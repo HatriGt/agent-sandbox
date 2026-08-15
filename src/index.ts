@@ -28,7 +28,7 @@ import {
   status as msbStatus,
   teardown as msbTeardown,
 } from "./msb.js";
-import { acquireBox, refillPool, poolEligible } from "./pool.js";
+import { acquireBox, refillPool, poolEligible, poolStatus } from "./pool.js";
 import { newSessionId } from "./session.js";
 
 // Load .env next to the project (dist/../.env) so config lives in one gitignored place.
@@ -132,7 +132,27 @@ server.tool(
   }
 );
 
+server.tool(
+  "pool_status",
+  "Show the warm pool status: how many pre-booted boxes are available vs the target.",
+  {},
+  async () => {
+    const s = await poolStatus(cfg);
+    if (!s.enabled) {
+      return text(
+        `Pool disabled (needs MSB_POOL_SIZE>0, a snapshot, and EGRESS_ALLOW_ALL=1). size=${s.size}`
+      );
+    }
+    return text(
+      `Pool ${s.available}/${s.size} ready${s.boxes.length ? `: ${s.boxes.join(", ")}` : ""}`
+    );
+  }
+);
+
 const transport = new StdioServerTransport();
 await server.connect(transport);
 // Startup marker on stderr (stdout is reserved for the JSON-RPC stream).
 console.error("[agent-sandbox] MCP server ready");
+// Auto-seed the warm pool on start so the first delegation is already fast. Fire-and-forget:
+// refillPool swallows/logs its own errors and no-ops when pooling is disabled.
+void refillPool(cfg);

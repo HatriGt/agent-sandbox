@@ -61,5 +61,17 @@ export async function refillPool(cfg: Config): Promise<void> {
   }
 }
 
+/** Current pool status: how many warm boxes are available vs the configured target. */
+export async function poolStatus(cfg: Config): Promise<{
+  size: number;
+  available: number;
+  boxes: string[];
+  enabled: boolean;
+}> {
+  const enabled = cfg.poolSize > 0 && !!cfg.snapshot && cfg.egressAllowAll;
+  const boxes = enabled ? await listPoolBoxes(cfg) : [];
+  return { size: cfg.poolSize, available: boxes.length, boxes, enabled };
+}
+
 /** Staging path helper re-export so index.ts has one import site for pool wiring. */
 export { stagingPathFor };

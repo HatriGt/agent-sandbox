@@ -206,7 +206,9 @@ Keep `MSB_POOL_SIZE` boxes pre-booted from the snapshot AND pre-bootstrapped (cl
 git/gh auth) idle. A delegation claims one and only copies the repo in — skipping the ~4s
 microVM boot and the bootstrap step. The pool refills on claim (fire-and-forget) so the next
 delegation is also instant. Pool state = the running `pool-*` boxes on the VPS (survives MCP
-respawns). Seed/top up manually with `npm run pool:warm`.
+respawns). The MCP server **auto-seeds the pool on start** (fire-and-forget), so you normally
+never touch it. Check state with `npm run pool:status` or the `pool_status` MCP tool; seed/top
+up manually with `npm run pool:warm`.
 
 Egress tradeoff (decided): pooled boxes boot with OPEN egress so any task can reuse them, so
 the pool is only used when the delegation wants open egress (`EGRESS_ALLOW_ALL=1` and no
@@ -226,7 +228,8 @@ Cumulative: **16s → ~4s** boot-to-ready (mux + pool). Idle pool cost ~60 MiB p
 
 ### More config (see .env.example)
 - `SSH_PERSIST` ssh master keep-alive seconds (default 120).
-- `MSB_POOL_SIZE` warm boxes to keep idle (default 1; 0 disables). Seed via `npm run pool:warm`.
+- `MSB_POOL_SIZE` warm boxes to keep idle (default 1; 0 disables). Auto-seeded on MCP start;
+  inspect with `npm run pool:status` / `pool_status` tool, top up with `npm run pool:warm`.
 
 ### Footprint (per box)
 - Idle from snapshot: **~60–63 MiB** RAM (measured across 5 boxes).
