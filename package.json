@@ -13,7 +13,8 @@
     "dev": "tsc -w -p tsconfig.json",
     "start": "node dist/index.js",
     "bake": "node dist/bake-snapshot.js",
-    "bench": "node dist/bench.js"
+    "bench": "node dist/bench.js",
+    "pool:warm": "node dist/pool-warm.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",

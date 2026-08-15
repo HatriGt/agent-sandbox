@@ -17,6 +17,13 @@ export function stagingPathFor(cfg: Config, session: string): string {
   return path.posix.join(cfg.vpsStagingDir, session);
 }
 
+/** Remove a staging dir on the VPS (best-effort; staging is transient after copy-in). */
+export async function cleanupStaging(cfg: Config, staging: string): Promise<void> {
+  await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, `rm -rf ${shellQuote(staging)}`], {
+    check: false,
+  });
+}
+
 /**
  * rsync `${repo}/` -> `${VPS_SSH}:${staging}/`.
  * Returns the remote staging path (what --copy-dir will point at).

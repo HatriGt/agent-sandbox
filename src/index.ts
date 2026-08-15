@@ -19,9 +19,8 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { loadDotEnv } from "./dotenv.js";
 import { loadConfig } from "./config.js";
-import { syncTreeToVps, stagingPathFor } from "./sync.js";
+import { syncTreeToVps, stagingPathFor, cleanupStaging } from "./sync.js";
 import {
-  createBox,
   runAgentTask,
   resumeAgentTask,
   exec,
@@ -29,6 +28,7 @@ import {
   status as msbStatus,
   teardown as msbTeardown,
 } from "./msb.js";
+import { acquireBox, refillPool, poolEligible } from "./pool.js";
 import { newSessionId } from "./session.js";
 
 // Load .env next to the project (dist/../.env) so config lives in one gitignored place.
@@ -71,19 +71,27 @@ server.tool(
       ? { ...cfg, egressDomains: Array.from(new Set([...cfg.egressDomains, ...allowDomains])) }
       : cfg;
 
-    // The session id doubles as the box name; staging path is derived from it. No shared
-    // in-memory state is needed, so status/resume/teardown work even if the MCP process is
-    // respawned between calls (Cursor may not keep one long-lived process).
+    // A restricted-egress delegation must NOT reuse an open-egress pooled box.
+    const eligible = poolEligible(runCfg, !!allowDomains?.length);
+
+    // The session id doubles as the box name; staging path is derived from it (the sync uses the
+    // session id, so warm-box reuse still stages under a per-session path). No shared in-memory
+    // state — status/resume/teardown work even if the MCP process is respawned between calls.
     const id = newSessionId();
     // 1. Push the local working tree (incl. uncommitted changes) to a staging dir on the VPS.
     const staging = await syncTreeToVps(runCfg, repo, id);
-    // 2. Boot a box with the repo baked into /workspace at boot (--copy-dir is boot-time).
-    await createBox(runCfg, { name: id, copyDir: staging });
-    // 3. Bootstrap creds/tools + run the task; creds injected per-exec.
-    const result = await runAgentTask(runCfg, id, task);
+    // 2. Claim a warm box if eligible+available (skips ~4s boot + bootstrap), else cold-boot.
+    const { box, warm } = await acquireBox(runCfg, id, staging, eligible);
+    // Staging is transient (already copied into the box). Clean it now so teardown doesn't need
+    // to know the id (warm box name != staging key). Best-effort.
+    void cleanupStaging(runCfg, staging);
+    // 3. Refill the pool on claim so the next delegation is also instant (fire-and-forget).
+    if (warm) void refillPool(cfg);
+    // 4. Run the task. A warm box is already bootstrapped; runAgentTask's bootstrap is idempotent.
+    const result = await runAgentTask(runCfg, box, task);
 
     return text(
-      `Delegated. session=${id}\n\n--- agent output ---\n${result.stdout.trim() || result.stderr.trim()}`
+      `Delegated. session=${box}${warm ? " (warm)" : ""}\n\n--- agent output ---\n${result.stdout.trim() || result.stderr.trim()}`
     );
   }
 );

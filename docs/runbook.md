@@ -201,6 +201,33 @@ Remaining fixed cost is the msb microVM boot (~4s) itself. Socket path is kept s
 (`~/.ssh/asb/<hash>.sock`) to stay under the ~104-char Unix-socket limit. Tunable via
 `SSH_PERSIST` (default 120s keeps the master warm between back-to-back delegations).
 
+### Optimization: warm pool (boot-to-ready ~8-10s → ~4s)
+Keep `MSB_POOL_SIZE` boxes pre-booted from the snapshot AND pre-bootstrapped (claude+gh +
+git/gh auth) idle. A delegation claims one and only copies the repo in — skipping the ~4s
+microVM boot and the bootstrap step. The pool refills on claim (fire-and-forget) so the next
+delegation is also instant. Pool state = the running `pool-*` boxes on the VPS (survives MCP
+respawns). Seed/top up manually with `npm run pool:warm`.
+
+Egress tradeoff (decided): pooled boxes boot with OPEN egress so any task can reuse them, so
+the pool is only used when the delegation wants open egress (`EGRESS_ALLOW_ALL=1` and no
+per-call `allowDomains`). A restricted-egress delegation always cold-boots with its exact
+allowlist — never a pooled open box. Claimed vs free is tracked by a `/.claimed` sentinel in
+the box; `countBoxes` ignores unclaimed pool boxes for the concurrency cap.
+
+Measured (warm claim):
+| phase | cold (mux) | warm claim |
+|-------|-----------|------------|
+| sync tree | 1.4–3.6s | 1.4s |
+| acquire (boot vs claim+copy) | 4.2–7.7s | **2.3s** |
+| bootstrap | 0.7s | **0.5s** (already done) |
+| **boot-to-ready** | ~8–10s | **~4.3–4.4s** |
+
+Cumulative: **16s → ~4s** boot-to-ready (mux + pool). Idle pool cost ~60 MiB per box.
+
+### More config (see .env.example)
+- `SSH_PERSIST` ssh master keep-alive seconds (default 120).
+- `MSB_POOL_SIZE` warm boxes to keep idle (default 1; 0 disables). Seed via `npm run pool:warm`.
+
 ### Footprint (per box)
 - Idle from snapshot: **~60–63 MiB** RAM (measured across 5 boxes).
 - With Claude Code + agent work: **~98–114 MiB** RAM, <0.02 CPU of 1 core.

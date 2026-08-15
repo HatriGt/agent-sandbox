@@ -7,14 +7,8 @@
 import { loadDotEnv } from "./dotenv.js";
 import { loadConfig } from "./config.js";
 import { syncTreeToVps } from "./sync.js";
-import {
-  createBox,
-  bootstrap,
-  runAgentOnly,
-  metrics,
-  exec,
-  teardown,
-} from "./msb.js";
+import { bootstrap, runAgentOnly, metrics, exec, teardown } from "./msb.js";
+import { acquireBox, poolEligible } from "./pool.js";
 import { newSessionId } from "./session.js";
 
 function ms() {
@@ -43,27 +37,29 @@ async function main() {
       `model=${cfg.anthropicModel}`
   );
 
+  const eligible = poolEligible(cfg, false);
   t.start = ms();
   const staging = await syncTreeToVps(cfg, repo, id);
   t.synced = ms();
 
-  await createBox(cfg, { name: id, copyDir: staging });
+  const { box, warm } = await acquireBox(cfg, id, staging, eligible);
   t.booted = ms();
+  console.log(`[bench] box=${box} ${warm ? "(WARM claim)" : "(cold boot)"}`);
 
-  await bootstrap(cfg, id);
+  await bootstrap(cfg, box);
   t.bootstrapped = ms();
 
   // Capture footprint right before the agent runs (idle box w/ toolchain).
-  const idleMetrics = await metrics(cfg, id);
+  const idleMetrics = await metrics(cfg, box);
 
-  const res = await runAgentOnly(cfg, id, task);
+  const res = await runAgentOnly(cfg, box, task);
   t.agentDone = ms();
 
   // Footprint during/right after agent work.
-  const activeMetrics = await metrics(cfg, id);
-  const du = await exec(cfg, id, "du -sh /workspace 2>/dev/null | cut -f1; df -h / | tail -1");
+  const activeMetrics = await metrics(cfg, box);
+  const du = await exec(cfg, box, "du -sh /workspace 2>/dev/null | cut -f1; df -h / | tail -1");
 
-  await teardown(cfg, id, staging);
+  await teardown(cfg, box, staging);
   t.torndown = ms();
 
   console.log("\n===== AGENT OUTPUT =====");
@@ -71,7 +67,7 @@ async function main() {
 
   console.log("\n===== PHASE TIMINGS =====");
   console.log(`sync tree      : ${secs(t.start, t.synced)}`);
-  console.log(`boot + copy    : ${secs(t.synced, t.booted)}`);
+  console.log(`acquire (boot/claim+copy): ${secs(t.synced, t.booted)}`);
   console.log(`bootstrap      : ${secs(t.booted, t.bootstrapped)}`);
   console.log(`agent task     : ${secs(t.bootstrapped, t.agentDone)}`);
   console.log(`teardown       : ${secs(t.agentDone, t.torndown)}`);

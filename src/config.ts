@@ -28,6 +28,8 @@ export interface Config {
   memory: string;
   /** Max concurrent live boxes; new delegations are refused past this. */
   maxBoxes: number;
+  /** Number of pre-booted warm boxes to keep idle (0 disables pooling). */
+  poolSize: number;
 
   /** ccproxy endpoint for in-box model calls. */
   anthropicBaseUrl: string;
@@ -104,6 +106,7 @@ export function loadConfig(): Config {
     maxDuration: req("MSB_MAX_DURATION", "1h"),
     memory: req("MSB_MEMORY", "1G"),
     maxBoxes: Number(process.env.MSB_MAX_BOXES ?? "5"),
+    poolSize: Number(process.env.MSB_POOL_SIZE ?? "1"),
 
     anthropicBaseUrl,
     anthropicApiKey: req("ANTHROPIC_API_KEY", "dummy"),

@@ -30,11 +30,11 @@ async function ssh(cfg: Config, remoteCmd: string, check = true) {
 
 /**
  * Build egress flags. Default is a strict allowlist: deny by default, allow DNS + each allowed
- * domain on tcp:443, so a leaked token is useless off-list. When EGRESS_ALLOW_ALL is set, the
- * box gets open egress (`--net public`) instead — any domain, no allowlist.
+ * domain on tcp:443, so a leaked token is useless off-list. When `allowAll` is set, the box gets
+ * open egress (`--net public`) instead — any domain, no allowlist.
  */
-function egressFlags(cfg: Config): string[] {
-  if (cfg.egressAllowAll) {
+function egressFlags(cfg: Config, allowAll = cfg.egressAllowAll): string[] {
+  if (allowAll) {
     return ["--net", "public"];
   }
   const flags = ["--net-default-egress", "deny", "--net-rule", "allow@dns"];
@@ -42,6 +42,16 @@ function egressFlags(cfg: Config): string[] {
     flags.push("--net-rule", `allow@${domain}:tcp:443`);
   }
   return flags;
+}
+
+/**
+ * Copy a staged working tree on the VPS into a running box's /workspace.
+ * `msb copy <dir> box:/dest` copies the dir *into* /dest (trailing /. ignored), so we copy to a
+ * temp path then move the contents into /workspace to avoid a nested subdir.
+ */
+async function copyTreeIntoBox(cfg: Config, box: string, copyDir: string): Promise<void> {
+  await msb(cfg, ["copy", copyDir, `${box}:/.wt`]);
+  await exec(cfg, box, "mkdir -p /workspace && cp -a /.wt/. /workspace/ && rm -rf /.wt");
 }
 
 export interface CreateBoxOpts {
@@ -80,14 +90,7 @@ export async function createBox(cfg: Config, opts: CreateBoxOpts): Promise<void>
     // No -w /workspace here: it doesn't exist in the snapshot at boot. Agent commands cd into
     // it themselves. Copy the staged tree in post-boot (copy-dir is disallowed with snapshots).
     await msb(cfg, [...common, "--from-snapshot", cfg.snapshot, "--", "sleep", "infinity"]);
-    // `msb copy <dir> box:/dest` copies the dir *into* /dest (trailing /. is ignored), so copy
-    // to a temp path then move the contents into /workspace to avoid a nested subdir.
-    await msb(cfg, ["copy", opts.copyDir, `${opts.name}:/.wt`]);
-    await exec(
-      cfg,
-      opts.name,
-      "mkdir -p /workspace && cp -a /.wt/. /workspace/ && rm -rf /.wt"
-    );
+    await copyTreeIntoBox(cfg, opts.name, opts.copyDir);
   } else {
     // Base image: bake the repo in at boot and set the workdir.
     await msb(cfg, [
@@ -110,6 +113,75 @@ export async function exec(cfg: Config, box: string, sh: string) {
   return msb(cfg, ["exec", box, "--", "sh", "-lc", sh]);
 }
 
+// ----- Warm pool -------------------------------------------------------------------------
+// Pool boxes are pre-booted from the snapshot with OPEN egress and pre-bootstrapped (claude+gh
+// + git/gh auth + npm). Claiming one = copy the repo in, skipping the ~4s boot + bootstrap.
+// They're named `<POOL_PREFIX><rand>` so they're discoverable across MCP process respawns.
+const POOL_PREFIX = "pool-";
+
+/**
+ * Boot one warm pool box: snapshot + open egress + memory cap + auto-teardown, then
+ * pre-bootstrap creds/tools so a claim only needs the repo copy. Requires cfg.snapshot.
+ */
+export async function bootWarmBox(cfg: Config): Promise<string> {
+  const name = `${POOL_PREFIX}${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  await msb(cfg, [
+    "run",
+    "-d",
+    "--name",
+    name,
+    "-m",
+    cfg.memory,
+    ...egressFlags(cfg, true), // pooled boxes always boot with open egress
+    "--idle-timeout",
+    cfg.idleTimeout,
+    "--max-duration",
+    cfg.maxDuration,
+    "--pull",
+    "never",
+    "--from-snapshot",
+    cfg.snapshot,
+    "--",
+    "sleep",
+    "infinity",
+  ]);
+  // Pre-bootstrap so claims are instant (idempotent; persists in the box rootfs).
+  await msb(cfg, ["exec", name, ...agentEnvFlags(cfg, "noop"), "--", "sh", "-lc", bootstrapScript(cfg)]);
+  return name;
+}
+
+/** All warm pool boxes (claimed or not), newest-name order not guaranteed. */
+async function allPoolBoxes(cfg: Config): Promise<string[]> {
+  const r = await msb(cfg, ["ls"], false);
+  return r.stdout
+    .split("\n")
+    .map((l) => l.trim().split(/\s+/)[0])
+    .filter((n) => n && n.startsWith(POOL_PREFIX));
+}
+
+/**
+ * Available (unclaimed) warm boxes: a pool box is "claimed" once a repo is copied in, marked by
+ * the sentinel file /.claimed. Unclaimed boxes have no such marker.
+ */
+export async function listPoolBoxes(cfg: Config): Promise<string[]> {
+  const boxes = await allPoolBoxes(cfg);
+  const available: string[] = [];
+  for (const box of boxes) {
+    const r = await exec(cfg, box, "test -f /.claimed && echo claimed || echo free");
+    if (r.stdout.trim().endsWith("free")) available.push(box);
+  }
+  return available;
+}
+
+/**
+ * Claim a warm box for a session: mark it claimed and copy the staged tree into /workspace.
+ * The claimed box keeps its pool name as the box id; the caller maps session->box.
+ */
+export async function claimWarmBox(cfg: Config, box: string, copyDir: string): Promise<void> {
+  await exec(cfg, box, "touch /.claimed");
+  await copyTreeIntoBox(cfg, box, copyDir);
+}
+
 /** Install the agent toolchain (claude + gh) into a box. Used when baking the warm snapshot. */
 export async function installTools(cfg: Config, box: string) {
   return exec(
@@ -121,16 +193,29 @@ export async function installTools(cfg: Config, box: string) {
   );
 }
 
-/** Count currently live boxes (for the concurrency cap). Header line is excluded. */
+/**
+ * Count live user sessions for the concurrency cap. Excludes UNCLAIMED warm pool boxes (they're
+ * infrastructure); claimed pool boxes are real sessions and do count.
+ */
 export async function countBoxes(cfg: Config): Promise<number> {
   const r = await msb(cfg, ["ls"], false);
-  const lines = r.stdout
+  const names = r.stdout
     .split("\n")
     .map((l) => l.trim())
-    .filter(Boolean);
-  // Drop the header row ("NAME  IMAGE  ...") if present.
-  const dataLines = lines.filter((l) => !l.startsWith("NAME") && !/no sandboxes/i.test(l));
-  return dataLines.length;
+    .filter((l) => l && !l.startsWith("NAME") && !/no sandboxes/i.test(l))
+    .map((l) => l.split(/\s+/)[0]);
+
+  let count = 0;
+  for (const name of names) {
+    if (name.startsWith(POOL_PREFIX)) {
+      // Only count claimed pool boxes.
+      const c = await exec(cfg, name, "test -f /.claimed && echo claimed || echo free");
+      if (c.stdout.trim().endsWith("claimed")) count++;
+    } else {
+      count++;
+    }
+  }
+  return count;
 }
 
 /**
