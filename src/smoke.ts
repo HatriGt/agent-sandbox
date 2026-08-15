@@ -4,20 +4,11 @@
  *
  * Usage: node dist/smoke.js <repoPath> "<task>"
  */
-import fs from "node:fs";
+import { loadDotEnv } from "./dotenv.js";
 import { loadConfig } from "./config.js";
 import { syncTreeToVps } from "./sync.js";
 import { createBox, runAgentTask, exec, status, teardown } from "./msb.js";
 import { newSessionId } from "./session.js";
-
-// Minimal .env loader (no dependency): KEY=VALUE lines into process.env.
-function loadDotEnv(path = ".env") {
-  if (!fs.existsSync(path)) return;
-  for (const line of fs.readFileSync(path, "utf8").split("\n")) {
-    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
-    if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2];
-  }
-}
 
 async function main() {
   loadDotEnv();

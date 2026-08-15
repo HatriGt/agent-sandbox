@@ -17,7 +17,12 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import { loadDotEnv } from "./dotenv.js";
 import { loadConfig } from "./config.js";
+
+// Load .env next to the project (dist/../.env) so config lives in one gitignored place.
+// Vars already set in the environment (e.g. by the MCP launch config) take precedence.
+loadDotEnv();
 import { syncTreeToVps } from "./sync.js";
 import {
   createBox,
