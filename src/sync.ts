@@ -9,6 +9,7 @@
  */
 import path from "node:path";
 import { run, shellQuote } from "./exec.js";
+import { sshMuxOpts, rsyncSshFlag } from "./ssh.js";
 import type { Config } from "./config.js";
 
 /** Remote staging path for a given session. */
@@ -27,8 +28,8 @@ export async function syncTreeToVps(
 ): Promise<string> {
   const remote = stagingPathFor(cfg, session);
 
-  // Ensure the remote staging dir exists (path quoted for the remote shell).
-  await run("ssh", [cfg.vpsSsh, `mkdir -p ${shellQuote(remote)}`]);
+  // Ensure the remote staging dir exists (multiplexed ssh; path quoted for the remote shell).
+  await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, `mkdir -p ${shellQuote(remote)}`]);
 
   // Trailing slash on source => copy contents into remote dir (not a nested subdir).
   const src = repo.endsWith("/") ? repo : `${repo}/`;
@@ -36,6 +37,9 @@ export async function syncTreeToVps(
   await run("rsync", [
     "-az",
     "--delete",
+    // Route rsync's transport through the same multiplexed master connection.
+    "-e",
+    rsyncSshFlag(cfg),
     // Honor .gitignore, but keep .git itself so history/commit works in-box.
     "--filter=:- .gitignore",
     "--filter=+ /.git/**",

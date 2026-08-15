@@ -11,6 +11,8 @@ export interface Config {
   vpsSsh: string;
   /** Base dir on the VPS where each delegation's working tree is staged before --copy-dir. */
   vpsStagingDir: string;
+  /** How long (ssh ControlPersist syntax) to keep the multiplexed master connection alive. */
+  sshPersist: string;
 
   /** Path to the msb binary on the VPS. */
   msb: string;
@@ -93,6 +95,7 @@ export function loadConfig(): Config {
   return {
     vpsSsh: req("VPS_SSH"),
     vpsStagingDir: req("VPS_STAGING_DIR", "/root/agent-sandbox-staging"),
+    sshPersist: req("SSH_PERSIST", "120"),
 
     msb: req("MSB", "/root/.local/bin/msb"),
     image: req("MSB_IMAGE", "node"),

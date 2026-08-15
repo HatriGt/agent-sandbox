@@ -160,4 +160,55 @@ Hardened credentials/egress and added polish. Verified the full dev workflow end
 - `MSB_SNAPSHOT` warm-start snapshot name (empty = boot from image).
 - `MSB_MEMORY` / `MSB_MAX_BOXES` host protection.
 - `EGRESS_DOMAINS` extra allowed domains (comma-separated).
+- `EGRESS_ALLOW_ALL` set truthy for open egress (any domain; overrides allowlist).
 - `GH_TOKEN` / `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` / `NPM_TOKEN` in-box creds.
+
+## E2E benchmark — vps 2026-08-16 (all features on)
+Host baseline: 15 GB RAM (5.1 GB free), 154 GB disk (92 GB free), 4 vCPU, shared with
+Dokploy/ccproxy/ak-rdp. Warm snapshot `agent-base` (claude+gh baked), mem cap 1G, egress
+allowlist (8 domains), creds injected, no-attribution policy on. Via `npm run bench`.
+
+Task: fix 2 bugs in a Node repo, run `npm test` (passed), commit — verified end to end.
+
+### Phase timings (single delegation)
+| phase | run 1 | run 2 |
+|-------|-------|-------|
+| sync tree (rsync Mac→VPS) | 5.4s | 5.1s |
+| boot + copy (from snapshot) | 8.2s | 8.3s |
+| bootstrap (creds/tools, warm) | 2.5s | 2.4s |
+| agent task (Claude via ccproxy) | 37.0s | 57.3s |
+| teardown (stop+rm+staging clean) | 13.1s | 13.8s |
+| **boot-to-ready** (sync+boot+bootstrap) | **16.0s** | **15.7s** |
+| **TOTAL** | **66.1s** | **86.8s** |
+
+Infra overhead is steady ~16s to a ready box; agent time dominates and varies with task.
+
+### Optimization: SSH connection multiplexing (boot-to-ready 16s → ~8-10s)
+Root cause of the 16s: each `msb`/rsync call opened a FRESH ssh connection (~2.1s handshake),
+and a delegation makes ~6 of them → ~12s of pure handshake. Enabling ssh ControlMaster
+(one persistent master connection, `src/ssh.ts`) drops each subsequent call to ~0.4s.
+
+Measured after (same task/host):
+| phase | before | after |
+|-------|--------|-------|
+| sync tree | 5.4s | 1.4–3.6s |
+| boot + copy | 8.2s | 4.2–7.7s |
+| bootstrap | 2.5s | **0.7s** |
+| teardown | 13.1s | **4.5–5.2s** |
+| **boot-to-ready** | **16.0s** | **~8–10s** |
+
+Remaining fixed cost is the msb microVM boot (~4s) itself. Socket path is kept short
+(`~/.ssh/asb/<hash>.sock`) to stay under the ~104-char Unix-socket limit. Tunable via
+`SSH_PERSIST` (default 120s keeps the master warm between back-to-back delegations).
+
+### Footprint (per box)
+- Idle from snapshot: **~60–63 MiB** RAM (measured across 5 boxes).
+- With Claude Code + agent work: **~98–114 MiB** RAM, <0.02 CPU of 1 core.
+- Disk: workspace 232K (test repo); overlay root ~465M used of 3.9G per box.
+
+### Density / concurrency
+- **5 boxes booted concurrently in ~5.1s.**
+- 5 idle boxes together: host free RAM 5.1G → 4.8G (≈300 MiB for all five).
+- After teardown: RAM fully reclaimed (5.2G free), no boxes, staging empty — **zero leak**.
+- With ~5 GB headroom and ~62 MiB/idle box (~110 MiB active), the host can hold **dozens**
+  of boxes; `MSB_MAX_BOXES` (default 5) is the safety cap, not a hard limit.

@@ -6,6 +6,7 @@
  * or from the box itself. Args are passed as an argv array (no shell interpolation).
  */
 import { run, shellQuote } from "./exec.js";
+import { sshMuxOpts } from "./ssh.js";
 import type { Config } from "./config.js";
 
 /**
@@ -14,10 +15,17 @@ import type { Config } from "./config.js";
  * ssh re-parses its arguments through the REMOTE shell, so every element (msb path + each
  * arg, including task text and env values) is single-quoted into one remote command string.
  * This keeps argv semantics intact remotely and prevents task/env content from injecting.
+ *
+ * Uses a multiplexed master connection (sshMuxOpts) so repeated calls skip the ~2s handshake.
  */
 async function msb(cfg: Config, rest: string[], check = true) {
   const remoteCmd = [cfg.msb, ...rest].map(shellQuote).join(" ");
-  return run("ssh", [cfg.vpsSsh, remoteCmd], { check });
+  return run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, remoteCmd], { check });
+}
+
+/** Run an arbitrary remote command over the same multiplexed SSH connection. */
+async function ssh(cfg: Config, remoteCmd: string, check = true) {
+  return run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, remoteCmd], { check });
 }
 
 /**
@@ -220,6 +228,22 @@ export async function status(cfg: Config, box: string) {
   return r.stdout || r.stderr;
 }
 
+/** Raw `msb metrics` for a box (CPU/MEM/uptime); non-fatal. */
+export async function metrics(cfg: Config, box: string) {
+  const r = await msb(cfg, ["metrics", box], false);
+  return r.stdout || r.stderr;
+}
+
+/** Run the credential/tool bootstrap step only (separated so benchmarks can time it). */
+export async function bootstrap(cfg: Config, box: string, task = "noop") {
+  return msb(cfg, ["exec", box, ...agentEnvFlags(cfg, task), "--", "sh", "-lc", bootstrapScript(cfg)]);
+}
+
+/** Run only the agent task (assumes bootstrap already ran); separated for benchmarks. */
+export async function runAgentOnly(cfg: Config, box: string, task: string) {
+  return msb(cfg, ["exec", box, ...agentEnvFlags(cfg, task), "--", "sh", "-lc", RUN_SH]);
+}
+
 /** Boot a plain box (no repo copy) from the base image — used to bake a warm-start snapshot. */
 export async function createBareBox(cfg: Config, name: string): Promise<void> {
   await msb(cfg, [
@@ -255,6 +279,6 @@ export async function teardown(cfg: Config, box: string, stagingDir?: string): P
   await msb(cfg, ["stop", box], false);
   await msb(cfg, ["rm", "--force", box], false);
   if (stagingDir) {
-    await run("ssh", [cfg.vpsSsh, `rm -rf ${shellQuote(stagingDir)}`], { check: false });
+    await ssh(cfg, `rm -rf ${shellQuote(stagingDir)}`, false);
   }
 }
