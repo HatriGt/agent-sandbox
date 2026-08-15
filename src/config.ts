@@ -36,6 +36,8 @@ export interface Config {
 
   /** Domains the box is allowed to reach (egress allowlist). ccproxy is always added. */
   egressDomains: string[];
+  /** When true, allow the box to reach ANY domain (open egress) instead of the allowlist. */
+  egressAllowAll: boolean;
 
   /** GitHub token for git push + `gh` (PR creation) inside the box. */
   ghToken?: string;
@@ -52,6 +54,11 @@ function req(name: string, fallback?: string): string {
     throw new Error(`Missing required env var: ${name}`);
   }
   return v;
+}
+
+/** Parse a truthy env flag (1/true/yes/on, case-insensitive). */
+function parseBool(raw: string | undefined): boolean {
+  return /^(1|true|yes|on)$/i.test((raw ?? "").trim());
 }
 
 /** Parse a comma/space-separated domain list into a trimmed array. */
@@ -100,6 +107,7 @@ export function loadConfig(): Config {
     anthropicModel: req("ANTHROPIC_MODEL", "ak-claude-opus-5"),
 
     egressDomains,
+    egressAllowAll: parseBool(process.env.EGRESS_ALLOW_ALL),
 
     ghToken: process.env.GH_TOKEN || undefined,
     gitAuthorName: process.env.GIT_AUTHOR_NAME || undefined,

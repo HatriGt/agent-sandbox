@@ -21,11 +21,14 @@ async function msb(cfg: Config, rest: string[], check = true) {
 }
 
 /**
- * Build egress allowlist flags: deny by default, allow DNS + each allowed domain on tcp:443.
- * This means a leaked token in the box is useless off-list — the box can only reach ccproxy,
- * npm, GitHub, and any per-call extras.
+ * Build egress flags. Default is a strict allowlist: deny by default, allow DNS + each allowed
+ * domain on tcp:443, so a leaked token is useless off-list. When EGRESS_ALLOW_ALL is set, the
+ * box gets open egress (`--net public`) instead — any domain, no allowlist.
  */
 function egressFlags(cfg: Config): string[] {
+  if (cfg.egressAllowAll) {
+    return ["--net", "public"];
+  }
   const flags = ["--net-default-egress", "deny", "--net-rule", "allow@dns"];
   for (const domain of cfg.egressDomains) {
     flags.push("--net-rule", `allow@${domain}:tcp:443`);
