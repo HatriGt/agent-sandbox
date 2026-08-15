@@ -56,8 +56,8 @@ there is no long-running daemon to manage — v0.6.9 has no HTTP server, it's pu
 ## Layout
 
 ```
-src/          TypeScript MCP orchestrator (delegate / status / resume / continue tools)
-scripts/      Bash delegate core that wraps msb (create box, ship repo, inject creds, run agent)
+src/          TypeScript MCP orchestrator — the single entry point; calls msb directly
+              (create box, ship repo, inject creds, run agent, status, resume, teardown)
 docs/         Architecture, eval summary, credential strategy, runbook
 ```
 

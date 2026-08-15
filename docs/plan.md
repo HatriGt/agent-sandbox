@@ -3,8 +3,8 @@
 Phased, each phase independently verifiable.
 
 ## Phase 0 — repo scaffold (this)
-- Repo structure, README, architecture, package.json, delegate bash skeleton, MCP skeleton.
-- **Verify:** `npm run build` compiles the TS skeleton; `scripts/delegate.sh --help` prints usage.
+- Repo structure, README, architecture, package.json, MCP skeleton.
+- **Verify:** `npm run build` compiles the TS skeleton.
 
 ## Phase 1 — prove the loop manually (no MCP yet)
 The single most important milestone. On the VPS, by hand:
@@ -20,19 +20,26 @@ The single most important milestone. On the VPS, by hand:
 - **Verify:** Claude Code completes a real task end-to-end; output captured on host.
 - Record exact commands + timings in `docs/runbook.md`.
 
-## Phase 2 — delegate.sh (bash core)
-Wrap Phase 1 into one idempotent script: `delegate.sh --repo <path> --task "<text>" [--name box1]`.
-Handles: box create, repo ship, cred injection, agent run, log capture, teardown.
-- **Verify:** one command reproduces Phase 1.
+## Phase 2 — orchestrator MCP (TypeScript), the single entry point
+No bash wrapper. The MCP server *is* the delegate logic: it shells out to `msb` directly
+via Node `child_process`. In Cursor you say "delegate this to agent sandbox" → Cursor calls
+the MCP tool → the server runs the proven Phase 1 `msb` sequence.
 
-## Phase 3 — orchestrator MCP (TypeScript)
-Thin MCP server exposing tools:
-- `delegate(repo, task)` → starts a box via delegate.sh, returns a session id + streams status
+Tools:
+- `delegate(repo, task)` → creates a box, ships the repo, injects creds, runs Claude Code;
+  returns a session id + initial status
 - `status(session)` → current state + recent logs
-- `resume(session, message)` → answer a follow-up / continue (`msb exec`/`ssh` into the box)
-- `continue(session)` → keep going
-- `teardown(session)` → stop + remove box
+- `resume(session, message)` → answer a follow-up / continue (`msb exec` → `claude -c -p`)
+- `teardown(session)` → `msb stop` + `msb rm`
 - **Verify:** from Cursor, connected to the remote MCP, delegate a real task and get status back.
+
+### The local-uncommitted-changes problem (decided: sync working tree to VPS)
+The MCP runs on the VPS; your editable working tree lives on your Mac. "Delegate THIS"
+must include local uncommitted changes. So `delegate` needs the current working tree on the
+VPS before `msb --copy-dir` can ship it into the box. Chosen approach:
+- A tiny client-side step syncs the Mac working tree → a staging dir on the VPS
+  (`rsync`/`git bundle`+patch over SSH), then the MCP copies from that staging dir into the box.
+- Exact mechanism finalized in Phase 2 (keep it dumb: rsync the tree, respecting `.gitignore`).
 
 ## Phase 4 — credential strategy hardening
 Move from `-e` env creds to the safer pattern: short-lived tokens, `--secret-conf`, and an
