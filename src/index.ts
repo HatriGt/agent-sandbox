@@ -25,6 +25,7 @@ import {
   runAgentTask,
   resumeAgentTask,
   exec,
+  countBoxes,
   status as msbStatus,
   teardown as msbTeardown,
 } from "./msb.js";
@@ -51,18 +52,35 @@ server.tool(
   {
     repo: z.string().describe("Absolute path to the local repo (working tree) to delegate."),
     task: z.string().describe("Natural-language task for the in-box agent."),
+    allowDomains: z
+      .array(z.string())
+      .optional()
+      .describe("Extra domains the box may reach (added to the curated egress allowlist)."),
   },
-  async ({ repo, task }) => {
+  async ({ repo, task, allowDomains }) => {
+    // Concurrency cap: don't let boxes pile up and starve the host.
+    const live = await countBoxes(cfg);
+    if (live >= cfg.maxBoxes) {
+      return text(
+        `Refused: ${live}/${cfg.maxBoxes} boxes already running. Tear one down first (teardown) or raise MSB_MAX_BOXES.`
+      );
+    }
+
+    // Merge any per-call egress extras onto the curated allowlist for this delegation only.
+    const runCfg = allowDomains?.length
+      ? { ...cfg, egressDomains: Array.from(new Set([...cfg.egressDomains, ...allowDomains])) }
+      : cfg;
+
     // The session id doubles as the box name; staging path is derived from it. No shared
     // in-memory state is needed, so status/resume/teardown work even if the MCP process is
     // respawned between calls (Cursor may not keep one long-lived process).
     const id = newSessionId();
     // 1. Push the local working tree (incl. uncommitted changes) to a staging dir on the VPS.
-    const staging = await syncTreeToVps(cfg, repo, id);
+    const staging = await syncTreeToVps(runCfg, repo, id);
     // 2. Boot a box with the repo baked into /workspace at boot (--copy-dir is boot-time).
-    await createBox(cfg, { name: id, copyDir: staging });
-    // 3. Install Claude Code (if needed) and run the task; creds injected per-exec.
-    const result = await runAgentTask(cfg, id, task);
+    await createBox(runCfg, { name: id, copyDir: staging });
+    // 3. Bootstrap creds/tools + run the task; creds injected per-exec.
+    const result = await runAgentTask(runCfg, id, task);
 
     return text(
       `Delegated. session=${id}\n\n--- agent output ---\n${result.stdout.trim() || result.stderr.trim()}`
