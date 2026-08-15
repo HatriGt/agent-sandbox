@@ -115,3 +115,5 @@ server.tool(
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
+// Startup marker on stderr (stdout is reserved for the JSON-RPC stream).
+console.error("[agent-sandbox] MCP server ready");
