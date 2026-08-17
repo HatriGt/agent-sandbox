@@ -9,7 +9,7 @@
 import type { Config } from "./config.js";
 import type { HandlerDeps, DelegationResult } from "./handlers.js";
 import type { DelegatePlan } from "./delegate-input.js";
-import { syncTreeToVps, cleanupStaging, stagingPathFor } from "./sync.js";
+import { syncTreeToVps, cleanupStaging, stagingPathFor, repoStagingPath } from "./sync.js";
 import { cloneRepoOnVps } from "./git-source.js";
 import { acquireBox, refillPool, poolEligible, poolStatus } from "./pool.js";
 import {
@@ -37,21 +37,27 @@ export const deps: HandlerDeps = {
 
     const id = newSessionId();
 
-    // 1. Get the code onto the VPS staging dir — rsync (local) or fresh git clone (remote).
-    const staging =
-      plan.source === "git"
-        ? await cloneRepoOnVps(runCfg, plan.repo, plan.ref, id)
-        : await syncTreeToVps(runCfg, plan.repo, id);
+    // 1. Stage every repo into <sessionRoot>/<name> — rsync (local) or fresh git clone (remote).
+    //    The whole session root is then copied into /workspace, so each repo -> /workspace/<name>.
+    const sessionRoot = stagingPathFor(runCfg, id);
+    for (const r of plan.repos) {
+      const dest = repoStagingPath(runCfg, id, r.name);
+      if (plan.source === "git") {
+        await cloneRepoOnVps(runCfg, r.repo, r.ref, id, dest);
+      } else {
+        await syncTreeToVps(runCfg, r.repo, id, dest);
+      }
+    }
 
     // 2. A restricted-egress delegation must not reuse an open-egress pooled box.
     const eligible = poolEligible(runCfg, !!allowDomains?.length);
-    const { box, warm } = await acquireBox(runCfg, id, staging, eligible);
+    const { box, warm } = await acquireBox(runCfg, id, sessionRoot, eligible);
 
     // Staging is transient (already copied into the box). Clean it; refill pool on claim.
-    void cleanupStaging(runCfg, staging);
+    void cleanupStaging(runCfg, sessionRoot);
     if (warm) void refillPool(cfg);
 
-    const result = await runAgentTask(runCfg, box, plan.task);
+    const result = await runAgentTask(runCfg, box, plan.task, plan.repos);
     return { box, warm, output: result.stdout.trim() || result.stderr.trim() };
   },
 

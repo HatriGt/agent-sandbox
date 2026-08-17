@@ -7,6 +7,7 @@
  */
 import { run, shellQuote } from "./exec.js";
 import { sshMuxOpts } from "./ssh.js";
+import { reposPromptHint, type RepoLayout } from "./agent-prompt.js";
 import type { Config } from "./config.js";
 
 /**
@@ -230,7 +231,12 @@ const AGENT_SYS_PROMPT =
   '"Generated with Claude Code", "Co-Authored-By: Claude", any 🤖 marker, or similar ' +
   "AI/assistant credit in commit messages, PR titles, or PR bodies. Write them as a human author would.";
 
-function agentEnvFlags(cfg: Config, task: string): string[] {
+function agentEnvFlags(cfg: Config, task: string, repos?: RepoLayout[]): string[] {
+  // The standing policy plus (when known) the goal-neutral repo-layout hint, so the agent knows
+  // where each repo lives (/workspace/<name>). The TASK decides the goal. Passed as env, never argv.
+  const sysPrompt = repos?.length
+    ? `${AGENT_SYS_PROMPT} ${reposPromptHint(repos)}`
+    : AGENT_SYS_PROMPT;
   const flags = [
     "-e",
     `ANTHROPIC_BASE_URL=${cfg.anthropicBaseUrl}`,
@@ -241,11 +247,17 @@ function agentEnvFlags(cfg: Config, task: string): string[] {
     "-e",
     `AGENT_TASK=${task}`,
     "-e",
-    `AGENT_SYS_PROMPT=${AGENT_SYS_PROMPT}`,
+    `AGENT_SYS_PROMPT=${sysPrompt}`,
   ];
   if (cfg.ghToken) flags.push("-e", `GH_TOKEN=${cfg.ghToken}`, "-e", `GITHUB_TOKEN=${cfg.ghToken}`);
   if (cfg.npmToken) flags.push("-e", `NPM_TOKEN=${cfg.npmToken}`);
   return flags;
+}
+
+/** Working dir for the agent: the single repo's dir, or /workspace (parent) for multi-repo. */
+function agentWorkdir(repos?: RepoLayout[]): string {
+  if (repos && repos.length === 1) return `/workspace/${repos[0].name}`;
+  return "/workspace";
 }
 
 /**
@@ -287,24 +299,35 @@ function bootstrapScript(cfg: Config): string {
 // box is an isolated microVM with a curated egress allowlist. --allowedTools takes multiple
 // space-separated values, so it goes LAST in the command.
 const ALLOWED_TOOLS = "Bash Edit Write Read Glob Grep";
-// --append-system-prompt carries the standing no-attribution policy (via env, so it's data).
-const RUN_SH =
-  `cd /workspace && claude -p "$AGENT_TASK" --append-system-prompt "$AGENT_SYS_PROMPT" --allowedTools ${ALLOWED_TOOLS} 2>&1 | tee -a /workspace/.agent.log`;
-const RESUME_SH =
-  `cd /workspace && claude -c -p "$AGENT_TASK" --append-system-prompt "$AGENT_SYS_PROMPT" --allowedTools ${ALLOWED_TOOLS} 2>&1 | tee -a /workspace/.agent.log`;
+// --append-system-prompt carries the standing no-attribution policy + repo-layout hint (via env,
+// so it's data). Log always at /workspace/.agent.log (stable path for `status`, above per-repo dirs).
+function runSh(workdir: string): string {
+  return `cd ${workdir} && claude -p "$AGENT_TASK" --append-system-prompt "$AGENT_SYS_PROMPT" --allowedTools ${ALLOWED_TOOLS} 2>&1 | tee -a /workspace/.agent.log`;
+}
+function resumeSh(workdir: string): string {
+  return `cd ${workdir} && claude -c -p "$AGENT_TASK" --append-system-prompt "$AGENT_SYS_PROMPT" --allowedTools ${ALLOWED_TOOLS} 2>&1 | tee -a /workspace/.agent.log`;
+}
 
 /**
  * Bootstrap creds/tools, then run the task headless in the box.
  * Creds are injected here (per-exec) so they only exist for the task duration.
  */
-export async function runAgentTask(cfg: Config, box: string, task: string) {
-  await msb(cfg, ["exec", box, ...agentEnvFlags(cfg, task), "--", "sh", "-lc", bootstrapScript(cfg)]);
-  return msb(cfg, ["exec", box, ...agentEnvFlags(cfg, task), "--", "sh", "-lc", RUN_SH]);
+export async function runAgentTask(cfg: Config, box: string, task: string, repos?: RepoLayout[]) {
+  const env = agentEnvFlags(cfg, task, repos);
+  const workdir = agentWorkdir(repos);
+  await msb(cfg, ["exec", box, ...env, "--", "sh", "-lc", bootstrapScript(cfg)]);
+  return msb(cfg, ["exec", box, ...env, "--", "sh", "-lc", runSh(workdir)]);
 }
 
 /** Continue an existing Claude Code session with a follow-up (runbook note: `claude -c -p`). */
-export async function resumeAgentTask(cfg: Config, box: string, message: string) {
-  return msb(cfg, ["exec", box, ...agentEnvFlags(cfg, message), "--", "sh", "-lc", RESUME_SH]);
+export async function resumeAgentTask(
+  cfg: Config,
+  box: string,
+  message: string,
+  repos?: RepoLayout[]
+) {
+  const env = agentEnvFlags(cfg, message, repos);
+  return msb(cfg, ["exec", box, ...env, "--", "sh", "-lc", resumeSh(agentWorkdir(repos))]);
 }
 
 /** Raw `msb status` for a box (non-fatal if the box is gone). */
@@ -326,7 +349,7 @@ export async function bootstrap(cfg: Config, box: string, task = "noop") {
 
 /** Run only the agent task (assumes bootstrap already ran); separated for benchmarks. */
 export async function runAgentOnly(cfg: Config, box: string, task: string) {
-  return msb(cfg, ["exec", box, ...agentEnvFlags(cfg, task), "--", "sh", "-lc", RUN_SH]);
+  return msb(cfg, ["exec", box, ...agentEnvFlags(cfg, task), "--", "sh", "-lc", runSh("/workspace")]);
 }
 
 /** Boot a plain box (no repo copy) from the base image — used to bake a warm-start snapshot. */

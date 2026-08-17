@@ -12,9 +12,14 @@ import { run, shellQuote } from "./exec.js";
 import { sshMuxOpts, rsyncSshFlag } from "./ssh.js";
 import type { Config } from "./config.js";
 
-/** Remote staging path for a given session. */
+/** Remote staging path (session root) for a given session. Holds one subdir per repo. */
 export function stagingPathFor(cfg: Config, session: string): string {
   return path.posix.join(cfg.vpsStagingDir, session);
+}
+
+/** Remote staging path for a single repo within a session: <sessionRoot>/<name>. */
+export function repoStagingPath(cfg: Config, session: string, name: string): string {
+  return path.posix.join(cfg.vpsStagingDir, session, name);
 }
 
 /** Remove a staging dir on the VPS (best-effort; staging is transient after copy-in). */
@@ -25,15 +30,17 @@ export async function cleanupStaging(cfg: Config, staging: string): Promise<void
 }
 
 /**
- * rsync `${repo}/` -> `${VPS_SSH}:${staging}/`.
- * Returns the remote staging path (what --copy-dir will point at).
+ * rsync `${repo}/` -> `${VPS_SSH}:${dest}/`.
+ * `dest` defaults to the session root (single-repo); multi-repo callers pass the per-repo subdir.
+ * Returns the remote path that was written.
  */
 export async function syncTreeToVps(
   cfg: Config,
   repo: string,
-  session: string
+  session: string,
+  dest?: string
 ): Promise<string> {
-  const remote = stagingPathFor(cfg, session);
+  const remote = dest ?? stagingPathFor(cfg, session);
 
   // Ensure the remote staging dir exists (multiplexed ssh; path quoted for the remote shell).
   await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, `mkdir -p ${shellQuote(remote)}`]);

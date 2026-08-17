@@ -72,12 +72,13 @@ export async function cloneRepoOnVps(
   cfg: Config,
   repo: string,
   ref: string | undefined,
-  session: string
+  session: string,
+  destOverride?: string
 ): Promise<string> {
   if (ref !== undefined && !isValidRef(ref)) {
     throw new Error(`Invalid ref '${ref}'.`);
   }
-  const dest = stagingPathFor(cfg, session);
+  const dest = destOverride ?? stagingPathFor(cfg, session);
   const url = buildCloneUrl(repo, cfg.ghToken);
 
   // Fresh clone: remove any stale dir first, then clone. Both run on the VPS over one ssh mux.

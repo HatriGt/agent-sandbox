@@ -51,20 +51,34 @@ function text(t: string) {
 export function registerTools(server: ToolRegistrar, cfg: Config, deps: HandlerDeps): void {
   server.tool(
     "delegate",
-    "Delegate a task to an isolated microVM running Claude Code. source=local ships your local " +
-      "working tree (Mac/Cursor); source=git clones owner/name on the VPS (remote clients). " +
+    "Delegate a task to an isolated microVM running Claude Code. source=local ships local working " +
+      "trees (Mac/Cursor); source=git clones owner/name on the VPS (remote clients). A task may span " +
+      "several repos open in the same IDE window — pass repos:[{repo,ref?},...]; each lands in " +
+      "/workspace/<name> in ONE box and gets its own PR. A single `repo` still works. " +
       "Missing info is asked back, not failed.",
     {
       source: z
         .enum(["local", "git"])
         .optional()
-        .describe("local = ship local working tree (default); git = clone owner/name on the VPS."),
+        .describe("local = ship local working tree(s) (default); git = clone owner/name on the VPS."),
       repo: z
         .string()
         .optional()
-        .describe("local: absolute path to the working tree. git: owner/name or GitHub URL."),
+        .describe("Single-repo shorthand. local: absolute path. git: owner/name or GitHub URL."),
+      repos: z
+        .array(
+          z.object({
+            repo: z.string().describe("local: absolute path. git: owner/name or GitHub URL."),
+            ref: z.string().optional().describe("git only: branch/tag/SHA for THIS repo."),
+          })
+        )
+        .optional()
+        .describe(
+          "Multiple repos for a cross-repo task (e.g. several folders in a multi-root workspace). " +
+            "Each becomes /workspace/<name>; the agent opens a PR per repo it changes."
+        ),
       task: z.string().optional().describe("Natural-language task for the in-box agent."),
-      ref: z.string().optional().describe("git only: branch/tag/SHA (default: repo default branch)."),
+      ref: z.string().optional().describe("git only: branch/tag/SHA for the single `repo` shorthand."),
       allowDomains: z
         .array(z.string())
         .optional()
@@ -73,18 +87,32 @@ export function registerTools(server: ToolRegistrar, cfg: Config, deps: HandlerD
     async ({
       source,
       repo,
+      repos,
       task,
       ref,
       allowDomains,
     }: {
       source?: DelegateSource;
       repo?: string;
+      repos?: Array<{ repo: string; ref?: string }>;
       task?: string;
       ref?: string;
       allowDomains?: string[];
     }) => {
       const resolvedSource: DelegateSource = source ?? "local";
-      const v = validateDelegateInput({ source: resolvedSource, repo, task, ref });
+      // Local "delegate this": with neither repo nor repos, fall back to the IDE-provided open
+      // workspace (WORKSPACE_DIR=${workspaceFolder}). Only applies to the single-repo shortcut;
+      // multi-root windows pass repos[] explicitly. Remote/git has no such fallback.
+      const noRepos = !repo && (!repos || repos.length === 0);
+      const resolvedRepo =
+        repo ?? (noRepos && resolvedSource === "local" ? cfg.workspaceDir : undefined);
+      const v = validateDelegateInput({
+        source: resolvedSource,
+        repo: resolvedRepo,
+        repos,
+        task,
+        ref,
+      });
       if (!v.ok) return text(v.question);
 
       const live = await deps.countBoxes(cfg);
@@ -95,8 +123,12 @@ export function registerTools(server: ToolRegistrar, cfg: Config, deps: HandlerD
       }
 
       const r = await deps.runDelegation(cfg, v.plan, allowDomains);
+      const repoLine =
+        v.plan.repos.length > 1
+          ? `\nrepos: ${v.plan.repos.map((x) => `${x.repo} -> /workspace/${x.name}`).join(", ")}`
+          : "";
       return text(
-        `Delegated. session=${r.box}${r.warm ? " (warm)" : ""}\n\n--- agent output ---\n${r.output}`
+        `Delegated. session=${r.box}${r.warm ? " (warm)" : ""}${repoLine}\n\n--- agent output ---\n${r.output}`
       );
     }
   );

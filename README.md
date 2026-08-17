@@ -67,9 +67,13 @@ Both entries register identical tools (`src/handlers.ts`) backed by the same sid
 { "mcpServers": { "agent-sandbox": {
   "type": "stdio",
   "command": "node",
-  "args": ["/absolute/path/agent-sandbox/dist/index.js"]
+  "args": ["/absolute/path/agent-sandbox/dist/index.js"],
+  "env": { "WORKSPACE_DIR": "${workspaceFolder}" }
 } } }
 ```
+`WORKSPACE_DIR=${workspaceFolder}` lets Cursor tell the server which project is open, so you can
+just say **"delegate this"** with no repo. If Cursor doesn't expand it, the server asks for the path.
+(Remote/git always names the repo — the VPS can't see your Mac.)
 
 **Remote (delegate a git repo from anywhere)** — same file, HTTP entry:
 ```json

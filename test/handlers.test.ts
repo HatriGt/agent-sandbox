@@ -68,6 +68,56 @@ test("delegate: valid input -> calls runDelegation and returns its output", asyn
   assert.match(textOf(res), /SMOKE_OK/);
 });
 
+test("delegate: local with no repo falls back to cfg.workspaceDir (IDE-provided)", async () => {
+  const s = fakeServer();
+  let seen: any = null;
+  const cfgWs = { maxBoxes: 5, workspaceDir: "/Users/me/openproj" } as unknown as Config;
+  registerTools(s as any, cfgWs, {
+    countBoxes: async () => 0,
+    runDelegation: async (_cfg: any, plan: any) => {
+      seen = plan;
+      return { box: "b", warm: false, output: "" };
+    },
+  } as any);
+
+  const res = await s.tools.delegate.handler({ task: "do it" }); // no repo
+  assert.equal(seen?.repo, "/Users/me/openproj");
+  assert.match(textOf(res), /b/);
+});
+
+test("delegate: local with no repo AND no workspaceDir -> asks", async () => {
+  const s = fakeServer();
+  registerTools(s as any, cfg, { countBoxes: async () => 0, runDelegation: async () => ({ box: "b", warm: false, output: "" }) } as any);
+  const res = await s.tools.delegate.handler({ task: "do it" }); // no repo, cfg has no workspaceDir
+  assert.match(textOf(res), /repo|path/i);
+});
+
+test("delegate: repos[] passes the full list through to runDelegation", async () => {
+  const s = fakeServer();
+  let seen: any = null;
+  registerTools(s as any, cfg, {
+    countBoxes: async () => 0,
+    runDelegation: async (_cfg: any, plan: any) => {
+      seen = plan;
+      return { box: "b", warm: false, output: "" };
+    },
+  } as any);
+
+  await s.tools.delegate.handler({
+    source: "git",
+    repos: [{ repo: "o/frontend" }, { repo: "o/backend", ref: "develop" }],
+    task: "wire api",
+  });
+  assert.deepEqual(
+    seen.repos.map((r: any) => r.repo),
+    ["o/frontend", "o/backend"]
+  );
+  assert.deepEqual(
+    seen.repos.map((r: any) => r.name),
+    ["frontend", "backend"]
+  );
+});
+
 test("delegate: defaults source to local when omitted (Mac/stdio path)", async () => {
   const s = fakeServer();
   let seen: any = null;

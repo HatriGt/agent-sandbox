@@ -11,6 +11,9 @@ export interface Config {
   vpsSsh: string;
   /** Base dir on the VPS where each delegation's working tree is staged before --copy-dir. */
   vpsStagingDir: string;
+  /** IDE-provided open workspace path (local delegate falls back to this when no repo is given).
+   * Wire in mcp.json: env WORKSPACE_DIR=${workspaceFolder}. Ignored if not a real absolute path. */
+  workspaceDir?: string;
   /** How long (ssh ControlPersist syntax) to keep the multiplexed master connection alive. */
   sshPersist: string;
   /** Extra ssh args (e.g. -i <key>, -o StrictHostKeyChecking=...) for containerized deploy. */
@@ -107,6 +110,11 @@ export function loadConfig(): Config {
   return {
     vpsSsh: req("VPS_SSH"),
     vpsStagingDir: req("VPS_STAGING_DIR", "/root/agent-sandbox-staging"),
+    // Only accept an absolute path; ignore an unexpanded "${workspaceFolder}" literal.
+    workspaceDir:
+      process.env.WORKSPACE_DIR && process.env.WORKSPACE_DIR.startsWith("/")
+        ? process.env.WORKSPACE_DIR
+        : undefined,
     sshPersist: req("SSH_PERSIST", "120"),
     sshExtraOpts: process.env.SSH_EXTRA_OPTS
       ? process.env.SSH_EXTRA_OPTS.split(/\s+/).filter(Boolean)
