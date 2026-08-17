@@ -1,11 +1,10 @@
 node_modules
+dist
 .git
 .env
 .env.*
 deploy/
 test/
-src/
 *.md
 docs/
 .vscode
-tsconfig.json

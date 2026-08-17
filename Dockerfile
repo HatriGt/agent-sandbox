@@ -10,12 +10,13 @@ RUN apt-get update -qq \
 
 WORKDIR /app
 
-# Install prod deps first (better layer caching).
-COPY package.json package-lock.json* ./
-RUN npm ci --omit=dev
+# Install ALL deps (incl. dev) to compile TypeScript inside the image — no host build needed.
+COPY package.json package-lock.json* tsconfig.json ./
+RUN npm ci
 
-# Build output is compiled on the host (npm run build) and copied in.
-COPY dist ./dist
+# Compile src -> dist inside the image, then drop dev deps to slim the runtime.
+COPY src ./src
+RUN npm run build && npm prune --omit=dev
 
 # HTTP entry binds 127.0.0.1 inside the container; Traefik reaches it over the compose network,
 # so we bind 0.0.0.0 in-container via HOST override at runtime (see compose: MCP_HTTP_HOST).
