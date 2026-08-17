@@ -74,7 +74,7 @@ Both entries register identical tools (`src/handlers.ts`) backed by the same sid
 **Remote (delegate a git repo from anywhere)** — same file, HTTP entry:
 ```json
 { "mcpServers": { "agent-sandbox-remote": {
-  "url": "https://agent-sandbox.example.com/mcp",
+  "url": "https://<ASB_DOMAIN>/mcp",
   "headers": { "Authorization": "Bearer <MCP_HTTP_TOKEN>" }
 } } }
 ```
@@ -89,7 +89,7 @@ src/          MCP orchestrator: handlers (shared) + stdio entry (index.ts) + HTT
 test/         unit tests (node:test via tsx) — run `npm test`
 docs/         plan, remote-mcp plan, eval summary, runbook
 Dockerfile    HTTP controller image (Dokploy)
-compose.yaml  Dokploy app: Traefik route agent-sandbox.example.com → :8787
+compose.yaml  Dokploy app: Traefik route ${ASB_DOMAIN} → :8787
 ```
 
 ## Status
@@ -98,11 +98,31 @@ Phase 1 built + tested (29 unit tests, HTTP auth verified live). Remaining: depl
 entry to Dokploy and smoke-test a remote delegate. See `docs/remote-mcp-plan.md` (Phase 1 done /
 Phase 2 backlog).
 
-## Deployment
+## Deploy the remote (HTTP) entry
 
-Tracked in the AKVps deployments repo at `deployments/apps/agent-sandbox/` (pointer + docs),
-mirroring how ccproxy / indiastreamz are managed. The container drives `msb` on the VPS host over
-SSH (msb needs KVM on the host).
+Prereq: a VPS with [microsandbox](https://github.com/microsandbox/microsandbox) (`msb`) installed
+and Docker + a Traefik reverse proxy (e.g. Dokploy). Then, from a machine that can SSH to the VPS:
+
+```bash
+VPS_SSH_ALIAS=<your-vps-ssh> ./setup.sh
+```
+
+That one script: verifies `msb` on the VPS, creates + authorizes a dedicated SSH key, pulls the
+private key into `deploy/` (gitignored), scaffolds `.env` with a generated `MCP_HTTP_TOKEN` and
+the container→host SSH settings, and builds. Then:
+
+1. Edit `.env`: `ASB_DOMAIN`, `ANTHROPIC_BASE_URL`/`ANTHROPIC_MODEL` (your proxy), `GH_TOKEN`,
+   `GIT_AUTHOR_*`.
+2. Point DNS `ASB_DOMAIN` → your VPS.
+3. Deploy: a Dokploy Compose app from this repo (path `./compose.yaml`), or on the VPS
+   `docker compose up -d --build`.
+4. Add the remote entry to Cursor (see **Connect from Cursor** above).
+
+The container drives `msb` on the VPS **host** over SSH (msb needs KVM on the host), reaching it
+as `host.docker.internal`. Everything site-specific lives in `.env`; the repo ships no secrets.
+
+For this VPS specifically, the deploy pointer is tracked in AKVps
+`deployments/apps/agent-sandbox/`.
 
 ## License
 
