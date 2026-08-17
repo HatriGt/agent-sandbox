@@ -1,0 +1,38 @@
+# agent-sandbox HTTP MCP controller — Dokploy app.
+# Exposes agent-sandbox.example.com via Traefik (TLS by letsencrypt). The container drives
+# msb ON THE VPS HOST over SSH (msb needs KVM/microVMs, which live on the host, not in here).
+#
+# Before deploy:
+#   1. npm ci && npm run build         (produces dist/, copied by the Dockerfile)
+#   2. Put an SSH private key at ./deploy/id_ed25519 that can `ssh root@<host>` and run msb.
+#   3. Fill .env (see .env.example): MCP_HTTP_TOKEN, VPS_SSH=root@<host-ip>, MSB=..., creds.
+services:
+  agent-sandbox:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agent-sandbox
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Bind all interfaces INSIDE the container so Traefik (compose network) can reach it.
+      MCP_HTTP_HOST: 0.0.0.0
+      MCP_HTTP_PORT: "8787"
+      # Use the mounted key + skip host-key prompts for the self-host SSH hop.
+      GIT_SSH_COMMAND: "ssh -i /root/.ssh/id_ed25519 -o StrictHostKeyChecking=accept-new"
+    volumes:
+      # SSH key to reach the VPS host and run msb. Read-only.
+      - ./deploy/id_ed25519:/root/.ssh/id_ed25519:ro
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=dokploy-network
+      - traefik.http.routers.agent-sandbox.rule=Host(`agent-sandbox.example.com`)
+      - traefik.http.routers.agent-sandbox.entrypoints=websecure
+      - traefik.http.routers.agent-sandbox.tls.certresolver=letsencrypt
+      - traefik.http.services.agent-sandbox.loadbalancer.server.port=8787
+    networks:
+      - dokploy-network
+networks:
+  dokploy-network:
+    external: true

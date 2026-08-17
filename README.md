@@ -1,12 +1,17 @@
 # agent-sandbox
 
-Delegate a coding task from Cursor chat to an isolated microVM on your VPS, run an
-autonomous agent (Claude Code) inside it, and stream the result back — with resume,
-follow-ups, and safe credential handling.
+Delegate a coding task **from Cursor** to an isolated microVM on your VPS, run an autonomous
+agent (Claude Code) inside it, and stream the result back — with resume, follow-ups, and safe
+credential handling. Built for Cursor first; because it speaks MCP, it also works from **any MCP
+client** (Claude web, other IDEs, CI).
 
 Runtime: **[microsandbox](https://github.com/microsandbox/microsandbox)** (`msb`, libkrun/KVM microVMs).
-Orchestration: a small **TypeScript MCP server** that Cursor connects to and that drives
-`msb` locally on the VPS.
+Orchestration: a small **TypeScript MCP server** with two entry points that share the same tools:
+
+| Entry | Transport | Use it for | Client |
+|---|---|---|---|
+| `dist/index.js` | stdio (Cursor spawns it) | "delegate **THIS**" — your local working tree incl. uncommitted changes | Cursor on your Mac |
+| `dist/http.js` | Streamable HTTP + bearer token | "delegate a **git repo/branch**" from anywhere | Cursor (remote MCP), Claude web, phone, CI |
 
 ## Why microsandbox
 
@@ -33,43 +38,71 @@ Cleanroom and iron-proxy sell as separate products) natively.
 ## Architecture
 
 ```
-Cursor chat  ──MCP (remote, over SSH/HTTP)──►  Orchestrator (this repo, on VPS)
-                                                   │  shells out to `msb`
-                                                   ▼
-                                          microsandbox microVM (libkrun/KVM)
-                                             • repo (incl. local changes) copied in
-                                             • git/npm creds injected (short-lived)
-                                             • Claude Code runs the task
-                                             • model calls → ccproxy
-                                             • MCP servers run in-box
-                                                   │
-                                          status/logs stream back to chat
-                                                   │
-                                          resume / continue / follow-ups
-                                                   ▼
-                                          download results → tear down box
+Cursor (stdio)  ─ local working tree (rsync) ─┐
+Any MCP client (HTTP + token) ─ git clone ────┤►  handlers (shared) → msb on VPS host
+                                               │
+                                               ▼
+                                      microsandbox microVM (libkrun/KVM)
+                                         • repo copied in (local tree OR fresh git clone)
+                                         • git/npm creds injected (short-lived)
+                                         • Claude Code runs the task → commit/PR (no AI attribution)
+                                         • model calls → ccproxy
+                                               │
+                                      status/logs → resume/follow-ups → teardown
 ```
 
-The orchestrator runs **on the VPS** (chosen over Mac-side) so `msb` calls are local and
-there is no long-running daemon to manage — v0.6.9 has no HTTP server, it's pure CLI.
+Both entries register identical tools (`src/handlers.ts`) backed by the same side-effecting deps
+(`src/deps.ts`), so behavior is the same whichever client you use.
+
+## Tools
+
+`delegate` · `status` · `resume` · `teardown` · `pool_status`. `delegate` takes `source`
+(`local` ships your working tree; `git` clones `owner/repo@ref` on the VPS), `task`, optional
+`ref`, optional `allowDomains`. Missing required info is **asked back**, not failed.
+
+## Connect from Cursor
+
+**Local (delegate THIS, uncommitted changes)** — `~/.cursor/mcp.json`:
+```json
+{ "mcpServers": { "agent-sandbox": {
+  "type": "stdio",
+  "command": "node",
+  "args": ["/absolute/path/agent-sandbox/dist/index.js"]
+} } }
+```
+
+**Remote (delegate a git repo from anywhere)** — same file, HTTP entry:
+```json
+{ "mcpServers": { "agent-sandbox-remote": {
+  "url": "https://agent-sandbox.example.com/mcp",
+  "headers": { "Authorization": "Bearer <MCP_HTTP_TOKEN>" }
+} } }
+```
+
+Any other MCP client (Claude web, another IDE, CI) adds the same HTTP URL + bearer header.
 
 ## Layout
 
 ```
-src/          TypeScript MCP orchestrator — the single entry point; calls msb directly
-              (create box, ship repo, inject creds, run agent, status, resume, teardown)
-docs/         Architecture, eval summary, credential strategy, runbook
+src/          MCP orchestrator: handlers (shared) + stdio entry (index.ts) + HTTP entry (http.ts)
+              + git-source, delegate-input, deps, http-auth, msb/pool/ssh/sync
+test/         unit tests (node:test via tsx) — run `npm test`
+docs/         plan, remote-mcp plan, eval summary, runbook
+Dockerfile    HTTP controller image (Dokploy)
+compose.yaml  Dokploy app: Traefik route agent-sandbox.example.com → :8787
 ```
 
 ## Status
 
-Scaffold. See `docs/plan.md` for the build phases and `docs/eval-summary.md` for why
-microsandbox was chosen.
+Phase 1 built + tested (29 unit tests, HTTP auth verified live). Remaining: deploy the HTTP
+entry to Dokploy and smoke-test a remote delegate. See `docs/remote-mcp-plan.md` (Phase 1 done /
+Phase 2 backlog).
 
 ## Deployment
 
-Tracked in the AKVps deployments repo at `deployments/apps/agent-sandbox/` (pointer +
-docs), mirroring how ccproxy / indiastreamz are managed.
+Tracked in the AKVps deployments repo at `deployments/apps/agent-sandbox/` (pointer + docs),
+mirroring how ccproxy / indiastreamz are managed. The container drives `msb` on the VPS host over
+SSH (msb needs KVM on the host).
 
 ## License
 

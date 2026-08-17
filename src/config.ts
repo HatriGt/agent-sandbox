@@ -13,6 +13,8 @@ export interface Config {
   vpsStagingDir: string;
   /** How long (ssh ControlPersist syntax) to keep the multiplexed master connection alive. */
   sshPersist: string;
+  /** Extra ssh args (e.g. -i <key>, -o StrictHostKeyChecking=...) for containerized deploy. */
+  sshExtraOpts?: string[];
 
   /** Path to the msb binary on the VPS. */
   msb: string;
@@ -50,6 +52,14 @@ export interface Config {
   gitAuthorEmail?: string;
   /** npm credential injected into the box (optional). */
   npmToken?: string;
+
+  /** HTTP entry (http.ts): port to bind. */
+  httpPort: number;
+  /** HTTP entry: bind host. Default 127.0.0.1 (local). In a container set 0.0.0.0 so Traefik
+   * on the compose network can reach it; never publish the port to the public internet. */
+  httpHost: string;
+  /** HTTP entry: bearer token required on /mcp. Empty => HTTP entry refuses all (fail closed). */
+  httpToken?: string;
 }
 
 function req(name: string, fallback?: string): string {
@@ -98,6 +108,9 @@ export function loadConfig(): Config {
     vpsSsh: req("VPS_SSH"),
     vpsStagingDir: req("VPS_STAGING_DIR", "/root/agent-sandbox-staging"),
     sshPersist: req("SSH_PERSIST", "120"),
+    sshExtraOpts: process.env.SSH_EXTRA_OPTS
+      ? process.env.SSH_EXTRA_OPTS.split(/\s+/).filter(Boolean)
+      : undefined,
 
     msb: req("MSB", "/root/.local/bin/msb"),
     image: req("MSB_IMAGE", "node"),
@@ -119,5 +132,9 @@ export function loadConfig(): Config {
     gitAuthorName: process.env.GIT_AUTHOR_NAME || undefined,
     gitAuthorEmail: process.env.GIT_AUTHOR_EMAIL || undefined,
     npmToken: process.env.NPM_TOKEN || undefined,
+
+    httpPort: Number(process.env.MCP_HTTP_PORT ?? "8787"),
+    httpHost: process.env.MCP_HTTP_HOST || "127.0.0.1",
+    httpToken: process.env.MCP_HTTP_TOKEN || undefined,
   };
 }

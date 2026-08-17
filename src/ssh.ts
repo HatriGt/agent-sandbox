@@ -35,6 +35,8 @@ export function sshMuxOpts(cfg: Config): string[] {
     `ControlPath=${controlPath}`,
     "-o",
     `ControlPersist=${cfg.sshPersist}`,
+    // Deploy-time extras (e.g. `-i <key>`, StrictHostKeyChecking) for the containerized controller.
+    ...(cfg.sshExtraOpts ?? []),
   ];
 }
 
