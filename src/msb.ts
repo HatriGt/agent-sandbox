@@ -8,6 +8,7 @@
 import { run, shellQuote } from "./exec.js";
 import { sshMuxOpts } from "./ssh.js";
 import { reposPromptHint, type RepoLayout } from "./agent-prompt.js";
+import { secretEnvFlags } from "./secret-env.js";
 import type { Config } from "./config.js";
 
 /**
@@ -229,7 +230,13 @@ export async function countBoxes(cfg: Config): Promise<number> {
 const AGENT_SYS_PROMPT =
   "Never add AI attribution to git commits or pull requests. Do not include " +
   '"Generated with Claude Code", "Co-Authored-By: Claude", any 🤖 marker, or similar ' +
-  "AI/assistant credit in commit messages, PR titles, or PR bodies. Write them as a human author would.";
+  "AI/assistant credit in commit messages, PR titles, or PR bodies. Write them as a human author would. " +
+  // Ask-then-resume for missing secrets: don't fail silently or fabricate credentials.
+  "If you are missing a credential or connection detail needed to continue (e.g. a token for a " +
+  "private repo, a database URL, an API key), STOP and state clearly the exact environment " +
+  "variable name(s) you need and why. The caller will re-run with those provided as env. " +
+  "Never print, echo, or log secret values (tokens, passwords, connection strings); refer to them " +
+  "only by their env var name.";
 
 function agentEnvFlags(cfg: Config, task: string, repos?: RepoLayout[]): string[] {
   // The standing policy plus (when known) the goal-neutral repo-layout hint, so the agent knows
@@ -324,9 +331,11 @@ export async function resumeAgentTask(
   cfg: Config,
   box: string,
   message: string,
-  repos?: RepoLayout[]
+  repos?: RepoLayout[],
+  secrets?: Record<string, string>
 ) {
-  const env = agentEnvFlags(cfg, message, repos);
+  // Ephemeral secrets are appended as extra -e flags on THIS exec only (not stored).
+  const env = [...agentEnvFlags(cfg, message, repos), ...secretEnvFlags(secrets)];
   return msb(cfg, ["exec", box, ...env, "--", "sh", "-lc", resumeSh(agentWorkdir(repos))]);
 }
 

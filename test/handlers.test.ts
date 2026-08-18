@@ -118,6 +118,39 @@ test("delegate: repos[] passes the full list through to runDelegation", async ()
   );
 });
 
+test("resume: forwards optional secrets to deps.resume", async () => {
+  const s = fakeServer();
+  let seen: any = null;
+  registerTools(s as any, cfg, {
+    resume: async (_cfg: any, session: string, message: string, secrets?: any) => {
+      seen = { session, message, secrets };
+      return "continued";
+    },
+  } as any);
+
+  await s.tools.resume.handler({
+    session: "box-1",
+    message: "here is the token",
+    secrets: { GITHUB_TOKEN: "ghp_x", DB_URL: "postgres://u:p@h/db" },
+  });
+  assert.equal(seen.session, "box-1");
+  assert.deepEqual(seen.secrets, { GITHUB_TOKEN: "ghp_x", DB_URL: "postgres://u:p@h/db" });
+});
+
+test("resume: works with no secrets (back-compat)", async () => {
+  const s = fakeServer();
+  let seen: any = null;
+  registerTools(s as any, cfg, {
+    resume: async (_cfg: any, _session: string, _message: string, secrets?: any) => {
+      seen = secrets;
+      return "ok";
+    },
+  } as any);
+
+  await s.tools.resume.handler({ session: "b", message: "go on" });
+  assert.equal(seen, undefined);
+});
+
 test("delegate: defaults source to local when omitted (Mac/stdio path)", async () => {
   const s = fakeServer();
   let seen: any = null;

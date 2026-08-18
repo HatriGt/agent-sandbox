@@ -67,8 +67,8 @@ export const deps: HandlerDeps = {
     return `state:\n${state}\n\nrecent log:\n${log.stdout.trim()}`;
   },
 
-  async resume(cfg, session, message) {
-    const result = await resumeAgentTask(cfg, session, message);
+  async resume(cfg, session, message, secrets) {
+    const result = await resumeAgentTask(cfg, session, message, undefined, secrets);
     return result.stdout.trim() || result.stderr.trim();
   },
 

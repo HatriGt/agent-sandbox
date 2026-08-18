@@ -58,7 +58,22 @@ Both entries register identical tools (`src/handlers.ts`) backed by the same sid
 
 `delegate` · `status` · `resume` · `teardown` · `pool_status`. `delegate` takes `source`
 (`local` ships your working tree; `git` clones `owner/repo@ref` on the VPS), `task`, optional
-`ref`, optional `allowDomains`. Missing required info is **asked back**, not failed.
+`ref`, optional `allowDomains`, and `repos:[{repo,ref?}]` for a cross-repo task (each lands in
+`/workspace/<name>` in one box). Missing required info is **asked back**, not failed.
+
+**On-demand secrets (ask-then-resume).** The box always gets your default `GH_TOKEN`. If a task
+needs a credential it doesn't have (a token for a private repo it can't reach, a DB URL, an API
+key), the agent is instructed to **stop and name the exact env var** instead of failing or faking.
+You then call `resume` with `secrets`, injected as env for **that step only** — never stored, gone
+on teardown:
+
+```jsonc
+resume({
+  session: "box-abc",
+  message: "Use the token I provided to clone and continue.",
+  secrets: { "GITHUB_TOKEN": "ghp_…", "DB_URL": "postgres://…" }
+})
+```
 
 ## Connect from Cursor
 

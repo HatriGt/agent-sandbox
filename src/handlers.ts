@@ -31,8 +31,13 @@ export interface HandlerDeps {
   ): Promise<DelegationResult>;
   /** msb status + recent log. */
   status(cfg: Config, session: string): Promise<string>;
-  /** Continue the in-box session. */
-  resume(cfg: Config, session: string, message: string): Promise<string>;
+  /** Continue the in-box session, optionally injecting ephemeral secrets on this exec only. */
+  resume(
+    cfg: Config,
+    session: string,
+    message: string,
+    secrets?: Record<string, string>
+  ): Promise<string>;
   /** Stop + remove the box. */
   teardown(cfg: Config, session: string): Promise<void>;
   /** Warm pool status line. */
@@ -142,13 +147,30 @@ export function registerTools(server: ToolRegistrar, cfg: Config, deps: HandlerD
 
   server.tool(
     "resume",
-    "Send a follow-up / continue the in-box Claude Code session.",
+    "Send a follow-up / continue the in-box Claude Code session. If the agent reported it needs a " +
+      "credential or connection detail (e.g. a GitHub token for a private repo, a DB URL), pass it " +
+      "via `secrets` — injected as env for THIS step only, never stored, gone on teardown.",
     {
       session: z.string().describe("Session id returned by delegate."),
       message: z.string().describe("Follow-up instruction or answer for the agent."),
+      secrets: z
+        .record(z.string())
+        .optional()
+        .describe(
+          "Ephemeral env for this step only, e.g. {\"GITHUB_TOKEN\":\"...\",\"DB_URL\":\"...\"}. " +
+            "Injected as -e KEY=VALUE; not persisted."
+        ),
     },
-    async ({ session, message }: { session: string; message: string }) => {
-      const out = await deps.resume(cfg, session, message);
+    async ({
+      session,
+      message,
+      secrets,
+    }: {
+      session: string;
+      message: string;
+      secrets?: Record<string, string>;
+    }) => {
+      const out = await deps.resume(cfg, session, message, secrets);
       return text(`Resumed session=${session}\n\n--- agent output ---\n${out}`);
     }
   );
