@@ -25,22 +25,23 @@ import {
 import { newSessionId } from "./session.js";
 import {
   loadStore,
-  resolveToken,
-  ownerOf,
-  rememberOwnerToken,
-  deriveLogin,
   saveStore,
+  ownerOf,
+  candidateAccounts,
+  decideAccess,
+  upsertAccount,
+  type Account,
+  type TokenStore,
+  type GitAccessResolution,
 } from "./gh-token-store.js";
+import { probeToken, canAccessRepo } from "./gh-probe.js";
 
-/** GitHub token keys we recognize in resume `secrets` for permanent capture. */
-const GH_SECRET_KEYS = ["GITHUB_TOKEN", "GH_TOKEN"];
-
-/** The GitHub owners this box works with, read from each repo's `origin` remote under /workspace. */
-async function boxOwners(cfg: Config, box: string): Promise<string[]> {
+/** GitHub owners this box works with, read from each repo's `origin` remote under /workspace. */
+async function boxRepoOwners(cfg: Config, box: string): Promise<string[]> {
   const r = await exec(
     cfg,
     box,
-    "for d in /workspace/*/; do git -C \"$d\" remote get-url origin 2>/dev/null; done"
+    'for d in /workspace/*/; do git -C "$d" remote get-url origin 2>/dev/null; done'
   );
   const owners = new Set<string>();
   for (const url of r.stdout.split("\n")) {
@@ -51,60 +52,105 @@ async function boxOwners(cfg: Config, box: string): Promise<string[]> {
 }
 
 /**
- * If resume `secrets` carries a GitHub token, PERMANENTLY store it keyed by every owner this box
- * touches (so future delegations to those owners are automatic). Also keyed by the token's own
- * login as a fallback. Best-effort — never throws into the resume path.
+ * Live-confirm which stored accounts can access a repo. We pre-filter by cached access
+ * (candidateAccounts) then probe each survivor with GitHub (access can change). Returns the
+ * confirmed accounts. Cheap when the store is small.
  */
-async function captureResumeToken(
+async function confirmedAccountsFor(
   cfg: Config,
-  box: string,
-  secrets?: Record<string, string>
-): Promise<void> {
-  if (!secrets) return;
-  const key = GH_SECRET_KEYS.find((k) => secrets[k]?.trim());
-  if (!key) return;
-  const token = secrets[key].trim();
-  try {
-    const [owners, login] = await Promise.all([boxOwners(cfg, box), deriveLogin(cfg, token)]);
-    let store = await loadStore(cfg);
-    const keys = owners.length ? owners : login ? [login] : [];
-    for (const owner of keys) store = rememberOwnerToken(store, owner, token, login);
-    if (keys.length) await saveStore(cfg, store);
-  } catch {
-    // capture is a convenience; a failure must not break the resume.
+  store: TokenStore,
+  repo: string
+): Promise<Account[]> {
+  const pre = candidateAccounts(store, repo);
+  const confirmed: Account[] = [];
+  for (const acc of pre) {
+    if (await canAccessRepo(cfg, acc.token, repo)) confirmed.push(acc);
   }
+  return confirmed;
 }
 
 /**
- * Resolve GitHub creds for a set of repos from the persistent token store:
- *  - ownerTokens: owner -> token for every repo owner we have a token for (per-owner git creds).
- *  - primaryToken: token for the FIRST repo's owner (drives the `gh` CLI / PR creation).
- * Falls back to cfg.ghToken per owner. Returns undefined when nothing resolves (local-only / none).
+ * Resolve GitHub access for every git repo in the plan. Precedence:
+ *  1. githubToken provided -> probe it; if it can't reach a needed repo, ask again; else store + use.
+ *  2. githubAccount provided -> use that stored account for repos it can access.
+ *  3. otherwise per repo: confirmed accounts -> 1 use / many choose / 0 need-token (decideAccess).
+ * On success returns owner->token for all repos + the primary token (first repo) for the gh CLI.
  */
-async function resolveCreds(
+async function resolveGitAccessImpl(
   cfg: Config,
-  repos: Array<{ repo: string }>
-): Promise<AgentCreds | undefined> {
-  const store = await loadStore(cfg);
+  plan: DelegatePlan,
+  opts: { githubToken?: string; githubAccount?: string }
+): Promise<GitAccessResolution> {
+  let store = await loadStore(cfg);
   const ownerTokens: Record<string, string> = {};
-  for (const r of repos) {
-    const owner = ownerOf(r.repo);
-    if (!owner) continue;
-    const tok = resolveToken(store, r.repo, cfg.ghToken);
-    if (tok) ownerTokens[owner] = tok;
+  let primaryToken: string | undefined;
+
+  // A freshly provided token: probe against the FIRST repo (the one that triggered the ask), store
+  // it by login, then let the normal per-repo resolution below pick it up.
+  if (opts.githubToken?.trim()) {
+    const probed = await probeToken(cfg, opts.githubToken.trim(), plan.repos[0].repo);
+    if (!probed) {
+      return {
+        ok: false,
+        question:
+          "That token is invalid or expired (GitHub /user rejected it). Re-call delegate with a working githubToken.",
+      };
+    }
+    store = upsertAccount(store, probed);
+    await saveStore(cfg, store);
   }
-  const primaryToken = resolveToken(store, repos[0]?.repo ?? "", cfg.ghToken);
-  if (Object.keys(ownerTokens).length === 0 && !primaryToken) return undefined;
-  return { ownerTokens, primaryToken };
+
+  for (let i = 0; i < plan.repos.length; i++) {
+    const repo = plan.repos[i].repo;
+    const owner = ownerOf(repo);
+    if (!owner) continue; // non-GitHub id (shouldn't happen for git source)
+
+    const confirmed = await confirmedAccountsFor(cfg, store, repo);
+
+    // Explicit account choice: honor it if that account can access this repo.
+    if (opts.githubAccount?.trim()) {
+      const chosen = confirmed.find((a) => a.login === opts.githubAccount!.trim());
+      if (!chosen) {
+        return {
+          ok: false,
+          question:
+            `Account '${opts.githubAccount}' can't access ${repo}. ` +
+            `Options that can: ${confirmed.map((a) => a.login).join(", ") || "(none — provide githubToken)"}.`,
+        };
+      }
+      ownerTokens[owner] = chosen.token;
+      if (i === 0) primaryToken = chosen.token;
+      // Record the confirmed access for next time.
+      store = upsertAccount(store, { ...chosen, verifiedRepos: [repo] });
+      continue;
+    }
+
+    const decision = decideAccess(confirmed, repo);
+    if (decision.kind === "use") {
+      ownerTokens[owner] = decision.account!.token;
+      if (i === 0) primaryToken = decision.account!.token;
+      store = upsertAccount(store, { ...decision.account!, verifiedRepos: [repo] });
+    } else {
+      // choose or need_token — surface the question and stop.
+      return { ok: false, question: decision.message! };
+    }
+  }
+
+  // Persist any newly-recorded verifiedRepos.
+  await saveStore(cfg, store);
+  return { ok: true, ownerTokens, primaryToken };
 }
 
 export const deps: HandlerDeps = {
   countBoxes: (cfg) => msbCountBoxes(cfg),
 
+  resolveGitAccess: (cfg, plan, opts) => resolveGitAccessImpl(cfg, plan, opts),
+
   async runDelegation(
     cfg: Config,
     plan: DelegatePlan,
-    allowDomains?: string[]
+    allowDomains?: string[],
+    creds?: AgentCreds
   ): Promise<DelegationResult> {
     // Per-call egress extras merge onto the curated allowlist for this delegation only.
     const runCfg = allowDomains?.length
@@ -113,9 +159,8 @@ export const deps: HandlerDeps = {
 
     const id = newSessionId();
 
-    // Resolve per-owner GitHub tokens from the store up front: used both to CLONE private repos
-    // (git source) and, later, for the in-box agent's per-owner git credentials + `gh` CLI.
-    const creds = await resolveCreds(runCfg, plan.repos);
+    // `creds` (owner->token, primary) was resolved by the handler via resolveGitAccess for git
+    // source. Used to CLONE private repos and for the in-box per-owner git credentials + `gh` CLI.
 
     // 1. Stage every repo into <sessionRoot>/<name> — rsync (local) or fresh git clone (remote).
     //    The whole session root is then copied into /workspace, so each repo -> /workspace/<name>.
@@ -123,7 +168,7 @@ export const deps: HandlerDeps = {
     for (const r of plan.repos) {
       const dest = repoStagingPath(runCfg, id, r.name);
       if (plan.source === "git") {
-        // Clone with the owner's token when we have one (private repos), else cfg default.
+        // Clone with the owner's resolved token when we have one (private repos), else cfg default.
         const token = creds?.ownerTokens?.[ownerOf(r.repo) ?? ""] ?? runCfg.ghToken;
         await cloneRepoOnVps({ ...runCfg, ghToken: token }, r.repo, r.ref, id, dest);
       } else {
@@ -156,14 +201,23 @@ export const deps: HandlerDeps = {
   },
 
   async resume(cfg, session, message, secrets) {
-    // If a GitHub token was supplied, remember it permanently (keyed by this box's repo owners) so
-    // future delegations are automatic — while STILL injecting it ephemerally for this step.
-    await captureResumeToken(cfg, session, secrets);
-    // Reload creds so a just-captured token also flows in as per-owner git creds + gh CLI token.
-    const owners = await boxOwners(cfg, session);
-    const creds = await resolveCreds(cfg, owners.map((o) => ({ repo: `${o}/_` })));
+    // If a GitHub token is supplied here, probe + store it (login-keyed) so it's reusable later; it's
+    // also injected ephemerally for this step via secrets. Best-effort capture (never breaks resume).
+    if (secrets) {
+      const token = (secrets.GITHUB_TOKEN || secrets.GH_TOKEN || "").trim();
+      if (token) {
+        try {
+          const owners = await boxRepoOwners(cfg, session);
+          const probeRepo = owners[0] ? `${owners[0]}/_probe` : "";
+          const acc = await probeToken(cfg, token, probeRepo);
+          if (acc) await saveStore(cfg, upsertAccount(await loadStore(cfg), acc));
+        } catch {
+          // capture is a convenience; ignore failures.
+        }
+      }
+    }
     // Continues the in-box Claude session detached; poll status(session) for the result.
-    await resumeAgentTask(cfg, session, message, undefined, secrets, creds);
+    await resumeAgentTask(cfg, session, message, undefined, secrets);
     return "Follow-up launched in the background. Poll with status(session) for progress and result.";
   },
 
@@ -179,18 +233,21 @@ export const deps: HandlerDeps = {
     return `Pool ${s.available}/${s.size} ready${s.boxes.length ? `: ${s.boxes.join(", ")}` : ""}`;
   },
 
-  async addGhToken(cfg, token, owner) {
+  async addGhToken(cfg, token, repo) {
     const tok = token?.trim();
     if (!tok) return "No token provided.";
-    // The token identifies itself; key under the explicit owner, else the derived login.
-    const login = await deriveLogin(cfg, tok);
-    const key = owner?.trim() || login;
-    if (!key) {
-      return "Could not validate the token (GET /user failed) and no owner was given. Pass owner explicitly.";
+    // Probe the token: validate (login), list orgs, and confirm access to `repo` if given.
+    const acc = await probeToken(cfg, tok, repo ?? "");
+    if (!acc) {
+      return "That token is invalid or expired (GitHub /user rejected it).";
     }
-    const store = await loadStore(cfg);
-    await saveStore(cfg, rememberOwnerToken(store, key, tok, login));
-    const who = login ? ` (login: ${login})` : "";
-    return `Saved GitHub token for owner '${key}'${who}. Delegations to ${key}/* will use it automatically.`;
+    await saveStore(cfg, upsertAccount(await loadStore(cfg), acc));
+    const orgs = acc.orgs.length ? ` orgs: ${acc.orgs.join(", ")}.` : "";
+    const repoNote = repo
+      ? acc.verifiedRepos.length
+        ? ` Confirmed access to ${repo}.`
+        : ` NOTE: this token could NOT access ${repo}.`
+      : "";
+    return `Stored GitHub account '${acc.login}' (${acc.type}).${orgs}${repoNote} It will be used automatically for repos it can access.`;
   },
 };

@@ -34,26 +34,32 @@ Tools (current shape):
     (single `repo` still works; a multi-root IDE window's folders are passed here by the agent).
   - Missing required info is **asked back**, not failed. Local with no repo falls back to
     `WORKSPACE_DIR` (`${workspaceFolder}` from the IDE).
-  - **GitHub tokens are resolved per repo-owner from a persistent store** (see below). Private repos
-    for a known owner just work; an unknown owner falls back to the default token, and the agent can
-    still ask-then-resume for one.
+  - **GitHub access is resolved by ACCESS from a login-keyed store** (see below). If exactly one
+    stored account can reach the repo it's used silently; if several can, delegate asks you to pick a
+    login; if none can, delegate asks for a token — which is then validated, stored, and reused.
+  - New args: `githubToken` (answer the "need a token" ask) and `githubAccount` (answer the
+    "which account" ask).
 - `status(session)` → run state (`running` / `done exit=N` / `idle`, from an in-box sentinel) + log tail.
 - `resume(session, message, secrets?)` → answer a follow-up / continue (async, like delegate).
-  `secrets:{KEY:val}` injects **ephemeral** env for that step only (ask-then-resume). A GitHub token
-  passed here is ALSO **remembered permanently** (keyed by the box's repo owners) so it's automatic
-  next time — while still being injected ephemerally for this step.
+  `secrets:{KEY:val}` injects **ephemeral** env for that step only. A GitHub token passed here is
+  also probed + stored (login-keyed) so it's reusable next time.
 - `teardown(session)` → `msb stop` + `msb rm`
 - `pool_status()` → warm-pool availability.
-- `gh_token_add({token, owner?})` → save a GitHub token permanently, keyed by owner/org. The token
-  identifies itself (GET /user → login), so `owner` is only needed for an org you don't match by login.
+- `gh_token_add({token, repo?})` → pre-register a token. It identifies itself (GET /user → login),
+  records its org memberships, and (if `repo` given) confirms access. Usually unnecessary — delegate
+  asks on demand.
 - **Verify:** from Cursor, connected to the remote MCP, delegate a real task and get output back.
 
-Persistent GitHub token store (multi-account):
-- Lives on the VPS at `~/.agent-sandbox/gh-tokens.json` (chmod 600), keyed by **owner/org**.
-- Resolution: for each repo, use the owner's stored token, else the default `GH_TOKEN`.
+Login-keyed, access-based GitHub token store (multi-account):
+- Lives on the VPS at `~/.agent-sandbox/gh-tokens.json` (chmod 600), keyed by **account login**.
+  Each entry: `{login, token, type, orgs[], verifiedRepos[]}`.
+- **Reactive by default:** user just delegates. On a clone that no stored account can reach, delegate
+  returns "provide a token"; the token is probed (login + orgs + repo access), stored, and used.
+- **Access, not owner-name:** to pick a token for a repo we live-probe `GET /repos/{owner}/{name}`
+  with each candidate account (a personal token that spans several orgs is matched correctly).
+- **Disambiguation:** if >1 account can access a repo, delegate asks the user to choose by login.
 - Multi-owner tasks: the box gets per-owner `~/.git-credentials` entries (`credential.useHttpPath`),
-  so each repo pushes with its own owner's token; the primary owner's token drives the `gh` CLI.
-- Capture: `gh_token_add`, or automatically the first time you answer an ask-then-resume with a token.
+  so each repo pushes with the right token; the primary repo's token drives the `gh` CLI.
 
 The task defines the goal — analysis, root-cause, fix, PR, tests, anything. The infra only places
 the repo(s) and hands over the task verbatim (no outcome is baked into the prompt).

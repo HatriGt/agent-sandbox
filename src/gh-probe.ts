@@ -1,0 +1,79 @@
+/**
+ * Live GitHub token probing (runs curl on the VPS so it works even when the client can't reach
+ * GitHub). Given a token we determine: is it valid, what account (login) is it, which orgs does it
+ * belong to, and can it access a specific repo. The results populate the login-keyed token store.
+ *
+ * Pure parsers (tokenType/parseLogin/parseOrgs) are unit-tested; the probe* functions do IO.
+ */
+import { run } from "./exec.js";
+import { sshMuxOpts } from "./ssh.js";
+import { ownerOf, type Account, type TokenType } from "./gh-token-store.js";
+import type { Config } from "./config.js";
+
+/** Classify a token by its prefix. Best-effort; only affects display. */
+export function tokenType(token: string): TokenType {
+  if (/^github_pat_/.test(token)) return "fine-grained";
+  if (/^gh[po]_/.test(token)) return "classic";
+  return "unknown";
+}
+
+/** Pull the "login" field out of a GET /user JSON body. */
+export function parseLogin(body: string): string | undefined {
+  const m = body.match(/"login"\s*:\s*"([^"]+)"/);
+  return m ? m[1] : undefined;
+}
+
+/** Pull every "login" from a GET /user/orgs JSON array. */
+export function parseOrgs(body: string): string[] {
+  const out: string[] = [];
+  const re = /"login"\s*:\s*"([^"]+)"/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(body)) !== null) out.push(m[1]);
+  return out;
+}
+
+/** curl a GitHub API path on the VPS with the token; returns the response body (empty on failure). */
+async function ghGet(cfg: Config, token: string, path: string): Promise<string> {
+  const remote =
+    `curl -sf -H "Authorization: token ${token}" ` +
+    `-H "Accept: application/vnd.github+json" https://api.github.com${path}`;
+  const r = await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, remote], { check: false });
+  return r.stdout ?? "";
+}
+
+/** True if the token can access the repo (GET /repos/{owner}/{name} returns 200 with a body). */
+export async function canAccessRepo(cfg: Config, token: string, repo: string): Promise<boolean> {
+  const owner = ownerOf(repo);
+  const name = repo.replace(/\.git$/i, "").split("/").filter(Boolean)[1];
+  if (!owner || !name) return false;
+  const body = await ghGet(cfg, token, `/repos/${owner}/${name}`);
+  return /"full_name"\s*:/.test(body);
+}
+
+/**
+ * Probe a token into an Account: validate it (GET /user -> login), list its orgs, and confirm it can
+ * access `repo`. Returns undefined if the token is invalid (no login) — the caller then asks again.
+ * `verifiedRepos` includes `repo` only when access is confirmed.
+ */
+export async function probeToken(
+  cfg: Config,
+  token: string,
+  repo: string
+): Promise<Account | undefined> {
+  const userBody = await ghGet(cfg, token, "/user");
+  const login = parseLogin(userBody);
+  if (!login) return undefined; // invalid/expired token
+
+  const [orgsBody, hasRepo] = await Promise.all([
+    ghGet(cfg, token, "/user/orgs"),
+    canAccessRepo(cfg, token, repo),
+  ]);
+
+  return {
+    login,
+    token,
+    type: tokenType(token),
+    orgs: parseOrgs(orgsBody),
+    verifiedRepos: hasRepo ? [repo.replace(/\.git$/i, "")] : [],
+  };
+}

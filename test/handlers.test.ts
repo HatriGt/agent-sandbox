@@ -25,6 +25,9 @@ function textOf(res: any): string {
   return res.content.map((c: any) => c.text).join("\n");
 }
 
+/** Default fake: every git repo resolves cleanly (no token/choice needed). */
+const okAccess = async () => ({ ok: true, ownerTokens: {}, primaryToken: undefined });
+
 test("registers the core tools", () => {
   const s = fakeServer();
   registerTools(s as any, cfg, {} as any);
@@ -54,6 +57,7 @@ test("delegate: valid input -> calls runDelegation and returns its output", asyn
   let seen: any = null;
   registerTools(s as any, cfg, {
     countBoxes: async () => 0,
+    resolveGitAccess: okAccess,
     runDelegation: async (_cfg: any, plan: any) => {
       seen = plan;
       return { box: "box-1", warm: true, output: "SMOKE_OK" };
@@ -97,6 +101,7 @@ test("delegate: repos[] passes the full list through to runDelegation", async ()
   let seen: any = null;
   registerTools(s as any, cfg, {
     countBoxes: async () => 0,
+    resolveGitAccess: okAccess,
     runDelegation: async (_cfg: any, plan: any) => {
       seen = plan;
       return { box: "b", warm: false, output: "" };
@@ -166,25 +171,74 @@ test("delegate: defaults source to local when omitted (Mac/stdio path)", async (
   assert.equal(seen.source, "local");
 });
 
-test("gh_token_add: forwards token + owner and returns the summary", async () => {
+test("gh_token_add: forwards token + optional repo and returns the summary", async () => {
   const s = fakeServer();
   let seen: any = null;
   registerTools(s as any, cfg, {
-    addGhToken: async (_cfg: any, token: string, owner?: string) => {
-      seen = { token, owner };
-      return "Saved GitHub token for owner 'atom-insurance'.";
+    addGhToken: async (_cfg: any, token: string, repo?: string) => {
+      seen = { token, repo };
+      return "Stored GitHub account 'alice' (classic).";
     },
   } as any);
 
-  const res = await s.tools.gh_token_add.handler({ token: "ghp_x", owner: "atom-insurance" });
-  assert.deepEqual(seen, { token: "ghp_x", owner: "atom-insurance" });
-  assert.match(textOf(res), /atom-insurance/);
+  const res = await s.tools.gh_token_add.handler({ token: "ghp_x", repo: "atom-insurance/foo" });
+  assert.deepEqual(seen, { token: "ghp_x", repo: "atom-insurance/foo" });
+  assert.match(textOf(res), /alice/);
 });
 
-test("delegate: async launch note + status hint in the response", async () => {
+test("delegate git: resolveGitAccess need_token -> returns the question, does NOT run", async () => {
   const s = fakeServer();
+  let ran = false;
   registerTools(s as any, cfg, {
     countBoxes: async () => 0,
+    resolveGitAccess: async () => ({ ok: false, question: "No stored GitHub account can access o/n." }),
+    runDelegation: async () => {
+      ran = true;
+      return { box: "b", warm: false, output: "" };
+    },
+  } as any);
+
+  const res = await s.tools.delegate.handler({ source: "git", repo: "o/n", task: "t" });
+  assert.equal(ran, false);
+  assert.match(textOf(res), /No stored GitHub account/);
+});
+
+test("delegate git: forwards githubToken/githubAccount + resolved creds to runDelegation", async () => {
+  const s = fakeServer();
+  let seenOpts: any = null;
+  let seenCreds: any = null;
+  registerTools(s as any, cfg, {
+    countBoxes: async () => 0,
+    resolveGitAccess: async (_cfg: any, _plan: any, opts: any) => {
+      seenOpts = opts;
+      return { ok: true, ownerTokens: { o: "tok-o" }, primaryToken: "tok-o" };
+    },
+    runDelegation: async (_cfg: any, _plan: any, _dom: any, creds: any) => {
+      seenCreds = creds;
+      return { box: "b", warm: false, output: "" };
+    },
+  } as any);
+
+  await s.tools.delegate.handler({
+    source: "git",
+    repo: "o/n",
+    task: "t",
+    githubToken: "ghp_x",
+    githubAccount: "alice",
+  });
+  assert.deepEqual(seenOpts, { githubToken: "ghp_x", githubAccount: "alice" });
+  assert.deepEqual(seenCreds, { ownerTokens: { o: "tok-o" }, primaryToken: "tok-o" });
+});
+
+test("delegate local: skips resolveGitAccess entirely", async () => {
+  const s = fakeServer();
+  let accessCalled = false;
+  registerTools(s as any, cfg, {
+    countBoxes: async () => 0,
+    resolveGitAccess: async () => {
+      accessCalled = true;
+      return { ok: true, ownerTokens: {} };
+    },
     runDelegation: async () => ({
       box: "box-async",
       warm: false,
@@ -192,7 +246,8 @@ test("delegate: async launch note + status hint in the response", async () => {
     }),
   } as any);
 
-  const res = await s.tools.delegate.handler({ source: "git", repo: "o/n", task: "t" });
+  const res = await s.tools.delegate.handler({ source: "local", repo: "/Users/me/p", task: "t" });
+  assert.equal(accessCalled, false, "local source must not need GitHub access resolution");
   const out = textOf(res);
   assert.match(out, /box-async/);
   assert.match(out, /background/);

@@ -284,14 +284,21 @@ session id. The run writes `/workspace/.agent.running` while in flight and `/wor
 status({ session })   // -> "run:running" | "run:done exit=0" | "run:idle" + last ~60 log lines
 ```
 
-### Persistent multi-account GitHub token store
-Keyed by **owner/org**, stored on the VPS at `~/.agent-sandbox/gh-tokens.json` (chmod 600).
-```jsonc
-gh_token_add({ token: "ghp_…", owner: "atom-insurance" })  // owner optional; else derived login
-```
-- On delegate, each repo's owner resolves to its stored token (else the default `GH_TOKEN`); used to
-  clone private repos AND inside the box.
+### Login-keyed, access-based GitHub token store (reactive)
+Keyed by **account login**, stored on the VPS at `~/.agent-sandbox/gh-tokens.json` (chmod 600):
+`{login, token, type, orgs[], verifiedRepos[]}`.
+
+**User flow (no upfront setup):**
+1. `delegate({source:"git", repo:"atom-insurance/elseco-deal-service", task:"…"})`.
+2. If no stored account can access it, delegate replies: *"No stored GitHub account can access … —
+   re-call with githubToken:'…'"*.
+3. `delegate({… , githubToken:"ghp_…"})` → token is probed (login + orgs + repo access), stored by
+   login, clone proceeds, and it's reused automatically next time.
+4. If **several** stored accounts can access a repo, delegate asks you to pick:
+   `delegate({… , githubAccount:"<login>"})`.
+
+- Matching is by **access** (live `GET /repos/{owner}/{name}` per candidate), not owner-name.
 - Multi-owner tasks: per-owner `~/.git-credentials` entries (`credential.useHttpPath true`) so each
-  repo pushes with the right token; the primary owner's token drives the `gh` CLI.
-- A GitHub token supplied via `resume(secrets)` is auto-captured into the store (keyed by the box's
-  repo owners) so it's automatic next time. Pure store helpers are unit-tested.
+  repo pushes with the right token; the primary repo's token drives the `gh` CLI.
+- `gh_token_add({token, repo?})` pre-registers a token; a token via `resume(secrets)` is also stored.
+  Pure store/probe helpers are unit-tested.

@@ -12,6 +12,7 @@
 import { z } from "zod";
 import type { Config } from "./config.js";
 import { validateDelegateInput, type DelegateSource, type DelegatePlan } from "./delegate-input.js";
+import type { GitAccessResolution } from "./gh-token-store.js";
 
 export interface DelegationResult {
   box: string;
@@ -23,11 +24,22 @@ export interface DelegationResult {
 export interface HandlerDeps {
   /** Count live boxes for the concurrency cap. */
   countBoxes(cfg: Config): Promise<number>;
+  /**
+   * Resolve GitHub access for a git-source plan: match each repo to a stored account by ACCESS,
+   * probe/store a freshly provided token, or return a question (need token / choose login).
+   * Local-source plans need no GitHub access to clone, so the handler skips this for them.
+   */
+  resolveGitAccess(
+    cfg: Config,
+    plan: DelegatePlan,
+    opts: { githubToken?: string; githubAccount?: string }
+  ): Promise<GitAccessResolution>;
   /** Acquire a box for the plan (rsync local tree OR git-clone on VPS), run the agent. */
   runDelegation(
     cfg: Config,
     plan: DelegatePlan,
-    allowDomains?: string[]
+    allowDomains?: string[],
+    creds?: { ownerTokens?: Record<string, string>; primaryToken?: string }
   ): Promise<DelegationResult>;
   /** msb status + recent log. */
   status(cfg: Config, session: string): Promise<string>;
@@ -42,8 +54,8 @@ export interface HandlerDeps {
   teardown(cfg: Config, session: string): Promise<void>;
   /** Warm pool status line. */
   poolStatus(cfg: Config): Promise<string>;
-  /** Persist a GitHub token in the store, keyed by owner (auto-derives the login). Returns a summary. */
-  addGhToken(cfg: Config, token: string, owner?: string): Promise<string>;
+  /** Probe a token (login/orgs) and store it by account login. Optional repo confirms access. Returns a summary. */
+  addGhToken(cfg: Config, token: string, repo?: string): Promise<string>;
 }
 
 /** Minimal shape of the MCP server's `.tool()` we rely on (keeps this file transport-agnostic). */
@@ -90,6 +102,20 @@ export function registerTools(server: ToolRegistrar, cfg: Config, deps: HandlerD
         .array(z.string())
         .optional()
         .describe("Extra domains the box may reach (added to the curated egress allowlist)."),
+      githubToken: z
+        .string()
+        .optional()
+        .describe(
+          "Provide when delegate asks for one (a repo needs access no stored account has). It is " +
+            "validated, stored by its GitHub account login, and reused automatically next time."
+        ),
+      githubAccount: z
+        .string()
+        .optional()
+        .describe(
+          "Provide when delegate asks you to choose among several accounts that can access the repo: " +
+            "the GitHub login to use for this delegation."
+        ),
     },
     async ({
       source,
@@ -98,6 +124,8 @@ export function registerTools(server: ToolRegistrar, cfg: Config, deps: HandlerD
       task,
       ref,
       allowDomains,
+      githubToken,
+      githubAccount,
     }: {
       source?: DelegateSource;
       repo?: string;
@@ -105,6 +133,8 @@ export function registerTools(server: ToolRegistrar, cfg: Config, deps: HandlerD
       task?: string;
       ref?: string;
       allowDomains?: string[];
+      githubToken?: string;
+      githubAccount?: string;
     }) => {
       const resolvedSource: DelegateSource = source ?? "local";
       // Local "delegate this": with neither repo nor repos, fall back to the IDE-provided open
@@ -122,6 +152,16 @@ export function registerTools(server: ToolRegistrar, cfg: Config, deps: HandlerD
       });
       if (!v.ok) return text(v.question);
 
+      // Resolve GitHub access for git-source repos: match to a stored account by ACCESS, probe/store
+      // a freshly provided token, or return a question (need a token / choose a login). Local source
+      // ships the working tree, so no clone auth is needed — skip resolution there.
+      let creds: { ownerTokens?: Record<string, string>; primaryToken?: string } | undefined;
+      if (v.plan.source === "git") {
+        const res = await deps.resolveGitAccess(cfg, v.plan, { githubToken, githubAccount });
+        if (!res.ok) return text(res.question);
+        creds = { ownerTokens: res.ownerTokens, primaryToken: res.primaryToken };
+      }
+
       const live = await deps.countBoxes(cfg);
       if (live >= cfg.maxBoxes) {
         return text(
@@ -129,7 +169,7 @@ export function registerTools(server: ToolRegistrar, cfg: Config, deps: HandlerD
         );
       }
 
-      const r = await deps.runDelegation(cfg, v.plan, allowDomains);
+      const r = await deps.runDelegation(cfg, v.plan, allowDomains, creds);
       const repoLine =
         v.plan.repos.length > 1
           ? `\nrepos: ${v.plan.repos.map((x) => `${x.repo} -> /workspace/${x.name}`).join(", ")}`
@@ -197,19 +237,18 @@ export function registerTools(server: ToolRegistrar, cfg: Config, deps: HandlerD
 
   server.tool(
     "gh_token_add",
-    "Save a GitHub token permanently so private-repo delegations for its owner/org are automatic. " +
-      "The token identifies itself (GET /user), so you usually don't pass an owner — but for an ORG " +
-      "you don't belong to by login, pass owner to key it under that org. Stored on the VPS (chmod 600).",
+    "Pre-register a GitHub token so private-repo delegations are automatic. The token identifies " +
+      "itself (GET /user) and is stored by its account login, with its org memberships recorded. " +
+      "Optionally pass a repo to confirm+record access to it. Usually you don't need this — delegate " +
+      "asks for a token on demand when a repo needs one. Stored on the VPS (chmod 600).",
     {
-      token: z.string().describe("A GitHub PAT (classic or fine-grained) with access to the repos."),
-      owner: z
+      token: z.string().describe("A GitHub PAT (classic or fine-grained)."),
+      repo: z
         .string()
         .optional()
-        .describe(
-          "Owner/org to key this token under (e.g. 'atom-insurance'). Omit to use the token's own login."
-        ),
+        .describe("Optional owner/name to confirm and record access to (e.g. 'atom-insurance/foo')."),
     },
-    async ({ token, owner }: { token: string; owner?: string }) =>
-      text(await deps.addGhToken(cfg, token, owner))
+    async ({ token, repo }: { token: string; repo?: string }) =>
+      text(await deps.addGhToken(cfg, token, repo))
   );
 }

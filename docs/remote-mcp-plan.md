@@ -65,6 +65,8 @@ response timeout and lose the session id). Watch progress with `status`.
 | `repos` | yes* | `[{repo,ref?}]` for a cross-repo task; each → `/workspace/<name>` in one box |
 | `ref` | no | branch/tag/SHA for the single `repo`; default = repo default branch |
 | `allowDomains` | no | extra egress domains |
+| `githubToken` | no | answer to a "need a token" ask — validated, stored by login, then used |
+| `githubAccount` | no | answer to a "which account" ask — the stored login to use |
 
 *One of `repo` or `repos` required. Local with neither falls back to `WORKSPACE_DIR`
 (`${workspaceFolder}`). Missing `repo`/`task` → returns a plain-text question, not an error.
@@ -90,21 +92,30 @@ values. You re-call `resume` with `secrets`. A **GitHub token** passed in `secre
 **captured permanently** into the token store (keyed by the box's repo owners), so subsequent
 delegations to those owners are automatic — the injection into THIS run is still ephemeral.
 
-## gh_token_add tool + persistent GitHub token store
-Multi-account GitHub auth without prompts. Store lives on the VPS at
-`~/.agent-sandbox/gh-tokens.json` (chmod 600), keyed by **owner/org**.
+## Login-keyed, access-based GitHub token store
+Reactive, multi-account GitHub auth. Store lives on the VPS at `~/.agent-sandbox/gh-tokens.json`
+(chmod 600), keyed by **account login**: `{login, token, type, orgs[], verifiedRepos[]}`.
 
+**Resolution on delegate (git source), per repo:**
+1. Pre-filter stored accounts by cached access (login owns it / owner in `orgs` / repo in
+   `verifiedRepos`), then **live-probe** `GET /repos/{owner}/{name}` with each to be certain.
+2. **1 account** → use it (record the confirmed repo). **>1** → return a question listing logins;
+   caller re-calls with `githubAccount`. **0** → return "provide a token"; caller re-calls with
+   `githubToken`.
+3. A provided `githubToken` is **probed** (GET /user → login, GET /user/orgs, repo access), stored by
+   login, then used. Invalid token → clear question to try again.
+
+Used both to CLONE private repos and inside the box (per-owner `~/.git-credentials` with
+`credential.useHttpPath true`; primary repo's token → `GH_TOKEN` for the `gh` CLI).
+
+### gh_token_add tool (optional pre-registration)
 | Arg | Required? | Note |
 |---|---|---|
-| `token` | yes | GitHub PAT (classic or fine-grained) |
-| `owner` | no | owner/org to key it under; omitted → the token's own login (GET /user) |
+| `token` | yes | GitHub PAT (classic or fine-grained) — identifies itself via GET /user |
+| `repo` | no | owner/name to confirm + record access to |
 
-- **Resolve on delegate:** for each repo, use the owner's stored token, else the default `GH_TOKEN`.
-  Used both to CLONE private repos (git source) and for the in-box agent.
-- **Multi-owner tasks:** the box gets one `~/.git-credentials` line per owner
-  (`credential.useHttpPath true`), so each repo pushes with its own owner's token; the primary
-  owner's token is exported as `GH_TOKEN` for the `gh` CLI (PR creation).
-- **Capture:** `gh_token_add`, or automatically from an ask-then-resume token.
+Usually unnecessary: delegate asks for a token on demand. A token given via `resume(secrets)` is also
+probed + stored.
 
 ## git-source (fresh clone, idempotent)
 - Always `git clone --depth 1 --branch <ref>` into a per-session staging dir. Never reuse/pull.
