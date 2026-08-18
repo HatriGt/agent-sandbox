@@ -19,45 +19,113 @@ export function dashboardHtml(pollMs: number = DASHBOARD_POLL_MS): string {
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>agent-sandbox monitor</title>
 <style>
-  :root { color-scheme: dark; }
+  /* shadcn-style design tokens (zinc, dark) — hand-authored so the page stays dependency-free. */
+  :root {
+    color-scheme: dark;
+    --background: #09090b; --foreground: #fafafa;
+    --card: #0c0c0f; --card-border: #1f1f23;
+    --muted: #18181b; --muted-foreground: #a1a1aa;
+    --accent: #27272a; --ring: #3f3f46;
+    --radius: 12px;
+    --green: #22c55e; --green-bg: rgba(34,197,94,.12); --green-bd: rgba(34,197,94,.30);
+    --amber: #f59e0b; --amber-bg: rgba(245,158,11,.12); --amber-bd: rgba(245,158,11,.32);
+    --blue: #3b82f6; --blue-bg: rgba(59,130,246,.12); --blue-bd: rgba(59,130,246,.30);
+    --red: #ef4444;
+  }
   * { box-sizing: border-box; }
-  body { margin: 0; font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
-         background: #0b0e14; color: #d7dce5; }
-  header { padding: 14px 20px; border-bottom: 1px solid #1c2130; display: flex;
-           align-items: baseline; gap: 16px; position: sticky; top: 0; background: #0b0e14; }
-  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
-  #summary { color: #8b93a7; }
-  #err { color: #ff7b72; margin-left: auto; }
-  main { padding: 16px 20px; display: grid; gap: 12px;
-         grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
-  .card { border: 1px solid #1c2130; border-radius: 8px; background: #11151f; overflow: hidden; }
-  .card h2 { font-size: 13px; margin: 0; padding: 10px 12px; background: #141a26;
-             border-bottom: 1px solid #1c2130; display: flex; align-items: center; gap: 8px;
-             cursor: pointer; }
-  .card h2 .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .card .body { padding: 10px 12px; }
-  .row { display: flex; gap: 8px; color: #8b93a7; flex-wrap: wrap; }
-  .task { margin-top: 8px; color: #d7dce5; word-break: break-word; }
-  .q { margin-top: 8px; color: #e3b341; word-break: break-word; }
-  pre.log { margin: 10px 0 0; padding: 10px; background: #0b0e14; border: 1px solid #1c2130;
-            border-radius: 6px; max-height: 320px; overflow: auto; white-space: pre-wrap;
-            word-break: break-word; display: none; }
-  .badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid transparent; }
-  .b-running { background: #12261a; color: #57d364; border-color: #1f4a2e; }
-  .b-waiting { background: #2b2410; color: #e3b341; border-color: #5a4a13; }
-  .b-done    { background: #16202e; color: #6ea8fe; border-color: #234; }
-  .b-idle    { background: #1a1f2b; color: #8b93a7; border-color: #2a3040; }
-  .empty { color: #8b93a7; padding: 24px 20px; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--background); color: var(--foreground);
+    font: 14px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+  header {
+    position: sticky; top: 0; z-index: 10;
+    padding: 16px 24px; display: flex; align-items: center; gap: 16px;
+    background: rgba(9,9,11,.8); backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--card-border);
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .dot { width: 8px; height: 8px; border-radius: 999px; background: var(--green);
+         box-shadow: 0 0 0 4px var(--green-bg); }
+  header h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: -.01em; }
+  header h1 .sub { color: var(--muted-foreground); font-weight: 400; margin-left: 6px; }
+  .stats { display: flex; gap: 8px; margin-left: 8px; flex-wrap: wrap; }
+  .stat { display: inline-flex; align-items: baseline; gap: 6px; padding: 4px 10px;
+          background: var(--muted); border: 1px solid var(--card-border); border-radius: 999px;
+          font-size: 12px; color: var(--muted-foreground); }
+  .stat b { color: var(--foreground); font-weight: 600; font-variant-numeric: tabular-nums; }
+  #err { margin-left: auto; color: var(--red); font-size: 12.5px; }
+  #err:empty { display: none; }
+
+  main { padding: 20px 24px 48px; display: grid; gap: 16px;
+         grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); }
+
+  .card {
+    border: 1px solid var(--card-border); border-radius: var(--radius); background: var(--card);
+    overflow: hidden; transition: border-color .15s ease, transform .15s ease;
+    box-shadow: 0 1px 2px rgba(0,0,0,.4);
+  }
+  .card:hover { border-color: var(--ring); }
+  .card > h2 {
+    all: unset; display: flex; align-items: center; gap: 10px; cursor: pointer;
+    padding: 14px 16px; border-bottom: 1px solid var(--card-border);
+  }
+  .card > h2 .name { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
+                     font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .card > h2 .role { font-size: 11px; color: var(--muted-foreground); }
+  .card > h2 .chev { margin-left: auto; color: var(--muted-foreground); transition: transform .15s ease;
+                     font-size: 12px; }
+  .card.open > h2 .chev { transform: rotate(90deg); }
+  .card .body { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+
+  .metrics { display: flex; gap: 6px; flex-wrap: wrap; }
+  .pill { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; font-size: 12px;
+          background: var(--muted); border: 1px solid var(--card-border); border-radius: 8px;
+          color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+  .pill b { color: var(--foreground); font-weight: 500; }
+
+  .field-label { font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+                 color: var(--muted-foreground); margin-bottom: 2px; }
+  .task { word-break: break-word; }
+  .q { padding: 10px 12px; border-radius: 8px; background: var(--amber-bg);
+       border: 1px solid var(--amber-bd); color: #fcd34d; word-break: break-word; font-size: 13px; }
+  .q:empty { display: none; }
+
+  pre.log { margin: 0; padding: 12px 14px; background: #050506; border: 1px solid var(--card-border);
+            border-radius: 8px; max-height: 340px; overflow: auto; white-space: pre-wrap;
+            word-break: break-word; display: none; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 12px; color: #d4d4d8; line-height: 1.5; }
+  .card.open pre.log { display: block; }
+
+  .badge { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 500;
+           padding: 3px 9px; border-radius: 999px; border: 1px solid transparent; white-space: nowrap; }
+  .badge::before { content: ""; width: 6px; height: 6px; border-radius: 999px; background: currentColor; }
+  .b-running { background: var(--green-bg); color: var(--green); border-color: var(--green-bd); }
+  .b-running::before { animation: pulse 1.6s ease-in-out infinite; }
+  .b-waiting { background: var(--amber-bg); color: var(--amber); border-color: var(--amber-bd); }
+  .b-done    { background: var(--blue-bg);  color: var(--blue);  border-color: var(--blue-bd); }
+  .b-idle    { background: var(--muted); color: var(--muted-foreground); border-color: var(--card-border); }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+
+  .empty { grid-column: 1 / -1; text-align: center; color: var(--muted-foreground);
+           padding: 64px 20px; border: 1px dashed var(--card-border); border-radius: var(--radius);
+           background: var(--card); }
+  .empty .big { font-size: 15px; color: var(--foreground); font-weight: 500; margin-bottom: 4px; }
 </style>
 </head>
 <body>
 <header>
-  <h1>agent-sandbox monitor</h1>
-  <span id="summary">loading…</span>
+  <div class="brand"><span class="dot"></span>
+    <h1>agent-sandbox <span class="sub">monitor</span></h1></div>
+  <div class="stats" id="stats"></div>
   <span id="err"></span>
 </header>
-<main id="fleet"></main>
-<p class="empty" id="empty" style="display:none">No sandboxes are up.</p>
+<main id="fleet">
+  <div class="empty" id="empty"><div class="big">Loading…</div>connecting to the fleet</div>
+</main>
 <script>
 (function () {
   var POLL = ${JSON.stringify(pollMs)};
@@ -81,17 +149,43 @@ export function dashboardHtml(pollMs: number = DASHBOARD_POLL_MS): string {
     return "/watch.json" + (qs ? qs + "&" : "?") + "session=" + encodeURIComponent(session);
   }
 
+  function roleLabel(r) {
+    return r === "pool-free" ? "warm pool" : r === "pool-claimed" ? "session · pool" : "session";
+  }
+  function stat(label, n) {
+    return '<span class="stat"><b>' + n + "</b> " + esc(label) + "</span>";
+  }
+
   function render(views) {
     var fleet = document.getElementById("fleet");
-    var empty = document.getElementById("empty");
     var running = views.filter(function (v) { return /^running$/i.test(v.boxStatus || ""); });
-    empty.style.display = running.length ? "none" : "block";
 
     var sessions = running.filter(function (v) { return v.role !== "pool-free"; }).length;
     var free = running.filter(function (v) { return v.role === "pool-free"; }).length;
     var wait = running.filter(function (v) { return v.runState === "waiting"; }).length;
-    document.getElementById("summary").textContent =
-      running.length + " up · " + sessions + " session(s) · " + free + " pool free · " + wait + " waiting";
+    var active = running.filter(function (v) { return v.runState === "running"; }).length;
+    document.getElementById("stats").innerHTML =
+      stat("up", running.length) + stat("sessions", sessions) + stat("pool free", free) +
+      stat("running", active) + stat("waiting", wait);
+
+    // Empty state (kept as a child so the grid centers it).
+    var empty = document.getElementById("empty");
+    if (!running.length) {
+      if (!empty) {
+        empty = document.createElement("div");
+        empty.className = "empty"; empty.id = "empty";
+        fleet.appendChild(empty);
+      }
+      empty.innerHTML = '<div class="big">No sandboxes are up</div>delegate a task to spin one up';
+    } else if (empty) {
+      empty.remove();
+    }
+
+    // Order: sessions, then claimed pool, then free pool; stable by name.
+    var order = { "session": 0, "pool-claimed": 1, "pool-free": 2 };
+    running.sort(function (a, b) {
+      return (order[a.role] - order[b.role]) || a.name.localeCompare(b.name);
+    });
 
     // Reconcile cards by session id (stable DOM so scroll/log state survives polls).
     var seen = {};
@@ -103,36 +197,39 @@ export function dashboardHtml(pollMs: number = DASHBOARD_POLL_MS): string {
         card.className = "card";
         card.id = "card-" + v.name;
         card.innerHTML =
-          '<h2><span class="name"></span><span class="badge"></span></h2>' +
-          '<div class="body"><div class="meta"></div>' +
-          '<div class="task"></div><div class="q"></div>' +
+          '<h2><span class="name"></span><span class="role"></span>' +
+          '<span class="badge"></span><span class="chev">▸</span></h2>' +
+          '<div class="body">' +
+          '<div class="metrics"></div>' +
+          '<div class="taskwrap" style="display:none"><div class="field-label">Task</div>' +
+          '<div class="task mono"></div></div>' +
+          '<div class="q"></div>' +
           '<pre class="log">(open to load log)</pre></div>';
         fleet.appendChild(card);
         card.querySelector("h2").addEventListener("click", function () {
           expanded[v.name] = !expanded[v.name];
-          var log = card.querySelector(".log");
-          log.style.display = expanded[v.name] ? "block" : "none";
+          card.classList.toggle("open", !!expanded[v.name]);
           if (expanded[v.name]) loadLog(v.name);
         });
       }
-      card.querySelector(".name").textContent = v.name + "  [" + v.role + "]";
+      card.querySelector(".name").textContent = v.name;
+      card.querySelector(".role").textContent = roleLabel(v.role);
       var badge = card.querySelector(".badge");
       badge.textContent = v.runState + (v.runState === "done" && v.exitCode != null ? " " + v.exitCode : "");
       badge.className = "badge " + badgeClass(v.runState);
-      card.querySelector(".meta").innerHTML =
-        '<div class="row">' +
-        (v.uptime ? "<span>up " + esc(v.uptime) + "</span>" : "") +
-        (v.cpu ? "<span>cpu " + esc(v.cpu) + "</span>" : "") +
-        (v.mem ? "<span>mem " + esc(v.mem) + "</span>" : "") +
-        "</div>";
-      card.querySelector(".task").textContent = v.task ? "task: " + v.task : "";
+      card.querySelector(".metrics").innerHTML =
+        (v.uptime ? '<span class="pill">up <b>' + esc(v.uptime) + "</b></span>" : "") +
+        (v.cpu ? '<span class="pill">cpu <b>' + esc(v.cpu) + "</b></span>" : "") +
+        (v.mem ? '<span class="pill">mem <b>' + esc(v.mem) + "</b></span>" : "");
+      var taskwrap = card.querySelector(".taskwrap");
+      if (v.task) { taskwrap.style.display = "block"; card.querySelector(".task").textContent = v.task; }
+      else { taskwrap.style.display = "none"; }
       card.querySelector(".q").textContent = v.question ? "❓ " + v.question : "";
-      var log = card.querySelector(".log");
-      log.style.display = expanded[v.name] ? "block" : "none";
+      card.classList.toggle("open", !!expanded[v.name]);
       if (expanded[v.name]) loadLog(v.name);
     });
     // Drop cards for boxes no longer running.
-    Array.prototype.slice.call(fleet.children).forEach(function (c) {
+    Array.prototype.slice.call(fleet.querySelectorAll(".card")).forEach(function (c) {
       var name = c.id.replace(/^card-/, "");
       if (!seen[name]) { delete expanded[name]; c.remove(); }
     });
