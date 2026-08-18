@@ -56,15 +56,20 @@ Both entries register identical tools (`src/handlers.ts`) backed by the same sid
 
 ## Tools
 
-`delegate` · `status` · `resume` · `teardown` · `pool_status` · `monitor` · `gh_token_add`. `delegate`
-takes `source` (`local` ships your working tree; `git` clones `owner/repo@ref` on the VPS), `task`,
-optional `ref`, optional `allowDomains`, and `repos:[{repo,ref?}]` for a cross-repo task (each lands in
-`/workspace/<name>` in one box). Missing required info is **asked back**, not failed.
+`delegate` · `status` · `resume` · `teardown` · `pool_status` · `monitor` · `watch` · `gh_token_add`.
+`delegate` takes `source` (`local` ships your working tree; `git` clones `owner/repo@ref` on the VPS),
+`task`, optional `ref`, optional `allowDomains`, and `repos:[{repo,ref?}]` for a cross-repo task (each
+lands in `/workspace/<name>` in one box). Missing required info is **asked back**, not failed.
 
 **Fleet monitor.** `monitor` (no args; or `npm run monitor`) shows the whole fleet in one call — how
 many sandboxes are up and what each is doing: role (session / claimed-pool / free-pool), run state
-(running / waiting-for-answer / done / idle), the task text, uptime, and CPU/MEM. `status` is one
-session; `monitor` is all of them at a glance.
+(running / waiting-for-answer / done / idle), the task text, uptime, and CPU/MEM. Only running boxes
+count as "up"; auto-stopped boxes are noted separately. `status` is one session; `monitor` is all of
+them at a glance.
+
+**Watch one box live.** `watch(session)` returns a rich snapshot of a single box — run state, task,
+resources, and a tail of the agent's log (what it's doing right now). For a terminal live-stream that
+redraws every ~2s, run `npm run watch -- <session>` on the VPS.
 
 **Reactive GitHub auth — no default account.** There is no baked GitHub token or git identity. Access
 is resolved **per repo** from a login-keyed store on the VPS: on the first delegation to a repo no

@@ -16,6 +16,7 @@ import {
   parseMetrics,
   type BoxView,
   type RunState,
+  type WatchSnapshot,
 } from "./monitor.js";
 import type { Config } from "./config.js";
 
@@ -583,12 +584,15 @@ export async function gatherMonitor(cfg: Config): Promise<BoxView[]> {
         // box gone / not execable — leave defaults.
       }
 
-      // Metrics are cheap and independent; best-effort.
+      // Metrics are cheap and independent; best-effort. msb's metrics STATE is more current than the
+      // ls status (ls can briefly lag a just-stopped box), so prefer it for the lifecycle when present.
+      let boxStatus = e.status;
       try {
         const m = parseMetrics(await metrics(cfg, e.name));
         uptime = m.uptime;
         cpu = m.cpu;
         mem = m.mem;
+        if (m.state) boxStatus = m.state === "exited" ? "Stopped" : m.state;
       } catch {
         // ignore
       }
@@ -596,7 +600,7 @@ export async function gatherMonitor(cfg: Config): Promise<BoxView[]> {
       return {
         name: e.name,
         role: classifyBox(e.name, claimed),
-        boxStatus: e.status,
+        boxStatus,
         runState,
         exitCode,
         task,
@@ -609,6 +613,59 @@ export async function gatherMonitor(cfg: Config): Promise<BoxView[]> {
   );
 
   return views;
+}
+
+/**
+ * Live over-the-shoulder snapshot of ONE box for the `watch` tool/CLI: the same sentinels monitor
+ * reads (claim/run-state/task/question) plus a configurable-length log tail and metrics. Returns a
+ * `missing` snapshot (never throws) if the box is gone, so the watch CLI can keep polling cleanly.
+ */
+export async function gatherWatch(
+  cfg: Config,
+  box: string,
+  logLines = 40
+): Promise<WatchSnapshot> {
+  const base: WatchSnapshot = { name: box, boxStatus: "missing", runState: "idle", log: "" };
+  try {
+    const r = await exec(
+      cfg,
+      box,
+      `if [ -f ${RUN_MARK} ]; then echo "run:running"; ` +
+        `elif [ -f ${DONE_MARK} ]; then echo "run:done exit=$(cat ${DONE_MARK} 2>/dev/null)"; ` +
+        `else echo "run:idle"; fi; ` +
+        `echo "---Q---"; cat ${QUESTION_MARK} 2>/dev/null || true; ` +
+        `echo "---T---"; head -n 1 ${TASK_MARK} 2>/dev/null || true; ` +
+        `echo "---LOG---"; tail -n ${logLines} ${AGENT_LOG} 2>/dev/null || true`
+    );
+    const out = r.stdout;
+    const qStart = out.indexOf("---Q---");
+    const tStart = out.indexOf("---T---");
+    const logStart = out.indexOf("---LOG---");
+    const runLine =
+      out.slice(0, qStart).split("\n").map((l) => l.trim()).find((l) => l.startsWith("run:")) ??
+      "run:idle";
+    const rs = parseRunState(runLine);
+    const question = out.slice(qStart + "---Q---".length, tStart).trim() || undefined;
+    base.question = question;
+    base.runState = question ? "waiting" : rs.state;
+    base.exitCode = rs.exitCode;
+    base.task = out.slice(tStart + "---T---".length, logStart).trim() || undefined;
+    base.log = out.slice(logStart + "---LOG---".length).trim();
+    base.boxStatus = "running"; // execable => running
+  } catch {
+    return base; // stays "missing"
+  }
+
+  try {
+    const m = parseMetrics(await metrics(cfg, box));
+    base.uptime = m.uptime;
+    base.cpu = m.cpu;
+    base.mem = m.mem;
+    if (m.state && m.state !== "running") base.boxStatus = m.state === "exited" ? "stopped" : m.state;
+  } catch {
+    // metrics is best-effort
+  }
+  return base;
 }
 
 /** Run the credential/tool bootstrap step only (separated so benchmarks can time it). */

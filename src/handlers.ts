@@ -58,6 +58,8 @@ export interface HandlerDeps {
   poolStatus(cfg: Config): Promise<string>;
   /** Fleet report: how many boxes are up and what each is doing (role/state/task/metrics). */
   monitor(cfg: Config): Promise<string>;
+  /** Live over-the-shoulder view of ONE box: state + task + a log tail (lines default in impl). */
+  watch(cfg: Config, session: string, lines?: number): Promise<string>;
   /** Probe a token (login/orgs) and store it by account login. Optional repo confirms access. Returns a summary. */
   addGhToken(cfg: Config, token: string, repo?: string): Promise<string>;
 }
@@ -267,6 +269,25 @@ export function registerTools(server: ToolRegistrar, cfg: Config, deps: HandlerD
       "delegations at a glance (e.g. which ones are waiting on a question).",
     {},
     async () => text(await deps.monitor(cfg))
+  );
+
+  server.tool(
+    "watch",
+    "Live over-the-shoulder view of ONE delegated session: its run-state, the task it's on, resource " +
+      "use, and a tail of the agent's log (what it's actually doing right now). Richer than `status` " +
+      "— use it to visually follow a single box. For a terminal live-stream, run `npm run watch " +
+      "<session>` on the VPS instead.",
+    {
+      session: z.string().describe("Session id returned by delegate."),
+      lines: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("How many log lines to show (default 40)."),
+    },
+    async ({ session, lines }: { session: string; lines?: number }) =>
+      text(await deps.watch(cfg, session, lines))
   );
 
   server.tool(

@@ -302,3 +302,19 @@ test("monitor: registered and returns the fleet report from deps", async () => {
   assert.equal(called, true);
   assert.match(textOf(res), /2 sandbox\(es\) up/);
 });
+
+test("watch: registered; forwards session + lines and returns the snapshot", async () => {
+  const s = fakeServer();
+  let seen: any = null;
+  registerTools(s as any, cfg, {
+    watch: async (_cfg: any, session: string, lines?: number) => {
+      seen = { session, lines };
+      return `┌─ ${session} (running)`;
+    },
+  } as any);
+
+  assert.ok(s.tools.watch, "watch tool is registered");
+  const res = await s.tools.watch.handler({ session: "delegate-9", lines: 60 });
+  assert.deepEqual(seen, { session: "delegate-9", lines: 60 });
+  assert.match(textOf(res), /delegate-9/);
+});

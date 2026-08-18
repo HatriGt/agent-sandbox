@@ -322,6 +322,28 @@ best-effort — a box that vanishes mid-scan just degrades its own row. Shaping/
 `classifyBox`, `parseRunState`, `parseMetrics`, `formatMonitor`) is pure and unit-tested; the IO
 (`gatherMonitor`) lives in `msb.ts`.
 
+**Running-only "up".** Only boxes whose lifecycle is *running* count as up; an auto-torn-down pool box
+(msb `exited` / ls `Stopped`) is shown on a trailing `stopped (N): …` line, not in the count — it's
+consuming nothing and can't be doing anything. `msb metrics` STATE is preferred over the `ls` status
+for currency (ls can briefly lag a just-stopped box).
+
+**`parseMetrics` parses by header column positions**, not naive whitespace splitting — real rows break
+that: a stopped box shows an em-dash CPU (→ `undefined`, not a literal dash), the DISK/NET cells contain
+the word "total", and uptime reads "ran 59m59s" (the `ran ` prefix is stripped). Each cell is sliced at
+its header label's offset.
+
+### Watch one box live — over-the-shoulder view
+`monitor` is the fleet; `watch` is one box in detail, for visually following what an agent is doing:
+```jsonc
+watch({ session, lines?: 40 })   // MCP: rich one-shot snapshot (state + task + log tail)
+npm run watch -- <session> [--lines N] [--interval MS]   // CLI: redraws every ~2s until done/gone
+```
+The MCP tool returns a header (box name + lifecycle, run state, task, pending question, uptime/cpu/mem)
+followed by the last N lines of `/workspace/.agent.log` — richer than `status`. The CLI clears the
+screen and redraws each frame so you watch the log grow in real time; it stops on its own when the run
+finishes (and is not waiting on a question) or the box is gone. `gatherWatch` never throws — a missing
+box yields a `missing` snapshot so the poll loop exits cleanly. `formatWatch` is pure/unit-tested.
+
 ### Login-keyed, access-based GitHub token store (reactive)
 Keyed by **account login**, stored on the VPS at `~/.agent-sandbox/gh-tokens.json` (chmod 600):
 `{login, token, type, orgs[], verifiedRepos[]}`.

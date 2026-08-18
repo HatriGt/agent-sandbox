@@ -43,6 +43,11 @@ export interface BoxView {
 
 const POOL_PREFIX = "pool-";
 
+/** True when the box's msb lifecycle status means it's actually running (vs stopped/exited). */
+export function isRunning(boxStatus: string): boolean {
+  return /^running$/i.test(boxStatus.trim());
+}
+
 /** Parse `msb ls --format json`; tolerant of empty/garbage output (returns []). */
 export function parseLsJson(stdout: string): LsEntry[] {
   const s = stdout.trim();
@@ -83,21 +88,116 @@ export function parseRunState(runLine: string): { state: RunState; exitCode?: nu
   return { state: "idle" };
 }
 
-/** Extract uptime/cpu/mem from a `msb metrics` table (best-effort; returns {} if unparseable). */
-export function parseMetrics(stdout: string): { uptime?: string; cpu?: string; mem?: string } {
-  const lines = stdout.split("\n").map((l) => l.trim()).filter(Boolean);
-  // Data row is the one that isn't the header (header starts with "NAME").
-  const dataRow = lines.find((l) => !/^NAME\b/.test(l));
-  if (!dataRow) return {};
-  // Columns: NAME STATE CPU("a / bc") MEM("x U / y U") DISK("a / b") NET("a / b") UPTIME
-  // Split on 2+ spaces to keep the "a / b" cells intact.
-  const cols = dataRow.split(/\s{2,}/);
-  // cols[0]=name cols[1]=state cols[2]=cpu cols[3]=mem cols[4]=disk cols[5]=net cols[6]=uptime
-  return {
-    cpu: cols[2],
-    mem: cols[3],
-    uptime: cols[cols.length - 1],
-  };
+/** Parsed `msb metrics` row (best-effort). */
+export interface Metrics {
+  /** msb's own STATE column (running / exited / …), lowercased. */
+  state?: string;
+  cpu?: string;
+  mem?: string;
+  uptime?: string;
+}
+
+/**
+ * Extract state/cpu/mem/uptime from a `msb metrics` table by HEADER COLUMN POSITIONS, not by
+ * naive delimiter splitting. Blind 2+-space splitting breaks on real rows: an exited box shows an
+ * em-dash CPU, the DISK/NET cells contain the word "total", and uptime reads "ran 59m59s". Slicing
+ * each cell at its header's start offset (to the next header's offset) is robust to all of that.
+ * Returns {} when there's no data row.
+ */
+export function parseMetrics(stdout: string): Metrics {
+  const lines = stdout.split("\n").filter((l) => l.trim());
+  const header = lines.find((l) => /^\s*NAME\b/.test(l));
+  const dataRow = lines.find((l) => !/^\s*NAME\b/.test(l));
+  if (!header || !dataRow) return {};
+
+  // Column start offsets from the header labels (order as emitted by msb).
+  const at = (label: string) => header.indexOf(label);
+  type Col = { key: keyof Metrics | "skip"; start: number };
+  const cols: Col[] = (
+    [
+      { key: "skip", start: at("NAME") },
+      { key: "state", start: at("STATE") },
+      { key: "cpu", start: at("CPU") },
+      { key: "mem", start: at("MEM") },
+      { key: "skip", start: at("DISK") },
+      { key: "skip", start: at("NET") },
+      { key: "uptime", start: at("UPTIME") },
+    ] as Col[]
+  ).filter((c) => c.start >= 0);
+
+  const out: Metrics = {};
+  for (let i = 0; i < cols.length; i++) {
+    const { key, start } = cols[i];
+    if (key === "skip") continue;
+    const end = i + 1 < cols.length ? cols[i + 1].start : dataRow.length;
+    const cell = dataRow.slice(start, end).trim();
+    if (!cell) continue;
+    if (key === "state") out.state = cell.toLowerCase();
+    else if (key === "cpu") out.cpu = normalizeCpu(cell);
+    else if (key === "mem") out.mem = cell;
+    else if (key === "uptime") out.uptime = cell.replace(/^ran\s+/, "");
+  }
+  return out;
+}
+
+/** An em-dash (or empty) CPU means "no sample" (box not running) → undefined, not a literal dash. */
+function normalizeCpu(cell: string): string | undefined {
+  const c = cell.trim();
+  if (!c || c === "\u2014" || c === "-") return undefined;
+  return c;
+}
+
+// ----- watch: a live over-the-shoulder view of ONE box -----------------------------------------
+
+/** Everything the watch view shows for a single box (assembled by gatherWatch in msb.ts). */
+export interface WatchSnapshot {
+  name: string;
+  /** msb lifecycle: running / stopped (may be "missing" if the box is gone). */
+  boxStatus: string;
+  runState: RunState;
+  exitCode?: number;
+  task?: string;
+  question?: string;
+  uptime?: string;
+  cpu?: string;
+  mem?: string;
+  /** The log tail (already limited to N lines by the caller). */
+  log: string;
+}
+
+/**
+ * Render the watch view: a compact header (state · task · resources) then the log tail. Designed to
+ * be redrawn in place by the CLI every couple seconds, so it leads with the one line that changes
+ * meaning most — the run state — and flags WAITING loudly since that needs a human/agent to answer.
+ */
+export function formatWatch(s: WatchSnapshot): string {
+  if (s.boxStatus === "missing") return `Box ${s.name} is gone (torn down or never existed).`;
+
+  const stateLine =
+    s.runState === "waiting"
+      ? "⏸  WAITING — the agent asked a question and needs an answer (resume to continue)"
+      : s.runState === "running"
+        ? "▶  running"
+        : s.runState === "done"
+          ? `■  done (exit=${s.exitCode ?? "?"})`
+          : "·  idle";
+
+  const res = [s.uptime && `up ${s.uptime}`, s.cpu && `cpu ${s.cpu}`, s.mem && `mem ${s.mem}`]
+    .filter(Boolean)
+    .join(" · ");
+
+  const header = [
+    `┌─ ${s.name}  (${s.boxStatus})`,
+    `│ ${stateLine}`,
+    s.task ? `│ task: ${s.task}` : undefined,
+    s.question ? `│ question: ${s.question}` : undefined,
+    res ? `│ ${res}` : undefined,
+    `└─ log ─────────────────────────────────────────`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return `${header}\n${s.log || "(no output yet)"}`;
 }
 
 /** One-line-per-box label used in the report. */
@@ -133,41 +233,49 @@ function runLabel(v: BoxView): string {
   }
 }
 
+function boxBlock(v: BoxView): string {
+  const lines = [
+    `• ${v.name}  [${roleLabel(v.role)}]  ${runLabel(v)}` + (v.uptime ? `  up ${v.uptime}` : ""),
+  ];
+  if (v.cpu || v.mem) lines.push(`    cpu ${v.cpu ?? "?"} · mem ${v.mem ?? "?"}`);
+  if (v.task) lines.push(`    task: ${v.task}`);
+  if (v.runState === "waiting" && v.question) lines.push(`    question: ${v.question}`);
+  return lines.join("\n");
+}
+
 /**
- * Render the fleet report: a summary line, then one block per box. Sessions first (most
- * interesting), then claimed pool, then free pool. Sorted stably by name within each group.
+ * Render the fleet report. Only RUNNING boxes count as "up" (a stopped/auto-torn-down box no longer
+ * consumes resources and can't be doing anything). Running boxes are listed first — sessions, then
+ * claimed pool, then free pool — followed by a compact one-line note for any stopped boxes so you
+ * still know they exist without inflating the "up" count.
  */
 export function formatMonitor(views: BoxView[]): string {
-  if (views.length === 0) return "No sandboxes are up.";
+  const running = views.filter((v) => isRunning(v.boxStatus));
+  const stopped = views.filter((v) => !isRunning(v.boxStatus));
 
-  const order: Record<BoxRole, number> = {
-    session: 0,
-    "pool-claimed": 1,
-    "pool-free": 2,
-  };
-  const sorted = [...views].sort(
+  if (running.length === 0) {
+    const tail = stopped.length ? ` (${stopped.length} stopped box(es) present)` : "";
+    return `No sandboxes are up.${tail}`;
+  }
+
+  const order: Record<BoxRole, number> = { session: 0, "pool-claimed": 1, "pool-free": 2 };
+  const sorted = [...running].sort(
     (a, b) => order[a.role] - order[b.role] || a.name.localeCompare(b.name)
   );
 
-  const sessions = views.filter((v) => v.role === "session" || v.role === "pool-claimed").length;
-  const poolFree = views.filter((v) => v.role === "pool-free").length;
-  const waiting = views.filter((v) => v.runState === "waiting").length;
-  const running = views.filter((v) => v.runState === "running").length;
+  const sessions = running.filter((v) => v.role === "session" || v.role === "pool-claimed").length;
+  const poolFree = running.filter((v) => v.role === "pool-free").length;
+  const waiting = running.filter((v) => v.runState === "waiting").length;
+  const active = running.filter((v) => v.runState === "running").length;
 
   const summary =
-    `${views.length} sandbox(es) up — ${sessions} session(s), ${poolFree} warm pool free. ` +
-    `${running} running, ${waiting} waiting for an answer.`;
+    `${running.length} sandbox(es) up — ${sessions} session(s), ${poolFree} warm pool free. ` +
+    `${active} running, ${waiting} waiting for an answer.`;
 
-  const blocks = sorted.map((v) => {
-    const lines = [
-      `• ${v.name}  [${roleLabel(v.role)}]  ${runLabel(v)}` +
-        (v.uptime ? `  up ${v.uptime}` : ""),
-    ];
-    if (v.cpu || v.mem) lines.push(`    cpu ${v.cpu ?? "?"} · mem ${v.mem ?? "?"}`);
-    if (v.task) lines.push(`    task: ${v.task}`);
-    if (v.runState === "waiting" && v.question) lines.push(`    question: ${v.question}`);
-    return lines.join("\n");
-  });
-
-  return `${summary}\n\n${blocks.join("\n")}`;
+  const blocks = sorted.map(boxBlock);
+  let out = `${summary}\n\n${blocks.join("\n")}`;
+  if (stopped.length) {
+    out += `\n\nstopped (${stopped.length}): ${stopped.map((v) => v.name).join(", ")}`;
+  }
+  return out;
 }

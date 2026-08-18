@@ -21,9 +21,10 @@ import {
   status as msbStatus,
   teardown as msbTeardown,
   gatherMonitor,
+  gatherWatch,
   type AgentCreds,
 } from "./msb.js";
-import { formatMonitor } from "./monitor.js";
+import { formatMonitor, formatWatch } from "./monitor.js";
 import { newSessionId } from "./session.js";
 import {
   loadStore,
@@ -329,6 +330,10 @@ export const deps: HandlerDeps = {
 
   async monitor(cfg) {
     return formatMonitor(await gatherMonitor(cfg));
+  },
+
+  async watch(cfg, session, lines) {
+    return formatWatch(await gatherWatch(cfg, session, lines));
   },
 
   async addGhToken(cfg, token, repo) {
