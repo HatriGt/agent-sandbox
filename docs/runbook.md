@@ -344,6 +344,28 @@ screen and redraws each frame so you watch the log grow in real time; it stops o
 finishes (and is not waiting on a question) or the box is gone. `gatherWatch` never throws — a missing
 box yields a `missing` snapshot so the poll loop exits cleanly. `formatWatch` is pure/unit-tested.
 
+### Web dashboard (browser, token-protected)
+The HTTP entry (`http.ts`) also serves a visual dashboard for people who'd rather not use a terminal:
+```
+https://<ASB_DOMAIN>/dashboard?token=<MCP_HTTP_TOKEN>
+```
+- **`/dashboard`** — a self-contained HTML page (no build step, no external deps; `dashboardHtml()`
+  returns the whole string). It reads `token` from its own URL and **polls `/monitor.json` every 3s**,
+  rendering one card per running box (role, run-state badge, task, question, cpu/mem). Click a card to
+  open its log panel, which polls **`/watch.json?session=…`** for that box's live log tail.
+- **`/monitor.json`** and **`/watch.json?session=&lines=`** — JSON forms of `gatherMonitor` /
+  `gatherWatch`, same data the `monitor` / `watch` tools render as text.
+- **Auth (fails closed):** `checkDashboardAuth` accepts the token via `Authorization: Bearer` (the
+  page's fetch calls) **or** the `?token=` query param (so a browser navigation works — it can't set
+  headers). All four routes 401 without a valid token; the whole thing is behind the same
+  `MCP_HTTP_TOKEN` as `/mcp`, and Traefik already forwards every path on `ASB_DOMAIN` to the container
+  (no compose change needed).
+- **Polling, not SSE — deliberate:** a 3s snapshot dashboard is the textbook polling case; polling is
+  robust behind Traefik (no persistent-connection buffering/timeout tuning) with negligible overhead.
+  Reserve SSE/WebSockets for sub-second event push (chat, live trading), which this isn't.
+- The container image has no `curl`; to smoke-test on the VPS use `node -e` with `http.get` (see the
+  live-verification pattern used during rollout), or just open the URL in a browser.
+
 ### Login-keyed, access-based GitHub token store (reactive)
 Keyed by **account login**, stored on the VPS at `~/.agent-sandbox/gh-tokens.json` (chmod 600):
 `{login, token, type, orgs[], verifiedRepos[]}`.

@@ -71,6 +71,12 @@ them at a glance.
 resources, and a tail of the agent's log (what it's doing right now). For a terminal live-stream that
 redraws every ~2s, run `npm run watch -- <session>` on the VPS.
 
+**Web dashboard.** The HTTP entry also serves a token-protected page at `/dashboard` — open
+`https://<ASB_DOMAIN>/dashboard?token=<MCP_HTTP_TOKEN>` in a browser to see all boxes as auto-refreshing
+cards (role, run-state badge, task, question, cpu/mem); click a card to load that box's live log. It
+polls `/monitor.json` every 3s (and `/watch.json?session=…` for logs); both JSON endpoints require the
+same token. Auth accepts the token via `Authorization: Bearer` header or the `?token=` query param.
+
 **Reactive GitHub auth — no default account.** There is no baked GitHub token or git identity. Access
 is resolved **per repo** from a login-keyed store on the VPS: on the first delegation to a repo no
 stored account can reach, `delegate` asks for a `githubToken`; it's probed (login + orgs + access),
