@@ -242,3 +242,35 @@ Cumulative: **16s → ~4s** boot-to-ready (mux + pool). Idle pool cost ~60 MiB p
 - After teardown: RAM fully reclaimed (5.2G free), no boxes, staging empty — **zero leak**.
 - With ~5 GB headroom and ~62 MiB/idle box (~110 MiB active), the host can hold **dozens**
   of boxes; `MSB_MAX_BOXES` (default 5) is the safety cap, not a hard limit.
+
+## Post-Phase-1 features — VERIFIED live on vps 2026-08-18
+
+### Remote deploy (standalone compose, NOT Dokploy)
+The HTTP controller runs as a plain `docker compose` stack from a git clone at
+`/root/agent-sandbox-deploy`. `.env` + `deploy/id_ed25519` are gitignored (survive pulls).
+```bash
+ssh hostbrr 'cd /root/agent-sandbox-deploy \
+  && git fetch origin main && git reset --hard origin/main \
+  && docker compose up -d --build'
+# server logs: "HTTP MCP on 0.0.0.0:8787 (bearer-guarded)"
+curl -s -o /dev/null -w '%{http_code}\n' https://agent-sandbox.example.com/mcp   # 401 (no token)
+```
+Live smoke through the remote MCP: `delegate(source:git, repo:owner/name, task:"analyze …")`
+returned findings (read-only, no PR — task defines the goal); `resume`/`status` worked;
+teardown removed the box + staging. ✅
+
+### Multi-repo delegation
+`delegate({repos:[{repo,ref?},…], task})` stages each repo into `<sessionRoot>/<name>` and copies
+the session root into the box, so each lands at `/workspace/<name>` in ONE box. Single `repo` still
+works; a multi-root IDE window passes its folders as `repos`. The repo-layout hint states only
+*where* the repos are — the task defines the outcome (analysis/fix/PR/tests/anything).
+
+### On-demand secrets (ask-then-resume, ephemeral)
+The box always gets the default `GH_TOKEN`. For anything beyond it (private repo the default token
+can't reach, DB URL, API key), the standing system prompt tells the agent to STOP and name the
+exact env var — never fail silently, fabricate, or print secret values. You then:
+```jsonc
+resume({ session, message: "use it", secrets: { "GITHUB_TOKEN": "…", "DB_URL": "…" } })
+```
+Secrets inject as `-e KEY=VALUE` on that exec only (same path as `GH_TOKEN`), shell-quoted over
+SSH, never stored — gone on the next exec / teardown. Pure `secretEnvFlags()` is unit-tested.

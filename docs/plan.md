@@ -25,13 +25,23 @@ No bash wrapper. The MCP server *is* the delegate logic: it shells out to `msb` 
 via Node `child_process`. In Cursor you say "delegate this to agent sandbox" → Cursor calls
 the MCP tool → the server runs the proven Phase 1 `msb` sequence.
 
-Tools:
-- `delegate(repo, task)` → creates a box, ships the repo, injects creds, runs Claude Code;
-  returns a session id + initial status
+Tools (current shape):
+- `delegate({source?, repo?, repos?, task, ref?, allowDomains?})` → stages the code, injects creds,
+  runs Claude Code; returns a session id + agent output.
+  - `source`: `local` (rsync working tree, default) or `git` (clone `owner/name` on the VPS).
+  - `repos:[{repo,ref?}]` for a **cross-repo** task — each lands in `/workspace/<name>` in ONE box
+    (single `repo` still works; a multi-root IDE window's folders are passed here by the agent).
+  - Missing required info is **asked back**, not failed. Local with no repo falls back to
+    `WORKSPACE_DIR` (`${workspaceFolder}` from the IDE).
 - `status(session)` → current state + recent logs
-- `resume(session, message)` → answer a follow-up / continue (`msb exec` → `claude -c -p`)
+- `resume(session, message, secrets?)` → answer a follow-up / continue (`msb exec` → `claude -c -p`).
+  `secrets:{KEY:val}` injects **ephemeral** env for that step only (ask-then-resume) — never stored.
 - `teardown(session)` → `msb stop` + `msb rm`
-- **Verify:** from Cursor, connected to the remote MCP, delegate a real task and get status back.
+- `pool_status()` → warm-pool availability.
+- **Verify:** from Cursor, connected to the remote MCP, delegate a real task and get output back.
+
+The task defines the goal — analysis, root-cause, fix, PR, tests, anything. The infra only places
+the repo(s) and hands over the task verbatim (no outcome is baked into the prompt).
 
 ### The local-uncommitted-changes problem (decided: sync working tree to VPS)
 The MCP runs on the VPS; your editable working tree lives on your Mac. "Delegate THIS"

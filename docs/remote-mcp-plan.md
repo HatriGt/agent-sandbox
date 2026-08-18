@@ -52,16 +52,29 @@ Rules:
 - Missing → return a short, plain-text question listing exactly what's needed. No error, no crash.
 - The client (you) re-calls `delegate` with the value. Stateless — no half-open session to track.
 
-## delegate tool (Phase 1 shape)
+## delegate tool (current shape)
 | Arg | Required? | Note |
 |---|---|---|
-| `task` | yes | natural-language task |
-| `repo` | yes (remote) | `owner/name` or full https URL |
-| `ref` | no | branch/tag/SHA; default = repo default branch |
+| `task` | yes | natural-language task (defines the goal — analysis/fix/PR/tests/anything) |
+| `source` | no | `local` (rsync tree, default) or `git` (clone on VPS) |
+| `repo` | yes* | single-repo shorthand. local: path; git: `owner/name` or https URL |
+| `repos` | yes* | `[{repo,ref?}]` for a cross-repo task; each → `/workspace/<name>` in one box |
+| `ref` | no | branch/tag/SHA for the single `repo`; default = repo default branch |
 | `allowDomains` | no | extra egress domains |
 
-Missing `repo` or `task` → returns: `Need: repo (owner/name), task. You gave: <what>. Re-call
-delegate with the rest.`
+*One of `repo` or `repos` required. Local with neither falls back to `WORKSPACE_DIR`
+(`${workspaceFolder}`). Missing `repo`/`task` → returns a plain-text question, not an error.
+
+## resume tool (on-demand secrets)
+| Arg | Required? | Note |
+|---|---|---|
+| `session` | yes | box id from delegate |
+| `message` | yes | follow-up / answer to the agent |
+| `secrets` | no | `{KEY:val}` injected as env for **this step only** — ephemeral, never stored |
+
+Ask-then-resume: the standing system prompt tells the agent to STOP and name the exact env var it
+needs (private-repo token, DB URL, API key) instead of failing/faking — and never print secret
+values. You re-call `resume` with `secrets`. Gone on teardown.
 
 ## git-source (fresh clone, idempotent)
 - Always `git clone --depth 1 --branch <ref>` into a per-session staging dir. Never reuse/pull.
@@ -92,10 +105,15 @@ delegate with the rest.`
 | 3 | delegate: `source`/`repo`/`ref` args + **ask-if-missing** | omit repo → question, not error | ✅ (9 tests) |
 | 4 | `http.ts` — Streamable HTTP + bearer token | live: 401 w/o token, tools/list w/ token | ✅ (6 auth tests + live) |
 | 5 | Dockerfile + compose (Dokploy) + `agent-sandbox.example.com` + `MCP_HTTP_TOKEN` | files ready; `SSH_EXTRA_OPTS` for container→host | ✅ artifacts (3 ssh tests) |
-| 6 | deploy to Dokploy; add URL to Claude web; live smoke `delegate owner/repo@main` | real PR opens | ⏳ needs you (deploy) |
+| 6 | deploy (standalone compose at `/root/agent-sandbox-deploy`); add URL to Cursor; live smoke | delegate `owner/repo` ran real analysis; resume/status/teardown verified | ✅ live 2026-08-18 |
 
-**Test total: 29 passing.** Files: `git-source.ts`, `delegate-input.ts`, `handlers.ts`,
-`deps.ts`, `http.ts`, `http-auth.ts`, ssh extra-opts; `index.ts` refactored to share handlers.
+**Test total: 52 passing.** Files: `git-source.ts`, `delegate-input.ts`, `handlers.ts`,
+`deps.ts`, `http.ts`, `http-auth.ts`, `agent-prompt.ts`, `secret-env.ts`, `staging-paths`,
+ssh extra-opts; `index.ts`/`http.ts` share handlers. Post-1: multi-repo + on-demand secrets.
+
+> Deploy note: agent-sandbox runs as a **standalone `docker compose`** stack from a git clone at
+> `/root/agent-sandbox-deploy` (NOT a Dokploy app). Redeploy = `git reset --hard origin/main &&
+> docker compose up -d --build`. Traefik on `dokploy-network` still routes the domain.
 
 ## Deploy (Dokploy) — how the container reaches msb
 The container does NOT run msb (needs KVM/microVMs on the host). It **SSHes to the VPS host** to
@@ -105,8 +123,15 @@ StrictHostKeyChecking=accept-new`, with the key mounted read-only. Traefik termi
 published to host/public). Pointer app added under AKVps `deployments/apps/agent-sandbox/`.
 
 ## Phase 1 explicitly does NOT include
-Secret vault · agent-emitted need-input markers · mid-task secret injection · session sweep ·
+Secret vault (persisted) · agent-emitted fenced need-input markers · session sweep ·
 IP allowlist / split hostnames / Cloudflare Access · local runner. All → Phase 2.
+
+## Shipped after Phase 1 (post-1)
+- **Multi-repo delegation** (`repos:[...]`, one box, `/workspace/<name>` each) + `WORKSPACE_DIR`
+  local fallback + goal-neutral prompt (task defines the outcome, not the infra).
+- **On-demand secrets (ask-then-resume, ephemeral)** — `resume(secrets)` injects `-e KEY=VALUE`
+  for that step only; prompt tells the agent to STOP + name the env var it needs. This is the
+  lightweight half of 2a below (no persisted vault, no fenced marker protocol yet).
 
 ---
 
@@ -114,14 +139,14 @@ IP allowlist / split hostnames / Cloudflare Access · local runner. All → Phas
 
 Pull items individually; none are prerequisites for Phase 1.
 
-## 2a. Secret vault (by name) + mid-task ask
-When a task needs a secret beyond GH/git/npm.
-- age/sops encrypted file on VPS, key in `.env`. Tools: `secret_register`, `secret_list` (names only).
-- Inject `-e NAME=...` per-turn only. Requires code change: `resumeAgentTask(cfg, box, msg,
-  extraEnv?)` threaded into `agentEnvFlags` (today resume injects only standing creds — `msb.ts:306`).
-- Agent-emitted **fenced `need-input` block** (last-one-wins parse) so a blocked turn can ask for
-  a secret/choice; you answer via `resume`. Merge with the existing no-attribution system prompt
-  into ONE `AGENT_SYS_PROMPT`.
+## 2a. Secret vault (by name) + fenced ask — PARTIALLY DONE
+Mid-task secret injection is DONE (see "Shipped after Phase 1"): `resume(session, msg, secrets?)`
+threads ephemeral `-e KEY=VALUE` per-turn, and the system prompt tells the agent to ask by env-var
+name. What remains for a fuller version:
+- **Persisted vault:** age/sops encrypted file on VPS, key in `.env`. Tools: `secret_register`,
+  `secret_list` (names only) — so secrets survive across delegations / are reused by name.
+- **Fenced `need-input` block** (last-one-wins parse) so a blocked turn emits a structured ask
+  (vs. free-text in the output today). Would make the ask machine-parseable for auto-prompting.
 
 ## 2b. Local runner (`VPS_SSH=local`)
 Optimization: when the controller runs ON the VPS, run `msb`/git via `child_process` and skip
