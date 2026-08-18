@@ -211,7 +211,7 @@ test("delegate git: forwards githubToken/githubAccount + resolved creds to runDe
     countBoxes: async () => 0,
     resolveGitAccess: async (_cfg: any, _plan: any, opts: any) => {
       seenOpts = opts;
-      return { ok: true, ownerTokens: { o: "tok-o" }, primaryToken: "tok-o" };
+      return { ok: true, ownerTokens: { o: "tok-o" }, primaryToken: "tok-o", primaryLogin: "alice" };
     },
     runDelegation: async (_cfg: any, _plan: any, _dom: any, creds: any) => {
       seenCreds = creds;
@@ -227,7 +227,7 @@ test("delegate git: forwards githubToken/githubAccount + resolved creds to runDe
     githubAccount: "alice",
   });
   assert.deepEqual(seenOpts, { githubToken: "ghp_x", githubAccount: "alice" });
-  assert.deepEqual(seenCreds, { ownerTokens: { o: "tok-o" }, primaryToken: "tok-o" });
+  assert.deepEqual(seenCreds, { ownerTokens: { o: "tok-o" }, primaryToken: "tok-o", primaryLogin: "alice" });
 });
 
 test("delegate local: skips resolveGitAccess entirely", async () => {

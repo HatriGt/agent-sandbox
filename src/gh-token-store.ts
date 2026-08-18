@@ -136,8 +136,15 @@ export interface AccessDecision {
  *  - question: something needs the user (a token or a login choice) — surface this text and stop.
  */
 export type GitAccessResolution =
-  | { ok: true; ownerTokens: Record<string, string>; primaryToken?: string; question?: undefined }
-  | { ok: false; question: string; ownerTokens?: undefined; primaryToken?: undefined };
+  | {
+      ok: true;
+      ownerTokens: Record<string, string>;
+      primaryToken?: string;
+      /** GitHub login of the account behind primaryToken — drives in-box git identity + gh. */
+      primaryLogin?: string;
+      question?: undefined;
+    }
+  | { ok: false; question: string; ownerTokens?: undefined; primaryToken?: undefined; primaryLogin?: undefined };
 
 /** Turn a candidate list into a decision: 1 -> use, many -> choose (ask login), 0 -> need a token. */
 export function decideAccess(candidates: Account[], repo: string): AccessDecision {

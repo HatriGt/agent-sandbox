@@ -84,6 +84,7 @@ async function resolveGitAccessImpl(
   let store = await loadStore(cfg);
   const ownerTokens: Record<string, string> = {};
   let primaryToken: string | undefined;
+  let primaryLogin: string | undefined;
 
   // A freshly provided token: probe against the FIRST repo (the one that triggered the ask), store
   // it by login, then let the normal per-repo resolution below pick it up.
@@ -119,7 +120,10 @@ async function resolveGitAccessImpl(
         };
       }
       ownerTokens[owner] = chosen.token;
-      if (i === 0) primaryToken = chosen.token;
+      if (i === 0) {
+        primaryToken = chosen.token;
+        primaryLogin = chosen.login;
+      }
       // Record the confirmed access for next time.
       store = upsertAccount(store, { ...chosen, verifiedRepos: [repo] });
       continue;
@@ -128,7 +132,10 @@ async function resolveGitAccessImpl(
     const decision = decideAccess(confirmed, repo);
     if (decision.kind === "use") {
       ownerTokens[owner] = decision.account!.token;
-      if (i === 0) primaryToken = decision.account!.token;
+      if (i === 0) {
+        primaryToken = decision.account!.token;
+        primaryLogin = decision.account!.login;
+      }
       store = upsertAccount(store, { ...decision.account!, verifiedRepos: [repo] });
     } else {
       // choose or need_token — surface the question and stop.
@@ -138,7 +145,7 @@ async function resolveGitAccessImpl(
 
   // Persist any newly-recorded verifiedRepos.
   await saveStore(cfg, store);
-  return { ok: true, ownerTokens, primaryToken };
+  return { ok: true, ownerTokens, primaryToken, primaryLogin };
 }
 
 export const deps: HandlerDeps = {

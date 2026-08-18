@@ -39,7 +39,7 @@ export interface HandlerDeps {
     cfg: Config,
     plan: DelegatePlan,
     allowDomains?: string[],
-    creds?: { ownerTokens?: Record<string, string>; primaryToken?: string }
+    creds?: { ownerTokens?: Record<string, string>; primaryToken?: string; primaryLogin?: string }
   ): Promise<DelegationResult>;
   /** msb status + recent log. */
   status(cfg: Config, session: string): Promise<string>;
@@ -155,11 +155,17 @@ export function registerTools(server: ToolRegistrar, cfg: Config, deps: HandlerD
       // Resolve GitHub access for git-source repos: match to a stored account by ACCESS, probe/store
       // a freshly provided token, or return a question (need a token / choose a login). Local source
       // ships the working tree, so no clone auth is needed — skip resolution there.
-      let creds: { ownerTokens?: Record<string, string>; primaryToken?: string } | undefined;
+      let creds:
+        | { ownerTokens?: Record<string, string>; primaryToken?: string; primaryLogin?: string }
+        | undefined;
       if (v.plan.source === "git") {
         const res = await deps.resolveGitAccess(cfg, v.plan, { githubToken, githubAccount });
         if (!res.ok) return text(res.question);
-        creds = { ownerTokens: res.ownerTokens, primaryToken: res.primaryToken };
+        creds = {
+          ownerTokens: res.ownerTokens,
+          primaryToken: res.primaryToken,
+          primaryLogin: res.primaryLogin,
+        };
       }
 
       const live = await deps.countBoxes(cfg);

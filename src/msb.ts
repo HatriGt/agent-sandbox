@@ -367,16 +367,46 @@ function agentSh(workdir: string, resume: boolean): string {
  * Per-repo GitHub credentials resolved from the token store, threaded into a run.
  *  - ownerTokens: owner -> token, written as per-owner ~/.git-credentials entries (multi-owner push).
  *  - primaryToken: token for the primary repo's owner, exported as GH_TOKEN for the `gh` CLI.
+ *  - primaryLogin: GitHub login behind primaryToken — sets the in-box git commit identity so commits
+ *    are authored as the account whose token actually has access (not the box's default identity).
  */
 export interface AgentCreds {
   ownerTokens?: Record<string, string>;
   primaryToken?: string;
+  primaryLogin?: string;
 }
 
-/** Write per-owner git credentials in the box (no-op when none). Runs after bootstrap. */
+/**
+ * Apply resolved GitHub creds inside the box (after bootstrap):
+ *  1. per-owner ~/.git-credentials so each repo pushes with the right token (multi-owner);
+ *  2. git commit identity from the token's login (name + noreply email), so authorship matches the
+ *     account with access instead of the box default;
+ *  3. a GitHub Packages ~/.npmrc line with the primary token so scoped installs
+ *     (e.g. @owner/pkg from npm.pkg.github.com) work — needs `read:packages` on the token.
+ */
 async function applyGitCredentials(cfg: Config, box: string, creds?: AgentCreds): Promise<void> {
-  const script = gitCredentialsScript(creds?.ownerTokens ?? {});
-  if (script) await exec(cfg, box, script);
+  const lines: string[] = [];
+
+  const credScript = gitCredentialsScript(creds?.ownerTokens ?? {});
+  if (credScript) lines.push(credScript);
+
+  if (creds?.primaryLogin) {
+    // GitHub noreply email keeps the commit linked to the account without exposing a real address.
+    const email = `${creds.primaryLogin}@users.noreply.github.com`;
+    lines.push(`git config --global user.name ${shellQuote(creds.primaryLogin)}`);
+    lines.push(`git config --global user.email ${shellQuote(email)}`);
+  }
+
+  if (creds?.primaryToken) {
+    // GitHub Packages auth for scoped @owner installs. Appended (not overwriting any npmjs entry).
+    const npmrcLine = `//npm.pkg.github.com/:_authToken=${creds.primaryToken}`;
+    lines.push(
+      `touch "$HOME/.npmrc" && chmod 600 "$HOME/.npmrc" && ` +
+        `grep -q npm.pkg.github.com "$HOME/.npmrc" || printf '%s\\n' ${shellQuote(npmrcLine)} >> "$HOME/.npmrc"`
+    );
+  }
+
+  if (lines.length) await exec(cfg, box, lines.join(" && "));
 }
 
 /**

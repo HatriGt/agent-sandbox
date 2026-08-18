@@ -299,6 +299,14 @@ Keyed by **account login**, stored on the VPS at `~/.agent-sandbox/gh-tokens.jso
 
 - Matching is by **access** (live `GET /repos/{owner}/{name}` per candidate), not owner-name.
 - Multi-owner tasks: per-owner `~/.git-credentials` entries (`credential.useHttpPath true`) so each
-  repo pushes with the right token; the primary repo's token drives the `gh` CLI.
+  repo pushes with the right token; the primary repo's token drives the `gh` CLI (`GH_TOKEN` = the
+  resolved token, so `gh pr create` uses the account that can actually see the repo).
+- **Commit identity** is set from the resolved token's login: `user.name = <login>`,
+  `user.email = <login>@users.noreply.github.com`. So commits/PRs are authored as the account whose
+  token has access — not the box's default identity.
+- **GitHub Packages:** the box writes `//npm.pkg.github.com/:_authToken=<token>` to `~/.npmrc` so
+  scoped `@owner/pkg` installs resolve. The token must have **`read:packages`** — otherwise `npm
+  install` returns **E401** (seen with `@atom-insurance/deal-mgmt-core`). Grant `read:packages` when
+  a repo pulls private GitHub Packages.
 - `gh_token_add({token, repo?})` pre-registers a token; a token via `resume(secrets)` is also stored.
   Pure store/probe helpers are unit-tested.
