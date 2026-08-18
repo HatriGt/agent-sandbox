@@ -17,7 +17,9 @@ import { loadConfig } from "./config.js";
 import { registerTools } from "./handlers.js";
 import { deps } from "./deps.js";
 import { refillPool } from "./pool.js";
-import { checkBearer } from "./http-auth.js";
+import { checkBearer, checkDashboardAuth } from "./http-auth.js";
+import { gatherMonitor, gatherWatch } from "./msb.js";
+import { dashboardHtml } from "./dashboard-html.js";
 
 loadDotEnv();
 const cfg = loadConfig();
@@ -73,6 +75,47 @@ async function handle(req: Request, res: Response) {
 app.post("/mcp", handle);
 app.get("/mcp", handle);
 app.delete("/mcp", handle);
+
+// --- Monitoring dashboard (token-protected; poll-based) ---------------------------------------
+// Auth accepts the token via Bearer header (the page's fetch calls) OR a ?token= query param (so the
+// page can be opened directly in a browser, which can't set headers on a navigation). Same secret.
+function dashAuthed(req: Request, res: Response): boolean {
+  if (checkDashboardAuth(req.headers.authorization, req.query.token, cfg.httpToken)) return true;
+  res.status(401).json({ error: "unauthorized" });
+  return false;
+}
+
+// The page itself (static HTML; it reads ?token= and polls the JSON endpoints below).
+app.get("/dashboard", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  res.type("html").send(dashboardHtml());
+});
+
+// Fleet snapshot as JSON (what `monitor` renders as text).
+app.get("/monitor.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  try {
+    res.json(await gatherMonitor(cfg));
+  } catch (e) {
+    res.status(500).json({ error: String((e as Error).message ?? e) });
+  }
+});
+
+// One box's live snapshot (what `watch` renders); ?session=… required, optional ?lines=.
+app.get("/watch.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const session = typeof req.query.session === "string" ? req.query.session : "";
+  if (!session) {
+    res.status(400).json({ error: "session query param required" });
+    return;
+  }
+  const lines = Number(req.query.lines);
+  try {
+    res.json(await gatherWatch(cfg, session, Number.isFinite(lines) && lines > 0 ? lines : undefined));
+  } catch (e) {
+    res.status(500).json({ error: String((e as Error).message ?? e) });
+  }
+});
 
 app.listen(cfg.httpPort, cfg.httpHost, () => {
   console.error(`[agent-sandbox] HTTP MCP on ${cfg.httpHost}:${cfg.httpPort} (bearer-guarded)`);
