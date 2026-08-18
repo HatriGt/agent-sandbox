@@ -35,7 +35,7 @@ import {
   type GitAccessResolution,
 } from "./gh-token-store.js";
 import { probeToken, canAccessRepo } from "./gh-probe.js";
-import { localRepoOwnerName } from "./git-remote.js";
+import { localRepoOwnerName, parseOwnerName } from "./git-remote.js";
 
 /** GitHub owners this box works with, read from each repo's `origin` remote under /workspace. */
 async function boxRepoOwners(cfg: Config, box: string): Promise<string[]> {
@@ -50,6 +50,60 @@ async function boxRepoOwners(cfg: Config, box: string): Promise<string[]> {
     if (o) owners.add(o);
   }
   return [...owners];
+}
+
+/**
+ * Read each in-box repo dir and its GitHub `owner/name` from the origin remote. Used by resume to
+ * re-resolve access (identity + token) since resume only has a box id, not the original plan.
+ * Returns [{name, repo}] where name is the /workspace/<name> dir and repo is canonical owner/name.
+ */
+async function boxRepoRefs(cfg: Config, box: string): Promise<Array<{ name: string; repo: string }>> {
+  const r = await exec(
+    cfg,
+    box,
+    'for d in /workspace/*/; do n=$(basename "$d"); u=$(git -C "$d" remote get-url origin 2>/dev/null); ' +
+      'if [ -n "$u" ]; then echo "$n|$u"; fi; done'
+  );
+  const out: Array<{ name: string; repo: string }> = [];
+  for (const line of r.stdout.split("\n")) {
+    const [name, url] = line.split("|");
+    if (!name || !url) continue;
+    const ref = parseOwnerName(url.trim());
+    if (ref) out.push({ name, repo: ref });
+  }
+  return out;
+}
+
+/**
+ * Resolve per-repo identity/token for the repos already in a box (resume path). Mirrors delegate's
+ * resolution: for each repo, find the stored account with access and record owner->token/login and
+ * name->owner. Best-effort — a repo with no resolvable account is skipped (no default identity).
+ */
+async function resolveCredsForBox(cfg: Config, box: string): Promise<AgentCreds | undefined> {
+  const refs = await boxRepoRefs(cfg, box);
+  if (refs.length === 0) return undefined;
+  const store = await loadStore(cfg);
+  const ownerTokens: Record<string, string> = {};
+  const ownerLogins: Record<string, string> = {};
+  const repoOwners: Record<string, string> = {};
+  let primaryToken: string | undefined;
+  let primaryLogin: string | undefined;
+  for (let i = 0; i < refs.length; i++) {
+    const { name, repo } = refs[i];
+    const owner = ownerOf(repo);
+    if (!owner) continue;
+    repoOwners[name] = owner;
+    const confirmed = await confirmedAccountsFor(cfg, store, repo);
+    if (confirmed.length !== 1) continue; // 0 or ambiguous -> no identity (resume can't ask mid-run)
+    ownerTokens[owner] = confirmed[0].token;
+    ownerLogins[owner] = confirmed[0].login;
+    if (i === 0) {
+      primaryToken = confirmed[0].token;
+      primaryLogin = confirmed[0].login;
+    }
+  }
+  if (Object.keys(ownerTokens).length === 0 && Object.keys(repoOwners).length === 0) return undefined;
+  return { ownerTokens, ownerLogins, repoOwners, primaryToken, primaryLogin };
 }
 
 /**
@@ -251,8 +305,11 @@ export const deps: HandlerDeps = {
         }
       }
     }
+    // Re-resolve per-repo identity/token from the box's repos so the continued run commits as the
+    // access-correct account (not a stale/baked identity). Same access model as delegate.
+    const creds = await resolveCredsForBox(cfg, session);
     // Continues the in-box Claude session detached; poll status(session) for the result.
-    await resumeAgentTask(cfg, session, message, undefined, secrets);
+    await resumeAgentTask(cfg, session, message, undefined, secrets, creds);
     return "Follow-up launched in the background. Poll with status(session) for progress and result.";
   },
 

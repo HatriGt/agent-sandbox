@@ -326,6 +326,11 @@ function bootstrapScript(cfg: Config): string {
     // afterwards (applyGitCredentials) from the access-resolved account for each repo.
     "command -v gh >/dev/null || (type apt-get >/dev/null 2>&1 && " +
       "(apt-get update -qq && apt-get install -y -qq gh >/dev/null 2>&1 || npm i -g gh >/dev/null 2>&1)) || true",
+    // Scrub any GLOBAL identity a stale warm-start snapshot may have baked in (e.g. an old default
+    // like `atom-bot`). Commit identity must ONLY ever come from the per-repo access-resolved account
+    // set by applyGitCredentials — never a leftover global. Unset is idempotent/‑safe if absent.
+    "git config --global --unset-all user.name 2>/dev/null || true",
+    "git config --global --unset-all user.email 2>/dev/null || true",
   ];
   if (cfg.npmToken) {
     lines.push(
