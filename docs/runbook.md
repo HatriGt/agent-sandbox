@@ -162,7 +162,8 @@ Hardened credentials/egress and added polish. Verified the full dev workflow end
 - `MSB_MEMORY` / `MSB_MAX_BOXES` host protection.
 - `EGRESS_DOMAINS` extra allowed domains (comma-separated).
 - `EGRESS_ALLOW_ALL` set truthy for open egress (any domain; overrides allowlist).
-- `GH_TOKEN` / `GIT_AUTHOR_NAME` / `GIT_AUTHOR_EMAIL` / `NPM_TOKEN` in-box creds.
+- `NPM_TOKEN` optional in-box npm (public registry) cred. (No `GH_TOKEN`/`GIT_AUTHOR_*` — GitHub
+  access is reactive, resolved per repo from the login-keyed store.)
 
 ## E2E benchmark — vps 2026-08-16 (all features on)
 Host baseline: 15 GB RAM (5.1 GB free), 154 GB disk (92 GB free), 4 vCPU, shared with
@@ -267,9 +268,10 @@ works; a multi-root IDE window passes its folders as `repos`. The repo-layout hi
 *where* the repos are — the task defines the outcome (analysis/fix/PR/tests/anything).
 
 ### On-demand secrets (ask-then-resume, ephemeral)
-The box always gets the default `GH_TOKEN`. For anything beyond it (private repo the default token
-can't reach, DB URL, API key), the standing system prompt tells the agent to STOP and name the
-exact env var — never fail silently, fabricate, or print secret values. You then:
+GitHub access is resolved per repo from the store (no default token). For anything else the agent
+needs (a DB URL, an API key, or a GitHub token for a repo no stored account can reach), the standing
+system prompt tells it to STOP and name the exact env var — never fail silently, fabricate, or print
+secret values. You then:
 ```jsonc
 resume({ session, message: "use it", secrets: { "GITHUB_TOKEN": "…", "DB_URL": "…" } })
 ```
@@ -297,8 +299,9 @@ for the (possibly long) agent run, which used to overrun the MCP response window
 session id. The run writes `/workspace/.agent.running` while in flight and `/workspace/.agent.done`
 (holding the exit code) when finished; output streams to `/workspace/.agent.log`. Watch it:
 ```jsonc
-status({ session })   // -> "run:running" | "run:done exit=0" | "run:idle" + last ~60 log lines
+status({ session })   // -> "run:running" | "run:done exit=0" | "run:idle" | "run:waiting" + last ~60 log lines
 ```
+`run:waiting` = the agent asked a question (see Interactive Q&A above); answer via `resume`.
 
 ### Login-keyed, access-based GitHub token store (reactive)
 Keyed by **account login**, stored on the VPS at `~/.agent-sandbox/gh-tokens.json` (chmod 600):
@@ -328,6 +331,16 @@ Keyed by **account login**, stored on the VPS at `~/.agent-sandbox/gh-tokens.jso
   A commit is therefore authored by the same account that can push it — fixing the bug where a commit
   was authored by an account with no access while the PR used another. Mixed-owner multi-repo tasks
   get the right author in each repo.
+- **`resume` re-resolves identity too.** A follow-up only has a box id, so `resume` reads each in-box
+  repo's `origin` (`boxRepoRefs`), re-resolves the access account per repo (`resolveCredsForBox`), and
+  re-applies the per-repo identity/token BEFORE continuing the Claude session. This was the actual
+  cause of the earlier `atom-bot` commit: the old `resume` passed no creds, so the box kept whatever
+  identity a stale warm-start snapshot had baked in.
+- **No baked identity survives.** `bootstrap` actively unsets any GLOBAL `user.name/email` (belt-and-
+  suspenders against an old snapshot), and the per-repo LOCAL identity always wins over a global. If
+  you ever see a wrong author, the snapshot is stale — **rebake it**: `node dist/bake-snapshot.js
+  agent-base` (a fresh box must show `user.name = NONE`, no `~/.gitconfig`). The current
+  `installTools`/bake sets no identity; an old snapshot baked one from a manual `gh auth login`.
 - **GitHub Packages:** the box writes `//npm.pkg.github.com/:_authToken=<token>` to `~/.npmrc` so
   scoped `@owner/pkg` installs resolve. The token must have **`read:packages`** — otherwise `npm
   install` returns **E401** (seen with `@atom-insurance/deal-mgmt-core`). Grant `read:packages` when

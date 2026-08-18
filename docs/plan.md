@@ -61,7 +61,12 @@ Login-keyed, access-based GitHub token store (multi-account):
   with each candidate account (a personal token that spans several orgs is matched correctly).
 - **Disambiguation:** if >1 account can access a repo, delegate asks the user to choose by login.
 - Multi-owner tasks: the box gets per-owner `~/.git-credentials` entries (`credential.useHttpPath`),
-  so each repo pushes with the right token; the primary repo's token drives the `gh` CLI.
+  so each repo pushes with the right token; the first repo's token drives the `gh` CLI.
+- **No default account; per-repo identity:** there is no fallback identity/token. Each `/workspace/<name>`
+  gets `git -C … config user.*` = the login of the account with access to THAT repo, so a commit is
+  authored by an account that can push it. Resolution runs for `local` too (owner from the origin
+  remote). `resume` re-resolves this from the box (it only has a session id), and `bootstrap` unsets
+  any global identity a stale warm-start snapshot may have baked in.
 
 The task defines the goal — analysis, root-cause, fix, PR, tests, anything. The infra only places
 the repo(s) and hands over the task verbatim (no outcome is baked into the prompt).

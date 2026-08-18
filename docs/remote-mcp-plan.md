@@ -97,6 +97,11 @@ values. You re-call `resume` with `secrets`. A **GitHub token** passed in `secre
 **captured permanently** into the token store (keyed by the box's repo owners), so subsequent
 delegations to those owners are automatic — the injection into THIS run is still ephemeral.
 
+**Identity on resume:** `resume` only has a box id, so it reads each in-box repo's `origin`
+(`boxRepoRefs`), re-resolves the access account per repo (`resolveCredsForBox`), and re-applies the
+per-repo git identity/token before continuing. Without this a follow-up commit fell back to a stale
+baked identity (the earlier `atom-bot` bug).
+
 ## Login-keyed, access-based GitHub token store
 Reactive, multi-account GitHub auth. Store lives on the VPS at `~/.agent-sandbox/gh-tokens.json`
 (chmod 600), keyed by **account login**: `{login, token, type, orgs[], verifiedRepos[]}`.

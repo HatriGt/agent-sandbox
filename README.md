@@ -56,16 +56,22 @@ Both entries register identical tools (`src/handlers.ts`) backed by the same sid
 
 ## Tools
 
-`delegate` · `status` · `resume` · `teardown` · `pool_status`. `delegate` takes `source`
-(`local` ships your working tree; `git` clones `owner/repo@ref` on the VPS), `task`, optional
+`delegate` · `status` · `resume` · `teardown` · `pool_status` · `gh_token_add`. `delegate` takes
+`source` (`local` ships your working tree; `git` clones `owner/repo@ref` on the VPS), `task`, optional
 `ref`, optional `allowDomains`, and `repos:[{repo,ref?}]` for a cross-repo task (each lands in
 `/workspace/<name>` in one box). Missing required info is **asked back**, not failed.
 
-**On-demand secrets (ask-then-resume).** The box always gets your default `GH_TOKEN`. If a task
-needs a credential it doesn't have (a token for a private repo it can't reach, a DB URL, an API
-key), the agent is instructed to **stop and name the exact env var** instead of failing or faking.
-You then call `resume` with `secrets`, injected as env for **that step only** — never stored, gone
-on teardown:
+**Reactive GitHub auth — no default account.** There is no baked GitHub token or git identity. Access
+is resolved **per repo** from a login-keyed store on the VPS: on the first delegation to a repo no
+stored account can reach, `delegate` asks for a `githubToken`; it's probed (login + orgs + access),
+stored, and reused. Each repo's commit identity + push token + `gh` come from the account that has
+access to **that** repo (works for `local` too — owner read from the origin remote). `status` shows
+`run:waiting` when the agent asks a question; you answer with `resume`.
+
+**On-demand secrets (ask-then-resume).** If a task needs a credential it doesn't have (a token for a
+private repo it can't reach, a DB URL, an API key), the agent is instructed to **stop and name the
+exact env var** instead of failing or faking. You then call `resume` with `secrets`, injected as env
+for **that step only** — never stored, gone on teardown:
 
 ```jsonc
 resume({
@@ -130,8 +136,9 @@ That one script: verifies `msb` on the VPS, creates + authorizes a dedicated SSH
 private key into `deploy/` (gitignored), scaffolds `.env` with a generated `MCP_HTTP_TOKEN` and
 the container→host SSH settings, and builds. Then:
 
-1. Edit `.env`: `ASB_DOMAIN`, `ANTHROPIC_BASE_URL`/`ANTHROPIC_MODEL` (your proxy), `GH_TOKEN`,
-   `GIT_AUTHOR_*`.
+1. Edit `.env`: `ASB_DOMAIN`, `ANTHROPIC_BASE_URL`/`ANTHROPIC_MODEL` (your proxy), and optionally
+   `NPM_TOKEN`. No `GH_TOKEN`/`GIT_AUTHOR_*` — GitHub access is reactive and resolved per repo from
+   the login-keyed store (`delegate` asks for a token on first use).
 2. Point DNS `ASB_DOMAIN` → your VPS.
 3. Deploy: a Dokploy Compose app from this repo (path `./compose.yaml`), or on the VPS
    `docker compose up -d --build`.
