@@ -274,3 +274,24 @@ resume({ session, message: "use it", secrets: { "GITHUB_TOKEN": "…", "DB_URL":
 ```
 Secrets inject as `-e KEY=VALUE` on that exec only (same path as `GH_TOKEN`), shell-quoted over
 SSH, never stored — gone on the next exec / teardown. Pure `secretEnvFlags()` is unit-tested.
+
+### Async delegate/resume (fixes the MCP response timeout)
+`delegate` and `resume` **launch the agent detached and return immediately** — they no longer wait
+for the (possibly long) agent run, which used to overrun the MCP response window and lose the
+session id. The run writes `/workspace/.agent.running` while in flight and `/workspace/.agent.done`
+(holding the exit code) when finished; output streams to `/workspace/.agent.log`. Watch it:
+```jsonc
+status({ session })   // -> "run:running" | "run:done exit=0" | "run:idle" + last ~60 log lines
+```
+
+### Persistent multi-account GitHub token store
+Keyed by **owner/org**, stored on the VPS at `~/.agent-sandbox/gh-tokens.json` (chmod 600).
+```jsonc
+gh_token_add({ token: "ghp_…", owner: "atom-insurance" })  // owner optional; else derived login
+```
+- On delegate, each repo's owner resolves to its stored token (else the default `GH_TOKEN`); used to
+  clone private repos AND inside the box.
+- Multi-owner tasks: per-owner `~/.git-credentials` entries (`credential.useHttpPath true`) so each
+  repo pushes with the right token; the primary owner's token drives the `gh` CLI.
+- A GitHub token supplied via `resume(secrets)` is auto-captured into the store (keyed by the box's
+  repo owners) so it's automatic next time. Pure store helpers are unit-tested.

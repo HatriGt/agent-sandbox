@@ -42,6 +42,8 @@ export interface HandlerDeps {
   teardown(cfg: Config, session: string): Promise<void>;
   /** Warm pool status line. */
   poolStatus(cfg: Config): Promise<string>;
+  /** Persist a GitHub token in the store, keyed by owner (auto-derives the login). Returns a summary. */
+  addGhToken(cfg: Config, token: string, owner?: string): Promise<string>;
 }
 
 /** Minimal shape of the MCP server's `.tool()` we rely on (keeps this file transport-agnostic). */
@@ -133,7 +135,8 @@ export function registerTools(server: ToolRegistrar, cfg: Config, deps: HandlerD
           ? `\nrepos: ${v.plan.repos.map((x) => `${x.repo} -> /workspace/${x.name}`).join(", ")}`
           : "";
       return text(
-        `Delegated. session=${r.box}${r.warm ? " (warm)" : ""}${repoLine}\n\n--- agent output ---\n${r.output}`
+        `Delegated. session=${r.box}${r.warm ? " (warm)" : ""}${repoLine}\n\n${r.output}\n\n` +
+          `Next: status({session:"${r.box}"}) to watch progress; resume({session:"${r.box}",message:"..."}) to follow up.`
       );
     }
   );
@@ -171,7 +174,7 @@ export function registerTools(server: ToolRegistrar, cfg: Config, deps: HandlerD
       secrets?: Record<string, string>;
     }) => {
       const out = await deps.resume(cfg, session, message, secrets);
-      return text(`Resumed session=${session}\n\n--- agent output ---\n${out}`);
+      return text(`Resumed session=${session}\n\n${out}`);
     }
   );
 
@@ -190,5 +193,23 @@ export function registerTools(server: ToolRegistrar, cfg: Config, deps: HandlerD
     "Show the warm pool status: how many pre-booted boxes are available vs the target.",
     {},
     async () => text(await deps.poolStatus(cfg))
+  );
+
+  server.tool(
+    "gh_token_add",
+    "Save a GitHub token permanently so private-repo delegations for its owner/org are automatic. " +
+      "The token identifies itself (GET /user), so you usually don't pass an owner — but for an ORG " +
+      "you don't belong to by login, pass owner to key it under that org. Stored on the VPS (chmod 600).",
+    {
+      token: z.string().describe("A GitHub PAT (classic or fine-grained) with access to the repos."),
+      owner: z
+        .string()
+        .optional()
+        .describe(
+          "Owner/org to key this token under (e.g. 'atom-insurance'). Omit to use the token's own login."
+        ),
+    },
+    async ({ token, owner }: { token: string; owner?: string }) =>
+      text(await deps.addGhToken(cfg, token, owner))
   );
 }

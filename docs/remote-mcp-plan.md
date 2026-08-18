@@ -52,7 +52,11 @@ Rules:
 - Missing → return a short, plain-text question listing exactly what's needed. No error, no crash.
 - The client (you) re-calls `delegate` with the value. Stateless — no half-open session to track.
 
-## delegate tool (current shape)
+## delegate tool (current shape) — ASYNC
+`delegate` stages the repo(s), acquires a box, then **launches the agent detached** and returns the
+session id right away. It does NOT wait for the agent to finish (that used to overrun the MCP
+response timeout and lose the session id). Watch progress with `status`.
+
 | Arg | Required? | Note |
 |---|---|---|
 | `task` | yes | natural-language task (defines the goal — analysis/fix/PR/tests/anything) |
@@ -65,16 +69,42 @@ Rules:
 *One of `repo` or `repos` required. Local with neither falls back to `WORKSPACE_DIR`
 (`${workspaceFolder}`). Missing `repo`/`task` → returns a plain-text question, not an error.
 
-## resume tool (on-demand secrets)
+## status tool — run state
+`status(session)` returns the box state plus an in-box run marker: `run:running`,
+`run:done exit=<code>`, or `run:idle`, followed by the last ~60 lines of `/workspace/.agent.log`.
+The markers are sentinel files the detached run writes (`.agent.running` while in flight,
+`.agent.done` holding the exit code when finished).
+
+## resume tool (on-demand secrets) — ASYNC
+Continues the in-box Claude session detached (same async model as delegate); poll `status`.
+
 | Arg | Required? | Note |
 |---|---|---|
 | `session` | yes | box id from delegate |
 | `message` | yes | follow-up / answer to the agent |
-| `secrets` | no | `{KEY:val}` injected as env for **this step only** — ephemeral, never stored |
+| `secrets` | no | `{KEY:val}` injected as env for **this step only** — ephemeral for THIS run |
 
 Ask-then-resume: the standing system prompt tells the agent to STOP and name the exact env var it
 needs (private-repo token, DB URL, API key) instead of failing/faking — and never print secret
-values. You re-call `resume` with `secrets`. Gone on teardown.
+values. You re-call `resume` with `secrets`. A **GitHub token** passed in `secrets` is additionally
+**captured permanently** into the token store (keyed by the box's repo owners), so subsequent
+delegations to those owners are automatic — the injection into THIS run is still ephemeral.
+
+## gh_token_add tool + persistent GitHub token store
+Multi-account GitHub auth without prompts. Store lives on the VPS at
+`~/.agent-sandbox/gh-tokens.json` (chmod 600), keyed by **owner/org**.
+
+| Arg | Required? | Note |
+|---|---|---|
+| `token` | yes | GitHub PAT (classic or fine-grained) |
+| `owner` | no | owner/org to key it under; omitted → the token's own login (GET /user) |
+
+- **Resolve on delegate:** for each repo, use the owner's stored token, else the default `GH_TOKEN`.
+  Used both to CLONE private repos (git source) and for the in-box agent.
+- **Multi-owner tasks:** the box gets one `~/.git-credentials` line per owner
+  (`credential.useHttpPath true`), so each repo pushes with its own owner's token; the primary
+  owner's token is exported as `GH_TOKEN` for the `gh` CLI (PR creation).
+- **Capture:** `gh_token_add`, or automatically from an ask-then-resume token.
 
 ## git-source (fresh clone, idempotent)
 - Always `git clone --depth 1 --branch <ref>` into a per-session staging dir. Never reuse/pull.

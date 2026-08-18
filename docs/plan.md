@@ -27,18 +27,33 @@ the MCP tool → the server runs the proven Phase 1 `msb` sequence.
 
 Tools (current shape):
 - `delegate({source?, repo?, repos?, task, ref?, allowDomains?})` → stages the code, injects creds,
-  runs Claude Code; returns a session id + agent output.
+  **launches Claude Code in the background**, and returns a session id **immediately** (async — no
+  waiting on the agent, so it never hits the MCP response timeout). Poll `status` for progress/result.
   - `source`: `local` (rsync working tree, default) or `git` (clone `owner/name` on the VPS).
   - `repos:[{repo,ref?}]` for a **cross-repo** task — each lands in `/workspace/<name>` in ONE box
     (single `repo` still works; a multi-root IDE window's folders are passed here by the agent).
   - Missing required info is **asked back**, not failed. Local with no repo falls back to
     `WORKSPACE_DIR` (`${workspaceFolder}` from the IDE).
-- `status(session)` → current state + recent logs
-- `resume(session, message, secrets?)` → answer a follow-up / continue (`msb exec` → `claude -c -p`).
-  `secrets:{KEY:val}` injects **ephemeral** env for that step only (ask-then-resume) — never stored.
+  - **GitHub tokens are resolved per repo-owner from a persistent store** (see below). Private repos
+    for a known owner just work; an unknown owner falls back to the default token, and the agent can
+    still ask-then-resume for one.
+- `status(session)` → run state (`running` / `done exit=N` / `idle`, from an in-box sentinel) + log tail.
+- `resume(session, message, secrets?)` → answer a follow-up / continue (async, like delegate).
+  `secrets:{KEY:val}` injects **ephemeral** env for that step only (ask-then-resume). A GitHub token
+  passed here is ALSO **remembered permanently** (keyed by the box's repo owners) so it's automatic
+  next time — while still being injected ephemerally for this step.
 - `teardown(session)` → `msb stop` + `msb rm`
 - `pool_status()` → warm-pool availability.
+- `gh_token_add({token, owner?})` → save a GitHub token permanently, keyed by owner/org. The token
+  identifies itself (GET /user → login), so `owner` is only needed for an org you don't match by login.
 - **Verify:** from Cursor, connected to the remote MCP, delegate a real task and get output back.
+
+Persistent GitHub token store (multi-account):
+- Lives on the VPS at `~/.agent-sandbox/gh-tokens.json` (chmod 600), keyed by **owner/org**.
+- Resolution: for each repo, use the owner's stored token, else the default `GH_TOKEN`.
+- Multi-owner tasks: the box gets per-owner `~/.git-credentials` entries (`credential.useHttpPath`),
+  so each repo pushes with its own owner's token; the primary owner's token drives the `gh` CLI.
+- Capture: `gh_token_add`, or automatically the first time you answer an ask-then-resume with a token.
 
 The task defines the goal — analysis, root-cause, fix, PR, tests, anything. The infra only places
 the repo(s) and hands over the task verbatim (no outcome is baked into the prompt).

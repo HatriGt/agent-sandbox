@@ -28,7 +28,7 @@ function textOf(res: any): string {
 test("registers the core tools", () => {
   const s = fakeServer();
   registerTools(s as any, cfg, {} as any);
-  for (const name of ["delegate", "status", "resume", "teardown", "pool_status"]) {
+  for (const name of ["delegate", "status", "resume", "teardown", "pool_status", "gh_token_add"]) {
     assert.ok(s.tools[name], `missing tool: ${name}`);
   }
 });
@@ -164,4 +164,37 @@ test("delegate: defaults source to local when omitted (Mac/stdio path)", async (
 
   await s.tools.delegate.handler({ repo: "/Users/me/proj", task: "t" });
   assert.equal(seen.source, "local");
+});
+
+test("gh_token_add: forwards token + owner and returns the summary", async () => {
+  const s = fakeServer();
+  let seen: any = null;
+  registerTools(s as any, cfg, {
+    addGhToken: async (_cfg: any, token: string, owner?: string) => {
+      seen = { token, owner };
+      return "Saved GitHub token for owner 'atom-insurance'.";
+    },
+  } as any);
+
+  const res = await s.tools.gh_token_add.handler({ token: "ghp_x", owner: "atom-insurance" });
+  assert.deepEqual(seen, { token: "ghp_x", owner: "atom-insurance" });
+  assert.match(textOf(res), /atom-insurance/);
+});
+
+test("delegate: async launch note + status hint in the response", async () => {
+  const s = fakeServer();
+  registerTools(s as any, cfg, {
+    countBoxes: async () => 0,
+    runDelegation: async () => ({
+      box: "box-async",
+      warm: false,
+      output: "Task launched in the background. Poll with status(session) for progress and result.",
+    }),
+  } as any);
+
+  const res = await s.tools.delegate.handler({ source: "git", repo: "o/n", task: "t" });
+  const out = textOf(res);
+  assert.match(out, /box-async/);
+  assert.match(out, /background/);
+  assert.match(out, /status\(/);
 });

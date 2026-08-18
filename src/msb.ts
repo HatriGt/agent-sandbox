@@ -238,7 +238,12 @@ const AGENT_SYS_PROMPT =
   "Never print, echo, or log secret values (tokens, passwords, connection strings); refer to them " +
   "only by their env var name.";
 
-function agentEnvFlags(cfg: Config, task: string, repos?: RepoLayout[]): string[] {
+function agentEnvFlags(
+  cfg: Config,
+  task: string,
+  repos?: RepoLayout[],
+  ghTokenOverride?: string
+): string[] {
   // The standing policy plus (when known) the goal-neutral repo-layout hint, so the agent knows
   // where each repo lives (/workspace/<name>). The TASK decides the goal. Passed as env, never argv.
   const sysPrompt = repos?.length
@@ -256,7 +261,11 @@ function agentEnvFlags(cfg: Config, task: string, repos?: RepoLayout[]): string[
     "-e",
     `AGENT_SYS_PROMPT=${sysPrompt}`,
   ];
-  if (cfg.ghToken) flags.push("-e", `GH_TOKEN=${cfg.ghToken}`, "-e", `GITHUB_TOKEN=${cfg.ghToken}`);
+  // The GH_TOKEN env drives the `gh` CLI (PR creation) for the PRIMARY repo's owner; per-owner
+  // git pushes are handled by the ~/.git-credentials entries (gitCredentialsScript). An override
+  // (resolved from the token store for the primary repo) wins over the default cfg.ghToken.
+  const ghToken = ghTokenOverride ?? cfg.ghToken;
+  if (ghToken) flags.push("-e", `GH_TOKEN=${ghToken}`, "-e", `GITHUB_TOKEN=${ghToken}`);
   if (cfg.npmToken) flags.push("-e", `NPM_TOKEN=${cfg.npmToken}`);
   return flags;
 }
@@ -265,6 +274,29 @@ function agentEnvFlags(cfg: Config, task: string, repos?: RepoLayout[]): string[
 function agentWorkdir(repos?: RepoLayout[]): string {
   if (repos && repos.length === 1) return `/workspace/${repos[0].name}`;
   return "/workspace";
+}
+
+/**
+ * Shell to write per-OWNER git credentials inside the box so a multi-repo/multi-owner task
+ * authenticates each repo with the right token. GitHub shares one host across all owners, so we
+ * enable `credential.useHttpPath` and write one `~/.git-credentials` line per owner path — git then
+ * longest-prefix matches `github.com/<owner>/...` to the correct token. Returns "" when no tokens.
+ */
+function gitCredentialsScript(ownerTokens: Record<string, string>): string {
+  const owners = Object.keys(ownerTokens).filter((o) => o && ownerTokens[o]);
+  if (owners.length === 0) return "";
+  const lines = [
+    "git config --global credential.helper store",
+    "git config --global credential.useHttpPath true",
+    // Recreate the file fresh each run so a rotated/removed token doesn't linger.
+    'GC="$HOME/.git-credentials"; : > "$GC"; chmod 600 "$GC"',
+  ];
+  for (const owner of owners) {
+    const line = `https://x-access-token:${ownerTokens[owner]}@github.com/${owner}`;
+    // printf keeps the token off the process list better than echo in ps; still env-free here.
+    lines.push(`printf '%s\\n' ${shellQuote(line)} >> "$GC"`);
+  }
+  return lines.join(" && ");
 }
 
 /**
@@ -306,24 +338,76 @@ function bootstrapScript(cfg: Config): string {
 // box is an isolated microVM with a curated egress allowlist. --allowedTools takes multiple
 // space-separated values, so it goes LAST in the command.
 const ALLOWED_TOOLS = "Bash Edit Write Read Glob Grep";
-// --append-system-prompt carries the standing no-attribution policy + repo-layout hint (via env,
-// so it's data). Log always at /workspace/.agent.log (stable path for `status`, above per-repo dirs).
-function runSh(workdir: string): string {
-  return `cd ${workdir} && claude -p "$AGENT_TASK" --append-system-prompt "$AGENT_SYS_PROMPT" --allowedTools ${ALLOWED_TOOLS} 2>&1 | tee -a /workspace/.agent.log`;
-}
-function resumeSh(workdir: string): string {
-  return `cd ${workdir} && claude -c -p "$AGENT_TASK" --append-system-prompt "$AGENT_SYS_PROMPT" --allowedTools ${ALLOWED_TOOLS} 2>&1 | tee -a /workspace/.agent.log`;
+
+// Stable in-box paths (above per-repo dirs so `status` finds them regardless of repo layout).
+const AGENT_LOG = "/workspace/.agent.log";
+const DONE_MARK = "/workspace/.agent.done"; // written with the exit code when the run finishes
+const RUN_MARK = "/workspace/.agent.running"; // present while a run is in flight
+
+/**
+ * Build the background agent command. The agent runs headless and DETACHED so `msb exec` returns
+ * immediately (fixing the MCP response timeout): delegate returns the session id in seconds while
+ * the task keeps running in the box. Completion is observable via the .agent.done sentinel (holds
+ * the exit code); `status` reads it. `resume=true` continues the existing Claude session (-c).
+ */
+function agentSh(workdir: string, resume: boolean): string {
+  const claude = resume
+    ? `claude -c -p "$AGENT_TASK"`
+    : `claude -p "$AGENT_TASK"`;
+  // Run the whole pipeline in a detached subshell; record start/finish sentinels.
+  const inner =
+    `cd ${workdir} && rm -f ${DONE_MARK} && touch ${RUN_MARK} && ` +
+    `{ ${claude} --append-system-prompt "$AGENT_SYS_PROMPT" --allowedTools ${ALLOWED_TOOLS} ` +
+    `>> ${AGENT_LOG} 2>&1; echo $? > ${DONE_MARK}; rm -f ${RUN_MARK}; }`;
+  // nohup + & so the child outlives the exec shell; redirect all fds so exec doesn't block on them.
+  return `nohup sh -c ${shellQuote(inner)} >/dev/null 2>&1 < /dev/null & echo started`;
 }
 
 /**
- * Bootstrap creds/tools, then run the task headless in the box.
- * Creds are injected here (per-exec) so they only exist for the task duration.
+ * Per-repo GitHub credentials resolved from the token store, threaded into a run.
+ *  - ownerTokens: owner -> token, written as per-owner ~/.git-credentials entries (multi-owner push).
+ *  - primaryToken: token for the primary repo's owner, exported as GH_TOKEN for the `gh` CLI.
  */
-export async function runAgentTask(cfg: Config, box: string, task: string, repos?: RepoLayout[]) {
-  const env = agentEnvFlags(cfg, task, repos);
+export interface AgentCreds {
+  ownerTokens?: Record<string, string>;
+  primaryToken?: string;
+}
+
+/** Write per-owner git credentials in the box (no-op when none). Runs after bootstrap. */
+async function applyGitCredentials(cfg: Config, box: string, creds?: AgentCreds): Promise<void> {
+  const script = gitCredentialsScript(creds?.ownerTokens ?? {});
+  if (script) await exec(cfg, box, script);
+}
+
+/**
+ * Bootstrap creds/tools, then LAUNCH the task headless-and-detached in the box.
+ * Returns as soon as the agent is kicked off (not when it finishes) so the caller can return a
+ * session id without hitting the MCP timeout. Creds are injected per-exec (task-scoped).
+ */
+export async function runAgentTask(
+  cfg: Config,
+  box: string,
+  task: string,
+  repos?: RepoLayout[],
+  creds?: AgentCreds
+) {
+  const env = agentEnvFlags(cfg, task, repos, creds?.primaryToken);
   const workdir = agentWorkdir(repos);
   await msb(cfg, ["exec", box, ...env, "--", "sh", "-lc", bootstrapScript(cfg)]);
-  return msb(cfg, ["exec", box, ...env, "--", "sh", "-lc", runSh(workdir)]);
+  await applyGitCredentials(cfg, box, creds);
+  return msb(cfg, ["exec", box, ...env, "--", "sh", "-lc", agentSh(workdir, false)]);
+}
+
+/** Read run state from the sentinels: running | done(code) | idle, plus the log tail. */
+export async function agentProgress(cfg: Config, box: string): Promise<string> {
+  const r = await exec(
+    cfg,
+    box,
+    `if [ -f ${RUN_MARK} ]; then echo "run:running"; ` +
+      `elif [ -f ${DONE_MARK} ]; then echo "run:done exit=$(cat ${DONE_MARK} 2>/dev/null)"; ` +
+      `else echo "run:idle"; fi; echo "---LOG---"; tail -n 60 ${AGENT_LOG} 2>/dev/null || true`
+  );
+  return r.stdout.trim();
 }
 
 /** Continue an existing Claude Code session with a follow-up (runbook note: `claude -c -p`). */
@@ -332,11 +416,13 @@ export async function resumeAgentTask(
   box: string,
   message: string,
   repos?: RepoLayout[],
-  secrets?: Record<string, string>
+  secrets?: Record<string, string>,
+  creds?: AgentCreds
 ) {
   // Ephemeral secrets are appended as extra -e flags on THIS exec only (not stored).
-  const env = [...agentEnvFlags(cfg, message, repos), ...secretEnvFlags(secrets)];
-  return msb(cfg, ["exec", box, ...env, "--", "sh", "-lc", resumeSh(agentWorkdir(repos))]);
+  const env = [...agentEnvFlags(cfg, message, repos, creds?.primaryToken), ...secretEnvFlags(secrets)];
+  await applyGitCredentials(cfg, box, creds);
+  return msb(cfg, ["exec", box, ...env, "--", "sh", "-lc", agentSh(agentWorkdir(repos), true)]);
 }
 
 /** Raw `msb status` for a box (non-fatal if the box is gone). */
@@ -356,9 +442,9 @@ export async function bootstrap(cfg: Config, box: string, task = "noop") {
   return msb(cfg, ["exec", box, ...agentEnvFlags(cfg, task), "--", "sh", "-lc", bootstrapScript(cfg)]);
 }
 
-/** Run only the agent task (assumes bootstrap already ran); separated for benchmarks. */
+/** Launch only the agent task (assumes bootstrap already ran); separated for benchmarks. */
 export async function runAgentOnly(cfg: Config, box: string, task: string) {
-  return msb(cfg, ["exec", box, ...agentEnvFlags(cfg, task), "--", "sh", "-lc", runSh("/workspace")]);
+  return msb(cfg, ["exec", box, ...agentEnvFlags(cfg, task), "--", "sh", "-lc", agentSh("/workspace", false)]);
 }
 
 /** Boot a plain box (no repo copy) from the base image — used to bake a warm-start snapshot. */
