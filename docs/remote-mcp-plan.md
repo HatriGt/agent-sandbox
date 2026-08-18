@@ -111,7 +111,10 @@ Reactive, multi-account GitHub auth. Store lives on the VPS at `~/.agent-sandbox
    login, then used. Invalid token → clear question to try again.
 
 Used both to CLONE private repos and inside the box (per-owner `~/.git-credentials` with
-`credential.useHttpPath true`; primary repo's token → `GH_TOKEN` for the `gh` CLI).
+`credential.useHttpPath true`; first repo's token → `GH_TOKEN` for the `gh` CLI). There is **no
+default account**: commit identity is set **per repo** (`git -C /workspace/<name> config user.*` =
+the login of the account with access to that repo), so a repo is always authored by an account that
+can push it. Resolution runs for **local too** (owner read from the working tree's `origin`).
 
 ### gh_token_add tool (optional pre-registration)
 | Arg | Required? | Note |

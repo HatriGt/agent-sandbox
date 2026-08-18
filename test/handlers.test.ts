@@ -78,6 +78,7 @@ test("delegate: local with no repo falls back to cfg.workspaceDir (IDE-provided)
   const cfgWs = { maxBoxes: 5, workspaceDir: "/Users/me/openproj" } as unknown as Config;
   registerTools(s as any, cfgWs, {
     countBoxes: async () => 0,
+    resolveGitAccess: okAccess,
     runDelegation: async (_cfg: any, plan: any) => {
       seen = plan;
       return { box: "b", warm: false, output: "" };
@@ -161,6 +162,7 @@ test("delegate: defaults source to local when omitted (Mac/stdio path)", async (
   let seen: any = null;
   registerTools(s as any, cfg, {
     countBoxes: async () => 0,
+    resolveGitAccess: okAccess,
     runDelegation: async (_cfg: any, plan: any) => {
       seen = plan;
       return { box: "b", warm: false, output: "" };
@@ -211,7 +213,13 @@ test("delegate git: forwards githubToken/githubAccount + resolved creds to runDe
     countBoxes: async () => 0,
     resolveGitAccess: async (_cfg: any, _plan: any, opts: any) => {
       seenOpts = opts;
-      return { ok: true, ownerTokens: { o: "tok-o" }, primaryToken: "tok-o", primaryLogin: "alice" };
+      return {
+        ok: true,
+        ownerTokens: { o: "tok-o" },
+        ownerLogins: { o: "alice" },
+        primaryToken: "tok-o",
+        primaryLogin: "alice",
+      };
     },
     runDelegation: async (_cfg: any, _plan: any, _dom: any, creds: any) => {
       seenCreds = creds;
@@ -227,29 +235,54 @@ test("delegate git: forwards githubToken/githubAccount + resolved creds to runDe
     githubAccount: "alice",
   });
   assert.deepEqual(seenOpts, { githubToken: "ghp_x", githubAccount: "alice" });
-  assert.deepEqual(seenCreds, { ownerTokens: { o: "tok-o" }, primaryToken: "tok-o", primaryLogin: "alice" });
+  assert.deepEqual(seenCreds, {
+    ownerTokens: { o: "tok-o" },
+    ownerLogins: { o: "alice" },
+    primaryToken: "tok-o",
+    primaryLogin: "alice",
+  });
 });
 
-test("delegate local: skips resolveGitAccess entirely", async () => {
+test("delegate local: resolves access too (for per-repo identity/token)", async () => {
   const s = fakeServer();
   let accessCalled = false;
+  let seenCreds: any = "unset";
   registerTools(s as any, cfg, {
     countBoxes: async () => 0,
     resolveGitAccess: async () => {
       accessCalled = true;
-      return { ok: true, ownerTokens: {} };
+      return { ok: true, ownerTokens: { o: "t" }, ownerLogins: { o: "alice" }, primaryLogin: "alice" };
     },
-    runDelegation: async () => ({
-      box: "box-async",
-      warm: false,
-      output: "Task launched in the background. Poll with status(session) for progress and result.",
-    }),
+    runDelegation: async (_cfg: any, _plan: any, _dom: any, creds: any) => {
+      seenCreds = creds;
+      return {
+        box: "box-async",
+        warm: false,
+        output: "Task launched in the background. Poll with status(session) for progress and result.",
+      };
+    },
   } as any);
 
   const res = await s.tools.delegate.handler({ source: "local", repo: "/Users/me/p", task: "t" });
-  assert.equal(accessCalled, false, "local source must not need GitHub access resolution");
-  const out = textOf(res);
-  assert.match(out, /box-async/);
-  assert.match(out, /background/);
-  assert.match(out, /status\(/);
+  assert.equal(accessCalled, true, "local source now resolves access for identity + token");
+  assert.equal(seenCreds.primaryLogin, "alice", "resolved creds flow to runDelegation for local");
+  assert.match(textOf(res), /box-async/);
+});
+
+test("delegate local: unresolved access is NON-fatal (still delegates, no creds)", async () => {
+  const s = fakeServer();
+  let seenCreds: any = "unset";
+  registerTools(s as any, cfg, {
+    countBoxes: async () => 0,
+    resolveGitAccess: async () => ({ ok: false, question: "No stored GitHub account can access o/n." }),
+    runDelegation: async (_cfg: any, _plan: any, _dom: any, creds: any) => {
+      seenCreds = creds;
+      return { box: "box-local", warm: false, output: "launched" };
+    },
+  } as any);
+
+  const res = await s.tools.delegate.handler({ source: "local", repo: "/Users/me/p", task: "t" });
+  // local: a need-token/choose outcome does NOT block; delegation proceeds with no injected creds.
+  assert.equal(seenCreds, undefined);
+  assert.match(textOf(res), /box-local/);
 });

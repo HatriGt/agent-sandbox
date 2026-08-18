@@ -48,11 +48,12 @@ export interface Config {
   /** When true, allow the box to reach ANY domain (open egress) instead of the allowlist. */
   egressAllowAll: boolean;
 
-  /** GitHub token for git push + `gh` (PR creation) inside the box. */
+  /**
+   * Per-clone GitHub token, set explicitly by runDelegation from the access-resolved account for
+   * each repo. There is intentionally NO default/global token from the environment: access is
+   * resolved per repo from the login-keyed store (see gh-token-store.ts).
+   */
   ghToken?: string;
-  /** git identity used for in-box commits. */
-  gitAuthorName?: string;
-  gitAuthorEmail?: string;
   /** npm credential injected into the box (optional). */
   npmToken?: string;
 
@@ -136,9 +137,8 @@ export function loadConfig(): Config {
     egressDomains,
     egressAllowAll: parseBool(process.env.EGRESS_ALLOW_ALL),
 
-    ghToken: process.env.GH_TOKEN || undefined,
-    gitAuthorName: process.env.GIT_AUTHOR_NAME || undefined,
-    gitAuthorEmail: process.env.GIT_AUTHOR_EMAIL || undefined,
+    // No default GH token from the env: per-repo access is resolved from the login-keyed store.
+    ghToken: undefined,
     npmToken: process.env.NPM_TOKEN || undefined,
 
     httpPort: Number(process.env.MCP_HTTP_PORT ?? "8787"),

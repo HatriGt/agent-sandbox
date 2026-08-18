@@ -139,12 +139,25 @@ export type GitAccessResolution =
   | {
       ok: true;
       ownerTokens: Record<string, string>;
+      /**
+       * owner -> GitHub login of the account with access to that owner's repo. Drives the PER-REPO
+       * git commit identity in the box: each repo is authored by the account that can actually push
+       * it. There is deliberately NO default/global identity.
+       */
+      ownerLogins: Record<string, string>;
       primaryToken?: string;
-      /** GitHub login of the account behind primaryToken — drives in-box git identity + gh. */
+      /** GitHub login of the account behind primaryToken — drives the `gh` CLI default (GH_TOKEN). */
       primaryLogin?: string;
       question?: undefined;
     }
-  | { ok: false; question: string; ownerTokens?: undefined; primaryToken?: undefined; primaryLogin?: undefined };
+  | {
+      ok: false;
+      question: string;
+      ownerTokens?: undefined;
+      ownerLogins?: undefined;
+      primaryToken?: undefined;
+      primaryLogin?: undefined;
+    };
 
 /** Turn a candidate list into a decision: 1 -> use, many -> choose (ask login), 0 -> need a token. */
 export function decideAccess(candidates: Account[], repo: string): AccessDecision {

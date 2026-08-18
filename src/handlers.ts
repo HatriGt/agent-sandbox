@@ -13,6 +13,7 @@ import { z } from "zod";
 import type { Config } from "./config.js";
 import { validateDelegateInput, type DelegateSource, type DelegatePlan } from "./delegate-input.js";
 import type { GitAccessResolution } from "./gh-token-store.js";
+import type { AgentCreds } from "./msb.js";
 
 export interface DelegationResult {
   box: string;
@@ -25,9 +26,10 @@ export interface HandlerDeps {
   /** Count live boxes for the concurrency cap. */
   countBoxes(cfg: Config): Promise<number>;
   /**
-   * Resolve GitHub access for a git-source plan: match each repo to a stored account by ACCESS,
-   * probe/store a freshly provided token, or return a question (need token / choose login).
-   * Local-source plans need no GitHub access to clone, so the handler skips this for them.
+   * Resolve GitHub access per repo by ACCESS from the login-keyed store (both sources). Returns the
+   * owner->token, owner->login maps + a primary. For git a missing/ambiguous account is a question
+   * (need token / choose login); for local it's best-effort (owner derived from the origin remote,
+   * unresolved repos just get no injected identity/token).
    */
   resolveGitAccess(
     cfg: Config,
@@ -39,7 +41,7 @@ export interface HandlerDeps {
     cfg: Config,
     plan: DelegatePlan,
     allowDomains?: string[],
-    creds?: { ownerTokens?: Record<string, string>; primaryToken?: string; primaryLogin?: string }
+    creds?: AgentCreds
   ): Promise<DelegationResult>;
   /** msb status + recent log. */
   status(cfg: Config, session: string): Promise<string>;
@@ -152,20 +154,27 @@ export function registerTools(server: ToolRegistrar, cfg: Config, deps: HandlerD
       });
       if (!v.ok) return text(v.question);
 
-      // Resolve GitHub access for git-source repos: match to a stored account by ACCESS, probe/store
-      // a freshly provided token, or return a question (need a token / choose a login). Local source
-      // ships the working tree, so no clone auth is needed — skip resolution there.
-      let creds:
-        | { ownerTokens?: Record<string, string>; primaryToken?: string; primaryLogin?: string }
-        | undefined;
-      if (v.plan.source === "git") {
+      // Resolve GitHub access by ACCESS from the login-keyed store (no default account anywhere):
+      // pick, per repo, the account whose token can actually reach it. This drives the CLONE (git),
+      // the per-repo push token, the per-repo commit IDENTITY, and the `gh` CLI. Runs for BOTH
+      // sources — for local we derive each repo's owner from its origin remote.
+      //  - git:   a missing/ambiguous account is a hard question (we can't clone a private repo blind).
+      //  - local: best-effort — the working tree is already shipped, so we set identity/token for what
+      //           resolves and DON'T block read-only tasks when nothing matches (agent can ask later).
+      let creds: AgentCreds | undefined;
+      {
         const res = await deps.resolveGitAccess(cfg, v.plan, { githubToken, githubAccount });
-        if (!res.ok) return text(res.question);
-        creds = {
-          ownerTokens: res.ownerTokens,
-          primaryToken: res.primaryToken,
-          primaryLogin: res.primaryLogin,
-        };
+        if (!res.ok) {
+          if (v.plan.source === "git") return text(res.question);
+          // local: unresolved access is not fatal — proceed with no injected identity/token.
+        } else {
+          creds = {
+            ownerTokens: res.ownerTokens,
+            ownerLogins: res.ownerLogins,
+            primaryToken: res.primaryToken,
+            primaryLogin: res.primaryLogin,
+          };
+        }
       }
 
       const live = await deps.countBoxes(cfg);

@@ -35,6 +35,7 @@ import {
   type GitAccessResolution,
 } from "./gh-token-store.js";
 import { probeToken, canAccessRepo } from "./gh-probe.js";
+import { localRepoOwnerName } from "./git-remote.js";
 
 /** GitHub owners this box works with, read from each repo's `origin` remote under /workspace. */
 async function boxRepoOwners(cfg: Config, box: string): Promise<string[]> {
@@ -83,6 +84,7 @@ async function resolveGitAccessImpl(
 ): Promise<GitAccessResolution> {
   let store = await loadStore(cfg);
   const ownerTokens: Record<string, string> = {};
+  const ownerLogins: Record<string, string> = {};
   let primaryToken: string | undefined;
   let primaryLogin: string | undefined;
 
@@ -102,9 +104,15 @@ async function resolveGitAccessImpl(
   }
 
   for (let i = 0; i < plan.repos.length; i++) {
-    const repo = plan.repos[i].repo;
+    // For git source the delegate arg IS owner/name. For local it's a filesystem path, so derive the
+    // GitHub id from the working tree's origin remote — that's how we pick the access-correct account
+    // (identity + push token) for a locally-shipped repo too.
+    const repo =
+      plan.source === "git"
+        ? plan.repos[i].repo
+        : (await localRepoOwnerName(plan.repos[i].repo)) ?? "";
     const owner = ownerOf(repo);
-    if (!owner) continue; // non-GitHub id (shouldn't happen for git source)
+    if (!owner) continue; // no GitHub origin (e.g. a local-only repo) — nothing to resolve/identity to set
 
     const confirmed = await confirmedAccountsFor(cfg, store, repo);
 
@@ -112,6 +120,8 @@ async function resolveGitAccessImpl(
     if (opts.githubAccount?.trim()) {
       const chosen = confirmed.find((a) => a.login === opts.githubAccount!.trim());
       if (!chosen) {
+        // For local this is non-fatal (working tree already shipped); for git it's a hard stop.
+        if (plan.source === "local") continue;
         return {
           ok: false,
           question:
@@ -120,6 +130,7 @@ async function resolveGitAccessImpl(
         };
       }
       ownerTokens[owner] = chosen.token;
+      ownerLogins[owner] = chosen.login;
       if (i === 0) {
         primaryToken = chosen.token;
         primaryLogin = chosen.login;
@@ -132,20 +143,25 @@ async function resolveGitAccessImpl(
     const decision = decideAccess(confirmed, repo);
     if (decision.kind === "use") {
       ownerTokens[owner] = decision.account!.token;
+      ownerLogins[owner] = decision.account!.login;
       if (i === 0) {
         primaryToken = decision.account!.token;
         primaryLogin = decision.account!.login;
       }
       store = upsertAccount(store, { ...decision.account!, verifiedRepos: [repo] });
+    } else if (plan.source === "local") {
+      // choose/need_token on local: don't block. Ship the tree with no injected identity for this
+      // repo; the agent will ask for a token if a write actually needs one.
+      continue;
     } else {
-      // choose or need_token — surface the question and stop.
+      // git: choose or need_token — surface the question and stop.
       return { ok: false, question: decision.message! };
     }
   }
 
   // Persist any newly-recorded verifiedRepos.
   await saveStore(cfg, store);
-  return { ok: true, ownerTokens, primaryToken, primaryLogin };
+  return { ok: true, ownerTokens, ownerLogins, primaryToken, primaryLogin };
 }
 
 export const deps: HandlerDeps = {
@@ -166,22 +182,34 @@ export const deps: HandlerDeps = {
 
     const id = newSessionId();
 
-    // `creds` (owner->token, primary) was resolved by the handler via resolveGitAccess for git
-    // source. Used to CLONE private repos and for the in-box per-owner git credentials + `gh` CLI.
+    // `creds` (owner->token/login) was resolved by the handler via resolveGitAccess (both sources).
+    // Used to CLONE private repos and for the in-box per-owner git credentials, per-repo identity,
+    // and `gh` CLI. No default account: if an owner didn't resolve, there's simply no token for it.
 
     // 1. Stage every repo into <sessionRoot>/<name> — rsync (local) or fresh git clone (remote).
     //    The whole session root is then copied into /workspace, so each repo -> /workspace/<name>.
+    //    Also build name->owner so identity can be set per-repo dir in the box.
     const sessionRoot = stagingPathFor(runCfg, id);
+    const repoOwners: Record<string, string> = {};
     for (const r of plan.repos) {
       const dest = repoStagingPath(runCfg, id, r.name);
       if (plan.source === "git") {
-        // Clone with the owner's resolved token when we have one (private repos), else cfg default.
-        const token = creds?.ownerTokens?.[ownerOf(r.repo) ?? ""] ?? runCfg.ghToken;
+        const owner = ownerOf(r.repo);
+        if (owner) repoOwners[r.name] = owner;
+        // Clone with the owner's access-resolved token (private repos). No default fallback: a repo
+        // that reached here without a token means resolution deemed it public/accessible.
+        const token = owner ? creds?.ownerTokens?.[owner] : undefined;
         await cloneRepoOnVps({ ...runCfg, ghToken: token }, r.repo, r.ref, id, dest);
       } else {
         await syncTreeToVps(runCfg, r.repo, id, dest);
+        // For local, derive the owner from the working tree's origin remote (best-effort).
+        const on = await localRepoOwnerName(r.repo);
+        const owner = on ? ownerOf(on) : undefined;
+        if (owner) repoOwners[r.name] = owner;
       }
     }
+    // Thread the name->owner map so applyGitCredentials can set per-repo identity.
+    const runCreds: AgentCreds | undefined = creds ? { ...creds, repoOwners } : undefined;
 
     // 2. A restricted-egress delegation must not reuse an open-egress pooled box.
     const eligible = poolEligible(runCfg, !!allowDomains?.length);
@@ -193,7 +221,7 @@ export const deps: HandlerDeps = {
 
     // Launch the agent DETACHED and return now — the run keeps going in the box. The caller polls
     // status(session) for progress/result. This is what fixes the MCP response timeout.
-    await runAgentTask(runCfg, box, plan.task, plan.repos, creds);
+    await runAgentTask(runCfg, box, plan.task, plan.repos, runCreds);
     return {
       box,
       warm,

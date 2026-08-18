@@ -133,9 +133,10 @@ Hardened credentials/egress and added polish. Verified the full dev workflow end
   leaked token in the box is useless off-list.
 - **Memory cap** `-m` (default 1G) and **concurrency cap** `MSB_MAX_BOXES` (delegate refuses
   past the limit, counted via `msb ls`).
-- **Credentials so the agent works like local Claude Code**: `GH_TOKEN` (+ `GITHUB_TOKEN`)
-  injected per-exec; bootstrap runs `gh auth setup-git`, sets git identity, wires npm auth.
-  Result: the in-box agent can fix → commit → push → open a PR.
+- **Credentials so the agent works like local Claude Code**: bootstrap installs `gh` + npm auth but
+  sets **no** default identity/token. The access-resolved account(s) are applied afterwards —
+  per-owner `~/.git-credentials`, per-repo `user.name/email`, and `GH_TOKEN` (first repo's owner).
+  Result: the in-box agent can fix → commit → push → open a PR as the account that actually has access.
 - **Warm-start snapshot**: `npm run bake` boots a bare box, installs claude+gh, and
   `msb snapshot create`s `agent-base`. Set `MSB_SNAPSHOT=agent-base` to skip the ~10s install.
 - **No AI attribution**: a standing `--append-system-prompt` policy forbids "Generated with
@@ -313,12 +314,20 @@ Keyed by **account login**, stored on the VPS at `~/.agent-sandbox/gh-tokens.jso
    `delegate({… , githubAccount:"<login>"})`.
 
 - Matching is by **access** (live `GET /repos/{owner}/{name}` per candidate), not owner-name.
+- **No default account anywhere.** The box has no fallback identity or token. `bootstrap` does NOT run
+  `gh auth setup-git` or set any `user.name/email`. Everything below is the access-resolved account(s)
+  for THIS task's repo(s); if a repo resolves to nothing, it gets no identity/token (the agent asks).
+- **Resolution runs for BOTH sources.** For `git` the arg is `owner/name`. For `local` the owner is
+  read from each working tree's `origin` remote, so a locally-shipped repo picks the same
+  access-correct account. Local is best-effort: an unresolved repo doesn't block a read-only task.
 - Multi-owner tasks: per-owner `~/.git-credentials` entries (`credential.useHttpPath true`) so each
-  repo pushes with the right token; the primary repo's token drives the `gh` CLI (`GH_TOKEN` = the
-  resolved token, so `gh pr create` uses the account that can actually see the repo).
-- **Commit identity** is set from the resolved token's login: `user.name = <login>`,
-  `user.email = <login>@users.noreply.github.com`. So commits/PRs are authored as the account whose
-  token has access — not the box's default identity.
+  repo pushes with the token that has access; the first repo's token drives the `gh` CLI
+  (`GH_TOKEN`), so `gh pr create` uses an account that can actually see the repo.
+- **Commit identity is PER REPO.** Each `/workspace/<name>` gets `git -C … config user.name/email`
+  from the login of the account with access to THAT repo (`<login>` + `<login>@users.noreply.github.com`).
+  A commit is therefore authored by the same account that can push it — fixing the bug where a commit
+  was authored by an account with no access while the PR used another. Mixed-owner multi-repo tasks
+  get the right author in each repo.
 - **GitHub Packages:** the box writes `//npm.pkg.github.com/:_authToken=<token>` to `~/.npmrc` so
   scoped `@owner/pkg` installs resolve. The token must have **`read:packages`** — otherwise `npm
   install` returns **E401** (seen with `@atom-insurance/deal-mgmt-core`). Grant `read:packages` when

@@ -273,11 +273,12 @@ function agentEnvFlags(
     "-e",
     `AGENT_SYS_PROMPT=${sysPrompt}`,
   ];
-  // The GH_TOKEN env drives the `gh` CLI (PR creation) for the PRIMARY repo's owner; per-owner
-  // git pushes are handled by the ~/.git-credentials entries (gitCredentialsScript). An override
-  // (resolved from the token store for the primary repo) wins over the default cfg.ghToken.
-  const ghToken = ghTokenOverride ?? cfg.ghToken;
-  if (ghToken) flags.push("-e", `GH_TOKEN=${ghToken}`, "-e", `GITHUB_TOKEN=${ghToken}`);
+  // GH_TOKEN drives the `gh` CLI; it's the access-resolved token for the FIRST repo's owner. Per-repo
+  // pushes use the ~/.git-credentials entries (per-owner). There is NO default cfg.ghToken fallback —
+  // if nothing resolved, `gh` gets no token and the agent must ask for one (ask-then-resume).
+  if (ghTokenOverride) {
+    flags.push("-e", `GH_TOKEN=${ghTokenOverride}`, "-e", `GITHUB_TOKEN=${ghTokenOverride}`);
+  }
   if (cfg.npmToken) flags.push("-e", `NPM_TOKEN=${cfg.npmToken}`);
   return flags;
 }
@@ -320,22 +321,12 @@ function bootstrapScript(cfg: Config): string {
   const lines = [
     "set -e",
     "command -v claude >/dev/null || npm i -g @anthropic-ai/claude-code",
+    // Install gh if missing (Debian/Ubuntu node image). We do NOT run `gh auth setup-git` or set any
+    // identity here: there is no default account. Git auth + commit identity are applied per-repo
+    // afterwards (applyGitCredentials) from the access-resolved account for each repo.
+    "command -v gh >/dev/null || (type apt-get >/dev/null 2>&1 && " +
+      "(apt-get update -qq && apt-get install -y -qq gh >/dev/null 2>&1 || npm i -g gh >/dev/null 2>&1)) || true",
   ];
-  if (cfg.ghToken) {
-    lines.push(
-      // Install gh if missing (Debian/Ubuntu node image).
-      "command -v gh >/dev/null || (type apt-get >/dev/null 2>&1 && " +
-        "(apt-get update -qq && apt-get install -y -qq gh >/dev/null 2>&1 || npm i -g gh >/dev/null 2>&1)) || true",
-      // Make git use gh's token for HTTPS pushes + let gh open PRs.
-      "gh auth setup-git >/dev/null 2>&1 || true"
-    );
-  }
-  if (cfg.gitAuthorName) {
-    lines.push(`git config --global user.name ${shellQuote(cfg.gitAuthorName)}`);
-  }
-  if (cfg.gitAuthorEmail) {
-    lines.push(`git config --global user.email ${shellQuote(cfg.gitAuthorEmail)}`);
-  }
   if (cfg.npmToken) {
     lines.push(
       'printf "//registry.npmjs.org/:_authToken=%s\\n" "$NPM_TOKEN" > "$HOME/.npmrc"'
@@ -377,25 +368,34 @@ function agentSh(workdir: string, resume: boolean): string {
 }
 
 /**
- * Per-repo GitHub credentials resolved from the token store, threaded into a run.
+ * Per-repo GitHub credentials resolved from the token store, threaded into a run. There is NO
+ * default account: everything here is the access-resolved account(s) for the repo(s) in this task.
  *  - ownerTokens: owner -> token, written as per-owner ~/.git-credentials entries (multi-owner push).
- *  - primaryToken: token for the primary repo's owner, exported as GH_TOKEN for the `gh` CLI.
- *  - primaryLogin: GitHub login behind primaryToken — sets the in-box git commit identity so commits
- *    are authored as the account whose token actually has access (not the box's default identity).
+ *  - ownerLogins: owner -> GitHub login, used to set the commit identity PER REPO directory so each
+ *    repo is authored by the account that can actually push it (never a shared/default identity).
+ *  - repoOwners: in-box dir name (/workspace/<name>) -> owner, so we know which login/token each
+ *    repo directory should use.
+ *  - primaryToken: token for the first repo's owner, exported as GH_TOKEN so the `gh` CLI defaults to
+ *    an account with access (per-repo pushes still use ownerTokens via ~/.git-credentials).
+ *  - primaryLogin: login behind primaryToken (informational / gh default).
  */
 export interface AgentCreds {
   ownerTokens?: Record<string, string>;
+  ownerLogins?: Record<string, string>;
+  repoOwners?: Record<string, string>;
   primaryToken?: string;
   primaryLogin?: string;
 }
 
 /**
- * Apply resolved GitHub creds inside the box (after bootstrap):
- *  1. per-owner ~/.git-credentials so each repo pushes with the right token (multi-owner);
- *  2. git commit identity from the token's login (name + noreply email), so authorship matches the
- *     account with access instead of the box default;
- *  3. a GitHub Packages ~/.npmrc line with the primary token so scoped installs
- *     (e.g. @owner/pkg from npm.pkg.github.com) work — needs `read:packages` on the token.
+ * Apply resolved GitHub creds inside the box (after bootstrap). No default account is ever used:
+ *  1. per-owner ~/.git-credentials so each repo pushes with the token that has access;
+ *  2. commit identity set PER REPO directory (git -C /workspace/<name>) from that repo's access
+ *     account login — so a repo is authored by the account that can actually push it, and a
+ *     mixed-owner multi-repo task gets the right author in each repo;
+ *  3. a GitHub Packages ~/.npmrc line (primary token) so scoped @owner installs resolve — needs
+ *     `read:packages` on the token.
+ * Deliberately does NOT set a global user.name/email or run `gh auth setup-git` with a default token.
  */
 async function applyGitCredentials(cfg: Config, box: string, creds?: AgentCreds): Promise<void> {
   const lines: string[] = [];
@@ -403,11 +403,16 @@ async function applyGitCredentials(cfg: Config, box: string, creds?: AgentCreds)
   const credScript = gitCredentialsScript(creds?.ownerTokens ?? {});
   if (credScript) lines.push(credScript);
 
-  if (creds?.primaryLogin) {
-    // GitHub noreply email keeps the commit linked to the account without exposing a real address.
-    const email = `${creds.primaryLogin}@users.noreply.github.com`;
-    lines.push(`git config --global user.name ${shellQuote(creds.primaryLogin)}`);
-    lines.push(`git config --global user.email ${shellQuote(email)}`);
+  // Per-repo identity: for each in-box dir, look up its owner -> that owner's access login.
+  const repoOwners = creds?.repoOwners ?? {};
+  const ownerLogins = creds?.ownerLogins ?? {};
+  for (const [name, owner] of Object.entries(repoOwners)) {
+    const login = ownerLogins[owner];
+    if (!login) continue; // no resolved account for this repo -> set no identity (never a default)
+    const email = `${login}@users.noreply.github.com`;
+    const dir = `/workspace/${name}`;
+    lines.push(`git -C ${shellQuote(dir)} config user.name ${shellQuote(login)}`);
+    lines.push(`git -C ${shellQuote(dir)} config user.email ${shellQuote(email)}`);
   }
 
   if (creds?.primaryToken) {
