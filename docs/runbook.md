@@ -351,8 +351,11 @@ https://<ASB_DOMAIN>/dashboard?token=<MCP_HTTP_TOKEN>
 ```
 - **`/dashboard`** — a self-contained HTML page (no build step, no external deps; `dashboardHtml()`
   returns the whole string). It reads `token` from its own URL and **polls `/monitor.json` every 3s**,
-  rendering one card per running box (role, run-state badge, task, question, cpu/mem). Click a card to
-  open its log panel, which polls **`/watch.json?session=…`** for that box's live log tail.
+  rendering a KPI stat-card row (up / running / waiting / pool-free) above a "Sandboxes" grid of
+  cards (role, run-state badge, per-metric tiles, task, question). A sticky top bar shows a live
+  connection dot and a **light/dark theme toggle** (persisted to `localStorage`; both palettes are
+  hand-authored shadcn-style `data-theme` token sets on `<html>`). Click a card to open its log
+  panel, which polls **`/watch.json?session=…`** for that box's live log tail.
 - **`/monitor.json`** and **`/watch.json?session=&lines=`** — JSON forms of `gatherMonitor` /
   `gatherWatch`, same data the `monitor` / `watch` tools render as text.
 - **Auth (fails closed):** `checkDashboardAuth` accepts the token via `Authorization: Bearer` (the
