@@ -71,11 +71,16 @@ response timeout and lose the session id). Watch progress with `status`.
 *One of `repo` or `repos` required. Local with neither falls back to `WORKSPACE_DIR`
 (`${workspaceFolder}`). Missing `repo`/`task` → returns a plain-text question, not an error.
 
-## status tool — run state
+## status tool — run state (interactive)
 `status(session)` returns the box state plus an in-box run marker: `run:running`,
-`run:done exit=<code>`, or `run:idle`, followed by the last ~60 lines of `/workspace/.agent.log`.
-The markers are sentinel files the detached run writes (`.agent.running` while in flight,
-`.agent.done` holding the exit code when finished).
+`run:done exit=<code>`, `run:idle`, or **`run:waiting`**, followed by the last ~60 lines of
+`/workspace/.agent.log`. Markers are sentinel files the detached run writes (`.agent.running` while
+in flight, `.agent.done` holding the exit code when finished).
+
+**`run:waiting`** is the interactive-development signal: the agent wrote a QUESTION to
+`/workspace/.agent.question` and paused (a pending question overrides `run:done`). The calling agent
+should answer it — from repo/context if it can, otherwise ask the user — and then call
+`resume(session, "<answer>")`, which clears the question file and continues the same Claude session.
 
 ## resume tool (on-demand secrets) — ASYNC
 Continues the in-box Claude session detached (same async model as delegate); poll `status`.

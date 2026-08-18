@@ -275,6 +275,21 @@ resume({ session, message: "use it", secrets: { "GITHUB_TOKEN": "…", "DB_URL":
 Secrets inject as `-e KEY=VALUE` on that exec only (same path as `GH_TOKEN`), shell-quoted over
 SSH, never stored — gone on the next exec / teardown. Pure `secretEnvFlags()` is unit-tested.
 
+### Interactive Q&A (sandbox agent ↔ calling agent)
+Development is a conversation. The in-box agent can PAUSE and ask instead of guessing:
+1. When it needs a real decision it can't safely infer, it writes the question to
+   `/workspace/.agent.question` and ends its turn.
+2. `status(session)` then reports **`run:waiting`** with the question text (a pending question
+   overrides `run:done`, so a finished-but-unanswered run still shows as waiting).
+3. The **calling agent answers**: from repo/context if it can, otherwise it asks the user. It then
+   calls `resume(session, "<answer>")`.
+4. `resume` clears the question file and continues the SAME Claude session (`claude -c`) with the
+   answer; the agent reads it and proceeds.
+
+This gives the Claude-web feel (ask → answer → continue) with no new infra — it rides on the existing
+async status/resume loop. The calling agent should poll `status` a few times (short waits) until it
+sees `run:waiting` or `run:done`. `formatProgress` (pure) is unit-tested.
+
 ### Async delegate/resume (fixes the MCP response timeout)
 `delegate` and `resume` **launch the agent detached and return immediately** — they no longer wait
 for the (possibly long) agent run, which used to overrun the MCP response window and lose the

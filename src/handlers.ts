@@ -189,16 +189,23 @@ export function registerTools(server: ToolRegistrar, cfg: Config, deps: HandlerD
 
   server.tool(
     "status",
-    "Get the current box state and recent agent log for a delegated session.",
+    "Get the current box state + recent agent log for a delegated session. States: run:running, " +
+      "run:done exit=N, run:idle, or run:waiting. IMPORTANT — this is an INTERACTIVE session: when " +
+      "you see 'run:waiting' the in-box agent asked a QUESTION and paused. As the calling agent you " +
+      "should ANSWER it yourself if you can determine it from the repo/context, otherwise ask the " +
+      "user; then call resume(session, <answer>) to continue. Poll status a few times (with short " +
+      "waits) until you see run:waiting or run:done — don't assume it finished after delegate.",
     { session: z.string().describe("Session id returned by delegate.") },
     async ({ session }: { session: string }) => text(await deps.status(cfg, session))
   );
 
   server.tool(
     "resume",
-    "Send a follow-up / continue the in-box Claude Code session. If the agent reported it needs a " +
-      "credential or connection detail (e.g. a GitHub token for a private repo, a DB URL), pass it " +
-      "via `secrets` — injected as env for THIS step only, never stored, gone on teardown.",
+    "Continue the in-box Claude Code session — primarily to ANSWER a question it asked (status shows " +
+      "run:waiting). Put the answer in `message`; the agent reads it and proceeds. As the calling " +
+      "agent, answer from repo/context when you can, and only ask the user for real decisions or " +
+      "secrets. If it needs a credential/connection detail (GitHub token for a private repo, DB URL), " +
+      "pass it via `secrets` — injected as env for THIS step only, never stored, gone on teardown.",
     {
       session: z.string().describe("Session id returned by delegate."),
       message: z.string().describe("Follow-up instruction or answer for the agent."),

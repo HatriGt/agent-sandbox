@@ -225,6 +225,10 @@ export async function countBoxes(cfg: Config): Promise<number> {
  * it's data, never part of the command string), and any credentials so the in-box agent can
  * push and open PRs exactly like local Claude Code.
  */
+// The agent writes a plain-text QUESTION here when it needs a decision/answer to continue, then
+// finishes the run. `status` surfaces it as "waiting"; `resume` clears it and feeds back the answer.
+export const QUESTION_MARK = "/workspace/.agent.question";
+
 // Standing policy injected as a system prompt on every run/resume. Kept as env data (like the
 // task) so it never touches the command string. No AI attribution in commits or PRs.
 const AGENT_SYS_PROMPT =
@@ -236,7 +240,15 @@ const AGENT_SYS_PROMPT =
   "private repo, a database URL, an API key), STOP and state clearly the exact environment " +
   "variable name(s) you need and why. The caller will re-run with those provided as env. " +
   "Never print, echo, or log secret values (tokens, passwords, connection strings); refer to them " +
-  "only by their env var name.";
+  "only by their env var name. " +
+  // Interactive Q&A: pause and ask instead of guessing on real decisions.
+  "This is an interactive session. When you need a DECISION or information you cannot safely infer " +
+  "(ambiguous requirements, which approach to take, a missing fact about the codebase, confirmation " +
+  "before something destructive), do NOT guess. Write your question as plain text to the file " +
+  `${QUESTION_MARK} (one clear question, include the options you are choosing between), then STOP ` +
+  "and end your turn. The caller will answer and continue this same session with 'claude -c'. " +
+  "When you continue, first read and act on the answer. Ask only when it genuinely matters — keep " +
+  "moving on things you can determine yourself. Never write secret values into the question file.";
 
 function agentEnvFlags(
   cfg: Config,
@@ -354,9 +366,10 @@ function agentSh(workdir: string, resume: boolean): string {
   const claude = resume
     ? `claude -c -p "$AGENT_TASK"`
     : `claude -p "$AGENT_TASK"`;
-  // Run the whole pipeline in a detached subshell; record start/finish sentinels.
+  // Clear any pending question up front: a new run or a resume (which carries the answer) means the
+  // previous question is now handled, so status stops reporting "waiting".
   const inner =
-    `cd ${workdir} && rm -f ${DONE_MARK} && touch ${RUN_MARK} && ` +
+    `cd ${workdir} && rm -f ${DONE_MARK} ${QUESTION_MARK} && touch ${RUN_MARK} && ` +
     `{ ${claude} --append-system-prompt "$AGENT_SYS_PROMPT" --allowedTools ${ALLOWED_TOOLS} ` +
     `>> ${AGENT_LOG} 2>&1; echo $? > ${DONE_MARK}; rm -f ${RUN_MARK}; }`;
   // nohup + & so the child outlives the exec shell; redirect all fds so exec doesn't block on them.
@@ -428,16 +441,48 @@ export async function runAgentTask(
   return msb(cfg, ["exec", box, ...env, "--", "sh", "-lc", agentSh(workdir, false)]);
 }
 
-/** Read run state from the sentinels: running | done(code) | idle, plus the log tail. */
+/** Raw sentinel readout from the box, split into the state line, question text, and log tail. */
+export interface ProgressRaw {
+  /** One of: running | done exit=N | idle (from the run/done sentinels). */
+  runLine: string;
+  /** Question text if the agent is waiting for an answer, else "". */
+  question: string;
+  /** Last log lines. */
+  log: string;
+}
+
+/**
+ * Turn the raw sentinel readout into a human status. A pending QUESTION takes precedence: even if
+ * the run has finished, an unanswered question means the agent is WAITING for the caller to answer
+ * (via resume) — that's the interactive-development signal the Mac agent loops on.
+ */
+export function formatProgress(raw: ProgressRaw): string {
+  const head = raw.question
+    ? `run:waiting — the agent asked a question and paused.\nQUESTION: ${raw.question.trim()}\n` +
+      `Answer it with resume(session, "<answer>"). The Mac agent should answer from repo context if ` +
+      `it can, otherwise ask the user.`
+    : raw.runLine;
+  return `${head}\n---LOG---\n${raw.log}`.trim();
+}
+
+/** Read run state from the sentinels: waiting(question) | running | done(code) | idle, plus log tail. */
 export async function agentProgress(cfg: Config, box: string): Promise<string> {
   const r = await exec(
     cfg,
     box,
     `if [ -f ${RUN_MARK} ]; then echo "run:running"; ` +
       `elif [ -f ${DONE_MARK} ]; then echo "run:done exit=$(cat ${DONE_MARK} 2>/dev/null)"; ` +
-      `else echo "run:idle"; fi; echo "---LOG---"; tail -n 60 ${AGENT_LOG} 2>/dev/null || true`
+      `else echo "run:idle"; fi; ` +
+      `echo "---Q---"; cat ${QUESTION_MARK} 2>/dev/null || true; ` +
+      `echo "---LOG---"; tail -n 60 ${AGENT_LOG} 2>/dev/null || true`
   );
-  return r.stdout.trim();
+  const out = r.stdout;
+  const qStart = out.indexOf("---Q---");
+  const logStart = out.indexOf("---LOG---");
+  const runLine = out.slice(0, qStart).trim();
+  const question = out.slice(qStart + "---Q---".length, logStart).trim();
+  const log = out.slice(logStart + "---LOG---".length).trim();
+  return formatProgress({ runLine, question, log });
 }
 
 /** Continue an existing Claude Code session with a follow-up (runbook note: `claude -c -p`). */

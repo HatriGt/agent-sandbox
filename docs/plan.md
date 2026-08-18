@@ -39,7 +39,9 @@ Tools (current shape):
     login; if none can, delegate asks for a token — which is then validated, stored, and reused.
   - New args: `githubToken` (answer the "need a token" ask) and `githubAccount` (answer the
     "which account" ask).
-- `status(session)` → run state (`running` / `done exit=N` / `idle`, from an in-box sentinel) + log tail.
+- `status(session)` → run state (`running` / `done exit=N` / `idle` / **`waiting`**, from in-box
+  sentinels) + log tail. `waiting` means the agent asked a QUESTION (wrote `/workspace/.agent.question`)
+  and paused; the calling agent answers (from context, else asks the user) and calls `resume`.
 - `resume(session, message, secrets?)` → answer a follow-up / continue (async, like delegate).
   `secrets:{KEY:val}` injects **ephemeral** env for that step only. A GitHub token passed here is
   also probed + stored (login-keyed) so it's reusable next time.
