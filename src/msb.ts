@@ -9,6 +9,14 @@ import { run, shellQuote } from "./exec.js";
 import { sshMuxOpts } from "./ssh.js";
 import { reposPromptHint, type RepoLayout } from "./agent-prompt.js";
 import { secretEnvFlags } from "./secret-env.js";
+import {
+  parseLsJson,
+  classifyBox,
+  parseRunState,
+  parseMetrics,
+  type BoxView,
+  type RunState,
+} from "./monitor.js";
 import type { Config } from "./config.js";
 
 /**
@@ -351,6 +359,7 @@ const ALLOWED_TOOLS = "Bash Edit Write Read Glob Grep";
 const AGENT_LOG = "/workspace/.agent.log";
 const DONE_MARK = "/workspace/.agent.done"; // written with the exit code when the run finishes
 const RUN_MARK = "/workspace/.agent.running"; // present while a run is in flight
+const TASK_MARK = "/workspace/.agent.task"; // the current task/follow-up text, so `monitor` can show it
 
 /**
  * Build the background agent command. The agent runs headless and DETACHED so `msb exec` returns
@@ -365,7 +374,10 @@ function agentSh(workdir: string, resume: boolean): string {
   // Clear any pending question up front: a new run or a resume (which carries the answer) means the
   // previous question is now handled, so status stops reporting "waiting".
   const inner =
-    `cd ${workdir} && rm -f ${DONE_MARK} ${QUESTION_MARK} && touch ${RUN_MARK} && ` +
+    // Record the current task (from env) so `monitor` can report what this box is doing. First run
+    // sets it; a resume appends the follow-up so the marker reflects the latest ask.
+    `cd ${workdir} && printf '%s\\n' "$AGENT_TASK" ${resume ? `>> ${TASK_MARK}` : `> ${TASK_MARK}`} && ` +
+    `rm -f ${DONE_MARK} ${QUESTION_MARK} && touch ${RUN_MARK} && ` +
     `{ ${claude} --append-system-prompt "$AGENT_SYS_PROMPT" --allowedTools ${ALLOWED_TOOLS} ` +
     `>> ${AGENT_LOG} 2>&1; echo $? > ${DONE_MARK}; rm -f ${RUN_MARK}; }`;
   // nohup + & so the child outlives the exec shell; redirect all fds so exec doesn't block on them.
@@ -520,6 +532,83 @@ export async function status(cfg: Config, box: string) {
 export async function metrics(cfg: Config, box: string) {
   const r = await msb(cfg, ["metrics", box], false);
   return r.stdout || r.stderr;
+}
+
+/**
+ * Fleet snapshot for the `monitor` tool: every box with role, agent run-state, task, and metrics.
+ * One `msb ls --format json`, then per box a single combined sentinel read + one metrics call. All
+ * per-box reads are best-effort (a box can vanish mid-scan) — failures degrade that box's row, not
+ * the whole report. Shaping/formatting is delegated to the pure monitor module.
+ */
+export async function gatherMonitor(cfg: Config): Promise<BoxView[]> {
+  const ls = await msb(cfg, ["ls", "--format", "json"], false);
+  const entries = parseLsJson(ls.stdout);
+
+  const views = await Promise.all(
+    entries.map(async (e): Promise<BoxView> => {
+      let claimed = false;
+      let runState: RunState = "idle";
+      let exitCode: number | undefined;
+      let task: string | undefined;
+      let question: string | undefined;
+      let uptime: string | undefined;
+      let cpu: string | undefined;
+      let mem: string | undefined;
+
+      // One round-trip for all in-box sentinels: claim marker, run state, task, question.
+      try {
+        const r = await exec(
+          cfg,
+          e.name,
+          `test -f /.claimed && echo CLAIMED || echo FREE; ` +
+            `if [ -f ${RUN_MARK} ]; then echo "run:running"; ` +
+            `elif [ -f ${DONE_MARK} ]; then echo "run:done exit=$(cat ${DONE_MARK} 2>/dev/null)"; ` +
+            `else echo "run:idle"; fi; ` +
+            `echo "---Q---"; cat ${QUESTION_MARK} 2>/dev/null || true; ` +
+            `echo "---T---"; head -n 1 ${TASK_MARK} 2>/dev/null || true`
+        );
+        const out = r.stdout;
+        const qStart = out.indexOf("---Q---");
+        const tStart = out.indexOf("---T---");
+        const head = out.slice(0, qStart);
+        claimed = /(^|\n)CLAIMED\s*(\n|$)/.test(head);
+        const runLine = head.split("\n").map((l) => l.trim()).find((l) => l.startsWith("run:")) ?? "run:idle";
+        const rs = parseRunState(runLine);
+        // A pending question means WAITING even if the run "finished" (mirrors agentProgress).
+        question = out.slice(qStart + "---Q---".length, tStart).trim() || undefined;
+        runState = question ? "waiting" : rs.state;
+        exitCode = rs.exitCode;
+        task = out.slice(tStart + "---T---".length).trim() || undefined;
+      } catch {
+        // box gone / not execable — leave defaults.
+      }
+
+      // Metrics are cheap and independent; best-effort.
+      try {
+        const m = parseMetrics(await metrics(cfg, e.name));
+        uptime = m.uptime;
+        cpu = m.cpu;
+        mem = m.mem;
+      } catch {
+        // ignore
+      }
+
+      return {
+        name: e.name,
+        role: classifyBox(e.name, claimed),
+        boxStatus: e.status,
+        runState,
+        exitCode,
+        task,
+        question,
+        uptime,
+        cpu,
+        mem,
+      };
+    })
+  );
+
+  return views;
 }
 
 /** Run the credential/tool bootstrap step only (separated so benchmarks can time it). */

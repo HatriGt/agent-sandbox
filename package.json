@@ -17,6 +17,7 @@
     "bench": "node dist/bench.js",
     "pool:warm": "node dist/pool-warm.js",
     "pool:status": "node dist/pool-status.js",
+    "monitor": "node dist/monitor-cli.js",
     "test": "tsx --test test/*.test.ts",
     "test:watch": "tsx --test --watch test/*.test.ts"
   },

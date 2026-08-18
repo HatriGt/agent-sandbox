@@ -286,3 +286,19 @@ test("delegate local: unresolved access is NON-fatal (still delegates, no creds)
   assert.equal(seenCreds, undefined);
   assert.match(textOf(res), /box-local/);
 });
+
+test("monitor: registered and returns the fleet report from deps", async () => {
+  const s = fakeServer();
+  let called = false;
+  registerTools(s as any, cfg, {
+    monitor: async () => {
+      called = true;
+      return "2 sandbox(es) up — 1 session(s), 1 warm pool free.";
+    },
+  } as any);
+
+  assert.ok(s.tools.monitor, "monitor tool is registered");
+  const res = await s.tools.monitor.handler({});
+  assert.equal(called, true);
+  assert.match(textOf(res), /2 sandbox\(es\) up/);
+});

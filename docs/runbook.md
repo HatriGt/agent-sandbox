@@ -303,6 +303,25 @@ status({ session })   // -> "run:running" | "run:done exit=0" | "run:idle" | "ru
 ```
 `run:waiting` = the agent asked a question (see Interactive Q&A above); answer via `resume`.
 
+### Fleet monitor — what's up and what each box is doing
+`status` is one session; `monitor` is the whole fleet. It answers "how many sandboxes are up right
+now and what is each doing" in one call:
+```jsonc
+monitor({})   // or: npm run monitor  (on the VPS / from dist)
+```
+It runs `msb ls --format json`, then per box reads one combined sentinel (claim marker + run state +
+task + question) and one `msb metrics`, and renders:
+- a **summary line** — total up, sessions vs warm-pool-free, how many running / waiting;
+- **one block per box** — role (`session` / `session(pool)` for a claimed pool box / `pool(free)`),
+  run state (`running` / `WAITING(needs answer)` / `done exit=N` / `idle`), uptime, cpu·mem, the
+  `task:` it's working on, and the pending `question:` when it's waiting.
+
+Sessions are listed before free pool boxes. The task text comes from a new `/workspace/.agent.task`
+sentinel the run writes (first run overwrites, a resume appends the follow-up). Per-box reads are
+best-effort — a box that vanishes mid-scan just degrades its own row. Shaping/formatting (`parseLsJson`,
+`classifyBox`, `parseRunState`, `parseMetrics`, `formatMonitor`) is pure and unit-tested; the IO
+(`gatherMonitor`) lives in `msb.ts`.
+
 ### Login-keyed, access-based GitHub token store (reactive)
 Keyed by **account login**, stored on the VPS at `~/.agent-sandbox/gh-tokens.json` (chmod 600):
 `{login, token, type, orgs[], verifiedRepos[]}`.

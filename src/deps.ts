@@ -20,8 +20,10 @@ import {
   countBoxes as msbCountBoxes,
   status as msbStatus,
   teardown as msbTeardown,
+  gatherMonitor,
   type AgentCreds,
 } from "./msb.js";
+import { formatMonitor } from "./monitor.js";
 import { newSessionId } from "./session.js";
 import {
   loadStore,
@@ -323,6 +325,10 @@ export const deps: HandlerDeps = {
       return `Pool disabled (needs MSB_POOL_SIZE>0, a snapshot, and EGRESS_ALLOW_ALL=1). size=${s.size}`;
     }
     return `Pool ${s.available}/${s.size} ready${s.boxes.length ? `: ${s.boxes.join(", ")}` : ""}`;
+  },
+
+  async monitor(cfg) {
+    return formatMonitor(await gatherMonitor(cfg));
   },
 
   async addGhToken(cfg, token, repo) {

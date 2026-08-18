@@ -56,6 +56,8 @@ export interface HandlerDeps {
   teardown(cfg: Config, session: string): Promise<void>;
   /** Warm pool status line. */
   poolStatus(cfg: Config): Promise<string>;
+  /** Fleet report: how many boxes are up and what each is doing (role/state/task/metrics). */
+  monitor(cfg: Config): Promise<string>;
   /** Probe a token (login/orgs) and store it by account login. Optional repo confirms access. Returns a summary. */
   addGhToken(cfg: Config, token: string, repo?: string): Promise<string>;
 }
@@ -255,6 +257,16 @@ export function registerTools(server: ToolRegistrar, cfg: Config, deps: HandlerD
     "Show the warm pool status: how many pre-booted boxes are available vs the target.",
     {},
     async () => text(await deps.poolStatus(cfg))
+  );
+
+  server.tool(
+    "monitor",
+    "Fleet overview: how many sandboxes are up right now and what each is doing. Lists every box " +
+      "with its role (session vs warm-pool), agent run-state (running / waiting-for-an-answer / " +
+      "done / idle), the task it's working on, uptime, and CPU/MEM. Use this to see all in-flight " +
+      "delegations at a glance (e.g. which ones are waiting on a question).",
+    {},
+    async () => text(await deps.monitor(cfg))
   );
 
   server.tool(
