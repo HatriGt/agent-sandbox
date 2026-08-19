@@ -94,7 +94,17 @@ export async function runInteractive(opts: InteractiveOpts): Promise<Interactive
 
     // Ask the user natively (server→client request mid tool-call), then continue the box.
     const question = w.question ?? w.text;
-    const outcome = await opts.elicit(question);
+    let outcome: ElicitOutcome;
+    try {
+      outcome = await opts.elicit(question);
+    } catch {
+      // The elicitation round-trip FAILED (transport cancel, client approval-card timeout, network).
+      // This is NOT a user decline — the box is still genuinely waiting. Do NOT stop it: return the
+      // pending question so the caller reconnects (status/resume) and answers it. The box keeps its
+      // place; nothing is lost.
+      return { status: "waiting", text: w.text };
+    }
+    // Only an explicit user decline/cancel stops the run.
     if (outcome.action !== "accept") {
       return {
         status: "cancelled",

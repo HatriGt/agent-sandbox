@@ -125,6 +125,27 @@ test("timeout with no boundary: emits progress, keeps waiting, then completes", 
   assert.ok(progresses.length >= 1, "progress is emitted across timeout windows to keep the call alive");
 });
 
+test("elicit THROWS (transport cancel/timeout): does NOT cancel the run; returns waiting for reconnect", async () => {
+  // The box is genuinely waiting; the elicitation round-trip was torn down by the client (e.g. an
+  // approval-card timeout). That must NOT be treated as a user decline — the box keeps working.
+  const seq: PollResult[] = [wait("Which changeType? feature/bugfix")];
+  let i = 0;
+  let resumes = 0;
+  const r = await runInteractive({
+    ...baseOpts,
+    poll: async () => seq[Math.min(i++, seq.length - 1)],
+    elicit: async () => {
+      throw new Error("MCP error -32001: Request timed out");
+    },
+    resume: async () => {
+      resumes++;
+    },
+  });
+  assert.equal(r.status, "waiting", "a failed elicitation leaves the run waiting, not cancelled");
+  assert.equal(resumes, 0, "must not resume on a failed elicitation");
+  assert.match(r.text, /Which changeType/, "surfaces the pending question so it can be answered");
+});
+
 test("no elicit capability (fallback): returns at the boundary instead of eliciting", async () => {
   const seq: PollResult[] = [wait("Which tag?")];
   let i = 0;
