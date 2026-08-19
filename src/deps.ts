@@ -15,7 +15,6 @@ import { acquireBox, refillPool, poolEligible, poolStatus } from "./pool.js";
 import {
   runAgentTask,
   resumeAgentTask,
-  agentProgress,
   agentBoundary,
   exec,
   countBoxes as msbCountBoxes,
@@ -62,9 +61,13 @@ async function waitAndFormat(cfg: Config, box: string): Promise<string> {
   });
   if (!r.reached) {
     return (
-      `run:running — still working after ${Math.round(cfg.waitTimeoutMs / 1000)}s (no boundary yet).\n` +
-      `Reconnect with status({session:"${box}"}) to keep watching; it will return the question or ` +
-      `result as soon as the box asks something or finishes.\n---LOG---\n${r.text}`
+      `run:running — NOT DONE. The task is still executing after ${Math.round(cfg.waitTimeoutMs / 1000)}s; ` +
+      `it has NOT finished and has NOT asked anything yet.\n` +
+      `YOU ARE NOT DONE. Do NOT tell the user "I'll report back" or end your turn. You MUST immediately ` +
+      `call status({session:"${box}"}) again — that call blocks the same way and returns the question or ` +
+      `result the moment there is one. Keep calling status until you get run:waiting (answer via resume) ` +
+      `or run:done (report the outcome). Treat this exactly like a tool that said "call me again".\n` +
+      `---LOG---\n${r.text}`
     );
   }
   return r.text;
@@ -316,9 +319,13 @@ export const deps: HandlerDeps = {
   },
 
   async status(cfg, session) {
-    const state = await msbStatus(cfg, session);
-    const progress = await agentProgress(cfg, session);
-    return `state:\n${state}\n\n${progress}`;
+    // status is the reconnect path for a delegate/resume that timed out mid-task. It BLOCKS the same
+    // way (wait until the box asks something or finishes, or the cap elapses) so the caller can just
+    // keep calling status to stay attached — no busy-polling. A quick box-level line is prefixed for
+    // context (running/stopped/gone).
+    const box = await msbStatus(cfg, session);
+    const progress = await waitAndFormat(cfg, session);
+    return `state:\n${box}\n\n${progress}`;
   },
 
   async resume(cfg, session, message, secrets) {

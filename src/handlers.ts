@@ -211,12 +211,13 @@ export function registerTools(server: ToolRegistrar, cfg: Config, deps: HandlerD
 
   server.tool(
     "status",
-    "Get the current box state + recent agent log for a delegated session. States: run:running, " +
-      "run:done exit=N, run:idle, or run:waiting. IMPORTANT — this is an INTERACTIVE session: when " +
-      "you see 'run:waiting' the in-box agent asked a QUESTION and paused. As the calling agent you " +
-      "should ANSWER it yourself if you can determine it from the repo/context, otherwise ask the " +
-      "user; then call resume(session, <answer>) to continue. Poll status a few times (with short " +
-      "waits) until you see run:waiting or run:done — don't assume it finished after delegate.",
+    "Reconnect to a delegated session and WAIT for its next boundary. Like delegate/resume, this " +
+      "call BLOCKS until the in-box agent asks a question (run:waiting) or finishes (run:done), then " +
+      "returns that — so it's the tool to call after a delegate/resume reply said 'NOT DONE, call " +
+      "status'. If it again returns 'NOT DONE' (the task is still running past the wait cap), call " +
+      "status AGAIN immediately — keep doing so until you get run:waiting or run:done. On run:waiting, " +
+      "answer from repo/context if you can (else ask the user) and resume(session, <answer>); on " +
+      "run:done, report the outcome. Never end your turn on a 'NOT DONE' reply.",
     { session: z.string().describe("Session id returned by delegate.") },
     async ({ session }: { session: string }) => text(await deps.status(cfg, session))
   );
