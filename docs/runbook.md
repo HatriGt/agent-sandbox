@@ -308,24 +308,33 @@ prompt makes it STOP and write the question in three cases:
 
 Loop:
 1. Agent writes the question to `/workspace/.agent.question` and ends its turn.
-2. `status(session)` reports **`run:waiting`** with the question text (a pending question overrides
+2. The `delegate`/`resume` call — which is **blocking** — was waiting server-side for exactly this;
+   it returns now with **`run:waiting`** and the question text (a pending question overrides
    `run:done`, so a finished-but-unanswered run still shows as waiting).
 3. The **calling agent answers**: from repo/context if it can, otherwise it asks the user; then calls
    `resume(session, "<answer>")` (secrets, if needed, ride along as ephemeral env for that step only).
-4. `resume` clears the question file and continues the SAME Claude session (`claude -c`) with the
-   answer; the agent reads it and proceeds.
+4. `resume` clears the question file, continues the SAME Claude session (`claude -c`), and BLOCKS
+   again until the next boundary — returning the next question or the final result.
 
-This gives the Claude-web feel (ask → answer → continue) with no new infra — it rides on the existing
-async status/resume loop. **`delegate` is async, so the caller is not done when it returns** — it must
-poll `status` (short waits) until it sees `run:waiting` (answer + `resume`, keep polling) or `run:done`
-(report the outcome/PR link to the user), never end the turn with "I'll report back later".
-`formatProgress` (pure) is unit-tested.
+This gives the Claude-web feel (ask → answer → continue) with no new infra — the interactive
+turn-taking rides on the blocking `delegate`/`resume` calls. `formatProgress` and the pure
+`waitForBoundary`/`isBoundary` loop are unit-tested.
 
-### Async delegate/resume (fixes the MCP response timeout)
-`delegate` and `resume` **launch the agent detached and return immediately** — they no longer wait
-for the (possibly long) agent run, which used to overrun the MCP response window and lose the
-session id. The run writes `/workspace/.agent.running` while in flight and `/workspace/.agent.done`
-(holding the exit code) when finished; output streams to `/workspace/.agent.log`. Watch it:
+### Blocking (interactive) delegate/resume
+`delegate` and `resume` launch the agent detached, then **block server-side until the agent reaches a
+boundary** — a question (`run:waiting`) or completion (`run:done`) — via `waitForBoundary` (polls the
+sentinels every `WAIT_INTERVAL_MS`, default 3s). The open MCP call is the "listener" that keeps the
+calling agent from ending its turn early. The run writes `/workspace/.agent.running` while in flight
+and `/workspace/.agent.done` (holding the exit code) when finished; output streams to
+`/workspace/.agent.log`.
+
+- **Timeout fallback:** if no boundary is hit within `WAIT_TIMEOUT_MS` (default 75s — kept under the
+  MCP client's HTTP timeout so the IDE never hangs), the call returns "run:running — still working …
+  reconnect with status". `status` is the pull-based reconnect and returns the question/result as
+  soon as there is one.
+- **Idle-stop while waiting:** a box paused on a question can outlive `--idle-timeout` and be Stopped
+  by msb (its rootfs + Claude session persist). `resume` calls `startBoxIfStopped` first, so the
+  answer reaches the same session instead of failing the exec.
 ```jsonc
 status({ session })   // -> "run:running" | "run:done exit=0" | "run:idle" | "run:waiting" + last ~60 log lines
 ```

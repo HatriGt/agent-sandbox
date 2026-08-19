@@ -99,21 +99,29 @@ resume({
 
 ## How delegation flows (A2A)
 
-`delegate` is **asynchronous**: it ships the repo, boots the box, launches the agent in the
-background, and **returns a session id immediately**. The caller is *not* done — it drives an
-interactive loop, just like pairing with a teammate:
+`delegate` is **interactive and blocking**: it ships the repo, boots the box, launches the agent,
+and then **holds the MCP call open** while the agent works — returning the moment the agent reaches a
+boundary (asks a question → `run:waiting`, or finishes → `run:done`). The open call is the listener,
+so the caller takes turns with the box, just like pairing with a teammate — it can't fire-and-forget:
 
 ```
-delegate ──► session id ──►  poll status(session) ┐
-                                                   │  run:running  → wait a bit, poll again
-   report PR/result ◄── run:done  ◄────────────────┤  run:waiting  → the box is asking something
-        to the user                                └───────────────────────┐
+delegate ──► launch + WAIT (server-side) ──► returns at the first boundary:
+                                              │  run:waiting → the box asked something
+   report PR/result ◄── run:done  ◄───────────┤  run:done    → finished
+        to the user                           └──► run:waiting ─────────────┐
                                                                             ▼
                                                         answer (from repo/context or ask you) +
                                                         resume(session, "<answer>", secrets?)  ──┐
-                                                                                                 │
-                                                          continues the SAME claude session  ◄───┘
+                                                          (resume ALSO waits for the next         │
+                                                           boundary, and auto-starts a box that   │
+                                                           idle-stopped while waiting)            │
+                                                          continues the SAME claude session  ◄────┘
 ```
+
+If a step runs longer than the wait cap (`WAIT_TIMEOUT_MS`, default 75s — under the client's HTTP
+timeout), the call returns "still working — reconnect with `status(session)`", and `status` returns
+the question/result as soon as there is one. So the fast common case feels synchronous, while a long
+build never hangs the IDE.
 
 The in-box agent reaches back through **one channel** (`/workspace/.agent.question` → `run:waiting`)
 whenever it hits something it shouldn't guess through:
@@ -124,8 +132,9 @@ whenever it hits something it shouldn't guess through:
   registry or API, a missing scope. It reports the exact failure and what unblocks it, and does **not**
   quietly skip the step or declare success. You (or the calling agent) answer, `resume`, and it picks up.
 
-So a delegation ends only when it truly finishes (`run:done`) or is genuinely blocked and waiting on
-you (`run:waiting`) — never a silent "I'll report back later".
+So a `delegate`/`resume` call returns only when it truly finishes (`run:done`), is genuinely blocked
+and waiting on you (`run:waiting`), or the wait cap elapsed (explicit "still working, reconnect via
+`status`") — never a silent "I'll report back later".
 
 ## Connect from Cursor
 

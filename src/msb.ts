@@ -19,6 +19,7 @@ import {
   type RunState,
   type WatchSnapshot,
 } from "./monitor.js";
+import type { PollResult } from "./wait.js";
 import type { Config } from "./config.js";
 
 /**
@@ -532,8 +533,8 @@ export function formatProgress(raw: ProgressRaw): string {
   return `${head}\n---LOG---\n${raw.log}`.trim();
 }
 
-/** Read run state from the sentinels: waiting(question) | running | done(code) | idle, plus log tail. */
-export async function agentProgress(cfg: Config, box: string): Promise<string> {
+/** One SSH round-trip that reads the run/done/question sentinels + a log tail into a ProgressRaw. */
+async function readProgressRaw(cfg: Config, box: string, logLines = 60): Promise<ProgressRaw> {
   const r = await exec(
     cfg,
     box,
@@ -541,15 +542,48 @@ export async function agentProgress(cfg: Config, box: string): Promise<string> {
       `elif [ -f ${DONE_MARK} ]; then echo "run:done exit=$(cat ${DONE_MARK} 2>/dev/null)"; ` +
       `else echo "run:idle"; fi; ` +
       `echo "---Q---"; cat ${QUESTION_MARK} 2>/dev/null || true; ` +
-      `echo "---LOG---"; tail -n 60 ${AGENT_LOG} 2>/dev/null || true`
+      `echo "---LOG---"; tail -n ${logLines} ${AGENT_LOG} 2>/dev/null || true`
   );
   const out = r.stdout;
   const qStart = out.indexOf("---Q---");
   const logStart = out.indexOf("---LOG---");
-  const runLine = out.slice(0, qStart).trim();
-  const question = out.slice(qStart + "---Q---".length, logStart).trim();
-  const log = out.slice(logStart + "---LOG---".length).trim();
-  return formatProgress({ runLine, question, log });
+  return {
+    runLine: out.slice(0, qStart).trim(),
+    question: out.slice(qStart + "---Q---".length, logStart).trim(),
+    log: out.slice(logStart + "---LOG---".length).trim(),
+  };
+}
+
+/** Read run state from the sentinels: waiting(question) | running | done(code) | idle, plus log tail. */
+export async function agentProgress(cfg: Config, box: string): Promise<string> {
+  return formatProgress(await readProgressRaw(cfg, box));
+}
+
+/**
+ * One poll of a box for the block-until-boundary wait loop: the classified RunState (a pending
+ * question forces `waiting` even past `done`, mirroring formatProgress) plus the human status text.
+ * Used by waitForBoundary so `delegate`/`resume` can hold the MCP call open until there's something
+ * to act on.
+ */
+export async function agentBoundary(cfg: Config, box: string): Promise<PollResult> {
+  const raw = await readProgressRaw(cfg, box);
+  const state: RunState = raw.question ? "waiting" : parseRunState(raw.runLine).state;
+  return { state, text: formatProgress(raw) };
+}
+
+/**
+ * Ensure a box is running before we exec into it. A box waiting on a question can outlive its
+ * `--idle-timeout` and be Stopped by msb while its rootfs (and Claude session) persist — so a
+ * `resume` must `msb start` it first, otherwise the exec fails and the answer is lost. Best-effort:
+ * if it's already running, `msb start` is a harmless no-op; failures are swallowed and surfaced by
+ * the exec that follows.
+ */
+export async function startBoxIfStopped(cfg: Config, box: string): Promise<void> {
+  const r = await msb(cfg, ["ls", "--format", "json"], false);
+  const entry = parseLsJson(r.stdout).find((e) => e.name === box);
+  if (entry && !isRunning(entry.status)) {
+    await msb(cfg, ["start", box], false);
+  }
 }
 
 /** Continue an existing Claude Code session with a follow-up (runbook note: `claude -c -p`). */
@@ -561,6 +595,9 @@ export async function resumeAgentTask(
   secrets?: Record<string, string>,
   creds?: AgentCreds
 ) {
+  // A box that idle-timed-out while WAITING on a question is Stopped but intact — start it so the
+  // answer reaches the same Claude session instead of failing the exec.
+  await startBoxIfStopped(cfg, box);
   // Ephemeral secrets are appended as extra -e flags on THIS exec only (not stored).
   const env = [...agentEnvFlags(cfg, message, repos, creds?.primaryToken), ...secretEnvFlags(secrets)];
   await applyGitCredentials(cfg, box, creds);

@@ -16,6 +16,7 @@ import {
   runAgentTask,
   resumeAgentTask,
   agentProgress,
+  agentBoundary,
   exec,
   countBoxes as msbCountBoxes,
   status as msbStatus,
@@ -24,6 +25,7 @@ import {
   gatherWatch,
   type AgentCreds,
 } from "./msb.js";
+import { waitForBoundary } from "./wait.js";
 import { formatMonitor, formatWatch } from "./monitor.js";
 import { newSessionId } from "./session.js";
 import {
@@ -39,6 +41,34 @@ import {
 } from "./gh-token-store.js";
 import { probeToken, canAccessRepo } from "./gh-probe.js";
 import { localRepoOwnerName, parseOwnerName } from "./git-remote.js";
+
+/** Promise sleep for the block-until-boundary wait loop. */
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/**
+ * After launching (delegate) or continuing (resume) the in-box agent, hold the MCP call open until
+ * the agent hits a boundary — a question (`waiting`) or completion (`done`) — or the timeout fires.
+ * This is the interactive A2A turn-taking: the calling agent can't end its turn early because the
+ * tool call hasn't returned. On a boundary we hand back the question/result directly (answer via
+ * resume, or report to the user). On timeout we tell the caller it's still working and to reconnect
+ * with status — so a genuinely long step never hangs the IDE past its HTTP timeout.
+ */
+async function waitAndFormat(cfg: Config, box: string): Promise<string> {
+  const r = await waitForBoundary({
+    poll: () => agentBoundary(cfg, box),
+    sleep,
+    timeoutMs: cfg.waitTimeoutMs,
+    intervalMs: cfg.waitIntervalMs,
+  });
+  if (!r.reached) {
+    return (
+      `run:running — still working after ${Math.round(cfg.waitTimeoutMs / 1000)}s (no boundary yet).\n` +
+      `Reconnect with status({session:"${box}"}) to keep watching; it will return the question or ` +
+      `result as soon as the box asks something or finishes.\n---LOG---\n${r.text}`
+    );
+  }
+  return r.text;
+}
 
 /** GitHub owners this box works with, read from each repo's `origin` remote under /workspace. */
 async function boxRepoOwners(cfg: Config, box: string): Promise<string[]> {
@@ -276,14 +306,13 @@ export const deps: HandlerDeps = {
     void cleanupStaging(runCfg, sessionRoot);
     if (warm) void refillPool(cfg);
 
-    // Launch the agent DETACHED and return now — the run keeps going in the box. The caller polls
-    // status(session) for progress/result. This is what fixes the MCP response timeout.
+    // Launch the agent DETACHED (the run keeps going in the box regardless), then BLOCK here until
+    // it reaches an interactive boundary (asks a question / finishes) or the wait times out. The
+    // open MCP call is the "listener" — this is what makes the calling agent wait for the box
+    // instead of ending its turn. A timeout returns "still working, reconnect via status".
     await runAgentTask(runCfg, box, plan.task, plan.repos, runCreds);
-    return {
-      box,
-      warm,
-      output: "Task launched in the background. Poll with status(session) for progress and result.",
-    };
+    const output = await waitAndFormat(runCfg, box);
+    return { box, warm, output };
   },
 
   async status(cfg, session) {
@@ -311,9 +340,11 @@ export const deps: HandlerDeps = {
     // Re-resolve per-repo identity/token from the box's repos so the continued run commits as the
     // access-correct account (not a stale/baked identity). Same access model as delegate.
     const creds = await resolveCredsForBox(cfg, session);
-    // Continues the in-box Claude session detached; poll status(session) for the result.
+    // Continue the in-box Claude session detached, then BLOCK until the next boundary (another
+    // question, or done) or timeout — same turn-taking as delegate, so the answer→continue→next
+    // step feels synchronous to the caller.
     await resumeAgentTask(cfg, session, message, undefined, secrets, creds);
-    return "Follow-up launched in the background. Poll with status(session) for progress and result.";
+    return waitAndFormat(cfg, session);
   },
 
   async teardown(cfg, session) {

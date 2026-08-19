@@ -36,6 +36,15 @@ export interface Config {
   /** Number of pre-booted warm boxes to keep idle (0 disables pooling). */
   poolSize: number;
 
+  /**
+   * Interactive A2A: how long `delegate`/`resume` block server-side waiting for the in-box agent to
+   * reach a boundary (a question => waiting, or done) before returning "still working, reconnect via
+   * status". Kept under the MCP client's HTTP timeout so the call never hangs the IDE.
+   */
+  waitTimeoutMs: number;
+  /** Poll interval for that wait loop (one SSH sentinel read per tick). */
+  waitIntervalMs: number;
+
   /** ccproxy endpoint for in-box model calls. */
   anthropicBaseUrl: string;
   /** Placeholder key accepted by ccproxy's Anthropic route. */
@@ -129,6 +138,10 @@ export function loadConfig(): Config {
     memory: req("MSB_MEMORY", "1G"),
     maxBoxes: Number(process.env.MSB_MAX_BOXES ?? "5"),
     poolSize: Number(process.env.MSB_POOL_SIZE ?? "1"),
+
+    // Block-until-boundary defaults: 75s cap (under Cursor's ~2min tool timeout), poll every 3s.
+    waitTimeoutMs: Number(process.env.WAIT_TIMEOUT_MS ?? "75000"),
+    waitIntervalMs: Number(process.env.WAIT_INTERVAL_MS ?? "3000"),
 
     anthropicBaseUrl,
     anthropicApiKey: req("ANTHROPIC_API_KEY", "dummy"),

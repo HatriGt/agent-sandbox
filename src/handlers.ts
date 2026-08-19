@@ -81,12 +81,14 @@ export function registerTools(server: ToolRegistrar, cfg: Config, deps: HandlerD
       "several repos open in the same IDE window — pass repos:[{repo,ref?},...]; each lands in " +
       "/workspace/<name> in ONE box and gets its own PR. A single `repo` still works. " +
       "Missing info is asked back, not failed. " +
-      "ASYNC — this returns a session id IMMEDIATELY; the agent keeps working in the background. You " +
-      "are NOT done: do NOT end your turn or tell the user 'I'll report back later'. Instead POLL " +
-      "status(session) in a loop (short waits between calls) until it reports run:waiting or run:done. " +
-      "On run:waiting, answer the question (from repo/context if you can, else ask the user) and " +
-      "resume(session, <answer>), then keep polling. On run:done, report the outcome (PR link / result) " +
-      "to the user. Treat this like an interactive coding session with a teammate, not fire-and-forget.",
+      "INTERACTIVE & BLOCKING — this call ships the repo, launches the in-box agent, and then WAITS " +
+      "until the agent either asks a question (run:waiting) or finishes (run:done), and only THEN " +
+      "returns. So the return value already tells you what to do: on run:waiting, answer it (from " +
+      "repo/context if you can, else ask the user) via resume(session, <answer>) — resume BLOCKS the " +
+      "same way and returns the next question or the result. On run:done, report the outcome (PR " +
+      "link / result) to the user. Only if the reply says 'still working' (a long step exceeded the " +
+      "wait) do you reconnect with status(session). Treat this like pairing with a teammate — the " +
+      "call holds the line open for you; do NOT fire-and-forget or say 'I'll report back later'.",
     {
       source: z
         .enum(["local", "git"])
@@ -201,7 +203,8 @@ export function registerTools(server: ToolRegistrar, cfg: Config, deps: HandlerD
           : "";
       return text(
         `Delegated. session=${r.box}${r.warm ? " (warm)" : ""}${repoLine}\n\n${r.output}\n\n` +
-          `Next: status({session:"${r.box}"}) to watch progress; resume({session:"${r.box}",message:"..."}) to follow up.`
+          `If the box asked a question (run:waiting), answer it now: resume({session:"${r.box}",message:"<answer>"}). ` +
+          `If it finished (run:done), report the outcome to the user. If it's still working, reconnect with status({session:"${r.box}"}).`
       );
     }
   );
@@ -220,11 +223,14 @@ export function registerTools(server: ToolRegistrar, cfg: Config, deps: HandlerD
 
   server.tool(
     "resume",
-    "Continue the in-box Claude Code session — primarily to ANSWER a question it asked (status shows " +
-      "run:waiting). Put the answer in `message`; the agent reads it and proceeds. As the calling " +
-      "agent, answer from repo/context when you can, and only ask the user for real decisions or " +
-      "secrets. If it needs a credential/connection detail (GitHub token for a private repo, DB URL), " +
-      "pass it via `secrets` — injected as env for THIS step only, never stored, gone on teardown.",
+    "Continue the in-box Claude Code session — primarily to ANSWER a question it asked (run:waiting). " +
+      "Put the answer in `message`; the agent reads it and proceeds. Like delegate, this call is " +
+      "INTERACTIVE & BLOCKING: it feeds the answer in and WAITS until the agent asks the next question " +
+      "or finishes, then returns that — so keep answering/resuming until you get run:done. It also " +
+      "auto-starts the box if it idle-stopped while waiting. As the calling agent, answer from " +
+      "repo/context when you can, and only ask the user for real decisions or secrets. If it needs a " +
+      "credential/connection detail (GitHub token for a private repo, DB URL), pass it via `secrets` " +
+      "— injected as env for THIS step only, never stored, gone on teardown.",
     {
       session: z.string().describe("Session id returned by delegate."),
       message: z.string().describe("Follow-up instruction or answer for the agent."),
