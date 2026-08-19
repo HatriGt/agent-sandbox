@@ -218,6 +218,22 @@ per-call `allowDomains`). A restricted-egress delegation always cold-boots with 
 allowlist — never a pooled open box. Claimed vs free is tracked by a `/.claimed` sentinel in
 the box; `countBoxes` ignores unclaimed pool boxes for the concurrency cap.
 
+**Self-heal against msb state desync.** msb can end up with a pool box that `ls` reports as
+`Stopped`/`exited` while its daemon still holds a "running" record — so a refill's `msb run`/exec on
+it fails with `error: sandbox still running: cannot start … already running`, and worse, a claim of
+such a box records the task but never actually runs (the box shows `run:running` while Stopped → the
+UI flickers as each poll reads contradictory state). Guards:
+- `allPoolBoxes` now reads `msb ls --format json` and keeps only **Running** boxes; `listPoolBoxes`
+  reaps the rest first (`reapDeadPoolBoxes` = `stop` + `rm --force`), and also reaps any box that is
+  Running-but-not-execable. So it only ever hands back a live, free box.
+- `refillPool` reaps before counting the deficit, so a fresh boot can't collide with a stale record.
+- `acquireBox` treats a failed claim as a desync: it reaps and falls through to a clean cold boot
+  instead of returning a dead box.
+- `countBoxes` likewise only counts Running boxes and won't throw on an unexecable one.
+
+If the pool ever wedges anyway, the manual reset is `msb stop <box> && msb rm --force <box>` for each
+`pool-*`, then `node dist/pool-warm.js` (in the container) to reseed.
+
 Measured (warm claim):
 | phase | cold (mux) | warm claim |
 |-------|-----------|------------|

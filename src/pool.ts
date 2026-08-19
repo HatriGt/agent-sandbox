@@ -9,7 +9,7 @@
  *
  * The pool state lives on the VPS (the running `pool-*` boxes), so it survives MCP respawns.
  */
-import { createBox, bootWarmBox, listPoolBoxes, claimWarmBox } from "./msb.js";
+import { createBox, bootWarmBox, listPoolBoxes, claimWarmBox, reapDeadPoolBoxes } from "./msb.js";
 import { stagingPathFor } from "./sync.js";
 import type { Config } from "./config.js";
 
@@ -32,11 +32,19 @@ export async function acquireBox(
   eligible: boolean
 ): Promise<{ box: string; warm: boolean }> {
   if (eligible) {
+    // listPoolBoxes already reaps dead/wedged boxes, so anything it returns is Running + free.
     const available = await listPoolBoxes(cfg);
     const warm = available[0];
     if (warm) {
-      await claimWarmBox(cfg, warm, copyDir);
-      return { box: warm, warm: true };
+      try {
+        await claimWarmBox(cfg, warm, copyDir);
+        return { box: warm, warm: true };
+      } catch (e) {
+        // The box went sideways between listing and claiming (desync). Don't hand back a dead box
+        // that would show run:running while Stopped — reap it and fall through to a clean cold boot.
+        console.error(`[pool] claim of ${warm} failed, reaping and cold-booting:`, e);
+        await reapDeadPoolBoxes(cfg);
+      }
     }
   }
   // Cold path: boot a box named after the session with the repo baked in / copied in.
@@ -51,6 +59,8 @@ export async function acquireBox(
 export async function refillPool(cfg: Config): Promise<void> {
   if (cfg.poolSize <= 0 || !cfg.snapshot || !cfg.egressAllowAll) return;
   try {
+    // Reap dead/wedged boxes first so the deficit is real and a fresh boot won't collide with a
+    // stale msb record ("cannot start: already running"). listPoolBoxes reaps as a side effect.
     const available = await listPoolBoxes(cfg);
     const deficit = cfg.poolSize - available.length;
     for (let i = 0; i < deficit; i++) {

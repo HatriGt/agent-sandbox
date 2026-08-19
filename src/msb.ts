@@ -11,6 +11,7 @@ import { reposPromptHint, type RepoLayout } from "./agent-prompt.js";
 import { secretEnvFlags } from "./secret-env.js";
 import {
   parseLsJson,
+  isRunning,
   classifyBox,
   parseRunState,
   parseMetrics,
@@ -161,25 +162,63 @@ export async function bootWarmBox(cfg: Config): Promise<string> {
   return name;
 }
 
-/** All warm pool boxes (claimed or not), newest-name order not guaranteed. */
-async function allPoolBoxes(cfg: Config): Promise<string[]> {
-  const r = await msb(cfg, ["ls"], false);
-  return r.stdout
-    .split("\n")
-    .map((l) => l.trim().split(/\s+/)[0])
-    .filter((n) => n && n.startsWith(POOL_PREFIX));
+/**
+ * All warm pool boxes with their msb lifecycle status, from `msb ls --format json` (robust to the
+ * variable-width text table). Newest-name order not guaranteed.
+ */
+async function allPoolBoxes(cfg: Config): Promise<Array<{ name: string; status: string }>> {
+  const r = await msb(cfg, ["ls", "--format", "json"], false);
+  return parseLsJson(r.stdout)
+    .filter((e) => e.name.startsWith(POOL_PREFIX))
+    .map((e) => ({ name: e.name, status: e.status }));
 }
 
 /**
- * Available (unclaimed) warm boxes: a pool box is "claimed" once a repo is copied in, marked by
- * the sentinel file /.claimed. Unclaimed boxes have no such marker.
+ * Force-remove a wedged box (stop + rm --force), swallowing errors. Used to reap pool boxes that
+ * msb reports as Stopped/exited but still has a stale record for — the source of the "already
+ * running" desync that leaves a claimed box that never actually runs.
+ */
+async function forceRemoveBox(cfg: Config, box: string): Promise<void> {
+  await msb(cfg, ["stop", box], false);
+  await msb(cfg, ["rm", "--force", box], false);
+}
+
+/**
+ * Reap pool boxes that are not actually Running (Stopped/exited/unknown). Returns the names of the
+ * still-Running boxes. Removing dead boxes clears msb's stale state so a later refill can recreate
+ * them cleanly instead of hitting "cannot start: already running".
+ */
+export async function reapDeadPoolBoxes(cfg: Config): Promise<string[]> {
+  const boxes = await allPoolBoxes(cfg);
+  const live: string[] = [];
+  for (const b of boxes) {
+    if (isRunning(b.status)) {
+      live.push(b.name);
+    } else {
+      console.error(`[pool] reaping dead box ${b.name} (status=${b.status || "unknown"})`);
+      await forceRemoveBox(cfg, b.name);
+    }
+  }
+  return live;
+}
+
+/**
+ * Available (unclaimed) warm boxes: only RUNNING pool boxes with no /.claimed marker. Stopped or
+ * wedged boxes are reaped first so we never hand a dead box to a delegation (which would claim it,
+ * record the task, but never run — the box shows run:running while Stopped).
  */
 export async function listPoolBoxes(cfg: Config): Promise<string[]> {
-  const boxes = await allPoolBoxes(cfg);
+  const live = await reapDeadPoolBoxes(cfg);
   const available: string[] = [];
-  for (const box of boxes) {
-    const r = await exec(cfg, box, "test -f /.claimed && echo claimed || echo free");
-    if (r.stdout.trim().endsWith("free")) available.push(box);
+  for (const box of live) {
+    try {
+      const r = await exec(cfg, box, "test -f /.claimed && echo claimed || echo free");
+      if (r.stdout.trim().endsWith("free")) available.push(box);
+    } catch {
+      // Not execable despite a Running status => wedged; reap it so refill can recreate.
+      console.error(`[pool] reaping unexecable box ${box}`);
+      await forceRemoveBox(cfg, box);
+    }
   }
   return available;
 }
@@ -209,19 +248,19 @@ export async function installTools(cfg: Config, box: string) {
  * infrastructure); claimed pool boxes are real sessions and do count.
  */
 export async function countBoxes(cfg: Config): Promise<number> {
-  const r = await msb(cfg, ["ls"], false);
-  const names = r.stdout
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l && !l.startsWith("NAME") && !/no sandboxes/i.test(l))
-    .map((l) => l.split(/\s+/)[0]);
+  const r = await msb(cfg, ["ls", "--format", "json"], false);
+  const entries = parseLsJson(r.stdout).filter((e) => isRunning(e.status));
 
   let count = 0;
-  for (const name of names) {
-    if (name.startsWith(POOL_PREFIX)) {
-      // Only count claimed pool boxes.
-      const c = await exec(cfg, name, "test -f /.claimed && echo claimed || echo free");
-      if (c.stdout.trim().endsWith("claimed")) count++;
+  for (const e of entries) {
+    if (e.name.startsWith(POOL_PREFIX)) {
+      // Only count claimed pool boxes; a dead/unexecable one doesn't hold a session.
+      try {
+        const c = await exec(cfg, e.name, "test -f /.claimed && echo claimed || echo free");
+        if (c.stdout.trim().endsWith("claimed")) count++;
+      } catch {
+        // unexecable => not a live session
+      }
     } else {
       count++;
     }
