@@ -66,6 +66,16 @@ async function handle(req: Request, res: Response) {
     };
     const server = new McpServer({ name: "agent-sandbox", version: "0.1.0" });
     registerTools(server as unknown as Parameters<typeof registerTools>[0], cfg, deps);
+    // Log what the client advertises on connect — decisive for whether we can use native
+    // Elicitation (server→client questions mid tool-call) vs. the poll-based fallback.
+    server.server.oninitialized = () => {
+      const caps = server.server.getClientCapabilities();
+      const info = server.server.getClientVersion();
+      console.error(
+        `[mcp] client connected: ${info?.name ?? "?"}@${info?.version ?? "?"} ` +
+          `capabilities=${JSON.stringify(caps ?? {})}`
+      );
+    };
     await server.connect(transport);
   }
 
