@@ -7,11 +7,16 @@
  *   maps the ElicitResult back to our ElicitOutcome (accept+answer / decline / cancel).
  * - progress: a keep-alive logging notification during long, question-less waits (best-effort).
  */
+import { ElicitResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ServerBridge } from "./handlers.js";
 import type { ElicitOutcome } from "./interactive.js";
 
-/** The single-field form schema we elicit: a free-text answer to the box's question. */
+/**
+ * The single-field form schema we elicit: a free-text answer to the box's question. Each property
+ * carries a `title` (the shape Cursor's v1.5 form-style elicitation renders) and stays flat with a
+ * primitive `string` type (Cursor supports only string/number/boolean/enum, no nesting).
+ */
 const ANSWER_SCHEMA = {
   type: "object" as const,
   properties: {
@@ -35,19 +40,23 @@ export function makeBridge(server: McpServer): ServerBridge {
     async elicit(question: string): Promise<ElicitOutcome> {
       console.error(`[elicit] sending elicitation/create: ${question.slice(0, 80)}`);
       try {
-        const res = await core.elicitInput(
+        // Send the raw elicitation/create WITHOUT the newer `mode` field. Cursor's v1.5 form-style
+        // elicitation predates the 2025-11-25 `mode`/`form`/`url` capability shape; sending `mode`
+        // makes it treat the call as unsupported and decline instantly with no card. The spec says a
+        // missing mode MUST be treated as "form", so this is the most compatible request.
+        const res = await core.request(
           {
-            mode: "form",
-            message: question,
-            requestedSchema: ANSWER_SCHEMA,
+            method: "elicitation/create",
+            params: { message: question, requestedSchema: ANSWER_SCHEMA },
           },
-          // Elicitation is a human-in-the-loop prompt: give the user real time to answer instead of
-          // the SDK's short default request timeout (which would reject the card as "timed out").
+          ElicitResultSchema,
+          // Human-in-the-loop: hold the request open for a real answer instead of the SDK's short
+          // default request timeout (which would otherwise reject the card as "timed out").
           { timeout: 3_600_000, resetTimeoutOnProgress: true }
         );
         console.error(`[elicit] result action=${res.action}`);
         if (res.action === "accept") {
-          const answer = typeof res.content?.answer === "string" ? res.content.answer : "";
+          const answer = typeof (res.content as any)?.answer === "string" ? (res.content as any).answer : "";
           return { action: "accept", answer };
         }
         return { action: res.action === "decline" ? "decline" : "cancel" };
