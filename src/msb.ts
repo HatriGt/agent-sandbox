@@ -344,6 +344,27 @@ function agentWorkdir(repos?: RepoLayout[]): string {
 }
 
 /**
+ * Mark every /workspace repo dir (and /workspace itself) as trusted in ~/.claude.json so Claude
+ * honors settings instead of logging "workspace has not been trusted". Trust is keyed to the dir;
+ * we set hasTrustDialogAccepted for each so a single- or multi-repo layout is covered. Uses node
+ * (present in the image) to edit the JSON — no jq dependency. Idempotent.
+ */
+async function trustWorkspace(cfg: Config, box: string): Promise<void> {
+  const script =
+    `node -e '` +
+    `const fs=require("fs"),os=require("os"),p=require("path");` +
+    `const f=p.join(os.homedir(),".claude.json");` +
+    `let j={};try{j=JSON.parse(fs.readFileSync(f,"utf8"))}catch(e){}` +
+    `j.projects=j.projects||{};` +
+    `const dirs=["/workspace"];` +
+    `try{for(const d of fs.readdirSync("/workspace",{withFileTypes:true}))if(d.isDirectory())dirs.push("/workspace/"+d.name)}catch(e){}` +
+    `for(const d of dirs){j.projects[d]=j.projects[d]||{};j.projects[d].hasTrustDialogAccepted=true;}` +
+    `fs.writeFileSync(f,JSON.stringify(j));` +
+    `'`;
+  await exec(cfg, box, script);
+}
+
+/**
  * Shell to write per-OWNER git credentials inside the box so a multi-repo/multi-owner task
  * authenticates each repo with the right token. GitHub shares one host across all owners, so we
  * enable `credential.useHttpPath` and write one `~/.git-credentials` line per owner path — git then
@@ -414,9 +435,15 @@ const TASK_MARK = "/workspace/.agent.task"; // the current task/follow-up text, 
  * the exit code); `status` reads it. `resume=true` continues the existing Claude session (-c).
  */
 function agentSh(workdir: string, resume: boolean): string {
+  // --setting-sources user: load ONLY user settings, so a cloned repo's own .claude/settings.json
+  // (and its hooks) is never loaded. Target repos commonly ship a UserPromptSubmit "plugin gate"
+  // hook that hard-blocks every prompt when marketplace plugins aren't installed — which they aren't
+  // in a headless box — making Claude exit 0 doing nothing. Skipping project settings avoids that;
+  // we grant tools ourselves via --allowedTools, so we don't need the repo's permissions.allow.
+  const settingSources = `--setting-sources user`;
   const claude = resume
-    ? `claude -c -p "$AGENT_TASK"`
-    : `claude -p "$AGENT_TASK"`;
+    ? `claude -c -p "$AGENT_TASK" ${settingSources}`
+    : `claude -p "$AGENT_TASK" ${settingSources}`;
   // Clear any pending question up front: a new run or a resume (which carries the answer) means the
   // previous question is now handled, so status stops reporting "waiting".
   const inner =
@@ -506,6 +533,7 @@ export async function runAgentTask(
   const workdir = agentWorkdir(repos);
   await msb(cfg, ["exec", box, ...env, "--", "sh", "-lc", bootstrapScript(cfg)]);
   await applyGitCredentials(cfg, box, creds);
+  await trustWorkspace(cfg, box);
   return msb(cfg, ["exec", box, ...env, "--", "sh", "-lc", agentSh(workdir, false)]);
 }
 
@@ -601,6 +629,7 @@ export async function resumeAgentTask(
   // Ephemeral secrets are appended as extra -e flags on THIS exec only (not stored).
   const env = [...agentEnvFlags(cfg, message, repos, creds?.primaryToken), ...secretEnvFlags(secrets)];
   await applyGitCredentials(cfg, box, creds);
+  await trustWorkspace(cfg, box);
   return msb(cfg, ["exec", box, ...env, "--", "sh", "-lc", agentSh(agentWorkdir(repos), true)]);
 }
 
