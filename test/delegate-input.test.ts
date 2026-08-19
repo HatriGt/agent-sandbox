@@ -6,10 +6,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { validateDelegateInput } from "../src/delegate-input.ts";
 
-test("remote: missing repo -> ask (not error)", () => {
-  const r = validateDelegateInput({ source: "git", task: "fix the bug" });
-  assert.equal(r.ok, false);
-  assert.match(r.question!, /repo/i);
+test("task-only (no repo): valid -> empty repos, no repo required", () => {
+  // A sandbox doesn't need a repo. "Write me a detailed report about X" is a valid delegation.
+  const r = validateDelegateInput({ source: "git", task: "write a detailed report about X" });
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.plan!.repos, []);
+  assert.equal(r.plan!.repo, ""); // back-compat accessor: no repo
+  assert.equal(r.plan!.task, "write a detailed report about X");
 });
 
 test("remote: missing task -> ask", () => {
@@ -18,11 +21,11 @@ test("remote: missing task -> ask", () => {
   assert.match(r.question!, /task/i);
 });
 
-test("remote: missing both -> ask lists both", () => {
+test("no repo AND no task -> ask for task only (repo is optional now)", () => {
   const r = validateDelegateInput({ source: "git" });
   assert.equal(r.ok, false);
-  assert.match(r.question!, /repo/i);
   assert.match(r.question!, /task/i);
+  assert.doesNotMatch(r.question!, /repo/i);
 });
 
 test("remote: repo + task -> ok, ref optional", () => {
@@ -39,10 +42,10 @@ test("remote: ref carried through when given", () => {
   assert.equal(r.plan!.ref, "main");
 });
 
-test("local: missing repo path -> ask", () => {
+test("local task-only (no repo path): valid -> empty repos", () => {
   const r = validateDelegateInput({ source: "local", task: "t" });
-  assert.equal(r.ok, false);
-  assert.match(r.question!, /repo|path/i);
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.plan!.repos, []);
 });
 
 test("local: repo path + task -> ok", () => {
@@ -51,10 +54,11 @@ test("local: repo path + task -> ok", () => {
   assert.equal(r.plan!.repo, "/Users/me/proj");
 });
 
-test("blank strings are treated as missing", () => {
+test("blank repo string is treated as task-only (not an error)", () => {
+  // A blank single `repo` shorthand means "no repo" — task-only, not a broken input.
   const r = validateDelegateInput({ source: "git", repo: "   ", task: "t" });
-  assert.equal(r.ok, false);
-  assert.match(r.question!, /repo/i);
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.plan!.repos, []);
 });
 
 test("question is plain guidance to re-call, not a thrown error", () => {
@@ -105,10 +109,10 @@ test("repos[] present but task missing -> ask for task", () => {
   assert.match(r.question!, /task/i);
 });
 
-test("empty repos[] AND no repo -> ask for repo", () => {
+test("empty repos[] AND no repo, with task -> task-only ok", () => {
   const r = validateDelegateInput({ source: "git", repos: [], task: "t" });
-  assert.equal(r.ok, false);
-  assert.match(r.question!, /repo/i);
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.plan!.repos, []);
 });
 
 test("workspaceName is derived from the repo (basename / owner-name)", () => {

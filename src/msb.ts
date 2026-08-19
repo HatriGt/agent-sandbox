@@ -62,15 +62,20 @@ function egressFlags(cfg: Config, allowAll = cfg.egressAllowAll): string[] {
  * `msb copy <dir> box:/dest` copies the dir *into* /dest (trailing /. ignored), so we copy to a
  * temp path then move the contents into /workspace to avoid a nested subdir.
  */
-async function copyTreeIntoBox(cfg: Config, box: string, copyDir: string): Promise<void> {
+async function copyTreeIntoBox(cfg: Config, box: string, copyDir: string | undefined): Promise<void> {
+  // Task-only (no repos): nothing staged — just ensure an empty /workspace exists to run in.
+  if (!copyDir) {
+    await exec(cfg, box, "mkdir -p /workspace");
+    return;
+  }
   await msb(cfg, ["copy", copyDir, `${box}:/.wt`]);
   await exec(cfg, box, "mkdir -p /workspace && cp -a /.wt/. /workspace/ && rm -rf /.wt");
 }
 
 export interface CreateBoxOpts {
   name: string;
-  /** Remote path on the VPS (staging dir) to bake into /workspace at boot. */
-  copyDir: string;
+  /** Remote path on the VPS (staging dir) to bake into /workspace at boot. Omit for task-only. */
+  copyDir?: string;
 }
 
 /**
@@ -102,9 +107,10 @@ export async function createBox(cfg: Config, opts: CreateBoxOpts): Promise<void>
   if (cfg.snapshot) {
     // No -w /workspace here: it doesn't exist in the snapshot at boot. Agent commands cd into
     // it themselves. Copy the staged tree in post-boot (copy-dir is disallowed with snapshots).
+    // Task-only (no copyDir): copyTreeIntoBox just mkdir's an empty /workspace.
     await msb(cfg, [...common, "--from-snapshot", cfg.snapshot, "--", "sleep", "infinity"]);
     await copyTreeIntoBox(cfg, opts.name, opts.copyDir);
-  } else {
+  } else if (opts.copyDir) {
     // Base image: bake the repo in at boot and set the workdir.
     await msb(cfg, [
       ...common,
@@ -117,6 +123,10 @@ export async function createBox(cfg: Config, opts: CreateBoxOpts): Promise<void>
       "sleep",
       "infinity",
     ]);
+  } else {
+    // Base image, task-only: no repo to bake — boot bare, then create an empty /workspace.
+    await msb(cfg, [...common, cfg.image, "--", "sleep", "infinity"]);
+    await copyTreeIntoBox(cfg, opts.name, undefined);
   }
 }
 
@@ -228,7 +238,11 @@ export async function listPoolBoxes(cfg: Config): Promise<string[]> {
  * Claim a warm box for a session: mark it claimed and copy the staged tree into /workspace.
  * The claimed box keeps its pool name as the box id; the caller maps session->box.
  */
-export async function claimWarmBox(cfg: Config, box: string, copyDir: string): Promise<void> {
+export async function claimWarmBox(
+  cfg: Config,
+  box: string,
+  copyDir: string | undefined
+): Promise<void> {
   await exec(cfg, box, "touch /.claimed");
   await copyTreeIntoBox(cfg, box, copyDir);
 }

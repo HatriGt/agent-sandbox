@@ -194,6 +194,11 @@ async function resolveGitAccessImpl(
   let primaryToken: string | undefined;
   let primaryLogin: string | undefined;
 
+  // Task-only (no repos): nothing to resolve — no clone, no per-repo identity, no gh token needed.
+  if (plan.repos.length === 0) {
+    return { ok: true, ownerTokens, ownerLogins };
+  }
+
   // A freshly provided token: probe against the FIRST repo (the one that triggered the ask), store
   // it by login, then let the normal per-repo resolution below pick it up.
   if (opts.githubToken?.trim()) {
@@ -296,7 +301,10 @@ export const deps: HandlerDeps = {
     // 1. Stage every repo into <sessionRoot>/<name> — rsync (local) or fresh git clone (remote).
     //    The whole session root is then copied into /workspace, so each repo -> /workspace/<name>.
     //    Also build name->owner so identity can be set per-repo dir in the box.
-    const sessionRoot = stagingPathFor(runCfg, id);
+    //    TASK-ONLY (no repos): nothing is staged; the box boots with an empty /workspace and the
+    //    agent just works on the task (e.g. "write a detailed report about X").
+    const hasRepos = plan.repos.length > 0;
+    const sessionRoot = hasRepos ? stagingPathFor(runCfg, id) : undefined;
     const repoOwners: Record<string, string> = {};
     for (const r of plan.repos) {
       const dest = repoStagingPath(runCfg, id, r.name);
@@ -323,7 +331,7 @@ export const deps: HandlerDeps = {
     const { box, warm } = await acquireBox(runCfg, id, sessionRoot, eligible);
 
     // Staging is transient (already copied into the box). Clean it; refill pool on claim.
-    void cleanupStaging(runCfg, sessionRoot);
+    if (sessionRoot) void cleanupStaging(runCfg, sessionRoot);
     if (warm) void refillPool(cfg);
 
     // Launch the agent DETACHED (the run keeps going in the box regardless), then BLOCK here until

@@ -88,9 +88,11 @@ export function validateDelegateInput(input: DelegateInput): DelegateValidation 
 
   const missing: string[] = [];
 
-  if (raw.length === 0) {
-    missing.push(input.source === "local" ? "repo (absolute path)" : "repo (owner/name)");
-  } else if (raw.some((r) => blank(r.repo))) {
+  // A repo is OPTIONAL: a sandbox can run a task with no repo at all ("write a report about X").
+  // We only complain about repos that were PROVIDED but are blank inside an explicit repos[] list —
+  // that's a caller mistake, not "no repo". A blank single `repo` shorthand just means "no repo".
+  const blankInReposList = (input.repos ?? []).some((r) => blank(r.repo));
+  if (blankInReposList) {
     missing.push(input.source === "local" ? "repo (absolute path)" : "repo (owner/name)");
   }
   if (blank(input.task)) {
@@ -105,8 +107,10 @@ export function validateDelegateInput(input: DelegateInput): DelegateValidation 
     };
   }
 
+  // Drop any blank single-repo shorthand: it means task-only.
+  const usable = raw.filter((r) => !blank(r.repo));
   const refs = uniquifyNames(
-    raw.map((r) => ({
+    usable.map((r) => ({
       repo: r.repo.trim(),
       ref: blank(r.ref) ? undefined : r.ref!.trim(),
       name: repoDirName(r.repo),
@@ -119,8 +123,9 @@ export function validateDelegateInput(input: DelegateInput): DelegateValidation 
       source: input.source,
       repos: refs,
       task: input.task!.trim(),
-      repo: refs[0].repo,
-      ref: refs[0].ref,
+      // Back-compat accessor: first repo, or "" in task-only mode.
+      repo: refs[0]?.repo ?? "",
+      ref: refs[0]?.ref,
     },
   };
 }

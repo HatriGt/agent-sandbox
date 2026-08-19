@@ -36,20 +36,23 @@ test("registers the core tools", () => {
   }
 });
 
-test("delegate: git source missing repo -> asks, does NOT call runDelegation", async () => {
+test("delegate: git source, task-only (no repo) -> runs with empty repos", async () => {
   const s = fakeServer();
-  let called = false;
+  let seen: any = null;
   registerTools(s as any, cfg, {
     countBoxes: async () => 0,
-    runDelegation: async () => {
-      called = true;
-      return { box: "x", warm: false, output: "" };
+    resolveGitAccess: okAccess,
+    runDelegation: async (_cfg: any, plan: any) => {
+      seen = plan;
+      return { box: "task-box", warm: false, output: "REPORT_OK" };
     },
   } as any);
 
-  const res = await s.tools.delegate.handler({ source: "git", task: "do it" });
-  assert.match(textOf(res), /repo/i);
-  assert.equal(called, false, "runDelegation must not run when info is missing");
+  const res = await s.tools.delegate.handler({ source: "git", task: "write a report about X" });
+  assert.deepEqual(seen.repos, [], "task-only => empty repos");
+  assert.equal(seen.task, "write a report about X");
+  assert.match(textOf(res), /task-box/);
+  assert.match(textOf(res), /REPORT_OK/);
 });
 
 test("delegate: valid input -> calls runDelegation and returns its output", async () => {
@@ -90,11 +93,20 @@ test("delegate: local with no repo falls back to cfg.workspaceDir (IDE-provided)
   assert.match(textOf(res), /b/);
 });
 
-test("delegate: local with no repo AND no workspaceDir -> asks", async () => {
+test("delegate: local with no repo AND no workspaceDir -> task-only (no repo needed)", async () => {
   const s = fakeServer();
-  registerTools(s as any, cfg, { countBoxes: async () => 0, runDelegation: async () => ({ box: "b", warm: false, output: "" }) } as any);
+  let seen: any = null;
+  registerTools(s as any, cfg, {
+    countBoxes: async () => 0,
+    resolveGitAccess: okAccess,
+    runDelegation: async (_cfg: any, plan: any) => {
+      seen = plan;
+      return { box: "b", warm: false, output: "" };
+    },
+  } as any);
   const res = await s.tools.delegate.handler({ task: "do it" }); // no repo, cfg has no workspaceDir
-  assert.match(textOf(res), /repo|path/i);
+  assert.deepEqual(seen.repos, [], "no repo + no workspaceDir => task-only");
+  assert.match(textOf(res), /b/);
 });
 
 test("delegate: repos[] passes the full list through to runDelegation", async () => {

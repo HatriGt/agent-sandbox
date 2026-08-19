@@ -28,7 +28,7 @@ export function poolEligible(cfg: Config, allowDomainsProvided: boolean): boolea
 export async function acquireBox(
   cfg: Config,
   session: string,
-  copyDir: string,
+  copyDir: string | undefined,
   eligible: boolean
 ): Promise<{ box: string; warm: boolean }> {
   if (eligible) {

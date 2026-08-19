@@ -118,6 +118,8 @@ export function registerTools(
       "trees (Mac/Cursor); source=git clones owner/name on the VPS (remote clients). A task may span " +
       "several repos open in the same IDE window — pass repos:[{repo,ref?},...]; each lands in " +
       "/workspace/<name> in ONE box and gets its own PR. A single `repo` still works. " +
+      "A repo is OPTIONAL: pass ONLY a task (no repo/repos) for repo-less work — e.g. 'write a " +
+      "detailed report about X' — and the box boots with an empty /workspace. " +
       "Missing info is asked back, not failed. " +
       "FULLY INTERACTIVE — this single call runs the whole delegation to completion. It ships the " +
       "repo, launches the in-box agent, and drives the entire conversation itself: whenever the agent " +
@@ -136,7 +138,10 @@ export function registerTools(
       repo: z
         .string()
         .optional()
-        .describe("Single-repo shorthand. local: absolute path. git: owner/name or GitHub URL."),
+        .describe(
+          "Single-repo shorthand (OPTIONAL — omit for a repo-less, task-only run). local: absolute " +
+            "path. git: owner/name or GitHub URL."
+        ),
       repos: z
         .array(
           z.object({
