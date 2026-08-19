@@ -12,6 +12,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { loadDotEnv } from "./dotenv.js";
 import { loadConfig } from "./config.js";
 import { registerTools } from "./handlers.js";
+import { makeBridge } from "./server-bridge.js";
 import { deps } from "./deps.js";
 import { refillPool } from "./pool.js";
 
@@ -22,7 +23,7 @@ loadDotEnv();
 const cfg = loadConfig();
 
 const server = new McpServer({ name: "agent-sandbox", version: "0.1.0" });
-registerTools(server as unknown as Parameters<typeof registerTools>[0], cfg, deps);
+registerTools(server as unknown as Parameters<typeof registerTools>[0], cfg, deps, makeBridge(server));
 
 const transport = new StdioServerTransport();
 await server.connect(transport);

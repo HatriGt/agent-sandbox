@@ -99,29 +99,29 @@ resume({
 
 ## How delegation flows (A2A)
 
-`delegate` is **interactive and blocking**: it ships the repo, boots the box, launches the agent,
-and then **holds the MCP call open** while the agent works — returning the moment the agent reaches a
-boundary (asks a question → `run:waiting`, or finishes → `run:done`). The open call is the listener,
-so the caller takes turns with the box, just like pairing with a teammate — it can't fire-and-forget:
+`delegate` is **fully interactive** via native MCP **Elicitation**: one call runs the task to
+completion. It ships the repo, launches the agent, and drives the whole conversation from *inside the
+still-open tool call* — when the box needs a decision, the server sends an `elicitation/create`
+request back to the client, which shows the user a native prompt; the answer flows back and the box
+continues. The caller can't fire-and-forget, because the protocol keeps the call open until done:
 
 ```
-delegate ──► launch + WAIT (server-side) ──► returns at the first boundary:
-                                              │  run:waiting → the box asked something
-   report PR/result ◄── run:done  ◄───────────┤  run:done    → finished
-        to the user                           └──► run:waiting ─────────────┐
-                                                                            ▼
-                                                        answer (from repo/context or ask you) +
-                                                        resume(session, "<answer>", secrets?)  ──┐
-                                                          (resume ALSO waits for the next         │
-                                                           boundary, and auto-starts a box that   │
-                                                           idle-stopped while waiting)            │
-                                                          continues the SAME claude session  ◄────┘
+delegate ──► launch, then loop INSIDE the call:
+   ┌───────────────────────────────────────────────────────────┐
+   │  waitForBoundary                                            │
+   │    ├─ done            → return result (call ends) ─────────┼──► report PR/result to user
+   │    ├─ waiting(question) → elicit(question) ──► native prompt│
+   │    │       user answers ──► resume box ──► loop ◄───────────┤
+   │    └─ timeout (still running) → progress ping ──► loop ◄────┘
+   └───────────────────────────────────────────────────────────┘
 ```
 
-If a step runs longer than the wait cap (`WAIT_TIMEOUT_MS`, default 75s — under the client's HTTP
-timeout), the call returns "still working — reconnect with `status(session)`", and `status` returns
-the question/result as soon as there is one. So the fast common case feels synchronous, while a long
-build never hangs the IDE.
+Why this instead of "block then tell the agent to poll": an MCP `tools/call` returns exactly one
+result, and *returning* is what freed the agent to stop ("I'll report back"). Elicitation is a
+server→client request the protocol lets us send *before* the final result — so the turn-taking is
+enforced by the transport, not by instructions. On a client that doesn't advertise elicitation, the
+call falls back to returning the pending question and you answer via `resume`. `resume` also
+auto-starts a box that idle-stopped while waiting; `status` reconnects and resumes the same loop.
 
 The in-box agent reaches back through **one channel** (`/workspace/.agent.question` → `run:waiting`)
 whenever it hits something it shouldn't guess through:

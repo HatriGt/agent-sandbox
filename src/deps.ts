@@ -24,7 +24,8 @@ import {
   gatherWatch,
   type AgentCreds,
 } from "./msb.js";
-import { waitForBoundary } from "./wait.js";
+import { runInteractive } from "./interactive.js";
+import type { Interact } from "./handlers.js";
 import { formatMonitor, formatWatch } from "./monitor.js";
 import { newSessionId } from "./session.js";
 import {
@@ -45,32 +46,42 @@ import { localRepoOwnerName, parseOwnerName } from "./git-remote.js";
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /**
- * After launching (delegate) or continuing (resume) the in-box agent, hold the MCP call open until
- * the agent hits a boundary — a question (`waiting`) or completion (`done`) — or the timeout fires.
- * This is the interactive A2A turn-taking: the calling agent can't end its turn early because the
- * tool call hasn't returned. On a boundary we hand back the question/result directly (answer via
- * resume, or report to the user). On timeout we tell the caller it's still working and to reconnect
- * with status — so a genuinely long step never hangs the IDE past its HTTP timeout.
+ * Drive an interactive delegation to completion inside the still-open tool call.
+ *
+ * When the client supports native elicitation (Cursor does — `interact.elicit` is set), the loop
+ * turns each in-box question into a native prompt via `elicit`, feeds the answer back with
+ * `resumeAgentTask`, and continues — so the whole ask→answer→continue conversation happens WITHOUT
+ * the tool call ever returning (the protocol enforces the turn-taking; the agent can't wander off).
+ * Progress notifications keep a long, question-less run alive.
+ *
+ * When the client can't elicit (other MCP clients / CI), the loop returns at the first question with
+ * the poll-model fallback string so the caller can reconnect via `status`.
  */
-async function waitAndFormat(cfg: Config, box: string): Promise<string> {
-  const r = await waitForBoundary({
+async function driveInteractive(cfg: Config, box: string, interact?: Interact): Promise<string> {
+  const r = await runInteractive({
     poll: () => agentBoundary(cfg, box),
+    elicit: interact?.elicit,
+    resume: async (answer: string) => {
+      // Re-resolve per-repo identity/token (same as an explicit resume) so the continued run commits
+      // as the access-correct account, then continue the in-box Claude session with the answer.
+      const creds = await resolveCredsForBox(cfg, box);
+      await resumeAgentTask(cfg, box, answer, undefined, undefined, creds);
+    },
+    progress: interact?.progress,
     sleep,
     timeoutMs: cfg.waitTimeoutMs,
     intervalMs: cfg.waitIntervalMs,
   });
-  if (!r.reached) {
+
+  if (r.status === "waiting") {
+    // Fallback path (no elicitation): hand the question back with an emphatic reconnect instruction.
     return (
-      `run:running — NOT DONE. The task is still executing after ${Math.round(cfg.waitTimeoutMs / 1000)}s; ` +
-      `it has NOT finished and has NOT asked anything yet.\n` +
-      `YOU ARE NOT DONE. Do NOT tell the user "I'll report back" or end your turn. You MUST immediately ` +
-      `call status({session:"${box}"}) again — that call blocks the same way and returns the question or ` +
-      `result the moment there is one. Keep calling status until you get run:waiting (answer via resume) ` +
-      `or run:done (report the outcome). Treat this exactly like a tool that said "call me again".\n` +
-      `---LOG---\n${r.text}`
+      `${r.text}\n\n` +
+      `(Interactive prompt unavailable on this client.) Answer with resume({session:"${box}",` +
+      `message:"<answer>"}); it continues the session and returns the next question or the result.`
     );
   }
-  return r.text;
+  return r.text; // done or cancelled
 }
 
 /** GitHub owners this box works with, read from each repo's `origin` remote under /workspace. */
@@ -263,7 +274,8 @@ export const deps: HandlerDeps = {
     cfg: Config,
     plan: DelegatePlan,
     allowDomains?: string[],
-    creds?: AgentCreds
+    creds?: AgentCreds,
+    interact?: Interact
   ): Promise<DelegationResult> {
     // Per-call egress extras merge onto the curated allowlist for this delegation only.
     const runCfg = allowDomains?.length
@@ -314,21 +326,20 @@ export const deps: HandlerDeps = {
     // open MCP call is the "listener" — this is what makes the calling agent wait for the box
     // instead of ending its turn. A timeout returns "still working, reconnect via status".
     await runAgentTask(runCfg, box, plan.task, plan.repos, runCreds);
-    const output = await waitAndFormat(runCfg, box);
+    const output = await driveInteractive(runCfg, box, interact);
     return { box, warm, output };
   },
 
-  async status(cfg, session) {
-    // status is the reconnect path for a delegate/resume that timed out mid-task. It BLOCKS the same
-    // way (wait until the box asks something or finishes, or the cap elapses) so the caller can just
-    // keep calling status to stay attached — no busy-polling. A quick box-level line is prefixed for
-    // context (running/stopped/gone).
+  async status(cfg, session, interact) {
+    // status reconnects and drives the SAME interactive loop: on a client that can elicit, calling
+    // status resumes the ask→answer→continue conversation; otherwise it blocks to the next boundary
+    // and returns it. A quick box-level line is prefixed for context (running/stopped/gone).
     const box = await msbStatus(cfg, session);
-    const progress = await waitAndFormat(cfg, session);
+    const progress = await driveInteractive(cfg, session, interact);
     return `state:\n${box}\n\n${progress}`;
   },
 
-  async resume(cfg, session, message, secrets) {
+  async resume(cfg, session, message, secrets, interact) {
     // If a GitHub token is supplied here, probe + store it (login-keyed) so it's reusable later; it's
     // also injected ephemerally for this step via secrets. Best-effort capture (never breaks resume).
     if (secrets) {
@@ -351,7 +362,7 @@ export const deps: HandlerDeps = {
     // question, or done) or timeout — same turn-taking as delegate, so the answer→continue→next
     // step feels synchronous to the caller.
     await resumeAgentTask(cfg, session, message, undefined, secrets, creds);
-    return waitAndFormat(cfg, session);
+    return driveInteractive(cfg, session, interact);
   },
 
   async teardown(cfg, session) {

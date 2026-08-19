@@ -15,6 +15,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { loadDotEnv } from "./dotenv.js";
 import { loadConfig } from "./config.js";
 import { registerTools } from "./handlers.js";
+import { makeBridge } from "./server-bridge.js";
 import { deps } from "./deps.js";
 import { refillPool } from "./pool.js";
 import { checkBearer, checkDashboardAuth } from "./http-auth.js";
@@ -65,7 +66,12 @@ async function handle(req: Request, res: Response) {
       if (transport!.sessionId) delete transports[transport!.sessionId];
     };
     const server = new McpServer({ name: "agent-sandbox", version: "0.1.0" });
-    registerTools(server as unknown as Parameters<typeof registerTools>[0], cfg, deps);
+    registerTools(
+      server as unknown as Parameters<typeof registerTools>[0],
+      cfg,
+      deps,
+      makeBridge(server)
+    );
     // Log what the client advertises on connect — decisive for whether we can use native
     // Elicitation (server→client questions mid tool-call) vs. the poll-based fallback.
     server.server.oninitialized = () => {

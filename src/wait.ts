@@ -27,6 +27,8 @@ export function isBoundary(state: RunState): boolean {
 export interface PollResult {
   state: RunState;
   text: string;
+  /** The raw question text when state==="waiting" (used verbatim as the elicitation prompt). */
+  question?: string;
 }
 
 export interface WaitOpts {
@@ -49,6 +51,8 @@ export interface WaitResult {
   state: RunState;
   /** The last status text (the question when waiting, the result when done). */
   text: string;
+  /** The raw question text when state==="waiting" (propagated from the poll). */
+  question?: string;
 }
 
 /**
@@ -65,14 +69,17 @@ export async function waitForBoundary(opts: WaitOpts): Promise<WaitResult> {
   for (let first = true; ; first = false) {
     if (!first) {
       await opts.sleep(opts.intervalMs);
-      if (now() > deadline) return { reached: false, state: last.state, text: last.text };
+      if (now() > deadline)
+        return { reached: false, state: last.state, text: last.text, question: last.question };
     }
     try {
       last = await opts.poll();
-      if (isBoundary(last.state)) return { reached: true, state: last.state, text: last.text };
+      if (isBoundary(last.state))
+        return { reached: true, state: last.state, text: last.text, question: last.question };
     } catch {
       // transient (e.g. SSH blip) — treat as a non-boundary tick and keep waiting.
     }
-    if (first && now() > deadline) return { reached: false, state: last.state, text: last.text };
+    if (first && now() > deadline)
+      return { reached: false, state: last.state, text: last.text, question: last.question };
   }
 }

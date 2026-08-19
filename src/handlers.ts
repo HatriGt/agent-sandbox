@@ -14,6 +14,17 @@ import type { Config } from "./config.js";
 import { validateDelegateInput, type DelegateSource, type DelegatePlan } from "./delegate-input.js";
 import type { GitAccessResolution } from "./gh-token-store.js";
 import type { AgentCreds } from "./msb.js";
+import type { ElicitOutcome } from "./interactive.js";
+
+/**
+ * Interactive callbacks the handler supplies to the deps layer so the wait loop can talk to the
+ * client mid tool-call: `elicit` asks the user a question natively (undefined when the client can't
+ * elicit — deps then falls back to returning the question), `progress` keeps a long run alive.
+ */
+export interface Interact {
+  elicit?: (question: string) => Promise<ElicitOutcome>;
+  progress?: (message: string) => Promise<void>;
+}
 
 export interface DelegationResult {
   box: string;
@@ -41,16 +52,18 @@ export interface HandlerDeps {
     cfg: Config,
     plan: DelegatePlan,
     allowDomains?: string[],
-    creds?: AgentCreds
+    creds?: AgentCreds,
+    interact?: Interact
   ): Promise<DelegationResult>;
-  /** msb status + recent log. */
-  status(cfg: Config, session: string): Promise<string>;
+  /** msb status + recent log (blocks to the next boundary; interactive when elicit is available). */
+  status(cfg: Config, session: string, interact?: Interact): Promise<string>;
   /** Continue the in-box session, optionally injecting ephemeral secrets on this exec only. */
   resume(
     cfg: Config,
     session: string,
     message: string,
-    secrets?: Record<string, string>
+    secrets?: Record<string, string>,
+    interact?: Interact
   ): Promise<string>;
   /** Stop + remove the box. */
   teardown(cfg: Config, session: string): Promise<void>;
@@ -69,11 +82,36 @@ interface ToolRegistrar {
   tool(name: string, description: string, schema: unknown, handler: (args: any) => any): void;
 }
 
+/**
+ * Bridge to the concrete MCP server for interactive features, kept as a tiny interface so handlers
+ * stay transport-agnostic and tests can omit it. `canElicit` reflects the client's advertised
+ * capability; `elicit` sends the native question; `progress` sends a keep-alive notification.
+ */
+export interface ServerBridge {
+  canElicit(): boolean;
+  elicit(question: string): Promise<ElicitOutcome>;
+  progress(message: string): Promise<void>;
+}
+
 function text(t: string) {
   return { content: [{ type: "text" as const, text: t }] };
 }
 
-export function registerTools(server: ToolRegistrar, cfg: Config, deps: HandlerDeps): void {
+/** Build the per-call Interact from the bridge: elicit only when the client supports it. */
+function interactFrom(bridge?: ServerBridge): Interact {
+  if (!bridge) return {};
+  return {
+    elicit: bridge.canElicit() ? (q: string) => bridge.elicit(q) : undefined,
+    progress: (m: string) => bridge.progress(m),
+  };
+}
+
+export function registerTools(
+  server: ToolRegistrar,
+  cfg: Config,
+  deps: HandlerDeps,
+  bridge?: ServerBridge
+): void {
   server.tool(
     "delegate",
     "Delegate a task to an isolated microVM running Claude Code. source=local ships local working " +
@@ -81,14 +119,15 @@ export function registerTools(server: ToolRegistrar, cfg: Config, deps: HandlerD
       "several repos open in the same IDE window — pass repos:[{repo,ref?},...]; each lands in " +
       "/workspace/<name> in ONE box and gets its own PR. A single `repo` still works. " +
       "Missing info is asked back, not failed. " +
-      "INTERACTIVE & BLOCKING — this call ships the repo, launches the in-box agent, and then WAITS " +
-      "until the agent either asks a question (run:waiting) or finishes (run:done), and only THEN " +
-      "returns. So the return value already tells you what to do: on run:waiting, answer it (from " +
-      "repo/context if you can, else ask the user) via resume(session, <answer>) — resume BLOCKS the " +
-      "same way and returns the next question or the result. On run:done, report the outcome (PR " +
-      "link / result) to the user. Only if the reply says 'still working' (a long step exceeded the " +
-      "wait) do you reconnect with status(session). Treat this like pairing with a teammate — the " +
-      "call holds the line open for you; do NOT fire-and-forget or say 'I'll report back later'.",
+      "FULLY INTERACTIVE — this single call runs the whole delegation to completion. It ships the " +
+      "repo, launches the in-box agent, and drives the entire conversation itself: whenever the agent " +
+      "needs a decision it asks YOU directly via a native prompt (MCP elicitation), and continues " +
+      "with your answer — all without returning. You normally do NOTHING between: just answer the " +
+      "prompts as they pop up. The call returns only when the task is DONE (report the PR link / " +
+      "result to the user) or was cancelled (you declined a prompt). On the rare client without " +
+      "elicitation support it instead returns the pending question and you answer via " +
+      "resume(session, <answer>). Either way: do NOT say 'I'll report back later' — the work happens " +
+      "inside this call.",
     {
       source: z
         .enum(["local", "git"])
@@ -196,7 +235,7 @@ export function registerTools(server: ToolRegistrar, cfg: Config, deps: HandlerD
         );
       }
 
-      const r = await deps.runDelegation(cfg, v.plan, allowDomains, creds);
+      const r = await deps.runDelegation(cfg, v.plan, allowDomains, creds, interactFrom(bridge));
       const repoLine =
         v.plan.repos.length > 1
           ? `\nrepos: ${v.plan.repos.map((x) => `${x.repo} -> /workspace/${x.name}`).join(", ")}`
@@ -211,15 +250,14 @@ export function registerTools(server: ToolRegistrar, cfg: Config, deps: HandlerD
 
   server.tool(
     "status",
-    "Reconnect to a delegated session and WAIT for its next boundary. Like delegate/resume, this " +
-      "call BLOCKS until the in-box agent asks a question (run:waiting) or finishes (run:done), then " +
-      "returns that — so it's the tool to call after a delegate/resume reply said 'NOT DONE, call " +
-      "status'. If it again returns 'NOT DONE' (the task is still running past the wait cap), call " +
-      "status AGAIN immediately — keep doing so until you get run:waiting or run:done. On run:waiting, " +
-      "answer from repo/context if you can (else ask the user) and resume(session, <answer>); on " +
-      "run:done, report the outcome. Never end your turn on a 'NOT DONE' reply.",
+    "Reconnect to a delegated session and resume driving it interactively — same as delegate: it " +
+      "runs the ask (native prompt) → answer → continue loop and returns only when the task is DONE " +
+      "or cancelled. Use it if a delegate/resume call was interrupted, or (on a client without " +
+      "elicitation) after answering a returned question. On such clients it returns the next pending " +
+      "question; answer via resume(session, <answer>). Never end your turn while it still reports a " +
+      "pending question or in-flight run.",
     { session: z.string().describe("Session id returned by delegate.") },
-    async ({ session }: { session: string }) => text(await deps.status(cfg, session))
+    async ({ session }: { session: string }) => text(await deps.status(cfg, session, interactFrom(bridge)))
   );
 
   server.tool(
@@ -252,7 +290,7 @@ export function registerTools(server: ToolRegistrar, cfg: Config, deps: HandlerD
       message: string;
       secrets?: Record<string, string>;
     }) => {
-      const out = await deps.resume(cfg, session, message, secrets);
+      const out = await deps.resume(cfg, session, message, secrets, interactFrom(bridge));
       return text(`Resumed session=${session}\n\n${out}`);
     }
   );
