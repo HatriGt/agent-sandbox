@@ -80,7 +80,13 @@ export function registerTools(server: ToolRegistrar, cfg: Config, deps: HandlerD
       "trees (Mac/Cursor); source=git clones owner/name on the VPS (remote clients). A task may span " +
       "several repos open in the same IDE window — pass repos:[{repo,ref?},...]; each lands in " +
       "/workspace/<name> in ONE box and gets its own PR. A single `repo` still works. " +
-      "Missing info is asked back, not failed.",
+      "Missing info is asked back, not failed. " +
+      "ASYNC — this returns a session id IMMEDIATELY; the agent keeps working in the background. You " +
+      "are NOT done: do NOT end your turn or tell the user 'I'll report back later'. Instead POLL " +
+      "status(session) in a loop (short waits between calls) until it reports run:waiting or run:done. " +
+      "On run:waiting, answer the question (from repo/context if you can, else ask the user) and " +
+      "resume(session, <answer>), then keep polling. On run:done, report the outcome (PR link / result) " +
+      "to the user. Treat this like an interactive coding session with a teammate, not fire-and-forget.",
     {
       source: z
         .enum(["local", "git"])

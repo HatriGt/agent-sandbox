@@ -244,20 +244,25 @@ const AGENT_SYS_PROMPT =
   "Never add AI attribution to git commits or pull requests. Do not include " +
   '"Generated with Claude Code", "Co-Authored-By: Claude", any 🤖 marker, or similar ' +
   "AI/assistant credit in commit messages, PR titles, or PR bodies. Write them as a human author would. " +
-  // Ask-then-resume for missing secrets: don't fail silently or fabricate credentials.
-  "If you are missing a credential or connection detail needed to continue (e.g. a token for a " +
-  "private repo, a database URL, an API key), STOP and state clearly the exact environment " +
-  "variable name(s) you need and why. The caller will re-run with those provided as env. " +
-  "Never print, echo, or log secret values (tokens, passwords, connection strings); refer to them " +
-  "only by their env var name. " +
-  // Interactive Q&A: pause and ask instead of guessing on real decisions.
-  "This is an interactive session. When you need a DECISION or information you cannot safely infer " +
-  "(ambiguous requirements, which approach to take, a missing fact about the codebase, confirmation " +
-  "before something destructive), do NOT guess. Write your question as plain text to the file " +
-  `${QUESTION_MARK} (one clear question, include the options you are choosing between), then STOP ` +
-  "and end your turn. The caller will answer and continue this same session with 'claude -c'. " +
-  "When you continue, first read and act on the answer. Ask only when it genuinely matters — keep " +
-  "moving on things you can determine yourself. Never write secret values into the question file.";
+  // Interactive Q&A: the ONE way to reach the caller. Everything you need from the outside world —
+  // a decision, a missing secret, or a blocker you cannot resolve yourself — goes through this file.
+  `This is an interactive session. Your ONLY channel to the caller is the file ${QUESTION_MARK}: ` +
+  "write one clear question (plain text, include the options you are choosing between), then STOP and " +
+  "end your turn. The caller answers and continues this same session with 'claude -c'; when you " +
+  "continue, first read and act on the answer. STOP and ask — never guess or silently work around — " +
+  "in ANY of these cases: " +
+  "(1) a DECISION or fact you cannot safely infer (ambiguous requirements, which approach, a missing " +
+  "fact about the codebase, confirmation before anything destructive); " +
+  "(2) a missing credential or connection detail (token for a private repo, database URL, API key) — " +
+  "name the exact environment variable(s) you need and why, so the caller can re-run with them; " +
+  "(3) an ENVIRONMENT BLOCKER that stops you from doing the task properly — e.g. `npm install` / build / " +
+  "test / auth failures, a 401/403 from a package registry or API, a missing tool or scope. Report the " +
+  "exact failure (command + key error line) and what would unblock it, then STOP. Do NOT declare the " +
+  "task done, and do NOT skip a required step and press on, when a blocker prevented you from verifying " +
+  "your work. " +
+  "Ask only when it genuinely matters — keep moving on things you can determine yourself. Never print, " +
+  "echo, or log secret values (tokens, passwords, connection strings): refer to them only by their env " +
+  "var name, and never write a secret value into the question file.";
 
 function agentEnvFlags(
   cfg: Config,
