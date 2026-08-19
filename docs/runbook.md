@@ -335,6 +335,14 @@ and `/workspace/.agent.done` (holding the exit code) when finished; output strea
 - **Idle-stop while waiting:** a box paused on a question can outlive `--idle-timeout` and be Stopped
   by msb (its rootfs + Claude session persist). `resume` calls `startBoxIfStopped` first, so the
   answer reaches the same session instead of failing the exec.
+- **Repo-shipped Claude hooks are bypassed.** A cloned repo can carry its own `.claude/settings.json`
+  with hooks meant for a trusted human setup — e.g. a `UserPromptSubmit` "plugin gate" that hard-
+  blocks every prompt when marketplace plugins aren't installed. In a headless box those plugins
+  aren't present, so the agent would exit 0 having done nothing. Two guards run before every launch:
+  the `claude` invocation passes `--setting-sources user` (project `.claude/settings.json` and its
+  hooks are never loaded; tools come from our `--allowedTools`), and `trustWorkspace` sets
+  `hasTrustDialogAccepted` for `/workspace` and each `/workspace/<repo>` in `~/.claude.json`. This is
+  a per-run fix (flag + bootstrap), independent of the warm snapshot.
 ```jsonc
 status({ session })   // -> "run:running" | "run:done exit=0" | "run:idle" | "run:waiting" + last ~60 log lines
 ```
