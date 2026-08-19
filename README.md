@@ -97,6 +97,36 @@ resume({
 })
 ```
 
+## How delegation flows (A2A)
+
+`delegate` is **asynchronous**: it ships the repo, boots the box, launches the agent in the
+background, and **returns a session id immediately**. The caller is *not* done — it drives an
+interactive loop, just like pairing with a teammate:
+
+```
+delegate ──► session id ──►  poll status(session) ┐
+                                                   │  run:running  → wait a bit, poll again
+   report PR/result ◄── run:done  ◄────────────────┤  run:waiting  → the box is asking something
+        to the user                                └───────────────────────┐
+                                                                            ▼
+                                                        answer (from repo/context or ask you) +
+                                                        resume(session, "<answer>", secrets?)  ──┐
+                                                                                                 │
+                                                          continues the SAME claude session  ◄───┘
+```
+
+The in-box agent reaches back through **one channel** (`/workspace/.agent.question` → `run:waiting`)
+whenever it hits something it shouldn't guess through:
+
+- **a decision / missing fact** (ambiguous requirement, which approach, destructive confirmation),
+- **a missing credential** (names the exact env var; you supply it via `resume` `secrets`),
+- **an environment blocker** — failed `npm install` / build / test / auth, a 401/403 from a package
+  registry or API, a missing scope. It reports the exact failure and what unblocks it, and does **not**
+  quietly skip the step or declare success. You (or the calling agent) answer, `resume`, and it picks up.
+
+So a delegation ends only when it truly finishes (`run:done`) or is genuinely blocked and waiting on
+you (`run:waiting`) — never a silent "I'll report back later".
+
 ## Connect from Cursor
 
 **Local (delegate THIS, uncommitted changes)** — `~/.cursor/mcp.json`:
