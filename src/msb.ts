@@ -610,7 +610,9 @@ export async function agentProgress(cfg: Config, box: string): Promise<string> {
 export async function agentBoundary(cfg: Config, box: string): Promise<PollResult> {
   const raw = await readProgressRaw(cfg, box);
   const state: RunState = raw.question ? "waiting" : parseRunState(raw.runLine).state;
-  return { state, text: formatProgress(raw) };
+  // Propagate the RAW question text so the elicitation prompt is the agent's actual question, not the
+  // "run:waiting — the agent asked a question…" status blurb. Falls back to text when there's none.
+  return { state, text: formatProgress(raw), question: raw.question || undefined };
 }
 
 /**
