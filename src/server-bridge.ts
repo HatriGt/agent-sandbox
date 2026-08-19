@@ -28,19 +28,33 @@ export function makeBridge(server: McpServer): ServerBridge {
   const core = server.server;
   return {
     canElicit() {
-      return !!core.getClientCapabilities()?.elicitation?.form;
+      const can = !!core.getClientCapabilities()?.elicitation?.form;
+      console.error(`[elicit] canElicit=${can}`);
+      return can;
     },
     async elicit(question: string): Promise<ElicitOutcome> {
-      const res = await core.elicitInput({
-        mode: "form",
-        message: question,
-        requestedSchema: ANSWER_SCHEMA,
-      });
-      if (res.action === "accept") {
-        const answer = typeof res.content?.answer === "string" ? res.content.answer : "";
-        return { action: "accept", answer };
+      console.error(`[elicit] sending elicitation/create: ${question.slice(0, 80)}`);
+      try {
+        const res = await core.elicitInput(
+          {
+            mode: "form",
+            message: question,
+            requestedSchema: ANSWER_SCHEMA,
+          },
+          // Elicitation is a human-in-the-loop prompt: give the user real time to answer instead of
+          // the SDK's short default request timeout (which would reject the card as "timed out").
+          { timeout: 3_600_000, resetTimeoutOnProgress: true }
+        );
+        console.error(`[elicit] result action=${res.action}`);
+        if (res.action === "accept") {
+          const answer = typeof res.content?.answer === "string" ? res.content.answer : "";
+          return { action: "accept", answer };
+        }
+        return { action: res.action === "decline" ? "decline" : "cancel" };
+      } catch (e) {
+        console.error(`[elicit] THREW: ${e instanceof Error ? e.message : String(e)}`);
+        throw e;
       }
-      return { action: res.action === "decline" ? "decline" : "cancel" };
     },
     async progress(message: string): Promise<void> {
       try {
