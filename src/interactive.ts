@@ -104,8 +104,15 @@ export async function runInteractive(opts: InteractiveOpts): Promise<Interactive
       // place; nothing is lost.
       return { status: "waiting", text: w.text };
     }
-    // Only an explicit user decline/cancel stops the run.
+    // A non-accept action isn't necessarily a real user decline. Cursor's Auto-review can auto-cancel a
+    // token-bearing elicitation BEFORE the user ever sees the card, resolving it as action:"cancel"
+    // (not a throw). Distinguish the two by re-polling the box: if it's STILL waiting on its question,
+    // the cancel was spurious — hand the question back (reconnectable) instead of killing the run.
     if (outcome.action !== "accept") {
+      const after = await opts.poll();
+      if (after.state === "waiting") {
+        return { status: "waiting", text: after.text };
+      }
       return {
         status: "cancelled",
         text: `Cancelled: you ${outcome.action}d the question — the delegation was stopped without answering.`,

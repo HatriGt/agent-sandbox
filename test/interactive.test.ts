@@ -83,8 +83,12 @@ test("multi-turn: two questions then done", async () => {
   assert.equal(r.status, "done");
 });
 
-test("user declines the elicitation: stops, does NOT resume, reports cancelled", async () => {
-  const seq: PollResult[] = [wait("Proceed with destructive migration?")];
+test("user declines the elicitation (box no longer waiting): stops, does NOT resume, reports cancelled", async () => {
+  // Genuine decline: after declining, the box is no longer waiting (the re-poll confirms it stopped).
+  const seq: PollResult[] = [
+    wait("Proceed with destructive migration?"), // boundary → elicit
+    { state: "idle", text: "run:idle" }, // re-poll after decline → not waiting → genuine cancel
+  ];
   let i = 0;
   let resumes = 0;
   const r = await runInteractive({
@@ -123,6 +127,46 @@ test("timeout with no boundary: emits progress, keeps waiting, then completes", 
   });
   assert.equal(r.status, "done");
   assert.ok(progresses.length >= 1, "progress is emitted across timeout windows to keep the call alive");
+});
+
+test("elicit returns cancel BUT box still waiting (Cursor auto-dismiss): treat as waiting, not cancelled", async () => {
+  // Cursor's Auto-review can auto-cancel a token-bearing elicitation before the user sees the card;
+  // it resolves the elicitation with action:"cancel" (not a throw). If the box is STILL waiting after
+  // that, it was never a real user decline — don't abandon the box; return waiting so we can reconnect.
+  const seq: PollResult[] = [
+    wait("Which changeType?"), // initial boundary → elicit
+    wait("Which changeType?"), // re-poll after spurious cancel → still waiting
+  ];
+  let i = 0;
+  let resumes = 0;
+  const r = await runInteractive({
+    ...baseOpts,
+    poll: async () => seq[Math.min(i++, seq.length - 1)],
+    elicit: async () => ({ action: "cancel" }),
+    resume: async () => {
+      resumes++;
+    },
+  });
+  assert.equal(r.status, "waiting", "spurious cancel while still waiting => reconnectable, not cancelled");
+  assert.equal(resumes, 0);
+  assert.match(r.text, /changeType/);
+});
+
+test("elicit returns decline AND box no longer waiting (genuine decline): cancels the run", async () => {
+  // A real user decline: after they decline, the box is no longer waiting (idle/done). Then it IS a
+  // genuine cancellation and we stop.
+  const seq: PollResult[] = [
+    wait("Which changeType?"), // boundary → elicit
+    { state: "idle", text: "run:idle" }, // re-poll after decline → not waiting anymore
+  ];
+  let i = 0;
+  const r = await runInteractive({
+    ...baseOpts,
+    poll: async () => seq[Math.min(i++, seq.length - 1)],
+    elicit: async () => ({ action: "decline" }),
+    resume: async () => {},
+  });
+  assert.equal(r.status, "cancelled", "decline + box not waiting => genuine cancellation");
 });
 
 test("elicit THROWS (transport cancel/timeout): does NOT cancel the run; returns waiting for reconnect", async () => {

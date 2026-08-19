@@ -74,11 +74,16 @@ async function driveInteractive(cfg: Config, box: string, interact?: Interact): 
   });
 
   if (r.status === "waiting") {
-    // Fallback path (no elicitation): hand the question back with an emphatic reconnect instruction.
+    // Two ways we land here: (1) the client can't elicit at all, or (2) the elicitation was
+    // auto-cancelled by the client BEFORE the user saw it (e.g. Cursor Auto-review blocking a
+    // token-bearing prompt) — the box is STILL genuinely waiting either way. Do NOT report this as a
+    // decline: the run is alive and the question below is real. The caller must answer via resume.
     return (
+      `run:waiting — the sandbox agent is asking a question and is STILL running (it was NOT cancelled).\n\n` +
       `${r.text}\n\n` +
-      `(Interactive prompt unavailable on this client.) Answer with resume({session:"${box}",` +
-      `message:"<answer>"}); it continues the session and returns the next question or the result.`
+      `ANSWER IT to continue: resume({session:"${box}", message:"<answer>"}). ` +
+      `Do NOT say the delegation was cancelled or declined — it is waiting on you. ` +
+      `If you need a value only the user can give, ask the user, then call resume with their answer.`
     );
   }
   return r.text; // done or cancelled
