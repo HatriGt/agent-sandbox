@@ -301,8 +301,11 @@ const AGENT_SYS_PROMPT =
   // Interactive Q&A: the ONE way to reach the caller. Everything you need from the outside world —
   // a decision, a missing secret, or a blocker you cannot resolve yourself — goes through this file.
   `This is an interactive session. Your ONLY channel to the caller is the file ${QUESTION_MARK}: ` +
-  "write one clear question (plain text, include the options you are choosing between), then STOP and " +
-  "end your turn. The caller answers and continues this same session with 'claude -c'; when you " +
+  "write one clear question (plain text, include the options you are choosing between) as your LAST " +
+  "action, then STOP and end your turn immediately — do not take any further steps after writing it. " +
+  `(Enforcement: while ${QUESTION_MARK} exists, every tool call you attempt is DENIED, so you cannot ` +
+  "do more work until the caller answers — writing it and stopping is the only correct move.) " +
+  "The caller answers and continues this same session with 'claude -c'; when you " +
   "continue, first read and act on the answer. STOP and ask — never guess or silently work around — " +
   "in ANY of these cases: " +
   "(1) a DECISION or fact you cannot safely infer (ambiguous requirements, which approach, a missing " +
@@ -406,6 +409,43 @@ function gitCredentialsScript(ownerTokens: Record<string, string>): string {
  * authenticate git via gh (credential helper), set the commit identity, and wire npm auth.
  * Idempotent — safe to run before every task; a snapshot warm-start makes it near-instant.
  */
+/**
+ * Install our USER-scope Claude hook that turns "ask a question" into a real, enforced pause.
+ *
+ * Why a hook: `claude -p` never blocks — writing the question file alone doesn't stop Claude; it
+ * writes then keeps working and self-answers (observed). Claude Code's documented lever is a
+ * PreToolUse hook returning permissionDecision:"deny": once the agent has written the question
+ * sentinel, the hook DENIES every subsequent tool call, so Claude cannot do any more work and its
+ * turn ends cleanly at the question. The run then shows run:waiting; `resume` (claude -c) deletes
+ * the sentinel (see agentSh) and the next turn's tool calls are allowed again.
+ *
+ * Installed at ~/.claude (user scope) so `--setting-sources user` loads it (project settings are
+ * intentionally skipped). Idempotent: overwrites the files each bootstrap.
+ */
+function askHookScript(): string {
+  // The hook: if the question sentinel exists, DENY the pending tool call with a clear reason; else
+  // allow. Reads the PreToolUse JSON on stdin (we don't need its fields — presence of the sentinel
+  // is the whole decision). Uses node (always present in the image) to emit the exact JSON contract.
+  const hook =
+    `#!/bin/sh\n` +
+    `if [ -f ${QUESTION_MARK} ]; then\n` +
+    `  node -e 'process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:"A question is pending in ${QUESTION_MARK} and is awaiting the caller. Do NOT take any further action or guess an answer — end your turn now. It will be resumed with the answer."}}))'\n` +
+    `fi\n` +
+    `exit 0\n`;
+  const settings = JSON.stringify({
+    hooks: {
+      PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command: "$HOME/.claude/hooks/ask-gate.sh" }] }],
+    },
+  });
+  return (
+    `mkdir -p "$HOME/.claude/hooks" && ` +
+    `printf '%s' ${shellQuote(hook)} > "$HOME/.claude/hooks/ask-gate.sh" && ` +
+    `chmod +x "$HOME/.claude/hooks/ask-gate.sh" && ` +
+    // Merge the hook into any existing user settings.json (don't clobber other keys).
+    `node -e 'const fs=require("fs"),os=require("os"),p=require("path");const f=p.join(os.homedir(),".claude","settings.json");let j={};try{j=JSON.parse(fs.readFileSync(f,"utf8"))}catch(e){}const add=${JSON.stringify(JSON.parse(settings))};j.hooks=Object.assign({},j.hooks,add.hooks);fs.writeFileSync(f,JSON.stringify(j,null,2))'`
+  );
+}
+
 function bootstrapScript(cfg: Config): string {
   const lines = [
     "set -e",
@@ -420,6 +460,8 @@ function bootstrapScript(cfg: Config): string {
     // set by applyGitCredentials — never a leftover global. Unset is idempotent/‑safe if absent.
     "git config --global --unset-all user.name 2>/dev/null || true",
     "git config --global --unset-all user.email 2>/dev/null || true",
+    // Install the PreToolUse ask-gate hook so a pending question actually halts the turn.
+    askHookScript(),
   ];
   if (cfg.npmToken) {
     lines.push(
