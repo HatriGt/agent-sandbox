@@ -33,9 +33,17 @@ export function makeBridge(server: McpServer): ServerBridge {
   const core = server.server;
   return {
     canElicit() {
-      const can = !!core.getClientCapabilities()?.elicitation?.form;
-      console.error(`[elicit] canElicit=${can}`);
-      return can;
+      // Deliberately DISABLED. Cursor advertises elicitation.form but its Auto-review auto-declines a
+      // server-initiated elicitation/create for a token-bearing (delegate/status/resume) call BEFORE
+      // the user ever sees a card — the server gets action=decline instantly and the tool call then
+      // hangs to the client's request timeout (-32001). Returning false routes to the client-driven
+      // path instead: the loop hands the question back as text, and the CALLING agent (Cursor) answers
+      // it from context or asks the user via its OWN native question UI, then resumes. That path is
+      // reliable today; native elicitation is not. (Kept behind this flag so it's a one-line re-enable
+      // if a future Cursor build renders server elicitations.)
+      const advertised = !!core.getClientCapabilities()?.elicitation?.form;
+      console.error(`[elicit] canElicit=false (advertised=${advertised}; disabled: client auto-declines)`);
+      return false;
     },
     async elicit(question: string): Promise<ElicitOutcome> {
       console.error(`[elicit] sending elicitation/create: ${question.slice(0, 80)}`);
