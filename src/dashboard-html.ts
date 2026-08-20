@@ -23,6 +23,10 @@ const STYLE = `<style>
     --hover: #17171b; --sidebar: #0b0b0d; --accent: #6366f1; --accent-fg: #fff;
     --green: #22c55e; --amber: #f59e0b; --blue: #60a5fa; --red: #ef4444;
     --shadow: 0 1px 2px rgba(0,0,0,.4);
+    /* terminal panel (dark) */
+    --term-bg: #0a0a0c; --term-bar: #131318; --term-border: #26262c; --term-fg: #d4d4d8;
+    --term-title: #8a8a93; --term-err: #f87171; --term-warn: #fbbf24; --term-ok: #4ade80;
+    --term-cmd: #818cf8; --term-dim: #6b6b73; --term-q: #fcd34d;
   }
   [data-theme="light"] {
     --bg: #fafafa; --panel: #fff; --elev: #fff; --border: #e7e7ea; --border-2: #dedee1;
@@ -30,6 +34,10 @@ const STYLE = `<style>
     --hover: #f4f4f5; --sidebar: #fbfbfc; --accent: #4f46e5; --accent-fg: #fff;
     --green: #16a34a; --amber: #b45309; --blue: #2563eb; --red: #dc2626;
     --shadow: 0 1px 2px rgba(0,0,0,.05);
+    /* terminal panel (light — a soft dark IDE terminal reads better than white for logs) */
+    --term-bg: #1c1c22; --term-bar: #26262e; --term-border: #33333c; --term-fg: #e4e4e7;
+    --term-title: #a9a9b3; --term-err: #f87171; --term-warn: #fbbf24; --term-ok: #4ade80;
+    --term-cmd: #a5b4fc; --term-dim: #8a8a95; --term-q: #fcd34d;
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
@@ -142,7 +150,7 @@ const STYLE = `<style>
   tr.detail td { padding: 0; border-bottom: 1px solid var(--border); }
   tr.detail:last-child td { border-bottom: 0; }
   .drawer { padding: 0 16px; max-height: 0; overflow: hidden; transition: max-height .2s ease, padding .2s ease; }
-  tr.detail.open .drawer { max-height: 460px; padding: 14px 16px; }
+  tr.detail.open .drawer { max-height: 560px; padding: 14px 16px; }
   .drawer .q { padding: 9px 12px; border-radius: 9px; margin-bottom: 12px; font-size: 13px;
        background: color-mix(in srgb, var(--amber) 13%, transparent);
        border: 1px solid color-mix(in srgb, var(--amber) 32%, transparent);
@@ -150,10 +158,38 @@ const STYLE = `<style>
   .drawer .q:empty { display: none; }
   .drawer .field-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em;
                          color: var(--faint); margin-bottom: 5px; }
-  pre.log { margin: 0; padding: 12px 14px; background: var(--bg); border: 1px solid var(--border);
-            border-radius: 9px; max-height: 340px; overflow: auto; white-space: pre-wrap; word-break: break-word;
-            font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--fg);
-            line-height: 1.5; }
+  /* Terminal-style live log panel */
+  .term { border-radius: 10px; overflow: hidden; border: 1px solid var(--term-border);
+          box-shadow: 0 1px 2px rgba(0,0,0,.06); background: var(--term-bg); }
+  .term-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+              background: var(--term-bar); border-bottom: 1px solid var(--term-border); }
+  .term-dots { display: flex; gap: 6px; }
+  .term-dots i { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+  .term-dots i.r { background: #ff5f56; } .term-dots i.y { background: #ffbd2e; } .term-dots i.g { background: #27c93f; }
+  .term-title { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px;
+                color: var(--term-title); font-weight: 600; letter-spacing: .01em; }
+  .term-live { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; font-size: 10.5px;
+               color: var(--term-title); text-transform: uppercase; letter-spacing: .05em; }
+  .term-live .pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--green);
+                      box-shadow: 0 0 0 0 color-mix(in srgb, var(--green) 60%, transparent);
+                      animation: pulse 1.6s infinite; }
+  @keyframes pulse { 0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--green) 55%,transparent)} 70%{box-shadow:0 0 0 6px transparent} 100%{box-shadow:0 0 0 0 transparent} }
+  .term-copy { margin-left: 8px; cursor: pointer; border: 1px solid var(--term-border); background: transparent;
+               color: var(--term-title); border-radius: 6px; padding: 3px 8px; font-size: 10.5px; font: inherit;
+               font-size: 10.5px; transition: background .12s; }
+  .term-copy:hover { background: var(--term-bar); }
+  pre.log { margin: 0; padding: 12px 14px; background: var(--term-bg); max-height: 360px; overflow: auto;
+            white-space: pre-wrap; word-break: break-word; tab-size: 2;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--term-fg);
+            line-height: 1.55; }
+  pre.log .l { display: block; padding: 0 2px; border-radius: 3px; }
+  pre.log .l-err  { color: var(--term-err); }
+  pre.log .l-warn { color: var(--term-warn); }
+  pre.log .l-ok   { color: var(--term-ok); }
+  pre.log .l-cmd  { color: var(--term-cmd); font-weight: 600; }
+  pre.log .l-dim  { color: var(--term-dim); }
+  pre.log .l-q    { color: var(--term-q); }
+  pre.log .empty  { color: var(--term-dim); font-style: italic; }
 
   .emptyrow td { padding: 60px 20px; text-align: center; color: var(--muted); }
   .emptyrow .big { font-size: 15px; color: var(--fg); font-weight: 600; margin-bottom: 4px; }
@@ -313,7 +349,15 @@ function script(pollMs: number): string {
       '</tr>' +
       '<tr class="detail" data-detail="' + esc(v.name) + '"><td colspan="7"><div class="drawer">' +
         '<div class="q"></div>' +
-        '<div class="field-label">Live log</div><pre class="log">(loading…)</pre>' +
+        '<div class="term">' +
+          '<div class="term-bar">' +
+            '<span class="term-dots"><i class="r"></i><i class="y"></i><i class="g"></i></span>' +
+            '<span class="term-title">' + esc(v.name) + ' — claude-code</span>' +
+            '<span class="term-live"><span class="pulse"></span>live</span>' +
+            '<button class="term-copy" type="button">copy</button>' +
+          '</div>' +
+          '<pre class="log"><span class="empty">(loading…)</span></pre>' +
+        '</div>' +
       '</div></td></tr>';
   }
 
@@ -344,11 +388,11 @@ function script(pollMs: number): string {
       return;
     }
 
-    // Rebuild rows (small fleet; cheap). Preserve which drawers were open + their logs.
+    // Rebuild rows (small fleet; cheap). Preserve which drawers were open + their rendered logs.
     var openLogs = {};
     running.forEach(function (v) {
       var d = tbody.querySelector('tr.detail[data-detail="' + cssEsc(v.name) + '"] pre.log');
-      if (d) openLogs[v.name] = d.textContent;
+      if (d) openLogs[v.name] = d.innerHTML;
     });
     tbody.innerHTML = sortViews(running).map(rowHtml).join("");
 
@@ -356,11 +400,20 @@ function script(pollMs: number): string {
       var detail = tbody.querySelector('tr.detail[data-detail="' + cssEsc(v.name) + '"]');
       var q = detail.querySelector(".q");
       q.textContent = v.question ? "❓ " + v.question : "";
+      // Copy button: copies the terminal's visible text.
+      var copyBtn = detail.querySelector(".term-copy");
+      if (copyBtn) copyBtn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        var pre = detail.querySelector("pre.log");
+        var txt = pre ? pre.textContent : "";
+        if (navigator.clipboard) navigator.clipboard.writeText(txt);
+        copyBtn.textContent = "copied"; setTimeout(function () { copyBtn.textContent = "copy"; }, 1200);
+      });
       if (expanded[v.name]) {
         tbody.querySelector('tr.row[data-box="' + cssEsc(v.name) + '"]').classList.add("open");
         detail.classList.add("open");
         var log = detail.querySelector("pre.log");
-        if (openLogs[v.name]) log.textContent = openLogs[v.name];
+        if (openLogs[v.name]) log.innerHTML = openLogs[v.name];
         loadLog(v.name);
       }
     });
@@ -380,13 +433,47 @@ function script(pollMs: number): string {
   // CSS.escape isn't everywhere; box names are [A-Za-z0-9-] so a minimal escape is enough.
   function cssEsc(s) { return String(s).replace(/[^a-zA-Z0-9_-]/g, "\\\\$&"); }
 
+  // Strip ANSI/OSC escape sequences and carriage-return spinner rewrites so the log reads cleanly.
+  function stripAnsi(s) {
+    return String(s)
+      .replace(/\\u001b\\[[0-9;?]*[ -\/]*[@-~]/g, "")   // CSI (colors, cursor)
+      .replace(/\\u001b\\][^\\u0007]*(\\u0007|\\u001b\\\\)/g, "") // OSC
+      .replace(/\\u001b[=>PX^_].*?(\\u001b\\\\|\\u0007)/g, "")   // other escapes
+      .replace(/[^\\n]*\\r(?!\\n)/g, "")                  // CR spinner overwrites: keep final segment
+      .replace(/[\\u0000-\\u0008\\u000b\\u000c\\u000e-\\u001f]/g, ""); // stray control chars (keep \\t \\n \\r)
+  }
+
+  // Classify a log line so we can colour it like a terminal.
+  function lineClass(line) {
+    var t = line.trim();
+    if (!t) return "";
+    if (/error|fail(ed|ure)?|exception|traceback|fatal|✗|✘|\\bENO|not found|denied|rejected/i.test(t)) return "l-err";
+    if (/warn(ing)?|deprecat|retired|⚠/i.test(t)) return "l-warn";
+    if (/success|done|✓|✔|completed|created|passed|✅|committed|pushed|opened pr/i.test(t)) return "l-ok";
+    if (/^[$>#❯]\\s|^\\s*(npm|git|gh|node|claude|sh|bash|cd|export|curl|yarn|pnpm)\\b/.test(t)) return "l-cmd";
+    if (/^\\s*(❓|QUESTION[: ]|USER-INPUT)/i.test(t)) return "l-q";
+    return "";
+  }
+
+  function renderLog(pre, raw) {
+    var clean = stripAnsi(raw || "").replace(/\\n{3,}/g, "\\n\\n");
+    if (!clean.trim()) { pre.innerHTML = '<span class="empty">(no output yet)</span>'; return; }
+    var atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
+    var html = clean.split("\\n").map(function (ln) {
+      var c = lineClass(ln);
+      return '<span class="l' + (c ? " " + c : "") + '">' + (esc(ln) || " ") + "</span>";
+    }).join("");
+    pre.innerHTML = html;
+    if (atBottom) pre.scrollTop = pre.scrollHeight; // keep tailing if the user was at the bottom
+  }
+
   function loadLog(session) {
     fetch(watchUrl(session), { headers: authHeaders })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (s) {
         if (!s || !expanded[session]) return;
         var pre = document.querySelector('tr.detail[data-detail="' + cssEsc(session) + '"] pre.log');
-        if (pre) pre.textContent = s.log || "(no output yet)";
+        if (pre) renderLog(pre, s.log);
       })
       .catch(function () {});
   }
