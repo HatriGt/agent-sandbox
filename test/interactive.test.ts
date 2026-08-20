@@ -103,11 +103,12 @@ test("user declines the elicitation (box no longer waiting): stops, does NOT res
   assert.equal(resumes, 0, "a declined question must not resume the agent");
 });
 
-test("timeout with no boundary: emits progress, keeps waiting, then completes", async () => {
-  // First wait window times out (all running), second reaches done. Virtual clock via sleep.
+test("timeout with no boundary: emits progress once and RETURNS running (under client timeout)", async () => {
+  // The box is still working when the wait window elapses. Instead of looping forever (which would
+  // blow past the MCP client's request timeout -> -32001), we emit one progress ping and return
+  // `running` so the caller reconnects via status.
   let now = 0;
   const progresses: string[] = [];
-  let calls = 0;
   const r = await runInteractive({
     sleep: async (ms) => {
       now += ms;
@@ -115,18 +116,15 @@ test("timeout with no boundary: emits progress, keeps waiting, then completes", 
     now: () => now,
     timeoutMs: 50,
     intervalMs: 20,
-    poll: async () => {
-      calls++;
-      return calls < 5 ? running() : done();
-    },
+    poll: async () => running(), // never reaches a boundary within the window
     elicit: async () => ({ action: "accept", answer: "x" }),
     resume: async () => {},
     progress: async (msg: string) => {
       progresses.push(msg);
     },
   });
-  assert.equal(r.status, "done");
-  assert.ok(progresses.length >= 1, "progress is emitted across timeout windows to keep the call alive");
+  assert.equal(r.status, "running", "still-working window returns running, not an infinite loop");
+  assert.equal(progresses.length, 1, "exactly one progress ping before returning");
 });
 
 test("elicit returns cancel BUT box still waiting (Cursor auto-dismiss): treat as waiting, not cancelled", async () => {

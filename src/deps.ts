@@ -92,6 +92,19 @@ async function driveInteractive(cfg: Config, box: string, interact?: Interact): 
       `NEVER report this as cancelled, declined, or "I'll check back later" — it is actively waiting on you.`
     );
   }
+
+  if (r.status === "running") {
+    // The wait window elapsed with the box still working (no question yet). We returned here so the
+    // tool call ends under the client's request timeout — the box keeps running. The calling agent
+    // must reconnect (NOT end its turn) so it's present when the next question/result lands.
+    return (
+      `run:running — still working after ${Math.round(cfg.waitTimeoutMs / 1000)}s; NOT done, NOT cancelled.\n\n` +
+      `WHAT YOU (the calling agent) MUST DO NOW — do NOT end your turn:\n` +
+      `Immediately call status({session:"${box}"}) to keep waiting. It returns as soon as the box asks ` +
+      `a question or finishes. Keep reconnecting until you get run:done. ` +
+      `NEVER say "I'll report back later" — reconnect now.`
+    );
+  }
   return r.text; // done or cancelled
 }
 

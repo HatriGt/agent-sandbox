@@ -139,13 +139,15 @@ export function loadConfig(): Config {
     maxBoxes: Number(process.env.MSB_MAX_BOXES ?? "5"),
     poolSize: Number(process.env.MSB_POOL_SIZE ?? "1"),
 
-    // Block-until-boundary defaults. Real agent questions land ~1-3 min in, so a short cap almost
-    // always times out mid-task (the bug where the client narrated "still running, I'll report
-    // back"). Cursor's MCP tool-call timeout is undocumented, so we can't block indefinitely — 4 min
-    // catches the vast majority of boundaries while staying moderate. On timeout the caller MUST
-    // reconnect via status (the return string is emphatic about that). Poll every 4s.
-    waitTimeoutMs: Number(process.env.WAIT_TIMEOUT_MS ?? "240000"),
-    waitIntervalMs: Number(process.env.WAIT_INTERVAL_MS ?? "4000"),
+    // Block-until-boundary window. A tools/call must RETURN before the MCP client's own request
+    // timeout, or the client throws "-32001 Request timed out" and the calling agent reverts to
+    // fire-and-forget. Cursor's client timeout is ~60s, so we cap the server-side block at 50s: if the
+    // box reaches a boundary (asks a question / finishes) we return instantly with it; otherwise we
+    // return a "still working — reconnect with status" message at 50s, safely under the client cap, and
+    // status resumes the same wait. (A question/done mid-window still short-circuits immediately.)
+    // Poll every 3s so a boundary is surfaced within ~3s of happening.
+    waitTimeoutMs: Number(process.env.WAIT_TIMEOUT_MS ?? "50000"),
+    waitIntervalMs: Number(process.env.WAIT_INTERVAL_MS ?? "3000"),
 
     anthropicBaseUrl,
     anthropicApiKey: req("ANTHROPIC_API_KEY", "dummy"),

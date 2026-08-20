@@ -52,10 +52,15 @@ export interface InteractiveOpts {
   intervalMs: number;
 }
 
-export type InteractiveStatus = "done" | "cancelled" | "waiting";
+export type InteractiveStatus = "done" | "cancelled" | "waiting" | "running";
 
 export interface InteractiveResult {
-  /** done = run finished; cancelled = user declined a question; waiting = fallback (no elicit). */
+  /**
+   * done = run finished; cancelled = user declined a question; waiting = a question is pending;
+   * running = still working after the wait window elapsed (caller must reconnect via status). We
+   * return `running` instead of blocking forever so the tool call returns UNDER the MCP client's
+   * request timeout (avoids -32001).
+   */
   status: InteractiveStatus;
   /** Human text to return from the tool call (the result, or the pending question in fallback). */
   text: string;
@@ -78,10 +83,12 @@ export async function runInteractive(opts: InteractiveOpts): Promise<Interactive
       intervalMs: opts.intervalMs,
     });
 
-    // Still running after a full window: keep the call alive with a progress ping and wait again.
+    // Still running after a full window: return `running` so the tool call ends UNDER the client's
+    // request timeout. The box keeps working; the caller reconnects via status to resume this wait.
+    // (Emit a best-effort progress ping first for clients that surface it.)
     if (!w.reached) {
       await opts.progress?.("still working…");
-      continue;
+      return { status: "running", text: w.text };
     }
 
     // Finished — return the result; the tool call ends naturally.
