@@ -459,7 +459,7 @@ function askHookScript(): string {
 function streamFmtScript(): string {
   const js =
     `const fs=require("fs");` +
-    `const out=process.argv[1];` +
+    `const out=process.argv[2];` +
     `function w(s){try{fs.appendFileSync(out,s+"\\n")}catch(e){}}` +
     `let buf="";` +
     `process.stdin.setEncoding("utf8");` +
