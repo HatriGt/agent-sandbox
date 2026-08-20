@@ -446,6 +446,44 @@ function askHookScript(): string {
   );
 }
 
+/**
+ * Install the stream-json → human-log formatter at ~/.claude/stream-fmt.js.
+ *
+ * Headless `claude -p` buffers plain output and flushes at the very end, so the dashboard terminal
+ * shows nothing mid-run. With `--output-format stream-json --verbose` Claude emits one JSON event per
+ * line (system init, assistant text, tool_use, tool_result, final result) as they happen. This
+ * formatter tails that NDJSON on stdin and appends readable lines to the log (argv[1]) in real time —
+ * so the terminal panel streams tool calls and messages live. It also re-emits the final result text
+ * so `status`/completion still sees the summary. Pure Node (always in the image); no deps.
+ */
+function streamFmtScript(): string {
+  const js =
+    `const fs=require("fs");` +
+    `const out=process.argv[1];` +
+    `function w(s){try{fs.appendFileSync(out,s+"\\n")}catch(e){}}` +
+    `let buf="";` +
+    `process.stdin.setEncoding("utf8");` +
+    `process.stdin.on("data",d=>{buf+=d;let i;while((i=buf.indexOf("\\n"))>=0){const line=buf.slice(0,i);buf=buf.slice(i+1);handle(line)}});` +
+    `process.stdin.on("end",()=>{if(buf.trim())handle(buf)});` +
+    `function txt(c){return Array.isArray(c)?c.map(b=>b&&b.type==="text"?b.text:"").join(""):(typeof c==="string"?c:"")}` +
+    `function handle(line){line=line.trim();if(!line)return;let e;try{e=JSON.parse(line)}catch(_){w(line);return}` +
+    `try{` +
+    `if(e.type==="system"&&e.subtype==="init"){w("● session started (model "+(e.model||"?")+")");return}` +
+    `if(e.type==="assistant"&&e.message){for(const b of e.message.content||[]){` +
+    `if(b.type==="text"&&b.text.trim())w(b.text.trim());` +
+    `else if(b.type==="tool_use"){const inp=b.input||{};const arg=inp.command||inp.file_path||inp.path||inp.pattern||inp.description||"";w("→ "+b.name+(arg?": "+String(arg).slice(0,200):""))}` +
+    `}return}` +
+    `if(e.type==="user"&&e.message){for(const b of e.message.content||[]){` +
+    `if(b.type==="tool_result"){const r=txt(b.content).trim();if(r)w("  "+r.split("\\n").slice(0,20).join("\\n  "))}` +
+    `}return}` +
+    `if(e.type==="result"){if(e.result&&String(e.result).trim())w(String(e.result).trim());return}` +
+    `}catch(_){}}`;
+  return (
+    `mkdir -p "$HOME/.claude" && ` +
+    `printf '%s' ${shellQuote(js)} > "$HOME/.claude/stream-fmt.js"`
+  );
+}
+
 function bootstrapScript(cfg: Config): string {
   const lines = [
     "set -e",
@@ -462,6 +500,8 @@ function bootstrapScript(cfg: Config): string {
     "git config --global --unset-all user.email 2>/dev/null || true",
     // Install the PreToolUse ask-gate hook so a pending question actually halts the turn.
     askHookScript(),
+    // Install the stream-json formatter so the dashboard terminal streams live progress.
+    streamFmtScript(),
   ];
   if (cfg.npmToken) {
     lines.push(
@@ -497,9 +537,13 @@ function agentSh(workdir: string, resume: boolean): string {
   // in a headless box — making Claude exit 0 doing nothing. Skipping project settings avoids that;
   // we grant tools ourselves via --allowedTools, so we don't need the repo's permissions.allow.
   const settingSources = `--setting-sources user`;
-  const claude = resume
-    ? `claude -c -p "$AGENT_TASK" ${settingSources}`
-    : `claude -p "$AGENT_TASK" ${settingSources}`;
+  // stream-json (+ required --verbose) emits one JSON event per line as work happens; we pipe it
+  // through the formatter so the dashboard terminal streams live instead of dumping at the end.
+  const streamFmt = `--output-format stream-json --verbose`;
+  const cont = resume ? `-c ` : ``;
+  const claude =
+    `claude ${cont}-p "$AGENT_TASK" ${settingSources} ${streamFmt} ` +
+    `--append-system-prompt "$AGENT_SYS_PROMPT" --allowedTools ${ALLOWED_TOOLS}`;
   // Clear any pending question up front: a new run or a resume (which carries the answer) means the
   // previous question is now handled, so status stops reporting "waiting".
   const inner =
@@ -507,10 +551,15 @@ function agentSh(workdir: string, resume: boolean): string {
     // sets it; a resume appends the follow-up so the marker reflects the latest ask.
     `cd ${workdir} && printf '%s\\n' "$AGENT_TASK" ${resume ? `>> ${TASK_MARK}` : `> ${TASK_MARK}`} && ` +
     `rm -f ${DONE_MARK} ${QUESTION_MARK} && touch ${RUN_MARK} && ` +
-    `{ ${claude} --append-system-prompt "$AGENT_SYS_PROMPT" --allowedTools ${ALLOWED_TOOLS} ` +
-    `>> ${AGENT_LOG} 2>&1; echo $? > ${DONE_MARK}; rm -f ${RUN_MARK}; }`;
-  // nohup + & so the child outlives the exec shell; redirect all fds so exec doesn't block on them.
-  return `nohup sh -c ${shellQuote(inner)} >/dev/null 2>&1 < /dev/null & echo started`;
+    // pipefail so the recorded exit reflects claude's, not the formatter's. Claude's raw stderr also
+    // lands in the log (errors aren't JSON). The formatter appends readable lines to the same log as
+    // events stream in, tailing live for the dashboard. Run under bash (present in the node image) so
+    // pipefail is available.
+    `{ set -o pipefail; ` +
+    `${claude} 2>> ${AGENT_LOG} | node "$HOME/.claude/stream-fmt.js" ${AGENT_LOG}; ` +
+    `echo $? > ${DONE_MARK}; rm -f ${RUN_MARK}; }`;
+  // nohup + bash + & so the child outlives the exec shell; redirect all fds so exec doesn't block.
+  return `nohup bash -c ${shellQuote(inner)} >/dev/null 2>&1 < /dev/null & echo started`;
 }
 
 /**
