@@ -99,29 +99,50 @@ resume({
 
 ## How delegation flows (A2A)
 
-`delegate` is **fully interactive** via native MCP **Elicitation**: one call runs the task to
-completion. It ships the repo, launches the agent, and drives the whole conversation from *inside the
-still-open tool call* — when the box needs a decision, the server sends an `elicitation/create`
-request back to the client, which shows the user a native prompt; the answer flows back and the box
-continues. The caller can't fire-and-forget, because the protocol keeps the call open until done:
+`delegate` is **interactive and blocking**: one call ships the repo, launches the agent, and waits —
+it does not fire-and-forget. It returns only at a real boundary: the run finished (`run:done`), the
+box paused to ask a question (`run:waiting`), or the wait cap elapsed with the box still working
+(`run:running` — an explicit "reconnect via `status`"). The wait window is bounded (`WAIT_TIMEOUT_MS`,
+default 50s) so the call always returns **under** the MCP client's request timeout instead of hanging
+to a `-32001`.
 
 ```
-delegate ──► launch, then loop INSIDE the call:
-   ┌───────────────────────────────────────────────────────────┐
-   │  waitForBoundary                                            │
-   │    ├─ done            → return result (call ends) ─────────┼──► report PR/result to user
-   │    ├─ waiting(question) → elicit(question) ──► native prompt│
-   │    │       user answers ──► resume box ──► loop ◄───────────┤
-   │    └─ timeout (still running) → progress ping ──► loop ◄────┘
-   └───────────────────────────────────────────────────────────┘
+delegate ──► launch, then wait to a boundary:
+   ┌────────────────────────────────────────────────────────────────────┐
+   │  waitForBoundary (≤ WAIT_TIMEOUT_MS)                                 │
+   │    ├─ done              → return result ────────────────────────────┼──► report PR/result to user
+   │    ├─ waiting(question) → return the QUESTION as text ──────────────┼──► calling agent answers it
+   │    │                       (from context) OR asks the user via its   │     (from context) or asks
+   │    │                       OWN native question UI, then resume(...)  │     the user, then resume()
+   │    └─ still running     → return "reconnect via status" ────────────┼──► status() to keep waiting
+   └────────────────────────────────────────────────────────────────────┘
 ```
 
-Why this instead of "block then tell the agent to poll": an MCP `tools/call` returns exactly one
-result, and *returning* is what freed the agent to stop ("I'll report back"). Elicitation is a
-server→client request the protocol lets us send *before* the final result — so the turn-taking is
-enforced by the transport, not by instructions. On a client that doesn't advertise elicitation, the
-call falls back to returning the pending question and you answer via `resume`. `resume` also
-auto-starts a box that idle-stopped while waiting; `status` reconnects and resumes the same loop.
+**Client-driven question loop (why not native elicitation).** The spec-intended mechanism is MCP
+**Elicitation** (a server→client `elicitation/create` request sent *before* the final result). We
+implemented it, but Cursor auto-**declines** a server-initiated elicitation for a token-bearing
+`delegate`/`status`/`resume` call *before the user ever sees a card* — the server gets
+`action=decline` instantly and the call then hangs to `-32001`. So native elicitation is **disabled**
+(`canElicit()` returns false; one-line re-enable if a future Cursor build renders it). Instead the
+wait loop **hands the pending question back as text**, and the *calling* agent (Cursor) does the
+turn-taking with its own reliable UI: it answers the question itself when it can from repo/task
+context, otherwise prompts the user via its native question UI (e.g. `AskQuestion`), then calls
+`resume({session, message})`. Repeat until `run:done`. `resume` also auto-starts a box that
+idle-stopped while waiting; `status` reconnects and resumes the same loop. The tool descriptions
+carry this as an imperative protocol so the calling agent never ends its turn on a `run:waiting`.
+
+**Live output (stream-json terminal).** The in-box agent runs with
+`claude -p --output-format stream-json --verbose`, whose NDJSON events are piped through a small
+formatter (`~/.claude/stream-fmt.js`, installed on every claim) that appends readable lines to the
+agent log **as work happens** — assistant text, `→ Tool: <arg>` calls, and indented results. Plain
+`claude -p` buffers and flushes only at the end; this makes `watch`/`monitor`/the dashboard terminal
+genuinely live during a run.
+
+**Ask-and-stop is enforced.** Writing a question to the channel doesn't by itself stop a headless
+agent, so a `PreToolUse` hook (`ask-gate.sh`, installed at bootstrap) **denies every further tool
+call** while `/workspace/.agent.question` exists. The agent writes its question as its last action and
+its turn ends — it can't self-answer or work around a pending question until you `resume` with the
+answer.
 
 The in-box agent reaches back through **one channel** (`/workspace/.agent.question` → `run:waiting`)
 whenever it hits something it shouldn't guess through:
