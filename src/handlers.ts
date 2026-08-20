@@ -121,15 +121,15 @@ export function registerTools(
       "A repo is OPTIONAL: pass ONLY a task (no repo/repos) for repo-less work — e.g. 'write a " +
       "detailed report about X' — and the box boots with an empty /workspace. " +
       "Missing info is asked back, not failed. " +
-      "FULLY INTERACTIVE — this single call runs the whole delegation to completion. It ships the " +
-      "repo, launches the in-box agent, and drives the entire conversation itself: whenever the agent " +
-      "needs a decision it asks YOU directly via a native prompt (MCP elicitation), and continues " +
-      "with your answer — all without returning. You normally do NOTHING between: just answer the " +
-      "prompts as they pop up. The call returns only when the task is DONE (report the PR link / " +
-      "result to the user) or was cancelled (you declined a prompt). On the rare client without " +
-      "elicitation support it instead returns the pending question and you answer via " +
-      "resume(session, <answer>). Either way: do NOT say 'I'll report back later' — the work happens " +
-      "inside this call.",
+      "INTERACTIVE — this call ships the repo, launches the in-box agent, and blocks until the agent " +
+      "either FINISHES or PAUSES to ask a question. Two outcomes:\n" +
+      "• 'run:done' → report the result/PR link to the user. Done.\n" +
+      "• 'run:waiting — …QUESTION FROM THE SANDBOX…' → the agent needs an answer and is STILL running. " +
+      "You MUST NOT end your turn. Answer it from repo/task context if you confidently can; otherwise " +
+      "ask the USER using your native question UI (e.g. AskQuestion). Then call " +
+      "resume({session, message:<answer>}). Keep answering→resuming until you get run:done. " +
+      "NEVER say the delegation was cancelled/declined or that you'll 'report back later' when it is " +
+      "waiting — it is actively blocked on your answer.",
     {
       source: z
         .enum(["local", "git"])
@@ -245,22 +245,19 @@ export function registerTools(
         v.plan.repos.length > 1
           ? `\nrepos: ${v.plan.repos.map((x) => `${x.repo} -> /workspace/${x.name}`).join(", ")}`
           : "";
-      return text(
-        `Delegated. session=${r.box}${r.warm ? " (warm)" : ""}${repoLine}\n\n${r.output}\n\n` +
-          `If the box asked a question (run:waiting), answer it now: resume({session:"${r.box}",message:"<answer>"}). ` +
-          `If it finished (run:done), report the outcome to the user. If it's still working, reconnect with status({session:"${r.box}"}).`
-      );
+      // r.output already carries the full imperative protocol for a waiting box, or the result when
+      // done — don't append a contradicting tail.
+      return text(`Delegated. session=${r.box}${r.warm ? " (warm)" : ""}${repoLine}\n\n${r.output}`);
     }
   );
 
   server.tool(
     "status",
-    "Reconnect to a delegated session and resume driving it interactively — same as delegate: it " +
-      "runs the ask (native prompt) → answer → continue loop and returns only when the task is DONE " +
-      "or cancelled. Use it if a delegate/resume call was interrupted, or (on a client without " +
-      "elicitation) after answering a returned question. On such clients it returns the next pending " +
-      "question; answer via resume(session, <answer>). Never end your turn while it still reports a " +
-      "pending question or in-flight run.",
+    "Reconnect to a delegated session and block until it FINISHES or PAUSES to ask — same outcomes as " +
+      "delegate. Use it if a delegate/resume call was interrupted. If it returns 'run:waiting' with a " +
+      "QUESTION, do NOT end your turn: answer from context or ask the USER via your native question UI " +
+      "(AskQuestion), then resume({session, message:<answer>}). Repeat until run:done. Never report a " +
+      "waiting session as cancelled or say you'll check back later.",
     { session: z.string().describe("Session id returned by delegate.") },
     async ({ session }: { session: string }) => text(await deps.status(cfg, session, interactFrom(bridge)))
   );
@@ -268,13 +265,14 @@ export function registerTools(
   server.tool(
     "resume",
     "Continue the in-box Claude Code session — primarily to ANSWER a question it asked (run:waiting). " +
-      "Put the answer in `message`; the agent reads it and proceeds. Like delegate, this call is " +
-      "INTERACTIVE & BLOCKING: it feeds the answer in and WAITS until the agent asks the next question " +
-      "or finishes, then returns that — so keep answering/resuming until you get run:done. It also " +
-      "auto-starts the box if it idle-stopped while waiting. As the calling agent, answer from " +
-      "repo/context when you can, and only ask the user for real decisions or secrets. If it needs a " +
-      "credential/connection detail (GitHub token for a private repo, DB URL), pass it via `secrets` " +
-      "— injected as env for THIS step only, never stored, gone on teardown.",
+      "Put the answer in `message`; the agent reads it and proceeds. BLOCKING: it feeds the answer in " +
+      "and WAITS until the agent asks the NEXT question or finishes, then returns that. If it returns " +
+      "another 'run:waiting' QUESTION, do NOT end your turn — answer from context or ask the USER via " +
+      "your native question UI (AskQuestion), then resume again. Keep going until run:done. It also " +
+      "auto-starts the box if it idle-stopped while waiting. Answer from repo/context when you can, and " +
+      "only ask the user for real decisions or secrets. If it needs a credential/connection detail " +
+      "(GitHub token for a private repo, DB URL), pass it via `secrets` — injected as env for THIS " +
+      "step only, never stored, gone on teardown.",
     {
       session: z.string().describe("Session id returned by delegate."),
       message: z.string().describe("Follow-up instruction or answer for the agent."),

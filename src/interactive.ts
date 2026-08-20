@@ -59,6 +59,8 @@ export interface InteractiveResult {
   status: InteractiveStatus;
   /** Human text to return from the tool call (the result, or the pending question in fallback). */
   text: string;
+  /** When status==="waiting": the raw question text, so the caller can drive its own prompt UI. */
+  question?: string;
 }
 
 /**
@@ -89,7 +91,7 @@ export async function runInteractive(opts: InteractiveOpts): Promise<Interactive
 
     // Waiting on a question. Without elicitation support, hand it back as the result (poll fallback).
     if (!opts.elicit) {
-      return { status: "waiting", text: w.text };
+      return { status: "waiting", text: w.text, question: w.question };
     }
 
     // Ask the user natively (server→client request mid tool-call), then continue the box.
@@ -102,7 +104,7 @@ export async function runInteractive(opts: InteractiveOpts): Promise<Interactive
       // This is NOT a user decline — the box is still genuinely waiting. Do NOT stop it: return the
       // pending question so the caller reconnects (status/resume) and answers it. The box keeps its
       // place; nothing is lost.
-      return { status: "waiting", text: w.text };
+      return { status: "waiting", text: w.text, question: w.question };
     }
     // A non-accept action isn't necessarily a real user decline. Cursor's Auto-review can auto-cancel a
     // token-bearing elicitation BEFORE the user ever sees the card, resolving it as action:"cancel"
@@ -111,7 +113,7 @@ export async function runInteractive(opts: InteractiveOpts): Promise<Interactive
     if (outcome.action !== "accept") {
       const after = await opts.poll();
       if (after.state === "waiting") {
-        return { status: "waiting", text: after.text };
+        return { status: "waiting", text: after.text, question: after.question };
       }
       return {
         status: "cancelled",

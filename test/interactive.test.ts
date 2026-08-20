@@ -190,6 +190,17 @@ test("elicit THROWS (transport cancel/timeout): does NOT cancel the run; returns
   assert.match(r.text, /Which changeType/, "surfaces the pending question so it can be answered");
 });
 
+test("waiting result carries the raw question (so the caller can drive its own prompt UI)", async () => {
+  const r = await runInteractive({
+    ...baseOpts,
+    poll: async () => wait("Which city and budget?"),
+    elicit: undefined, // fallback path
+    resume: async () => {},
+  });
+  assert.equal(r.status, "waiting");
+  assert.equal(r.question, "Which city and budget?", "raw question is propagated for client-driven prompt");
+});
+
 test("no elicit capability (fallback): returns at the boundary instead of eliciting", async () => {
   const seq: PollResult[] = [wait("Which tag?")];
   let i = 0;

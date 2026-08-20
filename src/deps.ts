@@ -74,16 +74,22 @@ async function driveInteractive(cfg: Config, box: string, interact?: Interact): 
   });
 
   if (r.status === "waiting") {
-    // Two ways we land here: (1) the client can't elicit at all, or (2) the elicitation was
-    // auto-cancelled by the client BEFORE the user saw it (e.g. Cursor Auto-review blocking a
-    // token-bearing prompt) — the box is STILL genuinely waiting either way. Do NOT report this as a
-    // decline: the run is alive and the question below is real. The caller must answer via resume.
+    // Native server-side elicitation doesn't render in Cursor for this remote/async tool-call flow
+    // (the client advertises the capability but auto-declines with no card). So we hand the question
+    // back to the CALLING agent with an explicit, imperative protocol: show the user a native prompt
+    // using ITS OWN question UI (which works), then resume the box with the answer. This achieves the
+    // same in-loop, native-prompt UX on a path that actually works in Cursor. The box is STILL running
+    // and waiting — this is NOT a cancellation.
+    const q = (r.question ?? r.text).trim();
     return (
-      `run:waiting — the sandbox agent is asking a question and is STILL running (it was NOT cancelled).\n\n` +
-      `${r.text}\n\n` +
-      `ANSWER IT to continue: resume({session:"${box}", message:"<answer>"}). ` +
-      `Do NOT say the delegation was cancelled or declined — it is waiting on you. ` +
-      `If you need a value only the user can give, ask the user, then call resume with their answer.`
+      `run:waiting — the sandbox agent PAUSED and is waiting for an answer (it is NOT cancelled/done).\n\n` +
+      `QUESTION FROM THE SANDBOX:\n${q}\n\n` +
+      `WHAT YOU (the calling agent) MUST DO NOW — do NOT end your turn:\n` +
+      `1. Ask the USER this exact question using your native question UI (e.g. the AskQuestion tool) ` +
+      `— UNLESS you can answer it confidently from repo/task context yourself.\n` +
+      `2. Take the answer and call resume({session:"${box}", message:"<answer>"}).\n` +
+      `3. resume blocks until the next question or completion — keep repeating 1–2 until run:done.\n` +
+      `NEVER report this as cancelled, declined, or "I'll check back later" — it is actively waiting on you.`
     );
   }
   return r.text; // done or cancelled
