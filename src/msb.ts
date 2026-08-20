@@ -478,9 +478,13 @@ function streamFmtScript(): string {
     `}return}` +
     `if(e.type==="result"){if(e.result&&String(e.result).trim())w(String(e.result).trim());return}` +
     `}catch(_){}}`;
+  // base64 the whole script and decode in the box: shipping a large JS blob through
+  // shell/SSH/msb-exec quoting was corrupting it (trailing garbage → SyntaxError at load).
+  // base64 has no shell-special chars, so the file lands byte-for-byte intact.
+  const b64 = Buffer.from(js, "utf8").toString("base64");
   return (
     `mkdir -p "$HOME/.claude" && ` +
-    `printf '%s' ${shellQuote(js)} > "$HOME/.claude/stream-fmt.js"`
+    `printf '%s' '${b64}' | base64 -d > "$HOME/.claude/stream-fmt.js"`
   );
 }
 
