@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ChevronRight, Eye, PauseCircle, Terminal } from "lucide-react";
+import { ChevronRight, Eye, FileText, PauseCircle, Terminal } from "lucide-react";
 import { resultSummary, type TraceEvent } from "@/lib/trace";
 import { tokenizeInline } from "@/lib/inline";
 import { Message, MessageContent, MessageHeader } from "@/components/ui/message";
@@ -61,8 +61,68 @@ export function LifecycleItem({ label, detail }: { label: string; detail?: strin
   );
 }
 
-/** A tool call: one mono row, output folded. A run emits dozens; expanded would bury the reasoning. */
+/** Shell-family tools render as a real command; everything else is a compact labelled row. */
+const SHELL_TOOLS = new Set(["Bash", "Shell", "Terminal", "Run", "Exec", "sh", "bash"]);
+
+/**
+ * A tool call rendered like real code (this is what the old dashboard got right):
+ *
+ *   · a Bash/Shell call is a TERMINAL block — a `$ <command>` prompt line on the dark trace ground,
+ *     its output printed right below it in the same panel. The command is code, so it reads as code.
+ *   · any other tool (Write / Read / Edit / Grep …) is a compact row: tool name + its argument in a
+ *     code chip, output folded behind a chevron.
+ *
+ * Output folds by default — a run emits dozens of calls and expanding every one would bury the
+ * reasoning — but a shell command's headline is always visible because the command IS the content.
+ */
 export function ToolItem({ event }: { event: Extract<TraceEvent, { kind: "tool" }> }) {
+  const isShell = SHELL_TOOLS.has(event.name);
+  return isShell ? <ShellItem event={event} /> : <FileToolItem event={event} />;
+}
+
+/** A shell command as a terminal panel: `$ cmd` then its output, on the dark trace ground. */
+function ShellItem({ event }: { event: Extract<TraceEvent, { kind: "tool" }> }) {
+  const [open, setOpen] = React.useState(false);
+  const hasOutput = !!event.result;
+  return (
+    <div className="ml-7 min-w-0">
+      <div className="overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--trace)]">
+        {/* title bar — signals "terminal" the way the old panel did */}
+        <div className="flex items-center gap-2 border-b border-[color-mix(in_srgb,var(--trace-fg)_14%,transparent)] px-3 py-1.5">
+          <Terminal className="size-3 shrink-0 text-[color-mix(in_srgb,var(--trace-fg)_60%,transparent)]" aria-hidden />
+          <span className="stamp text-[color-mix(in_srgb,var(--trace-fg)_55%,transparent)]">{event.name}</span>
+          {hasOutput && (
+            <button
+              type="button"
+              onClick={() => setOpen((v) => !v)}
+              aria-expanded={open}
+              className="ml-auto flex cursor-pointer items-center gap-1 text-[color-mix(in_srgb,var(--trace-fg)_60%,transparent)] hover:text-[var(--trace-fg)]"
+            >
+              <span className="stamp">{open ? "hide" : "output"}</span>
+              <ChevronRight className={cn("size-3.5 transition-transform duration-150", open && "rotate-90")} aria-hidden />
+            </button>
+          )}
+        </div>
+        {/* command line — always visible; the command is the content */}
+        <pre className="overflow-x-auto px-3 py-2 font-mono text-micro leading-relaxed text-[var(--trace-fg)]">
+          <span className="mr-2 shrink-0 select-none text-[var(--ok)]" aria-hidden>$</span>
+          {event.arg ?? ""}
+        </pre>
+        {hasOutput && open && (
+          <pre className="max-h-80 overflow-auto border-t border-[color-mix(in_srgb,var(--trace-fg)_14%,transparent)] px-3 py-2 font-mono text-micro leading-relaxed whitespace-pre-wrap text-[color-mix(in_srgb,var(--trace-fg)_82%,transparent)]">
+            {event.result}
+          </pre>
+        )}
+      </div>
+      {hasOutput && !open && (
+        <p className="text-ash mt-1 truncate font-mono text-micro">{resultSummary(event.result)}</p>
+      )}
+    </div>
+  );
+}
+
+/** Non-shell tool (Write/Read/Edit/Grep…): compact row, arg as a code chip, output folded. */
+function FileToolItem({ event }: { event: Extract<TraceEvent, { kind: "tool" }> }) {
   const [open, setOpen] = React.useState(false);
   const summary = resultSummary(event.result);
 
@@ -70,7 +130,7 @@ export function ToolItem({ event }: { event: Extract<TraceEvent, { kind: "tool" 
     <div className="min-w-0">
       <Marker>
         <MarkerIcon className="text-ash">
-          <Terminal />
+          <FileText />
         </MarkerIcon>
         <MarkerContent className="min-w-0 flex-1">
           <button
@@ -79,12 +139,16 @@ export function ToolItem({ event }: { event: Extract<TraceEvent, { kind: "tool" 
             disabled={!event.result}
             aria-expanded={event.result ? open : undefined}
             className={cn(
-              "flex w-full min-w-0 items-baseline gap-2 rounded-md px-2 py-1 text-left font-mono text-meta -mx-2",
-              event.result && "hover:text-ink cursor-pointer hover:bg-[var(--surface)]"
+              "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1 text-left text-meta -mx-2",
+              event.result && "cursor-pointer hover:bg-[var(--surface)]"
             )}
           >
             <span className="text-ink shrink-0 font-medium">{event.name}</span>
-            {event.arg && <span className="text-ash min-w-0 truncate">{event.arg}</span>}
+            {event.arg && (
+              <code className="text-ash min-w-0 truncate rounded bg-[var(--surface)] px-1.5 py-0.5 font-mono text-micro">
+                {event.arg}
+              </code>
+            )}
             {event.result && (
               <ChevronRight
                 className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-150", open && "rotate-90")}
@@ -97,7 +161,7 @@ export function ToolItem({ event }: { event: Extract<TraceEvent, { kind: "tool" 
 
       {event.result &&
         (open ? (
-          <pre className="mt-2 ml-7 max-h-72 overflow-auto rounded-md bg-[var(--trace)] px-4 py-3 font-mono text-micro leading-relaxed whitespace-pre-wrap text-[var(--trace-fg)]">
+          <pre className="mt-2 ml-7 max-h-72 overflow-auto rounded-lg border border-[var(--line)] bg-[var(--trace)] px-3 py-2 font-mono text-micro leading-relaxed whitespace-pre-wrap text-[color-mix(in_srgb,var(--trace-fg)_82%,transparent)]">
             {event.result}
           </pre>
         ) : (
