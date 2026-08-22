@@ -8,6 +8,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { FleetList } from "@/components/FleetList";
 import { BoxDetail } from "@/components/BoxDetail";
 import { Composer } from "@/components/Composer";
+import { EmptyDetail } from "@/components/EmptyDetail";
 import type { AskMessage } from "@/components/AskPanel";
 import { cn } from "@/lib/utils";
 
@@ -161,13 +162,7 @@ export default function App() {
               onRefresh={() => setRefreshKey((k) => k + 1)}
             />
           ) : (
-            <div className="text-muted-foreground flex h-full flex-col items-center justify-center gap-2 p-10 text-center">
-              <Boxes className="size-7 opacity-40" aria-hidden />
-              <p className="text-foreground text-sm font-medium">Select a sandbox</p>
-              <p className="max-w-[38ch] text-xs leading-relaxed">
-                Pick a box to watch its log, ask the co-pilot about it, or answer a question it is blocked on.
-              </p>
-            </div>
+            <EmptyDetail boxes={boxes} onSelect={setSelected} />
           )}
         </main>
       </div>
