@@ -3,28 +3,53 @@
 /*
  * ── Design thesis ──────────────────────────────────────────────────────────────────────────────
  * A sandbox is not a chat partner. It is a machine that boots, works, sometimes asks, and dies.
- * So the interface is an INSTRUMENT for reading a trace, not a messaging app wearing a dev-tool
- * costume:
+ * The UI is an instrument for reading a trace and for releasing a halted machine:
  *
- *   · One hairline rail runs down every thread. Lifecycle events (booted, claimed, asked, resumed,
- *     exited) are nodes on it. The eye follows a single spine, the way you read a flight recorder.
- *   · The agent has no bubble. It speaks in full-width prose at a reading measure, because its
- *     output is prose. Bubbles on both sides is the generic move and wastes half the width.
- *   · Tool calls are thin monospace rows on the rail with their results folded away — a trace line,
- *     not a chat message.
- *   · Sodium amber is the primary signal, not indigo. Amber is what an instrument uses to mean
- *     "attention here", and this product has exactly one state that needs a human. Mint is reserved
- *     for genuinely-live, and nothing else may use either colour decoratively.
- *   · IBM Plex Sans + Mono: engineered, technical heritage, and specifically not the Inter/Geist
- *     silhouette every generated dashboard ships.
- *   · No cards. Hairlines, rails, and space do the structuring.
+ *   · A thread is a TRACE with one hairline spine. Lifecycle moments are markers on it, the agent
+ *     speaks in full-measure prose (no bubble — its output is prose), and tool calls are thin
+ *     monospace rows with their output folded away.
+ *   · Sodium amber is the signal colour. This product has exactly one state that needs a human, and
+ *     amber is what an instrument uses for "attention here". Mint means live. Neither decorates.
+ *   · IBM Plex Sans + Mono: engineered, technical, and specifically not the Inter/Geist silhouette.
+ *   · No cards as page structure. Hairlines, rails and space do the work.
+ *
+ * ── Token strategy ────────────────────────────────────────────────────────────────────────────
+ * The shadcn chat components (message, bubble, marker, message-scroller) are built against the
+ * standard shadcn semantic variables. Rather than patch them, the palette below DEFINES those
+ * variables, so installed and future registry components inherit this design automatically:
+ *   --primary   -> sodium signal        --muted/--secondary -> raised ink surfaces
+ *   --background/--foreground -> ink    --border/--input    -> hairlines
+ * The named aliases (--ink, --signal, --live, --line, --observer, --trace) stay as the vocabulary
+ * this app's own components speak.
  * ───────────────────────────────────────────────────────────────────────────────────────────────
  */
 
 @theme inline {
-  --color-bg: var(--bg);
-  --color-surface: var(--surface);
-  --color-raised: var(--raised);
+  /* shadcn contract */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  /* this app's vocabulary */
   --color-ink: var(--ink);
   --color-ink-dim: var(--ink-dim);
   --color-ink-faint: var(--ink-faint);
@@ -32,41 +57,56 @@
   --color-line-strong: var(--line-strong);
   --color-signal: var(--signal);
   --color-signal-ink: var(--signal-ink);
-  --color-signal-wash: var(--signal-wash);
   --color-live: var(--live);
-  --color-live-wash: var(--live-wash);
   --color-danger: var(--danger);
-  --color-danger-wash: var(--danger-wash);
   --color-observer: var(--observer);
   --color-trace: var(--trace);
-  --radius-xs: 3px;
-  --radius-sm: 5px;
-  --radius-md: 7px;
-  --radius-lg: 10px;
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+
   --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-/* Dark is the default: this is watched at a desk, often at night, beside an editor. */
+/* Dark is the default: watched at a desk, often at night, beside an editor. */
 :root,
 .dark {
-  --bg: oklch(0.165 0.008 250); /* ink, faintly cool — not pure black, not slate-blue */
+  --radius: 0.5rem;
+
+  --bg: oklch(0.165 0.008 250);
   --surface: oklch(0.196 0.008 250);
   --raised: oklch(0.232 0.009 250);
-  --ink: oklch(0.955 0.004 90); /* warm off-white: paper under a lamp, not clinical #fff */
+  --ink: oklch(0.955 0.004 90); /* warm off-white — paper under a lamp, not clinical #fff */
   --ink-dim: oklch(0.74 0.008 90);
-  --ink-faint: oklch(0.575 0.008 250);
+  --ink-faint: oklch(0.6 0.008 250);
   --line: oklch(0.27 0.008 250);
-  --line-strong: oklch(0.35 0.01 250);
+  --line-strong: oklch(0.36 0.01 250);
   --signal: oklch(0.79 0.15 72); /* sodium amber */
   --signal-ink: oklch(0.2 0.05 70);
-  --signal-wash: oklch(0.79 0.15 72 / 0.12);
   --live: oklch(0.82 0.16 158); /* mint — live only */
-  --live-wash: oklch(0.82 0.16 158 / 0.12);
   --danger: oklch(0.68 0.19 22);
-  --danger-wash: oklch(0.68 0.19 22 / 0.12);
-  --observer: oklch(0.74 0.1 232); /* the read-only lane: cool, never amber, never mint */
-  --trace: oklch(0.135 0.006 250); /* tool-output ground, deeper than the page */
+  --observer: oklch(0.76 0.1 232); /* the read-only lane: cool, never amber, never mint */
+  --trace: oklch(0.135 0.006 250);
+
+  /* shadcn semantic layer, derived from the above */
+  --background: var(--bg);
+  --foreground: var(--ink);
+  --card: var(--surface);
+  --card-foreground: var(--ink);
+  --popover: var(--raised);
+  --popover-foreground: var(--ink);
+  --primary: var(--signal);
+  --primary-foreground: var(--signal-ink);
+  --secondary: var(--surface);
+  --secondary-foreground: var(--ink);
+  --muted: var(--surface);
+  --muted-foreground: var(--ink-faint);
+  --accent: var(--raised);
+  --accent-foreground: var(--ink);
+  --destructive: var(--danger);
+  --border: var(--line);
+  --input: var(--line-strong);
+  --ring: var(--signal);
 }
 
 .light {
@@ -75,18 +115,52 @@
   --raised: oklch(0.965 0.004 85);
   --ink: oklch(0.22 0.01 250);
   --ink-dim: oklch(0.44 0.012 250);
-  --ink-faint: oklch(0.6 0.01 250);
+  --ink-faint: oklch(0.52 0.01 250);
   --line: oklch(0.9 0.005 85);
-  --line-strong: oklch(0.82 0.008 85);
+  --line-strong: oklch(0.8 0.008 85);
   --signal: oklch(0.56 0.14 62);
   --signal-ink: oklch(0.99 0.01 80);
-  --signal-wash: oklch(0.56 0.14 62 / 0.1);
   --live: oklch(0.52 0.14 158);
-  --live-wash: oklch(0.52 0.14 158 / 0.1);
   --danger: oklch(0.52 0.2 24);
-  --danger-wash: oklch(0.52 0.2 24 / 0.09);
-  --observer: oklch(0.48 0.12 240);
+  --observer: oklch(0.45 0.12 240);
   --trace: oklch(0.22 0.01 250); /* the trace stays dark in both themes: it is machine output */
+
+  --background: var(--bg);
+  --foreground: var(--ink);
+  --card: var(--surface);
+  --card-foreground: var(--ink);
+  --popover: var(--surface);
+  --popover-foreground: var(--ink);
+  --primary: var(--signal);
+  --primary-foreground: var(--signal-ink);
+  --secondary: var(--raised);
+  --secondary-foreground: var(--ink);
+  --muted: var(--raised);
+  --muted-foreground: var(--ink-faint);
+  --accent: var(--raised);
+  --accent-foreground: var(--ink);
+  --destructive: var(--danger);
+  --border: var(--line);
+  --input: var(--line-strong);
+  --ring: var(--signal);
+}
+
+/* Utilities the registry's message-scroller expects from a shadcn base stylesheet. */
+@utility scrollbar-thin {
+  scrollbar-width: thin;
+}
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+@utility scrollbar-gutter-stable {
+  scrollbar-gutter: stable;
+}
+/* A short fade at the bottom of a scroll viewport, so a cut-off line reads as "more below". */
+@utility scroll-fade-b {
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 2rem), transparent 100%);
 }
 
 @layer base {
@@ -111,7 +185,7 @@
     background: var(--bg);
     color: var(--ink);
     font-family: var(--font-sans);
-    /* 15px base with a 1.6 measure: agent output is prose and gets read, not scanned. */
+    /* 15px base, 1.6 measure: agent output is prose and gets read, not scanned. */
     font-size: 15px;
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
@@ -119,7 +193,7 @@
   }
   /* Browser surfaces the design still owns. */
   ::selection {
-    background: var(--signal-wash);
+    background: color-mix(in oklch, var(--signal) 25%, transparent);
     color: var(--ink);
   }
   ::-webkit-scrollbar {
@@ -153,7 +227,7 @@
     font-variant-numeric: tabular-nums;
     font-feature-settings: "tnum";
   }
-  /* Small-caps machine labels: BOOTED, EXITED, ASKED. Set in mono, tracked out. */
+  /* Machine labels: BOOTED, EXITED, NEEDS YOU. Mono, tracked out, small. */
   .stamp {
     font-family: var(--font-mono);
     font-size: 10.5px;
@@ -174,7 +248,7 @@
   }
 }
 
-/* The one authored motion: a live node breathing on the rail. Nothing else animates on its own. */
+/* The one authored motion: a live node breathing. Nothing else animates unprompted. */
 @keyframes breathe {
   0%,
   100% {

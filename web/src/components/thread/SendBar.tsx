@@ -2,7 +2,7 @@ import * as React from "react";
 import { ArrowUp, Eye, Terminal } from "lucide-react";
 import { api, type RunState } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Composer } from "@/components/ui/textarea";
+import { Composer } from "@/components/ui/composer";
 import { cn } from "@/lib/utils";
 
 type Mode = "reply" | "ask";
