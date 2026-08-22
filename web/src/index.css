@@ -118,6 +118,19 @@
 
   --trace: var(--gray-1); /* terminal ground: the darkest neutral surface */
   --trace-fg: var(--gray-12);
+
+  /*
+   * Override Radix's default face with Geist. This MUST live outside @layer base: Radix's own
+   * styles.css is un-layered and would otherwise win the cascade and keep the system font. Setting
+   * the Radix token itself means every Radix component and our own markup pick up Geist uniformly.
+   */
+  --default-font-family: var(--font-sans);
+  --default-mono-font-family: var(--font-mono);
+  --em-font-family: var(--font-sans);
+  --quote-font-family: var(--font-sans);
+  --code-font-family: var(--font-mono);
+  --strong-font-family: var(--font-sans);
+  font-family: var(--font-sans);
 }
 
 /* Utilities the registry's message-scroller expects from a shadcn base stylesheet. */
@@ -158,12 +171,10 @@
     -webkit-font-smoothing: antialiased;
     overscroll-behavior-y: none;
   }
-  /* The Radix Theme fills the app and owns the real canvas colour + font. */
+  /* The Radix Theme fills the app; the real canvas colour is painted here. */
   .radix-themes {
     min-height: 100%;
     background: var(--canvas);
-    color: var(--fg);
-    --default-font-family: var(--font-sans);
   }
   ::selection {
     background: var(--accent-a5);
