@@ -11,6 +11,7 @@ import {
   Search,
   Sun,
   TriangleAlert,
+  Waypoints,
 } from "lucide-react";
 import { api, type BoxView } from "@/lib/api";
 import { POLL_MS, isUp } from "@/lib/format";
@@ -167,16 +168,16 @@ export default function App() {
           threadOpen && "hidden md:flex"
         )}
       >
-        <header className={cn("flex items-center gap-2 px-4 pt-4 pb-3", collapsed && "md:flex-col md:gap-3 md:px-2")}>
-          <span className="bg-azure grid size-6 shrink-0 place-items-center rounded-md text-[var(--accent-fg)]">
-            <Boxes className="size-3.5" aria-hidden />
+        <header className={cn("flex items-center gap-2.5 px-3 pt-3 pb-2.5", collapsed && "md:flex-col md:gap-3 md:px-2")}>
+          <span className="bg-primary text-primary-foreground grid size-8 shrink-0 place-items-center rounded-xl">
+            <Boxes className="size-4" aria-hidden />
           </span>
           {!collapsed && (
             <div className="min-w-0">
-              <p className="text-ink text-meta leading-tight font-semibold tracking-tight">agent-sandbox</p>
+              <p className="text-ink text-body leading-tight font-semibold tracking-tight">agent-sandbox</p>
               <p className="stamp text-ash mt-0.5 flex items-center gap-1.5">
                 <span
-                  className={cn("size-1.5 rounded-full", live ? "bg-azure breathe" : "bg-[var(--danger)]")}
+                  className={cn("size-1.5 rounded-full", live ? "bg-primary breathe" : "bg-[var(--danger)]")}
                   aria-hidden
                 />
                 {live
@@ -238,25 +239,26 @@ export default function App() {
           </nav>
         ) : (
           <>
-            <div className="flex flex-col gap-1.5 px-3 pb-3">
-              <Button variant="primary" size="default" onClick={newTask} className="w-full justify-start">
-                <Plus />
-                New task
-              </Button>
+            {/* Search pill — the reference's prominent "Search ⌘K" affordance, wired to the palette. */}
+            <div className="flex flex-col gap-2 px-3 pb-3">
               <button
                 type="button"
                 onClick={() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }))}
-                className="text-ash hover:text-ink flex w-full cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-left text-meta transition-colors hover:bg-[var(--surface)]"
+                className="text-ash hover:text-ink hover:border-[var(--line-strong)] flex w-full cursor-pointer items-center gap-2.5 rounded-xl border bg-[var(--surface)] px-3 py-2.5 text-left text-meta transition-colors"
               >
-                <Search className="size-3.5 shrink-0" aria-hidden />
-                Search machines
-                <kbd className="stamp ml-auto rounded border px-1.5 py-0.5">⌘K</kbd>
+                <Search className="size-4 shrink-0" aria-hidden />
+                <span className="flex-1">Search</span>
+                <kbd className="stamp rounded-md border bg-[var(--card)] px-1.5 py-0.5">⌘K</kbd>
               </button>
+              <Button variant="primary" size="default" onClick={newTask} className="w-full justify-center rounded-xl">
+                <Plus />
+                New task
+              </Button>
             </div>
 
-            {/* Sections. "Sandboxes" is its own destination: the chat answers "what am I building",
+            {/* Primary nav. "Sandboxes" is its own destination: the chat answers "what am I building",
                 this answers "what is running on my VPS, and does any of it need me". */}
-            <div className="flex flex-col gap-0.5 px-3 pb-2">
+            <div className="flex flex-col gap-0.5 px-3 pb-1">
               <NavItem active={view === "chat"} onClick={() => setView("chat")} icon={<MessageSquare />} label="Chat" />
               <NavItem
                 active={view === "sandboxes"}
@@ -275,15 +277,19 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => open(waiting[0].name)}
-                className="mx-3 mb-3 flex cursor-pointer items-center gap-2 rounded-md border border-[color-mix(in_srgb,var(--attention)_45%,transparent)] bg-[color-mix(in_srgb,var(--attention)_12%,transparent)] px-3 py-2 text-left transition-colors hover:bg-[color-mix(in_srgb,var(--attention)_18%,transparent)]"
+                className="mx-3 mt-2 mb-1 flex cursor-pointer items-center gap-2 rounded-xl border border-[color-mix(in_srgb,var(--attention)_45%,transparent)] bg-[color-mix(in_srgb,var(--attention)_12%,transparent)] px-3 py-2.5 text-left transition-colors hover:bg-[color-mix(in_srgb,var(--attention)_18%,transparent)]"
               >
-                <PauseCircle className="size-3.5 shrink-0 text-[var(--attention-text)]" aria-hidden />
+                <PauseCircle className="size-4 shrink-0 text-[var(--attention-text)]" aria-hidden />
                 <span className="text-ink text-meta font-medium">{waiting.length} waiting on you</span>
                 <span className="stamp ml-auto text-[var(--attention-text)]">answer →</span>
               </button>
             )}
 
-            <p className="stamp text-ash px-4 pt-2 pb-1.5">machines</p>
+            <div className="flex items-center gap-2 px-4 pt-3 pb-1.5">
+              <Waypoints className="text-ash size-3.5" aria-hidden />
+              <p className="stamp text-ash">machines</p>
+              {boxes.length > 0 && <span className="stamp text-ash tabular ml-auto">{boxes.length}</span>}
+            </div>
 
             {error && (
               <p role="alert" className="mx-4 mb-2 flex items-start gap-1.5 text-micro text-[var(--danger)]">
@@ -299,6 +305,20 @@ export default function App() {
               loading={!data && !error}
               onSelect={open}
             />
+
+            {/* Bottom identity/status row — the reference's user-profile footer, mapped to a live
+                connection stamp for our single-tenant console. */}
+            <div className="border-t px-3 py-2.5">
+              <div className="flex items-center gap-2.5">
+                <span className="bg-accent text-accent-foreground grid size-7 shrink-0 place-items-center rounded-full text-meta font-semibold">
+                  A
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-ink truncate text-meta font-medium">Operator</p>
+                  <p className="stamp text-ash truncate">{live ? `connected · ${freshness}` : "offline"}</p>
+                </div>
+              </div>
+            </div>
           </>
         )}
       </aside>

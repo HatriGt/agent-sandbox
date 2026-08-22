@@ -69,9 +69,9 @@ export function CommandPalette({
       }}
       aria-label="Command palette"
       className={cn(
-        "text-ink m-0 w-full max-w-xl rounded-lg border bg-[var(--raised)] p-0",
+        "text-ink m-0 w-full max-w-xl rounded-2xl border bg-[var(--raised)] p-0 elevate",
         "fixed top-[12vh] left-1/2 -translate-x-1/2",
-        "backdrop:bg-black/50 open:flex open:flex-col"
+        "backdrop:bg-black/40 open:flex open:flex-col"
       )}
     >
       <div className="flex items-center gap-2 border-b px-3.5 py-3">
@@ -110,8 +110,8 @@ export function CommandPalette({
               onMouseEnter={() => setCursor(i)}
               onClick={() => run(i)}
               className={cn(
-                "flex w-full cursor-pointer items-center gap-3 rounded px-2.5 py-2 text-left",
-                i === clamped && "bg-[var(--surface)]"
+                "flex w-full cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 text-left",
+                i === clamped && "bg-accent"
               )}
             >
               {row.kind === "new" ? (

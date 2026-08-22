@@ -46,7 +46,7 @@ export function MachineList({
 
       <ul>
         {pending.map((p) => (
-          <li key={p.id} className="mx-2 rounded-md px-3 py-2.5">
+          <li key={p.id} className="mx-2 rounded-xl px-3 py-2.5">
             <p className="stamp text-ash">
               <span className="breathe">○</span> booting
             </p>
@@ -63,14 +63,14 @@ export function MachineList({
                 onClick={() => onSelect(v.name)}
                 aria-current={active ? "true" : undefined}
                 className={cn(
-                  "relative mx-2 w-[calc(100%-1rem)] cursor-pointer rounded-md px-3 py-2.5 text-left",
+                  "relative mx-2 w-[calc(100%-1rem)] cursor-pointer rounded-xl px-3 py-2.5 text-left",
                   "transition-colors duration-150 hover:bg-[var(--surface)]",
-                  active && "bg-[var(--surface)]",
+                  active && "bg-accent",
                   v.leaving && "opacity-50"
                 )}
               >
                 {active && (
-                  <span className="bg-azure absolute inset-y-2 left-0 w-[3px] rounded-full" aria-hidden />
+                  <span className="bg-primary absolute inset-y-2.5 left-0 w-[3px] rounded-full" aria-hidden />
                 )}
 
                 <div className="flex items-center gap-2">

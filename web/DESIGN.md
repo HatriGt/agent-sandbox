@@ -1,19 +1,53 @@
 # agent-sandbox — Style Reference
 
+> **Modelled on the [CRM AI Agent reference](https://crm-ai-agent-tau.vercel.app/)** (assistant
+> "Rune") — its clean, airy, soft-neutral light aesthetic — mapped onto our domain: a console for
+> delegating coding tasks to ephemeral microVM sandboxes running the Claude Code agent. We clone the
+> reference's *look and feel* (palette, typography, radii, spacing, layout structure, card/pill/bubble
+> styling) but NOT its concepts: there are no CRM nav items (Balances/Customers/Contracts), no fake
+> multi-workspace switcher, and no fabricated agent roster. Every region shows real product data.
+>
 > Built on **shadcn (neutral base) + prompt-kit + Geist**. The chat surface — the product's core — is
 > composed from prompt-kit's purpose-built AI-chat components (ChatContainer, PromptInput, Steps, Tool,
 > Markdown, ScrollButton) rather than hand-rolled bubbles, so it reads like a real assistant UI. The
-> shell of the console (sidebar, Sandboxes table, command palette) shares the same shadcn token base.
-> Run STATE is the loudest signal; geometry is shadcn's; nothing is bespoke where a proven part exists.
+> shell of the console (sidebar, Sandboxes table, command palette) shares the same token base.
+> Run STATE is the loudest signal; geometry is the reference's; nothing is bespoke where a proven part exists.
 
-**Theme:** dual (neutral dark default, neutral light), toggled by a `dark` class on `<html>`.
+**Theme:** dual — **soft-neutral light is the default and primary target** (the reference is light);
+dark is a tuned dark version of the same feel (near-neutral charcoal, not the old blue). Toggled by a
+`dark` class on `<html>`.
+
+## Mapping the reference onto our domain
+
+| Reference region | Our surface |
+|---|---|
+| Workspace switcher | Brand/identity header for **agent-sandbox** (icon + name + live status). No fake workspaces. |
+| Search ⌘K pill | Search pill wired to the **CommandPalette** (⌘K), which searches machines by task. |
+| Left nav (Home/Inbox/…) | **Chat** and **Sandboxes** — the two real destinations. No invented CRM items. |
+| Sidebar chat/agent list | **MachineList** — live sandbox machines: state + task + short-name + uptime. |
+| Center hero empty state | **Hub** — time-aware greeting, assistant-voice subtitle, delegate composer, starter chips, previous runs. |
+| Center chat state | **Thread** — breadcrumb (Agent / machine / task), agent prose, "N tools used" pills, clarifying-question-with-buttons, artifacts, vitals in the header. |
+| Right agent-roster panel | **Omitted** — our data has no roster; forcing a third column would mean fake content. Two-column shell keeps the faithful feel. |
 
 ## Foundation
 
-The colour system is shadcn's **canonical neutral theme** (the exact oklch values from ui.shadcn.com),
-defined once in `index.css` under `:root` (light) and `.dark`. There is no runtime theme provider — the
-`useTheme` hook in `App.tsx` toggles the `dark` class on `document.documentElement` and persists to
-`localStorage`. Tailwind v4 reads the tokens through `@theme inline`.
+The colour system is a **soft warm-neutral light theme** (canvas hue ~95, very low chroma) with a
+**restrained slate-indigo accent** (hue ~272), modelled on the reference's near-monochrome palette:
+white floating cards on a faint warm canvas, colour reserved for the single accent and functional
+state hues. Defined once in `index.css` under `:root` (light) and `.dark`. There is no runtime theme
+provider — the `useTheme` hook in `App.tsx` toggles the `dark` class on `document.documentElement`
+and persists to `localStorage`. Tailwind v4 reads the tokens through `@theme inline`.
+
+### Key patterns cloned from the reference
+
+- **Floating shell** — sidebar and workspace are detached, `rounded-2xl`, softly elevated cards on a
+  breathing canvas.
+- **"N tools used" pill** (`ToolGroup`) — consecutive tool calls fold into one summary pill that
+  expands to the individual terminal panels / tool rows.
+- **Clarifying-question-with-buttons** (`AskingItem`) — when the agent halts with a question that
+  contains inline options (`[Acme Corp] [New Acme Corp]` or a `1) … 2) …` list), those render as
+  one-click answer buttons that release the run; otherwise the free-text reply below is used.
+- **Breadcrumb** — the thread header carries an `Agent / <machine> / <task>` trail.
 
 Two layers sit on top:
 
@@ -40,24 +74,28 @@ Two layers sit on top:
   output); other tools are compact rows with the argument in a code chip. prompt-kit's `Tool` and
   `Steps` primitives are available for richer structured-tool rendering.
 
-## Tokens — Colors (all derived from Radix scales)
+## Tokens — Colors (oklch, defined in `index.css`)
 
-| Semantic var | Maps to (Radix) | Role |
+The base is the shadcn semantic contract (`--background/--foreground/--primary/--muted/--border/…`);
+the app vocabulary below is *derived* from it in `@theme inline` so existing components inherit the
+base with no per-line edits. Light values shown; `.dark` swaps the same names.
+
+| Semantic var | Light value / maps to | Role |
 |---|---|---|
-| `--canvas` | `--color-background` | Page field (slate, per mode). |
-| `--surface` | `--gray-2` | Panels, cards, active rows. |
-| `--raised` | `--gray-3` | Hover / popover lift. |
-| `--fg` | `--gray-12` | Primary text. |
-| `--muted-fg` | `--gray-11` | Secondary text — AA by Radix construction. |
-| `--line` | `--gray-a5` | Hairlines (alpha: reads on any surface). |
-| `--line-strong` | `--gray-a7` | Hover borders, scrollbar thumb. |
-| `--accent` | `--accent-9` | THE action fill (buttons, primary CTA). |
-| `--accent-fg` | `--accent-contrast` | Text on the accent fill. |
-| `--accent-text` | `--accent-11` | Accent as text/icon/state (working), focus ring. |
-| `--danger` | `--red-9` | Destroy + non-zero exit. |
-| `--attention` / `--attention-text` | `--amber-9` / `--amber-11` | Needs-you (the one state with a deadline). |
-| `--ok` | `--green-11` | Completed / healthy. |
-| `--trace` | `--gray-1` | Terminal ground (darkest neutral surface). |
+| `--background` / `--canvas` | `oklch(0.975 0.003 95)` | Warm-neutral page field the cards float on. |
+| `--card` / `--raised` | `oklch(1 0 0)` | White floating panels, cards, popovers. |
+| `--surface` | `oklch(0.968 0.003 95)` | Hover / active rows, inset pills. |
+| `--foreground` / `--ink` | `oklch(0.24 0.008 275)` | Primary text. |
+| `--muted-foreground` / `--ash` | `oklch(0.52 0.008 275)` | Secondary text (AA on card/canvas). |
+| `--border` / `--line` | `oklch(0.915 0.004 95)` | Hairlines. `--line-strong` for hover borders. |
+| `--primary` / `--azure` | `oklch(0.46 0.11 272)` | THE action fill (buttons, primary CTA). |
+| `--accent-fg` | `--primary-foreground` | Text on the accent fill. |
+| `--accent` / `--accent-foreground` | soft neutral / slate-indigo | Active nav, selected rows, agent avatar. |
+| `--azure-text` | `--primary` | Accent as text/icon/state (working), focus ring. |
+| `--danger` | `oklch(0.577 0.222 27.3)` | Destroy + non-zero exit. |
+| `--attention` / `--attention-text` | amber | Needs-you (the one state with a deadline). |
+| `--ok` | green | Completed / healthy; the `$` shell prompt glyph. |
+| `--trace` / `--trace-fg` | dark ground / light text | Terminal panels — **verified legible in BOTH themes** (light text on dark ground in both). |
 
 State is the one exception to "one accent": working (accent), needs-you (amber), done (slate), error
 (red) each carry a functional hue, but **always** with a glyph + word (see `stamp.tsx`) so colour is
@@ -70,8 +108,8 @@ never the sole carrier.
 - **Geist Mono Variable** — machine text only: identifiers, vitals (tabular), tool calls, log output,
   stamps.
 
-Geist is applied by overriding Radix's `--default-font-family` (and its mono/code/em/quote font tokens)
-on `.radix-themes` **outside any `@layer`** — Radix's stylesheet is un-layered and would otherwise win.
+Geist is wired in `main.tsx` (self-hosted variable fonts) and set as `--font-sans` / `--font-mono` in
+the `@theme inline` block, so Tailwind's `font-sans` / `font-mono` and the `body` default both use it.
 
 ### Type Scale (dense console; agent prose is the one step-up)
 
@@ -89,11 +127,13 @@ on `.radix-themes` **outside any `@layer`** — Radix's stylesheet is un-layered
 
 `.prose-agent` is the single place type steps up (16px), because it is read, not scanned.
 
-## Shapes — Radix radius scale
+## Shapes — medium radii (reference feel)
 
-Radii map onto Radix's `--radius-1..6` (driven by `radius="medium"`): `--radius-sm/md/lg/xl` →
-`--radius-2/3/4/5`. The only genuinely round things are the live dot and avatars (`--radius-pill`).
-Focus rings use the console shape (`--radius-sm`), not a pill.
+`--radius` is `0.875rem`; `--radius-sm/md/lg/xl` derive from it in `@theme inline`. Cards and the
+floating shell use `rounded-2xl`, list rows / nav items / palette rows use `rounded-xl`/`rounded-lg`,
+and chips (starters, answer buttons, the "N tools used" pill, the Search pill) are `rounded-full` to
+match the reference's soft, airy geometry. The only genuinely round things are the live dot and
+avatars (`--radius-pill`).
 
 ## Motion
 
@@ -102,8 +142,8 @@ motion collapses under `prefers-reduced-motion: reduce`.
 
 ## Accessibility
 
-- Contrast is AA-by-construction: text tiers use `--gray-11/12` and `--accent-11`, which Radix
-  guarantees against their paired surfaces in both modes.
+- Contrast: text tiers (`--foreground`, `--muted-foreground`) and the accent-as-text (`--azure-text`
+  → `--primary`) are tuned to read AA against card/canvas in both light and dark.
 - Touch targets: a global `@media (pointer: coarse)` rule floors interactive elements at 44px without
   inflating desktop density.
 - Focus: a visible 2px `--accent-text` ring on `:focus-visible`.

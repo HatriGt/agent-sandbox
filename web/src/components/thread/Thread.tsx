@@ -1,7 +1,7 @@
 import * as React from "react";
 import { ArrowLeft, Clock, Cpu, MemoryStick, Plus, Trash2 } from "lucide-react";
 import { api, type BoxView, type WatchSnapshot } from "@/lib/api";
-import { POLL_MS, roleLabel, shortName } from "@/lib/format";
+import { POLL_MS, roleLabel, shortName, threadTitle } from "@/lib/format";
 import { parseTrace } from "@/lib/trace";
 import { usePoll } from "@/hooks/usePoll";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,8 @@ import { StateStamp } from "@/components/ui/stamp";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ChatContainerContent, ChatContainerRoot, ChatContainerScrollAnchor } from "@/components/ui/chat-container";
 import { ScrollButton } from "@/components/ui/scroll-button";
-import { AskingItem, LifecycleItem, ObserverItem, SayItem, ToolItem, YouItem } from "./TraceItems";
+import type { TraceEvent } from "@/lib/trace";
+import { AskingItem, LifecycleItem, ObserverItem, SayItem, ToolGroup, YouItem } from "./TraceItems";
 import { SendBar } from "./SendBar";
 
 /** A co-pilot exchange, owned by the parent so it survives switching threads. */
@@ -48,6 +49,9 @@ export function Thread({
   const { data: snap } = usePoll<WatchSnapshot>((signal) => api.watch(box.name, signal), POLL_MS, [box.name]);
 
   const events = React.useMemo(() => parseTrace(snap?.log ?? ""), [snap?.log]);
+  // Fold consecutive tool calls into one cluster so the thread reads as prose punctuated by
+  // "N tools used" pills (the reference pattern), instead of a wall of individual tool rows.
+  const groups = React.useMemo(() => groupTrace(events), [events]);
   const runState = snap?.runState ?? box.runState;
   const question = snap?.question ?? box.question;
 
@@ -71,6 +75,16 @@ export function Thread({
     }
   };
 
+  // One-click answer to a clarifying question: same path as the SendBar reply (optimistic echo +
+  // resume), so the buttons in AskingItem release the halted run just like typing a reply does.
+  const answer = React.useCallback(
+    (text: string) => {
+      onReplied(text);
+      void api.resume(box.name, text);
+    },
+    [box.name, onReplied]
+  );
+
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
       <header className="flex items-center gap-2 border-b px-3 py-2.5 md:px-6">
@@ -79,14 +93,16 @@ export function Thread({
         </Button>
 
         <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-center gap-2.5">
-            <StateStamp state={runState} exitCode={snap?.exitCode ?? box.exitCode} />
-            <span className="text-ash min-w-0 truncate font-mono text-micro">
-              <span className="md:hidden">{shortName(box.name)}</span>
-              <span className="hidden md:inline">{box.name}</span>
-            </span>
+          {/* Breadcrumb — the reference's "Agent / Rune / <task>" trail, mapped to our machine. */}
+          <div className="text-ash flex min-w-0 items-center gap-1.5 text-micro">
+            <span className="hidden sm:inline">Agent</span>
+            <span className="hidden sm:inline opacity-50" aria-hidden>/</span>
+            <span className="shrink-0 font-mono">{shortName(box.name)}</span>
+            <span className="opacity-50" aria-hidden>/</span>
+            <span className="text-ink min-w-0 truncate font-medium">{threadTitle(box)}</span>
           </div>
           <div className="tabular mt-1.5 flex flex-wrap items-center gap-1.5">
+            <StateStamp state={runState} exitCode={snap?.exitCode ?? box.exitCode} />
             {box.uptime && <Vital icon={<Clock className="size-3" />} label="uptime" value={box.uptime} />}
             {box.cpu && <Vital icon={<Cpu className="size-3" />} label="cpu" value={box.cpu} />}
             {box.mem && <Vital icon={<MemoryStick className="size-3" />} label="memory" value={box.mem} />}
@@ -110,13 +126,13 @@ export function Thread({
           <ChatContainerContent className="mx-auto w-full max-w-3xl gap-6 px-4 pt-8 pb-16 md:px-6">
             {box.task && <YouItem text={box.task} label="task" />}
 
-            {events.map((e, i) =>
-              e.kind === "lifecycle" ? (
-                <LifecycleItem key={i} label={e.label} detail={e.detail} />
-              ) : e.kind === "tool" ? (
-                <ToolItem key={i} event={e} />
+            {groups.map((g, i) =>
+              g.kind === "lifecycle" ? (
+                <LifecycleItem key={i} label={g.label} detail={g.detail} />
+              ) : g.kind === "tools" ? (
+                <ToolGroup key={i} events={g.events} />
               ) : (
-                <SayItem key={i} text={e.text} live={runState === "running" && i === events.length - 1} />
+                <SayItem key={i} text={g.text} live={runState === "running" && i === groups.length - 1} />
               )
             )}
 
@@ -127,7 +143,7 @@ export function Thread({
               />
             )}
 
-            {question && runState === "waiting" && <AskingItem question={question} />}
+            {question && runState === "waiting" && <AskingItem question={question} onAnswer={answer} />}
 
             {/* What you sent back. The agent log does not echo it, so without this your own
                 message would vanish the moment it was delivered. */}
@@ -159,6 +175,31 @@ export function Thread({
       <SendBar boxName={box.name} runState={runState} onAsk={onAsk} onReplied={onReplied} />
     </div>
   );
+}
+
+type ToolEvent = Extract<TraceEvent, { kind: "tool" }>;
+
+/** A render group: prose, a lifecycle hairline, or a cluster of consecutive tool calls. */
+type TraceGroup =
+  | { kind: "say"; text: string }
+  | { kind: "lifecycle"; label: string; detail?: string }
+  | { kind: "tools"; events: ToolEvent[] };
+
+/** Coalesce runs of `tool` events into one `tools` group; pass prose/lifecycle through unchanged. */
+function groupTrace(events: TraceEvent[]): TraceGroup[] {
+  const out: TraceGroup[] = [];
+  for (const e of events) {
+    if (e.kind === "tool") {
+      const last = out[out.length - 1];
+      if (last?.kind === "tools") last.events.push(e);
+      else out.push({ kind: "tools", events: [e] });
+    } else if (e.kind === "lifecycle") {
+      out.push({ kind: "lifecycle", label: e.label, detail: e.detail });
+    } else {
+      out.push({ kind: "say", text: e.text });
+    }
+  }
+  return out;
 }
 
 /**

@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowRight, ArrowUp, Bug, ClipboardCheck, FileSearch, FlaskConical, GitBranch, Layers, Loader2 } from "lucide-react";
+import { ArrowRight, ArrowUp, Bug, ClipboardCheck, FileSearch, FlaskConical, GitBranch, Layers, Loader2, Sparkles } from "lucide-react";
 import { api, type BoxView } from "@/lib/api";
 import { shortName, threadTitle } from "@/lib/format";
 import { Button } from "@/components/ui/button";
@@ -27,6 +27,15 @@ interface Starter {
   /** Prefill — a real task, not a category. */
   task: string;
   needsRepo?: boolean;
+}
+
+/** Time-of-day greeting, in the reference's warm register. */
+function greeting(): string {
+  const h = new Date().getHours();
+  if (h < 5) return "Working late";
+  if (h < 12) return "Good morning";
+  if (h < 18) return "Good afternoon";
+  return "Good evening";
 }
 
 const STARTERS: Starter[] = [
@@ -133,23 +142,26 @@ export function Hub({
         )}
       >
         <div className="text-center">
-          <h1 className="text-ink text-h1 leading-[1.05] font-bold tracking-[-0.03em] sm:text-display">
-            What should it build?
+          <span className="text-ash mb-3 inline-flex items-center gap-1.5 text-meta">
+            <Sparkles className="text-azure-text size-4" aria-hidden />
+            agent-sandbox
+          </span>
+          <h1 className="text-ink text-h1 leading-[1.05] font-semibold tracking-[-0.03em] sm:text-display">
+            {greeting()}
           </h1>
-          <p className="text-ash mx-auto mt-3 max-w-[52ch] text-body leading-relaxed">
-            A microVM boots, an agent works the task inside it, and the machine stops itself when
-            idle. It halts and asks if it needs a decision from you.
+          <p className="text-ash mx-auto mt-3 max-w-[52ch] text-h3 leading-snug">
+            Where should we start? Describe a task and a fresh microVM will pick it up.
           </p>
         </div>
 
-        {/* starters — each prefills a real task */}
+        {/* starters — each prefills a real task, as reference-style quick-action chips */}
         <div className="flex flex-wrap justify-center gap-2">
           {STARTERS.map((s) => (
             <button
               key={s.label}
               type="button"
               onClick={() => applyStarter(s)}
-              className="text-ash hover:text-ink flex cursor-pointer items-center gap-2 rounded-md border bg-[var(--surface)] px-3 py-2 text-meta transition-colors hover:bg-[var(--raised)] hover:border-[var(--line-strong)] [&_svg]:size-3.5"
+              className="text-ash hover:text-ink flex cursor-pointer items-center gap-2 rounded-full border bg-[var(--card)] px-3.5 py-2 text-meta transition-colors hover:bg-[var(--surface)] hover:border-[var(--line-strong)] [&_svg]:size-3.5"
             >
               {s.icon}
               {s.label}
@@ -165,7 +177,7 @@ export function Hub({
           onValueChange={setTask}
           onSubmit={submit}
           isLoading={busy}
-          className="bg-card rounded-2xl"
+          className="bg-card rounded-2xl border-[var(--line)] elevate-sm"
         >
           <label htmlFor="new-task" className="sr-only">
             Describe the task for a new machine
@@ -221,7 +233,10 @@ export function Hub({
         {/* this session — real, and honest about what does not persist */}
         {sessionRuns.length > 0 && (
           <div className="border-t pt-6">
-            <p className="stamp text-ash pb-3">this session</p>
+            <div className="flex items-center gap-2 pb-3">
+              <p className="stamp text-ash">previous runs</p>
+              <span className="stamp text-ash tabular ml-auto">this session</span>
+            </div>
             <ul className="flex flex-col">
               {sessionRuns.slice(0, 6).map((r) => {
                 const box = boxes.find((b) => b.name === r.box);

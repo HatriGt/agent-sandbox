@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ChevronRight, Eye, FileText, PauseCircle, Terminal } from "lucide-react";
+import { ChevronRight, Eye, FileText, PauseCircle, Terminal, Wrench } from "lucide-react";
 import { resultSummary, type TraceEvent } from "@/lib/trace";
 import { Markdown } from "@/components/ui/markdown";
 import { cn } from "@/lib/utils";
@@ -37,9 +37,47 @@ const SHELL_TOOLS = new Set(["Bash", "Shell", "Terminal", "Run", "Exec", "sh", "
  *   · any other tool (Write / Read / Edit / Grep …) is a compact row: name + argument in a code chip,
  *     output folded behind a chevron.
  */
-export function ToolItem({ event }: { event: Extract<TraceEvent, { kind: "tool" }> }) {
+/** Module-local: only `ToolGroup` (below) renders it; nothing outside this file imports it. */
+function ToolItem({ event }: { event: Extract<TraceEvent, { kind: "tool" }> }) {
   const isShell = SHELL_TOOLS.has(event.name);
   return isShell ? <ShellItem event={event} /> : <FileToolItem event={event} />;
+}
+
+/**
+ * A cluster of consecutive tool calls, rendered like the reference's "N tools used" pill: a compact
+ * summary chip that expands to the individual tool rows/terminal panels. A single tool renders
+ * inline with no pill — there is nothing to summarise.
+ */
+export function ToolGroup({ events }: { events: Extract<TraceEvent, { kind: "tool" }>[] }) {
+  const [open, setOpen] = React.useState(false);
+  if (events.length === 1) return <ToolItem event={events[0]} />;
+
+  const names = [...new Set(events.map((e) => e.name))].slice(0, 4).join(", ");
+  return (
+    <div className="min-w-0">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="text-muted-foreground hover:text-foreground hover:bg-muted flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1 text-left text-meta transition-colors"
+      >
+        <Wrench className="size-3.5 shrink-0" aria-hidden />
+        <span className="font-medium">{events.length} tools used</span>
+        <span className="text-muted-foreground/70 hidden min-w-0 truncate font-mono text-micro sm:inline">{names}</span>
+        <ChevronRight
+          className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-150", open && "rotate-90")}
+          aria-hidden
+        />
+      </button>
+      {open && (
+        <div className="mt-2.5 flex flex-col gap-2.5 border-l pl-3">
+          {events.map((e, i) => (
+            <ToolItem key={i} event={e} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /** A shell command as a terminal panel: `$ cmd` then its output, on the dark trace ground. */
@@ -156,17 +194,52 @@ export function YouItem({ text, label = "you" }: { text: string; label?: string 
   );
 }
 
+/**
+ * Pull inline answer options out of a clarifying question, matching the reference's
+ * "…which one? [Acme Corp] [New Acme Corp]" pattern. Recognises bracketed `[option]` choices and, as
+ * a fallback, `1) x` / `2. y` enumerations. Options are capped and de-duplicated; anything long or
+ * malformed falls back to free-text reply (returns no options).
+ */
+function parseChoices(question: string): string[] {
+  const bracketed = [...question.matchAll(/\[([^\]]{1,48})\]/g)].map((m) => m[1].trim());
+  if (bracketed.length >= 2) return [...new Set(bracketed)].slice(0, 5);
+  const enumerated = [...question.matchAll(/(?:^|\n)\s*\d+[.)]\s*([^\n]{1,48})/g)].map((m) => m[1].trim());
+  if (enumerated.length >= 2) return [...new Set(enumerated)].slice(0, 5);
+  return [];
+}
+
 /** The question the machine is blocked on: the blocking control, so it names the release. */
-export function AskingItem({ question }: { question: string }) {
+export function AskingItem({ question, onAnswer }: { question: string; onAnswer?: (text: string) => void }) {
+  const choices = React.useMemo(() => parseChoices(question), [question]);
   return (
     <div className="flex flex-col gap-1.5">
       <span className="stamp text-attention-text flex items-center gap-1.5">
         <PauseCircle className="size-3.5" aria-hidden />
         the agent is asking
       </span>
-      <div className="border-attention/45 bg-attention/10 max-w-[70ch] rounded-lg border px-5 py-4">
+      <div className="border-attention/45 bg-attention/10 max-w-[70ch] rounded-xl border px-5 py-4">
         <p className="text-foreground text-lead leading-[1.55] whitespace-pre-wrap">{question}</p>
-        <p className="text-muted-foreground mt-2.5 text-meta">It has halted and cannot continue until you answer below.</p>
+        {choices.length > 0 && onAnswer ? (
+          <>
+            <div className="mt-3.5 flex flex-wrap gap-2">
+              {choices.map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => onAnswer(c)}
+                  className="bg-card text-foreground hover:bg-attention/15 hover:border-attention/60 cursor-pointer rounded-full border px-3.5 py-1.5 text-meta font-medium transition-colors"
+                >
+                  {c}
+                </button>
+              ))}
+            </div>
+            <p className="text-muted-foreground mt-2.5 text-micro">
+              Pick one to release the run, or type a different answer below.
+            </p>
+          </>
+        ) : (
+          <p className="text-muted-foreground mt-2.5 text-meta">It has halted and cannot continue until you answer below.</p>
+        )}
       </div>
     </div>
   );

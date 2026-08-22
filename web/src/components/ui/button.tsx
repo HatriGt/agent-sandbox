@@ -14,9 +14,9 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        // THE action. Azure fill, white text — the only filled-accent element in a view where possible.
-        default: "bg-azure text-[var(--accent-fg)] hover:bg-[color-mix(in_srgb,var(--accent)_88%,#fff)] active:brightness-95",
-        primary: "bg-azure text-[var(--accent-fg)] hover:bg-[color-mix(in_srgb,var(--accent)_88%,#fff)] active:brightness-95",
+        // THE action. Accent fill, contrast text — the only filled-accent element in a view where possible.
+        default: "bg-azure text-[var(--accent-fg)] hover:brightness-110 active:brightness-95",
+        primary: "bg-azure text-[var(--accent-fg)] hover:brightness-110 active:brightness-95",
         // Secondary: hairline panel, fills with a surface lift on hover (never a shadow).
         outline: "border border-[var(--line)] text-ink hover:bg-[var(--surface)] hover:border-[var(--line-strong)]",
         secondary: "border border-[var(--line)] bg-[var(--surface)] text-ink hover:bg-[var(--raised)]",

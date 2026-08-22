@@ -103,7 +103,7 @@ export function SendBar({
           onValueChange={setValue}
           onSubmit={send}
           isLoading={sending}
-          className={cn("bg-card rounded-2xl", effective === "ask" && "border-dashed")}
+          className={cn("bg-card rounded-2xl elevate-sm", effective === "ask" && "border-dashed")}
         >
           <label htmlFor="send-input" className="sr-only">
             {effective === "reply" ? "Message the agent" : "Ask the read-only co-pilot"}
