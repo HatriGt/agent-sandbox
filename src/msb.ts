@@ -10,6 +10,16 @@ import { sshMuxOpts } from "./ssh.js";
 import { reposPromptHint, type RepoLayout } from "./agent-prompt.js";
 import { secretEnvFlags } from "./secret-env.js";
 import {
+  ASK_ALLOWED_TOOLS,
+  ASK_DIR,
+  ASK_LANE_ENV,
+  ASK_LOG,
+  ASK_THREAD_MARK,
+  askGateNodeProgram,
+  askSystemPrompt,
+  type AskResult,
+} from "./ask.js";
+import {
   parseLsJson,
   isRunning,
   classifyBox,
@@ -428,19 +438,44 @@ function askHookScript(): string {
   // is the whole decision). Uses node (always present in the image) to emit the exact JSON contract.
   const hook =
     `#!/bin/sh\n` +
+    // Driver lane only. The ASK co-pilot runs in the same box with the same user settings, so it
+    // would otherwise be frozen by the driver's pending question — exactly when you most want to ask
+    // "what is it stuck on?". The lane flag is set on ask execs only (see askInBox).
+    `if [ -n "$${ASK_LANE_ENV}" ]; then exit 0; fi\n` +
     `if [ -f ${QUESTION_MARK} ]; then\n` +
     `  node -e 'process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:"A question is pending in ${QUESTION_MARK} and is awaiting the caller. Do NOT take any further action or guess an answer — end your turn now. It will be resumed with the answer."}}))'\n` +
     `fi\n` +
     `exit 0\n`;
+  // The ask lane's read-only gate: the mirror image of the ask-gate — it runs ONLY when the lane
+  // flag is set, and denies anything that would mutate the box under the working driver.
+  const roHook =
+    `#!/bin/sh\n` +
+    `if [ -z "$${ASK_LANE_ENV}" ]; then exit 0; fi\n` +
+    `exec node "$HOME/.claude/hooks/ask-ro.js"\n`;
+
   const settings = JSON.stringify({
     hooks: {
-      PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command: "$HOME/.claude/hooks/ask-gate.sh" }] }],
+      PreToolUse: [
+        {
+          matcher: "*",
+          hooks: [
+            { type: "command", command: "$HOME/.claude/hooks/ask-gate.sh" },
+            { type: "command", command: "$HOME/.claude/hooks/ask-ro.sh" },
+          ],
+        },
+      ],
     },
   });
+  // The gate program is base64'd for the same reason as stream-fmt.js: a raw JS blob does not
+  // survive shell + SSH + msb-exec quoting intact.
+  const roB64 = Buffer.from(askGateNodeProgram(), "utf8").toString("base64");
   return (
     `mkdir -p "$HOME/.claude/hooks" && ` +
     `printf '%s' ${shellQuote(hook)} > "$HOME/.claude/hooks/ask-gate.sh" && ` +
     `chmod +x "$HOME/.claude/hooks/ask-gate.sh" && ` +
+    `printf '%s' ${shellQuote(roHook)} > "$HOME/.claude/hooks/ask-ro.sh" && ` +
+    `chmod +x "$HOME/.claude/hooks/ask-ro.sh" && ` +
+    `printf '%s' '${roB64}' | base64 -d > "$HOME/.claude/hooks/ask-ro.js" && ` +
     // Merge the hook into any existing user settings.json (don't clobber other keys).
     `node -e 'const fs=require("fs"),os=require("os"),p=require("path");const f=p.join(os.homedir(),".claude","settings.json");let j={};try{j=JSON.parse(fs.readFileSync(f,"utf8"))}catch(e){}const add=${JSON.stringify(JSON.parse(settings))};j.hooks=Object.assign({},j.hooks,add.hooks);fs.writeFileSync(f,JSON.stringify(j,null,2))'`
   );
@@ -841,6 +876,87 @@ export async function gatherMonitor(cfg: Config): Promise<BoxView[]> {
  * reads (claim/run-state/task/question) plus a configurable-length log tail and metrics. Returns a
  * `missing` snapshot (never throws) if the box is gone, so the watch CLI can keep polling cleanly.
  */
+/**
+ * Ask the co-pilot a question about a running box, WITHOUT disturbing the driver agent.
+ *
+ * Unlike runAgentTask (detached, sentinel-observed) this exec is SYNCHRONOUS and short: the caller
+ * is waiting for an answer, so we block on it and cap it with `timeout` well under the MCP client's
+ * request window. Nothing here touches /workspace, the .agent.* sentinels, or the driver's Claude
+ * session — see ask.ts for why each of those matters.
+ *
+ * Threading: the ask lane keeps its own resumable Claude session, rooted at ${ASK_DIR} so it can
+ * never be picked up by the driver's `claude -c`. We only pass `-c` when a prior turn left the
+ * thread marker, since `-c` with no session in the bucket is an error.
+ */
+export async function askInBox(
+  cfg: Config,
+  box: string,
+  question: string,
+  opts: { newThread?: boolean; repos?: RepoLayout[] } = {}
+): Promise<AskResult> {
+  // A box that idle-stopped (very likely if the driver is parked on a question) still holds the
+  // whole workspace — start it so the co-pilot has something to read.
+  await startBoxIfStopped(cfg, box);
+
+  const workdir = agentWorkdir(opts.repos);
+  const timeoutSec = Math.max(5, Math.round(cfg.askTimeoutMs / 1000));
+  const model = cfg.askModel ? `--model "$ASK_MODEL" ` : "";
+
+  const env = [
+    "-e",
+    `ANTHROPIC_BASE_URL=${cfg.anthropicBaseUrl}`,
+    "-e",
+    `ANTHROPIC_API_KEY=${cfg.anthropicApiKey}`,
+    "-e",
+    // The lane flag: flips BOTH in-box hooks (driver ask-gate off, read-only gate on).
+    `${ASK_LANE_ENV}=1`,
+    "-e",
+    `ASK_QUESTION=${question}`,
+    "-e",
+    `ASK_SYS_PROMPT=${askSystemPrompt(workdir, AGENT_LOG, QUESTION_MARK)}`,
+    ...(cfg.askModel ? ["-e", `ASK_MODEL=${cfg.askModel}`] : []),
+  ];
+
+  // Continue the ask thread unless asked for a fresh one; the marker is what proves `-c` is safe.
+  const contProbe = opts.newThread
+    ? `rm -f ${ASK_THREAD_MARK}; CONT=""`
+    : `if [ -f ${ASK_THREAD_MARK} ]; then CONT="-c"; else CONT=""; fi`;
+
+  const inner =
+    `mkdir -p ${ASK_DIR} && cd ${ASK_DIR} && ${contProbe}; ` +
+    `printf '\\n=== ask %s ===\\n%s\\n' "$(date -u +%FT%TZ)" "$ASK_QUESTION" >> ${ASK_LOG}; ` +
+    // --setting-sources user loads the hooks (both gates) and nothing from any cloned repo.
+    `timeout ${timeoutSec}s claude $CONT -p "$ASK_QUESTION" --setting-sources user ${model}` +
+    `--append-system-prompt "$ASK_SYS_PROMPT" --allowedTools ${ASK_ALLOWED_TOOLS} ` +
+    `2>>${ASK_LOG} | tee -a ${ASK_LOG}; ` +
+    // 124 is timeout(1)'s "killed at the cap"; surface it so the caller can say the answer is partial.
+    `code=$?; touch ${ASK_THREAD_MARK}; echo "---ASKEXIT---$code"`;
+
+  const r = await msb(cfg, ["exec", box, ...env, "--", "bash", "-lc", inner], false);
+  const out = r.stdout;
+  const marker = out.lastIndexOf("---ASKEXIT---");
+  const answer = (marker >= 0 ? out.slice(0, marker) : out).trim();
+  const code = marker >= 0 ? Number(out.slice(marker + "---ASKEXIT---".length).trim()) : r.code;
+
+  return {
+    session: box,
+    answer,
+    timedOut: code === 124,
+    continued: !opts.newThread,
+  };
+}
+
+/** One-line driver state for the ask header: what the OTHER lane is doing right now. */
+export async function driverStateLine(cfg: Config, box: string): Promise<string | undefined> {
+  try {
+    const raw = await readProgressRaw(cfg, box, 0);
+    if (raw.question) return `WAITING on a question — "${raw.question.split("\n")[0].slice(0, 120)}"`;
+    return raw.runLine || undefined;
+  } catch {
+    return undefined; // context only; never fail the ask over it
+  }
+}
+
 export async function gatherWatch(
   cfg: Config,
   box: string,

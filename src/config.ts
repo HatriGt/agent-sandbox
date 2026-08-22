@@ -45,6 +45,17 @@ export interface Config {
   /** Poll interval for that wait loop (one SSH sentinel read per tick). */
   waitIntervalMs: number;
 
+  /**
+   * ASK lane: hard cap on one co-pilot turn. The call is synchronous (the operator is waiting), so
+   * this must stay under the MCP client's request timeout — same reasoning as waitTimeoutMs.
+   */
+  askTimeoutMs: number;
+  /**
+   * ASK lane: optional model override. The co-pilot is a read-mostly glance, so a cheaper/faster
+   * alias than the driver's is usually right. Empty = whatever the box's Claude Code defaults to.
+   */
+  askModel?: string;
+
   /** ccproxy endpoint for in-box model calls. */
   anthropicBaseUrl: string;
   /** Placeholder key accepted by ccproxy's Anthropic route. */
@@ -148,6 +159,11 @@ export function loadConfig(): Config {
     // Poll every 3s so a boundary is surfaced within ~3s of happening.
     waitTimeoutMs: Number(process.env.WAIT_TIMEOUT_MS ?? "50000"),
     waitIntervalMs: Number(process.env.WAIT_INTERVAL_MS ?? "3000"),
+
+    // 45s: one co-pilot turn is a few reads plus a short answer, and this leaves headroom under a
+    // ~60s client timeout for the SSH round-trip either side of it.
+    askTimeoutMs: Number(process.env.ASK_TIMEOUT_MS ?? "45000"),
+    askModel: process.env.ASK_MODEL || undefined,
 
     anthropicBaseUrl,
     anthropicApiKey: req("ANTHROPIC_API_KEY", "dummy"),

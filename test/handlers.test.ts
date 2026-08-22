@@ -330,3 +330,25 @@ test("watch: registered; forwards session + lines and returns the snapshot", asy
   assert.deepEqual(seen, { session: "delegate-9", lines: 60 });
   assert.match(textOf(res), /delegate-9/);
 });
+
+test("ask: registered, and routes to the read-only co-pilot without touching the driver", async () => {
+  const s = fakeServer();
+  const calls: any[] = [];
+  registerTools(s as any, cfg, {
+    ask: async (_c: any, session: string, question: string, newThread?: boolean) => {
+      calls.push({ session, question, newThread });
+      return "CO_PILOT_ANSWER";
+    },
+    // Deliberately fatal: `ask` must never drive the driver lane.
+    resume: async () => assert.fail("ask must not resume the driver"),
+    status: async () => assert.fail("ask must not drive the driver's wait loop"),
+  } as any);
+
+  assert.ok(s.tools.ask, "missing tool: ask");
+  const res = await s.tools.ask.handler({ session: "box-9", question: "what has it changed?" });
+  assert.deepEqual(calls, [{ session: "box-9", question: "what has it changed?", newThread: undefined }]);
+  assert.match(textOf(res), /CO_PILOT_ANSWER/);
+
+  await s.tools.ask.handler({ session: "box-9", question: "and the other repo?", newThread: true });
+  assert.equal(calls[1].newThread, true);
+});

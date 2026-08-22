@@ -73,6 +73,11 @@ export interface HandlerDeps {
   monitor(cfg: Config): Promise<string>;
   /** Live over-the-shoulder view of ONE box: state + task + a log tail (lines default in impl). */
   watch(cfg: Config, session: string, lines?: number): Promise<string>;
+  /**
+   * Ask a read-only co-pilot about a box WITHOUT interrupting the driver agent (separate lane,
+   * separate Claude session; nothing it says reaches the driver).
+   */
+  ask(cfg: Config, session: string, question: string, newThread?: boolean): Promise<string>;
   /** Probe a token (login/orgs) and store it by account login. Optional repo confirms access. Returns a summary. */
   addGhToken(cfg: Config, token: string, repo?: string): Promise<string>;
 }
@@ -342,6 +347,41 @@ export function registerTools(
     },
     async ({ session, lines }: { session: string; lines?: number }) =>
       text(await deps.watch(cfg, session, lines))
+  );
+
+  server.tool(
+    "ask",
+    "Ask a question ABOUT a running delegation without interrupting it. A second, read-only " +
+      "co-pilot agent runs inside the same box, reads the workspace and the driver's live log, and " +
+      "answers you. The driver agent keeps working, never sees this exchange, and is not paused — " +
+      "so use this freely mid-run (\"what has it changed so far?\", \"why is it stuck?\", \"show me " +
+      "the diff\", \"is it about to do something dumb?\"). " +
+      "Use `watch` for a raw log tail; use `ask` when you want the log INTERPRETED. " +
+      "IMPORTANT: this can only LOOK, never steer. To change what the driver does, answer its " +
+      "question with resume({session, message}) — nothing said here reaches it. Works while the " +
+      "driver is running AND while it is parked on a question.",
+    {
+      session: z.string().describe("Session id returned by delegate."),
+      question: z
+        .string()
+        .describe("What you want to know about the run, in plain language."),
+      newThread: z
+        .boolean()
+        .optional()
+        .describe(
+          "Start a fresh co-pilot thread instead of continuing the previous one. Default false — " +
+            "follow-ups keep their context, so you can just say 'and the other repo?'."
+        ),
+    },
+    async ({
+      session,
+      question,
+      newThread,
+    }: {
+      session: string;
+      question: string;
+      newThread?: boolean;
+    }) => text(await deps.ask(cfg, session, question, newThread))
   );
 
   server.tool(

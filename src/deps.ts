@@ -9,6 +9,7 @@
 import type { Config } from "./config.js";
 import type { HandlerDeps, DelegationResult } from "./handlers.js";
 import type { DelegatePlan } from "./delegate-input.js";
+import type { RepoLayout } from "./agent-prompt.js";
 import { syncTreeToVps, cleanupStaging, stagingPathFor, repoStagingPath } from "./sync.js";
 import { cloneRepoOnVps } from "./git-source.js";
 import { acquireBox, refillPool, poolEligible, poolStatus } from "./pool.js";
@@ -22,11 +23,14 @@ import {
   teardown as msbTeardown,
   gatherMonitor,
   gatherWatch,
+  askInBox,
+  driverStateLine,
   type AgentCreds,
 } from "./msb.js";
 import { runInteractive } from "./interactive.js";
 import type { Interact } from "./handlers.js";
 import { formatMonitor, formatWatch } from "./monitor.js";
+import { formatAsk } from "./ask.js";
 import { newSessionId } from "./session.js";
 import {
   loadStore,
@@ -121,6 +125,24 @@ async function boxRepoOwners(cfg: Config, box: string): Promise<string[]> {
     if (o) owners.add(o);
   }
   return [...owners];
+}
+
+/**
+ * The repo dirs present under /workspace, as a RepoLayout. `ask` only has a box id, so this is how
+ * the co-pilot learns where the repos are (a single repo means its dir is the natural cwd, matching
+ * what the driver sees). Best-effort: an empty list just means "task-only box, /workspace is bare".
+ */
+async function boxRepoLayout(cfg: Config, box: string): Promise<RepoLayout[]> {
+  try {
+    const r = await exec(cfg, box, 'for d in /workspace/*/; do basename "$d"; done');
+    return r.stdout
+      .split("\n")
+      .map((n) => n.trim())
+      .filter((n) => n && n !== "*")
+      .map((name) => ({ name }));
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -415,6 +437,18 @@ export const deps: HandlerDeps = {
 
   async watch(cfg, session, lines) {
     return formatWatch(await gatherWatch(cfg, session, lines));
+  },
+
+  async ask(cfg, session, question, newThread) {
+    // The co-pilot lane: a separate read-only Claude run in the same box. Deliberately does NOT go
+    // through driveInteractive — that loop is the DRIVER's turn-taking, and touching it here would
+    // be the one thing this feature exists to avoid.
+    const repos = await boxRepoLayout(cfg, session);
+    const [result, driver] = await Promise.all([
+      askInBox(cfg, session, question, { newThread, repos }),
+      driverStateLine(cfg, session),
+    ]);
+    return formatAsk({ ...result, driverState: driver });
   },
 
   async addGhToken(cfg, token, repo) {

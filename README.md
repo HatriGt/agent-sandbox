@@ -56,7 +56,7 @@ Both entries register identical tools (`src/handlers.ts`) backed by the same sid
 
 ## Tools
 
-`delegate` · `status` · `resume` · `teardown` · `pool_status` · `monitor` · `watch` · `gh_token_add`.
+`delegate` · `status` · `resume` · `teardown` · `pool_status` · `monitor` · `watch` · `ask` · `gh_token_add`.
 `delegate` takes `source` (`local` ships your working tree; `git` clones `owner/repo@ref` on the VPS),
 `task`, optional `ref`, optional `allowDomains`, and `repos:[{repo,ref?}]` for a cross-repo task (each
 lands in `/workspace/<name>` in one box). Missing required info is **asked back**, not failed.
@@ -70,6 +70,30 @@ them at a glance.
 **Watch one box live.** `watch(session)` returns a rich snapshot of a single box — run state, task,
 resources, and a tail of the agent's log (what it's doing right now). For a terminal live-stream that
 redraws every ~2s, run `npm run watch -- <session>` on the VPS.
+
+**Ask a running box — without stopping it.** `ask(session, question)` runs a **second, read-only
+co-pilot agent inside the same box** and answers you from what it reads: the workspace, `git diff`,
+and the driver's live log. The driver agent keeps working, is never paused, and never sees the
+exchange — so you can ask "what has it changed so far?", "why is it stuck?", "is it about to do
+something dumb?" mid-run. `watch` gives you the raw log; `ask` gives you the log *interpreted*.
+
+Three things keep the lanes apart (see `src/ask.ts`):
+
+- **Separate session bucket.** Claude Code keys resumable sessions by cwd, so the ask lane is rooted
+  at `/ask`. If it shared the repo workdir, an ask turn would become the most recent session there
+  and the next `resume` would continue the *co-pilot's* conversation instead of the driver's.
+- **No shared state.** Ask artifacts live under `/ask`, outside `/workspace` — the repo tree stays
+  clean, `monitor`/`watch` never show ask chatter, and nothing lands in a PR.
+- **Read-only, enforced.** A second `PreToolUse` hook (`ask-ro.js`) denies the edit tools and mutating
+  shell in this lane. Both in-box hooks self-select on the `ASK_LANE` env flag: the driver's ask-gate
+  skips when it's set (so a pending question doesn't freeze the co-pilot — exactly when you most want
+  to ask what it's stuck on), and the read-only gate skips when it isn't. The gate is generated from
+  the same predicate the tests exercise, and the shipped file is run under `node` in the suite.
+
+`ask` can only look, never steer: to change what the driver does, answer its question with `resume`.
+Follow-ups continue the same co-pilot thread unless you pass `newThread:true`. One turn is capped by
+`ASK_TIMEOUT_MS` (default 45s, under the client's request timeout); `ASK_MODEL` optionally points the
+co-pilot at a cheaper/faster alias than the driver's.
 
 **Web dashboard.** The HTTP entry also serves a token-protected page at `/dashboard` — open
 `https://<ASB_DOMAIN>/dashboard?token=<MCP_HTTP_TOKEN>` in a browser to see all boxes as auto-refreshing
@@ -187,6 +211,7 @@ Any other MCP client (Claude web, another IDE, CI) adds the same HTTP URL + bear
 ```
 src/          MCP orchestrator: handlers (shared) + stdio entry (index.ts) + HTTP entry (http.ts)
               + git-source, delegate-input, deps, http-auth, msb/pool/ssh/sync
+              + ask.ts (read-only co-pilot lane: gate predicate + in-box hook + prompt)
 test/         unit tests (node:test via tsx) — run `npm test`
 docs/         plan, remote-mcp plan, eval summary, runbook
 Dockerfile    HTTP controller image (Dokploy)
