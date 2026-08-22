@@ -39,6 +39,7 @@ import {
   candidateAccounts,
   decideAccess,
   upsertAccount,
+  pickDefaultAccount,
   type Account,
   type TokenStore,
   type GitAccessResolution,
@@ -235,8 +236,25 @@ async function resolveGitAccessImpl(
   let primaryToken: string | undefined;
   let primaryLogin: string | undefined;
 
-  // Task-only (no repos): nothing to resolve — no clone, no per-repo identity, no gh token needed.
+  // Task-only (no repos): there's no repo to match by access, but a bare task often still needs to
+  // reach GitHub (read a private PR, clone something the task names). Inject a DEFAULT account's token
+  // as GH_TOKEN so `gh`/`curl` work, without setting any per-repo commit identity (there is no repo).
+  // An explicit githubToken/githubAccount overrides the default.
   if (plan.repos.length === 0) {
+    if (opts.githubToken?.trim()) {
+      const probed = await probeToken(cfg, opts.githubToken.trim(), "");
+      if (probed) {
+        store = upsertAccount(store, probed);
+        await saveStore(cfg, store);
+        return { ok: true, ownerTokens, ownerLogins, primaryToken: probed.token, primaryLogin: probed.login };
+      }
+    }
+    const chosen = opts.githubAccount?.trim()
+      ? store.accounts[opts.githubAccount.trim()]
+      : pickDefaultAccount(store);
+    if (chosen) {
+      return { ok: true, ownerTokens, ownerLogins, primaryToken: chosen.token, primaryLogin: chosen.login };
+    }
     return { ok: true, ownerTokens, ownerLogins };
   }
 

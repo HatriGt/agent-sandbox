@@ -1,3 +1,4 @@
+import { Clock } from "lucide-react";
 import type { StableBox } from "@/hooks/useStableBoxes";
 import { roleLabel, shortName, threadSort, threadTitle } from "@/lib/format";
 import { StateStamp } from "@/components/ui/stamp";
@@ -93,10 +94,20 @@ export function MachineList({
                   {threadTitle(v)}
                 </p>
 
-                <p className="text-ash tabular mt-1.5 font-mono text-micro">
-                  {shortName(v.name)}
-                  {v.uptime && <span className="ml-2 opacity-70">{v.uptime}</span>}
-                </p>
+                <div className="text-ash tabular mt-1.5 flex items-center gap-1.5 font-mono text-micro">
+                  <span className="truncate">{shortName(v.name)}</span>
+                  {v.uptime && (
+                    <>
+                      <span className="text-ash/40" aria-hidden>
+                        ·
+                      </span>
+                      <span className="inline-flex items-center gap-1 opacity-70" title="uptime">
+                        <Clock className="size-2.5" aria-hidden />
+                        {v.uptime}
+                      </span>
+                    </>
+                  )}
+                </div>
               </button>
             </li>
           );

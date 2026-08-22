@@ -122,6 +122,21 @@ export function candidateAccounts(store: TokenStore, repo: string): Account[] {
   });
 }
 
+/**
+ * A sensible default account for a task-only run (no repo to match by access). Prefers the account
+ * with the widest observed access (most orgs, then most verified repos), so `gh`/`curl` inside a
+ * bare task can still reach the private repos the user has. Returns undefined only for an empty store.
+ */
+export function pickDefaultAccount(store: TokenStore): Account | undefined {
+  const accounts = Object.values(store.accounts);
+  if (accounts.length === 0) return undefined;
+  return [...accounts].sort((a, b) => {
+    const byOrgs = (b.orgs?.length ?? 0) - (a.orgs?.length ?? 0);
+    if (byOrgs !== 0) return byOrgs;
+    return (b.verifiedRepos?.length ?? 0) - (a.verifiedRepos?.length ?? 0);
+  })[0];
+}
+
 /** The decision after resolving candidate accounts for a repo. */
 export interface AccessDecision {
   kind: "use" | "choose" | "need_token";

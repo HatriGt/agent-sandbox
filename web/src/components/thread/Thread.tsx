@@ -1,11 +1,12 @@
 import * as React from "react";
-import { ArrowLeft, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, Clock, Cpu, MemoryStick, Plus, Trash2 } from "lucide-react";
 import { api, type BoxView, type WatchSnapshot } from "@/lib/api";
 import { POLL_MS, roleLabel, shortName } from "@/lib/format";
 import { parseTrace } from "@/lib/trace";
 import { usePoll } from "@/hooks/usePoll";
 import { Button } from "@/components/ui/button";
 import { StateStamp } from "@/components/ui/stamp";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ChatContainerContent, ChatContainerRoot, ChatContainerScrollAnchor } from "@/components/ui/chat-container";
 import { ScrollButton } from "@/components/ui/scroll-button";
 import { AskingItem, LifecycleItem, ObserverItem, SayItem, ToolItem, YouItem } from "./TraceItems";
@@ -85,11 +86,11 @@ export function Thread({
               <span className="hidden md:inline">{box.name}</span>
             </span>
           </div>
-          <div className="tabular mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-micro">
-            {box.uptime && <Vital label="up" value={box.uptime} />}
-            {box.cpu && <Vital label="cpu" value={box.cpu} />}
-            {box.mem && <Vital label="mem" value={box.mem} />}
-            <span className="text-ash rounded border px-1.5 py-0.5 opacity-80">{roleLabel(box.role)}</span>
+          <div className="tabular mt-1.5 flex flex-wrap items-center gap-1.5">
+            {box.uptime && <Vital icon={<Clock className="size-3" />} label="uptime" value={box.uptime} />}
+            {box.cpu && <Vital icon={<Cpu className="size-3" />} label="cpu" value={box.cpu} />}
+            {box.mem && <Vital icon={<MemoryStick className="size-3" />} label="memory" value={box.mem} />}
+            <span className="stamp text-ash rounded-md border px-1.5 py-0.5">{roleLabel(box.role)}</span>
           </div>
         </div>
 
@@ -160,12 +161,22 @@ export function Thread({
   );
 }
 
-/** A labelled machine vital: label recedes in ash, value leads in foreground — scannable, not a run-on. */
-function Vital({ label, value }: { label: string; value: string }) {
+/**
+ * A machine vital as a self-contained chip: icon + value, with the full label in a tooltip. Chips
+ * read as discrete facts ("uptime 36m", "cpu 0.01/1c", "mem 81 MiB") instead of a run-on string.
+ */
+function Vital({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
-    <span className="inline-flex items-baseline gap-1">
-      <span className="text-ash opacity-70">{label}</span>
-      <span className="text-ink">{value}</span>
-    </span>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="border-border bg-[var(--surface)] text-ink inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 font-mono text-micro">
+          <span className="text-ash" aria-hidden>
+            {icon}
+          </span>
+          {value}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{label}</TooltipContent>
+    </Tooltip>
   );
 }

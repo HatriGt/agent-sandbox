@@ -14,6 +14,7 @@ import {
   upsertAccount,
   candidateAccounts,
   decideAccess,
+  pickDefaultAccount,
   type TokenStore,
   type Account,
 } from "../src/gh-token-store.ts";
@@ -29,6 +30,28 @@ test("parseStore: empty/invalid input yields an empty store", () => {
   assert.deepEqual(parseStore(""), { accounts: {} });
   assert.deepEqual(parseStore("not json"), { accounts: {} });
   assert.deepEqual(parseStore("null"), { accounts: {} });
+});
+
+test("pickDefaultAccount: empty store -> undefined; else widest access (orgs, then repos) wins", () => {
+  assert.equal(pickDefaultAccount({ accounts: {} }), undefined);
+
+  const store: TokenStore = {
+    accounts: {
+      narrow: { login: "narrow", token: "t1", type: "classic", orgs: [], verifiedRepos: ["a/x"] },
+      wide: { login: "wide", token: "t2", type: "classic", orgs: ["acme", "globex"], verifiedRepos: [] },
+      mid: { login: "mid", token: "t3", type: "classic", orgs: ["acme"], verifiedRepos: ["a/x", "a/y"] },
+    },
+  };
+  assert.equal(pickDefaultAccount(store)?.login, "wide");
+
+  // tie on orgs -> more verifiedRepos wins
+  const tie: TokenStore = {
+    accounts: {
+      few: { login: "few", token: "t1", type: "classic", orgs: ["acme"], verifiedRepos: ["a/x"] },
+      many: { login: "many", token: "t2", type: "classic", orgs: ["acme"], verifiedRepos: ["a/x", "a/y"] },
+    },
+  };
+  assert.equal(pickDefaultAccount(tie)?.login, "many");
 });
 
 test("parse/serialize round-trips", () => {

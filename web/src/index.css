@@ -45,6 +45,7 @@
   --color-raised: var(--raised);
   --color-danger: var(--destructive);
   --color-trace: var(--trace);
+  --color-trace-fg: var(--trace-fg);
 
   /* functional status hues (glyph + word always accompany these) */
   --color-attention: var(--attention);
