@@ -19,7 +19,7 @@ import { makeBridge } from "./server-bridge.js";
 import { deps } from "./deps.js";
 import { refillPool } from "./pool.js";
 import { checkBearer, checkDashboardAuth } from "./http-auth.js";
-import { gatherMonitor, gatherWatch } from "./msb.js";
+import { gatherMonitor, gatherWatch, askInBox, driverStateLine } from "./msb.js";
 import { dashboardHtml } from "./dashboard-html.js";
 
 loadDotEnv();
@@ -128,6 +128,31 @@ app.get("/watch.json", async (req: Request, res: Response) => {
   const lines = Number(req.query.lines);
   try {
     res.json(await gatherWatch(cfg, session, Number.isFinite(lines) && lines > 0 ? lines : undefined));
+  } catch (e) {
+    res.status(500).json({ error: String((e as Error).message ?? e) });
+  }
+});
+
+// Ask the box's READ-ONLY co-pilot a question (what `ask` does over MCP). POST so the question isn't
+// logged in a URL. Deliberately NOT wired to resume/status: this must never touch the driver lane.
+// One turn is capped in-box by ASK_TIMEOUT_MS, so this request is bounded too.
+app.post("/ask.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const { session, question, newThread } = (req.body ?? {}) as {
+    session?: string;
+    question?: string;
+    newThread?: boolean;
+  };
+  if (!session || !question?.trim()) {
+    res.status(400).json({ error: "session and question are required" });
+    return;
+  }
+  try {
+    const [result, driverState] = await Promise.all([
+      askInBox(cfg, session, question, { newThread: !!newThread }),
+      driverStateLine(cfg, session),
+    ]);
+    res.json({ ...result, driverState });
   } catch (e) {
     res.status(500).json({ error: String((e as Error).message ?? e) });
   }

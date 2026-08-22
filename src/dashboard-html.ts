@@ -3,7 +3,8 @@
  *
  * It's a thin client: on load it reads the `token` from its own URL and polls `/monitor.json` every
  * few seconds to render the fleet as a data table; expanding a row polls `/watch.json?session=…` for
- * that box's live log. All auth rides on the token already in the URL (query param), so the page needs
+ * that box's live log and offers an ASK panel (POST `/ask.json`) that puts a question to the box's
+ * read-only co-pilot without interrupting the agent. All auth rides on the token already in the URL (query param), so the page needs
  * no secrets baked in. Kept as one string (no framework/build step) so the container serves it with
  * zero deps.
  *
@@ -191,6 +192,34 @@ const STYLE = `<style>
   pre.log .l-q    { color: var(--term-q); }
   pre.log .empty  { color: var(--term-dim); font-style: italic; }
 
+  /* Ask panel — the co-pilot lane. Visually distinct from the terminal: this is a conversation
+     with an OBSERVER, not the agent's own output, and conflating the two would mislead. */
+  .askp { margin-top: 14px; }
+  .ask-log { display: flex; flex-direction: column; gap: 7px; max-height: 260px; overflow: auto;
+             margin-bottom: 9px; }
+  .ask-log:empty { display: none; }
+  .ask-msg { padding: 8px 11px; border-radius: 9px; font-size: 12.5px; white-space: pre-wrap;
+             word-break: break-word; border: 1px solid var(--border); background: var(--elev); }
+  .ask-msg.you { background: color-mix(in srgb, var(--accent) 12%, transparent);
+                 border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+                 align-self: flex-end; max-width: 82%; }
+  .ask-msg.cop { background: var(--hover); max-width: 92%; }
+  .ask-msg.err { color: var(--red); border-color: color-mix(in srgb, var(--red) 34%, transparent);
+                 background: color-mix(in srgb, var(--red) 10%, transparent); }
+  .ask-msg .who { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: .05em;
+                  color: var(--faint); margin-bottom: 3px; }
+  .ask-msg.pending { color: var(--muted); font-style: italic; }
+  .ask-row { display: flex; gap: 7px; }
+  .ask-in { flex: 1; background: var(--panel); color: var(--fg); border: 1px solid var(--border-2);
+            border-radius: 8px; padding: 7px 10px; font: inherit; font-size: 12.5px; }
+  .ask-in:focus { outline: none; border-color: var(--accent); }
+  .ask-btn { cursor: pointer; border: 1px solid var(--border-2); background: var(--elev); color: var(--fg);
+             border-radius: 8px; padding: 7px 13px; font: inherit; font-size: 12px; font-weight: 500;
+             transition: background .12s, border-color .12s; }
+  .ask-btn:hover:not(:disabled) { background: var(--hover); border-color: var(--accent); }
+  .ask-btn:disabled { opacity: .5; cursor: default; }
+  .ask-btn.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+
   .emptyrow td { padding: 60px 20px; text-align: center; color: var(--muted); }
   .emptyrow .big { font-size: 15px; color: var(--fg); font-weight: 600; margin-bottom: 4px; }
 </style>`;
@@ -358,6 +387,15 @@ function script(pollMs: number): string {
           '</div>' +
           '<pre class="log"><span class="empty">(loading…)</span></pre>' +
         '</div>' +
+        '<div class="askp">' +
+          '<div class="field-label">Ask the co-pilot — read-only, does not interrupt the agent</div>' +
+          '<div class="ask-log"></div>' +
+          '<div class="ask-row">' +
+            '<input class="ask-in" type="text" placeholder="what has it changed so far? why is it stuck?" />' +
+            '<button class="ask-btn primary ask-send" type="button">ask</button>' +
+            '<button class="ask-btn ask-new" type="button" title="start a fresh co-pilot thread">new thread</button>' +
+          '</div>' +
+        '</div>' +
       '</div></td></tr>';
   }
 
@@ -409,6 +447,7 @@ function script(pollMs: number): string {
         if (navigator.clipboard) navigator.clipboard.writeText(txt);
         copyBtn.textContent = "copied"; setTimeout(function () { copyBtn.textContent = "copy"; }, 1200);
       });
+      wireAsk(detail, v.name);
       if (expanded[v.name]) {
         tbody.querySelector('tr.row[data-box="' + cssEsc(v.name) + '"]').classList.add("open");
         detail.classList.add("open");
@@ -476,6 +515,93 @@ function script(pollMs: number): string {
         if (pre) renderLog(pre, s.log);
       })
       .catch(function () {});
+  }
+
+  // ---- Ask panel: a conversation with the box's READ-ONLY co-pilot -------------------------
+  // State lives here, not in the DOM, because the fleet table is rebuilt on every poll. The one
+  // thing the DOM owns is the caret: we save the draft + restore focus so a 3s tick can't eat what
+  // someone is typing.
+  var askLog = {};     // session -> [{who, text, cls}]
+  var askBusy = {};    // session -> true while a turn is in flight
+  var askDraft = {};   // session -> the half-typed question
+  var askFocus = null; // session whose input had focus before the last rebuild
+
+  function renderAsk(detail, name) {
+    var box = detail.querySelector(".ask-log");
+    if (!box) return;
+    var msgs = (askLog[name] || []).slice();
+    if (askBusy[name]) msgs.push({ who: "co-pilot", text: "reading the box…", cls: "cop pending" });
+    box.innerHTML = msgs.map(function (m) {
+      return '<div class="ask-msg ' + m.cls + '"><span class="who">' + esc(m.who) + '</span>' +
+             esc(m.text) + '</div>';
+    }).join("");
+    box.scrollTop = box.scrollHeight;
+
+    var input = detail.querySelector(".ask-in");
+    var send = detail.querySelector(".ask-send");
+    var fresh = detail.querySelector(".ask-new");
+    if (!input) return;
+    input.value = askDraft[name] || "";
+    input.disabled = !!askBusy[name];
+    if (send) send.disabled = !!askBusy[name];
+    if (fresh) fresh.disabled = !!askBusy[name] || !(askLog[name] || []).length;
+    if (askFocus === name && !input.disabled) {
+      input.focus();
+      try { input.setSelectionRange(input.value.length, input.value.length); } catch (e) {}
+    }
+  }
+
+  function sendAsk(name, newThread) {
+    var q = (askDraft[name] || "").trim();
+    if (!q || askBusy[name]) return;
+    askLog[name] = askLog[name] || [];
+    if (newThread) askLog[name] = [];
+    askLog[name].push({ who: "you", text: q, cls: "you" });
+    askDraft[name] = "";
+    askBusy[name] = true;
+    var detail = document.querySelector('tr.detail[data-detail="' + cssEsc(name) + '"]');
+    if (detail) renderAsk(detail, name);
+
+    fetch("/ask.json" + qs, {
+      method: "POST",
+      headers: Object.assign({ "Content-Type": "application/json" }, authHeaders),
+      body: JSON.stringify({ session: name, question: q, newThread: !!newThread }),
+    })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (res) {
+        askBusy[name] = false;
+        if (!res.ok) {
+          askLog[name].push({ who: "error", text: res.j.error || "ask failed", cls: "err" });
+        } else {
+          var t = res.j.answer || "(the co-pilot returned nothing)";
+          if (res.j.timedOut) t += "\n\n(time cap reached — this answer may be partial)";
+          askLog[name].push({ who: "co-pilot", text: t, cls: "cop" });
+        }
+      })
+      .catch(function (e) {
+        askBusy[name] = false;
+        askLog[name].push({ who: "error", text: String(e.message || e), cls: "err" });
+      })
+      .then(function () {
+        var d = document.querySelector('tr.detail[data-detail="' + cssEsc(name) + '"]');
+        if (d) renderAsk(d, name);
+      });
+  }
+
+  function wireAsk(detail, name) {
+    var input = detail.querySelector(".ask-in");
+    var send = detail.querySelector(".ask-send");
+    var fresh = detail.querySelector(".ask-new");
+    if (!input) return;
+    input.addEventListener("input", function () { askDraft[name] = input.value; });
+    input.addEventListener("focus", function () { askFocus = name; });
+    input.addEventListener("blur", function () { if (askFocus === name) askFocus = null; });
+    input.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); askFocus = name; sendAsk(name, false); }
+    });
+    if (send) send.addEventListener("click", function () { askFocus = name; sendAsk(name, false); });
+    if (fresh) fresh.addEventListener("click", function () { askFocus = name; sendAsk(name, true); });
+    renderAsk(detail, name);
   }
 
   function tick() {

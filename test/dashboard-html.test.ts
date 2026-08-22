@@ -24,3 +24,22 @@ test("is a self-contained HTML document (no external deps)", () => {
   assert.match(html, /^<!doctype html>/i);
   assert.doesNotMatch(html, /<script[^>]+src=/i); // no external scripts
 });
+
+test("ask panel: posts to /ask.json and keeps its state out of the DOM", () => {
+  const html = dashboardHtml();
+  assert.match(html, /\/ask\.json/);
+  assert.match(html, /method: "POST"/);
+  // The fleet table is rebuilt on every poll, so the transcript, the in-flight flag, and the draft
+  // must live in JS state — otherwise a 3s tick wipes a conversation or eats what you're typing.
+  for (const state of ["askLog", "askBusy", "askDraft", "askFocus"]) {
+    assert.match(html, new RegExp("var " + state + " ="), `missing ask state: ${state}`);
+  }
+  assert.match(html, /newThread/);
+});
+
+test("ask panel: labelled as read-only and non-interrupting", () => {
+  // The panel sits directly under the agent's own terminal output. If it isn't obvious that this is
+  // an observer rather than the agent, someone will type a steering instruction into it and be
+  // silently ignored.
+  assert.match(dashboardHtml(), /read-only, does not interrupt the agent/);
+});

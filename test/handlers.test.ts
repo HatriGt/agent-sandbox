@@ -352,3 +352,14 @@ test("ask: registered, and routes to the read-only co-pilot without touching the
   await s.tools.ask.handler({ session: "box-9", question: "and the other repo?", newThread: true });
   assert.equal(calls[1].newThread, true);
 });
+
+test("ask: an empty or missing question is rejected before reaching the box", async () => {
+  // Booting/entering a box to ask nothing is pure waste, and the co-pilot would answer noise.
+  const s = fakeServer();
+  registerTools(s as any, cfg, { ask: async () => "SHOULD_NOT_RUN" } as any);
+  const schema = s.tools.ask.schema as any;
+  assert.ok(schema.session, "session must be in the schema");
+  assert.ok(schema.question, "question must be in the schema");
+  assert.equal(schema.question.isOptional?.() ?? false, false, "question must be required");
+  assert.equal(schema.newThread.isOptional?.(), true, "newThread must be optional");
+});

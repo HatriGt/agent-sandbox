@@ -92,8 +92,14 @@ Three things keep the lanes apart (see `src/ask.ts`):
 
 `ask` can only look, never steer: to change what the driver does, answer its question with `resume`.
 Follow-ups continue the same co-pilot thread unless you pass `newThread:true`. One turn is capped by
-`ASK_TIMEOUT_MS` (default 45s, under the client's request timeout); `ASK_MODEL` optionally points the
-co-pilot at a cheaper/faster alias than the driver's.
+`ASK_TIMEOUT_MS` (default 45s, under the client's request timeout); `ASK_MODEL` points the co-pilot at
+a cheaper/faster alias than the driver's (the co-pilot mostly reads a log and summarizes — it does not
+need the driver's model).
+
+Three surfaces, one lane: the `ask` MCP tool, an **Ask panel** in each dashboard row (under that box's
+terminal — POSTs to `/ask.json`), and `npm run ask -- <session> "question"` on the VPS. The CLI with no
+question reads them from stdin, one per line, so you can hold a conversation with the co-pilot while
+the driver works.
 
 **Web dashboard.** The HTTP entry also serves a token-protected page at `/dashboard` — open
 `https://<ASB_DOMAIN>/dashboard?token=<MCP_HTTP_TOKEN>` in a browser to see all boxes as auto-refreshing
