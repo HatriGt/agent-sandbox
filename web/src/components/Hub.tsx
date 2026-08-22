@@ -121,10 +121,18 @@ export function Hub({
   };
 
   const live = new Set(boxes.map((b) => b.name));
+  // Center the composer only on a truly empty hub; once there's session history, anchor to the top so
+  // the composer doesn't jump downward as the list grows under it.
+  const hasHistory = sessionRuns.length > 0;
 
   return (
     <div className="h-full min-w-0 overflow-y-auto">
-      <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col justify-center gap-8 px-5 py-10">
+      <div
+        className={cn(
+          "mx-auto flex min-h-full w-full max-w-3xl flex-col gap-8 px-5 py-10",
+          hasHistory ? "justify-start pt-[8vh]" : "justify-center"
+        )}
+      >
         <div className="text-center">
           <h1 className="text-ink text-h1 leading-[1.05] font-bold tracking-[-0.03em] sm:text-display">
             What should it build?

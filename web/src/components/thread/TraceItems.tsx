@@ -196,7 +196,7 @@ export function YouItem({ text, label = "you" }: { text: string; label?: string 
         <MessageHeader className="stamp text-ash gap-1.5 px-0">{label}</MessageHeader>
         <div
           className={cn(
-            "max-w-[70%] rounded-[22px] rounded-br-[6px] bg-[var(--surface)] px-4.5 py-3",
+            "max-w-[70%] rounded-[var(--radius-bubble)] rounded-br-[4px] bg-[var(--surface)] px-4 py-2.5",
             "border text-body whitespace-pre-wrap"
           )}
         >
@@ -212,11 +212,11 @@ export function AskingItem({ question }: { question: string }) {
   return (
     <Message align="start">
       <MessageContent>
-        <MessageHeader className="stamp text-azure-text gap-1.5 px-0">
+        <MessageHeader className="stamp gap-1.5 px-0 text-[var(--attention-text)]">
           <PauseCircle className="size-3.5" aria-hidden />
           the agent is asking
         </MessageHeader>
-        <div className="max-w-[70ch] rounded-lg border border-[var(--accent-edge)] bg-[var(--accent-wash)] px-5 py-4">
+        <div className="max-w-[70ch] rounded-lg border border-[color-mix(in_srgb,var(--attention)_45%,transparent)] bg-[color-mix(in_srgb,var(--attention)_10%,transparent)] px-5 py-4">
           <p className="text-ink text-lead leading-[1.55] whitespace-pre-wrap">{question}</p>
           <p className="text-ash mt-2.5 text-meta">
             It has halted and cannot continue until you answer below.

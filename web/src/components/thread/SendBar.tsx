@@ -74,21 +74,27 @@ export function SendBar({
   return (
     <div className="px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-6">
       <div className="mx-auto min-w-0 max-w-3xl">
-        {/* mode switch — two destinations, named, never ambiguous */}
-        <div className="mb-2 flex items-center justify-center gap-1">
-          <ModeTab
-            active={effective === "reply"}
-            disabled={!canReply}
-            onClick={() => setMode("reply")}
-            icon={<Terminal className="size-3" />}
-            label={runState === "waiting" ? "Answer the agent" : "Reply to the agent"}
-          />
-          <ModeTab
-            active={effective === "ask"}
-            onClick={() => setMode("ask")}
-            icon={<Eye className="size-3" />}
-            label="Ask the co-pilot"
-          />
+        {/* mode switch — a segmented control: two destinations in one container, never ambiguous */}
+        <div className="mb-2 flex justify-center">
+          <div
+            role="tablist"
+            aria-label="Message destination"
+            className="inline-flex items-center gap-0.5 rounded-lg border bg-[var(--surface)] p-0.5"
+          >
+            <ModeTab
+              active={effective === "reply"}
+              disabled={!canReply}
+              onClick={() => setMode("reply")}
+              icon={<Terminal className="size-3" />}
+              label={runState === "waiting" ? "Answer agent" : "Reply to agent"}
+            />
+            <ModeTab
+              active={effective === "ask"}
+              onClick={() => setMode("ask")}
+              icon={<Eye className="size-3" />}
+              label="Ask co-pilot"
+            />
+          </div>
         </div>
 
         <div
@@ -162,16 +168,15 @@ function ModeTab({
   return (
     <button
       type="button"
+      role="tab"
       onClick={onClick}
       disabled={disabled}
-      aria-pressed={active}
+      aria-selected={active}
       title={disabled ? "Unavailable while the agent is working" : undefined}
       className={cn(
-        "stamp flex cursor-pointer items-center gap-1.5 rounded-md px-2.5 py-1.5 transition-colors duration-150",
+        "stamp flex min-h-8 cursor-pointer items-center gap-1.5 rounded-md px-3 py-1.5 transition-colors duration-150",
         "disabled:cursor-not-allowed disabled:opacity-35",
-        active
-          ? "text-azure-text bg-[var(--accent-wash)] border border-[var(--accent-edge)]"
-          : "text-ash hover:text-ink border border-transparent"
+        active ? "text-ink bg-[var(--raised)] shadow-[0_1px_2px_rgba(0,0,0,0.15)]" : "text-ash hover:text-ink"
       )}
     >
       {icon}
