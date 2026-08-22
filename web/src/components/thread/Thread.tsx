@@ -109,7 +109,7 @@ export function Thread({
 
       <MessageScrollerProvider>
         <MessageScroller className="min-h-0 flex-1">
-          <MessageScrollerViewport className="px-4 py-8 md:px-6">
+          <MessageScrollerViewport className="px-4 pt-8 pb-16 md:px-6">
             <MessageScrollerContent className="mx-auto max-w-3xl gap-7">
               {box.task && <YouItem text={box.task} label="task" />}
 
