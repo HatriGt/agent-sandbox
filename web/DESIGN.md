@@ -1,149 +1,96 @@
 # agent-sandbox — Style Reference
 
-> Operations Slate. A calm cool-gray operations console (Linear / Vercel lineage) where run STATE
-> is the loudest signal, one azure carries every action, and geometry is crisp panels and rows —
-> not pills.
+> Built on **Radix Themes + Geist**. A dense agent-ops console (Linear / Vercel lineage) that stands
+> on a real, opinionated design system instead of hand-tuned tokens — so nothing reads as generic.
+> Run STATE is the loudest signal; one accent (indigo) carries every action; geometry is Radix's.
 
-**Theme:** mixed (deep-slate dark default, cool-paper light mode)
+**Theme:** dual (deep-slate dark default, cool-paper light), owned entirely by the Radix `<Theme>`.
 
-The interface is a data-dense operational console, not a document. A cool-gray field stays out of the
-way so status reads instantly. **Run state is functional colour** — working = azure pulse, needs-you =
-amber (the only thing with a deadline), done = slate, error = red — always paired with a glyph + word
-so meaning survives colourblindness. One azure (`#2f6fed`) carries every button and link. Elevation is
-a single surface lift plus a hairline, never a drop shadow. Radii are small and systematic (6–12px);
-the only round things are the live dot and avatars. Type is tuned tighter for scanning (14px UI base);
-agent output is the single exception and steps up to 16px because it is read, not scanned. Monospace is
-reserved for genuine machine text: identifiers, vitals, tool calls, log output, stamps.
+## Foundation
 
-## Tokens — Colors
+The app is wrapped in a single Radix `<Theme>` (see `App.tsx`):
 
-| Name | Value (dark) | Value (light) | Token | Role |
-|------|--------------|---------------|-------|------|
-| Azure | `#2f6fed` | `#2563eb` | `--accent` | THE action. Every filled button and primary CTA. |
-| Azure Text | `#6ea8ff` | `#1d4ed8` | `--accent-text` | Azure as text/icon/state (working), contrast-safe per theme, and focus ring. |
-| Attention | `#eab308` | `#d97706` | `--attention` | Needs-you amber — the one state with a deadline. Fill for the waiting banner. |
-| Attention Text | `#fbbf24` | `#b45309` | `--attention-text` | Needs-you as text/glyph (stamp, banner label). |
-| OK | `#34d399` | `#059669` | `--ok` | Completed / healthy green (available to vitals & badges). |
-| Foreground | `#eef2f8` | `#0b1220` | `--fg` | Primary text. |
-| Ash | `#93a0b5` | `#5b6577` | `--muted-fg` | Secondary text, labels, machine metadata. ≥4.5:1 on the field. |
-| Line | `#232c3f` | `#e2e8f0` | `--line` | Hairlines, dividers, input borders. Visible in both themes. |
-| Line Strong | `#334155` | `#cbd5e1` | `--line-strong` | Hover borders, scrollbar thumb — one step firmer than a hairline. |
-| Canvas | `#0b0f1a` | `#f6f8fb` | `--canvas` | Page field. |
-| Surface | `#121826` | `#ffffff` | `--surface` | Panels, cards, composer, active rows. |
-| Raised | `#1a2234` | `#ffffff` | `--raised` | Popover / hover lift. |
-| Trace | `#070a12` | `#0b0f1a` | `--trace` | Terminal ground, darker than canvas. |
-| Danger | `#f26d6d` | `#dc2626` | `--danger` | Destroy + non-zero exit. Functional, not expressive. |
+```tsx
+<Theme appearance={dark ? "dark" : "light"} accentColor="indigo" grayColor="slate" radius="medium" scaling="100%">
+```
 
-State is the exception to "one accent": working/needs-you/done/error each carry a functional hue, but
-**always** with a distinct glyph + word (see State Stamp) so colour is never the sole carrier.
+- **`accentColor="indigo"`** — the one action hue. Radix generates the full 1..12 scale + alpha + a
+  contrast-safe `--accent-contrast` for text on the fill, per mode. We never pick accent hex by hand.
+- **`grayColor="slate"`** — the cool neutral field. Radix generates `--gray-1..12` and `--gray-a1..12`
+  (alpha) per mode; every surface, text tier, and hairline is one of these.
+- **`radius="medium"`** — drives `--radius-1..6`; our radii map onto that scale so shape matches the
+  Radix components.
+- **`appearance`** follows the theme toggle (dark by default; persisted in `localStorage`). Radix owns
+  light/dark, so there is no separate hand-maintained dark block.
 
-## Tokens — Typography
+Everything else (`index.css`) is a thin **mapping layer**: the app's semantic variables and the shadcn
+contract are *derived* from Radix tokens, so all existing components inherit Radix's palette, its
+guaranteed AA contrast, and its geometry for free.
 
-### Archivo — the single face
-- **Substitute:** Helvetica Now Display, Neue Haas Grotesk, Inter
-- **Weights:** 400, 500, 600, 700
-- **UI base:** 14px / 1.6 — console density; the interface scans, it does not read long-form
-- **Tracking:** −0.03em at display sizes, −0.01em at headings, 0 at body
-- **Role:** wordmark, display, headings, body, controls
+## Tokens — Colors (all derived from Radix scales)
 
-### IBM Plex Mono — machine text only
-- **Weights:** 400, 500
-- **Role:** machine identifiers, vitals (tabular), tool calls, log output, stamps. Never for prose,
-  never as a "technical" costume.
+| Semantic var | Maps to (Radix) | Role |
+|---|---|---|
+| `--canvas` | `--color-background` | Page field (slate, per mode). |
+| `--surface` | `--gray-2` | Panels, cards, active rows. |
+| `--raised` | `--gray-3` | Hover / popover lift. |
+| `--fg` | `--gray-12` | Primary text. |
+| `--muted-fg` | `--gray-11` | Secondary text — AA by Radix construction. |
+| `--line` | `--gray-a5` | Hairlines (alpha: reads on any surface). |
+| `--line-strong` | `--gray-a7` | Hover borders, scrollbar thumb. |
+| `--accent` | `--accent-9` | THE action fill (buttons, primary CTA). |
+| `--accent-fg` | `--accent-contrast` | Text on the accent fill. |
+| `--accent-text` | `--accent-11` | Accent as text/icon/state (working), focus ring. |
+| `--danger` | `--red-9` | Destroy + non-zero exit. |
+| `--attention` / `--attention-text` | `--amber-9` / `--amber-11` | Needs-you (the one state with a deadline). |
+| `--ok` | `--green-11` | Completed / healthy. |
+| `--trace` | `--gray-1` | Terminal ground (darkest neutral surface). |
 
-### Type Scale
+State is the one exception to "one accent": working (accent), needs-you (amber), done (slate), error
+(red) each carry a functional hue, but **always** with a glyph + word (see `stamp.tsx`) so colour is
+never the sole carrier.
 
-| Role | Size | Line height | Tracking |
-|------|------|-------------|----------|
-| stamp | 10.5px | 1.2 | 0.08em, uppercase, mono |
-| micro | 11px | 1.4 | 0 |
-| meta | 13px | 1.5 | 0 |
-| body | 14px | 1.6 | 0 |
-| prose (agent output, read) | 16px | 1.65 | 0 |
-| h3 | 18px | 1.35 | −0.01em |
-| h2 | 22px | 1.25 | −0.01em |
-| h1 | 28px | 1.15 | −0.02em |
-| display | 38px | 1.05 | −0.03em |
+## Typography — Geist
 
-Agent output (`.prose-agent`) is the single place type steps UP — 16px at 1.65, `max-width: 72ch` —
-because it is read rather than scanned.
+- **Geist Variable** (sans) — the single UI face. Vercel's product/dev-UI grotesk, self-hosted variable
+  via `@fontsource-variable/geist` (no Google Fonts request, no FOUT, offline-correct).
+- **Geist Mono Variable** — machine text only: identifiers, vitals (tabular), tool calls, log output,
+  stamps.
 
-## Tokens — Spacing & Shapes
+Geist is applied by overriding Radix's `--default-font-family` (and its mono/code/em/quote font tokens)
+on `.radix-themes` **outside any `@layer`** — Radix's stylesheet is un-layered and would otherwise win.
 
-**Base unit:** 4px · **Density:** dense (operational console)
+### Type Scale (dense console; agent prose is the one step-up)
 
-### Border Radius — crisp panels, no pills
+| Role | Size | Line height |
+|---|---|---|
+| stamp | 10.5px | 1.2 (0.06em, uppercase, mono) |
+| micro | 11px | 1.4 |
+| meta | 13px | 1.5 |
+| body | 14px | 1.6 |
+| prose (agent output, read) | 16px | 1.65 (`max-width: 72ch`) |
+| h3 | 18px | 1.35 |
+| h2 | 22px | 1.25 |
+| h1 | 28px | 1.15 |
+| display | 34px | 1.1 |
 
-| Element | Value | Token |
-|---------|-------|-------|
-| buttons, chips, inputs, rows | `8px` | `--radius-md` |
-| badges | `4px` | (rounded) |
-| cards, panels | `10px` | `--radius-lg` |
-| composer, tool/log blocks | `12px` | `--radius-xl` |
-| bubbles | `12px` | `--radius-bubble` |
-| live dot, avatars **only** | `9999px` | `--radius-pill` |
+`.prose-agent` is the single place type steps up (16px), because it is read, not scanned.
 
-Geometry is crisp: small, systematic radii. The only round things are the live indicator dot and
-message avatars. Focus rings are `--radius-sm` (6px), matching the console shape — no pill ring.
+## Shapes — Radix radius scale
 
-### Layout
+Radii map onto Radix's `--radius-1..6` (driven by `radius="medium"`): `--radius-sm/md/lg/xl` →
+`--radius-2/3/4/5`. The only genuinely round things are the live dot and avatars (`--radius-pill`).
+Focus rings use the console shape (`--radius-sm`), not a pill.
 
-- Conversation column: `max-width: 768px`, centred — the ChatGPT measure.
-- Sandboxes section: `max-width: 1100px`.
-- Sidebar: `clamp(17rem, 23vw, 20rem)`.
-- Section gap: `48px`. Card padding: `20px 24px`. Element gap: `12px`.
+## Motion
 
-## Components
+One authored animation: the live indicator `breathe`. Everything else is CSS hover/transition. All
+motion collapses under `prefers-reduced-motion: reduce`.
 
-### Action (primary)
-Azure fill, white text, `8px` radius, `h-9 px-3.5`, weight 500. Hover mixes 12% white into the fill
-(not a brightness filter). The only filled-accent element on screen at a time where possible.
+## Accessibility
 
-### Action (secondary)
-Transparent fill, `1px` line border, foreground text, same geometry. Hover fills with a surface lift
-and firms the border to `--line-strong`.
-
-### Icon Button
-`8px` radius, 32–36px (44px touch), ash icon, hover shifts surface. Used for send, theme, back, destroy.
-
-### Composer
-`12px` radius, surface fill, line border, focus border azure. Textarea grows by CSS. Controls sit
-inside on the bottom row. Hint text sits *below* the composer in ash at 13px. ChatGPT composer
-geometry, on the console's crisp radius.
-
-### Message — user
-Right-aligned, `22px` radius with a `6px` bottom-right tail, surface-shift fill (not azure — azure
-is for actions), max-width `70%`.
-
-### Message — agent
-**No bubble.** Full column width, prose at 18px/1.6, a small ash label above. This is the ChatGPT
-treatment and it is correct: the agent's output is prose and deserves the measure.
-
-### Tool Call
-One mono row, `14px` radius on hover, output folded behind a disclosure. Result preview in ash.
-
-### State Stamp
-Mono, 11px, uppercase, tracked. Glyph + word, never colour alone:
-`● working` (ink) · `❚❚ needs you` (azure) · `■ exit 0` (ash) · `○ idle` (ash).
-
-### Sandbox Card (Sandboxes section)
-`20px` radius, surface fill, pebble border, no shadow. Header row: state stamp + machine id.
-Body: what it is doing. Footer: vitals in mono + pill actions (Open, Answer, Destroy).
-
-## Do's and Don'ts
-
-### Do
-- Use `#023e8a` for actions, active selection, focus, and the one state that needs a human.
-- Make every button a full pill and every panel `20px`+ rounded.
-- Set agent prose at 18px with 1.6 leading, capped at a ~70ch measure.
-- Express elevation as a surface colour shift (canvas → surface), never as a shadow.
-- Keep monospace for machine text: ids, vitals, tool calls, logs, stamps.
-- Give the agent's output the full column with no bubble; bubble only the human's turns.
-
-### Don't
-- Don't add a second accent hue. States use glyph + label + weight.
-- Don't use `#023e8a` as a surface on light — it is an action and a state colour.
-- Don't put `#023e8a` text on dark surfaces; use Azure Lift, which is the same hue made legible.
-- Don't apply box-shadows to cards, bubbles, or the composer.
-- Don't set prose below 15px, or agent output below 18px.
-- Don't square any control. No sharp-cornered buttons, inputs, or cards.
+- Contrast is AA-by-construction: text tiers use `--gray-11/12` and `--accent-11`, which Radix
+  guarantees against their paired surfaces in both modes.
+- Touch targets: a global `@media (pointer: coarse)` rule floors interactive elements at 44px without
+  inflating desktop density.
+- Focus: a visible 2px `--accent-text` ring on `:focus-visible`.
