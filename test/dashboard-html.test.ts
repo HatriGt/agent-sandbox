@@ -43,3 +43,13 @@ test("ask panel: labelled as read-only and non-interrupting", () => {
   // silently ignored.
   assert.match(dashboardHtml(), /read-only, does not interrupt the agent/);
 });
+
+test("the embedded browser script is syntactically valid JavaScript", () => {
+  // The page's JS is hand-written as a TS template string, so an escape that collapses one level too
+  // far (a literal newline inside a JS string, say) ships a page that dies on load — and every
+  // markup-level assertion in this file would still pass. Parse it for real.
+  const html = dashboardHtml();
+  const script = html.match(/<script>([\s\S]*?)<\/script>/);
+  assert.ok(script, "no <script> block found");
+  assert.doesNotThrow(() => new Function(script![1]), "embedded script does not parse");
+});

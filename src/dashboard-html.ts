@@ -574,7 +574,7 @@ function script(pollMs: number): string {
           askLog[name].push({ who: "error", text: res.j.error || "ask failed", cls: "err" });
         } else {
           var t = res.j.answer || "(the co-pilot returned nothing)";
-          if (res.j.timedOut) t += "\n\n(time cap reached — this answer may be partial)";
+          if (res.j.timedOut) t += "\\n\\n(time cap reached — this answer may be partial)";
           askLog[name].push({ who: "co-pilot", text: t, cls: "cop" });
         }
       })
