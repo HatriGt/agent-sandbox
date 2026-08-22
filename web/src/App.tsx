@@ -151,6 +151,10 @@ export default function App() {
               setSelected(null);
               setIsNew(true);
             }}
+            onNew={() => {
+              setIsNew(true);
+              setSelected(null);
+            }}
             onTornDown={(name) => {
               setSelected(null);
               setIsNew(true);
@@ -169,21 +173,6 @@ export default function App() {
         )}
       </main>
 
-      {/* Mobile: the new-task pane is reachable when a thread is open, since the sidebar is hidden. */}
-      {showConversation && (
-        <Button
-          variant="signal"
-          size="touch"
-          onClick={() => {
-            setIsNew(true);
-            setSelected(null);
-          }}
-          className="fixed bottom-[calc(env(safe-area-inset-bottom)+5.5rem)] right-4 z-20 rounded-full shadow-[0_6px_20px_-6px_rgba(0,0,0,.7)] md:hidden"
-          aria-label="Start a new task"
-        >
-          + New
-        </Button>
-      )}
     </div>
   );
 }

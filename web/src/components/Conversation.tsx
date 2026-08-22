@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowDown, ArrowLeft, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowLeft, Plus, Trash2 } from "lucide-react";
 import { api, type BoxView, type WatchSnapshot } from "@/lib/api";
 import { POLL_MS, roleLabel, shortName } from "@/lib/format";
 import { parseTrace } from "@/lib/trace";
@@ -28,12 +28,14 @@ export function Conversation({
   asides,
   onAsk,
   onBack,
+  onNew,
   onTornDown,
 }: {
   box: BoxView;
   asides: Aside[];
   onAsk: (question: string) => void;
   onBack: () => void;
+  onNew: () => void;
   onTornDown: (name: string) => void;
 }) {
   const { data: snap } = usePoll<WatchSnapshot>((signal) => api.watch(box.name, signal), POLL_MS, [box.name]);
@@ -109,6 +111,12 @@ export function Conversation({
             <span className="opacity-70">{roleLabel(box.role)}</span>
           </p>
         </div>
+
+        {/* On mobile the thread list is off-screen, so starting a new machine lives here rather
+            than in a floating button — which collided with the send bar's mode tabs at 375px. */}
+        <Button variant="ghost" size="icon" onClick={onNew} aria-label="Start a new task" className="md:hidden">
+          <Plus className="size-4" />
+        </Button>
 
         <Button variant="danger" size="sm" onClick={teardown} disabled={removing}>
           <Trash2 className="size-3.5" />
