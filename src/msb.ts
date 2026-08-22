@@ -383,7 +383,7 @@ async function trustWorkspace(cfg: Config, box: string): Promise<void> {
     `const f=p.join(os.homedir(),".claude.json");` +
     `let j={};try{j=JSON.parse(fs.readFileSync(f,"utf8"))}catch(e){}` +
     `j.projects=j.projects||{};` +
-    `const dirs=["/workspace"];` +
+    `const dirs=["/workspace","${ASK_DIR}"];` +
     `try{for(const d of fs.readdirSync("/workspace",{withFileTypes:true}))if(d.isDirectory())dirs.push("/workspace/"+d.name)}catch(e){}` +
     `for(const d of dirs){j.projects[d]=j.projects[d]||{};j.projects[d].hasTrustDialogAccepted=true;}` +
     `fs.writeFileSync(f,JSON.stringify(j));` +
@@ -897,10 +897,12 @@ export async function askInBox(
   // A box that idle-stopped (very likely if the driver is parked on a question) still holds the
   // whole workspace — start it so the co-pilot has something to read.
   await startBoxIfStopped(cfg, box);
+  // The co-pilot's cwd is a project dir like any other: without a trust entry Claude Code can refuse
+  // to run there. Cheap and idempotent, so just do it on every ask.
+  await trustWorkspace(cfg, box);
 
   const workdir = agentWorkdir(opts.repos);
   const timeoutSec = Math.max(5, Math.round(cfg.askTimeoutMs / 1000));
-  const model = cfg.askModel ? `--model "$ASK_MODEL" ` : "";
 
   const env = [
     "-e",
@@ -911,10 +913,14 @@ export async function askInBox(
     // The lane flag: flips BOTH in-box hooks (driver ask-gate off, read-only gate on).
     `${ASK_LANE_ENV}=1`,
     "-e",
+    // Model selection goes through the env, exactly like the driver's. Without it Claude Code falls
+    // back to its own default alias, which the ccproxy does not serve — a 502 the CLI reports only as
+    // "Execution error". askModel lets the co-pilot run on a cheaper/faster alias than the driver.
+    `ANTHROPIC_MODEL=${cfg.askModel ?? cfg.anthropicModel}`,
+    "-e",
     `ASK_QUESTION=${question}`,
     "-e",
     `ASK_SYS_PROMPT=${askSystemPrompt(workdir, AGENT_LOG, QUESTION_MARK)}`,
-    ...(cfg.askModel ? ["-e", `ASK_MODEL=${cfg.askModel}`] : []),
   ];
 
   // Continue the ask thread unless asked for a fresh one; the marker is what proves `-c` is safe.
@@ -926,7 +932,7 @@ export async function askInBox(
     `mkdir -p ${ASK_DIR} && cd ${ASK_DIR} && ${contProbe}; ` +
     `printf '\\n=== ask %s ===\\n%s\\n' "$(date -u +%FT%TZ)" "$ASK_QUESTION" >> ${ASK_LOG}; ` +
     // --setting-sources user loads the hooks (both gates) and nothing from any cloned repo.
-    `timeout ${timeoutSec}s claude $CONT -p "$ASK_QUESTION" --setting-sources user ${model}` +
+    `timeout ${timeoutSec}s claude $CONT -p "$ASK_QUESTION" --setting-sources user ` +
     `--append-system-prompt "$ASK_SYS_PROMPT" --allowedTools ${ASK_ALLOWED_TOOLS} ` +
     `2>>${ASK_LOG} | tee -a ${ASK_LOG}; ` +
     // 124 is timeout(1)'s "killed at the cap"; surface it so the caller can say the answer is partial.
