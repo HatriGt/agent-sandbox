@@ -97,9 +97,14 @@ a cheaper/faster alias than the driver's (the co-pilot mostly reads a log and su
 need the driver's model).
 
 Three surfaces, one lane: the `ask` MCP tool, an **Ask panel** in each dashboard row (under that box's
-terminal — POSTs to `/ask.json`), and `npm run ask -- <session> "question"` on the VPS. The CLI with no
-question reads them from stdin, one per line, so you can hold a conversation with the co-pilot while
-the driver works.
+terminal — POSTs to `/ask.json`), and a CLI. With no question the CLI reads them from stdin, one per
+line, so you can hold a conversation with the co-pilot while the driver works:
+
+```bash
+# in the deployed setup the built dist lives in the container, not on the host
+ssh <vps> "docker exec agent-sandbox npm run ask -- <session> 'what has it changed so far?'"
+ssh -t <vps> "docker exec -i agent-sandbox npm run ask -- <session>"   # interactive, stdin
+```
 
 **Web dashboard.** The HTTP entry also serves a token-protected page at `/dashboard` — open
 `https://<ASB_DOMAIN>/dashboard?token=<MCP_HTTP_TOKEN>` in a browser to see all boxes as auto-refreshing
