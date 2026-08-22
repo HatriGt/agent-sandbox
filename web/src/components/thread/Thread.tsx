@@ -105,8 +105,8 @@ export function Thread({
       {/* prompt-kit ChatContainer owns the stick-to-bottom behaviour: it anchors to the newest turn,
           yields when the reader scrolls up, and the ScrollButton offers a way back. */}
       <div className="relative min-h-0 flex-1">
-        <ChatContainerRoot className="h-full">
-          <ChatContainerContent className="mx-auto max-w-3xl gap-6 px-4 pt-8 pb-16 md:px-6">
+        <ChatContainerRoot className="relative h-full">
+          <ChatContainerContent className="mx-auto w-full max-w-3xl gap-6 px-4 pt-8 pb-16 md:px-6">
             {box.task && <YouItem text={box.task} label="task" />}
 
             {events.map((e, i) =>
@@ -143,12 +143,16 @@ export function Thread({
             )}
             <ChatContainerScrollAnchor />
           </ChatContainerContent>
-        </ChatContainerRoot>
-        <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center">
-          <div className="pointer-events-auto">
-            <ScrollButton />
+
+          {/* ScrollButton consumes the StickToBottom context, so it must live INSIDE ChatContainerRoot.
+              StickToBottom is itself the scroll element, so the button is `sticky` (not absolute) to
+              pin to the viewport bottom instead of scrolling away with the content. */}
+          <div className="pointer-events-none sticky inset-x-0 bottom-4 z-10 flex justify-center">
+            <div className="pointer-events-auto">
+              <ScrollButton />
+            </div>
           </div>
-        </div>
+        </ChatContainerRoot>
       </div>
 
       <SendBar boxName={box.name} runState={runState} onAsk={onAsk} onReplied={onReplied} />
