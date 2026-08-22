@@ -1,160 +1,168 @@
 @import "tailwindcss";
 
 /*
- * Design tokens. Semantic OKLCH variables with a complete :root and .dark scheme (shadcn cli 4
- * convention — never legacy space-separated HSL, and never a dark theme missing tokens the light
- * one defines).
+ * ── Design thesis ──────────────────────────────────────────────────────────────────────────────
+ * A sandbox is not a chat partner. It is a machine that boots, works, sometimes asks, and dies.
+ * So the interface is an INSTRUMENT for reading a trace, not a messaging app wearing a dev-tool
+ * costume:
  *
- * Palette is the "dark tech + status green" operations profile: slate-blue neutrals carrying the
- * chrome, one green accent reserved for live/positive state, amber for the single state that needs
- * a human (a box waiting on a question), red for destructive. Accent is never decoration.
- *
- * Type: Fira Sans for UI, Fira Code for box names, logs, and metrics — monospace here is for real
- * code, identifiers, and measurement, not "technical" costume.
+ *   · One hairline rail runs down every thread. Lifecycle events (booted, claimed, asked, resumed,
+ *     exited) are nodes on it. The eye follows a single spine, the way you read a flight recorder.
+ *   · The agent has no bubble. It speaks in full-width prose at a reading measure, because its
+ *     output is prose. Bubbles on both sides is the generic move and wastes half the width.
+ *   · Tool calls are thin monospace rows on the rail with their results folded away — a trace line,
+ *     not a chat message.
+ *   · Sodium amber is the primary signal, not indigo. Amber is what an instrument uses to mean
+ *     "attention here", and this product has exactly one state that needs a human. Mint is reserved
+ *     for genuinely-live, and nothing else may use either colour decoratively.
+ *   · IBM Plex Sans + Mono: engineered, technical heritage, and specifically not the Inter/Geist
+ *     silhouette every generated dashboard ships.
+ *   · No cards. Hairlines, rails, and space do the structuring.
+ * ───────────────────────────────────────────────────────────────────────────────────────────────
  */
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
-  --color-destructive-foreground: var(--destructive-foreground);
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
-  --color-sidebar: var(--sidebar);
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-ink: var(--ink);
+  --color-ink-dim: var(--ink-dim);
+  --color-ink-faint: var(--ink-faint);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-signal: var(--signal);
+  --color-signal-ink: var(--signal-ink);
+  --color-signal-wash: var(--signal-wash);
   --color-live: var(--live);
-  --color-live-foreground: var(--live-foreground);
-  --color-attention: var(--attention);
-  --color-attention-foreground: var(--attention-foreground);
-  --color-info: var(--info);
-  --color-terminal: var(--terminal);
-  --color-terminal-foreground: var(--terminal-foreground);
-  --color-terminal-border: var(--terminal-border);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-  --font-sans: "Fira Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --color-live-wash: var(--live-wash);
+  --color-danger: var(--danger);
+  --color-danger-wash: var(--danger-wash);
+  --color-observer: var(--observer);
+  --color-trace: var(--trace);
+  --radius-xs: 3px;
+  --radius-sm: 5px;
+  --radius-md: 7px;
+  --radius-lg: 10px;
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-:root {
-  --radius: 0.625rem;
-
-  /* Light: for a phone in daylight. Not an afterthought — every token below is re-derived. */
-  --background: oklch(0.985 0.002 250);
-  --foreground: oklch(0.21 0.02 260);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.21 0.02 260);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.21 0.02 260);
-  --primary: oklch(0.32 0.035 260);
-  --primary-foreground: oklch(0.985 0.002 250);
-  --secondary: oklch(0.955 0.005 255);
-  --secondary-foreground: oklch(0.32 0.035 260);
-  --muted: oklch(0.955 0.005 255);
-  --muted-foreground: oklch(0.47 0.02 258);
-  --accent: oklch(0.5 0.16 152);
-  --accent-foreground: oklch(0.99 0.005 150);
-  --destructive: oklch(0.51 0.2 26);
-  --destructive-foreground: oklch(0.99 0 0);
-  --border: oklch(0.9 0.006 255);
-  --input: oklch(0.9 0.006 255);
-  --ring: oklch(0.5 0.16 152);
-  --sidebar: oklch(0.975 0.003 250);
-  --live: oklch(0.5 0.16 152);
-  --live-foreground: oklch(0.99 0.005 150);
-  --attention: oklch(0.52 0.13 70);
-  --attention-foreground: oklch(0.99 0.01 80);
-  --info: oklch(0.5 0.16 255);
-  /* The log stays a dark terminal in both themes: a white code surface reads worse and the ANSI
-     colour vocabulary the agent emits is authored for a dark ground. */
-  --terminal: oklch(0.22 0.015 265);
-  --terminal-foreground: oklch(0.92 0.005 260);
-  --terminal-border: oklch(0.3 0.02 265);
-}
-
+/* Dark is the default: this is watched at a desk, often at night, beside an editor. */
+:root,
 .dark {
-  --background: oklch(0.17 0.015 265);
-  --foreground: oklch(0.975 0.004 255);
-  --card: oklch(0.215 0.018 265);
-  --card-foreground: oklch(0.975 0.004 255);
-  --popover: oklch(0.235 0.02 265);
-  --popover-foreground: oklch(0.975 0.004 255);
-  --primary: oklch(0.93 0.006 255);
-  --primary-foreground: oklch(0.21 0.018 265);
-  --secondary: oklch(0.27 0.02 265);
-  --secondary-foreground: oklch(0.975 0.004 255);
-  --muted: oklch(0.27 0.02 265);
-  --muted-foreground: oklch(0.72 0.015 258);
-  --accent: oklch(0.72 0.19 148);
-  --accent-foreground: oklch(0.19 0.03 150);
-  --destructive: oklch(0.68 0.2 24);
-  --destructive-foreground: oklch(0.17 0.02 25);
-  --border: oklch(0.31 0.02 265);
-  --input: oklch(0.34 0.02 265);
-  --ring: oklch(0.72 0.19 148);
-  --sidebar: oklch(0.195 0.016 265);
-  --live: oklch(0.72 0.19 148);
-  --live-foreground: oklch(0.19 0.03 150);
-  --attention: oklch(0.79 0.15 82);
-  --attention-foreground: oklch(0.21 0.04 70);
-  --info: oklch(0.72 0.13 250);
-  --terminal: oklch(0.145 0.012 265);
-  --terminal-foreground: oklch(0.88 0.006 260);
-  --terminal-border: oklch(0.27 0.018 265);
+  --bg: oklch(0.165 0.008 250); /* ink, faintly cool — not pure black, not slate-blue */
+  --surface: oklch(0.196 0.008 250);
+  --raised: oklch(0.232 0.009 250);
+  --ink: oklch(0.955 0.004 90); /* warm off-white: paper under a lamp, not clinical #fff */
+  --ink-dim: oklch(0.74 0.008 90);
+  --ink-faint: oklch(0.575 0.008 250);
+  --line: oklch(0.27 0.008 250);
+  --line-strong: oklch(0.35 0.01 250);
+  --signal: oklch(0.79 0.15 72); /* sodium amber */
+  --signal-ink: oklch(0.2 0.05 70);
+  --signal-wash: oklch(0.79 0.15 72 / 0.12);
+  --live: oklch(0.82 0.16 158); /* mint — live only */
+  --live-wash: oklch(0.82 0.16 158 / 0.12);
+  --danger: oklch(0.68 0.19 22);
+  --danger-wash: oklch(0.68 0.19 22 / 0.12);
+  --observer: oklch(0.74 0.1 232); /* the read-only lane: cool, never amber, never mint */
+  --trace: oklch(0.135 0.006 250); /* tool-output ground, deeper than the page */
+}
+
+.light {
+  --bg: oklch(0.985 0.004 85); /* warm paper */
+  --surface: oklch(1 0 0);
+  --raised: oklch(0.965 0.004 85);
+  --ink: oklch(0.22 0.01 250);
+  --ink-dim: oklch(0.44 0.012 250);
+  --ink-faint: oklch(0.6 0.01 250);
+  --line: oklch(0.9 0.005 85);
+  --line-strong: oklch(0.82 0.008 85);
+  --signal: oklch(0.56 0.14 62);
+  --signal-ink: oklch(0.99 0.01 80);
+  --signal-wash: oklch(0.56 0.14 62 / 0.1);
+  --live: oklch(0.52 0.14 158);
+  --live-wash: oklch(0.52 0.14 158 / 0.1);
+  --danger: oklch(0.52 0.2 24);
+  --danger-wash: oklch(0.52 0.2 24 / 0.09);
+  --observer: oklch(0.48 0.12 240);
+  --trace: oklch(0.22 0.01 250); /* the trace stays dark in both themes: it is machine output */
 }
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    box-sizing: border-box;
+    border-color: var(--line);
+    -webkit-tap-highlight-color: transparent;
   }
   html,
   body,
   #root {
     height: 100%;
   }
+  html {
+    color-scheme: dark;
+  }
+  html.light {
+    color-scheme: light;
+  }
   body {
-    @apply bg-background text-foreground font-sans antialiased;
-    /* 16px base: the density dial governs spacing, never legibility. */
-    font-size: 16px;
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    /* 15px base with a 1.6 measure: agent output is prose and gets read, not scanned. */
+    font-size: 15px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
     overscroll-behavior-y: none;
   }
-  ::selection {
-    @apply bg-accent/30;
-  }
   /* Browser surfaces the design still owns. */
+  ::selection {
+    background: var(--signal-wash);
+    color: var(--ink);
+  }
   ::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
+    width: 11px;
+    height: 11px;
   }
   ::-webkit-scrollbar-thumb {
-    @apply bg-border rounded-full;
-    border: 2px solid transparent;
+    background: var(--line-strong);
+    border: 3px solid transparent;
     background-clip: padding-box;
+    border-radius: 99px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    @apply bg-muted-foreground/40;
+    background: var(--ink-faint);
+    border: 3px solid transparent;
+    background-clip: padding-box;
   }
-  /* Data alignment: metrics and counts must not jitter as they poll. */
+  :focus-visible {
+    outline: 2px solid var(--signal);
+    outline-offset: 2px;
+    border-radius: 3px;
+  }
+  button,
+  input,
+  textarea {
+    font: inherit;
+    color: inherit;
+  }
+  /* Vitals must not jitter as they tick. */
   .tabular {
     font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
+  /* Small-caps machine labels: BOOTED, EXITED, ASKED. Set in mono, tracked out. */
+  .stamp {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    font-weight: 500;
   }
 }
 
-/* Motion is state, not decoration — and it stops entirely when the user asks it to. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -164,4 +172,20 @@
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* The one authored motion: a live node breathing on the rail. Nothing else animates on its own. */
+@keyframes breathe {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.45;
+    transform: scale(0.82);
+  }
+}
+.breathe {
+  animation: breathe 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }

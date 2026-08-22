@@ -1,19 +1,30 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
-function Textarea({ className, ...props }: React.ComponentProps<"textarea">) {
-  return (
-    <textarea
-      data-slot="textarea"
-      className={cn(
-        "border-input placeholder:text-muted-foreground bg-card flex min-h-16 w-full rounded-md border px-3 py-2",
-        "text-sm shadow-none outline-none transition-[color,border-color,box-shadow]",
-        "focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]",
-        "disabled:cursor-not-allowed disabled:opacity-50 resize-none field-sizing-content",
-        className
-      )}
-      {...props}
-    />
-  );
-}
-export { Textarea };
+/**
+ * The composer input. Enter sends, Shift+Enter newlines. Grown by CSS (field-sizing) rather than by
+ * measuring in JS on every keystroke.
+ */
+export const Composer = React.forwardRef<
+  HTMLTextAreaElement,
+  React.ComponentProps<"textarea"> & { onSend?: () => void }
+>(({ className, onSend, onKeyDown, ...props }, ref) => (
+  <textarea
+    ref={ref}
+    rows={1}
+    onKeyDown={(e) => {
+      if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+        e.preventDefault();
+        onSend?.();
+      }
+      onKeyDown?.(e);
+    }}
+    className={cn(
+      "text-ink placeholder:text-ink-faint max-h-48 min-h-11 w-full resize-none bg-transparent px-3.5 py-3",
+      "text-[14.5px] leading-relaxed outline-none field-sizing-content disabled:opacity-50",
+      className
+    )}
+    {...props}
+  />
+));
+Composer.displayName = "Composer";

@@ -1,18 +1,15 @@
 import * as React from "react";
-import { Boxes, Moon, Sun, TriangleAlert } from "lucide-react";
+import { Moon, Sun, TriangleAlert } from "lucide-react";
 import { api, type BoxView } from "@/lib/api";
 import { POLL_MS, isUp } from "@/lib/format";
 import { usePoll } from "@/hooks/usePoll";
 import { Button } from "@/components/ui/button";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import { FleetList } from "@/components/FleetList";
-import { BoxDetail } from "@/components/BoxDetail";
-import { Composer } from "@/components/Composer";
-import { EmptyDetail } from "@/components/EmptyDetail";
-import type { AskMessage } from "@/components/AskPanel";
+import { ThreadList } from "@/components/ThreadList";
+import { Conversation, type Aside } from "@/components/Conversation";
+import { NewTask } from "@/components/NewTask";
 import { cn } from "@/lib/utils";
 
-/** Dark by default — the desk case — but the choice persists and both themes are fully derived. */
+/** Dark by default (a desk, often at night); the choice persists and both themes are fully derived. */
 function useTheme() {
   const [dark, setDark] = React.useState(() => {
     try {
@@ -22,7 +19,9 @@ function useTheme() {
     }
   });
   React.useEffect(() => {
-    document.documentElement.classList.toggle("dark", dark);
+    const root = document.documentElement;
+    root.classList.toggle("dark", dark);
+    root.classList.toggle("light", !dark);
     try {
       localStorage.setItem("asb-theme", dark ? "dark" : "light");
     } catch {
@@ -32,140 +31,159 @@ function useTheme() {
   return { dark, toggle: () => setDark((d) => !d) };
 }
 
-function StatPill({ label, value, tone }: { label: string; value: number; tone?: "live" | "attention" }) {
-  return (
-    <div className="bg-card flex-1 rounded-md border px-2 py-1.5 text-center">
-      <div
-        className={cn(
-          "tabular text-base font-semibold leading-none",
-          tone === "live" && value > 0 && "text-live",
-          tone === "attention" && value > 0 && "text-attention"
-        )}
-      >
-        {value}
-      </div>
-      <div className="text-muted-foreground mt-1 text-[10px] uppercase tracking-wide">{label}</div>
-    </div>
-  );
-}
-
 export default function App() {
   const { dark, toggle } = useTheme();
   const { data, error, live } = usePoll<BoxView[]>((signal) => api.monitor(signal), POLL_MS);
 
   const [selected, setSelected] = React.useState<string | null>(null);
+  const [isNew, setIsNew] = React.useState(true);
   const [pending, setPending] = React.useState<{ id: string; task: string }[]>([]);
-  // Ask transcripts live here, keyed by box, so switching boxes and returning keeps the thread.
-  const [askBySession, setAskBySession] = React.useState<Record<string, AskMessage[]>>({});
-  const [refreshKey, setRefreshKey] = React.useState(0);
+  // Co-pilot exchanges per machine, so switching threads and returning keeps the margin notes.
+  const [asides, setAsides] = React.useState<Record<string, Aside[]>>({});
 
   const boxes = React.useMemo(() => (data ?? []).filter(isUp), [data]);
   const selectedBox = boxes.find((b) => b.name === selected) ?? null;
+  const waiting = boxes.filter((b) => b.runState === "waiting").length;
 
-  // A box that was selected and then vanished (torn down, auto-stopped) must not leave a dead pane.
+  // A machine that vanished (destroyed, auto-stopped) must not leave a dead pane behind.
   React.useEffect(() => {
-    if (selected && data && !boxes.some((b) => b.name === selected)) setSelected(null);
+    if (selected && data && !boxes.some((b) => b.name === selected)) {
+      setSelected(null);
+      setIsNew(true);
+    }
   }, [selected, data, boxes]);
 
-  const waiting = boxes.filter((b) => b.runState === "waiting").length;
-  const running = boxes.filter((b) => b.runState === "running").length;
-  const pool = boxes.filter((b) => b.role === "pool-free").length;
+  const openThread = (name: string) => {
+    setSelected(name);
+    setIsNew(false);
+  };
+
+  /** Ask the co-pilot, rendering the pending note immediately so the thread never looks frozen. */
+  const ask = async (name: string, question: string) => {
+    setAsides((prev) => ({ ...prev, [name]: [...(prev[name] ?? []), { question }] }));
+    const index = (asides[name] ?? []).length;
+    try {
+      const res = await api.ask(name, question);
+      setAsides((prev) => {
+        const list = [...(prev[name] ?? [])];
+        list[index] = {
+          question,
+          answer: res.timedOut ? `${res.answer}\n\n(time cap reached — this answer may be partial)` : res.answer,
+        };
+        return { ...prev, [name]: list };
+      });
+    } catch (e) {
+      setAsides((prev) => {
+        const list = [...(prev[name] ?? [])];
+        list[index] = { question, error: e instanceof Error ? e.message : String(e) };
+        return { ...prev, [name]: list };
+      });
+    }
+  };
+
+  const showConversation = !isNew && selectedBox;
 
   return (
-    <TooltipProvider>
-      <div className="grid h-full grid-cols-1 md:grid-cols-[clamp(20rem,26vw,24rem)_1fr]">
-        {/* ---------------- fleet pane ---------------- */}
-        <aside
-          className={cn(
-            "bg-sidebar flex min-h-0 flex-col border-r",
-            // Mobile: one pane at a time. The detail view takes over rather than cramming both.
-            selected && "hidden md:flex"
-          )}
-        >
-          <header className="flex flex-col gap-3 px-3 pt-3.5 pb-2.5">
-            <div className="flex items-center gap-2.5">
-              <span className="bg-accent text-accent-foreground grid size-7 shrink-0 place-items-center rounded-md">
-                <Boxes className="size-4" aria-hidden />
-              </span>
-              <div className="min-w-0">
-                <p className="text-sm font-semibold leading-tight">agent-sandbox</p>
-                <p className="text-muted-foreground flex items-center gap-1.5 text-[11px]">
-                  <span
-                    className={cn(
-                      "size-1.5 rounded-full",
-                      live ? "bg-live animate-pulse" : "bg-destructive"
-                    )}
-                    aria-hidden
-                  />
-                  {live ? `live · ${POLL_MS / 1000}s` : "disconnected"}
-                </p>
-              </div>
-              <Button
-                size="icon"
-                variant="ghost"
-                onClick={toggle}
-                aria-label={dark ? "Switch to light theme" : "Switch to dark theme"}
-                className="ml-auto shrink-0"
-              >
-                {dark ? <Moon /> : <Sun />}
-              </Button>
-            </div>
-
-            <div className="flex gap-1.5">
-              <StatPill label="up" value={boxes.length} />
-              <StatPill label="running" value={running} tone="live" />
-              <StatPill label="waiting" value={waiting} tone="attention" />
-              <StatPill label="pool" value={pool} />
-            </div>
-
-            {error && (
-              <p role="alert" className="text-destructive flex items-start gap-1.5 text-xs leading-relaxed">
-                <TriangleAlert className="mt-px size-3.5 shrink-0" aria-hidden />
-                {error}
-              </p>
-            )}
-          </header>
-
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            <FleetList
-              boxes={boxes}
-              pending={pending}
-              selected={selected}
-              loading={!data && !error}
-              onSelect={setSelected}
-            />
+    <div className="grid h-full grid-cols-1 md:grid-cols-[clamp(17rem,22vw,20rem)_1fr]">
+      {/* ── threads ── */}
+      <aside
+        className={cn(
+          "flex min-h-0 flex-col border-r border-[var(--line)] bg-[var(--bg)]",
+          // Mobile: one surface at a time.
+          showConversation && "hidden md:flex"
+        )}
+      >
+        <header className="flex items-center gap-2 px-4 pb-3 pt-4">
+          <div className="min-w-0">
+            <p className="text-ink text-[13.5px] font-semibold tracking-tight">agent-sandbox</p>
+            <p className="text-ink-faint stamp mt-0.5 flex items-center gap-1.5">
+              <span
+                className={cn(
+                  "size-1.5 rounded-full",
+                  live ? "bg-live breathe" : "bg-[var(--danger)]"
+                )}
+                aria-hidden
+              />
+              {live ? `${boxes.length} up` : "offline"}
+              {waiting > 0 && <span className="text-signal ml-1">· {waiting} need you</span>}
+            </p>
           </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={toggle}
+            aria-label={dark ? "Switch to light theme" : "Switch to dark theme"}
+            className="ml-auto"
+          >
+            {dark ? <Moon className="size-3.5" /> : <Sun className="size-3.5" />}
+          </Button>
+        </header>
 
-          <Composer
-            onStarted={(box) => setSelected(box)}
+        {error && (
+          <p role="alert" className="mx-4 mb-2 flex items-start gap-1.5 text-[12px] text-[var(--danger)]">
+            <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+            {error}
+          </p>
+        )}
+
+        <ThreadList
+          boxes={boxes}
+          pending={pending}
+          selected={selected}
+          isNew={isNew}
+          loading={!data && !error}
+          onSelect={openThread}
+          onNew={() => {
+            setIsNew(true);
+            setSelected(null);
+          }}
+        />
+      </aside>
+
+      {/* ── thread ── */}
+      <main className={cn("min-h-0 bg-[var(--bg)]", !showConversation && "hidden md:block")}>
+        {showConversation ? (
+          <Conversation
+            box={selectedBox}
+            asides={asides[selectedBox.name] ?? []}
+            onAsk={(q) => void ask(selectedBox.name, q)}
+            onBack={() => {
+              setSelected(null);
+              setIsNew(true);
+            }}
+            onTornDown={(name) => {
+              setSelected(null);
+              setIsNew(true);
+              setAsides((prev) => {
+                const { [name]: _gone, ...rest } = prev;
+                return rest;
+              });
+            }}
+          />
+        ) : (
+          <NewTask
+            onStarted={openThread}
             onPending={(p) => setPending((prev) => [...prev, p])}
             onSettled={(id) => setPending((prev) => prev.filter((p) => p.id !== id))}
           />
-        </aside>
+        )}
+      </main>
 
-        {/* ---------------- detail pane ---------------- */}
-        <main className={cn("bg-background min-h-0", !selected && "hidden md:block")}>
-          {selectedBox ? (
-            <BoxDetail
-              key={`${selectedBox.name}-${refreshKey}`}
-              box={selectedBox}
-              askMessages={askBySession[selectedBox.name] ?? []}
-              setAskMessages={(next) => setAskBySession((prev) => ({ ...prev, [selectedBox.name]: next }))}
-              onBack={() => setSelected(null)}
-              onTornDown={(name) => {
-                setSelected(null);
-                setAskBySession((prev) => {
-                  const { [name]: _gone, ...rest } = prev;
-                  return rest;
-                });
-              }}
-              onRefresh={() => setRefreshKey((k) => k + 1)}
-            />
-          ) : (
-            <EmptyDetail boxes={boxes} onSelect={setSelected} />
-          )}
-        </main>
-      </div>
-    </TooltipProvider>
+      {/* Mobile: the new-task pane is reachable when a thread is open, since the sidebar is hidden. */}
+      {showConversation && (
+        <Button
+          variant="signal"
+          size="touch"
+          onClick={() => {
+            setIsNew(true);
+            setSelected(null);
+          }}
+          className="fixed bottom-[calc(env(safe-area-inset-bottom)+5.5rem)] right-4 z-20 rounded-full shadow-[0_6px_20px_-6px_rgba(0,0,0,.7)] md:hidden"
+          aria-label="Start a new task"
+        >
+          + New
+        </Button>
+      )}
+    </div>
   );
 }

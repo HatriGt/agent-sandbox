@@ -3,9 +3,9 @@ import * as React from "react";
 /**
  * Poll a promise on an interval, with the two things a naive `setInterval(fetch)` gets wrong:
  *
- *  - it never stacks requests (a tick already in flight is not re-entered), and
+ *  - it never stacks requests (a tick still in flight is not re-entered), and
  *  - it stops entirely while the tab is hidden, then fetches once immediately on return.
- *    A phone left on this page in a pocket should not wake a VPS every 3 seconds.
+ *    A phone left on this page in a pocket should not wake a VPS every three seconds.
  */
 export function usePoll<T>(fn: (signal: AbortSignal) => Promise<T>, intervalMs: number, deps: unknown[] = []) {
   const [data, setData] = React.useState<T | null>(null);
