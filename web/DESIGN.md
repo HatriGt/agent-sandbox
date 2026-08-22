@@ -1,41 +1,48 @@
 # agent-sandbox — Style Reference
 
-> Azure on parchment. A single deep-blue accent breaking a monochrome ink system, pill-shaped
-> actions, and a ChatGPT-shaped conversation that happens to be driving a real machine.
+> Operations Slate. A calm cool-gray operations console (Linear / Vercel lineage) where run STATE
+> is the loudest signal, one azure carries every action, and geometry is crisp panels and rows —
+> not pills.
 
-**Theme:** mixed (parchment canvas default, deep-ink dark mode)
+**Theme:** mixed (deep-slate dark default, cool-paper light mode)
 
-The interface reads as an editorial console: a near-monochrome ink-on-parchment system where one
-deep azure (`#023e8a`) carries every action and every moment that needs a person. Type is a single
-grotesk at generous size and leading — 18px body at 1.6, display weights at 700 with tight tracking
-— so a machine's prose output reads like prose. Every action is a full pill; every surface is
-generously rounded; elevation is expressed by surface colour shift, never shadow. Monospace is
-reserved for what is genuinely machine text: identifiers, vitals, tool calls, log output.
+The interface is a data-dense operational console, not a document. A cool-gray field stays out of the
+way so status reads instantly. **Run state is functional colour** — working = azure pulse, needs-you =
+amber (the only thing with a deadline), done = slate, error = red — always paired with a glyph + word
+so meaning survives colourblindness. One azure (`#2f6fed`) carries every button and link. Elevation is
+a single surface lift plus a hairline, never a drop shadow. Radii are small and systematic (6–12px);
+the only round things are the live dot and avatars. Type is tuned tighter for scanning (14px UI base);
+agent output is the single exception and steps up to 16px because it is read, not scanned. Monospace is
+reserved for genuine machine text: identifiers, vitals, tool calls, log output, stamps.
 
 ## Tokens — Colors
 
-| Name | Value | Token | Role |
-|------|-------|-------|------|
-| Azure | `#023e8a` | `--azure` | THE accent. Primary actions, the state that needs a human, active selection, focus. Never decoration. |
-| Azure Lift | `#5b93e8` | `--azure-lift` | The same hue lifted for legibility as text/iconography on dark surfaces, where `#023e8a` is too dark to read. |
-| Deep Ink | `#000d10` | `--ink` | Primary text on light, filled dark actions, the structural near-black. |
-| Cool Ash | `#8e8e95` | `--ash` | Secondary text, labels, machine metadata. The only neutral that recedes on purpose. |
-| Pebble | `#d5d3d4` | `--pebble` | Hairlines, dividers, input borders. Visible only at edges. |
-| Parchment | `#fbfaf8` | `--canvas` | Page canvas (light). Warm white, not clinical. |
-| Pure White | `#ffffff` | `--surface` | Cards, composer, raised surfaces on the light canvas. |
-| Midnight Hull | `#0f0f1c` | `--canvas-dark` | Page canvas (dark). |
-| Charcoal Deck | `#151623` | `--surface-dark` | Raised surfaces on dark: composer, cards, active rows. |
-| Signal Red | `#b4232a` | `--danger` | Destroy only. Functional, not expressive. |
+| Name | Value (dark) | Value (light) | Token | Role |
+|------|--------------|---------------|-------|------|
+| Azure | `#2f6fed` | `#2563eb` | `--accent` | THE action. Every filled button and primary CTA. |
+| Azure Text | `#6ea8ff` | `#1d4ed8` | `--accent-text` | Azure as text/icon/state (working), contrast-safe per theme, and focus ring. |
+| Attention | `#eab308` | `#d97706` | `--attention` | Needs-you amber — the one state with a deadline. Fill for the waiting banner. |
+| Attention Text | `#fbbf24` | `#b45309` | `--attention-text` | Needs-you as text/glyph (stamp, banner label). |
+| OK | `#34d399` | `#059669` | `--ok` | Completed / healthy green (available to vitals & badges). |
+| Foreground | `#eef2f8` | `#0b1220` | `--fg` | Primary text. |
+| Ash | `#93a0b5` | `#5b6577` | `--muted-fg` | Secondary text, labels, machine metadata. ≥4.5:1 on the field. |
+| Line | `#232c3f` | `#e2e8f0` | `--line` | Hairlines, dividers, input borders. Visible in both themes. |
+| Line Strong | `#334155` | `#cbd5e1` | `--line-strong` | Hover borders, scrollbar thumb — one step firmer than a hairline. |
+| Canvas | `#0b0f1a` | `#f6f8fb` | `--canvas` | Page field. |
+| Surface | `#121826` | `#ffffff` | `--surface` | Panels, cards, composer, active rows. |
+| Raised | `#1a2234` | `#ffffff` | `--raised` | Popover / hover lift. |
+| Trace | `#070a12` | `#0b0f1a` | `--trace` | Terminal ground, darker than canvas. |
+| Danger | `#f26d6d` | `#dc2626` | `--danger` | Destroy + non-zero exit. Functional, not expressive. |
 
-Monochrome plus one accent. Do not introduce a second hue for state; states differentiate by
-label, weight, and glyph — see State Stamp.
+State is the exception to "one accent": working/needs-you/done/error each carry a functional hue, but
+**always** with a distinct glyph + word (see State Stamp) so colour is never the sole carrier.
 
 ## Tokens — Typography
 
 ### Archivo — the single face
 - **Substitute:** Helvetica Now Display, Neue Haas Grotesk, Inter
 - **Weights:** 400, 500, 600, 700
-- **Body:** 18px / 1.6 — the leading is a signature; agent output is prose and must breathe
+- **UI base:** 14px / 1.6 — console density; the interface scans, it does not read long-form
 - **Tracking:** −0.03em at display sizes, −0.01em at headings, 0 at body
 - **Role:** wordmark, display, headings, body, controls
 
@@ -48,54 +55,61 @@ label, weight, and glyph — see State Stamp.
 
 | Role | Size | Line height | Tracking |
 |------|------|-------------|----------|
-| stamp | 11px | 1 | 0.1em, uppercase, mono |
-| meta | 13px | 1.45 | 0 |
-| body | 15px | 1.6 | 0 |
-| prose | 18px | 1.6 | 0 |
-| heading | 24px | 1.2 | −0.01em |
-| display | 40px | 1.05 | −0.03em |
-| hero | 56px | 1.0 | −0.03em |
+| stamp | 10.5px | 1.2 | 0.08em, uppercase, mono |
+| micro | 11px | 1.4 | 0 |
+| meta | 13px | 1.5 | 0 |
+| body | 14px | 1.6 | 0 |
+| prose (agent output, read) | 16px | 1.65 | 0 |
+| h3 | 18px | 1.35 | −0.01em |
+| h2 | 22px | 1.25 | −0.01em |
+| h1 | 28px | 1.15 | −0.02em |
+| display | 38px | 1.05 | −0.03em |
+
+Agent output (`.prose-agent`) is the single place type steps UP — 16px at 1.65, `max-width: 72ch` —
+because it is read rather than scanned.
 
 ## Tokens — Spacing & Shapes
 
-**Base unit:** 4px · **Density:** spacious
+**Base unit:** 4px · **Density:** dense (operational console)
 
-### Border Radius
+### Border Radius — crisp panels, no pills
 
-| Element | Value |
-|---------|-------|
-| buttons, chips, pills | `9999px` |
-| composer | `28px` |
-| cards, panels | `20px` |
-| inputs, rows | `14px` |
-| bubbles | `22px` (with a `6px` tail corner on the sender side) |
-| tool/log blocks | `14px` |
+| Element | Value | Token |
+|---------|-------|-------|
+| buttons, chips, inputs, rows | `8px` | `--radius-md` |
+| badges | `4px` | (rounded) |
+| cards, panels | `10px` | `--radius-lg` |
+| composer, tool/log blocks | `12px` | `--radius-xl` |
+| bubbles | `12px` | `--radius-bubble` |
+| live dot, avatars **only** | `9999px` | `--radius-pill` |
 
-No square corners anywhere in chrome. The only hard edge permitted is a hairline rule.
+Geometry is crisp: small, systematic radii. The only round things are the live indicator dot and
+message avatars. Focus rings are `--radius-sm` (6px), matching the console shape — no pill ring.
 
 ### Layout
 
 - Conversation column: `max-width: 768px`, centred — the ChatGPT measure.
 - Sandboxes section: `max-width: 1100px`.
-- Sidebar: `clamp(17rem, 22vw, 20rem)`.
+- Sidebar: `clamp(17rem, 23vw, 20rem)`.
 - Section gap: `48px`. Card padding: `20px 24px`. Element gap: `12px`.
 
 ## Components
 
-### Pill Action (primary)
-`#023e8a` fill, white text, `9999px` radius, `10px 18px`, weight 500. The only filled-accent
-element on screen at a time where possible.
+### Action (primary)
+Azure fill, white text, `8px` radius, `h-9 px-3.5`, weight 500. Hover mixes 12% white into the fill
+(not a brightness filter). The only filled-accent element on screen at a time where possible.
 
-### Pill Action (secondary)
-Transparent fill, `1px` pebble border, ink text, same geometry. Hover fills with surface shift.
+### Action (secondary)
+Transparent fill, `1px` line border, foreground text, same geometry. Hover fills with a surface lift
+and firms the border to `--line-strong`.
 
-### Circular Icon Button
-`9999px`, 36px (44px touch), ash icon, hover shifts surface. Used for send, theme, back, destroy.
+### Icon Button
+`8px` radius, 32–36px (44px touch), ash icon, hover shifts surface. Used for send, theme, back, destroy.
 
 ### Composer
-`28px` radius, surface fill, pebble border, focus border azure. Textarea grows by CSS. Controls sit
-inside on the bottom row; the send button is a circular azure pill. Hint text sits *below* the
-composer in ash at 13px. This is the ChatGPT composer geometry and it is deliberate.
+`12px` radius, surface fill, line border, focus border azure. Textarea grows by CSS. Controls sit
+inside on the bottom row. Hint text sits *below* the composer in ash at 13px. ChatGPT composer
+geometry, on the console's crisp radius.
 
 ### Message — user
 Right-aligned, `22px` radius with a `6px` bottom-right tail, surface-shift fill (not azure — azure

@@ -142,7 +142,7 @@ export function Hub({
               key={s.label}
               type="button"
               onClick={() => applyStarter(s)}
-              className="text-ash hover:text-ink flex cursor-pointer items-center gap-2 rounded-full border bg-[var(--surface)] px-4 py-2 text-meta transition-colors hover:bg-[var(--raised)] [&_svg]:size-3.5"
+              className="text-ash hover:text-ink flex cursor-pointer items-center gap-2 rounded-md border bg-[var(--surface)] px-3 py-2 text-meta transition-colors hover:bg-[var(--raised)] hover:border-[var(--line-strong)] [&_svg]:size-3.5"
             >
               {s.icon}
               {s.label}
@@ -175,14 +175,14 @@ export function Hub({
                 onChange={(e) => setRepo(e.target.value)}
                 placeholder="owner/repo"
                 aria-label="Repository, owner slash name"
-                className="text-ink placeholder:text-ash rounded-full border bg-[var(--canvas)] px-3.5 py-2 font-mono text-meta outline-none focus:border-[var(--accent-text)]"
+                className="text-ink placeholder:text-ash rounded-md border bg-[var(--canvas)] px-3 py-2 font-mono text-meta outline-none focus:border-[var(--accent-text)]"
               />
               <input
                 value={ref}
                 onChange={(e) => setRef(e.target.value)}
                 placeholder="branch"
                 aria-label="Git ref"
-                className="text-ink placeholder:text-ash rounded-full border bg-[var(--canvas)] px-3.5 py-2 font-mono text-meta outline-none focus:border-[var(--accent-text)]"
+                className="text-ink placeholder:text-ash rounded-md border bg-[var(--canvas)] px-3 py-2 font-mono text-meta outline-none focus:border-[var(--accent-text)]"
               />
             </div>
           )}

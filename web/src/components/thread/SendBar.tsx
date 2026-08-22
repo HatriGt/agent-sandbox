@@ -167,7 +167,7 @@ function ModeTab({
       aria-pressed={active}
       title={disabled ? "Unavailable while the agent is working" : undefined}
       className={cn(
-        "stamp flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1.5 transition-colors duration-150",
+        "stamp flex cursor-pointer items-center gap-1.5 rounded-md px-2.5 py-1.5 transition-colors duration-150",
         "disabled:cursor-not-allowed disabled:opacity-35",
         active
           ? "text-azure-text bg-[var(--accent-wash)] border border-[var(--accent-edge)]"

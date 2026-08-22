@@ -126,7 +126,7 @@ export default function App() {
       {/* ───────────── machines ───────────── */}
       <aside className={cn("flex min-h-0 flex-col border-r", threadOpen && "hidden md:flex")}>
         <header className="flex items-center gap-2 px-4 pt-4 pb-3">
-          <span className="bg-azure grid size-6 shrink-0 place-items-center rounded text-[var(--accent-fg)]">
+          <span className="bg-azure grid size-6 shrink-0 place-items-center rounded-md text-[var(--accent-fg)]">
             <Boxes className="size-3.5" aria-hidden />
           </span>
           <div className="min-w-0">
@@ -160,11 +160,11 @@ export default function App() {
           <button
             type="button"
             onClick={() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }))}
-            className="text-ash hover:text-ink flex w-full cursor-pointer items-center gap-2 rounded-full border px-4 py-2 text-left text-meta transition-colors hover:bg-[var(--surface)]"
+            className="text-ash hover:text-ink flex w-full cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-left text-meta transition-colors hover:bg-[var(--surface)]"
           >
             <Search className="size-3.5 shrink-0" aria-hidden />
             Search machines
-            <kbd className="stamp ml-auto rounded-full border px-2 py-0.5">⌘K</kbd>
+            <kbd className="stamp ml-auto rounded border px-1.5 py-0.5">⌘K</kbd>
           </button>
         </div>
 
@@ -194,11 +194,11 @@ export default function App() {
           <button
             type="button"
             onClick={() => open(waiting[0].name)}
-            className="mx-3 mb-3 flex cursor-pointer items-center gap-2 rounded-full border border-[var(--accent-edge)] bg-[var(--accent-wash)] px-4 py-2 text-left"
+            className="mx-3 mb-3 flex cursor-pointer items-center gap-2 rounded-md border border-[color-mix(in_srgb,var(--attention)_45%,transparent)] bg-[color-mix(in_srgb,var(--attention)_12%,transparent)] px-3 py-2 text-left transition-colors hover:bg-[color-mix(in_srgb,var(--attention)_18%,transparent)]"
           >
-            <PauseCircle className="text-azure-text size-3.5 shrink-0" aria-hidden />
+            <PauseCircle className="size-3.5 shrink-0 text-[var(--attention-text)]" aria-hidden />
             <span className="text-ink text-meta font-medium">{waiting.length} waiting on you</span>
-            <span className="stamp text-azure-text ml-auto">answer →</span>
+            <span className="stamp ml-auto text-[var(--attention-text)]">answer →</span>
           </button>
         )}
 
@@ -295,9 +295,11 @@ function NavItem({
       onClick={onClick}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "flex cursor-pointer items-center gap-2.5 rounded-full px-4 py-2 text-left text-meta transition-colors",
+        "relative flex cursor-pointer items-center gap-2.5 rounded-md px-3 py-2 text-left text-meta transition-colors",
         "[&_svg]:size-4",
-        active ? "text-ink bg-[var(--surface)] font-medium" : "text-ash hover:text-ink hover:bg-[var(--surface)]"
+        active
+          ? "text-ink bg-[var(--surface)] font-medium before:absolute before:inset-y-1.5 before:left-0 before:w-[3px] before:rounded-full before:bg-azure before:content-['']"
+          : "text-ash hover:text-ink hover:bg-[var(--surface)]"
       )}
     >
       {icon}
