@@ -228,6 +228,21 @@
     font-variant-numeric: tabular-nums;
     font-feature-settings: "tnum";
   }
+  /*
+   * Touch-target floor. On a coarse pointer (finger), every button meets the 44px minimum without
+   * bloating desktop density: the visual size (icon-sm = 32px, etc.) is kept, and the hit area is
+   * expanded to 44px. Anything already >=44px is untouched.
+   */
+  @media (pointer: coarse) {
+    button,
+    [role="button"],
+    a[href] {
+      min-height: 44px;
+    }
+    [data-slot="button"] {
+      min-width: 44px;
+    }
+  }
   /* Machine label: WORKING, NEEDS YOU, EXIT 0. */
   .stamp {
     font-family: var(--font-mono);

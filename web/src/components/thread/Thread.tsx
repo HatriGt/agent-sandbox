@@ -90,12 +90,12 @@ export function Thread({
               <span className="hidden md:inline">{box.name}</span>
             </span>
           </div>
-          <p className="text-ash tabular mt-0.5 flex flex-wrap gap-x-3 font-mono text-micro">
-            {box.uptime && <span>up {box.uptime}</span>}
-            {box.cpu && <span>cpu {box.cpu}</span>}
-            {box.mem && <span>mem {box.mem}</span>}
-            <span className="opacity-70">{roleLabel(box.role)}</span>
-          </p>
+          <div className="tabular mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-micro">
+            {box.uptime && <Vital label="up" value={box.uptime} />}
+            {box.cpu && <Vital label="cpu" value={box.cpu} />}
+            {box.mem && <Vital label="mem" value={box.mem} />}
+            <span className="text-ash rounded border px-1.5 py-0.5 opacity-80">{roleLabel(box.role)}</span>
+          </div>
         </div>
 
         <Button variant="ghost" size="icon-sm" onClick={onNew} aria-label="New task" className="md:hidden">
@@ -153,5 +153,15 @@ export function Thread({
 
       <SendBar boxName={box.name} runState={runState} onAsk={onAsk} onReplied={onReplied} />
     </div>
+  );
+}
+
+/** A labelled machine vital: label recedes in ash, value leads in foreground — scannable, not a run-on. */
+function Vital({ label, value }: { label: string; value: string }) {
+  return (
+    <span className="inline-flex items-baseline gap-1">
+      <span className="text-ash opacity-70">{label}</span>
+      <span className="text-ink">{value}</span>
+    </span>
   );
 }
