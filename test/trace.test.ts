@@ -98,3 +98,48 @@ test("resultSummary takes the first meaningful line and truncates", () => {
   assert.equal(resultSummary("x".repeat(200))!.length, 100);
   assert.match(resultSummary("x".repeat(200))!, /…$/);
 });
+
+test("a repeated closing summary renders once, not twice", () => {
+  // The in-box formatter emits assistant text as it streams and re-emits the final result at the
+  // end, so the last block legitimately arrives twice. Showing both looks like a rendering bug.
+  const summary = "All four essays are written in /workspace.";
+  const ev = parseTrace([summary, "", summary].join("\n"));
+  assert.equal(ev.filter((e) => e.kind === "say").length, 1);
+});
+
+test("distinct consecutive prose is NOT deduped", () => {
+  const ev = parseTrace(["→ Write: /a.md", "first summary", "→ Write: /b.md", "second summary"].join("\n"));
+  const says = ev.filter((e) => e.kind === "say");
+  assert.equal(says.length, 2);
+});
+
+// ── inline markdown ──────────────────────────────────────────────────────────────────────────────
+test("inline: bold and code are tokenized, not left as literal markers", async () => {
+  const { tokenizeInline, plainInline } = await import("../web/src/lib/inline.ts");
+  const t = tokenizeInline("**Finished** `/workspace/audit.md` now");
+  assert.deepEqual(t, [
+    { type: "strong", value: "Finished" },
+    { type: "text", value: " " },
+    { type: "code", value: "/workspace/audit.md" },
+    { type: "text", value: " now" },
+  ]);
+  assert.equal(plainInline("**Finished** `x`"), "Finished x");
+});
+
+test("inline: asterisks inside code are not emphasis", async () => {
+  const { tokenizeInline } = await import("../web/src/lib/inline.ts");
+  const t = tokenizeInline("run `a * b * c` please");
+  assert.equal(t.filter((x) => x.type === "strong").length, 0);
+  assert.equal(t.find((x) => x.type === "code")!.value, "a * b * c");
+});
+
+test("inline: unmatched markers stay literal rather than eating the rest of the line", async () => {
+  const { tokenizeInline } = await import("../web/src/lib/inline.ts");
+  assert.deepEqual(tokenizeInline("a ** b"), [{ type: "text", value: "a ** b" }]);
+  assert.deepEqual(tokenizeInline("50% * 2"), [{ type: "text", value: "50% * 2" }]);
+});
+
+test("inline: empty input yields nothing", async () => {
+  const { tokenizeInline } = await import("../web/src/lib/inline.ts");
+  assert.deepEqual(tokenizeInline(""), []);
+});

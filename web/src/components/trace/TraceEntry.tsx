@@ -1,7 +1,41 @@
 import * as React from "react";
 import { ChevronRight } from "lucide-react";
 import { resultSummary, type TraceEvent } from "@/lib/trace";
+import { tokenizeInline } from "@/lib/inline";
 import { cn } from "@/lib/utils";
+
+/**
+ * Agent prose, with its inline markdown actually rendered. The agent writes `**bold**` and
+ * `` `code` `` because it is a coding agent; leaving the markers on screen reads as broken. Tokens
+ * become React nodes — no HTML string is ever built, so model output cannot inject markup.
+ */
+function Prose({ text }: { text: string }) {
+  return (
+    <>
+      {text.split("\n").map((line, li) => (
+        <React.Fragment key={li}>
+          {li > 0 && <br />}
+          {tokenizeInline(line).map((t, i) =>
+            t.type === "strong" ? (
+              <strong key={i} className="text-ink font-semibold">
+                {t.value}
+              </strong>
+            ) : t.type === "code" ? (
+              <code
+                key={i}
+                className="text-ink-dim rounded-xs bg-[var(--surface)] px-1 py-px font-mono text-[13px]"
+              >
+                {t.value}
+              </code>
+            ) : (
+              <React.Fragment key={i}>{t.value}</React.Fragment>
+            )
+          )}
+        </React.Fragment>
+      ))}
+    </>
+  );
+}
 
 /**
  * One entry on the rail.
@@ -63,7 +97,9 @@ export function SayEntry({ text, live }: { text: string; live?: boolean }) {
         />
       }
     >
-      <p className="text-ink max-w-[68ch] whitespace-pre-wrap text-[15px] leading-[1.65]">{text}</p>
+      <p className="text-ink max-w-[68ch] text-[15px] leading-[1.65]">
+        <Prose text={text} />
+      </p>
     </RailRow>
   );
 }
@@ -144,7 +180,9 @@ export function ObserverEntry({ question, answer }: { question: string; answer?:
         </p>
         <p className="text-ink-dim text-[14px] italic">{question}</p>
         {answer ? (
-          <p className="text-ink mt-1.5 whitespace-pre-wrap text-[14.5px] leading-[1.6]">{answer}</p>
+          <p className="text-ink mt-1.5 text-[14.5px] leading-[1.6]">
+          <Prose text={answer} />
+        </p>
         ) : (
           <p className="text-ink-faint mt-1.5 flex items-center gap-1.5 text-[14px]">
             <span className="bg-ink-faint size-1 animate-bounce rounded-full [animation-delay:-0.3s]" />

@@ -118,8 +118,8 @@ export function Conversation({
 
       {/* ── the trace ── */}
       <div className="relative min-h-0 flex-1">
-        <div ref={scroller} onScroll={onScroll} className="h-full overflow-y-auto px-4 py-6 md:px-8">
-          <div className="mx-auto max-w-3xl">
+        <div ref={scroller} onScroll={onScroll} className="h-full overflow-y-auto px-4 py-6 md:px-6">
+          <div className="max-w-3xl">
             {box.task && <YouEntry text={box.task} stampLabel="task" />}
 
             {events.map((e, i) =>

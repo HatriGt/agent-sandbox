@@ -98,7 +98,24 @@ export function parseTrace(rawLog: string): TraceEvent[] {
     prose.push(line);
   }
   flushProse();
-  return events;
+  return dedupe(events);
+}
+
+/**
+ * Drop a `say` that repeats the one before it.
+ *
+ * The in-box formatter emits assistant text as it streams AND re-emits the final result text at the
+ * end, so a run's closing summary legitimately appears twice in the log. Faithfully rendering both
+ * looks like a rendering bug to anyone reading the thread.
+ */
+function dedupe(events: TraceEvent[]): TraceEvent[] {
+  const out: TraceEvent[] = [];
+  for (const e of events) {
+    const prev = out[out.length - 1];
+    if (e.kind === "say" && prev?.kind === "say" && prev.text.trim() === e.text.trim()) continue;
+    out.push(e);
+  }
+  return out;
 }
 
 /** First line of a tool result, for the collapsed summary row. */
