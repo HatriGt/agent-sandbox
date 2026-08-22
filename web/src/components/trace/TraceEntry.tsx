@@ -114,7 +114,7 @@ export function ToolEntry({ event }: { event: Extract<TraceEvent, { kind: "tool"
 
   return (
     <RailRow node={<span className="size-1.5 rounded-[1px] bg-[var(--ink-faint)]" />}>
-      <div className="max-w-[80ch]">
+      <div className="min-w-0 max-w-[80ch]">
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
@@ -126,7 +126,7 @@ export function ToolEntry({ event }: { event: Extract<TraceEvent, { kind: "tool"
           )}
         >
           <span className="text-ink-dim shrink-0 font-medium">{event.name}</span>
-          {event.arg && <span className="text-ink-faint truncate">{event.arg}</span>}
+          {event.arg && <span className="text-ink-faint min-w-0 truncate">{event.arg}</span>}
           {event.result && (
             <ChevronRight
               className={cn(

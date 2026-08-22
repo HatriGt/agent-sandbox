@@ -112,17 +112,20 @@ export function parseTrace(rawLog: string): TraceEvent[] {
 const DEDUPE_MIN_LEN = 40;
 
 export function dedupeParagraphs(text: string): string {
-  const paras = text.split(/\n{2,}/);
-  if (paras.length < 2) return text;
+  // Line-level, not paragraph-level. The re-emitted copy does not respect blank-line boundaries:
+  // in real output the tail of the first copy and the head of the second share a paragraph, so
+  // splitting on blank lines never finds a matching pair. Lines do match.
   const seen = new Set<string>();
   const kept: string[] = [];
-  for (const p of paras) {
-    const key = p.trim();
-    if (key.length >= DEDUPE_MIN_LEN && seen.has(key)) continue;
-    if (key.length >= DEDUPE_MIN_LEN) seen.add(key);
-    kept.push(p);
+  for (const line of text.split("\n")) {
+    const key = line.trim();
+    if (key.length >= DEDUPE_MIN_LEN) {
+      if (seen.has(key)) continue;
+      seen.add(key);
+    }
+    kept.push(line);
   }
-  return kept.join("\n\n");
+  return kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 /**

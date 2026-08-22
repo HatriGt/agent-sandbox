@@ -168,3 +168,15 @@ test("parseTrace applies paragraph dedupe end to end", () => {
   assert.equal(says.length, 1);
   if (says[0].kind === "say") assert.equal(says[0].text, para);
 });
+
+test("dedupe survives a repeat that straddles paragraph boundaries", () => {
+  // The shape that actually shipped: the tail of copy 1 and the head of copy 2 share a paragraph,
+  // so a paragraph-level pass finds no matching pair. This is why the dedupe works per line.
+  const a = "Finished /workspace/audit.md. The essay covers layers, trails, and accountability.";
+  const b = "All four essays are written in /workspace and each is about 500 words long.";
+  const log = [a, "", b, a, "", b].join("\n");
+  const ev = parseTrace(log);
+  const text = ev.map((e) => (e.kind === "say" ? e.text : "")).join("\n");
+  assert.equal(text.split(a).length - 1, 1, "first line should appear once");
+  assert.equal(text.split(b).length - 1, 1, "second line should appear once");
+});

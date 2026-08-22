@@ -84,7 +84,7 @@ export default function App() {
   const showConversation = !isNew && selectedBox;
 
   return (
-    <div className="grid h-full grid-cols-1 md:grid-cols-[clamp(17rem,22vw,20rem)_1fr]">
+    <div className="grid h-full grid-cols-1 md:grid-cols-[clamp(17rem,22vw,20rem)_minmax(0,1fr)]">
       {/* ── threads ── */}
       <aside
         className={cn(
@@ -141,7 +141,7 @@ export default function App() {
       </aside>
 
       {/* ── thread ── */}
-      <main className={cn("min-h-0 bg-[var(--bg)]", !showConversation && "hidden md:block")}>
+      <main className={cn("min-h-0 min-w-0 overflow-hidden bg-[var(--bg)]", !showConversation && "hidden md:block")}>
         {showConversation ? (
           <Conversation
             box={selectedBox}

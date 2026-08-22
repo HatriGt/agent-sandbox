@@ -68,7 +68,7 @@ export function SendBar({
 
   return (
     <div className="border-t border-[var(--line)] px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 md:px-6">
-      <div className="max-w-3xl">
+      <div className="min-w-0 max-w-3xl">
         {/* mode switch — two destinations, named, never ambiguous */}
         <div className="mb-2 flex items-center gap-1">
           <ModeTab
