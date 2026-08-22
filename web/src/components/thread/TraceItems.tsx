@@ -127,27 +127,29 @@ function FileToolItem({ event }: { event: Extract<TraceEvent, { kind: "tool" }> 
   );
 }
 
-/** The agent speaking: no bubble, full measure, prose type via prompt-kit Markdown. */
+/** The agent speaking: an avatar-led card bubble on white, blue accent glyph, prose via Markdown. */
 export function SayItem({ text, live }: { text: string; live?: boolean }) {
   return (
-    <div className="flex flex-col gap-1.5">
-      <span className="stamp text-muted-foreground flex items-center gap-1.5">
-        <span className={cn("bg-current size-1.5 rounded-full", live && "breathe")} aria-hidden />
-        agent
+    <div className="flex items-start gap-3">
+      <span className="bg-accent text-accent-foreground mt-0.5 grid size-7 shrink-0 place-items-center rounded-full" aria-hidden>
+        <span className={cn("bg-current size-2 rounded-full", live && "breathe")} />
       </span>
-      <div className="prose-agent text-foreground">
-        <Markdown>{text}</Markdown>
+      <div className="min-w-0 flex-1">
+        <span className="stamp text-muted-foreground mb-1 block">agent</span>
+        <div className="bg-card border-border prose-agent text-foreground elevate-sm rounded-2xl rounded-tl-sm border px-4 py-3">
+          <Markdown>{text}</Markdown>
+        </div>
       </div>
     </div>
   );
 }
 
-/** Your turn: a rounded secondary bubble with a tail, right-aligned. */
+/** Your turn: a solid BLUE bubble, right-aligned, with a tail corner — the one filled voice. */
 export function YouItem({ text, label = "you" }: { text: string; label?: string }) {
   return (
     <div className="flex flex-col items-end gap-1.5">
-      <span className="stamp text-muted-foreground">{label}</span>
-      <div className="bg-secondary text-foreground border-border max-w-[70%] rounded-[var(--radius-bubble)] rounded-br-sm border px-4 py-2.5 text-body whitespace-pre-wrap">
+      <span className="stamp text-muted-foreground pr-1">{label}</span>
+      <div className="bg-primary text-primary-foreground elevate-sm max-w-[72%] rounded-2xl rounded-br-sm px-4 py-2.5 text-body whitespace-pre-wrap">
         {text}
       </div>
     </div>

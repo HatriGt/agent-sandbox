@@ -86,79 +86,90 @@
  * .dark swaps the same token names. Everything else in the app derives from these.
  */
 :root {
-  --radius: 0.625rem;
+  --radius: 0.75rem;
 
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  /* Light, blue-accented product theme. Canvas is a faint cool blue-gray so a WHITE floating
+     sidebar/panels read as raised cards above it; blue (oklch ~256h) is the single action hue. */
+  --background: oklch(0.985 0.006 256);
+  --foreground: oklch(0.21 0.02 256);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.21 0.02 256);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.21 0.02 256);
+  --primary: oklch(0.58 0.19 256);
+  --primary-foreground: oklch(0.99 0.01 256);
+  --secondary: oklch(0.955 0.014 256);
+  --secondary-foreground: oklch(0.3 0.06 256);
+  --muted: oklch(0.965 0.008 256);
+  --muted-foreground: oklch(0.52 0.03 256);
+  --accent: oklch(0.95 0.03 256);
+  --accent-foreground: oklch(0.4 0.12 256);
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --border: oklch(0.915 0.012 256);
+  --input: oklch(0.9 0.015 256);
+  --ring: oklch(0.58 0.19 256);
 
   /* app vocabulary (light) */
-  --surface: oklch(0.985 0 0);
-  --raised: oklch(0.97 0 0);
-  --trace: oklch(0.205 0 0);
-  --trace-fg: oklch(0.97 0 0);
-  --azure-text: oklch(0.205 0 0);
+  --surface: oklch(0.975 0.01 256);
+  --raised: oklch(1 0 0);
+  --trace: oklch(0.27 0.03 256);
+  --trace-fg: oklch(0.96 0.01 256);
+  --azure-text: var(--primary-foreground);
   --attention: oklch(0.769 0.153 70.08);
   --attention-text: oklch(0.554 0.135 66.44);
   --ok: oklch(0.6 0.118 154.5);
 
+  /* elevation for floating panels (sidebar, palette, popovers) */
+  --elevate: 0 1px 2px oklch(0.4 0.06 256 / 0.06), 0 8px 24px -8px oklch(0.4 0.08 256 / 0.14);
+  --elevate-sm: 0 1px 2px oklch(0.4 0.06 256 / 0.08), 0 2px 8px -4px oklch(0.4 0.08 256 / 0.12);
+
   /* legacy raw-var aliases so existing markup renders on the shadcn base without per-line edits */
   --canvas: var(--background);
   --accent-text: var(--primary);
+  --accent-fg: var(--primary-foreground);
   --line: var(--border);
-  --line-strong: var(--muted-foreground);
+  --line-strong: color-mix(in oklch, var(--border) 55%, var(--muted-foreground));
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
+  --background: oklch(0.17 0.02 256);
+  --foreground: oklch(0.97 0.008 256);
+  --card: oklch(0.215 0.022 256);
+  --card-foreground: oklch(0.97 0.008 256);
+  --popover: oklch(0.215 0.022 256);
+  --popover-foreground: oklch(0.97 0.008 256);
+  --primary: oklch(0.66 0.17 256);
+  --primary-foreground: oklch(0.16 0.03 256);
+  --secondary: oklch(0.27 0.025 256);
+  --secondary-foreground: oklch(0.97 0.008 256);
+  --muted: oklch(0.27 0.025 256);
+  --muted-foreground: oklch(0.72 0.02 256);
+  --accent: oklch(0.32 0.05 256);
+  --accent-foreground: oklch(0.9 0.03 256);
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  --ring: oklch(0.66 0.17 256);
 
   /* app vocabulary (dark) */
-  --surface: oklch(0.205 0 0);
-  --raised: oklch(0.269 0 0);
-  --trace: oklch(0.185 0 0);
-  --trace-fg: oklch(0.92 0 0);
-  --azure-text: oklch(0.985 0 0);
+  --surface: oklch(0.215 0.022 256);
+  --raised: oklch(0.25 0.025 256);
+  --trace: oklch(0.14 0.02 256);
+  --trace-fg: oklch(0.92 0.01 256);
+  --azure-text: var(--primary-foreground);
   --attention: oklch(0.769 0.153 70.08);
   --attention-text: oklch(0.828 0.111 76.0);
   --ok: oklch(0.723 0.152 154.5);
 
+  --elevate: 0 1px 2px oklch(0 0 0 / 0.4), 0 8px 24px -8px oklch(0 0 0 / 0.5);
+  --elevate-sm: 0 1px 2px oklch(0 0 0 / 0.4), 0 2px 8px -4px oklch(0 0 0 / 0.4);
+
   /* legacy raw-var aliases so existing markup renders on the shadcn base without per-line edits */
   --canvas: var(--background);
   --accent-text: var(--primary);
+  --accent-fg: var(--primary-foreground);
   --line: var(--border);
-  --line-strong: var(--muted-foreground);
+  --line-strong: color-mix(in oklch, var(--border) 55%, var(--muted-foreground));
 }
 
 /* Utilities prompt-kit's chat-container + our scrollers expect from a shadcn base stylesheet. */
@@ -177,6 +188,12 @@
 @utility scroll-fade-b {
   -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 2rem), transparent 100%);
   mask-image: linear-gradient(to bottom, #000 calc(100% - 2rem), transparent 100%);
+}
+@utility elevate {
+  box-shadow: var(--elevate);
+}
+@utility elevate-sm {
+  box-shadow: var(--elevate-sm);
 }
 
 @layer base {

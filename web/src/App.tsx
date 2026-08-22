@@ -30,13 +30,13 @@ function useFreshness(updatedAt: number | null) {
   return secs < 2 ? "just now" : `${secs}s ago`;
 }
 
-/** Dark by default (a desk, often at night); persisted, toggling the `.dark` class on <html>. */
+/** Light by default (blue-on-white product theme); persisted, toggling the `.dark` class on <html>. */
 function useTheme() {
   const [dark, setDark] = React.useState(() => {
     try {
-      return localStorage.getItem("asb-theme") !== "light";
+      return localStorage.getItem("asb-theme") === "dark";
     } catch {
-      return true;
+      return false;
     }
   });
   React.useEffect(() => {
@@ -120,9 +120,15 @@ export default function App() {
   return (
     <TooltipProvider delayDuration={400}>
       <Toaster position="bottom-center" />
-      <div className="grid h-full grid-cols-1 md:grid-cols-[clamp(17rem,23vw,20rem)_minmax(0,1fr)]">
-      {/* ───────────── machines ───────────── */}
-      <aside className={cn("flex min-h-0 flex-col border-r", threadOpen && "hidden md:flex")}>
+      {/* Floating shell: the canvas breathes around two detached, elevated cards (rail + workspace). */}
+      <div className="grid h-full grid-cols-1 gap-0 p-0 md:grid-cols-[clamp(17rem,23vw,20rem)_minmax(0,1fr)] md:gap-3 md:p-3">
+      {/* ───────────── machines (floating rail) ───────────── */}
+      <aside
+        className={cn(
+          "bg-card flex min-h-0 flex-col overflow-hidden border-r md:rounded-2xl md:border md:elevate",
+          threadOpen && "hidden md:flex"
+        )}
+      >
         <header className="flex items-center gap-2 px-4 pt-4 pb-3">
           <span className="bg-azure grid size-6 shrink-0 place-items-center rounded-md text-[var(--accent-fg)]">
             <Boxes className="size-3.5" aria-hidden />
@@ -218,8 +224,13 @@ export default function App() {
         />
       </aside>
 
-      {/* ───────────── main ───────────── */}
-      <main className={cn("flex min-h-0 min-w-0 flex-col overflow-hidden", !threadOpen && "hidden md:flex")}>
+      {/* ───────────── main (floating workspace) ───────────── */}
+      <main
+        className={cn(
+          "bg-card flex min-h-0 min-w-0 flex-col overflow-hidden md:rounded-2xl md:border md:elevate",
+          !threadOpen && "hidden md:flex"
+        )}
+      >
         <div className="min-h-0 flex-1">
           {view === "sandboxes" ? (
             <Sandboxes
@@ -293,10 +304,10 @@ function NavItem({
       onClick={onClick}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "relative flex cursor-pointer items-center gap-2.5 rounded-md px-3 py-2 text-left text-meta transition-colors",
+        "relative flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left text-meta transition-colors",
         "[&_svg]:size-4",
         active
-          ? "text-ink bg-[var(--surface)] font-medium before:absolute before:inset-y-1.5 before:left-0 before:w-[3px] before:rounded-full before:bg-azure before:content-['']"
+          ? "bg-accent text-accent-foreground font-medium"
           : "text-ash hover:text-ink hover:bg-[var(--surface)]"
       )}
     >
