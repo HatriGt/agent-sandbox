@@ -59,7 +59,7 @@ export function parseTrace(rawLog: string): TraceEvent[] {
   let prose: string[] = [];
 
   const flushProse = () => {
-    const text = prose.join("\n").trim();
+    const text = dedupeParagraphs(prose.join("\n").trim());
     if (text) events.push({ kind: "say", text });
     prose = [];
   };
@@ -99,6 +99,30 @@ export function parseTrace(rawLog: string): TraceEvent[] {
   }
   flushProse();
   return dedupe(events);
+}
+
+/**
+ * Drop a paragraph that already appeared earlier in the same block.
+ *
+ * The formatter streams assistant text and then re-emits the run's final result. With no tool call
+ * between them the two runs of text coalesce into one `say`, so block-level dedupe cannot see it —
+ * the repetition is *inside* the block. Only substantial paragraphs are considered: short lines like
+ * "done." or "ok" legitimately recur and must not be collapsed.
+ */
+const DEDUPE_MIN_LEN = 40;
+
+export function dedupeParagraphs(text: string): string {
+  const paras = text.split(/\n{2,}/);
+  if (paras.length < 2) return text;
+  const seen = new Set<string>();
+  const kept: string[] = [];
+  for (const p of paras) {
+    const key = p.trim();
+    if (key.length >= DEDUPE_MIN_LEN && seen.has(key)) continue;
+    if (key.length >= DEDUPE_MIN_LEN) seen.add(key);
+    kept.push(p);
+  }
+  return kept.join("\n\n");
 }
 
 /**

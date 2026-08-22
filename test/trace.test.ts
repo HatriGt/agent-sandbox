@@ -143,3 +143,28 @@ test("inline: empty input yields nothing", async () => {
   const { tokenizeInline } = await import("../web/src/lib/inline.ts");
   assert.deepEqual(tokenizeInline(""), []);
 });
+
+test("a summary repeated INSIDE one block is collapsed", async () => {
+  // The real failure: the formatter re-emits the final result with no tool call between, so both
+  // copies coalesce into a single say and block-level dedupe cannot see them.
+  const { dedupeParagraphs } = await import("../web/src/lib/trace.ts");
+  const para = "All four essays are written in /workspace: isolation.md, egress.md, secrets.md, audit.md.";
+  const other = "Finished the audit essay covering layers, trails, observability and accountability.";
+  const out = dedupeParagraphs([other, para, other, para].join("\n\n"));
+  assert.equal(out, [other, para].join("\n\n"));
+});
+
+test("short repeated lines are NOT collapsed", async () => {
+  // "done." legitimately recurs once per file; collapsing it would delete real progress reporting.
+  const { dedupeParagraphs } = await import("../web/src/lib/trace.ts");
+  const out = dedupeParagraphs(["done.", "next file.", "done."].join("\n\n"));
+  assert.equal(out.match(/done\./g)!.length, 2);
+});
+
+test("parseTrace applies paragraph dedupe end to end", () => {
+  const para = "All four essays are written in /workspace and each is about 500 words long.";
+  const ev = parseTrace([para, "", para].join("\n"));
+  const says = ev.filter((e) => e.kind === "say");
+  assert.equal(says.length, 1);
+  if (says[0].kind === "say") assert.equal(says[0].text, para);
+});
