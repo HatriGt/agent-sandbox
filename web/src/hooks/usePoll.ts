@@ -11,6 +11,10 @@ export function usePoll<T>(fn: (signal: AbortSignal) => Promise<T>, intervalMs: 
   const [data, setData] = React.useState<T | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [live, setLive] = React.useState(false);
+  // When the last successful response landed, so the UI can show real freshness rather than
+  // advertise an interval it may not achieve: /monitor.json does SSH round trips per machine, so a
+  // 3s tick against a 4s response is a label that lies.
+  const [updatedAt, setUpdatedAt] = React.useState<number | null>(null);
   const fnRef = React.useRef(fn);
   fnRef.current = fn;
 
@@ -28,6 +32,7 @@ export function usePoll<T>(fn: (signal: AbortSignal) => Promise<T>, intervalMs: 
         setData(next);
         setError(null);
         setLive(true);
+        setUpdatedAt(Date.now());
       } catch (e) {
         if (cancelled || (e instanceof DOMException && e.name === "AbortError")) return;
         setError(e instanceof Error ? e.message : String(e));
@@ -53,5 +58,5 @@ export function usePoll<T>(fn: (signal: AbortSignal) => Promise<T>, intervalMs: 
     };
   }, [intervalMs, ...deps]);
 
-  return { data, error, live };
+  return { data, error, live, updatedAt };
 }

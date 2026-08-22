@@ -813,9 +813,11 @@ export async function gatherMonitor(cfg: Config): Promise<BoxView[]> {
       let cpu: string | undefined;
       let mem: string | undefined;
 
-      // One round-trip for all in-box sentinels: claim marker, run state, task, question.
-      try {
-        const r = await exec(
+      // The sentinel read and the metrics read are independent, so they go out together. They used
+      // to be sequential, which doubled this endpoint's latency per box: with four boxes the whole
+      // response took ~3.8s, slower than the dashboard's own poll interval.
+      const [sentinels, metricsText] = await Promise.allSettled([
+        exec(
           cfg,
           e.name,
           `test -f /.claimed && echo CLAIMED || echo FREE; ` +
@@ -824,8 +826,12 @@ export async function gatherMonitor(cfg: Config): Promise<BoxView[]> {
             `else echo "run:idle"; fi; ` +
             `echo "---Q---"; cat ${QUESTION_MARK} 2>/dev/null || true; ` +
             `echo "---T---"; head -n 1 ${TASK_MARK} 2>/dev/null || true`
-        );
-        const out = r.stdout;
+        ),
+        metrics(cfg, e.name),
+      ]);
+
+      if (sentinels.status === "fulfilled") {
+        const out = sentinels.value.stdout;
         const qStart = out.indexOf("---Q---");
         const tStart = out.indexOf("---T---");
         const head = out.slice(0, qStart);
@@ -837,21 +843,17 @@ export async function gatherMonitor(cfg: Config): Promise<BoxView[]> {
         runState = question ? "waiting" : rs.state;
         exitCode = rs.exitCode;
         task = out.slice(tStart + "---T---".length).trim() || undefined;
-      } catch {
-        // box gone / not execable — leave defaults.
       }
 
-      // Metrics are cheap and independent; best-effort. msb's metrics STATE is more current than the
-      // ls status (ls can briefly lag a just-stopped box), so prefer it for the lifecycle when present.
+      // msb's metrics STATE is more current than the ls status (ls can briefly lag a just-stopped
+      // box), so prefer it for the lifecycle when present. Best-effort.
       let boxStatus = e.status;
-      try {
-        const m = parseMetrics(await metrics(cfg, e.name));
+      if (metricsText.status === "fulfilled") {
+        const m = parseMetrics(metricsText.value);
         uptime = m.uptime;
         cpu = m.cpu;
         mem = m.mem;
         if (m.state) boxStatus = m.state === "exited" ? "Stopped" : m.state;
-      } catch {
-        // ignore
       }
 
       return {

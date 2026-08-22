@@ -12,6 +12,21 @@ import { CommandPalette } from "@/components/CommandPalette";
 import { Thread, type Aside } from "@/components/thread/Thread";
 import { cn } from "@/lib/utils";
 
+/**
+ * "updated 3s ago" — recomputed on a 1s timer so it stays true between polls. Honest freshness beats
+ * a claimed interval: this endpoint's latency grows with the number of machines.
+ */
+function useFreshness(updatedAt: number | null) {
+  const [, tick] = React.useState(0);
+  React.useEffect(() => {
+    const t = window.setInterval(() => tick((n) => n + 1), 1000);
+    return () => window.clearInterval(t);
+  }, []);
+  if (!updatedAt) return "connecting";
+  const secs = Math.max(0, Math.round((Date.now() - updatedAt) / 1000));
+  return secs < 2 ? "just now" : `${secs}s ago`;
+}
+
 /** Dark by default (a desk, often at night); persisted, and both themes are fully derived. */
 function useTheme() {
   const [dark, setDark] = React.useState(() => {
@@ -38,7 +53,8 @@ type View = "chat" | "overview";
 
 export default function App() {
   const { dark, toggle } = useTheme();
-  const { data, error, live } = usePoll<BoxView[]>((signal) => api.monitor(signal), POLL_MS);
+  const { data, error, live, updatedAt } = usePoll<BoxView[]>((signal) => api.monitor(signal), POLL_MS);
+  const freshness = useFreshness(updatedAt);
   const { runs, remember } = useSessionRuns();
 
   const [view, setView] = React.useState<View>("chat");
@@ -109,7 +125,7 @@ export default function App() {
                 className={cn("size-1.5 rounded-full", live ? "bg-live breathe" : "bg-[var(--danger)]")}
                 aria-hidden
               />
-              {live ? `${boxes.length} up` : "offline"}
+              {live ? `${boxes.length} up · ${freshness}` : "offline"}
             </p>
           </div>
           <Button
