@@ -1,25 +1,25 @@
 @import "tailwindcss";
 
 /*
- * agent-sandbox console — "Operations Slate".
+ * agent-sandbox console — built on Radix Themes tokens + Geist.
  *
- * A data-dense operational console (Linear / Vercel lineage), not a document. The interface is a
- * calm cool-gray field that stays out of the way so status reads instantly:
+ * The app adopts Radix Themes as its foundation (see main.tsx <Theme>). Rather than hand-tuning a
+ * bespoke palette (which read as generic), every semantic variable below is MAPPED onto Radix's
+ * professionally-calibrated scales:
  *
- *   - ONE action hue (azure/blue) carries every button and link.
- *   - Run STATE is the loudest signal, and it is functional colour, never decorative:
- *       working → azure pulse · needs-you → amber · done → slate · error → red.
- *     Colour is always paired with a glyph + word, so meaning survives colourblindness (see stamp.tsx).
- *   - Elevation is a one-step surface lift + a hairline, never a drop shadow.
- *   - Geometry is crisp: small radii (a console is panels and rows, not pills).
- *   - Monospace is reserved for genuine machine text (ids, uptimes, agent output, stamps).
+ *   --gray-1..12   neutral scale (we use the "slate" tint) — surfaces, text, hairlines
+ *   --gray-a1..12  the same as alpha, for overlays/hover that sit on any background
+ *   --accent-1..12 the theme accent (indigo) — actions, links, working state, focus
+ *   --radius-1..6  Radix radius scale, driven by <Theme radius>
  *
- * shadcn semantic variables are DERIVED from these tokens, so registry components (message / bubble /
- * marker / message-scroller) inherit the system without per-component patching.
+ * The shadcn semantic contract and this app's own vocabulary are derived from those, so every
+ * component (Tailwind + the chat registry) inherits Radix's calibration. Two functional status hues
+ * (amber = needs-you, green = done) are the only colours outside the accent+gray system, and they
+ * always ride with a glyph + word so meaning never rests on colour alone.
  */
 
 @theme inline {
-  /* shadcn contract */
+  /* shadcn contract → Radix tokens */
   --color-background: var(--canvas);
   --color-foreground: var(--fg);
   --color-card: var(--surface);
@@ -50,30 +50,24 @@
   --color-danger: var(--danger);
   --color-trace: var(--trace);
 
-  /* Functional status hues — used by stamps, badges, vitals. Always with glyph+word, never alone. */
-  --color-run: var(--accent-text);
+  /* functional status hues (glyph + word always accompany these) */
   --color-attention: var(--attention);
   --color-attention-text: var(--attention-text);
   --color-ok: var(--ok);
 
-  /*
-   * Console radii — crisp panels and rows. Small, systematic, no pills. `--radius-pill` remains for
-   * the two genuinely round things (live dot, avatar), everything structural is 6–12px.
-   */
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 10px;
-  --radius-xl: 12px;
-  --radius-bubble: 12px;
+  /* Radii come from Radix's radius scale so shape matches the components. */
+  --radius-sm: var(--radius-2);
+  --radius-md: var(--radius-3);
+  --radius-lg: var(--radius-4);
+  --radius-xl: var(--radius-5);
+  --radius-bubble: var(--radius-4);
   --radius-pill: 9999px;
 
-  --font-sans: "Archivo", "Helvetica Neue", ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* Geist — one product face; Geist Mono for machine text. */
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  /*
-   * ONE type scale, tuned tighter for a dense console (a dashboard scans; it does not read long-form).
-   * Agent prose is the single exception and steps up in .prose-agent below.
-   */
+  /* ONE type scale, tuned for a dense console. Agent prose steps up in .prose-agent. */
   --text-micro: 11px;
   --text-micro--line-height: 1.4;
   --text-meta: 13px;
@@ -90,60 +84,40 @@
   --text-h2--line-height: 1.25;
   --text-h1: 28px;
   --text-h1--line-height: 1.15;
-  --text-display: 38px;
-  --text-display--line-height: 1.05;
+  --text-display: 34px;
+  --text-display--line-height: 1.1;
 }
 
 /*
- * Dark — the default. A true operations console: deep slate ground, panels lifted one cool step,
- * hairlines that stay visible. Modelled on the skill's Data-Dense palette (slate-900 field).
+ * Map semantic vars onto Radix scales. The Radix <Theme> owns light/dark: it sets --gray-*,
+ * --accent-* and friends per mode, so we reference them and inherit both themes for free — no
+ * hand-picked hex, no separate .dark block to keep in sync.
  */
-:root,
-.dark {
-  --accent: #2f6fed; /* azure action — holds white text on slate */
-  --accent-fg: #ffffff;
-  --accent-text: #6ea8ff; /* azure as TEXT/state on dark, contrast-safe */
-  --accent-wash: color-mix(in srgb, #6ea8ff 14%, transparent);
-  --accent-edge: color-mix(in srgb, #6ea8ff 32%, transparent);
+.radix-themes {
+  --canvas: var(--color-background); /* Radix page background (gray-tinted per mode) */
+  --surface: var(--gray-2); /* panel one step off the canvas */
+  --raised: var(--gray-3); /* hover / popover lift */
+  --fg: var(--gray-12); /* primary text */
+  --muted-fg: var(--gray-11); /* secondary text — Radix guarantees AA at 11 */
+  --line: var(--gray-a5); /* hairline (alpha, reads on any surface) */
+  --line-strong: var(--gray-a7);
 
-  --attention: #eab308; /* needs-you amber (fill) */
-  --attention-text: #fbbf24; /* needs-you amber (text on dark) */
-  --ok: #34d399; /* completed / healthy green */
+  --accent: var(--accent-9); /* solid accent fill (buttons) */
+  --accent-fg: var(--accent-contrast); /* text on the accent fill */
+  --accent-text: var(--accent-11); /* accent as text/icon/state — AA by construction */
+  --accent-wash: var(--accent-a3);
+  --accent-edge: var(--accent-a7);
 
-  --canvas: #0b0f1a; /* slate-950-ish field */
-  --surface: #121826; /* panel */
-  --raised: #1a2234; /* popover / hover lift */
-  --fg: #eef2f8;
-  --muted-fg: #93a0b5; /* secondary text — >=4.5:1 on canvas */
-  --line: #232c3f; /* hairline, visible on dark */
-  --line-strong: #334155;
-  --danger: #f26d6d;
-  --trace: #070a12; /* terminal ground, darker than canvas */
-  --trace-fg: #dfe5ef;
-}
+  --danger: var(--red-9);
+  --danger-text: var(--red-11);
 
-/* Light — the same console under daylight: cool paper, not warm parchment. */
-.light {
-  --accent: #2563eb;
-  --accent-fg: #ffffff;
-  --accent-text: #1d4ed8;
-  --accent-wash: color-mix(in srgb, #2563eb 8%, transparent);
-  --accent-edge: color-mix(in srgb, #2563eb 26%, transparent);
+  /* Status hues pulled from Radix's own amber/green scales for consistent calibration. */
+  --attention: var(--amber-9);
+  --attention-text: var(--amber-11);
+  --ok: var(--green-11);
 
-  --attention: #d97706;
-  --attention-text: #b45309;
-  --ok: #059669;
-
-  --canvas: #f6f8fb;
-  --surface: #ffffff;
-  --raised: #ffffff;
-  --fg: #0b1220;
-  --muted-fg: #5b6577; /* secondary text — >=4.5:1 on cool paper */
-  --line: #e2e8f0;
-  --line-strong: #cbd5e1;
-  --danger: #dc2626;
-  --trace: #0b0f1a;
-  --trace-fg: #dfe5ef;
+  --trace: var(--gray-1); /* terminal ground: the darkest neutral surface */
+  --trace-fg: var(--gray-12);
 }
 
 /* Utilities the registry's message-scroller expects from a shadcn base stylesheet. */
@@ -174,28 +148,27 @@
   #root {
     height: 100%;
   }
-  html {
-    color-scheme: dark;
-  }
-  html.light {
-    color-scheme: light;
-  }
   body {
     margin: 0;
-    background: var(--canvas);
-    color: var(--fg);
+    /* The Radix <Theme> paints the real background; this is only the pre-mount fallback. */
+    background: #0b0f19;
     font-family: var(--font-sans);
-    /* 14px UI base — console density. Agent prose steps up to 16px where it is read. */
     font-size: 14px;
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
     overscroll-behavior-y: none;
   }
+  /* The Radix Theme fills the app and owns the real canvas colour + font. */
+  .radix-themes {
+    min-height: 100%;
+    background: var(--canvas);
+    color: var(--fg);
+    --default-font-family: var(--font-sans);
+  }
   ::selection {
-    background: var(--accent-wash);
+    background: var(--accent-a5);
     color: var(--fg);
   }
-  /* Thin, unobtrusive console scrollbars. */
   ::-webkit-scrollbar {
     width: 10px;
     height: 10px;
@@ -207,11 +180,10 @@
     border-radius: 9999px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: var(--muted-fg);
+    background: var(--gray-a8);
     border: 3px solid transparent;
     background-clip: padding-box;
   }
-  /* Crisp square-ish focus ring — matches the console geometry, no pill. */
   :focus-visible {
     outline: 2px solid var(--accent-text);
     outline-offset: 2px;
@@ -223,16 +195,10 @@
     font: inherit;
     color: inherit;
   }
-  /* Vitals must not jitter as they tick. */
   .tabular {
     font-variant-numeric: tabular-nums;
     font-feature-settings: "tnum";
   }
-  /*
-   * Touch-target floor. On a coarse pointer (finger), every button meets the 44px minimum without
-   * bloating desktop density: the visual size (icon-sm = 32px, etc.) is kept, and the hit area is
-   * expanded to 44px. Anything already >=44px is untouched.
-   */
   @media (pointer: coarse) {
     button,
     [role="button"],
@@ -248,7 +214,7 @@
     font-family: var(--font-mono);
     font-size: 10.5px;
     line-height: 1.2;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
     font-weight: 500;
   }
@@ -276,7 +242,7 @@
   }
 }
 
-/* The one authored motion: a live indicator breathing. Nothing else animates unprompted. */
+/* The one authored motion: a live indicator breathing. */
 @keyframes breathe {
   0%,
   100% {
