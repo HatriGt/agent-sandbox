@@ -30,13 +30,37 @@
 export const ASK_DIR = "/ask";
 /** Append-only transcript of every ask turn, for auditing what the co-pilot was told/asked. */
 export const ASK_LOG = `${ASK_DIR}/.ask.log`;
-/** Marker proving a prior ask turn exists in this bucket, so `-c` has something to continue. */
+/**
+ * Marker for the current ask thread. It holds a FINGERPRINT of the driver's task rather than just
+ * existing, because a box outlives a single task: a warm-pool box that was asked about while idle
+ * gets claimed for a real delegation later, and continuing that old thread makes the co-pilot
+ * re-assert what was true in the box's previous life ("there is no /workspace here") instead of
+ * reading the box in front of it. Fingerprint mismatch => start a fresh thread.
+ */
 export const ASK_THREAD_MARK = `${ASK_DIR}/.ask.thread`;
 /**
  * Env flag that tells the two in-box hooks which lane they're running in. Set on ask execs only:
  * the driver's ask-gate skips when it's set, the read-only gate skips when it isn't.
  */
 export const ASK_LANE_ENV = "ASK_LANE";
+
+/**
+ * Shell that decides whether this turn continues the existing ask thread. Sets $CONT to `-c` only
+ * when the driver's task is the SAME one the stored thread was about; any change (a new delegation
+ * into a recycled box, a fresh task) starts clean. Keyed on the task marker's FIRST line: `resume`
+ * appends follow-ups to that file, and a follow-up shouldn't throw away a useful thread.
+ *
+ * `taskMark` is the driver's /workspace/.agent.task path (owned by the other lane — read only).
+ */
+export function askThreadProbe(taskMark: string, newThread: boolean): string {
+  const fingerprint = `ASK_FP=$(head -n 1 ${taskMark} 2>/dev/null | cksum | tr -d ' ')`;
+  if (newThread) return `${fingerprint}; rm -f ${ASK_THREAD_MARK}; CONT=""`;
+  return (
+    `${fingerprint}; ` +
+    `if [ -f ${ASK_THREAD_MARK} ] && [ "$(cat ${ASK_THREAD_MARK} 2>/dev/null)" = "$ASK_FP" ]; ` +
+    `then CONT="-c"; else CONT=""; fi`
+  );
+}
 
 /** Tools the co-pilot may use. Read/Glob/Grep are inherently read-only; Bash is gated below. */
 export const ASK_ALLOWED_TOOLS = "Read Glob Grep Bash";
@@ -134,8 +158,10 @@ export function askSystemPrompt(workdir: string, agentLog: string, questionMark:
     "A hook enforces this and will deny mutating calls; that is expected, not an error. " +
     "You CANNOT talk to the driver and must not try: you are a separate observer, and nothing you " +
     "say reaches it. If the operator wants to steer it, tell them to answer via resume(). " +
-    "Ground every claim in something you actually read, cite the file or log line, and answer in a " +
-    "few sentences — this is a glance over the shoulder, not a report."
+    "Ground every claim in something you actually read RIGHT NOW — the box changes under you while " +
+    "you talk, so if anything you concluded in an earlier turn conflicts with what you just read, the " +
+    "fresh read wins and you should say so plainly. Cite the file or log line, and answer in a few " +
+    "sentences — this is a glance over the shoulder, not a report."
   );
 }
 

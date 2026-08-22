@@ -13,6 +13,7 @@ import {
   askGateDecision,
   askGateNodeProgram,
   askSystemPrompt,
+  askThreadProbe,
   formatAsk,
   MUTATING_BASH_RE,
 } from "../src/ask.ts";
@@ -173,4 +174,47 @@ test("the generated hook, run as real node, matches askGateDecision case for cas
     // ...and agrees with the in-process predicate, so the tests above are load-bearing.
     assert.equal(denied, askGateDecision(payload).deny, `hook/predicate drift on ${JSON.stringify(payload)}`);
   }
+});
+
+test("thread probe: continues only when the driver's task fingerprint still matches", () => {
+  // A warm-pool box that was asked about while idle gets CLAIMED for a real delegation later. If the
+  // ask thread carried over, the co-pilot would re-assert what was true in the box's previous life
+  // ("there is no /workspace here") instead of reading the box in front of it. Observed live.
+  const probe = askThreadProbe("/workspace/.agent.task", false);
+  assert.match(probe, /head -n 1 \/workspace\/\.agent\.task/, "must fingerprint the driver's task");
+  assert.match(probe, /ASK_FP=/);
+  assert.match(probe, /CONT="-c"/, "matching fingerprint continues the thread");
+  assert.match(probe, /else CONT=""/, "mismatch starts a fresh thread");
+  // First line only: `resume` APPENDS follow-ups to the task marker, and a follow-up must not throw
+  // away a thread that is still about the same delegation.
+  assert.doesNotMatch(probe, /cat \/workspace\/\.agent\.task/);
+});
+
+test("thread probe: newThread never continues, whatever the fingerprint says", () => {
+  const probe = askThreadProbe("/workspace/.agent.task", true);
+  assert.match(probe, /rm -f/);
+  assert.match(probe, /CONT=""/);
+  assert.doesNotMatch(probe, /CONT="-c"/);
+});
+
+test("parseAskOutput: continuity comes from the box's decision, not the caller's flag", async () => {
+  const { parseAskOutput } = await import("../src/msb.ts");
+  const fresh = parseAskOutput("b", "---ASKCONT---0\nthe answer\n---ASKEXIT---0", 0);
+  assert.equal(fresh.continued, false);
+  assert.equal(fresh.answer, "the answer");
+
+  const same = parseAskOutput("b", "---ASKCONT---1\nthe answer\n---ASKEXIT---0", 0);
+  assert.equal(same.continued, true);
+
+  // The markers must not leak into what the operator reads.
+  assert.doesNotMatch(same.answer, /ASKCONT|ASKEXIT/);
+});
+
+test("parseAskOutput: surfaces the time cap and survives missing markers", async () => {
+  const { parseAskOutput } = await import("../src/msb.ts");
+  assert.equal(parseAskOutput("b", "---ASKCONT---1\npartial\n---ASKEXIT---124", 0).timedOut, true);
+  // No markers at all (an exec that died early): fall back to the raw output + process exit code.
+  const raw = parseAskOutput("b", "boom", 1);
+  assert.equal(raw.answer, "boom");
+  assert.equal(raw.timedOut, false);
 });

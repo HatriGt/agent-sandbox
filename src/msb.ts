@@ -17,6 +17,7 @@ import {
   ASK_THREAD_MARK,
   askGateNodeProgram,
   askSystemPrompt,
+  askThreadProbe,
   type AskResult,
 } from "./ask.js";
 import {
@@ -923,33 +924,45 @@ export async function askInBox(
     `ASK_SYS_PROMPT=${askSystemPrompt(workdir, AGENT_LOG, QUESTION_MARK)}`,
   ];
 
-  // Continue the ask thread unless asked for a fresh one; the marker is what proves `-c` is safe.
-  const contProbe = opts.newThread
-    ? `rm -f ${ASK_THREAD_MARK}; CONT=""`
-    : `if [ -f ${ASK_THREAD_MARK} ]; then CONT="-c"; else CONT=""; fi`;
+  // Continue the ask thread only when it belongs to the driver's CURRENT task (see askThreadProbe).
+  const contProbe = askThreadProbe(TASK_MARK, !!opts.newThread);
 
   const inner =
     `mkdir -p ${ASK_DIR} && cd ${ASK_DIR} && ${contProbe}; ` +
+    // Report the decision the BOX made, so the caller never claims continuity the box didn't give.
+    `echo "---ASKCONT---$([ -n "$CONT" ] && echo 1 || echo 0)"; ` +
     `printf '\\n=== ask %s ===\\n%s\\n' "$(date -u +%FT%TZ)" "$ASK_QUESTION" >> ${ASK_LOG}; ` +
     // --setting-sources user loads the hooks (both gates) and nothing from any cloned repo.
     `timeout ${timeoutSec}s claude $CONT -p "$ASK_QUESTION" --setting-sources user ` +
     `--append-system-prompt "$ASK_SYS_PROMPT" --allowedTools ${ASK_ALLOWED_TOOLS} ` +
     `2>>${ASK_LOG} | tee -a ${ASK_LOG}; ` +
     // 124 is timeout(1)'s "killed at the cap"; surface it so the caller can say the answer is partial.
-    `code=$?; touch ${ASK_THREAD_MARK}; echo "---ASKEXIT---$code"`;
+    // Stamp the thread with the task it belongs to, so the next turn can tell continuity from a
+    // box that has since been recycled into a different delegation.
+    `code=$?; printf '%s' "$ASK_FP" > ${ASK_THREAD_MARK}; echo "---ASKEXIT---$code"`;
 
   const r = await msb(cfg, ["exec", box, ...env, "--", "bash", "-lc", inner], false);
-  const out = r.stdout;
-  const marker = out.lastIndexOf("---ASKEXIT---");
-  const answer = (marker >= 0 ? out.slice(0, marker) : out).trim();
-  const code = marker >= 0 ? Number(out.slice(marker + "---ASKEXIT---".length).trim()) : r.code;
+  return parseAskOutput(box, r.stdout, r.code);
+}
 
-  return {
-    session: box,
-    answer,
-    timedOut: code === 124,
-    continued: !opts.newThread,
-  };
+/**
+ * Split one ask turn's stdout into its parts. Pure so the marker handling is unit-tested: the
+ * continuity flag comes from the BOX's own decision (the fingerprint probe), never from the
+ * caller's `newThread` — otherwise the header claims "same thread" for a turn that actually
+ * started fresh because the box had been recycled into a different delegation.
+ */
+export function parseAskOutput(box: string, stdout: string, exitCode: number): AskResult {
+  const contMark = "---ASKCONT---";
+  const exitMark = "---ASKEXIT---";
+  const cont = stdout.indexOf(contMark);
+  const continued = cont >= 0 && stdout.slice(cont + contMark.length).trimStart().startsWith("1");
+
+  const bodyStart = cont >= 0 ? stdout.indexOf("\n", cont) + 1 : 0;
+  const end = stdout.lastIndexOf(exitMark);
+  const answer = (end >= 0 ? stdout.slice(bodyStart, end) : stdout.slice(bodyStart)).trim();
+  const code = end >= 0 ? Number(stdout.slice(end + exitMark.length).trim()) : exitCode;
+
+  return { session: box, answer, timedOut: code === 124, continued };
 }
 
 /** One-line driver state for the ask header: what the OTHER lane is doing right now. */
