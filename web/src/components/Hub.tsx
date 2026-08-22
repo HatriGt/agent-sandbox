@@ -126,10 +126,10 @@ export function Hub({
     <div className="h-full min-w-0 overflow-y-auto">
       <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col justify-center gap-8 px-5 py-10">
         <div className="text-center">
-          <h1 className="text-ink text-[34px] leading-[1.05] font-bold tracking-[-0.03em] sm:text-[44px]">
+          <h1 className="text-ink text-h1 leading-[1.05] font-bold tracking-[-0.03em] sm:text-display">
             What should it build?
           </h1>
-          <p className="text-ash mx-auto mt-3 max-w-[52ch] text-[15px] leading-relaxed">
+          <p className="text-ash mx-auto mt-3 max-w-[52ch] text-body leading-relaxed">
             A microVM boots, an agent works the task inside it, and the machine stops itself when
             idle. It halts and asks if it needs a decision from you.
           </p>
@@ -142,7 +142,7 @@ export function Hub({
               key={s.label}
               type="button"
               onClick={() => applyStarter(s)}
-              className="text-ash hover:text-ink flex cursor-pointer items-center gap-2 rounded-full border bg-[var(--surface)] px-4 py-2 text-[13.5px] transition-colors hover:bg-[var(--raised)] [&_svg]:size-3.5"
+              className="text-ash hover:text-ink flex cursor-pointer items-center gap-2 rounded-full border bg-[var(--surface)] px-4 py-2 text-meta transition-colors hover:bg-[var(--raised)] [&_svg]:size-3.5"
             >
               {s.icon}
               {s.label}
@@ -175,14 +175,14 @@ export function Hub({
                 onChange={(e) => setRepo(e.target.value)}
                 placeholder="owner/repo"
                 aria-label="Repository, owner slash name"
-                className="text-ink placeholder:text-ash rounded-full border bg-[var(--canvas)] px-3.5 py-2 font-mono text-[13px] outline-none focus:border-[var(--accent-text)]"
+                className="text-ink placeholder:text-ash rounded-full border bg-[var(--canvas)] px-3.5 py-2 font-mono text-meta outline-none focus:border-[var(--accent-text)]"
               />
               <input
                 value={ref}
                 onChange={(e) => setRef(e.target.value)}
                 placeholder="branch"
                 aria-label="Git ref"
-                className="text-ink placeholder:text-ash rounded-full border bg-[var(--canvas)] px-3.5 py-2 font-mono text-[13px] outline-none focus:border-[var(--accent-text)]"
+                className="text-ink placeholder:text-ash rounded-full border bg-[var(--canvas)] px-3.5 py-2 font-mono text-meta outline-none focus:border-[var(--accent-text)]"
               />
             </div>
           )}
@@ -204,7 +204,7 @@ export function Hub({
           </div>
         </div>
 
-        <p className="text-ash -mt-5 min-h-4 text-center text-[12.5px]">
+        <p className="text-ash -mt-5 min-h-4 text-center text-micro">
           {error ? (
             <span className="text-[var(--danger)]" role="alert">
               {error}
@@ -238,10 +238,10 @@ export function Hub({
                       ) : (
                         <span className="stamp text-ash shrink-0">destroyed</span>
                       )}
-                      <span className="text-ink min-w-0 flex-1 truncate text-[14px]">
+                      <span className="text-ink min-w-0 flex-1 truncate text-meta">
                         {box ? threadTitle(box) : r.task}
                       </span>
-                      <span className="text-ash shrink-0 font-mono text-[12px]">{shortName(r.box)}</span>
+                      <span className="text-ash shrink-0 font-mono text-micro">{shortName(r.box)}</span>
                       {!gone && (
                         <ArrowRight className="text-ash size-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
                       )}
@@ -250,7 +250,7 @@ export function Hub({
                 );
               })}
             </ul>
-            <p className="text-ash mt-3 text-[12.5px]">
+            <p className="text-ash mt-3 text-micro">
               A machine's history dies with it — nothing here is stored on the server.
             </p>
           </div>

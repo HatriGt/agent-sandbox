@@ -3,12 +3,15 @@ import { Boxes, LayoutGrid, MessageSquare, Moon, PauseCircle, Plus, Search, Sun,
 import { api, type BoxView } from "@/lib/api";
 import { POLL_MS, isUp } from "@/lib/format";
 import { usePoll } from "@/hooks/usePoll";
+import { useStableBoxes } from "@/hooks/useStableBoxes";
 import { useSessionRuns } from "@/hooks/useSessionRuns";
 import { Button } from "@/components/ui/button";
 import { MachineList } from "@/components/MachineList";
 import { Hub } from "@/components/Hub";
 import { Sandboxes } from "@/components/Sandboxes";
 import { CommandPalette } from "@/components/CommandPalette";
+import { Toaster } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { Thread, type Aside } from "@/components/thread/Thread";
 import { cn } from "@/lib/utils";
 
@@ -64,7 +67,11 @@ export default function App() {
   // Replies this browser sent, per machine: the server keeps no transcript of them.
   const [replies, setReplies] = React.useState<Record<string, string[]>>({});
 
-  const boxes = React.useMemo(() => (data ?? []).filter(isUp), [data]);
+  // Filter to running, then hold a machine briefly after it stops being reported: a box being
+  // reaped at its max-duration makes the host disagree with itself for a few seconds, and without
+  // this its card blinked in and out once a second.
+  const reported = React.useMemo(() => (data ? data.filter(isUp) : null), [data]);
+  const boxes = useStableBoxes(reported);
   const selectedBox = boxes.find((b) => b.name === selected) ?? null;
   const waiting = boxes.filter((b) => b.runState === "waiting");
   const working = boxes.filter((b) => b.runState === "running").length;
@@ -113,18 +120,20 @@ export default function App() {
   const threadOpen = view === "chat" && !!selectedBox;
 
   return (
-    <div className="grid h-full grid-cols-1 md:grid-cols-[clamp(17rem,23vw,20rem)_minmax(0,1fr)]">
+    <TooltipProvider delayDuration={400}>
+      <Toaster position="bottom-center" />
+      <div className="grid h-full grid-cols-1 md:grid-cols-[clamp(17rem,23vw,20rem)_minmax(0,1fr)]">
       {/* ───────────── machines ───────────── */}
       <aside className={cn("flex min-h-0 flex-col border-r", threadOpen && "hidden md:flex")}>
         <header className="flex items-center gap-2 px-4 pt-4 pb-3">
-          <span className="bg-signal grid size-6 shrink-0 place-items-center rounded text-[var(--signal-ink)]">
+          <span className="bg-azure grid size-6 shrink-0 place-items-center rounded text-[var(--accent-fg)]">
             <Boxes className="size-3.5" aria-hidden />
           </span>
           <div className="min-w-0">
-            <p className="text-ink text-[13.5px] leading-tight font-semibold tracking-tight">agent-sandbox</p>
-            <p className="stamp text-ink-faint mt-0.5 flex items-center gap-1.5">
+            <p className="text-ink text-meta leading-tight font-semibold tracking-tight">agent-sandbox</p>
+            <p className="stamp text-ash mt-0.5 flex items-center gap-1.5">
               <span
-                className={cn("size-1.5 rounded-full", live ? "bg-live breathe" : "bg-[var(--danger)]")}
+                className={cn("size-1.5 rounded-full", live ? "bg-azure breathe" : "bg-[var(--danger)]")}
                 aria-hidden
               />
               {live
@@ -151,7 +160,7 @@ export default function App() {
           <button
             type="button"
             onClick={() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }))}
-            className="text-ash hover:text-ink flex w-full cursor-pointer items-center gap-2 rounded-full border px-4 py-2 text-left text-[13px] transition-colors hover:bg-[var(--surface)]"
+            className="text-ash hover:text-ink flex w-full cursor-pointer items-center gap-2 rounded-full border px-4 py-2 text-left text-meta transition-colors hover:bg-[var(--surface)]"
           >
             <Search className="size-3.5 shrink-0" aria-hidden />
             Search machines
@@ -188,7 +197,7 @@ export default function App() {
             className="mx-3 mb-3 flex cursor-pointer items-center gap-2 rounded-full border border-[var(--accent-edge)] bg-[var(--accent-wash)] px-4 py-2 text-left"
           >
             <PauseCircle className="text-azure-text size-3.5 shrink-0" aria-hidden />
-            <span className="text-ink text-[13px] font-medium">{waiting.length} waiting on you</span>
+            <span className="text-ink text-meta font-medium">{waiting.length} waiting on you</span>
             <span className="stamp text-azure-text ml-auto">answer →</span>
           </button>
         )}
@@ -196,7 +205,7 @@ export default function App() {
         <p className="stamp text-ash px-4 pt-2 pb-1.5">machines</p>
 
         {error && (
-          <p role="alert" className="mx-4 mb-2 flex items-start gap-1.5 text-[12px] text-[var(--danger)]">
+          <p role="alert" className="mx-4 mb-2 flex items-start gap-1.5 text-micro text-[var(--danger)]">
             <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
             {error}
           </p>
@@ -261,8 +270,9 @@ export default function App() {
         </div>
       </main>
 
-      <CommandPalette boxes={boxes} onOpen={open} onNew={newTask} />
-    </div>
+        <CommandPalette boxes={boxes} onOpen={open} onNew={newTask} />
+      </div>
+    </TooltipProvider>
   );
 }
 
@@ -285,7 +295,7 @@ function NavItem({
       onClick={onClick}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "flex cursor-pointer items-center gap-2.5 rounded-full px-4 py-2 text-left text-[14px] transition-colors",
+        "flex cursor-pointer items-center gap-2.5 rounded-full px-4 py-2 text-left text-meta transition-colors",
         "[&_svg]:size-4",
         active ? "text-ink bg-[var(--surface)] font-medium" : "text-ash hover:text-ink hover:bg-[var(--surface)]"
       )}

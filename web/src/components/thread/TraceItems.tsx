@@ -35,7 +35,7 @@ function Prose({ text }: { text: string }) {
             ) : t.type === "code" ? (
               <code
                 key={i}
-                className="text-ink rounded-[8px] bg-[var(--surface)] px-1.5 py-0.5 font-mono text-[0.85em]"
+                className="text-ink rounded-[8px] bg-[var(--surface)] px-1.5 py-0.5 font-mono text-micro"
               >
                 {t.value}
               </code>
@@ -79,7 +79,7 @@ export function ToolItem({ event }: { event: Extract<TraceEvent, { kind: "tool" 
             disabled={!event.result}
             aria-expanded={event.result ? open : undefined}
             className={cn(
-              "flex w-full min-w-0 items-baseline gap-2 rounded-md px-2 py-1 text-left font-mono text-[13px] -mx-2",
+              "flex w-full min-w-0 items-baseline gap-2 rounded-md px-2 py-1 text-left font-mono text-meta -mx-2",
               event.result && "hover:text-ink cursor-pointer hover:bg-[var(--surface)]"
             )}
           >
@@ -97,11 +97,11 @@ export function ToolItem({ event }: { event: Extract<TraceEvent, { kind: "tool" 
 
       {event.result &&
         (open ? (
-          <pre className="mt-2 ml-7 max-h-72 overflow-auto rounded-md bg-[var(--trace)] px-4 py-3 font-mono text-[12.5px] leading-relaxed whitespace-pre-wrap text-[var(--trace-fg)]">
+          <pre className="mt-2 ml-7 max-h-72 overflow-auto rounded-md bg-[var(--trace)] px-4 py-3 font-mono text-micro leading-relaxed whitespace-pre-wrap text-[var(--trace-fg)]">
             {event.result}
           </pre>
         ) : (
-          summary && <p className="text-ash ml-7 truncate font-mono text-[12.5px]">{summary}</p>
+          summary && <p className="text-ash ml-7 truncate font-mono text-micro">{summary}</p>
         ))}
     </div>
   );
@@ -133,7 +133,7 @@ export function YouItem({ text, label = "you" }: { text: string; label?: string 
         <div
           className={cn(
             "max-w-[70%] rounded-[22px] rounded-br-[6px] bg-[var(--surface)] px-4.5 py-3",
-            "border text-[15px] whitespace-pre-wrap"
+            "border text-body whitespace-pre-wrap"
           )}
         >
           {text}
@@ -153,8 +153,8 @@ export function AskingItem({ question }: { question: string }) {
           the agent is asking
         </MessageHeader>
         <div className="max-w-[70ch] rounded-lg border border-[var(--accent-edge)] bg-[var(--accent-wash)] px-5 py-4">
-          <p className="text-ink text-[17px] leading-[1.55] whitespace-pre-wrap">{question}</p>
-          <p className="text-ash mt-2.5 text-[13px]">
+          <p className="text-ink text-lead leading-[1.55] whitespace-pre-wrap">{question}</p>
+          <p className="text-ash mt-2.5 text-meta">
             It has halted and cannot continue until you answer below.
           </p>
         </div>
@@ -173,13 +173,13 @@ export function ObserverItem({ question, answer }: { question: string; answer?: 
           co-pilot · read-only · the agent never saw this
         </MessageHeader>
         <div className="max-w-[70ch] rounded-lg border border-dashed border-[var(--accent-edge)] px-5 py-4">
-          <p className="text-ash text-[14px] italic">{question}</p>
+          <p className="text-ash text-meta italic">{question}</p>
           {answer ? (
-            <p className="text-ink mt-2 text-[16px] leading-[1.6]">
+            <p className="text-ink mt-2 text-lead leading-[1.6]">
               <Prose text={answer} />
             </p>
           ) : (
-            <p className="text-ash mt-2 flex items-center gap-1.5 text-[14px]">
+            <p className="text-ash mt-2 flex items-center gap-1.5 text-meta">
               <span className="size-1 animate-bounce rounded-full bg-current [animation-delay:-0.3s]" />
               <span className="size-1 animate-bounce rounded-full bg-current [animation-delay:-0.15s]" />
               <span className="size-1 animate-bounce rounded-full bg-current" />

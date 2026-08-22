@@ -21,7 +21,7 @@ export const Composer = React.forwardRef<
     }}
     className={cn(
       "placeholder:text-ash max-h-52 min-h-12 w-full resize-none bg-transparent px-5 pt-3.5 pb-1",
-      "text-[16px] leading-relaxed outline-none field-sizing-content disabled:opacity-50",
+      "text-lead leading-relaxed outline-none field-sizing-content disabled:opacity-50",
       className
     )}
     {...props}

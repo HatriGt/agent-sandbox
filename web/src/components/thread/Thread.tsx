@@ -85,12 +85,12 @@ export function Thread({
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2.5">
             <StateStamp state={runState} exitCode={snap?.exitCode ?? box.exitCode} />
-            <span className="text-ash min-w-0 truncate font-mono text-[12px]">
+            <span className="text-ash min-w-0 truncate font-mono text-micro">
               <span className="md:hidden">{shortName(box.name)}</span>
               <span className="hidden md:inline">{box.name}</span>
             </span>
           </div>
-          <p className="text-ash tabular mt-0.5 flex flex-wrap gap-x-3 font-mono text-[12px]">
+          <p className="text-ash tabular mt-0.5 flex flex-wrap gap-x-3 font-mono text-micro">
             {box.uptime && <span>up {box.uptime}</span>}
             {box.cpu && <span>cpu {box.cpu}</span>}
             {box.mem && <span>mem {box.mem}</span>}

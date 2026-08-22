@@ -1,6 +1,8 @@
-import type { BoxView } from "@/lib/api";
+import type { StableBox } from "@/hooks/useStableBoxes";
 import { roleLabel, shortName, threadSort, threadTitle } from "@/lib/format";
 import { StateStamp } from "@/components/ui/stamp";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
 /**
@@ -14,7 +16,7 @@ export function MachineList({
   loading,
   onSelect,
 }: {
-  boxes: BoxView[];
+  boxes: StableBox[];
   pending: { id: string; task: string }[];
   selected: string | null;
   loading: boolean;
@@ -28,15 +30,15 @@ export function MachineList({
         <div className="space-y-3 px-3 py-2" aria-busy="true">
           {[0, 1, 2].map((i) => (
             <div key={i} className="space-y-2 rounded-md p-2">
-              <div className="h-2.5 w-16 rounded-full bg-[var(--surface)]" />
-              <div className="h-3 w-full rounded-full bg-[var(--surface)]" />
+              <Skeleton className="h-2.5 w-16 rounded-full" />
+              <Skeleton className="h-3 w-full rounded-full" />
             </div>
           ))}
         </div>
       )}
 
       {!loading && !sorted.length && !pending.length && (
-        <p className="text-ash px-4 py-6 text-[13.5px] leading-relaxed">
+        <p className="text-ash px-4 py-6 text-meta leading-relaxed">
           No machines up. A boot takes a few seconds, and idle machines stop themselves.
         </p>
       )}
@@ -47,7 +49,7 @@ export function MachineList({
             <p className="stamp text-ash">
               <span className="breathe">○</span> booting
             </p>
-            <p className="text-ash mt-1 line-clamp-2 text-[13.5px] leading-snug">{p.task}</p>
+            <p className="text-ash mt-1 line-clamp-2 text-meta leading-snug">{p.task}</p>
           </li>
         ))}
 
@@ -62,7 +64,8 @@ export function MachineList({
                 className={cn(
                   "relative mx-2 w-[calc(100%-1rem)] cursor-pointer rounded-md px-3 py-2.5 text-left",
                   "transition-colors duration-150 hover:bg-[var(--surface)]",
-                  active && "bg-[var(--surface)]"
+                  active && "bg-[var(--surface)]",
+                  v.leaving && "opacity-50"
                 )}
               >
                 {active && (
@@ -71,19 +74,26 @@ export function MachineList({
 
                 <div className="flex items-center gap-2">
                   <StateStamp state={v.runState} exitCode={v.exitCode} />
-                  <span className="stamp text-ash ml-auto opacity-70">{roleLabel(v.role)}</span>
+                  {/* A machine mid-shutdown is labelled rather than removed mid-poll. */}
+                  {v.leaving ? (
+                    <Badge variant="outline" className="stamp ml-auto">
+                      shutting down
+                    </Badge>
+                  ) : (
+                    <span className="stamp text-ash ml-auto opacity-70">{roleLabel(v.role)}</span>
+                  )}
                 </div>
 
                 <p
                   className={cn(
-                    "mt-1.5 line-clamp-2 text-[14px] leading-snug",
+                    "mt-1.5 line-clamp-2 text-meta leading-snug",
                     v.runState === "waiting" ? "text-ink font-medium" : "text-ink"
                   )}
                 >
                   {threadTitle(v)}
                 </p>
 
-                <p className="text-ash tabular mt-1.5 font-mono text-[12px]">
+                <p className="text-ash tabular mt-1.5 font-mono text-micro">
                   {shortName(v.name)}
                   {v.uptime && <span className="ml-2 opacity-70">{v.uptime}</span>}
                 </p>

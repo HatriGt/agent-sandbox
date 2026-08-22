@@ -25,9 +25,9 @@ const buttonVariants = cva(
         link: "text-azure-text underline-offset-4 hover:underline",
       },
       size: {
-        default: "h-10 px-4.5 text-[14px]",
-        sm: "h-8 px-3.5 text-[13px]",
-        lg: "h-12 px-6 text-[15px]",
+        default: "h-10 px-4.5 text-meta",
+        sm: "h-8 px-3.5 text-meta",
+        lg: "h-12 px-6 text-body",
         icon: "size-10",
         "icon-xs": "size-7 [&_svg:not([class*='size-'])]:size-3.5",
         "icon-sm": "size-9",

@@ -126,7 +126,7 @@ export function SendBar({
           </Button>
         </div>
 
-        <p className="text-ash mt-2 min-h-4 text-center text-[12.5px]">
+        <p className="text-ash mt-2 min-h-4 text-center text-micro">
           {error ? (
             <span className="text-[var(--danger)]" role="alert">
               {error}

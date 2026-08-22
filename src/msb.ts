@@ -830,6 +830,12 @@ export async function gatherMonitor(cfg: Config): Promise<BoxView[]> {
         metrics(cfg, e.name),
       ]);
 
+      // If we cannot exec into a box, it is not usable, whatever `msb ls` still claims. A box being
+      // reaped at --max-duration flaps: ls reports Running, metrics reports exited, and the exec
+      // fails intermittently. Reporting that honestly (as not-running) stops the dashboard blinking
+      // a card in and out once a second.
+      const execOk = sentinels.status === "fulfilled";
+
       if (sentinels.status === "fulfilled") {
         const out = sentinels.value.stdout;
         const qStart = out.indexOf("---Q---");
@@ -855,6 +861,9 @@ export async function gatherMonitor(cfg: Config): Promise<BoxView[]> {
         mem = m.mem;
         if (m.state) boxStatus = m.state === "exited" ? "Stopped" : m.state;
       }
+      // Not execable => not usable. This is the deciding vote, so the answer cannot flip between
+      // two disagreeing sources on consecutive polls.
+      if (!execOk) boxStatus = "Stopped";
 
       return {
         name: e.name,

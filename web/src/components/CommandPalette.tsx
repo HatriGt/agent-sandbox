@@ -75,7 +75,7 @@ export function CommandPalette({
       )}
     >
       <div className="flex items-center gap-2 border-b px-3.5 py-3">
-        <Search className="text-ink-faint size-4 shrink-0" aria-hidden />
+        <Search className="text-ash size-4 shrink-0" aria-hidden />
         <input
           autoFocus
           value={query}
@@ -97,9 +97,9 @@ export function CommandPalette({
           }}
           placeholder="Search machines by task, or start a new one…"
           aria-label="Search machines"
-          className="placeholder:text-ink-faint min-w-0 flex-1 bg-transparent text-[14px] outline-none"
+          className="placeholder:text-ash min-w-0 flex-1 bg-transparent text-meta outline-none"
         />
-        <kbd className="stamp text-ink-faint rounded border px-1.5 py-0.5">esc</kbd>
+        <kbd className="stamp text-ash rounded border px-1.5 py-0.5">esc</kbd>
       </div>
 
       <ul className="max-h-[52vh] overflow-y-auto p-1.5">
@@ -116,25 +116,25 @@ export function CommandPalette({
             >
               {row.kind === "new" ? (
                 <>
-                  <Plus className="text-signal size-3.5 shrink-0" aria-hidden />
-                  <span className="text-ink flex-1 text-[13.5px]">Start a new task</span>
+                  <Plus className="text-azure-text size-3.5 shrink-0" aria-hidden />
+                  <span className="text-ink flex-1 text-meta">Start a new task</span>
                 </>
               ) : (
                 <>
-                  <span className="stamp text-ink-faint w-20 shrink-0">{stateNoun(row.box.runState)}</span>
-                  <span className="text-ink-dim min-w-0 flex-1 truncate text-[13.5px]">
+                  <span className="stamp text-ash w-20 shrink-0">{stateNoun(row.box.runState)}</span>
+                  <span className="text-ash min-w-0 flex-1 truncate text-meta">
                     {threadTitle(row.box)}
                   </span>
-                  <span className="text-ink-faint shrink-0 font-mono text-[11px]">
+                  <span className="text-ash shrink-0 font-mono text-micro">
                     {shortName(row.box.name)}
                   </span>
                 </>
               )}
-              {i === clamped && <CornerDownLeft className="text-ink-faint size-3 shrink-0" aria-hidden />}
+              {i === clamped && <CornerDownLeft className="text-ash size-3 shrink-0" aria-hidden />}
             </button>
           </li>
         ))}
-        {!rows.length && <li className="text-ink-faint px-2.5 py-6 text-center text-[13px]">No machines match.</li>}
+        {!rows.length && <li className="text-ash px-2.5 py-6 text-center text-meta">No machines match.</li>}
       </ul>
     </dialog>
   );
