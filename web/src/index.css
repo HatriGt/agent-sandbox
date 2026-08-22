@@ -1,148 +1,98 @@
 @import "tailwindcss";
 
 /*
- * ── Design thesis ──────────────────────────────────────────────────────────────────────────────
- * A sandbox is not a chat partner. It is a machine that boots, works, sometimes asks, and dies.
- * The UI is an instrument for reading a trace and for releasing a halted machine:
+ * Implements web/DESIGN.md — "Azure on parchment".
  *
- *   · A thread is a TRACE with one hairline spine. Lifecycle moments are markers on it, the agent
- *     speaks in full-measure prose (no bubble — its output is prose), and tool calls are thin
- *     monospace rows with their output folded away.
- *   · Sodium amber is the signal colour. This product has exactly one state that needs a human, and
- *     amber is what an instrument uses for "attention here". Mint means live. Neither decorates.
- *   · IBM Plex Sans + Mono: engineered, technical, and specifically not the Inter/Geist silhouette.
- *   · No cards as page structure. Hairlines, rails and space do the work.
+ * Monochrome ink system with ONE accent (#023e8a) carrying every action and the single state that
+ * needs a human. Elevation is a surface colour shift, never a shadow. Everything is rounded; actions
+ * are full pills. Monospace is reserved for genuine machine text.
  *
- * ── Token strategy ────────────────────────────────────────────────────────────────────────────
- * The shadcn chat components (message, bubble, marker, message-scroller) are built against the
- * standard shadcn semantic variables. Rather than patch them, the palette below DEFINES those
- * variables, so installed and future registry components inherit this design automatically:
- *   --primary   -> sodium signal        --muted/--secondary -> raised ink surfaces
- *   --background/--foreground -> ink    --border/--input    -> hairlines
- * The named aliases (--ink, --signal, --live, --line, --observer, --trace) stay as the vocabulary
- * this app's own components speak.
- * ───────────────────────────────────────────────────────────────────────────────────────────────
+ * The shadcn semantic variables are DEFINED from these tokens rather than patched, so the registry
+ * chat components (message / bubble / marker / message-scroller) inherit the system.
  */
 
 @theme inline {
   /* shadcn contract */
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--canvas);
+  --color-foreground: var(--fg);
+  --color-card: var(--surface);
+  --color-card-foreground: var(--fg);
+  --color-popover: var(--raised);
+  --color-popover-foreground: var(--fg);
+  --color-primary: var(--accent);
+  --color-primary-foreground: var(--accent-fg);
+  --color-secondary: var(--surface);
+  --color-secondary-foreground: var(--fg);
+  --color-muted: var(--surface);
+  --color-muted-foreground: var(--muted-fg);
+  --color-accent: var(--raised);
+  --color-accent-foreground: var(--fg);
+  --color-destructive: var(--danger);
+  --color-border: var(--line);
+  --color-input: var(--line);
+  --color-ring: var(--accent-text);
 
   /* this app's vocabulary */
-  --color-ink: var(--ink);
-  --color-ink-dim: var(--ink-dim);
-  --color-ink-faint: var(--ink-faint);
-  --color-line: var(--line);
-  --color-line-strong: var(--line-strong);
-  --color-signal: var(--signal);
-  --color-signal-ink: var(--signal-ink);
-  --color-live: var(--live);
-  --color-danger: var(--danger);
-  --color-observer: var(--observer);
-  --color-trace: var(--trace);
+  --color-azure: var(--accent);
+  --color-azure-text: var(--accent-text);
+  --color-ink: var(--fg);
+  --color-ash: var(--muted-fg);
+  --color-pebble: var(--line);
   --color-surface: var(--surface);
   --color-raised: var(--raised);
+  --color-danger: var(--danger);
+  --color-trace: var(--trace);
 
-  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  /* Radii: nothing square. Pills for actions, generous curves for surfaces. */
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+  --radius-bubble: 22px;
+
+  --font-sans: "Archivo", "Helvetica Neue", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-/* Dark is the default: watched at a desk, often at night, beside an editor. */
+/* Light — parchment canvas, the default reading of this system. */
 :root,
-.dark {
-  --radius: 0.5rem;
+.light {
+  --accent: #023e8a;
+  --accent-fg: #ffffff;
+  /* On light, the accent reads directly. */
+  --accent-text: #023e8a;
+  --accent-wash: color-mix(in srgb, #023e8a 8%, transparent);
+  --accent-edge: color-mix(in srgb, #023e8a 28%, transparent);
 
-  --bg: oklch(0.165 0.008 250);
-  --surface: oklch(0.196 0.008 250);
-  --raised: oklch(0.232 0.009 250);
-  --ink: oklch(0.955 0.004 90); /* warm off-white — paper under a lamp, not clinical #fff */
-  --ink-dim: oklch(0.74 0.008 90);
-  --ink-faint: oklch(0.6 0.008 250);
-  --line: oklch(0.27 0.008 250);
-  --line-strong: oklch(0.36 0.01 250);
-  --signal: oklch(0.79 0.15 72); /* sodium amber */
-  --signal-ink: oklch(0.2 0.05 70);
-  --live: oklch(0.82 0.16 158); /* mint — live only */
-  --danger: oklch(0.68 0.19 22);
-  --observer: oklch(0.76 0.1 232); /* the read-only lane: cool, never amber, never mint */
-  --trace: oklch(0.135 0.006 250);
-
-  /* shadcn semantic layer, derived from the above */
-  --background: var(--bg);
-  --foreground: var(--ink);
-  --card: var(--surface);
-  --card-foreground: var(--ink);
-  --popover: var(--raised);
-  --popover-foreground: var(--ink);
-  --primary: var(--signal);
-  --primary-foreground: var(--signal-ink);
-  --secondary: var(--surface);
-  --secondary-foreground: var(--ink);
-  --muted: var(--surface);
-  --muted-foreground: var(--ink-faint);
-  --accent: var(--raised);
-  --accent-foreground: var(--ink);
-  --destructive: var(--danger);
-  --border: var(--line);
-  --input: var(--line-strong);
-  --ring: var(--signal);
+  --canvas: #fbfaf8;
+  --surface: #ffffff;
+  --raised: #ffffff;
+  --fg: #000d10;
+  --muted-fg: #6f6f77;
+  --line: #d5d3d4;
+  --danger: #b4232a;
+  --trace: #0f0f1c;
+  --trace-fg: #e8e8ea;
 }
 
-.light {
-  --bg: oklch(0.985 0.004 85); /* warm paper */
-  --surface: oklch(1 0 0);
-  --raised: oklch(0.965 0.004 85);
-  --ink: oklch(0.22 0.01 250);
-  --ink-dim: oklch(0.44 0.012 250);
-  --ink-faint: oklch(0.52 0.01 250);
-  --line: oklch(0.9 0.005 85);
-  --line-strong: oklch(0.8 0.008 85);
-  --signal: oklch(0.56 0.14 62);
-  --signal-ink: oklch(0.99 0.01 80);
-  --live: oklch(0.52 0.14 158);
-  --danger: oklch(0.52 0.2 24);
-  --observer: oklch(0.45 0.12 240);
-  --trace: oklch(0.22 0.01 250); /* the trace stays dark in both themes: it is machine output */
+/* Dark — the sample's own midnight bands. */
+.dark {
+  --accent: #1a56b0; /* lifted enough to hold white text on a dark ground */
+  --accent-fg: #ffffff;
+  /* #023e8a as TEXT on midnight fails contrast, so the same hue is lifted. See DESIGN.md. */
+  --accent-text: #5b93e8;
+  --accent-wash: color-mix(in srgb, #5b93e8 12%, transparent);
+  --accent-edge: color-mix(in srgb, #5b93e8 34%, transparent);
 
-  --background: var(--bg);
-  --foreground: var(--ink);
-  --card: var(--surface);
-  --card-foreground: var(--ink);
-  --popover: var(--surface);
-  --popover-foreground: var(--ink);
-  --primary: var(--signal);
-  --primary-foreground: var(--signal-ink);
-  --secondary: var(--raised);
-  --secondary-foreground: var(--ink);
-  --muted: var(--raised);
-  --muted-foreground: var(--ink-faint);
-  --accent: var(--raised);
-  --accent-foreground: var(--ink);
-  --destructive: var(--danger);
-  --border: var(--line);
-  --input: var(--line-strong);
-  --ring: var(--signal);
+  --canvas: #0f0f1c;
+  --surface: #151623;
+  --raised: #1b1c2b;
+  --fg: #f4f4f6;
+  --muted-fg: #8e8e95;
+  --line: #292a3a;
+  --danger: #e2545c;
+  --trace: #0a0a12;
+  --trace-fg: #dcdce0;
 }
 
 /* Utilities the registry's message-scroller expects from a shadcn base stylesheet. */
@@ -158,7 +108,6 @@
 @utility scrollbar-gutter-stable {
   scrollbar-gutter: stable;
 }
-/* A short fade at the bottom of a scroll viewport, so a cut-off line reads as "more below". */
 @utility scroll-fade-b {
   mask-image: linear-gradient(to bottom, #000 calc(100% - 2rem), transparent 100%);
 }
@@ -175,17 +124,17 @@
     height: 100%;
   }
   html {
-    color-scheme: dark;
-  }
-  html.light {
     color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
   }
   body {
     margin: 0;
-    background: var(--bg);
-    color: var(--ink);
+    background: var(--canvas);
+    color: var(--fg);
     font-family: var(--font-sans);
-    /* 15px base, 1.6 measure: agent output is prose and gets read, not scanned. */
+    /* 15px UI base; agent prose steps up to 18px where it is read rather than scanned. */
     font-size: 15px;
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
@@ -193,28 +142,28 @@
   }
   /* Browser surfaces the design still owns. */
   ::selection {
-    background: color-mix(in oklch, var(--signal) 25%, transparent);
-    color: var(--ink);
+    background: var(--accent-wash);
+    color: var(--fg);
   }
   ::-webkit-scrollbar {
-    width: 11px;
-    height: 11px;
+    width: 12px;
+    height: 12px;
   }
   ::-webkit-scrollbar-thumb {
-    background: var(--line-strong);
-    border: 3px solid transparent;
+    background: var(--line);
+    border: 4px solid transparent;
     background-clip: padding-box;
-    border-radius: 99px;
+    border-radius: 9999px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: var(--ink-faint);
-    border: 3px solid transparent;
+    background: var(--muted-fg);
+    border: 4px solid transparent;
     background-clip: padding-box;
   }
   :focus-visible {
-    outline: 2px solid var(--signal);
+    outline: 2px solid var(--accent-text);
     outline-offset: 2px;
-    border-radius: 3px;
+    border-radius: 9999px;
   }
   button,
   input,
@@ -227,13 +176,25 @@
     font-variant-numeric: tabular-nums;
     font-feature-settings: "tnum";
   }
-  /* Machine labels: BOOTED, EXITED, NEEDS YOU. Mono, tracked out, small. */
+  /* Machine label: BOOTED, NEEDS YOU, EXIT 0. */
   .stamp {
     font-family: var(--font-mono);
-    font-size: 10.5px;
+    font-size: 11px;
+    line-height: 1.2;
     letter-spacing: 0.1em;
     text-transform: uppercase;
     font-weight: 500;
+  }
+  /* Agent output: the one place type steps up, because it is read. */
+  .prose-agent {
+    font-size: 18px;
+    line-height: 1.6;
+    max-width: 70ch;
+  }
+  @media (max-width: 640px) {
+    .prose-agent {
+      font-size: 16.5px;
+    }
   }
 }
 
@@ -248,7 +209,7 @@
   }
 }
 
-/* The one authored motion: a live node breathing. Nothing else animates unprompted. */
+/* The one authored motion: a live indicator breathing. Nothing else animates unprompted. */
 @keyframes breathe {
   0%,
   100% {
@@ -256,8 +217,8 @@
     transform: scale(1);
   }
   50% {
-    opacity: 0.45;
-    transform: scale(0.82);
+    opacity: 0.4;
+    transform: scale(0.8);
   }
 }
 .breathe {

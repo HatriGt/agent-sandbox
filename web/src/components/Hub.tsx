@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowRight, Bug, ClipboardCheck, FileSearch, FlaskConical, GitBranch, Layers, Loader2, Send } from "lucide-react";
+import { ArrowRight, ArrowUp, Bug, ClipboardCheck, FileSearch, FlaskConical, GitBranch, Layers, Loader2 } from "lucide-react";
 import { api, type BoxView } from "@/lib/api";
 import { shortName, threadTitle } from "@/lib/format";
 import { Button } from "@/components/ui/button";
@@ -125,25 +125,24 @@ export function Hub({
   return (
     <div className="h-full min-w-0 overflow-y-auto">
       <div className="mx-auto flex min-h-full w-full max-w-3xl flex-col justify-center gap-8 px-5 py-10">
-        <div>
-          <p className="stamp text-ink-faint pb-2">new machine</p>
-          <h1 className="text-ink text-[28px] leading-tight font-semibold tracking-tight sm:text-[32px]">
+        <div className="text-center">
+          <h1 className="text-ink text-[34px] leading-[1.05] font-bold tracking-[-0.03em] sm:text-[44px]">
             What should it build?
           </h1>
-          <p className="text-ink-dim mt-2 max-w-[58ch] text-[14.5px] leading-relaxed">
-            A microVM boots, an autonomous agent works the task inside it, and the machine stops itself
-            when idle. It halts and asks if it needs a decision from you.
+          <p className="text-ash mx-auto mt-3 max-w-[52ch] text-[15px] leading-relaxed">
+            A microVM boots, an agent works the task inside it, and the machine stops itself when
+            idle. It halts and asks if it needs a decision from you.
           </p>
         </div>
 
         {/* starters — each prefills a real task */}
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap justify-center gap-2">
           {STARTERS.map((s) => (
             <button
               key={s.label}
               type="button"
               onClick={() => applyStarter(s)}
-              className="text-ink-dim hover:text-ink hover:border-[var(--line-strong)] flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1.5 text-[13px] transition-colors [&_svg]:size-3.5"
+              className="text-ash hover:text-ink flex cursor-pointer items-center gap-2 rounded-full border bg-[var(--surface)] px-4 py-2 text-[13.5px] transition-colors hover:bg-[var(--raised)] [&_svg]:size-3.5"
             >
               {s.icon}
               {s.label}
@@ -152,7 +151,9 @@ export function Hub({
         </div>
 
         {/* composer */}
-        <div className="focus-within:border-signal rounded-lg border bg-[var(--surface)] transition-colors">
+        {/* ChatGPT composer geometry: one deeply-rounded surface, controls inside on the bottom
+            row, hint text below it. */}
+        <div className="rounded-xl border bg-[var(--surface)] transition-colors focus-within:border-[var(--accent-text)]">
           <label htmlFor="new-task" className="sr-only">
             Describe the task for a new machine
           </label>
@@ -163,8 +164,8 @@ export function Hub({
             disabled={busy}
             onChange={(e) => setTask(e.target.value)}
             onSend={submit}
-            placeholder="Refactor the auth service and open a PR…"
-            className="min-h-28"
+            placeholder="Message a new sandbox…"
+            className="min-h-14"
           />
 
           {showRepo && (
@@ -174,44 +175,49 @@ export function Hub({
                 onChange={(e) => setRepo(e.target.value)}
                 placeholder="owner/repo"
                 aria-label="Repository, owner slash name"
-                className="text-ink placeholder:text-ink-faint focus:border-signal rounded border bg-[var(--bg)] px-2.5 py-1.5 font-mono text-[12.5px] outline-none"
+                className="text-ink placeholder:text-ash rounded-full border bg-[var(--canvas)] px-3.5 py-2 font-mono text-[13px] outline-none focus:border-[var(--accent-text)]"
               />
               <input
                 value={ref}
                 onChange={(e) => setRef(e.target.value)}
                 placeholder="branch"
                 aria-label="Git ref"
-                className="text-ink placeholder:text-ink-faint focus:border-signal rounded border bg-[var(--bg)] px-2.5 py-1.5 font-mono text-[12.5px] outline-none"
+                className="text-ink placeholder:text-ash rounded-full border bg-[var(--canvas)] px-3.5 py-2 font-mono text-[13px] outline-none focus:border-[var(--accent-text)]"
               />
             </div>
           )}
 
-          <div className="flex items-center gap-2 px-2 pb-2">
+          <div className="flex items-center gap-2 px-3 pb-3">
             <Button variant="ghost" size="sm" onClick={() => setShowRepo((v) => !v)} aria-expanded={showRepo}>
               <GitBranch className="size-3.5" />
               <span className="stamp">{repo.trim() || "attach a repo"}</span>
             </Button>
-            <Button variant="signal" size="sm" onClick={submit} disabled={busy || !task.trim()} className="ml-auto">
-              {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Send className="size-3.5" />}
-              {busy ? "booting" : "Boot machine"}
+            <Button
+              size="icon"
+              onClick={submit}
+              disabled={busy || !task.trim()}
+              aria-label="Boot a machine with this task"
+              className="ml-auto"
+            >
+              {busy ? <Loader2 className="animate-spin" /> : <ArrowUp />}
             </Button>
           </div>
         </div>
 
-        <p className="text-ink-faint -mt-4 min-h-4 text-[11.5px]">
+        <p className="text-ash -mt-5 min-h-4 text-center text-[12.5px]">
           {error ? (
             <span className="text-[var(--danger)]" role="alert">
               {error}
             </span>
           ) : (
-            "Enter boots · no repo runs a task-only machine"
+            "Enter boots a machine · no repo runs a task-only machine"
           )}
         </p>
 
         {/* this session — real, and honest about what does not persist */}
         {sessionRuns.length > 0 && (
           <div className="border-t pt-6">
-            <p className="stamp text-ink-faint pb-3">this session</p>
+            <p className="stamp text-ash pb-3">this session</p>
             <ul className="flex flex-col">
               {sessionRuns.slice(0, 6).map((r) => {
                 const box = boxes.find((b) => b.name === r.box);
@@ -230,21 +236,21 @@ export function Hub({
                       {box ? (
                         <StateStamp state={box.runState} exitCode={box.exitCode} className="shrink-0" />
                       ) : (
-                        <span className="stamp text-ink-faint shrink-0">destroyed</span>
+                        <span className="stamp text-ash shrink-0">destroyed</span>
                       )}
-                      <span className="text-ink-dim min-w-0 flex-1 truncate text-[13.5px]">
+                      <span className="text-ink min-w-0 flex-1 truncate text-[14px]">
                         {box ? threadTitle(box) : r.task}
                       </span>
-                      <span className="text-ink-faint shrink-0 font-mono text-[11px]">{shortName(r.box)}</span>
+                      <span className="text-ash shrink-0 font-mono text-[12px]">{shortName(r.box)}</span>
                       {!gone && (
-                        <ArrowRight className="text-ink-faint size-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
+                        <ArrowRight className="text-ash size-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
                       )}
                     </button>
                   </li>
                 );
               })}
             </ul>
-            <p className="text-ink-faint mt-3 text-[11.5px]">
+            <p className="text-ash mt-3 text-[12.5px]">
               A machine's history dies with it — nothing here is stored on the server.
             </p>
           </div>

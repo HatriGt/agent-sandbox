@@ -1,25 +1,26 @@
 import * as React from "react";
-import { ChevronRight, Eye, PauseCircle, Terminal, User } from "lucide-react";
+import { ChevronRight, Eye, PauseCircle, Terminal } from "lucide-react";
 import { resultSummary, type TraceEvent } from "@/lib/trace";
 import { tokenizeInline } from "@/lib/inline";
 import { Message, MessageContent, MessageHeader } from "@/components/ui/message";
-import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
 import { cn } from "@/lib/utils";
 
 /**
- * The thread's items, composed from shadcn's chat primitives (Message / Bubble / Marker) rather
- * than hand-rolled equivalents — the registry owns the layout, grouping and alignment mechanics, and
- * this file owns the design decisions on top of them:
+ * Thread items, in the ChatGPT treatment (see DESIGN.md):
  *
- *   · the agent gets Bubble variant="ghost" (no surface, full measure) because its output is prose;
- *   · you get variant="tinted", which resolves to the sodium primary — the only lane that can steer;
- *   · the co-pilot gets variant="outline" with a dashed edge, so an observer can never be mistaken
- *     for the driver;
- *   · lifecycle and tool activity are Markers, which is exactly what Marker is for.
+ *   · the AGENT has no bubble — full column, 18px prose at 1.6, a small label above. Its output is
+ *     prose and deserves the measure; a bubble would halve the width for nothing.
+ *   · YOU get a rounded surface-shift bubble, right-aligned, with a tail corner. Not azure: azure is
+ *     for actions and for the one state that needs a person.
+ *   · the CO-PILOT is visually a different voice — dashed edge, azure-text label, restated every
+ *     time, because mistaking the read-only observer for the driver is the dangerous error here.
+ *   · lifecycle and tool activity are Markers, which is what Marker is for.
+ *
+ * Composed on the shadcn chat registry components; this file owns the design decisions on top.
  */
 
-/** Agent prose with its inline markdown rendered. Tokens become nodes; no HTML string is built. */
+/** Agent prose with inline markdown rendered. Tokens become nodes; no HTML string is ever built. */
 function Prose({ text }: { text: string }) {
   return (
     <>
@@ -32,7 +33,10 @@ function Prose({ text }: { text: string }) {
                 {t.value}
               </strong>
             ) : t.type === "code" ? (
-              <code key={i} className="bg-muted text-ink-dim rounded px-1 py-px font-mono text-[13px]">
+              <code
+                key={i}
+                className="text-ink rounded-[8px] bg-[var(--surface)] px-1.5 py-0.5 font-mono text-[0.85em]"
+              >
                 {t.value}
               </code>
             ) : (
@@ -45,13 +49,13 @@ function Prose({ text }: { text: string }) {
   );
 }
 
-/** A lifecycle moment: booted, exited. A labelled separator across the thread. */
+/** A lifecycle moment: a labelled hairline across the column. */
 export function LifecycleItem({ label, detail }: { label: string; detail?: string }) {
   return (
     <Marker variant="separator">
-      <MarkerContent className="stamp text-ink-faint">
+      <MarkerContent className="stamp text-ash">
         {label}
-        {detail && <span className="ml-2 normal-case tracking-normal opacity-70">{detail}</span>}
+        {detail && <span className="ml-2 tracking-normal normal-case opacity-70">{detail}</span>}
       </MarkerContent>
     </Marker>
   );
@@ -65,7 +69,7 @@ export function ToolItem({ event }: { event: Extract<TraceEvent, { kind: "tool" 
   return (
     <div className="min-w-0">
       <Marker>
-        <MarkerIcon className="text-ink-faint">
+        <MarkerIcon className="text-ash">
           <Terminal />
         </MarkerIcon>
         <MarkerContent className="min-w-0 flex-1">
@@ -75,15 +79,15 @@ export function ToolItem({ event }: { event: Extract<TraceEvent, { kind: "tool" 
             disabled={!event.result}
             aria-expanded={event.result ? open : undefined}
             className={cn(
-              "flex w-full min-w-0 items-baseline gap-2 rounded text-left font-mono text-[12.5px]",
-              event.result && "hover:text-ink cursor-pointer"
+              "flex w-full min-w-0 items-baseline gap-2 rounded-md px-2 py-1 text-left font-mono text-[13px] -mx-2",
+              event.result && "hover:text-ink cursor-pointer hover:bg-[var(--surface)]"
             )}
           >
-            <span className="text-ink-dim shrink-0 font-medium">{event.name}</span>
-            {event.arg && <span className="text-ink-faint min-w-0 truncate">{event.arg}</span>}
+            <span className="text-ink shrink-0 font-medium">{event.name}</span>
+            {event.arg && <span className="text-ash min-w-0 truncate">{event.arg}</span>}
             {event.result && (
               <ChevronRight
-                className={cn("ml-auto size-3 shrink-0 transition-transform duration-150", open && "rotate-90")}
+                className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-150", open && "rotate-90")}
                 aria-hidden
               />
             )}
@@ -93,110 +97,96 @@ export function ToolItem({ event }: { event: Extract<TraceEvent, { kind: "tool" 
 
       {event.result &&
         (open ? (
-          <pre className="bg-trace text-ink-dim mt-1.5 ml-6 max-h-64 overflow-auto rounded px-3 py-2 font-mono text-[12px] leading-relaxed whitespace-pre-wrap">
+          <pre className="mt-2 ml-7 max-h-72 overflow-auto rounded-md bg-[var(--trace)] px-4 py-3 font-mono text-[12.5px] leading-relaxed whitespace-pre-wrap text-[var(--trace-fg)]">
             {event.result}
           </pre>
         ) : (
-          summary && <p className="text-ink-faint ml-6 truncate font-mono text-[12px]">{summary}</p>
+          summary && <p className="text-ash ml-7 truncate font-mono text-[12.5px]">{summary}</p>
         ))}
     </div>
   );
 }
 
-/** The agent speaking: ghost bubble, full measure, prose type. */
+/** The agent speaking: no bubble, full measure, prose type. */
 export function SayItem({ text, live }: { text: string; live?: boolean }) {
   return (
     <Message align="start">
       <MessageContent>
-        <MessageHeader className="stamp text-ink-faint gap-1.5">
-          <span
-            className={cn("size-1.5 rounded-full", live ? "bg-live breathe" : "bg-[var(--line-strong)]")}
-            aria-hidden
-          />
+        <MessageHeader className="stamp text-ash gap-1.5 px-0">
+          <span className={cn("size-1.5 rounded-full bg-current", live && "breathe")} aria-hidden />
           agent
         </MessageHeader>
-        <Bubble variant="ghost">
-          <BubbleContent className="text-ink max-w-[68ch] text-[15px] leading-[1.65]">
-            <Prose text={text} />
-          </BubbleContent>
-        </Bubble>
+        <div className="prose-agent text-ink">
+          <Prose text={text} />
+        </div>
       </MessageContent>
     </Message>
   );
 }
 
-/** Your turn: the task, or an answer that released a halted run. */
+/** Your turn: a rounded surface bubble with a tail, right-aligned. */
 export function YouItem({ text, label = "you" }: { text: string; label?: string }) {
   return (
     <Message align="end">
       <MessageContent>
-        <MessageHeader className="stamp text-signal/80 gap-1.5">
-          <User className="size-3" aria-hidden />
-          {label}
-        </MessageHeader>
-        <Bubble variant="tinted">
-          <BubbleContent className="max-w-[62ch] text-[14.5px] whitespace-pre-wrap">{text}</BubbleContent>
-        </Bubble>
+        <MessageHeader className="stamp text-ash gap-1.5 px-0">{label}</MessageHeader>
+        <div
+          className={cn(
+            "max-w-[70%] rounded-[22px] rounded-br-[6px] bg-[var(--surface)] px-4.5 py-3",
+            "border text-[15px] whitespace-pre-wrap"
+          )}
+        >
+          {text}
+        </div>
       </MessageContent>
     </Message>
   );
 }
 
-/**
- * The question the machine is blocked on. Not a notification — it is the blocking control, so it
- * states the consequence ("halted") and the release ("answer below").
- */
+/** The question the machine is blocked on: the blocking control, so it names the release. */
 export function AskingItem({ question }: { question: string }) {
   return (
     <Message align="start">
       <MessageContent>
-        <MessageHeader className="stamp text-signal gap-1.5">
-          <PauseCircle className="size-3" aria-hidden />
+        <MessageHeader className="stamp text-azure-text gap-1.5 px-0">
+          <PauseCircle className="size-3.5" aria-hidden />
           the agent is asking
         </MessageHeader>
-        <Bubble variant="outline">
-          <BubbleContent className="border-signal/40 bg-[color-mix(in_oklch,var(--signal)_10%,transparent)] max-w-[68ch] border">
-            <p className="text-ink text-[15px] leading-[1.6] whitespace-pre-wrap">{question}</p>
-            <p className="text-ink-faint mt-2 text-[12.5px]">
-              It has halted and cannot continue until you answer below.
-            </p>
-          </BubbleContent>
-        </Bubble>
+        <div className="max-w-[70ch] rounded-lg border border-[var(--accent-edge)] bg-[var(--accent-wash)] px-5 py-4">
+          <p className="text-ink text-[17px] leading-[1.55] whitespace-pre-wrap">{question}</p>
+          <p className="text-ash mt-2.5 text-[13px]">
+            It has halted and cannot continue until you answer below.
+          </p>
+        </div>
       </MessageContent>
     </Message>
   );
 }
 
-/**
- * A co-pilot exchange: same thread, unmistakably another voice. The lane distinction is the one
- * thing here that is dangerous to get wrong, so it is restated at every occurrence rather than once
- * in a header the reader has already scrolled past.
- */
+/** A co-pilot exchange: same thread, unmistakably another voice, and it says so every time. */
 export function ObserverItem({ question, answer }: { question: string; answer?: string }) {
   return (
     <Message align="start">
       <MessageContent>
-        <MessageHeader className="stamp gap-1.5" style={{ color: "var(--observer)" }}>
-          <Eye className="size-3" aria-hidden />
+        <MessageHeader className="stamp text-azure-text gap-1.5 px-0">
+          <Eye className="size-3.5" aria-hidden />
           co-pilot · read-only · the agent never saw this
         </MessageHeader>
-        <Bubble variant="outline">
-          <BubbleContent className="max-w-[70ch] border border-dashed" style={{ borderColor: "var(--observer)" }}>
-            <p className="text-ink-dim text-[13.5px] italic">{question}</p>
-            {answer ? (
-              <p className="text-ink mt-1.5 text-[14.5px] leading-[1.6]">
-                <Prose text={answer} />
-              </p>
-            ) : (
-              <p className="text-ink-faint mt-1.5 flex items-center gap-1.5 text-[13.5px]">
-                <span className="bg-ink-faint size-1 animate-bounce rounded-full [animation-delay:-0.3s]" />
-                <span className="bg-ink-faint size-1 animate-bounce rounded-full [animation-delay:-0.15s]" />
-                <span className="bg-ink-faint size-1 animate-bounce rounded-full" />
-                reading the box
-              </p>
-            )}
-          </BubbleContent>
-        </Bubble>
+        <div className="max-w-[70ch] rounded-lg border border-dashed border-[var(--accent-edge)] px-5 py-4">
+          <p className="text-ash text-[14px] italic">{question}</p>
+          {answer ? (
+            <p className="text-ink mt-2 text-[16px] leading-[1.6]">
+              <Prose text={answer} />
+            </p>
+          ) : (
+            <p className="text-ash mt-2 flex items-center gap-1.5 text-[14px]">
+              <span className="size-1 animate-bounce rounded-full bg-current [animation-delay:-0.3s]" />
+              <span className="size-1 animate-bounce rounded-full bg-current [animation-delay:-0.15s]" />
+              <span className="size-1 animate-bounce rounded-full bg-current" />
+              reading the box
+            </p>
+          )}
+        </div>
       </MessageContent>
     </Message>
   );

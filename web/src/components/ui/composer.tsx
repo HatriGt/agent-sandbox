@@ -2,8 +2,8 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * The composer input. Enter sends, Shift+Enter newlines. Grown by CSS (field-sizing) rather than by
- * measuring in JS on every keystroke.
+ * The composer input. Enter sends, Shift+Enter newlines — the convention every chat user already
+ * has in their fingers. Grown by CSS (field-sizing) rather than measured in JS per keystroke.
  */
 export const Composer = React.forwardRef<
   HTMLTextAreaElement,
@@ -20,8 +20,8 @@ export const Composer = React.forwardRef<
       onKeyDown?.(e);
     }}
     className={cn(
-      "text-ink placeholder:text-ink-faint max-h-48 min-h-11 w-full resize-none bg-transparent px-3.5 py-3",
-      "text-[14.5px] leading-relaxed outline-none field-sizing-content disabled:opacity-50",
+      "placeholder:text-ash max-h-52 min-h-12 w-full resize-none bg-transparent px-5 pt-3.5 pb-1",
+      "text-[16px] leading-relaxed outline-none field-sizing-content disabled:opacity-50",
       className
     )}
     {...props}

@@ -7,7 +7,7 @@ import { useSessionRuns } from "@/hooks/useSessionRuns";
 import { Button } from "@/components/ui/button";
 import { MachineList } from "@/components/MachineList";
 import { Hub } from "@/components/Hub";
-import { Overview } from "@/components/Overview";
+import { Sandboxes } from "@/components/Sandboxes";
 import { CommandPalette } from "@/components/CommandPalette";
 import { Thread, type Aside } from "@/components/thread/Thread";
 import { cn } from "@/lib/utils";
@@ -49,7 +49,7 @@ function useTheme() {
   return { dark, toggle: () => setDark((d) => !d) };
 }
 
-type View = "chat" | "overview";
+type View = "chat" | "sandboxes";
 
 export default function App() {
   const { dark, toggle } = useTheme();
@@ -67,7 +67,7 @@ export default function App() {
   const boxes = React.useMemo(() => (data ?? []).filter(isUp), [data]);
   const selectedBox = boxes.find((b) => b.name === selected) ?? null;
   const waiting = boxes.filter((b) => b.runState === "waiting");
-  const workingCount = boxes.filter((b) => b.runState === "running").length;
+  const working = boxes.filter((b) => b.runState === "running").length;
 
   // A machine that vanished (destroyed, auto-stopped) must not leave a dead pane behind.
   React.useEffect(() => {
@@ -127,7 +127,9 @@ export default function App() {
                 className={cn("size-1.5 rounded-full", live ? "bg-live breathe" : "bg-[var(--danger)]")}
                 aria-hidden
               />
-              {live ? `${boxes.length} up · ${freshness}` : "offline"}
+              {live
+                ? `${boxes.length} up${working ? ` · ${working} working` : ""} · ${freshness}`
+                : "offline"}
             </p>
           </div>
           <Button
@@ -142,34 +144,56 @@ export default function App() {
         </header>
 
         <div className="flex flex-col gap-1.5 px-3 pb-3">
-          <Button variant="signal" size="sm" onClick={newTask} className="w-full justify-start">
-            <Plus className="size-3.5" />
+          <Button variant="primary" size="default" onClick={newTask} className="w-full justify-start">
+            <Plus />
             New task
           </Button>
           <button
             type="button"
             onClick={() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }))}
-            className="text-ink-faint hover:text-ink-dim flex w-full cursor-pointer items-center gap-2 rounded border px-2.5 py-1.5 text-left text-[12.5px] transition-colors"
+            className="text-ash hover:text-ink flex w-full cursor-pointer items-center gap-2 rounded-full border px-4 py-2 text-left text-[13px] transition-colors hover:bg-[var(--surface)]"
           >
             <Search className="size-3.5 shrink-0" aria-hidden />
             Search machines
-            <kbd className="stamp ml-auto rounded border px-1 py-0.5">⌘K</kbd>
+            <kbd className="stamp ml-auto rounded-full border px-2 py-0.5">⌘K</kbd>
           </button>
         </div>
 
-        {/* The queue: a halted machine is blocking on a person, so it gets its own affordance above
-            the list — it is the only thing here with a deadline. */}
+        {/* Sections. "Sandboxes" is its own destination: the chat answers "what am I building",
+            this answers "what is running on my VPS, and does any of it need me". */}
+        <div className="flex flex-col gap-0.5 px-3 pb-2">
+          <NavItem
+            active={view === "chat"}
+            onClick={() => setView("chat")}
+            icon={<MessageSquare />}
+            label="Chat"
+          />
+          <NavItem
+            active={view === "sandboxes"}
+            onClick={() => {
+              setView("sandboxes");
+              setSelected(null);
+            }}
+            icon={<LayoutGrid />}
+            label="Sandboxes"
+            badge={boxes.length || undefined}
+          />
+        </div>
+
+        {/* A halted machine blocks on a person — the only thing here with a deadline. */}
         {waiting.length > 0 && (
           <button
             type="button"
             onClick={() => open(waiting[0].name)}
-            className="border-signal/40 mx-3 mb-3 flex cursor-pointer items-center gap-2 rounded border bg-[color-mix(in_oklch,var(--signal)_10%,transparent)] px-2.5 py-2 text-left"
+            className="mx-3 mb-3 flex cursor-pointer items-center gap-2 rounded-full border border-[var(--accent-edge)] bg-[var(--accent-wash)] px-4 py-2 text-left"
           >
-            <PauseCircle className="text-signal size-3.5 shrink-0" aria-hidden />
-            <span className="text-ink text-[12.5px] font-medium">{waiting.length} waiting on you</span>
-            <span className="stamp text-signal ml-auto">answer →</span>
+            <PauseCircle className="text-azure-text size-3.5 shrink-0" aria-hidden />
+            <span className="text-ink text-[13px] font-medium">{waiting.length} waiting on you</span>
+            <span className="stamp text-azure-text ml-auto">answer →</span>
           </button>
         )}
+
+        <p className="stamp text-ash px-4 pt-2 pb-1.5">machines</p>
 
         {error && (
           <p role="alert" className="mx-4 mb-2 flex items-start gap-1.5 text-[12px] text-[var(--danger)]">
@@ -189,31 +213,15 @@ export default function App() {
 
       {/* ───────────── main ───────────── */}
       <main className={cn("flex min-h-0 min-w-0 flex-col overflow-hidden", !threadOpen && "hidden md:flex")}>
-        {/* Two tabs for the two questions this surface answers: what am I building, and what is the
-            fleet doing. */}
-        <div className="flex items-center gap-1 border-b px-3 py-2 md:px-6">
-          <Tab active={view === "chat"} onClick={() => setView("chat")} icon={<MessageSquare />} label="Chat" />
-          <Tab
-            active={view === "overview"}
-            onClick={() => {
-              setView("overview");
-              setSelected(null);
-            }}
-            icon={<LayoutGrid />}
-            label="Overview"
-          />
-          <span className="stamp text-ink-faint ml-auto flex items-center gap-1.5">
-            <span
-              className={cn("size-1.5 rounded-full", workingCount ? "bg-live breathe" : "bg-[var(--line-strong)]")}
-              aria-hidden
-            />
-            {workingCount} working
-          </span>
-        </div>
-
         <div className="min-h-0 flex-1">
-          {view === "overview" ? (
-            <Overview boxes={boxes} onOpen={open} />
+          {view === "sandboxes" ? (
+            <Sandboxes
+              boxes={boxes}
+              onOpen={open}
+              onDestroyed={(name) => {
+                if (selected === name) setSelected(null);
+              }}
+            />
           ) : selectedBox ? (
             <Thread
               box={selectedBox}
@@ -258,29 +266,33 @@ export default function App() {
   );
 }
 
-function Tab({
+function NavItem({
   active,
   onClick,
   icon,
   label,
+  badge,
 }: {
   active: boolean;
   onClick: () => void;
   icon: React.ReactNode;
   label: string;
+  badge?: number;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      aria-pressed={active}
+      aria-current={active ? "page" : undefined}
       className={cn(
-        "flex cursor-pointer items-center gap-1.5 rounded px-2.5 py-1.5 text-[13px] transition-colors [&_svg]:size-3.5",
-        active ? "text-ink bg-[var(--surface)] font-medium" : "text-ink-faint hover:text-ink-dim"
+        "flex cursor-pointer items-center gap-2.5 rounded-full px-4 py-2 text-left text-[14px] transition-colors",
+        "[&_svg]:size-4",
+        active ? "text-ink bg-[var(--surface)] font-medium" : "text-ash hover:text-ink hover:bg-[var(--surface)]"
       )}
     >
       {icon}
       {label}
+      {badge != null && <span className="stamp text-ash tabular ml-auto">{badge}</span>}
     </button>
   );
 }

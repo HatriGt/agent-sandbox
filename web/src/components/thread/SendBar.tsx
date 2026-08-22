@@ -72,33 +72,29 @@ export function SendBar({
   };
 
   return (
-    <div className="border-t border-[var(--line)] px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 md:px-6">
-      <div className="min-w-0 max-w-3xl">
+    <div className="px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-6">
+      <div className="mx-auto min-w-0 max-w-3xl">
         {/* mode switch — two destinations, named, never ambiguous */}
-        <div className="mb-2 flex items-center gap-1">
+        <div className="mb-2 flex items-center justify-center gap-1">
           <ModeTab
             active={effective === "reply"}
             disabled={!canReply}
             onClick={() => setMode("reply")}
             icon={<Terminal className="size-3" />}
             label={runState === "waiting" ? "Answer the agent" : "Reply to the agent"}
-            tone="signal"
           />
           <ModeTab
             active={effective === "ask"}
             onClick={() => setMode("ask")}
             icon={<Eye className="size-3" />}
             label="Ask the co-pilot"
-            tone="observer"
           />
         </div>
 
         <div
           className={cn(
-            "flex items-end rounded-md border bg-[var(--surface)] transition-colors",
-            effective === "reply"
-              ? "border-[var(--line-strong)] focus-within:border-[var(--signal)]"
-              : "border-[var(--line-strong)] focus-within:border-[var(--observer)]"
+            "flex items-end rounded-xl border bg-[var(--surface)] transition-colors",
+            "focus-within:border-[var(--accent-text)]"
           )}
         >
           <label htmlFor="send-input" className="sr-only">
@@ -119,18 +115,18 @@ export function SendBar({
             }
           />
           <Button
-            variant={effective === "reply" ? "signal" : "outline"}
+            variant={effective === "reply" ? "primary" : "outline"}
             size="icon"
             onClick={send}
             disabled={sending || !value.trim()}
             aria-label={effective === "reply" ? "Send to the agent" : "Ask the co-pilot"}
-            className="m-1.5"
+            className="m-2"
           >
             <ArrowUp />
           </Button>
         </div>
 
-        <p className="text-ink-faint mt-1.5 min-h-4 text-[11.5px]">
+        <p className="text-ash mt-2 min-h-4 text-center text-[12.5px]">
           {error ? (
             <span className="text-[var(--danger)]" role="alert">
               {error}
@@ -156,14 +152,12 @@ function ModeTab({
   onClick,
   icon,
   label,
-  tone,
 }: {
   active: boolean;
   disabled?: boolean;
   onClick: () => void;
   icon: React.ReactNode;
   label: string;
-  tone: "signal" | "observer";
 }) {
   return (
     <button
@@ -173,13 +167,11 @@ function ModeTab({
       aria-pressed={active}
       title={disabled ? "Unavailable while the agent is working" : undefined}
       className={cn(
-        "stamp flex cursor-pointer items-center gap-1.5 rounded-sm px-2 py-1 transition-colors duration-150",
+        "stamp flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1.5 transition-colors duration-150",
         "disabled:cursor-not-allowed disabled:opacity-35",
         active
-          ? tone === "signal"
-            ? "bg-signal-wash text-signal"
-            : "text-[var(--observer)] [background:color-mix(in_oklch,var(--observer)_12%,transparent)]"
-          : "text-ink-faint hover:text-ink-dim"
+          ? "text-azure-text bg-[var(--accent-wash)] border border-[var(--accent-edge)]"
+          : "text-ash hover:text-ink border border-transparent"
       )}
     >
       {icon}

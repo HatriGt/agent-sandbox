@@ -2,14 +2,15 @@ import { cn } from "@/lib/utils";
 import type { RunState } from "@/lib/api";
 
 /**
- * State as a machine stamp, not a pill badge. Mono, tracked out, with a leading glyph — reads like
- * a status line on an instrument. Colour never carries the meaning alone; the word is always there.
+ * State as a machine stamp. Monochrome plus the one accent: only "needs you" earns azure, because
+ * it is the only state that requires a person. The others separate by glyph and word, never by a
+ * second hue (DESIGN.md).
  */
-const TONE: Record<RunState, { cls: string; glyph: string }> = {
-  running: { cls: "text-live", glyph: "●" },
-  waiting: { cls: "text-signal", glyph: "❚❚" },
-  done: { cls: "text-ink-faint", glyph: "■" },
-  idle: { cls: "text-ink-faint", glyph: "○" },
+const TONE: Record<RunState, { cls: string; glyph: string; word: (exit?: number) => string }> = {
+  running: { cls: "text-ink", glyph: "●", word: () => "working" },
+  waiting: { cls: "text-azure-text", glyph: "❚❚", word: () => "needs you" },
+  done: { cls: "text-ash", glyph: "■", word: (e) => `exit ${e ?? "?"}` },
+  idle: { cls: "text-ash", glyph: "○", word: () => "idle" },
 };
 
 export function StateStamp({
@@ -22,18 +23,12 @@ export function StateStamp({
   className?: string;
 }) {
   const t = TONE[state];
-  const label =
-    state === "waiting"
-      ? "needs you"
-      : state === "done"
-        ? `exit ${exitCode ?? "?"}`
-        : state;
   return (
     <span className={cn("stamp inline-flex items-center gap-1.5", t.cls, className)}>
       <span aria-hidden className={cn("text-[8px] leading-none", state === "running" && "breathe")}>
         {t.glyph}
       </span>
-      {label}
+      {t.word(exitCode)}
     </span>
   );
 }
