@@ -147,7 +147,7 @@ function SandboxCard({
   return (
     <li>
       <Card className={cn("h-full gap-0 py-0 transition-opacity", box.leaving && "opacity-50")}>
-        <CardHeader className="flex-row items-center gap-3 px-5 pt-5 pb-0">
+        <CardHeader className="flex flex-row items-center gap-3 px-5 pt-5 pb-0">
           <StateStamp state={box.runState} exitCode={box.exitCode} />
           {/* A machine mid-shutdown says so, instead of blinking out of the list. */}
           {box.leaving ? (
