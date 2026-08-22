@@ -4,7 +4,7 @@ import { api, type BoxView } from "@/lib/api";
 import { shortName, threadTitle } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { StateStamp } from "@/components/ui/stamp";
-import { Composer } from "@/components/ui/composer";
+import { PromptInput, PromptInputTextarea } from "@/components/ui/prompt-input";
 import { cn } from "@/lib/utils";
 import type { SessionRun } from "@/hooks/useSessionRuns";
 
@@ -82,14 +82,13 @@ export function Hub({
   const [showRepo, setShowRepo] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const inputRef = React.useRef<HTMLTextAreaElement>(null);
-
   const applyStarter = (s: Starter) => {
     setTask(s.task);
     if (s.needsRepo) setShowRepo(true);
     // Put the caret at the end so a template that expects detail can be finished by typing.
+    // prompt-kit's PromptInputTextarea owns its own ref via context, so we reach it by id.
     requestAnimationFrame(() => {
-      const el = inputRef.current;
+      const el = document.getElementById("new-task") as HTMLTextAreaElement | null;
       if (!el) return;
       el.focus();
       el.setSelectionRange(el.value.length, el.value.length);
@@ -161,41 +160,38 @@ export function Hub({
         {/* composer */}
         {/* ChatGPT composer geometry: one deeply-rounded surface, controls inside on the bottom
             row, hint text below it. */}
-        <div className="rounded-xl border bg-[var(--surface)] transition-colors focus-within:border-[var(--accent-text)]">
+        <PromptInput
+          value={task}
+          onValueChange={setTask}
+          onSubmit={submit}
+          isLoading={busy}
+          className="bg-card rounded-2xl"
+        >
           <label htmlFor="new-task" className="sr-only">
             Describe the task for a new machine
           </label>
-          <Composer
-            id="new-task"
-            ref={inputRef}
-            value={task}
-            disabled={busy}
-            onChange={(e) => setTask(e.target.value)}
-            onSend={submit}
-            placeholder="Message a new sandbox…"
-            className="min-h-14"
-          />
+          <PromptInputTextarea id="new-task" placeholder="Message a new sandbox…" className="min-h-14" />
 
           {showRepo && (
-            <div className="grid gap-2 px-3 pb-3 sm:grid-cols-[2fr_1fr]">
+            <div className="grid gap-2 px-1 pt-2 sm:grid-cols-[2fr_1fr]">
               <input
                 value={repo}
                 onChange={(e) => setRepo(e.target.value)}
                 placeholder="owner/repo"
                 aria-label="Repository, owner slash name"
-                className="text-ink placeholder:text-ash rounded-md border bg-[var(--canvas)] px-3 py-2 font-mono text-meta outline-none focus:border-[var(--accent-text)]"
+                className="text-foreground placeholder:text-muted-foreground border-border bg-background focus:border-ring rounded-md border px-3 py-2 font-mono text-meta outline-none"
               />
               <input
                 value={ref}
                 onChange={(e) => setRef(e.target.value)}
                 placeholder="branch"
                 aria-label="Git ref"
-                className="text-ink placeholder:text-ash rounded-md border bg-[var(--canvas)] px-3 py-2 font-mono text-meta outline-none focus:border-[var(--accent-text)]"
+                className="text-foreground placeholder:text-muted-foreground border-border bg-background focus:border-ring rounded-md border px-3 py-2 font-mono text-meta outline-none"
               />
             </div>
           )}
 
-          <div className="flex items-center gap-2 px-3 pb-3">
+          <div className="flex items-center gap-2 pt-1">
             <Button variant="ghost" size="sm" onClick={() => setShowRepo((v) => !v)} aria-expanded={showRepo}>
               <GitBranch className="size-3.5" />
               <span className="stamp">{repo.trim() || "attach a repo"}</span>
@@ -205,12 +201,12 @@ export function Hub({
               onClick={submit}
               disabled={busy || !task.trim()}
               aria-label="Boot a machine with this task"
-              className="ml-auto"
+              className="ml-auto rounded-full"
             >
               {busy ? <Loader2 className="animate-spin" /> : <ArrowUp />}
             </Button>
           </div>
-        </div>
+        </PromptInput>
 
         <p className="text-ash -mt-5 min-h-4 text-center text-micro">
           {error ? (

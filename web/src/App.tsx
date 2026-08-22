@@ -1,5 +1,4 @@
 import * as React from "react";
-import { Theme } from "@radix-ui/themes";
 import { Boxes, LayoutGrid, MessageSquare, Moon, PauseCircle, Plus, Search, Sun, TriangleAlert } from "lucide-react";
 import { api, type BoxView } from "@/lib/api";
 import { POLL_MS, isUp } from "@/lib/format";
@@ -31,7 +30,7 @@ function useFreshness(updatedAt: number | null) {
   return secs < 2 ? "just now" : `${secs}s ago`;
 }
 
-/** Dark by default (a desk, often at night); persisted. Drives the Radix <Theme> appearance. */
+/** Dark by default (a desk, often at night); persisted, toggling the `.dark` class on <html>. */
 function useTheme() {
   const [dark, setDark] = React.useState(() => {
     try {
@@ -41,6 +40,7 @@ function useTheme() {
     }
   });
   React.useEffect(() => {
+    document.documentElement.classList.toggle("dark", dark);
     try {
       localStorage.setItem("asb-theme", dark ? "dark" : "light");
     } catch {
@@ -118,14 +118,6 @@ export default function App() {
   const threadOpen = view === "chat" && !!selectedBox;
 
   return (
-    <Theme
-      appearance={dark ? "dark" : "light"}
-      accentColor="indigo"
-      grayColor="slate"
-      radius="medium"
-      scaling="100%"
-      className="h-full"
-    >
     <TooltipProvider delayDuration={400}>
       <Toaster position="bottom-center" />
       <div className="grid h-full grid-cols-1 md:grid-cols-[clamp(17rem,23vw,20rem)_minmax(0,1fr)]">
@@ -279,7 +271,6 @@ export default function App() {
         <CommandPalette boxes={boxes} onOpen={open} onNew={newTask} />
       </div>
     </TooltipProvider>
-    </Theme>
   );
 }
 

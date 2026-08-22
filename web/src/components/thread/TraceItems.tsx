@@ -1,63 +1,28 @@
 import * as React from "react";
 import { ChevronRight, Eye, FileText, PauseCircle, Terminal } from "lucide-react";
 import { resultSummary, type TraceEvent } from "@/lib/trace";
-import { tokenizeInline } from "@/lib/inline";
-import { Message, MessageContent, MessageHeader } from "@/components/ui/message";
-import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
+import { Markdown } from "@/components/ui/markdown";
 import { cn } from "@/lib/utils";
 
 /**
- * Thread items, in the ChatGPT treatment (see DESIGN.md):
+ * Thread items, rendered on the prompt-kit chat vocabulary over the shadcn neutral base:
  *
- *   · the AGENT has no bubble — full column, 18px prose at 1.6, a small label above. Its output is
- *     prose and deserves the measure; a bubble would halve the width for nothing.
- *   · YOU get a rounded surface-shift bubble, right-aligned, with a tail corner. Not azure: azure is
- *     for actions and for the one state that needs a person.
- *   · the CO-PILOT is visually a different voice — dashed edge, azure-text label, restated every
- *     time, because mistaking the read-only observer for the driver is the dangerous error here.
- *   · lifecycle and tool activity are Markers, which is what Marker is for.
- *
- * Composed on the shadcn chat registry components; this file owns the design decisions on top.
+ *   · the AGENT has no bubble — full column, 16px prose via prompt-kit Markdown, a small label above.
+ *     Its output is prose and deserves the measure; a bubble would halve the width for nothing.
+ *   · YOU get a rounded secondary bubble, right-aligned, with a tail corner.
+ *   · the CO-PILOT is a visibly different voice — dashed edge, restated every time, because mistaking
+ *     the read-only observer for the driver is the dangerous error here.
+ *   · lifecycle is a labelled hairline; tool activity is a compact row or a terminal block.
  */
-
-/** Agent prose with inline markdown rendered. Tokens become nodes; no HTML string is ever built. */
-function Prose({ text }: { text: string }) {
-  return (
-    <>
-      {text.split("\n").map((line, li) => (
-        <React.Fragment key={li}>
-          {li > 0 && <br />}
-          {tokenizeInline(line).map((t, i) =>
-            t.type === "strong" ? (
-              <strong key={i} className="text-ink font-semibold">
-                {t.value}
-              </strong>
-            ) : t.type === "code" ? (
-              <code
-                key={i}
-                className="text-ink rounded-[8px] bg-[var(--surface)] px-1.5 py-0.5 font-mono text-micro"
-              >
-                {t.value}
-              </code>
-            ) : (
-              <React.Fragment key={i}>{t.value}</React.Fragment>
-            )
-          )}
-        </React.Fragment>
-      ))}
-    </>
-  );
-}
 
 /** A lifecycle moment: a labelled hairline across the column. */
 export function LifecycleItem({ label, detail }: { label: string; detail?: string }) {
   return (
-    <Marker variant="separator">
-      <MarkerContent className="stamp text-ash">
-        {label}
-        {detail && <span className="ml-2 tracking-normal normal-case opacity-70">{detail}</span>}
-      </MarkerContent>
-    </Marker>
+    <div className="flex items-center gap-3 py-1">
+      <span className="stamp text-muted-foreground shrink-0">{label}</span>
+      {detail && <span className="text-muted-foreground/70 truncate font-mono text-micro">{detail}</span>}
+      <span className="bg-border h-px flex-1" aria-hidden />
+    </div>
   );
 }
 
@@ -65,15 +30,12 @@ export function LifecycleItem({ label, detail }: { label: string; detail?: strin
 const SHELL_TOOLS = new Set(["Bash", "Shell", "Terminal", "Run", "Exec", "sh", "bash"]);
 
 /**
- * A tool call rendered like real code (this is what the old dashboard got right):
+ * A tool call rendered like real code:
  *
- *   · a Bash/Shell call is a TERMINAL block — a `$ <command>` prompt line on the dark trace ground,
- *     its output printed right below it in the same panel. The command is code, so it reads as code.
- *   · any other tool (Write / Read / Edit / Grep …) is a compact row: tool name + its argument in a
- *     code chip, output folded behind a chevron.
- *
- * Output folds by default — a run emits dozens of calls and expanding every one would bury the
- * reasoning — but a shell command's headline is always visible because the command IS the content.
+ *   · a Bash/Shell call is a TERMINAL block — a `$ <command>` prompt on the dark trace ground, output
+ *     printed right below in the same panel. The command is code, so it reads as code.
+ *   · any other tool (Write / Read / Edit / Grep …) is a compact row: name + argument in a code chip,
+ *     output folded behind a chevron.
  */
 export function ToolItem({ event }: { event: Extract<TraceEvent, { kind: "tool" }> }) {
   const isShell = SHELL_TOOLS.has(event.name);
@@ -85,37 +47,37 @@ function ShellItem({ event }: { event: Extract<TraceEvent, { kind: "tool" }> }) 
   const [open, setOpen] = React.useState(false);
   const hasOutput = !!event.result;
   return (
-    <div className="ml-7 min-w-0">
-      <div className="overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--trace)]">
-        {/* title bar — signals "terminal" the way the old panel did */}
-        <div className="flex items-center gap-2 border-b border-[color-mix(in_srgb,var(--trace-fg)_14%,transparent)] px-3 py-1.5">
-          <Terminal className="size-3 shrink-0 text-[color-mix(in_srgb,var(--trace-fg)_60%,transparent)]" aria-hidden />
-          <span className="stamp text-[color-mix(in_srgb,var(--trace-fg)_55%,transparent)]">{event.name}</span>
+    <div className="min-w-0">
+      <div className="border-border bg-trace overflow-hidden rounded-lg border">
+        <div className="border-border/60 flex items-center gap-2 border-b px-3 py-1.5">
+          <Terminal className="text-trace-fg/60 size-3 shrink-0" aria-hidden />
+          <span className="stamp text-trace-fg/55">{event.name}</span>
           {hasOutput && (
             <button
               type="button"
               onClick={() => setOpen((v) => !v)}
               aria-expanded={open}
-              className="ml-auto flex cursor-pointer items-center gap-1 text-[color-mix(in_srgb,var(--trace-fg)_60%,transparent)] hover:text-[var(--trace-fg)]"
+              className="text-trace-fg/60 hover:text-trace-fg ml-auto flex cursor-pointer items-center gap-1"
             >
               <span className="stamp">{open ? "hide" : "output"}</span>
               <ChevronRight className={cn("size-3.5 transition-transform duration-150", open && "rotate-90")} aria-hidden />
             </button>
           )}
         </div>
-        {/* command line — always visible; the command is the content */}
-        <pre className="overflow-x-auto px-3 py-2 font-mono text-micro leading-relaxed text-[var(--trace-fg)]">
-          <span className="mr-2 shrink-0 select-none text-[var(--ok)]" aria-hidden>$</span>
+        <pre className="text-trace-fg overflow-x-auto px-3 py-2 font-mono text-micro leading-relaxed">
+          <span className="text-ok mr-2 shrink-0 select-none" aria-hidden>
+            $
+          </span>
           {event.arg ?? ""}
         </pre>
         {hasOutput && open && (
-          <pre className="max-h-80 overflow-auto border-t border-[color-mix(in_srgb,var(--trace-fg)_14%,transparent)] px-3 py-2 font-mono text-micro leading-relaxed whitespace-pre-wrap text-[color-mix(in_srgb,var(--trace-fg)_82%,transparent)]">
+          <pre className="border-border/60 text-trace-fg/80 max-h-80 overflow-auto border-t px-3 py-2 font-mono text-micro leading-relaxed whitespace-pre-wrap">
             {event.result}
           </pre>
         )}
       </div>
       {hasOutput && !open && (
-        <p className="text-ash mt-1 truncate font-mono text-micro">{resultSummary(event.result)}</p>
+        <p className="text-muted-foreground mt-1 truncate font-mono text-micro">{resultSummary(event.result)}</p>
       )}
     </div>
   );
@@ -128,130 +90,109 @@ function FileToolItem({ event }: { event: Extract<TraceEvent, { kind: "tool" }> 
 
   return (
     <div className="min-w-0">
-      <Marker>
-        <MarkerIcon className="text-ash">
-          <FileText />
-        </MarkerIcon>
-        <MarkerContent className="min-w-0 flex-1">
-          <button
-            type="button"
-            onClick={() => setOpen((v) => !v)}
-            disabled={!event.result}
-            aria-expanded={event.result ? open : undefined}
-            className={cn(
-              "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1 text-left text-meta -mx-2",
-              event.result && "cursor-pointer hover:bg-[var(--surface)]"
-            )}
-          >
-            <span className="text-ink shrink-0 font-medium">{event.name}</span>
-            {event.arg && (
-              <code className="text-ash min-w-0 truncate rounded bg-[var(--surface)] px-1.5 py-0.5 font-mono text-micro">
-                {event.arg}
-              </code>
-            )}
-            {event.result && (
-              <ChevronRight
-                className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-150", open && "rotate-90")}
-                aria-hidden
-              />
-            )}
-          </button>
-        </MarkerContent>
-      </Marker>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        disabled={!event.result}
+        aria-expanded={event.result ? open : undefined}
+        className={cn(
+          "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1 text-left text-meta",
+          event.result && "hover:bg-muted cursor-pointer"
+        )}
+      >
+        <FileText className="text-muted-foreground size-3.5 shrink-0" aria-hidden />
+        <span className="text-foreground shrink-0 font-medium">{event.name}</span>
+        {event.arg && (
+          <code className="text-muted-foreground bg-muted min-w-0 truncate rounded px-1.5 py-0.5 font-mono text-micro">
+            {event.arg}
+          </code>
+        )}
+        {event.result && (
+          <ChevronRight
+            className={cn("text-muted-foreground ml-auto size-3.5 shrink-0 transition-transform duration-150", open && "rotate-90")}
+            aria-hidden
+          />
+        )}
+      </button>
 
       {event.result &&
         (open ? (
-          <pre className="mt-2 ml-7 max-h-72 overflow-auto rounded-lg border border-[var(--line)] bg-[var(--trace)] px-3 py-2 font-mono text-micro leading-relaxed whitespace-pre-wrap text-[color-mix(in_srgb,var(--trace-fg)_82%,transparent)]">
+          <pre className="border-border bg-trace text-trace-fg/80 mt-2 ml-6 max-h-72 overflow-auto rounded-lg border px-3 py-2 font-mono text-micro leading-relaxed whitespace-pre-wrap">
             {event.result}
           </pre>
         ) : (
-          summary && <p className="text-ash ml-7 truncate font-mono text-micro">{summary}</p>
+          summary && <p className="text-muted-foreground ml-6 truncate font-mono text-micro">{summary}</p>
         ))}
     </div>
   );
 }
 
-/** The agent speaking: no bubble, full measure, prose type. */
+/** The agent speaking: no bubble, full measure, prose type via prompt-kit Markdown. */
 export function SayItem({ text, live }: { text: string; live?: boolean }) {
   return (
-    <Message align="start">
-      <MessageContent>
-        <MessageHeader className="stamp text-ash gap-1.5 px-0">
-          <span className={cn("size-1.5 rounded-full bg-current", live && "breathe")} aria-hidden />
-          agent
-        </MessageHeader>
-        <div className="prose-agent text-ink">
-          <Prose text={text} />
-        </div>
-      </MessageContent>
-    </Message>
+    <div className="flex flex-col gap-1.5">
+      <span className="stamp text-muted-foreground flex items-center gap-1.5">
+        <span className={cn("bg-current size-1.5 rounded-full", live && "breathe")} aria-hidden />
+        agent
+      </span>
+      <div className="prose-agent text-foreground">
+        <Markdown>{text}</Markdown>
+      </div>
+    </div>
   );
 }
 
-/** Your turn: a rounded surface bubble with a tail, right-aligned. */
+/** Your turn: a rounded secondary bubble with a tail, right-aligned. */
 export function YouItem({ text, label = "you" }: { text: string; label?: string }) {
   return (
-    <Message align="end">
-      <MessageContent>
-        <MessageHeader className="stamp text-ash gap-1.5 px-0">{label}</MessageHeader>
-        <div
-          className={cn(
-            "max-w-[70%] rounded-[var(--radius-bubble)] rounded-br-[4px] bg-[var(--surface)] px-4 py-2.5",
-            "border text-body whitespace-pre-wrap"
-          )}
-        >
-          {text}
-        </div>
-      </MessageContent>
-    </Message>
+    <div className="flex flex-col items-end gap-1.5">
+      <span className="stamp text-muted-foreground">{label}</span>
+      <div className="bg-secondary text-foreground border-border max-w-[70%] rounded-[var(--radius-bubble)] rounded-br-sm border px-4 py-2.5 text-body whitespace-pre-wrap">
+        {text}
+      </div>
+    </div>
   );
 }
 
 /** The question the machine is blocked on: the blocking control, so it names the release. */
 export function AskingItem({ question }: { question: string }) {
   return (
-    <Message align="start">
-      <MessageContent>
-        <MessageHeader className="stamp gap-1.5 px-0 text-[var(--attention-text)]">
-          <PauseCircle className="size-3.5" aria-hidden />
-          the agent is asking
-        </MessageHeader>
-        <div className="max-w-[70ch] rounded-lg border border-[color-mix(in_srgb,var(--attention)_45%,transparent)] bg-[color-mix(in_srgb,var(--attention)_10%,transparent)] px-5 py-4">
-          <p className="text-ink text-lead leading-[1.55] whitespace-pre-wrap">{question}</p>
-          <p className="text-ash mt-2.5 text-meta">
-            It has halted and cannot continue until you answer below.
-          </p>
-        </div>
-      </MessageContent>
-    </Message>
+    <div className="flex flex-col gap-1.5">
+      <span className="stamp text-attention-text flex items-center gap-1.5">
+        <PauseCircle className="size-3.5" aria-hidden />
+        the agent is asking
+      </span>
+      <div className="border-attention/45 bg-attention/10 max-w-[70ch] rounded-lg border px-5 py-4">
+        <p className="text-foreground text-lead leading-[1.55] whitespace-pre-wrap">{question}</p>
+        <p className="text-muted-foreground mt-2.5 text-meta">It has halted and cannot continue until you answer below.</p>
+      </div>
+    </div>
   );
 }
 
 /** A co-pilot exchange: same thread, unmistakably another voice, and it says so every time. */
 export function ObserverItem({ question, answer }: { question: string; answer?: string }) {
   return (
-    <Message align="start">
-      <MessageContent>
-        <MessageHeader className="stamp text-azure-text gap-1.5 px-0">
-          <Eye className="size-3.5" aria-hidden />
-          co-pilot · read-only · the agent never saw this
-        </MessageHeader>
-        <div className="max-w-[70ch] rounded-lg border border-dashed border-[var(--accent-edge)] px-5 py-4">
-          <p className="text-ash text-meta italic">{question}</p>
-          {answer ? (
-            <p className="text-ink mt-2 text-lead leading-[1.6]">
-              <Prose text={answer} />
-            </p>
-          ) : (
-            <p className="text-ash mt-2 flex items-center gap-1.5 text-meta">
-              <span className="size-1 animate-bounce rounded-full bg-current [animation-delay:-0.3s]" />
-              <span className="size-1 animate-bounce rounded-full bg-current [animation-delay:-0.15s]" />
-              <span className="size-1 animate-bounce rounded-full bg-current" />
-              reading the box
-            </p>
-          )}
-        </div>
-      </MessageContent>
-    </Message>
+    <div className="flex flex-col gap-1.5">
+      <span className="stamp text-muted-foreground flex items-center gap-1.5">
+        <Eye className="size-3.5" aria-hidden />
+        co-pilot · read-only · the agent never saw this
+      </span>
+      <div className="border-border max-w-[70ch] rounded-lg border border-dashed px-5 py-4">
+        <p className="text-muted-foreground text-meta italic">{question}</p>
+        {answer ? (
+          <div className="text-foreground mt-2 text-lead leading-[1.6]">
+            <Markdown>{answer}</Markdown>
+          </div>
+        ) : (
+          <p className="text-muted-foreground mt-2 flex items-center gap-1.5 text-meta">
+            <span className="size-1 animate-bounce rounded-full bg-current [animation-delay:-0.3s]" />
+            <span className="size-1 animate-bounce rounded-full bg-current [animation-delay:-0.15s]" />
+            <span className="size-1 animate-bounce rounded-full bg-current" />
+            reading the box
+          </p>
+        )}
+      </div>
+    </div>
   );
 }

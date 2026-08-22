@@ -1,31 +1,44 @@
 # agent-sandbox — Style Reference
 
-> Built on **Radix Themes + Geist**. A dense agent-ops console (Linear / Vercel lineage) that stands
-> on a real, opinionated design system instead of hand-tuned tokens — so nothing reads as generic.
-> Run STATE is the loudest signal; one accent (indigo) carries every action; geometry is Radix's.
+> Built on **shadcn (neutral base) + prompt-kit + Geist**. The chat surface — the product's core — is
+> composed from prompt-kit's purpose-built AI-chat components (ChatContainer, PromptInput, Steps, Tool,
+> Markdown, ScrollButton) rather than hand-rolled bubbles, so it reads like a real assistant UI. The
+> shell of the console (sidebar, Sandboxes table, command palette) shares the same shadcn token base.
+> Run STATE is the loudest signal; geometry is shadcn's; nothing is bespoke where a proven part exists.
 
-**Theme:** dual (deep-slate dark default, cool-paper light), owned entirely by the Radix `<Theme>`.
+**Theme:** dual (neutral dark default, neutral light), toggled by a `dark` class on `<html>`.
 
 ## Foundation
 
-The app is wrapped in a single Radix `<Theme>` (see `App.tsx`):
+The colour system is shadcn's **canonical neutral theme** (the exact oklch values from ui.shadcn.com),
+defined once in `index.css` under `:root` (light) and `.dark`. There is no runtime theme provider — the
+`useTheme` hook in `App.tsx` toggles the `dark` class on `document.documentElement` and persists to
+`localStorage`. Tailwind v4 reads the tokens through `@theme inline`.
 
-```tsx
-<Theme appearance={dark ? "dark" : "light"} accentColor="indigo" grayColor="slate" radius="medium" scaling="100%">
-```
+Two layers sit on top:
 
-- **`accentColor="indigo"`** — the one action hue. Radix generates the full 1..12 scale + alpha + a
-  contrast-safe `--accent-contrast` for text on the fill, per mode. We never pick accent hex by hand.
-- **`grayColor="slate"`** — the cool neutral field. Radix generates `--gray-1..12` and `--gray-a1..12`
-  (alpha) per mode; every surface, text tier, and hairline is one of these.
-- **`radius="medium"`** — drives `--radius-1..6`; our radii map onto that scale so shape matches the
-  Radix components.
-- **`appearance`** follows the theme toggle (dark by default; persisted in `localStorage`). Radix owns
-  light/dark, so there is no separate hand-maintained dark block.
+- **prompt-kit components** (`src/components/ui/{chat-container,prompt-input,steps,tool,message,`
+  `reasoning,scroll-button,markdown,code-block}.tsx`) install as standard shadcn and read the same
+  `--background / --foreground / --primary / --muted …` contract, so the chat surface and the rest of
+  the app are one system. Installed via `npx shadcn add https://prompt-kit.com/c/<name>.json`.
+- **an app vocabulary** (`--azure` → primary, `--ink` → foreground, `--ash` → muted-foreground,
+  `--trace` for the terminal ground, plus functional status hues `--attention` / `--ok`) *derived*
+  from the shadcn tokens in `@theme inline`, so existing components inherit the base with no per-line
+  edits. A handful of legacy raw-var aliases (`--surface`, `--canvas`, `--line`, `--accent-text`) map
+  onto the shadcn tokens for the same reason.
 
-Everything else (`index.css`) is a thin **mapping layer**: the app's semantic variables and the shadcn
-contract are *derived* from Radix tokens, so all existing components inherit Radix's palette, its
-guaranteed AA contrast, and its geometry for free.
+### Chat surface (prompt-kit)
+
+- **Conversation column** — `ChatContainerRoot / ChatContainerContent / ChatContainerScrollAnchor`
+  (built on `use-stick-to-bottom`) owns anchoring: it sticks to the newest turn, yields when the reader
+  scrolls up, and a `ScrollButton` floats in to jump back down.
+- **Composer** — both the Hub "new machine" box and the Thread `SendBar` are prompt-kit `PromptInput`
+  (autosizing textarea, Enter-to-send, `PromptInputActions`). SendBar keeps the reply/ask segmented
+  control on top so the two destinations stay unambiguous.
+- **Agent prose** renders through prompt-kit `Markdown` (+ `CodeBlock`) at 16px full-measure, no bubble.
+- **Tool output** — shell commands render as a terminal panel on the `--trace` ground (`$ cmd` + folded
+  output); other tools are compact rows with the argument in a code chip. prompt-kit's `Tool` and
+  `Steps` primitives are available for richer structured-tool rendering.
 
 ## Tokens — Colors (all derived from Radix scales)
 

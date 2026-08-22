@@ -2,7 +2,7 @@ import * as React from "react";
 import { ArrowUp, Eye, Terminal } from "lucide-react";
 import { api, type RunState } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Composer } from "@/components/ui/composer";
+import { PromptInput, PromptInputActions, PromptInputTextarea } from "@/components/ui/prompt-input";
 import { cn } from "@/lib/utils";
 
 type Mode = "reply" | "ask";
@@ -97,21 +97,19 @@ export function SendBar({
           </div>
         </div>
 
-        <div
-          className={cn(
-            "flex items-end rounded-xl border bg-[var(--surface)] transition-colors",
-            "focus-within:border-[var(--accent-text)]"
-          )}
+        {/* prompt-kit PromptInput: autosizing textarea + Enter-to-send, wrapping our two-destination send. */}
+        <PromptInput
+          value={value}
+          onValueChange={setValue}
+          onSubmit={send}
+          isLoading={sending}
+          className={cn("bg-card rounded-2xl", effective === "ask" && "border-dashed")}
         >
           <label htmlFor="send-input" className="sr-only">
             {effective === "reply" ? "Message the agent" : "Ask the read-only co-pilot"}
           </label>
-          <Composer
+          <PromptInputTextarea
             id="send-input"
-            value={value}
-            disabled={sending}
-            onChange={(e) => setValue(e.target.value)}
-            onSend={send}
             placeholder={
               effective === "reply"
                 ? runState === "waiting"
@@ -120,17 +118,19 @@ export function SendBar({
                 : "Ask what it is doing, what changed, why it is stuck…"
             }
           />
-          <Button
-            variant={effective === "reply" ? "primary" : "outline"}
-            size="icon"
-            onClick={send}
-            disabled={sending || !value.trim()}
-            aria-label={effective === "reply" ? "Send to the agent" : "Ask the co-pilot"}
-            className="m-2"
-          >
-            <ArrowUp />
-          </Button>
-        </div>
+          <PromptInputActions className="justify-end pt-1">
+            <Button
+              variant={effective === "reply" ? "primary" : "outline"}
+              size="icon"
+              onClick={send}
+              disabled={sending || !value.trim()}
+              aria-label={effective === "reply" ? "Send to the agent" : "Ask the co-pilot"}
+              className="rounded-full"
+            >
+              <ArrowUp />
+            </Button>
+          </PromptInputActions>
+        </PromptInput>
 
         <p className="text-ash mt-2 min-h-4 text-center text-micro">
           {error ? (

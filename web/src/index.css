@@ -1,53 +1,49 @@
 @import "tailwindcss";
 
 /*
- * agent-sandbox console — built on Radix Themes tokens + Geist.
+ * agent-sandbox console — shadcn (new-york, neutral base) + Geist + prompt-kit chat components.
  *
- * The app adopts Radix Themes as its foundation (see main.tsx <Theme>). Rather than hand-tuning a
- * bespoke palette (which read as generic), every semantic variable below is MAPPED onto Radix's
- * professionally-calibrated scales:
+ * The colour foundation is shadcn's official neutral theme (the canonical ui.shadcn.com values),
+ * not hand-tuned hex. prompt-kit's chat components (Steps / Tool / PromptInput / ChatContainer /
+ * ScrollButton) install as standard shadcn and read these same variables, so the whole chat surface
+ * and the rest of the console share one system.
  *
- *   --gray-1..12   neutral scale (we use the "slate" tint) — surfaces, text, hairlines
- *   --gray-a1..12  the same as alpha, for overlays/hover that sit on any background
- *   --accent-1..12 the theme accent (indigo) — actions, links, working state, focus
- *   --radius-1..6  Radix radius scale, driven by <Theme radius>
- *
- * The shadcn semantic contract and this app's own vocabulary are derived from those, so every
- * component (Tailwind + the chat registry) inherits Radix's calibration. Two functional status hues
- * (amber = needs-you, green = done) are the only colours outside the accent+gray system, and they
- * always ride with a glyph + word so meaning never rests on colour alone.
+ * The app's own vocabulary (--ink / --ash / --azure / --trace / status hues) is DERIVED from the
+ * shadcn tokens so existing components inherit the base without per-component patching.
  */
 
-@theme inline {
-  /* shadcn contract → Radix tokens */
-  --color-background: var(--canvas);
-  --color-foreground: var(--fg);
-  --color-card: var(--surface);
-  --color-card-foreground: var(--fg);
-  --color-popover: var(--raised);
-  --color-popover-foreground: var(--fg);
-  --color-primary: var(--accent);
-  --color-primary-foreground: var(--accent-fg);
-  --color-secondary: var(--surface);
-  --color-secondary-foreground: var(--fg);
-  --color-muted: var(--surface);
-  --color-muted-foreground: var(--muted-fg);
-  --color-accent: var(--raised);
-  --color-accent-foreground: var(--fg);
-  --color-destructive: var(--danger);
-  --color-border: var(--line);
-  --color-input: var(--line);
-  --color-ring: var(--accent-text);
+@custom-variant dark (&:where(.dark, .dark *));
 
-  /* this app's vocabulary */
-  --color-azure: var(--accent);
-  --color-azure-text: var(--accent-text);
-  --color-ink: var(--fg);
-  --color-ash: var(--muted-fg);
-  --color-pebble: var(--line);
+@theme inline {
+  /* shadcn semantic contract (consumed by prompt-kit + our components) */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* this app's vocabulary, derived from the shadcn base */
+  --color-azure: var(--primary);
+  --color-azure-text: var(--azure-text);
+  --color-ink: var(--foreground);
+  --color-ash: var(--muted-foreground);
+  --color-pebble: var(--border);
   --color-surface: var(--surface);
   --color-raised: var(--raised);
-  --color-danger: var(--danger);
+  --color-danger: var(--destructive);
   --color-trace: var(--trace);
 
   /* functional status hues (glyph + word always accompany these) */
@@ -55,19 +51,16 @@
   --color-attention-text: var(--attention-text);
   --color-ok: var(--ok);
 
-  /* Radii come from Radix's radius scale so shape matches the components. */
-  --radius-sm: var(--radius-2);
-  --radius-md: var(--radius-3);
-  --radius-lg: var(--radius-4);
-  --radius-xl: var(--radius-5);
-  --radius-bubble: var(--radius-4);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-bubble: calc(var(--radius) + 2px);
   --radius-pill: 9999px;
 
-  /* Geist — one product face; Geist Mono for machine text. */
   --font-sans: "Geist Variable", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  /* ONE type scale, tuned for a dense console. Agent prose steps up in .prose-agent. */
   --text-micro: 11px;
   --text-micro--line-height: 1.4;
   --text-meta: 13px;
@@ -89,51 +82,86 @@
 }
 
 /*
- * Map semantic vars onto Radix scales. The Radix <Theme> owns light/dark: it sets --gray-*,
- * --accent-* and friends per mode, so we reference them and inherit both themes for free — no
- * hand-picked hex, no separate .dark block to keep in sync.
+ * shadcn "neutral" base — canonical ui.shadcn.com values (oklch). Light is the default block;
+ * .dark swaps the same token names. Everything else in the app derives from these.
  */
-.radix-themes {
-  --canvas: var(--color-background); /* Radix page background (gray-tinted per mode) */
-  --surface: var(--gray-2); /* panel one step off the canvas */
-  --raised: var(--gray-3); /* hover / popover lift */
-  --fg: var(--gray-12); /* primary text */
-  --muted-fg: var(--gray-11); /* secondary text — Radix guarantees AA at 11 */
-  --line: var(--gray-a5); /* hairline (alpha, reads on any surface) */
-  --line-strong: var(--gray-a7);
+:root {
+  --radius: 0.625rem;
 
-  --accent: var(--accent-9); /* solid accent fill (buttons) */
-  --accent-fg: var(--accent-contrast); /* text on the accent fill */
-  --accent-text: var(--accent-11); /* accent as text/icon/state — AA by construction */
-  --accent-wash: var(--accent-a3);
-  --accent-edge: var(--accent-a7);
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
 
-  --danger: var(--red-9);
-  --danger-text: var(--red-11);
+  /* app vocabulary (light) */
+  --surface: oklch(0.985 0 0);
+  --raised: oklch(0.97 0 0);
+  --trace: oklch(0.205 0 0);
+  --trace-fg: oklch(0.97 0 0);
+  --azure-text: oklch(0.205 0 0);
+  --attention: oklch(0.769 0.153 70.08);
+  --attention-text: oklch(0.554 0.135 66.44);
+  --ok: oklch(0.6 0.118 154.5);
 
-  /* Status hues pulled from Radix's own amber/green scales for consistent calibration. */
-  --attention: var(--amber-9);
-  --attention-text: var(--amber-11);
-  --ok: var(--green-11);
-
-  --trace: var(--gray-1); /* terminal ground: the darkest neutral surface */
-  --trace-fg: var(--gray-12);
-
-  /*
-   * Override Radix's default face with Geist. This MUST live outside @layer base: Radix's own
-   * styles.css is un-layered and would otherwise win the cascade and keep the system font. Setting
-   * the Radix token itself means every Radix component and our own markup pick up Geist uniformly.
-   */
-  --default-font-family: var(--font-sans);
-  --default-mono-font-family: var(--font-mono);
-  --em-font-family: var(--font-sans);
-  --quote-font-family: var(--font-sans);
-  --code-font-family: var(--font-mono);
-  --strong-font-family: var(--font-sans);
-  font-family: var(--font-sans);
+  /* legacy raw-var aliases so existing markup renders on the shadcn base without per-line edits */
+  --canvas: var(--background);
+  --accent-text: var(--primary);
+  --line: var(--border);
+  --line-strong: var(--muted-foreground);
 }
 
-/* Utilities the registry's message-scroller expects from a shadcn base stylesheet. */
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+
+  /* app vocabulary (dark) */
+  --surface: oklch(0.205 0 0);
+  --raised: oklch(0.269 0 0);
+  --trace: oklch(0.185 0 0);
+  --trace-fg: oklch(0.92 0 0);
+  --azure-text: oklch(0.985 0 0);
+  --attention: oklch(0.769 0.153 70.08);
+  --attention-text: oklch(0.828 0.111 76.0);
+  --ok: oklch(0.723 0.152 154.5);
+
+  /* legacy raw-var aliases so existing markup renders on the shadcn base without per-line edits */
+  --canvas: var(--background);
+  --accent-text: var(--primary);
+  --line: var(--border);
+  --line-strong: var(--muted-foreground);
+}
+
+/* Utilities prompt-kit's chat-container + our scrollers expect from a shadcn base stylesheet. */
 @utility scrollbar-thin {
   scrollbar-width: thin;
 }
@@ -147,13 +175,14 @@
   scrollbar-gutter: stable;
 }
 @utility scroll-fade-b {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 2rem), transparent 100%);
   mask-image: linear-gradient(to bottom, #000 calc(100% - 2rem), transparent 100%);
 }
 
 @layer base {
   * {
     box-sizing: border-box;
-    border-color: var(--line);
+    border-color: var(--border);
     -webkit-tap-highlight-color: transparent;
   }
   html,
@@ -163,40 +192,35 @@
   }
   body {
     margin: 0;
-    /* The Radix <Theme> paints the real background; this is only the pre-mount fallback. */
-    background: #0b0f19;
+    background: var(--background);
+    color: var(--foreground);
     font-family: var(--font-sans);
     font-size: 14px;
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
     overscroll-behavior-y: none;
   }
-  /* The Radix Theme fills the app; the real canvas colour is painted here. */
-  .radix-themes {
-    min-height: 100%;
-    background: var(--canvas);
-  }
   ::selection {
-    background: var(--accent-a5);
-    color: var(--fg);
+    background: color-mix(in oklch, var(--primary) 22%, transparent);
+    color: var(--foreground);
   }
   ::-webkit-scrollbar {
     width: 10px;
     height: 10px;
   }
   ::-webkit-scrollbar-thumb {
-    background: var(--line-strong);
+    background: var(--border);
     border: 3px solid transparent;
     background-clip: padding-box;
     border-radius: 9999px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: var(--gray-a8);
+    background: var(--muted-foreground);
     border: 3px solid transparent;
     background-clip: padding-box;
   }
   :focus-visible {
-    outline: 2px solid var(--accent-text);
+    outline: 2px solid var(--ring);
     outline-offset: 2px;
     border-radius: var(--radius-sm);
   }
@@ -220,7 +244,6 @@
       min-width: 44px;
     }
   }
-  /* Machine label: WORKING, NEEDS YOU, EXIT 0. */
   .stamp {
     font-family: var(--font-mono);
     font-size: 10.5px;
@@ -229,7 +252,6 @@
     text-transform: uppercase;
     font-weight: 500;
   }
-  /* Agent output: the one place type steps up, because it is read rather than scanned. */
   .prose-agent {
     font-size: 16px;
     line-height: 1.65;
@@ -253,7 +275,6 @@
   }
 }
 
-/* The one authored motion: a live indicator breathing. */
 @keyframes breathe {
   0%,
   100% {

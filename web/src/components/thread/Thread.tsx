@@ -6,13 +6,8 @@ import { parseTrace } from "@/lib/trace";
 import { usePoll } from "@/hooks/usePoll";
 import { Button } from "@/components/ui/button";
 import { StateStamp } from "@/components/ui/stamp";
-import {
-  MessageScroller,
-  MessageScrollerButton,
-  MessageScrollerContent,
-  MessageScrollerProvider,
-  MessageScrollerViewport,
-} from "@/components/ui/message-scroller";
+import { ChatContainerContent, ChatContainerRoot, ChatContainerScrollAnchor } from "@/components/ui/chat-container";
+import { ScrollButton } from "@/components/ui/scroll-button";
 import { AskingItem, LifecycleItem, ObserverItem, SayItem, ToolItem, YouItem } from "./TraceItems";
 import { SendBar } from "./SendBar";
 
@@ -107,49 +102,54 @@ export function Thread({
         </Button>
       </header>
 
-      <MessageScrollerProvider>
-        <MessageScroller className="min-h-0 flex-1">
-          <MessageScrollerViewport className="px-4 pt-8 pb-16 md:px-6">
-            <MessageScrollerContent className="mx-auto max-w-3xl gap-7">
-              {box.task && <YouItem text={box.task} label="task" />}
+      {/* prompt-kit ChatContainer owns the stick-to-bottom behaviour: it anchors to the newest turn,
+          yields when the reader scrolls up, and the ScrollButton offers a way back. */}
+      <div className="relative min-h-0 flex-1">
+        <ChatContainerRoot className="h-full">
+          <ChatContainerContent className="mx-auto max-w-3xl gap-6 px-4 pt-8 pb-16 md:px-6">
+            {box.task && <YouItem text={box.task} label="task" />}
 
-              {events.map((e, i) =>
-                e.kind === "lifecycle" ? (
-                  <LifecycleItem key={i} label={e.label} detail={e.detail} />
-                ) : e.kind === "tool" ? (
-                  <ToolItem key={i} event={e} />
-                ) : (
-                  <SayItem key={i} text={e.text} live={runState === "running" && i === events.length - 1} />
-                )
-              )}
+            {events.map((e, i) =>
+              e.kind === "lifecycle" ? (
+                <LifecycleItem key={i} label={e.label} detail={e.detail} />
+              ) : e.kind === "tool" ? (
+                <ToolItem key={i} event={e} />
+              ) : (
+                <SayItem key={i} text={e.text} live={runState === "running" && i === events.length - 1} />
+              )
+            )}
 
-              {!events.length && (
-                <LifecycleItem
-                  label={runState === "idle" ? "machine idle" : "booting"}
-                  detail={runState === "idle" ? "no run yet" : "waiting for first output"}
-                />
-              )}
+            {!events.length && (
+              <LifecycleItem
+                label={runState === "idle" ? "machine idle" : "booting"}
+                detail={runState === "idle" ? "no run yet" : "waiting for first output"}
+              />
+            )}
 
-              {question && runState === "waiting" && <AskingItem question={question} />}
+            {question && runState === "waiting" && <AskingItem question={question} />}
 
-              {/* What you sent back. The agent log does not echo it, so without this your own
-                  message would vanish the moment it was delivered. */}
-              {replies.map((r, i) => (
-                <YouItem key={`reply-${i}`} text={r} label="your answer" />
-              ))}
+            {/* What you sent back. The agent log does not echo it, so without this your own
+                message would vanish the moment it was delivered. */}
+            {replies.map((r, i) => (
+              <YouItem key={`reply-${i}`} text={r} label="your answer" />
+            ))}
 
-              {asides.map((a, i) => (
-                <ObserverItem key={`aside-${i}`} question={a.question} answer={a.error ?? a.answer} />
-              ))}
+            {asides.map((a, i) => (
+              <ObserverItem key={`aside-${i}`} question={a.question} answer={a.error ?? a.answer} />
+            ))}
 
-              {runState === "done" && (
-                <LifecycleItem label="exited" detail={`code ${snap?.exitCode ?? box.exitCode ?? "?"}`} />
-              )}
-            </MessageScrollerContent>
-          </MessageScrollerViewport>
-          <MessageScrollerButton />
-        </MessageScroller>
-      </MessageScrollerProvider>
+            {runState === "done" && (
+              <LifecycleItem label="exited" detail={`code ${snap?.exitCode ?? box.exitCode ?? "?"}`} />
+            )}
+            <ChatContainerScrollAnchor />
+          </ChatContainerContent>
+        </ChatContainerRoot>
+        <div className="pointer-events-none absolute inset-x-0 bottom-4 flex justify-center">
+          <div className="pointer-events-auto">
+            <ScrollButton />
+          </div>
+        </div>
+      </div>
 
       <SendBar boxName={box.name} runState={runState} onAsk={onAsk} onReplied={onReplied} />
     </div>
