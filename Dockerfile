@@ -18,6 +18,13 @@ RUN npm ci
 COPY src ./src
 RUN npm run build && npm prune --omit=dev
 
+# Build the dashboard SPA (React + Vite + Tailwind). Its deps are installed and discarded in this
+# same layer set: the runtime only needs web/dist, never web/node_modules.
+COPY web/package.json web/package-lock.json* ./web/
+RUN npm --prefix web ci
+COPY web ./web
+RUN npm --prefix web run build && rm -rf web/node_modules web/src
+
 # HTTP entry binds 127.0.0.1 inside the container; Traefik reaches it over the compose network,
 # so we bind 0.0.0.0 in-container via HOST override at runtime (see compose: MCP_HTTP_HOST).
 EXPOSE 8787

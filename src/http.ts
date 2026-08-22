@@ -21,7 +21,9 @@ import { refillPool } from "./pool.js";
 import { checkBearer, checkDashboardAuth } from "./http-auth.js";
 import { gatherMonitor, gatherWatch, askInBox, driverStateLine } from "./msb.js";
 import { runDelegateFlow } from "./delegate-flow.js";
-import { dashboardHtml } from "./dashboard-html.js";
+import { existsSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 loadDotEnv();
 const cfg = loadConfig();
@@ -102,11 +104,29 @@ function dashAuthed(req: Request, res: Response): boolean {
   return false;
 }
 
-// The page itself (static HTML; it reads ?token= and polls the JSON endpoints below).
-app.get("/dashboard", (req: Request, res: Response) => {
-  if (!dashAuthed(req, res)) return;
-  res.type("html").send(dashboardHtml());
-});
+// --- the dashboard SPA (React + Tailwind, built by Vite into web/dist) ---------------------------
+// Static assets are served WITHOUT the token: they are the app shell (JS/CSS/HTML) and carry no
+// secrets, and a browser can't attach an Authorization header to its own <script> fetches. Every
+// route that returns real data stays bearer-guarded, which is where the actual protection belongs.
+const HERE = dirname(fileURLToPath(import.meta.url));
+const WEB_DIST = resolve(HERE, "..", "web", "dist");
+const HAS_WEB = existsSync(join(WEB_DIST, "index.html"));
+
+if (HAS_WEB) {
+  app.use("/dashboard", express.static(WEB_DIST, { index: false, maxAge: "1h" }));
+  // SPA fallback: /dashboard and anything under it that isn't a built asset returns index.html, so
+  // a deep link (or a reload on one) still boots the app.
+  app.get(/^\/dashboard(?:\/.*)?$/, (_req: Request, res: Response) => {
+    res.sendFile(join(WEB_DIST, "index.html"));
+  });
+} else {
+  app.get("/dashboard", (_req: Request, res: Response) => {
+    res
+      .status(503)
+      .type("text/plain")
+      .send("Dashboard bundle missing: run `npm --prefix web ci && npm --prefix web run build`.");
+  });
+}
 
 // Fleet snapshot as JSON (what `monitor` renders as text).
 app.get("/monitor.json", async (req: Request, res: Response) => {

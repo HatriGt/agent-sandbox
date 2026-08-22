@@ -8,3 +8,5 @@ test/
 *.md
 docs/
 .vscode
+web/node_modules
+web/dist
