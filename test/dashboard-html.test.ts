@@ -53,3 +53,39 @@ test("the embedded browser script is syntactically valid JavaScript", () => {
   assert.ok(script, "no <script> block found");
   assert.doesNotThrow(() => new Function(script![1]), "embedded script does not parse");
 });
+
+test("resume: WAITING is the one state the page cannot let you miss", () => {
+  const html = dashboardHtml();
+  assert.match(html, /\/resume\.json/);
+  assert.match(html, /waiting for you/i);
+  assert.match(html, /runState !== "waiting"/);
+});
+
+test("teardown: destructive, so it requires a second click to confirm (no modal)", () => {
+  const html = dashboardHtml();
+  assert.match(html, /\/teardown\.json/);
+  assert.match(html, /teardownArmed/);
+  assert.match(html, /confirm\?/);
+  assert.doesNotMatch(html, /<dialog|showModal/);
+});
+
+test("composer: starts a delegation and never blocks on the MCP interactive wait loop", () => {
+  const html = dashboardHtml();
+  assert.match(html, /\/delegate\.json/);
+  assert.match(html, /composer-send/);
+  // Optimistic pending card while the box boots — the delegate call itself is not the sync boundary.
+  assert.match(html, /pendingBoxes/);
+});
+
+test("mobile: list and detail collapse into one view with a back affordance", () => {
+  const html = dashboardHtml();
+  assert.match(html, /max-width:\s*899px/);
+  assert.match(html, /detail-open/);
+  assert.match(html, /back-btn/);
+});
+
+test("theme tokens carry real contrast in both themes, not a dark theme with light bolted on", () => {
+  const html = dashboardHtml();
+  assert.match(html, /\[data-theme="light"\]/);
+  assert.match(html, /--term-bg: #1c1c22/); // light theme still renders the terminal dark on purpose
+});

@@ -20,6 +20,7 @@ import { deps } from "./deps.js";
 import { refillPool } from "./pool.js";
 import { checkBearer, checkDashboardAuth } from "./http-auth.js";
 import { gatherMonitor, gatherWatch, askInBox, driverStateLine } from "./msb.js";
+import { runDelegateFlow } from "./delegate-flow.js";
 import { dashboardHtml } from "./dashboard-html.js";
 
 loadDotEnv();
@@ -153,6 +154,63 @@ app.post("/ask.json", async (req: Request, res: Response) => {
       driverStateLine(cfg, session),
     ]);
     res.json({ ...result, driverState });
+  } catch (e) {
+    res.status(500).json({ error: String((e as Error).message ?? e) });
+  }
+});
+
+// Answer a WAITING box's question (the only way to steer the driver). Blocks server-side up to
+// WAIT_TIMEOUT_MS driving the same interactive loop resume() uses over MCP.
+app.post("/resume.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const { session, message } = (req.body ?? {}) as { session?: string; message?: string };
+  if (!session || !message?.trim()) {
+    res.status(400).json({ error: "session and message are required" });
+    return;
+  }
+  try {
+    res.json({ output: await deps.resume(cfg, session, message, undefined, {}) });
+  } catch (e) {
+    res.status(500).json({ error: String((e as Error).message ?? e) });
+  }
+});
+
+// Stop and remove a box. Destructive; the dashboard confirms before calling this.
+app.post("/teardown.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const { session } = (req.body ?? {}) as { session?: string };
+  if (!session) {
+    res.status(400).json({ error: "session is required" });
+    return;
+  }
+  try {
+    await deps.teardown(cfg, session);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: String((e as Error).message ?? e) });
+  }
+});
+
+// Start a new delegation from the dashboard composer. Same validate -> resolve -> run flow as the
+// MCP `delegate` tool (see delegate-flow.ts); source defaults to "git" here since a browser has no
+// local working tree to ship.
+app.post("/delegate.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  if (typeof body.task !== "string" || !body.task.trim()) {
+    res.status(400).json({ error: "task is required" });
+    return;
+  }
+  try {
+    const result = await runDelegateFlow(cfg, deps, {
+      source: body.source === "local" ? "local" : "git",
+      repo: typeof body.repo === "string" ? body.repo : undefined,
+      task: body.task,
+      ref: typeof body.ref === "string" ? body.ref : undefined,
+      githubToken: typeof body.githubToken === "string" ? body.githubToken : undefined,
+      githubAccount: typeof body.githubAccount === "string" ? body.githubAccount : undefined,
+    });
+    res.json(result);
   } catch (e) {
     res.status(500).json({ error: String((e as Error).message ?? e) });
   }
