@@ -2,6 +2,7 @@ import { CircleDot, Eye, PauseCircle, Terminal } from "lucide-react";
 import type { BoxView } from "@/lib/api";
 import { shortName, stateLabel } from "@/lib/format";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 /**
  * The detail pane with nothing selected. On a wide screen this is over half the viewport, so it does
@@ -12,6 +13,9 @@ import { Button } from "@/components/ui/button";
 export function EmptyDetail({ boxes, onSelect }: { boxes: BoxView[]; onSelect: (name: string) => void }) {
   const waiting = boxes.filter((b) => b.runState === "waiting");
   const running = boxes.filter((b) => b.runState === "running");
+  // A finished run is still a box on the list, so "nothing running" alone read as wrong next to a
+  // visible `done` card. Name what is actually there.
+  const finished = boxes.filter((b) => b.runState === "done");
 
   return (
     <div className="mx-auto flex h-full w-full max-w-2xl flex-col justify-center gap-7 p-8">
@@ -21,14 +25,18 @@ export function EmptyDetail({ boxes, onSelect }: { boxes: BoxView[]; onSelect: (
             ? `${waiting.length} sandbox${waiting.length > 1 ? "es" : ""} waiting on you`
             : running.length > 0
               ? `${running.length} agent${running.length > 1 ? "s" : ""} working`
-              : "Nothing running"}
+              : finished.length > 0
+                ? `${finished.length} run${finished.length > 1 ? "s" : ""} finished`
+                : "Nothing running"}
         </h1>
         <p className="text-muted-foreground mt-1.5 text-sm leading-relaxed">
           {waiting.length > 0
             ? "A run has paused to ask a question and cannot continue until it gets an answer."
             : running.length > 0
               ? "Pick a run to watch its log, or ask its co-pilot what it is doing."
-              : "Describe a task in the composer to start a sandbox. Boxes stop themselves when idle."}
+              : finished.length > 0
+                ? "Open a finished run to read its output, or start another from the composer."
+                : "Describe a task in the composer to start a sandbox. Boxes stop themselves when idle."}
         </p>
       </div>
 
@@ -58,16 +66,22 @@ export function EmptyDetail({ boxes, onSelect }: { boxes: BoxView[]; onSelect: (
         </ul>
       )}
 
-      {waiting.length === 0 && running.length > 0 && (
+      {waiting.length === 0 && (running.length > 0 || finished.length > 0) && (
         <ul className="space-y-2">
-          {running.slice(0, 4).map((b) => (
+          {[...running, ...finished].slice(0, 4).map((b) => (
             <li key={b.name}>
               <button
                 type="button"
                 onClick={() => onSelect(b.name)}
                 className="hover:bg-secondary/60 focus-visible:ring-ring/50 flex w-full cursor-pointer items-center gap-3 rounded-lg border p-3 text-left outline-none transition-colors focus-visible:ring-[3px]"
               >
-                <CircleDot className="text-live size-3.5 shrink-0 animate-pulse" aria-hidden />
+                <CircleDot
+                  className={cn(
+                    "size-3.5 shrink-0",
+                    b.runState === "running" ? "text-live animate-pulse" : "text-muted-foreground"
+                  )}
+                  aria-hidden
+                />
                 <span className="min-w-0 flex-1">
                   <span className="block font-mono text-xs font-semibold">{shortName(b.name)}</span>
                   {b.task && (
