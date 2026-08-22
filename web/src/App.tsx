@@ -61,6 +61,8 @@ export default function App() {
   const [selected, setSelected] = React.useState<string | null>(null);
   const [pending, setPending] = React.useState<{ id: string; task: string }[]>([]);
   const [asides, setAsides] = React.useState<Record<string, Aside[]>>({});
+  // Replies this browser sent, per machine: the server keeps no transcript of them.
+  const [replies, setReplies] = React.useState<Record<string, string[]>>({});
 
   const boxes = React.useMemo(() => (data ?? []).filter(isUp), [data]);
   const selectedBox = boxes.find((b) => b.name === selected) ?? null;
@@ -216,13 +218,21 @@ export default function App() {
             <Thread
               box={selectedBox}
               asides={asides[selectedBox.name] ?? []}
+              replies={replies[selectedBox.name] ?? []}
               onAsk={(q) => void ask(selectedBox.name, q)}
+              onReplied={(text) =>
+                setReplies((prev) => ({ ...prev, [selectedBox.name]: [...(prev[selectedBox.name] ?? []), text] }))
+              }
               onBack={() => setSelected(null)}
               onNew={newTask}
               onTornDown={(name) => {
                 setSelected(null);
                 setAsides((prev) => {
                   const { [name]: _gone, ...rest } = prev;
+                  return rest;
+                });
+                setReplies((prev) => {
+                  const { [name]: _dropped, ...rest } = prev;
                   return rest;
                 });
               }}

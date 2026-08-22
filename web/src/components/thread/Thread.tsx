@@ -33,14 +33,18 @@ export interface Aside {
 export function Thread({
   box,
   asides,
+  replies,
   onAsk,
+  onReplied,
   onBack,
   onNew,
   onTornDown,
 }: {
   box: BoxView;
   asides: Aside[];
+  replies: string[];
   onAsk: (question: string) => void;
+  onReplied: (text: string) => void;
   onBack: () => void;
   onNew: () => void;
   onTornDown: (name: string) => void;
@@ -128,6 +132,12 @@ export function Thread({
 
               {question && runState === "waiting" && <AskingItem question={question} />}
 
+              {/* What you sent back. The agent log does not echo it, so without this your own
+                  message would vanish the moment it was delivered. */}
+              {replies.map((r, i) => (
+                <YouItem key={`reply-${i}`} text={r} label="your answer" />
+              ))}
+
               {asides.map((a, i) => (
                 <ObserverItem key={`aside-${i}`} question={a.question} answer={a.error ?? a.answer} />
               ))}
@@ -141,7 +151,7 @@ export function Thread({
         </MessageScroller>
       </MessageScrollerProvider>
 
-      <SendBar boxName={box.name} runState={runState} onAsk={onAsk} />
+      <SendBar boxName={box.name} runState={runState} onAsk={onAsk} onReplied={onReplied} />
     </div>
   );
 }

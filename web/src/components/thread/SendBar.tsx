@@ -25,10 +25,12 @@ export function SendBar({
   boxName,
   runState,
   onAsk,
+  onReplied,
 }: {
   boxName: string;
   runState: RunState;
   onAsk: (question: string) => void;
+  onReplied: (text: string) => void;
 }) {
   const canReply = runState !== "running";
   const preferred: Mode = runState === "waiting" ? "reply" : runState === "running" ? "ask" : "reply";
@@ -56,8 +58,11 @@ export function SendBar({
         setValue("");
         onAsk(text); // the parent owns the aside list, so it can render the pending state
       } else {
-        await api.resume(boxName, text);
+        // Show it in the thread immediately: a chat where your own message disappears on send is
+        // broken, and the server does not echo replies back into the agent log.
+        onReplied(text);
         setValue("");
+        await api.resume(boxName, text);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
