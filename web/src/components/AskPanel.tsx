@@ -63,10 +63,15 @@ export function AskPanel({
     <section aria-labelledby="ask-heading" className="bg-card flex min-h-0 flex-col rounded-lg border">
       <header className="flex items-center gap-2 border-b px-3.5 py-2.5">
         <Eye className="text-muted-foreground size-3.5 shrink-0" aria-hidden />
-        <h2 id="ask-heading" className="text-sm font-semibold">
+        {/* shrink-0 on the title: at 390px the flex row was compressing it into "Co-" / "pilot". */}
+        <h2 id="ask-heading" className="shrink-0 text-sm font-semibold">
           Co-pilot
         </h2>
-        <span className="text-muted-foreground truncate text-xs">read-only · never interrupts the agent</span>
+        {/* The qualifier is essential context, but it is the first thing that can go when space runs
+            out — the label and the dashed bubbles still carry the distinction. */}
+        <span className="text-muted-foreground hidden truncate text-xs sm:block">
+          read-only · never interrupts the agent
+        </span>
         <Button
           size="sm"
           variant="ghost"
@@ -75,7 +80,9 @@ export function AskPanel({
           disabled={busy || !messages.length || !value.trim()}
           title="Ask in a fresh thread, discarding this context"
         >
-          <RotateCcw /> New thread
+          <RotateCcw />
+          <span className="hidden sm:inline">New thread</span>
+          <span className="sr-only sm:hidden">Start a new co-pilot thread</span>
         </Button>
       </header>
 

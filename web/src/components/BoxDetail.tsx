@@ -1,7 +1,7 @@
 import * as React from "react";
 import { ArrowLeft, Trash2 } from "lucide-react";
 import { api, type BoxView, type WatchSnapshot } from "@/lib/api";
-import { POLL_MS, roleLabel, stateLabel, stateVariant } from "@/lib/format";
+import { POLL_MS, roleLabel, shortName, stateLabel, stateVariant } from "@/lib/format";
 import { usePoll } from "@/hooks/usePoll";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -77,7 +77,10 @@ export function BoxDetail({
 
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="truncate font-mono text-sm font-semibold">{box.name}</h1>
+            <h1 className="truncate font-mono text-sm font-semibold">
+              <span className="sm:hidden">{shortName(box.name)}</span>
+              <span className="hidden sm:inline">{box.name}</span>
+            </h1>
             <Badge variant={stateVariant(runState)}>{stateLabel({ runState, exitCode: snap?.exitCode ?? box.exitCode })}</Badge>
           </div>
           {box.task && <p className="text-muted-foreground mt-1.5 max-w-[75ch] text-xs leading-relaxed">{box.task}</p>}
