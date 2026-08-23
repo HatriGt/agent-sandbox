@@ -293,6 +293,100 @@
       font-size: 15.5px;
     }
   }
+  /* Tailwind preflight strips element styling, so markdown renders as flat text without this. These
+     rules give agent prose real structure — headings, lists, tables, code, quotes — in the pixel-match
+     Inter/zinc language, so a GFM table reads as a table instead of a run-on paragraph. */
+  .prose-agent > :first-child {
+    margin-top: 0;
+  }
+  .prose-agent > :last-child {
+    margin-bottom: 0;
+  }
+  .prose-agent p {
+    margin: 0.75em 0;
+  }
+  .prose-agent h1,
+  .prose-agent h2,
+  .prose-agent h3,
+  .prose-agent h4 {
+    font-weight: 600;
+    line-height: 1.3;
+    margin: 1.4em 0 0.6em;
+    letter-spacing: -0.01em;
+  }
+  .prose-agent h1 {
+    font-size: 1.4em;
+  }
+  .prose-agent h2 {
+    font-size: 1.2em;
+  }
+  .prose-agent h3 {
+    font-size: 1.05em;
+  }
+  .prose-agent h4 {
+    font-size: 1em;
+  }
+  .prose-agent ul,
+  .prose-agent ol {
+    margin: 0.75em 0;
+    padding-left: 1.5em;
+  }
+  .prose-agent ul {
+    list-style: disc;
+  }
+  .prose-agent ol {
+    list-style: decimal;
+  }
+  .prose-agent li {
+    margin: 0.3em 0;
+  }
+  .prose-agent li::marker {
+    color: var(--muted-foreground);
+  }
+  .prose-agent a {
+    color: var(--primary);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .prose-agent blockquote {
+    border-left: 2px solid var(--border);
+    margin: 0.75em 0;
+    padding-left: 1em;
+    color: var(--muted-foreground);
+  }
+  .prose-agent hr {
+    border: 0;
+    border-top: 1px solid var(--border);
+    margin: 1.4em 0;
+  }
+  .prose-agent table {
+    display: block;
+    width: max-content;
+    max-width: 100%;
+    overflow-x: auto;
+    border-collapse: collapse;
+    margin: 1em 0;
+    font-size: 0.9em;
+    font-variant-numeric: tabular-nums;
+  }
+  .prose-agent thead {
+    border-bottom: 1px solid var(--border);
+  }
+  .prose-agent th {
+    text-align: left;
+    font-weight: 600;
+    padding: 0.5em 0.85em;
+    white-space: nowrap;
+    color: var(--foreground);
+  }
+  .prose-agent td {
+    padding: 0.45em 0.85em;
+    border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
+    white-space: nowrap;
+  }
+  .prose-agent tbody tr:nth-child(even) {
+    background: color-mix(in oklch, var(--muted) 45%, transparent);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

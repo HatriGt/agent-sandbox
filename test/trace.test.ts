@@ -8,6 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseTrace, resultSummary, clean } from "../web/src/lib/trace.ts";
+import { normalizeBlocks } from "../web/src/lib/markdown-normalize.ts";
 
 const REAL_LOG = [
   "● session started (model ak-claude-opus-4.8)",
@@ -68,6 +69,54 @@ test("a blank line inside a result block stays part of the result", () => {
   const ev = parseTrace(["→ Bash: cat a b", "  hello", "  ", "  world"].join("\n"));
   assert.equal(ev.length, 1);
   if (ev[0].kind === "tool") assert.equal(ev[0].result, "hello\n\nworld");
+});
+
+test("a markdown table stays in ONE say block, not split across bubbles", () => {
+  // The df -h failure: a GFM table followed by a heading must arrive as a single prose block so the
+  // renderer sees valid table structure. Splitting rows across bubbles renders it as inline text.
+  const log = [
+    "Here is the disk usage:",
+    "",
+    "| Filesystem | Size | Used |",
+    "|------------|------|------|",
+    "| overlay | 3.9G | 469M |",
+    "| tmpfs | 256M | 0 |",
+    "",
+    "## Summary",
+    "",
+    "Disk looks healthy.",
+  ].join("\n");
+  const ev = parseTrace(log);
+  const says = ev.filter((e) => e.kind === "say");
+  assert.equal(says.length, 1, "table + heading + prose is one say, not many");
+  if (says[0].kind === "say") {
+    assert.match(says[0].text, /\| overlay \| 3\.9G \| 469M \|/);
+    assert.match(says[0].text, /## Summary/);
+    // The blank line separating the table from the heading must survive.
+    assert.match(says[0].text, /\| tmpfs \| 256M \| 0 \|\n\n## Summary/);
+  }
+});
+
+test("normalizeBlocks inserts the blank line a jammed heading-after-table needs", () => {
+  // marked recognises the table only when a blank line follows its last row. The model routinely
+  // streams the heading on the very next line; without normalization the table degrades to a paragraph.
+  const md = ["| overlay | 3.9G | 469M |", "## Summary", "Disk looks healthy."].join("\n");
+  const out = normalizeBlocks(md);
+  assert.match(out, /469M \|\n\n## Summary/, "blank line inserted before the heading");
+  assert.match(out, /## Summary\n\nDisk looks healthy\./, "blank line inserted after the heading");
+});
+
+test("normalizeBlocks separates a table jammed directly under prose", () => {
+  const md = ["Here is the disk usage:", "| Filesystem | Size |", "|------------|------|", "| overlay | 3.9G |"].join("\n");
+  const out = normalizeBlocks(md);
+  assert.match(out, /disk usage:\n\n\| Filesystem \| Size \|/, "blank line inserted before the table");
+});
+
+test("normalizeBlocks leaves fenced code untouched (no boundary rewrites inside a fence)", () => {
+  // A '#' comment or a '|' pipe inside a code fence must NOT be treated as a heading/table boundary.
+  const md = ["```sh", "# not a heading", "echo a | grep b", "```"].join("\n");
+  const out = normalizeBlocks(md);
+  assert.equal(out, md, "fence content is preserved verbatim");
 });
 
 test("an indented line that is NOT after a tool call stays prose", () => {

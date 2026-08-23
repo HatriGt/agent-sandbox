@@ -2,8 +2,8 @@ import { cn } from "@/lib/utils"
 import { marked } from "marked"
 import { memo, useId, useMemo } from "react"
 import ReactMarkdown, { type Components } from "react-markdown"
-import remarkBreaks from "remark-breaks"
 import remarkGfm from "remark-gfm"
+import { normalizeBlocks } from "@/lib/markdown-normalize"
 import { CodeBlock, CodeBlockCode } from "./code-block"
 
 export type MarkdownProps = {
@@ -14,7 +14,7 @@ export type MarkdownProps = {
 }
 
 function parseMarkdownIntoBlocks(markdown: string): string[] {
-  const tokens = marked.lexer(markdown)
+  const tokens = marked.lexer(normalizeBlocks(markdown))
   return tokens.map((token) => token.raw)
 }
 
@@ -66,10 +66,7 @@ const MemoizedMarkdownBlock = memo(
     components?: Partial<Components>
   }) {
     return (
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkBreaks]}
-        components={components}
-      >
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
         {content}
       </ReactMarkdown>
     )
