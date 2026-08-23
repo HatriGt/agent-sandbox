@@ -26,6 +26,7 @@ import { CommandPalette } from "@/components/CommandPalette";
 import { Toaster } from "@/components/ui/sonner";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Thread, type Aside } from "@/components/thread/Thread";
+import { BootingThread } from "@/components/thread/BootingThread";
 import { cn } from "@/lib/utils";
 
 /**
@@ -93,6 +94,11 @@ export default function App() {
 
   const [view, setView] = React.useState<View>("chat");
   const [selected, setSelected] = React.useState<string | null>(null);
+  // A delegate in flight: the box name is not known until the run reaches a boundary (which can be
+  // a minute out), so we show a booting thread with the submitted task from the moment it's sent —
+  // the user watches the machine come up rather than staring at the Hub. Cleared when the delegate
+  // resolves to a box (which we then select) or errors (which returns to the Hub).
+  const [booting, setBooting] = React.useState<string | null>(null);
   const [pending, setPending] = React.useState<{ id: string; task: string }[]>([]);
   const [asides, setAsides] = React.useState<Record<string, Aside[]>>({});
   // Replies this browser sent, per machine: the server keeps no transcript of them.
@@ -107,16 +113,21 @@ export default function App() {
   const waiting = boxes.filter((b) => b.runState === "waiting");
   const working = boxes.filter((b) => b.runState === "running").length;
 
-  // A machine that vanished (destroyed, auto-stopped) must not leave a dead pane behind.
+  // A machine that vanished (destroyed, auto-stopped) must not leave a dead pane behind. A box that
+  // was JUST delegated has not appeared in monitor.json yet, so guard on `booting`: never unselect
+  // while a delegate is in flight, or the newly-opened thread would flip back to the Hub.
   React.useEffect(() => {
+    if (booting) return;
     if (selected && data && !boxes.some((b) => b.name === selected)) setSelected(null);
-  }, [selected, data, boxes]);
+  }, [selected, data, boxes, booting]);
 
   const open = (name: string) => {
+    setBooting(null);
     setSelected(name);
     setView("chat");
   };
   const newTask = () => {
+    setBooting(null);
     setSelected(null);
     setView("chat");
   };
@@ -148,7 +159,7 @@ export default function App() {
     }
   };
 
-  const threadOpen = view === "chat" && !!selectedBox;
+  const threadOpen = view === "chat" && (!!selectedBox || !!booting);
 
   return (
     <TooltipProvider delayDuration={400}>
@@ -340,6 +351,8 @@ export default function App() {
                 if (selected === name) setSelected(null);
               }}
             />
+          ) : booting && !selectedBox ? (
+            <BootingThread task={booting} onBack={newTask} />
           ) : selectedBox ? (
             <Thread
               box={selectedBox}
@@ -367,10 +380,12 @@ export default function App() {
             <Hub
               boxes={boxes}
               sessionRuns={runs}
+              onBooting={(task) => setBooting(task)}
               onStarted={(box, task) => {
                 remember(box, task);
                 open(box);
               }}
+              onFailed={() => setBooting(null)}
               onPending={(p) => setPending((prev) => [...prev, p])}
               onSettled={(id) => setPending((prev) => prev.filter((p) => p.id !== id))}
               onOpen={open}

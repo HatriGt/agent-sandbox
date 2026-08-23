@@ -73,14 +73,18 @@ const STARTERS: Starter[] = [
 export function Hub({
   boxes,
   sessionRuns,
+  onBooting,
   onStarted,
+  onFailed,
   onPending,
   onSettled,
   onOpen,
 }: {
   boxes: BoxView[];
   sessionRuns: SessionRun[];
+  onBooting: (task: string) => void;
   onStarted: (box: string, task: string) => void;
+  onFailed: () => void;
   onPending: (p: { id: string; task: string }) => void;
   onSettled: (id: string) => void;
   onOpen: (name: string) => void;
@@ -112,14 +116,21 @@ export function Hub({
     setError(null);
     setTask("");
     onPending({ id, task: t });
+    // Leave the Hub immediately: the box id won't be known until the run hits a boundary, so show a
+    // booting thread with the task now rather than freezing here for the whole boot.
+    onBooting(t);
     try {
       const res = await api.delegate({ task: t, repo: repo.trim() || undefined, ref: ref.trim() || undefined });
       if (res.ok) onStarted(res.box, t);
       else {
+        // A clarifying question came back instead of a box: fall back to the Hub with the task and
+        // the question shown, since there is no thread to open.
+        onFailed();
         setError(res.question);
         setTask(t);
       }
     } catch (e) {
+      onFailed();
       setError(e instanceof Error ? e.message : String(e));
       setTask(t);
     } finally {

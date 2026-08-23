@@ -87,10 +87,14 @@ export function parseTrace(rawLog: string): TraceEvent[] {
       continue;
     }
 
-    // An indented line directly after a tool call is that call's output.
+    // An indented line following a tool call (possibly across a blank line within the same result
+    // block) is that call's output. The formatter prefixes every result line with exactly two
+    // spaces, so strip two — not all leading whitespace — to preserve the result's own indentation
+    // (diffs, JSON, code) instead of flattening it into an unreadable left-justified blob.
     const last = events[events.length - 1];
-    if (/^\s{2,}\S/.test(line) && prose.length === 0 && last?.kind === "tool") {
-      const body = line.replace(/^\s+/, "");
+    const isResultLine = /^\s{2,}\S/.test(line) || (line.trim() === "" && last?.kind === "tool" && !!last.result);
+    if (isResultLine && prose.length === 0 && last?.kind === "tool") {
+      const body = line.replace(/^\s{2}/, "");
       last.result = last.result ? `${last.result}\n${body}` : body;
       continue;
     }

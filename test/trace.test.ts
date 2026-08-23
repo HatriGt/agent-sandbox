@@ -53,6 +53,23 @@ test("multi-line tool output stays attached to its call", () => {
   if (ev[0].kind === "tool") assert.equal(ev[0].result, "120 passing\n0 failing");
 });
 
+test("tool output keeps its OWN indentation (only the formatter's 2-space prefix is stripped)", () => {
+  // The formatter prefixes every result line with two spaces. A result that is itself indented —
+  // a diff, JSON, a tree — must keep that structure; flattening all leading whitespace turned
+  // readable output into an unreadable left-justified blob.
+  const ev = parseTrace(["→ Bash: ls -R", "  src/", "      app.ts", "      util.ts"].join("\n"));
+  assert.equal(ev.length, 1);
+  if (ev[0].kind === "tool") assert.equal(ev[0].result, "src/\n    app.ts\n    util.ts");
+});
+
+test("a blank line inside a result block stays part of the result", () => {
+  // Command output with paragraph breaks (e.g. two-file cat) should not split into a truncated
+  // result plus stray prose.
+  const ev = parseTrace(["→ Bash: cat a b", "  hello", "  ", "  world"].join("\n"));
+  assert.equal(ev.length, 1);
+  if (ev[0].kind === "tool") assert.equal(ev[0].result, "hello\n\nworld");
+});
+
 test("an indented line that is NOT after a tool call stays prose", () => {
   // Agent prose is sometimes indented (lists, quotes). Swallowing it as tool output would silently
   // hide what the agent said.
