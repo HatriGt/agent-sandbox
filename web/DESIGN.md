@@ -174,3 +174,38 @@ motion collapses under `prefers-reduced-motion: reduce`.
 - Touch targets: a global `@media (pointer: coarse)` rule floors interactive elements at 44px without
   inflating desktop density.
 - Focus: a visible 2px `--accent-text` ring on `:focus-visible`.
+
+---
+
+## Chat experience pass — "feel like Claude Code on web"
+
+A quality pass on the conversation EXPERIENCE (not a layout change). Audited live against the
+Claude-Code-web bar while streaming real tasks (research prose, shell-heavy, table+code, multi-turn).
+
+### Audit findings (gaps vs the bar)
+
+| # | Gap | Evidence (live) |
+|---|---|---|
+| 1 | **No progressive reveal.** Source is a 3s-polled `.agent.log`, so a completed block pops in whole. There is no smooth typewriter/fade cadence on the newest text. | A ~600-word report appeared in one paint on poll tick. |
+| 2 | **No "working…" indicator** between outputs or while a tool runs. Only signal is a `breathe` dot on the last say's avatar + the header stamp. | Between the last prose line and the next tool there is dead air. |
+| 3 | **Tools have no running-vs-finished state.** A running tool row looks identical to a finished one. | `ToolItem`/`ShellItem` render the same regardless of run state. |
+| 4 | **No message-enter motion.** New turns/blocks appear with no easing — feels like a log repaint. | Blocks snap in. |
+| 5 | **Perf: index keys + whole-list rebuild.** `groups.map((g,i) => key={i})` risks remounts; every poll rebuilds the array. Markdown is memoized by content (good), say/tool rows are not. | Re-render per 3s poll of the entire trace. |
+
+### Plan (highest-leverage first)
+
+1. **Streaming reveal on the newest tail only** — a `StreamingText` built on prompt-kit `ResponseStream`
+   reveals the last in-progress `say` block with a typewriter cadence, then renders finished text as
+   static Markdown. Keyed by content so a re-poll of already-shown text does NOT re-animate; only the
+   genuinely-new tail streams. Completed history stays static (no per-poll animation → no jank).
+2. **Working indicator** — a `WorkingIndicator` (pulsing dots + "working…") shown while `runState`
+   is `running` and the trailing event is a tool / there is no fresh prose, so there is always a clear
+   "the agent is doing something" beat that resolves on completion.
+3. **Running-vs-finished tools** — a tool with no result while the run is live renders with a spinner +
+   "running" tint; a finished tool keeps the calm style.
+4. **Tasteful motion** — a single reusable `.enter` keyframe (fade+rise) on new turns and smooth tool
+   expand. All gated by `prefers-reduced-motion`.
+5. **Perf** — stable content-derived keys, memoized `SayItem`/tool group, reveal state keyed by content.
+
+Library note: prefer prompt-kit's vendored `ResponseStream` over adding framer-motion — the motion is
+small and CSS keyframes cover it, so **no new dependency**.

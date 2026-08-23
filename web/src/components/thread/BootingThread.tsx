@@ -1,6 +1,6 @@
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { YouItem } from "./TraceItems";
+import { WorkingIndicator, YouItem } from "./TraceItems";
 
 /**
  * The thread shown from the instant a task is delegated until the assigned machine is known.
@@ -38,20 +38,11 @@ export function BootingThread({ task, onBack }: { task: string; onBack: () => vo
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 pt-8 pb-16 md:px-6">
           <YouItem text={task} label="task" />
 
-          <div className="flex items-start gap-3">
-            <span
-              className="bg-accent text-accent-foreground mt-0.5 grid size-7 shrink-0 place-items-center rounded-full"
-              aria-hidden
-            >
-              <Loader2 className="size-3.5 animate-spin" />
-            </span>
-            <div className="min-w-0 flex-1">
-              <span className="stamp text-muted-foreground mb-1 block">agent</span>
-              <div className="bg-card border-border text-muted-foreground elevate-sm rounded-2xl rounded-tl-sm border px-4 py-3 text-meta">
-                Booting a fresh microVM and handing it your task. Its live output will appear here as soon as it starts
-                working.
-              </div>
-            </div>
+          <div className="flex flex-col gap-2.5">
+            <WorkingIndicator label="booting a fresh microVM" />
+            <p className="text-muted-foreground ml-10 text-meta">
+              Handing it your task — its live output will appear here as soon as it starts working.
+            </p>
           </div>
         </div>
       </div>

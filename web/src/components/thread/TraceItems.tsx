@@ -1,7 +1,8 @@
 import * as React from "react";
-import { ChevronRight, Eye, FileText, PauseCircle, Terminal, Wrench } from "lucide-react";
+import { ChevronRight, Eye, FileText, Loader2, PauseCircle, Terminal, Wrench } from "lucide-react";
 import { resultSummary, type TraceEvent } from "@/lib/trace";
 import { Markdown } from "@/components/ui/markdown";
+import { StreamingMarkdown } from "./StreamingMarkdown";
 import { cn } from "@/lib/utils";
 
 /**
@@ -37,20 +38,29 @@ const SHELL_TOOLS = new Set(["Bash", "Shell", "Terminal", "Run", "Exec", "sh", "
  *   · any other tool (Write / Read / Edit / Grep …) is a compact row: name + argument in a code chip,
  *     output folded behind a chevron.
  */
+/**
+ * `live` means the run is in progress AND this is the newest tool with no result yet — i.e. the tool
+ * is executing right now. It drives the running-vs-finished visual: a spinner + tinted header while
+ * running, the calm finished style once output arrives (or the run moves on).
+ */
 /** Module-local: only `ToolGroup` (below) renders it; nothing outside this file imports it. */
-function ToolItem({ event }: { event: Extract<TraceEvent, { kind: "tool" }> }) {
+function ToolItem({ event, live }: { event: Extract<TraceEvent, { kind: "tool" }>; live?: boolean }) {
   const isShell = SHELL_TOOLS.has(event.name);
-  return isShell ? <ShellItem event={event} /> : <FileToolItem event={event} />;
+  return isShell ? <ShellItem event={event} live={live} /> : <FileToolItem event={event} live={live} />;
 }
 
 /**
  * A cluster of consecutive tool calls, rendered like the reference's "N tools used" pill: a compact
  * summary chip that expands to the individual tool rows/terminal panels. A single tool renders
  * inline with no pill — there is nothing to summarise.
+ *
+ * `live` marks the whole group as belonging to the in-progress turn; the LAST tool in a live group
+ * with no result yet is the one actually executing, so only it gets the running treatment.
  */
-export function ToolGroup({ events }: { events: Extract<TraceEvent, { kind: "tool" }>[] }) {
+export function ToolGroup({ events, live }: { events: Extract<TraceEvent, { kind: "tool" }>[]; live?: boolean }) {
   const [open, setOpen] = React.useState(false);
-  if (events.length === 1) return <ToolItem event={events[0]} />;
+  const lastRunning = live && !events[events.length - 1]?.result;
+  if (events.length === 1) return <ToolItem event={events[0]} live={lastRunning} />;
 
   const names = [...new Set(events.map((e) => e.name))].slice(0, 4).join(", ");
   return (
@@ -59,10 +69,19 @@ export function ToolGroup({ events }: { events: Extract<TraceEvent, { kind: "too
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="text-muted-foreground hover:text-foreground hover:bg-muted flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1 text-left text-meta transition-colors"
+        className={cn(
+          "flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1 text-left text-meta transition-colors",
+          lastRunning
+            ? "border-border text-foreground bg-muted/60"
+            : "text-muted-foreground hover:text-foreground hover:bg-muted"
+        )}
       >
-        <Wrench className="size-3.5 shrink-0" aria-hidden />
-        <span className="font-medium">{events.length} tools used</span>
+        {lastRunning ? (
+          <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden />
+        ) : (
+          <Wrench className="size-3.5 shrink-0" aria-hidden />
+        )}
+        <span className="font-medium">{lastRunning ? `${events.length} tools · running` : `${events.length} tools used`}</span>
         <span className="text-muted-foreground/70 hidden min-w-0 truncate font-mono text-micro sm:inline">{names}</span>
         <ChevronRight
           className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-150", open && "rotate-90")}
@@ -72,7 +91,7 @@ export function ToolGroup({ events }: { events: Extract<TraceEvent, { kind: "too
       {open && (
         <div className="mt-2.5 flex flex-col gap-2.5 border-l pl-3">
           {events.map((e, i) => (
-            <ToolItem key={i} event={e} />
+            <ToolItem key={i} event={e} live={live && i === events.length - 1 && !e.result} />
           ))}
         </div>
       )}
@@ -81,15 +100,20 @@ export function ToolGroup({ events }: { events: Extract<TraceEvent, { kind: "too
 }
 
 /** A shell command as a terminal panel: `$ cmd` then its output, on the dark trace ground. */
-function ShellItem({ event }: { event: Extract<TraceEvent, { kind: "tool" }> }) {
+function ShellItem({ event, live }: { event: Extract<TraceEvent, { kind: "tool" }>; live?: boolean }) {
   const [open, setOpen] = React.useState(false);
   const hasOutput = !!event.result;
   return (
     <div className="min-w-0">
-      <div className="border-border bg-trace overflow-hidden rounded-lg border">
+      <div className={cn("border-border bg-trace overflow-hidden rounded-lg border", live && "ring-1 ring-ok/40")}>
         <div className="border-border/60 flex items-center gap-2 border-b px-3 py-1.5">
-          <Terminal className="text-trace-fg/60 size-3 shrink-0" aria-hidden />
+          {live ? (
+            <Loader2 className="text-ok size-3 shrink-0 animate-spin" aria-hidden />
+          ) : (
+            <Terminal className="text-trace-fg/60 size-3 shrink-0" aria-hidden />
+          )}
           <span className="stamp text-trace-fg/55">{event.name}</span>
+          {live && <span className="stamp text-ok/80">running</span>}
           {hasOutput && (
             <button
               type="button"
@@ -107,6 +131,7 @@ function ShellItem({ event }: { event: Extract<TraceEvent, { kind: "tool" }> }) 
             $
           </span>
           {event.arg ?? ""}
+          {live && !hasOutput && <span className="caret text-ok" aria-hidden>▍</span>}
         </pre>
         {hasOutput && open && (
           <pre className="border-border/60 text-trace-fg/80 max-h-80 overflow-auto border-t px-3 py-2 font-mono text-micro leading-relaxed whitespace-pre-wrap">
@@ -122,7 +147,7 @@ function ShellItem({ event }: { event: Extract<TraceEvent, { kind: "tool" }> }) 
 }
 
 /** Non-shell tool (Write/Read/Edit/Grep…): compact row, arg as a code chip, output folded. */
-function FileToolItem({ event }: { event: Extract<TraceEvent, { kind: "tool" }> }) {
+function FileToolItem({ event, live }: { event: Extract<TraceEvent, { kind: "tool" }>; live?: boolean }) {
   const [open, setOpen] = React.useState(false);
   const summary = resultSummary(event.result);
 
@@ -135,10 +160,15 @@ function FileToolItem({ event }: { event: Extract<TraceEvent, { kind: "tool" }> 
         aria-expanded={event.result ? open : undefined}
         className={cn(
           "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1 text-left text-meta",
-          event.result && "hover:bg-muted cursor-pointer"
+          event.result && "hover:bg-muted cursor-pointer",
+          live && "bg-muted/60"
         )}
       >
-        <FileText className="text-muted-foreground size-3.5 shrink-0" aria-hidden />
+        {live ? (
+          <Loader2 className="text-foreground size-3.5 shrink-0 animate-spin" aria-hidden />
+        ) : (
+          <FileText className="text-muted-foreground size-3.5 shrink-0" aria-hidden />
+        )}
         <span className="text-foreground shrink-0 font-medium">{event.name}</span>
         {event.arg && (
           <code className="text-muted-foreground bg-muted min-w-0 truncate rounded px-1.5 py-0.5 font-mono text-micro">
@@ -165,18 +195,49 @@ function FileToolItem({ event }: { event: Extract<TraceEvent, { kind: "tool" }> 
   );
 }
 
-/** The agent speaking: an avatar-led card bubble on white, blue accent glyph, prose via Markdown. */
-export function SayItem({ text, live }: { text: string; live?: boolean }) {
+/**
+ * The agent speaking: an avatar-led card bubble on white, prose via Markdown.
+ *
+ * While `live` (this is the newest say and the run is in progress) the text is revealed with a
+ * streaming cadence via `StreamingMarkdown`; a finished say renders as static Markdown. The reveal
+ * only animates the not-yet-shown tail, so a re-poll of already-visible text never re-animates.
+ *
+ * Memoised on `(text, live)` so an unchanged completed say does not re-render every 3s poll.
+ */
+export const SayItem = React.memo(function SayItem({ text, live }: { text: string; live?: boolean }) {
   return (
-    <div className="flex items-start gap-3">
+    <div className="enter flex items-start gap-3">
       <span className="bg-accent text-accent-foreground mt-0.5 grid size-7 shrink-0 place-items-center rounded-full" aria-hidden>
         <span className={cn("bg-current size-2 rounded-full", live && "breathe")} />
       </span>
       <div className="min-w-0 flex-1">
         <span className="stamp text-muted-foreground mb-1 block">agent</span>
         <div className="bg-card border-border prose-agent text-foreground elevate-sm rounded-2xl rounded-tl-sm border px-4 py-3">
-          <Markdown>{text}</Markdown>
+          {live ? <StreamingMarkdown text={text} /> : <Markdown>{text}</Markdown>}
         </div>
+      </div>
+    </div>
+  );
+});
+
+/**
+ * The "working…" beat: shown while the run is in progress and the agent is between visible outputs
+ * (thinking, or a tool is executing without streamed prose). Gives the thread a clear, resolving
+ * "the agent is doing something" signal instead of dead air, matching Claude Code web.
+ */
+export function WorkingIndicator({ label = "working" }: { label?: string }) {
+  return (
+    <div className="enter flex items-start gap-3" aria-live="polite">
+      <span className="bg-accent text-accent-foreground mt-0.5 grid size-7 shrink-0 place-items-center rounded-full" aria-hidden>
+        <span className="bg-current breathe size-2 rounded-full" />
+      </span>
+      <div className="text-muted-foreground flex items-center gap-2 pt-1.5 text-meta">
+        <span className="flex items-center gap-1" aria-hidden>
+          <span className="dot dot-1 bg-current size-1.5 rounded-full" />
+          <span className="dot dot-2 bg-current size-1.5 rounded-full" />
+          <span className="dot dot-3 bg-current size-1.5 rounded-full" />
+        </span>
+        <span>{label}…</span>
       </div>
     </div>
   );

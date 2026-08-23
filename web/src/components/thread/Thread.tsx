@@ -10,7 +10,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { ChatContainerContent, ChatContainerRoot, ChatContainerScrollAnchor } from "@/components/ui/chat-container";
 import { ScrollButton } from "@/components/ui/scroll-button";
 import type { TraceEvent } from "@/lib/trace";
-import { AskingItem, LifecycleItem, ObserverItem, SayItem, ToolGroup, YouItem } from "./TraceItems";
+import { AskingItem, LifecycleItem, ObserverItem, SayItem, ToolGroup, WorkingIndicator, YouItem } from "./TraceItems";
 import { SendBar } from "./SendBar";
 
 /** A co-pilot exchange, owned by the parent so it survives switching threads. */
@@ -133,17 +133,24 @@ export function Thread({
           <ChatContainerContent className="mx-auto w-full max-w-3xl gap-6 px-4 pt-8 pb-16 md:px-6">
             {box.task && <YouItem text={box.task} label="task" />}
 
-            {groups.map((g, i) =>
-              g.kind === "lifecycle" ? (
-                <LifecycleItem key={i} label={g.label} detail={g.detail} />
+            {groups.map((g, i) => {
+              const isLast = i === groups.length - 1;
+              const key = groupKey(g, i);
+              return g.kind === "lifecycle" ? (
+                <LifecycleItem key={key} label={g.label} detail={g.detail} />
               ) : g.kind === "tools" ? (
-                <ToolGroup key={i} events={g.events} />
+                <ToolGroup key={key} events={g.events} live={runState === "running" && isLast} />
               ) : g.kind === "you" ? (
-                <YouItem key={i} text={g.text} label="you" />
+                <YouItem key={key} text={g.text} label="you" />
               ) : (
-                <SayItem key={i} text={g.text} live={runState === "running" && i === groups.length - 1} />
-              )
-            )}
+                <SayItem key={key} text={g.text} live={runState === "running" && isLast} />
+              );
+            })}
+
+            {/* The "working…" beat: the run is live but the newest thing on screen is not streaming
+                prose — the agent is thinking, or a tool has just finished and the next output has not
+                landed. Keeps a clear, resolving activity signal instead of dead air between polls. */}
+            {runState === "running" && groups[groups.length - 1]?.kind !== "say" && <WorkingIndicator />}
 
             {!events.length && (
               <LifecycleItem
@@ -204,6 +211,19 @@ type TraceGroup =
   | { kind: "you"; text: string }
   | { kind: "lifecycle"; label: string; detail?: string }
   | { kind: "tools"; events: ToolEvent[] };
+
+/**
+ * A stable key for a render group.
+ *
+ * The trace is append-mostly: earlier blocks are settled, only the tail grows. Keying by position +
+ * kind is therefore stable — a block keeps its identity (and its mounted state) across polls even as
+ * the streaming tail lengthens. Deliberately NOT content-hashed: hashing the text would change the
+ * key every poll while a `say` streams, remounting it and resetting its reveal. Position is stable
+ * here because groups only ever append, and a `you`/`say` never swaps kind under the same index.
+ */
+function groupKey(g: TraceGroup, i: number): string {
+  return `${g.kind}-${i}`;
+}
 
 /** Coalesce runs of `tool` events into one `tools` group; pass prose/you/lifecycle through unchanged. */
 function groupTrace(events: TraceEvent[]): TraceGroup[] {
