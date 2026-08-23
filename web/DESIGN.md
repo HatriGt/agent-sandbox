@@ -1,21 +1,44 @@
 # agent-sandbox — Style Reference
 
-> **Modelled on the [CRM AI Agent reference](https://crm-ai-agent-tau.vercel.app/)** (assistant
-> "Rune") — its clean, airy, soft-neutral light aesthetic — mapped onto our domain: a console for
-> delegating coding tasks to ephemeral microVM sandboxes running the Claude Code agent. We clone the
-> reference's *look and feel* (palette, typography, radii, spacing, layout structure, card/pill/bubble
-> styling) but NOT its concepts: there are no CRM nav items (Balances/Customers/Contracts), no fake
-> multi-workspace switcher, and no fabricated agent roster. Every region shows real product data.
+> **Cloned inch-by-inch from the [CRM AI Agent reference](https://crm-ai-agent-tau.vercel.app/)**
+> (assistant "Rune"), studied *live in a browser* at 1440×900 and measured via `getComputedStyle`. We
+> mirror its exact chrome, layout, typography, colours, radii and component shapes, mapped onto our
+> domain: a console for delegating coding tasks to ephemeral microVM sandboxes running the Claude Code
+> agent. We clone the reference's *look and feel* but NOT its concepts: there are no CRM nav items
+> (Balances/Customers/Contracts), no fake multi-workspace switcher, and no fabricated agent roster.
+> Every region shows real product data.
 >
-> Built on **shadcn (neutral base) + prompt-kit + Geist**. The chat surface — the product's core — is
-> composed from prompt-kit's purpose-built AI-chat components (ChatContainer, PromptInput, Steps, Tool,
-> Markdown, ScrollButton) rather than hand-rolled bubbles, so it reads like a real assistant UI. The
-> shell of the console (sidebar, Sandboxes table, command palette) shares the same token base.
-> Run STATE is the loudest signal; geometry is the reference's; nothing is bespoke where a proven part exists.
+> Built on **shadcn (neutral base) + prompt-kit + Inter/Hedvig/Geist Mono**. The chat surface — the
+> product's core — is composed from prompt-kit's purpose-built AI-chat components (ChatContainer,
+> PromptInput, Steps, Tool, Markdown, ScrollButton) rather than hand-rolled bubbles. The shell of the
+> console (sidebar, Sandboxes table, command palette) shares the same token base. Run STATE is the
+> loudest signal; geometry is the reference's; nothing is bespoke where a proven part exists.
 
-**Theme:** dual — **soft-neutral light is the default and primary target** (the reference is light);
-dark is a tuned dark version of the same feel (near-neutral charcoal, not the old blue). Toggled by a
-`dark` class on `<html>`.
+**Theme:** dual — **zinc-on-white light is the default and primary target** (the reference is light);
+dark is a coherent zinc charcoal version of the same feel. Toggled by a `dark` class on `<html>`.
+
+## Extracted reference spec (measured live via getComputedStyle @ 1440×900)
+
+The reference renders **light** when the OS prefers light (it follows `prefers-color-scheme`; we
+forced light via CDP `Emulation.setEmulatedMedia` to measure the intended primary theme).
+
+| Property | Measured value |
+|---|---|
+| Body / UI font | **Inter** (`font-family: Inter, …`), 14px body |
+| Greeting font | **Hedvig Letters Serif** (serif display), ~30px, weight 400 |
+| Mono | none distinct in reference (we keep Geist Mono for machine text) |
+| Canvas / page bg | pure white `rgb(255 255 255)` |
+| Sidebar bg | white, separated by a single hairline `border-r` (no float, no gap) |
+| Card / panel bg | white |
+| Border / hairline | zinc `~rgb(228 228 231)` (very low chroma, cool) |
+| Primary text | near-black zinc `~rgb(24 24 27)` |
+| Muted / nav-inactive text | zinc `~rgb(113 113 122)` |
+| Accent (active nav fill) | subtle zinc surface fill, not a saturated hue |
+| Sidebar width | ~208–224px (we use 208px / `13rem`) |
+| Radii | tight **6–8px** on cards, nav rows, chips, search pill (`rounded-md`) |
+| Layout | **flat two-column**: `border-r` sidebar + white content, no floating cards |
+| Hero | **left-aligned** serif greeting → subtitle → composer → skill-chip row |
+| Composer | single rounded surface, controls on bottom row |
 
 ## Mapping the reference onto our domain
 
@@ -31,17 +54,17 @@ dark is a tuned dark version of the same feel (near-neutral charcoal, not the ol
 
 ## Foundation
 
-The colour system is a **soft warm-neutral light theme** (canvas hue ~95, very low chroma) with a
-**restrained slate-indigo accent** (hue ~272), modelled on the reference's near-monochrome palette:
-white floating cards on a faint warm canvas, colour reserved for the single accent and functional
-state hues. Defined once in `index.css` under `:root` (light) and `.dark`. There is no runtime theme
-provider — the `useTheme` hook in `App.tsx` toggles the `dark` class on `document.documentElement`
-and persists to `localStorage`. Tailwind v4 reads the tokens through `@theme inline`.
+The colour system is a **cool zinc-on-white light theme** (near-zero chroma, cool hue ~275) matching
+the reference's near-monochrome palette: white sidebar and content separated by a hairline, colour
+reserved for the single accent and functional state hues. Defined once in `index.css` under `:root`
+(light) and `.dark`. There is no runtime theme provider — the `useTheme` hook in `App.tsx` toggles the
+`dark` class on `document.documentElement` and persists to `localStorage`. Tailwind v4 reads the
+tokens through `@theme inline`.
 
 ### Key patterns cloned from the reference
 
-- **Floating shell** — sidebar and workspace are detached, `rounded-2xl`, softly elevated cards on a
-  breathing canvas.
+- **Flat shell** — the sidebar is a flat white column separated from the content by a single
+  `border-r` hairline (no float, no gap, no elevation), exactly like the reference.
 - **"N tools used" pill** (`ToolGroup`) — consecutive tool calls fold into one summary pill that
   expands to the individual terminal panels / tool rows.
 - **Clarifying-question-with-buttons** (`AskingItem`) — when the agent halts with a question that
@@ -101,39 +124,43 @@ State is the one exception to "one accent": working (accent), needs-you (amber),
 (red) each carry a functional hue, but **always** with a glyph + word (see `stamp.tsx`) so colour is
 never the sole carrier.
 
-## Typography — Geist
+## Typography — Inter + Hedvig Letters Serif (the reference's exact faces)
 
-- **Geist Variable** (sans) — the single UI face. Vercel's product/dev-UI grotesk, self-hosted variable
-  via `@fontsource-variable/geist` (no Google Fonts request, no FOUT, offline-correct).
-- **Geist Mono Variable** — machine text only: identifiers, vitals (tabular), tool calls, log output,
-  stamps.
+Both are freely available and self-hosted via fontsource (no Google Fonts request, no FOUT,
+offline-correct):
 
-Geist is wired in `main.tsx` (self-hosted variable fonts) and set as `--font-sans` / `--font-mono` in
-the `@theme inline` block, so Tailwind's `font-sans` / `font-mono` and the `body` default both use it.
+- **Inter Variable** (sans) — the single UI/body face, matching the reference's measured
+  `font-family: Inter`. Via `@fontsource-variable/inter`.
+- **Hedvig Letters Serif** — the greeting/display serif, matching the reference's hero. Via
+  `@fontsource/hedvig-letters-serif`. Used through `font-serif` on the Hub greeting.
+- **Geist Mono Variable** — machine text only (identifiers, vitals, tool calls, log output, stamps).
+  The reference has no distinct mono face; we keep Geist Mono because the product needs one.
 
-### Type Scale (dense console; agent prose is the one step-up)
+Wired in `main.tsx` (self-hosted) and set as `--font-sans` / `--font-serif` / `--font-mono` in the
+`@theme inline` block.
+
+### Type Scale (matched to the reference)
 
 | Role | Size | Line height |
 |---|---|---|
 | stamp | 10.5px | 1.2 (0.06em, uppercase, mono) |
 | micro | 11px | 1.4 |
 | meta | 13px | 1.5 |
-| body | 14px | 1.6 |
-| prose (agent output, read) | 16px | 1.65 (`max-width: 72ch`) |
-| h3 | 18px | 1.35 |
-| h2 | 22px | 1.25 |
-| h1 | 28px | 1.15 |
-| display | 34px | 1.1 |
+| body | 14px | 1.5 |
+| prose (agent output, read) | 15px | 1.65 |
+| h3 | 16px | 1.4 |
+| h2 | 20px | 1.4 |
+| h1 (greeting) | 30px | 1.2 (**serif**, weight 400) |
+| display | 30px | 1.2 |
 
-`.prose-agent` is the single place type steps up (16px), because it is read, not scanned.
+The greeting is the one place type steps up into the serif face at 30px/400, exactly as the reference.
 
-## Shapes — medium radii (reference feel)
+## Shapes — tight radii (reference feel)
 
-`--radius` is `0.875rem`; `--radius-sm/md/lg/xl` derive from it in `@theme inline`. Cards and the
-floating shell use `rounded-2xl`, list rows / nav items / palette rows use `rounded-xl`/`rounded-lg`,
-and chips (starters, answer buttons, the "N tools used" pill, the Search pill) are `rounded-full` to
-match the reference's soft, airy geometry. The only genuinely round things are the live dot and
-avatars (`--radius-pill`).
+The reference uses **6–8px** corners throughout. Cards, nav items, chips, the Search pill and "New
+task" button all use `rounded-md`; the composer uses `rounded-xl`. Only genuinely round things (live
+dot, avatars, send button) use `--radius-pill`. No `rounded-2xl` floating-card treatment — the shell
+is flat with a hairline `border-r`.
 
 ## Motion
 

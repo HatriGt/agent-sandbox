@@ -153,18 +153,19 @@ export default function App() {
   return (
     <TooltipProvider delayDuration={400}>
       <Toaster position="bottom-center" />
-      {/* Floating shell: the canvas breathes around two detached, elevated cards (rail + workspace).
-          The rail column narrows to a slim icon strip when collapsed. */}
+      {/* Flat shell (reference): a thin 208px sidebar divided from the workspace by a single hairline
+          border — not floating cards on a tinted canvas. The rail narrows to a slim icon strip when
+          collapsed. */}
       <div
         className={cn(
-          "grid h-full grid-cols-1 gap-0 p-0 md:gap-3 md:p-3",
-          collapsed ? "md:grid-cols-[4rem_minmax(0,1fr)]" : "md:grid-cols-[clamp(17rem,23vw,20rem)_minmax(0,1fr)]"
+          "grid h-full grid-cols-1",
+          collapsed ? "md:grid-cols-[4rem_minmax(0,1fr)]" : "md:grid-cols-[13rem_minmax(0,1fr)]"
         )}
       >
-      {/* ───────────── machines (floating rail) ───────────── */}
+      {/* ───────────── machines (flat rail) ───────────── */}
       <aside
         className={cn(
-          "bg-card flex min-h-0 flex-col overflow-hidden border-r md:rounded-2xl md:border md:elevate",
+          "bg-card flex min-h-0 flex-col overflow-hidden border-r",
           threadOpen && "hidden md:flex"
         )}
       >
@@ -244,13 +245,13 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }))}
-                className="text-ash hover:text-ink hover:border-[var(--line-strong)] flex w-full cursor-pointer items-center gap-2.5 rounded-xl border bg-[var(--surface)] px-3 py-2.5 text-left text-meta transition-colors"
+                className="text-ash hover:text-ink hover:bg-[var(--surface)] flex w-full cursor-pointer items-center gap-2.5 rounded-md border px-3 py-2 text-left text-meta transition-colors"
               >
                 <Search className="size-4 shrink-0" aria-hidden />
                 <span className="flex-1">Search</span>
-                <kbd className="stamp rounded-md border bg-[var(--card)] px-1.5 py-0.5">⌘K</kbd>
+                <kbd className="stamp rounded border bg-[var(--surface)] px-1.5 py-0.5">⌘K</kbd>
               </button>
-              <Button variant="primary" size="default" onClick={newTask} className="w-full justify-center rounded-xl">
+              <Button variant="primary" size="default" onClick={newTask} className="w-full justify-center rounded-md">
                 <Plus />
                 New task
               </Button>
@@ -323,10 +324,10 @@ export default function App() {
         )}
       </aside>
 
-      {/* ───────────── main (floating workspace) ───────────── */}
+      {/* ───────────── main (flat workspace) ───────────── */}
       <main
         className={cn(
-          "bg-card flex min-h-0 min-w-0 flex-col overflow-hidden md:rounded-2xl md:border md:elevate",
+          "bg-background flex min-h-0 min-w-0 flex-col overflow-hidden",
           !threadOpen && "hidden md:flex"
         )}
       >
@@ -403,11 +404,11 @@ function NavItem({
       onClick={onClick}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "relative flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 text-left text-meta transition-colors",
+        "relative flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-body transition-colors",
         "[&_svg]:size-4",
         active
           ? "bg-accent text-accent-foreground font-medium"
-          : "text-ash hover:text-ink hover:bg-[var(--surface)]"
+          : "text-[var(--nav-ink)] hover:text-ink hover:bg-[var(--surface)]"
       )}
     >
       {icon}

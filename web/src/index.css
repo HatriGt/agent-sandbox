@@ -52,34 +52,40 @@
   --color-attention-text: var(--attention-text);
   --color-ok: var(--ok);
 
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
+  /* Radii — the reference uses tight 6–8px corners (nav rows 6px, cards 8px), NOT big pills. */
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
   --radius-xl: calc(var(--radius) + 4px);
   --radius-bubble: calc(var(--radius) + 2px);
   --radius-pill: 9999px;
 
-  --font-sans: "Geist Variable", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  /* Fonts cloned from the reference: Inter for all UI/body, Hedvig Letters Serif for the greeting.
+     Geist Mono is retained for machine text (the reference has no distinct mono face). */
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-serif: "Hedvig Letters Serif", ui-serif, Georgia, "Times New Roman", serif;
   --font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
 
+  /* Type scale measured off the reference: body/UI 14px Inter, h1 greeting 30px serif (weight 400,
+     lh 36px), h2 20px Inter medium. */
   --text-micro: 11px;
   --text-micro--line-height: 1.4;
   --text-meta: 13px;
   --text-meta--line-height: 1.5;
   --text-body: 14px;
-  --text-body--line-height: 1.6;
+  --text-body--line-height: 1.5;
   --text-lead: 15px;
   --text-lead--line-height: 1.55;
-  --text-prose: 16px;
-  --text-prose--line-height: 1.6;
-  --text-h3: 18px;
-  --text-h3--line-height: 1.35;
-  --text-h2: 22px;
-  --text-h2--line-height: 1.25;
-  --text-h1: 28px;
-  --text-h1--line-height: 1.15;
-  --text-display: 34px;
-  --text-display--line-height: 1.1;
+  --text-prose: 15px;
+  --text-prose--line-height: 1.65;
+  --text-h3: 16px;
+  --text-h3--line-height: 1.4;
+  --text-h2: 20px;
+  --text-h2--line-height: 1.4;
+  --text-h1: 30px;
+  --text-h1--line-height: 1.2;
+  --text-display: 30px;
+  --text-display--line-height: 1.2;
 }
 
 /*
@@ -87,94 +93,97 @@
  * .dark swaps the same token names. Everything else in the app derives from these.
  */
 :root {
-  --radius: 0.875rem;
+  --radius: 0.5rem;
 
-  /* Light theme modelled on the CRM AI Agent reference: a soft warm-neutral canvas (hue ~95, very
-     low chroma) so WHITE floating panels read as gently raised cards above it. The accent is a
-     restrained slate-indigo (hue ~265) used sparingly — the reference is almost monochrome, letting
-     content and state carry the colour. */
-  --background: oklch(0.975 0.003 95);
-  --foreground: oklch(0.24 0.008 275);
+  /* Light theme = EXACT reference palette (crm-ai-agent-tau), measured with getComputedStyle in the
+     light scheme: a PURE WHITE canvas (the sidebar is flat, divided by a hairline — not a floating
+     card on a tinted field), cool near-neutral zinc text, 10%-black hairlines, and zinc-100 as the
+     hover/active fill. It is near-monochrome: the accent is a restrained zinc-950 ink, colour is
+     reserved for functional state. */
+  --background: oklch(1 0 0); /* #ffffff */
+  --foreground: oklch(0.21 0.006 285.9); /* zinc-950 #09090b */
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.24 0.008 275);
+  --card-foreground: oklch(0.21 0.006 285.9);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.24 0.008 275);
-  --primary: oklch(0.46 0.11 272);
-  --primary-foreground: oklch(0.99 0.002 275);
-  --secondary: oklch(0.955 0.004 95);
-  --secondary-foreground: oklch(0.32 0.012 275);
-  --muted: oklch(0.965 0.003 95);
-  --muted-foreground: oklch(0.52 0.008 275);
-  --accent: oklch(0.94 0.008 275);
-  --accent-foreground: oklch(0.34 0.03 272);
+  --popover-foreground: oklch(0.21 0.006 285.9);
+  --primary: oklch(0.21 0.006 285.9); /* zinc-950 ink — the reference's fills/CTA are near-black */
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.967 0.001 286.4); /* zinc-100 */
+  --secondary-foreground: oklch(0.21 0.006 285.9);
+  --muted: oklch(0.967 0.001 286.4); /* zinc-100 */
+  --muted-foreground: oklch(0.552 0.016 285.9); /* zinc-500 #71717a */
+  --accent: oklch(0.967 0.001 286.4); /* zinc-100 — active nav row / hover fill (#f4f4f5) */
+  --accent-foreground: oklch(0.21 0.006 285.9);
   --destructive: oklch(0.577 0.222 27.3);
-  --border: oklch(0.915 0.004 95);
-  --input: oklch(0.9 0.005 95);
-  --ring: oklch(0.46 0.11 272);
+  --border: oklch(0 0 0 / 0.1); /* rgba(0,0,0,0.1) hairline */
+  --input: oklch(0 0 0 / 0.12);
+  --ring: oklch(0.21 0.006 285.9);
 
   /* app vocabulary (light) */
-  --surface: oklch(0.968 0.003 95);
+  --surface: oklch(0.967 0.001 286.4); /* zinc-100 hover/active rows */
   --raised: oklch(1 0 0);
-  --trace: oklch(0.26 0.012 275);
-  --trace-fg: oklch(0.95 0.004 95);
-  --azure-text: var(--primary);
+  --trace: oklch(0.21 0.006 285.9); /* terminal ground — near-black zinc */
+  --trace-fg: oklch(0.96 0.001 286.4);
+  --azure-text: var(--foreground);
   --attention: oklch(0.8 0.12 78);
   --attention-text: oklch(0.53 0.11 66);
   --ok: oklch(0.58 0.1 155);
 
-  /* elevation for floating panels (sidebar, palette, popovers) — soft, low-contrast, per reference */
-  --elevate: 0 1px 2px oklch(0.3 0.01 275 / 0.05), 0 12px 32px -12px oklch(0.3 0.02 275 / 0.12);
-  --elevate-sm: 0 1px 2px oklch(0.3 0.01 275 / 0.06), 0 4px 12px -6px oklch(0.3 0.02 275 / 0.1);
+  /* elevation — the reference's cards use only a whisper of shadow (0 1px 2px rgba(0,0,0,.05)). */
+  --elevate: 0 1px 2px oklch(0 0 0 / 0.05);
+  --elevate-sm: 0 1px 2px oklch(0 0 0 / 0.05);
 
   /* legacy raw-var aliases so existing markup renders on the shadcn base without per-line edits */
   --canvas: var(--background);
-  --accent-text: var(--primary);
+  --accent-text: var(--foreground);
   --accent-fg: var(--primary-foreground);
   --line: var(--border);
-  --line-strong: color-mix(in oklch, var(--border) 55%, var(--muted-foreground));
+  --line-strong: oklch(0 0 0 / 0.18);
+  --nav-ink: oklch(0.442 0.017 285.9); /* zinc-600 — inactive nav labels in the reference */
 }
 
 .dark {
-  /* A dark version of the same reference feel: near-neutral charcoal (hue ~275) with the same
-     low-chroma slate-indigo accent, lifted for legibility on the dark ground. Not the old blue. */
-  --background: oklch(0.185 0.006 275);
-  --foreground: oklch(0.96 0.004 95);
-  --card: oklch(0.225 0.007 275);
-  --card-foreground: oklch(0.96 0.004 95);
-  --popover: oklch(0.225 0.007 275);
-  --popover-foreground: oklch(0.96 0.004 95);
-  --primary: oklch(0.72 0.1 272);
-  --primary-foreground: oklch(0.18 0.02 275);
-  --secondary: oklch(0.28 0.008 275);
-  --secondary-foreground: oklch(0.96 0.004 95);
-  --muted: oklch(0.28 0.008 275);
-  --muted-foreground: oklch(0.72 0.008 275);
-  --accent: oklch(0.32 0.02 275);
-  --accent-foreground: oklch(0.9 0.02 272);
+  /* A coherent dark version of the same cool-zinc feel: near-neutral charcoal ground, zinc text,
+     and a light ink lifted for legibility as the near-monochrome accent. */
+  --background: oklch(0.185 0.004 286); /* zinc-950-ish ground */
+  --foreground: oklch(0.96 0.001 286);
+  --card: oklch(0.21 0.005 286); /* zinc-900 */
+  --card-foreground: oklch(0.96 0.001 286);
+  --popover: oklch(0.21 0.005 286);
+  --popover-foreground: oklch(0.96 0.001 286);
+  --primary: oklch(0.92 0.001 286); /* near-white ink CTA on dark */
+  --primary-foreground: oklch(0.21 0.005 286);
+  --secondary: oklch(0.274 0.006 286); /* zinc-800 */
+  --secondary-foreground: oklch(0.96 0.001 286);
+  --muted: oklch(0.274 0.006 286);
+  --muted-foreground: oklch(0.705 0.015 286); /* zinc-400 */
+  --accent: oklch(0.274 0.006 286); /* zinc-800 active/hover fill */
+  --accent-foreground: oklch(0.96 0.001 286);
   --destructive: oklch(0.704 0.191 22.2);
-  --border: oklch(1 0 0 / 9%);
-  --input: oklch(1 0 0 / 14%);
-  --ring: oklch(0.72 0.1 272);
+  --border: oklch(1 0 0 / 0.1);
+  --input: oklch(1 0 0 / 0.14);
+  --ring: oklch(0.705 0.015 286);
 
   /* app vocabulary (dark) */
-  --surface: oklch(0.235 0.008 275);
-  --raised: oklch(0.27 0.009 275);
-  --trace: oklch(0.155 0.006 275);
-  --trace-fg: oklch(0.9 0.006 95);
-  --azure-text: var(--primary);
+  --surface: oklch(0.244 0.006 286);
+  --raised: oklch(0.244 0.006 286);
+  --trace: oklch(0.145 0.004 286);
+  --trace-fg: oklch(0.9 0.004 286);
+  --azure-text: var(--foreground);
   --attention: oklch(0.8 0.12 78);
   --attention-text: oklch(0.83 0.11 76);
   --ok: oklch(0.72 0.13 155);
 
-  --elevate: 0 1px 2px oklch(0 0 0 / 0.4), 0 12px 32px -12px oklch(0 0 0 / 0.55);
-  --elevate-sm: 0 1px 2px oklch(0 0 0 / 0.4), 0 4px 12px -6px oklch(0 0 0 / 0.45);
+  --elevate: 0 1px 2px oklch(0 0 0 / 0.4), 0 12px 32px -12px oklch(0 0 0 / 0.5);
+  --elevate-sm: 0 1px 2px oklch(0 0 0 / 0.4);
 
   /* legacy raw-var aliases so existing markup renders on the shadcn base without per-line edits */
   --canvas: var(--background);
-  --accent-text: var(--primary);
+  --accent-text: var(--foreground);
   --accent-fg: var(--primary-foreground);
   --line: var(--border);
-  --line-strong: color-mix(in oklch, var(--border) 55%, var(--muted-foreground));
+  --line-strong: oklch(1 0 0 / 0.18);
+  --nav-ink: oklch(0.705 0.015 286); /* zinc-400 — inactive nav labels (dark) */
 }
 
 /* Utilities prompt-kit's chat-container + our scrollers expect from a shadcn base stylesheet. */

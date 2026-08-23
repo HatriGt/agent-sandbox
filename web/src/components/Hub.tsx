@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowRight, ArrowUp, Bug, ClipboardCheck, FileSearch, FlaskConical, GitBranch, Layers, Loader2, Sparkles } from "lucide-react";
+import { ArrowRight, ArrowUp, Bug, ClipboardCheck, FileSearch, FlaskConical, GitBranch, Layers, Loader2 } from "lucide-react";
 import { api, type BoxView } from "@/lib/api";
 import { shortName, threadTitle } from "@/lib/format";
 import { Button } from "@/components/ui/button";
@@ -137,36 +137,16 @@ export function Hub({
     <div className="h-full min-w-0 overflow-y-auto">
       <div
         className={cn(
-          "mx-auto flex min-h-full w-full max-w-3xl flex-col gap-8 px-5 py-10",
-          hasHistory ? "justify-start pt-[8vh]" : "justify-center"
+          "mx-auto flex min-h-full w-full max-w-2xl flex-col gap-6 px-6 py-10",
+          hasHistory ? "justify-start pt-[10vh]" : "justify-center"
         )}
       >
-        <div className="text-center">
-          <span className="text-ash mb-3 inline-flex items-center gap-1.5 text-meta">
-            <Sparkles className="text-azure-text size-4" aria-hidden />
-            agent-sandbox
-          </span>
-          <h1 className="text-ink text-h1 leading-[1.05] font-semibold tracking-[-0.03em] sm:text-display">
-            {greeting()}
-          </h1>
-          <p className="text-ash mx-auto mt-3 max-w-[52ch] text-h3 leading-snug">
+        {/* Left-aligned serif greeting + subtitle, mirroring the reference's hero register. */}
+        <div>
+          <h1 className="text-ink font-serif text-h1 font-normal">{greeting()}</h1>
+          <p className="text-ash mt-1.5 max-w-[52ch] text-body">
             Where should we start? Describe a task and a fresh microVM will pick it up.
           </p>
-        </div>
-
-        {/* starters — each prefills a real task, as reference-style quick-action chips */}
-        <div className="flex flex-wrap justify-center gap-2">
-          {STARTERS.map((s) => (
-            <button
-              key={s.label}
-              type="button"
-              onClick={() => applyStarter(s)}
-              className="text-ash hover:text-ink flex cursor-pointer items-center gap-2 rounded-full border bg-[var(--card)] px-3.5 py-2 text-meta transition-colors hover:bg-[var(--surface)] hover:border-[var(--line-strong)] [&_svg]:size-3.5"
-            >
-              {s.icon}
-              {s.label}
-            </button>
-          ))}
         </div>
 
         {/* composer */}
@@ -177,7 +157,7 @@ export function Hub({
           onValueChange={setTask}
           onSubmit={submit}
           isLoading={busy}
-          className="bg-card rounded-2xl border-[var(--line)] elevate-sm"
+          className="bg-card rounded-xl border-[var(--line)] elevate-sm"
         >
           <label htmlFor="new-task" className="sr-only">
             Describe the task for a new machine
@@ -220,7 +200,7 @@ export function Hub({
           </div>
         </PromptInput>
 
-        <p className="text-ash -mt-5 min-h-4 text-center text-micro">
+        <p className="text-ash -mt-4 min-h-4 text-micro">
           {error ? (
             <span className="text-[var(--danger)]" role="alert">
               {error}
@@ -229,6 +209,22 @@ export function Hub({
             "Enter boots a machine · no repo runs a task-only machine"
           )}
         </p>
+
+        {/* Skill chips row — reference places quick actions as a wrapping pill row under the composer.
+            Each prefills a real task rather than inserting a bare category. */}
+        <div className="-mt-2 flex flex-wrap gap-2">
+          {STARTERS.map((s) => (
+            <button
+              key={s.label}
+              type="button"
+              onClick={() => applyStarter(s)}
+              className="text-[var(--nav-ink)] hover:text-ink flex cursor-pointer items-center gap-2 rounded-md border bg-[var(--card)] px-3 py-1.5 text-meta transition-colors hover:bg-[var(--surface)] [&_svg]:size-3.5"
+            >
+              {s.icon}
+              {s.label}
+            </button>
+          ))}
+        </div>
 
         {/* this session — real, and honest about what does not persist */}
         {sessionRuns.length > 0 && (
