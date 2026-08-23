@@ -9,6 +9,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseTrace, resultSummary, clean } from "../web/src/lib/trace.ts";
 import { normalizeBlocks } from "../web/src/lib/markdown-normalize.ts";
+import { doneLabel, isFailedExit } from "../web/src/lib/format.ts";
 
 const REAL_LOG = [
   "● session started (model ak-claude-opus-4.8)",
@@ -117,6 +118,56 @@ test("normalizeBlocks leaves fenced code untouched (no boundary rewrites inside 
   const md = ["```sh", "# not a heading", "echo a | grep b", "```"].join("\n");
   const out = normalizeBlocks(md);
   assert.equal(out, md, "fence content is preserved verbatim");
+});
+
+test("a ⟦you⟧ follow-up parses as a `you` event at its chronological position", () => {
+  // The resume path stamps the user's follow-up into the log BEFORE the agent's next output. The
+  // parser must place the `you` event between the previous agent turn and the response it triggered —
+  // the order bug was rendering the user message after the response instead of before it.
+  const log = [
+    "Even numbers: 2, 4, 6, 8, 10.",
+    "⟦you⟧",
+    "now show odd numbers",
+    "⟦/you⟧",
+    "Odd numbers: 1, 3, 5, 7, 9.",
+  ].join("\n");
+  const ev = parseTrace(log);
+  assert.deepEqual(
+    ev.map((e) => e.kind),
+    ["say", "you", "say"]
+  );
+  if (ev[1].kind === "you") assert.equal(ev[1].text, "now show odd numbers");
+  // The response must come AFTER the user turn, never before it.
+  if (ev[2].kind === "say") assert.match(ev[2].text, /Odd numbers/);
+});
+
+test("a multi-line ⟦you⟧ follow-up keeps its lines and does not absorb the agent reply", () => {
+  const log = ["⟦you⟧", "line one", "line two", "⟦/you⟧", "Agent reply here."].join("\n");
+  const ev = parseTrace(log);
+  assert.equal(ev.length, 2);
+  if (ev[0].kind === "you") assert.equal(ev[0].text, "line one\nline two");
+  if (ev[1].kind === "say") assert.equal(ev[1].text, "Agent reply here.");
+});
+
+test("an unclosed ⟦you⟧ block (log tail cut) still emits the user turn, not silence", () => {
+  const ev = parseTrace(["Some agent text.", "⟦you⟧", "the follow-up"].join("\n"));
+  const you = ev.find((e) => e.kind === "you");
+  assert.ok(you, "the user turn survives even without a close marker");
+  if (you && you.kind === "you") assert.equal(you.text, "the follow-up");
+});
+
+test("a clean exit shows no code badge; a non-zero exit does", () => {
+  // exit 0 read like an error to the user, so success is labelled "done" with no code. A real
+  // failure keeps its code and is flagged as failed (rendered red by StateStamp).
+  assert.equal(doneLabel(0), "done");
+  assert.equal(isFailedExit(0), false);
+  assert.equal(doneLabel(1), "exit 1");
+  assert.equal(isFailedExit(1), true);
+  assert.equal(doneLabel(137), "exit 137");
+  assert.equal(isFailedExit(137), true);
+  // Unknown exit is treated as not-clean: keep a badge so a lost code is visible, not hidden.
+  assert.equal(doneLabel(undefined), "exit ?");
+  assert.equal(isFailedExit(undefined), false);
 });
 
 test("an indented line that is NOT after a tool call stays prose", () => {

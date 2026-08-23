@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { doneLabel, isFailedExit } from "@/lib/format";
 import type { RunState } from "@/lib/api";
 
 /**
@@ -9,7 +10,9 @@ import type { RunState } from "@/lib/api";
 const TONE: Record<RunState, { cls: string; glyph: string; word: (exit?: number) => string }> = {
   running: { cls: "text-azure-text", glyph: "●", word: () => "working" },
   waiting: { cls: "text-[var(--attention-text)]", glyph: "❚❚", word: () => "needs you" },
-  done: { cls: "text-ash", glyph: "■", word: (e) => `exit ${e ?? "?"}` },
+  // Success is just "done" — surfacing "exit 0" reads like an error code to a non-engineer. Only a
+  // non-zero (or unknown) exit earns the code, which is then also coloured red below.
+  done: { cls: "text-ash", glyph: "■", word: (e) => doneLabel(e) },
   idle: { cls: "text-ash", glyph: "○", word: () => "idle" },
 };
 
@@ -24,7 +27,7 @@ export function StateStamp({
 }) {
   const t = TONE[state];
   // A non-zero exit is a failure — surface it in red rather than neutral slate.
-  const cls = state === "done" && exitCode != null && exitCode !== 0 ? "text-[var(--danger)]" : t.cls;
+  const cls = state === "done" && isFailedExit(exitCode) ? "text-[var(--danger)]" : t.cls;
   return (
     <span className={cn("stamp inline-flex items-center gap-1.5", cls, className)}>
       <span aria-hidden className={cn("text-[8px] leading-none", state === "running" && "breathe")}>

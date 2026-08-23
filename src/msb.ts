@@ -564,6 +564,12 @@ const DONE_MARK = "/workspace/.agent.done"; // written with the exit code when t
 const RUN_MARK = "/workspace/.agent.running"; // present while a run is in flight
 const TASK_MARK = "/workspace/.agent.task"; // the current task/follow-up text, so `monitor` can show it
 
+// Sentinels the resume path writes into the log to record a user follow-up as a first-class turn.
+// The trace parser (web/src/lib/trace.ts) recognises the same pair and emits a `you` event, so the
+// user's message is persisted in the durable log and ordered correctly relative to agent output.
+const YOU_MARK_OPEN = "⟦you⟧";
+const YOU_MARK_CLOSE = "⟦/you⟧";
+
 /**
  * Build the background agent command. The agent runs headless and DETACHED so `msb exec` returns
  * immediately (fixing the MCP response timeout): delegate returns the session id in seconds while
@@ -586,10 +592,20 @@ function agentSh(workdir: string, resume: boolean): string {
     `--append-system-prompt "$AGENT_SYS_PROMPT" --allowedTools ${ALLOWED_TOOLS}`;
   // Clear any pending question up front: a new run or a resume (which carries the answer) means the
   // previous question is now handled, so status stops reporting "waiting".
+  // On resume, stamp the user's follow-up into the durable log BEFORE Claude runs, so the dashboard
+  // reconstructs the turn from one source of truth (the log) instead of ephemeral browser state:
+  // this fixes both the ordering (the `you` line lands before the new agent output, so it renders
+  // above the response it triggered) and the persistence (it survives a page refresh). The `⟦you⟧`
+  // sentinel is a line the trace parser turns into a `you` event; `⟦/you⟧` closes a multi-line
+  // message so trailing agent prose is never absorbed into it.
+  const echoFollowup = resume
+    ? `{ printf '%s\\n' ${shellQuote(YOU_MARK_OPEN)}; printf '%s\\n' "$AGENT_TASK"; printf '%s\\n' ${shellQuote(YOU_MARK_CLOSE)}; } >> ${AGENT_LOG} && `
+    : ``;
   const inner =
     // Record the current task (from env) so `monitor` can report what this box is doing. First run
     // sets it; a resume appends the follow-up so the marker reflects the latest ask.
     `cd ${workdir} && printf '%s\\n' "$AGENT_TASK" ${resume ? `>> ${TASK_MARK}` : `> ${TASK_MARK}`} && ` +
+    echoFollowup +
     `rm -f ${DONE_MARK} ${QUESTION_MARK} && touch ${RUN_MARK} && ` +
     // pipefail so the recorded exit reflects claude's, not the formatter's. Claude's raw stderr also
     // lands in the log (errors aren't JSON). The formatter appends readable lines to the same log as

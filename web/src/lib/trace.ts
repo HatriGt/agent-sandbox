@@ -21,6 +21,7 @@
 export type TraceEvent =
   | { kind: "lifecycle"; label: string; detail?: string }
   | { kind: "say"; text: string }
+  | { kind: "you"; text: string }
   | { kind: "tool"; name: string; arg?: string; result?: string };
 
 // Written as explicit \u escapes: a literal ESC byte in source is invisible to a reviewer.
@@ -48,6 +49,11 @@ export function clean(raw: string): string {
 const MARKER_RE = /^●\s*(.+)$/;
 /** `→ Write: /workspace/a.md` / `→ Bash: npm test` — a tool call with its headline argument. */
 const TOOL_RE = /^→\s*([A-Za-z_][\w-]*)\s*:?\s*(.*)$/;
+// A user follow-up the resume path stamped into the log: everything between the open and close
+// sentinel is the user's message. Keeping it in the log (not just browser state) is what makes the
+// turn survive a refresh and sit in the right chronological place among the agent's output.
+const YOU_OPEN = "⟦you⟧";
+const YOU_CLOSE = "⟦/you⟧";
 
 /**
  * Parse a log into trace events. Consecutive prose lines coalesce into one `say`; indented lines
@@ -64,7 +70,26 @@ export function parseTrace(rawLog: string): TraceEvent[] {
     prose = [];
   };
 
+  // While inside a ⟦you⟧…⟦/you⟧ block we collect the user's message verbatim, so agent prose that
+  // follows the close marker is never merged into the user's bubble.
+  let you: string[] | null = null;
+
   for (const line of lines) {
+    if (you !== null) {
+      if (line.trim() === YOU_CLOSE) {
+        events.push({ kind: "you", text: you.join("\n").trim() });
+        you = null;
+      } else {
+        you.push(line);
+      }
+      continue;
+    }
+    if (line.trim() === YOU_OPEN) {
+      flushProse();
+      you = [];
+      continue;
+    }
+
     const marker = line.match(MARKER_RE);
     if (marker) {
       flushProse();
@@ -100,6 +125,12 @@ export function parseTrace(rawLog: string): TraceEvent[] {
     }
 
     prose.push(line);
+  }
+  // A ⟦you⟧ block still open at the end (log tail cut mid-message, or the close marker scrolled off):
+  // emit what we have so the user's turn is never dropped.
+  if (you !== null) {
+    const text = you.join("\n").trim();
+    if (text) events.push({ kind: "you", text });
   }
   flushProse();
   return dedupe(events);

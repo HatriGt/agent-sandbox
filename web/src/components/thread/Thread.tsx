@@ -52,6 +52,13 @@ export function Thread({
   // Fold consecutive tool calls into one cluster so the thread reads as prose punctuated by
   // "N tools used" pills (the reference pattern), instead of a wall of individual tool rows.
   const groups = React.useMemo(() => groupTrace(events), [events]);
+  // A reply is echoed optimistically only until the resume path's ⟦you⟧ line reaches the polled log.
+  // Once the trace carries a matching `you` event we drop the local echo, so the message shows once,
+  // in order, and from the durable source (so a refresh keeps it).
+  const pendingReplies = React.useMemo(() => {
+    const persisted = new Set(events.filter((e) => e.kind === "you").map((e) => e.text.trim()));
+    return replies.filter((r) => !persisted.has(r.trim()));
+  }, [replies, events]);
   const runState = snap?.runState ?? box.runState;
   const question = snap?.question ?? box.question;
 
@@ -131,6 +138,8 @@ export function Thread({
                 <LifecycleItem key={i} label={g.label} detail={g.detail} />
               ) : g.kind === "tools" ? (
                 <ToolGroup key={i} events={g.events} />
+              ) : g.kind === "you" ? (
+                <YouItem key={i} text={g.text} label="you" />
               ) : (
                 <SayItem key={i} text={g.text} live={runState === "running" && i === groups.length - 1} />
               )
@@ -145,19 +154,29 @@ export function Thread({
 
             {question && runState === "waiting" && <AskingItem question={question} onAnswer={answer} />}
 
-            {/* What you sent back. The agent log does not echo it, so without this your own
-                message would vanish the moment it was delivered. */}
-            {replies.map((r, i) => (
-              <YouItem key={`reply-${i}`} text={r} label="your answer" />
+            {/* Optimistic echo of a reply you JUST sent, shown only until the durable log catches up.
+                The resume path stamps each follow-up into .agent.log as a ⟦you⟧ turn, which the trace
+                renders inline above its response (correct order) and which survives a refresh — so a
+                reply that already appears as a `you` event must not be echoed again here. */}
+            {pendingReplies.map((r, i) => (
+              <YouItem key={`reply-${i}`} text={r} label="you" />
             ))}
 
             {asides.map((a, i) => (
               <ObserverItem key={`aside-${i}`} question={a.question} answer={a.error ?? a.answer} />
             ))}
 
-            {runState === "done" && (
-              <LifecycleItem label="exited" detail={`code ${snap?.exitCode ?? box.exitCode ?? "?"}`} />
-            )}
+            {runState === "done" &&
+              (() => {
+                // A clean exit is just "completed" — no scary "code 0". A non-zero exit is a real
+                // failure signal, so keep the code (StateStamp already reds it in the header).
+                const code = snap?.exitCode ?? box.exitCode;
+                return code == null || code === 0 ? (
+                  <LifecycleItem label="completed" />
+                ) : (
+                  <LifecycleItem label="exited" detail={`code ${code}`} />
+                );
+              })()}
             <ChatContainerScrollAnchor />
           </ChatContainerContent>
 
@@ -179,13 +198,14 @@ export function Thread({
 
 type ToolEvent = Extract<TraceEvent, { kind: "tool" }>;
 
-/** A render group: prose, a lifecycle hairline, or a cluster of consecutive tool calls. */
+/** A render group: prose, a user turn, a lifecycle hairline, or a cluster of consecutive tool calls. */
 type TraceGroup =
   | { kind: "say"; text: string }
+  | { kind: "you"; text: string }
   | { kind: "lifecycle"; label: string; detail?: string }
   | { kind: "tools"; events: ToolEvent[] };
 
-/** Coalesce runs of `tool` events into one `tools` group; pass prose/lifecycle through unchanged. */
+/** Coalesce runs of `tool` events into one `tools` group; pass prose/you/lifecycle through unchanged. */
 function groupTrace(events: TraceEvent[]): TraceGroup[] {
   const out: TraceGroup[] = [];
   for (const e of events) {
@@ -195,6 +215,8 @@ function groupTrace(events: TraceEvent[]): TraceGroup[] {
       else out.push({ kind: "tools", events: [e] });
     } else if (e.kind === "lifecycle") {
       out.push({ kind: "lifecycle", label: e.label, detail: e.detail });
+    } else if (e.kind === "you") {
+      out.push({ kind: "you", text: e.text });
     } else {
       out.push({ kind: "say", text: e.text });
     }

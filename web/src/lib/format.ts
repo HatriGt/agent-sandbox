@@ -35,3 +35,17 @@ export function threadTitle(v: BoxView): string {
 export function stateNoun(s: RunState): string {
   return s === "waiting" ? "needs you" : s;
 }
+
+/**
+ * Label for a finished run. A clean exit (code 0) is just "done" — showing "exit 0" reads like an
+ * error to anyone who isn't a shell user. A non-zero (or unknown) exit keeps the code as a real
+ * failure signal; the caller styles that case distinctly (red).
+ */
+export function doneLabel(exitCode?: number): string {
+  return exitCode === 0 ? "done" : `exit ${exitCode ?? "?"}`;
+}
+
+/** Whether a finished run should be styled as a failure (non-zero exit). */
+export function isFailedExit(exitCode?: number): boolean {
+  return exitCode != null && exitCode !== 0;
+}
