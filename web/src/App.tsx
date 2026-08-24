@@ -104,7 +104,13 @@ export default function App() {
   // a minute out), so we show a booting thread with the submitted task from the moment it's sent —
   // the user watches the machine come up rather than staring at the Hub. Cleared when the delegate
   // resolves to a box (which we then select) or errors (which returns to the Hub).
-  const [booting, setBooting] = React.useState<string | null>(null);
+  //
+  // `known` snapshots the box names that existed at submit time: a warm claim (or a cold boot)
+  // surfaces a NEW box in monitor.json within ~1-2s (a poll tick), long before `delegate.json`
+  // resolves. As soon as that new box appears we attach to its real Thread — so a warm claim never
+  // sits on the "booting a fresh microVM" placeholder. `warm` on the boot state is inferred from the
+  // role of that new box (pool-claimed = warm fast path; session = cold boot) so the copy is honest.
+  const [booting, setBooting] = React.useState<{ task: string; known: Set<string>; warm: boolean } | null>(null);
   const [pending, setPending] = React.useState<{ id: string; task: string }[]>([]);
   const [asides, setAsides] = React.useState<Record<string, Aside[]>>({});
   // Replies this browser sent, per machine: the server keeps no transcript of them.
@@ -126,6 +132,24 @@ export default function App() {
     if (booting) return;
     if (selected && data && !boxes.some((b) => b.name === selected)) setSelected(null);
   }, [selected, data, boxes, booting]);
+
+  // Attach to the delegated box the instant it surfaces. A warm claim (fast path) and a cold boot
+  // both appear in monitor.json as a box that wasn't there at submit time; the FIRST such new box is
+  // ours. Selecting it swaps the transient BootingThread for the real, SSE-streaming Thread within a
+  // poll tick — so a warm claim is never misreported as "booting a fresh microVM". We also record
+  // whether it's warm (pool-claimed) purely to keep the placeholder copy honest for the sub-second
+  // window before this fires. `Hub.onStarted` still runs when delegate.json resolves; `open()` there
+  // is idempotent with this (same box), and it also persists the run to session history.
+  React.useEffect(() => {
+    if (!booting) return;
+    const fresh = boxes.find((b) => !booting.known.has(b.name));
+    if (!fresh) return;
+    const warm = fresh.role === "pool-claimed";
+    if (warm !== booting.warm) setBooting((prev) => (prev ? { ...prev, warm } : prev));
+    setSelected(fresh.name);
+    setBooting(null);
+    setView("chat");
+  }, [booting, boxes]);
 
   const open = (name: string) => {
     setBooting(null);
@@ -369,7 +393,7 @@ export default function App() {
               onBack={backToRail}
             />
           ) : booting && !selectedBox ? (
-            <BootingThread task={booting} onBack={backToRail} />
+            <BootingThread task={booting.task} warm={booting.warm} onBack={backToRail} />
           ) : selectedBox ? (
             <Thread
               box={selectedBox}
@@ -397,7 +421,7 @@ export default function App() {
             <Hub
               boxes={boxes}
               sessionRuns={runs}
-              onBooting={(task) => setBooting(task)}
+              onBooting={(task) => setBooting({ task, known: new Set(boxes.map((b) => b.name)), warm: false })}
               onStarted={(box, task) => {
                 remember(box, task);
                 open(box);

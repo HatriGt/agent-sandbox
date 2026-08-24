@@ -1,17 +1,23 @@
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { bootingLabel } from "@/lib/booting";
 import { WorkingIndicator, YouItem } from "./TraceItems";
 
 /**
  * The thread shown from the instant a task is delegated until the assigned machine is known.
  *
  * `delegate` does not return a box id until the run reaches a boundary (a question or completion),
- * which can be a minute out — but the user asked for a machine and should be watching it come up,
- * not left on the Hub wondering if the click registered. So this stands in immediately: the task
- * they sent, echoed as their turn, and a booting rail. App swaps it for the real Thread the moment
- * the delegate resolves to a box.
+ * which can be a minute out — but the assigned box surfaces in monitor.json within a poll tick, and
+ * App attaches to its real Thread the moment it does. So this only stands in for the brief window
+ * before the box id is known: the task they sent, echoed as their turn, and a booting rail.
+ *
+ * `warm` keeps the copy honest for that window: a warm claim reuses a pre-booted box (no microVM
+ * boot), so it says "Starting your task on a warm sandbox…"; a cold boot is a genuine fresh microVM.
+ * When we don't yet know (the very first frame), `warm` is false and we say "Assigning" rather than
+ * asserting a cold boot that may not happen.
  */
-export function BootingThread({ task, onBack }: { task: string; onBack: () => void }) {
+export function BootingThread({ task, warm, onBack }: { task: string; warm: boolean; onBack: () => void }) {
+  const label = bootingLabel(warm);
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
       <header className="flex items-center gap-2 border-b px-3 py-2.5 md:px-6">
@@ -39,7 +45,7 @@ export function BootingThread({ task, onBack }: { task: string; onBack: () => vo
           <YouItem text={task} label="task" />
 
           <div className="flex flex-col gap-2.5">
-            <WorkingIndicator label="booting a fresh microVM" />
+            <WorkingIndicator label={label} />
             <p className="text-muted-foreground ml-10 text-meta">
               Handing it your task — its live output will appear here as soon as it starts working.
             </p>

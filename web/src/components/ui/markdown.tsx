@@ -4,6 +4,7 @@ import { memo, useId, useMemo } from "react"
 import ReactMarkdown, { type Components } from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { normalizeBlocks } from "@/lib/markdown-normalize"
+import { isCodeBlock } from "@/lib/markdown-code"
 import { CodeBlock, CodeBlockCode } from "./code-block"
 
 export type MarkdownProps = {
@@ -26,11 +27,16 @@ function extractLanguage(className?: string): string {
 
 const INITIAL_COMPONENTS: Partial<Components> = {
   code: function CodeComponent({ className, children, ...props }) {
-    const isInline =
-      !props.node?.position?.start.line ||
-      props.node?.position?.start.line === props.node?.position?.end.line
+    // Block vs inline, decided by CONTENT not source geometry. The old heuristic
+    // (start.line === end.line → inline) misclassified any fenced block whose content happens to be
+    // one line, and worse, sent multi-line fenced content down the inline <span> path — collapsing
+    // code/JSON/ASCII art into a proportional-font, whitespace-normalized blob. A node is a block
+    // whenever it carries a `language-*` class (always set by remark for a fenced ``` block) OR its
+    // text contains a newline (a fenced block with no language, e.g. plain ASCII art). Only genuine
+    // single-line inline code (`like this`) takes the <span> path.
+    const text = typeof children === "string" ? children : Array.isArray(children) ? children.join("") : ""
 
-    if (isInline) {
+    if (!isCodeBlock(className, text)) {
       return (
         <span
           className={cn(
@@ -48,7 +54,7 @@ const INITIAL_COMPONENTS: Partial<Components> = {
 
     return (
       <CodeBlock className={className}>
-        <CodeBlockCode code={children as string} language={language} />
+        <CodeBlockCode code={text} language={language} />
       </CodeBlock>
     )
   },
