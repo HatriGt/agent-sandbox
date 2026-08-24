@@ -494,12 +494,21 @@ function askHookScript(): string {
  * so the terminal panel streams tool calls and messages live. It also re-emits the final result text
  * so `status`/completion still sees the summary. Pure Node (always in the image); no deps.
  */
-function streamFmtScript(): string {
+/**
+ * Marks a tool result the model reported as an error (`is_error`). The trace parser strips it and
+ * flags the tool call as failed, so a command that errored does not read as a normal success.
+ */
+export const ERR_MARK = "⟦err⟧";
+
+export function streamFmtScript(): string {
   const js =
     `const fs=require("fs");` +
     `const out=process.argv[2];` +
     `function w(s){try{fs.appendFileSync(out,s+"\\n")}catch(e){}}` +
     `let buf="";` +
+    // Every assistant text block already written, so the run's final `result` (which IS one of them,
+    // normally the last) is not appended a second time.
+    `const seenText=new Set();` +
     `process.stdin.setEncoding("utf8");` +
     `process.stdin.on("data",d=>{buf+=d;let i;while((i=buf.indexOf("\\n"))>=0){const line=buf.slice(0,i);buf=buf.slice(i+1);handle(line)}});` +
     `process.stdin.on("end",()=>{if(buf.trim())handle(buf)});` +
@@ -508,13 +517,26 @@ function streamFmtScript(): string {
     `try{` +
     `if(e.type==="system"&&e.subtype==="init"){w("● session started (model "+(e.model||"?")+")");return}` +
     `if(e.type==="assistant"&&e.message){for(const b of e.message.content||[]){` +
-    `if(b.type==="text"&&b.text.trim())w(b.text.trim());` +
-    `else if(b.type==="tool_use"){const inp=b.input||{};const arg=inp.command||inp.file_path||inp.path||inp.pattern||inp.description||"";w("→ "+b.name+(arg?": "+String(arg).slice(0,200):""))}` +
+    // Trailing "\n" => a BLANK line after each text block. Consecutive assistant text blocks are
+    // separate markdown documents (a table, then a fenced block); glued with a single newline the
+    // renderer reads "| 1 | 2 |```bash" as one paragraph and the fence never opens.
+    `if(b.type==="text"&&b.text.trim()){const t=b.text.trim();seenText.add(t);w(t+"\\n")}` +
+    // The headline arg is ONE log line. A multi-line command (a for-loop, a heredoc) otherwise spills
+    // its 2nd..Nth lines into the log as bare text, where the parser reads the indented ones as this
+    // tool's "result" and the rest as agent prose — the real output then lands in a stray say block.
+    `else if(b.type==="tool_use"){const inp=b.input||{};const arg=String(inp.command||inp.file_path||inp.path||inp.pattern||inp.description||"").replace(/\\s*\\n\\s*/g," ").trim();w("→ "+b.name+(arg?": "+arg.slice(0,200):""))}` +
     `}return}` +
     `if(e.type==="user"&&e.message){for(const b of e.message.content||[]){` +
-    `if(b.type==="tool_result"){const r=txt(b.content).trim();if(r)w("  "+r.split("\\n").slice(0,20).join("\\n  "))}` +
+    // Cap the result at 20 lines, but SAY SO. Silently dropping the tail made a truncated listing
+    // look like the command's complete output.
+    // A FAILED tool call is marked, so the UI can show it failed. Without this a command that errored
+    // renders exactly like one that succeeded — its stderr just looks like ordinary output.
+    `if(b.type==="tool_result"){const r=txt(b.content).trim();if(r){const ls=r.split("\\n");const head=ls.slice(0,20);if(ls.length>20)head.push("… "+(ls.length-20)+" more lines");w("  "+(b.is_error?"${ERR_MARK} ":"")+head.join("\\n  "))}}` +
     `}return}` +
-    `if(e.type==="result"){if(e.result&&String(e.result).trim())w(String(e.result).trim());return}` +
+    // Re-emit the run's final result ONLY when it is not simply the assistant text we already wrote.
+    // Claude's `result` IS the last assistant message, so the unconditional re-emit appended the
+    // whole closing summary a second time — the duplicate the reader sees at the end of every run.
+    `if(e.type==="result"){const r=e.result?String(e.result).trim():"";if(r&&!seenText.has(r))w(r);return}` +
     `}catch(_){}}`;
   // base64 the whole script and decode in the box: shipping a large JS blob through
   // shell/SSH/msb-exec quoting was corrupting it (trailing garbage → SyntaxError at load).

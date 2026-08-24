@@ -22,7 +22,7 @@ export type TraceEvent =
   | { kind: "lifecycle"; label: string; detail?: string }
   | { kind: "say"; text: string }
   | { kind: "you"; text: string }
-  | { kind: "tool"; name: string; arg?: string; result?: string };
+  | { kind: "tool"; name: string; arg?: string; result?: string; failed?: boolean };
 
 // Written as explicit \u escapes: a literal ESC byte in source is invisible to a reviewer.
 const ESC = "\u001b";
@@ -52,6 +52,9 @@ const TOOL_RE = /^→\s*([A-Za-z_][\w-]*)\s*:?\s*(.*)$/;
 // A user follow-up the resume path stamped into the log: everything between the open and close
 // sentinel is the user's message. Keeping it in the log (not just browser state) is what makes the
 // turn survive a refresh and sit in the right chronological place among the agent's output.
+// The formatter (src/msb.ts ERR_MARK) stamps this on the first line of a tool_result the model
+// reported as an error, so the UI can distinguish a failed call from a successful one.
+const ERR_MARK = "⟦err⟧";
 const YOU_OPEN = "⟦you⟧";
 const YOU_CLOSE = "⟦/you⟧";
 
@@ -119,7 +122,13 @@ export function parseTrace(rawLog: string): TraceEvent[] {
     const last = events[events.length - 1];
     const isResultLine = /^\s{2,}\S/.test(line) || (line.trim() === "" && last?.kind === "tool" && !!last.result);
     if (isResultLine && prose.length === 0 && last?.kind === "tool") {
-      const body = line.replace(/^\s{2}/, "");
+      let body = line.replace(/^\s{2}/, "");
+      // The formatter prefixes an errored tool_result's first line with the error sentinel. Strip it
+      // and flag the call, so the UI can show the failure instead of printing a sentinel at the user.
+      if (body.startsWith(ERR_MARK)) {
+        last.failed = true;
+        body = body.slice(ERR_MARK.length).trimStart();
+      }
       last.result = last.result ? `${last.result}\n${body}` : body;
       continue;
     }

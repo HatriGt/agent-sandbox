@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ChevronRight, Eye, FileText, Loader2, PauseCircle, Terminal, Wrench } from "lucide-react";
+import { AlertTriangle, ChevronRight, Eye, FileText, Loader2, PauseCircle, Terminal, Wrench } from "lucide-react";
 import { resultSummary, type TraceEvent } from "@/lib/trace";
 import { Markdown } from "@/components/ui/markdown";
 import { StreamingMarkdown } from "./StreamingMarkdown";
@@ -109,11 +109,14 @@ function ShellItem({ event, live }: { event: Extract<TraceEvent, { kind: "tool" 
         <div className="border-border/60 flex items-center gap-2 border-b px-3 py-1.5">
           {live ? (
             <Loader2 className="text-ok size-3 shrink-0 animate-spin" aria-hidden />
+          ) : event.failed ? (
+            <AlertTriangle className="text-destructive size-3 shrink-0" aria-hidden />
           ) : (
             <Terminal className="text-trace-fg/60 size-3 shrink-0" aria-hidden />
           )}
           <span className="stamp text-trace-fg/55">{event.name}</span>
           {live && <span className="stamp text-ok/80">running</span>}
+          {!live && event.failed && <span className="stamp text-destructive">failed</span>}
           {hasOutput && (
             <button
               type="button"
@@ -166,6 +169,8 @@ function FileToolItem({ event, live }: { event: Extract<TraceEvent, { kind: "too
       >
         {live ? (
           <Loader2 className="text-foreground size-3.5 shrink-0 animate-spin" aria-hidden />
+        ) : event.failed ? (
+          <AlertTriangle className="text-destructive size-3.5 shrink-0" aria-hidden />
         ) : (
           <FileText className="text-muted-foreground size-3.5 shrink-0" aria-hidden />
         )}
