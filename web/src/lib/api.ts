@@ -82,6 +82,10 @@ export const api = {
   watch: (session: string, signal?: AbortSignal) =>
     fetch(url("/watch.json", { session }), { headers: authHeaders, signal }).then(parse<WatchSnapshot>),
 
+  /** URL for the live SSE log stream. EventSource can't set headers, so the token rides in the query. */
+  watchStreamUrl: (session: string, from = 0) =>
+    url("/watch.sse", from > 0 ? { session, from: String(from) } : { session }),
+
   /** Read-only observer. Cannot steer the agent, by design. */
   ask: (session: string, question: string, newThread = false) =>
     post<AskResult>("/ask.json", { session, question, newThread }),

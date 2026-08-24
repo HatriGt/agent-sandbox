@@ -19,6 +19,12 @@ export function usePoll<T>(fn: (signal: AbortSignal) => Promise<T>, intervalMs: 
   fnRef.current = fn;
 
   React.useEffect(() => {
+    // A non-positive interval disables polling entirely — used when a live stream is the source of
+    // truth, so the fallback poll never fires (and never spins in a setTimeout(run, 0) hot loop).
+    if (intervalMs <= 0) {
+      setLive(false);
+      return;
+    }
     let cancelled = false;
     let timer: number | undefined;
     let controller: AbortController | null = null;

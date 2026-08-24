@@ -1,0 +1,69 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { diffLog, metaOf, isTerminal, sseFrame } from "../src/watch-sse.ts";
+import type { WatchSnapshot } from "../src/monitor.ts";
+
+test("diffLog: unchanged log yields none", () => {
+  const d = diffLog(10, "0123456789");
+  assert.equal(d.kind, "none");
+  assert.equal(d.chunk, "");
+  assert.equal(d.offset, 10);
+});
+
+test("diffLog: grown log yields only the new tail as append", () => {
+  const d = diffLog(5, "hello world");
+  assert.equal(d.kind, "append");
+  assert.equal(d.chunk, " world");
+  assert.equal(d.offset, "hello world".length);
+});
+
+test("diffLog: from zero appends the whole log", () => {
+  const d = diffLog(0, "abc");
+  assert.equal(d.kind, "append");
+  assert.equal(d.chunk, "abc");
+  assert.equal(d.offset, 3);
+});
+
+test("diffLog: shrunk log resets wholesale (client replaces buffer)", () => {
+  const d = diffLog(20, "short");
+  assert.equal(d.kind, "reset");
+  assert.equal(d.chunk, "short");
+  assert.equal(d.offset, 5);
+});
+
+test("metaOf strips the log body but keeps state fields", () => {
+  const snap: WatchSnapshot = {
+    name: "box-1",
+    boxStatus: "running",
+    runState: "running",
+    exitCode: undefined,
+    task: "do a thing",
+    question: undefined,
+    uptime: "1m",
+    cpu: "0.01 / 1c",
+    mem: "80 MiB",
+    log: "a very long log body",
+  };
+  const m = metaOf(snap);
+  assert.equal("log" in m, false);
+  assert.equal(m.name, "box-1");
+  assert.equal(m.task, "do a thing");
+  assert.equal(m.runState, "running");
+});
+
+test("isTerminal: done and idle are terminal; running/waiting are not", () => {
+  assert.equal(isTerminal("done"), true);
+  assert.equal(isTerminal("idle"), true);
+  assert.equal(isTerminal("running"), false);
+  assert.equal(isTerminal("waiting"), false);
+});
+
+test("sseFrame serialises event/id/data as a valid SSE frame", () => {
+  const frame = sseFrame("append", { chunk: "hi" }, 42);
+  assert.equal(frame, 'event: append\nid: 42\ndata: {"chunk":"hi"}\n\n');
+});
+
+test("sseFrame omits id when not provided", () => {
+  const frame = sseFrame("snapshot", { a: 1 });
+  assert.equal(frame, 'event: snapshot\ndata: {"a":1}\n\n');
+});

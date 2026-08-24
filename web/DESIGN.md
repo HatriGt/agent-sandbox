@@ -209,3 +209,45 @@ Claude-Code-web bar while streaming real tasks (research prose, shell-heavy, tab
 
 Library note: prefer prompt-kit's vendored `ResponseStream` over adding framer-motion — the motion is
 small and CSS keyframes cover it, so **no new dependency**.
+
+## Real streaming — SSE replaces the 3s client poll
+
+The client-simulated reveal (above) made *completed* text arrive smoothly, but the DATA still landed
+on a 3s poll. This pass makes the data itself live: agent output now reaches the browser sub-second.
+
+### Why SSE + server-side fast-tail (not `tail -f` over SSH, not WebSocket)
+
+The box never pushes to the controller — the in-box agent writes NDJSON that a formatter turns into
+`/workspace/.agent.log`, which the controller reads over a multiplexed SSH channel (`gatherWatch`).
+So "live" = the CONTROLLER tails fast and pushes deltas to browsers. SSE fits perfectly: one-way,
+text, auto-reconnecting, works through Traefik, no extra protocol. A streamed `tail -f` over SSH
+would spawn one long-lived remote process per viewer (leak risk on disconnect); instead each viewer
+runs one bounded `setTimeout` loop calling the existing `gatherWatch` every **800ms**, reusing the
+SSH mux — no new processes, and it stops the instant the client disconnects.
+
+### Endpoint — `GET /watch.sse?session=<id>&token=<t>&from=<offset>`
+
+- **Auth**: token via `?token=` (EventSource can't set headers), checked by the same `dashAuthed`
+  as every other data route. 401 without it — fail-closed. Tokens are never logged.
+- **Frames** (`src/watch-sse.ts`, pure/unit-tested delta math):
+  - `snapshot` — meta (state/vitals) + full log from the requested offset (first frame).
+  - `append` — only the new tail bytes since the client's offset (the common, cheap case).
+  - `reset` — full log when it shrank/diverged (rare dedupe re-emit); client replaces its buffer.
+  - `state` — meta changed (runState/exitCode/question) with no new log bytes.
+  - `done` — terminal (`done`/`idle`); server then ends the stream so it stops hitting SSH.
+  - `:` heartbeat every 15s so proxies keep the idle pipe open.
+- **Offset/reconnect**: each frame's SSE `id:` is the byte offset. EventSource replays it as
+  `Last-Event-ID` on auto-reconnect (also accepted as `?from=`), so a blip resumes with only the
+  missed tail — never a full re-send.
+- **Cleanup**: `req.on("close")` stops the loop; the terminal `done` also stops it. Bounded to one
+  timer per viewer → host load is O(viewers), same SSH mux as the old poll but only while watched.
+
+### Frontend
+
+- `api.watchStreamUrl(session)` builds the tokened URL; `useWatchStream` (new hook) opens the
+  EventSource, rebuilds the full log from `snapshot`+`append`/`reset`, and yields a normal
+  `WatchSnapshot` — so trace parsing + the StreamingMarkdown reveal are unchanged, just fed fresher.
+- `Thread.tsx` prefers the stream; `usePoll` is the **fallback**, disabled (interval 0) whenever the
+  stream is healthy so there is **no double-fetch**. If SSE never connects, `ok` stays false and the
+  3s poll takes over transparently. `/watch.json` is untouched and kept as that fallback.
+- Bundle impact: **none** (EventSource is native; hook is ~1kB). No new dependency.

@@ -4,6 +4,7 @@ import { api, type BoxView, type WatchSnapshot } from "@/lib/api";
 import { POLL_MS, roleLabel, shortName, threadTitle } from "@/lib/format";
 import { parseTrace } from "@/lib/trace";
 import { usePoll } from "@/hooks/usePoll";
+import { useWatchStream } from "@/hooks/useWatchStream";
 import { Button } from "@/components/ui/button";
 import { StateStamp } from "@/components/ui/stamp";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -46,7 +47,16 @@ export function Thread({
   onNew: () => void;
   onTornDown: (name: string) => void;
 }) {
-  const { data: snap } = usePoll<WatchSnapshot>((signal) => api.watch(box.name, signal), POLL_MS, [box.name]);
+  // Prefer the live SSE stream (sub-second appends). Poll only as a FALLBACK — it runs solely while
+  // the stream is not healthy, so we never double-fetch the same thread. When SSE is up the poll hook
+  // is disabled (interval 0 = never fires) and the stream snapshot wins.
+  const stream = useWatchStream(box.name, true);
+  const { data: polled } = usePoll<WatchSnapshot>(
+    (signal) => api.watch(box.name, signal),
+    stream.ok ? 0 : POLL_MS,
+    [box.name, stream.ok]
+  );
+  const snap = stream.snap ?? polled;
 
   const events = React.useMemo(() => parseTrace(snap?.log ?? ""), [snap?.log]);
   // Fold consecutive tool calls into one cluster so the thread reads as prose punctuated by

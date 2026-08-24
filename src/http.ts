@@ -21,6 +21,7 @@ import { refillPool } from "./pool.js";
 import { checkBearer, checkDashboardAuth } from "./http-auth.js";
 import { gatherMonitor, gatherWatch, askInBox, driverStateLine } from "./msb.js";
 import { runDelegateFlow } from "./delegate-flow.js";
+import { streamWatch } from "./watch-sse.js";
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -152,6 +153,36 @@ app.get("/watch.json", async (req: Request, res: Response) => {
   } catch (e) {
     res.status(500).json({ error: String((e as Error).message ?? e) });
   }
+});
+
+// Live stream of one box's log over SSE. The browser opens an EventSource (which can't set headers),
+// so auth rides on ?token= exactly like /dashboard. The controller fast-tails the log server-side and
+// pushes only deltas; the old /watch.json poll stays as the fallback for clients/proxies without SSE.
+app.get("/watch.sse", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const session = typeof req.query.session === "string" ? req.query.session : "";
+  if (!session) {
+    res.status(400).json({ error: "session query param required" });
+    return;
+  }
+  // Resume offset: prefer the SSE-standard Last-Event-ID (set automatically by EventSource on
+  // reconnect), fall back to an explicit ?from=. Either lets a reconnect skip re-sending the log.
+  const lastEventId = Number(req.headers["last-event-id"]);
+  const fromQuery = Number(req.query.from);
+  const from = Number.isFinite(lastEventId) && lastEventId > 0
+    ? lastEventId
+    : Number.isFinite(fromQuery) && fromQuery > 0
+      ? fromQuery
+      : 0;
+
+  const stop = streamWatch(res, {
+    session,
+    from,
+    read: (s) => gatherWatch(cfg, s),
+  });
+  // Stop the server-side tail the instant the browser goes away (tab closed, navigated, network drop)
+  // so a disconnected viewer never keeps hitting SSH for a box no one is watching.
+  req.on("close", stop);
 });
 
 // Ask the box's READ-ONLY co-pilot a question (what `ask` does over MCP). POST so the question isn't
