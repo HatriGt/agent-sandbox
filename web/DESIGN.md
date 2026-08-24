@@ -251,3 +251,55 @@ SSH mux — no new processes, and it stops the instant the client disconnects.
   stream is healthy so there is **no double-fetch**. If SSE never connects, `ok` stays false and the
   3s poll takes over transparently. `/watch.json` is untouched and kept as that fallback.
 - Bundle impact: **none** (EventSource is native; hook is ~1kB). No new dependency.
+
+## Responsiveness across viewports
+
+Measured live via CDP device-metrics + DOM geometry (not screenshots) at 390 / 768 / 1024 / 1440.
+
+### Bug found (390px mobile): the Hub was unreachable
+
+The shell is a two-column grid on `md+` (rail + workspace). On mobile it collapses to one column and
+shows a single pane at a time. The old logic keyed pane visibility on `threadOpen` — so the workspace
+`<main>` (which contains the **Hub**, the primary "start a task" surface) was `display:none` whenever
+no thread was open. Result: on a phone you saw the machines rail but **could not reach the Hub or its
+composer at all** (measured: `h1 "Good morning"` and the `<textarea>` both computed to `display:none`,
+0×0). Tapping "New task" set `selected=null` which left `threadOpen` false → nothing appeared.
+
+768 / 1024 / 1440 were all clean (no horizontal overflow; rail 208px + workspace fills the rest; Hub
+composer shown and comfortably sized).
+
+### Fix — an explicit mobile single-pane model
+
+`App.tsx` now tracks `mobileRail` (starts true = the rail/list is the mobile home). Navigating INTO
+the workspace (New task, open a box, switch to Sandboxes) sets it false → the workspace pane shows;
+the in-workspace **"← Machines"** back control (added to Hub and Sandboxes headers, `md:hidden`;
+Thread/BootingThread already had one) sets it true → back to the rail. On `md+` the grid shows both
+panes so `mobileRail` only toggles the mobile `hidden`/`flex` classes and is visually inert. No new
+breakpoints; the existing coarse-pointer 44px rule and the table/`<pre>` `overflow-x:auto` already
+handle tap targets and wide-output containment.
+
+## SSE `state`-frame debounce
+
+`/watch.sse` previously compared the whole meta blob each tick, so because uptime ticks every second
+it emitted a `state` frame every 800ms even when nothing meaningful changed. `meaningfulStateKey`
+(pure, unit-tested) now keys only on runState / boxStatus / exitCode / question / task — the fields
+that actually flip the UI — so a `state` frame fires only on a real transition. Vitals still ride
+along in whatever frame the meaningful fields trigger, and the thread header's uptime/cpu/mem come
+from the App-level monitor poll anyway, so nothing goes stale. Kills the per-tick chatter without
+touching latency or reconnection.
+
+## Known gap — produced-file artifacts (NOT built; documented deliberately)
+
+The reference surfaced a produced file (e.g. a downloadable PDF card). Today a file the agent writes
+(e.g. the "Research, no repo" starter's `/workspace/report.md`) is surfaced only as a compact `Write`
+tool row (path in a code chip); the file itself lives in the ephemeral box and dies with it — there
+is **no view/download affordance and no endpoint that serves box files**.
+
+Deliberately left as a gap rather than built now, because a real artifact download is not a small,
+safe change: it needs a new token-guarded route that reads an arbitrary path out of a box over SSH,
+and that token can spawn VMs — so it demands careful path-traversal/allowlist confinement (restrict to
+`/workspace`, canonicalize, reject `..`/symlinks), a size cap, and a content-type/inline-vs-attachment
+decision. The right shape is roughly `GET /artifact?session=&path=` → `dashAuthed` → validate the path
+is under `/workspace` → stream `cat` over the existing SSH mux → a distinct "produced file" card in the
+trace (icon + name + size + Download). That is a focused follow-up feature, not a quick polish item, so
+it is captured here for continued goal work instead of half-built.

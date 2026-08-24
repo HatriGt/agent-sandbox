@@ -1,7 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { diffLog, metaOf, isTerminal, sseFrame } from "../src/watch-sse.ts";
+import { diffLog, metaOf, isTerminal, sseFrame, meaningfulStateKey } from "../src/watch-sse.ts";
 import type { WatchSnapshot } from "../src/monitor.ts";
+import type { SnapshotMeta } from "../src/watch-sse.ts";
+
+const baseMeta: SnapshotMeta = {
+  name: "box-1",
+  boxStatus: "running",
+  runState: "running",
+  task: "do a thing",
+};
 
 test("diffLog: unchanged log yields none", () => {
   const d = diffLog(10, "0123456789");
@@ -66,4 +74,35 @@ test("sseFrame serialises event/id/data as a valid SSE frame", () => {
 test("sseFrame omits id when not provided", () => {
   const frame = sseFrame("snapshot", { a: 1 });
   assert.equal(frame, 'event: snapshot\ndata: {"a":1}\n\n');
+});
+
+test("meaningfulStateKey ignores uptime/cpu/mem churn (debounce)", () => {
+  const a = meaningfulStateKey({ ...baseMeta, uptime: "1m", cpu: "0.01 / 1c", mem: "80 MiB" });
+  const b = meaningfulStateKey({ ...baseMeta, uptime: "2m", cpu: "0.42 / 1c", mem: "120 MiB" });
+  // Same run, only vitals ticked → identical key → no state frame emitted.
+  assert.equal(a, b);
+});
+
+test("meaningfulStateKey changes when runState changes", () => {
+  const running = meaningfulStateKey({ ...baseMeta, runState: "running" });
+  const done = meaningfulStateKey({ ...baseMeta, runState: "done", exitCode: 0 });
+  assert.notEqual(running, done);
+});
+
+test("meaningfulStateKey changes when the agent starts waiting on a question", () => {
+  const running = meaningfulStateKey({ ...baseMeta, runState: "running" });
+  const waiting = meaningfulStateKey({ ...baseMeta, runState: "waiting", question: "which env?" });
+  assert.notEqual(running, waiting);
+});
+
+test("meaningfulStateKey changes when exit code changes", () => {
+  const ok = meaningfulStateKey({ ...baseMeta, runState: "done", exitCode: 0 });
+  const fail = meaningfulStateKey({ ...baseMeta, runState: "done", exitCode: 1 });
+  assert.notEqual(ok, fail);
+});
+
+test("meaningfulStateKey changes when boxStatus changes", () => {
+  const running = meaningfulStateKey({ ...baseMeta, boxStatus: "running" });
+  const stopped = meaningfulStateKey({ ...baseMeta, boxStatus: "stopped" });
+  assert.notEqual(running, stopped);
 });

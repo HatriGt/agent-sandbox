@@ -1,5 +1,5 @@
 import * as React from "react";
-import { MessageSquare, PauseCircle, Trash2 } from "lucide-react";
+import { ArrowLeft, MessageSquare, PauseCircle, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { roleLabel, shortName, threadSort, threadTitle } from "@/lib/format";
@@ -27,10 +27,13 @@ export function Sandboxes({
   boxes,
   onOpen,
   onDestroyed,
+  onBack,
 }: {
   boxes: StableBox[];
   onOpen: (name: string) => void;
   onDestroyed: (name: string) => void;
+  /** Mobile-only: return to the machines rail. */
+  onBack: () => void;
 }) {
   const waiting = boxes.filter((b) => b.runState === "waiting" && !b.leaving);
   const working = boxes.filter((b) => b.runState === "running" && !b.leaving).length;
@@ -41,6 +44,16 @@ export function Sandboxes({
     <div className="h-full min-w-0 overflow-y-auto">
       <div className="mx-auto max-w-[1100px] px-5 py-8 md:px-8 md:py-10">
         <header className="mb-6">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onBack}
+            className="text-ash -ml-2 mb-2 md:hidden"
+            aria-label="Back to machines"
+          >
+            <ArrowLeft className="size-4" />
+            Machines
+          </Button>
           <h1 className="text-ink text-h1 font-bold tracking-[-0.03em]">Sandboxes</h1>
           <p className="text-ash mt-2 max-w-[62ch] text-body">
             Every microVM currently up, and what its agent is doing. Machines stop themselves when

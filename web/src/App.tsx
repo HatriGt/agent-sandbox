@@ -94,6 +94,12 @@ export default function App() {
 
   const [view, setView] = React.useState<View>("chat");
   const [selected, setSelected] = React.useState<string | null>(null);
+  // Mobile is a single-pane device: either the machines rail OR the workspace (Hub/Thread/Sandboxes)
+  // is on screen, never both. `mobileRail` decides which. It starts on the rail (the home/list), and
+  // any navigation INTO the workspace (new task, open a box, switch to sandboxes) flips to the
+  // workspace; the in-workspace "back" controls flip it back. On md+ this is irrelevant — the grid
+  // shows both panes — so it only gates the `hidden`/`flex` classes below at the mobile breakpoint.
+  const [mobileRail, setMobileRail] = React.useState(true);
   // A delegate in flight: the box name is not known until the run reaches a boundary (which can be
   // a minute out), so we show a booting thread with the submitted task from the moment it's sent —
   // the user watches the machine come up rather than staring at the Hub. Cleared when the delegate
@@ -125,11 +131,25 @@ export default function App() {
     setBooting(null);
     setSelected(name);
     setView("chat");
+    setMobileRail(false); // reveal the workspace pane on mobile
   };
   const newTask = () => {
     setBooting(null);
     setSelected(null);
     setView("chat");
+    setMobileRail(false); // the Hub lives in the workspace pane — show it on mobile
+  };
+  /** Mobile-only: leave the workspace pane and return to the machines rail. No-op visually on md+. */
+  const backToRail = () => setMobileRail(true);
+  /** Switch the workspace to a section and reveal it on mobile. */
+  const showChat = () => {
+    setView("chat");
+    setMobileRail(false);
+  };
+  const showSandboxes = () => {
+    setView("sandboxes");
+    setSelected(null);
+    setMobileRail(false);
   };
 
   /** Ask the co-pilot; the pending note renders immediately so the thread never looks frozen. */
@@ -159,8 +179,6 @@ export default function App() {
     }
   };
 
-  const threadOpen = view === "chat" && (!!selectedBox || !!booting);
-
   return (
     <TooltipProvider delayDuration={400}>
       <Toaster position="bottom-center" />
@@ -177,7 +195,9 @@ export default function App() {
       <aside
         className={cn(
           "bg-card flex min-h-0 flex-col overflow-hidden border-r",
-          threadOpen && "hidden md:flex"
+          // Mobile: the rail shows only when `mobileRail` is set; otherwise the workspace has the
+          // screen. On md+ the grid always shows it.
+          mobileRail ? "flex" : "hidden md:flex"
         )}
       >
         <header className={cn("flex items-center gap-2.5 px-3 pt-3 pb-2.5", collapsed && "md:flex-col md:gap-3 md:px-2")}>
@@ -233,17 +253,14 @@ export default function App() {
             <div className="bg-border my-1 h-px w-6" aria-hidden />
             <RailIcon
               active={view === "chat"}
-              onClick={() => setView("chat")}
+              onClick={showChat}
               icon={<MessageSquare />}
               label="Chat"
               dot={waiting.length > 0}
             />
             <RailIcon
               active={view === "sandboxes"}
-              onClick={() => {
-                setView("sandboxes");
-                setSelected(null);
-              }}
+              onClick={showSandboxes}
               icon={<LayoutGrid />}
               label={`Sandboxes${boxes.length ? ` (${boxes.length})` : ""}`}
               badge={boxes.length || undefined}
@@ -271,13 +288,10 @@ export default function App() {
             {/* Primary nav. "Sandboxes" is its own destination: the chat answers "what am I building",
                 this answers "what is running on my VPS, and does any of it need me". */}
             <div className="flex flex-col gap-0.5 px-3 pb-1">
-              <NavItem active={view === "chat"} onClick={() => setView("chat")} icon={<MessageSquare />} label="Chat" />
+              <NavItem active={view === "chat"} onClick={showChat} icon={<MessageSquare />} label="Chat" />
               <NavItem
                 active={view === "sandboxes"}
-                onClick={() => {
-                  setView("sandboxes");
-                  setSelected(null);
-                }}
+                onClick={showSandboxes}
                 icon={<LayoutGrid />}
                 label="Sandboxes"
                 badge={boxes.length || undefined}
@@ -339,7 +353,9 @@ export default function App() {
       <main
         className={cn(
           "bg-background flex min-h-0 min-w-0 flex-col overflow-hidden",
-          !threadOpen && "hidden md:flex"
+          // Mobile: the workspace (Hub/Thread/Sandboxes) shows when the rail is dismissed. On md+ the
+          // grid always shows it beside the rail.
+          mobileRail ? "hidden md:flex" : "flex"
         )}
       >
         <div className="min-h-0 flex-1">
@@ -350,9 +366,10 @@ export default function App() {
               onDestroyed={(name) => {
                 if (selected === name) setSelected(null);
               }}
+              onBack={backToRail}
             />
           ) : booting && !selectedBox ? (
-            <BootingThread task={booting} onBack={newTask} />
+            <BootingThread task={booting} onBack={backToRail} />
           ) : selectedBox ? (
             <Thread
               box={selectedBox}
@@ -362,7 +379,7 @@ export default function App() {
               onReplied={(text) =>
                 setReplies((prev) => ({ ...prev, [selectedBox.name]: [...(prev[selectedBox.name] ?? []), text] }))
               }
-              onBack={() => setSelected(null)}
+              onBack={backToRail}
               onNew={newTask}
               onTornDown={(name) => {
                 setSelected(null);
@@ -389,6 +406,7 @@ export default function App() {
               onPending={(p) => setPending((prev) => [...prev, p])}
               onSettled={(id) => setPending((prev) => prev.filter((p) => p.id !== id))}
               onOpen={open}
+              onBack={backToRail}
             />
           )}
         </div>

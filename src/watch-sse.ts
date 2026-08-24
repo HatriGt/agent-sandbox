@@ -66,6 +66,25 @@ export function metaOf(s: WatchSnapshot): SnapshotMeta {
   return meta;
 }
 
+/**
+ * A signature of the meaningful meta fields — the ones a viewer needs a fresh `state` frame for.
+ *
+ * Deliberately EXCLUDES uptime/cpu/mem: those tick every second, so keying on them made the server
+ * emit a `state` frame every 800ms tick even when nothing the user cares about changed (pure
+ * chatter). Vitals still ride along inside whatever `snapshot`/`state`/`done` frame the meaningful
+ * fields do trigger; they just no longer trigger a frame on their own. runState / boxStatus /
+ * exitCode / question (waiting) are what flip the UI's state, so those still push immediately.
+ */
+export function meaningfulStateKey(m: SnapshotMeta): string {
+  return JSON.stringify({
+    runState: m.runState,
+    boxStatus: m.boxStatus,
+    exitCode: m.exitCode ?? null,
+    question: m.question ?? null,
+    task: m.task ?? null,
+  });
+}
+
 /** True once the run has reached a terminal state and there is nothing more to stream. */
 export function isTerminal(runState: WatchSnapshot["runState"]): boolean {
   return runState === "done" || runState === "idle";
@@ -153,7 +172,7 @@ export function streamWatch(res: Response, opts: StreamWatchOpts): () => void {
       const startOffset = offset > 0 && offset <= snap.log.length ? offset : 0;
       offset = snap.log.length;
       sentSnapshot = true;
-      lastMeta = JSON.stringify(meta);
+      lastMeta = meaningfulStateKey(meta);
       lastRun = snap.runState;
       send(sseFrame("snapshot", { meta, log: initial, from: startOffset }, offset));
     } else {
@@ -162,9 +181,12 @@ export function streamWatch(res: Response, opts: StreamWatchOpts): () => void {
         offset = delta.offset;
         send(sseFrame(delta.kind, { chunk: delta.chunk }, offset));
       }
-      const metaStr = JSON.stringify(meta);
-      if (metaStr !== lastMeta) {
-        lastMeta = metaStr;
+      // Only push a `state` frame when a MEANINGFUL field changed (runState/waiting/exit/box status/
+      // task) — not on every uptime tick. This kills the per-800ms chatter while keeping the UI's
+      // state transitions instant. Vitals still arrive with the next meaningful frame.
+      const key = meaningfulStateKey(meta);
+      if (key !== lastMeta) {
+        lastMeta = key;
         send(sseFrame("state", { meta }, offset));
       }
     }

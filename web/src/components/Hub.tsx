@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowRight, ArrowUp, Bug, ClipboardCheck, FileSearch, FlaskConical, GitBranch, Layers, Loader2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, ArrowUp, Bug, ClipboardCheck, FileSearch, FlaskConical, GitBranch, Layers, Loader2 } from "lucide-react";
 import { api, type BoxView } from "@/lib/api";
 import { shortName, threadTitle } from "@/lib/format";
 import { Button } from "@/components/ui/button";
@@ -79,6 +79,7 @@ export function Hub({
   onPending,
   onSettled,
   onOpen,
+  onBack,
 }: {
   boxes: BoxView[];
   sessionRuns: SessionRun[];
@@ -88,6 +89,8 @@ export function Hub({
   onPending: (p: { id: string; task: string }) => void;
   onSettled: (id: string) => void;
   onOpen: (name: string) => void;
+  /** Mobile-only: return to the machines rail. */
+  onBack: () => void;
 }) {
   const [task, setTask] = React.useState("");
   const [repo, setRepo] = React.useState("");
@@ -154,6 +157,16 @@ export function Hub({
       >
         {/* Left-aligned serif greeting + subtitle, mirroring the reference's hero register. */}
         <div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onBack}
+            className="text-ash -ml-2 mb-2 md:hidden"
+            aria-label="Back to machines"
+          >
+            <ArrowLeft className="size-4" />
+            Machines
+          </Button>
           <h1 className="text-ink font-serif text-h1 font-normal">{greeting()}</h1>
           <p className="text-ash mt-1.5 max-w-[52ch] text-body">
             Where should we start? Describe a task and a fresh microVM will pick it up.
