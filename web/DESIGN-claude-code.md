@@ -87,7 +87,46 @@ visual language (Inter + blue accent), the deviation is called out under **Our s
 6. Keep our streaming reveal + working indicator + tool grouping (already at/above parity).
 7. Warm-neutral is Claude's; we intentionally keep our zinc+blue system (documented deviation).
 
-## 8. Deliberate deviations from Claude (kept on purpose)
+## 8. Reference screenshot — Claude Code shell/system turn (authoritative, 2026-08)
+
+A real Claude Code conversation turn was supplied as the ground truth: a shell/system task showing
+`df -h`-style output on a Debian container, followed by a prose "Summary" section. Measured/observed
+patterns from it, and how we match them:
+
+- **Turn layout:** assistant reply is **full-width prose** — no card, no bubble, no avatar. Matches
+  our `SayItem` (full column, small quiet `agent` label above). ✔
+- **Typography:** body prose is a sans face at ~15px with generous line spacing (~1.6); the
+  **"Summary" heading** is bold, one modest step up from body. Comfortable measure filling the
+  column. Our `.prose-agent` (15px/1.65, h2≈1.2em semibold) matches. ✔
+- **`df -h` / ASCII output renders as a MONOSPACE PREFORMATTED BLOCK, not a GFM table.** The
+  box-drawing/columnar output is a plain fenced block (no language) on a **subtly tinted neutral
+  panel** (distinct from the canvas), whitespace preserved, horizontal scroll for long lines, one
+  hover copy affordance. It is **not** syntax-coloured — plaintext stays uncoloured.
+  - Our pipeline: `isCodeBlock` routes any multi-line/`language-*` content to `CodeBlockCode`; a
+    no-language fence resolves to `text` in Shiki → **no** highlight, matching the reference's plain
+    mono. `whitespace-pre` on the `<pre>` preserves column alignment of ASCII tables. ✔
+- **Code-block surface:** the reference panel is a faint neutral fill, NOT the page white. Our old
+  `bg-card` equalled the pure-white light canvas, so fenced/ASCII blocks were white-on-white (only a
+  hairline). Fixed to **`bg-muted/40`** on the wrapper, and Shiki's baked-in `<pre>` background is
+  forced transparent (`[&>pre]:!bg-transparent`) so highlighted and plain blocks share one neutral
+  surface in both themes. ✔ (this is the primary gap the screenshot exposed)
+- **Tables vs. fences:** genuine GFM tables (`| a | b |`) still render as real tables via
+  `.prose-agent table`; only monospace/columnar shell output stays preformatted. Matches the
+  screenshot (its tabular `df -h` output is preformatted mono, because that is how the tool emitted
+  it — not a markdown table).
+- **Colour:** the reference canvas is warm off-white with dark text; we keep our cool-zinc system
+  (documented deviation below), but ensured the code panel now reads as a distinct surface in both
+  light and dark, and prose text/borders stay legible in both.
+
+### Deliberate deviations we KEEP where they don't conflict with the reference
+- Shell **tool** output (Bash/Shell trace events) still renders in our **dark terminal panels**
+  (`--trace`), richer than Claude's light treatment — our shell-heavy runs benefit and this is a
+  documented product deviation. Markdown-embedded ASCII/preformatted **prose** (the screenshot case)
+  now matches the reference light-neutral panel. If a run emits the `df -h` output as a fenced block
+  in the agent's *say*, it renders exactly like the reference; if it comes through as a Bash tool
+  result, it renders in our terminal panel by design.
+
+## 9. Deliberate deviations from Claude (kept on purpose)
 
 - **Inter + Hedvig Letters Serif** instead of anthropic-sans/serif (product brand).
 - **Blue user bubble** instead of Claude's grey neutral fill (our single filled voice).

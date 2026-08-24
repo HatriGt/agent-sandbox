@@ -12,11 +12,15 @@ function CodeBlock({ children, className, ...props }: CodeBlockProps) {
   return (
     <div
       className={cn(
-        // Claude's fenced block: a light card, 8px corners, a hairline, and a copy affordance that
-        // fades in on hover (the `group` here drives the button's opacity). `relative` anchors the
-        // floating button; `overflow-clip` keeps highlighted content within the rounded corners.
+        // Claude's fenced block: a subtly tinted panel, 8px corners, a hairline, and a copy
+        // affordance that fades in on hover (the `group` here drives the button's opacity).
+        // `relative` anchors the floating button; `overflow-clip` keeps highlighted content within
+        // the rounded corners. The surface is `bg-muted/40`, NOT `bg-card` — in light mode `--card`
+        // equals the pure-white canvas, so a code block would read as white-on-white with only a
+        // hairline. The reference renders fenced/ASCII content on a distinct neutral panel; the
+        // faint muted fill gives the block that surface in both themes.
         "group not-prose relative flex w-full flex-col overflow-clip border",
-        "border-border bg-card text-card-foreground rounded-lg",
+        "border-border bg-muted/40 text-card-foreground rounded-lg",
         className
       )}
       {...props}
@@ -181,8 +185,12 @@ function CodeBlockCode({
 
   const classNames = cn(
     // 14px mono matches the reference (was 13px). `pr-10` reserves room for the floating copy button
-    // so long lines never slide under it.
-    "w-full overflow-x-auto text-[14px] [&>pre]:px-4 [&>pre]:py-3.5 [&>pre]:pr-10",
+    // so long lines never slide under it. Shiki bakes the theme's own page background onto the
+    // generated `<pre>` (github-light = white, github-dark = a slate) — force it transparent so our
+    // `bg-muted/40` panel (set on the CodeBlock wrapper) shows through consistently and highlighted
+    // blocks share the same neutral surface as plain/ASCII ones. `whitespace-pre` preserves the
+    // column alignment of ASCII/box-drawing tables (the `df -h` case) and lets long lines scroll.
+    "w-full overflow-x-auto text-[14px] [&>pre]:!bg-transparent [&>pre]:px-4 [&>pre]:py-3.5 [&>pre]:pr-10 [&>pre]:whitespace-pre",
     className
   )
 
