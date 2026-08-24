@@ -55,6 +55,13 @@ const TOOL_RE = /^→\s*([A-Za-z_][\w-]*)\s*:?\s*(.*)$/;
 // The formatter (src/msb.ts ERR_MARK) stamps this on the first line of a tool_result the model
 // reported as an error, so the UI can distinguish a failed call from a successful one.
 const ERR_MARK = "⟦err⟧";
+// Correlation token (src/msb.ts ID_OPEN/ID_CLOSE) carrying the tail of Claude's `tool_use.id`. It is
+// stamped on the tool call line and on the first line of that call's result, so parallel tool use —
+// one assistant message issuing several calls, whose results arrive together afterwards — attaches
+// each result to its own call. Logs written by an older formatter carry no token; those fall back to
+// "attach to the most recent tool", which is what they have always done.
+const ID_OPEN = "⟦#";
+const TOOL_ID_RE = /\s*⟦#([^⟧]+)⟧\s*/;
 const YOU_OPEN = "⟦you⟧";
 const YOU_CLOSE = "⟦/you⟧";
 
@@ -76,6 +83,13 @@ export function parseTrace(rawLog: string): TraceEvent[] {
   // While inside a ⟦you⟧…⟦/you⟧ block we collect the user's message verbatim, so agent prose that
   // follows the close marker is never merged into the user's bubble.
   let you: string[] | null = null;
+
+  // tool_use id tail -> the tool event it belongs to, so a result block stamped with that id lands
+  // on its own call even when several calls were issued in one message.
+  const byId = new Map<string, Extract<TraceEvent, { kind: "tool" }>>();
+  // The tool the CURRENT result block is being appended to. A block's id is stamped on its first
+  // line only; the remaining lines belong to the same target.
+  let target: Extract<TraceEvent, { kind: "tool" }> | null = null;
 
   for (const line of lines) {
     if (you !== null) {
@@ -110,8 +124,13 @@ export function parseTrace(rawLog: string): TraceEvent[] {
     const tool = line.match(TOOL_RE);
     if (tool) {
       flushProse();
-      const arg = tool[2].trim();
-      events.push({ kind: "tool", name: tool[1], arg: arg || undefined });
+      let arg = tool[2].trim();
+      const id = arg.match(TOOL_ID_RE);
+      if (id) arg = arg.replace(TOOL_ID_RE, " ").trim();
+      const ev: Extract<TraceEvent, { kind: "tool" }> = { kind: "tool", name: tool[1], arg: arg || undefined };
+      events.push(ev);
+      if (id) byId.set(id[1], ev);
+      target = null;
       continue;
     }
 
@@ -120,19 +139,33 @@ export function parseTrace(rawLog: string): TraceEvent[] {
     // spaces, so strip two — not all leading whitespace — to preserve the result's own indentation
     // (diffs, JSON, code) instead of flattening it into an unreadable left-justified blob.
     const last = events[events.length - 1];
-    const isResultLine = /^\s{2,}\S/.test(line) || (line.trim() === "" && last?.kind === "tool" && !!last.result);
-    if (isResultLine && prose.length === 0 && last?.kind === "tool") {
+    const isResultLine = /^\s{2,}\S/.test(line) || (line.trim() === "" && !!target?.result);
+    if (isResultLine && prose.length === 0 && (target || last?.kind === "tool")) {
       let body = line.replace(/^\s{2}/, "");
+      // A result block's first line may carry the correlation token: route the whole block to the
+      // call with that id. Unstamped blocks (old formatter) keep attaching to the most recent tool.
+      const id = body.match(TOOL_ID_RE);
+      if (id && body.trimStart().startsWith(ID_OPEN)) {
+        body = body.replace(TOOL_ID_RE, "");
+        target = byId.get(id[1]) ?? (last?.kind === "tool" ? last : target);
+      } else if (!target) {
+        target = last?.kind === "tool" ? last : null;
+      }
+      if (!target) {
+        prose.push(line);
+        continue;
+      }
       // The formatter prefixes an errored tool_result's first line with the error sentinel. Strip it
       // and flag the call, so the UI can show the failure instead of printing a sentinel at the user.
       if (body.startsWith(ERR_MARK)) {
-        last.failed = true;
+        target.failed = true;
         body = body.slice(ERR_MARK.length).trimStart();
       }
-      last.result = last.result ? `${last.result}\n${body}` : body;
+      target.result = target.result ? `${target.result}\n${body}` : body;
       continue;
     }
 
+    target = null;
     prose.push(line);
   }
   // A ⟦you⟧ block still open at the end (log tail cut mid-message, or the close marker scrolled off):

@@ -500,6 +500,15 @@ function askHookScript(): string {
  */
 export const ERR_MARK = "⟦err⟧";
 
+/**
+ * Correlation token wrapping the last 8 chars of a `tool_use.id`. Stamped on both the `→ Tool: arg`
+ * line and the tool_result block so the parser pairs each result with ITS OWN call under parallel
+ * tool use. Stripped before display, exactly like ERR_MARK; logs without it fall back to the
+ * historical "attach to the most recent tool" behaviour.
+ */
+export const ID_OPEN = "⟦#";
+export const ID_CLOSE = "⟧";
+
 export function streamFmtScript(): string {
   const js =
     `const fs=require("fs");` +
@@ -524,14 +533,17 @@ export function streamFmtScript(): string {
     // The headline arg is ONE log line. A multi-line command (a for-loop, a heredoc) otherwise spills
     // its 2nd..Nth lines into the log as bare text, where the parser reads the indented ones as this
     // tool's "result" and the rest as agent prose — the real output then lands in a stray say block.
-    `else if(b.type==="tool_use"){const inp=b.input||{};const arg=String(inp.command||inp.file_path||inp.path||inp.pattern||inp.description||"").replace(/\\s*\\n\\s*/g," ").trim();w("→ "+b.name+(arg?": "+arg.slice(0,200):""))}` +
+    // Stamp the tool_use id (short tail) so a result can be matched to ITS OWN call. With parallel
+    // tool use one assistant message issues N tool_use blocks and the N results arrive afterwards;
+    // without a correlation token the parser can only attach every result to the most recent call.
+    `else if(b.type==="tool_use"){const inp=b.input||{};const arg=String(inp.command||inp.file_path||inp.path||inp.pattern||inp.description||"").replace(/\\s*\\n\\s*/g," ").trim();w("→ "+b.name+(arg?": "+arg.slice(0,200):"")+(b.id?" ${ID_OPEN}"+String(b.id).slice(-8)+"${ID_CLOSE}":""))}` +
     `}return}` +
     `if(e.type==="user"&&e.message){for(const b of e.message.content||[]){` +
     // Cap the result at 20 lines, but SAY SO. Silently dropping the tail made a truncated listing
     // look like the command's complete output.
     // A FAILED tool call is marked, so the UI can show it failed. Without this a command that errored
     // renders exactly like one that succeeded — its stderr just looks like ordinary output.
-    `if(b.type==="tool_result"){const r=txt(b.content).trim();if(r){const ls=r.split("\\n");const head=ls.slice(0,20);if(ls.length>20)head.push("… "+(ls.length-20)+" more lines");w("  "+(b.is_error?"${ERR_MARK} ":"")+head.join("\\n  "))}}` +
+    `if(b.type==="tool_result"){const r=txt(b.content).trim();const id=b.tool_use_id?"${ID_OPEN}"+String(b.tool_use_id).slice(-8)+"${ID_CLOSE} ":"";if(r){const ls=r.split("\\n");const head=ls.slice(0,20);if(ls.length>20)head.push("… "+(ls.length-20)+" more lines");w("  "+id+(b.is_error?"${ERR_MARK} ":"")+head.join("\\n  "))}else if(id)w("  "+id+(b.is_error?"${ERR_MARK} ":"")+"(no output)")}` +
     `}return}` +
     // Re-emit the run's final result ONLY when it is not simply the assistant text we already wrote.
     // Claude's `result` IS the last assistant message, so the unconditional re-emit appended the

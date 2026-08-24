@@ -54,13 +54,15 @@ function ToolItem({ event, live }: { event: Extract<TraceEvent, { kind: "tool" }
  * summary chip that expands to the individual tool rows/terminal panels. A single tool renders
  * inline with no pill — there is nothing to summarise.
  *
- * `live` marks the whole group as belonging to the in-progress turn; the LAST tool in a live group
- * with no result yet is the one actually executing, so only it gets the running treatment.
+ * `live` marks the whole group as belonging to the in-progress turn; every tool in a live group whose
+ * result has not arrived yet is still executing, so each of those gets the running treatment.
  */
 export function ToolGroup({ events, live }: { events: Extract<TraceEvent, { kind: "tool" }>[]; live?: boolean }) {
   const [open, setOpen] = React.useState(false);
-  const lastRunning = live && !events[events.length - 1]?.result;
-  if (events.length === 1) return <ToolItem event={events[0]} live={lastRunning} />;
+  // With correlated results any tool in the group can still be outstanding — under parallel tool use
+  // the last one often answers first — so "running" is per-tool, not "the last one".
+  const anyRunning = !!live && events.some((e) => !e.result);
+  if (events.length === 1) return <ToolItem event={events[0]} live={anyRunning} />;
 
   const names = [...new Set(events.map((e) => e.name))].slice(0, 4).join(", ");
   return (
@@ -71,17 +73,17 @@ export function ToolGroup({ events, live }: { events: Extract<TraceEvent, { kind
         aria-expanded={open}
         className={cn(
           "flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1 text-left text-meta transition-colors",
-          lastRunning
+          anyRunning
             ? "border-border text-foreground bg-muted/60"
             : "text-muted-foreground hover:text-foreground hover:bg-muted"
         )}
       >
-        {lastRunning ? (
+        {anyRunning ? (
           <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden />
         ) : (
           <Wrench className="size-3.5 shrink-0" aria-hidden />
         )}
-        <span className="font-medium">{lastRunning ? `${events.length} tools · running` : `${events.length} tools used`}</span>
+        <span className="font-medium">{anyRunning ? `${events.length} tools · running` : `${events.length} tools used`}</span>
         <span className="text-muted-foreground/70 hidden min-w-0 truncate font-mono text-micro sm:inline">{names}</span>
         <ChevronRight
           className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-150", open && "rotate-90")}
@@ -91,7 +93,7 @@ export function ToolGroup({ events, live }: { events: Extract<TraceEvent, { kind
       {open && (
         <div className="mt-2.5 flex flex-col gap-2.5 border-l pl-3">
           {events.map((e, i) => (
-            <ToolItem key={i} event={e} live={live && i === events.length - 1 && !e.result} />
+            <ToolItem key={i} event={e} live={live && !e.result} />
           ))}
         </div>
       )}

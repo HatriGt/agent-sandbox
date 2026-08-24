@@ -413,3 +413,67 @@ test("stabilizing prose with no fences changes nothing", async () => {
   const t = "| Check | Command |\n|---|---|\n| a |";
   assert.equal(stabilizeMarkdown(t), t);
 });
+
+// --- parallel tool use: each result must land on its own call -----------------------------------
+// The formatter stamps the tail of Claude's `tool_use.id` as ⟦#id⟧ on the call line and on the first
+// line of that call's result. Without it every result piled onto the most recent call.
+const PARALLEL_LOG = [
+  "● session started (model ak-claude-opus-4.8)",
+  "Running both at once.",
+  "→ Bash: for i in $(seq 1 3); do echo \"row $i\" done ⟦#01aaaaaa⟧",
+  "→ Bash: ls /definitely/not/here ⟦#02bbbbbb⟧",
+  "  ⟦#01aaaaaa⟧ row 1",
+  "  row 2",
+  "  row 3",
+  "  ⟦#02bbbbbb⟧ ⟦err⟧ Exit code 2",
+  "  ls: cannot access '/definitely/not/here': No such file or directory",
+].join("\n");
+
+test("parallel tool calls each keep their own result", () => {
+  const tools = parseTrace(PARALLEL_LOG).filter((e) => e.kind === "tool");
+  assert.equal(tools.length, 2);
+  if (tools[0].kind !== "tool" || tools[1].kind !== "tool") return;
+  // The correlation token is stripped from the displayed arg.
+  assert.equal(tools[0].arg, 'for i in $(seq 1 3); do echo "row $i" done');
+  assert.equal(tools[1].arg, "ls /definitely/not/here");
+  assert.equal(tools[0].result, "row 1\nrow 2\nrow 3");
+  assert.match(tools[1].result ?? "", /^Exit code 2\nls: cannot access/);
+  assert.ok(!(tools[0].result ?? "").includes("⟦"));
+});
+
+test("the failure flag lands only on the tool that actually failed", () => {
+  const tools = parseTrace(PARALLEL_LOG).filter((e) => e.kind === "tool");
+  if (tools[0].kind !== "tool" || tools[1].kind !== "tool") return;
+  assert.equal(tools[0].failed, undefined);
+  assert.equal(tools[1].failed, true);
+});
+
+test("a result stamped out of order still finds its own call", () => {
+  const log = [
+    "→ Bash: echo a ⟦#aaa11111⟧",
+    "→ Bash: echo b ⟦#bbb22222⟧",
+    "  ⟦#bbb22222⟧ b",
+    "  ⟦#aaa11111⟧ a",
+  ].join("\n");
+  const tools = parseTrace(log).filter((e) => e.kind === "tool");
+  if (tools[0].kind !== "tool" || tools[1].kind !== "tool") return;
+  assert.equal(tools[0].result, "a");
+  assert.equal(tools[1].result, "b");
+});
+
+test("an old-format log with no correlation ids parses exactly as before", () => {
+  const old = [
+    "→ Write: /workspace/a.md",
+    "  File created successfully at: /workspace/a.md",
+    "→ Bash: ls /nope",
+    "  ⟦err⟧ Exit code 2",
+    "  ls: cannot access '/nope'",
+  ].join("\n");
+  const tools = parseTrace(old).filter((e) => e.kind === "tool");
+  assert.equal(tools.length, 2);
+  if (tools[0].kind !== "tool" || tools[1].kind !== "tool") return;
+  assert.equal(tools[0].result, "File created successfully at: /workspace/a.md");
+  assert.equal(tools[0].failed, undefined);
+  assert.equal(tools[1].result, "Exit code 2\nls: cannot access '/nope'");
+  assert.equal(tools[1].failed, true);
+});
