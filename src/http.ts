@@ -17,7 +17,7 @@ import { loadConfig } from "./config.js";
 import { registerTools } from "./handlers.js";
 import { makeBridge } from "./server-bridge.js";
 import { deps } from "./deps.js";
-import { refillPool } from "./pool.js";
+import { refillPool, startPoolMaintainer } from "./pool.js";
 import { checkBearer, checkDashboardAuth } from "./http-auth.js";
 import { gatherMonitor, gatherWatch, askInBox, driverStateLine } from "./msb.js";
 import { runDelegateFlow } from "./delegate-flow.js";
@@ -271,4 +271,7 @@ app.listen(cfg.httpPort, cfg.httpHost, () => {
   console.error(`[agent-sandbox] HTTP MCP on ${cfg.httpHost}:${cfg.httpPort} (bearer-guarded)`);
   // Auto-seed the shared warm pool so the first remote delegation is fast too.
   void refillPool(cfg);
+  // Keep it topped up so a warm box is ALWAYS ready, even through a long lull with no delegations
+  // (an unclaimed box idle/max-duration reaped can't trigger its own claim-based reseed).
+  startPoolMaintainer(cfg);
 });

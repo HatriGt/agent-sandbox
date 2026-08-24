@@ -38,6 +38,11 @@ export async function acquireBox(
     if (warm) {
       try {
         await claimWarmBox(cfg, warm, copyDir);
+        // Fast path: a pre-booted, pre-bootstrapped box was claimed. The caller kicks an async
+        // reseed right after so the pool refills to size while this delegation runs.
+        console.error(
+          `[pool] claimed warm box ${warm} (fast path, ${available.length}/${cfg.poolSize} were ready); reseeding to ${cfg.poolSize}`
+        );
         return { box: warm, warm: true };
       } catch (e) {
         // The box went sideways between listing and claiming (desync). Don't hand back a dead box
@@ -48,6 +53,9 @@ export async function acquireBox(
     }
   }
   // Cold path: boot a box named after the session with the repo baked in / copied in.
+  console.error(
+    `[pool] cold boot: pool empty (eligible=${eligible}) — booting a fresh box for ${session}`
+  );
   await createBox(cfg, { name: session, copyDir });
   return { box: session, warm: false };
 }
@@ -63,12 +71,38 @@ export async function refillPool(cfg: Config): Promise<void> {
     // stale msb record ("cannot start: already running"). listPoolBoxes reaps as a side effect.
     const available = await listPoolBoxes(cfg);
     const deficit = cfg.poolSize - available.length;
+    if (deficit <= 0) return;
+    console.error(`[pool] refilling: ${available.length}/${cfg.poolSize} ready — booting ${deficit}`);
     for (let i = 0; i < deficit; i++) {
-      await bootWarmBox(cfg);
+      const name = await bootWarmBox(cfg);
+      console.error(`[pool] warm box ready: ${name}`);
     }
   } catch (e) {
     console.error("[pool] refill failed:", e);
   }
+}
+
+/**
+ * Start a background maintainer that keeps the pool topped to size. A claim-only reseed can't cover
+ * a pool that drained on its own — an unclaimed box hitting max-duration, a boot that failed, or a
+ * long lull. This periodic refill (which reaps dead boxes first, then boots the deficit) is what
+ * makes a warm box ALWAYS ready. Returns a stop handle; unref'd so it never holds the process open.
+ */
+export function startPoolMaintainer(cfg: Config): { stop: () => void } {
+  if (cfg.poolSize <= 0 || !cfg.snapshot || !cfg.egressAllowAll || cfg.poolRefillIntervalMs <= 0) {
+    return { stop: () => {} };
+  }
+  console.error(
+    `[pool] maintainer on: keeping ${cfg.poolSize} warm box(es) ready (every ${Math.round(
+      cfg.poolRefillIntervalMs / 1000
+    )}s)`
+  );
+  const timer = setInterval(() => {
+    void refillPool(cfg);
+  }, cfg.poolRefillIntervalMs);
+  // Don't let the interval keep the event loop (and thus the process) alive on its own.
+  if (typeof timer.unref === "function") timer.unref();
+  return { stop: () => clearInterval(timer) };
 }
 
 /** Current pool status: how many warm boxes are available vs the configured target. */

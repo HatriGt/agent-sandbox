@@ -27,6 +27,18 @@ export interface Config {
   snapshot: string;
   /** Auto-stop after this idle period. */
   idleTimeout: string;
+  /**
+   * Idle timeout for UNCLAIMED warm-pool boxes. A warm box must persist until a delegation claims
+   * it, so this is much longer than a session's idleTimeout — otherwise an unclaimed box idle-stops
+   * (default 15m) and the pool silently drains to empty with no delegation to trigger a reseed.
+   */
+  poolIdleTimeout: string;
+  /**
+   * How often the background pool maintainer reaps dead/idle-stopped boxes and refills to poolSize.
+   * This is what keeps a warm box always ready even when no delegation happens for a long time (a
+   * claim-only reseed can't cover an idle-drained or max-duration-reaped pool). 0 disables it.
+   */
+  poolRefillIntervalMs: number;
   /** Hard cap on box lifetime. */
   maxDuration: string;
   /** Per-box memory cap (e.g. 512M, 1G). */
@@ -145,6 +157,10 @@ export function loadConfig(): Config {
     image: req("MSB_IMAGE", "node"),
     snapshot: process.env.MSB_SNAPSHOT || "",
     idleTimeout: req("MSB_IDLE_TIMEOUT", "15m"),
+    // Warm boxes should outlive a long lull with no delegations; the maintainer replaces any that the
+    // hard max-duration cap reaps. Default well above idleTimeout so the pool doesn't self-drain.
+    poolIdleTimeout: req("MSB_POOL_IDLE_TIMEOUT", "6h"),
+    poolRefillIntervalMs: Number(process.env.MSB_POOL_REFILL_MS ?? "60000"),
     maxDuration: req("MSB_MAX_DURATION", "1h"),
     memory: req("MSB_MEMORY", "1G"),
     maxBoxes: Number(process.env.MSB_MAX_BOXES ?? "5"),

@@ -167,8 +167,10 @@ export async function bootWarmBox(cfg: Config): Promise<string> {
     "-m",
     cfg.memory,
     ...egressFlags(cfg, true), // pooled boxes always boot with open egress
+    // An UNCLAIMED warm box must persist until a delegation claims it, so it uses the longer
+    // poolIdleTimeout (not a session's idleTimeout) — otherwise it idle-stops and the pool drains.
     "--idle-timeout",
-    cfg.idleTimeout,
+    cfg.poolIdleTimeout,
     "--max-duration",
     cfg.maxDuration,
     "--pull",

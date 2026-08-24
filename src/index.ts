@@ -14,7 +14,7 @@ import { loadConfig } from "./config.js";
 import { registerTools } from "./handlers.js";
 import { makeBridge } from "./server-bridge.js";
 import { deps } from "./deps.js";
-import { refillPool } from "./pool.js";
+import { refillPool, startPoolMaintainer } from "./pool.js";
 
 // Load .env next to the project (dist/../.env) so config lives in one gitignored place.
 // Vars already set in the environment (e.g. by the MCP launch config) take precedence.
@@ -31,3 +31,5 @@ await server.connect(transport);
 console.error("[agent-sandbox] MCP server ready (stdio)");
 // Auto-seed the warm pool on start so the first delegation is already fast. Fire-and-forget.
 void refillPool(cfg);
+// Keep it topped up: a claim-only reseed can't cover an idle-drained or max-duration-reaped pool.
+startPoolMaintainer(cfg);
