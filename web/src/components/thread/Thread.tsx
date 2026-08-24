@@ -2,7 +2,7 @@ import * as React from "react";
 import { ArrowLeft, Clock, Cpu, MemoryStick, Plus, Trash2 } from "lucide-react";
 import { api, type BoxView, type WatchSnapshot } from "@/lib/api";
 import { POLL_MS, roleLabel, shortName, threadTitle } from "@/lib/format";
-import { parseTrace } from "@/lib/trace";
+import { parseTrace, producedFiles } from "@/lib/trace";
 import { usePoll } from "@/hooks/usePoll";
 import { useWatchStream } from "@/hooks/useWatchStream";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { ChatContainerContent, ChatContainerRoot, ChatContainerScrollAnchor } fr
 import { ScrollButton } from "@/components/ui/scroll-button";
 import type { TraceEvent } from "@/lib/trace";
 import { AskingItem, LifecycleItem, ObserverItem, SayItem, ToolGroup, WorkingIndicator, YouItem } from "./TraceItems";
+import { ProducedFiles } from "./ProducedFiles";
 import { SendBar } from "./SendBar";
 
 /** A co-pilot exchange, owned by the parent so it survives switching threads. */
@@ -62,6 +63,10 @@ export function Thread({
   // Fold consecutive tool calls into one cluster so the thread reads as prose punctuated by
   // "N tools used" pills (the reference pattern), instead of a wall of individual tool rows.
   const groups = React.useMemo(() => groupTrace(events), [events]);
+  // Files the agent wrote/edited under /workspace this run — surfaced as downloadable artifact cards
+  // below the trace. Derived from the Write/Edit tool calls, so it costs nothing and reflects exactly
+  // what the agent made.
+  const artifacts = React.useMemo(() => producedFiles(events), [events]);
   // A reply is echoed optimistically only until the resume path's ⟦you⟧ line reaches the polled log.
   // Once the trace carries a matching `you` event we drop the local echo, so the message shows once,
   // in order, and from the durable source (so a refresh keeps it).
@@ -170,6 +175,9 @@ export function Thread({
             )}
 
             {question && runState === "waiting" && <AskingItem question={question} onAnswer={answer} />}
+
+            {/* Produced files: view/download cards for what the agent wrote under /workspace this run. */}
+            <ProducedFiles session={box.name} files={artifacts} />
 
             {/* Optimistic echo of a reply you JUST sent, shown only until the durable log catches up.
                 The resume path stamps each follow-up into .agent.log as a ⟦you⟧ turn, which the trace

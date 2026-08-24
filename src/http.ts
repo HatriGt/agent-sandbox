@@ -22,6 +22,7 @@ import { checkBearer, checkDashboardAuth } from "./http-auth.js";
 import { gatherMonitor, gatherWatch, askInBox, driverStateLine } from "./msb.js";
 import { runDelegateFlow } from "./delegate-flow.js";
 import { streamWatch } from "./watch-sse.js";
+import { readArtifact } from "./artifact.js";
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -183,6 +184,54 @@ app.get("/watch.sse", (req: Request, res: Response) => {
   // Stop the server-side tail the instant the browser goes away (tab closed, navigated, network drop)
   // so a disconnected viewer never keeps hitting SSH for a box no one is watching.
   req.on("close", stop);
+});
+
+// Download / preview a file the agent produced inside a box's /workspace. Same dashAuthed guard as
+// the other data routes (Bearer OR ?token= so a browser download link works). Path handling is
+// hostile-input hardened in artifact.ts: pure-layer rejects, then an on-box realpath + regular-file +
+// size check before any bytes are read. Never serves text/html; unknown types force a download.
+app.get("/artifact", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const session = typeof req.query.session === "string" ? req.query.session : "";
+  const path = typeof req.query.path === "string" ? req.query.path : "";
+  if (!session) {
+    res.status(400).json({ error: "session query param required" });
+    return;
+  }
+  if (!path) {
+    res.status(400).json({ error: "path query param required" });
+    return;
+  }
+  try {
+    const result = await readArtifact(cfg, session, path);
+    if ("error" in result) {
+      // Map the confinement/read errors to sensible statuses. A bad path is a 400 (client error),
+      // a missing file / torn-down box is 404, an oversize file is 413.
+      const status =
+        result.error === "bad-path"
+          ? 400
+          : result.error === "not-found"
+            ? 404
+            : result.error === "not-file"
+              ? 400
+              : result.error === "too-large"
+                ? 413
+                : 502;
+      res.status(status).json({ error: result.message });
+      return;
+    }
+    const name = result.relPath.split("/").pop() || "file";
+    // nosniff so the browser honours our Content-Type instead of sniffing an html/exec type. Inline
+    // only for known text-ish types; everything else downloads. The filename is quote-escaped.
+    res.setHeader("Content-Type", result.contentType);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    const disposition = result.inlineSafe ? "inline" : "attachment";
+    res.setHeader("Content-Disposition", `${disposition}; filename="${name.replace(/["\\]/g, "_")}"`);
+    res.setHeader("Cache-Control", "no-store");
+    res.send(result.data);
+  } catch (e) {
+    res.status(500).json({ error: String((e as Error).message ?? e) });
+  }
 });
 
 // Ask the box's READ-ONLY co-pilot a question (what `ask` does over MCP). POST so the question isn't

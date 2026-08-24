@@ -86,6 +86,20 @@ export const api = {
   watchStreamUrl: (session: string, from = 0) =>
     url("/watch.sse", from > 0 ? { session, from: String(from) } : { session }),
 
+  /** Download URL for a produced file — token in the query so the browser's own GET authenticates. */
+  artifactUrl: (session: string, path: string) => url("/artifact", { session, path }),
+
+  /** Fetch a produced file's text for inline preview. Throws ApiError (404/413/…) on failure. */
+  async artifactText(session: string, path: string, signal?: AbortSignal): Promise<string> {
+    const res = await fetch(url("/artifact", { session, path }), { headers: authHeaders, signal });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      const msg = typeof body.error === "string" ? body.error : `Request failed (${res.status})`;
+      throw new ApiError(msg, res.status);
+    }
+    return res.text();
+  },
+
   /** Read-only observer. Cannot steer the agent, by design. */
   ask: (session: string, question: string, newThread = false) =>
     post<AskResult>("/ask.json", { session, question, newThread }),

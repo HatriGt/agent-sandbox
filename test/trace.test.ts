@@ -7,7 +7,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseTrace, resultSummary, clean } from "../web/src/lib/trace.ts";
+import { parseTrace, resultSummary, clean, producedFiles } from "../web/src/lib/trace.ts";
 import { normalizeBlocks } from "../web/src/lib/markdown-normalize.ts";
 import { doneLabel, isFailedExit } from "../web/src/lib/format.ts";
 
@@ -296,4 +296,38 @@ test("dedupe survives a repeat that straddles paragraph boundaries", () => {
   const text = ev.map((e) => (e.kind === "say" ? e.text : "")).join("\n");
   assert.equal(text.split(a).length - 1, 1, "first line should appear once");
   assert.equal(text.split(b).length - 1, 1, "second line should appear once");
+});
+
+test("producedFiles derives Write/Edit targets under /workspace, deduped in order", () => {
+  const log = [
+    "● session started (model ak-claude-opus-4.8)",
+    "Writing the report.",
+    "→ Write: /workspace/report.md",
+    "  File created successfully at: /workspace/report.md",
+    "→ Edit: /workspace/report.md",
+    "  Applied 1 edit",
+    "→ Write: /workspace/out/data.json",
+    "  File created successfully at: /workspace/out/data.json",
+    "done.",
+  ].join("\n");
+  const files = producedFiles(parseTrace(log));
+  assert.deepEqual(files, [
+    { relPath: "report.md", name: "report.md" },
+    { relPath: "out/data.json", name: "data.json" },
+  ]);
+});
+
+test("producedFiles ignores Read/Grep and files outside /workspace", () => {
+  const log = [
+    "→ Read: /workspace/report.md",
+    "→ Grep: pattern",
+    "→ Write: /etc/passwd",
+    "→ Write: /tmp/scratch.txt",
+  ].join("\n");
+  assert.deepEqual(producedFiles(parseTrace(log)), []);
+});
+
+test("producedFiles drops a traversal arg defensively", () => {
+  const log = "→ Write: /workspace/../secret.txt";
+  assert.deepEqual(producedFiles(parseTrace(log)), []);
 });

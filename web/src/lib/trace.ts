@@ -180,6 +180,43 @@ function dedupe(events: TraceEvent[]): TraceEvent[] {
   return out;
 }
 
+/** A file the agent wrote/edited under /workspace, worth surfacing as a downloadable artifact. */
+export interface ProducedFile {
+  /** Path relative to /workspace, e.g. "report.md" — what /artifact?path= expects. */
+  relPath: string;
+  /** Just the basename, for the card title. */
+  name: string;
+}
+
+// Tools whose headline argument is a filesystem path the agent CREATED or MODIFIED. Read/Grep/Glob
+// only inspect, so they never make an artifact. `arg` for these is the path (see the formatter).
+const WRITE_TOOLS = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
+const WORKSPACE_PREFIX = "/workspace/";
+
+/**
+ * Which files the agent produced under /workspace, derived purely from the trace's Write/Edit tool
+ * calls (cheap, and exactly what the agent made — no directory listing needed). Only paths that
+ * resolve literally inside /workspace are kept; a `..` segment or any other root is dropped here too,
+ * so the card never even offers a path the backend would reject. De-duplicated by path, in first-seen
+ * order, so editing the same file twice shows one card.
+ */
+export function producedFiles(events: TraceEvent[]): ProducedFile[] {
+  const seen = new Set<string>();
+  const out: ProducedFile[] = [];
+  for (const e of events) {
+    if (e.kind !== "tool" || !WRITE_TOOLS.has(e.name) || !e.arg) continue;
+    // The arg may carry trailing prose after the path on some formatter lines; take the first token.
+    const raw = e.arg.trim().split(/\s+/)[0];
+    if (!raw.startsWith(WORKSPACE_PREFIX)) continue;
+    const rel = raw.slice(WORKSPACE_PREFIX.length);
+    if (!rel || rel.split("/").some((s) => s === ".." || s === ".")) continue;
+    if (seen.has(rel)) continue;
+    seen.add(rel);
+    out.push({ relPath: rel, name: rel.split("/").pop() || rel });
+  }
+  return out;
+}
+
 /** First line of a tool result, for the collapsed summary row. */
 export function resultSummary(result: string | undefined, max = 100): string | undefined {
   if (!result) return undefined;
