@@ -1,5 +1,6 @@
 import * as React from "react";
 import { Markdown } from "@/components/ui/markdown";
+import { stabilizeMarkdown } from "@/lib/markdown-stream";
 
 /**
  * The live-feeling reveal for the NEWEST in-progress assistant block.
@@ -56,10 +57,13 @@ export function StreamingMarkdown({ text }: { text: string }) {
 
   const revealed = reduced ? text : text.slice(0, shown);
   const streaming = !reduced && shown < text.length;
+  // Render the slice as the stable document it is becoming: a fence still being typed is hidden and
+  // an open fence is virtually closed, so a code block never flickers in as prose-then-panel.
+  const safe = React.useMemo(() => (streaming ? stabilizeMarkdown(revealed) : revealed), [revealed, streaming]);
 
   return (
     <div className="relative">
-      <Markdown className="prose-agent">{revealed}</Markdown>
+      <Markdown className="prose-agent">{safe}</Markdown>
       {streaming && <span className="caret text-muted-foreground align-baseline" aria-hidden>▍</span>}
     </div>
   );

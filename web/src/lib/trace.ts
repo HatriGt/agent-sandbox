@@ -147,6 +147,13 @@ export function parseTrace(rawLog: string): TraceEvent[] {
 const DEDUPE_MIN_LEN = 40;
 
 export function dedupeParagraphs(text: string): string {
+  // First drop an exact repeated tail. The common shape is the WHOLE final block emitted twice
+  // (streamed assistant text, then the run's `result` re-emit). Line-level dedupe cannot clean that
+  // up: it drops the long lines but keeps every line under the threshold, so a duplicated markdown
+  // summary degrades into a ghost second copy — a stray `## Summary`, a header-only 0-row table, and
+  // a repeated fenced block. Removing the exact repeat first leaves the block intact.
+  text = dropRepeatedTail(text);
+
   // Line-level, not paragraph-level. The re-emitted copy does not respect blank-line boundaries:
   // in real output the tail of the first copy and the head of the second share a paragraph, so
   // splitting on blank lines never finds a matching pair. Lines do match.
@@ -161,6 +168,36 @@ export function dedupeParagraphs(text: string): string {
     kept.push(line);
   }
   return kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+/**
+ * A repeat shorter than this is not worth collapsing — a genuine short refrain ("Done.", a repeated
+ * one-line heading) would be destroyed. The re-emitted `result` block is always substantial.
+ */
+const REPEAT_MIN_LEN = 80;
+
+/**
+ * If the text is some prefix followed by an EXACT repeat of its own tail, drop the repeat.
+ *
+ * The formatter writes assistant text as it streams and then writes the run's final `result`, which
+ * is the same closing block verbatim. So the say ends `…X X` where X is the whole summary. Finding
+ * the largest such X and dropping one copy restores the single, correctly-structured block.
+ *
+ * Implementation: for each candidate tail length we ask whether what comes BEFORE the tail already
+ * ends with it. Both sides are trimmed at the boundary, so the blank line the formatter puts between
+ * the two copies (and an odd total length) cannot misalign the comparison — an index-based
+ * "second half of the trailing 2n chars" test silently fails on exactly those inputs.
+ */
+export function dropRepeatedTail(text: string): string {
+  const t = text.trimEnd();
+  // Longest candidate first: prefer collapsing the whole duplicated block over a short inner echo.
+  for (let n = Math.floor(t.length / 2); n >= REPEAT_MIN_LEN; n--) {
+    const tail = t.slice(t.length - n).trim();
+    if (tail.length < REPEAT_MIN_LEN) continue;
+    const head = t.slice(0, t.length - n).trimEnd();
+    if (head.endsWith(tail)) return head;
+  }
+  return text;
 }
 
 /**

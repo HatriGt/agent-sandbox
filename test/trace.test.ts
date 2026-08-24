@@ -331,3 +331,85 @@ test("producedFiles drops a traversal arg defensively", () => {
   const log = "→ Write: /workspace/../secret.txt";
   assert.deepEqual(producedFiles(parseTrace(log)), []);
 });
+
+/**
+ * The formatter re-emits the run's final `result` verbatim after having already streamed the same
+ * text, so a markdown summary lands in the log TWICE with no tool call between the copies. Line-level
+ * dedupe alone cannot clean that up — it drops the long prose lines but keeps every line under its
+ * length threshold, so the second copy survives as a wreck: a stray `## Summary`, a header-only
+ * 0-row table, and a repeated fenced block. Observed live on the deployed dashboard.
+ */
+test("an exactly repeated markdown summary collapses to one clean copy", async () => {
+  const { dedupeParagraphs } = await import("../web/src/lib/trace.ts");
+  const summary = [
+    "## Summary",
+    "",
+    "This sandbox is a lightweight, containerized Linux environment running Debian 13 on a 6.12 kernel.",
+    "",
+    "| Check | Command | Finding |",
+    "|-------|---------|---------|",
+    "| Kernel | `uname -a` | Linux 6.12.99 SMP x86_64 running inside a krun-backed microVM guest |",
+    "",
+    "```bash",
+    "uname -a",
+    "df -h",
+    "```",
+  ].join("\n");
+
+  const out = dedupeParagraphs(`${summary}\n${summary}`);
+
+  assert.equal(out, summary);
+  // The exact artefacts seen in the live DOM must be gone, not merely reduced.
+  assert.equal(out.match(/## Summary/g)!.length, 1);
+  assert.equal(out.match(/```bash/g)!.length, 1);
+  assert.equal(out.match(/\|-------\|/g)!.length, 1);
+});
+
+test("dropRepeatedTail leaves text whose ending is not a repeat", async () => {
+  const { dropRepeatedTail } = await import("../web/src/lib/trace.ts");
+  const text =
+    "First a genuinely distinct paragraph of prose about isolation and egress controls in the box.\n\nAnd then a different closing paragraph that shares no suffix with the one written above it.";
+  assert.equal(dropRepeatedTail(text), text);
+});
+
+test("dropRepeatedTail does not eat a short recurring refrain", async () => {
+  const { dropRepeatedTail } = await import("../web/src/lib/trace.ts");
+  const text = "done.\ndone.";
+  assert.equal(dropRepeatedTail(text), text);
+});
+
+/**
+ * Mid-stream slices cut through markdown. Two cuts render WRONG rather than merely incomplete: a
+ * fence still being typed reads as a paragraph of backticks (so the block flickers prose→panel), and
+ * an unclosed fence has no end (so everything below it reflows when the close finally lands).
+ */
+test("a half-typed fence marker is withheld until it is a real fence", async () => {
+  const { stabilizeMarkdown } = await import("../web/src/lib/markdown-stream.ts");
+  assert.equal(stabilizeMarkdown("intro\n``"), "intro");
+  assert.equal(stabilizeMarkdown("intro\n`"), "intro");
+  // Three backticks IS a fence — it must survive, virtually closed.
+  assert.equal(stabilizeMarkdown("intro\n```"), "intro\n```\n```");
+});
+
+test("an open fence is virtually closed so the panel has an end", async () => {
+  const { stabilizeMarkdown } = await import("../web/src/lib/markdown-stream.ts");
+  assert.equal(stabilizeMarkdown("```bash\nuname -a"), "```bash\nuname -a\n```");
+});
+
+test("an already-closed fence is left exactly as it is", async () => {
+  const { stabilizeMarkdown } = await import("../web/src/lib/markdown-stream.ts");
+  const done = "```bash\nuname -a\n```\n\nafter";
+  assert.equal(stabilizeMarkdown(done), done);
+});
+
+test("a tilde fence is not closed by a backtick fence inside it", async () => {
+  const { stabilizeMarkdown } = await import("../web/src/lib/markdown-stream.ts");
+  // The ``` here is CONTENT of the ~~~ block; closing on it would truncate the block early.
+  assert.equal(stabilizeMarkdown("~~~md\n```\n"), "~~~md\n```\n\n~~~");
+});
+
+test("stabilizing prose with no fences changes nothing", async () => {
+  const { stabilizeMarkdown } = await import("../web/src/lib/markdown-stream.ts");
+  const t = "| Check | Command |\n|---|---|\n| a |";
+  assert.equal(stabilizeMarkdown(t), t);
+});
