@@ -101,10 +101,20 @@ export function ToolGroup({ events, live }: { events: Extract<TraceEvent, { kind
   );
 }
 
+/**
+ * How many lines a result has, for the fold's label. The formatter now preserves hundreds of lines,
+ * so "output" alone gives no hint whether the fold hides two lines or four hundred — and the panel
+ * is a fixed-height scroller, so nothing else on screen conveys the size.
+ */
+function lineCount(result: string): number {
+  return result.replace(/\n+$/, "").split("\n").length;
+}
+
 /** A shell command as a terminal panel: `$ cmd` then its output, on the dark trace ground. */
 function ShellItem({ event, live }: { event: Extract<TraceEvent, { kind: "tool" }>; live?: boolean }) {
   const [open, setOpen] = React.useState(false);
   const hasOutput = !!event.result;
+  const lines = event.result ? lineCount(event.result) : 0;
   return (
     <div className="min-w-0">
       <div className={cn("border-border bg-trace overflow-hidden rounded-lg border", live && "ring-1 ring-ok/40")}>
@@ -126,7 +136,7 @@ function ShellItem({ event, live }: { event: Extract<TraceEvent, { kind: "tool" 
               aria-expanded={open}
               className="text-trace-fg/60 hover:text-trace-fg ml-auto flex cursor-pointer items-center gap-1"
             >
-              <span className="stamp">{open ? "hide" : "output"}</span>
+              <span className="stamp">{open ? "hide" : lines > 1 ? `output · ${lines} lines` : "output"}</span>
               <ChevronRight className={cn("size-3.5 transition-transform duration-150", open && "rotate-90")} aria-hidden />
             </button>
           )}
@@ -155,6 +165,7 @@ function ShellItem({ event, live }: { event: Extract<TraceEvent, { kind: "tool" 
 function FileToolItem({ event, live }: { event: Extract<TraceEvent, { kind: "tool" }>; live?: boolean }) {
   const [open, setOpen] = React.useState(false);
   const summary = resultSummary(event.result);
+  const lines = event.result ? lineCount(event.result) : 0;
 
   return (
     <div className="min-w-0">
@@ -183,10 +194,17 @@ function FileToolItem({ event, live }: { event: Extract<TraceEvent, { kind: "too
           </code>
         )}
         {event.result && (
-          <ChevronRight
-            className={cn("text-muted-foreground ml-auto size-3.5 shrink-0 transition-transform duration-150", open && "rotate-90")}
-            aria-hidden
-          />
+          <>
+            {lines > 1 && <span className="stamp text-muted-foreground/70 ml-auto shrink-0">{lines} lines</span>}
+            <ChevronRight
+              className={cn(
+                "text-muted-foreground size-3.5 shrink-0 transition-transform duration-150",
+                lines > 1 ? "ml-1.5" : "ml-auto",
+                open && "rotate-90"
+              )}
+              aria-hidden
+            />
+          </>
         )}
       </button>
 

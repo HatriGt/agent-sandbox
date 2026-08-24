@@ -509,6 +509,23 @@ export const ERR_MARK = "⟦err⟧";
 export const ID_OPEN = "⟦#";
 export const ID_CLOSE = "⟧";
 
+/**
+ * How much of a tool_result survives into .agent.log.
+ *
+ * The tail a formatter drops is gone for good — the raw stream-json is never persisted, so the UI
+ * can never recover it. At 20 lines an ordinary `printf` of 60 lines, or a burst of parallel Bash
+ * calls each printing 40, lost most of their real output while still looking complete-ish. 400 lines
+ * covers essentially every real command (test runs, diffs, listings) at roughly 30KB of log.
+ *
+ * The byte cap is the actual protection: a `cat` of a minified bundle is few lines but megabytes,
+ * and .agent.log is re-read in full on every SSE poll, so bytes — not lines — are what bloat the
+ * stream. 64KB per result keeps a pathological dump bounded without touching realistic output.
+ * A single absurdly long line is clipped on its own so one 10MB line cannot blow the budget alone.
+ */
+export const RESULT_MAX_LINES = 400;
+export const RESULT_MAX_BYTES = 65536;
+export const RESULT_MAX_LINE_CHARS = 4000;
+
 export function streamFmtScript(): string {
   const js =
     `const fs=require("fs");` +
@@ -522,6 +539,8 @@ export function streamFmtScript(): string {
     `process.stdin.on("data",d=>{buf+=d;let i;while((i=buf.indexOf("\\n"))>=0){const line=buf.slice(0,i);buf=buf.slice(i+1);handle(line)}});` +
     `process.stdin.on("end",()=>{if(buf.trim())handle(buf)});` +
     `function txt(c){return Array.isArray(c)?c.map(b=>b&&b.type==="text"?b.text:"").join(""):(typeof c==="string"?c:"")}` +
+    `function clip(ls){const head=[];let bytes=0;for(const l0 of ls){if(head.length>=${RESULT_MAX_LINES})break;const l=l0.length>${RESULT_MAX_LINE_CHARS}?l0.slice(0,${RESULT_MAX_LINE_CHARS})+" …":l0;const b=Buffer.byteLength(l,"utf8")+3;if(head.length&&bytes+b>${RESULT_MAX_BYTES})break;bytes+=b;head.push(l)}` +
+    `const cut=ls.length-head.length;if(cut>0)head.push("… "+cut+" more lines");return head}` +
     `function handle(line){line=line.trim();if(!line)return;let e;try{e=JSON.parse(line)}catch(_){w(line);return}` +
     `try{` +
     `if(e.type==="system"&&e.subtype==="init"){w("● session started (model "+(e.model||"?")+")");return}` +
@@ -539,11 +558,13 @@ export function streamFmtScript(): string {
     `else if(b.type==="tool_use"){const inp=b.input||{};const arg=String(inp.command||inp.file_path||inp.path||inp.pattern||inp.description||"").replace(/\\s*\\n\\s*/g," ").trim();w("→ "+b.name+(arg?": "+arg.slice(0,200):"")+(b.id?" ${ID_OPEN}"+String(b.id).slice(-8)+"${ID_CLOSE}":""))}` +
     `}return}` +
     `if(e.type==="user"&&e.message){for(const b of e.message.content||[]){` +
-    // Cap the result at 20 lines, but SAY SO. Silently dropping the tail made a truncated listing
-    // look like the command's complete output.
+    // Cap the result, but SAY SO. Silently dropping the tail made a truncated listing look like the
+    // command's complete output — and the tail is unrecoverable, the raw stream-json is not kept.
+    // Two independent budgets: lines (readability) and bytes (a few-line `cat` of a minified bundle
+    // is megabytes, and .agent.log is re-read whole on every SSE poll). Whichever binds first wins.
     // A FAILED tool call is marked, so the UI can show it failed. Without this a command that errored
     // renders exactly like one that succeeded — its stderr just looks like ordinary output.
-    `if(b.type==="tool_result"){const r=txt(b.content).trim();const id=b.tool_use_id?"${ID_OPEN}"+String(b.tool_use_id).slice(-8)+"${ID_CLOSE} ":"";if(r){const ls=r.split("\\n");const head=ls.slice(0,20);if(ls.length>20)head.push("… "+(ls.length-20)+" more lines");w("  "+id+(b.is_error?"${ERR_MARK} ":"")+head.join("\\n  "))}else if(id)w("  "+id+(b.is_error?"${ERR_MARK} ":"")+"(no output)")}` +
+    `if(b.type==="tool_result"){const r=txt(b.content).trim();const id=b.tool_use_id?"${ID_OPEN}"+String(b.tool_use_id).slice(-8)+"${ID_CLOSE} ":"";if(r){w("  "+id+(b.is_error?"${ERR_MARK} ":"")+clip(r.split("\\n")).join("\\n  "))}else if(id)w("  "+id+(b.is_error?"${ERR_MARK} ":"")+"(no output)")}` +
     `}return}` +
     // Re-emit the run's final result ONLY when it is not simply the assistant text we already wrote.
     // Claude's `result` IS the last assistant message, so the unconditional re-emit appended the

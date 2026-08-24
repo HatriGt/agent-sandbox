@@ -477,3 +477,45 @@ test("an old-format log with no correlation ids parses exactly as before", () =>
   assert.equal(tools[1].result, "Exit code 2\nls: cannot access '/nope'");
   assert.equal(tools[1].failed, true);
 });
+
+// --- long tool output ---------------------------------------------------------------------------
+// The formatter used to cap a result at 20 lines and drop the tail at source, so the parser was
+// never exercised on real-sized output. It must carry hundreds of lines onto the right call rather
+// than spilling them into prose, and must not eat the truncation disclosure when one is present.
+test("a long result is carried whole onto its own tool call", () => {
+  const body = Array.from({ length: 300 }, (_, i) => `line ${i + 1}`);
+  const log = [
+    "→ Bash: seq 300 ⟦#long0001⟧",
+    `  ⟦#long0001⟧ ${body[0]}`,
+    ...body.slice(1).map((l) => `  ${l}`),
+  ].join("\n");
+  const tools = parseTrace(log).filter((e) => e.kind === "tool");
+  assert.equal(tools.length, 1);
+  if (tools[0].kind !== "tool") return;
+  assert.equal(tools[0].result, body.join("\n"));
+});
+
+test("a truncated result keeps the disclosure as the last line of the output", () => {
+  const log = ["→ Bash: seq 100000", "  line 1", "  line 2", "  … 99998 more lines"].join("\n");
+  const tools = parseTrace(log).filter((e) => e.kind === "tool");
+  if (tools[0].kind !== "tool") return;
+  assert.match(tools[0].result ?? "", /… 99998 more lines$/);
+});
+
+test("parallel long results do not bleed into each other", () => {
+  const a = Array.from({ length: 60 }, (_, i) => `a${i + 1}`);
+  const b = Array.from({ length: 45 }, (_, i) => `b${i + 1}`);
+  const log = [
+    "→ Bash: seq a ⟦#pa000001⟧",
+    "→ Bash: seq b ⟦#pb000002⟧",
+    `  ⟦#pa000001⟧ ${a[0]}`,
+    ...a.slice(1).map((l) => `  ${l}`),
+    `  ⟦#pb000002⟧ ${b[0]}`,
+    ...b.slice(1).map((l) => `  ${l}`),
+  ].join("\n");
+  const tools = parseTrace(log).filter((e) => e.kind === "tool");
+  assert.equal(tools.length, 2);
+  if (tools[0].kind !== "tool" || tools[1].kind !== "tool") return;
+  assert.equal(tools[0].result, a.join("\n"));
+  assert.equal(tools[1].result, b.join("\n"));
+});
