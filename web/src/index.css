@@ -284,13 +284,16 @@
     font-weight: 500;
   }
   .prose-agent {
-    font-size: 16px;
+    /* 15px/1.65 matches claude.ai's reading measure (its prose sits at 14–15px, not 16px). The wide
+       measure fills the reading column rather than clamping to 72ch — the reference lets assistant
+       prose use the full column now that it is no longer boxed in a bubble. */
+    font-size: 15px;
     line-height: 1.65;
-    max-width: 72ch;
+    max-width: 78ch;
   }
   @media (max-width: 640px) {
     .prose-agent {
-      font-size: 15.5px;
+      font-size: 14.5px;
     }
   }
   /* Tailwind preflight strips element styling, so markdown renders as flat text without this. These

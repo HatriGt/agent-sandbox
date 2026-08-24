@@ -196,25 +196,28 @@ function FileToolItem({ event, live }: { event: Extract<TraceEvent, { kind: "too
 }
 
 /**
- * The agent speaking: an avatar-led card bubble on white, prose via Markdown.
+ * The agent speaking: full-width prose in the column, Claude-Code style — NO card, NO bubble, NO
+ * avatar. The reference renders the assistant turn as plain prose straight in the reading measure
+ * (transparent ground, comfortable line-height), reserving fills for the user's one voice. We keep a
+ * small, quiet role label above so the turn is still attributable, and a breathing dot beside it
+ * while live so the "who is talking / still going" signal survives without a heavy avatar chrome.
  *
- * While `live` (this is the newest say and the run is in progress) the text is revealed with a
- * streaming cadence via `StreamingMarkdown`; a finished say renders as static Markdown. The reveal
- * only animates the not-yet-shown tail, so a re-poll of already-visible text never re-animates.
+ * While `live` the text is revealed with a streaming cadence via `StreamingMarkdown`; a finished say
+ * renders as static Markdown. The reveal only animates the not-yet-shown tail, so a re-poll of
+ * already-visible text never re-animates. Both paths render through `prose-agent` so static and
+ * streaming turns are typographically identical.
  *
  * Memoised on `(text, live)` so an unchanged completed say does not re-render every 3s poll.
  */
 export const SayItem = React.memo(function SayItem({ text, live }: { text: string; live?: boolean }) {
   return (
-    <div className="enter flex items-start gap-3">
-      <span className="bg-accent text-accent-foreground mt-0.5 grid size-7 shrink-0 place-items-center rounded-full" aria-hidden>
-        <span className={cn("bg-current size-2 rounded-full", live && "breathe")} />
+    <div className="enter min-w-0">
+      <span className="stamp text-muted-foreground mb-1.5 flex items-center gap-1.5">
+        <span className={cn("bg-muted-foreground size-1.5 rounded-full", live && "breathe")} aria-hidden />
+        agent
       </span>
-      <div className="min-w-0 flex-1">
-        <span className="stamp text-muted-foreground mb-1 block">agent</span>
-        <div className="bg-card border-border prose-agent text-foreground elevate-sm rounded-2xl rounded-tl-sm border px-4 py-3">
-          {live ? <StreamingMarkdown text={text} /> : <Markdown>{text}</Markdown>}
-        </div>
+      <div className="text-foreground min-w-0">
+        {live ? <StreamingMarkdown text={text} /> : <Markdown className="prose-agent">{text}</Markdown>}
       </div>
     </div>
   );

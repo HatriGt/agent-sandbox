@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils"
+import { Check, Copy } from "lucide-react"
 import React, { useEffect, useState } from "react"
 import type { HighlighterCore } from "shiki/core"
 
@@ -11,14 +12,49 @@ function CodeBlock({ children, className, ...props }: CodeBlockProps) {
   return (
     <div
       className={cn(
-        "not-prose flex w-full flex-col overflow-clip border",
-        "border-border bg-card text-card-foreground rounded-xl",
+        // Claude's fenced block: a light card, 8px corners, a hairline, and a copy affordance that
+        // fades in on hover (the `group` here drives the button's opacity). `relative` anchors the
+        // floating button; `overflow-clip` keeps highlighted content within the rounded corners.
+        "group not-prose relative flex w-full flex-col overflow-clip border",
+        "border-border bg-card text-card-foreground rounded-lg",
         className
       )}
       {...props}
     >
       {children}
     </div>
+  )
+}
+
+/**
+ * The hover-revealed copy button, pinned top-right of a code block — the reference pattern (no heavy
+ * header bar; the language lives in the fence, the one control is copy). Confirms with a check for a
+ * beat so the click registers. Absolutely positioned so it never reflows the code.
+ */
+function CopyButton({ code }: { code: string }) {
+  const [copied, setCopied] = useState(false)
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(code)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1400)
+    } catch {
+      // Clipboard can be blocked (permissions / insecure context); fail quietly rather than throw.
+    }
+  }
+  return (
+    <button
+      type="button"
+      onClick={copy}
+      aria-label={copied ? "Copied" : "Copy code"}
+      className={cn(
+        "absolute top-2 right-2 z-10 inline-flex size-7 items-center justify-center rounded-md border",
+        "border-border bg-card text-muted-foreground hover:text-foreground hover:bg-muted cursor-pointer",
+        "opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-visible:opacity-100"
+      )}
+    >
+      {copied ? <Check className="size-3.5 text-ok" /> : <Copy className="size-3.5" />}
+    </button>
   )
 }
 
@@ -144,23 +180,31 @@ function CodeBlockCode({
   }, [code, language, theme])
 
   const classNames = cn(
-    "w-full overflow-x-auto text-[13px] [&>pre]:px-4 [&>pre]:py-4",
+    // 14px mono matches the reference (was 13px). `pr-10` reserves room for the floating copy button
+    // so long lines never slide under it.
+    "w-full overflow-x-auto text-[14px] [&>pre]:px-4 [&>pre]:py-3.5 [&>pre]:pr-10",
     className
   )
 
   // Fallback: plain code until the lazy highlighter resolves (or if it can't highlight this language).
   return highlightedHtml ? (
-    <div
-      className={classNames}
-      dangerouslySetInnerHTML={{ __html: highlightedHtml }}
-      {...props}
-    />
+    <>
+      <CopyButton code={code} />
+      <div
+        className={classNames}
+        dangerouslySetInnerHTML={{ __html: highlightedHtml }}
+        {...props}
+      />
+    </>
   ) : (
-    <div className={classNames} {...props}>
-      <pre>
-        <code>{code}</code>
-      </pre>
-    </div>
+    <>
+      <CopyButton code={code} />
+      <div className={classNames} {...props}>
+        <pre>
+          <code>{code}</code>
+        </pre>
+      </div>
+    </>
   )
 }
 
