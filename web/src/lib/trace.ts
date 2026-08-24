@@ -84,6 +84,25 @@ export function parseTrace(rawLog: string): TraceEvent[] {
   // follows the close marker is never merged into the user's bubble.
   let you: string[] | null = null;
 
+  // A log we are shown is a TAIL of the real one. When the cut lands inside a tool_result the block
+  // arrives without its `→ Tool: arg` line, and every indented line of real command output would
+  // otherwise fall through to `prose` and render as a wall of pseudo-prose — the shape that made a
+  // 60-line command look like an unreadable blob. Adopting the orphan under an explicit placeholder
+  // call keeps the content (nothing is swallowed) AND keeps it in a collapsible tool card, while
+  // saying plainly that its call line is not in view. Only at the very TOP of the log: an indented
+  // block anywhere else has a real tool above it, or is genuinely indented prose.
+  const ORPHAN_TOOL_NAME = "output";
+  const ORPHAN_TOOL_ARG = "tool call is above the start of this log";
+  const adoptOrphan = (): Extract<TraceEvent, { kind: "tool" }> => {
+    const ev: Extract<TraceEvent, { kind: "tool" }> = {
+      kind: "tool",
+      name: ORPHAN_TOOL_NAME,
+      arg: ORPHAN_TOOL_ARG,
+    };
+    events.push(ev);
+    return ev;
+  };
+
   // tool_use id tail -> the tool event it belongs to, so a result block stamped with that id lands
   // on its own call even when several calls were issued in one message.
   const byId = new Map<string, Extract<TraceEvent, { kind: "tool" }>>();
@@ -140,6 +159,9 @@ export function parseTrace(rawLog: string): TraceEvent[] {
     // (diffs, JSON, code) instead of flattening it into an unreadable left-justified blob.
     const last = events[events.length - 1];
     const isResultLine = /^\s{2,}\S/.test(line) || (line.trim() === "" && !!target?.result);
+    // Nothing at all before it and it is indented => the tail cut its call line off. Adopt it.
+    const orphaned = isResultLine && events.length === 0 && prose.length === 0 && !target;
+    if (orphaned) target = adoptOrphan();
     if (isResultLine && prose.length === 0 && (target || last?.kind === "tool")) {
       let body = line.replace(/^\s{2}/, "");
       // A result block's first line may carry the correlation token: route the whole block to the

@@ -502,6 +502,49 @@ test("a truncated result keeps the disclosure as the last line of the output", (
   assert.match(tools[0].result ?? "", /… 99998 more lines$/);
 });
 
+// --- decapitated logs ---------------------------------------------------------------------------
+// Any bound on the reader's tail can still slice through a tool_result. The block then arrives with
+// no `→ Tool:` line above it. Before this, every one of those lines fell through to prose and the
+// run rendered as a wall of left-justified text with no collapsible card — the exact "unreadable
+// blob" report. The content must be kept, but kept AS tool output, and the missing call disclosed.
+test("a log starting mid-result adopts the orphan into one tool card, not prose", () => {
+  const body = Array.from({ length: 58 }, (_, i) => `LINE-${i + 3}`);
+  const log = [...body.map((l) => `  ${l}`), "The command printed 60 lines."].join("\n");
+  const ev = parseTrace(log);
+  const tools = ev.filter((e) => e.kind === "tool");
+  assert.equal(tools.length, 1);
+  if (tools[0].kind !== "tool") return;
+  // Nothing swallowed: every surviving output line is in the card.
+  assert.equal(tools[0].result, body.join("\n"));
+  // And it says plainly that the call line is not in view rather than inventing one.
+  assert.match(tools[0].arg ?? "", /above the start of this log/);
+  // The agent's closing sentence is still prose, not absorbed into the card.
+  assert.ok(ev.some((e) => e.kind === "say" && e.text.includes("printed 60 lines")));
+});
+
+test("adoption only applies at the very top — indented prose mid-log is still prose", () => {
+  const log = ["Here is the plan:", "    indented note", "done."].join("\n");
+  const ev = parseTrace(log);
+  assert.equal(ev.filter((e) => e.kind === "tool").length, 0);
+  assert.ok(ev.some((e) => e.kind === "say" && e.text.includes("indented note")));
+});
+
+test("an intact log gains no placeholder tool", () => {
+  const log = ["● session started (model m)", "→ Bash: seq 3", "  1", "  2", "  3"].join("\n");
+  const tools = parseTrace(log).filter((e) => e.kind === "tool");
+  assert.equal(tools.length, 1);
+  if (tools[0].kind !== "tool") return;
+  assert.equal(tools[0].name, "Bash");
+});
+
+test("a decapitated block still carrying its ⟦#id⟧ is adopted, id stripped", () => {
+  const log = ["  ⟦#abc12345⟧ LINE-3", "  LINE-4"].join("\n");
+  const tools = parseTrace(log).filter((e) => e.kind === "tool");
+  assert.equal(tools.length, 1);
+  if (tools[0].kind !== "tool") return;
+  assert.equal(tools[0].result, "LINE-3\nLINE-4");
+});
+
 test("parallel long results do not bleed into each other", () => {
   const a = Array.from({ length: 60 }, (_, i) => `a${i + 1}`);
   const b = Array.from({ length: 45 }, (_, i) => `b${i + 1}`);

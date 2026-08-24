@@ -755,6 +755,43 @@ export async function runAgentTask(
   return msb(cfg, ["exec", box, ...env, "--", "sh", "-lc", agentSh(workdir, false)]);
 }
 
+/**
+ * How much of `.agent.log` a READER pulls back from the box.
+ *
+ * The formatter budgets (RESULT_MAX_*) decide how much of one tool_result reaches the log; these
+ * decide how much of the log reaches us. They have to be sized against each other, and they were
+ * not: with the formatter writing up to 400 lines per result, a reader tailing 40–60 lines could
+ * not even carry ONE ordinary command's output. Worse than losing text, a short tail DECAPITATES
+ * the log — it slices away the `● session started` marker and the `→ Tool: arg` call line, and the
+ * indented result block that survives has no call to attach to, so parseTrace renders real tool
+ * output as orphaned prose (the "unreadable blob").
+ *
+ * Two budgets, mirroring the formatter's reasoning:
+ *  - LINES bounds an ordinary chatty run. 2000 lines holds a session marker, several full-budget
+ *    tool results and the prose between them, which is what a realistic multi-step run looks like.
+ *  - BYTES is the real protection and the binding one in the dangerous case: a handful of very long
+ *    lines (a minified bundle, a base64 blob) is cheap in lines and megabytes on the wire. This log
+ *    is re-read IN FULL on every SSE tick (SSE_TICK_MS) per viewer, so bytes are what bloat the
+ *    stream. 128KB is deliberately a compromise: enough for ~2 pathological full-budget results
+ *    (64KB each) plus context, small enough that a viewer costs ~160KB/s of SSH read in the worst
+ *    case rather than an unbounded amount. Unbounded was never an option for that reason.
+ *
+ * Bytes are applied first (`tail -c` bounds what is read at all), lines second. Either bound can
+ * still cut mid-structure; parseTrace handles a leading orphaned result block explicitly rather
+ * than relying on the bound being large enough.
+ */
+export const LOG_TAIL_LINES = 2000;
+export const LOG_TAIL_BYTES = 131072;
+
+/**
+ * The `tail` invocation for a log read. `lines = 0` means "no log at all" (driverStateLine only
+ * wants the sentinels), and is kept as an explicit no-op read so the command shape stays uniform.
+ */
+export function logTailCmd(lines: number, path = AGENT_LOG): string {
+  if (lines <= 0) return `tail -n 0 ${path} 2>/dev/null || true`;
+  return `tail -c ${LOG_TAIL_BYTES} ${path} 2>/dev/null | tail -n ${lines} || true`;
+}
+
 /** Raw sentinel readout from the box, split into the state line, question text, and log tail. */
 export interface ProgressRaw {
   /** One of: running | done exit=N | idle (from the run/done sentinels). */
@@ -780,7 +817,7 @@ export function formatProgress(raw: ProgressRaw): string {
 }
 
 /** One SSH round-trip that reads the run/done/question sentinels + a log tail into a ProgressRaw. */
-async function readProgressRaw(cfg: Config, box: string, logLines = 60): Promise<ProgressRaw> {
+async function readProgressRaw(cfg: Config, box: string, logLines = LOG_TAIL_LINES): Promise<ProgressRaw> {
   const r = await exec(
     cfg,
     box,
@@ -788,7 +825,7 @@ async function readProgressRaw(cfg: Config, box: string, logLines = 60): Promise
       `elif [ -f ${DONE_MARK} ]; then echo "run:done exit=$(cat ${DONE_MARK} 2>/dev/null)"; ` +
       `else echo "run:idle"; fi; ` +
       `echo "---Q---"; cat ${QUESTION_MARK} 2>/dev/null || true; ` +
-      `echo "---LOG---"; tail -n ${logLines} ${AGENT_LOG} 2>/dev/null || true`
+      `echo "---LOG---"; ${logTailCmd(logLines)}`
   );
   const out = r.stdout;
   const qStart = out.indexOf("---Q---");
@@ -1063,7 +1100,11 @@ export async function driverStateLine(cfg: Config, box: string): Promise<string 
 export async function gatherWatch(
   cfg: Config,
   box: string,
-  logLines = 40
+  // Same bound as readProgressRaw: the SSE stream reads through here while the MCP `progress` path
+  // reads through there, and two paths disagreeing about how much log they show is its own bug —
+  // the dashboard would render a differently-truncated (differently-parseable) trace than the tool.
+  // An explicit `--lines N` from a caller still overrides, and is still byte-capped.
+  logLines = LOG_TAIL_LINES
 ): Promise<WatchSnapshot> {
   const base: WatchSnapshot = { name: box, boxStatus: "missing", runState: "idle", log: "" };
   try {
@@ -1075,7 +1116,7 @@ export async function gatherWatch(
         `else echo "run:idle"; fi; ` +
         `echo "---Q---"; cat ${QUESTION_MARK} 2>/dev/null || true; ` +
         `echo "---T---"; head -n 1 ${TASK_MARK} 2>/dev/null || true; ` +
-        `echo "---LOG---"; tail -n ${logLines} ${AGENT_LOG} 2>/dev/null || true`
+        `echo "---LOG---"; ${logTailCmd(logLines)}`
     );
     const out = r.stdout;
     const qStart = out.indexOf("---Q---");
