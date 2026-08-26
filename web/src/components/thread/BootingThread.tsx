@@ -6,48 +6,35 @@ import { WorkingIndicator, YouItem } from "./TraceItems";
 /**
  * The thread shown from the instant a task is delegated until the assigned machine is known.
  *
- * `delegate` does not return a box id until the run reaches a boundary (a question or completion),
- * which can be a minute out — but the assigned box surfaces in monitor.json within a poll tick, and
- * App attaches to its real Thread the moment it does. So this only stands in for the brief window
- * before the box id is known: the task they sent, echoed as their turn, and a booting rail.
+ * `delegate` does not return a box id until the run reaches a boundary, which can be a minute out —
+ * but the assigned box surfaces in monitor.json within a poll tick, and App attaches to its real
+ * Thread the moment it does. So this only stands in for the brief window before the box id is known.
  *
  * `warm` keeps the copy honest for that window: a warm claim reuses a pre-booted box (no microVM
- * boot), so it says "Starting your task on a warm sandbox…"; a cold boot is a genuine fresh microVM.
- * When we don't yet know (the very first frame), `warm` is false and we say "Assigning" rather than
- * asserting a cold boot that may not happen.
+ * boot); a cold boot is a genuine fresh microVM.
  */
 export function BootingThread({ task, warm, onBack }: { task: string; warm: boolean; onBack: () => void }) {
   const label = bootingLabel(warm);
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
-      <header className="flex items-center gap-2 border-b px-3 py-2.5 md:px-6">
+      <header className="flex h-14 items-center gap-2 border-b px-3 md:px-5">
         <Button variant="ghost" size="icon-sm" onClick={onBack} aria-label="Back to machines" className="md:hidden">
           <ArrowLeft />
         </Button>
-        <div className="min-w-0 flex-1">
-          <div className="text-ash flex min-w-0 items-center gap-1.5 text-micro">
-            <span className="hidden sm:inline">Agent</span>
-            <span className="hidden sm:inline opacity-50" aria-hidden>
-              /
-            </span>
-            <span className="text-ink min-w-0 truncate font-medium">Assigning a machine…</span>
-          </div>
-          <div className="tabular mt-1.5 flex flex-wrap items-center gap-1.5">
-            <span className="stamp text-ash inline-flex items-center gap-1.5 rounded-md border px-1.5 py-0.5">
-              <span className="breathe">○</span> booting
-            </span>
-          </div>
-        </div>
+        <span className="bg-live/12 text-live ring-live/25 inline-flex h-6 items-center gap-1.5 rounded-full px-2.5 text-micro font-semibold ring-1 ring-inset">
+          <span className="bg-live breathe size-2 rounded-full" aria-hidden />
+          assigning
+        </span>
+        <p className="text-muted-foreground min-w-0 truncate text-meta">Finding a machine for your task…</p>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 pt-8 pb-16 md:px-6">
-          <YouItem text={task} label="task" />
-
-          <div className="flex flex-col gap-2.5">
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-7 px-4 pt-8 pb-16 md:px-6">
+          <YouItem text={task} label="Task" />
+          <div className="flex flex-col gap-2">
             <WorkingIndicator label={label} />
-            <p className="text-muted-foreground ml-10 text-meta">
-              Handing it your task — its live output will appear here as soon as it starts working.
+            <p className="text-muted-foreground text-meta">
+              Its live output will appear here the moment it starts working.
             </p>
           </div>
         </div>

@@ -1,9 +1,10 @@
 # agent-sandbox dashboard
 
-React + Vite + Tailwind v4 on a **shadcn (neutral) + prompt-kit** foundation with **Inter + Hedvig
-Letters Serif + Geist Mono** fonts. Built into `web/dist` and served by the same express container
-that serves `/mcp`, mounted at `/dashboard`. See `DESIGN.md` for the full style reference (the chrome
-is cloned from the CRM-AI-Agent reference) and `DESIGN-claude-code.md` for the chat-surface spec.
+React + Vite + Tailwind v4 on a **shadcn (neutral) + Radix + prompt-kit** foundation with **Inter +
+Hedvig Letters Serif + Geist Mono** fonts. Built into `web/dist` and served by the same express
+container that serves `/mcp`, mounted at `/dashboard`. See `DESIGN.md` for the design reference
+(layout, tokens, the functional state palette, chat surface) and `DESIGN-claude-code.md` for the
+measured claude.ai chat-surface notes it borrows from.
 
 ## Why the components are vendored
 
@@ -20,11 +21,15 @@ sonner, and React itself.
 
 The UI must never let these be confused, and the trace items encode the difference:
 
-- **Driver** — the agent doing the work. You steer it *only* by answering the question it is blocked
-  on. The `SendBar` "reply" mode → `POST /resume.json`; the pending question renders as `AskingItem`.
-- **Co-pilot** — a read-only observer in the same box. The `SendBar` "ask" mode → `POST /ask.json`. It
-  cannot change anything and cannot reach the driver, and renders as a visibly distinct `ObserverItem`
-  (dashed edge, "read-only · the agent never saw this").
+- **Agent** — the driver doing the work. You steer it *only* by answering the question it is blocked
+  on or sending a follow-up once it has finished. The composer's **Agent** destination →
+  `POST /resume.json`; a pending question renders as an amber `AskingItem` with one-click choices.
+- **Co-pilot** — a read-only observer in the same box. The composer's **Co-pilot** destination →
+  `POST /ask.json`. It cannot change anything and cannot reach the agent, and renders as a visibly
+  distinct dashed `ObserverItem` ("read-only · the agent never sees this").
+
+The destination selector lives inside the composer; while the agent is mid-turn only Co-pilot is
+available (and the composer says why).
 
 ## Develop
 
@@ -34,8 +39,9 @@ ASB_API=https://agent-sandbox.ajeethkumar.dev npm run dev
 # then open http://localhost:5173/dashboard/?token=<MCP_HTTP_TOKEN>
 ```
 
-`vite.config.ts` proxies the JSON routes to `ASB_API` (default `http://127.0.0.1:8787`) so the UI
-can be developed against real boxes.
+`vite.config.ts` proxies every data route (`/fleet.json`, `/monitor.json`, `/watch.json`, `/watch.sse`, `/artifact`,
+`/ask.json`, `/resume.json`, `/teardown.json`, `/delegate.json`) to `ASB_API` (default
+`http://127.0.0.1:8787`) so the UI can be developed against real boxes.
 
 ## Build
 
@@ -45,3 +51,10 @@ npm run build   # tsc -b && vite build -> web/dist
 
 The Dockerfile does this during the image build; `web/node_modules` and `web/src` are dropped from
 the runtime image.
+
+## Lifecycle, sleeping machines, capacity
+
+See `../docs/lifecycle.md`. In short: a quiet machine is **stopped, not destroyed** — the dashboard
+shows it as *sleeping* and a reply wakes it; only the run cap or **Destroy** discards a workspace.
+`/fleet.json` carries the configured timeouts and capacity so the UI can show real deadlines and
+slots.

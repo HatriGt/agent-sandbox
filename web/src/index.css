@@ -1,15 +1,17 @@
 @import "tailwindcss";
 
 /*
- * agent-sandbox console — shadcn (new-york, neutral base) + Geist + prompt-kit chat components.
+ * agent-sandbox console — shadcn (neutral) + prompt-kit + Inter / Hedvig Letters Serif / Geist Mono.
  *
- * The colour foundation is shadcn's official neutral theme (the canonical ui.shadcn.com values),
- * not hand-tuned hex. prompt-kit's chat components (Steps / Tool / PromptInput / ChatContainer /
- * ScrollButton) install as standard shadcn and read these same variables, so the whole chat surface
- * and the rest of the console share one system.
+ * One neutral zinc ground that holds real contrast in a bright room AND a dark one, plus a small
+ * FUNCTIONAL palette that is the whole point of the console: a machine is working (live blue), needs
+ * you (amber — the only state with a deadline), finished (green), failed (red) or idle (grey). Colour
+ * is reserved for those states and for the single primary action; everything else is ink on paper.
  *
- * The app's own vocabulary (--ink / --ash / --azure / --trace / status hues) is DERIVED from the
- * shadcn tokens so existing components inherit the base without per-component patching.
+ * The app vocabulary (--live / --attention / --ok / --trace …) is exposed to Tailwind through
+ * `@theme inline`, so every usage is a real utility (`text-live`, `bg-attention/18`) that
+ * tailwind-merge can classify — never an arbitrary `text-[var(--x)]`, which is how the previous build
+ * lost its button labels.
  */
 
 @custom-variant dark (&:where(.dark, .dark *));
@@ -32,42 +34,43 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-border: var(--border);
+  --color-line-strong: var(--line-strong);
   --color-input: var(--input);
   --color-ring: var(--ring);
 
-  /* this app's vocabulary, derived from the shadcn base */
-  --color-azure: var(--primary);
-  --color-azure-text: var(--azure-text);
-  --color-ink: var(--foreground);
-  --color-ash: var(--muted-foreground);
-  --color-pebble: var(--border);
-  --color-surface: var(--surface);
-  --color-raised: var(--raised);
-  --color-danger: var(--destructive);
+  /* functional state hues — an icon + a word always accompany these */
+  --color-live: var(--live);
+  --color-attention: var(--attention);
+  --color-attention-text: var(--attention-text);
+  --color-attention-ink: var(--attention-ink);
+  --color-ok: var(--ok);
+  --color-sleep: var(--sleep);
+
+  /* terminal ground for shell output */
   --color-trace: var(--trace);
   --color-trace-fg: var(--trace-fg);
 
-  /* functional status hues (glyph + word always accompany these) */
-  --color-attention: var(--attention);
-  --color-attention-text: var(--attention-text);
-  --color-ok: var(--ok);
+  /* legacy names still used in a few places; all derived */
+  --color-ink: var(--foreground);
+  --color-ash: var(--muted-foreground);
+  --color-surface: var(--muted);
+  --color-raised: var(--card);
+  --color-danger: var(--destructive);
+  --color-azure: var(--primary);
+  --color-azure-text: var(--live);
 
-  /* Radii — the reference uses tight 6–8px corners (nav rows 6px, cards 8px), NOT big pills. */
   --radius-sm: calc(var(--radius) - 2px);
   --radius-md: var(--radius);
   --radius-lg: calc(var(--radius) + 2px);
-  --radius-xl: calc(var(--radius) + 4px);
-  --radius-bubble: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 6px);
+  --radius-2xl: calc(var(--radius) + 10px);
   --radius-pill: 9999px;
 
-  /* Fonts cloned from the reference: Inter for all UI/body, Hedvig Letters Serif for the greeting.
-     Geist Mono is retained for machine text (the reference has no distinct mono face). */
   --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-serif: "Hedvig Letters Serif", ui-serif, Georgia, "Times New Roman", serif;
   --font-mono: "Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  /* Type scale measured off the reference: body/UI 14px Inter, h1 greeting 30px serif (weight 400,
-     lh 36px), h2 20px Inter medium. */
+  /* Type scale. Registered with tailwind-merge in lib/utils.ts — keep the two lists in sync. */
   --text-micro: 11px;
   --text-micro--line-height: 1.4;
   --text-meta: 13px;
@@ -81,112 +84,84 @@
   --text-h3: 16px;
   --text-h3--line-height: 1.4;
   --text-h2: 20px;
-  --text-h2--line-height: 1.4;
-  --text-h1: 30px;
+  --text-h2--line-height: 1.35;
+  --text-h1: 28px;
   --text-h1--line-height: 1.2;
-  --text-display: 30px;
-  --text-display--line-height: 1.2;
+  --text-display: 34px;
+  --text-display--line-height: 1.15;
+
+  --shadow-xs: 0 1px 2px oklch(0 0 0 / 0.05);
 }
 
-/*
- * shadcn "neutral" base — canonical ui.shadcn.com values (oklch). Light is the default block;
- * .dark swaps the same token names. Everything else in the app derives from these.
- */
 :root {
   --radius: 0.5rem;
 
-  /* Light theme = EXACT reference palette (crm-ai-agent-tau), measured with getComputedStyle in the
-     light scheme: a PURE WHITE canvas (the sidebar is flat, divided by a hairline — not a floating
-     card on a tinted field), cool near-neutral zinc text, 10%-black hairlines, and zinc-100 as the
-     hover/active fill. It is near-monochrome: the accent is a restrained zinc-950 ink, colour is
-     reserved for functional state. */
-  --background: oklch(1 0 0); /* #ffffff */
-  --foreground: oklch(0.21 0.006 285.9); /* zinc-950 #09090b */
+  /* Light: white paper, zinc ink. Read in daylight, so text tiers sit well above AA. */
+  --background: oklch(0.992 0.001 286);
+  --foreground: oklch(0.21 0.006 285.9);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.21 0.006 285.9);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.21 0.006 285.9);
-  --primary: oklch(0.21 0.006 285.9); /* zinc-950 ink — the reference's fills/CTA are near-black */
+  --primary: oklch(0.21 0.006 285.9);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.967 0.001 286.4); /* zinc-100 */
+  --secondary: oklch(0.955 0.002 286.4);
   --secondary-foreground: oklch(0.21 0.006 285.9);
-  --muted: oklch(0.967 0.001 286.4); /* zinc-100 */
-  --muted-foreground: oklch(0.552 0.016 285.9); /* zinc-500 #71717a */
-  --accent: oklch(0.967 0.001 286.4); /* zinc-100 — active nav row / hover fill (#f4f4f5) */
+  --muted: oklch(0.962 0.002 286.4);
+  --muted-foreground: oklch(0.5 0.016 285.9);
+  --accent: oklch(0.945 0.003 286.4);
   --accent-foreground: oklch(0.21 0.006 285.9);
-  --destructive: oklch(0.577 0.222 27.3);
-  --border: oklch(0 0 0 / 0.1); /* rgba(0,0,0,0.1) hairline */
-  --input: oklch(0 0 0 / 0.12);
-  --ring: oklch(0.21 0.006 285.9);
-
-  /* app vocabulary (light) */
-  --surface: oklch(0.967 0.001 286.4); /* zinc-100 hover/active rows */
-  --raised: oklch(1 0 0);
-  --trace: oklch(0.21 0.006 285.9); /* terminal ground — near-black zinc */
-  --trace-fg: oklch(0.96 0.001 286.4);
-  --azure-text: var(--foreground);
-  --attention: oklch(0.8 0.12 78);
-  --attention-text: oklch(0.53 0.11 66);
-  --ok: oklch(0.58 0.1 155);
-
-  /* elevation — the reference's cards use only a whisper of shadow (0 1px 2px rgba(0,0,0,.05)). */
-  --elevate: 0 1px 2px oklch(0 0 0 / 0.05);
-  --elevate-sm: 0 1px 2px oklch(0 0 0 / 0.05);
-
-  /* legacy raw-var aliases so existing markup renders on the shadcn base without per-line edits */
-  --canvas: var(--background);
-  --accent-text: var(--foreground);
-  --accent-fg: var(--primary-foreground);
-  --line: var(--border);
+  --destructive: oklch(0.55 0.21 27);
+  --border: oklch(0 0 0 / 0.09);
   --line-strong: oklch(0 0 0 / 0.18);
-  --nav-ink: oklch(0.442 0.017 285.9); /* zinc-600 — inactive nav labels in the reference */
+  --input: oklch(0 0 0 / 0.12);
+  --ring: oklch(0.55 0.19 262);
+
+  /* functional */
+  --live: oklch(0.52 0.2 262); /* working: electric indigo-blue, reads on white at 5.6:1 */
+  --attention: oklch(0.82 0.15 78); /* amber fill */
+  --attention-text: oklch(0.5 0.12 62); /* amber as text on paper, 5.4:1 */
+  --attention-ink: oklch(0.25 0.05 60); /* text on the amber fill */
+  --ok: oklch(0.52 0.14 152);
+  --sleep: oklch(0.55 0.16 300); /* sleeping: an idle-stopped microVM that a reply wakes */
+
+  --trace: oklch(0.2 0.006 286);
+  --trace-fg: oklch(0.93 0.003 286);
 }
 
 .dark {
-  /* A coherent dark version of the same cool-zinc feel: near-neutral charcoal ground, zinc text,
-     and a light ink lifted for legibility as the near-monochrome accent. */
-  --background: oklch(0.185 0.004 286); /* zinc-950-ish ground */
-  --foreground: oklch(0.96 0.001 286);
-  --card: oklch(0.21 0.005 286); /* zinc-900 */
-  --card-foreground: oklch(0.96 0.001 286);
-  --popover: oklch(0.21 0.005 286);
-  --popover-foreground: oklch(0.96 0.001 286);
-  --primary: oklch(0.92 0.001 286); /* near-white ink CTA on dark */
-  --primary-foreground: oklch(0.21 0.005 286);
-  --secondary: oklch(0.274 0.006 286); /* zinc-800 */
-  --secondary-foreground: oklch(0.96 0.001 286);
-  --muted: oklch(0.274 0.006 286);
-  --muted-foreground: oklch(0.705 0.015 286); /* zinc-400 */
-  --accent: oklch(0.274 0.006 286); /* zinc-800 active/hover fill */
-  --accent-foreground: oklch(0.96 0.001 286);
-  --destructive: oklch(0.704 0.191 22.2);
-  --border: oklch(1 0 0 / 0.1);
+  /* Dark: charcoal, not black, so the terminal panel can still be darker than the page. */
+  --background: oklch(0.17 0.005 286);
+  --foreground: oklch(0.95 0.002 286);
+  --card: oklch(0.205 0.005 286);
+  --card-foreground: oklch(0.95 0.002 286);
+  --popover: oklch(0.225 0.006 286);
+  --popover-foreground: oklch(0.95 0.002 286);
+  --primary: oklch(0.93 0.002 286);
+  --primary-foreground: oklch(0.19 0.005 286);
+  --secondary: oklch(0.27 0.006 286);
+  --secondary-foreground: oklch(0.95 0.002 286);
+  --muted: oklch(0.255 0.006 286);
+  --muted-foreground: oklch(0.7 0.012 286);
+  --accent: oklch(0.29 0.007 286);
+  --accent-foreground: oklch(0.97 0.002 286);
+  --destructive: oklch(0.7 0.19 22);
+  --border: oklch(1 0 0 / 0.09);
+  --line-strong: oklch(1 0 0 / 0.2);
   --input: oklch(1 0 0 / 0.14);
-  --ring: oklch(0.705 0.015 286);
+  --ring: oklch(0.72 0.16 262);
 
-  /* app vocabulary (dark) */
-  --surface: oklch(0.244 0.006 286);
-  --raised: oklch(0.244 0.006 286);
-  --trace: oklch(0.145 0.004 286);
+  --live: oklch(0.74 0.15 262);
+  --attention: oklch(0.8 0.15 78);
+  --attention-text: oklch(0.85 0.12 80);
+  --attention-ink: oklch(0.22 0.05 60);
+  --ok: oklch(0.74 0.14 155);
+  --sleep: oklch(0.76 0.13 300);
+
+  --trace: oklch(0.13 0.004 286);
   --trace-fg: oklch(0.9 0.004 286);
-  --azure-text: var(--foreground);
-  --attention: oklch(0.8 0.12 78);
-  --attention-text: oklch(0.83 0.11 76);
-  --ok: oklch(0.72 0.13 155);
-
-  --elevate: 0 1px 2px oklch(0 0 0 / 0.4), 0 12px 32px -12px oklch(0 0 0 / 0.5);
-  --elevate-sm: 0 1px 2px oklch(0 0 0 / 0.4);
-
-  /* legacy raw-var aliases so existing markup renders on the shadcn base without per-line edits */
-  --canvas: var(--background);
-  --accent-text: var(--foreground);
-  --accent-fg: var(--primary-foreground);
-  --line: var(--border);
-  --line-strong: oklch(1 0 0 / 0.18);
-  --nav-ink: oklch(0.705 0.015 286); /* zinc-400 — inactive nav labels (dark) */
 }
 
-/* Utilities prompt-kit's chat-container + our scrollers expect from a shadcn base stylesheet. */
 @utility scrollbar-thin {
   scrollbar-width: thin;
 }
@@ -198,16 +173,6 @@
 }
 @utility scrollbar-gutter-stable {
   scrollbar-gutter: stable;
-}
-@utility scroll-fade-b {
-  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 2rem), transparent 100%);
-  mask-image: linear-gradient(to bottom, #000 calc(100% - 2rem), transparent 100%);
-}
-@utility elevate {
-  box-shadow: var(--elevate);
-}
-@utility elevate-sm {
-  box-shadow: var(--elevate-sm);
 }
 
 @layer base {
@@ -227,12 +192,13 @@
     color: var(--foreground);
     font-family: var(--font-sans);
     font-size: 14px;
-    line-height: 1.6;
+    line-height: 1.5;
     -webkit-font-smoothing: antialiased;
     overscroll-behavior-y: none;
+    caret-color: var(--live);
   }
   ::selection {
-    background: color-mix(in oklch, var(--primary) 22%, transparent);
+    background: color-mix(in oklch, var(--live) 24%, transparent);
     color: var(--foreground);
   }
   ::-webkit-scrollbar {
@@ -240,7 +206,7 @@
     height: 10px;
   }
   ::-webkit-scrollbar-thumb {
-    background: var(--border);
+    background: var(--line-strong);
     border: 3px solid transparent;
     background-clip: padding-box;
     border-radius: 9999px;
@@ -261,44 +227,49 @@
     font: inherit;
     color: inherit;
   }
+  kbd {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+  }
   .tabular {
     font-variant-numeric: tabular-nums;
     font-feature-settings: "tnum";
   }
   @media (pointer: coarse) {
-    button,
-    [role="button"],
-    a[href] {
+    [data-slot="button"],
+    [data-touch] {
       min-height: 44px;
     }
-    [data-slot="button"] {
-      min-width: 44px;
-    }
   }
-  .stamp {
-    font-family: var(--font-mono);
-    font-size: 10.5px;
-    line-height: 1.2;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
+
+  /* A small sans label — section titles, role captions, inline state words. Sentence case; the
+     weight and colour do the work, not capitals. */
+  .label {
+    font-size: 11px;
+    line-height: 1.4;
+    letter-spacing: 0.01em;
     font-weight: 500;
   }
+  /* Machine data — ids, vitals, paths, commands — is set in the mono face, as data, never as a
+     costume for prose. */
+  .stamp {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.4;
+    font-variant-numeric: tabular-nums;
+  }
+
   .prose-agent {
-    /* 15px/1.65 matches claude.ai's reading measure (its prose sits at 14–15px, not 16px). The wide
-       measure fills the reading column rather than clamping to 72ch — the reference lets assistant
-       prose use the full column now that it is no longer boxed in a bubble. */
     font-size: 15px;
     line-height: 1.65;
-    max-width: 78ch;
+    max-width: 74ch;
   }
   @media (max-width: 640px) {
     .prose-agent {
       font-size: 14.5px;
     }
   }
-  /* Tailwind preflight strips element styling, so markdown renders as flat text without this. These
-     rules give agent prose real structure — headings, lists, tables, code, quotes — in the pixel-match
-     Inter/zinc language, so a GFM table reads as a table instead of a run-on paragraph. */
   .prose-agent > :first-child {
     margin-top: 0;
   }
@@ -314,11 +285,12 @@
   .prose-agent h4 {
     font-weight: 600;
     line-height: 1.3;
-    margin: 1.4em 0 0.6em;
-    letter-spacing: -0.01em;
+    margin: 1.5em 0 0.5em;
+    letter-spacing: -0.015em;
+    text-wrap: balance;
   }
   .prose-agent h1 {
-    font-size: 1.4em;
+    font-size: 1.35em;
   }
   .prose-agent h2 {
     font-size: 1.2em;
@@ -347,12 +319,16 @@
     color: var(--muted-foreground);
   }
   .prose-agent a {
-    color: var(--primary);
+    color: var(--live);
     text-decoration: underline;
-    text-underline-offset: 2px;
+    text-decoration-color: color-mix(in oklch, var(--live) 40%, transparent);
+    text-underline-offset: 3px;
+  }
+  .prose-agent a:hover {
+    text-decoration-color: var(--live);
   }
   .prose-agent blockquote {
-    border-left: 2px solid var(--border);
+    border-left: 1px solid var(--line-strong);
     margin: 0.75em 0;
     padding-left: 1em;
     color: var(--muted-foreground);
@@ -373,7 +349,7 @@
     font-variant-numeric: tabular-nums;
   }
   .prose-agent thead {
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--line-strong);
   }
   .prose-agent th {
     text-align: left;
@@ -384,11 +360,8 @@
   }
   .prose-agent td {
     padding: 0.45em 0.85em;
-    border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
+    border-top: 1px solid var(--border);
     white-space: nowrap;
-  }
-  .prose-agent tbody tr:nth-child(even) {
-    background: color-mix(in oklch, var(--muted) 45%, transparent);
   }
 }
 
@@ -403,6 +376,7 @@
   }
 }
 
+/* The one authored motion in the console: liveness. A working machine breathes; nothing else pulses. */
 @keyframes breathe {
   0%,
   100% {
@@ -410,16 +384,15 @@
     transform: scale(1);
   }
   50% {
-    opacity: 0.4;
-    transform: scale(0.8);
+    opacity: 0.45;
+    transform: scale(0.82);
   }
 }
 .breathe {
   animation: breathe 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
-/* A turn/block arriving in the thread: a short fade + rise, so a new message reads as a message
-   landing rather than a log line repainting. Applied once on mount; static history never re-animates. */
+/* A turn landing in the thread: a short fade + rise, once on mount. Static history never re-animates. */
 @keyframes enter {
   from {
     opacity: 0;
@@ -431,11 +404,10 @@
   }
 }
 .enter {
-  animation: enter 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: enter 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-/* The "working…" indicator dots: three staggered bounces while the agent is between outputs or a
-   tool is mid-run. Deliberately calmer than a spinner — a heartbeat, not a throbber. */
+/* Working… dots: three staggered lifts. A heartbeat, not a throbber. */
 @keyframes dot {
   0%,
   80%,
@@ -461,7 +433,7 @@
   animation-delay: 320ms;
 }
 
-/* A blinking caret at the tail of the streaming text — the classic "still typing" tell. */
+/* Blinking caret at the growing edge of streamed text. */
 @keyframes caret {
   0%,
   100% {
@@ -475,4 +447,47 @@
   display: inline-block;
   width: 0.5ch;
   animation: caret 1s step-end infinite;
+}
+
+/* Amber attention halo for the composer while a machine waits on an answer: a soft, offset glow. */
+.attention-glow {
+  box-shadow:
+    0 1px 2px oklch(0 0 0 / 0.05),
+    0 0 0 3px color-mix(in oklch, var(--attention) 28%, transparent),
+    0 8px 24px -12px color-mix(in oklch, var(--attention) 60%, transparent);
+}
+
+/* Skeleton shimmer: a soft highlight sweeping across placeholder bars while a thread's first frame
+   is in flight. Static under reduced motion (the global rule zeroes the duration). */
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--muted) 0%,
+    color-mix(in oklch, var(--muted) 55%, var(--card)) 50%,
+    var(--muted) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+
+/* Capacity slots: a filled slot for a working machine carries a slow sheen so the strip reads live. */
+@keyframes sheen {
+  0%,
+  100% {
+    opacity: 0.85;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.sheen {
+  animation: sheen 2.4s ease-in-out infinite;
 }

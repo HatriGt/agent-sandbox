@@ -1,38 +1,88 @@
+import { CircleDot, Pause, Check, X, Circle, MoonStar, type LucideProps } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { doneLabel, isFailedExit } from "@/lib/format";
-import type { RunState } from "@/lib/api";
+import type { DisplayState } from "@/lib/lifecycle";
 
 /**
- * State as a machine stamp — functional colour, the loudest signal in the console. Each state pairs a
- * hue with a distinct glyph + word so meaning survives colourblindness (never colour alone):
- *   working → azure pulse · needs-you → amber (the one thing with a deadline) · done → slate · error → red.
+ * Run state, the loudest signal in the console.
+ *
+ * Each state pairs a functional hue with a drawn icon AND a word, so meaning survives colour-blindness
+ * and bright sunlight: working → live blue, breathing · needs you → amber pause · done → green check ·
+ * failed → red cross · idle → hollow grey circle · sleeping → violet moon (an idle-stopped microVM
+ * whose workspace and session survive; a reply wakes it).
+ *
+ *   · `StateStamp` — inline text: icon + word, for list rows, tables and the palette.
+ *   · `StatePill`  — a tinted pill for the thread header, where the state anchors the whole view.
  */
-const TONE: Record<RunState, { cls: string; glyph: string; word: (exit?: number) => string }> = {
-  running: { cls: "text-azure-text", glyph: "●", word: () => "working" },
-  waiting: { cls: "text-[var(--attention-text)]", glyph: "❚❚", word: () => "needs you" },
-  // Success is just "done" — surfacing "exit 0" reads like an error code to a non-engineer. Only a
-  // non-zero (or unknown) exit earns the code, which is then also coloured red below.
-  done: { cls: "text-ash", glyph: "■", word: (e) => doneLabel(e) },
-  idle: { cls: "text-ash", glyph: "○", word: () => "idle" },
+type Tone = { icon: React.ComponentType<LucideProps>; word: (exit?: number) => string; text: string; pill: string };
+
+const TONE: Record<DisplayState | "failed", Tone> = {
+  running: { icon: CircleDot, word: () => "working", text: "text-live", pill: "bg-live/12 text-live ring-live/25" },
+  waiting: {
+    icon: Pause,
+    word: () => "needs you",
+    text: "text-attention-text",
+    pill: "bg-attention/18 text-attention-text ring-attention/45",
+  },
+  done: { icon: Check, word: (e) => doneLabel(e), text: "text-ok", pill: "bg-ok/12 text-ok ring-ok/25" },
+  failed: {
+    icon: X,
+    word: (e) => doneLabel(e),
+    text: "text-destructive",
+    pill: "bg-destructive/10 text-destructive ring-destructive/25",
+  },
+  idle: { icon: Circle, word: () => "idle", text: "text-muted-foreground", pill: "bg-muted text-muted-foreground ring-border" },
+  sleeping: {
+    icon: MoonStar,
+    word: () => "sleeping",
+    text: "text-sleep",
+    pill: "bg-sleep/12 text-sleep ring-sleep/25",
+  },
 };
+
+function toneOf(state: DisplayState, exitCode?: number): Tone {
+  return state === "done" && isFailedExit(exitCode) ? TONE.failed : TONE[state];
+}
 
 export function StateStamp({
   state,
   exitCode,
   className,
 }: {
-  state: RunState;
+  state: DisplayState;
   exitCode?: number;
   className?: string;
 }) {
-  const t = TONE[state];
-  // A non-zero exit is a failure — surface it in red rather than neutral slate.
-  const cls = state === "done" && isFailedExit(exitCode) ? "text-[var(--danger)]" : t.cls;
+  const t = toneOf(state, exitCode);
+  const Icon = t.icon;
   return (
-    <span className={cn("stamp inline-flex items-center gap-1.5", cls, className)}>
-      <span aria-hidden className={cn("text-[8px] leading-none", state === "running" && "breathe")}>
-        {t.glyph}
-      </span>
+    <span className={cn("label inline-flex items-center gap-1.5 font-medium", t.text, className)}>
+      <Icon className={cn("size-3 shrink-0", state === "running" && "breathe")} aria-hidden strokeWidth={2.5} />
+      {t.word(exitCode)}
+    </span>
+  );
+}
+
+export function StatePill({
+  state,
+  exitCode,
+  className,
+}: {
+  state: DisplayState;
+  exitCode?: number;
+  className?: string;
+}) {
+  const t = toneOf(state, exitCode);
+  const Icon = t.icon;
+  return (
+    <span
+      className={cn(
+        "inline-flex h-6 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-micro font-semibold ring-1 ring-inset",
+        t.pill,
+        className
+      )}
+    >
+      <Icon className={cn("size-3 shrink-0", state === "running" && "breathe")} aria-hidden strokeWidth={2.5} />
       {t.word(exitCode)}
     </span>
   );

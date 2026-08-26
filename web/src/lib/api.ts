@@ -10,6 +10,7 @@ export type BoxRole = "session" | "pool-claimed" | "pool-free";
 export interface BoxView {
   name: string;
   role: BoxRole;
+  /** msb lifecycle: "Running" while the microVM is up, "Stopped" for a sleeping (idle-stopped) box. */
   boxStatus: string;
   runState: RunState;
   exitCode?: number;
@@ -18,6 +19,22 @@ export interface BoxView {
   uptime?: string;
   cpu?: string;
   mem?: string;
+  /** Unix seconds of the agent's last output (log mtime). */
+  lastOutputAt?: number;
+}
+
+export interface FleetLifecycle {
+  idleTimeoutSec?: number;
+  poolIdleTimeoutSec?: number;
+  maxDurationSec?: number;
+  capacity: number;
+  poolSize: number;
+}
+
+export interface FleetSnapshot {
+  boxes: BoxView[];
+  lifecycle: FleetLifecycle;
+  at: number;
 }
 
 export interface WatchSnapshot extends Omit<BoxView, "role"> {
@@ -75,9 +92,23 @@ async function post<T>(path: string, payload: unknown): Promise<T> {
   );
 }
 
+/** A controller built before /fleet.json existed: fall back to the bare monitor list once, remember. */
+let fleetRouteMissing = false;
+
 export const api = {
-  monitor: (signal?: AbortSignal) =>
-    fetch(url("/monitor.json"), { headers: authHeaders, signal }).then(parse<BoxView[]>),
+  /**
+   * The fleet with lifecycle facts. Falls back to `/monitor.json` (boxes only, no lifecycle) against
+   * an older controller so the dashboard still works during a rolling deploy.
+   */
+  async fleet(signal?: AbortSignal): Promise<FleetSnapshot> {
+    if (!fleetRouteMissing) {
+      const res = await fetch(url("/fleet.json"), { headers: authHeaders, signal });
+      if (res.status !== 404) return parse<FleetSnapshot>(res);
+      fleetRouteMissing = true;
+    }
+    const boxes = await fetch(url("/monitor.json"), { headers: authHeaders, signal }).then(parse<BoxView[]>);
+    return { boxes, lifecycle: { capacity: 0, poolSize: 0 }, at: Date.now() };
+  },
 
   watch: (session: string, signal?: AbortSignal) =>
     fetch(url("/watch.json", { session }), { headers: authHeaders, signal }).then(parse<WatchSnapshot>),

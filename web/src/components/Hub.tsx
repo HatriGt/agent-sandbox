@@ -1,35 +1,46 @@
 import * as React from "react";
-import { ArrowLeft, ArrowRight, ArrowUp, Bug, ClipboardCheck, FileSearch, FlaskConical, GitBranch, Layers, Loader2 } from "lucide-react";
-import { api, type BoxView } from "@/lib/api";
-import { friendlyName, shortName, threadTitle } from "@/lib/format";
+import {
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
+  Bug,
+  ClipboardCheck,
+  FileSearch,
+  FlaskConical,
+  GitBranch,
+  Layers,
+  Loader2,
+  X,
+} from "lucide-react";
+import { motion } from "motion/react";
+import { api, type BoxView, type FleetLifecycle } from "@/lib/api";
+import { friendlyName, shortName, threadSort, threadTitle } from "@/lib/format";
+import { displayState, fmtDuration } from "@/lib/lifecycle";
+import { prefetchWatch } from "@/hooks/useWatchStream";
 import { Button } from "@/components/ui/button";
 import { StateStamp } from "@/components/ui/stamp";
-import { PromptInput, PromptInputTextarea } from "@/components/ui/prompt-input";
+import { PromptInput, PromptInputActions, PromptInputTextarea } from "@/components/ui/prompt-input";
+import { Capacity } from "@/components/Capacity";
+import { Bar } from "@/components/thread/Skeletons";
 import { cn } from "@/lib/utils";
 import type { SessionRun } from "@/hooks/useSessionRuns";
 
 /**
  * The hub: what you see with no machine selected.
  *
- * Starting a run is the primary act of this product, so it gets the centre of the screen rather than
- * a control in a corner. The starters below are the real jobs this system is used for — each one
- * prefills the composer with a working task, because a chip that only inserts a category name makes
- * you do the writing anyway.
- *
- * "This session" is deliberately honest: nothing about a run survives its machine being destroyed,
- * so this lists what THIS browser started, and marks the ones whose machines are gone. Inventing a
- * run history would be inventing data the product does not keep.
+ * Starting a run is the primary act of this product, so the composer is the first thing on the page,
+ * top-anchored so nothing jumps when the lists below change. Under it: the live fleet with its
+ * capacity, because the hub is also where you glance to know whether anything needs you; then the
+ * runs this browser started, honest about the ones whose machines are gone.
  */
 
 interface Starter {
   icon: React.ReactNode;
   label: string;
-  /** Prefill — a real task, not a category. */
   task: string;
   needsRepo?: boolean;
 }
 
-/** Time-of-day greeting, in the reference's warm register. */
 function greeting(): string {
   const h = new Date().getHours();
   if (h < 5) return "Working late";
@@ -70,8 +81,28 @@ const STARTERS: Starter[] = [
   },
 ];
 
+/** One honest sentence about the fleet right now, built only from live data. */
+function fleetLine(boxes: BoxView[], lc: FleetLifecycle): string {
+  const waiting = boxes.filter((b) => b.runState === "waiting").length;
+  const working = boxes.filter((b) => b.runState === "running" && displayState(b) === "running").length;
+  const warm = boxes.filter((b) => b.role === "pool-free" && displayState(b) === "idle").length;
+  const up = boxes.filter((b) => displayState(b) !== "sleeping").length;
+  const parts: string[] = [];
+  if (waiting) parts.push(`${waiting} ${waiting === 1 ? "machine needs" : "machines need"} your answer`);
+  if (working) parts.push(`${working} working`);
+  const full = lc.capacity > 0 && up >= lc.capacity;
+  const tail = full
+    ? `All ${lc.capacity} slots are in use — finish or destroy a machine to start another.`
+    : warm
+      ? "A warm machine is ready, so a new task starts in seconds."
+      : "No warm machine right now — a fresh microVM boots in a few seconds.";
+  return parts.length ? `${parts.join(", ")}. ${tail}` : tail;
+}
+
 export function Hub({
   boxes,
+  lifecycle,
+  loading,
   sessionRuns,
   onBooting,
   onStarted,
@@ -82,6 +113,8 @@ export function Hub({
   onBack,
 }: {
   boxes: BoxView[];
+  lifecycle: FleetLifecycle;
+  loading: boolean;
   sessionRuns: SessionRun[];
   onBooting: (task: string) => void;
   onStarted: (box: string, task: string) => void;
@@ -89,7 +122,6 @@ export function Hub({
   onPending: (p: { id: string; task: string }) => void;
   onSettled: (id: string) => void;
   onOpen: (name: string) => void;
-  /** Mobile-only: return to the machines rail. */
   onBack: () => void;
 }) {
   const [task, setTask] = React.useState("");
@@ -98,11 +130,10 @@ export function Hub({
   const [showRepo, setShowRepo] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+
   const applyStarter = (s: Starter) => {
     setTask(s.task);
     if (s.needsRepo) setShowRepo(true);
-    // Put the caret at the end so a template that expects detail can be finished by typing.
-    // prompt-kit's PromptInputTextarea owns its own ref via context, so we reach it by id.
     requestAnimationFrame(() => {
       const el = document.getElementById("new-task") as HTMLTextAreaElement | null;
       if (!el) return;
@@ -119,15 +150,11 @@ export function Hub({
     setError(null);
     setTask("");
     onPending({ id, task: t });
-    // Leave the Hub immediately: the box id won't be known until the run hits a boundary, so show a
-    // booting thread with the task now rather than freezing here for the whole boot.
     onBooting(t);
     try {
       const res = await api.delegate({ task: t, repo: repo.trim() || undefined, ref: ref.trim() || undefined });
       if (res.ok) onStarted(res.box, t);
       else {
-        // A clarifying question came back instead of a box: fall back to the Hub with the task and
-        // the question shown, since there is no thread to open.
         onFailed();
         setError(res.question);
         setTask(t);
@@ -143,119 +170,185 @@ export function Hub({
   };
 
   const live = new Set(boxes.map((b) => b.name));
-  // Center the composer only on a truly empty hub; once there's session history, anchor to the top so
-  // the composer doesn't jump downward as the list grows under it.
-  const hasHistory = sessionRuns.length > 0;
+  const fleet = [...boxes].sort(threadSort);
+  const repoLabel = repo.trim() ? `${repo.trim()}${ref.trim() ? `@${ref.trim()}` : ""}` : "Attach a repo";
 
   return (
     <div className="h-full min-w-0 overflow-y-auto">
-      <div
-        className={cn(
-          "mx-auto flex min-h-full w-full max-w-2xl flex-col gap-6 px-6 py-10",
-          hasHistory ? "justify-start pt-[10vh]" : "justify-center"
-        )}
-      >
-        {/* Left-aligned serif greeting + subtitle, mirroring the reference's hero register. */}
-        <div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onBack}
-            className="text-ash -ml-2 mb-2 md:hidden"
-            aria-label="Back to machines"
-          >
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-8 px-5 pt-8 pb-16 md:px-6 md:pt-[8vh]">
+        <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}>
+          <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2 mb-3 md:hidden" aria-label="Back to machines">
             <ArrowLeft className="size-4" />
             Machines
           </Button>
-          <h1 className="text-ink font-serif text-h1 font-normal">{greeting()}</h1>
-          <p className="text-ash mt-1.5 max-w-[52ch] text-body">
-            Where should we start? Describe a task and a fresh microVM will pick it up.
-          </p>
-        </div>
-
-        {/* composer */}
-        {/* ChatGPT composer geometry: one deeply-rounded surface, controls inside on the bottom
-            row, hint text below it. */}
-        <PromptInput
-          value={task}
-          onValueChange={setTask}
-          onSubmit={submit}
-          isLoading={busy}
-          className="bg-card rounded-xl border-[var(--line)] elevate-sm"
-        >
-          <label htmlFor="new-task" className="sr-only">
-            Describe the task for a new machine
-          </label>
-          <PromptInputTextarea id="new-task" placeholder="Message a new sandbox…" className="min-h-14" />
-
-          {showRepo && (
-            <div className="grid gap-2 px-1 pt-2 sm:grid-cols-[2fr_1fr]">
-              <input
-                value={repo}
-                onChange={(e) => setRepo(e.target.value)}
-                placeholder="owner/repo"
-                aria-label="Repository, owner slash name"
-                className="text-foreground placeholder:text-muted-foreground border-border bg-background focus:border-ring rounded-md border px-3 py-2 font-mono text-meta outline-none"
-              />
-              <input
-                value={ref}
-                onChange={(e) => setRef(e.target.value)}
-                placeholder="branch"
-                aria-label="Git ref"
-                className="text-foreground placeholder:text-muted-foreground border-border bg-background focus:border-ring rounded-md border px-3 py-2 font-mono text-meta outline-none"
-              />
+          <h1 className="text-foreground font-serif text-display font-normal tracking-[-0.01em] text-balance">
+            {greeting()}
+          </h1>
+          {loading ? (
+            <div className="mt-3 flex flex-col gap-2">
+              <Bar className="h-3 w-[70%]" />
+              <Bar className="h-3 w-[40%]" />
             </div>
-          )}
-
-          <div className="flex items-center gap-2 pt-1">
-            <Button variant="ghost" size="sm" onClick={() => setShowRepo((v) => !v)} aria-expanded={showRepo}>
-              <GitBranch className="size-3.5" />
-              <span className="stamp">{repo.trim() || "attach a repo"}</span>
-            </Button>
-            <Button
-              size="icon"
-              onClick={submit}
-              disabled={busy || !task.trim()}
-              aria-label="Boot a machine with this task"
-              className="ml-auto rounded-full"
-            >
-              {busy ? <Loader2 className="animate-spin" /> : <ArrowUp />}
-            </Button>
-          </div>
-        </PromptInput>
-
-        <p className="text-ash -mt-4 min-h-4 text-micro">
-          {error ? (
-            <span className="text-[var(--danger)]" role="alert">
-              {error}
-            </span>
           ) : (
-            "Enter boots a machine · no repo runs a task-only machine"
+            <p className="text-muted-foreground mt-2 max-w-[56ch] text-body">{fleetLine(boxes, lifecycle)}</p>
           )}
-        </p>
+        </motion.div>
 
-        {/* Skill chips row — reference places quick actions as a wrapping pill row under the composer.
-            Each prefills a real task rather than inserting a bare category. */}
-        <div className="-mt-2 flex flex-wrap gap-2">
-          {STARTERS.map((s) => (
-            <button
-              key={s.label}
-              type="button"
-              onClick={() => applyStarter(s)}
-              className="text-[var(--nav-ink)] hover:text-ink flex cursor-pointer items-center gap-2 rounded-md border bg-[var(--card)] px-3 py-1.5 text-meta transition-colors hover:bg-[var(--surface)] [&_svg]:size-3.5"
-            >
-              {s.icon}
-              {s.label}
-            </button>
-          ))}
-        </div>
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.05, ease: [0.22, 1, 0.36, 1] }}>
+          <PromptInput
+            value={task}
+            onValueChange={setTask}
+            onSubmit={submit}
+            isLoading={busy}
+            className="bg-card border-line-strong focus-within:border-live/60 focus-within:shadow-[0_0_0_3px_color-mix(in_oklch,var(--live)_18%,transparent)] rounded-2xl p-2 shadow-xs transition-[border-color,box-shadow] duration-200"
+          >
+            <label htmlFor="new-task" className="sr-only">
+              Describe the task for a new machine
+            </label>
+            <PromptInputTextarea
+              id="new-task"
+              placeholder="Describe a task. A fresh microVM picks it up…"
+              className="min-h-14 px-2.5 pt-2 text-body"
+            />
 
-        {/* this session — real, and honest about what does not persist */}
+            {showRepo && (
+              <div className="enter mt-1 grid gap-2 px-1 sm:grid-cols-[2fr_1fr_auto]" onClick={(e) => e.stopPropagation()}>
+                <input
+                  value={repo}
+                  onChange={(e) => setRepo(e.target.value)}
+                  placeholder="owner/repo"
+                  aria-label="Repository, owner slash name"
+                  autoFocus
+                  className="text-foreground placeholder:text-muted-foreground bg-muted focus:ring-ring h-8 rounded-md px-2.5 font-mono text-meta outline-none focus:ring-2"
+                />
+                <input
+                  value={ref}
+                  onChange={(e) => setRef(e.target.value)}
+                  placeholder="branch (optional)"
+                  aria-label="Git ref"
+                  className="text-foreground placeholder:text-muted-foreground bg-muted focus:ring-ring h-8 rounded-md px-2.5 font-mono text-meta outline-none focus:ring-2"
+                />
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => {
+                    setShowRepo(false);
+                    setRepo("");
+                    setRef("");
+                  }}
+                  aria-label="Remove repository"
+                >
+                  <X />
+                </Button>
+              </div>
+            )}
+
+            <PromptInputActions className="justify-between pt-1">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowRepo((v) => !v);
+                }}
+                aria-expanded={showRepo}
+                className={cn(
+                  "flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2 text-micro font-medium transition-colors",
+                  repo.trim() ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                )}
+              >
+                <GitBranch className="size-3.5" aria-hidden />
+                <span className={cn(repo.trim() && "font-mono")}>{repoLabel}</span>
+              </button>
+              <p className={cn("hidden min-w-0 flex-1 truncate text-right text-micro sm:block", error ? "text-destructive" : "text-muted-foreground")}>
+                {error ??
+                  (lifecycle.maxDurationSec
+                    ? `Enter starts the machine · runs up to ${fmtDuration(lifecycle.maxDurationSec)}${lifecycle.idleTimeoutSec ? `, sleeps after ${fmtDuration(lifecycle.idleTimeoutSec)} quiet` : ""}`
+                    : "Enter starts the machine · without a repo it runs task-only")}
+              </p>
+              <Button
+                size="icon"
+                onClick={submit}
+                disabled={busy || !task.trim()}
+                aria-label="Start a machine with this task"
+                className="rounded-full"
+              >
+                {busy ? <Loader2 className="animate-spin" /> : <ArrowUp />}
+              </Button>
+            </PromptInputActions>
+          </PromptInput>
+          {error && (
+            <p className="text-destructive mt-2 px-1 text-micro sm:hidden" role="alert">
+              {error}
+            </p>
+          )}
+
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {STARTERS.map((s) => (
+              <button
+                key={s.label}
+                type="button"
+                onClick={() => applyStarter(s)}
+                className="text-muted-foreground hover:text-foreground hover:bg-muted hover:border-line-strong flex cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1.5 text-meta transition-colors [&_svg]:size-3.5"
+              >
+                {s.icon}
+                {s.label}
+              </button>
+            ))}
+          </div>
+        </motion.div>
+
+        {(loading || fleet.length > 0) && (
+          <motion.section
+            aria-labelledby="live-now"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
+          >
+            <div className="flex items-center justify-between pb-2">
+              <h2 id="live-now" className="text-foreground text-h3 font-semibold tracking-[-0.01em]">
+                Live now
+              </h2>
+              {loading ? <Bar className="h-3 w-20" /> : <Capacity boxes={boxes} capacity={lifecycle.capacity} size="sm" />}
+            </div>
+            <ul className="divide-y rounded-xl border">
+              {loading
+                ? [0, 1, 2].map((i) => (
+                    <li key={i} className="flex items-center gap-3 px-3.5 py-3">
+                      <Bar className="h-2.5 w-20" />
+                      <Bar className="h-3 flex-1" />
+                      <Bar className="h-2.5 w-16" />
+                    </li>
+                  ))
+                : fleet.map((b) => (
+                    <li key={b.name}>
+                      <button
+                        type="button"
+                        onClick={() => onOpen(b.name)}
+                        onMouseEnter={() => prefetchWatch(b.name)}
+                        className="group hover:bg-muted flex w-full cursor-pointer items-center gap-3 px-3.5 py-2.5 text-left transition-colors first:rounded-t-xl last:rounded-b-xl"
+                      >
+                        <StateStamp state={displayState(b)} exitCode={b.exitCode} className="w-24 shrink-0" />
+                        <span className="text-foreground min-w-0 flex-1 truncate text-meta">
+                          {b.runState === "waiting" && b.question ? b.question : threadTitle(b)}
+                        </span>
+                        <span className="stamp text-muted-foreground shrink-0" title={shortName(b.name)}>
+                          {friendlyName(b.name)}
+                        </span>
+                        <ArrowRight className="text-muted-foreground size-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
+                      </button>
+                    </li>
+                  ))}
+            </ul>
+          </motion.section>
+        )}
+
         {sessionRuns.length > 0 && (
-          <div className="border-t pt-6">
-            <div className="flex items-center gap-2 pb-3">
-              <p className="stamp text-ash">previous runs</p>
-              <span className="stamp text-ash tabular ml-auto">this session</span>
+          <section aria-labelledby="started-here">
+            <div className="flex items-baseline justify-between pb-2">
+              <h2 id="started-here" className="text-foreground text-h3 font-semibold tracking-[-0.01em]">
+                Started from this browser
+              </h2>
+              <span className="text-muted-foreground text-micro">this session</span>
             </div>
             <ul className="flex flex-col">
               {sessionRuns.slice(0, 6).map((r) => {
@@ -269,30 +362,32 @@ export function Hub({
                       onClick={() => onOpen(r.box)}
                       className={cn(
                         "group flex w-full items-center gap-3 border-b py-2.5 text-left last:border-b-0",
-                        gone ? "cursor-default opacity-45" : "cursor-pointer"
+                        gone ? "cursor-default" : "cursor-pointer"
                       )}
                     >
                       {box ? (
-                        <StateStamp state={box.runState} exitCode={box.exitCode} className="shrink-0" />
+                        <StateStamp state={displayState(box)} exitCode={box.exitCode} className="w-24 shrink-0" />
                       ) : (
-                        <span className="stamp text-ash shrink-0">destroyed</span>
+                        <span className="label text-muted-foreground/70 w-24 shrink-0">destroyed</span>
                       )}
-                      <span className="text-ink min-w-0 flex-1 truncate text-meta">
+                      <span className={cn("min-w-0 flex-1 truncate text-meta", gone ? "text-muted-foreground" : "text-foreground")}>
                         {box ? threadTitle(box) : r.task}
                       </span>
-                      <span className="text-ash shrink-0 text-micro font-medium" title={shortName(r.box)}>{friendlyName(r.box)}</span>
+                      <span className="stamp text-muted-foreground shrink-0" title={shortName(r.box)}>
+                        {friendlyName(r.box)}
+                      </span>
                       {!gone && (
-                        <ArrowRight className="text-ash size-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
+                        <ArrowRight className="text-muted-foreground size-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
                       )}
                     </button>
                   </li>
                 );
               })}
             </ul>
-            <p className="text-ash mt-3 text-micro">
+            <p className="text-muted-foreground mt-3 text-micro">
               A machine's history dies with it — nothing here is stored on the server.
             </p>
-          </div>
+          </section>
         )}
       </div>
     </div>

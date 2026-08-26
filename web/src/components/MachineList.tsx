@@ -1,14 +1,18 @@
 import { Clock } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
 import type { StableBox } from "@/hooks/useStableBoxes";
+import { prefetchWatch } from "@/hooks/useWatchStream";
 import { friendlyName, roleLabel, shortName, threadSort, threadTitle } from "@/lib/format";
+import { displayState } from "@/lib/lifecycle";
 import { StateStamp } from "@/components/ui/stamp";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Badge } from "@/components/ui/badge";
+import { Bar } from "@/components/thread/Skeletons";
 import { cn } from "@/lib/utils";
 
 /**
- * The machines, ordered for triage: anything halted on a question first, then working, then the
- * rest. Flat rows on hairlines — a card per machine would be four borders around two lines of text.
+ * The machines, ordered for triage: anything halted on a question first, then working, finished,
+ * sleeping, idle. Rows animate into their new position when a state flips (a machine that just
+ * paused rises to the top instead of teleporting), and hovering a row prefetches its thread so the
+ * click lands on a warm cache.
  */
 export function MachineList({
   boxes,
@@ -26,91 +30,97 @@ export function MachineList({
   const sorted = [...boxes].sort(threadSort);
 
   return (
-    <nav aria-label="Machines" className="min-h-0 flex-1 overflow-y-auto">
+    <nav aria-label="Machines" className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
       {loading && (
-        <div className="space-y-3 px-3 py-2" aria-busy="true">
+        <div className="space-y-1 px-1 py-1" aria-busy="true">
           {[0, 1, 2].map((i) => (
-            <div key={i} className="space-y-2 rounded-md p-2">
-              <Skeleton className="h-2.5 w-16 rounded-full" />
-              <Skeleton className="h-3 w-full rounded-full" />
+            <div key={i} className="space-y-2.5 rounded-lg px-2 py-2.5">
+              <div className="flex justify-between">
+                <Bar className="h-2.5 w-16" />
+                <Bar className="h-2.5 w-10" />
+              </div>
+              <Bar className="h-3 w-full" />
+              <Bar className="h-3 w-2/3" />
+              <Bar className="h-2.5 w-24" />
             </div>
           ))}
         </div>
       )}
 
       {!loading && !sorted.length && !pending.length && (
-        <p className="text-ash px-4 py-6 text-meta leading-relaxed">
-          No machines up. A boot takes a few seconds, and idle machines stop themselves.
+        <p className="text-muted-foreground px-3 py-5 text-meta leading-relaxed">
+          Nothing is up. Start a task and a machine boots in seconds; idle machines stop themselves.
         </p>
       )}
 
-      <ul>
+      <ul className="flex flex-col gap-px">
         {pending.map((p) => (
-          <li key={p.id} className="mx-2 rounded-xl px-3 py-2.5">
-            <p className="stamp text-ash">
-              <span className="breathe">○</span> booting
+          <li key={p.id} className="enter rounded-lg px-3 py-2.5" aria-busy="true">
+            <p className="label text-live flex items-center gap-1.5">
+              <span className="bg-live breathe size-2 rounded-full" aria-hidden />
+              booting
             </p>
-            <p className="text-ash mt-1 line-clamp-2 text-meta leading-snug">{p.task}</p>
+            <p className="text-muted-foreground mt-1 line-clamp-2 text-meta leading-snug">{p.task}</p>
           </li>
         ))}
 
-        {sorted.map((v) => {
-          const active = selected === v.name;
-          return (
-            <li key={v.name}>
-              <button
-                type="button"
-                onClick={() => onSelect(v.name)}
-                aria-current={active ? "true" : undefined}
-                className={cn(
-                  "relative mx-2 w-[calc(100%-1rem)] cursor-pointer rounded-xl px-3 py-2.5 text-left",
-                  "transition-colors duration-150 hover:bg-[var(--surface)]",
-                  active && "bg-accent",
-                  v.leaving && "opacity-50"
-                )}
+        <AnimatePresence initial={false}>
+          {sorted.map((v) => {
+            const active = selected === v.name;
+            const waiting = v.runState === "waiting";
+            const state = displayState(v);
+            return (
+              <motion.li
+                key={v.name}
+                layout="position"
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: v.leaving ? 0.5 : 1, y: 0 }}
+                exit={{ opacity: 0, height: 0, marginTop: 0, marginBottom: 0 }}
+                transition={{ type: "spring", stiffness: 500, damping: 40, mass: 0.8 }}
               >
-                {active && (
-                  <span className="bg-primary absolute inset-y-2.5 left-0 w-[3px] rounded-full" aria-hidden />
-                )}
-
-                <div className="flex items-center gap-2">
-                  <StateStamp state={v.runState} exitCode={v.exitCode} />
-                  {/* A machine mid-shutdown is labelled rather than removed mid-poll. */}
-                  {v.leaving ? (
-                    <Badge variant="outline" className="stamp ml-auto">
-                      shutting down
-                    </Badge>
-                  ) : (
-                    <span className="stamp text-ash ml-auto opacity-70">{roleLabel(v.role)}</span>
-                  )}
-                </div>
-
-                <p
+                <button
+                  type="button"
+                  onClick={() => onSelect(v.name)}
+                  onMouseEnter={() => prefetchWatch(v.name)}
+                  onFocus={() => prefetchWatch(v.name)}
+                  aria-current={active ? "true" : undefined}
                   className={cn(
-                    "mt-1.5 line-clamp-2 text-meta leading-snug",
-                    v.runState === "waiting" ? "text-ink font-medium" : "text-ink"
+                    "group w-full cursor-pointer rounded-lg px-3 py-2.5 text-left transition-colors duration-150",
+                    active ? "bg-accent" : "hover:bg-muted"
                   )}
                 >
-                  {threadTitle(v)}
-                </p>
-
-                <div className="text-ash mt-1.5 flex items-center gap-1.5 text-micro">
-                  {/* Friendly name is the readable handle; the raw id lives in the title for anyone
-                      who needs to match it against `msb ls`. */}
-                  <span className="truncate font-medium" title={shortName(v.name)}>
-                    {friendlyName(v.name)}
-                  </span>
-                  {v.uptime && (
-                    <span className="tabular ml-auto inline-flex shrink-0 items-center gap-1 font-mono opacity-70" title="uptime">
-                      <Clock className="size-2.5" aria-hidden />
-                      {v.uptime}
+                  <div className="flex items-center gap-2">
+                    <StateStamp state={state} exitCode={v.exitCode} />
+                    <span className="label text-muted-foreground ml-auto truncate">
+                      {v.leaving ? "shutting down" : state === "sleeping" ? "wakes on reply" : roleLabel(v.role)}
                     </span>
-                  )}
-                </div>
-              </button>
-            </li>
-          );
-        })}
+                  </div>
+
+                  <p
+                    className={cn(
+                      "mt-1 line-clamp-2 text-meta leading-snug",
+                      waiting ? "text-foreground font-medium" : "text-foreground"
+                    )}
+                  >
+                    {waiting && v.question ? v.question : threadTitle(v)}
+                  </p>
+
+                  <div className="text-muted-foreground mt-1 flex items-center gap-2 text-micro">
+                    <span className="stamp truncate" title={shortName(v.name)}>
+                      {friendlyName(v.name)}
+                    </span>
+                    {v.uptime && (
+                      <span className="stamp ml-auto inline-flex shrink-0 items-center gap-1" title={state === "sleeping" ? "ran for" : "uptime"}>
+                        <Clock className="size-2.5" aria-hidden />
+                        {v.uptime}
+                      </span>
+                    )}
+                  </div>
+                </button>
+              </motion.li>
+            );
+          })}
+        </AnimatePresence>
       </ul>
     </nav>
   );

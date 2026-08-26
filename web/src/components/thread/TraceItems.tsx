@@ -1,70 +1,58 @@
 import * as React from "react";
-import { AlertTriangle, ChevronRight, Eye, FileText, Loader2, PauseCircle, Terminal, Wrench } from "lucide-react";
+import { AlertTriangle, ChevronRight, Eye, FileText, Loader2, Pause, Terminal, Wrench } from "lucide-react";
 import { resultSummary, type TraceEvent } from "@/lib/trace";
 import { Markdown } from "@/components/ui/markdown";
 import { StreamingMarkdown } from "./StreamingMarkdown";
 import { cn } from "@/lib/utils";
 
 /**
- * Thread items, rendered on the prompt-kit chat vocabulary over the shadcn neutral base:
+ * Thread items. Three voices, never confusable:
  *
- *   · the AGENT has no bubble — full column, 16px prose via prompt-kit Markdown, a small label above.
- *     Its output is prose and deserves the measure; a bubble would halve the width for nothing.
- *   · YOU get a rounded secondary bubble, right-aligned, with a tail corner.
- *   · the CO-PILOT is a visibly different voice — dashed edge, restated every time, because mistaking
- *     the read-only observer for the driver is the dangerous error here.
- *   · lifecycle is a labelled hairline; tool activity is a compact row or a terminal block.
+ *   · the AGENT has no bubble — full-measure prose, a quiet label above. Its output is prose.
+ *   · YOU are the one bubble: a muted fill on the right. Tasks and follow-ups both use it.
+ *   · the CO-PILOT is visibly another voice — dashed edge, restated every time — because mistaking
+ *     the read-only observer for the driver is the dangerous error in this product.
+ *
+ * Lifecycle is a labelled hairline; tool activity is a compact step row or a terminal panel.
  */
 
 /** A lifecycle moment: a labelled hairline across the column. */
 export function LifecycleItem({ label, detail }: { label: string; detail?: string }) {
   return (
-    <div className="flex items-center gap-3 py-1">
-      <span className="stamp text-muted-foreground shrink-0">{label}</span>
-      {detail && <span className="text-muted-foreground/70 truncate font-mono text-micro">{detail}</span>}
+    <div className="flex items-center gap-3 py-0.5">
+      <span className="label text-muted-foreground shrink-0">{label}</span>
+      {detail && <span className="stamp text-muted-foreground/70 truncate">{detail}</span>}
       <span className="bg-border h-px flex-1" aria-hidden />
     </div>
   );
 }
 
-/** Shell-family tools render as a real command; everything else is a compact labelled row. */
 const SHELL_TOOLS = new Set(["Bash", "Shell", "Terminal", "Run", "Exec", "sh", "bash"]);
+type ToolEvent = Extract<TraceEvent, { kind: "tool" }>;
 
-/**
- * A tool call rendered like real code:
- *
- *   · a Bash/Shell call is a TERMINAL block — a `$ <command>` prompt on the dark trace ground, output
- *     printed right below in the same panel. The command is code, so it reads as code.
- *   · any other tool (Write / Read / Edit / Grep …) is a compact row: name + argument in a code chip,
- *     output folded behind a chevron.
- */
-/**
- * `live` means the run is in progress AND this is the newest tool with no result yet — i.e. the tool
- * is executing right now. It drives the running-vs-finished visual: a spinner + tinted header while
- * running, the calm finished style once output arrives (or the run moves on).
- */
-/** Module-local: only `ToolGroup` (below) renders it; nothing outside this file imports it. */
-function ToolItem({ event, live }: { event: Extract<TraceEvent, { kind: "tool" }>; live?: boolean }) {
-  const isShell = SHELL_TOOLS.has(event.name);
-  return isShell ? <ShellItem event={event} live={live} /> : <FileToolItem event={event} live={live} />;
+/** How many lines a result has, for the fold's label. */
+function lineCount(result: string): number {
+  return result.replace(/\n+$/, "").split("\n").length;
+}
+
+function ToolItem({ event, live }: { event: ToolEvent; live?: boolean }) {
+  return SHELL_TOOLS.has(event.name) ? <ShellItem event={event} live={live} /> : <StepItem event={event} live={live} />;
 }
 
 /**
- * A cluster of consecutive tool calls, rendered like the reference's "N tools used" pill: a compact
- * summary chip that expands to the individual tool rows/terminal panels. A single tool renders
- * inline with no pill — there is nothing to summarise.
+ * Consecutive tool calls fold into one "N steps" row that expands to the individual panels — the
+ * thread reads as prose punctuated by work, not a wall of tool rows. A single tool renders inline.
  *
- * `live` marks the whole group as belonging to the in-progress turn; every tool in a live group whose
- * result has not arrived yet is still executing, so each of those gets the running treatment.
+ * `live` marks the group as belonging to the in-progress turn; any tool in it without a result is
+ * still executing (under parallel tool use the last one often answers first), so running is per-tool.
  */
-export function ToolGroup({ events, live }: { events: Extract<TraceEvent, { kind: "tool" }>[]; live?: boolean }) {
+export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolean }) {
   const [open, setOpen] = React.useState(false);
-  // With correlated results any tool in the group can still be outstanding — under parallel tool use
-  // the last one often answers first — so "running" is per-tool, not "the last one".
   const anyRunning = !!live && events.some((e) => !e.result);
+  const failed = events.filter((e) => e.failed).length;
   if (events.length === 1) return <ToolItem event={events[0]} live={anyRunning} />;
 
-  const names = [...new Set(events.map((e) => e.name))].slice(0, 4).join(", ");
+  const names = [...new Set(events.map((e) => e.name))].slice(0, 4).join(" · ");
   return (
     <div className="min-w-0">
       <button
@@ -72,21 +60,26 @@ export function ToolGroup({ events, live }: { events: Extract<TraceEvent, { kind
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         className={cn(
-          "flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1 text-left text-meta transition-colors",
+          "flex max-w-full cursor-pointer items-center gap-2 rounded-lg border px-3 py-1.5 text-left text-meta transition-colors",
           anyRunning
-            ? "border-border text-foreground bg-muted/60"
-            : "text-muted-foreground hover:text-foreground hover:bg-muted"
+            ? "border-live/30 bg-live/6 text-foreground"
+            : "text-muted-foreground hover:text-foreground hover:bg-muted bg-card"
         )}
       >
         {anyRunning ? (
-          <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden />
+          <Loader2 className="text-live size-3.5 shrink-0 animate-spin" aria-hidden />
         ) : (
           <Wrench className="size-3.5 shrink-0" aria-hidden />
         )}
-        <span className="font-medium">{anyRunning ? `${events.length} tools · running` : `${events.length} tools used`}</span>
-        <span className="text-muted-foreground/70 hidden min-w-0 truncate font-mono text-micro sm:inline">{names}</span>
+        <span className="font-medium">
+          {anyRunning ? `${events.length} steps · running` : `${events.length} steps`}
+        </span>
+        {failed > 0 && !anyRunning && (
+          <span className="text-destructive label">{failed} failed</span>
+        )}
+        <span className="stamp text-muted-foreground/70 hidden min-w-0 truncate sm:inline">{names}</span>
         <ChevronRight
-          className={cn("ml-auto size-3.5 shrink-0 transition-transform duration-150", open && "rotate-90")}
+          className={cn("ml-1 size-3.5 shrink-0 transition-transform duration-150", open && "rotate-90")}
           aria-hidden
         />
       </button>
@@ -101,42 +94,38 @@ export function ToolGroup({ events, live }: { events: Extract<TraceEvent, { kind
   );
 }
 
-/**
- * How many lines a result has, for the fold's label. The formatter now preserves hundreds of lines,
- * so "output" alone gives no hint whether the fold hides two lines or four hundred — and the panel
- * is a fixed-height scroller, so nothing else on screen conveys the size.
- */
-function lineCount(result: string): number {
-  return result.replace(/\n+$/, "").split("\n").length;
-}
-
-/** A shell command as a terminal panel: `$ cmd` then its output, on the dark trace ground. */
-function ShellItem({ event, live }: { event: Extract<TraceEvent, { kind: "tool" }>; live?: boolean }) {
+/** A shell command as a terminal panel: `$ cmd`, then its output, on the dark trace ground. */
+function ShellItem({ event, live }: { event: ToolEvent; live?: boolean }) {
   const [open, setOpen] = React.useState(false);
   const hasOutput = !!event.result;
   const lines = event.result ? lineCount(event.result) : 0;
   return (
     <div className="min-w-0">
-      <div className={cn("border-border bg-trace overflow-hidden rounded-lg border", live && "ring-1 ring-ok/40")}>
-        <div className="border-border/60 flex items-center gap-2 border-b px-3 py-1.5">
+      <div
+        className={cn(
+          "bg-trace overflow-hidden rounded-lg border border-white/8",
+          live && "ring-live/40 ring-1"
+        )}
+      >
+        <div className="flex items-center gap-2 border-b border-white/8 px-3 py-1.5">
           {live ? (
-            <Loader2 className="text-ok size-3 shrink-0 animate-spin" aria-hidden />
+            <Loader2 className="text-live size-3 shrink-0 animate-spin" aria-hidden />
           ) : event.failed ? (
             <AlertTriangle className="text-destructive size-3 shrink-0" aria-hidden />
           ) : (
-            <Terminal className="text-trace-fg/60 size-3 shrink-0" aria-hidden />
+            <Terminal className="text-trace-fg/55 size-3 shrink-0" aria-hidden />
           )}
-          <span className="stamp text-trace-fg/55">{event.name}</span>
-          {live && <span className="stamp text-ok/80">running</span>}
-          {!live && event.failed && <span className="stamp text-destructive">failed</span>}
+          <span className="label text-trace-fg/60">{event.name}</span>
+          {live && <span className="label text-live">running</span>}
+          {!live && event.failed && <span className="label text-destructive">failed</span>}
           {hasOutput && (
             <button
               type="button"
               onClick={() => setOpen((v) => !v)}
               aria-expanded={open}
-              className="text-trace-fg/60 hover:text-trace-fg ml-auto flex cursor-pointer items-center gap-1"
+              className="text-trace-fg/60 hover:text-trace-fg ml-auto flex cursor-pointer items-center gap-1 rounded px-1"
             >
-              <span className="stamp">{open ? "hide" : lines > 1 ? `output · ${lines} lines` : "output"}</span>
+              <span className="label">{open ? "hide output" : lines > 1 ? `${lines} lines` : "output"}</span>
               <ChevronRight className={cn("size-3.5 transition-transform duration-150", open && "rotate-90")} aria-hidden />
             </button>
           )}
@@ -146,23 +135,23 @@ function ShellItem({ event, live }: { event: Extract<TraceEvent, { kind: "tool" 
             $
           </span>
           {event.arg ?? ""}
-          {live && !hasOutput && <span className="caret text-ok" aria-hidden>▍</span>}
+          {live && !hasOutput && <span className="caret text-live" aria-hidden>▍</span>}
         </pre>
         {hasOutput && open && (
-          <pre className="border-border/60 text-trace-fg/80 max-h-80 overflow-auto border-t px-3 py-2 font-mono text-micro leading-relaxed whitespace-pre-wrap">
+          <pre className="text-trace-fg/85 max-h-80 overflow-auto border-t border-white/8 px-3 py-2 font-mono text-micro leading-relaxed whitespace-pre-wrap">
             {event.result}
           </pre>
         )}
       </div>
       {hasOutput && !open && (
-        <p className="text-muted-foreground mt-1 truncate font-mono text-micro">{resultSummary(event.result)}</p>
+        <p className="stamp text-muted-foreground mt-1 truncate pl-1">{resultSummary(event.result)}</p>
       )}
     </div>
   );
 }
 
-/** Non-shell tool (Write/Read/Edit/Grep…): compact row, arg as a code chip, output folded. */
-function FileToolItem({ event, live }: { event: Extract<TraceEvent, { kind: "tool" }>; live?: boolean }) {
+/** Non-shell tool (Write / Read / Edit / Grep …): compact step row, arg as a code chip, output folded. */
+function StepItem({ event, live }: { event: ToolEvent; live?: boolean }) {
   const [open, setOpen] = React.useState(false);
   const summary = resultSummary(event.result);
   const lines = event.result ? lineCount(event.result) : 0;
@@ -177,11 +166,11 @@ function FileToolItem({ event, live }: { event: Extract<TraceEvent, { kind: "too
         className={cn(
           "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1 text-left text-meta",
           event.result && "hover:bg-muted cursor-pointer",
-          live && "bg-muted/60"
+          live && "bg-live/6"
         )}
       >
         {live ? (
-          <Loader2 className="text-foreground size-3.5 shrink-0 animate-spin" aria-hidden />
+          <Loader2 className="text-live size-3.5 shrink-0 animate-spin" aria-hidden />
         ) : event.failed ? (
           <AlertTriangle className="text-destructive size-3.5 shrink-0" aria-hidden />
         ) : (
@@ -195,11 +184,11 @@ function FileToolItem({ event, live }: { event: Extract<TraceEvent, { kind: "too
         )}
         {event.result && (
           <>
-            {lines > 1 && <span className="stamp text-muted-foreground/70 ml-auto shrink-0">{lines} lines</span>}
+            {lines > 1 && <span className="label text-muted-foreground/70 ml-auto shrink-0">{lines} lines</span>}
             <ChevronRight
               className={cn(
                 "text-muted-foreground size-3.5 shrink-0 transition-transform duration-150",
-                lines > 1 ? "ml-1.5" : "ml-auto",
+                lines > 1 ? "ml-1" : "ml-auto",
                 open && "rotate-90"
               )}
               aria-hidden
@@ -210,36 +199,30 @@ function FileToolItem({ event, live }: { event: Extract<TraceEvent, { kind: "too
 
       {event.result &&
         (open ? (
-          <pre className="border-border bg-trace text-trace-fg/80 mt-2 ml-6 max-h-72 overflow-auto rounded-lg border px-3 py-2 font-mono text-micro leading-relaxed whitespace-pre-wrap">
+          <pre className="bg-trace text-trace-fg/85 mt-2 ml-6 max-h-72 overflow-auto rounded-lg border border-white/8 px-3 py-2 font-mono text-micro leading-relaxed whitespace-pre-wrap">
             {event.result}
           </pre>
         ) : (
-          summary && <p className="text-muted-foreground ml-6 truncate font-mono text-micro">{summary}</p>
+          summary && <p className="stamp text-muted-foreground ml-8 truncate">{summary}</p>
         ))}
     </div>
   );
 }
 
 /**
- * The agent speaking: full-width prose in the column, Claude-Code style — NO card, NO bubble, NO
- * avatar. The reference renders the assistant turn as plain prose straight in the reading measure
- * (transparent ground, comfortable line-height), reserving fills for the user's one voice. We keep a
- * small, quiet role label above so the turn is still attributable, and a breathing dot beside it
- * while live so the "who is talking / still going" signal survives without a heavy avatar chrome.
- *
- * While `live` the text is revealed with a streaming cadence via `StreamingMarkdown`; a finished say
- * renders as static Markdown. The reveal only animates the not-yet-shown tail, so a re-poll of
- * already-visible text never re-animates. Both paths render through `prose-agent` so static and
- * streaming turns are typographically identical.
- *
- * Memoised on `(text, live)` so an unchanged completed say does not re-render every 3s poll.
+ * The agent speaking: full-width prose, no card, no bubble. A small label above keeps the turn
+ * attributable; the dot breathes while live. While `live`, the text reveals with a streaming cadence
+ * (only the not-yet-shown tail animates); a finished say renders as static Markdown.
  */
 export const SayItem = React.memo(function SayItem({ text, live }: { text: string; live?: boolean }) {
   return (
     <div className="enter min-w-0">
-      <span className="stamp text-muted-foreground mb-1.5 flex items-center gap-1.5">
-        <span className={cn("bg-muted-foreground size-1.5 rounded-full", live && "breathe")} aria-hidden />
-        agent
+      <span className="label text-muted-foreground mb-1.5 flex items-center gap-1.5">
+        <span
+          className={cn("size-1.5 rounded-full", live ? "bg-live breathe" : "bg-muted-foreground/60")}
+          aria-hidden
+        />
+        Agent
       </span>
       <div className="text-foreground min-w-0">
         {live ? <StreamingMarkdown text={text} /> : <Markdown className="prose-agent">{text}</Markdown>}
@@ -248,35 +231,26 @@ export const SayItem = React.memo(function SayItem({ text, live }: { text: strin
   );
 });
 
-/**
- * The "working…" beat: shown while the run is in progress and the agent is between visible outputs
- * (thinking, or a tool is executing without streamed prose). Gives the thread a clear, resolving
- * "the agent is doing something" signal instead of dead air, matching Claude Code web.
- */
-export function WorkingIndicator({ label = "working" }: { label?: string }) {
+/** The "working…" beat between visible outputs, so the thread never has dead air while a run is live. */
+export function WorkingIndicator({ label = "Working" }: { label?: string }) {
   return (
-    <div className="enter flex items-start gap-3" aria-live="polite">
-      <span className="bg-accent text-accent-foreground mt-0.5 grid size-7 shrink-0 place-items-center rounded-full" aria-hidden>
-        <span className="bg-current breathe size-2 rounded-full" />
+    <div className="enter text-muted-foreground flex items-center gap-2.5 text-meta" aria-live="polite">
+      <span className="text-live flex items-center gap-1" aria-hidden>
+        <span className="dot dot-1 bg-current size-1.5 rounded-full" />
+        <span className="dot dot-2 bg-current size-1.5 rounded-full" />
+        <span className="dot dot-3 bg-current size-1.5 rounded-full" />
       </span>
-      <div className="text-muted-foreground flex items-center gap-2 pt-1.5 text-meta">
-        <span className="flex items-center gap-1" aria-hidden>
-          <span className="dot dot-1 bg-current size-1.5 rounded-full" />
-          <span className="dot dot-2 bg-current size-1.5 rounded-full" />
-          <span className="dot dot-3 bg-current size-1.5 rounded-full" />
-        </span>
-        <span>{label}…</span>
-      </div>
+      <span>{label}…</span>
     </div>
   );
 }
 
-/** Your turn: a solid BLUE bubble, right-aligned, with a tail corner — the one filled voice. */
-export function YouItem({ text, label = "you" }: { text: string; label?: string }) {
+/** Your turn: the one bubble. A muted fill, right-aligned, so the primary ink stays for actions. */
+export function YouItem({ text, label = "You" }: { text: string; label?: string }) {
   return (
     <div className="flex flex-col items-end gap-1.5">
-      <span className="stamp text-muted-foreground pr-1">{label}</span>
-      <div className="bg-primary text-primary-foreground elevate-sm max-w-[72%] rounded-2xl rounded-br-sm px-4 py-2.5 text-body whitespace-pre-wrap">
+      <span className="label text-muted-foreground pr-1">{label}</span>
+      <div className="bg-muted text-foreground max-w-[min(72%,60ch)] rounded-2xl rounded-br-md px-4 py-2.5 text-body leading-relaxed whitespace-pre-wrap">
         {text}
       </div>
     </div>
@@ -284,10 +258,9 @@ export function YouItem({ text, label = "you" }: { text: string; label?: string 
 }
 
 /**
- * Pull inline answer options out of a clarifying question, matching the reference's
- * "…which one? [Acme Corp] [New Acme Corp]" pattern. Recognises bracketed `[option]` choices and, as
- * a fallback, `1) x` / `2. y` enumerations. Options are capped and de-duplicated; anything long or
- * malformed falls back to free-text reply (returns no options).
+ * Pull inline answer options out of a clarifying question: bracketed `[option]` choices, or a
+ * `1) x` / `2. y` enumeration. Capped and de-duplicated; anything long or malformed falls back to a
+ * free-text reply (no options).
  */
 function parseChoices(question: string): string[] {
   const bracketed = [...question.matchAll(/\[([^\]]{1,48})\]/g)].map((m) => m[1].trim());
@@ -297,16 +270,16 @@ function parseChoices(question: string): string[] {
   return [];
 }
 
-/** The question the machine is blocked on: the blocking control, so it names the release. */
+/** The question the machine is blocked on — the blocking control, so it names the release. */
 export function AskingItem({ question, onAnswer }: { question: string; onAnswer?: (text: string) => void }) {
   const choices = React.useMemo(() => parseChoices(question), [question]);
   return (
-    <div className="flex flex-col gap-1.5">
-      <span className="stamp text-attention-text flex items-center gap-1.5">
-        <PauseCircle className="size-3.5" aria-hidden />
-        the agent is asking
+    <div className="enter flex flex-col gap-1.5">
+      <span className="label text-attention-text flex items-center gap-1.5">
+        <Pause className="size-3" strokeWidth={2.5} aria-hidden />
+        Paused — the agent needs your answer
       </span>
-      <div className="border-attention/45 bg-attention/10 max-w-[70ch] rounded-xl border px-5 py-4">
+      <div className="border-attention/50 bg-attention/12 max-w-[70ch] rounded-xl border px-5 py-4">
         <p className="text-foreground text-lead leading-[1.55] whitespace-pre-wrap">{question}</p>
         {choices.length > 0 && onAnswer ? (
           <>
@@ -316,18 +289,18 @@ export function AskingItem({ question, onAnswer }: { question: string; onAnswer?
                   key={c}
                   type="button"
                   onClick={() => onAnswer(c)}
-                  className="bg-card text-foreground hover:bg-attention/15 hover:border-attention/60 cursor-pointer rounded-full border px-3.5 py-1.5 text-meta font-medium transition-colors"
+                  className="bg-card text-foreground hover:border-attention hover:bg-attention/15 cursor-pointer rounded-full border px-3.5 py-1.5 text-meta font-medium transition-colors"
                 >
                   {c}
                 </button>
               ))}
             </div>
-            <p className="text-muted-foreground mt-2.5 text-micro">
-              Pick one to release the run, or type a different answer below.
-            </p>
+            <p className="text-muted-foreground mt-2.5 text-micro">Pick one, or type a different answer below.</p>
           </>
         ) : (
-          <p className="text-muted-foreground mt-2.5 text-meta">It has halted and cannot continue until you answer below.</p>
+          <p className="text-muted-foreground mt-2.5 text-meta">
+            Nothing happens until you reply below — every tool call is blocked while it waits.
+          </p>
         )}
       </div>
     </div>
@@ -337,23 +310,25 @@ export function AskingItem({ question, onAnswer }: { question: string; onAnswer?
 /** A co-pilot exchange: same thread, unmistakably another voice, and it says so every time. */
 export function ObserverItem({ question, answer }: { question: string; answer?: string }) {
   return (
-    <div className="flex flex-col gap-1.5">
-      <span className="stamp text-muted-foreground flex items-center gap-1.5">
-        <Eye className="size-3.5" aria-hidden />
-        co-pilot · read-only · the agent never saw this
+    <div className="enter flex flex-col gap-1.5">
+      <span className="label text-muted-foreground flex items-center gap-1.5">
+        <Eye className="size-3" aria-hidden />
+        Co-pilot · read-only · the agent never sees this
       </span>
-      <div className="border-border max-w-[70ch] rounded-lg border border-dashed px-5 py-4">
+      <div className="max-w-[70ch] rounded-xl border border-dashed px-5 py-4">
         <p className="text-muted-foreground text-meta italic">{question}</p>
         {answer ? (
-          <div className="text-foreground mt-2 text-lead leading-[1.6]">
+          <div className="text-foreground prose-agent mt-2 text-body">
             <Markdown>{answer}</Markdown>
           </div>
         ) : (
-          <p className="text-muted-foreground mt-2 flex items-center gap-1.5 text-meta">
-            <span className="size-1 animate-bounce rounded-full bg-current [animation-delay:-0.3s]" />
-            <span className="size-1 animate-bounce rounded-full bg-current [animation-delay:-0.15s]" />
-            <span className="size-1 animate-bounce rounded-full bg-current" />
-            reading the box
+          <p className="text-muted-foreground mt-2.5 flex items-center gap-2 text-meta">
+            <span className="flex items-center gap-1" aria-hidden>
+              <span className="dot dot-1 bg-current size-1.5 rounded-full" />
+              <span className="dot dot-2 bg-current size-1.5 rounded-full" />
+              <span className="dot dot-3 bg-current size-1.5 rounded-full" />
+            </span>
+            Reading the box…
           </p>
         )}
       </div>

@@ -19,7 +19,7 @@ export function ProducedFiles({ session, files }: { session: string; files: Prod
   if (files.length === 0) return null;
   return (
     <div className="flex flex-col gap-2">
-      <span className="stamp text-muted-foreground">{files.length === 1 ? "produced file" : "produced files"}</span>
+      <span className="label text-muted-foreground">{files.length === 1 ? "Produced file" : "Produced files"}</span>
       <div className="flex flex-col gap-2">
         {files.map((f) => (
           <ArtifactCard key={f.relPath} session={session} file={f} />

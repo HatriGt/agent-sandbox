@@ -1,38 +1,41 @@
 import * as React from "react";
 import {
+  Bell,
+  BellOff,
   LayoutGrid,
-  MessageSquare,
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
-  PauseCircle,
+  Pause,
   Plus,
   Search,
   Sun,
   TriangleAlert,
-  Waypoints,
 } from "lucide-react";
-import { api, type BoxView } from "@/lib/api";
-import { POLL_MS, isUp } from "@/lib/format";
+import { AnimatePresence, motion } from "motion/react";
+import { api, type FleetLifecycle, type FleetSnapshot } from "@/lib/api";
+import { POLL_MS, isVisible, threadSort } from "@/lib/format";
 import { usePoll } from "@/hooks/usePoll";
 import { useStableBoxes } from "@/hooks/useStableBoxes";
 import { useSessionRuns } from "@/hooks/useSessionRuns";
+import { useNotifications } from "@/hooks/useNotifications";
+import { useHashRoute } from "@/hooks/useHashRoute";
 import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/ui/logo";
 import { MachineList } from "@/components/MachineList";
 import { Hub } from "@/components/Hub";
 import { Sandboxes } from "@/components/Sandboxes";
-import { CommandPalette } from "@/components/CommandPalette";
+import { Capacity } from "@/components/Capacity";
+import { CommandPalette, openPalette } from "@/components/CommandPalette";
 import { Toaster } from "@/components/ui/sonner";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Thread, type Aside } from "@/components/thread/Thread";
 import { BootingThread } from "@/components/thread/BootingThread";
 import { cn } from "@/lib/utils";
 
-/**
- * "updated 3s ago" — recomputed on a 1s timer so it stays true between polls. Honest freshness beats
- * a claimed interval: this endpoint's latency grows with the number of machines.
- */
+const NO_LIFECYCLE: FleetLifecycle = { capacity: 0, poolSize: 0 };
+
+/** "updated 3s ago" — recomputed on a 1s timer so it stays true between polls. */
 function useFreshness(updatedAt: number | null) {
   const [, tick] = React.useState(0);
   React.useEffect(() => {
@@ -44,143 +47,130 @@ function useFreshness(updatedAt: number | null) {
   return secs < 2 ? "just now" : `${secs}s ago`;
 }
 
-/** Light by default (blue-on-white product theme); persisted, toggling the `.dark` class on <html>. */
-function useTheme() {
-  const [dark, setDark] = React.useState(() => {
+function usePersisted(key: string, initial: boolean) {
+  const [v, setV] = React.useState(() => {
     try {
-      return localStorage.getItem("asb-theme") === "dark";
+      const raw = localStorage.getItem(key);
+      return raw == null ? initial : raw === "1";
     } catch {
-      return false;
-    }
-  });
-  React.useEffect(() => {
-    document.documentElement.classList.toggle("dark", dark);
-    try {
-      localStorage.setItem("asb-theme", dark ? "dark" : "light");
-    } catch {
-      /* private mode: the toggle still works for this session */
-    }
-  }, [dark]);
-  return { dark, toggle: () => setDark((d) => !d) };
-}
-
-/** Sidebar collapse, persisted. Collapsed = a slim icon rail; expanded = the full machines list. */
-function useSidebarCollapsed() {
-  const [collapsed, setCollapsed] = React.useState(() => {
-    try {
-      return localStorage.getItem("asb-rail") === "collapsed";
-    } catch {
-      return false;
+      return initial;
     }
   });
   React.useEffect(() => {
     try {
-      localStorage.setItem("asb-rail", collapsed ? "collapsed" : "expanded");
+      localStorage.setItem(key, v ? "1" : "0");
     } catch {
-      /* private mode: still works for this session */
+      /* private mode */
     }
-  }, [collapsed]);
-  return { collapsed, toggle: () => setCollapsed((c) => !c) };
+  }, [key, v]);
+  return [v, setV] as const;
 }
-
-type View = "chat" | "sandboxes";
 
 export default function App() {
-  const { dark, toggle } = useTheme();
-  const { collapsed, toggle: toggleRail } = useSidebarCollapsed();
-  const { data, error, live, updatedAt } = usePoll<BoxView[]>((signal) => api.monitor(signal), POLL_MS);
+  const [dark, setDark] = usePersisted("asb-dark", false);
+  React.useEffect(() => {
+    document.documentElement.classList.toggle("dark", dark);
+  }, [dark]);
+  const [collapsed, setCollapsed] = usePersisted("asb-collapsed", false);
+
+  const { data, error, live, updatedAt } = usePoll<FleetSnapshot>((signal) => api.fleet(signal), POLL_MS);
   const freshness = useFreshness(updatedAt);
   const { runs, remember } = useSessionRuns();
+  const lifecycle = data?.lifecycle ?? NO_LIFECYCLE;
 
-  const [view, setView] = React.useState<View>("chat");
-  const [selected, setSelected] = React.useState<string | null>(null);
-  // Mobile is a single-pane device: either the machines rail OR the workspace (Hub/Thread/Sandboxes)
-  // is on screen, never both. `mobileRail` decides which. It starts on the rail (the home/list), and
-  // any navigation INTO the workspace (new task, open a box, switch to sandboxes) flips to the
-  // workspace; the in-workspace "back" controls flip it back. On md+ this is irrelevant — the grid
-  // shows both panes — so it only gates the `hidden`/`flex` classes below at the mobile breakpoint.
-  const [mobileRail, setMobileRail] = React.useState(true);
-  // A delegate in flight: the box name is not known until the run reaches a boundary (which can be
-  // a minute out), so we show a booting thread with the submitted task from the moment it's sent —
-  // the user watches the machine come up rather than staring at the Hub. Cleared when the delegate
-  // resolves to a box (which we then select) or errors (which returns to the Hub).
-  //
-  // `known` snapshots the box names that existed at submit time: a warm claim (or a cold boot)
-  // surfaces a NEW box in monitor.json within ~1-2s (a poll tick), long before `delegate.json`
-  // resolves. As soon as that new box appears we attach to its real Thread — so a warm claim never
-  // sits on the "booting a fresh microVM" placeholder. `warm` on the boot state is inferred from the
-  // role of that new box (pool-claimed = warm fast path; session = cold boot) so the copy is honest.
+  // Route = the URL hash: `#/box/<name>` or `#/fleet` or `#/`. Reload lands on the same thread.
+  const [route, navigate] = useHashRoute();
+  const view = route.view;
+  const selected = route.view === "chat" ? route.box : null;
+  const [mobileRail, setMobileRail] = React.useState(() => route.view === "chat" && !route.box);
+  // A delegate in flight: `known` snapshots box names at submit time; the first NEW session box to
+  // appear is ours (a warm claim surfaces within a poll tick, long before delegate.json resolves).
   const [booting, setBooting] = React.useState<{ task: string; known: Set<string>; warm: boolean } | null>(null);
   const [pending, setPending] = React.useState<{ id: string; task: string }[]>([]);
   const [asides, setAsides] = React.useState<Record<string, Aside[]>>({});
-  // Replies this browser sent, per machine: the server keeps no transcript of them.
   const [replies, setReplies] = React.useState<Record<string, string[]>>({});
 
-  // Filter to running, then hold a machine briefly after it stops being reported: a box being
-  // reaped at its max-duration makes the host disagree with itself for a few seconds, and without
-  // this its card blinked in and out once a second.
-  const reported = React.useMemo(() => (data ? data.filter(isUp) : null), [data]);
+  const reported = React.useMemo(() => (data ? data.boxes.filter(isVisible) : null), [data]);
   const boxes = useStableBoxes(reported);
   const selectedBox = boxes.find((b) => b.name === selected) ?? null;
   const waiting = boxes.filter((b) => b.runState === "waiting");
-  const working = boxes.filter((b) => b.runState === "running").length;
+  const working = boxes.filter((b) => b.runState === "running" && /^running$/i.test(b.boxStatus)).length;
 
-  // A machine that vanished (destroyed, auto-stopped) must not leave a dead pane behind. A box that
-  // was JUST delegated has not appeared in monitor.json yet, so guard on `booting`: never unselect
-  // while a delegate is in flight, or the newly-opened thread would flip back to the Hub.
+  const open = React.useCallback(
+    (name: string) => {
+      setBooting(null);
+      navigate({ view: "chat", box: name });
+      setMobileRail(false);
+    },
+    [navigate]
+  );
+  const newTask = React.useCallback(() => {
+    setBooting(null);
+    navigate({ view: "chat", box: null });
+    setMobileRail(false);
+  }, [navigate]);
+  const backToRail = () => setMobileRail(true);
+  const showFleet = React.useCallback(() => {
+    navigate({ view: "fleet" });
+    setMobileRail(false);
+  }, [navigate]);
+
+  const notify = useNotifications(boxes, open);
+
+  // A machine that vanished must not leave a dead pane behind — but never while a delegate is in
+  // flight, or the newly-opened thread would flip back to the Hub. Wait for the first fleet read so a
+  // deep link to a box is not cleared before the fleet has even loaded.
   React.useEffect(() => {
-    if (booting) return;
-    if (selected && data && !boxes.some((b) => b.name === selected)) setSelected(null);
-  }, [selected, data, boxes, booting]);
+    if (booting || !data) return;
+    if (selected && !boxes.some((b) => b.name === selected)) navigate({ view: "chat", box: null });
+  }, [selected, data, boxes, booting, navigate]);
 
-  // Attach to the delegated box the instant it surfaces. A warm claim (fast path) and a cold boot
-  // both appear in monitor.json as a box that wasn't there at submit time; the FIRST such new box is
-  // ours. Selecting it swaps the transient BootingThread for the real, SSE-streaming Thread within a
-  // poll tick — so a warm claim is never misreported as "booting a fresh microVM". We also record
-  // whether it's warm (pool-claimed) purely to keep the placeholder copy honest for the sub-second
-  // window before this fires. `Hub.onStarted` still runs when delegate.json resolves; `open()` there
-  // is idempotent with this (same box), and it also persists the run to session history.
+  // Attach to the delegated box the instant it surfaces. Only a SESSION box can be ours — the pool
+  // maintainer spawns fresh `pool-free` boxes in the background.
   React.useEffect(() => {
     if (!booting) return;
-    const fresh = boxes.find((b) => !booting.known.has(b.name));
+    const fresh = boxes.find((b) => !booting.known.has(b.name) && b.role !== "pool-free");
     if (!fresh) return;
-    const warm = fresh.role === "pool-claimed";
-    if (warm !== booting.warm) setBooting((prev) => (prev ? { ...prev, warm } : prev));
-    setSelected(fresh.name);
+    navigate({ view: "chat", box: fresh.name });
     setBooting(null);
-    setView("chat");
-    // The box is now a real row in the list, so the transient "booting" placeholder in the sidebar
-    // is redundant — clear it, otherwise it lingers (and lies as "booting") for the rest of the
-    // ~50s delegate call while the thread already shows the claimed warm box.
     setPending([]);
-  }, [booting, boxes]);
+  }, [booting, boxes, navigate]);
 
-  const open = (name: string) => {
-    setBooting(null);
-    setSelected(name);
-    setView("chat");
-    setMobileRail(false); // reveal the workspace pane on mobile
-  };
-  const newTask = () => {
-    setBooting(null);
-    setSelected(null);
-    setView("chat");
-    setMobileRail(false); // the Hub lives in the workspace pane — show it on mobile
-  };
-  /** Mobile-only: leave the workspace pane and return to the machines rail. No-op visually on md+. */
-  const backToRail = () => setMobileRail(true);
-  /** Switch the workspace to a section and reveal it on mobile. */
-  const showChat = () => {
-    setView("chat");
-    setMobileRail(false);
-  };
-  const showSandboxes = () => {
-    setView("sandboxes");
-    setSelected(null);
-    setMobileRail(false);
-  };
+  // Keyboard: n → new task · j/k → next/previous machine · / → focus the composer · g f → fleet.
+  const focusComposer = React.useRef<(() => void) | null>(null);
+  const onFocusRequest = React.useCallback((f: () => void) => {
+    focusComposer.current = f;
+  }, []);
+  React.useEffect(() => {
+    let pendingG = false;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      const typing = t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
+      if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === "g") {
+        pendingG = true;
+        window.setTimeout(() => (pendingG = false), 800);
+        return;
+      }
+      if (pendingG && e.key === "f") return showFleet();
+      if (e.key === "n") return newTask();
+      if (e.key === "/") {
+        e.preventDefault();
+        focusComposer.current?.();
+        return;
+      }
+      if (e.key === "j" || e.key === "k") {
+        const sorted = [...boxes].sort(threadSort);
+        if (!sorted.length) return;
+        const i = sorted.findIndex((b) => b.name === selected);
+        const next = e.key === "j" ? Math.min(sorted.length - 1, i + 1) : Math.max(0, i < 0 ? 0 : i - 1);
+        open(sorted[next].name);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [boxes, selected, open, newTask, showFleet]);
 
-  /** Ask the co-pilot; the pending note renders immediately so the thread never looks frozen. */
   const ask = async (name: string, question: string) => {
     let index = 0;
     setAsides((prev) => {
@@ -194,7 +184,7 @@ export default function App() {
         const list = [...(prev[name] ?? [])];
         list[index] = {
           question,
-          answer: res.timedOut ? `${res.answer}\n\n(time cap reached — this answer may be partial)` : res.answer,
+          answer: res.timedOut ? `${res.answer}\n\n_(time cap reached — this answer may be partial)_` : res.answer,
         };
         return { ...prev, [name]: list };
       });
@@ -207,283 +197,235 @@ export default function App() {
     }
   };
 
+  const health = !live ? "offline" : waiting.length ? "attention" : "ok";
+  const loading = !data && !error;
+  const paneKey = view === "fleet" ? "fleet" : booting && !selectedBox ? "booting" : selectedBox ? `box:${selectedBox.name}` : "hub";
+
   return (
     <TooltipProvider delayDuration={400}>
-      <Toaster position="bottom-center" />
-      {/* Floating shell: a tinted canvas holds two elevated panels — the sidebar and the workspace —
-          each a rounded card with its own hairline + soft shadow, separated by a gap. On mobile the
-          panels go full-bleed (no gap/radius) so no screen space is wasted. The rail narrows to a slim
-          icon strip when collapsed. */}
+      <Toaster position="top-center" />
       <div
         className={cn(
-          "bg-muted/40 grid h-full grid-cols-1 gap-0 md:gap-2.5 md:p-2.5",
-          collapsed ? "md:grid-cols-[4rem_minmax(0,1fr)]" : "md:grid-cols-[13.5rem_minmax(0,1fr)]"
+          "bg-background grid h-full grid-cols-1 transition-[grid-template-columns] duration-200",
+          collapsed ? "md:grid-cols-[3.5rem_minmax(0,1fr)]" : "md:grid-cols-[17rem_minmax(0,1fr)]"
         )}
       >
-      {/* ───────────── machines (floating rail) ───────────── */}
-      <aside
-        className={cn(
-          "bg-card flex min-h-0 flex-col overflow-hidden md:rounded-xl md:border md:shadow-sm",
-          // Mobile: the rail shows only when `mobileRail` is set; otherwise the workspace has the
-          // screen. On md+ the grid always shows it.
-          mobileRail ? "flex" : "hidden md:flex"
-        )}
-      >
-        <header className={cn("px-3 pt-2 pb-3", collapsed && "md:px-2")}>
-          {/* Collapse toggle: top-anchored on its own row — always the first control in the rail, in a
-              fixed spot, so re-expanding is predictable whether the rail is open or a slim strip.
-              Desktop only (mobile uses full-screen panes). */}
-          <div className={cn("hidden md:flex", collapsed ? "justify-center" : "justify-end")}>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={toggleRail}
-              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            >
-              {collapsed ? <PanelLeftOpen className="size-3.5" /> : <PanelLeftClose className="size-3.5" />}
-            </Button>
-          </div>
-
-          {/* Brand row: mark + wordmark on the left, theme toggle on the right. */}
-          <div className={cn("mt-1 flex items-center gap-2.5", collapsed && "md:mt-2 md:justify-center")}>
-            <span className="bg-primary text-primary-foreground grid size-8 shrink-0 place-items-center rounded-[10px] shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+        <aside className={cn("bg-card flex min-h-0 flex-col overflow-hidden md:border-r", mobileRail ? "flex" : "hidden md:flex")}>
+          <div className={cn("flex h-14 shrink-0 items-center gap-2.5 px-3", collapsed && "md:justify-center md:px-0")}>
+            <span className="bg-primary text-primary-foreground grid size-8 shrink-0 place-items-center rounded-lg">
               <Logo className="size-[18px]" />
             </span>
             {!collapsed && (
               <>
-                <p className="text-ink min-w-0 flex-1 truncate text-body leading-tight font-semibold tracking-tight">
-                  Agent Sandbox
-                </p>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={toggle}
-                  aria-label={dark ? "Switch to light theme" : "Switch to dark theme"}
-                >
-                  {dark ? <Moon className="size-3.5" /> : <Sun className="size-3.5" />}
+                <div className="min-w-0 flex-1">
+                  <p className="text-foreground truncate text-body leading-tight font-semibold tracking-[-0.01em]">Agent Sandbox</p>
+                  <p className="text-muted-foreground flex items-center gap-1.5 text-micro leading-tight">
+                    <span
+                      className={cn(
+                        "size-1.5 shrink-0 rounded-full",
+                        health === "offline" && "bg-destructive",
+                        health === "attention" && "bg-attention",
+                        health === "ok" && "bg-ok breathe"
+                      )}
+                      aria-hidden
+                    />
+                    {live ? (
+                      <span className="tabular truncate">
+                        {boxes.length} up
+                        {working > 0 && <> · {working} working</>}
+                        {waiting.length > 0 && <span className="text-attention-text"> · {waiting.length} waiting</span>}
+                      </span>
+                    ) : (
+                      <span className="text-destructive font-medium">offline</span>
+                    )}
+                  </p>
+                </div>
+                <Button variant="ghost" size="icon-sm" onClick={() => setCollapsed(true)} aria-label="Collapse sidebar" className="hidden md:inline-flex">
+                  <PanelLeftClose className="size-4" />
                 </Button>
               </>
             )}
           </div>
 
-          {/* Health line: its own full-width row so it never crowds the controls. A semantic dot
-              (green live / amber if any waiting / red offline) + plain-case counts; freshness is
-              demoted to a quiet right-aligned timestamp so the live count reads first. */}
-          {!collapsed && (
-            <p className="mt-2.5 flex items-center gap-1.5 text-micro leading-none">
-              <span
-                className={cn(
-                  "size-1.5 shrink-0 rounded-full",
-                  !live ? "bg-destructive" : waiting.length ? "bg-attention" : "bg-ok breathe"
-                )}
-                aria-hidden
-              />
-              {live ? (
-                <>
-                  <span className="text-ink tabular font-medium">
-                    {boxes.length} {boxes.length === 1 ? "machine" : "machines"}
-                  </span>
-                  {working > 0 && <span className="text-azure-text tabular">· {working} working</span>}
-                  {waiting.length > 0 && (
-                    <span className="text-attention-text tabular">· {waiting.length} waiting</span>
-                  )}
-                  <span className="text-ash/70 tabular ml-auto shrink-0" title={`updated ${freshness}`}>
-                    {freshness}
-                  </span>
-                </>
-              ) : (
-                <span className="text-destructive font-medium">offline</span>
-              )}
-            </p>
-          )}
-        </header>
-
-        {collapsed ? (
-          /* Collapsed: an icon-only rail. Machines list is hidden; a dot on the Chat icon signals
-             waiting. Tooltips name each control so the strip stays legible. */
-          <nav className="flex flex-col items-center gap-1.5 px-2 pb-3" aria-label="Sections">
-            <RailIcon onClick={newTask} icon={<Plus />} label="New task" primary />
-            <RailIcon
-              onClick={() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }))}
-              icon={<Search />}
-              label="Search machines (⌘K)"
-            />
-            <div className="bg-border my-1 h-px w-6" aria-hidden />
-            <RailIcon
-              active={view === "chat"}
-              onClick={showChat}
-              icon={<MessageSquare />}
-              label="Chat"
-              dot={waiting.length > 0}
-            />
-            <RailIcon
-              active={view === "sandboxes"}
-              onClick={showSandboxes}
-              icon={<LayoutGrid />}
-              label={`Sandboxes${boxes.length ? ` (${boxes.length})` : ""}`}
-              badge={boxes.length || undefined}
-            />
-            <div className="bg-border my-1 h-px w-6" aria-hidden />
-            <RailIcon
-              onClick={toggle}
-              icon={dark ? <Moon /> : <Sun />}
-              label={dark ? "Switch to light theme" : "Switch to dark theme"}
-            />
-          </nav>
-        ) : (
-          <>
-            {/* Search pill — the reference's prominent "Search ⌘K" affordance, wired to the palette. */}
-            <div className="flex flex-col gap-2 px-3 pb-3">
-              <button
-                type="button"
-                onClick={() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true }))}
-                className="text-ash hover:text-ink hover:bg-[var(--surface)] flex w-full cursor-pointer items-center gap-2.5 rounded-md border px-3 py-2 text-left text-meta transition-colors"
-              >
-                <Search className="size-4 shrink-0" aria-hidden />
-                <span className="flex-1">Search</span>
-                <kbd className="stamp rounded border bg-[var(--surface)] px-1.5 py-0.5">⌘K</kbd>
-              </button>
-              <Button variant="primary" size="default" onClick={newTask} className="w-full justify-center rounded-md">
-                <Plus />
-                New task
-              </Button>
-            </div>
-
-            {/* Primary nav. "Sandboxes" is its own destination: the chat answers "what am I building",
-                this answers "what is running on my VPS, and does any of it need me". */}
-            <div className="flex flex-col gap-0.5 px-3 pb-1">
-              <NavItem active={view === "chat"} onClick={showChat} icon={<MessageSquare />} label="Chat" />
-              <NavItem
-                active={view === "sandboxes"}
-                onClick={showSandboxes}
+          {collapsed ? (
+            <nav className="flex flex-1 flex-col items-center gap-1.5 px-2 pt-1 pb-3" aria-label="Sections">
+              <RailIcon onClick={newTask} icon={<Plus />} label="New task (n)" primary />
+              <RailIcon onClick={openPalette} icon={<Search />} label="Search machines (⌘K)" />
+              <RailIcon
+                active={view === "fleet"}
+                onClick={showFleet}
                 icon={<LayoutGrid />}
-                label="Sandboxes"
+                label={`Fleet${boxes.length ? ` (${boxes.length})` : ""}`}
                 badge={boxes.length || undefined}
+                dot={waiting.length > 0}
               />
-            </div>
+              <div className="mt-auto flex flex-col items-center gap-1.5">
+                <RailIcon onClick={() => setDark(!dark)} icon={dark ? <Moon /> : <Sun />} label={dark ? "Light theme" : "Dark theme"} />
+                <RailIcon onClick={() => setCollapsed(false)} icon={<PanelLeftOpen />} label="Expand sidebar" />
+              </div>
+            </nav>
+          ) : (
+            <>
+              <div className="flex flex-col gap-2 px-3 pt-1 pb-3">
+                <Button variant="primary" onClick={newTask} className="w-full justify-center">
+                  <Plus />
+                  New task
+                  <kbd className="text-primary-foreground/60 ml-auto">n</kbd>
+                </Button>
+                <button
+                  type="button"
+                  onClick={openPalette}
+                  className="text-muted-foreground hover:text-foreground hover:bg-muted flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md border px-3 text-left text-meta transition-colors"
+                >
+                  <Search className="size-4 shrink-0" aria-hidden />
+                  <span className="flex-1">Search machines</span>
+                  <kbd className="text-muted-foreground rounded border px-1.5 py-0.5">⌘K</kbd>
+                </button>
+              </div>
 
-            {/* A halted machine blocks on a person — the only thing here with a deadline. */}
-            {waiting.length > 0 && (
-              <button
-                type="button"
-                onClick={() => open(waiting[0].name)}
-                className="mx-3 mt-2 mb-1 flex cursor-pointer items-center gap-2 rounded-xl border border-[color-mix(in_srgb,var(--attention)_45%,transparent)] bg-[color-mix(in_srgb,var(--attention)_12%,transparent)] px-3 py-2.5 text-left transition-colors hover:bg-[color-mix(in_srgb,var(--attention)_18%,transparent)]"
-              >
-                <PauseCircle className="size-4 shrink-0 text-[var(--attention-text)]" aria-hidden />
-                <span className="text-ink text-meta font-medium">{waiting.length} waiting on you</span>
-                <span className="stamp ml-auto text-[var(--attention-text)]">answer →</span>
-              </button>
-            )}
+              <AnimatePresence initial={false}>
+                {waiting.length > 0 && (
+                  <motion.button
+                    key="queue"
+                    type="button"
+                    initial={{ opacity: 0, height: 0, marginBottom: 0 }}
+                    animate={{ opacity: 1, height: "auto", marginBottom: 8 }}
+                    exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+                    transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+                    onClick={() => open(waiting[0].name)}
+                    className="border-attention/50 bg-attention/12 hover:bg-attention/18 mx-3 flex cursor-pointer items-center gap-2.5 overflow-hidden rounded-lg border px-3 py-2.5 text-left transition-colors"
+                  >
+                    <Pause className="text-attention-text size-4 shrink-0" strokeWidth={2.5} aria-hidden />
+                    <span className="text-foreground min-w-0 flex-1 truncate text-meta font-medium">
+                      {waiting.length === 1 ? "1 machine needs you" : `${waiting.length} machines need you`}
+                    </span>
+                    <span className="text-attention-text text-micro font-semibold">Answer →</span>
+                  </motion.button>
+                )}
+              </AnimatePresence>
 
-            <div className="flex items-center gap-2 px-4 pt-3 pb-1.5">
-              <Waypoints className="text-ash size-3.5" aria-hidden />
-              <p className="stamp text-ash">machines</p>
-              {boxes.length > 0 && <span className="stamp text-ash tabular ml-auto">{boxes.length}</span>}
-            </div>
-
-            {error && (
-              <p role="alert" className="mx-4 mb-2 flex items-start gap-1.5 text-micro text-[var(--danger)]">
-                <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-                {error}
-              </p>
-            )}
-
-            <MachineList
-              boxes={boxes}
-              pending={pending}
-              selected={view === "chat" ? selected : null}
-              loading={!data && !error}
-              onSelect={open}
-            />
-
-            {/* Bottom identity/status row — the reference's user-profile footer, mapped to a live
-                connection stamp for our single-tenant console. */}
-            <div className="border-t px-3 py-2.5">
-              <div className="flex items-center gap-2.5">
-                <span className="bg-accent text-accent-foreground grid size-7 shrink-0 place-items-center rounded-full text-meta font-semibold">
-                  A
+              <div className="flex items-center gap-2 px-4 pt-2 pb-1">
+                <p className="text-foreground text-meta font-semibold">Machines</p>
+                <span className="ml-auto">
+                  {lifecycle.capacity > 0 ? (
+                    <Capacity boxes={boxes} capacity={lifecycle.capacity} size="sm" />
+                  ) : (
+                    boxes.length > 0 && <span className="text-muted-foreground tabular text-micro">{boxes.length}</span>
+                  )}
                 </span>
-                <div className="min-w-0 flex-1">
-                  <p className="text-ink truncate text-meta font-medium">Operator</p>
-                  <p className="stamp text-ash truncate">{live ? `connected · ${freshness}` : "offline"}</p>
+              </div>
+
+              {error && (
+                <p role="alert" className="text-destructive mx-4 mb-2 flex items-start gap-1.5 text-micro">
+                  <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+                  {error}
+                </p>
+              )}
+
+              <MachineList boxes={boxes} pending={pending} selected={view === "chat" ? selected : null} loading={loading} onSelect={open} />
+
+              <div className="flex flex-col gap-0.5 border-t px-2 py-2">
+                <NavItem active={view === "fleet"} onClick={showFleet} icon={<LayoutGrid />} label="Fleet view" badge={boxes.length || undefined} shortcut="g f" />
+                <div className="flex items-center justify-between px-2.5 pt-1">
+                  <p className="text-muted-foreground text-micro">{live ? `Updated ${freshness}` : "Offline — retrying"}</p>
+                  <div className="flex items-center">
+                    {notify.supported && (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button variant="ghost" size="icon-xs" onClick={() => void notify.toggle()} aria-pressed={notify.enabled} aria-label="Desktop notifications">
+                            {notify.enabled ? <Bell className="text-live" /> : <BellOff />}
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top">
+                          {notify.enabled ? "Notifying when a machine needs you or finishes" : "Notify me when a machine needs me or finishes"}
+                        </TooltipContent>
+                      </Tooltip>
+                    )}
+                    <Button variant="ghost" size="icon-xs" onClick={() => setDark(!dark)} aria-label={dark ? "Switch to light theme" : "Switch to dark theme"}>
+                      {dark ? <Moon /> : <Sun />}
+                    </Button>
+                  </div>
                 </div>
               </div>
-            </div>
-          </>
-        )}
-      </aside>
-
-      {/* ───────────── main (floating workspace) ───────────── */}
-      <main
-        className={cn(
-          "bg-card flex min-h-0 min-w-0 flex-col overflow-hidden md:rounded-xl md:border md:shadow-sm",
-          // Mobile: the workspace (Hub/Thread/Sandboxes) shows when the rail is dismissed. On md+ the
-          // grid always shows it beside the rail.
-          mobileRail ? "hidden md:flex" : "flex"
-        )}
-      >
-        <div className="min-h-0 flex-1">
-          {view === "sandboxes" ? (
-            <Sandboxes
-              boxes={boxes}
-              onOpen={open}
-              onDestroyed={(name) => {
-                if (selected === name) setSelected(null);
-              }}
-              onBack={backToRail}
-            />
-          ) : booting && !selectedBox ? (
-            <BootingThread task={booting.task} warm={booting.warm} onBack={backToRail} />
-          ) : selectedBox ? (
-            <Thread
-              box={selectedBox}
-              asides={asides[selectedBox.name] ?? []}
-              replies={replies[selectedBox.name] ?? []}
-              onAsk={(q) => void ask(selectedBox.name, q)}
-              onReplied={(text) =>
-                setReplies((prev) => ({ ...prev, [selectedBox.name]: [...(prev[selectedBox.name] ?? []), text] }))
-              }
-              onBack={backToRail}
-              onNew={newTask}
-              onTornDown={(name) => {
-                setSelected(null);
-                setAsides((prev) => {
-                  const { [name]: _gone, ...rest } = prev;
-                  return rest;
-                });
-                setReplies((prev) => {
-                  const { [name]: _dropped, ...rest } = prev;
-                  return rest;
-                });
-              }}
-            />
-          ) : (
-            <Hub
-              boxes={boxes}
-              sessionRuns={runs}
-              onBooting={(task) =>
-                setBooting({
-                  task,
-                  known: new Set(boxes.map((b) => b.name)),
-                  // Infer warm from live pool state: an idle pool-free box means the claim reuses a
-                  // pre-booted box (no microVM boot), so the copy is honest from the first frame
-                  // rather than asserting a cold boot the user can see is false.
-                  warm: boxes.some((b) => b.role === "pool-free"),
-                })
-              }
-              onStarted={(box, task) => {
-                remember(box, task);
-                open(box);
-              }}
-              onFailed={() => setBooting(null)}
-              onPending={(p) => setPending((prev) => [...prev, p])}
-              onSettled={(id) => setPending((prev) => prev.filter((p) => p.id !== id))}
-              onOpen={open}
-              onBack={backToRail}
-            />
+            </>
           )}
-        </div>
-      </main>
+        </aside>
+
+        <main className={cn("bg-background flex min-h-0 min-w-0 flex-col overflow-hidden", mobileRail ? "hidden md:flex" : "flex")}>
+          <AnimatePresence mode="wait" initial={false}>
+            <motion.div
+              key={paneKey}
+              className="min-h-0 flex-1"
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+            >
+              {view === "fleet" ? (
+                <Sandboxes
+                  boxes={boxes}
+                  lifecycle={lifecycle}
+                  loading={loading}
+                  onOpen={open}
+                  onDestroyed={(name) => {
+                    if (selected === name) navigate({ view: "fleet" });
+                  }}
+                  onBack={backToRail}
+                />
+              ) : booting && !selectedBox ? (
+                <BootingThread task={booting.task} warm={booting.warm} onBack={backToRail} />
+              ) : selectedBox ? (
+                <Thread
+                  box={selectedBox}
+                  lifecycle={lifecycle}
+                  asides={asides[selectedBox.name] ?? []}
+                  replies={replies[selectedBox.name] ?? []}
+                  onAsk={(q) => void ask(selectedBox.name, q)}
+                  onReplied={(text) =>
+                    setReplies((prev) => ({ ...prev, [selectedBox.name]: [...(prev[selectedBox.name] ?? []), text] }))
+                  }
+                  onBack={backToRail}
+                  onNew={newTask}
+                  onFocusRequest={onFocusRequest}
+                  onTornDown={(name) => {
+                    navigate({ view: "chat", box: null });
+                    setAsides((prev) => {
+                      const { [name]: _gone, ...rest } = prev;
+                      return rest;
+                    });
+                    setReplies((prev) => {
+                      const { [name]: _dropped, ...rest } = prev;
+                      return rest;
+                    });
+                  }}
+                />
+              ) : (
+                <Hub
+                  boxes={boxes}
+                  lifecycle={lifecycle}
+                  loading={loading}
+                  sessionRuns={runs}
+                  onBooting={(task) =>
+                    setBooting({
+                      task,
+                      known: new Set(boxes.map((b) => b.name)),
+                      warm: boxes.some((b) => b.role === "pool-free" && /^running$/i.test(b.boxStatus)),
+                    })
+                  }
+                  onStarted={(box, task) => {
+                    remember(box, task);
+                    open(box);
+                  }}
+                  onFailed={() => setBooting(null)}
+                  onPending={(p) => setPending((prev) => [...prev, p])}
+                  onSettled={(id) => setPending((prev) => prev.filter((p) => p.id !== id))}
+                  onOpen={open}
+                  onBack={backToRail}
+                />
+              )}
+            </motion.div>
+          </AnimatePresence>
+        </main>
 
         <CommandPalette boxes={boxes} onOpen={open} onNew={newTask} />
       </div>
@@ -497,12 +439,14 @@ function NavItem({
   icon,
   label,
   badge,
+  shortcut,
 }: {
   active: boolean;
   onClick: () => void;
   icon: React.ReactNode;
   label: string;
   badge?: number;
+  shortcut?: string;
 }) {
   return (
     <button
@@ -510,21 +454,20 @@ function NavItem({
       onClick={onClick}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "relative flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-body transition-colors",
-        "[&_svg]:size-4",
-        active
-          ? "bg-accent text-accent-foreground font-medium"
-          : "text-[var(--nav-ink)] hover:text-ink hover:bg-[var(--surface)]"
+        "group flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-meta transition-colors [&_svg]:size-4",
+        active ? "bg-accent text-foreground font-medium" : "text-muted-foreground hover:text-foreground hover:bg-muted"
       )}
     >
       {icon}
       {label}
-      {badge != null && <span className="stamp text-ash tabular ml-auto">{badge}</span>}
+      <span className="ml-auto flex items-center gap-2">
+        {shortcut && <kbd className="text-muted-foreground/60 hidden group-hover:inline">{shortcut}</kbd>}
+        {badge != null && <span className="text-muted-foreground tabular text-micro">{badge}</span>}
+      </span>
     </button>
   );
 }
 
-/** A single control in the collapsed rail: a square icon button with a tooltip label. */
 function RailIcon({
   active,
   onClick,
@@ -553,21 +496,16 @@ function RailIcon({
           className={cn(
             "relative grid size-10 cursor-pointer place-items-center rounded-lg transition-colors [&_svg]:size-4",
             primary
-              ? "bg-primary text-primary-foreground hover:opacity-90"
+              ? "bg-primary text-primary-foreground hover:bg-primary/90"
               : active
-                ? "bg-accent text-accent-foreground"
-                : "text-ash hover:text-ink hover:bg-[var(--surface)]"
+                ? "bg-accent text-foreground"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted"
           )}
         >
           {icon}
-          {dot && (
-            <span
-              className="bg-[var(--attention)] absolute right-1.5 top-1.5 size-2 rounded-full ring-2 ring-[var(--card)]"
-              aria-hidden
-            />
-          )}
+          {dot && <span className="bg-attention ring-card absolute top-1.5 right-1.5 size-2 rounded-full ring-2" aria-hidden />}
           {badge != null && !dot && (
-            <span className="stamp bg-[var(--surface)] text-ash tabular absolute -right-1 -top-1 min-w-4 rounded-full border px-1 text-center">
+            <span className="bg-card text-muted-foreground tabular absolute -top-1 -right-1 min-w-4 rounded-full border px-1 text-center text-[10px] leading-4">
               {badge}
             </span>
           )}

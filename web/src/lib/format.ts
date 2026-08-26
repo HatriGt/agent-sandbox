@@ -1,4 +1,5 @@
 import type { BoxRole, BoxView, RunState } from "./api";
+import { displayState } from "./lifecycle";
 
 export const POLL_MS = 3000;
 
@@ -6,14 +7,31 @@ export function roleLabel(role: BoxRole): string {
   return role === "pool-free" ? "warm pool" : role === "pool-claimed" ? "claimed" : "session";
 }
 
-/** Only a running box can be doing anything; a stopped one is history. */
+/** The microVM is up. */
 export function isUp(v: BoxView): boolean {
   return /^running$/i.test(v.boxStatus ?? "");
 }
 
+/** Idle-stopped but intact: rootfs and Claude session survive; `resume` restarts it. */
+export function isSleeping(v: BoxView): boolean {
+  return /^stopped$/i.test(v.boxStatus ?? "");
+}
+
+/**
+ * What the dashboard lists: every running box, plus sleeping boxes that carried a run (a warm-pool
+ * box that died without ever being claimed is dead capacity, not a machine anyone cares about).
+ */
+export function isVisible(v: BoxView): boolean {
+  return isUp(v) || (isSleeping(v) && v.role !== "pool-free");
+}
+
 /** Threads are ordered by who needs attention, not by name. */
 export function threadSort(a: BoxView, b: BoxView): number {
-  const rank = (v: BoxView) => (v.runState === "waiting" ? 0 : v.runState === "running" ? 1 : 2);
+  const rank = (v: BoxView) => {
+    if (v.runState === "waiting") return 0;
+    const s = displayState(v);
+    return s === "running" ? 1 : s === "done" ? 2 : s === "sleeping" ? 3 : 4;
+  };
   const roleRank: Record<BoxRole, number> = { session: 0, "pool-claimed": 0, "pool-free": 1 };
   return rank(a) - rank(b) || roleRank[a.role] - roleRank[b.role] || a.name.localeCompare(b.name);
 }
@@ -25,13 +43,9 @@ export function shortName(name: string): string {
 }
 
 /**
- * A stable, memorable display name for a machine.
- *
- * The real box name (`pool-1787747538458-0onjhe`) is a server-owned identifier — immutable and used
- * for every API call — but its random tail ("0onjhe") is unreadable and forgettable, so people can't
- * refer to "the one working on the migration" by name. We derive a Docker/Heroku-style `adjective-noun`
- * slug DETERMINISTICALLY from the full name: the same box always yields the same pair, no state needed,
- * and it survives reloads. This is purely a display alias; `box.name` remains the key for actions.
+ * A stable, memorable display name for a machine: a Docker/Heroku-style `adjective-noun` slug derived
+ * DETERMINISTICALLY from the real box name, so the same box always yields the same pair with no state.
+ * Purely a display alias; `box.name` remains the key for every API call.
  */
 const NAME_ADJECTIVES = [
   "amber", "brisk", "cobalt", "dusk", "ember", "fern", "glint", "hazel", "iris", "jade",
@@ -44,7 +58,6 @@ const NAME_NOUNS = [
   "lynx", "marsh", "newt", "orbit", "puffin", "reef", "swift", "thorn", "vale", "yak",
 ];
 
-/** A tiny stable string hash (FNV-1a) so a box name always maps to the same slug. */
 function hashName(s: string): number {
   let h = 0x811c9dc5;
   for (let i = 0; i < s.length; i++) {
@@ -64,7 +77,7 @@ export function friendlyName(name: string): string {
 /** First sentence-ish of a task, for the thread list. */
 export function threadTitle(v: BoxView): string {
   const t = (v.task ?? "").trim();
-  if (!t) return v.role === "pool-free" ? "Idle machine" : "Untitled run";
+  if (!t) return v.role === "pool-free" ? "No task yet" : "Untitled run";
   const firstLine = t.split("\n")[0];
   return firstLine.length > 72 ? `${firstLine.slice(0, 71)}…` : firstLine;
 }
@@ -73,16 +86,11 @@ export function stateNoun(s: RunState): string {
   return s === "waiting" ? "needs you" : s;
 }
 
-/**
- * Label for a finished run. A clean exit (code 0) is just "done" — showing "exit 0" reads like an
- * error to anyone who isn't a shell user. A non-zero (or unknown) exit keeps the code as a real
- * failure signal; the caller styles that case distinctly (red).
- */
+/** A clean exit is just "done"; a non-zero (or unknown) exit keeps the code as a real failure signal. */
 export function doneLabel(exitCode?: number): string {
   return exitCode === 0 ? "done" : `exit ${exitCode ?? "?"}`;
 }
 
-/** Whether a finished run should be styled as a failure (non-zero exit). */
 export function isFailedExit(exitCode?: number): boolean {
   return exitCode != null && exitCode !== 0;
 }

@@ -1,19 +1,23 @@
 import * as React from "react";
-import { ArrowLeft, Clock, Cpu, MemoryStick, Plus, Trash2 } from "lucide-react";
-import { api, type BoxView, type WatchSnapshot } from "@/lib/api";
-import { friendlyName, POLL_MS, roleLabel, shortName, threadTitle } from "@/lib/format";
+import { ArrowLeft, Clock, Cpu, Hourglass, MemoryStick, MoonStar, Plus, Trash2, X } from "lucide-react";
+import { toast } from "sonner";
+import { api, type BoxView, type FleetLifecycle, type WatchSnapshot } from "@/lib/api";
+import { friendlyName, isSleeping, POLL_MS, roleLabel, shortName, threadTitle } from "@/lib/format";
+import { deadlineLabel, deadlineOf, displayState, fmtDuration } from "@/lib/lifecycle";
 import { parseTrace, producedFiles } from "@/lib/trace";
 import { usePoll } from "@/hooks/usePoll";
-import { useWatchStream } from "@/hooks/useWatchStream";
+import { seedWatchCache, useWatchStream } from "@/hooks/useWatchStream";
 import { Button } from "@/components/ui/button";
-import { StateStamp } from "@/components/ui/stamp";
+import { StatePill } from "@/components/ui/stamp";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ChatContainerContent, ChatContainerRoot, ChatContainerScrollAnchor } from "@/components/ui/chat-container";
 import { ScrollButton } from "@/components/ui/scroll-button";
 import type { TraceEvent } from "@/lib/trace";
 import { AskingItem, LifecycleItem, ObserverItem, SayItem, ToolGroup, WorkingIndicator, YouItem } from "./TraceItems";
 import { ProducedFiles } from "./ProducedFiles";
+import { ThreadSkeleton } from "./Skeletons";
 import { SendBar } from "./SendBar";
+import { cn } from "@/lib/utils";
 
 /** A co-pilot exchange, owned by the parent so it survives switching threads. */
 export interface Aside {
@@ -23,14 +27,13 @@ export interface Aside {
 }
 
 /**
- * One machine's thread: vitals strip, the trace, the send bar.
- *
- * Scroll behaviour is delegated to the registry's MessageScroller — anchoring to the newest turn,
- * yielding when the reader scrolls up, and offering a way back. That logic is genuinely fiddly and
- * had been hand-written twice here before the components existed.
+ * One machine's thread: a one-row header (state · title · name · lifecycle · vitals · destroy), the
+ * trace, and the composer. The trace comes from the cached/resumable SSE stream, with a slow poll as
+ * fallback; the first paint is either the cached log or a shaped skeleton — never a blank column.
  */
 export function Thread({
   box,
+  lifecycle,
   asides,
   replies,
   onAsk,
@@ -38,8 +41,10 @@ export function Thread({
   onBack,
   onNew,
   onTornDown,
+  onFocusRequest,
 }: {
   box: BoxView;
+  lifecycle: FleetLifecycle;
   asides: Aside[];
   replies: string[];
   onAsk: (question: string) => void;
@@ -47,35 +52,50 @@ export function Thread({
   onBack: () => void;
   onNew: () => void;
   onTornDown: (name: string) => void;
+  onFocusRequest?: (focus: () => void) => void;
 }) {
-  // Prefer the live SSE stream (sub-second appends). Poll only as a FALLBACK — it runs solely while
-  // the stream is not healthy, so we never double-fetch the same thread. When SSE is up the poll hook
-  // is disabled (interval 0 = never fires) and the stream snapshot wins.
-  const stream = useWatchStream(box.name, true);
+  const sleeping = isSleeping(box);
+  // Reopen the stream when the fleet poll sees the box come back to life (a follow-up woke a
+  // finished run, or a sleeping microVM restarted): the server closed the stream at the terminal
+  // `done`, so a new generation is the only way to get live appends again.
+  const alive = !sleeping && (box.runState === "running" || box.runState === "waiting");
+  const [generation, setGeneration] = React.useState(0);
+  const wasAlive = React.useRef(alive);
+  React.useEffect(() => {
+    if (alive && !wasAlive.current) setGeneration((g) => g + 1);
+    wasAlive.current = alive;
+  }, [alive]);
+
+  const stream = useWatchStream(box.name, !sleeping, generation);
+  // Fallback poll: held back so it never races the stream for the first byte, then only while the
+  // stream is down. Through the server hub it is a cache hit, not an SSH round trip.
   const { data: polled } = usePoll<WatchSnapshot>(
     (signal) => api.watch(box.name, signal),
-    stream.ok ? 0 : POLL_MS,
-    [box.name, stream.ok]
+    stream.ok || sleeping ? 0 : POLL_MS,
+    [box.name, stream.ok, sleeping],
+    { initialDelayMs: 2500 }
   );
-  const snap = stream.snap ?? polled;
+  React.useEffect(() => {
+    if (polled && polled.name === box.name) seedWatchCache(polled);
+  }, [polled, box.name]);
+  const snap = stream.snap ?? (polled?.name === box.name ? polled : null);
 
   const events = React.useMemo(() => parseTrace(snap?.log ?? ""), [snap?.log]);
-  // Fold consecutive tool calls into one cluster so the thread reads as prose punctuated by
-  // "N tools used" pills (the reference pattern), instead of a wall of individual tool rows.
   const groups = React.useMemo(() => groupTrace(events), [events]);
-  // Files the agent wrote/edited under /workspace this run — surfaced as downloadable artifact cards
-  // below the trace. Derived from the Write/Edit tool calls, so it costs nothing and reflects exactly
-  // what the agent made.
   const artifacts = React.useMemo(() => producedFiles(events), [events]);
-  // A reply is echoed optimistically only until the resume path's ⟦you⟧ line reaches the polled log.
-  // Once the trace carries a matching `you` event we drop the local echo, so the message shows once,
-  // in order, and from the durable source (so a refresh keeps it).
   const pendingReplies = React.useMemo(() => {
     const persisted = new Set(events.filter((e) => e.kind === "you").map((e) => e.text.trim()));
     return replies.filter((r) => !persisted.has(r.trim()));
   }, [replies, events]);
-  const runState = snap?.runState ?? box.runState;
-  const question = snap?.question ?? box.question;
+  // The fleet poll is authoritative for a sleeping box (its stream cannot connect).
+  const runState = sleeping ? box.runState : snap?.runState ?? box.runState;
+  const question = sleeping ? box.question : snap?.question ?? box.question;
+  const exitCode = snap?.exitCode ?? box.exitCode;
+  const state = sleeping ? "sleeping" : displayState({ boxStatus: box.boxStatus, runState });
+  const loadingTrace = !snap && !sleeping;
+
+  const deadline = React.useMemo(() => deadlineOf(box, lifecycle), [box, lifecycle]);
+  const deadlineText = deadlineLabel(deadline);
 
   const [armed, setArmed] = React.useState(false);
   const [removing, setRemoving] = React.useState(false);
@@ -83,7 +103,12 @@ export function Thread({
   React.useEffect(() => {
     if (!armed) return;
     const t = window.setTimeout(() => setArmed(false), 4000);
-    return () => window.clearTimeout(t);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setArmed(false);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.clearTimeout(t);
+      window.removeEventListener("keydown", onKey);
+    };
   }, [armed]);
 
   const destroy = async () => {
@@ -91,133 +116,158 @@ export function Thread({
     setRemoving(true);
     try {
       await api.teardown(box.name);
+      toast.success(`${friendlyName(box.name)} destroyed`);
       onTornDown(box.name);
+    } catch (e) {
+      toast.error("Could not destroy the machine", { description: e instanceof Error ? e.message : String(e) });
     } finally {
       setRemoving(false);
+      setArmed(false);
     }
   };
 
-  // One-click answer to a clarifying question: same path as the SendBar reply (optimistic echo +
-  // resume), so the buttons in AskingItem release the halted run just like typing a reply does.
   const answer = React.useCallback(
     (text: string) => {
       onReplied(text);
-      void api.resume(box.name, text);
+      api.resume(box.name, text).catch((e: unknown) =>
+        toast.error("The agent did not get your answer", { description: e instanceof Error ? e.message : String(e) })
+      );
     },
     [box.name, onReplied]
   );
 
+  const idle = runState === "idle" && events.length === 0 && !loadingTrace;
+
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
-      <header className="flex items-center gap-2 border-b px-3 py-2.5 md:px-6">
+      <header className="flex h-14 shrink-0 items-center gap-2.5 border-b px-3 md:px-5">
         <Button variant="ghost" size="icon-sm" onClick={onBack} aria-label="Back to machines" className="md:hidden">
           <ArrowLeft />
         </Button>
 
-        <div className="min-w-0 flex-1">
-          {/* Breadcrumb — "Agent / <friendly-name> / <task>". The friendly name is the readable
-              handle; the raw id is in its title for anyone matching against `msb ls`. */}
-          <div className="text-ash flex min-w-0 items-center gap-1.5 text-micro">
-            <span className="hidden sm:inline">Agent</span>
-            <span className="hidden sm:inline opacity-50" aria-hidden>/</span>
-            <span className="shrink-0 font-medium" title={shortName(box.name)}>{friendlyName(box.name)}</span>
-            <span className="opacity-50" aria-hidden>/</span>
-            <span className="text-ink min-w-0 truncate font-medium">{threadTitle(box)}</span>
-          </div>
-          <div className="tabular mt-2 flex flex-wrap items-center gap-x-2 gap-y-1.5">
-            {/* State is the anchor (coloured, glyph+word), set apart from the neutral vitals by a
-                hairline divider so it never reads as part of the metric run. */}
-            <StateStamp state={runState} exitCode={snap?.exitCode ?? box.exitCode} />
-            {(box.uptime || box.cpu || box.mem) && (
-              <span className="bg-border/70 hidden h-3.5 w-px sm:inline-block" aria-hidden />
-            )}
-            {box.uptime && <Vital icon={<Clock className="size-3" />} label="uptime" value={box.uptime} />}
-            {box.cpu && <Vital icon={<Cpu className="size-3" />} label="cpu" value={box.cpu} />}
-            {box.mem && <Vital icon={<MemoryStick className="size-3" />} label="memory" value={box.mem} />}
-            {/* Role is a classification, not a metric: a filled tag, pushed to the end. */}
-            <span className="bg-muted text-muted-foreground stamp ml-auto rounded-md px-2 py-1">
-              {roleLabel(box.role)}
+        <StatePill state={state} exitCode={exitCode} />
+
+        <div className="flex min-w-0 flex-1 items-baseline gap-2">
+          <h1 className="text-foreground min-w-0 truncate text-body font-medium">
+            {box.task ? threadTitle(box) : friendlyName(box.name)}
+          </h1>
+          {box.task && (
+            <span className="stamp text-muted-foreground hidden shrink-0 sm:inline" title={shortName(box.name)}>
+              {friendlyName(box.name)}
             </span>
-          </div>
+          )}
+        </div>
+
+        {/* Lifecycle + vitals: quiet mono facts, desktop only — the fleet view carries them on phones. */}
+        <div className="stamp text-muted-foreground hidden items-center gap-3 lg:flex">
+          {deadlineText && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className={cn("inline-flex items-center gap-1.5", deadline.remainingSec != null && deadline.remainingSec < 300 && "text-attention-text")}>
+                  <Hourglass className="size-3" aria-hidden />
+                  <span className="tabular">{deadline.remainingSec != null ? fmtDuration(deadline.remainingSec) : ""}</span>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{deadlineText}</TooltipContent>
+            </Tooltip>
+          )}
+          {box.uptime && <Vital icon={<Clock className="size-3" />} label={sleeping ? "ran for" : "uptime"} value={box.uptime} />}
+          {box.cpu && <Vital icon={<Cpu className="size-3" />} label="cpu" value={box.cpu} />}
+          {box.mem && <Vital icon={<MemoryStick className="size-3" />} label="memory" value={box.mem.split(" / ")[0]} />}
+          <span className="bg-muted text-muted-foreground label rounded-md px-1.5 py-0.5">{roleLabel(box.role)}</span>
         </div>
 
         <Button variant="ghost" size="icon-sm" onClick={onNew} aria-label="New task" className="md:hidden">
           <Plus />
         </Button>
-        <Button variant="danger" size="sm" onClick={destroy} disabled={removing}>
-          <Trash2 className="size-3.5" />
-          <span className="hidden sm:inline">{removing ? "destroying" : armed ? "confirm?" : "destroy"}</span>
-        </Button>
+
+        {armed ? (
+          <div className="enter flex items-center gap-1">
+            <Button variant="destructive" size="sm" onClick={destroy} disabled={removing}>
+              <Trash2 className="size-3.5" />
+              {removing ? "Destroying…" : "Confirm destroy"}
+            </Button>
+            <Button variant="ghost" size="icon-sm" onClick={() => setArmed(false)} aria-label="Cancel">
+              <X />
+            </Button>
+          </div>
+        ) : (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon-sm" onClick={destroy} aria-label="Destroy this machine">
+                <Trash2 />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Destroy — stops the microVM and discards its workspace</TooltipContent>
+          </Tooltip>
+        )}
       </header>
 
-      {/* prompt-kit ChatContainer owns the stick-to-bottom behaviour: it anchors to the newest turn,
-          yields when the reader scrolls up, and the ScrollButton offers a way back. */}
       <div className="relative min-h-0 flex-1">
         <ChatContainerRoot className="relative h-full">
-          <ChatContainerContent className="mx-auto w-full max-w-3xl gap-6 px-4 pt-8 pb-16 md:px-6">
-            {box.task && <YouItem text={box.task} label="task" />}
+          <ChatContainerContent className="mx-auto w-full max-w-3xl gap-7 px-4 pt-7 pb-12 md:px-6">
+            {box.task && <YouItem text={box.task} label="Task" />}
+
+            {loadingTrace && <ThreadSkeleton withTask={!!box.task} />}
+
+            {sleeping && (
+              <div className="enter border-sleep/30 bg-sleep/8 flex items-start gap-3 rounded-xl border px-4 py-3">
+                <MoonStar className="text-sleep mt-0.5 size-4 shrink-0" aria-hidden />
+                <div className="min-w-0 text-meta">
+                  <p className="text-foreground font-medium">This machine is asleep.</p>
+                  <p className="text-muted-foreground mt-0.5">
+                    It went quiet for longer than the idle limit
+                    {lifecycle.idleTimeoutSec ? ` (${fmtDuration(lifecycle.idleTimeoutSec)})` : ""} and msb stopped
+                    the microVM — but its workspace and Claude session are intact. A reply below restarts it and
+                    continues the same run. The transcript reappears once it is awake.
+                  </p>
+                </div>
+              </div>
+            )}
 
             {groups.map((g, i) => {
               const isLast = i === groups.length - 1;
-              const key = groupKey(g, i);
+              const key = `${g.kind}-${i}`;
               return g.kind === "lifecycle" ? (
                 <LifecycleItem key={key} label={g.label} detail={g.detail} />
               ) : g.kind === "tools" ? (
                 <ToolGroup key={key} events={g.events} live={runState === "running" && isLast} />
               ) : g.kind === "you" ? (
-                <YouItem key={key} text={g.text} label="you" />
+                <YouItem key={key} text={g.text} />
               ) : (
                 <SayItem key={key} text={g.text} live={runState === "running" && isLast} />
               );
             })}
 
-            {/* The "working…" beat: the run is live but the newest thing on screen is not streaming
-                prose — the agent is thinking, or a tool has just finished and the next output has not
-                landed. Keeps a clear, resolving activity signal instead of dead air between polls. */}
-            {runState === "running" && groups[groups.length - 1]?.kind !== "say" && <WorkingIndicator />}
-
-            {!events.length && (
-              <LifecycleItem
-                label={runState === "idle" ? "machine idle" : "booting"}
-                detail={runState === "idle" ? "no run yet" : "waiting for first output"}
-              />
+            {!sleeping && runState === "running" && groups[groups.length - 1]?.kind !== "say" && !loadingTrace && (
+              <WorkingIndicator label={events.length ? "Working" : "Starting up"} />
             )}
+
+            {idle && <IdleEmpty box={box} onNew={onNew} />}
 
             {question && runState === "waiting" && <AskingItem question={question} onAnswer={answer} />}
 
-            {/* Produced files: view/download cards for what the agent wrote under /workspace this run. */}
-            <ProducedFiles session={box.name} files={artifacts} />
+            {!sleeping && <ProducedFiles session={box.name} files={artifacts} />}
 
-            {/* Optimistic echo of a reply you JUST sent, shown only until the durable log catches up.
-                The resume path stamps each follow-up into .agent.log as a ⟦you⟧ turn, which the trace
-                renders inline above its response (correct order) and which survives a refresh — so a
-                reply that already appears as a `you` event must not be echoed again here. */}
             {pendingReplies.map((r, i) => (
-              <YouItem key={`reply-${i}`} text={r} label="you" />
+              <YouItem key={`reply-${i}`} text={r} />
             ))}
 
             {asides.map((a, i) => (
               <ObserverItem key={`aside-${i}`} question={a.question} answer={a.error ?? a.answer} />
             ))}
 
-            {runState === "done" &&
-              (() => {
-                // A clean exit is just "completed" — no scary "code 0". A non-zero exit is a real
-                // failure signal, so keep the code (StateStamp already reds it in the header).
-                const code = snap?.exitCode ?? box.exitCode;
-                return code == null || code === 0 ? (
-                  <LifecycleItem label="completed" />
-                ) : (
-                  <LifecycleItem label="exited" detail={`code ${code}`} />
-                );
-              })()}
+            {!sleeping &&
+              runState === "done" &&
+              (exitCode == null || exitCode === 0 ? (
+                <LifecycleItem label="Completed" detail={deadlineText ?? undefined} />
+              ) : (
+                <LifecycleItem label="Exited with an error" detail={`code ${exitCode}`} />
+              ))}
             <ChatContainerScrollAnchor />
           </ChatContainerContent>
 
-          {/* ScrollButton consumes the StickToBottom context, so it must live INSIDE ChatContainerRoot.
-              StickToBottom is itself the scroll element, so the button is `sticky` (not absolute) to
-              pin to the viewport bottom instead of scrolling away with the content. */}
-          <div className="pointer-events-none sticky inset-x-0 bottom-4 z-10 flex justify-center">
+          <div className="pointer-events-none sticky inset-x-0 bottom-3 z-10 flex justify-center">
             <div className="pointer-events-auto">
               <ScrollButton />
             </div>
@@ -225,34 +275,46 @@ export function Thread({
         </ChatContainerRoot>
       </div>
 
-      <SendBar boxName={box.name} runState={runState} onAsk={onAsk} onReplied={onReplied} />
+      <SendBar
+        boxName={box.name}
+        runState={runState}
+        sleeping={sleeping}
+        onAsk={onAsk}
+        onReplied={onReplied}
+        onFocusRequest={onFocusRequest}
+      />
+    </div>
+  );
+}
+
+function IdleEmpty({ box, onNew }: { box: BoxView; onNew: () => void }) {
+  const warm = box.role === "pool-free";
+  return (
+    <div className="enter flex flex-col items-start gap-3 py-6">
+      <p className="text-foreground text-lead font-medium">
+        {friendlyName(box.name)} is {warm ? "warm and waiting" : "idle"}.
+      </p>
+      <p className="text-muted-foreground max-w-[52ch] text-body">
+        {warm
+          ? "This microVM is already booted with the agent installed. The next task you start claims it, so the run begins in seconds instead of waiting on a boot."
+          : "Nothing has run here yet. Send an instruction below to start the agent, or start a new task."}
+      </p>
+      <Button variant="outline" size="sm" onClick={onNew}>
+        <Plus className="size-3.5" />
+        New task
+      </Button>
     </div>
   );
 }
 
 type ToolEvent = Extract<TraceEvent, { kind: "tool" }>;
 
-/** A render group: prose, a user turn, a lifecycle hairline, or a cluster of consecutive tool calls. */
 type TraceGroup =
   | { kind: "say"; text: string }
   | { kind: "you"; text: string }
   | { kind: "lifecycle"; label: string; detail?: string }
   | { kind: "tools"; events: ToolEvent[] };
 
-/**
- * A stable key for a render group.
- *
- * The trace is append-mostly: earlier blocks are settled, only the tail grows. Keying by position +
- * kind is therefore stable — a block keeps its identity (and its mounted state) across polls even as
- * the streaming tail lengthens. Deliberately NOT content-hashed: hashing the text would change the
- * key every poll while a `say` streams, remounting it and resetting its reveal. Position is stable
- * here because groups only ever append, and a `you`/`say` never swaps kind under the same index.
- */
-function groupKey(g: TraceGroup, i: number): string {
-  return `${g.kind}-${i}`;
-}
-
-/** Coalesce runs of `tool` events into one `tools` group; pass prose/you/lifecycle through unchanged. */
 function groupTrace(events: TraceEvent[]): TraceGroup[] {
   const out: TraceGroup[] = [];
   for (const e of events) {
@@ -261,7 +323,7 @@ function groupTrace(events: TraceEvent[]): TraceGroup[] {
       if (last?.kind === "tools") last.events.push(e);
       else out.push({ kind: "tools", events: [e] });
     } else if (e.kind === "lifecycle") {
-      out.push({ kind: "lifecycle", label: e.label, detail: e.detail });
+      out.push({ kind: "lifecycle", label: sentence(e.label), detail: e.detail });
     } else if (e.kind === "you") {
       out.push({ kind: "you", text: e.text });
     } else {
@@ -271,20 +333,16 @@ function groupTrace(events: TraceEvent[]): TraceGroup[] {
   return out;
 }
 
-/**
- * A machine vital as a self-contained chip: icon + value, with the full label in a tooltip. Chips
- * read as discrete facts ("uptime 36m", "cpu 0.01/1c", "mem 81 MiB") instead of a run-on string.
- */
+function sentence(s: string): string {
+  return s ? s[0].toUpperCase() + s.slice(1) : s;
+}
+
 function Vital({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        {/* A discrete fact: muted-icon + tabular value on a real surface with a hairline, so the three
-            vitals read as three chips — not one run-on string. `tabular` keeps digits from jittering. */}
-        <span className="border-border bg-muted/50 text-ink hover:bg-muted inline-flex items-center gap-1.5 rounded-md border px-2 py-1 font-mono text-micro leading-none transition-colors">
-          <span className="text-muted-foreground" aria-hidden>
-            {icon}
-          </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span aria-hidden>{icon}</span>
           <span className="tabular">{value}</span>
         </span>
       </TooltipTrigger>
