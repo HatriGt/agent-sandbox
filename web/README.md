@@ -1,23 +1,30 @@
 # agent-sandbox dashboard
 
-React + Vite + Tailwind v4 + vendored shadcn/ui components. Built into `web/dist` and served by the
-same express container that serves `/mcp`, mounted at `/dashboard`.
+React + Vite + Tailwind v4 on a **shadcn (neutral) + prompt-kit** foundation with **Inter + Hedvig
+Letters Serif + Geist Mono** fonts. Built into `web/dist` and served by the same express container
+that serves `/mcp`, mounted at `/dashboard`. See `DESIGN.md` for the full style reference (the chrome
+is cloned from the CRM-AI-Agent reference) and `DESIGN-claude-code.md` for the chat-surface spec.
 
 ## Why the components are vendored
 
-shadcn/ui is not an npm runtime dependency — components are copied into the project so they can be
-edited. The same applies to the chat primitives (`ChatBubble` / `ChatMessageList` / `ChatInput`),
-which follow the shadcn-chat component shape. Runtime deps are only Radix primitives, CVA, clsx,
-tailwind-merge, lucide-react, and React itself.
+Neither shadcn/ui nor prompt-kit is an npm runtime dependency — components are copied into
+`src/components/ui/` so they can be edited. The chat surface is composed from prompt-kit's AI-chat
+components (`chat-container`, `prompt-input`, `steps`, `tool`, `markdown`, `code-block`,
+`scroll-button`, `reasoning`), installed with `npx shadcn add https://prompt-kit.com/c/<name>.json`;
+they read the same shadcn token contract as the rest of the console. Runtime deps are the low-level
+Radix *primitives* (dialog / scroll-area / slot / tooltip — not Radix Themes), CVA, clsx,
+tailwind-merge, lucide-react, `use-stick-to-bottom`, react-markdown + remark + shiki, next-themes,
+sonner, and React itself.
 
 ## Two conversational lanes
 
-The UI must never let these be confused, and the bubble variants encode the difference:
+The UI must never let these be confused, and the trace items encode the difference:
 
 - **Driver** — the agent doing the work. You steer it *only* by answering the question it is blocked
-  on (`WaitingBanner` → `POST /resume.json`).
-- **Co-pilot** — a read-only observer in the same box (`AskPanel` → `POST /ask.json`). It cannot
-  change anything and cannot reach the driver. Dashed bubble border, distinct avatar.
+  on. The `SendBar` "reply" mode → `POST /resume.json`; the pending question renders as `AskingItem`.
+- **Co-pilot** — a read-only observer in the same box. The `SendBar` "ask" mode → `POST /ask.json`. It
+  cannot change anything and cannot reach the driver, and renders as a visibly distinct `ObserverItem`
+  (dashed edge, "read-only · the agent never saw this").
 
 ## Develop
 

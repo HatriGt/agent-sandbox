@@ -24,6 +24,43 @@ export function shortName(name: string): string {
   return m ? m[1] : name;
 }
 
+/**
+ * A stable, memorable display name for a machine.
+ *
+ * The real box name (`pool-1787747538458-0onjhe`) is a server-owned identifier — immutable and used
+ * for every API call — but its random tail ("0onjhe") is unreadable and forgettable, so people can't
+ * refer to "the one working on the migration" by name. We derive a Docker/Heroku-style `adjective-noun`
+ * slug DETERMINISTICALLY from the full name: the same box always yields the same pair, no state needed,
+ * and it survives reloads. This is purely a display alias; `box.name` remains the key for actions.
+ */
+const NAME_ADJECTIVES = [
+  "amber", "brisk", "cobalt", "dusk", "ember", "fern", "glint", "hazel", "iris", "jade",
+  "lunar", "mint", "nova", "onyx", "pine", "quartz", "rust", "sage", "teal", "vapor",
+  "wren", "zephyr", "clay", "frost", "opal", "slate", "coral", "drift", "flint", "moss",
+];
+const NAME_NOUNS = [
+  "otter", "falcon", "cedar", "harbor", "lark", "maple", "quokka", "raven", "sparrow", "tundra",
+  "willow", "badger", "comet", "delta", "eagle", "finch", "grove", "heron", "ibis", "koi",
+  "lynx", "marsh", "newt", "orbit", "puffin", "reef", "swift", "thorn", "vale", "yak",
+];
+
+/** A tiny stable string hash (FNV-1a) so a box name always maps to the same slug. */
+function hashName(s: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+
+export function friendlyName(name: string): string {
+  const h = hashName(name);
+  const adj = NAME_ADJECTIVES[h % NAME_ADJECTIVES.length];
+  const noun = NAME_NOUNS[(h >>> 8) % NAME_NOUNS.length];
+  return `${adj}-${noun}`;
+}
+
 /** First sentence-ish of a task, for the thread list. */
 export function threadTitle(v: BoxView): string {
   const t = (v.task ?? "").trim();

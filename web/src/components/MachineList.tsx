@@ -1,6 +1,6 @@
 import { Clock } from "lucide-react";
 import type { StableBox } from "@/hooks/useStableBoxes";
-import { roleLabel, shortName, threadSort, threadTitle } from "@/lib/format";
+import { friendlyName, roleLabel, shortName, threadSort, threadTitle } from "@/lib/format";
 import { StateStamp } from "@/components/ui/stamp";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
@@ -94,18 +94,17 @@ export function MachineList({
                   {threadTitle(v)}
                 </p>
 
-                <div className="text-ash tabular mt-1.5 flex items-center gap-1.5 font-mono text-micro">
-                  <span className="truncate">{shortName(v.name)}</span>
+                <div className="text-ash mt-1.5 flex items-center gap-1.5 text-micro">
+                  {/* Friendly name is the readable handle; the raw id lives in the title for anyone
+                      who needs to match it against `msb ls`. */}
+                  <span className="truncate font-medium" title={shortName(v.name)}>
+                    {friendlyName(v.name)}
+                  </span>
                   {v.uptime && (
-                    <>
-                      <span className="text-ash/40" aria-hidden>
-                        ·
-                      </span>
-                      <span className="inline-flex items-center gap-1 opacity-70" title="uptime">
-                        <Clock className="size-2.5" aria-hidden />
-                        {v.uptime}
-                      </span>
-                    </>
+                    <span className="tabular ml-auto inline-flex shrink-0 items-center gap-1 font-mono opacity-70" title="uptime">
+                      <Clock className="size-2.5" aria-hidden />
+                      {v.uptime}
+                    </span>
                   )}
                 </div>
               </button>

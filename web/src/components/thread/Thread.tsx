@@ -1,7 +1,7 @@
 import * as React from "react";
 import { ArrowLeft, Clock, Cpu, MemoryStick, Plus, Trash2 } from "lucide-react";
 import { api, type BoxView, type WatchSnapshot } from "@/lib/api";
-import { POLL_MS, roleLabel, shortName, threadTitle } from "@/lib/format";
+import { friendlyName, POLL_MS, roleLabel, shortName, threadTitle } from "@/lib/format";
 import { parseTrace, producedFiles } from "@/lib/trace";
 import { usePoll } from "@/hooks/usePoll";
 import { useWatchStream } from "@/hooks/useWatchStream";
@@ -115,20 +115,29 @@ export function Thread({
         </Button>
 
         <div className="min-w-0 flex-1">
-          {/* Breadcrumb — the reference's "Agent / Rune / <task>" trail, mapped to our machine. */}
+          {/* Breadcrumb — "Agent / <friendly-name> / <task>". The friendly name is the readable
+              handle; the raw id is in its title for anyone matching against `msb ls`. */}
           <div className="text-ash flex min-w-0 items-center gap-1.5 text-micro">
             <span className="hidden sm:inline">Agent</span>
             <span className="hidden sm:inline opacity-50" aria-hidden>/</span>
-            <span className="shrink-0 font-mono">{shortName(box.name)}</span>
+            <span className="shrink-0 font-medium" title={shortName(box.name)}>{friendlyName(box.name)}</span>
             <span className="opacity-50" aria-hidden>/</span>
             <span className="text-ink min-w-0 truncate font-medium">{threadTitle(box)}</span>
           </div>
-          <div className="tabular mt-1.5 flex flex-wrap items-center gap-1.5">
+          <div className="tabular mt-2 flex flex-wrap items-center gap-x-2 gap-y-1.5">
+            {/* State is the anchor (coloured, glyph+word), set apart from the neutral vitals by a
+                hairline divider so it never reads as part of the metric run. */}
             <StateStamp state={runState} exitCode={snap?.exitCode ?? box.exitCode} />
+            {(box.uptime || box.cpu || box.mem) && (
+              <span className="bg-border/70 hidden h-3.5 w-px sm:inline-block" aria-hidden />
+            )}
             {box.uptime && <Vital icon={<Clock className="size-3" />} label="uptime" value={box.uptime} />}
             {box.cpu && <Vital icon={<Cpu className="size-3" />} label="cpu" value={box.cpu} />}
             {box.mem && <Vital icon={<MemoryStick className="size-3" />} label="memory" value={box.mem} />}
-            <span className="stamp text-ash rounded-md border px-1.5 py-0.5">{roleLabel(box.role)}</span>
+            {/* Role is a classification, not a metric: a filled tag, pushed to the end. */}
+            <span className="bg-muted text-muted-foreground stamp ml-auto rounded-md px-2 py-1">
+              {roleLabel(box.role)}
+            </span>
           </div>
         </div>
 
@@ -270,11 +279,13 @@ function Vital({ icon, label, value }: { icon: React.ReactNode; label: string; v
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className="border-border bg-[var(--surface)] text-ink inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 font-mono text-micro">
-          <span className="text-ash" aria-hidden>
+        {/* A discrete fact: muted-icon + tabular value on a real surface with a hairline, so the three
+            vitals read as three chips — not one run-on string. `tabular` keeps digits from jittering. */}
+        <span className="border-border bg-muted/50 text-ink hover:bg-muted inline-flex items-center gap-1.5 rounded-md border px-2 py-1 font-mono text-micro leading-none transition-colors">
+          <span className="text-muted-foreground" aria-hidden>
             {icon}
           </span>
-          {value}
+          <span className="tabular">{value}</span>
         </span>
       </TooltipTrigger>
       <TooltipContent side="bottom">{label}</TooltipContent>

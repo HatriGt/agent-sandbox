@@ -2,7 +2,7 @@ import * as React from "react";
 import { ArrowLeft, MessageSquare, PauseCircle, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import { roleLabel, shortName, threadSort, threadTitle } from "@/lib/format";
+import { friendlyName, roleLabel, shortName, threadSort, threadTitle } from "@/lib/format";
 import type { StableBox } from "@/hooks/useStableBoxes";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -91,7 +91,7 @@ export function Sandboxes({
                   >
                     <PauseCircle className="mt-0.5 size-4.5 shrink-0 text-[var(--attention-text)]" aria-hidden />
                     <span className="min-w-0 flex-1">
-                      <span className="stamp text-ash block">{shortName(b.name)}</span>
+                      <span className="stamp text-ash block" title={shortName(b.name)}>{friendlyName(b.name)}</span>
                       <span className="text-ink mt-1 block text-lead leading-snug">
                         {b.question ?? b.task ?? "Waiting for an answer"}
                       </span>
@@ -180,7 +180,7 @@ function MachineRow({
     setRemoving(true);
     try {
       await api.teardown(box.name);
-      toast.success(`${shortName(box.name)} destroyed`);
+      toast.success(`${friendlyName(box.name)} destroyed`);
       onDestroyed(box.name);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not destroy the machine");
@@ -219,15 +219,15 @@ function MachineRow({
         {box.question && (
           <p className="truncate text-micro text-[var(--attention-text)]">Asking: {box.question}</p>
         )}
-        <p className="text-ash tabular mt-0.5 font-mono text-micro md:hidden">
-          {shortName(box.name)}
-          {box.uptime && <span className="ml-2 opacity-70">up {box.uptime}</span>}
+        <p className="text-ash mt-0.5 text-micro md:hidden" title={shortName(box.name)}>
+          <span className="font-medium">{friendlyName(box.name)}</span>
+          {box.uptime && <span className="tabular ml-2 font-mono opacity-70">up {box.uptime}</span>}
         </p>
       </div>
 
       {/* vitals — desktop column */}
       <div className="text-ash tabular hidden flex-col gap-0.5 font-mono text-micro md:flex">
-        <span className="text-ink">{shortName(box.name)}</span>
+        <span className="text-ink font-medium" title={shortName(box.name)}>{friendlyName(box.name)}</span>
         <span className="flex gap-2 opacity-80">
           {box.uptime && <span>up {box.uptime}</span>}
           {box.cpu && <span>cpu {box.cpu}</span>}

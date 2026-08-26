@@ -1,6 +1,5 @@
 import * as React from "react";
 import {
-  Boxes,
   LayoutGrid,
   MessageSquare,
   Moon,
@@ -19,6 +18,7 @@ import { usePoll } from "@/hooks/usePoll";
 import { useStableBoxes } from "@/hooks/useStableBoxes";
 import { useSessionRuns } from "@/hooks/useSessionRuns";
 import { Button } from "@/components/ui/button";
+import { Logo } from "@/components/ui/logo";
 import { MachineList } from "@/components/MachineList";
 import { Hub } from "@/components/Hub";
 import { Sandboxes } from "@/components/Sandboxes";
@@ -149,6 +149,10 @@ export default function App() {
     setSelected(fresh.name);
     setBooting(null);
     setView("chat");
+    // The box is now a real row in the list, so the transient "booting" placeholder in the sidebar
+    // is redundant — clear it, otherwise it lingers (and lies as "booting") for the rest of the
+    // ~50s delegate call while the thread already shows the claimed warm box.
+    setPending([]);
   }, [booting, boxes]);
 
   const open = (name: string) => {
@@ -206,62 +210,92 @@ export default function App() {
   return (
     <TooltipProvider delayDuration={400}>
       <Toaster position="bottom-center" />
-      {/* Flat shell (reference): a thin 208px sidebar divided from the workspace by a single hairline
-          border — not floating cards on a tinted canvas. The rail narrows to a slim icon strip when
-          collapsed. */}
+      {/* Floating shell: a tinted canvas holds two elevated panels — the sidebar and the workspace —
+          each a rounded card with its own hairline + soft shadow, separated by a gap. On mobile the
+          panels go full-bleed (no gap/radius) so no screen space is wasted. The rail narrows to a slim
+          icon strip when collapsed. */}
       <div
         className={cn(
-          "grid h-full grid-cols-1",
-          collapsed ? "md:grid-cols-[4rem_minmax(0,1fr)]" : "md:grid-cols-[13rem_minmax(0,1fr)]"
+          "bg-muted/40 grid h-full grid-cols-1 gap-0 md:gap-2.5 md:p-2.5",
+          collapsed ? "md:grid-cols-[4rem_minmax(0,1fr)]" : "md:grid-cols-[13.5rem_minmax(0,1fr)]"
         )}
       >
-      {/* ───────────── machines (flat rail) ───────────── */}
+      {/* ───────────── machines (floating rail) ───────────── */}
       <aside
         className={cn(
-          "bg-card flex min-h-0 flex-col overflow-hidden border-r",
+          "bg-card flex min-h-0 flex-col overflow-hidden md:rounded-xl md:border md:shadow-sm",
           // Mobile: the rail shows only when `mobileRail` is set; otherwise the workspace has the
           // screen. On md+ the grid always shows it.
           mobileRail ? "flex" : "hidden md:flex"
         )}
       >
-        <header className={cn("flex items-center gap-2.5 px-3 pt-3 pb-2.5", collapsed && "md:flex-col md:gap-3 md:px-2")}>
-          <span className="bg-primary text-primary-foreground grid size-8 shrink-0 place-items-center rounded-xl">
-            <Boxes className="size-4" aria-hidden />
-          </span>
-          {!collapsed && (
-            <div className="min-w-0">
-              <p className="text-ink text-body leading-tight font-semibold tracking-tight">agent-sandbox</p>
-              <p className="stamp text-ash mt-0.5 flex items-center gap-1.5">
-                <span
-                  className={cn("size-1.5 rounded-full", live ? "bg-primary breathe" : "bg-[var(--danger)]")}
-                  aria-hidden
-                />
-                {live
-                  ? `${boxes.length} up${working ? ` · ${working} working` : ""} · ${freshness}`
-                  : "offline"}
-              </p>
-            </div>
-          )}
-          <div className={cn("flex items-center gap-1", collapsed ? "md:flex-col" : "ml-auto")}>
-            {/* Collapse toggle: desktop only — mobile uses full-screen panes, not a rail. */}
+        <header className={cn("px-3 pt-2 pb-3", collapsed && "md:px-2")}>
+          {/* Collapse toggle: top-anchored on its own row — always the first control in the rail, in a
+              fixed spot, so re-expanding is predictable whether the rail is open or a slim strip.
+              Desktop only (mobile uses full-screen panes). */}
+          <div className={cn("hidden md:flex", collapsed ? "justify-center" : "justify-end")}>
             <Button
               variant="ghost"
               size="icon-sm"
               onClick={toggleRail}
               aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-              className="hidden md:inline-flex"
             >
               {collapsed ? <PanelLeftOpen className="size-3.5" /> : <PanelLeftClose className="size-3.5" />}
             </Button>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={toggle}
-              aria-label={dark ? "Switch to light theme" : "Switch to dark theme"}
-            >
-              {dark ? <Moon className="size-3.5" /> : <Sun className="size-3.5" />}
-            </Button>
           </div>
+
+          {/* Brand row: mark + wordmark on the left, theme toggle on the right. */}
+          <div className={cn("mt-1 flex items-center gap-2.5", collapsed && "md:mt-2 md:justify-center")}>
+            <span className="bg-primary text-primary-foreground grid size-8 shrink-0 place-items-center rounded-[10px] shadow-sm ring-1 ring-black/5 dark:ring-white/10">
+              <Logo className="size-[18px]" />
+            </span>
+            {!collapsed && (
+              <>
+                <p className="text-ink min-w-0 flex-1 truncate text-body leading-tight font-semibold tracking-tight">
+                  Agent Sandbox
+                </p>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={toggle}
+                  aria-label={dark ? "Switch to light theme" : "Switch to dark theme"}
+                >
+                  {dark ? <Moon className="size-3.5" /> : <Sun className="size-3.5" />}
+                </Button>
+              </>
+            )}
+          </div>
+
+          {/* Health line: its own full-width row so it never crowds the controls. A semantic dot
+              (green live / amber if any waiting / red offline) + plain-case counts; freshness is
+              demoted to a quiet right-aligned timestamp so the live count reads first. */}
+          {!collapsed && (
+            <p className="mt-2.5 flex items-center gap-1.5 text-micro leading-none">
+              <span
+                className={cn(
+                  "size-1.5 shrink-0 rounded-full",
+                  !live ? "bg-destructive" : waiting.length ? "bg-attention" : "bg-ok breathe"
+                )}
+                aria-hidden
+              />
+              {live ? (
+                <>
+                  <span className="text-ink tabular font-medium">
+                    {boxes.length} {boxes.length === 1 ? "machine" : "machines"}
+                  </span>
+                  {working > 0 && <span className="text-azure-text tabular">· {working} working</span>}
+                  {waiting.length > 0 && (
+                    <span className="text-attention-text tabular">· {waiting.length} waiting</span>
+                  )}
+                  <span className="text-ash/70 tabular ml-auto shrink-0" title={`updated ${freshness}`}>
+                    {freshness}
+                  </span>
+                </>
+              ) : (
+                <span className="text-destructive font-medium">offline</span>
+              )}
+            </p>
+          )}
         </header>
 
         {collapsed ? (
@@ -288,6 +322,12 @@ export default function App() {
               icon={<LayoutGrid />}
               label={`Sandboxes${boxes.length ? ` (${boxes.length})` : ""}`}
               badge={boxes.length || undefined}
+            />
+            <div className="bg-border my-1 h-px w-6" aria-hidden />
+            <RailIcon
+              onClick={toggle}
+              icon={dark ? <Moon /> : <Sun />}
+              label={dark ? "Switch to light theme" : "Switch to dark theme"}
             />
           </nav>
         ) : (
@@ -373,10 +413,10 @@ export default function App() {
         )}
       </aside>
 
-      {/* ───────────── main (flat workspace) ───────────── */}
+      {/* ───────────── main (floating workspace) ───────────── */}
       <main
         className={cn(
-          "bg-background flex min-h-0 min-w-0 flex-col overflow-hidden",
+          "bg-card flex min-h-0 min-w-0 flex-col overflow-hidden md:rounded-xl md:border md:shadow-sm",
           // Mobile: the workspace (Hub/Thread/Sandboxes) shows when the rail is dismissed. On md+ the
           // grid always shows it beside the rail.
           mobileRail ? "hidden md:flex" : "flex"
@@ -421,7 +461,16 @@ export default function App() {
             <Hub
               boxes={boxes}
               sessionRuns={runs}
-              onBooting={(task) => setBooting({ task, known: new Set(boxes.map((b) => b.name)), warm: false })}
+              onBooting={(task) =>
+                setBooting({
+                  task,
+                  known: new Set(boxes.map((b) => b.name)),
+                  // Infer warm from live pool state: an idle pool-free box means the claim reuses a
+                  // pre-booted box (no microVM boot), so the copy is honest from the first frame
+                  // rather than asserting a cold boot the user can see is false.
+                  warm: boxes.some((b) => b.role === "pool-free"),
+                })
+              }
               onStarted={(box, task) => {
                 remember(box, task);
                 open(box);

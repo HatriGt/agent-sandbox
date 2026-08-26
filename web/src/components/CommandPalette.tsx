@@ -1,7 +1,7 @@
 import * as React from "react";
 import { CornerDownLeft, Plus, Search } from "lucide-react";
 import type { BoxView } from "@/lib/api";
-import { shortName, stateNoun, threadTitle } from "@/lib/format";
+import { friendlyName, shortName, stateNoun, threadTitle } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 /**
@@ -47,7 +47,7 @@ export function CommandPalette({
 
   const q = query.trim().toLowerCase();
   const matches = q
-    ? boxes.filter((b) => `${b.name} ${b.task ?? ""}`.toLowerCase().includes(q))
+    ? boxes.filter((b) => `${friendlyName(b.name)} ${b.name} ${b.task ?? ""}`.toLowerCase().includes(q))
     : boxes;
   const rows = [{ kind: "new" as const }, ...matches.map((b) => ({ kind: "box" as const, box: b }))];
   const clamped = Math.min(cursor, rows.length - 1);
@@ -125,8 +125,8 @@ export function CommandPalette({
                   <span className="text-ash min-w-0 flex-1 truncate text-meta">
                     {threadTitle(row.box)}
                   </span>
-                  <span className="text-ash shrink-0 font-mono text-micro">
-                    {shortName(row.box.name)}
+                  <span className="text-ash shrink-0 text-micro font-medium" title={shortName(row.box.name)}>
+                    {friendlyName(row.box.name)}
                   </span>
                 </>
               )}

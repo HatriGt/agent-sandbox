@@ -12,15 +12,14 @@ function CodeBlock({ children, className, ...props }: CodeBlockProps) {
   return (
     <div
       className={cn(
-        // Claude's fenced block: a subtly tinted panel, 8px corners, a hairline, and a copy
-        // affordance that fades in on hover (the `group` here drives the button's opacity).
-        // `relative` anchors the floating button; `overflow-clip` keeps highlighted content within
-        // the rounded corners. The surface is `bg-muted/40`, NOT `bg-card` — in light mode `--card`
-        // equals the pure-white canvas, so a code block would read as white-on-white with only a
-        // hairline. The reference renders fenced/ASCII content on a distinct neutral panel; the
-        // faint muted fill gives the block that surface in both themes.
-        "group not-prose relative flex w-full flex-col overflow-clip border",
-        "border-border bg-muted/40 text-card-foreground rounded-lg",
+        // A fenced block reads as a distinct panel: a header bar carrying the language + copy control,
+        // a hairline, 8px corners, and a tinted body. `group` drives the copy button's hover reveal;
+        // `overflow-clip` keeps highlighted content inside the rounded corners. The surface is the
+        // muted token (NOT `--card`, which equals the white canvas in light mode and would read as
+        // white-on-white). The body fill is set on CodeBlockCode so it sits under the code but the
+        // header bar can carry a slightly stronger tint for separation.
+        "group not-prose relative my-3 flex w-full flex-col overflow-clip rounded-lg border",
+        "border-border bg-muted/40 text-card-foreground shadow-xs",
         className
       )}
       {...props}
@@ -31,9 +30,9 @@ function CodeBlock({ children, className, ...props }: CodeBlockProps) {
 }
 
 /**
- * The hover-revealed copy button, pinned top-right of a code block — the reference pattern (no heavy
- * header bar; the language lives in the fence, the one control is copy). Confirms with a check for a
- * beat so the click registers. Absolutely positioned so it never reflows the code.
+ * The copy control that lives in the code block's header bar. Shows the label "Copy" on wide blocks,
+ * collapses to just the icon when space is tight, and confirms with a check for a beat so the click
+ * registers.
  */
 function CopyButton({ code }: { code: string }) {
   const [copied, setCopied] = useState(false)
@@ -52,13 +51,28 @@ function CopyButton({ code }: { code: string }) {
       onClick={copy}
       aria-label={copied ? "Copied" : "Copy code"}
       className={cn(
-        "absolute top-2 right-2 z-10 inline-flex size-7 items-center justify-center rounded-md border",
-        "border-border bg-card text-muted-foreground hover:text-foreground hover:bg-muted cursor-pointer",
-        "opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-visible:opacity-100"
+        "text-muted-foreground hover:text-foreground -my-1 -mr-1 inline-flex items-center gap-1.5 rounded-md px-2 py-1",
+        "cursor-pointer text-[11px] font-medium transition-colors",
+        "opacity-70 group-hover:opacity-100 focus-visible:opacity-100"
       )}
     >
-      {copied ? <Check className="size-3.5 text-ok" /> : <Copy className="size-3.5" />}
+      {copied ? <Check className="text-ok size-3.5" /> : <Copy className="size-3.5" />}
+      <span className="tabular hidden sm:inline">{copied ? "Copied" : "Copy"}</span>
     </button>
+  )
+}
+
+/**
+ * The header bar: language tag on the left, copy control on the right. A quiet strip that names the
+ * block as code without a heavy chrome. `language` is the resolved fence language (or "text").
+ */
+function CodeBlockHeader({ language, code }: { language: string; code: string }) {
+  const label = language && language !== "text" && language !== "plaintext" ? language : "code"
+  return (
+    <div className="border-border bg-muted/60 text-muted-foreground flex items-center justify-between border-b px-3 py-1.5">
+      <span className="stamp select-none">{label}</span>
+      <CopyButton code={code} />
+    </div>
   )
 }
 
@@ -148,6 +162,22 @@ export type CodeBlockCodeProps = {
   className?: string
 } & React.HTMLProps<HTMLDivElement>
 
+/** React to the app theme toggling (the `.dark` class flips on <html>) so code re-highlights live. */
+function useIsDark(): boolean {
+  const [isDark, setIsDark] = useState(
+    () => typeof document !== "undefined" && document.documentElement.classList.contains("dark")
+  )
+  useEffect(() => {
+    const el = document.documentElement
+    const update = () => setIsDark(el.classList.contains("dark"))
+    update()
+    const obs = new MutationObserver(update)
+    obs.observe(el, { attributes: true, attributeFilter: ["class"] })
+    return () => obs.disconnect()
+  }, [])
+  return isDark
+}
+
 function CodeBlockCode({
   code,
   language = "tsx",
@@ -156,6 +186,7 @@ function CodeBlockCode({
   ...props
 }: CodeBlockCodeProps) {
   const [highlightedHtml, setHighlightedHtml] = useState<string | null>(null)
+  const isDark = useIsDark()
 
   useEffect(() => {
     let cancelled = false
@@ -167,8 +198,7 @@ function CodeBlockCode({
       try {
         const hl = await getHighlighter()
         const lang = await ensureLang(hl, language)
-        // Follow the app theme (the `.dark` class on <html>); a caller can still force one via `theme`.
-        const isDark = document.documentElement.classList.contains("dark")
+        // Follow the app theme (re-runs when `isDark` flips); a caller can still force one via `theme`.
         const chosen = theme ?? (isDark ? "github-dark" : "github-light")
         const html = hl.codeToHtml(code, { lang: lang ?? "text", theme: chosen })
         if (!cancelled) setHighlightedHtml(html)
@@ -181,37 +211,31 @@ function CodeBlockCode({
     return () => {
       cancelled = true
     }
-  }, [code, language, theme])
+  }, [code, language, theme, isDark])
 
   const classNames = cn(
-    // 14px mono matches the reference (was 13px). `pr-10` reserves room for the floating copy button
-    // so long lines never slide under it. Shiki bakes the theme's own page background onto the
-    // generated `<pre>` (github-light = white, github-dark = a slate) — force it transparent so our
-    // `bg-muted/40` panel (set on the CodeBlock wrapper) shows through consistently and highlighted
-    // blocks share the same neutral surface as plain/ASCII ones. `whitespace-pre` preserves the
-    // column alignment of ASCII/box-drawing tables (the `df -h` case) and lets long lines scroll.
-    "w-full overflow-x-auto text-[14px] [&>pre]:!bg-transparent [&>pre]:px-4 [&>pre]:py-3.5 [&>pre]:pr-10 [&>pre]:whitespace-pre",
+    // 14px mono matches the reference. Shiki bakes the theme's own page background onto the generated
+    // `<pre>` (github-light = white, github-dark = a slate) — force it transparent so our tinted panel
+    // shows through and highlighted blocks share the same surface as plain/ASCII ones. `whitespace-pre`
+    // preserves the column alignment of ASCII/box-drawing tables (the `df -h` case) and scrolls long
+    // lines. No `pr-10` reserve is needed anymore — the copy control lives in the header, not floating.
+    "w-full overflow-x-auto text-[13.5px] leading-relaxed [&>pre]:!bg-transparent [&>pre]:px-4 [&>pre]:py-3 [&>pre]:whitespace-pre",
     className
   )
 
-  // Fallback: plain code until the lazy highlighter resolves (or if it can't highlight this language).
-  return highlightedHtml ? (
+  return (
     <>
-      <CopyButton code={code} />
-      <div
-        className={classNames}
-        dangerouslySetInnerHTML={{ __html: highlightedHtml }}
-        {...props}
-      />
-    </>
-  ) : (
-    <>
-      <CopyButton code={code} />
-      <div className={classNames} {...props}>
-        <pre>
-          <code>{code}</code>
-        </pre>
-      </div>
+      <CodeBlockHeader language={language} code={code} />
+      {/* Fallback: plain code until the lazy highlighter resolves (or can't highlight this language). */}
+      {highlightedHtml ? (
+        <div className={classNames} dangerouslySetInnerHTML={{ __html: highlightedHtml }} {...props} />
+      ) : (
+        <div className={classNames} {...props}>
+          <pre>
+            <code>{code}</code>
+          </pre>
+        </div>
+      )}
     </>
   )
 }

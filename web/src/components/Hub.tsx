@@ -1,7 +1,7 @@
 import * as React from "react";
 import { ArrowLeft, ArrowRight, ArrowUp, Bug, ClipboardCheck, FileSearch, FlaskConical, GitBranch, Layers, Loader2 } from "lucide-react";
 import { api, type BoxView } from "@/lib/api";
-import { shortName, threadTitle } from "@/lib/format";
+import { friendlyName, shortName, threadTitle } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { StateStamp } from "@/components/ui/stamp";
 import { PromptInput, PromptInputTextarea } from "@/components/ui/prompt-input";
@@ -280,7 +280,7 @@ export function Hub({
                       <span className="text-ink min-w-0 flex-1 truncate text-meta">
                         {box ? threadTitle(box) : r.task}
                       </span>
-                      <span className="text-ash shrink-0 font-mono text-micro">{shortName(r.box)}</span>
+                      <span className="text-ash shrink-0 text-micro font-medium" title={shortName(r.box)}>{friendlyName(r.box)}</span>
                       {!gone && (
                         <ArrowRight className="text-ash size-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
                       )}

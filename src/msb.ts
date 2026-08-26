@@ -642,7 +642,11 @@ function agentSh(workdir: string, resume: boolean): string {
   const settingSources = `--setting-sources user`;
   // stream-json (+ required --verbose) emits one JSON event per line as work happens; we pipe it
   // through the formatter so the dashboard terminal streams live instead of dumping at the end.
-  const streamFmt = `--output-format stream-json --verbose`;
+  // --include-partial-messages additionally emits `stream_event` frames carrying content_block_delta
+  // token deltas. Without it Claude only emits a text block once the whole paragraph is composed, so
+  // the dashboard paints prose in one jump and then sits frozen — measured 12s dead windows against
+  // an 800ms SSE tick. With deltas the formatter appends text as it is generated and prose types out.
+  const streamFmt = `--output-format stream-json --verbose --include-partial-messages`;
   const cont = resume ? `-c ` : ``;
   const claude =
     `claude ${cont}-p "$AGENT_TASK" ${settingSources} ${streamFmt} ` +
