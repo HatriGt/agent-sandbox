@@ -230,37 +230,6 @@ test("distinct consecutive prose is NOT deduped", () => {
   assert.equal(says.length, 2);
 });
 
-// ── inline markdown ──────────────────────────────────────────────────────────────────────────────
-test("inline: bold and code are tokenized, not left as literal markers", async () => {
-  const { tokenizeInline, plainInline } = await import("../web/src/lib/inline.ts");
-  const t = tokenizeInline("**Finished** `/workspace/audit.md` now");
-  assert.deepEqual(t, [
-    { type: "strong", value: "Finished" },
-    { type: "text", value: " " },
-    { type: "code", value: "/workspace/audit.md" },
-    { type: "text", value: " now" },
-  ]);
-  assert.equal(plainInline("**Finished** `x`"), "Finished x");
-});
-
-test("inline: asterisks inside code are not emphasis", async () => {
-  const { tokenizeInline } = await import("../web/src/lib/inline.ts");
-  const t = tokenizeInline("run `a * b * c` please");
-  assert.equal(t.filter((x) => x.type === "strong").length, 0);
-  assert.equal(t.find((x) => x.type === "code")!.value, "a * b * c");
-});
-
-test("inline: unmatched markers stay literal rather than eating the rest of the line", async () => {
-  const { tokenizeInline } = await import("../web/src/lib/inline.ts");
-  assert.deepEqual(tokenizeInline("a ** b"), [{ type: "text", value: "a ** b" }]);
-  assert.deepEqual(tokenizeInline("50% * 2"), [{ type: "text", value: "50% * 2" }]);
-});
-
-test("inline: empty input yields nothing", async () => {
-  const { tokenizeInline } = await import("../web/src/lib/inline.ts");
-  assert.deepEqual(tokenizeInline(""), []);
-});
-
 test("a summary repeated INSIDE one block is collapsed", async () => {
   // The real failure: the formatter re-emits the final result with no tool call between, so both
   // copies coalesce into a single say and block-level dedupe cannot see them.

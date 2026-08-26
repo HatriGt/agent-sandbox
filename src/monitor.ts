@@ -39,6 +39,33 @@ export interface BoxView {
   cpu?: string;
   /** MEM string from metrics (e.g. "63.4 MiB / 1.0 GiB"), best-effort. */
   mem?: string;
+  /** Unix seconds of the agent log's last write — when the agent last produced output. Best-effort. */
+  lastOutputAt?: number;
+}
+
+/**
+ * Parse an msb duration flag ("15m", "1h", "90s", "1h30m", "2d") into seconds. Returns undefined for
+ * anything it does not understand, so a misconfigured value degrades to "unknown" rather than 0.
+ */
+export function parseDurationSec(raw: string | undefined): number | undefined {
+  const s = (raw ?? "").trim().toLowerCase();
+  if (!s) return undefined;
+  if (/^\d+$/.test(s)) return Number(s);
+  const re = /(\d+(?:\.\d+)?)\s*(d|h|m|s)/g;
+  let total = 0;
+  let matched = false;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(s))) {
+    matched = true;
+    const n = Number(m[1]);
+    total += m[2] === "d" ? n * 86400 : m[2] === "h" ? n * 3600 : m[2] === "m" ? n * 60 : n;
+  }
+  return matched ? Math.round(total) : undefined;
+}
+
+/** `msb metrics` uptime ("43m18s", "1h02m03s", "2d1h") → seconds. Same grammar as the flags. */
+export function parseUptimeSec(raw: string | undefined): number | undefined {
+  return parseDurationSec(raw?.replace(/^ran\s+/, ""));
 }
 
 const POOL_PREFIX = "pool-";

@@ -22,6 +22,8 @@ import { checkBearer, checkDashboardAuth } from "./http-auth.js";
 import { gatherMonitor, gatherWatch, askInBox, driverStateLine } from "./msb.js";
 import { runDelegateFlow } from "./delegate-flow.js";
 import { streamWatch } from "./watch-sse.js";
+import { WatchHub } from "./watch-hub.js";
+import { makeFleetReader } from "./fleet.js";
 import { readArtifact } from "./artifact.js";
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -39,6 +41,14 @@ if (!cfg.httpToken) {
 
 const app = express();
 app.use(express.json());
+
+// One shared tail loop per watched box (see watch-hub.ts): every SSE viewer, /watch.json call and
+// hover-prefetch of the same box reads one cached snapshot instead of each paying an SSH round trip.
+// The tick path skips `msb metrics` — vitals arrive with the fleet poll.
+const watchHub = new WatchHub({ read: (s) => gatherWatch(cfg, s, undefined, { metrics: false }) });
+// The dashboard's fleet read: gatherMonitor behind a short shared cache, plus lifecycle config and
+// sleeping (Stopped-but-resumable) boxes merged from memory.
+const readFleet = makeFleetReader(cfg, () => gatherMonitor(cfg));
 
 // Bearer guard on every /mcp method. Fails closed (checkBearer denies when no token).
 app.use("/mcp", (req: Request, res: Response, next) => {
@@ -140,7 +150,20 @@ app.get("/monitor.json", async (req: Request, res: Response) => {
   }
 });
 
+// The dashboard's fleet read: boxes + lifecycle facts (idle/max timeouts, capacity) + sleeping boxes.
+// Cached ~1.5s server-side so N tabs cost one SSH sweep.
+app.get("/fleet.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  try {
+    res.json(await readFleet());
+  } catch (e) {
+    res.status(500).json({ error: String((e as Error).message ?? e) });
+  }
+});
+
 // One box's live snapshot (what `watch` renders); ?session=… required, optional ?lines=.
+// Served through the hub: a box someone is (or was just) watching answers from cache instantly.
+// An explicit ?lines= bypasses the hub (different truncation → different snapshot).
 app.get("/watch.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   const session = typeof req.query.session === "string" ? req.query.session : "";
@@ -150,7 +173,9 @@ app.get("/watch.json", async (req: Request, res: Response) => {
   }
   const lines = Number(req.query.lines);
   try {
-    res.json(await gatherWatch(cfg, session, Number.isFinite(lines) && lines > 0 ? lines : undefined));
+    res.json(
+      Number.isFinite(lines) && lines > 0 ? await gatherWatch(cfg, session, lines) : await watchHub.read(session)
+    );
   } catch (e) {
     res.status(500).json({ error: String((e as Error).message ?? e) });
   }
@@ -179,7 +204,7 @@ app.get("/watch.sse", (req: Request, res: Response) => {
   const stop = streamWatch(res, {
     session,
     from,
-    read: (s) => gatherWatch(cfg, s),
+    read: (s) => watchHub.read(s),
   });
   // Stop the server-side tail the instant the browser goes away (tab closed, navigated, network drop)
   // so a disconnected viewer never keeps hitting SSH for a box no one is watching.
@@ -285,6 +310,7 @@ app.post("/teardown.json", async (req: Request, res: Response) => {
   }
   try {
     await deps.teardown(cfg, session);
+    watchHub.drop(session);
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: String((e as Error).message ?? e) });

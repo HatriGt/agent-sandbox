@@ -926,6 +926,7 @@ export async function gatherMonitor(cfg: Config): Promise<BoxView[]> {
       let uptime: string | undefined;
       let cpu: string | undefined;
       let mem: string | undefined;
+      let lastOutputAt: number | undefined;
 
       // The sentinel read and the metrics read are independent, so they go out together. They used
       // to be sequential, which doubled this endpoint's latency per box: with four boxes the whole
@@ -939,7 +940,10 @@ export async function gatherMonitor(cfg: Config): Promise<BoxView[]> {
             `elif [ -f ${DONE_MARK} ]; then echo "run:done exit=$(cat ${DONE_MARK} 2>/dev/null)"; ` +
             `else echo "run:idle"; fi; ` +
             `echo "---Q---"; cat ${QUESTION_MARK} 2>/dev/null || true; ` +
-            `echo "---T---"; head -n 1 ${TASK_MARK} 2>/dev/null || true`
+            `echo "---T---"; head -n 1 ${TASK_MARK} 2>/dev/null || true; ` +
+            // mtime of the agent log = the last moment the agent produced output. The dashboard uses
+            // it to say "no output for 4m" next to the idle-stop deadline. Best-effort (no log → blank).
+            `echo "---M---"; stat -c %Y ${AGENT_LOG} 2>/dev/null || true`
         ),
         metrics(cfg, e.name),
       ]);
@@ -954,6 +958,8 @@ export async function gatherMonitor(cfg: Config): Promise<BoxView[]> {
         const out = sentinels.value.stdout;
         const qStart = out.indexOf("---Q---");
         const tStart = out.indexOf("---T---");
+        const mStartRaw = out.indexOf("---M---");
+        const mStart = mStartRaw >= 0 ? mStartRaw : out.length;
         const head = out.slice(0, qStart);
         claimed = /(^|\n)CLAIMED\s*(\n|$)/.test(head);
         const runLine = head.split("\n").map((l) => l.trim()).find((l) => l.startsWith("run:")) ?? "run:idle";
@@ -962,7 +968,9 @@ export async function gatherMonitor(cfg: Config): Promise<BoxView[]> {
         question = out.slice(qStart + "---Q---".length, tStart).trim() || undefined;
         runState = question ? "waiting" : rs.state;
         exitCode = rs.exitCode;
-        task = out.slice(tStart + "---T---".length).trim() || undefined;
+        task = out.slice(tStart + "---T---".length, mStart).trim() || undefined;
+        const mtime = Number(out.slice(mStart + "---M---".length).trim());
+        lastOutputAt = Number.isFinite(mtime) && mtime > 0 ? mtime : undefined;
       }
 
       // msb's metrics STATE is more current than the ls status (ls can briefly lag a just-stopped
@@ -990,6 +998,7 @@ export async function gatherMonitor(cfg: Config): Promise<BoxView[]> {
         uptime,
         cpu,
         mem,
+        lastOutputAt,
       };
     })
   );
@@ -1108,7 +1117,10 @@ export async function gatherWatch(
   // reads through there, and two paths disagreeing about how much log they show is its own bug —
   // the dashboard would render a differently-truncated (differently-parseable) trace than the tool.
   // An explicit `--lines N` from a caller still overrides, and is still byte-capped.
-  logLines = LOG_TAIL_LINES
+  logLines = LOG_TAIL_LINES,
+  // The SSE tail loop reads this every 800ms; vitals come from the fleet poll anyway, so it skips
+  // the second SSH round trip (`msb metrics`) and halves the per-tick cost and first-frame latency.
+  opts: { metrics?: boolean } = {}
 ): Promise<WatchSnapshot> {
   const base: WatchSnapshot = { name: box, boxStatus: "missing", runState: "idle", log: "" };
   try {
@@ -1141,6 +1153,7 @@ export async function gatherWatch(
     return base; // stays "missing"
   }
 
+  if (opts.metrics === false) return base;
   try {
     const m = parseMetrics(await metrics(cfg, box));
     base.uptime = m.uptime;
