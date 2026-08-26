@@ -29,6 +29,9 @@ export function brokerAnswer(login: string): string {
   );
 }
 
+/** One auto-answer per box per window, whatever the question text — never a resume storm. */
+const COOLDOWN_MS = 10 * 60_000;
+
 export function makeCredentialBroker(opts: {
   /** The login of the account resume will inject, or undefined when the store is empty. */
   defaultLogin: () => Promise<string | undefined>;
@@ -40,14 +43,23 @@ export function makeCredentialBroker(opts: {
   const log = opts.log ?? (() => {});
 
   /** Consider one waiting box. Returns true if the broker took the question. */
-  return async function consider(session: string, question: string | undefined): Promise<boolean> {
+  const lastAnswered = new Map<string, number>();
+  return async function consider(session: string, question: string | undefined, now = Date.now()): Promise<boolean> {
     if (!isGithubAuthQuestion(question)) return false;
     const key = `${session}\n${question}`;
+    // Every guard is taken SYNCHRONOUSLY, before the first await: two fleet reads landing in the same
+    // tick must not both pass the check and resume the box twice (a second `claude -c` races the first).
     if (answered.has(key) || inFlight.has(session)) return false;
-    const login = await opts.defaultLogin();
-    if (!login) return false;
-    inFlight.add(session);
+    if ((lastAnswered.get(session) ?? -Infinity) > now - COOLDOWN_MS) return false;
     answered.add(key);
+    inFlight.add(session);
+    lastAnswered.set(session, now);
+    const login = await opts.defaultLogin();
+    if (!login) {
+      inFlight.delete(session);
+      answered.delete(key); // nothing was sent; let a human (or a later store entry) handle it
+      return false;
+    }
     try {
       log(`[broker] auto-answering GitHub credential question on ${session} as ${login}`);
       await opts.resume(session, brokerAnswer(login));

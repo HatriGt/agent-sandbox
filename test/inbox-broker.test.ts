@@ -85,3 +85,17 @@ test("broker: answers once per (box, question) and only with a stored account", 
   login = undefined;
   assert.equal(await consider("c", "please run gh auth login"), false, "no account → human decides");
 });
+
+test("broker: two simultaneous considerations of the same question resume exactly once", async () => {
+  let resumes = 0;
+  const consider = makeCredentialBroker({
+    defaultLogin: () => new Promise((r) => setTimeout(() => r("hatrigt"), 5)),
+    resume: async () => void resumes++,
+  });
+  const q = "GitHub auth has been lost; please re-export GH_TOKEN";
+  const [a, b] = await Promise.all([consider("b", q), consider("b", q)]);
+  assert.equal(resumes, 1);
+  assert.deepEqual([a, b].sort(), [false, true]);
+  // A differently-worded auth question on the same box inside the cooldown is also not re-answered.
+  assert.equal(await consider("b", "please run gh auth login"), false);
+});
