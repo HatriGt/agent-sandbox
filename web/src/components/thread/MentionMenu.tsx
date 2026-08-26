@@ -1,5 +1,6 @@
 import * as React from "react";
-import { FileCode2, FileText, Folder } from "lucide-react";
+import { FileCode2, FileText, Folder, GitBranch } from "lucide-react";
+import { Bar } from "./Skeletons";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -27,11 +28,13 @@ export function mentionAt(value: string, caret: number): MentionState | null {
 
 export function MentionMenu({
   session,
+  repos = [],
   state,
   onPick,
   onClose,
 }: {
   session: string;
+  repos?: { name: string; branch?: string }[];
   state: MentionState;
   onPick: (path: string) => void;
   onClose: () => void;
@@ -81,12 +84,49 @@ export function MentionMenu({
       aria-label="Files in the workspace"
       className="bg-popover text-popover-foreground absolute inset-x-2 bottom-full z-20 mb-2 max-h-72 overflow-y-auto rounded-xl border p-1 shadow-[0_1px_2px_oklch(0_0_0/0.06),0_16px_40px_-16px_oklch(0_0_0/0.35)]"
     >
-      <div className="text-muted-foreground flex items-center justify-between px-2.5 py-1.5 text-micro">
-        <span>
-          {loading ? "Searching…" : files.length ? `Files${state.query ? ` matching “${state.query}”` : ""}` : "No matching files"}
+      <div className="text-muted-foreground flex items-center justify-between gap-3 px-2.5 py-1.5 text-micro">
+        <span className="flex min-w-0 items-center gap-2">
+          {repos.length > 0 ? (
+            <>
+              <GitBranch className="size-3 shrink-0" aria-hidden />
+              <span className="truncate">
+                Searching {repos.map((r) => r.name).join(", ")}
+                {state.query ? ` for “${state.query}”` : ""}
+              </span>
+            </>
+          ) : (
+            <span>{state.query ? `Files matching “${state.query}”` : "Workspace files"}</span>
+          )}
         </span>
-        {!loading && total > 0 && <span className="tabular">{total} indexed</span>}
+        {!loading && total > 0 && <span className="tabular shrink-0">{total} indexed</span>}
       </div>
+      {loading && files.length === 0 && (
+        <div className="flex flex-col gap-1 px-1 pb-1" aria-busy="true">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="flex items-center gap-2.5 px-2.5 py-1.5">
+              <Bar className="size-3.5 rounded" />
+              <Bar className="h-3 w-32" />
+              <Bar className="ml-auto h-2.5 w-20" />
+            </div>
+          ))}
+        </div>
+      )}
+      {!loading && files.length === 0 && (
+        <div className="text-muted-foreground px-3 py-4 text-meta">
+          {total === 0 ? (
+            repos.length ? (
+              <>The index is empty — the checkout may still be in progress. Try again in a moment.</>
+            ) : (
+              <>
+                <span className="text-foreground font-medium">No files to mention.</span> This sandbox has no repository
+                attached — the run is task-only, so /workspace holds only what the agent writes.
+              </>
+            )
+          ) : (
+            <>Nothing matches “{state.query}”. Try part of the file name.</>
+          )}
+        </div>
+      )}
       {files.map((f, i) => {
         const base = f.slice(f.lastIndexOf("/") + 1);
         const dir = f.slice(0, Math.max(0, f.lastIndexOf("/")));

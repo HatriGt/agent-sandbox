@@ -28,7 +28,9 @@ import { Inbox, startInboxDelivery } from "./inbox.js";
 import { makeCredentialBroker } from "./broker.js";
 import { makeFileIndex } from "./files.js";
 import { exec as execInBox } from "./msb.js";
-import { loadStore, pickDefaultAccount } from "./gh-token-store.js";
+import { loadStore, saveStore, pickDefaultAccount, upsertAccount, removeAccount, setDefaultAccount } from "./gh-token-store.js";
+import { probeToken } from "./gh-probe.js";
+import { viewAccounts, deviceStart, devicePoll } from "./accounts.js";
 import { readArtifact } from "./artifact.js";
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -157,6 +159,11 @@ if (HAS_WEB) {
   // SPA fallback: /dashboard and anything under it that isn't a built asset returns index.html, so
   // a deep link (or a reload on one) still boots the app.
   app.get(/^\/dashboard(?:\/.*)?$/, (_req: Request, res: Response) => {
+    res.sendFile(join(WEB_DIST, "index.html"));
+  });
+  // The public landing page is the same SPA at the site root (its assets are absolute under
+  // /dashboard/). It carries no data and no token; the console routes stay bearer-guarded.
+  app.get("/", (_req: Request, res: Response) => {
     res.sendFile(join(WEB_DIST, "index.html"));
   });
 } else {
@@ -344,6 +351,109 @@ app.post("/resume.json", async (req: Request, res: Response) => {
 });
 
 // Stop and remove a box. Destructive; the dashboard confirms before calling this.
+// GitHub accounts — the login-keyed token store, tokens masked. Add by PAT or via device flow.
+app.get("/accounts.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  try {
+    const store = await loadStore(cfg);
+    res.json({
+      accounts: viewAccounts(store, pickDefaultAccount(store)?.login),
+      oauth: !!cfg.githubOauthClientId,
+    });
+  } catch (e) {
+    res.status(500).json({ error: String((e as Error).message ?? e) });
+  }
+});
+app.post("/accounts.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const { token } = (req.body ?? {}) as { token?: string };
+  if (!token?.trim()) {
+    res.status(400).json({ error: "token is required" });
+    return;
+  }
+  try {
+    const acc = await probeToken(cfg, token.trim(), "");
+    if (!acc) {
+      res.status(422).json({ error: "GitHub rejected this token (invalid or expired)." });
+      return;
+    }
+    const store = upsertAccount(await loadStore(cfg), acc);
+    await saveStore(cfg, store);
+    res.json({ accounts: viewAccounts(store, pickDefaultAccount(store)?.login), added: acc.login });
+  } catch (e) {
+    res.status(500).json({ error: String((e as Error).message ?? e) });
+  }
+});
+app.delete("/accounts.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const login = typeof req.query.login === "string" ? req.query.login : "";
+  if (!login) {
+    res.status(400).json({ error: "login query param required" });
+    return;
+  }
+  try {
+    const store = removeAccount(await loadStore(cfg), login);
+    await saveStore(cfg, store);
+    res.json({ accounts: viewAccounts(store, pickDefaultAccount(store)?.login) });
+  } catch (e) {
+    res.status(500).json({ error: String((e as Error).message ?? e) });
+  }
+});
+app.post("/accounts/default.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const { login } = (req.body ?? {}) as { login?: string };
+  if (!login) {
+    res.status(400).json({ error: "login is required" });
+    return;
+  }
+  try {
+    const store = setDefaultAccount(await loadStore(cfg), login);
+    await saveStore(cfg, store);
+    res.json({ accounts: viewAccounts(store, pickDefaultAccount(store)?.login) });
+  } catch (e) {
+    res.status(500).json({ error: String((e as Error).message ?? e) });
+  }
+});
+// Sign in with GitHub (device flow). start → {user_code, verification_uri}; poll until a token
+// arrives, then it is probed and stored like a pasted PAT. Only when GITHUB_OAUTH_CLIENT_ID is set.
+app.post("/accounts/device.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  if (!cfg.githubOauthClientId) {
+    res.status(404).json({ error: "GitHub sign-in is not configured (GITHUB_OAUTH_CLIENT_ID)." });
+    return;
+  }
+  try {
+    res.json(await deviceStart(cfg.githubOauthClientId));
+  } catch (e) {
+    res.status(502).json({ error: String((e as Error).message ?? e) });
+  }
+});
+app.post("/accounts/device/poll.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const { device_code } = (req.body ?? {}) as { device_code?: string };
+  if (!cfg.githubOauthClientId || !device_code) {
+    res.status(400).json({ error: "device_code is required" });
+    return;
+  }
+  try {
+    const r = await devicePoll(cfg.githubOauthClientId, device_code);
+    if (r.status !== "token") {
+      res.json(r);
+      return;
+    }
+    const acc = await probeToken(cfg, r.token, "");
+    if (!acc) {
+      res.json({ status: "error", message: "GitHub issued a token the API rejected." });
+      return;
+    }
+    const store = upsertAccount(await loadStore(cfg), acc);
+    await saveStore(cfg, store);
+    res.json({ status: "done", login: acc.login, accounts: viewAccounts(store, pickDefaultAccount(store)?.login) });
+  } catch (e) {
+    res.status(502).json({ error: String((e as Error).message ?? e) });
+  }
+});
+
 // Queued follow-ups for a box: list, or remove one (`?id=`) / all.
 app.get("/inbox.json", (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;

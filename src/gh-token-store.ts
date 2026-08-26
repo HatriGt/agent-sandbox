@@ -33,6 +33,8 @@ export interface Account {
 /** The on-disk store: login -> account. */
 export interface TokenStore {
   accounts: Record<string, Account>;
+  /** Login the operator marked as the default for task-only runs; falls back to a heuristic. */
+  defaultLogin?: string;
 }
 
 /** Path to the store on the VPS (under the SSH user's home). */
@@ -77,7 +79,8 @@ export function parseStore(raw: string): TokenStore {
   try {
     const obj = JSON.parse(raw);
     if (obj && typeof obj === "object" && obj.accounts && typeof obj.accounts === "object") {
-      return { accounts: { ...obj.accounts } };
+      const defaultLogin = typeof obj.defaultLogin === "string" && obj.accounts[obj.defaultLogin] ? obj.defaultLogin : undefined;
+      return defaultLogin ? { accounts: { ...obj.accounts }, defaultLogin } : { accounts: { ...obj.accounts } };
     }
   } catch {
     // fall through
@@ -98,11 +101,26 @@ export function upsertAccount(store: TokenStore, acc: Account): TokenStore {
     new Set([...(prev?.verifiedRepos ?? []), ...(acc.verifiedRepos ?? [])])
   );
   return {
+    ...store,
     accounts: {
       ...store.accounts,
       [acc.login]: { ...acc, verifiedRepos },
     },
   };
+}
+
+/** Remove an account; clears the default if it pointed at it. */
+export function removeAccount(store: TokenStore, login: string): TokenStore {
+  const { [login]: _gone, ...accounts } = store.accounts;
+  const next: TokenStore = { accounts };
+  if (store.defaultLogin && store.defaultLogin !== login) next.defaultLogin = store.defaultLogin;
+  return next;
+}
+
+/** Mark an account as the default for task-only runs (must exist). */
+export function setDefaultAccount(store: TokenStore, login: string): TokenStore {
+  if (!store.accounts[login]) return store;
+  return { ...store, defaultLogin: login };
 }
 
 /**
@@ -130,6 +148,7 @@ export function candidateAccounts(store: TokenStore, repo: string): Account[] {
 export function pickDefaultAccount(store: TokenStore): Account | undefined {
   const accounts = Object.values(store.accounts);
   if (accounts.length === 0) return undefined;
+  if (store.defaultLogin && store.accounts[store.defaultLogin]) return store.accounts[store.defaultLogin];
   return [...accounts].sort((a, b) => {
     const byOrgs = (b.orgs?.length ?? 0) - (a.orgs?.length ?? 0);
     if (byOrgs !== 0) return byOrgs;

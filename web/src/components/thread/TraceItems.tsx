@@ -1,6 +1,8 @@
 import * as React from "react";
-import { AlertTriangle, ChevronRight, Clock, FileText, Loader2, MessageCircleQuestion, Terminal, Wrench } from "lucide-react";
+import { AlertTriangle, Brain, Check, ChevronRight, Circle, CircleDot, Clock, FileText, Loader2, MessageCircleQuestion, Terminal, Wrench } from "lucide-react";
+import type { PlanItem as PlanStep } from "@/lib/trace";
 import { resultSummary, type TraceEvent } from "@/lib/trace";
+import { AnimatePresence, motion } from "motion/react";
 import { Markdown } from "@/components/ui/markdown";
 import { StreamingMarkdown } from "./StreamingMarkdown";
 import { cn } from "@/lib/utils";
@@ -309,6 +311,119 @@ export function ObserverItem({ question, answer }: { question: string; answer?: 
           </p>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Extended thinking, folded. Collapsed by default to a one-line "Thought about …" with the first
+ * sentence as a teaser; expands to the full reasoning in a quieter voice than the agent's prose. While
+ * live it shows the shimmer of a thought still forming.
+ */
+export function ThinkingItem({ text, live }: { text: string; live?: boolean }) {
+  const [open, setOpen] = React.useState(false);
+  const words = text.trim().split(/\s+/).length;
+  const teaser = text.trim().split(/(?<=[.!?])\s+/)[0]?.slice(0, 120) ?? "";
+  return (
+    <div className="enter min-w-0">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className={cn(
+          "group flex max-w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1 text-left text-meta transition-colors",
+          "text-muted-foreground hover:text-foreground hover:bg-muted"
+        )}
+      >
+        <Brain className={cn("size-3.5 shrink-0", live && "text-live breathe")} aria-hidden />
+        <span className="font-medium">{live ? "Thinking" : "Thought"}</span>
+        {!open && <span className="min-w-0 truncate italic opacity-80">{teaser}</span>}
+        <span className="label shrink-0 opacity-60">{words} words</span>
+        <ChevronRight className={cn("size-3.5 shrink-0 transition-transform duration-150", open && "rotate-90")} aria-hidden />
+      </button>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+            className="overflow-hidden"
+          >
+            <div className="text-muted-foreground mt-1 ml-2 border-l pl-4 text-meta leading-relaxed whitespace-pre-wrap">{text}</div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+/**
+ * The agent's plan (TodoWrite), rendered as a live checklist: done steps ticked, the active step
+ * highlighted with a breathing marker, a progress fraction in the corner. Steps animate as their state
+ * flips. Only the LATEST plan is rendered (the thread passes `superseded` for older snapshots).
+ */
+export function PlanCard({ items, live }: { items: PlanStep[]; live?: boolean }) {
+  const done = items.filter((i) => i.state === "done").length;
+  const [open, setOpen] = React.useState(true);
+  const allDone = done === items.length;
+  return (
+    <div className="enter bg-card max-w-[60ch] rounded-xl border shadow-xs">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full cursor-pointer items-center gap-2.5 px-4 py-2.5 text-left"
+      >
+        {allDone ? (
+          <Check className="text-ok size-4 shrink-0" strokeWidth={2.5} aria-hidden />
+        ) : (
+          <Loader2 className={cn("text-live size-4 shrink-0", live && "animate-spin")} aria-hidden />
+        )}
+        <span className="text-foreground flex-1 text-body font-medium">{allDone ? "Plan complete" : live ? "Agent is working the plan" : "Plan"}</span>
+        <span className="text-muted-foreground tabular text-meta">
+          {done}/{items.length}
+        </span>
+        <ChevronRight className={cn("text-muted-foreground size-3.5 shrink-0 transition-transform duration-150", open && "rotate-90")} aria-hidden />
+      </button>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.ol
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+            className="overflow-hidden border-t"
+          >
+            {items.map((it, i) => (
+              <motion.li
+                key={`${i}-${it.text}`}
+                layout
+                className={cn(
+                  "flex items-center gap-3 px-4 py-2 text-body",
+                  it.state === "active" ? "text-foreground font-medium" : it.state === "done" ? "text-muted-foreground" : "text-foreground/80"
+                )}
+              >
+                {it.state === "done" ? (
+                  <span className="bg-ok/15 text-ok grid size-5 shrink-0 place-items-center rounded-md">
+                    <Check className="size-3" strokeWidth={3} aria-hidden />
+                  </span>
+                ) : it.state === "active" ? (
+                  <span className="bg-live/12 text-live grid size-5 shrink-0 place-items-center rounded-md">
+                    <CircleDot className={cn("size-3", live && "breathe")} strokeWidth={2.5} aria-hidden />
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground/60 grid size-5 shrink-0 place-items-center rounded-md border">
+                    <Circle className="size-2" aria-hidden />
+                  </span>
+                )}
+                <span className={cn("min-w-0 flex-1", it.state === "done" && "line-through decoration-border")}>{it.text}</span>
+                {it.state === "active" && <span className="label text-live shrink-0">in progress</span>}
+              </motion.li>
+            ))}
+          </motion.ol>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

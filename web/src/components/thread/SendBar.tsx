@@ -31,6 +31,7 @@ export function SendBar({
   boxName,
   runState,
   sleeping = false,
+  repos = [],
   onAsk,
   onReplied,
   onQueued,
@@ -39,6 +40,7 @@ export function SendBar({
   boxName: string;
   runState: RunState;
   sleeping?: boolean;
+  repos?: { name: string; branch?: string }[];
   onAsk: (question: string) => void;
   onReplied: (text: string) => void;
   onQueued?: () => void;
@@ -133,7 +135,7 @@ export function SendBar({
   return (
     <div className="px-3 pt-1 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-6">
       <div className="relative mx-auto min-w-0 max-w-3xl">
-        {mention && <MentionMenu session={boxName} state={mention} onPick={pickFile} onClose={() => setMention(null)} />}
+        {mention && <MentionMenu session={boxName} repos={repos} state={mention} onPick={pickFile} onClose={() => setMention(null)} />}
         <PromptInput
           value={value}
           onValueChange={(v) => {

@@ -122,9 +122,34 @@ skeleton shaped like the real thread. Everything collapses under `prefers-reduce
 `?from=<offset>`; hovering a row prefetches. Server-side, `WatchHub` shares one tail loop per box
 and answers from cache. The first paint of a thread is the cached log or a skeleton — never blank.
 
+## Routes (react-router v7, browser history)
+
+`/` public landing (also `/dashboard/welcome`) · `/dashboard` hub · `/dashboard/box/:name` thread ·
+`/dashboard/fleet` · `/dashboard/accounts`. `lib/route.ts` owns the mapping; `useGo` carries `?token=`
+across every navigation; legacy `#/box/x` links redirect once. Fleet and Accounts pages and the landing
+are code-split; the last fleet snapshot is cached in `sessionStorage` so the shell paints instantly.
+
+## Machines vs capacity
+
+The Machines list shows RUNS only. An unclaimed warm box is capacity, not a run: it appears in the
+capacity strip, the "1 warm machine ready" line and the Fleet view — never as a list row. This also
+makes a warm claim read as one clean transition (booting placeholder → claimed row).
+
+## Reasoning and plans
+
+`ThinkingItem` folds extended-thinking blocks (collapsed to "Thought — <teaser> · N words"); `PlanCard`
+renders the agent's TodoWrite plan as a live checklist (done ✓ / in progress / todo, n/m), shown once
+in its latest state. Both come from sentinel blocks the in-box formatter writes (`⟦think⟧`, `⟦plan⟧`).
+
+## GitHub accounts
+
+`/dashboard/accounts`: the login-keyed token store on the VPS, masked. Add by "Sign in with GitHub"
+(OAuth device flow, when `GITHUB_OAUTH_CLIENT_ID` is set) or by pasting a PAT (probed, then stored).
+Mark a default for task-only runs; remove with an armed confirm. Tokens never reach the browser.
+
 ## Keyboard
 
-`n` new task · `⌘K` search · `j`/`k` next/previous machine · `/` focus the composer · `g f` fleet ·
+`n` new task · `⌘K` search · `j`/`k` next/previous machine · `/` focus the composer · `g f` fleet · `g a` accounts ·
 `Esc` cancels an armed destroy. The URL hash (`#/box/<name>`, `#/fleet`) is the route, so reload and
 share work.
 

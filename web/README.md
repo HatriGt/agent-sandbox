@@ -40,6 +40,7 @@ broker from the stored account, so it never reaches you.
 npm install
 ASB_API=https://agent-sandbox.ajeethkumar.dev npm run dev
 # then open http://localhost:5173/dashboard/?token=<MCP_HTTP_TOKEN>
+# the public landing page: http://localhost:5173/dashboard/welcome (served at / in production)
 ```
 
 `vite.config.ts` proxies every data route (`/fleet.json`, `/monitor.json`, `/watch.json`, `/watch.sse`, `/artifact`, `/files.json`, `/inbox.json`,
@@ -61,3 +62,11 @@ See `../docs/lifecycle.md`. In short: a quiet machine is **stopped, not destroye
 shows it as *sleeping* and a reply wakes it; only the run cap or **Destroy** discards a workspace.
 `/fleet.json` carries the configured timeouts and capacity so the UI can show real deadlines and
 slots.
+
+## Routes and pages
+
+React Router v7 (browser history; the express SPA fallback serves `index.html` for `/` and
+`/dashboard/*`). `/dashboard/accounts` manages GitHub accounts (`/accounts.json`, device flow via
+`/accounts/device*.json` when `GITHUB_OAUTH_CLIENT_ID` is set). The thread folds extended thinking and
+renders TodoWrite plans as a live checklist; sandboxes expose their checked-out repos (`repos` on the
+fleet view), shown as chips in the thread header and used to scope `@` file search.

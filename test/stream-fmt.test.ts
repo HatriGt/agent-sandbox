@@ -131,3 +131,42 @@ test("an errored long result keeps its sentinel and its full body", () => {
   assert.equal(tool.failed, true);
   assert.equal(tool.result, body);
 });
+
+test("thinking and TodoWrite become folded blocks; the TodoWrite result is not written", () => {
+  const log = runFormatter([
+    { type: "system", subtype: "init", model: "m" },
+    {
+      type: "assistant",
+      message: {
+        content: [
+          { type: "thinking", thinking: "Let me map the entry points first.\nThen the handlers." },
+          {
+            type: "tool_use",
+            id: "toolu_plan0001",
+            name: "TodoWrite",
+            input: {
+              todos: [
+                { content: "Read the schema", status: "completed" },
+                { content: "Write the migration", status: "in_progress" },
+                { content: "Run the tests", status: "pending" },
+              ],
+            },
+          },
+        ],
+      },
+    },
+    toolResult("toolu_plan0001", "Todos have been modified successfully."),
+    { type: "assistant", message: { content: [{ type: "text", text: "Starting." }] } },
+  ]);
+  assert.doesNotMatch(log, /Todos have been modified/);
+  const ev = parseTrace(log);
+  const think = ev.find((e) => e.kind === "think");
+  assert.ok(think && think.kind === "think" && /entry points/.test(think.text));
+  const plan = ev.find((e) => e.kind === "plan");
+  assert.ok(plan && plan.kind === "plan");
+  assert.deepEqual(
+    plan.kind === "plan" && plan.items.map((i) => [i.text, i.state]),
+    [["Read the schema", "done"], ["Write the migration", "active"], ["Run the tests", "todo"]]
+  );
+  assert.ok(ev.some((e) => e.kind === "say" && e.text === "Starting."));
+});

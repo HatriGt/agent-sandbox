@@ -43,6 +43,13 @@ export interface BoxView {
   lastOutputAt?: number;
   /** Follow-ups queued by the dashboard while the agent was mid-turn; delivered when it finishes. */
   queued?: string[];
+  /** Repositories checked out under /workspace (dir name + current branch). */
+  repos?: RepoRef[];
+}
+
+export interface RepoRef {
+  name: string;
+  branch?: string;
 }
 
 /**

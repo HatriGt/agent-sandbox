@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowLeft, Clock, Cpu, Hourglass, MemoryStick, MoonStar, Plus, Trash2, X } from "lucide-react";
+import { ArrowLeft, Clock, Cpu, GitBranch, Hourglass, MemoryStick, MoonStar, Plus, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, type BoxView, type FleetLifecycle, type WatchSnapshot } from "@/lib/api";
 import { friendlyName, isSleeping, POLL_MS, roleLabel, shortName, threadTitle } from "@/lib/format";
@@ -13,7 +13,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { ChatContainerContent, ChatContainerRoot, ChatContainerScrollAnchor } from "@/components/ui/chat-container";
 import { ScrollButton } from "@/components/ui/scroll-button";
 import type { TraceEvent } from "@/lib/trace";
-import { LifecycleItem, ObserverItem, QueuedItem, SayItem, ToolGroup, WorkingIndicator, YouItem } from "./TraceItems";
+import { LifecycleItem, ObserverItem, PlanCard, QueuedItem, SayItem, ThinkingItem, ToolGroup, WorkingIndicator, YouItem } from "./TraceItems";
 import { QuestionCard } from "./QuestionCard";
 import { ProducedFiles } from "./ProducedFiles";
 import { ThreadSkeleton } from "./Skeletons";
@@ -180,6 +180,18 @@ export function Thread({
               {friendlyName(box.name)}
             </span>
           )}
+          {box.repos?.map((r) => (
+            <Tooltip key={r.name}>
+              <TooltipTrigger asChild>
+                <span className="bg-muted text-muted-foreground stamp hidden shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 md:inline-flex">
+                  <GitBranch className="size-3" aria-hidden />
+                  {r.name}
+                  {r.branch && <span className="opacity-60">@{r.branch}</span>}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Repository checked out in this sandbox at /workspace/{r.name}</TooltipContent>
+            </Tooltip>
+          ))}
         </div>
 
         {/* Lifecycle + vitals: quiet mono facts, desktop only — the fleet view carries them on phones. */}
@@ -258,12 +270,16 @@ export function Thread({
                 <ToolGroup key={key} events={g.events} live={runState === "running" && isLast} />
               ) : g.kind === "you" ? (
                 <YouItem key={key} text={g.text} />
+              ) : g.kind === "think" ? (
+                <ThinkingItem key={key} text={g.text} live={runState === "running" && isLast} />
+              ) : g.kind === "plan" ? (
+                <PlanCard key={key} items={g.items} live={runState === "running"} />
               ) : (
                 <SayItem key={key} text={g.text} live={runState === "running" && isLast} />
               );
             })}
 
-            {!sleeping && runState === "running" && groups[groups.length - 1]?.kind !== "say" && !loadingTrace && (
+            {!sleeping && runState === "running" && !["say", "think"].includes(groups[groups.length - 1]?.kind ?? "") && !loadingTrace && (
               <WorkingIndicator label={events.length ? "Working" : "Starting up"} />
             )}
 
@@ -307,6 +323,7 @@ export function Thread({
         boxName={box.name}
         runState={runState}
         sleeping={sleeping}
+        repos={box.repos ?? []}
         onAsk={onAsk}
         onReplied={onReplied}
         onQueued={refreshQueue}
@@ -342,7 +359,9 @@ type TraceGroup =
   | { kind: "say"; text: string }
   | { kind: "you"; text: string }
   | { kind: "lifecycle"; label: string; detail?: string }
-  | { kind: "tools"; events: ToolEvent[] };
+  | { kind: "tools"; events: ToolEvent[] }
+  | { kind: "think"; text: string }
+  | { kind: "plan"; items: import("@/lib/trace").PlanItem[] };
 
 function groupTrace(events: TraceEvent[]): TraceGroup[] {
   const out: TraceGroup[] = [];
@@ -355,6 +374,14 @@ function groupTrace(events: TraceEvent[]): TraceGroup[] {
       out.push({ kind: "lifecycle", label: sentence(e.label), detail: e.detail });
     } else if (e.kind === "you") {
       out.push({ kind: "you", text: e.text });
+    } else if (e.kind === "think") {
+      out.push({ kind: "think", text: e.text });
+    } else if (e.kind === "plan") {
+      // The plan is a living document: every TodoWrite re-emits the whole list. Show it ONCE, where
+      // it first appeared, in its latest state — so the checklist ticks in place instead of stacking.
+      const first = out.findIndex((g) => g.kind === "plan");
+      if (first >= 0) out[first] = { kind: "plan", items: e.items };
+      else out.push({ kind: "plan", items: e.items });
     } else {
       out.push({ kind: "say", text: e.text });
     }

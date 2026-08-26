@@ -1,20 +1,29 @@
-import { StrictMode } from "react";
+import { StrictMode, Suspense, lazy } from "react";
 import { createRoot } from "react-dom/client";
-import App from "./App";
+import { createBrowserRouter, RouterProvider } from "react-router";
 
-// Type faces, self-hosted (variable where available) via fontsource: no Google Fonts request, no
-// FOUT, correct offline rendering. Cloned from the CRM AI Agent reference:
-//   Inter (UI/body) + Hedvig Letters Serif (the greeting/display serif) — the two faces the live
-//   reference actually loads. Geist Mono is kept for machine text (ids, vitals, tool calls, logs),
-//   which the reference has no distinct face for.
+// Type faces, self-hosted (variable where available) via fontsource.
 import "@fontsource-variable/inter";
 import "@fontsource/hedvig-letters-serif";
 import "@fontsource-variable/geist-mono";
 
 import "./index.css";
+import App from "./App";
+
+// The public landing page is code-split: the console never pays for it, and vice versa.
+const Landing = lazy(() => import("./pages/Landing"));
+
+const router = createBrowserRouter([
+  { path: "/", element: <Landing /> },
+  { path: "/dashboard/welcome", element: <Landing /> },
+  { path: "/dashboard/*", element: <App /> },
+  { path: "*", element: <Landing /> },
+]);
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App />
+    <Suspense fallback={<div className="bg-background h-full" aria-busy="true" />}>
+      <RouterProvider router={router} />
+    </Suspense>
   </StrictMode>
 );

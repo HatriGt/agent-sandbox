@@ -22,7 +22,14 @@ export type TraceEvent =
   | { kind: "lifecycle"; label: string; detail?: string }
   | { kind: "say"; text: string }
   | { kind: "you"; text: string }
-  | { kind: "tool"; name: string; arg?: string; result?: string; failed?: boolean };
+  | { kind: "tool"; name: string; arg?: string; result?: string; failed?: boolean }
+  | { kind: "think"; text: string }
+  | { kind: "plan"; items: PlanItem[] };
+
+export interface PlanItem {
+  text: string;
+  state: "done" | "active" | "todo";
+}
 
 // Written as explicit \u escapes: a literal ESC byte in source is invisible to a reviewer.
 const ESC = "\u001b";
@@ -64,6 +71,12 @@ const ID_OPEN = "⟦#";
 const TOOL_ID_RE = /\s*⟦#([^⟧]+)⟧\s*/;
 const YOU_OPEN = "⟦you⟧";
 const YOU_CLOSE = "⟦/you⟧";
+// Extended thinking and TodoWrite plans, stamped by the formatter (src/msb.ts THINK_*/PLAN_*).
+const THINK_OPEN = "⟦think⟧";
+const THINK_CLOSE = "⟦/think⟧";
+const PLAN_OPEN = "⟦plan⟧";
+const PLAN_CLOSE = "⟦/plan⟧";
+const PLAN_LINE = /^\[( |x|>)\]\s*(.*)$/;
 
 /**
  * Parse a log into trace events. Consecutive prose lines coalesce into one `say`; indented lines
@@ -83,6 +96,9 @@ export function parseTrace(rawLog: string): TraceEvent[] {
   // While inside a ⟦you⟧…⟦/you⟧ block we collect the user's message verbatim, so agent prose that
   // follows the close marker is never merged into the user's bubble.
   let you: string[] | null = null;
+  // Same shape for a thinking block and a plan block.
+  let think: string[] | null = null;
+  let plan: string[] | null = null;
 
   // A log we are shown is a TAIL of the real one. When the cut lands inside a tool_result the block
   // arrives without its `→ Tool: arg` line, and every indented line of real command output would
@@ -111,6 +127,37 @@ export function parseTrace(rawLog: string): TraceEvent[] {
   let target: Extract<TraceEvent, { kind: "tool" }> | null = null;
 
   for (const line of lines) {
+    if (think !== null) {
+      if (line.trim() === THINK_CLOSE) {
+        const text = think.join("\n").trim();
+        if (text) events.push({ kind: "think", text });
+        think = null;
+      } else think.push(line);
+      continue;
+    }
+    if (plan !== null) {
+      if (line.trim() === PLAN_CLOSE) {
+        const items: PlanItem[] = plan
+          .map((l) => l.trim().match(PLAN_LINE))
+          .filter((m): m is RegExpMatchArray => !!m)
+          .map((m) => ({ text: m[2].trim(), state: m[1] === "x" ? "done" : m[1] === ">" ? "active" : "todo" }));
+        if (items.length) events.push({ kind: "plan", items });
+        plan = null;
+      } else plan.push(line);
+      continue;
+    }
+    if (line.trim() === THINK_OPEN) {
+      flushProse();
+      think = [];
+      target = null;
+      continue;
+    }
+    if (line.trim() === PLAN_OPEN) {
+      flushProse();
+      plan = [];
+      target = null;
+      continue;
+    }
     if (you !== null) {
       if (line.trim() === YOU_CLOSE) {
         events.push({ kind: "you", text: you.join("\n").trim() });

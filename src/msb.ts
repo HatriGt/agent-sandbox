@@ -29,6 +29,7 @@ import {
   type BoxView,
   type RunState,
   type WatchSnapshot,
+  type RepoRef,
 } from "./monitor.js";
 import type { PollResult } from "./wait.js";
 import type { Config } from "./config.js";
@@ -321,6 +322,8 @@ const AGENT_SYS_PROMPT =
   "under 80 characters; put the option you recommend first). Omit the Options block only when the answer " +
   "is genuinely free-form (a value, a name). The caller sees the question as a card with those options " +
   "as buttons, so never mention this file, its path, or the mechanism in your prose — just ask. " +
+  "For work with three or more steps, keep a short plan with the TodoWrite tool and update it as steps " +
+  "complete — the caller sees it as a live checklist. " +
   `(Enforcement: while ${QUESTION_MARK} exists, every tool call you attempt is DENIED, so you cannot ` +
   "do more work until the caller answers — writing it and stopping is the only correct move.) " +
   "The caller answers and continues this same session with 'claude -c'; when you " +
@@ -531,6 +534,12 @@ export const RESULT_MAX_LINES = 400;
 export const RESULT_MAX_BYTES = 65536;
 export const RESULT_MAX_LINE_CHARS = 4000;
 
+/** Sentinels for extended-thinking and plan (TodoWrite) blocks in the log; the trace parser folds them. */
+export const THINK_OPEN = "⟦think⟧";
+export const THINK_CLOSE = "⟦/think⟧";
+export const PLAN_OPEN = "⟦plan⟧";
+export const PLAN_CLOSE = "⟦/plan⟧";
+
 export function streamFmtScript(): string {
   const js =
     `const fs=require("fs");` +
@@ -540,6 +549,9 @@ export function streamFmtScript(): string {
     // Every assistant text block already written, so the run's final `result` (which IS one of them,
     // normally the last) is not appended a second time.
     `const seenText=new Set();` +
+    // tool_use ids of TodoWrite calls: their result ("Todos have been modified successfully") is
+    // noise once the plan block itself is in the log, so it is not written.
+    `const planIds=new Set();` +
     `process.stdin.setEncoding("utf8");` +
     `process.stdin.on("data",d=>{buf+=d;let i;while((i=buf.indexOf("\\n"))>=0){const line=buf.slice(0,i);buf=buf.slice(i+1);handle(line)}});` +
     `process.stdin.on("end",()=>{if(buf.trim())handle(buf)});` +
@@ -554,6 +566,12 @@ export function streamFmtScript(): string {
     // separate markdown documents (a table, then a fenced block); glued with a single newline the
     // renderer reads "| 1 | 2 |```bash" as one paragraph and the fence never opens.
     `if(b.type==="text"&&b.text.trim()){const t=b.text.trim();seenText.add(t);w(t+"\\n")}` +
+    // Extended thinking arrives as its own block. It is written between sentinels so the UI can fold
+    // it into a collapsed "Thought for a moment" panel instead of reading it as the agent's prose.
+    `else if(b.type==="thinking"&&b.thinking&&String(b.thinking).trim()){w("${THINK_OPEN}\\n"+String(b.thinking).trim()+"\\n${THINK_CLOSE}")}` +
+    // TodoWrite = the agent's plan. Written as a checklist block ([x] done, [>] in progress, [ ] todo)
+    // so the UI renders a live plan card; the tool row itself would only say "TodoWrite".
+    `else if(b.type==="tool_use"&&b.name==="TodoWrite"&&Array.isArray((b.input||{}).todos)){if(b.id)planIds.add(b.id);w("${PLAN_OPEN}\\n"+b.input.todos.map(t=>(t.status==="completed"?"[x] ":t.status==="in_progress"?"[>] ":"[ ] ")+String(t.content||t.activeForm||"").replace(/\\s*\\n\\s*/g," ").slice(0,160)).join("\\n")+"\\n${PLAN_CLOSE}")}` +
     // The headline arg is ONE log line. A multi-line command (a for-loop, a heredoc) otherwise spills
     // its 2nd..Nth lines into the log as bare text, where the parser reads the indented ones as this
     // tool's "result" and the rest as agent prose — the real output then lands in a stray say block.
@@ -569,7 +587,7 @@ export function streamFmtScript(): string {
     // is megabytes, and .agent.log is re-read whole on every SSE poll). Whichever binds first wins.
     // A FAILED tool call is marked, so the UI can show it failed. Without this a command that errored
     // renders exactly like one that succeeded — its stderr just looks like ordinary output.
-    `if(b.type==="tool_result"){const r=txt(b.content).trim();const id=b.tool_use_id?"${ID_OPEN}"+String(b.tool_use_id).slice(-8)+"${ID_CLOSE} ":"";if(r){w("  "+id+(b.is_error?"${ERR_MARK} ":"")+clip(r.split("\\n")).join("\\n  "))}else if(id)w("  "+id+(b.is_error?"${ERR_MARK} ":"")+"(no output)")}` +
+    `if(b.type==="tool_result"){if(b.tool_use_id&&planIds.has(b.tool_use_id))continue;const r=txt(b.content).trim();const id=b.tool_use_id?"${ID_OPEN}"+String(b.tool_use_id).slice(-8)+"${ID_CLOSE} ":"";if(r){w("  "+id+(b.is_error?"${ERR_MARK} ":"")+clip(r.split("\\n")).join("\\n  "))}else if(id)w("  "+id+(b.is_error?"${ERR_MARK} ":"")+"(no output)")}` +
     `}return}` +
     // Re-emit the run's final result ONLY when it is not simply the assistant text we already wrote.
     // Claude's `result` IS the last assistant message, so the unconditional re-emit appended the
@@ -618,7 +636,7 @@ function bootstrapScript(cfg: Config): string {
 // the concrete tools the agent needs instead. Bash covers git/gh/npm; this is safe because the
 // box is an isolated microVM with a curated egress allowlist. --allowedTools takes multiple
 // space-separated values, so it goes LAST in the command.
-const ALLOWED_TOOLS = "Bash Edit Write Read Glob Grep";
+const ALLOWED_TOOLS = "Bash Edit Write Read Glob Grep TodoWrite";
 
 // Stable in-box paths (above per-repo dirs so `status` finds them regardless of repo layout).
 const AGENT_LOG = "/workspace/.agent.log";
@@ -932,6 +950,7 @@ export async function gatherMonitor(cfg: Config): Promise<BoxView[]> {
       let cpu: string | undefined;
       let mem: string | undefined;
       let lastOutputAt: number | undefined;
+      let repos: RepoRef[] | undefined;
 
       // The sentinel read and the metrics read are independent, so they go out together. They used
       // to be sequential, which doubled this endpoint's latency per box: with four boxes the whole
@@ -946,6 +965,10 @@ export async function gatherMonitor(cfg: Config): Promise<BoxView[]> {
             `else echo "run:idle"; fi; ` +
             `echo "---Q---"; cat ${QUESTION_MARK} 2>/dev/null || true; ` +
             `echo "---T---"; head -n 1 ${TASK_MARK} 2>/dev/null || true; ` +
+            // Repositories checked out in the box (dir name + current branch), so the dashboard can
+            // show what a sandbox is connected to and scope file search to it.
+            `echo "---R---"; for g in /workspace/*/.git; do [ -d "$g" ] || continue; d=$(dirname "$g"); ` +
+            `printf '%s %s\n' "$(basename "$d")" "$(git -C "$d" rev-parse --abbrev-ref HEAD 2>/dev/null)"; done 2>/dev/null; ` +
             // mtime of the agent log = the last moment the agent produced output. The dashboard uses
             // it to say "no output for 4m" next to the idle-stop deadline. Best-effort (no log → blank).
             `echo "---M---"; stat -c %Y ${AGENT_LOG} 2>/dev/null || true`
@@ -965,6 +988,8 @@ export async function gatherMonitor(cfg: Config): Promise<BoxView[]> {
         const tStart = out.indexOf("---T---");
         const mStartRaw = out.indexOf("---M---");
         const mStart = mStartRaw >= 0 ? mStartRaw : out.length;
+        const rStartRaw = out.indexOf("---R---");
+        const rStart = rStartRaw >= 0 ? rStartRaw : mStart;
         const head = out.slice(0, qStart);
         claimed = /(^|\n)CLAIMED\s*(\n|$)/.test(head);
         const runLine = head.split("\n").map((l) => l.trim()).find((l) => l.startsWith("run:")) ?? "run:idle";
@@ -973,7 +998,19 @@ export async function gatherMonitor(cfg: Config): Promise<BoxView[]> {
         question = out.slice(qStart + "---Q---".length, tStart).trim() || undefined;
         runState = question ? "waiting" : rs.state;
         exitCode = rs.exitCode;
-        task = out.slice(tStart + "---T---".length, mStart).trim() || undefined;
+        task = out.slice(tStart + "---T---".length, rStart).trim() || undefined;
+        if (rStartRaw >= 0) {
+          const list = out
+            .slice(rStart + "---R---".length, mStart)
+            .split("\n")
+            .map((l) => l.trim())
+            .filter(Boolean)
+            .map((l) => {
+              const [name, branch] = l.split(/\s+/);
+              return { name, branch: branch && branch !== "HEAD" ? branch : undefined };
+            });
+          repos = list.length ? list : undefined;
+        }
         const mtime = Number(out.slice(mStart + "---M---".length).trim());
         lastOutputAt = Number.isFinite(mtime) && mtime > 0 ? mtime : undefined;
       }
@@ -1004,6 +1041,7 @@ export async function gatherMonitor(cfg: Config): Promise<BoxView[]> {
         cpu,
         mem,
         lastOutputAt,
+        repos,
       };
     })
   );

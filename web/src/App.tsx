@@ -1,7 +1,10 @@
 import * as React from "react";
+import { useLocation } from "react-router";
 import {
   Bell,
   BellOff,
+  Flame,
+  KeyRound,
   LayoutGrid,
   Moon,
   PanelLeftClose,
@@ -14,28 +17,51 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { api, type FleetLifecycle, type FleetSnapshot } from "@/lib/api";
-import { POLL_MS, isVisible, threadSort } from "@/lib/format";
+import { POLL_MS, isUp, isVisible, threadSort } from "@/lib/format";
+import { legacyHashTarget, useConsoleRoute, useGo } from "@/lib/route";
 import { usePoll } from "@/hooks/usePoll";
 import { useStableBoxes } from "@/hooks/useStableBoxes";
 import { useSessionRuns } from "@/hooks/useSessionRuns";
 import { useNotifications } from "@/hooks/useNotifications";
-import { useHashRoute } from "@/hooks/useHashRoute";
 import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/ui/logo";
 import { MachineList } from "@/components/MachineList";
 import { Hub } from "@/components/Hub";
-import { Sandboxes } from "@/components/Sandboxes";
 import { Capacity } from "@/components/Capacity";
 import { CommandPalette, openPalette } from "@/components/CommandPalette";
 import { Toaster } from "@/components/ui/sonner";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Thread, type Aside } from "@/components/thread/Thread";
 import { BootingThread } from "@/components/thread/BootingThread";
+import { Bar } from "@/components/thread/Skeletons";
 import { cn } from "@/lib/utils";
 
-const NO_LIFECYCLE: FleetLifecycle = { capacity: 0, poolSize: 0 };
+// Secondary pages are code-split: the thread — the page you live in — never pays for them.
+const Sandboxes = React.lazy(() => import("@/components/Sandboxes").then((m) => ({ default: m.Sandboxes })));
+const Accounts = React.lazy(() => import("@/components/Accounts").then((m) => ({ default: m.Accounts })));
 
-/** "updated 3s ago" — recomputed on a 1s timer so it stays true between polls. */
+const NO_LIFECYCLE: FleetLifecycle = { capacity: 0, poolSize: 0 };
+const FLEET_CACHE_KEY = "asb-fleet-cache";
+
+/** Last fleet snapshot this browser saw, for an instant first paint (then the poll corrects it). */
+function readFleetCache(): FleetSnapshot | null {
+  try {
+    const raw = sessionStorage.getItem(FLEET_CACHE_KEY);
+    const parsed = raw ? (JSON.parse(raw) as FleetSnapshot) : null;
+    // Stale beyond a minute is worse than a skeleton: the machines may all be gone.
+    return parsed && Date.now() - parsed.at < 60_000 ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+function writeFleetCache(s: FleetSnapshot) {
+  try {
+    sessionStorage.setItem(FLEET_CACHE_KEY, JSON.stringify(s));
+  } catch {
+    /* quota / private mode */
+  }
+}
+
 function useFreshness(updatedAt: number | null) {
   const [, tick] = React.useState(0);
   React.useEffect(() => {
@@ -73,18 +99,28 @@ export default function App() {
   }, [dark]);
   const [collapsed, setCollapsed] = usePersisted("asb-collapsed", false);
 
-  const { data, error, live, updatedAt } = usePoll<FleetSnapshot>((signal) => api.fleet(signal), POLL_MS);
+  const cached = React.useRef(readFleetCache());
+  const { data, error, live, updatedAt } = usePoll<FleetSnapshot>((signal) => api.fleet(signal), POLL_MS, [], {
+    initial: cached.current,
+    onData: writeFleetCache,
+  });
   const freshness = useFreshness(updatedAt);
   const { runs, remember } = useSessionRuns();
   const lifecycle = data?.lifecycle ?? NO_LIFECYCLE;
 
-  // Route = the URL hash: `#/box/<name>` or `#/fleet` or `#/`. Reload lands on the same thread.
-  const [route, navigate] = useHashRoute();
+  // Routing (react-router, browser history). A legacy `#/box/x` link is translated once on load.
+  const route = useConsoleRoute();
+  const go = useGo();
+  const { hash } = useLocation();
+  React.useEffect(() => {
+    const legacy = legacyHashTarget(hash);
+    if (legacy) go(legacy, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const view = route.view;
-  const selected = route.view === "chat" ? route.box : null;
-  const [mobileRail, setMobileRail] = React.useState(() => route.view === "chat" && !route.box);
-  // A delegate in flight: `known` snapshots box names at submit time; the first NEW session box to
-  // appear is ours (a warm claim surfaces within a poll tick, long before delegate.json resolves).
+  const selected = route.view === "box" ? route.name : null;
+  const [mobileRail, setMobileRail] = React.useState(() => route.view === "hub");
+
   const [booting, setBooting] = React.useState<{ task: string; known: Map<string, string>; warm: boolean } | null>(null);
   const [pending, setPending] = React.useState<{ id: string; task: string }[]>([]);
   const [asides, setAsides] = React.useState<Record<string, Aside[]>>({});
@@ -92,59 +128,62 @@ export default function App() {
 
   const reported = React.useMemo(() => (data ? data.boxes.filter(isVisible) : null), [data]);
   const boxes = useStableBoxes(reported);
+  // The Machines list shows RUNS. An unclaimed warm box is capacity, not a run — it lives in the
+  // capacity strip and the fleet view. Hiding it here also makes a warm claim read as one clean
+  // transition: the "booting" placeholder becomes the claimed row, with no idle row shuffling around.
+  const runs_ = React.useMemo(() => boxes.filter((b) => b.role !== "pool-free"), [boxes]);
+  const warmReady = boxes.filter((b) => b.role === "pool-free" && isUp(b)).length;
   const selectedBox = boxes.find((b) => b.name === selected) ?? null;
-  const waiting = boxes.filter((b) => b.runState === "waiting");
-  const working = boxes.filter((b) => b.runState === "running" && /^running$/i.test(b.boxStatus)).length;
+  const waiting = runs_.filter((b) => b.runState === "waiting");
+  const working = runs_.filter((b) => b.runState === "running" && isUp(b)).length;
 
   const open = React.useCallback(
     (name: string) => {
       setBooting(null);
-      navigate({ view: "chat", box: name });
+      go({ view: "box", name });
       setMobileRail(false);
     },
-    [navigate]
+    [go]
   );
   const newTask = React.useCallback(() => {
     setBooting(null);
-    navigate({ view: "chat", box: null });
+    go({ view: "hub" });
     setMobileRail(false);
-  }, [navigate]);
+  }, [go]);
   const backToRail = () => setMobileRail(true);
   const showFleet = React.useCallback(() => {
-    navigate({ view: "fleet" });
+    go({ view: "fleet" });
     setMobileRail(false);
-  }, [navigate]);
+  }, [go]);
+  const showAccounts = React.useCallback(() => {
+    go({ view: "accounts" });
+    setMobileRail(false);
+  }, [go]);
 
   const notify = useNotifications(boxes, open);
 
-  // A machine that vanished must not leave a dead pane behind — but never while a delegate is in
-  // flight, or the newly-opened thread would flip back to the Hub. Wait for the first fleet read so a
-  // deep link to a box is not cleared before the fleet has even loaded.
   React.useEffect(() => {
     if (booting || !data) return;
-    if (selected && !boxes.some((b) => b.name === selected)) navigate({ view: "chat", box: null });
-  }, [selected, data, boxes, booting, navigate]);
+    if (selected && !boxes.some((b) => b.name === selected)) go({ view: "hub" }, { replace: true });
+  }, [selected, data, boxes, booting, go]);
 
-  // Attach to the delegated box the instant it surfaces. Two shapes: a COLD boot is a brand-new
-  // session box; a WARM claim is an EXISTING pool-free box whose role flips to pool-claimed (its name
-  // does not change — the old "first new box" test never matched it, which left the booting
-  // placeholder and the real thread both on screen). Fresh pool-free boxes are the maintainer
-  // refilling the pool and are never ours.
+  // Attach to the delegated box the instant it surfaces: a cold boot is a brand-new session box; a
+  // warm claim is an existing pool-free box whose role flips to pool-claimed (same name).
   React.useEffect(() => {
     if (!booting) return;
     const fresh = boxes.find((b) => {
       if (b.role === "pool-free") return false;
       const before = booting.known.get(b.name);
-      if (before === undefined) return true; // new session box (cold boot)
-      return before === "pool-free" && b.role === "pool-claimed"; // warm box claimed for us
+      if (before === undefined) return true;
+      return before === "pool-free" && b.role === "pool-claimed";
     });
     if (!fresh) return;
-    navigate({ view: "chat", box: fresh.name });
+    go({ view: "box", name: fresh.name });
     setBooting(null);
     setPending([]);
-  }, [booting, boxes, navigate]);
+  }, [booting, boxes, go]);
 
-  // Keyboard: n → new task · j/k → next/previous machine · / → focus the composer · g f → fleet.
+  // Keyboard: n new · j/k machines · / composer · g f fleet · g a accounts.
   const focusComposer = React.useRef<(() => void) | null>(null);
   const onFocusRequest = React.useCallback((f: () => void) => {
     focusComposer.current = f;
@@ -161,6 +200,7 @@ export default function App() {
         return;
       }
       if (pendingG && e.key === "f") return showFleet();
+      if (pendingG && e.key === "a") return showAccounts();
       if (e.key === "n") return newTask();
       if (e.key === "/") {
         e.preventDefault();
@@ -168,7 +208,7 @@ export default function App() {
         return;
       }
       if (e.key === "j" || e.key === "k") {
-        const sorted = [...boxes].sort(threadSort);
+        const sorted = [...runs_].sort(threadSort);
         if (!sorted.length) return;
         const i = sorted.findIndex((b) => b.name === selected);
         const next = e.key === "j" ? Math.min(sorted.length - 1, i + 1) : Math.max(0, i < 0 ? 0 : i - 1);
@@ -177,7 +217,7 @@ export default function App() {
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [boxes, selected, open, newTask, showFleet]);
+  }, [runs_, selected, open, newTask, showFleet, showAccounts]);
 
   const ask = async (name: string, question: string) => {
     let index = 0;
@@ -205,9 +245,10 @@ export default function App() {
     }
   };
 
-  const health = !live ? "offline" : waiting.length ? "attention" : "ok";
+  const health = !live && !data ? "offline" : waiting.length ? "attention" : "ok";
   const loading = !data && !error;
-  const paneKey = view === "fleet" ? "fleet" : booting && !selectedBox ? "booting" : selectedBox ? `box:${selectedBox.name}` : "hub";
+  const paneKey =
+    view === "fleet" ? "fleet" : view === "accounts" ? "accounts" : booting && !selectedBox ? "booting" : selectedBox ? `box:${selectedBox.name}` : "hub";
 
   return (
     <TooltipProvider delayDuration={400}>
@@ -237,14 +278,16 @@ export default function App() {
                       )}
                       aria-hidden
                     />
-                    {live ? (
+                    {data ? (
                       <span className="tabular truncate">
-                        {boxes.length} up
+                        {runs_.length} {runs_.length === 1 ? "run" : "runs"}
                         {working > 0 && <> · {working} working</>}
                         {waiting.length > 0 && <span className="text-attention-text"> · {waiting.length} waiting</span>}
                       </span>
-                    ) : (
+                    ) : error ? (
                       <span className="text-destructive font-medium">offline</span>
+                    ) : (
+                      <span>connecting…</span>
                     )}
                   </p>
                 </div>
@@ -259,14 +302,8 @@ export default function App() {
             <nav className="flex flex-1 flex-col items-center gap-1.5 px-2 pt-1 pb-3" aria-label="Sections">
               <RailIcon onClick={newTask} icon={<Plus />} label="New task (n)" primary />
               <RailIcon onClick={openPalette} icon={<Search />} label="Search machines (⌘K)" />
-              <RailIcon
-                active={view === "fleet"}
-                onClick={showFleet}
-                icon={<LayoutGrid />}
-                label={`Fleet${boxes.length ? ` (${boxes.length})` : ""}`}
-                badge={boxes.length || undefined}
-                dot={waiting.length > 0}
-              />
+              <RailIcon active={view === "fleet"} onClick={showFleet} icon={<LayoutGrid />} label="Fleet" badge={boxes.length || undefined} dot={waiting.length > 0} />
+              <RailIcon active={view === "accounts"} onClick={showAccounts} icon={<KeyRound />} label="GitHub accounts" />
               <div className="mt-auto flex flex-col items-center gap-1.5">
                 <RailIcon onClick={() => setDark(!dark)} icon={dark ? <Moon /> : <Sun />} label={dark ? "Light theme" : "Dark theme"} />
                 <RailIcon onClick={() => setCollapsed(false)} icon={<PanelLeftOpen />} label="Expand sidebar" />
@@ -318,7 +355,7 @@ export default function App() {
                   {lifecycle.capacity > 0 ? (
                     <Capacity boxes={boxes} capacity={lifecycle.capacity} size="sm" />
                   ) : (
-                    boxes.length > 0 && <span className="text-muted-foreground tabular text-micro">{boxes.length}</span>
+                    runs_.length > 0 && <span className="text-muted-foreground tabular text-micro">{runs_.length}</span>
                   )}
                 </span>
               </div>
@@ -330,12 +367,25 @@ export default function App() {
                 </p>
               )}
 
-              <MachineList boxes={boxes} pending={pending} selected={view === "chat" ? selected : null} loading={loading} onSelect={open} />
+              <MachineList boxes={runs_} pending={pending} selected={view === "box" ? selected : null} loading={loading} onSelect={open} />
+
+              {/* Warm capacity is a fact about the fleet, not a run: one quiet line, not a list row. */}
+              {warmReady > 0 && (
+                <button
+                  type="button"
+                  onClick={showFleet}
+                  className="text-muted-foreground hover:text-foreground mx-3 mb-1 flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-micro transition-colors"
+                >
+                  <Flame className="text-ok size-3.5 shrink-0" aria-hidden />
+                  {warmReady === 1 ? "1 warm machine ready" : `${warmReady} warm machines ready`} — a new task starts in seconds
+                </button>
+              )}
 
               <div className="flex flex-col gap-0.5 border-t px-2 py-2">
                 <NavItem active={view === "fleet"} onClick={showFleet} icon={<LayoutGrid />} label="Fleet view" badge={boxes.length || undefined} shortcut="g f" />
+                <NavItem active={view === "accounts"} onClick={showAccounts} icon={<KeyRound />} label="GitHub accounts" shortcut="g a" />
                 <div className="flex items-center justify-between px-2.5 pt-1">
-                  <p className="text-muted-foreground text-micro">{live ? `Updated ${freshness}` : "Offline — retrying"}</p>
+                  <p className="text-muted-foreground text-micro">{live ? `Updated ${freshness}` : data ? "Reconnecting…" : "Offline — retrying"}</p>
                   <div className="flex items-center">
                     {notify.supported && (
                       <Tooltip>
@@ -369,75 +419,93 @@ export default function App() {
               exit={{ opacity: 0, y: -4 }}
               transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
             >
-              {view === "fleet" ? (
-                <Sandboxes
-                  boxes={boxes}
-                  lifecycle={lifecycle}
-                  loading={loading}
-                  onOpen={open}
-                  onDestroyed={(name) => {
-                    if (selected === name) navigate({ view: "fleet" });
-                  }}
-                  onBack={backToRail}
-                />
-              ) : booting && !selectedBox ? (
-                <BootingThread task={booting.task} warm={booting.warm} onBack={backToRail} />
-              ) : selectedBox ? (
-                <Thread
-                  box={selectedBox}
-                  lifecycle={lifecycle}
-                  asides={asides[selectedBox.name] ?? []}
-                  replies={replies[selectedBox.name] ?? []}
-                  onAsk={(q) => void ask(selectedBox.name, q)}
-                  onReplied={(text) =>
-                    setReplies((prev) => ({ ...prev, [selectedBox.name]: [...(prev[selectedBox.name] ?? []), text] }))
-                  }
-                  onBack={backToRail}
-                  onNew={newTask}
-                  onFocusRequest={onFocusRequest}
-                  onTornDown={(name) => {
-                    navigate({ view: "chat", box: null });
-                    setAsides((prev) => {
-                      const { [name]: _gone, ...rest } = prev;
-                      return rest;
-                    });
-                    setReplies((prev) => {
-                      const { [name]: _dropped, ...rest } = prev;
-                      return rest;
-                    });
-                  }}
-                />
-              ) : (
-                <Hub
-                  boxes={boxes}
-                  lifecycle={lifecycle}
-                  loading={loading}
-                  sessionRuns={runs}
-                  onBooting={(task) =>
-                    setBooting({
-                      task,
-                      known: new Map(boxes.map((b) => [b.name, b.role])),
-                      warm: boxes.some((b) => b.role === "pool-free" && /^running$/i.test(b.boxStatus)),
-                    })
-                  }
-                  onStarted={(box, task) => {
-                    remember(box, task);
-                    open(box);
-                  }}
-                  onFailed={() => setBooting(null)}
-                  onPending={(p) => setPending((prev) => [...prev, p])}
-                  onSettled={(id) => setPending((prev) => prev.filter((p) => p.id !== id))}
-                  onOpen={open}
-                  onBack={backToRail}
-                />
-              )}
+              <React.Suspense fallback={<PageSkeleton />}>
+                {view === "fleet" ? (
+                  <Sandboxes
+                    boxes={boxes}
+                    lifecycle={lifecycle}
+                    loading={loading}
+                    onOpen={open}
+                    onDestroyed={() => {}}
+                    onBack={backToRail}
+                  />
+                ) : view === "accounts" ? (
+                  <Accounts onBack={backToRail} />
+                ) : booting && !selectedBox ? (
+                  <BootingThread task={booting.task} warm={booting.warm} onBack={backToRail} />
+                ) : selectedBox ? (
+                  <Thread
+                    box={selectedBox}
+                    lifecycle={lifecycle}
+                    asides={asides[selectedBox.name] ?? []}
+                    replies={replies[selectedBox.name] ?? []}
+                    onAsk={(q) => void ask(selectedBox.name, q)}
+                    onReplied={(text) =>
+                      setReplies((prev) => ({ ...prev, [selectedBox.name]: [...(prev[selectedBox.name] ?? []), text] }))
+                    }
+                    onBack={backToRail}
+                    onNew={newTask}
+                    onFocusRequest={onFocusRequest}
+                    onTornDown={(name) => {
+                      go({ view: "hub" });
+                      setAsides((prev) => {
+                        const { [name]: _gone, ...rest } = prev;
+                        return rest;
+                      });
+                      setReplies((prev) => {
+                        const { [name]: _dropped, ...rest } = prev;
+                        return rest;
+                      });
+                    }}
+                  />
+                ) : (
+                  <Hub
+                    boxes={boxes}
+                    lifecycle={lifecycle}
+                    loading={loading}
+                    sessionRuns={runs}
+                    onBooting={(task) =>
+                      setBooting({
+                        task,
+                        known: new Map(boxes.map((b) => [b.name, b.role])),
+                        warm: warmReady > 0,
+                      })
+                    }
+                    onStarted={(box, task) => {
+                      remember(box, task);
+                      open(box);
+                    }}
+                    onFailed={() => setBooting(null)}
+                    onPending={(p) => setPending((prev) => [...prev, p])}
+                    onSettled={(id) => setPending((prev) => prev.filter((p) => p.id !== id))}
+                    onOpen={open}
+                    onBack={backToRail}
+                  />
+                )}
+              </React.Suspense>
             </motion.div>
           </AnimatePresence>
         </main>
 
-        <CommandPalette boxes={boxes} onOpen={open} onNew={newTask} />
+        <CommandPalette boxes={runs_} onOpen={open} onNew={newTask} />
       </div>
     </TooltipProvider>
+  );
+}
+
+/** Placeholder while a code-split page loads (sub-100ms on a warm cache; shaped like a page). */
+function PageSkeleton() {
+  return (
+    <div className="mx-auto max-w-3xl px-6 py-9" aria-busy="true">
+      <Bar className="h-7 w-40" />
+      <Bar className="mt-3 h-3 w-[70%]" />
+      <Bar className="mt-2 h-3 w-[50%]" />
+      <div className="mt-8 flex flex-col gap-2">
+        {[0, 1, 2].map((i) => (
+          <Bar key={i} className="h-14 w-full rounded-xl" />
+        ))}
+      </div>
+    </div>
   );
 }
 

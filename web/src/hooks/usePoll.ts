@@ -12,9 +12,10 @@ export function usePoll<T>(
   fn: (signal: AbortSignal) => Promise<T>,
   intervalMs: number,
   deps: unknown[] = [],
-  opts: { initialDelayMs?: number } = {}
+  opts: { initialDelayMs?: number; initial?: T | null; onData?: (data: T) => void } = {}
 ) {
-  const [data, setData] = React.useState<T | null>(null);
+  // `initial` lets a caller paint a cached snapshot before the first tick lands (instant first frame).
+  const [data, setData] = React.useState<T | null>(opts.initial ?? null);
   const [error, setError] = React.useState<string | null>(null);
   const [live, setLive] = React.useState(false);
   const [updatedAt, setUpdatedAt] = React.useState<number | null>(null);
@@ -40,6 +41,7 @@ export function usePoll<T>(
         const next = await fnRef.current(controller.signal);
         if (cancelled) return;
         setData(next);
+        opts.onData?.(next);
         setError(null);
         setLive(true);
         setUpdatedAt(Date.now());

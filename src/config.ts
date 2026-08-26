@@ -89,6 +89,12 @@ export interface Config {
   /** npm credential injected into the box (optional). */
   npmToken?: string;
 
+  /**
+   * GitHub OAuth App client id for "Sign in with GitHub" (device flow) on the dashboard's Accounts
+   * page. Optional: without it, accounts are added by pasting a personal access token.
+   */
+  githubOauthClientId?: string;
+
   /** HTTP entry (http.ts): port to bind. */
   httpPort: number;
   /** HTTP entry: bind host. Default 127.0.0.1 (local). In a container set 0.0.0.0 so Traefik
@@ -180,6 +186,7 @@ export function loadConfig(): Config {
     // ~60s client timeout for the SSH round-trip either side of it.
     askTimeoutMs: Number(process.env.ASK_TIMEOUT_MS ?? "45000"),
     askModel: process.env.ASK_MODEL || undefined,
+    githubOauthClientId: process.env.GITHUB_OAUTH_CLIENT_ID?.trim() || undefined,
 
     anthropicBaseUrl,
     anthropicApiKey: req("ANTHROPIC_API_KEY", "dummy"),

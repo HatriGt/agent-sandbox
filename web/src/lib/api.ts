@@ -23,7 +23,29 @@ export interface BoxView {
   lastOutputAt?: number;
   /** Follow-ups queued while the agent was mid-turn; delivered when it finishes. */
   queued?: string[];
+  /** Repositories checked out under /workspace. */
+  repos?: { name: string; branch?: string }[];
 }
+
+export interface AccountView {
+  login: string;
+  type: "classic" | "fine-grained" | "unknown";
+  orgs: string[];
+  verifiedRepos: string[];
+  tokenHint: string;
+  isDefault: boolean;
+}
+export interface AccountsResponse {
+  accounts: AccountView[];
+  /** True when "Sign in with GitHub" (device flow) is configured on the controller. */
+  oauth: boolean;
+}
+export type DevicePoll =
+  | { status: "pending"; interval?: number }
+  | { status: "expired" }
+  | { status: "denied" }
+  | { status: "error"; message: string }
+  | { status: "done"; login: string; accounts: AccountView[] };
 
 export interface QueuedMessage {
   id: string;
@@ -170,6 +192,20 @@ export const api = {
     ),
 
   teardown: (session: string) => post<{ ok: true }>("/teardown.json", { session }),
+
+  /** GitHub accounts (tokens stay on the VPS; only masked hints come back). */
+  accounts: (signal?: AbortSignal) =>
+    fetch(url("/accounts.json"), { headers: authHeaders, signal }).then(parse<AccountsResponse>),
+  addAccount: (token: string) => post<{ accounts: AccountView[]; added: string }>("/accounts.json", { token }),
+  removeAccount: (login: string) =>
+    fetch(url("/accounts.json", { login }), { method: "DELETE", headers: authHeaders }).then(parse<{ accounts: AccountView[] }>),
+  setDefaultAccount: (login: string) => post<{ accounts: AccountView[] }>("/accounts/default.json", { login }),
+  deviceStart: () =>
+    post<{ device_code: string; user_code: string; verification_uri: string; expires_in: number; interval: number }>(
+      "/accounts/device.json",
+      {}
+    ),
+  devicePoll: (device_code: string) => post<DevicePoll>("/accounts/device/poll.json", { device_code }),
 
   delegate: (input: { task: string; repo?: string; ref?: string }) =>
     post<{ ok: true; box: string; warm: boolean; output: string } | { ok: false; question: string }>(
