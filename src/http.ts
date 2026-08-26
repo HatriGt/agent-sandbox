@@ -24,6 +24,11 @@ import { runDelegateFlow } from "./delegate-flow.js";
 import { streamWatch } from "./watch-sse.js";
 import { WatchHub } from "./watch-hub.js";
 import { makeFleetReader } from "./fleet.js";
+import { Inbox, startInboxDelivery } from "./inbox.js";
+import { makeCredentialBroker } from "./broker.js";
+import { makeFileIndex } from "./files.js";
+import { exec as execInBox } from "./msb.js";
+import { loadStore, pickDefaultAccount } from "./gh-token-store.js";
 import { readArtifact } from "./artifact.js";
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -48,7 +53,30 @@ app.use(express.json());
 const watchHub = new WatchHub({ read: (s) => gatherWatch(cfg, s, undefined, { metrics: false }) });
 // The dashboard's fleet read: gatherMonitor behind a short shared cache, plus lifecycle config and
 // sleeping (Stopped-but-resumable) boxes merged from memory.
-const readFleet = makeFleetReader(cfg, () => gatherMonitor(cfg));
+// Follow-ups typed while the agent is mid-turn wait here and are delivered when the run finishes.
+const inbox = new Inbox();
+const resumeQuietly = (session: string, message: string) => deps.resume(cfg, session, message, undefined, {});
+startInboxDelivery({
+  inbox,
+  read: (s) => watchHub.read(s),
+  resume: resumeQuietly,
+  log: (m) => console.error(m),
+});
+// Credential broker: a box that pauses to ask for GitHub auth is resumed with the stored account.
+const brokerConsider = makeCredentialBroker({
+  defaultLogin: async () => pickDefaultAccount(await loadStore(cfg))?.login,
+  resume: resumeQuietly,
+  log: (m) => console.error(m),
+});
+const readFleet = makeFleetReader(cfg, () => gatherMonitor(cfg), {
+  decorate: (boxes) =>
+    boxes.map((b) => {
+      const q = inbox.list(b.name);
+      return q.length ? { ...b, queued: q.map((m) => m.text) } : b;
+    }),
+});
+// `@` mentions: a briefly cached file index per box.
+const fileIndex = makeFileIndex(async (box, sh) => (await execInBox(cfg, box, sh)).stdout);
 
 // Bearer guard on every /mcp method. Fails closed (checkBearer denies when no token).
 app.use("/mcp", (req: Request, res: Response, next) => {
@@ -155,7 +183,12 @@ app.get("/monitor.json", async (req: Request, res: Response) => {
 app.get("/fleet.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   try {
-    res.json(await readFleet());
+    const fleet = await readFleet();
+    // Let the broker look at every waiting box (fire-and-forget; guarded once per question).
+    for (const b of fleet.boxes) {
+      if (b.runState === "waiting" && /^running$/i.test(b.boxStatus)) void brokerConsider(b.name, b.question);
+    }
+    res.json(fleet);
   } catch (e) {
     res.status(500).json({ error: String((e as Error).message ?? e) });
   }
@@ -288,12 +321,22 @@ app.post("/ask.json", async (req: Request, res: Response) => {
 // WAIT_TIMEOUT_MS driving the same interactive loop resume() uses over MCP.
 app.post("/resume.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const { session, message } = (req.body ?? {}) as { session?: string; message?: string };
+  const { session, message, force } = (req.body ?? {}) as { session?: string; message?: string; force?: boolean };
   if (!session || !message?.trim()) {
     res.status(400).json({ error: "session and message are required" });
     return;
   }
   try {
+    // Mid-turn: a second `claude -c` would race the running one, so the message waits in the inbox
+    // and is delivered the moment the run finishes. `force` (answering a question) bypasses.
+    if (!force) {
+      const snap = await watchHub.read(session);
+      if (snap.runState === "running") {
+        const q = inbox.enqueue(session, message);
+        res.json({ queued: true, id: q.id });
+        return;
+      }
+    }
     res.json({ output: await deps.resume(cfg, session, message, undefined, {}) });
   } catch (e) {
     res.status(500).json({ error: String((e as Error).message ?? e) });
@@ -301,6 +344,45 @@ app.post("/resume.json", async (req: Request, res: Response) => {
 });
 
 // Stop and remove a box. Destructive; the dashboard confirms before calling this.
+// Queued follow-ups for a box: list, or remove one (`?id=`) / all.
+app.get("/inbox.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const session = typeof req.query.session === "string" ? req.query.session : "";
+  if (!session) {
+    res.status(400).json({ error: "session query param required" });
+    return;
+  }
+  res.json({ queued: inbox.list(session) });
+});
+app.delete("/inbox.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const session = typeof req.query.session === "string" ? req.query.session : "";
+  const id = typeof req.query.id === "string" ? req.query.id : "";
+  if (!session) {
+    res.status(400).json({ error: "session query param required" });
+    return;
+  }
+  if (id) inbox.remove(session, id);
+  else inbox.clear(session);
+  res.json({ queued: inbox.list(session) });
+});
+
+// Workspace files for `@` mentions: ?session=&q=; at most 40 ranked matches.
+app.get("/files.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const session = typeof req.query.session === "string" ? req.query.session : "";
+  const q = typeof req.query.q === "string" ? req.query.q : "";
+  if (!session) {
+    res.status(400).json({ error: "session query param required" });
+    return;
+  }
+  try {
+    res.json(await fileIndex(session, q));
+  } catch (e) {
+    res.status(500).json({ error: String((e as Error).message ?? e) });
+  }
+});
+
 app.post("/teardown.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   const { session } = (req.body ?? {}) as { session?: string };
@@ -311,6 +393,7 @@ app.post("/teardown.json", async (req: Request, res: Response) => {
   try {
     await deps.teardown(cfg, session);
     watchHub.drop(session);
+    inbox.clear(session);
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: String((e as Error).message ?? e) });

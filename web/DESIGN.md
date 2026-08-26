@@ -20,8 +20,9 @@
    workspace survives; a reply wakes it). The single primary action is ink. Everything else is ink on
    paper.
 3. **Two voices, never confusable.** The agent is full-measure prose with a small label. You are the
-   one bubble (a quiet muted fill, right-aligned). The co-pilot is a dashed card that restates it is
-   read-only every time.
+   one bubble (a quiet muted fill, right-aligned). A **side question** — answered by a separate
+   read-only helper inside the sandbox, never by the agent — is a dashed card that says so every time.
+   (It was called "Co-pilot"; that implied steering, which it cannot do.)
 4. **Show what is alive, never imply history.** No trends, KPI tiles or aggregates. The one
    "dashboard" element is the **capacity strip** — `MSB_MAX_BOXES` slots coloured by the machine in
    each — because it is the present shape of the fleet, not a chart over data that was never stored.
@@ -92,12 +93,20 @@ that precedes them — the bug that made the primary button ink-on-ink. Keep the
   state; `ShellItem` is a terminal panel (`$ cmd`, folded output with line count); `StepItem` is a
   compact row with the argument in a code chip.
 - `YouItem` — muted bubble, labels "Task" / "You".
-- `AskingItem` — amber card; bracketed `[option]` or enumerated choices become one-click answers.
-- `ObserverItem` — dashed card, "Co-pilot · read-only · the agent never sees this".
+- `QuestionCard` — the agent's pause as a real decision control (Claude Code / Cursor shape): one-line
+  question, optional collapsible context, selectable options with number keys and ↑/↓, "Something
+  else…" free text, one explicit **Send answer**. The agent writes a structured question
+  (`lib/question.ts` parses it; legacy `(A)/(B)`, `1)`, `[x]` shapes still work). The sentinel file
+  and the mechanism never appear in the thread — `.agent.*` tool steps are filtered out.
+- `QueuedItem` — a follow-up sent while the agent was mid-turn: dashed bubble, "Queued · delivers when
+  this turn finishes", cancel. The controller holds it and resumes the run the moment it ends.
+- `ObserverItem` — dashed card, "Side question · answered from the sandbox, not by the agent".
 - `WorkingIndicator` — three live-blue dots; label "Starting up" until the first output.
-- **Composer (`SendBar`)** — destination selector *inside* the composer rail (Agent / Co-pilot),
-  hint text on the rail (below it on phones), send button changes with destination (ink / outline /
-  amber when the run is paused). Dashed border in co-pilot mode; amber halo while waiting.
+- **Composer (`SendBar`)** — one input, the agent is the primary destination and is *always*
+  sendable: mid-turn messages queue ("Queue for agent", clock icon) instead of being refused. The
+  secondary chip is **Side question**. `@` (or the @ button) opens `MentionMenu` — the workspace file
+  list from `/files.json`, narrowed as you type, ↑/↓/Enter/Tab/Esc; mentions expand to
+  `/workspace/<path>` references in the message. Dashed border in side-question mode.
 
 ## Motion (`motion/react` + CSS)
 

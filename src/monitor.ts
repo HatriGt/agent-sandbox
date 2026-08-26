@@ -41,6 +41,8 @@ export interface BoxView {
   mem?: string;
   /** Unix seconds of the agent log's last write — when the agent last produced output. Best-effort. */
   lastOutputAt?: number;
+  /** Follow-ups queued by the dashboard while the agent was mid-turn; delivered when it finishes. */
+  queued?: string[];
 }
 
 /**

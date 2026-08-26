@@ -1,5 +1,5 @@
 import * as React from "react";
-import { AlertTriangle, ChevronRight, Eye, FileText, Loader2, Pause, Terminal, Wrench } from "lucide-react";
+import { AlertTriangle, ChevronRight, Clock, FileText, Loader2, MessageCircleQuestion, Terminal, Wrench } from "lucide-react";
 import { resultSummary, type TraceEvent } from "@/lib/trace";
 import { Markdown } from "@/components/ui/markdown";
 import { StreamingMarkdown } from "./StreamingMarkdown";
@@ -258,62 +258,39 @@ export function YouItem({ text, label = "You" }: { text: string; label?: string 
 }
 
 /**
- * Pull inline answer options out of a clarifying question: bracketed `[option]` choices, or a
- * `1) x` / `2. y` enumeration. Capped and de-duplicated; anything long or malformed falls back to a
- * free-text reply (no options).
+ * A follow-up the operator sent while the agent was mid-turn. The controller holds it and delivers it
+ * the moment the current turn finishes; until then it sits in the thread, visibly pending, with a way
+ * to take it back.
  */
-function parseChoices(question: string): string[] {
-  const bracketed = [...question.matchAll(/\[([^\]]{1,48})\]/g)].map((m) => m[1].trim());
-  if (bracketed.length >= 2) return [...new Set(bracketed)].slice(0, 5);
-  const enumerated = [...question.matchAll(/(?:^|\n)\s*\d+[.)]\s*([^\n]{1,48})/g)].map((m) => m[1].trim());
-  if (enumerated.length >= 2) return [...new Set(enumerated)].slice(0, 5);
-  return [];
-}
-
-/** The question the machine is blocked on — the blocking control, so it names the release. */
-export function AskingItem({ question, onAnswer }: { question: string; onAnswer?: (text: string) => void }) {
-  const choices = React.useMemo(() => parseChoices(question), [question]);
+export function QueuedItem({ text, onCancel }: { text: string; onCancel?: () => void }) {
   return (
-    <div className="enter flex flex-col gap-1.5">
-      <span className="label text-attention-text flex items-center gap-1.5">
-        <Pause className="size-3" strokeWidth={2.5} aria-hidden />
-        Paused — the agent needs your answer
-      </span>
-      <div className="border-attention/50 bg-attention/12 max-w-[70ch] rounded-xl border px-5 py-4">
-        <p className="text-foreground text-lead leading-[1.55] whitespace-pre-wrap">{question}</p>
-        {choices.length > 0 && onAnswer ? (
-          <>
-            <div className="mt-3.5 flex flex-wrap gap-2">
-              {choices.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  onClick={() => onAnswer(c)}
-                  className="bg-card text-foreground hover:border-attention hover:bg-attention/15 cursor-pointer rounded-full border px-3.5 py-1.5 text-meta font-medium transition-colors"
-                >
-                  {c}
-                </button>
-              ))}
-            </div>
-            <p className="text-muted-foreground mt-2.5 text-micro">Pick one, or type a different answer below.</p>
-          </>
-        ) : (
-          <p className="text-muted-foreground mt-2.5 text-meta">
-            Nothing happens until you reply below — every tool call is blocked while it waits.
-          </p>
+    <div className="enter flex flex-col items-end gap-1.5">
+      <span className="label text-muted-foreground flex items-center gap-1.5 pr-1">
+        <Clock className="size-3" aria-hidden />
+        Queued · delivers when this turn finishes
+        {onCancel && (
+          <button type="button" onClick={onCancel} className="hover:text-foreground cursor-pointer underline-offset-2 hover:underline">
+            cancel
+          </button>
         )}
+      </span>
+      <div className="text-foreground/80 max-w-[min(72%,60ch)] rounded-2xl rounded-br-md border border-dashed px-4 py-2.5 text-body leading-relaxed whitespace-pre-wrap">
+        {text}
       </div>
     </div>
   );
 }
 
-/** A co-pilot exchange: same thread, unmistakably another voice, and it says so every time. */
+/**
+ * A side question and its answer: a separate read-only helper answering ABOUT the run. Same thread,
+ * unmistakably another voice, and it says so every time — the agent never sees this exchange.
+ */
 export function ObserverItem({ question, answer }: { question: string; answer?: string }) {
   return (
     <div className="enter flex flex-col gap-1.5">
       <span className="label text-muted-foreground flex items-center gap-1.5">
-        <Eye className="size-3" aria-hidden />
-        Co-pilot · read-only · the agent never sees this
+        <MessageCircleQuestion className="size-3" aria-hidden />
+        Side question · answered from the sandbox, not by the agent
       </span>
       <div className="max-w-[70ch] rounded-xl border border-dashed px-5 py-4">
         <p className="text-muted-foreground text-meta italic">{question}</p>

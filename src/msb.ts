@@ -314,8 +314,13 @@ const AGENT_SYS_PROMPT =
   // Interactive Q&A: the ONE way to reach the caller. Everything you need from the outside world —
   // a decision, a missing secret, or a blocker you cannot resolve yourself — goes through this file.
   `This is an interactive session. Your ONLY channel to the caller is the file ${QUESTION_MARK}: ` +
-  "write one clear question (plain text, include the options you are choosing between) as your LAST " +
-  "action, then STOP and end your turn immediately — do not take any further steps after writing it. " +
+  "write one clear question as your LAST action, then STOP and end your turn immediately — do not take " +
+  "any further steps after writing it. Use EXACTLY this shape for the file: line 1 = the question in one " +
+  "sentence; then a blank line; then (optional) 1-4 short lines of context; then a blank line; then the " +
+  "literal line 'Options:' followed by one option per line, each starting with '- ' (2-5 options, each " +
+  "under 80 characters; put the option you recommend first). Omit the Options block only when the answer " +
+  "is genuinely free-form (a value, a name). The caller sees the question as a card with those options " +
+  "as buttons, so never mention this file, its path, or the mechanism in your prose — just ask. " +
   `(Enforcement: while ${QUESTION_MARK} exists, every tool call you attempt is DENIED, so you cannot ` +
   "do more work until the caller answers — writing it and stopping is the only correct move.) " +
   "The caller answers and continues this same session with 'claude -c'; when you " +

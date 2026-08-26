@@ -13,7 +13,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { ChatContainerContent, ChatContainerRoot, ChatContainerScrollAnchor } from "@/components/ui/chat-container";
 import { ScrollButton } from "@/components/ui/scroll-button";
 import type { TraceEvent } from "@/lib/trace";
-import { AskingItem, LifecycleItem, ObserverItem, SayItem, ToolGroup, WorkingIndicator, YouItem } from "./TraceItems";
+import { LifecycleItem, ObserverItem, QueuedItem, SayItem, ToolGroup, WorkingIndicator, YouItem } from "./TraceItems";
+import { QuestionCard } from "./QuestionCard";
 import { ProducedFiles } from "./ProducedFiles";
 import { ThreadSkeleton } from "./Skeletons";
 import { SendBar } from "./SendBar";
@@ -126,15 +127,38 @@ export function Thread({
     }
   };
 
+  // Answering the paused question: echo, then a FORCED resume (never queued — the run is waiting).
+  const [answering, setAnswering] = React.useState(false);
   const answer = React.useCallback(
     (text: string) => {
       onReplied(text);
-      api.resume(box.name, text).catch((e: unknown) =>
-        toast.error("The agent did not get your answer", { description: e instanceof Error ? e.message : String(e) })
-      );
+      setAnswering(true);
+      api
+        .resume(box.name, text, { force: true })
+        .catch((e: unknown) =>
+          toast.error("The agent did not get your answer", { description: e instanceof Error ? e.message : String(e) })
+        )
+        .finally(() => setAnswering(false));
     },
     [box.name, onReplied]
   );
+
+  // Follow-ups queued while the agent was mid-turn (server-held; the fleet poll carries them).
+  const [queued, setQueued] = React.useState<{ id: string; text: string }[] | null>(null);
+  const refreshQueue = React.useCallback(() => {
+    api.inbox(box.name).then((r) => setQueued(r.queued)).catch(() => {});
+  }, [box.name]);
+  React.useEffect(() => {
+    setQueued(null);
+    if ((box.queued?.length ?? 0) > 0) refreshQueue();
+  }, [box.name, box.queued?.length, refreshQueue]);
+  const queuedItems = queued ?? (box.queued ?? []).map((text, i) => ({ id: `fleet-${i}`, text }));
+  const cancelQueued = (id: string) => {
+    api
+      .dequeue(box.name, id.startsWith("fleet-") ? undefined : id)
+      .then((r) => setQueued(r.queued))
+      .catch((e: unknown) => toast.error("Could not cancel", { description: e instanceof Error ? e.message : String(e) }));
+  };
 
   const idle = runState === "idle" && events.length === 0 && !loadingTrace;
 
@@ -245,12 +269,16 @@ export function Thread({
 
             {idle && <IdleEmpty box={box} onNew={onNew} />}
 
-            {question && runState === "waiting" && <AskingItem question={question} onAnswer={answer} />}
+            {question && runState === "waiting" && <QuestionCard question={question} onAnswer={answer} busy={answering} />}
 
             {!sleeping && <ProducedFiles session={box.name} files={artifacts} />}
 
             {pendingReplies.map((r, i) => (
               <YouItem key={`reply-${i}`} text={r} />
+            ))}
+
+            {queuedItems.map((q) => (
+              <QueuedItem key={q.id} text={q.text} onCancel={() => cancelQueued(q.id)} />
             ))}
 
             {asides.map((a, i) => (
@@ -281,6 +309,7 @@ export function Thread({
         sleeping={sleeping}
         onAsk={onAsk}
         onReplied={onReplied}
+        onQueued={refreshQueue}
         onFocusRequest={onFocusRequest}
       />
     </div>

@@ -17,10 +17,13 @@ export default defineConfig({
     // 404'd and silently fell back to the 3s poll, and artifact previews never loaded.
     proxy: Object.fromEntries(
       [
+        "/fleet.json",
         "/monitor.json",
         "/watch.json",
         "/watch.sse",
         "/artifact",
+        "/files.json",
+        "/inbox.json",
         "/ask.json",
         "/resume.json",
         "/teardown.json",

@@ -1,6 +1,7 @@
 import * as React from "react";
 import type { BoxView } from "@/lib/api";
 import { friendlyName, threadTitle } from "@/lib/format";
+import { questionHeadline } from "@/lib/question";
 
 /**
  * Desktop notifications for the two transitions that need a human: a machine pausing on a question,
@@ -43,7 +44,7 @@ export function useNotifications(boxes: BoxView[], onOpen: (name: string) => voi
         const before = prev.current.get(b.name);
         if (!before || before === b.runState) continue;
         if (b.runState === "waiting") {
-          fire(`${friendlyName(b.name)} needs your answer`, b.question ?? threadTitle(b), b.name, onOpen);
+          fire(`${friendlyName(b.name)} needs your answer`, b.question ? questionHeadline(b.question) : threadTitle(b), b.name, onOpen);
         } else if (b.runState === "done") {
           fire(
             `${friendlyName(b.name)} ${b.exitCode ? `exited with code ${b.exitCode}` : "finished"}`,

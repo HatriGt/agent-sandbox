@@ -4,6 +4,7 @@ import type { StableBox } from "@/hooks/useStableBoxes";
 import { prefetchWatch } from "@/hooks/useWatchStream";
 import { friendlyName, roleLabel, shortName, threadSort, threadTitle } from "@/lib/format";
 import { displayState } from "@/lib/lifecycle";
+import { questionHeadline } from "@/lib/question";
 import { StateStamp } from "@/components/ui/stamp";
 import { Bar } from "@/components/thread/Skeletons";
 import { cn } from "@/lib/utils";
@@ -102,7 +103,7 @@ export function MachineList({
                       waiting ? "text-foreground font-medium" : "text-foreground"
                     )}
                   >
-                    {waiting && v.question ? v.question : threadTitle(v)}
+                    {waiting && v.question ? questionHeadline(v.question) : threadTitle(v)}
                   </p>
 
                   <div className="text-muted-foreground mt-1 flex items-center gap-2 text-micro">

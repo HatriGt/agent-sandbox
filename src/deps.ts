@@ -173,10 +173,16 @@ async function boxRepoRefs(cfg: Config, box: string): Promise<Array<{ name: stri
  * resolution: for each repo, find the stored account with access and record owner->token/login and
  * name->owner. Best-effort — a repo with no resolvable account is skipped (no default identity).
  */
-async function resolveCredsForBox(cfg: Config, box: string): Promise<AgentCreds | undefined> {
+export async function resolveCredsForBox(cfg: Config, box: string): Promise<AgentCreds | undefined> {
   const refs = await boxRepoRefs(cfg, box);
-  if (refs.length === 0) return undefined;
   const store = await loadStore(cfg);
+  // Task-only box (no repo dirs): delegate injected the store's DEFAULT account as GH_TOKEN so `gh`
+  // could read PRs etc. Resume must do the same, or the second turn silently loses GitHub auth —
+  // the agent then stops to ask for a credential the controller already holds.
+  if (refs.length === 0) {
+    const d = pickDefaultAccount(store);
+    return d ? { primaryToken: d.token, primaryLogin: d.login } : undefined;
+  }
   const ownerTokens: Record<string, string> = {};
   const ownerLogins: Record<string, string> = {};
   const repoOwners: Record<string, string> = {};
@@ -196,7 +202,16 @@ async function resolveCredsForBox(cfg: Config, box: string): Promise<AgentCreds 
       primaryLogin = confirmed[0].login;
     }
   }
-  if (Object.keys(ownerTokens).length === 0 && Object.keys(repoOwners).length === 0) return undefined;
+  // Repos present but none resolved to an account (e.g. a public clone): still give `gh` a default
+  // account so read-only GitHub calls work, without assigning any per-repo commit identity.
+  if (!primaryToken) {
+    const d = pickDefaultAccount(store);
+    if (d) {
+      primaryToken = d.token;
+      primaryLogin = d.login;
+    }
+  }
+  if (!primaryToken && Object.keys(ownerTokens).length === 0 && Object.keys(repoOwners).length === 0) return undefined;
   return { ownerTokens, ownerLogins, repoOwners, primaryToken, primaryLogin };
 }
 

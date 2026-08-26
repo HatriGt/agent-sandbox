@@ -90,7 +90,7 @@ export function mergeWithMemory(latest: BoxView[], memory: Map<string, BoxView>)
 export function makeFleetReader(
   cfg: Config,
   sweep: () => Promise<BoxView[]>,
-  opts: { ttlMs?: number; now?: () => number } = {}
+  opts: { ttlMs?: number; now?: () => number; decorate?: (boxes: BoxView[]) => BoxView[] } = {}
 ): () => Promise<FleetSnapshot> {
   const ttl = opts.ttlMs ?? 1500;
   const now = opts.now ?? Date.now;
@@ -104,7 +104,8 @@ export function makeFleetReader(
     if (inFlight) return inFlight;
     inFlight = sweep()
       .then((boxes) => {
-        cached = { boxes: mergeWithMemory(boxes, memory), lifecycle, at: now() };
+        const merged = mergeWithMemory(boxes, memory);
+        cached = { boxes: opts.decorate ? opts.decorate(merged) : merged, lifecycle, at: now() };
         return cached;
       })
       .finally(() => {

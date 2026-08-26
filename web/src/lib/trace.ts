@@ -197,7 +197,18 @@ export function parseTrace(rawLog: string): TraceEvent[] {
     if (text) events.push({ kind: "you", text });
   }
   flushProse();
-  return dedupe(events);
+  return dedupe(events).filter((e) => !isMechanism(e));
+}
+
+/**
+ * The agent's control files (`/workspace/.agent.question`, `.agent.task`, …) are how it talks to the
+ * controller — a Write to the question sentinel IS the act of asking. Showing that Write as a step
+ * ("Write .agent.question · File created successfully") leaks the plumbing into a conversation the
+ * operator should read as prose + a question card. Drop those tool events from the rendered trace.
+ */
+const SENTINEL_RE = /(^|\/)\.agent\.[a-z]+(\s|$)/i;
+function isMechanism(e: TraceEvent): boolean {
+  return e.kind === "tool" && !!e.arg && SENTINEL_RE.test(e.arg.trim().split(/\s+/)[0] ?? "");
 }
 
 /**

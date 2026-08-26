@@ -16,6 +16,7 @@ import { motion } from "motion/react";
 import { api, type BoxView, type FleetLifecycle } from "@/lib/api";
 import { friendlyName, shortName, threadSort, threadTitle } from "@/lib/format";
 import { displayState, fmtDuration } from "@/lib/lifecycle";
+import { questionHeadline } from "@/lib/question";
 import { prefetchWatch } from "@/hooks/useWatchStream";
 import { Button } from "@/components/ui/button";
 import { StateStamp } from "@/components/ui/stamp";
@@ -329,7 +330,7 @@ export function Hub({
                       >
                         <StateStamp state={displayState(b)} exitCode={b.exitCode} className="w-24 shrink-0" />
                         <span className="text-foreground min-w-0 flex-1 truncate text-meta">
-                          {b.runState === "waiting" && b.question ? b.question : threadTitle(b)}
+                          {b.runState === "waiting" && b.question ? questionHeadline(b.question) : threadTitle(b)}
                         </span>
                         <span className="stamp text-muted-foreground shrink-0" title={shortName(b.name)}>
                           {friendlyName(b.name)}

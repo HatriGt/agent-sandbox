@@ -21,6 +21,14 @@ export interface BoxView {
   mem?: string;
   /** Unix seconds of the agent's last output (log mtime). */
   lastOutputAt?: number;
+  /** Follow-ups queued while the agent was mid-turn; delivered when it finishes. */
+  queued?: string[];
+}
+
+export interface QueuedMessage {
+  id: string;
+  text: string;
+  at: number;
 }
 
 export interface FleetLifecycle {
@@ -135,8 +143,31 @@ export const api = {
   ask: (session: string, question: string, newThread = false) =>
     post<AskResult>("/ask.json", { session, question, newThread }),
 
-  /** The only way to steer the agent: answers what it is blocked on, or sends a follow-up. */
-  resume: (session: string, message: string) => post<{ output: string }>("/resume.json", { session, message }),
+  /**
+   * The only way to steer the agent: answers what it is blocked on, or sends a follow-up. While the
+   * agent is mid-turn the controller QUEUES the message ({queued:true}) and delivers it when the run
+   * finishes; `force` bypasses the queue (used for answering a question).
+   */
+  resume: (session: string, message: string, opts: { force?: boolean } = {}) =>
+    post<{ output: string; queued?: undefined } | { queued: true; id: string }>("/resume.json", {
+      session,
+      message,
+      force: opts.force,
+    }),
+
+  /** Queued follow-ups for a box. */
+  inbox: (session: string) =>
+    fetch(url("/inbox.json", { session }), { headers: authHeaders }).then(parse<{ queued: QueuedMessage[] }>),
+  dequeue: (session: string, id?: string) =>
+    fetch(url("/inbox.json", id ? { session, id } : { session }), { method: "DELETE", headers: authHeaders }).then(
+      parse<{ queued: QueuedMessage[] }>
+    ),
+
+  /** Workspace files matching `q`, for `@` mentions in the composer. */
+  files: (session: string, q: string, signal?: AbortSignal) =>
+    fetch(url("/files.json", { session, q }), { headers: authHeaders, signal }).then(
+      parse<{ files: string[]; total: number; truncated: boolean }>
+    ),
 
   teardown: (session: string) => post<{ ok: true }>("/teardown.json", { session }),
 

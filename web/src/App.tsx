@@ -85,7 +85,7 @@ export default function App() {
   const [mobileRail, setMobileRail] = React.useState(() => route.view === "chat" && !route.box);
   // A delegate in flight: `known` snapshots box names at submit time; the first NEW session box to
   // appear is ours (a warm claim surfaces within a poll tick, long before delegate.json resolves).
-  const [booting, setBooting] = React.useState<{ task: string; known: Set<string>; warm: boolean } | null>(null);
+  const [booting, setBooting] = React.useState<{ task: string; known: Map<string, string>; warm: boolean } | null>(null);
   const [pending, setPending] = React.useState<{ id: string; task: string }[]>([]);
   const [asides, setAsides] = React.useState<Record<string, Aside[]>>({});
   const [replies, setReplies] = React.useState<Record<string, string[]>>({});
@@ -125,11 +125,19 @@ export default function App() {
     if (selected && !boxes.some((b) => b.name === selected)) navigate({ view: "chat", box: null });
   }, [selected, data, boxes, booting, navigate]);
 
-  // Attach to the delegated box the instant it surfaces. Only a SESSION box can be ours — the pool
-  // maintainer spawns fresh `pool-free` boxes in the background.
+  // Attach to the delegated box the instant it surfaces. Two shapes: a COLD boot is a brand-new
+  // session box; a WARM claim is an EXISTING pool-free box whose role flips to pool-claimed (its name
+  // does not change — the old "first new box" test never matched it, which left the booting
+  // placeholder and the real thread both on screen). Fresh pool-free boxes are the maintainer
+  // refilling the pool and are never ours.
   React.useEffect(() => {
     if (!booting) return;
-    const fresh = boxes.find((b) => !booting.known.has(b.name) && b.role !== "pool-free");
+    const fresh = boxes.find((b) => {
+      if (b.role === "pool-free") return false;
+      const before = booting.known.get(b.name);
+      if (before === undefined) return true; // new session box (cold boot)
+      return before === "pool-free" && b.role === "pool-claimed"; // warm box claimed for us
+    });
     if (!fresh) return;
     navigate({ view: "chat", box: fresh.name });
     setBooting(null);
@@ -408,7 +416,7 @@ export default function App() {
                   onBooting={(task) =>
                     setBooting({
                       task,
-                      known: new Set(boxes.map((b) => b.name)),
+                      known: new Map(boxes.map((b) => [b.name, b.role])),
                       warm: boxes.some((b) => b.role === "pool-free" && /^running$/i.test(b.boxStatus)),
                     })
                   }

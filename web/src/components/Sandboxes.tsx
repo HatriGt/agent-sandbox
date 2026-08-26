@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { api, type FleetLifecycle } from "@/lib/api";
 import { friendlyName, roleLabel, shortName, threadSort, threadTitle } from "@/lib/format";
 import { deadlineLabel, deadlineOf, displayState, fmtDuration } from "@/lib/lifecycle";
+import { questionHeadline } from "@/lib/question";
 import type { StableBox } from "@/hooks/useStableBoxes";
 import { prefetchWatch } from "@/hooks/useWatchStream";
 import { Button } from "@/components/ui/button";
@@ -99,7 +100,7 @@ export function Sandboxes({
                         {displayState(b) === "sleeping" && <span className="text-sleep ml-2">asleep — wakes on reply</span>}
                       </span>
                       <span className="text-foreground mt-1 block text-lead leading-snug">
-                        {b.question ?? b.task ?? "Waiting for an answer"}
+                        {b.question ? questionHeadline(b.question, 200) : b.task ?? "Waiting for an answer"}
                       </span>
                     </span>
                     <span className="text-attention-text shrink-0 text-meta font-semibold">Answer →</span>
@@ -227,7 +228,7 @@ function MachineRow({
         <p className="text-foreground truncate text-meta">
           {box.task ? threadTitle(box) : <span className="text-muted-foreground">No task yet</span>}
         </p>
-        {box.question && <p className="text-attention-text truncate text-micro">Asking: {box.question}</p>}
+        {box.question && <p className="text-attention-text truncate text-micro">Asking: {questionHeadline(box.question)}</p>}
         <p className="stamp text-muted-foreground mt-0.5 md:hidden" title={shortName(box.name)}>
           {friendlyName(box.name)}
           {box.uptime && <span className="ml-2 opacity-70">up {box.uptime}</span>}
