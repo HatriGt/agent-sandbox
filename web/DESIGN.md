@@ -295,3 +295,21 @@ is invented: no analytics, no cost, no history beyond this browser's own session
   refreshes the change list. `GET /tree.json` is the @-mention index without the 40-match limit.
 - Inspiration taken from beautifului.dev: pixel-grid loading state with elapsed time, task-row
   status language, tabbed file/diff panel.
+
+## Round: the workspace as an editor (2026-08-27)
+
+- **Icon theme** (`lib/vscodeIcons.tsx`): brand glyphs from simple-icons in their conventional
+  colours for ~70 languages/tools, name-aware specials (package.json → npm, tsconfig, Dockerfile,
+  .env, README, LICENSE, CHANGELOG, lockfiles, CI workflows, *.test.*), and folders coloured by
+  role (src blue, test green, docs purple, public yellow, components pink, config orange…). `FileMark`
+  now delegates to it, so chips, the dock and mentions all upgraded at once.
+- **WorkspacePane** is laid out like VS Code: activity bar (Explorer · Go to file · Source Control
+  with a change badge · close), sidebar view, editor group with tabs + breadcrumbs + Diff/File/Edit,
+  status bar (branch with ↑↓, changes, files, language, mode). Tree rows have indent guides, repo
+  roots show their branch, folders show the count of changes inside, changed files carry VS Code's
+  M/A/D/U/R letters.
+- **Source Control** (`POST /git.json`, `src/git-ops.ts`): branch strip with ahead/behind and a
+  Push button, commit message (⌘Enter) + "Commit N files" (git add -A && commit as the box's
+  identity), changes list with +/− and status letters (click → diff), last commit and push output.
+- Reference patterns from beautifului.dev applied here: task-row status letters, tabbed code/diff
+  panel, sidebar nav with a gliding active indicator.

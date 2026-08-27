@@ -45,6 +45,7 @@ export default defineConfig({
         "/tree.json",
         "/file.json",
         "/pr/merge.json",
+        "/git.json",
         "/repos.json",
         "/mcp-servers.json",
         "/changes.json",

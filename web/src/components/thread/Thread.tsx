@@ -552,7 +552,7 @@ export function Thread({
       />
       </div>
       <AnimatePresence>
-        {showWorkspace && <WorkspacePane key="workspace" session={box.name} changes={changes} open={openFile} onClose={closeWorkspace} onSaved={refreshChanges} repos={repos.map((r) => r.name)} />}
+        {showWorkspace && <WorkspacePane key="workspace" session={box.name} changes={changes} open={openFile} onClose={closeWorkspace} onSaved={refreshChanges} repos={repos} />}
       </AnimatePresence>
       </div>
     </div>

@@ -23,6 +23,7 @@ import { checkBearer } from "./http-auth.js";
 import { securityHeaders } from "./security-headers.js";
 import { gatherMonitor, gatherWatch, askInBox, driverStateLine, startBoxIfStopped, noteRunning } from "./msb.js";
 import { safeWorkspacePath } from "./artifact.js";
+import { gitStatus, gitCommitAll, gitPush } from "./git-ops.js";
 import { runDelegateFlow } from "./delegate-flow.js";
 import { streamWatch } from "./watch-sse.js";
 import { WatchHub } from "./watch-hub.js";
@@ -781,6 +782,24 @@ app.post("/wake.json", async (req: Request, res: Response) => {
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: String((e as Error).message ?? e) });
+  }
+});
+
+// Source control for one cloned repo, from the workspace pane: status / commit-all / push.
+app.post("/git.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const { session, repo, action, message } = (req.body ?? {}) as { session?: string; repo?: string; action?: string; message?: string };
+  if (!session || !/^[\w.-]+$/.test(session) || !repo) {
+    res.status(400).json({ error: "session and repo are required" });
+    return;
+  }
+  try {
+    if (action === "status") res.json(await gitStatus(cfg, session, repo));
+    else if (action === "commit") res.json(await gitCommitAll(cfg, session, repo, String(message ?? "")));
+    else if (action === "push") res.json({ output: redactor.redact((await gitPush(cfg, session, repo)).output) });
+    else res.status(400).json({ error: "action must be status | commit | push" });
+  } catch (e) {
+    res.status(422).json({ error: redactor.redact(String((e as Error).message ?? e).slice(-500)) });
   }
 });
 

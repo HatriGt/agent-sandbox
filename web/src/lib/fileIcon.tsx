@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { FileIcon } from "@/lib/vscodeIcons";
 
 /**
  * File-type marks for lists: a two-letter monogram in the language's conventional colour, the way
@@ -47,20 +48,9 @@ export function fileKind(path: string): { mark: string; color: string } {
   return KINDS[ext] ?? { mark: ext ? ext.slice(0, 3).toUpperCase() : "·", color: "bg-muted text-muted-foreground" };
 }
 
+/** The file mark used across the console: the VS Code-style icon theme (brand glyphs, coloured). */
 export function FileMark({ path, className }: { path: string; className?: string }) {
-  const k = fileKind(path);
-  return (
-    <span
-      aria-hidden
-      className={cn(
-        "grid size-4 shrink-0 place-items-center rounded-[3px] font-mono text-[8px] leading-none font-bold",
-        k.color,
-        className
-      )}
-    >
-      {k.mark}
-    </span>
-  );
+  return <FileIcon path={path} className={cn("size-4", className)} />;
 }
 
 /** Language hint for the syntax highlighter, from the extension. */

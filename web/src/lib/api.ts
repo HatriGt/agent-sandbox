@@ -49,6 +49,16 @@ export interface ChangedFile {
   additions: number;
   deletions: number;
 }
+export interface GitStatus {
+  repo: string;
+  branch: string;
+  upstream?: string;
+  ahead: number;
+  behind: number;
+  lastCommit?: string;
+  clean: boolean;
+  changed: number;
+}
 export interface FileDiff {
   path: string;
   diff: string;
@@ -304,6 +314,10 @@ export const api = {
     fetch(url("/pr.json", { repo, number: String(number) }), { headers: authHeaders, signal }).then(parse<PullInfo>),
 
   /** Keep (pin) a sandbox until destroyed, or release it. */
+  /** Source control on one cloned repo inside the sandbox. */
+  gitStatus: (session: string, repo: string) => post<GitStatus>("/git.json", { session, repo, action: "status" }),
+  gitCommit: (session: string, repo: string, message: string) => post<{ sha: string; summary: string }>("/git.json", { session, repo, action: "commit", message }),
+  gitPush: (session: string, repo: string) => post<{ output: string }>("/git.json", { session, repo, action: "push" }),
   /** Start a sleeping sandbox now (opening its thread does this automatically). */
   wake: (session: string) => post<{ ok: true }>("/wake.json", { session }),
   /** Every workspace file (flat paths) for the explorer tree. */
