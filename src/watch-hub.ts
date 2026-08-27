@@ -151,7 +151,7 @@ export class WatchHub {
       e.timer = null;
       return;
     }
-    const terminal = e.snap ? isTerminal(e.snap.runState) || e.snap.boxStatus === "missing" : false;
+    const terminal = e.snap ? isTerminal(e.snap.runState) || e.snap.boxStatus === "missing" || e.snap.boxStatus === "stopped" : false;
     const base = terminal ? this.idleTickMs : this.tickMs;
     const backoff = e.failures ? Math.min(base * 2 ** e.failures, 10_000) : base;
     e.timer = setTimeout(() => {

@@ -23,7 +23,7 @@ import { cn } from "@/lib/utils";
 /** A lifecycle moment: a labelled hairline across the column. */
 export function LifecycleItem({ label, detail }: { label: string; detail?: string }) {
   return (
-    <div className="flex items-center gap-3 py-0.5">
+    <div className="enter flex items-center gap-3 py-0.5">
       <span className="label text-muted-foreground shrink-0">{label}</span>
       {detail && <span className="stamp text-muted-foreground/70 truncate">{detail}</span>}
       <span className="bg-border h-px flex-1" aria-hidden />
@@ -66,7 +66,7 @@ export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolea
 
   const names = [...new Set(events.map((e) => e.name))].slice(0, 4).join(" · ");
   return (
-    <div className="min-w-0">
+    <div className="enter min-w-0">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -279,7 +279,7 @@ export function WorkingIndicator({ label = "Working" }: { label?: string }) {
 /** Your turn: the one bubble. A muted fill, right-aligned, so the primary ink stays for actions. */
 export function YouItem({ text, label = "You" }: { text: string; label?: string }) {
   return (
-    <div className="flex flex-col items-end gap-1.5">
+    <div className="enter flex flex-col items-end gap-1.5">
       <span className="label text-muted-foreground pr-1">{label}</span>
       <div className="bg-muted text-foreground max-w-[min(72%,60ch)] rounded-2xl rounded-br-md px-4 py-2.5 text-body leading-relaxed whitespace-pre-wrap">
         {text}

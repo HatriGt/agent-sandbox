@@ -1,5 +1,6 @@
 import * as React from "react";
-import { Check, ChevronDown, Circle, GitPullRequest, X } from "lucide-react";
+import { ArrowRight, Check, ChevronDown, Circle, GitMerge, GitPullRequest, GitPullRequestDraft, X } from "lucide-react";
+import { api, type PullInfo } from "@/lib/api";
 import { AnimatePresence, motion } from "motion/react";
 import type { TestReport, TestStatus } from "@/lib/testReport";
 import { cn } from "@/lib/utils";
@@ -127,24 +128,57 @@ function fmtMs(ms: number): string {
   return `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`;
 }
 
-/** A pull request the agent opened, as a link card. */
+/**
+ * A pull request the agent opened — the way a PR reads on GitHub: state glyph, "#142 Title", then
+ * repo · head → base · +adds −dels · files. Metadata is fetched through a connected account; until it
+ * arrives (or if the repo is private to another account) the card still works as a link.
+ */
 export function PullRequestCard({ url, repo, number }: { url: string; repo: string; number: number }) {
+  const [info, setInfo] = React.useState<PullInfo | null>(null);
+  React.useEffect(() => {
+    const ctrl = new AbortController();
+    api.pull(repo, number, ctrl.signal).then(setInfo).catch(() => {});
+    return () => ctrl.abort();
+  }, [repo, number]);
+  const state = info?.state ?? "open";
+  const Icon = state === "merged" ? GitMerge : state === "draft" ? GitPullRequestDraft : GitPullRequest;
+  const tone =
+    state === "merged" ? "bg-sleep/15 text-sleep" : state === "closed" ? "bg-destructive/10 text-destructive" : state === "draft" ? "bg-muted text-muted-foreground" : "bg-ok/12 text-ok";
   return (
     <a
       href={url}
       target="_blank"
       rel="noreferrer"
-      className="bg-card hover:border-line-strong hover:bg-muted/40 inline-flex max-w-full items-center gap-3 rounded-xl border px-3.5 py-2.5 transition-colors"
+      className="bg-card hover:border-line-strong group flex w-full max-w-[60ch] items-start gap-3 rounded-xl border px-3.5 py-3 transition-colors"
     >
-      <span className="bg-ok/12 text-ok grid size-8 shrink-0 place-items-center rounded-lg">
-        <GitPullRequest className="size-4" aria-hidden />
+      <span className={cn("mt-0.5 grid size-7 shrink-0 place-items-center rounded-md", tone)}>
+        <Icon className="size-4" aria-hidden />
       </span>
-      <span className="min-w-0">
-        <span className="text-foreground block truncate text-meta font-medium">
-          Pull request #{number}
+      <span className="min-w-0 flex-1">
+        <span className="text-foreground flex items-baseline gap-1.5 text-body">
+          <span className="text-muted-foreground shrink-0 tabular">#{number}</span>
+          <span className="truncate font-medium">{info?.title ?? "Pull request"}</span>
         </span>
-        <span className="stamp text-muted-foreground block truncate">{repo}</span>
+        <span className="stamp text-muted-foreground mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+          <span className="truncate">{repo}</span>
+          {info && (
+            <>
+              <span className="opacity-40">·</span>
+              <span className="truncate">
+                {info.head} <span className="opacity-60">→</span> {info.base}
+              </span>
+              <span className="opacity-40">·</span>
+              <span className="text-ok">+{info.additions}</span>
+              <span className="text-destructive">−{info.deletions}</span>
+              <span>
+                {info.changedFiles} {info.changedFiles === 1 ? "file" : "files"}
+              </span>
+              <span className={cn("label rounded px-1.5 py-0.5", tone)}>{state}</span>
+            </>
+          )}
+        </span>
       </span>
+      <ArrowRight className="text-muted-foreground mt-1.5 size-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" aria-hidden />
     </a>
   );
 }

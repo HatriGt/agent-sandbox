@@ -41,6 +41,14 @@ Think about the machine from the operator's side. After a task is delegated ther
 Warm pool: `MSB_POOL_IDLE_TIMEOUT` should be long (`6h`+) because an unclaimed warm box is the whole
 point of the pool; the refill interval keeps one ready even after a max-duration reap.
 
+## A trap worth knowing: `msb exec` wakes a stopped box
+
+Measured: `msb exec <stopped-box> -- cmd` boots the VM, runs the command, and stops it again (metrics
+then show `ran 2.5s`). So *probing* a sleeping box wakes it. The controller therefore never execs into
+a box `msb ls` reports as stopped — the fleet sweep reports it stopped and merges the last-known run
+from memory, and the watch hub short-circuits. Before this, every 3s sweep booted each sleeping box,
+which showed in the UI as sleeping → done → sleeping flicker.
+
 ## What the dashboard shows, and where it comes from
 
 | UI | Source | Certainty |

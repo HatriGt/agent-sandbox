@@ -227,6 +227,14 @@ function CodeBlockCode({
     <>
       <CodeBlockHeader language={language} code={code} />
       {/* Fallback: plain code until the lazy highlighter resolves (or can't highlight this language). */}
+      {/*
+        The console's only `dangerouslySetInnerHTML`. Safe because `highlightedHtml` is never caller
+        markup: it is always shiki's `codeToHtml` output, which escapes the code (`<` -> `&#x3C;`,
+        `&` -> `&#x26;`) and emits only <pre>/<code>/<span> with class/style/tabindex. `code` is
+        untrusted by design (agent output, repo files, web pages), so that property is pinned by
+        test/code-highlight-escaping.test.ts — which also fails if a second such sink appears.
+        Never pass anything but highlighter output through here.
+      */}
       {highlightedHtml ? (
         <div className={classNames} dangerouslySetInnerHTML={{ __html: highlightedHtml }} {...props} />
       ) : (

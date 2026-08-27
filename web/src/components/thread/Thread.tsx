@@ -1,7 +1,10 @@
 import * as React from "react";
 import { ArrowLeft, Clock, Cpu, GitBranch, Hourglass, Loader2, MemoryStick, MoonStar, Pin, PinOff, Plus, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
-import { api, type BoxView, type FleetLifecycle, type WatchSnapshot } from "@/lib/api";
+import { api, type BoxView, type ChangedFile, type FleetLifecycle, type WatchSnapshot } from "@/lib/api";
+import { AnimatePresence } from "motion/react";
+import { ChangesPanel } from "./ChangesPanel";
+import { FilePane } from "./FilePane";
 import { friendlyName, isSleeping, POLL_MS, roleLabel, shortName, threadTitle } from "@/lib/format";
 import { deadlineLabel, deadlineOf, displayState, fmtDuration } from "@/lib/lifecycle";
 import { parseTrace, producedFiles } from "@/lib/trace";
@@ -18,7 +21,6 @@ import { QuestionCard } from "./QuestionCard";
 import { PullRequestCard } from "./TestResultsCard";
 import { RepoPicker } from "@/components/RepoPicker";
 import { findPullRequests } from "@/lib/testReport";
-import { ProducedFiles } from "./ProducedFiles";
 import { ThreadSkeleton } from "./Skeletons";
 import { SendBar } from "./SendBar";
 import { cn } from "@/lib/utils";
@@ -90,6 +92,34 @@ export function Thread({
   const events = React.useMemo(() => parseTrace(snap?.log ?? ""), [snap?.log]);
   const groups = React.useMemo(() => groupTrace(events), [events]);
   const artifacts = React.useMemo(() => producedFiles(events), [events]);
+
+  // What changed: fetched when the thread opens, whenever a Write/Edit lands or the run finishes, and
+  // every 20s while running. Opening a file shows it in the side pane.
+  const [changes, setChanges] = React.useState<ChangedFile[]>([]);
+  const [changesLoading, setChangesLoading] = React.useState(false);
+  const [openFile, setOpenFile] = React.useState<ChangedFile | null>(null);
+  const refreshChanges = React.useCallback(() => {
+    if (sleeping) return;
+    setChangesLoading(true);
+    api
+      .changes(box.name)
+      .then((r) => setChanges(r.files))
+      .catch(() => {})
+      .finally(() => setChangesLoading(false));
+  }, [box.name, sleeping]);
+  React.useEffect(() => {
+    setChanges([]);
+    setOpenFile(null);
+    refreshChanges();
+  }, [box.name, refreshChanges]);
+  React.useEffect(() => {
+    if (!sleeping && (artifacts.length > 0 || box.runState === "done")) refreshChanges();
+  }, [artifacts.length, box.runState, sleeping, refreshChanges]);
+  React.useEffect(() => {
+    if (sleeping || box.runState !== "running") return;
+    const t = window.setInterval(refreshChanges, 20_000);
+    return () => window.clearInterval(t);
+  }, [box.runState, sleeping, refreshChanges]);
   const pendingReplies = React.useMemo(() => {
     const persisted = new Set(events.filter((e) => e.kind === "you").map((e) => e.text.trim()));
     return replies.filter((r) => !persisted.has(r.trim()));
@@ -365,7 +395,8 @@ export function Thread({
         </div>
       )}
 
-      <div className="relative min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1">
+      <div className="relative min-h-0 min-w-0 flex-1">
         <ChatContainerRoot className="relative h-full">
           <ChatContainerContent className="mx-auto w-full max-w-3xl gap-7 px-4 pt-7 pb-12 md:px-6">
             {box.task && <YouItem text={box.task} label="Task" />}
@@ -422,7 +453,9 @@ export function Thread({
               </div>
             )}
 
-            {!sleeping && <ProducedFiles session={box.name} files={artifacts} />}
+            {!sleeping && (
+              <ChangesPanel files={changes} loading={changesLoading} onOpen={setOpenFile} onRefresh={refreshChanges} activePath={openFile?.path} />
+            )}
 
             {pendingReplies.map((r, i) => (
               <YouItem key={`reply-${i}`} text={r} />
@@ -453,6 +486,8 @@ export function Thread({
           </div>
         </ChatContainerRoot>
       </div>
+      <AnimatePresence>{openFile && <FilePane key={openFile.path} session={box.name} file={openFile} onClose={() => setOpenFile(null)} />}</AnimatePresence>
+      </div>
 
       <SendBar
         boxName={box.name}
@@ -463,6 +498,7 @@ export function Thread({
         onReplied={onReplied}
         onQueued={refreshQueue}
         onFocusRequest={onFocusRequest}
+        onReplyFailed={onReplyFailed}
       />
     </div>
   );

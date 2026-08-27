@@ -40,6 +40,33 @@ export interface RepoInfo {
   description?: string;
 }
 
+export interface ChangedFile {
+  path: string;
+  repo?: string;
+  status: "modified" | "added" | "deleted" | "untracked" | "renamed";
+  additions: number;
+  deletions: number;
+}
+export interface FileDiff {
+  path: string;
+  diff: string;
+  untracked: boolean;
+  binary: boolean;
+}
+export interface PullInfo {
+  repo: string;
+  number: number;
+  title: string;
+  state: "open" | "closed" | "merged" | "draft";
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  head: string;
+  base: string;
+  author?: string;
+  url: string;
+}
+
 export type McpTransport = "stdio" | "http" | "sse";
 export interface McpServerView {
   name: string;
@@ -237,6 +264,16 @@ export const api = {
     }
     return res.blob();
   },
+
+  /** Files the agent changed in the sandbox, with +/- counts. */
+  changes: (session: string, signal?: AbortSignal) =>
+    fetch(url("/changes.json", { session }), { headers: authHeaders, signal }).then(parse<{ files: ChangedFile[] }>),
+  /** Unified diff for one file (or `untracked`). */
+  diff: (session: string, path: string, signal?: AbortSignal) =>
+    fetch(url("/diff.json", { session, path }), { headers: authHeaders, signal }).then(parse<FileDiff>),
+  /** Pull request metadata for a card. */
+  pull: (repo: string, number: number, signal?: AbortSignal) =>
+    fetch(url("/pr.json", { repo, number: String(number) }), { headers: authHeaders, signal }).then(parse<PullInfo>),
 
   /** Keep (pin) a sandbox until destroyed, or release it. */
   keep: (session: string, keep: boolean) => post<{ ok: true; kept: boolean }>("/keep.json", { session, keep }),

@@ -108,6 +108,12 @@ that precedes them — the bug that made the primary button ink-on-ink. Keep the
   list from `/files.json`, narrowed as you type, ↑/↓/Enter/Tab/Esc; mentions expand to
   `/workspace/<path>` references in the message. Dashed border in side-question mode.
 
+## Sending
+
+The composer echoes a message the instant Enter is pressed (withdrawn only if delivery fails); the
+controller kicks the run detached instead of waiting for the agent's next boundary. Every new turn
+enters with the same short rise; the state pill crossfades on change.
+
 ## Motion (`motion/react` + CSS)
 
 One idea — liveness — expressed consistently: `breathe` on working dots, the streaming caret, the
@@ -180,12 +186,22 @@ connected accounts' repos, per-repo branch), **auto-attach** when the task names
 **Connected** strip with **Add repo**, which clones into the running sandbox at `/workspace/<name>` with
 the account that can access it and tells the agent at its next turn. `@` mentions search those repos.
 
+## Changes and the file pane
+
+`ChangesPanel` folds what the agent changed — "N files changed · +adds −dels", each file with a
+language monogram (`lib/fileIcon.tsx`), path and its own counts; new/deleted/renamed marked. Clicking
+a file opens `FilePane`, a VS Code-style side panel (46% on desktop, full-screen overlay on phones)
+with **Diff** (two-gutter unified diff from `git diff HEAD`, hunk headers, tinted rows; new files as
+all-added) and **File** (shiki-highlighted content, markdown rendered) tabs, plus download. Data:
+`/changes.json` (git numstat + untracked + loose files), `/diff.json`, `/artifact`.
+
 ## Result cards
 
 A Bash step whose output is a test run (vitest/jest, node:test, pytest, go test) renders as a
 `TestResultsCard` — passed/failed/skipped chips, duration, per-file cases with timing, raw output one
 click away; groups containing one open by default. A PR URL in the transcript becomes a
-`PullRequestCard`. Answering a question hides the card at once and shows "Answer sent — resuming".
+`PullRequestCard` that reads like GitHub: state glyph, `#142 Title`, `repo · head → base · +/- · files`
+(metadata via `/pr.json` through a connected account; a plain link until it arrives). Answering a question hides the card at once and shows "Answer sent — resuming".
 
 ## Keyboard
 

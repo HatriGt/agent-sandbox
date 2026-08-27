@@ -21,15 +21,7 @@ export function checkBearer(authHeader: string | undefined, token: string | unde
   return checkToken(authHeader.slice("Bearer ".length), token);
 }
 
-/**
- * Dashboard auth: allow the token via the `Authorization: Bearer` header (fetch calls) OR a `token`
- * query param (so the page can be opened directly in a browser, which can't set headers on navigation).
- */
-export function checkDashboardAuth(
-  authHeader: string | undefined,
-  queryToken: unknown,
-  token: string | undefined
-): boolean {
-  if (checkBearer(authHeader, token)) return true;
-  return typeof queryToken === "string" && checkToken(queryToken, token);
-}
+// There is deliberately no query-parameter auth helper here. The dashboard once accepted `?token=`
+// so a link could open the console directly; that leaked a root-equivalent secret into browser
+// history, proxy/server logs and Referer headers. Auth is header-only — if a browser API can't set
+// headers (EventSource, <a download>), the client uses fetch instead. Do not add it back.

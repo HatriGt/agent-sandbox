@@ -1030,12 +1030,32 @@ export async function metrics(cfg: Config, box: string) {
  * per-box reads are best-effort (a box can vanish mid-scan) — failures degrade that box's row, not
  * the whole report. Shaping/formatting is delegated to the pure monitor module.
  */
+/**
+ * `msb ls` status of every box as of the last fleet sweep. `msb exec` on a STOPPED box boots it for
+ * the duration of the command and stops it again (measured: "ran 2.5s") — so probing a sleeping box
+ * wakes it, flips its status for a few seconds, and burns a boot. Every reader that would exec
+ * (fleet sweep, watch hub) consults this first and leaves sleeping boxes alone.
+ */
+const lastLsStatus = new Map<string, { status: string; at: number }>();
+export function knownStopped(box: string, maxAgeMs = 15_000): boolean {
+  const e = lastLsStatus.get(box);
+  return !!e && !isRunning(e.status) && Date.now() - e.at < maxAgeMs;
+}
+
 export async function gatherMonitor(cfg: Config): Promise<BoxView[]> {
   const ls = await msb(cfg, ["ls", "--format", "json"], false);
   const entries = parseLsJson(ls.stdout);
+  const now = Date.now();
+  for (const e of entries) lastLsStatus.set(e.name, { status: e.status, at: now });
+  for (const name of [...lastLsStatus.keys()]) if (!entries.some((e) => e.name === name)) lastLsStatus.delete(name);
 
   const views = await Promise.all(
     entries.map(async (e): Promise<BoxView> => {
+      // A stopped box is asleep: do not exec (that would boot it). Report it stopped; the fleet layer
+      // merges its last-known task/question from memory.
+      if (!isRunning(e.status)) {
+        return { name: e.name, role: classifyBox(e.name, false), boxStatus: "Stopped", runState: "idle" };
+      }
       let claimed = false;
       let runState: RunState = "idle";
       let exitCode: number | undefined;
@@ -1261,6 +1281,8 @@ export async function gatherWatch(
   opts: { metrics?: boolean } = {}
 ): Promise<WatchSnapshot> {
   const base: WatchSnapshot = { name: box, boxStatus: "missing", runState: "idle", log: "" };
+  // Asleep per the last fleet sweep: report it without exec'ing (which would boot it).
+  if (knownStopped(box)) return { ...base, boxStatus: "stopped" };
   try {
     const r = await exec(
       cfg,

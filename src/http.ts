@@ -19,6 +19,7 @@ import { makeBridge } from "./server-bridge.js";
 import { deps } from "./deps.js";
 import { refillPool, startPoolMaintainer } from "./pool.js";
 import { checkBearer } from "./http-auth.js";
+import { securityHeaders } from "./security-headers.js";
 import { gatherMonitor, gatherWatch, askInBox, driverStateLine } from "./msb.js";
 import { runDelegateFlow } from "./delegate-flow.js";
 import { streamWatch } from "./watch-sse.js";
@@ -34,6 +35,7 @@ import { viewAccounts, deviceStart, devicePoll } from "./accounts.js";
 import { makeRepoLister, fetchGithubRepos, matchRepos, inferRepos, attachRepoToBox } from "./repos.js";
 import { loadMcpStore, saveMcpStore, normalizeServer, parseMcpImport, viewServers, type McpServer as McpServerDef } from "./mcp-store.js";
 import { listKept, markKept, unmarkKept } from "./claims.js";
+import { listChanges, readDiff, fetchPull } from "./changes.js";
 import { readArtifact } from "./artifact.js";
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -50,6 +52,15 @@ if (!cfg.httpToken) {
 }
 
 const app = express();
+
+// Security headers on EVERY response (static shell, JSON, SSE, artifact bytes) — registered first so
+// nothing, not even an error page, escapes them. The CSP profile is chosen per path; see
+// security-headers.ts for why the console needs a strict script-src in particular.
+app.use((req: Request, res: Response, next) => {
+  for (const [k, v] of Object.entries(securityHeaders(req.path))) res.setHeader(k, v);
+  next();
+});
+
 app.use(express.json());
 
 // One shared tail loop per watched box (see watch-hub.ts): every SSE viewer, /watch.json call and
@@ -60,7 +71,10 @@ const watchHub = new WatchHub({ read: (s) => gatherWatch(cfg, s, undefined, { me
 // sleeping (Stopped-but-resumable) boxes merged from memory.
 // Follow-ups typed while the agent is mid-turn wait here and are delivered when the run finishes.
 const inbox = new Inbox();
-const resumeQuietly = (session: string, message: string) => deps.resume(cfg, session, message, undefined, {});
+// Detached: kicks the run and returns; the transcript streams. (deps.resume would block up to
+// WAIT_TIMEOUT_MS for the agent's next boundary — fine for an MCP tool call, wrong for a chat send.)
+const resumeQuietly = (session: string, message: string) =>
+  deps.resumeDetached ? deps.resumeDetached(cfg, session, message) : deps.resume(cfg, session, message, undefined, {}).then(() => undefined);
 startInboxDelivery({
   inbox,
   read: (s) => watchHub.read(s),
@@ -161,12 +175,11 @@ app.get("/mcp", handle);
 app.delete("/mcp", handle);
 
 // --- Monitoring dashboard (token-protected; poll-based) ---------------------------------------
-// Auth accepts the token via Bearer header (the page's fetch calls) OR a ?token= query param (so the
-// page can be opened directly in a browser, which can't set headers on a navigation). Same secret.
 // Header-only. The dashboard used to accept `?token=` so a page could be opened by URL; that put a
 // root-equivalent secret into browser history, server logs and referrers. The client now keeps the
 // token in local storage and sends it as a bearer header on every call — including the SSE stream
-// (fetch-based) and artifact downloads (fetch + blob) — so the query form is gone.
+// (fetch-based) and artifact downloads (fetch + blob) — so the query form is gone. There is no
+// query-parameter path here and nothing should add one back.
 function dashAuthed(req: Request, res: Response): boolean {
   if (checkBearer(req.headers.authorization, cfg.httpToken)) return true;
   res.status(401).json({ error: "unauthorized" });
@@ -248,8 +261,9 @@ app.get("/watch.json", async (req: Request, res: Response) => {
   }
 });
 
-// Live stream of one box's log over SSE. The browser opens an EventSource (which can't set headers),
-// so auth rides on ?token= exactly like /dashboard. The controller fast-tails the log server-side and
+// Live stream of one box's log over SSE. EventSource can't set headers, so the client reads this
+// stream with fetch instead and sends the bearer header like every other call — auth here is the
+// same header-only dashAuthed guard, never a query param. The controller fast-tails the log server-side and
 // pushes only deltas; the old /watch.json poll stays as the fallback for clients/proxies without SSE.
 app.get("/watch.sse", (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
@@ -278,8 +292,8 @@ app.get("/watch.sse", (req: Request, res: Response) => {
   req.on("close", stop);
 });
 
-// Download / preview a file the agent produced inside a box's /workspace. Same dashAuthed guard as
-// the other data routes (Bearer OR ?token= so a browser download link works). Path handling is
+// Download / preview a file the agent produced inside a box's /workspace. Same header-only dashAuthed
+// guard as the other data routes; the client fetches the bytes and saves them as a blob. Path handling is
 // hostile-input hardened in artifact.ts: pure-layer rejects, then an on-box realpath + regular-file +
 // size check before any bytes are read. Never serves text/html; unknown types force a download.
 app.get("/artifact", async (req: Request, res: Response) => {
@@ -371,7 +385,8 @@ app.post("/resume.json", async (req: Request, res: Response) => {
         return;
       }
     }
-    res.json({ output: await deps.resume(cfg, session, message, undefined, {}) });
+    await resumeQuietly(session, message);
+    res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: String((e as Error).message ?? e) });
   }
@@ -557,6 +572,53 @@ app.post("/mcp-servers.json", async (req: Request, res: Response) => {
     res.json({ servers: viewServers(store) });
   } catch (e) {
     res.status(400).json({ error: String((e as Error).message ?? e) });
+  }
+});
+
+// What the agent changed: per-file +/- and status across the checked-out repos (and loose files).
+app.get("/changes.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const session = typeof req.query.session === "string" ? req.query.session : "";
+  if (!session) {
+    res.status(400).json({ error: "session query param required" });
+    return;
+  }
+  try {
+    res.json({ files: await listChanges(cfg, session) });
+  } catch (e) {
+    res.status(500).json({ error: String((e as Error).message ?? e) });
+  }
+});
+// The unified diff for one file (git diff HEAD), or "untracked" for a new file; path under /workspace.
+app.get("/diff.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const session = typeof req.query.session === "string" ? req.query.session : "";
+  const path = typeof req.query.path === "string" ? req.query.path : "";
+  if (!session || !path) {
+    res.status(400).json({ error: "session and path are required" });
+    return;
+  }
+  try {
+    res.json(await readDiff(cfg, session, path));
+  } catch (e) {
+    res.status(400).json({ error: String((e as Error).message ?? e) });
+  }
+});
+// Pull request metadata for the PR card (through a connected account; cached a minute).
+app.get("/pr.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const repo = typeof req.query.repo === "string" ? req.query.repo : "";
+  const number = Number(req.query.number);
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repo) || !Number.isFinite(number)) {
+    res.status(400).json({ error: "repo (owner/name) and number are required" });
+    return;
+  }
+  try {
+    const info = await fetchPull(cfg, repo, number);
+    if (!info) res.status(404).json({ error: "pull request not reachable with the connected accounts" });
+    else res.json(info);
+  } catch (e) {
+    res.status(500).json({ error: String((e as Error).message ?? e) });
   }
 });
 

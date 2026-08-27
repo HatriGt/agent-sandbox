@@ -452,6 +452,13 @@ export const deps: HandlerDeps = {
     return driveInteractive(cfg, session, interact);
   },
 
+  async resumeDetached(cfg, session, message, secrets) {
+    // Same as `resume` minus the blocking wait for the next boundary: the dashboard streams the
+    // transcript live, so it only needs the run to be kicked off. Returns as soon as claude is
+    // started in the box (a few seconds: wake if asleep, inject creds, exec).
+    const creds = await resolveCredsForBox(cfg, session);
+    await resumeAgentTask(cfg, session, message, undefined, secrets, creds);
+  },
   async teardown(cfg, session) {
     await msbTeardown(cfg, session, stagingPathFor(cfg, session));
   },

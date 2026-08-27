@@ -1,4 +1,5 @@
 import { CircleDot, Pause, Check, X, Circle, MoonStar, type LucideProps } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
 import { cn } from "@/lib/utils";
 import { doneLabel, isFailedExit } from "@/lib/format";
 import type { DisplayState } from "@/lib/lifecycle";
@@ -74,16 +75,25 @@ export function StatePill({
 }) {
   const t = toneOf(state, exitCode);
   const Icon = t.icon;
+  // The pill crossfades when the state flips (working → needs you → done → sleeping) instead of
+  // snapping: a state change is an event worth a beat, and the beat makes it legible.
   return (
-    <span
-      className={cn(
-        "inline-flex h-6 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-micro font-semibold ring-1 ring-inset",
-        t.pill,
-        className
-      )}
-    >
-      <Icon className={cn("size-3 shrink-0", state === "running" && "breathe")} aria-hidden strokeWidth={2.5} />
-      {t.word(exitCode)}
-    </span>
+    <AnimatePresence mode="popLayout" initial={false}>
+      <motion.span
+        key={`${state}-${exitCode ?? ""}`}
+        initial={{ opacity: 0, scale: 0.92 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.92 }}
+        transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+        className={cn(
+          "inline-flex h-6 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-micro font-semibold ring-1 ring-inset",
+          t.pill,
+          className
+        )}
+      >
+        <Icon className={cn("size-3 shrink-0", state === "running" && "breathe")} aria-hidden strokeWidth={2.5} />
+        {t.word(exitCode)}
+      </motion.span>
+    </AnimatePresence>
   );
 }

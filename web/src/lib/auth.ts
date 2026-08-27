@@ -5,6 +5,15 @@
  * lives in `localStorage` and rides as an `Authorization: Bearer` header on every request — never in
  * a URL, so it is out of history, logs and referrers. A `?token=` on first load (old links) is
  * consumed once and stripped from the address bar.
+ *
+ * ACCEPTED RISK, deliberately: `localStorage` is readable by any script that runs on this origin, so
+ * one XSS exfiltrates a root-equivalent secret with no expiry. That is tolerated only because this
+ * is the pre-authentication phase; the mitigations carrying it are (a) a strict CSP with no inline
+ * script and `connect-src 'self'`, so injected script neither runs nor has anywhere to send the
+ * token (src/security-headers.ts), and (b) the single innerHTML sink being escaping-audited
+ * (test/code-highlight-escaping.test.ts). When real user authentication lands, this whole module
+ * should be replaced by short-lived, revocable sessions in an HttpOnly, SameSite cookie — at which
+ * point no token is reachable from JavaScript at all.
  */
 const KEY = "asb-token";
 const listeners = new Set<() => void>();

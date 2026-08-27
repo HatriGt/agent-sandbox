@@ -65,7 +65,8 @@ export function mergeWithMemory(latest: BoxView[], memory: Map<string, BoxView>)
       continue;
     }
     const known = memory.get(b.name);
-    if (b.role === "pool-free" && !known) continue; // never-claimed pool box that died: not a run
+    // A stopped box's role cannot be read (no exec); trust memory, else treat as dead capacity.
+    if (!known) continue;
     if (known) {
       out.push({
         ...known,

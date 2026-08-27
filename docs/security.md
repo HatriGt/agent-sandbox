@@ -53,6 +53,29 @@
 - **Secrets never reach the browser**: tokens are masked in every API response; MCP env/header values
   are masked; the artifact route is confined to `/workspace`.
 
+## Defences in the browser
+
+The console holds the bearer token in `localStorage`, so script injection on this origin is the
+highest-value attack on the product: one XSS inherits the whole controller. `src/security-headers.ts`
+sets, on every response (static shell, JSON, SSE and artifact bytes alike):
+
+- **CSP.** The SPA runs under `script-src 'self'` with no `unsafe-inline` and no `unsafe-eval` — the
+  Vite build emits external modules only, and the highlighter uses shiki's JavaScript regex engine
+  rather than the WASM build, so nothing needs to eval. `connect-src 'self'` means that even a
+  successful injection has nowhere off-origin to post a stolen token. `style-src` keeps
+  `'unsafe-inline'` (shiki bakes token colours into `style=` attributes); inline *style* cannot
+  exfiltrate a token. `frame-ancestors`/`object-src`/`base-uri` are locked down.
+- **Artifact bytes get their own profile**: `default-src 'none'` plus `sandbox`, so files produced
+  inside a VM are served with no origin, no script and no same-origin privileges — on top of the
+  existing `nosniff`, never-`text/html`, force-download handling.
+- **Transport and leak control**: HSTS (one year, `includeSubDomains`, no `preload`), `nosniff`,
+  `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Permissions-Policy` denying device APIs,
+  and `Cross-Origin-Opener-Policy` / `Cross-Origin-Resource-Policy: same-origin`.
+- **The one `dangerouslySetInnerHTML`** in the console (the code block) is fed exclusively by shiki's
+  `codeToHtml`, which escapes the source and emits only `<pre>/<code>/<span>` with `class`/`style`/
+  `tabindex`. Since code shown there is untrusted by design, that property is pinned by
+  `test/code-highlight-escaping.test.ts`, which also fails if a second innerHTML sink is introduced.
+
 ## Known gaps (honest)
 
 - The agent runs as root inside its VM. Harmless to the host, but a compromised run could still read
@@ -61,3 +84,11 @@
   obvious 95% deterministically and to make the rest visible in the transcript.
 - One shared token. Real accounts (per-user tokens, sessions, revocation, audit log) are the next
   authentication milestone.
+- **The token lives in `localStorage`** — readable by any script on the origin, and it never expires.
+  This is a knowingly accepted risk for the pre-authentication phase, held in check by the CSP and
+  the escaping audit above rather than by the storage itself. The fix is not a different storage key:
+  it is the authentication milestone, after which the browser should hold a short-lived, revocable
+  session in an `HttpOnly`, `SameSite` cookie that JavaScript cannot read at all.
+- No rate limiting on the token check. Not currently exploitable — the token is 256 bits of
+  `openssl rand` and the compare is timing-safe — but it would matter the moment tokens get weaker
+  or user-chosen.

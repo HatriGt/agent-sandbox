@@ -36,6 +36,7 @@ export function SendBar({
   onReplied,
   onQueued,
   onFocusRequest,
+  onReplyFailed,
 }: {
   boxName: string;
   runState: RunState;
@@ -45,6 +46,8 @@ export function SendBar({
   onReplied: (text: string) => void;
   onQueued?: () => void;
   onFocusRequest?: (focus: () => void) => void;
+  /** The server could not deliver this reply: the parent drops the optimistic echo. */
+  onReplyFailed?: (text: string) => void;
 }) {
   const busy = runState === "running" && !sleeping;
   const canSide = !sleeping;
@@ -109,15 +112,24 @@ export function SendBar({
       } else {
         setValue("");
         setFiles([]);
-        const res = await api.resume(boxName, message);
-        if ("queued" in res && res.queued) {
-          onQueued?.();
-          toast("Queued for the agent", {
-            description: "It is mid-turn. Your message is delivered the moment this turn finishes.",
-            icon: <Clock className="size-4" />,
-          });
-        } else {
-          onReplied(attached.length ? `${text}\n${attached.map((f) => `@${f}`).join(" ")}` : text);
+        // Echo NOW. The controller wakes/kicks the run in a few seconds; a message that only appears
+        // when the server answers reads as a broken chat. The echo is withdrawn if delivery fails,
+        // and the durable ⟦you⟧ line in the log replaces it once it lands.
+        const echo = attached.length ? `${text}\n${attached.map((f) => `@${f}`).join(" ")}` : text;
+        if (!busy) onReplied(echo);
+        try {
+          const res = await api.resume(boxName, message);
+          if ("queued" in res && res.queued) {
+            if (!busy) onReplyFailed?.(echo);
+            onQueued?.();
+            toast("Queued for the agent", {
+              description: "It is mid-turn. Your message is delivered the moment this turn finishes.",
+              icon: <Clock className="size-4" />,
+            });
+          }
+        } catch (e) {
+          if (!busy) onReplyFailed?.(echo);
+          throw e;
         }
       }
     } catch (e) {

@@ -65,6 +65,8 @@ export interface HandlerDeps {
     secrets?: Record<string, string>,
     interact?: Interact
   ): Promise<string>;
+  /** Continue the in-box session WITHOUT waiting for the next boundary (dashboard / queue / broker). */
+  resumeDetached?(cfg: Config, session: string, message: string, secrets?: Record<string, string>): Promise<void>;
   /** Stop + remove the box. */
   teardown(cfg: Config, session: string): Promise<void>;
   /** Warm pool status line. */
