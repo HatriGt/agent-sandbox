@@ -232,3 +232,22 @@ share work.
 fallback for older controllers), `/watch.sse` (live log, cached + resumable; poll fallback),
 `/ask.json`, `/resume.json`, `/teardown.json`, `/delegate.json`, `/artifact`. Nothing on this page
 is invented: no analytics, no cost, no history beyond this browser's own session storage.
+
+## Round: transcript navigation, changes dock, integrations table (2026-08-27)
+
+- **Conversation minimap** (`thread/ThreadMinimap.tsx`): a rail of ticks, one per turn you sent
+  (task, follow-ups, answered questions), positioned proportionally in the scroller. Hover = preview
+  card (your message + how the agent began its reply); click = smooth jump. Active tick tracks scroll.
+- **Answered questions stay in the transcript**: `agentSh` stamps `⟦ask⟧…⟦/ask⟧` right before the
+  `⟦you⟧` answer, so the parser can fold them into one `AnsweredQuestionItem` — the question, every
+  option, the one you chose highlighted (or your free-text answer).
+- **Changes dock** (`thread/ChangesDock.tsx`): the changed-files summary lives above the composer, not
+  in the conversation — a collapsed bar (monogram stack · N files · +/−) that expands upward into the
+  list; click a file to open the pane. Per-write tool rows stay in the thread.
+- **Integrations** is a settings surface: one search field (`/` focuses it) filtering both tables,
+  sticky sub-nav with counts, filter chips for servers (All/On/Off/stdio/Remote), brand tiles from
+  `simple-icons` (`lib/brandIcon.tsx`, transport glyph fallback), inline edit/rename dialog.
+- **Sleep TTL is visible**: `/fleet.json` exposes `asleepSec` + `lifecycle.sleepTtlSec`; sleeping
+  rows say "gone in 20m" / "destroyed in 20m", kept rows say "kept"; Fleet has "Destroy N sleeping".
+- **No stale shells**: `index.html` is `no-store`, hashed assets immutable; router `errorElement`
+  renders the same recovery screen as the ErrorBoundary.

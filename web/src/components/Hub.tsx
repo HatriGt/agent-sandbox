@@ -275,7 +275,7 @@ export function Hub({
                 </button>
                 {showRepo && (
                   <RepoPicker
-                    className="absolute bottom-full left-0 z-20 mb-2"
+                    className="absolute top-full left-0 z-20 mt-2"
                     selected={picked}
                     onToggle={(r) =>
                       setPicked((prev) =>

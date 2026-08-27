@@ -3,7 +3,6 @@ import { ArrowLeft, Clock, Cpu, GitBranch, Hourglass, Loader2, MemoryStick, Moon
 import { toast } from "sonner";
 import { api, type BoxView, type ChangedFile, type FleetLifecycle, type WatchSnapshot } from "@/lib/api";
 import { AnimatePresence } from "motion/react";
-import { ChangesPanel } from "./ChangesPanel";
 import { FilePane } from "./FilePane";
 import { friendlyName, isSleeping, POLL_MS, roleLabel, shortName, threadTitle } from "@/lib/format";
 import { deadlineLabel, deadlineOf, displayState, fmtDuration } from "@/lib/lifecycle";
@@ -16,7 +15,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { ChatContainerContent, ChatContainerRoot, ChatContainerScrollAnchor } from "@/components/ui/chat-container";
 import { ScrollButton } from "@/components/ui/scroll-button";
 import type { TraceEvent } from "@/lib/trace";
-import { LifecycleItem, ObserverItem, PlanCard, QueuedItem, SayItem, ThinkingItem, ToolGroup, WorkingIndicator, YouItem } from "./TraceItems";
+import { AnsweredQuestionItem, LifecycleItem, ObserverItem, PlanCard, QueuedItem, SayItem, ThinkingItem, ToolGroup, WorkingIndicator, YouItem } from "./TraceItems";
+import { ThreadMinimap, type Turn } from "./ThreadMinimap";
+import { useStickToBottom } from "use-stick-to-bottom";
+import { ChangesDock } from "./ChangesDock";
 import { QuestionCard } from "./QuestionCard";
 import { PullRequestCard } from "./TestResultsCard";
 import { RepoPicker } from "@/components/RepoPicker";
@@ -234,6 +236,20 @@ export function Thread({
 
   const idle = runState === "idle" && events.length === 0 && !loadingTrace;
 
+  // Turns for the minimap: the task plus every message you sent, each with how the agent replied.
+  const stick = useStickToBottom({ resize: "smooth", initial: "instant" });
+  const turns = React.useMemo<Turn[]>(() => {
+    const out: Turn[] = [];
+    if (box.task) out.push({ id: "task", label: "Task", you: box.task, reply: groups.find((g) => g.kind === "say")?.text });
+    groups.forEach((g, i) => {
+      if (g.kind === "you" || g.kind === "asked") {
+        const reply = groups.slice(i + 1).find((x) => x.kind === "say");
+        out.push({ id: `${g.kind}-${i}`, label: g.kind === "asked" ? "Question" : "Follow-up", you: g.kind === "asked" ? `${g.question.split("\n")[0]} → ${g.answer}` : g.text, reply: reply?.kind === "say" ? reply.text : undefined });
+      }
+    });
+    return out;
+  }, [groups, box.task]);
+
   // Keep (pin): the sandbox still sleeps on schedule, but is never reaped — only Destroy removes it.
   const [keptLocal, setKeptLocal] = React.useState<boolean | null>(null);
   React.useEffect(() => setKeptLocal(null), [box.name, box.kept]);
@@ -397,9 +413,14 @@ export function Thread({
 
       <div className="relative flex min-h-0 flex-1">
       <div className="relative min-h-0 min-w-0 flex-1">
-        <ChatContainerRoot className="relative h-full">
+        <ThreadMinimap turns={turns} scrollerRef={stick.scrollRef} />
+        <ChatContainerRoot className="relative h-full" instance={stick}>
           <ChatContainerContent className="mx-auto w-full max-w-3xl gap-7 px-4 pt-7 pb-12 md:px-6">
-            {box.task && <YouItem text={box.task} label="Task" />}
+            {box.task && (
+              <div data-turn="task">
+                <YouItem text={box.task} label="Task" />
+              </div>
+            )}
 
             {loadingTrace && <ThreadSkeleton withTask={!!box.task} />}
 
@@ -426,7 +447,13 @@ export function Thread({
               ) : g.kind === "tools" ? (
                 <ToolGroup key={key} events={g.events} live={runState === "running" && isLast} />
               ) : g.kind === "you" ? (
-                <YouItem key={key} text={g.text} />
+                <div key={key} data-turn={key}>
+                  <YouItem text={g.text} />
+                </div>
+              ) : g.kind === "asked" ? (
+                <div key={key} data-turn={key}>
+                  <AnsweredQuestionItem question={g.question} answer={g.answer} />
+                </div>
               ) : g.kind === "think" ? (
                 <ThinkingItem key={key} text={g.text} live={runState === "running" && isLast} />
               ) : g.kind === "plan" ? (
@@ -453,9 +480,6 @@ export function Thread({
               </div>
             )}
 
-            {!sleeping && (
-              <ChangesPanel files={changes} loading={changesLoading} onOpen={setOpenFile} onRefresh={refreshChanges} activePath={openFile?.path} />
-            )}
 
             {pendingReplies.map((r, i) => (
               <YouItem key={`reply-${i}`} text={r} />
@@ -489,6 +513,7 @@ export function Thread({
       <AnimatePresence>{openFile && <FilePane key={openFile.path} session={box.name} file={openFile} onClose={() => setOpenFile(null)} />}</AnimatePresence>
       </div>
 
+      {!sleeping && <ChangesDock files={changes} loading={changesLoading} onOpen={setOpenFile} onRefresh={refreshChanges} activePath={openFile?.path} />}
       <SendBar
         boxName={box.name}
         runState={runState}
@@ -529,6 +554,7 @@ type ToolEvent = Extract<TraceEvent, { kind: "tool" }>;
 type TraceGroup =
   | { kind: "say"; text: string }
   | { kind: "you"; text: string }
+  | { kind: "asked"; question: string; answer: string }
   | { kind: "lifecycle"; label: string; detail?: string }
   | { kind: "tools"; events: ToolEvent[] }
   | { kind: "think"; text: string }
@@ -544,7 +570,13 @@ function groupTrace(events: TraceEvent[]): TraceGroup[] {
     } else if (e.kind === "lifecycle") {
       out.push({ kind: "lifecycle", label: sentence(e.label), detail: e.detail });
     } else if (e.kind === "you") {
-      out.push({ kind: "you", text: e.text });
+      // An answer to a question the transcript recorded (⟦ask⟧ … ⟦/ask⟧ right before) folds into one
+      // "asked — answered" item, so the decision stays readable when scrolling back.
+      const prev = out[out.length - 1];
+      if (prev?.kind === "asked" && prev.answer === "") prev.answer = e.text;
+      else out.push({ kind: "you", text: e.text });
+    } else if (e.kind === "ask") {
+      out.push({ kind: "asked", question: e.text, answer: "" });
     } else if (e.kind === "think") {
       out.push({ kind: "think", text: e.text });
     } else if (e.kind === "plan") {

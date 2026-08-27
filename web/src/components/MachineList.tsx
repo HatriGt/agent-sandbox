@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from "motion/react";
 import type { StableBox } from "@/hooks/useStableBoxes";
 import { prefetchWatch } from "@/hooks/useWatchStream";
 import { friendlyName, roleLabel, shortName, threadSort, threadTitle } from "@/lib/format";
-import { displayState } from "@/lib/lifecycle";
+import { displayState, fmtDuration } from "@/lib/lifecycle";
 import { questionHeadline } from "@/lib/question";
 import { StateStamp } from "@/components/ui/stamp";
 import { Bar } from "@/components/thread/Skeletons";
@@ -19,6 +19,7 @@ export function MachineList({
   boxes,
   pending,
   selected,
+  sleepTtlSec,
   loading,
   onSelect,
 }: {
@@ -27,6 +28,8 @@ export function MachineList({
   selected: string | null;
   loading: boolean;
   onSelect: (name: string) => void;
+  /** How long a non-kept sleeping sandbox lives before it is destroyed. */
+  sleepTtlSec?: number;
 }) {
   const sorted = [...boxes].sort(threadSort);
 
@@ -93,7 +96,7 @@ export function MachineList({
                   <div className="flex items-center gap-2">
                     <StateStamp state={state} exitCode={v.exitCode} />
                     <span className="label text-muted-foreground ml-auto truncate">
-                      {v.leaving ? "shutting down" : v.kept ? "kept" : state === "sleeping" ? "wakes on reply" : roleLabel(v.role)}
+                      {v.leaving ? "shutting down" : v.kept ? "kept" : state === "sleeping" ? (sleepTtlSec && v.asleepSec != null ? `gone in ${fmtDuration(Math.max(0, sleepTtlSec - v.asleepSec))}` : "wakes on reply") : roleLabel(v.role)}
                     </span>
                   </div>
 

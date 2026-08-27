@@ -25,6 +25,8 @@ export interface BoxView {
   lastOutputAt?: number;
   /** Pinned by the operator: never reaped while asleep; only Destroy removes it. */
   kept?: boolean;
+  /** Seconds this stopped box has been asleep, when known. */
+  asleepSec?: number;
   /** Follow-ups queued while the agent was mid-turn; delivered when it finishes. */
   queued?: string[];
   /** Repositories checked out under /workspace. */
@@ -113,6 +115,8 @@ export interface FleetLifecycle {
   maxDurationSec?: number;
   capacity: number;
   poolSize: number;
+  /** How long a non-kept sandbox may sleep before it is destroyed. */
+  sleepTtlSec?: number;
 }
 
 export interface FleetSnapshot {

@@ -709,6 +709,11 @@ const TASK_MARK = "/workspace/.agent.task"; // the current task/follow-up text, 
 const YOU_MARK_OPEN = "⟦you⟧";
 const YOU_MARK_CLOSE = "⟦/you⟧";
 
+/** The question the operator answered, stamped into the log right before their ⟦you⟧ answer, so the
+ *  transcript keeps question + options + answer together (the sentinel file itself is deleted). */
+const ASK_MARK_OPEN = "⟦ask⟧";
+const ASK_MARK_CLOSE = "⟦/ask⟧";
+
 /** Where the dashboard-configured MCP servers are written inside the box for `claude --mcp-config`. */
 const MCP_CONFIG_PATH = "/root/.agent-mcp.json";
 
@@ -769,7 +774,8 @@ function agentSh(workdir: string, resume: boolean): string {
   // sentinel is a line the trace parser turns into a `you` event; `⟦/you⟧` closes a multi-line
   // message so trailing agent prose is never absorbed into it.
   const echoFollowup = resume
-    ? `{ printf '%s\\n' ${shellQuote(YOU_MARK_OPEN)}; printf '%s\\n' "$AGENT_TASK"; printf '%s\\n' ${shellQuote(YOU_MARK_CLOSE)}; } >> ${AGENT_LOG} && `
+    ? `if [ -s ${QUESTION_MARK} ]; then { printf '%s\\n' ${shellQuote(ASK_MARK_OPEN)}; cat ${QUESTION_MARK}; printf '\\n%s\\n' ${shellQuote(ASK_MARK_CLOSE)}; } >> ${AGENT_LOG}; fi; ` +
+      `{ printf '%s\\n' ${shellQuote(YOU_MARK_OPEN)}; printf '%s\\n' "$AGENT_TASK"; printf '%s\\n' ${shellQuote(YOU_MARK_CLOSE)}; } >> ${AGENT_LOG} && `
     : ``;
   const inner =
     // Record the current task (from env) so `monitor` can report what this box is doing. First run

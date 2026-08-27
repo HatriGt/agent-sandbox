@@ -53,7 +53,7 @@ export interface Deadline {
   /** 0..1 of the window already consumed, for a progress track. */
   fraction?: number;
   /** Which limit produces the deadline. */
-  kind: "max-duration" | "idle" | "none";
+  kind: "max-duration" | "idle" | "sleep" | "none";
   /** Seconds since the agent's last output, when known. */
   quietForSec?: number;
 }
@@ -63,7 +63,11 @@ export interface Deadline {
  * waiting run is bounded by whichever of idle-stop (estimated) and max-duration comes sooner.
  */
 export function deadlineOf(b: BoxView, lc: FleetLifecycle, nowMs = Date.now()): Deadline {
-  if (/^stopped$/i.test(b.boxStatus)) return { kind: "none" };
+  if (/^stopped$/i.test(b.boxStatus)) {
+    // Asleep: destroyed when the sleep TTL runs out, unless kept.
+    if (b.kept || b.asleepSec == null || !lc.sleepTtlSec) return { kind: "none" };
+    return { kind: "sleep", remainingSec: Math.max(0, lc.sleepTtlSec - b.asleepSec), fraction: Math.min(1, b.asleepSec / lc.sleepTtlSec) };
+  }
   const up = parseUptimeSec(b.uptime);
   const cands: Deadline[] = [];
   if (up != null && lc.maxDurationSec) {
@@ -83,5 +87,6 @@ export function deadlineOf(b: BoxView, lc: FleetLifecycle, nowMs = Date.now()): 
 export function deadlineLabel(d: Deadline): string | null {
   if (d.kind === "none" || d.remainingSec == null) return null;
   if (d.kind === "max-duration") return `${fmtDuration(d.remainingSec)} left of the run cap`;
+  if (d.kind === "sleep") return `destroyed in ${fmtDuration(d.remainingSec)} unless kept or woken`;
   return `stops in ~${fmtDuration(d.remainingSec)} if it stays quiet`;
 }

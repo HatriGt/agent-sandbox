@@ -1,11 +1,13 @@
 "use client"
 
 import { cn } from "@/lib/utils"
-import { StickToBottom } from "use-stick-to-bottom"
+import { StickToBottom, type StickToBottomInstance } from "use-stick-to-bottom"
 
 export type ChatContainerRootProps = {
   children: React.ReactNode
   className?: string
+  /** A `useStickToBottom()` instance, when the parent needs the scroller ref (e.g. for a minimap). */
+  instance?: StickToBottomInstance
 } & React.HTMLAttributes<HTMLDivElement>
 
 export type ChatContainerContentProps = {

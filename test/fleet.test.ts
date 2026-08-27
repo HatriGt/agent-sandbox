@@ -61,12 +61,12 @@ test("mergeWithMemory: a never-claimed pool box that died is dropped; a vanished
 test("makeFleetReader: caches within ttl and dedupes concurrent sweeps", async () => {
   let sweeps = 0;
   let t = 0;
-  const cfg = { idleTimeout: "15m", poolIdleTimeout: "6h", maxDuration: "1h", maxBoxes: 5, poolSize: 1 } as Config;
+  const cfg = { idleTimeout: "15m", poolIdleTimeout: "6h", maxDuration: "1h", maxBoxes: 5, poolSize: 1, sleepTtl: "1h" } as Config;
   const read = makeFleetReader(cfg, async () => (sweeps++, [running("a")]), { ttlMs: 1000, now: () => t });
   const [a, b] = await Promise.all([read(), read()]);
   assert.equal(sweeps, 1);
   assert.equal(a, b);
-  assert.deepEqual(a.lifecycle, { idleTimeoutSec: 900, poolIdleTimeoutSec: 21600, maxDurationSec: 3600, capacity: 5, poolSize: 1 });
+  assert.deepEqual(a.lifecycle, { idleTimeoutSec: 900, poolIdleTimeoutSec: 21600, maxDurationSec: 3600, capacity: 5, poolSize: 1, sleepTtlSec: 3600 });
   t = 500;
   await read();
   assert.equal(sweeps, 1, "served from cache inside ttl");

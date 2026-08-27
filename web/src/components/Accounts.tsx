@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
  * actions on the row. "Add account" opens a dialog with the two ways in (Sign in with GitHub when the
  * controller has an OAuth client id; paste a token). Field-level hints live in the dialog.
  */
-export function Accounts({ embedded = false }: { embedded?: boolean }) {
+export function Accounts({ embedded = false, query = "", onCount }: { embedded?: boolean; query?: string; onCount?: (n: number) => void }) {
   const [accounts, setAccounts] = React.useState<AccountView[] | null>(null);
   const [oauth, setOauth] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -30,6 +30,11 @@ export function Accounts({ embedded = false }: { embedded?: boolean }) {
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   }, []);
   React.useEffect(load, [load]);
+  React.useEffect(() => {
+    if (accounts) onCount?.(accounts.length);
+  }, [accounts, onCount]);
+  const q = query.trim().toLowerCase();
+  const visible = (accounts ?? []).filter((a) => !q || [a.login, a.type, ...a.orgs].join(" ").toLowerCase().includes(q));
 
   return (
     <div className={cn(!embedded && "mx-auto max-w-3xl px-5 py-7")}>
@@ -57,9 +62,14 @@ export function Accounts({ embedded = false }: { embedded?: boolean }) {
             <p className="text-foreground mt-3 text-body font-medium">No account connected</p>
             <p className="text-muted-foreground mt-1 text-meta">Sandboxes can only reach public repositories until you add one.</p>
           </div>
+        ) : visible.length === 0 ? (
+          <div className="flex flex-col items-center px-6 py-8 text-center">
+            <p className="text-foreground text-body font-medium">Nothing matches</p>
+            <p className="text-muted-foreground mt-1 text-meta">No account matches “{query.trim()}”.</p>
+          </div>
         ) : (
           <ul className="divide-y">
-            {accounts.map((a) => (
+            {visible.map((a) => (
               <AccountRow key={a.login} account={a} onChanged={setAccounts} />
             ))}
           </ul>

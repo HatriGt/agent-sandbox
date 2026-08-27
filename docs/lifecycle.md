@@ -32,7 +32,7 @@ Think about the machine from the operator's side. After a task is delegated ther
    later — it simply pays a few seconds to restart. The one loss on sleep is the co-pilot (it needs a
    running box), which the UI says plainly.
 4. **Abandoned.** A sleeping box that nobody ever wakes is destroyed after `MSB_SLEEP_TTL` (default
-   `24h`) by the pool maintainer. **Implemented** — and it fixed a real bug: the maintainer used to
+   `1h`, i.e. the run cap; pin a sandbox with **Keep** to hold it) by the pool maintainer. **Implemented** — and it fixed a real bug: the maintainer used to
    treat *any* stopped `pool-*` box as dead and force-remove it, which destroyed sleeping claimed runs
    (the "a reply wakes it" promise was broken). Claims are now recorded on the host
    (`~/.agent-sandbox/claims/<box>`, see `src/claims.ts`), so a stopped box's status as a run is

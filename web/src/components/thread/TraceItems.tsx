@@ -2,6 +2,8 @@ import * as React from "react";
 import { AlertTriangle, Brain, Check, ChevronRight, Circle, CircleDot, Clock, FileText, Loader2, MessageCircleQuestion, Terminal, Wrench } from "lucide-react";
 import type { PlanItem as PlanStep } from "@/lib/trace";
 import { resultSummary, type TraceEvent } from "@/lib/trace";
+import { parseQuestion } from "@/lib/question";
+import { Pause as PauseIcon } from "lucide-react";
 import { parseTestReport } from "@/lib/testReport";
 import { TestResultsCard } from "./TestResultsCard";
 import { AnimatePresence, motion } from "motion/react";
@@ -453,6 +455,51 @@ export function PlanCard({ items, live }: { items: PlanStep[]; live?: boolean })
           </motion.ol>
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+/**
+ * A question the agent asked earlier, kept in the transcript with the options it offered and the
+ * answer you gave — so scrolling back shows the decision, not just a bare reply. Read-only; the
+ * chosen option (or your free-text answer) is highlighted.
+ */
+export function AnsweredQuestionItem({ question, answer }: { question: string; answer: string }) {
+  const parsed = React.useMemo(() => parseQuestion(question), [question]);
+  const chosen = parsed.options.findIndex((o) => o.trim().toLowerCase() === answer.trim().toLowerCase());
+  return (
+    <div className="enter flex flex-col gap-1.5">
+      <span className="label text-muted-foreground flex items-center gap-1.5">
+        <PauseIcon className="size-3" strokeWidth={2.5} aria-hidden />
+        The agent asked — you answered
+      </span>
+      <div className="bg-card max-w-[72ch] rounded-xl border">
+        <div className="px-4 pt-3 pb-2">
+          <p className="text-foreground text-body font-medium text-balance">{parsed.title || question}</p>
+          {parsed.context && <p className="text-muted-foreground mt-1 line-clamp-3 text-meta whitespace-pre-wrap">{parsed.context}</p>}
+        </div>
+        {parsed.options.length > 0 && (
+          <ul className="flex flex-col gap-1 px-2.5 pb-2">
+            {parsed.options.map((opt, i) => {
+              const on = i === chosen;
+              return (
+                <li key={opt} className={cn("flex items-center gap-2.5 rounded-lg border px-3 py-1.5 text-meta", on ? "border-attention bg-attention/12 text-foreground font-medium" : "border-transparent text-muted-foreground")}>
+                  <span className={cn("grid size-4 shrink-0 place-items-center rounded-full border", on ? "border-attention bg-attention text-attention-ink" : "border-line-strong")} aria-hidden>
+                    {on && <Check className="size-2.5" strokeWidth={3} />}
+                  </span>
+                  {opt}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        {chosen < 0 && (
+          <div className="border-t px-4 py-2">
+            <p className="label text-muted-foreground mb-0.5">Your answer</p>
+            <p className="text-foreground text-meta whitespace-pre-wrap">{answer}</p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

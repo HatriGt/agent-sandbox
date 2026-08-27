@@ -1,5 +1,5 @@
 import * as React from "react";
-import { useLocation } from "react-router";
+import { Link, useLocation } from "react-router";
 import {
   Bell,
   BellOff,
@@ -261,13 +261,20 @@ export default function App() {
       >
         <aside className={cn("bg-card flex min-h-0 flex-col overflow-hidden md:border-r", mobileRail ? "flex" : "hidden md:flex")}>
           <div className={cn("flex h-14 shrink-0 items-center gap-2.5 px-3", collapsed && "md:justify-center md:px-0")}>
-            <span className="bg-primary text-primary-foreground grid size-8 shrink-0 place-items-center rounded-lg">
-              <Logo className="size-[18px]" />
-            </span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Link to="/" aria-label="Agent Sandbox home" className="bg-primary text-primary-foreground hover:bg-primary/90 grid size-8 shrink-0 place-items-center rounded-lg transition-colors">
+                  <Logo className="size-[18px]" />
+                </Link>
+              </TooltipTrigger>
+              <TooltipContent side="right">Home page</TooltipContent>
+            </Tooltip>
             {!collapsed && (
               <>
                 <div className="min-w-0 flex-1">
-                  <p className="text-foreground truncate text-body leading-tight font-semibold tracking-[-0.01em]">Agent Sandbox</p>
+                  <Link to="/" className="text-foreground hover:text-live block truncate text-body leading-tight font-semibold tracking-[-0.01em] transition-colors">
+                    Agent Sandbox
+                  </Link>
                   <p className="text-muted-foreground flex items-center gap-1.5 text-micro leading-tight">
                     <span
                       className={cn(
@@ -367,7 +374,7 @@ export default function App() {
                 </p>
               )}
 
-              <MachineList boxes={runs_} pending={pending} selected={view === "box" ? selected : null} loading={loading} onSelect={open} />
+              <MachineList boxes={runs_} pending={pending} selected={view === "box" ? selected : null} loading={loading} onSelect={open} sleepTtlSec={lifecycle.sleepTtlSec} />
 
               {/* Warm capacity is a fact about the fleet, not a run: one quiet line, not a list row. */}
               {warmReady > 0 && (

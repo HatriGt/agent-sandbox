@@ -531,3 +531,11 @@ test("parallel long results do not bleed into each other", () => {
   assert.equal(tools[0].result, a.join("\n"));
   assert.equal(tools[1].result, b.join("\n"));
 });
+
+test("an answered question is kept in the transcript as an ask event before the you answer", () => {
+  const ev = parseTrace(["● session started (model m)", "⟦ask⟧", "Which fix?", "", "Options:", "- Mock the clock", "- Widen the tolerance", "⟦/ask⟧", "⟦you⟧", "Mock the clock", "⟦/you⟧", "Working on it."].join("\n"));
+  const ask = ev.find((e) => e.kind === "ask");
+  assert.ok(ask && ask.kind === "ask" && /Mock the clock/.test(ask.text));
+  const i = ev.findIndex((e) => e.kind === "ask");
+  assert.equal(ev[i + 1].kind, "you");
+});

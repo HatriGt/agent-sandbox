@@ -1,22 +1,26 @@
 import * as React from "react";
-import { Braces, Check, Globe, Loader2, Plug, Plus, Terminal, Trash2, X } from "lucide-react";
+import { Braces, Check, KeyRound, Loader2, Pencil, Plug, Plus, SearchX, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, type McpServerView, type McpTransport } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Bar } from "@/components/thread/Skeletons";
+import { BrandIcon } from "@/lib/brandIcon";
 import { cn } from "@/lib/utils";
 
+export type McpFilter = "all" | "enabled" | "disabled" | "stdio" | "remote";
+
 /**
- * MCP servers as a compact list — transport glyph · name · target · secret keys — with an on/off
- * switch and remove on each row. "Add server" opens one dialog with two tabs: a form, or the
- * `mcpServers` JSON any agentic IDE exports. Hints sit under the fields they explain.
+ * MCP servers as a dense table: brand tile · name (+ transport) · target · secret keys · on/off ·
+ * edit · remove. The parent owns search and filter; this list reports its counts back up. Editing
+ * opens the same form as adding, prefilled, and renaming moves the entry (secrets are kept unless
+ * you type new ones — the masked values never round-trip).
  */
-export function McpServers() {
+export function McpServers({ query = "", filter = "all", onCount }: { query?: string; filter?: McpFilter; onCount?: (total: number, enabled: number) => void }) {
   const [servers, setServers] = React.useState<McpServerView[] | null>(null);
   const [error, setError] = React.useState<string | null>(null);
-  const [adding, setAdding] = React.useState(false);
+  const [dialog, setDialog] = React.useState<{ mode: "add" } | { mode: "edit"; server: McpServerView } | null>(null);
 
   React.useEffect(() => {
     api
@@ -24,6 +28,9 @@ export function McpServers() {
       .then((r) => setServers(r.servers))
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   }, []);
+  React.useEffect(() => {
+    if (servers) onCount?.(servers.length, servers.filter((s) => s.enabled).length);
+  }, [servers, onCount]);
 
   const mutate = async (body: Record<string, unknown>, ok?: string) => {
     const r = await api.mcpMutate(body);
@@ -31,7 +38,16 @@ export function McpServers() {
     if (ok) toast.success(ok);
   };
 
-  const enabled = servers?.filter((s) => s.enabled).length ?? 0;
+  const q = query.trim().toLowerCase();
+  const visible = (servers ?? []).filter((s) => {
+    if (filter === "enabled" && !s.enabled) return false;
+    if (filter === "disabled" && s.enabled) return false;
+    if (filter === "stdio" && s.type !== "stdio") return false;
+    if (filter === "remote" && s.type === "stdio") return false;
+    if (!q) return true;
+    return [s.name, s.type, s.command, ...(s.args ?? []), s.url, ...Object.keys(s.env ?? {}), ...Object.keys(s.headers ?? {})].filter(Boolean).join(" ").toLowerCase().includes(q);
+  });
+
   return (
     <div>
       <div className="bg-card overflow-hidden rounded-xl border">
@@ -42,48 +58,78 @@ export function McpServers() {
         )}
         {servers === null ? (
           <div className="divide-y">
-            {[0, 1].map((i) => (
+            {[0, 1, 2].map((i) => (
               <div key={i} className="flex items-center gap-3 px-4 py-3">
-                <Bar className="size-8 rounded-lg" />
-                <div className="flex-1 space-y-2">
-                  <Bar className="h-3 w-28" />
-                  <Bar className="h-2.5 w-64" />
-                </div>
-                <Bar className="h-5 w-9 rounded-full" />
+                <Bar className="size-9 rounded-lg" />
+                <Bar className="h-3 w-24" />
+                <Bar className="h-2.5 w-56" />
+                <Bar className="ml-auto h-5 w-9 rounded-full" />
               </div>
             ))}
           </div>
         ) : servers.length === 0 ? (
-          <div className="flex flex-col items-center px-6 py-10 text-center">
-            <Plug className="text-muted-foreground size-6" aria-hidden />
-            <p className="text-foreground mt-3 text-body font-medium">No MCP servers</p>
-            <p className="text-muted-foreground mt-1 text-meta">The agent has shell, files, GitHub and web. Add Jira, Slack or a database here.</p>
-          </div>
+          <Empty icon={<Plug className="size-5" />} title="No MCP servers yet" line="The agent already has shell, files, GitHub and the web. Add Jira, Slack, a database…" action={<Button size="sm" onClick={() => setDialog({ mode: "add" })}><Plus />Add server</Button>} />
+        ) : visible.length === 0 ? (
+          <Empty icon={<SearchX className="size-5" />} title="Nothing matches" line={q ? `No server matches “${query.trim()}”${filter !== "all" ? ` in ${filter}` : ""}.` : `No ${filter} servers.`} />
         ) : (
-          <ul className="divide-y">
-            {servers.map((s) => (
-              <ServerRow key={s.name} server={s} onMutate={mutate} />
-            ))}
-          </ul>
+          <table className="w-full table-fixed border-collapse text-left">
+            <thead className="sr-only">
+              <tr>
+                <th>Server</th>
+                <th>Target</th>
+                <th>Secrets</th>
+                <th>Enabled</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {visible.map((s) => (
+                <ServerRow key={s.name} server={s} onMutate={mutate} onEdit={() => setDialog({ mode: "edit", server: s })} />
+              ))}
+            </tbody>
+          </table>
         )}
-        <div className="bg-muted/40 flex items-center justify-between gap-3 border-t px-4 py-2.5">
-          <span className="text-muted-foreground text-micro">{servers?.length ? `${enabled} of ${servers.length} enabled · given to every new run and turn` : "Form, or paste your IDE's mcpServers JSON"}</span>
-          <Button size="sm" onClick={() => setAdding(true)}>
-            <Plus />
-            Add server
-          </Button>
-        </div>
+        {servers !== null && servers.length > 0 && (
+          <div className="bg-muted/40 flex items-center justify-between gap-3 border-t px-4 py-2">
+            <span className="text-muted-foreground text-micro">
+              {visible.length === servers.length ? `${servers.length} server${servers.length === 1 ? "" : "s"}` : `${visible.length} of ${servers.length}`} · {servers.filter((s) => s.enabled).length} on
+            </span>
+            <Button size="sm" onClick={() => setDialog({ mode: "add" })}>
+              <Plus />
+              Add server
+            </Button>
+          </div>
+        )}
       </div>
-      <Dialog open={adding} onOpenChange={setAdding}>
-        <DialogContent title="Add an MCP server" description="Available to the agent inside every sandbox from its next run or turn. Secrets are stored on your server and never shown again.">
-          <AddServer onMutate={mutate} onDone={() => setAdding(false)} />
-        </DialogContent>
+
+      <Dialog open={dialog !== null} onOpenChange={(o) => !o && setDialog(null)}>
+        {dialog?.mode === "add" && (
+          <DialogContent title="Add an MCP server" description="Available to the agent inside every sandbox from its next run or turn. Secrets stay on your server and are never shown again.">
+            <AddServer onMutate={mutate} onDone={() => setDialog(null)} />
+          </DialogContent>
+        )}
+        {dialog?.mode === "edit" && (
+          <DialogContent title={`Edit ${dialog.server.name}`} description="Rename, change the command or URL, or replace secrets. Leave a secret field empty to keep the stored value.">
+            <ServerForm initial={dialog.server} onMutate={mutate} onDone={() => setDialog(null)} />
+          </DialogContent>
+        )}
       </Dialog>
     </div>
   );
 }
 
-function ServerRow({ server: s, onMutate }: { server: McpServerView; onMutate: (b: Record<string, unknown>, ok?: string) => Promise<void> }) {
+function Empty({ icon, title, line, action }: { icon: React.ReactNode; title: string; line: string; action?: React.ReactNode }) {
+  return (
+    <div className="flex flex-col items-center px-6 py-10 text-center">
+      <span className="bg-muted text-muted-foreground grid size-10 place-items-center rounded-lg">{icon}</span>
+      <p className="text-foreground mt-3 text-body font-medium">{title}</p>
+      <p className="text-muted-foreground mt-1 max-w-sm text-meta">{line}</p>
+      {action && <div className="mt-4">{action}</div>}
+    </div>
+  );
+}
+
+function ServerRow({ server: s, onMutate, onEdit }: { server: McpServerView; onMutate: (b: Record<string, unknown>, ok?: string) => Promise<void>; onEdit: () => void }) {
   const [armed, setArmed] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   React.useEffect(() => {
@@ -100,57 +146,77 @@ function ServerRow({ server: s, onMutate }: { server: McpServerView; onMutate: (
         setArmed(false);
       });
   };
-  const Icon = s.type === "stdio" ? Terminal : Globe;
   const target = s.type === "stdio" ? [s.command, ...(s.args ?? [])].join(" ") : s.url ?? "";
   const keys = [...Object.keys(s.env ?? {}), ...Object.keys(s.headers ?? {})];
   return (
-    <li className={cn("flex items-center gap-3 px-4 py-3", !s.enabled && "opacity-60")}>
-      <span className={cn("grid size-8 shrink-0 place-items-center rounded-lg", s.type === "stdio" ? "bg-[#89e051]/15 text-[#3f8f1a] dark:text-[#89e051]" : "bg-live/12 text-live")}>
-        <Icon className="size-4" aria-hidden />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <span className="text-foreground text-body font-medium">{s.name}</span>
-          <span className="label text-muted-foreground">{s.type}</span>
+    <tr className={cn("group transition-colors", !s.enabled && "text-muted-foreground")}>
+      <td className="w-[42%] py-2.5 pl-3 pr-2 align-middle sm:w-[32%]">
+        <div className="flex items-center gap-3">
+          <BrandIcon hint={`${s.name} ${target}`} transport={s.type} className={cn(!s.enabled && "opacity-50 grayscale")} />
+          <div className="min-w-0">
+            <p className={cn("truncate text-body font-medium", s.enabled ? "text-foreground" : "text-muted-foreground")}>{s.name}</p>
+            <p className="label text-muted-foreground whitespace-nowrap">{s.type === "stdio" ? "stdio · local" : `${s.type} · remote`}</p>
+          </div>
         </div>
-        <p className="stamp text-muted-foreground mt-0.5 truncate" title={target}>
+      </td>
+      <td className="hidden py-2.5 pr-2 align-middle sm:table-cell">
+        <p className="stamp text-muted-foreground truncate" title={target}>
           {target}
-          {keys.length > 0 && (
+        </p>
+      </td>
+      <td className="hidden w-[18%] py-2.5 pr-2 align-middle md:table-cell">
+        {keys.length > 0 && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="stamp text-muted-foreground inline-flex max-w-full items-center gap-1 truncate">
+                <KeyRound className="size-3 shrink-0" aria-hidden />
+                <span className="truncate">{keys.join(", ")}</span>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>Stored on the server, masked here</TooltipContent>
+          </Tooltip>
+        )}
+      </td>
+      <td className="w-14 py-2.5 pr-1 align-middle">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button type="button" role="switch" aria-checked={s.enabled} disabled={busy} onClick={() => run({ action: "toggle", name: s.name, enabled: !s.enabled })} className={cn("relative h-5 w-9 cursor-pointer rounded-full transition-colors", s.enabled ? "bg-live" : "bg-muted-foreground/30")} aria-label={s.enabled ? "Disable" : "Enable"}>
+              <span className={cn("bg-card absolute top-0.5 size-4 rounded-full shadow-xs transition-[left]", s.enabled ? "left-[1.125rem]" : "left-0.5")} />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>{s.enabled ? "On — given to every new run and turn" : "Off — kept, not given to the agent"}</TooltipContent>
+        </Tooltip>
+      </td>
+      <td className="w-[5.5rem] py-2.5 pr-2 align-middle">
+        <div className="flex items-center justify-end gap-0.5">
+          {armed ? (
             <>
-              <span className="mx-1.5 opacity-40">·</span>
-              <Lockish /> {keys.join(", ")}
+              <Button size="sm" variant="destructive" onClick={() => run({ action: "remove", name: s.name }, `Removed ${s.name}`)} disabled={busy}>
+                <Trash2 /> Remove
+              </Button>
+              <Button size="icon-sm" variant="ghost" onClick={() => setArmed(false)} aria-label="Cancel">
+                <X />
+              </Button>
+            </>
+          ) : (
+            <>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button size="icon-sm" variant="ghost" onClick={onEdit} aria-label={`Edit ${s.name}`}>
+                    <Pencil />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Edit or rename</TooltipContent>
+              </Tooltip>
+              <Button size="icon-sm" variant="ghost" onClick={() => setArmed(true)} aria-label={`Remove ${s.name}`}>
+                <Trash2 />
+              </Button>
             </>
           )}
-        </p>
-      </div>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button type="button" role="switch" aria-checked={s.enabled} disabled={busy} onClick={() => run({ action: "toggle", name: s.name, enabled: !s.enabled })} className={cn("relative h-5 w-9 cursor-pointer rounded-full transition-colors", s.enabled ? "bg-live" : "bg-muted-foreground/30")} aria-label={s.enabled ? "Disable" : "Enable"}>
-            <span className={cn("bg-card absolute top-0.5 size-4 rounded-full shadow-xs transition-[left]", s.enabled ? "left-[1.125rem]" : "left-0.5")} />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent>{s.enabled ? "On — given to every new run and turn" : "Off — kept, not given to the agent"}</TooltipContent>
-      </Tooltip>
-      {armed ? (
-        <>
-          <Button size="sm" variant="destructive" onClick={() => run({ action: "remove", name: s.name }, `Removed ${s.name}`)} disabled={busy}>
-            <Trash2 /> Remove
-          </Button>
-          <Button size="icon-sm" variant="ghost" onClick={() => setArmed(false)} aria-label="Cancel">
-            <X />
-          </Button>
-        </>
-      ) : (
-        <Button size="icon-sm" variant="ghost" onClick={() => setArmed(true)} aria-label={`Remove ${s.name}`}>
-          <Trash2 />
-        </Button>
-      )}
-    </li>
+        </div>
+      </td>
+    </tr>
   );
-}
-
-function Lockish() {
-  return <span aria-hidden>🔒</span>;
 }
 
 function kvParse(text: string): Record<string, string> {
@@ -189,35 +255,42 @@ function Tab({ active, onClick, icon, label }: { active: boolean; onClick: () =>
 
 const field = "text-foreground placeholder:text-muted-foreground bg-muted focus:ring-ring h-10 w-full rounded-md px-3 text-meta outline-none focus:ring-2";
 
-function ServerForm({ onMutate, onDone }: { onMutate: (b: Record<string, unknown>, ok?: string) => Promise<void>; onDone: () => void }) {
-  const [name, setName] = React.useState("");
-  const [type, setType] = React.useState<McpTransport>("stdio");
-  const [command, setCommand] = React.useState("");
-  const [url, setUrl] = React.useState("");
+/** Add or edit. With `initial`, the form is prefilled and saves with `previousName` so renames move the entry. */
+function ServerForm({ initial, onMutate, onDone }: { initial?: McpServerView; onMutate: (b: Record<string, unknown>, ok?: string) => Promise<void>; onDone: () => void }) {
+  const [name, setName] = React.useState(initial?.name ?? "");
+  const [type, setType] = React.useState<McpTransport>(initial?.type ?? "stdio");
+  const [command, setCommand] = React.useState(initial ? [initial.command, ...(initial.args ?? [])].filter(Boolean).map((p) => (/\s/.test(p!) ? JSON.stringify(p) : p)).join(" ") : "");
+  const [url, setUrl] = React.useState(initial?.url ?? "");
   const [env, setEnv] = React.useState("");
   const [headers, setHeaders] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
+  const storedEnv = Object.keys(initial?.env ?? {});
+  const storedHeaders = Object.keys(initial?.headers ?? {});
   const submit = async () => {
     setBusy(true);
     setErr(null);
     try {
       const parts = (command.trim().match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? []).map((p) => p.replace(/^["']|["']$/g, ""));
+      const newEnv = kvParse(env);
+      const newHeaders = kvParse(headers);
       await onMutate(
         {
           action: "upsert",
+          previousName: initial?.name,
           server: {
             name: name.trim(),
             type,
             command: type === "stdio" ? parts[0] : undefined,
             args: type === "stdio" ? parts.slice(1) : undefined,
             url: type !== "stdio" ? url.trim() : undefined,
-            env: kvParse(env),
-            headers: type !== "stdio" ? kvParse(headers) : undefined,
-            enabled: true,
+            // Empty → keep what is stored (masked values never round-trip); anything typed replaces it.
+            env: Object.keys(newEnv).length || !initial ? newEnv : undefined,
+            headers: type !== "stdio" ? (Object.keys(newHeaders).length || !initial ? newHeaders : undefined) : undefined,
+            enabled: initial?.enabled ?? true,
           },
         },
-        `Added ${name.trim()}`
+        initial ? (initial.name !== name.trim() ? `Renamed to ${name.trim()}` : `Saved ${name.trim()}`) : `Added ${name.trim()}`
       );
       onDone();
     } catch (e) {
@@ -237,7 +310,10 @@ function ServerForm({ onMutate, onDone }: { onMutate: (b: Record<string, unknown
       <div className="grid gap-4 sm:grid-cols-[1fr_auto]">
         <label className="flex flex-col gap-1.5">
           <span className="label text-muted-foreground">Name</span>
-          <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="atlassian" className={cn(field, "font-mono")} />
+          <div className="flex items-center gap-2.5">
+            <BrandIcon hint={`${name} ${command} ${url}`} transport={type} className="size-10" />
+            <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="atlassian" className={cn(field, "font-mono")} />
+          </div>
         </label>
         <div className="flex flex-col gap-1.5">
           <span className="label text-muted-foreground">Transport</span>
@@ -254,7 +330,7 @@ function ServerForm({ onMutate, onDone }: { onMutate: (b: Record<string, unknown
         <label className="flex flex-col gap-1.5">
           <span className="label text-muted-foreground">Command</span>
           <input value={command} onChange={(e) => setCommand(e.target.value)} placeholder="npx -y @modelcontextprotocol/server-postgres" className={cn(field, "font-mono")} />
-          <span className="text-muted-foreground text-micro">Runs inside the sandbox; arguments are split on spaces (quote to keep them together).</span>
+          <span className="text-muted-foreground text-micro">Runs inside the sandbox; arguments split on spaces (quote to keep them together).</span>
         </label>
       ) : (
         <label className="flex flex-col gap-1.5">
@@ -265,13 +341,13 @@ function ServerForm({ onMutate, onDone }: { onMutate: (b: Record<string, unknown
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="flex flex-col gap-1.5">
           <span className="label text-muted-foreground">Environment</span>
-          <textarea value={env} onChange={(e) => setEnv(e.target.value)} rows={3} placeholder={"JIRA_EMAIL=me@example.com\nJIRA_API_TOKEN=…"} className={cn(field, "h-auto resize-none py-2 font-mono")} />
+          <textarea value={env} onChange={(e) => setEnv(e.target.value)} rows={3} placeholder={storedEnv.length ? `Stored: ${storedEnv.join(", ")}\nType KEY=value to replace` : "JIRA_EMAIL=me@example.com\nJIRA_API_TOKEN=…"} className={cn(field, "h-auto resize-none py-2 font-mono")} />
           <span className="text-muted-foreground text-micro">One KEY=value per line.</span>
         </label>
         {type !== "stdio" && (
           <label className="flex flex-col gap-1.5">
             <span className="label text-muted-foreground">Headers</span>
-            <textarea value={headers} onChange={(e) => setHeaders(e.target.value)} rows={3} placeholder={"Authorization=Bearer …"} className={cn(field, "h-auto resize-none py-2 font-mono")} />
+            <textarea value={headers} onChange={(e) => setHeaders(e.target.value)} rows={3} placeholder={storedHeaders.length ? `Stored: ${storedHeaders.join(", ")}\nType Name=value to replace` : "Authorization=Bearer …"} className={cn(field, "h-auto resize-none py-2 font-mono")} />
             <span className="text-muted-foreground text-micro">One Name=value per line.</span>
           </label>
         )}
@@ -284,7 +360,7 @@ function ServerForm({ onMutate, onDone }: { onMutate: (b: Record<string, unknown
       <div className="flex justify-end">
         <Button type="submit" disabled={busy || !name.trim() || (type === "stdio" ? !command.trim() : !url.trim())}>
           {busy ? <Loader2 className="animate-spin" /> : <Check />}
-          Save server
+          {initial ? "Save changes" : "Save server"}
         </Button>
       </div>
     </form>

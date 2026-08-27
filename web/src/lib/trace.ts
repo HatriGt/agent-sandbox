@@ -24,7 +24,9 @@ export type TraceEvent =
   | { kind: "you"; text: string }
   | { kind: "tool"; name: string; arg?: string; result?: string; failed?: boolean }
   | { kind: "think"; text: string }
-  | { kind: "plan"; items: PlanItem[] };
+  | { kind: "plan"; items: PlanItem[] }
+  /** A question the operator answered; the answer follows as the next `you` event. */
+  | { kind: "ask"; text: string };
 
 export interface PlanItem {
   text: string;
@@ -76,6 +78,8 @@ const THINK_OPEN = "⟦think⟧";
 const THINK_CLOSE = "⟦/think⟧";
 const PLAN_OPEN = "⟦plan⟧";
 const PLAN_CLOSE = "⟦/plan⟧";
+const ASK_OPEN = "⟦ask⟧";
+const ASK_CLOSE = "⟦/ask⟧";
 const PLAN_LINE = /^\[( |x|>)\]\s*(.*)$/;
 
 /**
@@ -99,6 +103,7 @@ export function parseTrace(rawLog: string): TraceEvent[] {
   // Same shape for a thinking block and a plan block.
   let think: string[] | null = null;
   let plan: string[] | null = null;
+  let ask: string[] | null = null;
 
   // A log we are shown is a TAIL of the real one. When the cut lands inside a tool_result the block
   // arrives without its `→ Tool: arg` line, and every indented line of real command output would
@@ -150,6 +155,20 @@ export function parseTrace(rawLog: string): TraceEvent[] {
     // CONTENT — e.g. the agent catting its own .agent.log, which nests a copy of the transcript into a
     // tool result. Matching those flipped the parser into a think block and spilled the rest of the
     // result out as prose (bash commands "rendered as plain text").
+    if (ask !== null) {
+      if (line === ASK_CLOSE) {
+        const text = ask.join("\n").trim();
+        if (text) events.push({ kind: "ask", text });
+        ask = null;
+      } else ask.push(line);
+      continue;
+    }
+    if (line === ASK_OPEN) {
+      flushProse();
+      ask = [];
+      target = null;
+      continue;
+    }
     if (line === THINK_OPEN) {
       flushProse();
       think = [];

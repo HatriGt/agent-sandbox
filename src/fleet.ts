@@ -28,6 +28,8 @@ export interface FleetLifecycle {
   capacity: number;
   /** Warm boxes the pool tries to keep ready. */
   poolSize: number;
+  /** How long a non-kept sandbox may sleep before it is destroyed, seconds. */
+  sleepTtlSec?: number;
 }
 
 export interface FleetSnapshot {
@@ -44,6 +46,7 @@ export function lifecycleOf(cfg: Config): FleetLifecycle {
     maxDurationSec: parseDurationSec(cfg.maxDuration),
     capacity: cfg.maxBoxes,
     poolSize: cfg.poolSize,
+    sleepTtlSec: parseDurationSec(cfg.sleepTtl),
   };
 }
 

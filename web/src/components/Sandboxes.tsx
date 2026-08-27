@@ -112,9 +112,12 @@ export function Sandboxes({
         )}
 
         <section aria-labelledby="all">
-          <h2 id="all" className="text-foreground mb-2.5 text-meta font-semibold">
-            All machines
-          </h2>
+          <div className="mb-2.5 flex items-center justify-between">
+            <h2 id="all" className="text-foreground text-meta font-semibold">
+              All machines
+            </h2>
+            {sleeping > 0 && <DestroySleeping boxes={boxes.filter((b) => displayState(b) === "sleeping" && !b.kept && !b.leaving)} onDestroyed={onDestroyed} />}
+          </div>
 
           {loading ? (
             <div className="overflow-hidden rounded-xl border">
@@ -241,7 +244,7 @@ function MachineRow({
           {friendlyName(box.name)}
         </span>
         <span>
-          {box.leaving ? "shutting down" : box.kept ? "kept · wakes on reply" : state === "sleeping" ? "asleep · wakes on reply" : roleLabel(box.role)}
+          {box.leaving ? "shutting down" : box.kept ? "kept · wakes on reply" : state === "sleeping" ? (deadline.kind === "sleep" && deadline.remainingSec != null ? `asleep · destroyed in ${fmtDuration(deadline.remainingSec)}` : "asleep · wakes on reply") : roleLabel(box.role)}
           {box.uptime && <> · {state === "sleeping" ? "ran" : "up"} {box.uptime}</>}
         </span>
         {(box.cpu || box.mem) && (
@@ -261,11 +264,11 @@ function MachineRow({
                 <span className={cn("stamp inline-flex items-center gap-1.5", deadline.remainingSec < 300 ? "text-attention-text" : "text-muted-foreground")}>
                   <Hourglass className="size-3" aria-hidden />
                   {fmtDuration(deadline.remainingSec)}
-                  <span className="opacity-70">{deadline.kind === "idle" ? "if quiet" : "cap"}</span>
+                  <span className="opacity-70">{deadline.kind === "idle" ? "if quiet" : deadline.kind === "sleep" ? "then destroyed" : "cap"}</span>
                 </span>
                 <span className="bg-border block h-1 w-28 overflow-hidden rounded-full">
                   <span
-                    className={cn("block h-full rounded-full transition-[width] duration-700", deadline.kind === "idle" ? "bg-sleep" : "bg-live")}
+                    className={cn("block h-full rounded-full transition-[width] duration-700", deadline.kind === "idle" || deadline.kind === "sleep" ? "bg-sleep" : "bg-live")}
                     style={{ width: `${Math.round((deadline.fraction ?? 0) * 100)}%` }}
                   />
                 </span>
@@ -317,5 +320,41 @@ function MachineRow({
         )}
       </div>
     </li>
+  );
+}
+
+
+/** Bulk clean-up: destroy every sleeping, non-kept sandbox (two clicks). */
+function DestroySleeping({ boxes, onDestroyed }: { boxes: StableBox[]; onDestroyed: (name: string) => void }) {
+  const [armed, setArmed] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+  React.useEffect(() => {
+    if (!armed) return;
+    const t = window.setTimeout(() => setArmed(false), 5000);
+    return () => window.clearTimeout(t);
+  }, [armed]);
+  if (!boxes.length) return null;
+  const run = async () => {
+    if (!armed) return setArmed(true);
+    setBusy(true);
+    let ok = 0;
+    for (const b of boxes) {
+      try {
+        await api.teardown(b.name);
+        onDestroyed(b.name);
+        ok++;
+      } catch (e) {
+        toast.error(`Could not destroy ${friendlyName(b.name)}`, { description: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    toast.success(`Destroyed ${ok} sleeping ${ok === 1 ? "sandbox" : "sandboxes"}`);
+    setBusy(false);
+    setArmed(false);
+  };
+  return (
+    <Button size="sm" variant={armed ? "destructive" : "outline"} onClick={run} disabled={busy}>
+      <Trash2 />
+      {busy ? "Destroying…" : armed ? `Confirm: destroy ${boxes.length} sleeping` : `Destroy ${boxes.length} sleeping`}
+    </Button>
   );
 }

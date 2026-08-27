@@ -34,7 +34,7 @@ import { probeToken } from "./gh-probe.js";
 import { viewAccounts, deviceStart, devicePoll } from "./accounts.js";
 import { makeRepoLister, fetchGithubRepos, matchRepos, inferRepos, attachRepoToBox } from "./repos.js";
 import { loadMcpStore, saveMcpStore, normalizeServer, parseMcpImport, viewServers, type McpServer as McpServerDef } from "./mcp-store.js";
-import { listKept, markKept, unmarkKept } from "./claims.js";
+import { listClaims, listKept, markKept, unmarkKept } from "./claims.js";
 import { listChanges, readDiff, fetchPull } from "./changes.js";
 import { loadRunMetas, saveRunMeta, forgetRunMeta } from "./run-memory.js";
 import { readArtifact } from "./artifact.js";
@@ -91,8 +91,17 @@ const brokerConsider = makeCredentialBroker({
 const readFleet = makeFleetReader(
   cfg,
   async () => {
-    const [boxes, kept] = await Promise.all([gatherMonitor(cfg), listKept(cfg).catch(() => new Set<string>())]);
-    return boxes.map((b) => (kept.has(b.name) ? { ...b, kept: true } : b));
+    const [boxes, kept, claims] = await Promise.all([
+      gatherMonitor(cfg),
+      listKept(cfg).catch(() => new Set<string>()),
+      listClaims(cfg).catch(() => new Map<string, number>()),
+    ]);
+    return boxes.map((b) => ({
+      ...b,
+      ...(kept.has(b.name) ? { kept: true } : {}),
+      // For a stopped box the claim age is (a good proxy for) how long it has been asleep.
+      ...(!/^running$/i.test(b.boxStatus) && claims.has(b.name) ? { asleepSec: claims.get(b.name) } : {}),
+    }));
   },
   {
   decorate: (boxes) =>
@@ -201,17 +210,28 @@ const WEB_DIST = resolve(HERE, "..", "web", "dist");
 const HAS_WEB = existsSync(join(WEB_DIST, "index.html"));
 
 if (HAS_WEB) {
-  app.use("/dashboard", express.static(WEB_DIST, { index: false, maxAge: "1h" }));
+  // Hashed assets are immutable; the HTML shell must never be cached or a browser keeps referencing
+  // a bundle that no longer exists after a deploy (the "old index.js" crash reports).
+  app.use(
+    "/dashboard",
+    express.static(WEB_DIST, {
+      index: false,
+      setHeaders: (res, filePath) => {
+        if (/\/assets\//.test(filePath)) res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        else res.setHeader("Cache-Control", "no-cache");
+      },
+    })
+  );
+  const sendShell = (res: Response) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.sendFile(join(WEB_DIST, "index.html"));
+  };
   // SPA fallback: /dashboard and anything under it that isn't a built asset returns index.html, so
   // a deep link (or a reload on one) still boots the app.
-  app.get(/^\/dashboard(?:\/.*)?$/, (_req: Request, res: Response) => {
-    res.sendFile(join(WEB_DIST, "index.html"));
-  });
+  app.get(/^\/dashboard(?:\/.*)?$/, (_req: Request, res: Response) => sendShell(res));
   // The public landing page is the same SPA at the site root (its assets are absolute under
   // /dashboard/). It carries no data and no token; the console routes stay bearer-guarded.
-  app.get("/", (_req: Request, res: Response) => {
-    res.sendFile(join(WEB_DIST, "index.html"));
-  });
+  app.get("/", (_req: Request, res: Response) => sendShell(res));
 } else {
   app.get("/dashboard", (_req: Request, res: Response) => {
     res
@@ -550,8 +570,17 @@ app.post("/mcp-servers.json", async (req: Request, res: Response) => {
     const action = body.action;
     if (action === "upsert") {
       const s = normalizeServer(body.server as Partial<McpServerDef> & { name: string });
+      // Rename: the entry moves under the new name and the old one goes.
+      const previous = typeof body.previousName === "string" ? body.previousName : "";
+      if (previous && previous !== s.name && store.servers[previous]) {
+        const old = store.servers[previous];
+        s.addedAt = old.addedAt;
+        s.env = s.env ?? old.env;
+        s.headers = s.headers ?? old.headers;
+        delete store.servers[previous];
+      }
       // Keep secret values the form left masked/blank: merge over the stored entry.
-      const prev = store.servers[s.name];
+      const prev = store.servers[s.name] ?? (previous ? undefined : undefined);
       if (prev) {
         s.addedAt = prev.addedAt;
         for (const k of ["env", "headers"] as const) {

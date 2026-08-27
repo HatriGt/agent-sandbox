@@ -171,7 +171,9 @@ export function loadConfig(): Config {
     // Warm boxes should outlive a long lull with no delegations; the maintainer replaces any that the
     // hard max-duration cap reaps. Default well above idleTimeout so the pool doesn't self-drain.
     poolIdleTimeout: req("MSB_POOL_IDLE_TIMEOUT", "6h"),
-    sleepTtl: req("MSB_SLEEP_TTL", "24h"),
+    // Default = the run cap: a non-kept sandbox is gone within an hour of its last activity. Pin it
+    // (Keep) to hold it; raise this to give every run a longer grace period.
+    sleepTtl: req("MSB_SLEEP_TTL", "1h"),
     poolRefillIntervalMs: Number(process.env.MSB_POOL_REFILL_MS ?? "60000"),
     maxDuration: req("MSB_MAX_DURATION", "1h"),
     memory: req("MSB_MEMORY", "1G"),
