@@ -41,14 +41,11 @@ jobs:
       - name: Test
         run: npm test
 
-  # The dashboard is a separate workspace with its own tsconfig and lockfile.
-  # NOTE: not wired into `needs` and not required — see the checklist in CONTRIBUTING.md.
+  # The dashboard is a separate workspace with its own tsconfig and lockfile, so it gets its own job.
+  # Blocking: a console that does not compile should fail the build like anything else.
   web:
     name: web build
     runs-on: ubuntu-latest
-    # Kept non-blocking until the outstanding type errors in the changes/file panes are fixed;
-    # flip this to `false` (or drop it) at that point so a broken console build fails CI.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
