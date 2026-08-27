@@ -1,16 +1,17 @@
 <div align="center">
 
-# agent-sandbox
+# Agent Sandbox
 
-**Delegate a coding task to a real microVM, let an autonomous agent finish it, and watch it happen live.**
+**A cloud sandbox for coding agents — on your own server.**
 
-Hand off work from **whatever agentic IDE you already use** — including your uncommitted working
-tree — to an isolated [microsandbox](https://github.com/microsandbox/microsandbox) microVM on your own
-VPS. Claude Code runs the task inside it, asks you questions when it's genuinely blocked, and streams
-every tool call back to your editor or a web console.
+### Delegate the task. Keep the control.
 
-agent-sandbox is an **MCP server**, so the client is your choice and the protocol is the contract —
-no plugin per editor, no lock-in.
+Hand a coding task to an autonomous agent running inside a throwaway
+[microsandbox](https://github.com/microsandbox/microsandbox) microVM. Watch it work live, answer the
+one question it stops to ask, and get a pull request back.
+
+Start a run **from the dashboard**, **from your coding agent**, or **from a script** — same sandbox,
+same fleet, same live view.
 
 [![CI](https://github.com/HatriGt/agent-sandbox/actions/workflows/ci.yml/badge.svg)](https://github.com/HatriGt/agent-sandbox/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
@@ -18,11 +19,12 @@ no plugin per editor, no lock-in.
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)](tsconfig.json)
 [![MCP](https://img.shields.io/badge/MCP-any%20client-000000)](https://modelcontextprotocol.io)
 [![Isolation](https://img.shields.io/badge/isolation-KVM%20microVM-8A2BE2)](docs/security.md)
+[![Self-hosted](https://img.shields.io/badge/self--hosted-your%20VPS-0E7C5A)](#deploy-the-remote-http-entry)
 
 [**Live console**](https://agent-sandbox.ajeethkumar.dev) · [Security model](docs/security.md) · [Runbook](docs/runbook.md) · [Lifecycle](docs/lifecycle.md)
 
-**Works with** Cursor · VS Code · Windsurf · Zed · Claude Code · Cline · JetBrains · Claude web · CI
-<br><sub>— anything that speaks MCP over stdio or Streamable HTTP.</sub>
+**Works with** Cursor · Claude Code · Codex · VS Code · Windsurf · Zed · Cline · Claude web · CI
+<br><sub>— anything that speaks MCP over stdio or Streamable HTTP. And nothing at all, if you use the dashboard.</sub>
 
 </div>
 
@@ -32,10 +34,10 @@ no plugin per editor, no lock-in.
 
 Handing a task to an autonomous agent usually means one of two bad trades: run it on your own machine
 and hope it doesn't `rm -rf` something, or run it in a container and pretend a shared kernel is a
-boundary. agent-sandbox takes the third option — **one hardware-isolated microVM per run** — and then
-solves the parts that make delegation actually usable:
+boundary. Agent Sandbox takes the third option — **one hardware-isolated microVM per run**, on
+hardware you own — and then solves the parts that make running agents unattended actually usable:
 
-| Problem | What agent-sandbox does |
+| Problem | What Agent Sandbox does |
 |---|---|
 | "Is this safe to run unattended?" | Every run is its own KVM guest kernel. A fork bomb or `rm -rf /` ends at the VM boundary. |
 | "It went quiet for 10 minutes." | NDJSON tool events stream to a live log — `watch`, the fleet `monitor`, and SSE in the console. |
@@ -43,13 +45,38 @@ solves the parts that make delegation actually usable:
 | "What is it doing *right now*?" | `ask` runs a **second, read-only agent** in the same box that reads the diff and log — the driver is never paused. |
 | "I don't want to paste tokens everywhere." | GitHub access is resolved per repo from a login-keyed store; on-demand secrets are injected for one step and never stored. |
 | "A prompt injection could exfiltrate my keys." | A deterministic guard hook denies control-plane edits, credential exfiltration and runtime reconfiguration — no model in the loop. |
+| "I'm away from my desk and it's blocked." | The dashboard is a full control plane, not a log viewer: start runs, answer questions, queue follow-ups, tear boxes down — from a phone. |
+
+## Three ways to start a run
+
+The sandbox is the product; how you reach it is your choice. All three paths hit the same
+orchestrator, produce the same box, and show up in the same fleet view.
+
+| | Start it | Best for |
+|---|---|---|
+| 🖥️ **Dashboard** | Open the console, pick repos, type the task, hit send. Nothing installed. | Kicking off work from anywhere — including a phone — and answering a box that's blocked. |
+| 🧩 **Your coding agent** | `delegate this: <task>` in Cursor, Claude Code, Codex, VS Code, Windsurf, Zed… | Handing off what you're already looking at — the local entry ships your **uncommitted working tree**. |
+| ⚙️ **A script / CI** | `POST /delegate.json` (or `/mcp`) with a bearer token. | Automation: nightly chores, an issue-triage bot, a pipeline step. |
+
+Once a run exists, every surface can drive it: watch the live log, `ask` a read-only co-pilot what
+it's doing, queue a follow-up, answer its question, pin the box, or tear it down.
 
 ## Quickstart
 
-Two ways to run it. Local (stdio) needs nothing but Node; remote (HTTP) needs a VPS with `msb`.
-
 <details open>
-<summary><b>Local — "delegate THIS", including uncommitted changes</b></summary>
+<summary><b>1. Dashboard — no client, no config</b></summary>
+
+Deploy the controller (below), open `https://<ASB_DOMAIN>/dashboard`, paste your `MCP_HTTP_TOKEN`
+once into the token gate, and add a GitHub account. Then type a task and send.
+
+The composer picks up the repos you name — *"fix the flaky retry test in packages/queue"* attaches
+the repo it refers to automatically, so the agent starts with the checkout it was clearly asked
+about instead of hunting for it. You can also pick repos explicitly, or run with no repo at all.
+
+</details>
+
+<details>
+<summary><b>2. Your coding agent — delegate what you're looking at</b></summary>
 
 ```bash
 git clone https://github.com/HatriGt/agent-sandbox.git
@@ -58,7 +85,7 @@ npm ci && npm run build
 cp .env.example .env       # set VPS_SSH to a host that has microsandbox installed
 ```
 
-Then register it with your IDE's MCP config (`~/.cursor/mcp.json`, `.vscode/mcp.json`, Windsurf's
+Register it with your IDE's MCP config (`~/.cursor/mcp.json`, `.vscode/mcp.json`, Windsurf's
 `mcp_config.json`, `claude mcp add` — see [Connect your IDE](#connect-your-ide)):
 
 ```json
@@ -70,19 +97,23 @@ Then register it with your IDE's MCP config (`~/.cursor/mcp.json`, `.vscode/mcp.
 } } }
 ```
 
-Now say **"delegate this: add tests for the parser"** in your IDE's agent chat.
+Now say **"delegate this: add tests for the parser"** in your agent chat. The local entry rsyncs your
+working tree — uncommitted changes included — so you can hand off work that isn't pushed anywhere.
 
 </details>
 
 <details>
-<summary><b>Remote — delegate a git repo from anywhere, plus the web console</b></summary>
+<summary><b>3. A script — one authenticated POST</b></summary>
 
 ```bash
-VPS_SSH_ALIAS=<your-vps-ssh> ./setup.sh   # keys, .env, a generated MCP_HTTP_TOKEN, build
+curl -X POST https://<ASB_DOMAIN>/delegate.json \
+  -H "Authorization: Bearer $MCP_HTTP_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"task":"bump deps and open a PR","repos":[{"repo":"owner/name"}]}'
 ```
 
-Set `ASB_DOMAIN`, point DNS at the VPS, then `docker compose up -d --build`. The console lands on
-`https://<ASB_DOMAIN>/dashboard`. Full walkthrough: [**Deploy the remote (HTTP) entry**](#deploy-the-remote-http-entry).
+Every console action has a route behind it (`/fleet.json`, `/watch.sse`, `/ask.json`,
+`/resume.json`, `/teardown.json`), so anything the dashboard can do, a script can do.
 
 </details>
 
@@ -92,8 +123,9 @@ Set `ASB_DOMAIN`, point DNS at the VPS, then `docker compose up -d --build`. The
 
 ## Contents
 
+- [Three ways to start a run](#three-ways-to-start-a-run) — dashboard · coding agent · script
 - [Why microsandbox](#why-microsandbox) — the runtime evaluation, and what it gave us for free
-- [Architecture](#architecture) — one set of handlers, two transports
+- [Architecture](#architecture) — one set of handlers, every surface on top of them
 - [Tools](#tools) — `delegate` · `status` · `resume` · `monitor` · `watch` · `ask` · …
 - [How delegation flows (A2A)](#how-delegation-flows-a2a) — the blocking wait loop and the question protocol
 - [Connect your IDE](#connect-your-ide) — Cursor, VS Code, Windsurf, Zed, Claude Code, Cline, CI
@@ -108,7 +140,7 @@ Orchestration: a small **TypeScript MCP server** with two entry points that shar
 | Entry | Transport | Use it for | Client |
 |---|---|---|---|
 | `dist/index.js` | stdio (your IDE spawns it) | "delegate **THIS**" — your local working tree incl. uncommitted changes | Any MCP client on your machine — Cursor, VS Code, Windsurf, Zed, Claude Code, Cline… |
-| `dist/http.js` | Streamable HTTP + bearer token | "delegate a **git repo/branch**" from anywhere | Any remote MCP client — your IDE, Claude web, a phone, CI |
+| `dist/http.js` | Streamable HTTP + bearer token | "delegate a **git repo/branch**" from anywhere — **and it serves the dashboard** | The web console, any remote MCP client, a phone, CI |
 
 ## Why microsandbox
 
@@ -135,21 +167,27 @@ Cleanroom and iron-proxy sell as separate products) natively.
 ## Architecture
 
 ```
-Your IDE (stdio) ─ local working tree (rsync) ─┐
-Any MCP client (HTTP + token) ─ git clone ────┤►  handlers (shared) → msb on VPS host
-                                               │
-                                               ▼
-                                      microsandbox microVM (libkrun/KVM)
-                                         • repo copied in (local tree OR fresh git clone)
-                                         • git/npm creds injected (short-lived)
-                                         • Claude Code runs the task → commit/PR (no AI attribution)
-                                         • model calls → ccproxy
-                                               │
-                                      status/logs → resume/follow-ups → teardown
+   Dashboard        Your IDE         Any MCP          Script / CI
+  (HTTP+token)    (stdio, MCP)    client (HTTP)      (HTTP+token)
+        │                │                │                │
+        │        local working tree       │ git clone       │
+        │        (rsync, uncommitted)     │                 │
+        └────────────────┴────────┬───────┴─────────────────┘
+                                  ▼
+                    handlers (shared)  →  msb on the VPS host
+                                  ▼
+                   microsandbox microVM (libkrun/KVM)
+                     • repo copied in (local tree OR fresh clone)
+                     • git/npm creds injected (short-lived)
+                     • Claude Code runs the task → commit/PR
+                     • model calls → ccproxy
+                                  ▼
+          live log · fleet view · ask · resume · follow-ups · teardown
 ```
 
 Both entries register identical tools (`src/handlers.ts`) backed by the same side-effecting deps
-(`src/deps.ts`), so behavior is the same whichever client you use.
+(`src/deps.ts`), and the dashboard's JSON routes call those same handlers — so a run started in the
+browser and a run started from your IDE are the same object, visible and drivable from either.
 
 ## Tools
 
@@ -203,11 +241,17 @@ ssh <vps> "docker exec agent-sandbox npm run ask -- <session> 'what has it chang
 ssh -t <vps> "docker exec -i agent-sandbox npm run ask -- <session>"   # interactive, stdin
 ```
 
-**Web dashboard.** The HTTP entry also serves the console at `/dashboard` (and a public landing page at
-`/`). Open `https://<ASB_DOMAIN>/dashboard`, paste `MCP_HTTP_TOKEN` once into the token gate, and the
-browser keeps it and sends it as a bearer header on every call; `?token=` is no longer accepted. The
-console streams each box live over SSE, shows the fleet, GitHub accounts and MCP servers
-(Integrations), and lets you answer the agent's questions. See `docs/security.md` and `web/DESIGN.md`.
+**Web dashboard — a full control plane, not a log viewer.** The HTTP entry serves the console at
+`/dashboard` (and a public landing page at `/`). It is a first-class way to *use* the product, not
+just to observe it: **start a run** (repo picker, or let the composer infer the repo from the task
+text), stream each box live over SSE, `ask` the read-only co-pilot, queue follow-ups, answer a
+blocked agent, pin a box so it is never reaped, browse and download the files a run produced, and
+manage GitHub accounts and MCP servers under Integrations. It works on a phone, which is the point —
+a run you started this morning can be unblocked from wherever you are.
+
+Open `https://<ASB_DOMAIN>/dashboard`, paste `MCP_HTTP_TOKEN` once into the token gate; the browser
+keeps it and sends it as a bearer header on every call (`?token=` is not accepted). See
+`docs/security.md` and `web/DESIGN.md`.
 
 **Reactive GitHub auth — no default account.** There is no baked GitHub token or git identity. Access
 is resolved **per repo** from a login-keyed store on the VPS: on the first delegation to a repo no
