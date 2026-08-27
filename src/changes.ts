@@ -39,7 +39,7 @@ for g in */.git; do
   done
 done
 echo "@@loose"
-find . -maxdepth 3 -type f -not -path './*/.git/*' -not -name '.agent.*' -not -path './node_modules/*' 2>/dev/null | while IFS= read -r f; do
+find . -maxdepth 3 -type f -not -path './*/.git/*' -not -name '.agent.*' -not -path './node_modules/*' -not -path './.attachments/*' 2>/dev/null | while IFS= read -r f; do
   f=\${f#./}
   top=\${f%%/*}
   [ -d "$top/.git" ] && continue

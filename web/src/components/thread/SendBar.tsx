@@ -1,5 +1,6 @@
 import * as React from "react";
-import { ArrowUp, AtSign, Clock, MessageCircleQuestion, Terminal, X } from "lucide-react";
+import { ArrowUp, AtSign, Clock, ImagePlus, Loader2, MessageCircleQuestion, Terminal, X } from "lucide-react";
+import { ATTACHMENTS_DIR } from "@/lib/session-context";
 import { FileMark } from "@/lib/fileIcon";
 import { toast } from "sonner";
 import { api, type RunState } from "@/lib/api";
@@ -57,6 +58,34 @@ export function SendBar({
   const [sending, setSending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [mention, setMention] = React.useState<MentionState | null>(null);
+  // Images pasted, dropped or picked: kept as data URLs for the preview, uploaded into the sandbox on
+  // send (/workspace/.attachments) and referenced in the message so the agent opens them with Read.
+  const [images, setImages] = React.useState<{ id: string; name: string; dataUrl: string; size: number }[]>([]);
+  const [dragOver, setDragOver] = React.useState(false);
+  const fileInput = React.useRef<HTMLInputElement>(null);
+  const addImages = React.useCallback((list: Iterable<File>) => {
+    for (const f of list) {
+      if (!f.type.startsWith("image/")) continue;
+      if (f.size > 8 * 1024 * 1024) {
+        toast.error(`${f.name || "image"} is over 8 MB`);
+        continue;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        const ext = (f.type.split("/")[1] || "png").replace("jpeg", "jpg");
+        const stem = (f.name || "pasted").replace(/\.[^.]+$/, "").replace(/[^\w.-]+/g, "-").slice(0, 40) || "image";
+        setImages((prev) => [...prev, { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: `${stem}.${ext}`, dataUrl: String(reader.result), size: f.size }]);
+      };
+      reader.readAsDataURL(f);
+    }
+  }, []);
+  const onPaste = (e: React.ClipboardEvent) => {
+    const files = [...(e.clipboardData?.items ?? [])].filter((i) => i.kind === "file" && i.type.startsWith("image/")).map((i) => i.getAsFile()).filter((f): f is File => !!f);
+    if (files.length) {
+      e.preventDefault();
+      addImages(files);
+    }
+  };
   // Files the message refers to — shown as removable chips above the text (Cursor's context pills),
   // not as `@path` tokens buried in prose. They travel with the message as explicit references.
   const [files, setFiles] = React.useState<string[]>([]);
@@ -100,23 +129,37 @@ export function SendBar({
 
   const send = async () => {
     const text = value.trim();
-    if ((!text && !files.length) || sending) return;
+    if ((!text && !files.length && !images.length) || sending) return;
     setSending(true);
     setError(null);
-    const message = expandMentions(files.length ? `${text}\n\nFiles: ${files.map((f) => `@${f}`).join(" ")}` : text);
     const attached = files;
+    const attachedImages = images;
+    let message = expandMentions(files.length ? `${text}\n\nFiles: ${files.map((f) => `@${f}`).join(" ")}` : text);
     try {
+      // Upload images first so the message can name their in-box paths.
+      if (attachedImages.length) {
+        const stamp = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
+        const paths: string[] = [];
+        for (const [i, img] of attachedImages.entries()) {
+          const rel = `${ATTACHMENTS_DIR}/${stamp}-${i + 1}-${img.name}`;
+          await api.writeFile(boxName, rel, img.dataUrl, "base64");
+          paths.push(`/workspace/${rel}`);
+        }
+        message = `${message}${message ? "\n\n" : ""}Attached ${paths.length === 1 ? "image" : "images"} (open with the Read tool):\n${paths.map((p) => `- ${p}`).join("\n")}`;
+      }
       if (!toAgent) {
         setValue("");
         setFiles([]);
+        setImages([]);
         onAsk(message);
       } else {
         setValue("");
         setFiles([]);
+        setImages([]);
         // Echo NOW. The controller wakes/kicks the run in a few seconds; a message that only appears
         // when the server answers reads as a broken chat. The echo is withdrawn if delivery fails,
         // and the durable ⟦you⟧ line in the log replaces it once it lands.
-        const echo = attached.length ? `${text}\n${attached.map((f) => `@${f}`).join(" ")}` : text;
+        const echo = (attached.length ? `${text}\n${attached.map((f) => `@${f}`).join(" ")}` : text) + (message.includes("Attached image") ? message.slice(message.indexOf("Attached image") - 2) : "");
         if (!busy) onReplied(echo);
         try {
           const res = await api.resume(boxName, message);
@@ -138,6 +181,7 @@ export function SendBar({
       setError(msg);
       setValue(text);
       setFiles(attached);
+      setImages(attachedImages);
       toast.error("Could not send", { description: msg });
     } finally {
       setSending(false);
@@ -151,7 +195,7 @@ export function SendBar({
       : toAgent
         ? busy
           ? "The agent is mid-turn. Your message is queued and delivered when this turn finishes."
-          : "Enter to send · @ to mention a file"
+          : "Enter to send · Shift+Enter for a new line · paste or drop images"
         : "Answered by a separate read-only helper inside the sandbox. The agent is not interrupted.";
 
   return (
@@ -173,9 +217,41 @@ export function SendBar({
           className={cn(
             "bg-card rounded-2xl p-2 shadow-xs transition-[border-color,box-shadow] duration-300",
             toAgent ? "border-line-strong" : "border-border border-dashed",
-            sleeping && "border-sleep/50"
+            sleeping && "border-sleep/50",
+            dragOver && "border-live ring-live/30 ring-2"
           )}
+          onPaste={onPaste}
+          onDragOver={(e) => {
+            if ([...e.dataTransfer.items].some((i) => i.type.startsWith("image/"))) {
+              e.preventDefault();
+              setDragOver(true);
+            }
+          }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragOver(false);
+            addImages(e.dataTransfer.files);
+          }}
         >
+          {images.length > 0 && (
+            <div className="flex flex-wrap gap-2 px-2 pt-1.5" onClick={(e) => e.stopPropagation()}>
+              {images.map((img) => (
+                <span key={img.id} className="enter group relative block size-16 overflow-hidden rounded-lg border" title={img.name}>
+                  <img src={img.dataUrl} alt={img.name} className="size-full object-cover" />
+                  <span className="stamp absolute inset-x-0 bottom-0 truncate bg-black/55 px-1 py-px text-[9px] text-white">{img.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => setImages((prev) => prev.filter((x) => x.id !== img.id))}
+                    aria-label={`Remove ${img.name}`}
+                    className="bg-card/90 text-foreground hover:bg-card absolute top-1 right-1 grid size-5 cursor-pointer place-items-center rounded-full opacity-0 shadow-xs transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+                  >
+                    <X className="size-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
           <label htmlFor="send-input" className="sr-only">
             {toAgent ? "Message the agent" : "Ask a side question about this run"}
           </label>
@@ -221,7 +297,7 @@ export function SendBar({
                 : toAgent
                   ? busy
                     ? "Queue a follow-up for when this turn finishes…"
-                    : "Send a follow-up instruction… (@ to mention a file)"
+                    : "Send a follow-up instruction…"
                   : "Ask about this run — what changed, what is it doing, why is it stuck…"
             }
           />
@@ -276,6 +352,33 @@ export function SendBar({
                 </TooltipTrigger>
                 <TooltipContent side="top">Mention a workspace file</TooltipContent>
               </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      fileInput.current?.click();
+                    }}
+                    aria-label="Attach an image"
+                    className="text-muted-foreground hover:text-foreground hover:bg-muted grid size-7 cursor-pointer place-items-center rounded-md transition-colors"
+                  >
+                    <ImagePlus className="size-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">Attach an image — or paste / drop one</TooltipContent>
+              </Tooltip>
+              <input
+                ref={fileInput}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  addImages(e.target.files ?? []);
+                  e.target.value = "";
+                }}
+              />
             </div>
 
             <p
@@ -289,11 +392,11 @@ export function SendBar({
               variant={toAgent ? "primary" : "outline"}
               size="icon"
               onClick={send}
-              disabled={sending || (!value.trim() && !files.length)}
+              disabled={sending || (!value.trim() && !files.length && !images.length)}
               aria-label={toAgent ? (busy ? "Queue for the agent" : "Send to the agent") : "Ask a side question"}
               className="rounded-full"
             >
-              {busy && toAgent ? <Clock /> : <ArrowUp />}
+              {sending ? <Loader2 className="animate-spin" /> : busy && toAgent ? <Clock /> : <ArrowUp />}
             </Button>
           </PromptInputActions>
         </PromptInput>

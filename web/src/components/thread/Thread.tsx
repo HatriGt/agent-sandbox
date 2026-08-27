@@ -1,10 +1,11 @@
 import * as React from "react";
-import { ArrowLeft, Clock, Cpu, FolderTree, GitBranch, Hourglass, Loader2, MemoryStick, Pin, PinOff, Plus, Trash2, X } from "lucide-react";
+import { ArrowLeft, Cpu, FolderTree, GitBranch, Hourglass, Loader2, Pin, PinOff, Plus, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, type BoxView, type ChangedFile, type FleetLifecycle, type WatchSnapshot } from "@/lib/api";
 import { AnimatePresence, motion } from "motion/react";
 import { WorkspacePane } from "./WorkspacePane";
 import { WakingCard } from "./WakingCard";
+import { SessionContext } from "@/lib/session-context";
 import { friendlyName, isSleeping, POLL_MS, roleLabel, shortName, threadTitle } from "@/lib/format";
 import { deadlineLabel, deadlineOf, displayState, fmtDuration } from "@/lib/lifecycle";
 import { parseTrace, producedFiles } from "@/lib/trace";
@@ -300,6 +301,7 @@ export function Thread({
   };
 
   return (
+    <SessionContext.Provider value={box.name}>
     <div className="flex h-full min-h-0 min-w-0 flex-col">
       <header className="flex h-14 shrink-0 items-center gap-2.5 border-b px-3 md:px-5">
         <Button variant="ghost" size="icon-sm" onClick={onBack} aria-label="Back to machines" className="md:hidden">
@@ -338,16 +340,38 @@ export function Thread({
               <TooltipContent side="bottom">{deadlineText}</TooltipContent>
             </Tooltip>
           )}
-          {box.uptime && <Vital icon={<Clock className="size-3" />} label={sleeping ? "ran for" : "uptime"} value={box.uptime} />}
-          {box.cpu && <Vital icon={<Cpu className="size-3" />} label="cpu" value={box.cpu} />}
-          {box.mem && <Vital icon={<MemoryStick className="size-3" />} label="memory" value={box.mem.split(" / ")[0]} />}
-          {!kept && <span className="bg-muted text-muted-foreground label rounded-md px-1.5 py-0.5">{roleLabel(box.role)}</span>}
+          {/* One quiet group: uptime · cpu · memory. The role is implied by the state pill. */}
+          {(box.uptime || box.cpu || box.mem) && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex items-center gap-1.5">
+                  <Cpu className="size-3" aria-hidden />
+                  <span className="tabular">
+                    {[box.uptime, box.cpu ? box.cpu.split(" / ")[0] + "c" : null, box.mem ? box.mem.split(" / ")[0] : null].filter(Boolean).join(" · ")}
+                  </span>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {sleeping ? "ran for" : "up"} {box.uptime ?? "—"} · cpu {box.cpu ?? "—"} · memory {box.mem ?? "—"} · {roleLabel(box.role)}
+              </TooltipContent>
+            </Tooltip>
+          )}
         </div>
 
         <Button variant="ghost" size="icon-sm" onClick={onNew} aria-label="New task" className="md:hidden">
           <Plus />
         </Button>
 
+        {!sleeping && repos.length === 0 && !addRepo && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon-sm" onClick={() => setAddRepo(true)} aria-label="Attach a repository">
+                <GitBranch />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Attach a repository — the agent clones it into this sandbox</TooltipContent>
+          </Tooltip>
+        )}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button variant="ghost" size="icon-sm" onClick={() => (showWorkspace ? closeWorkspace() : setWorkspaceOpen(true))} aria-pressed={showWorkspace} aria-label="Workspace files" className={cn(showWorkspace && "bg-accent text-foreground")} disabled={sleeping}>
@@ -403,7 +427,7 @@ export function Thread({
       </header>
 
       {/* Connected repositories: what the agent can see, and the way to give it more mid-run. */}
-      {!sleeping && (
+      {!sleeping && (repos.length > 0 || addRepo) && (
         <div className="relative flex h-9 shrink-0 items-center gap-1.5 border-b px-3 md:px-5">
           <GitBranch className="text-muted-foreground size-3.5 shrink-0" aria-hidden />
           <span className="label text-muted-foreground shrink-0">{repos.length ? "Connected" : "No repository attached"}</span>
@@ -556,6 +580,7 @@ export function Thread({
       </AnimatePresence>
       </div>
     </div>
+    </SessionContext.Provider>
   );
 }
 
@@ -626,16 +651,3 @@ function sentence(s: string): string {
   return s ? s[0].toUpperCase() + s.slice(1) : s;
 }
 
-function Vital({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span className="inline-flex items-center gap-1.5">
-          <span aria-hidden>{icon}</span>
-          <span className="tabular">{value}</span>
-        </span>
-      </TooltipTrigger>
-      <TooltipContent side="bottom">{label}</TooltipContent>
-    </Tooltip>
-  );
-}

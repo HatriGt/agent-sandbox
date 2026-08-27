@@ -822,13 +822,15 @@ app.get("/tree.json", async (req: Request, res: Response) => {
 // body travels base64 so no byte can escape the shell quoting. Size-capped at 2 MB.
 app.put("/file.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const { session, path, content } = (req.body ?? {}) as { session?: string; path?: string; content?: string };
+  const { session, path, content, encoding } = (req.body ?? {}) as { session?: string; path?: string; content?: string; encoding?: string };
   if (!session || !/^[\w.-]+$/.test(session) || typeof path !== "string" || typeof content !== "string") {
     res.status(400).json({ error: "session, path and content are required" });
     return;
   }
-  if (content.length > 2_000_000) {
-    res.status(413).json({ error: "file too large to edit here (2 MB cap)" });
+  // Text edits cap at 2 MB; base64 uploads (images pasted into the composer) at ~8 MB decoded.
+  const isB64 = encoding === "base64";
+  if ((!isB64 && content.length > 2_000_000) || (isB64 && content.length > 11_000_000)) {
+    res.status(413).json({ error: isB64 ? "image too large (8 MB cap)" : "file too large to edit here (2 MB cap)" });
     return;
   }
   const safe = safeWorkspacePath(path);
@@ -837,12 +839,16 @@ app.put("/file.json", async (req: Request, res: Response) => {
     return;
   }
   try {
-    const b64 = Buffer.from(content, "utf8").toString("base64");
+    const b64 = isB64 ? content.replace(/^data:[^,]*,/, "") : Buffer.from(content, "utf8").toString("base64");
+    if (isB64 && !/^[A-Za-z0-9+/=\s]*$/.test(b64)) {
+      res.status(400).json({ error: "content is not valid base64" });
+      return;
+    }
     const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
     const abs = `/workspace/${safe.relPath}`;
     const dir = abs.slice(0, abs.lastIndexOf("/"));
     await execInBox(cfg, session, `mkdir -p ${q(dir)} && printf '%s' ${q(b64)} | base64 -d > ${q(abs)} && wc -c < ${q(abs)}`);
-    res.json({ ok: true, path: safe.relPath, bytes: Buffer.byteLength(content, "utf8") });
+    res.json({ ok: true, path: safe.relPath, bytes: isB64 ? Math.floor((b64.replace(/\s/g, "").length * 3) / 4) : Buffer.byteLength(content, "utf8") });
   } catch (e) {
     res.status(422).json({ error: String((e as Error).message ?? e).slice(-400) });
   }

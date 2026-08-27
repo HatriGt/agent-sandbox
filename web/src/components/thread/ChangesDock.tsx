@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ChevronUp, FileDiff, RefreshCw } from "lucide-react";
+import { ChevronUp, RefreshCw } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import type { ChangedFile } from "@/lib/api";
 import { FileMark } from "@/lib/fileIcon";
@@ -60,7 +60,6 @@ export function ChangesDock({ files, loading, onOpen, onRefresh, activePath }: {
                 <FileMark key={f.path} path={f.path} className="ring-card ring-2" />
               ))}
             </span>
-            <FileDiff className="text-muted-foreground size-3.5 shrink-0" aria-hidden />
             <span className="text-foreground text-meta font-medium">
               {files.length} {files.length === 1 ? "file" : "files"} changed
             </span>

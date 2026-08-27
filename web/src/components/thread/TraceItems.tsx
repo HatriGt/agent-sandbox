@@ -10,6 +10,8 @@ import { AnimatePresence, motion } from "motion/react";
 import { Markdown } from "@/components/ui/markdown";
 import { StreamingMarkdown } from "./StreamingMarkdown";
 import { cn } from "@/lib/utils";
+import { api } from "@/lib/api";
+import { ATTACHMENT_RE, useSession } from "@/lib/session-context";
 
 /**
  * Thread items. Three voices, never confusable:
@@ -230,10 +232,13 @@ function ShellItem({ event, live }: { event: ToolEvent; live?: boolean }) {
             {event.result}
           </pre>
         )}
+        {hasOutput && !open && (
+          <button type="button" onClick={() => setOpen(true)} className="text-trace-fg/60 hover:text-trace-fg flex w-full cursor-pointer items-center gap-2 border-t border-white/8 px-3 py-1.5 text-left font-mono text-micro">
+            <span className="text-trace-fg/35 select-none">›</span>
+            <span className="truncate">{resultSummary(event.result)}</span>
+          </button>
+        )}
       </div>
-      {hasOutput && !open && (
-        <p className="stamp text-muted-foreground mt-1 truncate pl-1">{resultSummary(event.result)}</p>
-      )}
     </div>
   );
 }
@@ -335,13 +340,53 @@ export function WorkingIndicator({ label = "Working" }: { label?: string }) {
 
 /** Your turn: the one bubble. A muted fill, right-aligned, so the primary ink stays for actions. */
 export function YouItem({ text, label = "You" }: { text: string; label?: string }) {
+  // Image attachments ride in the message as in-box paths; show them as thumbnails, not as text.
+  const attachments = React.useMemo(() => [...new Set(text.match(ATTACHMENT_RE) ?? [])], [text]);
+  const body = React.useMemo(() => (attachments.length ? text.replace(/\n*Attached images? \(open with the Read tool\):[\s\S]*$/, "").trim() : text), [text, attachments.length]);
   return (
     <div className="enter flex flex-col items-end gap-1.5">
       <span className="label text-muted-foreground pr-1">{label}</span>
-      <div className="bg-muted text-foreground max-w-[min(72%,60ch)] rounded-2xl rounded-br-md px-4 py-2.5 text-body leading-relaxed whitespace-pre-wrap">
-        {text}
-      </div>
+      {attachments.length > 0 && (
+        <div className="flex max-w-[min(72%,60ch)] flex-wrap justify-end gap-1.5">
+          {attachments.map((p) => (
+            <AttachmentImage key={p} path={p} />
+          ))}
+        </div>
+      )}
+      {body && (
+        <div className="bg-muted text-foreground max-w-[min(72%,60ch)] rounded-2xl rounded-br-md px-4 py-2.5 text-body leading-relaxed whitespace-pre-wrap">
+          {body}
+        </div>
+      )}
     </div>
+  );
+}
+
+/** A pasted image, fetched through the token-guarded artifact route; click to open full size. */
+function AttachmentImage({ path }: { path: string }) {
+  const session = useSession();
+  const [src, setSrc] = React.useState<string | null>(null);
+  const [failed, setFailed] = React.useState(false);
+  React.useEffect(() => {
+    if (!session) return;
+    let url: string | null = null;
+    api
+      .artifactBlob(session, path.replace(/^\/workspace\//, ""))
+      .then((b) => {
+        url = URL.createObjectURL(b);
+        setSrc(url);
+      })
+      .catch(() => setFailed(true));
+    return () => {
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [session, path]);
+  const name = path.slice(path.lastIndexOf("/") + 1);
+  if (failed) return <span className="stamp text-muted-foreground rounded-md border px-2 py-1">{name}</span>;
+  return (
+    <a href={src ?? undefined} target="_blank" rel="noreferrer" title={name} className={cn("bg-muted block max-h-56 max-w-[16rem] overflow-hidden rounded-xl border", !src && "size-24 animate-pulse")}>
+      {src && <img src={src} alt={name} className="max-h-56 max-w-[16rem] object-contain" />}
+    </a>
   );
 }
 
@@ -417,15 +462,15 @@ export function ThinkingItem({ text, live }: { text: string; live?: boolean }) {
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         className={cn(
-          "group flex max-w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-1 text-left text-meta transition-colors",
-          "text-muted-foreground hover:text-foreground hover:bg-muted"
+          "group -ml-1.5 flex max-w-full cursor-pointer items-center gap-2 rounded-md py-1 pr-2 pl-1.5 text-left text-meta transition-colors",
+          live ? "text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
         )}
       >
+        <ChevronRight className={cn("size-3.5 shrink-0 transition-transform duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]", open && "rotate-90")} aria-hidden />
         <Brain className={cn("size-3.5 shrink-0", live && "text-live breathe")} aria-hidden />
         <span className="font-medium">{live ? "Thinking" : "Thought"}</span>
-        {!open && <span className="min-w-0 truncate italic opacity-80">{teaser}</span>}
-        <span className="label shrink-0 opacity-60">{words} words</span>
-        <ChevronRight className={cn("size-3.5 shrink-0 transition-transform duration-150", open && "rotate-90")} aria-hidden />
+        {!open && <span className="stamp text-muted-foreground min-w-0 truncate">{teaser}</span>}
+        <span className="stamp text-muted-foreground shrink-0">{words} words</span>
       </button>
       <AnimatePresence initial={false}>
         {open && (

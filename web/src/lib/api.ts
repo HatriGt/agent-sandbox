@@ -324,8 +324,8 @@ export const api = {
   tree: (session: string, signal?: AbortSignal) =>
     fetch(url("/tree.json", { session }), { headers: authHeaders, signal }).then(parse<{ files: string[]; total: number; truncated: boolean }>),
   /** Write a text file inside the sandbox. */
-  writeFile: (session: string, path: string, content: string) =>
-    fetch(url("/file.json"), { method: "PUT", headers: { ...authHeaders, "content-type": "application/json" }, body: JSON.stringify({ session, path, content }) }).then(
+  writeFile: (session: string, path: string, content: string, encoding?: "base64") =>
+    fetch(url("/file.json"), { method: "PUT", headers: { ...authHeaders, "content-type": "application/json" }, body: JSON.stringify({ session, path, content, encoding }) }).then(
       parse<{ ok: true; path: string; bytes: number }>
     ),
   /** Merge the PR from inside the sandbox (`gh pr merge --merge`). */

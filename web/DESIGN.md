@@ -313,3 +313,18 @@ is invented: no analytics, no cost, no history beyond this browser's own session
   identity), changes list with +/− and status letters (click → diff), last commit and push output.
 - Reference patterns from beautifului.dev applied here: task-row status letters, tabbed code/diff
   panel, sidebar nav with a gliding active indicator.
+
+## Round: images to the agent, quieter chrome (2026-08-27)
+
+- **Image attachments** in the composer: paste, drop, or pick (image button). Thumbnails with remove
+  sit above the text; on send each image is uploaded into the sandbox (`/workspace/.attachments/…`
+  via `PUT /file.json` with `encoding: base64`) and the message ends with "Attached image (open with
+  the Read tool): - /workspace/.attachments/…" so Claude Code views it with its Read tool. The You
+  bubble shows the pictures (fetched through `/artifact`) instead of the paths. Attachments are
+  excluded from the change list.
+- **Chrome audit fixes**: header vitals fold into one `up · cpu · mem` group (role pill dropped — the
+  state pill says it); the empty "No repository attached" strip is gone (an Attach-repo icon in the
+  header instead); Thought rows share the Worked line's shape; a shell panel's output preview sits
+  inside the panel as a footer row instead of floating below it; the changes dock drops its duplicate
+  icon; the composer hint is one line; the workspace pane is resizable (drag its edge) and no longer
+  repeats the file/changes count twice.

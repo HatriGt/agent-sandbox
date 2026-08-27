@@ -131,8 +131,30 @@ export function WorkspacePane({ session, changes, open, onClose, onSaved, repos 
   }, [session, activeRepo]);
   React.useEffect(loadGit, [loadGit, changes.length]);
 
+  // Drag the left edge to resize; the width persists across sessions.
+  const [width, setWidth] = React.useState<number>(() => Number(localStorage.getItem("asb-workspace-w")) || 0);
+  const dragging = React.useRef(false);
+  const onDrag = (e: React.PointerEvent) => {
+    dragging.current = true;
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    const move = (ev: PointerEvent) => {
+      if (!dragging.current) return;
+      const w = Math.min(window.innerWidth - 480, Math.max(520, window.innerWidth - ev.clientX));
+      setWidth(w);
+    };
+    const up = () => {
+      dragging.current = false;
+      setWidth((w) => (localStorage.setItem("asb-workspace-w", String(w)), w));
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
   return (
     <motion.aside
+      style={width ? { width, minWidth: width } : undefined}
       initial={{ x: 24, opacity: 0 }}
       animate={{ x: 0, opacity: 1 }}
       exit={{ x: 24, opacity: 0 }}
@@ -140,6 +162,7 @@ export function WorkspacePane({ session, changes, open, onClose, onSaved, repos 
       className="bg-card absolute inset-0 z-20 flex min-w-0 flex-col md:relative md:inset-auto md:h-full md:w-[58%] md:min-w-[34rem] md:border-l"
       aria-label="Workspace"
     >
+      <div role="separator" aria-orientation="vertical" onPointerDown={onDrag} className="hover:bg-live/60 active:bg-live absolute top-0 bottom-0 -left-1 z-30 hidden w-2 cursor-col-resize transition-colors md:block" title="Drag to resize" />
       <div className="flex min-h-0 flex-1">
         {/* Activity bar */}
         <nav aria-label="Views" className="bg-muted/50 flex w-11 shrink-0 flex-col items-center gap-1 border-r py-2">
@@ -154,7 +177,7 @@ export function WorkspacePane({ session, changes, open, onClose, onSaved, repos 
         {/* Sidebar */}
         {sidebar && (
           <section className="bg-muted/25 flex w-64 shrink-0 flex-col border-r" aria-label={view}>
-            {view === "explorer" && <Explorer tree={tree} err={treeErr} paths={paths} expanded={expanded} setExpanded={setExpanded} active={active} changeByPath={changeByPath} onOpen={openPath} repos={repos} onRefresh={() => void loadTree()} />}
+            {view === "explorer" && <Explorer tree={tree} err={treeErr} expanded={expanded} setExpanded={setExpanded} active={active} changeByPath={changeByPath} onOpen={openPath} repos={repos} onRefresh={() => void loadTree()} />}
             {view === "search" && <GoToFile paths={paths} active={active} changeByPath={changeByPath} onOpen={openPath} />}
             {view === "scm" && <SourceControl session={session} repo={activeRepo} status={git} err={gitErr} reload={loadGit} changes={changes} active={active} onOpen={(p) => openPath(p, "diff")} onChanged={onSaved} />}
           </section>
@@ -234,7 +257,7 @@ function SideHeader({ title, children }: { title: string; children?: React.React
 
 /* ───────────────────────────── Explorer ───────────────────────────── */
 
-function Explorer({ tree, err, paths, expanded, setExpanded, active, changeByPath, onOpen, repos, onRefresh }: { tree: Node | null; err: string | null; paths: string[] | null; expanded: Set<string>; setExpanded: React.Dispatch<React.SetStateAction<Set<string>>>; active: string | null; changeByPath: Map<string, ChangedFile>; onOpen: (p: string) => void; repos: Repo[]; onRefresh: () => void }) {
+function Explorer({ tree, err, expanded, setExpanded, active, changeByPath, onOpen, repos, onRefresh }: { tree: Node | null; err: string | null; expanded: Set<string>; setExpanded: React.Dispatch<React.SetStateAction<Set<string>>>; active: string | null; changeByPath: Map<string, ChangedFile>; onOpen: (p: string) => void; repos: Repo[]; onRefresh: () => void }) {
   return (
     <>
       <SideHeader title="Explorer">
@@ -258,11 +281,6 @@ function Explorer({ tree, err, paths, expanded, setExpanded, active, changeByPat
           <TreeLevel node={tree} depth={0} expanded={expanded} setExpanded={setExpanded} active={active} changeByPath={changeByPath} onOpen={onOpen} repos={repos} />
         )}
       </div>
-      {paths && (
-        <p className="stamp text-muted-foreground border-t px-3 py-1.5">
-          {paths.length} files · {changeByPath.size} changed
-        </p>
-      )}
     </>
   );
 }
