@@ -83,7 +83,9 @@ that precedes them — the bug that made the primary button ink-on-ink. Keep the
 - **Hedvig Letters Serif** 34px/400 for the Hub greeting only.
 - **Geist Mono** via `.stamp` (11px, tabular) for ids, vitals, paths, commands, log output — data, not
   costume.
-- Agent prose `.prose-agent`: 15px/1.65, 74ch measure, real GFM tables, fenced code in `CodeBlock`.
+- Agent prose `.prose-agent`: 15.5px/1.7, 72ch measure, 1em paragraph rhythm, lists at 0.45em, inline
+  code as a quiet tinted chip (no border, 0.86em) so dense technical paragraphs read as text, not as
+  a wall of boxes. Real GFM tables, fenced code in `CodeBlock`.
 
 ## Chat surface
 
@@ -149,7 +151,10 @@ in its latest state. Both come from sentinel blocks the in-box formatter writes 
 
 ## Integrations
 
-`/dashboard/integrations` (`/accounts` redirects): everything a sandbox borrows from you.
+`/dashboard/integrations` (`/accounts` redirects): a settings page shaped like one. Each section is a
+titled block with a one-line purpose and an (i) tooltip for the why; what is connected shows as compact
+rows (avatar/glyph · name · facts · switch/actions); one primary **Add** button per section opens a
+dialog (`ui/dialog.tsx`) whose field-level hints sit under the fields. No explanatory paragraphs.
 - **GitHub accounts** — the login-keyed token store on the VPS, masked. Add by "Sign in with GitHub"
   (OAuth device flow, when `GITHUB_OAUTH_CLIENT_ID` is set) or by pasting a PAT (probed, then stored).
   Mark a default for task-only runs; remove with an armed confirm. Tokens never reach the browser.
@@ -171,6 +176,18 @@ is one operator. Old `?token=` links are consumed once and stripped.
 A pin in the thread header holds a sandbox: it still sleeps when quiet, but the maintainer never reaps
 it — only Destroy does. Shown as a `kept` pill in the header, "kept" in the machine list and "kept ·
 until destroyed" in the Fleet time-left column. Off by default; per sandbox.
+
+## File marks
+
+`lib/fileIcon.tsx`: a two-letter monogram in the language's conventional colour (TS blue, JS yellow,
+MD steel-blue, Py …) used in the `@` menu, composer chips and the changes list — the editor
+convention, vector-crisp, no icon font.
+
+## Resilience
+
+`ErrorBoundary` wraps the console: a render error shows the message with Try again / Reload instead
+of a blank page. `api.parse` treats a non-JSON 200 (index.html during a deploy) as an error, and the
+fleet response is shape-checked, so a transient bad response cannot crash a `useMemo`.
 
 ## Composer context
 

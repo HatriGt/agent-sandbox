@@ -49,7 +49,7 @@ function readFleetCache(): FleetSnapshot | null {
     const raw = sessionStorage.getItem(FLEET_CACHE_KEY);
     const parsed = raw ? (JSON.parse(raw) as FleetSnapshot) : null;
     // Stale beyond a minute is worse than a skeleton: the machines may all be gone.
-    return parsed && Date.now() - parsed.at < 60_000 ? parsed : null;
+    return parsed && Array.isArray(parsed.boxes) && Date.now() - parsed.at < 60_000 ? parsed : null;
   } catch {
     return null;
   }
@@ -126,7 +126,7 @@ export default function App() {
   const [asides, setAsides] = React.useState<Record<string, Aside[]>>({});
   const [replies, setReplies] = React.useState<Record<string, string[]>>({});
 
-  const reported = React.useMemo(() => (data ? data.boxes.filter(isVisible) : null), [data]);
+  const reported = React.useMemo(() => (data && Array.isArray(data.boxes) ? data.boxes.filter(isVisible) : null), [data]);
   const boxes = useStableBoxes(reported);
   // The Machines list shows RUNS. An unclaimed warm box is capacity, not a run — it lives in the
   // capacity strip and the fleet view. Hiding it here also makes a warm claim read as one clean

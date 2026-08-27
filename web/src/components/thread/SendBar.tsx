@@ -1,5 +1,6 @@
 import * as React from "react";
-import { ArrowUp, AtSign, Clock, FileCode2, MessageCircleQuestion, Terminal, X } from "lucide-react";
+import { ArrowUp, AtSign, Clock, MessageCircleQuestion, Terminal, X } from "lucide-react";
+import { FileMark } from "@/lib/fileIcon";
 import { toast } from "sonner";
 import { api, type RunState } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -184,7 +185,7 @@ export function SendBar({
                 const dir = f.slice(0, Math.max(0, f.lastIndexOf("/")));
                 return (
                   <span key={f} className="bg-muted text-foreground enter inline-flex h-7 max-w-full items-center gap-1.5 rounded-md pl-2 pr-1 text-micro" title={f}>
-                    <FileCode2 className="text-muted-foreground size-3.5 shrink-0" aria-hidden />
+                    <FileMark path={f} />
                     <span className="font-mono font-medium">{base}</span>
                     {dir && <span className="text-muted-foreground hidden truncate font-mono sm:inline">{dir}</span>}
                     <button

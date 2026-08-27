@@ -261,13 +261,17 @@
   }
 
   .prose-agent {
-    font-size: 15px;
-    line-height: 1.65;
-    max-width: 74ch;
+    /* Reading measure for agent output: a touch larger and looser than UI text, generous paragraph
+       rhythm, and inline code that sits IN the line instead of bulging out of it. */
+    font-size: 15.5px;
+    line-height: 1.7;
+    max-width: 72ch;
+    letter-spacing: -0.003em;
+    word-break: break-word;
   }
   @media (max-width: 640px) {
     .prose-agent {
-      font-size: 14.5px;
+      font-size: 15px;
     }
   }
   .prose-agent > :first-child {
@@ -277,7 +281,10 @@
     margin-bottom: 0;
   }
   .prose-agent p {
-    margin: 0.75em 0;
+    margin: 0 0 1em;
+  }
+  .prose-agent p + p {
+    margin-top: 1em;
   }
   .prose-agent h1,
   .prose-agent h2,
@@ -285,26 +292,27 @@
   .prose-agent h4 {
     font-weight: 600;
     line-height: 1.3;
-    margin: 1.5em 0 0.5em;
+    margin: 1.9em 0 0.6em;
     letter-spacing: -0.015em;
     text-wrap: balance;
   }
   .prose-agent h1 {
-    font-size: 1.35em;
+    font-size: 1.3em;
   }
   .prose-agent h2 {
-    font-size: 1.2em;
+    font-size: 1.15em;
   }
   .prose-agent h3 {
     font-size: 1.05em;
   }
   .prose-agent h4 {
     font-size: 1em;
+    color: var(--muted-foreground);
   }
   .prose-agent ul,
   .prose-agent ol {
-    margin: 0.75em 0;
-    padding-left: 1.5em;
+    margin: 0.6em 0 1.1em;
+    padding-left: 1.4em;
   }
   .prose-agent ul {
     list-style: disc;
@@ -313,10 +321,19 @@
     list-style: decimal;
   }
   .prose-agent li {
-    margin: 0.3em 0;
+    margin: 0.45em 0;
+    padding-left: 0.15em;
+  }
+  .prose-agent li > p {
+    margin: 0.35em 0;
   }
   .prose-agent li::marker {
     color: var(--muted-foreground);
+    font-variant-numeric: tabular-nums;
+  }
+  .prose-agent strong {
+    font-weight: 600;
+    color: var(--foreground);
   }
   .prose-agent a {
     color: var(--live);
@@ -328,15 +345,30 @@
     text-decoration-color: var(--live);
   }
   .prose-agent blockquote {
-    border-left: 1px solid var(--line-strong);
-    margin: 0.75em 0;
-    padding-left: 1em;
+    border-left: 2px solid var(--line-strong);
+    margin: 1em 0;
+    padding: 0.1em 0 0.1em 1em;
     color: var(--muted-foreground);
   }
   .prose-agent hr {
     border: 0;
     border-top: 1px solid var(--border);
-    margin: 1.4em 0;
+    margin: 1.6em 0;
+  }
+  /* Inline code: a quiet tinted chip at the surrounding cap height. No border — a boxed chip in every
+     other word is what made dense technical paragraphs read as clutter. */
+  .prose-agent :not(pre) > code {
+    font-family: var(--font-mono);
+    font-size: 0.86em;
+    background: color-mix(in oklch, var(--foreground) 7%, transparent);
+    color: color-mix(in oklch, var(--foreground) 88%, var(--live));
+    border-radius: 5px;
+    padding: 0.1em 0.38em;
+    border: 0;
+    white-space: nowrap;
+  }
+  .dark .prose-agent :not(pre) > code {
+    background: color-mix(in oklch, var(--foreground) 10%, transparent);
   }
   .prose-agent table {
     display: block;

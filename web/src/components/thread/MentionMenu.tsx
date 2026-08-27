@@ -1,5 +1,6 @@
 import * as React from "react";
-import { FileCode2, FileText, Folder, GitBranch } from "lucide-react";
+import { Folder, GitBranch } from "lucide-react";
+import { FileMark } from "@/lib/fileIcon";
 import { Bar } from "./Skeletons";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -130,7 +131,6 @@ export function MentionMenu({
       {files.map((f, i) => {
         const base = f.slice(f.lastIndexOf("/") + 1);
         const dir = f.slice(0, Math.max(0, f.lastIndexOf("/")));
-        const Icon = /\.(ts|tsx|js|jsx|py|go|rs|java|rb|sh|c|cpp|h|css|json|ya?ml|toml)$/i.test(base) ? FileCode2 : FileText;
         return (
           <button
             key={f}
@@ -147,7 +147,7 @@ export function MentionMenu({
               i === cursor ? "bg-accent text-foreground" : "text-foreground"
             )}
           >
-            <Icon className="text-muted-foreground size-3.5 shrink-0" aria-hidden />
+            <FileMark path={f} />
             <span className="truncate font-medium">{base}</span>
             {dir && (
               <span className="text-muted-foreground stamp ml-auto flex min-w-0 items-center gap-1 truncate">

@@ -43,7 +43,7 @@ const INITIAL_COMPONENTS: Partial<Components> = {
             // A tinted chip, not the invisible near-white fill this used to carry. Claude's inline
             // code is a subtle bg + a distinct accent text colour; we mirror that with our tokens so
             // `inline code` reads as code against prose in both themes.
-            "bg-muted text-foreground border-border rounded-md border px-1.5 py-0.5 font-mono text-[0.85em]",
+            "font-mono",
             className
           )}
           {...props}

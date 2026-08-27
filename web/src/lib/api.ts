@@ -161,8 +161,18 @@ export class ApiError extends Error {
 }
 
 async function parse<T>(res: Response): Promise<T> {
-  const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  // A 200 that is not JSON (the SPA's index.html during a deploy, a proxy error page) must be an
+  // error, not an empty object handed to the UI as data.
+  let body: Record<string, unknown> | null = null;
+  const text = await res.text();
+  try {
+    body = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+  } catch {
+    body = null;
+  }
   if (res.status === 401) signOut();
+  if (res.ok && body === null) throw new ApiError("The controller returned a non-JSON response (deploying?)", 502);
+  if (body === null) body = {};
   if (!res.ok) {
     const msg =
       typeof body.error === "string"
@@ -244,7 +254,11 @@ export const api = {
   async fleet(signal?: AbortSignal): Promise<FleetSnapshot> {
     if (!fleetRouteMissing) {
       const res = await fetch(url("/fleet.json"), { headers: authHeaders, signal });
-      if (res.status !== 404) return parse<FleetSnapshot>(res);
+      if (res.status !== 404) {
+        const snap = await parse<FleetSnapshot>(res);
+        if (!Array.isArray(snap.boxes)) throw new ApiError("Unexpected fleet response", 502);
+        return { ...snap, lifecycle: snap.lifecycle ?? { capacity: 0, poolSize: 0 } };
+      }
       fleetRouteMissing = true;
     }
     const boxes = await fetch(url("/monitor.json"), { headers: authHeaders, signal }).then(parse<BoxView[]>);
