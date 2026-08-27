@@ -52,7 +52,7 @@ function CopyButton({ code }: { code: string }) {
       aria-label={copied ? "Copied" : "Copy code"}
       className={cn(
         "text-muted-foreground hover:text-foreground -my-1 -mr-1 inline-flex items-center gap-1.5 rounded-md px-2 py-1",
-        "cursor-pointer text-[11px] font-medium transition-colors",
+        "cursor-pointer text-micro font-medium transition-colors",
         "opacity-70 group-hover:opacity-100 focus-visible:opacity-100"
       )}
     >
@@ -219,7 +219,7 @@ function CodeBlockCode({
     // shows through and highlighted blocks share the same surface as plain/ASCII ones. `whitespace-pre`
     // preserves the column alignment of ASCII/box-drawing tables (the `df -h` case) and scrolls long
     // lines. No `pr-10` reserve is needed anymore — the copy control lives in the header, not floating.
-    "w-full overflow-x-auto text-[13.5px] leading-relaxed [&>pre]:!bg-transparent [&>pre]:px-4 [&>pre]:py-3 [&>pre]:whitespace-pre",
+    "w-full overflow-x-auto text-code [&>pre]:!bg-transparent [&>pre]:px-4 [&>pre]:py-3 [&>pre]:whitespace-pre",
     className
   )
 

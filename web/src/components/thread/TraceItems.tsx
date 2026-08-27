@@ -30,7 +30,7 @@ export function LifecycleItem({ label, detail }: { label: string; detail?: strin
   return (
     <div className="enter flex items-center gap-3 py-0.5">
       <span className="label text-muted-foreground shrink-0">{label}</span>
-      {detail && <span className="stamp text-muted-foreground/70 truncate">{detail}</span>}
+      {detail && <span className="text-muted-foreground/70 truncate text-micro">{detail}</span>}
       <span className="bg-border h-px flex-1" aria-hidden />
     </div>
   );
@@ -183,7 +183,7 @@ function ShellItem({ event, live }: { event: ToolEvent; live?: boolean }) {
         </p>
         <TestResultsCard report={report} onRaw={() => setOpen((v) => !v)} rawOpen={open} />
         {open && (
-          <pre className="bg-trace text-trace-fg/85 max-h-80 overflow-auto rounded-lg border border-white/8 px-3 py-2 font-mono text-micro leading-relaxed whitespace-pre-wrap">
+          <pre className="bg-trace text-trace-fg/85 max-h-80 overflow-auto rounded-lg border border-white/8 px-3 py-2 font-mono text-code whitespace-pre-wrap">
             {event.result}
           </pre>
         )}
@@ -221,7 +221,7 @@ function ShellItem({ event, live }: { event: ToolEvent; live?: boolean }) {
             </button>
           )}
         </div>
-        <pre className="text-trace-fg px-3 py-2 font-mono text-micro leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere]">
+        <pre className="text-trace-fg px-3 py-2 font-mono text-code whitespace-pre-wrap [overflow-wrap:anywhere]">
           <span className="text-ok mr-2 shrink-0 select-none" aria-hidden>
             $
           </span>
@@ -229,7 +229,7 @@ function ShellItem({ event, live }: { event: ToolEvent; live?: boolean }) {
           {live && !hasOutput && <span className="caret text-live" aria-hidden>▍</span>}
         </pre>
         {hasOutput && open && (
-          <pre className="text-trace-fg/85 max-h-80 overflow-auto border-t border-white/8 px-3 py-2 font-mono text-micro leading-relaxed whitespace-pre-wrap">
+          <pre className="text-trace-fg/85 max-h-80 overflow-auto border-t border-white/8 px-3 py-2 font-mono text-code whitespace-pre-wrap">
             {event.result}
           </pre>
         )}
@@ -293,7 +293,7 @@ function StepItem({ event, live }: { event: ToolEvent; live?: boolean }) {
 
       {event.result &&
         (open ? (
-          <pre className="bg-trace text-trace-fg/85 mt-2 ml-6 max-h-72 overflow-auto rounded-lg border border-white/8 px-3 py-2 font-mono text-micro leading-relaxed whitespace-pre-wrap">
+          <pre className="bg-trace text-trace-fg/85 mt-2 ml-6 max-h-72 overflow-auto rounded-lg border border-white/8 px-3 py-2 font-mono text-code whitespace-pre-wrap">
             {event.result}
           </pre>
         ) : (
@@ -332,7 +332,7 @@ function DumpItem({ text }: { text: string }) {
         <span className="stamp">{n} lines</span>
         {!open && <span className="stamp min-w-0 truncate">{text.split("\n").find((l) => l.trim())?.trim().slice(0, 80)}</span>}
       </button>
-      {open && <pre className="bg-trace text-trace-fg/85 mt-1.5 max-h-96 overflow-auto rounded-lg border border-white/8 px-3 py-2 font-mono text-micro leading-relaxed whitespace-pre-wrap">{text}</pre>}
+      {open && <pre className="bg-trace text-trace-fg/85 mt-1.5 max-h-96 overflow-auto rounded-lg border border-white/8 px-3 py-2 font-mono text-code whitespace-pre-wrap">{text}</pre>}
     </div>
   );
 }
@@ -385,7 +385,7 @@ export function YouItem({ text, label = "You" }: { text: string; label?: string 
         </div>
       )}
       {body && (
-        <div className="bg-muted text-foreground max-w-[min(72%,60ch)] rounded-2xl rounded-br-md px-4 py-2.5 text-body leading-relaxed whitespace-pre-wrap">
+        <div className="bg-muted text-foreground max-w-[min(72%,60ch)] rounded-2xl rounded-br-md px-4 py-2.5 text-lead whitespace-pre-wrap">
           {body}
         </div>
       )}

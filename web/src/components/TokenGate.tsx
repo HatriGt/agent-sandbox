@@ -55,7 +55,7 @@ function Entry() {
           </span>
           <span className="text-body font-semibold tracking-[-0.01em]">Agent Sandbox</span>
         </div>
-        <h1 className="mt-8 font-serif text-h1 tracking-[-0.02em]">Enter your controller token</h1>
+        <h1 className="mt-8 text-h1 font-semibold tracking-[-0.02em]">Enter your controller token</h1>
         <p className="text-muted-foreground mt-2 text-body leading-relaxed">
           The token from your controller's <code className="bg-muted rounded px-1 font-mono text-[0.9em]">MCP_HTTP_TOKEN</code>.
           It is kept in this browser only and sent as a header — never in a link. Everything behind it — sandboxes,

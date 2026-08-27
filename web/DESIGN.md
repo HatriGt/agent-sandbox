@@ -344,3 +344,18 @@ Audit against live screenshots. Fixed:
 - **Lightbox** (`ui/lightbox.tsx`): click any image — a composer thumbnail or a picture in the
   conversation — for an in-page viewer: fit/actual toggle, − % + zoom, scroll-to-zoom around the
   cursor, drag to pan, double-click to toggle, download, Esc/backdrop to close.
+
+## Typography system (audit, 2026-08-27)
+
+One scale, used everywhere — `micro 11 · meta 13 · body 14 · lead 15 · prose 15 · code 12.5 · h3 16 ·
+h2 20 · h1 28` (all registered with tailwind-merge). Rules the audit enforced:
+- **Conversation reads at one size.** Agent prose and the operator's bubbles are both 15px; the
+  composer stays UI-size (14).
+- **Mono is for data, never sentences.** Ids, paths, durations, counts, commands → `.stamp`/mono.
+  Words ("going to sleep any moment", "if quiet", "kept · wakes on reply") → sans `text-micro`.
+- **One code size** (`text-code`, 12.5px) for shell panels, raw output, diffs, the editor and
+  fenced blocks — they were 11 / 12.5 / 13.5 before.
+- **One chip anatomy in the header**: h-6, `text-micro` semibold, rounded-full (state · kept · PR).
+- **Titles are sans** in the app (`text-h1` semibold, −0.02em). Serif is the landing page's voice only.
+- **Section headings**: page `h1` → section `text-h3` semibold → sub-section `text-body` semibold.
+- Primitives (tooltip, badge, card, avatar, textarea) use the tokens, not Tailwind's `text-xs/sm/base`.

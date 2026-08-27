@@ -233,7 +233,7 @@ export function Hub({
             <ArrowLeft className="size-4" />
             Machines
           </Button>
-          <h1 className="text-foreground font-serif text-display font-normal tracking-[-0.01em] text-balance">
+          <h1 className="text-foreground text-h1 font-semibold tracking-[-0.02em] text-balance">
             {greeting()}
           </h1>
           {loading ? (

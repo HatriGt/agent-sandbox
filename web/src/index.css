@@ -81,6 +81,9 @@
   --text-lead--line-height: 1.55;
   --text-prose: 15px;
   --text-prose--line-height: 1.65;
+  /* Every monospaced code surface — shell panels, diffs, the editor, fenced blocks — one size. */
+  --text-code: 12.5px;
+  --text-code--line-height: 1.6;
   --text-h3: 16px;
   --text-h3--line-height: 1.4;
   --text-h2: 20px;
@@ -263,15 +266,15 @@
   .prose-agent {
     /* Reading measure for agent output: a touch larger and looser than UI text, generous paragraph
        rhythm, and inline code that sits IN the line instead of bulging out of it. */
-    font-size: 15.5px;
-    line-height: 1.7;
+    font-size: 15px;
+    line-height: 1.65;
     max-width: 72ch;
     letter-spacing: -0.003em;
     word-break: break-word;
   }
   @media (max-width: 640px) {
     .prose-agent {
-      font-size: 15px;
+      font-size: 14.5px;
     }
   }
   .prose-agent > :first-child {

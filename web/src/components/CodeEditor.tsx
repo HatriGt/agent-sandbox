@@ -99,7 +99,7 @@ export function CodeEditor({
     }
   };
 
-  const mono = "font-mono text-[12.5px] leading-[1.55]";
+  const mono = "font-mono text-code";
   return (
     <div className={cn("bg-card relative flex overflow-hidden", className)}>
       <div ref={gutterRef} aria-hidden className={cn("bg-muted/40 text-muted-foreground/70 shrink-0 overflow-hidden border-r px-2 py-3 text-right select-none", mono)} style={{ minWidth: `${String(rows).length + 1.5}ch` }}>
@@ -111,8 +111,8 @@ export function CodeEditor({
       </div>
       <div className="relative min-w-0 flex-1">
         <div aria-hidden className={cn("pointer-events-none absolute inset-0 overflow-hidden py-3", mono)}>
-          {errorLine != null && errorLine >= 1 && errorLine <= rows && <div className="bg-destructive/10 absolute right-0 left-0" style={{ top: `calc(0.75rem + ${(errorLine - 1) * 1.55}em)`, height: "1.55em" }} />}
-          {errorLine !== caretLine && <div className="bg-foreground/[0.035] absolute right-0 left-0" style={{ top: `calc(0.75rem + ${(caretLine - 1) * 1.55}em)`, height: "1.55em" }} />}
+          {errorLine != null && errorLine >= 1 && errorLine <= rows && <div className="bg-destructive/10 absolute right-0 left-0" style={{ top: `calc(0.75rem + ${(errorLine - 1) * 1.6}em)`, height: "1.6em" }} />}
+          {errorLine !== caretLine && <div className="bg-foreground/[0.035] absolute right-0 left-0" style={{ top: `calc(0.75rem + ${(caretLine - 1) * 1.6}em)`, height: "1.6em" }} />}
         </div>
         <div ref={preRef} aria-hidden className={cn("pointer-events-none absolute inset-0 overflow-hidden px-3 py-3 whitespace-pre", mono, "[&_pre]:!m-0 [&_pre]:!bg-transparent [&_pre]:!p-0 [&_code]:!bg-transparent")}>
           {html ? <div dangerouslySetInnerHTML={{ __html: html }} /> : <pre className="text-foreground">{value}</pre>}

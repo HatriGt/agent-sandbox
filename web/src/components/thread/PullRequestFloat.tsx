@@ -49,12 +49,12 @@ export function PullRequestFloat({ session, url, repo, number }: { session: stri
         aria-expanded={open}
         aria-label={`Pull request #${number}: ${v.title}`}
         className={cn(
-          "bg-card hover:border-line-strong flex h-7 cursor-pointer items-center gap-1.5 rounded-full border pr-2.5 pl-1.5 text-meta font-medium transition-[border-color,box-shadow]",
+          "bg-card hover:border-line-strong flex h-6 cursor-pointer items-center gap-1.5 rounded-full border pr-2.5 pl-1 text-micro font-semibold transition-[border-color,box-shadow]",
           open && "border-line-strong"
         )}
       >
-        <span className={cn("grid size-5 place-items-center rounded-full", v.chip)}>
-          <Icon className="size-3" aria-hidden />
+        <span className={cn("grid size-4 place-items-center rounded-full", v.chip)}>
+          <Icon className="size-2.5" aria-hidden />
         </span>
         <span className="text-foreground tabular-nums">#{number}</span>
         <span className={cn("hidden sm:inline", v.text)}>{v.short}</span>

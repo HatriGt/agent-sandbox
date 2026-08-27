@@ -110,7 +110,7 @@ export function Sandboxes({
 
         <section aria-labelledby="all">
           <div className="mb-2.5 flex items-center justify-between">
-            <h2 id="all" className="text-foreground text-meta font-semibold">
+            <h2 id="all" className="text-foreground text-h3 font-semibold tracking-[-0.01em]">
               All machines
             </h2>
             {sleeping > 0 && <DestroySleeping boxes={boxes.filter((b) => displayState(b) === "sleeping" && !b.kept && !b.leaving)} onDestroyed={onDestroyed} />}
@@ -258,10 +258,10 @@ function MachineRow({
           <Tooltip>
             <TooltipTrigger asChild>
               <div className="flex flex-col gap-1.5">
-                <span className={cn("stamp inline-flex items-center gap-1.5", deadline.remainingSec < 300 ? "text-attention-text" : "text-muted-foreground")}>
+                <span className={cn("inline-flex items-center gap-1.5 text-micro", deadline.remainingSec < 300 ? "text-attention-text" : "text-muted-foreground")}>
                   <Hourglass className="size-3" aria-hidden />
-                  {(deadline.remainingSec <= 0 ? "soon" : fmtDuration(deadline.remainingSec))}
-                  <span className="opacity-70">{deadline.remainingSec != null && deadline.remainingSec <= 0 ? "" : deadline.kind === "idle" ? "if quiet" : deadline.kind === "sleep" ? "then destroyed" : "cap"}</span>
+                  <span className="stamp">{deadline.remainingSec <= 0 ? "soon" : fmtDuration(deadline.remainingSec)}</span>
+                  <span className="opacity-80">{deadline.remainingSec != null && deadline.remainingSec <= 0 ? "" : deadline.kind === "idle" ? "if quiet" : deadline.kind === "sleep" ? "then destroyed" : "of the cap"}</span>
                 </span>
                 <span className="bg-border block h-1 w-28 overflow-hidden rounded-full">
                   <span
