@@ -240,9 +240,15 @@ function MachineRow({
         <span className="text-foreground" title={shortName(box.name)}>
           {friendlyName(box.name)}
         </span>
-        <span>
-          {box.leaving ? "shutting down" : box.kept ? "kept · wakes on reply" : state === "sleeping" ? (deadline.kind === "sleep" && deadline.remainingSec != null ? `asleep · destroyed in ${(deadline.remainingSec <= 0 ? "soon" : fmtDuration(deadline.remainingSec))}` : "asleep · wakes on reply") : roleLabel(box.role)}
-          {box.uptime && <> · {state === "sleeping" ? "ran" : "up"} {box.uptime}</>}
+        {/* Words in the sans face; only the duration is data. */}
+        <span className="font-sans text-micro">
+          {box.leaving ? "shutting down" : box.kept ? "kept · wakes on reply" : state === "sleeping" ? (deadline.kind === "sleep" && deadline.remainingSec != null ? `asleep · destroyed in ${deadline.remainingSec <= 0 ? "soon" : fmtDuration(deadline.remainingSec)}` : "asleep · wakes on reply") : roleLabel(box.role)}
+          {box.uptime && (
+            <>
+              {" · "}
+              {state === "sleeping" ? "ran" : "up"} <span className="stamp">{box.uptime}</span>
+            </>
+          )}
         </span>
         {(box.cpu || box.mem) && (
           <span>
