@@ -328,3 +328,19 @@ is invented: no analytics, no cost, no history beyond this browser's own session
   inside the panel as a footer row instead of floating below it; the changes dock drops its duplicate
   icon; the composer hint is one line; the workspace pane is resizable (drag its edge) and no longer
   repeats the file/changes count twice.
+
+## Round: design audit + image viewer (2026-08-27)
+
+Audit against live screenshots. Fixed:
+- Raw dumps (diffs, `cat -n` listings, here-docs) the formatter attributed to the agent were rendered
+  as markdown bullets → detected by shape (`looksLikeDump`) and shown as a folded "Raw output · N lines".
+- "Session started" re-logged on every follow-up turn → only the first is shown.
+- "stops in ~0s if it stays quiet" / "0s if quiet" → "going to sleep any moment" / "soon".
+- PR chip floated over conversation text → it lives in the header with the other status chips; the
+  card drops down from it.
+- Hub "Live now" listed the warm pool box as a run ("idle · No task yet") while the sidebar hid it →
+  excluded; the footer line already says a warm machine is ready.
+- Fleet header was a three-line paragraph → one line of facts.
+- **Lightbox** (`ui/lightbox.tsx`): click any image — a composer thumbnail or a picture in the
+  conversation — for an in-page viewer: fit/actual toggle, − % + zoom, scroll-to-zoom around the
+  cursor, drag to pan, double-click to toggle, download, Esc/backdrop to close.

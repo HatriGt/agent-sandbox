@@ -71,11 +71,8 @@ export function Sandboxes({
               </>
             )}
           </div>
-          <p className="text-muted-foreground mt-2 max-w-[68ch] text-body">
-            Every microVM and what its agent is doing. A machine runs for at most{" "}
-            {lifecycle.maxDurationSec ? fmtDuration(lifecycle.maxDurationSec) : "the configured cap"}; after{" "}
-            {lifecycle.idleTimeoutSec ? fmtDuration(lifecycle.idleTimeoutSec) : "the idle limit"} without output it goes
-            to sleep with its workspace intact, and a reply wakes it. Destroy discards the workspace for good.
+          <p className="text-muted-foreground mt-1 text-meta">
+            Runs up to {lifecycle.maxDurationSec ? fmtDuration(lifecycle.maxDurationSec) : "the cap"} · sleeps after {lifecycle.idleTimeoutSec ? fmtDuration(lifecycle.idleTimeoutSec) : "the idle limit"} quiet · a reply wakes it · Destroy discards the workspace.
           </p>
         </header>
 
@@ -235,7 +232,7 @@ function MachineRow({
         <p className="stamp text-muted-foreground mt-0.5 md:hidden" title={shortName(box.name)}>
           {friendlyName(box.name)}
           {box.uptime && <span className="ml-2 opacity-70">up {box.uptime}</span>}
-          {deadline.remainingSec != null && <span className="ml-2 opacity-70">· {fmtDuration(deadline.remainingSec)} left</span>}
+          {deadline.remainingSec != null && <span className="ml-2 opacity-70">· {(deadline.remainingSec <= 0 ? "soon" : fmtDuration(deadline.remainingSec))} left</span>}
         </p>
       </div>
 
@@ -244,7 +241,7 @@ function MachineRow({
           {friendlyName(box.name)}
         </span>
         <span>
-          {box.leaving ? "shutting down" : box.kept ? "kept · wakes on reply" : state === "sleeping" ? (deadline.kind === "sleep" && deadline.remainingSec != null ? `asleep · destroyed in ${fmtDuration(deadline.remainingSec)}` : "asleep · wakes on reply") : roleLabel(box.role)}
+          {box.leaving ? "shutting down" : box.kept ? "kept · wakes on reply" : state === "sleeping" ? (deadline.kind === "sleep" && deadline.remainingSec != null ? `asleep · destroyed in ${(deadline.remainingSec <= 0 ? "soon" : fmtDuration(deadline.remainingSec))}` : "asleep · wakes on reply") : roleLabel(box.role)}
           {box.uptime && <> · {state === "sleeping" ? "ran" : "up"} {box.uptime}</>}
         </span>
         {(box.cpu || box.mem) && (
@@ -263,8 +260,8 @@ function MachineRow({
               <div className="flex flex-col gap-1.5">
                 <span className={cn("stamp inline-flex items-center gap-1.5", deadline.remainingSec < 300 ? "text-attention-text" : "text-muted-foreground")}>
                   <Hourglass className="size-3" aria-hidden />
-                  {fmtDuration(deadline.remainingSec)}
-                  <span className="opacity-70">{deadline.kind === "idle" ? "if quiet" : deadline.kind === "sleep" ? "then destroyed" : "cap"}</span>
+                  {(deadline.remainingSec <= 0 ? "soon" : fmtDuration(deadline.remainingSec))}
+                  <span className="opacity-70">{deadline.remainingSec != null && deadline.remainingSec <= 0 ? "" : deadline.kind === "idle" ? "if quiet" : deadline.kind === "sleep" ? "then destroyed" : "cap"}</span>
                 </span>
                 <span className="bg-border block h-1 w-28 overflow-hidden rounded-full">
                   <span

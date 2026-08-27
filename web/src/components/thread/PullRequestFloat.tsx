@@ -42,14 +42,14 @@ export function PullRequestFloat({ session, url, repo, number }: { session: stri
   const Icon = v.icon;
 
   return (
-    <div ref={rootRef} className="absolute top-3 right-4 z-20 flex flex-col items-end gap-2">
+    <div ref={rootRef} className="relative flex shrink-0 items-center">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-label={`Pull request #${number}: ${v.title}`}
         className={cn(
-          "bg-card/95 hover:border-line-strong flex h-8 cursor-pointer items-center gap-1.5 rounded-full border pr-3 pl-2 text-meta font-medium shadow-[0_1px_2px_oklch(0_0_0/0.06),0_8px_24px_-12px_oklch(0_0_0/0.35)] backdrop-blur transition-[border-color,box-shadow]",
+          "bg-card hover:border-line-strong flex h-7 cursor-pointer items-center gap-1.5 rounded-full border pr-2.5 pl-1.5 text-meta font-medium transition-[border-color,box-shadow]",
           open && "border-line-strong"
         )}
       >
@@ -69,7 +69,7 @@ export function PullRequestFloat({ session, url, repo, number }: { session: stri
             transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
             role="dialog"
             aria-label={`Pull request #${number}`}
-            className="bg-card w-[22rem] rounded-2xl border p-1.5 shadow-[0_1px_2px_oklch(0_0_0/0.06),0_24px_48px_-20px_oklch(0_0_0/0.45)]"
+            className="bg-card absolute top-full right-0 z-40 mt-2 w-[22rem] rounded-2xl border p-1.5 shadow-[0_1px_2px_oklch(0_0_0/0.06),0_24px_48px_-20px_oklch(0_0_0/0.45)]"
           >
             <Header info={info} v={v} url={url} session={session} repo={repo} number={number} onMerged={() => void load()} onClose={() => setOpen(false)} />
             <div className="px-2.5 pt-3 pb-2">

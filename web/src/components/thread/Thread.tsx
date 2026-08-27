@@ -327,6 +327,8 @@ export function Thread({
           )}
         </div>
 
+        {pulls.length > 0 && !loadingTrace && <PullRequestFloat key={pulls[pulls.length - 1].url} session={box.name} {...pulls[pulls.length - 1]} />}
+
         {/* Lifecycle + vitals: quiet mono facts, desktop only — the fleet view carries them on phones. */}
         <div className="stamp text-muted-foreground hidden items-center gap-3 lg:flex">
           {deadlineText && (
@@ -472,9 +474,8 @@ export function Thread({
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div className="relative min-h-0 min-w-0 flex-1">
         <ThreadMinimap turns={turns} scrollerRef={stick.scrollRef} />
-        {pulls.length > 0 && !loadingTrace && <PullRequestFloat key={pulls[pulls.length - 1].url} session={box.name} {...pulls[pulls.length - 1]} />}
         <ChatContainerRoot className="relative h-full [&>div]:overflow-x-hidden" instance={stick}>
-          <ChatContainerContent className={cn("mx-auto w-full max-w-3xl gap-7 px-4 pb-12 md:px-6", pulls.length > 0 ? "pt-14" : "pt-7")}>
+          <ChatContainerContent className="mx-auto w-full max-w-3xl gap-7 px-4 pt-7 pb-12 md:px-6">
             {box.task && (
               <div data-turn="task">
                 <YouItem text={box.task} label="Task" />
@@ -623,6 +624,8 @@ function groupTrace(events: TraceEvent[]): TraceGroup[] {
       if (last?.kind === "tools") last.events.push(e);
       else out.push({ kind: "tools", events: [e] });
     } else if (e.kind === "lifecycle") {
+      // Every follow-up turn re-logs "session started"; the first one is information, the rest are noise.
+      if (/^session started/i.test(e.label) && out.some((g) => g.kind === "lifecycle" && /^session started/i.test(g.label))) continue;
       out.push({ kind: "lifecycle", label: sentence(e.label), detail: e.detail });
     } else if (e.kind === "you") {
       // An answer to a question the transcript recorded (⟦ask⟧ … ⟦/ask⟧ right before) folds into one

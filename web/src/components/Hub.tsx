@@ -348,7 +348,7 @@ export function Hub({
                       <Bar className="h-2.5 w-16" />
                     </li>
                   ))
-                : fleet.map((b) => (
+                : fleet.filter((b) => b.role !== "pool-free").map((b) => (
                     <li key={b.name}>
                       <button
                         type="button"

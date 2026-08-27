@@ -1,6 +1,7 @@
 import * as React from "react";
 import { ArrowUp, AtSign, Clock, ImagePlus, Loader2, MessageCircleQuestion, Terminal, X } from "lucide-react";
 import { ATTACHMENTS_DIR } from "@/lib/session-context";
+import { Lightbox } from "@/components/ui/lightbox";
 import { FileMark } from "@/lib/fileIcon";
 import { toast } from "sonner";
 import { api, type RunState } from "@/lib/api";
@@ -62,6 +63,7 @@ export function SendBar({
   // send (/workspace/.attachments) and referenced in the message so the agent opens them with Read.
   const [images, setImages] = React.useState<{ id: string; name: string; dataUrl: string; size: number }[]>([]);
   const [dragOver, setDragOver] = React.useState(false);
+  const [preview, setPreview] = React.useState<{ name: string; dataUrl: string } | null>(null);
   const fileInput = React.useRef<HTMLInputElement>(null);
   const addImages = React.useCallback((list: Iterable<File>) => {
     for (const f of list) {
@@ -238,7 +240,9 @@ export function SendBar({
             <div className="flex flex-wrap gap-2 px-2 pt-1.5" onClick={(e) => e.stopPropagation()}>
               {images.map((img) => (
                 <span key={img.id} className="enter group relative block size-16 overflow-hidden rounded-lg border" title={img.name}>
-                  <img src={img.dataUrl} alt={img.name} className="size-full object-cover" />
+                  <button type="button" onClick={() => setPreview(img)} aria-label={`Preview ${img.name}`} className="block size-full cursor-zoom-in">
+                    <img src={img.dataUrl} alt={img.name} className="size-full object-cover transition-transform duration-200 group-hover:scale-105" />
+                  </button>
                   <span className="stamp absolute inset-x-0 bottom-0 truncate bg-black/55 px-1 py-px text-[9px] text-white">{img.name}</span>
                   <button
                     type="button"
@@ -400,6 +404,7 @@ export function SendBar({
             </Button>
           </PromptInputActions>
         </PromptInput>
+        <Lightbox src={preview?.dataUrl ?? null} name={preview?.name ?? ""} open={!!preview} onClose={() => setPreview(null)} />
 
         <p className={cn("mt-1.5 min-h-4 px-1 text-center text-micro sm:hidden", error ? "text-destructive" : "text-muted-foreground")}>
           {error ?? hint}

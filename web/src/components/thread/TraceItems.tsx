@@ -12,6 +12,7 @@ import { StreamingMarkdown } from "./StreamingMarkdown";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { ATTACHMENT_RE, useSession } from "@/lib/session-context";
+import { Lightbox } from "@/components/ui/lightbox";
 
 /**
  * Thread items. Three voices, never confusable:
@@ -307,7 +308,37 @@ function StepItem({ event, live }: { event: ToolEvent; live?: boolean }) {
  * attributable; the dot breathes while live. While `live`, the text reveals with a streaming cadence
  * (only the not-yet-shown tail animates); a finished say renders as static Markdown.
  */
+/**
+ * Some "speech" is really a dump the formatter could not attribute to a tool — a diff, a `cat -n`
+ * listing, a here-doc. Rendered as markdown it becomes bullet salad. Detect it by shape and show a
+ * collapsed raw block instead.
+ */
+export function looksLikeDump(text: string): boolean {
+  const lines = text.split("\n").filter((l) => l.trim());
+  if (lines.length < 6) return /(^|\n)(diff --git|<<PROMPT_EOF|@@ -\d)/.test(text);
+  const dumpish = lines.filter((l) => /^\s*(\d{1,5}[\s\t]|[+-]{3}\s|@@ |diff --git|index [0-9a-f]{6,}|[{}[\];]\s*$|<<|\$ )/.test(l) || /^\s{4,}\S/.test(l)).length;
+  return dumpish / lines.length >= 0.5;
+}
+
+function DumpItem({ text }: { text: string }) {
+  const [open, setOpen] = React.useState(false);
+  const n = text.split("\n").length;
+  return (
+    <div className="enter min-w-0">
+      <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} className="group -ml-1.5 flex max-w-full cursor-pointer items-center gap-2 rounded-md py-1 pr-2 pl-1.5 text-left text-meta text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground">
+        <ChevronRight className={cn("size-3.5 shrink-0 transition-transform duration-200", open && "rotate-90")} aria-hidden />
+        <FileText className="size-3.5 shrink-0" aria-hidden />
+        <span className="font-medium">Raw output</span>
+        <span className="stamp">{n} lines</span>
+        {!open && <span className="stamp min-w-0 truncate">{text.split("\n").find((l) => l.trim())?.trim().slice(0, 80)}</span>}
+      </button>
+      {open && <pre className="bg-trace text-trace-fg/85 mt-1.5 max-h-96 overflow-auto rounded-lg border border-white/8 px-3 py-2 font-mono text-micro leading-relaxed whitespace-pre-wrap">{text}</pre>}
+    </div>
+  );
+}
+
 export const SayItem = React.memo(function SayItem({ text, live }: { text: string; live?: boolean }) {
+  if (!live && looksLikeDump(text)) return <DumpItem text={text} />;
   return (
     <div className="enter min-w-0">
       <span className="label text-muted-foreground mb-1.5 flex items-center gap-1.5">
@@ -382,11 +413,15 @@ function AttachmentImage({ path }: { path: string }) {
     };
   }, [session, path]);
   const name = path.slice(path.lastIndexOf("/") + 1);
+  const [open, setOpen] = React.useState(false);
   if (failed) return <span className="stamp text-muted-foreground rounded-md border px-2 py-1">{name}</span>;
   return (
-    <a href={src ?? undefined} target="_blank" rel="noreferrer" title={name} className={cn("bg-muted block max-h-56 max-w-[16rem] overflow-hidden rounded-xl border", !src && "size-24 animate-pulse")}>
-      {src && <img src={src} alt={name} className="max-h-56 max-w-[16rem] object-contain" />}
-    </a>
+    <>
+      <button type="button" onClick={() => src && setOpen(true)} title={name} aria-label={`Open ${name}`} className={cn("bg-muted hover:border-line-strong block max-h-56 max-w-[16rem] cursor-zoom-in overflow-hidden rounded-xl border transition-[border-color,transform] hover:scale-[1.01]", !src && "size-24 animate-pulse")}>
+        {src && <img src={src} alt={name} className="max-h-56 max-w-[16rem] object-contain" />}
+      </button>
+      <Lightbox src={src} name={name} open={open} onClose={() => setOpen(false)} />
+    </>
   );
 }
 

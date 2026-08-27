@@ -86,6 +86,7 @@ export function deadlineOf(b: BoxView, lc: FleetLifecycle, nowMs = Date.now()): 
 /** One quiet sentence for the header: "1h cap · 42m left" / "stops in ~9m if it stays quiet". */
 export function deadlineLabel(d: Deadline): string | null {
   if (d.kind === "none" || d.remainingSec == null) return null;
+  if (d.remainingSec <= 0) return d.kind === "sleep" ? "being destroyed" : d.kind === "max-duration" ? "at the run cap — stopping" : "going to sleep any moment";
   if (d.kind === "max-duration") return `${fmtDuration(d.remainingSec)} left of the run cap`;
   if (d.kind === "sleep") return `destroyed in ${fmtDuration(d.remainingSec)} unless kept or woken`;
   return `stops in ~${fmtDuration(d.remainingSec)} if it stays quiet`;
