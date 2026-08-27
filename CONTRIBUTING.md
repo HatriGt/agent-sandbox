@@ -8,7 +8,7 @@ in-box hooks), so this file is mostly about *how to work on it without needing a
 ```bash
 npm ci
 npm run build     # tsc -p tsconfig.json  (typecheck IS the build; it emits dist/)
-npm test          # node:test via tsx — 298 unit tests, none of which need a VPS
+npm test          # node:test via tsx — ~300 unit tests, none of which need a VPS
 npm run test:watch
 ```
 

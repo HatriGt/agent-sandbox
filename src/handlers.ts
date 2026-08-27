@@ -125,8 +125,9 @@ export function registerTools(
 ): void {
   server.tool(
     "delegate",
-    "Delegate a task to an isolated microVM running Claude Code. source=local ships local working " +
-      "trees (Mac/Cursor); source=git clones owner/name on the VPS (remote clients). A task may span " +
+    "Delegate a task to an isolated microVM running Claude Code. source=local ships the working " +
+      "tree from the machine your IDE runs on (stdio entry); source=git clones owner/name on the VPS " +
+      "(any remote MCP client). A task may span " +
       "several repos open in the same IDE window — pass repos:[{repo,ref?},...]; each lands in " +
       "/workspace/<name> in ONE box and gets its own PR. A single `repo` still works. " +
       "A repo is OPTIONAL: pass ONLY a task (no repo/repos) for repo-less work — e.g. 'write a " +
