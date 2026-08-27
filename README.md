@@ -4,19 +4,25 @@
 
 **Delegate a coding task to a real microVM, let an autonomous agent finish it, and watch it happen live.**
 
-Hand off work from Cursor — including your uncommitted working tree — to an isolated
-[microsandbox](https://github.com/microsandbox/microsandbox) microVM on your own VPS. Claude Code runs
-the task inside it, asks you questions when it's genuinely blocked, and streams every tool call back
-to your editor or a web console. Because it speaks MCP, any MCP client works.
+Hand off work from **whatever agentic IDE you already use** — including your uncommitted working
+tree — to an isolated [microsandbox](https://github.com/microsandbox/microsandbox) microVM on your own
+VPS. Claude Code runs the task inside it, asks you questions when it's genuinely blocked, and streams
+every tool call back to your editor or a web console.
+
+agent-sandbox is an **MCP server**, so the client is your choice and the protocol is the contract —
+no plugin per editor, no lock-in.
 
 [![CI](https://github.com/HatriGt/agent-sandbox/actions/workflows/ci.yml/badge.svg)](https://github.com/HatriGt/agent-sandbox/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A520-5FA04E?logo=node.js&logoColor=white)](package.json)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)](tsconfig.json)
-[![MCP](https://img.shields.io/badge/MCP-stdio%20%2B%20HTTP-000000)](https://modelcontextprotocol.io)
+[![MCP](https://img.shields.io/badge/MCP-any%20client-000000)](https://modelcontextprotocol.io)
 [![Isolation](https://img.shields.io/badge/isolation-KVM%20microVM-8A2BE2)](docs/security.md)
 
 [**Live console**](https://agent-sandbox.ajeethkumar.dev) · [Security model](docs/security.md) · [Runbook](docs/runbook.md) · [Lifecycle](docs/lifecycle.md)
+
+**Works with** Cursor · VS Code · Windsurf · Zed · Claude Code · Cline · JetBrains · Claude web · CI
+<br><sub>— anything that speaks MCP over stdio or Streamable HTTP.</sub>
 
 </div>
 
@@ -52,7 +58,8 @@ npm ci && npm run build
 cp .env.example .env       # set VPS_SSH to a host that has microsandbox installed
 ```
 
-Then point Cursor at it in `~/.cursor/mcp.json`:
+Then register it with your IDE's MCP config (`~/.cursor/mcp.json`, `.vscode/mcp.json`, Windsurf's
+`mcp_config.json`, `claude mcp add` — see [Connect your IDE](#connect-your-ide)):
 
 ```json
 { "mcpServers": { "agent-sandbox": {
@@ -63,7 +70,7 @@ Then point Cursor at it in `~/.cursor/mcp.json`:
 } } }
 ```
 
-Now say **"delegate this: add tests for the parser"** in Cursor.
+Now say **"delegate this: add tests for the parser"** in your IDE's agent chat.
 
 </details>
 
@@ -89,7 +96,8 @@ Set `ASB_DOMAIN`, point DNS at the VPS, then `docker compose up -d --build`. The
 - [Architecture](#architecture) — one set of handlers, two transports
 - [Tools](#tools) — `delegate` · `status` · `resume` · `monitor` · `watch` · `ask` · …
 - [How delegation flows (A2A)](#how-delegation-flows-a2a) — the blocking wait loop and the question protocol
-- [Connect from Cursor](#connect-from-cursor) · [Layout](#layout) · [Deploy](#deploy-the-remote-http-entry)
+- [Connect your IDE](#connect-your-ide) — Cursor, VS Code, Windsurf, Zed, Claude Code, Cline, CI
+- [Layout](#layout) · [Deploy](#deploy-the-remote-http-entry)
 - [Security](#security) · [Contributing](#contributing) · [License](#license)
 
 ---
@@ -99,8 +107,8 @@ Orchestration: a small **TypeScript MCP server** with two entry points that shar
 
 | Entry | Transport | Use it for | Client |
 |---|---|---|---|
-| `dist/index.js` | stdio (Cursor spawns it) | "delegate **THIS**" — your local working tree incl. uncommitted changes | Cursor on your Mac |
-| `dist/http.js` | Streamable HTTP + bearer token | "delegate a **git repo/branch**" from anywhere | Cursor (remote MCP), Claude web, phone, CI |
+| `dist/index.js` | stdio (your IDE spawns it) | "delegate **THIS**" — your local working tree incl. uncommitted changes | Any MCP client on your machine — Cursor, VS Code, Windsurf, Zed, Claude Code, Cline… |
+| `dist/http.js` | Streamable HTTP + bearer token | "delegate a **git repo/branch**" from anywhere | Any remote MCP client — your IDE, Claude web, a phone, CI |
 
 ## Why microsandbox
 
@@ -127,7 +135,7 @@ Cleanroom and iron-proxy sell as separate products) natively.
 ## Architecture
 
 ```
-Cursor (stdio)  ─ local working tree (rsync) ─┐
+Your IDE (stdio) ─ local working tree (rsync) ─┐
 Any MCP client (HTTP + token) ─ git clone ────┤►  handlers (shared) → msb on VPS host
                                                │
                                                ▼
@@ -248,7 +256,7 @@ implemented it, but Cursor auto-**declines** a server-initiated elicitation for 
 `delegate`/`status`/`resume` call *before the user ever sees a card* — the server gets
 `action=decline` instantly and the call then hangs to `-32001`. So native elicitation is **disabled**
 (`canElicit()` returns false; one-line re-enable if a future Cursor build renders it). Instead the
-wait loop **hands the pending question back as text**, and the *calling* agent (Cursor) does the
+wait loop **hands the pending question back as text**, and the *calling* agent does the
 turn-taking with its own reliable UI: it answers the question itself when it can from repo/task
 context, otherwise prompts the user via its native question UI (e.g. `AskQuestion`), then calls
 `resume({session, message})`. Repeat until `run:done`. `resume` also auto-starts a box that
@@ -281,9 +289,13 @@ So a `delegate`/`resume` call returns only when it truly finishes (`run:done`), 
 and waiting on you (`run:waiting`), or the wait cap elapsed (explicit "still working, reconnect via
 `status`") — never a silent "I'll report back later".
 
-## Connect from Cursor
+## Connect your IDE
 
-**Local (delegate THIS, uncommitted changes)** — `~/.cursor/mcp.json`:
+agent-sandbox registers standard MCP tools over two standard transports, so wiring it up is the same
+three lines everywhere — only the config file's location and key name differ per client.
+
+### Local entry — "delegate THIS", including uncommitted changes
+
 ```json
 { "mcpServers": { "agent-sandbox": {
   "type": "stdio",
@@ -292,11 +304,26 @@ and waiting on you (`run:waiting`), or the wait cap elapsed (explicit "still wor
   "env": { "WORKSPACE_DIR": "${workspaceFolder}" }
 } } }
 ```
-`WORKSPACE_DIR=${workspaceFolder}` lets Cursor tell the server which project is open, so you can
-just say **"delegate this"** with no repo. If Cursor doesn't expand it, the server asks for the path.
-(Remote/git always names the repo — the VPS can't see your Mac.)
 
-**Remote (delegate a git repo from anywhere)** — same file, HTTP entry:
+Where that goes:
+
+| Client | Config |
+|---|---|
+| Cursor | `~/.cursor/mcp.json` (or `.cursor/mcp.json` in the project) |
+| VS Code / Copilot agent mode | `.vscode/mcp.json` — uses `servers` instead of `mcpServers` |
+| Windsurf | `~/.codeium/windsurf/mcp_config.json` |
+| Claude Code | `claude mcp add agent-sandbox -- node /absolute/path/dist/index.js` |
+| Zed | `settings.json` → `context_servers` |
+| Cline / Roo | the extension's MCP settings JSON |
+
+`WORKSPACE_DIR` is what lets you say **"delegate this"** with no repo argument — it tells the server
+which project is open. `${workspaceFolder}` is a VS Code-family variable, so Cursor, VS Code and
+Windsurf expand it for you. In any client that doesn't, set an absolute path instead, or just name the
+repo — the server asks for it rather than guessing. (The remote entry always names a repo: the VPS
+cannot see your machine.)
+
+### Remote entry — delegate a git repo from anywhere
+
 ```json
 { "mcpServers": { "agent-sandbox-remote": {
   "url": "https://<ASB_DOMAIN>/mcp",
@@ -304,7 +331,14 @@ just say **"delegate this"** with no repo. If Cursor doesn't expand it, the serv
 } } }
 ```
 
-Any other MCP client (Claude web, another IDE, CI) adds the same HTTP URL + bearer header.
+Same URL and bearer header for every remote client — an IDE on another machine, Claude web, a phone,
+or a CI job that shells out to an MCP client. Nothing about the transport is editor-specific.
+
+> [!NOTE]
+> Cursor is the most heavily exercised client today, which is why one Cursor-specific quirk is
+> documented below (its Auto-review auto-declines server-initiated MCP *elicitation*). The workaround
+> — handing the pending question back as plain text for the calling agent to answer — is
+> client-agnostic and is the path **all** clients take, so no client depends on native elicitation.
 
 ## Layout
 
@@ -320,7 +354,7 @@ compose.yaml  Dokploy app: Traefik route ${ASB_DOMAIN} → :8787
 
 ## Status
 
-Actively developed and deployed. The orchestrator ships **298 unit tests** (`npm test`) covering the
+Actively developed and deployed. The orchestrator ships a **~300-case unit suite** (`npm test`) covering the
 handlers, the guard predicates, the auth guard, the response security headers, the lifecycle/pool
 logic and the stream formatter — all pure, so they run in CI with no VPS. Both entries (stdio + HTTP)
 are live, and the web console runs against a real fleet.
@@ -349,7 +383,7 @@ the container→host SSH settings, and builds. Then:
 2. Point DNS `ASB_DOMAIN` → your VPS.
 3. Deploy: a Dokploy Compose app from this repo (path `./compose.yaml`), or on the VPS
    `docker compose up -d --build`.
-4. Add the remote entry to Cursor (see **Connect from Cursor** above).
+4. Add the remote entry to your MCP client (see **[Connect your IDE](#connect-your-ide)** above).
 
 The container drives `msb` on the VPS **host** over SSH (msb needs KVM on the host), reaching it
 as `host.docker.internal`. Everything site-specific lives in `.env`; the repo ships no secrets.

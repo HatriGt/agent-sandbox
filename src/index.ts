@@ -1,9 +1,10 @@
 /**
- * agent-sandbox MCP orchestrator — stdio entry (Cursor on the Mac).
+ * agent-sandbox MCP orchestrator — stdio entry (the local lane; your IDE spawns it).
  *
- * Cursor spawns this over stdio. It registers the shared tools (handlers.ts) backed by the real
- * side-effecting deps (deps.ts), then serves. The HTTP entry (http.ts) registers the SAME tools
- * for remote clients. In chat you say "delegate this to agent sandbox" and Cursor calls delegate.
+ * Any MCP client that can spawn a stdio server runs this — Cursor, VS Code, Windsurf, Zed, Claude
+ * Code, Cline. It registers the shared tools (handlers.ts) backed by the real side-effecting deps
+ * (deps.ts), then serves. The HTTP entry (http.ts) registers the SAME tools for remote clients.
+ * In chat you say "delegate this to agent sandbox" and the client calls delegate.
  *
  * Tools: delegate / status / resume / teardown / pool_status (see handlers.ts).
  */
