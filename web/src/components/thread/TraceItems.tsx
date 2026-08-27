@@ -2,6 +2,8 @@ import * as React from "react";
 import { AlertTriangle, Brain, Check, ChevronRight, Circle, CircleDot, Clock, FileText, Loader2, MessageCircleQuestion, Terminal, Wrench } from "lucide-react";
 import type { PlanItem as PlanStep } from "@/lib/trace";
 import { resultSummary, type TraceEvent } from "@/lib/trace";
+import { parseTestReport } from "@/lib/testReport";
+import { TestResultsCard } from "./TestResultsCard";
 import { AnimatePresence, motion } from "motion/react";
 import { Markdown } from "@/components/ui/markdown";
 import { StreamingMarkdown } from "./StreamingMarkdown";
@@ -49,7 +51,15 @@ function ToolItem({ event, live }: { event: ToolEvent; live?: boolean }) {
  * still executing (under parallel tool use the last one often answers first), so running is per-tool.
  */
 export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolean }) {
-  const [open, setOpen] = React.useState(false);
+  // Results worth reading (a test run, a PR URL) must not hide behind the fold: open those groups.
+  const notable = React.useMemo(
+    () => events.some((e) => !!parseTestReport(e.result) || /github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/.test(e.result ?? "")),
+    [events]
+  );
+  const [open, setOpen] = React.useState(notable);
+  React.useEffect(() => {
+    if (notable) setOpen(true);
+  }, [notable]);
   const anyRunning = !!live && events.some((e) => !e.result);
   const failed = events.filter((e) => e.failed).length;
   if (events.length === 1) return <ToolItem event={events[0]} live={anyRunning} />;
@@ -101,6 +111,25 @@ function ShellItem({ event, live }: { event: ToolEvent; live?: boolean }) {
   const [open, setOpen] = React.useState(false);
   const hasOutput = !!event.result;
   const lines = event.result ? lineCount(event.result) : 0;
+  // A test run renders as a results card (summary chips + per-file cases) with the terminal panel
+  // demoted to "raw output"; anything else is the plain terminal.
+  const report = React.useMemo(() => (live ? null : parseTestReport(event.result)), [event.result, live]);
+  if (report) {
+    return (
+      <div className="min-w-0 flex flex-col gap-2">
+        <p className="stamp text-muted-foreground truncate pl-1">
+          <span className="text-ok mr-1.5 select-none">$</span>
+          {event.arg}
+        </p>
+        <TestResultsCard report={report} onRaw={() => setOpen((v) => !v)} rawOpen={open} />
+        {open && (
+          <pre className="bg-trace text-trace-fg/85 max-h-80 overflow-auto rounded-lg border border-white/8 px-3 py-2 font-mono text-micro leading-relaxed whitespace-pre-wrap">
+            {event.result}
+          </pre>
+        )}
+      </div>
+    );
+  }
   return (
     <div className="min-w-0">
       <div

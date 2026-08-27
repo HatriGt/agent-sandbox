@@ -27,6 +27,15 @@ export interface BoxView {
   repos?: { name: string; branch?: string }[];
 }
 
+export interface RepoInfo {
+  fullName: string;
+  private: boolean;
+  defaultBranch: string;
+  pushedAt?: string;
+  logins: string[];
+  description?: string;
+}
+
 export interface AccountView {
   login: string;
   type: "classic" | "fine-grained" | "unknown";
@@ -207,9 +216,18 @@ export const api = {
     ),
   devicePoll: (device_code: string) => post<DevicePoll>("/accounts/device/poll.json", { device_code }),
 
-  delegate: (input: { task: string; repo?: string; ref?: string }) =>
-    post<{ ok: true; box: string; warm: boolean; output: string } | { ok: false; question: string }>(
+  delegate: (input: { task: string; repos?: { repo: string; ref?: string }[] }) =>
+    post<{ ok: true; box: string; warm: boolean; output: string; inferred?: string[] } | { ok: false; question: string }>(
       "/delegate.json",
       { source: "git", ...input }
     ),
+
+  /** Repositories reachable through the connected accounts, ranked for a picker. */
+  repos: (q: string, refresh = false, signal?: AbortSignal) =>
+    fetch(url("/repos.json", refresh ? { q, refresh: "1" } : { q }), { headers: authHeaders, signal }).then(
+      parse<{ repos: RepoInfo[]; total: number }>
+    ),
+  /** Clone a repository into a running sandbox at /workspace/<name>. */
+  attachRepo: (session: string, repo: string, ref?: string) =>
+    post<{ ok: true; name: string; login?: string }>("/repos/attach.json", { session, repo, ref }),
 };

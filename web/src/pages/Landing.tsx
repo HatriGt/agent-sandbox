@@ -16,6 +16,11 @@ import {
   ShieldCheck,
   Terminal,
   Timer,
+  X,
+  Server,
+  Laptop,
+  Globe,
+  Circle,
 } from "lucide-react";
 import { motion, useInView, useReducedMotion } from "motion/react";
 import { Logo } from "@/components/ui/logo";
@@ -64,7 +69,9 @@ export default function Landing() {
       </header>
 
       {/* ───────────── hero ───────────── */}
-      <section className="mx-auto grid max-w-6xl items-center gap-12 px-6 pt-10 pb-20 lg:grid-cols-[1.05fr_1fr] lg:pt-16">
+      <section className="relative isolate">
+        <DotGrid />
+        <div className="mx-auto grid max-w-6xl items-center gap-12 px-6 pt-10 pb-20 lg:grid-cols-[1.05fr_1fr] lg:pt-16">
         <div>
           <Reveal>
             <p className="text-live label mb-4 inline-flex items-center gap-2 rounded-full border px-3 py-1">
@@ -117,6 +124,23 @@ export default function Landing() {
         <Reveal delay={0.12} className="min-w-0">
           <Demo />
         </Reveal>
+        </div>
+      </section>
+
+      {/* ───────────── architecture ───────────── */}
+      <section className="border-t">
+        <div className="mx-auto max-w-6xl px-6 py-20">
+          <Reveal>
+            <h2 className="font-serif text-[clamp(1.8rem,3.2vw,2.5rem)] leading-tight tracking-[-0.015em]">How a task travels.</h2>
+            <p className="text-muted-foreground mt-3 max-w-[60ch] text-body">
+              Every entry point speaks MCP to one small controller on your VPS. It drives microsandbox over SSH, boots
+              or claims a KVM microVM, injects the right GitHub credential, and streams the agent's transcript back.
+            </p>
+          </Reveal>
+          <Reveal delay={0.08}>
+            <Architecture />
+          </Reveal>
+        </div>
       </section>
 
       {/* ───────────── three ways in ───────────── */}
@@ -176,7 +200,10 @@ export default function Landing() {
             </ul>
           </Reveal>
           <Reveal delay={0.1}>
-            <QuestionMock />
+            <div className="flex flex-col gap-4">
+              <QuestionMock />
+              <TestMock />
+            </div>
           </Reveal>
         </div>
       </section>
@@ -479,6 +506,129 @@ function QuestionMock() {
             Send answer <ArrowRight className="size-3.5" />
           </span>
         </div>
+      </div>
+    </div>
+  );
+}
+
+
+/* ───────────────────────────── visual elements ───────────────────────────── */
+
+/** A quiet dot grid under the hero with a soft live-blue glow: the "sandbox floor". Pure CSS. */
+function DotGrid() {
+  return (
+    <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
+      <div
+        className="absolute inset-0 opacity-[0.55] dark:opacity-[0.35]"
+        style={{
+          backgroundImage: "radial-gradient(color-mix(in oklch, var(--foreground) 14%, transparent) 1px, transparent 1px)",
+          backgroundSize: "22px 22px",
+          maskImage: "radial-gradient(ellipse 70% 60% at 50% 30%, #000 40%, transparent 100%)",
+          WebkitMaskImage: "radial-gradient(ellipse 70% 60% at 50% 30%, #000 40%, transparent 100%)",
+        }}
+      />
+      <div
+        className="absolute left-1/2 top-[-10rem] h-[32rem] w-[52rem] -translate-x-1/2 rounded-full blur-3xl"
+        style={{ background: "radial-gradient(closest-side, color-mix(in oklch, var(--live) 22%, transparent), transparent)" }}
+      />
+    </div>
+  );
+}
+
+/** Clients → controller → microVMs, with animated flow along the paths (SVG dash offset). */
+function Architecture() {
+  const reduced = useReducedMotion();
+  return (
+    <div className="bg-card mt-10 overflow-hidden rounded-2xl border p-6 md:p-10">
+      <div className="grid items-center gap-8 md:grid-cols-[1fr_auto_1fr_auto_1fr]">
+        <div className="flex flex-col gap-3">
+          <Node icon={<Laptop className="size-4" />} title="Cursor · IDE" sub="MCP over stdio or HTTP" />
+          <Node icon={<Globe className="size-4" />} title="Dashboard" sub="this console, any device" />
+          <Node icon={<Plug className="size-4" />} title="Any MCP client" sub="Claude web · CI" />
+        </div>
+        <Flow reduced={!!reduced} />
+        <div className="flex flex-col gap-3">
+          <Node icon={<Server className="size-4" />} title="Controller" sub="one bearer token · fails closed" accent />
+          <ul className="text-muted-foreground flex flex-col gap-1 text-micro">
+            <li className="flex items-center gap-1.5"><KeyRound className="size-3" /> credential broker</li>
+            <li className="flex items-center gap-1.5"><Flame className="size-3" /> warm pool maintainer</li>
+            <li className="flex items-center gap-1.5"><Timer className="size-3" /> lifecycle · queue · stream</li>
+          </ul>
+        </div>
+        <Flow reduced={!!reduced} />
+        <div className="flex flex-col gap-3">
+          {["glint-otter", "teal-comet", "opal-koi"].map((n, i) => (
+            <Node
+              key={n}
+              icon={<ShieldCheck className="size-4" />}
+              title={n}
+              sub={i === 0 ? "working · 12m left" : i === 1 ? "needs you" : "warm · ready"}
+              tone={i === 0 ? "live" : i === 1 ? "attention" : "ok"}
+            />
+          ))}
+          <p className="text-muted-foreground text-micro">KVM microVMs (microsandbox) on your VPS</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Node({ icon, title, sub, accent, tone }: { icon: React.ReactNode; title: string; sub: string; accent?: boolean; tone?: "live" | "attention" | "ok" }) {
+  return (
+    <div className={cn("flex items-center gap-3 rounded-xl border px-3.5 py-2.5", accent && "border-line-strong shadow-xs")}>
+      <span
+        className={cn(
+          "grid size-8 shrink-0 place-items-center rounded-lg",
+          tone === "live" ? "bg-live/12 text-live" : tone === "attention" ? "bg-attention/18 text-attention-text" : tone === "ok" ? "bg-ok/12 text-ok" : "bg-muted text-foreground"
+        )}
+      >
+        {icon}
+      </span>
+      <span className="min-w-0">
+        <span className="text-foreground block truncate text-meta font-medium">{title}</span>
+        <span className="text-muted-foreground block truncate text-micro">{sub}</span>
+      </span>
+    </div>
+  );
+}
+
+function Flow({ reduced }: { reduced: boolean }) {
+  return (
+    <svg viewBox="0 0 80 24" className="text-live mx-auto h-6 w-20 rotate-90 md:rotate-0" aria-hidden>
+      <path d="M2 12 H78" stroke="color-mix(in oklch, currentColor 30%, transparent)" strokeWidth="2" strokeLinecap="round" />
+      <path d="M2 12 H78" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeDasharray="6 10" className={reduced ? "" : "flow-dash"} />
+      <path d="M70 6 L78 12 L70 18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function TestMock() {
+  const rows: Array<[string, "pass" | "fail", string]> = [
+    ["should login with valid credentials", "pass", "45ms"],
+    ["should reject invalid password", "pass", "32ms"],
+    ["should handle timeout", "fail", "5001ms"],
+  ];
+  return (
+    <div className="bg-card rounded-2xl border p-2 shadow-[0_1px_2px_oklch(0_0_0/0.05),0_30px_60px_-30px_oklch(0_0_0/0.35)]">
+      <div className="overflow-hidden rounded-xl border">
+        <div className="flex flex-wrap items-center gap-2 border-b px-3.5 py-2.5 text-meta">
+          <span className="bg-ok/12 text-ok inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-medium"><Check className="size-3" strokeWidth={3} /> 8 passed</span>
+          <span className="bg-destructive/10 text-destructive inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-medium"><X className="size-3" strokeWidth={3} /> 1 failed</span>
+          <span className="bg-attention/18 text-attention-text inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-medium"><Circle className="size-3" /> 1 skipped</span>
+          <span className="text-muted-foreground tabular ml-auto">1.23s</span>
+        </div>
+        <div className="flex items-center gap-2.5 px-3.5 py-2 text-meta"><span className="border-destructive text-destructive grid size-4 place-items-center rounded-full border-[1.5px]"><X className="size-2.5" strokeWidth={3} /></span><span className="font-mono">auth.test.ts</span><span className="text-muted-foreground ml-auto text-micro">1 failing · 3 tests</span></div>
+        <ul>
+          {rows.map(([n, s, ms]) => (
+            <li key={n} className="flex items-center gap-2.5 border-t py-1.5 pr-3.5 pl-10 text-meta">
+              <span className={cn("grid size-3.5 place-items-center rounded-full border-[1.5px]", s === "pass" ? "border-ok text-ok" : "border-destructive text-destructive")}>
+                {s === "pass" ? <Check className="size-2" strokeWidth={3} /> : <X className="size-2" strokeWidth={3} />}
+              </span>
+              <span className="flex-1">{n}</span>
+              <span className={cn("tabular text-micro", s === "fail" ? "text-destructive" : "text-muted-foreground")}>{ms}</span>
+            </li>
+          ))}
+        </ul>
       </div>
     </div>
   );

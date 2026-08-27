@@ -491,3 +491,13 @@
 .sheen {
   animation: sheen 2.4s ease-in-out infinite;
 }
+
+/* Landing: energy flowing along the architecture paths. */
+@keyframes flow-dash {
+  to {
+    stroke-dashoffset: -32;
+  }
+}
+.flow-dash {
+  animation: flow-dash 1.4s linear infinite;
+}

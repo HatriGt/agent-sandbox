@@ -10,8 +10,12 @@ import {
   GitBranch,
   Layers,
   Loader2,
+  Lock,
+  Plus,
   X,
 } from "lucide-react";
+import { toast } from "sonner";
+import { RepoPicker, type PickedRepo } from "@/components/RepoPicker";
 import { motion } from "motion/react";
 import { api, type BoxView, type FleetLifecycle } from "@/lib/api";
 import { friendlyName, shortName, threadSort, threadTitle } from "@/lib/format";
@@ -126,9 +130,17 @@ export function Hub({
   onBack: () => void;
 }) {
   const [task, setTask] = React.useState("");
-  const [repo, setRepo] = React.useState("");
-  const [ref, setRef] = React.useState("");
+  const [picked, setPicked] = React.useState<PickedRepo[]>([]);
   const [showRepo, setShowRepo] = React.useState(false);
+  const pickerRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    if (!showRepo) return;
+    const onDown = (e: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) setShowRepo(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [showRepo]);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -153,9 +165,19 @@ export function Hub({
     onPending({ id, task: t });
     onBooting(t);
     try {
-      const res = await api.delegate({ task: t, repo: repo.trim() || undefined, ref: ref.trim() || undefined });
-      if (res.ok) onStarted(res.box, t);
-      else {
+      const res = await api.delegate({
+        task: t,
+        repos: picked.length ? picked.map((p) => ({ repo: p.repo, ref: p.ref || undefined })) : undefined,
+      });
+      if (res.ok) {
+        if (res.inferred?.length) {
+          toast("Attached from the task", {
+            description: `${res.inferred.join(", ")} — named in your task, so it was checked out for the agent.`,
+            icon: <GitBranch className="size-4" />,
+          });
+        }
+        onStarted(res.box, t);
+      } else {
         onFailed();
         setError(res.question);
         setTask(t);
@@ -172,7 +194,6 @@ export function Hub({
 
   const live = new Set(boxes.map((b) => b.name));
   const fleet = [...boxes].sort(threadSort);
-  const repoLabel = repo.trim() ? `${repo.trim()}${ref.trim() ? `@${ref.trim()}` : ""}` : "Attach a repo";
 
   return (
     <div className="h-full min-w-0 overflow-y-auto">
@@ -212,59 +233,66 @@ export function Hub({
               className="min-h-14 px-2.5 pt-2 text-body"
             />
 
-            {showRepo && (
-              <div className="enter mt-1 grid gap-2 px-1 sm:grid-cols-[2fr_1fr_auto]" onClick={(e) => e.stopPropagation()}>
-                <input
-                  value={repo}
-                  onChange={(e) => setRepo(e.target.value)}
-                  placeholder="owner/repo"
-                  aria-label="Repository, owner slash name"
-                  autoFocus
-                  className="text-foreground placeholder:text-muted-foreground bg-muted focus:ring-ring h-8 rounded-md px-2.5 font-mono text-meta outline-none focus:ring-2"
-                />
-                <input
-                  value={ref}
-                  onChange={(e) => setRef(e.target.value)}
-                  placeholder="branch (optional)"
-                  aria-label="Git ref"
-                  className="text-foreground placeholder:text-muted-foreground bg-muted focus:ring-ring h-8 rounded-md px-2.5 font-mono text-meta outline-none focus:ring-2"
-                />
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={() => {
-                    setShowRepo(false);
-                    setRepo("");
-                    setRef("");
-                  }}
-                  aria-label="Remove repository"
-                >
-                  <X />
-                </Button>
+            {picked.length > 0 && (
+              <div className="enter mt-1 flex flex-wrap gap-1.5 px-1" onClick={(e) => e.stopPropagation()}>
+                {picked.map((p) => (
+                  <span key={p.repo} className="bg-muted text-foreground inline-flex h-7 items-center gap-1.5 rounded-md pl-2 pr-1 font-mono text-micro">
+                    {p.private && <Lock className="text-muted-foreground size-3" aria-label="private" />}
+                    {p.repo}
+                    <input
+                      value={p.ref ?? ""}
+                      onChange={(e) => setPicked((prev) => prev.map((x) => (x.repo === p.repo ? { ...x, ref: e.target.value } : x)))}
+                      placeholder={p.defaultBranch ?? "branch"}
+                      aria-label={`Branch for ${p.repo}`}
+                      className="placeholder:text-muted-foreground/70 text-live w-24 bg-transparent font-mono text-micro outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setPicked((prev) => prev.filter((x) => x.repo !== p.repo))}
+                      aria-label={`Remove ${p.repo}`}
+                      className="text-muted-foreground hover:text-foreground grid size-5 cursor-pointer place-items-center rounded"
+                    >
+                      <X className="size-3" />
+                    </button>
+                  </span>
+                ))}
               </div>
             )}
 
-            <PromptInputActions className="justify-between pt-1">
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setShowRepo((v) => !v);
-                }}
-                aria-expanded={showRepo}
-                className={cn(
-                  "flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2 text-micro font-medium transition-colors",
-                  repo.trim() ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"
+            <PromptInputActions className="relative justify-between pt-1">
+              <div ref={pickerRef} className="relative" onClick={(e) => e.stopPropagation()}>
+                <button
+                  type="button"
+                  onClick={() => setShowRepo((v) => !v)}
+                  aria-expanded={showRepo}
+                  className={cn(
+                    "flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2 text-micro font-medium transition-colors",
+                    picked.length ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  )}
+                >
+                  {picked.length ? <Plus className="size-3.5" aria-hidden /> : <GitBranch className="size-3.5" aria-hidden />}
+                  {picked.length ? "Add another repo" : "Attach repos"}
+                </button>
+                {showRepo && (
+                  <RepoPicker
+                    className="absolute bottom-full left-0 z-20 mb-2"
+                    selected={picked}
+                    onToggle={(r) =>
+                      setPicked((prev) =>
+                        prev.some((p) => p.repo.toLowerCase() === r.fullName.toLowerCase())
+                          ? prev.filter((p) => p.repo.toLowerCase() !== r.fullName.toLowerCase())
+                          : [...prev, { repo: r.fullName, defaultBranch: r.defaultBranch, private: r.private }]
+                      )
+                    }
+                    onClose={() => setShowRepo(false)}
+                  />
                 )}
-              >
-                <GitBranch className="size-3.5" aria-hidden />
-                <span className={cn(repo.trim() && "font-mono")}>{repoLabel}</span>
-              </button>
+              </div>
               <p className={cn("hidden min-w-0 flex-1 truncate text-right text-micro sm:block", error ? "text-destructive" : "text-muted-foreground")}>
                 {error ??
                   (lifecycle.maxDurationSec
                     ? `Enter starts the machine · runs up to ${fmtDuration(lifecycle.maxDurationSec)}${lifecycle.idleTimeoutSec ? `, sleeps after ${fmtDuration(lifecycle.idleTimeoutSec)} quiet` : ""}`
-                    : "Enter starts the machine · without a repo it runs task-only")}
+                    : "Enter starts the machine · a repo named in the task is attached automatically")}
               </p>
               <Button
                 size="icon"

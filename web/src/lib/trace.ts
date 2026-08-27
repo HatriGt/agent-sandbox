@@ -128,7 +128,7 @@ export function parseTrace(rawLog: string): TraceEvent[] {
 
   for (const line of lines) {
     if (think !== null) {
-      if (line.trim() === THINK_CLOSE) {
+      if (line === THINK_CLOSE) {
         const text = think.join("\n").trim();
         if (text) events.push({ kind: "think", text });
         think = null;
@@ -136,7 +136,7 @@ export function parseTrace(rawLog: string): TraceEvent[] {
       continue;
     }
     if (plan !== null) {
-      if (line.trim() === PLAN_CLOSE) {
+      if (line === PLAN_CLOSE) {
         const items: PlanItem[] = plan
           .map((l) => l.trim().match(PLAN_LINE))
           .filter((m): m is RegExpMatchArray => !!m)
@@ -146,20 +146,24 @@ export function parseTrace(rawLog: string): TraceEvent[] {
       } else plan.push(line);
       continue;
     }
-    if (line.trim() === THINK_OPEN) {
+    // Sentinels are only sentinels at column 0. The formatter never indents them; an indented one is
+    // CONTENT — e.g. the agent catting its own .agent.log, which nests a copy of the transcript into a
+    // tool result. Matching those flipped the parser into a think block and spilled the rest of the
+    // result out as prose (bash commands "rendered as plain text").
+    if (line === THINK_OPEN) {
       flushProse();
       think = [];
       target = null;
       continue;
     }
-    if (line.trim() === PLAN_OPEN) {
+    if (line === PLAN_OPEN) {
       flushProse();
       plan = [];
       target = null;
       continue;
     }
     if (you !== null) {
-      if (line.trim() === YOU_CLOSE) {
+      if (line === YOU_CLOSE) {
         events.push({ kind: "you", text: you.join("\n").trim() });
         you = null;
       } else {
@@ -167,7 +171,7 @@ export function parseTrace(rawLog: string): TraceEvent[] {
       }
       continue;
     }
-    if (line.trim() === YOU_OPEN) {
+    if (line === YOU_OPEN) {
       flushProse();
       you = [];
       continue;

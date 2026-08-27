@@ -74,6 +74,17 @@ function egressFlags(cfg: Config, allowAll = cfg.egressAllowAll): string[] {
  * `msb copy <dir> box:/dest` copies the dir *into* /dest (trailing /. ignored), so we copy to a
  * temp path then move the contents into /workspace to avoid a nested subdir.
  */
+/**
+ * Copy a directory from the VPS into a RUNNING box at `dest` (used to attach a repo mid-run). The
+ * staged tree lands via `msb copy` in a scratch dir, then moves into place so a half-copied tree is
+ * never visible at the final path.
+ */
+export async function copyDirIntoBox(cfg: Config, box: string, hostDir: string, dest: string): Promise<void> {
+  const scratch = `/.wt-${Date.now().toString(36)}`;
+  await msb(cfg, ["copy", hostDir, `${box}:${scratch}`]);
+  await exec(cfg, box, `mkdir -p ${shellQuote(dest)} && cp -a ${scratch}/. ${shellQuote(dest)}/ && rm -rf ${scratch}`);
+}
+
 async function copyTreeIntoBox(cfg: Config, box: string, copyDir: string | undefined): Promise<void> {
   // Task-only (no repos): nothing staged — just ensure an empty /workspace exists to run in.
   if (!copyDir) {
@@ -323,7 +334,9 @@ const AGENT_SYS_PROMPT =
   "is genuinely free-form (a value, a name). The caller sees the question as a card with those options " +
   "as buttons, so never mention this file, its path, or the mechanism in your prose — just ask. " +
   "For work with three or more steps, keep a short plan with the TodoWrite tool and update it as steps " +
-  "complete — the caller sees it as a live checklist. " +
+  "complete — the caller sees it as a live checklist. Never read or print /workspace/.agent.* files " +
+  "(the log, task, question): they are the controller's channel, not context, and echoing the log " +
+  "corrupts the transcript the caller is reading. " +
   `(Enforcement: while ${QUESTION_MARK} exists, every tool call you attempt is DENIED, so you cannot ` +
   "do more work until the caller answers — writing it and stopping is the only correct move.) " +
   "The caller answers and continues this same session with 'claude -c'; when you " +
@@ -636,7 +649,7 @@ function bootstrapScript(cfg: Config): string {
 // the concrete tools the agent needs instead. Bash covers git/gh/npm; this is safe because the
 // box is an isolated microVM with a curated egress allowlist. --allowedTools takes multiple
 // space-separated values, so it goes LAST in the command.
-const ALLOWED_TOOLS = "Bash Edit Write Read Glob Grep TodoWrite";
+const ALLOWED_TOOLS = "Bash Edit Write Read Glob Grep TodoWrite WebFetch WebSearch";
 
 // Stable in-box paths (above per-repo dirs so `status` finds them regardless of repo layout).
 const AGENT_LOG = "/workspace/.agent.log";
@@ -732,7 +745,7 @@ export interface AgentCreds {
  *     `read:packages` on the token.
  * Deliberately does NOT set a global user.name/email or run `gh auth setup-git` with a default token.
  */
-async function applyGitCredentials(cfg: Config, box: string, creds?: AgentCreds): Promise<void> {
+export async function applyGitCredentials(cfg: Config, box: string, creds?: AgentCreds): Promise<void> {
   const lines: string[] = [];
 
   const credScript = gitCredentialsScript(creds?.ownerTokens ?? {});

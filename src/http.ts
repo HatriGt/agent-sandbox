@@ -31,6 +31,7 @@ import { exec as execInBox } from "./msb.js";
 import { loadStore, saveStore, pickDefaultAccount, upsertAccount, removeAccount, setDefaultAccount } from "./gh-token-store.js";
 import { probeToken } from "./gh-probe.js";
 import { viewAccounts, deviceStart, devicePoll } from "./accounts.js";
+import { makeRepoLister, fetchGithubRepos, matchRepos, inferRepos, attachRepoToBox } from "./repos.js";
 import { readArtifact } from "./artifact.js";
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -77,6 +78,8 @@ const readFleet = makeFleetReader(cfg, () => gatherMonitor(cfg), {
       return q.length ? { ...b, queued: q.map((m) => m.text) } : b;
     }),
 });
+// Repositories reachable through the connected accounts (picker, inference, attach).
+const listRepos = makeRepoLister(cfg, fetchGithubRepos);
 // `@` mentions: a briefly cached file index per box.
 const fileIndex = makeFileIndex(async (box, sh) => (await execInBox(cfg, box, sh)).stdout);
 
@@ -454,6 +457,35 @@ app.post("/accounts/device/poll.json", async (req: Request, res: Response) => {
   }
 });
 
+// Repositories the connected accounts can reach, ranked for the picker (?q=). ?refresh=1 re-fetches.
+app.get("/repos.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const q = typeof req.query.q === "string" ? req.query.q : "";
+  try {
+    const all = await listRepos(req.query.refresh === "1");
+    res.json({ repos: matchRepos(all, q), total: all.length });
+  } catch (e) {
+    res.status(500).json({ error: String((e as Error).message ?? e) });
+  }
+});
+// Attach a repository to a RUNNING sandbox: clone with the account that can access it, place it at
+// /workspace/<name>, and tell the agent (queued, delivered at its next boundary).
+app.post("/repos/attach.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const { session, repo, ref } = (req.body ?? {}) as { session?: string; repo?: string; ref?: string };
+  if (!session || !repo || !/^[\w.-]+\/[\w.-]+$/.test(repo.trim())) {
+    res.status(400).json({ error: "session and repo (owner/name) are required" });
+    return;
+  }
+  try {
+    const r = await attachRepoToBox(cfg, session, repo.trim(), ref?.trim() || undefined);
+    inbox.enqueue(session, `The repository ${repo.trim()} is now checked out at /workspace/${r.name}${ref ? ` (ref ${ref})` : ""}. Use it for the task where relevant.`);
+    res.json({ ok: true, name: r.name, login: r.login });
+  } catch (e) {
+    res.status(500).json({ error: String((e as Error).message ?? e) });
+  }
+});
+
 // Queued follow-ups for a box: list, or remove one (`?id=`) / all.
 app.get("/inbox.json", (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
@@ -521,15 +553,35 @@ app.post("/delegate.json", async (req: Request, res: Response) => {
     return;
   }
   try {
+    // Explicit repos from the picker win. With none given, a repo the TASK names ("review the last PR
+    // in elseco deal service") is attached automatically, so the agent starts with the checkout it
+    // was clearly asked about instead of hunting for it with `gh search`.
+    const explicit = Array.isArray(body.repos)
+      ? (body.repos as Array<{ repo?: string; ref?: string }>)
+          .filter((r) => r && typeof r.repo === "string" && r.repo.trim())
+          .map((r) => ({ repo: r.repo!.trim(), ref: typeof r.ref === "string" && r.ref.trim() ? r.ref.trim() : undefined }))
+      : [];
+    let inferred: string[] = [];
+    let repos = explicit;
+    if (!repos.length && typeof body.repo !== "string") {
+      try {
+        const matches = inferRepos(body.task, await listRepos());
+        inferred = matches.map((m) => m.fullName);
+        repos = matches.map((m) => ({ repo: m.fullName, ref: undefined }));
+      } catch {
+        /* inference is best-effort; a task-only run is the honest fallback */
+      }
+    }
     const result = await runDelegateFlow(cfg, deps, {
       source: body.source === "local" ? "local" : "git",
       repo: typeof body.repo === "string" ? body.repo : undefined,
+      repos: repos.length ? repos : undefined,
       task: body.task,
       ref: typeof body.ref === "string" ? body.ref : undefined,
       githubToken: typeof body.githubToken === "string" ? body.githubToken : undefined,
       githubAccount: typeof body.githubAccount === "string" ? body.githubAccount : undefined,
     });
-    res.json(result);
+    res.json(inferred.length ? { ...result, inferred } : result);
   } catch (e) {
     res.status(500).json({ error: String((e as Error).message ?? e) });
   }

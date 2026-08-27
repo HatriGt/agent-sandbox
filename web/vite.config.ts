@@ -41,6 +41,8 @@ export default defineConfig({
         "/files.json",
         "/inbox.json",
         "/accounts.json",
+        "/repos.json",
+        "/repos",
         "/accounts",
         "/ask.json",
         "/resume.json",

@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowLeft, Clock, Cpu, GitBranch, Hourglass, MemoryStick, MoonStar, Plus, Trash2, X } from "lucide-react";
+import { ArrowLeft, Clock, Cpu, GitBranch, Hourglass, Loader2, MemoryStick, MoonStar, Plus, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, type BoxView, type FleetLifecycle, type WatchSnapshot } from "@/lib/api";
 import { friendlyName, isSleeping, POLL_MS, roleLabel, shortName, threadTitle } from "@/lib/format";
@@ -15,6 +15,9 @@ import { ScrollButton } from "@/components/ui/scroll-button";
 import type { TraceEvent } from "@/lib/trace";
 import { LifecycleItem, ObserverItem, PlanCard, QueuedItem, SayItem, ThinkingItem, ToolGroup, WorkingIndicator, YouItem } from "./TraceItems";
 import { QuestionCard } from "./QuestionCard";
+import { PullRequestCard } from "./TestResultsCard";
+import { RepoPicker } from "@/components/RepoPicker";
+import { findPullRequests } from "@/lib/testReport";
 import { ProducedFiles } from "./ProducedFiles";
 import { ThreadSkeleton } from "./Skeletons";
 import { SendBar } from "./SendBar";
@@ -128,20 +131,55 @@ export function Thread({
   };
 
   // Answering the paused question: echo, then a FORCED resume (never queued — the run is waiting).
+  // `answered` remembers WHICH question was answered so the card disappears at once and a "resuming"
+  // beat shows until the box actually flips — resume takes a few seconds, and a card that lingers
+  // through them reads as "stuck". A genuinely NEW question (different text) shows a fresh card.
   const [answering, setAnswering] = React.useState(false);
+  const [answered, setAnswered] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    if (runState !== "waiting") setAnswered(null);
+  }, [runState, box.name]);
   const answer = React.useCallback(
     (text: string) => {
       onReplied(text);
       setAnswering(true);
+      setAnswered(question ?? "");
       api
         .resume(box.name, text, { force: true })
-        .catch((e: unknown) =>
-          toast.error("The agent did not get your answer", { description: e instanceof Error ? e.message : String(e) })
-        )
+        .catch((e: unknown) => {
+          setAnswered(null);
+          toast.error("The agent did not get your answer", { description: e instanceof Error ? e.message : String(e) });
+        })
         .finally(() => setAnswering(false));
     },
-    [box.name, onReplied]
+    [box.name, onReplied, question]
   );
+  const showQuestion = !!question && runState === "waiting" && answered !== question;
+  const resuming = !!question && runState === "waiting" && answered === question;
+
+  // Pull requests the agent opened, from its prose and tool output.
+  const pulls = React.useMemo(() => findPullRequests(events.map((e) => (e.kind === "say" ? e.text : e.kind === "tool" ? e.result ?? "" : "")).join("\n")), [events]);
+
+  // Attach a repository to this running sandbox.
+  const [addRepo, setAddRepo] = React.useState(false);
+  const [attaching, setAttaching] = React.useState<string | null>(null);
+  const [optimisticRepos, setOptimisticRepos] = React.useState<{ name: string; branch?: string }[]>([]);
+  React.useEffect(() => setOptimisticRepos([]), [box.name, box.repos?.length]);
+  const repos = React.useMemo(() => {
+    const seen = new Set((box.repos ?? []).map((r) => r.name));
+    return [...(box.repos ?? []), ...optimisticRepos.filter((r) => !seen.has(r.name))];
+  }, [box.repos, optimisticRepos]);
+  const attach = (fullName: string, ref?: string) => {
+    setAttaching(fullName);
+    api
+      .attachRepo(box.name, fullName, ref)
+      .then((r) => {
+        setOptimisticRepos((prev) => [...prev, { name: r.name, branch: ref }]);
+        toast.success(`Attached ${fullName}`, { description: `Checked out at /workspace/${r.name}. The agent is told at its next turn.` });
+      })
+      .catch((e: unknown) => toast.error("Could not attach", { description: e instanceof Error ? e.message : String(e) }))
+      .finally(() => setAttaching(null));
+  };
 
   // Follow-ups queued while the agent was mid-turn (server-held; the fleet poll carries them).
   const [queued, setQueued] = React.useState<{ id: string; text: string }[] | null>(null);
@@ -180,18 +218,6 @@ export function Thread({
               {friendlyName(box.name)}
             </span>
           )}
-          {box.repos?.map((r) => (
-            <Tooltip key={r.name}>
-              <TooltipTrigger asChild>
-                <span className="bg-muted text-muted-foreground stamp hidden shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 md:inline-flex">
-                  <GitBranch className="size-3" aria-hidden />
-                  {r.name}
-                  {r.branch && <span className="opacity-60">@{r.branch}</span>}
-                </span>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">Repository checked out in this sandbox at /workspace/{r.name}</TooltipContent>
-            </Tooltip>
-          ))}
         </div>
 
         {/* Lifecycle + vitals: quiet mono facts, desktop only — the fleet view carries them on phones. */}
@@ -239,6 +265,48 @@ export function Thread({
         )}
       </header>
 
+      {/* Connected repositories: what the agent can see, and the way to give it more mid-run. */}
+      {!sleeping && (
+        <div className="relative flex h-9 shrink-0 items-center gap-1.5 border-b px-3 md:px-5">
+          <GitBranch className="text-muted-foreground size-3.5 shrink-0" aria-hidden />
+          <span className="label text-muted-foreground shrink-0">{repos.length ? "Connected" : "No repository attached"}</span>
+          <div className="scrollbar-none flex min-w-0 items-center gap-1.5 overflow-x-auto">
+          {repos.map((r) => (
+            <Tooltip key={r.name}>
+              <TooltipTrigger asChild>
+                <span className="bg-muted text-foreground stamp inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5">
+                  {r.name}
+                  {r.branch && <span className="text-muted-foreground">@{r.branch}</span>}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">/workspace/{r.name} — @ mentions search here</TooltipContent>
+            </Tooltip>
+          ))}
+          </div>
+          <div className="relative shrink-0">
+            <button
+              type="button"
+              onClick={() => setAddRepo((v) => !v)}
+              disabled={!!attaching}
+              aria-expanded={addRepo}
+              className="text-muted-foreground hover:text-foreground hover:bg-muted inline-flex h-6 cursor-pointer items-center gap-1 rounded-md px-1.5 text-micro font-medium transition-colors disabled:opacity-60"
+            >
+              {attaching ? <Loader2 className="size-3 animate-spin" aria-hidden /> : <Plus className="size-3" aria-hidden />}
+              {attaching ? `Cloning ${attaching.split("/")[1]}…` : "Add repo"}
+            </button>
+            {addRepo && (
+              <RepoPicker
+                className="absolute top-full left-0 z-20 mt-1"
+                multi={false}
+                selected={repos.map((r) => ({ repo: r.name }))}
+                onToggle={(r) => attach(r.fullName)}
+                onClose={() => setAddRepo(false)}
+              />
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="relative min-h-0 flex-1">
         <ChatContainerRoot className="relative h-full">
           <ChatContainerContent className="mx-auto w-full max-w-3xl gap-7 px-4 pt-7 pb-12 md:px-6">
@@ -285,7 +353,16 @@ export function Thread({
 
             {idle && <IdleEmpty box={box} onNew={onNew} />}
 
-            {question && runState === "waiting" && <QuestionCard question={question} onAnswer={answer} busy={answering} />}
+            {showQuestion && <QuestionCard question={question!} onAnswer={answer} busy={answering} />}
+            {resuming && <WorkingIndicator label="Answer sent — the agent is resuming" />}
+
+            {pulls.length > 0 && !loadingTrace && (
+              <div className="flex flex-wrap gap-2">
+                {pulls.map((p) => (
+                  <PullRequestCard key={p.url} {...p} />
+                ))}
+              </div>
+            )}
 
             {!sleeping && <ProducedFiles session={box.name} files={artifacts} />}
 
@@ -323,7 +400,7 @@ export function Thread({
         boxName={box.name}
         runState={runState}
         sleeping={sleeping}
-        repos={box.repos ?? []}
+        repos={repos}
         onAsk={onAsk}
         onReplied={onReplied}
         onQueued={refreshQueue}

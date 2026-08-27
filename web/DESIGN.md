@@ -147,6 +147,21 @@ in its latest state. Both come from sentinel blocks the in-box formatter writes 
 (OAuth device flow, when `GITHUB_OAUTH_CLIENT_ID` is set) or by pasting a PAT (probed, then stored).
 Mark a default for task-only runs; remove with an armed confirm. Tokens never reach the browser.
 
+## Repositories
+
+Runs get repositories three ways: the Hub composer's **Attach repos** picker (multi-select from the
+connected accounts' repos, per-repo branch), **auto-attach** when the task names a known repo
+("elseco deal service" → `atom-insurance/elseco-deal-service`, exact name match only), and the thread's
+**Connected** strip with **Add repo**, which clones into the running sandbox at `/workspace/<name>` with
+the account that can access it and tells the agent at its next turn. `@` mentions search those repos.
+
+## Result cards
+
+A Bash step whose output is a test run (vitest/jest, node:test, pytest, go test) renders as a
+`TestResultsCard` — passed/failed/skipped chips, duration, per-file cases with timing, raw output one
+click away; groups containing one open by default. A PR URL in the transcript becomes a
+`PullRequestCard`. Answering a question hides the card at once and shows "Answer sent — resuming".
+
 ## Keyboard
 
 `n` new task · `⌘K` search · `j`/`k` next/previous machine · `/` focus the composer · `g f` fleet · `g a` accounts ·

@@ -41,6 +41,16 @@ async function ghGet(cfg: Config, token: string, path: string): Promise<string> 
   return r.stdout ?? "";
 }
 
+/** GET a GitHub API path as parsed JSON (undefined when the body is not JSON / the call failed). */
+export async function ghGetJson<T>(cfg: Config, token: string, path: string): Promise<T | undefined> {
+  const body = await ghGet(cfg, token, path);
+  try {
+    return body ? (JSON.parse(body) as T) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** True if the token can access the repo (GET /repos/{owner}/{name} returns 200 with a body). */
 export async function canAccessRepo(cfg: Config, token: string, repo: string): Promise<boolean> {
   const owner = ownerOf(repo);
