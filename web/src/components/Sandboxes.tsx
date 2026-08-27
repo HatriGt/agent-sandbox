@@ -243,16 +243,12 @@ function MachineRow({
         {/* Words in the sans face; only the duration is data. */}
         <span className="font-sans text-micro">
           {box.leaving ? "shutting down" : box.kept ? "kept · wakes on reply" : state === "sleeping" ? (deadline.kind === "sleep" && deadline.remainingSec != null ? `asleep · destroyed in ${deadline.remainingSec <= 0 ? "soon" : fmtDuration(deadline.remainingSec)}` : "asleep · wakes on reply") : roleLabel(box.role)}
-          {box.uptime && (
-            <>
-              {" · "}
-              {state === "sleeping" ? "ran" : "up"} <span className="stamp">{box.uptime}</span>
-            </>
-          )}
         </span>
-        {(box.cpu || box.mem) && (
-          <span>
-            {box.cpu && <>cpu {box.cpu}</>}
+        {/* Data line: uptime · cpu · memory — one row, never wrapping the words above. */}
+        {(box.uptime || box.cpu || box.mem) && (
+          <span className="whitespace-nowrap">
+            {box.uptime && <>{state === "sleeping" ? "ran" : "up"} {box.uptime}</>}
+            {box.cpu && <>{box.uptime ? " · " : ""}cpu {box.cpu.split(" / ")[0]}</>}
             {box.mem && <> · {box.mem.split(" / ")[0]}</>}
           </span>
         )}
