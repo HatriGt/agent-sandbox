@@ -102,7 +102,7 @@ export default function Landing() {
                 <ArrowRight className="size-4" />
               </Link>
               <a
-                href="https://github.com/HatriGt/agent-sandbox#connect-from-cursor"
+                href="https://github.com/HatriGt/agent-sandbox#connect-your-ide"
                 target="_blank"
                 rel="noreferrer"
                 className="border-line-strong hover:bg-muted inline-flex h-11 items-center gap-2 rounded-lg border px-5 text-body font-medium"
