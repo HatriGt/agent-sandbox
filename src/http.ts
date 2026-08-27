@@ -18,7 +18,7 @@ import { registerTools } from "./handlers.js";
 import { makeBridge } from "./server-bridge.js";
 import { deps } from "./deps.js";
 import { refillPool, startPoolMaintainer } from "./pool.js";
-import { checkBearer, checkDashboardAuth } from "./http-auth.js";
+import { checkBearer } from "./http-auth.js";
 import { gatherMonitor, gatherWatch, askInBox, driverStateLine } from "./msb.js";
 import { runDelegateFlow } from "./delegate-flow.js";
 import { streamWatch } from "./watch-sse.js";
@@ -33,6 +33,7 @@ import { probeToken } from "./gh-probe.js";
 import { viewAccounts, deviceStart, devicePoll } from "./accounts.js";
 import { makeRepoLister, fetchGithubRepos, matchRepos, inferRepos, attachRepoToBox } from "./repos.js";
 import { loadMcpStore, saveMcpStore, normalizeServer, parseMcpImport, viewServers, type McpServer as McpServerDef } from "./mcp-store.js";
+import { listKept, markKept, unmarkKept } from "./claims.js";
 import { readArtifact } from "./artifact.js";
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -72,13 +73,20 @@ const brokerConsider = makeCredentialBroker({
   resume: resumeQuietly,
   log: (m) => console.error(m),
 });
-const readFleet = makeFleetReader(cfg, () => gatherMonitor(cfg), {
+const readFleet = makeFleetReader(
+  cfg,
+  async () => {
+    const [boxes, kept] = await Promise.all([gatherMonitor(cfg), listKept(cfg).catch(() => new Set<string>())]);
+    return boxes.map((b) => (kept.has(b.name) ? { ...b, kept: true } : b));
+  },
+  {
   decorate: (boxes) =>
     boxes.map((b) => {
       const q = inbox.list(b.name);
       return q.length ? { ...b, queued: q.map((m) => m.text) } : b;
     }),
-});
+  }
+);
 // Repositories reachable through the connected accounts (picker, inference, attach).
 const listRepos = makeRepoLister(cfg, fetchGithubRepos);
 // The same repo capabilities for MCP clients (Cursor etc.): list_repos / attach_repo tools.
@@ -155,8 +163,12 @@ app.delete("/mcp", handle);
 // --- Monitoring dashboard (token-protected; poll-based) ---------------------------------------
 // Auth accepts the token via Bearer header (the page's fetch calls) OR a ?token= query param (so the
 // page can be opened directly in a browser, which can't set headers on a navigation). Same secret.
+// Header-only. The dashboard used to accept `?token=` so a page could be opened by URL; that put a
+// root-equivalent secret into browser history, server logs and referrers. The client now keeps the
+// token in local storage and sends it as a bearer header on every call — including the SSE stream
+// (fetch-based) and artifact downloads (fetch + blob) — so the query form is gone.
 function dashAuthed(req: Request, res: Response): boolean {
-  if (checkDashboardAuth(req.headers.authorization, req.query.token, cfg.httpToken)) return true;
+  if (checkBearer(req.headers.authorization, cfg.httpToken)) return true;
   res.status(401).json({ error: "unauthorized" });
   return false;
 }
@@ -545,6 +557,23 @@ app.post("/mcp-servers.json", async (req: Request, res: Response) => {
     res.json({ servers: viewServers(store) });
   } catch (e) {
     res.status(400).json({ error: String((e as Error).message ?? e) });
+  }
+});
+
+// Keep (pin) a sandbox: it still sleeps like any other, but is never reaped — only Destroy removes it.
+app.post("/keep.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const { session, keep } = (req.body ?? {}) as { session?: string; keep?: boolean };
+  if (!session) {
+    res.status(400).json({ error: "session is required" });
+    return;
+  }
+  try {
+    if (keep === false) await unmarkKept(cfg, session);
+    else await markKept(cfg, session);
+    res.json({ ok: true, kept: keep !== false });
+  } catch (e) {
+    res.status(500).json({ error: String((e as Error).message ?? e) });
   }
 });
 

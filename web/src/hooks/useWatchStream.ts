@@ -1,5 +1,5 @@
 import * as React from "react";
-import { api, type WatchSnapshot } from "@/lib/api";
+import { api, ApiError, openSse, type WatchSnapshot } from "@/lib/api";
 
 /**
  * Live thread stream over SSE, with a client-side cache so switching machines is instant.
@@ -79,7 +79,6 @@ export function useWatchStream(session: string, enabled = true, generation = 0):
 
     let log = cached?.log ?? "";
     let meta: Meta | null = cached ? (({ log: _l, ...m }) => m)(cached) : null;
-    let es: EventSource | null = null;
     let closedByUs = false;
 
     const publish = () => {
@@ -117,30 +116,45 @@ export function useWatchStream(session: string, enabled = true, generation = 0):
       // The server ends the stream after this. Hand over to the slow poll so a follow-up that wakes
       // the run is still picked up; the caller reopens the stream when the state flips back.
       closedByUs = true;
-      es?.close();
       setOk(false);
     };
 
-    try {
-      es = new EventSource(api.watchStreamUrl(session, log.length));
-    } catch {
-      setOk(false);
-      return;
-    }
-    es.addEventListener("snapshot", onSnapshot as EventListener);
-    es.addEventListener("append", onAppend as EventListener);
-    es.addEventListener("reset", onReset as EventListener);
-    es.addEventListener("state", onState as EventListener);
-    es.addEventListener("done", onDone as EventListener);
-    es.onopen = () => setOk(true);
-    es.onerror = () => {
-      if (closedByUs) return;
-      if (es && es.readyState === EventSource.CLOSED) setOk(false);
+    // fetch-based SSE (the bearer token must travel as a header). Reconnects with backoff on network
+    // errors, replaying from the last event id; a clean end (the server's terminal `done`) stops.
+    const ctrl = new AbortController();
+    let lastId: string | undefined = log.length ? String(log.length) : undefined;
+    let attempt = 0;
+    let stopped = false;
+    const handle = (f: { event: string; data: string; id?: string }) => {
+      if (f.id) lastId = f.id;
+      const ev = { data: f.data } as MessageEvent;
+      if (f.event === "snapshot") onSnapshot(ev);
+      else if (f.event === "append") onAppend(ev);
+      else if (f.event === "reset") onReset(ev);
+      else if (f.event === "state") onState(ev);
+      else if (f.event === "done") onDone(ev);
     };
+    const loop = async () => {
+      while (!stopped && !closedByUs) {
+        try {
+          await openSse("/watch.sse", { session }, { signal: ctrl.signal, lastEventId: lastId, onFrame: handle, onOpen: () => { attempt = 0; setOk(true); } });
+          if (closedByUs || stopped) return;
+          // Server ended without `done` (e.g. proxy idle cut): reconnect promptly.
+        } catch (e) {
+          if (stopped || (e instanceof DOMException && e.name === "AbortError")) return;
+          if (e instanceof ApiError && e.status === 401) return; // signed out; the gate takes over
+        }
+        setOk(false);
+        attempt++;
+        await new Promise((r) => setTimeout(r, Math.min(1000 * 2 ** Math.min(attempt, 4), 15_000)));
+      }
+    };
+    void loop();
 
     return () => {
+      stopped = true;
       closedByUs = true;
-      es?.close();
+      ctrl.abort();
     };
   }, [session, enabled, generation]);
 

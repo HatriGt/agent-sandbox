@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Link, useLocation } from "react-router";
+import { Link } from "react-router";
 import {
   ArrowRight,
   Box,
@@ -32,8 +32,7 @@ import { cn } from "@/lib/utils";
  * done), built from the same visual vocabulary as the console so what you see is what you get.
  */
 export default function Landing() {
-  const { search } = useLocation();
-  const consoleHref = { pathname: "/dashboard", search };
+  const consoleHref = { pathname: "/dashboard" };
   return (
     <div className="dark bg-background text-foreground min-h-full overflow-y-auto">
       <header className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
@@ -71,7 +70,7 @@ export default function Landing() {
       {/* ───────────── hero ───────────── */}
       <section className="relative isolate">
         <HairlineGrid />
-        <div className="mx-auto grid max-w-6xl items-center gap-12 px-6 pt-10 pb-20 lg:grid-cols-[1.05fr_1fr] lg:pt-16">
+        <div className="mx-auto grid max-w-6xl items-start gap-12 px-6 pt-10 pb-20 lg:grid-cols-[1.05fr_1fr] lg:pt-16">
         <div>
           <Reveal>
             <p className="text-live label mb-4 inline-flex items-center gap-2 rounded-full border px-3 py-1">
@@ -427,7 +426,8 @@ function Demo() {
         <span className="text-foreground min-w-0 truncate text-meta font-medium">Fix the flaky retry test in packages/queue</span>
         <span className="stamp text-muted-foreground ml-auto hidden sm:inline">glint-otter</span>
       </div>
-      <div className="flex min-h-[26rem] flex-col gap-4 px-5 py-5 text-meta">
+      {/* Fixed height: the replay grows and shrinks, and the hero copy beside it must not move. */}
+      <div className="flex h-[27rem] flex-col gap-4 overflow-hidden px-5 py-5 text-meta">
         {items.map((f, i) =>
           f.kind === "task" ? (
             <motion.div key={i} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="flex justify-end">

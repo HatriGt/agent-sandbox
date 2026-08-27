@@ -93,7 +93,7 @@ export function MachineList({
                   <div className="flex items-center gap-2">
                     <StateStamp state={state} exitCode={v.exitCode} />
                     <span className="label text-muted-foreground ml-auto truncate">
-                      {v.leaving ? "shutting down" : state === "sleeping" ? "wakes on reply" : roleLabel(v.role)}
+                      {v.leaving ? "shutting down" : v.kept ? "kept" : state === "sleeping" ? "wakes on reply" : roleLabel(v.role)}
                     </span>
                   </div>
 

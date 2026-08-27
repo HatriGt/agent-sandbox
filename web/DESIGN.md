@@ -153,6 +153,19 @@ in its latest state. Both come from sentinel blocks the in-box formatter writes 
   the box and passed to `claude --mcp-config`, with their tools allowed. Enable/disable per server;
   secret values come back masked.
 
+## Access (interim)
+
+`TokenGate` fronts `/dashboard/*`: paste the controller token once; it is verified, kept in
+`localStorage`, and sent as a bearer header on every call. Nothing carries the token in a URL any
+more — the stream is fetch-based SSE, downloads are fetch + blob. A 401 anywhere signs out. One token
+is one operator. Old `?token=` links are consumed once and stripped.
+
+## Keep (pin)
+
+A pin in the thread header holds a sandbox: it still sleeps when quiet, but the maintainer never reaps
+it — only Destroy does. Shown as a `kept` pill in the header, "kept" in the machine list and "kept ·
+until destroyed" in the Fleet time-left column. Off by default; per sandbox.
+
 ## Composer context
 
 Picking a file from the `@` menu turns it into a removable **chip** above the text (Cursor's context

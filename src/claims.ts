@@ -45,10 +45,25 @@ export function parseClaims(stdout: string, now: number): Map<string, number> {
   return m;
 }
 
+/* ───────────── keep (pin) markers: a run the operator wants held until they destroy it ───────────── */
+const KEEP_DIR = '"$HOME/.agent-sandbox/keep"';
+
+export async function markKept(cfg: Config, box: string): Promise<void> {
+  await ssh(cfg, `mkdir -p ${KEEP_DIR} && chmod 700 ${KEEP_DIR} && : > ${KEEP_DIR}/${shellQuote(box)}`);
+}
+export async function unmarkKept(cfg: Config, box: string): Promise<void> {
+  await ssh(cfg, `rm -f ${KEEP_DIR}/${shellQuote(box)}`);
+}
+export async function listKept(cfg: Config): Promise<Set<string>> {
+  const out = await ssh(cfg, `[ -d ${KEEP_DIR} ] && ls -1 ${KEEP_DIR} 2>/dev/null || true`);
+  return new Set(out.split("\n").map((l) => l.trim()).filter((l) => l && l !== "*"));
+}
+
 /**
  * The reaping decision for a NON-running pool box: keep it if it is a claimed run that has been
  * asleep for less than the sleep TTL; otherwise it is dead capacity (or an abandoned run) and goes.
  */
-export function shouldKeepStopped(claimAgeSec: number | undefined, sleepTtlSec: number): boolean {
+export function shouldKeepStopped(claimAgeSec: number | undefined, sleepTtlSec: number, kept = false): boolean {
+  if (kept) return true;
   return claimAgeSec !== undefined && claimAgeSec < sleepTtlSec;
 }

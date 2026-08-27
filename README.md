@@ -106,11 +106,11 @@ ssh <vps> "docker exec agent-sandbox npm run ask -- <session> 'what has it chang
 ssh -t <vps> "docker exec -i agent-sandbox npm run ask -- <session>"   # interactive, stdin
 ```
 
-**Web dashboard.** The HTTP entry also serves a token-protected page at `/dashboard` — open
-`https://<ASB_DOMAIN>/dashboard?token=<MCP_HTTP_TOKEN>` in a browser to see all boxes as auto-refreshing
-cards (role, run-state badge, task, question, cpu/mem); click a card to load that box's live log. It
-polls `/monitor.json` every 3s (and `/watch.json?session=…` for logs); both JSON endpoints require the
-same token. Auth accepts the token via `Authorization: Bearer` header or the `?token=` query param.
+**Web dashboard.** The HTTP entry also serves the console at `/dashboard` (and a public landing page at
+`/`). Open `https://<ASB_DOMAIN>/dashboard`, paste `MCP_HTTP_TOKEN` once into the token gate, and the
+browser keeps it and sends it as a bearer header on every call; `?token=` is no longer accepted. The
+console streams each box live over SSE, shows the fleet, GitHub accounts and MCP servers
+(Integrations), and lets you answer the agent's questions. See `docs/security.md` and `web/DESIGN.md`.
 
 **Reactive GitHub auth — no default account.** There is no baked GitHub token or git identity. Access
 is resolved **per repo** from a login-keyed store on the VPS: on the first delegation to a repo no

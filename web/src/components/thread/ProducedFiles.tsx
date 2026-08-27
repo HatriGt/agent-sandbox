@@ -85,14 +85,26 @@ function ArtifactCard({ session, file }: { session: string; file: ProducedFile }
           )}
           <span>{open ? "hide" : "view"}</span>
         </button>
-        <a
-          href={api.artifactUrl(session, file.relPath)}
-          download={file.name}
+        <button
+          type="button"
+          onClick={() => {
+            api
+              .artifactBlob(session, file.relPath)
+              .then((blob) => {
+                const href = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = href;
+                a.download = file.name;
+                a.click();
+                setTimeout(() => URL.revokeObjectURL(href), 10_000);
+              })
+              .catch((e: unknown) => setLoad({ state: "error", message: errorText(e), gone: e instanceof ApiError && e.status === 404 }));
+          }}
           className="text-muted-foreground hover:text-foreground hover:bg-muted flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-meta transition-colors"
         >
           <Download className="size-3.5" aria-hidden />
           <span>download</span>
-        </a>
+        </button>
       </div>
 
       {open && (

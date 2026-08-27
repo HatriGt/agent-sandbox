@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowLeft, Clock, Cpu, GitBranch, Hourglass, Loader2, MemoryStick, MoonStar, Plus, Trash2, X } from "lucide-react";
+import { ArrowLeft, Clock, Cpu, GitBranch, Hourglass, Loader2, MemoryStick, MoonStar, Pin, PinOff, Plus, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, type BoxView, type FleetLifecycle, type WatchSnapshot } from "@/lib/api";
 import { friendlyName, isSleeping, POLL_MS, roleLabel, shortName, threadTitle } from "@/lib/format";
@@ -204,6 +204,31 @@ export function Thread({
 
   const idle = runState === "idle" && events.length === 0 && !loadingTrace;
 
+  // Keep (pin): the sandbox still sleeps on schedule, but is never reaped — only Destroy removes it.
+  const [keptLocal, setKeptLocal] = React.useState<boolean | null>(null);
+  React.useEffect(() => setKeptLocal(null), [box.name, box.kept]);
+  const kept = keptLocal ?? !!box.kept;
+  const [keeping, setKeeping] = React.useState(false);
+  const toggleKeep = () => {
+    const next = !kept;
+    setKeeping(true);
+    setKeptLocal(next);
+    api
+      .keep(box.name, next)
+      .then(() =>
+        toast.success(next ? `${friendlyName(box.name)} is kept` : `${friendlyName(box.name)} released`, {
+          description: next
+            ? "It will still sleep when quiet, but it stays until you destroy it. Wake it any day with a follow-up."
+            : `Back to the normal lifecycle: destroyed after ${lifecycle.idleTimeoutSec ? fmtDuration((lifecycle.idleTimeoutSec ?? 0) * 96) : "the sleep limit"} asleep.`,
+        })
+      )
+      .catch((e: unknown) => {
+        setKeptLocal(!next);
+        toast.error("Could not update", { description: e instanceof Error ? e.message : String(e) });
+      })
+      .finally(() => setKeeping(false));
+  };
+
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col">
       <header className="flex h-14 shrink-0 items-center gap-2.5 border-b px-3 md:px-5">
@@ -212,6 +237,12 @@ export function Thread({
         </Button>
 
         <StatePill state={state} exitCode={exitCode} />
+        {kept && (
+          <span className="bg-live/10 text-live hidden h-6 shrink-0 items-center gap-1 rounded-full px-2 text-micro font-semibold sm:inline-flex" title="Kept until you destroy it">
+            <Pin className="size-3 fill-current" aria-hidden />
+            kept
+          </span>
+        )}
 
         <div className="flex min-w-0 flex-1 items-baseline gap-2">
           <h1 className="text-foreground min-w-0 truncate text-body font-medium">
@@ -246,6 +277,29 @@ export function Thread({
         <Button variant="ghost" size="icon-sm" onClick={onNew} aria-label="New task" className="md:hidden">
           <Plus />
         </Button>
+
+        {box.role !== "pool-free" && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={toggleKeep}
+                disabled={keeping}
+                aria-pressed={kept}
+                aria-label={kept ? "Release this sandbox" : "Keep this sandbox"}
+                className={cn(kept && "text-live bg-live/10")}
+              >
+                {kept ? <Pin className="fill-current" /> : <PinOff />}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              {kept
+                ? "Kept — sleeps when quiet, never destroyed until you say so. Click to release."
+                : "Keep — hold this sandbox (asleep, workspace intact) until you destroy it. Come back any day with a follow-up."}
+            </TooltipContent>
+          </Tooltip>
+        )}
 
         {armed ? (
           <div className="enter flex items-center gap-1">

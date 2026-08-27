@@ -39,7 +39,7 @@ broker from the stored account, so it never reaches you.
 ```bash
 npm install
 ASB_API=https://agent-sandbox.ajeethkumar.dev npm run dev
-# then open http://localhost:5173/dashboard/?token=<MCP_HTTP_TOKEN>
+# then open http://localhost:5173/dashboard/ and paste MCP_HTTP_TOKEN into the token gate
 # the public landing page: http://localhost:5173/dashboard/welcome (served at / in production)
 ```
 
@@ -70,3 +70,9 @@ React Router v7 (browser history; the express SPA fallback serves `index.html` f
 `/accounts/device*.json` when `GITHUB_OAUTH_CLIENT_ID` is set). The thread folds extended thinking and
 renders TodoWrite plans as a live checklist; sandboxes expose their checked-out repos (`repos` on the
 fleet view), shown as chips in the thread header and used to scope `@` file search.
+
+## Access
+
+The dashboard asks for the controller token once and stores it in the browser (`localStorage`); every
+request sends it as `Authorization: Bearer`. The controller no longer accepts `?token=`. See
+`../docs/security.md` for the full model, including the in-sandbox guard hook.

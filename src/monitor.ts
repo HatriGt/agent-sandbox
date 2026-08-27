@@ -45,6 +45,8 @@ export interface BoxView {
   queued?: string[];
   /** Repositories checked out under /workspace (dir name + current branch). */
   repos?: RepoRef[];
+  /** Pinned by the operator: never reaped while asleep; only Destroy removes it. */
+  kept?: boolean;
 }
 
 export interface RepoRef {

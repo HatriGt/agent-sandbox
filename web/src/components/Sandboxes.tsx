@@ -241,7 +241,7 @@ function MachineRow({
           {friendlyName(box.name)}
         </span>
         <span>
-          {box.leaving ? "shutting down" : state === "sleeping" ? "asleep · wakes on reply" : roleLabel(box.role)}
+          {box.leaving ? "shutting down" : box.kept ? "kept · wakes on reply" : state === "sleeping" ? "asleep · wakes on reply" : roleLabel(box.role)}
           {box.uptime && <> · {state === "sleeping" ? "ran" : "up"} {box.uptime}</>}
         </span>
         {(box.cpu || box.mem) && (
@@ -274,7 +274,7 @@ function MachineRow({
             <TooltipContent>{deadlineText}</TooltipContent>
           </Tooltip>
         ) : (
-          <span className="stamp text-muted-foreground/60">{state === "sleeping" ? "asleep" : "—"}</span>
+          <span className="stamp text-muted-foreground/60">{box.kept ? "kept · until destroyed" : state === "sleeping" ? "asleep" : "—"}</span>
         )}
       </div>
 

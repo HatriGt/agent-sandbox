@@ -1,8 +1,10 @@
 /**
- * The controller's JSON surface. Every data route is bearer-guarded; the token rides in the page URL
- * (`?token=`) and is sent as both a header and a query param, so a page opened by navigation and a
- * fetch made from it authenticate identically.
+ * The controller's JSON surface. Every data route is bearer-guarded; the token lives in local storage
+ * (lib/auth.ts) and is sent ONLY as an `Authorization: Bearer` header — never in a URL. The live
+ * stream uses fetch (not EventSource, which cannot set headers) and downloads go through fetch + blob.
+ * A 401 anywhere signs the browser out so the token gate reappears.
  */
+import { currentToken, signOut } from "./auth";
 
 export type RunState = "running" | "waiting" | "done" | "idle";
 export type BoxRole = "session" | "pool-claimed" | "pool-free";
@@ -21,6 +23,8 @@ export interface BoxView {
   mem?: string;
   /** Unix seconds of the agent's last output (log mtime). */
   lastOutputAt?: number;
+  /** Pinned by the operator: never reaped while asleep; only Destroy removes it. */
+  kept?: boolean;
   /** Follow-ups queued while the agent was mid-turn; delivered when it finishes. */
   queued?: string[];
   /** Repositories checked out under /workspace. */
@@ -101,16 +105,24 @@ export interface AskResult {
   driverState?: string;
 }
 
-export const token = new URLSearchParams(location.search).get("token") ?? "";
-
 function url(path: string, params: Record<string, string> = {}) {
   const u = new URL(path, location.origin);
-  if (token) u.searchParams.set("token", token);
   for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
   return u.toString();
 }
 
-const authHeaders: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
+function headersFor(token = currentToken()): Record<string, string> {
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+/** Live headers object — read at call time so a token entered a moment ago is used immediately. */
+const authHeaders: HeadersInit = new Proxy({} as Record<string, string>, {
+  get: (_t, k: string) => headersFor()[k],
+  ownKeys: () => Object.keys(headersFor()),
+  getOwnPropertyDescriptor: (_t, k: string) => {
+    const v = headersFor()[k];
+    return v === undefined ? undefined : { value: v, enumerable: true, configurable: true, writable: true };
+  },
+});
 
 export class ApiError extends Error {
   constructor(
@@ -123,6 +135,7 @@ export class ApiError extends Error {
 
 async function parse<T>(res: Response): Promise<T> {
   const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (res.status === 401) signOut();
   if (!res.ok) {
     const msg =
       typeof body.error === "string"
@@ -148,7 +161,55 @@ async function post<T>(path: string, payload: unknown): Promise<T> {
 /** A controller built before /fleet.json existed: fall back to the bare monitor list once, remember. */
 let fleetRouteMissing = false;
 
+/**
+ * Server-sent events over fetch, so the bearer header can be sent. Emits parsed `{event, data, id}`
+ * frames; resolves when the server ends the stream; rejects on a network error. The caller owns
+ * reconnection (and passes `lastEventId` back in).
+ */
+export async function openSse(
+  path: string,
+  params: Record<string, string>,
+  opts: { signal: AbortSignal; lastEventId?: string; onFrame: (f: { event: string; data: string; id?: string }) => void; onOpen?: () => void }
+): Promise<void> {
+  const res = await fetch(url(path, params), {
+    headers: { ...headersFor(), Accept: "text/event-stream", ...(opts.lastEventId ? { "Last-Event-ID": opts.lastEventId } : {}) },
+    signal: opts.signal,
+  });
+  if (res.status === 401) signOut();
+  if (!res.ok || !res.body) throw new ApiError(`stream failed (${res.status})`, res.status);
+  opts.onOpen?.();
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let i: number;
+    while ((i = buf.indexOf("\n\n")) >= 0) {
+      const raw = buf.slice(0, i);
+      buf = buf.slice(i + 2);
+      let event = "message";
+      let id: string | undefined;
+      const data: string[] = [];
+      for (const line of raw.split("\n")) {
+        if (line.startsWith(":")) continue;
+        if (line.startsWith("event:")) event = line.slice(6).trim();
+        else if (line.startsWith("id:")) id = line.slice(3).trim();
+        else if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
+      }
+      if (data.length) opts.onFrame({ event, data: data.join("\n"), id });
+    }
+  }
+}
+
 export const api = {
+  /** Does the controller accept this token? (Used by the token gate before storing it.) */
+  verifyToken: async (token: string): Promise<boolean> => {
+    const res = await fetch(url("/fleet.json"), { headers: headersFor(token) });
+    return res.status !== 401;
+  },
+
   /**
    * The fleet with lifecycle facts. Falls back to `/monitor.json` (boxes only, no lifecycle) against
    * an older controller so the dashboard still works during a rolling deploy.
@@ -166,16 +227,24 @@ export const api = {
   watch: (session: string, signal?: AbortSignal) =>
     fetch(url("/watch.json", { session }), { headers: authHeaders, signal }).then(parse<WatchSnapshot>),
 
-  /** URL for the live SSE log stream. EventSource can't set headers, so the token rides in the query. */
-  watchStreamUrl: (session: string, from = 0) =>
-    url("/watch.sse", from > 0 ? { session, from: String(from) } : { session }),
+  /** Download a produced file as a blob (authenticated by header; the browser saves it). */
+  async artifactBlob(session: string, path: string): Promise<Blob> {
+    const res = await fetch(url("/artifact", { session, path }), { headers: authHeaders });
+    if (res.status === 401) signOut();
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      throw new ApiError(typeof body.error === "string" ? body.error : `Request failed (${res.status})`, res.status);
+    }
+    return res.blob();
+  },
 
-  /** Download URL for a produced file — token in the query so the browser's own GET authenticates. */
-  artifactUrl: (session: string, path: string) => url("/artifact", { session, path }),
+  /** Keep (pin) a sandbox until destroyed, or release it. */
+  keep: (session: string, keep: boolean) => post<{ ok: true; kept: boolean }>("/keep.json", { session, keep }),
 
   /** Fetch a produced file's text for inline preview. Throws ApiError (404/413/…) on failure. */
   async artifactText(session: string, path: string, signal?: AbortSignal): Promise<string> {
     const res = await fetch(url("/artifact", { session, path }), { headers: authHeaders, signal });
+    if (res.status === 401) signOut();
     if (!res.ok) {
       const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
       const msg = typeof body.error === "string" ? body.error : `Request failed (${res.status})`;
