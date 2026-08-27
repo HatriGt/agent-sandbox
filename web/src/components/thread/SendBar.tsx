@@ -147,7 +147,7 @@ export function SendBar({
   const hint = error
     ? null
     : sleeping
-      ? "Asleep. Your message restarts the sandbox — workspace and session intact — in a few seconds."
+      ? "Waking the sandbox. Type ahead — it is sent the moment the machine is back."
       : toAgent
         ? busy
           ? "The agent is mid-turn. Your message is queued and delivered when this turn finishes."
@@ -217,7 +217,7 @@ export function SendBar({
             onClick={() => updateMention(value)}
             placeholder={
               sleeping
-                ? "Send a follow-up — this wakes the sandbox…"
+                ? "Type ahead — sends once the sandbox is awake…"
                 : toAgent
                   ? busy
                     ? "Queue a follow-up for when this turn finishes…"

@@ -157,7 +157,7 @@ function Tab({ active, onClick, icon, label, disabled }: { active: boolean; onCl
 }
 
 /** Two-gutter unified diff: old/new line numbers, +/- rows tinted, hunk headers as dividers. */
-function DiffView({ diff, path }: { diff: ParsedDiff; path: string }) {
+export function DiffView({ diff, path }: { diff: ParsedDiff; path: string }) {
   if (diff.binary) return <p className="text-muted-foreground px-4 py-6 text-meta">Binary file — no textual diff.</p>;
   if (!diff.hunks.length) return <p className="text-muted-foreground px-4 py-6 text-meta">No differences against HEAD for {path}.</p>;
   return (

@@ -76,5 +76,5 @@ test("the sinks are exactly the audited ones", () => {
     out = ""; // grep exits 1 on no matches
   }
   const files = out.split("\n").filter(Boolean).map((f) => f.replace(`${webSrc}/`, ""));
-  assert.deepEqual(files.sort(), ["components/JsonEditor.tsx", "components/ui/code-block.tsx"]);
+  assert.deepEqual(files.sort(), ["components/CodeEditor.tsx", "components/ui/code-block.tsx"]);
 });

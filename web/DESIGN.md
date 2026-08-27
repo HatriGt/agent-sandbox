@@ -280,3 +280,18 @@ is invented: no analytics, no cost, no history beyond this browser's own session
   author) and Checks. `/pr.json` now carries mergeable, reviews and check-run rollups.
 - Header: no `0s` countdown (reads "soon"); the role pill hides when a box is kept.
 - Composer hint is one clause: `Enter to send · @ to mention a file`.
+
+## Round: wake on open, workspace explorer (2026-08-27)
+
+- **Opening a sleeping thread wakes it** (`POST /wake.json` → `msb start`, hub cache dropped). The
+  old "this machine is asleep, type to wake it" card is a **WakingCard**: pixel-grid wave, elapsed
+  seconds, three stages (boot → restore → reconnect) that tick off; it says "Awake" and leaves once
+  the box reports running. The composer says "Type ahead — sends once the sandbox is awake".
+- **Workspace pane** (`thread/WorkspacePane.tsx`, header folder-tree button or any file in the
+  changes dock): VS Code-shaped — collapsible tree (repos as roots with a branch glyph, folders with
+  change counts, files with marks and +/−, "Go to file" filter), tab strip of open files, and per
+  file **Diff / File / Edit**. Edit is `CodeEditor` (the JSON editor generalised: gutter, shiki,
+  caret line); ⌘S / Save writes back via `PUT /file.json` (base64, path-confined, 2 MB cap) and
+  refreshes the change list. `GET /tree.json` is the @-mention index without the 40-match limit.
+- Inspiration taken from beautifului.dev: pixel-grid loading state with elapsed time, task-row
+  status language, tabbed file/diff panel.

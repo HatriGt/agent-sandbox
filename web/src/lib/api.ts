@@ -304,6 +304,16 @@ export const api = {
     fetch(url("/pr.json", { repo, number: String(number) }), { headers: authHeaders, signal }).then(parse<PullInfo>),
 
   /** Keep (pin) a sandbox until destroyed, or release it. */
+  /** Start a sleeping sandbox now (opening its thread does this automatically). */
+  wake: (session: string) => post<{ ok: true }>("/wake.json", { session }),
+  /** Every workspace file (flat paths) for the explorer tree. */
+  tree: (session: string, signal?: AbortSignal) =>
+    fetch(url("/tree.json", { session }), { headers: authHeaders, signal }).then(parse<{ files: string[]; total: number; truncated: boolean }>),
+  /** Write a text file inside the sandbox. */
+  writeFile: (session: string, path: string, content: string) =>
+    fetch(url("/file.json"), { method: "PUT", headers: { ...authHeaders, "content-type": "application/json" }, body: JSON.stringify({ session, path, content }) }).then(
+      parse<{ ok: true; path: string; bytes: number }>
+    ),
   /** Merge the PR from inside the sandbox (`gh pr merge --merge`). */
   mergePull: (session: string, repo: string, number: number) => post<{ ok: true; output: string }>("/pr/merge.json", { session, repo, number }),
   keep: (session: string, keep: boolean) => post<{ ok: true; kept: boolean }>("/keep.json", { session, keep }),

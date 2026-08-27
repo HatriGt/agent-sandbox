@@ -64,7 +64,7 @@ function isSubsequence(needle: string, hay: string): boolean {
 export function makeFileIndex(
   exec: (box: string, sh: string) => Promise<string>,
   opts: { ttlMs?: number; now?: () => number } = {}
-): (box: string, query: string) => Promise<{ files: string[]; total: number; truncated: boolean }> {
+): (box: string, query: string, limit?: number) => Promise<{ files: string[]; total: number; truncated: boolean }> {
   const ttl = opts.ttlMs ?? 20_000;
   const now = opts.now ?? Date.now;
   const cache = new Map<string, { at: number; paths: string[] }>();
@@ -86,8 +86,8 @@ export function makeFileIndex(
     return p;
   };
 
-  return async (box, query) => {
+  return async (box, query, limit) => {
     const paths = await index(box);
-    return { files: matchFiles(paths, query), total: paths.length, truncated: paths.length >= FILE_INDEX_CAP };
+    return { files: matchFiles(paths, query, limit), total: paths.length, truncated: paths.length >= FILE_INDEX_CAP };
   };
 }

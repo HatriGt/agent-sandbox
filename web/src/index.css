@@ -535,3 +535,12 @@
 .flow-dash {
   animation: flow-dash 1.4s linear infinite;
 }
+
+/* Waiting texture for the waking card: cells brighten in a diagonal wave (delay set per cell). */
+@keyframes pixel-wave {
+  0%, 100% { opacity: 0.2; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1); }
+}
+.pixel-wave {
+  animation: pixel-wave 1.4s ease-in-out infinite;
+}

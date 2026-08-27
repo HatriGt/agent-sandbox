@@ -1,9 +1,10 @@
 import * as React from "react";
-import { ArrowLeft, Clock, Cpu, GitBranch, Hourglass, Loader2, MemoryStick, MoonStar, Pin, PinOff, Plus, Trash2, X } from "lucide-react";
+import { ArrowLeft, Clock, Cpu, FolderTree, GitBranch, Hourglass, Loader2, MemoryStick, Pin, PinOff, Plus, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, type BoxView, type ChangedFile, type FleetLifecycle, type WatchSnapshot } from "@/lib/api";
 import { AnimatePresence, motion } from "motion/react";
-import { FilePane } from "./FilePane";
+import { WorkspacePane } from "./WorkspacePane";
+import { WakingCard } from "./WakingCard";
 import { friendlyName, isSleeping, POLL_MS, roleLabel, shortName, threadTitle } from "@/lib/format";
 import { deadlineLabel, deadlineOf, displayState, fmtDuration } from "@/lib/lifecycle";
 import { parseTrace, producedFiles } from "@/lib/trace";
@@ -65,7 +66,23 @@ export function Thread({
   /** A reply the server could not deliver: the parent drops its optimistic echo. */
   onReplyFailed?: (text: string) => void;
 }) {
+  // Opening a sleeping sandbox wakes it at once — nobody should have to type to see their run.
+  const [wake, setWake] = React.useState<{ startedAt: number; error: string | null } | null>(null);
+  const wokeRef = React.useRef<string | null>(null);
   const sleeping = isSleeping(box);
+  React.useEffect(() => {
+    if (!sleeping || wokeRef.current === box.name) return;
+    wokeRef.current = box.name;
+    setWake({ startedAt: Date.now(), error: null });
+    api.wake(box.name).catch((e: unknown) => setWake((w) => (w ? { ...w, error: e instanceof Error ? e.message : String(e) } : w)));
+  }, [sleeping, box.name]);
+  React.useEffect(() => {
+    // Once the box reports running again, let the card show "awake" briefly, then leave.
+    if (!sleeping && wake) {
+      const t = window.setTimeout(() => setWake(null), 1400);
+      return () => window.clearTimeout(t);
+    }
+  }, [sleeping, wake]);
   // Reopen the stream when the fleet poll sees the box come back to life (a follow-up woke a
   // finished run, or a sleeping microVM restarted): the server closed the stream at the terminal
   // `done`, so a new generation is the only way to get live appends again.
@@ -100,6 +117,13 @@ export function Thread({
   const [changes, setChanges] = React.useState<ChangedFile[]>([]);
   const [changesLoading, setChangesLoading] = React.useState(false);
   const [openFile, setOpenFile] = React.useState<ChangedFile | null>(null);
+  const [workspaceOpen, setWorkspaceOpen] = React.useState(false);
+  const showWorkspace = workspaceOpen || openFile !== null;
+  const closeWorkspace = () => {
+    setWorkspaceOpen(false);
+    setOpenFile(null);
+  };
+
   const refreshChanges = React.useCallback(() => {
     if (sleeping) return;
     setChangesLoading(true);
@@ -324,6 +348,15 @@ export function Thread({
           <Plus />
         </Button>
 
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon-sm" onClick={() => (showWorkspace ? closeWorkspace() : setWorkspaceOpen(true))} aria-pressed={showWorkspace} aria-label="Workspace files" className={cn(showWorkspace && "bg-accent text-foreground")} disabled={sleeping}>
+              <FolderTree />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">{sleeping ? "Files — available once the sandbox is awake" : "Files — browse, diff and edit the workspace"}</TooltipContent>
+        </Tooltip>
+
         {box.role !== "pool-free" && (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -417,7 +450,7 @@ export function Thread({
         <ThreadMinimap turns={turns} scrollerRef={stick.scrollRef} />
         {pulls.length > 0 && !loadingTrace && <PullRequestFloat key={pulls[pulls.length - 1].url} session={box.name} {...pulls[pulls.length - 1]} />}
         <ChatContainerRoot className="relative h-full [&>div]:overflow-x-hidden" instance={stick}>
-          <ChatContainerContent className="mx-auto w-full max-w-3xl gap-7 px-4 pt-7 pb-12 md:px-6">
+          <ChatContainerContent className={cn("mx-auto w-full max-w-3xl gap-7 px-4 pb-12 md:px-6", pulls.length > 0 ? "pt-14" : "pt-7")}>
             {box.task && (
               <div data-turn="task">
                 <YouItem text={box.task} label="Task" />
@@ -426,20 +459,7 @@ export function Thread({
 
             {loadingTrace && <ThreadSkeleton withTask={!!box.task} />}
 
-            {sleeping && (
-              <div className="enter border-sleep/30 bg-sleep/8 flex items-start gap-3 rounded-xl border px-4 py-3">
-                <MoonStar className="text-sleep mt-0.5 size-4 shrink-0" aria-hidden />
-                <div className="min-w-0 text-meta">
-                  <p className="text-foreground font-medium">This machine is asleep.</p>
-                  <p className="text-muted-foreground mt-0.5">
-                    It went quiet for longer than the idle limit
-                    {lifecycle.idleTimeoutSec ? ` (${fmtDuration(lifecycle.idleTimeoutSec)})` : ""} and msb stopped
-                    the microVM — but its workspace and Claude session are intact. A reply below restarts it and
-                    continues the same run. The transcript reappears once it is awake.
-                  </p>
-                </div>
-              </div>
-            )}
+            <AnimatePresence>{(sleeping || wake) && <WakingCard key="waking" awake={!sleeping} startedAt={wake?.startedAt ?? Date.now()} error={wake?.error} />}</AnimatePresence>
 
             {groups.map((g, i) => {
               const isLast = i === groups.length - 1;
@@ -531,7 +551,9 @@ export function Thread({
         onReplyFailed={onReplyFailed}
       />
       </div>
-      <AnimatePresence>{openFile && <FilePane key={openFile.path} session={box.name} file={openFile} onClose={() => setOpenFile(null)} />}</AnimatePresence>
+      <AnimatePresence>
+        {showWorkspace && <WorkspacePane key="workspace" session={box.name} changes={changes} open={openFile} onClose={closeWorkspace} onSaved={refreshChanges} repos={repos.map((r) => r.name)} />}
+      </AnimatePresence>
       </div>
     </div>
   );

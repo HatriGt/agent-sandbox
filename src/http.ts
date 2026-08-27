@@ -21,7 +21,8 @@ import { deps } from "./deps.js";
 import { refillPool, startPoolMaintainer } from "./pool.js";
 import { checkBearer } from "./http-auth.js";
 import { securityHeaders } from "./security-headers.js";
-import { gatherMonitor, gatherWatch, askInBox, driverStateLine } from "./msb.js";
+import { gatherMonitor, gatherWatch, askInBox, driverStateLine, startBoxIfStopped, noteRunning } from "./msb.js";
+import { safeWorkspacePath } from "./artifact.js";
 import { runDelegateFlow } from "./delegate-flow.js";
 import { streamWatch } from "./watch-sse.js";
 import { WatchHub } from "./watch-hub.js";
@@ -73,7 +74,7 @@ app.use(
     filter: (req, res) => (req.path.endsWith(".sse") || req.path === "/mcp" || req.path.startsWith("/mcp/") ? false : compression.filter(req, res)),
   })
 );
-app.use(express.json());
+app.use(express.json({ limit: "4mb" }));
 
 // One shared tail loop per watched box (see watch-hub.ts): every SSE viewer, /watch.json call and
 // hover-prefetch of the same box reads one cached snapshot instead of each paying an SSH round trip.
@@ -765,6 +766,69 @@ app.delete("/inbox.json", (req: Request, res: Response) => {
 });
 
 // Workspace files for `@` mentions: ?session=&q=; at most 40 ranked matches.
+// Wake a sleeping sandbox the moment its thread is opened — no need to type first. Idempotent.
+app.post("/wake.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const { session } = (req.body ?? {}) as { session?: string };
+  if (!session || !/^[\w.-]+$/.test(session)) {
+    res.status(400).json({ error: "session is required" });
+    return;
+  }
+  try {
+    await startBoxIfStopped(cfg, session);
+    noteRunning(session);
+    watchHub.drop(session); // the cached "stopped" snapshot must not be served as live
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: String((e as Error).message ?? e) });
+  }
+});
+
+// Every file under /workspace (same exclusions as the @-mention index), for the file explorer.
+app.get("/tree.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const session = typeof req.query.session === "string" ? req.query.session : "";
+  if (!session) {
+    res.status(400).json({ error: "session query param required" });
+    return;
+  }
+  try {
+    res.json(await fileIndex(session, "", Number.POSITIVE_INFINITY));
+  } catch (e) {
+    res.status(500).json({ error: String((e as Error).message ?? e) });
+  }
+});
+
+// Write one text file under /workspace (the explorer's editor). Path-confined like /artifact; the
+// body travels base64 so no byte can escape the shell quoting. Size-capped at 2 MB.
+app.put("/file.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const { session, path, content } = (req.body ?? {}) as { session?: string; path?: string; content?: string };
+  if (!session || !/^[\w.-]+$/.test(session) || typeof path !== "string" || typeof content !== "string") {
+    res.status(400).json({ error: "session, path and content are required" });
+    return;
+  }
+  if (content.length > 2_000_000) {
+    res.status(413).json({ error: "file too large to edit here (2 MB cap)" });
+    return;
+  }
+  const safe = safeWorkspacePath(path);
+  if (!safe.ok) {
+    res.status(400).json({ error: safe.message });
+    return;
+  }
+  try {
+    const b64 = Buffer.from(content, "utf8").toString("base64");
+    const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+    const abs = `/workspace/${safe.relPath}`;
+    const dir = abs.slice(0, abs.lastIndexOf("/"));
+    await execInBox(cfg, session, `mkdir -p ${q(dir)} && printf '%s' ${q(b64)} | base64 -d > ${q(abs)} && wc -c < ${q(abs)}`);
+    res.json({ ok: true, path: safe.relPath, bytes: Buffer.byteLength(content, "utf8") });
+  } catch (e) {
+    res.status(422).json({ error: String((e as Error).message ?? e).slice(-400) });
+  }
+});
+
 app.get("/files.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   const session = typeof req.query.session === "string" ? req.query.session : "";

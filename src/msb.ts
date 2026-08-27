@@ -1044,6 +1044,10 @@ export async function metrics(cfg: Config, box: string) {
  * (fleet sweep, watch hub) consults this first and leaves sleeping boxes alone.
  */
 const lastLsStatus = new Map<string, { status: string; at: number }>();
+/** After `msb start`, stop treating the box as asleep so the watch hub execs again immediately. */
+export function noteRunning(box: string): void {
+  lastLsStatus.set(box, { status: "Running", at: Date.now() });
+}
 export function knownStopped(box: string, maxAgeMs = 15_000): boolean {
   const e = lastLsStatus.get(box);
   return !!e && !isRunning(e.status) && Date.now() - e.at < maxAgeMs;
