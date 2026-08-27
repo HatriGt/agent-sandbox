@@ -607,7 +607,7 @@ function RailIcon({
           {icon}
           {dot && <span className="bg-attention ring-card absolute top-1.5 right-1.5 size-2 rounded-full ring-2" aria-hidden />}
           {badge != null && !dot && (
-            <span className="bg-card text-muted-foreground tabular absolute -top-1 -right-1 min-w-4 rounded-full border px-1 text-center text-[10px] leading-4">
+            <span className="bg-live ring-card absolute top-0.5 right-0.5 grid min-w-4 place-items-center rounded-full px-1 text-[9px] leading-4 font-semibold text-white ring-2 tabular-nums">
               {badge}
             </span>
           )}

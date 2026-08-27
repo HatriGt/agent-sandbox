@@ -390,7 +390,7 @@ export const api = {
     ),
   devicePoll: (device_code: string) => post<DevicePoll>("/accounts/device/poll.json", { device_code }),
 
-  delegate: (input: { task: string; repos?: { repo: string; ref?: string }[] }) =>
+  delegate: (input: { task: string; repos?: { repo: string; ref?: string }[]; attachments?: { name: string; dataUrl: string }[] }) =>
     post<{ ok: true; box: string; warm: boolean; output: string; inferred?: string[] } | { ok: false; question: string }>(
       "/delegate.json",
       { source: "git", ...input }

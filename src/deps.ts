@@ -26,6 +26,7 @@ import {
   askInBox,
   driverStateLine,
   type AgentCreds,
+  execWithInput,
 } from "./msb.js";
 import { runInteractive } from "./interactive.js";
 import type { Interact } from "./handlers.js";
@@ -403,6 +404,15 @@ export const deps: HandlerDeps = {
     // 2. A restricted-egress delegation must not reuse an open-egress pooled box.
     const eligible = poolEligible(runCfg, !!allowDomains?.length);
     const { box, warm } = await acquireBox(runCfg, id, sessionRoot, eligible);
+
+    // Operator attachments (pasted screenshots) land in the box before the agent's first tool call.
+    for (const a of plan.attachments ?? []) {
+      const safe = safeWorkspacePath(a.path);
+      if (!safe.ok) throw new Error(`attachment: ${safe.message}`);
+      const abs = `/workspace/${safe.relPath}`;
+      const dir = abs.slice(0, abs.lastIndexOf("/"));
+      await execWithInput(runCfg, box, `mkdir -p ${shellQuote(dir)} && base64 -d > ${shellQuote(abs)}`, a.base64.replace(/^data:[^,]*,/, ""));
+    }
 
     // Staging is transient (already copied into the box). Clean it; refill pool on claim.
     if (sessionRoot) void cleanupStaging(runCfg, sessionRoot);

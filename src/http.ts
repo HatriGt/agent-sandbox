@@ -917,11 +917,22 @@ app.post("/delegate.json", async (req: Request, res: Response) => {
         /* inference is best-effort; a task-only run is the honest fallback */
       }
     }
+    // Images attached in the composer: named now so the task can reference them; staged by the flow.
+    const rawAtt = Array.isArray(body.attachments) ? (body.attachments as Array<{ name?: string; dataUrl?: string }>) : [];
+    const stamp = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
+    const attachments = rawAtt
+      .filter((a) => typeof a.dataUrl === "string" && a.dataUrl.length < 11_000_000)
+      .slice(0, 8)
+      .map((a, i) => ({ path: `.attachments/${stamp}-${i + 1}-${String(a.name ?? "image.png").replace(/[^\w.-]+/g, "-").slice(0, 60)}`, base64: a.dataUrl! }));
+    const task = attachments.length
+      ? `${body.task}\n\nAttached ${attachments.length === 1 ? "image" : "images"} (open with the Read tool):\n${attachments.map((a) => `- /workspace/${a.path}`).join("\n")}`
+      : body.task;
     const result = await runDelegateFlow(cfg, deps, {
+      attachments: attachments.length ? attachments : undefined,
       source: body.source === "local" ? "local" : "git",
       repo: typeof body.repo === "string" ? body.repo : undefined,
       repos: repos.length ? repos : undefined,
-      task: body.task,
+      task,
       ref: typeof body.ref === "string" ? body.ref : undefined,
       githubToken: typeof body.githubToken === "string" ? body.githubToken : undefined,
       githubAccount: typeof body.githubAccount === "string" ? body.githubAccount : undefined,

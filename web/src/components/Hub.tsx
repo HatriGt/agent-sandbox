@@ -10,6 +10,7 @@ import {
   GitBranch,
   Layers,
   Loader2,
+  ImagePlus,
   Lock,
   Plus,
   X,
@@ -25,6 +26,7 @@ import { prefetchWatch } from "@/hooks/useWatchStream";
 import { Button } from "@/components/ui/button";
 import { StateStamp } from "@/components/ui/stamp";
 import { PromptInput, PromptInputActions, PromptInputTextarea } from "@/components/ui/prompt-input";
+import { Lightbox } from "@/components/ui/lightbox";
 import { Capacity } from "@/components/Capacity";
 import { Bar } from "@/components/thread/Skeletons";
 import { cn } from "@/lib/utils";
@@ -155,19 +157,45 @@ export function Hub({
     });
   };
 
+  // Images pasted, dropped or picked go with the task: the controller stages them into the fresh
+  // sandbox before the agent starts, and the task names them for the Read tool.
+  const [images, setImages] = React.useState<{ id: string; name: string; dataUrl: string }[]>([]);
+  const [preview, setPreview] = React.useState<{ name: string; dataUrl: string } | null>(null);
+  const [dragOver, setDragOver] = React.useState(false);
+  const fileInput = React.useRef<HTMLInputElement>(null);
+  const addImages = (list: Iterable<File>) => {
+    for (const f of list) {
+      if (!f.type.startsWith("image/")) continue;
+      if (f.size > 8 * 1024 * 1024) {
+        toast.error(`${f.name || "image"} is over 8 MB`);
+        continue;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        const ext = (f.type.split("/")[1] || "png").replace("jpeg", "jpg");
+        const stem = (f.name || "pasted").replace(/\.[^.]+$/, "").replace(/[^\w.-]+/g, "-").slice(0, 40) || "image";
+        setImages((prev) => [...prev, { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: `${stem}.${ext}`, dataUrl: String(reader.result) }]);
+      };
+      reader.readAsDataURL(f);
+    }
+  };
+
   const submit = async () => {
     const t = task.trim();
-    if (!t || busy) return;
+    if ((!t && !images.length) || busy) return;
     const id = `pending-${Date.now()}`;
     setBusy(true);
     setError(null);
     setTask("");
+    const attached = images;
+    setImages([]);
     onPending({ id, task: t });
     onBooting(t);
     try {
       const res = await api.delegate({
         task: t,
         repos: picked.length ? picked.map((p) => ({ repo: p.repo, ref: p.ref || undefined })) : undefined,
+        attachments: attached.length ? attached.map((i) => ({ name: i.name, dataUrl: i.dataUrl })) : undefined,
       });
       if (res.ok) {
         if (res.inferred?.length) {
@@ -181,11 +209,13 @@ export function Hub({
         onFailed();
         setError(res.question);
         setTask(t);
+        setImages(attached);
       }
     } catch (e) {
       onFailed();
       setError(e instanceof Error ? e.message : String(e));
       setTask(t);
+      setImages(attached);
     } finally {
       onSettled(id);
       setBusy(false);
@@ -222,11 +252,47 @@ export function Hub({
             onValueChange={setTask}
             onSubmit={submit}
             isLoading={busy}
-            className="bg-card border-line-strong focus-within:border-live/60 focus-within:shadow-[0_0_0_3px_color-mix(in_oklch,var(--live)_18%,transparent)] rounded-2xl p-2 shadow-xs transition-[border-color,box-shadow] duration-200"
+            className={cn(
+              "bg-card border-line-strong focus-within:border-live/60 focus-within:shadow-[0_0_0_3px_color-mix(in_oklch,var(--live)_18%,transparent)] rounded-2xl p-2 shadow-xs transition-[border-color,box-shadow] duration-200",
+              dragOver && "border-live ring-live/30 ring-2"
+            )}
+            onPaste={(e) => {
+              const files = [...(e.clipboardData?.items ?? [])].filter((i) => i.kind === "file" && i.type.startsWith("image/")).map((i) => i.getAsFile()).filter((f): f is File => !!f);
+              if (files.length) {
+                e.preventDefault();
+                addImages(files);
+              }
+            }}
+            onDragOver={(e) => {
+              if ([...e.dataTransfer.items].some((i) => i.type.startsWith("image/"))) {
+                e.preventDefault();
+                setDragOver(true);
+              }
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+              addImages(e.dataTransfer.files);
+            }}
           >
             <label htmlFor="new-task" className="sr-only">
               Describe the task for a new machine
             </label>
+            {images.length > 0 && (
+              <div className="flex flex-wrap gap-2 px-2 pt-1.5" onClick={(e) => e.stopPropagation()}>
+                {images.map((img) => (
+                  <span key={img.id} className="enter group relative block size-16 overflow-hidden rounded-lg border" title={img.name}>
+                    <button type="button" onClick={() => setPreview(img)} aria-label={`Preview ${img.name}`} className="block size-full cursor-zoom-in">
+                      <img src={img.dataUrl} alt={img.name} className="size-full object-cover transition-transform duration-200 group-hover:scale-105" />
+                    </button>
+                    <button type="button" onClick={() => setImages((prev) => prev.filter((x) => x.id !== img.id))} aria-label={`Remove ${img.name}`} className="bg-card/90 text-foreground hover:bg-card absolute top-1 right-1 grid size-5 cursor-pointer place-items-center rounded-full opacity-0 shadow-xs transition-opacity group-hover:opacity-100 focus-visible:opacity-100">
+                      <X className="size-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
             <PromptInputTextarea
               id="new-task"
               placeholder="Describe a task. A fresh microVM picks it up…"
@@ -288,6 +354,19 @@ export function Hub({
                   />
                 )}
               </div>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  fileInput.current?.click();
+                }}
+                aria-label="Attach an image"
+                title="Attach an image — or paste / drop one"
+                className="text-muted-foreground hover:text-foreground hover:bg-muted grid size-7 cursor-pointer place-items-center rounded-md transition-colors"
+              >
+                <ImagePlus className="size-3.5" />
+              </button>
+              <input ref={fileInput} type="file" accept="image/*" multiple className="hidden" onChange={(e) => (addImages(e.target.files ?? []), (e.target.value = ""))} />
               <p className={cn("hidden min-w-0 flex-1 truncate text-right text-micro sm:block", error ? "text-destructive" : "text-muted-foreground")}>
                 {error ??
                   (lifecycle.maxDurationSec
@@ -297,7 +376,7 @@ export function Hub({
               <Button
                 size="icon"
                 onClick={submit}
-                disabled={busy || !task.trim()}
+                disabled={busy || (!task.trim() && !images.length)}
                 aria-label="Start a machine with this task"
                 className="rounded-full"
               >
@@ -305,6 +384,7 @@ export function Hub({
               </Button>
             </PromptInputActions>
           </PromptInput>
+          <Lightbox src={preview?.dataUrl ?? null} name={preview?.name ?? ""} open={!!preview} onClose={() => setPreview(null)} />
           {error && (
             <p className="text-destructive mt-2 px-1 text-micro sm:hidden" role="alert">
               {error}

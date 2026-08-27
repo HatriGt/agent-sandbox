@@ -41,10 +41,19 @@ export interface RepoRef {
   name: string;
 }
 
+/** An image (or other small file) the operator attached to the task; staged into the box before the agent starts. */
+export interface Attachment {
+  /** Path relative to /workspace, e.g. `.attachments/20260827-1-shot.png`. */
+  path: string;
+  /** Base64 payload (data-URL prefix allowed). */
+  base64: string;
+}
+
 export interface DelegatePlan {
   source: DelegateSource;
   repos: RepoRef[];
   task: string;
+  attachments?: Attachment[];
   /** Back-compat accessor: the first repo's identifier. */
   repo: string;
   /** Back-compat accessor: the first repo's ref. */
