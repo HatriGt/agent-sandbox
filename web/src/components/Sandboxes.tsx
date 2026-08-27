@@ -236,7 +236,7 @@ function MachineRow({
         </p>
       </div>
 
-      <div className="stamp text-muted-foreground hidden flex-col gap-0.5 md:flex">
+      <div className="stamp text-muted-foreground hidden min-w-0 flex-col gap-0.5 md:flex">
         <span className="text-foreground" title={shortName(box.name)}>
           {friendlyName(box.name)}
         </span>
@@ -246,10 +246,10 @@ function MachineRow({
         </span>
         {/* Data line: uptime · cpu · memory — one row, never wrapping the words above. */}
         {(box.uptime || box.cpu || box.mem) && (
-          <span className="whitespace-nowrap">
+          <span className="truncate" title={[box.uptime && `${state === "sleeping" ? "ran" : "up"} ${box.uptime}`, box.cpu && `cpu ${box.cpu}`, box.mem && `memory ${box.mem}`].filter(Boolean).join(" · ")}>
             {box.uptime && <>{state === "sleeping" ? "ran" : "up"} {box.uptime}</>}
-            {box.cpu && <>{box.uptime ? " · " : ""}cpu {box.cpu.split(" / ")[0]}</>}
-            {box.mem && <> · {box.mem.split(" / ")[0]}</>}
+            {box.cpu && <>{box.uptime ? " · " : ""}{box.cpu.split(" / ")[0]}c</>}
+            {box.mem && <> · {box.mem.split(" / ")[0].replace(/\.\d+ /, " ")}</>}
           </span>
         )}
       </div>
