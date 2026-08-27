@@ -36,6 +36,7 @@ import { makeRepoLister, fetchGithubRepos, matchRepos, inferRepos, attachRepoToB
 import { loadMcpStore, saveMcpStore, normalizeServer, parseMcpImport, viewServers, type McpServer as McpServerDef } from "./mcp-store.js";
 import { listKept, markKept, unmarkKept } from "./claims.js";
 import { listChanges, readDiff, fetchPull } from "./changes.js";
+import { loadRunMetas, saveRunMeta, forgetRunMeta } from "./run-memory.js";
 import { readArtifact } from "./artifact.js";
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -99,6 +100,11 @@ const readFleet = makeFleetReader(
       const q = inbox.list(b.name);
       return q.length ? { ...b, queued: q.map((m) => m.text) } : b;
     }),
+    store: {
+      load: () => loadRunMetas(cfg),
+      save: (meta) => saveRunMeta(cfg, meta as Parameters<typeof saveRunMeta>[1]),
+      forget: (box) => forgetRunMeta(cfg, box),
+    },
   }
 );
 // Repositories reachable through the connected accounts (picker, inference, attach).

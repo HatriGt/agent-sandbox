@@ -88,10 +88,19 @@ export function mergeWithMemory(latest: BoxView[], memory: Map<string, BoxView>)
  * Cached fleet reader: at most one sweep in flight, results reused for `ttlMs`.
  * `sweep` is the SSH-backed gatherMonitor in production.
  */
+export interface RunMemoryStore {
+  /** All remembered runs (loaded once, at the first sweep). */
+  load(): Promise<Map<string, Partial<BoxView> & { name: string }>>;
+  /** Persist one running box's description (called only when it changed). */
+  save(meta: Partial<BoxView> & { name: string }): Promise<void>;
+  /** Forget a box that left `msb ls`. */
+  forget(box: string): Promise<void>;
+}
+
 export function makeFleetReader(
   cfg: Config,
   sweep: () => Promise<BoxView[]>,
-  opts: { ttlMs?: number; now?: () => number; decorate?: (boxes: BoxView[]) => BoxView[] } = {}
+  opts: { ttlMs?: number; now?: () => number; decorate?: (boxes: BoxView[]) => BoxView[]; store?: RunMemoryStore } = {}
 ): () => Promise<FleetSnapshot> {
   const ttl = opts.ttlMs ?? 1500;
   const now = opts.now ?? Date.now;
@@ -99,13 +108,44 @@ export function makeFleetReader(
   const lifecycle = lifecycleOf(cfg);
   let cached: FleetSnapshot | null = null;
   let inFlight: Promise<FleetSnapshot> | null = null;
+  // Durable memory (run-memory.ts): hydrate once so sleeping runs survive a controller restart, and
+  // write back a box's description whenever it changes while running. Fingerprints avoid a write per
+  // sweep; failures are swallowed — memory is a convenience layer, never a reason to fail the fleet.
+  let hydrated = !opts.store;
+  const written = new Map<string, string>();
+  const persist = (boxes: BoxView[]) => {
+    if (!opts.store) return;
+    for (const b of boxes) {
+      if (!isRunning(b.boxStatus) || b.role === "pool-free") continue;
+      const meta = { name: b.name, role: b.role, runState: b.runState, exitCode: b.exitCode, task: b.task, question: b.question, repos: b.repos, uptime: b.uptime };
+      const fp = JSON.stringify(meta);
+      if (written.get(b.name) === fp) continue;
+      written.set(b.name, fp);
+      void opts.store.save(meta).catch(() => {});
+    }
+  };
 
   return () => {
     if (cached && now() - cached.at < ttl) return Promise.resolve(cached);
     if (inFlight) return inFlight;
-    inFlight = sweep()
+    inFlight = (async () => {
+      if (!hydrated && opts.store) {
+        try {
+          for (const [name, meta] of await opts.store.load()) {
+            if (!memory.has(name)) memory.set(name, { boxStatus: "Stopped", runState: "idle", role: "session", ...meta } as BoxView);
+          }
+        } catch {
+          /* start without memory; the next sweep rebuilds it */
+        }
+        hydrated = true;
+      }
+      return sweep();
+    })()
       .then((boxes) => {
+        const before = new Set(memory.keys());
         const merged = mergeWithMemory(boxes, memory);
+        persist(boxes);
+        if (opts.store) for (const name of before) if (!memory.has(name)) void opts.store.forget(name).catch(() => {});
         cached = { boxes: opts.decorate ? opts.decorate(merged) : merged, lifecycle, at: now() };
         return cached;
       })

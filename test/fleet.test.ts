@@ -75,3 +75,34 @@ test("makeFleetReader: caches within ttl and dedupes concurrent sweeps", async (
   assert.equal(sweeps, 2, "re-swept after ttl");
   assert.deepEqual(lifecycleOf(cfg).capacity, 5);
 });
+
+test("makeFleetReader: hydrates sleeping runs from the durable store and persists running ones", async () => {
+  const saved: Array<{ name: string }> = [];
+  const forgotten: string[] = [];
+  const store = {
+    load: async () => new Map([["pool-old", { name: "pool-old", role: "pool-claimed" as const, runState: "done" as const, task: "yesterday's run" }]]),
+    save: async (m: { name: string }) => void saved.push(m),
+    forget: async (b: string) => void forgotten.push(b),
+  };
+  const cfg = { idleTimeout: "15m", poolIdleTimeout: "6h", maxDuration: "1h", maxBoxes: 5, poolSize: 1 } as Config;
+  let t = 0;
+  const read = makeFleetReader(
+    cfg,
+    async () => [
+      { name: "pool-old", role: "pool-free", boxStatus: "Stopped", runState: "idle" }, // stopped: role unreadable
+      running("live", { role: "pool-claimed" }),
+    ],
+    { ttlMs: 1, now: () => (t += 10), store }
+  );
+  const snap = await read();
+  await new Promise((r) => setImmediate(r));
+  const old = snap.boxes.find((b) => b.name === "pool-old")!;
+  assert.equal(old.boxStatus, "Stopped");
+  assert.equal(old.task, "yesterday's run", "a sleeping run survives a controller restart");
+  assert.equal(old.runState, "done");
+  assert.deepEqual(saved.map((s) => s.name), ["live"], "running claimed boxes are persisted once");
+  await read();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(saved.length, 1, "unchanged description is not re-written");
+  assert.deepEqual(forgotten, []);
+});
