@@ -46,6 +46,7 @@ export function Thread({
   onNew,
   onTornDown,
   onFocusRequest,
+  onReplyFailed,
 }: {
   box: BoxView;
   lifecycle: FleetLifecycle;
@@ -57,6 +58,8 @@ export function Thread({
   onNew: () => void;
   onTornDown: (name: string) => void;
   onFocusRequest?: (focus: () => void) => void;
+  /** A reply the server could not deliver: the parent drops its optimistic echo. */
+  onReplyFailed?: (text: string) => void;
 }) {
   const sleeping = isSleeping(box);
   // Reopen the stream when the fleet poll sees the box come back to life (a follow-up woke a
@@ -148,6 +151,7 @@ export function Thread({
         .resume(box.name, text, { force: true })
         .catch((e: unknown) => {
           setAnswered(null);
+          onReplyFailed?.(text);
           toast.error("The agent did not get your answer", { description: e instanceof Error ? e.message : String(e) });
         })
         .finally(() => setAnswering(false));

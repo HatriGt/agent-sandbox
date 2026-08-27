@@ -7,6 +7,8 @@
  */
 import { run, shellQuote } from "./exec.js";
 import { sshMuxOpts } from "./ssh.js";
+import { listClaims, markClaimed, shouldKeepStopped, unmarkClaimed } from "./claims.js";
+import { loadMcpStore, toClaudeMcpConfig } from "./mcp-store.js";
 import { reposPromptHint, type RepoLayout } from "./agent-prompt.js";
 import { secretEnvFlags } from "./secret-env.js";
 import {
@@ -30,6 +32,7 @@ import {
   type RunState,
   type WatchSnapshot,
   type RepoRef,
+  parseDurationSec,
 } from "./monitor.js";
 import type { PollResult } from "./wait.js";
 import type { Config } from "./config.js";
@@ -217,6 +220,7 @@ async function allPoolBoxes(cfg: Config): Promise<Array<{ name: string; status: 
 async function forceRemoveBox(cfg: Config, box: string): Promise<void> {
   await msb(cfg, ["stop", box], false);
   await msb(cfg, ["rm", "--force", box], false);
+  await unmarkClaimed(cfg, box);
 }
 
 /**
@@ -227,13 +231,28 @@ async function forceRemoveBox(cfg: Config, box: string): Promise<void> {
 export async function reapDeadPoolBoxes(cfg: Config): Promise<string[]> {
   const boxes = await allPoolBoxes(cfg);
   const live: string[] = [];
+  let claims: Map<string, number> | null = null;
+  const sleepTtlSec = parseDurationSec(cfg.sleepTtl) ?? 86_400;
   for (const b of boxes) {
     if (isRunning(b.status)) {
       live.push(b.name);
-    } else {
-      console.error(`[pool] reaping dead box ${b.name} (status=${b.status || "unknown"})`);
-      await forceRemoveBox(cfg, b.name);
+      continue;
     }
+    // A stopped box is either dead capacity (never claimed) or a SLEEPING RUN: claimed, idle-stopped,
+    // workspace and session intact, wakeable by a reply. Only the former is reaped now; the latter
+    // survives until the sleep TTL. (The claim marker lives on the host — the box can't be asked.)
+    claims ??= await listClaims(cfg);
+    const age = claims.get(b.name);
+    if (shouldKeepStopped(age, sleepTtlSec)) {
+      console.error(`[pool] keeping sleeping run ${b.name} (asleep ${Math.round((age ?? 0) / 60)}m, ttl ${cfg.sleepTtl})`);
+      continue;
+    }
+    console.error(
+      age === undefined
+        ? `[pool] reaping dead box ${b.name} (status=${b.status || "unknown"})`
+        : `[pool] reaping abandoned run ${b.name} (asleep ${Math.round(age / 3600)}h > ${cfg.sleepTtl})`
+    );
+    await forceRemoveBox(cfg, b.name);
   }
   return live;
 }
@@ -269,6 +288,9 @@ export async function claimWarmBox(
   copyDir: string | undefined
 ): Promise<void> {
   await exec(cfg, box, "touch /.claimed");
+  // Host-side marker too: once this box sleeps, /.claimed is unreadable, and the marker is what
+  // stops the pool maintainer from reaping the run (see claims.ts).
+  await markClaimed(cfg, box);
   await copyTreeIntoBox(cfg, box, copyDir);
 }
 
@@ -663,6 +685,28 @@ const TASK_MARK = "/workspace/.agent.task"; // the current task/follow-up text, 
 const YOU_MARK_OPEN = "⟦you⟧";
 const YOU_MARK_CLOSE = "⟦/you⟧";
 
+/** Where the dashboard-configured MCP servers are written inside the box for `claude --mcp-config`. */
+const MCP_CONFIG_PATH = "/root/.agent-mcp.json";
+
+/**
+ * Write the enabled MCP servers into the box (or remove a stale file when none are enabled). Runs
+ * before every agent start/resume so a server added on the dashboard reaches the very next turn.
+ * Best-effort: an MCP misconfiguration must never block a run.
+ */
+export async function installMcpConfig(cfg: Config, box: string): Promise<void> {
+  try {
+    const conf = toClaudeMcpConfig(await loadMcpStore(cfg));
+    if (!conf) {
+      await exec(cfg, box, `rm -f ${MCP_CONFIG_PATH}`);
+      return;
+    }
+    const json = JSON.stringify(conf);
+    await exec(cfg, box, `printf '%s' ${shellQuote(json)} > ${MCP_CONFIG_PATH} && chmod 600 ${MCP_CONFIG_PATH}`);
+  } catch (e) {
+    console.error(`[mcp] could not install MCP config into ${box}:`, (e as Error).message);
+  }
+}
+
 /**
  * Build the background agent command. The agent runs headless and DETACHED so `msb exec` returns
  * immediately (fixing the MCP response timeout): delegate returns the session id in seconds while
@@ -684,9 +728,14 @@ function agentSh(workdir: string, resume: boolean): string {
   // an 800ms SSE tick. With deltas the formatter appends text as it is generated and prose types out.
   const streamFmt = `--output-format stream-json --verbose --include-partial-messages`;
   const cont = resume ? `-c ` : ``;
+  // MCP servers configured on the dashboard land in /root/.agent-mcp.json before the run (see
+  // installMcpConfig); when the file has content, claude loads them. Their tools are allowed via the
+  // mcp__<server>__* wildcard so the agent can actually call them.
+  const mcpFlag = `$([ -s ${MCP_CONFIG_PATH} ] && printf -- '--mcp-config ${MCP_CONFIG_PATH}')`;
   const claude =
-    `claude ${cont}-p "$AGENT_TASK" ${settingSources} ${streamFmt} ` +
-    `--append-system-prompt "$AGENT_SYS_PROMPT" --allowedTools ${ALLOWED_TOOLS}`;
+    `claude ${cont}-p "$AGENT_TASK" ${settingSources} ${streamFmt} ${mcpFlag} ` +
+    `--append-system-prompt "$AGENT_SYS_PROMPT" --allowedTools ${ALLOWED_TOOLS} ` +
+    `$([ -s ${MCP_CONFIG_PATH} ] && printf -- '%s' "$(node -e 'const c=require(\"${MCP_CONFIG_PATH}\");process.stdout.write(Object.keys(c.mcpServers||{}).map(n=>\"mcp__\"+n).join(\" \"))')")`;
   // Clear any pending question up front: a new run or a resume (which carries the answer) means the
   // previous question is now handled, so status stops reporting "waiting".
   // On resume, stamp the user's follow-up into the durable log BEFORE Claude runs, so the dashboard
@@ -792,6 +841,7 @@ export async function runAgentTask(
   await msb(cfg, ["exec", box, ...env, "--", "sh", "-lc", bootstrapScript(cfg)]);
   await applyGitCredentials(cfg, box, creds);
   await trustWorkspace(cfg, box);
+  await installMcpConfig(cfg, box);
   return msb(cfg, ["exec", box, ...env, "--", "sh", "-lc", agentSh(workdir, false)]);
 }
 
@@ -906,8 +956,15 @@ export async function agentBoundary(cfg: Config, box: string): Promise<PollResul
 export async function startBoxIfStopped(cfg: Config, box: string): Promise<void> {
   const r = await msb(cfg, ["ls", "--format", "json"], false);
   const entry = parseLsJson(r.stdout).find((e) => e.name === box);
-  if (entry && !isRunning(entry.status)) {
-    await msb(cfg, ["start", box], false);
+  if (!entry || isRunning(entry.status)) return;
+  // A box mid-shutdown reports "Draining" for a few seconds; `start` fails until it is Stopped.
+  // Retry briefly instead of surfacing "cannot start" for a reply that arrived at the wrong moment.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const s = await msb(cfg, ["start", box], false);
+    if (s.code === 0) return;
+    await new Promise((res) => setTimeout(res, 2000));
+    const again = parseLsJson((await msb(cfg, ["ls", "--format", "json"], false)).stdout).find((e) => e.name === box);
+    if (!again || isRunning(again.status)) return;
   }
 }
 
@@ -927,6 +984,7 @@ export async function resumeAgentTask(
   const env = [...agentEnvFlags(cfg, message, repos, creds?.primaryToken), ...secretEnvFlags(secrets)];
   await applyGitCredentials(cfg, box, creds);
   await trustWorkspace(cfg, box);
+  await installMcpConfig(cfg, box);
   return msb(cfg, ["exec", box, ...env, "--", "sh", "-lc", agentSh(agentWorkdir(repos), true)]);
 }
 
@@ -1266,6 +1324,7 @@ export async function snapshotCreate(cfg: Config, fromBox: string, name: string)
 export async function teardown(cfg: Config, box: string, stagingDir?: string): Promise<void> {
   await msb(cfg, ["stop", box], false);
   await msb(cfg, ["rm", "--force", box], false);
+  await unmarkClaimed(cfg, box);
   if (stagingDir) {
     await ssh(cfg, `rm -rf ${shellQuote(stagingDir)}`, false);
   }

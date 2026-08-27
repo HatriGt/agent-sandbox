@@ -20,14 +20,14 @@ export type ConsoleRoute =
   | { view: "hub" }
   | { view: "box"; name: string }
   | { view: "fleet" }
-  | { view: "accounts" };
+  | { view: "integrations" };
 
 export function parseConsolePath(pathname: string): ConsoleRoute {
   const rest = pathname.startsWith(BASE) ? pathname.slice(BASE.length) : pathname;
   const box = rest.match(/^\/box\/([^/]+)/);
   if (box) return { view: "box", name: decodeURIComponent(box[1]) };
   if (/^\/fleet\/?$/.test(rest)) return { view: "fleet" };
-  if (/^\/accounts\/?$/.test(rest)) return { view: "accounts" };
+  if (/^\/(accounts|integrations)\/?$/.test(rest)) return { view: "integrations" };
   return { view: "hub" };
 }
 
@@ -37,8 +37,8 @@ export function consolePath(r: ConsoleRoute): string {
       return `${BASE}/box/${encodeURIComponent(r.name)}`;
     case "fleet":
       return `${BASE}/fleet`;
-    case "accounts":
-      return `${BASE}/accounts`;
+    case "integrations":
+      return `${BASE}/integrations`;
     default:
       return BASE;
   }

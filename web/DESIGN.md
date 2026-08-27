@@ -141,11 +141,23 @@ makes a warm claim read as one clean transition (booting placeholder → claimed
 renders the agent's TodoWrite plan as a live checklist (done ✓ / in progress / todo, n/m), shown once
 in its latest state. Both come from sentinel blocks the in-box formatter writes (`⟦think⟧`, `⟦plan⟧`).
 
-## GitHub accounts
+## Integrations
 
-`/dashboard/accounts`: the login-keyed token store on the VPS, masked. Add by "Sign in with GitHub"
-(OAuth device flow, when `GITHUB_OAUTH_CLIENT_ID` is set) or by pasting a PAT (probed, then stored).
-Mark a default for task-only runs; remove with an armed confirm. Tokens never reach the browser.
+`/dashboard/integrations` (`/accounts` redirects): everything a sandbox borrows from you.
+- **GitHub accounts** — the login-keyed token store on the VPS, masked. Add by "Sign in with GitHub"
+  (OAuth device flow, when `GITHUB_OAUTH_CLIENT_ID` is set) or by pasting a PAT (probed, then stored).
+  Mark a default for task-only runs; remove with an armed confirm. Tokens never reach the browser.
+- **MCP servers** — the tools the agent can call inside every sandbox. Add via a form (stdio / http /
+  sse, command or url, env, headers) or paste the `mcpServers` JSON any agentic IDE exports. Stored on
+  the VPS (`~/.agent-sandbox/mcp.json`, 600); before each run/turn the enabled servers are written into
+  the box and passed to `claude --mcp-config`, with their tools allowed. Enable/disable per server;
+  secret values come back masked.
+
+## Composer context
+
+Picking a file from the `@` menu turns it into a removable **chip** above the text (Cursor's context
+pills), not an `@path` token in the prose; the message carries the files as explicit `/workspace`
+references.
 
 ## Repositories
 
@@ -164,7 +176,7 @@ click away; groups containing one open by default. A PR URL in the transcript be
 
 ## Keyboard
 
-`n` new task · `⌘K` search · `j`/`k` next/previous machine · `/` focus the composer · `g f` fleet · `g a` accounts ·
+`n` new task · `⌘K` search · `j`/`k` next/previous machine · `/` focus the composer · `g f` fleet · `g a` integrations ·
 `Esc` cancels an armed destroy. The URL hash (`#/box/<name>`, `#/fleet`) is the route, so reload and
 share work.
 

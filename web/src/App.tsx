@@ -4,7 +4,7 @@ import {
   Bell,
   BellOff,
   Flame,
-  KeyRound,
+  Plug,
   LayoutGrid,
   Moon,
   PanelLeftClose,
@@ -38,7 +38,7 @@ import { cn } from "@/lib/utils";
 
 // Secondary pages are code-split: the thread — the page you live in — never pays for them.
 const Sandboxes = React.lazy(() => import("@/components/Sandboxes").then((m) => ({ default: m.Sandboxes })));
-const Accounts = React.lazy(() => import("@/components/Accounts").then((m) => ({ default: m.Accounts })));
+const Integrations = React.lazy(() => import("@/components/Integrations").then((m) => ({ default: m.Integrations })));
 
 const NO_LIFECYCLE: FleetLifecycle = { capacity: 0, poolSize: 0 };
 const FLEET_CACHE_KEY = "asb-fleet-cache";
@@ -156,7 +156,7 @@ export default function App() {
     setMobileRail(false);
   }, [go]);
   const showAccounts = React.useCallback(() => {
-    go({ view: "accounts" });
+    go({ view: "integrations" });
     setMobileRail(false);
   }, [go]);
 
@@ -248,7 +248,7 @@ export default function App() {
   const health = !live && !data ? "offline" : waiting.length ? "attention" : "ok";
   const loading = !data && !error;
   const paneKey =
-    view === "fleet" ? "fleet" : view === "accounts" ? "accounts" : booting && !selectedBox ? "booting" : selectedBox ? `box:${selectedBox.name}` : "hub";
+    view === "fleet" ? "fleet" : view === "integrations" ? "integrations" : booting && !selectedBox ? "booting" : selectedBox ? `box:${selectedBox.name}` : "hub";
 
   return (
     <TooltipProvider delayDuration={400}>
@@ -303,7 +303,7 @@ export default function App() {
               <RailIcon onClick={newTask} icon={<Plus />} label="New task (n)" primary />
               <RailIcon onClick={openPalette} icon={<Search />} label="Search machines (⌘K)" />
               <RailIcon active={view === "fleet"} onClick={showFleet} icon={<LayoutGrid />} label="Fleet" badge={boxes.length || undefined} dot={waiting.length > 0} />
-              <RailIcon active={view === "accounts"} onClick={showAccounts} icon={<KeyRound />} label="GitHub accounts" />
+              <RailIcon active={view === "integrations"} onClick={showAccounts} icon={<Plug />} label="Integrations" />
               <div className="mt-auto flex flex-col items-center gap-1.5">
                 <RailIcon onClick={() => setDark(!dark)} icon={dark ? <Moon /> : <Sun />} label={dark ? "Light theme" : "Dark theme"} />
                 <RailIcon onClick={() => setCollapsed(false)} icon={<PanelLeftOpen />} label="Expand sidebar" />
@@ -383,7 +383,7 @@ export default function App() {
 
               <div className="flex flex-col gap-0.5 border-t px-2 py-2">
                 <NavItem active={view === "fleet"} onClick={showFleet} icon={<LayoutGrid />} label="Fleet view" badge={boxes.length || undefined} shortcut="g f" />
-                <NavItem active={view === "accounts"} onClick={showAccounts} icon={<KeyRound />} label="GitHub accounts" shortcut="g a" />
+                <NavItem active={view === "integrations"} onClick={showAccounts} icon={<Plug />} label="Integrations" shortcut="g a" />
                 <div className="flex items-center justify-between px-2.5 pt-1">
                   <p className="text-muted-foreground text-micro">{live ? `Updated ${freshness}` : data ? "Reconnecting…" : "Offline — retrying"}</p>
                   <div className="flex items-center">
@@ -429,8 +429,8 @@ export default function App() {
                     onDestroyed={() => {}}
                     onBack={backToRail}
                   />
-                ) : view === "accounts" ? (
-                  <Accounts onBack={backToRail} />
+                ) : view === "integrations" ? (
+                  <Integrations onBack={backToRail} />
                 ) : booting && !selectedBox ? (
                   <BootingThread task={booting.task} warm={booting.warm} onBack={backToRail} />
                 ) : selectedBox ? (
@@ -446,6 +446,14 @@ export default function App() {
                     onBack={backToRail}
                     onNew={newTask}
                     onFocusRequest={onFocusRequest}
+                    onReplyFailed={(text) =>
+                      setReplies((prev) => {
+                        const list = [...(prev[selectedBox.name] ?? [])];
+                        const i = list.lastIndexOf(text);
+                        if (i >= 0) list.splice(i, 1);
+                        return { ...prev, [selectedBox.name]: list };
+                      })
+                    }
                     onTornDown={(name) => {
                       go({ view: "hub" });
                       setAsides((prev) => {

@@ -80,6 +80,10 @@ export interface HandlerDeps {
   ask(cfg: Config, session: string, question: string, newThread?: boolean): Promise<string>;
   /** Probe a token (login/orgs) and store it by account login. Optional repo confirms access. Returns a summary. */
   addGhToken(cfg: Config, token: string, repo?: string): Promise<string>;
+  /** Repositories reachable through the connected accounts, ranked for `query`. Optional (HTTP entry). */
+  listRepos?(cfg: Config, query: string): Promise<string>;
+  /** Clone a repository into a RUNNING sandbox at /workspace/<name>. Optional (HTTP entry). */
+  attachRepo?(cfg: Config, session: string, repo: string, ref?: string): Promise<string>;
 }
 
 /** Minimal shape of the MCP server's `.tool()` we rely on (keeps this file transport-agnostic). */
@@ -383,6 +387,32 @@ export function registerTools(
       newThread?: boolean;
     }) => text(await deps.ask(cfg, session, question, newThread))
   );
+
+  if (deps.listRepos) {
+    const listRepos = deps.listRepos;
+    server.tool(
+      "list_repos",
+      "Repositories the connected GitHub accounts can reach, ranked for an optional query. Use it to " +
+        "find the exact owner/name before delegate or attach_repo when the user only names a repo loosely.",
+      { query: z.string().optional().describe("Substring of the repo name/owner, e.g. 'deal service'.") },
+      async ({ query }: { query?: string }) => text(await listRepos(cfg, query ?? ""))
+    );
+  }
+  if (deps.attachRepo) {
+    const attachRepo = deps.attachRepo;
+    server.tool(
+      "attach_repo",
+      "Check out another repository into a RUNNING sandbox at /workspace/<name>, with the GitHub " +
+        "account that can access it, and tell the agent at its next turn. Use when a run turns out to " +
+        "need a second repo (a shared library, the service it calls) without starting over.",
+      {
+        session: z.string().describe("Session id returned by delegate."),
+        repo: z.string().describe("owner/name"),
+        ref: z.string().optional().describe("Branch or tag; default branch when omitted."),
+      },
+      async ({ session, repo, ref }: { session: string; repo: string; ref?: string }) => text(await attachRepo(cfg, session, repo, ref))
+    );
+  }
 
   server.tool(
     "gh_token_add",

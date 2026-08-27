@@ -41,6 +41,11 @@ export interface Config {
   poolRefillIntervalMs: number;
   /** Hard cap on box lifetime. */
   maxDuration: string;
+  /**
+   * How long a CLAIMED box may stay asleep (idle-stopped) before it is finally destroyed. A sleeping
+   * run keeps its workspace and can be woken by a reply; this bounds how long that offer stands.
+   */
+  sleepTtl: string;
   /** Per-box memory cap (e.g. 512M, 1G). */
   memory: string;
   /** Max concurrent live boxes; new delegations are refused past this. */
@@ -166,6 +171,7 @@ export function loadConfig(): Config {
     // Warm boxes should outlive a long lull with no delegations; the maintainer replaces any that the
     // hard max-duration cap reaps. Default well above idleTimeout so the pool doesn't self-drain.
     poolIdleTimeout: req("MSB_POOL_IDLE_TIMEOUT", "6h"),
+    sleepTtl: req("MSB_SLEEP_TTL", "24h"),
     poolRefillIntervalMs: Number(process.env.MSB_POOL_REFILL_MS ?? "60000"),
     maxDuration: req("MSB_MAX_DURATION", "1h"),
     memory: req("MSB_MEMORY", "1G"),

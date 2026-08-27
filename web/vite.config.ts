@@ -42,6 +42,7 @@ export default defineConfig({
         "/inbox.json",
         "/accounts.json",
         "/repos.json",
+        "/mcp-servers.json",
         "/repos",
         "/accounts",
         "/ask.json",

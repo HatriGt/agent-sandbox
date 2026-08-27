@@ -32,6 +32,7 @@ import { loadStore, saveStore, pickDefaultAccount, upsertAccount, removeAccount,
 import { probeToken } from "./gh-probe.js";
 import { viewAccounts, deviceStart, devicePoll } from "./accounts.js";
 import { makeRepoLister, fetchGithubRepos, matchRepos, inferRepos, attachRepoToBox } from "./repos.js";
+import { loadMcpStore, saveMcpStore, normalizeServer, parseMcpImport, viewServers, type McpServer as McpServerDef } from "./mcp-store.js";
 import { readArtifact } from "./artifact.js";
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -80,6 +81,17 @@ const readFleet = makeFleetReader(cfg, () => gatherMonitor(cfg), {
 });
 // Repositories reachable through the connected accounts (picker, inference, attach).
 const listRepos = makeRepoLister(cfg, fetchGithubRepos);
+// The same repo capabilities for MCP clients (Cursor etc.): list_repos / attach_repo tools.
+deps.listRepos = async (_cfg, query) => {
+  const all = matchRepos(await listRepos(), query, 25);
+  if (!all.length) return query ? `No repository matches "${query}".` : "No repositories — connect a GitHub account first.";
+  return all.map((r) => `${r.fullName}${r.private ? " (private)" : ""} · default ${r.defaultBranch}${r.description ? ` — ${r.description}` : ""}`).join("\n");
+};
+deps.attachRepo = async (c, session, repo, ref) => {
+  const r = await attachRepoToBox(c, session, repo, ref);
+  inbox.enqueue(session, `The repository ${repo} is now checked out at /workspace/${r.name}${ref ? ` (ref ${ref})` : ""}. Use it for the task where relevant.`);
+  return `Attached ${repo} to ${session} at /workspace/${r.name}${r.login ? ` as ${r.login}` : ""}. The agent is told at its next turn.`;
+};
 // `@` mentions: a briefly cached file index per box.
 const fileIndex = makeFileIndex(async (box, sh) => (await execInBox(cfg, box, sh)).stdout);
 
@@ -483,6 +495,56 @@ app.post("/repos/attach.json", async (req: Request, res: Response) => {
     res.json({ ok: true, name: r.name, login: r.login });
   } catch (e) {
     res.status(500).json({ error: String((e as Error).message ?? e) });
+  }
+});
+
+// MCP servers for the sandbox agent. GET lists (secrets masked); POST mutates:
+//   {action:"upsert", server:{name,type,command,args,url,env,headers,enabled}}
+//   {action:"import", json:"<{mcpServers:{...}}>"}  {action:"remove", name}  {action:"toggle", name, enabled}
+app.get("/mcp-servers.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  try {
+    res.json({ servers: viewServers(await loadMcpStore(cfg)) });
+  } catch (e) {
+    res.status(500).json({ error: String((e as Error).message ?? e) });
+  }
+});
+app.post("/mcp-servers.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  try {
+    const store = await loadMcpStore(cfg);
+    const action = body.action;
+    if (action === "upsert") {
+      const s = normalizeServer(body.server as Partial<McpServerDef> & { name: string });
+      // Keep secret values the form left masked/blank: merge over the stored entry.
+      const prev = store.servers[s.name];
+      if (prev) {
+        s.addedAt = prev.addedAt;
+        for (const k of ["env", "headers"] as const) {
+          const incoming = s[k] ?? {};
+          const kept = prev[k] ?? {};
+          const merged: Record<string, string> = {};
+          for (const [key, v] of Object.entries(incoming)) merged[key] = v && !/…/.test(v) && v !== "••••" ? v : (kept[key] ?? "");
+          if (Object.keys(merged).length) s[k] = merged;
+        }
+      }
+      store.servers[s.name] = s;
+    } else if (action === "import") {
+      for (const s of parseMcpImport(String(body.json ?? ""))) store.servers[s.name] = s;
+    } else if (action === "remove") {
+      delete store.servers[String(body.name ?? "")];
+    } else if (action === "toggle") {
+      const s = store.servers[String(body.name ?? "")];
+      if (s) s.enabled = body.enabled !== false;
+    } else {
+      res.status(400).json({ error: "unknown action" });
+      return;
+    }
+    await saveMcpStore(cfg, store);
+    res.json({ servers: viewServers(store) });
+  } catch (e) {
+    res.status(400).json({ error: String((e as Error).message ?? e) });
   }
 });
 

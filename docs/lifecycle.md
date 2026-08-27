@@ -31,11 +31,12 @@ Think about the machine from the operator's side. After a task is delegated ther
    and if you don't, the machine costs nothing while asleep. A sleeping box still allows a follow-up
    later — it simply pays a few seconds to restart. The one loss on sleep is the co-pilot (it needs a
    running box), which the UI says plainly.
-4. **Abandoned.** A sleeping box that nobody ever wakes should eventually be destroyed so the disk and
-   the box count recover. Today the hard cap handles the running case only; a sleeping box is not
-   killed by `--max-duration` (it is not running). **Recommendation:** add a slow reaper to the pool
-   maintainer that destroys Stopped session boxes older than `MSB_SLEEP_TTL` (default `24h`), and
-   surface "asleep for 3h · destroyed after 24h" in the fleet view. That is the one lifecycle gap left.
+4. **Abandoned.** A sleeping box that nobody ever wakes is destroyed after `MSB_SLEEP_TTL` (default
+   `24h`) by the pool maintainer. **Implemented** — and it fixed a real bug: the maintainer used to
+   treat *any* stopped `pool-*` box as dead and force-remove it, which destroyed sleeping claimed runs
+   (the "a reply wakes it" promise was broken). Claims are now recorded on the host
+   (`~/.agent-sandbox/claims/<box>`, see `src/claims.ts`), so a stopped box's status as a run is
+   knowable without exec'ing into it; its mtime is the sleep clock.
 
 Warm pool: `MSB_POOL_IDLE_TIMEOUT` should be long (`6h`+) because an unclaimed warm box is the whole
 point of the pool; the refill interval keeps one ready even after a max-duration reap.

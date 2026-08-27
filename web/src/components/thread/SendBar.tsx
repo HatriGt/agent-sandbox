@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowUp, AtSign, Clock, MessageCircleQuestion, Terminal } from "lucide-react";
+import { ArrowUp, AtSign, Clock, FileCode2, MessageCircleQuestion, Terminal, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, type RunState } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -53,6 +53,10 @@ export function SendBar({
   const [sending, setSending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [mention, setMention] = React.useState<MentionState | null>(null);
+  // Files the message refers to — shown as removable chips above the text (Cursor's context pills),
+  // not as `@path` tokens buried in prose. They travel with the message as explicit references.
+  const [files, setFiles] = React.useState<string[]>([]);
+  React.useEffect(() => setFiles([]), [boxName]);
 
   const textarea = () => document.getElementById("send-input") as HTMLTextAreaElement | null;
   React.useEffect(() => {
@@ -75,32 +79,36 @@ export function SendBar({
     if (!mention) return;
     const el = textarea();
     const caret = el?.selectionStart ?? value.length;
+    // Remove the `@query` token the user typed; the file becomes a chip.
     const before = value.slice(0, mention.start);
-    const after = value.slice(caret);
-    const next = `${before}@${path} ${after}`;
+    const after = value.slice(caret).replace(/^\s/, "");
+    const next = `${before}${after}`;
     setValue(next);
+    setFiles((prev) => (prev.includes(path) ? prev : [...prev, path]));
     setMention(null);
     requestAnimationFrame(() => {
       const t = textarea();
       if (!t) return;
-      const pos = before.length + path.length + 2;
       t.focus();
-      t.setSelectionRange(pos, pos);
+      t.setSelectionRange(before.length, before.length);
     });
   };
 
   const send = async () => {
     const text = value.trim();
-    if (!text || sending) return;
+    if ((!text && !files.length) || sending) return;
     setSending(true);
     setError(null);
-    const message = expandMentions(text);
+    const message = expandMentions(files.length ? `${text}\n\nFiles: ${files.map((f) => `@${f}`).join(" ")}` : text);
+    const attached = files;
     try {
       if (!toAgent) {
         setValue("");
+        setFiles([]);
         onAsk(message);
       } else {
         setValue("");
+        setFiles([]);
         const res = await api.resume(boxName, message);
         if ("queued" in res && res.queued) {
           onQueued?.();
@@ -109,13 +117,14 @@ export function SendBar({
             icon: <Clock className="size-4" />,
           });
         } else {
-          onReplied(text);
+          onReplied(attached.length ? `${text}\n${attached.map((f) => `@${f}`).join(" ")}` : text);
         }
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setError(msg);
       setValue(text);
+      setFiles(attached);
       toast.error("Could not send", { description: msg });
     } finally {
       setSending(false);
@@ -156,6 +165,29 @@ export function SendBar({
           <label htmlFor="send-input" className="sr-only">
             {toAgent ? "Message the agent" : "Ask a side question about this run"}
           </label>
+          {files.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 px-2 pt-1.5" onClick={(e) => e.stopPropagation()}>
+              {files.map((f) => {
+                const base = f.slice(f.lastIndexOf("/") + 1);
+                const dir = f.slice(0, Math.max(0, f.lastIndexOf("/")));
+                return (
+                  <span key={f} className="bg-muted text-foreground enter inline-flex h-7 max-w-full items-center gap-1.5 rounded-md pl-2 pr-1 text-micro" title={f}>
+                    <FileCode2 className="text-muted-foreground size-3.5 shrink-0" aria-hidden />
+                    <span className="font-mono font-medium">{base}</span>
+                    {dir && <span className="text-muted-foreground hidden truncate font-mono sm:inline">{dir}</span>}
+                    <button
+                      type="button"
+                      onClick={() => setFiles((prev) => prev.filter((x) => x !== f))}
+                      aria-label={`Remove ${base}`}
+                      className="text-muted-foreground hover:text-foreground grid size-5 cursor-pointer place-items-center rounded"
+                    >
+                      <X className="size-3" />
+                    </button>
+                  </span>
+                );
+              })}
+            </div>
+          )}
           <PromptInputTextarea
             id="send-input"
             className="px-2.5 pt-2 text-body"
@@ -243,7 +275,7 @@ export function SendBar({
               variant={toAgent ? "primary" : "outline"}
               size="icon"
               onClick={send}
-              disabled={sending || !value.trim()}
+              disabled={sending || (!value.trim() && !files.length)}
               aria-label={toAgent ? (busy ? "Queue for the agent" : "Send to the agent") : "Ask a side question"}
               className="rounded-full"
             >

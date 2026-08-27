@@ -36,6 +36,20 @@ export interface RepoInfo {
   description?: string;
 }
 
+export type McpTransport = "stdio" | "http" | "sse";
+export interface McpServerView {
+  name: string;
+  type: McpTransport;
+  command?: string;
+  args?: string[];
+  url?: string;
+  /** Values are masked by the controller. */
+  env?: Record<string, string>;
+  headers?: Record<string, string>;
+  enabled: boolean;
+  addedAt: number;
+}
+
 export interface AccountView {
   login: string;
   type: "classic" | "fine-grained" | "unknown";
@@ -221,6 +235,11 @@ export const api = {
       "/delegate.json",
       { source: "git", ...input }
     ),
+
+  /** MCP servers the sandbox agent gets. */
+  mcpServers: (signal?: AbortSignal) =>
+    fetch(url("/mcp-servers.json"), { headers: authHeaders, signal }).then(parse<{ servers: McpServerView[] }>),
+  mcpMutate: (body: Record<string, unknown>) => post<{ servers: McpServerView[] }>("/mcp-servers.json", body),
 
   /** Repositories reachable through the connected accounts, ranked for a picker. */
   repos: (q: string, refresh = false, signal?: AbortSignal) =>

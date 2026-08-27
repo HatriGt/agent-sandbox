@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
  * controller has an OAuth client id, and pasting a personal access token otherwise. Tokens are shown
  * only as a masked hint; removal is deliberate (armed confirm).
  */
-export function Accounts({ onBack }: { onBack: () => void }) {
+export function Accounts({ onBack, embedded = false }: { onBack?: () => void; embedded?: boolean }) {
   const [accounts, setAccounts] = React.useState<AccountView[] | null>(null);
   const [oauth, setOauth] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -33,15 +33,20 @@ export function Accounts({ onBack }: { onBack: () => void }) {
   }, []);
   React.useEffect(load, [load]);
 
-  return (
-    <div className="h-full min-w-0 overflow-y-auto">
-      <div className="mx-auto max-w-3xl px-5 py-7 md:px-8 md:py-9">
+  const body = (
+    <>
         <header className="mb-7">
-          <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2 mb-3 md:hidden" aria-label="Back to machines">
-            <ArrowLeft className="size-4" />
-            Machines
-          </Button>
-          <h1 className="text-foreground text-h1 font-semibold tracking-[-0.02em]">GitHub accounts</h1>
+          {!embedded && (
+            <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2 mb-3 md:hidden" aria-label="Back to machines">
+              <ArrowLeft className="size-4" />
+              Machines
+            </Button>
+          )}
+          {embedded ? (
+            <h2 className="text-foreground text-h2 font-semibold tracking-[-0.015em]">GitHub accounts</h2>
+          ) : (
+            <h1 className="text-foreground text-h1 font-semibold tracking-[-0.02em]">GitHub accounts</h1>
+          )}
           <p className="text-muted-foreground mt-2 max-w-[68ch] text-body">
             Sandboxes borrow these credentials to clone, read pull requests and push. Tokens are stored on your
             server with owner-only permissions and are never sent to this browser. A run on a repository uses the
@@ -107,7 +112,12 @@ export function Accounts({ onBack }: { onBack: () => void }) {
             </p>
           )}
         </section>
-      </div>
+    </>
+  );
+  if (embedded) return <div>{body}</div>;
+  return (
+    <div className="h-full min-w-0 overflow-y-auto">
+      <div className="mx-auto max-w-3xl px-5 py-7 md:px-8 md:py-9">{body}</div>
     </div>
   );
 }

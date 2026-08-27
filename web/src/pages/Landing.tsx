@@ -35,7 +35,7 @@ export default function Landing() {
   const { search } = useLocation();
   const consoleHref = { pathname: "/dashboard", search };
   return (
-    <div className="bg-background text-foreground min-h-full overflow-y-auto">
+    <div className="dark bg-background text-foreground min-h-full overflow-y-auto">
       <header className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
         <div className="flex items-center gap-2.5">
           <span className="bg-primary text-primary-foreground grid size-8 place-items-center rounded-lg">
@@ -70,13 +70,13 @@ export default function Landing() {
 
       {/* ───────────── hero ───────────── */}
       <section className="relative isolate">
-        <DotGrid />
+        <HairlineGrid />
         <div className="mx-auto grid max-w-6xl items-center gap-12 px-6 pt-10 pb-20 lg:grid-cols-[1.05fr_1fr] lg:pt-16">
         <div>
           <Reveal>
             <p className="text-live label mb-4 inline-flex items-center gap-2 rounded-full border px-3 py-1">
               <span className="bg-live breathe size-1.5 rounded-full" />
-              Claude Code, in a microVM, on your own server
+              A cloud sandbox for coding agents · on your own server
             </p>
           </Reveal>
           <Reveal delay={0.05}>
@@ -88,9 +88,9 @@ export default function Landing() {
           </Reveal>
           <Reveal delay={0.1}>
             <p className="text-muted-foreground mt-5 max-w-[52ch] text-lead leading-relaxed">
-              Hand a coding task to an autonomous agent that runs inside a throwaway microVM — from Cursor over MCP,
-              from this dashboard, or from any MCP client. Watch it work live, answer the one question it stops
-              to ask, and get a pull request back.
+              Hand a coding task to an autonomous agent running inside a throwaway microVM — from Cursor, Claude Code,
+              Codex, VS Code or any agentic IDE that speaks MCP, from this dashboard, or from a script. Watch it work
+              live, answer the one question it stops to ask, and get a pull request back.
             </p>
           </Reveal>
           <Reveal delay={0.15}>
@@ -109,8 +109,18 @@ export default function Landing() {
                 className="border-line-strong hover:bg-muted inline-flex h-11 items-center gap-2 rounded-lg border px-5 text-body font-medium"
               >
                 <Plug className="size-4" />
-                Connect from Cursor
+                Connect your IDE
               </a>
+            </div>
+          </Reveal>
+          <Reveal delay={0.18}>
+            <div className="text-muted-foreground mt-8 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-micro">
+              <span className="label mr-1">Works with</span>
+              {["Cursor", "Claude Code", "Codex", "VS Code", "Windsurf", "Zed", "any MCP client"].map((n) => (
+                <span key={n} className="rounded-md border px-2 py-0.5 font-medium">
+                  {n}
+                </span>
+              ))}
             </div>
           </Reveal>
           <Reveal delay={0.2}>
@@ -159,7 +169,7 @@ export default function Landing() {
             <Way
               icon={<Plug className="size-5" />}
               title="From your agentic IDE"
-              body="Add the MCP server to Cursor. Say “delegate this” and your working tree — uncommitted changes included — is shipped into a sandbox. Questions come back as native prompts."
+              body="Add the MCP server to Cursor, Claude Code, Codex, VS Code or Windsurf. Say “delegate this” and your working tree — uncommitted changes included — is shipped into a sandbox. Questions come back as the IDE's own prompts."
               code={`"agent-sandbox": {\n  "url": "https://…/mcp",\n  "headers": { "Authorization": "Bearer …" }\n}`}
               delay={0}
             />
@@ -514,22 +524,19 @@ function QuestionMock() {
 
 /* ───────────────────────────── visual elements ───────────────────────────── */
 
-/** A quiet dot grid under the hero with a soft live-blue glow: the "sandbox floor". Pure CSS. */
-function DotGrid() {
+/** A faint hairline grid under the hero — a drafting sheet, not a glow. Fades out toward the fold. */
+function HairlineGrid() {
   return (
     <div aria-hidden className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
       <div
-        className="absolute inset-0 opacity-[0.55] dark:opacity-[0.35]"
+        className="absolute inset-0 opacity-[0.35]"
         style={{
-          backgroundImage: "radial-gradient(color-mix(in oklch, var(--foreground) 14%, transparent) 1px, transparent 1px)",
-          backgroundSize: "22px 22px",
-          maskImage: "radial-gradient(ellipse 70% 60% at 50% 30%, #000 40%, transparent 100%)",
-          WebkitMaskImage: "radial-gradient(ellipse 70% 60% at 50% 30%, #000 40%, transparent 100%)",
+          backgroundImage:
+            "linear-gradient(to right, color-mix(in oklch, var(--foreground) 12%, transparent) 1px, transparent 1px), linear-gradient(to bottom, color-mix(in oklch, var(--foreground) 12%, transparent) 1px, transparent 1px)",
+          backgroundSize: "48px 48px",
+          maskImage: "linear-gradient(to bottom, #000 0%, #000 45%, transparent 100%)",
+          WebkitMaskImage: "linear-gradient(to bottom, #000 0%, #000 45%, transparent 100%)",
         }}
-      />
-      <div
-        className="absolute left-1/2 top-[-10rem] h-[32rem] w-[52rem] -translate-x-1/2 rounded-full blur-3xl"
-        style={{ background: "radial-gradient(closest-side, color-mix(in oklch, var(--live) 22%, transparent), transparent)" }}
       />
     </div>
   );
@@ -542,7 +549,7 @@ function Architecture() {
     <div className="bg-card mt-10 overflow-hidden rounded-2xl border p-6 md:p-10">
       <div className="grid items-center gap-8 md:grid-cols-[1fr_auto_1fr_auto_1fr]">
         <div className="flex flex-col gap-3">
-          <Node icon={<Laptop className="size-4" />} title="Cursor · IDE" sub="MCP over stdio or HTTP" />
+          <Node icon={<Laptop className="size-4" />} title="Agentic IDE" sub="Cursor · Claude Code · Codex · VS Code" />
           <Node icon={<Globe className="size-4" />} title="Dashboard" sub="this console, any device" />
           <Node icon={<Plug className="size-4" />} title="Any MCP client" sub="Claude web · CI" />
         </div>
