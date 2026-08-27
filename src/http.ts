@@ -39,7 +39,7 @@ import { listClaims, listKept, markKept, unmarkKept } from "./claims.js";
 import { makeRedactor } from "./redact.js";
 import { isSecretKey } from "./mcp-store.js";
 import type { WatchSnapshot } from "./monitor.js";
-import { listChanges, readDiff, fetchPull } from "./changes.js";
+import { listChanges, readDiff, fetchPull, forgetPull } from "./changes.js";
 import { loadRunMetas, saveRunMeta, forgetRunMeta } from "./run-memory.js";
 import { readArtifact } from "./artifact.js";
 import { existsSync } from "node:fs";
@@ -687,6 +687,26 @@ app.get("/diff.json", async (req: Request, res: Response) => {
   }
 });
 // Pull request metadata for the PR card (through a connected account; cached a minute).
+// Merge the run's pull request from inside its sandbox: `gh` there already carries the account
+// that opened it, so the merge is attributed like the agent's own pushes. Method is merge-commit.
+app.post("/pr/merge.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const { session, repo, number } = (req.body ?? {}) as { session?: string; repo?: string; number?: number };
+  if (!session || !/^[\w.-]+$/.test(session) || !repo || !/^[\w.-]+\/[\w.-]+$/.test(repo) || !Number.isFinite(Number(number))) {
+    res.status(400).json({ error: "session, repo (owner/name) and number are required" });
+    return;
+  }
+  try {
+    const r = await execInBox(cfg, session, `gh pr merge ${Number(number)} --repo ${repo} --merge 2>&1`);
+    forgetPull(repo, Number(number));
+    res.json({ ok: true, output: redactor.redact((r.stdout ?? "").trim().slice(-600)) });
+  } catch (e) {
+    // exec throws on a non-zero exit with gh's own message (not mergeable, checks, permissions…).
+    forgetPull(repo, Number(number));
+    res.status(422).json({ error: redactor.redact(String((e as Error).message ?? e).trim().slice(-600)) });
+  }
+});
+
 app.get("/pr.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   const repo = typeof req.query.repo === "string" ? req.query.repo : "";

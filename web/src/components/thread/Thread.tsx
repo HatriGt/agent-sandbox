@@ -2,7 +2,7 @@ import * as React from "react";
 import { ArrowLeft, Clock, Cpu, GitBranch, Hourglass, Loader2, MemoryStick, MoonStar, Pin, PinOff, Plus, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, type BoxView, type ChangedFile, type FleetLifecycle, type WatchSnapshot } from "@/lib/api";
-import { AnimatePresence } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
 import { FilePane } from "./FilePane";
 import { friendlyName, isSleeping, POLL_MS, roleLabel, shortName, threadTitle } from "@/lib/format";
 import { deadlineLabel, deadlineOf, displayState, fmtDuration } from "@/lib/lifecycle";
@@ -13,15 +13,14 @@ import { Button } from "@/components/ui/button";
 import { StatePill } from "@/components/ui/stamp";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ChatContainerContent, ChatContainerRoot, ChatContainerScrollAnchor } from "@/components/ui/chat-container";
-import { ScrollButton } from "@/components/ui/scroll-button";
 import type { TraceEvent } from "@/lib/trace";
 import { AnsweredQuestionItem, LifecycleItem, ObserverItem, PlanCard, QueuedItem, SayItem, ThinkingItem, ToolGroup, WorkingIndicator, YouItem } from "./TraceItems";
 import { ThreadMinimap, type Turn } from "./ThreadMinimap";
 import { useStickToBottom } from "use-stick-to-bottom";
 import { ChangesDock } from "./ChangesDock";
 import { QuestionCard } from "./QuestionCard";
-import { PullRequestCard } from "./TestResultsCard";
-import { PullRequestPanel } from "./PullRequestPanel";
+import { PullRequestFloat } from "./PullRequestFloat";
+import { ArrowDown } from "lucide-react";
 import { RepoPicker } from "@/components/RepoPicker";
 import { findPullRequests } from "@/lib/testReport";
 import { ThreadSkeleton } from "./Skeletons";
@@ -309,7 +308,7 @@ export function Thread({
               <TooltipTrigger asChild>
                 <span className={cn("inline-flex items-center gap-1.5", deadline.remainingSec != null && deadline.remainingSec < 300 && "text-attention-text")}>
                   <Hourglass className="size-3" aria-hidden />
-                  <span className="tabular">{deadline.remainingSec != null ? fmtDuration(deadline.remainingSec) : ""}</span>
+                  <span className="tabular">{deadline.remainingSec != null ? (deadline.remainingSec <= 0 ? "soon" : fmtDuration(deadline.remainingSec)) : ""}</span>
                 </span>
               </TooltipTrigger>
               <TooltipContent side="bottom">{deadlineText}</TooltipContent>
@@ -318,7 +317,7 @@ export function Thread({
           {box.uptime && <Vital icon={<Clock className="size-3" />} label={sleeping ? "ran for" : "uptime"} value={box.uptime} />}
           {box.cpu && <Vital icon={<Cpu className="size-3" />} label="cpu" value={box.cpu} />}
           {box.mem && <Vital icon={<MemoryStick className="size-3" />} label="memory" value={box.mem.split(" / ")[0]} />}
-          <span className="bg-muted text-muted-foreground label rounded-md px-1.5 py-0.5">{roleLabel(box.role)}</span>
+          {!kept && <span className="bg-muted text-muted-foreground label rounded-md px-1.5 py-0.5">{roleLabel(box.role)}</span>}
         </div>
 
         <Button variant="ghost" size="icon-sm" onClick={onNew} aria-label="New task" className="md:hidden">
@@ -413,8 +412,10 @@ export function Thread({
       )}
 
       <div className="relative flex min-h-0 flex-1">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <div className="relative min-h-0 min-w-0 flex-1">
         <ThreadMinimap turns={turns} scrollerRef={stick.scrollRef} />
+        {pulls.length > 0 && !loadingTrace && <PullRequestFloat key={pulls[pulls.length - 1].url} session={box.name} {...pulls[pulls.length - 1]} />}
         <ChatContainerRoot className="relative h-full [&>div]:overflow-x-hidden" instance={stick}>
           <ChatContainerContent className="mx-auto w-full max-w-3xl gap-7 px-4 pt-7 pb-12 md:px-6">
             {box.task && (
@@ -473,14 +474,7 @@ export function Thread({
             {showQuestion && <QuestionCard question={question!} onAnswer={answer} busy={answering} />}
             {resuming && <WorkingIndicator label="Answer sent — the agent is resuming" />}
 
-            {/* Narrow screens have no room for the pinned panel: the card stays in the flow there. */}
-            {pulls.length > 0 && !loadingTrace && (
-              <div className="flex flex-wrap gap-2 xl:hidden">
-                {pulls.map((p) => (
-                  <PullRequestCard key={p.url} {...p} />
-                ))}
-              </div>
-            )}
+
 
 
             {pendingReplies.map((r, i) => (
@@ -504,21 +498,24 @@ export function Thread({
               ))}
             <ChatContainerScrollAnchor />
           </ChatContainerContent>
-
-          <div className="pointer-events-none sticky inset-x-0 bottom-3 z-10 flex justify-center">
-            <div className="pointer-events-auto">
-              <ScrollButton />
-            </div>
-          </div>
         </ChatContainerRoot>
-      </div>
-      {/* The run's pull request lives in its own column beside the conversation on wide screens. */}
-      {pulls.length > 0 && !loadingTrace && !openFile && (
-        <aside className="hidden w-[19.5rem] shrink-0 overflow-y-auto p-4 pl-0 xl:block">
-          <PullRequestPanel key={pulls[pulls.length - 1].url} {...pulls[pulls.length - 1]} className="w-full" />
-        </aside>
-      )}
-      <AnimatePresence>{openFile && <FilePane key={openFile.path} session={box.name} file={openFile} onClose={() => setOpenFile(null)} />}</AnimatePresence>
+        {/* Jump to the latest output: centred over the column, only while scrolled up. */}
+        <AnimatePresence>
+          {!stick.isAtBottom && (
+            <motion.button
+              type="button"
+              initial={{ opacity: 0, y: 6, scale: 0.9 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 6, scale: 0.9 }}
+              transition={{ duration: 0.16 }}
+              onClick={() => void stick.scrollToBottom()}
+              aria-label="Scroll to latest"
+              className="bg-card hover:bg-muted text-foreground absolute bottom-3 left-1/2 z-10 grid size-8 -translate-x-1/2 cursor-pointer place-items-center rounded-full border shadow-[0_1px_2px_oklch(0_0_0/0.06),0_8px_20px_-10px_oklch(0_0_0/0.4)]"
+            >
+              <ArrowDown className="size-4" aria-hidden />
+            </motion.button>
+          )}
+        </AnimatePresence>
       </div>
 
       {!sleeping && <ChangesDock files={changes} loading={changesLoading} onOpen={setOpenFile} onRefresh={refreshChanges} activePath={openFile?.path} />}
@@ -533,6 +530,9 @@ export function Thread({
         onFocusRequest={onFocusRequest}
         onReplyFailed={onReplyFailed}
       />
+      </div>
+      <AnimatePresence>{openFile && <FilePane key={openFile.path} session={box.name} file={openFile} onClose={() => setOpenFile(null)} />}</AnimatePresence>
+      </div>
     </div>
   );
 }

@@ -148,6 +148,13 @@ export interface PullInfo {
   base: string;
   author?: string;
   url: string;
+  /** GitHub's merge assessment (null while it is still computing). */
+  mergeable?: boolean | null;
+  reviewDecision?: "approved" | "changes_requested" | "review_required" | null;
+  /** Latest review state per reviewer, plus anyone still asked. */
+  reviewers?: { login: string; state: "approved" | "changes_requested" | "commented" | "pending" }[];
+  /** Check-run rollup on the head commit. */
+  checks?: { total: number; success: number; failure: number; pending: number };
 }
 
 interface GhPull {
@@ -158,10 +165,50 @@ interface GhPull {
   additions?: number;
   deletions?: number;
   changed_files?: number;
-  head?: { ref?: string };
+  head?: { ref?: string; sha?: string };
   base?: { ref?: string };
   user?: { login?: string };
   html_url?: string;
+  mergeable?: boolean | null;
+  requested_reviewers?: { login?: string }[];
+}
+interface GhReview {
+  user?: { login?: string };
+  state?: string;
+  submitted_at?: string;
+}
+interface GhCheckRuns {
+  total_count?: number;
+  check_runs?: { status?: string; conclusion?: string | null }[];
+}
+
+/** Fold reviews (latest per user) + outstanding requests into the reviewer list, and derive a decision. */
+export function shapeReviews(p: GhPull, reviews: GhReview[] | undefined): Pick<PullInfo, "reviewers" | "reviewDecision"> {
+  const latest = new Map<string, { state: string; at: string }>();
+  for (const r of reviews ?? []) {
+    const login = r.user?.login;
+    const state = (r.state ?? "").toLowerCase();
+    if (!login || !["approved", "changes_requested", "commented"].includes(state)) continue;
+    const prev = latest.get(login);
+    if (!prev || (r.submitted_at ?? "") > prev.at) latest.set(login, { state, at: r.submitted_at ?? "" });
+  }
+  const reviewers: NonNullable<PullInfo["reviewers"]> = [...latest.entries()].map(([login, v]) => ({ login, state: v.state as "approved" | "changes_requested" | "commented" }));
+  for (const rr of p.requested_reviewers ?? []) if (rr.login && !latest.has(rr.login)) reviewers.push({ login: rr.login, state: "pending" });
+  const states = reviewers.map((r) => r.state);
+  const reviewDecision = states.includes("changes_requested") ? "changes_requested" : states.includes("approved") ? "approved" : reviewers.length ? "review_required" : null;
+  return { reviewers, reviewDecision };
+}
+
+export function shapeChecks(c: GhCheckRuns | undefined): PullInfo["checks"] | undefined {
+  const runs = c?.check_runs ?? [];
+  if (!runs.length) return undefined;
+  let success = 0, failure = 0, pending = 0;
+  for (const r of runs) {
+    if (r.status !== "completed") pending++;
+    else if (["success", "neutral", "skipped"].includes(r.conclusion ?? "")) success++;
+    else failure++;
+  }
+  return { total: runs.length, success, failure, pending };
 }
 
 export function shapePull(repo: string, number: number, p: GhPull): PullInfo {
@@ -177,10 +224,14 @@ export function shapePull(repo: string, number: number, p: GhPull): PullInfo {
     base: p.base?.ref ?? "",
     author: p.user?.login,
     url: p.html_url ?? `https://github.com/${repo}/pull/${number}`,
+    mergeable: p.mergeable ?? null,
   };
 }
 
 const pullCache = new Map<string, { at: number; info: PullInfo }>();
+export function forgetPull(repo: string, number: number) {
+  pullCache.delete(`${repo}#${number}`);
+}
 
 export async function fetchPull(cfg: Config, repo: string, number: number): Promise<PullInfo | undefined> {
   const key = `${repo}#${number}`;
@@ -192,6 +243,12 @@ export async function fetchPull(cfg: Config, repo: string, number: number): Prom
     const p = await ghGetJson<GhPull>(cfg, acc.token, `/repos/${repo}/pulls/${number}`);
     if (p?.title) {
       const info = shapePull(repo, number, p);
+      // Reviews and checks ride along; either failing leaves the basics intact.
+      const [reviews, checks] = await Promise.all([
+        ghGetJson<GhReview[]>(cfg, acc.token, `/repos/${repo}/pulls/${number}/reviews?per_page=100`).catch(() => undefined),
+        p.head?.sha ? ghGetJson<GhCheckRuns>(cfg, acc.token, `/repos/${repo}/commits/${p.head.sha}/check-runs?per_page=100`).catch(() => undefined) : Promise.resolve(undefined),
+      ]);
+      Object.assign(info, shapeReviews(p, Array.isArray(reviews) ? reviews : undefined), { checks: shapeChecks(checks ?? undefined) });
       pullCache.set(key, { at: Date.now(), info });
       return info;
     }

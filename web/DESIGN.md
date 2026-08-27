@@ -265,3 +265,18 @@ is invented: no analytics, no cost, no history beyond this browser's own session
 - **No horizontal scroll**: inline `code` in prose wraps (`overflow-wrap: anywhere`) — a 3000px
   path in a backtick span was widening the whole thread — shell commands wrap, and the chat
   scroller clips x-overflow as a backstop.
+
+## Round: one column, floating PR (2026-08-27)
+
+- **One column.** Conversation, changes dock and composer are one flex column sharing `max-w-3xl`
+  and the same inner gutter, with the file pane as a sibling — nothing beside the thread can shift
+  the composer away from the text again. The scroll-to-latest button is our own (`stick.isAtBottom`),
+  centred over the column, never stuck at the top.
+- **Pull request is a floating chip** (`thread/PullRequestFloat.tsx`), top-right of the thread:
+  `#142 · ready to merge`. Click → card modelled on the reference: verdict header (Ready to merge /
+  Checks failing / Changes requested / Merge conflicts / Merged / Draft) with `#n · N checks`, a
+  globe link and a **Merge** button (two-click; runs `gh pr merge --merge` inside the sandbox via
+  `/pr/merge.json`), then Review (decision + reviewers with avatars), Committed (files, +/−, branch,
+  author) and Checks. `/pr.json` now carries mergeable, reviews and check-run rollups.
+- Header: no `0s` countdown (reads "soon"); the role pill hides when a box is kept.
+- Composer hint is one clause: `Enter to send · @ to mention a file`.

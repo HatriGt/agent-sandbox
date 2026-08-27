@@ -151,12 +151,13 @@ export function SendBar({
       : toAgent
         ? busy
           ? "The agent is mid-turn. Your message is queued and delivered when this turn finishes."
-          : "Enter sends · continues the same agent session. Type @ to reference a file."
+          : "Enter to send · @ to mention a file"
         : "Answered by a separate read-only helper inside the sandbox. The agent is not interrupted.";
 
   return (
-    <div className="px-3 pt-1 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:px-6">
-      <div className="relative mx-auto min-w-0 max-w-3xl">
+    <div className="pt-1 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+      {/* Same column as the conversation and the changes dock: max-w-3xl with the same inner gutter. */}
+      <div className="relative mx-auto min-w-0 max-w-3xl px-3 md:px-6">
         {mention && <MentionMenu session={boxName} repos={repos} state={mention} onPick={pickFile} onClose={() => setMention(null)} />}
         <PromptInput
           value={value}

@@ -67,6 +67,10 @@ export interface PullInfo {
   base: string;
   author?: string;
   url: string;
+  mergeable?: boolean | null;
+  reviewDecision?: "approved" | "changes_requested" | "review_required" | null;
+  reviewers?: { login: string; state: "approved" | "changes_requested" | "commented" | "pending" }[];
+  checks?: { total: number; success: number; failure: number; pending: number };
 }
 
 export type McpTransport = "stdio" | "http" | "sse";
@@ -300,6 +304,8 @@ export const api = {
     fetch(url("/pr.json", { repo, number: String(number) }), { headers: authHeaders, signal }).then(parse<PullInfo>),
 
   /** Keep (pin) a sandbox until destroyed, or release it. */
+  /** Merge the PR from inside the sandbox (`gh pr merge --merge`). */
+  mergePull: (session: string, repo: string, number: number) => post<{ ok: true; output: string }>("/pr/merge.json", { session, repo, number }),
   keep: (session: string, keep: boolean) => post<{ ok: true; kept: boolean }>("/keep.json", { session, keep }),
 
   /** Fetch a produced file's text for inline preview. Throws ApiError (404/413/…) on failure. */
