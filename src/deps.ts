@@ -29,6 +29,8 @@ import {
   execWithInput,
 } from "./msb.js";
 import { runInteractive } from "./interactive.js";
+import { safeWorkspacePath } from "./artifact.js";
+import { shellQuote } from "./exec.js";
 import type { Interact } from "./handlers.js";
 import { formatMonitor, formatWatch } from "./monitor.js";
 import { formatAsk } from "./ask.js";
