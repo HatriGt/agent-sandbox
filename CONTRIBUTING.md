@@ -52,9 +52,8 @@ the logic that matters is factored out so it can be tested directly.
 npm run build && npm test
 ```
 
-CI runs the same thing on Node 20 and 22. The `web build` job is currently **non-blocking** while
-some outstanding type errors in the changes/file panes are fixed — if you are working in `web/`,
-please don't add new ones, and flipping that job to blocking is a very welcome PR.
+CI runs the same thing on Node 20 and 22, plus a blocking `web build` job. If you are working in
+`web/`, run `npm --prefix web run build` too — a console that does not compile fails the build.
 
 ## Areas that need help
 
