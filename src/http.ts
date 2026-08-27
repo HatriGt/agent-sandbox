@@ -67,7 +67,7 @@ app.use((req: Request, res: Response, next) => {
 // must flush every event as it happens.
 app.use(
   compression({
-    filter: (req, res) => (req.path.endsWith(".sse") || req.path.startsWith("/mcp") ? false : compression.filter(req, res)),
+    filter: (req, res) => (req.path.endsWith(".sse") || req.path === "/mcp" || req.path.startsWith("/mcp/") ? false : compression.filter(req, res)),
   })
 );
 app.use(express.json());
