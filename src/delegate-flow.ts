@@ -10,7 +10,7 @@
  */
 import type { Config } from "./config.js";
 import type { HandlerDeps } from "./handlers.js";
-import { validateDelegateInput, type DelegateSource } from "./delegate-input.js";
+import { validateDelegateInput, type DelegateSource, type Attachment } from "./delegate-input.js";
 import type { AgentCreds } from "./msb.js";
 
 export interface DelegateFlowInput {
@@ -22,6 +22,7 @@ export interface DelegateFlowInput {
   allowDomains?: string[];
   githubToken?: string;
   githubAccount?: string;
+  attachments?: Attachment[];
 }
 
 export type DelegateFlowResult =
@@ -46,6 +47,7 @@ export async function runDelegateFlow(
     ref: input.ref,
   });
   if (!v.ok) return { ok: false, question: v.question };
+  if (input.attachments?.length) v.plan.attachments = input.attachments;
 
   let creds: AgentCreds | undefined;
   {
