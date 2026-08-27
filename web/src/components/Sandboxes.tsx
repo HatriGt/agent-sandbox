@@ -141,7 +141,7 @@ export function Sandboxes({
   );
 }
 
-const COLS = "md:grid-cols-[8.5rem_minmax(0,1fr)_10rem_9rem_11rem]";
+const COLS = "md:grid-cols-[8rem_minmax(0,1fr)_13.5rem_8.5rem_10rem]";
 
 function MachineTable({
   boxes,
