@@ -92,3 +92,20 @@ sets, on every response (static shell, JSON, SSE and artifact bytes alike):
 - No rate limiting on the token check. Not currently exploitable — the token is 256 bits of
   `openssl rand` and the compare is timing-safe — but it would matter the moment tokens get weaker
   or user-chosen.
+
+## Secret redaction in the transcript (2026-08-27)
+
+A sandbox run printed `git remote -v`, and the remote carried the clone token
+(`https://x-access-token:ghp_…@github.com/…`). Two fixes, defence in depth:
+
+1. **No token in the remote.** `cloneRepoOnVps` still clones with the token URL (non-interactive),
+   then immediately `git remote set-url origin` to the plain URL. Later fetch/push inside the box
+   authenticates via the per-owner `~/.git-credentials` store written at setup (mode 600).
+2. **Redaction at the edge** (`src/redact.ts`). Everything the console shows from inside a box — the
+   live log (`/watch.sse`, `/watch.json`), questions/tasks, text artifacts, and the MCP `progress`
+   text — passes through a redactor: the exact secrets the controller holds (GitHub tokens, MCP
+   env/header secrets, npm token, dashboard bearer) are replaced wherever they appear, plus anything
+   credential-shaped (`ghp_…`, `github_pat_…`, `user:secret@host`, `Bearer …`, `sk-…`, `AKIA…`,
+   `xox…`, `glpat-…`, `npm_…`, `*_PASSWORD=…`). A 4-char tail is kept so the operator can tell WHICH
+   credential leaked (`ghp_…jXIw`) without being able to use it. The known list refreshes lazily
+   (60s) and a failing refresh keeps the previous list — redaction never blocks a read.

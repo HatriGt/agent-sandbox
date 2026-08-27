@@ -37,6 +37,7 @@ import {
 } from "./monitor.js";
 import type { PollResult } from "./wait.js";
 import type { Config } from "./config.js";
+import { redactShapes } from "./redact.js";
 
 /**
  * Run `msb <rest>` on the VPS over SSH.
@@ -973,7 +974,7 @@ export async function agentBoundary(cfg: Config, box: string): Promise<PollResul
   const state: RunState = raw.question ? "waiting" : parseRunState(raw.runLine).state;
   // Propagate the RAW question text so the elicitation prompt is the agent's actual question, not the
   // "run:waiting — the agent asked a question…" status blurb. Falls back to text when there's none.
-  return { state, text: formatProgress(raw), question: raw.question || undefined };
+  return { state, text: redactShapes(formatProgress(raw)), question: raw.question ? redactShapes(raw.question) : undefined };
 }
 
 /**

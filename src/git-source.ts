@@ -86,7 +86,14 @@ export async function cloneRepoOnVps(
     check: false,
   });
 
-  const gitCmd = ["git", ...buildCloneArgs(url, ref, dest)].map(shellQuote).join(" ");
+  let gitCmd = ["git", ...buildCloneArgs(url, ref, dest)].map(shellQuote).join(" ");
+  // The token rides in the clone URL only for the clone itself. Afterwards the remote is reset to
+  // the plain URL, so `git remote -v` inside the box never prints a credential (the agent's later
+  // fetch/push authenticates through the per-owner credential store written at setup).
+  if (cfg.ghToken) {
+    const clean = buildCloneUrl(repo);
+    gitCmd += ` && git -C ${shellQuote(dest)} remote set-url origin ${shellQuote(clean)}`;
+  }
   await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, gitCmd]);
 
   return dest;

@@ -36,6 +36,9 @@ import { viewAccounts, deviceStart, devicePoll } from "./accounts.js";
 import { makeRepoLister, fetchGithubRepos, matchRepos, inferRepos, attachRepoToBox } from "./repos.js";
 import { loadMcpStore, saveMcpStore, normalizeServer, parseMcpImport, viewServers, toEditableConfig, replaceFromJson, mergeSecrets, type McpServer as McpServerDef } from "./mcp-store.js";
 import { listClaims, listKept, markKept, unmarkKept } from "./claims.js";
+import { makeRedactor } from "./redact.js";
+import { isSecretKey } from "./mcp-store.js";
+import type { WatchSnapshot } from "./monitor.js";
 import { listChanges, readDiff, fetchPull } from "./changes.js";
 import { loadRunMetas, saveRunMeta, forgetRunMeta } from "./run-memory.js";
 import { readArtifact } from "./artifact.js";
@@ -75,7 +78,35 @@ app.use(express.json());
 // One shared tail loop per watched box (see watch-hub.ts): every SSE viewer, /watch.json call and
 // hover-prefetch of the same box reads one cached snapshot instead of each paying an SSH round trip.
 // The tick path skips `msb metrics` — vitals arrive with the fleet poll.
-const watchHub = new WatchHub({ read: (s) => gatherWatch(cfg, s, undefined, { metrics: false }) });
+// Everything the dashboard shows from inside a box passes through here: the exact secrets the
+// controller holds (GitHub tokens, MCP secrets, npm/bearer) are replaced wherever they appear, and
+// anything shaped like a credential is masked too. See redact.ts.
+const redactor = makeRedactor(async () => {
+  const out: string[] = [];
+  try {
+    for (const a of Object.values((await loadStore(cfg)).accounts)) out.push(a.token);
+  } catch {
+    /* store unreachable: shapes still apply */
+  }
+  try {
+    for (const s of Object.values((await loadMcpStore(cfg)).servers)) {
+      for (const m of [s.env, s.headers]) for (const [k, v] of Object.entries(m ?? {})) if (isSecretKey(k)) out.push(v);
+    }
+  } catch {
+    /* same */
+  }
+  if (cfg.npmToken) out.push(cfg.npmToken);
+  if (cfg.httpToken) out.push(cfg.httpToken);
+  return out;
+});
+void redactor.prime();
+const redactSnap = (snap: WatchSnapshot): WatchSnapshot => ({
+  ...snap,
+  log: redactor.redact(snap.log),
+  ...(snap.question ? { question: redactor.redact(snap.question) } : {}),
+  ...(snap.task ? { task: redactor.redact(snap.task) } : {}),
+});
+const watchHub = new WatchHub({ read: async (s) => redactSnap(await gatherWatch(cfg, s, undefined, { metrics: false })) });
 // The dashboard's fleet read: gatherMonitor behind a short shared cache, plus lifecycle config and
 // sleeping (Stopped-but-resumable) boxes merged from memory.
 // Follow-ups typed while the agent is mid-turn wait here and are delivered when the run finishes.
@@ -288,7 +319,7 @@ app.get("/watch.json", async (req: Request, res: Response) => {
   const lines = Number(req.query.lines);
   try {
     res.json(
-      Number.isFinite(lines) && lines > 0 ? await gatherWatch(cfg, session, lines) : await watchHub.read(session)
+      Number.isFinite(lines) && lines > 0 ? redactSnap(await gatherWatch(cfg, session, lines)) : await watchHub.read(session)
     );
   } catch (e) {
     res.status(500).json({ error: String((e as Error).message ?? e) });
@@ -368,7 +399,12 @@ app.get("/artifact", async (req: Request, res: Response) => {
     const disposition = result.inlineSafe ? "inline" : "attachment";
     res.setHeader("Content-Disposition", `${disposition}; filename="${name.replace(/["\\]/g, "_")}"`);
     res.setHeader("Cache-Control", "no-store");
-    res.send(result.data);
+    // Text artifacts (source, logs, JSON, .env dumps) are redacted like the transcript; binaries pass.
+    if (/^(text\/|application\/(json|javascript|xml|x-sh))/.test(result.contentType)) {
+      res.send(redactor.redact(Buffer.isBuffer(result.data) ? result.data.toString("utf8") : String(result.data)));
+    } else {
+      res.send(result.data);
+    }
   } catch (e) {
     res.status(500).json({ error: String((e as Error).message ?? e) });
   }

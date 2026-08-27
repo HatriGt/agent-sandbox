@@ -1,5 +1,5 @@
 import * as React from "react";
-import { AlertTriangle, Brain, Check, ChevronRight, Circle, CircleDot, Clock, FileText, Loader2, MessageCircleQuestion, Terminal, Wrench } from "lucide-react";
+import { AlertTriangle, Brain, Check, ChevronRight, Circle, CircleDot, Clock, FilePen, FilePlus2, FileText, Globe, ListChecks, Loader2, MessageCircleQuestion, Search, Terminal, Wrench } from "lucide-react";
 import type { PlanItem as PlanStep } from "@/lib/trace";
 import { resultSummary, type TraceEvent } from "@/lib/trace";
 import { parseQuestion } from "@/lib/question";
@@ -45,12 +45,26 @@ function ToolItem({ event, live }: { event: ToolEvent; live?: boolean }) {
   return SHELL_TOOLS.has(event.name) ? <ShellItem event={event} live={live} /> : <StepItem event={event} live={live} />;
 }
 
+/** One glyph per tool family, so a folded group reads as "what kind of work" before you open it. */
+function toolIcon(name: string) {
+  const n = name.toLowerCase();
+  if (SHELL_TOOLS.has(name)) return Terminal;
+  if (n === "write" || n === "notebookedit") return FilePlus2;
+  if (n === "edit" || n === "multiedit") return FilePen;
+  if (n === "read") return FileText;
+  if (n === "glob" || n === "grep" || n === "search" || n === "ls") return Search;
+  if (n.startsWith("web")) return Globe;
+  if (n === "todowrite" || n === "task") return ListChecks;
+  return Wrench;
+}
+
 /**
- * Consecutive tool calls fold into one "N steps" row that expands to the individual panels — the
+ * Consecutive tool calls fold into one "steps" row that expands to the individual panels — the
  * thread reads as prose punctuated by work, not a wall of tool rows. A single tool renders inline.
  *
- * `live` marks the group as belonging to the in-progress turn; any tool in it without a result is
- * still executing (under parallel tool use the last one often answers first), so running is per-tool.
+ * Folded: a stack of family glyphs, "N steps", then a chip per tool name with its count, a failure
+ * badge, and the chevron. Open: a numbered timeline with a connector line; each node completes as
+ * its result lands. `live` marks the in-progress turn: tools without a result are still running.
  */
 export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolean }) {
   // Results worth reading (a test run, a PR URL) must not hide behind the fold: open those groups.
@@ -64,9 +78,13 @@ export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolea
   }, [notable]);
   const anyRunning = !!live && events.some((e) => !e.result);
   const failed = events.filter((e) => e.failed).length;
+  const done = events.filter((e) => !!e.result).length;
   if (events.length === 1) return <ToolItem event={events[0]} live={anyRunning} />;
 
-  const names = [...new Set(events.map((e) => e.name))].slice(0, 4).join(" · ");
+  const counts = new Map<string, number>();
+  for (const e of events) counts.set(e.name, (counts.get(e.name) ?? 0) + 1);
+  const families = [...new Set(events.map((e) => toolIcon(e.name)))].slice(0, 3);
+
   return (
     <div className="enter min-w-0">
       <button
@@ -74,36 +92,101 @@ export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolea
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         className={cn(
-          "flex max-w-full cursor-pointer items-center gap-2 rounded-lg border px-3 py-1.5 text-left text-meta transition-colors",
+          "group/steps flex max-w-full cursor-pointer items-center gap-2.5 rounded-full border py-1 pr-2.5 pl-1.5 text-left text-meta transition-[background-color,border-color,box-shadow] duration-200",
           anyRunning
-            ? "border-live/30 bg-live/6 text-foreground"
-            : "text-muted-foreground hover:text-foreground hover:bg-muted bg-card"
+            ? "border-live/30 bg-live/6 text-foreground shadow-[0_0_0_3px_oklch(0.62_0.19_255/0.08)]"
+            : open
+              ? "bg-muted/60 border-line-strong text-foreground"
+              : "text-muted-foreground hover:text-foreground hover:bg-muted hover:border-line-strong bg-card"
         )}
       >
-        {anyRunning ? (
-          <Loader2 className="text-live size-3.5 shrink-0 animate-spin" aria-hidden />
-        ) : (
-          <Wrench className="size-3.5 shrink-0" aria-hidden />
-        )}
-        <span className="font-medium">
-          {anyRunning ? `${events.length} steps · running` : `${events.length} steps`}
+        {/* Family glyph stack — overlapping discs, like avatars. */}
+        <span className="flex -space-x-1.5">
+          {families.map((Icon, i) => (
+            <span
+              key={i}
+              className={cn(
+                "ring-card grid size-5 place-items-center rounded-full ring-2 transition-transform duration-200 group-hover/steps:translate-x-0",
+                anyRunning ? "bg-live/15 text-live" : "bg-muted text-foreground/70"
+              )}
+              style={{ zIndex: families.length - i }}
+            >
+              <Icon className="size-3" aria-hidden />
+            </span>
+          ))}
+        </span>
+        <span className="font-medium tabular-nums">
+          {anyRunning ? (
+            <span className="inline-flex items-center gap-1.5">
+              <Loader2 className="text-live size-3.5 animate-spin" aria-hidden />
+              {done}/{events.length} steps
+            </span>
+          ) : (
+            `${events.length} steps`
+          )}
+        </span>
+        <span className="hidden min-w-0 items-center gap-1 sm:flex">
+          {[...counts.entries()].slice(0, 4).map(([name, n]) => (
+            <span key={name} className="bg-muted text-muted-foreground stamp rounded-md px-1.5 py-px">
+              {name}
+              {n > 1 && <span className="opacity-60"> ×{n}</span>}
+            </span>
+          ))}
+          {counts.size > 4 && <span className="stamp text-muted-foreground/70">+{counts.size - 4}</span>}
         </span>
         {failed > 0 && !anyRunning && (
-          <span className="text-destructive label">{failed} failed</span>
+          <span className="bg-destructive/10 text-destructive label rounded-md px-1.5 py-px">{failed} failed</span>
         )}
-        <span className="stamp text-muted-foreground/70 hidden min-w-0 truncate sm:inline">{names}</span>
         <ChevronRight
-          className={cn("ml-1 size-3.5 shrink-0 transition-transform duration-150", open && "rotate-90")}
+          className={cn("ml-0.5 size-3.5 shrink-0 transition-transform duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]", open && "rotate-90")}
           aria-hidden
         />
       </button>
-      {open && (
-        <div className="mt-2.5 flex flex-col gap-2.5 border-l pl-3">
-          {events.map((e, i) => (
-            <ToolItem key={i} event={e} live={live && !e.result} />
-          ))}
-        </div>
-      )}
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.ol
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+            className="relative mt-2 overflow-hidden pl-1"
+          >
+            {events.map((e, i) => {
+              const running = !!live && !e.result;
+              const last = i === events.length - 1;
+              return (
+                <motion.li
+                  key={i}
+                  initial={{ opacity: 0, x: -4 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ duration: 0.18, delay: Math.min(i, 8) * 0.03 }}
+                  className="relative flex gap-3 pb-2.5 last:pb-0"
+                >
+                  {/* Node + connector */}
+                  <span className="relative flex w-5 shrink-0 flex-col items-center">
+                    <span
+                      className={cn(
+                        "z-10 mt-1.5 grid size-4 place-items-center rounded-full border text-[9px] font-semibold tabular-nums",
+                        running
+                          ? "border-live bg-live/15 text-live"
+                          : e.failed
+                            ? "border-destructive/60 bg-destructive/10 text-destructive"
+                            : "border-line-strong bg-card text-muted-foreground"
+                      )}
+                    >
+                      {running ? <span className="bg-live size-1.5 animate-pulse rounded-full" /> : e.failed ? "!" : i + 1}
+                    </span>
+                    {!last && <span className="bg-border absolute top-5 bottom-0 w-px" aria-hidden />}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <ToolItem event={e} live={running} />
+                  </div>
+                </motion.li>
+              );
+            })}
+          </motion.ol>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
