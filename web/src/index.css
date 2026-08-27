@@ -365,7 +365,9 @@
     border-radius: 5px;
     padding: 0.1em 0.38em;
     border: 0;
-    white-space: nowrap;
+    /* Wrap, never widen: a long path or hash in inline code must not stretch the whole thread. */
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
   .dark .prose-agent :not(pre) > code {
     background: color-mix(in oklch, var(--foreground) 10%, transparent);

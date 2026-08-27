@@ -21,6 +21,7 @@ import { useStickToBottom } from "use-stick-to-bottom";
 import { ChangesDock } from "./ChangesDock";
 import { QuestionCard } from "./QuestionCard";
 import { PullRequestCard } from "./TestResultsCard";
+import { PullRequestPanel } from "./PullRequestPanel";
 import { RepoPicker } from "@/components/RepoPicker";
 import { findPullRequests } from "@/lib/testReport";
 import { ThreadSkeleton } from "./Skeletons";
@@ -414,7 +415,7 @@ export function Thread({
       <div className="relative flex min-h-0 flex-1">
       <div className="relative min-h-0 min-w-0 flex-1">
         <ThreadMinimap turns={turns} scrollerRef={stick.scrollRef} />
-        <ChatContainerRoot className="relative h-full" instance={stick}>
+        <ChatContainerRoot className="relative h-full [&>div]:overflow-x-hidden" instance={stick}>
           <ChatContainerContent className="mx-auto w-full max-w-3xl gap-7 px-4 pt-7 pb-12 md:px-6">
             {box.task && (
               <div data-turn="task">
@@ -472,8 +473,9 @@ export function Thread({
             {showQuestion && <QuestionCard question={question!} onAnswer={answer} busy={answering} />}
             {resuming && <WorkingIndicator label="Answer sent — the agent is resuming" />}
 
+            {/* Narrow screens have no room for the pinned panel: the card stays in the flow there. */}
             {pulls.length > 0 && !loadingTrace && (
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2 xl:hidden">
                 {pulls.map((p) => (
                   <PullRequestCard key={p.url} {...p} />
                 ))}
@@ -510,6 +512,12 @@ export function Thread({
           </div>
         </ChatContainerRoot>
       </div>
+      {/* The run's pull request lives in its own column beside the conversation on wide screens. */}
+      {pulls.length > 0 && !loadingTrace && !openFile && (
+        <aside className="hidden w-[19.5rem] shrink-0 overflow-y-auto p-4 pl-0 xl:block">
+          <PullRequestPanel key={pulls[pulls.length - 1].url} {...pulls[pulls.length - 1]} className="w-full" />
+        </aside>
+      )}
       <AnimatePresence>{openFile && <FilePane key={openFile.path} session={box.name} file={openFile} onClose={() => setOpenFile(null)} />}</AnimatePresence>
       </div>
 

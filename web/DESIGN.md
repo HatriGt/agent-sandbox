@@ -251,3 +251,17 @@ is invented: no analytics, no cost, no history beyond this browser's own session
   rows say "gone in 20m" / "destroyed in 20m", kept rows say "kept"; Fleet has "Destroy N sleeping".
 - **No stale shells**: `index.html` is `no-store`, hashed assets immutable; router `errorElement`
   renders the same recovery screen as the ErrorBoundary.
+
+## Round: quiet work lines, link chips, PR column (2026-08-27)
+
+- **Tool groups** are a disclosure line, not a pill: `› Worked · 4 steps · 2 files · 1 command`
+  (live: `Working · 2/4 steps` with a breathing dot). Open → numbered timeline. Prose stays prose.
+- **Links** in agent prose render as chips (`ui/link-chip.tsx`): icon for what they point at —
+  PR (`queue-service#142`), issue, commit, file, repo, or `host/first-segment…` — plus an arrow.
+  Author-given link text is kept.
+- **Pull request** lives in its own right-hand column (`thread/PullRequestPanel.tsx`) on xl+
+  screens: tinted state header (#, repo, link out), title, Branch / Changes / Author rows. Narrower
+  screens keep the in-flow card. The transcript itself only carries the link chip.
+- **No horizontal scroll**: inline `code` in prose wraps (`overflow-wrap: anywhere`) — a 3000px
+  path in a backtick span was widening the whole thread — shell commands wrap, and the chat
+  scroller clips x-overflow as a backstop.

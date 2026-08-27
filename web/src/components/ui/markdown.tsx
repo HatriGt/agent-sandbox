@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm"
 import { normalizeBlocks } from "@/lib/markdown-normalize"
 import { isCodeBlock } from "@/lib/markdown-code"
 import { CodeBlock, CodeBlockCode } from "./code-block"
+import { LinkChip } from "./link-chip"
 
 export type MarkdownProps = {
   children: string
@@ -43,7 +44,7 @@ const INITIAL_COMPONENTS: Partial<Components> = {
             // A tinted chip, not the invisible near-white fill this used to carry. Claude's inline
             // code is a subtle bg + a distinct accent text colour; we mirror that with our tokens so
             // `inline code` reads as code against prose in both themes.
-            "font-mono",
+            "font-mono [overflow-wrap:anywhere] whitespace-pre-wrap",
             className
           )}
           {...props}
@@ -63,6 +64,12 @@ const INITIAL_COMPONENTS: Partial<Components> = {
   },
   pre: function PreComponent({ children }) {
     return <>{children}</>
+  },
+  // Every link — typed `[text](url)` or an autolinked bare URL — renders as a chip with an icon for
+  // what it points at and a short label (`queue-service#142`, `github.com/acme/…`).
+  a: function LinkComponent({ href, children }) {
+    if (!href) return <>{children}</>
+    return <LinkChip href={href}>{children}</LinkChip>
   },
 }
 

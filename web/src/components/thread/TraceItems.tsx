@@ -1,5 +1,5 @@
 import * as React from "react";
-import { AlertTriangle, Brain, Check, ChevronRight, Circle, CircleDot, Clock, FilePen, FilePlus2, FileText, Globe, ListChecks, Loader2, MessageCircleQuestion, Search, Terminal, Wrench } from "lucide-react";
+import { AlertTriangle, Brain, Check, ChevronRight, Circle, CircleDot, Clock, FileText, Loader2, MessageCircleQuestion, Terminal } from "lucide-react";
 import type { PlanItem as PlanStep } from "@/lib/trace";
 import { resultSummary, type TraceEvent } from "@/lib/trace";
 import { parseQuestion } from "@/lib/question";
@@ -45,26 +45,11 @@ function ToolItem({ event, live }: { event: ToolEvent; live?: boolean }) {
   return SHELL_TOOLS.has(event.name) ? <ShellItem event={event} live={live} /> : <StepItem event={event} live={live} />;
 }
 
-/** One glyph per tool family, so a folded group reads as "what kind of work" before you open it. */
-function toolIcon(name: string) {
-  const n = name.toLowerCase();
-  if (SHELL_TOOLS.has(name)) return Terminal;
-  if (n === "write" || n === "notebookedit") return FilePlus2;
-  if (n === "edit" || n === "multiedit") return FilePen;
-  if (n === "read") return FileText;
-  if (n === "glob" || n === "grep" || n === "search" || n === "ls") return Search;
-  if (n.startsWith("web")) return Globe;
-  if (n === "todowrite" || n === "task") return ListChecks;
-  return Wrench;
-}
-
 /**
- * Consecutive tool calls fold into one "steps" row that expands to the individual panels — the
- * thread reads as prose punctuated by work, not a wall of tool rows. A single tool renders inline.
- *
- * Folded: a stack of family glyphs, "N steps", then a chip per tool name with its count, a failure
- * badge, and the chevron. Open: a numbered timeline with a connector line; each node completes as
- * its result lands. `live` marks the in-progress turn: tools without a result are still running.
+ * Consecutive tool calls fold into one quiet disclosure line — `› Worked · 4 steps · 3 files` — the
+ * way a good transcript summarises effort without interrupting the prose. Open, it becomes a
+ * numbered timeline of the individual calls. While the turn is live it reads `Working · 2/4 steps`
+ * with a breathing dot; failures surface as a red count. A single tool renders inline.
  */
 export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolean }) {
   // Results worth reading (a test run, a PR URL) must not hide behind the fold: open those groups.
@@ -81,9 +66,16 @@ export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolea
   const done = events.filter((e) => !!e.result).length;
   if (events.length === 1) return <ToolItem event={events[0]} live={anyRunning} />;
 
-  const counts = new Map<string, number>();
-  for (const e of events) counts.set(e.name, (counts.get(e.name) ?? 0) + 1);
-  const families = [...new Set(events.map((e) => toolIcon(e.name)))].slice(0, 3);
+  // Files touched (Write/Edit targets) and commands run — the two facts worth a glance.
+  const files = new Set(events.filter((e) => /^(write|edit|multiedit|notebookedit)$/i.test(e.name) && e.arg).map((e) => e.arg!.split(/\s/)[0]));
+  const commands = events.filter((e) => SHELL_TOOLS.has(e.name)).length;
+  const reads = events.filter((e) => /^(read|glob|grep|search|ls|webfetch|websearch)$/i.test(e.name)).length;
+  const facts = [
+    `${events.length} steps`,
+    files.size ? `${files.size} ${files.size === 1 ? "file" : "files"}` : null,
+    commands ? `${commands} ${commands === 1 ? "command" : "commands"}` : null,
+    !files.size && !commands && reads ? `${reads} lookups` : null,
+  ].filter(Boolean) as string[];
 
   return (
     <div className="enter min-w-0">
@@ -92,55 +84,36 @@ export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolea
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         className={cn(
-          "group/steps flex max-w-full cursor-pointer items-center gap-2.5 rounded-full border py-1 pr-2.5 pl-1.5 text-left text-meta transition-[background-color,border-color,box-shadow] duration-200",
-          anyRunning
-            ? "border-live/30 bg-live/6 text-foreground shadow-[0_0_0_3px_oklch(0.62_0.19_255/0.08)]"
-            : open
-              ? "bg-muted/60 border-line-strong text-foreground"
-              : "text-muted-foreground hover:text-foreground hover:bg-muted hover:border-line-strong bg-card"
+          "group/steps -ml-1.5 flex max-w-full cursor-pointer items-center gap-2 rounded-md py-1 pr-2 pl-1.5 text-left text-meta transition-colors",
+          anyRunning ? "text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
         )}
       >
-        {/* Family glyph stack — overlapping discs, like avatars. */}
-        <span className="flex -space-x-1.5">
-          {families.map((Icon, i) => (
-            <span
-              key={i}
-              className={cn(
-                "ring-card grid size-5 place-items-center rounded-full ring-2 transition-transform duration-200 group-hover/steps:translate-x-0",
-                anyRunning ? "bg-live/15 text-live" : "bg-muted text-foreground/70"
-              )}
-              style={{ zIndex: families.length - i }}
-            >
-              <Icon className="size-3" aria-hidden />
-            </span>
-          ))}
-        </span>
-        <span className="font-medium tabular-nums">
-          {anyRunning ? (
-            <span className="inline-flex items-center gap-1.5">
-              <Loader2 className="text-live size-3.5 animate-spin" aria-hidden />
-              {done}/{events.length} steps
-            </span>
-          ) : (
-            `${events.length} steps`
-          )}
-        </span>
-        <span className="hidden min-w-0 items-center gap-1 sm:flex">
-          {[...counts.entries()].slice(0, 4).map(([name, n]) => (
-            <span key={name} className="bg-muted text-muted-foreground stamp rounded-md px-1.5 py-px">
-              {name}
-              {n > 1 && <span className="opacity-60"> ×{n}</span>}
-            </span>
-          ))}
-          {counts.size > 4 && <span className="stamp text-muted-foreground/70">+{counts.size - 4}</span>}
-        </span>
-        {failed > 0 && !anyRunning && (
-          <span className="bg-destructive/10 text-destructive label rounded-md px-1.5 py-px">{failed} failed</span>
-        )}
         <ChevronRight
-          className={cn("ml-0.5 size-3.5 shrink-0 transition-transform duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]", open && "rotate-90")}
+          className={cn("size-3.5 shrink-0 transition-transform duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]", open && "rotate-90")}
           aria-hidden
         />
+        {anyRunning ? (
+          <span className="flex items-center gap-2 font-medium">
+            <span className="bg-live breathe size-1.5 rounded-full" aria-hidden />
+            Working
+            <span className="text-muted-foreground font-normal tabular-nums">
+              {done}/{events.length} steps
+            </span>
+          </span>
+        ) : (
+          <span className="font-medium">Worked</span>
+        )}
+        {!anyRunning && (
+          <span className="stamp text-muted-foreground min-w-0 truncate">
+            {facts.map((f, i) => (
+              <React.Fragment key={f}>
+                {i > 0 && <span className="mx-1 opacity-50">·</span>}
+                {f}
+              </React.Fragment>
+            ))}
+          </span>
+        )}
+        {failed > 0 && !anyRunning && <span className="text-destructive stamp">{failed} failed</span>}
       </button>
       <AnimatePresence initial={false}>
         {open && (
@@ -149,7 +122,7 @@ export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolea
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-            className="relative mt-2 overflow-hidden pl-1"
+            className="relative mt-1.5 overflow-hidden pl-0.5"
           >
             {events.map((e, i) => {
               const running = !!live && !e.result;
@@ -160,13 +133,12 @@ export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolea
                   initial={{ opacity: 0, x: -4 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ duration: 0.18, delay: Math.min(i, 8) * 0.03 }}
-                  className="relative flex gap-3 pb-2.5 last:pb-0"
+                  className="relative flex gap-3 pb-2 last:pb-0"
                 >
-                  {/* Node + connector */}
-                  <span className="relative flex w-5 shrink-0 flex-col items-center">
+                  <span className="relative flex w-4 shrink-0 flex-col items-center">
                     <span
                       className={cn(
-                        "z-10 mt-1.5 grid size-4 place-items-center rounded-full border text-[9px] font-semibold tabular-nums",
+                        "z-10 mt-2 grid size-3.5 place-items-center rounded-full border text-[8.5px] font-semibold tabular-nums",
                         running
                           ? "border-live bg-live/15 text-live"
                           : e.failed
@@ -176,7 +148,7 @@ export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolea
                     >
                       {running ? <span className="bg-live size-1.5 animate-pulse rounded-full" /> : e.failed ? "!" : i + 1}
                     </span>
-                    {!last && <span className="bg-border absolute top-5 bottom-0 w-px" aria-hidden />}
+                    {!last && <span className="bg-border absolute top-[1.4rem] bottom-0 w-px" aria-hidden />}
                   </span>
                   <div className="min-w-0 flex-1">
                     <ToolItem event={e} live={running} />
@@ -246,7 +218,7 @@ function ShellItem({ event, live }: { event: ToolEvent; live?: boolean }) {
             </button>
           )}
         </div>
-        <pre className="text-trace-fg overflow-x-auto px-3 py-2 font-mono text-micro leading-relaxed">
+        <pre className="text-trace-fg px-3 py-2 font-mono text-micro leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere]">
           <span className="text-ok mr-2 shrink-0 select-none" aria-hidden>
             $
           </span>
