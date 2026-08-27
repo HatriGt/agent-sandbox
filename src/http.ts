@@ -849,7 +849,7 @@ app.put("/file.json", async (req: Request, res: Response) => {
     const dir = abs.slice(0, abs.lastIndexOf("/"));
     // The body streams over stdin: argv would overflow (E2BIG) on anything larger than an icon.
     await execWithInput(cfg, session, `mkdir -p ${q(dir)} && base64 -d > ${q(abs)} && wc -c < ${q(abs)}`, b64);
-    res.json({ ok: true, path: safe.relPath, bytes: isB64 ? Math.floor((b64.replace(/\s/g, "").length * 3) / 4) : Buffer.byteLength(content, "utf8") });
+    res.json({ ok: true, path: safe.relPath, bytes: isB64 ? Buffer.from(b64, "base64").length : Buffer.byteLength(content, "utf8") });
   } catch (e) {
     res.status(422).json({ error: String((e as Error).message ?? e).slice(-400) });
   }
