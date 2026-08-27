@@ -164,6 +164,16 @@ export async function exec(cfg: Config, box: string, sh: string) {
   return msb(cfg, ["exec", box, "--", "sh", "-lc", sh]);
 }
 
+/**
+ * Like `exec`, but the payload travels on stdin (ssh → msb exec → the command), not in argv. A shell
+ * argument is capped at ~128 KB by the kernel and the ssh remote command is one argument, so file
+ * contents — a pasted screenshot, an edited source file — must stream. `msb exec` forwards stdin.
+ */
+export async function execWithInput(cfg: Config, box: string, sh: string, input: string) {
+  const remoteCmd = [cfg.msb, "exec", box, "--", "sh", "-lc", sh].map(shellQuote).join(" ");
+  return run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, remoteCmd], { input });
+}
+
 // ----- Warm pool -------------------------------------------------------------------------
 // Pool boxes are pre-booted from the snapshot with OPEN egress and pre-bootstrapped (claude+gh
 // + git/gh auth + npm). Claiming one = copy the repo in, skipping the ~4s boot + bootstrap.

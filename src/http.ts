@@ -31,7 +31,7 @@ import { makeFleetReader } from "./fleet.js";
 import { Inbox, startInboxDelivery } from "./inbox.js";
 import { makeCredentialBroker } from "./broker.js";
 import { makeFileIndex } from "./files.js";
-import { exec as execInBox } from "./msb.js";
+import { exec as execInBox, execWithInput } from "./msb.js";
 import { loadStore, saveStore, pickDefaultAccount, upsertAccount, removeAccount, setDefaultAccount } from "./gh-token-store.js";
 import { probeToken } from "./gh-probe.js";
 import { viewAccounts, deviceStart, devicePoll } from "./accounts.js";
@@ -847,7 +847,8 @@ app.put("/file.json", async (req: Request, res: Response) => {
     const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
     const abs = `/workspace/${safe.relPath}`;
     const dir = abs.slice(0, abs.lastIndexOf("/"));
-    await execInBox(cfg, session, `mkdir -p ${q(dir)} && printf '%s' ${q(b64)} | base64 -d > ${q(abs)} && wc -c < ${q(abs)}`);
+    // The body streams over stdin: argv would overflow (E2BIG) on anything larger than an icon.
+    await execWithInput(cfg, session, `mkdir -p ${q(dir)} && base64 -d > ${q(abs)} && wc -c < ${q(abs)}`, b64);
     res.json({ ok: true, path: safe.relPath, bytes: isB64 ? Math.floor((b64.replace(/\s/g, "").length * 3) / 4) : Buffer.byteLength(content, "utf8") });
   } catch (e) {
     res.status(422).json({ error: String((e as Error).message ?? e).slice(-400) });
