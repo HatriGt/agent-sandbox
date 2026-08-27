@@ -9,7 +9,7 @@
  *      `x-access-token:…@`, `Bearer …`, OpenAI/Slack/AWS/GitLab/npm key shapes, `password=` pairs).
  *      Catches tokens we don't hold (the agent found one in a repo or an env dump).
  *
- * Replacement keeps a short tail (`ghp_…jXIw`) so the operator can still tell WHICH credential leaked
+ * Replacement keeps a short tail (`ghp_…ABCD`) so the operator can still tell WHICH credential leaked
  * without being able to use it. Pure functions; the http layer wires them in front of the log paths.
  */
 

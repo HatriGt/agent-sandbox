@@ -107,5 +107,5 @@ A sandbox run printed `git remote -v`, and the remote carried the clone token
    env/header secrets, npm token, dashboard bearer) are replaced wherever they appear, plus anything
    credential-shaped (`ghp_…`, `github_pat_…`, `user:secret@host`, `Bearer …`, `sk-…`, `AKIA…`,
    `xox…`, `glpat-…`, `npm_…`, `*_PASSWORD=…`). A 4-char tail is kept so the operator can tell WHICH
-   credential leaked (`ghp_…jXIw`) without being able to use it. The known list refreshes lazily
+   credential leaked (`ghp_…ABCD`) without being able to use it. The known list refreshes lazily
    (60s) and a failing refresh keeps the previous list — redaction never blocks a read.
