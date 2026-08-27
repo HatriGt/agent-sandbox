@@ -216,13 +216,19 @@ export function decideAccess(candidates: Account[], repo: string): AccessDecisio
 
 // ----- VPS-backed I/O (over SSH) -------------------------------------------------------------
 
+// Same SSH hop as the MCP store: cache briefly, refresh on every write.
+const CACHE_TTL_MS = 60_000;
+let cached: { raw: string; at: number } | null = null;
+
 /** Load the store from the VPS (empty store if the file doesn't exist yet). */
 export async function loadStore(cfg: Config): Promise<TokenStore> {
+  if (cached && Date.now() - cached.at < CACHE_TTL_MS) return parseStore(cached.raw);
   const r = await run(
     "ssh",
     [...sshMuxOpts(cfg), cfg.vpsSsh, `cat ${STORE_PATH} 2>/dev/null || true`],
     { check: false }
   );
+  cached = { raw: r.stdout ?? "", at: Date.now() };
   return parseStore(r.stdout ?? "");
 }
 
@@ -234,4 +240,5 @@ export async function saveStore(cfg: Config, store: TokenStore): Promise<void> {
     `printf '%s' ${shellQuote(json)} > ${STORE_PATH}.tmp && chmod 600 ${STORE_PATH}.tmp && ` +
     `mv ${STORE_PATH}.tmp ${STORE_PATH}`;
   await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, remote]);
+  cached = { raw: json, at: Date.now() };
 }

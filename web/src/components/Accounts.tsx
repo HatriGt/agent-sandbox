@@ -7,6 +7,7 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Bar } from "@/components/thread/Skeletons";
 import { cn } from "@/lib/utils";
+import { useCached } from "@/lib/cache";
 
 /**
  * GitHub accounts as a compact list: avatar · login · default star · masked token · orgs, with the
@@ -14,22 +15,13 @@ import { cn } from "@/lib/utils";
  * controller has an OAuth client id; paste a token). Field-level hints live in the dialog.
  */
 export function Accounts({ embedded = false, query = "", onCount }: { embedded?: boolean; query?: string; onCount?: (n: number) => void }) {
-  const [accounts, setAccounts] = React.useState<AccountView[] | null>(null);
-  const [oauth, setOauth] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
+  // Painted from the cache instantly, refreshed in the background (see lib/cache.ts).
+  const cached = useCached("accounts", (signal) => api.accounts(signal));
+  const accounts = cached.data?.accounts ?? null;
+  const oauth = cached.data?.oauth ?? false;
+  const error = cached.error;
+  const setAccounts = React.useCallback((list: AccountView[]) => cached.setData((d) => ({ oauth: d?.oauth ?? false, accounts: list })), [cached]);
   const [adding, setAdding] = React.useState(false);
-
-  const load = React.useCallback(() => {
-    api
-      .accounts()
-      .then((r) => {
-        setAccounts(r.accounts);
-        setOauth(r.oauth);
-        setError(null);
-      })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
-  }, []);
-  React.useEffect(load, [load]);
   React.useEffect(() => {
     if (accounts) onCount?.(accounts.length);
   }, [accounts, onCount]);

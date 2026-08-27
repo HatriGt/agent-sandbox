@@ -9,6 +9,7 @@
  * `mcp-session-id` header so multiple clients don't cross wires.
  */
 import express, { type Request, type Response } from "express";
+import compression from "compression";
 import { randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -33,7 +34,7 @@ import { loadStore, saveStore, pickDefaultAccount, upsertAccount, removeAccount,
 import { probeToken } from "./gh-probe.js";
 import { viewAccounts, deviceStart, devicePoll } from "./accounts.js";
 import { makeRepoLister, fetchGithubRepos, matchRepos, inferRepos, attachRepoToBox } from "./repos.js";
-import { loadMcpStore, saveMcpStore, normalizeServer, parseMcpImport, viewServers, type McpServer as McpServerDef } from "./mcp-store.js";
+import { loadMcpStore, saveMcpStore, normalizeServer, parseMcpImport, viewServers, toEditableConfig, replaceFromJson, mergeSecrets, type McpServer as McpServerDef } from "./mcp-store.js";
 import { listClaims, listKept, markKept, unmarkKept } from "./claims.js";
 import { listChanges, readDiff, fetchPull } from "./changes.js";
 import { loadRunMetas, saveRunMeta, forgetRunMeta } from "./run-memory.js";
@@ -62,6 +63,13 @@ app.use((req: Request, res: Response, next) => {
   next();
 });
 
+// gzip/brotli for JSON and the SPA — but never for the streams (SSE and the MCP transport), which
+// must flush every event as it happens.
+app.use(
+  compression({
+    filter: (req, res) => (req.path.endsWith(".sse") || req.path.startsWith("/mcp") ? false : compression.filter(req, res)),
+  })
+);
 app.use(express.json());
 
 // One shared tail loop per watched box (see watch-hub.ts): every SSE viewer, /watch.json call and
@@ -557,7 +565,8 @@ app.post("/repos/attach.json", async (req: Request, res: Response) => {
 app.get("/mcp-servers.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   try {
-    res.json({ servers: viewServers(await loadMcpStore(cfg)) });
+    const store = await loadMcpStore(cfg);
+    res.json({ servers: viewServers(store), config: toEditableConfig(store) });
   } catch (e) {
     res.status(500).json({ error: String((e as Error).message ?? e) });
   }
@@ -575,25 +584,24 @@ app.post("/mcp-servers.json", async (req: Request, res: Response) => {
       if (previous && previous !== s.name && store.servers[previous]) {
         const old = store.servers[previous];
         s.addedAt = old.addedAt;
-        s.env = s.env ?? old.env;
-        s.headers = s.headers ?? old.headers;
+        s.env = mergeSecrets(s.env, old.env) ?? old.env;
+        s.headers = mergeSecrets(s.headers, old.headers) ?? old.headers;
         delete store.servers[previous];
       }
       // Keep secret values the form left masked/blank: merge over the stored entry.
-      const prev = store.servers[s.name] ?? (previous ? undefined : undefined);
+      const prev = store.servers[s.name];
       if (prev) {
         s.addedAt = prev.addedAt;
-        for (const k of ["env", "headers"] as const) {
-          const incoming = s[k] ?? {};
-          const kept = prev[k] ?? {};
-          const merged: Record<string, string> = {};
-          for (const [key, v] of Object.entries(incoming)) merged[key] = v && !/…/.test(v) && v !== "••••" ? v : (kept[key] ?? "");
-          if (Object.keys(merged).length) s[k] = merged;
-        }
+        s.env = mergeSecrets(s.env, prev.env);
+        s.headers = mergeSecrets(s.headers, prev.headers);
       }
       store.servers[s.name] = s;
     } else if (action === "import") {
       for (const s of parseMcpImport(String(body.json ?? ""))) store.servers[s.name] = s;
+    } else if (action === "replace") {
+      // The JSON editor saved the whole config.
+      const next = replaceFromJson(store, String(body.json ?? ""));
+      store.servers = next.servers;
     } else if (action === "remove") {
       delete store.servers[String(body.name ?? "")];
     } else if (action === "toggle") {
@@ -604,7 +612,7 @@ app.post("/mcp-servers.json", async (req: Request, res: Response) => {
       return;
     }
     await saveMcpStore(cfg, store);
-    res.json({ servers: viewServers(store) });
+    res.json({ servers: viewServers(store), config: toEditableConfig(store) });
   } catch (e) {
     res.status(400).json({ error: String((e as Error).message ?? e) });
   }

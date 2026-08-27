@@ -1,279 +1,251 @@
 import * as React from "react";
-import { Braces, Check, KeyRound, Loader2, Pencil, Plug, Plus, SearchX, Trash2, X } from "lucide-react";
+import { Braces, Check, ChevronDown, Copy, KeyRound, List, Loader2, Plus, RotateCcw, Search, Trash2, WandSparkles, X } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
-import { api, type McpServerView, type McpTransport } from "@/lib/api";
+import { api, type McpServersResponse, type McpServerView, type McpTransport } from "@/lib/api";
+import { useCached } from "@/lib/cache";
+import { BrandGlyph } from "@/lib/brandIcon";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Bar } from "@/components/thread/Skeletons";
-import { BrandIcon } from "@/lib/brandIcon";
+import { JsonEditor, jsonErrorLine } from "@/components/JsonEditor";
 import { cn } from "@/lib/utils";
 
-export type McpFilter = "all" | "enabled" | "disabled" | "stdio" | "remote";
-
 /**
- * MCP servers as a dense table: brand tile · name (+ transport) · target · secret keys · on/off ·
- * edit · remove. The parent owns search and filter; this list reports its counts back up. Editing
- * opens the same form as adding, prefilled, and renaming moves the entry (secrets are kept unless
- * you type new ones — the masked values never round-trip).
+ * MCP servers, two ways to look at the same store:
+ *
+ *   List — one row per server (brand glyph · name · transport · target · env count · switch). A row
+ *          opens in place into an editor: name, transport, command + args, URL, env and headers as
+ *          key/value rows. Secret values arrive masked; leaving one alone keeps what is stored.
+ *   JSON — the whole config as the `{"mcpServers": …}` file every IDE speaks, in a real editor
+ *          (gutter, colours, error line). Format, copy, reset, save. Saving replaces the store;
+ *          masked secrets that were not touched survive.
  */
-export function McpServers({ query = "", filter = "all", onCount }: { query?: string; filter?: McpFilter; onCount?: (total: number, enabled: number) => void }) {
-  const [servers, setServers] = React.useState<McpServerView[] | null>(null);
-  const [error, setError] = React.useState<string | null>(null);
-  const [dialog, setDialog] = React.useState<{ mode: "add" } | { mode: "edit"; server: McpServerView } | null>(null);
+type View = "list" | "json";
+type Filter = "all" | "on" | "off";
+const MASKED = /^(••••|.{2}….{3})$/;
 
-  React.useEffect(() => {
-    api
-      .mcpServers()
-      .then((r) => setServers(r.servers))
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
-  }, []);
-  React.useEffect(() => {
-    if (servers) onCount?.(servers.length, servers.filter((s) => s.enabled).length);
-  }, [servers, onCount]);
+export function McpServers() {
+  const cached = useCached("mcp", (signal) => api.mcpServers(signal));
+  const servers = cached.data?.servers ?? null;
+  const config = cached.data?.config ?? null;
+  const [view, setView] = React.useState<View>("list");
+  const [filter, setFilter] = React.useState<Filter>("all");
+  const [query, setQuery] = React.useState("");
+  const [open, setOpen] = React.useState<string | null>(null); // row being edited, or "__new__"
 
-  const mutate = async (body: Record<string, unknown>, ok?: string) => {
-    const r = await api.mcpMutate(body);
-    setServers(r.servers);
-    if (ok) toast.success(ok);
-  };
+  const mutate = React.useCallback(
+    async (body: Record<string, unknown>, ok?: string) => {
+      const r = await api.mcpMutate(body);
+      cached.setData(r);
+      if (ok) toast.success(ok);
+      return r;
+    },
+    [cached]
+  );
 
   const q = query.trim().toLowerCase();
   const visible = (servers ?? []).filter((s) => {
-    if (filter === "enabled" && !s.enabled) return false;
-    if (filter === "disabled" && s.enabled) return false;
-    if (filter === "stdio" && s.type !== "stdio") return false;
-    if (filter === "remote" && s.type === "stdio") return false;
+    if (filter === "on" && !s.enabled) return false;
+    if (filter === "off" && s.enabled) return false;
     if (!q) return true;
     return [s.name, s.type, s.command, ...(s.args ?? []), s.url, ...Object.keys(s.env ?? {}), ...Object.keys(s.headers ?? {})].filter(Boolean).join(" ").toLowerCase().includes(q);
   });
+  const onCount = servers?.filter((s) => s.enabled).length ?? 0;
 
   return (
-    <div>
-      <div className="bg-card overflow-hidden rounded-xl border">
-        {error && (
-          <p role="alert" className="text-destructive border-b px-4 py-3 text-meta">
-            {error}
-          </p>
+    <section aria-labelledby="mcp-h">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <h2 id="mcp-h" className="text-foreground text-h3 font-semibold tracking-[-0.01em]">
+          MCP servers
+        </h2>
+        {servers && (
+          <span className="text-muted-foreground text-meta">
+            {servers.length} · {onCount} on
+          </span>
         )}
-        {servers === null ? (
-          <div className="divide-y">
-            {[0, 1, 2].map((i) => (
-              <div key={i} className="flex items-center gap-3 px-4 py-3">
-                <Bar className="size-9 rounded-lg" />
-                <Bar className="h-3 w-24" />
-                <Bar className="h-2.5 w-56" />
-                <Bar className="ml-auto h-5 w-9 rounded-full" />
-              </div>
-            ))}
-          </div>
-        ) : servers.length === 0 ? (
-          <Empty icon={<Plug className="size-5" />} title="No MCP servers yet" line="The agent already has shell, files, GitHub and the web. Add Jira, Slack, a database…" action={<Button size="sm" onClick={() => setDialog({ mode: "add" })}><Plus />Add server</Button>} />
-        ) : visible.length === 0 ? (
-          <Empty icon={<SearchX className="size-5" />} title="Nothing matches" line={q ? `No server matches “${query.trim()}”${filter !== "all" ? ` in ${filter}` : ""}.` : `No ${filter} servers.`} />
-        ) : (
-          <table className="w-full table-fixed border-collapse text-left">
-            <thead className="sr-only">
-              <tr>
-                <th>Server</th>
-                <th>Target</th>
-                <th>Secrets</th>
-                <th>Enabled</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y">
-              {visible.map((s) => (
-                <ServerRow key={s.name} server={s} onMutate={mutate} onEdit={() => setDialog({ mode: "edit", server: s })} />
-              ))}
-            </tbody>
-          </table>
-        )}
-        {servers !== null && servers.length > 0 && (
-          <div className="bg-muted/40 flex items-center justify-between gap-3 border-t px-4 py-2">
-            <span className="text-muted-foreground text-micro">
-              {visible.length === servers.length ? `${servers.length} server${servers.length === 1 ? "" : "s"}` : `${visible.length} of ${servers.length}`} · {servers.filter((s) => s.enabled).length} on
-            </span>
-            <Button size="sm" onClick={() => setDialog({ mode: "add" })}>
-              <Plus />
-              Add server
-            </Button>
-          </div>
-        )}
-      </div>
-
-      <Dialog open={dialog !== null} onOpenChange={(o) => !o && setDialog(null)}>
-        {dialog?.mode === "add" && (
-          <DialogContent title="Add an MCP server" description="Available to the agent inside every sandbox from its next run or turn. Secrets stay on your server and are never shown again.">
-            <AddServer onMutate={mutate} onDone={() => setDialog(null)} />
-          </DialogContent>
-        )}
-        {dialog?.mode === "edit" && (
-          <DialogContent title={`Edit ${dialog.server.name}`} description="Rename, change the command or URL, or replace secrets. Leave a secret field empty to keep the stored value.">
-            <ServerForm initial={dialog.server} onMutate={mutate} onDone={() => setDialog(null)} />
-          </DialogContent>
-        )}
-      </Dialog>
-    </div>
-  );
-}
-
-function Empty({ icon, title, line, action }: { icon: React.ReactNode; title: string; line: string; action?: React.ReactNode }) {
-  return (
-    <div className="flex flex-col items-center px-6 py-10 text-center">
-      <span className="bg-muted text-muted-foreground grid size-10 place-items-center rounded-lg">{icon}</span>
-      <p className="text-foreground mt-3 text-body font-medium">{title}</p>
-      <p className="text-muted-foreground mt-1 max-w-sm text-meta">{line}</p>
-      {action && <div className="mt-4">{action}</div>}
-    </div>
-  );
-}
-
-function ServerRow({ server: s, onMutate, onEdit }: { server: McpServerView; onMutate: (b: Record<string, unknown>, ok?: string) => Promise<void>; onEdit: () => void }) {
-  const [armed, setArmed] = React.useState(false);
-  const [busy, setBusy] = React.useState(false);
-  React.useEffect(() => {
-    if (!armed) return;
-    const t = window.setTimeout(() => setArmed(false), 4000);
-    return () => window.clearTimeout(t);
-  }, [armed]);
-  const run = (b: Record<string, unknown>, ok?: string) => {
-    setBusy(true);
-    onMutate(b, ok)
-      .catch((e: unknown) => toast.error("Could not update", { description: e instanceof Error ? e.message : String(e) }))
-      .finally(() => {
-        setBusy(false);
-        setArmed(false);
-      });
-  };
-  const target = s.type === "stdio" ? [s.command, ...(s.args ?? [])].join(" ") : s.url ?? "";
-  const keys = [...Object.keys(s.env ?? {}), ...Object.keys(s.headers ?? {})];
-  return (
-    <tr className={cn("group transition-colors", !s.enabled && "text-muted-foreground")}>
-      <td className="w-[42%] py-2.5 pl-3 pr-2 align-middle sm:w-[32%]">
-        <div className="flex items-center gap-3">
-          <BrandIcon hint={`${s.name} ${target}`} transport={s.type} className={cn(!s.enabled && "opacity-50 grayscale")} />
-          <div className="min-w-0">
-            <p className={cn("truncate text-body font-medium", s.enabled ? "text-foreground" : "text-muted-foreground")}>{s.name}</p>
-            <p className="label text-muted-foreground whitespace-nowrap">{s.type === "stdio" ? "stdio · local" : `${s.type} · remote`}</p>
-          </div>
-        </div>
-      </td>
-      <td className="hidden py-2.5 pr-2 align-middle sm:table-cell">
-        <p className="stamp text-muted-foreground truncate" title={target}>
-          {target}
-        </p>
-      </td>
-      <td className="hidden w-[18%] py-2.5 pr-2 align-middle md:table-cell">
-        {keys.length > 0 && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="stamp text-muted-foreground inline-flex max-w-full items-center gap-1 truncate">
-                <KeyRound className="size-3 shrink-0" aria-hidden />
-                <span className="truncate">{keys.join(", ")}</span>
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>Stored on the server, masked here</TooltipContent>
-          </Tooltip>
-        )}
-      </td>
-      <td className="w-14 py-2.5 pr-1 align-middle">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button type="button" role="switch" aria-checked={s.enabled} disabled={busy} onClick={() => run({ action: "toggle", name: s.name, enabled: !s.enabled })} className={cn("relative h-5 w-9 cursor-pointer rounded-full transition-colors", s.enabled ? "bg-live" : "bg-muted-foreground/30")} aria-label={s.enabled ? "Disable" : "Enable"}>
-              <span className={cn("bg-card absolute top-0.5 size-4 rounded-full shadow-xs transition-[left]", s.enabled ? "left-[1.125rem]" : "left-0.5")} />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>{s.enabled ? "On — given to every new run and turn" : "Off — kept, not given to the agent"}</TooltipContent>
-        </Tooltip>
-      </td>
-      <td className="w-[5.5rem] py-2.5 pr-2 align-middle">
-        <div className="flex items-center justify-end gap-0.5">
-          {armed ? (
+        <div className="ml-auto flex items-center gap-2">
+          {view === "list" && (
             <>
-              <Button size="sm" variant="destructive" onClick={() => run({ action: "remove", name: s.name }, `Removed ${s.name}`)} disabled={busy}>
-                <Trash2 /> Remove
-              </Button>
-              <Button size="icon-sm" variant="ghost" onClick={() => setArmed(false)} aria-label="Cancel">
-                <X />
-              </Button>
-            </>
-          ) : (
-            <>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button size="icon-sm" variant="ghost" onClick={onEdit} aria-label={`Edit ${s.name}`}>
-                    <Pencil />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Edit or rename</TooltipContent>
-              </Tooltip>
-              <Button size="icon-sm" variant="ghost" onClick={() => setArmed(true)} aria-label={`Remove ${s.name}`}>
-                <Trash2 />
-              </Button>
+              <label className="bg-card focus-within:ring-ring flex h-8 items-center gap-1.5 rounded-md border px-2 focus-within:ring-2">
+                <Search className="text-muted-foreground size-3.5" aria-hidden />
+                <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter" aria-label="Filter servers" className="text-foreground placeholder:text-muted-foreground w-28 bg-transparent text-meta outline-none focus:w-44 transition-[width]" />
+                {query && (
+                  <button type="button" onClick={() => setQuery("")} aria-label="Clear" className="text-muted-foreground hover:text-foreground cursor-pointer">
+                    <X className="size-3.5" />
+                  </button>
+                )}
+              </label>
+              <Segmented value={filter} onChange={setFilter} options={[["all", "All"], ["on", "On"], ["off", "Off"]]} />
             </>
           )}
+          <Segmented
+            value={view}
+            onChange={setView}
+            options={[
+              ["list", <><List className="size-3.5" /> List</>],
+              ["json", <><Braces className="size-3.5" /> JSON</>],
+            ]}
+          />
+          {view === "list" && (
+            <Button size="sm" onClick={() => setOpen(open === "__new__" ? null : "__new__")}>
+              <Plus />
+              Add
+            </Button>
+          )}
         </div>
-      </td>
-    </tr>
+      </div>
+
+      {cached.error && (
+        <p role="alert" className="text-destructive mb-3 text-meta">
+          {cached.error}
+        </p>
+      )}
+
+      {view === "json" ? (
+        <JsonView config={config} onSave={(json) => mutate({ action: "replace", json }, "Configuration saved")} />
+      ) : (
+        <div className="bg-card overflow-hidden rounded-xl border">
+          <AnimatePresence initial={false}>
+            {open === "__new__" && (
+              <Expand key="new">
+                <ServerEditor onMutate={mutate} onDone={() => setOpen(null)} />
+              </Expand>
+            )}
+          </AnimatePresence>
+          {servers === null ? (
+            <ul className="divide-y">
+              {[0, 1, 2, 3].map((i) => (
+                <li key={i} className="flex items-center gap-3 px-4 py-3">
+                  <Bar className="size-4 rounded" />
+                  <Bar className="h-3 w-28" />
+                  <Bar className="h-2.5 w-64" />
+                  <Bar className="ml-auto h-5 w-9 rounded-full" />
+                </li>
+              ))}
+            </ul>
+          ) : servers.length === 0 ? (
+            <Empty title="No MCP servers yet" line="The agent already has shell, files, GitHub and the web. Add Jira, a database, your API — or paste your IDE's JSON in the JSON view." />
+          ) : visible.length === 0 ? (
+            <Empty title="Nothing matches" line={q ? `No server matches “${query.trim()}”.` : filter === "on" ? "No servers are on." : "No servers are off."} />
+          ) : (
+            <ul className="divide-y">
+              {visible.map((s) => (
+                <li key={s.name}>
+                  <ServerRow server={s} open={open === s.name} onToggleOpen={() => setOpen(open === s.name ? null : s.name)} onMutate={mutate} />
+                  <AnimatePresence initial={false}>
+                    {open === s.name && (
+                      <Expand key="edit">
+                        <ServerEditor initial={s} onMutate={mutate} onDone={() => setOpen(null)} />
+                      </Expand>
+                    )}
+                  </AnimatePresence>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </section>
   );
 }
 
-function kvParse(text: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const line of text.split("\n")) {
-    const t = line.trim();
-    if (!t || t.startsWith("#")) continue;
-    const i = t.indexOf("=");
-    if (i <= 0) continue;
-    out[t.slice(0, i).trim()] = t.slice(i + 1).trim();
-  }
-  return out;
-}
-
-function AddServer({ onMutate, onDone }: { onMutate: (b: Record<string, unknown>, ok?: string) => Promise<void>; onDone: () => void }) {
-  const [tab, setTab] = React.useState<"form" | "json">("form");
+function Segmented<T extends string>({ value, onChange, options }: { value: T; onChange: (v: T) => void; options: [T, React.ReactNode][] }) {
   return (
-    <div>
-      <div role="tablist" className="bg-muted mb-5 inline-flex h-9 items-center gap-0.5 rounded-lg p-0.5">
-        <Tab active={tab === "form"} onClick={() => setTab("form")} icon={<Plus className="size-3.5" />} label="Form" />
-        <Tab active={tab === "json"} onClick={() => setTab("json")} icon={<Braces className="size-3.5" />} label="Paste JSON" />
-      </div>
-      {tab === "form" ? <ServerForm onMutate={onMutate} onDone={onDone} /> : <JsonImport onMutate={onMutate} onDone={onDone} />}
+    <div role="radiogroup" className="bg-muted inline-flex h-8 items-center gap-0.5 rounded-md p-0.5">
+      {options.map(([k, label]) => (
+        <button key={k} type="button" role="radio" aria-checked={value === k} onClick={() => onChange(k)} className={cn("flex h-7 cursor-pointer items-center gap-1.5 rounded px-2.5 text-micro font-medium transition-colors", value === k ? "bg-card text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>
+          {label}
+        </button>
+      ))}
     </div>
   );
 }
 
-function Tab({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string }) {
+function Expand({ children }: { children: React.ReactNode }) {
   return (
-    <button type="button" role="tab" aria-selected={active} onClick={onClick} className={cn("flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-3 text-meta font-medium", active ? "bg-card text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>
-      {icon}
-      {label}
-    </button>
+    <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }} className="overflow-hidden">
+      <div className="bg-muted/30 border-b px-4 py-4">{children}</div>
+    </motion.div>
   );
 }
 
-const field = "text-foreground placeholder:text-muted-foreground bg-muted focus:ring-ring h-10 w-full rounded-md px-3 text-meta outline-none focus:ring-2";
+function Empty({ title, line }: { title: string; line: string }) {
+  return (
+    <div className="px-6 py-10 text-center">
+      <p className="text-foreground text-body font-medium">{title}</p>
+      <p className="text-muted-foreground mx-auto mt-1 max-w-md text-meta">{line}</p>
+    </div>
+  );
+}
 
-/** Add or edit. With `initial`, the form is prefilled and saves with `previousName` so renames move the entry. */
-function ServerForm({ initial, onMutate, onDone }: { initial?: McpServerView; onMutate: (b: Record<string, unknown>, ok?: string) => Promise<void>; onDone: () => void }) {
+/* ───────────────────────────── list row ───────────────────────────── */
+
+function ServerRow({ server: s, open, onToggleOpen, onMutate }: { server: McpServerView; open: boolean; onToggleOpen: () => void; onMutate: (b: Record<string, unknown>, ok?: string) => Promise<unknown> }) {
+  const [busy, setBusy] = React.useState(false);
+  const target = s.type === "stdio" ? [s.command, ...(s.args ?? [])].join(" ") : s.url ?? "";
+  const envN = Object.keys(s.env ?? {}).length;
+  const hdrN = Object.keys(s.headers ?? {}).length;
+  const toggle = () => {
+    setBusy(true);
+    onMutate({ action: "toggle", name: s.name, enabled: !s.enabled })
+      .catch((e: unknown) => toast.error("Could not update", { description: e instanceof Error ? e.message : String(e) }))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <div className={cn("group flex items-center gap-3 px-4 py-2.5 transition-colors", open ? "bg-muted/30" : "hover:bg-muted/40")}>
+      <button type="button" onClick={onToggleOpen} aria-expanded={open} className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 text-left">
+        <BrandGlyph hint={`${s.name} ${target}`} transport={s.type} className={cn(!s.enabled && "opacity-40 grayscale")} />
+        <span className={cn("shrink-0 text-body font-medium", s.enabled ? "text-foreground" : "text-muted-foreground")}>{s.name}</span>
+        <span className="label text-muted-foreground shrink-0 rounded border px-1 py-px">{s.type}</span>
+        <span className="stamp text-muted-foreground min-w-0 flex-1 truncate" title={target}>
+          {target}
+        </span>
+        {(envN > 0 || hdrN > 0) && (
+          <span className="stamp text-muted-foreground hidden shrink-0 items-center gap-1 sm:inline-flex">
+            <KeyRound className="size-3" aria-hidden />
+            {envN > 0 && `${envN} env`}
+            {envN > 0 && hdrN > 0 && " · "}
+            {hdrN > 0 && `${hdrN} hdr`}
+          </span>
+        )}
+        <ChevronDown className={cn("text-muted-foreground size-3.5 shrink-0 transition-transform", open && "rotate-180")} aria-hidden />
+      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button type="button" role="switch" aria-checked={s.enabled} disabled={busy} onClick={toggle} className={cn("relative h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors", s.enabled ? "bg-live" : "bg-muted-foreground/30")} aria-label={s.enabled ? `Disable ${s.name}` : `Enable ${s.name}`}>
+            <span className={cn("bg-card absolute top-0.5 size-4 rounded-full shadow-xs transition-[left]", s.enabled ? "left-[1.125rem]" : "left-0.5")} />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>{s.enabled ? "On — given to every new run and turn" : "Off — kept, not given to the agent"}</TooltipContent>
+      </Tooltip>
+    </div>
+  );
+}
+
+/* ───────────────────────────── inline editor ───────────────────────────── */
+
+type KV = { k: string; v: string; secret: boolean };
+const toKV = (m?: Record<string, string>): KV[] => Object.entries(m ?? {}).map(([k, v]) => ({ k, v, secret: MASKED.test(v) }));
+const fromKV = (rows: KV[]) => Object.fromEntries(rows.filter((r) => r.k.trim()).map((r) => [r.k.trim(), r.v]));
+
+function ServerEditor({ initial, onMutate, onDone }: { initial?: McpServerView; onMutate: (b: Record<string, unknown>, ok?: string) => Promise<unknown>; onDone: () => void }) {
   const [name, setName] = React.useState(initial?.name ?? "");
   const [type, setType] = React.useState<McpTransport>(initial?.type ?? "stdio");
-  const [command, setCommand] = React.useState(initial ? [initial.command, ...(initial.args ?? [])].filter(Boolean).map((p) => (/\s/.test(p!) ? JSON.stringify(p) : p)).join(" ") : "");
+  const [command, setCommand] = React.useState(initial?.command ?? "");
+  const [args, setArgs] = React.useState((initial?.args ?? []).join("\n"));
   const [url, setUrl] = React.useState(initial?.url ?? "");
-  const [env, setEnv] = React.useState("");
-  const [headers, setHeaders] = React.useState("");
+  const [env, setEnv] = React.useState<KV[]>(() => toKV(initial?.env));
+  const [headers, setHeaders] = React.useState<KV[]>(() => toKV(initial?.headers));
   const [busy, setBusy] = React.useState(false);
+  const [armed, setArmed] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
-  const storedEnv = Object.keys(initial?.env ?? {});
-  const storedHeaders = Object.keys(initial?.headers ?? {});
-  const submit = async () => {
+  const valid = name.trim() && (type === "stdio" ? command.trim() : /^https?:\/\//.test(url.trim()));
+
+  const save = async () => {
     setBusy(true);
     setErr(null);
     try {
-      const parts = (command.trim().match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? []).map((p) => p.replace(/^["']|["']$/g, ""));
-      const newEnv = kvParse(env);
-      const newHeaders = kvParse(headers);
       await onMutate(
         {
           action: "upsert",
@@ -281,12 +253,11 @@ function ServerForm({ initial, onMutate, onDone }: { initial?: McpServerView; on
           server: {
             name: name.trim(),
             type,
-            command: type === "stdio" ? parts[0] : undefined,
-            args: type === "stdio" ? parts.slice(1) : undefined,
+            command: type === "stdio" ? command.trim() : undefined,
+            args: type === "stdio" ? args.split("\n").map((a) => a.trim()).filter(Boolean) : undefined,
             url: type !== "stdio" ? url.trim() : undefined,
-            // Empty → keep what is stored (masked values never round-trip); anything typed replaces it.
-            env: Object.keys(newEnv).length || !initial ? newEnv : undefined,
-            headers: type !== "stdio" ? (Object.keys(newHeaders).length || !initial ? newHeaders : undefined) : undefined,
+            env: fromKV(env),
+            headers: type !== "stdio" ? fromKV(headers) : undefined,
             enabled: initial?.enabled ?? true,
           },
         },
@@ -299,113 +270,254 @@ function ServerForm({ initial, onMutate, onDone }: { initial?: McpServerView; on
       setBusy(false);
     }
   };
+  const remove = async () => {
+    if (!initial) return;
+    setBusy(true);
+    try {
+      await onMutate({ action: "remove", name: initial.name }, `Removed ${initial.name}`);
+      onDone();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+      setBusy(false);
+    }
+  };
+
+  const field = "text-foreground placeholder:text-muted-foreground bg-card focus:ring-ring h-9 w-full rounded-md border px-2.5 font-mono text-meta outline-none focus:ring-2";
   return (
     <form
-      className="flex flex-col gap-4"
+      className="grid gap-4"
       onSubmit={(e) => {
         e.preventDefault();
-        void submit();
+        if (valid) void save();
       }}
     >
-      <div className="grid gap-4 sm:grid-cols-[1fr_auto]">
-        <label className="flex flex-col gap-1.5">
-          <span className="label text-muted-foreground">Name</span>
-          <div className="flex items-center gap-2.5">
-            <BrandIcon hint={`${name} ${command} ${url}`} transport={type} className="size-10" />
-            <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="atlassian" className={cn(field, "font-mono")} />
+      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+        <Field label="Name">
+          <div className="flex items-center gap-2">
+            <BrandGlyph hint={`${name} ${command} ${url}`} transport={type} />
+            <input autoFocus={!initial} value={name} onChange={(e) => setName(e.target.value)} placeholder="atlassian" className={field} />
           </div>
-        </label>
-        <div className="flex flex-col gap-1.5">
-          <span className="label text-muted-foreground">Transport</span>
-          <div role="radiogroup" className="bg-muted inline-flex h-10 items-center gap-0.5 rounded-md p-0.5">
+        </Field>
+        <Field label="Transport">
+          <div role="radiogroup" className="bg-muted inline-flex h-9 items-center gap-0.5 rounded-md p-0.5">
             {(["stdio", "http", "sse"] as McpTransport[]).map((t) => (
-              <button key={t} type="button" role="radio" aria-checked={type === t} onClick={() => setType(t)} className={cn("h-9 cursor-pointer rounded px-3 text-meta font-medium", type === t ? "bg-card text-foreground shadow-xs" : "text-muted-foreground")}>
+              <button key={t} type="button" role="radio" aria-checked={type === t} onClick={() => setType(t)} className={cn("h-8 cursor-pointer rounded px-3 text-meta font-medium", type === t ? "bg-card text-foreground shadow-xs" : "text-muted-foreground")}>
                 {t}
               </button>
             ))}
           </div>
-        </div>
+        </Field>
       </div>
+
       {type === "stdio" ? (
-        <label className="flex flex-col gap-1.5">
-          <span className="label text-muted-foreground">Command</span>
-          <input value={command} onChange={(e) => setCommand(e.target.value)} placeholder="npx -y @modelcontextprotocol/server-postgres" className={cn(field, "font-mono")} />
-          <span className="text-muted-foreground text-micro">Runs inside the sandbox; arguments split on spaces (quote to keep them together).</span>
-        </label>
+        <div className="grid gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+          <Field label="Command" hint="Runs inside the sandbox.">
+            <input value={command} onChange={(e) => setCommand(e.target.value)} placeholder="npx" className={field} />
+          </Field>
+          <Field label="Arguments" hint="One per line.">
+            <textarea value={args} onChange={(e) => setArgs(e.target.value)} rows={Math.max(2, Math.min(6, args.split("\n").length))} placeholder={"-y\n@modelcontextprotocol/server-postgres"} className={cn(field, "h-auto resize-y py-1.5")} />
+          </Field>
+        </div>
       ) : (
-        <label className="flex flex-col gap-1.5">
-          <span className="label text-muted-foreground">URL</span>
-          <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://mcp.example.com/mcp" className={cn(field, "font-mono")} />
-        </label>
+        <Field label="URL">
+          <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://mcp.example.com/mcp" className={field} />
+        </Field>
       )}
-      <div className="grid gap-4 sm:grid-cols-2">
-        <label className="flex flex-col gap-1.5">
-          <span className="label text-muted-foreground">Environment</span>
-          <textarea value={env} onChange={(e) => setEnv(e.target.value)} rows={3} placeholder={storedEnv.length ? `Stored: ${storedEnv.join(", ")}\nType KEY=value to replace` : "JIRA_EMAIL=me@example.com\nJIRA_API_TOKEN=…"} className={cn(field, "h-auto resize-none py-2 font-mono")} />
-          <span className="text-muted-foreground text-micro">One KEY=value per line.</span>
-        </label>
-        {type !== "stdio" && (
-          <label className="flex flex-col gap-1.5">
-            <span className="label text-muted-foreground">Headers</span>
-            <textarea value={headers} onChange={(e) => setHeaders(e.target.value)} rows={3} placeholder={storedHeaders.length ? `Stored: ${storedHeaders.join(", ")}\nType Name=value to replace` : "Authorization=Bearer …"} className={cn(field, "h-auto resize-none py-2 font-mono")} />
-            <span className="text-muted-foreground text-micro">One Name=value per line.</span>
-          </label>
-        )}
-      </div>
+
+      <KVTable label="Environment" rows={env} onChange={setEnv} keyPlaceholder="DATABASE_URL" />
+      {type !== "stdio" && <KVTable label="Headers" rows={headers} onChange={setHeaders} keyPlaceholder="Authorization" />}
+
       {err && (
         <p className="text-destructive text-meta" role="alert">
           {err}
         </p>
       )}
-      <div className="flex justify-end">
-        <Button type="submit" disabled={busy || !name.trim() || (type === "stdio" ? !command.trim() : !url.trim())}>
-          {busy ? <Loader2 className="animate-spin" /> : <Check />}
-          {initial ? "Save changes" : "Save server"}
-        </Button>
+      <div className="flex items-center gap-2">
+        {initial &&
+          (armed ? (
+            <>
+              <Button type="button" size="sm" variant="destructive" onClick={() => void remove()} disabled={busy}>
+                <Trash2 /> Remove {initial.name}
+              </Button>
+              <Button type="button" size="sm" variant="ghost" onClick={() => setArmed(false)}>
+                Keep
+              </Button>
+            </>
+          ) : (
+            <Button type="button" size="sm" variant="ghost" onClick={() => setArmed(true)} className="text-muted-foreground hover:text-destructive">
+              <Trash2 /> Remove
+            </Button>
+          ))}
+        <div className="ml-auto flex items-center gap-2">
+          <Button type="button" size="sm" variant="ghost" onClick={onDone}>
+            Cancel
+          </Button>
+          <Button type="submit" size="sm" disabled={busy || !valid}>
+            {busy ? <Loader2 className="animate-spin" /> : <Check />}
+            {initial ? "Save" : "Add server"}
+          </Button>
+        </div>
       </div>
     </form>
   );
 }
 
-function JsonImport({ onMutate, onDone }: { onMutate: (b: Record<string, unknown>, ok?: string) => Promise<void>; onDone: () => void }) {
-  const [json, setJson] = React.useState("");
+function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <label className="flex min-w-0 flex-col gap-1.5">
+      <span className="label text-muted-foreground flex items-baseline gap-2">
+        {label}
+        {hint && <span className="font-normal normal-case tracking-normal opacity-70">{hint}</span>}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+function KVTable({ label, rows, onChange, keyPlaceholder }: { label: string; rows: KV[]; onChange: (r: KV[]) => void; keyPlaceholder: string }) {
+  const update = (i: number, patch: Partial<KV>) => onChange(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const cell = "text-foreground placeholder:text-muted-foreground bg-card focus:ring-ring h-8 w-full rounded-md border px-2 font-mono text-meta outline-none focus:ring-2";
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="label text-muted-foreground flex items-center gap-2">
+        {label}
+        {rows.length > 0 && <span className="font-normal normal-case tracking-normal opacity-70">{rows.length}</span>}
+      </span>
+      {rows.length > 0 && (
+        <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)_auto] gap-1.5">
+          {rows.map((r, i) => (
+            <React.Fragment key={i}>
+              <input value={r.k} onChange={(e) => update(i, { k: e.target.value })} placeholder={keyPlaceholder} aria-label={`${label} key ${i + 1}`} className={cell} />
+              <div className="relative">
+                <input
+                  value={r.v}
+                  onChange={(e) => update(i, { v: e.target.value, secret: false })}
+                  onFocus={(e) => r.secret && e.currentTarget.select()}
+                  placeholder="value"
+                  aria-label={`${label} value ${i + 1}`}
+                  className={cn(cell, r.secret && "text-muted-foreground pr-20")}
+                />
+                {r.secret && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="text-muted-foreground absolute top-1/2 right-2 flex -translate-y-1/2 items-center gap-1 text-micro">
+                        <KeyRound className="size-3" aria-hidden /> stored
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>Secret — shown masked. Type a new value to replace it; leave it to keep it.</TooltipContent>
+                  </Tooltip>
+                )}
+              </div>
+              <button type="button" onClick={() => onChange(rows.filter((_, j) => j !== i))} aria-label={`Remove ${r.k || "row"}`} className="text-muted-foreground hover:text-destructive grid size-8 cursor-pointer place-items-center rounded-md">
+                <X className="size-3.5" />
+              </button>
+            </React.Fragment>
+          ))}
+        </div>
+      )}
+      <button type="button" onClick={() => onChange([...rows, { k: "", v: "", secret: false }])} className="text-muted-foreground hover:text-foreground flex w-fit cursor-pointer items-center gap-1 text-micro">
+        <Plus className="size-3" aria-hidden /> Add {label.toLowerCase() === "headers" ? "header" : "variable"}
+      </button>
+    </div>
+  );
+}
+
+/* ───────────────────────────── JSON view ───────────────────────────── */
+
+function JsonView({ config, onSave }: { config: McpServersResponse["config"] | null; onSave: (json: string) => Promise<unknown> }) {
+  const pristine = React.useMemo(() => (config ? JSON.stringify(config, null, 2) : ""), [config]);
+  const [text, setText] = React.useState(pristine);
   const [busy, setBusy] = React.useState(false);
-  const [err, setErr] = React.useState<string | null>(null);
-  const submit = async () => {
-    setBusy(true);
-    setErr(null);
+  const touched = React.useRef(false);
+  // A background refresh replaces the pristine text unless you have started editing.
+  React.useEffect(() => {
+    if (!touched.current) setText(pristine);
+  }, [pristine]);
+
+  const parsed = React.useMemo(() => {
     try {
-      await onMutate({ action: "import", json }, "Imported");
-      onDone();
+      const v = JSON.parse(text) as { mcpServers?: Record<string, unknown> };
+      if (!v || typeof v !== "object" || !v.mcpServers || typeof v.mcpServers !== "object") return { error: 'Top level must be { "mcpServers": { … } }', line: 1 };
+      return { value: v, count: Object.keys(v.mcpServers).length };
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      return { error: msg, line: jsonErrorLine(text, msg) };
+    }
+  }, [text]);
+  const dirty = text !== pristine;
+
+  const format = () => {
+    if ("value" in parsed && parsed.value) setText(JSON.stringify(parsed.value, null, 2));
+  };
+  const save = async () => {
+    if (!dirty || "error" in parsed) return;
+    setBusy(true);
+    try {
+      await onSave(text);
+      touched.current = false;
+    } catch (e) {
+      toast.error("Could not save", { description: e instanceof Error ? e.message : String(e) });
     } finally {
       setBusy(false);
     }
   };
-  return (
-    <div className="flex flex-col gap-3">
-      <textarea
-        autoFocus
-        value={json}
-        onChange={(e) => setJson(e.target.value)}
-        rows={9}
-        spellCheck={false}
-        placeholder={'{\n  "mcpServers": {\n    "atlassian": {\n      "command": "npx",\n      "args": ["-y", "mcp-remote", "https://mcp.atlassian.com/v1/sse"]\n    }\n  }\n}'}
-        className="text-foreground placeholder:text-muted-foreground/60 bg-muted focus:ring-ring w-full resize-y rounded-md px-3 py-2 font-mono text-meta outline-none focus:ring-2"
-      />
-      <p className="text-muted-foreground text-micro">Accepts the `mcpServers` block from Claude Code, Cursor, VS Code or Claude Desktop. Same-name servers are replaced.</p>
-      {err && (
-        <p className="text-destructive text-meta" role="alert">
-          {err}
-        </p>
-      )}
-      <div className="flex justify-end">
-        <Button onClick={() => void submit()} disabled={busy || !json.trim()}>
-          {busy ? <Loader2 className="animate-spin" /> : <Braces />}
-          Import
-        </Button>
+
+  if (!config) {
+    return (
+      <div className="bg-card rounded-xl border p-4">
+        <Bar className="h-64 w-full" />
       </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="stamp text-muted-foreground">~/.agent-sandbox/mcp.json · Claude Code / Cursor format · `disabled: true` = off</span>
+        <div className="ml-auto flex items-center gap-1">
+          <Button size="sm" variant="ghost" onClick={format} disabled={"error" in parsed}>
+            <WandSparkles /> Format
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              void navigator.clipboard.writeText(text);
+              toast.success("Copied");
+            }}
+          >
+            <Copy /> Copy
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={!dirty}
+            onClick={() => {
+              setText(pristine);
+              touched.current = false;
+            }}
+          >
+            <RotateCcw /> Reset
+          </Button>
+          <Button size="sm" disabled={!dirty || "error" in parsed || busy} onClick={() => void save()}>
+            {busy ? <Loader2 className="animate-spin" /> : <Check />}
+            Save
+          </Button>
+        </div>
+      </div>
+      <JsonEditor
+        value={text}
+        onChange={(v) => {
+          touched.current = true;
+          setText(v);
+        }}
+        onSave={() => void save()}
+        errorLine={"error" in parsed ? parsed.line : null}
+        minRows={18}
+        className="max-h-[70vh] [&_textarea]:max-h-[70vh]"
+      />
+      <p className={cn("text-micro", "error" in parsed ? "text-destructive" : "text-muted-foreground")} role={"error" in parsed ? "alert" : undefined}>
+        {"error" in parsed ? `${parsed.error}${parsed.line ? ` (line ${parsed.line})` : ""}` : `${parsed.count} server${parsed.count === 1 ? "" : "s"}${dirty ? " · unsaved changes — ⌘S to save" : ""}. Secrets show masked; untouched ones stay as stored when you save.`}
+      </p>
     </div>
   );
 }

@@ -70,6 +70,12 @@ export interface PullInfo {
 }
 
 export type McpTransport = "stdio" | "http" | "sse";
+/** Servers for the list, plus the same data as the editable `{"mcpServers": …}` JSON (secrets masked). */
+export interface McpServersResponse {
+  servers: McpServerView[];
+  config: { mcpServers: Record<string, unknown> };
+}
+
 export interface McpServerView {
   name: string;
   type: McpTransport;
@@ -362,8 +368,8 @@ export const api = {
 
   /** MCP servers the sandbox agent gets. */
   mcpServers: (signal?: AbortSignal) =>
-    fetch(url("/mcp-servers.json"), { headers: authHeaders, signal }).then(parse<{ servers: McpServerView[] }>),
-  mcpMutate: (body: Record<string, unknown>) => post<{ servers: McpServerView[] }>("/mcp-servers.json", body),
+    fetch(url("/mcp-servers.json"), { headers: authHeaders, signal }).then(parse<McpServersResponse>),
+  mcpMutate: (body: Record<string, unknown>) => post<McpServersResponse>("/mcp-servers.json", body),
 
   /** Repositories reachable through the connected accounts, ranked for a picker. */
   repos: (q: string, refresh = false, signal?: AbortSignal) =>

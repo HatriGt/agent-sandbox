@@ -20,6 +20,7 @@ import { api, type FleetLifecycle, type FleetSnapshot } from "@/lib/api";
 import { POLL_MS, isUp, isVisible, threadSort } from "@/lib/format";
 import { legacyHashTarget, useConsoleRoute, useGo } from "@/lib/route";
 import { usePoll } from "@/hooks/usePoll";
+import { prefetch } from "@/lib/cache";
 import { useStableBoxes } from "@/hooks/useStableBoxes";
 import { useSessionRuns } from "@/hooks/useSessionRuns";
 import { useNotifications } from "@/hooks/useNotifications";
@@ -39,6 +40,12 @@ import { cn } from "@/lib/utils";
 // Secondary pages are code-split: the thread — the page you live in — never pays for them.
 const Sandboxes = React.lazy(() => import("@/components/Sandboxes").then((m) => ({ default: m.Sandboxes })));
 const Integrations = React.lazy(() => import("@/components/Integrations").then((m) => ({ default: m.Integrations })));
+/** Hovering the nav item warms the chunk and both payloads, so the page paints complete on click. */
+function prefetchIntegrations() {
+  void import("@/components/Integrations");
+  void prefetch("accounts", api.accounts).catch(() => {});
+  void prefetch("mcp", api.mcpServers).catch(() => {});
+}
 
 const NO_LIFECYCLE: FleetLifecycle = { capacity: 0, poolSize: 0 };
 const FLEET_CACHE_KEY = "asb-fleet-cache";
@@ -310,7 +317,9 @@ export default function App() {
               <RailIcon onClick={newTask} icon={<Plus />} label="New task (n)" primary />
               <RailIcon onClick={openPalette} icon={<Search />} label="Search machines (⌘K)" />
               <RailIcon active={view === "fleet"} onClick={showFleet} icon={<LayoutGrid />} label="Fleet" badge={boxes.length || undefined} dot={waiting.length > 0} />
-              <RailIcon active={view === "integrations"} onClick={showAccounts} icon={<Plug />} label="Integrations" />
+              <span className="contents" onMouseEnter={prefetchIntegrations}>
+                <RailIcon active={view === "integrations"} onClick={showAccounts} icon={<Plug />} label="Integrations" />
+              </span>
               <div className="mt-auto flex flex-col items-center gap-1.5">
                 <RailIcon onClick={() => setDark(!dark)} icon={dark ? <Moon /> : <Sun />} label={dark ? "Light theme" : "Dark theme"} />
                 <RailIcon onClick={() => setCollapsed(false)} icon={<PanelLeftOpen />} label="Expand sidebar" />
@@ -390,7 +399,9 @@ export default function App() {
 
               <div className="flex flex-col gap-0.5 border-t px-2 py-2">
                 <NavItem active={view === "fleet"} onClick={showFleet} icon={<LayoutGrid />} label="Fleet view" badge={boxes.length || undefined} shortcut="g f" />
-                <NavItem active={view === "integrations"} onClick={showAccounts} icon={<Plug />} label="Integrations" shortcut="g a" />
+                <span className="contents" onMouseEnter={prefetchIntegrations}>
+                  <NavItem active={view === "integrations"} onClick={showAccounts} icon={<Plug />} label="Integrations" shortcut="g a" />
+                </span>
                 <div className="flex items-center justify-between px-2.5 pt-1">
                   <p className="text-muted-foreground text-micro">{live ? `Updated ${freshness}` : data ? "Reconnecting…" : "Offline — retrying"}</p>
                   <div className="flex items-center">

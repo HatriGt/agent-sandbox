@@ -3,26 +3,27 @@ import { Globe, Terminal } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
- * Brand glyphs for MCP servers, guessed from the server's name/command/url (atlassian, slack,
- * postgres…), drawn from simple-icons in the brand's own colour on a tinted tile. Unknown servers
- * fall back to a transport glyph. Pure lookup; no network.
+ * Brand glyphs for MCP servers, guessed from the server's name/command/url (atlassian, linear,
+ * postgres…), drawn from simple-icons in the brand's own colour — bare glyph, no tile. Brands whose
+ * colour is near-black use the foreground colour so they survive the dark theme. Unknown servers
+ * get a transport glyph in the muted colour. Pure lookup; no network.
  */
 type Icon = { path: string; hex: string; title: string };
-// Keys are looked up loosely: simple-icons drops trademarks now and then, and a missing brand should
-// fall back to the transport glyph rather than break the build.
+// Looked up loosely: simple-icons drops trademarks now and then; a missing brand must fall back, not break.
 const BRANDS: Array<[RegExp, string]> = [
-  [/atlassian|jira|confluence/i, "siAtlassian"],
+  [/atlassian|jira|confluence|rovo/i, "siAtlassian"],
   [/slack/i, "siSlack"],
   [/github/i, "siGithub"],
   [/gitlab/i, "siGitlab"],
   [/bitbucket/i, "siBitbucket"],
-  [/postgres|pg\b/i, "siPostgresql"],
+  [/postgres|\bpg\b/i, "siPostgresql"],
   [/mysql|mariadb/i, "siMysql"],
   [/sqlite/i, "siSqlite"],
   [/mongo/i, "siMongodb"],
   [/redis/i, "siRedis"],
   [/supabase/i, "siSupabase"],
   [/snowflake/i, "siSnowflake"],
+  [/\bsap\b|hana|abap|s4|cap-js|cds/i, "siSap"],
   [/linear/i, "siLinear"],
   [/notion/i, "siNotion"],
   [/sentry/i, "siSentry"],
@@ -34,8 +35,10 @@ const BRANDS: Array<[RegExp, string]> = [
   [/kubernetes|k8s/i, "siKubernetes"],
   [/datadog/i, "siDatadog"],
   [/grafana/i, "siGrafana"],
+  [/chrome|devtools|chromium/i, "siGooglechrome"],
   [/playwright/i, "siPlaywright"],
   [/puppeteer/i, "siPuppeteer"],
+  [/draw\.?io|diagrams/i, "siDiagramsdotnet"],
   [/brave/i, "siBrave"],
   [/perplexity/i, "siPerplexity"],
   [/openai/i, "siOpenai"],
@@ -51,6 +54,8 @@ const BRANDS: Array<[RegExp, string]> = [
   [/gmail/i, "siGmail"],
   [/youtube/i, "siYoutube"],
   [/reddit/i, "siReddit"],
+  [/\bnpx\b|\bnode\b|npm/i, "siNodedotjs"],
+  [/python|\bpip\b|uvx?/i, "siPython"],
 ];
 
 export function brandFor(hint: string): Icon | null {
@@ -63,27 +68,24 @@ export function brandFor(hint: string): Icon | null {
   return null;
 }
 
-export function BrandIcon({ hint, transport, className }: { hint: string; transport?: "stdio" | "http" | "sse"; className?: string }) {
+function luminance(hex: string) {
+  const n = parseInt(hex, 16);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+}
+
+export function BrandGlyph({ hint, transport, className }: { hint: string; transport?: "stdio" | "http" | "sse"; className?: string }) {
   const b = brandFor(hint);
   if (!b) {
     const Fallback = transport === "stdio" ? Terminal : Globe;
-    return (
-      <span className={cn("bg-muted text-foreground grid size-9 shrink-0 place-items-center rounded-lg", className)}>
-        <Fallback className="size-4" aria-hidden />
-      </span>
-    );
+    return <Fallback className={cn("text-muted-foreground size-4 shrink-0", className)} aria-hidden />;
   }
-  // Very dark brand colours vanish on the dark theme; lift them onto a light tile instead.
-  const dark = parseInt(b.hex.slice(0, 2), 16) + parseInt(b.hex.slice(2, 4), 16) + parseInt(b.hex.slice(4, 6), 16) < 120;
+  const lum = luminance(b.hex);
+  // Near-black brands (GitHub, Vercel, Notion…) take the theme's foreground; near-white ones too.
+  const themed = lum < 0.18 || lum > 0.9;
   return (
-    <span
-      className={cn("grid size-9 shrink-0 place-items-center rounded-lg", dark && "dark:bg-white", className)}
-      style={{ background: dark ? undefined : `#${b.hex}1f` }}
-      title={b.title}
-    >
-      <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
-        <path d={b.path} fill={dark ? undefined : `#${b.hex}`} className={dark ? "fill-foreground dark:fill-black" : undefined} />
-      </svg>
-    </span>
+    <svg viewBox="0 0 24 24" className={cn("size-4 shrink-0", themed && "fill-foreground", className)} aria-hidden data-brand={b.title}>
+      <path d={b.path} fill={themed ? undefined : `#${b.hex}`} />
+    </svg>
   );
 }

@@ -129,28 +129,93 @@ export function toClaudeMcpConfig(store: McpStore): { mcpServers: Record<string,
   return Object.keys(mcpServers).length ? { mcpServers } : null;
 }
 
-/** What the dashboard sees: env/header VALUES masked, everything else as stored. */
+/**
+ * Which env/header keys hold secrets. Only these are masked on the way to the browser — a host,
+ * port, schema or log level is configuration the operator needs to read and edit, not a credential.
+ */
+const SECRET_KEY_RE = /(token|secret|passw|pwd|api[_-]?key|apikey|^auth$|authorization|cookie|credential|private|bearer|session|access[_-]?key|client[_-]?secret|signing)/i;
+export function isSecretKey(key: string): boolean {
+  return SECRET_KEY_RE.test(key);
+}
+
+export function mask(v: string): string {
+  return v.length <= 6 ? "••••" : `${v.slice(0, 2)}…${v.slice(-3)}`;
+}
+
+function maskMap(m: Record<string, string> | undefined): Record<string, string> | undefined {
+  if (!m) return undefined;
+  return Object.fromEntries(Object.entries(m).map(([k, v]) => [k, isSecretKey(k) ? mask(v) : v]));
+}
+
+/** What the dashboard sees: secret VALUES masked, everything else as stored. */
 export function viewServers(store: McpStore) {
   return Object.values(store.servers)
     .sort((a, b) => a.name.localeCompare(b.name))
-    .map((s) => ({
-      ...s,
-      env: s.env ? Object.fromEntries(Object.entries(s.env).map(([k, v]) => [k, mask(v)])) : undefined,
-      headers: s.headers ? Object.fromEntries(Object.entries(s.headers).map(([k, v]) => [k, mask(v)])) : undefined,
-    }));
+    .map((s) => ({ ...s, env: maskMap(s.env), headers: maskMap(s.headers) }));
 }
 
-function mask(v: string): string {
-  return v.length <= 6 ? "••••" : `${v.slice(0, 2)}…${v.slice(-3)}`;
+/**
+ * Values coming back from an editor that only ever saw masked secrets: a value equal to the mask of
+ * what is stored (or left blank) means "unchanged" and keeps the stored secret; anything else is new.
+ */
+export function mergeSecrets(incoming: Record<string, string> | undefined, prev: Record<string, string> | undefined): Record<string, string> | undefined {
+  if (!incoming) return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(incoming)) {
+    const stored = prev?.[k];
+    out[k] = stored !== undefined && (v === "" || v === mask(stored)) ? stored : v;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+/**
+ * The whole store as the JSON the IDEs speak — `{"mcpServers": {name: {...}}}` — with `disabled: true`
+ * on servers that are off (Cursor's convention) and secrets masked. This is what the JSON editor shows.
+ */
+export function toEditableConfig(store: McpStore): { mcpServers: Record<string, unknown> } {
+  const mcpServers: Record<string, unknown> = {};
+  for (const s of Object.values(store.servers).sort((a, b) => a.name.localeCompare(b.name))) {
+    mcpServers[s.name] = {
+      type: s.type,
+      ...(s.type === "stdio" ? { command: s.command, ...(s.args?.length ? { args: s.args } : {}) } : { url: s.url }),
+      ...(s.env ? { env: maskMap(s.env) } : {}),
+      ...(s.headers ? { headers: maskMap(s.headers) } : {}),
+      ...(s.enabled ? {} : { disabled: true }),
+    };
+  }
+  return { mcpServers };
+}
+
+/** Apply an edited full config: servers missing from the JSON are removed, secrets left masked survive. */
+export function replaceFromJson(store: McpStore, json: string, now = Date.now()): McpStore {
+  const servers: Record<string, McpServer> = {};
+  for (const s of parseMcpImport(json, now)) {
+    const prev = store.servers[s.name];
+    if (prev) {
+      s.addedAt = prev.addedAt;
+      s.env = mergeSecrets(s.env, prev.env);
+      s.headers = mergeSecrets(s.headers, prev.headers);
+    }
+    servers[s.name] = s;
+  }
+  return { servers };
 }
 
 /* ───────────────────────────── IO ───────────────────────────── */
 
 const STORE_PATH = '"$HOME/.agent-sandbox/mcp.json"';
 
+// The file lives on the VPS behind an SSH hop (~100–300 ms). The dashboard reads it on every visit,
+// so keep a short-lived copy in memory; writes go through here too, so the copy is never stale.
+const CACHE_TTL_MS = 60_000;
+let cached: { store: McpStore; at: number } | null = null;
+
 export async function loadMcpStore(cfg: Config): Promise<McpStore> {
+  if (cached && Date.now() - cached.at < CACHE_TTL_MS) return { servers: { ...cached.store.servers } };
   const r = await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, `cat ${STORE_PATH} 2>/dev/null || true`], { check: false });
-  return parseMcpStore(r.stdout ?? "");
+  const store = parseMcpStore(r.stdout ?? "");
+  cached = { store: { servers: { ...store.servers } }, at: Date.now() };
+  return store;
 }
 
 export async function saveMcpStore(cfg: Config, store: McpStore): Promise<void> {
@@ -159,4 +224,5 @@ export async function saveMcpStore(cfg: Config, store: McpStore): Promise<void> 
     `mkdir -p "$HOME/.agent-sandbox" && chmod 700 "$HOME/.agent-sandbox" && ` +
     `printf '%s' ${shellQuote(json)} > ${STORE_PATH}.tmp && chmod 600 ${STORE_PATH}.tmp && mv ${STORE_PATH}.tmp ${STORE_PATH}`;
   await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, remote]);
+  cached = { store: { servers: { ...store.servers } }, at: Date.now() };
 }

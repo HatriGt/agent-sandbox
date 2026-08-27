@@ -266,3 +266,16 @@ function CodeBlockGroup({
 }
 
 export { CodeBlockGroup, CodeBlockCode, CodeBlock }
+
+
+/**
+ * One-shot highlight to HTML for editors that draw their own text layer (the JSON editor): both
+ * themes as CSS variables, so `.dark` flips colours without re-highlighting. Null until the grammar
+ * is loaded, or for languages we do not bundle.
+ */
+export async function highlightHtml(code: string, language: string): Promise<string | null> {
+  const hl = await getHighlighter()
+  const lang = await ensureLang(hl, language)
+  if (!lang) return null
+  return hl.codeToHtml(code, { lang, themes: { light: "github-light", dark: "github-dark" }, defaultColor: false })
+}

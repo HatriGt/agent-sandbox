@@ -64,8 +64,10 @@ test("shiki escapes hostile code and emits only its own inert markup", { skip: !
   }
 });
 
-test("the sink is still the only one in the console", () => {
-  // If a second dangerouslySetInnerHTML appears, it needs its own audit — fail loudly here.
+test("the sinks are exactly the audited ones", () => {
+  // Both sinks render shiki's `codeToHtml` output and nothing else: code-block for markdown fences and
+  // traces, JsonEditor for the MCP config the operator types (highlightHtml in code-block.tsx). If a
+  // third appears, it needs its own audit — fail loudly here.
   const webSrc = resolve(HERE, "..", "web", "src");
   let out = "";
   try {
@@ -74,5 +76,5 @@ test("the sink is still the only one in the console", () => {
     out = ""; // grep exits 1 on no matches
   }
   const files = out.split("\n").filter(Boolean).map((f) => f.replace(`${webSrc}/`, ""));
-  assert.deepEqual(files, ["components/ui/code-block.tsx"]);
+  assert.deepEqual(files.sort(), ["components/JsonEditor.tsx", "components/ui/code-block.tsx"]);
 });
