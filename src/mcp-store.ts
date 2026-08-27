@@ -133,7 +133,7 @@ export function toClaudeMcpConfig(store: McpStore): { mcpServers: Record<string,
  * Which env/header keys hold secrets. Only these are masked on the way to the browser — a host,
  * port, schema or log level is configuration the operator needs to read and edit, not a credential.
  */
-const SECRET_KEY_RE = /(token|secret|passw|pwd|api[_-]?key|apikey|^auth$|authorization|cookie|credential|private|bearer|session|access[_-]?key|client[_-]?secret|signing)/i;
+const SECRET_KEY_RE = /(token|secret|passw|pwd|keys?(?:$|[_-])|apikey|^auth$|authorization|cookie|credential|private|bearer|session|signing)/i;
 export function isSecretKey(key: string): boolean {
   return SECRET_KEY_RE.test(key);
 }

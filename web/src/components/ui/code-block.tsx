@@ -163,7 +163,7 @@ export type CodeBlockCodeProps = {
 } & React.HTMLProps<HTMLDivElement>
 
 /** React to the app theme toggling (the `.dark` class flips on <html>) so code re-highlights live. */
-function useIsDark(): boolean {
+export function useIsDark(): boolean {
   const [isDark, setIsDark] = useState(
     () => typeof document !== "undefined" && document.documentElement.classList.contains("dark")
   )
@@ -273,9 +273,10 @@ export { CodeBlockGroup, CodeBlockCode, CodeBlock }
  * themes as CSS variables, so `.dark` flips colours without re-highlighting. Null until the grammar
  * is loaded, or for languages we do not bundle.
  */
-export async function highlightHtml(code: string, language: string): Promise<string | null> {
+export async function highlightHtml(code: string, language: string, dark: boolean): Promise<string | null> {
   const hl = await getHighlighter()
   const lang = await ensureLang(hl, language)
   if (!lang) return null
-  return hl.codeToHtml(code, { lang, themes: { light: "github-light", dark: "github-dark" }, defaultColor: false })
+  return hl.codeToHtml(code, { lang, theme: dark ? "github-dark" : "github-light" })
 }
+

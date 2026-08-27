@@ -1,5 +1,5 @@
 import * as React from "react";
-import { highlightHtml } from "@/components/ui/code-block";
+import { highlightHtml, useIsDark } from "@/components/ui/code-block";
 import { cn } from "@/lib/utils";
 
 /**
@@ -24,6 +24,7 @@ export function JsonEditor({
   minRows?: number;
   className?: string;
 }) {
+  const dark = useIsDark();
   const [html, setHtml] = React.useState<string | null>(null);
   const [caretLine, setCaretLine] = React.useState(1);
   const taRef = React.useRef<HTMLTextAreaElement>(null);
@@ -32,11 +33,11 @@ export function JsonEditor({
 
   React.useEffect(() => {
     let alive = true;
-    highlightHtml(value.endsWith("\n") ? value + " " : value, "json").then((h) => alive && setHtml(h));
+    highlightHtml(value.endsWith("\n") ? value + " " : value, "json", dark).then((h) => alive && setHtml(h));
     return () => {
       alive = false;
     };
-  }, [value]);
+  }, [value, dark]);
 
   const lines = React.useMemo(() => value.split("\n").length, [value]);
   const rows = Math.max(minRows, lines);
