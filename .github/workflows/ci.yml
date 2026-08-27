@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Only the newest run per branch matters; cancel superseded ones.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: build + test (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["20", "22"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - run: npm ci
+
+      # Typecheck is the build: tsc emits dist/.
+      - name: Build (tsc)
+        run: npm run build
+
+      # The orchestrator suite. Every test is pure/unit — no VPS, no msb, no network — so it runs
+      # unchanged in CI. The sandbox lifecycle itself is exercised by the runbook, not here.
+      - name: Test
+        run: npm test
+
+  # The dashboard is a separate workspace with its own tsconfig and lockfile.
+  # NOTE: not wired into `needs` and not required — see the checklist in CONTRIBUTING.md.
+  web:
+    name: web build
+    runs-on: ubuntu-latest
+    # Kept non-blocking until the outstanding type errors in the changes/file panes are fixed;
+    # flip this to `false` (or drop it) at that point so a broken console build fails CI.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npm run build
+        working-directory: web

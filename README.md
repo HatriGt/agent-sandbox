@@ -1,9 +1,98 @@
+<div align="center">
+
 # agent-sandbox
 
-Delegate a coding task **from Cursor** to an isolated microVM on your VPS, run an autonomous
-agent (Claude Code) inside it, and stream the result back — with resume, follow-ups, and safe
-credential handling. Built for Cursor first; because it speaks MCP, it also works from **any MCP
-client** (Claude web, other IDEs, CI).
+**Delegate a coding task to a real microVM, let an autonomous agent finish it, and watch it happen live.**
+
+Hand off work from Cursor — including your uncommitted working tree — to an isolated
+[microsandbox](https://github.com/microsandbox/microsandbox) microVM on your own VPS. Claude Code runs
+the task inside it, asks you questions when it's genuinely blocked, and streams every tool call back
+to your editor or a web console. Because it speaks MCP, any MCP client works.
+
+[![CI](https://github.com/HatriGt/agent-sandbox/actions/workflows/ci.yml/badge.svg)](https://github.com/HatriGt/agent-sandbox/actions/workflows/ci.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Node](https://img.shields.io/badge/node-%E2%89%A520-5FA04E?logo=node.js&logoColor=white)](package.json)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)](tsconfig.json)
+[![MCP](https://img.shields.io/badge/MCP-stdio%20%2B%20HTTP-000000)](https://modelcontextprotocol.io)
+[![Isolation](https://img.shields.io/badge/isolation-KVM%20microVM-8A2BE2)](docs/security.md)
+
+[**Live console**](https://agent-sandbox.ajeethkumar.dev) · [Security model](docs/security.md) · [Runbook](docs/runbook.md) · [Lifecycle](docs/lifecycle.md)
+
+</div>
+
+---
+
+## Why this exists
+
+Handing a task to an autonomous agent usually means one of two bad trades: run it on your own machine
+and hope it doesn't `rm -rf` something, or run it in a container and pretend a shared kernel is a
+boundary. agent-sandbox takes the third option — **one hardware-isolated microVM per run** — and then
+solves the parts that make delegation actually usable:
+
+| Problem | What agent-sandbox does |
+|---|---|
+| "Is this safe to run unattended?" | Every run is its own KVM guest kernel. A fork bomb or `rm -rf /` ends at the VM boundary. |
+| "It went quiet for 10 minutes." | NDJSON tool events stream to a live log — `watch`, the fleet `monitor`, and SSE in the console. |
+| "It guessed instead of asking." | The agent writes a question and a `PreToolUse` hook **denies every further tool call** until you answer. It cannot barrel on. |
+| "What is it doing *right now*?" | `ask` runs a **second, read-only agent** in the same box that reads the diff and log — the driver is never paused. |
+| "I don't want to paste tokens everywhere." | GitHub access is resolved per repo from a login-keyed store; on-demand secrets are injected for one step and never stored. |
+| "A prompt injection could exfiltrate my keys." | A deterministic guard hook denies control-plane edits, credential exfiltration and runtime reconfiguration — no model in the loop. |
+
+## Quickstart
+
+Two ways to run it. Local (stdio) needs nothing but Node; remote (HTTP) needs a VPS with `msb`.
+
+<details open>
+<summary><b>Local — "delegate THIS", including uncommitted changes</b></summary>
+
+```bash
+git clone https://github.com/HatriGt/agent-sandbox.git
+cd agent-sandbox
+npm ci && npm run build
+cp .env.example .env       # set VPS_SSH to a host that has microsandbox installed
+```
+
+Then point Cursor at it in `~/.cursor/mcp.json`:
+
+```json
+{ "mcpServers": { "agent-sandbox": {
+  "type": "stdio",
+  "command": "node",
+  "args": ["/absolute/path/agent-sandbox/dist/index.js"],
+  "env": { "WORKSPACE_DIR": "${workspaceFolder}" }
+} } }
+```
+
+Now say **"delegate this: add tests for the parser"** in Cursor.
+
+</details>
+
+<details>
+<summary><b>Remote — delegate a git repo from anywhere, plus the web console</b></summary>
+
+```bash
+VPS_SSH_ALIAS=<your-vps-ssh> ./setup.sh   # keys, .env, a generated MCP_HTTP_TOKEN, build
+```
+
+Set `ASB_DOMAIN`, point DNS at the VPS, then `docker compose up -d --build`. The console lands on
+`https://<ASB_DOMAIN>/dashboard`. Full walkthrough: [**Deploy the remote (HTTP) entry**](#deploy-the-remote-http-entry).
+
+</details>
+
+> [!IMPORTANT]
+> The HTTP entry refuses to start without `MCP_HTTP_TOKEN`, and that one token is root-equivalent —
+> it can spawn VMs. Read [`docs/security.md`](docs/security.md) before exposing it to the internet.
+
+## Contents
+
+- [Why microsandbox](#why-microsandbox) — the runtime evaluation, and what it gave us for free
+- [Architecture](#architecture) — one set of handlers, two transports
+- [Tools](#tools) — `delegate` · `status` · `resume` · `monitor` · `watch` · `ask` · …
+- [How delegation flows (A2A)](#how-delegation-flows-a2a) — the blocking wait loop and the question protocol
+- [Connect from Cursor](#connect-from-cursor) · [Layout](#layout) · [Deploy](#deploy-the-remote-http-entry)
+- [Security](#security) · [Contributing](#contributing) · [License](#license)
+
+---
 
 Runtime: **[microsandbox](https://github.com/microsandbox/microsandbox)** (`msb`, libkrun/KVM microVMs).
 Orchestration: a small **TypeScript MCP server** with two entry points that share the same tools:
@@ -231,9 +320,15 @@ compose.yaml  Dokploy app: Traefik route ${ASB_DOMAIN} → :8787
 
 ## Status
 
-Phase 1 built + tested (29 unit tests, HTTP auth verified live). Remaining: deploy the HTTP
-entry to Dokploy and smoke-test a remote delegate. See `docs/remote-mcp-plan.md` (Phase 1 done /
-Phase 2 backlog).
+Actively developed and deployed. The orchestrator ships **298 unit tests** (`npm test`) covering the
+handlers, the guard predicates, the auth guard, the response security headers, the lifecycle/pool
+logic and the stream formatter — all pure, so they run in CI with no VPS. Both entries (stdio + HTTP)
+are live, and the web console runs against a real fleet.
+
+Next up: real user authentication (replacing the single shared bearer token), rate limiting on the
+token check, and egress deny-by-default for RFC1918 ranges. See `docs/remote-mcp-plan.md` for the
+phase breakdown and [Known gaps](docs/security.md#known-gaps-honest) for what is deliberately not
+solved yet.
 
 ## Deploy the remote (HTTP) entry
 
@@ -259,9 +354,26 @@ the container→host SSH settings, and builds. Then:
 The container drives `msb` on the VPS **host** over SSH (msb needs KVM on the host), reaching it
 as `host.docker.internal`. Everything site-specific lives in `.env`; the repo ships no secrets.
 
-For this VPS specifically, the deploy pointer is tracked in AKVps
-`deployments/apps/agent-sandbox/`.
+
+## Security
+
+Every run is a KVM microVM, so the *host* is protected by hardware regardless of what the agent does.
+The interesting threat is therefore not escape but **a prompt-injected agent exfiltrating the
+credentials the box legitimately holds** — so the defences that matter are deterministic, not
+model-mediated: a `PreToolUse` guard hook denylist, a read-only lane for `ask`, allow-listed tools,
+per-repo credential resolution, and a strict CSP around the console.
+
+[`docs/security.md`](docs/security.md) documents the full model, including an honest
+[Known gaps](docs/security.md#known-gaps-honest) section.
+
+Found a vulnerability? Please report it privately — see [SECURITY.md](SECURITY.md). Do not open a
+public issue.
+
+## Contributing
+
+Contributions are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers the dev loop (`npm run build`,
+`npm test`), the testing conventions (pure units, no VPS required) and what a good PR looks like.
 
 ## License
 
-MIT.
+[Apache-2.0](LICENSE) © 2026 Ajeeth Kumar Ravichandran.

@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability (private)
+    url: https://github.com/HatriGt/agent-sandbox/security/advisories/new
+    about: Report privately. Please never file a vulnerability as a public issue.
+  - name: Security model and known gaps
+    url: https://github.com/HatriGt/agent-sandbox/blob/main/docs/security.md
+    about: Several limitations are documented and deliberate — check here first.
