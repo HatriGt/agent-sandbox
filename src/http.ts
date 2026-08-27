@@ -137,6 +137,9 @@ const readFleet = makeFleetReader(
     ]);
     return boxes.map((b) => ({
       ...b,
+      // The task and any pending question are operator/agent text too — same redaction as the log.
+      ...(b.task ? { task: redactor.redact(b.task) } : {}),
+      ...(b.question ? { question: redactor.redact(b.question) } : {}),
       ...(kept.has(b.name) ? { kept: true } : {}),
       // For a stopped box the claim age is (a good proxy for) how long it has been asleep.
       ...(!/^running$/i.test(b.boxStatus) && claims.has(b.name) ? { asleepSec: claims.get(b.name) } : {}),
