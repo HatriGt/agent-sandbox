@@ -20,6 +20,7 @@ import { makeBridge } from "./server-bridge.js";
 import { deps } from "./deps.js";
 import { refillPool, startPoolMaintainer } from "./pool.js";
 import { checkBearer } from "./http-auth.js";
+import { clientOf, makeAuthThrottle } from "./auth-throttle.js";
 import { securityHeaders } from "./security-headers.js";
 import { gatherMonitor, gatherWatch, askInBox, driverStateLine, startBoxIfStopped, noteRunning } from "./msb.js";
 import { safeWorkspacePath } from "./artifact.js";
@@ -180,8 +181,16 @@ deps.attachRepo = async (c, session, repo, ref) => {
 const fileIndex = makeFileIndex(async (box, sh) => (await execInBox(cfg, box, sh)).stdout);
 
 // Bearer guard on every /mcp method. Fails closed (checkBearer denies when no token).
+const authThrottle = makeAuthThrottle();
 app.use("/mcp", (req: Request, res: Response, next) => {
+  const client = clientOf(req.headers, req.socket.remoteAddress);
+  if (authThrottle.blocked(client)) {
+    res.setHeader("Retry-After", "600");
+    res.status(429).json({ jsonrpc: "2.0", error: { code: -32001, message: "too many failed attempts" }, id: null });
+    return;
+  }
   if (!checkBearer(req.headers.authorization, cfg.httpToken)) {
+    authThrottle.fail(client);
     res.status(401).json({
       jsonrpc: "2.0",
       error: { code: -32001, message: "unauthorized" },
@@ -243,7 +252,14 @@ app.delete("/mcp", handle);
 // (fetch-based) and artifact downloads (fetch + blob) — so the query form is gone. There is no
 // query-parameter path here and nothing should add one back.
 function dashAuthed(req: Request, res: Response): boolean {
+  const client = clientOf(req.headers, req.socket.remoteAddress);
+  if (authThrottle.blocked(client)) {
+    res.setHeader("Retry-After", "600");
+    res.status(429).json({ error: "too many failed attempts — try again later" });
+    return false;
+  }
   if (checkBearer(req.headers.authorization, cfg.httpToken)) return true;
+  authThrottle.fail(client);
   res.status(401).json({ error: "unauthorized" });
   return false;
 }

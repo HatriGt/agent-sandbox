@@ -254,7 +254,8 @@ export function ThreadHeader({
                   cloning {attaching.split("/")[1]}…
                 </span>
               )}
-              <span className="relative shrink-0">
+            </span>
+            <span className="relative shrink-0">
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button
@@ -275,7 +276,6 @@ export function ThreadHeader({
                   <RepoPicker className="absolute top-full left-0 z-20 mt-1" multi={false} selected={repos.map((r) => ({ repo: r.name }))} onToggle={(r) => (onAttach(r.fullName), setAddRepo(false))} onClose={() => setAddRepo(false)} />
                 )}
               </span>
-            </span>
           </>
         )}
 
