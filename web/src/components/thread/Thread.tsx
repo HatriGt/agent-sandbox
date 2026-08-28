@@ -265,7 +265,7 @@ export function Thread({
     setRenamed({ box: box.name, title: r.title });
   };
   const newFromThis = () => {
-    setPrefill({ task: box.task ?? "", wantsRepo: repos.length > 0 });
+    setPrefill({ task: box.task ?? "", repos });
     onNew();
   };
   // What the agent is doing right now: the latest tool call, or thinking between calls.

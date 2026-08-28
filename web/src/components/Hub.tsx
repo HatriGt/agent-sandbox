@@ -138,6 +138,33 @@ export function Hub({
   const [picked, setPicked] = React.useState<PickedRepo[]>([]);
   const [showRepo, setShowRepo] = React.useState(() => !!prefill.current?.wantsRepo);
   React.useEffect(() => writeDraft("hub", task), [task]);
+  // Re-attach the source run's repositories: each checkout name is looked up across your accounts and
+  // pre-picked when exactly one repository matches; anything ambiguous falls back to the picker.
+  React.useEffect(() => {
+    const want = prefill.current?.repos ?? [];
+    if (!want.length) return;
+    let cancelled = false;
+    Promise.all(
+      want.map((w) =>
+        api
+          .repos(w.name)
+          .then((r) => {
+            const hits = r.repos.filter((x) => x.fullName.split("/")[1]?.toLowerCase() === w.name.toLowerCase());
+            const pick: PickedRepo | null = hits.length === 1 ? { repo: hits[0].fullName, ref: w.branch && w.branch !== hits[0].defaultBranch ? w.branch : undefined, defaultBranch: hits[0].defaultBranch, private: hits[0].private } : null;
+            return pick;
+          })
+          .catch(() => null)
+      )
+    ).then((found) => {
+      if (cancelled) return;
+      const ok = found.filter((x): x is PickedRepo => !!x);
+      if (ok.length) setPicked((prev) => [...prev, ...ok.filter((o) => !prev.some((p) => p.repo.toLowerCase() === o.repo.toLowerCase()))]);
+      if (ok.length < want.length) setShowRepo(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   React.useEffect(() => {
     if (!prefill.current) return;
     requestAnimationFrame(() => {

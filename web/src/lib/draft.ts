@@ -24,7 +24,9 @@ export function writeDraft(key: string, text: string) {
 
 export interface Prefill {
   task: string;
-  /** The source run had repositories attached — open the picker so they can be re-attached. */
+  /** Repositories the source run had, by checkout name (and branch); the Hub resolves them to owner/name. */
+  repos?: { name: string; branch?: string }[];
+  /** Open the picker anyway (e.g. a repo could not be resolved). */
   wantsRepo?: boolean;
 }
 export function setPrefill(p: Prefill) {

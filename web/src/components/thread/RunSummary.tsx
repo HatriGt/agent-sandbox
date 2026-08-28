@@ -56,17 +56,18 @@ export function RunSummary({
       <span className="bg-border h-px min-w-6 flex-1" aria-hidden />
       <span className="flex shrink-0 items-center gap-1">
         <Tertiary onClick={copy} icon={copied ? <Check className="text-ok" /> : <Copy />} label={copied ? "Copied" : "Copy transcript"} />
-        <Tertiary onClick={onAgain} icon={<RotateCw />} label="New task from this" />
+        <Tertiary onClick={onAgain} icon={<RotateCw />} label="Run again" title="Start a new machine with the same brief and repositories — you can edit it first" />
       </span>
     </div>
   );
 }
 
-function Tertiary({ onClick, icon, label }: { onClick: () => void; icon: React.ReactNode; label: string }) {
+function Tertiary({ onClick, icon, label, title }: { onClick: () => void; icon: React.ReactNode; label: string; title?: string }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      title={title}
       className="text-muted-foreground hover:text-foreground hover:bg-muted flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2 text-micro font-medium transition-colors [&_svg]:size-3.5"
     >
       {icon}

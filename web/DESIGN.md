@@ -468,3 +468,5 @@ Now: one block, two lines (~64 px), one border.
 - **Kept** is shown once: a small pin glyph before the machine name, plus the menu hint.
 - **Telemetry** (uptime · cpu · memory · role) moved into the machine name's tooltip; Fleet view keeps it first-class.
 - The repo bar is gone; repos are chips in the context line with a quiet `+`.
+- **Run again** (was "New task from this"): the brief *and* the repositories carry over — the Hub resolves each checkout name to `owner/name` across your accounts and pre-attaches it; anything ambiguous opens the picker instead. Menu hint says what it does: *new machine, same brief*.
+- **When.** The context line's tail now answers it: `finished 14m ago`, `asked 3m ago`, `asleep 2h` — before the lifecycle phrase.

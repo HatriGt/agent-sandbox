@@ -2,8 +2,8 @@ import * as React from "react";
 import { ArrowLeft, FileText, FolderTree, Link2, Loader2, MoreHorizontal, Pencil, Pin, PinOff, Plus, RotateCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import type { BoxView } from "@/lib/api";
-import { friendlyName, roleLabel, shortName } from "@/lib/format";
-import { deadlineLabel, deadlineShort, type Deadline, type DisplayState } from "@/lib/lifecycle";
+import { fmtAgo, friendlyName, roleLabel, shortName } from "@/lib/format";
+import { deadlineLabel, deadlineShort, fmtDuration, type Deadline, type DisplayState } from "@/lib/lifecycle";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, MenuHint } from "@/components/ui/dropdown-menu";
@@ -111,6 +111,13 @@ export function ThreadHeader({
   };
 
   const short = deadlineShort(deadline);
+  const when = sleeping
+    ? box.asleepSec != null && box.asleepSec >= 60
+      ? `asleep ${fmtDuration(box.asleepSec)}`
+      : null
+    : (state === "done" || state === "waiting") && box.lastOutputAt
+      ? `${state === "done" ? "finished" : "asked"} ${fmtAgo(box.lastOutputAt)}`
+      : null;
   const long = deadlineLabel(deadline);
   const vitals = [box.uptime && `${sleeping ? "ran for" : "up"} ${box.uptime}`, box.cpu && `cpu ${box.cpu}`, box.mem && `memory ${box.mem}`, roleLabel(box.role)].filter(Boolean).join(" · ");
 
@@ -177,7 +184,7 @@ export function ThreadHeader({
                   <MenuHint>{kept ? "kept" : "sleeps · auto-destroyed"}</MenuHint>
                 </DropdownMenuItem>
               )}
-              <DropdownMenuItem onSelect={startRename}>
+              <DropdownMenuItem onSelect={startRename} disabled={!box.task}>
                 <Pencil />
                 Rename
               </DropdownMenuItem>
@@ -199,7 +206,8 @@ export function ThreadHeader({
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={onNewFromThis} disabled={!box.task}>
                 <RotateCw />
-                New task from this
+                Run again
+                <MenuHint>new machine, same brief</MenuHint>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem destructive onSelect={() => setConfirm(true)}>
@@ -285,6 +293,8 @@ export function ThreadHeader({
               <span className="max-w-[16rem] truncate">{activity}</span>
             </span>
           )}
+          {when && <span className="text-faint text-micro">{when}</span>}
+          {when && short && <Dot />}
           {short && (
             <Tooltip>
               <TooltipTrigger asChild>
