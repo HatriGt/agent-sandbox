@@ -109,6 +109,15 @@ export function WorkspacePane({ session, changes, open, onClose, onSaved, repos,
   };
   const patchTab = (path: string, p: Partial<Tab>) => setTabs((t) => t.map((x) => (x.path === path ? { ...x, ...p } : x)));
 
+  // An empty editor is a dead end: when the tree arrives and nothing is open, open the most useful file —
+  // the first change, else a README, else the first file at the repo root.
+  React.useEffect(() => {
+    if (!paths || tabs.length > 0 || open) return;
+    const first = changes[0]?.path ?? paths.find((p) => /(^|\/)readme\.md$/i.test(p)) ?? [...paths].sort((a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b))[0];
+    if (first) openPath(first, changes[0] ? "diff" : "edit");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paths]);
+
   const tree = React.useMemo(() => (paths ? buildTree(paths) : null), [paths]);
   const activeTab = tabs.find((t) => t.path === active) ?? null;
   const activeRepo = React.useMemo(() => {

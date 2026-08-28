@@ -1,4 +1,4 @@
-import * as si from "simple-icons";
+import { siApachemaven, siAstro, siBabel, siBun, siC, siCloudflare, siCmake, siCplusplus, siCss, siDart, siDocker, siDotenv, siDotnet, siEditorconfig, siElixir, siEslint, siGit, siGithubactions, siGitignoredotio, siGnubash, siGo, siGradle, siGraphql, siHaskell, siHtml5, siJavascript, siJest, siJson, siJulia, siJupyter, siKotlin, siLatex, siLua, siMarkdown, siMdx, siNetlify, siNextdotjs, siNpm, siNuxt, siNx, siPhp, siPnpm, siPostgresql, siPrettier, siPrisma, siPython, siR, siReact, siRenovate, siRuby, siRust, siSass, siScala, siSvelte, siSvg, siSwift, siTailwindcss, siTerraform, siToml, siTurborepo, siTypescript, siVercel, siVite, siVitest, siVuedotjs, siWebassembly, siWebpack, siXml, siYaml, siYarn, siZig } from "simple-icons";
 import { cn } from "@/lib/utils";
 
 /**
@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
  * inline SVG — crisp at 16px, no icon font, works in both themes.
  */
 type Glyph = { path: string; hex: string };
-const S = si as unknown as Record<string, Glyph | undefined>;
+const S: Record<string, Glyph | undefined> = { siApachemaven, siAstro, siBabel, siBun, siC, siCloudflare, siCmake, siCplusplus, siCss, siDart, siDocker, siDotenv, siDotnet, siEditorconfig, siElixir, siEslint, siGit, siGithubactions, siGitignoredotio, siGnubash, siGo, siGradle, siGraphql, siHaskell, siHtml5, siJavascript, siJest, siJson, siJulia, siJupyter, siKotlin, siLatex, siLua, siMarkdown, siMdx, siNetlify, siNextdotjs, siNpm, siNuxt, siNx, siPhp, siPnpm, siPostgresql, siPrettier, siPrisma, siPython, siR, siReact, siRenovate, siRuby, siRust, siSass, siScala, siSvelte, siSvg, siSwift, siTailwindcss, siTerraform, siToml, siTurborepo, siTypescript, siVercel, siVite, siVitest, siVuedotjs, siWebassembly, siWebpack, siXml, siYaml, siYarn, siZig };
 const g = (key: string, hex?: string): Glyph | undefined => {
   const icon = S[key];
   return icon ? { path: icon.path, hex: hex ?? icon.hex } : undefined;

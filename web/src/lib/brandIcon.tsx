@@ -1,4 +1,4 @@
-import * as si from "simple-icons";
+import { siAirtable, siAnthropic, siAsana, siAtlassian, siBitbucket, siBrave, siCloudflare, siDatadog, siDiagramsdotnet, siDiscord, siDocker, siFigma, siGithub, siGitlab, siGmail, siGooglechrome, siGoogledrive, siGrafana, siHubspot, siKubernetes, siLinear, siMongodb, siMysql, siNodedotjs, siNotion, siPerplexity, siPostgresql, siPuppeteer, siPython, siReddit, siRedis, siSap, siSentry, siSnowflake, siSqlite, siStripe, siSupabase, siTelegram, siTrello, siVercel, siYoutube, siZapier } from "simple-icons";
 import { Globe, Terminal } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -9,6 +9,8 @@ import { cn } from "@/lib/utils";
  * get a transport glyph in the muted colour. Pure lookup; no network.
  */
 type Icon = { path: string; hex: string; title: string };
+type Glyph = Icon;
+const ICONS: Record<string, Glyph | undefined> = { siAirtable, siAnthropic, siAsana, siAtlassian, siBitbucket, siBrave, siCloudflare, siDatadog, siDiagramsdotnet, siDiscord, siDocker, siFigma, siGithub, siGitlab, siGmail, siGooglechrome, siGoogledrive, siGrafana, siHubspot, siKubernetes, siLinear, siMongodb, siMysql, siNodedotjs, siNotion, siPerplexity, siPostgresql, siPuppeteer, siPython, siReddit, siRedis, siSap, siSentry, siSnowflake, siSqlite, siStripe, siSupabase, siTelegram, siTrello, siVercel, siYoutube, siZapier };
 // Looked up loosely: simple-icons drops trademarks now and then; a missing brand must fall back, not break.
 const BRANDS: Array<[RegExp, string]> = [
   [/atlassian|jira|confluence|rovo/i, "siAtlassian"],
@@ -61,7 +63,7 @@ const BRANDS: Array<[RegExp, string]> = [
 export function brandFor(hint: string): Icon | null {
   for (const [re, key] of BRANDS) {
     if (re.test(hint)) {
-      const icon = (si as unknown as Record<string, Icon | undefined>)[key];
+      const icon = ICONS[key];
       if (icon?.path) return icon;
     }
   }

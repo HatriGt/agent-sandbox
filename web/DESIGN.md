@@ -397,3 +397,14 @@ h2 20 · h1 28` (all registered with tailwind-merge). Rules the audit enforced:
 - **Breadcrumb**: folders in muted, the file in foreground with its icon; folders truncate first and
   the middle collapses to "…" beyond four levels; the file name always survives.
 - Editor code ships as its own chunk (`editor-*.js`, ~226 KB gzip), loaded only when the pane opens.
+
+## Round: first paint and small frictions (2026-08-28)
+
+- **The blank second**: the main bundle was 5.6 MB because `import * as si from "simple-icons"`
+  shipped the entire icon library. Named imports cut it to ~580 KB. The workspace pane (CodeMirror,
+  merge view) is lazy — loaded the first time it opens, never preloaded on the thread.
+- **A shell before the bundle**: `index.html` carries an inline theme script (dark class before
+  first paint, no light flash) and a static app-shell skeleton (sidebar, header, column placeholders)
+  that the app replaces on mount. The first frame is the layout, never white.
+- Workspace opens straight into the most useful file (first change → README → first root file);
+  the scroll-to-latest button sits bottom-right of the column instead of over the text.

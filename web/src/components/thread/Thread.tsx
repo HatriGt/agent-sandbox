@@ -3,7 +3,8 @@ import { ArrowLeft, Cpu, FolderTree, GitBranch, Hourglass, Loader2, Pin, PinOff,
 import { toast } from "sonner";
 import { api, type BoxView, type ChangedFile, type FleetLifecycle, type WatchSnapshot } from "@/lib/api";
 import { AnimatePresence, motion } from "motion/react";
-import { WorkspacePane } from "./WorkspacePane";
+// The workspace (CodeMirror + merge view) is heavy and optional: loaded the first time it opens.
+const WorkspacePane = React.lazy(() => import("./WorkspacePane").then((m) => ({ default: m.WorkspacePane })));
 import { WakingCard } from "./WakingCard";
 import { SessionContext } from "@/lib/session-context";
 import { friendlyName, isSleeping, POLL_MS, roleLabel, shortName, threadTitle } from "@/lib/format";
@@ -565,7 +566,7 @@ export function Thread({
               transition={{ duration: 0.16 }}
               onClick={() => void stick.scrollToBottom()}
               aria-label="Scroll to latest"
-              className="bg-card hover:bg-muted text-foreground absolute bottom-3 left-1/2 z-10 grid size-8 -translate-x-1/2 cursor-pointer place-items-center rounded-full border shadow-[0_1px_2px_oklch(0_0_0/0.06),0_8px_20px_-10px_oklch(0_0_0/0.4)]"
+              className="bg-card hover:bg-muted text-foreground absolute right-5 bottom-4 z-10 grid size-8 cursor-pointer place-items-center rounded-full border shadow-[0_1px_2px_oklch(0_0_0/0.06),0_8px_20px_-10px_oklch(0_0_0/0.4)]"
             >
               <ArrowDown className="size-4" aria-hidden />
             </motion.button>
@@ -587,7 +588,30 @@ export function Thread({
       />
       </div>
       <AnimatePresence>
-        {showWorkspace && <WorkspacePane key="workspace" session={box.name} changes={changes} open={openFile} onClose={closeWorkspace} onSaved={refreshChanges} repos={repos} full={workspaceFull} onToggleFull={() => setWorkspaceFull((v) => !v)} />}
+        {showWorkspace && (
+          <React.Suspense
+            key="workspace"
+            fallback={
+              <aside className="bg-card hidden md:flex md:h-full md:w-[58%] md:min-w-[34rem] md:flex-col md:border-l" aria-busy="true" aria-label="Workspace loading">
+                <div className="h-10 border-b" />
+                <div className="flex flex-1">
+                  <div className="flex-1 space-y-2 p-4">
+                    {[80, 60, 70, 40, 55].map((w, i) => (
+                      <div key={i} className="bg-muted h-3 animate-pulse rounded" style={{ width: `${w}%` }} />
+                    ))}
+                  </div>
+                  <div className="w-64 space-y-2 border-l p-3">
+                    {[70, 50, 60, 45, 65, 40].map((w, i) => (
+                      <div key={i} className="bg-muted h-3 animate-pulse rounded" style={{ width: `${w}%`, marginLeft: `${(i % 3) * 10}px` }} />
+                    ))}
+                  </div>
+                </div>
+              </aside>
+            }
+          >
+            <WorkspacePane session={box.name} changes={changes} open={openFile} onClose={closeWorkspace} onSaved={refreshChanges} repos={repos} full={workspaceFull} onToggleFull={() => setWorkspaceFull((v) => !v)} />
+          </React.Suspense>
+        )}
       </AnimatePresence>
       </div>
     </div>

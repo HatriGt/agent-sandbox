@@ -9,9 +9,56 @@
     <link rel="apple-touch-icon" href="/dashboard/favicon.svg" />
     <meta name="theme-color" content="#18181b" />
     <title>Agent Sandbox</title>
+    <script>
+      // Theme before first paint: the console persists it in localStorage; applying it here avoids a
+      // light flash for dark users while the bundle loads.
+      try { if (localStorage.getItem("asb-dark") === "true" || localStorage.getItem("asb-dark") === "1") document.documentElement.classList.add("dark"); } catch (e) {}
+    </script>
+    <style>
+      /* The app shell, drawn in plain HTML/CSS so the first frame is the layout, not a blank page. */
+      #root:empty::before, .asb-shell { display: none; }
+      .asb-shell { display: flex; height: 100vh; background: oklch(0.992 0.001 286); color: oklch(0.21 0.006 285.9); font-family: ui-sans-serif, system-ui, sans-serif; }
+      .dark .asb-shell { background: oklch(0.17 0.005 285); color: oklch(0.93 0 0); }
+      .asb-shell .side { width: 272px; border-right: 1px solid oklch(0 0 0 / 0.08); padding: 16px; box-sizing: border-box; }
+      .dark .asb-shell .side { border-color: oklch(1 0 0 / 0.08); }
+      .asb-shell .main { flex: 1; display: flex; flex-direction: column; }
+      .asb-shell .bar { height: 56px; border-bottom: 1px solid oklch(0 0 0 / 0.08); }
+      .dark .asb-shell .bar { border-color: oklch(1 0 0 / 0.08); }
+      .asb-shell .ph { background: oklch(0 0 0 / 0.06); border-radius: 6px; height: 12px; margin: 10px 0; animation: asb-pulse 1.4s ease-in-out infinite; }
+      .dark .asb-shell .ph { background: oklch(1 0 0 / 0.08); }
+      .asb-shell .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+      .asb-shell .logo { width: 32px; height: 32px; border-radius: 8px; background: oklch(0.21 0.006 285.9); }
+      .dark .asb-shell .logo { background: oklch(0.93 0 0); }
+      .asb-shell .btn { height: 36px; border-radius: 8px; background: oklch(0.21 0.006 285.9); margin: 0 0 12px; }
+      .dark .asb-shell .btn { background: oklch(0.93 0 0); }
+      @keyframes asb-pulse { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div class="asb-shell" aria-hidden="true">
+        <div class="side">
+          <div class="brand"><div class="logo"></div><div class="ph" style="width: 110px; margin: 0"></div></div>
+          <div class="btn"></div>
+          <div class="ph" style="width: 100%; height: 36px; border-radius: 10px"></div>
+          <div class="ph" style="width: 40%; margin-top: 22px"></div>
+          <div class="ph" style="width: 85%"></div>
+          <div class="ph" style="width: 60%"></div>
+          <div class="ph" style="width: 80%; margin-top: 18px"></div>
+          <div class="ph" style="width: 50%"></div>
+        </div>
+        <div class="main">
+          <div class="bar"></div>
+          <div style="max-width: 768px; margin: 32px auto 0; width: 100%; padding: 0 24px; box-sizing: border-box">
+            <div class="ph" style="width: 45%; margin-left: auto; height: 40px; border-radius: 14px"></div>
+            <div class="ph" style="width: 20%; margin-top: 28px"></div>
+            <div class="ph" style="width: 90%"></div>
+            <div class="ph" style="width: 75%"></div>
+            <div class="ph" style="width: 82%"></div>
+          </div>
+        </div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
