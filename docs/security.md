@@ -89,9 +89,12 @@ sets, on every response (static shell, JSON, SSE and artifact bytes alike):
   the escaping audit above rather than by the storage itself. The fix is not a different storage key:
   it is the authentication milestone, after which the browser should hold a short-lived, revocable
   session in an `HttpOnly`, `SameSite` cookie that JavaScript cannot read at all.
-- No rate limiting on the token check. Not currently exploitable — the token is 256 bits of
-  `openssl rand` and the compare is timing-safe — but it would matter the moment tokens get weaker
-  or user-chosen.
+- ~~No rate limiting on the token check.~~ Since 2026-08-29: 20 failed attempts per client per
+  10 minutes → 429 (`src/auth-throttle.ts`). The token is still 256 bits of `openssl rand` with a
+  timing-safe compare; the throttle is a speed bump for the day tokens become user-chosen.
+- The dashboard and MCP clients can now use **different** tokens (`DASHBOARD_TOKEN` vs
+  `MCP_HTTP_TOKEN`), and every state-changing call leaves an `[audit]` line (`src/audit.ts`). Both are
+  operator-grade measures — they do not add identity. See `docs/architecture.md` §7 for what does.
 
 ## Secret redaction in the transcript (2026-08-27)
 

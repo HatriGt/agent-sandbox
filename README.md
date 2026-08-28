@@ -125,7 +125,7 @@ Every console action has a route behind it (`/fleet.json`, `/watch.sse`, `/ask.j
 
 - [Three ways to start a run](#three-ways-to-start-a-run) — dashboard · coding agent · script
 - [Why microsandbox](#why-microsandbox) — the runtime evaluation, and what it gave us for free
-- [Architecture](#architecture) — one set of handlers, every surface on top of them
+- [Architecture](#architecture) — one set of handlers, every surface on top of them · [full map with flow diagrams](docs/architecture.md)
 - [Tools](#tools) — `delegate` · `status` · `resume` · `monitor` · `watch` · `ask` · …
 - [How delegation flows (A2A)](#how-delegation-flows-a2a) — the blocking wait loop and the question protocol
 - [Connect your IDE](#connect-your-ide) — Cursor, VS Code, Windsurf, Zed, Claude Code, Cline, CI

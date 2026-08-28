@@ -107,6 +107,8 @@ export interface Config {
   httpHost: string;
   /** HTTP entry: bearer token required on /mcp. Empty => HTTP entry refuses all (fail closed). */
   httpToken?: string;
+  /** Bearer for the dashboard's JSON routes. Defaults to httpToken; set DASHBOARD_TOKEN to give the browser its own, separately revocable credential. */
+  dashboardToken?: string;
 }
 
 function req(name: string, fallback?: string): string {
@@ -210,5 +212,6 @@ export function loadConfig(): Config {
     httpPort: Number(process.env.MCP_HTTP_PORT ?? "8787"),
     httpHost: process.env.MCP_HTTP_HOST || "127.0.0.1",
     httpToken: process.env.MCP_HTTP_TOKEN || undefined,
+    dashboardToken: process.env.DASHBOARD_TOKEN || process.env.MCP_HTTP_TOKEN || undefined,
   };
 }

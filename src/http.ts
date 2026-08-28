@@ -21,6 +21,7 @@ import { deps } from "./deps.js";
 import { refillPool, startPoolMaintainer } from "./pool.js";
 import { checkBearer } from "./http-auth.js";
 import { clientOf, makeAuthThrottle } from "./auth-throttle.js";
+import { auditFields, formatAudit, MUTATING } from "./audit.js";
 import { securityHeaders } from "./security-headers.js";
 import { gatherMonitor, gatherWatch, askInBox, driverStateLine, startBoxIfStopped, noteRunning } from "./msb.js";
 import { isBoxName } from "./sync.js";
@@ -91,6 +92,26 @@ app.use((err: unknown, _req: Request, res: Response, next: express.NextFunction)
   next(err);
 });
 
+// Audit every state-changing call (not /mcp — the MCP transport has its own tool-level log lines).
+app.use((req: Request, res: Response, next) => {
+  if (!MUTATING.has(req.method) || req.path === "/mcp" || req.path.startsWith("/mcp/")) return next();
+  const started = Date.now();
+  res.on("finish", () => {
+    console.error(
+      formatAudit({
+        at: new Date(started).toISOString(),
+        client: clientOf(req.headers, req.socket.remoteAddress),
+        method: req.method,
+        path: req.path,
+        status: res.statusCode,
+        ms: Date.now() - started,
+        ...auditFields(req.body, req.query),
+      })
+    );
+  });
+  next();
+});
+
 // One shared tail loop per watched box (see watch-hub.ts): every SSE viewer, /watch.json call and
 // hover-prefetch of the same box reads one cached snapshot instead of each paying an SSH round trip.
 // The tick path skips `msb metrics` — vitals arrive with the fleet poll.
@@ -113,6 +134,7 @@ const redactor = makeRedactor(async () => {
   }
   if (cfg.npmToken) out.push(cfg.npmToken);
   if (cfg.httpToken) out.push(cfg.httpToken);
+  if (cfg.dashboardToken && cfg.dashboardToken !== cfg.httpToken) out.push(cfg.dashboardToken);
   return out;
 });
 void redactor.prime();
@@ -285,7 +307,7 @@ function dashAuthed(req: Request, res: Response): boolean {
     res.status(429).json({ error: "too many failed attempts — try again later" });
     return false;
   }
-  if (checkBearer(req.headers.authorization, cfg.httpToken)) return true;
+  if (checkBearer(req.headers.authorization, cfg.dashboardToken)) return true;
   authThrottle.fail(client);
   res.status(401).json({ error: "unauthorized" });
   return false;
