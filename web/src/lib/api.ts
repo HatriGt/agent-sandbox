@@ -242,6 +242,8 @@ export async function openSse(
   });
   if (res.status === 401) signOut();
   if (!res.ok || !res.body) throw new ApiError(`stream failed (${res.status})`, res.status);
+  // The SPA fallback (a deploy in progress) answers 200 text/html; that is not a stream.
+  if (!(res.headers.get("content-type") ?? "").includes("text/event-stream")) throw new ApiError("not an event stream", 502);
   opts.onOpen?.();
   const reader = res.body.getReader();
   const dec = new TextDecoder();

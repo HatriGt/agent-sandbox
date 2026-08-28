@@ -8,6 +8,7 @@
  * run is still knowable, and its mtime is the sleep clock: a claimed box asleep longer than
  * `MSB_SLEEP_TTL` is finally reaped (docs/lifecycle.md).
  */
+import { assertBoxName } from "./sync.js";
 import type { Config } from "./config.js";
 import { run, shellQuote } from "./exec.js";
 import { sshMuxOpts } from "./ssh.js";
@@ -21,10 +22,18 @@ async function ssh(cfg: Config, cmd: string): Promise<string> {
 
 /** Record that `box` carries a run (idempotent; refreshes nothing — the claim time is the first touch). */
 export async function markClaimed(cfg: Config, box: string): Promise<void> {
+  assertBoxName(box);
   await ssh(cfg, `mkdir -p ${DIR} && chmod 700 ${DIR} && [ -e ${DIR}/${shellQuote(box)} ] || : > ${DIR}/${shellQuote(box)}`);
 }
 
+/** Re-stamp the claim: called when a box is seen going Running → Stopped, so `asleepSec` and the sleep TTL count from the nap, not the claim. */
+export async function touchClaimed(cfg: Config, box: string): Promise<void> {
+  assertBoxName(box);
+  await ssh(cfg, `mkdir -p ${DIR} && touch ${DIR}/${shellQuote(box)}`);
+}
+
 export async function unmarkClaimed(cfg: Config, box: string): Promise<void> {
+  assertBoxName(box);
   await ssh(cfg, `rm -f ${DIR}/${shellQuote(box)}`);
 }
 
@@ -49,9 +58,11 @@ export function parseClaims(stdout: string, now: number): Map<string, number> {
 const KEEP_DIR = '"$HOME/.agent-sandbox/keep"';
 
 export async function markKept(cfg: Config, box: string): Promise<void> {
+  assertBoxName(box);
   await ssh(cfg, `mkdir -p ${KEEP_DIR} && chmod 700 ${KEEP_DIR} && : > ${KEEP_DIR}/${shellQuote(box)}`);
 }
 export async function unmarkKept(cfg: Config, box: string): Promise<void> {
+  assertBoxName(box);
   await ssh(cfg, `rm -f ${KEEP_DIR}/${shellQuote(box)}`);
 }
 export async function listKept(cfg: Config): Promise<Set<string>> {

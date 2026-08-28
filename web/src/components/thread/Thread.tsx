@@ -116,7 +116,10 @@ export function Thread({
   React.useEffect(() => {
     if (polled && polled.name === box.name) seedWatchCache(polled);
   }, [polled, box.name]);
-  const snap = stream.snap ?? (polled?.name === box.name ? polled : null);
+  // The stream when it is live; otherwise whichever of the cached stream copy and the poll is newer,
+  // so a thread opened without SSE (or after a short turn the stream missed) keeps moving.
+  const polledSnap = polled?.name === box.name ? polled : null;
+  const snap = stream.ok ? stream.snap ?? polledSnap : polledSnap && (!stream.snap || polledSnap.log.length >= stream.snap.log.length) ? polledSnap : stream.snap;
 
   const events = React.useMemo(() => parseTrace(snap?.log ?? ""), [snap?.log]);
   const groups = React.useMemo(() => groupTrace(events), [events]);
@@ -222,10 +225,14 @@ export function Thread({
   const [attaching, setAttaching] = React.useState<string | null>(null);
   const [optimisticRepos, setOptimisticRepos] = React.useState<{ name: string; branch?: string }[]>([]);
   React.useEffect(() => setOptimisticRepos([]), [box.name, box.repos?.length]);
+  // Keyed by content: the fleet poll hands over a new array every 3 s, and downstream effects
+  // (the workspace's git status, header chips) must not refire for an identical list.
+  const reposKey = JSON.stringify(box.repos ?? []);
   const repos = React.useMemo(() => {
-    const seen = new Set((box.repos ?? []).map((r) => r.name));
-    return [...(box.repos ?? []), ...optimisticRepos.filter((r) => !seen.has(r.name))];
-  }, [box.repos, optimisticRepos]);
+    const base = JSON.parse(reposKey) as { name: string; branch?: string }[];
+    const seen = new Set(base.map((r) => r.name));
+    return [...base, ...optimisticRepos.filter((r) => !seen.has(r.name))];
+  }, [reposKey, optimisticRepos]);
   const attach = (fullName: string, ref?: string) => {
     setAttaching(fullName);
     api
@@ -313,7 +320,7 @@ export function Thread({
         toast.success(next ? `${friendlyName(box.name)} is kept` : `${friendlyName(box.name)} released`, {
           description: next
             ? "It will still sleep when quiet, but it stays until you destroy it. Wake it any day with a follow-up."
-            : `Back to the normal lifecycle: destroyed after ${lifecycle.idleTimeoutSec ? fmtDuration((lifecycle.idleTimeoutSec ?? 0) * 96) : "the sleep limit"} asleep.`,
+            : `Back to the normal lifecycle: destroyed after ${lifecycle.sleepTtlSec ? fmtDuration(lifecycle.sleepTtlSec) : "the sleep limit"} asleep.`,
         })
       )
       .catch((e: unknown) => {

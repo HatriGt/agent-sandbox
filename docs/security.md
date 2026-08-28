@@ -109,3 +109,35 @@ A sandbox run printed `git remote -v`, and the remote carried the clone token
    `xox…`, `glpat-…`, `npm_…`, `*_PASSWORD=…`). A 4-char tail is kept so the operator can tell WHICH
    credential leaked (`ghp_…ABCD`) without being able to use it. The known list refreshes lazily
    (60s) and a failing refresh keeps the previous list — redaction never blocks a read.
+
+## Hardening pass (2026-08-29) and the road to multi-tenant
+
+Findings from a code audit of the controller, all fixed in this pass:
+
+- **Remote command injection** — `gh-probe.ts` interpolated a caller-supplied GitHub token and API path into a shell string run over SSH. Now both are single-quoted and the path is whitelisted. Reachable from `/accounts.json`, `/delegate.json` (`githubToken`, `repo`).
+- **Path traversal to `rm -rf`** — `/teardown.json`, `/keep.json`, `/repos/attach.json` and the MCP `teardown` tool accepted any string as a box name; `../../root` resolved to `/root`. Box names are now validated once (`isBoxName`, `[A-Za-z0-9_.-]{1,128}`, never `.`/`..`) at every route, inside the claim/keep markers, in `stagingPathFor` (which also asserts the result stays under the staging dir) and in `msb.teardown`.
+- **`source:"local"` from the browser** — would rsync a controller-host path into a sandbox. The dashboard route is git-only now; repo names must be `owner/name`.
+- **Redaction gaps** — `/ask.json` answers, `/diff.json` bodies, `/monitor.json` task/question and text artifacts with unknown extensions (`.env`, `.pem`, extensionless) bypassed the secret redactor. All redacted now; artifacts are redacted by content sniff when the extension is unknown.
+- **Brute force** — one shared bearer token had no attempt limit. Now 20 failed attempts per client per 10 minutes → 429 with `Retry-After` (in-memory; keyed by first `X-Forwarded-For` hop, else socket address).
+- **Body limits** — 1 MB JSON everywhere except `/file.json` and `/delegate.json` (96 MB, for base64 uploads); parser errors return JSON, not an HTML page.
+- Reliability: SSE delta computed against the previous text (a sliding tail window is not a prefix extension); hub readers no longer hang when a box is dropped mid-read; a resume marks the box running immediately; sleep TTL and "asleep for" count from the nap, not the claim; MCP store cache never hands out live objects; `?lines=` must be an integer ≤ 5000.
+
+### What is true today
+
+- The browser talks HTTP(S) to the controller only. **Nothing in the client can reach SSH or the VPS**; the controller is the sole SSH principal.
+- Every data route requires `Authorization: Bearer <MCP_HTTP_TOKEN>`; the token is never accepted in a URL; comparison is constant-time; the server refuses to start without one.
+- Strict CSP (`script-src 'self'`, `connect-src 'self'`, `frame-ancestors 'none'`); artifact bytes served with `default-src 'none'; sandbox` and `nosniff`; no CORS (same-origin only).
+
+### What must change before selling seats
+
+The controller is **single-tenant by design**: one token, one operator, one fleet. Turning it into a SaaS is an identity-and-ownership project, not a hardening one:
+
+1. **Identity** — replace the shared bearer with per-user sessions (OIDC/email magic link → short-lived signed session cookie `HttpOnly; Secure; SameSite=Lax` or a JWT with refresh), CSRF protection for cookie auth, and a separate **API key** model for the MCP endpoint (per user, revocable, hashed at rest). The dashboard token in `localStorage` goes away.
+2. **Ownership** — every box, claim, keep marker, title, inbox and MCP/GitHub store must carry a `tenantId`/`userId`; every route resolves the box **through the caller's tenant** (`boxes.find(b => b.owner === user)`) before touching it. Today `session` is a global name — an authenticated user could act on any box.
+3. **Isolation on the host** — per-tenant staging dirs, per-tenant `~/.agent-sandbox/*` (or a database), per-tenant GitHub tokens and MCP configs injected only into that tenant's boxes; microVM network egress policy per tenant.
+4. **Quotas and rate limits per user** — box count, run minutes, attachment bytes, requests/minute; the current global `MSB_MAX_BOXES` becomes a plan limit.
+5. **Audit log** — who delegated/resumed/destroyed what, when, from where; retained per tenant.
+6. **Secrets** — GitHub tokens and MCP env encrypted at rest with a KMS-held key, not plaintext files on the VPS; redaction lists per tenant.
+7. **Operational** — Postgres (or SQLite per tenant) instead of files-over-SSH for state; the SSH hop to the host stays internal and is never user-parameterised beyond the validated box name.
+
+Until (1) and (2) exist, the right deployment is one controller + one token **per customer** (what runs today), not one shared controller.

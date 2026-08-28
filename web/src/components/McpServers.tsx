@@ -481,8 +481,10 @@ function JsonView({ config, onSave }: { config: McpServersResponse["config"] | n
             size="sm"
             variant="ghost"
             onClick={() => {
-              void navigator.clipboard.writeText(text);
-              toast.success("Copied");
+              navigator.clipboard
+                .writeText(text)
+                .then(() => toast.success("Copied"))
+                .catch((e: unknown) => toast.error("Could not copy", { description: e instanceof Error ? e.message : String(e) }));
             }}
           >
             <Copy /> Copy

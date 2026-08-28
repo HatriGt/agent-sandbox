@@ -26,15 +26,22 @@ export function useNotifications(boxes: BoxView[], onOpen: (name: string) => voi
 
   const toggle = React.useCallback(async () => {
     if (!supported) return;
+    const remember = (v: string) => {
+      try {
+        localStorage.setItem(KEY, v);
+      } catch {
+        /* storage blocked: the setting lives for this tab only */
+      }
+    };
     if (enabled) {
       setEnabled(false);
-      localStorage.setItem(KEY, "0");
+      remember("0");
       return;
     }
     const perm = Notification.permission === "granted" ? "granted" : await Notification.requestPermission();
     const on = perm === "granted";
     setEnabled(on);
-    localStorage.setItem(KEY, on ? "1" : "0");
+    remember(on ? "1" : "0");
   }, [enabled, supported]);
 
   React.useEffect(() => {

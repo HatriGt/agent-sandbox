@@ -211,10 +211,10 @@ const CACHE_TTL_MS = 60_000;
 let cached: { store: McpStore; at: number } | null = null;
 
 export async function loadMcpStore(cfg: Config): Promise<McpStore> {
-  if (cached && Date.now() - cached.at < CACHE_TTL_MS) return { servers: { ...cached.store.servers } };
+  if (cached && Date.now() - cached.at < CACHE_TTL_MS) return structuredClone(cached.store);
   const r = await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, `cat ${STORE_PATH} 2>/dev/null || true`], { check: false });
   const store = parseMcpStore(r.stdout ?? "");
-  cached = { store: { servers: { ...store.servers } }, at: Date.now() };
+  cached = { store: structuredClone(store), at: Date.now() };
   return store;
 }
 

@@ -23,6 +23,8 @@ import { checkBearer } from "./http-auth.js";
 import { clientOf, makeAuthThrottle } from "./auth-throttle.js";
 import { securityHeaders } from "./security-headers.js";
 import { gatherMonitor, gatherWatch, askInBox, driverStateLine, startBoxIfStopped, noteRunning } from "./msb.js";
+import { isBoxName } from "./sync.js";
+import { touchClaimed } from "./claims.js";
 import { safeWorkspacePath } from "./artifact.js";
 import { gitStatus, gitCommitAll, gitPush } from "./git-ops.js";
 import { loadTitles, generateTitle, forgetTitle, saveTitle, cleanTitle } from "./titles.js";
@@ -77,7 +79,17 @@ app.use(
     filter: (req, res) => (req.path.endsWith(".sse") || req.path === "/mcp" || req.path.startsWith("/mcp/") ? false : compression.filter(req, res)),
   })
 );
-app.use(express.json({ limit: "4mb" }));
+const jsonSmall = express.json({ limit: "1mb" });
+const jsonLarge = express.json({ limit: "96mb" }); // /file.json (≤8 MB file as base64) and /delegate.json (≤8 images)
+app.use((req: Request, res: Response, next) => (req.path === "/file.json" || req.path === "/delegate.json" ? jsonLarge : jsonSmall)(req, res, next));
+app.use((err: unknown, _req: Request, res: Response, next: express.NextFunction) => {
+  const e = err as { type?: string; status?: number; message?: string } | undefined;
+  if (e && (e.type === "entity.too.large" || e.type === "entity.parse.failed" || e.status === 400 || e.status === 413)) {
+    res.status(e.status ?? 400).json({ error: e.type === "entity.too.large" ? "request body too large" : "malformed JSON body" });
+    return;
+  }
+  next(err);
+});
 
 // One shared tail loop per watched box (see watch-hub.ts): every SSE viewer, /watch.json call and
 // hover-prefetch of the same box reads one cached snapshot instead of each paying an SSH round trip.
@@ -117,8 +129,13 @@ const watchHub = new WatchHub({ read: async (s) => redactSnap(await gatherWatch(
 const inbox = new Inbox();
 // Detached: kicks the run and returns; the transcript streams. (deps.resume would block up to
 // WAIT_TIMEOUT_MS for the agent's next boundary — fine for an MCP tool call, wrong for a chat send.)
-const resumeQuietly = (session: string, message: string) =>
-  deps.resumeDetached ? deps.resumeDetached(cfg, session, message) : deps.resume(cfg, session, message, undefined, {}).then(() => undefined);
+const resumeQuietly = (session: string, message: string) => {
+  // A resume boots a sleeping box; forget the "stopped" memory and the cached idle snapshot at once so
+  // the thread does not show it asleep (and close its stream) for the next 15 s.
+  noteRunning(session);
+  watchHub.drop(session);
+  return deps.resumeDetached ? deps.resumeDetached(cfg, session, message) : deps.resume(cfg, session, message, undefined, {}).then(() => undefined);
+};
 startInboxDelivery({
   inbox,
   read: (s) => watchHub.read(s),
@@ -131,6 +148,7 @@ const brokerConsider = makeCredentialBroker({
   resume: resumeQuietly,
   log: (m) => console.error(m),
 });
+const lastSeenStatus = new Map<string, boolean>();
 const readFleet = makeFleetReader(
   cfg,
   async () => {
@@ -140,6 +158,15 @@ const readFleet = makeFleetReader(
       listClaims(cfg).catch(() => new Map<string, number>()),
       loadTitles(cfg).catch(() => ({}) as Record<string, string>),
     ]);
+    // A box seen Running last sweep and Stopped now just fell asleep: re-stamp its claim so the sleep
+    // TTL (and the "asleep for" figure) count from the nap rather than from when the run started.
+    for (const b of boxes) {
+      const was = lastSeenStatus.get(b.name);
+      const runningNow = /^running$/i.test(b.boxStatus);
+      if (was === true && !runningNow && claims.has(b.name)) void touchClaimed(cfg, b.name).catch(() => {});
+      lastSeenStatus.set(b.name, runningNow);
+    }
+    for (const k of [...lastSeenStatus.keys()]) if (!boxes.some((b) => b.name === k)) lastSeenStatus.delete(k);
     return boxes.map((b) => ({
       ...b,
       ...(titles[b.name] ? { title: titles[b.name] } : {}),
@@ -308,7 +335,7 @@ if (HAS_WEB) {
 app.get("/monitor.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   try {
-    res.json(await gatherMonitor(cfg));
+    res.json((await gatherMonitor(cfg)).map((b) => ({ ...b, ...(b.task ? { task: redactor.redact(b.task) } : {}), ...(b.question ? { question: redactor.redact(b.question) } : {}) })));
   } catch (e) {
     res.status(500).json({ error: String((e as Error).message ?? e) });
   }
@@ -343,7 +370,7 @@ app.get("/watch.json", async (req: Request, res: Response) => {
   const lines = Number(req.query.lines);
   try {
     res.json(
-      Number.isFinite(lines) && lines > 0 ? redactSnap(await gatherWatch(cfg, session, lines)) : await watchHub.read(session)
+      Number.isInteger(lines) && lines > 0 && lines <= 5000 ? redactSnap(await gatherWatch(cfg, session, lines)) : await watchHub.read(session)
     );
   } catch (e) {
     res.status(500).json({ error: String((e as Error).message ?? e) });
@@ -424,8 +451,12 @@ app.get("/artifact", async (req: Request, res: Response) => {
     res.setHeader("Content-Disposition", `${disposition}; filename="${name.replace(/["\\]/g, "_")}"`);
     res.setHeader("Cache-Control", "no-store");
     // Text artifacts (source, logs, JSON, .env dumps) are redacted like the transcript; binaries pass.
-    if (/^(text\/|application\/(json|javascript|xml|x-sh))/.test(result.contentType)) {
-      res.send(redactor.redact(Buffer.isBuffer(result.data) ? result.data.toString("utf8") : String(result.data)));
+    const buf = Buffer.isBuffer(result.data) ? result.data : Buffer.from(String(result.data));
+    // Redact anything that is text — by declared type, or by content for unknown extensions (.env,
+    // .pem, .ini, extensionless dumps): no NUL bytes in the first 8 KB and it decodes as UTF-8.
+    const looksText = !buf.subarray(0, 8192).includes(0) && (() => { try { new TextDecoder("utf-8", { fatal: true }).decode(buf); return true; } catch { return false; } })();
+    if (/^(text\/|application\/(json|javascript|xml|x-sh))/.test(result.contentType) || (result.contentType === "application/octet-stream" && looksText)) {
+      res.send(redactor.redact(buf.toString("utf8")));
     } else {
       res.send(result.data);
     }
@@ -453,7 +484,7 @@ app.post("/ask.json", async (req: Request, res: Response) => {
       askInBox(cfg, session, question, { newThread: !!newThread }),
       driverStateLine(cfg, session),
     ]);
-    res.json({ ...result, driverState });
+    res.json({ ...result, ...("answer" in result && typeof result.answer === "string" ? { answer: redactor.redact(result.answer) } : {}), driverState: driverState ? redactor.redact(driverState) : driverState });
   } catch (e) {
     res.status(500).json({ error: String((e as Error).message ?? e) });
   }
@@ -606,7 +637,7 @@ app.get("/repos.json", async (req: Request, res: Response) => {
 app.post("/repos/attach.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   const { session, repo, ref } = (req.body ?? {}) as { session?: string; repo?: string; ref?: string };
-  if (!session || !repo || !/^[\w.-]+\/[\w.-]+$/.test(repo.trim())) {
+  if (!isBoxName(session) || !repo || !/^[\w.-]+\/[\w.-]+$/.test(repo.trim())) {
     res.status(400).json({ error: "session and repo (owner/name) are required" });
     return;
   }
@@ -702,7 +733,8 @@ app.get("/diff.json", async (req: Request, res: Response) => {
     return;
   }
   try {
-    res.json(await readDiff(cfg, session, path));
+    const d = await readDiff(cfg, session, path);
+    res.json({ ...d, ...("diff" in d && typeof d.diff === "string" ? { diff: redactor.redact(d.diff) } : {}), ...("original" in d && typeof d.original === "string" ? { original: redactor.redact(d.original) } : {}) });
   } catch (e) {
     res.status(400).json({ error: String((e as Error).message ?? e) });
   }
@@ -749,7 +781,7 @@ app.get("/pr.json", async (req: Request, res: Response) => {
 app.post("/keep.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   const { session, keep } = (req.body ?? {}) as { session?: string; keep?: boolean };
-  if (!session) {
+  if (!isBoxName(session)) {
     res.status(400).json({ error: "session is required" });
     return;
   }
@@ -938,7 +970,7 @@ app.get("/files.json", async (req: Request, res: Response) => {
 app.post("/teardown.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   const { session } = (req.body ?? {}) as { session?: string };
-  if (!session) {
+  if (!isBoxName(session)) {
     res.status(400).json({ error: "session is required" });
     return;
   }
@@ -967,9 +999,14 @@ app.post("/delegate.json", async (req: Request, res: Response) => {
     // Explicit repos from the picker win. With none given, a repo the TASK names ("review the last PR
     // in elseco deal service") is attached automatically, so the agent starts with the checkout it
     // was clearly asked about instead of hunting for it with `gh search`.
+    const REPO_RE = /^[\w.-]+\/[\w.-]+$/;
+    if (typeof body.repo === "string" && !REPO_RE.test(body.repo.trim().replace(/\.git$/i, ""))) {
+      res.status(400).json({ error: "repo must be owner/name" });
+      return;
+    }
     const explicit = Array.isArray(body.repos)
       ? (body.repos as Array<{ repo?: string; ref?: string }>)
-          .filter((r) => r && typeof r.repo === "string" && r.repo.trim())
+          .filter((r) => r && typeof r.repo === "string" && REPO_RE.test(r.repo.trim().replace(/\.git$/i, "")))
           .map((r) => ({ repo: r.repo!.trim(), ref: typeof r.ref === "string" && r.ref.trim() ? r.ref.trim() : undefined }))
       : [];
     let inferred: string[] = [];
@@ -995,7 +1032,8 @@ app.post("/delegate.json", async (req: Request, res: Response) => {
       : body.task;
     const result = await runDelegateFlow(cfg, deps, {
       attachments: attachments.length ? attachments : undefined,
-      source: body.source === "local" ? "local" : "git",
+      // A browser has no local tree to ship: git only. (`source:"local"` would rsync a controller-host path.)
+      source: "git",
       repo: typeof body.repo === "string" ? body.repo : undefined,
       repos: repos.length ? repos : undefined,
       task,

@@ -101,3 +101,15 @@ test("hub: drop forgets the box", async () => {
   assert.equal(hub.peek("b"), null);
   assert.equal(hub.active, 0);
 });
+
+test("hub: drop() settles pending readers instead of leaving them hanging", async () => {
+  let release: ((s: WatchSnapshot) => void) | null = null;
+  const hub = new WatchHub({ read: () => new Promise<WatchSnapshot>((r) => (release = r)), tickMs: 10_000, freshMs: 5_000 });
+  const pending = hub.read("b");
+  await tickAsync();
+  hub.drop("b");
+  await assert.rejects(pending, /box gone/);
+  release?.(snap("late"));
+  await tickAsync();
+  assert.equal(hub.peek("b"), null, "a dropped box does not come back from a late read");
+});

@@ -400,14 +400,19 @@ function AttachmentImage({ path }: { path: string }) {
   React.useEffect(() => {
     if (!session) return;
     let url: string | null = null;
+    let cancelled = false;
     api
       .artifactBlob(session, path.replace(/^\/workspace\//, ""))
       .then((b) => {
+        if (cancelled) return; // resolved after unmount / path change: nothing to show, nothing to leak
         url = URL.createObjectURL(b);
         setSrc(url);
       })
-      .catch(() => setFailed(true));
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
     return () => {
+      cancelled = true;
       if (url) URL.revokeObjectURL(url);
     };
   }, [session, path]);

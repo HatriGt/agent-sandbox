@@ -78,6 +78,16 @@ export function ThreadHeader({
   const [draft, setDraft] = React.useState(title);
   const [confirm, setConfirm] = React.useState(false);
   const [addRepo, setAddRepo] = React.useState(false);
+  const pickerRef = React.useRef<HTMLSpanElement>(null);
+  const openFromMenu = React.useRef(false);
+  React.useEffect(() => {
+    if (!addRepo) return;
+    const onDown = (e: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) setAddRepo(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [addRepo]);
   const inputRef = React.useRef<HTMLInputElement>(null);
   const cancelRef = React.useRef<HTMLButtonElement>(null);
   React.useEffect(() => setEditing(false), [box.name]);
@@ -98,8 +108,12 @@ export function ThreadHeader({
     }
   };
   const copyLink = async () => {
-    await navigator.clipboard.writeText(window.location.href);
-    toast.success("Link copied");
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      toast.success("Link copied");
+    } catch (e) {
+      toast.error("Could not copy the link", { description: e instanceof Error ? e.message : String(e) });
+    }
   };
   const copyTranscript = async () => {
     try {
@@ -162,10 +176,13 @@ export function ThreadHeader({
           </Button>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="sm" onClick={onToggleWorkspace} aria-pressed={showWorkspace} className={cn("text-muted-foreground", showWorkspace && "bg-accent text-foreground")} disabled={sleeping}>
-                <FolderTree />
-                <span className="hidden sm:inline">Files</span>
-              </Button>
+              {/* A disabled button emits no pointer events; the span carries the tooltip while asleep. */}
+              <span tabIndex={sleeping ? 0 : -1} className="inline-flex rounded-md outline-none">
+                <Button variant="ghost" size="sm" onClick={onToggleWorkspace} aria-pressed={showWorkspace} className={cn("text-muted-foreground", showWorkspace && "bg-accent text-foreground")} disabled={sleeping}>
+                  <FolderTree />
+                  <span className="hidden sm:inline">Files</span>
+                </Button>
+              </span>
             </TooltipTrigger>
             <TooltipContent side="bottom">{sleeping ? "Files — available once the sandbox is awake" : "Browse, diff and edit the workspace"}</TooltipContent>
           </Tooltip>
@@ -176,7 +193,16 @@ export function ThreadHeader({
                 <MoreHorizontal />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
+            <DropdownMenuContent
+              align="end"
+              onCloseAutoFocus={(e) => {
+                // Opening the repo picker from the menu: the picker owns focus, not the ⋯ trigger.
+                if (openFromMenu.current) {
+                  e.preventDefault();
+                  openFromMenu.current = false;
+                }
+              }}
+            >
               {box.role !== "pool-free" && (
                 <DropdownMenuItem onSelect={onToggleKeep} disabled={keeping}>
                   {kept ? <PinOff /> : <Pin />}
@@ -189,7 +215,13 @@ export function ThreadHeader({
                 Rename
               </DropdownMenuItem>
               {!sleeping && (
-                <DropdownMenuItem onSelect={() => setAddRepo(true)} disabled={!!attaching}>
+                <DropdownMenuItem
+                  onSelect={() => {
+                    openFromMenu.current = true;
+                    setAddRepo(true);
+                  }}
+                  disabled={!!attaching}
+                >
                   <Plus />
                   Attach a repository
                 </DropdownMenuItem>
@@ -255,7 +287,7 @@ export function ThreadHeader({
                 </span>
               )}
             </span>
-            <span className="relative shrink-0">
+            <span ref={pickerRef} className="relative shrink-0">
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <button

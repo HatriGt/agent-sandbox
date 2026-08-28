@@ -40,8 +40,13 @@ export interface LogDelta {
  * - shrank or diverged  -> reset with the whole log (client replaces its buffer)
  * - unchanged           -> none (nothing to send; a heartbeat will keep the pipe warm)
  */
-export function diffLog(prevOffset: number, latest: string): LogDelta {
+export function diffLog(prevOffset: number, latest: string, prevLog?: string): LogDelta {
   const len = latest.length;
+  // The reader serves a sliding tail window: once it fills, same-length or longer output is NOT a
+  // prefix extension. When the previous text is known, a mismatch means "replace", never "append".
+  if (prevLog !== undefined && prevLog.length === prevOffset && !latest.startsWith(prevLog)) {
+    return len === 0 && prevOffset === 0 ? { chunk: "", offset: 0, kind: "none" } : { chunk: latest, offset: len, kind: "reset" };
+  }
   if (len === prevOffset) return { chunk: "", offset: len, kind: "none" };
   if (len > prevOffset) return { chunk: latest.slice(prevOffset), offset: len, kind: "append" };
   // len < prevOffset: the log got shorter than what the client saw — replace wholesale.
@@ -133,6 +138,7 @@ export function streamWatch(res: Response, opts: StreamWatchOpts): () => void {
   let lastMeta = "";
   let lastRun: WatchSnapshot["runState"] | null = null;
   let sentSnapshot = false;
+  let lastLog = "";
   let closed = false;
   let tickTimer: NodeJS.Timeout | undefined;
   let beatTimer: NodeJS.Timeout | undefined;
@@ -171,14 +177,16 @@ export function streamWatch(res: Response, opts: StreamWatchOpts): () => void {
       const initial = offset > 0 && offset <= snap.log.length ? snap.log.slice(offset) : snap.log;
       const startOffset = offset > 0 && offset <= snap.log.length ? offset : 0;
       offset = snap.log.length;
+      lastLog = snap.log;
       sentSnapshot = true;
       lastMeta = meaningfulStateKey(meta);
       lastRun = snap.runState;
       send(sseFrame("snapshot", { meta, log: initial, from: startOffset }, offset));
     } else {
-      const delta = diffLog(offset, snap.log);
+      const delta = diffLog(offset, snap.log, lastLog);
       if (delta.kind !== "none") {
         offset = delta.offset;
+        lastLog = snap.log;
         send(sseFrame(delta.kind, { chunk: delta.chunk }, offset));
       }
       // Only push a `state` frame when a MEANINGFUL field changed (runState/waiting/exit/box status/

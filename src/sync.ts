@@ -14,7 +14,19 @@ import type { Config } from "./config.js";
 
 /** Remote staging path (session root) for a given session. Holds one subdir per repo. */
 export function stagingPathFor(cfg: Config, session: string): string {
-  return path.posix.join(cfg.vpsStagingDir, session);
+  assertBoxName(session);
+  const p = path.posix.join(cfg.vpsStagingDir, session);
+  if (!p.startsWith(cfg.vpsStagingDir.replace(/\/+$/, "") + "/")) throw new Error(`staging path escapes ${cfg.vpsStagingDir}`);
+  return p;
+}
+
+/** Box / session names are `[A-Za-z0-9_.-]+`, never "." or "..": they become directory names and shell words. */
+export const BOX_NAME_RE = /^(?!\.\.?$)[\w.-]{1,128}$/;
+export function isBoxName(s: unknown): s is string {
+  return typeof s === "string" && BOX_NAME_RE.test(s);
+}
+export function assertBoxName(s: string): void {
+  if (!isBoxName(s)) throw new Error("invalid box name");
 }
 
 /** Remote staging path for a single repo within a session: <sessionRoot>/<name>. */

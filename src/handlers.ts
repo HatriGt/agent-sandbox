@@ -9,6 +9,7 @@
  * Ask-if-missing (Phase 1): delegate validates its args and, when something required is missing,
  * returns a plain-text question instead of failing. The caller re-calls delegate with the value.
  */
+import { isBoxName } from "./sync.js";
 import { z } from "zod";
 import type { Config } from "./config.js";
 import { validateDelegateInput, type DelegateSource, type DelegatePlan } from "./delegate-input.js";
@@ -315,6 +316,7 @@ export function registerTools(
     "Stop and remove the box for a delegated session.",
     { session: z.string().describe("Session id returned by delegate.") },
     async ({ session }: { session: string }) => {
+      if (!isBoxName(session)) throw new Error("invalid session name");
       await deps.teardown(cfg, session);
       return text(`Torn down session=${session} (box removed).`);
     }

@@ -5,6 +5,7 @@
  * All calls run on the VPS over SSH so this works whether the MCP is driven from the client
  * or from the box itself. Args are passed as an argv array (no shell interpolation).
  */
+import { assertBoxName } from "./sync.js";
 import { run, shellQuote } from "./exec.js";
 import { sshMuxOpts } from "./ssh.js";
 import { listClaims, listKept, markClaimed, shouldKeepStopped, unmarkClaimed, unmarkKept } from "./claims.js";
@@ -1389,6 +1390,7 @@ export async function snapshotCreate(cfg: Config, fromBox: string, name: string)
 
 /** Stop then remove the box, and clean its staging dir on the VPS if given. */
 export async function teardown(cfg: Config, box: string, stagingDir?: string): Promise<void> {
+  assertBoxName(box);
   await msb(cfg, ["stop", box], false);
   await msb(cfg, ["rm", "--force", box], false);
   await unmarkClaimed(cfg, box);

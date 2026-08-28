@@ -36,9 +36,10 @@ export function usePoll<T>(
 
     const run = async () => {
       controller?.abort();
-      controller = new AbortController();
+      const mine = new AbortController();
+      controller = mine;
       try {
-        const next = await fnRef.current(controller.signal);
+        const next = await fnRef.current(mine.signal);
         if (cancelled) return;
         setData(next);
         opts.onData?.(next);
@@ -50,12 +51,14 @@ export function usePoll<T>(
         setError(e instanceof Error ? e.message : String(e));
         setLive(false);
       } finally {
-        if (!cancelled) timer = window.setTimeout(run, intervalMs);
+        // Schedule the next tick only if this run was not superseded (aborted) and the tab is visible.
+        if (!cancelled && !mine.signal.aborted && !document.hidden) timer = window.setTimeout(run, intervalMs);
       }
     };
 
     const onVisibility = () => {
       window.clearTimeout(timer);
+      timer = undefined;
       if (document.hidden) controller?.abort();
       else void run();
     };

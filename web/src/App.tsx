@@ -56,15 +56,16 @@ function writeFleetCache(s: FleetSnapshot) {
   }
 }
 
-function useFreshness(updatedAt: number | null) {
+/** "Updated 3s ago" — ticks once a second, but only re-renders itself, not the whole console. */
+function Freshness({ updatedAt }: { updatedAt: number | null }) {
   const [, tick] = React.useState(0);
   React.useEffect(() => {
     const t = window.setInterval(() => tick((n) => n + 1), 1000);
     return () => window.clearInterval(t);
   }, []);
-  if (!updatedAt) return "connecting";
+  if (!updatedAt) return <>connecting</>;
   const secs = Math.max(0, Math.round((Date.now() - updatedAt) / 1000));
-  return secs < 2 ? "just now" : `${secs}s ago`;
+  return <>{secs < 2 ? "just now" : `${secs}s ago`}</>;
 }
 
 function usePersisted(key: string, initial: boolean) {
@@ -98,7 +99,6 @@ export default function App() {
     initial: cached.current,
     onData: writeFleetCache,
   });
-  const freshness = useFreshness(updatedAt);
   const { runs, remember } = useSessionRuns();
   const lifecycle = data?.lifecycle ?? NO_LIFECYCLE;
 
@@ -401,7 +401,7 @@ export default function App() {
                   <NavItem active={view === "integrations"} onClick={showAccounts} icon={<Plug />} label="Integrations" shortcut="g a" />
                 </span>
                 <div className="flex items-center justify-between px-2.5 pt-1">
-                  <p className="text-muted-foreground text-micro">{live ? `Updated ${freshness}` : data ? "Reconnecting…" : error ? "Offline — retrying" : "Connecting…"}</p>
+                  <p className="text-muted-foreground text-micro">{live ? <>Updated <Freshness updatedAt={updatedAt} /></> : data ? "Reconnecting…" : error ? "Offline — retrying" : "Connecting…"}</p>
                   <div className="flex items-center">
                     {notify.supported && (
                       <Tooltip>

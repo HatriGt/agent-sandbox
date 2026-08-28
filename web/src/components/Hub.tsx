@@ -225,9 +225,7 @@ export function Hub({
     const id = `pending-${Date.now()}`;
     setBusy(true);
     setError(null);
-    setTask("");
     const attached = images;
-    setImages([]);
     onPending({ id, task: t });
     onBooting(t);
     try {
@@ -237,6 +235,9 @@ export function Hub({
         attachments: attached.length ? attached.map((i) => ({ name: i.name, dataUrl: i.dataUrl })) : undefined,
       });
       if (res.ok) {
+        // Accepted: only now let go of the brief and the images (the draft effect clears storage too).
+        setTask("");
+        setImages([]);
         if (res.inferred?.length) {
           toast("Attached from the task", {
             description: `${res.inferred.join(", ")} — named in your task, so it was checked out for the agent.`,
@@ -247,14 +248,14 @@ export function Hub({
       } else {
         onFailed();
         setError(res.question);
-        setTask(t);
-        setImages(attached);
+        // The Hub may have been swapped out for the booting pane: the toast survives, the draft is still in storage.
+        toast.error("Could not start the task", { description: res.question });
       }
     } catch (e) {
       onFailed();
-      setError(e instanceof Error ? e.message : String(e));
-      setTask(t);
-      setImages(attached);
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg);
+      toast.error("Could not start the task", { description: msg });
     } finally {
       onSettled(id);
       setBusy(false);

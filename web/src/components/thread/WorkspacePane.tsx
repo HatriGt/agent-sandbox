@@ -127,20 +127,29 @@ export function WorkspacePane({ session, changes, open, onClose, onSaved, repos,
   // Git's own view of the repo (branch, ahead/behind, last commit) — shared by Source Control and the status bar.
   const [git, setGit] = React.useState<GitStatus | null>(null);
   const [gitErr, setGitErr] = React.useState<string | null>(null);
+  const activeRepoName = activeRepo?.name;
   const loadGit = React.useCallback(() => {
-    if (!activeRepo) return;
+    if (!activeRepoName) return;
     api
-      .gitStatus(session, activeRepo.name)
+      .gitStatus(session, activeRepoName)
       .then((g) => {
         setGit(g);
         setGitErr(null);
       })
       .catch((e: unknown) => setGitErr(e instanceof Error ? e.message : String(e)));
-  }, [session, activeRepo]);
+  }, [session, activeRepoName]);
   React.useEffect(loadGit, [loadGit, changes.length]);
 
   // Drag the left edge to resize; the width persists across sessions.
-  const [width, setWidth] = React.useState<number>(() => Number(localStorage.getItem("asb-workspace-w")) || 0);
+  const [width, setWidth] = React.useState<number>(() => {
+    try {
+      return Number(localStorage.getItem("asb-workspace-w")) || 0;
+    } catch {
+      return 0;
+    }
+  });
+  const widthRef = React.useRef(width);
+  widthRef.current = width;
   const dragging = React.useRef(false);
   const onDrag = (e: React.PointerEvent) => {
     dragging.current = true;
@@ -152,7 +161,11 @@ export function WorkspacePane({ session, changes, open, onClose, onSaved, repos,
     };
     const up = () => {
       dragging.current = false;
-      setWidth((w) => (localStorage.setItem("asb-workspace-w", String(w)), w));
+      try {
+        localStorage.setItem("asb-workspace-w", String(widthRef.current));
+      } catch {
+        /* storage blocked: the width lives for this tab only */
+      }
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
     };

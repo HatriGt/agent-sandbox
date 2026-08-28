@@ -39,7 +39,7 @@ interface Entry {
   lastReadAt: number;
   timer: NodeJS.Timeout | null;
   inFlight: Promise<WatchSnapshot> | null;
-  waiters: Array<(s: WatchSnapshot) => void>;
+  waiters: Array<{ resolve: (s: WatchSnapshot) => void; reject: (e: Error) => void }>;
   failures: number;
 }
 
@@ -84,7 +84,7 @@ export class WatchHub {
       this.ensureLoop(session, e);
       return Promise.resolve(e.snap);
     }
-    const p = new Promise<WatchSnapshot>((resolve) => e.waiters.push(resolve));
+    const p = new Promise<WatchSnapshot>((resolve, reject) => e.waiters.push({ resolve, reject }));
     this.ensureLoop(session, e);
     if (!e.inFlight && !e.timer) void this.tick(session, e);
     else if (!e.inFlight && e.timer) {
@@ -102,6 +102,10 @@ export class WatchHub {
     if (!e) return;
     if (e.timer) clearTimeout(e.timer);
     this.entries.delete(session);
+    // Nobody may hang on a box that no longer exists: hand out the last snapshot, or fail fast.
+    const waiters = e.waiters;
+    e.waiters = [];
+    for (const w of waiters) (e.snap ? w.resolve(e.snap) : w.reject(new Error(`no snapshot for ${session}: box gone`)));
   }
 
   /** Stop every loop (server shutdown / tests). */
@@ -136,13 +140,19 @@ export class WatchHub {
     } finally {
       e.inFlight = null;
     }
-    if (!this.entries.has(session)) return; // dropped while reading
+    if (!this.entries.has(session)) return; // dropped while reading (drop() settled the waiters)
     if (snap) {
       e.snap = snap;
       e.at = this.now();
       const waiters = e.waiters;
       e.waiters = [];
-      for (const w of waiters) w(snap);
+      for (const w of waiters) w.resolve(snap);
+    } else if (e.failures >= 3 && e.waiters.length) {
+      // Three misses in a row: readers get the error instead of waiting forever.
+      const waiters = e.waiters;
+      e.waiters = [];
+      const err = new Error(`could not read ${session} (${e.failures} failed attempts)`);
+      for (const w of waiters) (e.snap ? w.resolve(e.snap) : w.reject(err));
     }
 
     // Keep tailing while someone read recently; otherwise let the entry go quiet (cache retained).

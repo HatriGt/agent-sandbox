@@ -106,3 +106,19 @@ test("meaningfulStateKey changes when boxStatus changes", () => {
   const stopped = meaningfulStateKey({ ...baseMeta, boxStatus: "stopped" });
   assert.notEqual(running, stopped);
 });
+
+test("diffLog: a same-length or longer log that is not a prefix extension is a reset, not an append", async () => {
+  
+  // Sliding tail window: the first line fell off, a new one arrived; length is unchanged.
+  const prev = "line1\nline2\nline3\n";
+  const latest = "line2\nline3\nline4\n";
+  assert.equal(diffLog(prev.length, latest, prev).kind, "reset");
+  // Longer but divergent: still a reset.
+  assert.equal(diffLog(prev.length, "zzz" + latest, prev).kind, "reset");
+  // A true extension is still an append of only the new tail.
+  const d = diffLog(prev.length, prev + "line4\n", prev);
+  assert.equal(d.kind, "append");
+  assert.equal(d.chunk, "line4\n");
+  // Without prevLog the legacy length-only behaviour is unchanged.
+  assert.equal(diffLog(prev.length, latest).kind, "none");
+});

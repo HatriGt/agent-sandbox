@@ -5,6 +5,7 @@
  *
  * Pure parsers (tokenType/parseLogin/parseOrgs) are unit-tested; the probe* functions do IO.
  */
+import { shellQuote } from "./exec.js";
 import { run } from "./exec.js";
 import { sshMuxOpts } from "./ssh.js";
 import { ownerOf, type Account, type TokenType } from "./gh-token-store.js";
@@ -34,9 +35,11 @@ export function parseOrgs(body: string): string[] {
 
 /** curl a GitHub API path on the VPS with the token; returns the response body (empty on failure). */
 async function ghGet(cfg: Config, token: string, path: string): Promise<string> {
+  // Token and path are caller-supplied; both go through the VPS shell, so both are single-quoted.
+  if (!/^\/[\w./%?=&+-]*$/.test(path)) return "";
   const remote =
-    `curl -sf -H "Authorization: token ${token}" ` +
-    `-H "Accept: application/vnd.github+json" https://api.github.com${path}`;
+    `curl -sf -H ${shellQuote(`Authorization: token ${token}`)} ` +
+    `-H "Accept: application/vnd.github+json" ${shellQuote(`https://api.github.com${path}`)}`;
   const r = await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, remote], { check: false });
   return r.stdout ?? "";
 }
