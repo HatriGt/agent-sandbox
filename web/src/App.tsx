@@ -255,7 +255,7 @@ export default function App() {
   const health = !live && !data ? "offline" : waiting.length ? "attention" : "ok";
   const loading = !data && !error;
   const paneKey =
-    view === "fleet" ? "fleet" : view === "integrations" ? "integrations" : booting && !selectedBox ? "booting" : selectedBox ? `box:${selectedBox.name}` : "hub";
+    view === "fleet" ? "fleet" : view === "integrations" ? "integrations" : booting && !selectedBox ? "booting" : selectedBox ? `box:${selectedBox.name}` : view === "box" && !data ? "box-loading" : "hub";
 
   return (
     <TooltipProvider delayDuration={400}>
@@ -403,7 +403,7 @@ export default function App() {
                   <NavItem active={view === "integrations"} onClick={showAccounts} icon={<Plug />} label="Integrations" shortcut="g a" />
                 </span>
                 <div className="flex items-center justify-between px-2.5 pt-1">
-                  <p className="text-muted-foreground text-micro">{live ? `Updated ${freshness}` : data ? "Reconnecting…" : "Offline — retrying"}</p>
+                  <p className="text-muted-foreground text-micro">{live ? `Updated ${freshness}` : data ? "Reconnecting…" : error ? "Offline — retrying" : "Connecting…"}</p>
                   <div className="flex items-center">
                     {notify.supported && (
                       <Tooltip>
@@ -451,6 +451,8 @@ export default function App() {
                   <Integrations onBack={backToRail} />
                 ) : booting && !selectedBox ? (
                   <BootingThread task={booting.task} warm={booting.warm} onBack={backToRail} />
+                ) : view === "box" && !selectedBox && !data ? (
+                  <ThreadPageSkeleton />
                 ) : selectedBox ? (
                   <Thread
                     box={selectedBox}
@@ -520,6 +522,38 @@ export default function App() {
 }
 
 /** Placeholder while a code-split page loads (sub-100ms on a warm cache; shaped like a page). */
+/** The thread page before the fleet has answered: header, connected strip and transcript placeholders. */
+function ThreadPageSkeleton() {
+  return (
+    <div className="flex h-full min-h-0 flex-col" aria-busy="true" aria-label="Loading run">
+      <div className="flex h-14 shrink-0 items-center gap-3 border-b px-5">
+        <span className="bg-muted h-6 w-16 animate-pulse rounded-full" />
+        <span className="bg-muted h-3.5 w-72 animate-pulse rounded" />
+        <span className="bg-muted ml-auto h-3 w-40 animate-pulse rounded" />
+      </div>
+      <div className="h-9 shrink-0 border-b" />
+      <div className="mx-auto w-full max-w-3xl flex-1 px-6 pt-8">
+        <div className="bg-muted ml-auto h-11 w-[46%] animate-pulse rounded-2xl" />
+        <div className="mt-8 space-y-2.5">
+          <div className="bg-muted h-2.5 w-14 animate-pulse rounded" />
+          <div className="bg-muted h-3.5 w-[92%] animate-pulse rounded" />
+          <div className="bg-muted h-3.5 w-[78%] animate-pulse rounded" />
+          <div className="bg-muted h-3.5 w-[85%] animate-pulse rounded" />
+        </div>
+        <div className="bg-muted mt-7 h-8 w-56 animate-pulse rounded-full" />
+        <div className="mt-7 space-y-2.5">
+          <div className="bg-muted h-2.5 w-14 animate-pulse rounded" />
+          <div className="bg-muted h-3.5 w-[88%] animate-pulse rounded" />
+          <div className="bg-muted h-3.5 w-[64%] animate-pulse rounded" />
+        </div>
+      </div>
+      <div className="mx-auto w-full max-w-3xl px-6 pb-4">
+        <div className="bg-card h-24 rounded-2xl border" />
+      </div>
+    </div>
+  );
+}
+
 function PageSkeleton() {
   return (
     <div className="mx-auto max-w-3xl px-6 py-9" aria-busy="true">
