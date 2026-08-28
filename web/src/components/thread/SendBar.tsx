@@ -398,7 +398,7 @@ export function SendBar({
               onClick={send}
               disabled={sending || (!value.trim() && !files.length && !images.length)}
               aria-label={toAgent ? (busy ? "Queue for the agent" : "Send to the agent") : "Ask a side question"}
-              className="rounded-full"
+              className="rounded-full transition-[opacity,transform,background-color] duration-200 disabled:opacity-35 enabled:hover:scale-105"
             >
               {sending ? <Loader2 className="animate-spin" /> : busy && toAgent ? <Clock /> : <ArrowUp />}
             </Button>

@@ -53,8 +53,10 @@ export function ThreadMinimap({ turns, scrollerRef }: { turns: Turn[]; scrollerR
   };
 
   return (
-    <nav aria-label="Conversation map" className="absolute top-1/2 left-2 z-10 hidden -translate-y-1/2 lg:block" onMouseLeave={() => setHover(null)}>
-      <ol className="flex flex-col gap-[7px] py-2 pr-4 pl-1">
+    <nav aria-label="Conversation map" className="group/map absolute top-1/2 left-0 z-10 hidden w-12 -translate-y-1/2 min-[1120px]:block" onMouseLeave={() => setHover(null)}>
+      {/* A faint rail appears when the pointer is near, so the ticks read as one control. */}
+      <span className="bg-border/80 absolute top-0 bottom-0 left-[13px] w-px opacity-0 transition-opacity duration-200 group-hover/map:opacity-100" aria-hidden />
+      <ol className="flex flex-col gap-[7px] py-2 pl-2">
         {turns.map((t, i) => {
           const on = i === active;
           return (
@@ -67,7 +69,7 @@ export function ThreadMinimap({ turns, scrollerRef }: { turns: Turn[]; scrollerR
                 onBlur={() => setHover(null)}
                 aria-label={`Jump to ${t.label}: ${t.you.slice(0, 60)}`}
                 aria-current={on ? "true" : undefined}
-                className="group -my-1 flex h-4 cursor-pointer items-center"
+                className="group no-press -my-1 flex h-4 w-10 cursor-pointer items-center"
               >
                 <span
                   className={cn(

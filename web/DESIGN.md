@@ -408,3 +408,14 @@ h2 20 · h1 28` (all registered with tailwind-merge). Rules the audit enforced:
   that the app replaces on mount. The first frame is the layout, never white.
 - Workspace opens straight into the most useful file (first change → README → first root file);
   the scroll-to-latest button sits bottom-right of the column instead of over the text.
+
+## Round: motion pass (2026-08-28)
+
+- Interaction grammar in CSS: every control eases colour/border/shadow in 150 ms with a soft press
+  (`scale(0.985)`); `.no-press` opts out where a transform would fight another one.
+- Workspace pane glides open/closed (width animates 0 ↔ 58% ↔ 100%) instead of snapping; the active
+  editor tab's background slides between tabs (`layoutId`).
+- Tool rows enter with the same motion as prose; the send button dims when empty and lifts on hover.
+- Minimap: 40 px hit area, a faint rail appears when the pointer is near, hidden below 1120 px.
+- Sidebar rows: state and role words share a baseline. Breadcrumb folders appear only when the
+  header is wide enough to show them whole (container queries), never as chopped fragments.

@@ -191,7 +191,7 @@ function ShellItem({ event, live }: { event: ToolEvent; live?: boolean }) {
     );
   }
   return (
-    <div className="min-w-0">
+    <div className="enter min-w-0">
       <div
         className={cn(
           "bg-trace overflow-hidden rounded-lg border border-white/8",
@@ -251,7 +251,7 @@ function StepItem({ event, live }: { event: ToolEvent; live?: boolean }) {
   const lines = event.result ? lineCount(event.result) : 0;
 
   return (
-    <div className="min-w-0">
+    <div className="enter min-w-0">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}

@@ -562,3 +562,14 @@
   text-align: left;
   animation: dots 1.4s steps(1, end) infinite;
 }
+
+/* Interaction grammar (asb-interactive): controls ease colour/border/shadow in 150ms and give a
+   slight press. Applied globally so no component has to remember it. */
+button, [role="tab"], [role="radio"], [role="switch"], a[href], summary {
+  transition-property: background-color, border-color, color, box-shadow, opacity, transform;
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+button:not(:disabled):active, [role="tab"]:active, [role="radio"]:active { transform: scale(0.985); }
+/* Editor tabs and rows that already scale on hover keep their own transform. */
+.no-press:active { transform: none !important; }

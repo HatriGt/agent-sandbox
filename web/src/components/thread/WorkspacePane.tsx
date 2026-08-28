@@ -163,12 +163,12 @@ export function WorkspacePane({ session, changes, open, onClose, onSaved, repos,
   const filesTitle = view === "scm" ? "Changes" : "Files";
   return (
     <motion.aside
-      style={!full && width ? { width, minWidth: width } : undefined}
-      initial={{ x: 24, opacity: 0 }}
-      animate={{ x: 0, opacity: 1 }}
-      exit={{ x: 24, opacity: 0 }}
-      transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-      className={cn("bg-card absolute inset-0 z-20 flex min-w-0 flex-col md:relative md:inset-auto md:h-full md:border-l", full ? "md:flex-1" : "md:w-[58%] md:min-w-[34rem]")}
+      initial={{ width: 0, opacity: 0 }}
+      animate={{ width: full ? "100%" : width ? width : "58%", opacity: 1 }}
+      exit={{ width: 0, opacity: 0 }}
+      transition={{ width: { duration: 0.28, ease: [0.22, 1, 0.36, 1] }, opacity: { duration: 0.18 } }}
+      style={{ minWidth: full ? undefined : width ? width : undefined }}
+      className={cn("bg-card absolute inset-0 z-20 flex min-w-0 flex-col overflow-hidden md:relative md:inset-auto md:h-full md:border-l", !full && !width && "md:min-w-[34rem]")}
       aria-label="Workspace"
     >
       {!full && <div role="separator" aria-orientation="vertical" onPointerDown={onDrag} className="hover:bg-live/60 active:bg-live absolute top-0 bottom-0 -left-1 z-30 hidden w-2 cursor-col-resize transition-colors md:block" title="Drag to resize" />}
@@ -180,8 +180,9 @@ export function WorkspacePane({ session, changes, open, onClose, onSaved, repos,
             const on = t.path === active;
             const base = t.path.slice(t.path.lastIndexOf("/") + 1);
             return (
-              <div key={t.path} role="tab" aria-selected={on} className={cn("group relative flex h-7 shrink-0 items-center gap-1.5 rounded-md pr-1 pl-2 text-meta transition-colors", on ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-muted/60")}>
-                <button type="button" onClick={() => setActive(t.path)} className="flex cursor-pointer items-center gap-1.5">
+              <div key={t.path} role="tab" aria-selected={on} className={cn("group relative flex h-7 shrink-0 items-center gap-1.5 rounded-md pr-1 pl-2 text-meta transition-colors", on ? "text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-muted/60")}>
+                {on && <motion.span layoutId="ws-active-tab" className="bg-muted absolute inset-0 -z-10 rounded-md" transition={{ type: "spring", stiffness: 500, damping: 40 }} aria-hidden />}
+                <button type="button" onClick={() => setActive(t.path)} className="no-press flex cursor-pointer items-center gap-1.5">
                   <FileIcon path={t.path} size={14} />
                   <span className={cn("text-micro", t.dirty && "italic")}>{base}</span>
                 </button>
@@ -733,12 +734,13 @@ function Breadcrumb({ path }: { path: string }) {
   const dirs = segs.slice(0, -1);
   const shown = dirs.length > 4 ? [dirs[0], "…", ...dirs.slice(-2)] : dirs;
   return (
-    <nav aria-label="Breadcrumb" className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-meta" title={path}>
-      {/* Folders give way first (they truncate); the file name is the one part that always survives. */}
+    <nav aria-label="Breadcrumb" className="@container flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-meta" title={path}>
+      {/* Folders are shown only when the header is wide enough to show them whole; below that the
+          trail is just the file (the full path stays in the tooltip). Never a row of chopped words. */}
       {shown.map((d, i) => (
         <React.Fragment key={i}>
-          <span className={cn("text-muted-foreground min-w-0 max-w-[9rem] truncate", d === "…" && "shrink-0 tracking-widest")}>{d}</span>
-          <ChevronRight className="text-muted-foreground/50 size-3 shrink-0" aria-hidden />
+          <span className={cn("text-muted-foreground hidden shrink-0 @min-[460px]:inline", d === "…" && "tracking-widest", i < shown.length - 1 && "@min-[460px]:hidden @min-[640px]:inline")}>{d}</span>
+          <ChevronRight className={cn("text-muted-foreground/50 hidden size-3 shrink-0 @min-[460px]:inline", i < shown.length - 1 && "@min-[460px]:hidden @min-[640px]:inline")} aria-hidden />
         </React.Fragment>
       ))}
       <span className="text-foreground flex shrink-0 items-center gap-1.5 font-medium">
