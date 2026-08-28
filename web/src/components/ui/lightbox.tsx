@@ -88,7 +88,7 @@ export function Lightbox({ src, name, open, onClose }: { src: string | null; nam
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.18 }}
-          className="fixed inset-0 z-[100] flex flex-col bg-black/85 backdrop-blur-sm"
+          className="fixed inset-0 z-[100] flex flex-col bg-black/80 backdrop-blur-sm"
           role="dialog"
           aria-modal="true"
           aria-label={`Image ${name}`}
@@ -104,7 +104,7 @@ export function Lightbox({ src, name, open, onClose }: { src: string | null; nam
                 </span>
               )}
             </p>
-            <div className="flex items-center gap-0.5 rounded-lg bg-white/10 p-0.5">
+            <div className="flex items-center gap-0.5 rounded-md bg-white/10 p-0.5">
               <Tool label="Zoom out (−)" onClick={() => zoom(0.8)}>
                 <Minus className="size-4" />
               </Tool>
@@ -158,7 +158,7 @@ export function Lightbox({ src, name, open, onClose }: { src: string | null; nam
                 initial={{ opacity: 0, scale: 0.96 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-                className="absolute top-1/2 left-1/2 max-w-none rounded-md shadow-[0_24px_80px_-20px_rgba(0,0,0,0.8)]"
+                className="absolute top-1/2 left-1/2 max-w-none rounded-md shadow-e5"
                 style={{
                   width: natural ? natural.w : undefined,
                   height: natural ? natural.h : undefined,

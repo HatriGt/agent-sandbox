@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 export function TestResultsCard({ report, onRaw, rawOpen }: { report: TestReport; onRaw?: () => void; rawOpen?: boolean }) {
   const total = report.passed + report.failed + report.skipped;
   return (
-    <div className="bg-card overflow-hidden rounded-xl border shadow-xs">
+    <div className="bg-card overflow-hidden rounded-xl border shadow-e1">
       <div className="flex flex-wrap items-center gap-2 border-b px-3.5 py-2.5">
         <Chip status="pass" n={report.passed} label="passed" />
         {report.failed > 0 && <Chip status="fail" n={report.failed} label="failed" />}
@@ -49,9 +49,9 @@ function Chip({ status, n, label }: { status: TestStatus; n: number; label: stri
     <span
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-meta font-medium",
-        status === "pass" && "bg-ok/12 text-ok",
+        status === "pass" && "bg-ok/10 text-ok",
         status === "fail" && "bg-destructive/10 text-destructive",
-        status === "skip" && "bg-attention/18 text-attention-text"
+        status === "skip" && "bg-attention/20 text-attention-text"
       )}
     >
       <span className={cn("grid size-4 place-items-center rounded-full border-[1.5px]", status === "pass" && "border-ok", status === "fail" && "border-destructive", status === "skip" && "border-attention-text")}>
@@ -91,7 +91,7 @@ function FileGroup({ file, defaultOpen }: { file: TestReport["files"][number]; d
             className="overflow-hidden"
           >
             {file.tests.map((t, i) => (
-              <li key={`${i}-${t.name}`} className={cn("flex items-center gap-2.5 border-t py-1.5 pr-3.5 pl-10 text-meta", t.status === "fail" ? "text-foreground" : "text-foreground/85")}>
+              <li key={`${i}-${t.name}`} className={cn("flex items-center gap-2.5 border-t py-1.5 pr-3.5 pl-10 text-meta", t.status === "fail" ? "text-foreground" : "text-foreground")}>
                 <StatusDot status={t.status} small />
                 <span className="min-w-0 flex-1 truncate">{t.name}</span>
                 {t.ms != null && <span className={cn("tabular text-micro", t.status === "fail" ? "text-destructive" : "text-muted-foreground")}>{fmtMs(t.ms)}</span>}
@@ -143,7 +143,7 @@ export function PullRequestCard({ url, repo, number }: { url: string; repo: stri
   const state = info?.state ?? "open";
   const Icon = state === "merged" ? GitMerge : state === "draft" ? GitPullRequestDraft : GitPullRequest;
   const tone =
-    state === "merged" ? "bg-sleep/15 text-sleep" : state === "closed" ? "bg-destructive/10 text-destructive" : state === "draft" ? "bg-muted text-muted-foreground" : "bg-ok/12 text-ok";
+    state === "merged" ? "bg-sleep/20 text-sleep" : state === "closed" ? "bg-destructive/10 text-destructive" : state === "draft" ? "bg-muted text-muted-foreground" : "bg-ok/10 text-ok";
   return (
     <a
       href={url}

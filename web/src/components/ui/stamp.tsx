@@ -18,26 +18,26 @@ import type { DisplayState } from "@/lib/lifecycle";
 type Tone = { icon: React.ComponentType<LucideProps>; word: (exit?: number) => string; text: string; pill: string };
 
 const TONE: Record<DisplayState | "failed", Tone> = {
-  running: { icon: CircleDot, word: () => "working", text: "text-live", pill: "bg-live/12 text-live ring-live/25" },
+  running: { icon: CircleDot, word: () => "working", text: "text-live", pill: "bg-live/10 text-live ring-live/20" },
   waiting: {
     icon: Pause,
     word: () => "needs you",
     text: "text-attention-text",
-    pill: "bg-attention/18 text-attention-text ring-attention/45",
+    pill: "bg-attention/20 text-attention-text ring-attention/40",
   },
-  done: { icon: Check, word: (e) => doneLabel(e), text: "text-ok", pill: "bg-ok/12 text-ok ring-ok/25" },
+  done: { icon: Check, word: (e) => doneLabel(e), text: "text-ok", pill: "bg-ok/10 text-ok ring-ok/20" },
   failed: {
     icon: X,
     word: (e) => doneLabel(e),
     text: "text-destructive",
-    pill: "bg-destructive/10 text-destructive ring-destructive/25",
+    pill: "bg-destructive/10 text-destructive ring-destructive/20",
   },
   idle: { icon: Circle, word: () => "idle", text: "text-muted-foreground", pill: "bg-muted text-muted-foreground ring-border" },
   sleeping: {
     icon: MoonStar,
     word: () => "sleeping",
     text: "text-sleep",
-    pill: "bg-sleep/12 text-sleep ring-sleep/25",
+    pill: "bg-sleep/10 text-sleep ring-sleep/20",
   },
 };
 

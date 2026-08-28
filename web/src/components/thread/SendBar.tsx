@@ -217,10 +217,10 @@ export function SendBar({
           }}
           isLoading={sending}
           className={cn(
-            "bg-card rounded-2xl p-2 shadow-xs transition-[border-color,box-shadow] duration-300",
+            "bg-card rounded-xl p-2 shadow-e1 transition-[border-color,box-shadow] duration-300",
             toAgent ? "border-line-strong" : "border-border border-dashed",
             sleeping && "border-sleep/50",
-            dragOver && "border-live ring-live/30 ring-2"
+            dragOver && "border-live ring-live/40 ring-2"
           )}
           onPaste={onPaste}
           onDragOver={(e) => {
@@ -239,16 +239,16 @@ export function SendBar({
           {images.length > 0 && (
             <div className="flex flex-wrap gap-2 px-2 pt-1.5" onClick={(e) => e.stopPropagation()}>
               {images.map((img) => (
-                <span key={img.id} className="enter group relative block size-16 overflow-hidden rounded-lg border" title={img.name}>
+                <span key={img.id} className="enter group relative block size-16 overflow-hidden rounded-md border" title={img.name}>
                   <button type="button" onClick={() => setPreview(img)} aria-label={`Preview ${img.name}`} className="block size-full cursor-zoom-in">
                     <img src={img.dataUrl} alt={img.name} className="size-full object-cover transition-transform duration-200 group-hover:scale-105" />
                   </button>
-                  <span className="stamp absolute inset-x-0 bottom-0 truncate bg-black/55 px-1 py-px text-[9px] text-white">{img.name}</span>
+                  <span className="stamp absolute inset-x-0 bottom-0 truncate bg-black/60 px-1 py-px text-[9px] text-white">{img.name}</span>
                   <button
                     type="button"
                     onClick={() => setImages((prev) => prev.filter((x) => x.id !== img.id))}
                     aria-label={`Remove ${img.name}`}
-                    className="bg-card/90 text-foreground hover:bg-card absolute top-1 right-1 grid size-5 cursor-pointer place-items-center rounded-full opacity-0 shadow-xs transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+                    className="bg-card/80 text-foreground hover:bg-card absolute top-1 right-1 grid size-5 cursor-pointer place-items-center rounded-full opacity-0 shadow-e1 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
                   >
                     <X className="size-3" />
                   </button>
@@ -310,7 +310,7 @@ export function SendBar({
               <div
                 role="radiogroup"
                 aria-label="Send to"
-                className="bg-muted inline-flex items-center gap-0.5 rounded-lg p-0.5"
+                className="bg-muted inline-flex items-center gap-0.5 rounded-md p-0.5"
                 onClick={(e) => e.stopPropagation()}
               >
                 <ModeChip
@@ -439,7 +439,7 @@ function ModeChip({
       className={cn(
         "flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-micro font-medium transition-colors duration-150",
         "disabled:cursor-not-allowed disabled:opacity-40",
-        active ? "bg-card text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground"
+        active ? "bg-card text-foreground shadow-e1" : "text-muted-foreground hover:text-foreground"
       )}
     >
       {icon}

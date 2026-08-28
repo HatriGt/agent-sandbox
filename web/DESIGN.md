@@ -419,3 +419,17 @@ h2 20 · h1 28` (all registered with tailwind-merge). Rules the audit enforced:
 - Minimap: 40 px hit area, a faint rail appears when the pointer is near, hidden below 1120 px.
 - Sidebar rows: state and role words share a baseline. Breadcrumb folders appear only when the
   header is wide enough to show them whole (container queries), never as chopped fragments.
+
+## Round: Refactoring UI systems pass (2026-08-28)
+
+Applied the book's "design from a scale" rules mechanically across the console:
+- **Elevation scale** `shadow-e1…e5` (raised control · dropdown · popover · floating panel · modal),
+  alpha in `--shade-*` so dark mode deepens it. Replaced 38 hand-typed shadows.
+- **Fixed opacity scale** 5 · 10 · 20 · 40 · 60 · 80 — 162 ad-hoc alphas (`/12`, `/15`, `/18`, `/25`,
+  `/30`, `/35`, `/45`, `/70`, `/85`, `/90`, `/95`) snapped to it.
+- **Three text colours** — `foreground`, `muted-foreground`, and a new `faint` (tertiary, still
+  ≥4.5:1) — replacing pseudo-tiers like `text-muted-foreground/60` and `text-foreground/85`.
+- **Three radii** — `md` for controls and chips, `xl` for containers, `full` for pills. `lg`, `2xl`
+  and `3xl` are gone (60 replacements).
+- **Fewer boxes**: link chips, the changes dock and the answered-question card lean on tint and
+  elevation instead of a 1px outline (the book's "busy, boxed-in" fix).

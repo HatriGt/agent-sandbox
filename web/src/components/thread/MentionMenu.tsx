@@ -83,7 +83,7 @@ export function MentionMenu({
     <div
       role="listbox"
       aria-label="Files in the workspace"
-      className="bg-popover text-popover-foreground absolute inset-x-2 bottom-full z-20 mb-2 max-h-72 overflow-y-auto rounded-xl border p-1 shadow-[0_1px_2px_oklch(0_0_0/0.06),0_16px_40px_-16px_oklch(0_0_0/0.35)]"
+      className="bg-popover text-popover-foreground absolute inset-x-2 bottom-full z-20 mb-2 max-h-72 overflow-y-auto rounded-xl border p-1 shadow-e3"
     >
       <div className="text-muted-foreground flex items-center justify-between gap-3 px-2.5 py-1.5 text-micro">
         <span className="flex min-w-0 items-center gap-2">
@@ -143,7 +143,7 @@ export function MentionMenu({
               onPick(f);
             }}
             className={cn(
-              "flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-meta",
+              "flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-meta",
               i === cursor ? "bg-accent text-foreground" : "text-foreground"
             )}
           >

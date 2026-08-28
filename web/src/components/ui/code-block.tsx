@@ -18,8 +18,8 @@ function CodeBlock({ children, className, ...props }: CodeBlockProps) {
         // muted token (NOT `--card`, which equals the white canvas in light mode and would read as
         // white-on-white). The body fill is set on CodeBlockCode so it sits under the code but the
         // header bar can carry a slightly stronger tint for separation.
-        "group not-prose relative my-3 flex w-full flex-col overflow-clip rounded-lg border",
-        "border-border bg-muted/40 text-card-foreground shadow-xs",
+        "group not-prose relative my-3 flex w-full flex-col overflow-clip rounded-md border",
+        "border-border bg-muted/40 text-card-foreground shadow-e1",
         className
       )}
       {...props}

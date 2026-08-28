@@ -38,7 +38,7 @@ export function MachineList({
       {loading && (
         <div className="space-y-1 px-1 py-1" aria-busy="true">
           {[0, 1, 2].map((i) => (
-            <div key={i} className="space-y-2.5 rounded-lg px-2 py-2.5">
+            <div key={i} className="space-y-2.5 rounded-md px-2 py-2.5">
               <div className="flex justify-between">
                 <Bar className="h-2.5 w-16" />
                 <Bar className="h-2.5 w-10" />
@@ -59,7 +59,7 @@ export function MachineList({
 
       <ul className="flex flex-col gap-px">
         {pending.map((p) => (
-          <li key={p.id} className="enter rounded-lg px-3 py-2.5" aria-busy="true">
+          <li key={p.id} className="enter rounded-md px-3 py-2.5" aria-busy="true">
             <p className="label text-live flex items-center gap-1.5">
               <span className="bg-live breathe size-2 rounded-full" aria-hidden />
               booting
@@ -89,7 +89,7 @@ export function MachineList({
                   onFocus={() => prefetchWatch(v.name)}
                   aria-current={active ? "true" : undefined}
                   className={cn(
-                    "group w-full cursor-pointer rounded-lg px-3 py-2.5 text-left transition-colors duration-150",
+                    "group w-full cursor-pointer rounded-md px-3 py-2.5 text-left transition-colors duration-150",
                     active ? "bg-accent" : "hover:bg-muted"
                   )}
                 >

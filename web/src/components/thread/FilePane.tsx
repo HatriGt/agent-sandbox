@@ -147,7 +147,7 @@ function Tab({ active, onClick, icon, label, disabled }: { active: boolean; onCl
       onClick={onClick}
       className={cn(
         "flex h-6 cursor-pointer items-center gap-1 rounded px-2 text-micro font-medium disabled:cursor-not-allowed disabled:opacity-40",
-        active ? "bg-card text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground"
+        active ? "bg-card text-foreground shadow-e1" : "text-muted-foreground hover:text-foreground"
       )}
     >
       {icon}
@@ -178,12 +178,12 @@ export function DiffView({ diff, path }: { diff: ParsedDiff; path: string }) {
                 l.kind === "meta" && "text-muted-foreground italic"
               )}
             >
-              <span className="text-muted-foreground/60 select-none px-2 text-right tabular">{l.oldNo ?? ""}</span>
-              <span className="text-muted-foreground/60 select-none px-2 text-right tabular">{l.newNo ?? ""}</span>
+              <span className="text-faint select-none px-2 text-right tabular">{l.oldNo ?? ""}</span>
+              <span className="text-faint select-none px-2 text-right tabular">{l.newNo ?? ""}</span>
               <span className={cn("select-none", l.kind === "add" ? "text-ok" : l.kind === "del" ? "text-destructive" : "text-transparent")}>
                 {l.kind === "add" ? "+" : l.kind === "del" ? "−" : " "}
               </span>
-              <span className="text-foreground/90 pr-4 whitespace-pre">{l.text || " "}</span>
+              <span className="text-foreground pr-4 whitespace-pre">{l.text || " "}</span>
             </div>
           ))}
         </div>

@@ -30,7 +30,7 @@ export function LifecycleItem({ label, detail }: { label: string; detail?: strin
   return (
     <div className="enter flex items-center gap-3 py-0.5">
       <span className="label text-muted-foreground shrink-0">{label}</span>
-      {detail && <span className="text-muted-foreground/70 truncate text-micro">{detail}</span>}
+      {detail && <span className="text-faint truncate text-micro">{detail}</span>}
       <span className="bg-border h-px flex-1" aria-hidden />
     </div>
   );
@@ -143,7 +143,7 @@ export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolea
                       className={cn(
                         "z-10 mt-2 grid size-3.5 place-items-center rounded-full border text-[8.5px] font-semibold tabular-nums",
                         running
-                          ? "border-live bg-live/15 text-live"
+                          ? "border-live bg-live/20 text-live"
                           : e.failed
                             ? "border-destructive/60 bg-destructive/10 text-destructive"
                             : "border-line-strong bg-card text-muted-foreground"
@@ -183,7 +183,7 @@ function ShellItem({ event, live }: { event: ToolEvent; live?: boolean }) {
         </p>
         <TestResultsCard report={report} onRaw={() => setOpen((v) => !v)} rawOpen={open} />
         {open && (
-          <pre className="bg-trace text-trace-fg/85 max-h-80 overflow-auto rounded-lg border border-white/8 px-3 py-2 font-mono text-code whitespace-pre-wrap">
+          <pre className="bg-trace text-trace-fg/80 max-h-80 overflow-auto rounded-md border border-white/8 px-3 py-2 font-mono text-code whitespace-pre-wrap">
             {event.result}
           </pre>
         )}
@@ -194,7 +194,7 @@ function ShellItem({ event, live }: { event: ToolEvent; live?: boolean }) {
     <div className="enter min-w-0">
       <div
         className={cn(
-          "bg-trace overflow-hidden rounded-lg border border-white/8",
+          "bg-trace overflow-hidden rounded-md border border-white/8",
           live && "ring-live/40 ring-1"
         )}
       >
@@ -204,7 +204,7 @@ function ShellItem({ event, live }: { event: ToolEvent; live?: boolean }) {
           ) : event.failed ? (
             <AlertTriangle className="text-destructive size-3 shrink-0" aria-hidden />
           ) : (
-            <Terminal className="text-trace-fg/55 size-3 shrink-0" aria-hidden />
+            <Terminal className="text-trace-fg/60 size-3 shrink-0" aria-hidden />
           )}
           <span className="label text-trace-fg/60">{event.name}</span>
           {live && <span className="label text-live">running</span>}
@@ -229,13 +229,13 @@ function ShellItem({ event, live }: { event: ToolEvent; live?: boolean }) {
           {live && !hasOutput && <span className="caret text-live" aria-hidden>▍</span>}
         </pre>
         {hasOutput && open && (
-          <pre className="text-trace-fg/85 max-h-80 overflow-auto border-t border-white/8 px-3 py-2 font-mono text-code whitespace-pre-wrap">
+          <pre className="text-trace-fg/80 max-h-80 overflow-auto border-t border-white/8 px-3 py-2 font-mono text-code whitespace-pre-wrap">
             {event.result}
           </pre>
         )}
         {hasOutput && !open && (
           <button type="button" onClick={() => setOpen(true)} className="text-trace-fg/60 hover:text-trace-fg flex w-full cursor-pointer items-center gap-2 border-t border-white/8 px-3 py-1.5 text-left font-mono text-micro">
-            <span className="text-trace-fg/35 select-none">›</span>
+            <span className="text-trace-fg/40 select-none">›</span>
             <span className="truncate">{resultSummary(event.result)}</span>
           </button>
         )}
@@ -278,7 +278,7 @@ function StepItem({ event, live }: { event: ToolEvent; live?: boolean }) {
         )}
         {event.result && (
           <>
-            {lines > 1 && <span className="label text-muted-foreground/70 ml-auto shrink-0">{lines} lines</span>}
+            {lines > 1 && <span className="label text-faint ml-auto shrink-0">{lines} lines</span>}
             <ChevronRight
               className={cn(
                 "text-muted-foreground size-3.5 shrink-0 transition-transform duration-150",
@@ -293,7 +293,7 @@ function StepItem({ event, live }: { event: ToolEvent; live?: boolean }) {
 
       {event.result &&
         (open ? (
-          <pre className="bg-trace text-trace-fg/85 mt-2 ml-6 max-h-72 overflow-auto rounded-lg border border-white/8 px-3 py-2 font-mono text-code whitespace-pre-wrap">
+          <pre className="bg-trace text-trace-fg/80 mt-2 ml-6 max-h-72 overflow-auto rounded-md border border-white/8 px-3 py-2 font-mono text-code whitespace-pre-wrap">
             {event.result}
           </pre>
         ) : (
@@ -332,7 +332,7 @@ function DumpItem({ text }: { text: string }) {
         <span className="stamp">{n} lines</span>
         {!open && <span className="stamp min-w-0 truncate">{text.split("\n").find((l) => l.trim())?.trim().slice(0, 80)}</span>}
       </button>
-      {open && <pre className="bg-trace text-trace-fg/85 mt-1.5 max-h-96 overflow-auto rounded-lg border border-white/8 px-3 py-2 font-mono text-code whitespace-pre-wrap">{text}</pre>}
+      {open && <pre className="bg-trace text-trace-fg/80 mt-1.5 max-h-96 overflow-auto rounded-md border border-white/8 px-3 py-2 font-mono text-code whitespace-pre-wrap">{text}</pre>}
     </div>
   );
 }
@@ -385,7 +385,7 @@ export function YouItem({ text, label = "You" }: { text: string; label?: string 
         </div>
       )}
       {body && (
-        <div className="bg-muted text-foreground max-w-[min(72%,60ch)] rounded-2xl rounded-br-md px-4 py-2.5 text-lead whitespace-pre-wrap">
+        <div className="bg-muted text-foreground max-w-[min(72%,60ch)] rounded-xl rounded-br-md px-4 py-2.5 text-lead whitespace-pre-wrap">
           {body}
         </div>
       )}
@@ -442,7 +442,7 @@ export function QueuedItem({ text, onCancel }: { text: string; onCancel?: () => 
           </button>
         )}
       </span>
-      <div className="text-foreground/80 max-w-[min(72%,60ch)] rounded-2xl rounded-br-md border border-dashed px-4 py-2.5 text-body leading-relaxed whitespace-pre-wrap">
+      <div className="text-foreground max-w-[min(72%,60ch)] rounded-xl rounded-br-md border border-dashed px-4 py-2.5 text-body leading-relaxed whitespace-pre-wrap">
         {text}
       </div>
     </div>
@@ -534,7 +534,7 @@ export function PlanCard({ items, live }: { items: PlanStep[]; live?: boolean })
   const [open, setOpen] = React.useState(true);
   const allDone = done === items.length;
   return (
-    <div className="enter bg-card max-w-[60ch] rounded-xl border shadow-xs">
+    <div className="enter bg-card max-w-[60ch] rounded-xl border shadow-e1">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -567,19 +567,19 @@ export function PlanCard({ items, live }: { items: PlanStep[]; live?: boolean })
                 layout
                 className={cn(
                   "flex items-center gap-3 px-4 py-2 text-body",
-                  it.state === "active" ? "text-foreground font-medium" : it.state === "done" ? "text-muted-foreground" : "text-foreground/80"
+                  it.state === "active" ? "text-foreground font-medium" : it.state === "done" ? "text-muted-foreground" : "text-foreground"
                 )}
               >
                 {it.state === "done" ? (
-                  <span className="bg-ok/15 text-ok grid size-5 shrink-0 place-items-center rounded-md">
+                  <span className="bg-ok/20 text-ok grid size-5 shrink-0 place-items-center rounded-md">
                     <Check className="size-3" strokeWidth={3} aria-hidden />
                   </span>
                 ) : it.state === "active" ? (
-                  <span className="bg-live/12 text-live grid size-5 shrink-0 place-items-center rounded-md">
+                  <span className="bg-live/10 text-live grid size-5 shrink-0 place-items-center rounded-md">
                     <CircleDot className={cn("size-3", live && "breathe")} strokeWidth={2.5} aria-hidden />
                   </span>
                 ) : (
-                  <span className="text-muted-foreground/60 grid size-5 shrink-0 place-items-center rounded-md border">
+                  <span className="text-faint grid size-5 shrink-0 place-items-center rounded-md border">
                     <Circle className="size-2" aria-hidden />
                   </span>
                 )}
@@ -608,7 +608,7 @@ export function AnsweredQuestionItem({ question, answer }: { question: string; a
         <PauseIcon className="size-3" strokeWidth={2.5} aria-hidden />
         The agent asked — you answered
       </span>
-      <div className="bg-card max-w-[72ch] rounded-xl border">
+      <div className="bg-card max-w-[72ch] rounded-xl shadow-e1">
         <div className="px-4 pt-3 pb-2">
           <p className="text-foreground text-body font-medium text-balance">{parsed.title || question}</p>
           {parsed.context && <p className="text-muted-foreground mt-1 line-clamp-3 text-meta whitespace-pre-wrap">{parsed.context}</p>}
@@ -618,7 +618,7 @@ export function AnsweredQuestionItem({ question, answer }: { question: string; a
             {parsed.options.map((opt, i) => {
               const on = i === chosen;
               return (
-                <li key={opt} className={cn("flex items-center gap-2.5 rounded-lg border px-3 py-1.5 text-meta", on ? "border-attention bg-attention/12 text-foreground font-medium" : "border-transparent text-muted-foreground")}>
+                <li key={opt} className={cn("flex items-center gap-2.5 rounded-md border px-3 py-1.5 text-meta", on ? "border-attention bg-attention/10 text-foreground font-medium" : "border-transparent text-muted-foreground")}>
                   <span className={cn("grid size-4 shrink-0 place-items-center rounded-full border", on ? "border-attention bg-attention text-attention-ink" : "border-line-strong")} aria-hidden>
                     {on && <Check className="size-2.5" strokeWidth={3} />}
                   </span>

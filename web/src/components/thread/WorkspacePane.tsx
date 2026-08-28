@@ -234,15 +234,15 @@ export function WorkspacePane({ session, changes, open, onClose, onSaved, repos,
 
         {/* Files panel on the right: search on top, tree (or results) below; Changes is the same panel's other face. */}
         {sidebar && (
-          <section className="bg-muted/25 flex w-64 shrink-0 flex-col border-l" aria-label={filesTitle}>
+          <section className="bg-muted/20 flex w-64 shrink-0 flex-col border-l" aria-label={filesTitle}>
             <div className="flex h-10 shrink-0 items-center gap-1 px-2">
               <div role="radiogroup" className="bg-muted inline-flex h-7 items-center gap-0.5 rounded-md p-0.5">
-                <button type="button" role="radio" aria-checked={view !== "scm"} onClick={() => setView("explorer")} className={cn("flex h-6 cursor-pointer items-center gap-1 rounded px-2 text-micro font-medium", view !== "scm" ? "bg-card text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>
+                <button type="button" role="radio" aria-checked={view !== "scm"} onClick={() => setView("explorer")} className={cn("flex h-6 cursor-pointer items-center gap-1 rounded px-2 text-micro font-medium", view !== "scm" ? "bg-card text-foreground shadow-e1" : "text-muted-foreground hover:text-foreground")}>
                   <Files className="size-3.5" /> Files
                 </button>
-                <button type="button" role="radio" aria-checked={view === "scm"} onClick={() => setView("scm")} className={cn("flex h-6 cursor-pointer items-center gap-1 rounded px-2 text-micro font-medium", view === "scm" ? "bg-card text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>
+                <button type="button" role="radio" aria-checked={view === "scm"} onClick={() => setView("scm")} className={cn("flex h-6 cursor-pointer items-center gap-1 rounded px-2 text-micro font-medium", view === "scm" ? "bg-card text-foreground shadow-e1" : "text-muted-foreground hover:text-foreground")}>
                   <GitBranch className="size-3.5" /> Changes
-                  {changes.length > 0 && <span className={cn("ml-0.5 rounded-full px-1.5 text-[9px] leading-4 font-semibold", view === "scm" ? "bg-live text-white" : "bg-live/15 text-live")}>{changes.length}</span>}
+                  {changes.length > 0 && <span className={cn("ml-0.5 rounded-full px-1.5 text-[9px] leading-4 font-semibold", view === "scm" ? "bg-live text-white" : "bg-live/20 text-live")}>{changes.length}</span>}
                 </button>
               </div>
               <button type="button" onClick={() => (view === "scm" ? loadGit() : void loadTree())} aria-label="Refresh" className="text-muted-foreground hover:text-foreground ml-auto grid size-7 cursor-pointer place-items-center rounded-md">
@@ -371,7 +371,7 @@ function FileRow({ path, depth, active, change, onOpen, showDir }: { path: strin
   const dir = path.slice(0, Math.max(0, path.lastIndexOf("/")));
   const st = change ? STATUS_LETTER[change.status] : null;
   return (
-    <button type="button" onClick={onOpen} className={cn("flex h-[26px] w-full cursor-pointer items-center gap-1.5 pr-2 text-left text-meta", active ? "bg-accent text-foreground" : "hover:bg-muted text-foreground/90")} style={{ paddingLeft: `${8 + depth * 12 + 18}px` }} title={path}>
+    <button type="button" onClick={onOpen} className={cn("flex h-[26px] w-full cursor-pointer items-center gap-1.5 pr-2 text-left text-meta", active ? "bg-accent text-foreground" : "hover:bg-muted text-foreground")} style={{ paddingLeft: `${8 + depth * 12 + 18}px` }} title={path}>
       <FileIcon path={path} size={15} />
       <span className={cn("truncate", change?.status === "deleted" && "line-through", st?.tone)}>{base}</span>
       {showDir && dir && <span className="stamp text-muted-foreground truncate">{dir}</span>}
@@ -692,7 +692,7 @@ function FileView({ session, tab, change, onMode, onDraft, onSaving, onSaved }: 
             <ModeTab active={mode === "edit"} onClick={() => onMode("edit")} icon={<FileCode2 className="size-3.5" />} label="File" disabled={deleted} />
           </div>
         )}
-        <span className={cn("stamp w-14 text-right transition-colors", saving ? "text-muted-foreground" : tab.dirty ? "text-attention-text" : "text-muted-foreground/60")} aria-live="polite">
+        <span className={cn("stamp w-14 text-right transition-colors", saving ? "text-muted-foreground" : tab.dirty ? "text-attention-text" : "text-faint")} aria-live="polite">
           {saving ? "saving…" : tab.dirty ? "unsaved" : tab.saving === "saved" ? "saved" : ""}
         </span>
         <Button variant="ghost" size="icon-sm" onClick={download} aria-label="Download" disabled={deleted}>
@@ -740,7 +740,7 @@ function Breadcrumb({ path }: { path: string }) {
       {shown.map((d, i) => (
         <React.Fragment key={i}>
           <span className={cn("text-muted-foreground hidden shrink-0 @min-[460px]:inline", d === "…" && "tracking-widest", i < shown.length - 1 && "@min-[460px]:hidden @min-[640px]:inline")}>{d}</span>
-          <ChevronRight className={cn("text-muted-foreground/50 hidden size-3 shrink-0 @min-[460px]:inline", i < shown.length - 1 && "@min-[460px]:hidden @min-[640px]:inline")} aria-hidden />
+          <ChevronRight className={cn("text-faint hidden size-3 shrink-0 @min-[460px]:inline", i < shown.length - 1 && "@min-[460px]:hidden @min-[640px]:inline")} aria-hidden />
         </React.Fragment>
       ))}
       <span className="text-foreground flex shrink-0 items-center gap-1.5 font-medium">
@@ -753,7 +753,7 @@ function Breadcrumb({ path }: { path: string }) {
 
 function ModeTab({ active, onClick, icon, label, disabled }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string; disabled?: boolean }) {
   return (
-    <button type="button" role="tab" aria-selected={active} disabled={disabled} onClick={onClick} className={cn("flex h-6 cursor-pointer items-center gap-1 rounded px-2 text-micro font-medium disabled:cursor-not-allowed disabled:opacity-40", active ? "bg-card text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>
+    <button type="button" role="tab" aria-selected={active} disabled={disabled} onClick={onClick} className={cn("flex h-6 cursor-pointer items-center gap-1 rounded px-2 text-micro font-medium disabled:cursor-not-allowed disabled:opacity-40", active ? "bg-card text-foreground shadow-e1" : "text-muted-foreground hover:text-foreground")}>
       {icon}
       {label}
     </button>

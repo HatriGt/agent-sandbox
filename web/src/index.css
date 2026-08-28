@@ -94,6 +94,18 @@
   --text-display--line-height: 1.15;
 
   --shadow-xs: 0 1px 2px oklch(0 0 0 / 0.05);
+
+  /* Elevation scale (Refactoring UI): choose by "where on the z-axis does this sit", never by taste.
+     e1 raised controls/cards · e2 dropdowns · e3 popovers · e4 floating panels · e5 modals. The alpha
+     lives in --shade-* so dark mode can deepen it without redefining the geometry. */
+  --shadow-e1: 0 1px 3px var(--shade-1);
+  --shadow-e2: 0 4px 6px var(--shade-1);
+  --shadow-e3: 0 5px 15px var(--shade-2);
+  --shadow-e4: 0 10px 24px var(--shade-2);
+  --shadow-e5: 0 15px 35px var(--shade-3);
+
+  /* Third text colour: tertiary content (footnotes, hints). Still ≥4.5:1 on its surface. */
+  --color-faint: var(--faint);
 }
 
 :root {
@@ -130,6 +142,11 @@
 
   --trace: oklch(0.2 0.006 286);
   --trace-fg: oklch(0.93 0.003 286);
+
+  --faint: oklch(0.58 0.012 286);
+  --shade-1: oklch(0 0 0 / 0.1);
+  --shade-2: oklch(0 0 0 / 0.14);
+  --shade-3: oklch(0 0 0 / 0.2);
 }
 
 .dark {
@@ -163,6 +180,11 @@
 
   --trace: oklch(0.13 0.004 286);
   --trace-fg: oklch(0.9 0.004 286);
+
+  --faint: oklch(0.62 0.012 286);
+  --shade-1: oklch(0 0 0 / 0.4);
+  --shade-2: oklch(0 0 0 / 0.5);
+  --shade-3: oklch(0 0 0 / 0.6);
 }
 
 @utility scrollbar-thin {

@@ -270,7 +270,7 @@ export default function App() {
           <div className={cn("flex h-14 shrink-0 items-center gap-2.5 px-3", collapsed && "md:justify-center md:px-0")}>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Link to="/" aria-label="Agent Sandbox home" className="bg-primary text-primary-foreground hover:bg-primary/90 grid size-8 shrink-0 place-items-center rounded-lg transition-colors">
+                <Link to="/" aria-label="Agent Sandbox home" className="bg-primary text-primary-foreground hover:bg-primary/80 grid size-8 shrink-0 place-items-center rounded-md transition-colors">
                   <Logo className="size-[18px]" />
                 </Link>
               </TooltipTrigger>
@@ -354,7 +354,7 @@ export default function App() {
                     exit={{ opacity: 0, height: 0, marginBottom: 0 }}
                     transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
                     onClick={() => open(waiting[0].name)}
-                    className="border-attention/50 bg-attention/12 hover:bg-attention/18 mx-3 flex cursor-pointer items-center gap-2.5 overflow-hidden rounded-lg border px-3 py-2.5 text-left transition-colors"
+                    className="border-attention/50 bg-attention/10 hover:bg-attention/20 mx-3 flex cursor-pointer items-center gap-2.5 overflow-hidden rounded-md border px-3 py-2.5 text-left transition-colors"
                   >
                     <Pause className="text-attention-text size-4 shrink-0" strokeWidth={2.5} aria-hidden />
                     <span className="text-foreground min-w-0 flex-1 truncate text-meta font-medium">
@@ -533,7 +533,7 @@ function ThreadPageSkeleton() {
       </div>
       <div className="h-9 shrink-0 border-b" />
       <div className="mx-auto w-full max-w-3xl flex-1 px-6 pt-8">
-        <div className="bg-muted ml-auto h-11 w-[46%] animate-pulse rounded-2xl" />
+        <div className="bg-muted ml-auto h-11 w-[46%] animate-pulse rounded-xl" />
         <div className="mt-8 space-y-2.5">
           <div className="bg-muted h-2.5 w-14 animate-pulse rounded" />
           <div className="bg-muted h-3.5 w-[92%] animate-pulse rounded" />
@@ -548,7 +548,7 @@ function ThreadPageSkeleton() {
         </div>
       </div>
       <div className="mx-auto w-full max-w-3xl px-6 pb-4">
-        <div className="bg-card h-24 rounded-2xl border" />
+        <div className="bg-card h-24 rounded-xl border" />
       </div>
     </div>
   );
@@ -597,7 +597,7 @@ function NavItem({
       {icon}
       {label}
       <span className="ml-auto flex items-center gap-2">
-        {shortcut && <kbd className="text-muted-foreground/60 hidden group-hover:inline">{shortcut}</kbd>}
+        {shortcut && <kbd className="text-faint hidden group-hover:inline">{shortcut}</kbd>}
         {badge != null && <span className="text-muted-foreground tabular text-micro">{badge}</span>}
       </span>
     </button>
@@ -630,9 +630,9 @@ function RailIcon({
           aria-label={label}
           aria-current={active ? "page" : undefined}
           className={cn(
-            "relative grid size-10 cursor-pointer place-items-center rounded-lg transition-colors [&_svg]:size-4",
+            "relative grid size-10 cursor-pointer place-items-center rounded-md transition-colors [&_svg]:size-4",
             primary
-              ? "bg-primary text-primary-foreground hover:bg-primary/90"
+              ? "bg-primary text-primary-foreground hover:bg-primary/80"
               : active
                 ? "bg-accent text-foreground"
                 : "text-muted-foreground hover:text-foreground hover:bg-muted"

@@ -50,7 +50,7 @@ function Entry() {
     <div className="bg-background text-foreground flex min-h-full items-center justify-center px-6">
       <div className="w-full max-w-sm">
         <div className="flex items-center gap-2.5">
-          <span className="bg-primary text-primary-foreground grid size-9 place-items-center rounded-lg">
+          <span className="bg-primary text-primary-foreground grid size-9 place-items-center rounded-md">
             <Logo className="size-5" />
           </span>
           <span className="text-body font-semibold tracking-[-0.01em]">Agent Sandbox</span>
@@ -70,7 +70,7 @@ function Entry() {
         >
           <label className="flex flex-col gap-1.5">
             <span className="label text-muted-foreground">Token</span>
-            <div className="border-line-strong focus-within:ring-ring flex items-center gap-2 rounded-lg border px-3 focus-within:ring-2">
+            <div className="border-line-strong focus-within:ring-ring flex items-center gap-2 rounded-md border px-3 focus-within:ring-2">
               <KeyRound className="text-muted-foreground size-4 shrink-0" aria-hidden />
               <input
                 type="password"

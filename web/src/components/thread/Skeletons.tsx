@@ -11,7 +11,7 @@ export function ThreadSkeleton({ withTask = true }: { withTask?: boolean }) {
       {withTask ? null : (
         <div className="flex flex-col items-end gap-1.5">
           <Bar className="h-2.5 w-8" />
-          <Bar className="h-11 w-[58%] rounded-2xl rounded-br-md" />
+          <Bar className="h-11 w-[58%] rounded-xl rounded-br-md" />
         </div>
       )}
       <div className="flex items-center gap-3">
@@ -24,7 +24,7 @@ export function ThreadSkeleton({ withTask = true }: { withTask?: boolean }) {
         <Bar className="h-3.5 w-[78%]" />
         <Bar className="h-3.5 w-[64%]" />
       </div>
-      <Bar className="h-9 w-56 rounded-lg" />
+      <Bar className="h-9 w-56 rounded-md" />
       <div className="flex flex-col gap-2.5">
         <Bar className="h-2.5 w-10" />
         <Bar className="h-3.5 w-[84%]" />

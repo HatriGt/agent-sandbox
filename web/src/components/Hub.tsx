@@ -253,8 +253,8 @@ export function Hub({
             onSubmit={submit}
             isLoading={busy}
             className={cn(
-              "bg-card border-line-strong focus-within:border-live/60 focus-within:shadow-[0_0_0_3px_color-mix(in_oklch,var(--live)_18%,transparent)] rounded-2xl p-2 shadow-xs transition-[border-color,box-shadow] duration-200",
-              dragOver && "border-live ring-live/30 ring-2"
+              "bg-card border-line-strong focus-within:border-live/60 focus-within:shadow-[0_0_0_3px_color-mix(in_oklch,var(--live)_18%,transparent)] rounded-xl p-2 shadow-e1 transition-[border-color,box-shadow] duration-200",
+              dragOver && "border-live ring-live/40 ring-2"
             )}
             onPaste={(e) => {
               const files = [...(e.clipboardData?.items ?? [])].filter((i) => i.kind === "file" && i.type.startsWith("image/")).map((i) => i.getAsFile()).filter((f): f is File => !!f);
@@ -282,11 +282,11 @@ export function Hub({
             {images.length > 0 && (
               <div className="flex flex-wrap gap-2 px-2 pt-1.5" onClick={(e) => e.stopPropagation()}>
                 {images.map((img) => (
-                  <span key={img.id} className="enter group relative block size-16 overflow-hidden rounded-lg border" title={img.name}>
+                  <span key={img.id} className="enter group relative block size-16 overflow-hidden rounded-md border" title={img.name}>
                     <button type="button" onClick={() => setPreview(img)} aria-label={`Preview ${img.name}`} className="block size-full cursor-zoom-in">
                       <img src={img.dataUrl} alt={img.name} className="size-full object-cover transition-transform duration-200 group-hover:scale-105" />
                     </button>
-                    <button type="button" onClick={() => setImages((prev) => prev.filter((x) => x.id !== img.id))} aria-label={`Remove ${img.name}`} className="bg-card/90 text-foreground hover:bg-card absolute top-1 right-1 grid size-5 cursor-pointer place-items-center rounded-full opacity-0 shadow-xs transition-opacity group-hover:opacity-100 focus-visible:opacity-100">
+                    <button type="button" onClick={() => setImages((prev) => prev.filter((x) => x.id !== img.id))} aria-label={`Remove ${img.name}`} className="bg-card/80 text-foreground hover:bg-card absolute top-1 right-1 grid size-5 cursor-pointer place-items-center rounded-full opacity-0 shadow-e1 transition-opacity group-hover:opacity-100 focus-visible:opacity-100">
                       <X className="size-3" />
                     </button>
                   </span>
@@ -310,7 +310,7 @@ export function Hub({
                       onChange={(e) => setPicked((prev) => prev.map((x) => (x.repo === p.repo ? { ...x, ref: e.target.value } : x)))}
                       placeholder={p.defaultBranch ?? "branch"}
                       aria-label={`Branch for ${p.repo}`}
-                      className="placeholder:text-muted-foreground/70 text-live w-24 bg-transparent font-mono text-micro outline-none"
+                      className="placeholder:text-faint text-live w-24 bg-transparent font-mono text-micro outline-none"
                     />
                     <button
                       type="button"
@@ -477,7 +477,7 @@ export function Hub({
                       {box ? (
                         <StateStamp state={displayState(box)} exitCode={box.exitCode} className="w-24 shrink-0" />
                       ) : (
-                        <span className="label text-muted-foreground/70 w-24 shrink-0">destroyed</span>
+                        <span className="label text-faint w-24 shrink-0">destroyed</span>
                       )}
                       <span className={cn("min-w-0 flex-1 truncate text-meta", gone ? "text-muted-foreground" : "text-foreground")}>
                         {box ? threadTitle(box) : r.task}

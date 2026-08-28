@@ -3,7 +3,7 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 
 /**
- * shadcn textarea, minus the stock `dark:bg-input/30` inset. Every textarea in this app lives inside a
+ * shadcn textarea, minus the stock `dark:bg-input/40` inset. Every textarea in this app lives inside a
  * composer surface that already carries the border and fill, so the inset painted a second, lighter
  * rectangle inside the composer in dark mode — it read as a rendering glitch, not a field.
  */

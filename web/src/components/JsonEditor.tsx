@@ -3,7 +3,7 @@ import { CodeEditor } from "@/components/CodeEditor";
 /** The MCP config editor: CodeEditor fixed to JSON, sized to the pane. */
 export function JsonEditor(props: { value: string; onChange: (v: string) => void; onSave?: () => void; errorLine?: number | null; minRows?: number; className?: string }) {
   return (
-    <div className={props.className ? `overflow-hidden rounded-lg border ${props.className}` : "h-[60vh] overflow-hidden rounded-lg border"}>
+    <div className={props.className ? `overflow-hidden rounded-md border ${props.className}` : "h-[60vh] overflow-hidden rounded-md border"}>
       <CodeEditor value={props.value} onChange={props.onChange} onSave={props.onSave} language="json" ariaLabel="MCP configuration JSON" />
     </div>
   );

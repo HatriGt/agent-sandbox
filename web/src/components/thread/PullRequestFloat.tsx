@@ -69,7 +69,7 @@ export function PullRequestFloat({ session, url, repo, number }: { session: stri
             transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
             role="dialog"
             aria-label={`Pull request #${number}`}
-            className="bg-card absolute top-full right-0 z-40 mt-2 w-[22rem] rounded-2xl border p-1.5 shadow-[0_1px_2px_oklch(0_0_0/0.06),0_24px_48px_-20px_oklch(0_0_0/0.45)]"
+            className="bg-card absolute top-full right-0 z-40 mt-2 w-[22rem] rounded-xl border p-1.5 shadow-e4"
           >
             <Header info={info} v={v} url={url} session={session} repo={repo} number={number} onMerged={() => void load()} onClose={() => setOpen(false)} />
             <div className="px-2.5 pt-3 pb-2">
@@ -130,14 +130,14 @@ export function PullRequestFloat({ session, url, repo, number }: { session: stri
 
 function verdict(info: PullInfo | null) {
   if (!info) return { title: "Pull request", short: "PR", icon: GitPullRequest, header: "bg-muted text-foreground", chip: "bg-muted text-muted-foreground", text: "text-muted-foreground", canMerge: false };
-  if (info.state === "merged") return { title: "Merged", short: "merged", icon: GitMerge, header: "bg-sleep/12 text-sleep", chip: "bg-sleep/15 text-sleep", text: "text-sleep", canMerge: false };
+  if (info.state === "merged") return { title: "Merged", short: "merged", icon: GitMerge, header: "bg-sleep/10 text-sleep", chip: "bg-sleep/20 text-sleep", text: "text-sleep", canMerge: false };
   if (info.state === "closed") return { title: "Closed", short: "closed", icon: GitPullRequestClosed, header: "bg-destructive/8 text-destructive", chip: "bg-destructive/10 text-destructive", text: "text-destructive", canMerge: false };
   if (info.state === "draft") return { title: "Draft", short: "draft", icon: GitPullRequestDraft, header: "bg-muted text-foreground", chip: "bg-muted text-muted-foreground", text: "text-muted-foreground", canMerge: false };
   if (info.checks && info.checks.failure > 0) return { title: "Checks failing", short: "checks failing", icon: CircleX, header: "bg-destructive/8 text-destructive", chip: "bg-destructive/10 text-destructive", text: "text-destructive", canMerge: false };
-  if (info.reviewDecision === "changes_requested") return { title: "Changes requested", short: "changes requested", icon: GitPullRequest, header: "bg-attention/15 text-attention-text", chip: "bg-attention/20 text-attention-text", text: "text-attention-text", canMerge: false };
-  if (info.checks && info.checks.pending > 0) return { title: "Checks running", short: "checks running", icon: CircleDashed, header: "bg-live/10 text-live", chip: "bg-live/12 text-live", text: "text-live", canMerge: false };
-  if (info.mergeable === false) return { title: "Merge conflicts", short: "conflicts", icon: GitPullRequest, header: "bg-attention/15 text-attention-text", chip: "bg-attention/20 text-attention-text", text: "text-attention-text", canMerge: false };
-  return { title: "Ready to merge", short: "ready to merge", icon: GitPullRequest, header: "bg-ok/12 text-ok", chip: "bg-ok/15 text-ok", text: "text-ok", canMerge: true };
+  if (info.reviewDecision === "changes_requested") return { title: "Changes requested", short: "changes requested", icon: GitPullRequest, header: "bg-attention/20 text-attention-text", chip: "bg-attention/20 text-attention-text", text: "text-attention-text", canMerge: false };
+  if (info.checks && info.checks.pending > 0) return { title: "Checks running", short: "checks running", icon: CircleDashed, header: "bg-live/10 text-live", chip: "bg-live/10 text-live", text: "text-live", canMerge: false };
+  if (info.mergeable === false) return { title: "Merge conflicts", short: "conflicts", icon: GitPullRequest, header: "bg-attention/20 text-attention-text", chip: "bg-attention/20 text-attention-text", text: "text-attention-text", canMerge: false };
+  return { title: "Ready to merge", short: "ready to merge", icon: GitPullRequest, header: "bg-ok/10 text-ok", chip: "bg-ok/20 text-ok", text: "text-ok", canMerge: true };
 }
 
 function reviewLabel(s: string) {
@@ -176,16 +176,16 @@ function Header({ info, v, url, session, repo, number, onMerged, onClose }: { in
           {info?.checks?.total ? <span>· {info.checks.total} checks</span> : <span className="truncate">· {repo.split("/")[1]}</span>}
         </p>
       </div>
-      <a href={url} target="_blank" rel="noreferrer noopener" aria-label="Open on GitHub" className="hover:bg-card/70 grid size-8 shrink-0 cursor-pointer place-items-center rounded-lg transition-colors">
+      <a href={url} target="_blank" rel="noreferrer noopener" aria-label="Open on GitHub" className="hover:bg-card/60 grid size-8 shrink-0 cursor-pointer place-items-center rounded-md transition-colors">
         <Globe className="size-4" aria-hidden />
       </a>
       {v.canMerge ? (
-        <Button size="sm" onClick={() => void merge()} disabled={busy} className={cn("bg-ok hover:bg-ok/90 text-white", armed && "ring-ok/40 ring-2")}>
+        <Button size="sm" onClick={() => void merge()} disabled={busy} className={cn("bg-ok hover:bg-ok/80 text-white", armed && "ring-ok/40 ring-2")}>
           {busy ? <Loader2 className="animate-spin" /> : <GitMerge />}
           {armed ? "Confirm merge" : "Merge"}
         </Button>
       ) : (
-        <button type="button" onClick={onClose} aria-label="Close" className="hover:bg-card/70 grid size-8 shrink-0 cursor-pointer place-items-center rounded-lg transition-colors">
+        <button type="button" onClick={onClose} aria-label="Close" className="hover:bg-card/60 grid size-8 shrink-0 cursor-pointer place-items-center rounded-md transition-colors">
           {info?.state === "merged" ? <Check className="size-4" aria-hidden /> : <X className="size-4" aria-hidden />}
         </button>
       )}

@@ -89,7 +89,7 @@ export function Sandboxes({
                     type="button"
                     onClick={() => onOpen(b.name)}
                     onMouseEnter={() => prefetchWatch(b.name)}
-                    className="border-attention/50 bg-attention/12 hover:bg-attention/18 flex w-full cursor-pointer items-start gap-3 rounded-xl border p-4 text-left transition-colors"
+                    className="border-attention/50 bg-attention/10 hover:bg-attention/20 flex w-full cursor-pointer items-start gap-3 rounded-xl border p-4 text-left transition-colors"
                   >
                     <span className="min-w-0 flex-1">
                       <span className="stamp text-muted-foreground block" title={shortName(b.name)}>
@@ -276,7 +276,7 @@ function MachineRow({
             <TooltipContent>{deadlineText}</TooltipContent>
           </Tooltip>
         ) : (
-          <span className="stamp text-muted-foreground/60">{box.kept ? "kept · until destroyed" : state === "sleeping" ? "asleep" : "—"}</span>
+          <span className="stamp text-faint">{box.kept ? "kept · until destroyed" : state === "sleeping" ? "asleep" : "—"}</span>
         )}
       </div>
 

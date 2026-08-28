@@ -18,17 +18,17 @@ const buttonVariants = cva(
     variants: {
       variant: {
         // THE action: ink fill, contrast text. Ideally the only filled element in view.
-        default: "bg-primary text-primary-foreground shadow-xs hover:bg-primary/90 active:bg-primary/80",
-        primary: "bg-primary text-primary-foreground shadow-xs hover:bg-primary/90 active:bg-primary/80",
+        default: "bg-primary text-primary-foreground shadow-e1 hover:bg-primary/80 active:bg-primary/80",
+        primary: "bg-primary text-primary-foreground shadow-e1 hover:bg-primary/80 active:bg-primary/80",
         // Secondary: hairline panel that fills on hover — never a shadow.
         outline: "border border-border bg-card text-foreground hover:bg-muted hover:border-line-strong",
-        secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/70",
+        secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/60",
         ghost: "text-muted-foreground hover:bg-muted hover:text-foreground",
         // Destructive is text-only until armed; the caller flips to `destructive` for the confirm step.
         danger: "text-destructive hover:bg-destructive/10",
-        destructive: "bg-destructive text-white shadow-xs hover:bg-destructive/90",
+        destructive: "bg-destructive text-white shadow-e1 hover:bg-destructive/80",
         // Amber: the one state with a deadline. Used for "Answer" on a waiting machine.
-        attention: "bg-attention text-attention-ink shadow-xs hover:bg-attention/90",
+        attention: "bg-attention text-attention-ink shadow-e1 hover:bg-attention/80",
         link: "text-primary underline-offset-4 hover:underline",
       },
       size: {

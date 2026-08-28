@@ -21,7 +21,7 @@ export function BootingThread({ task, warm, onBack }: { task: string; warm: bool
         <Button variant="ghost" size="icon-sm" onClick={onBack} aria-label="Back to machines" className="md:hidden">
           <ArrowLeft />
         </Button>
-        <span className="bg-live/12 text-live ring-live/25 inline-flex h-6 items-center gap-1.5 rounded-full px-2.5 text-micro font-semibold ring-1 ring-inset">
+        <span className="bg-live/10 text-live ring-live/20 inline-flex h-6 items-center gap-1.5 rounded-full px-2.5 text-micro font-semibold ring-1 ring-inset">
           <span className="bg-live breathe size-2 rounded-full" aria-hidden />
           assigning
         </span>

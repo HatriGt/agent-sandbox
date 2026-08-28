@@ -29,7 +29,7 @@ export function ChangesPanel({
   const adds = files.reduce((a, f) => a + f.additions, 0);
   const dels = files.reduce((a, f) => a + f.deletions, 0);
   return (
-    <div className="bg-card enter overflow-hidden rounded-xl border shadow-xs">
+    <div className="bg-card enter overflow-hidden rounded-xl border shadow-e1">
       <div className="flex items-center gap-2 px-3 py-2">
         <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left">
           <ChevronDown className={cn("text-muted-foreground size-3.5 shrink-0 transition-transform", !open && "-rotate-90")} aria-hidden />

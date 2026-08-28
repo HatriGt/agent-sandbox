@@ -32,12 +32,12 @@ const KINDS: Record<string, { mark: string; color: string }> = {
   toml: { mark: "T", color: "bg-[#9c4221] text-white" },
   sql: { mark: "SQL", color: "bg-[#e38c00] text-white" },
   svg: { mark: "◇", color: "bg-[#ffb13b] text-black" },
-  png: { mark: "▣", color: "bg-muted-foreground/30 text-foreground" },
-  jpg: { mark: "▣", color: "bg-muted-foreground/30 text-foreground" },
+  png: { mark: "▣", color: "bg-muted-foreground/40 text-foreground" },
+  jpg: { mark: "▣", color: "bg-muted-foreground/40 text-foreground" },
   lock: { mark: "🔒", color: "bg-muted text-foreground" },
   env: { mark: ".e", color: "bg-[#ecd53f] text-black" },
   dockerfile: { mark: "🐳", color: "bg-[#384d54] text-white" },
-  txt: { mark: "≡", color: "bg-muted-foreground/30 text-foreground" },
+  txt: { mark: "≡", color: "bg-muted-foreground/40 text-foreground" },
 };
 
 export function fileKind(path: string): { mark: string; color: string } {

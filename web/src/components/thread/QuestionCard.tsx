@@ -74,7 +74,7 @@ export function QuestionCard({
         aria-label="Question from the agent"
         tabIndex={0}
         onKeyDown={onKey}
-        className="border-attention/50 bg-card focus-visible:ring-attention/40 max-w-[72ch] rounded-xl border shadow-xs outline-none focus-visible:ring-2"
+        className="border-attention/50 bg-card focus-visible:ring-attention/40 max-w-[72ch] rounded-xl border shadow-e1 outline-none focus-visible:ring-2"
       >
         <div className="px-5 pt-4 pb-3">
           <p className="text-foreground text-lead leading-[1.5] font-medium text-balance">{parsed.title || question}</p>
@@ -118,9 +118,9 @@ export function QuestionCard({
                     }}
                     onDoubleClick={() => onAnswer(opt)}
                     className={cn(
-                      "flex w-full cursor-pointer items-center gap-3 rounded-lg border px-3 py-2.5 text-left text-body transition-colors",
+                      "flex w-full cursor-pointer items-center gap-3 rounded-md border px-3 py-2.5 text-left text-body transition-colors",
                       on
-                        ? "border-attention bg-attention/12 text-foreground"
+                        ? "border-attention bg-attention/10 text-foreground"
                         : "border-transparent hover:border-border hover:bg-muted text-foreground"
                     )}
                   >
@@ -134,7 +134,7 @@ export function QuestionCard({
                       {on && <Check className="size-3" strokeWidth={3} />}
                     </span>
                     <span className="min-w-0 flex-1">{opt}</span>
-                    <kbd className="text-muted-foreground/60 hidden sm:inline">{i + 1}</kbd>
+                    <kbd className="text-faint hidden sm:inline">{i + 1}</kbd>
                   </button>
                 </li>
               );
@@ -150,8 +150,8 @@ export function QuestionCard({
                   requestAnimationFrame(() => inputRef.current?.focus());
                 }}
                 className={cn(
-                  "flex w-full cursor-pointer items-center gap-3 rounded-lg border px-3 py-2.5 text-left text-body transition-colors",
-                  other ? "border-attention bg-attention/12" : "border-transparent hover:border-border hover:bg-muted text-muted-foreground"
+                  "flex w-full cursor-pointer items-center gap-3 rounded-md border px-3 py-2.5 text-left text-body transition-colors",
+                  other ? "border-attention bg-attention/10" : "border-transparent hover:border-border hover:bg-muted text-muted-foreground"
                 )}
               >
                 <span
@@ -184,7 +184,7 @@ export function QuestionCard({
               rows={2}
               placeholder={hasOptions ? "Type a different answer…" : "Type your answer…"}
               aria-label="Your answer"
-              className="text-foreground placeholder:text-muted-foreground bg-muted focus:ring-attention/50 w-full resize-none rounded-lg px-3 py-2 text-body outline-none focus:ring-2"
+              className="text-foreground placeholder:text-muted-foreground bg-muted focus:ring-attention/50 w-full resize-none rounded-md px-3 py-2 text-body outline-none focus:ring-2"
             />
           </div>
         )}

@@ -37,7 +37,7 @@ export default function Landing() {
     <div className="dark bg-background text-foreground min-h-full overflow-y-auto">
       <header className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
         <div className="flex items-center gap-2.5">
-          <span className="bg-primary text-primary-foreground grid size-8 place-items-center rounded-lg">
+          <span className="bg-primary text-primary-foreground grid size-8 place-items-center rounded-md">
             <Logo className="size-[18px]" />
           </span>
           <span className="text-body font-semibold tracking-[-0.01em]">Agent Sandbox</span>
@@ -59,7 +59,7 @@ export default function Landing() {
           </a>
           <Link
             to={consoleHref}
-            className="bg-primary text-primary-foreground hover:bg-primary/90 ml-2 inline-flex h-9 items-center gap-1.5 rounded-md px-3.5 text-meta font-medium"
+            className="bg-primary text-primary-foreground hover:bg-primary/80 ml-2 inline-flex h-9 items-center gap-1.5 rounded-md px-3.5 text-meta font-medium"
           >
             Open the console
             <ArrowRight className="size-3.5" />
@@ -96,7 +96,7 @@ export default function Landing() {
             <div className="mt-7 flex flex-wrap items-center gap-3">
               <Link
                 to={consoleHref}
-                className="bg-primary text-primary-foreground hover:bg-primary/90 inline-flex h-11 items-center gap-2 rounded-lg px-5 text-body font-medium shadow-xs"
+                className="bg-primary text-primary-foreground hover:bg-primary/80 inline-flex h-11 items-center gap-2 rounded-md px-5 text-body font-medium shadow-e1"
               >
                 Open the console
                 <ArrowRight className="size-4" />
@@ -105,7 +105,7 @@ export default function Landing() {
                 href="https://github.com/HatriGt/agent-sandbox#connect-your-ide"
                 target="_blank"
                 rel="noreferrer"
-                className="border-line-strong hover:bg-muted inline-flex h-11 items-center gap-2 rounded-lg border px-5 text-body font-medium"
+                className="border-line-strong hover:bg-muted inline-flex h-11 items-center gap-2 rounded-md border px-5 text-body font-medium"
               >
                 <Plug className="size-4" />
                 Connect your IDE
@@ -243,7 +243,7 @@ export default function Landing() {
             <p className="text-muted-foreground mt-1 text-meta">Open the console, add a GitHub account, start a task.</p>
           </div>
           <div className="flex items-center gap-3">
-            <Link to={consoleHref} className="bg-primary text-primary-foreground hover:bg-primary/90 inline-flex h-10 items-center gap-2 rounded-lg px-4 text-meta font-medium">
+            <Link to={consoleHref} className="bg-primary text-primary-foreground hover:bg-primary/80 inline-flex h-10 items-center gap-2 rounded-md px-4 text-meta font-medium">
               Open the console
               <ArrowRight className="size-4" />
             </Link>
@@ -299,7 +299,7 @@ function Li({ icon, children }: { icon: React.ReactNode; children: React.ReactNo
   return (
     <li className="flex items-start gap-3">
       <span className="bg-muted mt-0.5 grid size-7 shrink-0 place-items-center rounded-md">{icon}</span>
-      <span className="text-foreground/90 leading-relaxed">{children}</span>
+      <span className="text-foreground leading-relaxed">{children}</span>
     </li>
   );
 }
@@ -307,11 +307,11 @@ function Li({ icon, children }: { icon: React.ReactNode; children: React.ReactNo
 function Way({ icon, title, body, code, delay }: { icon: React.ReactNode; title: string; body: string; code: string; delay: number }) {
   return (
     <Reveal delay={delay}>
-      <div className="bg-card flex h-full flex-col rounded-2xl border p-6">
-        <span className="bg-muted text-foreground grid size-10 place-items-center rounded-lg">{icon}</span>
+      <div className="bg-card flex h-full flex-col rounded-xl border p-6">
+        <span className="bg-muted text-foreground grid size-10 place-items-center rounded-md">{icon}</span>
         <h3 className="mt-4 text-h3 font-semibold tracking-[-0.01em]">{title}</h3>
         <p className="text-muted-foreground mt-2 flex-1 text-body leading-relaxed">{body}</p>
-        <pre className="bg-trace text-trace-fg mt-5 overflow-x-auto rounded-lg px-3.5 py-3 font-mono text-micro leading-relaxed">{code}</pre>
+        <pre className="bg-trace text-trace-fg mt-5 overflow-x-auto rounded-md px-3.5 py-3 font-mono text-micro leading-relaxed">{code}</pre>
       </div>
     </Reveal>
   );
@@ -321,7 +321,7 @@ function Feature({ icon, title, body }: { icon: React.ReactNode; title: string; 
   return (
     <Reveal>
       <div className="flex gap-4">
-        <span className="bg-muted text-foreground grid size-10 shrink-0 place-items-center rounded-lg [&_svg]:size-5">{icon}</span>
+        <span className="bg-muted text-foreground grid size-10 shrink-0 place-items-center rounded-md [&_svg]:size-5">{icon}</span>
         <div>
           <h3 className="text-body font-semibold">{title}</h3>
           <p className="text-muted-foreground mt-1 text-meta leading-relaxed">{body}</p>
@@ -407,15 +407,15 @@ function Demo() {
 
   const pill =
     state === "working"
-      ? "bg-live/12 text-live ring-live/25"
+      ? "bg-live/10 text-live ring-live/20"
       : state === "needs you"
-        ? "bg-attention/18 text-attention-text ring-attention/45"
+        ? "bg-attention/20 text-attention-text ring-attention/40"
         : state === "done"
-          ? "bg-ok/12 text-ok ring-ok/25"
+          ? "bg-ok/10 text-ok ring-ok/20"
           : "bg-muted text-muted-foreground ring-border";
 
   return (
-    <div className="bg-card relative overflow-hidden rounded-2xl border shadow-[0_1px_2px_oklch(0_0_0/0.05),0_30px_60px_-30px_oklch(0_0_0/0.35)]">
+    <div className="bg-card relative overflow-hidden rounded-xl border shadow-e5">
       <div className="flex h-12 items-center gap-2.5 border-b px-4">
         <span className={cn("inline-flex h-6 items-center gap-1.5 rounded-full px-2.5 text-micro font-semibold ring-1 ring-inset transition-colors duration-300", pill)}>
           {state === "working" && <CircleDot className="size-3 breathe" strokeWidth={2.5} />}
@@ -431,7 +431,7 @@ function Demo() {
         {items.map((f, i) =>
           f.kind === "task" ? (
             <motion.div key={i} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="flex justify-end">
-              <span className="bg-muted max-w-[80%] rounded-2xl rounded-br-md px-3.5 py-2">{f.text}</span>
+              <span className="bg-muted max-w-[80%] rounded-xl rounded-br-md px-3.5 py-2">{f.text}</span>
             </motion.div>
           ) : f.kind === "say" ? (
             <motion.p key={i} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="text-foreground max-w-[60ch] leading-relaxed">
@@ -442,7 +442,7 @@ function Demo() {
             </motion.p>
           ) : f.kind === "steps" ? (
             <motion.div key={i} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
-              <span className="text-muted-foreground inline-flex items-center gap-2 rounded-lg border px-3 py-1.5">
+              <span className="text-muted-foreground inline-flex items-center gap-2 rounded-md border px-3 py-1.5">
                 <Terminal className="size-3.5" /> {f.label}
               </span>
             </motion.div>
@@ -453,7 +453,7 @@ function Demo() {
                 {["Mock the clock with a fake timer", "Widen the tolerance to 200ms"].map((o) => {
                   const on = answered === o;
                   return (
-                    <li key={o} className={cn("flex items-center gap-2.5 rounded-lg border px-3 py-1.5 transition-colors", on ? "border-attention bg-attention/12" : "border-transparent")}>
+                    <li key={o} className={cn("flex items-center gap-2.5 rounded-md border px-3 py-1.5 transition-colors", on ? "border-attention bg-attention/10" : "border-transparent")}>
                       <span className={cn("grid size-4 place-items-center rounded-full border", on ? "border-attention bg-attention text-attention-ink" : "border-line-strong")}>
                         {on && <Check className="size-2.5" strokeWidth={3} />}
                       </span>
@@ -474,7 +474,7 @@ function Demo() {
             <ol className="py-1">
               {plan.map(([t, s]) => (
                 <li key={t} className={cn("flex items-center gap-2.5 px-3.5 py-1", s === "done" && "text-muted-foreground line-through", s === "active" && "font-medium")}>
-                  <span className={cn("grid size-4 place-items-center rounded", s === "done" ? "bg-ok/15 text-ok" : s === "active" ? "bg-live/12 text-live" : "border")}>
+                  <span className={cn("grid size-4 place-items-center rounded", s === "done" ? "bg-ok/20 text-ok" : s === "active" ? "bg-live/10 text-live" : "border")}>
                     {s === "done" ? <Check className="size-2.5" strokeWidth={3} /> : s === "active" ? <CircleDot className="size-2.5 breathe" /> : null}
                   </span>
                   {t}
@@ -490,7 +490,7 @@ function Demo() {
 
 function QuestionMock() {
   return (
-    <div className="bg-card rounded-2xl border p-2 shadow-[0_1px_2px_oklch(0_0_0/0.05),0_30px_60px_-30px_oklch(0_0_0/0.35)]">
+    <div className="bg-card rounded-xl border p-2 shadow-e5">
       <div className="border-attention/50 rounded-xl border">
         <div className="px-5 pt-4 pb-3">
           <p className="label text-attention-text mb-2 flex items-center gap-1.5">
@@ -501,12 +501,12 @@ function QuestionMock() {
         </div>
         <ul className="flex flex-col gap-1 px-3 pb-2">
           {["Postgres (recommended)", "SQLite", "Something else…"].map((o, i) => (
-            <li key={o} className={cn("flex items-center gap-3 rounded-lg border px-3 py-2.5 text-body", i === 0 ? "border-attention bg-attention/12" : "border-transparent")}>
+            <li key={o} className={cn("flex items-center gap-3 rounded-md border px-3 py-2.5 text-body", i === 0 ? "border-attention bg-attention/10" : "border-transparent")}>
               <span className={cn("grid size-4.5 place-items-center rounded-full border", i === 0 ? "border-attention bg-attention text-attention-ink" : "border-line-strong")}>
                 {i === 0 && <Check className="size-3" strokeWidth={3} />}
               </span>
               <span className="flex-1">{o}</span>
-              <kbd className="text-muted-foreground/60">{i + 1}</kbd>
+              <kbd className="text-faint">{i + 1}</kbd>
             </li>
           ))}
         </ul>
@@ -546,7 +546,7 @@ function HairlineGrid() {
 function Architecture() {
   const reduced = useReducedMotion();
   return (
-    <div className="bg-card mt-10 overflow-hidden rounded-2xl border p-6 md:p-10">
+    <div className="bg-card mt-10 overflow-hidden rounded-xl border p-6 md:p-10">
       <div className="grid items-center gap-8 md:grid-cols-[1fr_auto_1fr_auto_1fr]">
         <div className="flex flex-col gap-3">
           <Node icon={<Laptop className="size-4" />} title="Agentic IDE" sub="Cursor · Claude Code · Codex · VS Code" />
@@ -582,11 +582,11 @@ function Architecture() {
 
 function Node({ icon, title, sub, accent, tone }: { icon: React.ReactNode; title: string; sub: string; accent?: boolean; tone?: "live" | "attention" | "ok" }) {
   return (
-    <div className={cn("flex items-center gap-3 rounded-xl border px-3.5 py-2.5", accent && "border-line-strong shadow-xs")}>
+    <div className={cn("flex items-center gap-3 rounded-xl border px-3.5 py-2.5", accent && "border-line-strong shadow-e1")}>
       <span
         className={cn(
-          "grid size-8 shrink-0 place-items-center rounded-lg",
-          tone === "live" ? "bg-live/12 text-live" : tone === "attention" ? "bg-attention/18 text-attention-text" : tone === "ok" ? "bg-ok/12 text-ok" : "bg-muted text-foreground"
+          "grid size-8 shrink-0 place-items-center rounded-md",
+          tone === "live" ? "bg-live/10 text-live" : tone === "attention" ? "bg-attention/20 text-attention-text" : tone === "ok" ? "bg-ok/10 text-ok" : "bg-muted text-foreground"
         )}
       >
         {icon}
@@ -616,12 +616,12 @@ function TestMock() {
     ["should handle timeout", "fail", "5001ms"],
   ];
   return (
-    <div className="bg-card rounded-2xl border p-2 shadow-[0_1px_2px_oklch(0_0_0/0.05),0_30px_60px_-30px_oklch(0_0_0/0.35)]">
+    <div className="bg-card rounded-xl border p-2 shadow-e5">
       <div className="overflow-hidden rounded-xl border">
         <div className="flex flex-wrap items-center gap-2 border-b px-3.5 py-2.5 text-meta">
-          <span className="bg-ok/12 text-ok inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-medium"><Check className="size-3" strokeWidth={3} /> 8 passed</span>
+          <span className="bg-ok/10 text-ok inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-medium"><Check className="size-3" strokeWidth={3} /> 8 passed</span>
           <span className="bg-destructive/10 text-destructive inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-medium"><X className="size-3" strokeWidth={3} /> 1 failed</span>
-          <span className="bg-attention/18 text-attention-text inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-medium"><Circle className="size-3" /> 1 skipped</span>
+          <span className="bg-attention/20 text-attention-text inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 font-medium"><Circle className="size-3" /> 1 skipped</span>
           <span className="text-muted-foreground tabular ml-auto">1.23s</span>
         </div>
         <div className="flex items-center gap-2.5 px-3.5 py-2 text-meta"><span className="border-destructive text-destructive grid size-4 place-items-center rounded-full border-[1.5px]"><X className="size-2.5" strokeWidth={3} /></span><span className="font-mono">auth.test.ts</span><span className="text-muted-foreground ml-auto text-micro">1 failing · 3 tests</span></div>

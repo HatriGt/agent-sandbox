@@ -72,7 +72,7 @@ export function RepoPicker({
       role="dialog"
       aria-label="Choose repositories"
       className={cn(
-        "bg-popover text-popover-foreground w-[min(28rem,calc(100vw-2rem))] overflow-hidden rounded-xl border shadow-[0_1px_2px_oklch(0_0_0/0.06),0_16px_40px_-16px_oklch(0_0_0/0.35)]",
+        "bg-popover text-popover-foreground w-[min(28rem,calc(100vw-2rem))] overflow-hidden rounded-xl border shadow-e3",
         className
       )}
       onKeyDown={(e) => {
@@ -155,7 +155,7 @@ export function RepoPicker({
                     if (!multi) onClose();
                   }}
                   className={cn(
-                    "flex w-full cursor-pointer items-center gap-3 rounded-lg px-2.5 py-2 text-left",
+                    "flex w-full cursor-pointer items-center gap-3 rounded-md px-2.5 py-2 text-left",
                     i === cursor ? "bg-accent" : "hover:bg-muted"
                   )}
                 >

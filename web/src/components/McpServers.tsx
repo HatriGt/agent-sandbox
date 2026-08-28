@@ -154,7 +154,7 @@ function Segmented<T extends string>({ value, onChange, options }: { value: T; o
   return (
     <div role="radiogroup" className="bg-muted inline-flex h-8 items-center gap-0.5 rounded-md p-0.5">
       {options.map(([k, label]) => (
-        <button key={k} type="button" role="radio" aria-checked={value === k} onClick={() => onChange(k)} className={cn("flex h-7 cursor-pointer items-center gap-1.5 rounded px-2.5 text-micro font-medium transition-colors", value === k ? "bg-card text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>
+        <button key={k} type="button" role="radio" aria-checked={value === k} onClick={() => onChange(k)} className={cn("flex h-7 cursor-pointer items-center gap-1.5 rounded px-2.5 text-micro font-medium transition-colors", value === k ? "bg-card text-foreground shadow-e1" : "text-muted-foreground hover:text-foreground")}>
           {label}
         </button>
       ))}
@@ -165,7 +165,7 @@ function Segmented<T extends string>({ value, onChange, options }: { value: T; o
 function Expand({ children }: { children: React.ReactNode }) {
   return (
     <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }} className="overflow-hidden">
-      <div className="bg-muted/30 border-b px-4 py-4">{children}</div>
+      <div className="bg-muted/40 border-b px-4 py-4">{children}</div>
     </motion.div>
   );
 }
@@ -193,7 +193,7 @@ function ServerRow({ server: s, open, onToggleOpen, onMutate }: { server: McpSer
       .finally(() => setBusy(false));
   };
   return (
-    <div className={cn("group flex items-center gap-3 px-4 py-2.5 transition-colors", open ? "bg-muted/30" : "hover:bg-muted/40")}>
+    <div className={cn("group flex items-center gap-3 px-4 py-2.5 transition-colors", open ? "bg-muted/40" : "hover:bg-muted/40")}>
       <button type="button" onClick={onToggleOpen} aria-expanded={open} className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 text-left">
         <BrandGlyph hint={`${s.name} ${target}`} transport={s.type} className={cn(!s.enabled && "opacity-40 grayscale")} />
         <span className={cn("shrink-0 text-body font-medium", s.enabled ? "text-foreground" : "text-muted-foreground")}>{s.name}</span>
@@ -213,8 +213,8 @@ function ServerRow({ server: s, open, onToggleOpen, onMutate }: { server: McpSer
       </button>
       <Tooltip>
         <TooltipTrigger asChild>
-          <button type="button" role="switch" aria-checked={s.enabled} disabled={busy} onClick={toggle} className={cn("relative h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors", s.enabled ? "bg-live" : "bg-muted-foreground/30")} aria-label={s.enabled ? `Disable ${s.name}` : `Enable ${s.name}`}>
-            <span className={cn("bg-card absolute top-0.5 size-4 rounded-full shadow-xs transition-[left]", s.enabled ? "left-[1.125rem]" : "left-0.5")} />
+          <button type="button" role="switch" aria-checked={s.enabled} disabled={busy} onClick={toggle} className={cn("relative h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors", s.enabled ? "bg-live" : "bg-muted-foreground/40")} aria-label={s.enabled ? `Disable ${s.name}` : `Enable ${s.name}`}>
+            <span className={cn("bg-card absolute top-0.5 size-4 rounded-full shadow-e1 transition-[left]", s.enabled ? "left-[1.125rem]" : "left-0.5")} />
           </button>
         </TooltipTrigger>
         <TooltipContent>{s.enabled ? "On — given to every new run and turn" : "Off — kept, not given to the agent"}</TooltipContent>
@@ -301,7 +301,7 @@ function ServerEditor({ initial, onMutate, onDone }: { initial?: McpServerView; 
         <Field label="Transport">
           <div role="radiogroup" className="bg-muted inline-flex h-9 items-center gap-0.5 rounded-md p-0.5">
             {(["stdio", "http", "sse"] as McpTransport[]).map((t) => (
-              <button key={t} type="button" role="radio" aria-checked={type === t} onClick={() => setType(t)} className={cn("h-8 cursor-pointer rounded px-3 text-meta font-medium", type === t ? "bg-card text-foreground shadow-xs" : "text-muted-foreground")}>
+              <button key={t} type="button" role="radio" aria-checked={type === t} onClick={() => setType(t)} className={cn("h-8 cursor-pointer rounded px-3 text-meta font-medium", type === t ? "bg-card text-foreground shadow-e1" : "text-muted-foreground")}>
                 {t}
               </button>
             ))}

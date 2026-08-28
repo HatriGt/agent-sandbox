@@ -74,7 +74,7 @@ export function ThreadMinimap({ turns, scrollerRef }: { turns: Turn[]; scrollerR
                 <span
                   className={cn(
                     "block h-[3px] rounded-full transition-[width,background-color] duration-200",
-                    on ? "bg-foreground w-7" : hover === i ? "bg-foreground/70 w-6" : "bg-muted-foreground/35 w-3.5 group-hover:bg-foreground/60"
+                    on ? "bg-foreground w-7" : hover === i ? "bg-foreground/60 w-6" : "bg-muted-foreground/40 w-3.5 group-hover:bg-foreground/60"
                   )}
                 />
               </button>
@@ -85,7 +85,7 @@ export function ThreadMinimap({ turns, scrollerRef }: { turns: Turn[]; scrollerR
                     animate={{ opacity: 1, x: 0, scale: 1 }}
                     exit={{ opacity: 0, x: -6, scale: 0.98 }}
                     transition={{ duration: 0.14, ease: [0.22, 1, 0.36, 1] }}
-                    className="bg-popover text-popover-foreground pointer-events-none absolute top-1/2 left-full z-20 w-80 -translate-y-1/2 rounded-xl border p-3.5 shadow-[0_1px_2px_oklch(0_0_0/0.06),0_16px_40px_-16px_oklch(0_0_0/0.4)]"
+                    className="bg-popover text-popover-foreground pointer-events-none absolute top-1/2 left-full z-20 w-80 -translate-y-1/2 rounded-xl border p-3.5 shadow-e3"
                   >
                     <p className="label text-muted-foreground mb-1">
                       {t.label} · {i + 1}/{turns.length}

@@ -60,7 +60,7 @@ export function LinkChip({ href, children, className }: { href: string; children
       rel="noreferrer noopener"
       title={d.title}
       className={cn(
-        "bg-card hover:border-line-strong hover:bg-muted text-foreground inline-flex max-w-full items-center gap-1 rounded-md border px-1.5 py-px align-[-0.12em] text-[0.9em] leading-[1.35] font-medium no-underline transition-colors",
+        "bg-muted hover:bg-accent text-foreground inline-flex max-w-full items-center gap-1 rounded-md px-1.5 py-px align-[-0.12em] text-[0.9em] leading-[1.35] font-medium no-underline transition-colors",
         d.kind === "pr" && "text-ok",
         d.kind === "issue" && "text-live",
         className

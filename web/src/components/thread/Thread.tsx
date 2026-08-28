@@ -566,7 +566,7 @@ export function Thread({
               transition={{ duration: 0.16 }}
               onClick={() => void stick.scrollToBottom()}
               aria-label="Scroll to latest"
-              className="bg-card hover:bg-muted text-foreground absolute right-5 bottom-4 z-10 grid size-8 cursor-pointer place-items-center rounded-full border shadow-[0_1px_2px_oklch(0_0_0/0.06),0_8px_20px_-10px_oklch(0_0_0/0.4)]"
+              className="bg-card hover:bg-muted text-foreground absolute right-5 bottom-4 z-10 grid size-8 cursor-pointer place-items-center rounded-full border shadow-e2"
             >
               <ArrowDown className="size-4" aria-hidden />
             </motion.button>

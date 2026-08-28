@@ -18,7 +18,7 @@ export function ChangesDock({ files, loading, onOpen, onRefresh, activePath }: {
   const dels = files.reduce((a, f) => a + f.deletions, 0);
   return (
     <div className="mx-auto w-full max-w-3xl px-3 md:px-6">
-      <div className="bg-card overflow-hidden rounded-xl border shadow-xs">
+      <div className="bg-card overflow-hidden rounded-xl shadow-e2">
         <AnimatePresence initial={false}>
           {open && (
             <motion.ul

@@ -115,7 +115,7 @@ function AccountRow({ account: a, onChanged }: { account: AccountView; onChanged
           {a.isDefault && (
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="bg-live/12 text-live inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-micro font-semibold">
+                <span className="bg-live/10 text-live inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-micro font-semibold">
                   <Star className="size-3 fill-current" aria-hidden /> default
                 </span>
               </TooltipTrigger>
@@ -177,7 +177,7 @@ function AddAccount({ oauth, onDone }: { oauth: boolean; onDone: (list: AccountV
   return (
     <div>
       {oauth && (
-        <div role="tablist" className="bg-muted mb-5 inline-flex h-9 items-center gap-0.5 rounded-lg p-0.5">
+        <div role="tablist" className="bg-muted mb-5 inline-flex h-9 items-center gap-0.5 rounded-md p-0.5">
           <Tab active={mode === "oauth"} onClick={() => setMode("oauth")} icon={<Github className="size-3.5" />} label="Sign in with GitHub" />
           <Tab active={mode === "pat"} onClick={() => setMode("pat")} icon={<KeyRound className="size-3.5" />} label="Paste a token" />
         </div>
@@ -194,7 +194,7 @@ function AddAccount({ oauth, onDone }: { oauth: boolean; onDone: (list: AccountV
 
 function Tab({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string }) {
   return (
-    <button type="button" role="tab" aria-selected={active} onClick={onClick} className={cn("flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-3 text-meta font-medium", active ? "bg-card text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>
+    <button type="button" role="tab" aria-selected={active} onClick={onClick} className={cn("flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-3 text-meta font-medium", active ? "bg-card text-foreground shadow-e1" : "text-muted-foreground hover:text-foreground")}>
       {icon}
       {label}
     </button>
@@ -313,7 +313,7 @@ function DeviceFlow({ onDone }: { onDone: (list: AccountView[]) => void }) {
           </a>
         </p>
         <div className="flex items-center gap-2">
-          <code className="bg-muted text-foreground rounded-lg px-4 py-2.5 font-mono text-h2 tracking-[0.14em]">{state.code}</code>
+          <code className="bg-muted text-foreground rounded-md px-4 py-2.5 font-mono text-h2 tracking-[0.14em]">{state.code}</code>
           <Button variant="outline" size="icon" onClick={() => navigator.clipboard.writeText(state.code).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1400); }).catch(() => {})} aria-label="Copy code">
             {copied ? <Check className="text-ok" /> : <Copy />}
           </Button>
