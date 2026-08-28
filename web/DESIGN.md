@@ -373,3 +373,13 @@ h2 20 · h1 28` (all registered with tailwind-merge). Rules the audit enforced:
   carry the state.
 - **Waking line**: no card, no tint. A 4×4 monochrome pixel wave, "Waking the sandbox · 4s", and one
   crossfading status line (boot → restore → reconnect), in the transcript's own voice.
+
+## Round: workspace like T3 Code, full view (2026-08-28)
+
+- **Arrangement**: tab strip across the top with the window controls at its right (full view ·
+  files panel · close); editor group on the left with breadcrumbs; the **files panel on the right**
+  with a "Search files" field above the tree and a Files ⇄ Changes toggle (the change count as a
+  badge). No activity bar. Typing in the search replaces the tree with ranked results; picking one
+  opens it and clears the search.
+- **Full view**: the ⤢ control collapses the conversation column so the workspace takes the whole
+  width beside the sidebar; ⤡ brings the conversation back. Closing the pane resets it.

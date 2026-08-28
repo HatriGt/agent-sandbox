@@ -127,9 +127,11 @@ export function Thread({
   const [changesLoading, setChangesLoading] = React.useState(false);
   const [openFile, setOpenFile] = React.useState<ChangedFile | null>(null);
   const [workspaceOpen, setWorkspaceOpen] = React.useState(false);
+  const [workspaceFull, setWorkspaceFull] = React.useState(false);
   const showWorkspace = workspaceOpen || openFile !== null;
   const closeWorkspace = () => {
     setWorkspaceOpen(false);
+    setWorkspaceFull(false);
     setOpenFile(null);
   };
 
@@ -479,7 +481,7 @@ export function Thread({
       )}
 
       <div className="relative flex min-h-0 flex-1">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col", showWorkspace && workspaceFull && "hidden md:hidden")}>
       <div className="relative min-h-0 min-w-0 flex-1">
         <ThreadMinimap turns={turns} scrollerRef={stick.scrollRef} />
         <ChatContainerRoot className="relative h-full [&>div]:overflow-x-hidden" instance={stick}>
@@ -585,7 +587,7 @@ export function Thread({
       />
       </div>
       <AnimatePresence>
-        {showWorkspace && <WorkspacePane key="workspace" session={box.name} changes={changes} open={openFile} onClose={closeWorkspace} onSaved={refreshChanges} repos={repos} />}
+        {showWorkspace && <WorkspacePane key="workspace" session={box.name} changes={changes} open={openFile} onClose={closeWorkspace} onSaved={refreshChanges} repos={repos} full={workspaceFull} onToggleFull={() => setWorkspaceFull((v) => !v)} />}
       </AnimatePresence>
       </div>
     </div>
