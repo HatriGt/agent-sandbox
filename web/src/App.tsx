@@ -1,20 +1,6 @@
 import * as React from "react";
 import { Link, useLocation } from "react-router";
-import {
-  Bell,
-  BellOff,
-  Flame,
-  Plug,
-  LayoutGrid,
-  Moon,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Pause,
-  Plus,
-  Search,
-  Sun,
-  TriangleAlert,
-} from "lucide-react";
+import { Bell, BellOff, Flame, Keyboard, LayoutGrid, Moon, PanelLeftClose, PanelLeftOpen, Pause, Plug, Plus, Search, Sun, TriangleAlert } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { api, type FleetLifecycle, type FleetSnapshot } from "@/lib/api";
 import { POLL_MS, isUp, isVisible, threadSort } from "@/lib/format";
@@ -29,7 +15,8 @@ import { Logo } from "@/components/ui/logo";
 import { MachineList } from "@/components/MachineList";
 import { Hub } from "@/components/Hub";
 import { Capacity } from "@/components/Capacity";
-import { CommandPalette, openPalette } from "@/components/CommandPalette";
+import { CommandPalette, openPalette, type PaletteAction } from "@/components/CommandPalette";
+import { ShortcutsDialog } from "@/components/ShortcutsDialog";
 import { Toaster } from "@/components/ui/sonner";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Thread, type Aside } from "@/components/thread/Thread";
@@ -168,6 +155,16 @@ export default function App() {
   }, [go]);
 
   const notify = useNotifications(boxes, open);
+  const [shortcuts, setShortcuts] = React.useState(false);
+  const paletteActions = React.useMemo<PaletteAction[]>(
+    () => [
+      { id: "fleet", label: "Fleet view", hint: "g f", icon: <LayoutGrid />, run: showFleet },
+      { id: "integrations", label: "Integrations", hint: "g a", icon: <Plug />, run: showAccounts },
+      { id: "theme", label: dark ? "Switch to light theme" : "Switch to dark theme", icon: dark ? <Sun /> : <Moon />, run: () => setDark(!dark) },
+      { id: "keys", label: "Keyboard shortcuts", hint: "?", icon: <Keyboard />, run: () => setShortcuts(true) },
+    ],
+    [showFleet, showAccounts, dark, setDark]
+  );
 
   React.useEffect(() => {
     if (booting || !data) return;
@@ -209,6 +206,7 @@ export default function App() {
       if (pendingG && e.key === "f") return showFleet();
       if (pendingG && e.key === "a") return showAccounts();
       if (e.key === "n") return newTask();
+      if (e.key === "?") return setShortcuts(true);
       if (e.key === "/") {
         e.preventDefault();
         focusComposer.current?.();
@@ -515,7 +513,8 @@ export default function App() {
           </AnimatePresence>
         </main>
 
-        <CommandPalette boxes={runs_} onOpen={open} onNew={newTask} />
+        <CommandPalette boxes={runs_} actions={paletteActions} onOpen={open} onNew={newTask} />
+        <ShortcutsDialog open={shortcuts} onOpenChange={setShortcuts} />
       </div>
     </TooltipProvider>
   );

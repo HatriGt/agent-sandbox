@@ -1,4 +1,5 @@
 import * as React from "react";
+import { readDraft, writeDraft } from "@/lib/draft";
 import { ArrowUp, AtSign, Clock, ImagePlus, Loader2, MessageCircleQuestion, Terminal, X } from "lucide-react";
 import { ATTACHMENTS_DIR } from "@/lib/session-context";
 import { Lightbox } from "@/components/ui/lightbox";
@@ -55,7 +56,9 @@ export function SendBar({
   const busy = runState === "running" && !sleeping;
   const canSide = !sleeping;
   const [mode, setMode] = React.useState<Mode>("agent");
-  const [value, setValue] = React.useState("");
+  const [value, setValue] = React.useState(() => readDraft(boxName));
+  React.useEffect(() => setValue(readDraft(boxName)), [boxName]);
+  React.useEffect(() => writeDraft(boxName, value), [boxName, value]);
   const [sending, setSending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [mention, setMention] = React.useState<MentionState | null>(null);

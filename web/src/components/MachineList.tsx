@@ -32,6 +32,10 @@ export function MachineList({
   sleepTtlSec?: number;
 }) {
   const sorted = [...boxes].sort(threadSort);
+  // A row's group, in the order the sort produces them. Labels only earn their place when the list
+  // spans more than one group; a single group is self-evident.
+  const groupOf = (v: StableBox) => (v.runState === "waiting" ? "Needs you" : displayState(v) === "running" ? "Working" : displayState(v) === "sleeping" ? "Sleeping" : v.role === "pool-free" ? "Warm" : "Done");
+  const grouped = new Set(sorted.map(groupOf)).size > 1;
 
   return (
     <nav aria-label="Machines" className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
@@ -69,8 +73,10 @@ export function MachineList({
         ))}
 
         <AnimatePresence initial={false}>
-          {sorted.map((v) => {
+          {sorted.map((v, idx) => {
             const active = selected === v.name;
+            const group = groupOf(v);
+            const heads = grouped && (idx === 0 || groupOf(sorted[idx - 1]) !== group);
             const waiting = v.runState === "waiting";
             const state = displayState(v);
             return (
@@ -82,6 +88,11 @@ export function MachineList({
                 exit={{ opacity: 0, height: 0, marginTop: 0, marginBottom: 0 }}
                 transition={{ type: "spring", stiffness: 500, damping: 40, mass: 0.8 }}
               >
+                {heads && (
+                  <p className={cn("label text-faint px-3 pb-1", idx === 0 ? "pt-1" : "pt-4")} aria-hidden>
+                    {group}
+                  </p>
+                )}
                 <button
                   type="button"
                   onClick={() => onSelect(v.name)}

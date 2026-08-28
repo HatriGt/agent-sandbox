@@ -19,12 +19,22 @@ export function openPalette() {
  *
  * A native <dialog>: top layer, focus trap and Escape for free, no portal.
  */
+export interface PaletteAction {
+  id: string;
+  label: string;
+  hint?: string;
+  icon: React.ReactNode;
+  run: () => void;
+}
+
 export function CommandPalette({
   boxes,
+  actions = [],
   onOpen,
   onNew,
 }: {
   boxes: BoxView[];
+  actions?: PaletteAction[];
   onOpen: (name: string) => void;
   onNew: () => void;
 }) {
@@ -66,13 +76,19 @@ export function CommandPalette({
   const matches = q
     ? boxes.filter((b) => `${friendlyName(b.name)} ${b.name} ${b.task ?? ""}`.toLowerCase().includes(q))
     : boxes;
-  const rows = [{ kind: "new" as const }, ...matches.map((b) => ({ kind: "box" as const, box: b }))];
+  const acts = q ? actions.filter((a) => `${a.label} ${a.hint ?? ""}`.toLowerCase().includes(q)) : actions;
+  const rows = [
+    ...(!q || "start a new task".includes(q) ? [{ kind: "new" as const }] : []),
+    ...matches.map((b) => ({ kind: "box" as const, box: b })),
+    ...acts.map((a) => ({ kind: "action" as const, action: a })),
+  ];
   const clamped = Math.min(cursor, rows.length - 1);
 
   const run = (i: number) => {
     const row = rows[i];
     if (!row) return;
     if (row.kind === "new") onNew();
+    else if (row.kind === "action") row.action.run();
     else onOpen(row.box.name);
     close();
   };
@@ -113,7 +129,7 @@ export function CommandPalette({
               run(clamped);
             }
           }}
-          placeholder="Search machines by task or name…"
+          placeholder="Search machines, or type an action…"
           aria-label="Search machines"
           className="placeholder:text-muted-foreground min-w-0 flex-1 bg-transparent text-body outline-none"
         />
@@ -122,7 +138,8 @@ export function CommandPalette({
 
       <ul className="max-h-[52vh] overflow-y-auto p-1.5">
         {rows.map((row, i) => (
-          <li key={row.kind === "new" ? "new" : row.box.name}>
+          <li key={row.kind === "new" ? "new" : row.kind === "action" ? `act-${row.action.id}` : row.box.name}>
+            {row.kind === "action" && (i === 0 || rows[i - 1].kind !== "action") && <p className="label text-faint px-2.5 pt-2 pb-1">Actions</p>}
             <button
               type="button"
               onMouseEnter={() => setCursor(i)}
@@ -139,6 +156,12 @@ export function CommandPalette({
                   </span>
                   <span className="text-foreground flex-1 text-meta font-medium">Start a new task</span>
                 </>
+              ) : row.kind === "action" ? (
+                <>
+                  <span className="bg-muted text-muted-foreground grid size-6 shrink-0 place-items-center rounded-md [&_svg]:size-3.5">{row.action.icon}</span>
+                  <span className="text-foreground flex-1 text-meta">{row.action.label}</span>
+                  {row.action.hint && <kbd className="text-faint font-sans text-micro">{row.action.hint}</kbd>}
+                </>
               ) : (
                 <>
                   <StateStamp state={displayState(row.box)} exitCode={row.box.exitCode} className="w-24 shrink-0" />
@@ -152,7 +175,7 @@ export function CommandPalette({
             </button>
           </li>
         ))}
-        {q && !matches.length && (
+        {q && !matches.length && !acts.length && (
           <li className="text-muted-foreground px-2.5 py-4 text-center text-meta">No machine matches “{query.trim()}”.</li>
         )}
       </ul>

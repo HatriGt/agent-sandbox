@@ -19,7 +19,8 @@ import { toast } from "sonner";
 import { RepoPicker, type PickedRepo } from "@/components/RepoPicker";
 import { motion } from "motion/react";
 import { api, type BoxView, type FleetLifecycle } from "@/lib/api";
-import { friendlyName, shortName, threadSort, threadTitle } from "@/lib/format";
+import { fmtAgo, friendlyName, shortName, threadSort, threadTitle } from "@/lib/format";
+import { readDraft, takePrefill, writeDraft } from "@/lib/draft";
 import { displayState, fmtDuration } from "@/lib/lifecycle";
 import { questionHeadline } from "@/lib/question";
 import { prefetchWatch } from "@/hooks/useWatchStream";
@@ -131,9 +132,20 @@ export function Hub({
   onOpen: (name: string) => void;
   onBack: () => void;
 }) {
-  const [task, setTask] = React.useState("");
+  // A handoff from a finished run wins; otherwise whatever was typed before a reload or detour.
+  const prefill = React.useRef(takePrefill());
+  const [task, setTask] = React.useState(() => prefill.current?.task ?? readDraft("hub"));
   const [picked, setPicked] = React.useState<PickedRepo[]>([]);
-  const [showRepo, setShowRepo] = React.useState(false);
+  const [showRepo, setShowRepo] = React.useState(() => !!prefill.current?.wantsRepo);
+  React.useEffect(() => writeDraft("hub", task), [task]);
+  React.useEffect(() => {
+    if (!prefill.current) return;
+    requestAnimationFrame(() => {
+      const el = document.getElementById("new-task") as HTMLTextAreaElement | null;
+      el?.focus();
+      el?.setSelectionRange(el.value.length, el.value.length);
+    });
+  }, []);
   const pickerRef = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
     if (!showRepo) return;
@@ -457,6 +469,12 @@ export function Hub({
                         <span className="text-foreground min-w-0 flex-1 truncate text-meta">
                           {b.runState === "waiting" && b.question ? questionHeadline(b.question) : threadTitle(b)}
                         </span>
+                        {b.lastOutputAt && (
+                          <span className="text-faint hidden shrink-0 text-micro sm:inline">
+                            {b.runState === "running" ? "active " : ""}
+                            {fmtAgo(b.lastOutputAt)}
+                          </span>
+                        )}
                         <span className="stamp text-muted-foreground shrink-0" title={shortName(b.name)}>
                           {friendlyName(b.name)}
                         </span>

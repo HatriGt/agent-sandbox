@@ -444,3 +444,15 @@ Hierarchy and depth rather than tokens this time. Each item is a rule from the b
 - **Tertiary actions look like links.** Hub starter prompts lost their pill borders; five equal outlined chips read as five secondary actions competing with the composer.
 - **Empty states are designed.** Hub with nothing running shows a small circled icon, a headline and one line of guidance instead of an absent section.
 - **Depth from light.** `.raised` = lit top edge (`inset 0 1px 0 white/6%`, dark only) + `--shadow-e1`. Used on the composer and the changes dock — the two surfaces that sit above the thread.
+
+## Features round (2026-08-28, with Refactoring UI)
+
+New things a user can do, each placed where the need arises rather than added to the chrome.
+
+- **Run summary.** A finished thread ends with one line that reads like a sentence — "Completed · 6 steps · 3 files · 2 commands · 19m" — followed by two tertiary actions: **Copy transcript** (Markdown, tool work folded into `<details>`) and **New task from this** (hands the task to the Hub; opens the repo picker if the run had repositories). Labels folded into values; no spec sheet.
+- **Command palette actions.** ⌘K now also runs Fleet view, Integrations, theme switch and the shortcuts list, under a quiet "Actions" label below machine matches. Typing filters both.
+- **Keyboard shortcuts overlay.** `?` anywhere. Three groups (Go, Thread, Anywhere); keys as small `kbd` chips on the right so the eye scans descriptions.
+- **Grouped sidebar.** Machines carry faint group labels (Needs you · Working · Done · Sleeping · Warm) only when the list spans more than one group — more space around a group than within it.
+- **Drafts survive.** Unsent Hub and follow-up text lives in sessionStorage per machine; a reload or a detour to another thread does not lose it.
+- **Last activity.** Hub "Live now" rows show "active 2m ago" / "2m ago" in the tertiary colour before the machine name.
+- **Header vitals demoted** to the tertiary text colour — uptime/cpu/memory were competing with the title.

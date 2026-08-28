@@ -95,3 +95,12 @@ export function doneLabel(exitCode?: number): string {
 export function isFailedExit(exitCode?: number): boolean {
   return exitCode != null && exitCode !== 0;
 }
+
+/** "just now", "4m ago", "3h ago", "2d ago" — for last-activity stamps. */
+export function fmtAgo(unixSec: number, nowMs = Date.now()): string {
+  const s = Math.max(0, Math.floor(nowMs / 1000) - unixSec);
+  if (s < 45) return "just now";
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+  return `${Math.round(s / 86400)}d ago`;
+}

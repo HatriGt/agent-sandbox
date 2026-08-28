@@ -8,7 +8,10 @@ const WorkspacePane = React.lazy(() => import("./WorkspacePane").then((m) => ({ 
 import { WakingCard } from "./WakingCard";
 import { SessionContext } from "@/lib/session-context";
 import { friendlyName, isSleeping, POLL_MS, roleLabel, shortName, threadTitle } from "@/lib/format";
-import { deadlineLabel, deadlineOf, displayState, fmtDuration } from "@/lib/lifecycle";
+import { deadlineLabel, deadlineOf, displayState, fmtDuration, parseUptimeSec } from "@/lib/lifecycle";
+import { runStats, toMarkdown } from "@/lib/transcript";
+import { setPrefill } from "@/lib/draft";
+import { RunSummary } from "./RunSummary";
 import { parseTrace, producedFiles } from "@/lib/trace";
 import { usePoll } from "@/hooks/usePoll";
 import { seedWatchCache, useWatchStream } from "@/hooks/useWatchStream";
@@ -341,7 +344,7 @@ export function Thread({
         {pulls.length > 0 && !loadingTrace && <PullRequestFloat key={pulls[pulls.length - 1].url} session={box.name} {...pulls[pulls.length - 1]} />}
 
         {/* Lifecycle + vitals: quiet mono facts, desktop only — the fleet view carries them on phones. */}
-        <div className="stamp text-muted-foreground hidden items-center gap-3 lg:flex">
+        <div className="stamp text-faint hidden items-center gap-3 lg:flex">
           {deadlineText && (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -545,13 +548,20 @@ export function Thread({
               <ObserverItem key={`aside-${i}`} question={a.question} answer={a.error ?? a.answer} />
             ))}
 
-            {!sleeping &&
-              runState === "done" &&
-              (exitCode == null || exitCode === 0 ? (
-                <LifecycleItem label="Completed" detail={deadlineText ?? undefined} />
-              ) : (
-                <LifecycleItem label="Exited with an error" detail={`code ${exitCode}`} />
-              ))}
+            {!sleeping && runState === "done" && (
+              <RunSummary
+                label={exitCode == null || exitCode === 0 ? "Completed" : "Exited with an error"}
+                failed={exitCode != null && exitCode !== 0}
+                detail={exitCode == null || exitCode === 0 ? deadlineText ?? undefined : `code ${exitCode}`}
+                stats={runStats(events)}
+                durationSec={parseUptimeSec(box.uptime)}
+                onCopy={async () => toMarkdown(events, { title: box.task ? threadTitle(box) : friendlyName(box.name), machine: friendlyName(box.name), url: window.location.href })}
+                onAgain={() => {
+                  setPrefill({ task: box.task ?? "", wantsRepo: repos.length > 0 });
+                  onNew();
+                }}
+              />
+            )}
             <ChatContainerScrollAnchor />
           </ChatContainerContent>
         </ChatContainerRoot>
