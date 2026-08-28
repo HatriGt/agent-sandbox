@@ -90,7 +90,8 @@ export function MachineList({
                   aria-current={active ? "true" : undefined}
                   className={cn(
                     "group w-full cursor-pointer rounded-md px-3 py-2.5 text-left transition-colors duration-150",
-                    active ? "bg-accent" : "hover:bg-muted"
+                    "relative",
+                    active ? "bg-accent before:bg-live before:absolute before:top-2.5 before:bottom-2.5 before:left-0 before:w-0.5 before:rounded-full" : "hover:bg-muted"
                   )}
                 >
                   <div className="flex items-baseline gap-2">

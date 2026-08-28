@@ -351,7 +351,7 @@ function DestroySleeping({ boxes, onDestroyed }: { boxes: StableBox[]; onDestroy
     setArmed(false);
   };
   return (
-    <Button size="sm" variant={armed ? "destructive" : "outline"} onClick={run} disabled={busy}>
+    <Button size="sm" variant={armed ? "destructive" : "ghost"} onClick={run} disabled={busy} className={cn(!armed && "text-muted-foreground")}>
       <Trash2 />
       {busy ? "Destroying…" : armed ? `Confirm: destroy ${boxes.length} sleeping` : `Destroy ${boxes.length} sleeping`}
     </Button>

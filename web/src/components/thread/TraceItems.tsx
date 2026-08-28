@@ -337,17 +337,16 @@ function DumpItem({ text }: { text: string }) {
   );
 }
 
-export const SayItem = React.memo(function SayItem({ text, live }: { text: string; live?: boolean }) {
+export const SayItem = React.memo(function SayItem({ text, live, label = true }: { text: string; live?: boolean; label?: boolean }) {
   if (!live && looksLikeDump(text)) return <DumpItem text={text} />;
   return (
     <div className="enter min-w-0">
-      <span className="label text-muted-foreground mb-1.5 flex items-center gap-1.5">
-        <span
-          className={cn("size-1.5 rounded-full", live ? "bg-live breathe" : "bg-muted-foreground/60")}
-          aria-hidden
-        />
-        Agent
-      </span>
+      {(label || live) && (
+        <span className="label text-muted-foreground mb-1.5 flex items-center gap-1.5">
+          <span className={cn("size-1.5 rounded-full", live ? "bg-live breathe" : "bg-faint")} aria-hidden />
+          Agent
+        </span>
+      )}
       <div className="text-foreground min-w-0">
         {live ? <StreamingMarkdown text={text} /> : <Markdown className="prose-agent">{text}</Markdown>}
       </div>

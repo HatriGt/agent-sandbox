@@ -595,3 +595,8 @@ button, [role="tab"], [role="radio"], [role="switch"], a[href], summary {
 button:not(:disabled):active, [role="tab"]:active, [role="radio"]:active { transform: scale(0.985); }
 /* Editor tabs and rows that already scale on hover keep their own transform. */
 .no-press:active { transform: none !important; }
+
+/* A raised surface: lit top edge + contact shadow (Refactoring UI, "emulating a light source").
+   On the light theme the face is near-white, so only the shadow does the work. */
+.raised { box-shadow: var(--shadow-e1); }
+.dark .raised { box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.06), var(--shadow-e1); }

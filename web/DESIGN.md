@@ -433,3 +433,14 @@ Applied the book's "design from a scale" rules mechanically across the console:
   and `3xl` are gone (60 replacements).
 - **Fewer boxes**: link chips, the changes dock and the answered-question card lean on tint and
   elevation instead of a 1px outline (the book's "busy, boxed-in" fix).
+
+## Refactoring UI, deeper pass (2026-08-28)
+
+Hierarchy and depth rather than tokens this time. Each item is a rule from the book, applied once.
+
+- **One deliberate accent.** The active thread in the sidebar and the active nav item carry a 2px live-blue edge (`before:` bar), not just a grey fill. Everything else stays grey, so the edge is the only coloured thing in the rail.
+- **One primary per page.** Integrations: MCP "Add" is the primary; "Add account" is now outline. Fleet: "Destroy N sleeping" is a ghost/tertiary control until armed, then destructive — the big red button belongs to the confirmation step, not the page.
+- **Labels are a last resort.** The "● Agent" label only appears where the speaker changes (after you, after a question, at the start) or while the agent is live. Consecutive agent blocks read as one voice.
+- **Tertiary actions look like links.** Hub starter prompts lost their pill borders; five equal outlined chips read as five secondary actions competing with the composer.
+- **Empty states are designed.** Hub with nothing running shows a small circled icon, a headline and one line of guidance instead of an absent section.
+- **Depth from light.** `.raised` = lit top edge (`inset 0 1px 0 white/6%`, dark only) + `--shadow-e1`. Used on the composer and the changes dock — the two surfaces that sit above the thread.

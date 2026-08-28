@@ -224,6 +224,7 @@ export function Hub({
 
   const live = new Set(boxes.map((b) => b.name));
   const fleet = [...boxes].sort(threadSort);
+  const runs = fleet.filter((b) => b.role !== "pool-free");
 
   return (
     <div className="h-full min-w-0 overflow-y-auto">
@@ -397,7 +398,7 @@ export function Hub({
                 key={s.label}
                 type="button"
                 onClick={() => applyStarter(s)}
-                className="text-muted-foreground hover:text-foreground hover:bg-muted hover:border-line-strong flex cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1.5 text-meta transition-colors [&_svg]:size-3.5"
+                className="text-muted-foreground hover:text-foreground hover:bg-muted flex cursor-pointer items-center gap-1.5 rounded-md px-2.5 py-1.5 text-meta transition-colors [&_svg]:size-3.5 [&_svg]:text-faint hover:[&_svg]:text-muted-foreground"
               >
                 {s.icon}
                 {s.label}
@@ -406,7 +407,23 @@ export function Hub({
           </div>
         </motion.div>
 
-        {(loading || fleet.length > 0) && (
+        {!loading && runs.length === 0 && (
+          <motion.section
+            aria-label="No runs yet"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
+            className="flex flex-col items-center px-6 py-10 text-center"
+          >
+            <span className="bg-muted text-muted-foreground mb-4 grid size-12 place-items-center rounded-full" aria-hidden>
+              <Layers className="size-5" />
+            </span>
+            <p className="text-foreground text-lead font-medium">Nothing running</p>
+            <p className="text-muted-foreground mt-1 max-w-[28em] text-meta leading-relaxed">Pick a repository, describe the task, and it will appear here while it runs.</p>
+          </motion.section>
+        )}
+
+        {(loading || runs.length > 0) && (
           <motion.section
             aria-labelledby="live-now"
             initial={{ opacity: 0, y: 10 }}
@@ -428,7 +445,7 @@ export function Hub({
                       <Bar className="h-2.5 w-16" />
                     </li>
                   ))
-                : fleet.filter((b) => b.role !== "pool-free").map((b) => (
+                : runs.map((b) => (
                     <li key={b.name}>
                       <button
                         type="button"

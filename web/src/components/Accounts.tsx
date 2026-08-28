@@ -70,7 +70,7 @@ export function Accounts({ embedded = false, query = "", onCount }: { embedded?:
           <span className="text-muted-foreground text-micro">
             {accounts?.length ? `${accounts.length} connected` : oauth ? "Sign in or paste a token" : "Paste a personal access token"}
           </span>
-          <Button size="sm" onClick={() => setAdding(true)}>
+          <Button size="sm" variant="outline" onClick={() => setAdding(true)}>
             <Plus />
             Add account
           </Button>

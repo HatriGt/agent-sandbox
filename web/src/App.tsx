@@ -591,7 +591,8 @@ function NavItem({
       aria-current={active ? "page" : undefined}
       className={cn(
         "group flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-meta transition-colors [&_svg]:size-4",
-        active ? "bg-accent text-foreground font-medium" : "text-muted-foreground hover:text-foreground hover:bg-muted"
+        "relative",
+        active ? "bg-accent text-foreground font-medium before:bg-live before:absolute before:top-2 before:bottom-2 before:left-0 before:w-0.5 before:rounded-full" : "text-muted-foreground hover:text-foreground hover:bg-muted"
       )}
     >
       {icon}

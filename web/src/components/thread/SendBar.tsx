@@ -217,7 +217,7 @@ export function SendBar({
           }}
           isLoading={sending}
           className={cn(
-            "bg-card rounded-xl p-2 shadow-e1 transition-[border-color,box-shadow] duration-300",
+            "bg-card raised rounded-xl p-2 transition-[border-color,box-shadow] duration-300",
             toAgent ? "border-line-strong" : "border-border border-dashed",
             sleeping && "border-sleep/50",
             dragOver && "border-live ring-live/40 ring-2"

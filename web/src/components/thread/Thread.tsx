@@ -517,7 +517,7 @@ export function Thread({
               ) : g.kind === "plan" ? (
                 <PlanCard key={key} items={g.items} live={runState === "running"} />
               ) : (
-                <SayItem key={key} text={g.text} live={runState === "running" && isLast} />
+                <SayItem key={key} text={g.text} live={runState === "running" && isLast} label={i === 0 || !["say", "tools", "think", "plan"].includes(groups[i - 1].kind)} />
               );
             })}
 
