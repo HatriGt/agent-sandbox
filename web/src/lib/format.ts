@@ -76,6 +76,7 @@ export function friendlyName(name: string): string {
 
 /** First sentence-ish of a task, for the thread list. */
 export function threadTitle(v: BoxView): string {
+  if (v.title?.trim()) return v.title.trim();
   const t = (v.task ?? "").trim();
   if (!t) return v.role === "pool-free" ? "No task yet" : "Untitled run";
   const firstLine = t.split("\n")[0];

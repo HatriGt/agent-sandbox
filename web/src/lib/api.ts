@@ -25,6 +25,8 @@ export interface BoxView {
   lastOutputAt?: number;
   /** Pinned by the operator: never reaped while asleep; only Destroy removes it. */
   kept?: boolean;
+  /** A short name for the run, written by the in-box helper from the first message. */
+  title?: string;
   /** Seconds this stopped box has been asleep, when known. */
   asleepSec?: number;
   /** Follow-ups queued while the agent was mid-turn; delivered when it finishes. */
@@ -318,6 +320,8 @@ export const api = {
   gitStatus: (session: string, repo: string) => post<GitStatus>("/git.json", { session, repo, action: "status" }),
   gitCommit: (session: string, repo: string, message: string) => post<{ sha: string; summary: string }>("/git.json", { session, repo, action: "commit", message }),
   gitPush: (session: string, repo: string) => post<{ output: string }>("/git.json", { session, repo, action: "push" }),
+  /** Ask the in-box helper to name this run (idempotent; the fleet carries the result). */
+  title: (session: string) => post<{ title?: string }>("/title.json", { session }),
   /** Start a sleeping sandbox now (opening its thread does this automatically). */
   wake: (session: string) => post<{ ok: true }>("/wake.json", { session }),
   /** Every workspace file (flat paths) for the explorer tree. */

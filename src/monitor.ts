@@ -47,6 +47,8 @@ export interface BoxView {
   repos?: RepoRef[];
   /** Pinned by the operator: never reaped while asleep; only Destroy removes it. */
   kept?: boolean;
+  /** A short name for the run, written by the in-box helper from the first message. */
+  title?: string;
   /** Seconds this stopped box has been asleep (claim age), when known. */
   asleepSec?: number;
 }

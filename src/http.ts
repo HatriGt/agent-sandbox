@@ -24,6 +24,7 @@ import { securityHeaders } from "./security-headers.js";
 import { gatherMonitor, gatherWatch, askInBox, driverStateLine, startBoxIfStopped, noteRunning } from "./msb.js";
 import { safeWorkspacePath } from "./artifact.js";
 import { gitStatus, gitCommitAll, gitPush } from "./git-ops.js";
+import { loadTitles, generateTitle, forgetTitle } from "./titles.js";
 import { runDelegateFlow } from "./delegate-flow.js";
 import { streamWatch } from "./watch-sse.js";
 import { WatchHub } from "./watch-hub.js";
@@ -132,13 +133,15 @@ const brokerConsider = makeCredentialBroker({
 const readFleet = makeFleetReader(
   cfg,
   async () => {
-    const [boxes, kept, claims] = await Promise.all([
+    const [boxes, kept, claims, titles] = await Promise.all([
       gatherMonitor(cfg),
       listKept(cfg).catch(() => new Set<string>()),
       listClaims(cfg).catch(() => new Map<string, number>()),
+      loadTitles(cfg).catch(() => ({}) as Record<string, string>),
     ]);
     return boxes.map((b) => ({
       ...b,
+      ...(titles[b.name] ? { title: titles[b.name] } : {}),
       // The task and any pending question are operator/agent text too — same redaction as the log.
       ...(b.task ? { task: redactor.redact(b.task) } : {}),
       ...(b.question ? { question: redactor.redact(b.question) } : {}),
@@ -767,6 +770,31 @@ app.delete("/inbox.json", (req: Request, res: Response) => {
 });
 
 // Workspace files for `@` mentions: ?session=&q=; at most 40 ranked matches.
+// Name a run from its first message via the in-box helper. Idempotent; sleeping boxes are skipped.
+app.post("/title.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const { session } = (req.body ?? {}) as { session?: string };
+  if (!session || !/^[\w.-]+$/.test(session)) {
+    res.status(400).json({ error: "session is required" });
+    return;
+  }
+  try {
+    const existing = (await loadTitles(cfg))[session];
+    if (existing) {
+      res.json({ title: existing });
+      return;
+    }
+    const box = (await readFleet()).boxes.find((b) => b.name === session);
+    if (!box?.task) {
+      res.json({});
+      return;
+    }
+    res.json({ title: await generateTitle(cfg, session, box.task) });
+  } catch (e) {
+    res.status(500).json({ error: String((e as Error).message ?? e) });
+  }
+});
+
 // Wake a sleeping sandbox the moment its thread is opened — no need to type first. Idempotent.
 app.post("/wake.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
@@ -881,6 +909,7 @@ app.post("/teardown.json", async (req: Request, res: Response) => {
     await deps.teardown(cfg, session);
     watchHub.drop(session);
     inbox.clear(session);
+    void forgetTitle(cfg, session).catch(() => {});
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: String((e as Error).message ?? e) });
@@ -937,6 +966,7 @@ app.post("/delegate.json", async (req: Request, res: Response) => {
       githubToken: typeof body.githubToken === "string" ? body.githubToken : undefined,
       githubAccount: typeof body.githubAccount === "string" ? body.githubAccount : undefined,
     });
+    if (result.ok) void generateTitle(cfg, result.box, task).catch(() => {});
     res.json(inferred.length ? { ...result, inferred } : result);
   } catch (e) {
     res.status(500).json({ error: String((e as Error).message ?? e) });

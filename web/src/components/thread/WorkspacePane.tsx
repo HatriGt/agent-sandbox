@@ -1,13 +1,11 @@
 import * as React from "react";
-import { ArrowDown, ArrowUp, Check, ChevronDown, ChevronRight, Download, Files, FileCode2, FileDiff, GitBranch, GitCommitHorizontal, Loader2, Pencil, RefreshCw, Save, Search, Upload, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, ChevronDown, ChevronRight, Download, Files, FileCode2, FileDiff, GitBranch, GitCommitHorizontal, Loader2, RefreshCw, Search, Upload, X } from "lucide-react";
 import { motion } from "motion/react";
 import { toast } from "sonner";
 import { api, ApiError, type ChangedFile, type GitStatus } from "@/lib/api";
 import { parseUnifiedDiff, diffForNewFile, type ParsedDiff } from "@/lib/diff";
 import { languageOf } from "@/lib/fileIcon";
 import { FileIcon, FolderIcon } from "@/lib/vscodeIcons";
-import { CodeBlock, CodeBlockCode } from "@/components/ui/code-block";
-import { Markdown } from "@/components/ui/markdown";
 import { CodeEditor } from "@/components/CodeEditor";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -23,7 +21,7 @@ import { cn } from "@/lib/utils";
  * changes dock; edits save back with ⌘S and refresh the change list.
  */
 type Node = { name: string; path: string; children?: Map<string, Node> };
-type Tab = { path: string; mode: "diff" | "file" | "edit"; draft?: string; dirty?: boolean };
+type Tab = { path: string; mode: "diff" | "edit"; draft?: string; dirty?: boolean; saving?: "saving" | "saved" };
 type View = "explorer" | "search" | "scm";
 type Repo = { name: string; branch?: string };
 
@@ -84,7 +82,7 @@ export function WorkspacePane({ session, changes, open, onClose, onSaved, repos 
 
   const openPath = React.useCallback(
     (path: string, mode?: Tab["mode"]) => {
-      setTabs((t) => (t.some((x) => x.path === path) ? t : [...t, { path, mode: mode ?? (changeByPath.has(path) ? "diff" : "file") }]));
+      setTabs((t) => (t.some((x) => x.path === path) ? t : [...t, { path, mode: mode ?? "edit" }]));
       setActive(path);
       setExpanded((e) => {
         const n = new Set(e);
@@ -96,7 +94,7 @@ export function WorkspacePane({ session, changes, open, onClose, onSaved, repos 
     [changeByPath]
   );
   React.useEffect(() => {
-    if (open) openPath(open.path, changeByPath.has(open.path) ? "diff" : "file");
+    if (open) openPath(open.path, changeByPath.has(open.path) ? "diff" : "edit");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open?.path]);
 
@@ -205,7 +203,7 @@ export function WorkspacePane({ session, changes, open, onClose, onSaved, repos 
             {tabs.length === 0 && <span className="text-muted-foreground self-center px-3 text-micro">No file open</span>}
           </div>
           {activeTab ? (
-            <FileView key={activeTab.path} session={session} tab={activeTab} change={changeByPath.get(activeTab.path)} onMode={(m) => patchTab(activeTab.path, { mode: m })} onDraft={(d, dirty) => patchTab(activeTab.path, { draft: d, dirty })} onSaved={onSaved} />
+            <FileView key={activeTab.path} session={session} tab={activeTab} change={changeByPath.get(activeTab.path)} onMode={(m) => patchTab(activeTab.path, { mode: m })} onDraft={(d, dirty) => patchTab(activeTab.path, { draft: d, dirty })} onSaving={(s) => patchTab(activeTab.path, { saving: s })} onSaved={onSaved} />
           ) : (
             <EmptyEditor />
           )}
@@ -225,7 +223,7 @@ export function WorkspacePane({ session, changes, open, onClose, onSaved, repos 
         <span>{changes.length} changed</span>
         {paths && <span>{paths.length} files</span>}
         <span className="ml-auto">{activeTab ? languageOf(activeTab.path) : ""}</span>
-        {activeTab && <span>{activeTab.mode === "edit" ? (activeTab.dirty ? "unsaved · ⌘S" : "editing") : activeTab.mode}</span>}
+        {activeTab && <span className="tabular-nums">{activeTab.mode === "diff" ? "diff" : activeTab.saving === "saving" ? "Saving…" : activeTab.dirty ? "Unsaved" : activeTab.saving === "saved" ? "Saved" : "Autosave on"}</span>}
       </footer>
     </motion.aside>
   );
@@ -569,7 +567,7 @@ function EmptyEditor() {
   );
 }
 
-function FileView({ session, tab, change, onMode, onDraft, onSaved }: { session: string; tab: Tab; change?: ChangedFile; onMode: (m: Tab["mode"]) => void; onDraft: (d: string, dirty: boolean) => void; onSaved: () => void }) {
+function FileView({ session, tab, change, onMode, onDraft, onSaving, onSaved }: { session: string; tab: Tab; change?: ChangedFile; onMode: (m: Tab["mode"]) => void; onDraft: (d: string, dirty: boolean) => void; onSaving: (s: Tab["saving"]) => void; onSaved: () => void }) {
   const [diff, setDiff] = React.useState<ParsedDiff | null>(null);
   const [content, setContent] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -610,22 +608,37 @@ function FileView({ session, tab, change, onMode, onDraft, onSaved }: { session:
   }, [session, tab.path, mode]);
 
   const draft = tab.draft ?? content ?? "";
-  const save = async () => {
-    if (!tab.dirty || saving) return;
+  // Autosave, the way an editor does it: a short pause after the last keystroke writes the file back
+  // into the sandbox. No Save button; ⌘S just saves immediately. The status bar shows Saving/Saved.
+  const latest = React.useRef({ draft, dirty: !!tab.dirty, saving: false });
+  latest.current = { draft, dirty: !!tab.dirty, saving };
+  const save = React.useCallback(async () => {
+    const cur = latest.current;
+    if (!cur.dirty || cur.saving) return;
     setSaving(true);
+    onSaving("saving");
     try {
-      await api.writeFile(session, tab.path, draft);
-      setContent(draft);
+      await api.writeFile(session, tab.path, cur.draft);
+      setContent(cur.draft);
       setDiff(null);
-      onDraft(draft, false);
+      onDraft(cur.draft, false);
+      onSaving("saved");
       onSaved();
-      toast.success(`Saved ${tab.path.slice(tab.path.lastIndexOf("/") + 1)}`);
     } catch (e) {
+      onSaving(undefined);
       toast.error("Could not save", { description: e instanceof Error ? e.message : String(e) });
     } finally {
       setSaving(false);
     }
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session, tab.path]);
+  React.useEffect(() => {
+    if (!tab.dirty) return;
+    const t = window.setTimeout(() => void save(), 900);
+    return () => window.clearTimeout(t);
+  }, [draft, tab.dirty, save]);
+  // Leaving the tab (or the pane) with unsaved text flushes it.
+  React.useEffect(() => () => void save(), [save]);
   const download = async () => {
     try {
       const blob = await api.artifactBlob(session, tab.path);
@@ -642,7 +655,6 @@ function FileView({ session, tab, change, onMode, onDraft, onSaved }: { session:
 
   const segs = tab.path.split("/");
   const base = segs[segs.length - 1];
-  const isMd = /\.(md|markdown)$/i.test(base);
   const deleted = change?.status === "deleted";
 
   return (
@@ -670,17 +682,15 @@ function FileView({ session, tab, change, onMode, onDraft, onSaved }: { session:
             {change.deletions > 0 && <span className="text-destructive">−{change.deletions}</span>}
           </span>
         )}
-        <div role="tablist" className="bg-muted inline-flex h-7 items-center gap-0.5 rounded-md p-0.5">
-          <ModeTab active={mode === "diff"} onClick={() => onMode("diff")} icon={<FileDiff className="size-3.5" />} label="Diff" disabled={!change} />
-          <ModeTab active={mode === "file"} onClick={() => onMode("file")} icon={<FileCode2 className="size-3.5" />} label="File" disabled={deleted} />
-          <ModeTab active={mode === "edit"} onClick={() => onMode("edit")} icon={<Pencil className="size-3.5" />} label="Edit" disabled={deleted} />
-        </div>
-        {mode === "edit" && (
-          <Button size="sm" onClick={() => void save()} disabled={!tab.dirty || saving}>
-            {saving ? <Loader2 className="animate-spin" /> : <Save />}
-            Save
-          </Button>
+        {change && (
+          <div role="tablist" className="bg-muted inline-flex h-7 items-center gap-0.5 rounded-md p-0.5">
+            <ModeTab active={mode === "diff"} onClick={() => onMode("diff")} icon={<FileDiff className="size-3.5" />} label="Diff" />
+            <ModeTab active={mode === "edit"} onClick={() => onMode("edit")} icon={<FileCode2 className="size-3.5" />} label="File" disabled={deleted} />
+          </div>
         )}
+        <span className={cn("stamp w-14 text-right transition-colors", saving ? "text-muted-foreground" : tab.dirty ? "text-attention-text" : "text-muted-foreground/60")} aria-live="polite">
+          {saving ? "saving…" : tab.dirty ? "unsaved" : tab.saving === "saved" ? "saved" : ""}
+        </span>
         <Button variant="ghost" size="icon-sm" onClick={download} aria-label="Download" disabled={deleted}>
           <Download />
         </Button>
@@ -696,16 +706,10 @@ function FileView({ session, tab, change, onMode, onDraft, onSaved }: { session:
         ) : mode === "diff" && diff ? (
           <DiffView diff={diff} path={tab.path} />
         ) : mode === "edit" && content !== null ? (
-          <CodeEditor value={draft} onChange={(v) => onDraft(v, v !== content)} onSave={() => void save()} language={languageOf(tab.path)} minRows={30} className="min-h-full" ariaLabel={`Edit ${base}`} />
-        ) : mode === "file" && content !== null ? (
-          isMd ? (
-            <div className="prose-agent text-foreground px-5 py-4">
-              <Markdown>{content}</Markdown>
-            </div>
+          deleted ? (
+            <p className="text-muted-foreground px-4 py-6 text-meta">This file was deleted in the working tree; see the diff.</p>
           ) : (
-            <CodeBlock className="my-0 rounded-none border-0 shadow-none">
-              <CodeBlockCode code={content} language={languageOf(tab.path)} />
-            </CodeBlock>
+            <CodeEditor value={draft} onChange={(v) => onDraft(v, v !== content)} onSave={() => void save()} language={languageOf(tab.path)} minRows={30} className="min-h-full" ariaLabel={`Edit ${base}`} />
           )
         ) : null}
       </div>

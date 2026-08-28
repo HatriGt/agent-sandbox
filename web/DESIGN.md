@@ -359,3 +359,17 @@ h2 20 · h1 28` (all registered with tailwind-merge). Rules the audit enforced:
 - **Titles are sans** in the app (`text-h1` semibold, −0.02em). Serif is the landing page's voice only.
 - **Section headings**: page `h1` → section `text-h3` semibold → sub-section `text-body` semibold.
 - Primitives (tooltip, badge, card, avatar, textarea) use the tokens, not Tailwind's `text-xs/sm/base`.
+
+## Round: titles, autosave, quieter waking (2026-08-28)
+
+- **Run titles**: the in-box side-chat helper names each run from its first message (3–6 words),
+  stored on the VPS (`~/.agent-sandbox/titles/<box>`), carried by `/fleet.json` as `title`, used
+  by the sidebar, Fleet, header, palette and notifications. Generated in the background after a
+  delegate; a thread with a task and no title asks once via `POST /title.json`. Sleeping boxes are
+  never woken for a name.
+- **Workspace editing is direct**: a file opens in the editor; typing autosaves ~0.9s after the last
+  keystroke (and when you leave the tab); ⌘S saves now. "Diff ⇄ File" toggle only for changed files.
+  No Save button, no separate Edit mode — the status bar and a small "saving…/unsaved/saved" mark
+  carry the state.
+- **Waking line**: no card, no tint. A 4×4 monochrome pixel wave, "Waking the sandbox · 4s", and one
+  crossfading status line (boot → restore → reconnect), in the transcript's own voice.

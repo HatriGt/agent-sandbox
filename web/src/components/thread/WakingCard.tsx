@@ -1,19 +1,18 @@
 import * as React from "react";
-import { Check, MoonStar } from "lucide-react";
-import { motion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
 import { cn } from "@/lib/utils";
 
 /**
  * Shown the moment you open a sleeping sandbox: the console has already asked the controller to
- * start the microVM, so this card narrates what is happening instead of asking you to type first.
- * A 5×5 pixel grid breathes while we wait (the reference "Loading State" pattern), the elapsed time
- * ticks, and three stages light up — boot, restore, reconnect — the last flips when the live
- * transcript arrives and the card leaves.
+ * start the microVM, so this line narrates what is happening instead of asking you to type first.
+ * It is set in the transcript's own voice — no box, no tint: a small monochrome pixel grid that
+ * pulses while we wait, a title, the elapsed time, and one line of status that crossfades through
+ * boot → restore → reconnect. When the box reports running it reads "Awake" and leaves.
  */
 const STAGES = [
-  { at: 0, label: "Starting the microVM", hint: "msb start — a few seconds" },
-  { at: 4, label: "Restoring workspace and session", hint: "files, git state and the Claude session are intact" },
-  { at: 9, label: "Reconnecting the transcript", hint: "tailing the agent log again" },
+  { at: 0, text: "Starting the microVM" },
+  { at: 4, text: "Restoring the workspace and the agent's session" },
+  { at: 9, text: "Reconnecting the transcript" },
 ];
 
 export function WakingCard({ awake, startedAt, error }: { awake: boolean; startedAt: number; error?: string | null }) {
@@ -24,59 +23,55 @@ export function WakingCard({ awake, startedAt, error }: { awake: boolean; starte
   }, []);
   const elapsed = Math.max(0, Math.floor((now - startedAt) / 1000));
   const stage = awake ? STAGES.length : Math.min(STAGES.length - 1, STAGES.filter((s) => elapsed >= s.at).length - 1);
+  const status = error ? `${error} Sending a message retries.` : awake ? "Back. The transcript follows." : STAGES[stage].text;
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 6 }}
+      initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -4 }}
-      transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-      className={cn("enter flex items-start gap-4 rounded-xl border px-4 py-3.5", error ? "border-destructive/30 bg-destructive/6" : "border-sleep/30 bg-sleep/8")}
+      transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+      className="enter flex items-start gap-3.5 py-1"
       role="status"
       aria-live="polite"
     >
-      <PixelGrid active={!awake && !error} done={awake} />
+      <PixelGrid state={error ? "error" : awake ? "done" : "active"} />
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2">
-          <p className="text-foreground text-body font-medium">{error ? "Could not wake the sandbox" : awake ? "Awake" : "Waking the sandbox"}</p>
+          <p className={cn("text-body font-medium", error ? "text-destructive" : "text-foreground")}>{error ? "Could not wake the sandbox" : awake ? "Awake" : "Waking the sandbox"}</p>
           <span className="stamp text-muted-foreground tabular-nums">{elapsed}s</span>
         </div>
-        {error ? (
-          <p className="text-muted-foreground mt-1 text-meta">{error} Sending a message retries.</p>
-        ) : (
-          <ol className="mt-2 flex flex-col gap-1">
-            {STAGES.map((s, i) => {
-              const done = awake || i < stage;
-              const current = !awake && i === stage;
-              return (
-                <li key={s.label} className={cn("flex items-center gap-2 text-meta transition-colors", done ? "text-muted-foreground" : current ? "text-foreground" : "text-muted-foreground/50")}>
-                  <span className={cn("grid size-4 shrink-0 place-items-center rounded-full border", done ? "border-sleep/40 bg-sleep/15 text-sleep" : current ? "border-sleep text-sleep" : "border-border")}>
-                    {done ? <Check className="size-2.5" strokeWidth={3} aria-hidden /> : current ? <span className="bg-sleep size-1.5 animate-pulse rounded-full" /> : null}
-                  </span>
-                  <span className={cn(done && "line-through decoration-sleep/40")}>{s.label}</span>
-                  {current && <span className="stamp text-muted-foreground hidden sm:inline">· {s.hint}</span>}
-                </li>
-              );
-            })}
-          </ol>
-        )}
+        <div className="relative mt-0.5 h-5 overflow-hidden">
+          <AnimatePresence mode="popLayout" initial={false}>
+            <motion.p
+              key={status}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+              className="text-muted-foreground absolute inset-x-0 top-0 truncate text-meta"
+            >
+              {status}
+              {!awake && !error && <span className="dots" aria-hidden />}
+            </motion.p>
+          </AnimatePresence>
+        </div>
       </div>
-      <MoonStar className={cn("text-sleep mt-0.5 size-4 shrink-0", !awake && !error && "animate-pulse")} aria-hidden />
     </motion.div>
   );
 }
 
-/** 5×5 grid of cells lighting in a diagonal wave — the waiting texture; solid when done. */
-function PixelGrid({ active, done }: { active: boolean; done: boolean }) {
+/** 4×4 monochrome grid. Waiting: cells pulse in a diagonal wave. Done: all lit. Error: dim. */
+function PixelGrid({ state }: { state: "active" | "done" | "error" }) {
   return (
-    <div className="grid size-10 shrink-0 grid-cols-5 gap-[2px]" aria-hidden>
-      {Array.from({ length: 25 }, (_, i) => {
-        const r = Math.floor(i / 5), c = i % 5;
+    <div className="mt-1 grid size-6 shrink-0 grid-cols-4 gap-[2px]" aria-hidden>
+      {Array.from({ length: 16 }, (_, i) => {
+        const r = Math.floor(i / 4), c = i % 4;
         return (
           <span
             key={i}
-            className={cn("bg-sleep block rounded-[1.5px]", done ? "opacity-70" : active ? "pixel-wave" : "opacity-25")}
-            style={active && !done ? { animationDelay: `${(r + c) * 90}ms` } : undefined}
+            className={cn("block rounded-[1px]", state === "done" ? "bg-foreground/80" : state === "error" ? "bg-destructive/40" : "bg-foreground pixel-wave")}
+            style={state === "active" ? { animationDelay: `${(r + c) * 110}ms` } : undefined}
           />
         );
       })}

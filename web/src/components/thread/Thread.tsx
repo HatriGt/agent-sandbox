@@ -70,7 +70,15 @@ export function Thread({
   // Opening a sleeping sandbox wakes it at once — nobody should have to type to see their run.
   const [wake, setWake] = React.useState<{ startedAt: number; error: string | null } | null>(null);
   const wokeRef = React.useRef<string | null>(null);
+
   const sleeping = isSleeping(box);
+  // Name the run once it has a task and is awake; the fleet poll carries the title back.
+  const titledRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (!box.task || box.title || sleeping || box.role === "pool-free" || titledRef.current === box.name) return;
+    titledRef.current = box.name;
+    api.title(box.name).catch(() => {});
+  }, [box.name, box.task, box.title, box.role, sleeping]);
   React.useEffect(() => {
     if (!sleeping || wokeRef.current === box.name) return;
     wokeRef.current = box.name;
