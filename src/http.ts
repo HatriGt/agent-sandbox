@@ -808,6 +808,11 @@ app.post("/keep.json", async (req: Request, res: Response) => {
     return;
   }
   try {
+    // Only a box we know about: a marker for a name that never existed would be a stray file on the host.
+    if (keep !== false && !(await readFleet()).boxes.some((b) => b.name === session)) {
+      res.status(404).json({ error: "no such machine" });
+      return;
+    }
     if (keep === false) await unmarkKept(cfg, session);
     else await markKept(cfg, session);
     res.json({ ok: true, kept: keep !== false });
