@@ -4,8 +4,10 @@
 # needs node + an ssh client (git is used host-side for clones, but kept here for parity/tests).
 FROM node:20-slim
 
+# python3/make/g++: better-sqlite3 (the controller's own state) compiles its native addon when no
+# prebuilt binary matches the image; the toolchain is small and keeps the build deterministic.
 RUN apt-get update -qq \
-  && apt-get install -y -qq --no-install-recommends openssh-client git ca-certificates \
+  && apt-get install -y -qq --no-install-recommends openssh-client git ca-certificates python3 make g++ \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
