@@ -109,6 +109,18 @@ export interface Config {
   httpToken?: string;
   /** Bearer for the dashboard's JSON routes. Defaults to httpToken; set DASHBOARD_TOKEN to give the browser its own, separately revocable credential. */
   dashboardToken?: string;
+  /** "token": one operator token (default). "saas": users sign in; sessions, API keys, box ownership, quotas. */
+  authMode: "token" | "saas";
+  /** Where the controller keeps its own state (SQLite). */
+  dataDir: string;
+  /** Public origin, e.g. https://agent-sandbox.example.com — OAuth callback base and cookie Secure flag. */
+  publicUrl?: string;
+  /** Client secret of the same GitHub OAuth App (web flow for sign-in). Required in saas mode. */
+  githubOauthClientSecret?: string;
+  /** Default concurrent-box quota per user (saas). */
+  userMaxBoxes: number;
+  /** GitHub logins that become admins on first sign-in. */
+  adminLogins: string[];
 }
 
 function req(name: string, fallback?: string): string {
@@ -213,5 +225,11 @@ export function loadConfig(): Config {
     httpHost: process.env.MCP_HTTP_HOST || "127.0.0.1",
     httpToken: process.env.MCP_HTTP_TOKEN || undefined,
     dashboardToken: process.env.DASHBOARD_TOKEN || process.env.MCP_HTTP_TOKEN || undefined,
+    authMode: process.env.AUTH_MODE === "saas" ? "saas" : "token",
+    dataDir: process.env.DATA_DIR || "./data",
+    publicUrl: (process.env.PUBLIC_URL || (process.env.ASB_DOMAIN ? `https://${process.env.ASB_DOMAIN}` : "")).replace(/\/+$/, "") || undefined,
+    githubOauthClientSecret: process.env.GITHUB_OAUTH_CLIENT_SECRET || undefined,
+    userMaxBoxes: Math.max(1, Number(process.env.USER_MAX_BOXES ?? "2") || 2),
+    adminLogins: (process.env.ADMIN_GITHUB_LOGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   };
 }

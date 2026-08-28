@@ -62,7 +62,22 @@ export function onTokenChange(fn: () => void): () => void {
   return () => listeners.delete(fn);
 }
 
-/** Called by the API layer on a 401: the stored token is wrong or revoked. */
+/** Called by the API layer on a 401: the stored token is wrong or revoked — or the cookie session ended. */
 export function signOut(): void {
   setToken("");
+  setMe(null);
+}
+
+/** The signed-in identity (cookie mode), or the operator marker. Null = nobody. */
+import type { Me } from "@/lib/api";
+let me: Me | null = null;
+export function getMe(): Me | null {
+  return me;
+}
+export function setMe(m: Me | null): void {
+  me = m;
+  notify();
+}
+export function onAuthChange(fn: () => void): () => void {
+  return onTokenChange(fn);
 }

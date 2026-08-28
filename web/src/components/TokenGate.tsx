@@ -1,7 +1,7 @@
 import * as React from "react";
-import { ArrowRight, KeyRound, Loader2, ShieldCheck } from "lucide-react";
+import { ArrowRight, Github, KeyRound, Loader2, ShieldCheck } from "lucide-react";
 import { api } from "@/lib/api";
-import { currentToken, migrateTokenFromUrl, onTokenChange, setToken } from "@/lib/auth";
+import { currentToken, getMe, migrateTokenFromUrl, onAuthChange, setMe, setToken } from "@/lib/auth";
 import { Logo } from "@/components/ui/logo";
 import { Button } from "@/components/ui/button";
 
@@ -12,14 +12,66 @@ import { Button } from "@/components/ui/button";
  */
 export function TokenGate({ children }: { children: React.ReactNode }) {
   const [, force] = React.useState(0);
+  const [mode, setMode] = React.useState<"token" | "saas" | null>(null);
+  const [checked, setChecked] = React.useState(false);
   React.useEffect(() => {
     migrateTokenFromUrl();
     force((n) => n + 1);
-    return onTokenChange(() => force((n) => n + 1));
+    api
+      .authConfig()
+      .then((c) => setMode(c.mode))
+      .catch(() => setMode("token"));
+    return onAuthChange(() => force((n) => n + 1));
   }, []);
+  // Cookie mode: ask the server who we are once; a 401 later (signOut) brings the door back.
+  React.useEffect(() => {
+    if (mode !== "saas") return;
+    let cancelled = false;
+    api
+      .me()
+      .then((m) => {
+        if (!cancelled) setMe(m);
+      })
+      .catch(() => {})
+      .finally(() => !cancelled && setChecked(true));
+    return () => {
+      cancelled = true;
+    };
+  }, [mode]);
+  if (mode === null) return <div className="bg-background h-full" aria-busy="true" />;
+  if (mode === "saas") {
+    if (getMe() || currentToken()) return <>{children}</>;
+    if (!checked) return <div className="bg-background h-full" aria-busy="true" />;
+    return <SignIn />;
+  }
   const token = currentToken();
   if (token) return <>{children}</>;
   return <Entry />;
+}
+
+function SignIn() {
+  const to = `${location.pathname}${location.search}`;
+  return (
+    <div className="bg-background text-foreground flex min-h-full items-center justify-center px-6">
+      <div className="w-full max-w-sm">
+        <div className="flex items-center gap-2.5">
+          <span className="bg-primary text-primary-foreground grid size-9 place-items-center rounded-md">
+            <Logo className="size-5" />
+          </span>
+          <span className="text-body font-semibold tracking-[-0.01em]">Agent Sandbox</span>
+        </div>
+        <h1 className="mt-8 text-h1 font-semibold tracking-[-0.02em]">Sign in</h1>
+        <p className="text-muted-foreground mt-2 text-body leading-relaxed">Your machines, runs and API keys are yours alone. We only read your GitHub identity — repository access is granted separately, per account.</p>
+        <Button asChild className="mt-6 h-10 w-full">
+          <a href={`/auth/github?to=${encodeURIComponent(to)}`}>
+            <Github />
+            Continue with GitHub
+          </a>
+        </Button>
+        <p className="text-faint mt-4 text-micro">Session cookie only · HttpOnly · signs out after 30 days of inactivity</p>
+      </div>
+    </div>
+  );
 }
 
 function Entry() {

@@ -248,3 +248,12 @@ flowchart LR
   API -- ssh (validated box name only) --> A1
   API -- ssh --> A2
 ```
+
+## 9. Update — Phase 1 of multi-tenancy is implemented (2026-08-29)
+
+Behind `AUTH_MODE=saas` (default `token` is unchanged): GitHub sign-in → HttpOnly session cookie
+(+ CSRF header on mutations), per-user API keys for `/mcp` (hashed at rest, revocable), `boxes.owner_id`
+written on every delegation, ownership enforced in **one place** (`src/tenancy.ts` wraps the shared
+`deps`, so JSON routes *and* MCP tools are covered), fleet filtered per user, per-user concurrent-box
+quota, audit rows with `user_id`. State in SQLite at `DATA_DIR/asb.sqlite`. Design and next phases:
+`docs/saas-design.md`.

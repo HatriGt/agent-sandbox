@@ -433,6 +433,14 @@ The container drives `msb` on the VPS **host** over SSH (msb needs KVM on the ho
 as `host.docker.internal`. Everything site-specific lives in `.env`; the repo ships no secrets.
 
 
+## Multi-user mode
+
+Set `AUTH_MODE=saas` (plus a GitHub OAuth App: `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`,
+`PUBLIC_URL`) and the console gets **Sign in with GitHub**, HttpOnly session cookies, per-user API
+keys for the MCP endpoint, box ownership (users see and act on their own machines only), and a
+per-user machine quota. The operator token keeps working as the break-glass identity. Design, data
+model and the remaining phases: [`docs/saas-design.md`](docs/saas-design.md).
+
 ## Security
 
 Every run is a KVM microVM, so the *host* is protected by hardware regardless of what the agent does.

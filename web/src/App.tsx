@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Link, useLocation } from "react-router";
-import { Bell, BellOff, Flame, Keyboard, LayoutGrid, Moon, PanelLeftClose, PanelLeftOpen, Pause, Plug, Plus, Search, Sun, TriangleAlert } from "lucide-react";
+import { Bell, BellOff, Flame, Keyboard, LayoutGrid, LogOut, Moon, PanelLeftClose, PanelLeftOpen, Pause, Plug, Plus, Search, Sun, TriangleAlert } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { api, type FleetLifecycle, type FleetSnapshot } from "@/lib/api";
 import { POLL_MS, isUp, isVisible, threadSort } from "@/lib/format";
@@ -18,6 +18,7 @@ import { Capacity } from "@/components/Capacity";
 import { CommandPalette, openPalette, type PaletteAction } from "@/components/CommandPalette";
 import { ShortcutsDialog } from "@/components/ShortcutsDialog";
 import { Toaster } from "@/components/ui/sonner";
+import { getMe, signOut } from "@/lib/auth";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Thread, type Aside } from "@/components/thread/Thread";
 import { BootingThread } from "@/components/thread/BootingThread";
@@ -413,6 +414,26 @@ export default function App() {
                         <TooltipContent side="top">
                           {notify.enabled ? "Notifying when a machine needs you or finishes" : "Notify me when a machine needs me or finishes"}
                         </TooltipContent>
+                      </Tooltip>
+                    )}
+                    {getMe()?.kind === "user" && (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            aria-label="Sign out"
+                            onClick={() =>
+                              api
+                                .logout()
+                                .catch(() => {})
+                                .finally(() => signOut())
+                            }
+                          >
+                            <LogOut />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="top">Sign out {getMe()?.kind === "user" ? (getMe() as { login: string }).login : ""}</TooltipContent>
                       </Tooltip>
                     )}
                     <Button variant="ghost" size="icon-xs" onClick={() => setDark(!dark)} aria-label={dark ? "Switch to light theme" : "Switch to dark theme"}>

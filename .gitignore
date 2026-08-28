@@ -8,3 +8,4 @@ out/
 .DS_Store
 # Deploy secrets (SSH key the container uses to reach the VPS host). NEVER commit.
 deploy/
+data/

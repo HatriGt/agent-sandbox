@@ -17,11 +17,18 @@ import { loadDotEnv } from "./dotenv.js";
 import { loadConfig } from "./config.js";
 import { registerTools } from "./handlers.js";
 import { makeBridge } from "./server-bridge.js";
-import { deps } from "./deps.js";
+import { deps as rawDeps } from "./deps.js";
 import { refillPool, startPoolMaintainer } from "./pool.js";
 import { checkBearer } from "./http-auth.js";
 import { clientOf, makeAuthThrottle } from "./auth-throttle.js";
 import { auditFields, formatAudit, MUTATING } from "./audit.js";
+import { openDb } from "./db.js";
+import {
+  API_KEY_PREFIX, clearSessionCookie, consumeLoginState, createApiKey, createSession, csrfOk, deleteSession, getUser, listApiKeys, newLoginState, parseCookies,
+  principalFromApiKey, principalFromSession, revokeApiKey, SESSION_COOKIE, sessionCookie, upsertGithubUser, mayAccess, type Principal,
+} from "./identity.js";
+import { githubAuthorizeUrl, githubExchangeCode, githubIdentity } from "./github-oauth.js";
+import { guardDeps, makeOwnership, NotOwnedError, QuotaError, withPrincipal } from "./tenancy.js";
 import { securityHeaders } from "./security-headers.js";
 import { gatherMonitor, gatherWatch, askInBox, driverStateLine, startBoxIfStopped, noteRunning } from "./msb.js";
 import { isBoxName } from "./sync.js";
@@ -63,6 +70,18 @@ if (!cfg.httpToken) {
   process.exit(1);
 }
 
+// The controller's own state (users, sessions, API keys, box ownership, audit). Opened in both modes:
+// in "token" mode it only receives audit rows and ownership records for the operator.
+const db = openDb(cfg.dataDir);
+const ownership = makeOwnership(db, cfg);
+const deps = guardDeps(rawDeps, ownership);
+const SAAS = cfg.authMode === "saas";
+const SECURE_COOKIE = (cfg.publicUrl ?? "").startsWith("https://");
+if (SAAS && !(cfg.githubOauthClientId && cfg.githubOauthClientSecret && cfg.publicUrl)) {
+  console.error("[agent-sandbox] AUTH_MODE=saas needs GITHUB_OAUTH_CLIENT_ID, GITHUB_OAUTH_CLIENT_SECRET and PUBLIC_URL (or ASB_DOMAIN).");
+  process.exit(1);
+}
+
 const app = express();
 
 // Security headers on EVERY response (static shell, JSON, SSE, artifact bytes) — registered first so
@@ -92,22 +111,68 @@ app.use((err: unknown, _req: Request, res: Response, next: express.NextFunction)
   next(err);
 });
 
+/**
+ * Who is calling — resolved once, before any route, and carried through async continuations so the
+ * shared deps can enforce ownership. Order: operator bearer → API key bearer → session cookie (not
+ * for /mcp: machine clients never use cookies). A cookie-authenticated MUTATION must also pass the
+ * CSRF check; when it does not, the request is treated as anonymous (→ 401 from the route guard).
+ */
+function bearerOf(req: Request): string | undefined {
+  const h = req.headers.authorization;
+  return h && h.startsWith("Bearer ") ? h.slice("Bearer ".length) : undefined;
+}
+function resolvePrincipal(req: Request): Principal | null {
+  const isMcp = req.path === "/mcp" || req.path.startsWith("/mcp/");
+  const bearer = bearerOf(req);
+  if (bearer) {
+    if (checkBearer(req.headers.authorization, isMcp ? cfg.httpToken : cfg.dashboardToken)) return { kind: "operator" };
+    if (!isMcp && !SAAS && checkBearer(req.headers.authorization, cfg.httpToken)) return { kind: "operator" };
+    if (bearer.startsWith(API_KEY_PREFIX)) return principalFromApiKey(db, bearer);
+    return null;
+  }
+  if (isMcp || !SAAS) return null;
+  const p = principalFromSession(db, parseCookies(req.headers.cookie)[SESSION_COOKIE]);
+  if (p && MUTATING.has(req.method) && !csrfOk(req.headers as Record<string, string | string[] | undefined>, cfg.publicUrl)) return null;
+  return p;
+}
+app.use((req: Request, res: Response, next) => {
+  const p = resolvePrincipal(req);
+  res.locals.principal = p;
+  // Box-scoped JSON routes: a user may only name their own boxes. 404, not 403 — no existence oracle.
+  if (p && p.kind === "user" && p.role !== "admin" && !(req.path === "/mcp" || req.path.startsWith("/mcp/"))) {
+    const s = (req.body as Record<string, unknown> | undefined)?.session ?? (req.query as Record<string, unknown>).session;
+    if (typeof s === "string" && s && !mayAccess(db, p, s)) {
+      res.status(404).json({ error: "no such machine" });
+      return;
+    }
+  }
+  if (p) withPrincipal(p, next);
+  else next();
+});
+
 // Audit every state-changing call (not /mcp — the MCP transport has its own tool-level log lines).
 app.use((req: Request, res: Response, next) => {
   if (!MUTATING.has(req.method) || req.path === "/mcp" || req.path.startsWith("/mcp/")) return next();
   const started = Date.now();
   res.on("finish", () => {
-    console.error(
-      formatAudit({
-        at: new Date(started).toISOString(),
-        client: clientOf(req.headers, req.socket.remoteAddress),
-        method: req.method,
-        path: req.path,
-        status: res.statusCode,
-        ms: Date.now() - started,
-        ...auditFields(req.body, req.query),
-      })
-    );
+    const p = res.locals.principal as Principal | null;
+    const ev = {
+      at: new Date(started).toISOString(),
+      client: clientOf(req.headers, req.socket.remoteAddress),
+      method: req.method,
+      path: req.path,
+      status: res.statusCode,
+      ms: Date.now() - started,
+      ...auditFields(req.body, req.query),
+    };
+    console.error(formatAudit(ev));
+    try {
+      db.prepare(`INSERT INTO audit_events (at, user_id, client, method, path, status, session, action) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
+        ev.at, p?.kind === "user" ? p.userId : p ? "operator" : null, ev.client, ev.method, ev.path, ev.status, ev.session ?? null, ev.action ?? null
+      );
+    } catch {
+      /* audit storage must never fail a request */
+    }
   });
   next();
 });
@@ -238,7 +303,8 @@ app.use("/mcp", (req: Request, res: Response, next) => {
     res.status(429).json({ jsonrpc: "2.0", error: { code: -32001, message: "too many failed attempts" }, id: null });
     return;
   }
-  if (!checkBearer(req.headers.authorization, cfg.httpToken)) {
+  const p = res.locals.principal as Principal | null;
+  if (!p) {
     authThrottle.fail(client);
     res.status(401).json({
       jsonrpc: "2.0",
@@ -247,6 +313,8 @@ app.use("/mcp", (req: Request, res: Response, next) => {
     });
     return;
   }
+  // The SDK forwards `req.auth` to tool handlers as `extra.authInfo`; the principal also travels via ALS.
+  (req as Request & { auth?: unknown }).auth = { token: "", clientId: p.kind === "user" ? p.userId : "operator", scopes: [], extra: { principal: p } };
   next();
 });
 
@@ -287,7 +355,8 @@ async function handle(req: Request, res: Response) {
     await server.connect(transport);
   }
 
-  await transport.handleRequest(req, res, req.body);
+  const p = (res.locals.principal as Principal | null) ?? { kind: "operator" as const };
+  await withPrincipal(p, () => transport!.handleRequest(req, res, req.body));
 }
 
 app.post("/mcp", handle);
@@ -307,11 +376,102 @@ function dashAuthed(req: Request, res: Response): boolean {
     res.status(429).json({ error: "too many failed attempts — try again later" });
     return false;
   }
-  if (checkBearer(req.headers.authorization, cfg.dashboardToken)) return true;
-  authThrottle.fail(client);
+  if (res.locals.principal) return true;
+  // Only a presented-and-wrong credential counts against the client; a missing one is just anonymous.
+  if (bearerOf(req) || parseCookies(req.headers.cookie)[SESSION_COOKIE]) authThrottle.fail(client);
   res.status(401).json({ error: "unauthorized" });
   return false;
 }
+const principalOf = (res: Response): Principal => (res.locals.principal as Principal | null) ?? { kind: "operator" };
+/** Map tenancy errors to HTTP: unknown/foreign box → 404, quota → 429, else 500. */
+function failWith(res: Response, e: unknown): void {
+  if (e instanceof NotOwnedError) res.status(404).json({ error: "no such machine" });
+  else if (e instanceof QuotaError) res.status(429).json({ error: e.message });
+  else failWith(res, e);
+}
+
+// ---- sign-in, session, API keys ----------------------------------------------------------------
+// Public: tells the SPA which front door to show.
+app.get("/auth/config.json", (_req: Request, res: Response) => {
+  res.setHeader("Cache-Control", "no-store");
+  res.json({ mode: cfg.authMode, providers: SAAS ? ["github"] : [] });
+});
+if (SAAS) {
+  const redirectUri = `${cfg.publicUrl}/auth/github/callback`;
+  app.get("/auth/github", (req: Request, res: Response) => {
+    const to = typeof req.query.to === "string" && /^\/dashboard(\/|$)/.test(req.query.to) ? req.query.to : "/dashboard/";
+    res.redirect(githubAuthorizeUrl(cfg.githubOauthClientId!, redirectUri, newLoginState(db, to)));
+  });
+  app.get("/auth/github/callback", async (req: Request, res: Response) => {
+    const st = consumeLoginState(db, typeof req.query.state === "string" ? req.query.state : undefined);
+    const code = typeof req.query.code === "string" ? req.query.code : "";
+    if (!st.ok || !code) {
+      res.status(400).type("text/plain").send("Sign-in link expired or invalid. Go back and try again.");
+      return;
+    }
+    try {
+      const token = await githubExchangeCode(cfg.githubOauthClientId!, cfg.githubOauthClientSecret!, code, redirectUri);
+      const gh = await githubIdentity(token);
+      const user = upsertGithubUser(db, { githubId: gh.id, login: gh.login, email: gh.email, avatarUrl: gh.avatarUrl }, { adminLogins: cfg.adminLogins });
+      const sess = createSession(db, user.id, { ip: clientOf(req.headers, req.socket.remoteAddress), userAgent: String(req.headers["user-agent"] ?? "") });
+      res.setHeader("Set-Cookie", sessionCookie(sess.id, { secure: SECURE_COOKIE }));
+      res.redirect(st.redirectTo ?? "/dashboard/");
+    } catch (e) {
+      console.error(`[auth] github sign-in failed: ${String((e as Error).message ?? e)}`);
+      res.status(502).type("text/plain").send("GitHub sign-in failed. Try again in a moment.");
+    }
+  });
+}
+app.post("/auth/logout", (req: Request, res: Response) => {
+  const p = res.locals.principal as Principal | null;
+  if (p?.kind === "user" && p.sessionId) deleteSession(db, p.sessionId);
+  res.setHeader("Set-Cookie", clearSessionCookie(SECURE_COOKIE));
+  res.json({ ok: true });
+});
+app.get("/me.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const p = principalOf(res);
+  if (p.kind === "operator") {
+    res.json({ kind: "operator", mode: cfg.authMode });
+    return;
+  }
+  const u = getUser(db, p.userId);
+  res.json({ kind: "user", mode: cfg.authMode, id: p.userId, login: p.login, role: p.role, via: p.via, email: u?.email ?? null, avatarUrl: u?.avatar_url ?? null, maxBoxes: u?.max_boxes ?? cfg.userMaxBoxes });
+});
+// API keys — for IDE/MCP clients and CI. Shown once at creation; the store keeps only a hash.
+app.get("/api-keys.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const p = principalOf(res);
+  if (p.kind !== "user") {
+    res.json({ keys: [] });
+    return;
+  }
+  res.json({ keys: listApiKeys(db, p.userId) });
+});
+app.post("/api-keys.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const p = principalOf(res);
+  if (p.kind !== "user" || p.via !== "session") {
+    res.status(403).json({ error: "sign in through the browser to create API keys" });
+    return;
+  }
+  const { name } = (req.body ?? {}) as { name?: string };
+  if (listApiKeys(db, p.userId).filter((k) => !k.revoked_at).length >= 10) {
+    res.status(429).json({ error: "at most 10 active keys" });
+    return;
+  }
+  res.json(createApiKey(db, p.userId, typeof name === "string" ? name : "key"));
+});
+app.delete("/api-keys.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const p = principalOf(res);
+  const { id } = (req.body ?? {}) as { id?: string };
+  if (p.kind !== "user" || !id || !revokeApiKey(db, p.userId, id)) {
+    res.status(404).json({ error: "no such key" });
+    return;
+  }
+  res.json({ ok: true });
+});
 
 // --- the dashboard SPA (React + Tailwind, built by Vite into web/dist) ---------------------------
 // Static assets are served WITHOUT the token: they are the app shell (JS/CSS/HTML) and carry no
@@ -357,9 +517,9 @@ if (HAS_WEB) {
 app.get("/monitor.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   try {
-    res.json((await gatherMonitor(cfg)).map((b) => ({ ...b, ...(b.task ? { task: redactor.redact(b.task) } : {}), ...(b.question ? { question: redactor.redact(b.question) } : {}) })));
+    res.json(ownership.visible(await gatherMonitor(cfg)).map((b) => ({ ...b, ...(b.task ? { task: redactor.redact(b.task) } : {}), ...(b.question ? { question: redactor.redact(b.question) } : {}) })));
   } catch (e) {
-    res.status(500).json({ error: String((e as Error).message ?? e) });
+    failWith(res, e);
   }
 });
 
@@ -373,9 +533,15 @@ app.get("/fleet.json", async (req: Request, res: Response) => {
     for (const b of fleet.boxes) {
       if (b.runState === "waiting" && /^running$/i.test(b.boxStatus)) void brokerConsider(b.name, b.question);
     }
-    res.json(fleet);
+    if (!ownership.isUser()) {
+      res.json(fleet);
+      return;
+    }
+    const p = principalOf(res);
+    const max = (p.kind === "user" && getUser(db, p.userId)?.max_boxes) || cfg.userMaxBoxes;
+    res.json({ ...fleet, boxes: ownership.visible(fleet.boxes), lifecycle: { ...fleet.lifecycle, capacity: Math.min(max, fleet.lifecycle.capacity || max) } });
   } catch (e) {
-    res.status(500).json({ error: String((e as Error).message ?? e) });
+    failWith(res, e);
   }
 });
 
@@ -395,7 +561,7 @@ app.get("/watch.json", async (req: Request, res: Response) => {
       Number.isInteger(lines) && lines > 0 && lines <= 5000 ? redactSnap(await gatherWatch(cfg, session, lines)) : await watchHub.read(session)
     );
   } catch (e) {
-    res.status(500).json({ error: String((e as Error).message ?? e) });
+    failWith(res, e);
   }
 });
 
@@ -483,7 +649,7 @@ app.get("/artifact", async (req: Request, res: Response) => {
       res.send(result.data);
     }
   } catch (e) {
-    res.status(500).json({ error: String((e as Error).message ?? e) });
+    failWith(res, e);
   }
 });
 
@@ -508,7 +674,7 @@ app.post("/ask.json", async (req: Request, res: Response) => {
     ]);
     res.json({ ...result, ...("answer" in result && typeof result.answer === "string" ? { answer: redactor.redact(result.answer) } : {}), driverState: driverState ? redactor.redact(driverState) : driverState });
   } catch (e) {
-    res.status(500).json({ error: String((e as Error).message ?? e) });
+    failWith(res, e);
   }
 });
 
@@ -535,7 +701,7 @@ app.post("/resume.json", async (req: Request, res: Response) => {
     await resumeQuietly(session, message);
     res.json({ ok: true });
   } catch (e) {
-    res.status(500).json({ error: String((e as Error).message ?? e) });
+    failWith(res, e);
   }
 });
 
@@ -550,7 +716,7 @@ app.get("/accounts.json", async (req: Request, res: Response) => {
       oauth: !!cfg.githubOauthClientId,
     });
   } catch (e) {
-    res.status(500).json({ error: String((e as Error).message ?? e) });
+    failWith(res, e);
   }
 });
 app.post("/accounts.json", async (req: Request, res: Response) => {
@@ -570,7 +736,7 @@ app.post("/accounts.json", async (req: Request, res: Response) => {
     await saveStore(cfg, store);
     res.json({ accounts: viewAccounts(store, pickDefaultAccount(store)?.login), added: acc.login });
   } catch (e) {
-    res.status(500).json({ error: String((e as Error).message ?? e) });
+    failWith(res, e);
   }
 });
 app.delete("/accounts.json", async (req: Request, res: Response) => {
@@ -585,7 +751,7 @@ app.delete("/accounts.json", async (req: Request, res: Response) => {
     await saveStore(cfg, store);
     res.json({ accounts: viewAccounts(store, pickDefaultAccount(store)?.login) });
   } catch (e) {
-    res.status(500).json({ error: String((e as Error).message ?? e) });
+    failWith(res, e);
   }
 });
 app.post("/accounts/default.json", async (req: Request, res: Response) => {
@@ -600,7 +766,7 @@ app.post("/accounts/default.json", async (req: Request, res: Response) => {
     await saveStore(cfg, store);
     res.json({ accounts: viewAccounts(store, pickDefaultAccount(store)?.login) });
   } catch (e) {
-    res.status(500).json({ error: String((e as Error).message ?? e) });
+    failWith(res, e);
   }
 });
 // Sign in with GitHub (device flow). start → {user_code, verification_uri}; poll until a token
@@ -651,7 +817,7 @@ app.get("/repos.json", async (req: Request, res: Response) => {
     const all = await listRepos(req.query.refresh === "1");
     res.json({ repos: matchRepos(all, q), total: all.length });
   } catch (e) {
-    res.status(500).json({ error: String((e as Error).message ?? e) });
+    failWith(res, e);
   }
 });
 // Attach a repository to a RUNNING sandbox: clone with the account that can access it, place it at
@@ -668,7 +834,7 @@ app.post("/repos/attach.json", async (req: Request, res: Response) => {
     inbox.enqueue(session, `The repository ${repo.trim()} is now checked out at /workspace/${r.name}${ref ? ` (ref ${ref})` : ""}. Use it for the task where relevant.`);
     res.json({ ok: true, name: r.name, login: r.login });
   } catch (e) {
-    res.status(500).json({ error: String((e as Error).message ?? e) });
+    failWith(res, e);
   }
 });
 
@@ -681,7 +847,7 @@ app.get("/mcp-servers.json", async (req: Request, res: Response) => {
     const store = await loadMcpStore(cfg);
     res.json({ servers: viewServers(store), config: toEditableConfig(store) });
   } catch (e) {
-    res.status(500).json({ error: String((e as Error).message ?? e) });
+    failWith(res, e);
   }
 });
 app.post("/mcp-servers.json", async (req: Request, res: Response) => {
@@ -742,7 +908,7 @@ app.get("/changes.json", async (req: Request, res: Response) => {
   try {
     res.json({ files: await listChanges(cfg, session) });
   } catch (e) {
-    res.status(500).json({ error: String((e as Error).message ?? e) });
+    failWith(res, e);
   }
 });
 // The unified diff for one file (git diff HEAD), or "untracked" for a new file; path under /workspace.
@@ -795,7 +961,7 @@ app.get("/pr.json", async (req: Request, res: Response) => {
     if (!info) res.status(404).json({ error: "pull request not reachable with the connected accounts" });
     else res.json(info);
   } catch (e) {
-    res.status(500).json({ error: String((e as Error).message ?? e) });
+    failWith(res, e);
   }
 });
 
@@ -817,7 +983,7 @@ app.post("/keep.json", async (req: Request, res: Response) => {
     else await markKept(cfg, session);
     res.json({ ok: true, kept: keep !== false });
   } catch (e) {
-    res.status(500).json({ error: String((e as Error).message ?? e) });
+    failWith(res, e);
   }
 });
 
@@ -866,7 +1032,7 @@ app.post("/title.json", async (req: Request, res: Response) => {
     }
     res.json({ title: await generateTitle(cfg, session, box.task) });
   } catch (e) {
-    res.status(500).json({ error: String((e as Error).message ?? e) });
+    failWith(res, e);
   }
 });
 
@@ -887,7 +1053,7 @@ app.post("/rename.json", async (req: Request, res: Response) => {
     await saveTitle(cfg, session, clean);
     res.json({ title: clean });
   } catch (e) {
-    res.status(500).json({ error: String((e as Error).message ?? e) });
+    failWith(res, e);
   }
 });
 
@@ -905,7 +1071,7 @@ app.post("/wake.json", async (req: Request, res: Response) => {
     watchHub.drop(session); // the cached "stopped" snapshot must not be served as live
     res.json({ ok: true });
   } catch (e) {
-    res.status(500).json({ error: String((e as Error).message ?? e) });
+    failWith(res, e);
   }
 });
 
@@ -938,7 +1104,7 @@ app.get("/tree.json", async (req: Request, res: Response) => {
   try {
     res.json(await fileIndex(session, "", Number.POSITIVE_INFINITY));
   } catch (e) {
-    res.status(500).json({ error: String((e as Error).message ?? e) });
+    failWith(res, e);
   }
 });
 
@@ -990,7 +1156,7 @@ app.get("/files.json", async (req: Request, res: Response) => {
   try {
     res.json(await fileIndex(session, q));
   } catch (e) {
-    res.status(500).json({ error: String((e as Error).message ?? e) });
+    failWith(res, e);
   }
 });
 
@@ -1008,7 +1174,7 @@ app.post("/teardown.json", async (req: Request, res: Response) => {
     void forgetTitle(cfg, session).catch(() => {});
     res.json({ ok: true });
   } catch (e) {
-    res.status(500).json({ error: String((e as Error).message ?? e) });
+    failWith(res, e);
   }
 });
 
@@ -1057,6 +1223,11 @@ app.post("/delegate.json", async (req: Request, res: Response) => {
     const task = attachments.length
       ? `${body.task}\n\nAttached ${attachments.length === 1 ? "image" : "images"} (open with the Read tool):\n${attachments.map((a) => `- /workspace/${a.path}`).join("\n")}`
       : body.task;
+    if (ownership.isUser()) {
+      const p = principalOf(res);
+      const max = (p.kind === "user" && getUser(db, p.userId)?.max_boxes) || cfg.userMaxBoxes;
+      ownership.assertQuota(ownership.liveOwned((await readFleet()).boxes), max);
+    }
     const result = await runDelegateFlow(cfg, deps, {
       attachments: attachments.length ? attachments : undefined,
       // A browser has no local tree to ship: git only. (`source:"local"` would rsync a controller-host path.)
@@ -1071,7 +1242,7 @@ app.post("/delegate.json", async (req: Request, res: Response) => {
     if (result.ok) void generateTitle(cfg, result.box, task).catch(() => {});
     res.json(inferred.length ? { ...result, inferred } : result);
   } catch (e) {
-    res.status(500).json({ error: String((e as Error).message ?? e) });
+    failWith(res, e);
   }
 });
 

@@ -167,7 +167,9 @@ function url(path: string, params: Record<string, string> = {}) {
 }
 
 function headersFor(token = currentToken()): Record<string, string> {
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  // The custom header is the CSRF proof for cookie sessions: a cross-site page cannot add it without
+  // a CORS preflight we never grant. Harmless with bearer auth.
+  return { "X-Requested-With": "agent-sandbox", ...(token ? { Authorization: `Bearer ${token}` } : {}) };
 }
 /** Live headers object — read at call time so a token entered a moment ago is used immediately. */
 const authHeaders: HeadersInit = new Proxy({} as Record<string, string>, {
@@ -178,6 +180,18 @@ const authHeaders: HeadersInit = new Proxy({} as Record<string, string>, {
     return v === undefined ? undefined : { value: v, enumerable: true, configurable: true, writable: true };
   },
 });
+
+export type Me =
+  | { kind: "operator"; mode: "token" | "saas" }
+  | { kind: "user"; mode: "token" | "saas"; id: string; login: string; role: "user" | "admin"; via: "session" | "apikey"; email: string | null; avatarUrl: string | null; maxBoxes: number };
+export interface ApiKeyRow {
+  id: string;
+  name: string;
+  prefix: string;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+}
 
 export class ApiError extends Error {
   constructor(
@@ -272,6 +286,19 @@ export async function openSse(
 
 export const api = {
   /** Does the controller accept this token? (Used by the token gate before storing it.) */
+  /** Which front door: one operator token, or sign-in. Public. */
+  authConfig: () => fetch(url("/auth/config.json")).then(parse<{ mode: "token" | "saas"; providers: string[] }>),
+  /** Who am I (401 when nobody). */
+  me: async (): Promise<Me | null> => {
+    const res = await fetch(url("/me.json"), { headers: authHeaders });
+    if (res.status === 401) return null;
+    return parse<Me>(res);
+  },
+  logout: () => post<{ ok: true }>("/auth/logout", {}),
+  apiKeys: () => fetch(url("/api-keys.json"), { headers: authHeaders }).then(parse<{ keys: ApiKeyRow[] }>),
+  createApiKey: (name: string) => post<{ id: string; token: string; prefix: string }>("/api-keys.json", { name }),
+  revokeApiKey: (id: string) =>
+    fetch(url("/api-keys.json"), { method: "DELETE", headers: { ...authHeaders, "Content-Type": "application/json" }, body: JSON.stringify({ id }) }).then(parse<{ ok: true }>),
   verifyToken: async (token: string): Promise<boolean> => {
     const res = await fetch(url("/fleet.json"), { headers: headersFor(token) });
     return res.status !== 401;
