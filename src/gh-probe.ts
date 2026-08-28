@@ -33,10 +33,15 @@ export function parseOrgs(body: string): string[] {
   return out;
 }
 
+/** A GitHub API path we are willing to put in a URL: absolute, and only URL-safe characters. */
+export function isSafeApiPath(path: string): boolean {
+  return /^\/[\w./%?=&+,:@-]*$/.test(path);
+}
+
 /** curl a GitHub API path on the VPS with the token; returns the response body (empty on failure). */
 async function ghGet(cfg: Config, token: string, path: string): Promise<string> {
   // Token and path are caller-supplied; both go through the VPS shell, so both are single-quoted.
-  if (!/^\/[\w./%?=&+-]*$/.test(path)) return "";
+  if (!isSafeApiPath(path)) return "";
   const remote =
     `curl -sf -H ${shellQuote(`Authorization: token ${token}`)} ` +
     `-H "Accept: application/vnd.github+json" ${shellQuote(`https://api.github.com${path}`)}`;
