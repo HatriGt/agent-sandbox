@@ -20,6 +20,7 @@ export default defineConfig({
           if (/react-markdown|remark-|micromark|mdast|unified|unist|hast|vfile|marked|property-information|comma-separated|space-separated|decode-named|trim-lines|bail|is-plain-obj|trough|devlop|estree|zwitch|longest-streak|ccount|escape-string|markdown-table|html-url-attributes/.test(id)) return "markdown";
           if (/\/motion\/|framer-motion|motion-dom|motion-utils/.test(id)) return "motion";
           if (/react-router/.test(id)) return "router";
+          if (/@codemirror|@lezer|style-mod|w3c-keyname|crelt/.test(id)) return "editor";
           if (/@radix-ui|radix-ui/.test(id)) return "radix";
           return undefined;
         },

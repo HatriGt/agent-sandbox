@@ -66,6 +66,8 @@ export interface FileDiff {
   diff: string;
   untracked: boolean;
   binary: boolean;
+  /** The file as of HEAD, for the merge view (absent for untracked/binary). */
+  original?: string;
 }
 export interface PullInfo {
   repo: string;

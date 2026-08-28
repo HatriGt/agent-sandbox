@@ -6,7 +6,7 @@ import { api, ApiError, type ChangedFile, type GitStatus } from "@/lib/api";
 import { parseUnifiedDiff, diffForNewFile, type ParsedDiff } from "@/lib/diff";
 import { languageOf } from "@/lib/fileIcon";
 import { FileIcon, FolderIcon } from "@/lib/vscodeIcons";
-import { CodeEditor } from "@/components/CodeEditor";
+import { CodeEditor, UnifiedDiff } from "@/components/CodeEditor";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DiffView } from "./FilePane";
@@ -566,6 +566,7 @@ function EmptyEditor() {
 
 function FileView({ session, tab, change, onMode, onDraft, onSaving, onSaved }: { session: string; tab: Tab; change?: ChangedFile; onMode: (m: Tab["mode"]) => void; onDraft: (d: string, dirty: boolean) => void; onSaving: (s: Tab["saving"]) => void; onSaved: () => void }) {
   const [diff, setDiff] = React.useState<ParsedDiff | null>(null);
+  const [original, setOriginal] = React.useState<string | null>(null);
   const [content, setContent] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
@@ -587,7 +588,17 @@ function FileView({ session, tab, change, onMode, onDraft, onSaving, onSaved }: 
             if (cancelled) return;
             setContent(text);
             setDiff(diffForNewFile(text));
-          } else setDiff(parseUnifiedDiff(d.diff));
+          } else {
+            setDiff(parseUnifiedDiff(d.diff));
+            if (typeof d.original === "string") {
+              setOriginal(d.original);
+              // The merge view needs the working copy too.
+              if (content === null) {
+                const text = await api.artifactText(session, tab.path);
+                if (!cancelled) setContent(text);
+              }
+            }
+          }
         } else if (content === null) {
           const text = await api.artifactText(session, tab.path);
           if (!cancelled) setContent(text);
@@ -657,22 +668,8 @@ function FileView({ session, tab, change, onMode, onDraft, onSaving, onSaved }: 
   return (
     <>
       {/* Breadcrumbs + mode + actions */}
-      <div className="flex h-9 shrink-0 items-center gap-1 border-b px-3">
-        <nav aria-label="Breadcrumb" className="stamp text-muted-foreground flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden">
-          {segs.map((s, i) => (
-            <React.Fragment key={i}>
-              {i > 0 && <ChevronRight className="size-3 shrink-0 opacity-60" aria-hidden />}
-              {i === segs.length - 1 ? (
-                <span className="text-foreground flex min-w-0 items-center gap-1 truncate">
-                  <FileIcon path={tab.path} size={13} />
-                  {s}
-                </span>
-              ) : (
-                <span className="truncate">{s}</span>
-              )}
-            </React.Fragment>
-          ))}
-        </nav>
+      <div className="flex h-9 shrink-0 items-center gap-2 border-b px-3">
+        <Breadcrumb path={tab.path} />
         {change && (
           <span className="stamp flex shrink-0 items-center gap-1.5 pr-1">
             {change.additions > 0 && <span className="text-ok">+{change.additions}</span>}
@@ -692,7 +689,7 @@ function FileView({ session, tab, change, onMode, onDraft, onSaving, onSaved }: 
           <Download />
         </Button>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div className="min-h-0 flex-1 overflow-hidden">
         {error ? (
           <p className="text-muted-foreground px-4 py-6 text-meta">{error}</p>
         ) : loading && ((mode === "diff" && !diff) || (mode !== "diff" && content === null)) ? (
@@ -701,16 +698,45 @@ function FileView({ session, tab, change, onMode, onDraft, onSaving, onSaved }: 
             Loading {mode === "diff" ? "diff" : "file"}…
           </p>
         ) : mode === "diff" && diff ? (
-          <DiffView diff={diff} path={tab.path} />
+          original !== null && content !== null ? (
+            <UnifiedDiff original={original} modified={draft} path={tab.path} />
+          ) : (
+            <div className="h-full overflow-auto">
+              <DiffView diff={diff} path={tab.path} />
+            </div>
+          )
         ) : mode === "edit" && content !== null ? (
           deleted ? (
             <p className="text-muted-foreground px-4 py-6 text-meta">This file was deleted in the working tree; see the diff.</p>
           ) : (
-            <CodeEditor value={draft} onChange={(v) => onDraft(v, v !== content)} onSave={() => void save()} language={languageOf(tab.path)} minRows={30} className="min-h-full" ariaLabel={`Edit ${base}`} />
+            <CodeEditor value={draft} onChange={(v) => onDraft(v, v !== content)} onSave={() => void save()} path={tab.path} ariaLabel={`Edit ${base}`} autoFocus />
           )
         ) : null}
       </div>
     </>
+  );
+}
+
+/** A path as a quiet trail: folders in the muted colour, the file with its icon in the foreground. The middle collapses first. */
+function Breadcrumb({ path }: { path: string }) {
+  const segs = path.split("/");
+  const file = segs[segs.length - 1];
+  const dirs = segs.slice(0, -1);
+  const shown = dirs.length > 4 ? [dirs[0], "…", ...dirs.slice(-2)] : dirs;
+  return (
+    <nav aria-label="Breadcrumb" className="flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-meta" title={path}>
+      {/* Folders give way first (they truncate); the file name is the one part that always survives. */}
+      {shown.map((d, i) => (
+        <React.Fragment key={i}>
+          <span className={cn("text-muted-foreground min-w-0 max-w-[9rem] truncate", d === "…" && "shrink-0 tracking-widest")}>{d}</span>
+          <ChevronRight className="text-muted-foreground/50 size-3 shrink-0" aria-hidden />
+        </React.Fragment>
+      ))}
+      <span className="text-foreground flex shrink-0 items-center gap-1.5 font-medium">
+        <FileIcon path={path} size={14} />
+        <span className="max-w-[16rem] truncate">{file}</span>
+      </span>
+    </nav>
   );
 }
 

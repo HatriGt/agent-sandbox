@@ -512,8 +512,7 @@ function JsonView({ config, onSave }: { config: McpServersResponse["config"] | n
         }}
         onSave={() => void save()}
         errorLine={"error" in parsed ? parsed.line : null}
-        minRows={18}
-        className="max-h-[70vh] [&_textarea]:max-h-[70vh]"
+        className="h-[62vh]"
       />
       <p className={cn("text-micro", "error" in parsed ? "text-destructive" : "text-muted-foreground")} role={"error" in parsed ? "alert" : undefined}>
         {"error" in parsed ? `${parsed.error}${parsed.line ? ` (line ${parsed.line})` : ""}` : `${parsed.count} server${parsed.count === 1 ? "" : "s"}${dirty ? " · unsaved changes — ⌘S to save" : ""}. Secrets show masked; untouched ones stay as stored when you save.`}

@@ -383,3 +383,17 @@ h2 20 · h1 28` (all registered with tailwind-merge). Rules the audit enforced:
   opens it and clears the search.
 - **Full view**: the ⤢ control collapses the conversation column so the workspace takes the whole
   width beside the sidebar; ⤡ brings the conversation back. Closing the pane resets it.
+
+## Round: a real editor (2026-08-28)
+
+- **CodeMirror 6** replaces the textarea-with-overlay editor (`components/CodeEditor.tsx`): one
+  scroller (no more double scrollbars), native selection and undo, ⌘F search panel, bracket matching,
+  fold gutter, indent-aware Enter, Tab indents. Themed from the console's tokens (Geist Mono at
+  `--text-code`, muted gutters, live-blue selection) with GitHub-hued syntax colours matching the
+  shiki blocks in the transcript. Languages: TS/JS/TSX, JSON, Markdown, Python, CSS, HTML, YAML, shell.
+- **Diffs are a merge view** (`@codemirror/merge`): `/diff.json` now returns the HEAD text, so a
+  changed file renders as a unified merge of HEAD vs working copy with changed-text highlights and
+  collapsed unchanged regions. The line-based DiffView remains the fallback for untracked files.
+- **Breadcrumb**: folders in muted, the file in foreground with its icon; folders truncate first and
+  the middle collapses to "…" beyond four levels; the file name always survives.
+- Editor code ships as its own chunk (`editor-*.js`, ~226 KB gzip), loaded only when the pane opens.

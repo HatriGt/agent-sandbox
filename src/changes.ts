@@ -119,6 +119,8 @@ export interface FileDiff {
   /** For untracked/loose files: the whole file, rendered as added. */
   untracked: boolean;
   binary: boolean;
+  /** The file as of HEAD (for a side-by-side/unified merge view); absent for untracked or binary. */
+  original?: string;
 }
 
 export async function readDiff(cfg: Config, box: string, path: string): Promise<FileDiff> {
@@ -129,11 +131,16 @@ export async function readDiff(cfg: Config, box: string, path: string): Promise<
   const sh =
     `cd /workspace || exit 0; if [ -d ${q(top)}/.git ] && [ -n ${q(inner)} ]; then ` +
     `if git -C ${q(top)} ls-files --error-unmatch ${q(inner)} >/dev/null 2>&1; then git -C ${q(top)} diff HEAD -- ${q(inner)} | head -c 400000; ` +
+    `printf '\n@@ORIGINAL\n'; git -C ${q(top)} show HEAD:${q(inner)} 2>/dev/null | head -c 400000; ` +
     `else echo "@@UNTRACKED"; fi; else echo "@@UNTRACKED"; fi`;
   const r = await exec(cfg, box, sh);
   const out = r.stdout;
   if (out.trim().startsWith("@@UNTRACKED")) return { path: rel, diff: "", untracked: true, binary: false };
-  return { path: rel, diff: out, untracked: false, binary: /^Binary files/m.test(out) };
+  const cut = out.indexOf("\n@@ORIGINAL\n");
+  const diff = cut >= 0 ? out.slice(0, cut) : out;
+  const original = cut >= 0 ? out.slice(cut + "\n@@ORIGINAL\n".length) : undefined;
+  const binary = /^Binary files/m.test(diff);
+  return { path: rel, diff, untracked: false, binary, ...(binary || original === undefined ? {} : { original }) };
 }
 
 export interface PullInfo {
