@@ -91,3 +91,11 @@ export function deadlineLabel(d: Deadline): string | null {
   if (d.kind === "sleep") return `destroyed in ${fmtDuration(d.remainingSec)} unless kept or woken`;
   return `stops in ~${fmtDuration(d.remainingSec)} if it stays quiet`;
 }
+
+/** The same fact in three words for the header context line: "sleeps in 4m" / "destroyed in 20m" / "42m left of cap". */
+export function deadlineShort(d: Deadline): string | null {
+  if (d.kind === "none" || d.remainingSec == null) return null;
+  if (d.remainingSec <= 0) return d.kind === "sleep" ? "being destroyed" : d.kind === "max-duration" ? "at the cap" : "sleeping any moment";
+  const t = fmtDuration(d.remainingSec);
+  return d.kind === "max-duration" ? `${t} left of cap` : d.kind === "sleep" ? `destroyed in ${t}` : `sleeps in ${t}`;
+}

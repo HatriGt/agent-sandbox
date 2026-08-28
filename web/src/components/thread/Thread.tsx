@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowLeft, Cpu, FolderTree, GitBranch, Hourglass, Loader2, Pin, PinOff, Plus, Trash2, X } from "lucide-react";
+import { Plus } from "lucide-react";
 import { toast } from "sonner";
 import { api, type BoxView, type ChangedFile, type FleetLifecycle, type WatchSnapshot } from "@/lib/api";
 import { AnimatePresence, motion } from "motion/react";
@@ -7,17 +7,16 @@ import { AnimatePresence, motion } from "motion/react";
 const WorkspacePane = React.lazy(() => import("./WorkspacePane").then((m) => ({ default: m.WorkspacePane })));
 import { WakingCard } from "./WakingCard";
 import { SessionContext } from "@/lib/session-context";
-import { friendlyName, isSleeping, POLL_MS, roleLabel, shortName, threadTitle } from "@/lib/format";
+import { friendlyName, isSleeping, POLL_MS, threadTitle } from "@/lib/format";
 import { deadlineLabel, deadlineOf, displayState, fmtDuration } from "@/lib/lifecycle";
 import { runStats, toMarkdown } from "@/lib/transcript";
 import { setPrefill } from "@/lib/draft";
 import { RunSummary } from "./RunSummary";
+import { ThreadHeader } from "./ThreadHeader";
 import { parseTrace, producedFiles } from "@/lib/trace";
 import { usePoll } from "@/hooks/usePoll";
 import { seedWatchCache, useWatchStream } from "@/hooks/useWatchStream";
 import { Button } from "@/components/ui/button";
-import { StatePill } from "@/components/ui/stamp";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ChatContainerContent, ChatContainerRoot, ChatContainerScrollAnchor } from "@/components/ui/chat-container";
 import type { TraceEvent } from "@/lib/trace";
 import { AnsweredQuestionItem, LifecycleItem, ObserverItem, PlanCard, QueuedItem, SayItem, ThinkingItem, ToolGroup, WorkingIndicator, YouItem } from "./TraceItems";
@@ -25,9 +24,7 @@ import { ThreadMinimap, type Turn } from "./ThreadMinimap";
 import { useStickToBottom } from "use-stick-to-bottom";
 import { ChangesDock } from "./ChangesDock";
 import { QuestionCard } from "./QuestionCard";
-import { PullRequestFloat } from "./PullRequestFloat";
 import { ArrowDown } from "lucide-react";
-import { RepoPicker } from "@/components/RepoPicker";
 import { findPullRequests } from "@/lib/testReport";
 import { ThreadSkeleton } from "./Skeletons";
 import { SendBar } from "./SendBar";
@@ -175,22 +172,9 @@ export function Thread({
   const deadline = React.useMemo(() => deadlineOf(box, lifecycle), [box, lifecycle]);
   const deadlineText = deadlineLabel(deadline);
 
-  const [armed, setArmed] = React.useState(false);
   const [removing, setRemoving] = React.useState(false);
-  React.useEffect(() => setArmed(false), [box.name]);
-  React.useEffect(() => {
-    if (!armed) return;
-    const t = window.setTimeout(() => setArmed(false), 4000);
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setArmed(false);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.clearTimeout(t);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [armed]);
 
   const destroy = async () => {
-    if (!armed) return setArmed(true);
     setRemoving(true);
     try {
       await api.teardown(box.name);
@@ -200,7 +184,6 @@ export function Thread({
       toast.error("Could not destroy the machine", { description: e instanceof Error ? e.message : String(e) });
     } finally {
       setRemoving(false);
-      setArmed(false);
     }
   };
 
@@ -236,7 +219,6 @@ export function Thread({
   const pulls = React.useMemo(() => findPullRequests(events.map((e) => (e.kind === "say" ? e.text : e.kind === "tool" ? e.result ?? "" : "")).join("\n")), [events]);
 
   // Attach a repository to this running sandbox.
-  const [addRepo, setAddRepo] = React.useState(false);
   const [attaching, setAttaching] = React.useState<string | null>(null);
   const [optimisticRepos, setOptimisticRepos] = React.useState<{ name: string; branch?: string }[]>([]);
   React.useEffect(() => setOptimisticRepos([]), [box.name, box.repos?.length]);
@@ -274,6 +256,33 @@ export function Thread({
   };
 
   const idle = runState === "idle" && events.length === 0 && !loadingTrace;
+
+  // The title: the operator's rename wins immediately; the fleet catches up on its next read.
+  const [renamed, setRenamed] = React.useState<{ box: string; title: string } | null>(null);
+  const title = renamed?.box === box.name ? renamed.title : box.task ? threadTitle(box) : friendlyName(box.name);
+  const rename = async (t: string) => {
+    const r = await api.rename(box.name, t);
+    setRenamed({ box: box.name, title: r.title });
+  };
+  const newFromThis = () => {
+    setPrefill({ task: box.task ?? "", wantsRepo: repos.length > 0 });
+    onNew();
+  };
+  // What the agent is doing right now: the latest tool call, or thinking between calls.
+  const activity = React.useMemo(() => {
+    if (runState !== "running" || sleeping) return null;
+    for (let i = events.length - 1; i >= 0; i--) {
+      const e = events[i];
+      if (e.kind === "say") return "writing";
+      if (e.kind === "tool") {
+        const a = e.arg?.split("\n")[0].trim();
+        const short = a ? (/^[\w./-]+$/.test(a) ? a.split("/").pop() : a.slice(0, 48)) : "";
+        return short ? `${e.name} ${short}` : e.name;
+      }
+      if (e.kind === "think") return "thinking";
+    }
+    return events.length ? "working" : "starting";
+  }, [events, runState, sleeping]);
 
   // Turns for the minimap: the task plus every message you sent, each with how the agent replied.
   const stick = useStickToBottom({ resize: "smooth", initial: "instant" });
@@ -317,172 +326,31 @@ export function Thread({
   return (
     <SessionContext.Provider value={box.name}>
     <div className="flex h-full min-h-0 min-w-0 flex-col">
-      <header className="flex h-14 shrink-0 items-center gap-2.5 border-b px-3 md:px-5">
-        <Button variant="ghost" size="icon-sm" onClick={onBack} aria-label="Back to machines" className="md:hidden">
-          <ArrowLeft />
-        </Button>
-
-        <StatePill state={state} exitCode={exitCode} />
-        {kept && (
-          <span className="bg-live/10 text-live hidden h-6 shrink-0 items-center gap-1 rounded-full px-2 text-micro font-semibold sm:inline-flex" title="Kept until you destroy it">
-            <Pin className="size-3 fill-current" aria-hidden />
-            kept
-          </span>
-        )}
-
-        <div className="flex min-w-0 flex-1 items-baseline gap-2">
-          <h1 className="text-foreground min-w-0 truncate text-body font-medium">
-            {box.task ? threadTitle(box) : friendlyName(box.name)}
-          </h1>
-          {box.task && (
-            <span className="stamp text-muted-foreground hidden shrink-0 sm:inline" title={shortName(box.name)}>
-              {friendlyName(box.name)}
-            </span>
-          )}
-        </div>
-
-        {pulls.length > 0 && !loadingTrace && <PullRequestFloat key={pulls[pulls.length - 1].url} session={box.name} {...pulls[pulls.length - 1]} />}
-
-        {/* Lifecycle + vitals: quiet mono facts, desktop only — the fleet view carries them on phones. */}
-        <div className="stamp text-faint hidden items-center gap-3 lg:flex">
-          {deadlineText && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className={cn("inline-flex items-center gap-1.5", deadline.remainingSec != null && deadline.remainingSec < 300 && "text-attention-text")}>
-                  <Hourglass className="size-3" aria-hidden />
-                  <span className="tabular">{deadline.remainingSec != null ? (deadline.remainingSec <= 0 ? "soon" : fmtDuration(deadline.remainingSec)) : ""}</span>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">{deadlineText}</TooltipContent>
-            </Tooltip>
-          )}
-          {/* One quiet group: uptime · cpu · memory. The role is implied by the state pill. */}
-          {(box.uptime || box.cpu || box.mem) && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="inline-flex items-center gap-1.5">
-                  <Cpu className="size-3" aria-hidden />
-                  <span className="tabular">
-                    {[box.uptime, box.cpu ? box.cpu.split(" / ")[0] + "c" : null, box.mem ? box.mem.split(" / ")[0] : null].filter(Boolean).join(" · ")}
-                  </span>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">
-                {sleeping ? "ran for" : "up"} {box.uptime ?? "—"} · cpu {box.cpu ?? "—"} · memory {box.mem ?? "—"} · {roleLabel(box.role)}
-              </TooltipContent>
-            </Tooltip>
-          )}
-        </div>
-
-        <Button variant="ghost" size="icon-sm" onClick={onNew} aria-label="New task" className="md:hidden">
-          <Plus />
-        </Button>
-
-        {!sleeping && repos.length === 0 && !addRepo && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon-sm" onClick={() => setAddRepo(true)} aria-label="Attach a repository">
-                <GitBranch />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">Attach a repository — the agent clones it into this sandbox</TooltipContent>
-          </Tooltip>
-        )}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon-sm" onClick={() => (showWorkspace ? closeWorkspace() : setWorkspaceOpen(true))} aria-pressed={showWorkspace} aria-label="Workspace files" className={cn(showWorkspace && "bg-accent text-foreground")} disabled={sleeping}>
-              <FolderTree />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">{sleeping ? "Files — available once the sandbox is awake" : "Files — browse, diff and edit the workspace"}</TooltipContent>
-        </Tooltip>
-
-        {box.role !== "pool-free" && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={toggleKeep}
-                disabled={keeping}
-                aria-pressed={kept}
-                aria-label={kept ? "Release this sandbox" : "Keep this sandbox"}
-                className={cn(kept && "text-live bg-live/10")}
-              >
-                {kept ? <Pin className="fill-current" /> : <PinOff />}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">
-              {kept
-                ? "Kept — sleeps when quiet, never destroyed until you say so. Click to release."
-                : "Keep — hold this sandbox (asleep, workspace intact) until you destroy it. Come back any day with a follow-up."}
-            </TooltipContent>
-          </Tooltip>
-        )}
-
-        {armed ? (
-          <div className="enter flex items-center gap-1">
-            <Button variant="destructive" size="sm" onClick={destroy} disabled={removing}>
-              <Trash2 className="size-3.5" />
-              {removing ? "Destroying…" : "Confirm destroy"}
-            </Button>
-            <Button variant="ghost" size="icon-sm" onClick={() => setArmed(false)} aria-label="Cancel">
-              <X />
-            </Button>
-          </div>
-        ) : (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon-sm" onClick={destroy} aria-label="Destroy this machine">
-                <Trash2 />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">Destroy — stops the microVM and discards its workspace</TooltipContent>
-          </Tooltip>
-        )}
-      </header>
-
-      {/* Connected repositories: what the agent can see, and the way to give it more mid-run. */}
-      {!sleeping && (repos.length > 0 || addRepo) && (
-        <div className="relative flex h-9 shrink-0 items-center gap-1.5 border-b px-3 md:px-5">
-          <GitBranch className="text-muted-foreground size-3.5 shrink-0" aria-hidden />
-          <span className="label text-muted-foreground shrink-0">{repos.length ? "Connected" : "No repository attached"}</span>
-          <div className="scrollbar-none flex min-w-0 items-center gap-1.5 overflow-x-auto">
-          {repos.map((r) => (
-            <Tooltip key={r.name}>
-              <TooltipTrigger asChild>
-                <span className="bg-muted text-foreground stamp inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5">
-                  {r.name}
-                  {r.branch && <span className="text-muted-foreground">@{r.branch}</span>}
-                </span>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">/workspace/{r.name} — @ mentions search here</TooltipContent>
-            </Tooltip>
-          ))}
-          </div>
-          <div className="relative shrink-0">
-            <button
-              type="button"
-              onClick={() => setAddRepo((v) => !v)}
-              disabled={!!attaching}
-              aria-expanded={addRepo}
-              className="text-muted-foreground hover:text-foreground hover:bg-muted inline-flex h-6 cursor-pointer items-center gap-1 rounded-md px-1.5 text-micro font-medium transition-colors disabled:opacity-60"
-            >
-              {attaching ? <Loader2 className="size-3 animate-spin" aria-hidden /> : <Plus className="size-3" aria-hidden />}
-              {attaching ? `Cloning ${attaching.split("/")[1]}…` : "Add repo"}
-            </button>
-            {addRepo && (
-              <RepoPicker
-                className="absolute top-full left-0 z-20 mt-1"
-                multi={false}
-                selected={repos.map((r) => ({ repo: r.name }))}
-                onToggle={(r) => attach(r.fullName)}
-                onClose={() => setAddRepo(false)}
-              />
-            )}
-          </div>
-        </div>
-      )}
+      <ThreadHeader
+        box={box}
+        title={title}
+        state={state}
+        exitCode={exitCode}
+        sleeping={sleeping}
+        kept={kept}
+        keeping={keeping}
+        deadline={deadline}
+        repos={repos}
+        attaching={attaching}
+        pull={pulls.length > 0 && !loadingTrace ? pulls[pulls.length - 1] : undefined}
+        activity={activity}
+        showWorkspace={showWorkspace}
+        removing={removing}
+        onBack={onBack}
+        onNew={onNew}
+        onToggleWorkspace={() => (showWorkspace ? closeWorkspace() : setWorkspaceOpen(true))}
+        onToggleKeep={toggleKeep}
+        onRename={rename}
+        onAttach={(full) => attach(full)}
+        onDestroy={destroy}
+        onCopyTranscript={async () => toMarkdown(events, { title, machine: friendlyName(box.name), url: window.location.href })}
+        onNewFromThis={newFromThis}
+      />
 
       <div className="relative flex min-h-0 flex-1">
       <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col", showWorkspace && workspaceFull && "hidden md:hidden")}>
@@ -554,11 +422,8 @@ export function Thread({
                 failed={exitCode != null && exitCode !== 0}
                 detail={exitCode == null || exitCode === 0 ? deadlineText ?? undefined : `code ${exitCode}`}
                 stats={runStats(events)}
-                onCopy={async () => toMarkdown(events, { title: box.task ? threadTitle(box) : friendlyName(box.name), machine: friendlyName(box.name), url: window.location.href })}
-                onAgain={() => {
-                  setPrefill({ task: box.task ?? "", wantsRepo: repos.length > 0 });
-                  onNew();
-                }}
+                onCopy={async () => toMarkdown(events, { title, machine: friendlyName(box.name), url: window.location.href })}
+                onAgain={newFromThis}
               />
             )}
             <ChatContainerScrollAnchor />

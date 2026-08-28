@@ -456,3 +456,15 @@ New things a user can do, each placed where the need arises rather than added to
 - **Drafts survive.** Unsent Hub and follow-up text lives in sessionStorage per machine; a reload or a detour to another thread does not lose it.
 - **Last activity.** Hub "Live now" rows show "active 2m ago" / "2m ago" in the tertiary colour before the machine name.
 - **Header vitals demoted** to the tertiary text colour — uptime/cpu/memory were competing with the title.
+
+## Thread masthead redesign (2026-08-28)
+
+Was: a 56 px header (two state pills, title, machine, PR chip, orange "soon", cpu/mem telemetry, three icon buttons with Destroy beside Keep) plus a 36 px "Connected · repo · Add repo" bar — 92 px of chrome, the title third in reading order, "kept" shown twice.
+
+Now: one block, two lines (~64 px), one border.
+
+- **Line 1 — identity + controls.** The title is the only bold element (16 px semibold; click to rename, saved via `/rename.json`). Two controls: **Files** and a **⋯ menu** with Keep/Release (state shown as a hint), Rename, Attach a repository, Copy link, Copy transcript, New task from this, and — separated — *Destroy machine…* which opens a confirm dialog where the red button is the primary action.
+- **Line 2 — context as a sentence** in the secondary colour: `✓ done · teal-otter · [queue-service @main] + · #142 ready to merge`, and on the right the lifecycle in words (`sleeps in 12m`, `destroyed in 20m`, `41m left of cap`) instead of an orange "soon". While running, a live-blue tail says what the agent is doing (`Edit retry.ts`, `Bash`, `writing`, `thinking`).
+- **Kept** is shown once: a small pin glyph before the machine name, plus the menu hint.
+- **Telemetry** (uptime · cpu · memory · role) moved into the machine name's tooltip; Fleet view keeps it first-class.
+- The repo bar is gone; repos are chips in the context line with a quiet `+`.

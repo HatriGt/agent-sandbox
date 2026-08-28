@@ -24,7 +24,7 @@ import { securityHeaders } from "./security-headers.js";
 import { gatherMonitor, gatherWatch, askInBox, driverStateLine, startBoxIfStopped, noteRunning } from "./msb.js";
 import { safeWorkspacePath } from "./artifact.js";
 import { gitStatus, gitCommitAll, gitPush } from "./git-ops.js";
-import { loadTitles, generateTitle, forgetTitle } from "./titles.js";
+import { loadTitles, generateTitle, forgetTitle, saveTitle, cleanTitle } from "./titles.js";
 import { runDelegateFlow } from "./delegate-flow.js";
 import { streamWatch } from "./watch-sse.js";
 import { WatchHub } from "./watch-hub.js";
@@ -790,6 +790,27 @@ app.post("/title.json", async (req: Request, res: Response) => {
       return;
     }
     res.json({ title: await generateTitle(cfg, session, box.task) });
+  } catch (e) {
+    res.status(500).json({ error: String((e as Error).message ?? e) });
+  }
+});
+
+// Rename a run. The generated title is a guess; the operator's word replaces it everywhere.
+app.post("/rename.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const { session, title } = (req.body ?? {}) as { session?: string; title?: string };
+  if (!session || !/^[\w.-]+$/.test(session)) {
+    res.status(400).json({ error: "session is required" });
+    return;
+  }
+  const clean = cleanTitle(String(title ?? ""));
+  if (!clean) {
+    res.status(400).json({ error: "title is required" });
+    return;
+  }
+  try {
+    await saveTitle(cfg, session, clean);
+    res.json({ title: clean });
   } catch (e) {
     res.status(500).json({ error: String((e as Error).message ?? e) });
   }
