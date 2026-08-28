@@ -8,7 +8,7 @@ const WorkspacePane = React.lazy(() => import("./WorkspacePane").then((m) => ({ 
 import { WakingCard } from "./WakingCard";
 import { SessionContext } from "@/lib/session-context";
 import { friendlyName, isSleeping, POLL_MS, roleLabel, shortName, threadTitle } from "@/lib/format";
-import { deadlineLabel, deadlineOf, displayState, fmtDuration, parseUptimeSec } from "@/lib/lifecycle";
+import { deadlineLabel, deadlineOf, displayState, fmtDuration } from "@/lib/lifecycle";
 import { runStats, toMarkdown } from "@/lib/transcript";
 import { setPrefill } from "@/lib/draft";
 import { RunSummary } from "./RunSummary";
@@ -554,7 +554,6 @@ export function Thread({
                 failed={exitCode != null && exitCode !== 0}
                 detail={exitCode == null || exitCode === 0 ? deadlineText ?? undefined : `code ${exitCode}`}
                 stats={runStats(events)}
-                durationSec={generation ? undefined : parseUptimeSec(box.uptime)}
                 onCopy={async () => toMarkdown(events, { title: box.task ? threadTitle(box) : friendlyName(box.name), machine: friendlyName(box.name), url: window.location.href })}
                 onAgain={() => {
                   setPrefill({ task: box.task ?? "", wantsRepo: repos.length > 0 });
