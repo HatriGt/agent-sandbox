@@ -548,13 +548,13 @@ export function Thread({
               <ObserverItem key={`aside-${i}`} question={a.question} answer={a.error ?? a.answer} />
             ))}
 
-            {!sleeping && runState === "done" && (
+            {!sleeping && !loadingTrace && runState === "done" && (
               <RunSummary
                 label={exitCode == null || exitCode === 0 ? "Completed" : "Exited with an error"}
                 failed={exitCode != null && exitCode !== 0}
                 detail={exitCode == null || exitCode === 0 ? deadlineText ?? undefined : `code ${exitCode}`}
                 stats={runStats(events)}
-                durationSec={parseUptimeSec(box.uptime)}
+                durationSec={generation ? undefined : parseUptimeSec(box.uptime)}
                 onCopy={async () => toMarkdown(events, { title: box.task ? threadTitle(box) : friendlyName(box.name), machine: friendlyName(box.name), url: window.location.href })}
                 onAgain={() => {
                   setPrefill({ task: box.task ?? "", wantsRepo: repos.length > 0 });
