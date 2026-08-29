@@ -143,7 +143,7 @@ export default function Landing() {
               software on a VPS you control. Either way, what is yours stays yours.
             </p>
           </Reveal>
-          <div className="mt-10 grid min-w-0 gap-4 lg:grid-cols-2">
+          <div className="mt-10 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-[repeat(2,minmax(0,1fr))]">
             <Reveal delay={0.04}>
               <motion.div whileHover={{ y: -2 }} transition={{ type: "spring", stiffness: 400, damping: 30 }} className="bg-card flex h-full min-w-0 flex-col rounded-xl p-6 shadow-e2">
                 <div className="flex items-center gap-2.5">
@@ -182,7 +182,7 @@ export default function Landing() {
                   One VPS with KVM, Docker and microsandbox. Single-operator by default; flip <code className="bg-muted rounded px-1 font-mono text-[0.9em]">AUTH_MODE=saas</code> for
                   sign-up, sessions and per-user isolation on your own domain.
                 </p>
-                <pre className="bg-background/60 text-foreground mt-4 min-w-0 max-w-full flex-1 overflow-x-auto rounded-md p-3 font-mono text-code leading-relaxed">{`git clone https://github.com/HatriGt/agent-sandbox
+                <pre className="bg-background/60 text-foreground mt-4 min-w-0 max-w-full flex-1 overflow-x-auto rounded-md p-3 font-mono text-code leading-relaxed break-all whitespace-pre-wrap sm:break-normal sm:whitespace-pre">{`git clone https://github.com/HatriGt/agent-sandbox
 cd agent-sandbox && cp .env.example .env
 docker compose up -d --build`}</pre>
                 <div className="mt-6 flex items-center gap-3">
