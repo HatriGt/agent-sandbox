@@ -47,9 +47,11 @@ export function upsertGithubUser(
   let existing = db.prepare(`SELECT * FROM users WHERE github_id = ?`).get(u.githubId) as UserRow | undefined;
   const now = nowIso();
   if (!existing) {
-    // An admin-created account (no GitHub id yet) with the same login is the same person: link it.
+    // An admin-created invite account (no GitHub id, no password) with the same login is the same
+    // person: link it. A password account with that login is NOT — someone may have squatted the
+    // name — so the GitHub identity gets its own user under a unique login instead.
     const byLogin = db.prepare(`SELECT * FROM users WHERE github_id IS NULL AND lower(login) = lower(?)`).get(u.login) as UserRow | undefined;
-    if (byLogin) {
+    if (byLogin && !byLogin.password_hash) {
       db.prepare(`UPDATE users SET github_id = ? WHERE id = ?`).run(u.githubId, byLogin.id);
       existing = { ...byLogin, github_id: u.githubId };
     }
@@ -60,7 +62,9 @@ export function upsertGithubUser(
   }
   const id = `u_${rand(12)}`;
   const role = (opts.adminLogins ?? []).map((l) => l.toLowerCase()).includes(u.login.toLowerCase()) ? "admin" : "user";
-  db.prepare(`INSERT INTO users (id, github_id, login, email, avatar_url, role, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(id, u.githubId, u.login, u.email ?? null, u.avatarUrl ?? null, role, now, now);
+  let login = u.login;
+  for (let n = 2; db.prepare(`SELECT 1 FROM users WHERE lower(login) = lower(?)`).get(login); n++) login = `${u.login}-${n}`;
+  db.prepare(`INSERT INTO users (id, github_id, login, email, avatar_url, role, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(id, u.githubId, login, u.email ?? null, u.avatarUrl ?? null, role, now, now);
   return db.prepare(`SELECT * FROM users WHERE id = ?`).get(id) as UserRow;
 }
 
@@ -101,7 +105,10 @@ export function createPasswordUser(db: Db, u: { login: string; name: string; ema
   const clash = db.prepare(`SELECT id FROM users WHERE lower(login) = lower(?) OR (email IS NOT NULL AND ? IS NOT NULL AND lower(email) = lower(?))`).get(u.login, u.email, u.email);
   if (clash) throw new Error("That username or email is already taken.");
   const count = (db.prepare(`SELECT COUNT(*) AS n FROM users`).get() as { n: number }).n;
-  const role = (opts.firstIsAdmin && count === 0) || (opts.adminLogins ?? []).map((l) => l.toLowerCase()).includes(u.login.toLowerCase()) ? "admin" : "user";
+  // A password sign-up proves nothing about who you are, so ADMIN_GITHUB_LOGINS never applies here —
+  // otherwise anyone could register the admin's username. Only the empty-controller bootstrap promotes.
+  void opts.adminLogins;
+  const role = opts.firstIsAdmin && count === 0 ? "admin" : "user";
   const id = `u_${rand(12)}`;
   db.prepare(`INSERT INTO users (id, login, name, email, password_hash, role, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(id, u.login, u.name, u.email, hashPassword(u.password), role, nowIso(), nowIso());
   return db.prepare(`SELECT * FROM users WHERE id = ?`).get(id) as UserRow;

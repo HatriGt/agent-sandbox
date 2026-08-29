@@ -24,7 +24,7 @@ test("signup validation", () => {
 
 test("password users: first account is admin, duplicates rejected, login by name or email, password change", () => {
   const db = openMemoryDb();
-  const a = createPasswordUser(db, { login: "alice", name: "Alice", email: "a@x.io", password: "alice-secret-pw" }, { firstIsAdmin: true });
+  const a = createPasswordUser(db, { login: "alice", name: "Alice", email: "a@x.io", password: "alice-secret-pw" }, { firstIsAdmin: true, adminLogins: [] });
   assert.equal(a.role, "admin");
   const b = createPasswordUser(db, { login: "bob", name: "Bob", email: null, password: "bob-secret-pw!" }, { firstIsAdmin: true });
   assert.equal(b.role, "user");

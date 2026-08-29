@@ -1,27 +1,6 @@
 import * as React from "react";
 import { Link } from "react-router";
-import {
-  ArrowRight,
-  Box,
-  Check,
-  CircleDot,
-  Cpu,
-  Flame,
-  GitBranch,
-  KeyRound,
-  MessageCircleQuestion,
-  MoonStar,
-  Pause,
-  Plug,
-  ShieldCheck,
-  Terminal,
-  Timer,
-  X,
-  Server,
-  Laptop,
-  Globe,
-  Circle,
-} from "lucide-react";
+import { ArrowRight, Box, Check, Circle, CircleDot, Cpu, Flame, GitBranch, Globe, KeyRound, Laptop, MessageCircleQuestion, MoonStar, Pause, Plug, Server, ShieldCheck, Terminal, Timer, UserRound, X } from "lucide-react";
 import { motion, useInView, useReducedMotion } from "motion/react";
 import { Logo } from "@/components/ui/logo";
 import { cn } from "@/lib/utils";
@@ -39,6 +18,7 @@ export default function Landing() {
   // Where the primary button goes: the console when signed in (or token mode), otherwise sign-up.
   const consoleHref = { pathname: !saas || signedIn ? "/dashboard" : config?.signup ? "/signup" : "/signin" };
   const primaryLabel = !ready ? "Open the console" : !saas || signedIn ? "Open the console" : config?.signup ? "Get started" : "Sign in";
+  const SELF_HOST = "https://github.com/HatriGt/agent-sandbox/blob/main/docs/self-hosting.md";
   return (
     <div className="dark bg-background text-foreground min-h-full overflow-y-auto">
       <header className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
@@ -54,6 +34,9 @@ export default function Landing() {
           </a>
           <a href="#trust" className="text-muted-foreground hover:text-foreground hidden rounded-md px-3 py-1.5 text-meta sm:inline-block">
             Isolation
+          </a>
+          <a href="#selfhost" className="text-muted-foreground hover:text-foreground hidden rounded-md px-3 py-1.5 text-meta sm:inline-block">
+            Self-host
           </a>
           <a
             href="https://github.com/HatriGt/agent-sandbox"
@@ -112,19 +95,15 @@ export default function Landing() {
                 {primaryLabel}
                 <ArrowRight className="size-4" />
               </Link>
-              {saas && !signedIn ? (
-                <Link to="/signin" className="border-line-strong hover:bg-muted inline-flex h-11 items-center gap-2 rounded-md border px-5 text-body font-medium">
-                  Sign in
-                </Link>
-              ) : (
-                <a
-                  href="https://github.com/HatriGt/agent-sandbox#connect-your-ide"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="border-line-strong hover:bg-muted inline-flex h-11 items-center gap-2 rounded-md border px-5 text-body font-medium"
-                >
+              {saas && signedIn ? (
+                <Link to="/dashboard/connect" className="border-line-strong hover:bg-muted inline-flex h-11 items-center gap-2 rounded-md border px-5 text-body font-medium">
                   <Plug className="size-4" />
                   Connect your IDE
+                </Link>
+              ) : (
+                <a href="#selfhost" className="border-line-strong hover:bg-muted inline-flex h-11 items-center gap-2 rounded-md border px-5 text-body font-medium">
+                  <Server className="size-4" />
+                  Self-host
                 </a>
               )}
             </div>
@@ -154,13 +133,80 @@ export default function Landing() {
       </section>
 
       {/* ───────────── architecture ───────────── */}
+      {/* ───────────── hosted or yours ───────────── */}
+      <section id="selfhost" className="border-t">
+        <div className="mx-auto max-w-6xl px-6 py-20">
+          <Reveal>
+            <h2 className="font-serif text-[clamp(1.8rem,3.2vw,2.5rem)] leading-tight tracking-[-0.015em]">Use this one, or run your own.</h2>
+            <p className="text-muted-foreground mt-3 max-w-[60ch] text-body">
+              Agent Sandbox is open source. Sign up here and get a private workspace on this controller — or put the same
+              software on a VPS you control. Either way, what is yours stays yours.
+            </p>
+          </Reveal>
+          <div className="mt-10 grid gap-4 lg:grid-cols-2">
+            <Reveal delay={0.04}>
+              <motion.div whileHover={{ y: -2 }} transition={{ type: "spring", stiffness: 400, damping: 30 }} className="bg-card flex h-full flex-col rounded-xl p-6 shadow-e2">
+                <div className="flex items-center gap-2.5">
+                  <span className="bg-live/10 text-live grid size-9 place-items-center rounded-md">
+                    <UserRound className="size-4" />
+                  </span>
+                  <h3 className="text-h3 font-semibold tracking-[-0.01em]">Hosted here</h3>
+                </div>
+                <p className="text-muted-foreground mt-3 flex-1 text-body leading-relaxed">
+                  Create an account and start a task in under a minute. Your machines, GitHub accounts and MCP servers are
+                  yours alone — encrypted at rest, injected only into your runs. Connect Cursor or Claude Code with a
+                  personal API key when you want to.
+                </p>
+                <ul className="text-muted-foreground mt-4 flex flex-col gap-1.5 text-meta">
+                  <li className="flex items-center gap-2"><Check className="text-ok size-3.5" /> Private workspace per person</li>
+                  <li className="flex items-center gap-2"><Check className="text-ok size-3.5" /> Warm machines, live thread, question cards</li>
+                  <li className="flex items-center gap-2"><Check className="text-ok size-3.5" /> Personal API keys for your IDE</li>
+                </ul>
+                <div className="mt-6">
+                  <Link to={consoleHref} className="bg-primary text-primary-foreground hover:bg-primary/80 inline-flex h-10 items-center gap-2 rounded-md px-4 text-meta font-medium">
+                    {primaryLabel}
+                    <ArrowRight className="size-4" />
+                  </Link>
+                </div>
+              </motion.div>
+            </Reveal>
+            <Reveal delay={0.1}>
+              <motion.div whileHover={{ y: -2 }} transition={{ type: "spring", stiffness: 400, damping: 30 }} className="bg-card flex h-full flex-col rounded-xl p-6 shadow-e2">
+                <div className="flex items-center gap-2.5">
+                  <span className="bg-muted text-foreground grid size-9 place-items-center rounded-md">
+                    <Server className="size-4" />
+                  </span>
+                  <h3 className="text-h3 font-semibold tracking-[-0.01em]">Self-host</h3>
+                </div>
+                <p className="text-muted-foreground mt-3 text-body leading-relaxed">
+                  One VPS with KVM, Docker and microsandbox. Single-operator by default; flip <code className="bg-muted rounded px-1 font-mono text-[0.9em]">AUTH_MODE=saas</code> for
+                  sign-up, sessions and per-user isolation on your own domain.
+                </p>
+                <pre className="bg-background/60 text-foreground mt-4 flex-1 overflow-x-auto rounded-md p-3 font-mono text-code leading-relaxed">{`git clone https://github.com/HatriGt/agent-sandbox
+cd agent-sandbox && cp .env.example .env
+docker compose up -d --build`}</pre>
+                <div className="mt-6 flex items-center gap-3">
+                  <a href={SELF_HOST} target="_blank" rel="noreferrer" className="border-line-strong hover:bg-muted inline-flex h-10 items-center gap-2 rounded-md border px-4 text-meta font-medium">
+                    Self-hosting guide
+                    <ArrowRight className="size-4" />
+                  </a>
+                  <a href="https://github.com/HatriGt/agent-sandbox" target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-foreground text-meta">
+                    Source · MIT
+                  </a>
+                </div>
+              </motion.div>
+            </Reveal>
+          </div>
+        </div>
+      </section>
+
       <section className="border-t">
         <div className="mx-auto max-w-6xl px-6 py-20">
           <Reveal>
             <h2 className="font-serif text-[clamp(1.8rem,3.2vw,2.5rem)] leading-tight tracking-[-0.015em]">How a task travels.</h2>
             <p className="text-muted-foreground mt-3 max-w-[60ch] text-body">
-              Every entry point speaks MCP to one small controller on your VPS. It drives microsandbox over SSH, boots
-              or claims a KVM microVM, injects the right GitHub credential, and streams the agent's transcript back.
+              Every entry point speaks MCP to one small controller. It drives microsandbox over SSH, boots or claims a
+              KVM microVM, injects <em>your</em> GitHub credential, and streams the agent's transcript back to you alone.
             </p>
           </Reveal>
           <Reveal delay={0.08}>
@@ -199,7 +245,7 @@ export default function Landing() {
             <Way
               icon={<Box className="size-5" />}
               title="From anywhere with MCP"
-              body="Claude web, another IDE, CI. Same tools — delegate, status, resume, ask, teardown — behind one bearer token."
+              body="Claude web, another IDE, CI. Same tools — delegate, status, resume, ask, teardown — behind your personal API key."
               code={`delegate({ source: "git",\n  repo: "owner/repo",\n  task: "run the suite…" })`}
               delay={0.12}
             />
@@ -245,10 +291,10 @@ export default function Landing() {
           <div className="mt-10 grid gap-x-10 gap-y-8 sm:grid-cols-2 lg:grid-cols-3">
             <Feature icon={<ShieldCheck />} title="microVM isolation" body="Every run gets its own KVM microVM (microsandbox). Model-generated code never touches your host — a hardware boundary, not a container namespace." />
             <Feature icon={<Flame />} title="Warm pool" body="Pre-booted machines wait with the agent installed. A new task starts in seconds instead of a cold boot." />
-            <Feature icon={<KeyRound />} title="Credential broker" body="GitHub accounts live on your server, never in the browser. The right account is injected per repo; if an agent asks for auth, the controller answers." />
+            <Feature icon={<KeyRound />} title="Credential broker" body="GitHub accounts live on the controller, encrypted, never in the browser. The right account is injected per repo; if an agent asks for auth, the controller answers." />
             <Feature icon={<Timer />} title="Honest lifecycle" body="A run cap and an idle limit you configure. Quiet machines sleep with their workspace intact and wake on your reply; only you (or the cap) destroy anything." />
             <Feature icon={<MoonStar />} title="Nothing hidden, nothing invented" body="The dashboard shows what is alive right now — capacity slots, real deadlines, real vitals. No fabricated analytics." />
-            <Feature icon={<Cpu />} title="Your server, your model route" body="Runs on your VPS. Model calls go through your proxy. One bearer token guards everything and fails closed." />
+            <Feature icon={<Cpu />} title="Yours alone" body="Every machine has one owner. GitHub accounts and MCP servers are encrypted per user and reach only that user's runs; another account's box answers 404, not 403." />
           </div>
         </div>
       </section>
@@ -264,6 +310,10 @@ export default function Landing() {
               {primaryLabel}
               <ArrowRight className="size-4" />
             </Link>
+            <a href={SELF_HOST} target="_blank" rel="noreferrer" className="border-line-strong hover:bg-muted inline-flex h-10 items-center gap-2 rounded-md border px-4 text-meta font-medium">
+              <Server className="size-4" />
+              Self-host
+            </a>
             <a href="https://github.com/HatriGt/agent-sandbox" target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-foreground text-meta">
               Source · MIT
             </a>
@@ -324,12 +374,12 @@ function Li({ icon, children }: { icon: React.ReactNode; children: React.ReactNo
 function Way({ icon, title, body, code, delay }: { icon: React.ReactNode; title: string; body: string; code: string; delay: number }) {
   return (
     <Reveal delay={delay}>
-      <div className="bg-card flex h-full flex-col rounded-xl border p-6">
+      <motion.div whileHover={{ y: -3 }} transition={{ type: "spring", stiffness: 400, damping: 30 }} className="bg-card flex h-full flex-col rounded-xl border p-6">
         <span className="bg-muted text-foreground grid size-10 place-items-center rounded-md">{icon}</span>
         <h3 className="mt-4 text-h3 font-semibold tracking-[-0.01em]">{title}</h3>
         <p className="text-muted-foreground mt-2 flex-1 text-body leading-relaxed">{body}</p>
         <pre className="bg-trace text-trace-fg mt-5 overflow-x-auto rounded-md px-3.5 py-3 font-mono text-micro leading-relaxed">{code}</pre>
-      </div>
+      </motion.div>
     </Reveal>
   );
 }

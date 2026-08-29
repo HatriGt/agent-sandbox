@@ -6,11 +6,12 @@ import { setMe, setToken } from "@/lib/auth";
 import { Logo } from "@/components/ui/logo";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { motion } from "motion/react";
 
 export function AuthShell({ children, wide = false }: { children: React.ReactNode; wide?: boolean }) {
   return (
     <div className="bg-background text-foreground flex min-h-full items-center justify-center px-6 py-10">
-      <div className={cn("w-full", wide ? "max-w-md" : "max-w-sm")}>
+      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }} className={cn("w-full", wide ? "max-w-md" : "max-w-sm")}>
         <Link to="/" className="inline-flex items-center gap-2.5 no-underline">
           <span className="bg-primary text-primary-foreground grid size-9 place-items-center rounded-md">
             <Logo className="size-5" />
@@ -18,7 +19,7 @@ export function AuthShell({ children, wide = false }: { children: React.ReactNod
           <span className="text-foreground text-body font-semibold tracking-[-0.01em]">Agent Sandbox</span>
         </Link>
         {children}
-      </div>
+      </motion.div>
     </div>
   );
 }

@@ -2,7 +2,7 @@
 
 # Agent Sandbox
 
-**A cloud sandbox for coding agents — on your own server.**
+**A cloud sandbox for coding agents — hosted, or on your own server.**
 
 ### Delegate the task. Keep the control.
 
@@ -11,7 +11,8 @@ Hand a coding task to an autonomous agent running inside a throwaway
 one question it stops to ask, and get a pull request back.
 
 Start a run **from the dashboard**, **from your coding agent**, or **from a script** — same sandbox,
-same fleet, same live view.
+same fleet, same live view. Sign up on a hosted controller, or self-host in five minutes; either way,
+your machines, GitHub accounts and MCP servers are **yours alone**.
 
 [![CI](https://github.com/HatriGt/agent-sandbox/actions/workflows/ci.yml/badge.svg)](https://github.com/HatriGt/agent-sandbox/actions/workflows/ci.yml)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
@@ -21,7 +22,7 @@ same fleet, same live view.
 [![Isolation](https://img.shields.io/badge/isolation-KVM%20microVM-8A2BE2)](docs/security.md)
 [![Self-hosted](https://img.shields.io/badge/self--hosted-your%20VPS-0E7C5A)](#deploy-the-remote-http-entry)
 
-[**Live console**](https://agent-sandbox.ajeethkumar.dev) · [Security model](docs/security.md) · [Runbook](docs/runbook.md) · [Lifecycle](docs/lifecycle.md)
+[**Sign up / live console**](https://agent-sandbox.ajeethkumar.dev) · [**Self-host**](docs/self-hosting.md) · [Security model](docs/security.md) · [Architecture](docs/architecture.md) · [Lifecycle](docs/lifecycle.md)
 
 **Works with** Cursor · Claude Code · Codex · VS Code · Windsurf · Zed · Cline · Claude web · CI
 <br><sub>— anything that speaks MCP over stdio or Streamable HTTP. And nothing at all, if you use the dashboard.</sub>
@@ -66,8 +67,11 @@ it's doing, queue a follow-up, answer its question, pin the box, or tear it down
 <details open>
 <summary><b>1. Dashboard — no client, no config</b></summary>
 
-Deploy the controller (below), open `https://<ASB_DOMAIN>/dashboard`, paste your `MCP_HTTP_TOKEN`
-once into the token gate, and add a GitHub account. Then type a task and send.
+**Hosted:** open the controller's landing page → **Get started** → name, username, password → you are
+on the dashboard. Add a GitHub account under *Integrations* (yours alone), type a task, send.
+
+**Self-hosted, single operator:** deploy (below), open `https://<ASB_DOMAIN>/dashboard`, paste your
+`MCP_HTTP_TOKEN` once. To let several people in, see [Multi-user mode](#multi-user-mode).
 
 The composer picks up the repos you name — *"fix the flaky retry test in packages/queue"* attaches
 the repo it refers to automatically, so the agent starts with the checkout it was clearly asked
@@ -85,8 +89,13 @@ npm ci && npm run build
 cp .env.example .env       # set VPS_SSH to a host that has microsandbox installed
 ```
 
-Register it with your IDE's MCP config (`~/.cursor/mcp.json`, `.vscode/mcp.json`, Windsurf's
-`mcp_config.json`, `claude mcp add` — see [Connect your IDE](#connect-your-ide)):
+**Hosted:** in the dashboard go to **Account → Connect an IDE**. It mints a personal API key and shows
+the exact config for Claude Code, Cursor, VS Code and Windsurf with the key filled in, plus a *Test
+connection* button. That is all you need — skip the rest of this step.
+
+**Local stdio entry (self-hosters who want to ship an uncommitted working tree):** register it with
+your IDE's MCP config (`~/.cursor/mcp.json`, `.vscode/mcp.json`, Windsurf's `mcp_config.json`,
+`claude mcp add` — see [Connect your IDE](#connect-your-ide)):
 
 ```json
 { "mcpServers": { "agent-sandbox": {
@@ -118,8 +127,10 @@ Every console action has a route behind it (`/fleet.json`, `/watch.sse`, `/ask.j
 </details>
 
 > [!IMPORTANT]
-> The HTTP entry refuses to start without `MCP_HTTP_TOKEN`, and that one token is root-equivalent —
-> it can spawn VMs. Read [`docs/security.md`](docs/security.md) before exposing it to the internet.
+> The HTTP entry refuses to start without `MCP_HTTP_TOKEN`; that token is the deployment's root
+> identity. In multi-user mode people sign in with their own accounts and personal API keys, and the
+> operator token stays in `.env` as break-glass. Read [`docs/security.md`](docs/security.md) before
+> exposing a controller to the internet.
 
 ## Contents
 
@@ -435,13 +446,30 @@ as `host.docker.internal`. Everything site-specific lives in `.env`; the repo sh
 
 ## Multi-user mode
 
-Set `AUTH_MODE=saas` (plus a GitHub OAuth App: `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`,
-`PUBLIC_URL`) and the console gets **Sign in with GitHub**, HttpOnly session cookies, per-user API
-keys for the MCP endpoint, box ownership (users see and act on their own machines only), and a
-per-user machine quota — and every user's GitHub accounts and MCP servers are theirs alone (encrypted
-per user, injected only into their machines). No OAuth app is required: admins issue access tokens
-from **Integrations → Users**. The operator token keeps working as the break-glass identity.
-Step-by-step: [`docs/self-hosting.md`](docs/self-hosting.md). Design, data model and what remains:
+```
+AUTH_MODE=saas          # accounts, sessions, ownership, per-user integrations
+SIGNUP=open             # public "Create an account"; omit for invite-only
+ADMIN_GITHUB_LOGINS=…   # who becomes admin when signing in with GitHub (optional)
+GITHUB_OAUTH_CLIENT_ID / GITHUB_OAUTH_CLIENT_SECRET   # optional "Continue with GitHub"
+```
+
+What you get:
+
+- **Sign up / sign in** — username + password (scrypt), personal access token, or GitHub. HttpOnly
+  session cookies with CSRF protection; *Signed-in devices* on the Account page to revoke any of them.
+- **Ownership** — every machine has one owner. Others' machines are invisible and answer 404. Enforced
+  in one place for the JSON routes *and* the MCP tools.
+- **Per-user integrations** — GitHub accounts and MCP servers are encrypted rows per user and are
+  injected only into that user's machines. Background work (queued follow-ups, the credential
+  broker) runs as the machine's owner.
+- **Personal API keys** — *Account → Connect an IDE* mints one and shows ready-to-paste configs;
+  keys are hashed at rest and revocable.
+- **Quotas and limits** — `USER_MAX_BOXES` concurrent machines per user, 60 mutating requests/minute
+  per caller, sign-in throttling.
+- **Admin** — *Account → Manage users*: create invite accounts, issue tokens, promote, remove. The
+  operator token remains the break-glass identity.
+
+Step-by-step: [`docs/self-hosting.md`](docs/self-hosting.md). Design, threat model and roadmap:
 [`docs/saas-design.md`](docs/saas-design.md).
 
 ## Security

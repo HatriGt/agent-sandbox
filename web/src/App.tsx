@@ -17,6 +17,7 @@ import { Hub } from "@/components/Hub";
 import { Account } from "@/components/Account";
 import { Connect } from "@/components/Connect";
 import { Admin } from "@/components/Admin";
+import { PageEnter } from "@/components/ui/page";
 import { Capacity } from "@/components/Capacity";
 import { CommandPalette, openPalette, type PaletteAction } from "@/components/CommandPalette";
 import { ShortcutsDialog } from "@/components/ShortcutsDialog";
@@ -498,13 +499,21 @@ export default function App() {
                     onBack={backToRail}
                   />
                 ) : view === "integrations" ? (
-                  <Integrations onBack={backToRail} />
+                  <PageEnter className="h-full min-h-0">
+                    <Integrations onBack={backToRail} />
+                  </PageEnter>
                 ) : view === "account" ? (
-                  <Account onBack={backToRail} onConnect={showConnect} onAdmin={showAdmin} />
+                  <PageEnter className="h-full min-h-0">
+                    <Account onBack={backToRail} onConnect={showConnect} onAdmin={showAdmin} />
+                  </PageEnter>
                 ) : view === "admin" ? (
-                  <Admin onBack={showAccount} />
+                  <PageEnter className="h-full min-h-0">
+                    <Admin onBack={showAccount} />
+                  </PageEnter>
                 ) : view === "connect" ? (
-                  <Connect onDone={showAccount} onBack={showAccount} />
+                  <PageEnter className="h-full min-h-0">
+                    <Connect onDone={showAccount} onBack={showAccount} />
+                  </PageEnter>
                 ) : booting && !selectedBox ? (
                   <BootingThread task={booting.task} warm={booting.warm} onBack={backToRail} />
                 ) : view === "box" && !selectedBox && !data ? (
