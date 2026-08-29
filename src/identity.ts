@@ -15,6 +15,8 @@ export interface UserRow {
   id: string;
   github_id: string | null;
   login: string;
+  name: string | null;
+  password_hash: string | null;
   email: string | null;
   avatar_url: string | null;
   role: "user" | "admin";
@@ -60,6 +62,69 @@ export function upsertGithubUser(
   const role = (opts.adminLogins ?? []).map((l) => l.toLowerCase()).includes(u.login.toLowerCase()) ? "admin" : "user";
   db.prepare(`INSERT INTO users (id, github_id, login, email, avatar_url, role, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(id, u.githubId, u.login, u.email ?? null, u.avatarUrl ?? null, role, now, now);
   return db.prepare(`SELECT * FROM users WHERE id = ?`).get(id) as UserRow;
+}
+
+/* ───────────── passwords: scrypt, per-user salt, constant-time compare ───────────── */
+
+export const LOGIN_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{1,38}$/;
+export const PASSWORD_MIN = 10;
+
+export function hashPassword(password: string): string {
+  const salt = crypto.randomBytes(16);
+  const hash = crypto.scryptSync(password.normalize("NFKC"), salt, 32, { N: 16384, r: 8, p: 1 });
+  return `scrypt$${salt.toString("base64url")}$${hash.toString("base64url")}`;
+}
+export function verifyPassword(password: string, stored: string | null | undefined): boolean {
+  if (!stored) return false;
+  const [algo, salt, hash] = stored.split("$");
+  if (algo !== "scrypt" || !salt || !hash) return false;
+  const want = Buffer.from(hash, "base64url");
+  const got = crypto.scryptSync(password.normalize("NFKC"), Buffer.from(salt, "base64url"), want.length, { N: 16384, r: 8, p: 1 });
+  return want.length === got.length && crypto.timingSafeEqual(want, got);
+}
+
+export function validateSignup(u: { login?: unknown; name?: unknown; email?: unknown; password?: unknown }): { ok: true; login: string; name: string; email: string | null; password: string } | { ok: false; error: string } {
+  const login = String(u.login ?? "").trim();
+  const name = String(u.name ?? "").trim().slice(0, 80);
+  const email = String(u.email ?? "").trim().toLowerCase();
+  const password = String(u.password ?? "");
+  if (!LOGIN_RE.test(login)) return { ok: false, error: "Username: 2–39 letters, digits, - or _, starting with a letter or digit." };
+  if (!name) return { ok: false, error: "Tell us your name." };
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { ok: false, error: "That email address does not look right." };
+  if (password.length < PASSWORD_MIN) return { ok: false, error: `Password: at least ${PASSWORD_MIN} characters.` };
+  if (/^(.)\1+$/.test(password) || ["password12", "1234567890", "qwertyuiop"].includes(password.toLowerCase())) return { ok: false, error: "Pick a less guessable password." };
+  return { ok: true, login, name, email: email || null, password };
+}
+
+/** Self sign-up: username + password account. First account on an empty controller becomes admin. */
+export function createPasswordUser(db: Db, u: { login: string; name: string; email: string | null; password: string }, opts: { adminLogins?: string[]; firstIsAdmin?: boolean } = {}): UserRow {
+  const clash = db.prepare(`SELECT id FROM users WHERE lower(login) = lower(?) OR (email IS NOT NULL AND ? IS NOT NULL AND lower(email) = lower(?))`).get(u.login, u.email, u.email);
+  if (clash) throw new Error("That username or email is already taken.");
+  const count = (db.prepare(`SELECT COUNT(*) AS n FROM users`).get() as { n: number }).n;
+  const role = (opts.firstIsAdmin && count === 0) || (opts.adminLogins ?? []).map((l) => l.toLowerCase()).includes(u.login.toLowerCase()) ? "admin" : "user";
+  const id = `u_${rand(12)}`;
+  db.prepare(`INSERT INTO users (id, login, name, email, password_hash, role, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(id, u.login, u.name, u.email, hashPassword(u.password), role, nowIso(), nowIso());
+  return db.prepare(`SELECT * FROM users WHERE id = ?`).get(id) as UserRow;
+}
+
+/** Username or email + password → the user, or null. Same cost on a miss (hash a dummy) so timing does not reveal who exists. */
+export function authenticatePassword(db: Db, loginOrEmail: string, password: string): UserRow | null {
+  const key = loginOrEmail.trim().toLowerCase();
+  const row = db.prepare(`SELECT * FROM users WHERE lower(login) = ? OR (email IS NOT NULL AND lower(email) = ?)`).get(key, key) as UserRow | undefined;
+  if (!row || !row.password_hash) {
+    verifyPassword(password, DUMMY_HASH);
+    return null;
+  }
+  return verifyPassword(password, row.password_hash) ? row : null;
+}
+const DUMMY_HASH = hashPassword("not-a-real-password-just-for-timing");
+
+export function setPassword(db: Db, id: string, password: string): void {
+  db.prepare(`UPDATE users SET password_hash = ? WHERE id = ?`).run(hashPassword(password), id);
+}
+export function updateProfile(db: Db, id: string, p: { name?: string; email?: string | null }): void {
+  if (p.name !== undefined) db.prepare(`UPDATE users SET name = ? WHERE id = ?`).run(p.name.trim().slice(0, 80) || null, id);
+  if (p.email !== undefined) db.prepare(`UPDATE users SET email = ? WHERE id = ?`).run(p.email ? p.email.trim().toLowerCase() : null, id);
 }
 
 /** Admin-created account for token sign-in (self-hosting without OAuth). */

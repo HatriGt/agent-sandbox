@@ -121,6 +121,8 @@ export interface Config {
   userMaxBoxes: number;
   /** GitHub logins that become admins on first sign-in. */
   adminLogins: string[];
+  /** Who may create an account: "open" (public sign-up form) or "invite" (admins create users). */
+  signup: "open" | "invite";
 }
 
 function req(name: string, fallback?: string): string {
@@ -231,5 +233,6 @@ export function loadConfig(): Config {
     githubOauthClientSecret: process.env.GITHUB_OAUTH_CLIENT_SECRET || undefined,
     userMaxBoxes: Math.max(1, Number(process.env.USER_MAX_BOXES ?? "2") || 2),
     adminLogins: (process.env.ADMIN_GITHUB_LOGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+    signup: process.env.SIGNUP === "open" ? "open" : "invite",
   };
 }

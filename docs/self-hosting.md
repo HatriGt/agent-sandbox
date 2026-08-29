@@ -22,15 +22,18 @@ Add to `.env` and restart:
 
 ```
 AUTH_MODE=saas
+SIGNUP=open                           # public "Create an account" form; omit for invite-only
 ADMIN_GITHUB_LOGINS=<your-login>      # optional: who becomes admin when signing in with GitHub
 ```
 
-Then:
+**Open sign-up:** the door shows *Create an account* (name, username, email, password). The first
+account created on an empty controller becomes **admin**. A new account lands on **Connect your IDE**:
+an API key is minted, dropped into ready-to-paste configs for Claude Code / Cursor / VS Code /
+Windsurf, and a *Test connection* button proves it works before they leave the page.
 
-1. Open the dashboard and paste `MCP_HTTP_TOKEN` — you are the **operator** (admin over everything).
-2. **Integrations → Users → Add user.** You get that person's **access token**, shown once. Send it to them.
-3. They open the dashboard, paste it, and are signed in as themselves. The same token works as their
-   MCP API key; from **Integrations → API keys** they can mint more or revoke.
+**Invite-only** (`SIGNUP` unset): sign in with `MCP_HTTP_TOKEN` (you are the **operator**), go to
+**Integrations → Users → Add user**, and hand over the access token shown once. They paste it at the
+door; from **Account** they can set a password, mint more keys, or revoke.
 
 What each user gets, and *only* they can see or touch:
 

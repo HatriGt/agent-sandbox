@@ -79,6 +79,10 @@ const MIGRATIONS: string[] = [
     PRIMARY KEY (owner_id, kind)
   );
   `,
+  `
+  ALTER TABLE users ADD COLUMN name TEXT;
+  ALTER TABLE users ADD COLUMN password_hash TEXT;
+  `,
 ];
 
 export function openDb(dataDir: string): Db {

@@ -30,7 +30,7 @@ import {
 import { githubAuthorizeUrl, githubExchangeCode, githubIdentity } from "./github-oauth.js";
 import { keyFromEnvOrFile, makeSecretBox } from "./secretbox.js";
 import { allBlobs, registerUserStoreBackend, withOwner } from "./user-store.js";
-import { createLocalUser, deleteUser, listUsers, ownerOf, setUserRole } from "./identity.js";
+import { createLocalUser, deleteUser, listUsers, ownerOf, setUserRole, validateSignup, createPasswordUser, authenticatePassword, setPassword, updateProfile, verifyPassword, PASSWORD_MIN } from "./identity.js";
 import { parseStore } from "./gh-token-store.js";
 import { parseMcpStore } from "./mcp-store.js";
 import { guardDeps, makeOwnership, NotOwnedError, QuotaError, withPrincipal } from "./tenancy.js";
@@ -405,7 +405,7 @@ function failWith(res: Response, e: unknown): void {
 // Public: tells the SPA which front door to show.
 app.get("/auth/config.json", (_req: Request, res: Response) => {
   res.setHeader("Cache-Control", "no-store");
-  res.json({ mode: cfg.authMode, providers: SAAS && cfg.githubOauthClientId && cfg.githubOauthClientSecret ? ["github"] : [], tokenLogin: true });
+  res.json({ mode: cfg.authMode, providers: SAAS && cfg.githubOauthClientId && cfg.githubOauthClientSecret ? ["github"] : [], tokenLogin: true, password: SAAS, signup: SAAS && cfg.signup === "open", passwordMin: PASSWORD_MIN });
 });
 if (GITHUB_LOGIN) {
   const redirectUri = `${cfg.publicUrl}/auth/github/callback`;
@@ -433,6 +433,96 @@ if (GITHUB_LOGIN) {
     }
   });
 }
+/** Sign up / sign in with a password (saas). Both are throttled per client like every other credential check. */
+function startSession(req: Request, res: Response, userId: string): void {
+  const sess = createSession(db, userId, { ip: clientOf(req.headers, req.socket.remoteAddress), userAgent: String(req.headers["user-agent"] ?? "") });
+  res.setHeader("Set-Cookie", sessionCookie(sess.id, { secure: SECURE_COOKIE }));
+}
+if (SAAS) {
+  app.post("/auth/signup", (req: Request, res: Response) => {
+    const client = clientOf(req.headers, req.socket.remoteAddress);
+    if (authThrottle.blocked(client)) {
+      res.status(429).json({ error: "too many attempts — try again later" });
+      return;
+    }
+    if (cfg.signup !== "open") {
+      res.status(403).json({ error: "sign-up is by invitation on this controller — ask an admin for an access token" });
+      return;
+    }
+    if (!csrfOk(req.headers as Record<string, string | string[] | undefined>, cfg.publicUrl)) {
+      res.status(403).json({ error: "bad origin" });
+      return;
+    }
+    const v = validateSignup((req.body ?? {}) as Record<string, unknown>);
+    if (!v.ok) {
+      res.status(400).json({ error: v.error });
+      return;
+    }
+    try {
+      const u = createPasswordUser(db, v, { adminLogins: cfg.adminLogins, firstIsAdmin: true });
+      startSession(req, res, u.id);
+      res.json({ ok: true, id: u.id, login: u.login, role: u.role });
+    } catch (e) {
+      authThrottle.fail(client); // enumeration attempts count
+      res.status(409).json({ error: String((e as Error).message ?? e) });
+    }
+  });
+  app.post("/auth/login", (req: Request, res: Response) => {
+    const client = clientOf(req.headers, req.socket.remoteAddress);
+    if (authThrottle.blocked(client)) {
+      res.setHeader("Retry-After", "600");
+      res.status(429).json({ error: "too many attempts — try again later" });
+      return;
+    }
+    if (!csrfOk(req.headers as Record<string, string | string[] | undefined>, cfg.publicUrl)) {
+      res.status(403).json({ error: "bad origin" });
+      return;
+    }
+    const { login, password } = (req.body ?? {}) as { login?: string; password?: string };
+    const u = typeof login === "string" && typeof password === "string" ? authenticatePassword(db, login, password) : null;
+    if (!u) {
+      authThrottle.fail(client);
+      res.status(401).json({ error: "Wrong username or password." });
+      return;
+    }
+    startSession(req, res, u.id);
+    res.json({ ok: true, id: u.id, login: u.login, role: u.role });
+  });
+  // Profile + password. Changing the password requires the current one (a stolen session cannot lock the owner out).
+  app.post("/account.json", (req: Request, res: Response) => {
+    if (!dashAuthed(req, res)) return;
+    const p = principalOf(res);
+    if (p.kind !== "user") {
+      res.status(403).json({ error: "the operator has no profile" });
+      return;
+    }
+    const { name, email, currentPassword, newPassword } = (req.body ?? {}) as { name?: string; email?: string | null; currentPassword?: string; newPassword?: string };
+    const user = getUser(db, p.userId);
+    if (!user) {
+      res.status(404).json({ error: "no such user" });
+      return;
+    }
+    if (typeof newPassword === "string") {
+      if (user.password_hash && !verifyPassword(String(currentPassword ?? ""), user.password_hash)) {
+        res.status(403).json({ error: "Current password is wrong." });
+        return;
+      }
+      if (newPassword.length < PASSWORD_MIN) {
+        res.status(400).json({ error: `Password: at least ${PASSWORD_MIN} characters.` });
+        return;
+      }
+      setPassword(db, p.userId, newPassword);
+    }
+    if (typeof name === "string" || email !== undefined) {
+      if (typeof email === "string" && email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        res.status(400).json({ error: "That email address does not look right." });
+        return;
+      }
+      updateProfile(db, p.userId, { name: typeof name === "string" ? name : undefined, email: email === undefined ? undefined : email || null });
+    }
+    res.json({ ok: true });
+  });
+}
 app.post("/auth/logout", (req: Request, res: Response) => {
   const p = res.locals.principal as Principal | null;
   if (p?.kind === "user" && p.sessionId) deleteSession(db, p.sessionId);
@@ -447,7 +537,7 @@ app.get("/me.json", (req: Request, res: Response) => {
     return;
   }
   const u = getUser(db, p.userId);
-  res.json({ kind: "user", mode: cfg.authMode, id: p.userId, login: p.login, role: p.role, via: p.via, email: u?.email ?? null, avatarUrl: u?.avatar_url ?? null, maxBoxes: u?.max_boxes ?? cfg.userMaxBoxes });
+  res.json({ kind: "user", mode: cfg.authMode, id: p.userId, login: p.login, name: u?.name ?? null, role: p.role, via: p.via, email: u?.email ?? null, avatarUrl: u?.avatar_url ?? null, github: !!u?.github_id, hasPassword: !!u?.password_hash, maxBoxes: u?.max_boxes ?? cfg.userMaxBoxes });
 });
 // Users — operator/admin only. Self-hosting without OAuth: an admin creates the account and hands
 // over its first access token (shown once); the person signs in with it and can mint their own keys.

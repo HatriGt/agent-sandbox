@@ -193,9 +193,30 @@ export interface UserRow {
   keys: number;
   boxes: number;
 }
+export interface AuthConfig {
+  mode: "token" | "saas";
+  providers: string[];
+  tokenLogin?: boolean;
+  password?: boolean;
+  signup?: boolean;
+  passwordMin?: number;
+}
 export type Me =
   | { kind: "operator"; mode: "token" | "saas"; role: "admin" }
-  | { kind: "user"; mode: "token" | "saas"; id: string; login: string; role: "user" | "admin"; via: "session" | "apikey"; email: string | null; avatarUrl: string | null; maxBoxes: number };
+  | {
+      kind: "user";
+      mode: "token" | "saas";
+      id: string;
+      login: string;
+      name: string | null;
+      role: "user" | "admin";
+      via: "session" | "apikey";
+      email: string | null;
+      avatarUrl: string | null;
+      github: boolean;
+      hasPassword: boolean;
+      maxBoxes: number;
+    };
 export interface ApiKeyRow {
   id: string;
   name: string;
@@ -299,7 +320,15 @@ export async function openSse(
 export const api = {
   /** Does the controller accept this token? (Used by the token gate before storing it.) */
   /** Which front door: one operator token, or sign-in. Public. */
-  authConfig: () => fetch(url("/auth/config.json")).then(parse<{ mode: "token" | "saas"; providers: string[]; tokenLogin?: boolean }>),
+  authConfig: () => fetch(url("/auth/config.json")).then(parse<AuthConfig>),
+  signup: (u: { login: string; name: string; email: string; password: string }) => post<{ ok: true; id: string; login: string; role: string }>("/auth/signup", u),
+  login: (login: string, password: string) => post<{ ok: true; id: string; login: string; role: string }>("/auth/login", { login, password }),
+  updateAccount: (p: { name?: string; email?: string | null; currentPassword?: string; newPassword?: string }) => post<{ ok: true }>("/account.json", p),
+  /** Prove a bearer works, from the browser — the "Test connection" on the connect page. */
+  whoIs: async (token: string): Promise<Me | null> => {
+    const res = await fetch(url("/me.json"), { headers: headersFor(token) });
+    return res.ok ? ((await res.json()) as Me) : null;
+  },
   users: () => fetch(url("/users.json"), { headers: authHeaders }).then(parse<{ users: UserRow[] }>),
   createUser: (login: string, role: "user" | "admin") => post<{ id: string; login: string; role: string; token: string }>("/users.json", { login, role }),
   issueUserKey: (id: string) => post<{ id: string; token: string; prefix: string }>("/users/key.json", { id }),

@@ -1,4 +1,3 @@
-import { ApiKeys } from "@/components/ApiKeys";
 import { Users } from "@/components/Users";
 import { getMe } from "@/lib/auth";
 import { ArrowLeft } from "lucide-react";
@@ -35,7 +34,6 @@ export function Integrations({ onBack }: { onBack: () => void }) {
             <Accounts embedded />
           </section>
           <McpServers />
-          {getMe()?.kind === "user" && <ApiKeys />}
           {getMe()?.mode === "saas" && getMe()?.role === "admin" && <Users />}
         </div>
       </div>

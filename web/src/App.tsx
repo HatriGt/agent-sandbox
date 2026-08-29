@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Link, useLocation } from "react-router";
-import { Bell, BellOff, Flame, Keyboard, LayoutGrid, LogOut, Moon, PanelLeftClose, PanelLeftOpen, Pause, Plug, Plus, Search, Sun, TriangleAlert } from "lucide-react";
+import { Bell, BellOff, Flame, Keyboard, LayoutGrid, LogOut, Moon, PanelLeftClose, PanelLeftOpen, Pause, Plug, Plus, Search, Sun, TriangleAlert, UserRound } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { api, type FleetLifecycle, type FleetSnapshot } from "@/lib/api";
 import { POLL_MS, isUp, isVisible, threadSort } from "@/lib/format";
@@ -14,6 +14,8 @@ import { Button } from "@/components/ui/button";
 import { Logo } from "@/components/ui/logo";
 import { MachineList } from "@/components/MachineList";
 import { Hub } from "@/components/Hub";
+import { Account } from "@/components/Account";
+import { Connect } from "@/components/Connect";
 import { Capacity } from "@/components/Capacity";
 import { CommandPalette, openPalette, type PaletteAction } from "@/components/CommandPalette";
 import { ShortcutsDialog } from "@/components/ShortcutsDialog";
@@ -154,6 +156,14 @@ export default function App() {
     go({ view: "integrations" });
     setMobileRail(false);
   }, [go]);
+  const showAccount = React.useCallback(() => {
+    go({ view: "account" });
+    setMobileRail(false);
+  }, [go]);
+  const showConnect = React.useCallback(() => {
+    go({ view: "connect" });
+    setMobileRail(false);
+  }, [go]);
 
   const notify = useNotifications(boxes, open);
   const [shortcuts, setShortcuts] = React.useState(false);
@@ -162,9 +172,10 @@ export default function App() {
       { id: "fleet", label: "Fleet view", hint: "g f", icon: <LayoutGrid />, run: showFleet },
       { id: "integrations", label: "Integrations", hint: "g a", icon: <Plug />, run: showAccounts },
       { id: "theme", label: dark ? "Switch to light theme" : "Switch to dark theme", icon: dark ? <Sun /> : <Moon />, run: () => setDark(!dark) },
+      { id: "account", label: "Account", icon: <UserRound />, run: showAccount },
       { id: "keys", label: "Keyboard shortcuts", hint: "?", icon: <Keyboard />, run: () => setShortcuts(true) },
     ],
-    [showFleet, showAccounts, dark, setDark]
+    [showFleet, showAccounts, showAccount, dark, setDark]
   );
 
   React.useEffect(() => {
@@ -254,7 +265,7 @@ export default function App() {
   const health = !live && !data ? "offline" : waiting.length ? "attention" : "ok";
   const loading = !data && !error;
   const paneKey =
-    view === "fleet" ? "fleet" : view === "integrations" ? "integrations" : booting && !selectedBox ? "booting" : selectedBox ? `box:${selectedBox.name}` : view === "box" && !data ? "box-loading" : "hub";
+    view === "fleet" ? "fleet" : view === "integrations" ? "integrations" : view === "account" ? "account" : view === "connect" ? "connect" : booting && !selectedBox ? "booting" : selectedBox ? `box:${selectedBox.name}` : view === "box" && !data ? "box-loading" : "hub";
 
   return (
     <TooltipProvider delayDuration={400}>
@@ -401,6 +412,20 @@ export default function App() {
                 <span className="contents" onMouseEnter={prefetchIntegrations}>
                   <NavItem active={view === "integrations"} onClick={showAccounts} icon={<Plug />} label="Integrations" shortcut="g a" />
                 </span>
+                {getMe()?.mode === "saas" && (
+                  <NavItem
+                    active={view === "account" || view === "connect"}
+                    onClick={showAccount}
+                    icon={
+                      getMe()?.kind === "user" ? (
+                        <span className="bg-live/10 text-live grid size-4 place-items-center rounded-full text-[9px] font-semibold uppercase">{((getMe() as { name: string | null; login: string }).name || (getMe() as { login: string }).login).slice(0, 1)}</span>
+                      ) : (
+                        <UserRound />
+                      )
+                    }
+                    label={getMe()?.kind === "user" ? (getMe() as { name: string | null; login: string }).name || (getMe() as { login: string }).login : "Operator"}
+                  />
+                )}
                 <div className="flex items-center justify-between px-2.5 pt-1">
                   <p className="text-muted-foreground text-micro">{live ? <>Updated <Freshness updatedAt={updatedAt} /></> : data ? "Reconnecting…" : error ? "Offline — retrying" : "Connecting…"}</p>
                   <div className="flex items-center">
@@ -468,6 +493,10 @@ export default function App() {
                   />
                 ) : view === "integrations" ? (
                   <Integrations onBack={backToRail} />
+                ) : view === "account" ? (
+                  <Account onBack={backToRail} onConnect={showConnect} />
+                ) : view === "connect" ? (
+                  <Connect welcome={new URLSearchParams(location.search).has("welcome")} onDone={() => go({ view: "hub" })} onBack={showAccount} />
                 ) : booting && !selectedBox ? (
                   <BootingThread task={booting.task} warm={booting.warm} onBack={backToRail} />
                 ) : view === "box" && !selectedBox && !data ? (
