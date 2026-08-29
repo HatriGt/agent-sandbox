@@ -69,7 +69,7 @@ export default function Landing() {
           <Reveal>
             <p className="text-live label mb-4 inline-flex items-center gap-2 rounded-full border px-3 py-1">
               <span className="bg-live breathe size-1.5 rounded-full" />
-              A cloud sandbox for coding agents · on your own server
+              A cloud sandbox for coding agents · hosted, or on your own server
             </p>
           </Reveal>
           <Reveal delay={0.05}>
@@ -143,9 +143,9 @@ export default function Landing() {
               software on a VPS you control. Either way, what is yours stays yours.
             </p>
           </Reveal>
-          <div className="mt-10 grid gap-4 lg:grid-cols-2">
+          <div className="mt-10 grid min-w-0 gap-4 lg:grid-cols-2">
             <Reveal delay={0.04}>
-              <motion.div whileHover={{ y: -2 }} transition={{ type: "spring", stiffness: 400, damping: 30 }} className="bg-card flex h-full flex-col rounded-xl p-6 shadow-e2">
+              <motion.div whileHover={{ y: -2 }} transition={{ type: "spring", stiffness: 400, damping: 30 }} className="bg-card flex h-full min-w-0 flex-col rounded-xl p-6 shadow-e2">
                 <div className="flex items-center gap-2.5">
                   <span className="bg-live/10 text-live grid size-9 place-items-center rounded-md">
                     <UserRound className="size-4" />
@@ -171,7 +171,7 @@ export default function Landing() {
               </motion.div>
             </Reveal>
             <Reveal delay={0.1}>
-              <motion.div whileHover={{ y: -2 }} transition={{ type: "spring", stiffness: 400, damping: 30 }} className="bg-card flex h-full flex-col rounded-xl p-6 shadow-e2">
+              <motion.div whileHover={{ y: -2 }} transition={{ type: "spring", stiffness: 400, damping: 30 }} className="bg-card flex h-full min-w-0 flex-col rounded-xl p-6 shadow-e2">
                 <div className="flex items-center gap-2.5">
                   <span className="bg-muted text-foreground grid size-9 place-items-center rounded-md">
                     <Server className="size-4" />
