@@ -496,7 +496,7 @@ export default function App() {
                 ) : view === "account" ? (
                   <Account onBack={backToRail} onConnect={showConnect} />
                 ) : view === "connect" ? (
-                  <Connect welcome={new URLSearchParams(location.search).has("welcome")} onDone={() => go({ view: "hub" })} onBack={showAccount} />
+                  <Connect onDone={showAccount} onBack={showAccount} />
                 ) : booting && !selectedBox ? (
                   <BootingThread task={booting.task} warm={booting.warm} onBack={backToRail} />
                 ) : view === "box" && !selectedBox && !data ? (

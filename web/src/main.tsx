@@ -14,10 +14,14 @@ import { ErrorBoundary, RouteError } from "./components/ErrorBoundary";
 
 // The public landing page is code-split: the console never pays for it, and vice versa.
 const Landing = lazy(() => import("./pages/Landing"));
+const SignInPage = lazy(() => import("./pages/Auth").then((m) => ({ default: m.SignInPage })));
+const SignUpPage = lazy(() => import("./pages/Auth").then((m) => ({ default: m.SignUpPage })));
 
 const router = createBrowserRouter([
   { path: "/", element: <Landing />, errorElement: <RouteError /> },
   { path: "/dashboard/welcome", element: <Landing />, errorElement: <RouteError /> },
+  { path: "/signin", element: <SignInPage />, errorElement: <RouteError /> },
+  { path: "/signup", element: <SignUpPage />, errorElement: <RouteError /> },
   {
     path: "/dashboard/*",
     errorElement: <RouteError />,

@@ -69,7 +69,6 @@ export function signOut(): void {
 }
 
 /** The signed-in identity (cookie mode), or the operator marker. Null = nobody. */
-import type { Me } from "@/lib/api";
 let me: Me | null = null;
 export function getMe(): Me | null {
   return me;
@@ -80,4 +79,44 @@ export function setMe(m: Me | null): void {
 }
 export function onAuthChange(fn: () => void): () => void {
   return onTokenChange(fn);
+}
+
+/**
+ * One fetch of the auth config and (in saas mode) of who is signed in, shared by the landing page,
+ * the console gate and the auth pages. `ready` flips once both are known.
+ */
+import * as React from "react";
+import { api, type AuthConfig, type Me } from "@/lib/api";
+let configPromise: Promise<AuthConfig> | null = null;
+export function loadAuthConfig(): Promise<AuthConfig> {
+  configPromise ??= api.authConfig().catch(() => ({ mode: "token" as const, providers: [] }));
+  return configPromise;
+}
+let meChecked = false;
+export function useSession(): { ready: boolean; config: AuthConfig | null; me: Me | null; token: string } {
+  const [, force] = React.useState(0);
+  const [config, setConfig] = React.useState<AuthConfig | null>(null);
+  const [ready, setReady] = React.useState(false);
+  React.useEffect(() => {
+    let cancelled = false;
+    loadAuthConfig().then(async (c) => {
+      if (cancelled) return;
+      setConfig(c);
+      if (c.mode === "saas" && !meChecked && !getMe()) {
+        try {
+          setMe(await api.me());
+        } catch {
+          /* offline: treated as signed out */
+        }
+        meChecked = true;
+      }
+      if (!cancelled) setReady(true);
+    });
+    const off = onAuthChange(() => force((n) => n + 1));
+    return () => {
+      cancelled = true;
+      off();
+    };
+  }, []);
+  return { ready, config, me: getMe(), token: currentToken() };
 }

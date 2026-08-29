@@ -25,6 +25,7 @@ import {
 import { motion, useInView, useReducedMotion } from "motion/react";
 import { Logo } from "@/components/ui/logo";
 import { cn } from "@/lib/utils";
+import { useSession } from "@/lib/auth";
 
 /**
  * The public landing page. No data, no token — the product explained and DEMONSTRATED: the hero is a
@@ -32,7 +33,12 @@ import { cn } from "@/lib/utils";
  * done), built from the same visual vocabulary as the console so what you see is what you get.
  */
 export default function Landing() {
-  const consoleHref = { pathname: "/dashboard" };
+  const { ready, config, me, token } = useSession();
+  const saas = config?.mode === "saas";
+  const signedIn = !!(me || token);
+  // Where the primary button goes: the console when signed in (or token mode), otherwise sign-up.
+  const consoleHref = { pathname: !saas || signedIn ? "/dashboard" : config?.signup ? "/signup" : "/signin" };
+  const primaryLabel = !ready ? "Open the console" : !saas || signedIn ? "Open the console" : config?.signup ? "Get started" : "Sign in";
   return (
     <div className="dark bg-background text-foreground min-h-full overflow-y-auto">
       <header className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
@@ -57,11 +63,16 @@ export default function Landing() {
           >
             GitHub
           </a>
+          {saas && !signedIn && (
+            <Link to="/signin" className="text-muted-foreground hover:text-foreground rounded-md px-3 py-1.5 text-meta">
+              Sign in
+            </Link>
+          )}
           <Link
             to={consoleHref}
             className="bg-primary text-primary-foreground hover:bg-primary/80 ml-2 inline-flex h-9 items-center gap-1.5 rounded-md px-3.5 text-meta font-medium"
           >
-            Open the console
+            {primaryLabel}
             <ArrowRight className="size-3.5" />
           </Link>
         </nav>
@@ -98,18 +109,24 @@ export default function Landing() {
                 to={consoleHref}
                 className="bg-primary text-primary-foreground hover:bg-primary/80 inline-flex h-11 items-center gap-2 rounded-md px-5 text-body font-medium shadow-e1"
               >
-                Open the console
+                {primaryLabel}
                 <ArrowRight className="size-4" />
               </Link>
-              <a
-                href="https://github.com/HatriGt/agent-sandbox#connect-your-ide"
-                target="_blank"
-                rel="noreferrer"
-                className="border-line-strong hover:bg-muted inline-flex h-11 items-center gap-2 rounded-md border px-5 text-body font-medium"
-              >
-                <Plug className="size-4" />
-                Connect your IDE
-              </a>
+              {saas && !signedIn ? (
+                <Link to="/signin" className="border-line-strong hover:bg-muted inline-flex h-11 items-center gap-2 rounded-md border px-5 text-body font-medium">
+                  Sign in
+                </Link>
+              ) : (
+                <a
+                  href="https://github.com/HatriGt/agent-sandbox#connect-your-ide"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="border-line-strong hover:bg-muted inline-flex h-11 items-center gap-2 rounded-md border px-5 text-body font-medium"
+                >
+                  <Plug className="size-4" />
+                  Connect your IDE
+                </a>
+              )}
             </div>
           </Reveal>
           <Reveal delay={0.18}>
@@ -240,11 +257,11 @@ export default function Landing() {
         <div className="mx-auto flex max-w-6xl flex-col items-start justify-between gap-6 px-6 py-12 md:flex-row md:items-center">
           <div>
             <p className="font-serif text-h2 tracking-[-0.01em]">Ready when you are.</p>
-            <p className="text-muted-foreground mt-1 text-meta">Open the console, add a GitHub account, start a task.</p>
+            <p className="text-muted-foreground mt-1 text-meta">{saas && !signedIn ? "Create an account, add a GitHub account, start a task." : "Open the console, add a GitHub account, start a task."}</p>
           </div>
           <div className="flex items-center gap-3">
             <Link to={consoleHref} className="bg-primary text-primary-foreground hover:bg-primary/80 inline-flex h-10 items-center gap-2 rounded-md px-4 text-meta font-medium">
-              Open the console
+              {primaryLabel}
               <ArrowRight className="size-4" />
             </Link>
             <a href="https://github.com/HatriGt/agent-sandbox" target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-foreground text-meta">
