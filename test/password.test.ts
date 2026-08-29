@@ -31,7 +31,7 @@ test("plans: trial clock, expiry, admins never gated, upgrade clears the clock",
   startTrial(db, u.id, 7, t0);
   let row = getUser(db, u.id)!;
   assert.equal(planOf(row, t0).daysLeft, 7);
-  assert.equal(planOf(row, t0 + 6.5 * 86_400_000).daysLeft, 0);
+  assert.equal(planOf(row, t0 + 6.5 * 86_400_000).daysLeft, 1);
   assert.equal(planOf(row, t0 + 6.5 * 86_400_000).expired, false);
   assert.equal(planOf(row, t0 + 7 * 86_400_000 + 1).expired, true);
   assert.equal(planOf({ ...row, role: "admin" }, t0 + 30 * 86_400_000).expired, false, "admins are never gated");

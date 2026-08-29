@@ -32,7 +32,7 @@ export interface UserRow {
 export interface PlanView {
   plan: "trial" | "pro" | "free";
   trialEndsAt: string | null;
-  /** Whole days left on a trial (0 when today is the last day), null when not on a trial clock. */
+  /** Days left on a trial, rounded up (7 on the first day, 1 on the last), null when not on a trial clock. */
   daysLeft: number | null;
   /** Trial over: the account keeps its history but cannot start or resume machines. */
   expired: boolean;
@@ -50,7 +50,7 @@ export function startTrial(db: Db, userId: string, trialDays: number, now = Date
 export function planOf(u: Pick<UserRow, "plan" | "trial_ends_at" | "role">, now = Date.now()): PlanView {
   if (u.role === "admin" || u.plan === "pro" || u.plan === "free" || !u.trial_ends_at) return { plan: u.plan ?? "free", trialEndsAt: u.trial_ends_at, daysLeft: null, expired: false };
   const ms = Date.parse(u.trial_ends_at) - now;
-  return { plan: "trial", trialEndsAt: u.trial_ends_at, daysLeft: Math.max(0, Math.floor(ms / 86_400_000)), expired: ms <= 0 };
+  return { plan: "trial", trialEndsAt: u.trial_ends_at, daysLeft: Math.max(0, Math.ceil(ms / 86_400_000)), expired: ms <= 0 };
 }
 
 export function setPlan(db: Db, id: string, plan: "trial" | "pro" | "free", trialDaysFromNow?: number, now = Date.now()): boolean {
