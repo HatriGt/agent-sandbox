@@ -26,7 +26,9 @@ SIGNUP=open                           # public "Create an account" form; omit fo
 ADMIN_GITHUB_LOGINS=<your-login>      # optional: who becomes admin when signing in with GitHub
 ```
 
-**Open sign-up:** the door shows *Create an account* (name, username, email, password). On a
+**Open sign-up:** the landing page gets **Sign in** and **Get started**; `/signup` asks name, username,
+email, password and lands straight on the dashboard. API keys for an IDE are made later from
+**Account → Connect an IDE** (ready-to-paste configs + a live connection test). On a
 controller with **no** `ADMIN_GITHUB_LOGINS`, the first account created becomes **admin** (bootstrap);
 once admins are configured, nobody is promoted by being first — set `ADMIN_GITHUB_LOGINS` *before*
 opening sign-up on a public instance. A new account lands on **Connect your IDE**:
