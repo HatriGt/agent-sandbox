@@ -250,10 +250,10 @@ export function SignInCard({ config, to, onDone }: { config: AuthConfig; to: str
   const [useToken, setUseToken] = React.useState(false);
   return (
     <AuthShell>
-      <div className="mt-8 flex items-baseline justify-between gap-4">
+      <div className="mt-8 flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
         <h1 className="text-h1 font-semibold tracking-[-0.02em]">Sign in</h1>
         {config.signup && (
-          <Link to={`/signup${to !== "/dashboard" ? `?to=${encodeURIComponent(to)}` : ""}`} className="text-muted-foreground hover:text-foreground text-meta underline-offset-4 hover:underline">
+          <Link to={`/signup${to !== "/dashboard" ? `?to=${encodeURIComponent(to)}` : ""}`} className="text-muted-foreground hover:text-foreground text-meta whitespace-nowrap underline-offset-4 hover:underline">
             Create an account
           </Link>
         )}
@@ -277,9 +277,9 @@ export function SignInCard({ config, to, onDone }: { config: AuthConfig; to: str
 export function SignUpCard({ config, to, onDone }: { config: AuthConfig; to: string; onDone: () => void }) {
   return (
     <AuthShell wide>
-      <div className="mt-8 flex items-baseline justify-between gap-4">
+      <div className="mt-8 flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
         <h1 className="text-h1 font-semibold tracking-[-0.02em]">Create your account</h1>
-        <Link to={`/signin${to !== "/dashboard" ? `?to=${encodeURIComponent(to)}` : ""}`} className="text-muted-foreground hover:text-foreground text-meta underline-offset-4 hover:underline">
+        <Link to={`/signin${to !== "/dashboard" ? `?to=${encodeURIComponent(to)}` : ""}`} className="text-muted-foreground hover:text-foreground text-meta whitespace-nowrap underline-offset-4 hover:underline">
           I have an account
         </Link>
       </div>

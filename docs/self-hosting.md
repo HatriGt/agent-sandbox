@@ -36,7 +36,7 @@ an API key is minted, dropped into ready-to-paste configs for Claude Code / Curs
 Windsurf, and a *Test connection* button proves it works before they leave the page.
 
 **Invite-only** (`SIGNUP` unset): sign in with `MCP_HTTP_TOKEN` (you are the **operator**), go to
-**Integrations → Users → Add user**, and hand over the access token shown once. They paste it at the
+**Account → Manage users → Add user**, and hand over the access token shown once. They paste it at the
 door; from **Account** they can set a password, mint more keys, or revoke.
 
 What each user gets, and *only* they can see or touch:
