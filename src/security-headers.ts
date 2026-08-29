@@ -51,7 +51,7 @@ export type CspKind = "app" | "artifact" | "data";
 /** Which CSP profile a request path gets. Static assets under /dashboard count as the app shell. */
 export function cspKindForPath(path: string): CspKind {
   if (path === "/artifact") return "artifact";
-  if (path === "/" || path === "/dashboard" || path.startsWith("/dashboard/")) return "app";
+  if (path === "/" || path === "/dashboard" || path.startsWith("/dashboard/") || /^\/(signin|signup)\/?$/.test(path)) return "app";
   return "data";
 }
 

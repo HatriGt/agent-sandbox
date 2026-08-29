@@ -67,3 +67,10 @@ test("every response carries the transport + sniffing + referrer set", () => {
 test("HSTS is not sent with preload (that would be a hard-to-reverse commitment)", () => {
   assert.ok(!securityHeaders("/")["Strict-Transport-Security"].includes("preload"));
 });
+
+test("csp: the public auth pages are app shell, not data", async () => {
+  const { cspKindForPath } = await import("../src/security-headers.js");
+  assert.equal(cspKindForPath("/signin"), "app");
+  assert.equal(cspKindForPath("/signup/"), "app");
+  assert.equal(cspKindForPath("/auth/config.json"), "data");
+});
