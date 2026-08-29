@@ -83,6 +83,12 @@ const MIGRATIONS: string[] = [
   ALTER TABLE users ADD COLUMN name TEXT;
   ALTER TABLE users ADD COLUMN password_hash TEXT;
   `,
+  `
+  -- Plans. 'trial' runs until trial_ends_at; 'pro' is paid/unlimited; 'free' is a self-hoster's
+  -- default (no clock). Admins and the operator are never gated.
+  ALTER TABLE users ADD COLUMN plan TEXT NOT NULL DEFAULT 'trial';
+  ALTER TABLE users ADD COLUMN trial_ends_at TEXT;
+  `,
 ];
 
 export function openDb(dataDir: string): Db {

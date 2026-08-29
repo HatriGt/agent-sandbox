@@ -78,6 +78,32 @@ export function Account({ onBack, onConnect, onAdmin }: { onBack: () => void; on
         </header>
 
         <div className="flex flex-col gap-10">
+          {user && user.mode === "saas" && (user.plan === "trial" || user.plan === "pro") && (
+            <section aria-labelledby="plan-h" className={cn("rounded-xl p-4", user.expired ? "bg-destructive/10" : "bg-card raised")}>
+              <h2 id="plan-h" className="text-foreground text-h3 font-semibold tracking-[-0.01em]">
+                {user.plan === "pro" ? "Pro" : user.expired ? "Trial ended" : "Free trial"}
+              </h2>
+              <p className="text-muted-foreground mt-1 text-meta">
+                {user.plan === "pro"
+                  ? "Unlimited time. Thank you."
+                  : user.expired
+                    ? "Your history and settings are kept; starting or resuming machines needs an upgrade — or self-host for free."
+                    : `${user.daysLeft === 0 ? "Ends today" : `${user.daysLeft} day${user.daysLeft === 1 ? "" : "s"} left`} · ends ${new Date(user.trialEndsAt ?? 0).toLocaleDateString()} · no card on file`}
+              </p>
+              {user.plan !== "pro" && (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button size="sm" asChild>
+                    <a href={user.billingUrl ?? "mailto:hello@agent-sandbox.dev?subject=Agent%20Sandbox%20upgrade"}>Upgrade</a>
+                  </Button>
+                  <Button size="sm" variant="ghost" asChild className="text-muted-foreground">
+                    <a href="https://github.com/HatriGt/agent-sandbox/blob/main/docs/self-hosting.md" target="_blank" rel="noreferrer">
+                      Self-host for free
+                    </a>
+                  </Button>
+                </div>
+              )}
+            </section>
+          )}
           {user && (
             <section aria-labelledby="profile-h">
               <h2 id="profile-h" className="text-foreground mb-3 text-h3 font-semibold tracking-[-0.01em]">

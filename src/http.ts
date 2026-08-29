@@ -30,7 +30,7 @@ import {
 import { githubAuthorizeUrl, githubExchangeCode, githubIdentity } from "./github-oauth.js";
 import { keyFromEnvOrFile, makeSecretBox } from "./secretbox.js";
 import { allBlobs, registerUserStoreBackend, withOwner } from "./user-store.js";
-import { createLocalUser, deleteUser, listUsers, ownerOf, setUserRole, validateSignup, createPasswordUser, authenticatePassword, setPassword, updateProfile, verifyPassword, PASSWORD_MIN, listSessions, revokeSession, revokeOtherSessions } from "./identity.js";
+import { createLocalUser, deleteUser, listUsers, ownerOf, setUserRole, validateSignup, createPasswordUser, authenticatePassword, setPassword, updateProfile, verifyPassword, PASSWORD_MIN, listSessions, revokeSession, revokeOtherSessions, startTrial, planOf, setPlan, TrialExpiredError } from "./identity.js";
 import { parseStore } from "./gh-token-store.js";
 import { parseMcpStore } from "./mcp-store.js";
 import { guardDeps, makeOwnership, NotOwnedError, QuotaError, withPrincipal } from "./tenancy.js";
@@ -412,6 +412,7 @@ const principalOf = (res: Response): Principal => (res.locals.principal as Princ
 /** Map tenancy errors to HTTP: unknown/foreign box → 404, quota → 429, else 500. */
 function failWith(res: Response, e: unknown): void {
   if (e instanceof NotOwnedError) res.status(404).json({ error: "no such machine" });
+  else if (e instanceof TrialExpiredError) res.status(402).json({ error: e.message, code: "trial_expired" });
   else if (e instanceof QuotaError) res.status(429).json({ error: e.message });
   else failWith(res, e);
 }
@@ -420,7 +421,7 @@ function failWith(res: Response, e: unknown): void {
 // Public: tells the SPA which front door to show.
 app.get("/auth/config.json", (_req: Request, res: Response) => {
   res.setHeader("Cache-Control", "no-store");
-  res.json({ mode: cfg.authMode, providers: SAAS && cfg.githubOauthClientId && cfg.githubOauthClientSecret ? ["github"] : [], tokenLogin: true, password: SAAS, signup: SAAS && cfg.signup === "open", passwordMin: PASSWORD_MIN });
+  res.json({ mode: cfg.authMode, providers: SAAS && cfg.githubOauthClientId && cfg.githubOauthClientSecret ? ["github"] : [], tokenLogin: true, password: SAAS, signup: SAAS && cfg.signup === "open", passwordMin: PASSWORD_MIN, trialDays: SAAS ? cfg.trialDays : 0, billingUrl: cfg.billingUrl ?? null });
 });
 if (GITHUB_LOGIN) {
   const redirectUri = `${cfg.publicUrl}/auth/github/callback`;
@@ -439,6 +440,7 @@ if (GITHUB_LOGIN) {
       const token = await githubExchangeCode(cfg.githubOauthClientId!, cfg.githubOauthClientSecret!, code, redirectUri);
       const gh = await githubIdentity(token);
       const user = upsertGithubUser(db, { githubId: gh.id, login: gh.login, email: gh.email, avatarUrl: gh.avatarUrl }, { adminLogins: cfg.adminLogins });
+      if (user.plan === "trial" && !user.trial_ends_at) startTrial(db, user.id, cfg.trialDays);
       const sess = createSession(db, user.id, { ip: clientOf(req.headers, req.socket.remoteAddress), userAgent: String(req.headers["user-agent"] ?? "") });
       res.setHeader("Set-Cookie", sessionCookie(sess.id, { secure: SECURE_COOKIE }));
       res.redirect(st.redirectTo ?? "/dashboard/");
@@ -478,6 +480,7 @@ if (SAAS) {
       // config — a self-hoster starting from nothing. With ADMIN_GITHUB_LOGINS set, nobody is promoted
       // by being first (open sign-up on a public instance must never hand out admin).
       const u = createPasswordUser(db, v, { adminLogins: cfg.adminLogins, firstIsAdmin: cfg.adminLogins.length === 0 });
+      startTrial(db, u.id, cfg.trialDays);
       startSession(req, res, u.id);
       res.json({ ok: true, id: u.id, login: u.login, role: u.role });
     } catch (e) {
@@ -555,7 +558,8 @@ app.get("/me.json", (req: Request, res: Response) => {
     return;
   }
   const u = getUser(db, p.userId);
-  res.json({ kind: "user", mode: cfg.authMode, id: p.userId, login: p.login, name: u?.name ?? null, role: p.role, via: p.via, email: u?.email ?? null, avatarUrl: u?.avatar_url ?? null, github: !!u?.github_id, hasPassword: !!u?.password_hash, maxBoxes: u?.max_boxes ?? cfg.userMaxBoxes });
+  const plan = u ? planOf(u) : { plan: "free" as const, trialEndsAt: null, daysLeft: null, expired: false };
+  res.json({ kind: "user", mode: cfg.authMode, id: p.userId, login: p.login, name: u?.name ?? null, role: p.role, via: p.via, email: u?.email ?? null, avatarUrl: u?.avatar_url ?? null, github: !!u?.github_id, hasPassword: !!u?.password_hash, maxBoxes: u?.max_boxes ?? cfg.userMaxBoxes, ...plan, billingUrl: cfg.billingUrl ?? null });
 });
 // Users — operator/admin only. Self-hosting without OAuth: an admin creates the account and hands
 // over its first access token (shown once); the person signs in with it and can mint their own keys.
@@ -568,7 +572,7 @@ app.get("/users.json", (req: Request, res: Response) => {
     res.status(403).json({ error: "admins only" });
     return;
   }
-  res.json({ users: listUsers(db).map(({ id, login, email, role, max_boxes, created_at, last_seen_at, github_id, keys, boxes }) => ({ id, login, email, role, maxBoxes: max_boxes, createdAt: created_at, lastSeenAt: last_seen_at, github: !!github_id, keys, boxes })) });
+  res.json({ users: listUsers(db).map((u) => ({ id: u.id, login: u.login, name: u.name, email: u.email, role: u.role, maxBoxes: u.max_boxes, createdAt: u.created_at, lastSeenAt: u.last_seen_at, github: !!u.github_id, keys: u.keys, boxes: u.boxes, ...planOf(u) })) });
 });
 app.post("/users.json", (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
@@ -597,6 +601,19 @@ app.post("/users/key.json", (req: Request, res: Response) => {
     return;
   }
   res.json(createApiKey(db, id, "issued by admin"));
+});
+app.post("/users/plan.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  if (!isAdmin(principalOf(res))) {
+    res.status(403).json({ error: "admins only" });
+    return;
+  }
+  const { id, plan, days } = (req.body ?? {}) as { id?: string; plan?: string; days?: number };
+  if (!id || !["trial", "pro", "free"].includes(String(plan)) || !setPlan(db, id, plan as "trial" | "pro" | "free", typeof days === "number" && days > 0 ? Math.min(365, days) : undefined)) {
+    res.status(404).json({ error: "no such user" });
+    return;
+  }
+  res.json({ ok: true });
 });
 app.post("/users/role.json", (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
@@ -1449,6 +1466,7 @@ app.post("/delegate.json", async (req: Request, res: Response) => {
       ? `${body.task}\n\nAttached ${attachments.length === 1 ? "image" : "images"} (open with the Read tool):\n${attachments.map((a) => `- /workspace/${a.path}`).join("\n")}`
       : body.task;
     if (ownership.isUser()) {
+      ownership.assertCanRun();
       const p = principalOf(res);
       const max = (p.kind === "user" && getUser(db, p.userId)?.max_boxes) || cfg.userMaxBoxes;
       ownership.assertQuota(ownership.liveOwned((await readFleet()).boxes), max);

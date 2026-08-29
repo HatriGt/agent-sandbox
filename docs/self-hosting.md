@@ -58,6 +58,14 @@ Create a GitHub OAuth App (callback `https://<ASB_DOMAIN>/auth/github/callback`)
 `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET`. The sign-in page grows a GitHub button;
 a GitHub sign-in with the same login as an admin-created user links to that account.
 
+### Optional: run it as a paid service
+
+`TRIAL_DAYS=7` gives every new account a 7-day free trial; when it ends, that account can still sign
+in and read everything but cannot start or resume machines until an admin sets its plan to **pro**
+(Account → Manage users → *Make pro*, or *+7d* to extend). `BILLING_URL` is where the **Upgrade**
+button sends people. Leave `TRIAL_DAYS` unset for a private/self-hosted controller: accounts are
+`free` with no clock. Admins and the operator are never gated.
+
 ## 3. Data and keys — back these up
 
 | Path (inside `./data`, mounted into the container) | Contents |

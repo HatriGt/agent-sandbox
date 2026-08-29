@@ -18,6 +18,7 @@ import { Account } from "@/components/Account";
 import { Connect } from "@/components/Connect";
 import { Admin } from "@/components/Admin";
 import { PageEnter } from "@/components/ui/page";
+import { TrialBadge } from "@/components/TrialBadge";
 import { Capacity } from "@/components/Capacity";
 import { CommandPalette, openPalette, type PaletteAction } from "@/components/CommandPalette";
 import { ShortcutsDialog } from "@/components/ShortcutsDialog";
@@ -419,6 +420,7 @@ export default function App() {
                 <span className="contents" onMouseEnter={prefetchIntegrations}>
                   <NavItem active={view === "integrations"} onClick={showAccounts} icon={<Plug />} label="Integrations" shortcut="g a" />
                 </span>
+                <TrialBadge className="mx-2.5 mt-1 self-start" />
                 {getMe()?.mode === "saas" && (
                   <NavItem
                     active={view === "account" || view === "connect" || view === "admin"}

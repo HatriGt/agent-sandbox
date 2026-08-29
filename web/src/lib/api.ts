@@ -200,6 +200,11 @@ export interface UserRow {
   github: boolean;
   keys: number;
   boxes: number;
+  name?: string | null;
+  plan: "trial" | "pro" | "free";
+  trialEndsAt: string | null;
+  daysLeft: number | null;
+  expired: boolean;
 }
 export interface AuthConfig {
   mode: "token" | "saas";
@@ -208,6 +213,8 @@ export interface AuthConfig {
   password?: boolean;
   signup?: boolean;
   passwordMin?: number;
+  trialDays?: number;
+  billingUrl?: string | null;
 }
 export type Me =
   | { kind: "operator"; mode: "token" | "saas"; role: "admin" }
@@ -224,6 +231,11 @@ export type Me =
       github: boolean;
       hasPassword: boolean;
       maxBoxes: number;
+      plan: "trial" | "pro" | "free";
+      trialEndsAt: string | null;
+      daysLeft: number | null;
+      expired: boolean;
+      billingUrl: string | null;
     };
 export interface ApiKeyRow {
   id: string;
@@ -341,6 +353,7 @@ export const api = {
   createUser: (login: string, role: "user" | "admin") => post<{ id: string; login: string; role: string; token: string }>("/users.json", { login, role }),
   issueUserKey: (id: string) => post<{ id: string; token: string; prefix: string }>("/users/key.json", { id }),
   setUserRole: (id: string, role: "user" | "admin") => post<{ ok: true }>("/users/role.json", { id, role }),
+  setUserPlan: (id: string, plan: "trial" | "pro" | "free", days?: number) => post<{ ok: true }>("/users/plan.json", { id, plan, days }),
   deleteUser: (id: string) =>
     fetch(url("/users.json"), { method: "DELETE", headers: { ...authHeaders, "Content-Type": "application/json" }, body: JSON.stringify({ id }) }).then(parse<{ ok: true }>),
   /** Who am I (401 when nobody). */

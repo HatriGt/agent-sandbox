@@ -23,6 +23,46 @@ export interface UserRow {
   max_boxes: number | null;
   created_at: string;
   last_seen_at: string | null;
+  plan: "trial" | "pro" | "free";
+  trial_ends_at: string | null;
+}
+
+/* ───────────── plans: trial clock, upgrade, gating ───────────── */
+
+export interface PlanView {
+  plan: "trial" | "pro" | "free";
+  trialEndsAt: string | null;
+  /** Whole days left on a trial (0 when today is the last day), null when not on a trial clock. */
+  daysLeft: number | null;
+  /** Trial over: the account keeps its history but cannot start or resume machines. */
+  expired: boolean;
+}
+
+/** Stamp the trial clock on a fresh account; a controller with no trial (self-host) leaves it off. */
+export function startTrial(db: Db, userId: string, trialDays: number, now = Date.now()): void {
+  if (trialDays <= 0) {
+    db.prepare(`UPDATE users SET plan = 'free', trial_ends_at = NULL WHERE id = ?`).run(userId);
+    return;
+  }
+  db.prepare(`UPDATE users SET plan = 'trial', trial_ends_at = ? WHERE id = ?`).run(nowIso(now + trialDays * 86_400_000), userId);
+}
+
+export function planOf(u: Pick<UserRow, "plan" | "trial_ends_at" | "role">, now = Date.now()): PlanView {
+  if (u.role === "admin" || u.plan === "pro" || u.plan === "free" || !u.trial_ends_at) return { plan: u.plan ?? "free", trialEndsAt: u.trial_ends_at, daysLeft: null, expired: false };
+  const ms = Date.parse(u.trial_ends_at) - now;
+  return { plan: "trial", trialEndsAt: u.trial_ends_at, daysLeft: Math.max(0, Math.floor(ms / 86_400_000)), expired: ms <= 0 };
+}
+
+export function setPlan(db: Db, id: string, plan: "trial" | "pro" | "free", trialDaysFromNow?: number, now = Date.now()): boolean {
+  const ends = plan === "trial" ? nowIso(now + (trialDaysFromNow ?? 7) * 86_400_000) : null;
+  return db.prepare(`UPDATE users SET plan = ?, trial_ends_at = ? WHERE id = ?`).run(plan, ends, id).changes > 0;
+}
+
+export class TrialExpiredError extends Error {
+  constructor() {
+    super("Your free trial has ended. Upgrade to keep starting machines — your runs and settings are kept.");
+    this.name = "TrialExpiredError";
+  }
 }
 
 export const SESSION_COOKIE = "asb_session";

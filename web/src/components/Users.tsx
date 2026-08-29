@@ -5,6 +5,7 @@ import { api, type UserRow } from "@/lib/api";
 import { fmtAgo } from "@/lib/format";
 import { getMe } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 /**
  * Admin: the people on this controller. Create an account and hand over its first access token
@@ -39,6 +40,14 @@ export function Users() {
       setFresh({ login: u.login, token: k.token });
     } catch (e) {
       toast.error("Could not issue a token", { description: e instanceof Error ? e.message : String(e) });
+    }
+  };
+  const setPlan = async (u: UserRow, plan: "trial" | "pro" | "free", days?: number) => {
+    try {
+      await api.setUserPlan(u.id, plan, days);
+      void load();
+    } catch (e) {
+      toast.error("Could not change the plan", { description: e instanceof Error ? e.message : String(e) });
     }
   };
   const toggleRole = async (u: UserRow) => {
@@ -108,11 +117,28 @@ export function Users() {
               {u.login}
               {u.id === myId && <span className="text-faint ml-1.5 text-micro">you</span>}
             </span>
+            <span className={cn("shrink-0 rounded-full px-1.5 py-0.5 text-micro font-medium", u.plan === "pro" ? "bg-ok/10 text-ok" : u.expired ? "bg-destructive/10 text-destructive" : u.plan === "trial" ? "bg-muted text-muted-foreground" : "bg-muted text-muted-foreground")}>
+              {u.plan === "pro" ? "pro" : u.plan === "free" ? "free" : u.expired ? "trial ended" : `trial · ${u.daysLeft}d`}
+            </span>
             <span className="text-faint hidden shrink-0 text-micro sm:inline">
               {u.boxes} {u.boxes === 1 ? "machine" : "machines"} · {u.keys} {u.keys === 1 ? "key" : "keys"}
               {u.github ? " · GitHub linked" : ""}
               {u.lastSeenAt ? ` · seen ${fmtAgo(Date.parse(u.lastSeenAt) / 1000)}` : ""}
             </span>
+            {u.plan !== "pro" ? (
+              <Button size="sm" variant="ghost" onClick={() => setPlan(u, "pro")} className="text-muted-foreground" title="Unlimited time">
+                Make pro
+              </Button>
+            ) : (
+              <Button size="sm" variant="ghost" onClick={() => setPlan(u, "trial", 7)} className="text-muted-foreground" title="Back to a 7-day trial">
+                Trial
+              </Button>
+            )}
+            {u.plan === "trial" && (
+              <Button size="sm" variant="ghost" onClick={() => setPlan(u, "trial", 7)} className="text-muted-foreground" title="Give 7 more days">
+                +7d
+              </Button>
+            )}
             <Button size="sm" variant="ghost" onClick={() => issue(u)} className="text-muted-foreground" title="Issue a new access token">
               <KeyRound />
               Token

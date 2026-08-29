@@ -284,7 +284,9 @@ export function SignUpCard({ config, to, onDone }: { config: AuthConfig; to: str
           I have an account
         </Link>
       </div>
-      <p className="text-muted-foreground mt-2 text-body leading-relaxed">Free on this controller. Start tasks from the dashboard right away, or connect your IDE later from Account.</p>
+      <p className="text-muted-foreground mt-2 text-body leading-relaxed">
+        {config.trialDays ? `${config.trialDays}-day free trial, no card required. ` : ""}Start tasks from the dashboard right away, or connect your IDE later from Account.
+      </p>
       {config.signup ? (
         <>
           <SignUpForm min={config.passwordMin ?? 10} onDone={onDone} />

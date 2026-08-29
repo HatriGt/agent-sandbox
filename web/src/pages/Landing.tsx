@@ -17,7 +17,8 @@ export default function Landing() {
   const signedIn = !!(me || token);
   // Where the primary button goes: the console when signed in (or token mode), otherwise sign-up.
   const consoleHref = { pathname: !saas || signedIn ? "/dashboard" : config?.signup ? "/signup" : "/signin" };
-  const primaryLabel = !ready ? "Open the console" : !saas || signedIn ? "Open the console" : config?.signup ? "Get started" : "Sign in";
+  const trialDays = config?.trialDays ?? 0;
+  const primaryLabel = !ready ? "Open the console" : !saas || signedIn ? "Open the console" : config?.signup ? (trialDays ? "Start free trial" : "Get started") : "Sign in";
   const SELF_HOST = "https://github.com/HatriGt/agent-sandbox/blob/main/docs/self-hosting.md";
   return (
     <div className="dark bg-background text-foreground min-h-full overflow-y-auto">
@@ -69,7 +70,7 @@ export default function Landing() {
           <Reveal>
             <p className="text-live label mb-4 inline-flex items-center gap-2 rounded-full border px-3 py-1">
               <span className="bg-live breathe size-1.5 rounded-full" />
-              A cloud sandbox for coding agents · hosted, or on your own server
+              Sandbox as a service for coding agents · or self-host, free
             </p>
           </Reveal>
           <Reveal delay={0.05}>
@@ -137,10 +138,10 @@ export default function Landing() {
       <section id="selfhost" className="border-t">
         <div className="mx-auto max-w-6xl px-6 py-20">
           <Reveal>
-            <h2 className="font-serif text-[clamp(1.8rem,3.2vw,2.5rem)] leading-tight tracking-[-0.015em]">Use this one, or run your own.</h2>
+            <h2 className="font-serif text-[clamp(1.8rem,3.2vw,2.5rem)] leading-tight tracking-[-0.015em]">Hosted, or yours. Both honest.</h2>
             <p className="text-muted-foreground mt-3 max-w-[60ch] text-body">
-              Agent Sandbox is open source. Sign up here and get a private workspace on this controller — or put the same
-              software on a VPS you control. Either way, what is yours stays yours.
+              Agent Sandbox is open source. Use the hosted service{trialDays ? ` — free for ${trialDays} days, no card` : ""} — or run the same software on a
+              VPS you control, free forever. Either way, what is yours stays yours.
             </p>
           </Reveal>
           <div className="mt-10 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-[repeat(2,minmax(0,1fr))]">
@@ -150,17 +151,19 @@ export default function Landing() {
                   <span className="bg-live/10 text-live grid size-9 place-items-center rounded-md">
                     <UserRound className="size-4" />
                   </span>
-                  <h3 className="text-h3 font-semibold tracking-[-0.01em]">Hosted here</h3>
+                  <h3 className="text-h3 font-semibold tracking-[-0.01em]">Hosted</h3>
+                  {trialDays > 0 && <span className="bg-live/10 text-live ml-auto rounded-full px-2 py-0.5 text-micro font-medium">{trialDays}-day free trial</span>}
                 </div>
                 <p className="text-muted-foreground mt-3 flex-1 text-body leading-relaxed">
-                  Create an account and start a task in under a minute. Your machines, GitHub accounts and MCP servers are
-                  yours alone — encrypted at rest, injected only into your runs. Connect Cursor or Claude Code with a
+                  Sign up and start a task in under a minute — warm machines, live thread, question cards, no server to
+                  run. Your machines, GitHub accounts and MCP servers are yours alone. Connect Cursor or Claude Code with a
                   personal API key when you want to.
                 </p>
                 <ul className="text-muted-foreground mt-4 flex flex-col gap-1.5 text-meta">
                   <li className="flex items-center gap-2"><Check className="text-ok size-3.5" /> Private workspace per person</li>
                   <li className="flex items-center gap-2"><Check className="text-ok size-3.5" /> Warm machines, live thread, question cards</li>
                   <li className="flex items-center gap-2"><Check className="text-ok size-3.5" /> Personal API keys for your IDE</li>
+                  {trialDays > 0 && <li className="flex items-center gap-2"><Check className="text-ok size-3.5" /> Nothing to cancel — the trial simply pauses new machines when it ends</li>}
                 </ul>
                 <div className="mt-6">
                   <Link to={consoleHref} className="bg-primary text-primary-foreground hover:bg-primary/80 inline-flex h-10 items-center gap-2 rounded-md px-4 text-meta font-medium">
@@ -177,6 +180,7 @@ export default function Landing() {
                     <Server className="size-4" />
                   </span>
                   <h3 className="text-h3 font-semibold tracking-[-0.01em]">Self-host</h3>
+                  <span className="bg-muted text-muted-foreground ml-auto rounded-full px-2 py-0.5 text-micro font-medium">free · MIT</span>
                 </div>
                 <p className="text-muted-foreground mt-3 text-body leading-relaxed">
                   One VPS with KVM, Docker and microsandbox. Single-operator by default; flip <code className="bg-muted rounded px-1 font-mono text-[0.9em]">AUTH_MODE=saas</code> for
@@ -303,7 +307,7 @@ docker compose up -d --build`}</pre>
         <div className="mx-auto flex max-w-6xl flex-col items-start justify-between gap-6 px-6 py-12 md:flex-row md:items-center">
           <div>
             <p className="font-serif text-h2 tracking-[-0.01em]">Ready when you are.</p>
-            <p className="text-muted-foreground mt-1 text-meta">{saas && !signedIn ? "Create an account, add a GitHub account, start a task." : "Open the console, add a GitHub account, start a task."}</p>
+            <p className="text-muted-foreground mt-1 text-meta">{saas && !signedIn ? (trialDays ? `${trialDays} days free, no card. Or self-host — free forever.` : "Create an account, add a GitHub account, start a task.") : "Open the console, add a GitHub account, start a task."}</p>
           </div>
           <div className="flex items-center gap-3">
             <Link to={consoleHref} className="bg-primary text-primary-foreground hover:bg-primary/80 inline-flex h-10 items-center gap-2 rounded-md px-4 text-meta font-medium">

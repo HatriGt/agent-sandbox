@@ -2,7 +2,7 @@
 
 # Agent Sandbox
 
-**A cloud sandbox for coding agents — hosted, or on your own server.**
+**Sandbox as a service for coding agents — hosted with a free trial, or self-host for free.**
 
 ### Delegate the task. Keep the control.
 
@@ -466,8 +466,11 @@ What you get:
   keys are hashed at rest and revocable.
 - **Quotas and limits** — `USER_MAX_BOXES` concurrent machines per user, 60 mutating requests/minute
   per caller, sign-in throttling.
-- **Admin** — *Account → Manage users*: create invite accounts, issue tokens, promote, remove. The
-  operator token remains the break-glass identity.
+- **Plans** — `TRIAL_DAYS=7` starts every new account on a free trial; when it lapses the account keeps
+  its history but cannot start or resume machines until an admin marks it **pro** (or extends the
+  trial). Unset for self-hosting: no clock. `BILLING_URL` is where *Upgrade* points.
+- **Admin** — *Account → Manage users*: create invite accounts, issue tokens, promote, set plans,
+  remove. The operator token remains the break-glass identity.
 
 Step-by-step: [`docs/self-hosting.md`](docs/self-hosting.md). Design, threat model and roadmap:
 [`docs/saas-design.md`](docs/saas-design.md).

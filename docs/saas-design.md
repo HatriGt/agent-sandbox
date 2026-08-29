@@ -167,8 +167,10 @@ the operator. A box with no row (pre-migration) belongs to nobody but the operat
    AsyncLocalStorage principal); repo-list and PR caches are per owner; inbox delivery, the credential
    broker and admin-triggered resumes run `withOwner(box)`, so a machine always gets its owner's
    credentials and MCP servers. The redactor sees every owner's secrets. Still to do: per-user rate limits.
-3. **Billing + plans.** Plans define `max_boxes`, run minutes, memory; usage from run records;
-   Stripe customer per user; model usage attribution.
+3. **Billing + plans — plans done, billing not.** `users.plan` (`trial` | `pro` | `free`) and
+   `trial_ends_at`; `TRIAL_DAYS` stamps new accounts; `assertCanRun()` gates start/resume in routes
+   *and* MCP tools (402 `trial_expired`); admins set plans. Next: Stripe checkout behind `BILLING_URL`,
+   webhooks flipping `plan`, usage records for run minutes.
 4. **Scale-out.** Postgres; N controllers behind Traefik (sessions already server-side);
    several sandbox hosts with a host column on `boxes`; per-tenant egress policies.
 

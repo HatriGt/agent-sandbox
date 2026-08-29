@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { Config } from "./config.js";
 import type { HandlerDeps } from "./handlers.js";
 import type { Db } from "./db.js";
-import { forgetBox, mayAccess, ownedBoxNames, recordBoxOwner, type Principal } from "./identity.js";
+import { forgetBox, getUser, mayAccess, ownedBoxNames, planOf, recordBoxOwner, TrialExpiredError, type Principal } from "./identity.js";
 import { formatMonitor } from "./monitor.js";
 import { gatherMonitor } from "./msb.js";
 
@@ -30,6 +30,8 @@ export class QuotaError extends Error {
 }
 
 export interface Ownership {
+  /** Throws TrialExpiredError when the current user may not start or resume machines. */
+  assertCanRun(): void;
   check(session: string): void;
   record(box: string, taskHead?: string): void;
   forget(box: string): void;
@@ -46,6 +48,12 @@ export function makeOwnership(db: Db, cfg: Config): Ownership {
   const userOnly = (p: Principal): p is Extract<Principal, { kind: "user" }> => p.kind === "user" && p.role !== "admin";
   return {
     isUser: () => userOnly(currentPrincipal()),
+    assertCanRun() {
+      const p = currentPrincipal();
+      if (!userOnly(p)) return;
+      const u = getUser(db, p.userId);
+      if (u && planOf(u).expired) throw new TrialExpiredError();
+    },
     check(session) {
       const p = currentPrincipal();
       if (!mayAccess(db, p, session)) throw new NotOwnedError(session);
@@ -86,6 +94,7 @@ export function guardDeps(deps: HandlerDeps, own: Ownership): HandlerDeps {
   const guarded: HandlerDeps = {
     ...deps,
     async runDelegation(cfg, plan, allowDomains, creds, interact) {
+      own.assertCanRun();
       const r = await deps.runDelegation(cfg, plan, allowDomains, creds, interact);
       own.record(r.box, plan.task?.split("\n")[0]);
       return r;
@@ -96,6 +105,7 @@ export function guardDeps(deps: HandlerDeps, own: Ownership): HandlerDeps {
     },
     async resume(cfg, session, message, secrets, interact) {
       own.check(session);
+      own.assertCanRun();
       return deps.resume(cfg, session, message, secrets, interact);
     },
     async teardown(cfg, session) {
@@ -122,6 +132,7 @@ export function guardDeps(deps: HandlerDeps, own: Ownership): HandlerDeps {
     const rd = deps.resumeDetached.bind(deps);
     guarded.resumeDetached = async (cfg, session, message, secrets) => {
       own.check(session);
+      own.assertCanRun();
       return rd(cfg, session, message, secrets);
     };
   }

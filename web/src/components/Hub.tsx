@@ -23,6 +23,7 @@ import { fmtAgo, friendlyName, shortName, threadSort, threadTitle } from "@/lib/
 import { readDraft, takePrefill, writeDraft } from "@/lib/draft";
 import { getMe } from "@/lib/auth";
 import { GettingStarted } from "@/components/GettingStarted";
+import { TrialEndedNotice } from "@/components/TrialBadge";
 import { displayState, fmtDuration } from "@/lib/lifecycle";
 import { questionHeadline } from "@/lib/question";
 import { prefetchWatch } from "@/hooks/useWatchStream";
@@ -290,10 +291,11 @@ export function Hub({
         </motion.div>
 
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.05, ease: [0.22, 1, 0.36, 1] }}>
+          <TrialEndedNotice />
           <PromptInput
             value={task}
             onValueChange={setTask}
-            onSubmit={submit}
+            onSubmit={getMe()?.kind === "user" && getMe()?.kind === "user" && (getMe() as { expired?: boolean }).expired ? () => {} : submit}
             isLoading={busy}
             className={cn(
               "bg-card border-line-strong focus-within:border-live/60 focus-within:shadow-[0_0_0_3px_color-mix(in_oklch,var(--live)_18%,transparent)] rounded-xl p-2 shadow-e1 transition-[border-color,box-shadow] duration-200",
@@ -419,7 +421,7 @@ export function Hub({
               <Button
                 size="icon"
                 onClick={submit}
-                disabled={busy || (!task.trim() && !images.length)}
+                disabled={busy || (!task.trim() && !images.length) || !!(getMe()?.kind === "user" && (getMe() as { expired?: boolean }).expired)}
                 aria-label="Start a machine with this task"
                 className="rounded-full"
               >

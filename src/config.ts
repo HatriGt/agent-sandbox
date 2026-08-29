@@ -123,6 +123,10 @@ export interface Config {
   adminLogins: string[];
   /** Who may create an account: "open" (public sign-up form) or "invite" (admins create users). */
   signup: "open" | "invite";
+  /** Hosted product: days of free trial for a new account. 0 = no trial clock (self-hosters). */
+  trialDays: number;
+  /** Where "Upgrade" goes when a trial ends (a mailto:, a checkout page, a form). */
+  billingUrl?: string;
 }
 
 function req(name: string, fallback?: string): string {
@@ -234,5 +238,7 @@ export function loadConfig(): Config {
     userMaxBoxes: Math.max(1, Number(process.env.USER_MAX_BOXES ?? "2") || 2),
     adminLogins: (process.env.ADMIN_GITHUB_LOGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
     signup: process.env.SIGNUP === "open" ? "open" : "invite",
+    trialDays: Math.max(0, Number(process.env.TRIAL_DAYS ?? "0") || 0),
+    billingUrl: process.env.BILLING_URL || undefined,
   };
 }
