@@ -182,7 +182,7 @@ export default function Landing() {
                   One VPS with KVM, Docker and microsandbox. Single-operator by default; flip <code className="bg-muted rounded px-1 font-mono text-[0.9em]">AUTH_MODE=saas</code> for
                   sign-up, sessions and per-user isolation on your own domain.
                 </p>
-                <pre className="bg-background/60 text-foreground mt-4 flex-1 overflow-x-auto rounded-md p-3 font-mono text-code leading-relaxed">{`git clone https://github.com/HatriGt/agent-sandbox
+                <pre className="bg-background/60 text-foreground mt-4 min-w-0 max-w-full flex-1 overflow-x-auto rounded-md p-3 font-mono text-code leading-relaxed">{`git clone https://github.com/HatriGt/agent-sandbox
 cd agent-sandbox && cp .env.example .env
 docker compose up -d --build`}</pre>
                 <div className="mt-6 flex items-center gap-3">
