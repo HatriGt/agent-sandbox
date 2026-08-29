@@ -459,7 +459,10 @@ if (SAAS) {
       return;
     }
     try {
-      const u = createPasswordUser(db, v, { adminLogins: cfg.adminLogins, firstIsAdmin: true });
+      // Bootstrap rule: the very first account becomes admin ONLY when no admin is designated by
+      // config — a self-hoster starting from nothing. With ADMIN_GITHUB_LOGINS set, nobody is promoted
+      // by being first (open sign-up on a public instance must never hand out admin).
+      const u = createPasswordUser(db, v, { adminLogins: cfg.adminLogins, firstIsAdmin: cfg.adminLogins.length === 0 });
       startSession(req, res, u.id);
       res.json({ ok: true, id: u.id, login: u.login, role: u.role });
     } catch (e) {

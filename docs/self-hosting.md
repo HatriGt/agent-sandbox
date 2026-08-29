@@ -26,8 +26,10 @@ SIGNUP=open                           # public "Create an account" form; omit fo
 ADMIN_GITHUB_LOGINS=<your-login>      # optional: who becomes admin when signing in with GitHub
 ```
 
-**Open sign-up:** the door shows *Create an account* (name, username, email, password). The first
-account created on an empty controller becomes **admin**. A new account lands on **Connect your IDE**:
+**Open sign-up:** the door shows *Create an account* (name, username, email, password). On a
+controller with **no** `ADMIN_GITHUB_LOGINS`, the first account created becomes **admin** (bootstrap);
+once admins are configured, nobody is promoted by being first — set `ADMIN_GITHUB_LOGINS` *before*
+opening sign-up on a public instance. A new account lands on **Connect your IDE**:
 an API key is minted, dropped into ready-to-paste configs for Claude Code / Cursor / VS Code /
 Windsurf, and a *Test connection* button proves it works before they leave the page.
 

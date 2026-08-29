@@ -5,6 +5,7 @@ import { currentToken, getMe, migrateTokenFromUrl, onAuthChange, setMe, setToken
 import { Logo } from "@/components/ui/logo";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useNavigate } from "react-router";
 
 /**
  * The console's front door. Token mode: paste the controller token. Multi-user mode: sign in with a
@@ -173,6 +174,7 @@ function PasswordLogin() {
 }
 
 function SignUp({ min }: { min: number }) {
+  const navigate = useNavigate();
   const [f, setF] = React.useState({ name: "", login: "", email: "", password: "" });
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -185,8 +187,8 @@ function SignUp({ min }: { min: number }) {
     setError(null);
     try {
       await api.signup({ login: f.login.trim(), name: f.name.trim(), email: f.email.trim(), password: f.password });
-      // Land on "Connect your IDE": the gate re-renders the app once `me` is set.
-      history.replaceState(null, "", "/dashboard/connect?welcome=1");
+      // Land on "Connect your IDE": route first (through the router, so the app sees it), then let the gate open.
+      navigate("/dashboard/connect?welcome=1", { replace: true });
       setMe(await api.me());
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
