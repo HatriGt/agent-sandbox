@@ -181,6 +181,14 @@ const authHeaders: HeadersInit = new Proxy({} as Record<string, string>, {
   },
 });
 
+export interface SessionRow {
+  id: string;
+  current: boolean;
+  createdAt: string;
+  lastSeenAt: string | null;
+  ip: string | null;
+  userAgent: string | null;
+}
 export interface UserRow {
   id: string;
   login: string;
@@ -343,6 +351,11 @@ export const api = {
   },
   logout: () => post<{ ok: true }>("/auth/logout", {}),
   apiKeys: () => fetch(url("/api-keys.json"), { headers: authHeaders }).then(parse<{ keys: ApiKeyRow[] }>),
+  sessions: () => fetch(url("/sessions.json"), { headers: authHeaders }).then(parse<{ sessions: SessionRow[] }>),
+  revokeSession: (id: string) =>
+    fetch(url("/sessions.json"), { method: "DELETE", headers: { ...authHeaders, "Content-Type": "application/json" }, body: JSON.stringify({ id }) }).then(parse<{ ok: true }>),
+  revokeOtherSessions: () =>
+    fetch(url("/sessions.json"), { method: "DELETE", headers: { ...authHeaders, "Content-Type": "application/json" }, body: JSON.stringify({ others: true }) }).then(parse<{ ok: true; revoked: number }>),
   createApiKey: (name: string) => post<{ id: string; token: string; prefix: string }>("/api-keys.json", { name }),
   revokeApiKey: (id: string) =>
     fetch(url("/api-keys.json"), { method: "DELETE", headers: { ...authHeaders, "Content-Type": "application/json" }, body: JSON.stringify({ id }) }).then(parse<{ ok: true }>),

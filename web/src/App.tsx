@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Link, useLocation } from "react-router";
-import { Bell, BellOff, Flame, Keyboard, LayoutGrid, LogOut, Moon, PanelLeftClose, PanelLeftOpen, Pause, Plug, Plus, Search, Sun, TriangleAlert, UserRound } from "lucide-react";
+import { Bell, BellOff, Flame, Keyboard, LayoutGrid, LogOut, Moon, PanelLeftClose, PanelLeftOpen, Pause, Plug, Plus, Search, Shield, Sun, TriangleAlert, UserRound } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { api, type FleetLifecycle, type FleetSnapshot } from "@/lib/api";
 import { POLL_MS, isUp, isVisible, threadSort } from "@/lib/format";
@@ -16,6 +16,7 @@ import { MachineList } from "@/components/MachineList";
 import { Hub } from "@/components/Hub";
 import { Account } from "@/components/Account";
 import { Connect } from "@/components/Connect";
+import { Admin } from "@/components/Admin";
 import { Capacity } from "@/components/Capacity";
 import { CommandPalette, openPalette, type PaletteAction } from "@/components/CommandPalette";
 import { ShortcutsDialog } from "@/components/ShortcutsDialog";
@@ -160,6 +161,10 @@ export default function App() {
     go({ view: "account" });
     setMobileRail(false);
   }, [go]);
+  const showAdmin = React.useCallback(() => {
+    go({ view: "admin" });
+    setMobileRail(false);
+  }, [go]);
   const showConnect = React.useCallback(() => {
     go({ view: "connect" });
     setMobileRail(false);
@@ -173,9 +178,10 @@ export default function App() {
       { id: "integrations", label: "Integrations", hint: "g a", icon: <Plug />, run: showAccounts },
       { id: "theme", label: dark ? "Switch to light theme" : "Switch to dark theme", icon: dark ? <Sun /> : <Moon />, run: () => setDark(!dark) },
       { id: "account", label: "Account", icon: <UserRound />, run: showAccount },
+      ...(getMe()?.mode === "saas" && getMe()?.role === "admin" ? [{ id: "admin", label: "Admin · users", icon: <Shield />, run: showAdmin }] : []),
       { id: "keys", label: "Keyboard shortcuts", hint: "?", icon: <Keyboard />, run: () => setShortcuts(true) },
     ],
-    [showFleet, showAccounts, showAccount, dark, setDark]
+    [showFleet, showAccounts, showAccount, showAdmin, dark, setDark]
   );
 
   React.useEffect(() => {
@@ -265,7 +271,7 @@ export default function App() {
   const health = !live && !data ? "offline" : waiting.length ? "attention" : "ok";
   const loading = !data && !error;
   const paneKey =
-    view === "fleet" ? "fleet" : view === "integrations" ? "integrations" : view === "account" ? "account" : view === "connect" ? "connect" : booting && !selectedBox ? "booting" : selectedBox ? `box:${selectedBox.name}` : view === "box" && !data ? "box-loading" : "hub";
+    view === "fleet" ? "fleet" : view === "integrations" ? "integrations" : view === "account" ? "account" : view === "connect" ? "connect" : view === "admin" ? "admin" : booting && !selectedBox ? "booting" : selectedBox ? `box:${selectedBox.name}` : view === "box" && !data ? "box-loading" : "hub";
 
   return (
     <TooltipProvider delayDuration={400}>
@@ -414,7 +420,7 @@ export default function App() {
                 </span>
                 {getMe()?.mode === "saas" && (
                   <NavItem
-                    active={view === "account" || view === "connect"}
+                    active={view === "account" || view === "connect" || view === "admin"}
                     onClick={showAccount}
                     icon={
                       getMe()?.kind === "user" ? (
@@ -494,7 +500,9 @@ export default function App() {
                 ) : view === "integrations" ? (
                   <Integrations onBack={backToRail} />
                 ) : view === "account" ? (
-                  <Account onBack={backToRail} onConnect={showConnect} />
+                  <Account onBack={backToRail} onConnect={showConnect} onAdmin={showAdmin} />
+                ) : view === "admin" ? (
+                  <Admin onBack={showAccount} />
                 ) : view === "connect" ? (
                   <Connect onDone={showAccount} onBack={showAccount} />
                 ) : booting && !selectedBox ? (

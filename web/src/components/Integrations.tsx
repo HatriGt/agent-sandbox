@@ -1,4 +1,3 @@
-import { Users } from "@/components/Users";
 import { getMe } from "@/lib/auth";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -34,7 +33,6 @@ export function Integrations({ onBack }: { onBack: () => void }) {
             <Accounts embedded />
           </section>
           <McpServers />
-          {getMe()?.mode === "saas" && getMe()?.role === "admin" && <Users />}
         </div>
       </div>
     </div>

@@ -64,7 +64,7 @@ export function McpServers() {
             {servers.length} · {onCount} on
           </span>
         )}
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
           {view === "list" && (
             <>
               <label className="bg-card focus-within:ring-ring flex h-8 items-center gap-1.5 rounded-md border px-2 focus-within:ring-2">

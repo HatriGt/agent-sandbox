@@ -1,15 +1,16 @@
 import * as React from "react";
-import { ArrowLeft, Check, Loader2, PlugZap } from "lucide-react";
+import { ArrowLeft, Check, Loader2, PlugZap, Shield } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { getMe, setMe } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { ApiKeys } from "@/components/ApiKeys";
+import { Sessions } from "@/components/Sessions";
 import { cn } from "@/lib/utils";
 
 const inputCls = "border-line-strong focus:ring-ring text-foreground placeholder:text-muted-foreground h-9 w-full rounded-md border bg-transparent px-3 text-meta outline-none focus:ring-2";
 
-export function Account({ onBack, onConnect }: { onBack: () => void; onConnect: () => void }) {
+export function Account({ onBack, onConnect, onAdmin }: { onBack: () => void; onConnect: () => void; onAdmin: () => void }) {
   const me = getMe();
   const user = me?.kind === "user" ? me : null;
   const [name, setName] = React.useState(user?.name ?? "");
@@ -57,15 +58,23 @@ export function Account({ onBack, onConnect }: { onBack: () => void; onConnect: 
           <ArrowLeft className="size-4" />
           Machines
         </Button>
-        <header className="mb-7 flex items-end justify-between gap-4">
+        <header className="mb-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h1 className="text-foreground text-h1 font-semibold tracking-[-0.02em]">Account</h1>
             <p className="text-muted-foreground mt-0.5 text-meta">{user ? `@${user.login}` : "Operator"} · {user?.role === "admin" || me?.kind === "operator" ? "admin" : "member"} · up to {user?.maxBoxes ?? "∞"} machines at once</p>
           </div>
-          <Button variant="outline" onClick={onConnect}>
-            <PlugZap />
-            Connect an IDE
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            {(me?.kind === "operator" || user?.role === "admin") && me?.mode === "saas" && (
+              <Button variant="ghost" onClick={onAdmin} className="text-muted-foreground">
+                <Shield />
+                Manage users
+              </Button>
+            )}
+            <Button variant="outline" onClick={onConnect}>
+              <PlugZap />
+              Connect an IDE
+            </Button>
+          </div>
         </header>
 
         <div className="flex flex-col gap-10">
@@ -124,7 +133,12 @@ export function Account({ onBack, onConnect }: { onBack: () => void; onConnect: 
           )}
 
           {user && <ApiKeys />}
-          {!user && <p className="text-muted-foreground text-meta">You are signed in with the operator token. Create a personal account from Integrations → Users to get a profile and API keys of your own.</p>}
+          {user && <Sessions />}
+          {!user && (
+            <p className="text-muted-foreground text-meta">
+              You are signed in with the operator token — the deployment's root identity. For day-to-day work, sign up for a personal account and, if you need to manage people, use <button type="button" onClick={onAdmin} className="text-foreground cursor-pointer underline underline-offset-4">Manage users</button>.
+            </p>
+          )}
         </div>
       </div>
     </div>

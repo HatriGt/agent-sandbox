@@ -59,18 +59,18 @@ export default function Landing() {
             href="https://github.com/HatriGt/agent-sandbox"
             target="_blank"
             rel="noreferrer"
-            className="text-muted-foreground hover:text-foreground rounded-md px-3 py-1.5 text-meta"
+            className="text-muted-foreground hover:text-foreground hidden rounded-md px-3 py-1.5 text-meta sm:inline-block"
           >
             GitHub
           </a>
           {saas && !signedIn && (
-            <Link to="/signin" className="text-muted-foreground hover:text-foreground rounded-md px-3 py-1.5 text-meta">
+            <Link to="/signin" className="text-muted-foreground hover:text-foreground rounded-md px-3 py-1.5 text-meta whitespace-nowrap">
               Sign in
             </Link>
           )}
           <Link
             to={consoleHref}
-            className="bg-primary text-primary-foreground hover:bg-primary/80 ml-2 inline-flex h-9 items-center gap-1.5 rounded-md px-3.5 text-meta font-medium"
+            className="bg-primary text-primary-foreground hover:bg-primary/80 ml-1 inline-flex h-9 items-center gap-1.5 rounded-md px-3.5 text-meta font-medium whitespace-nowrap sm:ml-2"
           >
             {primaryLabel}
             <ArrowRight className="size-3.5" />

@@ -21,6 +21,8 @@ import { motion } from "motion/react";
 import { api, type BoxView, type FleetLifecycle } from "@/lib/api";
 import { fmtAgo, friendlyName, shortName, threadSort, threadTitle } from "@/lib/format";
 import { readDraft, takePrefill, writeDraft } from "@/lib/draft";
+import { getMe } from "@/lib/auth";
+import { GettingStarted } from "@/components/GettingStarted";
 import { displayState, fmtDuration } from "@/lib/lifecycle";
 import { questionHeadline } from "@/lib/question";
 import { prefetchWatch } from "@/hooks/useWatchStream";
@@ -447,6 +449,7 @@ export function Hub({
           </div>
         </motion.div>
 
+        {!loading && runs.length === 0 && getMe()?.kind === "user" && <GettingStarted />}
         {!loading && runs.length === 0 && (
           <motion.section
             aria-label="No runs yet"

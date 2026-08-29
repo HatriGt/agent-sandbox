@@ -1,6 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { makeAuthThrottle, clientOf } from "../src/auth-throttle.js";
+import { makeAuthThrottle, clientOf, makeRateLimiter } from "../src/auth-throttle.js";
+
+test("rate limiter: sliding window per key", () => {
+  let t = 0;
+  const rl = makeRateLimiter({ limit: 3, windowMs: 1000, now: () => t });
+  assert.equal(rl.over("a"), false);
+  assert.equal(rl.over("a"), false);
+  assert.equal(rl.over("a"), false);
+  assert.equal(rl.over("a"), true, "4th in the window");
+  assert.equal(rl.over("b"), false, "other keys unaffected");
+  t = 1001;
+  assert.equal(rl.over("a"), false, "window slid");
+});
 
 test("auth throttle: blocks after the limit within the window, forgets after it", () => {
   let t = 1_000_000;

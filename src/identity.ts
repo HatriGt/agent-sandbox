@@ -185,6 +185,16 @@ export function principalFromSession(db: Db, sessionId: string | undefined, now 
   return { kind: "user", userId: row.user_id, login: row.login, role: row.role, via: "session", sessionId };
 }
 
+export function listSessions(db: Db, userId: string): Array<{ id: string; created_at: string; last_seen_at: string | null; ip: string | null; user_agent: string | null }> {
+  return db.prepare(`SELECT id, created_at, last_seen_at, ip, user_agent FROM sessions WHERE user_id = ? AND expires_at > ? ORDER BY last_seen_at DESC`).all(userId, nowIso()) as never;
+}
+export function revokeSession(db: Db, userId: string, sessionId: string): boolean {
+  return db.prepare(`DELETE FROM sessions WHERE id = ? AND user_id = ?`).run(sessionId, userId).changes > 0;
+}
+export function revokeOtherSessions(db: Db, userId: string, keep: string | undefined): number {
+  return db.prepare(`DELETE FROM sessions WHERE user_id = ? AND id != ?`).run(userId, keep ?? "").changes;
+}
+
 export function deleteSession(db: Db, sessionId: string): void {
   db.prepare(`DELETE FROM sessions WHERE id = ?`).run(sessionId);
 }

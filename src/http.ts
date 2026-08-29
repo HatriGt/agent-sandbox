@@ -20,7 +20,7 @@ import { makeBridge } from "./server-bridge.js";
 import { deps as rawDeps } from "./deps.js";
 import { refillPool, startPoolMaintainer } from "./pool.js";
 import { checkBearer } from "./http-auth.js";
-import { clientOf, makeAuthThrottle } from "./auth-throttle.js";
+import { clientOf, makeAuthThrottle, makeRateLimiter } from "./auth-throttle.js";
 import { auditFields, formatAudit, MUTATING } from "./audit.js";
 import { openDb } from "./db.js";
 import {
@@ -30,7 +30,7 @@ import {
 import { githubAuthorizeUrl, githubExchangeCode, githubIdentity } from "./github-oauth.js";
 import { keyFromEnvOrFile, makeSecretBox } from "./secretbox.js";
 import { allBlobs, registerUserStoreBackend, withOwner } from "./user-store.js";
-import { createLocalUser, deleteUser, listUsers, ownerOf, setUserRole, validateSignup, createPasswordUser, authenticatePassword, setPassword, updateProfile, verifyPassword, PASSWORD_MIN } from "./identity.js";
+import { createLocalUser, deleteUser, listUsers, ownerOf, setUserRole, validateSignup, createPasswordUser, authenticatePassword, setPassword, updateProfile, verifyPassword, PASSWORD_MIN, listSessions, revokeSession, revokeOtherSessions } from "./identity.js";
 import { parseStore } from "./gh-token-store.js";
 import { parseMcpStore } from "./mcp-store.js";
 import { guardDeps, makeOwnership, NotOwnedError, QuotaError, withPrincipal } from "./tenancy.js";
@@ -154,6 +154,21 @@ app.use((req: Request, res: Response, next) => {
   }
   if (p) withPrincipal(p, next);
   else next();
+});
+
+// Rate limit state-changing calls per caller (60/min): a runaway script or a hostile key cannot spin
+// machines or hammer sign-in faster than that. Reads are unlimited; /mcp has its own transport.
+const mutationLimiter = makeRateLimiter({ limit: Number(process.env.RATE_LIMIT_PER_MIN ?? "60") || 60, windowMs: 60_000 });
+app.use((req: Request, res: Response, next) => {
+  if (!MUTATING.has(req.method) || req.path === "/mcp" || req.path.startsWith("/mcp/")) return next();
+  const p = res.locals.principal as Principal | null;
+  const key = p ? (p.kind === "user" ? p.userId : "operator") : `anon:${clientOf(req.headers, req.socket.remoteAddress)}`;
+  if (mutationLimiter.over(key)) {
+    res.setHeader("Retry-After", "60");
+    res.status(429).json({ error: "slow down — too many requests this minute" });
+    return;
+  }
+  next();
 });
 
 // Audit every state-changing call (not /mcp — the MCP transport has its own tool-level log lines).
@@ -616,6 +631,36 @@ app.delete("/users.json", (req: Request, res: Response) => {
   res.json({ ok: true });
 });
 
+// Signed-in devices: list and revoke browser sessions.
+app.get("/sessions.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const p = principalOf(res);
+  if (p.kind !== "user") {
+    res.json({ sessions: [] });
+    return;
+  }
+  res.json({ sessions: listSessions(db, p.userId).map((s) => ({ id: s.id.slice(0, 8), current: s.id === p.sessionId, createdAt: s.created_at, lastSeenAt: s.last_seen_at, ip: s.ip, userAgent: s.user_agent })) });
+});
+app.delete("/sessions.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const p = principalOf(res);
+  const { id, others } = (req.body ?? {}) as { id?: string; others?: boolean };
+  if (p.kind !== "user") {
+    res.status(403).json({ error: "no sessions" });
+    return;
+  }
+  if (others) {
+    res.json({ ok: true, revoked: revokeOtherSessions(db, p.userId, p.sessionId) });
+    return;
+  }
+  const full = typeof id === "string" ? listSessions(db, p.userId).find((s) => s.id.startsWith(id))?.id : undefined;
+  if (!full || !revokeSession(db, p.userId, full)) {
+    res.status(404).json({ error: "no such session" });
+    return;
+  }
+  res.json({ ok: true });
+});
+
 // API keys — for IDE/MCP clients and CI. Shown once at creation; the store keeps only a hash.
 app.get("/api-keys.json", (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
@@ -682,6 +727,8 @@ if (HAS_WEB) {
   // The public landing page is the same SPA at the site root (its assets are absolute under
   // /dashboard/). It carries no data and no token; the console routes stay bearer-guarded.
   app.get("/", (_req: Request, res: Response) => sendShell(res));
+  // Public auth pages are part of the SPA too (a direct visit or reload must not 404).
+  app.get(/^\/(signin|signup)\/?$/, (_req: Request, res: Response) => sendShell(res));
 } else {
   app.get("/dashboard", (_req: Request, res: Response) => {
     res

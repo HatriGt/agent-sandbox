@@ -50,3 +50,26 @@ export function clientOf(headers: Record<string, string | string[] | undefined>,
   const first = (Array.isArray(xff) ? xff[0] : xff)?.split(",")[0]?.trim();
   return first || socketAddr || "unknown";
 }
+
+/**
+ * Per-caller rate limit for state-changing requests: a sliding window of `limit` per `windowMs`.
+ * Keys are principals (user id / "operator") or, before auth, the client address. Reads are not
+ * limited — the fleet poll is legitimately chatty; mutations are what cost machines and money.
+ */
+export function makeRateLimiter(opts: { limit?: number; windowMs?: number; now?: () => number } = {}) {
+  const limit = opts.limit ?? 60;
+  const windowMs = opts.windowMs ?? 60_000;
+  const now = opts.now ?? Date.now;
+  const hits = new Map<string, number[]>();
+  return {
+    /** Records the hit and reports whether it is over the limit. */
+    over(key: string): boolean {
+      const t = now();
+      const arr = (hits.get(key) ?? []).filter((x) => t - x < windowMs);
+      arr.push(t);
+      hits.set(key, arr);
+      if (hits.size > 20_000) for (const [k, v] of hits) if (v.every((x) => t - x >= windowMs)) hits.delete(k);
+      return arr.length > limit;
+    },
+  };
+}
