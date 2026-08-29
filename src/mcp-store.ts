@@ -8,6 +8,7 @@
  * with `--mcp-config`, so the agent has Jira, Slack, a database… without the operator ever being
  * asked mid-run. Pure parsing/shaping here; IO at the bottom.
  */
+import { hasUserStoreBackend, loadBlob, saveBlob, ownerKey, OPERATOR_OWNER } from "./user-store.js";
 import type { Config } from "./config.js";
 import { run, shellQuote } from "./exec.js";
 import { sshMuxOpts } from "./ssh.js";
@@ -210,7 +211,25 @@ const STORE_PATH = '"$HOME/.agent-sandbox/mcp.json"';
 const CACHE_TTL_MS = 60_000;
 let cached: { store: McpStore; at: number } | null = null;
 
+const BLOB_KIND = "mcp";
+const perOwner = new Map<string, { store: McpStore; at: number }>();
+
+/** The calling principal's MCP servers (database row per owner; legacy file for the stdio entry / first operator load). */
 export async function loadMcpStore(cfg: Config): Promise<McpStore> {
+  if (hasUserStoreBackend()) {
+    const owner = ownerKey();
+    const c = perOwner.get(owner);
+    if (c && Date.now() - c.at < CACHE_TTL_MS) return structuredClone(c.store);
+    let raw = loadBlob(BLOB_KIND, owner);
+    if (raw === null && owner === OPERATOR_OWNER) {
+      const r = await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, `cat ${STORE_PATH} 2>/dev/null || true`], { check: false });
+      raw = r.stdout ?? "";
+      if (raw.trim()) saveBlob(BLOB_KIND, raw, owner);
+    }
+    const store = parseMcpStore(raw ?? "");
+    perOwner.set(owner, { store: structuredClone(store), at: Date.now() });
+    return store;
+  }
   if (cached && Date.now() - cached.at < CACHE_TTL_MS) return structuredClone(cached.store);
   const r = await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, `cat ${STORE_PATH} 2>/dev/null || true`], { check: false });
   const store = parseMcpStore(r.stdout ?? "");
@@ -220,6 +239,12 @@ export async function loadMcpStore(cfg: Config): Promise<McpStore> {
 
 export async function saveMcpStore(cfg: Config, store: McpStore): Promise<void> {
   const json = serializeMcpStore(store);
+  if (hasUserStoreBackend()) {
+    const owner = ownerKey();
+    saveBlob(BLOB_KIND, json, owner);
+    perOwner.set(owner, { store: structuredClone(store), at: Date.now() });
+    return;
+  }
   const remote =
     `mkdir -p "$HOME/.agent-sandbox" && chmod 700 "$HOME/.agent-sandbox" && ` +
     `printf '%s' ${shellQuote(json)} > ${STORE_PATH}.tmp && chmod 600 ${STORE_PATH}.tmp && mv ${STORE_PATH}.tmp ${STORE_PATH}`;

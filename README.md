@@ -438,8 +438,11 @@ as `host.docker.internal`. Everything site-specific lives in `.env`; the repo sh
 Set `AUTH_MODE=saas` (plus a GitHub OAuth App: `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`,
 `PUBLIC_URL`) and the console gets **Sign in with GitHub**, HttpOnly session cookies, per-user API
 keys for the MCP endpoint, box ownership (users see and act on their own machines only), and a
-per-user machine quota. The operator token keeps working as the break-glass identity. Design, data
-model and the remaining phases: [`docs/saas-design.md`](docs/saas-design.md).
+per-user machine quota — and every user's GitHub accounts and MCP servers are theirs alone (encrypted
+per user, injected only into their machines). No OAuth app is required: admins issue access tokens
+from **Integrations → Users**. The operator token keeps working as the break-glass identity.
+Step-by-step: [`docs/self-hosting.md`](docs/self-hosting.md). Design, data model and what remains:
+[`docs/saas-design.md`](docs/saas-design.md).
 
 ## Security
 

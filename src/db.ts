@@ -68,6 +68,17 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX IF NOT EXISTS audit_user_at ON audit_events(user_id, at);
   `,
+  `
+  -- Per-owner integration state (GitHub accounts, MCP servers), encrypted with the controller key.
+  -- owner_id is a users.id, or 'operator' for the deployment's own operator identity.
+  CREATE TABLE IF NOT EXISTS user_blobs (
+    owner_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    data_enc TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (owner_id, kind)
+  );
+  `,
 ];
 
 export function openDb(dataDir: string): Db {

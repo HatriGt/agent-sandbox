@@ -28,6 +28,11 @@ import {
   principalFromApiKey, principalFromSession, revokeApiKey, SESSION_COOKIE, sessionCookie, upsertGithubUser, mayAccess, type Principal,
 } from "./identity.js";
 import { githubAuthorizeUrl, githubExchangeCode, githubIdentity } from "./github-oauth.js";
+import { keyFromEnvOrFile, makeSecretBox } from "./secretbox.js";
+import { allBlobs, registerUserStoreBackend, withOwner } from "./user-store.js";
+import { createLocalUser, deleteUser, listUsers, ownerOf, setUserRole } from "./identity.js";
+import { parseStore } from "./gh-token-store.js";
+import { parseMcpStore } from "./mcp-store.js";
 import { guardDeps, makeOwnership, NotOwnedError, QuotaError, withPrincipal } from "./tenancy.js";
 import { securityHeaders } from "./security-headers.js";
 import { gatherMonitor, gatherWatch, askInBox, driverStateLine, startBoxIfStopped, noteRunning } from "./msb.js";
@@ -73,14 +78,15 @@ if (!cfg.httpToken) {
 // The controller's own state (users, sessions, API keys, box ownership, audit). Opened in both modes:
 // in "token" mode it only receives audit rows and ownership records for the operator.
 const db = openDb(cfg.dataDir);
+// Integrations (GitHub accounts, MCP servers) are per owner and encrypted at rest from here on. The
+// operator's row is seeded from the legacy shared files on first read.
+registerUserStoreBackend({ db, box: makeSecretBox(keyFromEnvOrFile(process.env.SECRETS_KEY, cfg.dataDir)) });
 const ownership = makeOwnership(db, cfg);
 const deps = guardDeps(rawDeps, ownership);
 const SAAS = cfg.authMode === "saas";
 const SECURE_COOKIE = (cfg.publicUrl ?? "").startsWith("https://");
-if (SAAS && !(cfg.githubOauthClientId && cfg.githubOauthClientSecret && cfg.publicUrl)) {
-  console.error("[agent-sandbox] AUTH_MODE=saas needs GITHUB_OAUTH_CLIENT_ID, GITHUB_OAUTH_CLIENT_SECRET and PUBLIC_URL (or ASB_DOMAIN).");
-  process.exit(1);
-}
+const GITHUB_LOGIN = SAAS && !!(cfg.githubOauthClientId && cfg.githubOauthClientSecret && cfg.publicUrl);
+if (SAAS && !GITHUB_LOGIN) console.error("[agent-sandbox] AUTH_MODE=saas without a GitHub OAuth App: users sign in with personal access tokens issued by an admin.");
 
 const app = express();
 
@@ -185,15 +191,17 @@ app.use((req: Request, res: Response, next) => {
 // anything shaped like a credential is masked too. See redact.ts.
 const redactor = makeRedactor(async () => {
   const out: string[] = [];
+  // Every owner's secrets, not just the caller's: a transcript may quote any of them.
   try {
-    for (const a of Object.values((await loadStore(cfg)).accounts)) out.push(a.token);
+    await loadStore(cfg); // seeds the operator row from the legacy file on first run
+    for (const raw of allBlobs("gh-tokens")) for (const a of Object.values(parseStore(raw).accounts)) out.push(a.token);
   } catch {
     /* store unreachable: shapes still apply */
   }
   try {
-    for (const s of Object.values((await loadMcpStore(cfg)).servers)) {
-      for (const m of [s.env, s.headers]) for (const [k, v] of Object.entries(m ?? {})) if (isSecretKey(k)) out.push(v);
-    }
+    await loadMcpStore(cfg);
+    for (const raw of allBlobs("mcp"))
+      for (const s of Object.values(parseMcpStore(raw).servers)) for (const m of [s.env, s.headers]) for (const [k, v] of Object.entries(m ?? {})) if (isSecretKey(k)) out.push(v);
   } catch {
     /* same */
   }
@@ -221,7 +229,10 @@ const resumeQuietly = (session: string, message: string) => {
   // the thread does not show it asleep (and close its stream) for the next 15 s.
   noteRunning(session);
   watchHub.drop(session);
-  return deps.resumeDetached ? deps.resumeDetached(cfg, session, message) : deps.resume(cfg, session, message, undefined, {}).then(() => undefined);
+  // Whoever triggers it (inbox delivery, broker, an admin), the box runs with its OWNER's integrations.
+  return withOwner(ownerOf(db, session) ?? null, () =>
+    deps.resumeDetached ? deps.resumeDetached(cfg, session, message) : deps.resume(cfg, session, message, undefined, {}).then(() => undefined)
+  );
 };
 startInboxDelivery({
   inbox,
@@ -394,9 +405,9 @@ function failWith(res: Response, e: unknown): void {
 // Public: tells the SPA which front door to show.
 app.get("/auth/config.json", (_req: Request, res: Response) => {
   res.setHeader("Cache-Control", "no-store");
-  res.json({ mode: cfg.authMode, providers: SAAS ? ["github"] : [] });
+  res.json({ mode: cfg.authMode, providers: SAAS && cfg.githubOauthClientId && cfg.githubOauthClientSecret ? ["github"] : [], tokenLogin: true });
 });
-if (SAAS) {
+if (GITHUB_LOGIN) {
   const redirectUri = `${cfg.publicUrl}/auth/github/callback`;
   app.get("/auth/github", (req: Request, res: Response) => {
     const to = typeof req.query.to === "string" && /^\/dashboard(\/|$)/.test(req.query.to) ? req.query.to : "/dashboard/";
@@ -432,12 +443,86 @@ app.get("/me.json", (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   const p = principalOf(res);
   if (p.kind === "operator") {
-    res.json({ kind: "operator", mode: cfg.authMode });
+    res.json({ kind: "operator", mode: cfg.authMode, role: "admin" });
     return;
   }
   const u = getUser(db, p.userId);
   res.json({ kind: "user", mode: cfg.authMode, id: p.userId, login: p.login, role: p.role, via: p.via, email: u?.email ?? null, avatarUrl: u?.avatar_url ?? null, maxBoxes: u?.max_boxes ?? cfg.userMaxBoxes });
 });
+// Users — operator/admin only. Self-hosting without OAuth: an admin creates the account and hands
+// over its first access token (shown once); the person signs in with it and can mint their own keys.
+function isAdmin(p: Principal): boolean {
+  return p.kind === "operator" || p.role === "admin";
+}
+app.get("/users.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  if (!isAdmin(principalOf(res))) {
+    res.status(403).json({ error: "admins only" });
+    return;
+  }
+  res.json({ users: listUsers(db).map(({ id, login, email, role, max_boxes, created_at, last_seen_at, github_id, keys, boxes }) => ({ id, login, email, role, maxBoxes: max_boxes, createdAt: created_at, lastSeenAt: last_seen_at, github: !!github_id, keys, boxes })) });
+});
+app.post("/users.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  if (!isAdmin(principalOf(res))) {
+    res.status(403).json({ error: "admins only" });
+    return;
+  }
+  const { login, email, role } = (req.body ?? {}) as { login?: string; email?: string; role?: string };
+  try {
+    const u = createLocalUser(db, { login: String(login ?? ""), email: typeof email === "string" ? email : null, role: role === "admin" ? "admin" : "user" });
+    const key = createApiKey(db, u.id, "first sign-in");
+    res.json({ id: u.id, login: u.login, role: u.role, token: key.token });
+  } catch (e) {
+    res.status(400).json({ error: String((e as Error).message ?? e) });
+  }
+});
+app.post("/users/key.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  if (!isAdmin(principalOf(res))) {
+    res.status(403).json({ error: "admins only" });
+    return;
+  }
+  const { id } = (req.body ?? {}) as { id?: string };
+  if (!id || !getUser(db, id)) {
+    res.status(404).json({ error: "no such user" });
+    return;
+  }
+  res.json(createApiKey(db, id, "issued by admin"));
+});
+app.post("/users/role.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  if (!isAdmin(principalOf(res))) {
+    res.status(403).json({ error: "admins only" });
+    return;
+  }
+  const { id, role } = (req.body ?? {}) as { id?: string; role?: string };
+  if (!id || (role !== "admin" && role !== "user") || !setUserRole(db, id, role)) {
+    res.status(404).json({ error: "no such user" });
+    return;
+  }
+  res.json({ ok: true });
+});
+app.delete("/users.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const p = principalOf(res);
+  if (!isAdmin(p)) {
+    res.status(403).json({ error: "admins only" });
+    return;
+  }
+  const { id } = (req.body ?? {}) as { id?: string };
+  if (!id || (p.kind === "user" && p.userId === id)) {
+    res.status(400).json({ error: "cannot delete yourself" });
+    return;
+  }
+  // Sessions and keys cascade; their boxes become the operator's (owner_id → NULL) and can be destroyed from Fleet.
+  if (!deleteUser(db, id)) {
+    res.status(404).json({ error: "no such user" });
+    return;
+  }
+  res.json({ ok: true });
+});
+
 // API keys — for IDE/MCP clients and CI. Shown once at creation; the store keeps only a hash.
 app.get("/api-keys.json", (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
@@ -531,7 +616,7 @@ app.get("/fleet.json", async (req: Request, res: Response) => {
     const fleet = await readFleet();
     // Let the broker look at every waiting box (fire-and-forget; guarded once per question).
     for (const b of fleet.boxes) {
-      if (b.runState === "waiting" && /^running$/i.test(b.boxStatus)) void brokerConsider(b.name, b.question);
+      if (b.runState === "waiting" && /^running$/i.test(b.boxStatus)) void withOwner(ownerOf(db, b.name) ?? null, () => brokerConsider(b.name, b.question));
     }
     if (!ownership.isUser()) {
       res.json(fleet);

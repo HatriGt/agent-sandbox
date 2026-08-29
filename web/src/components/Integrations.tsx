@@ -1,4 +1,5 @@
 import { ApiKeys } from "@/components/ApiKeys";
+import { Users } from "@/components/Users";
 import { getMe } from "@/lib/auth";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -21,7 +22,7 @@ export function Integrations({ onBack }: { onBack: () => void }) {
         </Button>
         <header className="mb-7">
           <h1 className="text-foreground text-h1 font-semibold tracking-[-0.02em]">Integrations</h1>
-          <p className="text-muted-foreground mt-0.5 text-meta">Given to every sandbox on its next run or turn. Stored on your server.</p>
+          <p className="text-muted-foreground mt-0.5 text-meta">{getMe()?.mode === "saas" ? "Yours alone — given only to your machines, encrypted at rest." : "Given to every sandbox on its next run or turn. Stored on your server."}</p>
         </header>
         <div className="flex flex-col gap-10">
           <section aria-labelledby="gh-h">
@@ -35,6 +36,7 @@ export function Integrations({ onBack }: { onBack: () => void }) {
           </section>
           <McpServers />
           {getMe()?.kind === "user" && <ApiKeys />}
+          {getMe()?.mode === "saas" && getMe()?.role === "admin" && <Users />}
         </div>
       </div>
     </div>

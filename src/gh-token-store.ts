@@ -13,6 +13,7 @@
  * Lives on the VPS at ~/.agent-sandbox/gh-tokens.json (chmod 600). Pure helpers are unit-tested; the
  * load/save do IO over the same multiplexed SSH used everywhere else.
  */
+import { hasUserStoreBackend, loadBlob, saveBlob, ownerKey, OPERATOR_OWNER } from "./user-store.js";
 import { run, shellQuote } from "./exec.js";
 import { sshMuxOpts } from "./ssh.js";
 import type { Config } from "./config.js";
@@ -220,21 +221,47 @@ export function decideAccess(candidates: Account[], repo: string): AccessDecisio
 const CACHE_TTL_MS = 60_000;
 let cached: { raw: string; at: number } | null = null;
 
-/** Load the store from the VPS (empty store if the file doesn't exist yet). */
-export async function loadStore(cfg: Config): Promise<TokenStore> {
-  if (cached && Date.now() - cached.at < CACHE_TTL_MS) return parseStore(cached.raw);
-  const r = await run(
-    "ssh",
-    [...sshMuxOpts(cfg), cfg.vpsSsh, `cat ${STORE_PATH} 2>/dev/null || true`],
-    { check: false }
-  );
-  cached = { raw: r.stdout ?? "", at: Date.now() };
-  return parseStore(r.stdout ?? "");
+const BLOB_KIND = "gh-tokens";
+const perOwner = new Map<string, { raw: string; at: number }>();
+
+async function readLegacyFile(cfg: Config): Promise<string> {
+  const r = await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, `cat ${STORE_PATH} 2>/dev/null || true`], { check: false });
+  return r.stdout ?? "";
 }
 
-/** Persist the store to the VPS with tight perms (dir 700, file 600). */
+/**
+ * Load the calling principal's store. With the controller database registered, each owner has their
+ * own encrypted row; the operator's row is seeded once from the legacy shared file on the host. The
+ * stdio entry (no database) keeps reading the file.
+ */
+export async function loadStore(cfg: Config): Promise<TokenStore> {
+  if (hasUserStoreBackend()) {
+    const owner = ownerKey();
+    const c = perOwner.get(owner);
+    if (c && Date.now() - c.at < CACHE_TTL_MS) return parseStore(c.raw);
+    let raw = loadBlob(BLOB_KIND, owner);
+    if (raw === null && owner === OPERATOR_OWNER) {
+      raw = await readLegacyFile(cfg);
+      if (raw.trim()) saveBlob(BLOB_KIND, raw, owner);
+    }
+    perOwner.set(owner, { raw: raw ?? "", at: Date.now() });
+    return parseStore(raw ?? "");
+  }
+  if (cached && Date.now() - cached.at < CACHE_TTL_MS) return parseStore(cached.raw);
+  const raw = await readLegacyFile(cfg);
+  cached = { raw, at: Date.now() };
+  return parseStore(raw);
+}
+
+/** Persist the calling principal's store (database row), or the legacy file with tight perms. */
 export async function saveStore(cfg: Config, store: TokenStore): Promise<void> {
   const json = serializeStore(store);
+  if (hasUserStoreBackend()) {
+    const owner = ownerKey();
+    saveBlob(BLOB_KIND, json, owner);
+    perOwner.set(owner, { raw: json, at: Date.now() });
+    return;
+  }
   const remote =
     `mkdir -p "$HOME/.agent-sandbox" && chmod 700 "$HOME/.agent-sandbox" && ` +
     `printf '%s' ${shellQuote(json)} > ${STORE_PATH}.tmp && chmod 600 ${STORE_PATH}.tmp && ` +

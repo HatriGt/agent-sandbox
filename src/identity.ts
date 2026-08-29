@@ -42,8 +42,16 @@ export function upsertGithubUser(
   u: { githubId: string; login: string; email?: string | null; avatarUrl?: string | null },
   opts: { adminLogins?: string[] } = {}
 ): UserRow {
-  const existing = db.prepare(`SELECT * FROM users WHERE github_id = ?`).get(u.githubId) as UserRow | undefined;
+  let existing = db.prepare(`SELECT * FROM users WHERE github_id = ?`).get(u.githubId) as UserRow | undefined;
   const now = nowIso();
+  if (!existing) {
+    // An admin-created account (no GitHub id yet) with the same login is the same person: link it.
+    const byLogin = db.prepare(`SELECT * FROM users WHERE github_id IS NULL AND lower(login) = lower(?)`).get(u.login) as UserRow | undefined;
+    if (byLogin) {
+      db.prepare(`UPDATE users SET github_id = ? WHERE id = ?`).run(u.githubId, byLogin.id);
+      existing = { ...byLogin, github_id: u.githubId };
+    }
+  }
   if (existing) {
     db.prepare(`UPDATE users SET login = ?, email = COALESCE(?, email), avatar_url = COALESCE(?, avatar_url), last_seen_at = ? WHERE id = ?`).run(u.login, u.email ?? null, u.avatarUrl ?? null, now, existing.id);
     return { ...existing, login: u.login, last_seen_at: now };
@@ -52,6 +60,33 @@ export function upsertGithubUser(
   const role = (opts.adminLogins ?? []).map((l) => l.toLowerCase()).includes(u.login.toLowerCase()) ? "admin" : "user";
   db.prepare(`INSERT INTO users (id, github_id, login, email, avatar_url, role, created_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(id, u.githubId, u.login, u.email ?? null, u.avatarUrl ?? null, role, now, now);
   return db.prepare(`SELECT * FROM users WHERE id = ?`).get(id) as UserRow;
+}
+
+/** Admin-created account for token sign-in (self-hosting without OAuth). */
+export function createLocalUser(db: Db, u: { login: string; email?: string | null; role?: "user" | "admin"; maxBoxes?: number | null }): UserRow {
+  const login = u.login.trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9-]{0,38}$/.test(login)) throw new Error("login must be 1–39 letters, digits or hyphens");
+  const clash = db.prepare(`SELECT id FROM users WHERE lower(login) = lower(?)`).get(login);
+  if (clash) throw new Error(`a user named ${login} already exists`);
+  const id = `u_${rand(12)}`;
+  db.prepare(`INSERT INTO users (id, login, email, role, max_boxes, created_at) VALUES (?, ?, ?, ?, ?, ?)`).run(id, login, u.email ?? null, u.role ?? "user", u.maxBoxes ?? null, nowIso());
+  return db.prepare(`SELECT * FROM users WHERE id = ?`).get(id) as UserRow;
+}
+
+export function listUsers(db: Db): Array<UserRow & { keys: number; boxes: number }> {
+  return db
+    .prepare(
+      `SELECT u.*, (SELECT COUNT(*) FROM api_keys k WHERE k.user_id = u.id AND k.revoked_at IS NULL) AS keys, (SELECT COUNT(*) FROM boxes b WHERE b.owner_id = u.id) AS boxes FROM users u ORDER BY u.created_at`
+    )
+    .all() as never;
+}
+
+export function deleteUser(db: Db, id: string): boolean {
+  return db.prepare(`DELETE FROM users WHERE id = ?`).run(id).changes > 0;
+}
+
+export function setUserRole(db: Db, id: string, role: "user" | "admin"): boolean {
+  return db.prepare(`UPDATE users SET role = ? WHERE id = ?`).run(role, id).changes > 0;
 }
 
 export function getUser(db: Db, id: string): UserRow | undefined {

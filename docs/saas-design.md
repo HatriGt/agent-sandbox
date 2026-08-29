@@ -1,7 +1,10 @@
 # Agent Sandbox as a multi-user SaaS — design
 
-Status: **Phase 1 implemented behind `AUTH_MODE=saas`** (users, sessions, API keys, box ownership,
-per-user quota). Default `AUTH_MODE=token` keeps the single-operator behaviour byte-for-byte.
+Status: **Phases 1 and 2 implemented behind `AUTH_MODE=saas`** — users, sessions, API keys, box
+ownership, per-user quota, **and per-user integrations** (GitHub accounts and MCP servers are
+encrypted rows per owner; background jobs run *as the box owner*). Sign-in works with an admin-issued
+access token alone; GitHub OAuth is optional. Default `AUTH_MODE=token` keeps the single-operator
+behaviour byte-for-byte. Self-hosters: `docs/self-hosting.md`.
 See `docs/architecture.md` for today's map; this document is the target and the path.
 
 ## 1. Principles
@@ -158,8 +161,12 @@ the operator. A box with no row (pre-migration) belongs to nobody but the operat
 1. **Identity + ownership (this change).** SQLite, users/sessions/api_keys/boxes, GitHub OAuth,
    cookie sessions with CSRF, API keys UI, `ownedBox()` everywhere, fleet filter, per-user quota,
    attributable audit. Flag: `AUTH_MODE=saas`.
-2. **Per-user integrations.** Move GitHub PATs and MCP servers to per-user encrypted rows; the
-   bootstrap injects the owner's set; Integrations page becomes per-user. Per-user rate limits.
+2. **Per-user integrations — done.** GitHub PATs and MCP servers live in `user_blobs(owner_id, kind)`
+   encrypted with AES-256-GCM (`SECRETS_KEY` or `DATA_DIR/secrets.key`). The store modules keep their
+   signatures and read *the calling principal's* row (`src/user-store.ts`, via the same
+   AsyncLocalStorage principal); repo-list and PR caches are per owner; inbox delivery, the credential
+   broker and admin-triggered resumes run `withOwner(box)`, so a machine always gets its owner's
+   credentials and MCP servers. The redactor sees every owner's secrets. Still to do: per-user rate limits.
 3. **Billing + plans.** Plans define `max_boxes`, run minutes, memory; usage from run records;
    Stripe customer per user; model usage attribution.
 4. **Scale-out.** Postgres; N controllers behind Traefik (sessions already server-side);

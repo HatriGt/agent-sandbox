@@ -13,6 +13,7 @@
  *
  * Pure helpers are exported for tests; IO is injected or delegated to existing helpers.
  */
+import { ownerKey } from "./user-store.js";
 import type { Config } from "./config.js";
 import { candidateAccounts, loadStore, pickDefaultAccount, type Account, type TokenStore } from "./gh-token-store.js";
 import { canAccessRepo, ghGetJson } from "./gh-probe.js";
@@ -129,15 +130,19 @@ export function makeRepoLister(
 ) {
   const ttl = opts.ttlMs ?? 5 * 60_000;
   const now = opts.now ?? Date.now;
-  let cache: { at: number; logins: string; repos: RepoInfo[] } | null = null;
-  let inFlight: Promise<RepoInfo[]> | null = null;
+  // One cache per owner: user A's repository list must never answer user B's picker.
+  const caches = new Map<string, { at: number; logins: string; repos: RepoInfo[] }>();
+  const inFlights = new Map<string, Promise<RepoInfo[]>>();
 
   return async function list(force = false): Promise<RepoInfo[]> {
+    const owner = ownerKey();
     const store = await loadStore(cfg);
     const logins = Object.keys(store.accounts).sort().join(",");
+    const cache = caches.get(owner);
     if (!force && cache && cache.logins === logins && now() - cache.at < ttl) return cache.repos;
+    const inFlight = inFlights.get(owner);
     if (inFlight) return inFlight;
-    inFlight = Promise.all(
+    const p = Promise.all(
       Object.values(store.accounts).map(async (a) => ({
         login: a.login,
         repos: await fetchRepos(cfg, a.token).catch(() => [] as GhRepo[]),
@@ -145,13 +150,14 @@ export function makeRepoLister(
     )
       .then((per) => {
         const repos = mergeRepoLists(per);
-        cache = { at: now(), logins, repos };
+        caches.set(owner, { at: now(), logins, repos });
         return repos;
       })
       .finally(() => {
-        inFlight = null;
+        inFlights.delete(owner);
       });
-    return inFlight;
+    inFlights.set(owner, p);
+    return p;
   };
 }
 

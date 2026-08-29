@@ -181,8 +181,20 @@ const authHeaders: HeadersInit = new Proxy({} as Record<string, string>, {
   },
 });
 
+export interface UserRow {
+  id: string;
+  login: string;
+  email: string | null;
+  role: "user" | "admin";
+  maxBoxes: number | null;
+  createdAt: string;
+  lastSeenAt: string | null;
+  github: boolean;
+  keys: number;
+  boxes: number;
+}
 export type Me =
-  | { kind: "operator"; mode: "token" | "saas" }
+  | { kind: "operator"; mode: "token" | "saas"; role: "admin" }
   | { kind: "user"; mode: "token" | "saas"; id: string; login: string; role: "user" | "admin"; via: "session" | "apikey"; email: string | null; avatarUrl: string | null; maxBoxes: number };
 export interface ApiKeyRow {
   id: string;
@@ -287,7 +299,13 @@ export async function openSse(
 export const api = {
   /** Does the controller accept this token? (Used by the token gate before storing it.) */
   /** Which front door: one operator token, or sign-in. Public. */
-  authConfig: () => fetch(url("/auth/config.json")).then(parse<{ mode: "token" | "saas"; providers: string[] }>),
+  authConfig: () => fetch(url("/auth/config.json")).then(parse<{ mode: "token" | "saas"; providers: string[]; tokenLogin?: boolean }>),
+  users: () => fetch(url("/users.json"), { headers: authHeaders }).then(parse<{ users: UserRow[] }>),
+  createUser: (login: string, role: "user" | "admin") => post<{ id: string; login: string; role: string; token: string }>("/users.json", { login, role }),
+  issueUserKey: (id: string) => post<{ id: string; token: string; prefix: string }>("/users/key.json", { id }),
+  setUserRole: (id: string, role: "user" | "admin") => post<{ ok: true }>("/users/role.json", { id, role }),
+  deleteUser: (id: string) =>
+    fetch(url("/users.json"), { method: "DELETE", headers: { ...authHeaders, "Content-Type": "application/json" }, body: JSON.stringify({ id }) }).then(parse<{ ok: true }>),
   /** Who am I (401 when nobody). */
   me: async (): Promise<Me | null> => {
     const res = await fetch(url("/me.json"), { headers: authHeaders });

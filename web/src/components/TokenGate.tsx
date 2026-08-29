@@ -13,13 +13,17 @@ import { Button } from "@/components/ui/button";
 export function TokenGate({ children }: { children: React.ReactNode }) {
   const [, force] = React.useState(0);
   const [mode, setMode] = React.useState<"token" | "saas" | null>(null);
+  const [providers, setProviders] = React.useState<string[]>([]);
   const [checked, setChecked] = React.useState(false);
   React.useEffect(() => {
     migrateTokenFromUrl();
     force((n) => n + 1);
     api
       .authConfig()
-      .then((c) => setMode(c.mode))
+      .then((c) => {
+        setProviders(c.providers);
+        setMode(c.mode);
+      })
       .catch(() => setMode("token"));
     return onAuthChange(() => force((n) => n + 1));
   }, []);
@@ -42,39 +46,14 @@ export function TokenGate({ children }: { children: React.ReactNode }) {
   if (mode === "saas") {
     if (getMe() || currentToken()) return <>{children}</>;
     if (!checked) return <div className="bg-background h-full" aria-busy="true" />;
-    return <SignIn />;
+    return <Entry saas github={providers.includes("github")} />;
   }
   const token = currentToken();
   if (token) return <>{children}</>;
   return <Entry />;
 }
 
-function SignIn() {
-  const to = `${location.pathname}${location.search}`;
-  return (
-    <div className="bg-background text-foreground flex min-h-full items-center justify-center px-6">
-      <div className="w-full max-w-sm">
-        <div className="flex items-center gap-2.5">
-          <span className="bg-primary text-primary-foreground grid size-9 place-items-center rounded-md">
-            <Logo className="size-5" />
-          </span>
-          <span className="text-body font-semibold tracking-[-0.01em]">Agent Sandbox</span>
-        </div>
-        <h1 className="mt-8 text-h1 font-semibold tracking-[-0.02em]">Sign in</h1>
-        <p className="text-muted-foreground mt-2 text-body leading-relaxed">Your machines, runs and API keys are yours alone. We only read your GitHub identity — repository access is granted separately, per account.</p>
-        <Button asChild className="mt-6 h-10 w-full">
-          <a href={`/auth/github?to=${encodeURIComponent(to)}`}>
-            <Github />
-            Continue with GitHub
-          </a>
-        </Button>
-        <p className="text-faint mt-4 text-micro">Session cookie only · HttpOnly · signs out after 30 days of inactivity</p>
-      </div>
-    </div>
-  );
-}
-
-function Entry() {
+function Entry({ saas = false, github = false }: { saas?: boolean; github?: boolean }) {
   const [value, setValue] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -107,12 +86,18 @@ function Entry() {
           </span>
           <span className="text-body font-semibold tracking-[-0.01em]">Agent Sandbox</span>
         </div>
-        <h1 className="mt-8 text-h1 font-semibold tracking-[-0.02em]">Enter your controller token</h1>
-        <p className="text-muted-foreground mt-2 text-body leading-relaxed">
-          The token from your controller's <code className="bg-muted rounded px-1 font-mono text-[0.9em]">MCP_HTTP_TOKEN</code>.
-          It is kept in this browser only and sent as a header — never in a link. Everything behind it — sandboxes,
-          GitHub accounts, MCP servers — is yours alone.
-        </p>
+        <h1 className="mt-8 text-h1 font-semibold tracking-[-0.02em]">{saas ? "Sign in" : "Enter your controller token"}</h1>
+        {saas ? (
+          <p className="text-muted-foreground mt-2 text-body leading-relaxed">
+            Paste the access token you were given. It stays in this browser and rides as a header — never in a link. Your machines, GitHub accounts and MCP servers are yours alone.
+          </p>
+        ) : (
+          <p className="text-muted-foreground mt-2 text-body leading-relaxed">
+            The token from your controller's <code className="bg-muted rounded px-1 font-mono text-[0.9em]">MCP_HTTP_TOKEN</code>.
+            It is kept in this browser only and sent as a header — never in a link. Everything behind it — sandboxes,
+            GitHub accounts, MCP servers — is yours alone.
+          </p>
+        )}
         <form
           className="mt-6 flex flex-col gap-3"
           onSubmit={(e) => {
@@ -121,7 +106,7 @@ function Entry() {
           }}
         >
           <label className="flex flex-col gap-1.5">
-            <span className="label text-muted-foreground">Token</span>
+            <span className="label text-muted-foreground">{saas ? "Access token" : "Token"}</span>
             <div className="border-line-strong focus-within:ring-ring flex items-center gap-2 rounded-md border px-3 focus-within:ring-2">
               <KeyRound className="text-muted-foreground size-4 shrink-0" aria-hidden />
               <input
@@ -131,8 +116,8 @@ function Entry() {
                 spellCheck={false}
                 value={value}
                 onChange={(e) => setValue(e.target.value)}
-                placeholder="paste the token"
-                aria-label="Controller token"
+                placeholder={saas ? "asb_…" : "paste the token"}
+                aria-label={saas ? "Access token" : "Controller token"}
                 className="placeholder:text-muted-foreground h-11 min-w-0 flex-1 bg-transparent font-mono text-meta outline-none"
               />
             </div>
@@ -148,9 +133,25 @@ function Entry() {
             {!busy && <ArrowRight className="size-4" />}
           </Button>
         </form>
+        {saas && github && (
+          <>
+            <div className="text-faint my-5 flex items-center gap-3 text-micro">
+              <span className="bg-border h-px flex-1" />
+              or
+              <span className="bg-border h-px flex-1" />
+            </div>
+            <Button asChild variant="outline" size="lg" className="w-full justify-center">
+              <a href={`/auth/github?to=${encodeURIComponent(`${location.pathname}${location.search}`)}`}>
+                <Github />
+                Continue with GitHub
+              </a>
+            </Button>
+          </>
+        )}
         <p className="text-muted-foreground mt-6 text-micro leading-relaxed">
-          Interim access model: one token is one operator. Proper sign-in (accounts, sessions, revocation) is on the
-          roadmap; until then treat this token like a root password.
+          {saas
+            ? "Lost your token? Ask an admin to issue a new one. Tokens can be revoked at any time from Integrations."
+            : "Interim access model: one token is one operator. Proper sign-in (accounts, sessions, revocation) is on the roadmap; until then treat this token like a root password."}
         </p>
       </div>
     </div>

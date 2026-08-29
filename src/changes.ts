@@ -10,6 +10,7 @@
  *
  * All paths are confined to /workspace (same rule as /artifact). Pure parsers are exported for tests.
  */
+import { ownerKey } from "./user-store.js";
 import type { Config } from "./config.js";
 import { exec } from "./msb.js";
 import { shellQuote } from "./exec.js";
@@ -237,11 +238,11 @@ export function shapePull(repo: string, number: number, p: GhPull): PullInfo {
 
 const pullCache = new Map<string, { at: number; info: PullInfo }>();
 export function forgetPull(repo: string, number: number) {
-  pullCache.delete(`${repo}#${number}`);
+  for (const k of [...pullCache.keys()]) if (k.endsWith(`|${repo}#${number}`)) pullCache.delete(k);
 }
 
 export async function fetchPull(cfg: Config, repo: string, number: number): Promise<PullInfo | undefined> {
-  const key = `${repo}#${number}`;
+  const key = `${ownerKey()}|${repo}#${number}`;
   const c = pullCache.get(key);
   if (c && Date.now() - c.at < 60_000) return c.info;
   const store = await loadStore(cfg);
