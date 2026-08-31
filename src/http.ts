@@ -35,7 +35,7 @@ import { parseStore } from "./gh-token-store.js";
 import { parseMcpStore } from "./mcp-store.js";
 import { guardDeps, makeOwnership, NotOwnedError, QuotaError, withPrincipal } from "./tenancy.js";
 import { securityHeaders } from "./security-headers.js";
-import { gatherMonitor, gatherWatch, askInBox, driverStateLine, startBoxIfStopped, noteRunning } from "./msb.js";
+import { gatherMonitor, gatherWatch, askInBox, driverStateLine, startBoxIfStopped, noteRunning, stopBox, noteStopped } from "./msb.js";
 import { isBoxName } from "./sync.js";
 import { touchClaimed } from "./claims.js";
 import { safeWorkspacePath } from "./artifact.js";
@@ -1354,6 +1354,25 @@ app.post("/wake.json", async (req: Request, res: Response) => {
     await startBoxIfStopped(cfg, session);
     noteRunning(session);
     watchHub.drop(session); // the cached "stopped" snapshot must not be served as live
+    res.json({ ok: true });
+  } catch (e) {
+    failWith(res, e);
+  }
+});
+
+// Put a sandbox to sleep on demand — `msb stop`, no remove. The workspace and the agent's session
+// persist exactly as with the idle timeout; opening the thread (or a reply) wakes it again.
+app.post("/sleep.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const { session } = (req.body ?? {}) as { session?: string };
+  if (!session || !/^[\w.-]+$/.test(session)) {
+    res.status(400).json({ error: "session is required" });
+    return;
+  }
+  try {
+    await stopBox(cfg, session);
+    noteStopped(session);
+    watchHub.drop(session); // the cached "running" snapshot must not be served as live
     res.json({ ok: true });
   } catch (e) {
     failWith(res, e);

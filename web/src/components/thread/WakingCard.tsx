@@ -5,9 +5,9 @@ import { cn } from "@/lib/utils";
 /**
  * Shown the moment you open a sleeping sandbox: the console has already asked the controller to
  * start the microVM, so this line narrates what is happening instead of asking you to type first.
- * It is set in the transcript's own voice — no box, no tint: a small monochrome pixel grid that
- * pulses while we wait, a title, the elapsed time, and one line of status that crossfades through
- * boot → restore → reconnect. When the box reports running it reads "Awake" and leaves.
+ * The mark is a power ring in the product's live blue — a comet arc orbits while the machine boots,
+ * the ring fills and a check draws when it is awake, and it dims to red on failure. Under the title,
+ * a three-segment progress rail ticks through boot → restore → reconnect.
  */
 const STAGES = [
   { at: 0, text: "Starting the microVM" },
@@ -35,7 +35,7 @@ export function WakingCard({ awake, startedAt, error }: { awake: boolean; starte
       role="status"
       aria-live="polite"
     >
-      <PixelGrid state={error ? "error" : awake ? "done" : "active"} />
+      <PowerRing state={error ? "error" : awake ? "done" : "active"} />
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline gap-2">
           <p className={cn("text-body font-medium", error ? "text-destructive" : "text-foreground")}>{error ? "Could not wake the sandbox" : awake ? "Awake" : "Waking the sandbox"}</p>
@@ -56,25 +56,56 @@ export function WakingCard({ awake, startedAt, error }: { awake: boolean; starte
             </motion.p>
           </AnimatePresence>
         </div>
+        {!error && (
+          <div className="mt-1.5 flex w-40 items-center gap-1" aria-hidden>
+            {STAGES.map((s, i) => (
+              <span key={s.at} className="bg-live/15 h-[3px] flex-1 overflow-hidden rounded-full">
+                <span
+                  className={cn(
+                    "bg-live block h-full rounded-full transition-transform duration-500 ease-out",
+                    awake || stage > i ? "translate-x-0" : stage === i ? "wake-fill" : "-translate-x-full"
+                  )}
+                />
+              </span>
+            ))}
+          </div>
+        )}
       </div>
     </motion.div>
   );
 }
 
-/** 4×4 monochrome grid. Waiting: cells pulse in a diagonal wave. Done: all lit. Error: dim. */
-function PixelGrid({ state }: { state: "active" | "done" | "error" }) {
+/**
+ * The waking mark: a faint blue halo, a track ring, and a comet arc that orbits while booting.
+ * Done: the ring completes in blue and a check draws in. Error: a broken ring in the alarm colour.
+ */
+function PowerRing({ state }: { state: "active" | "done" | "error" }) {
+  const C = 2 * Math.PI * 9; // circumference of the r=9 ring
   return (
-    <div className="mt-1 grid size-6 shrink-0 grid-cols-4 gap-[2px]" aria-hidden>
-      {Array.from({ length: 16 }, (_, i) => {
-        const r = Math.floor(i / 4), c = i % 4;
-        return (
-          <span
-            key={i}
-            className={cn("block rounded-[1px]", state === "done" ? "bg-foreground/80" : state === "error" ? "bg-destructive/40" : "bg-foreground pixel-wave")}
-            style={state === "active" ? { animationDelay: `${(r + c) * 110}ms` } : undefined}
-          />
-        );
-      })}
+    <div className="relative mt-0.5 size-8 shrink-0" aria-hidden>
+      {state === "active" && <span className="bg-live/20 absolute inset-0 rounded-full blur-[6px] wake-halo" />}
+      <svg viewBox="0 0 24 24" fill="none" className="relative size-8">
+        {/* track */}
+        <circle cx="12" cy="12" r="9" strokeWidth="2" className={cn("stroke-current", state === "error" ? "text-destructive/25" : "text-live/20")} />
+        {state === "active" && (
+          <g className="wake-orbit origin-center">
+            <circle cx="12" cy="12" r="9" strokeWidth="2" strokeLinecap="round" strokeDasharray={`${C * 0.28} ${C}`} className="text-live stroke-current" />
+            <circle cx="12" cy="3" r="1.6" className="text-live fill-current" />
+          </g>
+        )}
+        {state === "done" && (
+          <>
+            <circle cx="12" cy="12" r="9" strokeWidth="2" strokeLinecap="round" strokeDasharray={C} className="text-live wake-close stroke-current" style={{ transformOrigin: "center", transform: "rotate(-90deg)" }} />
+            <path d="M8.4 12.2l2.5 2.5 4.7-5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="12" className="text-live wake-check stroke-current" />
+          </>
+        )}
+        {state === "error" && (
+          <>
+            <circle cx="12" cy="12" r="9" strokeWidth="2" strokeLinecap="round" strokeDasharray={`${C * 0.82} ${C}`} className="text-destructive stroke-current" style={{ transformOrigin: "center", transform: "rotate(120deg)" }} />
+            <path d="M12 8v5M12 16v.5" strokeWidth="2" strokeLinecap="round" className="text-destructive stroke-current" />
+          </>
+        )}
+      </svg>
     </div>
   );
 }

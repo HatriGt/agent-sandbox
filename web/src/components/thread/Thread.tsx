@@ -177,6 +177,19 @@ export function Thread({
 
   const [removing, setRemoving] = React.useState(false);
 
+  // Sleep on demand: `msb stop`, nothing removed. Marking wokeRef first keeps the "open a sleeping
+  // thread wakes it" effect from bouncing the box straight back up.
+  const [sleepBusy, setSleepBusy] = React.useState(false);
+  const sleepNow = () => {
+    setSleepBusy(true);
+    wokeRef.current = box.name;
+    api
+      .sleep(box.name)
+      .then(() => toast.success(`${friendlyName(box.name)} is asleep`, { description: "The workspace and session are kept. Opening the thread or replying wakes it." }))
+      .catch((e: unknown) => toast.error("Could not put it to sleep", { description: e instanceof Error ? e.message : String(e) }))
+      .finally(() => setSleepBusy(false));
+  };
+
   const destroy = async () => {
     setRemoving(true);
     try {
@@ -348,6 +361,8 @@ export function Thread({
         activity={activity}
         showWorkspace={showWorkspace}
         removing={removing}
+        sleepNow={sleepNow}
+        sleepBusy={sleepBusy}
         onBack={onBack}
         onNew={onNew}
         onToggleWorkspace={() => (showWorkspace ? closeWorkspace() : setWorkspaceOpen(true))}

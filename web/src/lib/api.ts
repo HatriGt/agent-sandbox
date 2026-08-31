@@ -442,6 +442,7 @@ export const api = {
   title: (session: string) => post<{ title?: string }>("/title.json", { session }),
   /** Start a sleeping sandbox now (opening its thread does this automatically). */
   wake: (session: string) => post<{ ok: true }>("/wake.json", { session }),
+  sleep: (session: string) => post<{ ok: true }>("/sleep.json", { session }),
   rename: (session: string, title: string) => post<{ title: string }>("/rename.json", { session, title }),
   /** Every workspace file (flat paths) for the explorer tree. */
   tree: (session: string, signal?: AbortSignal) =>

@@ -41,7 +41,7 @@ export function Capacity({
                     s === "running" && "bg-live sheen",
                     s === "waiting" && "bg-attention",
                     s === "done" && (b?.exitCode ? "bg-destructive" : "bg-ok"),
-                    s === "idle" && "bg-muted-foreground/40",
+                    s === "idle" && "bg-live/45",
                     s === "sleeping" && "bg-sleep"
                   )}
                   aria-hidden

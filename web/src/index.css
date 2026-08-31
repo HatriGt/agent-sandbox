@@ -561,13 +561,43 @@
   animation: flow-dash 1.4s linear infinite;
 }
 
-/* Waiting texture for the waking card: cells brighten in a diagonal wave (delay set per cell). */
-@keyframes pixel-wave {
-  0%, 100% { opacity: 0.2; transform: scale(0.85); }
-  50% { opacity: 1; transform: scale(1); }
+/* Waking card: the power ring. A comet arc orbits while booting; the halo breathes behind it;
+   on wake the ring closes and the check draws in; the active rail segment sweeps left→right. */
+@keyframes wake-orbit {
+  to { transform: rotate(360deg); }
 }
-.pixel-wave {
-  animation: pixel-wave 1.4s ease-in-out infinite;
+.wake-orbit {
+  animation: wake-orbit 1.3s linear infinite;
+}
+@keyframes wake-halo {
+  0%, 100% { opacity: 0.5; transform: scale(0.9); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
+.wake-halo {
+  animation: wake-halo 2.2s ease-in-out infinite;
+}
+@keyframes wake-close {
+  from { stroke-dashoffset: 56.5; }
+  to { stroke-dashoffset: 0; }
+}
+.wake-close {
+  animation: wake-close 0.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+@keyframes wake-check {
+  from { stroke-dashoffset: 12; }
+  to { stroke-dashoffset: 0; }
+}
+.wake-check {
+  stroke-dashoffset: 12;
+  animation: wake-check 0.35s 0.4s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+@keyframes wake-fill {
+  0% { transform: translateX(-100%); }
+  60% { transform: translateX(-15%); }
+  100% { transform: translateX(-8%); }
+}
+.wake-fill {
+  animation: wake-fill 4s cubic-bezier(0.22, 1, 0.36, 1) forwards;
 }
 
 /* Trailing "…" that types itself, for one-line status text. */

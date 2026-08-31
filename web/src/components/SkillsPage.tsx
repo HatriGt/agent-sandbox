@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowLeft, Eye, PenLine, Plus, Search, Trash2, X } from "lucide-react";
+import { ArrowLeft, Check, Download, Eye, FileUp, Github, Loader2, Maximize2, Minimize2, PenLine, Plus, Search, Trash2, Upload, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
 import { api, type SkillView } from "@/lib/api";
@@ -7,10 +7,13 @@ import { useCached } from "@/lib/cache";
 import { fmtAgo } from "@/lib/format";
 import { SkillMark } from "@/lib/skillGlyph";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Markdown } from "@/components/ui/markdown";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { CodeEditor } from "@/components/CodeEditor";
 import { Bar } from "@/components/thread/Skeletons";
+import { fetchRepoFile, listRepoSkills, parseRepoInput, parseSkillMd, toSkillMd, type RepoRef, type RepoSkillFile } from "@/lib/skillImport";
 import { cn } from "@/lib/utils";
 
 /**
@@ -61,6 +64,26 @@ export function SkillsPage({ onBack }: { onBack: () => void }) {
   const skills = cached.data?.skills ?? null;
   const [query, setQuery] = React.useState("");
   const [editing, setEditing] = React.useState<{ initial?: SkillView; draft?: Draft } | null>(null);
+  const [browsing, setBrowsing] = React.useState(false);
+  const fileRef = React.useRef<HTMLInputElement>(null);
+
+  // Import from disk: one file opens in the editor for review, several are saved straight in.
+  const importFiles = async (files: FileList | null) => {
+    if (!files?.length) return;
+    const drafts = await Promise.all(Array.from(files).map(async (f) => parseSkillMd(await f.text(), f.name)));
+    if (drafts.length === 1) return setEditing({ draft: drafts[0] });
+    let saved = 0;
+    for (const d of drafts) {
+      try {
+        await api.skillMutate({ action: "upsert", skill: { ...d, enabled: true } });
+        saved++;
+      } catch (e) {
+        toast.error(`Could not import /${d.name}`, { description: e instanceof Error ? e.message : String(e) });
+      }
+    }
+    cached.setData(await api.skills());
+    if (saved) toast.success(`Imported ${saved} skill${saved === 1 ? "" : "s"}`);
+  };
 
   const mutate = React.useCallback(
     async (body: Record<string, unknown>, ok?: string) => {
@@ -110,6 +133,35 @@ export function SkillsPage({ onBack }: { onBack: () => void }) {
                   )}
                 </label>
               )}
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".md,.markdown,.txt"
+                multiple
+                className="hidden"
+                onChange={(e) => {
+                  void importFiles(e.target.files);
+                  e.target.value = "";
+                }}
+              />
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm" variant="outline">
+                    <Download />
+                    Import
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onSelect={() => fileRef.current?.click()}>
+                    <FileUp />
+                    From SKILL.md files…
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => setBrowsing(true)}>
+                    <Github />
+                    From a GitHub repository…
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Button size="sm" onClick={() => setEditing({ draft: { name: "", description: "", content: "" } })}>
                 <Plus />
                 New skill
@@ -149,6 +201,20 @@ export function SkillsPage({ onBack }: { onBack: () => void }) {
           <SkillTable skills={visible} onOpen={(s) => setEditing({ initial: s })} onMutate={mutate} />
         )}
       </div>
+
+      <RepoBrowser
+        open={browsing}
+        onClose={() => setBrowsing(false)}
+        existing={new Set((skills ?? []).map((s) => s.name))}
+        onImported={async (count) => {
+          cached.setData(await api.skills());
+          toast.success(`Imported ${count} skill${count === 1 ? "" : "s"} — every sandbox gets them on its next turn`);
+        }}
+        onEditOne={(d) => {
+          setBrowsing(false);
+          setEditing({ draft: d });
+        }}
+      />
 
       <AnimatePresence>
         {editing && <EditorSheet key="sheet" initial={editing.initial} draft={editing.draft} onMutate={mutate} onClose={() => setEditing(null)} />}
@@ -313,14 +379,43 @@ function EditorSheet({
   const nameRef = React.useRef<HTMLInputElement>(null);
   const valid = /^[a-z0-9][a-z0-9-]{0,49}$/.test(name.trim()) && description.trim() && content.trim();
 
+  // The sheet's width is yours: drag the left edge (remembered across sessions), or go full screen
+  // for a long playbook. Esc steps out of full screen first, then closes.
+  const MIN_W = 512;
+  const [width, setWidth] = React.useState(() => {
+    const w = Number(localStorage.getItem("skillSheetW"));
+    return Number.isFinite(w) && w >= MIN_W ? w : 672;
+  });
+  const [full, setFull] = React.useState(false);
+  const [dragging, setDragging] = React.useState(false);
+  const startDrag = (e: React.PointerEvent) => {
+    if (full) return;
+    e.preventDefault();
+    setDragging(true);
+    const at = (x: number) => Math.min(Math.max(window.innerWidth - x, MIN_W), window.innerWidth - 80);
+    const move = (ev: PointerEvent) => setWidth(at(ev.clientX));
+    const up = (ev: PointerEvent) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      setDragging(false);
+      localStorage.setItem("skillSheetW", String(Math.round(at(ev.clientX))));
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
   React.useEffect(() => {
     if (!initial) nameRef.current?.focus();
+  }, [initial]);
+  React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape") return;
+      if (full) setFull(false);
+      else onClose();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [initial, onClose]);
+  }, [onClose, full]);
 
   const save = async () => {
     if (!valid || busy) return;
@@ -374,13 +469,38 @@ function EditorSheet({
         animate={{ x: 0 }}
         exit={{ x: "104%" }}
         transition={{ type: "spring", stiffness: 380, damping: 38 }}
-        className="bg-card absolute inset-y-0 right-0 flex w-full max-w-2xl flex-col border-l shadow-e5"
+        style={full ? undefined : { width: `min(${Math.round(width)}px, 100%)` }}
+        className={cn(
+          "bg-card absolute flex flex-col shadow-e5",
+          dragging && "select-none",
+          full ? "inset-0 w-auto" : "inset-y-0 right-0 w-full border-l"
+        )}
       >
+        {/* Drag the left edge to resize; the width is remembered. */}
+        {!full && (
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize editor"
+            onPointerDown={startDrag}
+            className="group absolute inset-y-0 -left-1 z-10 hidden w-2.5 cursor-col-resize sm:block"
+          >
+            <span className={cn("absolute inset-y-0 left-1 w-[2px] transition-colors", dragging ? "bg-live" : "group-hover:bg-live/50")} />
+          </div>
+        )}
         <header className="flex h-14 shrink-0 items-center gap-3 border-b px-5">
           <SkillMark name={name || "skill"} size={18} className="text-muted-foreground" />
           <h2 className="text-foreground min-w-0 flex-1 truncate text-body font-semibold">
             {initial ? <span className="stamp">/{initial.name}</span> : "New skill"}
           </h2>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="icon-sm" onClick={() => setFull((v) => !v)} aria-label={full ? "Exit full screen" : "Full screen"} className="text-muted-foreground hidden sm:inline-flex">
+                {full ? <Minimize2 /> : <Maximize2 />}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{full ? "Exit full screen · Esc" : "Full screen"}</TooltipContent>
+          </Tooltip>
           <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close">
             <X />
           </Button>
@@ -466,6 +586,27 @@ function EditorSheet({
                   <X />
                 </Button>
               )}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label="Download as SKILL.md"
+                    className="text-muted-foreground"
+                    onClick={() => {
+                      const md = toSkillMd({ name: name.trim() || initial.name, description: description.trim(), content });
+                      const a = document.createElement("a");
+                      a.href = URL.createObjectURL(new Blob([md], { type: "text/markdown" }));
+                      a.download = `${name.trim() || initial.name}.SKILL.md`;
+                      a.click();
+                      URL.revokeObjectURL(a.href);
+                    }}
+                  >
+                    <Upload />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top">Download as SKILL.md</TooltipContent>
+              </Tooltip>
             </>
           )}
           <div className="ml-auto flex items-center gap-2">
@@ -479,6 +620,212 @@ function EditorSheet({
         </footer>
       </motion.div>
     </div>
+  );
+}
+
+/* ───────────────────────────── GitHub import ───────────────────────────── */
+
+/** Public repos that actually carry skills in the SKILL.md format — a starting point, not a store. */
+const FEATURED_REPOS = [
+  { repo: "anthropics/skills", blurb: "Anthropic's own skill collection" },
+  { repo: "anthropics/claude-code", blurb: "Skills shipped with Claude Code" },
+];
+
+/**
+ * Browse a public GitHub repository for skills and pull them in. All of it happens in the browser
+ * against api.github.com / raw.githubusercontent.com — no token, public repos only, nothing about
+ * your account leaves the page. Found files list with checkboxes: pick one to review it in the
+ * editor first, or several to import in one go.
+ */
+function RepoBrowser({
+  open,
+  existing,
+  onClose,
+  onImported,
+  onEditOne,
+}: {
+  open: boolean;
+  existing: Set<string>;
+  onClose: () => void;
+  onImported: (count: number) => void | Promise<void>;
+  onEditOne: (d: Draft) => void;
+}) {
+  const [input, setInput] = React.useState("");
+  const [loading, setLoading] = React.useState(false);
+  const [err, setErr] = React.useState<string | null>(null);
+  const [found, setFound] = React.useState<{ ref: RepoRef; branch: string; files: RepoSkillFile[] } | null>(null);
+  const [picked, setPicked] = React.useState<Set<string>>(new Set());
+  const [importing, setImporting] = React.useState(false);
+
+  React.useEffect(() => {
+    if (open) return;
+    setInput("");
+    setErr(null);
+    setFound(null);
+    setPicked(new Set());
+  }, [open]);
+
+  const browse = async (raw: string) => {
+    setErr(null);
+    setFound(null);
+    setPicked(new Set());
+    setLoading(true);
+    try {
+      const ref = parseRepoInput(raw);
+      const r = await listRepoSkills(ref);
+      if (!r.files.length) setErr("No skills here — the repo has no SKILL.md files or skills/ markdown.");
+      else setFound({ ref, ...r });
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const doImport = async () => {
+    if (!found || !picked.size) return;
+    setImporting(true);
+    try {
+      const files = found.files.filter((f) => picked.has(f.path));
+      const drafts = await Promise.all(files.map(async (f) => parseSkillMd(await fetchRepoFile(found.ref, found.branch, f.path), f.name)));
+      if (drafts.length === 1) return onEditOne(drafts[0]);
+      let saved = 0;
+      for (const d of drafts) {
+        try {
+          await api.skillMutate({ action: "upsert", skill: { ...d, enabled: true } });
+          saved++;
+        } catch (e) {
+          toast.error(`Could not import /${d.name}`, { description: e instanceof Error ? e.message : String(e) });
+        }
+      }
+      if (saved) await onImported(saved);
+      onClose();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent title="Import from GitHub" description="Browse a public repository — SKILL.md folders and skills/ markdown come in as they are." className="w-[min(40rem,calc(100vw-2rem))]">
+        <form
+          className="flex gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void browse(input);
+          }}
+        >
+          <label className="focus-within:ring-ring bg-background flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md border px-2.5 transition-shadow focus-within:ring-2">
+            <Search className="text-muted-foreground size-3.5 shrink-0" aria-hidden />
+            <input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="owner/repo or a github.com URL"
+              aria-label="Repository"
+              spellCheck={false}
+              className="text-foreground placeholder:text-muted-foreground h-full w-full bg-transparent text-meta outline-none"
+            />
+          </label>
+          <Button type="submit" size="sm" disabled={!input.trim() || loading}>
+            {loading ? <Loader2 className="animate-spin" /> : <Search />}
+            Browse
+          </Button>
+        </form>
+
+        {!found && !loading && !err && (
+          <div className="mt-4 overflow-hidden rounded-lg border">
+            <p className="label text-muted-foreground bg-muted/60 border-b px-3 py-2">Try one of these</p>
+            <ul className="divide-y">
+              {FEATURED_REPOS.map((f) => (
+                <li key={f.repo}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setInput(f.repo);
+                      void browse(f.repo);
+                    }}
+                    className="group hover:bg-muted/50 flex w-full cursor-pointer items-center gap-2.5 px-3 py-2.5 text-left transition-colors"
+                  >
+                    <Github className="text-muted-foreground size-4 shrink-0" aria-hidden />
+                    <span className="stamp text-foreground shrink-0 text-meta font-medium">{f.repo}</span>
+                    <span className="text-muted-foreground min-w-0 flex-1 truncate text-meta">{f.blurb}</span>
+                    <span className="text-live shrink-0 text-meta font-medium opacity-0 transition-opacity group-hover:opacity-100">Browse →</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {err && (
+          <p role="alert" className="text-destructive mt-3 text-meta">
+            {err}
+          </p>
+        )}
+
+        {found && (
+          <>
+            <div className="mt-4 mb-2 flex items-baseline justify-between gap-3">
+              <p className="text-muted-foreground min-w-0 truncate text-meta">
+                <span className="stamp text-foreground">
+                  {found.ref.owner}/{found.ref.repo}
+                </span>{" "}
+                @ {found.branch} · {found.files.length} found
+              </p>
+              <button
+                type="button"
+                onClick={() => setPicked(picked.size === found.files.length ? new Set() : new Set(found.files.map((f) => f.path)))}
+                className="text-live shrink-0 cursor-pointer text-meta font-medium hover:underline"
+              >
+                {picked.size === found.files.length ? "Clear" : "Select all"}
+              </button>
+            </div>
+            <ul className="max-h-72 divide-y overflow-y-auto rounded-lg border">
+              {found.files.map((f) => {
+                const on = picked.has(f.path);
+                return (
+                  <li key={f.path}>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setPicked((p) => {
+                          const n = new Set(p);
+                          if (n.has(f.path)) n.delete(f.path);
+                          else n.add(f.path);
+                          return n;
+                        })
+                      }
+                      className={cn("hover:bg-muted/50 flex w-full cursor-pointer items-center gap-3 px-3 py-2.5 text-left transition-colors", on && "bg-live/5")}
+                    >
+                      <span className={cn("grid size-4 shrink-0 place-items-center rounded-[3px] border transition-colors", on ? "bg-live border-live text-white" : "bg-background")}>
+                        {on && <Check className="size-3" aria-hidden />}
+                      </span>
+                      <SkillMark name={f.name} size={16} className="text-muted-foreground" />
+                      <span className="min-w-0 flex-1">
+                        <span className="stamp text-foreground block truncate text-meta font-medium">/{f.name}</span>
+                        <span className="text-faint block truncate text-micro">{f.path}</span>
+                      </span>
+                      {existing.has(f.name) && <span className="text-attention-text shrink-0 text-micro">replaces yours</span>}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+            <div className="mt-4 flex justify-end gap-2">
+              <Button variant="ghost" size="sm" onClick={onClose}>
+                Cancel
+              </Button>
+              <Button size="sm" onClick={() => void doImport()} disabled={!picked.size || importing}>
+                {importing ? <Loader2 className="animate-spin" /> : <Download />}
+                {picked.size === 1 ? "Review & import" : picked.size ? `Import ${picked.size}` : "Import"}
+              </Button>
+            </div>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
 

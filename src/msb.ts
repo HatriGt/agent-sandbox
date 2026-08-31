@@ -1108,6 +1108,10 @@ const lastLsStatus = new Map<string, { status: string; at: number }>();
 export function noteRunning(box: string): void {
   lastLsStatus.set(box, { status: "Running", at: Date.now() });
 }
+/** After `msb stop`, treat the box as asleep at once so no reader execs into it and re-boots it. */
+export function noteStopped(box: string): void {
+  lastLsStatus.set(box, { status: "Stopped", at: Date.now() });
+}
 export function knownStopped(box: string, maxAgeMs = 15_000): boolean {
   const e = lastLsStatus.get(box);
   return !!e && !isRunning(e.status) && Date.now() - e.at < maxAgeMs;

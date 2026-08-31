@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowLeft, FileText, FolderTree, Link2, Loader2, MoreHorizontal, Pencil, Pin, PinOff, Plus, RotateCw, Trash2 } from "lucide-react";
+import { ArrowLeft, FileText, FolderTree, Link2, Loader2, Moon, MoreHorizontal, Pencil, Pin, PinOff, Plus, RotateCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import type { BoxView } from "@/lib/api";
 import { fmtAgo, friendlyName, roleLabel, shortName } from "@/lib/format";
@@ -39,6 +39,8 @@ export function ThreadHeader({
   activity,
   showWorkspace,
   removing,
+  sleepNow,
+  sleepBusy,
   onBack,
   onNew,
   onToggleWorkspace,
@@ -64,6 +66,9 @@ export function ThreadHeader({
   activity?: string | null;
   showWorkspace: boolean;
   removing: boolean;
+  /** Put the machine to sleep now (msb stop, nothing removed). Hidden while already asleep. */
+  sleepNow?: () => void;
+  sleepBusy?: boolean;
   onBack: () => void;
   onNew: () => void;
   onToggleWorkspace: () => void;
@@ -242,6 +247,13 @@ export function ThreadHeader({
                 <MenuHint>new machine, same brief</MenuHint>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
+              {!sleeping && sleepNow && (
+                <DropdownMenuItem onSelect={sleepNow} disabled={sleepBusy || state === "running"}>
+                  <Moon />
+                  Sleep now
+                  <MenuHint>{state === "running" ? "busy — finish first" : "a reply wakes it"}</MenuHint>
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem destructive onSelect={() => setConfirm(true)}>
                 <Trash2 />
                 Destroy machine…
