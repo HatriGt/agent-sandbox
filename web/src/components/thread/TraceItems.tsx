@@ -12,6 +12,7 @@ import { StreamingMarkdown } from "./StreamingMarkdown";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { ATTACHMENT_RE, useSession } from "@/lib/session-context";
+import { SkillMark } from "@/lib/skillGlyph";
 import { Lightbox } from "@/components/ui/lightbox";
 
 /**
@@ -373,6 +374,10 @@ export function YouItem({ text, label = "You" }: { text: string; label?: string 
   // Image attachments ride in the message as in-box paths; show them as thumbnails, not as text.
   const attachments = React.useMemo(() => [...new Set(text.match(ATTACHMENT_RE) ?? [])], [text]);
   const body = React.useMemo(() => (attachments.length ? text.replace(/\n*Attached images? \(open with the Read tool\):[\s\S]*$/, "").trim() : text), [text, attachments.length]);
+  // A leading /skill token renders as a tinted tag, not prose — the same face it had in the composer.
+  const skillMatch = body.match(/^\/([a-z0-9][a-z0-9-]{0,49})(?:\s+([\s\S]*))?$/);
+  const skillName = skillMatch?.[1] ?? null;
+  const rest = skillMatch ? (skillMatch[2] ?? "").trim() : body;
   return (
     <div className="enter flex flex-col items-end gap-1.5">
       <span className="label text-muted-foreground pr-1">{label}</span>
@@ -385,7 +390,17 @@ export function YouItem({ text, label = "You" }: { text: string; label?: string 
       )}
       {body && (
         <div className="bg-muted text-foreground max-w-[min(72%,60ch)] rounded-xl rounded-br-md px-4 py-2.5 text-lead whitespace-pre-wrap">
-          {body}
+          {skillName ? (
+            <>
+              <span className="border-live/30 bg-live/10 text-live stamp mr-1.5 inline-flex translate-y-[-1px] items-center gap-1 rounded-md border px-1.5 py-0.5 align-middle text-micro font-semibold">
+                <SkillMark name={skillName} size="sm" className="size-3.5 rounded-sm bg-transparent" />
+                /{skillName}
+              </span>
+              {rest}
+            </>
+          ) : (
+            body
+          )}
         </div>
       )}
     </div>

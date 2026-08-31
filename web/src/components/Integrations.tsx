@@ -3,7 +3,6 @@ import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Accounts } from "@/components/Accounts";
 import { McpServers } from "@/components/McpServers";
-import { Skills } from "@/components/Skills";
 
 /**
  * Integrations: what every sandbox is given — GitHub identities and MCP servers. One column, two
@@ -33,7 +32,6 @@ export function Integrations({ onBack }: { onBack: () => void }) {
             </div>
             <Accounts embedded />
           </section>
-          <Skills />
           <McpServers />
         </div>
       </div>

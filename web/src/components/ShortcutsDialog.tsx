@@ -7,6 +7,7 @@ const GROUPS: { title: string; rows: [string[], string][] }[] = [
       [["⌘", "K"], "Search machines and actions"],
       [["n"], "New task"],
       [["g", "f"], "Fleet view"],
+      [["g", "s"], "Skills"],
       [["g", "a"], "Integrations"],
       [["j"], "Next machine"],
       [["k"], "Previous machine"],

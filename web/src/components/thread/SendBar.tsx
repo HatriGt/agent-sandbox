@@ -10,7 +10,9 @@ import { Button } from "@/components/ui/button";
 import { PromptInput, PromptInputActions, PromptInputTextarea } from "@/components/ui/prompt-input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { MentionMenu, expandMentions, mentionAt, type MentionState } from "./MentionMenu";
-import { SkillMenu, slashAt, type SlashState } from "./SkillMenu";
+import { SkillChip, SkillMenu, slashAt, type SlashState } from "./SkillMenu";
+import { useCached } from "@/lib/cache";
+import type { SkillView } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 type Mode = "agent" | "side";
@@ -66,6 +68,11 @@ export function SendBar({
   // `/skill` menu: open while the message starts with `/` and something matches an enabled skill.
   const [slash, setSlash] = React.useState<SlashState | null>(null);
   const [slashMatches, setSlashMatches] = React.useState(0);
+  // The chosen skill rides as a chip above the text (like file mentions), not as raw `/name` prose.
+  const skillsCache = useCached("skills", (signal) => api.skills(signal));
+  const [skill, setSkill] = React.useState<SkillView | null>(null);
+  React.useEffect(() => setSkill(null), [boxName]);
+  const findSkill = (name: string) => (skillsCache.data?.skills ?? []).find((s) => s.enabled && s.name === name) ?? null;
   // Images pasted, dropped or picked: kept as data URLs for the preview, uploaded into the sandbox on
   // send (/workspace/.attachments) and referenced in the message so the agent opens them with Read.
   const [images, setImages] = React.useState<{ id: string; name: string; dataUrl: string; size: number }[]>([]);
@@ -115,22 +122,32 @@ export function SendBar({
     const el = textarea();
     const caret = el?.selectionStart ?? next.length;
     setMention(mentionAt(next, caret));
-    setSlash(slashAt(next, caret));
+    setSlash(skill ? null : slashAt(next, caret));
+    // Typing a full `/name ` by hand converts to the chip the moment the space lands — same result
+    // as picking from the menu, so both paths look identical in the composer.
+    if (!skill) {
+      const m = next.match(/^\/([a-z0-9][a-z0-9-]*)\s/);
+      const hit = m ? findSkill(m[1]) : null;
+      if (hit) {
+        setSkill(hit);
+        setValue(next.slice(m![0].length));
+        setSlash(null);
+      }
+    }
   };
 
   const pickSkill = (name: string) => {
-    // Replace the `/query` first token with the chosen `/name ` and keep typing the arguments.
+    // The `/query` token becomes a chip; whatever follows stays as the message.
+    const hit = findSkill(name);
     const rest = value.replace(/^\/\S*\s?/, "");
-    const next = `/${name} ${rest}`;
-    setValue(next);
+    if (hit) {
+      setSkill(hit);
+      setValue(rest);
+    } else {
+      setValue(`/${name} ${rest}`);
+    }
     setSlash(null);
-    requestAnimationFrame(() => {
-      const t = textarea();
-      if (!t) return;
-      t.focus();
-      const pos = name.length + 2;
-      t.setSelectionRange(pos, pos);
-    });
+    requestAnimationFrame(() => textarea()?.focus());
   };
 
   const pickFile = (path: string) => {
@@ -154,12 +171,15 @@ export function SendBar({
 
   const send = async () => {
     const text = value.trim();
-    if ((!text && !files.length && !images.length) || sending) return;
+    if ((!text && !files.length && !images.length && !skill) || sending) return;
     setSending(true);
     setError(null);
     const attached = files;
     const attachedImages = images;
+    const chosenSkill = skill;
     let message = expandMentions(files.length ? `${text}\n\nFiles: ${files.map((f) => `@${f}`).join(" ")}` : text);
+    // The skill rides as the leading /token — the agent is instructed to invoke it for the message.
+    if (chosenSkill) message = `/${chosenSkill.name}${message ? ` ${message}` : ""}`;
     try {
       // Upload images first so the message can name their in-box paths.
       if (attachedImages.length) {
@@ -176,15 +196,20 @@ export function SendBar({
         setValue("");
         setFiles([]);
         setImages([]);
+        setSkill(null);
         onAsk(message);
       } else {
         setValue("");
         setFiles([]);
         setImages([]);
+        setSkill(null);
         // Echo NOW. The controller wakes/kicks the run in a few seconds; a message that only appears
         // when the server answers reads as a broken chat. The echo is withdrawn if delivery fails,
         // and the durable ⟦you⟧ line in the log replaces it once it lands.
-        const echo = (attached.length ? `${text}\n${attached.map((f) => `@${f}`).join(" ")}` : text) + (message.includes("Attached image") ? message.slice(message.indexOf("Attached image") - 2) : "");
+        const echo =
+          (chosenSkill ? `/${chosenSkill.name} ` : "") +
+          (attached.length ? `${text}\n${attached.map((f) => `@${f}`).join(" ")}` : text) +
+          (message.includes("Attached image") ? message.slice(message.indexOf("Attached image") - 2) : "");
         if (!busy) onReplied(echo);
         try {
           const res = await api.resume(boxName, message);
@@ -207,6 +232,7 @@ export function SendBar({
       setValue(text);
       setFiles(attached);
       setImages(attachedImages);
+      setSkill(chosenSkill);
       toast.error("Could not send", { description: msg });
     } finally {
       setSending(false);
@@ -281,6 +307,11 @@ export function SendBar({
               ))}
             </div>
           )}
+          {skill && (
+            <div className="flex flex-wrap gap-1.5 px-2 pt-1.5" onClick={(e) => e.stopPropagation()}>
+              <SkillChip skill={skill} onRemove={() => setSkill(null)} />
+            </div>
+          )}
           <label htmlFor="send-input" className="sr-only">
             {toAgent ? "Message the agent" : "Ask a side question about this run"}
           </label>
@@ -326,13 +357,15 @@ export function SendBar({
             onKeyUp={() => updateMention(value)}
             onClick={() => updateMention(value)}
             placeholder={
-              sleeping
-                ? "Type ahead — sends once the sandbox is awake…"
-                : toAgent
-                  ? busy
-                    ? "Queue a follow-up for when this turn finishes…"
-                    : "Send a follow-up instruction…"
-                  : "Ask about this run — what changed, what is it doing, why is it stuck…"
+              skill
+                ? `Add details for /${skill.name} — or just send…`
+                : sleeping
+                  ? "Type ahead — sends once the sandbox is awake…"
+                  : toAgent
+                    ? busy
+                      ? "Queue a follow-up for when this turn finishes…"
+                      : "Send a follow-up instruction… ( / for skills · @ for files )"
+                    : "Ask about this run — what changed, what is it doing, why is it stuck…"
             }
           />
           <PromptInputActions className="justify-between gap-2 pt-1">
@@ -426,7 +459,7 @@ export function SendBar({
               variant={toAgent ? "primary" : "outline"}
               size="icon"
               onClick={send}
-              disabled={sending || (!value.trim() && !files.length && !images.length)}
+              disabled={sending || (!value.trim() && !files.length && !images.length && !skill)}
               aria-label={toAgent ? (busy ? "Queue for the agent" : "Send to the agent") : "Ask a side question"}
               className="rounded-full transition-[opacity,transform,background-color] duration-200 disabled:opacity-35 enabled:hover:scale-105"
             >
