@@ -54,6 +54,7 @@ import { probeToken } from "./gh-probe.js";
 import { viewAccounts, deviceStart, devicePoll } from "./accounts.js";
 import { makeRepoLister, fetchGithubRepos, matchRepos, inferRepos, attachRepoToBox } from "./repos.js";
 import { loadMcpStore, saveMcpStore, normalizeServer, parseMcpImport, viewServers, toEditableConfig, replaceFromJson, mergeSecrets, type McpServer as McpServerDef } from "./mcp-store.js";
+import { loadSkillStore, saveSkillStore, normalizeSkill, viewSkills, type SkillDef } from "./skill-store.js";
 import { listClaims, listKept, markKept, unmarkKept } from "./claims.js";
 import { makeRedactor } from "./redact.js";
 import { isSecretKey } from "./mcp-store.js";
@@ -1134,6 +1135,48 @@ app.post("/mcp-servers.json", async (req: Request, res: Response) => {
     }
     await saveMcpStore(cfg, store);
     res.json({ servers: viewServers(store), config: toEditableConfig(store) });
+  } catch (e) {
+    res.status(400).json({ error: String((e as Error).message ?? e) });
+  }
+});
+
+// Skills: the owner's reusable playbooks, synced into every box before each run/resume. Same shape
+// of API as the MCP servers: one GET for the list, one POST with an action.
+app.get("/skills.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  try {
+    res.json({ skills: viewSkills(await loadSkillStore(cfg)) });
+  } catch (e) {
+    failWith(res, e);
+  }
+});
+app.post("/skills.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  try {
+    const store = await loadSkillStore(cfg);
+    const action = body.action;
+    if (action === "upsert") {
+      const s = normalizeSkill(body.skill as Partial<SkillDef> & { name: string });
+      // Rename: the entry moves under the new name and the old one goes.
+      const previous = typeof body.previousName === "string" ? body.previousName : "";
+      if (previous && previous !== s.name && store.skills[previous]) {
+        s.addedAt = store.skills[previous].addedAt;
+        delete store.skills[previous];
+      }
+      if (store.skills[s.name]) s.addedAt = store.skills[s.name].addedAt;
+      store.skills[s.name] = s;
+    } else if (action === "remove") {
+      delete store.skills[String(body.name ?? "")];
+    } else if (action === "toggle") {
+      const s = store.skills[String(body.name ?? "")];
+      if (s) s.enabled = body.enabled !== false;
+    } else {
+      res.status(400).json({ error: "unknown action" });
+      return;
+    }
+    await saveSkillStore(cfg, store);
+    res.json({ skills: viewSkills(store) });
   } catch (e) {
     res.status(400).json({ error: String((e as Error).message ?? e) });
   }

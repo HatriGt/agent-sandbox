@@ -425,9 +425,21 @@ export function Thread({
 
             {!sleeping && !loadingTrace && runState === "done" && (
               <RunSummary
-                label={exitCode == null || exitCode === 0 ? "Completed" : "Exited with an error"}
+                label={
+                  exitCode == null || exitCode === 0
+                    ? "Completed"
+                    : exitCode === 254
+                      ? "Run interrupted"
+                      : "Exited with an error"
+                }
                 failed={exitCode != null && exitCode !== 0}
-                detail={exitCode == null || exitCode === 0 ? deadlineText ?? undefined : `code ${exitCode}`}
+                detail={
+                  exitCode == null || exitCode === 0
+                    ? deadlineText ?? undefined
+                    : exitCode === 254
+                      ? "the sandbox restarted mid-run — send a message to continue"
+                      : `code ${exitCode}`
+                }
                 stats={runStats(events)}
                 onCopy={async () => toMarkdown(events, { title, machine: friendlyName(box.name), url: window.location.href })}
                 onAgain={newFromThis}

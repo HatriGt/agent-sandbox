@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowLeft, Hourglass, MessageSquare, Pause, Trash2, X } from "lucide-react";
+import { ArrowLeft, ChevronRight, Hourglass, Pause, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, type FleetLifecycle } from "@/lib/api";
 import { friendlyName, roleLabel, shortName, threadSort, threadTitle } from "@/lib/format";
@@ -141,7 +141,7 @@ export function Sandboxes({
   );
 }
 
-const COLS = "md:grid-cols-[8rem_minmax(0,1fr)_13.5rem_8.5rem_10rem]";
+const COLS = "md:grid-cols-[8rem_minmax(0,1fr)_13.5rem_8.5rem_6rem]";
 
 function MachineTable({
   boxes,
@@ -161,7 +161,7 @@ function MachineTable({
         <span>Task</span>
         <span>Machine</span>
         <span>Time left</span>
-        <span className="text-right">Actions</span>
+        <span aria-hidden />{/* row is the action: click opens the thread */}
       </div>
       <ul className="divide-y">
         {boxes.map((b) => (
@@ -214,11 +214,23 @@ function MachineRow({
   return (
     <li
       className={cn(
-        "hover:bg-muted/50 grid grid-cols-1 gap-2 px-4 py-3 transition-colors md:items-center md:gap-3",
+        "group hover:bg-muted/50 relative grid grid-cols-1 gap-2 px-4 py-3 transition-colors md:items-center md:gap-3",
         COLS,
         box.leaving && "opacity-50"
       )}
     >
+      {/* The row IS the open action: a stretched button under the content (first child, so every
+          later positioned sibling — destroy, the time-left tooltip — paints and clicks above it).
+          Real button, so it stays keyboard-tabbable and screen-reader announced. */}
+      <button
+        type="button"
+        onClick={() => onOpen(box.name)}
+        onMouseEnter={() => prefetchWatch(box.name)}
+        onFocus={() => prefetchWatch(box.name)}
+        disabled={box.leaving}
+        aria-label={`Open ${friendlyName(box.name)} — ${box.task ? threadTitle(box) : "no task yet"}`}
+        className="absolute inset-0 cursor-pointer rounded-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+      />
       <div className="flex items-center gap-2">
         <StateStamp state={state} exitCode={box.exitCode} />
         <span className="label text-muted-foreground md:hidden">{box.leaving ? "shutting down" : roleLabel(box.role)}</span>
@@ -254,8 +266,9 @@ function MachineRow({
         )}
       </div>
 
-      {/* Time left: the nearer of the run cap and the idle-stop estimate, with a slim track. */}
-      <div className="hidden md:block">
+      {/* Time left: the nearer of the run cap and the idle-stop estimate, with a slim track.
+          `relative` lifts it above the stretched row button so its tooltip still hovers. */}
+      <div className="relative hidden md:block">
         {deadline.remainingSec != null ? (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -280,17 +293,18 @@ function MachineRow({
         )}
       </div>
 
-      <div className="flex items-center gap-1.5 md:justify-end">
-        <Button
-          size="sm"
-          variant={waiting ? "attention" : "outline"}
-          onClick={() => onOpen(box.name)}
-          onMouseEnter={() => prefetchWatch(box.name)}
-          disabled={box.leaving}
-        >
-          {waiting ? <Pause strokeWidth={2.5} /> : <MessageSquare />}
-          {waiting ? "Answer" : "Open"}
-        </Button>
+      {/* Trailing cell: destroy (lifted above the row button) + a cue for what a click does. */}
+      <div className="relative flex items-center gap-1.5 md:justify-end">
+        {waiting ? (
+          <span className="text-attention-text pointer-events-none mr-auto text-meta font-semibold md:mr-0 md:order-last">
+            Answer →
+          </span>
+        ) : (
+          <ChevronRight
+            className="text-muted-foreground pointer-events-none mr-auto size-4 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 md:order-last md:mr-0"
+            aria-hidden
+          />
+        )}
         {armed ? (
           <>
             <Button size="sm" variant="destructive" onClick={destroy} disabled={removing}>

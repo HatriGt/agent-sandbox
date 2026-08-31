@@ -87,8 +87,13 @@ export function stateNoun(s: RunState): string {
   return s === "waiting" ? "needs you" : s;
 }
 
-/** A clean exit is just "done"; a non-zero (or unknown) exit keeps the code as a real failure signal. */
+/**
+ * A clean exit is just "done"; a non-zero (or unknown) exit keeps the code as a real failure signal.
+ * 254 is the controller's reserved "run interrupted" code: the sandbox stopped mid-run (idle reaper,
+ * host restart) and the status probe healed the stale run marker — the session is intact and resumable.
+ */
 export function doneLabel(exitCode?: number): string {
+  if (exitCode === 254) return "interrupted";
   return exitCode === 0 ? "done" : `exit ${exitCode ?? "?"}`;
 }
 

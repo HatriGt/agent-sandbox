@@ -11,6 +11,7 @@ import { sshMuxOpts } from "./ssh.js";
 import { listClaims, listKept, markClaimed, shouldKeepStopped, unmarkClaimed, unmarkKept } from "./claims.js";
 import { guardNodeProgram } from "./guard.js";
 import { loadMcpStore, toClaudeMcpConfig } from "./mcp-store.js";
+import { enabledSkills, loadSkillStore, toSkillMd } from "./skill-store.js";
 import { reposPromptHint, type RepoLayout } from "./agent-prompt.js";
 import { secretEnvFlags } from "./secret-env.js";
 import {
@@ -400,7 +401,11 @@ const AGENT_SYS_PROMPT =
   "your work. " +
   "Ask only when it genuinely matters — keep moving on things you can determine yourself. Never print, " +
   "echo, or log secret values (tokens, passwords, connection strings): refer to them only by their env " +
-  "var name, and never write a secret value into the question file.";
+  "var name, and never write a secret value into the question file. " +
+  // Dashboard-configured skills are synced into ~/.claude/skills before every turn (installSkills).
+  "The caller may have installed skills (reusable playbooks). When a message starts with " +
+  "/<skill-name> matching an available skill, invoke that skill with the Skill tool and follow it " +
+  "for the rest of the message; otherwise use skills whenever their description matches the task.";
 
 function agentEnvFlags(
   cfg: Config,
@@ -707,13 +712,35 @@ function bootstrapScript(cfg: Config): string {
 // the concrete tools the agent needs instead. Bash covers git/gh/npm; this is safe because the
 // box is an isolated microVM with a curated egress allowlist. --allowedTools takes multiple
 // space-separated values, so it goes LAST in the command.
-const ALLOWED_TOOLS = "Bash Edit Write Read Glob Grep TodoWrite WebFetch WebSearch";
+// Skill lets claude load dashboard-configured skills (installed under /root/.claude/skills).
+const ALLOWED_TOOLS = "Bash Edit Write Read Glob Grep TodoWrite WebFetch WebSearch Skill";
 
 // Stable in-box paths (above per-repo dirs so `status` finds them regardless of repo layout).
 const AGENT_LOG = "/workspace/.agent.log";
 const DONE_MARK = "/workspace/.agent.done"; // written with the exit code when the run finishes
 const RUN_MARK = "/workspace/.agent.running"; // present while a run is in flight
+const PID_MARK = "/workspace/.agent.pid"; // pid of the run wrapper, for liveness checks
 const TASK_MARK = "/workspace/.agent.task"; // the current task/follow-up text, so `monitor` can show it
+
+/**
+ * Shell fragment that reports the run state — with a liveness check. RUN_MARK alone is not proof of
+ * a live run: if the microVM is stopped mid-run (idle reaper, host restart) or the wrapper is killed,
+ * the marker survives on disk and every reader reports run:running forever. That deadlocks the whole
+ * thread: the dashboard shows "working…" with no output, and /resume.json queues every new message to
+ * the inbox, which only delivers on done/idle. So: a marker whose recorded pid is dead, or that
+ * predates the current boot (older than /proc/1), is stale — heal it to done(254) in place and note
+ * the interruption in the log so the user sees why the run ended. 254 is reserved for "interrupted".
+ */
+const RUN_STATE_SH =
+  `if [ -f ${RUN_MARK} ]; then ` +
+  `p=$(cat ${PID_MARK} 2>/dev/null); ` +
+  `if { [ -n "$p" ] && [ ! -d "/proc/$p" ]; } || [ ${RUN_MARK} -ot /proc/1 ]; then ` +
+  `echo 254 > ${DONE_MARK}; rm -f ${RUN_MARK}; ` +
+  `echo "run interrupted: the sandbox restarted mid-run. Send a message to continue." >> ${AGENT_LOG}; ` +
+  `echo "run:done exit=254"; ` +
+  `else echo "run:running"; fi; ` +
+  `elif [ -f ${DONE_MARK} ]; then echo "run:done exit=$(cat ${DONE_MARK} 2>/dev/null)"; ` +
+  `else echo "run:idle"; fi`;
 
 // Sentinels the resume path writes into the log to record a user follow-up as a first-class turn.
 // The trace parser (web/src/lib/trace.ts) recognises the same pair and emits a `you` event, so the
@@ -745,6 +772,28 @@ export async function installMcpConfig(cfg: Config, box: string): Promise<void> 
     await exec(cfg, box, `printf '%s' ${shellQuote(json)} > ${MCP_CONFIG_PATH} && chmod 600 ${MCP_CONFIG_PATH}`);
   } catch (e) {
     console.error(`[mcp] could not install MCP config into ${box}:`, (e as Error).message);
+  }
+}
+
+/** Where dashboard-configured skills land inside the box. `--setting-sources user` loads exactly
+ *  this tree, so the in-box claude discovers them natively (and repo-shipped skills never load). */
+const SKILLS_DIR = "/root/.claude/skills";
+
+/**
+ * Sync the owner's enabled skills into the box before every run/resume: the whole tree is replaced,
+ * so an edit, a disable, or a delete on the dashboard reaches the very next turn. One exec for all
+ * of them. Best-effort: a skill must never block a run.
+ */
+export async function installSkills(cfg: Config, box: string): Promise<void> {
+  try {
+    const skills = enabledSkills(await loadSkillStore(cfg));
+    const parts = [`rm -rf ${SKILLS_DIR}`];
+    for (const s of skills) {
+      parts.push(`mkdir -p ${SKILLS_DIR}/${s.name} && printf '%s' ${shellQuote(toSkillMd(s))} > ${SKILLS_DIR}/${s.name}/SKILL.md`);
+    }
+    await exec(cfg, box, parts.join(" && "));
+  } catch (e) {
+    console.error(`[skills] could not install skills into ${box}:`, (e as Error).message);
   }
 }
 
@@ -794,14 +843,16 @@ function agentSh(workdir: string, resume: boolean): string {
     // sets it; a resume appends the follow-up so the marker reflects the latest ask.
     `cd ${workdir} && printf '%s\\n' "$AGENT_TASK" ${resume ? `>> ${TASK_MARK}` : `> ${TASK_MARK}`} && ` +
     echoFollowup +
-    `rm -f ${DONE_MARK} ${QUESTION_MARK} && touch ${RUN_MARK} && ` +
+    // $$ is this wrapper's pid — the process that writes DONE_MARK at the end — recorded so status
+    // reads can tell a live run from a stale marker left by a mid-run VM stop (see RUN_STATE_SH).
+    `rm -f ${DONE_MARK} ${QUESTION_MARK} && touch ${RUN_MARK} && echo $$ > ${PID_MARK} && ` +
     // pipefail so the recorded exit reflects claude's, not the formatter's. Claude's raw stderr also
     // lands in the log (errors aren't JSON). The formatter appends readable lines to the same log as
     // events stream in, tailing live for the dashboard. Run under bash (present in the node image) so
     // pipefail is available.
     `{ set -o pipefail; ` +
     `${claude} 2>> ${AGENT_LOG} | node "$HOME/.claude/stream-fmt.js" ${AGENT_LOG}; ` +
-    `echo $? > ${DONE_MARK}; rm -f ${RUN_MARK}; }`;
+    `echo $? > ${DONE_MARK}; rm -f ${RUN_MARK} ${PID_MARK}; }`;
   // nohup + bash + & so the child outlives the exec shell; redirect all fds so exec doesn't block.
   return `nohup bash -c ${shellQuote(inner)} >/dev/null 2>&1 < /dev/null & echo started`;
 }
@@ -883,7 +934,7 @@ export async function runAgentTask(
   await msb(cfg, ["exec", box, ...env, "--", "sh", "-lc", bootstrapScript(cfg)]);
   await applyGitCredentials(cfg, box, creds);
   await trustWorkspace(cfg, box);
-  await installMcpConfig(cfg, box);
+  await Promise.all([installMcpConfig(cfg, box), installSkills(cfg, box)]);
   return msb(cfg, ["exec", box, ...env, "--", "sh", "-lc", agentSh(workdir, false)]);
 }
 
@@ -953,9 +1004,7 @@ async function readProgressRaw(cfg: Config, box: string, logLines = LOG_TAIL_LIN
   const r = await exec(
     cfg,
     box,
-    `if [ -f ${RUN_MARK} ]; then echo "run:running"; ` +
-      `elif [ -f ${DONE_MARK} ]; then echo "run:done exit=$(cat ${DONE_MARK} 2>/dev/null)"; ` +
-      `else echo "run:idle"; fi; ` +
+    `${RUN_STATE_SH}; ` +
       `echo "---Q---"; cat ${QUESTION_MARK} 2>/dev/null || true; ` +
       `echo "---LOG---"; ${logTailCmd(logLines)}`
   );
@@ -1026,7 +1075,7 @@ export async function resumeAgentTask(
   const env = [...agentEnvFlags(cfg, message, repos, creds?.primaryToken), ...secretEnvFlags(secrets)];
   await applyGitCredentials(cfg, box, creds);
   await trustWorkspace(cfg, box);
-  await installMcpConfig(cfg, box);
+  await Promise.all([installMcpConfig(cfg, box), installSkills(cfg, box)]);
   return msb(cfg, ["exec", box, ...env, "--", "sh", "-lc", agentSh(agentWorkdir(repos), true)]);
 }
 
@@ -1097,9 +1146,7 @@ export async function gatherMonitor(cfg: Config): Promise<BoxView[]> {
           cfg,
           e.name,
           `test -f /.claimed && echo CLAIMED || echo FREE; ` +
-            `if [ -f ${RUN_MARK} ]; then echo "run:running"; ` +
-            `elif [ -f ${DONE_MARK} ]; then echo "run:done exit=$(cat ${DONE_MARK} 2>/dev/null)"; ` +
-            `else echo "run:idle"; fi; ` +
+            `${RUN_STATE_SH}; ` +
             `echo "---Q---"; cat ${QUESTION_MARK} 2>/dev/null || true; ` +
             `echo "---T---"; head -n 1 ${TASK_MARK} 2>/dev/null || true; ` +
             // Repositories checked out in the box (dir name + current branch), so the dashboard can
@@ -1309,9 +1356,7 @@ export async function gatherWatch(
     const r = await exec(
       cfg,
       box,
-      `if [ -f ${RUN_MARK} ]; then echo "run:running"; ` +
-        `elif [ -f ${DONE_MARK} ]; then echo "run:done exit=$(cat ${DONE_MARK} 2>/dev/null)"; ` +
-        `else echo "run:idle"; fi; ` +
+      `${RUN_STATE_SH}; ` +
         `echo "---Q---"; cat ${QUESTION_MARK} 2>/dev/null || true; ` +
         `echo "---T---"; head -n 1 ${TASK_MARK} 2>/dev/null || true; ` +
         `echo "---LOG---"; ${logTailCmd(logLines)}`

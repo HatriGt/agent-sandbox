@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { PromptInput, PromptInputActions, PromptInputTextarea } from "@/components/ui/prompt-input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { MentionMenu, expandMentions, mentionAt, type MentionState } from "./MentionMenu";
+import { SkillMenu, slashAt, type SlashState } from "./SkillMenu";
 import { cn } from "@/lib/utils";
 
 type Mode = "agent" | "side";
@@ -62,6 +63,9 @@ export function SendBar({
   const [sending, setSending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [mention, setMention] = React.useState<MentionState | null>(null);
+  // `/skill` menu: open while the message starts with `/` and something matches an enabled skill.
+  const [slash, setSlash] = React.useState<SlashState | null>(null);
+  const [slashMatches, setSlashMatches] = React.useState(0);
   // Images pasted, dropped or picked: kept as data URLs for the preview, uploaded into the sandbox on
   // send (/workspace/.attachments) and referenced in the message so the agent opens them with Read.
   const [images, setImages] = React.useState<{ id: string; name: string; dataUrl: string; size: number }[]>([]);
@@ -111,6 +115,22 @@ export function SendBar({
     const el = textarea();
     const caret = el?.selectionStart ?? next.length;
     setMention(mentionAt(next, caret));
+    setSlash(slashAt(next, caret));
+  };
+
+  const pickSkill = (name: string) => {
+    // Replace the `/query` first token with the chosen `/name ` and keep typing the arguments.
+    const rest = value.replace(/^\/\S*\s?/, "");
+    const next = `/${name} ${rest}`;
+    setValue(next);
+    setSlash(null);
+    requestAnimationFrame(() => {
+      const t = textarea();
+      if (!t) return;
+      t.focus();
+      const pos = name.length + 2;
+      t.setSelectionRange(pos, pos);
+    });
   };
 
   const pickFile = (path: string) => {
@@ -208,6 +228,7 @@ export function SendBar({
       {/* Same column as the conversation and the changes dock: max-w-3xl with the same inner gutter. */}
       <div className="relative mx-auto min-w-0 max-w-3xl px-3 md:px-6">
         {mention && <MentionMenu session={boxName} repos={repos} state={mention} onPick={pickFile} onClose={() => setMention(null)} />}
+        {!mention && slash && <SkillMenu state={slash} onPick={pickSkill} onClose={() => setSlash(null)} onMatches={setSlashMatches} />}
         <PromptInput
           value={value}
           onValueChange={(v) => {
@@ -216,6 +237,7 @@ export function SendBar({
           }}
           onSubmit={() => {
             if (mention) return; // Enter inside the mention menu picks a file
+            if (slash && slashMatches > 0) return; // Enter inside the skill menu picks a skill
             void send();
           }}
           isLoading={sending}
@@ -289,11 +311,16 @@ export function SendBar({
             id="send-input"
             className="px-2.5 pt-2 text-body"
             onKeyDown={(e) => {
-              if (!mention) return;
-              if (["ArrowDown", "ArrowUp", "Enter", "Tab", "Escape"].includes(e.key)) {
+              const nav = ["ArrowDown", "ArrowUp", "Enter", "Tab", "Escape"].includes(e.key);
+              if (!nav) return;
+              if (mention) {
                 e.preventDefault();
                 e.stopPropagation();
                 document.dispatchEvent(new CustomEvent("asb:mention-nav", { detail: e.key }));
+              } else if (slash && slashMatches > 0) {
+                e.preventDefault();
+                e.stopPropagation();
+                document.dispatchEvent(new CustomEvent("asb:skill-nav", { detail: e.key }));
               }
             }}
             onKeyUp={() => updateMention(value)}

@@ -107,6 +107,19 @@ export interface McpServerView {
   addedAt: number;
 }
 
+/** A skill: a reusable playbook synced into every sandbox as ~/.claude/skills/<name>/SKILL.md. */
+export interface SkillView {
+  name: string;
+  description: string;
+  content: string;
+  enabled: boolean;
+  addedAt: number;
+  updatedAt: number;
+}
+export interface SkillsResponse {
+  skills: SkillView[];
+}
+
 export interface AccountView {
   login: string;
   type: "classic" | "fine-grained" | "unknown";
@@ -510,6 +523,8 @@ export const api = {
   mcpServers: (signal?: AbortSignal) =>
     fetch(url("/mcp-servers.json"), { headers: authHeaders, signal }).then(parse<McpServersResponse>),
   mcpMutate: (body: Record<string, unknown>) => post<McpServersResponse>("/mcp-servers.json", body),
+  skills: (signal?: AbortSignal) => fetch(url("/skills.json"), { headers: authHeaders, signal }).then(parse<SkillsResponse>),
+  skillMutate: (body: Record<string, unknown>) => post<SkillsResponse>("/skills.json", body),
 
   /** Repositories reachable through the connected accounts, ranked for a picker. */
   repos: (q: string, refresh = false, signal?: AbortSignal) =>
