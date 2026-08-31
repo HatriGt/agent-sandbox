@@ -393,7 +393,7 @@ export function YouItem({ text, label = "You" }: { text: string; label?: string 
           {skillName ? (
             <>
               <span className="border-live/30 bg-live/10 text-live stamp mr-1.5 inline-flex translate-y-[-1px] items-center gap-1 rounded-md border px-1.5 py-0.5 align-middle text-micro font-semibold">
-                <SkillMark name={skillName} size="sm" className="size-3.5 rounded-sm bg-transparent" />
+                <SkillMark name={skillName} size={13} />
                 /{skillName}
               </span>
               {rest}

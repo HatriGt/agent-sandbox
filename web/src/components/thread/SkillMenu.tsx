@@ -97,7 +97,7 @@ export function SkillMenu({
             i === cursor ? "bg-accent text-foreground" : "text-foreground"
           )}
         >
-          <SkillMark name={s.name} size="sm" />
+          <SkillMark name={s.name} size={15} className="text-muted-foreground" />
           <span className="stamp shrink-0 font-medium">/{s.name}</span>
           <span className="text-muted-foreground min-w-0 truncate">{s.description}</span>
         </button>
@@ -121,7 +121,7 @@ export function SkillChip({ skill, onRemove }: { skill: SkillView; onRemove: () 
         className="border-live/30 bg-live/8 inline-flex h-7 max-w-full cursor-default items-center gap-1.5 rounded-lg border pr-1 pl-1.5 text-micro"
         tabIndex={0}
       >
-        <SkillMark name={skill.name} size="sm" className="size-4.5 rounded" />
+        <SkillMark name={skill.name} size={13} />
         <span className="stamp text-live font-semibold">/{skill.name}</span>
         <button
           type="button"
@@ -145,7 +145,7 @@ export function SkillChip({ skill, onRemove }: { skill: SkillView; onRemove: () 
       >
         <span className="bg-popover text-popover-foreground block overflow-hidden rounded-xl border shadow-e3">
           <span className="flex items-center gap-2.5 border-b px-3 py-2.5">
-            <SkillMark name={skill.name} size="md" />
+            <SkillMark name={skill.name} size={16} className="text-muted-foreground" />
             <span className="min-w-0">
               <span className="stamp text-foreground block truncate text-meta font-semibold">/{skill.name}</span>
               <span className="text-muted-foreground block truncate text-micro">runs as a playbook this turn</span>
