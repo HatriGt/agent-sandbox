@@ -421,7 +421,7 @@ function failWith(res: Response, e: unknown): void {
 // Public: tells the SPA which front door to show.
 app.get("/auth/config.json", (_req: Request, res: Response) => {
   res.setHeader("Cache-Control", "no-store");
-  res.json({ mode: cfg.authMode, providers: SAAS && cfg.githubOauthClientId && cfg.githubOauthClientSecret ? ["github"] : [], tokenLogin: true, password: SAAS, signup: SAAS && cfg.signup === "open", passwordMin: PASSWORD_MIN, trialDays: SAAS ? cfg.trialDays : 0, billingUrl: cfg.billingUrl ?? null });
+  res.json({ mode: cfg.authMode, providers: SAAS && cfg.githubOauthClientId && cfg.githubOauthClientSecret ? ["github"] : [], tokenLogin: true, password: SAAS, signup: SAAS && cfg.signup === "open", passwordMin: PASSWORD_MIN, trialDays: SAAS ? cfg.trialDays : 0, billingUrl: cfg.billingUrl ?? null, beta: cfg.beta });
 });
 if (GITHUB_LOGIN) {
   const redirectUri = `${cfg.publicUrl}/auth/github/callback`;

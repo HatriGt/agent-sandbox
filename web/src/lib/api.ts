@@ -215,6 +215,7 @@ export interface AuthConfig {
   passwordMin?: number;
   trialDays?: number;
   billingUrl?: string | null;
+  beta?: boolean;
 }
 export type Me =
   | { kind: "operator"; mode: "token" | "saas"; role: "admin" }

@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Link } from "react-router";
-import { ArrowRight, Box, Check, Circle, CircleDot, Cpu, Flame, GitBranch, Globe, KeyRound, Laptop, MessageCircleQuestion, MoonStar, Pause, Plug, Server, ShieldCheck, Terminal, Timer, UserRound, X } from "lucide-react";
+import { ArrowRight, Box, Check, Circle, CircleDot, Cpu, Flame, GitBranch, Globe, KeyRound, Laptop, MessageCircleQuestion, MoonStar, Pause, Plug, Server, ShieldCheck, Terminal, Timer, X } from "lucide-react";
 import { motion, useInView, useReducedMotion } from "motion/react";
 import { Logo } from "@/components/ui/logo";
 import { cn } from "@/lib/utils";
@@ -17,8 +17,9 @@ export default function Landing() {
   const signedIn = !!(me || token);
   // Where the primary button goes: the console when signed in (or token mode), otherwise sign-up.
   const consoleHref = { pathname: !saas || signedIn ? "/dashboard" : config?.signup ? "/signup" : "/signin" };
+  const beta = !!config?.beta;
   const trialDays = config?.trialDays ?? 0;
-  const primaryLabel = !ready ? "Open the console" : !saas || signedIn ? "Open the console" : config?.signup ? (trialDays ? "Start free trial" : "Get started") : "Sign in";
+  const primaryLabel = !ready ? "Open the console" : !saas || signedIn ? "Open the console" : config?.signup ? "Start for free" : "Sign in";
   const SELF_HOST = "https://github.com/HatriGt/agent-sandbox/blob/main/docs/self-hosting.md";
   return (
     <div className="dark bg-background text-foreground min-h-full overflow-y-auto">
@@ -35,9 +36,6 @@ export default function Landing() {
           </a>
           <a href="#trust" className="text-muted-foreground hover:text-foreground hidden rounded-md px-3 py-1.5 text-meta sm:inline-block">
             Isolation
-          </a>
-          <a href="#selfhost" className="text-muted-foreground hover:text-foreground hidden rounded-md px-3 py-1.5 text-meta sm:inline-block">
-            Self-host
           </a>
           <a
             href="https://github.com/HatriGt/agent-sandbox"
@@ -70,7 +68,7 @@ export default function Landing() {
           <Reveal>
             <p className="text-live label mb-4 inline-flex items-center gap-2 rounded-full border px-3 py-1">
               <span className="bg-live breathe size-1.5 rounded-full" />
-              Sandbox as a service for coding agents · or self-host, free
+              Public beta · free while it lasts
             </p>
           </Reveal>
           <Reveal delay={0.05}>
@@ -96,18 +94,26 @@ export default function Landing() {
                 {primaryLabel}
                 <ArrowRight className="size-4" />
               </Link>
-              {saas && signedIn ? (
+              {saas && signedIn && (
                 <Link to="/dashboard/connect" className="border-line-strong hover:bg-muted inline-flex h-11 items-center gap-2 rounded-md border px-5 text-body font-medium">
                   <Plug className="size-4" />
                   Connect your IDE
                 </Link>
-              ) : (
-                <a href="#selfhost" className="border-line-strong hover:bg-muted inline-flex h-11 items-center gap-2 rounded-md border px-5 text-body font-medium">
-                  <Server className="size-4" />
-                  Self-host
-                </a>
               )}
             </div>
+            <p className="text-muted-foreground mt-3 text-meta">
+              {saas && !signedIn ? (beta ? "Free during the public beta · no card, nothing to cancel." : trialDays ? `${trialDays} days free · no card.` : "") : ""}
+              {saas && !signedIn && (
+                <>
+                  {" "}
+                  Prefer your own server?{" "}
+                  <a href="https://github.com/HatriGt/agent-sandbox/blob/main/docs/self-hosting.md" target="_blank" rel="noreferrer" className="text-foreground underline decoration-[oklch(0.55_0.02_286)] underline-offset-4 hover:decoration-current">
+                    Self-host — it's open source
+                  </a>
+                  .
+                </>
+              )}
+            </p>
           </Reveal>
           <Reveal delay={0.18}>
             <div className="text-muted-foreground mt-8 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-micro">
@@ -134,76 +140,6 @@ export default function Landing() {
       </section>
 
       {/* ───────────── architecture ───────────── */}
-      {/* ───────────── hosted or yours ───────────── */}
-      <section id="selfhost" className="border-t">
-        <div className="mx-auto max-w-6xl px-6 py-20">
-          <Reveal>
-            <h2 className="font-serif text-[clamp(1.8rem,3.2vw,2.5rem)] leading-tight tracking-[-0.015em]">Hosted, or yours. Both honest.</h2>
-            <p className="text-muted-foreground mt-3 max-w-[60ch] text-body">
-              Agent Sandbox is open source. Use the hosted service{trialDays ? ` — free for ${trialDays} days, no card` : ""} — or run the same software on a
-              VPS you control, free forever. Either way, what is yours stays yours.
-            </p>
-          </Reveal>
-          <div className="mt-10 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-[repeat(2,minmax(0,1fr))]">
-            <Reveal delay={0.04}>
-              <motion.div whileHover={{ y: -2 }} transition={{ type: "spring", stiffness: 400, damping: 30 }} className="bg-card flex h-full min-w-0 flex-col rounded-xl p-6 shadow-e2">
-                <div className="flex items-center gap-2.5">
-                  <span className="bg-live/10 text-live grid size-9 place-items-center rounded-md">
-                    <UserRound className="size-4" />
-                  </span>
-                  <h3 className="text-h3 font-semibold tracking-[-0.01em]">Hosted</h3>
-                  {trialDays > 0 && <span className="bg-live/10 text-live ml-auto rounded-full px-2 py-0.5 text-micro font-medium">{trialDays}-day free trial</span>}
-                </div>
-                <p className="text-muted-foreground mt-3 flex-1 text-body leading-relaxed">
-                  Sign up and start a task in under a minute — warm machines, live thread, question cards, no server to
-                  run. Your machines, GitHub accounts and MCP servers are yours alone. Connect Cursor or Claude Code with a
-                  personal API key when you want to.
-                </p>
-                <ul className="text-muted-foreground mt-4 flex flex-col gap-1.5 text-meta">
-                  <li className="flex items-center gap-2"><Check className="text-ok size-3.5" /> Private workspace per person</li>
-                  <li className="flex items-center gap-2"><Check className="text-ok size-3.5" /> Warm machines, live thread, question cards</li>
-                  <li className="flex items-center gap-2"><Check className="text-ok size-3.5" /> Personal API keys for your IDE</li>
-                  {trialDays > 0 && <li className="flex items-center gap-2"><Check className="text-ok size-3.5" /> Nothing to cancel — the trial simply pauses new machines when it ends</li>}
-                </ul>
-                <div className="mt-6">
-                  <Link to={consoleHref} className="bg-primary text-primary-foreground hover:bg-primary/80 inline-flex h-10 items-center gap-2 rounded-md px-4 text-meta font-medium">
-                    {primaryLabel}
-                    <ArrowRight className="size-4" />
-                  </Link>
-                </div>
-              </motion.div>
-            </Reveal>
-            <Reveal delay={0.1}>
-              <motion.div whileHover={{ y: -2 }} transition={{ type: "spring", stiffness: 400, damping: 30 }} className="bg-card flex h-full min-w-0 flex-col rounded-xl p-6 shadow-e2">
-                <div className="flex items-center gap-2.5">
-                  <span className="bg-muted text-foreground grid size-9 place-items-center rounded-md">
-                    <Server className="size-4" />
-                  </span>
-                  <h3 className="text-h3 font-semibold tracking-[-0.01em]">Self-host</h3>
-                  <span className="bg-muted text-muted-foreground ml-auto rounded-full px-2 py-0.5 text-micro font-medium">free · MIT</span>
-                </div>
-                <p className="text-muted-foreground mt-3 text-body leading-relaxed">
-                  One VPS with KVM, Docker and microsandbox. Single-operator by default; flip <code className="bg-muted rounded px-1 font-mono text-[0.9em]">AUTH_MODE=saas</code> for
-                  sign-up, sessions and per-user isolation on your own domain.
-                </p>
-                <pre className="bg-background/60 text-foreground mt-4 min-w-0 max-w-full flex-1 overflow-x-auto rounded-md p-3 font-mono text-code leading-relaxed break-all whitespace-pre-wrap sm:break-normal sm:whitespace-pre">{`git clone https://github.com/HatriGt/agent-sandbox
-cd agent-sandbox && cp .env.example .env
-docker compose up -d --build`}</pre>
-                <div className="mt-6 flex items-center gap-3">
-                  <a href={SELF_HOST} target="_blank" rel="noreferrer" className="border-line-strong hover:bg-muted inline-flex h-10 items-center gap-2 rounded-md border px-4 text-meta font-medium">
-                    Self-hosting guide
-                    <ArrowRight className="size-4" />
-                  </a>
-                  <a href="https://github.com/HatriGt/agent-sandbox" target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-foreground text-meta">
-                    Source · MIT
-                  </a>
-                </div>
-              </motion.div>
-            </Reveal>
-          </div>
-        </div>
-      </section>
-
       <section className="border-t">
         <div className="mx-auto max-w-6xl px-6 py-20">
           <Reveal>
@@ -307,15 +243,14 @@ docker compose up -d --build`}</pre>
         <div className="mx-auto flex max-w-6xl flex-col items-start justify-between gap-6 px-6 py-12 md:flex-row md:items-center">
           <div>
             <p className="font-serif text-h2 tracking-[-0.01em]">Ready when you are.</p>
-            <p className="text-muted-foreground mt-1 text-meta">{saas && !signedIn ? (trialDays ? `${trialDays} days free, no card. Or self-host — free forever.` : "Create an account, add a GitHub account, start a task.") : "Open the console, add a GitHub account, start a task."}</p>
+            <p className="text-muted-foreground mt-1 text-meta">{saas && !signedIn ? (beta ? "Free during the beta. Sign up, add a GitHub account, start a task." : "Sign up, add a GitHub account, start a task.") : "Open the console, add a GitHub account, start a task."}</p>
           </div>
           <div className="flex items-center gap-3">
             <Link to={consoleHref} className="bg-primary text-primary-foreground hover:bg-primary/80 inline-flex h-10 items-center gap-2 rounded-md px-4 text-meta font-medium">
               {primaryLabel}
               <ArrowRight className="size-4" />
             </Link>
-            <a href={SELF_HOST} target="_blank" rel="noreferrer" className="border-line-strong hover:bg-muted inline-flex h-10 items-center gap-2 rounded-md border px-4 text-meta font-medium">
-              <Server className="size-4" />
+            <a href={SELF_HOST} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-foreground text-meta">
               Self-host
             </a>
             <a href="https://github.com/HatriGt/agent-sandbox" target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-foreground text-meta">

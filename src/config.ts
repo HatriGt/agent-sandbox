@@ -127,6 +127,8 @@ export interface Config {
   trialDays: number;
   /** Where "Upgrade" goes when a trial ends (a mailto:, a checkout page, a form). */
   billingUrl?: string;
+  /** Public beta: the hosted product is free; the landing and sign-up say so. */
+  beta: boolean;
 }
 
 function req(name: string, fallback?: string): string {
@@ -240,5 +242,6 @@ export function loadConfig(): Config {
     signup: process.env.SIGNUP === "open" ? "open" : "invite",
     trialDays: Math.max(0, Number(process.env.TRIAL_DAYS ?? "0") || 0),
     billingUrl: process.env.BILLING_URL || undefined,
+    beta: process.env.BETA === "1",
   };
 }

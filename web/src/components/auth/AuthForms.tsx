@@ -285,7 +285,7 @@ export function SignUpCard({ config, to, onDone }: { config: AuthConfig; to: str
         </Link>
       </div>
       <p className="text-muted-foreground mt-2 text-body leading-relaxed">
-        {config.trialDays ? `${config.trialDays}-day free trial, no card required. ` : ""}Start tasks from the dashboard right away, or connect your IDE later from Account.
+        {config.beta ? "Free during the public beta — no card required. " : config.trialDays ? `${config.trialDays}-day free trial, no card required. ` : ""}Start tasks from the dashboard right away, or connect your IDE later from Account.
       </p>
       {config.signup ? (
         <>
