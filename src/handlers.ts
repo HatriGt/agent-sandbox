@@ -122,7 +122,18 @@ export function registerTools(
   server: ToolRegistrar,
   cfg: Config,
   deps: HandlerDeps,
-  bridge?: ServerBridge
+  bridge?: ServerBridge,
+  /**
+   * True for the REMOTE (HTTP) entry, where the client is on another machine.
+   *
+   * `source:"local"` means "rsync the caller's working tree", which only makes sense on the stdio
+   * entry where the controller and the IDE share a filesystem. Over HTTP that path rsyncs from the
+   * SERVER's disk: a Windows/Mac checkout path doesn't exist there, so it failed with a bare
+   * "spawn rsync ENOENT" that reads to the calling agent like the sandbox is unreachable. Remote
+   * callers must use source:"git" (clone on the VPS), so the default flips and an explicit
+   * source:"local" is answered with a question instead of a broken sync.
+   */
+  remoteEntry = false
 ): void {
   server.tool(
     "delegate",
@@ -147,7 +158,12 @@ export function registerTools(
       source: z
         .enum(["local", "git"])
         .optional()
-        .describe("local = ship local working tree(s) (default); git = clone owner/name on the VPS."),
+        .describe(
+          remoteEntry
+            ? "git = clone owner/name on the VPS (DEFAULT, and the only option here: this sandbox " +
+                "is remote and cannot see your filesystem). Do NOT pass local."
+            : "local = ship local working tree(s) (default); git = clone owner/name on the VPS."
+        ),
       repo: z
         .string()
         .optional()
@@ -207,7 +223,17 @@ export function registerTools(
       githubToken?: string;
       githubAccount?: string;
     }) => {
-      const resolvedSource: DelegateSource = source ?? "local";
+      // Remote callers have no shared filesystem, so "git" is the only source that can work there.
+      const resolvedSource: DelegateSource = source ?? (remoteEntry ? "git" : "local");
+      if (remoteEntry && resolvedSource === "local") {
+        return text(
+          `This sandbox is reached over HTTP, so it cannot see your machine's files — ` +
+            `source:"local" would try to copy the path from the SERVER's disk. ` +
+            `Re-call delegate with source:"git" and repo:"owner/name" (plus ref if you need a ` +
+            `specific branch); the repo is cloned on the VPS. ` +
+            `Nothing was started, and the sandbox is up — this is not a connectivity problem.`
+        );
+      }
       // Local "delegate this": with neither repo nor repos, fall back to the IDE-provided open
       // workspace (WORKSPACE_DIR=${workspaceFolder}). Only applies to the single-repo shortcut;
       // multi-root windows pass repos[] explicitly. Remote/git has no such fallback.

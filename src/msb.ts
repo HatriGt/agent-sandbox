@@ -680,6 +680,8 @@ export function streamFmtScript(): string {
     // Every assistant text block already written, so the run's final `result` (which IS one of them,
     // normally the last) is not appended a second time.
     `const seenText=new Set();` +
+    // Whether the "session started" marker has been written for this turn (see the init branch).
+    `let inited=false;` +
     // tool_use ids of TodoWrite calls: their result ("Todos have been modified successfully") is
     // noise once the plan block itself is in the log, so it is not written.
     `const planIds=new Set();` +
@@ -700,7 +702,12 @@ export function streamFmtScript(): string {
     `const cut=ls.length-head.length;if(cut>0)head.push("… "+cut+" more lines");return head}` +
     `function handle(line){line=line.trim();if(!line)return;let e;try{e=JSON.parse(line)}catch(_){w(line);return}` +
     `try{` +
-    `if(e.type==="system"&&e.subtype==="init"){w("● session started (model "+(e.model||"?")+")");return}` +
+    // One formatter process is one `claude` invocation, i.e. exactly one turn — so the marker is
+    // written at most once. Claude Code can emit a SECOND system/init mid-stream (observed after an
+    // interrupted turn resumed with -c, where a killed background task makes it re-init), which
+    // rendered as two "session started" lines back to back and read like the turn had restarted and
+    // lost its context. It had not: same session, same conversation.
+    `if(e.type==="system"&&e.subtype==="init"){if(!inited){inited=true;w("● session started (model "+(e.model||"?")+")")}return}` +
     `if(e.type==="assistant"&&e.message){for(const b of e.message.content||[]){` +
     // Trailing "\n" => a BLANK line after each text block. Consecutive assistant text blocks are
     // separate markdown documents (a table, then a fenced block); glued with a single newline the

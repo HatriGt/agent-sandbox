@@ -244,3 +244,19 @@ test("TodoWrite still works — older builds are not broken by the new path", ()
     { text: "Step two", state: "active" },
   ]);
 });
+
+test("a second system/init in one turn does not stamp a second 'session started'", () => {
+  // Claude Code can re-init mid-stream — seen when a turn interrupted by send-now resumed with -c
+  // and a killed background task triggered a fresh init. One formatter process is one turn, so two
+  // markers back to back read as "the turn restarted and lost its context", which is not what
+  // happened. Everything after the re-init must still be written normally.
+  const log = runFormatter([
+    { type: "system", subtype: "init", model: "m" },
+    { type: "assistant", message: { content: [{ type: "text", text: "before" }] } },
+    { type: "system", subtype: "init", model: "m" },
+    { type: "assistant", message: { content: [{ type: "text", text: "after" }] } },
+  ]);
+  assert.equal(log.split("● session started").length - 1, 1);
+  assert.match(log, /before/);
+  assert.match(log, /after/);
+});

@@ -363,3 +363,72 @@ test("ask: an empty or missing question is rejected before reaching the box", as
   assert.equal(schema.question.isOptional?.() ?? false, false, "question must be required");
   assert.equal(schema.newThread.isOptional?.(), true, "newThread must be optional");
 });
+
+test("remote entry: source defaults to git, not local", async () => {
+  // Over HTTP the caller is on another machine. Defaulting to "local" made the server rsync from
+  // its OWN disk, which died with "spawn rsync ENOENT" — a failure the calling agent reported to
+  // the user as "the sandbox MCP server is unreachable". It was up the whole time.
+  const s = fakeServer();
+  let seen: any = null;
+  registerTools(
+    s as any,
+    cfg,
+    {
+      countBoxes: async () => 0,
+      resolveGitAccess: okAccess,
+      runDelegation: async (_cfg: any, plan: any) => {
+        seen = plan;
+        return { box: "b", warm: false, output: "ok" };
+      },
+    } as any,
+    undefined,
+    true
+  );
+
+  await s.tools.delegate.handler({ repo: "owner/name", task: "fix a bug" });
+  assert.equal(seen.source, "git", "remote entry must not silently choose the rsync path");
+});
+
+test("remote entry: an explicit source:local is answered, not attempted", async () => {
+  const s = fakeServer();
+  let ran = false;
+  registerTools(
+    s as any,
+    cfg,
+    {
+      countBoxes: async () => 0,
+      resolveGitAccess: okAccess,
+      runDelegation: async () => {
+        ran = true;
+        return { box: "b", warm: false, output: "ok" };
+      },
+    } as any,
+    undefined,
+    true
+  );
+
+  const out = textOf(
+    await s.tools.delegate.handler({ source: "local", repo: "C:\Users\me\proj", task: "fix a bug" })
+  );
+  assert.equal(ran, false, "must not start a delegation it cannot possibly stage");
+  // The message has to tell the agent BOTH what to do instead and that the server is fine —
+  // otherwise it keeps reporting a connectivity outage and offering to work around it.
+  assert.match(out, /source:"git"/);
+  assert.match(out, /not a connectivity problem/i);
+});
+
+test("stdio entry keeps the local default (the IDE shares a filesystem with the controller)", async () => {
+  const s = fakeServer();
+  let seen: any = null;
+  registerTools(s as any, cfg, {
+    countBoxes: async () => 0,
+    resolveGitAccess: okAccess,
+    runDelegation: async (_cfg: any, plan: any) => {
+      seen = plan;
+      return { box: "b", warm: false, output: "ok" };
+    },
+  } as any);
+
+  await s.tools.delegate.handler({ repo: "/Users/me/proj", task: "fix a bug" });
+  assert.equal(seen.source, "local");
+});

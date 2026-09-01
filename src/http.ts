@@ -368,7 +368,10 @@ async function handle(req: Request, res: Response) {
       server as unknown as Parameters<typeof registerTools>[0],
       cfg,
       deps,
-      makeBridge(server)
+      makeBridge(server),
+      // Remote entry: the client is on another machine, so source:"local" (rsync the caller's tree)
+      // cannot work here — it would read the server's own disk. See registerTools' remoteEntry.
+      true
     );
     // Log what the client advertises on connect — decisive for whether we can use native
     // Elicitation (server→client questions mid tool-call) vs. the poll-based fallback.
