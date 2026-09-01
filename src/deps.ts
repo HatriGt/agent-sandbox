@@ -384,25 +384,32 @@ export const deps: HandlerDeps = {
     const hasRepos = plan.repos.length > 0;
     const sessionRoot = hasRepos ? stagingPathFor(runCfg, id) : undefined;
     const repoOwners: Record<string, string> = {};
-    for (const r of plan.repos) {
-      const dest = repoStagingPath(runCfg, id, r.name);
-      if (plan.source === "git") {
-        const owner = ownerOf(r.repo);
-        if (owner) repoOwners[r.name] = owner;
-        // Clone with the owner's access-resolved token (private repos). No default fallback: a repo
-        // that reached here without a token means resolution deemed it public/accessible.
-        const token = owner ? creds?.ownerTokens?.[owner] : undefined;
-        await cloneRepoInStaging({ ...runCfg, ghToken: token }, r.repo, r.ref, id, dest);
-        // Uncommitted work from the caller's machine rides in as a diff over the fresh checkout.
-        // A patch that doesn't apply aborts the delegation — never start a box on a half-applied tree.
-        if (r.patch) await applyPatchInStaging(runCfg, dest, r.patch);
-      } else {
-        await syncTreeToVps(runCfg, r.repo, id, dest);
-        // For local, derive the owner from the working tree's origin remote (best-effort).
-        const on = await localRepoOwnerName(r.repo);
-        const owner = on ? ownerOf(on) : undefined;
-        if (owner) repoOwners[r.name] = owner;
+    try {
+      for (const r of plan.repos) {
+        const dest = repoStagingPath(runCfg, id, r.name);
+        if (plan.source === "git") {
+          const owner = ownerOf(r.repo);
+          if (owner) repoOwners[r.name] = owner;
+          // Clone with the owner's access-resolved token (private repos). No default fallback: a repo
+          // that reached here without a token means resolution deemed it public/accessible.
+          const token = owner ? creds?.ownerTokens?.[owner] : undefined;
+          await cloneRepoInStaging({ ...runCfg, ghToken: token }, r.repo, r.ref, id, dest);
+          // Uncommitted work from the caller's machine rides in as a diff over the fresh checkout.
+          // A patch that doesn't apply aborts the delegation — never start a box on a half-applied tree.
+          if (r.patch) await applyPatchInStaging(runCfg, dest, r.patch);
+        } else {
+          await syncTreeToVps(runCfg, r.repo, id, dest);
+          // For local, derive the owner from the working tree's origin remote (best-effort).
+          const on = await localRepoOwnerName(r.repo);
+          const owner = on ? ownerOf(on) : undefined;
+          if (owner) repoOwners[r.name] = owner;
+        }
       }
+    } catch (e) {
+      // Staging failed mid-way (bad patch, clone error): what was already cloned/synced would
+      // otherwise sit on the host forever — a full checkout of a private repo per failed attempt.
+      if (sessionRoot) void cleanupStaging(runCfg, sessionRoot);
+      throw e;
     }
     // Thread the name->owner map so applyGitCredentials can set per-repo identity.
     const runCreds: AgentCreds | undefined = creds ? { ...creds, repoOwners } : undefined;

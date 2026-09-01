@@ -68,12 +68,10 @@ export function isValidRef(ref: string): boolean {
   return /^[A-Za-z0-9._\/-]+$/.test(ref);
 }
 
-/**
- * A caller-supplied diff has to stay small enough to travel through the MCP transport and the JSON
- * body parser. 8 MB covers any sane feature-in-progress; a diff bigger than that is usually a
- * generated-file or vendored-deps mistake the caller should exclude.
- */
-export const MAX_PATCH_BYTES = 8 * 1024 * 1024;
+// Defence in depth: validation already rejects oversized patches before access resolution; the
+// re-check here covers callers that reach applyPatchInStaging without going through delegate.
+export { MAX_PATCH_BYTES } from "./delegate-input.js";
+import { MAX_PATCH_BYTES } from "./delegate-input.js";
 
 /** git argv to apply a caller diff (on stdin) to the checkout at `dest`. */
 export function buildApplyArgs(dest: string): string[] {

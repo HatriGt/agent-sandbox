@@ -16,6 +16,15 @@
 
 export type DelegateSource = "local" | "git";
 
+/**
+ * A caller-supplied diff has to stay small enough to travel through the MCP transport and the JSON
+ * body parser. 8 MB covers any sane feature-in-progress; a diff bigger than that is usually a
+ * generated-file or vendored-deps mistake the caller should exclude. Enforced here in pure
+ * validation — BEFORE GitHub access resolution — so an oversized payload is rejected cheaply
+ * instead of first spending live GitHub probes on it.
+ */
+export const MAX_PATCH_BYTES = 8 * 1024 * 1024;
+
 /** One repo to bring into the box, as given by the caller. */
 export interface RepoInput {
   repo: string;
@@ -119,6 +128,17 @@ export function validateDelegateInput(input: DelegateInput): DelegateValidation 
       ok: false,
       question:
         "patch needs a repo to apply to. Re-call delegate with repo (owner/name) and ref alongside the patch.",
+    };
+  }
+  const tooBig = [input.patch, ...raw.map((r) => r.patch)].some(
+    (p) => p && Buffer.byteLength(p, "utf8") > MAX_PATCH_BYTES
+  );
+  if (tooBig) {
+    return {
+      ok: false,
+      question:
+        `patch too large (> ${MAX_PATCH_BYTES / 1024 / 1024} MB). Exclude generated/vendored files ` +
+        `from the diff, or push the work to a branch and delegate that ref instead.`,
     };
   }
 

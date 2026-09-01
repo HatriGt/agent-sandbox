@@ -4,7 +4,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { validateDelegateInput } from "../src/delegate-input.ts";
+import { validateDelegateInput, MAX_PATCH_BYTES } from "../src/delegate-input.ts";
 
 test("task-only (no repo): valid -> empty repos, no repo required", () => {
   // A sandbox doesn't need a repo. "Write me a detailed report about X" is a valid delegation.
@@ -184,4 +184,13 @@ test("patch with no repo at all is a question (nothing to apply to)", () => {
   const r = validateDelegateInput({ source: "git", patch: "diff\n", task: "t" });
   assert.equal(r.ok, false);
   assert.match(r.question!, /repo/);
+});
+
+test("an oversized patch is rejected in validation, before any GitHub probe", () => {
+  // Live testing showed the 9 MB probe reached ACCESS RESOLUTION first — the size guard only lived
+  // in applyPatchInStaging, after clone. Cheap rejection belongs in pure validation.
+  const big = "+x".repeat(MAX_PATCH_BYTES / 2 + 8) + "\n";
+  const r = validateDelegateInput({ source: "git", repo: "acme/api", ref: "main", patch: big, task: "t" });
+  assert.equal(r.ok, false);
+  assert.match(r.question!, /patch too large/);
 });
