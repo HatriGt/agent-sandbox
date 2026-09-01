@@ -366,87 +366,98 @@ export function PlanDock({ board, live }: { board: TaskBoard; live?: boolean }) 
     });
 
   return (
+    // The aside is a SIBLING in the thread's flex row, so the conversation column narrows rather than
+    // being covered — but it only reserves a gutter. The board itself is a self-sized card centred in
+    // that gutter (`items-center`), not a floor-to-ceiling panel.
     <motion.aside
       aria-label="Plan"
       initial={false}
-      animate={{ width: open ? "22rem" : "2.75rem" }}
+      animate={{ width: open ? "22.5rem" : "3.25rem" }}
       transition={reduce ? { duration: 0 } : { type: "spring", stiffness: 340, damping: 36 }}
-      className="bg-card relative hidden shrink-0 flex-col overflow-hidden border-l xl:flex"
+      className="hidden shrink-0 items-center py-4 pr-4 pl-1 xl:flex"
     >
-      <Sweep on={sweep} />
-
-      {/* Header. Collapsed, it is just the toggle — the rail below carries the state. */}
-      <div className={cn("flex h-10 shrink-0 items-center border-b", open ? "gap-2 px-3" : "justify-center px-0")}>
-        {open && (
-          <>
-            <BoardIcon complete={complete} live={live} />
-            <span className="text-foreground min-w-0 flex-1 truncate text-meta font-semibold">
-              <BoardHeadline complete={complete} live={live} />
-            </span>
-            <span className="text-muted-foreground stamp flex shrink-0 items-baseline text-micro">
-              <RollingCount value={done} />/{tasks.length}
-            </span>
-          </>
+      <motion.div
+        layout={!reduce}
+        transition={reduce ? { duration: 0 } : SPRING}
+        className={cn(
+          "bg-card relative flex max-h-[70vh] w-full flex-col overflow-hidden rounded-xl border shadow-e4",
+          !open && "items-center"
         )}
-        <button
-          type="button"
-          onClick={toggle}
-          aria-expanded={open}
-          aria-label={open ? "Collapse the plan" : "Expand the plan"}
-          title={open ? "Collapse the plan" : `Plan · ${done}/${tasks.length}`}
-          className="text-muted-foreground hover:text-foreground grid size-7 shrink-0 cursor-pointer place-items-center rounded-md transition-colors"
-        >
-          {open ? <PanelRightClose className="size-4" aria-hidden /> : <PanelRightOpen className="size-4" aria-hidden />}
-        </button>
-      </div>
+      >
+        <Sweep on={sweep} />
 
-      {open ? (
-        <>
-          <ProgressRail done={done} total={tasks.length} complete={complete} layoutId="plan-rail" />
-          <ol className="min-h-0 flex-1 overflow-y-auto">
-            {tasks.map((t, i) => (
-              <TaskRow key={`${i}-${t.text}`} task={t} live={live} compact />
-            ))}
-          </ol>
-          {(board.ms !== undefined || failed > 0) && (
-            <div className="shrink-0 border-t px-3 py-2 text-micro">
-              {board.ms !== undefined && <span className="text-faint stamp">{shortDuration(board.ms)} total</span>}
-              {board.ms !== undefined && failed > 0 && <span className="text-border mx-1.5">·</span>}
-              {failed > 0 && (
-                <span className="text-destructive">
-                  {failed} step{failed === 1 ? "" : "s"} hit a failed call
-                </span>
-              )}
+        {open ? (
+          <>
+            <div className="flex h-10 shrink-0 items-center gap-2 px-3">
+              <BoardIcon complete={complete} live={live} />
+              <span className="text-foreground min-w-0 flex-1 truncate text-meta font-semibold">
+                <BoardHeadline complete={complete} live={live} />
+              </span>
+              <span className="text-muted-foreground stamp flex shrink-0 items-baseline text-micro">
+                <RollingCount value={done} />/{tasks.length}
+              </span>
+              <button
+                type="button"
+                onClick={toggle}
+                aria-expanded={open}
+                aria-label="Collapse the plan"
+                title="Collapse the plan"
+                className="text-muted-foreground hover:text-foreground grid size-7 shrink-0 cursor-pointer place-items-center rounded-md transition-colors"
+              >
+                <PanelRightClose className="size-4" aria-hidden />
+              </button>
             </div>
-          )}
-        </>
-      ) : (
-        // Collapsed: a vertical pip per step. Still readable at 44px — done fills, active breathes.
-        <button
-          type="button"
-          onClick={toggle}
-          aria-label={`Expand the plan · ${done} of ${tasks.length} steps done`}
-          className="flex min-h-0 flex-1 cursor-pointer flex-col items-center gap-1.5 overflow-hidden py-3"
-        >
-          <span className="text-muted-foreground stamp mb-1 text-micro">
-            {done}/{tasks.length}
-          </span>
-          {tasks.map((t, i) => (
-            <motion.span
-              key={`${i}-${t.text}`}
-              initial={reduce ? false : { scaleY: 0, opacity: 0 }}
-              animate={{ scaleY: 1, opacity: 1 }}
-              transition={{ delay: Math.min(i * 0.04, 0.3), duration: 0.24, ease: EASE }}
-              title={t.text}
-              className={cn(
-                "w-1.5 shrink-0 rounded-full",
-                t.state === "done" ? "bg-ok" : t.state === "active" ? cn("bg-live", live && "breathe") : "bg-border"
-              )}
-              style={{ height: 14 }}
-            />
-          ))}
-        </button>
-      )}
+            <ProgressRail done={done} total={tasks.length} complete={complete} layoutId="plan-rail" />
+            <ol className="min-h-0 flex-1 overflow-y-auto">
+              {tasks.map((t, i) => (
+                <TaskRow key={`${i}-${t.text}`} task={t} live={live} compact />
+              ))}
+            </ol>
+            {(board.ms !== undefined || failed > 0) && (
+              <div className="shrink-0 border-t px-3 py-2 text-micro">
+                {board.ms !== undefined && <span className="text-faint stamp">{shortDuration(board.ms)} total</span>}
+                {board.ms !== undefined && failed > 0 && <span className="text-border mx-1.5">·</span>}
+                {failed > 0 && (
+                  <span className="text-destructive">
+                    {failed} step{failed === 1 ? "" : "s"} hit a failed call
+                  </span>
+                )}
+              </div>
+            )}
+          </>
+        ) : (
+          // Collapsed: a slim pill, still centred, still content-height. One pip per step — done
+          // fills, the active one breathes — so even at 52px it answers "how far in".
+          <button
+            type="button"
+            onClick={toggle}
+            aria-expanded={open}
+            aria-label={`Expand the plan · ${done} of ${tasks.length} steps done`}
+            title={`Plan · ${done}/${tasks.length}`}
+            className="flex w-full cursor-pointer flex-col items-center gap-1.5 px-2 py-3"
+          >
+            <PanelRightOpen className="text-muted-foreground size-4 shrink-0" aria-hidden />
+            <span className="text-muted-foreground stamp mt-0.5 text-micro">
+              {done}/{tasks.length}
+            </span>
+            <span className="flex flex-col items-center gap-1 pt-0.5">
+              {tasks.map((t, i) => (
+                <motion.span
+                  key={`${i}-${t.text}`}
+                  initial={reduce ? false : { scaleY: 0, opacity: 0 }}
+                  animate={{ scaleY: 1, opacity: 1 }}
+                  transition={{ delay: Math.min(i * 0.04, 0.3), duration: 0.24, ease: EASE }}
+                  title={t.text}
+                  className={cn(
+                    "h-3 w-1.5 shrink-0 rounded-full",
+                    t.state === "done" ? "bg-ok" : t.state === "active" ? cn("bg-live", live && "breathe") : "bg-border"
+                  )}
+                />
+              ))}
+            </span>
+          </button>
+        )}
+      </motion.div>
     </motion.aside>
   );
 }
