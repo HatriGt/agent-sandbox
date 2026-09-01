@@ -13,6 +13,7 @@ import { join } from "node:path";
 import vm from "node:vm";
 import { streamFmtScript, RESULT_MAX_LINES, RESULT_MAX_BYTES } from "../src/msb.ts";
 import { parseTrace } from "../web/src/lib/trace.ts";
+import { deriveTaskBoard } from "../web/src/lib/planTasks.ts";
 
 /** The exact JS the box will execute, recovered the same way the box recovers it. */
 function formatterSource(): string {
@@ -169,4 +170,77 @@ test("thinking and TodoWrite become folded blocks; the TodoWrite result is not w
     [["Read the schema", "done"], ["Write the migration", "active"], ["Run the tests", "todo"]]
   );
   assert.ok(ev.some((e) => e.kind === "say" && e.text === "Starting."));
+});
+
+// --- the plan on newer Claude Code (TaskCreate/TaskUpdate, no TodoWrite) -------------------------
+// Verified against a live box: TaskCreate answers "Task #N created successfully", and TaskUpdate is
+// then called with taskId "N" — so creation order IS the id. These lock that mapping in.
+
+const call = (name: string, input: unknown, id = "t1") => ({
+  type: "assistant",
+  message: { content: [{ type: "tool_use", id, name, input }] },
+});
+
+test("TaskCreate/TaskUpdate fold into plan snapshots, not tool rows", () => {
+  const log = runFormatter([
+    call("TaskCreate", { subject: "Wire the parser", description: "edit trace.ts" }, "a"),
+    call("TaskCreate", { subject: "Render the board", description: "new component" }, "b"),
+    call("TaskUpdate", { taskId: "1", status: "in_progress" }, "c"),
+    { type: "assistant", message: { content: [{ type: "tool_use", id: "d", name: "Write", input: { file_path: "/workspace/x.ts" } }] } },
+    call("TaskUpdate", { taskId: "1", status: "completed" }, "e"),
+    call("TaskUpdate", { taskId: "2", status: "in_progress" }, "f"),
+  ]);
+
+  // The task tools never appear as tool rows — the ticking checklist is the information.
+  const tools = parseTrace(log).filter((e) => e.kind === "tool");
+  assert.deepEqual(tools.map((t) => (t.kind === "tool" ? t.name : "")), ["Write"]);
+
+  const plans = parseTrace(log).filter((e) => e.kind === "plan");
+  assert.equal(plans.length, 5, "one snapshot per mutation: 2 creates + 3 updates");
+  const last = plans[plans.length - 1];
+  assert.ok(last.kind === "plan");
+  assert.deepEqual(last.items, [
+    { text: "Wire the parser", state: "done" },
+    { text: "Render the board", state: "active" },
+  ]);
+  // Every snapshot carries the wall clock the board needs for per-step durations.
+  assert.ok(last.at && last.at > 0);
+});
+
+test("the write between two snapshots is attributed to the step in progress", () => {
+  const log = runFormatter([
+    call("TaskCreate", { subject: "Wire the parser", description: "x" }, "a"),
+    call("TaskUpdate", { taskId: "1", status: "in_progress" }, "b"),
+    { type: "assistant", message: { content: [{ type: "tool_use", id: "c", name: "Write", input: { file_path: "/workspace/x.ts" } }] } },
+    call("TaskUpdate", { taskId: "1", status: "completed" }, "d"),
+  ]);
+  const board = deriveTaskBoard(parseTrace(log));
+  assert.ok(board);
+  assert.deepEqual(board.tasks[0].evidence.files, ["/workspace/x.ts"]);
+  assert.equal(board.complete, true);
+});
+
+test("a deleted task leaves the plan; an unknown taskId changes nothing", () => {
+  const log = runFormatter([
+    call("TaskCreate", { subject: "Keep me", description: "x" }, "a"),
+    call("TaskCreate", { subject: "Drop me", description: "y" }, "b"),
+    call("TaskUpdate", { taskId: "2", status: "deleted" }, "c"),
+    call("TaskUpdate", { taskId: "9", status: "completed" }, "d"),
+  ]);
+  const plans = parseTrace(log).filter((e) => e.kind === "plan");
+  const last = plans[plans.length - 1];
+  assert.ok(last.kind === "plan");
+  assert.deepEqual(last.items, [{ text: "Keep me", state: "todo" }]);
+});
+
+test("TodoWrite still works — older builds are not broken by the new path", () => {
+  const log = runFormatter([
+    call("TodoWrite", { todos: [{ content: "Step one", status: "completed" }, { content: "Step two", status: "in_progress" }] }, "a"),
+  ]);
+  const plan = parseTrace(log).find((e) => e.kind === "plan");
+  assert.ok(plan?.kind === "plan");
+  assert.deepEqual(plan.items, [
+    { text: "Step one", state: "done" },
+    { text: "Step two", state: "active" },
+  ]);
 });
