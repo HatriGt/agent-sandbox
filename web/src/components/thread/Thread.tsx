@@ -14,6 +14,7 @@ import { setPrefill } from "@/lib/draft";
 import { RunSummary } from "./RunSummary";
 import { ThreadHeader } from "./ThreadHeader";
 import { parseTrace, producedFiles } from "@/lib/trace";
+import { deriveTaskBoard, type TaskBoard } from "@/lib/planTasks";
 import { usePoll } from "@/hooks/usePoll";
 import { seedWatchCache, useWatchStream } from "@/hooks/useWatchStream";
 import { Button } from "@/components/ui/button";
@@ -408,7 +409,7 @@ export function Thread({
               ) : g.kind === "think" ? (
                 <ThinkingItem key={key} text={g.text} live={runState === "running" && isLast} />
               ) : g.kind === "plan" ? (
-                <PlanCard key={key} items={g.items} live={runState === "running"} />
+                <PlanCard key={key} board={g.board} live={runState === "running"} />
               ) : (
                 <SayItem key={key} text={g.text} live={runState === "running" && isLast} label={i === 0 || !["say", "tools", "think", "plan"].includes(groups[i - 1].kind)} />
               );
@@ -556,10 +557,13 @@ type TraceGroup =
   | { kind: "lifecycle"; label: string; detail?: string }
   | { kind: "tools"; events: ToolEvent[] }
   | { kind: "think"; text: string }
-  | { kind: "plan"; items: import("@/lib/trace").PlanItem[] };
+  | { kind: "plan"; board: TaskBoard };
 
 function groupTrace(events: TraceEvent[]): TraceGroup[] {
   const out: TraceGroup[] = [];
+  // The board reads the WHOLE trace, not one snapshot: a step's evidence is the work that happened
+  // between the snapshot that started it and the one that ended it.
+  const board = deriveTaskBoard(events);
   for (const e of events) {
     if (e.kind === "tool") {
       const last = out[out.length - 1];
@@ -582,9 +586,7 @@ function groupTrace(events: TraceEvent[]): TraceGroup[] {
     } else if (e.kind === "plan") {
       // The plan is a living document: every TodoWrite re-emits the whole list. Show it ONCE, where
       // it first appeared, in its latest state — so the checklist ticks in place instead of stacking.
-      const first = out.findIndex((g) => g.kind === "plan");
-      if (first >= 0) out[first] = { kind: "plan", items: e.items };
-      else out.push({ kind: "plan", items: e.items });
+      if (board && !out.some((g) => g.kind === "plan")) out.push({ kind: "plan", board });
     } else {
       out.push({ kind: "say", text: e.text });
     }

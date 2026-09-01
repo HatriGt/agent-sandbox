@@ -647,7 +647,10 @@ export function streamFmtScript(): string {
     `else if(b.type==="thinking"&&b.thinking&&String(b.thinking).trim()){w("${THINK_OPEN}\\n"+String(b.thinking).trim()+"\\n${THINK_CLOSE}")}` +
     // TodoWrite = the agent's plan. Written as a checklist block ([x] done, [>] in progress, [ ] todo)
     // so the UI renders a live plan card; the tool row itself would only say "TodoWrite".
-    `else if(b.type==="tool_use"&&b.name==="TodoWrite"&&Array.isArray((b.input||{}).todos)){if(b.id)planIds.add(b.id);w("${PLAN_OPEN}\\n"+b.input.todos.map(t=>(t.status==="completed"?"[x] ":t.status==="in_progress"?"[>] ":"[ ] ")+String(t.content||t.activeForm||"").replace(/\\s*\\n\\s*/g," ").slice(0,160)).join("\\n")+"\\n${PLAN_CLOSE}")}` +
+    // The open sentinel carries the wall-clock ms of the snapshot. Consecutive snapshots bracket the
+    // window a step was in progress, which is the ONLY source of a per-step duration — the log has no
+    // other clock. Logs written before this stamp simply parse without a time and show no duration.
+    `else if(b.type==="tool_use"&&b.name==="TodoWrite"&&Array.isArray((b.input||{}).todos)){if(b.id)planIds.add(b.id);w("${PLAN_OPEN} "+Date.now()+"\\n"+b.input.todos.map(t=>(t.status==="completed"?"[x] ":t.status==="in_progress"?"[>] ":"[ ] ")+String(t.content||t.activeForm||"").replace(/\\s*\\n\\s*/g," ").slice(0,160)).join("\\n")+"\\n${PLAN_CLOSE}")}` +
     // The headline arg is ONE log line. A multi-line command (a for-loop, a heredoc) otherwise spills
     // its 2nd..Nth lines into the log as bare text, where the parser reads the indented ones as this
     // tool's "result" and the rest as agent prose — the real output then lands in a stray say block.

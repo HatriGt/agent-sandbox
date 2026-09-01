@@ -24,7 +24,8 @@ export type TraceEvent =
   | { kind: "you"; text: string }
   | { kind: "tool"; name: string; arg?: string; result?: string; failed?: boolean }
   | { kind: "think"; text: string }
-  | { kind: "plan"; items: PlanItem[] }
+  /** A TodoWrite snapshot. `at` is the formatter's wall-clock ms; absent on logs written before it. */
+  | { kind: "plan"; items: PlanItem[]; at?: number }
   /** A question the operator answered; the answer follows as the next `you` event. */
   | { kind: "ask"; text: string };
 
@@ -103,6 +104,8 @@ export function parseTrace(rawLog: string): TraceEvent[] {
   // Same shape for a thinking block and a plan block.
   let think: string[] | null = null;
   let plan: string[] | null = null;
+  // Wall-clock of the plan block currently being collected, from the open sentinel's suffix.
+  let planAt: number | undefined;
   let ask: string[] | null = null;
 
   // A log we are shown is a TAIL of the real one. When the cut lands inside a tool_result the block
@@ -146,8 +149,9 @@ export function parseTrace(rawLog: string): TraceEvent[] {
           .map((l) => l.trim().match(PLAN_LINE))
           .filter((m): m is RegExpMatchArray => !!m)
           .map((m) => ({ text: m[2].trim(), state: m[1] === "x" ? "done" : m[1] === ">" ? "active" : "todo" }));
-        if (items.length) events.push({ kind: "plan", items });
+        if (items.length) events.push(planAt === undefined ? { kind: "plan", items } : { kind: "plan", items, at: planAt });
         plan = null;
+        planAt = undefined;
       } else plan.push(line);
       continue;
     }
@@ -175,8 +179,12 @@ export function parseTrace(rawLog: string): TraceEvent[] {
       target = null;
       continue;
     }
-    if (line === PLAN_OPEN) {
+    // `⟦plan⟧` or `⟦plan⟧ 1756713600000` — the trailing stamp is optional so logs from an older
+    // in-box formatter still open a plan block (they just carry no time).
+    if (line === PLAN_OPEN || line.startsWith(PLAN_OPEN + " ")) {
       flushProse();
+      const stamp = Number(line.slice(PLAN_OPEN.length).trim());
+      planAt = Number.isFinite(stamp) && stamp > 0 ? stamp : undefined;
       plan = [];
       target = null;
       continue;

@@ -1,7 +1,8 @@
 import * as React from "react";
 import { AlertTriangle, Brain, Check, ChevronRight, Circle, CircleDot, Clock, FileText, Loader2, MessageCircleQuestion, Terminal } from "lucide-react";
-import type { PlanItem as PlanStep } from "@/lib/trace";
 import { resultSummary, type TraceEvent } from "@/lib/trace";
+import { shortDuration, shortPath, type DerivedTask, type TaskBoard, type TaskEvidence } from "@/lib/planTasks";
+import { FileMark } from "@/lib/fileIcon";
 import { parseQuestion } from "@/lib/question";
 import { Pause as PauseIcon } from "lucide-react";
 import { parseTestReport } from "@/lib/testReport";
@@ -544,33 +545,180 @@ export function ThinkingItem({ text, live }: { text: string; live?: boolean }) {
 }
 
 /**
- * The agent's plan (TodoWrite), rendered as a live checklist: done steps ticked, the active step
- * highlighted with a breathing marker, a progress fraction in the corner. Steps animate as their state
- * flips. Only the LATEST plan is rendered (the thread passes `superseded` for older snapshots).
+ * The agent's plan (TodoWrite) joined to the work it actually did — the thread's spine.
+ *
+ * A checklist alone answers "what did it intend"; it cannot answer "is this moving, and what did that
+ * step actually touch". `deriveTaskBoard` attributes every tool call to the step that was in progress
+ * when it ran, so each row carries its own evidence: files written, commands run, how long it took,
+ * and whether anything failed. Rows with evidence open; rows without stay flat rather than offering an
+ * empty disclosure. Only the LATEST snapshot is rendered — the plan ticks in place instead of stacking.
  */
-export function PlanCard({ items, live }: { items: PlanStep[]; live?: boolean }) {
-  const done = items.filter((i) => i.state === "done").length;
-  const [open, setOpen] = React.useState(true);
-  const allDone = done === items.length;
+function ProgressRail({ done, total, complete }: { done: number; total: number; complete: boolean }) {
+  const pct = total ? (done / total) * 100 : 0;
   return (
-    <div className="enter bg-card max-w-[60ch] rounded-xl border shadow-e1">
+    <div
+      role="progressbar"
+      aria-valuemin={0}
+      aria-valuemax={total}
+      aria-valuenow={done}
+      aria-label={`${done} of ${total} steps done`}
+      // The rail IS the divider between header and list, so the card still declares its elevation once.
+      className="bg-border relative h-0.5 w-full overflow-hidden"
+    >
+      <motion.div
+        className={cn("absolute inset-y-0 left-0", complete ? "bg-ok" : "bg-live")}
+        initial={false}
+        animate={{ width: `${pct}%` }}
+        transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+      />
+    </div>
+  );
+}
+
+/** `2 files · 9s` — the facts that fit on the row, in the same voice as the Worked line. */
+function evidenceSummary(e: TaskEvidence): string {
+  const parts: string[] = [];
+  if (e.files.length) parts.push(`${e.files.length} file${e.files.length > 1 ? "s" : ""}`);
+  else if (e.commands.length) parts.push(`${e.commands.length} command${e.commands.length > 1 ? "s" : ""}`);
+  else if (e.steps) parts.push(`${e.steps} step${e.steps > 1 ? "s" : ""}`);
+  if (e.ms !== undefined) parts.push(shortDuration(e.ms));
+  return parts.join(" · ");
+}
+
+function TaskRow({ task, live }: { task: DerivedTask; live?: boolean }) {
+  const [open, setOpen] = React.useState(false);
+  const e = task.evidence;
+  const hasDetail = e.files.length > 0 || e.commands.length > 0 || e.steps > 0;
+  const active = task.state === "active";
+  const summary = evidenceSummary(e);
+
+  const mark =
+    task.state === "done" ? (
+      <span className="bg-ok/20 text-ok grid size-5 shrink-0 place-items-center rounded-md">
+        <Check className="size-3" strokeWidth={3} aria-hidden />
+      </span>
+    ) : active ? (
+      <span className="bg-live/10 text-live grid size-5 shrink-0 place-items-center rounded-md">
+        <CircleDot className={cn("size-3", live && "breathe")} strokeWidth={2.5} aria-hidden />
+      </span>
+    ) : (
+      <span className="text-faint grid size-5 shrink-0 place-items-center rounded-md border">
+        <Circle className="size-2" aria-hidden />
+      </span>
+    );
+
+  const body = (
+    <>
+      {mark}
+      <span className="min-w-0 flex-1">
+        <span
+          className={cn(
+            "block truncate text-body",
+            active ? "text-foreground font-medium" : task.state === "done" ? "text-muted-foreground" : "text-foreground"
+          )}
+        >
+          {task.text}
+        </span>
+        {/* What this step is doing RIGHT NOW — the one thing a watcher actually wants mid-run. */}
+        {active && live && e.latest && (
+          <span className="text-live block truncate text-micro">
+            {e.latest.name}
+            {e.latest.arg ? <span className="stamp ml-1.5">{shortPath(e.latest.arg)}</span> : null}
+          </span>
+        )}
+      </span>
+      {e.failed && <AlertTriangle className="text-destructive size-3.5 shrink-0" aria-label="a call in this step failed" />}
+      {summary && <span className="text-faint stamp hidden shrink-0 text-micro sm:block">{summary}</span>}
+      {hasDetail && (
+        <ChevronRight
+          className={cn("text-faint size-3.5 shrink-0 transition-transform duration-150", open && "rotate-90")}
+          aria-hidden
+        />
+      )}
+    </>
+  );
+
+  return (
+    <motion.li layout="position" className={cn("border-b last:border-b-0", active && live && "bg-live/5")}>
+      {hasDetail ? (
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          className="flex w-full cursor-pointer items-center gap-3 px-4 py-2.5 text-left"
+        >
+          {body}
+        </button>
+      ) : (
+        <div className="flex w-full items-center gap-3 px-4 py-2.5">{body}</div>
+      )}
+
+      <AnimatePresence initial={false}>
+        {open && hasDetail && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+            className="overflow-hidden"
+          >
+            <div className="flex flex-col gap-2 px-4 pb-3 pl-12">
+              {e.files.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {e.files.map((f) => (
+                    <span key={f} className="bg-muted text-muted-foreground flex max-w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-micro" title={f}>
+                      <FileMark path={f} className="size-3.5 shrink-0" />
+                      <span className="stamp truncate">{shortPath(f)}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
+              {e.commands.map((c) => (
+                <div key={c} className="flex items-start gap-2 text-micro">
+                  <span className="text-ok shrink-0 select-none">$</span>
+                  <span className="stamp text-muted-foreground min-w-0 break-all">{c}</span>
+                </div>
+              ))}
+              <div className="text-faint text-micro">
+                {e.steps} tool call{e.steps === 1 ? "" : "s"} while this step was in progress
+                {e.failed ? " · one of them failed" : ""}
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.li>
+  );
+}
+
+export function PlanCard({ board, live }: { board: TaskBoard; live?: boolean }) {
+  const [open, setOpen] = React.useState(true);
+  const { tasks, done, complete } = board;
+  return (
+    <div className="enter bg-card max-w-[72ch] overflow-hidden rounded-xl border shadow-e1">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         className="flex w-full cursor-pointer items-center gap-2.5 px-4 py-2.5 text-left"
       >
-        {allDone ? (
+        {complete ? (
           <Check className="text-ok size-4 shrink-0" strokeWidth={2.5} aria-hidden />
         ) : (
           <Loader2 className={cn("text-live size-4 shrink-0", live && "animate-spin")} aria-hidden />
         )}
-        <span className="text-foreground flex-1 text-body font-medium">{allDone ? "Plan complete" : live ? "Agent is working the plan" : "Plan"}</span>
-        <span className="text-muted-foreground tabular text-meta">
-          {done}/{items.length}
+        <span className="text-foreground flex-1 truncate text-body font-medium">
+          {complete ? "Plan complete" : live ? "Working the plan" : "Plan"}
         </span>
-        <ChevronRight className={cn("text-muted-foreground size-3.5 shrink-0 transition-transform duration-150", open && "rotate-90")} aria-hidden />
+        <span className="text-muted-foreground stamp shrink-0 text-micro">
+          {done} of {tasks.length}
+          {board.ms !== undefined ? ` · ${shortDuration(board.ms)}` : ""}
+        </span>
+        <ChevronRight className={cn("text-faint size-3.5 shrink-0 transition-transform duration-150", open && "rotate-90")} aria-hidden />
       </button>
+
+      <ProgressRail done={done} total={tasks.length} complete={complete} />
+
       <AnimatePresence initial={false}>
         {open && (
           <motion.ol
@@ -578,33 +726,10 @@ export function PlanCard({ items, live }: { items: PlanStep[]; live?: boolean })
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-            className="overflow-hidden border-t"
+            className="overflow-hidden"
           >
-            {items.map((it, i) => (
-              <motion.li
-                key={`${i}-${it.text}`}
-                layout
-                className={cn(
-                  "flex items-center gap-3 px-4 py-2 text-body",
-                  it.state === "active" ? "text-foreground font-medium" : it.state === "done" ? "text-muted-foreground" : "text-foreground"
-                )}
-              >
-                {it.state === "done" ? (
-                  <span className="bg-ok/20 text-ok grid size-5 shrink-0 place-items-center rounded-md">
-                    <Check className="size-3" strokeWidth={3} aria-hidden />
-                  </span>
-                ) : it.state === "active" ? (
-                  <span className="bg-live/10 text-live grid size-5 shrink-0 place-items-center rounded-md">
-                    <CircleDot className={cn("size-3", live && "breathe")} strokeWidth={2.5} aria-hidden />
-                  </span>
-                ) : (
-                  <span className="text-faint grid size-5 shrink-0 place-items-center rounded-md border">
-                    <Circle className="size-2" aria-hidden />
-                  </span>
-                )}
-                <span className={cn("min-w-0 flex-1", it.state === "done" && "line-through decoration-border")}>{it.text}</span>
-                {it.state === "active" && <span className="label text-live shrink-0">in progress</span>}
-              </motion.li>
+            {tasks.map((t, i) => (
+              <TaskRow key={`${i}-${t.text}`} task={t} live={live} />
             ))}
           </motion.ol>
         )}
