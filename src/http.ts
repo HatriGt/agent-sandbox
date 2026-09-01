@@ -13,6 +13,7 @@ import compression from "compression";
 import { randomUUID } from "node:crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { loadDotEnv } from "./dotenv.js";
 import { loadConfig } from "./config.js";
 import { registerTools } from "./handlers.js";
@@ -352,6 +353,23 @@ const transports: Record<string, StreamableHTTPServerTransport> = {};
 async function handle(req: Request, res: Response) {
   const sid = req.headers["mcp-session-id"] as string | undefined;
   let transport = sid ? transports[sid] : undefined;
+
+  // A session id we don't know is a session that DIED — this map is in-memory, so every deploy or
+  // restart drops all of them while clients keep their id. The spec answer is 404, which tells the
+  // client to discard the id and re-initialize. We used to fall through and build a fresh transport
+  // instead; a fresh transport is `_initialized === false`, so it rejected the client's tools/call
+  // with "400 Bad Request: Server not initialized" — an error no client treats as "re-handshake".
+  // Cursor sat there until its own timer gave up and reported the sandbox as unreachable.
+  // ...except an `initialize` that still carries the dead id: that IS the client re-handshaking, so
+  // let it through to a fresh transport rather than 404-ing the very request that would recover.
+  if (sid && !transport && !isInitializeRequest(req.body)) {
+    res.status(404).json({
+      jsonrpc: "2.0",
+      error: { code: -32001, message: "Session not found: the server restarted. Re-initialize to get a new session id." },
+      id: null,
+    });
+    return;
+  }
 
   if (!transport) {
     transport = new StreamableHTTPServerTransport({
