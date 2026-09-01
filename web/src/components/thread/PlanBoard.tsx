@@ -1,0 +1,445 @@
+import * as React from "react";
+import { AlertTriangle, Check, ChevronRight, Circle, CircleDot, Loader2, PanelRightClose, PanelRightOpen } from "lucide-react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { shortDuration, shortPath, type DerivedTask, type TaskBoard, type TaskEvidence } from "@/lib/planTasks";
+import { FileMark } from "@/lib/fileIcon";
+import { cn } from "@/lib/utils";
+
+/**
+ * The agent's plan (TodoWrite) joined to the work it actually did — the thread's spine.
+ *
+ * Two presentations of ONE board. On wide screens it is a docked aside (`PlanDock`) pinned beside the
+ * conversation, because the plan is the answer to "where is this run up to" and a card that scrolls
+ * away with the transcript cannot answer it. Below `xl` there is no room for a second column, so the
+ * same board renders in flow (`PlanCard`) where it always did.
+ *
+ * The dock is a SIBLING of the conversation+composer column, not an overlay: the whole column narrows
+ * together, so the composer stays aligned with the text it belongs to (the constraint that killed the
+ * old right-hand PR column) and nothing is ever covered.
+ *
+ * Evidence per step comes from `deriveTaskBoard` — see `lib/planTasks.ts` for the attribution rule.
+ */
+
+/** `2 files · 9s` — the facts that fit on the row, in the same voice as the Worked line. */
+function evidenceSummary(e: TaskEvidence): string {
+  const parts: string[] = [];
+  if (e.files.length) parts.push(`${e.files.length} file${e.files.length > 1 ? "s" : ""}`);
+  else if (e.commands.length) parts.push(`${e.commands.length} command${e.commands.length > 1 ? "s" : ""}`);
+  else if (e.steps) parts.push(`${e.steps} step${e.steps > 1 ? "s" : ""}`);
+  if (e.ms !== undefined) parts.push(shortDuration(e.ms));
+  return parts.join(" · ");
+}
+
+const SPRING = { type: "spring", stiffness: 460, damping: 34 } as const;
+const EASE = [0.22, 1, 0.36, 1] as const;
+
+/** The step marker. A completed step STAMPS in — the one place a spring is louder than a fade. */
+function StepMark({ state, live }: { state: DerivedTask["state"]; live?: boolean }) {
+  const reduce = useReducedMotion();
+  if (state === "done") {
+    return (
+      <motion.span
+        initial={reduce ? false : { scale: 0.5, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        transition={SPRING}
+        className="bg-ok/20 text-ok grid size-5 shrink-0 place-items-center rounded-md"
+      >
+        <Check className="size-3" strokeWidth={3} aria-hidden />
+      </motion.span>
+    );
+  }
+  if (state === "active") {
+    return (
+      <span className="relative grid size-5 shrink-0 place-items-center">
+        {/* A halo behind the live marker, so the eye lands on the step in progress first. */}
+        {live && !reduce && (
+          <motion.span
+            className="bg-live/20 absolute inset-0 rounded-md"
+            animate={{ scale: [1, 1.35, 1], opacity: [0.6, 0, 0.6] }}
+            transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
+          />
+        )}
+        <span className="bg-live/10 text-live relative grid size-5 place-items-center rounded-md">
+          <CircleDot className={cn("size-3", live && "breathe")} strokeWidth={2.5} aria-hidden />
+        </span>
+      </span>
+    );
+  }
+  return (
+    <span className="text-faint grid size-5 shrink-0 place-items-center rounded-md border">
+      <Circle className="size-2" aria-hidden />
+    </span>
+  );
+}
+
+/** Determinate progress, and the card's structural divider in one 2px line. */
+function ProgressRail({ done, total, complete, layoutId }: { done: number; total: number; complete: boolean; layoutId?: string }) {
+  const pct = total ? (done / total) * 100 : 0;
+  return (
+    <div
+      role="progressbar"
+      aria-valuemin={0}
+      aria-valuemax={total}
+      aria-valuenow={done}
+      aria-label={`${done} of ${total} steps done`}
+      className="bg-border relative h-0.5 w-full shrink-0 overflow-hidden"
+    >
+      <motion.div
+        layoutId={layoutId}
+        className={cn("absolute inset-y-0 left-0", complete ? "bg-ok" : "bg-live")}
+        initial={false}
+        animate={{ width: `${pct}%` }}
+        transition={{ duration: 0.5, ease: EASE }}
+      />
+    </div>
+  );
+}
+
+/** The count, rolling when it changes, so a step completing is visible even if you were looking away. */
+function RollingCount({ value }: { value: number }) {
+  const reduce = useReducedMotion();
+  if (reduce) return <span className="tabular-nums">{value}</span>;
+  return (
+    <span className="relative inline-grid overflow-hidden text-center align-bottom" style={{ minWidth: "1ch", height: "1.15em" }}>
+      <AnimatePresence initial={false} mode="popLayout">
+        <motion.span
+          key={value}
+          initial={{ y: "0.9em", opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          exit={{ y: "-0.9em", opacity: 0 }}
+          transition={SPRING}
+          className="tabular-nums"
+        >
+          {value}
+        </motion.span>
+      </AnimatePresence>
+    </span>
+  );
+}
+
+function TaskRow({ task, live, compact }: { task: DerivedTask; live?: boolean; compact?: boolean }) {
+  const [open, setOpen] = React.useState(false);
+  const reduce = useReducedMotion();
+  const e = task.evidence;
+  const hasDetail = e.files.length > 0 || e.commands.length > 0 || e.steps > 0;
+  const active = task.state === "active";
+  const summary = evidenceSummary(e);
+
+  const body = (
+    <>
+      <StepMark state={task.state} live={live} />
+      <span className="min-w-0 flex-1">
+        <span className="relative inline-block max-w-full align-bottom">
+          <span
+            className={cn(
+              "block truncate text-body",
+              active ? "text-foreground font-medium" : task.state === "done" ? "text-muted-foreground" : "text-foreground"
+            )}
+          >
+            {task.text}
+          </span>
+          {/* The strike is drawn, not a text-decoration, so it can sweep across as the step completes. */}
+          {task.state === "done" && (
+            <motion.span
+              aria-hidden
+              className="bg-border absolute inset-x-0 top-1/2 h-px origin-left"
+              initial={reduce ? false : { scaleX: 0 }}
+              animate={{ scaleX: 1 }}
+              transition={{ duration: 0.35, ease: EASE }}
+            />
+          )}
+        </span>
+        {/* What this step is doing RIGHT NOW — the one thing a watcher actually wants mid-run. */}
+        {active && live && e.latest && (
+          <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-live block truncate text-micro">
+            {e.latest.name}
+            {e.latest.arg ? <span className="stamp ml-1.5">{shortPath(e.latest.arg)}</span> : null}
+          </motion.span>
+        )}
+      </span>
+      {e.failed && <AlertTriangle className="text-destructive size-3.5 shrink-0" aria-label="a call in this step failed" />}
+      {summary && <span className={cn("text-faint stamp shrink-0 text-micro", compact ? "hidden" : "hidden sm:block")}>{summary}</span>}
+      {hasDetail && (
+        <ChevronRight className={cn("text-faint size-3.5 shrink-0 transition-transform duration-150", open && "rotate-90")} aria-hidden />
+      )}
+    </>
+  );
+
+  return (
+    <motion.li layout="position" className={cn("border-b last:border-b-0", active && live && "bg-live/5")}>
+      {hasDetail ? (
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          className="flex w-full cursor-pointer items-center gap-3 px-4 py-2.5 text-left"
+        >
+          {body}
+        </button>
+      ) : (
+        <div className="flex w-full items-center gap-3 px-4 py-2.5">{body}</div>
+      )}
+
+      <AnimatePresence initial={false}>
+        {open && hasDetail && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.22, ease: EASE }}
+            className="overflow-hidden"
+          >
+            <div className="flex flex-col gap-2 px-4 pb-3 pl-12">
+              {compact && summary && <div className="text-faint stamp text-micro">{summary}</div>}
+              {e.files.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {e.files.map((f, i) => (
+                    <motion.span
+                      key={f}
+                      initial={reduce ? false : { opacity: 0, y: 3 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: i * 0.03, duration: 0.18, ease: EASE }}
+                      className="bg-muted text-muted-foreground flex max-w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-micro"
+                      title={f}
+                    >
+                      <FileMark path={f} className="size-3.5 shrink-0" />
+                      <span className="stamp truncate">{shortPath(f)}</span>
+                    </motion.span>
+                  ))}
+                </div>
+              )}
+              {e.commands.map((c) => (
+                <div key={c} className="flex items-start gap-2 text-micro">
+                  <span className="text-ok shrink-0 select-none">$</span>
+                  <span className="stamp text-muted-foreground min-w-0 break-all">{c}</span>
+                </div>
+              ))}
+              {/* Only what the chips above did NOT already say — a bare "1 tool call" next to the one
+                  file it wrote is noise. Reads and searches get named, since a count cannot say what
+                  the step spent its time on. */}
+              {(e.others.length > 0 || e.failed) && (
+                <div className="text-faint flex flex-wrap items-center gap-x-2 gap-y-1 text-micro">
+                  {e.others.map((o, i) => (
+                    <span key={o.name}>
+                      {i > 0 && <span className="text-border mr-2">·</span>}
+                      {o.name}
+                      {o.n > 1 ? <span className="stamp"> ×{o.n}</span> : null}
+                    </span>
+                  ))}
+                  {e.failed && <span className="text-destructive">a call failed</span>}
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.li>
+  );
+}
+
+function BoardHeadline({ complete, live }: { complete: boolean; live?: boolean }) {
+  return <>{complete ? "Plan complete" : live ? "Working the plan" : "Plan"}</>;
+}
+
+function BoardIcon({ complete, live }: { complete: boolean; live?: boolean }) {
+  const reduce = useReducedMotion();
+  if (complete)
+    return (
+      <motion.span
+        initial={reduce ? false : { scale: 0.4, rotate: -18, opacity: 0 }}
+        animate={{ scale: 1, rotate: 0, opacity: 1 }}
+        transition={SPRING}
+        className="shrink-0"
+      >
+        <Check className="text-ok size-4" strokeWidth={2.5} aria-hidden />
+      </motion.span>
+    );
+  return <Loader2 className={cn("text-live size-4 shrink-0", live && "animate-spin")} aria-hidden />;
+}
+
+/**
+ * The completion moment — one authored flourish, fired once when the last step ticks. A single sweep
+ * of light crosses the board; it never repeats and never runs on mount for an already-finished run.
+ */
+function useCompletionSweep(complete: boolean): boolean {
+  const [sweep, setSweep] = React.useState(false);
+  const wasComplete = React.useRef<boolean | null>(null);
+  React.useEffect(() => {
+    if (wasComplete.current === false && complete) {
+      setSweep(true);
+      const t = setTimeout(() => setSweep(false), 900);
+      return () => clearTimeout(t);
+    }
+    wasComplete.current = complete;
+  }, [complete]);
+  return sweep;
+}
+
+function Sweep({ on }: { on: boolean }) {
+  const reduce = useReducedMotion();
+  if (reduce) return null;
+  return (
+    <AnimatePresence>
+      {on && (
+        <motion.span
+          aria-hidden
+          className="pointer-events-none absolute inset-0 z-10"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+        >
+          <motion.span
+            className="absolute inset-y-0 w-1/3"
+            style={{ background: "linear-gradient(90deg, transparent, var(--ok), transparent)", opacity: 0.14 }}
+            initial={{ left: "-35%" }}
+            animate={{ left: "105%" }}
+            transition={{ duration: 0.85, ease: EASE }}
+          />
+        </motion.span>
+      )}
+    </AnimatePresence>
+  );
+}
+
+/** In-flow board, for screens with no room for the dock. */
+export function PlanCard({ board, live }: { board: TaskBoard; live?: boolean }) {
+  const [open, setOpen] = React.useState(true);
+  const { tasks, done, complete } = board;
+  const sweep = useCompletionSweep(complete);
+  return (
+    <div className="enter bg-card relative max-w-[72ch] overflow-hidden rounded-xl border shadow-e1">
+      <Sweep on={sweep} />
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full cursor-pointer items-center gap-2.5 px-4 py-2.5 text-left"
+      >
+        <BoardIcon complete={complete} live={live} />
+        <span className="text-foreground flex-1 truncate text-body font-medium">
+          <BoardHeadline complete={complete} live={live} />
+        </span>
+        <span className="text-muted-foreground stamp flex shrink-0 items-baseline gap-1 text-micro">
+          <RollingCount value={done} /> of {tasks.length}
+          {board.ms !== undefined ? ` · ${shortDuration(board.ms)}` : ""}
+        </span>
+        <ChevronRight className={cn("text-faint size-3.5 shrink-0 transition-transform duration-150", open && "rotate-90")} aria-hidden />
+      </button>
+
+      <ProgressRail done={done} total={tasks.length} complete={complete} />
+
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.ol
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.22, ease: EASE }}
+            className="overflow-hidden"
+          >
+            {tasks.map((t, i) => (
+              <TaskRow key={`${i}-${t.text}`} task={t} live={live} />
+            ))}
+          </motion.ol>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+const DOCK_KEY = "asb-plan-dock";
+
+/**
+ * The docked board: pinned beside the conversation so the plan never scrolls away. Collapses to a slim
+ * rail that still carries the fraction and a pip per step, so even collapsed it answers "how far in".
+ */
+export function PlanDock({ board, live }: { board: TaskBoard; live?: boolean }) {
+  const [open, setOpen] = React.useState(() => sessionStorage.getItem(DOCK_KEY) !== "0");
+  const reduce = useReducedMotion();
+  const { tasks, done, complete } = board;
+  const sweep = useCompletionSweep(complete);
+  const toggle = () =>
+    setOpen((v) => {
+      sessionStorage.setItem(DOCK_KEY, v ? "0" : "1");
+      return !v;
+    });
+
+  return (
+    <motion.aside
+      aria-label="Plan"
+      initial={false}
+      animate={{ width: open ? "22rem" : "2.75rem" }}
+      transition={reduce ? { duration: 0 } : { type: "spring", stiffness: 340, damping: 36 }}
+      className="bg-card relative hidden shrink-0 flex-col overflow-hidden border-l xl:flex"
+    >
+      <Sweep on={sweep} />
+
+      {/* Header. Collapsed, it is just the toggle — the rail below carries the state. */}
+      <div className={cn("flex h-10 shrink-0 items-center border-b", open ? "gap-2 px-3" : "justify-center px-0")}>
+        {open && (
+          <>
+            <BoardIcon complete={complete} live={live} />
+            <span className="text-foreground min-w-0 flex-1 truncate text-meta font-semibold">
+              <BoardHeadline complete={complete} live={live} />
+            </span>
+            <span className="text-muted-foreground stamp flex shrink-0 items-baseline gap-1 text-micro">
+              <RollingCount value={done} />/{tasks.length}
+            </span>
+          </>
+        )}
+        <button
+          type="button"
+          onClick={toggle}
+          aria-expanded={open}
+          aria-label={open ? "Collapse the plan" : "Expand the plan"}
+          title={open ? "Collapse the plan" : `Plan · ${done}/${tasks.length}`}
+          className="text-muted-foreground hover:text-foreground grid size-7 shrink-0 cursor-pointer place-items-center rounded-md transition-colors"
+        >
+          {open ? <PanelRightClose className="size-4" aria-hidden /> : <PanelRightOpen className="size-4" aria-hidden />}
+        </button>
+      </div>
+
+      {open ? (
+        <>
+          <ProgressRail done={done} total={tasks.length} complete={complete} layoutId="plan-rail" />
+          <ol className="min-h-0 flex-1 overflow-y-auto">
+            {tasks.map((t, i) => (
+              <TaskRow key={`${i}-${t.text}`} task={t} live={live} compact />
+            ))}
+          </ol>
+          {board.ms !== undefined && (
+            <div className="text-faint stamp shrink-0 border-t px-3 py-2 text-micro">
+              {shortDuration(board.ms)} · {board.revisions} revision{board.revisions === 1 ? "" : "s"}
+            </div>
+          )}
+        </>
+      ) : (
+        // Collapsed: a vertical pip per step. Still readable at 44px — done fills, active breathes.
+        <button
+          type="button"
+          onClick={toggle}
+          aria-label={`Expand the plan · ${done} of ${tasks.length} steps done`}
+          className="flex min-h-0 flex-1 cursor-pointer flex-col items-center gap-1.5 overflow-hidden py-3"
+        >
+          <span className="text-muted-foreground stamp mb-1 text-micro">
+            {done}/{tasks.length}
+          </span>
+          {tasks.map((t, i) => (
+            <motion.span
+              key={`${i}-${t.text}`}
+              initial={reduce ? false : { scaleY: 0, opacity: 0 }}
+              animate={{ scaleY: 1, opacity: 1 }}
+              transition={{ delay: Math.min(i * 0.04, 0.3), duration: 0.24, ease: EASE }}
+              title={t.text}
+              className={cn(
+                "w-1.5 shrink-0 rounded-full",
+                t.state === "done" ? "bg-ok" : t.state === "active" ? cn("bg-live", live && "breathe") : "bg-border"
+              )}
+              style={{ height: 14 }}
+            />
+          ))}
+        </button>
+      )}
+    </motion.aside>
+  );
+}

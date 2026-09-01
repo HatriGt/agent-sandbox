@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { ChatContainerContent, ChatContainerRoot, ChatContainerScrollAnchor } from "@/components/ui/chat-container";
 import type { TraceEvent } from "@/lib/trace";
 import { AnsweredQuestionItem, LifecycleItem, ObserverItem, PlanCard, QueuedItem, SayItem, ThinkingItem, ToolGroup, WorkingIndicator, YouItem } from "./TraceItems";
+import { PlanDock } from "./PlanBoard";
 import { ThreadMinimap, type Turn } from "./ThreadMinimap";
 import { useStickToBottom } from "use-stick-to-bottom";
 import { ChangesDock } from "./ChangesDock";
@@ -124,6 +125,8 @@ export function Thread({
 
   const events = React.useMemo(() => parseTrace(snap?.log ?? ""), [snap?.log]);
   const groups = React.useMemo(() => groupTrace(events), [events]);
+  // Derived once here so the docked board and the in-flow card are the same object.
+  const planBoard = React.useMemo(() => deriveTaskBoard(events), [events]);
   const artifacts = React.useMemo(() => producedFiles(events), [events]);
 
   // What changed: fetched when the thread opens, whenever a Write/Edit lands or the run finishes, and
@@ -409,7 +412,10 @@ export function Thread({
               ) : g.kind === "think" ? (
                 <ThinkingItem key={key} text={g.text} live={runState === "running" && isLast} />
               ) : g.kind === "plan" ? (
-                <PlanCard key={key} board={g.board} live={runState === "running"} />
+                // The dock owns the plan on wide screens; in flow it would be the same board twice.
+                <div key={key} className="xl:hidden">
+                  <PlanCard board={g.board} live={runState === "running"} />
+                </div>
               ) : (
                 <SayItem key={key} text={g.text} live={runState === "running" && isLast} label={i === 0 || !["say", "tools", "think", "plan"].includes(groups[i - 1].kind)} />
               );
@@ -496,6 +502,10 @@ export function Thread({
         onReplyFailed={onReplyFailed}
       />
       </div>
+      {/* Sibling of the whole column (conversation + dock + composer), so opening it narrows all
+          three together and the composer stays aligned with the text. Hidden while the workspace
+          pane is open — two asides would leave the conversation a sliver. */}
+      {planBoard && !sleeping && !showWorkspace && <PlanDock board={planBoard} live={runState === "running"} />}
       <AnimatePresence>
         {showWorkspace && (
           <React.Suspense
