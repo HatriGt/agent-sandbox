@@ -97,6 +97,27 @@ and would have cost us security and model updates. Instead:
 2. The formatter still understands `TaskCreate`/`TaskUpdate` and folds them into the same `⟦plan⟧`
    snapshots, so a box that ignores the flag degrades instead of losing its plan.
 
+**Two delegations could share one sandbox.** `acquireBox` proved a warm box free with `listPoolBoxes`
+(an SSH round-trip per box, seconds) and only wrote `/.claimed` afterwards, so two concurrent
+delegations both took `available[0]`. Reproduced in production: two plans interleaved snapshot by
+snapshot in a single log, two agents writing one `/workspace`, and one run self-healing to `exit 254`.
+`src/pool.ts` now reserves the box in-process between listing and marking, so a second delegation skips
+it and takes the next free one (or cold-boots). Verified: two concurrent delegates now land on
+different boxes with no cross-contamination. Scope is this process — a second controller replica
+against one pool would still need a host-side lock.
+
+**A step that failed looked like a clean success.** A green tick beside a red warning is two signals
+contradicting each other. The tick now carries the failure itself (`destructive` palette, glyph still a
+check because the step *is* done and may have failed then retried), the card header reads "Complete, not
+clean", and the rail and completion sweep match. Precise wording lives in the tooltip and the expansion.
+
+**Planning had to be asked for.** The old instruction was one soft clause, so a plan only appeared when
+the task text demanded it — which made the whole board dependent on how the caller phrased things.
+`AGENT_SYS_PROMPT` now requires an unprompted plan for any non-trivial task, written first rather than
+as a closing summary, with one step `in_progress` at a time and status changes in their own calls.
+Locked in by `test/agent-prompt.test.ts`. Verified: a task mentioning no planning produced a 4-step plan
+as the agent's first action.
+
 **A deploy could not reach a long-running thread.** The in-box log formatter was installed at bootstrap
 only, so a box bootstrapped by an older controller kept that build's log format for its whole life.
 `resumeAgentTask` now refreshes it too.
