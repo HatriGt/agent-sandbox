@@ -684,8 +684,9 @@ function TaskRow({ task, live }: { task: DerivedTask; live?: boolean }) {
                   the step spent its time on. */}
               {(e.others.length > 0 || e.failed) && (
                 <div className="text-faint flex flex-wrap items-center gap-x-2 gap-y-1 text-micro">
-                  {e.others.map((o) => (
+                  {e.others.map((o, i) => (
                     <span key={o.name}>
+                      {i > 0 && <span className="text-border mr-2">·</span>}
                       {o.name}
                       {o.n > 1 ? <span className="stamp"> ×{o.n}</span> : null}
                     </span>
