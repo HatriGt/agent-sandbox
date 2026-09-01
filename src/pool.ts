@@ -25,6 +25,25 @@ export function poolEligible(cfg: Config, allowDomainsProvided: boolean): boolea
  * When a warm box is claimed its own pool name becomes the session/box id, so callers should use
  * the returned name (not the incoming session) for status/resume/teardown.
  */
+/**
+ * Boxes this process is mid-claim on. `listPoolBoxes` proves a box free by SSHing into it, which takes
+ * seconds, and `claimWarmBox` only writes /.claimed after that returns — so two concurrent delegations
+ * both saw the same `available[0]` and drove two agents into ONE sandbox. Observed in production: two
+ * plans interleaved snapshot-by-snapshot in a single log, and one run self-healed to exit 254.
+ *
+ * A synchronous check-and-add is atomic on the event loop, so reserving here closes the window without
+ * serialising the claims: a second delegation simply skips a reserved box and takes the next free one.
+ * Released only on FAILURE — after a successful claim the box's own /.claimed marker keeps it out of
+ * `listPoolBoxes`. Scope is this process, which is the whole controller; it does not coordinate across
+ * replicas, and a second controller against one pool would still need a host-side lock.
+ */
+const claiming = new Set<string>();
+
+/** The first listed box no in-flight delegation has reserved. Pure, so the choice itself is testable. */
+export function pickFreeBox(available: readonly string[], reserved: ReadonlySet<string> = claiming): string | undefined {
+  return available.find((b) => !reserved.has(b));
+}
+
 export async function acquireBox(
   cfg: Config,
   session: string,
@@ -34,8 +53,9 @@ export async function acquireBox(
   if (eligible) {
     // listPoolBoxes already reaps dead/wedged boxes, so anything it returns is Running + free.
     const available = await listPoolBoxes(cfg);
-    const warm = available[0];
+    const warm = pickFreeBox(available);
     if (warm) {
+      claiming.add(warm);
       try {
         await claimWarmBox(cfg, warm, copyDir);
         // Fast path: a pre-booted, pre-bootstrapped box was claimed. The caller kicks an async
@@ -49,6 +69,8 @@ export async function acquireBox(
         // that would show run:running while Stopped — reap it and fall through to a clean cold boot.
         console.error(`[pool] claim of ${warm} failed, reaping and cold-booting:`, e);
         await reapDeadPoolBoxes(cfg);
+      } finally {
+        claiming.delete(warm);
       }
     }
   }
