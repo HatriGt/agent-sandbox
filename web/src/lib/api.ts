@@ -526,6 +526,11 @@ export const api = {
   mcpMutate: (body: Record<string, unknown>) => post<McpServersResponse>("/mcp-servers.json", body),
   skills: (signal?: AbortSignal) => fetch(url("/skills.json"), { headers: authHeaders, signal }).then(parse<SkillsResponse>),
   skillMutate: (body: Record<string, unknown>) => post<SkillsResponse>("/skills.json", body),
+  /**
+   * Browse a public GitHub repo for skills. Goes through the controller because the page's CSP is
+   * `connect-src 'self'` — see lib/skillImport.ts. Caller supplies the response shape per action.
+   */
+  skillRepo: <T>(body: Record<string, unknown>) => post<T>("/skill-repo.json", body),
 
   /** Repositories reachable through the connected accounts, ranked for a picker. */
   repos: (q: string, refresh = false, signal?: AbortSignal) =>

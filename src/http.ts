@@ -55,6 +55,7 @@ import { viewAccounts, deviceStart, devicePoll } from "./accounts.js";
 import { makeRepoLister, fetchGithubRepos, matchRepos, inferRepos, attachRepoToBox } from "./repos.js";
 import { loadMcpStore, saveMcpStore, normalizeServer, parseMcpImport, viewServers, toEditableConfig, replaceFromJson, mergeSecrets, type McpServer as McpServerDef } from "./mcp-store.js";
 import { loadSkillStore, saveSkillStore, normalizeSkill, viewSkills, type SkillDef } from "./skill-store.js";
+import { listRepoSkills, fetchRepoFile } from "./github-skills.js";
 import { listClaims, listKept, markKept, unmarkKept } from "./claims.js";
 import { makeRedactor } from "./redact.js";
 import { isSecretKey } from "./mcp-store.js";
@@ -1177,6 +1178,29 @@ app.post("/skills.json", async (req: Request, res: Response) => {
     }
     await saveSkillStore(cfg, store);
     res.json({ skills: viewSkills(store) });
+  } catch (e) {
+    res.status(400).json({ error: String((e as Error).message ?? e) });
+  }
+});
+
+/**
+ * Browse a public GitHub repository for importable skills. Proxied here rather than fetched from
+ * the page because the SPA runs under `connect-src 'self'` — see github-skills.ts for the why.
+ */
+app.post("/skill-repo.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const str = (k: string) => (typeof body[k] === "string" ? (body[k] as string) : "");
+  const owner = str("owner");
+  const repo = str("repo");
+  try {
+    if (body.action === "list") {
+      res.json(await listRepoSkills(owner, repo, str("branch") || undefined, str("subpath") || undefined));
+    } else if (body.action === "fetch") {
+      res.json({ text: await fetchRepoFile(owner, repo, str("branch"), str("path")) });
+    } else {
+      res.status(400).json({ error: "unknown action" });
+    }
   } catch (e) {
     res.status(400).json({ error: String((e as Error).message ?? e) });
   }

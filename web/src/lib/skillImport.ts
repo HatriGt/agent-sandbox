@@ -2,9 +2,11 @@
  * Importing skills from outside the dashboard: a SKILL.md file from disk, or a GitHub repository
  * browsed live. The file format is Claude Code's own — YAML frontmatter (name/description) over a
  * markdown body — so anything from anthropics/skills or a repo's .claude/skills folder drops in
- * unchanged. GitHub access is unauthenticated api.github.com + raw.githubusercontent.com (both
- * CORS-open), so the browser fetches directly and no token ever leaves the machine.
+ * unchanged. GitHub reads go through the controller (`/skill-repo.json`), NOT straight from here:
+ * the page runs under `connect-src 'self'`, which is what stops an injected script exfiltrating the
+ * bearer token, so the import feature routes around that policy instead of widening it.
  */
+import { api } from "./api";
 
 export interface ParsedSkill {
   name: string;
@@ -79,6 +81,8 @@ export interface RepoRef {
   owner: string;
   repo: string;
   branch?: string;
+  /** Directory the URL pointed at, if any — narrows the listing to that folder. */
+  subpath?: string;
 }
 
 export interface RepoSkillFile {
@@ -88,51 +92,30 @@ export interface RepoSkillFile {
   name: string;
 }
 
-/** Accepts "owner/repo", a github.com URL (optionally /tree/branch), or rejects with a message. */
+/**
+ * Accepts "owner/repo" or a github.com URL. A URL that points into the tree
+ * (`/tree/<branch>/<dir>`) keeps its directory, so pasting the address bar from a single skill's
+ * folder imports that skill rather than every skill in the repository.
+ */
 export function parseRepoInput(input: string): RepoRef {
-  const s = input.trim().replace(/\.git$/, "");
-  const url = /github\.com\/([^/\s]+)\/([^/\s]+)(?:\/tree\/([^/\s]+))?/.exec(s);
-  if (url) return { owner: url[1], repo: url[2], branch: url[3] };
+  const s = input.trim().replace(/\/+$/, "").replace(/\.git$/, "");
+  const url = /github\.com\/([^/\s]+)\/([^/\s]+)(?:\/tree\/([^/\s]+)(?:\/([^\s?#]+))?)?/.exec(s);
+  if (url) return { owner: url[1], repo: url[2], branch: url[3], subpath: url[4] };
   const short = /^([\w.-]+)\/([\w.-]+)$/.exec(s);
   if (short) return { owner: short[1], repo: short[2] };
   throw new Error("Enter a repository as owner/repo or a github.com URL.");
 }
 
-async function gh<T>(path: string): Promise<T> {
-  const r = await fetch(`https://api.github.com${path}`, { headers: { Accept: "application/vnd.github+json" } });
-  if (r.status === 403 || r.status === 429) throw new Error("GitHub rate limit reached — try again in a few minutes.");
-  if (r.status === 404) throw new Error("Repository not found (private repos cannot be browsed here).");
-  if (!r.ok) throw new Error(`GitHub said ${r.status}.`);
-  return (await r.json()) as T;
-}
-
 /**
  * List the skill files a repository carries: every `SKILL.md` (Claude Code skill folders), plus
- * loose `.md` files under a `skills/` or `.claude/commands/` directory. One tree call, recursive.
+ * loose `.md` files under a `skills/` or `commands/` directory. The controller does the fetching.
  */
 export async function listRepoSkills(ref: RepoRef): Promise<{ branch: string; files: RepoSkillFile[] }> {
-  const branch = ref.branch ?? (await gh<{ default_branch: string }>(`/repos/${ref.owner}/${ref.repo}`)).default_branch;
-  const tree = await gh<{ tree: { path: string; type: string }[]; truncated?: boolean }>(
-    `/repos/${ref.owner}/${ref.repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`
-  );
-  const files: RepoSkillFile[] = [];
-  for (const t of tree.tree) {
-    if (t.type !== "blob" || !/\.md$/i.test(t.path)) continue;
-    const parts = t.path.split("/");
-    const file = parts[parts.length - 1];
-    if (/^skill\.md$/i.test(file)) {
-      files.push({ path: t.path, name: toSkillName(parts[parts.length - 2] ?? file) });
-    } else if (/(^|\/)(skills|commands)\//i.test(t.path) && !/^readme\.md$/i.test(file)) {
-      files.push({ path: t.path, name: toSkillName(file) });
-    }
-  }
-  files.sort((a, b) => a.name.localeCompare(b.name));
-  return { branch, files };
+  return api.skillRepo<{ branch: string; files: RepoSkillFile[] }>({ action: "list", owner: ref.owner, repo: ref.repo, branch: ref.branch, subpath: ref.subpath });
 }
 
 /** Fetch one file's raw text from the repo. */
 export async function fetchRepoFile(ref: RepoRef, branch: string, path: string): Promise<string> {
-  const r = await fetch(`https://raw.githubusercontent.com/${ref.owner}/${ref.repo}/${encodeURIComponent(branch)}/${path.split("/").map(encodeURIComponent).join("/")}`);
-  if (!r.ok) throw new Error(`Could not fetch ${path} (${r.status}).`);
-  return r.text();
+  const { text } = await api.skillRepo<{ text: string }>({ action: "fetch", owner: ref.owner, repo: ref.repo, branch, path });
+  return text;
 }
