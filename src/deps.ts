@@ -27,6 +27,7 @@ import {
   driverStateLine,
   type AgentCreds,
   execWithInput,
+  WORKSPACE_DIRS_SH,
 } from "./msb.js";
 import { runInteractive } from "./interactive.js";
 import { safeWorkspacePath } from "./artifact.js";
@@ -138,7 +139,7 @@ async function boxRepoOwners(cfg: Config, box: string): Promise<string[]> {
  */
 async function boxRepoLayout(cfg: Config, box: string): Promise<RepoLayout[]> {
   try {
-    const r = await exec(cfg, box, 'for d in /workspace/*/; do basename "$d"; done');
+    const r = await exec(cfg, box, WORKSPACE_DIRS_SH);
     return r.stdout
       .split("\n")
       .map((n) => n.trim())

@@ -465,6 +465,43 @@ function agentWorkdir(repos?: RepoLayout[]): string {
 }
 
 /**
+ * The workdir of a run ALREADY in the box, read from the box instead of from a caller's layout.
+ *
+ * `claude -c` continues the most recent session **in the current directory**, so a resume MUST land
+ * in the same cwd the first run used or it silently starts a brand-new session with no memory of the
+ * conversation — the agent answers a follow-up by asking which PR you meant. Resume callers only
+ * have a box id (the original plan is long gone), and passing `repos: undefined` made agentWorkdir
+ * fall back to `/workspace` while the first run had used `/workspace/<repo>`. So: reconstruct the
+ * layout from what is actually on disk, which is the same rule the first run applied to the same
+ * directories. Falls back to `/workspace` if the listing fails — matching the multi-repo case, and
+ * no worse than the bug it replaces.
+ */
+async function boxAgentWorkdir(cfg: Config, box: string): Promise<string> {
+  try {
+    const r = await exec(cfg, box, WORKSPACE_DIRS_SH);
+    return workdirFromWorkspaceListing(r.stdout);
+  } catch {
+    return "/workspace";
+  }
+}
+
+/** Lists the repo dirs directly under /workspace, one basename per line (empty for a bare box). */
+export const WORKSPACE_DIRS_SH = 'for d in /workspace/*/; do basename "$d"; done';
+
+/**
+ * The workdir implied by a `WORKSPACE_DIRS_SH` listing. Pure so the resume-cwd rule is testable:
+ * this is what keeps `claude -c` on the same session the first run created.
+ */
+export function workdirFromWorkspaceListing(stdout: string): string {
+  const names = stdout
+    .split("\n")
+    .map((n) => n.trim())
+    // An unmatched glob comes back literally as `*` on a bare box; not a repo.
+    .filter((n) => n && n !== "*");
+  return agentWorkdir(names.map((name) => ({ name })));
+}
+
+/**
  * Mark every /workspace repo dir (and /workspace itself) as trusted in ~/.claude.json so Claude
  * honors settings instead of logging "workspace has not been trusted". Trust is keyed to the dir;
  * we set hasTrustDialogAccepted for each so a single- or multi-repo layout is covered. Uses node
@@ -1115,7 +1152,11 @@ export async function resumeAgentTask(
   // older controller keeps that build's formatter for the whole life of the sandbox otherwise, so a
   // deploy that changes the log format would never reach a long-running thread's follow-up turns.
   await Promise.all([installMcpConfig(cfg, box), installSkills(cfg, box), exec(cfg, box, streamFmtScript())]);
-  return msb(cfg, ["exec", box, ...env, "--", "sh", "-lc", agentSh(agentWorkdir(repos), true)]);
+  // The cwd is read from the box, not taken from `repos`: every resume path (dashboard follow-up,
+  // inbox delivery, send-now, the credential broker, an elicited answer) only has a box id and used
+  // to pass undefined here, which resumed a single-repo box in /workspace and lost the session.
+  const workdir = repos?.length ? agentWorkdir(repos) : await boxAgentWorkdir(cfg, box);
+  return msb(cfg, ["exec", box, ...env, "--", "sh", "-lc", agentSh(workdir, true)]);
 }
 
 /**
