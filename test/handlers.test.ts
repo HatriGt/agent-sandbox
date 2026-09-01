@@ -169,6 +169,24 @@ test("resume: works with no secrets (back-compat)", async () => {
   assert.equal(seen, undefined);
 });
 
+test("resume: a gone box is not reported as 'Resumed'", async () => {
+  const s = fakeServer();
+  const gone = "run:gone — no sandbox exists for session 'b'. It was torn down…";
+  registerTools(s as any, cfg, { resume: async () => gone } as any);
+
+  const r = await s.tools.resume.handler({ session: "b", message: "hi" });
+  const out = r.content[0].text;
+  // Nothing was resumed, so the header must not claim it was.
+  assert.doesNotMatch(out, /Resumed session=/);
+  assert.equal(out, gone);
+
+  // A live box still gets the header.
+  const s2 = fakeServer();
+  registerTools(s2 as any, cfg, { resume: async () => "run:done exit=0" } as any);
+  const r2 = await s2.tools.resume.handler({ session: "b", message: "hi" });
+  assert.match(r2.content[0].text, /^Resumed session=b/);
+});
+
 test("delegate: defaults source to local when omitted (Mac/stdio path)", async () => {
   const s = fakeServer();
   let seen: any = null;

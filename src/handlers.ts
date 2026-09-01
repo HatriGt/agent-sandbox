@@ -353,6 +353,10 @@ export function registerTools(
       secrets?: Record<string, string>;
     }) => {
       const out = await deps.resume(cfg, session, message, secrets, interactFrom(bridge));
+      // deps.resume answers run:gone when no box exists for the id — nothing was resumed, so the
+      // "Resumed session=…" header would be a claim the tool did something it did not. Observed
+      // live on a torn-down box: the header sat directly above "no sandbox exists for session".
+      if (out.startsWith("run:gone")) return text(out);
       return text(`Resumed session=${session}\n\n${out}`);
     }
   );
