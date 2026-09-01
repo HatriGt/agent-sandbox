@@ -17,7 +17,7 @@ import { ownerKey } from "./user-store.js";
 import type { Config } from "./config.js";
 import { candidateAccounts, loadStore, pickDefaultAccount, type Account, type TokenStore } from "./gh-token-store.js";
 import { canAccessRepo, ghGetJson } from "./gh-probe.js";
-import { cloneRepoOnVps } from "./git-source.js";
+import { cloneRepoInStaging } from "./git-source.js";
 import { repoDirName } from "./delegate-input.js";
 import { applyGitCredentials, copyDirIntoBox, exec } from "./msb.js";
 import { stagingPathFor } from "./sync.js";
@@ -212,7 +212,7 @@ export async function attachRepoToBox(
 
   const staging = `${stagingPathFor(cfg, box)}-attach-${name}`;
   try {
-    await cloneRepoOnVps({ ...cfg, ghToken: acc?.token }, repo, ref, box, staging);
+    await cloneRepoInStaging({ ...cfg, ghToken: acc?.token }, repo, ref, box, staging);
     await copyDirIntoBox(cfg, box, staging, `/workspace/${name}`);
     if (acc && owner) {
       await applyGitCredentials(cfg, box, {

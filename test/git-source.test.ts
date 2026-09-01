@@ -8,6 +8,8 @@ import {
   normalizeRepo,
   buildCloneUrl,
   buildCloneArgs,
+  buildApplyArgs,
+  MAX_PATCH_BYTES,
   isValidRef,
 } from "../src/git-source.ts";
 
@@ -71,4 +73,12 @@ test("isValidRef: accepts normal refs, rejects injection-y ones", () => {
   assert.ok(!isValidRef("main; rm -rf /"));
   assert.ok(!isValidRef("$(whoami)"));
   assert.ok(!isValidRef("--upload-pack=evil"));
+});
+
+test("buildApplyArgs: applies staged (--index) from stdin at the checkout dir", () => {
+  assert.deepEqual(buildApplyArgs("/stage/s1/api"), ["-C", "/stage/s1/api", "apply", "--index", "--whitespace=nowarn"]);
+});
+
+test("MAX_PATCH_BYTES bounds the caller diff to 8 MB", () => {
+  assert.equal(MAX_PATCH_BYTES, 8 * 1024 * 1024);
 });

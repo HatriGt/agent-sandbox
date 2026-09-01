@@ -60,10 +60,11 @@ response timeout and lose the session id). Watch progress with `status`.
 | Arg | Required? | Note |
 |---|---|---|
 | `task` | yes | natural-language task (defines the goal — analysis/fix/PR/tests/anything) |
-| `source` | no | `local` (rsync tree, default) or `git` (clone on VPS) |
+| `source` | no | `local` (rsync tree, stdio default) or `git` (the sandbox checks the repo out itself; remote default/only) |
 | `repo` | yes* | single-repo shorthand. local: path; git: `owner/name` or https URL |
-| `repos` | yes* | `[{repo,ref?}]` for a cross-repo task; each → `/workspace/<name>` in one box |
+| `repos` | yes* | `[{repo,ref?,patch?}]` for a cross-repo task; each → `/workspace/<name>` in one box |
 | `ref` | no | branch/tag/SHA for the single `repo`; default = repo default branch |
+| `patch` | no | git only: a caller-generated `git diff origin/<ref> --binary`, applied over the fresh checkout — carries uncommitted/unpushed work when (and only when) the TASK depends on it. `source` says where the code comes from; `patch` says whether local work rides along — independent axes. |
 | `allowDomains` | no | extra egress domains |
 | `githubToken` | no | answer to a "need a token" ask — validated, stored by login, then used |
 | `githubAccount` | no | answer to a "which account" ask — the stored login to use |

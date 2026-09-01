@@ -110,7 +110,17 @@ app.use(
 );
 const jsonSmall = express.json({ limit: "1mb" });
 const jsonLarge = express.json({ limit: "96mb" }); // /file.json (≤8 MB file as base64) and /delegate.json (≤8 images)
-app.use((req: Request, res: Response, next) => (req.path === "/file.json" || req.path === "/delegate.json" ? jsonLarge : jsonSmall)(req, res, next));
+// /mcp carries delegate calls whose `patch` can be a multi-MB diff (MAX_PATCH_BYTES = 8 MB, plus
+// JSON-escaping overhead) — 1 MB would reject them at the parser with an error the MCP client
+// can't interpret. 16 MB bounds it without opening the firehose the file/image routes need.
+const jsonMcp = express.json({ limit: "16mb" });
+app.use((req: Request, res: Response, next) =>
+  (req.path === "/file.json" || req.path === "/delegate.json"
+    ? jsonLarge
+    : req.path === "/mcp" || req.path.startsWith("/mcp/")
+    ? jsonMcp
+    : jsonSmall)(req, res, next)
+);
 app.use((err: unknown, _req: Request, res: Response, next: express.NextFunction) => {
   const e = err as { type?: string; status?: number; message?: string } | undefined;
   if (e && (e.type === "entity.too.large" || e.type === "entity.parse.failed" || e.status === 400 || e.status === 413)) {

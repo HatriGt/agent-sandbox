@@ -1,10 +1,14 @@
 /**
- * Phase 1 / Step 2 — git source for REMOTE delegations.
+ * git source — how the agent sandbox obtains code it cannot read from the caller's disk.
  *
- * The Mac (stdio) controller ships the local working tree via rsync (sync.ts). A remote client
- * (Claude web / phone / CI) can't see the Mac's files, so the HTTP controller instead clones a
- * git repo/branch ON the VPS into a per-session staging dir, then hands that path to the same
- * acquireBox/copy flow.
+ * A stdio controller ships the local working tree via rsync (sync.ts) because it runs ON the
+ * caller's machine. Any other client (an agentic IDE over the HTTP entry, Claude web, CI) cannot
+ * share a filesystem with the sandbox, so the sandbox instead clones a git repo/branch into the
+ * per-session staging dir on its own host, then hands that path to the same acquireBox/copy flow.
+ *
+ * Uncommitted local work from such a caller arrives as a PATCH: the caller diffs its tree against
+ * the pushed ref it asks us to clone, and applyPatchInStaging lays that diff over the fresh
+ * checkout — so a half-finished feature can be continued in the sandbox without being pushed.
  *
  * Design (see docs/remote-mcp-plan.md):
  *  - Always a FRESH shallow clone into a per-session dir (never pull/reuse) so a claimed warm box
@@ -65,10 +69,52 @@ export function isValidRef(ref: string): boolean {
 }
 
 /**
- * Fresh shallow clone of `repo`@`ref` on the VPS into the per-session staging dir.
- * Returns the remote staging path (same shape stagingPathFor produces for rsync).
+ * A caller-supplied diff has to stay small enough to travel through the MCP transport and the JSON
+ * body parser. 8 MB covers any sane feature-in-progress; a diff bigger than that is usually a
+ * generated-file or vendored-deps mistake the caller should exclude.
  */
-export async function cloneRepoOnVps(
+export const MAX_PATCH_BYTES = 8 * 1024 * 1024;
+
+/** git argv to apply a caller diff (on stdin) to the checkout at `dest`. */
+export function buildApplyArgs(dest: string): string[] {
+  // --index stages the result so the in-box agent's `git status`/`git diff HEAD` show the shipped
+  // changes exactly as they'd look mid-feature. --whitespace=nowarn: the caller's tree is theirs.
+  return ["-C", dest, "apply", "--index", "--whitespace=nowarn"];
+}
+
+/**
+ * Lay a caller-generated `git diff` over the fresh checkout in the sandbox's staging dir, so
+ * uncommitted work from the caller's machine rides into the box. The patch travels on stdin
+ * (never argv / a remote command line), through the same multiplexed ssh as the clone.
+ *
+ * Throws with git's own stderr on failure — "does not apply" etc. must reach the caller verbatim,
+ * and the box must not start on a half-applied tree.
+ */
+export async function applyPatchInStaging(cfg: Config, dest: string, patch: string): Promise<void> {
+  if (Buffer.byteLength(patch, "utf8") > MAX_PATCH_BYTES) {
+    throw new Error(
+      `patch too large (> ${MAX_PATCH_BYTES / 1024 / 1024} MB). Exclude generated/vendored files ` +
+        `from the diff, or push the work to a branch and delegate that ref instead.`
+    );
+  }
+  // A diff with no trailing newline is rejected by git; delegate callers routinely paste one.
+  const body = patch.endsWith("\n") ? patch : patch + "\n";
+  const gitCmd = ["git", ...buildApplyArgs(dest)].map(shellQuote).join(" ");
+  const r = await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, gitCmd], { input: body, check: false });
+  if (r.code !== 0) {
+    throw new Error(
+      `The patch does not apply to the fresh checkout at ${dest.split("/").pop()}. ` +
+        `Regenerate it against the same ref you delegate (git diff origin/<ref> --binary) and re-call. ` +
+        `git said:\n${r.stderr.trim()}`
+    );
+  }
+}
+
+/**
+ * Fresh shallow clone of `repo`@`ref` into the sandbox's per-session staging dir.
+ * Returns the staging path (same shape stagingPathFor produces for rsync).
+ */
+export async function cloneRepoInStaging(
   cfg: Config,
   repo: string,
   ref: string | undefined,

@@ -20,6 +20,8 @@ export type DelegateSource = "local" | "git";
 export interface RepoInput {
   repo: string;
   ref?: string;
+  /** git only: a `git diff` from the caller's machine, applied on top of the fresh checkout. */
+  patch?: string;
 }
 
 export interface DelegateInput {
@@ -31,12 +33,16 @@ export interface DelegateInput {
   task?: string;
   /** Single-repo ref shorthand; applies to `repo`. */
   ref?: string;
+  /** Single-repo patch shorthand; applies to `repo`. */
+  patch?: string;
 }
 
 /** A validated repo with a unique in-box directory name derived from the repo. */
 export interface RepoRef {
   repo: string;
   ref?: string;
+  /** git only: a caller-supplied diff applied on top of the fresh checkout before the box starts. */
+  patch?: string;
   /** Unique subdir under /workspace (basename for paths, name segment for owner/name). */
   name: string;
 }
@@ -92,8 +98,29 @@ export function validateDelegateInput(input: DelegateInput): DelegateValidation 
     input.repos && input.repos.length > 0
       ? input.repos
       : !blank(input.repo)
-      ? [{ repo: input.repo!, ref: input.ref }]
+      ? [{ repo: input.repo!, ref: input.ref, patch: input.patch }]
       : [];
+
+  // A patch rides on top of a fresh git checkout. On source "local" the whole working tree is
+  // already shipped — a patch there means the caller misunderstood the model, so say so rather
+  // than silently ignoring it (or worse, double-applying changes the tree already has).
+  const hasPatch = !blank(input.patch) || raw.some((r) => !blank(r.patch));
+  if (hasPatch && input.source === "local") {
+    return {
+      ok: false,
+      question:
+        "patch only applies to source:\"git\" — with source:\"local\" your whole working tree " +
+        "(including uncommitted changes) is shipped as-is, so there is nothing to apply a patch to. " +
+        "Drop the patch, or switch to source:\"git\" with repo owner/name + ref.",
+    };
+  }
+  if (hasPatch && raw.every((r) => blank(r.repo))) {
+    return {
+      ok: false,
+      question:
+        "patch needs a repo to apply to. Re-call delegate with repo (owner/name) and ref alongside the patch.",
+    };
+  }
 
   const missing: string[] = [];
 
@@ -122,6 +149,8 @@ export function validateDelegateInput(input: DelegateInput): DelegateValidation 
     usable.map((r) => ({
       repo: r.repo.trim(),
       ref: blank(r.ref) ? undefined : r.ref!.trim(),
+      // Never trim a patch: leading/trailing whitespace can be significant diff content.
+      patch: blank(r.patch) ? undefined : r.patch,
       name: repoDirName(r.repo),
     }))
   );

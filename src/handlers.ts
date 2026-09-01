@@ -138,8 +138,9 @@ export function registerTools(
   server.tool(
     "delegate",
     "Delegate a task to an isolated microVM running Claude Code. source=local ships the working " +
-      "tree from the machine your IDE runs on (stdio entry); source=git clones owner/name on the VPS " +
-      "(any remote MCP client). A task may span " +
+      "tree from the machine your IDE runs on (stdio entry); source=git makes the sandbox check out " +
+      "owner/name itself (any remote MCP client). With source=git, UNCOMMITTED local work can still " +
+      "ride along as `patch` — see that argument for when to send one. A task may span " +
       "several repos open in the same IDE window — pass repos:[{repo,ref?},...]; each lands in " +
       "/workspace/<name> in ONE box and gets its own PR. A single `repo` still works. " +
       "A repo is OPTIONAL: pass ONLY a task (no repo/repos) for repo-less work — e.g. 'write a " +
@@ -160,9 +161,10 @@ export function registerTools(
         .optional()
         .describe(
           remoteEntry
-            ? "git = clone owner/name on the VPS (DEFAULT, and the only option here: this sandbox " +
-                "is remote and cannot see your filesystem). Do NOT pass local."
-            : "local = ship local working tree(s) (default); git = clone owner/name on the VPS."
+            ? "git = the sandbox checks out owner/name itself (DEFAULT, and the only option here: " +
+                "this sandbox is remote and cannot see your filesystem — use `patch` to bring " +
+                "uncommitted work). Do NOT pass local."
+            : "local = ship local working tree(s) (default); git = the sandbox checks out owner/name itself."
         ),
       repo: z
         .string()
@@ -176,6 +178,7 @@ export function registerTools(
           z.object({
             repo: z.string().describe("local: absolute path. git: owner/name or GitHub URL."),
             ref: z.string().optional().describe("git only: branch/tag/SHA for THIS repo."),
+            patch: z.string().optional().describe("git only: a diff for THIS repo — same rules as the top-level `patch`."),
           })
         )
         .optional()
@@ -185,6 +188,18 @@ export function registerTools(
         ),
       task: z.string().optional().describe("Natural-language task for the in-box agent."),
       ref: z.string().optional().describe("git only: branch/tag/SHA for the single `repo` shorthand."),
+      patch: z
+        .string()
+        .optional()
+        .describe(
+          "git only. A `git diff` from your machine, carrying work that is NOT pushed yet. Pass it " +
+            "ONLY when the task you are delegating actually depends on those uncommitted/unpushed " +
+            "changes — e.g. you are half-way through a feature and the sandbox must continue it. If " +
+            "the task is independent of your working tree, OMIT it: a clean checkout of `ref` is " +
+            "correct and safer. Generate with `git add -A -N && git diff origin/<ref> --binary` " +
+            "(--binary so image/asset changes survive; -N so new files are included), and pass the " +
+            "same <ref> as `ref` so the patch applies to what the sandbox checks out."
+        ),
       allowDomains: z
         .array(z.string())
         .optional()
@@ -210,15 +225,17 @@ export function registerTools(
       repos,
       task,
       ref,
+      patch,
       allowDomains,
       githubToken,
       githubAccount,
     }: {
       source?: DelegateSource;
       repo?: string;
-      repos?: Array<{ repo: string; ref?: string }>;
+      repos?: Array<{ repo: string; ref?: string; patch?: string }>;
       task?: string;
       ref?: string;
+      patch?: string;
       allowDomains?: string[];
       githubToken?: string;
       githubAccount?: string;
@@ -228,9 +245,11 @@ export function registerTools(
       if (remoteEntry && resolvedSource === "local") {
         return text(
           `This sandbox is reached over HTTP, so it cannot see your machine's files — ` +
-            `source:"local" would try to copy the path from the SERVER's disk. ` +
-            `Re-call delegate with source:"git" and repo:"owner/name" (plus ref if you need a ` +
-            `specific branch); the repo is cloned on the VPS. ` +
+            `source:"local" would try to copy the path from the sandbox host's own disk. ` +
+            `Re-call delegate with source:"git" and repo:"owner/name" (plus ref for a specific ` +
+            `branch); the sandbox checks the repo out itself. If the task depends on UNCOMMITTED ` +
+            `local changes, also pass patch: run \`git add -A -N && git diff origin/<ref> --binary\` ` +
+            `and send that diff — it is applied on top of the fresh checkout. ` +
             `Nothing was started, and the sandbox is up — this is not a connectivity problem.`
         );
       }
@@ -246,6 +265,7 @@ export function registerTools(
         repos,
         task,
         ref,
+        patch,
       });
       if (!v.ok) return text(v.question);
 

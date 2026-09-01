@@ -151,3 +151,37 @@ test("duplicate repo names are disambiguated (no /workspace collision)", () => {
   const names = r.plan!.repos.map((x) => x.name);
   assert.equal(new Set(names).size, 2, "names must be unique");
 });
+
+test("patch: carried through on git (single-repo shorthand and repos[])", () => {
+  const single = validateDelegateInput({ source: "git", repo: "acme/api", ref: "main", patch: "diff --git a/x b/x\n", task: "t" });
+  assert.equal(single.ok, true);
+  assert.equal(single.plan!.repos[0].patch, "diff --git a/x b/x\n");
+
+  const multi = validateDelegateInput({
+    source: "git",
+    repos: [{ repo: "acme/api", patch: "P1\n" }, { repo: "acme/web" }],
+    task: "t",
+  });
+  assert.equal(multi.ok, true);
+  assert.equal(multi.plan!.repos[0].patch, "P1\n");
+  assert.equal(multi.plan!.repos[1].patch, undefined);
+});
+
+test("patch: never trimmed (diff whitespace is content)", () => {
+  const r = validateDelegateInput({ source: "git", repo: "acme/api", patch: "  context line\n", task: "t" });
+  assert.equal(r.ok, true);
+  assert.equal(r.plan!.repos[0].patch, "  context line\n");
+});
+
+test("patch on source:local is a question, not a silent no-op", () => {
+  // local ships the whole working tree already — a patch means the caller misread the model.
+  const r = validateDelegateInput({ source: "local", repo: "/Users/me/api", patch: "diff\n", task: "t" });
+  assert.equal(r.ok, false);
+  assert.match(r.question!, /source:"git"/);
+});
+
+test("patch with no repo at all is a question (nothing to apply to)", () => {
+  const r = validateDelegateInput({ source: "git", patch: "diff\n", task: "t" });
+  assert.equal(r.ok, false);
+  assert.match(r.question!, /repo/);
+});

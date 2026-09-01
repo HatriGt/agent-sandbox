@@ -101,7 +101,7 @@ sets, on every response (static shell, JSON, SSE and artifact bytes alike):
 A sandbox run printed `git remote -v`, and the remote carried the clone token
 (`https://x-access-token:ghp_…@github.com/…`). Two fixes, defence in depth:
 
-1. **No token in the remote.** `cloneRepoOnVps` still clones with the token URL (non-interactive),
+1. **No token in the remote.** `cloneRepoInStaging` still clones with the token URL (non-interactive),
    then immediately `git remote set-url origin` to the plain URL. Later fetch/push inside the box
    authenticates via the per-owner `~/.git-credentials` store written at setup (mode 600).
 2. **Redaction at the edge** (`src/redact.ts`). Everything the console shows from inside a box — the

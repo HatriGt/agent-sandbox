@@ -53,3 +53,12 @@ test("the prompt still forbids AI attribution and reading the controller's chann
   assert.match(AGENT_SYS_PROMPT, /Co-Authored-By: Claude/);
   assert.match(AGENT_SYS_PROMPT, /Never read or print \/workspace\/\.agent\./);
 });
+
+test("a patched repo warns the agent the dirty tree is intentional", () => {
+  const hint = reposPromptHint([{ name: "api", patch: "diff...\n" }]);
+  assert.match(hint, /\/workspace\/api/);
+  assert.match(hint, /uncommitted changes/i);
+  assert.match(hint, /Do not stash, reset, or discard/);
+  // And a plain checkout gets no such warning — the agent should trust `git status` there.
+  assert.doesNotMatch(reposPromptHint([{ name: "api" }]), /uncommitted/i);
+});

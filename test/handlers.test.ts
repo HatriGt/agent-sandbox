@@ -432,3 +432,42 @@ test("stdio entry keeps the local default (the IDE shares a filesystem with the 
   await s.tools.delegate.handler({ repo: "/Users/me/proj", task: "fix a bug" });
   assert.equal(seen.source, "local");
 });
+
+test("remote entry: a patch travels into the plan, per repo", async () => {
+  // The whole point of `patch`: uncommitted work from the caller's machine reaches the checkout.
+  const s = fakeServer();
+  let seen: any = null;
+  registerTools(
+    s as any,
+    cfg,
+    {
+      countBoxes: async () => 0,
+      resolveGitAccess: okAccess,
+      runDelegation: async (_cfg: any, plan: any) => {
+        seen = plan;
+        return { box: "b", warm: false, output: "ok" };
+      },
+    } as any,
+    undefined,
+    true
+  );
+
+  await s.tools.delegate.handler({
+    repo: "owner/name",
+    ref: "Development",
+    patch: "diff --git a/f b/f\n",
+    task: "continue my feature",
+  });
+  assert.equal(seen.repos[0].patch, "diff --git a/f b/f\n");
+  assert.equal(seen.repos[0].ref, "Development");
+});
+
+test("remote entry: the source:local refusal points at the patch path", async () => {
+  // An agent holding uncommitted work needs the way FORWARD, not just "use git" (which would
+  // silently drop that work — the exact failure mode the user described).
+  const s = fakeServer();
+  registerTools(s as any, cfg, { countBoxes: async () => 0, resolveGitAccess: okAccess } as any, undefined, true);
+  const out = textOf(await s.tools.delegate.handler({ source: "local", repo: "/Users/me/proj", task: "t" }));
+  assert.match(out, /patch/);
+  assert.match(out, /git diff origin\/<ref> --binary/);
+});
