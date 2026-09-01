@@ -260,3 +260,13 @@ test("a second system/init in one turn does not stamp a second 'session started'
   assert.match(log, /before/);
   assert.match(log, /after/);
 });
+
+test("a resume waits for a live in-flight run instead of racing it", async () => {
+  const { agentSh } = await import("../src/msb.ts");
+  const resume = agentSh("/workspace/api", true);
+  // The guard: poll RUN_MARK with the same dead-pid liveness rule as RUN_STATE_SH, THEN start.
+  assert.match(resume, /while \[ -f \/workspace\/\.agent\.running \]/);
+  assert.match(resume, /\/proc\/\$p/);
+  // A first run must NOT wait — there is nothing to wait for and the box may have stale marks.
+  assert.doesNotMatch(agentSh("/workspace/api", false), /while \[ -f \/workspace\/\.agent\.running \]/);
+});

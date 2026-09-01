@@ -883,7 +883,7 @@ export async function installSkills(cfg: Config, box: string): Promise<void> {
  * the task keeps running in the box. Completion is observable via the .agent.done sentinel (holds
  * the exit code); `status` reads it. `resume=true` continues the existing Claude session (-c).
  */
-function agentSh(workdir: string, resume: boolean): string {
+export function agentSh(workdir: string, resume: boolean): string {
   // --setting-sources user: load ONLY user settings, so a cloned repo's own .claude/settings.json
   // (and its hooks) is never loaded. Target repos commonly ship a UserPromptSubmit "plugin gate"
   // hook that hard-blocks every prompt when marketplace plugins aren't installed — which they aren't
@@ -918,7 +918,18 @@ function agentSh(workdir: string, resume: boolean): string {
     ? `if [ -s ${QUESTION_MARK} ]; then { printf '%s\\n' ${shellQuote(ASK_MARK_OPEN)}; cat ${QUESTION_MARK}; printf '\\n%s\\n' ${shellQuote(ASK_MARK_CLOSE)}; } >> ${AGENT_LOG}; fi; ` +
       `{ printf '%s\\n' ${shellQuote(YOU_MARK_OPEN)}; printf '%s\\n' "$AGENT_TASK"; printf '%s\\n' ${shellQuote(YOU_MARK_CLOSE)}; } >> ${AGENT_LOG} && `
     : ``;
+  // Two resumes can land at once (an inbox delivery and an explicit resume raced in live testing):
+  // both ran `claude -c` concurrently in the same dir, and the second's sentinel reset stomped the
+  // first's RUN_MARK/DONE_MARK — the transcript showed two interleaved "session started" turns and
+  // status flipped to done while a run was still going. A resume therefore WAITS for a live
+  // in-flight run to finish (dead-pid/stale marks don't count — same liveness rule as RUN_STATE_SH)
+  // instead of starting a second one; the message is preserved, just delivered next.
+  const waitForRun = resume
+    ? `i=0; while [ -f ${RUN_MARK} ] && [ $((i+=1)) -le 600 ]; do ` +
+      `p=$(cat ${PID_MARK} 2>/dev/null); { [ -z "$p" ] || [ ! -d "/proc/$p" ]; } && break; sleep 1; done; `
+    : ``;
   const inner =
+    waitForRun +
     // Record the current task (from env) so `monitor` can report what this box is doing. First run
     // sets it; a resume appends the follow-up so the marker reflects the latest ask.
     `cd ${workdir} && printf '%s\\n' "$AGENT_TASK" ${resume ? `>> ${TASK_MARK}` : `> ${TASK_MARK}`} && ` +
