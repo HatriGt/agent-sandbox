@@ -72,9 +72,16 @@ export const ASK_ALLOWED_TOOLS = "Read Glob Grep Bash";
  * Deliberately broad: a false deny costs the co-pilot one alternative phrasing, while a false allow
  * can corrupt a running delegation. `>`/`>>` are included because a redirect is the cheapest way to
  * write a file; `git add/commit/checkout/...` because they move the driver's HEAD or index under it.
+ *
+ * The `gh` clause is an ALLOWLIST of read-only subcommands, not a blocklist of writing ones. It used
+ * to deny only `-X/--method`, which let `gh pr comment|merge|review|close` through. That was
+ * survivably wrong while the lane had no GitHub auth at all (the calls simply failed), but the lane
+ * now gets a read-only GH_TOKEN, so an "allowed" write would really post/merge as the operator.
+ * Anything not in the allowlist is denied — a new read-only verb costs one denial and a line here,
+ * while a missed writing verb speaks publicly for the user.
  */
 export const MUTATING_BASH_RE =
-  /(^|[;&|`]|\$\()\s*(sudo\s+)?(rm|mv|cp|ln|mkdir|rmdir|touch|chmod|chown|dd|truncate|tee|kill|pkill|killall|shutdown|reboot|apt|apt-get|npm|pnpm|yarn|pip|pip3|make|nohup)\b|\bsed\b[^|;&]*\s-i\b|\bgit\s+(?:-[A-Za-z-]+\s+(?:[^-\s]\S*\s+)?)*(add|commit|checkout|switch|reset|revert|merge|rebase|push|pull|fetch|apply|clean|stash|restore|rm|mv|tag|branch)\b|\bgh\s+(pr|issue|release|repo|api)\b[^|;&]*\s-(X|-method)\s|>>?[^&]/;
+  /(^|[;&|`]|\$\()\s*(sudo\s+)?(rm|mv|cp|ln|mkdir|rmdir|touch|chmod|chown|dd|truncate|tee|kill|pkill|killall|shutdown|reboot|apt|apt-get|npm|pnpm|yarn|pip|pip3|make|nohup)\b|\bsed\b[^|;&]*\s-i\b|\bgit\s+(?:-[A-Za-z-]+\s+(?:[^-\s]\S*\s+)?)*(add|commit|checkout|switch|reset|revert|merge|rebase|push|pull|fetch|apply|clean|stash|restore|rm|mv|tag|branch)\b|\bgh\s+api\b[^|;&]*\s-(?:X|-method)[\s=]|\bgh\s+(?!api\b)(?!(?:pr|issue|release|repo|run|workflow|cache|search|label|ruleset|auth|browse|status|org|gist)\s+(?:status|list|view|checks|diff|download|log|ls)\b)(?![a-z-]*\s*$)|>>?[^&]/;
 
 /** Paths whose contents drive the DRIVER lane. Writing any of them from the ask lane is fatal. */
 export const PROTECTED_PATH_RE = /\/workspace\/\.agent\.|\/ask\b|\.claude\/(settings|hooks)/;

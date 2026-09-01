@@ -69,6 +69,52 @@ test("gate: mutating bash is denied", () => {
   }
 });
 
+test("gate: gh is read-only — reads pass, anything that writes to GitHub is denied", () => {
+  // The ask lane now gets a real GH_TOKEN (without it, it cannot answer "is the CI runner stuck?",
+  // which is the question it exists for). That makes the gate the only thing standing between an
+  // observer co-pilot and a merged PR, so gh is an allowlist of read verbs, not a blocklist.
+  for (const cmd of [
+    "gh pr checks 2319",
+    "gh pr view 2319 --json statusCheckRollup",
+    "gh pr list",
+    "gh pr diff 2319",
+    "gh run list --limit 5",
+    "gh run view 123 --log",
+    "gh issue view 12",
+    "gh repo view",
+    "gh workflow list",
+    "gh auth status",
+    // The runner query from the stuck-CI case: a bare `gh api` GET must survive the allowlist.
+    "gh api repos/o/r/actions/runners",
+    "gh api /repos/o/r/commits",
+  ]) {
+    assert.equal(bash(cmd).deny, false, `should allow: ${cmd}`);
+  }
+
+  for (const cmd of [
+    "gh pr comment 2319 --body hi",
+    "gh pr merge 2319",
+    "gh pr review 2319 --approve",
+    "gh pr close 2319",
+    "gh pr create --title x",
+    "gh pr edit 2319 --title z",
+    "gh issue comment 5 --body y",
+    "gh issue close 5",
+    "gh release create v1",
+    "gh run rerun 123",
+    "gh run cancel 123",
+    "gh workflow run ci.yml",
+    "gh secret set A",
+    "gh repo clone o/r",
+    "gh api -X POST repos/o/r/issues",
+    "gh api --method DELETE repos/o/r",
+    "gh api --method=PATCH repos/o/r",
+    "gh pr checks 2319 && gh pr merge 2319",
+  ]) {
+    assert.equal(bash(cmd).deny, true, `should deny: ${cmd}`);
+  }
+});
+
 test("gate: writing the driver's question sentinel is denied with a sentinel-specific reason", () => {
   // The worst case: this would make the DRIVER's ask-gate deny all its tool calls — a freeze
   // caused by an observer that was supposed to be invisible.

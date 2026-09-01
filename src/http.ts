@@ -416,7 +416,11 @@ function failWith(res: Response, e: unknown): void {
   if (e instanceof NotOwnedError) res.status(404).json({ error: "no such machine" });
   else if (e instanceof TrialExpiredError) res.status(402).json({ error: e.message, code: "trial_expired" });
   else if (e instanceof QuotaError) res.status(429).json({ error: e.message });
-  else failWith(res, e);
+  // Anything else is a 500. This branch used to call failWith itself — infinite recursion, so every
+  // unexpected error blew the stack instead of answering the request. The message is operator-facing
+  // (this is a single-tenant control plane) but goes through the redactor: an msb/git failure can
+  // quote a command line that carried a token.
+  else res.status(500).json({ error: redactor.redact(String((e as Error)?.message ?? e)) });
 }
 
 // ---- sign-in, session, API keys ----------------------------------------------------------------
