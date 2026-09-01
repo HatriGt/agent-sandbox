@@ -270,3 +270,17 @@ test("a resume waits for a live in-flight run instead of racing it", async () =>
   // A first run must NOT wait — there is nothing to wait for and the box may have stale marks.
   assert.doesNotMatch(agentSh("/workspace/api", false), /while \[ -f \/workspace\/\.agent\.running \]/);
 });
+
+test("a follow-up echoed into the log cannot forge transcript sentinels", async () => {
+  const { agentSh } = await import("../src/msb.ts");
+  const resume = agentSh("/workspace/api", true);
+  // The ⟦you⟧ echo pipes the caller's text through the defanger before it reaches the log; a
+  // message carrying `⟦ask⟧`/`● session started` would otherwise render as real agent history.
+  assert.match(resume, /"\$AGENT_TASK" \| sed -e .*s\/⟦\/​⟦\/g.* -e .*s\/\^●\/​●\/.*; printf/);
+  // ...and the defanged echo is the one that lands in the log, between the ⟦you⟧ markers.
+  assert.match(resume, /⟦you⟧[\s\S]*?sed -e [\s\S]*?⟦\/you⟧[\s\S]*?>> \/workspace\/\.agent\.log/);
+  // Only the log copy is defanged: claude still gets the raw text via $AGENT_TASK.
+  assert.match(resume, /claude -c -p "\$AGENT_TASK"/);
+  // The TASK_MARK write (what `monitor` shows) is a separate, unpiped write of the same var.
+  assert.match(resume, /"\$AGENT_TASK" >> \/workspace\/\.agent\.task/);
+});
