@@ -3,6 +3,7 @@
  * from task text, repo paths, or box names.
  */
 import { spawn } from "node:child_process";
+import { redactShapes } from "./redact.js";
 
 export interface RunResult {
   code: number;
@@ -51,9 +52,13 @@ export async function run(
     child.on("close", (code) => {
       const result: RunResult = { code: code ?? -1, stdout, stderr };
       if (check && result.code !== 0) {
+        // The argv is redacted, not omitted (it's what makes ssh failures debuggable) — but it can
+        // carry a token-embedded clone URL, and this message flows back to MCP callers verbatim:
+        // a failed `git clone --branch <bad-ref> https://x-access-token:ghp_…@github.com/…` was
+        // observed returning the live GitHub token to the calling agent.
         reject(
           new Error(
-            `Command failed (${result.code}): ${cmd} ${args.join(" ")}\n${stderr.trim()}`
+            redactShapes(`Command failed (${result.code}): ${cmd} ${args.join(" ")}\n${stderr.trim()}`)
           )
         );
         return;

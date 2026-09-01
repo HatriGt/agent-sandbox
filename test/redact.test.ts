@@ -60,3 +60,18 @@ test("redactor refreshes its list lazily and never blocks or throws on a failing
   assert.deepEqual(r.known, ["secret-value-one"]);
   assert.equal(calls, 2);
 });
+
+test("run() failures redact token-embedded clone URLs before they reach a caller", async () => {
+  // Live testing: `delegate` with a bad ref returned the raw failed command line, INCLUDING the
+  // x-access-token clone URL — a live GitHub token handed to the calling agent. exec.run now
+  // redacts by shape on the error path; this pins the shape that leaked.
+  const { run } = await import("../src/exec.ts");
+  await assert.rejects(
+    () => run("node", ["-e", "console.error('fatal: could not read https://x-access-token:ghp_ABCDEFGHIJKLMNOPQRSTUVWX1234@github.com/o/r.git'); process.exit(1)"]),
+    (e) => {
+      assert.ok(!String(e.message).includes("ghp_ABCDEFGHIJKLMNOPQRSTUVWX1234"), "token must not survive into the error");
+      assert.match(String(e.message), /x-access-token:…/);
+      return true;
+    }
+  );
+});

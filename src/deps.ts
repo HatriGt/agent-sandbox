@@ -117,6 +117,21 @@ async function driveInteractive(cfg: Config, box: string, interact?: Interact): 
   return r.text; // done or cancelled
 }
 
+/**
+ * Whether a session's box still exists. status/resume/ask on a torn-down or mistyped session used
+ * to fall through to `msb exec`, whose failure surfaced as either a raw ssh command line (leaking
+ * controller plumbing to the caller) or — worse — a fabricated "run:running, keep waiting" that
+ * sent the calling agent into a reconnect loop against a box that was never coming back.
+ */
+async function boxExists(cfg: Config, box: string): Promise<boolean> {
+  const s = await msbStatus(cfg, box);
+  return !/sandbox not found/i.test(s);
+}
+
+const GONE = (box: string) =>
+  `run:gone — no sandbox exists for session '${box}'. It was torn down, expired, or the id is ` +
+  `mistyped. Do NOT retry status/resume on it; start a new delegation with delegate(...) instead.`;
+
 /** GitHub owners this box works with, read from each repo's `origin` remote under /workspace. */
 async function boxRepoOwners(cfg: Config, box: string): Promise<string[]> {
   const r = await exec(
@@ -445,11 +460,13 @@ export const deps: HandlerDeps = {
     // status resumes the ask→answer→continue conversation; otherwise it blocks to the next boundary
     // and returns it. A quick box-level line is prefixed for context (running/stopped/gone).
     const box = await msbStatus(cfg, session);
+    if (/sandbox not found/i.test(box)) return GONE(session);
     const progress = await driveInteractive(cfg, session, interact);
     return `state:\n${box}\n\n${progress}`;
   },
 
   async resume(cfg, session, message, secrets, interact) {
+    if (!(await boxExists(cfg, session))) return GONE(session);
     // If a GitHub token is supplied here, probe + store it (login-keyed) so it's reusable later; it's
     // also injected ephemerally for this step via secrets. Best-effort capture (never breaks resume).
     if (secrets) {
@@ -503,6 +520,7 @@ export const deps: HandlerDeps = {
   },
 
   async ask(cfg, session, question, newThread) {
+    if (!(await boxExists(cfg, session))) return GONE(session);
     // The co-pilot lane: a separate read-only Claude run in the same box. Deliberately does NOT go
     // through driveInteractive — that loop is the DRIVER's turn-taking, and touching it here would
     // be the one thing this feature exists to avoid.

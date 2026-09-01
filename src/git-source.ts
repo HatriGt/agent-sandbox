@@ -138,7 +138,17 @@ export async function cloneRepoInStaging(
     const clean = buildCloneUrl(repo);
     gitCmd += ` && git -C ${shellQuote(dest)} remote set-url origin ${shellQuote(clean)}`;
   }
-  await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, gitCmd]);
+  const r = await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, gitCmd], { check: false });
+  if (r.code !== 0) {
+    // Callers get a message about the CHECKOUT, not a dump of our ssh plumbing (which reads like an
+    // infrastructure outage and, before exec.ts learned to redact, even carried the token URL).
+    const detail = /Remote branch .* not found|couldn't find remote ref/i.test(r.stderr)
+      ? `ref '${ref}' does not exist on ${normalizeRepo(repo)}`
+      : /Repository not found|not read access|Authentication failed/i.test(r.stderr)
+      ? `the repository ${normalizeRepo(repo)} was not found or the stored account cannot read it`
+      : r.stderr.trim().split("\n").slice(-3).join(" ");
+    throw new Error(`Could not check out ${normalizeRepo(repo)}${ref ? `@${ref}` : ""}: ${detail}. Nothing was started.`);
+  }
 
   return dest;
 }
