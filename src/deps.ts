@@ -496,8 +496,11 @@ export const deps: HandlerDeps = {
     // through driveInteractive — that loop is the DRIVER's turn-taking, and touching it here would
     // be the one thing this feature exists to avoid.
     const repos = await boxRepoLayout(cfg, session);
+    // Read-only gh needs a token (gh reads GH_TOKEN from env; nothing persists in the box) — give
+    // the co-pilot the same default the driver would get, so `gh pr checks` etc. work.
+    const creds = await resolveCredsForBox(cfg, session).catch(() => undefined);
     const [result, driver] = await Promise.all([
-      askInBox(cfg, session, question, { newThread, repos }),
+      askInBox(cfg, session, question, { newThread, repos, ghToken: creds?.primaryToken }),
       driverStateLine(cfg, session),
     ]);
     return formatAsk({ ...result, driverState: driver });

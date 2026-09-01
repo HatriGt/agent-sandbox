@@ -1118,6 +1118,30 @@ export async function resumeAgentTask(
   return msb(cfg, ["exec", box, ...env, "--", "sh", "-lc", agentSh(agentWorkdir(repos), true)]);
 }
 
+/**
+ * Interrupt the agent run in a box so a message can be delivered NOW instead of waiting for the
+ * turn to finish (e.g. the agent is polling a CI check that will never complete). We kill the
+ * CHILDREN of the run wrapper (claude + the log formatter), not the wrapper itself: the wrapper
+ * then records the exit in DONE_MARK and clears RUN_MARK/PID_MARK exactly as on a normal finish,
+ * so every status reader sees a clean `done` and the follow-up `claude -c` resumes the same
+ * session. A note is stamped into the log first so the transcript says why the turn ended.
+ * Escalates TERM → KILL, and as a last resort heals the sentinels in place (exit 253) so the box
+ * can never be left wedged in `running`. Returns false when nothing was running.
+ */
+export async function interruptAgentRun(cfg: Config, box: string): Promise<boolean> {
+  const sh =
+    `p=$(cat ${PID_MARK} 2>/dev/null); ` +
+    `if [ -z "$p" ] || [ ! -d "/proc/$p" ]; then echo no-run; exit 0; fi; ` +
+    `echo "run interrupted by the operator to deliver a message immediately." >> ${AGENT_LOG}; ` +
+    `pkill -TERM -P "$p" 2>/dev/null; ` +
+    `for i in 1 2 3 4 5 6 7 8 9 10; do [ ! -f ${RUN_MARK} ] && { echo interrupted; exit 0; }; sleep 1; done; ` +
+    `pkill -KILL -P "$p" 2>/dev/null; ` +
+    `for i in 1 2 3 4 5; do [ ! -f ${RUN_MARK} ] && { echo interrupted; exit 0; }; sleep 1; done; ` +
+    `kill -KILL "$p" 2>/dev/null; echo 253 > ${DONE_MARK}; rm -f ${RUN_MARK} ${PID_MARK}; echo forced`;
+  const r = await msb(cfg, ["exec", box, "--", "bash", "-lc", sh], false);
+  return !/(^|\n)no-run/.test(r.stdout);
+}
+
 /** Raw `msb status` for a box (non-fatal if the box is gone). */
 export async function status(cfg: Config, box: string) {
   const r = await msb(cfg, ["status", box], false);
@@ -1297,7 +1321,7 @@ export async function askInBox(
   cfg: Config,
   box: string,
   question: string,
-  opts: { newThread?: boolean; repos?: RepoLayout[] } = {}
+  opts: { newThread?: boolean; repos?: RepoLayout[]; ghToken?: string } = {}
 ): Promise<AskResult> {
   // A box that idle-stopped (very likely if the driver is parked on a question) still holds the
   // whole workspace — start it so the co-pilot has something to read.
@@ -1326,6 +1350,10 @@ export async function askInBox(
     `ASK_QUESTION=${question}`,
     "-e",
     `ASK_SYS_PROMPT=${askSystemPrompt(workdir, AGENT_LOG, QUESTION_MARK)}`,
+    // Same GH default the driver gets, so the co-pilot's read-only `gh` calls (pr checks, run
+    // status…) work instead of failing with "gh auth login required". Mutating gh is still denied
+    // by the ask gate (MUTATING_BASH_RE), so this widens what it can SEE, not what it can do.
+    ...(opts.ghToken ? ["-e", `GH_TOKEN=${opts.ghToken}`, "-e", `GITHUB_TOKEN=${opts.ghToken}`] : []),
   ];
 
   // Continue the ask thread only when it belongs to the driver's CURRENT task (see askThreadProbe).

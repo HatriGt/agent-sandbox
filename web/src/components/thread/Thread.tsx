@@ -278,6 +278,28 @@ export function Thread({
       .then((r) => setQueued(r.queued))
       .catch((e: unknown) => toast.error("Could not cancel", { description: e instanceof Error ? e.message : String(e) }));
   };
+  // Deliver a queued message NOW: the controller interrupts the running turn and resumes with it.
+  // For turns stuck on something that will never finish (e.g. polling a CI check with no runner).
+  const [sendingNow, setSendingNow] = React.useState<string | null>(null);
+  const sendQueuedNow = (id: string) => {
+    if (id.startsWith("fleet-")) {
+      // Fleet fallback rows have no server id yet; fetch the real queue first.
+      refreshQueue();
+      return;
+    }
+    setSendingNow(id);
+    api
+      .sendNow(box.name, id)
+      .then((r) => {
+        setQueued(r.queued);
+        toast.success("Turn interrupted", { description: "Your message was delivered; the agent is resuming with it." });
+      })
+      .catch((e: unknown) => {
+        refreshQueue();
+        toast.error("Could not send now", { description: e instanceof Error ? e.message : String(e) });
+      })
+      .finally(() => setSendingNow(null));
+  };
 
   const idle = runState === "idle" && events.length === 0 && !loadingTrace;
 
@@ -438,7 +460,13 @@ export function Thread({
             ))}
 
             {queuedItems.map((q) => (
-              <QueuedItem key={q.id} text={q.text} onCancel={() => cancelQueued(q.id)} />
+              <QueuedItem
+                key={q.id}
+                text={q.text}
+                onCancel={() => cancelQueued(q.id)}
+                onSendNow={runState === "running" && !sleeping ? () => sendQueuedNow(q.id) : undefined}
+                sending={sendingNow === q.id}
+              />
             ))}
 
             {asides.map((a, i) => (
@@ -450,7 +478,7 @@ export function Thread({
                 label={
                   exitCode == null || exitCode === 0
                     ? "Completed"
-                    : exitCode === 254
+                    : exitCode === 254 || exitCode === 253
                       ? "Run interrupted"
                       : "Exited with an error"
                 }
@@ -460,7 +488,9 @@ export function Thread({
                     ? deadlineText ?? undefined
                     : exitCode === 254
                       ? "the sandbox restarted mid-run — send a message to continue"
-                      : `code ${exitCode}`
+                      : exitCode === 253
+                        ? "stopped by you to deliver a message immediately"
+                        : `code ${exitCode}`
                 }
                 stats={runStats(events)}
                 onCopy={async () => toMarkdown(events, { title, machine: friendlyName(box.name), url: window.location.href })}

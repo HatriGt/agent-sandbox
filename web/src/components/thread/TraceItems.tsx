@@ -449,13 +449,40 @@ function AttachmentImage({ path }: { path: string }) {
  * the moment the current turn finishes; until then it sits in the thread, visibly pending, with a way
  * to take it back.
  */
-export function QueuedItem({ text, onCancel }: { text: string; onCancel?: () => void }) {
+export function QueuedItem({
+  text,
+  onCancel,
+  onSendNow,
+  sending,
+}: {
+  text: string;
+  onCancel?: () => void;
+  onSendNow?: () => void;
+  sending?: boolean;
+}) {
+  // Send-now interrupts the running turn, so it arms on the first click and fires on the second.
+  const [armed, setArmed] = React.useState(false);
   return (
     <div className="enter flex flex-col items-end gap-1.5">
       <span className="label text-muted-foreground flex items-center gap-1.5 pr-1">
         <Clock className="size-3" aria-hidden />
-        Queued · delivers when this turn finishes
-        {onCancel && (
+        {sending ? "Interrupting the turn to deliver this…" : "Queued · delivers when this turn finishes"}
+        {!sending && onSendNow && (
+          <button
+            type="button"
+            onClick={() => (armed ? onSendNow() : setArmed(true))}
+            onBlur={() => setArmed(false)}
+            title="Stop the current turn and deliver this message immediately"
+            className={
+              armed
+                ? "text-destructive cursor-pointer font-medium underline underline-offset-2"
+                : "hover:text-foreground cursor-pointer underline-offset-2 hover:underline"
+            }
+          >
+            {armed ? "stop the turn & send?" : "send now"}
+          </button>
+        )}
+        {!sending && onCancel && (
           <button type="button" onClick={onCancel} className="hover:text-foreground cursor-pointer underline-offset-2 hover:underline">
             cancel
           </button>

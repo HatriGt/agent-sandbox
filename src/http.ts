@@ -17,7 +17,7 @@ import { loadDotEnv } from "./dotenv.js";
 import { loadConfig } from "./config.js";
 import { registerTools } from "./handlers.js";
 import { makeBridge } from "./server-bridge.js";
-import { deps as rawDeps } from "./deps.js";
+import { deps as rawDeps, resolveCredsForBox } from "./deps.js";
 import { refillPool, startPoolMaintainer } from "./pool.js";
 import { checkBearer } from "./http-auth.js";
 import { clientOf, makeAuthThrottle, makeRateLimiter } from "./auth-throttle.js";
@@ -35,7 +35,7 @@ import { parseStore } from "./gh-token-store.js";
 import { parseMcpStore } from "./mcp-store.js";
 import { guardDeps, makeOwnership, NotOwnedError, QuotaError, withPrincipal } from "./tenancy.js";
 import { securityHeaders } from "./security-headers.js";
-import { gatherMonitor, gatherWatch, askInBox, driverStateLine, startBoxIfStopped, noteRunning, stopBox, noteStopped } from "./msb.js";
+import { gatherMonitor, gatherWatch, askInBox, driverStateLine, startBoxIfStopped, noteRunning, stopBox, noteStopped, interruptAgentRun } from "./msb.js";
 import { isBoxName } from "./sync.js";
 import { touchClaimed } from "./claims.js";
 import { safeWorkspacePath } from "./artifact.js";
@@ -912,8 +912,11 @@ app.post("/ask.json", async (req: Request, res: Response) => {
     return;
   }
   try {
+    // Read-only gh needs GH_TOKEN in env (nothing persists in the box) — resolve the box owner's
+    // default account so `gh pr checks` etc. work in the ask lane too. Best-effort.
+    const creds = await withOwner(ownerOf(db, session) ?? null, () => resolveCredsForBox(cfg, session)).catch(() => undefined);
     const [result, driverState] = await Promise.all([
-      askInBox(cfg, session, question, { newThread: !!newThread }),
+      askInBox(cfg, session, question, { newThread: !!newThread, ghToken: creds?.primaryToken }),
       driverStateLine(cfg, session),
     ]);
     res.json({ ...result, ...("answer" in result && typeof result.answer === "string" ? { answer: redactor.redact(result.answer) } : {}), driverState: driverState ? redactor.redact(driverState) : driverState });
@@ -945,6 +948,36 @@ app.post("/resume.json", async (req: Request, res: Response) => {
     await resumeQuietly(session, message);
     res.json({ ok: true });
   } catch (e) {
+    failWith(res, e);
+  }
+});
+
+// Deliver a QUEUED message immediately: interrupt the running turn, then resume with that message.
+// This exists for the stuck-turn case — the agent is polling something that will never finish (a CI
+// check with no runner, a hung command) and the operator's correction sits in the inbox forever.
+// The message is taken out of the inbox FIRST so it is never delivered twice; on failure it is put
+// back so typed text is not lost. Other queued messages stay queued (the delivery loop sends them
+// after this turn). Interrupting kills the in-box claude turn (session state is preserved — the
+// resume is a normal `claude -c`), so the dashboard confirms before calling this.
+app.post("/send-now.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const { session, id } = (req.body ?? {}) as { session?: string; id?: string };
+  if (!session || !id) {
+    res.status(400).json({ error: "session and id are required" });
+    return;
+  }
+  const msg = inbox.list(session).find((m) => m.id === id);
+  if (!msg) {
+    res.status(404).json({ error: "that queued message is gone (already delivered or cancelled)" });
+    return;
+  }
+  inbox.remove(session, id);
+  try {
+    await withOwner(ownerOf(db, session) ?? null, () => interruptAgentRun(cfg, session));
+    await resumeQuietly(session, msg.text);
+    res.json({ ok: true, queued: inbox.list(session) });
+  } catch (e) {
+    inbox.enqueue(session, msg.text, msg.at);
     failWith(res, e);
   }
 });

@@ -487,6 +487,12 @@ export const api = {
   /** Queued follow-ups for a box. */
   inbox: (session: string) =>
     fetch(url("/inbox.json", { session }), { headers: authHeaders }).then(parse<{ queued: QueuedMessage[] }>),
+  /**
+   * Deliver a queued follow-up NOW: the controller interrupts the running turn and resumes the
+   * agent with this message (same session, `claude -c`). For turns stuck on something that will
+   * never finish. Other queued messages stay queued.
+   */
+  sendNow: (session: string, id: string) => post<{ ok: true; queued: QueuedMessage[] }>("/send-now.json", { session, id }),
   dequeue: (session: string, id?: string) =>
     fetch(url("/inbox.json", id ? { session, id } : { session }), { method: "DELETE", headers: authHeaders }).then(
       parse<{ queued: QueuedMessage[] }>
