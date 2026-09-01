@@ -429,6 +429,15 @@ function agentEnvFlags(
     `AGENT_TASK=${task}`,
     "-e",
     `AGENT_SYS_PROMPT=${sysPrompt}`,
+    // Pin the PLAN tool to TodoWrite. Newer Claude Code exposes EITHER TodoWrite or the task list
+    // (TaskCreate/TaskUpdate/TaskList) and, unset, headless runs get the task list. Measured on the
+    // installed 2.1.234: unset → TaskCreate only; `0`/`false` → TodoWrite only; `1` → TaskCreate only.
+    // TodoWrite is the better fit here because it re-emits the WHOLE list per call, so one call is one
+    // plan snapshot — the task tools emit one call per task, which turned a 4-step plan into 12
+    // snapshots and made "how many times did it rewrite the plan" meaningless. The formatter still
+    // understands both, so a box that ignores this flag degrades instead of losing its plan.
+    "-e",
+    "CLAUDE_CODE_ENABLE_TASKS=0",
   ];
   // GH_TOKEN drives the `gh` CLI; it's the access-resolved token for the FIRST repo's owner. Per-repo
   // pushes use the ~/.git-credentials entries (per-owner). There is NO default cfg.ghToken fallback —
