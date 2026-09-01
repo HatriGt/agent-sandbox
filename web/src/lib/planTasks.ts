@@ -29,6 +29,8 @@ export interface TaskEvidence {
   commands: string[];
   /** Every tool call attributed to the step, including reads and searches. */
   steps: number;
+  /** Calls that are neither a write nor a command — reads, searches — counted by tool name. */
+  others: { name: string; n: number }[];
   /** At least one attributed tool call came back as an error. */
   failed: boolean;
   /** Time in progress, summed over every window the step was active. Absent on logs with no stamps. */
@@ -53,7 +55,7 @@ export interface TaskBoard {
 }
 
 function blank(): TaskEvidence {
-  return { files: [], commands: [], steps: 0, failed: false };
+  return { files: [], commands: [], steps: 0, failed: false, others: [] };
 }
 
 /** Strip the workspace prefix so a chip reads `src/trace.ts`, not `/workspace/src/trace.ts`. */
@@ -101,11 +103,16 @@ export function deriveTaskBoard(events: TraceEvent[]): TaskBoard | null {
       if (ev.failed) e.failed = true;
       e.latest = { name: ev.name, arg: ev.arg };
       const arg = (ev.arg ?? "").trim();
-      if (!arg) continue;
       if (ev.name === "Bash") {
-        if (!e.commands.includes(arg)) e.commands.push(arg);
+        if (arg && !e.commands.includes(arg)) e.commands.push(arg);
       } else if (WRITE_TOOLS.has(ev.name)) {
-        if (!e.files.includes(arg)) e.files.push(arg);
+        if (arg && !e.files.includes(arg)) e.files.push(arg);
+      } else {
+        // Named rather than lumped into a bare count: "Read ×2 · Grep ×1" tells the reader what the
+        // step spent its calls on, which a number cannot.
+        const hit = e.others.find((o) => o.name === ev.name);
+        if (hit) hit.n += 1;
+        else e.others.push({ name: ev.name, n: 1 });
       }
     }
   }

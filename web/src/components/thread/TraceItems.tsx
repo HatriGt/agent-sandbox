@@ -679,10 +679,20 @@ function TaskRow({ task, live }: { task: DerivedTask; live?: boolean }) {
                   <span className="stamp text-muted-foreground min-w-0 break-all">{c}</span>
                 </div>
               ))}
-              <div className="text-faint text-micro">
-                {e.steps} tool call{e.steps === 1 ? "" : "s"} while this step was in progress
-                {e.failed ? " · one of them failed" : ""}
-              </div>
+              {/* Only what the chips above did NOT already say — a bare "1 tool call" next to the one
+                  file it wrote is noise. Reads and searches get named, since a count cannot say what
+                  the step spent its time on. */}
+              {(e.others.length > 0 || e.failed) && (
+                <div className="text-faint flex flex-wrap items-center gap-x-2 gap-y-1 text-micro">
+                  {e.others.map((o) => (
+                    <span key={o.name}>
+                      {o.name}
+                      {o.n > 1 ? <span className="stamp"> ×{o.n}</span> : null}
+                    </span>
+                  ))}
+                  {e.failed && <span className="text-destructive">a call failed</span>}
+                </div>
+              )}
             </div>
           </motion.div>
         )}

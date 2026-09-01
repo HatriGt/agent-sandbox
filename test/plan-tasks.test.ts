@@ -42,6 +42,8 @@ test("attributes tool work to the step that was in progress", () => {
   assert.equal(wire.evidence.steps, 3);
   assert.deepEqual(wire.evidence.files, ["/workspace/src/trace.ts"]);
   assert.deepEqual(wire.evidence.commands, ["npm test"]);
+  // The Read is named rather than folded into a bare number.
+  assert.deepEqual(wire.evidence.others, [{ name: "Read", n: 1 }]);
   assert.equal(wire.evidence.ms, 9000);
 
   assert.equal(render.state, "active");
