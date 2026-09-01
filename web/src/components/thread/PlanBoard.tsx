@@ -319,7 +319,7 @@ export function PlanCard({ board, live }: { board: TaskBoard; live?: boolean }) 
         <span className="text-foreground flex-1 truncate text-body font-medium">
           <BoardHeadline complete={complete} live={live} />
         </span>
-        <span className="text-muted-foreground stamp flex shrink-0 items-baseline gap-1 text-micro">
+        <span className="text-muted-foreground stamp flex shrink-0 items-baseline text-micro">
           <RollingCount value={done} /> of {tasks.length}
           {board.ms !== undefined ? ` · ${shortDuration(board.ms)}` : ""}
         </span>
@@ -357,6 +357,7 @@ export function PlanDock({ board, live }: { board: TaskBoard; live?: boolean }) 
   const [open, setOpen] = React.useState(() => sessionStorage.getItem(DOCK_KEY) !== "0");
   const reduce = useReducedMotion();
   const { tasks, done, complete } = board;
+  const failed = tasks.filter((t) => t.evidence.failed).length;
   const sweep = useCompletionSweep(complete);
   const toggle = () =>
     setOpen((v) => {
@@ -382,7 +383,7 @@ export function PlanDock({ board, live }: { board: TaskBoard; live?: boolean }) 
             <span className="text-foreground min-w-0 flex-1 truncate text-meta font-semibold">
               <BoardHeadline complete={complete} live={live} />
             </span>
-            <span className="text-muted-foreground stamp flex shrink-0 items-baseline gap-1 text-micro">
+            <span className="text-muted-foreground stamp flex shrink-0 items-baseline text-micro">
               <RollingCount value={done} />/{tasks.length}
             </span>
           </>
@@ -407,9 +408,15 @@ export function PlanDock({ board, live }: { board: TaskBoard; live?: boolean }) 
               <TaskRow key={`${i}-${t.text}`} task={t} live={live} compact />
             ))}
           </ol>
-          {board.ms !== undefined && (
-            <div className="text-faint stamp shrink-0 border-t px-3 py-2 text-micro">
-              {shortDuration(board.ms)} · {board.revisions} revision{board.revisions === 1 ? "" : "s"}
+          {(board.ms !== undefined || failed > 0) && (
+            <div className="shrink-0 border-t px-3 py-2 text-micro">
+              {board.ms !== undefined && <span className="text-faint stamp">{shortDuration(board.ms)} total</span>}
+              {board.ms !== undefined && failed > 0 && <span className="text-border mx-1.5">·</span>}
+              {failed > 0 && (
+                <span className="text-destructive">
+                  {failed} step{failed === 1 ? "" : "s"} hit a failed call
+                </span>
+              )}
             </div>
           )}
         </>
