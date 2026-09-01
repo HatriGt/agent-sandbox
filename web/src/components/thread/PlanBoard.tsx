@@ -33,8 +33,15 @@ function evidenceSummary(e: TaskEvidence): string {
 const SPRING = { type: "spring", stiffness: 460, damping: 34 } as const;
 const EASE = [0.22, 1, 0.36, 1] as const;
 
-/** The step marker. A completed step STAMPS in — the one place a spring is louder than a fade. */
-function StepMark({ state, live }: { state: DerivedTask["state"]; live?: boolean }) {
+/**
+ * The step marker. A completed step STAMPS in — the one place a spring is louder than a fade.
+ *
+ * A done step that contained a failed call is NOT drawn as a clean success: a green tick beside a red
+ * warning is two signals contradicting each other. The glyph stays a check, because the step really is
+ * done — the agent marked it so, and it may well have failed once and then retried — but the palette
+ * says "not cleanly", and the words that go with it stay precise.
+ */
+function StepMark({ state, live, failed }: { state: DerivedTask["state"]; live?: boolean; failed?: boolean }) {
   const reduce = useReducedMotion();
   if (state === "done") {
     return (
@@ -42,7 +49,11 @@ function StepMark({ state, live }: { state: DerivedTask["state"]; live?: boolean
         initial={reduce ? false : { scale: 0.5, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         transition={SPRING}
-        className="bg-ok/20 text-ok grid size-5 shrink-0 place-items-center rounded-md"
+        title={failed ? "Done, but a call in this step returned an error" : undefined}
+        className={cn(
+          "grid size-5 shrink-0 place-items-center rounded-md",
+          failed ? "bg-destructive/15 text-destructive" : "bg-ok/20 text-ok"
+        )}
       >
         <Check className="size-3" strokeWidth={3} aria-hidden />
       </motion.span>
@@ -73,7 +84,7 @@ function StepMark({ state, live }: { state: DerivedTask["state"]; live?: boolean
 }
 
 /** Determinate progress, and the card's structural divider in one 2px line. */
-function ProgressRail({ done, total, complete, layoutId }: { done: number; total: number; complete: boolean; layoutId?: string }) {
+function ProgressRail({ done, total, complete, failed, layoutId }: { done: number; total: number; complete: boolean; failed?: boolean; layoutId?: string }) {
   const pct = total ? (done / total) * 100 : 0;
   return (
     <div
@@ -86,7 +97,7 @@ function ProgressRail({ done, total, complete, layoutId }: { done: number; total
     >
       <motion.div
         layoutId={layoutId}
-        className={cn("absolute inset-y-0 left-0", complete ? "bg-ok" : "bg-live")}
+        className={cn("absolute inset-y-0 left-0", complete ? (failed ? "bg-destructive" : "bg-ok") : "bg-live")}
         initial={false}
         animate={{ width: `${pct}%` }}
         transition={{ duration: 0.5, ease: EASE }}
@@ -127,7 +138,7 @@ function TaskRow({ task, live, compact }: { task: DerivedTask; live?: boolean; c
 
   const body = (
     <>
-      <StepMark state={task.state} live={live} />
+      <StepMark state={task.state} live={live} failed={e.failed} />
       <span className="min-w-0 flex-1">
         <span className="relative inline-block max-w-full align-bottom">
           <span
@@ -157,7 +168,10 @@ function TaskRow({ task, live, compact }: { task: DerivedTask; live?: boolean; c
           </motion.span>
         )}
       </span>
-      {e.failed && <AlertTriangle className="text-destructive size-3.5 shrink-0" aria-label="a call in this step failed" />}
+      {/* Only where there is no tick to carry it — on a done row the mark itself is already red. */}
+      {e.failed && task.state !== "done" && (
+        <AlertTriangle className="text-destructive size-3.5 shrink-0" aria-label="a call in this step failed" />
+      )}
       {summary && <span className={cn("text-faint stamp shrink-0 text-micro", compact ? "hidden" : "hidden sm:block")}>{summary}</span>}
       {hasDetail && (
         <ChevronRight className={cn("text-faint size-3.5 shrink-0 transition-transform duration-150", open && "rotate-90")} aria-hidden />
@@ -237,11 +251,14 @@ function TaskRow({ task, live, compact }: { task: DerivedTask; live?: boolean; c
   );
 }
 
-function BoardHeadline({ complete, live }: { complete: boolean; live?: boolean }) {
-  return <>{complete ? "Plan complete" : live ? "Working the plan" : "Plan"}</>;
+function BoardHeadline({ complete, live, failed }: { complete: boolean; live?: boolean; failed?: boolean }) {
+  // "Plan complete" is true even with a failure — every step is done — but on its own it reads as
+  // "all well", which the footer then contradicts. Say both things in the one line.
+  if (complete) return <>{failed ? "Complete, not clean" : "Plan complete"}</>;
+  return <>{live ? "Working the plan" : "Plan"}</>;
 }
 
-function BoardIcon({ complete, live }: { complete: boolean; live?: boolean }) {
+function BoardIcon({ complete, live, failed }: { complete: boolean; live?: boolean; failed?: boolean }) {
   const reduce = useReducedMotion();
   if (complete)
     return (
@@ -251,7 +268,7 @@ function BoardIcon({ complete, live }: { complete: boolean; live?: boolean }) {
         transition={SPRING}
         className="shrink-0"
       >
-        <Check className="text-ok size-4" strokeWidth={2.5} aria-hidden />
+        <Check className={cn("size-4", failed ? "text-destructive" : "text-ok")} strokeWidth={2.5} aria-hidden />
       </motion.span>
     );
   return <Loader2 className={cn("text-live size-4 shrink-0", live && "animate-spin")} aria-hidden />;
@@ -275,7 +292,7 @@ function useCompletionSweep(complete: boolean): boolean {
   return sweep;
 }
 
-function Sweep({ on }: { on: boolean }) {
+function Sweep({ on, failed }: { on: boolean; failed?: boolean }) {
   const reduce = useReducedMotion();
   if (reduce) return null;
   return (
@@ -290,7 +307,7 @@ function Sweep({ on }: { on: boolean }) {
         >
           <motion.span
             className="absolute inset-y-0 w-1/3"
-            style={{ background: "linear-gradient(90deg, transparent, var(--ok), transparent)", opacity: 0.14 }}
+            style={{ background: `linear-gradient(90deg, transparent, var(${failed ? "--destructive" : "--ok"}), transparent)`, opacity: 0.14 }}
             initial={{ left: "-35%" }}
             animate={{ left: "105%" }}
             transition={{ duration: 0.85, ease: EASE }}
@@ -305,19 +322,20 @@ function Sweep({ on }: { on: boolean }) {
 export function PlanCard({ board, live }: { board: TaskBoard; live?: boolean }) {
   const [open, setOpen] = React.useState(true);
   const { tasks, done, complete } = board;
+  const failed = tasks.filter((t) => t.evidence.failed).length;
   const sweep = useCompletionSweep(complete);
   return (
     <div className="enter bg-card relative max-w-[72ch] overflow-hidden rounded-xl border shadow-e1">
-      <Sweep on={sweep} />
+      <Sweep on={sweep} failed={failed > 0} />
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         className="flex w-full cursor-pointer items-center gap-2.5 px-4 py-2.5 text-left"
       >
-        <BoardIcon complete={complete} live={live} />
+        <BoardIcon complete={complete} live={live} failed={failed > 0} />
         <span className="text-foreground flex-1 truncate text-body font-medium">
-          <BoardHeadline complete={complete} live={live} />
+          <BoardHeadline complete={complete} live={live} failed={failed > 0} />
         </span>
         <span className="text-muted-foreground stamp flex shrink-0 items-baseline text-micro">
           <RollingCount value={done} /> of {tasks.length}
@@ -326,7 +344,7 @@ export function PlanCard({ board, live }: { board: TaskBoard; live?: boolean }) 
         <ChevronRight className={cn("text-faint size-3.5 shrink-0 transition-transform duration-150", open && "rotate-90")} aria-hidden />
       </button>
 
-      <ProgressRail done={done} total={tasks.length} complete={complete} />
+      <ProgressRail done={done} total={tasks.length} complete={complete} failed={failed > 0} />
 
       <AnimatePresence initial={false}>
         {open && (
@@ -384,14 +402,14 @@ export function PlanDock({ board, live }: { board: TaskBoard; live?: boolean }) 
           !open && "items-center"
         )}
       >
-        <Sweep on={sweep} />
+        <Sweep on={sweep} failed={failed > 0} />
 
         {open ? (
           <>
             <div className="flex h-10 shrink-0 items-center gap-2 px-3">
-              <BoardIcon complete={complete} live={live} />
+              <BoardIcon complete={complete} live={live} failed={failed > 0} />
               <span className="text-foreground min-w-0 flex-1 truncate text-meta font-semibold">
-                <BoardHeadline complete={complete} live={live} />
+                <BoardHeadline complete={complete} live={live} failed={failed > 0} />
               </span>
               <span className="text-muted-foreground stamp flex shrink-0 items-baseline text-micro">
                 <RollingCount value={done} />/{tasks.length}
@@ -407,7 +425,7 @@ export function PlanDock({ board, live }: { board: TaskBoard; live?: boolean }) 
                 <PanelRightClose className="size-4" aria-hidden />
               </button>
             </div>
-            <ProgressRail done={done} total={tasks.length} complete={complete} layoutId="plan-rail" />
+            <ProgressRail done={done} total={tasks.length} complete={complete} failed={failed > 0} layoutId="plan-rail" />
             <ol className="min-h-0 flex-1 overflow-y-auto">
               {tasks.map((t, i) => (
                 <TaskRow key={`${i}-${t.text}`} task={t} live={live} compact />
@@ -450,7 +468,13 @@ export function PlanDock({ board, live }: { board: TaskBoard; live?: boolean }) 
                   title={t.text}
                   className={cn(
                     "h-3 w-1.5 shrink-0 rounded-full",
-                    t.state === "done" ? "bg-ok" : t.state === "active" ? cn("bg-live", live && "breathe") : "bg-border"
+                    t.state === "done"
+                      ? t.evidence.failed
+                        ? "bg-destructive"
+                        : "bg-ok"
+                      : t.state === "active"
+                        ? cn("bg-live", live && "breathe")
+                        : "bg-border"
                   )}
                 />
               ))}
