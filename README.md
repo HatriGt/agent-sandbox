@@ -22,7 +22,7 @@ your machines, GitHub accounts and MCP servers are **yours alone**.
 [![Isolation](https://img.shields.io/badge/isolation-KVM%20microVM-8A2BE2)](docs/security.md)
 [![Self-hosted](https://img.shields.io/badge/self--hosted-your%20VPS-0E7C5A)](#deploy-the-remote-http-entry)
 
-[**Sign up / live console**](https://agent-sandbox.ajeethkumar.dev) · [**Self-host**](docs/self-hosting.md) · [Security model](docs/security.md) · [Architecture](docs/architecture.md) · [Lifecycle](docs/lifecycle.md)
+[**Sign up / live console**](https://agent-sandbox.ajeethkumar.dev) · [**Self-host**](docs/self-hosting.md) · [Status](docs/status.md) · [Security model](docs/security.md) · [Architecture](docs/architecture.md) · [Lifecycle](docs/lifecycle.md)
 
 **Works with** Cursor · Claude Code · Codex · VS Code · Windsurf · Zed · Cline · Claude web · CI
 <br><sub>— anything that speaks MCP over stdio or Streamable HTTP. And nothing at all, if you use the dashboard.</sub>
@@ -402,7 +402,7 @@ src/          MCP orchestrator: handlers (shared) + stdio entry (index.ts) + HTT
               + git-source, delegate-input, deps, http-auth, msb/pool/ssh/sync
               + ask.ts (read-only co-pilot lane: gate predicate + in-box hook + prompt)
 test/         unit tests (node:test via tsx) — run `npm test`
-docs/         plan, remote-mcp plan, eval summary, runbook
+docs/         status (start here), architecture, lifecycle, runbook, security — see docs/README.md
 Dockerfile    HTTP controller image (Dokploy)
 compose.yaml  Dokploy app: Traefik route ${ASB_DOMAIN} → :8787
 ```
