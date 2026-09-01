@@ -285,7 +285,11 @@ export default function App() {
   const health = !live && !data ? "offline" : waiting.length ? "attention" : "ok";
   const loading = !data && !error;
   const paneKey =
-    view === "fleet" ? "fleet" : view === "skills" ? "skills" : view === "integrations" ? "integrations" : view === "account" ? "account" : view === "connect" ? "connect" : view === "admin" ? "admin" : booting && !selectedBox ? "booting" : selectedBox ? `box:${selectedBox.name}` : view === "box" && !data ? "box-loading" : "hub";
+    // view "box" with no matching box yet is a JUST-STARTED session: delegate returned and the URL
+    // moved, but the fleet snapshot won't list the new box until the next poll. Falling through to
+    // "hub" here rendered the composer on top of the box URL for a few seconds (observed live), so
+    // hold the box-loading skeleton until the box surfaces (or the cleanup effect routes home).
+    view === "fleet" ? "fleet" : view === "skills" ? "skills" : view === "integrations" ? "integrations" : view === "account" ? "account" : view === "connect" ? "connect" : view === "admin" ? "admin" : booting && !selectedBox ? "booting" : selectedBox ? `box:${selectedBox.name}` : view === "box" ? "box-loading" : "hub";
 
   return (
     <TooltipProvider delayDuration={400}>
