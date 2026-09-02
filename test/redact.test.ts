@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { makeRedactor, redactKnown, redactSecrets, redactShapes } from "../src/redact.ts";
+import { makeRedactor, redactKnown, redactSecrets, redactShapes, isPlumbingError } from "../src/redact.ts";
 
 // A fabricated token in the real shape (never a live credential in the repo).
 const GHP = "ghp_FakeExampleToken0000000000000000ABCD";
@@ -74,4 +74,27 @@ test("run() failures redact token-embedded clone URLs before they reach a caller
       return true;
     }
   );
+});
+
+test("ssh/msb plumbing in an error is recognised so it never reaches a client", () => {
+  // The real message observed from GET /tree.json for a box that simply did not exist.
+  const real =
+    "Command failed (1): ssh -o BatchMode=yes -o ControlMaster=auto -o ControlPath=/root/.ssh/asb/7bb6da7e.sock " +
+    "-o ControlPersist=120 -i /root/.ssh/id_ed25519 -o StrictHostKeyChecking=accept-new root@host.docker.internal " +
+    "'/root/.local/bin/msb' 'exec' 'nonexistent-but-valid' '--' 'sh' '-lc' 'cd /workspace && find .'";
+  assert.equal(isPlumbingError(real), true);
+  // Redaction alone does NOT remove it — none of it matches a secret shape. That is why the
+  // substitution exists rather than relying on the redactor.
+  assert.ok(redactShapes(real).includes("/root/.ssh/id_ed25519"));
+
+  for (const m of ["Command failed (1): rsync -a x y", "Command failed (-1): scp a b", "Command failed (128): /root/.local/bin/msb ls"])
+    assert.equal(isPlumbingError(m), true, m);
+
+  // Errors the operator/tenant SHOULD see are untouched.
+  for (const m of [
+    "The patch does not apply to the fresh checkout at api.",
+    "nothing to commit",
+    "Command failed (1): git apply --index",
+    "no repository at /workspace/api",
+  ]) assert.equal(isPlumbingError(m), false, m);
 });

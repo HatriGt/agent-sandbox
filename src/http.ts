@@ -59,7 +59,7 @@ import { loadMcpStore, saveMcpStore, normalizeServer, parseMcpImport, viewServer
 import { loadSkillStore, saveSkillStore, normalizeSkill, viewSkills, type SkillDef } from "./skill-store.js";
 import { listRepoSkills, fetchRepoFile } from "./github-skills.js";
 import { listClaims, listKept, markKept, unmarkKept } from "./claims.js";
-import { makeRedactor } from "./redact.js";
+import { makeRedactor, isPlumbingError } from "./redact.js";
 import { isSecretKey } from "./mcp-store.js";
 import type { WatchSnapshot } from "./monitor.js";
 import { listChanges, readDiff, fetchPull, forgetPull } from "./changes.js";
@@ -454,11 +454,32 @@ function failWith(res: Response, e: unknown): void {
   if (e instanceof NotOwnedError) res.status(404).json({ error: "no such machine" });
   else if (e instanceof TrialExpiredError) res.status(402).json({ error: e.message, code: "trial_expired" });
   else if (e instanceof QuotaError) res.status(429).json({ error: e.message });
-  // Anything else is a 500. This branch used to call failWith itself — infinite recursion, so every
-  // unexpected error blew the stack instead of answering the request. The message is operator-facing
-  // (this is a single-tenant control plane) but goes through the redactor: an msb/git failure can
-  // quote a command line that carried a token.
-  else res.status(500).json({ error: redactor.redact(String((e as Error)?.message ?? e)) });
+  // Anything else is a 500, through the redactor: an msb/git failure can quote a command line that
+  // carried a token. Redaction alone is not enough though — the message is no longer only
+  // operator-facing. `run()` rejects with the FULL argv to keep ssh failures debuggable, so a
+  // /tree.json for a box that simply doesn't exist answered a signed-in tenant with the control
+  // plane's ssh invocation: key path, control-socket path, the host it dials, and the msb binary
+  // path. None of that is a secret the redactor knows a shape for, and all of it is reconnaissance.
+  // The plumbing is stripped for the client and kept in full in the server log.
+  else res.status(500).json({ error: clientError(e) });
+}
+
+const PLUMBING_MESSAGE =
+  "The sandbox host did not complete that command. The machine may be stopped, gone, or still booting — reload the fleet, and if it persists check the controller log.";
+
+/**
+ * The message a client may see: redacted, plumbing replaced (and logged in full server-side), then
+ * trimmed. Every route error goes through this — including the ones that tail-slice, which is why
+ * the substitution happens BEFORE the slice: a `.slice(-400)` of an ssh dump cuts off the
+ * recognisable prefix and keeps the paths.
+ */
+export function clientError(e: unknown, maxLen = 2000): string {
+  const msg = redactor.redact(String((e as Error)?.message ?? e));
+  if (isPlumbingError(msg)) {
+    console.error(`[http] ${msg}`);
+    return PLUMBING_MESSAGE;
+  }
+  return msg.length > maxLen ? msg.slice(-maxLen) : msg;
 }
 
 // ---- sign-in, session, API keys ----------------------------------------------------------------
@@ -529,7 +550,7 @@ if (SAAS) {
       res.json({ ok: true, id: u.id, login: u.login, role: u.role });
     } catch (e) {
       authThrottle.fail(client); // enumeration attempts count
-      res.status(409).json({ error: String((e as Error).message ?? e) });
+      res.status(409).json({ error: clientError(e) });
     }
   });
   app.post("/auth/login", (req: Request, res: Response) => {
@@ -630,7 +651,7 @@ app.post("/users.json", (req: Request, res: Response) => {
     const key = createApiKey(db, u.id, "first sign-in");
     res.json({ id: u.id, login: u.login, role: u.role, token: key.token });
   } catch (e) {
-    res.status(400).json({ error: String((e as Error).message ?? e) });
+    res.status(400).json({ error: clientError(e) });
   }
 });
 app.post("/users/key.json", (req: Request, res: Response) => {
@@ -1212,7 +1233,7 @@ app.post("/mcp-servers.json", async (req: Request, res: Response) => {
     await saveMcpStore(cfg, store);
     res.json({ servers: viewServers(store), config: toEditableConfig(store) });
   } catch (e) {
-    res.status(400).json({ error: String((e as Error).message ?? e) });
+    res.status(400).json({ error: clientError(e) });
   }
 });
 
@@ -1254,7 +1275,7 @@ app.post("/skills.json", async (req: Request, res: Response) => {
     await saveSkillStore(cfg, store);
     res.json({ skills: viewSkills(store) });
   } catch (e) {
-    res.status(400).json({ error: String((e as Error).message ?? e) });
+    res.status(400).json({ error: clientError(e) });
   }
 });
 
@@ -1277,7 +1298,7 @@ app.post("/skill-repo.json", async (req: Request, res: Response) => {
       res.status(400).json({ error: "unknown action" });
     }
   } catch (e) {
-    res.status(400).json({ error: String((e as Error).message ?? e) });
+    res.status(400).json({ error: clientError(e) });
   }
 });
 
@@ -1308,7 +1329,7 @@ app.get("/diff.json", async (req: Request, res: Response) => {
     const d = await readDiff(cfg, session, path);
     res.json({ ...d, ...("diff" in d && typeof d.diff === "string" ? { diff: redactor.redact(d.diff) } : {}), ...("original" in d && typeof d.original === "string" ? { original: redactor.redact(d.original) } : {}) });
   } catch (e) {
-    res.status(400).json({ error: String((e as Error).message ?? e) });
+    res.status(400).json({ error: clientError(e) });
   }
 });
 // Pull request metadata for the PR card (through a connected account; cached a minute).
@@ -1331,7 +1352,7 @@ app.post("/pr/merge.json", async (req: Request, res: Response) => {
   } catch (e) {
     // exec throws on a non-zero exit with gh's own message (not mergeable, checks, permissions…).
     forgetPull(repo, Number(number));
-    res.status(422).json({ error: redactor.redact(String((e as Error).message ?? e).trim().slice(-600)) });
+    res.status(422).json({ error: clientError(e, 600) });
   }
 });
 
@@ -1495,7 +1516,7 @@ app.post("/git.json", async (req: Request, res: Response) => {
     else if (action === "push") res.json({ output: redactor.redact((await gitPush(cfg, session, repo)).output) });
     else res.status(400).json({ error: "action must be status | commit | push" });
   } catch (e) {
-    res.status(422).json({ error: redactor.redact(String((e as Error).message ?? e).slice(-500)) });
+    res.status(422).json({ error: clientError(e, 500) });
   }
 });
 
@@ -1547,7 +1568,7 @@ app.put("/file.json", async (req: Request, res: Response) => {
     await execWithInput(cfg, session, `mkdir -p ${q(dir)} && base64 -d > ${q(abs)} && wc -c < ${q(abs)}`, b64);
     res.json({ ok: true, path: safe.relPath, bytes: isB64 ? Buffer.from(b64, "base64").length : Buffer.byteLength(content, "utf8") });
   } catch (e) {
-    res.status(422).json({ error: String((e as Error).message ?? e).slice(-400) });
+    res.status(422).json({ error: clientError(e, 400) });
   }
 });
 

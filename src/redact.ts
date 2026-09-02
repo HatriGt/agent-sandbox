@@ -104,3 +104,17 @@ export function makeRedactor(secretsFn: () => Promise<string[]>, ttlMs = 60_000,
     },
   };
 }
+
+/**
+ * Does this error text expose HOW the controller reaches the VPS, rather than what went wrong?
+ *
+ * `run()` rejects with the full argv — deliberately, so ssh failures stay debuggable — and that
+ * message used to flow straight to HTTP clients. A /tree.json for a box that merely doesn't exist
+ * answered a signed-in tenant with the control plane's ssh invocation: the private key path, the
+ * control-socket path, the host it dials, and the msb binary path. Redaction doesn't catch it (none
+ * of it matches a secret SHAPE) and all of it is reconnaissance for someone probing the deployment.
+ * Errors matching this are replaced for the client and logged in full server-side.
+ */
+export function isPlumbingError(message: string): boolean {
+  return /Command failed \(-?\d+\):\s*\S*(ssh|rsync|scp|msb)\b/.test(message);
+}
