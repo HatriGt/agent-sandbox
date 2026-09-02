@@ -21,17 +21,6 @@ export function parseMcpName(name: string): McpCall | null {
   return { server: m[1], tool: m[2], label: m[2].replace(/[_-]+/g, " ").toLowerCase() };
 }
 
-/**
- * A stable accent hue per server so hana-qa always looks like hana-qa across runs and machines —
- * identity by color, no configuration. OKLCH hue 0–360 from a small string hash; the component
- * fixes lightness/chroma so every server lands on a readable, same-weight tint.
- */
-export function serverHue(server: string): number {
-  let h = 0;
-  for (let i = 0; i < server.length; i++) h = (h * 31 + server.charCodeAt(i)) >>> 0;
-  return h % 360;
-}
-
 /* ───────────────────────────── result analysis ───────────────────────────── */
 
 export type McpResultView =
@@ -123,10 +112,3 @@ export function mcpSummary(view: McpResultView): string {
   }
 }
 
-/** Whether an MCP arg deserves a mono block (SQL / JSON / multiline) instead of an inline chip. */
-export function argIsCode(arg: string | undefined): boolean {
-  if (!arg) return false;
-  if (arg.includes("\n")) return true;
-  if (/^\s*[[{]/.test(arg)) return true;
-  return /^\s*(select|insert|update|delete|with|create|alter|drop|call)\b/i.test(arg);
-}

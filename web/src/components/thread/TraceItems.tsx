@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { ATTACHMENT_RE, useSession } from "@/lib/session-context";
 import { SkillMark } from "@/lib/skillGlyph";
-import { parseMcpName, serverHue } from "@/lib/mcp";
+import { parseMcpName } from "@/lib/mcp";
 import { McpItem } from "./McpItem";
 import { Lightbox } from "@/components/ui/lightbox";
 
@@ -49,7 +49,7 @@ function lineCount(result: string): number {
 
 function ToolItem({ event, live }: { event: ToolEvent; live?: boolean }) {
   const mcp = parseMcpName(event.name);
-  if (mcp) return <McpItem event={event} call={mcp} hue={serverHue(mcp.server)} live={live} />;
+  if (mcp) return <McpItem event={event} call={mcp} live={live} />;
   return SHELL_TOOLS.has(event.name) ? <ShellItem event={event} live={live} /> : <StepItem event={event} live={live} />;
 }
 
