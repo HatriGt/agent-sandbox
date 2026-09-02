@@ -217,9 +217,11 @@ export function Thread({
     setReverting(true);
     try {
       await api.revert(box.name, revertAsk.message);
-      // The restored box carries the shorter log; flush everything the browser layered on top.
+      // The restored box carries the shorter log; flush everything the browser layered on top and
+      // force a fresh stream generation — the open watch stream still holds the pre-revert snapshot.
       settledRef.current.delete(box.name);
       onRepliesFlushed?.();
+      setGeneration((g) => g + 1);
       setRevertAsk(null);
       toast.success("Reverted", { description: "The sandbox and the agent's memory are back to this point." });
     } catch (e) {
