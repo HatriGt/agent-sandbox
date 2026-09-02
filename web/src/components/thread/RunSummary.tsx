@@ -49,7 +49,15 @@ export function RunSummary({
 
   return (
     <div className="enter flex flex-wrap items-center gap-x-3 gap-y-1.5 py-0.5">
-      <span className={cn("label shrink-0", failed ? "text-destructive" : "text-muted-foreground")}>{label}</span>
+      <span className={cn("label flex shrink-0 items-center gap-1.5", failed ? "text-destructive" : "text-muted-foreground")}>
+        {!failed && (
+          <svg className="text-ok size-3.5" viewBox="0 0 14 14" fill="none" aria-hidden>
+            <circle cx="7" cy="7" r="6" stroke="currentColor" strokeWidth="1.5" opacity="0.35" />
+            <path d="M4 7.2 L6.2 9.4 L10 4.8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="14" className="wire-check motion-reduce:[stroke-dashoffset:0]" />
+          </svg>
+        )}
+        {label}
+      </span>
       {(parts.length > 0 || detail) && (
         <span className="text-faint truncate text-micro">{[...parts, detail].filter(Boolean).join(" · ")}</span>
       )}

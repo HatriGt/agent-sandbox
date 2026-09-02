@@ -344,6 +344,19 @@ export function Thread({
 
   // Turns for the minimap: the task plus every message you sent, each with how the agent replied.
   const stick = useStickToBottom({ resize: "smooth", initial: "instant" });
+
+  // "New activity" on the jump-to-latest button: set when the trace grows while the reader is
+  // scrolled up in history, cleared the moment they reach the bottom again.
+  const [newBelow, setNewBelow] = React.useState(false);
+  const eventCount = events.length;
+  const prevCountRef = React.useRef(eventCount);
+  React.useEffect(() => {
+    if (eventCount > prevCountRef.current && !stick.isAtBottom) setNewBelow(true);
+    prevCountRef.current = eventCount;
+  }, [eventCount, stick.isAtBottom]);
+  React.useEffect(() => {
+    if (stick.isAtBottom) setNewBelow(false);
+  }, [stick.isAtBottom]);
   const turns = React.useMemo<Turn[]>(() => {
     const out: Turn[] = [];
     if (box.task) out.push({ id: "task", label: "Task", you: box.task, reply: groups.find((g) => g.kind === "say")?.text });
@@ -458,7 +471,7 @@ export function Thread({
             })}
 
             {!sleeping && runState === "running" && !["say", "think"].includes(groups[groups.length - 1]?.kind ?? "") && !loadingTrace && (
-              <WorkingIndicator label={events.length ? "Working" : "Starting up"} />
+              <WorkingIndicator label={events.length ? "Working" : "Starting up"} detail={activity} />
             )}
 
             {idle && <IdleEmpty box={box} onNew={onNew} />}
@@ -514,20 +527,31 @@ export function Thread({
             <ChatContainerScrollAnchor />
           </ChatContainerContent>
         </ChatContainerRoot>
-        {/* Jump to the latest output: centred over the column, only while scrolled up. */}
+        {/* Jump to the latest output: centred over the column, only while scrolled up. When the agent
+            produces something NEW while you are reading history, the button grows a label — the
+            chat-app affordance for "there is more below than when you left". */}
         <AnimatePresence>
           {!stick.isAtBottom && (
             <motion.button
               type="button"
+              layout
               initial={{ opacity: 0, y: 6, scale: 0.9 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 6, scale: 0.9 }}
               transition={{ duration: 0.16 }}
               onClick={() => void stick.scrollToBottom()}
               aria-label="Scroll to latest"
-              className="bg-card hover:bg-muted text-foreground absolute right-5 bottom-4 z-10 grid size-8 cursor-pointer place-items-center rounded-full border shadow-e2"
+              className={cn(
+                "text-foreground absolute right-5 bottom-4 z-10 flex h-8 cursor-pointer items-center justify-center gap-1.5 rounded-full border shadow-e2",
+                newBelow ? "border-live/40 bg-card px-3" : "bg-card hover:bg-muted w-8"
+              )}
             >
-              <ArrowDown className="size-4" aria-hidden />
+              {newBelow && (
+                <motion.span initial={{ opacity: 0, x: 4 }} animate={{ opacity: 1, x: 0 }} className="text-live text-micro font-medium whitespace-nowrap">
+                  New activity
+                </motion.span>
+              )}
+              <ArrowDown className={cn("size-4", newBelow && "text-live")} aria-hidden />
             </motion.button>
           )}
         </AnimatePresence>

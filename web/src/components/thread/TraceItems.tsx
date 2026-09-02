@@ -367,16 +367,50 @@ export const SayItem = React.memo(function SayItem({ text, live, label = true }:
   );
 });
 
-/** The "working…" beat between visible outputs, so the thread never has dead air while a run is live. */
-export function WorkingIndicator({ label = "Working" }: { label?: string }) {
+/**
+ * The "working…" beat between visible outputs — a live status pill, not dead air. It names what the
+ * agent is doing right now (`Bash npm test`, `thinking`), morphs as that changes (the old detail
+ * slides out, the new one in), and carries an elapsed counter so a stall is visible as a number that
+ * keeps climbing next to a detail that stopped changing.
+ */
+export function WorkingIndicator({ label = "Working", detail }: { label?: string; detail?: string | null }) {
+  const [elapsed, setElapsed] = React.useState(0);
+  React.useEffect(() => {
+    const start = Date.now();
+    const t = window.setInterval(() => setElapsed(Math.floor((Date.now() - start) / 1000)), 1000);
+    return () => window.clearInterval(t);
+  }, []);
+  const mins = Math.floor(elapsed / 60);
+  const time = elapsed < 5 ? null : mins > 0 ? `${mins}m ${elapsed % 60}s` : `${elapsed}s`;
   return (
-    <div className="enter text-muted-foreground flex items-center gap-2.5 text-meta" aria-live="polite">
-      <span className="text-live flex items-center gap-1" aria-hidden>
-        <span className="dot dot-1 bg-current size-1.5 rounded-full" />
-        <span className="dot dot-2 bg-current size-1.5 rounded-full" />
-        <span className="dot dot-3 bg-current size-1.5 rounded-full" />
-      </span>
-      <span>{label}…</span>
+    <div className="enter flex items-center gap-2.5" aria-live="polite">
+      <div className="bg-card inline-flex max-w-full items-center gap-2.5 rounded-full border py-1.5 pr-3.5 pl-3 text-meta shadow-e1">
+        <span className="text-live flex shrink-0 items-center gap-1" aria-hidden>
+          <span className="dot dot-1 bg-current size-1.5 rounded-full" />
+          <span className="dot dot-2 bg-current size-1.5 rounded-full" />
+          <span className="dot dot-3 bg-current size-1.5 rounded-full" />
+        </span>
+        <span className="text-foreground shrink-0 font-medium">{label}</span>
+        <AnimatePresence mode="popLayout" initial={false}>
+          {detail && (
+            <motion.code
+              key={detail}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+              className="text-muted-foreground bg-muted min-w-0 truncate rounded px-1.5 py-0.5 font-mono text-micro"
+            >
+              {detail}
+            </motion.code>
+          )}
+        </AnimatePresence>
+        {time && (
+          <span className="text-faint shrink-0 text-micro tabular-nums" aria-label={`elapsed ${time}`}>
+            {time}
+          </span>
+        )}
+      </div>
     </div>
   );
 }

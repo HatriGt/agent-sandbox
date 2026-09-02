@@ -3,6 +3,7 @@ import { ArrowUp, Check, ChevronDown, Pause, PenLine } from "lucide-react";
 import { parseQuestion } from "@/lib/question";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { motion } from "motion/react";
 
 /**
  * The agent's question as a real decision control — the shape Claude Code, Codex and Cursor use when
@@ -64,9 +65,17 @@ export function QuestionCard({
   };
 
   return (
-    <div className="enter flex flex-col gap-1.5">
+    <motion.div
+      initial={{ opacity: 0, y: 12, scale: 0.985 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ type: "spring", stiffness: 320, damping: 26 }}
+      className="flex flex-col gap-1.5"
+    >
       <span className="label text-attention-text flex items-center gap-1.5">
-        <Pause className="size-3" strokeWidth={2.5} aria-hidden />
+        <span className="relative grid size-3 place-items-center" aria-hidden>
+          <span className="bg-attention absolute inset-0 rounded-full opacity-40 mcp-ping motion-reduce:hidden" />
+          <Pause className="size-3" strokeWidth={2.5} />
+        </span>
         Paused — the agent needs a decision
       </span>
       <div
@@ -74,7 +83,7 @@ export function QuestionCard({
         aria-label="Question from the agent"
         tabIndex={0}
         onKeyDown={onKey}
-        className="border-attention/50 bg-card focus-visible:ring-attention/40 max-w-[72ch] rounded-xl border shadow-e1 outline-none focus-visible:ring-2"
+        className="border-attention/50 bg-card focus-visible:ring-attention/40 attention-glow max-w-[72ch] rounded-xl border outline-none focus-visible:ring-2"
       >
         <div className="px-5 pt-4 pb-3">
           <p className="text-foreground text-lead leading-[1.5] font-medium text-balance">{parsed.title || question}</p>
@@ -199,6 +208,6 @@ export function QuestionCard({
           </Button>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }
