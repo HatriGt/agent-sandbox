@@ -32,6 +32,8 @@ import { githubAuthorizeUrl, githubExchangeCode, githubIdentity } from "./github
 import { keyFromEnvOrFile, makeSecretBox } from "./secretbox.js";
 import { allBlobs, registerUserStoreBackend, withOwner, OPERATOR_OWNER } from "./user-store.js";
 import { detectTransitions, formatNotification, makeNotifier, type BoxRunView, type NotifyEvent } from "./notify.js";
+import { buildDigest } from "./digest.js";
+import { parseTrace } from "./trace.js";
 import { loadNotifySettings, normalizeNotifySettings, saveNotifySettings } from "./notify-store.js";
 import { createLocalUser, deleteUser, listUsers, ownerOf, setUserRole, validateSignup, createPasswordUser, authenticatePassword, setPassword, updateProfile, verifyPassword, PASSWORD_MIN, listSessions, revokeSession, revokeOtherSessions, startTrial, planOf, setPlan, TrialExpiredError } from "./identity.js";
 import { parseStore } from "./gh-token-store.js";
@@ -307,9 +309,21 @@ const sendNotification = async (ev: NotifyEvent): Promise<void> => {
   if (!url || !settings.events[ev.kind]) return;
   const ctx = notifyCtx.get(ev.box) ?? {};
   notifyCtx.delete(ev.box);
+  // A finished run's notification carries the digest headline ("done · 3 files · 4 steps"), so the
+  // push is a review-at-a-glance, not just a ping. Best-effort: a headline failure drops the
+  // enrichment, never the notification.
+  let headline: string | undefined;
+  if (ev.kind !== "waiting") {
+    headline = await watchHub
+      .read(ev.box)
+      .then((snap) =>
+        buildDigest({ box: ev.box, task: snap.task ?? "", runState: snap.runState, exitCode: snap.exitCode, events: parseTrace(snap.log ?? ""), files: [] }).headline
+      )
+      .catch(() => undefined);
+  }
   const msg = formatNotification(
     { ...ev, ...(ev.question ? { question: redactor.redact(ev.question) } : {}) },
-    { publicUrl: cfg.publicUrl ?? "", title: ctx.title, task: ctx.task ? redactor.redact(ctx.task) : undefined }
+    { publicUrl: cfg.publicUrl ?? "", title: ctx.title, task: ctx.task ? redactor.redact(ctx.task) : undefined, headline }
   );
   const ac = new AbortController();
   const t = setTimeout(() => ac.abort(), 5000);
@@ -1397,6 +1411,40 @@ app.post("/skill-repo.json", async (req: Request, res: Response) => {
 });
 
 // What the agent changed: per-file +/- and status across the checked-out repos (and loose files).
+// The run digest: what was asked, the plan of record, files touched, failed commands, questions
+// asked and answered, and one phone-readable headline. Pure derivation (src/digest.ts) from the
+// same log the thread renders plus the changed-files listing — no extra instrumentation in the box.
+app.get("/digest.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const session = typeof req.query.session === "string" ? req.query.session : "";
+  if (!session) {
+    res.status(400).json({ error: "session query param required" });
+    return;
+  }
+  try {
+    const snap = await watchHub.read(session);
+    if (snap.boxStatus === "missing") {
+      res.status(404).json({ error: "no such machine" });
+      return;
+    }
+    // A stopped box cannot answer listChanges (exec would boot it); the digest degrades to no files.
+    const files = /^running$/i.test(snap.boxStatus) ? await listChanges(cfg, session).catch(() => []) : [];
+    const digest = buildDigest({
+      box: session,
+      task: snap.task ?? "",
+      runState: snap.runState,
+      exitCode: snap.exitCode,
+      events: parseTrace(snap.log ?? ""),
+      files,
+    });
+    // The snapshot's log/task/question are already redacted by the hub's reader; the trace-derived
+    // strings inherit that. Task from the sentinel file is redacted there too.
+    res.json(digest);
+  } catch (e) {
+    failWith(res, e);
+  }
+});
+
 app.get("/changes.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   const session = typeof req.query.session === "string" ? req.query.session : "";

@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import vm from "node:vm";
 import { streamFmtScript, RESULT_MAX_LINES, RESULT_MAX_BYTES } from "../src/msb.ts";
-import { parseTrace } from "../web/src/lib/trace.ts";
+import { parseTrace } from "../src/trace.ts";
 import { deriveTaskBoard } from "../web/src/lib/planTasks.ts";
 
 /** The exact JS the box will execute, recovered the same way the box recovers it. */

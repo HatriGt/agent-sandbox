@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mergeRepoLists, matchRepos, inferRepos, type RepoInfo } from "../src/repos.ts";
-import { parseTrace } from "../web/src/lib/trace.ts";
+import { parseTrace } from "../src/trace.ts";
 
 const gh = (full_name: string, extra: Record<string, unknown> = {}) => ({
   full_name,

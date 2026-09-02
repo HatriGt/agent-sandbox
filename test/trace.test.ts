@@ -7,7 +7,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseTrace, resultSummary, clean, producedFiles } from "../web/src/lib/trace.ts";
+import { parseTrace, resultSummary, clean, producedFiles } from "../src/trace.ts";
 import { normalizeBlocks } from "../web/src/lib/markdown-normalize.ts";
 import { doneLabel, isFailedExit } from "../web/src/lib/format.ts";
 
@@ -233,7 +233,7 @@ test("distinct consecutive prose is NOT deduped", () => {
 test("a summary repeated INSIDE one block is collapsed", async () => {
   // The real failure: the formatter re-emits the final result with no tool call between, so both
   // copies coalesce into a single say and block-level dedupe cannot see them.
-  const { dedupeParagraphs } = await import("../web/src/lib/trace.ts");
+  const { dedupeParagraphs } = await import("../src/trace.ts");
   const para = "All four essays are written in /workspace: isolation.md, egress.md, secrets.md, audit.md.";
   const other = "Finished the audit essay covering layers, trails, observability and accountability.";
   const out = dedupeParagraphs([other, para, other, para].join("\n\n"));
@@ -242,7 +242,7 @@ test("a summary repeated INSIDE one block is collapsed", async () => {
 
 test("short repeated lines are NOT collapsed", async () => {
   // "done." legitimately recurs once per file; collapsing it would delete real progress reporting.
-  const { dedupeParagraphs } = await import("../web/src/lib/trace.ts");
+  const { dedupeParagraphs } = await import("../src/trace.ts");
   const out = dedupeParagraphs(["done.", "next file.", "done."].join("\n\n"));
   assert.equal(out.match(/done\./g)!.length, 2);
 });
@@ -309,7 +309,7 @@ test("producedFiles drops a traversal arg defensively", () => {
  * 0-row table, and a repeated fenced block. Observed live on the deployed dashboard.
  */
 test("an exactly repeated markdown summary collapses to one clean copy", async () => {
-  const { dedupeParagraphs } = await import("../web/src/lib/trace.ts");
+  const { dedupeParagraphs } = await import("../src/trace.ts");
   const summary = [
     "## Summary",
     "",
@@ -335,14 +335,14 @@ test("an exactly repeated markdown summary collapses to one clean copy", async (
 });
 
 test("dropRepeatedTail leaves text whose ending is not a repeat", async () => {
-  const { dropRepeatedTail } = await import("../web/src/lib/trace.ts");
+  const { dropRepeatedTail } = await import("../src/trace.ts");
   const text =
     "First a genuinely distinct paragraph of prose about isolation and egress controls in the box.\n\nAnd then a different closing paragraph that shares no suffix with the one written above it.";
   assert.equal(dropRepeatedTail(text), text);
 });
 
 test("dropRepeatedTail does not eat a short recurring refrain", async () => {
-  const { dropRepeatedTail } = await import("../web/src/lib/trace.ts");
+  const { dropRepeatedTail } = await import("../src/trace.ts");
   const text = "done.\ndone.";
   assert.equal(dropRepeatedTail(text), text);
 });

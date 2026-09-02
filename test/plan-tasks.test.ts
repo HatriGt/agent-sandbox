@@ -6,7 +6,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseTrace } from "../web/src/lib/trace.ts";
+import { parseTrace } from "../src/trace.ts";
 import { deriveTaskBoard, shortDuration, shortPath } from "../web/src/lib/planTasks.ts";
 
 const T0 = 1756713600000;
