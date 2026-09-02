@@ -33,8 +33,19 @@ const PIPE_TO_NETWORK = /\|\s*(curl|wget|nc|ncat|socat|ssh|openssl)\b/;
 const DESTRUCTIVE_ROOT = /\brm\s+(-[a-zA-Z]*r[a-zA-Z]*f?|-[a-zA-Z]*f[a-zA-Z]*r)\s+(\/|\/\*|\/root|\/usr|\/etc|\/var|~|\$HOME)(\s|$)/;
 const DISABLE_CONTROLS = /\b(claude\s+mcp\s+(add|remove)|chattr\s|chmod\s+[0-7]*\s+.*\.claude|crontab\s+-)/;
 
+/**
+ * Claude Code's auto-memory lives INSIDE ~/.claude (projects/<slug>/memory/*.md + MEMORY.md), and
+ * writing remembered facts there is legitimate agent behaviour, not a control-plane change — the
+ * hooks and settings that implement the guard live elsewhere in the tree. Denying it taught agents
+ * to announce "my memory is locked down" on every run. Markdown under memory/ is inert context.
+ */
+const MEMORY_PATH = /(^|[/\s])[\w~./-]*\.claude\/projects\/[^/\s]+\/memory(\/[^\s]*)?/g;
+
 function touchesControlPath(s: string): boolean {
-  return CONTROL_PATHS.some((re) => re.test(s));
+  // Blank out memory paths first so a command touching BOTH memory and, say, settings.json is
+  // still judged on the settings.json part alone.
+  const rest = s.replace(MEMORY_PATH, " ");
+  return CONTROL_PATHS.some((re) => re.test(rest));
 }
 
 export function guardDecision(tool: string, input: Record<string, unknown> | undefined): GuardDecision {
@@ -88,7 +99,8 @@ export function guardNodeProgram(): string {
     `const PIPE_TO_NETWORK=${String(PIPE_TO_NETWORK)};`,
     `const DESTRUCTIVE_ROOT=${String(DESTRUCTIVE_ROOT)};`,
     `const DISABLE_CONTROLS=${String(DISABLE_CONTROLS)};`,
-    `function touchesControlPath(s){return CONTROL_PATHS.some(re=>re.test(s))}`,
+    `const MEMORY_PATH=${String(MEMORY_PATH)};`,
+    `function touchesControlPath(s){const rest=s.replace(MEMORY_PATH," ");return CONTROL_PATHS.some(re=>re.test(rest))}`,
   ].join("\n");
   return (
     `${consts}\n${src}\n` +
