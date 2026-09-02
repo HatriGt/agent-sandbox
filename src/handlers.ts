@@ -16,6 +16,7 @@ import { validateDelegateInput, type DelegateSource, type DelegatePlan } from ".
 import type { GitAccessResolution } from "./gh-token-store.js";
 import type { AgentCreds } from "./msb.js";
 import type { ElicitOutcome } from "./interactive.js";
+import { verifyPlanOf, formatVerifyResult, type VerifyPlan, type VerifyResult } from "./verify.js";
 
 /**
  * Interactive callbacks the handler supplies to the deps layer so the wait loop can talk to the
@@ -87,6 +88,12 @@ export interface HandlerDeps {
   listRepos?(cfg: Config, query: string): Promise<string>;
   /** Clone a repository into a RUNNING sandbox at /workspace/<name>. Optional (HTTP entry). */
   attachRepo?(cfg: Config, session: string, repo: string, ref?: string): Promise<string>;
+  /**
+   * Verify a FINISHED run against the caller's verify clause (command exit code, or a read-only
+   * co-pilot judging a criterion). Runs after run:done exit=0; the result stamps the run — a failed
+   * verification never un-finishes it. Optional: entries without it ignore `verify`.
+   */
+  verify?(cfg: Config, session: string, plan: VerifyPlan): Promise<VerifyResult>;
 }
 
 /** Minimal shape of the MCP server's `.tool()` we rely on (keeps this file transport-agnostic). */
@@ -218,6 +225,18 @@ export function registerTools(
           "Provide when delegate asks you to choose among several accounts that can access the repo: " +
             "the GitHub login to use for this delegation."
         ),
+      verify: z
+        .object({
+          command: z.string().optional().describe("Shell command run in the box after run:done; exit 0 = verified."),
+          criterion: z.string().optional().describe("Acceptance criterion judged by the READ-ONLY co-pilot after run:done."),
+        })
+        .optional()
+        .describe(
+          "Make 'done' mean PROVEN: after a clean finish, run {command} (its exit code is the " +
+            "verdict) or have the read-only co-pilot judge {criterion} against the actual workspace. " +
+            "Exactly one key. The result stamps the run as verified/UNVERIFIED — a failed check never " +
+            "un-finishes it."
+        ),
     },
     async ({
       source,
@@ -229,6 +248,7 @@ export function registerTools(
       allowDomains,
       githubToken,
       githubAccount,
+      verify,
     }: {
       source?: DelegateSource;
       repo?: string;
@@ -239,7 +259,11 @@ export function registerTools(
       allowDomains?: string[];
       githubToken?: string;
       githubAccount?: string;
+      verify?: { command?: string; criterion?: string };
     }) => {
+      // Validate the verify clause FIRST — a malformed one must be a question before any box work.
+      const vp = verifyPlanOf(verify);
+      if (!vp.ok) return text(vp.question);
       // Remote callers have no shared filesystem, so "git" is the only source that can work there.
       const resolvedSource: DelegateSource = source ?? (remoteEntry ? "git" : "local");
       if (remoteEntry && resolvedSource === "local") {
@@ -304,9 +328,15 @@ export function registerTools(
         v.plan.repos.length > 1
           ? `\nrepos: ${v.plan.repos.map((x) => `${x.repo} -> /workspace/${x.name}`).join(", ")}`
           : "";
+      // Verified outcomes: a clean finish runs the verify clause and stamps the result. Only on
+      // exit=0 — a failed run needs no second proof of failure — and never on run:waiting.
+      let verifyLine = "";
+      if (vp.plan && deps.verify && /run:done exit=0/.test(r.output)) {
+        verifyLine = `\n\n${formatVerifyResult(await deps.verify(cfg, r.box, vp.plan))}`;
+      }
       // r.output already carries the full imperative protocol for a waiting box, or the result when
       // done — don't append a contradicting tail.
-      return text(`Delegated. session=${r.box}${r.warm ? " (warm)" : ""}${repoLine}\n\n${r.output}`);
+      return text(`Delegated. session=${r.box}${r.warm ? " (warm)" : ""}${repoLine}\n\n${r.output}${verifyLine}`);
     }
   );
 

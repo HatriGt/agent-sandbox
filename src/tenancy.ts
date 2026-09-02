@@ -136,6 +136,13 @@ export function guardDeps(deps: HandlerDeps, own: Ownership): HandlerDeps {
       return rd(cfg, session, message, secrets);
     };
   }
+  if (deps.verify) {
+    const vf = deps.verify.bind(deps);
+    guarded.verify = async (cfg, session, plan) => {
+      own.check(session);
+      return vf(cfg, session, plan);
+    };
+  }
   if (deps.attachRepo) {
     const ar = deps.attachRepo.bind(deps);
     guarded.attachRepo = async (cfg: Config, session: string, repo: string, ref?: string) => {

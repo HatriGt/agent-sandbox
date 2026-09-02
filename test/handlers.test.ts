@@ -489,3 +489,60 @@ test("remote entry: the source:local refusal points at the patch path", async ()
   assert.match(out, /patch/);
   assert.match(out, /git diff origin\/<ref> --binary/);
 });
+
+test("delegate+verify: runs the verify dep on run:done exit=0 and stamps the result", async () => {
+  const s = fakeServer();
+  let verified: any = null;
+  registerTools(s as any, cfg, {
+    countBoxes: async () => 0,
+    resolveGitAccess: okAccess,
+    runDelegation: async () => ({ box: "bx", warm: false, output: "run:done exit=0\n\nall good" }),
+    verify: async (_c: any, session: string, plan: any) => {
+      verified = { session, plan };
+      return { mode: plan.mode, pass: true, detail: "24 passing" };
+    },
+  } as any);
+  const res = await s.tools.delegate.handler({ source: "git", task: "t", verify: { command: "npm test" } });
+  assert.deepEqual(verified, { session: "bx", plan: { mode: "command", command: "npm test" } });
+  assert.match(textOf(res), /verified \(command\): 24 passing/);
+});
+
+test("delegate+verify: skipped on a failed or waiting run; malformed clause is a question", async () => {
+  const s = fakeServer();
+  let called = 0;
+  const deps = {
+    countBoxes: async () => 0,
+    resolveGitAccess: okAccess,
+    runDelegation: async () => ({ box: "bx", warm: false, output: "run:done exit=1\n\nboom" }),
+    verify: async () => {
+      called++;
+      return { mode: "command", pass: true, detail: "" };
+    },
+  } as any;
+  registerTools(s as any, cfg, deps);
+  const failed = await s.tools.delegate.handler({ source: "git", task: "t", verify: { command: "npm test" } });
+  assert.equal(called, 0, "no verification of a failed run");
+  assert.doesNotMatch(textOf(failed), /UNVERIFIED|verified/i);
+
+  // Both keys => a question, before any box is started.
+  let ran = false;
+  const s2 = fakeServer();
+  registerTools(s2 as any, cfg, { ...deps, runDelegation: async () => { ran = true; return { box: "b", warm: false, output: "" }; } });
+  const q = await s2.tools.delegate.handler({ source: "git", task: "t", verify: { command: "x", criterion: "y" } });
+  assert.equal(ran, false, "nothing started on a malformed verify");
+  assert.match(textOf(q), /EITHER \{command\} or \{criterion\}/);
+});
+
+test("delegate+verify: a failed verification stamps UNVERIFIED but the run stays done", async () => {
+  const s = fakeServer();
+  registerTools(s as any, cfg, {
+    countBoxes: async () => 0,
+    resolveGitAccess: okAccess,
+    runDelegation: async () => ({ box: "bx", warm: false, output: "run:done exit=0\n\nfinished" }),
+    verify: async () => ({ mode: "criterion", pass: false, detail: "endpoint returns 200 without auth" }),
+  } as any);
+  const res = await s.tools.delegate.handler({ source: "git", task: "t", verify: { criterion: "requires auth" } });
+  const out = textOf(res);
+  assert.match(out, /run:done exit=0/);
+  assert.match(out, /UNVERIFIED \(criterion\): endpoint returns 200 without auth/);
+});

@@ -30,6 +30,7 @@ import {
   WORKSPACE_DIRS_SH,
 } from "./msb.js";
 import { runInteractive } from "./interactive.js";
+import { runVerification } from "./verify.js";
 import { safeWorkspacePath } from "./artifact.js";
 import { shellQuote } from "./exec.js";
 import type { Interact } from "./handlers.js";
@@ -533,6 +534,31 @@ export const deps: HandlerDeps = {
       driverStateLine(cfg, session),
     ]);
     return formatAsk({ ...result, driverState: driver });
+  },
+
+  async verify(cfg, session, plan) {
+    if (!(await boxExists(cfg, session))) {
+      return { mode: plan.mode, pass: false, detail: `could not verify: no sandbox exists for session '${session}'` };
+    }
+    const repos = await boxRepoLayout(cfg, session);
+    return runVerification(plan, {
+      // Command mode: run in the driver's workdir; the exit code travels as a marker so the ssh
+      // layer's non-zero-throws behaviour never turns a red test suite into a thrown exception.
+      execCommand: async (cmd) => {
+        const workdir = repos?.length === 1 ? `/workspace/${repos[0].name}` : "/workspace";
+        const sh = `cd ${shellQuote(workdir)} && { ${cmd}\n} 2>&1 | tail -c 20000; echo "__VEXIT=$(( ${"$"}{PIPESTATUS[0]:-0} ))"`;
+        const r = await exec(cfg, session, `bash -lc ${shellQuote(sh)}`);
+        const m = r.stdout.match(/__VEXIT=(\d+)\s*$/);
+        return { code: m ? Number(m[1]) : 1, output: r.stdout.replace(/__VEXIT=\d+\s*$/, "") };
+      },
+      // Criterion mode: one read-only co-pilot turn, fresh thread — the verifier must not inherit
+      // an earlier ask conversation's framing.
+      askCriterion: async (prompt) => {
+        const creds = await resolveCredsForBox(cfg, session).catch(() => undefined);
+        const r = await askInBox(cfg, session, prompt, { newThread: true, repos, ghToken: creds?.primaryToken });
+        return { answer: r.answer };
+      },
+    });
   },
 
   async addGhToken(cfg, token, repo) {
