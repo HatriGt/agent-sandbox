@@ -56,9 +56,13 @@ export async function run(
         // carry a token-embedded clone URL, and this message flows back to MCP callers verbatim:
         // a failed `git clone --branch <bad-ref> https://x-access-token:ghp_…@github.com/…` was
         // observed returning the live GitHub token to the calling agent.
+        // Include a stdout tail too: remote commands often collapse their real message into stdout
+        // (`… 2>&1` inside the box), and an error whose only content is the ssh argv gets masked as
+        // plumbing — hiding, e.g., gh's "no pull request found" from the operator.
+        const tail = stdout.trim().slice(-600);
         reject(
           new Error(
-            redactShapes(`Command failed (${result.code}): ${cmd} ${args.join(" ")}\n${stderr.trim()}`)
+            redactShapes(`Command failed (${result.code}): ${cmd} ${args.join(" ")}\n${stderr.trim()}${tail ? `\n${tail}` : ""}`)
           )
         );
         return;

@@ -1521,9 +1521,14 @@ app.post("/pr/merge.json", async (req: Request, res: Response) => {
     forgetPull(repo, Number(number));
     res.json({ ok: true, output: redactor.redact((r.stdout ?? "").trim().slice(-600)) });
   } catch (e) {
-    // exec throws on a non-zero exit with gh's own message (not mergeable, checks, permissions…).
     forgetPull(repo, Number(number));
-    res.status(422).json({ error: clientError(e, 600) });
+    // gh's own message (not mergeable, checks, permissions…) is on the lines AFTER the argv line of
+    // the exec error; surface those words, not the plumbing. clientError would mask the whole thing
+    // as "the sandbox host did not complete that command", which reads as OUR bug, not the PR's state.
+    const raw = String((e as Error)?.message ?? e);
+    const afterArgv = raw.split("\n").slice(1).filter((l) => l.trim() && !/^(ssh|Warning: Permanently added|• Backend)/.test(l.trim()));
+    const ghMsg = afterArgv.join("\n").trim();
+    res.status(422).json({ error: ghMsg ? redactor.redact(ghMsg).slice(-600) : clientError(e, 600) });
   }
 });
 
