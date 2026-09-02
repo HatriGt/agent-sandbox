@@ -28,10 +28,12 @@ import {
   type AgentCreds,
   execWithInput,
   WORKSPACE_DIRS_SH,
+  msbIo,
 } from "./msb.js";
 import { runInteractive } from "./interactive.js";
 import { runVerification } from "./verify.js";
 import { handoffPlan, buildCarryDiffSh } from "./handoff.js";
+import { captureAskSnapshot, rewindToAskSnapshot, rewindRunFlags, shouldCaptureBeforeAnswer, snapAskEnabled } from "./snapshot.js";
 import { safeWorkspacePath } from "./artifact.js";
 import { shellQuote } from "./exec.js";
 import type { Interact } from "./handlers.js";
@@ -484,6 +486,17 @@ export const deps: HandlerDeps = {
         }
       }
     }
+    // Rewind point (SNAP_ASK=1): the moment a QUESTION is answered is the box's most
+    // decision-shaped state, so capture it before the answer changes anything — stop → snapshot →
+    // start, ~4 s, only on answered questions. A later resume with rewind:true restores exactly the
+    // state this question was asked from and delivers a different answer to it. Best-effort: any
+    // snapshot trouble logs and the answer proceeds.
+    if (snapAskEnabled()) {
+      const snap = await gatherWatch(cfg, session, 1, { metrics: false }).catch(() => undefined);
+      if (snap && shouldCaptureBeforeAnswer(true, snap.runState)) {
+        await captureAskSnapshot(msbIo(cfg), session);
+      }
+    }
     // Re-resolve per-repo identity/token from the box's repos so the continued run commits as the
     // access-correct account (not a stale/baked identity). Same access model as delegate.
     const creds = await resolveCredsForBox(cfg, session);
@@ -492,6 +505,12 @@ export const deps: HandlerDeps = {
     // step feels synchronous to the caller.
     await resumeAgentTask(cfg, session, message, undefined, secrets, creds);
     return driveInteractive(cfg, session, interact);
+  },
+
+  async rewind(cfg, session) {
+    if (!(await boxExists(cfg, session))) return GONE(session);
+    await rewindToAskSnapshot(msbIo(cfg), session, rewindRunFlags(cfg));
+    return `Rewound session=${session} to the state it asked its last captured question from. Resume it with the new answer.`;
   },
 
   async resumeDetached(cfg, session, message, secrets) {

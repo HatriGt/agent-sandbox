@@ -107,6 +107,11 @@ export interface HandlerDeps {
     | { ok: true; repos: Array<{ repo: string; ref?: string; patch?: string }>; parentFailed: boolean }
     | { ok: false; question: string }
   >;
+  /**
+   * Restore a box to the state it asked its last captured question from (SNAP_ASK rewind point),
+   * so the question can be answered differently. Returns a status line, or run:gone/plain error text.
+   */
+  rewind?(cfg: Config, session: string): Promise<string>;
 }
 
 /** Minimal shape of the MCP server's `.tool()` we rely on (keeps this file transport-agnostic). */
@@ -425,16 +430,40 @@ export function registerTools(
           "Ephemeral env for this step only, e.g. {\"GITHUB_TOKEN\":\"...\",\"DB_URL\":\"...\"}. " +
             "Injected as -e KEY=VALUE; not persisted."
         ),
+      rewind: z
+        .boolean()
+        .optional()
+        .describe(
+          "Restore the box to the state it asked its LAST CAPTURED question from before delivering " +
+            "this message — answer that question differently instead of piling a correction on top " +
+            "of the wrong branch. Needs SNAP_ASK=1 on the controller (rewind points are captured " +
+            "when questions are answered)."
+        ),
     },
     async ({
       session,
       message,
       secrets,
+      rewind,
     }: {
       session: string;
       message: string;
       secrets?: Record<string, string>;
+      rewind?: boolean;
     }) => {
+      if (rewind) {
+        if (!deps.rewind) return text("This entry point does not support rewind.");
+        // A missing snapshot / failed restore is an answer, not a crash — and the message is NOT
+        // delivered, because delivering it to the un-rewound state is exactly what the caller
+        // asked us not to do.
+        let r: string;
+        try {
+          r = await deps.rewind(cfg, session);
+        } catch (e) {
+          return text(String((e as Error).message ?? e));
+        }
+        if (r.startsWith("run:gone")) return text(r);
+      }
       const out = await deps.resume(cfg, session, message, secrets, interactFrom(bridge));
       // deps.resume answers run:gone when no box exists for the id — nothing was resumed, so the
       // "Resumed session=…" header would be a claim the tool did something it did not. Observed

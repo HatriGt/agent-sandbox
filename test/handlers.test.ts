@@ -606,3 +606,51 @@ test("delegate+after: a failed parent still hands off but the reply says so", as
   const res = await s.tools.delegate.handler({ after: "p", task: "review the failure" });
   assert.match(textOf(res), /parent run FAILED/);
 });
+
+test("resume+rewind: rewinds BEFORE delivering; a missing snapshot blocks delivery with the message", async () => {
+  const s = fakeServer();
+  const order: string[] = [];
+  registerTools(s as any, cfg, {
+    rewind: async () => {
+      order.push("rewind");
+      return "Rewound session=b to the state it asked its last captured question from.";
+    },
+    resume: async () => {
+      order.push("resume");
+      return "run:waiting — QUESTION: same question, fresh state";
+    },
+  } as any);
+  const ok = await s.tools.resume.handler({ session: "b", message: "different answer", rewind: true });
+  assert.deepEqual(order, ["rewind", "resume"]);
+  assert.match(textOf(ok), /Resumed session=b/);
+
+  // No snapshot: the error text comes back and the message is NOT delivered to the wrong state.
+  const s2 = fakeServer();
+  let delivered = false;
+  registerTools(s2 as any, cfg, {
+    rewind: async () => {
+      throw new Error("rewind: no snapshot exists for 'b'. A rewind point is captured when a question is answered with SNAP_ASK=1 — this box has none.");
+    },
+    resume: async () => {
+      delivered = true;
+      return "x";
+    },
+  } as any);
+  const miss = await s2.tools.resume.handler({ session: "b", message: "m", rewind: true });
+  assert.match(textOf(miss), /no snapshot exists/);
+  assert.equal(delivered, false);
+});
+
+test("resume without rewind never touches the rewind dep", async () => {
+  const s = fakeServer();
+  let rewound = false;
+  registerTools(s as any, cfg, {
+    rewind: async () => {
+      rewound = true;
+      return "";
+    },
+    resume: async () => "run:done exit=0",
+  } as any);
+  await s.tools.resume.handler({ session: "b", message: "m" });
+  assert.equal(rewound, false);
+});

@@ -40,6 +40,7 @@ import {
 import type { PollResult } from "./wait.js";
 import type { Config } from "./config.js";
 import { redactShapes } from "./redact.js";
+import { askSnapName } from "./snapshot.js";
 
 /**
  * Run `msb <rest>` on the VPS over SSH.
@@ -1585,10 +1586,20 @@ export async function snapshotCreate(cfg: Config, fromBox: string, name: string)
 }
 
 /** Stop then remove the box, and clean its staging dir on the VPS if given. */
+/** The raw msb runner for modules that compose their own verbs (snapshot.ts). Never throws. */
+export function msbIo(cfg: Config) {
+  return {
+    msb: (args: string[]) => msb(cfg, args, false),
+    log: (m: string) => console.error(m),
+  };
+}
+
 export async function teardown(cfg: Config, box: string, stagingDir?: string): Promise<void> {
   assertBoxName(box);
   await msb(cfg, ["stop", box], false);
   await msb(cfg, ["rm", "--force", box], false);
+  // The box's rewind snapshot (if any) dies with it — snapshots are per-box, never shared.
+  await msb(cfg, ["snapshot", "rm", askSnapName(box)], false);
   await unmarkClaimed(cfg, box);
   await unmarkKept(cfg, box);
   if (stagingDir) {
