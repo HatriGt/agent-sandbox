@@ -30,7 +30,9 @@ import {
 } from "./identity.js";
 import { githubAuthorizeUrl, githubExchangeCode, githubIdentity } from "./github-oauth.js";
 import { keyFromEnvOrFile, makeSecretBox } from "./secretbox.js";
-import { allBlobs, registerUserStoreBackend, withOwner } from "./user-store.js";
+import { allBlobs, registerUserStoreBackend, withOwner, OPERATOR_OWNER } from "./user-store.js";
+import { detectTransitions, formatNotification, makeNotifier, type BoxRunView, type NotifyEvent } from "./notify.js";
+import { loadNotifySettings, normalizeNotifySettings, saveNotifySettings } from "./notify-store.js";
 import { createLocalUser, deleteUser, listUsers, ownerOf, setUserRole, validateSignup, createPasswordUser, authenticatePassword, setPassword, updateProfile, verifyPassword, PASSWORD_MIN, listSessions, revokeSession, revokeOtherSessions, startTrial, planOf, setPlan, TrialExpiredError } from "./identity.js";
 import { parseStore } from "./gh-token-store.js";
 import { parseMcpStore } from "./mcp-store.js";
@@ -289,6 +291,41 @@ const brokerConsider = makeCredentialBroker({
   resume: resumeQuietly,
   log: (m) => console.error(m),
 });
+/**
+ * Walk-away notifications (docs/features-2026-09.md §1). detectTransitions diffs consecutive fleet
+ * sweeps; the send resolves the box OWNER's webhook (their encrypted `notify` blob) with the
+ * controller-level NOTIFY_WEBHOOK_URL env as the fallback, honours the per-event toggles, redacts
+ * the outgoing text like every other surface, and POSTs generic JSON `{text, url, event}` with a
+ * short timeout. All failures are logged and swallowed — a webhook can never break the sweep.
+ */
+let prevRunViews: BoxRunView[] = [];
+const notifyCtx = new Map<string, { title?: string; task?: string }>();
+const sendNotification = async (ev: NotifyEvent): Promise<void> => {
+  const owner = ownerOf(db, ev.box) ?? OPERATOR_OWNER;
+  const settings = loadNotifySettings(owner);
+  const url = settings.url || process.env.NOTIFY_WEBHOOK_URL || "";
+  if (!url || !settings.events[ev.kind]) return;
+  const ctx = notifyCtx.get(ev.box) ?? {};
+  notifyCtx.delete(ev.box);
+  const msg = formatNotification(
+    { ...ev, ...(ev.question ? { question: redactor.redact(ev.question) } : {}) },
+    { publicUrl: cfg.publicUrl ?? "", title: ctx.title, task: ctx.task ? redactor.redact(ctx.task) : undefined }
+  );
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), 5000);
+  try {
+    await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: msg.text, url: msg.url, event: msg.event }),
+      signal: ac.signal,
+    });
+  } finally {
+    clearTimeout(t);
+  }
+};
+const notifier = makeNotifier({ send: sendNotification, log: (m) => console.error(m) });
+
 const lastSeenStatus = new Map<string, boolean>();
 const readFleet = makeFleetReader(
   cfg,
@@ -308,6 +345,19 @@ const readFleet = makeFleetReader(
       lastSeenStatus.set(b.name, runningNow);
     }
     for (const k of [...lastSeenStatus.keys()]) if (!boxes.some((b) => b.name === k)) lastSeenStatus.delete(k);
+    // Walk-away notifications: diff this sweep against the last one and push the edges (waiting /
+    // done / failed) to the box owner's webhook. Fire-and-forget — a webhook must never slow or
+    // fail the fleet read the dashboard is polling on.
+    {
+      const nextRunViews = boxes
+        .filter((b) => b.role !== "pool-free")
+        .map((b) => ({ name: b.name, runState: b.runState, exitCode: b.exitCode, question: b.question }));
+      for (const ev of detectTransitions(prevRunViews, nextRunViews)) {
+        notifyCtx.set(ev.box, { title: titles[ev.box], task: boxes.find((b) => b.name === ev.box)?.task });
+        void notifier.notify(ev);
+      }
+      prevRunViews = nextRunViews;
+    }
     return boxes.map((b) => ({
       ...b,
       ...(titles[b.name] ? { title: titles[b.name] } : {}),
@@ -1239,6 +1289,50 @@ app.post("/mcp-servers.json", async (req: Request, res: Response) => {
 
 // Skills: the owner's reusable playbooks, synced into every box before each run/resume. Same shape
 // of API as the MCP servers: one GET for the list, one POST with an action.
+// Walk-away notifications: view / set the caller's webhook and per-event toggles. The webhook is
+// per OWNER (encrypted blob, like skills) so each tenant routes their own boxes' events; the
+// NOTIFY_WEBHOOK_URL env is the deployment-wide fallback when an owner has none configured.
+app.get("/notify.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const p = principalOf(res);
+  res.json({
+    ...loadNotifySettings(p.kind === "user" ? p.userId : OPERATOR_OWNER),
+    fallbackConfigured: Boolean(process.env.NOTIFY_WEBHOOK_URL),
+  });
+});
+app.post("/notify.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const p = principalOf(res);
+  try {
+    const s = normalizeNotifySettings((req.body ?? {}) as { url?: unknown; events?: unknown });
+    saveNotifySettings(p.kind === "user" ? p.userId : OPERATOR_OWNER, s);
+    res.json({ ...s, fallbackConfigured: Boolean(process.env.NOTIFY_WEBHOOK_URL) });
+  } catch (e) {
+    res.status(400).json({ error: clientError(e) });
+  }
+});
+// Fire a test event at the stored webhook so the operator can confirm the wiring without waiting
+// for a real run to finish.
+app.post("/notify/test.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const p = principalOf(res);
+  const s = loadNotifySettings(p.kind === "user" ? p.userId : OPERATOR_OWNER);
+  const url = s.url || process.env.NOTIFY_WEBHOOK_URL || "";
+  if (!url) {
+    res.status(400).json({ error: "no webhook configured — set one first" });
+    return;
+  }
+  const msg = formatNotification({ box: "test", kind: "done", exitCode: 0 }, { publicUrl: cfg.publicUrl ?? "", title: "Test notification" });
+  try {
+    const ac = new AbortController();
+    const t = setTimeout(() => ac.abort(), 5000);
+    const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: msg.text, url: msg.url, event: msg.event }), signal: ac.signal }).finally(() => clearTimeout(t));
+    res.json({ ok: r.ok, status: r.status });
+  } catch (e) {
+    res.status(502).json({ error: `webhook unreachable: ${String((e as Error).message ?? e).slice(0, 200)}` });
+  }
+});
+
 app.get("/skills.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   try {
