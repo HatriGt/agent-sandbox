@@ -21,6 +21,16 @@ export function parseMcpName(name: string): McpCall | null {
   return { server: m[1], tool: m[2], label: m[2].replace(/[_-]+/g, " ").toLowerCase() };
 }
 
+/**
+ * A stable accent hue per server so hana-qa always looks like hana-qa across runs and machines —
+ * identity by color, no configuration. The component fixes lightness/chroma for the dark ground.
+ */
+export function serverHue(server: string): number {
+  let h = 0;
+  for (let i = 0; i < server.length; i++) h = (h * 31 + server.charCodeAt(i)) >>> 0;
+  return h % 360;
+}
+
 /* ───────────────────────────── result analysis ───────────────────────────── */
 
 export type McpResultView =

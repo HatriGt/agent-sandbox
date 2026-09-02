@@ -1,35 +1,58 @@
 import * as React from "react";
-import { AlertTriangle, ChevronRight, Loader2, Plug } from "lucide-react";
-import { analyzeResult, mcpSummary, type McpCall, type McpResultView } from "@/lib/mcp";
+import { AlertTriangle, Check, ChevronRight, Zap } from "lucide-react";
+import { analyzeResult, mcpSummary, serverHue, type McpCall, type McpResultView } from "@/lib/mcp";
 import type { TraceEvent } from "@/lib/trace";
+import { TraceOutput } from "./TraceOutput";
 import { cn } from "@/lib/utils";
 
 /**
- * An MCP call, rendered exactly like a shell command — the terminal panel is the house style for
- * "the agent executed something and here is its output". Same dark ground, same header row, same
- * fold. The only differences from ShellItem: the label is `server · tool` instead of `Bash`, the
- * prompt glyph is the tool name rather than `$`, and the output is pretty-printed when it is JSON
- * (an MCP result as a one-line blob is unreadable; as indented JSON it is just terminal output).
+ * An MCP call: the shell panel's dark terminal body — because an external call IS a terminal kind
+ * of operation — under a header that carries the server's identity: a hue-stable chip (hashed from
+ * the server name, tuned for the dark ground) flowing along a dashed connector into the humanized
+ * tool name. While in flight the connector's energy moves and the chip pings; the JSON result is
+ * token-colored like an editor. Collapsed, the summary is shape-derived ("42 rows"), never the
+ * blob's first line.
  */
 
 type ToolEvent = Extract<TraceEvent, { kind: "tool" }>;
 
-/** The result as terminal text: JSON is unwrapped/indented, everything else verbatim. */
-function resultText(view: McpResultView, raw: string): string {
-  switch (view.kind) {
-    case "json":
-      return view.pretty;
-    case "table":
-    case "kv":
-      // Re-serialize the parsed value as indented JSON — same data, readable in a <pre>.
-      return view.kind === "kv"
-        ? JSON.stringify(Object.fromEntries(view.entries), null, 2)
-        : JSON.stringify(view.rows.map((r) => Object.fromEntries(view.columns.map((c, i) => [c, r[i]]))), null, 2);
-    case "text":
-      return view.text;
-    case "empty":
-      return raw.trim() || "(no data returned)";
-  }
+/** Server identity chip on the dark ground: brighter tint, low-alpha fill, same hue every run. */
+export function ServerChip({ server, live }: { server: string; live?: boolean }) {
+  const hue = serverHue(server);
+  const style = {
+    "--srv": `oklch(0.78 0.13 ${hue})`,
+    "--srv-soft": `oklch(0.78 0.13 ${hue} / 0.12)`,
+    "--srv-line": `oklch(0.78 0.13 ${hue} / 0.4)`,
+  } as React.CSSProperties;
+  return (
+    <span
+      style={style}
+      className="relative inline-flex shrink-0 items-center gap-1.5 rounded-md border border-[var(--srv-line)] bg-[var(--srv-soft)] px-1.5 py-0.5 font-mono text-micro font-semibold text-[var(--srv)]"
+    >
+      <span className="relative grid size-3 place-items-center" aria-hidden>
+        {live && <span className="absolute inset-0 rounded-full bg-[var(--srv)] opacity-40 mcp-ping motion-reduce:hidden" />}
+        <Zap className="size-3" strokeWidth={2.5} />
+      </span>
+      {server}
+    </span>
+  );
+}
+
+/** Dashed connector chip → tool. Energy flows while the call is out. */
+function Connector({ live, failed }: { live?: boolean; failed?: boolean }) {
+  return (
+    <svg className="h-2 w-5 shrink-0" viewBox="0 0 20 8" aria-hidden>
+      <path
+        d="M1 4 H19"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeDasharray="3 4"
+        className={cn(live ? "text-live flow-dash motion-reduce:animate-none" : failed ? "text-destructive/70" : "text-trace-fg/30")}
+      />
+    </svg>
+  );
 }
 
 export function McpItem({ event, call, live }: { event: ToolEvent; call: McpCall; live?: boolean }) {
@@ -39,31 +62,34 @@ export function McpItem({ event, call, live }: { event: ToolEvent; call: McpCall
   }, [event.failed]);
   const hasOutput = !!event.result;
   const view = React.useMemo(() => analyzeResult(event.result), [event.result]);
-  const output = React.useMemo(() => (hasOutput ? resultText(view, event.result!) : ""), [view, event.result, hasOutput]);
+  const { output, isJson } = React.useMemo(() => renderable(view, event.result ?? ""), [view, event.result]);
   const lines = output ? output.replace(/\n+$/, "").split("\n").length : 0;
 
   return (
     <div className="enter min-w-0">
       <div className={cn("bg-trace overflow-hidden rounded-md border border-white/8", live && "ring-live/40 ring-1")}>
-        <div className="flex items-center gap-2 border-b border-white/8 px-3 py-1.5">
-          {live ? (
-            <Loader2 className="text-live size-3 shrink-0 animate-spin" aria-hidden />
-          ) : event.failed ? (
-            <AlertTriangle className="text-destructive size-3 shrink-0" aria-hidden />
-          ) : (
-            <Plug className="text-trace-fg/60 size-3 shrink-0" aria-hidden />
+        <div className="flex min-w-0 items-center gap-2 border-b border-white/8 px-3 py-1.5">
+          <ServerChip server={call.server} live={live} />
+          <Connector live={live} failed={event.failed} />
+          <span className="text-trace-fg/80 min-w-0 truncate text-micro font-medium">{call.label}</span>
+          {live && <span className="label text-live shrink-0">running</span>}
+          {!live && event.failed && (
+            <span className="text-destructive flex shrink-0 items-center gap-1 text-micro font-medium">
+              <AlertTriangle className="size-3" aria-hidden /> failed
+            </span>
           )}
-          <span className="label text-trace-fg/60">
-            {call.server} · {call.tool}
-          </span>
-          {live && <span className="label text-live">running</span>}
-          {!live && event.failed && <span className="label text-destructive">failed</span>}
+          {!live && !event.failed && hasOutput && (
+            <span className="text-trace-fg/50 flex shrink-0 items-center gap-1 text-micro tabular-nums">
+              <Check className="text-emerald-400/80 size-3" strokeWidth={2.5} aria-hidden />
+              {mcpSummary(view)}
+            </span>
+          )}
           {hasOutput && (
             <button
               type="button"
               onClick={() => setOpen((v) => !v)}
               aria-expanded={open}
-              className="text-trace-fg/60 hover:text-trace-fg ml-auto flex cursor-pointer items-center gap-1 rounded px-1"
+              className="text-trace-fg/60 hover:text-trace-fg ml-auto flex shrink-0 cursor-pointer items-center gap-1 rounded px-1"
             >
               <span className="label">{open ? "hide output" : lines > 1 ? `${lines} lines` : "output"}</span>
               <ChevronRight className={cn("size-3.5 transition-transform duration-150", open && "rotate-90")} aria-hidden />
@@ -80,9 +106,7 @@ export function McpItem({ event, call, live }: { event: ToolEvent; call: McpCall
           </pre>
         )}
         {hasOutput && open && (
-          <pre className={cn("text-trace-fg/80 max-h-80 overflow-auto px-3 py-2 font-mono text-code whitespace-pre-wrap", event.arg && "border-t border-white/8")}>
-            {output}
-          </pre>
+          <TraceOutput text={output} mode={isJson ? "json" : "term"} className={cn(event.arg && "border-t border-white/8")} />
         )}
         {hasOutput && !open && (
           <button
@@ -100,4 +124,70 @@ export function McpItem({ event, call, live }: { event: ToolEvent; call: McpCall
       </div>
     </div>
   );
+}
+
+/**
+ * First contact with an MCP server in a run: a link being established, drawn as one — the sandbox
+ * node, energy across a dashed path, the server's identity chip, a check that draws in. It reads
+ * as a moment ("the wire is up"), and a server that SHOULD appear but never does is visible by
+ * absence. Rendered once per server, where its first call happened.
+ */
+export function McpConnectItem({ server }: { server: string }) {
+  const hue = serverHue(server);
+  return (
+    <div className="enter flex items-center gap-3 py-0.5" role="status">
+      <span className="label text-muted-foreground shrink-0">MCP</span>
+      <span className="border-line-strong bg-card text-muted-foreground inline-flex shrink-0 items-center gap-1.5 rounded-md border px-1.5 py-0.5 text-micro font-medium">
+        <span className="bg-live size-1.5 rounded-full" aria-hidden />
+        sandbox
+      </span>
+      <svg className="h-2 w-8 shrink-0" viewBox="0 0 32 8" aria-hidden>
+        <path
+          d="M1 4 H31"
+          fill="none"
+          stroke={`oklch(0.65 0.13 ${hue})`}
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeDasharray="3 4"
+          className="flow-dash-once motion-reduce:animate-none"
+        />
+      </svg>
+      <span
+        style={{
+          "--srv-l": `oklch(0.5 0.13 ${hue})`,
+          "--srv-d": `oklch(0.78 0.13 ${hue})`,
+          "--srv-soft": `oklch(0.65 0.13 ${hue} / 0.1)`,
+          "--srv-line": `oklch(0.65 0.13 ${hue} / 0.4)`,
+        } as React.CSSProperties}
+        className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-[var(--srv-line)] bg-[var(--srv-soft)] px-1.5 py-0.5 font-mono text-micro font-semibold text-[var(--srv-l)] dark:text-[var(--srv-d)]"
+      >
+        <Zap className="size-3" strokeWidth={2.5} aria-hidden />
+        {server}
+      </span>
+      <svg className="text-ok size-3.5 shrink-0" viewBox="0 0 14 14" fill="none" aria-hidden>
+        <path d="M2.5 7.5 L5.5 10.5 L11.5 3.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="14" className="wire-check motion-reduce:[stroke-dashoffset:0]" />
+      </svg>
+      <span className="text-faint text-micro">connected</span>
+      <span className="bg-border h-px flex-1" aria-hidden />
+    </div>
+  );
+}
+
+/** The result as terminal text plus whether it should get JSON token coloring. */
+function renderable(view: McpResultView, raw: string): { output: string; isJson: boolean } {
+  switch (view.kind) {
+    case "json":
+      return { output: view.pretty, isJson: true };
+    case "table":
+      return {
+        output: JSON.stringify(view.rows.map((r) => Object.fromEntries(view.columns.map((c, i) => [c, r[i]]))), null, 2),
+        isJson: true,
+      };
+    case "kv":
+      return { output: JSON.stringify(Object.fromEntries(view.entries), null, 2), isJson: true };
+    case "text":
+      return { output: view.text, isJson: false };
+    case "empty":
+      return { output: raw.trim() || "(no data returned)", isJson: false };
+  }
 }

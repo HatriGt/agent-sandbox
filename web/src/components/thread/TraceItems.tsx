@@ -15,6 +15,7 @@ import { ATTACHMENT_RE, useSession } from "@/lib/session-context";
 import { SkillMark } from "@/lib/skillGlyph";
 import { parseMcpName } from "@/lib/mcp";
 import { McpItem } from "./McpItem";
+import { TraceOutput } from "./TraceOutput";
 import { Lightbox } from "@/components/ui/lightbox";
 
 /**
@@ -202,11 +203,7 @@ function ShellItem({ event, live }: { event: ToolEvent; live?: boolean }) {
           {event.arg}
         </p>
         <TestResultsCard report={report} onRaw={() => setOpen((v) => !v)} rawOpen={open} />
-        {open && (
-          <pre className="bg-trace text-trace-fg/80 max-h-80 overflow-auto rounded-md border border-white/8 px-3 py-2 font-mono text-code whitespace-pre-wrap">
-            {event.result}
-          </pre>
-        )}
+        {open && <TraceOutput text={event.result!} mode="term" className="bg-trace rounded-md border border-white/8" />}
       </div>
     );
   }
@@ -248,11 +245,7 @@ function ShellItem({ event, live }: { event: ToolEvent; live?: boolean }) {
           {event.arg ?? ""}
           {live && !hasOutput && <span className="caret text-live" aria-hidden>▍</span>}
         </pre>
-        {hasOutput && open && (
-          <pre className="text-trace-fg/80 max-h-80 overflow-auto border-t border-white/8 px-3 py-2 font-mono text-code whitespace-pre-wrap">
-            {event.result}
-          </pre>
-        )}
+        {hasOutput && open && <TraceOutput text={event.result!} mode="term" className="border-t border-white/8" />}
         {hasOutput && !open && (
           <button type="button" onClick={() => setOpen(true)} className="text-trace-fg/60 hover:text-trace-fg flex w-full cursor-pointer items-center gap-2 border-t border-white/8 px-3 py-1.5 text-left font-mono text-micro">
             <span className="text-trace-fg/40 select-none">›</span>

@@ -12,6 +12,7 @@ import { deadlineLabel, deadlineOf, displayState, fmtDuration } from "@/lib/life
 import { runStats, toMarkdown } from "@/lib/transcript";
 import { splitReplies } from "@/lib/replies";
 import { parseMcpName } from "@/lib/mcp";
+import { McpConnectItem } from "./McpItem";
 import { setPrefill } from "@/lib/draft";
 import { RunSummary } from "./RunSummary";
 import { ThreadHeader } from "./ThreadHeader";
@@ -434,6 +435,8 @@ export function Thread({
                 <LifecycleItem key={key} label={g.label} detail={g.detail} />
               ) : g.kind === "tools" ? (
                 <ToolGroup key={key} events={g.events} live={runState === "running" && isLast} />
+              ) : g.kind === "mcp-connect" ? (
+                <McpConnectItem key={key} server={g.server} />
               ) : g.kind === "you" ? (
                 <div key={key} data-turn={key}>
                   <YouItem text={g.text} />
@@ -607,6 +610,7 @@ type TraceGroup =
   | { kind: "asked"; question: string; answer: string }
   | { kind: "lifecycle"; label: string; detail?: string }
   | { kind: "tools"; events: ToolEvent[] }
+  | { kind: "mcp-connect"; server: string }
   | { kind: "think"; text: string }
   | { kind: "plan"; board: TaskBoard };
 
@@ -623,7 +627,7 @@ function groupTrace(events: TraceEvent[]): TraceGroup[] {
       const mcp = parseMcpName(e.name);
       if (mcp && !seenServers.has(mcp.server)) {
         seenServers.add(mcp.server);
-        out.push({ kind: "lifecycle", label: `connected to ${mcp.server}`, detail: "MCP" });
+        out.push({ kind: "mcp-connect", server: mcp.server });
       }
       const last = out[out.length - 1];
       if (last?.kind === "tools") last.events.push(e);
