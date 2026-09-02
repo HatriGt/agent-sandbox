@@ -437,7 +437,7 @@ export function YouItem({ text, label = "You", onRevert }: { text: string; label
                 type="button"
                 onClick={onRevert}
                 aria-label="Revert the sandbox to before this message"
-                className="text-muted-foreground hover:text-foreground hover:bg-muted grid size-7 shrink-0 cursor-pointer place-items-center rounded-full border opacity-0 transition-opacity duration-150 group-hover/you:opacity-100 focus-visible:opacity-100"
+                className="text-muted-foreground hover:text-foreground hover:bg-muted grid size-7 shrink-0 cursor-pointer place-items-center rounded-full border opacity-0 transition-opacity duration-150 group-hover/you:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-70"
               >
                 <Undo2 className="size-3.5" aria-hidden />
               </button>

@@ -16,11 +16,12 @@ import {
   withBoxLock,
 } from "../src/checkpoint.ts";
 
-test("captureCmd tars workspace + agent home, excludes the checkpoint dir, tolerates exit 1", () => {
+test("captureCmd tars workspace + agent home into a store OUTSIDE /workspace, tolerates exit 1", () => {
   const cmd = captureCmd(3);
-  assert.match(cmd, /tar -cf '\/workspace\/\.agent\.ckpt\/t3\.tar\.tmp'/);
+  assert.match(cmd, /tar -cf '\/root\/\.agent-ckpt\/t3\.tar\.tmp'/);
   assert.match(cmd, /-C \/ 'workspace' 'root\/\.claude'/);
-  assert.match(cmd, /--exclude='\/workspace\/\.agent\.ckpt'/);
+  // The store must NOT live under /workspace — it would leak into the changes dock and file tree.
+  assert.ok(!cmd.includes("/workspace/.agent.ckpt"));
   assert.match(cmd, /\|\| \[ \$\? -eq 1 \]/); // "file changed as we read it" must not fail capture
   assert.match(cmd, /mv .*t3\.tar\.tmp.*t3\.tar/); // atomic publish
   assert.match(cmd, /echo CKPT_OK t3/);
@@ -36,12 +37,10 @@ test("parseCkptLs reads turn numbers, sorted, ignoring junk", () => {
   assert.deepEqual(parseCkptLs(""), []);
 });
 
-test("revertCmd guards on the tar, holds the store outside the wipe, appends the seam", () => {
+test("revertCmd guards on the tar, wipes then restores, appends the seam", () => {
   const cmd = revertCmd(2, 3);
-  assert.match(cmd, /\[ -f '\/workspace\/\.agent\.ckpt\/t2\.tar' \] \|\| \{ echo CKPT_MISSING t2; exit 9; \}/);
-  // The checkpoint store must move OUT of /workspace before the wipe, and back after.
-  assert.ok(cmd.indexOf("mv '/workspace/.agent.ckpt' '/tmp/.agent.ckpt.hold'") < cmd.indexOf("rm -rf /workspace/*"));
-  assert.ok(cmd.indexOf("tar -xf") < cmd.indexOf("mv '/tmp/.agent.ckpt.hold' '/workspace/.agent.ckpt'"));
+  assert.match(cmd, /\[ -f '\/root\/\.agent-ckpt\/t2\.tar' \] \|\| \{ echo CKPT_MISSING t2; exit 9; \}/);
+  assert.ok(cmd.indexOf("rm -rf /workspace/*") < cmd.indexOf("tar -xf"));
   assert.match(cmd, /3 later turns discarded/);
   assert.match(revertCmd(1, 1), /1 later turn discarded/);
   assert.match(cmd, /\.agent\.log/);
@@ -75,5 +74,5 @@ test("withBoxLock serializes per box and survives a rejection", async () => {
   });
   await Promise.all([slow, rejected, after]);
   assert.deepEqual(order, ["capture", "boom", "caught", "resume"]);
-  assert.match(listCmd(), /\.agent\.ckpt/);
+  assert.match(listCmd(), /\.agent-ckpt/);
 });
