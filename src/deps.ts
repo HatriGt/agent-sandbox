@@ -31,6 +31,7 @@ import {
 } from "./msb.js";
 import { runInteractive } from "./interactive.js";
 import { runVerification } from "./verify.js";
+import { handoffPlan, buildCarryDiffSh } from "./handoff.js";
 import { safeWorkspacePath } from "./artifact.js";
 import { shellQuote } from "./exec.js";
 import type { Interact } from "./handlers.js";
@@ -559,6 +560,42 @@ export const deps: HandlerDeps = {
         return { answer: r.answer };
       },
     });
+  },
+
+  async handoff(cfg, after, input) {
+    // Inspect the parent: existence, run state, and each repo dir's origin + current branch — one
+    // state read + one listing exec. The pure decision (what the child inherits) is handoffPlan's.
+    if (!(await boxExists(cfg, after))) {
+      return { ok: false, question: `after: no sandbox exists for session '${after}'.` };
+    }
+    const snap = await gatherWatch(cfg, after, 1, { metrics: false });
+    const listing = await exec(
+      cfg,
+      after,
+      'for d in /workspace/*/; do n=$(basename "$d"); u=$(git -C "$d" remote get-url origin 2>/dev/null); ' +
+        'b=$(git -C "$d" rev-parse --abbrev-ref HEAD 2>/dev/null); if [ -n "$u" ]; then echo "$n|$u|$b"; fi; done'
+    ).catch(() => ({ stdout: "" }));
+    const repos: Array<{ name: string; repo: string; ref?: string }> = [];
+    for (const line of listing.stdout.split("\n")) {
+      const [name, url, branch] = line.split("|");
+      if (!name || !url) continue;
+      const canonical = parseOwnerName(url.trim());
+      if (canonical) repos.push({ name, repo: canonical, ...(branch?.trim() && branch.trim() !== "HEAD" ? { ref: branch.trim() } : {}) });
+    }
+    const v = handoffPlan({ exists: true, runState: snap.runState, exitCode: snap.exitCode, repos }, input);
+    if (!v.ok) return v;
+    // Produce the carry diff per repo inside the parent (driver is done; nothing races). An empty
+    // diff means the parent committed/pushed everything — the child just clones clean.
+    const out: Array<{ repo: string; ref?: string; patch?: string }> = [];
+    for (const r of v.plan.repos) {
+      let patch: string | undefined;
+      if (r.carry) {
+        const d = await exec(cfg, after, buildCarryDiffSh(r.dir, r.ref));
+        patch = d.stdout && d.stdout.trim() ? d.stdout : undefined;
+      }
+      out.push({ repo: r.repo, ref: r.ref, ...(patch ? { patch } : {}) });
+    }
+    return { ok: true, repos: out, parentFailed: v.plan.parentFailed };
   },
 
   async addGhToken(cfg, token, repo) {

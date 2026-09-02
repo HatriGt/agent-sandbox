@@ -94,6 +94,19 @@ export interface HandlerDeps {
    * verification never un-finishes it. Optional: entries without it ignore `verify`.
    */
   verify?(cfg: Config, session: string, plan: VerifyPlan): Promise<VerifyResult>;
+  /**
+   * Chain a child delegation off a FINISHED parent box: inspect it, and produce per-repo
+   * {repo, ref, patch} entries carrying the parent's uncommitted work (the same patch pipeline the
+   * `patch` argument uses). Refusals (running/waiting/missing parent…) come back as questions.
+   */
+  handoff?(
+    cfg: Config,
+    after: string,
+    input: { task: string; repo?: string; carry?: "patch" | "none" }
+  ): Promise<
+    | { ok: true; repos: Array<{ repo: string; ref?: string; patch?: string }>; parentFailed: boolean }
+    | { ok: false; question: string }
+  >;
 }
 
 /** Minimal shape of the MCP server's `.tool()` we rely on (keeps this file transport-agnostic). */
@@ -225,6 +238,23 @@ export function registerTools(
           "Provide when delegate asks you to choose among several accounts that can access the repo: " +
             "the GitHub login to use for this delegation."
         ),
+      after: z
+        .string()
+        .optional()
+        .describe(
+          "Chain this delegation off a FINISHED session: the child gets a fresh box and clean " +
+            "context, with the parent's repo(s) checked out and its uncommitted work carried in as " +
+            "a patch. Use for implement→test→review pipelines where each stage should not inherit " +
+            "the previous agent's conversation. The parent must be run:done (a running parent is a " +
+            "question back). Omit repo/repos to inherit the parent's checkouts."
+        ),
+      carry: z
+        .enum(["patch", "none"])
+        .optional()
+        .describe(
+          "With `after`: patch (default) ships the parent's uncommitted work into the child; none " +
+            "gives the child a clean clone of the same repo@ref."
+        ),
       verify: z
         .object({
           command: z.string().optional().describe("Shell command run in the box after run:done; exit 0 = verified."),
@@ -249,6 +279,8 @@ export function registerTools(
       githubToken,
       githubAccount,
       verify,
+      after,
+      carry,
     }: {
       source?: DelegateSource;
       repo?: string;
@@ -260,12 +292,33 @@ export function registerTools(
       githubToken?: string;
       githubAccount?: string;
       verify?: { command?: string; criterion?: string };
+      after?: string;
+      carry?: "patch" | "none";
     }) => {
       // Validate the verify clause FIRST — a malformed one must be a question before any box work.
       const vp = verifyPlanOf(verify);
       if (!vp.ok) return text(vp.question);
+
+      // A handoff resolves the child's repos (and carry patches) FROM THE PARENT before validation:
+      // the resolved list simply becomes this call's `repos`, so everything downstream (per-repo
+      // access resolution, patch application, uniquified dir names) is the ordinary delegate path.
+      let handoffNote = "";
+      if (after !== undefined) {
+        if (!deps.handoff) return text("This entry point does not support `after` (handoff).");
+        if (!isBoxName(after)) return text("after: invalid session name.");
+        if (!task || !task.trim()) return text("after: the child needs its own `task` — the parent's conversation is deliberately not inherited.");
+        if (patch || repos?.some((r) => r.patch)) return text("after: don't also pass `patch` — the carry patch comes from the parent. Use carry:\"none\" for a clean clone.");
+        const h = await deps.handoff(cfg, after, { task: task!, repo, carry });
+        if (!h.ok) return text(h.question);
+        repos = h.repos;
+        repo = undefined;
+        ref = undefined;
+        handoffNote = `\ncarried from: ${after}${h.parentFailed ? " (note: the parent run FAILED — this child sees its last state)" : ""}`;
+      }
       // Remote callers have no shared filesystem, so "git" is the only source that can work there.
-      const resolvedSource: DelegateSource = source ?? (remoteEntry ? "git" : "local");
+      // A handoff child always clones — its tree comes from the parent's repo@ref (+carry patch),
+      // never from the caller's disk — so `after` forces git on the stdio entry too.
+      const resolvedSource: DelegateSource = after !== undefined ? "git" : source ?? (remoteEntry ? "git" : "local");
       if (remoteEntry && resolvedSource === "local") {
         return text(
           `This sandbox is reached over HTTP, so it cannot see your machine's files — ` +
@@ -336,7 +389,7 @@ export function registerTools(
       }
       // r.output already carries the full imperative protocol for a waiting box, or the result when
       // done — don't append a contradicting tail.
-      return text(`Delegated. session=${r.box}${r.warm ? " (warm)" : ""}${repoLine}\n\n${r.output}${verifyLine}`);
+      return text(`Delegated. session=${r.box}${r.warm ? " (warm)" : ""}${repoLine}${handoffNote}\n\n${r.output}${verifyLine}`);
     }
   );
 

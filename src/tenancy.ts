@@ -143,6 +143,13 @@ export function guardDeps(deps: HandlerDeps, own: Ownership): HandlerDeps {
       return vf(cfg, session, plan);
     };
   }
+  if (deps.handoff) {
+    const hf = deps.handoff.bind(deps);
+    guarded.handoff = async (cfg, after, input) => {
+      own.check(after); // you may only chain off your OWN boxes — a handoff reads the parent's tree
+      return hf(cfg, after, input);
+    };
+  }
   if (deps.attachRepo) {
     const ar = deps.attachRepo.bind(deps);
     guarded.attachRepo = async (cfg: Config, session: string, repo: string, ref?: string) => {

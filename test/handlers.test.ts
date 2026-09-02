@@ -546,3 +546,63 @@ test("delegate+verify: a failed verification stamps UNVERIFIED but the run stays
   assert.match(out, /run:done exit=0/);
   assert.match(out, /UNVERIFIED \(criterion\): endpoint returns 200 without auth/);
 });
+
+test("delegate+after: the parent's repos and carry patch become the child's plan", async () => {
+  const s = fakeServer();
+  let plan: any = null;
+  registerTools(s as any, cfg, {
+    countBoxes: async () => 0,
+    resolveGitAccess: okAccess,
+    handoff: async (_c: any, after: string, input: any) => {
+      assert.equal(after, "parent-1");
+      assert.equal(input.task, "write tests");
+      return { ok: true, repos: [{ repo: "acme/api", ref: "main", patch: "diff --git a/x b/x\n" }], parentFailed: false };
+    },
+    runDelegation: async (_c: any, p: any) => {
+      plan = p;
+      return { box: "child-1", warm: false, output: "run:done exit=0\n\nok" };
+    },
+  } as any);
+  const res = await s.tools.delegate.handler({ after: "parent-1", task: "write tests" });
+  assert.equal(plan.source, "git");
+  assert.equal(plan.repos.length, 1);
+  assert.equal(plan.repos[0].repo, "acme/api");
+  assert.equal(plan.repos[0].ref, "main");
+  assert.match(plan.repos[0].patch, /diff --git/);
+  assert.match(textOf(res), /carried from: parent-1/);
+});
+
+test("delegate+after: handoff refusals pass through; guard rails hold", async () => {
+  const s = fakeServer();
+  let ran = false;
+  registerTools(s as any, cfg, {
+    countBoxes: async () => 0,
+    resolveGitAccess: okAccess,
+    handoff: async () => ({ ok: false, question: "after: the parent is still running." }),
+    runDelegation: async () => {
+      ran = true;
+      return { box: "x", warm: false, output: "" };
+    },
+  } as any);
+  // Running parent -> the question, nothing started.
+  const r1 = await s.tools.delegate.handler({ after: "p", task: "t" });
+  assert.match(textOf(r1), /still running/);
+  assert.equal(ran, false);
+  // No task -> question. after + explicit patch -> question. Bad name -> refused.
+  assert.match(textOf(await s.tools.delegate.handler({ after: "p" })), /needs its own `task`/);
+  assert.match(textOf(await s.tools.delegate.handler({ after: "p", task: "t", patch: "d" })), /don't also pass `patch`/);
+  assert.match(textOf(await s.tools.delegate.handler({ after: "../x", task: "t" })), /invalid session name/);
+  assert.equal(ran, false);
+});
+
+test("delegate+after: a failed parent still hands off but the reply says so", async () => {
+  const s = fakeServer();
+  registerTools(s as any, cfg, {
+    countBoxes: async () => 0,
+    resolveGitAccess: okAccess,
+    handoff: async () => ({ ok: true, repos: [{ repo: "a/b" }], parentFailed: true }),
+    runDelegation: async () => ({ box: "c", warm: false, output: "run:done exit=0\n\nok" }),
+  } as any);
+  const res = await s.tools.delegate.handler({ after: "p", task: "review the failure" });
+  assert.match(textOf(res), /parent run FAILED/);
+});
