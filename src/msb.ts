@@ -676,6 +676,14 @@ export function streamFmtScript(): string {
     `const fs=require("fs");` +
     `const out=process.argv[2];` +
     `function w(s){try{fs.appendFileSync(out,s+"\\n")}catch(e){}}` +
+    // Defang transcript sentinels in MODEL-PRODUCED content before it reaches the log. The trace
+    // parser treats a column-0 ⟦you⟧/⟦ask⟧/⟦think⟧/⟦plan⟧ or a line-leading ● as structure, and
+    // assistant text is written at column 0 — so a prompt-injected agent could forge the record a
+    // human reviews: a fake operator-approval bubble, a fake question, a fake "session started".
+    // (The resume echo is defanged host-side the same way — see DEFANG_SENTINELS_SED.) A zero-width
+    // space before each ⟦ and each line-leading ● breaks the parse while reading identically to a
+    // human. The formatter's OWN sentinels are appended after this, so real structure is untouched.
+    `function df(s){return String(s).replace(/\\u27e6/g,"\\u200b\\u27e6").replace(/^\\u25cf/gm,"\\u200b\\u25cf")}` +
     `let buf="";` +
     // Every assistant text block already written, so the run's final `result` (which IS one of them,
     // normally the last) is not appended a second time.
@@ -693,14 +701,14 @@ export function streamFmtScript(): string {
     `const tasks=[];` +
     `function emitPlan(){const live=tasks.filter(t=>t.s!=="deleted");if(!live.length)return;` +
     `w("${PLAN_OPEN} "+Date.now()+"\\n"+live.map(t=>(t.s==="completed"?"[x] ":t.s==="in_progress"?"[>] ":"[ ] ")+t.t).join("\\n")+"\\n${PLAN_CLOSE}")}` +
-    `function oneLine(v){return String(v==null?"":v).replace(/\\s*\\n\\s*/g," ").trim().slice(0,160)}` +
+    `function oneLine(v){return df(String(v==null?"":v).replace(/\\s*\\n\\s*/g," ").trim().slice(0,160))}` +
     `process.stdin.setEncoding("utf8");` +
     `process.stdin.on("data",d=>{buf+=d;let i;while((i=buf.indexOf("\\n"))>=0){const line=buf.slice(0,i);buf=buf.slice(i+1);handle(line)}});` +
     `process.stdin.on("end",()=>{if(buf.trim())handle(buf)});` +
     `function txt(c){return Array.isArray(c)?c.map(b=>b&&b.type==="text"?b.text:"").join(""):(typeof c==="string"?c:"")}` +
     `function clip(ls){const head=[];let bytes=0;for(const l0 of ls){if(head.length>=${RESULT_MAX_LINES})break;const l=l0.length>${RESULT_MAX_LINE_CHARS}?l0.slice(0,${RESULT_MAX_LINE_CHARS})+" …":l0;const b=Buffer.byteLength(l,"utf8")+3;if(head.length&&bytes+b>${RESULT_MAX_BYTES})break;bytes+=b;head.push(l)}` +
     `const cut=ls.length-head.length;if(cut>0)head.push("… "+cut+" more lines");return head}` +
-    `function handle(line){line=line.trim();if(!line)return;let e;try{e=JSON.parse(line)}catch(_){w(line);return}` +
+    `function handle(line){line=line.trim();if(!line)return;let e;try{e=JSON.parse(line)}catch(_){w(df(line));return}` +
     `try{` +
     // One formatter process is one `claude` invocation, i.e. exactly one turn — so the marker is
     // written at most once. Claude Code can emit a SECOND system/init mid-stream (observed after an
@@ -712,16 +720,16 @@ export function streamFmtScript(): string {
     // Trailing "\n" => a BLANK line after each text block. Consecutive assistant text blocks are
     // separate markdown documents (a table, then a fenced block); glued with a single newline the
     // renderer reads "| 1 | 2 |```bash" as one paragraph and the fence never opens.
-    `if(b.type==="text"&&b.text.trim()){const t=b.text.trim();seenText.add(t);w(t+"\\n")}` +
+    `if(b.type==="text"&&b.text.trim()){const t=b.text.trim();seenText.add(t);w(df(t)+"\\n")}` +
     // Extended thinking arrives as its own block. It is written between sentinels so the UI can fold
     // it into a collapsed "Thought for a moment" panel instead of reading it as the agent's prose.
-    `else if(b.type==="thinking"&&b.thinking&&String(b.thinking).trim()){w("${THINK_OPEN}\\n"+String(b.thinking).trim()+"\\n${THINK_CLOSE}")}` +
+    `else if(b.type==="thinking"&&b.thinking&&String(b.thinking).trim()){w("${THINK_OPEN}\\n"+df(String(b.thinking).trim())+"\\n${THINK_CLOSE}")}` +
     // TodoWrite = the agent's plan. Written as a checklist block ([x] done, [>] in progress, [ ] todo)
     // so the UI renders a live plan card; the tool row itself would only say "TodoWrite".
     // The open sentinel carries the wall-clock ms of the snapshot. Consecutive snapshots bracket the
     // window a step was in progress, which is the ONLY source of a per-step duration — the log has no
     // other clock. Logs written before this stamp simply parse without a time and show no duration.
-    `else if(b.type==="tool_use"&&b.name==="TodoWrite"&&Array.isArray((b.input||{}).todos)){if(b.id)planIds.add(b.id);w("${PLAN_OPEN} "+Date.now()+"\\n"+b.input.todos.map(t=>(t.status==="completed"?"[x] ":t.status==="in_progress"?"[>] ":"[ ] ")+String(t.content||t.activeForm||"").replace(/\\s*\\n\\s*/g," ").slice(0,160)).join("\\n")+"\\n${PLAN_CLOSE}")}` +
+    `else if(b.type==="tool_use"&&b.name==="TodoWrite"&&Array.isArray((b.input||{}).todos)){if(b.id)planIds.add(b.id);w("${PLAN_OPEN} "+Date.now()+"\\n"+b.input.todos.map(t=>(t.status==="completed"?"[x] ":t.status==="in_progress"?"[>] ":"[ ] ")+df(String(t.content||t.activeForm||"").replace(/\\s*\\n\\s*/g," ").slice(0,160))).join("\\n")+"\\n${PLAN_CLOSE}")}` +
     // TaskCreate/TaskUpdate ARE the plan on newer Claude Code. Fold each into a plan snapshot and drop
     // the tool row: `→ TaskUpdate` carries no argument the reader can use (its input is a taskId and a
     // status), so as a row it is pure noise — the checklist ticking IS the information.
@@ -734,7 +742,7 @@ export function streamFmtScript(): string {
     // Stamp the tool_use id (short tail) so a result can be matched to ITS OWN call. With parallel
     // tool use one assistant message issues N tool_use blocks and the N results arrive afterwards;
     // without a correlation token the parser can only attach every result to the most recent call.
-    `else if(b.type==="tool_use"){const inp=b.input||{};const arg=String(inp.command||inp.file_path||inp.path||inp.pattern||inp.description||"").replace(/\\s*\\n\\s*/g," ").trim();w("→ "+b.name+(arg?": "+arg.slice(0,200):"")+(b.id?" ${ID_OPEN}"+String(b.id).slice(-8)+"${ID_CLOSE}":""))}` +
+    `else if(b.type==="tool_use"){const inp=b.input||{};const arg=String(inp.command||inp.file_path||inp.path||inp.pattern||inp.description||"").replace(/\\s*\\n\\s*/g," ").trim();w("→ "+b.name+(arg?": "+df(arg.slice(0,200)):"")+(b.id?" ${ID_OPEN}"+String(b.id).slice(-8)+"${ID_CLOSE}":""))}` +
     `}return}` +
     `if(e.type==="user"&&e.message){for(const b of e.message.content||[]){` +
     // Cap the result, but SAY SO. Silently dropping the tail made a truncated listing look like the
@@ -743,12 +751,12 @@ export function streamFmtScript(): string {
     // is megabytes, and .agent.log is re-read whole on every SSE poll). Whichever binds first wins.
     // A FAILED tool call is marked, so the UI can show it failed. Without this a command that errored
     // renders exactly like one that succeeded — its stderr just looks like ordinary output.
-    `if(b.type==="tool_result"){if(b.tool_use_id&&planIds.has(b.tool_use_id))continue;const r=txt(b.content).trim();const id=b.tool_use_id?"${ID_OPEN}"+String(b.tool_use_id).slice(-8)+"${ID_CLOSE} ":"";if(r){w("  "+id+(b.is_error?"${ERR_MARK} ":"")+clip(r.split("\\n")).join("\\n  "))}else if(id)w("  "+id+(b.is_error?"${ERR_MARK} ":"")+"(no output)")}` +
+    `if(b.type==="tool_result"){if(b.tool_use_id&&planIds.has(b.tool_use_id))continue;const r=txt(b.content).trim();const id=b.tool_use_id?"${ID_OPEN}"+String(b.tool_use_id).slice(-8)+"${ID_CLOSE} ":"";if(r){w("  "+id+(b.is_error?"${ERR_MARK} ":"")+clip(df(r).split("\\n")).join("\\n  "))}else if(id)w("  "+id+(b.is_error?"${ERR_MARK} ":"")+"(no output)")}` +
     `}return}` +
     // Re-emit the run's final result ONLY when it is not simply the assistant text we already wrote.
     // Claude's `result` IS the last assistant message, so the unconditional re-emit appended the
     // whole closing summary a second time — the duplicate the reader sees at the end of every run.
-    `if(e.type==="result"){const r=e.result?String(e.result).trim():"";if(r&&!seenText.has(r))w(r);return}` +
+    `if(e.type==="result"){const r=e.result?String(e.result).trim():"";if(r&&!seenText.has(r))w(df(r));return}` +
     `}catch(_){}}`;
   // base64 the whole script and decode in the box: shipping a large JS blob through
   // shell/SSH/msb-exec quoting was corrupting it (trailing garbage → SyntaxError at load).
