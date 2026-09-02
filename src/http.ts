@@ -1498,7 +1498,7 @@ app.get("/diff.json", async (req: Request, res: Response) => {
 // that opened it, so the merge is attributed like the agent's own pushes. Method is merge-commit.
 app.post("/pr/merge.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const { session, repo, number, method, auto } = (req.body ?? {}) as { session?: string; repo?: string; number?: number; method?: string; auto?: boolean };
+  const { session, repo, number, method, auto, admin } = (req.body ?? {}) as { session?: string; repo?: string; number?: number; method?: string; auto?: boolean; admin?: boolean };
   if (!session || !/^[\w.-]+$/.test(session) || !repo || !/^[\w.-]+\/[\w.-]+$/.test(repo) || !Number.isFinite(Number(number))) {
     res.status(400).json({ error: "session, repo (owner/name) and number are required" });
     return;
@@ -1520,11 +1520,15 @@ app.post("/pr/merge.json", async (req: Request, res: Response) => {
     // `auto` = GitHub's own auto-merge: queue the merge to fire the moment branch-policy
     // requirements (approvals, checks) are met — the answer to "the base branch policy prohibits
     // the merge" that doesn't involve coming back later.
-    const r = await execInBox(cfg, session, `gh pr merge ${Number(number)} --repo ${shellQuote(repo)} ${methodFlag}${auto ? " --auto" : ""} 2>&1`, {
+    // `admin` = gh's --admin: use the account's administrator bypass to merge despite branch
+    // policy. Only meaningful when the connected account actually has bypass rights; the UI keeps
+    // it behind its own explicit confirm. --auto and --admin are mutually exclusive in gh.
+    const extra = admin ? " --admin" : auto ? " --auto" : "";
+    const r = await execInBox(cfg, session, `gh pr merge ${Number(number)} --repo ${shellQuote(repo)} ${methodFlag}${extra} 2>&1`, {
       env: { GH_TOKEN: creds.primaryToken, GITHUB_TOKEN: creds.primaryToken },
     });
     forgetPull(repo, Number(number));
-    res.json({ ok: true, auto: !!auto, output: redactor.redact((r.stdout ?? "").trim().slice(-600)) });
+    res.json({ ok: true, auto: !!auto && !admin, output: redactor.redact((r.stdout ?? "").trim().slice(-600)) });
   } catch (e) {
     forgetPull(repo, Number(number));
     // gh's own message (not mergeable, checks, permissions…) is on the lines AFTER the argv line of

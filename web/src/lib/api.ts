@@ -461,7 +461,7 @@ export const api = {
       parse<{ ok: true; path: string; bytes: number }>
     ),
   /** Merge the PR from inside the sandbox (`gh pr merge --merge`). */
-  mergePull: (session: string, repo: string, number: number, opts?: { method?: "merge" | "squash" | "rebase"; auto?: boolean }) =>
+  mergePull: (session: string, repo: string, number: number, opts?: { method?: "merge" | "squash" | "rebase"; auto?: boolean; admin?: boolean }) =>
     post<{ ok: true; auto: boolean; output: string }>("/pr/merge.json", { session, repo, number, ...opts }),
   keep: (session: string, keep: boolean) => post<{ ok: true; kept: boolean }>("/keep.json", { session, keep }),
 

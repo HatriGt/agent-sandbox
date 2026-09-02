@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowUpRight, Check, ChevronDown, CircleCheck, CircleDashed, CircleX, FileDiff, GitBranch, GitMerge, GitPullRequest, GitPullRequestClosed, GitPullRequestDraft, Globe, Loader2, Sparkles, Users, X } from "lucide-react";
+import { ArrowUpRight, Check, ChevronDown, CircleCheck, CircleDashed, CircleX, FileDiff, GitBranch, GitMerge, GitPullRequest, GitPullRequestClosed, GitPullRequestDraft, Globe, Loader2, ShieldAlert, Sparkles, Users, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
 import { api, type PullInfo } from "@/lib/api";
@@ -169,11 +169,11 @@ function Header({ info, v, url, session, repo, number, onMerged, onClose }: { in
   // The last failure decides the retry offer: a branch-policy refusal is exactly what --auto solves.
   const policyBlocked = !!error && /policy prohibits|--auto/.test(error);
 
-  const merge = async (method: MergeMethod, auto: boolean) => {
+  const merge = async (method: MergeMethod, auto: boolean, admin = false) => {
     setBusy(true);
     setError(null);
     try {
-      const r = await api.mergePull(session, repo, number, { method, auto });
+      const r = await api.mergePull(session, repo, number, { method, auto, admin });
       setResult(r.auto ? "auto" : "merged");
       toast.success(r.auto ? `Auto-merge armed for #${number}` : `Merged #${number}`);
       onMerged();
@@ -219,20 +219,51 @@ function Header({ info, v, url, session, repo, number, onMerged, onClose }: { in
         <div role="alert" className="border-destructive/30 bg-destructive/8 mx-1.5 mt-1.5 rounded-lg border px-2.5 py-2">
           <p className="text-destructive text-micro font-medium">Merge failed</p>
           <p className="text-foreground/80 mt-0.5 text-micro whitespace-pre-wrap">{error}</p>
-          {policyBlocked && (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void merge("merge", true)}
-              className="border-sleep/40 bg-sleep/10 text-sleep hover:bg-sleep/20 mt-2 flex w-full cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-micro font-medium transition-colors"
-            >
-              {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" aria-hidden />}
-              Arm auto-merge — GitHub merges it the moment approvals and checks are satisfied
-            </button>
-          )}
+          {policyBlocked && <PolicyRescue busy={busy} onAuto={() => void merge("merge", true)} onAdmin={() => void merge("merge", false, true)} />}
         </div>
       )}
     </>
+  );
+}
+
+/**
+ * The two ways past a branch-policy refusal, offered exactly where the refusal appears:
+ *  - auto-merge (the patient path) — one click, GitHub merges when requirements are satisfied;
+ *  - admin merge (the bypass) — uses the connected account's administrator override, so it stays
+ *    behind its own arm-to-confirm and is styled as the louder, warier action. If the account has
+ *    no bypass rights gh refuses and the message lands in the same inline alert.
+ */
+function PolicyRescue({ busy, onAuto, onAdmin }: { busy: boolean; onAuto: () => void; onAdmin: () => void }) {
+  const [armed, setArmed] = React.useState(false);
+  React.useEffect(() => {
+    if (!armed) return;
+    const t = window.setTimeout(() => setArmed(false), 5000);
+    return () => window.clearTimeout(t);
+  }, [armed]);
+  return (
+    <div className="mt-2 flex flex-col gap-1.5">
+      <button
+        type="button"
+        disabled={busy}
+        onClick={onAuto}
+        className="border-sleep/40 bg-sleep/10 text-sleep hover:bg-sleep/20 flex w-full cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-micro font-medium transition-colors disabled:opacity-60"
+      >
+        {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" aria-hidden />}
+        Arm auto-merge — GitHub merges it the moment approvals and checks are satisfied
+      </button>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => (armed ? onAdmin() : setArmed(true))}
+        className={cn(
+          "border-attention/50 bg-attention/10 text-attention-text hover:bg-attention/20 flex w-full cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-micro font-medium transition-colors disabled:opacity-60",
+          armed && "ring-attention/50 ring-2"
+        )}
+      >
+        {busy ? <Loader2 className="size-3.5 animate-spin" /> : <ShieldAlert className="size-3.5" aria-hidden />}
+        {armed ? "Confirm: bypass the branch policy and merge now" : "Merge now with admin override — skips the policy's requirements"}
+      </button>
+    </div>
   );
 }
 
