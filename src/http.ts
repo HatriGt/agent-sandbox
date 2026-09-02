@@ -38,6 +38,7 @@ import { guardDeps, makeOwnership, NotOwnedError, QuotaError, withPrincipal } fr
 import { securityHeaders } from "./security-headers.js";
 import { gatherMonitor, gatherWatch, askInBox, driverStateLine, startBoxIfStopped, noteRunning, stopBox, noteStopped, interruptAgentRun } from "./msb.js";
 import { isBoxName } from "./sync.js";
+import { shellQuote } from "./exec.js";
 import { touchClaimed } from "./claims.js";
 import { safeWorkspacePath } from "./artifact.js";
 import { gitStatus, gitCommitAll, gitPush } from "./git-ops.js";
@@ -157,8 +158,22 @@ function resolvePrincipal(req: Request): Principal | null {
 app.use((req: Request, res: Response, next) => {
   const p = resolvePrincipal(req);
   res.locals.principal = p;
+  const isMcpPath = req.path === "/mcp" || req.path.startsWith("/mcp/");
+  // A `session` on any non-MCP route names a box, and a box name becomes a directory name and a
+  // shell word downstream. Routes validated it individually and inconsistently: isBoxName on four,
+  // an ad-hoc /^[\w.-]+$/ on four more (which accepts "." and ".." — exactly what isBoxName exists
+  // to reject), and nothing at all on /tree.json, /files.json, /changes.json and /diff.json. One
+  // check at the edge, on the same field the ownership check below already reads, is the version
+  // that cannot drift as routes are added.
+  if (!isMcpPath) {
+    const s = (req.body as Record<string, unknown> | undefined)?.session ?? (req.query as Record<string, unknown>).session;
+    if (s !== undefined && s !== "" && !isBoxName(s)) {
+      res.status(400).json({ error: "invalid session name" });
+      return;
+    }
+  }
   // Box-scoped JSON routes: a user may only name their own boxes. 404, not 403 — no existence oracle.
-  if (p && p.kind === "user" && p.role !== "admin" && !(req.path === "/mcp" || req.path.startsWith("/mcp/"))) {
+  if (p && p.kind === "user" && p.role !== "admin" && !isMcpPath) {
     const s = (req.body as Record<string, unknown> | undefined)?.session ?? (req.query as Record<string, unknown>).session;
     if (typeof s === "string" && s && !mayAccess(db, p, s)) {
       res.status(404).json({ error: "no such machine" });
@@ -1307,7 +1322,10 @@ app.post("/pr/merge.json", async (req: Request, res: Response) => {
     return;
   }
   try {
-    const r = await execInBox(cfg, session, `gh pr merge ${Number(number)} --repo ${repo} --merge 2>&1`);
+    // `repo` is quoted rather than relied on to be metacharacter-free: the validating regex above
+    // and this interpolation are far apart, and only one of them has to loosen for the other to
+    // become a remote shell.
+    const r = await execInBox(cfg, session, `gh pr merge ${Number(number)} --repo ${shellQuote(repo)} --merge 2>&1`);
     forgetPull(repo, Number(number));
     res.json({ ok: true, output: redactor.redact((r.stdout ?? "").trim().slice(-600)) });
   } catch (e) {

@@ -20,7 +20,7 @@ import { canAccessRepo, ghGetJson } from "./gh-probe.js";
 import { cloneRepoInStaging } from "./git-source.js";
 import { repoDirName } from "./delegate-input.js";
 import { applyGitCredentials, copyDirIntoBox, exec } from "./msb.js";
-import { stagingPathFor } from "./sync.js";
+import { stagingPathFor, assertBoxName } from "./sync.js";
 import { run, shellQuote } from "./exec.js";
 import { sshMuxOpts } from "./ssh.js";
 
@@ -203,7 +203,11 @@ export async function attachRepoToBox(
 ): Promise<{ name: string; login?: string }> {
   const store = await loadStore(cfg);
   const acc = await accountForRepo(cfg, store, repo);
+  // `name` becomes a directory in the box, a staging dir on the host, and the argument to the
+  // `rm -rf` in the finally below. repoDirName already constrains the charset and refuses dot-only
+  // names; asserting here means a future change to it cannot quietly widen those three paths.
   const name = repoDirName(repo);
+  assertBoxName(name);
   const owner = repo.split("/")[0]?.toLowerCase();
 
   // Refuse to overwrite a directory that already exists in the box.

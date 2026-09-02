@@ -29,9 +29,23 @@ export function assertBoxName(s: string): void {
   if (!isBoxName(s)) throw new Error("invalid box name");
 }
 
-/** Remote staging path for a single repo within a session: <sessionRoot>/<name>. */
+/**
+ * Remote staging path for a single repo within a session: <sessionRoot>/<name>.
+ *
+ * Held to the same rule as stagingPathFor, because `name` is caller-influenced: it comes from
+ * repoDirName(repo), and a repo id of `owner/..` used to yield the literal name "..", which
+ * path.posix.join collapses into the staging ROOT. The first thing cloneRepoInStaging does with a
+ * dest is `rm -rf` it, so that single character pair deleted every tenant's in-flight staging dir,
+ * not just the caller's. repoDirName now refuses dot-only names too; this is the second lock, on
+ * the function that actually builds the path.
+ */
 export function repoStagingPath(cfg: Config, session: string, name: string): string {
-  return path.posix.join(cfg.vpsStagingDir, session, name);
+  assertBoxName(session);
+  assertBoxName(name); // same charset, and the same "never . or .." rule
+  const root = cfg.vpsStagingDir.replace(/\/+$/, "");
+  const p = path.posix.join(cfg.vpsStagingDir, session, name);
+  if (!p.startsWith(`${root}/${session}/`)) throw new Error(`staging path escapes ${root}/${session}`);
+  return p;
 }
 
 /** Remove a staging dir on the VPS (best-effort; staging is transient after copy-in). */

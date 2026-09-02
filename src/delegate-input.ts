@@ -83,12 +83,21 @@ function blank(s: string | undefined): boolean {
   return !s || s.trim() === "";
 }
 
-/** Derive a directory name from a repo id: basename of a path, or the name segment of owner/name. */
+/**
+ * Derive a directory name from a repo id: basename of a path, or the name segment of owner/name.
+ *
+ * The result becomes a real directory name in three places — the per-repo staging dir on the VPS,
+ * /workspace/<name> in the box, and the path attach_repo `rm -rf`s on cleanup — so it must never be
+ * a path component with meaning. The charset filter keeps `.`, which on its own let a repo id of
+ * `owner/..` produce the literal name "..": every one of those paths then resolved to its PARENT.
+ * A dot-only result is therefore replaced, not sanitised character by character.
+ */
 export function repoDirName(repo: string): string {
   const s = repo.trim().replace(/\.git$/i, "").replace(/[\/]+$/, "");
   const last = s.split("/").filter(Boolean).pop() ?? "repo";
   // Keep it filesystem-safe.
-  return last.replace(/[^A-Za-z0-9._-]/g, "-") || "repo";
+  const name = last.replace(/[^A-Za-z0-9._-]/g, "-");
+  return /^\.+$/.test(name) ? "repo" : name || "repo";
 }
 
 /** Make each name unique (teamA/api + teamB/api -> api, api-2). */
