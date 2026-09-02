@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { matchFiles, parseFileList, makeFileIndex, fileListCommand } from "../src/files.ts";
+import { matchFiles, parseFileList, makeFileIndex, fileListCommand, fileDetailsCommand, parseFileDetails } from "../src/files.ts";
+const await_import = { fileDetailsCommand, parseFileDetails };
 
 test("parseFileList drops blanks and sentinels", () => {
   assert.deepEqual(parseFileList("src/a.ts\n\n.agent.question\nREADME.md\n"), ["src/a.ts", "README.md"]);
@@ -42,4 +43,22 @@ test("makeFileIndex caches per box within ttl and dedupes concurrent reads", asy
   await idx("box", "");
   assert.equal(calls, 2, "re-indexed after ttl");
   assert.match(fileListCommand(), /node_modules/);
+});
+
+test("fileDetailsCommand keeps the exclusions and prints size/mtime/relative path", () => {
+  const { fileDetailsCommand } = await_import;
+  const cmd = fileDetailsCommand();
+  assert.match(cmd, /node_modules/);
+  assert.ok(cmd.includes("-printf '%s\\t%T@\\t%P\\n'"));
+  // printf must come AFTER the last exclusion so it only fires on kept files.
+  assert.ok(cmd.lastIndexOf("-not") < cmd.indexOf("-printf"));
+});
+
+test("parseFileDetails reads size, mtime and path; skips malformed lines and sentinels", () => {
+  const { parseFileDetails } = await_import;
+  const out = "1024\t1788350000.123\tsrc/app.ts\nbadline\n99\t1788350001\t.agent.question\n0\t1788350002\tREADME.md\n";
+  assert.deepEqual(parseFileDetails(out), [
+    { path: "src/app.ts", bytes: 1024, mtime: 1788350000 },
+    { path: "README.md", bytes: 0, mtime: 1788350002 },
+  ]);
 });

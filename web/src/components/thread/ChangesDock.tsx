@@ -11,6 +11,26 @@ import { cn } from "@/lib/utils";
  * a chevron. Expanded: the list rises out of the bar (scrollable), each row a file with its mark,
  * path and counts; click opens the file pane. The dock stays put while the conversation scrolls.
  */
+/** The count rolls when it changes — a file landing mid-run is visible even in peripheral vision. */
+function PopCount({ value }: { value: number }) {
+  return (
+    <span className="relative inline-grid overflow-hidden text-center align-bottom" style={{ minWidth: "1ch", height: "1.2em" }}>
+      <AnimatePresence initial={false} mode="popLayout">
+        <motion.span
+          key={value}
+          initial={{ y: "0.9em", opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          exit={{ y: "-0.9em", opacity: 0 }}
+          transition={{ type: "spring", stiffness: 460, damping: 34 }}
+          className="tabular-nums"
+        >
+          {value}
+        </motion.span>
+      </AnimatePresence>
+    </span>
+  );
+}
+
 export function ChangesDock({ files, loading, onOpen, onRefresh, activePath }: { files: ChangedFile[]; loading?: boolean; onOpen: (f: ChangedFile) => void; onRefresh?: () => void; activePath?: string | null }) {
   const [open, setOpen] = React.useState(false);
   if (!files.length) return null;
@@ -61,7 +81,7 @@ export function ChangesDock({ files, loading, onOpen, onRefresh, activePath }: {
               ))}
             </span>
             <span className="text-foreground text-meta font-medium">
-              {files.length} {files.length === 1 ? "file" : "files"} changed
+              <PopCount value={files.length} /> {files.length === 1 ? "file" : "files"} changed
             </span>
             <span className="stamp flex items-center gap-1.5">
               {adds > 0 && <span className="text-ok">+{adds}</span>}

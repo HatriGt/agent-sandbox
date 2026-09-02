@@ -85,7 +85,10 @@ export function MachineList({
                 layout="position"
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: v.leaving ? 0.5 : 1, y: 0 }}
-                exit={{ opacity: 0, height: 0, marginTop: 0, marginBottom: 0 }}
+                // A destroyed machine dissolves — blur + drift + collapse — rather than snapping out;
+                // gone should feel like gone. (motion-safe: the blur is skipped under reduced motion
+                // by the global rule zeroing animation durations.)
+                exit={{ opacity: 0, filter: "blur(6px)", x: 12, height: 0, marginTop: 0, marginBottom: 0, transition: { duration: 0.4, ease: [0.4, 0, 1, 1] } }}
                 transition={{ type: "spring", stiffness: 500, damping: 40, mass: 0.8 }}
               >
                 {heads && (

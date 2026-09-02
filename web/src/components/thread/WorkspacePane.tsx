@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowDown, ArrowUp, Check, ChevronRight, Download, Files, FileCode2, FileDiff, GitBranch, GitCommitHorizontal, Loader2, Maximize2, Minimize2, PanelRight, RefreshCw, Search, Upload, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, ChevronRight, Download, Files, FileCode2, FileDiff, GitBranch, GitCommitHorizontal, Loader2, Maximize2, Minimize2, PanelRight, RefreshCw, Search, Table2, Upload, X } from "lucide-react";
 import { motion } from "motion/react";
 import { toast } from "sonner";
 import { api, ApiError, type ChangedFile, type GitStatus } from "@/lib/api";
@@ -10,6 +10,7 @@ import { CodeEditor, UnifiedDiff } from "@/components/CodeEditor";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DiffView } from "./FilePane";
+import { RecordsTable } from "./RecordsTable";
 import { cn } from "@/lib/utils";
 
 /**
@@ -22,7 +23,7 @@ import { cn } from "@/lib/utils";
  */
 type Node = { name: string; path: string; children?: Map<string, Node> };
 type Tab = { path: string; mode: "diff" | "edit"; draft?: string; dirty?: boolean; saving?: "saving" | "saved" };
-type View = "explorer" | "search" | "scm";
+type View = "explorer" | "search" | "scm" | "records";
 type Repo = { name: string; branch?: string };
 
 function buildTree(paths: string[]): Node {
@@ -238,7 +239,9 @@ export function WorkspacePane({ session, changes, open, onClose, onSaved, repos,
       <div className="flex min-h-0 flex-1">
         {/* Editor group */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          {activeTab ? (
+          {view === "records" ? (
+            <RecordsTable session={session} onOpen={(p) => (setView("explorer"), openPath(p))} />
+          ) : activeTab ? (
             <FileView key={activeTab.path} session={session} tab={activeTab} change={changeByPath.get(activeTab.path)} onMode={(m) => patchTab(activeTab.path, { mode: m })} onDraft={(d, dirty) => patchTab(activeTab.path, { draft: d, dirty })} onSaving={(s) => patchTab(activeTab.path, { saving: s })} onSaved={onSaved} />
           ) : (
             <EmptyEditor />
@@ -256,6 +259,9 @@ export function WorkspacePane({ session, changes, open, onClose, onSaved, repos,
                 <button type="button" role="radio" aria-checked={view === "scm"} onClick={() => setView("scm")} className={cn("flex h-6 cursor-pointer items-center gap-1 rounded px-2 text-micro font-medium", view === "scm" ? "bg-card text-foreground shadow-e1" : "text-muted-foreground hover:text-foreground")}>
                   <GitBranch className="size-3.5" /> Changes
                   {changes.length > 0 && <span className={cn("ml-0.5 rounded-full px-1.5 text-[9px] leading-4 font-semibold", view === "scm" ? "bg-live text-white" : "bg-live/20 text-live")}>{changes.length}</span>}
+                </button>
+                <button type="button" role="radio" aria-checked={view === "records"} onClick={() => setView("records")} className={cn("flex h-6 cursor-pointer items-center gap-1 rounded px-2 text-micro font-medium", view === "records" ? "bg-card text-foreground shadow-e1" : "text-muted-foreground hover:text-foreground")}>
+                  <Table2 className="size-3.5" /> All
                 </button>
               </div>
               <button type="button" onClick={() => (view === "scm" ? loadGit() : void loadTree())} aria-label="Refresh" className="text-muted-foreground hover:text-foreground ml-auto grid size-7 cursor-pointer place-items-center rounded-md">

@@ -53,7 +53,7 @@ import { WatchHub } from "./watch-hub.js";
 import { makeFleetReader } from "./fleet.js";
 import { Inbox, startInboxDelivery } from "./inbox.js";
 import { makeCredentialBroker } from "./broker.js";
-import { makeFileIndex } from "./files.js";
+import { FILE_INDEX_CAP, fileDetailsCommand, makeFileIndex, parseFileDetails } from "./files.js";
 import { exec as execInBox, execWithInput } from "./msb.js";
 import { loadStore, saveStore, pickDefaultAccount, upsertAccount, removeAccount, setDefaultAccount } from "./gh-token-store.js";
 import { probeToken } from "./gh-probe.js";
@@ -1690,6 +1690,14 @@ app.get("/tree.json", async (req: Request, res: Response) => {
     return;
   }
   try {
+    // details=1: sizes + mtimes for the workspace records table. Same exclusions, same cap, its own
+    // (short-lived) fetch — the plain path index stays the cheap default for @-mention search.
+    if (req.query.details === "1") {
+      const out = (await execInBox(cfg, session, fileDetailsCommand())).stdout;
+      const files = parseFileDetails(out);
+      res.json({ files, total: files.length, truncated: files.length >= FILE_INDEX_CAP });
+      return;
+    }
     res.json(await fileIndex(session, "", Number.POSITIVE_INFINITY));
   } catch (e) {
     failWith(res, e);

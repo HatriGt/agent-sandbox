@@ -25,6 +25,41 @@ export function fileListCommand(): string {
   );
 }
 
+/** Like fileListCommand but with size and mtime per line: `<bytes>\t<epoch>\t<path>`.
+ *  Written out in full (not derived) so the -printf action stays AFTER the exclusion predicates;
+ *  %P is the path relative to the search root, so no sed cleanup is needed. */
+export function fileDetailsCommand(): string {
+  return (
+    "cd /workspace 2>/dev/null && find . -type f " +
+    "-not -path './node_modules/*' -not -path '*/node_modules/*' " +
+    "-not -path './.git/*' -not -path '*/.git/*' " +
+    "-not -path '*/dist/*' -not -path '*/build/*' -not -path '*/.next/*' -not -path '*/target/*' " +
+    "-not -path '*/__pycache__/*' -not -path '*/.venv/*' -not -path '*/venv/*' " +
+    "-not -name '.agent.*' -not -name '*.lock' -not -name '*.log' " +
+    "-printf '%s\\t%T@\\t%P\\n' " +
+    `2>/dev/null | head -n ${FILE_INDEX_CAP}`
+  );
+}
+
+export interface FileDetail {
+  path: string;
+  bytes: number;
+  /** Unix seconds. */
+  mtime: number;
+}
+
+export function parseFileDetails(stdout: string): FileDetail[] {
+  const out: FileDetail[] = [];
+  for (const l of stdout.split("\n")) {
+    const m = l.match(/^(\d+)\t(\d+)(?:\.\d+)?\t(.+)$/);
+    if (!m) continue;
+    const path = m[3].trim();
+    if (!path || path.startsWith(".agent.")) continue;
+    out.push({ path, bytes: Number(m[1]), mtime: Number(m[2]) });
+  }
+  return out;
+}
+
 export function parseFileList(stdout: string): string[] {
   return stdout
     .split("\n")
