@@ -1191,10 +1191,11 @@ export async function resumeAgentTask(
   const env = [...agentEnvFlags(cfg, message, repos, creds?.primaryToken), ...secretEnvFlags(secrets)];
   await applyGitCredentials(cfg, box, creds);
   await trustWorkspace(cfg, box);
-  // The formatter is refreshed here too, not only at bootstrap: a box that was bootstrapped by an
-  // older controller keeps that build's formatter for the whole life of the sandbox otherwise, so a
-  // deploy that changes the log format would never reach a long-running thread's follow-up turns.
-  await Promise.all([installMcpConfig(cfg, box), installSkills(cfg, box), exec(cfg, box, streamFmtScript())]);
+  // The formatter AND the hooks are refreshed here too, not only at bootstrap: a box bootstrapped
+  // by an older controller keeps that build's formatter/guard for the whole life of the sandbox
+  // otherwise, so a deploy that changes the log format or a guard rule would never reach a
+  // long-running thread's follow-up turns.
+  await Promise.all([installMcpConfig(cfg, box), installSkills(cfg, box), exec(cfg, box, streamFmtScript()), exec(cfg, box, askHookScript())]);
   // The cwd is read from the box, not taken from `repos`: every resume path (dashboard follow-up,
   // inbox delivery, send-now, the credential broker, an elicited answer) only has a box id and used
   // to pass undefined here, which resumed a single-repo box in /workspace and lost the session.
