@@ -11,6 +11,7 @@ import { friendlyName, isSleeping, POLL_MS, threadTitle } from "@/lib/format";
 import { deadlineLabel, deadlineOf, displayState, fmtDuration } from "@/lib/lifecycle";
 import { runStats, toMarkdown } from "@/lib/transcript";
 import { splitReplies } from "@/lib/replies";
+import { parseMcpName } from "@/lib/mcp";
 import { setPrefill } from "@/lib/draft";
 import { RunSummary } from "./RunSummary";
 import { ThreadHeader } from "./ThreadHeader";
@@ -614,8 +615,16 @@ function groupTrace(events: TraceEvent[]): TraceGroup[] {
   // The board reads the WHOLE trace, not one snapshot: a step's evidence is the work that happened
   // between the snapshot that started it and the one that ended it.
   const board = deriveTaskBoard(events);
+  // First contact with each MCP server gets a lifecycle hairline — so a server that SHOULD appear
+  // but never does (silently dropped at handshake) is visible by absence.
+  const seenServers = new Set<string>();
   for (const e of events) {
     if (e.kind === "tool") {
+      const mcp = parseMcpName(e.name);
+      if (mcp && !seenServers.has(mcp.server)) {
+        seenServers.add(mcp.server);
+        out.push({ kind: "lifecycle", label: `connected to ${mcp.server}`, detail: "MCP" });
+      }
       const last = out[out.length - 1];
       if (last?.kind === "tools") last.events.push(e);
       else out.push({ kind: "tools", events: [e] });

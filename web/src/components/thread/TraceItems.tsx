@@ -13,6 +13,8 @@ import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { ATTACHMENT_RE, useSession } from "@/lib/session-context";
 import { SkillMark } from "@/lib/skillGlyph";
+import { parseMcpName, serverHue } from "@/lib/mcp";
+import { McpItem } from "./McpItem";
 import { Lightbox } from "@/components/ui/lightbox";
 
 /**
@@ -46,6 +48,8 @@ function lineCount(result: string): number {
 }
 
 function ToolItem({ event, live }: { event: ToolEvent; live?: boolean }) {
+  const mcp = parseMcpName(event.name);
+  if (mcp) return <McpItem event={event} call={mcp} hue={serverHue(mcp.server)} live={live} />;
   return SHELL_TOOLS.has(event.name) ? <ShellItem event={event} live={live} /> : <StepItem event={event} live={live} />;
 }
 
@@ -57,8 +61,16 @@ function ToolItem({ event, live }: { event: ToolEvent; live?: boolean }) {
  */
 export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolean }) {
   // Results worth reading (a test run, a PR URL) must not hide behind the fold: open those groups.
+  // …and a FAILED external (MCP) call must never hide behind the fold: a server silently missing
+  // or erroring is precisely the thing an operator otherwise cannot see.
   const notable = React.useMemo(
-    () => events.some((e) => !!parseTestReport(e.result) || /github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/.test(e.result ?? "")),
+    () =>
+      events.some(
+        (e) =>
+          !!parseTestReport(e.result) ||
+          /github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/.test(e.result ?? "") ||
+          (!!e.failed && !!parseMcpName(e.name))
+      ),
     [events]
   );
   const [open, setOpen] = React.useState(notable);
@@ -74,11 +86,18 @@ export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolea
   const files = new Set(events.filter((e) => /^(write|edit|multiedit|notebookedit)$/i.test(e.name) && e.arg).map((e) => e.arg!.split(/\s/)[0]));
   const commands = events.filter((e) => SHELL_TOOLS.has(e.name)).length;
   const reads = events.filter((e) => /^(read|glob|grep|search|ls|webfetch|websearch)$/i.test(e.name)).length;
+  // External calls, grouped by server — "3 hana-qa calls" is a headline fact, not a footnote.
+  const mcpByServer = new Map<string, number>();
+  for (const e of events) {
+    const m = parseMcpName(e.name);
+    if (m) mcpByServer.set(m.server, (mcpByServer.get(m.server) ?? 0) + 1);
+  }
   const facts = [
     `${events.length} steps`,
     files.size ? `${files.size} ${files.size === 1 ? "file" : "files"}` : null,
     commands ? `${commands} ${commands === 1 ? "command" : "commands"}` : null,
-    !files.size && !commands && reads ? `${reads} lookups` : null,
+    ...[...mcpByServer].map(([srv, n]) => `${n} ${srv} ${n === 1 ? "call" : "calls"}`),
+    !files.size && !commands && !mcpByServer.size && reads ? `${reads} lookups` : null,
   ].filter(Boolean) as string[];
 
   return (
