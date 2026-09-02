@@ -4,28 +4,15 @@ import { motion } from "motion/react";
 import { api, type SkillView } from "@/lib/api";
 import { useCached } from "@/lib/cache";
 import { SkillMark } from "@/lib/skillGlyph";
+import type { SlashState } from "@/lib/slash";
 import { cn } from "@/lib/utils";
 
 /**
- * `/` skill invocation, the slash-command way: a message that STARTS with `/` opens the list of the
- * user's enabled skills (from Integrations → Skills), narrowing as you type; ↑/↓ moves, Enter/Tab
- * inserts `/name `, Esc dismisses. The token is sent as-is — the in-box agent is instructed to invoke
- * the matching skill. The menu only exists while something matches, so typing a path like
- * `/workspace/...` just types.
+ * `/` skill invocation, the slash-command way: a `/` starting the message OR any word opens the
+ * list of the user's enabled skills (from Integrations → Skills), narrowing as you type; ↑/↓ moves,
+ * Enter/Tab inserts the skill as a chip, Esc dismisses. Token detection lives in `@/lib/slash`
+ * (unit-tested); the menu only exists while something matches, so typing `/workspace/...` just types.
  */
-export interface SlashState {
-  /** The skill-name query: the first token, without the leading slash. */
-  query: string;
-}
-
-/** Active `/query` at the START of the message with the caret still inside the first token, or null. */
-export function slashAt(value: string, caret: number): SlashState | null {
-  if (!value.startsWith("/")) return null;
-  const ws = value.search(/\s/);
-  const end = ws === -1 ? value.length : ws;
-  if (caret > end) return null;
-  return { query: value.slice(1, end) };
-}
 
 export function SkillMenu({
   state,
@@ -111,6 +98,16 @@ export function SkillMenu({
  * focusing) it floats a card with the full playbook: what it is for and the instructions the agent
  * will follow this turn. The X removes it without touching what was typed.
  */
+/** First prose paragraph of the playbook, markdown noise stripped — enough to preview, not a dump. */
+function snippet(content: string): string {
+  const para = content
+    .replace(/^---[\s\S]*?---\s*/, "") // frontmatter
+    .split(/\n\s*\n/)
+    .map((p) => p.replace(/^#+\s*/gm, "").replace(/[*_`>#]/g, "").trim())
+    .find((p) => p.length > 0);
+  return (para ?? "").slice(0, 220);
+}
+
 export function SkillChip({ skill, onRemove }: { skill: SkillView; onRemove: () => void }) {
   return (
     <span className="group/chip relative inline-flex">
@@ -143,19 +140,17 @@ export function SkillChip({ skill, onRemove }: { skill: SkillView; onRemove: () 
           "group-focus-within/chip:pointer-events-auto group-focus-within/chip:translate-y-0 group-focus-within/chip:opacity-100"
         )}
       >
-        <span className="bg-popover text-popover-foreground block overflow-hidden rounded-xl border shadow-e3">
-          <span className="flex items-center gap-2.5 border-b px-3 py-2.5">
-            <SkillMark name={skill.name} size={16} className="text-muted-foreground" />
-            <span className="min-w-0">
-              <span className="stamp text-foreground block truncate text-meta font-semibold">/{skill.name}</span>
-              <span className="text-muted-foreground block truncate text-micro">runs as a playbook this turn</span>
-            </span>
+        <span className="bg-popover text-popover-foreground block overflow-hidden rounded-lg border shadow-e3">
+          <span className="flex items-center gap-2 px-2.5 py-2">
+            <SkillMark name={skill.name} size={14} className="text-muted-foreground shrink-0" />
+            <span className="stamp text-foreground truncate text-meta font-semibold">/{skill.name}</span>
+            <span className="text-muted-foreground ml-auto shrink-0 text-micro">playbook</span>
           </span>
-          <span className="block px-3 py-2.5">
-            <span className="text-foreground block text-micro leading-relaxed">{skill.description}</span>
-            <span className="text-muted-foreground mt-2 line-clamp-6 block font-mono text-[11px] leading-relaxed whitespace-pre-wrap">
-              {skill.content}
-            </span>
+          <span className="text-muted-foreground block border-t px-2.5 py-2 text-micro leading-snug">
+            {skill.description}
+            {snippet(skill.content) && (
+              <span className="text-muted-foreground/70 mt-1.5 line-clamp-3 block leading-snug">{snippet(skill.content)}</span>
+            )}
           </span>
         </span>
       </span>

@@ -148,11 +148,25 @@ function maskMap(m: Record<string, string> | undefined): Record<string, string> 
   return Object.fromEntries(Object.entries(m).map(([k, v]) => [k, isSecretKey(k) ? mask(v) : v]));
 }
 
-/** What the dashboard sees: secret VALUES masked, everything else as stored. */
+/** What the dashboard sees: secret VALUES masked, everything else as stored — plus, when a header
+ *  carries a JWT, its expiry, so a dead token is visible in the LIST instead of only after a run
+ *  silently misses its tools. */
 export function viewServers(store: McpStore) {
   return Object.values(store.servers)
     .sort((a, b) => a.name.localeCompare(b.name))
-    .map((s) => ({ ...s, env: maskMap(s.env), headers: maskMap(s.headers) }));
+    .map((s) => {
+      let tokenExpiresAt: string | undefined;
+      let tokenExpired: boolean | undefined;
+      for (const v of Object.values(s.headers ?? {})) {
+        const j = jwtExpiry(v);
+        if (j) {
+          tokenExpiresAt = j.exp.toISOString();
+          tokenExpired = j.expired;
+          break;
+        }
+      }
+      return { ...s, env: maskMap(s.env), headers: maskMap(s.headers), ...(tokenExpiresAt ? { tokenExpiresAt, tokenExpired } : {}) };
+    });
 }
 
 /**
@@ -200,6 +214,109 @@ export function replaceFromJson(store: McpStore, json: string, now = Date.now())
     servers[s.name] = s;
   }
   return { servers };
+}
+
+/* ───────────────────────── health check ───────────────────────── */
+
+export interface McpProbeResult {
+  ok: boolean;
+  status?: number;
+  /** Human-readable diagnosis — shown verbatim on the dashboard. */
+  detail: string;
+}
+
+/**
+ * If a header value carries a JWT whose `exp` is in the past, say so specifically — an expired
+ * static token is by far the most common way an http MCP server silently dies (the in-box claude
+ * drops servers that fail to connect, so the agent just "doesn't have" the tools).
+ */
+export function jwtExpiry(headerValue: string): { exp: Date; expired: boolean } | null {
+  const m = /(?:^|\s)([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)\s*$/.exec(headerValue);
+  if (!m) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(m[1].split(".")[1], "base64url").toString()) as { exp?: number };
+    if (typeof payload.exp !== "number") return null;
+    const exp = new Date(payload.exp * 1000);
+    return { exp, expired: exp.getTime() < Date.now() };
+  } catch {
+    return null;
+  }
+}
+
+/** Shape a probe outcome into the message the dashboard shows. Pure — testable without a network. */
+export function describeProbe(s: McpServer, r: { status?: number; body?: string; error?: string }): McpProbeResult {
+  const tokenNote = (() => {
+    for (const v of Object.values(s.headers ?? {})) {
+      const j = jwtExpiry(v);
+      if (j?.expired) return ` The stored token EXPIRED ${j.exp.toISOString()} — paste a fresh one.`;
+    }
+    return "";
+  })();
+  if (r.error) return { ok: false, detail: `Could not reach ${s.url}: ${r.error}${tokenNote}` };
+  const status = r.status ?? 0;
+  if (status === 401 || status === 403)
+    return { ok: false, status, detail: `${status} unauthorized${r.body ? ` — ${r.body.slice(0, 200)}` : ""}.${tokenNote || " Check the Authorization header."}` };
+  if (status >= 400) return { ok: false, status, detail: `HTTP ${status}${r.body ? ` — ${r.body.slice(0, 200)}` : ""}` };
+  return { ok: true, status, detail: "Connected — the server answered the MCP initialize handshake." };
+}
+
+/**
+ * Test one server the way the in-box claude would: for http/sse, POST an `initialize` and read the
+ * verdict; for stdio there is nothing to call from here, so only the definition is sanity-checked.
+ * Runs on the CONTROLLER (the dashboard's CSP has connect-src 'self', and the box may not exist yet).
+ */
+/**
+ * The probe runs ON the controller with a tenant-supplied URL — classic SSRF shape. Refuse anything
+ * that isn't a public https host: loopback, link-local, RFC1918 literals and bare hostnames would
+ * let a tenant poke the controller's own API or the host network from inside the container.
+ */
+export function isProbeableUrl(raw: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== "https:") return false;
+  const h = u.hostname.toLowerCase();
+  if (!h.includes(".")) return false; // localhost, bare container names
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(h)) {
+    const [a, b] = h.split(".").map(Number);
+    if (a === 127 || a === 10 || a === 0 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254)) return false;
+  }
+  if (h === "host.docker.internal" || h.endsWith(".local") || h.endsWith(".internal")) return false;
+  if (h.startsWith("[") || h.includes(":")) return false; // IPv6 literals: not needed, hard to vet
+  return true;
+}
+
+export async function probeMcpServer(s: McpServer, timeoutMs = 8000): Promise<McpProbeResult> {
+  if (s.type === "stdio") return { ok: true, detail: "stdio server — starts inside each sandbox; nothing to test from here." };
+  if (!s.url || !isProbeableUrl(s.url)) return { ok: false, detail: "Only public https URLs can be tested from here (the sandbox itself may still reach it)." };
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    const res = await fetch(s.url!, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+        ...(s.headers ?? {}),
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "agent-sandbox-health", version: "1" } },
+      }),
+      signal: ac.signal,
+    });
+    const body = await res.text().catch(() => "");
+    return describeProbe(s, { status: res.status, body });
+  } catch (e) {
+    return describeProbe(s, { error: ac.signal.aborted ? `timed out after ${Math.round(timeoutMs / 1000)}s` : (e as Error).message });
+  } finally {
+    clearTimeout(t);
+  }
 }
 
 /* ───────────────────────────── IO ───────────────────────────── */

@@ -64,7 +64,7 @@ import { loadSkillStore, saveSkillStore, normalizeSkill, viewSkills, type SkillD
 import { listRepoSkills, fetchRepoFile } from "./github-skills.js";
 import { listClaims, listKept, markKept, unmarkKept } from "./claims.js";
 import { makeRedactor, isPlumbingError } from "./redact.js";
-import { isSecretKey } from "./mcp-store.js";
+import { isSecretKey, probeMcpServer } from "./mcp-store.js";
 import type { WatchSnapshot } from "./monitor.js";
 import { listChanges, readDiff, fetchPull, forgetPull } from "./changes.js";
 import { loadRunMetas, saveRunMeta, forgetRunMeta } from "./run-memory.js";
@@ -1298,6 +1298,25 @@ app.post("/mcp-servers.json", async (req: Request, res: Response) => {
     res.json({ servers: viewServers(store), config: toEditableConfig(store) });
   } catch (e) {
     res.status(400).json({ error: clientError(e) });
+  }
+});
+
+// Test one MCP server from the controller: the same `initialize` handshake the in-box claude does.
+// This is how the operator learns WHY a server is missing from the agent's tool list (claude drops
+// servers that fail to connect, silently) — most often an expired static token, called out by name.
+app.post("/mcp-servers/test.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const name = String((req.body as Record<string, unknown> | undefined)?.name ?? "");
+  try {
+    const store = await loadMcpStore(cfg);
+    const server = store.servers[name];
+    if (!server) {
+      res.status(404).json({ error: "no such server" });
+      return;
+    }
+    res.json(await probeMcpServer(server));
+  } catch (e) {
+    failWith(res, e);
   }
 });
 

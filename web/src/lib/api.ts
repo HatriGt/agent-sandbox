@@ -97,6 +97,9 @@ export interface McpServersResponse {
 export interface McpServerView {
   name: string;
   type: McpTransport;
+  /** Set when a header carries a JWT: its expiry, so a dead token shows in the list. */
+  tokenExpiresAt?: string;
+  tokenExpired?: boolean;
   command?: string;
   args?: string[];
   url?: string;
@@ -530,6 +533,8 @@ export const api = {
   mcpServers: (signal?: AbortSignal) =>
     fetch(url("/mcp-servers.json"), { headers: authHeaders, signal }).then(parse<McpServersResponse>),
   mcpMutate: (body: Record<string, unknown>) => post<McpServersResponse>("/mcp-servers.json", body),
+  /** One server's health: the same MCP initialize handshake the in-box claude does at startup. */
+  mcpTest: (name: string) => post<{ ok: boolean; status?: number; detail: string }>("/mcp-servers/test.json", { name }),
   skills: (signal?: AbortSignal) => fetch(url("/skills.json"), { headers: authHeaders, signal }).then(parse<SkillsResponse>),
   skillMutate: (body: Record<string, unknown>) => post<SkillsResponse>("/skills.json", body),
   /**

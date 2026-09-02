@@ -10,6 +10,7 @@ import { SessionContext } from "@/lib/session-context";
 import { friendlyName, isSleeping, POLL_MS, threadTitle } from "@/lib/format";
 import { deadlineLabel, deadlineOf, displayState, fmtDuration } from "@/lib/lifecycle";
 import { runStats, toMarkdown } from "@/lib/transcript";
+import { splitReplies } from "@/lib/replies";
 import { setPrefill } from "@/lib/draft";
 import { RunSummary } from "./RunSummary";
 import { ThreadHeader } from "./ThreadHeader";
@@ -165,10 +166,19 @@ export function Thread({
     const t = window.setInterval(refreshChanges, 20_000);
     return () => window.clearInterval(t);
   }, [box.runState, sleeping, refreshChanges]);
+  // Optimistic echoes vs the durable log. The log is a bounded TAIL: an old ⟦you⟧ line eventually
+  // scrolls out of the window, so an echo must be retired the FIRST time its persisted copy is seen
+  // — never resurrected later when the tail no longer contains it (the "ghost message" bug: a
+  // message sent hours ago reappearing at the bottom of the thread as if just sent).
+  const settledRef = React.useRef(new Map<string, Set<string>>());
   const pendingReplies = React.useMemo(() => {
+    const settled = settledRef.current.get(box.name) ?? new Set<string>();
+    settledRef.current.set(box.name, settled);
     const persisted = new Set(events.filter((e) => e.kind === "you").map((e) => e.text.trim()));
-    return replies.filter((r) => !persisted.has(r.trim()));
-  }, [replies, events]);
+    const { pending, nowSettled } = splitReplies(replies, persisted, settled);
+    for (const r of nowSettled) settled.add(r.trim());
+    return pending;
+  }, [replies, events, box.name]);
   // The fleet poll is authoritative for a sleeping box (its stream cannot connect).
   const runState = sleeping ? box.runState : snap?.runState ?? box.runState;
   const question = sleeping ? box.question : snap?.question ?? box.question;

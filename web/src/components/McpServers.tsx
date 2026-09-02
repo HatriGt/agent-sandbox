@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Braces, Check, ChevronDown, Copy, KeyRound, List, Loader2, Plus, RotateCcw, Search, Trash2, WandSparkles, X } from "lucide-react";
+import { Braces, Check, ChevronDown, Copy, KeyRound, List, Loader2, Plus, RotateCcw, Search, Stethoscope, Trash2, WandSparkles, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
 import { api, type McpServersResponse, type McpServerView, type McpTransport } from "@/lib/api";
@@ -183,6 +183,8 @@ function Empty({ title, line }: { title: string; line: string }) {
 
 function ServerRow({ server: s, open, onToggleOpen, onMutate }: { server: McpServerView; open: boolean; onToggleOpen: () => void; onMutate: (b: Record<string, unknown>, ok?: string) => Promise<unknown> }) {
   const [busy, setBusy] = React.useState(false);
+  const [testing, setTesting] = React.useState(false);
+  const [health, setHealth] = React.useState<{ ok: boolean; detail: string } | null>(null);
   const target = s.type === "stdio" ? [s.command, ...(s.args ?? [])].join(" ") : s.url ?? "";
   const envN = Object.keys(s.env ?? {}).length;
   const hdrN = Object.keys(s.headers ?? {}).length;
@@ -192,12 +194,30 @@ function ServerRow({ server: s, open, onToggleOpen, onMutate }: { server: McpSer
       .catch((e: unknown) => toast.error("Could not update", { description: e instanceof Error ? e.message : String(e) }))
       .finally(() => setBusy(false));
   };
+  const runTest = () => {
+    setTesting(true);
+    setHealth(null);
+    api
+      .mcpTest(s.name)
+      .then((r) => setHealth(r))
+      .catch((e: unknown) => setHealth({ ok: false, detail: e instanceof Error ? e.message : String(e) }))
+      .finally(() => setTesting(false));
+  };
   return (
-    <div className={cn("group flex items-center gap-3 px-4 py-2.5 transition-colors", open ? "bg-muted/40" : "hover:bg-muted/40")}>
+    <div className={cn("group px-4 py-2.5 transition-colors", open ? "bg-muted/40" : "hover:bg-muted/40")}>
+    <div className="flex items-center gap-3">
       <button type="button" onClick={onToggleOpen} aria-expanded={open} className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 text-left">
         <BrandGlyph hint={`${s.name} ${target}`} transport={s.type} className={cn(!s.enabled && "opacity-40 grayscale")} />
         <span className={cn("shrink-0 text-body font-medium", s.enabled ? "text-foreground" : "text-muted-foreground")}>{s.name}</span>
         <span className="label text-muted-foreground shrink-0 rounded border px-1 py-px">{s.type}</span>
+        {s.tokenExpired && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="label bg-destructive/10 text-destructive shrink-0 rounded px-1 py-px">token expired</span>
+            </TooltipTrigger>
+            <TooltipContent>The stored token expired {new Date(s.tokenExpiresAt!).toLocaleString()} — the agent silently loses this server. Paste a fresh one.</TooltipContent>
+          </Tooltip>
+        )}
         <span className="stamp text-muted-foreground min-w-0 flex-1 truncate" title={target}>
           {target}
         </span>
@@ -213,12 +233,27 @@ function ServerRow({ server: s, open, onToggleOpen, onMutate }: { server: McpSer
       </button>
       <Tooltip>
         <TooltipTrigger asChild>
+          <button type="button" onClick={runTest} disabled={testing} aria-label={`Test ${s.name}`} className="text-muted-foreground hover:text-foreground hover:bg-muted grid size-7 shrink-0 cursor-pointer place-items-center rounded-md transition-colors">
+            {testing ? <Loader2 className="size-3.5 animate-spin" /> : <Stethoscope className="size-3.5" />}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>Test the connection — the same handshake the agent does at startup</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
           <button type="button" role="switch" aria-checked={s.enabled} disabled={busy} onClick={toggle} className={cn("relative h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors", s.enabled ? "bg-live" : "bg-muted-foreground/40")} aria-label={s.enabled ? `Disable ${s.name}` : `Enable ${s.name}`}>
             <span className={cn("bg-card absolute top-0.5 size-4 rounded-full shadow-e1 transition-[left]", s.enabled ? "left-[1.125rem]" : "left-0.5")} />
           </button>
         </TooltipTrigger>
         <TooltipContent>{s.enabled ? "On — given to every new run and turn" : "Off — kept, not given to the agent"}</TooltipContent>
       </Tooltip>
+    </div>
+    {health && (
+      <p role="status" className={cn("mt-1.5 flex items-start gap-1.5 pl-7 text-micro", health.ok ? "text-live" : "text-destructive")}>
+        {health.ok ? <Check className="mt-px size-3 shrink-0" aria-hidden /> : <X className="mt-px size-3 shrink-0" aria-hidden />}
+        <span className="min-w-0">{health.detail}</span>
+      </p>
+    )}
     </div>
   );
 }

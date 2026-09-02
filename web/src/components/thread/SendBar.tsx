@@ -10,7 +10,8 @@ import { Button } from "@/components/ui/button";
 import { PromptInput, PromptInputActions, PromptInputTextarea } from "@/components/ui/prompt-input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { MentionMenu, expandMentions, mentionAt, type MentionState } from "./MentionMenu";
-import { SkillChip, SkillMenu, slashAt, type SlashState } from "./SkillMenu";
+import { SkillChip, SkillMenu } from "./SkillMenu";
+import { slashAt, stripSlashToken, typedSkillToken, type SlashState } from "@/lib/slash";
 import { useCached } from "@/lib/cache";
 import type { SkillView } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -123,31 +124,37 @@ export function SendBar({
     const caret = el?.selectionStart ?? next.length;
     setMention(mentionAt(next, caret));
     setSlash(skill ? null : slashAt(next, caret));
-    // Typing a full `/name ` by hand converts to the chip the moment the space lands — same result
-    // as picking from the menu, so both paths look identical in the composer.
+    // Typing a full `/name ` by hand — at the start or mid-message — converts to the chip the
+    // moment the space lands, same as picking from the menu.
     if (!skill) {
-      const m = next.match(/^\/([a-z0-9][a-z0-9-]*)\s/);
-      const hit = m ? findSkill(m[1]) : null;
-      if (hit) {
+      const t = typedSkillToken(next);
+      const hit = t ? findSkill(t.name) : null;
+      if (hit && t) {
         setSkill(hit);
-        setValue(next.slice(m![0].length));
+        setValue(next.slice(0, t.start) + next.slice(t.start + t.length));
         setSlash(null);
       }
     }
   };
 
   const pickSkill = (name: string) => {
-    // The `/query` token becomes a chip; whatever follows stays as the message.
+    // The `/query` token — wherever it sits — becomes a chip; the rest stays as the message.
     const hit = findSkill(name);
-    const rest = value.replace(/^\/\S*\s?/, "");
+    const at = slash?.start ?? 0;
+    const stripped = stripSlashToken(value, at);
     if (hit) {
       setSkill(hit);
-      setValue(rest);
+      setValue(stripped.value);
     } else {
-      setValue(`/${name} ${rest}`);
+      setValue(value.slice(0, at) + `/${name} ` + stripped.value.slice(stripped.caret));
     }
     setSlash(null);
-    requestAnimationFrame(() => textarea()?.focus());
+    requestAnimationFrame(() => {
+      const t = textarea();
+      if (!t) return;
+      t.focus();
+      t.setSelectionRange(stripped.caret, stripped.caret);
+    });
   };
 
   const pickFile = (path: string) => {
