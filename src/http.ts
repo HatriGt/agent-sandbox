@@ -1504,10 +1504,20 @@ app.post("/pr/merge.json", async (req: Request, res: Response) => {
     return;
   }
   try {
+    // `gh` in the box has NO persisted auth (tokens are per-exec env only, by design), so the merge
+    // must carry the owner's token the same way the ask lane does. Without it every merge failed
+    // with "gh auth login required".
+    const creds = await withOwner(ownerOf(db, session) ?? null, () => resolveCredsForBox(cfg, session)).catch(() => undefined);
+    if (!creds?.primaryToken) {
+      res.status(422).json({ error: "No GitHub account connected for this machine's owner — connect one in Integrations, then retry the merge." });
+      return;
+    }
     // `repo` is quoted rather than relied on to be metacharacter-free: the validating regex above
     // and this interpolation are far apart, and only one of them has to loosen for the other to
     // become a remote shell.
-    const r = await execInBox(cfg, session, `gh pr merge ${Number(number)} --repo ${shellQuote(repo)} --merge 2>&1`);
+    const r = await execInBox(cfg, session, `gh pr merge ${Number(number)} --repo ${shellQuote(repo)} --merge 2>&1`, {
+      env: { GH_TOKEN: creds.primaryToken, GITHUB_TOKEN: creds.primaryToken },
+    });
     forgetPull(repo, Number(number));
     res.json({ ok: true, output: redactor.redact((r.stdout ?? "").trim().slice(-600)) });
   } catch (e) {

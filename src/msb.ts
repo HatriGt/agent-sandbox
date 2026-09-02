@@ -163,8 +163,11 @@ export async function createBox(cfg: Config, opts: CreateBoxOpts): Promise<void>
 
 
 /** Run a shell command inside the box (no cred env). */
-export async function exec(cfg: Config, box: string, sh: string) {
-  return msb(cfg, ["exec", box, "--", "sh", "-lc", sh]);
+export async function exec(cfg: Config, box: string, sh: string, opts?: { env?: Record<string, string> }) {
+  // Env rides as `msb exec -e K=V` flags — per-invocation only, nothing persists in the box. Used to
+  // hand `gh` a token for one command (PR merge) the same way the ask lane does.
+  const envFlags = Object.entries(opts?.env ?? {}).flatMap(([k, v]) => ["-e", `${k}=${v}`]);
+  return msb(cfg, ["exec", ...envFlags, box, "--", "sh", "-lc", sh]);
 }
 
 /**

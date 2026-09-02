@@ -128,15 +128,25 @@ export function PullRequestFloat({ session, url, repo, number }: { session: stri
   );
 }
 
-function verdict(info: PullInfo | null) {
+function verdict(info: PullInfo | null): {
+  title: string;
+  short: string;
+  icon: React.ComponentType<{ className?: string; "aria-hidden"?: boolean }>;
+  header: string;
+  chip: string;
+  text: string;
+  canMerge: boolean;
+  /** One sentence explaining WHY merge is unavailable, shown under the header for open PRs. */
+  blocked?: string;
+} {
   if (!info) return { title: "Pull request", short: "PR", icon: GitPullRequest, header: "bg-muted text-foreground", chip: "bg-muted text-muted-foreground", text: "text-muted-foreground", canMerge: false };
   if (info.state === "merged") return { title: "Merged", short: "merged", icon: GitMerge, header: "bg-sleep/10 text-sleep", chip: "bg-sleep/20 text-sleep", text: "text-sleep", canMerge: false };
   if (info.state === "closed") return { title: "Closed", short: "closed", icon: GitPullRequestClosed, header: "bg-destructive/8 text-destructive", chip: "bg-destructive/10 text-destructive", text: "text-destructive", canMerge: false };
-  if (info.state === "draft") return { title: "Draft", short: "draft", icon: GitPullRequestDraft, header: "bg-muted text-foreground", chip: "bg-muted text-muted-foreground", text: "text-muted-foreground", canMerge: false };
-  if (info.checks && info.checks.failure > 0) return { title: "Checks failing", short: "checks failing", icon: CircleX, header: "bg-destructive/8 text-destructive", chip: "bg-destructive/10 text-destructive", text: "text-destructive", canMerge: false };
-  if (info.reviewDecision === "changes_requested") return { title: "Changes requested", short: "changes requested", icon: GitPullRequest, header: "bg-attention/20 text-attention-text", chip: "bg-attention/20 text-attention-text", text: "text-attention-text", canMerge: false };
-  if (info.checks && info.checks.pending > 0) return { title: "Checks running", short: "checks running", icon: CircleDashed, header: "bg-live/10 text-live", chip: "bg-live/10 text-live", text: "text-live", canMerge: false };
-  if (info.mergeable === false) return { title: "Merge conflicts", short: "conflicts", icon: GitPullRequest, header: "bg-attention/20 text-attention-text", chip: "bg-attention/20 text-attention-text", text: "text-attention-text", canMerge: false };
+  if (info.state === "draft") return { title: "Draft", short: "draft", icon: GitPullRequestDraft, header: "bg-muted text-foreground", chip: "bg-muted text-muted-foreground", text: "text-muted-foreground", canMerge: false, blocked: "Drafts can't merge — mark it ready for review on GitHub first." };
+  if (info.checks && info.checks.failure > 0) return { title: "Checks failing", short: "checks failing", icon: CircleX, header: "bg-destructive/8 text-destructive", chip: "bg-destructive/10 text-destructive", text: "text-destructive", canMerge: false, blocked: `${info.checks.failure} ${info.checks.failure === 1 ? "check is" : "checks are"} failing — fix or re-run them, then merge here.` };
+  if (info.reviewDecision === "changes_requested") return { title: "Changes requested", short: "changes requested", icon: GitPullRequest, header: "bg-attention/20 text-attention-text", chip: "bg-attention/20 text-attention-text", text: "text-attention-text", canMerge: false, blocked: "A reviewer requested changes — push an update or get a re-approval." };
+  if (info.checks && info.checks.pending > 0) return { title: "Checks running", short: "checks running", icon: CircleDashed, header: "bg-live/10 text-live", chip: "bg-live/10 text-live", text: "text-live", canMerge: false, blocked: `${info.checks.pending} ${info.checks.pending === 1 ? "check is" : "checks are"} still running — the Merge button appears when they pass.` };
+  if (info.mergeable === false) return { title: "Merge conflicts", short: "conflicts", icon: GitPullRequest, header: "bg-attention/20 text-attention-text", chip: "bg-attention/20 text-attention-text", text: "text-attention-text", canMerge: false, blocked: "The branch conflicts with its base — ask the agent to rebase and resolve, then merge." };
   return { title: "Ready to merge", short: "ready to merge", icon: GitPullRequest, header: "bg-ok/10 text-ok", chip: "bg-ok/20 text-ok", text: "text-ok", canMerge: true };
 }
 
@@ -147,6 +157,10 @@ function reviewLabel(s: string) {
 function Header({ info, v, url, session, repo, number, onMerged, onClose }: { info: PullInfo | null; v: ReturnType<typeof verdict>; url: string; session: string; repo: string; number: number; onMerged: () => void; onClose: () => void }) {
   const [armed, setArmed] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
+  // A failed merge's reason STAYS in the card (gh's own message, e.g. "not mergeable: the base
+  // branch policy prohibits the merge") — a vanishing toast made the button look simply broken.
+  const [error, setError] = React.useState<string | null>(null);
+  const [merged, setMerged] = React.useState(false);
   React.useEffect(() => {
     if (!armed) return;
     const t = window.setTimeout(() => setArmed(false), 5000);
@@ -155,12 +169,14 @@ function Header({ info, v, url, session, repo, number, onMerged, onClose }: { in
   const merge = async () => {
     if (!armed) return setArmed(true);
     setBusy(true);
+    setError(null);
     try {
       await api.mergePull(session, repo, number);
+      setMerged(true);
       toast.success(`Merged #${number}`);
       onMerged();
     } catch (e) {
-      toast.error("Merge failed", { description: e instanceof Error ? e.message : String(e) });
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
       setArmed(false);
@@ -168,29 +184,45 @@ function Header({ info, v, url, session, repo, number, onMerged, onClose }: { in
   };
   const Icon = v.icon;
   return (
-    <div className={cn("flex items-center gap-2.5 rounded-xl px-3 py-2.5", v.header)}>
-      <div className="min-w-0 flex-1">
-        <p className="text-body font-semibold">{v.title}</p>
-        <p className="stamp flex items-center gap-1.5 opacity-85">
-          <Icon className="size-3" aria-hidden />#{number}
-          {info?.checks?.total ? <span>· {info.checks.total} checks</span> : <span className="truncate">· {repo.split("/")[1]}</span>}
-        </p>
+    <>
+      <div className={cn("flex items-center gap-2.5 rounded-xl px-3 py-2.5", merged ? "bg-sleep/10 text-sleep" : v.header)}>
+        <div className="min-w-0 flex-1">
+          <p className="text-body font-semibold">{merged ? "Merged" : v.title}</p>
+          <p className="stamp flex items-center gap-1.5 opacity-85">
+            <Icon className="size-3" aria-hidden />#{number}
+            {info?.checks?.total ? <span>· {info.checks.total} checks</span> : <span className="truncate">· {repo.split("/")[1]}</span>}
+          </p>
+        </div>
+        <a href={url} target="_blank" rel="noreferrer noopener" aria-label="Open on GitHub" className="hover:bg-card/60 grid size-8 shrink-0 cursor-pointer place-items-center rounded-md transition-colors">
+          <Globe className="size-4" aria-hidden />
+        </a>
+        {merged ? (
+          <motion.span initial={{ scale: 0.4, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring", stiffness: 420, damping: 22 }} className="bg-sleep/20 text-sleep grid size-8 shrink-0 place-items-center rounded-md">
+            <GitMerge className="size-4" aria-hidden />
+          </motion.span>
+        ) : v.canMerge ? (
+          <Button size="sm" onClick={() => void merge()} disabled={busy} className={cn("bg-ok hover:bg-ok/80 text-white", armed && "ring-ok/40 ring-2")}>
+            {busy ? <Loader2 className="animate-spin" /> : <GitMerge />}
+            {busy ? "Merging…" : armed ? "Confirm merge" : "Merge"}
+          </Button>
+        ) : (
+          <button type="button" onClick={onClose} aria-label="Close" className="hover:bg-card/60 grid size-8 shrink-0 cursor-pointer place-items-center rounded-md transition-colors">
+            {info?.state === "merged" ? <Check className="size-4" aria-hidden /> : <X className="size-4" aria-hidden />}
+          </button>
+        )}
+        {url.length === 0 && <ArrowUpRight className="hidden" />}
       </div>
-      <a href={url} target="_blank" rel="noreferrer noopener" aria-label="Open on GitHub" className="hover:bg-card/60 grid size-8 shrink-0 cursor-pointer place-items-center rounded-md transition-colors">
-        <Globe className="size-4" aria-hidden />
-      </a>
-      {v.canMerge ? (
-        <Button size="sm" onClick={() => void merge()} disabled={busy} className={cn("bg-ok hover:bg-ok/80 text-white", armed && "ring-ok/40 ring-2")}>
-          {busy ? <Loader2 className="animate-spin" /> : <GitMerge />}
-          {armed ? "Confirm merge" : "Merge"}
-        </Button>
-      ) : (
-        <button type="button" onClick={onClose} aria-label="Close" className="hover:bg-card/60 grid size-8 shrink-0 cursor-pointer place-items-center rounded-md transition-colors">
-          {info?.state === "merged" ? <Check className="size-4" aria-hidden /> : <X className="size-4" aria-hidden />}
-        </button>
+      {/* Why the button is missing, in words — the card should never leave "can I merge?" implicit. */}
+      {!merged && !v.canMerge && info && info.state === "open" && (
+        <p className="text-muted-foreground px-3 pt-1.5 text-micro">{v.blocked ?? ""}</p>
       )}
-      {url.length === 0 && <ArrowUpRight className="hidden" />}
-    </div>
+      {error && (
+        <div role="alert" className="border-destructive/30 bg-destructive/8 mx-1.5 mt-1.5 rounded-lg border px-2.5 py-2">
+          <p className="text-destructive text-micro font-medium">Merge failed</p>
+          <p className="text-foreground/80 mt-0.5 text-micro whitespace-pre-wrap">{error}</p>
+        </div>
+      )}
+    </>
   );
 }
 
