@@ -13,6 +13,8 @@ export interface Turn {
   label: string;
   you: string;
   reply?: string;
+  /** Decisions (answered questions) get the amber tick — findable when scanning back. */
+  kind?: "question";
 }
 
 export function ThreadMinimap({ turns, scrollerRef }: { turns: Turn[]; scrollerRef: React.RefObject<HTMLElement | null> }) {
@@ -74,7 +76,17 @@ export function ThreadMinimap({ turns, scrollerRef }: { turns: Turn[]; scrollerR
                 <span
                   className={cn(
                     "block h-[3px] rounded-full transition-[width,background-color] duration-200",
-                    on ? "bg-foreground w-7" : hover === i ? "bg-foreground/60 w-6" : "bg-muted-foreground/40 w-3.5 group-hover:bg-foreground/60"
+                    t.kind === "question"
+                      ? on
+                        ? "bg-attention w-7"
+                        : hover === i
+                          ? "bg-attention/80 w-6"
+                          : "bg-attention/60 w-3.5 group-hover:bg-attention/80"
+                      : on
+                        ? "bg-foreground w-7"
+                        : hover === i
+                          ? "bg-foreground/60 w-6"
+                          : "bg-muted-foreground/40 w-3.5 group-hover:bg-foreground/60"
                   )}
                 />
               </button>

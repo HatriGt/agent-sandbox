@@ -363,7 +363,13 @@ export function Thread({
     groups.forEach((g, i) => {
       if (g.kind === "you" || g.kind === "asked") {
         const reply = groups.slice(i + 1).find((x) => x.kind === "say");
-        out.push({ id: `${g.kind}-${i}`, label: g.kind === "asked" ? "Question" : "Follow-up", you: g.kind === "asked" ? `${g.question.split("\n")[0]} → ${g.answer}` : g.text, reply: reply?.kind === "say" ? reply.text : undefined });
+        out.push({
+          id: `${g.kind}-${i}`,
+          label: g.kind === "asked" ? "Question" : "Follow-up",
+          you: g.kind === "asked" ? `${g.question.split("\n")[0]} → ${g.answer}` : g.text,
+          reply: reply?.kind === "say" ? reply.text : undefined,
+          ...(g.kind === "asked" ? { kind: "question" as const } : {}),
+        });
       }
     });
     return out;

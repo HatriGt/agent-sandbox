@@ -608,6 +608,18 @@
 .mcp-ping {
   animation: mcp-ping 1.6s cubic-bezier(0, 0, 0.2, 1) infinite;
 }
+/* A failed run's summary line lands with one short lateral shake — an error is FELT, once, not looped. */
+@keyframes shake-once {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-3px); }
+  40% { transform: translateX(3px); }
+  60% { transform: translateX(-2px); }
+  80% { transform: translateX(1px); }
+}
+.shake-once {
+  animation: shake-once 0.4s 0.25s cubic-bezier(0.36, 0.07, 0.19, 0.97) 1;
+}
+
 /* First contact: the link energizes for a beat, then holds — established, not busy. */
 .flow-dash-once {
   animation: flow-dash 1.4s linear 2;

@@ -48,7 +48,7 @@ export function RunSummary({
   };
 
   return (
-    <div className="enter flex flex-wrap items-center gap-x-3 gap-y-1.5 py-0.5">
+    <div className={cn("enter flex flex-wrap items-center gap-x-3 gap-y-1.5 py-0.5", failed && "shake-once")}>
       <span className={cn("label flex shrink-0 items-center gap-1.5", failed ? "text-destructive" : "text-muted-foreground")}>
         {!failed && (
           <svg className="text-ok size-3.5" viewBox="0 0 14 14" fill="none" aria-hidden>

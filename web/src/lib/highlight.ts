@@ -29,6 +29,18 @@ export function tokenizeJson(text: string): JsonToken[] {
 
 export type TermLineKind = "error" | "warn" | "ok" | "add" | "del" | "path" | "plain";
 
+/** Error/warning line counts for a collapsed panel's label — the fold says what it hides. */
+export function outputStats(text: string): { errors: number; warns: number } {
+  let errors = 0;
+  let warns = 0;
+  for (const l of text.split("\n")) {
+    const k = termLineKind(l);
+    if (k === "error") errors++;
+    else if (k === "warn") warns++;
+  }
+  return { errors, warns };
+}
+
 /**
  * Classify one terminal output line by its most probable meaning. Diff markers win over word
  * matches (a `- warning fixed` line is a deletion, not a warning).

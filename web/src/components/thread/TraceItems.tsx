@@ -15,7 +15,7 @@ import { ATTACHMENT_RE, useSession } from "@/lib/session-context";
 import { SkillMark } from "@/lib/skillGlyph";
 import { parseMcpName } from "@/lib/mcp";
 import { McpItem } from "./McpItem";
-import { TraceOutput } from "./TraceOutput";
+import { PanelFold, TraceOutput } from "./TraceOutput";
 import { Lightbox } from "@/components/ui/lightbox";
 
 /**
@@ -191,7 +191,6 @@ export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolea
 function ShellItem({ event, live }: { event: ToolEvent; live?: boolean }) {
   const [open, setOpen] = React.useState(false);
   const hasOutput = !!event.result;
-  const lines = event.result ? lineCount(event.result) : 0;
   // A test run renders as a results card (summary chips + per-file cases) with the terminal panel
   // demoted to "raw output"; anything else is the plain terminal.
   const report = React.useMemo(() => (live ? null : parseTestReport(event.result)), [event.result, live]);
@@ -226,17 +225,7 @@ function ShellItem({ event, live }: { event: ToolEvent; live?: boolean }) {
           <span className="label text-trace-fg/60">{event.name}</span>
           {live && <span className="label text-live">running</span>}
           {!live && event.failed && <span className="label text-destructive">failed</span>}
-          {hasOutput && (
-            <button
-              type="button"
-              onClick={() => setOpen((v) => !v)}
-              aria-expanded={open}
-              className="text-trace-fg/60 hover:text-trace-fg ml-auto flex cursor-pointer items-center gap-1 rounded px-1"
-            >
-              <span className="label">{open ? "hide output" : lines > 1 ? `${lines} lines` : "output"}</span>
-              <ChevronRight className={cn("size-3.5 transition-transform duration-150", open && "rotate-90")} aria-hidden />
-            </button>
-          )}
+          {hasOutput && <PanelFold open={open} text={event.result!} onToggle={() => setOpen((v) => !v)} />}
         </div>
         <pre className="text-trace-fg px-3 py-2 font-mono text-code whitespace-pre-wrap [overflow-wrap:anywhere]">
           <span className="text-ok mr-2 shrink-0 select-none" aria-hidden>

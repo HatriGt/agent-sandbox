@@ -66,6 +66,12 @@ export function ChangesDock({ files, loading, onOpen, onRefresh, activePath }: {
             <span className="stamp flex items-center gap-1.5">
               {adds > 0 && <span className="text-ok">+{adds}</span>}
               {dels > 0 && <span className="text-destructive">−{dels}</span>}
+              {adds + dels > 0 && (
+                <span className="bg-muted flex h-1 w-10 overflow-hidden rounded-full" aria-hidden>
+                  <span className="bg-ok h-full transition-[width] duration-300" style={{ width: `${(adds / (adds + dels)) * 100}%` }} />
+                  <span className="bg-destructive/80 h-full flex-1 transition-[width] duration-300" />
+                </span>
+              )}
             </span>
             <span className="text-muted-foreground ml-auto hidden text-micro sm:inline">{open ? "Hide files" : "Show files"}</span>
             <ChevronUp className={cn("text-muted-foreground size-3.5 shrink-0 transition-transform", open && "rotate-180")} aria-hidden />

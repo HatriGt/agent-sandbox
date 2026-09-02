@@ -1,8 +1,8 @@
 import * as React from "react";
-import { AlertTriangle, Check, ChevronRight, Zap } from "lucide-react";
+import { AlertTriangle, Check, Zap } from "lucide-react";
 import { analyzeResult, mcpSummary, serverHue, type McpCall, type McpResultView } from "@/lib/mcp";
 import type { TraceEvent } from "@/lib/trace";
-import { TraceOutput } from "./TraceOutput";
+import { PanelFold, TraceOutput } from "./TraceOutput";
 import { cn } from "@/lib/utils";
 
 /**
@@ -63,7 +63,6 @@ export function McpItem({ event, call, live }: { event: ToolEvent; call: McpCall
   const hasOutput = !!event.result;
   const view = React.useMemo(() => analyzeResult(event.result), [event.result]);
   const { output, isJson } = React.useMemo(() => renderable(view, event.result ?? ""), [view, event.result]);
-  const lines = output ? output.replace(/\n+$/, "").split("\n").length : 0;
 
   return (
     <div className="enter min-w-0">
@@ -84,17 +83,7 @@ export function McpItem({ event, call, live }: { event: ToolEvent; call: McpCall
               {mcpSummary(view)}
             </span>
           )}
-          {hasOutput && (
-            <button
-              type="button"
-              onClick={() => setOpen((v) => !v)}
-              aria-expanded={open}
-              className="text-trace-fg/60 hover:text-trace-fg ml-auto flex shrink-0 cursor-pointer items-center gap-1 rounded px-1"
-            >
-              <span className="label">{open ? "hide output" : lines > 1 ? `${lines} lines` : "output"}</span>
-              <ChevronRight className={cn("size-3.5 transition-transform duration-150", open && "rotate-90")} aria-hidden />
-            </button>
-          )}
+          {hasOutput && <PanelFold open={open} text={output} onToggle={() => setOpen((v) => !v)} />}
         </div>
         {event.arg && (
           <pre className="text-trace-fg px-3 py-2 font-mono text-code whitespace-pre-wrap [overflow-wrap:anywhere]">

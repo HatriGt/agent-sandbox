@@ -4,7 +4,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { termLineKind, tokenizeJson } from "../web/src/lib/highlight.ts";
+import { outputStats, termLineKind, tokenizeJson } from "../web/src/lib/highlight.ts";
 
 test("tokenizeJson is lossless and tells keys from string values", () => {
   const src = '{\n  "name": "hana-qa",\n  "rows": 42,\n  "ok": true,\n  "note": null\n}';
@@ -33,6 +33,12 @@ test("termLineKind classifies the obvious lines", () => {
   assert.equal(termLineKind("    at Object.<anonymous> (/app/x.js:3:1)"), "path");
   assert.equal(termLineKind("src/http.ts:1325: match"), "path");
   assert.equal(termLineKind("hello world"), "plain");
+});
+
+test("outputStats counts errors and warnings for the fold label", () => {
+  const out = ["ok line", "Error: boom", "npm WARN old", "fatal: nope", ""].join("\n");
+  assert.deepEqual(outputStats(out), { errors: 2, warns: 1 });
+  assert.deepEqual(outputStats("all clean"), { errors: 0, warns: 0 });
 });
 
 test("diff markers beat word matches; +++/--- headers are not add/del", () => {
