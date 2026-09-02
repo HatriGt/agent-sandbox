@@ -1498,11 +1498,13 @@ app.get("/diff.json", async (req: Request, res: Response) => {
 // that opened it, so the merge is attributed like the agent's own pushes. Method is merge-commit.
 app.post("/pr/merge.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const { session, repo, number } = (req.body ?? {}) as { session?: string; repo?: string; number?: number };
+  const { session, repo, number, method, auto } = (req.body ?? {}) as { session?: string; repo?: string; number?: number; method?: string; auto?: boolean };
   if (!session || !/^[\w.-]+$/.test(session) || !repo || !/^[\w.-]+\/[\w.-]+$/.test(repo) || !Number.isFinite(Number(number))) {
     res.status(400).json({ error: "session, repo (owner/name) and number are required" });
     return;
   }
+  // The method whitelist doubles as injection-proofing: only these three words ever reach the shell.
+  const methodFlag = method === "squash" ? "--squash" : method === "rebase" ? "--rebase" : "--merge";
   try {
     // `gh` in the box has NO persisted auth (tokens are per-exec env only, by design), so the merge
     // must carry the owner's token the same way the ask lane does. Without it every merge failed
@@ -1515,11 +1517,14 @@ app.post("/pr/merge.json", async (req: Request, res: Response) => {
     // `repo` is quoted rather than relied on to be metacharacter-free: the validating regex above
     // and this interpolation are far apart, and only one of them has to loosen for the other to
     // become a remote shell.
-    const r = await execInBox(cfg, session, `gh pr merge ${Number(number)} --repo ${shellQuote(repo)} --merge 2>&1`, {
+    // `auto` = GitHub's own auto-merge: queue the merge to fire the moment branch-policy
+    // requirements (approvals, checks) are met — the answer to "the base branch policy prohibits
+    // the merge" that doesn't involve coming back later.
+    const r = await execInBox(cfg, session, `gh pr merge ${Number(number)} --repo ${shellQuote(repo)} ${methodFlag}${auto ? " --auto" : ""} 2>&1`, {
       env: { GH_TOKEN: creds.primaryToken, GITHUB_TOKEN: creds.primaryToken },
     });
     forgetPull(repo, Number(number));
-    res.json({ ok: true, output: redactor.redact((r.stdout ?? "").trim().slice(-600)) });
+    res.json({ ok: true, auto: !!auto, output: redactor.redact((r.stdout ?? "").trim().slice(-600)) });
   } catch (e) {
     forgetPull(repo, Number(number));
     // gh's own message (not mergeable, checks, permissions…) is on the lines AFTER the argv line of
