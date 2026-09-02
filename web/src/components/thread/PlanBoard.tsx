@@ -180,18 +180,29 @@ function TaskRow({ task, live, compact }: { task: DerivedTask; live?: boolean; c
   );
 
   return (
-    <motion.li layout="position" className={cn("border-b last:border-b-0", active && live && "bg-live/5")}>
+    // Bouncy-accordion row (after skiper-ui's Skiper103): each step is its OWN soft card with a gap
+    // to its neighbours, and expanding is a weighted spring — the open row lands with a small
+    // overshoot, its siblings shuffle down on the same spring via `layout`. Rows stay borderless
+    // until they matter: hover lifts one, the active step carries the live tint.
+    <motion.li
+      layout={reduce ? undefined : "position"}
+      transition={reduce ? { duration: 0 } : { type: "spring", stiffness: 380, damping: 28 }}
+      className={cn(
+        "overflow-hidden rounded-lg transition-colors",
+        active && live ? "bg-live/6" : open ? "bg-muted/50" : "hover:bg-muted/40"
+      )}
+    >
       {hasDetail ? (
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
-          className="flex w-full cursor-pointer items-center gap-3 px-4 py-2.5 text-left"
+          className="flex w-full cursor-pointer items-center gap-3 px-3 py-2.5 text-left"
         >
           {body}
         </button>
       ) : (
-        <div className="flex w-full items-center gap-3 px-4 py-2.5">{body}</div>
+        <div className="flex w-full items-center gap-3 px-3 py-2.5">{body}</div>
       )}
 
       <AnimatePresence initial={false}>
@@ -199,11 +210,11 @@ function TaskRow({ task, live, compact }: { task: DerivedTask; live?: boolean; c
           <motion.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.22, ease: EASE }}
+            exit={{ height: 0, opacity: 0, transition: { duration: 0.18, ease: EASE } }}
+            transition={reduce ? { duration: 0 } : { type: "spring", stiffness: 300, damping: 26, mass: 0.9 }}
             className="overflow-hidden"
           >
-            <div className="flex flex-col gap-2 px-4 pb-3 pl-12">
+            <div className="flex flex-col gap-2 px-3 pb-3 pl-11">
               {compact && summary && <div className="text-faint stamp text-micro">{summary}</div>}
               {e.files.length > 0 && (
                 <div className="flex flex-wrap gap-1.5">
@@ -355,9 +366,11 @@ export function PlanCard({ board, live }: { board: TaskBoard; live?: boolean }) 
             transition={{ duration: 0.22, ease: EASE }}
             className="overflow-hidden"
           >
-            {tasks.map((t, i) => (
-              <TaskRow key={`${i}-${t.text}`} task={t} live={live} />
-            ))}
+            <div className="flex flex-col gap-1 p-1.5">
+              {tasks.map((t, i) => (
+                <TaskRow key={`${i}-${t.text}`} task={t} live={live} />
+              ))}
+            </div>
           </motion.ol>
         )}
       </AnimatePresence>
@@ -426,7 +439,7 @@ export function PlanDock({ board, live }: { board: TaskBoard; live?: boolean }) 
               </button>
             </div>
             <ProgressRail done={done} total={tasks.length} complete={complete} failed={failed > 0} layoutId="plan-rail" />
-            <ol className="min-h-0 flex-1 overflow-y-auto">
+            <ol className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-1.5">
               {tasks.map((t, i) => (
                 <TaskRow key={`${i}-${t.text}`} task={t} live={live} compact />
               ))}

@@ -227,11 +227,10 @@ function Header({ info, v, url, session, repo, number, onMerged, onClose }: { in
 }
 
 /**
- * The two ways past a branch-policy refusal, offered exactly where the refusal appears:
- *  - auto-merge (the patient path) — one click, GitHub merges when requirements are satisfied;
- *  - admin merge (the bypass) — uses the connected account's administrator override, so it stays
- *    behind its own arm-to-confirm and is styled as the louder, warier action. If the account has
- *    no bypass rights gh refuses and the message lands in the same inline alert.
+ * The two ways past a branch-policy refusal, as ONE quiet decision row — not a stack of shouting
+ * buttons. "Auto-merge" is the primary (the patient, policy-respecting path); "admin override" is
+ * a text-weight action that swaps in place into an explicit amber confirm (transitions.dev
+ * text-states-swap), so the bypass exists without being dressed as a peer of the safe choice.
  */
 function PolicyRescue({ busy, onAuto, onAdmin }: { busy: boolean; onAuto: () => void; onAdmin: () => void }) {
   const [armed, setArmed] = React.useState(false);
@@ -241,28 +240,64 @@ function PolicyRescue({ busy, onAuto, onAdmin }: { busy: boolean; onAuto: () => 
     return () => window.clearTimeout(t);
   }, [armed]);
   return (
-    <div className="mt-2 flex flex-col gap-1.5">
-      <button
-        type="button"
-        disabled={busy}
-        onClick={onAuto}
-        className="border-sleep/40 bg-sleep/10 text-sleep hover:bg-sleep/20 flex w-full cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-micro font-medium transition-colors disabled:opacity-60"
-      >
-        {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" aria-hidden />}
-        Arm auto-merge — GitHub merges it the moment approvals and checks are satisfied
-      </button>
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => (armed ? onAdmin() : setArmed(true))}
-        className={cn(
-          "border-attention/50 bg-attention/10 text-attention-text hover:bg-attention/20 flex w-full cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-micro font-medium transition-colors disabled:opacity-60",
-          armed && "ring-attention/50 ring-2"
+    <div className="mt-2.5 flex min-h-7 items-center gap-2">
+      <AnimatePresence mode="wait" initial={false}>
+        {armed ? (
+          <motion.div
+            key="confirm"
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.15, ease: [0.22, 1, 0.36, 1] }}
+            className="flex w-full items-center gap-2"
+          >
+            <span className="text-attention-text flex min-w-0 items-center gap-1.5 text-micro">
+              <ShieldAlert className="size-3.5 shrink-0" aria-hidden />
+              <span className="truncate">Skips the policy's requirements.</span>
+            </span>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={onAdmin}
+              className="bg-attention text-attention-ink hover:bg-attention/85 ml-auto flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-micro font-semibold transition-colors disabled:opacity-60"
+            >
+              {busy ? <Loader2 className="size-3 animate-spin" /> : <GitMerge className="size-3" aria-hidden />}
+              Merge anyway
+            </button>
+            <button type="button" onClick={() => setArmed(false)} className="text-muted-foreground hover:text-foreground shrink-0 cursor-pointer text-micro underline-offset-2 hover:underline">
+              cancel
+            </button>
+          </motion.div>
+        ) : (
+          <motion.div
+            key="choices"
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.15, ease: [0.22, 1, 0.36, 1] }}
+            className="flex w-full items-center gap-2"
+          >
+            <button
+              type="button"
+              disabled={busy}
+              onClick={onAuto}
+              title="GitHub merges the moment approvals and checks are satisfied"
+              className="bg-sleep/15 text-sleep hover:bg-sleep/25 flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-micro font-semibold transition-colors disabled:opacity-60"
+            >
+              {busy ? <Loader2 className="size-3 animate-spin" /> : <Sparkles className="size-3" aria-hidden />}
+              Auto-merge when ready
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setArmed(true)}
+              className="text-muted-foreground hover:text-attention-text ml-auto shrink-0 cursor-pointer text-micro font-medium underline-offset-2 hover:underline"
+            >
+              use admin override…
+            </button>
+          </motion.div>
         )}
-      >
-        {busy ? <Loader2 className="size-3.5 animate-spin" /> : <ShieldAlert className="size-3.5" aria-hidden />}
-        {armed ? "Confirm: bypass the branch policy and merge now" : "Merge now with admin override — skips the policy's requirements"}
-      </button>
+      </AnimatePresence>
     </div>
   );
 }
