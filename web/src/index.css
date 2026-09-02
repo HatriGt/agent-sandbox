@@ -608,6 +608,33 @@
 .mcp-ping {
   animation: mcp-ping 1.6s cubic-bezier(0, 0, 0.2, 1) infinite;
 }
+/* Live "Thinking" label: a soft highlight sweeps through the word while reasoning is in flight —
+   the AI-chat convention for "the model is working on words you cannot see yet". */
+@keyframes shimmer-text {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+.shimmer-text {
+  background: linear-gradient(
+    90deg,
+    var(--muted-foreground) 40%,
+    var(--foreground) 50%,
+    var(--muted-foreground) 60%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer-text 2s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .shimmer-text {
+    animation: none;
+    background: none;
+    -webkit-text-fill-color: currentColor;
+  }
+}
+
 /* A failed run's summary line lands with one short lateral shake — an error is FELT, once, not looped. */
 @keyframes shake-once {
   0%, 100% { transform: translateX(0); }

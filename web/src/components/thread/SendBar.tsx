@@ -1,6 +1,7 @@
 import * as React from "react";
 import { readDraft, writeDraft } from "@/lib/draft";
-import { ArrowUp, AtSign, Clock, ImagePlus, Loader2, MessageCircleQuestion, Terminal, X } from "lucide-react";
+import { ArrowUp, AtSign, Check as CheckIcon, Clock, ImagePlus, Loader2, MessageCircleQuestion, Terminal, X } from "lucide-react";
+import { motion } from "motion/react";
 import { ATTACHMENTS_DIR } from "@/lib/session-context";
 import { Lightbox } from "@/components/ui/lightbox";
 import { FileMark } from "@/lib/fileIcon";
@@ -64,6 +65,7 @@ export function SendBar({
   React.useEffect(() => setValue(readDraft(boxName)), [boxName]);
   React.useEffect(() => writeDraft(boxName, value), [boxName, value]);
   const [sending, setSending] = React.useState(false);
+  const [sent, setSent] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [mention, setMention] = React.useState<MentionState | null>(null);
   // `/skill` menu: open while the message starts with `/` and something matches an enabled skill.
@@ -241,9 +243,13 @@ export function SendBar({
       setImages(attachedImages);
       setSkill(chosenSkill);
       toast.error("Could not send", { description: msg });
-    } finally {
       setSending(false);
+      return;
     }
+    // Spinner → check morph: the send is confirmed where the eye already is, then the arrow returns.
+    setSending(false);
+    setSent(true);
+    window.setTimeout(() => setSent(false), 900);
   };
 
   const hint = error
@@ -470,7 +476,17 @@ export function SendBar({
               aria-label={toAgent ? (busy ? "Queue for the agent" : "Send to the agent") : "Ask a side question"}
               className="rounded-full transition-[opacity,transform,background-color] duration-200 disabled:opacity-35 enabled:hover:scale-105"
             >
-              {sending ? <Loader2 className="animate-spin" /> : busy && toAgent ? <Clock /> : <ArrowUp />}
+              {sending ? (
+                <Loader2 className="animate-spin" />
+              ) : sent ? (
+                <motion.span key="sent" initial={{ scale: 0.4, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring", stiffness: 480, damping: 22 }} className="grid place-items-center">
+                  <CheckIcon />
+                </motion.span>
+              ) : busy && toAgent ? (
+                <Clock />
+              ) : (
+                <ArrowUp />
+              )}
             </Button>
           </PromptInputActions>
         </PromptInput>

@@ -7,7 +7,7 @@ import { deadlineLabel, deadlineShort, fmtDuration, type Deadline, type DisplayS
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, MenuHint } from "@/components/ui/dropdown-menu";
-import { StateStamp } from "@/components/ui/stamp";
+import { StatePill } from "@/components/ui/stamp";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { RepoPicker } from "@/components/RepoPicker";
 import { PullRequestFloat } from "./PullRequestFloat";
@@ -263,9 +263,10 @@ export function ThreadHeader({
         </div>
       </div>
 
-      {/* Line 2: context as a sentence */}
+      {/* Line 2: context as a sentence. The state is the pill — it anchors the whole view, and its
+          crossfade makes the working → needs-you → done transition an event rather than a blink. */}
       <div className="text-muted-foreground mt-1 flex min-h-6 flex-wrap items-center gap-x-2 gap-y-1 text-meta">
-        <StateStamp state={state} exitCode={exitCode} />
+        <StatePill state={state} exitCode={exitCode} />
         <Dot />
         <Tooltip>
           <TooltipTrigger asChild>

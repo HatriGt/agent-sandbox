@@ -584,8 +584,8 @@ export function ThinkingItem({ text, live }: { text: string; live?: boolean }) {
       >
         <ChevronRight className={cn("size-3.5 shrink-0 transition-transform duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]", open && "rotate-90")} aria-hidden />
         <Brain className={cn("size-3.5 shrink-0", live && "text-live breathe")} aria-hidden />
-        <span className="font-medium">{live ? "Thinking" : "Thought"}</span>
-        {!open && <span className="stamp text-muted-foreground min-w-0 truncate">{teaser}</span>}
+        <span className={cn("font-medium", live && "shimmer-text")}>{live ? "Thinking" : "Thought"}</span>
+        {!open && <span className={cn("stamp min-w-0 truncate", live ? "shimmer-text" : "text-muted-foreground")}>{teaser}</span>}
         <span className="stamp text-muted-foreground shrink-0">{words} words</span>
       </button>
       <AnimatePresence initial={false}>
