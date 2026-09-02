@@ -1,5 +1,6 @@
 import * as React from "react";
-import { Plus } from "lucide-react";
+import { Loader2, Plus, Undo2 } from "lucide-react";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { api, type BoxView, type ChangedFile, type FleetLifecycle, type WatchSnapshot } from "@/lib/api";
 import { AnimatePresence, motion } from "motion/react";
@@ -59,6 +60,7 @@ export function Thread({
   onTornDown,
   onFocusRequest,
   onReplyFailed,
+  onRepliesFlushed,
 }: {
   box: BoxView;
   lifecycle: FleetLifecycle;
@@ -66,6 +68,8 @@ export function Thread({
   replies: string[];
   onAsk: (question: string) => void;
   onReplied: (text: string) => void;
+  /** Clear this box's optimistic echoes after a revert rewrites the durable log. */
+  onRepliesFlushed?: () => void;
   onBack: () => void;
   onNew: () => void;
   onTornDown: (name: string) => void;
@@ -192,6 +196,38 @@ export function Thread({
   const deadlineText = deadlineLabel(deadline);
 
   const [removing, setRemoving] = React.useState(false);
+
+  // Per-message revert: which operator messages have a restore point (message k restores the
+  // in-box checkpoint taken when turn k-1 finished). Refetched whenever a turn settles.
+  const [revertable, setRevertable] = React.useState<Set<number>>(new Set());
+  const [revertAsk, setRevertAsk] = React.useState<{ message: number; discarded: number } | null>(null);
+  const [reverting, setReverting] = React.useState(false);
+  const canRevertNow = !sleeping && runState !== "running";
+  React.useEffect(() => {
+    if (runState === "running") return;
+    const ctrl = new AbortController();
+    api
+      .revertPoints(box.name, ctrl.signal)
+      .then((r) => setRevertable(new Set(r.messages)))
+      .catch(() => {});
+    return () => ctrl.abort();
+  }, [box.name, runState]);
+  const doRevert = async () => {
+    if (!revertAsk) return;
+    setReverting(true);
+    try {
+      await api.revert(box.name, revertAsk.message);
+      // The restored box carries the shorter log; flush everything the browser layered on top.
+      settledRef.current.delete(box.name);
+      onRepliesFlushed?.();
+      setRevertAsk(null);
+      toast.success("Reverted", { description: "The sandbox and the agent's memory are back to this point." });
+    } catch (e) {
+      toast.error("Could not revert", { description: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setReverting(false);
+    }
+  };
 
   // Sleep on demand: `msb stop`, nothing removed. Marking wokeRef first keeps the "open a sleeping
   // thread wakes it" effect from bouncing the box straight back up.
@@ -450,6 +486,8 @@ export function Thread({
             {groups.map((g, i) => {
               const isLast = i === groups.length - 1;
               const key = `${g.kind}-${i}`;
+              // Operator-message index: the task is 1, each you/asked group after it increments.
+              const msgIndex = 1 + groups.slice(0, i + 1).filter((x) => x.kind === "you" || x.kind === "asked").length;
               return g.kind === "lifecycle" ? (
                 <LifecycleItem key={key} label={g.label} detail={g.detail} />
               ) : g.kind === "tools" ? (
@@ -458,7 +496,14 @@ export function Thread({
                 <McpConnectItem key={key} server={g.server} />
               ) : g.kind === "you" ? (
                 <div key={key} data-turn={key}>
-                  <YouItem text={g.text} />
+                  <YouItem
+                    text={g.text}
+                    onRevert={
+                      canRevertNow && revertable.has(msgIndex)
+                        ? () => setRevertAsk({ message: msgIndex, discarded: groups.filter((x) => x.kind === "you" || x.kind === "asked").length + 1 - (msgIndex - 1) })
+                        : undefined
+                    }
+                  />
                 </div>
               ) : g.kind === "asked" ? (
                 <div key={key} data-turn={key}>
@@ -533,6 +578,28 @@ export function Thread({
             <ChatContainerScrollAnchor />
           </ChatContainerContent>
         </ChatContainerRoot>
+        {/* Revert confirmation: destructive to the LATER turns, and honest about what does not
+            rewind — pushed commits, opened PRs, external API writes stay. */}
+        <Dialog open={!!revertAsk} onOpenChange={(o) => !o && !reverting && setRevertAsk(null)}>
+          <DialogContent
+            title="Revert to before this message?"
+            description={
+              revertAsk
+                ? `The sandbox and the agent's memory return to the state before message ${revertAsk.message} was delivered — the later work in this thread is discarded. Anything already pushed to GitHub or sent to external systems stays.`
+                : ""
+            }
+          >
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" size="sm" onClick={() => setRevertAsk(null)} disabled={reverting}>
+                Keep everything
+              </Button>
+              <Button variant="destructive" size="sm" onClick={() => void doRevert()} disabled={reverting}>
+                {reverting ? <Loader2 className="animate-spin" /> : <Undo2 />}
+                {reverting ? "Reverting…" : "Revert"}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
         {/* Jump to the latest output: centred over the column, only while scrolled up. When the agent
             produces something NEW while you are reading history, the button grows a label — the
             chat-app affordance for "there is more below than when you left". */}

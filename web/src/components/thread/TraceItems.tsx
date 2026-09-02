@@ -1,5 +1,6 @@
 import * as React from "react";
-import { AlertTriangle, Brain, Check, ChevronRight, Clock, FileText, Loader2, MessageCircleQuestion, Terminal } from "lucide-react";
+import { AlertTriangle, Brain, Check, ChevronRight, Clock, FileText, Loader2, MessageCircleQuestion, Terminal, Undo2 } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { resultSummary, type TraceEvent } from "@/lib/trace";
 export { PlanCard, PlanDock } from "./PlanBoard";
 import { parseQuestion } from "@/lib/question";
@@ -404,8 +405,13 @@ export function WorkingIndicator({ label = "Working", detail }: { label?: string
   );
 }
 
-/** Your turn: the one bubble. A muted fill, right-aligned, so the primary ink stays for actions. */
-export function YouItem({ text, label = "You" }: { text: string; label?: string }) {
+/**
+ * Your turn: the one bubble. A muted fill, right-aligned, so the primary ink stays for actions.
+ * When `onRevert` is set, hovering the row reveals a ⟲ control BEFORE the bubble (left of it,
+ * fading in like the output-panel copy button): revert the box to the state before this message
+ * was delivered. Confirmation happens upstream (Thread owns the dialog).
+ */
+export function YouItem({ text, label = "You", onRevert }: { text: string; label?: string; onRevert?: () => void }) {
   // Image attachments ride in the message as in-box paths; show them as thumbnails, not as text.
   const attachments = React.useMemo(() => [...new Set(text.match(ATTACHMENT_RE) ?? [])], [text]);
   const body = React.useMemo(() => (attachments.length ? text.replace(/\n*Attached images? \(open with the Read tool\):[\s\S]*$/, "").trim() : text), [text, attachments.length]);
@@ -414,7 +420,7 @@ export function YouItem({ text, label = "You" }: { text: string; label?: string 
   const skillName = skillMatch?.[1] ?? null;
   const rest = skillMatch ? (skillMatch[2] ?? "").trim() : body;
   return (
-    <div className="enter flex flex-col items-end gap-1.5">
+    <div className="enter group/you flex flex-col items-end gap-1.5">
       <span className="label text-muted-foreground pr-1">{label}</span>
       {attachments.length > 0 && (
         <div className="flex max-w-[min(72%,60ch)] flex-wrap justify-end gap-1.5">
@@ -423,6 +429,22 @@ export function YouItem({ text, label = "You" }: { text: string; label?: string 
           ))}
         </div>
       )}
+      <div className="flex max-w-full items-center justify-end gap-2">
+        {onRevert && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={onRevert}
+                aria-label="Revert the sandbox to before this message"
+                className="text-muted-foreground hover:text-foreground hover:bg-muted grid size-7 shrink-0 cursor-pointer place-items-center rounded-full border opacity-0 transition-opacity duration-150 group-hover/you:opacity-100 focus-visible:opacity-100"
+              >
+                <Undo2 className="size-3.5" aria-hidden />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="left">Revert to before this message</TooltipContent>
+          </Tooltip>
+        )}
       {body && (
         <div className="bg-muted text-foreground max-w-[min(72%,60ch)] rounded-xl rounded-br-md px-4 py-2.5 text-lead whitespace-pre-wrap">
           {skillName ? (
@@ -438,6 +460,7 @@ export function YouItem({ text, label = "You" }: { text: string; label?: string 
           )}
         </div>
       )}
+      </div>
     </div>
   );
 }

@@ -460,6 +460,11 @@ export const api = {
     fetch(url("/file.json"), { method: "PUT", headers: { ...authHeaders, "content-type": "application/json" }, body: JSON.stringify({ session, path, content, encoding }) }).then(
       parse<{ ok: true; path: string; bytes: number }>
     ),
+  /** Which operator messages (1-based; task = 1) have a restore point. */
+  revertPoints: (session: string, signal?: AbortSignal) =>
+    fetch(url("/revert-points.json", { session }), { headers: authHeaders, signal }).then(parse<{ messages: number[] }>),
+  /** Revert the box to the state before operator message k was delivered (~1 s, in place). */
+  revert: (session: string, message: number) => post<{ ok: true; message: number }>("/revert.json", { session, message }),
   /** Merge the PR from inside the sandbox (`gh pr merge --merge`). */
   mergePull: (session: string, repo: string, number: number, opts?: { method?: "merge" | "squash" | "rebase"; auto?: boolean; admin?: boolean }) =>
     post<{ ok: true; auto: boolean; output: string }>("/pr/merge.json", { session, repo, number, ...opts }),

@@ -559,6 +559,7 @@ export default function App() {
                     onBack={backToRail}
                     onNew={newTask}
                     onFocusRequest={onFocusRequest}
+                    onRepliesFlushed={() => setReplies((prev) => ({ ...prev, [selectedBox.name]: [] }))}
                     onReplyFailed={(text) =>
                       setReplies((prev) => {
                         const list = [...(prev[selectedBox.name] ?? [])];

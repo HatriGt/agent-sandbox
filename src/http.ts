@@ -54,6 +54,7 @@ import { makeFleetReader } from "./fleet.js";
 import { Inbox, startInboxDelivery } from "./inbox.js";
 import { makeCredentialBroker } from "./broker.js";
 import { FILE_INDEX_CAP, fileDetailsCommand, makeFileIndex, parseFileDetails } from "./files.js";
+import { canRevert, captureCmd, checkpointForMessage, listCmd, parseCkptLs, revertCmd, withBoxLock } from "./checkpoint.js";
 import { exec as execInBox, execWithInput } from "./msb.js";
 import { loadStore, saveStore, pickDefaultAccount, upsertAccount, removeAccount, setDefaultAccount } from "./gh-token-store.js";
 import { probeToken } from "./gh-probe.js";
@@ -277,8 +278,12 @@ const resumeQuietly = (session: string, message: string) => {
   noteRunning(session);
   watchHub.drop(session);
   // Whoever triggers it (inbox delivery, broker, an admin), the box runs with its OWNER's integrations.
-  return withOwner(ownerOf(db, session) ?? null, () =>
-    deps.resumeDetached ? deps.resumeDetached(cfg, session, message) : deps.resume(cfg, session, message, undefined, {}).then(() => undefined)
+  // Behind the checkpoint lock: a follow-up landing inside the ~1 s turn-end capture waits for it
+  // instead of mutating the workspace mid-tar.
+  return withBoxLock(session, () =>
+    withOwner(ownerOf(db, session) ?? null, () =>
+      deps.resumeDetached ? deps.resumeDetached(cfg, session, message) : deps.resume(cfg, session, message, undefined, {}).then(() => undefined)
+    )
   );
 };
 startInboxDelivery({
@@ -340,6 +345,26 @@ const sendNotification = async (ev: NotifyEvent): Promise<void> => {
 };
 const notifier = makeNotifier({ send: sendNotification, log: (m) => console.error(m) });
 
+/**
+ * Capture the turn-end checkpoint for `box` if this turn doesn't have one yet. Turn N = task + N-1
+ * follow-ups delivered, counted from the durable trace. Best-effort and serialized per box; any
+ * failure logs and the fleet sweep never notices.
+ */
+const captureTurnCheckpoint = (box: string): Promise<void> =>
+  withBoxLock(box, async () => {
+    try {
+      const snap = await watchHub.read(box);
+      if (!snap.task && !snap.log) return; // gone or empty
+      const turn = 1 + parseTrace(snap.log ?? "").filter((e) => e.kind === "you").length;
+      const have = parseCkptLs((await execInBox(cfg, box, listCmd())).stdout);
+      if (have.includes(turn)) return;
+      const r = await execInBox(cfg, box, captureCmd(turn));
+      if (!/CKPT_OK/.test(r.stdout)) console.error(`[ckpt] capture t${turn} on ${box}: ${r.stdout.trim().slice(-200)}`);
+    } catch (e) {
+      console.error(`[ckpt] capture on ${box} errored: ${(e as Error).message.slice(0, 200)}`);
+    }
+  });
+
 const lastSeenStatus = new Map<string, boolean>();
 const readFleet = makeFleetReader(
   cfg,
@@ -369,6 +394,10 @@ const readFleet = makeFleetReader(
       for (const ev of detectTransitions(prevRunViews, nextRunViews)) {
         notifyCtx.set(ev.box, { title: titles[ev.box], task: boxes.find((b) => b.name === ev.box)?.task });
         void notifier.notify(ev);
+        // Turn-end checkpoint: the moment a turn settles (done or paused on a question) is the
+        // restore point for whatever the operator sends next. Online in-box tar (~1 s, no VM stop)
+        // behind the per-box lock so a fast follow-up queues instead of racing the capture.
+        if (ev.kind === "done" || ev.kind === "waiting") void captureTurnCheckpoint(ev.box);
       }
       prevRunViews = nextRunViews;
     }
@@ -1777,6 +1806,50 @@ app.get("/files.json", async (req: Request, res: Response) => {
     res.json(await fileIndex(session, q));
   } catch (e) {
     failWith(res, e);
+  }
+});
+
+// Per-message revert: which operator messages have a restore point, and the revert itself.
+// Checkpoints are in-box tars (src/checkpoint.ts) — restore is ~1 s, no VM stop/boot.
+app.get("/revert-points.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const session = typeof req.query.session === "string" ? req.query.session : "";
+  if (!isBoxName(session)) {
+    res.status(400).json({ error: "session query param required" });
+    return;
+  }
+  try {
+    const turns = parseCkptLs((await execInBox(cfg, session, listCmd())).stdout);
+    // Checkpoint t<n> is the restore point for operator message n+1 (see checkpointForMessage).
+    res.json({ messages: turns.map((n) => n + 1) });
+  } catch (e) {
+    failWith(res, e);
+  }
+});
+app.post("/revert.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const { session, message } = (req.body ?? {}) as { session?: string; message?: number };
+  const k = Number(message);
+  const turn = checkpointForMessage(k);
+  if (!isBoxName(session) || turn === null) {
+    res.status(400).json({ error: "session and message (≥2) are required" });
+    return;
+  }
+  try {
+    const snap = await watchHub.read(session);
+    if (!canRevert(snap.runState)) {
+      res.status(409).json({ error: "The agent is mid-turn — wait for it to finish (or stop it) before reverting." });
+      return;
+    }
+    const discarded = 1 + parseTrace(snap.log ?? "").filter((e) => e.kind === "you").length - k + 1;
+    await withBoxLock(session, async () => {
+      const r = await execInBox(cfg, session, revertCmd(turn, Math.max(1, discarded)));
+      if (!/CKPT_RESTORED/.test(r.stdout)) throw new Error(r.stdout.trim().slice(-300) || "restore did not complete");
+    });
+    watchHub.drop(session); // next poll reads the restored (shorter) log fresh
+    res.json({ ok: true, message: k });
+  } catch (e) {
+    res.status(422).json({ error: clientError(e, 400) });
   }
 });
 
