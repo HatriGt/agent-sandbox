@@ -462,7 +462,7 @@ export const deps: HandlerDeps = {
     // it reaches an interactive boundary (asks a question / finishes) or the wait times out. The
     // open MCP call is the "listener" — this is what makes the calling agent wait for the box
     // instead of ending its turn. A timeout returns "still working, reconnect via status".
-    await runAgentTask(runCfg, box, plan.task, plan.repos, runCreds);
+    await runAgentTask(runCfg, box, plan.task, plan.repos, runCreds, plan.model);
     const output = await driveInteractive(runCfg, box, interact);
     return { box, warm, output };
   },
@@ -477,7 +477,7 @@ export const deps: HandlerDeps = {
     return `state:\n${box}\n\n${progress}`;
   },
 
-  async resume(cfg, session, message, secrets, interact) {
+  async resume(cfg, session, message, secrets, interact, model) {
     if (!(await boxExists(cfg, session))) return GONE(session);
     // If a GitHub token is supplied here, probe + store it (login-keyed) so it's reusable later; it's
     // also injected ephemerally for this step via secrets. Best-effort capture (never breaks resume).
@@ -511,7 +511,7 @@ export const deps: HandlerDeps = {
     // Continue the in-box Claude session detached, then BLOCK until the next boundary (another
     // question, or done) or timeout — same turn-taking as delegate, so the answer→continue→next
     // step feels synchronous to the caller.
-    await resumeAgentTask(cfg, session, message, undefined, secrets, creds);
+    await resumeAgentTask(cfg, session, message, undefined, secrets, creds, model);
     return driveInteractive(cfg, session, interact);
   },
 
@@ -521,12 +521,12 @@ export const deps: HandlerDeps = {
     return `Rewound session=${session} to the state it asked its last captured question from. Resume it with the new answer.`;
   },
 
-  async resumeDetached(cfg, session, message, secrets) {
+  async resumeDetached(cfg, session, message, secrets, model) {
     // Same as `resume` minus the blocking wait for the next boundary: the dashboard streams the
     // transcript live, so it only needs the run to be kicked off. Returns as soon as claude is
     // started in the box (a few seconds: wake if asleep, inject creds, exec).
     const creds = await resolveCredsForBox(cfg, session);
-    await resumeAgentTask(cfg, session, message, undefined, secrets, creds);
+    await resumeAgentTask(cfg, session, message, undefined, secrets, creds, model);
   },
   async teardown(cfg, session) {
     await msbTeardown(cfg, session, stagingPathFor(cfg, session));

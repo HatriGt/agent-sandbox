@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { PromptInput, PromptInputActions, PromptInputTextarea } from "@/components/ui/prompt-input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { MentionMenu, expandMentions, mentionAt, type MentionState } from "./MentionMenu";
+import { ModelChip, useModelChoice } from "./ModelPicker";
 import { SkillChip, SkillMenu } from "./SkillMenu";
 import { slashAt, stripSlashToken, typedSkillToken, type SlashState } from "@/lib/slash";
 import { useCached } from "@/lib/cache";
@@ -63,6 +64,7 @@ export function SendBar({
   const [mode, setMode] = React.useState<Mode>("agent");
   const [value, setValue] = React.useState(() => readDraft(boxName));
   React.useEffect(() => setValue(readDraft(boxName)), [boxName]);
+  const model = useModelChoice(boxName);
   React.useEffect(() => writeDraft(boxName, value), [boxName, value]);
   const [sending, setSending] = React.useState(false);
   const [sent, setSent] = React.useState(false);
@@ -221,7 +223,8 @@ export function SendBar({
           (message.includes("Attached image") ? message.slice(message.indexOf("Attached image") - 2) : "");
         if (!busy) onReplied(echo);
         try {
-          const res = await api.resume(boxName, message);
+          // The picked model rides the send once; the server makes it sticky for the box.
+          const res = await api.resume(boxName, message, model.picked ? { model: model.picked } : {});
           if ("queued" in res && res.queued) {
             if (!busy) onReplyFailed?.(echo);
             onQueued?.();
@@ -404,6 +407,8 @@ export function SendBar({
                   disabledReason="A sleeping sandbox has nothing to inspect — wake it with a message first"
                 />
               </div>
+              {/* Model switch: only for the AGENT lane — the side co-pilot stays on ASK_MODEL. */}
+              {toAgent && <ModelChip current={model.current} models={model.models} defaultId={model.defaultId} onPick={model.pick} disabled={sending} />}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button

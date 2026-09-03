@@ -23,6 +23,8 @@ export interface DelegateFlowInput {
   githubToken?: string;
   githubAccount?: string;
   attachments?: Attachment[];
+  /** Model alias for message 1 (already allowlist-validated by the route). */
+  model?: string;
 }
 
 export type DelegateFlowResult =
@@ -45,6 +47,7 @@ export async function runDelegateFlow(
     repos: input.repos,
     task: input.task,
     ref: input.ref,
+    model: input.model,
   });
   if (!v.ok) return { ok: false, question: v.question };
   if (input.attachments?.length) v.plan.attachments = input.attachments;

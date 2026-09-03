@@ -424,7 +424,8 @@ function agentEnvFlags(
   cfg: Config,
   task: string,
   repos?: RepoLayout[],
-  ghTokenOverride?: string
+  ghTokenOverride?: string,
+  modelOverride?: string
 ): string[] {
   // The standing policy plus (when known) the goal-neutral repo-layout hint, so the agent knows
   // where each repo lives (/workspace/<name>). The TASK decides the goal. Passed as env, never argv.
@@ -437,7 +438,9 @@ function agentEnvFlags(
     "-e",
     `ANTHROPIC_API_KEY=${cfg.anthropicApiKey}`,
     "-e",
-    `ANTHROPIC_MODEL=${cfg.anthropicModel}`,
+    // Per-message model switch: the override is validated against the ccproxy catalog upstream
+    // (src/models.ts isAllowedModel) — by the time it reaches here it is a known alias.
+    `ANTHROPIC_MODEL=${modelOverride || cfg.anthropicModel}`,
     "-e",
     `AGENT_TASK=${task}`,
     "-e",
@@ -1043,9 +1046,10 @@ export async function runAgentTask(
   box: string,
   task: string,
   repos?: RepoLayout[],
-  creds?: AgentCreds
+  creds?: AgentCreds,
+  model?: string
 ) {
-  const env = agentEnvFlags(cfg, task, repos, creds?.primaryToken);
+  const env = agentEnvFlags(cfg, task, repos, creds?.primaryToken, model);
   const workdir = agentWorkdir(repos);
   await msb(cfg, ["exec", box, ...env, "--", "sh", "-lc", bootstrapScript(cfg)]);
   await applyGitCredentials(cfg, box, creds);
@@ -1182,13 +1186,14 @@ export async function resumeAgentTask(
   message: string,
   repos?: RepoLayout[],
   secrets?: Record<string, string>,
-  creds?: AgentCreds
+  creds?: AgentCreds,
+  model?: string
 ) {
   // A box that idle-timed-out while WAITING on a question is Stopped but intact — start it so the
   // answer reaches the same Claude session instead of failing the exec.
   await startBoxIfStopped(cfg, box);
   // Ephemeral secrets are appended as extra -e flags on THIS exec only (not stored).
-  const env = [...agentEnvFlags(cfg, message, repos, creds?.primaryToken), ...secretEnvFlags(secrets)];
+  const env = [...agentEnvFlags(cfg, message, repos, creds?.primaryToken, model), ...secretEnvFlags(secrets)];
   await applyGitCredentials(cfg, box, creds);
   await trustWorkspace(cfg, box);
   // The formatter AND the hooks are refreshed here too, not only at bootstrap: a box bootstrapped

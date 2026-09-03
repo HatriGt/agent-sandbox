@@ -732,8 +732,14 @@ function groupTrace(events: TraceEvent[]): TraceGroup[] {
       if (last?.kind === "tools") last.events.push(e);
       else out.push({ kind: "tools", events: [e] });
     } else if (e.kind === "lifecycle") {
-      // Every follow-up turn re-logs "session started"; the first one is information, the rest are noise.
-      if (/^session started/i.test(e.label) && out.some((g) => g.kind === "lifecycle" && /^session started/i.test(g.label))) continue;
+      // Every follow-up turn re-logs "session started"; the first one is information, the rest are
+      // noise — UNLESS the model changed (the per-message model switch's receipt is exactly this
+      // line, so a new model must stay visible).
+      if (/^session started/i.test(e.label)) {
+        const prior = [...out].reverse().find((g) => g.kind === "lifecycle" && /^session started/i.test(g.label));
+        const modelOf = (s: string) => s.match(/model ([\w.-]+)/i)?.[1] ?? "";
+        if (prior && prior.kind === "lifecycle" && modelOf(prior.label) === modelOf(e.label)) continue;
+      }
       out.push({ kind: "lifecycle", label: sentence(e.label), detail: e.detail });
     } else if (e.kind === "you") {
       // An answer to a question the transcript recorded (⟦ask⟧ … ⟦/ask⟧ right before) folds into one

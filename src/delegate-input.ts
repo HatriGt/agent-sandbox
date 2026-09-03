@@ -44,6 +44,8 @@ export interface DelegateInput {
   ref?: string;
   /** Single-repo patch shorthand; applies to `repo`. */
   patch?: string;
+  /** Model alias for this run (validated against the catalog upstream in http/handlers). */
+  model?: string;
 }
 
 /** A validated repo with a unique in-box directory name derived from the repo. */
@@ -69,6 +71,8 @@ export interface DelegatePlan {
   repos: RepoRef[];
   task: string;
   attachments?: Attachment[];
+  /** Model alias for message 1 (already allowlist-validated by the route/handler). */
+  model?: string;
   /** Back-compat accessor: the first repo's identifier. */
   repo: string;
   /** Back-compat accessor: the first repo's ref. */
@@ -190,6 +194,7 @@ export function validateDelegateInput(input: DelegateInput): DelegateValidation 
       source: input.source,
       repos: refs,
       task: input.task!.trim(),
+      ...(input.model?.trim() ? { model: input.model.trim() } : {}),
       // Back-compat accessor: first repo, or "" in task-only mode.
       repo: refs[0]?.repo ?? "",
       ref: refs[0]?.ref,

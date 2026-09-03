@@ -1,0 +1,29 @@
+{
+  "expo": {
+    "name": "Agent Sandbox",
+    "slug": "agent-sandbox",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "asb",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "splash": {
+      "backgroundColor": "#0f0f12",
+      "resizeMode": "contain"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "dev.ajeethkumar.agentsandbox",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Attach screenshots and photos to delegated tasks.",
+        "NSCameraUsageDescription": "Photograph a whiteboard or bug to delegate it as a task."
+      }
+    },
+    "android": {
+      "package": "dev.ajeethkumar.agentsandbox",
+      "adaptiveIcon": { "backgroundColor": "#0f0f12" }
+    },
+    "plugins": ["expo-router", "expo-secure-store", "expo-font"],
+    "experiments": { "typedRoutes": false }
+  }
+}

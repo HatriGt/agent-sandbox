@@ -13,6 +13,7 @@ import { isBoxName } from "./sync.js";
 import { z } from "zod";
 import type { Config } from "./config.js";
 import { validateDelegateInput, type DelegateSource, type DelegatePlan } from "./delegate-input.js";
+import { fetchModels, isAllowedModel } from "./models.js";
 import type { GitAccessResolution } from "./gh-token-store.js";
 import type { AgentCreds } from "./msb.js";
 import type { ElicitOutcome } from "./interactive.js";
@@ -65,10 +66,11 @@ export interface HandlerDeps {
     session: string,
     message: string,
     secrets?: Record<string, string>,
-    interact?: Interact
+    interact?: Interact,
+    model?: string
   ): Promise<string>;
   /** Continue the in-box session WITHOUT waiting for the next boundary (dashboard / queue / broker). */
-  resumeDetached?(cfg: Config, session: string, message: string, secrets?: Record<string, string>): Promise<void>;
+  resumeDetached?(cfg: Config, session: string, message: string, secrets?: Record<string, string>, model?: string): Promise<void>;
   /** Stop + remove the box. */
   teardown(cfg: Config, session: string): Promise<void>;
   /** Warm pool status line. */
@@ -236,6 +238,13 @@ export function registerTools(
           "Provide when delegate asks for one (a repo needs access no stored account has). It is " +
             "validated, stored by its GitHub account login, and reused automatically next time."
         ),
+      model: z
+        .string()
+        .optional()
+        .describe(
+          "Model alias for this run, from the controller's catalog (GET /models.json on the dashboard, " +
+            "e.g. ak-claude-haiku-4.5). Invalid values are rejected with the allowed list. Omit for the default."
+        ),
       githubAccount: z
         .string()
         .optional()
@@ -283,6 +292,7 @@ export function registerTools(
       allowDomains,
       githubToken,
       githubAccount,
+      model,
       verify,
       after,
       carry,
@@ -296,6 +306,7 @@ export function registerTools(
       allowDomains?: string[];
       githubToken?: string;
       githubAccount?: string;
+      model?: string;
       verify?: { command?: string; criterion?: string };
       after?: string;
       carry?: "patch" | "none";
@@ -341,6 +352,16 @@ export function registerTools(
       const noRepos = !repo && (!repos || repos.length === 0);
       const resolvedRepo =
         repo ?? (noRepos && resolvedSource === "local" ? cfg.workspaceDir : undefined);
+      // Model override: must be a catalog alias (or a configured default) — model routing is a
+      // controller decision, never a free-form caller string.
+      if (model?.trim()) {
+        const catalog = await fetchModels(cfg).catch(() => []);
+        if (!isAllowedModel(model.trim(), catalog, cfg)) {
+          return text(
+            `Unknown model '${model}'. Allowed: ${[cfg.anthropicModel, ...catalog.map((m) => m.id)].filter((v2, i, a) => a.indexOf(v2) === i).join(", ")}.`
+          );
+        }
+      }
       const v = validateDelegateInput({
         source: resolvedSource,
         repo: resolvedRepo,
@@ -348,6 +369,7 @@ export function registerTools(
         task,
         ref,
         patch,
+        model,
       });
       if (!v.ok) return text(v.question);
 

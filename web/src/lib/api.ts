@@ -460,6 +460,11 @@ export const api = {
     fetch(url("/file.json"), { method: "PUT", headers: { ...authHeaders, "content-type": "application/json" }, body: JSON.stringify({ session, path, content, encoding }) }).then(
       parse<{ ok: true; path: string; bytes: number }>
     ),
+  /** The model catalog for the picker + this box's current sticky model. */
+  models: (session?: string, signal?: AbortSignal) =>
+    fetch(url("/models.json", session ? { session } : {}), { headers: authHeaders, signal }).then(
+      parse<{ default: string; current: string; models: { id: string; label: string; tier: "opus" | "sonnet" | "haiku" | "other" }[] }>
+    ),
   /** Which operator messages (1-based; task = 1) have a restore point. */
   revertPoints: (session: string, signal?: AbortSignal) =>
     fetch(url("/revert-points.json", { session }), { headers: authHeaders, signal }).then(parse<{ messages: number[] }>),
@@ -491,11 +496,12 @@ export const api = {
    * agent is mid-turn the controller QUEUES the message ({queued:true}) and delivers it when the run
    * finishes; `force` bypasses the queue (used for answering a question).
    */
-  resume: (session: string, message: string, opts: { force?: boolean } = {}) =>
+  resume: (session: string, message: string, opts: { force?: boolean; model?: string } = {}) =>
     post<{ output: string; queued?: undefined } | { queued: true; id: string }>("/resume.json", {
       session,
       message,
       force: opts.force,
+      ...(opts.model ? { model: opts.model } : {}),
     }),
 
   /** Queued follow-ups for a box. */
@@ -534,7 +540,7 @@ export const api = {
     ),
   devicePoll: (device_code: string) => post<DevicePoll>("/accounts/device/poll.json", { device_code }),
 
-  delegate: (input: { task: string; repos?: { repo: string; ref?: string }[]; attachments?: { name: string; dataUrl: string }[] }) =>
+  delegate: (input: { task: string; repos?: { repo: string; ref?: string }[]; attachments?: { name: string; dataUrl: string }[]; model?: string }) =>
     post<{ ok: true; box: string; warm: boolean; output: string; inferred?: string[] } | { ok: false; question: string }>(
       "/delegate.json",
       { source: "git", ...input }

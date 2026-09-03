@@ -55,6 +55,7 @@ import { Inbox, startInboxDelivery } from "./inbox.js";
 import { makeCredentialBroker } from "./broker.js";
 import { FILE_INDEX_CAP, fileDetailsCommand, makeFileIndex, parseFileDetails } from "./files.js";
 import { canRevert, captureCmd, checkpointForMessage, listCmd, parseCkptLs, revertCmd, withBoxLock } from "./checkpoint.js";
+import { fetchModels, isAllowedModel } from "./models.js";
 import { exec as execInBox, execWithInput } from "./msb.js";
 import { loadStore, saveStore, pickDefaultAccount, upsertAccount, removeAccount, setDefaultAccount } from "./gh-token-store.js";
 import { probeToken } from "./gh-probe.js";
@@ -272,6 +273,11 @@ const watchHub = new WatchHub({ read: async (s) => redactSnap(await gatherWatch(
 const inbox = new Inbox();
 // Detached: kicks the run and returns; the transcript streams. (deps.resume would block up to
 // WAIT_TIMEOUT_MS for the agent's next boundary — fine for an MCP tool call, wrong for a chat send.)
+// Per-box sticky model (Cursor semantics: a pick holds until changed). In-memory: a controller
+// restart falls back to the default, and the thread's "session started (model …)" lines keep the
+// historical truth regardless.
+const boxModels = new Map<string, string>();
+
 const resumeQuietly = (session: string, message: string) => {
   // A resume boots a sleeping box; forget the "stopped" memory and the cached idle snapshot at once so
   // the thread does not show it asleep (and close its stream) for the next 15 s.
@@ -286,7 +292,9 @@ const resumeQuietly = (session: string, message: string) => {
     // message changes anything — heavy dirs are excluded, so this is ~1 s on the send path at worst.
     await captureBeforeMessage(session).catch(() => {});
     return withOwner(ownerOf(db, session) ?? null, () =>
-      deps.resumeDetached ? deps.resumeDetached(cfg, session, message) : deps.resume(cfg, session, message, undefined, {}).then(() => undefined)
+      deps.resumeDetached
+        ? deps.resumeDetached(cfg, session, message, undefined, boxModels.get(session))
+        : deps.resume(cfg, session, message, undefined, {}, boxModels.get(session)).then(() => undefined)
     );
   });
 };
@@ -1094,12 +1102,23 @@ app.post("/ask.json", async (req: Request, res: Response) => {
 // WAIT_TIMEOUT_MS driving the same interactive loop resume() uses over MCP.
 app.post("/resume.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const { session, message, force } = (req.body ?? {}) as { session?: string; message?: string; force?: boolean };
+  const { session, message, force, model } = (req.body ?? {}) as { session?: string; message?: string; force?: boolean; model?: string };
   if (!session || !message?.trim()) {
     res.status(400).json({ error: "session and message are required" });
     return;
   }
   try {
+    // Per-message model switch: validate against the catalog, then make it STICK for this box —
+    // every later lane (inbox delivery, send-now, broker, question answers) uses the sticky value
+    // unless a new explicit pick replaces it. Cursor semantics: the picker holds until changed.
+    if (model?.trim()) {
+      const catalog = await fetchModels(cfg).catch(() => []);
+      if (!isAllowedModel(model.trim(), catalog, cfg)) {
+        res.status(400).json({ error: `Unknown model '${model}'. Allowed: ${[cfg.anthropicModel, ...catalog.map((m) => m.id)].filter((v, i, a) => a.indexOf(v) === i).join(", ")}` });
+        return;
+      }
+      boxModels.set(session, model.trim());
+    }
     // Mid-turn: a second `claude -c` would race the running one, so the message waits in the inbox
     // and is delivered the moment the run finishes. `force` (answering a question) bypasses.
     if (!force) {
@@ -1112,6 +1131,23 @@ app.post("/resume.json", async (req: Request, res: Response) => {
     }
     await resumeQuietly(session, message);
     res.json({ ok: true });
+  } catch (e) {
+    failWith(res, e);
+  }
+});
+
+// The model catalog for the dashboard picker: ccproxy's Claude aliases, labeled and tiered, plus
+// which one is the default and any per-box sticky picks.
+app.get("/models.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  try {
+    const models = await fetchModels(cfg);
+    const session = typeof req.query.session === "string" ? req.query.session : "";
+    res.json({
+      default: cfg.anthropicModel,
+      current: (session && boxModels.get(session)) || cfg.anthropicModel,
+      models,
+    });
   } catch (e) {
     failWith(res, e);
   }
@@ -1831,8 +1867,10 @@ app.get("/revert-points.json", async (req: Request, res: Response) => {
     const turns = parseCkptLs((await execInBox(cfg, session, listCmd())).stdout);
     // Checkpoint t<n> is the restore point for operator message n+1 (see checkpointForMessage).
     res.json({ messages: turns.map((n) => n + 1) });
-  } catch (e) {
-    failWith(res, e);
+  } catch {
+    // A gone/bogus box has no revert points — that's an empty list, not a 500 (found by the
+    // negative-scenario sweep: the exec failure was surfacing as a plumbing error).
+    res.json({ messages: [] });
   }
 });
 app.post("/revert.json", async (req: Request, res: Response) => {
@@ -1873,6 +1911,7 @@ app.post("/teardown.json", async (req: Request, res: Response) => {
     await deps.teardown(cfg, session);
     watchHub.drop(session);
     inbox.clear(session);
+    boxModels.delete(session);
     void forgetTitle(cfg, session).catch(() => {});
     res.json({ ok: true });
   } catch (e) {
@@ -1931,6 +1970,16 @@ app.post("/delegate.json", async (req: Request, res: Response) => {
       const max = (p.kind === "user" && getUser(db, p.userId)?.max_boxes) || cfg.userMaxBoxes;
       ownership.assertQuota(ownership.liveOwned((await readFleet()).boxes), max);
     }
+    // Model pick for message 1: same catalog gate as /resume.json, and it seeds the sticky value.
+    let model: string | undefined;
+    if (typeof body.model === "string" && body.model.trim()) {
+      const catalog = await fetchModels(cfg).catch(() => []);
+      if (!isAllowedModel(body.model.trim(), catalog, cfg)) {
+        res.status(400).json({ error: `Unknown model '${body.model}'.` });
+        return;
+      }
+      model = body.model.trim();
+    }
     const result = await runDelegateFlow(cfg, deps, {
       attachments: attachments.length ? attachments : undefined,
       // A browser has no local tree to ship: git only. (`source:"local"` would rsync a controller-host path.)
@@ -1941,8 +1990,12 @@ app.post("/delegate.json", async (req: Request, res: Response) => {
       ref: typeof body.ref === "string" ? body.ref : undefined,
       githubToken: typeof body.githubToken === "string" ? body.githubToken : undefined,
       githubAccount: typeof body.githubAccount === "string" ? body.githubAccount : undefined,
+      model,
     });
-    if (result.ok) void generateTitle(cfg, result.box, task).catch(() => {});
+    if (result.ok) {
+      if (model) boxModels.set(result.box, model);
+      void generateTitle(cfg, result.box, task).catch(() => {});
+    }
     res.json(inferred.length ? { ...result, inferred } : result);
   } catch (e) {
     failWith(res, e);

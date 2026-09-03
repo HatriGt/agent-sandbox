@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { RepoPicker, type PickedRepo } from "@/components/RepoPicker";
+import { ModelChip, useModelChoice } from "@/components/thread/ModelPicker";
 import { motion } from "motion/react";
 import { api, type BoxView, type FleetLifecycle } from "@/lib/api";
 import { fmtAgo, friendlyName, shortName, threadSort, threadTitle } from "@/lib/format";
@@ -139,6 +140,8 @@ export function Hub({
   const prefill = React.useRef(takePrefill());
   const [task, setTask] = React.useState(() => prefill.current?.task ?? readDraft("hub"));
   const [picked, setPicked] = React.useState<PickedRepo[]>([]);
+  // Model for message 1 — the "new-task" scope key keeps it distinct from any box's sticky pick.
+  const model = useModelChoice("new-task");
   const [showRepo, setShowRepo] = React.useState(() => !!prefill.current?.wantsRepo);
   React.useEffect(() => writeDraft("hub", task), [task]);
   // Re-attach the source run's repositories: each checkout name is looked up across your accounts and
@@ -236,6 +239,7 @@ export function Hub({
         task: t,
         repos: picked.length ? picked.map((p) => ({ repo: p.repo, ref: p.ref || undefined })) : undefined,
         attachments: attached.length ? attached.map((i) => ({ name: i.name, dataUrl: i.dataUrl })) : undefined,
+        ...(model.picked ? { model: model.picked } : {}),
       });
       if (res.ok) {
         // Accepted: only now let go of the brief and the images (the draft effect clears storage too).
@@ -384,6 +388,7 @@ export function Hub({
                   {picked.length ? <Plus className="size-3.5" aria-hidden /> : <GitBranch className="size-3.5" aria-hidden />}
                   {picked.length ? "Add another repo" : "Attach repos"}
                 </button>
+                <ModelChip current={model.current} models={model.models} defaultId={model.defaultId} onPick={model.pick} />
                 {showRepo && (
                   <RepoPicker
                     className="absolute top-full left-0 z-20 mt-2"
