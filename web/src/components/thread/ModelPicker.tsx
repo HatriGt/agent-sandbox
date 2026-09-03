@@ -112,13 +112,18 @@ export function ModelChip({
   const inputRef = React.useRef<HTMLInputElement>(null);
   const shown = React.useMemo(() => filterModels(models, query), [models, query]);
 
-  // Opening resets the search and lands the caret in it — open-and-type, no second click.
+  // Opening resets the search; the caret lands in it via autoFocus + the effect below (the popover
+  // mounts inside a motion element, so a focus fired before mount hits a node that gets replaced).
   const openMenu = React.useCallback(() => {
     setQuery("");
     setCursor(0);
     setOpen(true);
-    requestAnimationFrame(() => inputRef.current?.focus());
   }, []);
+  React.useEffect(() => {
+    if (!open) return;
+    const t = window.setTimeout(() => inputRef.current?.focus(), 30);
+    return () => window.clearTimeout(t);
+  }, [open]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -186,6 +191,7 @@ export function ModelChip({
               <Search className="text-muted-foreground size-3.5 shrink-0" aria-hidden />
               <input
                 ref={inputRef}
+                autoFocus
                 value={query}
                 onChange={(e) => {
                   setQuery(e.target.value);
