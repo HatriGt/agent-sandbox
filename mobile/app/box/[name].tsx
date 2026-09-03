@@ -14,6 +14,7 @@ import { radius } from "@/theme/tokens";
 import { Composer } from "@/components/Composer";
 import { QuestionCard } from "@/components/QuestionCard";
 import { RunSummary } from "@/components/RunSummary";
+import { TurnRail, type Turn } from "@/components/TurnRail";
 import { WakingCard } from "@/components/WakingCard";
 import { Button } from "@/components/ui/Button";
 import { groupEvents, ThreadRow } from "@/components/TranscriptView";
@@ -66,6 +67,10 @@ export default function Thread() {
   const [note, setNote] = useState<string | null>(null);
   const [stick, setStick] = useState(true);
   const scrollRef = useRef<ScrollView>(null);
+  const [scrollY, setScrollY] = useState(0);
+  const [viewportH, setViewportH] = useState(0);
+  const turnYs = useRef(new Map<string, number>());
+  const [turnTick, setTurnTick] = useState(0);
   const wokeRef = useRef(false);
   const buzzedRef = useRef(false);
   const mountedAt = useRef(Date.now());
@@ -128,13 +133,17 @@ export default function Thread() {
   }, [session, running]);
   const canRevertNow = !sleeping && !running;
 
-  // Message ordinal per grouped item, matching the web: task = 1, each you/asked
-  // group up to and including the current one increments.
+  // Message ordinal per grouped item, matching the web: task = 1; each `you`
+  // increments — but an ask+answer PAIR counts once (the web folds them into
+  // one `asked` item that never gets a revert button).
   const msgIndexOf = useMemo(() => {
     const map = new Map<number, number>();
     let n = 1;
     items.forEach((it, i) => {
-      if (it.kind === "you" || it.kind === "ask") {
+      if (it.kind === "ask") {
+        n += 1; // the pair's single increment (answered or not)
+      } else if (it.kind === "you") {
+        if (items[i - 1]?.kind === "ask") return; // the answer half of the pair: no button
         n += 1;
         map.set(i, n);
       }
@@ -287,6 +296,8 @@ export default function Thread() {
             onScroll={(e) => {
               const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
               setStick(contentOffset.y + layoutMeasurement.height > contentSize.height - 80);
+              setScrollY(contentOffset.y);
+              setViewportH(layoutMeasurement.height);
             }}
             scrollEventThrottle={100}
             onContentSizeChange={() => {
@@ -310,13 +321,25 @@ export default function Thread() {
               </View>
             )}
             {(sleeping || wakingSince != null) && <WakingCard sleeping={sleeping} startedAt={wakingSince ?? mountedAt.current} />}
+            {/* The task that started this run — pinned first, like the web's Task bubble. */}
+            {merged?.task ? (
+              <View
+                onLayout={(e) => {
+                  turnYs.current.set("task", e.nativeEvent.layout.y);
+                  setTurnTick((t) => t + 1);
+                }}
+              >
+                <ThreadRow item={{ kind: "you", text: merged.task }} />
+              </View>
+            ) : null}
             {items.map((it, i) => {
               const msgIndex = msgIndexOf.get(i);
               const revertableHere =
                 it.kind === "you" && msgIndex !== undefined && revertable.has(msgIndex) && canRevertNow;
-              return (
+              const isTurn = it.kind === "you" || it.kind === "ask";
+              const row = (
                 <ThreadRow
-                  key={i}
+                  key={isTurn ? undefined : i}
                   item={it}
                   animate={animate && i >= items.length - 2}
                   onRevert={
@@ -325,6 +348,19 @@ export default function Thread() {
                       : undefined
                   }
                 />
+              );
+              return isTurn ? (
+                <View
+                  key={i}
+                  onLayout={(e) => {
+                    turnYs.current.set(`${it.kind}-${i}`, e.nativeEvent.layout.y);
+                    setTurnTick((t) => t + 1);
+                  }}
+                >
+                  {row}
+                </View>
+              ) : (
+                <React.Fragment key={i}>{row}</React.Fragment>
               );
             })}
             {!sleeping && merged?.runState === "done" && items.length > 0 && (
@@ -373,6 +409,26 @@ export default function Thread() {
               </View>
             )}
           </ScrollView>
+
+          <TurnRail
+            turns={useMemo<Turn[]>(() => {
+              void turnTick;
+              const out: Turn[] = [];
+              const taskY = turnYs.current.get("task");
+              if (taskY !== undefined) out.push({ key: "task", kind: "task", y: taskY });
+              items.forEach((it, i) => {
+                const y = turnYs.current.get(`${it.kind}-${i}`);
+                if (y === undefined) return;
+                if (it.kind === "ask") out.push({ key: `ask-${i}`, kind: "question", y });
+                else if (it.kind === "you") out.push({ key: `you-${i}`, kind: "you", y });
+              });
+              return out.sort((a, b) => a.y - b.y);
+              // eslint-disable-next-line react-hooks/exhaustive-deps
+            }, [items, turnTick])}
+            scrollY={scrollY}
+            viewportH={viewportH}
+            onJump={(y) => scrollRef.current?.scrollTo({ y: Math.max(0, y - 12), animated: true })}
+          />
 
           {/* Scroll-to-bottom pill */}
           {!stick && (

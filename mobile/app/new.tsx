@@ -5,11 +5,13 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import * as WebBrowser from "expo-web-browser";
 import { api, type RepoInfo, type SkillView } from "@/lib/api";
+import { setPendingDelegate } from "@/lib/pending-delegate";
 import { useKeyboardInset } from "@/hooks/useKeyboardInset";
 import { useAuth } from "@/state/auth";
 import { useTheme } from "@/theme/ThemeContext";
 import { fonts, radius, type } from "@/theme/tokens";
 import { T } from "@/components/ui/AppText";
+import { Icon } from "@/components/ui/Icon";
 import { Button } from "@/components/ui/Button";
 import { Field } from "@/components/ui/Field";
 import { TextInput } from "react-native";
@@ -59,7 +61,6 @@ export default function NewTask() {
   const [picked, setPicked] = useState<{ repo: string; ref?: string }[]>([]);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [skills, setSkills] = useState<SkillView[]>([]);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [clarify, setClarify] = useState<string | null>(null);
   const [models, setModels] = useState<{ id: string; label: string }[]>([]);
@@ -111,28 +112,23 @@ export default function NewTask() {
     ]);
   };
 
-  const submit = async () => {
+  // Fire-and-navigate, like the web swapping to BootingThread the moment you
+  // submit: the delegate promise rides to /booting, which shows progress and
+  // replaces itself with the thread as soon as the box name comes back.
+  const submit = () => {
     if (!task.trim()) return;
-    setBusy(true);
     setError(null);
     setClarify(null);
-    try {
-      const r = await api.delegate({
+    setPendingDelegate(
+      task.trim(),
+      api.delegate({
         task: task.trim(),
         repos: picked.length ? picked : undefined,
         attachments: attachments.length ? attachments : undefined,
         ...(model ? { model } : {}),
-      });
-      if (r.ok) {
-        router.replace(`/box/${encodeURIComponent(r.box)}`);
-      } else {
-        setClarify(r.question);
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
+      }),
+    );
+    router.replace("/booting");
   };
 
   return (
@@ -277,30 +273,52 @@ export default function NewTask() {
                 </Pressable>
               </View>
             ))}
+            {/* Results ABOVE the search field so the keyboard never hides them. */}
+            {repoQuery.trim().length > 0 && (
+              <View
+                style={{
+                  backgroundColor: palette.popover,
+                  borderWidth: 1,
+                  borderColor: palette.border,
+                  borderRadius: radius.xl,
+                  overflow: "hidden",
+                }}
+              >
+                {repoResults.filter((r) => !picked.some((p) => p.repo === r.fullName)).length === 0 ? (
+                  <T variant="meta" tone="faint" style={{ padding: 12 }}>
+                    Nothing matches "{repoQuery.trim()}".
+                  </T>
+                ) : (
+                  repoResults
+                    .filter((r) => !picked.some((p) => p.repo === r.fullName))
+                    .map((r) => (
+                      <Pressable
+                        key={r.fullName}
+                        onPress={() => {
+                          setPicked((ps) => [...ps, { repo: r.fullName }]);
+                          setRepoQuery("");
+                        }}
+                        style={({ pressed }) => ({
+                          paddingVertical: 10,
+                          paddingHorizontal: 12,
+                          backgroundColor: pressed ? palette.accent : "transparent",
+                        })}
+                      >
+                        <T variant="meta" mono>
+                          {r.fullName}
+                          {r.private ? " · private" : ""}
+                        </T>
+                        {r.description ? (
+                          <T variant="micro" tone="faint" numberOfLines={1}>
+                            {r.description}
+                          </T>
+                        ) : null}
+                      </Pressable>
+                    ))
+                )}
+              </View>
+            )}
             <Field placeholder="Search repos…" value={repoQuery} onChangeText={setRepoQuery} autoCapitalize="none" mono />
-            {repoQuery.trim().length > 0 &&
-              repoResults
-                .filter((r) => !picked.some((p) => p.repo === r.fullName))
-                .map((r) => (
-                  <Pressable
-                    key={r.fullName}
-                    onPress={() => {
-                      setPicked((ps) => [...ps, { repo: r.fullName }]);
-                      setRepoQuery("");
-                    }}
-                    style={{ paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: palette.border }}
-                  >
-                    <T variant="meta" mono>
-                      {r.fullName}
-                      {r.private ? " · private" : ""}
-                    </T>
-                    {r.description ? (
-                      <T variant="micro" tone="faint" numberOfLines={1}>
-                        {r.description}
-                      </T>
-                    ) : null}
-                  </Pressable>
-                ))}
           </View>
 
           {models.length > 0 && (
@@ -380,8 +398,24 @@ export default function NewTask() {
             </T>
           </View>
         </ScrollView>
-        <View style={{ padding: 16, paddingBottom: 16 + keyboardInset }}>
-          <Button title="Delegate" onPress={submit} loading={busy} disabled={!task.trim() || !!trialExpired} />
+        {/* Web parity: a circular arrow-up "Start a machine with this task". */}
+        <View style={{ padding: 16, paddingBottom: 16 + keyboardInset, flexDirection: "row", justifyContent: "flex-end" }}>
+          <Pressable
+            onPress={submit}
+            disabled={!task.trim() || !!trialExpired}
+            accessibilityLabel="Start a machine with this task"
+            style={({ pressed }) => ({
+              width: 52,
+              height: 52,
+              borderRadius: 26,
+              backgroundColor: task.trim() && !trialExpired ? palette.primary : palette.muted,
+              alignItems: "center",
+              justifyContent: "center",
+              opacity: pressed ? 0.8 : 1,
+            })}
+          >
+            <Icon name="arrow-up" size={24} color={task.trim() && !trialExpired ? palette.primaryForeground : palette.faint} />
+          </Pressable>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
