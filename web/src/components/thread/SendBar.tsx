@@ -408,7 +408,7 @@ export function SendBar({
                 />
               </div>
               {/* Model switch: only for the AGENT lane — the side co-pilot stays on ASK_MODEL. */}
-              {toAgent && <ModelChip current={model.current} models={model.models} defaultId={model.defaultId} onPick={model.pick} disabled={sending} />}
+              {toAgent && <ModelChip current={model.current} models={model.models} defaultId={model.defaultId} onPick={model.pick} disabled={sending} hotkey />}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button

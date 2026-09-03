@@ -1,16 +1,17 @@
 import * as React from "react";
-import { Check, ChevronDown, Cpu } from "lucide-react";
+import { Check, ChevronDown, Search } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 /**
  * The model switch — Cursor's picker, in this console's voice. A compact chip in the composer's
- * action row showing the CURRENT model; click opens a tier-grouped popover of the ccproxy catalog.
- * A pick sticks for the box (the server holds it; localStorage repaints instantly) and rides the
- * next send. When the active model is not the deployment default the chip is tinted — "you are off
- * the default" must be glanceable, because a forgotten Haiku pick quietly degrades every following
- * turn.
+ * action row showing the CURRENT model; click (or ⌘.) opens a command-palette-style popover:
+ * search on top with the caret ALREADY in it (open-and-type, no second click), a capped scrolling
+ * list under it, ArrowUp/Down + Enter to pick, Escape to close. A pick sticks for the box (the
+ * server holds it; localStorage repaints instantly). When the active model is not the deployment
+ * default the chip is tinted — a forgotten Haiku pick must be glanceable, because it quietly
+ * degrades every following turn.
  */
 
 export interface ModelChoice {
@@ -81,34 +82,72 @@ export function useModelChoice(box: string | null): {
   return { current, models, defaultId, pick, picked };
 }
 
+/** Same subsequence-friendly filter feel as the file mention menu: substring on label OR id. */
+export function filterModels(models: ModelChoice[], query: string): ModelChoice[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return models;
+  return models.filter((m) => m.label.toLowerCase().includes(q) || m.id.toLowerCase().includes(q));
+}
+
 export function ModelChip({
   current,
   models,
   defaultId,
   onPick,
   disabled,
+  /** Register a global open shortcut (⌘/Ctrl+.) — pass true on the composer's instance only. */
+  hotkey,
 }: {
   current: ModelChoice | null;
   models: ModelChoice[];
   defaultId: string;
   onPick: (m: ModelChoice) => void;
   disabled?: boolean;
+  hotkey?: boolean;
 }) {
   const [open, setOpen] = React.useState(false);
+  const [query, setQuery] = React.useState("");
+  const [cursor, setCursor] = React.useState(0);
   const rootRef = React.useRef<HTMLDivElement>(null);
+  const inputRef = React.useRef<HTMLInputElement>(null);
+  const shown = React.useMemo(() => filterModels(models, query), [models, query]);
+
+  // Opening resets the search and lands the caret in it — open-and-type, no second click.
+  const openMenu = React.useCallback(() => {
+    setQuery("");
+    setCursor(0);
+    setOpen(true);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, []);
+
   React.useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
       if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
     };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
     window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
+    return () => window.removeEventListener("mousedown", onDown);
   }, [open]);
+
+  // ⌘. / Ctrl+. — the composer's model switch, reachable without leaving the keyboard.
+  React.useEffect(() => {
+    if (!hotkey) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "." && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        openMenu();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [hotkey, openMenu]);
+
+  const choose = (m: ModelChoice | undefined) => {
+    if (!m) return;
+    onPick(m);
+    setOpen(false);
+  };
+
   if (!current || models.length === 0) return null;
   const offDefault = current.id !== defaultId;
   return (
@@ -118,10 +157,11 @@ export function ModelChip({
         disabled={disabled}
         onClick={(e) => {
           e.stopPropagation();
-          setOpen((v) => !v);
+          open ? setOpen(false) : openMenu();
         }}
         aria-expanded={open}
         aria-label={`Model: ${current.label}`}
+        title="Switch model (⌘.)"
         className={cn(
           "flex h-7 cursor-pointer items-center gap-1.5 rounded-md border px-2 text-micro font-medium transition-colors disabled:opacity-50",
           offDefault
@@ -140,44 +180,71 @@ export function ModelChip({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 4, scale: 0.98 }}
             transition={{ duration: 0.15, ease: [0.22, 1, 0.36, 1] }}
-            role="listbox"
-            aria-label="Model"
-            className="bg-popover text-popover-foreground absolute bottom-full left-0 z-30 mb-1.5 w-64 rounded-xl border p-1 shadow-e3"
+            className="bg-popover text-popover-foreground absolute bottom-full left-0 z-30 mb-1.5 w-64 overflow-hidden rounded-xl border shadow-e3"
           >
-            <p className="text-muted-foreground flex items-center gap-1.5 px-2.5 pt-1.5 pb-1 text-micro">
-              <Cpu className="size-3" aria-hidden />
-              Model for the next message — sticks until changed
-            </p>
-            {models.map((m) => {
-              const on = m.id === current.id;
-              return (
-                <button
-                  key={m.id}
-                  type="button"
-                  role="option"
-                  aria-selected={on}
-                  onMouseDown={(e) => {
-                    e.preventDefault(); // keep the composer focused
-                    onPick(m);
+            <label className="flex h-9 items-center gap-2 border-b px-2.5">
+              <Search className="text-muted-foreground size-3.5 shrink-0" aria-hidden />
+              <input
+                ref={inputRef}
+                value={query}
+                onChange={(e) => {
+                  setQuery(e.target.value);
+                  setCursor(0);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    setCursor((c) => Math.min(shown.length - 1, c + 1));
+                  } else if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    setCursor((c) => Math.max(0, c - 1));
+                  } else if (e.key === "Enter") {
+                    e.preventDefault();
+                    choose(shown[cursor]);
+                  } else if (e.key === "Escape") {
+                    e.preventDefault();
                     setOpen(false);
-                  }}
-                  className={cn(
-                    "flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left transition-colors",
-                    on ? "bg-accent" : "hover:bg-muted"
-                  )}
-                >
-                  <span className={cn("size-2 shrink-0 rounded-full", TIER_TINT[m.tier])} aria-hidden />
-                  <span className="min-w-0 flex-1">
-                    <span className="text-foreground block text-meta font-medium">
-                      {m.label}
-                      {m.id === defaultId && <span className="text-faint ml-1.5 text-micro font-normal">default</span>}
+                  }
+                }}
+                placeholder="Search models…"
+                aria-label="Search models"
+                className="text-foreground placeholder:text-muted-foreground min-w-0 flex-1 bg-transparent text-meta outline-none"
+              />
+              <kbd className="text-faint hidden rounded border px-1 font-mono text-[9px] leading-4 sm:block">⌘.</kbd>
+            </label>
+            <div role="listbox" aria-label="Model" className="max-h-56 overflow-y-auto p-1">
+              {shown.length === 0 && <p className="text-muted-foreground px-2.5 py-3 text-micro">Nothing matches “{query}”.</p>}
+              {shown.map((m, i) => {
+                const on = m.id === current.id;
+                return (
+                  <button
+                    key={m.id}
+                    type="button"
+                    role="option"
+                    aria-selected={on}
+                    onMouseEnter={() => setCursor(i)}
+                    onMouseDown={(e) => {
+                      e.preventDefault(); // keep focus where it was
+                      choose(m);
+                    }}
+                    className={cn(
+                      "flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left transition-colors",
+                      i === cursor ? "bg-accent" : on ? "bg-muted/60" : ""
+                    )}
+                  >
+                    <span className={cn("size-2 shrink-0 rounded-full", TIER_TINT[m.tier])} aria-hidden />
+                    <span className="min-w-0 flex-1">
+                      <span className="text-foreground block truncate text-meta font-medium">
+                        {m.label}
+                        {m.id === defaultId && <span className="text-faint ml-1.5 text-micro font-normal">default</span>}
+                      </span>
+                      <span className="text-faint block truncate font-mono text-micro">{m.id}</span>
                     </span>
-                    <span className="text-faint block truncate font-mono text-micro">{m.id}</span>
-                  </span>
-                  {on && <Check className="text-foreground size-3.5 shrink-0" strokeWidth={2.5} aria-hidden />}
-                </button>
-              );
-            })}
+                    {on && <Check className="text-foreground size-3.5 shrink-0" strokeWidth={2.5} aria-hidden />}
+                  </button>
+                );
+              })}
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
