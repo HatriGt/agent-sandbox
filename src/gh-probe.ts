@@ -70,7 +70,9 @@ export async function isPublicRepo(cfg: Config, repo: string): Promise<boolean> 
   if (!m) return false;
   const path = `/repos/${m[1]}/${m[2]}`;
   if (!isSafeApiPath(path)) return false;
-  const remote = `curl -sf -H "Accept: application/vnd.github+json" ${shellQuote(`https://api.github.com${path}`)}`;
+  // -L: a transferred repo answers 301 Moved Permanently; the probe must follow to the new home
+  // (git clone follows the same redirect, so a moved public repo still clones fine).
+  const remote = `curl -sfL -H "Accept: application/vnd.github+json" ${shellQuote(`https://api.github.com${path}`)}`;
   const r = await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, remote], { check: false });
   try {
     const j = JSON.parse(r.stdout ?? "") as { private?: boolean; full_name?: string };
