@@ -28,6 +28,11 @@ export function useWatch(session: string | undefined) {
     setLog(logRef.current);
   };
 
+  // Set when the box goes terminal/asleep; a later "alive again" poll result
+  // reopens the SSE stream (the server closed it at `done`, so a fresh
+  // connection is the only way to get live appends after a wake or follow-up).
+  const reconnectRef = useRef<() => void>(() => {});
+
   const startPoll = useCallback(() => {
     if (!session) return;
     const poll = async () => {
@@ -38,6 +43,13 @@ export function useWatch(session: string | undefined) {
         setMeta(rest);
         setLogBoth(() => l);
         setGone(false);
+        if (rest.boxStatus === "Running" && (rest.runState === "running" || rest.runState === "waiting")) {
+          if (pollTimer.current) clearTimeout(pollTimer.current);
+          pollTimer.current = null;
+          offset.current = undefined; // resnapshot: the log may have been replaced across the wake
+          reconnectRef.current();
+          return;
+        }
       } catch (e) {
         if ((e as { status?: number }).status === 404) setGone(true);
       }
@@ -103,6 +115,8 @@ export function useWatch(session: string | undefined) {
     );
   }, [session, startPoll]);
 
+  reconnectRef.current = connect;
+
   useEffect(() => {
     if (!session) return;
     stopped.current = false;
@@ -110,6 +124,19 @@ export function useWatch(session: string | undefined) {
     setLog("");
     setMeta(null);
     offset.current = undefined;
+    // Fetch the snapshot immediately over plain GET: for a sleeping (stopped)
+    // box the SSE stream may error without ever delivering meta, and the
+    // caller needs boxStatus to decide to wake it.
+    api
+      .watch(session)
+      .then((snap) => {
+        const { log: l, ...rest } = snap;
+        setMeta((m) => m ?? rest);
+        setLogBoth((prev) => prev || l);
+      })
+      .catch((e) => {
+        if ((e as { status?: number }).status === 404) setGone(true);
+      });
     connect();
     const sub = AppState.addEventListener("change", (st) => {
       if (stopped.current) return;

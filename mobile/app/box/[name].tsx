@@ -11,10 +11,11 @@ import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { Composer } from "@/components/Composer";
 import { QuestionCard } from "@/components/QuestionCard";
+import { RunSummary } from "@/components/RunSummary";
+import { Button } from "@/components/ui/Button";
 import { groupEvents, ThreadRow } from "@/components/TranscriptView";
 import { BoxActionsSheet } from "@/components/sheets/BoxActionsSheet";
 import { ChangesSheet } from "@/components/sheets/ChangesSheet";
-import { CheckpointsSheet } from "@/components/sheets/CheckpointsSheet";
 import { PrSheet } from "@/components/sheets/PrSheet";
 import { T } from "@/components/ui/AppText";
 import { Icon, type IconName } from "@/components/ui/Icon";
@@ -35,7 +36,7 @@ export default function Thread() {
   const session = typeof name === "string" ? name : "";
   const { meta, log, connected, gone, refresh } = useWatch(session || undefined);
 
-  const [sheet, setSheet] = useState<null | "changes" | "checkpoints" | "pr" | "actions" | "model">(null);
+  const [sheet, setSheet] = useState<null | "changes" | "pr" | "actions" | "model">(null);
   const [models, setModels] = useState<{ id: string; label: string; tier: string }[]>([]);
   const [currentModel, setCurrentModel] = useState<string | null>(null);
   const [pickedModel, setPickedModel] = useState<string | null>(null);
@@ -75,6 +76,49 @@ export default function Thread() {
       })
       .catch(() => {});
   }, [session]);
+
+  // Which operator messages have a restore point. Refetched whenever the run settles.
+  const [revertable, setRevertable] = useState<Set<number>>(new Set());
+  const [revertAsk, setRevertAsk] = useState<{ message: number; text: string } | null>(null);
+  const [reverting, setReverting] = useState(false);
+  useEffect(() => {
+    if (!session || running) return;
+    api
+      .revertPoints(session)
+      .then((r) => setRevertable(new Set(r.messages)))
+      .catch(() => {});
+  }, [session, running]);
+  const canRevertNow = !sleeping && !running;
+
+  // Message ordinal per grouped item, matching the web: task = 1, each you/asked
+  // group up to and including the current one increments.
+  const msgIndexOf = useMemo(() => {
+    const map = new Map<number, number>();
+    let n = 1;
+    items.forEach((it, i) => {
+      if (it.kind === "you" || it.kind === "ask") {
+        n += 1;
+        map.set(i, n);
+      }
+    });
+    return map;
+  }, [items]);
+
+  const doRevert = async () => {
+    if (!revertAsk) return;
+    setReverting(true);
+    try {
+      await api.revert(session, revertAsk.message);
+      setRevertAsk(null);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      await refresh();
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : String(e));
+      setRevertAsk(null);
+    } finally {
+      setReverting(false);
+    }
+  };
 
   // Haptic nudge the moment the agent stops on a question while you're watching.
   useEffect(() => {
@@ -149,10 +193,9 @@ export default function Thread() {
     );
   }
 
-  const chips: { key: "changes" | "pr" | "checkpoints"; label: string; icon: IconName }[] = [
+  const chips: { key: "changes" | "pr"; label: string; icon: IconName }[] = [
     { key: "changes", label: "Changes", icon: "file-plus" },
     ...(pr ? ([{ key: "pr" as const, label: `PR #${pr.number}`, icon: "git-pull-request" as IconName }]) : []),
-    { key: "checkpoints", label: "Checkpoints", icon: "rotate-ccw" },
   ];
 
   return (
@@ -247,9 +290,32 @@ export default function Thread() {
                 </T>
               </View>
             )}
-            {items.map((it, i) => (
-              <ThreadRow key={i} item={it} animate={animate && i >= items.length - 2} />
-            ))}
+            {items.map((it, i) => {
+              const msgIndex = msgIndexOf.get(i);
+              const revertableHere =
+                it.kind === "you" && msgIndex !== undefined && revertable.has(msgIndex) && canRevertNow;
+              return (
+                <ThreadRow
+                  key={i}
+                  item={it}
+                  animate={animate && i >= items.length - 2}
+                  onRevert={
+                    revertableHere && msgIndex !== undefined
+                      ? (text) => setRevertAsk({ message: msgIndex, text })
+                      : undefined
+                  }
+                />
+              );
+            })}
+            {!sleeping && meta?.runState === "done" && items.length > 0 && (
+              <RunSummary
+                events={events}
+                exitCode={meta.exitCode}
+                title={meta.title || meta.task?.split("\n")[0] || session}
+                session={session}
+                onRunAgain={() => router.push({ pathname: "/new", params: { task: meta.task ?? "" } })}
+              />
+            )}
             {running && (
               <FadeInUp>
                 <View style={{ flexDirection: "row", gap: 10, alignItems: "center", paddingVertical: 12 }}>
@@ -346,28 +412,6 @@ export default function Thread() {
               <T variant="meta" weight="medium">{c.label}</T>
             </Pressable>
           ))}
-          {models.length > 0 && (
-            <Pressable
-              onPress={() => setSheet("model")}
-              style={({ pressed }) => ({
-                flexDirection: "row",
-                alignItems: "center",
-                gap: 6,
-                paddingVertical: 7,
-                paddingHorizontal: 12,
-                borderRadius: radius.pill,
-                borderWidth: 1,
-                borderColor: palette.border,
-                backgroundColor: palette.card,
-                opacity: pressed ? 0.7 : 1,
-              })}
-            >
-              <Icon name="cpu" size={13} color={pickedModel ? palette.live : palette.mutedForeground} />
-              <T variant="meta" weight="medium" tone={pickedModel ? "live" : "default"}>
-                {models.find((m) => m.id === (pickedModel ?? currentModel))?.label ?? "Model"}
-              </T>
-            </Pressable>
-          )}
           {meta?.queued?.length ? (
             <View style={{ flexDirection: "row", alignItems: "center", gap: 5, paddingVertical: 7, paddingHorizontal: 10 }}>
               <Icon name="inbox" size={13} color={palette.faint} />
@@ -389,21 +433,86 @@ export default function Thread() {
         ) : null}
 
         <View style={{ paddingHorizontal: 16, paddingBottom: 8 + keyboardInset }}>
-          <Composer onSend={steer} onAsk={ask} running={running} disabled={booting} />
+          <Composer
+            session={session}
+            onSend={steer}
+            onAsk={ask}
+            running={running}
+            sleeping={sleeping}
+            disabled={booting}
+            accessoryLeft={
+              models.length > 0 ? (
+                <Pressable
+                  onPress={() => setSheet("model")}
+                  style={({ pressed }) => ({
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 5,
+                    paddingVertical: 4,
+                    paddingHorizontal: 10,
+                    borderRadius: radius.pill,
+                    borderWidth: 1,
+                    borderColor: pickedModel ? palette.live : palette.border,
+                    opacity: pressed ? 0.7 : 1,
+                  })}
+                >
+                  <Icon name="cpu" size={11} color={pickedModel ? palette.live : palette.faint} />
+                  <T variant="micro" weight="medium" tone={pickedModel ? "live" : "faint"}>
+                    {models.find((m) => m.id === (pickedModel ?? currentModel))?.label ?? "Model"}
+                  </T>
+                </Pressable>
+              ) : null
+            }
+          />
         </View>
       </KeyboardAvoidingView>
 
+      {/* Revert confirm — quotes the message it rolls back to */}
+      <Sheet visible={!!revertAsk} onClose={() => setRevertAsk(null)} title="Revert to before this message?">
+        <View style={{ gap: 12, paddingBottom: 12 }}>
+          <View
+            style={{
+              backgroundColor: palette.secondary,
+              borderRadius: radius.lg,
+              padding: 12,
+              borderLeftWidth: 3,
+              borderLeftColor: palette.lineStrong,
+            }}
+          >
+            <T variant="body" numberOfLines={4}>
+              {revertAsk?.text}
+            </T>
+          </View>
+          <T variant="meta" tone="muted">
+            The sandbox and the agent's memory return to the state before this message was delivered — the
+            later work in this thread is discarded. Anything already pushed to GitHub stays.
+          </T>
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            <Button title="Keep everything" variant="secondary" style={{ flex: 1 }} onPress={() => setRevertAsk(null)} />
+            <Button title={reverting ? "Reverting…" : "Revert"} variant="destructive" style={{ flex: 1 }} loading={reverting} onPress={doRevert} />
+          </View>
+        </View>
+      </Sheet>
+
       <ChangesSheet session={session} repos={meta?.repos ?? []} visible={sheet === "changes"} onClose={() => setSheet(null)} />
-      <CheckpointsSheet session={session} visible={sheet === "checkpoints"} onClose={() => setSheet(null)} onReverted={refresh} />
       {pr ? (
         <PrSheet session={session} repo={pr.repo} number={pr.number} visible={sheet === "pr"} onClose={() => setSheet(null)} />
       ) : null}
       <BoxActionsSheet
         box={boxForActions}
+        log={log}
         visible={sheet === "actions"}
         onClose={() => setSheet(null)}
         onChanged={refresh}
         onDestroyed={() => router.back()}
+        onRunAgain={
+          meta?.task
+            ? () => {
+                setSheet(null);
+                router.push({ pathname: "/new", params: { task: meta.task ?? "" } });
+              }
+            : undefined
+        }
       />
       <Sheet visible={sheet === "model"} onClose={() => setSheet(null)} title="Model">
         <View style={{ gap: 4, paddingBottom: 12 }}>

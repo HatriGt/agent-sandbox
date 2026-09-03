@@ -32,11 +32,20 @@ export function groupEvents(events: TraceEvent[]): ThreadItem[] {
   return out;
 }
 
-export const ThreadRow = memo(function ThreadRow({ item, animate }: { item: ThreadItem; animate?: boolean }) {
+export const ThreadRow = memo(function ThreadRow({
+  item,
+  animate,
+  onRevert,
+}: {
+  item: ThreadItem;
+  animate?: boolean;
+  /** Set on revertable `you` items: called when the user confirms a revert to before this message. */
+  onRevert?: (messageText: string) => void;
+}) {
   const body = (() => {
     switch (item.kind) {
       case "you":
-        return <YouBubble text={item.text} />;
+        return <YouBubble text={item.text} onRevert={onRevert} />;
       case "say":
         return (
           <View style={{ paddingVertical: 8 }}>
@@ -61,10 +70,15 @@ export const ThreadRow = memo(function ThreadRow({ item, animate }: { item: Thre
   return animate ? <FadeInUp>{body}</FadeInUp> : <>{body}</>;
 });
 
-function YouBubble({ text }: { text: string }) {
+function YouBubble({ text, onRevert }: { text: string; onRevert?: (messageText: string) => void }) {
   const { palette } = useTheme();
+  // A leading /skill token renders as a tinted tag, like the web.
+  const m = text.match(/^\/([a-z0-9][a-z0-9-]*)\s*([\s\S]*)$/);
+  const skillTag = m?.[1];
+  const body = m ? m[2] : text;
   return (
-    <View style={{ alignItems: "flex-end", marginVertical: 8 }}>
+    <View style={{ flexDirection: "row", alignItems: "flex-end", justifyContent: "flex-end", gap: 8, marginVertical: 8 }}>
+      {onRevert ? <RevertButton onConfirm={() => onRevert(text)} /> : null}
       <View
         style={{
           backgroundColor: palette.primary,
@@ -72,14 +86,46 @@ function YouBubble({ text }: { text: string }) {
           borderBottomRightRadius: radius.sm,
           paddingVertical: 10,
           paddingHorizontal: 14,
-          maxWidth: "88%",
+          maxWidth: "82%",
         }}
       >
-        <T variant="body" selectable style={{ color: palette.primaryForeground }}>
-          {text}
-        </T>
+        {skillTag ? (
+          <T variant="micro" mono weight="semibold" style={{ color: palette.live, marginBottom: body ? 2 : 0 }}>
+            /{skillTag}
+          </T>
+        ) : null}
+        {body ? (
+          <T variant="body" selectable style={{ color: palette.primaryForeground }}>
+            {body}
+          </T>
+        ) : null}
       </View>
     </View>
+  );
+}
+
+/** Round revert affordance next to your bubble; the confirm lives in the thread. */
+function RevertButton({ onConfirm }: { onConfirm: () => void }) {
+  const { palette } = useTheme();
+  return (
+    <Pressable
+      onPress={onConfirm}
+      hitSlop={8}
+      style={({ pressed }) => ({
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        borderWidth: 1,
+        borderColor: palette.border,
+        backgroundColor: palette.card,
+        alignItems: "center",
+        justifyContent: "center",
+        marginBottom: 2,
+        opacity: pressed ? 0.6 : 0.85,
+      })}
+    >
+      <Icon name="rotate-ccw" size={13} color={palette.mutedForeground} />
+    </Pressable>
   );
 }
 

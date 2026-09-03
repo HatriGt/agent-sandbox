@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, View } from "react-native";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import * as WebBrowser from "expo-web-browser";
@@ -16,6 +16,34 @@ import { TextInput } from "react-native";
 
 type Attachment = { name: string; dataUrl: string };
 const MAX_ATTACHMENTS = 8;
+
+// Task starters, verbatim from the web Hub.
+const STARTERS: { label: string; text: string; needsRepo?: boolean }[] = [
+  {
+    label: "Explain a codebase",
+    needsRepo: true,
+    text: "Read this repository and write a concise architecture overview: the entry points, the main modules and how they depend on each other, and anything surprising. Do not change any files.",
+  },
+  {
+    label: "Fix a bug, open a PR",
+    needsRepo: true,
+    text: "Find and fix the following bug, add a regression test, and open a pull request:\n\n",
+  },
+  {
+    label: "Run the tests",
+    needsRepo: true,
+    text: "Install dependencies, run the full test suite, and report exactly what fails with the command and the key error lines. Do not fix anything yet — stop and tell me what you found.",
+  },
+  {
+    label: "Review a diff",
+    needsRepo: true,
+    text: "Review the changes on the current branch against main. Report correctness bugs first, then anything that could be simpler. Do not change files.",
+  },
+  {
+    label: "Research, no repo",
+    text: "Write a thorough, well-sourced report on the following, into /workspace/report.md:\n\n",
+  },
+];
 
 /**
  * Delegate: fire-and-stream. POST returns the box name and we navigate straight
@@ -34,12 +62,30 @@ export default function NewTask() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [clarify, setClarify] = useState<string | null>(null);
+  const [models, setModels] = useState<{ id: string; label: string }[]>([]);
+  const [model, setModel] = useState<string | null>(null);
+  const [defaultModel, setDefaultModel] = useState<string | null>(null);
+  const [showModels, setShowModels] = useState(false);
 
   const trialExpired = me?.kind === "user" && me.expired;
   const keyboardInset = useKeyboardInset();
 
+  // "Run again" prefill from the thread's ⋯ menu.
+  const params = useLocalSearchParams<{ task?: string }>();
+  useEffect(() => {
+    if (typeof params.task === "string" && params.task && !task) setTask(params.task);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [params.task]);
+
   useEffect(() => {
     api.skills().then((r) => setSkills(r.skills.filter((s) => s.enabled))).catch(() => {});
+    api
+      .models()
+      .then((r) => {
+        setModels(r.models);
+        setDefaultModel(r.default);
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -75,6 +121,7 @@ export default function NewTask() {
         task: task.trim(),
         repos: picked.length ? picked : undefined,
         attachments: attachments.length ? attachments : undefined,
+        ...(model ? { model } : {}),
       });
       if (r.ok) {
         router.replace(`/box/${encodeURIComponent(r.box)}`);
@@ -145,6 +192,33 @@ export default function NewTask() {
             </T>
           ) : null}
 
+          {!task.trim() && (
+            <View style={{ gap: 6 }}>
+              <T variant="meta" weight="medium" tone="muted">
+                Starters
+              </T>
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+                {STARTERS.map((s) => (
+                  <Pressable
+                    key={s.label}
+                    onPress={() => setTask(s.text)}
+                    style={({ pressed }) => ({
+                      paddingVertical: 7,
+                      paddingHorizontal: 12,
+                      borderRadius: radius.pill,
+                      borderWidth: 1,
+                      borderColor: palette.border,
+                      backgroundColor: palette.card,
+                      opacity: pressed ? 0.7 : 1,
+                    })}
+                  >
+                    <T variant="meta">{s.label}</T>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+          )}
+
           {skills.length > 0 && (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
               {skills.map((s) => (
@@ -173,19 +247,35 @@ export default function NewTask() {
               Repositories {picked.length ? `(${picked.length})` : "(optional — inferred from the task)"}
             </T>
             {picked.map((p) => (
-              <Pressable
-                key={p.repo}
-                onPress={() => setPicked((ps) => ps.filter((x) => x.repo !== p.repo))}
-                style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
-              >
-                <T variant="meta" mono style={{ flex: 1 }}>
+              <View key={p.repo} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <T variant="meta" mono style={{ flex: 1 }} numberOfLines={1}>
                   {p.repo}
-                  {p.ref ? `@${p.ref}` : ""}
                 </T>
-                <T variant="meta" tone="destructive">
-                  remove
-                </T>
-              </Pressable>
+                <TextInput
+                  value={p.ref ?? ""}
+                  onChangeText={(ref) =>
+                    setPicked((ps) => ps.map((x) => (x.repo === p.repo ? { ...x, ref: ref || undefined } : x)))
+                  }
+                  placeholder="branch"
+                  placeholderTextColor={palette.faint}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  style={{
+                    width: 110,
+                    color: palette.live,
+                    fontFamily: fonts.mono,
+                    fontSize: type.code.fontSize,
+                    borderBottomWidth: 1,
+                    borderBottomColor: palette.input,
+                    paddingVertical: 2,
+                  }}
+                />
+                <Pressable onPress={() => setPicked((ps) => ps.filter((x) => x.repo !== p.repo))} hitSlop={8}>
+                  <T variant="meta" tone="destructive">
+                    ✕
+                  </T>
+                </Pressable>
+              </View>
             ))}
             <Field placeholder="Search repos…" value={repoQuery} onChangeText={setRepoQuery} autoCapitalize="none" mono />
             {repoQuery.trim().length > 0 &&
@@ -212,6 +302,63 @@ export default function NewTask() {
                   </Pressable>
                 ))}
           </View>
+
+          {models.length > 0 && (
+            <View style={{ gap: 6 }}>
+              <T variant="meta" weight="medium" tone="muted">
+                Model
+              </T>
+              {showModels ? (
+                <View style={{ gap: 4 }}>
+                  {models.map((m) => {
+                    const active = m.id === (model ?? defaultModel);
+                    return (
+                      <Pressable
+                        key={m.id}
+                        onPress={() => {
+                          setModel(m.id === defaultModel ? null : m.id);
+                          setShowModels(false);
+                        }}
+                        style={({ pressed }) => ({
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 8,
+                          paddingVertical: 10,
+                          paddingHorizontal: 10,
+                          borderRadius: radius.lg,
+                          backgroundColor: active ? palette.accent : "transparent",
+                          opacity: pressed ? 0.7 : 1,
+                        })}
+                      >
+                        <T variant="body" weight={active ? "semibold" : "regular"} style={{ flex: 1 }}>
+                          {m.label}
+                          {m.id === defaultModel ? "  · default" : ""}
+                        </T>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              ) : (
+                <Pressable
+                  onPress={() => setShowModels(true)}
+                  style={({ pressed }) => ({
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 8,
+                    paddingVertical: 8,
+                    opacity: pressed ? 0.7 : 1,
+                  })}
+                >
+                  <T variant="body" tone={model ? "live" : "muted"}>
+                    {models.find((m) => m.id === (model ?? defaultModel))?.label ?? "Default"}
+                  </T>
+                  <T variant="meta" tone="faint">
+                    change
+                  </T>
+                </Pressable>
+              )}
+            </View>
+          )}
 
           <View style={{ gap: 8 }}>
             <T variant="meta" weight="medium" tone="muted">
