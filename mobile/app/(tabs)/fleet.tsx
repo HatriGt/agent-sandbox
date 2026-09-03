@@ -14,7 +14,7 @@ const ORDER: Record<string, number> = { waiting: 0, running: 1, done: 2, idle: 3
 /** Triage-ordered fleet: waiting → running → done → sleeping → pool, plus capacity. */
 export default function Fleet() {
   const { palette } = useTheme();
-  const { snap, refresh } = useFleet();
+  const { snap, error, refresh } = useFleet();
   const [refreshing, setRefreshing] = useState(false);
   const [actions, setActions] = useState<BoxView | null>(null);
 
@@ -49,10 +49,19 @@ export default function Fleet() {
           Fleet
         </T>
         <T variant="body" tone="muted">
-          {capacity
-            ? `${occupied} of ${capacity} slots occupied${poolFree ? `, ${plural(poolFree, "warm box")} ready` : ""}.`
-            : `${plural(occupied, "machine")}.`}
+          {error
+            ? `Can't reach the server — ${error}`
+            : capacity
+              ? `${occupied} of ${capacity} slots occupied${poolFree ? `, ${plural(poolFree, "warm box")} ready` : ""}.`
+              : `${plural(occupied, "machine")}.`}
         </T>
+        {snap && occupied === 0 && !error && (
+          <T variant="meta" tone="faint">
+            No machines owned by this account. Machines are per-owner — runs started from the web with the
+            operator token belong to the operator, not to your GitHub user. Sign in with the same identity
+            you use on the web to see them.
+          </T>
+        )}
         {capacity > 0 && (
           <View style={{ flexDirection: "row", gap: 4, marginBottom: 6 }}>
             {Array.from({ length: capacity }).map((_, i) => (

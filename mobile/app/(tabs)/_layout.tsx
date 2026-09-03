@@ -17,12 +17,10 @@ const TABS: { name: string; label: string; icon: IconName }[] = [
 ];
 
 function TabItem({
-  label,
   icon,
   focused,
   onPress,
 }: {
-  label: string;
   icon: IconName;
   focused: boolean;
   onPress: () => void;
@@ -30,32 +28,29 @@ function TabItem({
   const { palette } = useTheme();
   const anim = useRef(new Animated.Value(focused ? 1 : 0)).current;
   useEffect(() => {
-    Animated.timing(anim, { toValue: focused ? 1 : 0, duration: 180, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start();
+    Animated.spring(anim, { toValue: focused ? 1 : 0, useNativeDriver: true, speed: 24, bounciness: 7 }).start();
   }, [focused, anim]);
 
+  // Icon-only: the active tab gets a soft accent circle and a slight lift —
+  // no labels (they wrapped and cluttered the pill).
   return (
-    <Pressable onPress={onPress} style={{ flex: 1, alignItems: "center" }} hitSlop={8}>
-      <Animated.View
-        style={{
-          flexDirection: "row",
-          alignItems: "center",
-          gap: 6,
-          paddingVertical: 8,
-          paddingHorizontal: anim.interpolate({ inputRange: [0, 1], outputRange: [10, 14] }),
-          borderRadius: 999,
-          backgroundColor: anim.interpolate({
-            inputRange: [0, 1],
-            outputRange: ["rgba(0,0,0,0)", palette.accent],
-          }) as unknown as string,
-        }}
-      >
-        <Icon name={icon} size={19} color={focused ? palette.foreground : palette.faint} />
-        {focused && (
-          <T variant="micro" weight="semibold">
-            {label}
-          </T>
-        )}
-      </Animated.View>
+    <Pressable onPress={onPress} style={{ flex: 1, alignItems: "center" }} hitSlop={10}>
+      <View style={{ alignItems: "center", justifyContent: "center", width: 44, height: 44 }}>
+        <Animated.View
+          style={{
+            position: "absolute",
+            width: 40,
+            height: 40,
+            borderRadius: 20,
+            backgroundColor: palette.accent,
+            opacity: anim,
+            transform: [{ scale: anim }],
+          }}
+        />
+        <Animated.View style={{ transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [0, -1] }) }] }}>
+          <Icon name={icon} size={20} color={focused ? palette.foreground : palette.faint} />
+        </Animated.View>
+      </View>
     </Pressable>
   );
 }
@@ -75,7 +70,7 @@ function PillTabBar({ state, navigation }: BottomTabBarProps) {
 
   const item = (t: (typeof TABS)[number]) => {
     const idx = state.routes.findIndex((r) => r.name === t.name);
-    return <TabItem key={t.name} label={t.label} icon={t.icon} focused={state.index === idx} onPress={() => go(t.name)} />;
+    return <TabItem key={t.name} icon={t.icon} focused={state.index === idx} onPress={() => go(t.name)} />;
   };
 
   return (
