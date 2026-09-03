@@ -7,6 +7,8 @@ import { ago } from "@/lib/format";
 import { useTheme } from "@/theme/ThemeContext";
 import { T } from "./ui/AppText";
 import { Card } from "./ui/Card";
+import { Icon } from "./ui/Icon";
+import { Pressably } from "./ui/Motion";
 import { StatePill } from "./ui/StatePill";
 
 export function boxLabel(b: BoxView): string {
@@ -19,54 +21,68 @@ export function BoxCard({ box, onLongPress }: { box: BoxView; onLongPress?: (b: 
   const { palette } = useTheme();
   const waiting = box.runState === "waiting";
   const q = waiting ? questionHeadline(box.question) : "";
+  const ink = waiting ? palette.attentionInk : palette.faint;
+
   return (
-    <Card
+    <Pressably
       onPress={() => router.push(`/box/${encodeURIComponent(box.name)}`)}
       onLongPress={onLongPress ? () => onLongPress(box) : undefined}
-      attention={waiting}
     >
-      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-        <T
-          variant="body"
-          weight="semibold"
-          numberOfLines={1}
-          style={{ flex: 1, color: waiting ? palette.attentionInk : palette.foreground }}
-        >
-          {boxLabel(box)}
-        </T>
-        {!waiting && <StatePill runState={box.runState} boxStatus={box.boxStatus} exitCode={box.exitCode} />}
-      </View>
-      {waiting && q ? (
-        <T variant="meta" numberOfLines={2} style={{ marginTop: 6, color: palette.attentionInk }}>
-          ◆ {q}
-        </T>
-      ) : null}
-      <View style={{ flexDirection: "row", gap: 10, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <T variant="micro" mono style={{ color: waiting ? palette.attentionInk : palette.faint }}>
-          {box.name}
-        </T>
-        {box.repos?.map((r) => (
-          <T key={r.name} variant="micro" mono style={{ color: waiting ? palette.attentionInk : palette.faint }}>
-            {r.name}
-            {r.branch ? `@${r.branch}` : ""}
+      <Card attention={waiting}>
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+          <T
+            variant="body"
+            weight="semibold"
+            numberOfLines={1}
+            style={{ flex: 1, color: waiting ? palette.attentionInk : palette.foreground }}
+          >
+            {boxLabel(box)}
           </T>
-        ))}
-        {box.lastOutputAt ? (
-          <T variant="micro" style={{ color: waiting ? palette.attentionInk : palette.faint }}>
-            {ago(box.lastOutputAt * 1000)}
-          </T>
+          {!waiting && <StatePill runState={box.runState} boxStatus={box.boxStatus} exitCode={box.exitCode} />}
+        </View>
+        {waiting && q ? (
+          <View style={{ flexDirection: "row", gap: 6, marginTop: 6, alignItems: "flex-start" }}>
+            <Icon name="help-circle" size={14} color={palette.attentionInk} style={{ marginTop: 2 }} />
+            <T variant="meta" numberOfLines={2} style={{ flex: 1, color: palette.attentionInk }}>
+              {q}
+            </T>
+          </View>
         ) : null}
-        {box.kept ? (
-          <T variant="micro" style={{ color: waiting ? palette.attentionInk : palette.faint }}>
-            pinned
-          </T>
-        ) : null}
-        {box.queued?.length ? (
-          <T variant="micro" style={{ color: waiting ? palette.attentionInk : palette.faint }}>
-            {box.queued.length} queued
-          </T>
-        ) : null}
-      </View>
-    </Card>
+        <View style={{ flexDirection: "row", gap: 12, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+            <Icon name="box" size={11} color={ink} />
+            <T variant="micro" mono style={{ color: ink }}>
+              {box.name}
+            </T>
+          </View>
+          {box.repos?.map((r) => (
+            <View key={r.name} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+              <Icon name="git-branch" size={11} color={ink} />
+              <T variant="micro" mono style={{ color: ink }}>
+                {r.name.split("/").pop()}
+                {r.branch ? `@${r.branch}` : ""}
+              </T>
+            </View>
+          ))}
+          {box.lastOutputAt ? (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+              <Icon name="clock" size={11} color={ink} />
+              <T variant="micro" style={{ color: ink }}>
+                {ago(box.lastOutputAt * 1000)}
+              </T>
+            </View>
+          ) : null}
+          {box.kept ? <Icon name="bookmark" size={11} color={ink} /> : null}
+          {box.queued?.length ? (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+              <Icon name="inbox" size={11} color={ink} />
+              <T variant="micro" style={{ color: ink }}>
+                {box.queued.length}
+              </T>
+            </View>
+          ) : null}
+        </View>
+      </Card>
+    </Pressably>
   );
 }

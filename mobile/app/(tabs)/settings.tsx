@@ -9,8 +9,9 @@ import { radius } from "@/theme/tokens";
 import { T } from "@/components/ui/AppText";
 import { ArmButton } from "@/components/ui/ArmButton";
 import { Card } from "@/components/ui/Card";
+import { Icon, type IconName } from "@/components/ui/Icon";
 
-function RowLink({ title, hint, onPress }: { title: string; hint?: string; onPress: () => void }) {
+function RowLink({ title, hint, icon, onPress }: { title: string; hint?: string; icon: IconName; onPress: () => void }) {
   const { palette } = useTheme();
   return (
     <Pressable
@@ -22,8 +23,21 @@ function RowLink({ title, hint, onPress }: { title: string; hint?: string; onPre
         opacity: pressed ? 0.7 : 1,
         flexDirection: "row",
         alignItems: "center",
+        gap: 12,
       })}
     >
+      <View
+        style={{
+          width: 32,
+          height: 32,
+          borderRadius: 9,
+          backgroundColor: palette.secondary,
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <Icon name={icon} size={15} color={palette.foreground} />
+      </View>
       <View style={{ flex: 1 }}>
         <T variant="body" weight="medium">
           {title}
@@ -34,9 +48,7 @@ function RowLink({ title, hint, onPress }: { title: string; hint?: string; onPre
           </T>
         ) : null}
       </View>
-      <T variant="body" tone="faint">
-        ›
-      </T>
+      <Icon name="chevron-right" size={16} color={palette.faint} />
     </Pressable>
   );
 }
@@ -51,7 +63,7 @@ export default function Settings() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: palette.background }} edges={["top"]}>
-      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 40 }}>
+      <ScrollView contentContainerStyle={{ padding: 20, paddingBottom: 110 }}>
         <T serif variant="h1" style={{ marginTop: 12, marginBottom: 8 }}>
           Settings
         </T>
@@ -72,15 +84,15 @@ export default function Settings() {
           ) : null}
         </Card>
 
-        {isUser && <RowLink title="Account" hint="Name, email, password" onPress={() => router.push("/settings/account")} />}
-        <RowLink title="GitHub accounts" hint="Tokens the agent clones and pushes with" onPress={() => router.push("/settings/accounts")} />
-        <RowLink title="MCP servers" hint="Extra tools every sandbox gets" onPress={() => router.push("/settings/mcp")} />
-        <RowLink title="Skills" hint="Reusable playbooks synced into each box" onPress={() => router.push("/settings/skills")} />
-        <RowLink title="Notifications" hint="Webhook pings when a machine needs you" onPress={() => router.push("/settings/notifications")} />
-        {isUser && <RowLink title="API keys" hint="Bearer keys for scripts and devices" onPress={() => router.push("/settings/api-keys")} />}
-        {isUser && <RowLink title="Signed-in devices" hint="Active sessions, revoke any" onPress={() => router.push("/settings/devices")} />}
-        <RowLink title="Connect an IDE" hint="MCP snippets for Cursor, Claude Code, Zed" onPress={() => router.push("/settings/connect")} />
-        {admin && <RowLink title="Admin · Users" hint="Manage accounts and plans" onPress={() => router.push("/settings/admin")} />}
+        {isUser && <RowLink title="Account" icon="user" hint="Name, email, password" onPress={() => router.push("/settings/account")} />}
+        <RowLink title="GitHub accounts" icon="github" hint="Tokens the agent clones and pushes with" onPress={() => router.push("/settings/accounts")} />
+        <RowLink title="MCP servers" icon="tool" hint="Extra tools every sandbox gets" onPress={() => router.push("/settings/mcp")} />
+        <RowLink title="Skills" icon="book-open" hint="Reusable playbooks synced into each box" onPress={() => router.push("/settings/skills")} />
+        <RowLink title="Notifications" icon="bell" hint="Webhook pings when a machine needs you" onPress={() => router.push("/settings/notifications")} />
+        {isUser && <RowLink title="API keys" icon="key" hint="Bearer keys for scripts and devices" onPress={() => router.push("/settings/api-keys")} />}
+        {isUser && <RowLink title="Signed-in devices" icon="smartphone" hint="Active sessions, revoke any" onPress={() => router.push("/settings/devices")} />}
+        <RowLink title="Connect an IDE" icon="code" hint="MCP snippets for Cursor, Claude Code, Zed" onPress={() => router.push("/settings/connect")} />
+        {admin && <RowLink title="Admin · Users" icon="users" hint="Manage accounts and plans" onPress={() => router.push("/settings/admin")} />}
 
         <View style={{ marginTop: 20, gap: 8 }}>
           <T variant="meta" weight="medium" tone="muted">

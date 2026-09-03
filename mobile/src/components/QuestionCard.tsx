@@ -5,6 +5,7 @@ import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { MarkdownLite } from "./MarkdownLite";
 import { T } from "./ui/AppText";
+import { Icon } from "./ui/Icon";
 import { Button } from "./ui/Button";
 import { Field } from "./ui/Field";
 
@@ -36,9 +37,12 @@ export function QuestionCard({
         gap: 10,
       }}
     >
-      <T variant="micro" weight="semibold" style={{ color: palette.attentionInk }}>
-        ◆ NEEDS YOU
-      </T>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+        <Icon name="alert-circle" size={13} color={palette.attentionInk} />
+        <T variant="micro" weight="semibold" style={{ color: palette.attentionInk, letterSpacing: 0.5 }}>
+          NEEDS YOU
+        </T>
+      </View>
       <T variant="lead" weight="semibold" style={{ color: palette.attentionInk }} selectable>
         {parsed.title || question.split("\n")[0]}
       </T>
@@ -70,6 +74,7 @@ export function QuestionCard({
             <T variant="body" weight="medium" style={{ flex: 1 }}>
               {opt}
             </T>
+            <Icon name="chevron-right" size={14} />
           </Pressable>
         ))}
       {other ? (
@@ -88,7 +93,8 @@ export function QuestionCard({
           </View>
         </View>
       ) : (
-        <Pressable onPress={() => setOther(true)} style={{ paddingVertical: 6 }}>
+        <Pressable onPress={() => setOther(true)} style={{ paddingVertical: 6, flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <Icon name="edit-2" size={13} color={palette.attentionInk} />
           <T variant="body" weight="medium" style={{ color: palette.attentionInk }}>
             Something else…
           </T>

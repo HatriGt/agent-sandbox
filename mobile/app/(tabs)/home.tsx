@@ -11,6 +11,21 @@ import { radius } from "@/theme/tokens";
 import { BoxCard } from "@/components/BoxCard";
 import { BoxActionsSheet } from "@/components/sheets/BoxActionsSheet";
 import { T } from "@/components/ui/AppText";
+import { Icon, type IconName } from "@/components/ui/Icon";
+import { FadeInUp } from "@/components/ui/Motion";
+
+function SectionHeader({ icon, label, tone }: { icon: IconName; label: string; tone: "attention" | "live" | "muted" }) {
+  const { palette } = useTheme();
+  const color = tone === "attention" ? palette.attentionText : tone === "live" ? palette.live : palette.mutedForeground;
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+      <Icon name={icon} size={14} color={color} />
+      <T variant="meta" weight="semibold" style={{ color }}>
+        {label}
+      </T>
+    </View>
+  );
+}
 
 /** The Hub: serif greeting, fleet sentence, "Waiting on you" first, then live boxes. */
 export default function Home() {
@@ -30,7 +45,7 @@ export default function Home() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: palette.background }} edges={["top"]}>
       <ScrollView
-        contentContainerStyle={{ padding: 20, gap: 12, paddingBottom: 40 }}
+        contentContainerStyle={{ padding: 20, gap: 12, paddingBottom: 110 }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -52,47 +67,51 @@ export default function Home() {
 
         <Pressable
           onPress={() => router.push("/new")}
-          style={{
+          style={({ pressed }) => ({
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 10,
             borderWidth: 1,
             borderColor: palette.input,
             borderRadius: radius["2xl"],
             backgroundColor: palette.card,
             padding: 16,
             marginTop: 8,
-          }}
+            opacity: pressed ? 0.8 : 1,
+          })}
         >
-          <T variant="body" tone="faint">
+          <Icon name="plus-circle" size={18} color={palette.faint} />
+          <T variant="body" tone="faint" style={{ flex: 1 }}>
             Delegate a task…
           </T>
+          <Icon name="camera" size={16} color={palette.faint} />
         </Pressable>
 
         {waiting.length > 0 && (
           <View style={{ gap: 8, marginTop: 12 }}>
-            <T variant="meta" weight="semibold" tone="attention">
-              ◆ Waiting on you
-            </T>
-            {waiting.map((b) => (
-              <BoxCard key={b.name} box={b} onLongPress={setActions} />
+            <SectionHeader icon="alert-circle" label="Waiting on you" tone="attention" />
+            {waiting.map((b, i) => (
+              <FadeInUp key={b.name} delay={i * 60}>
+                <BoxCard box={b} onLongPress={setActions} />
+              </FadeInUp>
             ))}
           </View>
         )}
 
         {live.length > 0 && (
           <View style={{ gap: 8, marginTop: 12 }}>
-            <T variant="meta" weight="semibold" tone="live">
-              ● Live now
-            </T>
-            {live.map((b) => (
-              <BoxCard key={b.name} box={b} onLongPress={setActions} />
+            <SectionHeader icon="activity" label="Live now" tone="live" />
+            {live.map((b, i) => (
+              <FadeInUp key={b.name} delay={i * 60}>
+                <BoxCard box={b} onLongPress={setActions} />
+              </FadeInUp>
             ))}
           </View>
         )}
 
         {rest.length > 0 && (
           <View style={{ gap: 8, marginTop: 12 }}>
-            <T variant="meta" weight="semibold" tone="muted">
-              Recent
-            </T>
+            <SectionHeader icon="archive" label="Recent" tone="muted" />
             {rest.map((b) => (
               <BoxCard key={b.name} box={b} onLongPress={setActions} />
             ))}
@@ -100,8 +119,9 @@ export default function Home() {
         )}
 
         {snap && boxes.length === 0 && (
-          <View style={{ marginTop: 24, gap: 6 }}>
-            <T variant="body" tone="muted">
+          <View style={{ marginTop: 32, gap: 10, alignItems: "center" }}>
+            <Icon name="coffee" size={28} color={palette.faint} />
+            <T variant="body" tone="muted" style={{ textAlign: "center" }}>
               Nothing running. Delegate a task and walk away — you'll see it here the moment it needs you.
             </T>
           </View>

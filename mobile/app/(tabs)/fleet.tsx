@@ -32,7 +32,7 @@ export default function Fleet() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: palette.background }} edges={["top"]}>
       <ScrollView
-        contentContainerStyle={{ padding: 20, gap: 10, paddingBottom: 40 }}
+        contentContainerStyle={{ padding: 20, gap: 10, paddingBottom: 110 }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}

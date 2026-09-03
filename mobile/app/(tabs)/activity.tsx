@@ -8,6 +8,7 @@ import { useTheme } from "@/theme/ThemeContext";
 import { T } from "@/components/ui/AppText";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { Icon } from "@/components/ui/Icon";
 
 /** Device-local feed of state edges (the server stores no run history by design). */
 export default function Activity() {
@@ -23,7 +24,7 @@ export default function Activity() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: palette.background }} edges={["top"]}>
-      <ScrollView contentContainerStyle={{ padding: 20, gap: 10, paddingBottom: 40 }}>
+      <ScrollView contentContainerStyle={{ padding: 20, gap: 10, paddingBottom: 110 }}>
         <T serif variant="h1" style={{ marginTop: 12 }}>
           Activity
         </T>
@@ -36,12 +37,11 @@ export default function Activity() {
           events.map((e) => (
             <Card key={e.id} onPress={() => router.push(`/box/${encodeURIComponent(e.box)}`)}>
               <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
-                <T
-                  variant="body"
-                  tone={e.kind === "waiting" ? "attention" : e.kind === "done" ? "ok" : "destructive"}
-                >
-                  {e.kind === "waiting" ? "◆" : e.kind === "done" ? "✓" : "✕"}
-                </T>
+                <Icon
+                  name={e.kind === "waiting" ? "alert-circle" : e.kind === "done" ? "check-circle" : "x-circle"}
+                  size={16}
+                  color={e.kind === "waiting" ? palette.attention : e.kind === "done" ? palette.ok : palette.destructive}
+                />
                 <T variant="body" weight="medium" style={{ flex: 1 }} numberOfLines={1}>
                   {e.title ?? e.box}
                 </T>
