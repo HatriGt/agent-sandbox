@@ -1,3 +1,30 @@
+// Deterministic adjective-animal name, identical to the web's (lib/format.ts):
+// the dashboard never shows raw box ids, so mobile must hash the same way.
+const NAME_ADJECTIVES = [
+  "amber", "brisk", "cobalt", "dusk", "ember", "fern", "glint", "hazel", "iris", "jade",
+  "lunar", "mint", "nova", "onyx", "pine", "quartz", "rust", "sage", "teal", "vapor",
+  "wren", "zephyr", "clay", "frost", "opal", "slate", "coral", "drift", "flint", "moss",
+];
+const NAME_NOUNS = [
+  "otter", "falcon", "cedar", "harbor", "lark", "maple", "quokka", "raven", "sparrow", "tundra",
+  "willow", "badger", "comet", "delta", "eagle", "finch", "grove", "heron", "ibis", "koi",
+  "lynx", "marsh", "newt", "orbit", "puffin", "reef", "swift", "thorn", "vale", "yak",
+];
+
+function hashName(s: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+
+export function friendlyName(name: string): string {
+  const h = hashName(name);
+  return `${NAME_ADJECTIVES[h % NAME_ADJECTIVES.length]}-${NAME_NOUNS[(h >>> 8) % NAME_NOUNS.length]}`;
+}
+
 export function ago(ts?: number | null): string {
   if (!ts) return "";
   const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));

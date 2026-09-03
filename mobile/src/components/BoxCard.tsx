@@ -3,7 +3,7 @@ import { View } from "react-native";
 import { useRouter } from "expo-router";
 import type { BoxView } from "@/lib/api";
 import { questionHeadline } from "@/lib/question";
-import { ago } from "@/lib/format";
+import { ago, friendlyName } from "@/lib/format";
 import { useTheme } from "@/theme/ThemeContext";
 import { T } from "./ui/AppText";
 import { Card } from "./ui/Card";
@@ -52,7 +52,7 @@ export function BoxCard({ box, onLongPress }: { box: BoxView; onLongPress?: (b: 
           <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
             <Icon name="box" size={11} color={ink} />
             <T variant="micro" mono style={{ color: ink }}>
-              {box.name}
+              {friendlyName(box.name)}
             </T>
           </View>
           {box.repos?.map((r) => (

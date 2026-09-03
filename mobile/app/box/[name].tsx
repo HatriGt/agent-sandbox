@@ -7,12 +7,14 @@ import { useFleet } from "@/hooks/useFleet";
 import { useKeyboardInset } from "@/hooks/useKeyboardInset";
 import { useWatch } from "@/hooks/useWatch";
 import { api, type BoxView } from "@/lib/api";
+import { friendlyName } from "@/lib/format";
 import { parseTrace } from "@/lib/trace";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { Composer } from "@/components/Composer";
 import { QuestionCard } from "@/components/QuestionCard";
 import { RunSummary } from "@/components/RunSummary";
+import { WakingCard } from "@/components/WakingCard";
 import { Button } from "@/components/ui/Button";
 import { groupEvents, ThreadRow } from "@/components/TranscriptView";
 import { BoxActionsSheet } from "@/components/sheets/BoxActionsSheet";
@@ -71,12 +73,19 @@ export default function Thread() {
   // Animate entrances only for items that appear after mount, not the history dump.
   const animate = Date.now() - mountedAt.current > 1500;
 
+  // Auto-wake, with visible progress. The card lingers ~1.4s after awake.
+  const [wakingSince, setWakingSince] = useState<number | null>(null);
   useEffect(() => {
     if (sleeping && !wokeRef.current && session) {
       wokeRef.current = true;
-      api.wake(session).catch(() => {});
+      setWakingSince(Date.now());
+      api.wake(session).catch((e) => setNote(`Could not wake — ${e instanceof Error ? e.message : e}. Sending a message retries.`));
     }
-  }, [sleeping, session]);
+    if (!sleeping && wakingSince != null) {
+      const t = setTimeout(() => setWakingSince(null), 1400);
+      return () => clearTimeout(t);
+    }
+  }, [sleeping, session, wakingSince]);
 
   useEffect(() => {
     if (!session) return;
@@ -234,7 +243,7 @@ export default function Thread() {
             </T>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
               <T variant="micro" mono tone="faint" numberOfLines={1}>
-                {session}
+                {friendlyName(session)}
               </T>
               {merged?.repos?.map((r) => (
                 <View key={r.name} style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
@@ -283,25 +292,7 @@ export default function Thread() {
                 </T>
               </View>
             )}
-            {sleeping && (
-              <View
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: 8,
-                  borderWidth: 1,
-                  borderColor: palette.sleep,
-                  borderRadius: radius.xl,
-                  padding: 12,
-                  marginBottom: 12,
-                }}
-              >
-                <Icon name="moon" size={14} color={palette.sleep} />
-                <T variant="meta" tone="sleep" weight="medium" style={{ flex: 1 }}>
-                  This machine was asleep — waking it now. The session and files survived.
-                </T>
-              </View>
-            )}
+            {(sleeping || wakingSince != null) && <WakingCard sleeping={sleeping} startedAt={wakingSince ?? Date.now()} />}
             {items.map((it, i) => {
               const msgIndex = msgIndexOf.get(i);
               const revertableHere =
