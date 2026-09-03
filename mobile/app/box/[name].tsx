@@ -320,7 +320,16 @@ export default function Thread() {
                 </T>
               </View>
             )}
-            {(sleeping || wakingSince != null) && <WakingCard sleeping={sleeping} startedAt={wakingSince ?? mountedAt.current} />}
+            {(sleeping || wakingSince != null) && (
+              <WakingCard
+                sleeping={sleeping}
+                startedAt={wakingSince ?? mountedAt.current}
+                onRetry={() => {
+                  setWakingSince(Date.now());
+                  api.wake(session).catch((e) => setNote(`Could not wake — ${e instanceof Error ? e.message : e}.`));
+                }}
+              />
+            )}
             {/* The task that started this run — pinned first, like the web's Task bubble. */}
             {merged?.task ? (
               <View
@@ -425,6 +434,7 @@ export default function Thread() {
               return out.sort((a, b) => a.y - b.y);
               // eslint-disable-next-line react-hooks/exhaustive-deps
             }, [items, turnTick])}
+            visible={!stick}
             scrollY={scrollY}
             viewportH={viewportH}
             onJump={(y) => scrollRef.current?.scrollTo({ y: Math.max(0, y - 12), animated: true })}

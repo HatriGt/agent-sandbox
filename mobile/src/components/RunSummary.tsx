@@ -47,19 +47,21 @@ export function RunSummary({
         backgroundColor: palette.card,
       }}
     >
+      {/* Title and stats on separate lines: a long stats string must never
+          squeeze the title into a one-character column. */}
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
         <Icon
           name={ok ? "check-circle" : interrupted ? "pause-circle" : "x-circle"}
           size={16}
           color={ok ? palette.ok : interrupted ? palette.mutedForeground : palette.destructive}
         />
-        <T variant="body" weight="semibold" style={{ flex: 1 }}>
+        <T variant="body" weight="semibold" numberOfLines={1} style={{ flexShrink: 1 }}>
           {ok ? "Completed" : interrupted ? "Run interrupted" : "Exited with an error"}
         </T>
-        <T variant="micro" mono tone="faint">
-          {bits.join(" · ")}
-        </T>
       </View>
+      <T variant="micro" mono tone="faint">
+        {bits.join(" · ")}
+      </T>
       {!ok && !interrupted ? (
         <T variant="meta" tone="muted">
           code {exitCode}
