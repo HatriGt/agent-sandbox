@@ -13,6 +13,7 @@ import { BoxActionsSheet } from "@/components/sheets/BoxActionsSheet";
 import { T } from "@/components/ui/AppText";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { FadeInUp } from "@/components/ui/Motion";
+import { CardSkeleton } from "@/components/ui/Skeleton";
 
 function SectionHeader({ icon, label, tone }: { icon: IconName; label: string; tone: "attention" | "live" | "muted" }) {
   const { palette } = useTheme();
@@ -86,6 +87,14 @@ export default function Home() {
           </T>
           <Icon name="camera" size={16} color={palette.faint} />
         </Pressable>
+
+        {!snap && !error && (
+          <View style={{ gap: 8, marginTop: 12 }}>
+            <CardSkeleton />
+            <CardSkeleton />
+            <CardSkeleton />
+          </View>
+        )}
 
         {waiting.length > 0 && (
           <View style={{ gap: 8, marginTop: 12 }}>
