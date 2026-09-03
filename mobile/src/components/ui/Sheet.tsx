@@ -1,6 +1,7 @@
 import React from "react";
 import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useKeyboardInset } from "@/hooks/useKeyboardInset";
 import { useTheme } from "@/theme/ThemeContext";
 import { T } from "./AppText";
 
@@ -20,6 +21,7 @@ export function Sheet({
 }) {
   const { palette } = useTheme();
   const insets = useSafeAreaInsets();
+  const keyboardInset = useKeyboardInset();
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={{ flex: 1, backgroundColor: "#00000066" }} onPress={onClose} />
@@ -29,7 +31,7 @@ export function Sheet({
             backgroundColor: palette.popover,
             borderTopLeftRadius: 18,
             borderTopRightRadius: 18,
-            paddingBottom: insets.bottom + 12,
+            paddingBottom: insets.bottom + 12 + keyboardInset,
             maxHeight: 620,
           }}
         >

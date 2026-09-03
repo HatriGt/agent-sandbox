@@ -3,6 +3,7 @@ import { KeyboardAvoidingView, Platform, Pressable, ScrollView, View } from "rea
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
+import { useKeyboardInset } from "@/hooks/useKeyboardInset";
 import { useWatch } from "@/hooks/useWatch";
 import { api, type BoxView } from "@/lib/api";
 import { parseTrace } from "@/lib/trace";
@@ -17,6 +18,7 @@ import { CheckpointsSheet } from "@/components/sheets/CheckpointsSheet";
 import { PrSheet } from "@/components/sheets/PrSheet";
 import { T } from "@/components/ui/AppText";
 import { Icon, type IconName } from "@/components/ui/Icon";
+import { Sheet } from "@/components/ui/Sheet";
 import { FadeInUp, TypingDots } from "@/components/ui/Motion";
 import { StatePill } from "@/components/ui/StatePill";
 import { WorkingDot } from "@/components/ui/WorkingDot";
@@ -33,7 +35,11 @@ export default function Thread() {
   const session = typeof name === "string" ? name : "";
   const { meta, log, connected, gone, refresh } = useWatch(session || undefined);
 
-  const [sheet, setSheet] = useState<null | "changes" | "checkpoints" | "pr" | "actions">(null);
+  const [sheet, setSheet] = useState<null | "changes" | "checkpoints" | "pr" | "actions" | "model">(null);
+  const [models, setModels] = useState<{ id: string; label: string; tier: string }[]>([]);
+  const [currentModel, setCurrentModel] = useState<string | null>(null);
+  const [pickedModel, setPickedModel] = useState<string | null>(null);
+  const keyboardInset = useKeyboardInset();
   const [asks, setAsks] = useState<AskEntry[]>([]);
   const [answering, setAnswering] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -59,6 +65,17 @@ export default function Thread() {
     }
   }, [sleeping, session]);
 
+  useEffect(() => {
+    if (!session) return;
+    api
+      .models(session)
+      .then((r) => {
+        setModels(r.models);
+        setCurrentModel(r.current);
+      })
+      .catch(() => {});
+  }, [session]);
+
   // Haptic nudge the moment the agent stops on a question while you're watching.
   useEffect(() => {
     if (waiting && !buzzedRef.current) {
@@ -77,7 +94,7 @@ export default function Thread() {
   const steer = async (text: string) => {
     setNote(null);
     try {
-      const r = await api.resume(session, text);
+      const r = await api.resume(session, text, pickedModel ? { model: pickedModel } : {});
       if ("queued" in r && r.queued) setNote("Queued — delivered when this turn ends.");
       await refresh();
     } catch (e) {
@@ -201,6 +218,16 @@ export default function Thread() {
                 <T variant="body" tone="muted">Booting a fresh machine…</T>
               </View>
             )}
+            {!booting && meta?.runState === "idle" && items.length === 0 && (
+              <View style={{ alignItems: "center", paddingVertical: 60, gap: 12, paddingHorizontal: 20 }}>
+                <Icon name="box" size={28} color={palette.faint} />
+                <T variant="body" tone="muted" style={{ textAlign: "center" }}>
+                  {session.startsWith("pool-")
+                    ? "A warm, empty machine from the pool — pre-booted, waiting to be claimed. Send a task below and it starts here instantly."
+                    : "Nothing has happened on this machine yet. Send a message below to start."}
+                </T>
+              </View>
+            )}
             {sleeping && (
               <View
                 style={{
@@ -319,6 +346,28 @@ export default function Thread() {
               <T variant="meta" weight="medium">{c.label}</T>
             </Pressable>
           ))}
+          {models.length > 0 && (
+            <Pressable
+              onPress={() => setSheet("model")}
+              style={({ pressed }) => ({
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 6,
+                paddingVertical: 7,
+                paddingHorizontal: 12,
+                borderRadius: radius.pill,
+                borderWidth: 1,
+                borderColor: palette.border,
+                backgroundColor: palette.card,
+                opacity: pressed ? 0.7 : 1,
+              })}
+            >
+              <Icon name="cpu" size={13} color={pickedModel ? palette.live : palette.mutedForeground} />
+              <T variant="meta" weight="medium" tone={pickedModel ? "live" : "default"}>
+                {models.find((m) => m.id === (pickedModel ?? currentModel))?.label ?? "Model"}
+              </T>
+            </Pressable>
+          )}
           {meta?.queued?.length ? (
             <View style={{ flexDirection: "row", alignItems: "center", gap: 5, paddingVertical: 7, paddingHorizontal: 10 }}>
               <Icon name="inbox" size={13} color={palette.faint} />
@@ -339,7 +388,7 @@ export default function Thread() {
           </FadeInUp>
         ) : null}
 
-        <View style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
+        <View style={{ paddingHorizontal: 16, paddingBottom: 8 + keyboardInset }}>
           <Composer onSend={steer} onAsk={ask} running={running} disabled={booting} />
         </View>
       </KeyboardAvoidingView>
@@ -356,6 +405,47 @@ export default function Thread() {
         onChanged={refresh}
         onDestroyed={() => router.back()}
       />
+      <Sheet visible={sheet === "model"} onClose={() => setSheet(null)} title="Model">
+        <View style={{ gap: 4, paddingBottom: 12 }}>
+          <T variant="meta" tone="muted" style={{ marginBottom: 6 }}>
+            Applies to your next message on this machine.
+          </T>
+          {models.map((m) => {
+            const active = m.id === (pickedModel ?? currentModel);
+            return (
+              <Pressable
+                key={m.id}
+                onPress={() => {
+                  setPickedModel(m.id === currentModel ? null : m.id);
+                  setSheet(null);
+                }}
+                style={({ pressed }) => ({
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 10,
+                  paddingVertical: 12,
+                  paddingHorizontal: 12,
+                  borderRadius: radius.lg,
+                  backgroundColor: active ? palette.accent : "transparent",
+                  opacity: pressed ? 0.7 : 1,
+                })}
+              >
+                <Icon name="cpu" size={15} color={active ? palette.foreground : palette.faint} />
+                <View style={{ flex: 1 }}>
+                  <T variant="body" weight={active ? "semibold" : "regular"}>
+                    {m.label}
+                  </T>
+                  <T variant="micro" mono tone="faint">
+                    {m.id}
+                    {m.id === currentModel ? " · current" : ""}
+                  </T>
+                </View>
+                {active && <Icon name="check" size={16} color={palette.ok} />}
+              </Pressable>
+            );
+          })}
+        </View>
+      </Sheet>
     </SafeAreaView>
   );
 }

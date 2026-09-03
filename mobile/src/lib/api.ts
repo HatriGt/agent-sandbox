@@ -413,6 +413,12 @@ export const api = {
     post<NotifySettings>("/notify.json", s),
   testNotify: () => post<{ ok: true }>("/notify/test.json", {}),
 
+  models: (session?: string) =>
+    get<{ default: string; current: string; models: { id: string; label: string; tier: "opus" | "sonnet" | "haiku" | "other" }[] }>(
+      "/models.json",
+      session ? { session } : {},
+    ),
+
   verifyToken: async (token: string): Promise<boolean> => {
     const res = await fetch(url("/fleet.json"), { headers: { authorization: `Bearer ${token}` } });
     return res.status !== 401;

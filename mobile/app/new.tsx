@@ -5,6 +5,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import * as WebBrowser from "expo-web-browser";
 import { api, type RepoInfo, type SkillView } from "@/lib/api";
+import { useKeyboardInset } from "@/hooks/useKeyboardInset";
 import { useAuth } from "@/state/auth";
 import { useTheme } from "@/theme/ThemeContext";
 import { fonts, radius, type } from "@/theme/tokens";
@@ -35,6 +36,7 @@ export default function NewTask() {
   const [clarify, setClarify] = useState<string | null>(null);
 
   const trialExpired = me?.kind === "user" && me.expired;
+  const keyboardInset = useKeyboardInset();
 
   useEffect(() => {
     api.skills().then((r) => setSkills(r.skills.filter((s) => s.enabled))).catch(() => {});
@@ -231,7 +233,7 @@ export default function NewTask() {
             </T>
           </View>
         </ScrollView>
-        <View style={{ padding: 16 }}>
+        <View style={{ padding: 16, paddingBottom: 16 + keyboardInset }}>
           <Button title="Delegate" onPress={submit} loading={busy} disabled={!task.trim() || !!trialExpired} />
         </View>
       </KeyboardAvoidingView>
