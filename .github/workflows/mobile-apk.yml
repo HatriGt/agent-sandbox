@@ -45,8 +45,12 @@ jobs:
       # for sideloaded test builds, and the signature stays stable across runs.
       # arm64-only: every modern phone is arm64, and skipping the other three
       # ABIs roughly halves native compile time and shrinks the APK.
+      # lintVitalRelease is skipped: it OOMs the runner's Metaspace and adds
+      # minutes for zero value on a sideloaded test build.
       - name: Build release APK
-        run: cd android && ./gradlew :app:assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
+        env:
+          GRADLE_OPTS: -Dorg.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g
+        run: cd android && ./gradlew :app:assembleRelease -x lintVitalRelease -x lintVitalAnalyzeRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
