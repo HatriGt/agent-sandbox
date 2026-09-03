@@ -280,11 +280,26 @@ const resumeQuietly = (session: string, message: string) => {
   // Whoever triggers it (inbox delivery, broker, an admin), the box runs with its OWNER's integrations.
   // Behind the checkpoint lock: a follow-up landing inside the ~1 s turn-end capture waits for it
   // instead of mutating the workspace mid-tar.
-  return withBoxLock(session, () =>
-    withOwner(ownerOf(db, session) ?? null, () =>
+  return withBoxLock(session, async () => {
+    // Capture fallback: a run that finished before any fleet sweep observed it running produces no
+    // done EDGE, so the sweep never checkpointed the turn. Capture here, right before the new
+    // message changes anything — heavy dirs are excluded, so this is ~1 s on the send path at worst.
+    await captureBeforeMessage(session).catch(() => {});
+    return withOwner(ownerOf(db, session) ?? null, () =>
       deps.resumeDetached ? deps.resumeDetached(cfg, session, message) : deps.resume(cfg, session, message, undefined, {}).then(() => undefined)
-    )
-  );
+    );
+  });
+};
+
+/** Ensure the CURRENT turn has a checkpoint before a new message rewrites the workspace. */
+const captureBeforeMessage = async (box: string): Promise<void> => {
+  const snap = await watchHub.read(box);
+  if (!canRevert(snap.runState)) return; // mid-turn resume (queued send-now): no consistent point to capture
+  const turn = 1 + parseTrace(snap.log ?? "").filter((e) => e.kind === "you").length;
+  const have = parseCkptLs((await execInBox(cfg, box, listCmd())).stdout);
+  if (have.includes(turn)) return;
+  const r = await execInBox(cfg, box, captureCmd(turn));
+  if (!/CKPT_OK/.test(r.stdout)) console.error(`[ckpt] pre-message capture t${turn} on ${box}: ${r.stdout.trim().slice(-200)}`);
 };
 startInboxDelivery({
   inbox,
