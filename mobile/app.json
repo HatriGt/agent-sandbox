@@ -7,9 +7,12 @@
     "scheme": "asb",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "icon": "./assets/icon.png",
     "splash": {
+      "image": "./assets/splash-icon.png",
       "backgroundColor": "#0f0f12",
-      "resizeMode": "contain"
+      "resizeMode": "contain",
+      "imageWidth": 160
     },
     "ios": {
       "supportsTablet": true,
@@ -22,6 +25,7 @@
     "android": {
       "package": "dev.ajeethkumar.agentsandbox",
       "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0f0f12"
       }
     },
@@ -33,6 +37,12 @@
     ],
     "experiments": {
       "typedRoutes": false
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "1f4b99b6-e065-482b-a542-41a09e4927e2"
+      }
     }
   }
 }

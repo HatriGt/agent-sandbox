@@ -1,0 +1,54 @@
+# Build the mobile app APK on GitHub's runners (Android SDK + Java preinstalled).
+# Much faster than the EAS free-tier queue; the APK is attached as a run artifact.
+name: mobile-apk
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["mobile/**", ".github/workflows/mobile-apk.yml"]
+
+concurrency:
+  group: mobile-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prebuild android project
+        run: npx expo prebuild --platform android --no-install
+
+      # Expo's template signs release with the checked-in debug keystore — fine
+      # for sideloaded test builds, and the signature stays stable across runs.
+      - name: Build release APK
+        run: cd android && ./gradlew :app:assembleRelease --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-sandbox-apk
+          path: mobile/android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 30

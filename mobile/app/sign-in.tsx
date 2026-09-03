@@ -48,6 +48,11 @@ export default function SignIn() {
             </T>
           ) : null}
           <Button title="Sign in" onPress={submit} loading={busy} disabled={!login.trim() || !password} />
+          <Button
+            title="Sign in with GitHub"
+            variant="secondary"
+            onPress={() => router.push({ pathname: "/github-auth", params: { server: server.trim() } })}
+          />
           <Button title="Use a token instead" variant="ghost" onPress={() => router.push("/connect-server")} />
         </ScrollView>
       </KeyboardAvoidingView>

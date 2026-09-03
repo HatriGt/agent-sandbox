@@ -14,6 +14,8 @@ type AuthState = {
   connectWithToken: (url: string, token: string) => Promise<void>;
   /** SaaS: password sign-in; mints a device API key so no cookie/CSRF handling is needed. */
   signInWithPassword: (url: string, login: string, password: string) => Promise<void>;
+  /** GitHub OAuth ran in a WebView; it hands us the freshly minted device API key. */
+  completeGithubSignIn: (url: string, apiKey: string) => Promise<void>;
   signUp: (url: string, u: { login: string; name: string; email: string; password: string }) => Promise<void>;
   signOut: () => Promise<void>;
 };
@@ -98,6 +100,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [mintDeviceKey, refreshMe],
   );
 
+  const completeGithubSignIn = useCallback(
+    async (url: string, apiKey: string) => {
+      await setServerUrl(url);
+      await setBearer(apiKey);
+      await refreshMe();
+    },
+    [refreshMe],
+  );
+
   const connectWithToken = useCallback(
     async (url: string, token: string) => {
       await setServerUrl(url);
@@ -128,8 +139,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const value = useMemo(
-    () => ({ ready, signedIn, me, config, refreshMe, loadAuthConfig, connectWithToken, signInWithPassword, signUp, signOut }),
-    [ready, signedIn, me, config, refreshMe, loadAuthConfig, connectWithToken, signInWithPassword, signUp, signOut],
+    () => ({ ready, signedIn, me, config, refreshMe, loadAuthConfig, connectWithToken, signInWithPassword, completeGithubSignIn, signUp, signOut }),
+    [ready, signedIn, me, config, refreshMe, loadAuthConfig, connectWithToken, signInWithPassword, completeGithubSignIn, signUp, signOut],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

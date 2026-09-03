@@ -13,13 +13,17 @@ export default function Welcome() {
   const { palette } = useTheme();
   const { loadAuthConfig, signedIn } = useAuth();
   const [mode, setMode] = useState<"saas" | "token" | null>(null);
+  const [github, setGithub] = useState(false);
 
   useEffect(() => {
     if (signedIn) router.replace("/(tabs)/home");
   }, [signedIn, router]);
 
   useEffect(() => {
-    loadAuthConfig().then((c) => setMode(c?.mode ?? null));
+    loadAuthConfig().then((c) => {
+      setMode(c?.mode ?? null);
+      setGithub(!!c?.providers?.includes("github"));
+    });
   }, [loadAuthConfig]);
 
   return (
@@ -35,7 +39,8 @@ export default function Welcome() {
         <View style={{ gap: 10, marginTop: 24 }}>
           {mode !== "token" && (
             <>
-              <Button title="Sign in" onPress={() => router.push("/sign-in")} />
+              {github && <Button title="Sign in with GitHub" onPress={() => router.push("/github-auth")} />}
+              <Button title="Sign in" variant={github ? "secondary" : "primary"} onPress={() => router.push("/sign-in")} />
               <Button title="Create an account" variant="secondary" onPress={() => router.push("/sign-up")} />
             </>
           )}
