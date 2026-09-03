@@ -362,9 +362,12 @@ async function resolveGitAccessImpl(
       // repo; the agent will ask for a token if a write actually needs one.
       continue;
     } else if (decision.kind === "need_token" && (await isPublicRepo(cfg, repo))) {
-      // No stored account, but the repo is PUBLIC: clone tokenless (plain https). No push identity
-      // is injected for it — if the agent later needs to push, it asks for a token (ask-then-resume),
-      // same as a local-only repo.
+      // No account has CONFIRMED access, but the repo is PUBLIC. Clone with any stored account's
+      // token when one exists — GitHub throttles anonymous git from busy IPs (observed on the VPS),
+      // and an authenticated read of a public repo is always allowed — else tokenless https. Either
+      // way no push identity is injected: a later push asks for a token (ask-then-resume).
+      const any = Object.values(store.accounts)[0];
+      if (any) ownerTokens[owner] = any.token;
       continue;
     } else {
       // git: choose or need_token — surface the question and stop.
