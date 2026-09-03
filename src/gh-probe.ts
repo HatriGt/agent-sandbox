@@ -60,6 +60,26 @@ export async function ghGetJson<T>(cfg: Config, token: string, path: string): Pr
 }
 
 /** True if the token can access the repo (GET /repos/{owner}/{name} returns 200 with a body). */
+/**
+ * Whether `owner/name` is a PUBLIC repo — an anonymous API call, no token involved. Lets delegate
+ * proceed tokenless on public repos (read-only clone; no push identity injected) instead of
+ * refusing with "no stored account can access it".
+ */
+export async function isPublicRepo(cfg: Config, repo: string): Promise<boolean> {
+  const m = repo.match(/^([\w.-]+)\/([\w.-]+)$/);
+  if (!m) return false;
+  const path = `/repos/${m[1]}/${m[2]}`;
+  if (!isSafeApiPath(path)) return false;
+  const remote = `curl -sf -H "Accept: application/vnd.github+json" ${shellQuote(`https://api.github.com${path}`)}`;
+  const r = await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, remote], { check: false });
+  try {
+    const j = JSON.parse(r.stdout ?? "") as { private?: boolean; full_name?: string };
+    return j.private === false;
+  } catch {
+    return false;
+  }
+}
+
 export async function canAccessRepo(cfg: Config, token: string, repo: string): Promise<boolean> {
   const owner = ownerOf(repo);
   const name = repo.replace(/\.git$/i, "").split("/").filter(Boolean)[1];

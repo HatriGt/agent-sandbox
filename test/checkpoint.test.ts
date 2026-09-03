@@ -17,19 +17,21 @@ import {
   withBoxLock,
 } from "../src/checkpoint.ts";
 
-test("captureCmd tars workspace + agent home into a store OUTSIDE /workspace, tolerates exit 1", () => {
-  const cmd = captureCmd(3);
-  assert.match(cmd, /tar -cf '\/root\/\.agent-ckpt\/t3\.tar\.tmp'/);
+test("captureCmd labels the tar IN-BOX from the log, is idempotent, tolerates tar exit 1", () => {
+  const cmd = captureCmd();
+  // The turn number comes from the same log the tar captures — never a controller-side count that
+  // can be stale (the off-by-one found in the live stress run).
+  assert.match(cmd, /grep -a -c '\^⟦you⟧' \/workspace\/\.agent\.log/);
+  assert.match(cmd, /\[ -f "\$f" \] && \{ echo CKPT_HAVE t\$n; exit 0; \}/); // idempotent
   assert.match(cmd, /-C \/ 'workspace' 'root\/\.claude'/);
-  // The store must NOT live under /workspace — it would leak into the changes dock and file tree.
-  assert.ok(!cmd.includes("/workspace/.agent.ckpt"));
+  assert.ok(!cmd.includes("/workspace/.agent.ckpt")); // store never under /workspace
   assert.match(cmd, /\|\| \[ \$\? -eq 1 \]/); // "file changed as we read it" must not fail capture
-  assert.match(cmd, /mv .*t3\.tar\.tmp.*t3\.tar/); // atomic publish
-  assert.match(cmd, /echo CKPT_OK t3/);
+  assert.match(cmd, /mv "\$f\.tmp" "\$f"/); // atomic publish
+  assert.match(cmd, /echo CKPT_OK t\$n/);
 });
 
 test("captureCmd excludes every heavy dir — a GB node_modules must never enter the tar", () => {
-  const cmd = captureCmd(1);
+  const cmd = captureCmd();
   for (const d of HEAVY_DIRS) assert.ok(cmd.includes(`--exclude='*/${d}'`), d);
 });
 
@@ -43,8 +45,8 @@ test("parseCkptLs reads turn numbers, sorted, ignoring junk", () => {
   assert.deepEqual(parseCkptLs(""), []);
 });
 
-test("revertCmd guards on the tar, wipes around the heavy dirs, appends the seam with the deps caveat", () => {
-  const cmd = revertCmd(2, 3);
+test("revertCmd guards on the tar, wipes around the heavy dirs, computes the seam count in-box", () => {
+  const cmd = revertCmd(2);
   assert.match(cmd, /\[ -f '\/root\/\.agent-ckpt\/t2\.tar' \] \|\| \{ echo CKPT_MISSING t2; exit 9; \}/);
   // The wipe prunes heavy dirs (preserved installs) and runs BEFORE the untar.
   assert.match(cmd, /-name 'node_modules'/);
@@ -52,9 +54,11 @@ test("revertCmd guards on the tar, wipes around the heavy dirs, appends the seam
   assert.ok(cmd.indexOf("find /workspace") < cmd.indexOf("tar -xf"));
   // The agent home is restored whole (no heavy dirs there).
   assert.match(cmd, /rm -rf \/root\/\.claude/);
-  assert.match(cmd, /3 later turns discarded/);
+  // Discarded count comes from the live log, before the wipe, never below 1.
+  assert.match(cmd, /d=\$\(\( \$\(grep -a -c '\^⟦you⟧'/);
+  assert.match(cmd, /\[ "\$d" -lt 1 \] && d=1/);
+  assert.match(cmd, /\$d later turn\(s\) discarded/);
   assert.match(cmd, /dependencies were kept/);
-  assert.match(revertCmd(1, 1), /1 later turn discarded/);
   assert.match(cmd, /\.agent\.log/);
 });
 

@@ -37,22 +37,29 @@ export const HEAVY_DIRS = ["node_modules", ".venv", "venv", "dist", "build", ".n
 const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 
 /**
- * Capture checkpoint t<n>: tar workspace + agent memory into the store (outside both), then prune
- * the ring. Heavy dirs are excluded (see HEAVY_DIRS), so capture stays ~1 s and a few MB even on
- * installed monorepos. `--warning=no-file-changed` + trailing `|| [ $? -eq 1 ]`: tar exits 1 for
- * "file changed as we read it", which between turns can only be the log tail — content-harmless,
- * must not fail capture. tmp+mv so a torn capture never looks like a valid restore point.
+ * Capture the current turn's checkpoint. The turn number is computed IN-BOX from the same log the
+ * tar captures (1 + column-0 ⟦you⟧ blocks), in the same shell invocation — the controller's cached
+ * snapshot can be seconds stale (found live: question-heavy threads drifted the label by one, so a
+ * revert landed one turn later than the bubble clicked). Idempotent: exits OK if that turn's tar
+ * already exists, so callers fire it unconditionally under the box lock.
+ *
+ * Heavy dirs are excluded (see HEAVY_DIRS), so capture stays ~1 s and a few MB even on installed
+ * monorepos. `--warning=no-file-changed` + `|| [ $? -eq 1 ]`: tar exits 1 for "file changed as we
+ * read it", which between turns can only be the log tail — content-harmless, must not fail
+ * capture. tmp+mv so a torn capture never looks like a valid restore point.
  */
-export function captureCmd(n: number): string {
-  const file = `${CKPT_DIR}/t${n}.tar`;
+export function captureCmd(): string {
   const excludes = HEAVY_DIRS.map((d) => `--exclude=${q(`*/${d}`)}`).join(" ");
   return (
+    `n=$(( $(grep -a -c '^⟦you⟧' /workspace/.agent.log 2>/dev/null || echo 0) + 1 )); ` +
+    `f=${q(CKPT_DIR)}/t$n.tar; ` +
+    `[ -f "$f" ] && { echo CKPT_HAVE t$n; exit 0; }; ` +
     `mkdir -p ${q(CKPT_DIR)} && ` +
-    `tar -cf ${q(file + ".tmp")} --warning=no-file-changed ${excludes} ` +
-    `-C / ${q(WORKSPACE.slice(1))} ${q(AGENT_HOME.slice(1))} 2>/dev/null || [ $? -eq 1 ] && ` +
-    `mv ${q(file + ".tmp")} ${q(file)} && ` +
+    `{ tar -cf "$f.tmp" --warning=no-file-changed ${excludes} ` +
+    `-C / ${q(WORKSPACE.slice(1))} ${q(AGENT_HOME.slice(1))} 2>/dev/null || [ $? -eq 1 ]; } && ` +
+    `mv "$f.tmp" "$f" && ` +
     pruneCmd() +
-    ` && echo CKPT_OK t${n}`
+    ` && echo CKPT_OK t$n`
   );
 }
 
@@ -89,18 +96,22 @@ export function listCmd(): string {
  *      kept installs are a SUPERSET of the restored manifest until an install/prune reconciles.
  * The agent home has no heavy dirs; it is wiped and restored whole.
  */
-export function revertCmd(n: number, discarded: number): string {
+export function revertCmd(n: number): string {
   const prune = `\\( ${HEAVY_DIRS.map((d) => `-name ${q(d)}`).join(" -o ")} \\) -prune`;
+  // The discarded-turn count is computed in-box, from the live log, BEFORE the wipe — the
+  // controller's snapshot can be stale (same race as capture labeling).
   const seam =
-    `● reverted to an earlier point — ${discarded} later turn${discarded === 1 ? "" : "s"} discarded; ` +
+    `● reverted to an earlier point — $d later turn(s) discarded; ` +
     `installed dependencies were kept and may include extras — run the package manager's install if builds act oddly`;
   return (
     `[ -f ${q(`${CKPT_DIR}/t${n}.tar`)} ] || { echo CKPT_MISSING t${n}; exit 9; }; ` +
+    `d=$(( $(grep -a -c '^⟦you⟧' /workspace/.agent.log 2>/dev/null || echo 0) + 1 - ${n} )); ` +
+    `[ "$d" -lt 1 ] && d=1; ` +
     `find ${WORKSPACE} -mindepth 1 ${prune} -o \\( -type f -o -type l \\) -exec rm -f {} + 2>/dev/null; ` +
     `for i in 1 2 3 4; do find ${WORKSPACE} -mindepth 1 ${prune} -o -type d -empty -exec rmdir {} + 2>/dev/null; done; ` +
     `rm -rf ${AGENT_HOME} 2>/dev/null; ` +
     `tar -xf ${q(`${CKPT_DIR}/t${n}.tar`)} -C / && ` +
-    `printf '\\n%s\\n' ${q(seam)} >> /workspace/.agent.log && ` +
+    `printf '\\n%s\\n' "${seam}" >> /workspace/.agent.log && ` +
     `echo CKPT_RESTORED t${n}`
   );
 }

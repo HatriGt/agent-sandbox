@@ -295,11 +295,10 @@ const resumeQuietly = (session: string, message: string) => {
 const captureBeforeMessage = async (box: string): Promise<void> => {
   const snap = await watchHub.read(box);
   if (!canRevert(snap.runState)) return; // mid-turn resume (queued send-now): no consistent point to capture
-  const turn = 1 + parseTrace(snap.log ?? "").filter((e) => e.kind === "you").length;
-  const have = parseCkptLs((await execInBox(cfg, box, listCmd())).stdout);
-  if (have.includes(turn)) return;
-  const r = await execInBox(cfg, box, captureCmd(turn));
-  if (!/CKPT_OK/.test(r.stdout)) console.error(`[ckpt] pre-message capture t${turn} on ${box}: ${r.stdout.trim().slice(-200)}`);
+  // The turn number is computed in-box from the log itself (captureCmd), so a stale snapshot here
+  // can no longer mislabel the tar; idempotent when the turn is already captured.
+  const r = await execInBox(cfg, box, captureCmd());
+  if (!/CKPT_(OK|HAVE)/.test(r.stdout)) console.error(`[ckpt] pre-message capture on ${box}: ${r.stdout.trim().slice(-200)}`);
 };
 startInboxDelivery({
   inbox,
@@ -361,20 +360,15 @@ const sendNotification = async (ev: NotifyEvent): Promise<void> => {
 const notifier = makeNotifier({ send: sendNotification, log: (m) => console.error(m) });
 
 /**
- * Capture the turn-end checkpoint for `box` if this turn doesn't have one yet. Turn N = task + N-1
- * follow-ups delivered, counted from the durable trace. Best-effort and serialized per box; any
- * failure logs and the fleet sweep never notices.
+ * Capture the turn-end checkpoint for `box`. The turn number is computed in-box from the log the
+ * tar captures (captureCmd) — never from the controller's cached snapshot, which can be stale.
+ * Idempotent, best-effort, serialized per box; any failure logs and the fleet sweep never notices.
  */
 const captureTurnCheckpoint = (box: string): Promise<void> =>
   withBoxLock(box, async () => {
     try {
-      const snap = await watchHub.read(box);
-      if (!snap.task && !snap.log) return; // gone or empty
-      const turn = 1 + parseTrace(snap.log ?? "").filter((e) => e.kind === "you").length;
-      const have = parseCkptLs((await execInBox(cfg, box, listCmd())).stdout);
-      if (have.includes(turn)) return;
-      const r = await execInBox(cfg, box, captureCmd(turn));
-      if (!/CKPT_OK/.test(r.stdout)) console.error(`[ckpt] capture t${turn} on ${box}: ${r.stdout.trim().slice(-200)}`);
+      const r = await execInBox(cfg, box, captureCmd());
+      if (!/CKPT_(OK|HAVE)/.test(r.stdout)) console.error(`[ckpt] capture on ${box}: ${r.stdout.trim().slice(-200)}`);
     } catch (e) {
       console.error(`[ckpt] capture on ${box} errored: ${(e as Error).message.slice(0, 200)}`);
     }
@@ -1856,9 +1850,9 @@ app.post("/revert.json", async (req: Request, res: Response) => {
       res.status(409).json({ error: "The agent is mid-turn — wait for it to finish (or stop it) before reverting." });
       return;
     }
-    const discarded = 1 + parseTrace(snap.log ?? "").filter((e) => e.kind === "you").length - k + 1;
     await withBoxLock(session, async () => {
-      const r = await execInBox(cfg, session, revertCmd(turn, Math.max(1, discarded)));
+      // The discarded-count for the seam line is computed in-box from the live log (revertCmd).
+      const r = await execInBox(cfg, session, revertCmd(turn));
       if (!/CKPT_RESTORED/.test(r.stdout)) throw new Error(r.stdout.trim().slice(-300) || "restore did not complete");
     });
     watchHub.drop(session); // next poll reads the restored (shorter) log fresh

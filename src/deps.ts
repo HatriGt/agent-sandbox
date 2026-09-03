@@ -52,7 +52,7 @@ import {
   type TokenStore,
   type GitAccessResolution,
 } from "./gh-token-store.js";
-import { probeToken, canAccessRepo } from "./gh-probe.js";
+import { probeToken, canAccessRepo, isPublicRepo } from "./gh-probe.js";
 import { localRepoOwnerName, parseOwnerName } from "./git-remote.js";
 
 /** Promise sleep for the block-until-boundary wait loop. */
@@ -360,6 +360,11 @@ async function resolveGitAccessImpl(
     } else if (plan.source === "local") {
       // choose/need_token on local: don't block. Ship the tree with no injected identity for this
       // repo; the agent will ask for a token if a write actually needs one.
+      continue;
+    } else if (decision.kind === "need_token" && (await isPublicRepo(cfg, repo))) {
+      // No stored account, but the repo is PUBLIC: clone tokenless (plain https). No push identity
+      // is injected for it — if the agent later needs to push, it asks for a token (ask-then-resume),
+      // same as a local-only repo.
       continue;
     } else {
       // git: choose or need_token — surface the question and stop.
