@@ -8,10 +8,12 @@ import { useKeyboardInset } from "@/hooks/useKeyboardInset";
 import { useWatch } from "@/hooks/useWatch";
 import { api, type BoxView } from "@/lib/api";
 import { friendlyName } from "@/lib/format";
+import { deriveTaskBoard } from "@/lib/planTasks";
 import { parseTrace } from "@/lib/trace";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { Composer } from "@/components/Composer";
+import { PlanChip, PlanSheet } from "@/components/PlanBoard";
 import { QuestionCard } from "@/components/QuestionCard";
 import { RunSummary } from "@/components/RunSummary";
 import { TurnRail, type Turn } from "@/components/TurnRail";
@@ -57,7 +59,7 @@ export default function Thread() {
   const session = typeof name === "string" ? name : "";
   const { meta, log, connected, gone, refresh } = useWatch(session || undefined);
 
-  const [sheet, setSheet] = useState<null | "changes" | "pr" | "actions" | "model">(null);
+  const [sheet, setSheet] = useState<null | "changes" | "pr" | "actions" | "model" | "plan">(null);
   const [models, setModels] = useState<{ id: string; label: string; tier: string }[]>([]);
   const [currentModel, setCurrentModel] = useState<string | null>(null);
   const [pickedModel, setPickedModel] = useState<string | null>(null);
@@ -87,6 +89,8 @@ export default function Thread() {
 
   const events = useMemo(() => parseTrace(log), [log]);
   const items = useMemo(() => groupEvents(events), [events]);
+  // The plan joined to evidence — chip in the dock, full board in a sheet.
+  const board = useMemo(() => deriveTaskBoard(events), [events]);
   const running = merged?.runState === "running";
   const waiting = merged?.runState === "waiting" && !!merged.question;
   const sleeping = merged?.boxStatus === "Stopped";
@@ -477,6 +481,7 @@ export default function Thread() {
           style={{ flexGrow: 0 }}
           contentContainerStyle={{ gap: 6, paddingHorizontal: 16, paddingVertical: 6 }}
         >
+          {board ? <PlanChip board={board} live={running} onPress={() => setSheet("plan")} /> : null}
           {chips.map((c) => (
             <Pressable
               key={c.key}
@@ -580,6 +585,7 @@ export default function Thread() {
         </View>
       </Sheet>
 
+      <PlanSheet board={board} live={running} visible={sheet === "plan"} onClose={() => setSheet(null)} />
       <ChangesSheet session={session} repos={merged?.repos ?? []} visible={sheet === "changes"} onClose={() => setSheet(null)} />
       {pr ? (
         <PrSheet session={session} repo={pr.repo} number={pr.number} visible={sheet === "pr"} onClose={() => setSheet(null)} />

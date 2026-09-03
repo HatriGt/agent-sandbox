@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Animated, Pressable, ScrollView, TextInput, View } from "react-native";
+import { Animated, Keyboard, Pressable, ScrollView, TextInput, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import { api, type SkillView } from "@/lib/api";
 import { expandMentions, mentionAt, type MentionState } from "@/lib/mention";
@@ -123,6 +123,7 @@ export function Composer({
   const send = async () => {
     let t = text.trim();
     if ((!t && !files.length && !skill) || busy) return;
+    Keyboard.dismiss();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     setBusy(true);
     try {
@@ -377,6 +378,12 @@ export function Composer({
           }
           placeholderTextColor={palette.faint}
           multiline
+          // Enter sends (like the web); the keyboard drops so the reply is
+          // visible. Long text still wraps — there is no Shift+Enter on a phone,
+          // and pasted newlines are preserved.
+          submitBehavior="blurAndSubmit"
+          returnKeyType="send"
+          onSubmitEditing={() => void send()}
           editable={!disabled}
           style={{
             flex: 1,

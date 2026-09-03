@@ -1,5 +1,5 @@
-import React from "react";
-import { ActivityIndicator, Pressable, type StyleProp, type ViewStyle } from "react-native";
+import React, { useRef } from "react";
+import { ActivityIndicator, Animated, Pressable, type StyleProp, type ViewStyle } from "react-native";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { T } from "./AppText";
@@ -24,6 +24,8 @@ export function Button({
   style?: StyleProp<ViewStyle>;
 }) {
   const { palette } = useTheme();
+  const scale = useRef(new Animated.Value(1)).current;
+  const to = (v: number) => Animated.spring(scale, { toValue: v, useNativeDriver: true, speed: 40, bounciness: 6 }).start();
   const bg =
     variant === "primary" ? palette.primary
     : variant === "secondary" ? palette.secondary
@@ -36,11 +38,13 @@ export function Button({
     : variant === "attention" ? palette.attentionInk
     : palette.foreground;
   return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled || loading}
-      style={({ pressed }) => [
-        {
+    <Animated.View style={[{ transform: [{ scale }] }, style]}>
+      <Pressable
+        onPress={onPress}
+        disabled={disabled || loading}
+        onPressIn={() => to(0.96)}
+        onPressOut={() => to(1)}
+        style={({ pressed }) => ({
           backgroundColor: bg,
           borderRadius: radius.lg,
           paddingVertical: small ? 8 : 12,
@@ -49,18 +53,17 @@ export function Button({
           justifyContent: "center",
           flexDirection: "row",
           gap: 8,
-          opacity: disabled ? 0.45 : pressed ? 0.8 : 1,
+          opacity: disabled ? 0.45 : pressed ? 0.9 : 1,
           borderWidth: variant === "outline" ? 1 : 0,
           borderColor: palette.lineStrong,
           minHeight: small ? 34 : 46,
-        },
-        style,
-      ]}
-    >
-      {loading && <ActivityIndicator size="small" color={fg} />}
-      <T variant={small ? "meta" : "body"} weight="medium" style={{ color: fg }}>
-        {title}
-      </T>
-    </Pressable>
+        })}
+      >
+        {loading && <ActivityIndicator size="small" color={fg} />}
+        <T variant={small ? "meta" : "body"} weight="medium" style={{ color: fg }}>
+          {title}
+        </T>
+      </Pressable>
+    </Animated.View>
   );
 }
