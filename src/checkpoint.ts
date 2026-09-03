@@ -24,20 +24,31 @@ export const CKPT_KEEP = 5;
 const WORKSPACE = "/workspace";
 const AGENT_HOME = "/root/.claude";
 
+/**
+ * Reproducible-heavy directories: EXCLUDED from the tar (a big project's node_modules alone can be
+ * gigabytes — per checkpoint, times the ring) and PRESERVED across a revert. After reverting, the
+ * installed deps are a superset of the checkpoint's manifest: builds still resolve, and one
+ * install/prune reconciles exactly. Same trade-off Cursor makes; `.git` stays IN the tar — it is
+ * the history, not a derived artifact.
+ */
+export const HEAVY_DIRS = ["node_modules", ".venv", "venv", "dist", "build", ".next", "target", "__pycache__"] as const;
+
 /** Shell-safe single-quote (same rule as msb.ts shellQuote). */
 const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 
 /**
  * Capture checkpoint t<n>: tar workspace + agent memory into the store (outside both), then prune
- * the ring. `--warning=no-file-changed` + trailing `|| [ $? -eq 1 ]`: tar exits 1 for "file changed
- * as we read it", which between turns can only be the log tail — content-harmless, must not fail
- * capture. tmp+mv so a torn capture never looks like a valid restore point.
+ * the ring. Heavy dirs are excluded (see HEAVY_DIRS), so capture stays ~1 s and a few MB even on
+ * installed monorepos. `--warning=no-file-changed` + trailing `|| [ $? -eq 1 ]`: tar exits 1 for
+ * "file changed as we read it", which between turns can only be the log tail — content-harmless,
+ * must not fail capture. tmp+mv so a torn capture never looks like a valid restore point.
  */
 export function captureCmd(n: number): string {
   const file = `${CKPT_DIR}/t${n}.tar`;
+  const excludes = HEAVY_DIRS.map((d) => `--exclude=${q(`*/${d}`)}`).join(" ");
   return (
     `mkdir -p ${q(CKPT_DIR)} && ` +
-    `tar -cf ${q(file + ".tmp")} --warning=no-file-changed ` +
+    `tar -cf ${q(file + ".tmp")} --warning=no-file-changed ${excludes} ` +
     `-C / ${q(WORKSPACE.slice(1))} ${q(AGENT_HOME.slice(1))} 2>/dev/null || [ $? -eq 1 ] && ` +
     `mv ${q(file + ".tmp")} ${q(file)} && ` +
     pruneCmd() +
@@ -68,16 +79,26 @@ export function listCmd(): string {
 }
 
 /**
- * Restore checkpoint t<n> in place: wipe workspace + agent home, untar, then append an honest seam
- * to the restored log so history shows the rewrite. The store lives outside /workspace, so the
- * wipe cannot touch it and later checkpoints stay available for a re-revert forward until the next
- * capture prunes them.
+ * Restore checkpoint t<n> in place, PRESERVING the heavy dirs the tar never carried (their absence
+ * after a plain wipe would force a full reinstall on every revert). A blunt `rm -rf` of the top
+ * dirs would take nested node_modules with them, so the wipe is depth-aware:
+ *   1. delete files + symlinks with heavy dirs pruned (their contents untouched),
+ *   2. sweep now-empty dirs (a few passes stand in for depth-first, since -delete/-depth can't be
+ *      combined with -prune) so dirs created by later turns don't linger,
+ *   3. untar over the kept skeleton, 4. append the seam — including the deps caveat, because the
+ *      kept installs are a SUPERSET of the restored manifest until an install/prune reconciles.
+ * The agent home has no heavy dirs; it is wiped and restored whole.
  */
 export function revertCmd(n: number, discarded: number): string {
-  const seam = `● reverted to an earlier point — ${discarded} later turn${discarded === 1 ? "" : "s"} discarded`;
+  const prune = `\\( ${HEAVY_DIRS.map((d) => `-name ${q(d)}`).join(" -o ")} \\) -prune`;
+  const seam =
+    `● reverted to an earlier point — ${discarded} later turn${discarded === 1 ? "" : "s"} discarded; ` +
+    `installed dependencies were kept and may include extras — run the package manager's install if builds act oddly`;
   return (
     `[ -f ${q(`${CKPT_DIR}/t${n}.tar`)} ] || { echo CKPT_MISSING t${n}; exit 9; }; ` +
-    `rm -rf ${WORKSPACE}/* ${WORKSPACE}/.[!.]* ${AGENT_HOME} 2>/dev/null; ` +
+    `find ${WORKSPACE} -mindepth 1 ${prune} -o \\( -type f -o -type l \\) -exec rm -f {} + 2>/dev/null; ` +
+    `for i in 1 2 3 4; do find ${WORKSPACE} -mindepth 1 ${prune} -o -type d -empty -exec rmdir {} + 2>/dev/null; done; ` +
+    `rm -rf ${AGENT_HOME} 2>/dev/null; ` +
     `tar -xf ${q(`${CKPT_DIR}/t${n}.tar`)} -C / && ` +
     `printf '\\n%s\\n' ${q(seam)} >> /workspace/.agent.log && ` +
     `echo CKPT_RESTORED t${n}`

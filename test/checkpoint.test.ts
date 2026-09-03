@@ -9,6 +9,7 @@ import {
   captureCmd,
   checkpointForMessage,
   CKPT_KEEP,
+  HEAVY_DIRS,
   listCmd,
   parseCkptLs,
   pruneCmd,
@@ -27,6 +28,11 @@ test("captureCmd tars workspace + agent home into a store OUTSIDE /workspace, to
   assert.match(cmd, /echo CKPT_OK t3/);
 });
 
+test("captureCmd excludes every heavy dir — a GB node_modules must never enter the tar", () => {
+  const cmd = captureCmd(1);
+  for (const d of HEAVY_DIRS) assert.ok(cmd.includes(`--exclude='*/${d}'`), d);
+});
+
 test("pruneCmd keeps the newest CKPT_KEEP by turn number", () => {
   assert.match(pruneCmd(), new RegExp(`head -n -${CKPT_KEEP}`));
   assert.match(pruneCmd(), /sort -t t -k2 -n/);
@@ -37,11 +43,17 @@ test("parseCkptLs reads turn numbers, sorted, ignoring junk", () => {
   assert.deepEqual(parseCkptLs(""), []);
 });
 
-test("revertCmd guards on the tar, wipes then restores, appends the seam", () => {
+test("revertCmd guards on the tar, wipes around the heavy dirs, appends the seam with the deps caveat", () => {
   const cmd = revertCmd(2, 3);
   assert.match(cmd, /\[ -f '\/root\/\.agent-ckpt\/t2\.tar' \] \|\| \{ echo CKPT_MISSING t2; exit 9; \}/);
-  assert.ok(cmd.indexOf("rm -rf /workspace/*") < cmd.indexOf("tar -xf"));
+  // The wipe prunes heavy dirs (preserved installs) and runs BEFORE the untar.
+  assert.match(cmd, /-name 'node_modules'/);
+  assert.match(cmd, /-prune/);
+  assert.ok(cmd.indexOf("find /workspace") < cmd.indexOf("tar -xf"));
+  // The agent home is restored whole (no heavy dirs there).
+  assert.match(cmd, /rm -rf \/root\/\.claude/);
   assert.match(cmd, /3 later turns discarded/);
+  assert.match(cmd, /dependencies were kept/);
   assert.match(revertCmd(1, 1), /1 later turn discarded/);
   assert.match(cmd, /\.agent\.log/);
 });
