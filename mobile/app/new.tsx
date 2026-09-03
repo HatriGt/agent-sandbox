@@ -127,6 +127,12 @@ export default function NewTask() {
         attachments: attachments.length ? attachments : undefined,
         ...(model ? { model } : {}),
       }),
+      // Fleet-as-of-submit: /booting attaches the moment a NEW box (or a pool
+      // box flipping pool-free -> claimed) surfaces — the web's early-attach.
+      api
+        .fleet()
+        .then((s) => new Map(s.boxes.map((b) => [b.name, b.role])))
+        .catch(() => new Map<string, string>()),
     );
     router.replace("/booting");
   };
