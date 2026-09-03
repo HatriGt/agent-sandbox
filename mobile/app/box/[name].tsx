@@ -31,6 +31,23 @@ type AskEntry = { q: string; a?: string; pending: boolean };
 
 const PR_RE = /github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)/g;
 
+/** expo-router route error boundary: a render bug degrades to a retry screen, never a crash. */
+export function ErrorBoundary({ error, retry }: { error: Error; retry: () => Promise<void> }) {
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: "#0f0f12" }}>
+      <View style={{ flex: 1, justifyContent: "center", padding: 28, gap: 12 }}>
+        <T serif variant="h1">
+          Something broke rendering this thread.
+        </T>
+        <T variant="meta" tone="muted" selectable>
+          {error.message}
+        </T>
+        <Button title="Try again" onPress={() => void retry()} />
+      </View>
+    </SafeAreaView>
+  );
+}
+
 /** The Thread — the screen you live in. */
 export default function Thread() {
   const router = useRouter();
@@ -292,7 +309,7 @@ export default function Thread() {
                 </T>
               </View>
             )}
-            {(sleeping || wakingSince != null) && <WakingCard sleeping={sleeping} startedAt={wakingSince ?? Date.now()} />}
+            {(sleeping || wakingSince != null) && <WakingCard sleeping={sleeping} startedAt={wakingSince ?? mountedAt.current} />}
             {items.map((it, i) => {
               const msgIndex = msgIndexOf.get(i);
               const revertableHere =

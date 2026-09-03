@@ -21,8 +21,10 @@ export function WakingCard({ sleeping, startedAt }: { sleeping: boolean; started
     const t = setInterval(() => setNow(Date.now()), 500);
     return () => clearInterval(t);
   }, []);
-  const elapsed = Math.floor((now - startedAt) / 1000);
-  const stage = sleeping ? [...STAGES].reverse().find((s) => elapsed >= s.at)!.text : "Back. The transcript follows.";
+  const elapsed = Math.max(0, Math.floor((now - startedAt) / 1000));
+  const stage = sleeping
+    ? ([...STAGES].reverse().find((s) => elapsed >= s.at) ?? STAGES[0]).text
+    : "Back. The transcript follows.";
   const color = sleeping ? palette.sleep : palette.ok;
 
   return (
