@@ -21,9 +21,18 @@
     },
     "android": {
       "package": "dev.ajeethkumar.agentsandbox",
-      "adaptiveIcon": { "backgroundColor": "#0f0f12" }
+      "adaptiveIcon": {
+        "backgroundColor": "#0f0f12"
+      }
     },
-    "plugins": ["expo-router", "expo-secure-store", "expo-font"],
-    "experiments": { "typedRoutes": false }
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-font",
+      "expo-asset"
+    ],
+    "experiments": {
+      "typedRoutes": false
+    }
   }
 }

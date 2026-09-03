@@ -103,10 +103,10 @@ export function guardDeps(deps: HandlerDeps, own: Ownership): HandlerDeps {
       own.check(session);
       return deps.status(cfg, session, interact);
     },
-    async resume(cfg, session, message, secrets, interact) {
+    async resume(cfg, session, message, secrets, interact, model) {
       own.check(session);
       own.assertCanRun();
-      return deps.resume(cfg, session, message, secrets, interact);
+      return deps.resume(cfg, session, message, secrets, interact, model);
     },
     async teardown(cfg, session) {
       own.check(session);
@@ -130,10 +130,10 @@ export function guardDeps(deps: HandlerDeps, own: Ownership): HandlerDeps {
   };
   if (deps.resumeDetached) {
     const rd = deps.resumeDetached.bind(deps);
-    guarded.resumeDetached = async (cfg, session, message, secrets) => {
+    guarded.resumeDetached = async (cfg, session, message, secrets, model) => {
       own.check(session);
       own.assertCanRun();
-      return rd(cfg, session, message, secrets);
+      return rd(cfg, session, message, secrets, model);
     };
   }
   if (deps.verify) {
