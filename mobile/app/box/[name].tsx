@@ -3,6 +3,7 @@ import { KeyboardAvoidingView, Platform, Pressable, ScrollView, View } from "rea
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
+import { useFleet } from "@/hooks/useFleet";
 import { useKeyboardInset } from "@/hooks/useKeyboardInset";
 import { useWatch } from "@/hooks/useWatch";
 import { api, type BoxView } from "@/lib/api";
@@ -50,12 +51,23 @@ export default function Thread() {
   const buzzedRef = useRef(false);
   const mountedAt = useRef(Date.now());
 
+  // The fleet sweep is authoritative for lifecycle state (the watch hub serves
+  // a cached snapshot that can be stale for a stopped box — the web treats the
+  // fleet poll the same way). Merge the fleet row over the watch meta.
+  const { snap: fleetSnap } = useFleet(!!session);
+  const fleetBox = fleetSnap?.boxes.find((b) => b.name === session) ?? null;
+  const merged = useMemo(() => {
+    if (!meta && !fleetBox) return null;
+    return { ...(meta ?? {}), ...(fleetBox ?? {}) } as NonNullable<typeof meta> & Partial<BoxView>;
+  }, [meta, fleetBox]);
+
   const events = useMemo(() => parseTrace(log), [log]);
   const items = useMemo(() => groupEvents(events), [events]);
-  const running = meta?.runState === "running";
-  const waiting = meta?.runState === "waiting" && !!meta.question;
-  const sleeping = meta?.boxStatus === "Stopped";
-  const booting = !gone && !meta && log.length === 0;
+  const running = merged?.runState === "running";
+  const waiting = merged?.runState === "waiting" && !!merged.question;
+  const sleeping = merged?.boxStatus === "Stopped";
+  const poolFree = fleetBox?.role === "pool-free";
+  const booting = !gone && !merged && log.length === 0;
   // Animate entrances only for items that appear after mount, not the history dump.
   const animate = Date.now() - mountedAt.current > 1500;
 
@@ -173,7 +185,7 @@ export default function Thread() {
     }
   };
 
-  const boxForActions: BoxView | null = meta ? ({ ...meta, role: "session" } as BoxView) : null;
+  const boxForActions: BoxView | null = merged ? ({ role: "session", ...merged } as BoxView) : null;
 
   if (gone) {
     return (
@@ -218,13 +230,13 @@ export default function Thread() {
           </Pressable>
           <View style={{ flex: 1 }}>
             <T variant="body" weight="semibold" numberOfLines={1}>
-              {meta?.title || meta?.task?.split("\n")[0] || session}
+              {merged?.title || merged?.task?.split("\n")[0] || session}
             </T>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
               <T variant="micro" mono tone="faint" numberOfLines={1}>
                 {session}
               </T>
-              {meta?.repos?.map((r) => (
+              {merged?.repos?.map((r) => (
                 <View key={r.name} style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
                   <Icon name="git-branch" size={10} color={palette.faint} />
                   <T variant="micro" mono tone="faint" numberOfLines={1}>
@@ -234,7 +246,7 @@ export default function Thread() {
               ))}
             </View>
           </View>
-          {meta ? <StatePill runState={meta.runState} boxStatus={meta.boxStatus} exitCode={meta.exitCode} /> : null}
+          {merged ? <StatePill runState={merged.runState} boxStatus={merged.boxStatus} exitCode={merged.exitCode} /> : null}
           <Pressable onPress={() => setSheet("actions")} hitSlop={12} style={{ padding: 8 }}>
             <Icon name="more-horizontal" size={20} color={palette.mutedForeground} />
           </Pressable>
@@ -261,11 +273,11 @@ export default function Thread() {
                 <T variant="body" tone="muted">Booting a fresh machine…</T>
               </View>
             )}
-            {!booting && meta?.runState === "idle" && items.length === 0 && (
+            {!booting && !sleeping && merged?.runState === "idle" && items.length === 0 && (
               <View style={{ alignItems: "center", paddingVertical: 60, gap: 12, paddingHorizontal: 20 }}>
                 <Icon name="box" size={28} color={palette.faint} />
                 <T variant="body" tone="muted" style={{ textAlign: "center" }}>
-                  {session.startsWith("pool-")
+                  {poolFree
                     ? "A warm, empty machine from the pool — pre-booted, waiting to be claimed. Send a task below and it starts here instantly."
                     : "Nothing has happened on this machine yet. Send a message below to start."}
                 </T>
@@ -307,13 +319,13 @@ export default function Thread() {
                 />
               );
             })}
-            {!sleeping && meta?.runState === "done" && items.length > 0 && (
+            {!sleeping && merged?.runState === "done" && items.length > 0 && (
               <RunSummary
                 events={events}
-                exitCode={meta.exitCode}
-                title={meta.title || meta.task?.split("\n")[0] || session}
+                exitCode={merged?.exitCode}
+                title={merged?.title || merged?.task?.split("\n")[0] || session}
                 session={session}
-                onRunAgain={() => router.push({ pathname: "/new", params: { task: meta.task ?? "" } })}
+                onRunAgain={() => router.push({ pathname: "/new", params: { task: merged?.task ?? "" } })}
               />
             )}
             {running && (
@@ -412,10 +424,10 @@ export default function Thread() {
               <T variant="meta" weight="medium">{c.label}</T>
             </Pressable>
           ))}
-          {meta?.queued?.length ? (
+          {merged?.queued?.length ? (
             <View style={{ flexDirection: "row", alignItems: "center", gap: 5, paddingVertical: 7, paddingHorizontal: 10 }}>
               <Icon name="inbox" size={13} color={palette.faint} />
-              <T variant="meta" tone="faint">{meta.queued.length} queued</T>
+              <T variant="meta" tone="faint">{merged.queued.length} queued</T>
             </View>
           ) : null}
         </ScrollView>
@@ -426,9 +438,9 @@ export default function Thread() {
           </T>
         ) : null}
 
-        {waiting && meta?.question ? (
+        {waiting && merged?.question ? (
           <FadeInUp style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
-            <QuestionCard question={meta.question} onAnswer={answer} busy={answering} />
+            <QuestionCard question={merged.question} onAnswer={answer} busy={answering} />
           </FadeInUp>
         ) : null}
 
@@ -494,7 +506,7 @@ export default function Thread() {
         </View>
       </Sheet>
 
-      <ChangesSheet session={session} repos={meta?.repos ?? []} visible={sheet === "changes"} onClose={() => setSheet(null)} />
+      <ChangesSheet session={session} repos={merged?.repos ?? []} visible={sheet === "changes"} onClose={() => setSheet(null)} />
       {pr ? (
         <PrSheet session={session} repo={pr.repo} number={pr.number} visible={sheet === "pr"} onClose={() => setSheet(null)} />
       ) : null}
@@ -506,10 +518,10 @@ export default function Thread() {
         onChanged={refresh}
         onDestroyed={() => router.back()}
         onRunAgain={
-          meta?.task
+          merged?.task
             ? () => {
                 setSheet(null);
-                router.push({ pathname: "/new", params: { task: meta.task ?? "" } });
+                router.push({ pathname: "/new", params: { task: merged?.task ?? "" } });
               }
             : undefined
         }
