@@ -1,15 +1,63 @@
-import React, { useState } from "react";
-import { View } from "react-native";
+import React, { useRef, useState } from "react";
+import { Animated, Pressable, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
+import * as Haptics from "expo-haptics";
 import type { TraceEvent } from "@/lib/trace";
 import { runStats, toMarkdown } from "@/lib/transcript-tools";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { T } from "./ui/AppText";
-import { Button } from "./ui/Button";
-import { Icon } from "./ui/Icon";
+import { Icon, type IconName } from "./ui/Icon";
 
-/** End-of-run receipt: outcome, stats sentence, copy transcript + run again. */
+/** Icon action with spring press + a success pop (icon swaps to a check). */
+function IconAction({
+  name,
+  label,
+  color,
+  bg,
+  onPress,
+  done,
+}: {
+  name: IconName;
+  label: string;
+  color: string;
+  bg: string;
+  onPress: () => void;
+  done?: boolean;
+}) {
+  const scale = useRef(new Animated.Value(1)).current;
+  const to = (v: number) => Animated.spring(scale, { toValue: v, useNativeDriver: true, speed: 40, bounciness: 8 }).start();
+  return (
+    <Animated.View style={{ transform: [{ scale }] }}>
+      <Pressable
+        accessibilityLabel={label}
+        onPress={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+          onPress();
+        }}
+        onPressIn={() => to(0.9)}
+        onPressOut={() => to(1)}
+        hitSlop={6}
+        style={{
+          width: 32,
+          height: 32,
+          borderRadius: 16,
+          backgroundColor: bg,
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <Icon name={done ? "check" : name} size={14} color={color} />
+      </Pressable>
+    </Animated.View>
+  );
+}
+
+/**
+ * End-of-run receipt — one compact line, not a card: state mark, outcome word,
+ * stats, and two icon actions (copy transcript / run again). A hairline row in
+ * the transcript's flow, in the same voice as the lifecycle dividers.
+ */
 export function RunSummary({
   events,
   exitCode,
@@ -35,56 +83,60 @@ export function RunSummary({
     stats.failed ? `${stats.failed} failed` : null,
   ].filter(Boolean);
 
+  const color = ok ? palette.ok : interrupted ? palette.mutedForeground : palette.destructive;
+  const word = ok ? "Completed" : interrupted ? "Interrupted" : `Exited · code ${exitCode}`;
+  const sub = interrupted
+    ? exitCode === 254
+      ? "the sandbox restarted mid-run — send a message to continue"
+      : "stopped by you to deliver a message immediately"
+    : null;
+
   return (
-    <View
-      style={{
-        borderWidth: 1,
-        borderColor: ok ? palette.ok : interrupted ? palette.border : palette.destructive,
-        borderRadius: radius.xl,
-        padding: 14,
-        marginVertical: 10,
-        gap: 8,
-        backgroundColor: palette.card,
-      }}
-    >
-      {/* Title and stats on separate lines: a long stats string must never
-          squeeze the title into a one-character column. */}
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        <Icon
-          name={ok ? "check-circle" : interrupted ? "pause-circle" : "x-circle"}
-          size={16}
-          color={ok ? palette.ok : interrupted ? palette.mutedForeground : palette.destructive}
-        />
-        <T variant="body" weight="semibold" numberOfLines={1} style={{ flexShrink: 1 }}>
-          {ok ? "Completed" : interrupted ? "Run interrupted" : "Exited with an error"}
+    <View style={{ marginVertical: 10, gap: 4 }}>
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 8,
+          backgroundColor: palette.card,
+          borderWidth: 1,
+          borderColor: palette.border,
+          borderRadius: radius.pill,
+          paddingVertical: 6,
+          paddingLeft: 12,
+          paddingRight: 6,
+        }}
+      >
+        <Icon name={ok ? "check-circle" : interrupted ? "pause-circle" : "x-circle"} size={15} color={color} />
+        <T variant="meta" weight="semibold" numberOfLines={1} style={{ color, flexShrink: 0 }}>
+          {word}
         </T>
+        <T variant="micro" mono tone="faint" numberOfLines={1} style={{ flex: 1 }}>
+          {bits.join(" · ")}
+        </T>
+        <View style={{ flexDirection: "row", gap: 6 }}>
+          <IconAction
+            name="copy"
+            label="Copy transcript"
+            color={copied ? palette.ok : palette.mutedForeground}
+            bg={copied ? `${palette.ok}22` : palette.secondary}
+            done={copied}
+            onPress={async () => {
+              await Clipboard.setStringAsync(toMarkdown(events, { title, machine: session }));
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1600);
+            }}
+          />
+          {onRunAgain && (
+            <IconAction name="rotate-cw" label="Run again" color={palette.mutedForeground} bg={palette.secondary} onPress={onRunAgain} />
+          )}
+        </View>
       </View>
-      <T variant="micro" mono tone="faint">
-        {bits.join(" · ")}
-      </T>
-      {!ok && !interrupted ? (
-        <T variant="meta" tone="muted">
-          code {exitCode}
+      {sub ? (
+        <T variant="micro" tone="faint" style={{ paddingHorizontal: 12 }}>
+          {sub}
         </T>
       ) : null}
-      {interrupted ? (
-        <T variant="meta" tone="muted">
-          {exitCode === 254 ? "the sandbox restarted mid-run — send a message to continue" : "stopped by you to deliver a message immediately"}
-        </T>
-      ) : null}
-      <View style={{ flexDirection: "row", gap: 8 }}>
-        <Button
-          title={copied ? "Copied" : "Copy transcript"}
-          small
-          variant="secondary"
-          onPress={async () => {
-            await Clipboard.setStringAsync(toMarkdown(events, { title, machine: session }));
-            setCopied(true);
-            setTimeout(() => setCopied(false), 1600);
-          }}
-        />
-        {onRunAgain && <Button title="Run again" small variant="outline" onPress={onRunAgain} />}
-      </View>
     </View>
   );
 }
