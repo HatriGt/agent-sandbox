@@ -105,7 +105,9 @@ export function Sheet({
             borderTopLeftRadius: 22,
             borderTopRightRadius: 22,
             paddingBottom: insets.bottom + 12 + keyboardInset,
-            maxHeight: 620,
+            // A flat 620 is taller than a small phone's screen once the status bar is taken out,
+            // which pushed the sheet's own header off the top. Cap against the actual viewport.
+            maxHeight: Math.min(620, screenH - insets.top - 24),
             transform: [{ translateY: slide }],
             shadowColor: "#000",
             shadowOpacity: 0.25,
@@ -127,10 +129,12 @@ export function Sheet({
                 paddingVertical: 12,
               }}
             >
-              <T variant="h3" weight="semibold">
+              {/* A sheet title is often a box title the user typed, so it can be arbitrarily long;
+                  Close must stay put and the title give way. */}
+              <T variant="h3" weight="semibold" numberOfLines={1} style={{ flex: 1, minWidth: 0, marginRight: 12 }}>
                 {title}
               </T>
-              <Pressable onPress={() => dismiss(true)} hitSlop={12}>
+              <Pressable onPress={() => dismiss(true)} hitSlop={12} style={{ flexShrink: 0 }}>
                 <T variant="body" tone="muted">
                   Close
                 </T>

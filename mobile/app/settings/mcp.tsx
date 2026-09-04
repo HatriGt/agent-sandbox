@@ -56,8 +56,8 @@ export default function McpServers() {
         servers.map((s) => (
           <Card key={s.name}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-              <View style={{ flex: 1 }}>
-                <T variant="body" weight="semibold">
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <T variant="body" weight="semibold" numberOfLines={1}>
                   {s.name}
                 </T>
                 <T variant="micro" mono tone="faint" numberOfLines={1}>

@@ -22,12 +22,12 @@ export default function Devices() {
       {sessions?.map((s) => (
         <Card key={s.id}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-            <View style={{ flex: 1 }}>
+            <View style={{ flex: 1, minWidth: 0 }}>
               <T variant="body" weight="medium" numberOfLines={1}>
                 {s.userAgent?.slice(0, 60) || "Unknown device"}
                 {s.current ? " · this device" : ""}
               </T>
-              <T variant="micro" mono tone="faint">
+              <T variant="micro" mono tone="faint" numberOfLines={2}>
                 {s.ip ?? ""} · {s.lastSeenAt ? `seen ${ago(Date.parse(s.lastSeenAt))}` : `since ${ago(Date.parse(s.createdAt))}`}
               </T>
             </View>

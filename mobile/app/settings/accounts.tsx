@@ -75,7 +75,7 @@ export default function GithubAccounts() {
       {data?.accounts.map((a) => (
         <Card key={a.login}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-            <T variant="body" weight="semibold" style={{ flex: 1 }}>
+            <T variant="body" weight="semibold" numberOfLines={1} style={{ flex: 1, minWidth: 0 }}>
               {a.login}
             </T>
             {a.isDefault ? (

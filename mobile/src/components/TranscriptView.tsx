@@ -184,7 +184,7 @@ function ToolGroup({ tools }: { tools: Extract<TraceEvent, { kind: "tool" }>[] }
       >
         <Icon name={single ? toolIcon(tools[0].name) : "layers"} size={15} color={failed ? palette.destructive : palette.mutedForeground} />
         {single ? (
-          <T variant="meta" weight="medium" numberOfLines={1} style={{ flex: 1 }} tone={failed ? "destructive" : "default"}>
+          <T variant="meta" weight="medium" numberOfLines={1} style={{ flex: 1, minWidth: 0 }} tone={failed ? "destructive" : "default"}>
             {tools[0].name}
             {tools[0].arg ? (
               <T variant="meta" tone="faint" numberOfLines={1}>
@@ -194,12 +194,14 @@ function ToolGroup({ tools }: { tools: Extract<TraceEvent, { kind: "tool" }>[] }
             ) : null}
           </T>
         ) : (
-          <T variant="meta" weight="medium" style={{ flex: 1 }} tone={failed ? "destructive" : "default"}>
+          <T variant="meta" weight="medium" numberOfLines={1} style={{ flex: 1, minWidth: 0 }} tone={failed ? "destructive" : "default"}>
             Worked · {tools.length} steps
             {failed ? ` · ${failed} failed` : ""}
           </T>
         )}
-        <Icon name={open ? "chevron-up" : "chevron-down"} size={15} color={palette.faint} />
+        <View style={{ flexShrink: 0 }}>
+          <Icon name={open ? "chevron-up" : "chevron-down"} size={15} color={palette.faint} />
+        </View>
       </Pressable>
       {open && (
         <View style={{ borderTopWidth: 1, borderTopColor: palette.border }}>
@@ -223,7 +225,7 @@ function ToolRow({ tool, last }: { tool: Extract<TraceEvent, { kind: "tool" }>; 
         style={{ flexDirection: "row", alignItems: "flex-start", gap: 8, paddingHorizontal: 12, paddingVertical: 8 }}
       >
         <Icon name={toolIcon(tool.name)} size={13} color={tool.failed ? palette.destructive : palette.faint} style={{ marginTop: 2 }} />
-        <View style={{ flex: 1 }}>
+        <View style={{ flex: 1, minWidth: 0 }}>
           <T variant="code" mono tone={tool.failed ? "destructive" : "muted"} numberOfLines={open ? undefined : 1}>
             {tool.name}
             {tool.arg ? `: ${tool.arg.split("\n")[0]}` : ""}
@@ -270,7 +272,7 @@ function PlanRow({ items }: { items: PlanItem[] }) {
     >
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
         <Icon name="check-square" size={13} color={palette.mutedForeground} />
-        <T variant="micro" tone="muted" weight="semibold">
+        <T variant="micro" tone="muted" weight="semibold" numberOfLines={1} style={{ flexShrink: 0 }}>
           Plan · {done}/{items.length}
         </T>
         <View style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: palette.muted, marginLeft: 6 }}>
@@ -288,7 +290,7 @@ function PlanRow({ items }: { items: PlanItem[] }) {
           <T
             variant="body"
             tone={it.state === "todo" ? "muted" : "default"}
-            style={[{ flex: 1 }, it.state === "done" ? { textDecorationLine: "line-through" as const } : null]}
+            style={[{ flex: 1, minWidth: 0 }, it.state === "done" ? { textDecorationLine: "line-through" as const } : null]}
           >
             {it.text}
           </T>
@@ -302,13 +304,15 @@ function LifecycleRow({ label, detail }: { label: string; detail?: string }) {
   const { palette } = useTheme();
   return (
     <View style={{ flexDirection: "row", gap: 8, alignItems: "center", marginVertical: 10 }}>
-      <View style={{ flex: 1, height: 1, backgroundColor: palette.border }} />
+      {/* The rules must give way to the label, not the other way round: a long `detail` on a narrow
+          phone would otherwise push the right-hand rule off-screen. */}
+      <View style={{ flex: 1, minWidth: 8, height: 1, backgroundColor: palette.border }} />
       <Icon name="zap" size={11} color={palette.faint} />
-      <T variant="micro" tone="faint" mono>
+      <T variant="micro" tone="faint" mono numberOfLines={1} style={{ flexShrink: 1, minWidth: 0 }}>
         {label}
         {detail ? ` · ${detail}` : ""}
       </T>
-      <View style={{ flex: 1, height: 1, backgroundColor: palette.border }} />
+      <View style={{ flex: 1, minWidth: 8, height: 1, backgroundColor: palette.border }} />
     </View>
   );
 }

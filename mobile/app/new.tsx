@@ -250,7 +250,7 @@ export default function NewTask() {
             </T>
             {picked.map((p) => (
               <View key={p.repo} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                <T variant="meta" mono style={{ flex: 1 }} numberOfLines={1}>
+                <T variant="meta" mono style={{ flex: 1, minWidth: 0 }} numberOfLines={1}>
                   {p.repo}
                 </T>
                 <TextInput
@@ -310,7 +310,7 @@ export default function NewTask() {
                           backgroundColor: pressed ? palette.accent : "transparent",
                         })}
                       >
-                        <T variant="meta" mono>
+                        <T variant="meta" mono numberOfLines={1}>
                           {r.fullName}
                           {r.private ? " · private" : ""}
                         </T>

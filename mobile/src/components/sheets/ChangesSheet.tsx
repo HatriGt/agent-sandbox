@@ -73,7 +73,7 @@ export function ChangesSheet({
     <Sheet visible={visible} onClose={diff ? () => setDiff(null) : onClose} title={diff ? diff.path.split("/").pop()! : "Changes"}>
       {diff ? (
         <View style={{ gap: 10, paddingBottom: 12 }}>
-          <T variant="micro" mono tone="faint">
+          <T variant="micro" mono tone="faint" numberOfLines={2}>
             {diff.path}
             {diff.untracked ? " · untracked" : ""}
           </T>
@@ -102,13 +102,14 @@ export function ChangesSheet({
                   opacity: busy === f.path ? 0.5 : 1,
                 }}
               >
-                <T variant="code" mono numberOfLines={1} style={{ flex: 1 }}>
+                {/* Deep paths are long; the file name is the useful end, so clip the head. */}
+                <T variant="code" mono numberOfLines={1} ellipsizeMode="head" style={{ flex: 1, minWidth: 0 }}>
                   {f.path}
                 </T>
-                <T variant="micro" mono tone="ok">
+                <T variant="micro" mono tone="ok" style={{ flexShrink: 0 }}>
                   +{f.additions}
                 </T>
-                <T variant="micro" mono tone="destructive">
+                <T variant="micro" mono tone="destructive" style={{ flexShrink: 0 }}>
                   −{f.deletions}
                 </T>
               </Pressable>
@@ -119,7 +120,7 @@ export function ChangesSheet({
               <Field placeholder="Commit message" value={message} onChangeText={setMessage} />
               {repos.map((r) => (
                 <View key={r.name} style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
-                  <T variant="meta" mono tone="muted" style={{ flex: 1 }} numberOfLines={1}>
+                  <T variant="meta" mono tone="muted" style={{ flex: 1, minWidth: 0 }} numberOfLines={1}>
                     {r.name}
                   </T>
                   <Button title="Commit" small variant="secondary" loading={busy === "commit"} onPress={() => run("commit", r.name)} />

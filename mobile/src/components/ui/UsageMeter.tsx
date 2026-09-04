@@ -19,11 +19,16 @@ export function UsageMeter({
   kind,
   usage,
   trackWidth = 44,
+  fluid,
   style,
 }: {
   kind: "memory" | "disk";
   usage: Usage | undefined;
   trackWidth?: number;
+  /** Let the track absorb the leftover width instead of holding a fixed one. Use inside any
+   *  container whose width is not known at authoring time — a fixed track plus a mono label is
+   *  what pushes the number out past the edge on a narrow phone. */
+  fluid?: boolean;
   style?: ViewStyle;
 }) {
   const { palette } = useTheme();
@@ -49,7 +54,16 @@ export function UsageMeter({
       style={{ flexDirection: "row", alignItems: "center", gap: 5, ...style }}
     >
       <Icon name={kind === "memory" ? "cpu" : "hard-drive"} size={11} color={palette.faint} />
-      <View style={{ width: trackWidth, height: 4, borderRadius: radius.pill, backgroundColor: palette.accent, overflow: "hidden" }}>
+      <View
+        style={{
+          // Fluid: take the leftover width, but never collapse to nothing when the row is tight.
+          ...(fluid ? { flex: 1, minWidth: 24 } : { width: trackWidth }),
+          height: 4,
+          borderRadius: radius.pill,
+          backgroundColor: palette.accent,
+          overflow: "hidden",
+        }}
+      >
         <Animated.View
           style={{
             height: 4,
@@ -60,7 +74,7 @@ export function UsageMeter({
           }}
         />
       </View>
-      <T variant="micro" tone={textTone} mono>
+      <T variant="micro" tone={textTone} mono numberOfLines={1} style={{ flexShrink: 0 }}>
         {`${fmtMib(usage.usedMib)}/${fmtMib(usage.totalMib)}`}
       </T>
     </View>

@@ -44,10 +44,10 @@ export default function Activity() {
                   size={16}
                   color={e.kind === "waiting" ? palette.attention : e.kind === "done" ? palette.ok : palette.destructive}
                 />
-                <T variant="body" weight="medium" style={{ flex: 1 }} numberOfLines={1}>
+                <T variant="body" weight="medium" style={{ flex: 1, minWidth: 0 }} numberOfLines={1}>
                   {e.title ?? e.box}
                 </T>
-                <T variant="micro" tone="faint">
+                <T variant="micro" tone="faint" numberOfLines={1} style={{ flexShrink: 0 }}>
                   {ago(e.at)}
                 </T>
               </View>

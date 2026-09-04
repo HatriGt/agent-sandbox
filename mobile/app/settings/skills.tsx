@@ -40,8 +40,8 @@ export default function Skills() {
         skills.map((s) => (
           <Card key={s.name}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-              <View style={{ flex: 1 }}>
-                <T variant="body" weight="semibold" mono>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <T variant="body" weight="semibold" mono numberOfLines={1}>
                   /{s.name}
                 </T>
                 <T variant="meta" tone="muted" numberOfLines={2} style={{ marginTop: 2 }}>

@@ -21,17 +21,26 @@ function usageWords(u: Usage): string {
   return `${fmtMib(u.usedMib)} used · ${fmtMib(free)} free of ${fmtMib(u.totalMib)}`;
 }
 
-/** One vitals row: label, meter against the cap, and the used/free sentence. */
+/**
+ * One vitals row: label, meter against the cap, and the used/free sentence.
+ *
+ * Full width, stacked — not two columns. Half a sheet cannot hold an icon, a track, a `812 MB/1.0 GB`
+ * mono label and a "used · free of" sentence without the text escaping the card on a narrow phone.
+ */
 function VitalRow({ kind, label, usage }: { kind: "memory" | "disk"; label: string; usage: Usage | undefined }) {
   if (!usage || !(usage.totalMib > 0)) return null;
   const level = usageLevel(usage);
   return (
-    <View style={{ gap: 3, flex: 1 }}>
+    <View style={{ gap: 4 }}>
       <T variant="micro" tone="faint" weight="semibold">
         {label}
       </T>
-      <UsageMeter kind={kind} usage={usage} trackWidth={64} />
-      <T variant="micro" tone={level === "critical" ? "destructive" : level === "high" ? "attention" : "muted"}>
+      <UsageMeter kind={kind} usage={usage} fluid />
+      <T
+        variant="micro"
+        numberOfLines={1}
+        tone={level === "critical" ? "destructive" : level === "high" ? "attention" : "muted"}
+      >
         {usageWords(usage)}
       </T>
     </View>
@@ -51,7 +60,7 @@ function VitalsBlock({ box, sleeping, border }: { box: BoxView; sleeping: boolea
           {sleeping ? "Asleep — memory and disk usage report once it wakes." : "No usage metrics reported yet."}
         </T>
       ) : (
-        <View style={{ flexDirection: "row", gap: 16 }}>
+        <View style={{ gap: 12 }}>
           <VitalRow kind="memory" label="MEMORY" usage={box.memUsage} />
           <VitalRow kind="disk" label="STORAGE" usage={box.disk} />
         </View>
@@ -103,17 +112,21 @@ function ActionRow({
       >
         <Icon name={icon} size={16} color={destructive ? palette.destructive : palette.mutedForeground} />
       </View>
-      <View style={{ flex: 1 }}>
-        <T variant="body" weight="medium" style={{ color }}>
+      {/* minWidth:0 is what actually lets a flex child shrink below its content width in RN —
+          without it a long hint pushes the chevron off the sheet instead of ellipsising. */}
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <T variant="body" weight="medium" numberOfLines={1} style={{ color }}>
           {label}
         </T>
         {hint ? (
-          <T variant="micro" tone="faint">
+          <T variant="micro" tone="faint" numberOfLines={2}>
             {hint}
           </T>
         ) : null}
       </View>
-      <Icon name="chevron-right" size={15} color={palette.faint} />
+      <View style={{ flexShrink: 0 }}>
+        <Icon name="chevron-right" size={15} color={palette.faint} />
+      </View>
     </Pressable>
   );
 }

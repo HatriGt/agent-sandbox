@@ -38,17 +38,19 @@ function RowLink({ title, hint, icon, onPress }: { title: string; hint?: string;
       >
         <Icon name={icon} size={15} color={palette.foreground} />
       </View>
-      <View style={{ flex: 1 }}>
-        <T variant="body" weight="medium">
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <T variant="body" weight="medium" numberOfLines={1}>
           {title}
         </T>
         {hint ? (
-          <T variant="micro" tone="faint">
+          <T variant="micro" tone="faint" numberOfLines={2}>
             {hint}
           </T>
         ) : null}
       </View>
-      <Icon name="chevron-right" size={16} color={palette.faint} />
+      <View style={{ flexShrink: 0 }}>
+        <Icon name="chevron-right" size={16} color={palette.faint} />
+      </View>
     </Pressable>
   );
 }
@@ -69,10 +71,10 @@ export default function Settings() {
         </T>
 
         <Card style={{ marginVertical: 10 }}>
-          <T variant="body" weight="semibold">
+          <T variant="body" weight="semibold" numberOfLines={1}>
             {isUser && me.kind === "user" ? (me.name ?? me.login) : "Operator"}
           </T>
-          <T variant="micro" mono tone="faint">
+          <T variant="micro" mono tone="faint" numberOfLines={1}>
             {serverUrl().replace(/^https?:\/\//, "")}
           </T>
           {isUser && me.kind === "user" && me.plan === "trial" ? (

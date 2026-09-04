@@ -68,13 +68,17 @@ export function QuestionCard({
               alignItems: "center",
             })}
           >
-            <T variant="meta" mono tone="faint">
+            <T variant="meta" mono tone="faint" style={{ flexShrink: 0 }}>
               {i + 1}
             </T>
-            <T variant="body" weight="medium" style={{ flex: 1 }}>
+            {/* Options wrap rather than truncate — an unreadable half-option is worse than a
+                three-line one — but the column must be allowed to shrink so the chevron stays in. */}
+            <T variant="body" weight="medium" style={{ flex: 1, minWidth: 0 }}>
               {opt}
             </T>
-            <Icon name="chevron-right" size={14} />
+            <View style={{ flexShrink: 0 }}>
+              <Icon name="chevron-right" size={14} />
+            </View>
           </Pressable>
         ))}
       {other ? (

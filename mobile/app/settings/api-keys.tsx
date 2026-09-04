@@ -40,11 +40,11 @@ export default function ApiKeys() {
       {keys?.map((k) => (
         <Card key={k.id}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-            <View style={{ flex: 1 }}>
-              <T variant="body" weight="medium">
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <T variant="body" weight="medium" numberOfLines={1}>
                 {k.name}
               </T>
-              <T variant="micro" mono tone="faint">
+              <T variant="micro" mono tone="faint" numberOfLines={2}>
                 {k.prefix}… · {k.last_used_at ? `used ${ago(Date.parse(k.last_used_at))}` : "never used"}
               </T>
             </View>

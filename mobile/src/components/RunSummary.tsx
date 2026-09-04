@@ -116,10 +116,10 @@ export function RunSummary({
         <T variant="meta" weight="semibold" numberOfLines={1} style={{ color, flexShrink: 0 }}>
           {word}
         </T>
-        <T variant="micro" mono tone="faint" numberOfLines={1} style={{ flex: 1 }}>
+        <T variant="micro" mono tone="faint" numberOfLines={1} style={{ flex: 1, minWidth: 0 }}>
           {bits.join(" · ")}
         </T>
-        <View style={{ flexDirection: "row", gap: 6 }}>
+        <View style={{ flexDirection: "row", gap: 6, flexShrink: 0 }}>
           <IconAction
             name="copy"
             label="Copy transcript"

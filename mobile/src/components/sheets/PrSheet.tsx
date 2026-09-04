@@ -72,7 +72,9 @@ export function PrSheet({
               </T>
               <T variant="meta" mono tone="ok">+{pr.additions}</T>
               <T variant="meta" mono tone="destructive">−{pr.deletions}</T>
-              <T variant="meta" mono tone="muted">{pr.head} → {pr.base}</T>
+              <T variant="meta" mono tone="muted" numberOfLines={1} style={{ maxWidth: "100%" }}>
+                {pr.head} → {pr.base}
+              </T>
             </View>
             {checks ? (
               <T variant="meta" tone={checks.failure ? "destructive" : checks.pending ? "muted" : "ok"}>

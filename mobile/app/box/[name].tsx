@@ -278,22 +278,30 @@ export default function Thread() {
           >
             <Icon name="chevron-left" size={22} color={palette.mutedForeground} />
           </Pressable>
-          <View style={{ flex: 1 }}>
+          {/* minWidth:0 lets this column actually shrink; without it a long title or a third repo
+              chip widens the row and shoves the state pill and ⋯ past the right edge. */}
+          <View style={{ flex: 1, minWidth: 0 }}>
             <T variant="body" weight="semibold" numberOfLines={1}>
               {merged?.title || merged?.task?.split("\n")[0] || session}
             </T>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-              <T variant="micro" mono tone="faint" numberOfLines={1}>
+              <T variant="micro" mono tone="faint" numberOfLines={1} style={{ flexShrink: 1, minWidth: 0 }}>
                 {friendlyName(session)}
               </T>
-              {merged?.repos?.map((r) => (
-                <View key={r.name} style={{ flexDirection: "row", alignItems: "center", gap: 3 }}>
+              {/* Two chips is all a 56px header can carry legibly; the rest are in the ⋯ menu. */}
+              {merged?.repos?.slice(0, 2).map((r) => (
+                <View key={r.name} style={{ flexDirection: "row", alignItems: "center", gap: 3, flexShrink: 1, minWidth: 0 }}>
                   <Icon name="git-branch" size={10} color={palette.faint} />
-                  <T variant="micro" mono tone="faint" numberOfLines={1}>
+                  <T variant="micro" mono tone="faint" numberOfLines={1} style={{ flexShrink: 1, minWidth: 0 }}>
                     {r.name.split("/").pop()}
                   </T>
                 </View>
               ))}
+              {merged && merged.repos && merged.repos.length > 2 ? (
+                <T variant="micro" mono tone="faint" style={{ flexShrink: 0 }}>
+                  +{merged.repos.length - 2}
+                </T>
+              ) : null}
             </View>
           </View>
           {merged ? <StatePill runState={merged.runState} boxStatus={merged.boxStatus} exitCode={merged.exitCode} /> : null}
@@ -321,8 +329,8 @@ export default function Thread() {
               borderBottomColor: palette.border,
             }}
           >
-            <UsageMeter kind="memory" usage={merged?.memUsage} trackWidth={56} />
-            <UsageMeter kind="disk" usage={merged?.disk} trackWidth={56} />
+            <UsageMeter kind="memory" usage={merged?.memUsage} fluid style={{ flex: 1 }} />
+            <UsageMeter kind="disk" usage={merged?.disk} fluid style={{ flex: 1 }} />
           </View>
         ) : null}
 
@@ -535,7 +543,7 @@ export default function Thread() {
               })}
             >
               <Icon name={c.icon} size={13} color={palette.mutedForeground} />
-              <T variant="meta" weight="medium">{c.label}</T>
+              <T variant="meta" weight="medium" numberOfLines={1}>{c.label}</T>
             </Pressable>
           ))}
           {merged?.queued?.length ? (
@@ -583,7 +591,9 @@ export default function Thread() {
                   })}
                 >
                   <Icon name="cpu" size={11} color={pickedModel ? palette.live : palette.faint} />
-                  <T variant="micro" weight="medium" tone={pickedModel ? "live" : "faint"}>
+                  {/* Model names run long ("Claude Sonnet 5 (thinking)") and this chip shares a row
+                      with both lane toggles — cap it rather than let it push them off. */}
+                  <T variant="micro" weight="medium" numberOfLines={1} tone={pickedModel ? "live" : "faint"} style={{ maxWidth: 120 }}>
                     {models.find((m) => m.id === (pickedModel ?? currentModel))?.label ?? "Model"}
                   </T>
                 </Pressable>
@@ -670,16 +680,20 @@ export default function Thread() {
                 })}
               >
                 <Icon name="cpu" size={15} color={active ? palette.foreground : palette.faint} />
-                <View style={{ flex: 1 }}>
-                  <T variant="body" weight={active ? "semibold" : "regular"}>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <T variant="body" weight={active ? "semibold" : "regular"} numberOfLines={1}>
                     {m.label}
                   </T>
-                  <T variant="micro" mono tone="faint">
+                  <T variant="micro" mono tone="faint" numberOfLines={1}>
                     {m.id}
                     {m.id === currentModel ? " · current" : ""}
                   </T>
                 </View>
-                {active && <Icon name="check" size={16} color={palette.ok} />}
+                {active && (
+                  <View style={{ flexShrink: 0 }}>
+                    <Icon name="check" size={16} color={palette.ok} />
+                  </View>
+                )}
               </Pressable>
             );
           })}

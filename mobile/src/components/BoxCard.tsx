@@ -35,7 +35,7 @@ export function BoxCard({ box, onLongPress }: { box: BoxView; onLongPress?: (b: 
             variant="body"
             weight="semibold"
             numberOfLines={1}
-            style={{ flex: 1, color: waiting ? palette.attentionInk : palette.foreground }}
+            style={{ flex: 1, minWidth: 0, color: waiting ? palette.attentionInk : palette.foreground }}
           >
             {boxLabel(box)}
           </T>
@@ -50,16 +50,18 @@ export function BoxCard({ box, onLongPress }: { box: BoxView; onLongPress?: (b: 
           </View>
         ) : null}
         <View style={{ flexDirection: "row", gap: 12, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 4, maxWidth: "100%" }}>
             <Icon name="box" size={11} color={ink} />
-            <T variant="micro" mono style={{ color: ink }}>
+            <T variant="micro" mono numberOfLines={1} style={{ color: ink, flexShrink: 1 }}>
               {friendlyName(box.name)}
             </T>
           </View>
+          {/* A repo can be `some-long-name@feature/very-long-branch`; the row wraps, but one chip
+              wider than the card still needs to ellipsise rather than run past the border. */}
           {box.repos?.map((r) => (
-            <View key={r.name} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+            <View key={r.name} style={{ flexDirection: "row", alignItems: "center", gap: 4, maxWidth: "100%" }}>
               <Icon name="git-branch" size={11} color={ink} />
-              <T variant="micro" mono style={{ color: ink }}>
+              <T variant="micro" mono numberOfLines={1} style={{ color: ink, flexShrink: 1 }}>
                 {r.name.split("/").pop()}
                 {r.branch ? `@${r.branch}` : ""}
               </T>

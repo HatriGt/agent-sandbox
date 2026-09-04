@@ -63,7 +63,9 @@ export default function Fleet() {
             you use on the web to see them.
           </T>
         )}
-        {capacity > 0 && (
+        {/* One tick per slot, but only while the ticks stay legible — past ~24 slots each tick is
+            thinner than the gap between them and the row reads as noise, so it becomes one bar. */}
+        {capacity > 0 && capacity <= 24 && (
           <View style={{ flexDirection: "row", gap: 4, marginBottom: 6 }}>
             {Array.from({ length: capacity }).map((_, i) => (
               <View
@@ -76,6 +78,18 @@ export default function Fleet() {
                 }}
               />
             ))}
+          </View>
+        )}
+        {capacity > 24 && (
+          <View style={{ height: 6, borderRadius: 3, backgroundColor: palette.muted, marginBottom: 6, overflow: "hidden" }}>
+            <View
+              style={{
+                height: 6,
+                borderRadius: 3,
+                backgroundColor: palette.live,
+                width: `${Math.min(100, Math.round((occupied / capacity) * 100))}%`,
+              }}
+            />
           </View>
         )}
         {boxes

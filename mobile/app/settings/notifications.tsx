@@ -64,11 +64,11 @@ export default function Notifications() {
       />
       {EVENTS.map((ev) => (
         <View key={ev.key} style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-          <View style={{ flex: 1 }}>
-            <T variant="body" weight="medium">
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <T variant="body" weight="medium" numberOfLines={1}>
               {ev.label}
             </T>
-            <T variant="micro" tone="faint">
+            <T variant="micro" tone="faint" numberOfLines={2}>
               {ev.hint}
             </T>
           </View>

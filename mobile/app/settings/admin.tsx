@@ -38,12 +38,12 @@ export default function Admin() {
       {users?.map((u) => (
         <Card key={u.id}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-            <View style={{ flex: 1 }}>
-              <T variant="body" weight="semibold">
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <T variant="body" weight="semibold" numberOfLines={1}>
                 {u.login}
                 {u.role === "admin" ? " · admin" : ""}
               </T>
-              <T variant="micro" mono tone="faint">
+              <T variant="micro" mono tone="faint" numberOfLines={2}>
                 {u.email ?? "no email"} · {u.boxes} boxes · {u.lastSeenAt ? `seen ${ago(Date.parse(u.lastSeenAt))}` : "never seen"}
               </T>
               {u.plan === "trial" && (

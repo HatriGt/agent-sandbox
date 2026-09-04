@@ -32,6 +32,10 @@ export function StatePill({
         backgroundColor: attention ? palette.attention : "transparent",
         borderWidth: attention ? 0 : 1,
         borderColor: palette.border,
+        // Words like "out of memory" and "needs you" are wide; the pill must keep its own size and
+        // let whatever sits beside it give ground, never split across two lines.
+        flexShrink: 0,
+        alignSelf: "flex-start",
       }}
     >
       {s.icon === "dot" ? (
@@ -41,7 +45,7 @@ export function StatePill({
           {GLYPH[s.icon]}
         </T>
       )}
-      <T variant="meta" weight="medium" style={{ color: attention ? palette.attentionInk : s.color }}>
+      <T variant="meta" weight="medium" numberOfLines={1} style={{ color: attention ? palette.attentionInk : s.color }}>
         {s.word}
       </T>
     </View>

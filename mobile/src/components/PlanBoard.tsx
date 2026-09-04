@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { AccessibilityInfo, Animated, Easing, Pressable, ScrollView, View } from "react-native";
+import { AccessibilityInfo, Animated, Easing, Pressable, ScrollView, useWindowDimensions, View } from "react-native";
 import { shortDuration, shortPath, type DerivedTask, type TaskBoard, type TaskEvidence } from "@/lib/planTasks";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
@@ -285,11 +285,13 @@ export function PlanChip({ board, live, onPress }: { board: TaskBoard; live?: bo
       <T variant="meta" weight="medium">
         Plan
       </T>
-      <T variant="micro" mono tone="faint">
+      <T variant="micro" mono tone="faint" numberOfLines={1} style={{ flexShrink: 0 }}>
         {done}/{tasks.length}
       </T>
+      {/* One pip per step, but a 20-step plan's pips would widen the pill past the dock. Past 12 the
+          fraction beside them already carries the count, so the tail is dropped. */}
       <View style={{ flexDirection: "row", gap: 2.5, alignItems: "center" }}>
-        {tasks.map((t, i) => (
+        {tasks.slice(0, 12).map((t, i) => (
           <View
             key={`${i}-${t.text}`}
             style={{
@@ -325,13 +327,14 @@ export function PlanSheet({
   onClose: () => void;
 }) {
   const { palette } = useTheme();
+  const { height: screenH } = useWindowDimensions();
   if (!board) return null;
   const { tasks, done, complete } = board;
   const failedSteps = tasks.filter((t) => t.evidence.failed).length;
   return (
     <Sheet visible={visible} onClose={onClose} title={headline(complete, live, failedSteps > 0)} scroll={false}>
       <View style={{ gap: 0, paddingBottom: 12 }}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingBottom: 8 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingBottom: 8, flexWrap: "wrap" }}>
           <T variant="micro" mono tone="muted">
             {done}/{tasks.length} steps
           </T>
@@ -349,7 +352,9 @@ export function PlanSheet({
         <View style={{ borderRadius: 2, overflow: "hidden", marginBottom: 10 }}>
           <ProgressRail done={done} total={tasks.length} complete={complete} failed={failedSteps > 0} />
         </View>
-        <ScrollView style={{ maxHeight: 440 }} contentContainerStyle={{ backgroundColor: `${palette.muted}66`, borderRadius: radius.xl, padding: 8 }}>
+        {/* The sheet renders this pane unscrolled, so the list owns its own height. Bound it to the
+            screen, not a constant — 440 plus the header is taller than a short phone. */}
+        <ScrollView style={{ maxHeight: Math.min(440, screenH * 0.5) }} contentContainerStyle={{ backgroundColor: `${palette.muted}66`, borderRadius: radius.xl, padding: 8 }}>
           {tasks.map((t, i) => (
             <TaskRow key={`${i}-${t.text}`} task={t} live={live} last={i === tasks.length - 1} />
           ))}

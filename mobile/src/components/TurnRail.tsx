@@ -34,6 +34,14 @@ export function TurnRail({
     if (t.y <= scrollY + viewportH * 0.4) activeIdx = i;
   });
 
+  // Each dot costs ~16px of height, so a long conversation would grow a rail taller than the phone
+  // and spill off both ends. Keep a window around the turn you're on instead — the rail is for
+  // jumping near where you are, not an index of everything.
+  const MAX = Math.max(4, Math.floor((viewportH - 80) / 16));
+  let from = 0;
+  if (turns.length > MAX) from = Math.min(turns.length - MAX, Math.max(0, activeIdx - Math.floor(MAX / 2)));
+  const shown = turns.slice(from, from + MAX);
+
   return (
     <Animated.View
       pointerEvents={visible ? "box-none" : "none"}
@@ -58,7 +66,8 @@ export function TurnRail({
           alignItems: "center",
         }}
       >
-        {turns.map((t, i) => {
+        {shown.map((t, j) => {
+          const i = from + j;
           const active = i === activeIdx;
           const color = t.kind === "question" ? palette.attention : active ? palette.foreground : palette.lineStrong;
           return (
