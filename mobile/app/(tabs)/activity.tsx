@@ -9,6 +9,7 @@ import { T } from "@/components/ui/AppText";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Icon } from "@/components/ui/Icon";
+import { FadeInUp } from "@/components/ui/Motion";
 
 /** Device-local feed of state edges (the server stores no run history by design). */
 export default function Activity() {
@@ -34,8 +35,9 @@ export default function Activity() {
             fails. Nothing yet.
           </T>
         ) : (
-          events.map((e) => (
-            <Card key={e.id} onPress={() => router.push(`/box/${encodeURIComponent(e.box)}`)}>
+          events.map((e, i) => (
+            <FadeInUp key={e.id} delay={Math.min(i, 8) * 40}>
+            <Card onPress={() => router.push(`/box/${encodeURIComponent(e.box)}`)}>
               <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
                 <Icon
                   name={e.kind === "waiting" ? "alert-circle" : e.kind === "done" ? "check-circle" : "x-circle"}
@@ -53,6 +55,7 @@ export default function Activity() {
                 {e.kind === "waiting" ? (e.detail ?? "needs you") : e.kind === "done" ? "finished" : (e.detail ?? "failed")}
               </T>
             </Card>
+            </FadeInUp>
           ))
         )}
         {events.length > 0 && (

@@ -5,7 +5,9 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "@/state/auth";
 import { useTheme } from "@/theme/ThemeContext";
 import { T } from "@/components/ui/AppText";
+import { BrandMark } from "@/components/ui/BrandMark";
 import { Button } from "@/components/ui/Button";
+import { FadeInUp } from "@/components/ui/Motion";
 
 /** Landing: the serif voice of the web landing page, one screen. */
 export default function Welcome() {
@@ -29,14 +31,21 @@ export default function Welcome() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: palette.background }}>
       <View style={{ flex: 1, justifyContent: "center", padding: 28, gap: 16 }}>
-        <T serif variant="display">
-          Agent Sandbox
-        </T>
-        <T variant="lead" tone="muted">
-          Delegate a coding task to an agent in a throwaway machine. Watch it live, answer when it needs
-          you, review the diff, ship the PR — from your pocket.
-        </T>
-        <View style={{ gap: 10, marginTop: 24 }}>
+        <FadeInUp>
+          <BrandMark size={84} animate />
+        </FadeInUp>
+        <FadeInUp delay={80}>
+          <T serif variant="display">
+            Agent Sandbox
+          </T>
+        </FadeInUp>
+        <FadeInUp delay={160}>
+          <T variant="lead" tone="muted">
+            Delegate a coding task to an agent in a throwaway machine. Watch it live, answer when it needs
+            you, review the diff, ship the PR — from your pocket.
+          </T>
+        </FadeInUp>
+        <FadeInUp delay={240} style={{ gap: 10, marginTop: 24 }}>
           {mode !== "token" && (
             <>
               {github && <Button title="Sign in with GitHub" onPress={() => router.push("/github-auth")} />}
@@ -49,7 +58,7 @@ export default function Welcome() {
             variant={mode === "token" ? "primary" : "ghost"}
             onPress={() => router.push("/connect-server")}
           />
-        </View>
+        </FadeInUp>
       </View>
     </SafeAreaView>
   );

@@ -12,6 +12,7 @@ import { BoxCard } from "@/components/BoxCard";
 import { BoxActionsSheet } from "@/components/sheets/BoxActionsSheet";
 import { T } from "@/components/ui/AppText";
 import { Icon, type IconName } from "@/components/ui/Icon";
+import { BrandMark } from "@/components/ui/BrandMark";
 import { FadeInUp } from "@/components/ui/Motion";
 import { CardSkeleton } from "@/components/ui/Skeleton";
 
@@ -128,8 +129,8 @@ export default function Home() {
         )}
 
         {snap && boxes.length === 0 && (
-          <View style={{ marginTop: 32, gap: 10, alignItems: "center" }}>
-            <Icon name="coffee" size={28} color={palette.faint} />
+          <View style={{ marginTop: 32, gap: 14, alignItems: "center" }}>
+            <BrandMark size={72} animate />
             <T variant="body" tone="muted" style={{ textAlign: "center" }}>
               Nothing running. Delegate a task and walk away — you'll see it here the moment it needs you.
             </T>

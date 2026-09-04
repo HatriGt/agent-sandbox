@@ -1,5 +1,6 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { View } from "react-native";
+import { AnimatedSplash } from "@/components/AnimatedSplash";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import * as SplashScreen from "expo-splash-screen";
@@ -27,6 +28,9 @@ function Shell() {
     HedvigLettersSerif_400Regular,
   });
 
+  // Native splash hands off to the in-app AnimatedSplash for a live intro
+  // (spring mark, orb pop, spark to the gap) instead of a hard cut to the UI.
+  const [intro, setIntro] = useState(true);
   useEffect(() => {
     if (fontsLoaded && ready) void SplashScreen.hideAsync();
   }, [fontsLoaded, ready]);
@@ -46,6 +50,7 @@ function Shell() {
       >
         <Stack.Screen name="new" options={{ presentation: "modal", animation: "slide_from_bottom" }} />
       </Stack>
+      {intro && <AnimatedSplash onDone={() => setIntro(false)} />}
     </>
   );
 }

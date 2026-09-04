@@ -8,6 +8,7 @@ import { useTheme } from "@/theme/ThemeContext";
 import { BoxCard } from "@/components/BoxCard";
 import { BoxActionsSheet } from "@/components/sheets/BoxActionsSheet";
 import { T } from "@/components/ui/AppText";
+import { FadeInUp } from "@/components/ui/Motion";
 
 const ORDER: Record<string, number> = { waiting: 0, running: 1, done: 2, idle: 3 };
 
@@ -79,8 +80,10 @@ export default function Fleet() {
         )}
         {boxes
           .filter((b) => b.role !== "pool-free")
-          .map((b) => (
-            <BoxCard key={b.name} box={b} onLongPress={setActions} />
+          .map((b, i) => (
+            <FadeInUp key={b.name} delay={Math.min(i, 6) * 50}>
+              <BoxCard box={b} onLongPress={setActions} />
+            </FadeInUp>
           ))}
         {poolFree > 0 && (
           <T variant="micro" tone="faint" style={{ marginTop: 8 }}>
