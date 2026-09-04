@@ -16,6 +16,8 @@ import { SkillChip, SkillMenu } from "./SkillMenu";
 import { slashAt, stripSlashToken, typedSkillToken, type SlashState } from "@/lib/slash";
 import { useCached } from "@/lib/cache";
 import type { SkillView } from "@/lib/api";
+import { smartJoin, useVoiceInput } from "@/hooks/useVoiceInput";
+import { VoiceButton, VoicePill } from "@/components/ui/voice-button";
 import { cn } from "@/lib/utils";
 
 type Mode = "agent" | "side";
@@ -113,6 +115,26 @@ export function SendBar({
   React.useEffect(() => setFiles([]), [boxName]);
 
   const textarea = () => document.getElementById("send-input") as HTMLTextAreaElement | null;
+
+  // Dictation: finalized phrases land at the caret through the same setValue path typing uses,
+  // so drafts, @-mentions and /-skills keep working. Nothing auto-sends.
+  const voice = useVoiceInput({
+    onFinal: (spoken) => {
+      setValue((prev) => {
+        const el = textarea();
+        const caret = el && document.activeElement === el ? (el.selectionStart ?? prev.length) : prev.length;
+        const glue = smartJoin(prev.slice(0, caret), spoken);
+        const next = prev.slice(0, caret) + glue + prev.slice(caret);
+        requestAnimationFrame(() => {
+          const t = textarea();
+          if (!t) return;
+          const pos = caret + glue.length;
+          t.setSelectionRange(pos, pos);
+        });
+        return next;
+      });
+    },
+  });
   React.useEffect(() => {
     onFocusRequest?.(() => textarea()?.focus());
   }, [onFocusRequest]);
@@ -183,6 +205,7 @@ export function SendBar({
   const send = async () => {
     const text = value.trim();
     if ((!text && !files.length && !images.length && !skill) || sending) return;
+    voice.stop();
     setSending(true);
     setError(null);
     const attached = files;
@@ -269,6 +292,7 @@ export function SendBar({
     <div className="pt-1 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
       {/* Same column as the conversation and the changes dock: max-w-3xl with the same inner gutter. */}
       <div className="relative mx-auto min-w-0 max-w-3xl px-3 md:px-6">
+        <VoicePill state={voice.state} interim={voice.interim} />
         {mention && <MentionMenu session={boxName} repos={repos} state={mention} onPick={pickFile} onClose={() => setMention(null)} />}
         {!mention && slash && <SkillMenu state={slash} onPick={pickSkill} onClose={() => setSlash(null)} onMatches={setSlashMatches} />}
         <PromptInput
@@ -287,7 +311,8 @@ export function SendBar({
             "bg-card raised rounded-xl p-2 transition-[border-color,box-shadow] duration-300",
             toAgent ? "border-line-strong" : "border-border border-dashed",
             sleeping && "border-sleep/50",
-            dragOver && "border-live ring-live/40 ring-2"
+            dragOver && "border-live ring-live/40 ring-2",
+            (voice.state === "listening" || voice.state === "arming") && "mic-glow"
           )}
           onPaste={onPaste}
           onDragOver={(e) => {
@@ -453,6 +478,7 @@ export function SendBar({
                 </TooltipTrigger>
                 <TooltipContent side="top">Attach an image — or paste / drop one</TooltipContent>
               </Tooltip>
+              {voice.supported && <VoiceButton state={voice.state} level={voice.level} onToggle={voice.toggle} />}
               <input
                 ref={fileInput}
                 type="file"

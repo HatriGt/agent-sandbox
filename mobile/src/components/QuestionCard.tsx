@@ -8,6 +8,8 @@ import { T } from "./ui/AppText";
 import { Icon } from "./ui/Icon";
 import { Button } from "./ui/Button";
 import { Field } from "./ui/Field";
+import { smartJoin, useVoiceInput } from "@/hooks/useVoiceInput";
+import { VoiceButton, VoicePill } from "./VoiceButton";
 
 /**
  * The structured decision control: amber = needs you (the reserved hue),
@@ -27,6 +29,10 @@ export function QuestionCard({
   const parsed = parseQuestion(question);
   const [other, setOther] = useState(false);
   const [text, setText] = useState("");
+  // Dictate the free-text answer; sending stays behind the button.
+  const voice = useVoiceInput({
+    onFinal: (spoken) => setText((prev) => prev + smartJoin(prev, spoken)),
+  });
 
   return (
     <View
@@ -83,6 +89,7 @@ export function QuestionCard({
         ))}
       {other ? (
         <View style={{ gap: 8 }}>
+          <VoicePill state={voice.state} interim={voice.interim} />
           <Field
             placeholder="Tell the agent what to do…"
             value={text}
@@ -91,9 +98,19 @@ export function QuestionCard({
             autoFocus
             style={{ minHeight: 70 }}
           />
-          <View style={{ flexDirection: "row", gap: 8 }}>
-            <Button title="Send" onPress={() => text.trim() && onAnswer(text.trim())} loading={busy} style={{ flex: 1 }} />
-            <Button title="Back" variant="secondary" onPress={() => setOther(false)} />
+          <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
+            <Button
+              title="Send"
+              onPress={() => {
+                if (!text.trim()) return;
+                voice.stop();
+                onAnswer(text.trim());
+              }}
+              loading={busy}
+              style={{ flex: 1 }}
+            />
+            {voice.supported && <VoiceButton state={voice.state} level={voice.level} onToggle={voice.toggle} size={38} />}
+            <Button title="Back" variant="secondary" onPress={() => { voice.stop(); setOther(false); }} />
           </View>
         </View>
       ) : (

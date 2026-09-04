@@ -2,6 +2,8 @@ import * as React from "react";
 import { ArrowUp, Check, ChevronDown, Pause, PenLine } from "lucide-react";
 import { parseQuestion } from "@/lib/question";
 import { Button } from "@/components/ui/button";
+import { smartJoin, useVoiceInput } from "@/hooks/useVoiceInput";
+import { VoiceButton } from "@/components/ui/voice-button";
 import { cn } from "@/lib/utils";
 import { motion } from "motion/react";
 
@@ -37,6 +39,11 @@ export function QuestionCard({
     setOther(!hasOptions);
     setCustom("");
   }, [question, hasOptions]);
+
+  // Dictate the free-text answer; sending stays behind the explicit button.
+  const voice = useVoiceInput({
+    onFinal: (spoken) => setCustom((prev) => prev + smartJoin(prev, spoken)),
+  });
 
   const answer = other ? custom.trim() : selected != null ? parsed.options[selected] : "";
   const canSend = !!answer && !busy;
@@ -180,21 +187,24 @@ export function QuestionCard({
 
         {other && (
           <div className="px-3 pb-2">
-            <textarea
-              ref={inputRef}
-              value={custom}
-              onChange={(e) => setCustom(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  send();
-                }
-              }}
-              rows={2}
-              placeholder={hasOptions ? "Type a different answer…" : "Type your answer…"}
-              aria-label="Your answer"
-              className="text-foreground placeholder:text-muted-foreground bg-muted focus:ring-attention/50 w-full resize-none rounded-md px-3 py-2 text-body outline-none focus:ring-2"
-            />
+            <div className={cn("bg-muted focus-within:ring-attention/50 flex items-end gap-1 rounded-md pr-1.5 transition-shadow focus-within:ring-2", (voice.state === "listening" || voice.state === "arming") && "mic-glow ring-0")}>
+              <textarea
+                ref={inputRef}
+                value={custom}
+                onChange={(e) => setCustom(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    send();
+                  }
+                }}
+                rows={2}
+                placeholder={voice.state === "listening" ? (voice.interim ? voice.interim : "Listening — speak your answer…") : hasOptions ? "Type a different answer…" : "Type your answer…"}
+                aria-label="Your answer"
+                className="text-foreground placeholder:text-muted-foreground w-full resize-none rounded-md bg-transparent px-3 py-2 text-body outline-none"
+              />
+              {voice.supported && <VoiceButton state={voice.state} level={voice.level} onToggle={voice.toggle} className="mb-1.5" />}
+            </div>
           </div>
         )}
 

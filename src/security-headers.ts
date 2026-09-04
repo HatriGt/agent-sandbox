@@ -76,7 +76,9 @@ export function securityHeaders(path: string): HeaderMap {
     // The token never rides in a URL, but no-referrer also keeps session ids and box names out of
     // the Referer on the external links the console renders (github.com, MCP vendor docs).
     "Referrer-Policy": "no-referrer",
-    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+    // microphone=(self): the dashboard's dictation (Web Speech + a local level meter) needs the mic
+    // on this origin only; nothing embeds us (frame-ancestors 'none'), so no delegation surface opens.
+    "Permissions-Policy": "camera=(), microphone=(self), geolocation=(), payment=(), usb=()",
     "Cross-Origin-Opener-Policy": "same-origin",
     "Cross-Origin-Resource-Policy": "same-origin",
   };

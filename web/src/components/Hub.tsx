@@ -34,6 +34,8 @@ import { PromptInput, PromptInputActions, PromptInputTextarea } from "@/componen
 import { Lightbox } from "@/components/ui/lightbox";
 import { Capacity } from "@/components/Capacity";
 import { Bar } from "@/components/thread/Skeletons";
+import { smartJoin, useVoiceInput } from "@/hooks/useVoiceInput";
+import { VoiceButton, VoicePill } from "@/components/ui/voice-button";
 import { cn } from "@/lib/utils";
 import type { SessionRun } from "@/hooks/useSessionRuns";
 
@@ -191,6 +193,25 @@ export function Hub({
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
+  // Dictation into the task box: finalized phrases land at the caret; sending stays manual.
+  const voice = useVoiceInput({
+    onFinal: (spoken) => {
+      setTask((prev) => {
+        const el = document.getElementById("new-task") as HTMLTextAreaElement | null;
+        const caret = el && document.activeElement === el ? (el.selectionStart ?? prev.length) : prev.length;
+        const glue = smartJoin(prev.slice(0, caret), spoken);
+        const next = prev.slice(0, caret) + glue + prev.slice(caret);
+        requestAnimationFrame(() => {
+          const t = document.getElementById("new-task") as HTMLTextAreaElement | null;
+          if (!t) return;
+          const pos = caret + glue.length;
+          t.setSelectionRange(pos, pos);
+        });
+        return next;
+      });
+    },
+  });
+
   const applyStarter = (s: Starter) => {
     setTask(s.task);
     if (s.needsRepo) setShowRepo(true);
@@ -228,6 +249,7 @@ export function Hub({
   const submit = async () => {
     const t = task.trim();
     if ((!t && !images.length) || busy) return;
+    voice.stop();
     const id = `pending-${Date.now()}`;
     setBusy(true);
     setError(null);
@@ -296,6 +318,8 @@ export function Hub({
 
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.05, ease: [0.22, 1, 0.36, 1] }}>
           <TrialEndedNotice />
+          <div className="relative">
+          <VoicePill state={voice.state} interim={voice.interim} />
           <PromptInput
             value={task}
             onValueChange={setTask}
@@ -303,7 +327,8 @@ export function Hub({
             isLoading={busy}
             className={cn(
               "bg-card border-line-strong focus-within:border-live/60 focus-within:shadow-[0_0_0_3px_color-mix(in_oklch,var(--live)_18%,transparent)] rounded-xl p-2 shadow-e1 transition-[border-color,box-shadow] duration-200",
-              dragOver && "border-live ring-live/40 ring-2"
+              dragOver && "border-live ring-live/40 ring-2",
+              (voice.state === "listening" || voice.state === "arming") && "mic-glow"
             )}
             onPaste={(e) => {
               const files = [...(e.clipboardData?.items ?? [])].filter((i) => i.kind === "file" && i.type.startsWith("image/")).map((i) => i.getAsFile()).filter((f): f is File => !!f);
@@ -416,6 +441,7 @@ export function Hub({
               >
                 <ImagePlus className="size-3.5" />
               </button>
+              {voice.supported && <VoiceButton state={voice.state} level={voice.level} onToggle={voice.toggle} />}
               <input ref={fileInput} type="file" accept="image/*" multiple className="hidden" onChange={(e) => (addImages(e.target.files ?? []), (e.target.value = ""))} />
               <p className={cn("hidden min-w-0 flex-1 truncate text-right text-micro sm:block", error ? "text-destructive" : "text-muted-foreground")}>
                 {error ??
@@ -434,6 +460,7 @@ export function Hub({
               </Button>
             </PromptInputActions>
           </PromptInput>
+          </div>
           <Lightbox src={preview?.dataUrl ?? null} name={preview?.name ?? ""} open={!!preview} onClose={() => setPreview(null)} />
           {error && (
             <p className="text-destructive mt-2 px-1 text-micro sm:hidden" role="alert">

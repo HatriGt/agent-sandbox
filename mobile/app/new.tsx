@@ -7,6 +7,8 @@ import * as WebBrowser from "expo-web-browser";
 import { api, type RepoInfo, type SkillView } from "@/lib/api";
 import { setPendingDelegate } from "@/lib/pending-delegate";
 import { useKeyboardInset } from "@/hooks/useKeyboardInset";
+import { smartJoin, useVoiceInput } from "@/hooks/useVoiceInput";
+import { VoiceButton, VoicePill } from "@/components/VoiceButton";
 import { useAuth } from "@/state/auth";
 import { useTheme } from "@/theme/ThemeContext";
 import { fonts, radius, type } from "@/theme/tokens";
@@ -71,6 +73,12 @@ export default function NewTask() {
   const trialExpired = me?.kind === "user" && me.expired;
   const keyboardInset = useKeyboardInset();
 
+  // Dictate the brief: finalized phrases append to the task; starting the machine stays manual.
+  const voice = useVoiceInput({
+    onFinal: (spoken) => setTask((prev) => prev + smartJoin(prev, spoken)),
+  });
+  const dictating = voice.state === "listening" || voice.state === "arming";
+
   // "Run again" prefill from the thread's ⋯ menu.
   const params = useLocalSearchParams<{ task?: string }>();
   useEffect(() => {
@@ -117,6 +125,7 @@ export default function NewTask() {
   // replaces itself with the thread as soon as the box name comes back.
   const submit = () => {
     if (!task.trim()) return;
+    voice.stop();
     setError(null);
     setClarify(null);
     setPendingDelegate(
@@ -158,28 +167,37 @@ export default function NewTask() {
             </View>
           ) : null}
 
-          <TextInput
-            value={task}
-            onChangeText={setTask}
-            placeholder="What should the agent do? Repos mentioned in the task are inferred automatically."
-            placeholderTextColor={palette.faint}
-            multiline
-            autoFocus
-            editable={!trialExpired}
-            style={{
-              minHeight: 130,
-              borderWidth: 1,
-              borderColor: palette.input,
-              borderRadius: radius["2xl"],
-              backgroundColor: palette.card,
-              padding: 14,
-              color: palette.foreground,
-              fontFamily: fonts.sans,
-              fontSize: type.lead.fontSize,
-              lineHeight: type.lead.lineHeight,
-              textAlignVertical: "top",
-            }}
-          />
+          <VoicePill state={voice.state} interim={voice.interim} />
+          <View>
+            <TextInput
+              value={task}
+              onChangeText={setTask}
+              placeholder="What should the agent do? Repos mentioned in the task are inferred automatically."
+              placeholderTextColor={palette.faint}
+              multiline
+              autoFocus
+              editable={!trialExpired}
+              style={{
+                minHeight: 130,
+                borderWidth: dictating ? 1.5 : 1,
+                borderColor: dictating ? palette.live : palette.input,
+                borderRadius: radius["2xl"],
+                backgroundColor: palette.card,
+                padding: 14,
+                paddingBottom: 44,
+                color: palette.foreground,
+                fontFamily: fonts.sans,
+                fontSize: type.lead.fontSize,
+                lineHeight: type.lead.lineHeight,
+                textAlignVertical: "top",
+              }}
+            />
+            {voice.supported && !trialExpired && (
+              <View style={{ position: "absolute", right: 10, bottom: 8 }}>
+                <VoiceButton state={voice.state} level={voice.level} onToggle={voice.toggle} />
+              </View>
+            )}
+          </View>
 
           {clarify ? (
             <View style={{ backgroundColor: palette.attention, borderRadius: radius.xl, padding: 12 }}>

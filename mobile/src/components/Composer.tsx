@@ -4,10 +4,12 @@ import * as Haptics from "expo-haptics";
 import { api, type SkillView } from "@/lib/api";
 import { expandMentions, mentionAt, type MentionState } from "@/lib/mention";
 import { slashAt, stripSlashToken, typedSkillToken, type SlashState } from "@/lib/slash";
+import { smartJoin, useVoiceInput } from "@/hooks/useVoiceInput";
 import { useTheme } from "@/theme/ThemeContext";
 import { fonts, radius, type } from "@/theme/tokens";
 import { T } from "./ui/AppText";
 import { Icon } from "./ui/Icon";
+import { VoiceButton, VoicePill } from "./VoiceButton";
 
 /**
  * The SendBar, at web parity: two lanes (agent / read-only ask), `@` file
@@ -47,6 +49,21 @@ export function Composer({
   const sendScale = useRef(new Animated.Value(0)).current;
   const hasContent = useRef(false);
   const inputRef = useRef<TextInput>(null);
+
+  // Dictation: finalized phrases land at the caret through updateText, so chips and menus keep
+  // working; the interim phrase streams in the pill above. Sending stays behind the button.
+  const voice = useVoiceInput({
+    onFinal: (spoken) => {
+      setText((prev) => {
+        const at = inputRef.current?.isFocused() ? Math.min(caret, prev.length) : prev.length;
+        const glue = smartJoin(prev.slice(0, at), spoken);
+        const next = prev.slice(0, at) + glue + prev.slice(at);
+        setCaret(at + glue.length);
+        syncSendButton(next, files, skill);
+        return next;
+      });
+    },
+  });
 
   useEffect(() => {
     if (!session) return;
@@ -123,6 +140,7 @@ export function Composer({
   const send = async () => {
     let t = text.trim();
     if ((!t && !files.length && !skill) || busy) return;
+    voice.stop();
     Keyboard.dismiss();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     setBusy(true);
@@ -158,8 +176,11 @@ export function Composer({
         ? "The agent is mid-turn. Your message is queued and delivered when this turn finishes."
         : null;
 
+  const dictating = voice.state === "listening" || voice.state === "arming";
+
   return (
     <View style={{ gap: 6 }}>
+      <VoicePill state={voice.state} interim={voice.interim} />
       {/* @ / menus float above the composer */}
       {menuOpen && (
         <View
@@ -326,8 +347,8 @@ export function Composer({
           flexDirection: "row",
           alignItems: "flex-end",
           gap: 8,
-          borderWidth: isAsk ? 1.5 : 1,
-          borderColor: sleeping ? palette.sleep : isAsk ? palette.lineStrong : palette.input,
+          borderWidth: dictating ? 1.5 : isAsk ? 1.5 : 1,
+          borderColor: dictating ? palette.live : sleeping ? palette.sleep : isAsk ? palette.lineStrong : palette.input,
           borderStyle: isAsk ? "dashed" : "solid",
           borderRadius: radius["2xl"] + 6,
           backgroundColor: palette.card,
@@ -395,6 +416,11 @@ export function Composer({
             paddingBottom: 8,
           }}
         />
+        {voice.supported && (
+          <View style={{ paddingBottom: 2 }}>
+            <VoiceButton state={voice.state} level={voice.level} onToggle={voice.toggle} />
+          </View>
+        )}
         <Animated.View style={{ transform: [{ scale: sendScale }], opacity: sendScale }}>
           <Pressable
             onPress={send}
