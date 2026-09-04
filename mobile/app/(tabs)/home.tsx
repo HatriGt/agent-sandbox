@@ -122,8 +122,10 @@ export default function Home() {
         {rest.length > 0 && (
           <View style={{ gap: 8, marginTop: 12 }}>
             <SectionHeader icon="archive" label="Recent" tone="muted" />
-            {rest.map((b) => (
-              <BoxCard key={b.name} box={b} onLongPress={setActions} />
+            {rest.map((b, i) => (
+              <FadeInUp key={b.name} delay={Math.min(i, 5) * 45}>
+                <BoxCard box={b} onLongPress={setActions} />
+              </FadeInUp>
             ))}
           </View>
         )}

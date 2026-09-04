@@ -265,7 +265,11 @@ export default function Thread() {
             borderBottomColor: palette.border,
           }}
         >
-          <Pressable onPress={() => router.back()} hitSlop={12} style={{ padding: 8 }}>
+          <Pressable
+            onPress={() => router.back()}
+            hitSlop={12}
+            style={({ pressed }) => ({ padding: 8, opacity: pressed ? 0.5 : 1, transform: [{ scale: pressed ? 0.92 : 1 }] })}
+          >
             <Icon name="chevron-left" size={22} color={palette.mutedForeground} />
           </Pressable>
           <View style={{ flex: 1 }}>
@@ -287,7 +291,11 @@ export default function Thread() {
             </View>
           </View>
           {merged ? <StatePill runState={merged.runState} boxStatus={merged.boxStatus} exitCode={merged.exitCode} /> : null}
-          <Pressable onPress={() => setSheet("actions")} hitSlop={12} style={{ padding: 8 }}>
+          <Pressable
+            onPress={() => setSheet("actions")}
+            hitSlop={12}
+            style={({ pressed }) => ({ padding: 8, opacity: pressed ? 0.5 : 1, transform: [{ scale: pressed ? 0.92 : 1 }] })}
+          >
             <Icon name="more-horizontal" size={20} color={palette.mutedForeground} />
           </Pressable>
         </View>

@@ -5,7 +5,7 @@ import { api, type BoxView, type RepoInfo } from "@/lib/api";
 import { parseTrace } from "@/lib/trace";
 import { toMarkdown } from "@/lib/transcript-tools";
 import { serverUrl } from "@/lib/config";
-import { currentDiskTier, isSleeping, offerableTiers } from "@/lib/format";
+import { currentDiskTier, fmtMib, isSleeping, offerableTiers, usageLevel, type Usage } from "@/lib/format";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { T } from "../ui/AppText";
@@ -13,6 +13,52 @@ import { Button } from "../ui/Button";
 import { Field } from "../ui/Field";
 import { Icon, type IconName } from "../ui/Icon";
 import { Sheet } from "../ui/Sheet";
+import { UsageMeter } from "../ui/UsageMeter";
+
+/** "812 MB used · 3.2 GB free" — the sentence under a vitals meter. */
+function usageWords(u: Usage): string {
+  const free = Math.max(0, u.totalMib - u.usedMib);
+  return `${fmtMib(u.usedMib)} used · ${fmtMib(free)} free of ${fmtMib(u.totalMib)}`;
+}
+
+/** One vitals row: label, meter against the cap, and the used/free sentence. */
+function VitalRow({ kind, label, usage }: { kind: "memory" | "disk"; label: string; usage: Usage | undefined }) {
+  if (!usage || !(usage.totalMib > 0)) return null;
+  const level = usageLevel(usage);
+  return (
+    <View style={{ gap: 3, flex: 1 }}>
+      <T variant="micro" tone="faint" weight="semibold">
+        {label}
+      </T>
+      <UsageMeter kind={kind} usage={usage} trackWidth={64} />
+      <T variant="micro" tone={level === "critical" ? "destructive" : level === "high" ? "attention" : "muted"}>
+        {usageWords(usage)}
+      </T>
+    </View>
+  );
+}
+
+/**
+ * Live vitals for the ⋯ menu: how much RAM and disk the box is using and what's left. Only while
+ * awake — a sleeping box reports no metrics, so we say that instead of showing a frozen number.
+ */
+function VitalsBlock({ box, sleeping, border }: { box: BoxView; sleeping: boolean; border: string }) {
+  const hasAny = !!(box.memUsage || box.disk);
+  return (
+    <View style={{ borderWidth: 1, borderColor: border, borderRadius: radius.xl, padding: 12, marginBottom: 8 }}>
+      {sleeping || !hasAny ? (
+        <T variant="micro" tone="faint">
+          {sleeping ? "Asleep — memory and disk usage report once it wakes." : "No usage metrics reported yet."}
+        </T>
+      ) : (
+        <View style={{ flexDirection: "row", gap: 16 }}>
+          <VitalRow kind="memory" label="MEMORY" usage={box.memUsage} />
+          <VitalRow kind="disk" label="STORAGE" usage={box.disk} />
+        </View>
+      )}
+    </View>
+  );
+}
 
 /** One row of the actions menu: icon tile + label + hint, web ⋯-menu style. */
 function ActionRow({
@@ -185,6 +231,7 @@ export function BoxActionsSheet({
 
         {pane === "menu" && (
           <>
+            <VitalsBlock box={box} sleeping={sleeping} border={palette.border} />
             <ActionRow
               icon={box.kept ? "bookmark" : "bookmark"}
               label={box.kept ? "Release" : "Keep"}
@@ -235,7 +282,15 @@ export function BoxActionsSheet({
               <ActionRow
                 icon="cpu"
                 label="Memory"
-                hint={running ? "busy — finish first" : memTier ? `${memTier} · a change reboots the machine` : "a change reboots the machine"}
+                hint={
+                  running
+                    ? "busy — finish first"
+                    : box.memUsage
+                      ? `${fmtMib(box.memUsage.usedMib)} of ${fmtMib(box.memUsage.totalMib)} used · resize reboots`
+                      : memTier
+                        ? `${memTier} · a change reboots the machine`
+                        : "a change reboots the machine"
+                }
                 disabled={running}
                 onPress={() => setPane("memory")}
               />
@@ -244,7 +299,15 @@ export function BoxActionsSheet({
               <ActionRow
                 icon="hard-drive"
                 label="Storage"
-                hint={running ? "busy — finish first" : diskTier ? `${diskTier} · a change reboots the machine` : "a change reboots the machine"}
+                hint={
+                  running
+                    ? "busy — finish first"
+                    : box.disk
+                      ? `${fmtMib(box.disk.usedMib)} of ${fmtMib(box.disk.totalMib)} used · grow reboots`
+                      : diskTier
+                        ? `${diskTier} · a change reboots the machine`
+                        : "a change reboots the machine"
+                }
                 disabled={running}
                 onPress={() => setPane("disk")}
               />

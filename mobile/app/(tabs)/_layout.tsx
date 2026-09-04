@@ -1,12 +1,11 @@
 import React, { useEffect, useRef } from "react";
-import { Animated, Easing, Pressable, View } from "react-native";
+import { Animated, Easing, PanResponder, Pressable, View } from "react-native";
 import { Redirect, Tabs, useRouter } from "expo-router";
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
 import { useAuth } from "@/state/auth";
 import { useTheme } from "@/theme/ThemeContext";
-import { T } from "@/components/ui/AppText";
 import { Icon, type IconName } from "@/components/ui/Icon";
 
 const TABS: { name: string; label: string; icon: IconName }[] = [
@@ -126,6 +125,72 @@ function PillTabBar({ state, navigation }: BottomTabBarProps) {
   );
 }
 
+/**
+ * Horizontal-swipe layer over the tab scenes: a decisive left/right drag moves to the adjacent
+ * tab, with a small directional nudge so the gesture is acknowledged before the scene shifts.
+ * PanResponder (not a pager — no native pager in this app) claims the gesture only when it is
+ * clearly horizontal, so vertical scrolls and the horizontal chip docks keep working: those sit
+ * deeper in the tree and win the responder negotiation for small drags.
+ */
+function SwipeBetweenTabs({
+  index,
+  count,
+  onGo,
+  children,
+}: {
+  index: number;
+  count: number;
+  onGo: (dir: 1 | -1) => void;
+  children: React.ReactNode;
+}) {
+  const nudge = useRef(new Animated.Value(0)).current;
+  // Keep the latest index/count in refs — the PanResponder is created once.
+  const at = useRef({ index, count });
+  at.current = { index, count };
+
+  const pan = useRef(
+    PanResponder.create({
+      // Claim only decisive horizontal drags (long and flat), and never capture —
+      // children get first refusal, so scrolling stays untouched.
+      onMoveShouldSetPanResponder: (_e, g) =>
+        Math.abs(g.dx) > 26 && Math.abs(g.dx) > Math.abs(g.dy) * 2.2,
+      onPanResponderMove: (_e, g) => {
+        const { index: i, count: n } = at.current;
+        const blocked = (g.dx < 0 && i >= n - 1) || (g.dx > 0 && i <= 0);
+        // Follow the finger a little (rubber-banded), so the gesture feels held.
+        nudge.setValue(Math.max(-40, Math.min(40, g.dx * (blocked ? 0.08 : 0.25))));
+      },
+      onPanResponderRelease: (_e, g) => {
+        const { index: i, count: n } = at.current;
+        const goLeft = (g.dx < -48 || g.vx < -0.5) && i < n - 1;
+        const goRight = (g.dx > 48 || g.vx > 0.5) && i > 0;
+        if (goLeft || goRight) {
+          Haptics.selectionAsync().catch(() => {});
+          // Slide out toward the swipe, snap to the far side, and let the new
+          // scene slide in — a lightweight pager feel without a pager.
+          const dir = goLeft ? -1 : 1;
+          Animated.timing(nudge, { toValue: dir * 56, duration: 110, easing: Easing.out(Easing.quad), useNativeDriver: true }).start(() => {
+            onGo(dir === -1 ? 1 : -1);
+            nudge.setValue(-dir * 56);
+            Animated.timing(nudge, { toValue: 0, duration: 200, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+          });
+        } else {
+          Animated.spring(nudge, { toValue: 0, useNativeDriver: true, speed: 24, bounciness: 6 }).start();
+        }
+      },
+      onPanResponderTerminate: () => {
+        Animated.spring(nudge, { toValue: 0, useNativeDriver: true, speed: 24, bounciness: 6 }).start();
+      },
+    }),
+  ).current;
+
+  return (
+    <Animated.View style={{ flex: 1, transform: [{ translateX: nudge }] }} {...pan.panHandlers}>
+      {children}
+    </Animated.View>
+  );
+}
+
 export default function TabsLayout() {
   const { signedIn, ready } = useAuth();
   const { palette } = useTheme();
@@ -136,7 +201,29 @@ export default function TabsLayout() {
       tabBar={(props) => <PillTabBar {...props} />}
       screenOptions={{
         headerShown: false,
+        // Cross-fade + shift between tabs (bottom-tabs v7) — pairs with the swipe nudge below.
+        animation: "shift",
+        transitionSpec: {
+          animation: "timing",
+          config: { duration: 220, easing: Easing.out(Easing.cubic) },
+        },
         sceneStyle: { backgroundColor: palette.background },
+      }}
+      screenLayout={({ children, navigation, route }) => {
+        const state = navigation.getState();
+        const index = state.routes.findIndex((r) => r.name === route.name);
+        return (
+          <SwipeBetweenTabs
+            index={index}
+            count={state.routes.length}
+            onGo={(dir) => {
+              const next = state.routes[index + dir];
+              if (next) navigation.navigate(next.name as never);
+            }}
+          >
+            {children}
+          </SwipeBetweenTabs>
+        );
       }}
     >
       <Tabs.Screen name="home" />
