@@ -121,7 +121,7 @@ export function stateColor(p: Palette, s: {
   boxStatus?: string;
   exitCode?: number | null;
 }): { color: string; word: string; icon: "dot" | "hand" | "check" | "x" | "moon" | "circle" } {
-  if (s.boxStatus === "Stopped") return { color: p.sleep, word: "sleeping", icon: "moon" };
+  if (/^stopped$/i.test(s.boxStatus ?? "")) return { color: p.sleep, word: "sleeping", icon: "moon" };
   switch (s.runState) {
     case "waiting":
       return { color: p.attention, word: "needs you", icon: "hand" };

@@ -7,7 +7,7 @@ import { useFleet } from "@/hooks/useFleet";
 import { useKeyboardInset } from "@/hooks/useKeyboardInset";
 import { useWatch } from "@/hooks/useWatch";
 import { api, type BoxView } from "@/lib/api";
-import { friendlyName } from "@/lib/format";
+import { friendlyName, isSleeping } from "@/lib/format";
 import { deriveTaskBoard } from "@/lib/planTasks";
 import { parseTrace } from "@/lib/trace";
 import { useTheme } from "@/theme/ThemeContext";
@@ -93,7 +93,7 @@ export default function Thread() {
   const board = useMemo(() => deriveTaskBoard(events), [events]);
   const running = merged?.runState === "running";
   const waiting = merged?.runState === "waiting" && !!merged.question;
-  const sleeping = merged?.boxStatus === "Stopped";
+  const sleeping = isSleeping(merged?.boxStatus);
   const poolFree = fleetBox?.role === "pool-free";
   const booting = !gone && !merged && log.length === 0;
   // Animate entrances only for items that appear after mount, not the history dump.

@@ -56,10 +56,20 @@ export function greeting(name?: string): string {
   return name ? `${part}, ${name.split(" ")[0]}.` : `${part}.`;
 }
 
+// boxStatus casing varies by endpoint (fleet says "Stopped", watch says
+// "stopped", live boxes are "running") — compare case-insensitively, like the web.
+export function isUp(boxStatus?: string): boolean {
+  return /^running$/i.test(boxStatus ?? "");
+}
+
+export function isSleeping(boxStatus?: string): boolean {
+  return /^stopped$/i.test(boxStatus ?? "");
+}
+
 export function fleetSentence(boxes: { runState: string; boxStatus: string }[]): string {
   const waiting = boxes.filter((b) => b.runState === "waiting").length;
-  const running = boxes.filter((b) => b.runState === "running" && b.boxStatus === "Running").length;
-  const sleeping = boxes.filter((b) => b.boxStatus === "Stopped").length;
+  const running = boxes.filter((b) => b.runState === "running" && isUp(b.boxStatus)).length;
+  const sleeping = boxes.filter((b) => isSleeping(b.boxStatus)).length;
   const parts: string[] = [];
   if (running) parts.push(`${plural(running, "machine")} working`);
   if (waiting) parts.push(`${waiting} waiting on you`);

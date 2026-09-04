@@ -3,7 +3,7 @@ import { RefreshControl, ScrollView, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFleet } from "@/hooks/useFleet";
 import type { BoxView } from "@/lib/api";
-import { plural } from "@/lib/format";
+import { isSleeping, plural } from "@/lib/format";
 import { useTheme } from "@/theme/ThemeContext";
 import { BoxCard } from "@/components/BoxCard";
 import { BoxActionsSheet } from "@/components/sheets/BoxActionsSheet";
@@ -22,8 +22,8 @@ export default function Fleet() {
   const boxes = (snap?.boxes ?? [])
     .slice()
     .sort((a, b) => {
-      const ap = a.role === "pool-free" ? 9 : a.boxStatus === "Stopped" ? 4 : (ORDER[a.runState] ?? 5);
-      const bp = b.role === "pool-free" ? 9 : b.boxStatus === "Stopped" ? 4 : (ORDER[b.runState] ?? 5);
+      const ap = a.role === "pool-free" ? 9 : isSleeping(a.boxStatus) ? 4 : (ORDER[a.runState] ?? 5);
+      const bp = b.role === "pool-free" ? 9 : isSleeping(b.boxStatus) ? 4 : (ORDER[b.runState] ?? 5);
       return ap - bp;
     });
   const occupied = boxes.filter((b) => b.role !== "pool-free").length;

@@ -43,7 +43,8 @@ export function useWatch(session: string | undefined) {
         setMeta(rest);
         setLogBoth(() => l);
         setGone(false);
-        if (rest.boxStatus === "Running" && (rest.runState === "running" || rest.runState === "waiting")) {
+        // Case-insensitive: watch.json says "running", fleet.json says "Running".
+        if (/^running$/i.test(rest.boxStatus ?? "") && (rest.runState === "running" || rest.runState === "waiting")) {
           if (pollTimer.current) clearTimeout(pollTimer.current);
           pollTimer.current = null;
           offset.current = undefined; // resnapshot: the log may have been replaced across the wake

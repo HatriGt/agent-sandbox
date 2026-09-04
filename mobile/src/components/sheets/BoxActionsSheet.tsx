@@ -5,6 +5,7 @@ import { api, type BoxView, type RepoInfo } from "@/lib/api";
 import { parseTrace } from "@/lib/trace";
 import { toMarkdown } from "@/lib/transcript-tools";
 import { serverUrl } from "@/lib/config";
+import { isSleeping } from "@/lib/format";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { T } from "../ui/AppText";
@@ -115,7 +116,7 @@ export function BoxActionsSheet({
   }, [pane, repoQuery]);
 
   if (!box) return null;
-  const sleeping = box.boxStatus === "Stopped";
+  const sleeping = isSleeping(box.boxStatus);
   const running = box.runState === "running";
 
   const act = async (fn: () => Promise<unknown>, done?: () => void) => {
