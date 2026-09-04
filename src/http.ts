@@ -1733,7 +1733,18 @@ app.post("/wake.json", async (req: Request, res: Response) => {
     return;
   }
   try {
-    await startBoxIfStopped(cfg, session);
+    const outcome = await startBoxIfStopped(cfg, session);
+    // Report honestly. Answering `ok` for a box the runtime never started is indistinguishable
+    // from a real wake, so the client sits on a progress card forever waiting for a boot that was
+    // never asked for. 404 matches the shape a destroyed box already returns elsewhere.
+    if (outcome === "absent") {
+      res.status(404).json({ error: "no such machine" });
+      return;
+    }
+    if (outcome === "failed") {
+      res.status(503).json({ error: "the sandbox host could not start this machine — try again shortly" });
+      return;
+    }
     noteRunning(session);
     watchHub.drop(session); // the cached "stopped" snapshot must not be served as live
     res.json({ ok: true });

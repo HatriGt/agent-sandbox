@@ -1178,25 +1178,42 @@ export async function agentBoundary(cfg: Config, box: string): Promise<PollResul
 }
 
 /**
+ * What a start attempt actually did. Callers that exec straight afterwards can ignore this (their
+ * exec surfaces any failure); `/wake.json` has no follow-up command, so it needs to know the
+ * difference between "it is up" and "nothing happened" — otherwise it answers `ok` for a box the
+ * runtime never started and the client waits forever on a machine no one asked to boot.
+ */
+export type StartOutcome =
+  /** Already running, or `msb start` succeeded. */
+  | "running"
+  /** `msb ls` does not list this box at all — destroyed, reaped, or a foreign name. */
+  | "absent"
+  /** Listed and stopped, but every `msb start` attempt failed. */
+  | "failed";
+
+/**
  * Ensure a box is running before we exec into it. A box waiting on a question can outlive its
  * `--idle-timeout` and be Stopped by msb while its rootfs (and Claude session) persist — so a
- * `resume` must `msb start` it first, otherwise the exec fails and the answer is lost. Best-effort:
- * if it's already running, `msb start` is a harmless no-op; failures are swallowed and surfaced by
- * the exec that follows.
+ * `resume` must `msb start` it first, otherwise the exec fails and the answer is lost. Never
+ * throws: callers that exec next let that exec do the complaining, and `/wake.json` reads the
+ * returned outcome instead.
  */
-export async function startBoxIfStopped(cfg: Config, box: string): Promise<void> {
+export async function startBoxIfStopped(cfg: Config, box: string): Promise<StartOutcome> {
   const r = await msb(cfg, ["ls", "--format", "json"], false);
   const entry = parseLsJson(r.stdout).find((e) => e.name === box);
-  if (!entry || isRunning(entry.status)) return;
+  if (!entry) return "absent";
+  if (isRunning(entry.status)) return "running";
   // A box mid-shutdown reports "Draining" for a few seconds; `start` fails until it is Stopped.
   // Retry briefly instead of surfacing "cannot start" for a reply that arrived at the wrong moment.
   for (let attempt = 0; attempt < 5; attempt++) {
     const s = await msb(cfg, ["start", box], false);
-    if (s.code === 0) return;
+    if (s.code === 0) return "running";
     await new Promise((res) => setTimeout(res, 2000));
     const again = parseLsJson((await msb(cfg, ["ls", "--format", "json"], false)).stdout).find((e) => e.name === box);
-    if (!again || isRunning(again.status)) return;
+    if (!again) return "absent";
+    if (isRunning(again.status)) return "running";
   }
+  return "failed";
 }
 
 /** Continue an existing Claude Code session with a follow-up (runbook note: `claude -c -p`). */

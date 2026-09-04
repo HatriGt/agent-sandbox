@@ -74,7 +74,10 @@ export default function Thread() {
   const [viewportH, setViewportH] = useState(0);
   const turnYs = useRef(new Map<string, number>());
   const [turnTick, setTurnTick] = useState(0);
-  const wokeRef = useRef(false);
+  // The box we last asked to wake — NOT a boolean. This route is a single component instance that
+  // expo-router reuses across boxes, so a shared flag stayed true after the first sleeping box and
+  // silently swallowed the wake for every one opened after it. The web keys on the name too.
+  const wokeRef = useRef<string | null>(null);
   const buzzedRef = useRef(false);
   const mountedAt = useRef(Date.now());
 
@@ -103,11 +106,14 @@ export default function Thread() {
   // Auto-wake, with visible progress. The card lingers ~1.4s after awake.
   const [wakingSince, setWakingSince] = useState<number | null>(null);
   useEffect(() => {
-    if (sleeping && !wokeRef.current && session) {
-      wokeRef.current = true;
+    if (sleeping && wokeRef.current !== session && session) {
+      wokeRef.current = session;
       setWakingSince(Date.now());
       api.wake(session).catch((e) => setNote(`Could not wake — ${e instanceof Error ? e.message : e}. Sending a message retries.`));
     }
+    // Re-arm once it is awake, so a box that falls asleep again while you sit on the thread gets
+    // woken a second time rather than showing a card nothing is driving.
+    if (!sleeping && wokeRef.current === session) wokeRef.current = null;
     if (!sleeping && wakingSince != null) {
       const t = setTimeout(() => setWakingSince(null), 1400);
       return () => clearTimeout(t);
