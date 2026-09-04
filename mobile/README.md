@@ -15,7 +15,22 @@ npx expo start          # scan the QR with Expo Go, or press a/i for an emulator
 ```
 
 Native builds (needed for release / real splash assets): `npx expo prebuild` +
-`npx expo run:android` / `run:ios`, or EAS Build.
+`npx expo run:android` / `run:ios`.
+
+## Ship it
+
+See **[../docs/mobile-release.md](../docs/mobile-release.md)** for the full procedure.
+The short version:
+
+```sh
+npx tsc --noEmit
+npx eas-cli update --channel preview --message "what changed" --non-interactive
+```
+
+That OTA carries **JS only**. If you touched `app.json`, an asset, or a native
+dependency, you need a new APK instead — push to `main` (any change under `mobile/**`
+triggers `.github/workflows/mobile-apk.yml`) and grab the `agent-sandbox-apk` artifact.
+Never `eas-cli build`; the Actions runner is much faster than the EAS queue.
 
 ## Sign in
 
