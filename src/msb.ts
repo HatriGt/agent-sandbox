@@ -51,10 +51,19 @@ import { askSnapName } from "./snapshot.js";
  *
  * Uses a multiplexed master connection (sshMuxOpts) so repeated calls skip the ~2s handshake.
  */
-async function msb(cfg: Config, rest: string[], check = true) {
+async function msb(cfg: Config, rest: string[], check = true, timeoutMs?: number) {
   const remoteCmd = [cfg.msb, ...rest].map(shellQuote).join(" ");
-  return run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, remoteCmd], { check });
+  return run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, remoteCmd], { check, timeoutMs });
 }
+
+/**
+ * Timeout for the read-only probes the fleet sweep and watch hub make (`ls`, `exec` of the
+ * sentinel script, `metrics`). These are the calls that hang: `msb exec` into a box caught
+ * mid-shutdown parks in poll() forever. They're also cheap and frequent, so they get a much
+ * tighter bound than DEFAULT_TIMEOUT_MS — a probe that hasn't answered in 20s won't, and the
+ * caller treats a rejection as "no data for this box", which is the honest answer.
+ */
+const PROBE_TIMEOUT_MS = 20_000;
 
 /** Run an arbitrary remote command over the same multiplexed SSH connection. */
 async function ssh(cfg: Config, remoteCmd: string, check = true) {
@@ -163,11 +172,11 @@ export async function createBox(cfg: Config, opts: CreateBoxOpts): Promise<void>
 
 
 /** Run a shell command inside the box (no cred env). */
-export async function exec(cfg: Config, box: string, sh: string, opts?: { env?: Record<string, string> }) {
+export async function exec(cfg: Config, box: string, sh: string, opts?: { env?: Record<string, string>; timeoutMs?: number }) {
   // Env rides as `msb exec -e K=V` flags — per-invocation only, nothing persists in the box. Used to
   // hand `gh` a token for one command (PR merge) the same way the ask lane does.
   const envFlags = Object.entries(opts?.env ?? {}).flatMap(([k, v]) => ["-e", `${k}=${v}`]);
-  return msb(cfg, ["exec", ...envFlags, box, "--", "sh", "-lc", sh]);
+  return msb(cfg, ["exec", ...envFlags, box, "--", "sh", "-lc", sh], true, opts?.timeoutMs);
 }
 
 /**
@@ -825,14 +834,24 @@ const TASK_MARK = "/workspace/.agent.task"; // the current task/follow-up text, 
  * the inbox, which only delivers on done/idle. So: a marker whose recorded pid is dead, or that
  * predates the current boot (older than /proc/1), is stale — heal it to done(254) in place and note
  * the interruption in the log so the user sees why the run ended. 254 is reserved for "interrupted".
+ *
+ * A restart is not the only way a run can vanish, and it used to be the only one we reported: a box
+ * with a 1 GiB cap and no swap OOM-kills the agent, the wrapper dies with it, and the user was told
+ * three times over that the sandbox had "restarted" — so they retried a task that could never fit.
+ * The guest kernel ring buffer is per-boot, so any "Killed process" in `dmesg` belongs to THIS boot;
+ * when one is there, the honest answer is 137 (128+SIGKILL) and a pointer at the memory control.
  */
+const OOM_RE = "Out of memory: Killed process";
 const RUN_STATE_SH =
   `if [ -f ${RUN_MARK} ]; then ` +
   `p=$(cat ${PID_MARK} 2>/dev/null); ` +
   `if { [ -n "$p" ] && [ ! -d "/proc/$p" ]; } || [ ${RUN_MARK} -ot /proc/1 ]; then ` +
-  `echo 254 > ${DONE_MARK}; rm -f ${RUN_MARK}; ` +
-  `echo "run interrupted: the sandbox restarted mid-run. Send a message to continue." >> ${AGENT_LOG}; ` +
-  `echo "run:done exit=254"; ` +
+  `if dmesg 2>/dev/null | grep -q ${shellQuote(OOM_RE)}; then c=137; ` +
+  `m="run interrupted: out of memory — the agent was killed by the kernel. Raise this machine memory from the menu, then send a message to continue."; ` +
+  `else c=254; m="run interrupted: the sandbox restarted mid-run. Send a message to continue."; fi; ` +
+  `echo $c > ${DONE_MARK}; rm -f ${RUN_MARK}; ` +
+  `echo "$m" >> ${AGENT_LOG}; ` +
+  `echo "run:done exit=$c"; ` +
   `else echo "run:running"; fi; ` +
   `elif [ -f ${DONE_MARK} ]; then echo "run:done exit=$(cat ${DONE_MARK} 2>/dev/null)"; ` +
   `else echo "run:idle"; fi`;
@@ -1240,7 +1259,7 @@ export async function status(cfg: Config, box: string) {
 
 /** Raw `msb metrics` for a box (CPU/MEM/uptime); non-fatal. */
 export async function metrics(cfg: Config, box: string) {
-  const r = await msb(cfg, ["metrics", box], false);
+  const r = await msb(cfg, ["metrics", box], false, PROBE_TIMEOUT_MS);
   return r.stdout || r.stderr;
 }
 
@@ -1271,7 +1290,7 @@ export function knownStopped(box: string, maxAgeMs = 15_000): boolean {
 }
 
 export async function gatherMonitor(cfg: Config): Promise<BoxView[]> {
-  const ls = await msb(cfg, ["ls", "--format", "json"], false);
+  const ls = await msb(cfg, ["ls", "--format", "json"], false, PROBE_TIMEOUT_MS);
   const entries = parseLsJson(ls.stdout);
   const now = Date.now();
   for (const e of entries) lastLsStatus.set(e.name, { status: e.status, at: now });
@@ -1312,7 +1331,10 @@ export async function gatherMonitor(cfg: Config): Promise<BoxView[]> {
             `printf '%s %s\n' "$(basename "$d")" "$(git -C "$d" rev-parse --abbrev-ref HEAD 2>/dev/null)"; done 2>/dev/null; ` +
             // mtime of the agent log = the last moment the agent produced output. The dashboard uses
             // it to say "no output for 4m" next to the idle-stop deadline. Best-effort (no log → blank).
-            `echo "---M---"; stat -c %Y ${AGENT_LOG} 2>/dev/null || true`
+            `echo "---M---"; stat -c %Y ${AGENT_LOG} 2>/dev/null || true`,
+          // Bounded: this is the exact call that wedged forever on a box caught mid-shutdown and
+          // took the whole fleet read with it. A rejection here is already handled below (execOk).
+          { timeoutMs: PROBE_TIMEOUT_MS }
         ),
         metrics(cfg, e.name),
       ]);
@@ -1582,6 +1604,24 @@ export async function createBareBox(cfg: Config, name: string): Promise<void> {
     "sleep",
     "infinity",
   ]);
+}
+
+/** Allowed per-box memory tiers. A reboot is required — this runtime has no live resize. */
+export const MEMORY_TIERS = ["1G", "2G", "4G"] as const;
+export type MemoryTier = (typeof MEMORY_TIERS)[number];
+
+export function isMemoryTier(v: unknown): v is MemoryTier {
+  return typeof v === "string" && (MEMORY_TIERS as readonly string[]).includes(v);
+}
+
+/**
+ * Resize a box's memory and reboot it so the change takes effect. Both --memory and --max-memory are
+ * set: the latter is the boot-time hotplug ceiling, and raising the former alone is clamped to it.
+ * The reboot destroys any in-flight run (it trips the stale-marker heal in RUN_STATE_SH), so callers
+ * must gate on runState.
+ */
+export async function setBoxMemory(cfg: Config, box: string, tier: MemoryTier): Promise<void> {
+  await msb(cfg, ["modify", box, "--memory", tier, "--max-memory", tier, "--restart"]);
 }
 
 /** Stop a box (no remove) so it can be snapshotted. */

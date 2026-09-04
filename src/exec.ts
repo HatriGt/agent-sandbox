@@ -19,7 +19,24 @@ export interface RunOptions {
   check?: boolean;
   /** Data written to the child's stdin (then closed). Use for payloads too big for argv. */
   input?: string;
+  /**
+   * Kill the child and reject after this many ms. Default DEFAULT_TIMEOUT_MS; pass 0 to wait
+   * forever (only for commands with no bounded runtime, e.g. a streaming exec).
+   *
+   * Not optional in practice: an `msb exec` into a box that is mid-shutdown parks in poll() and
+   * NEVER returns. Observed in production — one such call hung for 23 minutes, and because the
+   * fleet reader memoises its in-flight sweep, every /fleet.json after it was handed the same
+   * dead promise and the dashboard showed skeletons until the controller was restarted.
+   */
+  timeoutMs?: number;
 }
+
+/**
+ * Ceiling for any command that doesn't set its own. Generous: a cold `msb run` boots a microVM and
+ * copies a repo in, and `npm i -g` inside a box is minutes. The point is not to be tight, it is that
+ * NOTHING waits forever — an unbounded wait turns one wedged sandbox into a dead control plane.
+ */
+export const DEFAULT_TIMEOUT_MS = 300_000;
 
 /** POSIX single-quote a string so it survives one round of remote shell parsing (ssh). */
 export function shellQuote(s: string): string {
@@ -31,7 +48,7 @@ export async function run(
   args: string[],
   opts: RunOptions = {}
 ): Promise<RunResult> {
-  const { cwd, env, check = true, input } = opts;
+  const { cwd, env, check = true, input, timeoutMs = DEFAULT_TIMEOUT_MS } = opts;
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, {
       cwd,
@@ -48,8 +65,32 @@ export async function run(
     child.stdout?.on("data", (d) => (stdout += d.toString()));
     child.stderr?.on("data", (d) => (stderr += d.toString()));
 
-    child.on("error", (err) => reject(err));
+    // SIGKILL, not SIGTERM: a wedged ssh sitting in poll() is exactly the case this exists for, and
+    // it may not act on a polite signal.
+    //
+    // The timer REJECTS rather than only killing and waiting for "close". "close" fires when the
+    // child's stdio closes, not when the child dies, so a grandchild holding the inherited pipes
+    // (the remote command behind ssh does exactly this) keeps the promise pending — which is the
+    // hang this whole mechanism exists to prevent. Kill for hygiene, settle regardless.
+    let settled = false;
+    const timer =
+      timeoutMs > 0
+        ? setTimeout(() => {
+            settled = true;
+            child.kill("SIGKILL");
+            reject(new Error(redactShapes(`Command timed out after ${timeoutMs}ms: ${cmd} ${args.join(" ")}`)));
+          }, timeoutMs)
+        : null;
+    const done = () => {
+      if (timer) clearTimeout(timer);
+      const first = !settled;
+      settled = true;
+      return first;
+    };
+
+    child.on("error", (err) => void (done() && reject(err)));
     child.on("close", (code) => {
+      if (!done()) return; // already rejected by the timeout
       const result: RunResult = { code: code ?? -1, stdout, stderr };
       if (check && result.code !== 0) {
         // The argv is redacted, not omitted (it's what makes ssh failures debuggable) — but it can

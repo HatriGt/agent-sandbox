@@ -72,12 +72,29 @@ function ActionRow({
   );
 }
 
-type Pane = "menu" | "rename" | "attach" | "destroy";
+type Pane = "menu" | "rename" | "attach" | "destroy" | "memory";
+
+/**
+ * The box's current memory cap, as a tier label. There is no dedicated field: `mem` is the MEM column
+ * of `msb metrics` ("1009.6 MiB / 1.0 GiB") and the denominator IS the cap. A sleeping box has no
+ * metrics, so the caller's fallback (the deployment default) stands in. Mirrors
+ * web/src/lib/lifecycle.ts:currentMemoryTier.
+ */
+export function currentMemoryTier(mem: string | undefined, fallback?: string): string | undefined {
+  const denom = (mem ?? "").split("/")[1]?.trim();
+  const m = /^(\d+(?:\.\d+)?)\s*(gib|gb|g|mib|mb|m)$/i.exec(denom ?? "");
+  if (!m) return fallback;
+  const gb = /^m/i.test(m[2]) ? Number(m[1]) / 1024 : Number(m[1]);
+  const whole = Math.round(gb);
+  return whole >= 1 ? `${whole}G` : fallback;
+}
 
 /** Machine controls, mirroring the web thread's ⋯ menu. */
 export function BoxActionsSheet({
   box,
   log,
+  memoryTiers,
+  memoryDefault,
   visible,
   onClose,
   onChanged,
@@ -86,6 +103,9 @@ export function BoxActionsSheet({
 }: {
   box: BoxView | null;
   log?: string;
+  /** Memory tiers the machine may be resized to (from /fleet.json). Omit to hide the control. */
+  memoryTiers?: string[];
+  memoryDefault?: string;
   visible: boolean;
   onClose: () => void;
   onChanged: () => void;
@@ -118,6 +138,7 @@ export function BoxActionsSheet({
   if (!box) return null;
   const sleeping = isSleeping(box.boxStatus);
   const running = box.runState === "running";
+  const memTier = currentMemoryTier(box.mem, memoryDefault);
 
   const act = async (fn: () => Promise<unknown>, done?: () => void) => {
     setNote(null);
@@ -134,7 +155,15 @@ export function BoxActionsSheet({
   };
 
   const titleText =
-    pane === "rename" ? "Rename" : pane === "attach" ? "Attach a repository" : pane === "destroy" ? "Destroy machine?" : box.title || box.name;
+    pane === "rename"
+      ? "Rename"
+      : pane === "attach"
+        ? "Attach a repository"
+        : pane === "destroy"
+          ? "Destroy machine?"
+          : pane === "memory"
+            ? "Memory"
+            : box.title || box.name;
 
   return (
     <Sheet visible={visible} onClose={pane === "menu" ? onClose : () => setPane("menu")} title={titleText}>
@@ -193,9 +222,39 @@ export function BoxActionsSheet({
               disabled={!sleeping && running}
               onPress={() => act(() => (sleeping ? api.wake(box.name) : api.sleep(box.name)), onClose)}
             />
+            {memoryTiers?.length ? (
+              <ActionRow
+                icon="hard-drive"
+                label="Memory"
+                hint={running ? "busy — finish first" : memTier ? `${memTier} · a change reboots the machine` : "a change reboots the machine"}
+                disabled={running}
+                onPress={() => setPane("memory")}
+              />
+            ) : null}
             <View style={{ height: 1, backgroundColor: palette.border, marginVertical: 6 }} />
             <ActionRow icon="trash-2" label="Destroy machine…" destructive onPress={() => setPane("destroy")} />
           </>
+        )}
+
+        {pane === "memory" && (
+          <View style={{ gap: 4 }}>
+            <T variant="meta" tone="muted" style={{ marginBottom: 4 }}>
+              This runtime cannot resize memory live, so picking a size reboots the machine. The
+              workspace, checkouts and the agent&apos;s session are kept — expect it back in about half a
+              minute.
+            </T>
+            {(memoryTiers ?? []).map((t) => (
+              <ActionRow
+                key={t}
+                icon="hard-drive"
+                label={t}
+                hint={t === memTier ? "current" : "restart with this size"}
+                disabled={busy || t === memTier}
+                onPress={() => act(() => api.setMemory(box.name, t), onClose)}
+              />
+            ))}
+            <Button title="Cancel" variant="secondary" onPress={() => setPane("menu")} disabled={busy} />
+          </View>
         )}
 
         {pane === "rename" && (

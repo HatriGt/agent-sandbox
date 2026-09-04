@@ -1,12 +1,12 @@
 import * as React from "react";
-import { ArrowLeft, FileText, FolderTree, Link2, Loader2, Moon, MoreHorizontal, Pencil, Pin, PinOff, Plus, RotateCw, Trash2 } from "lucide-react";
+import { ArrowLeft, FileText, FolderTree, Link2, Loader2, MemoryStick, Moon, MoreHorizontal, Pencil, Pin, PinOff, Plus, RotateCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import type { BoxView } from "@/lib/api";
 import { fmtAgo, friendlyName, roleLabel, shortName } from "@/lib/format";
 import { deadlineLabel, deadlineShort, fmtDuration, type Deadline, type DisplayState } from "@/lib/lifecycle";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, MenuHint } from "@/components/ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, MenuHint } from "@/components/ui/dropdown-menu";
 import { StatePill } from "@/components/ui/stamp";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { RepoPicker } from "@/components/RepoPicker";
@@ -41,6 +41,10 @@ export function ThreadHeader({
   removing,
   sleepNow,
   sleepBusy,
+  memoryTiers,
+  memoryTier,
+  memoryBusy,
+  onSetMemory,
   onBack,
   onNew,
   onToggleWorkspace,
@@ -69,6 +73,12 @@ export function ThreadHeader({
   /** Put the machine to sleep now (msb stop, nothing removed). Hidden while already asleep. */
   sleepNow?: () => void;
   sleepBusy?: boolean;
+  /** Memory tiers the machine may be resized to (server-supplied). Omit to hide the control. */
+  memoryTiers?: string[];
+  /** The tier the machine is on now, for marking the active row. */
+  memoryTier?: string;
+  memoryBusy?: boolean;
+  onSetMemory?: (tier: string) => Promise<void>;
   onBack: () => void;
   onNew: () => void;
   onToggleWorkspace: () => void;
@@ -82,6 +92,9 @@ export function ThreadHeader({
   const [editing, setEditing] = React.useState(false);
   const [draft, setDraft] = React.useState(title);
   const [confirm, setConfirm] = React.useState(false);
+  // The tier the user picked, awaiting confirmation. A resize is a reboot, so it gets the same
+  // confirm-dialog treatment as Destroy rather than firing straight off the menu.
+  const [resizeTo, setResizeTo] = React.useState<string | null>(null);
   const [addRepo, setAddRepo] = React.useState(false);
   const pickerRef = React.useRef<HTMLSpanElement>(null);
   const openFromMenu = React.useRef(false);
@@ -246,6 +259,25 @@ export function ThreadHeader({
                 Run again
                 <MenuHint>new machine, same brief</MenuHint>
               </DropdownMenuItem>
+              {onSetMemory && !!memoryTiers?.length && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel>Memory</DropdownMenuLabel>
+                  {memoryTiers.map((t) => (
+                    <DropdownMenuItem
+                      key={t}
+                      onSelect={() => setResizeTo(t)}
+                      disabled={t === memoryTier || memoryBusy || state === "running"}
+                    >
+                      <MemoryStick />
+                      {t}
+                      <MenuHint>
+                        {t === memoryTier ? "current" : state === "running" ? "busy — finish first" : "reboots the machine"}
+                      </MenuHint>
+                    </DropdownMenuItem>
+                  ))}
+                </>
+              )}
               <DropdownMenuSeparator />
               {!sleeping && sleepNow && (
                 <DropdownMenuItem onSelect={sleepNow} disabled={sleepBusy || state === "running"}>
@@ -350,6 +382,32 @@ export function ThreadHeader({
           )}
         </span>
       </div>
+
+      <Dialog open={!!resizeTo} onOpenChange={(o) => !o && setResizeTo(null)}>
+        <DialogContent
+          title={`Restart ${friendlyName(box.name)} with ${resizeTo}?`}
+          description="This runtime cannot resize memory live, so the machine reboots. The workspace, checkouts and the agent's session are kept — expect it back in about half a minute."
+        >
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" size="sm" onClick={() => setResizeTo(null)} disabled={memoryBusy}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              disabled={memoryBusy}
+              onClick={async () => {
+                const t = resizeTo;
+                if (!t) return;
+                await onSetMemory?.(t);
+                setResizeTo(null);
+              }}
+            >
+              {memoryBusy ? <Loader2 className="animate-spin" /> : <MemoryStick />}
+              {memoryBusy ? "Restarting…" : `Restart with ${resizeTo}`}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={confirm} onOpenChange={setConfirm}>
         <DialogContent onOpenAutoFocus={(e) => (e.preventDefault(), cancelRef.current?.focus())} title={`Destroy ${friendlyName(box.name)}?`} description="Stops the microVM and discards its workspace — files, checkouts and uncommitted work. The conversation is not recoverable afterwards.">

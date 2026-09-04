@@ -16,7 +16,8 @@ import { sshMuxOpts } from "./ssh.js";
 const DIR = '"$HOME/.agent-sandbox/runs"';
 
 async function ssh(cfg: Config, cmd: string): Promise<string> {
-  const r = await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, cmd], { check: false });
+  // Bounded — a convenience layer must never be able to hang the fleet read (see claims.ts).
+  const r = await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, cmd], { check: false, timeoutMs: 15_000 });
   return r.stdout ?? "";
 }
 

@@ -163,8 +163,11 @@ test("a clean exit shows no code badge; a non-zero exit does", () => {
   assert.equal(isFailedExit(0), false);
   assert.equal(doneLabel(1), "exit 1");
   assert.equal(isFailedExit(1), true);
-  assert.equal(doneLabel(137), "exit 137");
+  // 137 is 128+SIGKILL — the guest kernel OOM-killed the agent. A bare code taught the user nothing
+  // (they retried a task that could never fit), so it is named and points at the memory control.
+  assert.equal(doneLabel(137), "out of memory");
   assert.equal(isFailedExit(137), true);
+  assert.equal(doneLabel(254), "interrupted");
   // Unknown exit is treated as not-clean: keep a badge so a lost code is visible, not hidden.
   assert.equal(doneLabel(undefined), "exit ?");
   assert.equal(isFailedExit(undefined), false);

@@ -16,7 +16,10 @@ import { sshMuxOpts } from "./ssh.js";
 const DIR = '"$HOME/.agent-sandbox/claims"';
 
 async function ssh(cfg: Config, cmd: string): Promise<string> {
-  const r = await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, cmd], { check: false });
+  // Bounded: these are tiny host-side file reads on the fleet read's critical path, so a stalled
+  // connection must degrade to "no claims known" rather than hang the sweep. Callers already
+  // .catch() into an empty set/map.
+  const r = await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, cmd], { check: false, timeoutMs: 15_000 });
   return r.stdout ?? "";
 }
 

@@ -26,6 +26,26 @@ export function parseUptimeSec(raw: string | undefined): number | undefined {
   return matched ? Math.round(total) : undefined;
 }
 
+/**
+ * The box's current memory cap as a tier string ("1G"/"2G"/"4G").
+ *
+ * There is no dedicated field for it: `mem` comes from the MEM column of `msb metrics` as
+ * "1009.6 MiB / 1.0 GiB", and the denominator IS the cap. A sleeping box has no metrics at all, so
+ * fall back to the deployment default. This is the one brittle piece of the resize feature — it
+ * parses a CLI table — hence the tests.
+ */
+export function currentMemoryTier(mem: string | undefined, fallback?: string): string | undefined {
+  const denom = (mem ?? "").split("/")[1]?.trim();
+  const m = /^(\d+(?:\.\d+)?)\s*(gib|gb|g|mib|mb|m)$/i.exec(denom ?? "");
+  if (!m) return fallback;
+  const n = Number(m[1]);
+  const gb = /^m/i.test(m[2]) ? n / 1024 : n;
+  // Round to the nearest whole gibibyte: msb reports 1.0/2.0/4.0 GiB, but a MiB-denominated
+  // reading (1024 MiB) must land on the same tier label the menu offers.
+  const whole = Math.round(gb);
+  return whole >= 1 ? `${whole}G` : fallback;
+}
+
 /** Compact human duration: 42s · 4m · 1h 12m · 2d 3h. */
 export function fmtDuration(sec: number): string {
   const s = Math.max(0, Math.round(sec));

@@ -33,6 +33,10 @@ export interface FleetLifecycle {
   capacity: number;
   poolSize: number;
   sleepTtlSec?: number;
+  /** Memory tiers a box may be resized to. Server-supplied so the app never hardcodes them. */
+  memoryTiers?: string[];
+  /** The tier every new box boots with. */
+  memoryDefault?: string;
 }
 
 export interface FleetSnapshot {
@@ -281,24 +285,58 @@ async function parse<T>(res: Response): Promise<T> {
   return body as T;
 }
 
-async function get<T>(path: string, params: Record<string, string> = {}): Promise<T> {
-  return fetch(url(path, params), { headers: authHeaders(false) }).then((r) => parse<T>(r));
+/**
+ * Every request gets a deadline. `fetch` in RN has none, so a server that accepts the connection and
+ * then never answers leaves the caller spinning forever — that is exactly what a wedged fleet read
+ * looked like on the box screen: "Waking the sandbox…" counting up past a minute with no error. A
+ * rejection at least reaches the error path the screens already have.
+ *
+ * 45s is generous: a cold delegate boots a microVM and copies a repo in. Reads are much shorter.
+ */
+const READ_TIMEOUT_MS = 20_000;
+const WRITE_TIMEOUT_MS = 45_000;
+/** Lanes that wait on the agent itself (resume/ask/delegate) — minutes, not seconds, but still bounded. */
+const AGENT_TIMEOUT_MS = 300_000;
+
+async function fetchWithTimeout(input: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: ac.signal });
+  } catch (e) {
+    if (ac.signal.aborted) throw new ApiError(`The server did not respond within ${Math.round(timeoutMs / 1000)}s.`, 0);
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
-async function post<T>(path: string, body: unknown): Promise<T> {
-  return fetch(url(path), {
-    method: "POST",
-    headers: { ...authHeaders(), "content-type": "application/json" },
-    body: JSON.stringify(body),
-  }).then((r) => parse<T>(r));
+async function get<T>(path: string, params: Record<string, string> = {}): Promise<T> {
+  return fetchWithTimeout(url(path, params), { headers: authHeaders(false) }, READ_TIMEOUT_MS).then((r) => parse<T>(r));
+}
+
+async function post<T>(path: string, body: unknown, timeoutMs = WRITE_TIMEOUT_MS): Promise<T> {
+  return fetchWithTimeout(
+    url(path),
+    {
+      method: "POST",
+      headers: { ...authHeaders(), "content-type": "application/json" },
+      body: JSON.stringify(body),
+    },
+    timeoutMs,
+  ).then((r) => parse<T>(r));
 }
 
 async function del<T>(path: string, params: Record<string, string> = {}, body?: unknown): Promise<T> {
-  return fetch(url(path, params), {
-    method: "DELETE",
-    headers: { ...authHeaders(), ...(body ? { "content-type": "application/json" } : {}) },
-    body: body ? JSON.stringify(body) : undefined,
-  }).then((r) => parse<T>(r));
+  return fetchWithTimeout(
+    url(path, params),
+    {
+      method: "DELETE",
+      headers: { ...authHeaders(), ...(body ? { "content-type": "application/json" } : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+    },
+    WRITE_TIMEOUT_MS,
+  ).then((r) => parse<T>(r));
 }
 
 export const api = {
@@ -340,20 +378,23 @@ export const api = {
     repos?: { repo: string; ref?: string }[];
     attachments?: { name: string; dataUrl: string }[];
     model?: string;
-  }) => post<DelegateResult>("/delegate.json", { source: "git", ...input }),
+  }) => post<DelegateResult>("/delegate.json", { source: "git", ...input }, AGENT_TIMEOUT_MS),
   resume: (session: string, message: string, opts: { force?: boolean; model?: string } = {}) =>
     post<{ output: string; queued?: undefined } | { queued: true; id: string }>("/resume.json", {
       session,
       message,
       force: opts.force,
       ...(opts.model ? { model: opts.model } : {}),
-    }),
+    }, AGENT_TIMEOUT_MS),
   ask: (session: string, question: string, newThread = false) =>
-    post<AskResult>("/ask.json", { session, question, newThread }),
+    post<AskResult>("/ask.json", { session, question, newThread }, AGENT_TIMEOUT_MS),
   teardown: (session: string) => post<{ ok: true }>("/teardown.json", { session }),
   keep: (session: string, keep: boolean) => post<{ ok: true; kept: boolean }>("/keep.json", { session, keep }),
   wake: (session: string) => post<{ ok: true }>("/wake.json", { session }),
   sleep: (session: string) => post<{ ok: true }>("/sleep.json", { session }),
+  /** Resize a box's memory. Always reboots the machine — this runtime has no live resize. */
+  setMemory: (session: string, memory: string) =>
+    post<{ ok: true; memory: string }>("/memory.json", { session, memory }),
   rename: (session: string, title: string) => post<{ title: string }>("/rename.json", { session, title }),
   title: (session: string) => post<{ title?: string }>("/title.json", { session }),
   inbox: (session: string) => get<{ queued: QueuedMessage[] }>("/inbox.json", { session }),

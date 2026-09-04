@@ -9,7 +9,7 @@ const WorkspacePane = React.lazy(() => import("./WorkspacePane").then((m) => ({ 
 import { WakingCard } from "./WakingCard";
 import { SessionContext } from "@/lib/session-context";
 import { friendlyName, isSleeping, POLL_MS, threadTitle } from "@/lib/format";
-import { deadlineLabel, deadlineOf, displayState, fmtDuration } from "@/lib/lifecycle";
+import { currentMemoryTier, deadlineLabel, deadlineOf, displayState, fmtDuration } from "@/lib/lifecycle";
 import { runStats, toMarkdown } from "@/lib/transcript";
 import { splitReplies } from "@/lib/replies";
 import { parseMcpName } from "@/lib/mcp";
@@ -244,6 +244,23 @@ export function Thread({
       .finally(() => setSleepBusy(false));
   };
 
+  // Resize memory. Same shape as sleepNow — including marking wokeRef first, since `msb modify
+  // --restart` takes the box down and the auto-wake effect must not race the reboot.
+  const [memoryBusy, setMemoryBusy] = React.useState(false);
+  const memoryTier = React.useMemo(() => currentMemoryTier(box.mem, lifecycle.memoryDefault), [box.mem, lifecycle.memoryDefault]);
+  const setMemory = async (tier: string) => {
+    setMemoryBusy(true);
+    wokeRef.current = box.name;
+    try {
+      await api.setMemory(box.name, tier);
+      toast.success(`${friendlyName(box.name)} now has ${tier}`, { description: "The machine is restarting — the workspace and session are kept. Send a message once it is back." });
+    } catch (e) {
+      toast.error("Could not change the memory", { description: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setMemoryBusy(false);
+    }
+  };
+
   const destroy = async () => {
     setRemoving(true);
     try {
@@ -458,6 +475,10 @@ export function Thread({
         removing={removing}
         sleepNow={sleepNow}
         sleepBusy={sleepBusy}
+        memoryTiers={lifecycle.memoryTiers}
+        memoryTier={memoryTier}
+        memoryBusy={memoryBusy}
+        onSetMemory={setMemory}
         onBack={onBack}
         onNew={onNew}
         onToggleWorkspace={() => (showWorkspace ? closeWorkspace() : setWorkspaceOpen(true))}
@@ -558,19 +579,23 @@ export function Thread({
                 label={
                   exitCode == null || exitCode === 0
                     ? "Completed"
-                    : exitCode === 254 || exitCode === 253
-                      ? "Run interrupted"
-                      : "Exited with an error"
+                    : exitCode === 137
+                      ? "Out of memory"
+                      : exitCode === 254 || exitCode === 253
+                        ? "Run interrupted"
+                        : "Exited with an error"
                 }
                 failed={exitCode != null && exitCode !== 0}
                 detail={
                   exitCode == null || exitCode === 0
                     ? deadlineText ?? undefined
-                    : exitCode === 254
-                      ? "the sandbox restarted mid-run — send a message to continue"
-                      : exitCode === 253
-                        ? "stopped by you to deliver a message immediately"
-                        : `code ${exitCode}`
+                    : exitCode === 137
+                      ? "the kernel killed the agent — raise this machine's memory from the ⋯ menu, then send a message to continue"
+                      : exitCode === 254
+                        ? "the sandbox restarted mid-run — send a message to continue"
+                        : exitCode === 253
+                          ? "stopped by you to deliver a message immediately"
+                          : `code ${exitCode}`
                 }
                 stats={runStats(events)}
                 onCopy={async () => toMarkdown(events, { title, machine: friendlyName(box.name), url: window.location.href })}

@@ -16,6 +16,7 @@
  */
 import type { Config } from "./config.js";
 import { isRunning, parseDurationSec, type BoxView } from "./monitor.js";
+import { MEMORY_TIERS } from "./msb.js";
 
 export interface FleetLifecycle {
   /** Per-session idle timeout, seconds (undefined if unparseable). */
@@ -30,6 +31,10 @@ export interface FleetLifecycle {
   poolSize: number;
   /** How long a non-kept sandbox may sleep before it is destroyed, seconds. */
   sleepTtlSec?: number;
+  /** Memory tiers a box may be resized to, so the UI never hardcodes them. */
+  memoryTiers?: string[];
+  /** The tier every new box boots with (MSB_MEMORY). */
+  memoryDefault?: string;
 }
 
 export interface FleetSnapshot {
@@ -47,6 +52,8 @@ export function lifecycleOf(cfg: Config): FleetLifecycle {
     capacity: cfg.maxBoxes,
     poolSize: cfg.poolSize,
     sleepTtlSec: parseDurationSec(cfg.sleepTtl),
+    memoryTiers: [...MEMORY_TIERS],
+    memoryDefault: cfg.memory,
   };
 }
 
@@ -103,14 +110,25 @@ export interface RunMemoryStore {
 export function makeFleetReader(
   cfg: Config,
   sweep: () => Promise<BoxView[]>,
-  opts: { ttlMs?: number; now?: () => number; decorate?: (boxes: BoxView[]) => BoxView[]; store?: RunMemoryStore } = {}
+  opts: {
+    ttlMs?: number;
+    now?: () => number;
+    decorate?: (boxes: BoxView[]) => BoxView[];
+    store?: RunMemoryStore;
+    /** How long an in-flight sweep may be shared before a new caller starts its own. */
+    sweepTtlMs?: number;
+  } = {}
 ): () => Promise<FleetSnapshot> {
   const ttl = opts.ttlMs ?? 1500;
+  // Comfortably above a healthy sweep (~1.2s measured with 3 boxes) and below the client's own
+  // patience, so a wedged sweep costs one slow response rather than every response thereafter.
+  const sweepTtl = opts.sweepTtlMs ?? 20_000;
   const now = opts.now ?? Date.now;
   const memory = new Map<string, BoxView>();
   const lifecycle = lifecycleOf(cfg);
   let cached: FleetSnapshot | null = null;
   let inFlight: Promise<FleetSnapshot> | null = null;
+  let inFlightAt = 0;
   // Durable memory (run-memory.ts): hydrate once so sleeping runs survive a controller restart, and
   // write back a box's description whenever it changes while running. Fingerprints avoid a write per
   // sweep; failures are swallowed — memory is a convenience layer, never a reason to fail the fleet.
@@ -130,8 +148,15 @@ export function makeFleetReader(
 
   return () => {
     if (cached && now() - cached.at < ttl) return Promise.resolve(cached);
-    if (inFlight) return inFlight;
-    inFlight = (async () => {
+    // A sweep that never settles must not be shared forever. `inFlight` de-duplicates concurrent
+    // callers, but it used to be cleared ONLY in .finally() — so one unsettleable sweep (a wedged
+    // `msb exec` into a box caught mid-shutdown) meant every later reader was handed that same dead
+    // promise and the dashboard hung on skeletons until the controller was restarted. Observed in
+    // production. Stop sharing a sweep that has outlived any plausible runtime; the next caller
+    // starts a fresh one, and the abandoned promise settles (or doesn't) harmlessly on its own.
+    if (inFlight && now() - inFlightAt < sweepTtl) return inFlight;
+    inFlightAt = now();
+    const mine = (async () => {
       if (!hydrated && opts.store) {
         try {
           for (const [name, meta] of await opts.store.load()) {
@@ -153,8 +178,11 @@ export function makeFleetReader(
         return cached;
       })
       .finally(() => {
-        inFlight = null;
+        // Only the CURRENT sweep may clear the slot: a slow sweep that finally settles after being
+        // superseded would otherwise cancel the de-duplication for whichever sweep replaced it.
+        if (inFlight === mine) inFlight = null;
       });
-    return inFlight;
+    inFlight = mine;
+    return mine;
   };
 }

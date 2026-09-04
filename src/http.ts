@@ -40,7 +40,7 @@ import { parseStore } from "./gh-token-store.js";
 import { parseMcpStore } from "./mcp-store.js";
 import { guardDeps, makeOwnership, NotOwnedError, QuotaError, withPrincipal } from "./tenancy.js";
 import { securityHeaders } from "./security-headers.js";
-import { gatherMonitor, gatherWatch, askInBox, driverStateLine, startBoxIfStopped, noteRunning, stopBox, noteStopped, interruptAgentRun } from "./msb.js";
+import { gatherMonitor, gatherWatch, askInBox, driverStateLine, startBoxIfStopped, noteRunning, stopBox, noteStopped, interruptAgentRun, setBoxMemory, isMemoryTier, MEMORY_TIERS } from "./msb.js";
 import { isBoxName } from "./sync.js";
 import { shellQuote } from "./exec.js";
 import { touchClaimed } from "./claims.js";
@@ -1756,6 +1756,33 @@ app.post("/sleep.json", async (req: Request, res: Response) => {
     noteStopped(session);
     watchHub.drop(session); // the cached "running" snapshot must not be served as live
     res.json({ ok: true });
+  } catch (e) {
+    failWith(res, e);
+  }
+});
+
+/**
+ * Resize a box's memory. Always a reboot — this runtime has no live resize — so the client gates the
+ * action on the run being finished, and we drop the watch snapshot for the same reason /wake.json
+ * does: the pre-reboot cache must not be served as live. `noteRunning` because `msb modify --restart`
+ * brings the box back up.
+ */
+app.post("/memory.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const { session, memory } = (req.body ?? {}) as { session?: string; memory?: string };
+  if (!session || !/^[\w.-]+$/.test(session)) {
+    res.status(400).json({ error: "session is required" });
+    return;
+  }
+  if (!isMemoryTier(memory)) {
+    res.status(400).json({ error: `memory must be one of ${MEMORY_TIERS.join(", ")}` });
+    return;
+  }
+  try {
+    await setBoxMemory(cfg, session, memory);
+    noteRunning(session);
+    watchHub.drop(session);
+    res.json({ ok: true, memory });
   } catch (e) {
     failWith(res, e);
   }

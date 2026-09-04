@@ -38,7 +38,8 @@ const TTL = 60_000;
 export async function loadTitles(cfg: Config): Promise<Record<string, string>> {
   const c = cache.get(CACHE_KEY);
   if (c && Date.now() - c.at < TTL) return c.titles;
-  const r = await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, `cd ${DIR} 2>/dev/null || exit 0; for f in *; do [ -f "$f" ] && printf '%s\\t%s\\n' "$f" "$(head -c 200 "$f" | tr '\\n' ' ')"; done`], { check: false });
+  // Bounded — titles are cosmetic and sit on the fleet read's critical path (see claims.ts).
+  const r = await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, `cd ${DIR} 2>/dev/null || exit 0; for f in *; do [ -f "$f" ] && printf '%s\\t%s\\n' "$f" "$(head -c 200 "$f" | tr '\\n' ' ')"; done`], { check: false, timeoutMs: 15_000 });
   const titles: Record<string, string> = {};
   for (const line of (r.stdout ?? "").split("\n")) {
     const i = line.indexOf("\t");
@@ -50,14 +51,14 @@ export async function loadTitles(cfg: Config): Promise<Record<string, string>> {
 
 export async function saveTitle(cfg: Config, box: string, title: string): Promise<void> {
   if (!NAME_RE.test(box)) throw new Error("invalid box name");
-  await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, `mkdir -p ${DIR} && chmod 700 ${DIR} && printf '%s' ${shellQuote(title)} > ${DIR}/${shellQuote(box)}`]);
+  await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, `mkdir -p ${DIR} && chmod 700 ${DIR} && printf '%s' ${shellQuote(title)} > ${DIR}/${shellQuote(box)}`], { timeoutMs: 15_000 });
   const c = cache.get(CACHE_KEY);
   if (c) c.titles[box] = title;
 }
 
 export async function forgetTitle(cfg: Config, box: string): Promise<void> {
   if (!NAME_RE.test(box)) return;
-  await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, `rm -f ${DIR}/${shellQuote(box)}`], { check: false });
+  await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, `rm -f ${DIR}/${shellQuote(box)}`], { check: false, timeoutMs: 15_000 });
   cache.get(CACHE_KEY)?.titles && delete cache.get(CACHE_KEY)!.titles[box];
 }
 

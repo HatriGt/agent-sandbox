@@ -137,7 +137,7 @@ export default function Home() {
           </View>
         )}
       </ScrollView>
-      <BoxActionsSheet box={actions} visible={!!actions} onClose={() => setActions(null)} onChanged={refresh} />
+      <BoxActionsSheet box={actions} memoryTiers={snap?.lifecycle.memoryTiers} memoryDefault={snap?.lifecycle.memoryDefault} visible={!!actions} onClose={() => setActions(null)} onChanged={refresh} />
     </SafeAreaView>
   );
 }

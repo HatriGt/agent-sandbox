@@ -130,6 +130,8 @@ export function stateColor(p: Palette, s: {
     case "done":
       return s.exitCode === 0
         ? { color: p.ok, word: "done", icon: "check" }
+        : s.exitCode === 137
+          ? { color: p.destructive, word: "out of memory", icon: "x" }
         : s.exitCode === 254
           ? { color: p.mutedForeground, word: "interrupted", icon: "x" }
           : s.exitCode === 253

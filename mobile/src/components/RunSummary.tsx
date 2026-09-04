@@ -84,12 +84,17 @@ export function RunSummary({
   ].filter(Boolean);
 
   const color = ok ? palette.ok : interrupted ? palette.mutedForeground : palette.destructive;
-  const word = ok ? "Completed" : interrupted ? "Interrupted" : `Exited · code ${exitCode}`;
-  const sub = interrupted
-    ? exitCode === 254
-      ? "the sandbox restarted mid-run — send a message to continue"
-      : "stopped by you to deliver a message immediately"
-    : null;
+  // 137 is 128+SIGKILL: the guest kernel OOM-killed the agent. Different cause, different remedy —
+  // so it gets its own word and points at the control that fixes it.
+  const oom = exitCode === 137;
+  const word = ok ? "Completed" : oom ? "Out of memory" : interrupted ? "Interrupted" : `Exited · code ${exitCode}`;
+  const sub = oom
+    ? "the kernel killed the agent — raise this machine's memory from the actions menu, then send a message to continue"
+    : interrupted
+      ? exitCode === 254
+        ? "the sandbox restarted mid-run — send a message to continue"
+        : "stopped by you to deliver a message immediately"
+      : null;
 
   return (
     <View style={{ marginVertical: 10, gap: 4 }}>

@@ -66,7 +66,16 @@ test("makeFleetReader: caches within ttl and dedupes concurrent sweeps", async (
   const [a, b] = await Promise.all([read(), read()]);
   assert.equal(sweeps, 1);
   assert.equal(a, b);
-  assert.deepEqual(a.lifecycle, { idleTimeoutSec: 900, poolIdleTimeoutSec: 21600, maxDurationSec: 3600, capacity: 5, poolSize: 1, sleepTtlSec: 3600 });
+  assert.deepEqual(a.lifecycle, {
+    idleTimeoutSec: 900,
+    poolIdleTimeoutSec: 21600,
+    maxDurationSec: 3600,
+    capacity: 5,
+    poolSize: 1,
+    sleepTtlSec: 3600,
+    memoryTiers: ["1G", "2G", "4G"],
+    memoryDefault: undefined,
+  });
   t = 500;
   await read();
   assert.equal(sweeps, 1, "served from cache inside ttl");
@@ -74,6 +83,46 @@ test("makeFleetReader: caches within ttl and dedupes concurrent sweeps", async (
   await read();
   assert.equal(sweeps, 2, "re-swept after ttl");
   assert.deepEqual(lifecycleOf(cfg).capacity, 5);
+});
+
+test("makeFleetReader: stops sharing a sweep that never settles", async () => {
+  // The outage: one `msb exec` into a box caught mid-shutdown never returned, so the memoised
+  // in-flight sweep was handed to every later reader forever and the dashboard showed skeletons
+  // until the controller was restarted. A stale in-flight sweep must be abandoned, not shared.
+  let sweeps = 0;
+  let t = 0;
+  const cfg = { idleTimeout: "15m", poolIdleTimeout: "6h", maxDuration: "1h", maxBoxes: 5, poolSize: 1 } as Config;
+  let settle: ((b: BoxView[]) => void) | null = null;
+  const read = makeFleetReader(
+    cfg,
+    () => {
+      sweeps++;
+      // The first sweep hangs; later ones resolve at once.
+      if (sweeps === 1) return new Promise<BoxView[]>((r) => (settle = r));
+      return Promise.resolve([running("a")]);
+    },
+    { ttlMs: 1000, sweepTtlMs: 20_000, now: () => t },
+  );
+
+  const hung = read();
+  read();
+  assert.equal(sweeps, 1, "concurrent callers still share one sweep");
+
+  t = 19_000;
+  read();
+  assert.equal(sweeps, 1, "still shared inside the sweep ttl");
+
+  t = 21_000;
+  const fresh = await read();
+  assert.equal(sweeps, 2, "a sweep older than the sweep ttl is abandoned, not shared");
+  assert.equal(fresh.boxes[0]?.name, "a");
+
+  // The abandoned sweep settling late must not clear the slot out from under its replacement.
+  settle?.([running("a")]);
+  await hung;
+  t = 21_100;
+  await read();
+  assert.equal(sweeps, 2, "the late sweep did not invalidate the fresh cache");
 });
 
 test("makeFleetReader: hydrates sleeping runs from the durable store and persists running ones", async () => {

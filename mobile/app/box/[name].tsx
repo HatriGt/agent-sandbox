@@ -593,6 +593,8 @@ export default function Thread() {
       <BoxActionsSheet
         box={boxForActions}
         log={log}
+        memoryTiers={fleetSnap?.lifecycle.memoryTiers}
+        memoryDefault={fleetSnap?.lifecycle.memoryDefault}
         visible={sheet === "actions"}
         onClose={() => setSheet(null)}
         onChanged={refresh}

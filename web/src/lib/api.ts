@@ -157,6 +157,10 @@ export interface FleetLifecycle {
   poolSize: number;
   /** How long a non-kept sandbox may sleep before it is destroyed. */
   sleepTtlSec?: number;
+  /** Memory tiers a box may be resized to. Server-supplied so the UI never hardcodes them. */
+  memoryTiers?: string[];
+  /** The tier every new box boots with. */
+  memoryDefault?: string;
 }
 
 export interface FleetSnapshot {
@@ -446,6 +450,8 @@ export const api = {
   /** Start a sleeping sandbox now (opening its thread does this automatically). */
   wake: (session: string) => post<{ ok: true }>("/wake.json", { session }),
   sleep: (session: string) => post<{ ok: true }>("/sleep.json", { session }),
+  /** Resize a box's memory. Always reboots the machine — this runtime has no live resize. */
+  setMemory: (session: string, memory: string) => post<{ ok: true; memory: string }>("/memory.json", { session, memory }),
   rename: (session: string, title: string) => post<{ title: string }>("/rename.json", { session, title }),
   /** Every workspace file (flat paths) for the explorer tree. */
   tree: (session: string, signal?: AbortSignal) =>
