@@ -16,7 +16,7 @@
  */
 import type { Config } from "./config.js";
 import { isRunning, parseDurationSec, type BoxView } from "./monitor.js";
-import { MEMORY_TIERS } from "./msb.js";
+import { MEMORY_TIERS, DISK_TIERS } from "./msb.js";
 
 export interface FleetLifecycle {
   /** Per-session idle timeout, seconds (undefined if unparseable). */
@@ -35,6 +35,8 @@ export interface FleetLifecycle {
   memoryTiers?: string[];
   /** The tier every new box boots with (MSB_MEMORY). */
   memoryDefault?: string;
+  /** Root-disk tiers a box may GROW to — the runtime cannot shrink a managed disk. */
+  diskTiers?: string[];
 }
 
 export interface FleetSnapshot {
@@ -54,6 +56,7 @@ export function lifecycleOf(cfg: Config): FleetLifecycle {
     sleepTtlSec: parseDurationSec(cfg.sleepTtl),
     memoryTiers: [...MEMORY_TIERS],
     memoryDefault: cfg.memory,
+    diskTiers: [...DISK_TIERS],
   };
 }
 
@@ -81,9 +84,13 @@ export function mergeWithMemory(latest: BoxView[], memory: Map<string, BoxView>)
       out.push({
         ...known,
         boxStatus: "Stopped",
-        // Metrics of a stopped box are stale; keep the last-seen uptime as "ran for" and drop live vitals.
+        // Metrics of a stopped box are stale; keep the last-seen uptime as "ran for" and drop live
+        // vitals. The usage meters must go with them — a meter showing a frozen number is worse than
+        // no meter, because it looks live.
         cpu: undefined,
         mem: undefined,
+        memUsage: undefined,
+        disk: undefined,
       });
     } else {
       out.push(b);

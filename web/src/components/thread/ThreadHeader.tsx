@@ -1,13 +1,14 @@
 import * as React from "react";
-import { ArrowLeft, FileText, FolderTree, Link2, Loader2, MemoryStick, Moon, MoreHorizontal, Pencil, Pin, PinOff, Plus, RotateCw, Trash2 } from "lucide-react";
+import { ArrowLeft, FileText, FolderTree, HardDrive, Link2, Loader2, MemoryStick, Moon, MoreHorizontal, Pencil, Pin, PinOff, Plus, RotateCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import type { BoxView } from "@/lib/api";
 import { fmtAgo, friendlyName, roleLabel, shortName } from "@/lib/format";
-import { deadlineLabel, deadlineShort, fmtDuration, type Deadline, type DisplayState } from "@/lib/lifecycle";
+import { deadlineLabel, deadlineShort, fmtDuration, fmtUsage, type Deadline, type DisplayState } from "@/lib/lifecycle";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, MenuHint } from "@/components/ui/dropdown-menu";
 import { StatePill } from "@/components/ui/stamp";
+import { UsageMeter } from "@/components/ui/usage-meter";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { RepoPicker } from "@/components/RepoPicker";
 import { PullRequestFloat } from "./PullRequestFloat";
@@ -45,6 +46,10 @@ export function ThreadHeader({
   memoryTier,
   memoryBusy,
   onSetMemory,
+  diskTiers,
+  diskTier,
+  diskBusy,
+  onSetDisk,
   onBack,
   onNew,
   onToggleWorkspace,
@@ -79,6 +84,11 @@ export function ThreadHeader({
   memoryTier?: string;
   memoryBusy?: boolean;
   onSetMemory?: (tier: string) => Promise<void>;
+  /** Root-disk tiers the machine may GROW to — already filtered, since a shrink is impossible. */
+  diskTiers?: string[];
+  diskTier?: string;
+  diskBusy?: boolean;
+  onSetDisk?: (tier: string) => Promise<void>;
   onBack: () => void;
   onNew: () => void;
   onToggleWorkspace: () => void;
@@ -94,7 +104,7 @@ export function ThreadHeader({
   const [confirm, setConfirm] = React.useState(false);
   // The tier the user picked, awaiting confirmation. A resize is a reboot, so it gets the same
   // confirm-dialog treatment as Destroy rather than firing straight off the menu.
-  const [resizeTo, setResizeTo] = React.useState<string | null>(null);
+  const [resizeTo, setResizeTo] = React.useState<{ kind: "memory" | "disk"; tier: string } | null>(null);
   const [addRepo, setAddRepo] = React.useState(false);
   const pickerRef = React.useRef<HTMLSpanElement>(null);
   const openFromMenu = React.useRef(false);
@@ -151,7 +161,9 @@ export function ThreadHeader({
       ? `${state === "done" ? "finished" : "asked"} ${fmtAgo(box.lastOutputAt)}`
       : null;
   const long = deadlineLabel(deadline);
-  const vitals = [box.uptime && `${sleeping ? "ran for" : "up"} ${box.uptime}`, box.cpu && `cpu ${box.cpu}`, box.mem && `memory ${box.mem}`, roleLabel(box.role)].filter(Boolean).join(" · ");
+  // Which resource's request is in flight — the confirm dialog is shared between the two.
+  const busyFor = resizeTo?.kind === "disk" ? diskBusy : memoryBusy;
+  const vitals = [box.uptime && `${sleeping ? "ran for" : "up"} ${box.uptime}`, box.cpu && `cpu ${box.cpu}`, box.memUsage && `memory ${fmtUsage(box.memUsage)}`, box.disk && `disk ${fmtUsage(box.disk)}`, roleLabel(box.role)].filter(Boolean).join(" · ");
 
   return (
     <header className="shrink-0 border-b px-3 py-2.5 md:px-5">
@@ -266,13 +278,32 @@ export function ThreadHeader({
                   {memoryTiers.map((t) => (
                     <DropdownMenuItem
                       key={t}
-                      onSelect={() => setResizeTo(t)}
+                      onSelect={() => setResizeTo({ kind: "memory", tier: t })}
                       disabled={t === memoryTier || memoryBusy || state === "running"}
                     >
                       <MemoryStick />
                       {t}
                       <MenuHint>
                         {t === memoryTier ? "current" : state === "running" ? "busy — finish first" : "reboots the machine"}
+                      </MenuHint>
+                    </DropdownMenuItem>
+                  ))}
+                </>
+              )}
+              {onSetDisk && !!diskTiers?.length && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel>Storage</DropdownMenuLabel>
+                  {diskTiers.map((t) => (
+                    <DropdownMenuItem
+                      key={t}
+                      onSelect={() => setResizeTo({ kind: "disk", tier: t })}
+                      disabled={t === diskTier || diskBusy || state === "running"}
+                    >
+                      <HardDrive />
+                      {t}
+                      <MenuHint>
+                        {t === diskTier ? "current" : state === "running" ? "busy — finish first" : "reboots the machine"}
                       </MenuHint>
                     </DropdownMenuItem>
                   ))}
@@ -363,6 +394,18 @@ export function ThreadHeader({
           </>
         )}
 
+        {/* Live vitals as meters. They only render while awake — a frozen meter reads as live and
+            lies, so mergeWithMemory drops the numbers when a box sleeps. */}
+        {!sleeping && (box.memUsage || box.disk) && (
+          <>
+            <Dot />
+            <span className="flex shrink-0 items-center gap-2.5">
+              <UsageMeter kind="memory" usage={box.memUsage} />
+              <UsageMeter kind="disk" usage={box.disk} />
+            </span>
+          </>
+        )}
+
         <span className="ml-auto flex items-center gap-2">
           {activity && (
             <span className="text-live inline-flex items-center gap-1.5 text-micro font-medium">
@@ -385,25 +428,29 @@ export function ThreadHeader({
 
       <Dialog open={!!resizeTo} onOpenChange={(o) => !o && setResizeTo(null)}>
         <DialogContent
-          title={`Restart ${friendlyName(box.name)} with ${resizeTo}?`}
-          description="This runtime cannot resize memory live, so the machine reboots. The workspace, checkouts and the agent's session are kept — expect it back in about half a minute."
+          title={`Restart ${friendlyName(box.name)} with ${resizeTo?.tier} of ${resizeTo?.kind === "disk" ? "storage" : "memory"}?`}
+          description={
+            resizeTo?.kind === "disk"
+              ? "The disk grows on the next boot, so the machine reboots. The workspace, checkouts and the agent's session are kept — and a disk can only ever grow, never shrink back."
+              : "This runtime cannot resize memory live, so the machine reboots. The workspace, checkouts and the agent's session are kept — expect it back in about half a minute."
+          }
         >
           <div className="flex justify-end gap-2">
-            <Button variant="outline" size="sm" onClick={() => setResizeTo(null)} disabled={memoryBusy}>
+            <Button variant="outline" size="sm" onClick={() => setResizeTo(null)} disabled={busyFor}>
               Cancel
             </Button>
             <Button
               size="sm"
-              disabled={memoryBusy}
+              disabled={busyFor}
               onClick={async () => {
-                const t = resizeTo;
-                if (!t) return;
-                await onSetMemory?.(t);
+                const r = resizeTo;
+                if (!r) return;
+                await (r.kind === "disk" ? onSetDisk?.(r.tier) : onSetMemory?.(r.tier));
                 setResizeTo(null);
               }}
             >
-              {memoryBusy ? <Loader2 className="animate-spin" /> : <MemoryStick />}
-              {memoryBusy ? "Restarting…" : `Restart with ${resizeTo}`}
+              {busyFor ? <Loader2 className="animate-spin" /> : resizeTo?.kind === "disk" ? <HardDrive /> : <MemoryStick />}
+              {busyFor ? "Restarting…" : `Restart with ${resizeTo?.tier}`}
             </Button>
           </div>
         </DialogContent>

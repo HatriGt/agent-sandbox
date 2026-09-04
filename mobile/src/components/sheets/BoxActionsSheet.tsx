@@ -5,7 +5,7 @@ import { api, type BoxView, type RepoInfo } from "@/lib/api";
 import { parseTrace } from "@/lib/trace";
 import { toMarkdown } from "@/lib/transcript-tools";
 import { serverUrl } from "@/lib/config";
-import { isSleeping } from "@/lib/format";
+import { currentDiskTier, isSleeping, offerableTiers } from "@/lib/format";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { T } from "../ui/AppText";
@@ -72,7 +72,7 @@ function ActionRow({
   );
 }
 
-type Pane = "menu" | "rename" | "attach" | "destroy" | "memory";
+type Pane = "menu" | "rename" | "attach" | "destroy" | "memory" | "disk";
 
 /**
  * The box's current memory cap, as a tier label. There is no dedicated field: `mem` is the MEM column
@@ -95,6 +95,7 @@ export function BoxActionsSheet({
   log,
   memoryTiers,
   memoryDefault,
+  diskTiers,
   visible,
   onClose,
   onChanged,
@@ -106,6 +107,8 @@ export function BoxActionsSheet({
   /** Memory tiers the machine may be resized to (from /fleet.json). Omit to hide the control. */
   memoryTiers?: string[];
   memoryDefault?: string;
+  /** Root-disk tiers, unfiltered — a disk can only grow, so the sheet filters them itself. */
+  diskTiers?: string[];
   visible: boolean;
   onClose: () => void;
   onChanged: () => void;
@@ -139,6 +142,10 @@ export function BoxActionsSheet({
   const sleeping = isSleeping(box.boxStatus);
   const running = box.runState === "running";
   const memTier = currentMemoryTier(box.mem, memoryDefault);
+  const diskTier = currentDiskTier(box.disk, diskTiers);
+  // Grow-only: `msb modify --root-disk` cannot shrink a managed disk, so a smaller pick could only
+  // ever fail at the runtime with a confusing error. Offer sizes at or above the current one.
+  const growTiers = offerableTiers(diskTiers, diskTier, true);
 
   const act = async (fn: () => Promise<unknown>, done?: () => void) => {
     setNote(null);
@@ -163,7 +170,9 @@ export function BoxActionsSheet({
           ? "Destroy machine?"
           : pane === "memory"
             ? "Memory"
-            : box.title || box.name;
+            : pane === "disk"
+              ? "Storage"
+              : box.title || box.name;
 
   return (
     <Sheet visible={visible} onClose={pane === "menu" ? onClose : () => setPane("menu")} title={titleText}>
@@ -224,11 +233,20 @@ export function BoxActionsSheet({
             />
             {memoryTiers?.length ? (
               <ActionRow
-                icon="hard-drive"
+                icon="cpu"
                 label="Memory"
                 hint={running ? "busy — finish first" : memTier ? `${memTier} · a change reboots the machine` : "a change reboots the machine"}
                 disabled={running}
                 onPress={() => setPane("memory")}
+              />
+            ) : null}
+            {growTiers.length ? (
+              <ActionRow
+                icon="hard-drive"
+                label="Storage"
+                hint={running ? "busy — finish first" : diskTier ? `${diskTier} · a change reboots the machine` : "a change reboots the machine"}
+                disabled={running}
+                onPress={() => setPane("disk")}
               />
             ) : null}
             <View style={{ height: 1, backgroundColor: palette.border, marginVertical: 6 }} />
@@ -246,11 +264,32 @@ export function BoxActionsSheet({
             {(memoryTiers ?? []).map((t) => (
               <ActionRow
                 key={t}
-                icon="hard-drive"
+                icon="cpu"
                 label={t}
                 hint={t === memTier ? "current" : "restart with this size"}
                 disabled={busy || t === memTier}
                 onPress={() => act(() => api.setMemory(box.name, t), onClose)}
+              />
+            ))}
+            <Button title="Cancel" variant="secondary" onPress={() => setPane("menu")} disabled={busy} />
+          </View>
+        )}
+
+        {pane === "disk" && (
+          <View style={{ gap: 4 }}>
+            <T variant="meta" tone="muted" style={{ marginBottom: 4 }}>
+              The disk grows on the next boot, so picking a size reboots the machine. The workspace,
+              checkouts and the agent&apos;s session are kept — and a disk can only ever grow, never
+              shrink back.
+            </T>
+            {growTiers.map((t) => (
+              <ActionRow
+                key={t}
+                icon="hard-drive"
+                label={t}
+                hint={t === diskTier ? "current" : "restart with this size"}
+                disabled={busy || t === diskTier}
+                onPress={() => act(() => api.setDisk(box.name, t), onClose)}
               />
             ))}
             <Button title="Cancel" variant="secondary" onPress={() => setPane("menu")} disabled={busy} />

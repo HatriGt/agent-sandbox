@@ -9,7 +9,7 @@ const WorkspacePane = React.lazy(() => import("./WorkspacePane").then((m) => ({ 
 import { WakingCard } from "./WakingCard";
 import { SessionContext } from "@/lib/session-context";
 import { friendlyName, isSleeping, POLL_MS, threadTitle } from "@/lib/format";
-import { currentMemoryTier, deadlineLabel, deadlineOf, displayState, fmtDuration } from "@/lib/lifecycle";
+import { currentDiskTier, currentMemoryTier, deadlineLabel, deadlineOf, displayState, fmtDuration, offerableTiers } from "@/lib/lifecycle";
 import { runStats, toMarkdown } from "@/lib/transcript";
 import { splitReplies } from "@/lib/replies";
 import { parseMcpName } from "@/lib/mcp";
@@ -261,6 +261,24 @@ export function Thread({
     }
   };
 
+  // Grow the root disk. Identical flow, but the offered tiers are filtered to >= the current size:
+  // `msb modify --root-disk` cannot shrink a managed disk, so a smaller pick could only ever fail.
+  const [diskBusy, setDiskBusy] = React.useState(false);
+  const diskTier = React.useMemo(() => currentDiskTier(box.disk, lifecycle.diskTiers), [box.disk, lifecycle.diskTiers]);
+  const diskTiers = React.useMemo(() => offerableTiers(lifecycle.diskTiers, diskTier, true), [lifecycle.diskTiers, diskTier]);
+  const setDisk = async (tier: string) => {
+    setDiskBusy(true);
+    wokeRef.current = box.name;
+    try {
+      await api.setDisk(box.name, tier);
+      toast.success(`${friendlyName(box.name)} now has ${tier} of storage`, { description: "The machine is restarting — the workspace and session are kept. Send a message once it is back." });
+    } catch (e) {
+      toast.error("Could not change the storage", { description: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setDiskBusy(false);
+    }
+  };
+
   const destroy = async () => {
     setRemoving(true);
     try {
@@ -479,6 +497,10 @@ export function Thread({
         memoryTier={memoryTier}
         memoryBusy={memoryBusy}
         onSetMemory={setMemory}
+        diskTiers={diskTiers}
+        diskTier={diskTier}
+        diskBusy={diskBusy}
+        onSetDisk={setDisk}
         onBack={onBack}
         onNew={onNew}
         onToggleWorkspace={() => (showWorkspace ? closeWorkspace() : setWorkspaceOpen(true))}

@@ -39,6 +39,16 @@ export interface BoxView {
   cpu?: string;
   /** MEM string from metrics (e.g. "63.4 MiB / 1.0 GiB"), best-effort. */
   mem?: string;
+  /**
+   * Root-disk occupancy in MiB, from `df -k /` inside the box. NOT from `msb metrics` — its DISK
+   * column is an I/O rate, not how full the disk is. Absent for a sleeping box (nothing to ask).
+   */
+  disk?: Usage;
+  /**
+   * `mem` parsed into numbers, so clients render meters without re-parsing a CLI table. The total is
+   * the box's memory cap.
+   */
+  memUsage?: Usage;
   /** Unix seconds of the agent log's last write — when the agent last produced output. Best-effort. */
   lastOutputAt?: number;
   /** Follow-ups queued by the dashboard while the agent was mid-turn; delivered when it finishes. */
@@ -51,6 +61,34 @@ export interface BoxView {
   title?: string;
   /** Seconds this stopped box has been asleep (claim age), when known. */
   asleepSec?: number;
+}
+
+/** A used/total pair in MiB — the shape a usage meter needs. */
+export interface Usage {
+  usedMib: number;
+  totalMib: number;
+}
+
+/**
+ * Parse one side of a "63.4 MiB / 1.0 GiB" cell into MiB. The unit is whatever msb chose for the
+ * magnitude, so it must be honoured rather than assumed.
+ */
+export function parseSizeMib(raw: string | undefined): number | undefined {
+  const m = /^\s*(\d+(?:\.\d+)?)\s*(k|kb|kib|m|mb|mib|g|gb|gib|t|tb|tib)?\s*$/i.exec(raw ?? "");
+  if (!m) return undefined;
+  const n = Number(m[1]);
+  const u = (m[2] ?? "m").toLowerCase()[0];
+  const mib = u === "k" ? n / 1024 : u === "g" ? n * 1024 : u === "t" ? n * 1024 * 1024 : n;
+  return Math.round(mib);
+}
+
+/** "63.4 MiB / 1.0 GiB" → { usedMib: 63, totalMib: 1024 }. Undefined if either side is unreadable. */
+export function parseMemUsage(mem: string | undefined): Usage | undefined {
+  const [a, b] = (mem ?? "").split("/");
+  const usedMib = parseSizeMib(a);
+  const totalMib = parseSizeMib(b);
+  if (usedMib === undefined || totalMib === undefined || totalMib <= 0) return undefined;
+  return { usedMib, totalMib };
 }
 
 export interface RepoRef {
@@ -203,6 +241,8 @@ export interface WatchSnapshot {
   uptime?: string;
   cpu?: string;
   mem?: string;
+  /** `mem` as numbers, for the thread's usage meter. Disk arrives via the fleet poll instead. */
+  memUsage?: Usage;
   /** The log tail (already limited to N lines by the caller). */
   log: string;
 }

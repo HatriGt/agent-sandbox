@@ -10,6 +10,7 @@ import type { StableBox } from "@/hooks/useStableBoxes";
 import { prefetchWatch } from "@/hooks/useWatchStream";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { UsageMeter } from "@/components/ui/usage-meter";
 import { StateStamp } from "@/components/ui/stamp";
 import { Capacity } from "@/components/Capacity";
 import { Bar } from "@/components/thread/Skeletons";
@@ -413,12 +414,19 @@ function MachineRow({
           <span className="font-sans text-micro">
             {box.leaving ? "shutting down" : box.kept ? "kept · wakes on reply" : state === "sleeping" ? (deadline.kind === "sleep" && deadline.remainingSec != null ? `asleep · destroyed in ${deadline.remainingSec <= 0 ? "soon" : fmtDuration(deadline.remainingSec)}` : "asleep · wakes on reply") : roleLabel(box.role)}
           </span>
-          {/* Data line: uptime · cpu · memory — one row, never wrapping the words above. */}
-          {(box.uptime || box.cpu || box.mem) && (
-            <span className="truncate" title={[box.uptime && `${state === "sleeping" ? "ran" : "up"} ${box.uptime}`, box.cpu && `cpu ${box.cpu}`, box.mem && `memory ${box.mem}`].filter(Boolean).join(" · ")}>
+          {/* Data line: uptime · cpu — one row, never wrapping the words above. */}
+          {(box.uptime || box.cpu) && (
+            <span className="truncate" title={[box.uptime && `${state === "sleeping" ? "ran" : "up"} ${box.uptime}`, box.cpu && `cpu ${box.cpu}`].filter(Boolean).join(" · ")}>
               {box.uptime && <>{state === "sleeping" ? "ran" : "up"} {box.uptime}</>}
               {box.cpu && <>{box.uptime ? " · " : ""}{box.cpu.split(" / ")[0]}c</>}
-              {box.mem && <> · {box.mem.split(" / ")[0].replace(/\.\d+ /, " ")}</>}
+            </span>
+          )}
+          {/* Memory and disk get meters instead of a text fragment: the ratio is the point, and the
+              bar is what makes "nearly full" visible at a glance down a list of machines. */}
+          {(box.memUsage || box.disk) && (
+            <span className="flex items-center gap-2">
+              <UsageMeter kind="memory" usage={box.memUsage} width="w-10" />
+              <UsageMeter kind="disk" usage={box.disk} width="w-10" />
             </span>
           )}
         </div>

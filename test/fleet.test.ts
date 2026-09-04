@@ -75,6 +75,7 @@ test("makeFleetReader: caches within ttl and dedupes concurrent sweeps", async (
     sleepTtlSec: 3600,
     memoryTiers: ["1G", "2G", "4G"],
     memoryDefault: undefined,
+    diskTiers: ["4G", "8G", "16G", "32G"],
   });
   t = 500;
   await read();

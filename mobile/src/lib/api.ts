@@ -18,6 +18,10 @@ export interface BoxView {
   uptime?: string;
   cpu?: string;
   mem?: string;
+  /** `mem` parsed into numbers (MiB), for the usage meter. Total is the box's memory cap. */
+  memUsage?: { usedMib: number; totalMib: number };
+  /** Root-disk occupancy in MiB, from df inside the box. Absent while asleep. */
+  disk?: { usedMib: number; totalMib: number };
   lastOutputAt?: number; // unix seconds
   kept?: boolean;
   title?: string;
@@ -37,6 +41,8 @@ export interface FleetLifecycle {
   memoryTiers?: string[];
   /** The tier every new box boots with. */
   memoryDefault?: string;
+  /** Root-disk tiers a box may GROW to — the runtime cannot shrink a managed disk. */
+  diskTiers?: string[];
 }
 
 export interface FleetSnapshot {
@@ -395,6 +401,8 @@ export const api = {
   /** Resize a box's memory. Always reboots the machine — this runtime has no live resize. */
   setMemory: (session: string, memory: string) =>
     post<{ ok: true; memory: string }>("/memory.json", { session, memory }),
+  /** Grow a box's root disk. Grow-only and always reboots; the server rejects a smaller tier. */
+  setDisk: (session: string, disk: string) => post<{ ok: true; disk: string }>("/disk.json", { session, disk }),
   rename: (session: string, title: string) => post<{ title: string }>("/rename.json", { session, title }),
   title: (session: string) => post<{ title?: string }>("/title.json", { session }),
   inbox: (session: string) => get<{ queued: QueuedMessage[] }>("/inbox.json", { session }),

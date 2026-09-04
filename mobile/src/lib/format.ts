@@ -77,3 +77,74 @@ export function fleetSentence(boxes: { runState: string; boxStatus: string }[]):
   if (!parts.length) return "The fleet is quiet.";
   return parts.join(", ") + ".";
 }
+
+/* ─────────────────────── resource usage (mirrors web/src/lib/lifecycle.ts) ─────────────────────── */
+
+/** A used/total pair in MiB, as the controller reports it. */
+export interface Usage {
+  usedMib: number;
+  totalMib: number;
+}
+
+export type UsageLevel = "normal" | "high" | "critical";
+
+/** 0..1, clamped. Undefined when there is nothing live to show (a sleeping box has no vitals). */
+export function usageFraction(u: Usage | undefined): number | undefined {
+  if (!u || !(u.totalMib > 0)) return undefined;
+  return Math.max(0, Math.min(1, u.usedMib / u.totalMib));
+}
+
+/**
+ * "high" starts at 75% so the meter turns amber with enough headroom left to act (raise the tier)
+ * rather than as an obituary — a 1G box was OOM-killed three times with the UI saying nothing.
+ */
+export function usageLevel(u: Usage | undefined): UsageLevel {
+  const f = usageFraction(u);
+  if (f == null) return "normal";
+  return f >= 0.9 ? "critical" : f >= 0.75 ? "high" : "normal";
+}
+
+/** Compact size for a meter label: 812 MB / 4.0 GB. */
+export function fmtMib(mib: number): string {
+  if (!Number.isFinite(mib) || mib < 0) return "—";
+  if (mib < 1024) return `${Math.round(mib)} MB`;
+  const gb = mib / 1024;
+  return `${gb.toFixed(gb >= 10 ? 0 : 1)} GB`;
+}
+
+/** "812 MB of 4.0 GB" — the meter's accessible text. */
+export function fmtUsage(u: Usage | undefined): string | null {
+  if (!u || !(u.totalMib > 0)) return null;
+  return `${fmtMib(u.usedMib)} of ${fmtMib(u.totalMib)}`;
+}
+
+/** "16G" → 16. Undefined for anything not in that shape. */
+export function tierGib(tier: string | undefined): number | undefined {
+  const m = /^(\d+)\s*g$/i.exec((tier ?? "").trim());
+  return m ? Number(m[1]) : undefined;
+}
+
+/**
+ * The tiers a box may actually be moved to. Disk is GROW-ONLY in this runtime, so offering a smaller
+ * size would produce a failure the user cannot understand; memory resizes in both directions.
+ */
+export function offerableTiers(tiers: string[] | undefined, currentTier: string | undefined, growOnly: boolean): string[] {
+  const all = tiers ?? [];
+  if (!growOnly || !currentTier) return all;
+  const cur = tierGib(currentTier);
+  if (cur == null) return all;
+  return all.filter((t) => {
+    const g = tierGib(t);
+    return g == null || g >= cur;
+  });
+}
+
+/** The box's current disk tier, rounded up to the offered tier that contains it. */
+export function currentDiskTier(disk: Usage | undefined, tiers: string[] | undefined): string | undefined {
+  if (!disk || !(disk.totalMib > 0)) return undefined;
+  // df reports slightly less than the nominal size (a 4 GiB disk reads 3.9G), so match the smallest
+  // tier at or above the reported total rather than expecting equality.
+  const gb = disk.totalMib / 1024;
+  const sorted = (tiers ?? []).slice().sort((a, b) => (tierGib(a) ?? 0) - (tierGib(b) ?? 0));
+  return sorted.find((t) => (tierGib(t) ?? 0) >= gb - 0.35) ?? sorted[sorted.length - 1];
+}

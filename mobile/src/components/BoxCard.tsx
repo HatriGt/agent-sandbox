@@ -10,6 +10,7 @@ import { Card } from "./ui/Card";
 import { Icon } from "./ui/Icon";
 import { Pressably } from "./ui/Motion";
 import { StatePill } from "./ui/StatePill";
+import { UsageMeter } from "./ui/UsageMeter";
 
 export function boxLabel(b: BoxView): string {
   return b.title || b.task?.split("\n")[0] || b.name;
@@ -82,6 +83,15 @@ export function BoxCard({ box, onLongPress }: { box: BoxView; onLongPress?: (b: 
             </View>
           ) : null}
         </View>
+        {/* Vitals as meters, and only while awake: mergeWithMemory drops the numbers for a sleeping
+            box, and a frozen meter would read as live. Skipped on an amber "needs you" card, whose
+            ink is inverted and whose one job is the question. */}
+        {!waiting && (box.memUsage || box.disk) ? (
+          <View style={{ flexDirection: "row", gap: 12, marginTop: 6, alignItems: "center", flexWrap: "wrap" }}>
+            <UsageMeter kind="memory" usage={box.memUsage} />
+            <UsageMeter kind="disk" usage={box.disk} />
+          </View>
+        ) : null}
       </Card>
     </Pressably>
   );

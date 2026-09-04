@@ -40,7 +40,7 @@ import { parseStore } from "./gh-token-store.js";
 import { parseMcpStore } from "./mcp-store.js";
 import { guardDeps, makeOwnership, NotOwnedError, QuotaError, withPrincipal } from "./tenancy.js";
 import { securityHeaders } from "./security-headers.js";
-import { gatherMonitor, gatherWatch, askInBox, driverStateLine, startBoxIfStopped, noteRunning, stopBox, noteStopped, interruptAgentRun, setBoxMemory, isMemoryTier, MEMORY_TIERS } from "./msb.js";
+import { gatherMonitor, gatherWatch, askInBox, driverStateLine, startBoxIfStopped, noteRunning, stopBox, noteStopped, interruptAgentRun, setBoxMemory, isMemoryTier, MEMORY_TIERS, setBoxDisk, isDiskTier, DISK_TIERS } from "./msb.js";
 import { isBoxName } from "./sync.js";
 import { shellQuote } from "./exec.js";
 import { touchClaimed } from "./claims.js";
@@ -1783,6 +1783,32 @@ app.post("/memory.json", async (req: Request, res: Response) => {
     noteRunning(session);
     watchHub.drop(session);
     res.json({ ok: true, memory });
+  } catch (e) {
+    failWith(res, e);
+  }
+});
+
+/**
+ * Grow a box's root disk. Same reboot-and-gate story as /memory.json, with one extra constraint:
+ * the runtime cannot SHRINK a managed disk, so a tier below the current size is refused here rather
+ * than left to fail confusingly inside msb.
+ */
+app.post("/disk.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const { session, disk } = (req.body ?? {}) as { session?: string; disk?: string };
+  if (!session || !/^[\w.-]+$/.test(session)) {
+    res.status(400).json({ error: "session is required" });
+    return;
+  }
+  if (!isDiskTier(disk)) {
+    res.status(400).json({ error: `disk must be one of ${DISK_TIERS.join(", ")}` });
+    return;
+  }
+  try {
+    await setBoxDisk(cfg, session, disk);
+    noteRunning(session);
+    watchHub.drop(session);
+    res.json({ ok: true, disk });
   } catch (e) {
     failWith(res, e);
   }

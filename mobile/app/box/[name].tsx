@@ -28,6 +28,7 @@ import { Icon, type IconName } from "@/components/ui/Icon";
 import { Sheet } from "@/components/ui/Sheet";
 import { FadeInUp, TypingDots } from "@/components/ui/Motion";
 import { StatePill } from "@/components/ui/StatePill";
+import { UsageMeter } from "@/components/ui/UsageMeter";
 import { WorkingDot } from "@/components/ui/WorkingDot";
 
 type AskEntry = { q: string; a?: string; pending: boolean };
@@ -290,6 +291,26 @@ export default function Thread() {
             <Icon name="more-horizontal" size={20} color={palette.mutedForeground} />
           </Pressable>
         </View>
+
+        {/* Vitals strip: memory and disk against their caps. Its own row rather than crowding the
+            56px header, and only while awake — the controller drops these numbers for a sleeping box
+            so a meter never shows a frozen value that looks live. The ⋯ menu is where you act on it. */}
+        {!sleeping && (merged?.memUsage || merged?.disk) ? (
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 16,
+              paddingHorizontal: 16,
+              paddingVertical: 7,
+              borderBottomWidth: 1,
+              borderBottomColor: palette.border,
+            }}
+          >
+            <UsageMeter kind="memory" usage={merged?.memUsage} trackWidth={56} />
+            <UsageMeter kind="disk" usage={merged?.disk} trackWidth={56} />
+          </View>
+        ) : null}
 
         {/* Transcript */}
         <View style={{ flex: 1 }}>
@@ -595,6 +616,7 @@ export default function Thread() {
         log={log}
         memoryTiers={fleetSnap?.lifecycle.memoryTiers}
         memoryDefault={fleetSnap?.lifecycle.memoryDefault}
+        diskTiers={fleetSnap?.lifecycle.diskTiers}
         visible={sheet === "actions"}
         onClose={() => setSheet(null)}
         onChanged={refresh}

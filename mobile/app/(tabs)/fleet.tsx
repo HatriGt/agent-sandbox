@@ -94,7 +94,7 @@ export default function Fleet() {
           Long-press a machine for pin, sleep and destroy.
         </T>
       </ScrollView>
-      <BoxActionsSheet box={actions} memoryTiers={snap?.lifecycle.memoryTiers} memoryDefault={snap?.lifecycle.memoryDefault} visible={!!actions} onClose={() => setActions(null)} onChanged={refresh} />
+      <BoxActionsSheet box={actions} memoryTiers={snap?.lifecycle.memoryTiers} memoryDefault={snap?.lifecycle.memoryDefault} diskTiers={snap?.lifecycle.diskTiers} visible={!!actions} onClose={() => setActions(null)} onChanged={refresh} />
     </SafeAreaView>
   );
 }

@@ -31,6 +31,7 @@ import {
   classifyBox,
   parseRunState,
   parseMetrics,
+  parseMemUsage,
   type BoxView,
   type RunState,
   type WatchSnapshot,
@@ -1313,6 +1314,7 @@ export async function gatherMonitor(cfg: Config): Promise<BoxView[]> {
       let mem: string | undefined;
       let lastOutputAt: number | undefined;
       let repos: RepoRef[] | undefined;
+      let disk: { usedMib: number; totalMib: number } | undefined;
 
       // The sentinel read and the metrics read are independent, so they go out together. They used
       // to be sequential, which doubled this endpoint's latency per box: with four boxes the whole
@@ -1331,7 +1333,12 @@ export async function gatherMonitor(cfg: Config): Promise<BoxView[]> {
             `printf '%s %s\n' "$(basename "$d")" "$(git -C "$d" rev-parse --abbrev-ref HEAD 2>/dev/null)"; done 2>/dev/null; ` +
             // mtime of the agent log = the last moment the agent produced output. The dashboard uses
             // it to say "no output for 4m" next to the idle-stop deadline. Best-effort (no log → blank).
-            `echo "---M---"; stat -c %Y ${AGENT_LOG} 2>/dev/null || true`,
+            `echo "---M---"; stat -c %Y ${AGENT_LOG} 2>/dev/null || true; ` +
+            // Root-disk usage. `msb metrics`' DISK column is an I/O RATE, not occupancy, so the only
+            // honest source for "how full is this box" is df inside it — and it rides along on a probe
+            // we were already making. `-k` for a stable unit (blocks of 1 KiB) rather than df's
+            // human-readable rounding, which the client would have to re-parse.
+            `echo "---D---"; df -k / 2>/dev/null | awk 'NR==2 {print $2, $3}' || true`,
           // Bounded: this is the exact call that wedged forever on a box caught mid-shutdown and
           // took the whole fleet read with it. A rejection here is already handled below (execOk).
           { timeoutMs: PROBE_TIMEOUT_MS }
@@ -1374,8 +1381,21 @@ export async function gatherMonitor(cfg: Config): Promise<BoxView[]> {
             });
           repos = list.length ? list : undefined;
         }
-        const mtime = Number(out.slice(mStart + "---M---".length).trim());
+        const dStartRaw = out.indexOf("---D---");
+        const dStart = dStartRaw >= 0 ? dStartRaw : out.length;
+        const mtime = Number(out.slice(mStart + "---M---".length, dStart).trim());
         lastOutputAt = Number.isFinite(mtime) && mtime > 0 ? mtime : undefined;
+        if (dStartRaw >= 0) {
+          // "<total-1k-blocks> <used-1k-blocks>" from df -k, or blank on an older box / failed df.
+          const [totalK, usedK] = out
+            .slice(dStart + "---D---".length)
+            .trim()
+            .split(/\s+/)
+            .map(Number);
+          if (Number.isFinite(totalK) && Number.isFinite(usedK) && totalK > 0) {
+            disk = { usedMib: Math.round(usedK / 1024), totalMib: Math.round(totalK / 1024) };
+          }
+        }
       }
 
       // msb's metrics STATE is more current than the ls status (ls can briefly lag a just-stopped
@@ -1403,6 +1423,8 @@ export async function gatherMonitor(cfg: Config): Promise<BoxView[]> {
         uptime,
         cpu,
         mem,
+        memUsage: parseMemUsage(mem),
+        disk,
         lastOutputAt,
         repos,
       };
@@ -1569,6 +1591,7 @@ export async function gatherWatch(
     base.uptime = m.uptime;
     base.cpu = m.cpu;
     base.mem = m.mem;
+    base.memUsage = parseMemUsage(m.mem);
     if (m.state && m.state !== "running") base.boxStatus = m.state === "exited" ? "stopped" : m.state;
   } catch {
     // metrics is best-effort
@@ -1622,6 +1645,23 @@ export function isMemoryTier(v: unknown): v is MemoryTier {
  */
 export async function setBoxMemory(cfg: Config, box: string, tier: MemoryTier): Promise<void> {
   await msb(cfg, ["modify", box, "--memory", tier, "--max-memory", tier, "--restart"]);
+}
+
+/**
+ * Root disk tiers. GROW-ONLY: `msb modify --root-disk` on a managed disk cannot shrink, so the UI
+ * must offer only tiers at or above the current size — a "shrink" would fail at the runtime with a
+ * confusing error. Boxes are created at 4G.
+ */
+export const DISK_TIERS = ["4G", "8G", "16G", "32G"] as const;
+export type DiskTier = (typeof DISK_TIERS)[number];
+
+export function isDiskTier(v: unknown): v is DiskTier {
+  return typeof v === "string" && (DISK_TIERS as readonly string[]).includes(v);
+}
+
+/** Grow the root disk and reboot so it takes effect. Same run-state gating as setBoxMemory. */
+export async function setBoxDisk(cfg: Config, box: string, tier: DiskTier): Promise<void> {
+  await msb(cfg, ["modify", box, "--root-disk", tier, "--restart"]);
 }
 
 /** Stop a box (no remove) so it can be snapshotted. */

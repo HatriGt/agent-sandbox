@@ -21,6 +21,10 @@ export interface BoxView {
   uptime?: string;
   cpu?: string;
   mem?: string;
+  /** `mem` parsed into numbers (MiB), for the usage meter. Total is the box's memory cap. */
+  memUsage?: { usedMib: number; totalMib: number };
+  /** Root-disk occupancy in MiB, from df inside the box. Absent while asleep. */
+  disk?: { usedMib: number; totalMib: number };
   /** Unix seconds of the agent's last output (log mtime). */
   lastOutputAt?: number;
   /** Pinned by the operator: never reaped while asleep; only Destroy removes it. */
@@ -161,6 +165,8 @@ export interface FleetLifecycle {
   memoryTiers?: string[];
   /** The tier every new box boots with. */
   memoryDefault?: string;
+  /** Root-disk tiers a box may GROW to — the runtime cannot shrink a managed disk. */
+  diskTiers?: string[];
 }
 
 export interface FleetSnapshot {
@@ -452,6 +458,8 @@ export const api = {
   sleep: (session: string) => post<{ ok: true }>("/sleep.json", { session }),
   /** Resize a box's memory. Always reboots the machine — this runtime has no live resize. */
   setMemory: (session: string, memory: string) => post<{ ok: true; memory: string }>("/memory.json", { session, memory }),
+  /** Grow a box's root disk. Grow-only and always reboots; the server rejects a smaller tier. */
+  setDisk: (session: string, disk: string) => post<{ ok: true; disk: string }>("/disk.json", { session, disk }),
   rename: (session: string, title: string) => post<{ title: string }>("/rename.json", { session, title }),
   /** Every workspace file (flat paths) for the explorer tree. */
   tree: (session: string, signal?: AbortSignal) =>
