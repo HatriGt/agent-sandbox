@@ -160,6 +160,7 @@ export function BoxActionsSheet({
   onChanged,
   onDestroyed,
   onRunAgain,
+  onSlept,
 }: {
   box: BoxView | null;
   log?: string;
@@ -173,6 +174,8 @@ export function BoxActionsSheet({
   onChanged: () => void;
   onDestroyed?: () => void;
   onRunAgain?: () => void;
+  /** The operator chose "Sleep now" — the thread must not auto-wake the box right back up. */
+  onSlept?: () => void;
 }) {
   const { palette } = useTheme();
   const [pane, setPane] = useState<Pane>("menu");
@@ -289,7 +292,12 @@ export function BoxActionsSheet({
               label={sleeping ? "Wake" : "Sleep now"}
               hint={sleeping ? "restores the workspace and session" : running ? "busy — finish first" : "a reply wakes it"}
               disabled={!sleeping && running}
-              onPress={() => act(() => (sleeping ? api.wake(box.name) : api.sleep(box.name)), onClose)}
+              onPress={() =>
+                act(
+                  () => (sleeping ? api.wake(box.name) : api.sleep(box.name).then((r) => (onSlept?.(), r))),
+                  onClose,
+                )
+              }
             />
             {memoryTiers?.length ? (
               <ActionRow

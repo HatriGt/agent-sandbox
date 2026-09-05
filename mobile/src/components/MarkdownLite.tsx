@@ -1,12 +1,17 @@
 import React from "react";
 import { View } from "react-native";
+import * as WebBrowser from "expo-web-browser";
 import { useTheme } from "@/theme/ThemeContext";
-import { fonts, radius, type } from "@/theme/tokens";
+import { radius } from "@/theme/tokens";
 import { T } from "./ui/AppText";
+import { Icon, type IconName } from "./ui/Icon";
 
 /**
  * Lightweight markdown for agent prose: headings, fenced code, inline code,
- * bold, lists, blockquotes. Rendered at the .prose-agent scale (15.5/1.7).
+ * bold, italics, lists, blockquotes — and links. Rendered at the .prose-agent
+ * scale (15.5/1.7). Links match the web's LinkChip treatment: a URL in prose
+ * becomes a tappable chip with an icon for what it points at (PR, issue,
+ * commit, file, repo, web) and a short human label instead of the raw address.
  */
 export function MarkdownLite({ text }: { text: string }) {
   const { palette } = useTheme();
@@ -20,6 +25,11 @@ export function MarkdownLite({ text }: { text: string }) {
               key={i}
               style={{ backgroundColor: palette.trace, borderRadius: radius.lg, padding: 12 }}
             >
+              {b.lang ? (
+                <T variant="micro" mono tone="faint" style={{ marginBottom: 6 }}>
+                  {b.lang}
+                </T>
+              ) : null}
               <T variant="code" mono style={{ color: palette.traceFg }} selectable>
                 {b.text}
               </T>
@@ -62,13 +72,70 @@ export function MarkdownLite({ text }: { text: string }) {
   );
 }
 
+/** What a URL points at, mirrored from the web's describeUrl: GitHub gets first-class treatment. */
+type LinkKind = "pr" | "issue" | "commit" | "file" | "repo" | "github" | "web";
+
+export function describeUrl(href: string): { kind: LinkKind; label: string } {
+  const m = href.match(/^https?:\/\/([^/\s]+)(\/[^\s]*)?$/);
+  if (!m) return { kind: "web", label: href };
+  const host = m[1].replace(/^www\./, "");
+  const segs = (m[2] ?? "").split("/").filter(Boolean);
+  if (host === "github.com" && segs.length >= 2) {
+    const repoName = segs[1];
+    const [, , kind, ...rest] = segs;
+    if (kind === "pull" && rest[0]) return { kind: "pr", label: `${repoName}#${rest[0]}` };
+    if (kind === "issues" && rest[0]) return { kind: "issue", label: `${repoName}#${rest[0]}` };
+    if (kind === "commit" && rest[0]) return { kind: "commit", label: `${repoName}@${rest[0].slice(0, 7)}` };
+    if ((kind === "blob" || kind === "tree") && rest.length >= 2) {
+      const path = rest.slice(1).join("/");
+      return { kind: "file", label: path.split("/").pop() || path };
+    }
+    if (!kind) return { kind: "repo", label: `${segs[0]}/${repoName}` };
+    return { kind: "github", label: `${repoName}/${kind}` };
+  }
+  const first = segs[0] ? `/${segs[0]}${segs.length > 1 ? "/…" : ""}` : "";
+  return { kind: "web", label: `${host}${first}` };
+}
+
+const LINK_ICON: Record<LinkKind, IconName> = {
+  pr: "git-pull-request",
+  issue: "circle",
+  commit: "git-commit",
+  file: "file-text",
+  repo: "github",
+  github: "github",
+  web: "globe",
+};
+
+/** A URL as a tappable chip inside prose — icon · short label · arrow, like the web's LinkChip. */
+function LinkChip({ href, text }: { href: string; text?: string }) {
+  const { palette } = useTheme();
+  const d = describeUrl(href);
+  const custom = text && text !== href && text.replace(/\/$/, "") !== href.replace(/\/$/, "");
+  const tint = d.kind === "pr" ? palette.ok : d.kind === "issue" ? palette.live : palette.foreground;
+  return (
+    <T
+      variant="prose"
+      weight="semibold"
+      onPress={() => WebBrowser.openBrowserAsync(href).catch(() => {})}
+      style={{ backgroundColor: palette.muted, borderRadius: radius.sm, color: tint }}
+    >
+      {" "}
+      <Icon name={custom && d.kind === "web" ? "link" : LINK_ICON[d.kind]} size={12} color={tint} />{" "}
+      {custom ? text : d.label} <Icon name="arrow-up-right" size={11} color={palette.faint} />{" "}
+    </T>
+  );
+}
+
 function InlineText({ text, muted }: { text: string; muted?: boolean }) {
   const { palette } = useTheme();
   const parts = parseInline(text);
   return (
     <T variant="prose" tone={muted ? "muted" : "default"} selectable>
       {parts.map((p, i) =>
-        p.code ? (
+        p.href ? (
+          <LinkChip key={i} href={p.href} text={p.text !== p.href ? p.text : undefined} />
+        ) : p.code ? (
           <T
             key={i}
             variant="code"
@@ -80,6 +147,10 @@ function InlineText({ text, muted }: { text: string; muted?: boolean }) {
           </T>
         ) : p.bold ? (
           <T key={i} variant="prose" weight="semibold" selectable>
+            {p.text}
+          </T>
+        ) : p.italic ? (
+          <T key={i} variant="prose" selectable style={{ fontStyle: "italic" }}>
             {p.text}
           </T>
         ) : (
@@ -158,15 +229,30 @@ function splitBlocks(text: string): Block[] {
   return blocks;
 }
 
-function parseInline(text: string): { text: string; bold?: boolean; code?: boolean }[] {
-  const out: { text: string; bold?: boolean; code?: boolean }[] = [];
-  const re = /(`[^`\n]+`|\*\*[^*\n]+\*\*)/g;
+type InlinePart = { text: string; bold?: boolean; italic?: boolean; code?: boolean; href?: string };
+
+// Order matters: code first (a URL inside backticks stays code), then [text](url),
+// then bare URLs, then bold, then italics.
+const INLINE_RE = /(`[^`\n]+`|\[[^\]\n]+\]\(https?:\/\/[^\s)]+\)|https?:\/\/[^\s<>()"']+|\*\*[^*\n]+\*\*|\*[^*\n]+\*|_[^_\n]+_)/g;
+
+function parseInline(text: string): InlinePart[] {
+  const out: InlinePart[] = [];
   let last = 0;
-  for (const m of text.matchAll(re)) {
+  for (const m of text.matchAll(INLINE_RE)) {
     if (m.index! > last) out.push({ text: text.slice(last, m.index) });
     const tok = m[0];
     if (tok.startsWith("`")) out.push({ text: tok.slice(1, -1), code: true });
-    else out.push({ text: tok.slice(2, -2), bold: true });
+    else if (tok.startsWith("[")) {
+      const lm = tok.match(/^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/);
+      if (lm) out.push({ text: lm[1], href: lm[2] });
+      else out.push({ text: tok });
+    } else if (/^https?:\/\//.test(tok)) {
+      // Trailing punctuation belongs to the sentence, not the URL.
+      const trimmed = tok.replace(/[.,;:!?]+$/, "");
+      out.push({ text: trimmed, href: trimmed });
+      if (trimmed.length < tok.length) out.push({ text: tok.slice(trimmed.length) });
+    } else if (tok.startsWith("**")) out.push({ text: tok.slice(2, -2), bold: true });
+    else out.push({ text: tok.slice(1, -1), italic: true });
     last = m.index! + tok.length;
   }
   if (last < text.length) out.push({ text: text.slice(last) });

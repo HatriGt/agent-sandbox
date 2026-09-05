@@ -487,6 +487,9 @@ export const api = {
   /** Merge the PR from inside the sandbox (`gh pr merge --merge`). */
   mergePull: (session: string, repo: string, number: number, opts?: { method?: "merge" | "squash" | "rebase"; auto?: boolean; admin?: boolean }) =>
     post<{ ok: true; auto: boolean; output: string }>("/pr/merge.json", { session, repo, number, ...opts }),
+  /** Approve the PR from inside the sandbox (`gh pr review --approve`). */
+  approvePull: (session: string, repo: string, number: number) =>
+    post<{ ok: true; output: string }>("/pr/approve.json", { session, repo, number }),
   keep: (session: string, keep: boolean) => post<{ ok: true; kept: boolean }>("/keep.json", { session, keep }),
 
   /** Fetch a produced file's text for inline preview. Throws ApiError (404/413/…) on failure. */

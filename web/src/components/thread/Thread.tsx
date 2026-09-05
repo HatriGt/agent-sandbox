@@ -6,7 +6,7 @@ import { api, type BoxView, type ChangedFile, type FleetLifecycle, type WatchSna
 import { AnimatePresence, motion } from "motion/react";
 // The workspace (CodeMirror + merge view) is heavy and optional: loaded the first time it opens.
 const WorkspacePane = React.lazy(() => import("./WorkspacePane").then((m) => ({ default: m.WorkspacePane })));
-import { WakingCard } from "./WakingCard";
+import { SleepingCard, WakingCard } from "./WakingCard";
 import { SessionContext } from "@/lib/session-context";
 import { friendlyName, isSleeping, POLL_MS, threadTitle } from "@/lib/format";
 import { currentDiskTier, currentMemoryTier, deadlineLabel, deadlineOf, displayState, fmtDuration, offerableTiers } from "@/lib/lifecycle";
@@ -232,17 +232,29 @@ export function Thread({
   };
 
   // Sleep on demand: `msb stop`, nothing removed. Marking wokeRef first keeps the "open a sleeping
-  // thread wakes it" effect from bouncing the box straight back up.
+  // thread wakes it" effect from bouncing the box straight back up, and sleptHere makes the thread
+  // show a resting "Asleep · Wake" card instead of the waking pill (which would lie, or re-wake it).
   const [sleepBusy, setSleepBusy] = React.useState(false);
+  const [sleptHere, setSleptHere] = React.useState(false);
+  React.useEffect(() => setSleptHere(false), [box.name]);
   const sleepNow = () => {
     setSleepBusy(true);
     wokeRef.current = box.name;
+    setSleptHere(true);
     api
       .sleep(box.name)
-      .then(() => toast.success(`${friendlyName(box.name)} is asleep`, { description: "The workspace and session are kept. Opening the thread or replying wakes it." }))
-      .catch((e: unknown) => toast.error("Could not put it to sleep", { description: e instanceof Error ? e.message : String(e) }))
+      .then(() => toast.success(`${friendlyName(box.name)} is asleep`, { description: "The workspace and session are kept. Waking is one click away." }))
+      .catch((e: unknown) => {
+        setSleptHere(false);
+        toast.error("Could not put it to sleep", { description: e instanceof Error ? e.message : String(e) });
+      })
       .finally(() => setSleepBusy(false));
   };
+  const wakeNow = React.useCallback(() => {
+    setSleptHere(false);
+    setWake({ startedAt: Date.now(), error: null });
+    api.wake(box.name).catch((e: unknown) => setWake((w) => (w ? { ...w, error: e instanceof Error ? e.message : String(e) } : w)));
+  }, [box.name]);
 
   // Resize memory. Same shape as sleepNow — including marking wokeRef first, since `msb modify
   // --restart` takes the box down and the auto-wake effect must not race the reboot.
@@ -487,7 +499,7 @@ export function Thread({
         deadline={deadline}
         repos={repos}
         attaching={attaching}
-        pull={pulls.length > 0 && !loadingTrace ? pulls[pulls.length - 1] : undefined}
+        pulls={pulls.length > 0 && !loadingTrace ? pulls : undefined}
         activity={activity}
         showWorkspace={showWorkspace}
         removing={removing}
@@ -526,7 +538,15 @@ export function Thread({
 
             {loadingTrace && <ThreadSkeleton withTask={!!box.task} />}
 
-            <AnimatePresence>{(sleeping || wake) && <WakingCard key="waking" awake={!sleeping} startedAt={wake?.startedAt ?? Date.now()} error={wake?.error} />}</AnimatePresence>
+            <AnimatePresence>
+              {sleeping && sleptHere ? (
+                <SleepingCard key="sleeping" onWake={wakeNow} />
+              ) : (
+                (sleeping || wake) && (
+                  <WakingCard key="waking" awake={!sleeping} startedAt={wake?.startedAt ?? Date.now()} error={wake?.error} onRetry={wakeNow} />
+                )
+              )}
+            </AnimatePresence>
 
             {groups.map((g, i) => {
               const isLast = i === groups.length - 1;

@@ -36,7 +36,7 @@ export function ThreadHeader({
   deadline,
   repos,
   attaching,
-  pull,
+  pulls,
   activity,
   showWorkspace,
   removing,
@@ -70,7 +70,7 @@ export function ThreadHeader({
   deadline: Deadline;
   repos: { name: string; branch?: string }[];
   attaching: string | null;
-  pull?: { url: string; repo: string; number: number };
+  pulls?: { url: string; repo: string; number: number }[];
   /** What the agent is doing right now, while running. */
   activity?: string | null;
   showWorkspace: boolean;
@@ -387,10 +387,10 @@ export function ThreadHeader({
           </>
         )}
 
-        {pull && (
+        {!!pulls?.length && (
           <>
             <Dot />
-            <PullRequestFloat key={pull.url} session={box.name} {...pull} />
+            <PullRequestFloat key={pulls[pulls.length - 1].url} session={box.name} pulls={pulls} />
           </>
         )}
 

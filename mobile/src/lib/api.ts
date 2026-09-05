@@ -436,6 +436,8 @@ export const api = {
     number: number,
     opts?: { method?: "merge" | "squash" | "rebase"; auto?: boolean; admin?: boolean },
   ) => post<{ ok: true; auto: boolean; output: string }>("/pr/merge.json", { session, repo, number, ...opts }),
+  approvePull: (session: string, repo: string, number: number) =>
+    post<{ ok: true; output: string }>("/pr/approve.json", { session, repo, number }),
 
   // ---- integrations ----
   accounts: () => get<AccountsResponse>("/accounts.json"),

@@ -1,26 +1,51 @@
 import * as React from "react";
-import { ArrowUpRight, Check, ChevronDown, CircleCheck, CircleDashed, CircleX, FileDiff, GitBranch, GitMerge, GitPullRequest, GitPullRequestClosed, GitPullRequestDraft, Globe, Loader2, ShieldAlert, Sparkles, Users, X } from "lucide-react";
+import { ArrowUpRight, Check, ChevronDown, CircleCheck, CircleDashed, CircleX, FileDiff, GitBranch, GitMerge, GitPullRequest, GitPullRequestClosed, GitPullRequestDraft, Globe, Loader2, ShieldAlert, Sparkles, ThumbsUp, Users, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
 import { api, type PullInfo } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
+export type PullRef = { url: string; repo: string; number: number };
+
 /**
- * The run's pull request as a floating control: a small chip pinned to the top-right of the thread
- * (state icon · #number · state), which opens a card with everything you'd check before merging —
+ * The run's pull request(s) as a floating control: a small chip pinned to the top-right of the
+ * thread (state icon · #number · state, plus a +N badge when the run opened several), which opens
+ * a card with everything you'd check before merging — a PR switcher when there is more than one,
  * a verdict header ("Ready to merge" / "Checks failing" / "Merged" …) with the check count and a
- * Merge action, then Review (decision + reviewers), Committed (files, +/−), Branch, and a link out.
- * Merge runs `gh pr merge` inside the sandbox with the run's own GitHub identity; it asks twice.
+ * Merge action, then Review (decision + reviewers + Approve), Committed (files, +/−), Branch, and
+ * a link out. Merge and Approve run `gh` inside the sandbox with the run's own GitHub identity.
  */
-export function PullRequestFloat({ session, url, repo, number }: { session: string; url: string; repo: string; number: number }) {
-  const [info, setInfo] = React.useState<PullInfo | null>(null);
+export function PullRequestFloat({ session, pulls }: { session: string; pulls: PullRef[] }) {
+  const many = pulls.length > 1;
+  // With several PRs the card opens as a LIST; drilling into a row shows the detail view.
+  const [picked, setPicked] = React.useState<string | null>(null);
+  const active = pulls.find((p) => p.url === picked) ?? pulls[pulls.length - 1];
+  const showList = many && picked === null;
+  const { url, repo, number } = active;
   const [open, setOpen] = React.useState(false);
-  const load = React.useCallback((signal?: AbortSignal) => api.pull(repo, number, signal).then(setInfo).catch(() => {}), [repo, number]);
+  // One PullInfo per PR so the list rows and the detail view never show another PR's state.
+  const [infos, setInfos] = React.useState<Record<string, PullInfo>>({});
+  const info = infos[url] ?? null;
+  const load = React.useCallback(
+    (signal?: AbortSignal) => api.pull(repo, number, signal).then((i) => setInfos((m) => ({ ...m, [url]: i }))).catch(() => {}),
+    [repo, number, url]
+  );
   React.useEffect(() => {
     const ctrl = new AbortController();
     void load(ctrl.signal);
     return () => ctrl.abort();
   }, [load]);
+  // The list needs every PR's title/state, so prefetch the rest once the card opens.
+  React.useEffect(() => {
+    if (!open || !many) return;
+    const ctrl = new AbortController();
+    for (const p of pulls) {
+      if (infos[p.url]) continue;
+      api.pull(p.repo, p.number, ctrl.signal).then((i) => setInfos((m) => ({ ...m, [p.url]: i }))).catch(() => {});
+    }
+    return () => ctrl.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, many, pulls.map((p) => p.url).join(" ")]);
   // Close on Escape / outside click.
   const rootRef = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
@@ -55,8 +80,14 @@ export function PullRequestFloat({ session, url, repo, number }: { session: stri
         <span className={cn("grid size-4 place-items-center rounded-full", v.chip)}>
           <Icon className="size-2.5" aria-hidden />
         </span>
-        <span className="text-foreground tabular-nums">#{number}</span>
-        <span className={cn("hidden sm:inline", v.text)}>{v.short}</span>
+        {many ? (
+          <span className="text-foreground tabular-nums">{pulls.length} PRs</span>
+        ) : (
+          <>
+            <span className="text-foreground tabular-nums">#{number}</span>
+            <span className={cn("hidden sm:inline", v.text)}>{v.short}</span>
+          </>
+        )}
       </button>
 
       <AnimatePresence>
@@ -70,6 +101,20 @@ export function PullRequestFloat({ session, url, repo, number }: { session: stri
             aria-label={`Pull request #${number}`}
             className="bg-card absolute top-full right-0 z-40 mt-2 w-[22rem] rounded-xl border p-1.5 shadow-e4"
           >
+            {showList ? (
+              <PullList pulls={pulls} infos={infos} onPick={(u) => setPicked(u)} />
+            ) : (
+              <>
+            {many && (
+              <button
+                type="button"
+                onClick={() => setPicked(null)}
+                className="text-muted-foreground hover:text-foreground mb-1 flex cursor-pointer items-center gap-1 px-1.5 pt-0.5 text-micro font-medium transition-colors"
+              >
+                <ChevronDown className="size-3 rotate-90" aria-hidden />
+                All {pulls.length} pull requests
+              </button>
+            )}
             <Header info={info} v={v} url={url} session={session} repo={repo} number={number} onMerged={() => void load()} onClose={() => setOpen(false)} />
             <div className="px-2.5 pt-3 pb-2">
               <p className="text-foreground truncate text-meta font-medium" title={info?.title}>
@@ -84,6 +129,7 @@ export function PullRequestFloat({ session, url, repo, number }: { session: stri
               ) : (
                 <Row icon={<Users className="size-3.5" />} label="No reviewers" right={info?.reviewDecision === "approved" ? "Approved" : ""} />
               )}
+              {info && info.state === "open" && info.reviewDecision !== "approved" && <ApproveControl session={session} repo={repo} number={number} onApproved={() => void load()} />}
             </Section>
             <Section label="Committed">
               <Row
@@ -120,9 +166,70 @@ export function PullRequestFloat({ session, url, repo, number }: { session: stri
                 {info.checks.pending > 0 && <Row icon={<CircleDashed className="text-muted-foreground size-3.5 animate-spin [animation-duration:3s]" />} label="Running" right={String(info.checks.pending)} />}
               </Section>
             )}
+              </>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+/**
+ * All the run's PRs as a scannable list — the GitHub "pr list" idiom rather than tabs: a state
+ * icon, #number, the title, and a one-word verdict per row, grouped under their repo when the run
+ * touched more than one. A row drills into the full detail/merge view.
+ */
+function PullList({ pulls, infos, onPick }: { pulls: PullRef[]; infos: Record<string, PullInfo>; onPick: (url: string) => void }) {
+  const repos = [...new Set(pulls.map((p) => p.repo))];
+  return (
+    <div className="flex flex-col pb-1">
+      <p className="text-muted-foreground px-2.5 pt-1.5 pb-1 text-meta">Pull requests from this run</p>
+      {repos.map((r) => (
+        <React.Fragment key={r}>
+          {repos.length > 1 && <p className="text-faint px-2.5 pt-1 pb-0.5 font-mono text-micro">{r}</p>}
+          {pulls
+            .filter((p) => p.repo === r)
+            .map((p) => {
+              const i = infos[p.url];
+              const pv = verdict(i ?? null);
+              const PIcon = pv.icon;
+              return (
+                <button
+                  key={p.url}
+                  type="button"
+                  onClick={() => onPick(p.url)}
+                  className="hover:bg-muted flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors"
+                >
+                  <span className={cn("grid size-5 shrink-0 place-items-center rounded-full", pv.chip)}>
+                    <PIcon className="size-3" aria-hidden />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="text-foreground block truncate text-meta font-medium">
+                      {i?.title ?? <span className="bg-muted inline-block h-3 w-40 animate-pulse rounded align-middle" />}
+                    </span>
+                    <span className="text-muted-foreground block truncate text-micro">
+                      <span className="tabular-nums">#{p.number}</span>
+                      {i ? (
+                        <>
+                          {" · "}
+                          <span className={pv.text}>{pv.short}</span>
+                          {i.author ? ` · ${i.author}` : ""}
+                        </>
+                      ) : null}
+                    </span>
+                  </span>
+                  {i && (
+                    <span className="shrink-0 text-micro tabular-nums">
+                      <span className="text-ok">+{i.additions}</span> <span className="text-destructive">−{i.deletions}</span>
+                    </span>
+                  )}
+                  <ChevronDown className="text-faint size-3.5 shrink-0 -rotate-90" aria-hidden />
+                </button>
+              );
+            })}
+        </React.Fragment>
+      ))}
     </div>
   );
 }
@@ -399,6 +506,51 @@ function MergeControl({ busy, onMerge }: { busy: boolean; onMerge: (method: Merg
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+/**
+ * Approve, right where the review state lives: a quiet text-weight action (approving is additive,
+ * merging is the loud one). Failures — usually GitHub refusing self-approval — stay inline in
+ * gh's own words instead of vanishing in a toast.
+ */
+function ApproveControl({ session, repo, number, onApproved }: { session: string; repo: string; number: number; onApproved: () => void }) {
+  const [busy, setBusy] = React.useState(false);
+  const [done, setDone] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+  const approve = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.approvePull(session, repo, number);
+      setDone(true);
+      toast.success(`Approved #${number}`);
+      onApproved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="pt-1">
+      {done ? (
+        <span className="text-ok flex items-center gap-1.5 text-micro font-medium">
+          <CircleCheck className="size-3.5" aria-hidden /> Approved with your connected account
+        </span>
+      ) : (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void approve()}
+          className="bg-ok/10 text-ok hover:bg-ok/20 flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-micro font-semibold transition-colors disabled:opacity-60"
+        >
+          {busy ? <Loader2 className="size-3 animate-spin" /> : <ThumbsUp className="size-3" aria-hidden />}
+          Approve this PR
+        </button>
+      )}
+      {error && <p className="text-destructive mt-1 text-micro whitespace-pre-wrap">{error}</p>}
     </div>
   );
 }

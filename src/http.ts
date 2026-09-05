@@ -1615,6 +1615,35 @@ app.post("/pr/merge.json", async (req: Request, res: Response) => {
   }
 });
 
+// Approve the run's pull request from inside its sandbox, mirroring /pr/merge.json: `gh pr review
+// --approve` with the owner's token. GitHub refuses self-approval; that message is surfaced as-is.
+app.post("/pr/approve.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const { session, repo, number } = (req.body ?? {}) as { session?: string; repo?: string; number?: number };
+  if (!session || !/^[\w.-]+$/.test(session) || !repo || !/^[\w.-]+\/[\w.-]+$/.test(repo) || !Number.isFinite(Number(number))) {
+    res.status(400).json({ error: "session, repo (owner/name) and number are required" });
+    return;
+  }
+  try {
+    const creds = await withOwner(ownerOf(db, session) ?? null, () => resolveCredsForBox(cfg, session)).catch(() => undefined);
+    if (!creds?.primaryToken) {
+      res.status(422).json({ error: "No GitHub account connected for this machine's owner — connect one in Integrations, then retry." });
+      return;
+    }
+    const r = await execInBox(cfg, session, `gh pr review ${Number(number)} --repo ${shellQuote(repo)} --approve 2>&1`, {
+      env: { GH_TOKEN: creds.primaryToken, GITHUB_TOKEN: creds.primaryToken },
+    });
+    forgetPull(repo, Number(number));
+    res.json({ ok: true, output: redactor.redact((r.stdout ?? "").trim().slice(-600)) });
+  } catch (e) {
+    forgetPull(repo, Number(number));
+    const raw = String((e as Error)?.message ?? e);
+    const afterArgv = raw.split("\n").slice(1).filter((l) => l.trim() && !/^(ssh|Warning: Permanently added|• Backend)/.test(l.trim()));
+    const ghMsg = afterArgv.join("\n").trim();
+    res.status(422).json({ error: ghMsg ? redactor.redact(ghMsg).slice(-600) : clientError(e, 600) });
+  }
+});
+
 app.get("/pr.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   const repo = typeof req.query.repo === "string" ? req.query.repo : "";

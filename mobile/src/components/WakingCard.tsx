@@ -1,202 +1,81 @@
 import React, { useEffect, useRef, useState } from "react";
-import { AccessibilityInfo, Animated, Easing, View } from "react-native";
+import { Animated, Easing, Pressable, View } from "react-native";
 import { useTheme } from "@/theme/ThemeContext";
+import { radius } from "@/theme/tokens";
 import { T } from "./ui/AppText";
-import { Button } from "./ui/Button";
 import { Icon } from "./ui/Icon";
+import { TypingDots } from "./ui/Motion";
 
 // Same staged copy as the web's WakingCard, advanced purely by elapsed time.
 const STAGES = [
-  { at: 0, text: "Starting the microVM" },
-  { at: 4, text: "Restoring the workspace and the agent's session" },
-  { at: 9, text: "Reconnecting the transcript" },
+  { at: 0, text: "starting the microVM" },
+  { at: 4, text: "restoring workspace + session" },
+  { at: 9, text: "reconnecting the transcript" },
 ];
 const STUCK_AT = 45;
 
-const RING = 32;
-
-/**
- * The waking mark, ported from the web's PowerRing: a faint pulsing halo, a track ring, and a
- * comet arc that orbits while booting — all in the product's live blue, never the sleep violet.
- * Done: the ring completes and a check pops in. Stuck: the ring turns the alarm colour.
- * No SVG in this app, so the arc is the border-circle trick: a rotating circle whose border is
- * transparent on three sides reads as a smooth quarter-arc, with a dot riding its leading edge.
- */
-function PowerRing({ state, color, trackColor }: { state: "active" | "done" | "stuck"; color: string; trackColor: string }) {
-  const spin = useRef(new Animated.Value(0)).current;
-  const halo = useRef(new Animated.Value(0)).current;
-  const pop = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    if (state !== "active") return;
-    let loops: Animated.CompositeAnimation[] = [];
-    let cancelled = false;
-    AccessibilityInfo.isReduceMotionEnabled().then((reduced) => {
-      if (cancelled || reduced) return;
-      loops = [
-        Animated.loop(Animated.timing(spin, { toValue: 1, duration: 1300, easing: Easing.linear, useNativeDriver: true })),
-        Animated.loop(
-          Animated.sequence([
-            Animated.timing(halo, { toValue: 1, duration: 1100, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-            Animated.timing(halo, { toValue: 0, duration: 1100, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-          ]),
-        ),
-      ];
-      loops.forEach((l) => l.start());
-    });
-    return () => {
-      cancelled = true;
-      loops.forEach((l) => l.stop());
-    };
-  }, [state, spin, halo]);
-
-  useEffect(() => {
-    if (state !== "done") return;
-    Animated.spring(pop, { toValue: 1, useNativeDriver: true, speed: 14, bounciness: 10 }).start();
-  }, [state, pop]);
-
-  return (
-    <View style={{ width: RING + 8, height: RING + 8, alignItems: "center", justifyContent: "center" }}>
-      {state === "active" && (
-        <Animated.View
-          style={{
-            position: "absolute",
-            width: RING + 8,
-            height: RING + 8,
-            borderRadius: (RING + 8) / 2,
-            backgroundColor: color,
-            opacity: halo.interpolate({ inputRange: [0, 1], outputRange: [0.06, 0.2] }),
-            transform: [{ scale: halo.interpolate({ inputRange: [0, 1], outputRange: [0.95, 1.15] }) }],
-          }}
-        />
-      )}
-      {/* track */}
-      <View
-        style={{
-          position: "absolute",
-          width: RING,
-          height: RING,
-          borderRadius: RING / 2,
-          borderWidth: 2,
-          borderColor: state === "done" ? color : trackColor,
-        }}
-      />
-      {state === "active" && (
-        <Animated.View
-          style={{
-            position: "absolute",
-            width: RING,
-            height: RING,
-            transform: [{ rotate: spin.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] }) }],
-          }}
-        >
-          {/* the comet arc: only the top border is inked, so the circle reads as a quarter-arc */}
-          <View
-            style={{
-              width: RING,
-              height: RING,
-              borderRadius: RING / 2,
-              borderWidth: 2,
-              borderColor: "transparent",
-              borderTopColor: color,
-            }}
-          />
-          {/* the comet head, riding the arc's leading edge */}
-          <View
-            style={{
-              position: "absolute",
-              top: -1.5,
-              left: RING / 2 - 2.5,
-              width: 5,
-              height: 5,
-              borderRadius: 2.5,
-              backgroundColor: color,
-            }}
-          />
-        </Animated.View>
-      )}
-      {state === "done" && (
-        <Animated.View style={{ opacity: pop, transform: [{ scale: pop }] }}>
-          <Icon name="check" size={15} color={color} />
-        </Animated.View>
-      )}
-      {state === "stuck" && <Icon name="power" size={13} color={color} />}
-    </View>
-  );
-}
-
-/** The current stage line, crossfading up when the copy advances — the web's AnimatePresence swap. */
-function StageText({ text, live }: { text: string; live: boolean }) {
+/** The current stage as a quiet mono chip that crossfades up when the copy advances. */
+function StageChip({ text }: { text: string }) {
+  const { palette } = useTheme();
   const anim = useRef(new Animated.Value(1)).current;
   const prev = useRef(text);
   useEffect(() => {
     if (prev.current === text) return;
     prev.current = text;
     anim.setValue(0);
-    Animated.timing(anim, { toValue: 1, duration: 240, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+    Animated.timing(anim, { toValue: 1, duration: 220, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
   }, [text, anim]);
   return (
     <Animated.View
-      style={{ opacity: anim, transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }] }}
+      style={{
+        opacity: anim,
+        transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [6, 0] }) }],
+        backgroundColor: palette.muted,
+        borderRadius: radius.sm,
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        flexShrink: 1,
+        minWidth: 0,
+      }}
     >
-      <T variant="meta" tone="muted" numberOfLines={1}>
+      <T variant="micro" mono tone="muted" numberOfLines={1}>
         {text}
-        {live ? "…" : ""}
       </T>
     </Animated.View>
   );
 }
 
-/** One rail segment; the active one sweeps its fill left-to-right on a loop, like the web's wake-fill. */
-function RailSegment({ state, color, trackColor }: { state: "done" | "active" | "todo"; color: string; trackColor: string }) {
-  const sweep = useRef(new Animated.Value(0)).current;
-  const [w, setW] = useState(0);
-  useEffect(() => {
-    if (state !== "active") return;
-    let loop: Animated.CompositeAnimation | null = null;
-    let cancelled = false;
-    AccessibilityInfo.isReduceMotionEnabled().then((reduced) => {
-      if (cancelled) return;
-      if (reduced) {
-        sweep.setValue(0.6);
-        return;
-      }
-      loop = Animated.loop(
-        Animated.timing(sweep, { toValue: 1, duration: 1200, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-      );
-      loop.start();
-    });
-    return () => {
-      cancelled = true;
-      loop?.stop();
-    };
-  }, [state, sweep]);
-
+/** The pill's shared shell: border, card background, pill radius — the WorkingIndicator silhouette. */
+function Pill({ children }: { children: React.ReactNode }) {
+  const { palette } = useTheme();
   return (
-    <View
-      onLayout={(e) => setW(e.nativeEvent.layout.width)}
-      style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: trackColor, overflow: "hidden" }}
-    >
-      {state === "done" && <View style={{ height: 3, borderRadius: 2, backgroundColor: color }} />}
-      {state === "active" && w > 0 && (
-        <Animated.View
-          style={{
-            height: 3,
-            width: w,
-            borderRadius: 2,
-            backgroundColor: color,
-            transform: [{ translateX: sweep.interpolate({ inputRange: [0, 1], outputRange: [-w, w] }) }],
-          }}
-        />
-      )}
+    <View style={{ flexDirection: "row", marginBottom: 12 }}>
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 10,
+          maxWidth: "100%",
+          borderWidth: 1,
+          borderColor: palette.border,
+          borderRadius: radius.pill,
+          backgroundColor: palette.card,
+          paddingVertical: 8,
+          paddingLeft: 12,
+          paddingRight: 12,
+        }}
+      >
+        {children}
+      </View>
     </View>
   );
 }
 
 /**
- * Waking progress, matching the web's WakingCard: a plain status row (no boxed card), a blue
- * power ring with an orbiting comet, staged copy that crossfades as it advances, and a
- * three-segment boot → restore → reconnect rail. Retry appears once it looks stuck.
+ * Waking progress in the WorkingIndicator's pill silhouette, matching the web: three breathing
+ * dots in the live blue, "Waking the sandbox", the current boot stage as a mono chip that
+ * crossfades as it advances, and the elapsed seconds. Done swaps the dots for a check; stuck
+ * (45s) turns amber and offers a Retry inside the pill.
  */
 export function WakingCard({
   sleeping,
@@ -216,51 +95,83 @@ export function WakingCard({
   const elapsed = Math.max(0, Math.floor((now - startedAt) / 1000));
   const stageIdx = sleeping ? STAGES.reduce((a, s, i) => (elapsed >= s.at ? i : a), 0) : STAGES.length - 1;
   const stuck = sleeping && elapsed >= STUCK_AT;
-  const state: "active" | "done" | "stuck" = !sleeping ? "done" : stuck ? "stuck" : "active";
-  const color = stuck ? palette.attentionText : palette.live;
 
   return (
-    <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 12, paddingVertical: 8, marginBottom: 10 }}>
-      <PowerRing state={state} color={color} trackColor={`${palette.live}33`} />
-      <View style={{ flex: 1, gap: 2, paddingTop: 1 }}>
-        <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
-          <T variant="body" weight="medium" style={{ color: stuck ? palette.attentionText : palette.foreground }}>
-            {!sleeping ? "Awake" : stuck ? "Taking longer than usual" : "Waking the sandbox"}
+    <Pill>
+      {!sleeping ? (
+        <Icon name="check" size={14} color={palette.live} />
+      ) : stuck ? (
+        <Icon name="alert-circle" size={14} color={palette.attentionText} />
+      ) : (
+        <TypingDots color={palette.live} />
+      )}
+      <T variant="meta" weight="medium" style={{ color: stuck ? palette.attentionText : palette.foreground, flexShrink: 0 }}>
+        {!sleeping ? "Awake" : stuck ? "Taking longer than usual" : "Waking the sandbox"}
+      </T>
+      {!stuck && <StageChip text={!sleeping ? "back — the transcript follows" : STAGES[stageIdx].text} />}
+      {sleeping && !stuck && (
+        <T variant="micro" mono tone="faint" style={{ flexShrink: 0 }}>
+          {elapsed}s
+        </T>
+      )}
+      {stuck && onRetry && (
+        <Pressable
+          onPress={onRetry}
+          style={({ pressed }) => ({
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 4,
+            backgroundColor: `${palette.live}1a`,
+            borderRadius: radius.pill,
+            paddingVertical: 4,
+            paddingHorizontal: 10,
+            opacity: pressed ? 0.7 : 1,
+          })}
+        >
+          <Icon name="rotate-cw" size={11} color={palette.live} />
+          <T variant="micro" weight="semibold" tone="live">
+            Retry
           </T>
-          {sleeping && (
-            <T variant="micro" mono tone="faint">
-              {elapsed}s
-            </T>
-          )}
-        </View>
-        <StageText
-          text={
-            !sleeping
-              ? "Back. The transcript follows."
-              : stuck
-                ? "The machine hasn't reported back yet."
-                : STAGES[stageIdx].text
-          }
-          live={sleeping && !stuck}
-        />
-        {!stuck && (
-          <View style={{ flexDirection: "row", gap: 4, width: 160, marginTop: 6 }}>
-            {STAGES.map((_, i) => (
-              <RailSegment
-                key={i}
-                state={!sleeping || i < stageIdx ? "done" : i === stageIdx ? "active" : "todo"}
-                color={color}
-                trackColor={`${palette.live}26`}
-              />
-            ))}
-          </View>
-        )}
-        {stuck && onRetry && (
-          <View style={{ marginTop: 8, alignSelf: "flex-start" }}>
-            <Button title="Try waking again" small variant="secondary" onPress={onRetry} />
-          </View>
-        )}
-      </View>
-    </View>
+        </Pressable>
+      )}
+    </Pill>
+  );
+}
+
+/**
+ * The counterpart for a box the operator put to sleep on purpose: the same pill, resting — a moon,
+ * one line, and a Wake action. Without this, staying on the thread after "Sleep now" showed the
+ * waking pill and the auto-wake immediately bounced the box back up.
+ */
+export function SleepingCard({ onWake }: { onWake: () => void }) {
+  const { palette } = useTheme();
+  return (
+    <Pill>
+      <Icon name="moon" size={14} color={palette.sleep} />
+      <T variant="meta" weight="medium" style={{ flexShrink: 0 }}>
+        Asleep
+      </T>
+      <T variant="micro" tone="muted" numberOfLines={1} style={{ flexShrink: 1 }}>
+        workspace and session kept
+      </T>
+      <Pressable
+        onPress={onWake}
+        style={({ pressed }) => ({
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 4,
+          backgroundColor: `${palette.live}1a`,
+          borderRadius: radius.pill,
+          paddingVertical: 4,
+          paddingHorizontal: 10,
+          opacity: pressed ? 0.7 : 1,
+        })}
+      >
+        <Icon name="sun" size={11} color={palette.live} />
+        <T variant="micro" weight="semibold" tone="live">
+          Wake
+        </T>
+      </Pressable>
+    </Pill>
   );
 }
