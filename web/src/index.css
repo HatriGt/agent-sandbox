@@ -475,10 +475,47 @@
   border-color: color-mix(in oklch, var(--live) 55%, transparent) !important;
   box-shadow: 0 0 0 3px color-mix(in oklch, var(--live) 14%, transparent), 0 0 24px -6px color-mix(in oklch, var(--live) 30%, transparent);
 }
-@media (prefers-reduced-motion: reduce) {
-  .mic-ring {
-    animation: none;
+/* Idle wave in the Listening pill: three bars breathing while no words are in flight. */
+@keyframes mic-idle {
+  0%,
+  100% {
+    height: 4px;
     opacity: 0.5;
+  }
+  50% {
+    height: 11px;
+    opacity: 1;
+  }
+}
+.mic-idle-bar {
+  height: 4px;
+  animation: mic-idle 1.1s ease-in-out infinite;
+}
+/* A slow sheen drifting across the Listening pill. */
+@keyframes mic-sheen {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+.mic-sheen {
+  background: linear-gradient(100deg, transparent 30%, color-mix(in oklch, var(--live) 8%, transparent) 50%, transparent 70%);
+  animation: mic-sheen 2.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mic-ring,
+  .mic-idle-bar,
+  .mic-sheen {
+    animation: none;
+  }
+  .mic-ring {
+    opacity: 0.5;
+  }
+  .mic-idle-bar {
+    height: 8px;
+    opacity: 0.8;
   }
 }
 

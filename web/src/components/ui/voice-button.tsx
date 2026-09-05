@@ -126,44 +126,69 @@ function Equalizer({ level }: { level: number }) {
  */
 export function VoicePill({ state, interim }: { state: VoiceState; interim: string }) {
   const show = state === "listening" || state === "arming";
+  // Words materialize one by one; long phrases keep the newest tail visible.
+  const all = interim ? interim.split(/\s+/) : [];
+  const words = all.slice(-12);
+  const base = all.length - words.length;
   return (
     <AnimatePresence>
       {show && (
         <motion.div
-          initial={{ opacity: 0, y: 6, scale: 0.97 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: 4, scale: 0.98 }}
+          initial={{ opacity: 0, y: 10, scale: 0.95, filter: "blur(4px)" }}
+          animate={{ opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }}
+          exit={{ opacity: 0, y: 6, scale: 0.97, filter: "blur(3px)" }}
           transition={{ type: "spring", stiffness: 420, damping: 30 }}
-          className="pointer-events-none absolute -top-2 left-1/2 z-10 w-max max-w-[min(90%,42rem)] -translate-x-1/2 -translate-y-full"
+          className="pointer-events-none absolute -top-2 left-1/2 z-10 w-max max-w-[min(92%,44rem)] -translate-x-1/2 -translate-y-full"
           role="status"
           aria-live="polite"
         >
-          <div className="bg-card/95 border-live/40 flex items-center gap-2.5 rounded-full border px-3.5 py-1.5 shadow-e2 backdrop-blur">
-            <span className="relative grid size-2 place-items-center" aria-hidden>
-              <span className="bg-live absolute inset-0 rounded-full opacity-40 mcp-ping motion-reduce:hidden" />
-              <span className="bg-live size-1.5 rounded-full" />
-            </span>
+          <div className="bg-card/95 border-live/40 relative flex items-center gap-2.5 overflow-hidden rounded-full border px-3.5 py-1.5 shadow-e2 backdrop-blur">
+            {/* A slow sheen drifting across the pill: alive, not busy. */}
+            <span aria-hidden className="mic-sheen pointer-events-none absolute inset-0 motion-reduce:hidden" />
+            <VoiceGlyph state={state} />
             <span className="text-live text-micro font-medium tracking-wide">
               {state === "arming" ? "Starting…" : "Listening"}
             </span>
-            <AnimatePresence mode="popLayout">
-              {interim && (
-                <motion.span
-                  key={interim}
-                  initial={{ opacity: 0.3 }}
-                  animate={{ opacity: 1 }}
-                  className="text-muted-foreground max-w-[32rem] truncate text-micro italic"
-                >
-                  {interim}
-                </motion.span>
-              )}
-            </AnimatePresence>
-            {!interim && state === "listening" && (
-              <span className="text-faint text-micro">speak — words land in the box</span>
+            {words.length > 0 ? (
+              <span className="text-muted-foreground flex max-w-[32rem] items-baseline gap-x-1 overflow-hidden whitespace-nowrap text-micro italic">
+                {words.map((w, i) => (
+                  <motion.span
+                    // Absolute-index key: existing words keep their node; only new ones animate in.
+                    key={base + i}
+                    initial={{ opacity: 0, y: 4, filter: "blur(3px)" }}
+                    animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+                    transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+                  >
+                    {w}
+                  </motion.span>
+                ))}
+                <span className="bg-live ml-0.5 inline-block h-3 w-[2px] self-center rounded-full opacity-70 motion-reduce:hidden" style={{ animation: "caret 1s steps(1) infinite" }} aria-hidden />
+              </span>
+            ) : (
+              state === "listening" && <span className="text-faint text-micro">speak — words land in the box</span>
             )}
           </div>
         </motion.div>
       )}
     </AnimatePresence>
+  );
+}
+
+/** The pill's leading glyph: three tiny idle-wave bars while listening, a pulse dot while arming. */
+function VoiceGlyph({ state }: { state: VoiceState }) {
+  if (state === "arming") {
+    return (
+      <span className="relative grid size-2 place-items-center" aria-hidden>
+        <span className="bg-live absolute inset-0 rounded-full opacity-40 mcp-ping motion-reduce:hidden" />
+        <span className="bg-live size-1.5 rounded-full" />
+      </span>
+    );
+  }
+  return (
+    <span className="flex h-3 items-center gap-[2px]" aria-hidden>
+      {[0, 1, 2].map((i) => (
+        <span key={i} className="bg-live mic-idle-bar w-[2px] rounded-full" style={{ animationDelay: `${i * 140}ms` }} />
+      ))}
+    </span>
   );
 }

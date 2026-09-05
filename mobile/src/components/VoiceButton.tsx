@@ -94,17 +94,49 @@ export function VoiceButton({
   );
 }
 
-/** Five live bars driven by mic level; each spring-tracks its weighted target so motion feels organic. */
+/**
+ * Five live bars driven by mic level; each spring-tracks its weighted target so motion feels
+ * organic. When the room goes quiet the bars fall back to a gentle staggered idle wave instead of
+ * flatlining — "still listening" must stay visibly alive.
+ */
 function Equalizer({ level, color }: { level: number; color: string }) {
   const weights = [0.45, 0.8, 1, 0.8, 0.45];
-  const bars = useRef(weights.map(() => new Animated.Value(3))).current;
+  const bars = useRef(weights.map(() => new Animated.Value(4))).current;
+  const idle = useRef<Animated.CompositeAnimation | null>(null);
+  const quiet = level < 0.06;
+
   useEffect(() => {
+    if (quiet) {
+      if (!idle.current) {
+        idle.current = Animated.loop(
+          Animated.stagger(
+            120,
+            bars.map((b) =>
+              Animated.sequence([
+                Animated.timing(b, { toValue: 9, duration: 420, easing: Easing.inOut(Easing.ease), useNativeDriver: false }),
+                Animated.timing(b, { toValue: 4, duration: 420, easing: Easing.inOut(Easing.ease), useNativeDriver: false }),
+              ]),
+            ),
+          ),
+        );
+        idle.current.start();
+      }
+      return;
+    }
+    idle.current?.stop();
+    idle.current = null;
     weights.forEach((w, i) => {
       const target = Math.max(3, Math.min(14, 3 + level * 22 * w));
       Animated.spring(bars[i], { toValue: target, useNativeDriver: false, speed: 40, bounciness: 6 }).start();
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [level]);
+  }, [level, quiet]);
+  useEffect(
+    () => () => {
+      idle.current?.stop();
+    },
+    [],
+  );
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 2, height: 16 }}>
       {bars.map((h, i) => (

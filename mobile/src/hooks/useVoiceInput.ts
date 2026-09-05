@@ -19,8 +19,17 @@ export function useVoiceInput({ onFinal }: { onFinal: (text: string) => void }) 
   const [level, setLevel] = useState(0);
   // The engine restarts between utterances on Android; only user intent ends the session.
   const wantListening = useRef(false);
+  // The phrase still in flight — committed by us if the engine never finalizes it (stop/end/error).
+  const pending = useRef("");
   const onFinalRef = useRef(onFinal);
   onFinalRef.current = onFinal;
+
+  const commitPending = () => {
+    const t = pending.current.trim();
+    pending.current = "";
+    setInterim("");
+    if (t) onFinalRef.current(t);
+  };
 
   useEffect(() => {
     ExpoSpeechRecognitionModule.isRecognitionAvailable && setSupported(ExpoSpeechRecognitionModule.isRecognitionAvailable());
@@ -29,11 +38,15 @@ export function useVoiceInput({ onFinal }: { onFinal: (text: string) => void }) 
   useSpeechRecognitionEvent("start", () => setState("listening"));
   useSpeechRecognitionEvent("audiostart", () => setState("listening"));
   useSpeechRecognitionEvent("result", (e) => {
+    // After stop() WE committed the in-flight phrase; a late engine final must not double-insert.
+    if (!wantListening.current) return;
     const t = e.results?.[0]?.transcript ?? "";
     if (e.isFinal) {
+      pending.current = "";
       setInterim("");
       if (t.trim()) onFinalRef.current(t.trim());
     } else {
+      pending.current = t;
       setInterim(t);
     }
   });
@@ -43,7 +56,7 @@ export function useVoiceInput({ onFinal }: { onFinal: (text: string) => void }) 
     setLevel(v);
   });
   useSpeechRecognitionEvent("error", (e) => {
-    setInterim("");
+    commitPending();
     setLevel(0);
     if (e.error === "no-speech" && wantListening.current) {
       // Silence timeout — restart quietly, the user hasn't pressed stop.
@@ -58,7 +71,7 @@ export function useVoiceInput({ onFinal }: { onFinal: (text: string) => void }) 
     setState(e.error === "no-speech" || e.error === "aborted" ? "idle" : "error");
   });
   useSpeechRecognitionEvent("end", () => {
-    setInterim("");
+    commitPending();
     setLevel(0);
     if (wantListening.current) {
       try {
@@ -98,7 +111,7 @@ export function useVoiceInput({ onFinal }: { onFinal: (text: string) => void }) 
 
   const stop = useCallback(() => {
     wantListening.current = false;
-    setInterim("");
+    commitPending();
     setLevel(0);
     setState("idle");
     try {
