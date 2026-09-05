@@ -35,6 +35,7 @@ import { cn } from "@/lib/utils";
 const Sandboxes = React.lazy(() => import("@/components/Sandboxes").then((m) => ({ default: m.Sandboxes })));
 const Integrations = React.lazy(() => import("@/components/Integrations").then((m) => ({ default: m.Integrations })));
 const SkillsPage = React.lazy(() => import("@/components/SkillsPage").then((m) => ({ default: m.SkillsPage })));
+const PullRequestPage = React.lazy(() => import("@/components/pr/PullRequestPage").then((m) => ({ default: m.PullRequestPage })));
 /** Hovering the nav item warms the chunk and both payloads, so the page paints complete on click. */
 function prefetchIntegrations() {
   void import("@/components/Integrations");
@@ -289,7 +290,7 @@ export default function App() {
     // moved, but the fleet snapshot won't list the new box until the next poll. Falling through to
     // "hub" here rendered the composer on top of the box URL for a few seconds (observed live), so
     // hold the box-loading skeleton until the box surfaces (or the cleanup effect routes home).
-    view === "fleet" ? "fleet" : view === "skills" ? "skills" : view === "integrations" ? "integrations" : view === "account" ? "account" : view === "connect" ? "connect" : view === "admin" ? "admin" : booting && !selectedBox ? "booting" : selectedBox ? `box:${selectedBox.name}` : view === "box" ? "box-loading" : "hub";
+    view === "fleet" ? "fleet" : view === "skills" ? "skills" : view === "integrations" ? "integrations" : view === "account" ? "account" : view === "connect" ? "connect" : view === "admin" ? "admin" : route.view === "pr" ? `pr:${route.repo}#${route.number}` : booting && !selectedBox ? "booting" : selectedBox ? `box:${selectedBox.name}` : view === "box" ? "box-loading" : "hub";
 
   return (
     <TooltipProvider delayDuration={400}>
@@ -542,6 +543,10 @@ export default function App() {
                   <PageEnter className="h-full min-h-0">
                     <Connect onDone={showAccount} onBack={showAccount} />
                   </PageEnter>
+                ) : route.view === "pr" ? (
+                  <div className="h-full min-h-0 overflow-y-auto">
+                    <PullRequestPage session={route.name} repo={route.repo} number={route.number} />
+                  </div>
                 ) : booting && !selectedBox ? (
                   <BootingThread task={booting.task} warm={booting.warm} onBack={backToRail} />
                 ) : view === "box" && !selectedBox && !data ? (

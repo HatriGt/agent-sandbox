@@ -1,9 +1,12 @@
 import * as React from "react";
-import { ArrowUpRight, Check, ChevronDown, CircleCheck, CircleDashed, CircleX, FileDiff, GitBranch, GitMerge, GitPullRequest, GitPullRequestClosed, GitPullRequestDraft, Globe, Loader2, ShieldAlert, Sparkles, ThumbsUp, Users, X } from "lucide-react";
+import { ArrowUpRight, Check, ChevronDown, CircleCheck, CircleDashed, CircleX, ExternalLink, FileDiff, GitBranch, GitMerge, Globe, Users, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
 import { api, type PullInfo } from "@/lib/api";
+import { useGo } from "@/lib/route";
 import { cn } from "@/lib/utils";
+import { ApproveControl, MergeControl, PolicyRescue } from "@/components/pr/PullActions";
+import { reviewLabel, verdict, type MergeMethod, type Verdict } from "@/components/pr/verdict";
 
 export type PullRef = { url: string; repo: string; number: number };
 
@@ -23,6 +26,7 @@ export function PullRequestFloat({ session, pulls }: { session: string; pulls: P
   const showList = many && picked === null;
   const { url, repo, number } = active;
   const [open, setOpen] = React.useState(false);
+  const go = useGo();
   // One PullInfo per PR so the list rows and the detail view never show another PR's state.
   const [infos, setInfos] = React.useState<Record<string, PullInfo>>({});
   const info = infos[url] ?? null;
@@ -166,6 +170,19 @@ export function PullRequestFloat({ session, pulls }: { session: string; pulls: P
                 {info.checks.pending > 0 && <Row icon={<CircleDashed className="text-muted-foreground size-3.5 animate-spin [animation-duration:3s]" />} label="Running" right={String(info.checks.pending)} />}
               </Section>
             )}
+            {/* The card is the glance; everything else — body, commits, diffs, conversation — is a page. */}
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                go({ view: "pr", name: session, repo, number });
+              }}
+              className="hover:bg-muted text-foreground mt-0.5 flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-left text-meta font-medium transition-colors"
+            >
+              <ExternalLink className="text-muted-foreground size-3.5 shrink-0" aria-hidden />
+              <span className="flex-1">View full details</span>
+              <ChevronDown className="text-faint size-3.5 -rotate-90" aria-hidden />
+            </button>
               </>
             )}
           </motion.div>
@@ -234,40 +251,8 @@ function PullList({ pulls, infos, onPick }: { pulls: PullRef[]; infos: Record<st
   );
 }
 
-function verdict(info: PullInfo | null): {
-  title: string;
-  short: string;
-  icon: React.ComponentType<{ className?: string; "aria-hidden"?: boolean }>;
-  header: string;
-  chip: string;
-  text: string;
-  canMerge: boolean;
-  /** One sentence explaining WHY merge is unavailable, shown under the header for open PRs. */
-  blocked?: string;
-} {
-  if (!info) return { title: "Pull request", short: "PR", icon: GitPullRequest, header: "bg-muted text-foreground", chip: "bg-muted text-muted-foreground", text: "text-muted-foreground", canMerge: false };
-  if (info.state === "merged") return { title: "Merged", short: "merged", icon: GitMerge, header: "bg-sleep/10 text-sleep", chip: "bg-sleep/20 text-sleep", text: "text-sleep", canMerge: false };
-  if (info.state === "closed") return { title: "Closed", short: "closed", icon: GitPullRequestClosed, header: "bg-destructive/8 text-destructive", chip: "bg-destructive/10 text-destructive", text: "text-destructive", canMerge: false };
-  if (info.state === "draft") return { title: "Draft", short: "draft", icon: GitPullRequestDraft, header: "bg-muted text-foreground", chip: "bg-muted text-muted-foreground", text: "text-muted-foreground", canMerge: false, blocked: "Drafts can't merge — mark it ready for review on GitHub first." };
-  if (info.checks && info.checks.failure > 0) return { title: "Checks failing", short: "checks failing", icon: CircleX, header: "bg-destructive/8 text-destructive", chip: "bg-destructive/10 text-destructive", text: "text-destructive", canMerge: false, blocked: `${info.checks.failure} ${info.checks.failure === 1 ? "check is" : "checks are"} failing — fix or re-run them, then merge here.` };
-  if (info.reviewDecision === "changes_requested") return { title: "Changes requested", short: "changes requested", icon: GitPullRequest, header: "bg-attention/20 text-attention-text", chip: "bg-attention/20 text-attention-text", text: "text-attention-text", canMerge: false, blocked: "A reviewer requested changes — push an update or get a re-approval." };
-  if (info.checks && info.checks.pending > 0) return { title: "Checks running", short: "checks running", icon: CircleDashed, header: "bg-live/10 text-live", chip: "bg-live/10 text-live", text: "text-live", canMerge: false, blocked: `${info.checks.pending} ${info.checks.pending === 1 ? "check is" : "checks are"} still running — the Merge button appears when they pass.` };
-  if (info.mergeable === false) return { title: "Merge conflicts", short: "conflicts", icon: GitPullRequest, header: "bg-attention/20 text-attention-text", chip: "bg-attention/20 text-attention-text", text: "text-attention-text", canMerge: false, blocked: "The branch conflicts with its base — ask the agent to rebase and resolve, then merge." };
-  return { title: "Ready to merge", short: "ready to merge", icon: GitPullRequest, header: "bg-ok/10 text-ok", chip: "bg-ok/20 text-ok", text: "text-ok", canMerge: true };
-}
 
-function reviewLabel(s: string) {
-  return s === "approved" ? "Approved" : s === "changes_requested" ? "Changes requested" : s === "commented" ? "Commented" : "Review asked";
-}
-
-type MergeMethod = "merge" | "squash" | "rebase";
-const METHOD_LABEL: Record<MergeMethod, { label: string; hint: string }> = {
-  merge: { label: "Merge commit", hint: "keep every commit, add a merge commit" },
-  squash: { label: "Squash & merge", hint: "one clean commit on the base branch" },
-  rebase: { label: "Rebase & merge", hint: "replay the commits, no merge commit" },
-};
-
-function Header({ info, v, url, session, repo, number, onMerged, onClose }: { info: PullInfo | null; v: ReturnType<typeof verdict>; url: string; session: string; repo: string; number: number; onMerged: () => void; onClose: () => void }) {
+function Header({ info, v, url, session, repo, number, onMerged, onClose }: { info: PullInfo | null; v: Verdict; url: string; session: string; repo: string; number: number; onMerged: () => void; onClose: () => void }) {
   const [busy, setBusy] = React.useState(false);
   // A failed merge's reason STAYS in the card (gh's own message, e.g. "not mergeable: the base
   // branch policy prohibits the merge") — a vanishing toast made the button look simply broken.
@@ -330,228 +315,6 @@ function Header({ info, v, url, session, repo, number, onMerged, onClose }: { in
         </div>
       )}
     </>
-  );
-}
-
-/**
- * The two ways past a branch-policy refusal, as ONE quiet decision row — not a stack of shouting
- * buttons. "Auto-merge" is the primary (the patient, policy-respecting path); "admin override" is
- * a text-weight action that swaps in place into an explicit amber confirm (transitions.dev
- * text-states-swap), so the bypass exists without being dressed as a peer of the safe choice.
- */
-function PolicyRescue({ busy, onAuto, onAdmin }: { busy: boolean; onAuto: () => void; onAdmin: () => void }) {
-  const [armed, setArmed] = React.useState(false);
-  React.useEffect(() => {
-    if (!armed) return;
-    const t = window.setTimeout(() => setArmed(false), 5000);
-    return () => window.clearTimeout(t);
-  }, [armed]);
-  return (
-    <div className="mt-2.5 flex min-h-7 items-center gap-2">
-      <AnimatePresence mode="wait" initial={false}>
-        {armed ? (
-          <motion.div
-            key="confirm"
-            initial={{ opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4 }}
-            transition={{ duration: 0.15, ease: [0.22, 1, 0.36, 1] }}
-            className="flex w-full items-center gap-2"
-          >
-            <span className="text-attention-text flex min-w-0 items-center gap-1.5 text-micro">
-              <ShieldAlert className="size-3.5 shrink-0" aria-hidden />
-              <span className="truncate">Skips the policy's requirements.</span>
-            </span>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={onAdmin}
-              className="bg-attention text-attention-ink hover:bg-attention/85 ml-auto flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-micro font-semibold transition-colors disabled:opacity-60"
-            >
-              {busy ? <Loader2 className="size-3 animate-spin" /> : <GitMerge className="size-3" aria-hidden />}
-              Merge anyway
-            </button>
-            <button type="button" onClick={() => setArmed(false)} className="text-muted-foreground hover:text-foreground shrink-0 cursor-pointer text-micro underline-offset-2 hover:underline">
-              cancel
-            </button>
-          </motion.div>
-        ) : (
-          <motion.div
-            key="choices"
-            initial={{ opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -4 }}
-            transition={{ duration: 0.15, ease: [0.22, 1, 0.36, 1] }}
-            className="flex w-full items-center gap-2"
-          >
-            <button
-              type="button"
-              disabled={busy}
-              onClick={onAuto}
-              title="GitHub merges the moment approvals and checks are satisfied"
-              className="bg-sleep/15 text-sleep hover:bg-sleep/25 flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-micro font-semibold transition-colors disabled:opacity-60"
-            >
-              {busy ? <Loader2 className="size-3 animate-spin" /> : <Sparkles className="size-3" aria-hidden />}
-              Auto-merge when ready
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => setArmed(true)}
-              className="text-muted-foreground hover:text-attention-text ml-auto shrink-0 cursor-pointer text-micro font-medium underline-offset-2 hover:underline"
-            >
-              use admin override…
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
-
-/**
- * The merge decision as one control: a two-stage primary action (Merge → Confirm, disarming after
- * 5s) beside a chevron that morphs open a method menu — merge commit / squash / rebase, plus
- * auto-merge — so the choice GitHub gives you exists here too instead of hiding behind a default.
- */
-function MergeControl({ busy, onMerge }: { busy: boolean; onMerge: (method: MergeMethod, auto: boolean) => void }) {
-  const [method, setMethod] = React.useState<MergeMethod>("merge");
-  const [menu, setMenu] = React.useState(false);
-  const [armed, setArmed] = React.useState(false);
-  React.useEffect(() => {
-    if (!armed) return;
-    const t = window.setTimeout(() => setArmed(false), 5000);
-    return () => window.clearTimeout(t);
-  }, [armed]);
-  return (
-    <div className="px-1.5 pt-1.5">
-      <div className="flex items-stretch gap-px overflow-hidden rounded-lg">
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => (armed ? onMerge(method, false) : setArmed(true))}
-          className={cn(
-            "bg-ok hover:bg-ok/85 flex h-9 flex-1 cursor-pointer items-center justify-center gap-2 text-meta font-semibold text-white transition-colors disabled:opacity-60",
-            armed && "bg-ok/90 ring-ok/40 ring-2 ring-inset"
-          )}
-        >
-          {busy ? <Loader2 className="size-4 animate-spin" /> : <GitMerge className="size-4" aria-hidden />}
-          {busy ? "Merging…" : armed ? "Confirm merge" : METHOD_LABEL[method].label}
-        </button>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => setMenu((m) => !m)}
-          aria-expanded={menu}
-          aria-label="Merge options"
-          className="bg-ok hover:bg-ok/85 grid w-9 cursor-pointer place-items-center text-white transition-colors disabled:opacity-60"
-        >
-          <ChevronDown className={cn("size-4 transition-transform duration-200", menu && "rotate-180")} aria-hidden />
-        </button>
-      </div>
-      <AnimatePresence initial={false}>
-        {menu && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-            className="overflow-hidden"
-          >
-            <div role="radiogroup" aria-label="Merge method" className="mt-1.5 flex flex-col gap-0.5 rounded-lg border p-1">
-              {(Object.keys(METHOD_LABEL) as MergeMethod[]).map((m) => {
-                const on = m === method;
-                return (
-                  <button
-                    key={m}
-                    type="button"
-                    role="radio"
-                    aria-checked={on}
-                    onClick={() => {
-                      setMethod(m);
-                      setMenu(false);
-                      setArmed(false);
-                    }}
-                    className={cn(
-                      "flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-meta transition-colors",
-                      on ? "bg-ok/10 text-foreground" : "hover:bg-muted text-foreground"
-                    )}
-                  >
-                    <span className={cn("grid size-4 shrink-0 place-items-center rounded-full border", on ? "border-ok bg-ok text-white" : "border-line-strong")} aria-hidden>
-                      {on && <Check className="size-2.5" strokeWidth={3} />}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block font-medium">{METHOD_LABEL[m].label}</span>
-                      <span className="text-muted-foreground block text-micro">{METHOD_LABEL[m].hint}</span>
-                    </span>
-                  </button>
-                );
-              })}
-              <div className="mx-1 my-0.5 h-px bg-border" aria-hidden />
-              <button
-                type="button"
-                onClick={() => {
-                  setMenu(false);
-                  onMerge(method, true);
-                }}
-                className="hover:bg-sleep/10 text-foreground flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-meta transition-colors"
-              >
-                <Sparkles className="text-sleep size-4 shrink-0" aria-hidden />
-                <span className="min-w-0 flex-1">
-                  <span className="block font-medium">Auto-merge when ready</span>
-                  <span className="text-muted-foreground block text-micro">GitHub merges the moment approvals and checks are satisfied</span>
-                </span>
-              </button>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
-
-/**
- * Approve, right where the review state lives: a quiet text-weight action (approving is additive,
- * merging is the loud one). Failures — usually GitHub refusing self-approval — stay inline in
- * gh's own words instead of vanishing in a toast.
- */
-function ApproveControl({ session, repo, number, onApproved }: { session: string; repo: string; number: number; onApproved: () => void }) {
-  const [busy, setBusy] = React.useState(false);
-  const [done, setDone] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
-  const approve = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await api.approvePull(session, repo, number);
-      setDone(true);
-      toast.success(`Approved #${number}`);
-      onApproved();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <div className="pt-1">
-      {done ? (
-        <span className="text-ok flex items-center gap-1.5 text-micro font-medium">
-          <CircleCheck className="size-3.5" aria-hidden /> Approved with your connected account
-        </span>
-      ) : (
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => void approve()}
-          className="bg-ok/10 text-ok hover:bg-ok/20 flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-micro font-semibold transition-colors disabled:opacity-60"
-        >
-          {busy ? <Loader2 className="size-3 animate-spin" /> : <ThumbsUp className="size-3" aria-hidden />}
-          Approve this PR
-        </button>
-      )}
-      {error && <p className="text-destructive mt-1 text-micro whitespace-pre-wrap">{error}</p>}
-    </div>
   );
 }
 

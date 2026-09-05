@@ -179,15 +179,23 @@ interface GhPull {
   html_url?: string;
   mergeable?: boolean | null;
   requested_reviewers?: { login?: string }[];
+  body?: string | null;
+  labels?: { name?: string; color?: string }[];
+  assignees?: { login?: string }[];
+  milestone?: { title?: string } | null;
+  created_at?: string;
+  updated_at?: string;
 }
 interface GhReview {
+  id?: number;
   user?: { login?: string };
   state?: string;
   submitted_at?: string;
+  body?: string | null;
 }
 interface GhCheckRuns {
   total_count?: number;
-  check_runs?: { status?: string; conclusion?: string | null }[];
+  check_runs?: { name?: string; status?: string; conclusion?: string | null; html_url?: string }[];
 }
 
 /** Fold reviews (latest per user) + outstanding requests into the reviewer list, and derive a decision. */
@@ -236,9 +244,57 @@ export function shapePull(repo: string, number: number, p: GhPull): PullInfo {
   };
 }
 
+/**
+ * Everything the dedicated PR page shows on top of the chip's `PullInfo`: the description body,
+ * the commits, the files WITH their patches, the conversation, and the individual check runs.
+ * One aggregate so the page is a single request instead of six.
+ */
+export interface PullDetail extends PullInfo {
+  body?: string;
+  labels?: { name: string; color?: string }[];
+  assignees?: string[];
+  milestone?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  commits?: { sha: string; message: string; author?: string; date?: string }[];
+  files?: { path: string; status: string; additions: number; deletions: number; patch?: string }[];
+  /** Issue comments and review bodies, merged and sorted oldest-first — the timeline. */
+  comments?: { id: string; author?: string; body: string; at?: string; kind: "comment" | "review"; state?: string }[];
+  checkRuns?: { name: string; status: string; conclusion?: string | null; url?: string }[];
+  /** The file list hit `FILE_CAP`, or some patch was cut — the page says so rather than lying. */
+  truncated?: boolean;
+}
+
+interface GhCommit {
+  sha?: string;
+  commit?: { message?: string; author?: { name?: string; date?: string } };
+  author?: { login?: string };
+}
+interface GhFile {
+  filename?: string;
+  status?: string;
+  additions?: number;
+  deletions?: number;
+  patch?: string;
+}
+interface GhComment {
+  id?: number;
+  user?: { login?: string };
+  body?: string;
+  created_at?: string;
+}
+
+// A PR with thousands of files must not become a thousand-megabyte response.
+const FILE_CAP = 300;
+const PATCH_CAP = 40_000;
+
 const pullCache = new Map<string, { at: number; info: PullInfo }>();
+const pullDetailCache = new Map<string, { at: number; detail: PullDetail }>();
 export function forgetPull(repo: string, number: number) {
-  for (const k of [...pullCache.keys()]) if (k.endsWith(`|${repo}#${number}`)) pullCache.delete(k);
+  const suffix = `|${repo}#${number}`;
+  for (const k of [...pullCache.keys()]) if (k.endsWith(suffix)) pullCache.delete(k);
+  // Both caches, or merging from the page would leave the page itself showing the stale state.
+  for (const k of [...pullDetailCache.keys()]) if (k.endsWith(suffix)) pullDetailCache.delete(k);
 }
 
 export async function fetchPull(cfg: Config, repo: string, number: number): Promise<PullInfo | undefined> {
@@ -260,6 +316,87 @@ export async function fetchPull(cfg: Config, repo: string, number: number): Prom
       pullCache.set(key, { at: Date.now(), info });
       return info;
     }
+  }
+  return undefined;
+}
+
+/**
+ * The PR page's payload: `fetchPull`'s summary plus body, commits, files+patches, the comment
+ * timeline and the individual check runs. Every extra call is independently catchable — one 404
+ * (say, a repo with checks disabled) costs that section, not the page.
+ */
+export async function fetchPullDetail(cfg: Config, repo: string, number: number): Promise<PullDetail | undefined> {
+  const key = `${ownerKey()}|${repo}#${number}`;
+  const c = pullDetailCache.get(key);
+  if (c && Date.now() - c.at < 60_000) return c.detail;
+  const store = await loadStore(cfg);
+  const accounts = [...candidateAccounts(store, repo), ...(pickDefaultAccount(store) ? [pickDefaultAccount(store)!] : []), ...Object.values(store.accounts)];
+  for (const acc of accounts) {
+    const p = await ghGetJson<GhPull>(cfg, acc.token, `/repos/${repo}/pulls/${number}`);
+    if (!p?.title) continue;
+    const [reviews, checks, commits, files, comments] = await Promise.all([
+      ghGetJson<GhReview[]>(cfg, acc.token, `/repos/${repo}/pulls/${number}/reviews?per_page=100`).catch(() => undefined),
+      p.head?.sha ? ghGetJson<GhCheckRuns>(cfg, acc.token, `/repos/${repo}/commits/${p.head.sha}/check-runs?per_page=100`).catch(() => undefined) : Promise.resolve(undefined),
+      ghGetJson<GhCommit[]>(cfg, acc.token, `/repos/${repo}/pulls/${number}/commits?per_page=100`).catch(() => undefined),
+      ghGetJson<GhFile[]>(cfg, acc.token, `/repos/${repo}/pulls/${number}/files?per_page=100`).catch(() => undefined),
+      ghGetJson<GhComment[]>(cfg, acc.token, `/repos/${repo}/issues/${number}/comments?per_page=100`).catch(() => undefined),
+    ]);
+    const reviewList = Array.isArray(reviews) ? reviews : [];
+    const fileList = Array.isArray(files) ? files : [];
+    let truncated = fileList.length > FILE_CAP;
+    const detail: PullDetail = {
+      ...shapePull(repo, number, p),
+      ...shapeReviews(p, reviewList),
+      checks: shapeChecks(checks ?? undefined),
+      body: p.body ?? undefined,
+      labels: (p.labels ?? []).flatMap((l) => (l.name ? [{ name: l.name, color: l.color }] : [])),
+      assignees: (p.assignees ?? []).flatMap((a) => (a.login ? [a.login] : [])),
+      milestone: p.milestone?.title,
+      createdAt: p.created_at,
+      updatedAt: p.updated_at,
+      commits: (Array.isArray(commits) ? commits : []).map((k) => ({
+        sha: k.sha ?? "",
+        message: k.commit?.message ?? "",
+        author: k.author?.login ?? k.commit?.author?.name,
+        date: k.commit?.author?.date,
+      })),
+      files: fileList.slice(0, FILE_CAP).map((f) => {
+        const patch = f.patch ?? "";
+        if (patch.length > PATCH_CAP) truncated = true;
+        return {
+          path: f.filename ?? "",
+          status: f.status ?? "modified",
+          additions: f.additions ?? 0,
+          deletions: f.deletions ?? 0,
+          ...(patch ? { patch: patch.slice(0, PATCH_CAP) } : {}),
+        };
+      }),
+      // Issue comments and review bodies are one conversation on GitHub; they are two endpoints
+      // here, so merge them and sort by time rather than showing two disjoint lists.
+      comments: [
+        ...(Array.isArray(comments) ? comments : []).map((m) => ({
+          id: `c${m.id ?? 0}`,
+          author: m.user?.login,
+          body: m.body ?? "",
+          at: m.created_at,
+          kind: "comment" as const,
+        })),
+        ...reviewList.flatMap((r) =>
+          r.body?.trim()
+            ? [{ id: `r${r.id ?? 0}`, author: r.user?.login, body: r.body, at: r.submitted_at, kind: "review" as const, state: (r.state ?? "").toLowerCase() }]
+            : []
+        ),
+      ].sort((a, b) => (a.at ?? "").localeCompare(b.at ?? "")),
+      checkRuns: (checks?.check_runs ?? []).map((r) => ({
+        name: r.name ?? "check",
+        status: r.status ?? "completed",
+        conclusion: r.conclusion ?? null,
+        url: r.html_url,
+      })),
+      ...(truncated ? { truncated: true } : {}),
+    };
+    pullDetailCache.set(key, { at: Date.now(), detail });
+    return detail;
   }
   return undefined;
 }

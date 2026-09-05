@@ -109,6 +109,21 @@ export interface PullInfo {
   checks?: { total: number; success: number; failure: number; pending: number };
 }
 
+/** Mirrors `PullDetail` in src/changes.ts and web/src/lib/api.ts — the PR screen's payload. */
+export interface PullDetail extends PullInfo {
+  body?: string;
+  labels?: { name: string; color?: string }[];
+  assignees?: string[];
+  milestone?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  commits?: { sha: string; message: string; author?: string; date?: string }[];
+  files?: { path: string; status: string; additions: number; deletions: number; patch?: string }[];
+  comments?: { id: string; author?: string; body: string; at?: string; kind: "comment" | "review"; state?: string }[];
+  checkRuns?: { name: string; status: string; conclusion?: string | null; url?: string }[];
+  truncated?: boolean;
+}
+
 export type McpTransport = "stdio" | "http" | "sse";
 export interface McpServerView {
   name: string;
@@ -438,6 +453,14 @@ export const api = {
   ) => post<{ ok: true; auto: boolean; output: string }>("/pr/merge.json", { session, repo, number, ...opts }),
   approvePull: (session: string, repo: string, number: number) =>
     post<{ ok: true; output: string }>("/pr/approve.json", { session, repo, number }),
+  /** Everything the dedicated PR screen shows, in one request. */
+  pullDetail: (repo: string, number: number) => get<PullDetail>("/pr/detail.json", { repo, number: String(number) }),
+  commentPull: (session: string, repo: string, number: number, body: string) =>
+    post<{ ok: true; output: string }>("/pr/comment.json", { session, repo, number, body }),
+  reviewPull: (session: string, repo: string, number: number, event: "approve" | "request-changes" | "comment", body?: string) =>
+    post<{ ok: true; output: string }>("/pr/review.json", { session, repo, number, event, body }),
+  setPullState: (session: string, repo: string, number: number, action: "close" | "reopen" | "ready") =>
+    post<{ ok: true; output: string }>("/pr/state.json", { session, repo, number, action }),
 
   // ---- integrations ----
   accounts: () => get<AccountsResponse>("/accounts.json"),

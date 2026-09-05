@@ -91,6 +91,21 @@ export interface PullInfo {
   checks?: { total: number; success: number; failure: number; pending: number };
 }
 
+/** Mirrors `PullDetail` in src/changes.ts — the dedicated PR page's payload. */
+export interface PullDetail extends PullInfo {
+  body?: string;
+  labels?: { name: string; color?: string }[];
+  assignees?: string[];
+  milestone?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  commits?: { sha: string; message: string; author?: string; date?: string }[];
+  files?: { path: string; status: string; additions: number; deletions: number; patch?: string }[];
+  comments?: { id: string; author?: string; body: string; at?: string; kind: "comment" | "review"; state?: string }[];
+  checkRuns?: { name: string; status: string; conclusion?: string | null; url?: string }[];
+  truncated?: boolean;
+}
+
 export type McpTransport = "stdio" | "http" | "sse";
 /** Servers for the list, plus the same data as the editable `{"mcpServers": …}` JSON (secrets masked). */
 export interface McpServersResponse {
@@ -490,6 +505,15 @@ export const api = {
   /** Approve the PR from inside the sandbox (`gh pr review --approve`). */
   approvePull: (session: string, repo: string, number: number) =>
     post<{ ok: true; output: string }>("/pr/approve.json", { session, repo, number }),
+  /** Everything the dedicated PR page shows, in one request. */
+  pullDetail: (repo: string, number: number, signal?: AbortSignal) =>
+    fetch(url("/pr/detail.json", { repo, number: String(number) }), { headers: authHeaders, signal }).then(parse<PullDetail>),
+  commentPull: (session: string, repo: string, number: number, body: string) =>
+    post<{ ok: true; output: string }>("/pr/comment.json", { session, repo, number, body }),
+  reviewPull: (session: string, repo: string, number: number, event: "approve" | "request-changes" | "comment", body?: string) =>
+    post<{ ok: true; output: string }>("/pr/review.json", { session, repo, number, event, body }),
+  setPullState: (session: string, repo: string, number: number, action: "close" | "reopen" | "ready") =>
+    post<{ ok: true; output: string }>("/pr/state.json", { session, repo, number, action }),
   keep: (session: string, keep: boolean) => post<{ ok: true; kept: boolean }>("/keep.json", { session, keep }),
 
   /** Fetch a produced file's text for inline preview. Throws ApiError (404/413/…) on failure. */

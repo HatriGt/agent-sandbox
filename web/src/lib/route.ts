@@ -19,6 +19,7 @@ export const BASE = "/dashboard";
 export type ConsoleRoute =
   | { view: "hub" }
   | { view: "box"; name: string }
+  | { view: "pr"; name: string; repo: string; number: number }
   | { view: "fleet" }
   | { view: "skills" }
   | { view: "integrations" }
@@ -28,6 +29,10 @@ export type ConsoleRoute =
 
 export function parseConsolePath(pathname: string): ConsoleRoute {
   const rest = pathname.startsWith(BASE) ? pathname.slice(BASE.length) : pathname;
+  // The PR page is nested under its box, so it MUST be matched before the /box/:name rule below —
+  // that one is a prefix match and would otherwise swallow the whole path.
+  const pr = rest.match(/^\/box\/([^/]+)\/pr\/([^/]+)\/([^/]+)\/(\d+)/);
+  if (pr) return { view: "pr", name: decodeURIComponent(pr[1]), repo: `${decodeURIComponent(pr[2])}/${decodeURIComponent(pr[3])}`, number: Number(pr[4]) };
   const box = rest.match(/^\/box\/([^/]+)/);
   if (box) return { view: "box", name: decodeURIComponent(box[1]) };
   if (/^\/fleet\/?$/.test(rest)) return { view: "fleet" };
@@ -43,6 +48,10 @@ export function consolePath(r: ConsoleRoute): string {
   switch (r.view) {
     case "box":
       return `${BASE}/box/${encodeURIComponent(r.name)}`;
+    case "pr": {
+      const [owner, name] = r.repo.split("/");
+      return `${BASE}/box/${encodeURIComponent(r.name)}/pr/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/${r.number}`;
+    }
     case "fleet":
       return `${BASE}/fleet`;
     case "skills":

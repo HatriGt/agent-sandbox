@@ -1,70 +1,18 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Pressable, View } from "react-native";
 import * as WebBrowser from "expo-web-browser";
+import { useRouter } from "expo-router";
 import { api, type PullInfo } from "@/lib/api";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { T } from "../ui/AppText";
 import { ArmButton } from "../ui/ArmButton";
 import { Button } from "../ui/Button";
-import { Icon, type IconName } from "../ui/Icon";
+import { Icon } from "../ui/Icon";
 import { Sheet } from "../ui/Sheet";
+import { METHOD_HINT, toneColor, verdict } from "@/lib/prVerdict";
 
 export type PullRef = { repo: string; number: number };
-
-/**
- * The web PullRequestFloat's verdict machine, shared shape: one look at PullInfo decides the
- * headline, its tone, and whether Merge is available — plus the sentence explaining why not.
- */
-function verdict(info: PullInfo | null): {
-  title: string;
-  icon: IconName;
-  tone: "ok" | "destructive" | "attention" | "sleep" | "muted" | "live";
-  canMerge: boolean;
-  blocked?: string;
-} {
-  if (!info) return { title: "Pull request", icon: "git-pull-request", tone: "muted", canMerge: false };
-  if (info.state === "merged") return { title: "Merged", icon: "git-merge", tone: "sleep", canMerge: false };
-  if (info.state === "closed") return { title: "Closed", icon: "x-circle", tone: "destructive", canMerge: false };
-  if (info.state === "draft")
-    return { title: "Draft", icon: "edit-3", tone: "muted", canMerge: false, blocked: "Drafts can't merge — mark it ready for review on GitHub first." };
-  if (info.checks && info.checks.failure > 0)
-    return {
-      title: "Checks failing",
-      icon: "x-circle",
-      tone: "destructive",
-      canMerge: false,
-      blocked: `${info.checks.failure} ${info.checks.failure === 1 ? "check is" : "checks are"} failing — fix or re-run them, then merge here.`,
-    };
-  if (info.reviewDecision === "changes_requested")
-    return { title: "Changes requested", icon: "alert-circle", tone: "attention", canMerge: false, blocked: "A reviewer requested changes — push an update or get a re-approval." };
-  if (info.checks && info.checks.pending > 0)
-    return {
-      title: "Checks running",
-      icon: "loader",
-      tone: "live",
-      canMerge: false,
-      blocked: `${info.checks.pending} ${info.checks.pending === 1 ? "check is" : "checks are"} still running — Merge appears when they pass.`,
-    };
-  if (info.mergeable === false)
-    return { title: "Merge conflicts", icon: "git-pull-request", tone: "attention", canMerge: false, blocked: "The branch conflicts with its base — ask the agent to rebase and resolve, then merge." };
-  return { title: "Ready to merge", icon: "git-pull-request", tone: "ok", canMerge: true };
-}
-
-function toneColor(palette: Record<string, string>, tone: string): string {
-  return tone === "ok" ? palette.ok
-    : tone === "destructive" ? palette.destructive
-    : tone === "attention" ? palette.attentionText
-    : tone === "sleep" ? palette.sleep
-    : tone === "live" ? palette.live
-    : palette.mutedForeground;
-}
-
-const METHOD_HINT: Record<"merge" | "squash" | "rebase", string> = {
-  merge: "keep every commit",
-  squash: "one clean commit",
-  rebase: "replay, no merge commit",
-};
 
 /**
  * PR status + actions, at parity with the web card: a PR switcher when the run opened several,
@@ -83,6 +31,7 @@ export function PrSheet({
   onClose: () => void;
 }) {
   const { palette } = useTheme();
+  const router = useRouter();
   const many = pulls.length > 1;
   // With several PRs the sheet opens as a LIST; tapping a row drills into the detail view.
   const [picked, setPicked] = useState<string | null>(null);
@@ -296,6 +245,34 @@ export function PrSheet({
                 {pr.head} → {pr.base}
               </T>
             </View>
+
+            {/* The sheet is the glance; the body, commits, diffs and conversation live on a page. */}
+            <Pressable
+              onPress={() => {
+                onClose();
+                router.push({
+                  pathname: "/pr/[repo]/[number]",
+                  // repo is "owner/name" — one encoded segment, decoded by the screen.
+                  params: { repo: encodeURIComponent(repo), number: String(number), session },
+                });
+              }}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 8,
+                borderWidth: 1,
+                borderColor: palette.border,
+                borderRadius: radius.lg,
+                paddingHorizontal: 12,
+                paddingVertical: 10,
+              }}
+            >
+              <Icon name="file-text" size={14} color={palette.mutedForeground} />
+              <T variant="meta" weight="medium" style={{ flex: 1 }}>
+                View full details
+              </T>
+              <Icon name="chevron-right" size={14} color={palette.mutedForeground} />
+            </Pressable>
 
             {/* Review — decision, reviewers, and Approve */}
             <View style={{ gap: 6 }}>

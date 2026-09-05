@@ -68,7 +68,7 @@ import { listClaims, listKept, markKept, unmarkKept } from "./claims.js";
 import { makeRedactor, isPlumbingError } from "./redact.js";
 import { isSecretKey, probeMcpServer } from "./mcp-store.js";
 import type { WatchSnapshot } from "./monitor.js";
-import { listChanges, readDiff, fetchPull, forgetPull } from "./changes.js";
+import { listChanges, readDiff, fetchPull, fetchPullDetail, forgetPull } from "./changes.js";
 import { loadRunMetas, saveRunMeta, forgetRunMeta } from "./run-memory.js";
 import { readArtifact } from "./artifact.js";
 import { existsSync } from "node:fs";
@@ -1641,6 +1641,103 @@ app.post("/pr/approve.json", async (req: Request, res: Response) => {
     const afterArgv = raw.split("\n").slice(1).filter((l) => l.trim() && !/^(ssh|Warning: Permanently added|• Backend)/.test(l.trim()));
     const ghMsg = afterArgv.join("\n").trim();
     res.status(422).json({ error: ghMsg ? redactor.redact(ghMsg).slice(-600) : clientError(e, 600) });
+  }
+});
+
+/**
+ * The shared body of every PR write action (comment, review, close/reopen/ready): validate, borrow
+ * the owner's token the way /pr/merge.json does, run one `gh` command inside the box, invalidate
+ * the PR caches, and surface gh's own words on failure. `build` returns the command's arguments
+ * AFTER `gh pr` — it is responsible for quoting anything user-supplied.
+ */
+async function runPrAction(req: Request, res: Response, build: (number: number, repo: string) => string | { error: string }) {
+  if (!dashAuthed(req, res)) return;
+  const { session, repo, number } = (req.body ?? {}) as { session?: string; repo?: string; number?: number };
+  if (!session || !/^[\w.-]+$/.test(session) || !repo || !/^[\w.-]+\/[\w.-]+$/.test(repo) || !Number.isFinite(Number(number))) {
+    res.status(400).json({ error: "session, repo (owner/name) and number are required" });
+    return;
+  }
+  const built = build(Number(number), repo);
+  if (typeof built !== "string") {
+    res.status(400).json(built);
+    return;
+  }
+  try {
+    const creds = await withOwner(ownerOf(db, session) ?? null, () => resolveCredsForBox(cfg, session)).catch(() => undefined);
+    if (!creds?.primaryToken) {
+      res.status(422).json({ error: "No GitHub account connected for this machine's owner — connect one in Integrations, then retry." });
+      return;
+    }
+    const r = await execInBox(cfg, session, `gh pr ${built} 2>&1`, {
+      env: { GH_TOKEN: creds.primaryToken, GITHUB_TOKEN: creds.primaryToken },
+    });
+    forgetPull(repo, Number(number));
+    res.json({ ok: true, output: redactor.redact((r.stdout ?? "").trim().slice(-600)) });
+  } catch (e) {
+    forgetPull(repo, Number(number));
+    const raw = String((e as Error)?.message ?? e);
+    const afterArgv = raw.split("\n").slice(1).filter((l) => l.trim() && !/^(ssh|Warning: Permanently added|• Backend)/.test(l.trim()));
+    const ghMsg = afterArgv.join("\n").trim();
+    res.status(422).json({ error: ghMsg ? redactor.redact(ghMsg).slice(-600) : clientError(e, 600) });
+  }
+}
+
+// Comment on the PR. The body is operator prose heading for a shell, so it is ALWAYS shellQuote'd.
+app.post("/pr/comment.json", async (req: Request, res: Response) => {
+  const body = typeof (req.body ?? {}).body === "string" ? ((req.body as { body: string }).body).trim() : "";
+  await runPrAction(req, res, (n, repo) =>
+    body ? `comment ${n} --repo ${shellQuote(repo)} --body ${shellQuote(body)}` : { error: "body is required" }
+  );
+});
+
+// Submit a review: approve / request changes / plain comment. /pr/approve.json stays as the
+// dedicated approve path (both clients already call it); this covers the other two verdicts.
+app.post("/pr/review.json", async (req: Request, res: Response) => {
+  const { event, body } = (req.body ?? {}) as { event?: string; body?: string };
+  const text = typeof body === "string" ? body.trim() : "";
+  // Whitelist, not interpolation: only these three words can ever reach the shell.
+  const flag = event === "approve" ? "--approve" : event === "request-changes" ? "--request-changes" : event === "comment" ? "--comment" : "";
+  await runPrAction(req, res, (n, repo) => {
+    if (!flag) return { error: "event must be approve, request-changes or comment" };
+    // gh requires a body for both of these; approve is the only verdict that may stand alone.
+    if (!text && flag !== "--approve") return { error: "body is required for this review" };
+    return `review ${n} --repo ${shellQuote(repo)} ${flag}${text ? ` --body ${shellQuote(text)}` : ""}`;
+  });
+});
+
+// Close / reopen / mark ready for review.
+app.post("/pr/state.json", async (req: Request, res: Response) => {
+  const { action } = (req.body ?? {}) as { action?: string };
+  const verb = action === "close" ? "close" : action === "reopen" ? "reopen" : action === "ready" ? "ready" : "";
+  await runPrAction(req, res, (n, repo) => (verb ? `${verb} ${n} --repo ${shellQuote(repo)}` : { error: "action must be close, reopen or ready" }));
+});
+
+// The dedicated PR page's payload: the chip's summary plus body, commits, files+patches,
+// conversation and check runs, in one request.
+app.get("/pr/detail.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const repo = typeof req.query.repo === "string" ? req.query.repo : "";
+  const number = Number(req.query.number);
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repo) || !Number.isFinite(number)) {
+    res.status(400).json({ error: "repo (owner/name) and number are required" });
+    return;
+  }
+  try {
+    const detail = await fetchPullDetail(cfg, repo, number);
+    if (!detail) {
+      res.status(404).json({ error: "pull request not reachable with the connected accounts" });
+      return;
+    }
+    // Bodies are author-written text we are echoing back to a browser; scrub them like any other
+    // relayed output rather than trusting GitHub not to be carrying a leaked secret.
+    res.json({
+      ...detail,
+      ...(detail.body ? { body: redactor.redact(detail.body) } : {}),
+      ...(detail.comments ? { comments: detail.comments.map((c) => ({ ...c, body: redactor.redact(c.body) })) } : {}),
+      ...(detail.commits ? { commits: detail.commits.map((c) => ({ ...c, message: redactor.redact(c.message) })) } : {}),
+    });
+  } catch (e) {
+    failWith(res, e);
   }
 });
 
