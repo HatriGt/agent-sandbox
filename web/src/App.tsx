@@ -544,7 +544,7 @@ export default function App() {
                     <Connect onDone={showAccount} onBack={showAccount} />
                   </PageEnter>
                 ) : route.view === "pr" ? (
-                  <div className="h-full min-h-0 overflow-y-auto">
+                  <div className="h-full min-h-0">
                     <PullRequestPage session={route.name} repo={route.repo} number={route.number} />
                   </div>
                 ) : booting && !selectedBox ? (
