@@ -143,6 +143,16 @@ export function Composer({
     voice.stop();
     Keyboard.dismiss();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    // Clear the box BEFORE the round-trip — the thread echoes the message optimistically, and a
+    // composer that stays full for seconds reads as "the send didn't take". On failure the draft
+    // is restored so nothing is lost.
+    const draft = { text, files, skill };
+    setText("");
+    setFiles([]);
+    setSkill(null);
+    setMention(null);
+    setSlash(null);
+    syncSendButton("", [], null);
     setBusy(true);
     try {
       if (lane === "ask" && onAsk) {
@@ -153,12 +163,11 @@ export function Composer({
         if (skill) t = `/${skill}${t ? ` ${t}` : ""}`;
         await onSend(t);
       }
-      setText("");
-      setFiles([]);
-      setSkill(null);
-      setMention(null);
-      setSlash(null);
-      syncSendButton("", [], null);
+    } catch {
+      setText(draft.text);
+      setFiles(draft.files);
+      setSkill(draft.skill);
+      syncSendButton(draft.text, draft.files, draft.skill);
     } finally {
       setBusy(false);
     }

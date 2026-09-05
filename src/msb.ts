@@ -136,6 +136,11 @@ export async function createBox(cfg: Config, opts: CreateBoxOpts): Promise<void>
     opts.name,
     "-m",
     cfg.memory,
+    // Without --max-memory the runtime keeps its default 4G hotplug ceiling and reports THAT as
+    // the MEM denominator in `msb metrics` — so every dashboard meter reads "of 4.0 GB" no matter
+    // what -m says. Pin the ceiling to the cap so the meters show the real limit.
+    "--max-memory",
+    cfg.memory,
     ...egressFlags(cfg),
     "--idle-timeout",
     cfg.idleTimeout,
@@ -209,6 +214,8 @@ export async function bootWarmBox(cfg: Config): Promise<string> {
     name,
     "-m",
     cfg.memory,
+    "--max-memory",
+    cfg.memory, // pin the hotplug ceiling too, or metrics report the default 4G as the total
     ...egressFlags(cfg, true), // pooled boxes always boot with open egress
     // An UNCLAIMED warm box must persist until a delegation claims it, so it uses the longer
     // poolIdleTimeout (not a session's idleTimeout) — otherwise it idle-stops and the pool drains.
@@ -1636,6 +1643,8 @@ export async function createBareBox(cfg: Config, name: string): Promise<void> {
     "--name",
     name,
     "-m",
+    cfg.memory,
+    "--max-memory",
     cfg.memory,
     "--net",
     "public",
