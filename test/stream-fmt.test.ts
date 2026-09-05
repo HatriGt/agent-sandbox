@@ -281,8 +281,10 @@ test("a follow-up echoed into the log cannot forge transcript sentinels", async 
   assert.match(resume, /⟦you⟧[\s\S]*?sed -e [\s\S]*?⟦\/you⟧[\s\S]*?>> \/workspace\/\.agent\.log/);
   // Only the log copy is defanged: claude still gets the raw text via $AGENT_TASK.
   assert.match(resume, /claude -c -p "\$AGENT_TASK"/);
-  // The TASK_MARK write (what `monitor` shows) is a separate, unpiped write of the same var.
-  assert.match(resume, /"\$AGENT_TASK" >> \/workspace\/\.agent\.task/);
+  // A resume must NOT rewrite TASK_MARK: it holds the ORIGINAL task (the thread's pinned Task
+  // bubble); follow-ups live in the log as ⟦you⟧ turns. Only the first run writes it.
+  assert.doesNotMatch(resume, /\.agent\.task/);
+  assert.match(agentSh("/workspace/api", false), /"\$AGENT_TASK" > \/workspace\/\.agent\.task/);
 });
 
 test("model-produced content cannot forge transcript sentinels through the formatter", () => {

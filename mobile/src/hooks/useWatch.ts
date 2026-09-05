@@ -5,6 +5,11 @@ import { openSse, type SseHandle } from "@/lib/sse";
 
 const DONE_POLL_MS = 3000;
 
+// Last-seen snapshot per box, module-level so it outlives the screen (the web's useWatchStream keeps
+// the same cache). Opening a thread paints the cached log instantly instead of a blank "loading"
+// state for the seconds the first SSH-backed frame takes; live frames then replace it.
+const snapCache = new Map<string, { meta: Omit<WatchSnapshot, "log">; log: string }>();
+
 /**
  * Live view of one box: SSE stream of the agent log with byte-offset resume,
  * falling back to a 3s poll after the server closes the stream (`done`).
@@ -70,36 +75,53 @@ export function useWatch(session: string | undefined) {
           setConnected(true);
           retry.current = 0;
           if (f.id) offset.current = f.id;
+          // Frame payloads mirror src/watch-sse.ts: snapshot={meta,log,from},
+          // append/reset={chunk}, state/done={meta,...}. Rendering f.data raw
+          // dumped literal {"chunk":"..."} JSON into the transcript.
           switch (f.event) {
             case "snapshot": {
               try {
-                const snap = JSON.parse(f.data) as WatchSnapshot;
-                const { log: l, ...rest } = snap;
-                setMeta(rest);
-                setLogBoth(() => l ?? "");
+                const d = JSON.parse(f.data) as { meta: Omit<WatchSnapshot, "log">; log: string; from: number };
+                setMeta(d.meta);
+                // A resume (from>0) delivers only the missed tail; a fresh open replaces.
+                setLogBoth((prev) => (d.from > 0 ? prev.slice(0, d.from) + (d.log ?? "") : d.log ?? ""));
               } catch {
                 /* malformed snapshot — wait for the next frame */
               }
               break;
             }
-            case "append":
-              setLogBoth((prev) => prev + f.data);
-              break;
-            case "reset":
-              setLogBoth(() => f.data);
-              break;
-            case "state": {
+            case "append": {
               try {
-                setMeta((m) => ({ ...(m as Omit<WatchSnapshot, "log">), ...JSON.parse(f.data) }));
+                const { chunk } = JSON.parse(f.data) as { chunk: string };
+                setLogBoth((prev) => prev + chunk);
               } catch {
                 /* ignore */
               }
               break;
             }
-            case "done":
-              handle.current?.close();
-              startPoll();
+            case "reset": {
+              try {
+                const { chunk } = JSON.parse(f.data) as { chunk: string };
+                setLogBoth(() => chunk);
+              } catch {
+                /* ignore */
+              }
               break;
+            }
+            case "state":
+            case "done": {
+              try {
+                const { meta } = JSON.parse(f.data) as { meta: Omit<WatchSnapshot, "log"> };
+                setMeta((m) => ({ ...(m as Omit<WatchSnapshot, "log">), ...meta }));
+              } catch {
+                /* ignore */
+              }
+              if (f.event === "done") {
+                handle.current?.close();
+                startPoll();
+              }
+              break;
+            }
           }
         },
         onError: () => {
@@ -121,9 +143,12 @@ export function useWatch(session: string | undefined) {
   useEffect(() => {
     if (!session) return;
     stopped.current = false;
-    logRef.current = "";
-    setLog("");
-    setMeta(null);
+    // Seed from the cache so an already-seen thread paints instantly; a box we have never opened
+    // still starts blank. The SSE snapshot frame replaces this wholesale moments later.
+    const cached = snapCache.get(session);
+    logRef.current = cached?.log ?? "";
+    setLog(logRef.current);
+    setMeta(cached?.meta ?? null);
     offset.current = undefined;
     // Fetch the snapshot immediately over plain GET: for a sleeping (stopped)
     // box the SSE stream may error without ever delivering meta, and the
@@ -155,6 +180,11 @@ export function useWatch(session: string | undefined) {
       sub.remove();
     };
   }, [session, connect]);
+
+  // Keep the cache current so the NEXT open of this thread paints immediately.
+  useEffect(() => {
+    if (session && meta) snapCache.set(session, { meta, log });
+  }, [session, meta, log]);
 
   const refresh = useCallback(async () => {
     if (!session) return;

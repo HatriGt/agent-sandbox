@@ -47,8 +47,8 @@ export const ASK_LANE_ENV = "ASK_LANE";
 /**
  * Shell that decides whether this turn continues the existing ask thread. Sets $CONT to `-c` only
  * when the driver's task is the SAME one the stored thread was about; any change (a new delegation
- * into a recycled box, a fresh task) starts clean. Keyed on the task marker's FIRST line: `resume`
- * appends follow-ups to that file, and a follow-up shouldn't throw away a useful thread.
+ * into a recycled box, a fresh task) starts clean. Keyed on the task marker's FIRST line: the marker
+ * holds the ORIGINAL task (follow-ups live in the log), so a follow-up never throws away a thread.
  *
  * `taskMark` is the driver's /workspace/.agent.task path (owned by the other lane — read only).
  */

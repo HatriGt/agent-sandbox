@@ -354,7 +354,10 @@ export default function Thread() {
             {booting && (
               <View style={{ alignItems: "center", paddingVertical: 60, gap: 12 }}>
                 <WorkingDot color={palette.live} size={12} />
-                <T variant="body" tone="muted">Booting a fresh machine…</T>
+                {/* This state is "first snapshot not here yet" — almost always an EXISTING thread
+                    being opened (fresh boots go through app/booting.tsx). Claiming a machine is
+                    booting here was a lie that flashed on every open of an awake box. */}
+                <T variant="body" tone="muted">Opening the thread…</T>
               </View>
             )}
             {!booting && !sleeping && merged?.runState === "idle" && items.length === 0 && (

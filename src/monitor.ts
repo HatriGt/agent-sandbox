@@ -29,7 +29,7 @@ export interface BoxView {
   runState: RunState;
   /** exit code when runState==="done", else undefined. */
   exitCode?: number;
-  /** The task the box is working on (from /workspace/.agent.task), trimmed to one line. */
+  /** The full task the box was started with (from /workspace/.agent.task). May be multi-line. */
   task?: string;
   /** The pending question when runState==="waiting". */
   question?: string;
@@ -271,7 +271,7 @@ export function formatWatch(s: WatchSnapshot): string {
   const header = [
     `┌─ ${s.name}  (${s.boxStatus})`,
     `│ ${stateLine}`,
-    s.task ? `│ task: ${s.task}` : undefined,
+    s.task ? `│ task: ${s.task.split("\n")[0]}` : undefined,
     s.question ? `│ question: ${s.question}` : undefined,
     res ? `│ ${res}` : undefined,
     `└─ log ─────────────────────────────────────────`,
@@ -320,7 +320,7 @@ function boxBlock(v: BoxView): string {
     `• ${v.name}  [${roleLabel(v.role)}]  ${runLabel(v)}` + (v.uptime ? `  up ${v.uptime}` : ""),
   ];
   if (v.cpu || v.mem) lines.push(`    cpu ${v.cpu ?? "?"} · mem ${v.mem ?? "?"}`);
-  if (v.task) lines.push(`    task: ${v.task}`);
+  if (v.task) lines.push(`    task: ${v.task.split("\n")[0]}`);
   if (v.runState === "waiting" && v.question) lines.push(`    question: ${v.question}`);
   return lines.join("\n");
 }

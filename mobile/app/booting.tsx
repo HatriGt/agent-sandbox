@@ -3,7 +3,7 @@ import { AccessibilityInfo, Animated, Easing, View } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { takePendingDelegate } from "@/lib/pending-delegate";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
@@ -131,6 +131,9 @@ export default function Booting() {
 
     // Path 1 — early attach: poll the fleet; a brand-new box, or a pool box
     // flipping pool-free -> claimed, is OUR box (same rule as the web).
+    // This poll NEVER stops for a delegate transport error: it is the only
+    // path that can still find the box after the long-held delegate request
+    // drops on a flaky mobile network (the server keeps working regardless).
     let stop = false;
     void (async () => {
       const known = await p.known;
@@ -151,7 +154,11 @@ export default function Booting() {
       }
     })();
 
-    // Path 2 — the delegate promise: authoritative for clarify questions and errors.
+    // Path 2 — the delegate promise: authoritative for clarify questions and a
+    // server-side REFUSAL. A transport failure (the request held for minutes
+    // over mobile data and dropped) is NOT authoritative — the box usually
+    // started anyway. Give the fleet poll a grace window to attach; only then
+    // show the error, and even then keep polling so a late box still wins.
     p.promise
       .then((r) => {
         if (r.ok) attach(r.box);
@@ -161,8 +168,18 @@ export default function Booting() {
         }
       })
       .catch((e) => {
-        settled.current = true;
-        setError(e instanceof Error ? e.message : String(e));
+        if (settled.current) return;
+        const msg = e instanceof Error ? e.message : String(e);
+        // A real HTTP status is the server refusing (capacity, auth, bad repo) — final, show now.
+        // No status = the socket died in transit; the delegation is probably still running.
+        if (e instanceof ApiError && e.status > 0) {
+          settled.current = true;
+          setError(msg);
+          return;
+        }
+        setTimeout(() => {
+          if (!settled.current) setError(msg);
+        }, 15_000);
       });
 
     const t = setInterval(() => setElapsed((s) => s + 1), 1000);
@@ -197,6 +214,11 @@ export default function Booting() {
             <T variant="body" tone={question ? "muted" : "destructive"} style={{ textAlign: "center" }}>
               {question ?? error}
             </T>
+            {error ? (
+              <T variant="meta" tone="muted" style={{ textAlign: "center" }}>
+                The connection dropped, but the machine may have started anyway — check the fleet list, or resend the task.
+              </T>
+            ) : null}
             <Button title="Back to the task" onPress={() => router.replace({ pathname: "/new", params: { task: task.current } })} />
           </View>
         ) : (

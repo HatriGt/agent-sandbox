@@ -978,9 +978,11 @@ export function agentSh(workdir: string, resume: boolean): string {
     : ``;
   const inner =
     waitForRun +
-    // Record the current task (from env) so `monitor` can report what this box is doing. First run
-    // sets it; a resume appends the follow-up so the marker reflects the latest ask.
-    `cd ${workdir} && printf '%s\\n' "$AGENT_TASK" ${resume ? `>> ${TASK_MARK}` : `> ${TASK_MARK}`} && ` +
+    // Record the task (from env) so `monitor`/the dashboards can show what this box is doing. Only
+    // the FIRST run writes it: the marker is the ORIGINAL task, read back whole by the watch/fleet
+    // probes for the thread's pinned Task bubble. Follow-ups are already first-class ⟦you⟧ turns in
+    // the log; appending them here (the old behavior) just mashed them into the task text.
+    `cd ${workdir} && ${resume ? `true` : `printf '%s\\n' "$AGENT_TASK" > ${TASK_MARK}`} && ` +
     echoFollowup +
     // $$ is this wrapper's pid — the process that writes DONE_MARK at the end — recorded so status
     // reads can tell a live run from a stale marker left by a mid-run VM stop (see RUN_STATE_SH).
@@ -1343,7 +1345,7 @@ export async function gatherMonitor(cfg: Config): Promise<BoxView[]> {
           `test -f /.claimed && echo CLAIMED || echo FREE; ` +
             `${RUN_STATE_SH}; ` +
             `echo "---Q---"; cat ${QUESTION_MARK} 2>/dev/null || true; ` +
-            `echo "---T---"; head -n 1 ${TASK_MARK} 2>/dev/null || true; ` +
+            `echo "---T---"; cat ${TASK_MARK} 2>/dev/null || true; ` +
             // Repositories checked out in the box (dir name + current branch), so the dashboard can
             // show what a sandbox is connected to and scope file search to it.
             `echo "---R---"; for g in /workspace/*/.git; do [ -d "$g" ] || continue; d=$(dirname "$g"); ` +
@@ -1580,7 +1582,7 @@ export async function gatherWatch(
       box,
       `${RUN_STATE_SH}; ` +
         `echo "---Q---"; cat ${QUESTION_MARK} 2>/dev/null || true; ` +
-        `echo "---T---"; head -n 1 ${TASK_MARK} 2>/dev/null || true; ` +
+        `echo "---T---"; cat ${TASK_MARK} 2>/dev/null || true; ` +
         `echo "---LOG---"; ${logTailCmd(logLines)}`
     );
     const out = r.stdout;
