@@ -320,6 +320,8 @@ export interface ApiKeyRow {
 
 /** One stored audit event, raw from the controller — the UI derives the human verb. */
 export interface AuditEventRow {
+  /** Row id — paired with `at` it forms the paging cursor (`at` alone is not unique). */
+  id: number;
   at: string;
   method: string;
   path: string;
@@ -453,8 +455,15 @@ export const api = {
   revokeOtherSessions: () =>
     fetch(url("/sessions.json"), { method: "DELETE", headers: { ...authHeaders, "Content-Type": "application/json" }, body: JSON.stringify({ others: true }) }).then(parse<{ ok: true; revoked: number }>),
   /** Stored audit trail (reverse-chron). `before` pages backwards from the last row's `at`. */
-  audit: (opts: { limit?: number; before?: string } = {}, signal?: AbortSignal) =>
-    fetch(url("/audit.json", { ...(opts.limit ? { limit: String(opts.limit) } : {}), ...(opts.before ? { before: opts.before } : {}) }), { headers: authHeaders, signal }).then(
+  audit: (opts: { limit?: number; before?: string; beforeId?: number } = {}, signal?: AbortSignal) =>
+    fetch(
+      url("/audit.json", {
+        ...(opts.limit ? { limit: String(opts.limit) } : {}),
+        ...(opts.before ? { before: opts.before } : {}),
+        ...(opts.beforeId != null ? { beforeId: String(opts.beforeId) } : {}),
+      }),
+      { headers: authHeaders, signal }
+    ).then(
       parse<{ events: AuditEventRow[] }>
     ),
   createApiKey: (name: string) => post<{ id: string; token: string; prefix: string }>("/api-keys.json", { name }),
@@ -697,9 +706,14 @@ export interface HistoryRun {
   task?: string | null;
   state: "done" | "failed";
   exitCode?: number | null;
-  /** Unix seconds. */
+  /**
+   * Epoch MILLISECONDS, not seconds — these come straight off RunDigest (whose stamps are the
+   * in-box plan sentinel's Date.now()) and off the archiver's own Date.now(). The console's
+   * fmtAgo/fmtDuration both take seconds, so every read site must divide.
+   */
   startedAt?: number | null;
   endedAt?: number | null;
+  /** Epoch milliseconds. */
   archivedAt: number;
   headline?: string | null;
 }

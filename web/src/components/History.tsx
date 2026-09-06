@@ -22,9 +22,9 @@ const PAGE = 50;
 
 type Filter = "all" | "done" | "failed";
 
-/** "Today" / "Yesterday" / "Mon 1 Sep" — the archive's day headers. */
-function dayLabel(unixSec: number): string {
-  const d = new Date(unixSec * 1000);
+/** "Today" / "Yesterday" / "Mon 1 Sep" — the archive's day headers. Takes epoch MILLISECONDS. */
+function dayLabel(ms: number): string {
+  const d = new Date(ms);
   const today = new Date();
   const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
   const days = Math.round((startOf(today) - startOf(d)) / 86_400_000);
@@ -219,7 +219,8 @@ function HistoryRow({
   onDeleted: () => void;
 }) {
   const failed = run.state === "failed";
-  const duration = run.startedAt && run.endedAt && run.endedAt > run.startedAt ? fmtDuration(run.endedAt - run.startedAt) : null;
+  // Archive stamps are epoch ms (see HistoryRun); fmtDuration and fmtAgo both speak seconds.
+  const duration = run.startedAt && run.endedAt && run.endedAt > run.startedAt ? fmtDuration(Math.round((run.endedAt - run.startedAt) / 1000)) : null;
   const verified = /\bverified\s*$/i.test(run.headline ?? "");
 
   const [armed, setArmed] = React.useState(false);
@@ -294,7 +295,7 @@ function HistoryRow({
                 {friendlyName(run.box)}
               </span>
               {duration && <span className="stamp">{duration}</span>}
-              {run.archivedAt > 0 && <span>archived {fmtAgo(run.archivedAt)}</span>}
+              {run.archivedAt > 0 && <span>archived {fmtAgo(Math.round(run.archivedAt / 1000))}</span>}
             </span>
           </span>
 

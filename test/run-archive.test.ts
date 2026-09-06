@@ -64,7 +64,7 @@ test("archive: same finish observed twice does not duplicate (equal ended_at, ev
   assert.equal(listRuns(db, "A").length, 1);
 });
 
-test("archive: stamp-less finish dedupes on (exit, headline) within the window, not outside it", () => {
+test("archive: stamp-less finish dedupes on (state, exit) within the window, not outside it", () => {
   const db = openMemoryDb();
   const d = digest({ startedAt: undefined, endedAt: undefined });
   assert.ok(archiveRun(db, { box: "b", owner: "A", digest: d, now: 1_000_000 }) !== null);
@@ -76,6 +76,22 @@ test("archive: stamp-less finish dedupes on (exit, headline) within the window, 
   const stale = digest({ startedAt: undefined, endedAt: undefined });
   archiveRun(db, { box: "c", owner: "A", digest: stale, now: 0 });
   assert.ok(archiveRun(db, { box: "c", owner: "A", digest: stale, now: 2 * 60 * 60 * 1000 }) !== null, "outside the window a stamp-less repeat records again");
+});
+
+test("archive: a stamp-less finish seen by both the sweep and teardown records ONCE, keeping the richer row", () => {
+  // The regression this guards: dedupe used to compare headlines, but the headline is derived from
+  // the file list — exactly what the two observations disagree about. The sweep catches the box
+  // still up and lists changes ("done · 2 files"); the teardown fallback finds it stopped and lists
+  // none ("done"). Comparing headlines made every stamp-less run archive twice.
+  const db = openMemoryDb();
+  const base = { startedAt: undefined, endedAt: undefined };
+  const sweep = digest({ ...base, headline: "done · 2 files" });
+  const teardown = digest({ ...base, headline: "done", files: [] });
+  assert.ok(archiveRun(db, { box: "b", owner: "A", digest: sweep, now: 1000 }) !== null);
+  assert.equal(archiveRun(db, { box: "b", owner: "A", digest: teardown, now: 1500 }), null, "teardown re-observes the same finish");
+  const rows = listRuns(db, "A");
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].headline, "done · 2 files", "the sweep's richer record is the one kept");
 });
 
 test("archive: a resume that finishes again (new ended_at) creates a NEW row even with an identical outcome", () => {

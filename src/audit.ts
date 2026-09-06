@@ -49,6 +49,8 @@ export const AUDIT_MAX_AGE_DAYS = 90;
 
 /** One stored audit row as served by GET /audit.json — raw facts, no interpretation. */
 export interface AuditRow {
+  /** Row id — the tiebreaker half of the paging cursor (`at` alone is not unique). */
+  id: number;
   at: string;
   method: string;
   path: string;
@@ -60,10 +62,15 @@ export interface AuditRow {
 
 /**
  * Reverse-chronological page of stored audit events. `userId` scopes to one user (a user principal
- * always passes their own id; operator/admin may pass none for the whole deployment). `before` is an
- * exclusive upper bound on `at` for paging.
+ * always passes their own id; operator/admin may pass none for the whole deployment).
+ *
+ * Paging cursor: `(before, beforeId)` — the `at` AND `id` of the last row you were handed. `at` is
+ * an ISO string minted per request and is NOT unique: a burst of requests inside one millisecond
+ * shares a timestamp, so an `at < ?` cursor alone would skip every sibling of the boundary row.
+ * The cursor is therefore a lexicographic compare on the same `(at DESC, id DESC)` pair the ORDER BY
+ * uses. `beforeId` is optional so an old caller still pages, just with the sibling-skipping caveat.
  */
-export function listAuditEvents(db: Db, opts: { userId?: string; limit?: number; before?: string } = {}): AuditRow[] {
+export function listAuditEvents(db: Db, opts: { userId?: string; limit?: number; before?: string; beforeId?: number } = {}): AuditRow[] {
   const limit = Math.max(1, Math.min(100, Math.floor(opts.limit ?? 50)));
   const where: string[] = [];
   const args: unknown[] = [];
@@ -72,10 +79,15 @@ export function listAuditEvents(db: Db, opts: { userId?: string; limit?: number;
     args.push(opts.userId);
   }
   if (opts.before) {
-    where.push("at < ?");
-    args.push(opts.before);
+    if (Number.isInteger(opts.beforeId)) {
+      where.push("(at < ? OR (at = ? AND id < ?))");
+      args.push(opts.before, opts.before, opts.beforeId);
+    } else {
+      where.push("at < ?");
+      args.push(opts.before);
+    }
   }
-  const sql = `SELECT at, method, path, status, session, action, client FROM audit_events${where.length ? ` WHERE ${where.join(" AND ")}` : ""} ORDER BY at DESC, id DESC LIMIT ?`;
+  const sql = `SELECT id, at, method, path, status, session, action, client FROM audit_events${where.length ? ` WHERE ${where.join(" AND ")}` : ""} ORDER BY at DESC, id DESC LIMIT ?`;
   return db.prepare(sql).all(...args, limit) as AuditRow[];
 }
 

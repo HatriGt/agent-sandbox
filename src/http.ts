@@ -276,10 +276,18 @@ app.get("/audit.json", (req: Request, res: Response) => {
   const q = req.query as Record<string, unknown>;
   const limit = typeof q.limit === "string" ? Number(q.limit) : undefined;
   const before = typeof q.before === "string" ? q.before : undefined;
+  // `at` is not unique (a burst of requests shares a millisecond), so the cursor carries the row id
+  // as a tiebreaker — see listAuditEvents. The client echoes back both from its last row.
+  const beforeId = typeof q.beforeId === "string" ? Number(q.beforeId) : undefined;
   const userId = admin ? (typeof q.user === "string" && q.user ? q.user : undefined) : (p as { userId: string }).userId;
   res.json({
-    events: listAuditEvents(db, { userId, ...(Number.isFinite(limit) ? { limit } : {}), before }).map((e) => ({
-      at: e.at, method: e.method, path: e.path, status: e.status, session: e.session, action: e.action, client: e.client,
+    events: listAuditEvents(db, {
+      userId,
+      ...(Number.isFinite(limit) ? { limit } : {}),
+      before,
+      ...(Number.isInteger(beforeId) ? { beforeId } : {}),
+    }).map((e) => ({
+      id: e.id, at: e.at, method: e.method, path: e.path, status: e.status, session: e.session, action: e.action, client: e.client,
     })),
   });
 });
@@ -342,6 +350,10 @@ const resumeQuietly = (session: string, message: string) => {
   // the thread does not show it asleep (and close its stream) for the next 15 s.
   noteRunning(session);
   watchHub.drop(session);
+  // A verified stamp describes ONE finish. The next turn has not been checked, so carrying the stamp
+  // forward would let the digest, the archive record and the done push all claim "verified" about
+  // work nobody verified. Drop it here — the one choke point every resume lane goes through.
+  boxVerified.delete(session);
   // Whoever triggers it (inbox delivery, broker, an admin), the box runs with its OWNER's integrations.
   // Behind the checkpoint lock: a follow-up landing inside the ~1 s turn-end capture waits for it
   // instead of mutating the workspace mid-tar.
@@ -437,7 +449,11 @@ const notifier = makeNotifier({ send: sendNotification, log: (m) => console.erro
 const archiveFinishedRun = async (box: string, opts: { withFiles: boolean } = { withFiles: true }): Promise<void> => {
   const snap = await watchHub.read(box);
   if (snap.boxStatus === "missing") return;
-  if (snap.runState === "running" || snap.runState === "waiting") return; // records only, never live state
+  // Only a genuinely FINISHED run earns a record. Testing for "not running and not waiting" is not
+  // the same thing: RunState also has "idle" — a box that never ran a task (a pool machine, one
+  // claimed but never delegated to). Those reach buildDigest as state "done" with an empty headline
+  // and would land in history as phantom completed runs the user never started.
+  if (snap.runState !== "done") return;
   const files = opts.withFiles && /^running$/i.test(snap.boxStatus) ? await listChanges(cfg, box).catch(() => []) : [];
   const digest = buildDigest({
     box,

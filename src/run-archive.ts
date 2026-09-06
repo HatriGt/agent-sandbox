@@ -45,8 +45,12 @@ const DEDUPE_WINDOW_MS = 60 * 60 * 1000;
  *     plan sentinel); a resume that finishes again always moves it, so an equal stamp IS the same
  *     finish even when the two observations disagree on details (the sweep edge sees files, the
  *     teardown fallback can't list them, so headlines may differ); or
- *   - neither carries ended_at, AND (exit_code, headline) match, AND the existing row was archived
+ *   - neither carries ended_at, AND (state, exit_code) match, AND the existing row was archived
  *     within DEDUPE_WINDOW_MS (covers a stamp-less finish observed by both the sweep and teardown).
+ *     Deliberately NOT compared here: the headline. It is derived from the file list, and the file
+ *     list is exactly what the two observations disagree about — the sweep catches the box still up
+ *     and lists changes, the teardown fallback finds it stopped and lists none. Comparing headlines
+ *     made every stamp-less run archive twice ("done · 1 file" vs "done").
  * Anything else — a different or newer stamp, or a stamp-less record that differs or is old — is a
  * NEW finish and gets a new row. Consulting only the latest row means a box that re-finishes with an
  * identical outcome (same headline, same exit, new stamp) still records each finish.
@@ -57,14 +61,14 @@ export function archiveRun(db: Db, rec: ArchiveRecord): number | null {
   const d = rec.digest;
   const now = rec.now ?? Date.now();
   const latest = db
-    .prepare(`SELECT id, exit_code, ended_at, archived_at, headline FROM run_archive WHERE box = ? ORDER BY id DESC LIMIT 1`)
-    .get(rec.box) as { id: number; exit_code: number | null; ended_at: number | null; archived_at: number; headline: string | null } | undefined;
+    .prepare(`SELECT id, state, exit_code, ended_at, archived_at FROM run_archive WHERE box = ? ORDER BY id DESC LIMIT 1`)
+    .get(rec.box) as { id: number; state: string | null; exit_code: number | null; ended_at: number | null; archived_at: number } | undefined;
   if (latest) {
     const sameStamp = latest.ended_at !== null && d.endedAt !== undefined && latest.ended_at === d.endedAt;
     const bothStampless =
       latest.ended_at === null &&
       d.endedAt === undefined &&
-      latest.headline === d.headline &&
+      latest.state === d.state &&
       (latest.exit_code ?? null) === (d.exitCode ?? null) &&
       now - latest.archived_at < DEDUPE_WINDOW_MS;
     if (sameStamp || bothStampless) return null;

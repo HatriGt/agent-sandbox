@@ -101,7 +101,8 @@ export function HistoryList() {
         const prev = i > 0 ? rows[i - 1].archivedAt || rows[i - 1].endedAt || 0 : null;
         const head = at && (prev === null || dayLabel(prev) !== dayLabel(at)) ? dayLabel(at) : null;
         const failed = r.state === "failed";
-        const secs = r.startedAt && r.endedAt && r.endedAt > r.startedAt ? r.endedAt - r.startedAt : null;
+        // Archive stamps are epoch ms; durationWords speaks seconds, ago speaks ms.
+        const secs = r.startedAt && r.endedAt && r.endedAt > r.startedAt ? Math.round((r.endedAt - r.startedAt) / 1000) : null;
         return (
           <React.Fragment key={r.id}>
             {head ? (
@@ -203,9 +204,9 @@ function titleOf(r: HistoryRun): string {
   return (r.headline ?? "").trim() || "Untitled run";
 }
 
-/** "Today" / "Yesterday" / "Mon 1 Sep" — the archive's day headers. */
-function dayLabel(unixSec: number): string {
-  const d = new Date(unixSec * 1000);
+/** "Today" / "Yesterday" / "Mon 1 Sep" — the archive's day headers. Takes epoch MILLISECONDS. */
+function dayLabel(ms: number): string {
+  const d = new Date(ms);
   const today = new Date();
   const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
   const days = Math.round((startOf(today) - startOf(d)) / 86_400_000);

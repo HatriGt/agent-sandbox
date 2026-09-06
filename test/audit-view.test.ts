@@ -42,6 +42,22 @@ test("audit view: limit is capped at 100 and defaults to 50; before pages backwa
   assert.ok(page2.every((e) => !seen.has(e.session!)));
 });
 
+test("audit view: paging does not drop rows that share a timestamp", () => {
+  // `at` is an ISO string minted per request and is NOT unique — a burst of requests inside one
+  // millisecond shares it. Paging on `at < ?` alone skipped every sibling of the boundary row, so
+  // rows silently vanished between pages. The cursor is (at, id).
+  const db = openMemoryDb();
+  const burst = nowIso(5000);
+  for (const n of ["a", "b", "c"]) insert(db, { at: burst, user_id: "u1", session: n });
+  insert(db, { at: nowIso(1000), user_id: "u1", session: "older" });
+
+  const page1 = listAuditEvents(db, { userId: "u1", limit: 2 });
+  const last = page1[page1.length - 1];
+  const page2 = listAuditEvents(db, { userId: "u1", limit: 2, before: last.at, beforeId: last.id });
+  const seen = [...page1, ...page2].map((e) => e.session);
+  assert.deepEqual([...seen].sort(), ["a", "b", "c", "older"], "every row appears exactly once across the pages");
+});
+
 test("audit view: prune deletes only rows older than the retention window", () => {
   const db = openMemoryDb();
   const now = Date.now();

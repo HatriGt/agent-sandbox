@@ -62,11 +62,13 @@ export function AuditLog() {
   const [busy, setBusy] = React.useState(false);
   const { search } = useLocation();
 
-  const load = React.useCallback(async (before?: string) => {
+  // The cursor is (at, id): `at` is not unique across a burst of requests, so paging on it alone
+  // would silently drop every row sharing the boundary timestamp.
+  const load = React.useCallback(async (cursor?: { at: string; id: number }) => {
     setBusy(true);
     try {
-      const r = await api.audit({ limit: PAGE, before });
-      setRows((prev) => [...(before ? (prev ?? []) : []), ...r.events]);
+      const r = await api.audit({ limit: PAGE, before: cursor?.at, beforeId: cursor?.id });
+      setRows((prev) => [...(cursor ? (prev ?? []) : []), ...r.events]);
       if (r.events.length < PAGE) setDone(true);
     } catch {
       setRows((prev) => prev ?? []);
@@ -87,11 +89,11 @@ export function AuditLog() {
       </div>
       <ul className="divide-y rounded-xl border">
         {rows === null && <li className="text-muted-foreground px-3.5 py-3 text-meta">Loading…</li>}
-        {(rows ?? []).map((e, i) => {
+        {(rows ?? []).map((e) => {
           const d = describeEvent(e);
           const at = Date.parse(e.at);
           return (
-            <li key={`${e.at}-${i}`} className="flex items-baseline gap-3 px-3.5 py-2">
+            <li key={e.id} className="flex items-baseline gap-3 px-3.5 py-2">
               <span className="stamp text-faint shrink-0">{Number.isFinite(at) ? fmtAgo(at / 1000) : e.at}</span>
               <span className={cn("text-meta min-w-0 truncate", e.status >= 400 ? "text-muted-foreground" : "text-foreground")}>
                 {d.verb}
@@ -113,7 +115,7 @@ export function AuditLog() {
         )}
       </ul>
       {rows !== null && rows.length > 0 && !done && (
-        <Button size="sm" variant="ghost" className="text-muted-foreground mt-2" disabled={busy} onClick={() => load(rows[rows.length - 1].at)}>
+        <Button size="sm" variant="ghost" className="text-muted-foreground mt-2" disabled={busy} onClick={() => load({ at: rows[rows.length - 1].at, id: rows[rows.length - 1].id })}>
           Show more
         </Button>
       )}
