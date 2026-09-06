@@ -25,6 +25,7 @@ export type ConsoleRoute =
   | { view: "integrations" }
   | { view: "account" }
   | { view: "connect" }
+  | { view: "welcome" }
   | { view: "admin" };
 
 export function parseConsolePath(pathname: string): ConsoleRoute {
@@ -40,6 +41,7 @@ export function parseConsolePath(pathname: string): ConsoleRoute {
   if (/^\/(accounts|integrations)\/?$/.test(rest)) return { view: "integrations" };
   if (/^\/account\/?$/.test(rest)) return { view: "account" };
   if (/^\/connect\/?$/.test(rest)) return { view: "connect" };
+  if (/^\/welcome\/?$/.test(rest)) return { view: "welcome" };
   if (/^\/admin\/?$/.test(rest)) return { view: "admin" };
   return { view: "hub" };
 }
@@ -62,6 +64,8 @@ export function consolePath(r: ConsoleRoute): string {
       return `${BASE}/account`;
     case "connect":
       return `${BASE}/connect`;
+    case "welcome":
+      return `${BASE}/welcome`;
     case "admin":
       return `${BASE}/admin`;
     default:

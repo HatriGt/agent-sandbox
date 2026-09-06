@@ -33,6 +33,18 @@ function PopCount({ value }: { value: number }) {
 
 export function ChangesDock({ files, loading, onOpen, onRefresh, activePath }: { files: ChangedFile[]; loading?: boolean; onOpen: (f: ChangedFile) => void; onRefresh?: () => void; activePath?: string | null }) {
   const [open, setOpen] = React.useState(false);
+  // Esc collapses the expanded list — unless a dialog/menu/input owns the key.
+  React.useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable || t.closest("[role='dialog'],[role='menu'],[role='listbox'],dialog"))) return;
+      setOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open]);
   if (!files.length) return null;
   const adds = files.reduce((a, f) => a + f.additions, 0);
   const dels = files.reduce((a, f) => a + f.deletions, 0);

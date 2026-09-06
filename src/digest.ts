@@ -9,6 +9,7 @@
  * list. No new instrumentation runs in the box.
  */
 import type { TraceEvent, PlanItem } from "./trace.js";
+import type { VerifyResult } from "./verify.js";
 
 export interface DigestFile {
   path: string;
@@ -24,6 +25,8 @@ export interface DigestInput {
   exitCode?: number;
   events: TraceEvent[];
   files: DigestFile[];
+  /** Verified-outcomes result (src/verify.ts), when the run carried a verify clause. */
+  verified?: VerifyResult;
 }
 
 export interface DigestPlanStep extends PlanItem {
@@ -43,6 +46,8 @@ export interface RunDigest {
   files: DigestFile[];
   failedCommands: Array<{ name: string; arg?: string }>;
   questions: Array<{ question: string; answer?: string }>;
+  /** Verified-outcomes result: pass means checked, not just claimed. */
+  verified?: VerifyResult;
   /** One sentence for notifications and list rows. */
   headline: string;
 }
@@ -66,6 +71,7 @@ export function headlineOf(x: {
   stepCount: number;
   failedCount: number;
   openQuestions: number;
+  verified?: VerifyResult;
 }): string {
   const bits: string[] = [];
   if (x.state === "failed") {
@@ -82,6 +88,7 @@ export function headlineOf(x: {
   if (x.stepCount > 0) bits.push(`${x.stepCount} step${x.stepCount === 1 ? "" : "s"}`);
   if (x.failedCount > 0) bits.push(`${x.failedCount} failed command${x.failedCount === 1 ? "" : "s"}`);
   if (x.openQuestions > 0 && x.state !== "waiting") bits.push(`${x.openQuestions} unanswered question${x.openQuestions === 1 ? "" : "s"}`);
+  if (x.verified) bits.push(x.verified.pass ? "verified" : "UNVERIFIED");
   return bits.join(" · ");
 }
 
@@ -137,6 +144,7 @@ export function buildDigest(input: DigestInput): RunDigest {
     stepCount: plan.length,
     failedCount: failedCommands.length,
     openQuestions,
+    verified: input.verified,
   });
 
   return {
@@ -150,6 +158,7 @@ export function buildDigest(input: DigestInput): RunDigest {
     files: input.files,
     failedCommands,
     questions,
+    ...(input.verified ? { verified: input.verified } : {}),
     headline,
   };
 }

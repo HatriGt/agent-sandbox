@@ -19,7 +19,6 @@ const SignUpPage = lazy(() => import("./pages/Auth").then((m) => ({ default: m.S
 
 const router = createBrowserRouter([
   { path: "/", element: <Landing />, errorElement: <RouteError /> },
-  { path: "/dashboard/welcome", element: <Landing />, errorElement: <RouteError /> },
   { path: "/signin", element: <SignInPage />, errorElement: <RouteError /> },
   { path: "/signup", element: <SignUpPage />, errorElement: <RouteError /> },
   {

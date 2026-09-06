@@ -85,7 +85,7 @@ export function ApiKeys() {
             <KeyRound className="text-muted-foreground size-4 shrink-0" aria-hidden />
             <span className="text-foreground min-w-0 flex-1 truncate text-meta font-medium">{k.name}</span>
             <span className="stamp text-muted-foreground shrink-0">{k.prefix}…</span>
-            <span className="text-faint hidden shrink-0 text-micro sm:inline">{k.last_used_at ? `used ${fmtAgo(Date.parse(k.last_used_at) / 1000)}` : "never used"}</span>
+            <span className="text-faint hidden shrink-0 text-micro sm:inline">{k.last_used_at && Number.isFinite(Date.parse(k.last_used_at)) ? `used ${fmtAgo(Date.parse(k.last_used_at) / 1000)}` : "never used"}</span>
             <Button size="icon-sm" variant="ghost" aria-label={`Revoke ${k.name}`} onClick={() => revoke(k)} className="text-muted-foreground hover:text-destructive">
               <Trash2 />
             </Button>

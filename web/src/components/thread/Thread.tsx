@@ -16,6 +16,8 @@ import { parseMcpName } from "@/lib/mcp";
 import { McpConnectItem } from "./McpItem";
 import { setPrefill } from "@/lib/draft";
 import { RunSummary } from "./RunSummary";
+import { ProducedFiles } from "./ProducedFiles";
+import { DigestCard, useRunDigest } from "./DigestCard";
 import { ThreadHeader } from "./ThreadHeader";
 import { parseTrace, producedFiles } from "@/lib/trace";
 import { deriveTaskBoard, type TaskBoard } from "@/lib/planTasks";
@@ -158,6 +160,20 @@ export function Thread({
     setOpenFile(null);
   };
 
+  // Esc closes the workspace pane — but never steals the key from a dialog, menu or focused input
+  // (those own Escape themselves and either prevent default or match the focus guard below).
+  React.useEffect(() => {
+    if (!showWorkspace) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable || t.closest("[role='dialog'],[role='menu'],[role='listbox'],dialog"))) return;
+      closeWorkspace();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [showWorkspace]);
+
   const refreshChanges = React.useCallback(() => {
     if (sleeping) return;
     setChangesLoading(true);
@@ -199,6 +215,12 @@ export function Thread({
   const exitCode = snap?.exitCode ?? box.exitCode;
   const state = sleeping ? "sleeping" : displayState({ boxStatus: box.boxStatus, runState });
   const loadingTrace = !snap && !sleeping;
+
+  // The run receipt: fetched once when a run ends (keyed by exit code + trace length so a box that
+  // resumes and finishes again gets a fresh digest). Silent on failure — the thread stands alone.
+  const finished = !sleeping && !loadingTrace && (runState === "done" || (runState === "idle" && exitCode != null));
+  const digest = useRunDigest(box.name, finished, `${exitCode ?? ""}-${events.length}`);
+  const durationSec = digest?.startedAt && digest?.endedAt && digest.endedAt > digest.startedAt ? Math.round((digest.endedAt - digest.startedAt) / 1000) : undefined;
 
   const deadline = React.useMemo(() => deadlineOf(box, lifecycle), [box, lifecycle]);
   const deadlineText = deadlineLabel(deadline);
@@ -537,6 +559,8 @@ export function Thread({
               </div>
             )}
 
+            {finished && digest && <DigestCard digest={digest} />}
+
             {loadingTrace && <ThreadSkeleton withTask={!!box.task} />}
 
             <AnimatePresence>
@@ -615,6 +639,8 @@ export function Thread({
               <ObserverItem key={`aside-${i}`} question={a.question} answer={a.error ?? a.answer} />
             ))}
 
+            {!sleeping && !loadingTrace && artifacts.length > 0 && runState !== "running" && <ProducedFiles session={box.name} files={artifacts} />}
+
             {!sleeping && !loadingTrace && runState === "done" && (
               <RunSummary
                 label={
@@ -639,6 +665,7 @@ export function Thread({
                           : `code ${exitCode}`
                 }
                 stats={runStats(events)}
+                durationSec={durationSec}
                 onCopy={async () => toMarkdown(events, { title, machine: friendlyName(box.name), url: window.location.href })}
                 onAgain={newFromThis}
               />

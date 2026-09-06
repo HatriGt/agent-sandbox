@@ -1,10 +1,13 @@
 import * as React from "react";
 import { ArrowLeft, Check, Loader2, PlugZap, Shield } from "lucide-react";
 import { toast } from "sonner";
-import { api } from "@/lib/api";
+import { api, type BoxView } from "@/lib/api";
 import { getMe, setMe } from "@/lib/auth";
+import { isVisible } from "@/lib/format";
+import { Capacity } from "@/components/Capacity";
 import { Button } from "@/components/ui/button";
 import { ApiKeys } from "@/components/ApiKeys";
+import { NotifySettings } from "@/components/NotifySettings";
 import { Sessions } from "@/components/Sessions";
 import { cn } from "@/lib/utils";
 
@@ -19,6 +22,20 @@ export function Account({ onBack, onConnect, onAdmin }: { onBack: () => void; on
   const [saved, setSaved] = React.useState(false);
   const [pw, setPw] = React.useState({ current: "", next: "", again: "" });
   const [pwBusy, setPwBusy] = React.useState(false);
+
+  // Live usage: the machines running right now against the plan's cap. If the fleet fetch fails we
+  // simply fall back to the static "up to N machines" line — never invented numbers.
+  const [fleetBoxes, setFleetBoxes] = React.useState<BoxView[] | null>(null);
+  React.useEffect(() => {
+    const ctrl = new AbortController();
+    api
+      .fleet(ctrl.signal)
+      .then((r) => setFleetBoxes(r.boxes.filter(isVisible)))
+      .catch(() => {});
+    return () => ctrl.abort();
+  }, []);
+  const inUse = fleetBoxes ? fleetBoxes.filter((b) => /^running$/i.test(b.boxStatus)).length : null;
+  const maxBoxes = user?.maxBoxes ?? null;
 
   const saveProfile = async () => {
     setSaving(true);
@@ -61,7 +78,10 @@ export function Account({ onBack, onConnect, onAdmin }: { onBack: () => void; on
         <header className="mb-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h1 className="text-foreground text-h1 font-semibold tracking-[-0.02em]">Account</h1>
-            <p className="text-muted-foreground mt-0.5 text-meta">{user ? `@${user.login}` : "Operator"} · {user?.role === "admin" || me?.kind === "operator" ? "admin" : "member"} · up to {user?.maxBoxes ?? "∞"} machines at once</p>
+            <p className="text-muted-foreground mt-0.5 text-meta">
+              {user ? `@${user.login}` : "Operator"} · {user?.role === "admin" || me?.kind === "operator" ? "admin" : "member"} ·{" "}
+              {inUse !== null && maxBoxes ? `${inUse} of ${maxBoxes} machines in use` : `up to ${maxBoxes ?? "∞"} machines at once`}
+            </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {(me?.kind === "operator" || user?.role === "admin") && me?.mode === "saas" && (
@@ -90,6 +110,17 @@ export function Account({ onBack, onConnect, onAdmin }: { onBack: () => void; on
                     ? "Your history and settings are kept; starting or resuming machines needs an upgrade — or self-host for free."
                     : `${user.daysLeft === 0 ? "Ends today" : `${user.daysLeft} day${user.daysLeft === 1 ? "" : "s"} left`} · ends ${new Date(user.trialEndsAt ?? 0).toLocaleDateString()} · no card on file`}
               </p>
+              {inUse !== null && maxBoxes ? (
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  <Capacity boxes={fleetBoxes ?? []} capacity={maxBoxes} size="sm" />
+                  <span className="text-muted-foreground text-meta">
+                    {inUse} of {maxBoxes} machines in use
+                  </span>
+                  {user.plan === "trial" && !user.expired && <span className="stamp text-muted-foreground">{user.daysLeft === 0 ? "ends today" : `${user.daysLeft}d left`}</span>}
+                </div>
+              ) : maxBoxes ? (
+                <p className="text-muted-foreground mt-3 text-meta">up to {maxBoxes} machines at once</p>
+              ) : null}
               {user.plan !== "pro" && (
                 <div className="mt-3 flex flex-wrap gap-2">
                   <Button size="sm" asChild>
@@ -157,6 +188,8 @@ export function Account({ onBack, onConnect, onAdmin }: { onBack: () => void; on
               </Button>
             </section>
           )}
+
+          <NotifySettings />
 
           {user && <ApiKeys />}
           {user && <Sessions />}

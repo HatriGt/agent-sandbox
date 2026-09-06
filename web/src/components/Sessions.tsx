@@ -56,7 +56,7 @@ export function Sessions() {
               </span>
               <span className="text-faint hidden shrink-0 text-micro sm:inline">
                 {s.ip ?? ""}
-                {s.lastSeenAt ? ` · active ${fmtAgo(Date.parse(s.lastSeenAt) / 1000)}` : ""}
+                {s.lastSeenAt && Number.isFinite(Date.parse(s.lastSeenAt)) ? ` · active ${fmtAgo(Date.parse(s.lastSeenAt) / 1000)}` : ""}
               </span>
               {!s.current && (
                 <Button size="sm" variant="ghost" className="text-muted-foreground hover:text-destructive" onClick={() => revoke(s)}>

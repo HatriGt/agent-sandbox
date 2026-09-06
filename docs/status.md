@@ -136,24 +136,25 @@ only, so a box bootstrapped by an older controller kept that build's log format 
 
 ---
 
-## Next up (not started)
+## Next up — SaaS funnel focus (2026-09-06)
 
-Ordered by value, from the agenttrail review (2026-09-01):
+The product is **sandbox as a service**: hosted (free during beta) + free self-host. The roadmap is
+reordered around the funnel — activation, retention, legible value, monetization readiness. Full
+rationale and priority list: `docs/roadmap-saas.md`. Headline order:
 
-1. **`PLAN.md` as a durable component map.** The `TodoWrite` plan is per-run and dies with the box.
-   A committed markdown map — stable `{#id}`s, `files:` globs, `needs:`/`links:` edges, `[x]/[~]/[!]`
-   states — survives box reaping because it is in git, which matters here more than for a local tool.
-   Cheap to adopt: a `plan-map` skill teaching the convention (skills already sync into every box)
-   plus a `/plan.json` parser. No new infrastructure.
-2. **Declared-vs-observed drift.** The plan says the agent is in component A; the files it is writing
-   match component B's glob. A cheap, high-signal "this run is off the rails" indicator, and worth
-   more here than in a local tool because the whole premise is that you walk away from the box. The
-   observed half already exists in `/changes.json`, and the per-step attribution from the task board
-   is the other half.
-3. **`/` skill autocomplete in the Hub composer.** Works functionally; the menu only exists in the
-   thread composer.
-4. **A curated skill library** to seed new accounts.
-5. **Billing.** Deferred deliberately — free during beta.
+1. **Web notifications UI** — `/notify.json` is built and tested; configurable only on Android. The
+   retention ping on the primary surface.
+2. **Digest card on finished threads** — `/digest.json` has zero UI consumers.
+3. **Activation pass** — route the orphaned welcome flow (`/dashboard/welcome`), seeded skill
+   library, demo first run.
+4. **Run history archive** — persist the digest at teardown; the "what your agents did" page.
+5. **Verify in the composer** — surface `done:verified` (mechanism ships MCP-only today).
+6. **Usage metering + visible meter** — groundwork for pricing; `test/usage-meter.test.ts` exists
+   with no `src/` counterpart.
+7. **Mobile push + deep links** (spec'd M2 in `docs/mobile-app-spec.md`; nothing built).
+
+Carried forward from the agenttrail review: `PLAN.md` durable component map, declared-vs-observed
+drift, `/` skill autocomplete in the Hub composer. **Billing** stays deferred — free during beta.
 
 Explicitly **not** doing: an infinite zoomable canvas over the fleet. For a handful of boxes it is
 strictly worse than the grouped, filterable table, and it would be copying a competitor's marketing

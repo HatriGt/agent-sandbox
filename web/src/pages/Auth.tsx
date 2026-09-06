@@ -27,5 +27,7 @@ export function SignUpPage() {
   if (!ready || !config) return <div className="bg-background h-full" aria-busy="true" />;
   if (me || token) return <Navigate to={to} replace />;
   if (config.mode !== "saas") return <Navigate to="/signin" replace />;
-  return <SignUpCard config={config} to={to} onDone={() => navigate(to, { replace: true })} />;
+  // A fresh account lands on the welcome flow (first API key + IDE hookup) unless it was heading
+  // somewhere specific — e.g. a deep link that bounced through sign-up.
+  return <SignUpCard config={config} to={to} onDone={() => navigate(to === "/dashboard" ? "/dashboard/welcome" : to, { replace: true })} />;
 }

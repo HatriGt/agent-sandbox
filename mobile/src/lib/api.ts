@@ -124,6 +124,37 @@ export interface PullDetail extends PullInfo {
   truncated?: boolean;
 }
 
+// ---- run digest (mirrors src/digest.ts RunDigest) ----
+export interface DigestFile {
+  path: string;
+  status: string;
+  additions: number;
+  deletions: number;
+}
+export interface DigestPlanStep {
+  text: string;
+  state: "done" | "active" | "todo";
+  /** True when an err-marked tool call ran while this step was the active one. */
+  failed?: boolean;
+}
+export interface RunDigest {
+  box: string;
+  task: string;
+  state: "done" | "failed" | "waiting" | "running";
+  exitCode?: number;
+  /** Wall-clock ms from the first/last plan sentinel stamps. */
+  startedAt?: number;
+  endedAt?: number;
+  plan: DigestPlanStep[];
+  files: DigestFile[];
+  failedCommands: { name: string; arg?: string }[];
+  questions: { question: string; answer?: string }[];
+  /** One sentence for notifications and list rows. */
+  headline: string;
+  /** Post-run verification outcome, when the delegate asked for one. */
+  verified?: { mode: "command" | "criterion"; pass: boolean; detail: string };
+}
+
 export type McpTransport = "stdio" | "http" | "sse";
 export interface McpServerView {
   name: string;
@@ -394,11 +425,15 @@ export const api = {
     return { ...snap, lifecycle: snap.lifecycle ?? { capacity: 0, poolSize: 0 } };
   },
   watch: (session: string) => get<WatchSnapshot>("/watch.json", { session }),
+  /** The run receipt for a finished thread — headline, plan, files, questions. */
+  digest: (session: string) => get<RunDigest>("/digest.json", { session }),
   delegate: (input: {
     task: string;
     repos?: { repo: string; ref?: string }[];
     attachments?: { name: string; dataUrl: string }[];
     model?: string;
+    /** Exactly one key: a sandbox command (exit 0 = verified) or a plain-language criterion. */
+    verify?: { command: string } | { criterion: string };
   }) => post<DelegateResult>("/delegate.json", { source: "git", ...input }, AGENT_TIMEOUT_MS),
   resume: (session: string, message: string, opts: { force?: boolean; model?: string } = {}) =>
     post<{ output: string; queued?: undefined } | { queued: true; id: string }>("/resume.json", {

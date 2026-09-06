@@ -194,6 +194,36 @@ export interface WatchSnapshot extends Omit<BoxView, "role"> {
   log: string;
 }
 
+/** Walk-away notifications: the owner's webhook + which run events fire it. */
+export interface NotifySettings {
+  url: string;
+  events: { waiting: boolean; done: boolean; failed: boolean };
+  /** True when the deployment has a NOTIFY_WEBHOOK_URL fallback configured. */
+  fallbackConfigured: boolean;
+}
+
+/** Mirrors `RunDigest` in src/digest.ts — the run receipt for a finished thread. */
+export interface DigestPlanStep {
+  text: string;
+  state: "done" | "active" | "todo";
+  failed?: boolean;
+}
+export interface RunDigest {
+  box: string;
+  task: string;
+  state: "done" | "failed" | "waiting" | "running";
+  exitCode?: number;
+  startedAt?: number;
+  endedAt?: number;
+  plan: DigestPlanStep[];
+  files: { path: string; status: string; additions: number; deletions: number }[];
+  failedCommands: { name: string; arg?: string }[];
+  questions: { question: string; answer?: string }[];
+  headline: string;
+  /** Post-run verification, when the task was delegated with a `verify` clause. */
+  verified?: { mode: "command" | "criterion"; pass: boolean; detail: string };
+}
+
 export interface AskResult {
   answer: string;
   timedOut: boolean;
@@ -581,7 +611,14 @@ export const api = {
     ),
   devicePoll: (device_code: string) => post<DevicePoll>("/accounts/device/poll.json", { device_code }),
 
-  delegate: (input: { task: string; repos?: { repo: string; ref?: string }[]; attachments?: { name: string; dataUrl: string }[]; model?: string }) =>
+  delegate: (input: {
+    task: string;
+    repos?: { repo: string; ref?: string }[];
+    attachments?: { name: string; dataUrl: string }[];
+    model?: string;
+    /** Exactly one key: a command run in the sandbox after the run, or a criterion a read-only checker judges. */
+    verify?: { command: string } | { criterion: string };
+  }) =>
     post<{ ok: true; box: string; warm: boolean; output: string; inferred?: string[] } | { ok: false; question: string }>(
       "/delegate.json",
       { source: "git", ...input }
@@ -606,6 +643,18 @@ export const api = {
     fetch(url("/repos.json", refresh ? { q, refresh: "1" } : { q }), { headers: authHeaders, signal }).then(
       parse<{ repos: RepoInfo[]; total: number }>
     ),
+  /** Walk-away notifications: the caller's webhook and per-event toggles. */
+  notifySettings: (signal?: AbortSignal) =>
+    fetch(url("/notify.json"), { headers: authHeaders, signal }).then(parse<NotifySettings>),
+  saveNotifySettings: (url_: string, events: NotifySettings["events"]) =>
+    post<NotifySettings>("/notify.json", { url: url_, events }),
+  /** Fire a test event at the stored webhook (or the deployment fallback). */
+  testNotify: () => post<{ ok: boolean; status: number }>("/notify/test.json", {}),
+
+  /** The run receipt for a finished thread: plan, files, failed commands, questions, headline. */
+  digest: (session: string, signal?: AbortSignal) =>
+    fetch(url("/digest.json", { session }), { headers: authHeaders, signal }).then(parse<RunDigest>),
+
   /** Clone a repository into a running sandbox at /workspace/<name>. */
   attachRepo: (session: string, repo: string, ref?: string) =>
     post<{ ok: true; name: string; login?: string }>("/repos/attach.json", { session, repo, ref }),

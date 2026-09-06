@@ -13,6 +13,7 @@ import {
   ImagePlus,
   Lock,
   Plus,
+  ShieldCheck,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -193,6 +194,17 @@ export function Hub({
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
+  // Optional post-run verification: a command run in the sandbox, or a criterion a read-only checker
+  // judges. Collapsed by default so the composer stays clean; the chip lights up when filled.
+  const [verifyOpen, setVerifyOpen] = React.useState(false);
+  const [verifyMode, setVerifyMode] = React.useState<"command" | "criterion">("command");
+  const [verifyText, setVerifyText] = React.useState("");
+  const verifyActive = verifyText.trim().length > 0;
+  const clearVerify = () => {
+    setVerifyOpen(false);
+    setVerifyText("");
+  };
+
   // Dictation into the task box: finalized phrases land at the caret; sending stays manual.
   const voice = useVoiceInput({
     onFinal: (spoken) => {
@@ -262,11 +274,13 @@ export function Hub({
         repos: picked.length ? picked.map((p) => ({ repo: p.repo, ref: p.ref || undefined })) : undefined,
         attachments: attached.length ? attached.map((i) => ({ name: i.name, dataUrl: i.dataUrl })) : undefined,
         ...(model.picked ? { model: model.picked } : {}),
+        ...(verifyActive ? { verify: verifyMode === "command" ? { command: verifyText.trim() } : { criterion: verifyText.trim() } } : {}),
       });
       if (res.ok) {
         // Accepted: only now let go of the brief and the images (the draft effect clears storage too).
         setTask("");
         setImages([]);
+        clearVerify();
         if (res.inferred?.length) {
           toast("Attached from the task", {
             description: `${res.inferred.join(", ")} — named in your task, so it was checked out for the agent.`,
@@ -323,7 +337,7 @@ export function Hub({
           <PromptInput
             value={task}
             onValueChange={setTask}
-            onSubmit={getMe()?.kind === "user" && getMe()?.kind === "user" && (getMe() as { expired?: boolean }).expired ? () => {} : submit}
+            onSubmit={getMe()?.kind === "user" && (getMe() as { expired?: boolean }).expired ? () => {} : submit}
             isLoading={busy}
             className={cn(
               "bg-card border-line-strong focus-within:border-live/60 focus-within:shadow-[0_0_0_3px_color-mix(in_oklch,var(--live)_18%,transparent)] rounded-xl p-2 shadow-e1 transition-[border-color,box-shadow] duration-200",
@@ -399,6 +413,52 @@ export function Hub({
               </div>
             )}
 
+            {verifyOpen && (
+              <div className="enter border-t px-1 pt-2 pb-1 mt-1" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-center gap-1.5">
+                  <span className="bg-muted flex h-7 items-center gap-px rounded-md p-0.5" role="tablist" aria-label="Verification mode">
+                    {(["command", "criterion"] as const).map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        role="tab"
+                        aria-selected={verifyMode === m}
+                        onClick={() => setVerifyMode(m)}
+                        className={cn(
+                          "h-6 cursor-pointer rounded px-2 text-micro font-medium capitalize transition-colors",
+                          verifyMode === m ? "bg-card text-foreground shadow-e1" : "text-muted-foreground hover:text-foreground"
+                        )}
+                      >
+                        {m}
+                      </button>
+                    ))}
+                  </span>
+                  <input
+                    value={verifyText}
+                    onChange={(e) => setVerifyText(e.target.value)}
+                    placeholder={verifyMode === "command" ? "npm test" : "what must be true when it's done"}
+                    aria-label={verifyMode === "command" ? "Verification command" : "Verification criterion"}
+                    className={cn(
+                      "placeholder:text-faint text-foreground h-7 min-w-0 flex-1 bg-transparent px-1.5 outline-none",
+                      verifyMode === "command" ? "stamp" : "text-meta"
+                    )}
+                  />
+                  <button
+                    type="button"
+                    onClick={clearVerify}
+                    aria-label="Remove verification"
+                    className="text-muted-foreground hover:text-foreground grid size-6 shrink-0 cursor-pointer place-items-center rounded"
+                  >
+                    <X className="size-3" />
+                  </button>
+                </div>
+                <p className="text-muted-foreground mt-1 px-1 text-micro">
+                  {verifyMode === "command"
+                    ? "Runs in the sandbox after the agent finishes — exit 0 means verified."
+                    : "A read-only checker judges this against the workspace — it cannot edit anything."}
+                </p>
+              </div>
+            )}
             <PromptInputActions className="relative justify-between pt-1">
               <div ref={pickerRef} className="relative" onClick={(e) => e.stopPropagation()}>
                 <button
@@ -414,6 +474,19 @@ export function Hub({
                   {picked.length ? "Add another repo" : "Attach repos"}
                 </button>
                 <ModelChip current={model.current} models={model.models} defaultId={model.defaultId} onPick={model.pick} />
+                <button
+                  type="button"
+                  onClick={() => setVerifyOpen((v) => !v)}
+                  aria-expanded={verifyOpen}
+                  title="Verify the result after the run"
+                  className={cn(
+                    "flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2 text-micro font-medium transition-colors",
+                    verifyActive ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  )}
+                >
+                  <ShieldCheck className="size-3.5" aria-hidden />
+                  Verify
+                </button>
                 {showRepo && (
                   <RepoPicker
                     className="absolute top-full left-0 z-20 mt-2"

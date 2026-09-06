@@ -290,7 +290,7 @@ export default function App() {
     // moved, but the fleet snapshot won't list the new box until the next poll. Falling through to
     // "hub" here rendered the composer on top of the box URL for a few seconds (observed live), so
     // hold the box-loading skeleton until the box surfaces (or the cleanup effect routes home).
-    view === "fleet" ? "fleet" : view === "skills" ? "skills" : view === "integrations" ? "integrations" : view === "account" ? "account" : view === "connect" ? "connect" : view === "admin" ? "admin" : route.view === "pr" ? `pr:${route.repo}#${route.number}` : booting && !selectedBox ? "booting" : selectedBox ? `box:${selectedBox.name}` : view === "box" ? "box-loading" : "hub";
+    view === "fleet" ? "fleet" : view === "skills" ? "skills" : view === "integrations" ? "integrations" : view === "account" ? "account" : view === "connect" ? "connect" : view === "welcome" ? "welcome" : view === "admin" ? "admin" : route.view === "pr" ? `pr:${route.repo}#${route.number}` : booting && !selectedBox ? "booting" : selectedBox ? `box:${selectedBox.name}` : view === "box" ? "box-loading" : "hub";
 
   return (
     <TooltipProvider delayDuration={400}>
@@ -444,9 +444,10 @@ export default function App() {
                   <NavItem active={view === "integrations"} onClick={showAccounts} icon={<Plug />} label="Integrations" shortcut="g a" />
                 </span>
                 <TrialBadge className="mx-2.5 mt-1 self-start" />
-                {getMe()?.mode === "saas" && (
-                  <NavItem
-                    active={view === "account" || view === "connect" || view === "admin"}
+                {/* Account/Connect must be reachable in token mode too — the operator uses
+                    notifications, API keys and the IDE wizard just like a saas user. */}
+                <NavItem
+                    active={view === "account" || view === "connect" || view === "admin" || view === "welcome"}
                     onClick={showAccount}
                     icon={
                       getMe()?.kind === "user" ? (
@@ -457,7 +458,7 @@ export default function App() {
                     }
                     label={getMe()?.kind === "user" ? (getMe() as { name: string | null; login: string }).name || (getMe() as { login: string }).login : "Operator"}
                   />
-                )}
+
                 <div className="flex items-center justify-between px-2.5 pt-1">
                   <p className="text-muted-foreground text-micro">{live ? <>Updated <Freshness updatedAt={updatedAt} /></> : data ? "Reconnecting…" : error ? "Offline — retrying" : "Connecting…"}</p>
                   <div className="flex items-center">
@@ -542,6 +543,10 @@ export default function App() {
                 ) : view === "connect" ? (
                   <PageEnter className="h-full min-h-0">
                     <Connect onDone={showAccount} onBack={showAccount} />
+                  </PageEnter>
+                ) : view === "welcome" ? (
+                  <PageEnter className="h-full min-h-0">
+                    <Connect welcome onDone={() => go({ view: "hub" })} onBack={() => go({ view: "hub" })} />
                   </PageEnter>
                 ) : route.view === "pr" ? (
                   <div className="h-full min-h-0">

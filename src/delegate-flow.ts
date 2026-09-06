@@ -12,6 +12,7 @@ import type { Config } from "./config.js";
 import type { HandlerDeps } from "./handlers.js";
 import { validateDelegateInput, type DelegateSource, type Attachment } from "./delegate-input.js";
 import type { AgentCreds } from "./msb.js";
+import type { VerifyPlan } from "./verify.js";
 
 export interface DelegateFlowInput {
   source?: DelegateSource;
@@ -25,6 +26,12 @@ export interface DelegateFlowInput {
   attachments?: Attachment[];
   /** Model alias for message 1 (already allowlist-validated by the route). */
   model?: string;
+  /**
+   * Verified-outcomes clause (src/verify.ts), already validated by the route via verifyPlanOf.
+   * The flow itself does not run it — a browser delegate returns before the run finishes, so the
+   * route runs verification on the done edge of the fleet sweep and stamps the digest.
+   */
+  verify?: VerifyPlan;
 }
 
 export type DelegateFlowResult =

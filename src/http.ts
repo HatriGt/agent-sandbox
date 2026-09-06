@@ -33,6 +33,7 @@ import { keyFromEnvOrFile, makeSecretBox } from "./secretbox.js";
 import { allBlobs, registerUserStoreBackend, withOwner, OPERATOR_OWNER } from "./user-store.js";
 import { detectTransitions, formatNotification, makeNotifier, type BoxRunView, type NotifyEvent } from "./notify.js";
 import { buildDigest } from "./digest.js";
+import { verifyPlanOf, type VerifyPlan, type VerifyResult } from "./verify.js";
 import { parseTrace } from "./trace.js";
 import { loadNotifySettings, normalizeNotifySettings, saveNotifySettings } from "./notify-store.js";
 import { createLocalUser, deleteUser, listUsers, ownerOf, setUserRole, validateSignup, createPasswordUser, authenticatePassword, setPassword, updateProfile, verifyPassword, PASSWORD_MIN, listSessions, revokeSession, revokeOtherSessions, startTrial, planOf, setPlan, TrialExpiredError } from "./identity.js";
@@ -277,6 +278,12 @@ const inbox = new Inbox();
 // restart falls back to the default, and the thread's "session started (model …)" lines keep the
 // historical truth regardless.
 const boxModels = new Map<string, string>();
+// Verified outcomes for dashboard runs: a browser delegate returns before the run finishes, so the
+// clause waits here and runs on the done edge of the fleet sweep; the result feeds /digest.json and
+// the done notification. In-memory like boxModels — a restart drops the pending clause (visible,
+// not silent: the digest simply carries no verified stamp), never a queued answer.
+const boxVerify = new Map<string, VerifyPlan>();
+const boxVerified = new Map<string, VerifyResult>();
 
 const resumeQuietly = (session: string, message: string) => {
   // A resume boots a sleeping box; forget the "stopped" memory and the cached idle snapshot at once so
@@ -344,7 +351,7 @@ const sendNotification = async (ev: NotifyEvent): Promise<void> => {
     headline = await watchHub
       .read(ev.box)
       .then((snap) =>
-        buildDigest({ box: ev.box, task: snap.task ?? "", runState: snap.runState, exitCode: snap.exitCode, events: parseTrace(snap.log ?? ""), files: [] }).headline
+        buildDigest({ box: ev.box, task: snap.task ?? "", runState: snap.runState, exitCode: snap.exitCode, events: parseTrace(snap.log ?? ""), files: [], verified: boxVerified.get(ev.box) }).headline
       )
       .catch(() => undefined);
   }
@@ -410,7 +417,18 @@ const readFleet = makeFleetReader(
         .map((b) => ({ name: b.name, runState: b.runState, exitCode: b.exitCode, question: b.question }));
       for (const ev of detectTransitions(prevRunViews, nextRunViews)) {
         notifyCtx.set(ev.box, { title: titles[ev.box], task: boxes.find((b) => b.name === ev.box)?.task });
-        void notifier.notify(ev);
+        // Verified outcomes for dashboard runs: a clean finish runs the stored clause BEFORE the
+        // notification so the push can honestly say verified/UNVERIFIED. Failure paths drop the
+        // clause — verification of a failed run would prove nothing.
+        const vplan = ev.kind === "done" || ev.kind === "failed" ? boxVerify.get(ev.box) : undefined;
+        if (vplan) boxVerify.delete(ev.box);
+        if (vplan && ev.kind === "done" && (ev.exitCode ?? 0) === 0 && deps.verify) {
+          void deps
+            .verify(cfg, ev.box, vplan)
+            .then((r) => boxVerified.set(ev.box, r))
+            .catch(() => {})
+            .finally(() => void notifier.notify(ev));
+        } else void notifier.notify(ev);
         // Turn-end checkpoint: the moment a turn settles (done or paused on a question) is the
         // restore point for whatever the operator sends next. Online in-box tar (~1 s, no VM stop)
         // behind the per-box lock so a fast follow-up queues instead of racing the capture.
@@ -1529,6 +1547,7 @@ app.get("/digest.json", async (req: Request, res: Response) => {
       exitCode: snap.exitCode,
       events: parseTrace(snap.log ?? ""),
       files,
+      verified: boxVerified.get(session),
     });
     // The snapshot's log/task/question are already redacted by the hub's reader; the trace-derived
     // strings inherit that. Task from the sentinel file is redacted there too.
@@ -2105,6 +2124,8 @@ app.post("/teardown.json", async (req: Request, res: Response) => {
     watchHub.drop(session);
     inbox.clear(session);
     boxModels.delete(session);
+    boxVerify.delete(session);
+    boxVerified.delete(session);
     void forgetTitle(cfg, session).catch(() => {});
     res.json({ ok: true });
   } catch (e) {
@@ -2130,6 +2151,17 @@ app.post("/delegate.json", async (req: Request, res: Response) => {
     if (typeof body.repo === "string" && !REPO_RE.test(body.repo.trim().replace(/\.git$/i, ""))) {
       res.status(400).json({ error: "repo must be owner/name" });
       return;
+    }
+    // Verified outcomes: validate FIRST (same rule as the MCP tool — a malformed clause must fail
+    // before any box work). The plan is stored on success and run on the done edge of the sweep.
+    let verifyPlan: VerifyPlan | undefined;
+    if (body.verify !== undefined) {
+      const vp = verifyPlanOf(body.verify as Record<string, unknown>);
+      if (!vp.ok) {
+        res.status(400).json({ error: vp.question });
+        return;
+      }
+      verifyPlan = vp.plan ?? undefined;
     }
     const explicit = Array.isArray(body.repos)
       ? (body.repos as Array<{ repo?: string; ref?: string }>)
@@ -2184,9 +2216,11 @@ app.post("/delegate.json", async (req: Request, res: Response) => {
       githubToken: typeof body.githubToken === "string" ? body.githubToken : undefined,
       githubAccount: typeof body.githubAccount === "string" ? body.githubAccount : undefined,
       model,
+      verify: verifyPlan,
     });
     if (result.ok) {
       if (model) boxModels.set(result.box, model);
+      if (verifyPlan) boxVerify.set(result.box, verifyPlan);
       void generateTitle(cfg, result.box, task).catch(() => {});
     }
     res.json(inferred.length ? { ...result, inferred } : result);

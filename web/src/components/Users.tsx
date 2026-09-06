@@ -59,7 +59,6 @@ export function Users() {
     }
   };
   const remove = async (u: UserRow) => {
-    if (!window.confirm(`Remove ${u.login}? Their sessions and keys stop working; their machines pass to the operator.`)) return;
     try {
       await api.deleteUser(u.id);
       toast.success(`Removed ${u.login}`);
@@ -123,7 +122,7 @@ export function Users() {
             <span className="text-faint hidden shrink-0 text-micro sm:inline">
               {u.boxes} {u.boxes === 1 ? "machine" : "machines"} · {u.keys} {u.keys === 1 ? "key" : "keys"}
               {u.github ? " · GitHub linked" : ""}
-              {u.lastSeenAt ? ` · seen ${fmtAgo(Date.parse(u.lastSeenAt) / 1000)}` : ""}
+              {u.lastSeenAt && Number.isFinite(Date.parse(u.lastSeenAt)) ? ` · seen ${fmtAgo(Date.parse(u.lastSeenAt) / 1000)}` : ""}
             </span>
             {u.plan !== "pro" ? (
               <Button size="sm" variant="ghost" onClick={() => setPlan(u, "pro")} className="text-muted-foreground" title="Unlimited time">
@@ -146,9 +145,7 @@ export function Users() {
             <Button size="sm" variant="ghost" onClick={() => toggleRole(u)} className="text-muted-foreground" disabled={u.id === myId} title={u.role === "admin" ? "Make a regular user" : "Make an admin"}>
               {u.role === "admin" ? "Demote" : "Admin"}
             </Button>
-            <Button size="icon-sm" variant="ghost" aria-label={`Remove ${u.login}`} onClick={() => remove(u)} disabled={u.id === myId} className="text-muted-foreground hover:text-destructive">
-              <Trash2 />
-            </Button>
+            <RemoveButton login={u.login} disabled={u.id === myId} onRemove={() => remove(u)} />
           </li>
         ))}
         <li className="flex items-center gap-2 px-3.5 py-2.5">
@@ -167,5 +164,40 @@ export function Users() {
         </li>
       </ul>
     </section>
+  );
+}
+
+/**
+ * Arm-to-confirm removal (same pattern as destroying a machine): first click arms, the second within
+ * 4 s removes. Removing a user stops their sessions and keys; their machines pass to the operator.
+ */
+function RemoveButton({ login, disabled, onRemove }: { login: string; disabled?: boolean; onRemove: () => void }) {
+  const [armed, setArmed] = React.useState(false);
+  React.useEffect(() => {
+    if (!armed) return;
+    const t = window.setTimeout(() => setArmed(false), 4000);
+    return () => window.clearTimeout(t);
+  }, [armed]);
+  if (armed) {
+    return (
+      <Button
+        size="sm"
+        variant="destructive"
+        aria-label={`Confirm removing ${login}`}
+        title="Their sessions and keys stop working; their machines pass to the operator."
+        onClick={() => {
+          setArmed(false);
+          onRemove();
+        }}
+      >
+        <Trash2 />
+        Confirm remove
+      </Button>
+    );
+  }
+  return (
+    <Button size="icon-sm" variant="ghost" aria-label={`Remove ${login}`} onClick={() => setArmed(true)} disabled={disabled} className="text-muted-foreground hover:text-destructive">
+      <Trash2 />
+    </Button>
   );
 }

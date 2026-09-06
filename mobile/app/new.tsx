@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, View } from "react-native";
+import * as Haptics from "expo-haptics";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
@@ -69,6 +70,9 @@ export default function NewTask() {
   const [model, setModel] = useState<string | null>(null);
   const [defaultModel, setDefaultModel] = useState<string | null>(null);
   const [showModels, setShowModels] = useState(false);
+  const [verifyOpen, setVerifyOpen] = useState(false);
+  const [verifyMode, setVerifyMode] = useState<"command" | "criterion">("command");
+  const [verifyText, setVerifyText] = useState("");
 
   const trialExpired = me?.kind === "user" && me.expired;
   const keyboardInset = useKeyboardInset();
@@ -135,6 +139,9 @@ export default function NewTask() {
         repos: picked.length ? picked : undefined,
         attachments: attachments.length ? attachments : undefined,
         ...(model ? { model } : {}),
+        ...(verifyText.trim()
+          ? { verify: verifyMode === "command" ? { command: verifyText.trim() } : { criterion: verifyText.trim() } }
+          : {}),
       }),
       // Fleet-as-of-submit: /booting attaches the moment a NEW box (or a pool
       // box flipping pool-free -> claimed) surfaces — the web's early-attach.
@@ -401,6 +408,80 @@ export default function NewTask() {
               )}
             </View>
           )}
+
+          <View style={{ gap: 8 }}>
+            <Pressable
+              onPress={() => {
+                Haptics.selectionAsync().catch(() => {});
+                setVerifyOpen((o) => !o);
+              }}
+              accessibilityLabel="Verify the result"
+              style={({ pressed }) => ({
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 8,
+                paddingVertical: 4,
+                opacity: pressed ? 0.7 : 1,
+              })}
+            >
+              <Icon name="shield" size={14} color={verifyText.trim() ? palette.live : palette.mutedForeground} />
+              <T variant="meta" weight="medium" tone={verifyText.trim() ? "live" : "muted"} style={{ flex: 1 }}>
+                Verify the result{verifyText.trim() && !verifyOpen ? ` · ${verifyMode}` : ""}
+              </T>
+              <Icon name={verifyOpen ? "chevron-down" : "chevron-right"} size={14} color={palette.faint} />
+            </Pressable>
+            {verifyOpen && (
+              <View style={{ gap: 8 }}>
+                <View style={{ flexDirection: "row", gap: 6 }}>
+                  {(["command", "criterion"] as const).map((m) => (
+                    <Pressable
+                      key={m}
+                      onPress={() => {
+                        Haptics.selectionAsync().catch(() => {});
+                        setVerifyMode(m);
+                      }}
+                      style={{
+                        paddingVertical: 6,
+                        paddingHorizontal: 12,
+                        borderRadius: radius.pill,
+                        borderWidth: 1,
+                        borderColor: palette.border,
+                        backgroundColor: verifyMode === m ? palette.accent : "transparent",
+                      }}
+                    >
+                      <T variant="meta" weight={verifyMode === m ? "semibold" : "regular"}>
+                        {m === "command" ? "Command" : "Criterion"}
+                      </T>
+                    </Pressable>
+                  ))}
+                </View>
+                <TextInput
+                  value={verifyText}
+                  onChangeText={setVerifyText}
+                  placeholder={verifyMode === "command" ? "npm test" : "what must be true when it's done"}
+                  placeholderTextColor={palette.faint}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  style={{
+                    borderWidth: 1,
+                    borderColor: palette.input,
+                    borderRadius: radius.xl,
+                    backgroundColor: palette.card,
+                    paddingHorizontal: 12,
+                    paddingVertical: 10,
+                    color: palette.foreground,
+                    fontFamily: verifyMode === "command" ? fonts.mono : fonts.sans,
+                    fontSize: type.body.fontSize,
+                  }}
+                />
+                <T variant="micro" tone="faint">
+                  {verifyMode === "command"
+                    ? "Runs in the sandbox after the agent finishes — exit 0 means verified."
+                    : "A read-only checker judges this — it can't edit anything."}
+                </T>
+              </View>
+            )}
+          </View>
 
           <View style={{ gap: 8 }}>
             <T variant="meta" weight="medium" tone="muted">
