@@ -56,7 +56,7 @@ import { makeCredentialBroker } from "./broker.js";
 import { FILE_INDEX_CAP, fileDetailsCommand, makeFileIndex, parseFileDetails } from "./files.js";
 import { canRevert, captureCmd, checkpointForMessage, listCmd, parseCkptLs, revertCmd, withBoxLock } from "./checkpoint.js";
 import { fetchModels, isAllowedModel } from "./models.js";
-import { exec as execInBox, execWithInput } from "./msb.js";
+import { exec as execInBox, execWithInput, execWithSecretEnv } from "./msb.js";
 import { loadStore, saveStore, pickDefaultAccount, upsertAccount, removeAccount, setDefaultAccount } from "./gh-token-store.js";
 import { probeToken } from "./gh-probe.js";
 import { viewAccounts, deviceStart, devicePoll } from "./accounts.js";
@@ -1573,7 +1573,7 @@ app.get("/diff.json", async (req: Request, res: Response) => {
 app.post("/pr/merge.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   const { session, repo, number, method, auto, admin } = (req.body ?? {}) as { session?: string; repo?: string; number?: number; method?: string; auto?: boolean; admin?: boolean };
-  if (!session || !/^[\w.-]+$/.test(session) || !repo || !/^[\w.-]+\/[\w.-]+$/.test(repo) || !Number.isFinite(Number(number))) {
+  if (!session || !/^[\w.-]+$/.test(session) || !repo || !/^[\w.-]+\/[\w.-]+$/.test(repo) || !(Number.isInteger(Number(number)) && Number(number) > 0)) {
     res.status(400).json({ error: "session, repo (owner/name) and number are required" });
     return;
   }
@@ -1598,8 +1598,9 @@ app.post("/pr/merge.json", async (req: Request, res: Response) => {
     // policy. Only meaningful when the connected account actually has bypass rights; the UI keeps
     // it behind its own explicit confirm. --auto and --admin are mutually exclusive in gh.
     const extra = admin ? " --admin" : auto ? " --auto" : "";
-    const r = await execInBox(cfg, session, `gh pr merge ${Number(number)} --repo ${shellQuote(repo)} ${methodFlag}${extra} 2>&1`, {
-      env: { GH_TOKEN: creds.primaryToken, GITHUB_TOKEN: creds.primaryToken },
+    const r = await execWithSecretEnv(cfg, session, `gh pr merge ${Number(number)} --repo ${shellQuote(repo)} ${methodFlag}${extra} 2>&1`, {
+      GH_TOKEN: creds.primaryToken,
+      GITHUB_TOKEN: creds.primaryToken,
     });
     forgetPull(repo, Number(number));
     res.json({ ok: true, auto: !!auto && !admin, output: redactor.redact((r.stdout ?? "").trim().slice(-600)) });
@@ -1620,7 +1621,7 @@ app.post("/pr/merge.json", async (req: Request, res: Response) => {
 app.post("/pr/approve.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   const { session, repo, number } = (req.body ?? {}) as { session?: string; repo?: string; number?: number };
-  if (!session || !/^[\w.-]+$/.test(session) || !repo || !/^[\w.-]+\/[\w.-]+$/.test(repo) || !Number.isFinite(Number(number))) {
+  if (!session || !/^[\w.-]+$/.test(session) || !repo || !/^[\w.-]+\/[\w.-]+$/.test(repo) || !(Number.isInteger(Number(number)) && Number(number) > 0)) {
     res.status(400).json({ error: "session, repo (owner/name) and number are required" });
     return;
   }
@@ -1630,8 +1631,9 @@ app.post("/pr/approve.json", async (req: Request, res: Response) => {
       res.status(422).json({ error: "No GitHub account connected for this machine's owner — connect one in Integrations, then retry." });
       return;
     }
-    const r = await execInBox(cfg, session, `gh pr review ${Number(number)} --repo ${shellQuote(repo)} --approve 2>&1`, {
-      env: { GH_TOKEN: creds.primaryToken, GITHUB_TOKEN: creds.primaryToken },
+    const r = await execWithSecretEnv(cfg, session, `gh pr review ${Number(number)} --repo ${shellQuote(repo)} --approve 2>&1`, {
+      GH_TOKEN: creds.primaryToken,
+      GITHUB_TOKEN: creds.primaryToken,
     });
     forgetPull(repo, Number(number));
     res.json({ ok: true, output: redactor.redact((r.stdout ?? "").trim().slice(-600)) });
@@ -1653,7 +1655,7 @@ app.post("/pr/approve.json", async (req: Request, res: Response) => {
 async function runPrAction(req: Request, res: Response, build: (number: number, repo: string) => string | { error: string }) {
   if (!dashAuthed(req, res)) return;
   const { session, repo, number } = (req.body ?? {}) as { session?: string; repo?: string; number?: number };
-  if (!session || !/^[\w.-]+$/.test(session) || !repo || !/^[\w.-]+\/[\w.-]+$/.test(repo) || !Number.isFinite(Number(number))) {
+  if (!session || !/^[\w.-]+$/.test(session) || !repo || !/^[\w.-]+\/[\w.-]+$/.test(repo) || !(Number.isInteger(Number(number)) && Number(number) > 0)) {
     res.status(400).json({ error: "session, repo (owner/name) and number are required" });
     return;
   }
@@ -1668,8 +1670,9 @@ async function runPrAction(req: Request, res: Response, build: (number: number, 
       res.status(422).json({ error: "No GitHub account connected for this machine's owner — connect one in Integrations, then retry." });
       return;
     }
-    const r = await execInBox(cfg, session, `gh pr ${built} 2>&1`, {
-      env: { GH_TOKEN: creds.primaryToken, GITHUB_TOKEN: creds.primaryToken },
+    const r = await execWithSecretEnv(cfg, session, `gh pr ${built} 2>&1`, {
+      GH_TOKEN: creds.primaryToken,
+      GITHUB_TOKEN: creds.primaryToken,
     });
     forgetPull(repo, Number(number));
     res.json({ ok: true, output: redactor.redact((r.stdout ?? "").trim().slice(-600)) });
@@ -1718,7 +1721,7 @@ app.get("/pr/detail.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   const repo = typeof req.query.repo === "string" ? req.query.repo : "";
   const number = Number(req.query.number);
-  if (!/^[\w.-]+\/[\w.-]+$/.test(repo) || !Number.isFinite(number)) {
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repo) || !(Number.isInteger(number) && number > 0)) {
     res.status(400).json({ error: "repo (owner/name) and number are required" });
     return;
   }
@@ -1745,7 +1748,7 @@ app.get("/pr.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   const repo = typeof req.query.repo === "string" ? req.query.repo : "";
   const number = Number(req.query.number);
-  if (!/^[\w.-]+\/[\w.-]+$/.test(repo) || !Number.isFinite(number)) {
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repo) || !(Number.isInteger(number) && number > 0)) {
     res.status(400).json({ error: "repo (owner/name) and number are required" });
     return;
   }

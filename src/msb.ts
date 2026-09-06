@@ -141,6 +141,12 @@ export async function createBox(cfg: Config, opts: CreateBoxOpts): Promise<void>
     // what -m says. Pin the ceiling to the cap so the meters show the real limit.
     "--max-memory",
     cfg.memory,
+    // Same story for the root disk: without --root-disk every box gets the runtime's default 4G
+    // volume and the disk meter reads "of 3.9 GB". Boxes start at cfg.rootDisk (default 1G) and
+    // the operator grows from there (msb modify --root-disk is grow-only). Snapshot boots skip
+    // the flag — a snapshot carries its own rootfs size (pinned at bake time in createBareBox),
+    // and asking for a smaller disk than the snapshot was baked with would fail the boot.
+    ...(cfg.snapshot ? [] : ["--root-disk", cfg.rootDisk]),
     ...egressFlags(cfg),
     "--idle-timeout",
     cfg.idleTimeout,
@@ -195,6 +201,22 @@ export async function execWithInput(cfg: Config, box: string, sh: string, input:
   return run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, remoteCmd], { input });
 }
 
+/**
+ * Like `exec`, but the env values travel on STDIN, not as `-e K=V` argv flags. The `-e` route puts
+ * the value in the VPS-side ssh remote command string — readable in /proc/⋆/cmdline by any local
+ * user on the host for the duration of the call — which is unacceptable for a live GitHub token.
+ * The exports are evaluated inside the box before the command runs; nothing persists.
+ */
+export async function execWithSecretEnv(cfg: Config, box: string, sh: string, env: Record<string, string>) {
+  const exports = Object.entries(env)
+    .map(([k, v]) => {
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) throw new Error(`invalid env name: ${k}`);
+      return `export ${k}=${shellQuote(v)}`;
+    })
+    .join("\n");
+  return execWithInput(cfg, box, `eval "$(cat)"\n${sh}`, `${exports}\n`);
+}
+
 // ----- Warm pool -------------------------------------------------------------------------
 // Pool boxes are pre-booted from the snapshot with OPEN egress and pre-bootstrapped (claude+gh
 // + git/gh auth + npm). Claiming one = copy the repo in, skipping the ~4s boot + bootstrap.
@@ -216,6 +238,8 @@ export async function bootWarmBox(cfg: Config): Promise<string> {
     cfg.memory,
     "--max-memory",
     cfg.memory, // pin the hotplug ceiling too, or metrics report the default 4G as the total
+    // No --root-disk: pool boxes always boot --from-snapshot, and the snapshot carries its own
+    // rootfs size (pinned at bake time in createBareBox) — see createBox.
     ...egressFlags(cfg, true), // pooled boxes always boot with open egress
     // An UNCLAIMED warm box must persist until a delegation claims it, so it uses the longer
     // poolIdleTimeout (not a session's idleTimeout) — otherwise it idle-stops and the pool drains.
@@ -1646,6 +1670,10 @@ export async function createBareBox(cfg: Config, name: string): Promise<void> {
     cfg.memory,
     "--max-memory",
     cfg.memory,
+    // The snapshot baked from this box is what warm-pool boxes boot from; its rootfs must match
+    // the default tier or every snapshot-booted box inherits a bigger disk than configured.
+    "--root-disk",
+    cfg.rootDisk,
     "--net",
     "public",
     "--pull",
@@ -1678,9 +1706,9 @@ export async function setBoxMemory(cfg: Config, box: string, tier: MemoryTier): 
 /**
  * Root disk tiers. GROW-ONLY: `msb modify --root-disk` on a managed disk cannot shrink, so the UI
  * must offer only tiers at or above the current size — a "shrink" would fail at the runtime with a
- * confusing error. Boxes are created at 4G.
+ * confusing error. Boxes are created at cfg.rootDisk (default 1G).
  */
-export const DISK_TIERS = ["4G", "8G", "16G", "32G"] as const;
+export const DISK_TIERS = ["1G", "2G", "4G", "8G", "16G", "32G"] as const;
 export type DiskTier = (typeof DISK_TIERS)[number];
 
 export function isDiskTier(v: unknown): v is DiskTier {

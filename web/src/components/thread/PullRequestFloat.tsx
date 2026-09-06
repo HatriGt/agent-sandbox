@@ -260,8 +260,11 @@ function Header({ info, v, url, session, repo, number, onMerged, onClose }: { in
   const [result, setResult] = React.useState<"merged" | "auto" | null>(null);
   // The last failure decides the retry offer: a branch-policy refusal is exactly what --auto solves.
   const policyBlocked = !!error && /policy prohibits|--auto/.test(error);
+  // Remember the refused method so the rescue retries the SAME method the user picked.
+  const triedMethod = React.useRef<MergeMethod>("merge");
 
   const merge = async (method: MergeMethod, auto: boolean, admin = false) => {
+    triedMethod.current = method;
     setBusy(true);
     setError(null);
     try {
@@ -311,7 +314,7 @@ function Header({ info, v, url, session, repo, number, onMerged, onClose }: { in
         <div role="alert" className="border-destructive/30 bg-destructive/8 mx-1.5 mt-1.5 rounded-lg border px-2.5 py-2">
           <p className="text-destructive text-micro font-medium">Merge failed</p>
           <p className="text-foreground/80 mt-0.5 text-micro whitespace-pre-wrap">{error}</p>
-          {policyBlocked && <PolicyRescue busy={busy} onAuto={() => void merge("merge", true)} onAdmin={() => void merge("merge", false, true)} />}
+          {policyBlocked && <PolicyRescue busy={busy} onAuto={() => void merge(triedMethod.current, true)} onAdmin={() => void merge(triedMethod.current, false, true)} />}
         </div>
       )}
     </>

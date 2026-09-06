@@ -95,12 +95,20 @@ export function Thread({
     setWake({ startedAt: Date.now(), error: null });
     api.wake(box.name).catch((e: unknown) => setWake((w) => (w ? { ...w, error: e instanceof Error ? e.message : String(e) } : w)));
   }, [sleeping, box.name]);
+  const wasSleeping = React.useRef(false);
   React.useEffect(() => {
-    // Once the box reports running again, let the card show "awake" briefly, then leave.
-    if (!sleeping && wake) {
-      const t = window.setTimeout(() => setWake(null), 1400);
-      return () => window.clearTimeout(t);
+    // Once the box reports running again, let the card show "awake" briefly, then leave. On the
+    // sleeping→awake transition, re-arm the auto-wake guard so the NEXT time this box sleeps,
+    // opening the thread wakes it again. (Only on the transition: sleepNow/setMemory/setDisk mark
+    // wokeRef while the box is still awake, and clearing it then would bounce the box back up.)
+    if (!sleeping) {
+      if (wasSleeping.current) wokeRef.current = null;
+      if (wake) {
+        const t = window.setTimeout(() => setWake(null), 1400);
+        return () => window.clearTimeout(t);
+      }
     }
+    wasSleeping.current = sleeping;
   }, [sleeping, wake]);
   // Reopen the stream when the fleet poll sees the box come back to life (a follow-up woke a
   // finished run, or a sleeping microVM restarted): the server closed the stream at the terminal
@@ -232,26 +240,19 @@ export function Thread({
   };
 
   // Sleep on demand: `msb stop`, nothing removed. Marking wokeRef first keeps the "open a sleeping
-  // thread wakes it" effect from bouncing the box straight back up, and sleptHere makes the thread
-  // show a resting "Asleep · Wake" card instead of the waking pill (which would lie, or re-wake it).
+  // thread wakes it" effect from bouncing the box straight back up; with no wake in flight the
+  // thread shows the resting "Asleep · Wake" card instead of the waking pill.
   const [sleepBusy, setSleepBusy] = React.useState(false);
-  const [sleptHere, setSleptHere] = React.useState(false);
-  React.useEffect(() => setSleptHere(false), [box.name]);
   const sleepNow = () => {
     setSleepBusy(true);
     wokeRef.current = box.name;
-    setSleptHere(true);
     api
       .sleep(box.name)
       .then(() => toast.success(`${friendlyName(box.name)} is asleep`, { description: "The workspace and session are kept. Waking is one click away." }))
-      .catch((e: unknown) => {
-        setSleptHere(false);
-        toast.error("Could not put it to sleep", { description: e instanceof Error ? e.message : String(e) });
-      })
+      .catch((e: unknown) => toast.error("Could not put it to sleep", { description: e instanceof Error ? e.message : String(e) }))
       .finally(() => setSleepBusy(false));
   };
   const wakeNow = React.useCallback(() => {
-    setSleptHere(false);
     setWake({ startedAt: Date.now(), error: null });
     api.wake(box.name).catch((e: unknown) => setWake((w) => (w ? { ...w, error: e instanceof Error ? e.message : String(e) } : w)));
   }, [box.name]);
@@ -539,12 +540,10 @@ export function Thread({
             {loadingTrace && <ThreadSkeleton withTask={!!box.task} />}
 
             <AnimatePresence>
-              {sleeping && sleptHere ? (
+              {sleeping && !wake ? (
                 <SleepingCard key="sleeping" onWake={wakeNow} />
               ) : (
-                (sleeping || wake) && (
-                  <WakingCard key="waking" awake={!sleeping} startedAt={wake?.startedAt ?? Date.now()} error={wake?.error} onRetry={wakeNow} />
-                )
+                wake && <WakingCard key="waking" awake={!sleeping} startedAt={wake.startedAt} error={wake.error} onRetry={wakeNow} />
               )}
             </AnimatePresence>
 

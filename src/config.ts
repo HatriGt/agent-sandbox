@@ -48,6 +48,8 @@ export interface Config {
   sleepTtl: string;
   /** Per-box memory cap (e.g. 512M, 1G). */
   memory: string;
+  /** Root-disk size every new box boots with (e.g. 1G). Grow-only after creation. */
+  rootDisk: string;
   /** Max concurrent live boxes; new delegations are refused past this. */
   maxBoxes: number;
   /** Number of pre-booted warm boxes to keep idle (0 disables pooling). */
@@ -199,6 +201,7 @@ export function loadConfig(): Config {
     poolRefillIntervalMs: Number(process.env.MSB_POOL_REFILL_MS ?? "60000"),
     maxDuration: req("MSB_MAX_DURATION", "1h"),
     memory: req("MSB_MEMORY", "1G"),
+    rootDisk: req("MSB_ROOT_DISK", "1G"),
     maxBoxes: Number(process.env.MSB_MAX_BOXES ?? "5"),
     poolSize: Number(process.env.MSB_POOL_SIZE ?? "1"),
 

@@ -31,7 +31,7 @@ export function parseConsolePath(pathname: string): ConsoleRoute {
   const rest = pathname.startsWith(BASE) ? pathname.slice(BASE.length) : pathname;
   // The PR page is nested under its box, so it MUST be matched before the /box/:name rule below —
   // that one is a prefix match and would otherwise swallow the whole path.
-  const pr = rest.match(/^\/box\/([^/]+)\/pr\/([^/]+)\/([^/]+)\/(\d+)/);
+  const pr = rest.match(/^\/box\/([^/]+)\/pr\/([^/]+)\/([^/]+)\/(\d+)\/?$/);
   if (pr) return { view: "pr", name: decodeURIComponent(pr[1]), repo: `${decodeURIComponent(pr[2])}/${decodeURIComponent(pr[3])}`, number: Number(pr[4]) };
   const box = rest.match(/^\/box\/([^/]+)/);
   if (box) return { view: "box", name: decodeURIComponent(box[1]) };

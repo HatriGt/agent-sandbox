@@ -51,7 +51,8 @@ export default function PullRequestScreen() {
   const [tab, setTab] = useState<Tab>("conversation");
 
   const load = useCallback(() => {
-    if (!repo || !Number.isFinite(number)) return;
+    // A missing param coerces to 0; only a real PR number is worth a round trip.
+    if (!repo || !Number.isInteger(number) || number <= 0) return;
     api
       .pullDetail(repo, number)
       .then((d) => {

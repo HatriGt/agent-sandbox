@@ -16,7 +16,7 @@ import { ArrowLeft, ArrowUpRight, Check, CircleDashed, FileDiff, GitBranch, GitC
 import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
 import { api, type PullDetail } from "@/lib/api";
-import { diffForNewFile, parseUnifiedDiff, type ParsedDiff } from "@/lib/diff";
+import { parseUnifiedDiff, type ParsedDiff } from "@/lib/diff";
 import { FileMark } from "@/lib/fileIcon";
 import { useGo } from "@/lib/route";
 import { cn } from "@/lib/utils";
@@ -70,9 +70,9 @@ export function PullRequestPage({ session, repo, number }: { session: string; re
             <span className="stamp">{session}</span>
           </button>
 
-          {error && !pr ? (
+          {error ? (
             <div role="alert" className="border-destructive/30 bg-destructive/8 mb-4 rounded-xl border px-4 py-3">
-              <p className="text-destructive text-meta font-medium">Couldn't load this pull request</p>
+              <p className="text-destructive text-meta font-medium">{pr ? "Couldn't refresh this pull request — showing the last loaded state" : "Couldn't load this pull request"}</p>
               <p className="text-foreground/80 mt-1 text-micro whitespace-pre-wrap">{error}</p>
             </div>
           ) : null}
@@ -192,8 +192,12 @@ function SectionChip({ on, onClick, icon: Icon, label, count }: { on: boolean; o
 function ActionBar({ pr, v, session, repo, number, onChanged }: { pr: PullDetail; v: Verdict; session: string; repo: string; number: number; onChanged: () => void }) {
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  // The method of the refused merge, so the policy rescue retries with the SAME method the user
+  // picked (retrying a blocked squash as a merge commit would rewrite history the wrong way).
+  const triedMethod = React.useRef<MergeMethod>("merge");
   const policyBlocked = !!error && /policy prohibits|--auto/.test(error);
   const merge = async (method: MergeMethod, auto: boolean, admin = false) => {
+    triedMethod.current = method;
     setBusy(true);
     setError(null);
     try {
@@ -218,7 +222,7 @@ function ActionBar({ pr, v, session, repo, number, onChanged }: { pr: PullDetail
         <div role="alert" className="border-destructive/30 bg-destructive/8 mx-1.5 mt-2 rounded-lg border px-2.5 py-2">
           <p className="text-destructive text-micro font-medium">Merge failed</p>
           <p className="text-foreground/80 mt-0.5 text-micro whitespace-pre-wrap">{error}</p>
-          {policyBlocked && <PolicyRescue busy={busy} onAuto={() => void merge("merge", true)} onAdmin={() => void merge("merge", false, true)} />}
+          {policyBlocked && <PolicyRescue busy={busy} onAuto={() => void merge(triedMethod.current, true)} onAdmin={() => void merge(triedMethod.current, false, true)} />}
         </div>
       )}
       <div className="mt-1.5 flex flex-wrap items-center gap-2 px-1.5 pb-0.5">
@@ -353,10 +357,16 @@ function FilePatch({ file }: { file: NonNullable<PullDetail["files"]>[number] })
   const parsed: ParsedDiff | null = React.useMemo(() => {
     if (!file.patch) return null;
     // The API returns hunks WITHOUT the `diff --git`/`+++` preamble parseUnifiedDiff tolerates,
-    // which is fine — it keys off `@@`. An added file with no patch is still worth showing empty.
-    return file.status === "added" && !file.patch.startsWith("@@") ? diffForNewFile(file.patch) : parseUnifiedDiff(file.patch);
-  }, [file.patch, file.status]);
-  if (!parsed) return <p className="text-muted-foreground border-t px-3.5 py-3 text-meta">No textual diff — the file is binary or too large to inline.</p>;
+    // which is fine — it keys off `@@`. GitHub's files API always emits hunk-shaped patches, so
+    // anything else here would be raw text, not a diff to reparse as file content.
+    return parseUnifiedDiff(file.patch);
+  }, [file.patch]);
+  if (!parsed)
+    return (
+      <p className="text-muted-foreground border-t px-3.5 py-3 text-meta">
+        {file.status === "added" && file.additions === 0 ? "An empty file — nothing to show." : "No textual diff — the file is binary or too large to inline."}
+      </p>
+    );
   return (
     <div className="max-h-[32rem] overflow-auto border-t">
       <DiffView diff={parsed} path={file.path} />

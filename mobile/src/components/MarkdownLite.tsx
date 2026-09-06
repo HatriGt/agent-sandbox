@@ -177,13 +177,14 @@ function splitBlocks(text: string): Block[] {
       i++;
       continue;
     }
-    const fence = line.match(/^```(\w*)\s*$/);
+    const fence = line.match(/^```(.*)$/);
     if (fence) {
       const buf: string[] = [];
       i++;
       while (i < lines.length && !/^```\s*$/.test(lines[i])) buf.push(lines[i++]);
       i++;
-      blocks.push({ kind: "code", text: buf.join("\n"), lang: fence[1] || undefined });
+      const lang = fence[1].trim().split(/\s+/)[0].replace(/[^\w+#.-]/g, "");
+      blocks.push({ kind: "code", text: buf.join("\n"), lang: lang || undefined });
       continue;
     }
     const h = line.match(/^(#{1,6})\s+(.*)$/);
@@ -224,6 +225,7 @@ function splitBlocks(text: string): Block[] {
     ) {
       buf.push(lines[i++]);
     }
+    if (!buf.length) buf.push(lines[i++]); // guarantee progress; never loop forever on an odd line
     blocks.push({ kind: "para", text: buf.join("\n") });
   }
   return blocks;
@@ -233,7 +235,8 @@ type InlinePart = { text: string; bold?: boolean; italic?: boolean; code?: boole
 
 // Order matters: code first (a URL inside backticks stays code), then [text](url),
 // then bare URLs, then bold, then italics.
-const INLINE_RE = /(`[^`\n]+`|\[[^\]\n]+\]\(https?:\/\/[^\s)]+\)|https?:\/\/[^\s<>()"']+|\*\*[^*\n]+\*\*|\*[^*\n]+\*|_[^_\n]+_)/g;
+// Underscore italics require word boundaries so snake_case identifiers stay intact.
+const INLINE_RE = /(`[^`\n]+`|\[[^\]\n]+\]\(https?:\/\/[^\s)]+\)|https?:\/\/[^\s<>()"']+|\*\*[^*\n]+\*\*|\*[^*\n]+\*|(?<![\w])_[^_\n]+_(?![\w]))/g;
 
 function parseInline(text: string): InlinePart[] {
   const out: InlinePart[] = [];

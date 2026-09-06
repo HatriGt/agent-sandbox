@@ -82,7 +82,13 @@ export function parseChanges(out: string): ChangedFile[] {
     // numstat: "<adds>\t<dels>\t<path>" (binary shows "-")
     const m = line.match(/^(\d+|-)\t(\d+|-)\t(.+)$/);
     if (m && repo) {
-      const p = m[3].includes(" => ") ? m[3].replace(/^.*\{?([^{}]*) => ([^{}]*)\}?.*$/, (_s, _a, b) => b) : m[3];
+      // Renames arrive as "prefix{old => new}suffix" or, with no common parts, "old => new".
+      // Keep the surrounding prefix/suffix — only the braced (or whole) old side is replaced.
+      const p = m[3].includes(" => ")
+        ? m[3].includes("{")
+          ? m[3].replace(/\{([^{}]*) => ([^{}]*)\}/, (_s, _a, b) => b).replace(/\/\//g, "/")
+          : m[3].replace(/^.* => /, "")
+        : m[3];
       files.push({
         path: `${repo}/${p}`,
         repo,
@@ -288,19 +294,31 @@ interface GhComment {
 const FILE_CAP = 300;
 const PATCH_CAP = 40_000;
 
+const PULL_TTL = 60_000;
+// Detail payloads can run to megabytes each; without eviction the controller's RSS grows for the
+// life of the process. Sweep expired entries on write and cap the maps outright (oldest first).
+const PULL_CACHE_MAX = 200;
+function cachePut<V>(cache: Map<string, { at: number } & V>, key: string, value: { at: number } & V) {
+  for (const [k, v] of cache) if (Date.now() - v.at >= PULL_TTL) cache.delete(k);
+  while (cache.size >= PULL_CACHE_MAX) cache.delete(cache.keys().next().value as string);
+  cache.set(key, value);
+}
 const pullCache = new Map<string, { at: number; info: PullInfo }>();
 const pullDetailCache = new Map<string, { at: number; detail: PullDetail }>();
+// GitHub repo names are case-insensitive; canonicalize so a merge sent as "Owner/Repo" actually
+// invalidates the cache entry a viewer created as "owner/repo".
+const pullKey = (repo: string, number: number) => `${repo.toLowerCase()}#${number}`;
 export function forgetPull(repo: string, number: number) {
-  const suffix = `|${repo}#${number}`;
+  const suffix = `|${pullKey(repo, number)}`;
   for (const k of [...pullCache.keys()]) if (k.endsWith(suffix)) pullCache.delete(k);
   // Both caches, or merging from the page would leave the page itself showing the stale state.
   for (const k of [...pullDetailCache.keys()]) if (k.endsWith(suffix)) pullDetailCache.delete(k);
 }
 
 export async function fetchPull(cfg: Config, repo: string, number: number): Promise<PullInfo | undefined> {
-  const key = `${ownerKey()}|${repo}#${number}`;
+  const key = `${ownerKey()}|${pullKey(repo, number)}`;
   const c = pullCache.get(key);
-  if (c && Date.now() - c.at < 60_000) return c.info;
+  if (c && Date.now() - c.at < PULL_TTL) return c.info;
   const store = await loadStore(cfg);
   const accounts = [...candidateAccounts(store, repo), ...(pickDefaultAccount(store) ? [pickDefaultAccount(store)!] : []), ...Object.values(store.accounts)];
   for (const acc of accounts) {
@@ -313,7 +331,7 @@ export async function fetchPull(cfg: Config, repo: string, number: number): Prom
         p.head?.sha ? ghGetJson<GhCheckRuns>(cfg, acc.token, `/repos/${repo}/commits/${p.head.sha}/check-runs?per_page=100`).catch(() => undefined) : Promise.resolve(undefined),
       ]);
       Object.assign(info, shapeReviews(p, Array.isArray(reviews) ? reviews : undefined), { checks: shapeChecks(checks ?? undefined) });
-      pullCache.set(key, { at: Date.now(), info });
+      cachePut(pullCache, key, { at: Date.now(), info });
       return info;
     }
   }
@@ -326,9 +344,9 @@ export async function fetchPull(cfg: Config, repo: string, number: number): Prom
  * (say, a repo with checks disabled) costs that section, not the page.
  */
 export async function fetchPullDetail(cfg: Config, repo: string, number: number): Promise<PullDetail | undefined> {
-  const key = `${ownerKey()}|${repo}#${number}`;
+  const key = `${ownerKey()}|${pullKey(repo, number)}`;
   const c = pullDetailCache.get(key);
-  if (c && Date.now() - c.at < 60_000) return c.detail;
+  if (c && Date.now() - c.at < PULL_TTL) return c.detail;
   const store = await loadStore(cfg);
   const accounts = [...candidateAccounts(store, repo), ...(pickDefaultAccount(store) ? [pickDefaultAccount(store)!] : []), ...Object.values(store.accounts)];
   for (const acc of accounts) {
@@ -395,7 +413,7 @@ export async function fetchPullDetail(cfg: Config, repo: string, number: number)
       })),
       ...(truncated ? { truncated: true } : {}),
     };
-    pullDetailCache.set(key, { at: Date.now(), detail });
+    cachePut(pullDetailCache, key, { at: Date.now(), detail });
     return detail;
   }
   return undefined;

@@ -30,6 +30,28 @@ test("parseChanges: numstat + status + untracked per repo, loose files outside r
   assert.deepEqual(parseChanges(""), []);
 });
 
+test("parseChanges: renames keep the prefix/suffix around the braced segment", () => {
+  const out = [
+    "@@repo app",
+    "1\t1\tsrc/{old.ts => new.ts}",
+    "2\t2\tdir/{a => b}/f.ts",
+    "3\t3\tsrc/{sub => }/keep.ts",
+    "4\t4\told-root.ts => new-root.ts",
+    "@@status R100\tsrc/new.ts",
+    "@@status R090\tdir/b/f.ts",
+  ].join("\n");
+  const files = parseChanges(out);
+  assert.deepEqual(
+    files.map((f) => [f.path, f.status]),
+    [
+      ["app/dir/b/f.ts", "renamed"],
+      ["app/new-root.ts", "modified"],
+      ["app/src/keep.ts", "modified"],
+      ["app/src/new.ts", "renamed"],
+    ]
+  );
+});
+
 test("safeRelPath confines to /workspace", () => {
   assert.equal(safeRelPath("/workspace/repo/src/a.ts"), "repo/src/a.ts");
   assert.equal(safeRelPath("repo/a.ts"), "repo/a.ts");

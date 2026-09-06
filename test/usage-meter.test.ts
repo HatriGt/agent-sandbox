@@ -58,7 +58,10 @@ test("tierGib / isDiskTier", () => {
   assert.equal(tierGib("4g"), 4);
   assert.equal(tierGib("512M"), undefined);
   for (const t of DISK_TIERS) assert.equal(isDiskTier(t), true);
-  assert.equal(isDiskTier("1G"), false, "below the create size — the disk cannot shrink there");
+  // 1G is the create default now, so it IS a valid tier; shrink protection lives in the UI's
+  // grow-only tier filtering (offerableTiers), not in the whitelist.
+  assert.equal(isDiskTier("1G"), true);
+  assert.equal(isDiskTier("512M"), false, "not on the ladder");
   assert.equal(isDiskTier("64G"), false);
 });
 
