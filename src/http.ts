@@ -22,7 +22,7 @@ import { deps as rawDeps, resolveCredsForBox } from "./deps.js";
 import { refillPool, startPoolMaintainer } from "./pool.js";
 import { checkBearer } from "./http-auth.js";
 import { clientOf, makeAuthThrottle, makeRateLimiter } from "./auth-throttle.js";
-import { auditFields, formatAudit, MUTATING } from "./audit.js";
+import { auditFields, formatAudit, listAuditEvents, MUTATING, pruneAuditEvents } from "./audit.js";
 import { openDb } from "./db.js";
 import {
   API_KEY_PREFIX, clearSessionCookie, consumeLoginState, createApiKey, createSession, csrfOk, deleteSession, getUser, listApiKeys, newLoginState, parseCookies,
@@ -33,6 +33,7 @@ import { keyFromEnvOrFile, makeSecretBox } from "./secretbox.js";
 import { allBlobs, registerUserStoreBackend, withOwner, OPERATOR_OWNER } from "./user-store.js";
 import { detectTransitions, formatNotification, makeNotifier, type BoxRunView, type NotifyEvent } from "./notify.js";
 import { buildDigest } from "./digest.js";
+import { archiveRun, deleteRun, getRun, listRuns, pruneArchive } from "./run-archive.js";
 import { verifyPlanOf, type VerifyPlan, type VerifyResult } from "./verify.js";
 import { parseTrace } from "./trace.js";
 import { loadNotifySettings, normalizeNotifySettings, saveNotifySettings } from "./notify-store.js";
@@ -234,6 +235,55 @@ app.use((req: Request, res: Response, next) => {
   next();
 });
 
+// --- Stored audit trail: bounded retention + the account page's "Recent activity" ----------------
+// The table grows on every mutating request; prune at startup and every ~6 h (unref'd — never keeps
+// the process alive). Retention is AUDIT_MAX_AGE_DAYS in src/audit.ts.
+try {
+  pruneAuditEvents(db);
+} catch {
+  /* pruning must never block startup */
+}
+setInterval(() => {
+  try {
+    pruneAuditEvents(db);
+  } catch {
+    /* retry next tick */
+  }
+}, 6 * 3600 * 1000).unref();
+
+// Run history retention (src/run-archive.ts): 500 rows/owner or 90 days. Same cadence, same rule —
+// pruning must never block startup or keep the process alive.
+try {
+  pruneArchive(db);
+} catch {
+  /* retry on the interval */
+}
+setInterval(() => {
+  try {
+    pruneArchive(db);
+  } catch {
+    /* retry next tick */
+  }
+}, 6 * 3600 * 1000).unref();
+
+// Raw stored events, reverse-chron. A user sees only their own rows; operator/admin see everything
+// and may scope with ?user=<id>. `?limit=` (≤100, default 50) and `?before=<at>` page backwards.
+// The server stays raw and honest — the dashboard turns method+path into human verbs.
+app.get("/audit.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const p = principalOf(res);
+  const admin = p.kind === "operator" || p.role === "admin";
+  const q = req.query as Record<string, unknown>;
+  const limit = typeof q.limit === "string" ? Number(q.limit) : undefined;
+  const before = typeof q.before === "string" ? q.before : undefined;
+  const userId = admin ? (typeof q.user === "string" && q.user ? q.user : undefined) : (p as { userId: string }).userId;
+  res.json({
+    events: listAuditEvents(db, { userId, ...(Number.isFinite(limit) ? { limit } : {}), before }).map((e) => ({
+      at: e.at, method: e.method, path: e.path, status: e.status, session: e.session, action: e.action, client: e.client,
+    })),
+  });
+});
+
 // One shared tail loop per watched box (see watch-hub.ts): every SSE viewer, /watch.json call and
 // hover-prefetch of the same box reads one cached snapshot instead of each paying an SSH round trip.
 // The tick path skips `msb metrics` — vitals arrive with the fleet poll.
@@ -377,6 +427,31 @@ const sendNotification = async (ev: NotifyEvent): Promise<void> => {
 const notifier = makeNotifier({ send: sendNotification, log: (m) => console.error(m) });
 
 /**
+ * Run history archive (docs/roadmap-saas.md #7). Archive a finished run as a digest-shaped record.
+ * The done/failed edge of the fleet sweep is the natural moment: the box is still running there, so
+ * listChanges can capture the file list — at teardown a stopped box can't answer it. Redaction: the
+ * hub snapshot's log/task/question are already redacted by its reader (redactSnap), so everything
+ * the digest derives — and therefore everything archived — is redacted at archive time; /history.json
+ * can serve rows verbatim. Best-effort everywhere: archiving must never break the sweep or teardown.
+ */
+const archiveFinishedRun = async (box: string, opts: { withFiles: boolean } = { withFiles: true }): Promise<void> => {
+  const snap = await watchHub.read(box);
+  if (snap.boxStatus === "missing") return;
+  if (snap.runState === "running" || snap.runState === "waiting") return; // records only, never live state
+  const files = opts.withFiles && /^running$/i.test(snap.boxStatus) ? await listChanges(cfg, box).catch(() => []) : [];
+  const digest = buildDigest({
+    box,
+    task: snap.task ?? "",
+    runState: snap.runState,
+    exitCode: snap.exitCode,
+    events: parseTrace(snap.log ?? ""),
+    files,
+    verified: boxVerified.get(box),
+  });
+  archiveRun(db, { box, owner: ownerOf(db, box) ?? OPERATOR_OWNER, digest });
+};
+
+/**
  * Capture the turn-end checkpoint for `box`. The turn number is computed in-box from the log the
  * tar captures (captureCmd) — never from the controller's cached snapshot, which can be stale.
  * Idempotent, best-effort, serialized per box; any failure logs and the fleet sweep never notices.
@@ -429,8 +504,17 @@ const readFleet = makeFleetReader(
             .verify(cfg, ev.box, vplan)
             .then((r) => boxVerified.set(ev.box, r))
             .catch(() => {})
-            .finally(() => void notifier.notify(ev));
-        } else void notifier.notify(ev);
+            .finally(() => {
+              void notifier.notify(ev);
+              // Archive AFTER verification so the record carries the verified stamp.
+              void archiveFinishedRun(ev.box).catch((e) => console.error(`[archive] ${ev.box}: ${(e as Error).message.slice(0, 200)}`));
+            });
+        } else {
+          void notifier.notify(ev);
+          // Run history archive: persist the digest at the finish edge (box still up → files listable).
+          if (ev.kind === "done" || ev.kind === "failed")
+            void archiveFinishedRun(ev.box).catch((e) => console.error(`[archive] ${ev.box}: ${(e as Error).message.slice(0, 200)}`));
+        }
         // Turn-end checkpoint: the moment a turn settles (done or paused on a question) is the
         // restore point for whatever the operator sends next. Online in-box tar (~1 s, no VM stop)
         // behind the per-box lock so a fast follow-up queues instead of racing the capture.
@@ -911,6 +995,31 @@ app.delete("/api-keys.json", (req: Request, res: Response) => {
     return;
   }
   res.json({ ok: true });
+});
+
+// --- Android App Links -------------------------------------------------------------------------
+// The mobile app claims https://<host>/dashboard/box/* and /dashboard/pr/* (mobile/app.json
+// intentFilters, autoVerify). Android only honours that claim if this file is served over HTTPS,
+// unauthenticated, as application/json. The signing-cert fingerprints come from the environment
+// (`keytool -list -v` / Play Console → App signing) — a self-hoster with no app simply leaves
+// ANDROID_CERT_SHA256 unset and the route 404s, which is the honest answer.
+app.get("/.well-known/assetlinks.json", (_req: Request, res: Response) => {
+  const prints = (process.env.ANDROID_CERT_SHA256 ?? "")
+    .split(",")
+    .map((s) => s.trim().toUpperCase())
+    .filter(Boolean);
+  if (!prints.length) return res.status(404).json({ error: "no android app is linked to this host" });
+  res.setHeader("Cache-Control", "public, max-age=3600");
+  res.json([
+    {
+      relation: ["delegate_permission/common.handle_all_urls"],
+      target: {
+        namespace: "android_app",
+        package_name: process.env.ANDROID_PACKAGE ?? "dev.ajeethkumar.agentsandbox",
+        sha256_cert_fingerprints: prints,
+      },
+    },
+  ]);
 });
 
 // --- the dashboard SPA (React + Tailwind, built by Vite into web/dist) ---------------------------
@@ -1564,6 +1673,66 @@ app.get("/digest.json", async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * Run history archive (docs/roadmap-saas.md #7): a RECORD of finished runs, never live state
+ * (PRODUCT.md principle 4). List: `GET /history.json` → {runs:[…]} for the caller's owner, reverse-
+ * chron, ?limit (≤50) and ?before=<id> to page. Detail: `?id=N` → the full row incl. parsed digest.
+ * Redaction: archived text came from the watchHub snapshot, whose reader redacts log/task/question
+ * before anything derives from it — rows were redacted at archive time and are served verbatim.
+ */
+app.get("/history.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const p = principalOf(res);
+  const owner = p.kind === "user" ? p.userId : OPERATOR_OWNER;
+  try {
+    if (typeof req.query.id === "string") {
+      const id = Number(req.query.id);
+      if (!Number.isInteger(id)) {
+        res.status(400).json({ error: "id must be an integer" });
+        return;
+      }
+      const run = getRun(db, owner, id);
+      if (!run) {
+        res.status(404).json({ error: "no such run" });
+        return;
+      }
+      res.json({ run });
+      return;
+    }
+    const limit = typeof req.query.limit === "string" ? Number(req.query.limit) : undefined;
+    const before = typeof req.query.before === "string" ? Number(req.query.before) : undefined;
+    res.json({
+      runs: listRuns(db, owner, {
+        ...(Number.isFinite(limit) ? { limit } : {}),
+        ...(Number.isInteger(before) ? { before } : {}),
+      }),
+    });
+  } catch (e) {
+    failWith(res, e);
+  }
+});
+
+// Users may remove a record of their own run; the id must belong to the caller's owner.
+app.delete("/history.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const p = principalOf(res);
+  const owner = p.kind === "user" ? p.userId : OPERATOR_OWNER;
+  const id = Number(req.query.id);
+  if (!Number.isInteger(id)) {
+    res.status(400).json({ error: "id query param required" });
+    return;
+  }
+  try {
+    if (!deleteRun(db, owner, id)) {
+      res.status(404).json({ error: "no such run" });
+      return;
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    failWith(res, e);
+  }
+});
+
 app.get("/changes.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   const session = typeof req.query.session === "string" ? req.query.session : "";
@@ -2127,6 +2296,12 @@ app.post("/teardown.json", async (req: Request, res: Response) => {
     return;
   }
   try {
+    // Archive fallback: a run that finished without a fleet sweep observing the edge (controller
+    // restart, teardown racing the sweep) would evaporate. Best-effort from the last-known snapshot
+    // BEFORE the box is destroyed; files may be empty here (a stopped box can't answer listChanges —
+    // honest degradation), and the dedupe rule in archiveRun makes this a no-op when the sweep
+    // already recorded the same finish.
+    await archiveFinishedRun(session, { withFiles: false }).catch(() => {});
     await deps.teardown(cfg, session);
     watchHub.drop(session);
     inbox.clear(session);

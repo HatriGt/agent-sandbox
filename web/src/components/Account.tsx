@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { ApiKeys } from "@/components/ApiKeys";
 import { NotifySettings } from "@/components/NotifySettings";
 import { Sessions } from "@/components/Sessions";
+import { AuditLog } from "@/components/AuditLog";
 import { cn } from "@/lib/utils";
 
 const inputCls = "border-line-strong focus:ring-ring text-foreground placeholder:text-muted-foreground h-9 w-full rounded-md border bg-transparent px-3 text-meta outline-none focus:ring-2";
@@ -193,6 +194,7 @@ export function Account({ onBack, onConnect, onAdmin }: { onBack: () => void; on
 
           {user && <ApiKeys />}
           {user && <Sessions />}
+          <AuditLog />
           {!user && (
             <p className="text-muted-foreground text-meta">
               You are signed in with the operator token — the deployment's root identity. For day-to-day work, sign up for a personal account and, if you need to manage people, use <button type="button" onClick={onAdmin} className="text-foreground cursor-pointer underline underline-offset-4">Manage users</button>.

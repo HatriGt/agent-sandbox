@@ -155,6 +155,24 @@ export interface RunDigest {
   verified?: { mode: "command" | "criterion"; pass: boolean; detail: string };
 }
 
+// ---- run history (server-side archive of finished runs) ----
+export interface HistoryRun {
+  id: number;
+  box: string;
+  owner: string;
+  task: string;
+  state: "done" | "failed";
+  exitCode: number;
+  startedAt: number;
+  endedAt: number;
+  archivedAt: number;
+  headline: string;
+}
+export interface HistoryDetail extends HistoryRun {
+  /** Full receipt when the archiver captured one; null for runs that left no digest. */
+  digest: RunDigest | null;
+}
+
 export type McpTransport = "stdio" | "http" | "sse";
 export interface McpServerView {
   name: string;
@@ -427,6 +445,16 @@ export const api = {
   watch: (session: string) => get<WatchSnapshot>("/watch.json", { session }),
   /** The run receipt for a finished thread — headline, plan, files, questions. */
   digest: (session: string) => get<RunDigest>("/digest.json", { session }),
+  /** Archived finished runs, reverse-chron. `before` pages past the given id; `limit` caps at 50 server-side. */
+  history: (opts: { limit?: number; before?: number } = {}) =>
+    get<{ runs: HistoryRun[] }>("/history.json", {
+      ...(opts.limit !== undefined ? { limit: String(opts.limit) } : {}),
+      ...(opts.before !== undefined ? { before: String(opts.before) } : {}),
+    }),
+  /** One archived run with its full digest (null when none was captured). */
+  historyDetail: (id: number) => get<{ run: HistoryDetail }>("/history.json", { id: String(id) }),
+  /** Remove one archived run's receipt permanently. */
+  historyDelete: (id: number) => del<{ ok: true }>("/history.json", { id: String(id) }),
   delegate: (input: {
     task: string;
     repos?: { repo: string; ref?: string }[];

@@ -13,10 +13,11 @@
  */
 import React, { useCallback, useEffect, useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as WebBrowser from "expo-web-browser";
 import { api, type PullDetail } from "@/lib/api";
+import { useAuth } from "@/state/auth";
 import { toneColor, verdict, METHOD_HINT } from "@/lib/prVerdict";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
@@ -38,7 +39,14 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "checks", label: "Checks" },
 ];
 
-export default function PullRequestScreen() {
+/** Auth gate for deep links: a PR link opened while signed out lands on /welcome. */
+export default function PullRequestRoute() {
+  const { signedIn } = useAuth();
+  if (!signedIn) return <Redirect href="/welcome" />;
+  return <PullRequestScreen />;
+}
+
+function PullRequestScreen() {
   const router = useRouter();
   const { palette } = useTheme();
   const params = useLocalSearchParams<{ repo: string; number: string; session?: string }>();

@@ -101,6 +101,26 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX IF NOT EXISTS inbox_messages_box ON inbox_messages(box);
   `,
+  `
+  -- Run history archive: finished runs used to evaporate at teardown. Each row is a digest-shaped
+  -- RECORD (never live state — PRODUCT.md principle 4): the full RunDigest serialized in digest_json
+  -- plus the columns list views need without parsing it. Scoped per owner ('operator' for the
+  -- deployment's own runs).
+  CREATE TABLE IF NOT EXISTS run_archive (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    box TEXT,
+    owner TEXT,
+    task TEXT,
+    state TEXT,
+    exit_code INTEGER,
+    started_at INTEGER,
+    ended_at INTEGER,
+    archived_at INTEGER NOT NULL,
+    headline TEXT,
+    digest_json TEXT
+  );
+  CREATE INDEX IF NOT EXISTS run_archive_owner_at ON run_archive(owner, archived_at);
+  `,
 ];
 
 export function openDb(dataDir: string): Db {

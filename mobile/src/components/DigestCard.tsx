@@ -37,6 +37,16 @@ export function DigestCard({ session, fetchKey }: { session: string; fetchKey: s
   }, [session, fetchKey]);
 
   if (!digest) return null;
+  return <DigestView digest={digest} />;
+}
+
+/**
+ * The same receipt rendered from a digest already in hand — the History screen reads archived
+ * digests out of /history.json rather than off a live box, so it renders this directly.
+ */
+export function DigestView({ digest }: { digest: RunDigest }) {
+  const { palette } = useTheme();
+  const [open, setOpen] = useState(false);
 
   const failed = digest.state === "failed";
   const stateColor = failed ? palette.destructive : palette.ok;

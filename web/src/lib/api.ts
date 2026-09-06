@@ -318,6 +318,17 @@ export interface ApiKeyRow {
   revoked_at: string | null;
 }
 
+/** One stored audit event, raw from the controller — the UI derives the human verb. */
+export interface AuditEventRow {
+  at: string;
+  method: string;
+  path: string;
+  status: number;
+  session: string | null;
+  action: string | null;
+  client: string | null;
+}
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -441,6 +452,11 @@ export const api = {
     fetch(url("/sessions.json"), { method: "DELETE", headers: { ...authHeaders, "Content-Type": "application/json" }, body: JSON.stringify({ id }) }).then(parse<{ ok: true }>),
   revokeOtherSessions: () =>
     fetch(url("/sessions.json"), { method: "DELETE", headers: { ...authHeaders, "Content-Type": "application/json" }, body: JSON.stringify({ others: true }) }).then(parse<{ ok: true; revoked: number }>),
+  /** Stored audit trail (reverse-chron). `before` pages backwards from the last row's `at`. */
+  audit: (opts: { limit?: number; before?: string } = {}, signal?: AbortSignal) =>
+    fetch(url("/audit.json", { ...(opts.limit ? { limit: String(opts.limit) } : {}), ...(opts.before ? { before: opts.before } : {}) }), { headers: authHeaders, signal }).then(
+      parse<{ events: AuditEventRow[] }>
+    ),
   createApiKey: (name: string) => post<{ id: string; token: string; prefix: string }>("/api-keys.json", { name }),
   revokeApiKey: (id: string) =>
     fetch(url("/api-keys.json"), { method: "DELETE", headers: { ...authHeaders, "Content-Type": "application/json" }, body: JSON.stringify({ id }) }).then(parse<{ ok: true }>),
@@ -658,4 +674,35 @@ export const api = {
   /** Clone a repository into a running sandbox at /workspace/<name>. */
   attachRepo: (session: string, repo: string, ref?: string) =>
     post<{ ok: true; name: string; login?: string }>("/repos/attach.json", { session, repo, ref }),
+
+  /** Archived runs, reverse-chron. `before` pages backwards from the last row's id (exclusive). */
+  history: (opts: { limit?: number; before?: number } = {}, signal?: AbortSignal) =>
+    fetch(
+      url("/history.json", { ...(opts.limit ? { limit: String(opts.limit) } : {}), ...(opts.before != null ? { before: String(opts.before) } : {}) }),
+      { headers: authHeaders, signal }
+    ).then(parse<{ runs: HistoryRun[] }>),
+  /** One archived run with its full digest. */
+  historyRun: (id: number, signal?: AbortSignal) =>
+    fetch(url("/history.json", { id: String(id) }), { headers: authHeaders, signal }).then(parse<{ run: HistoryRunDetail }>),
+  /** Delete one archived run's record. */
+  deleteHistoryRun: (id: number) =>
+    fetch(url("/history.json", { id: String(id) }), { method: "DELETE", headers: authHeaders }).then(parse<{ ok: true }>),
 };
+
+/** One archived run — a record kept after its machine is gone. Mirrors GET /history.json rows. */
+export interface HistoryRun {
+  id: number;
+  box: string;
+  owner?: string | null;
+  task?: string | null;
+  state: "done" | "failed";
+  exitCode?: number | null;
+  /** Unix seconds. */
+  startedAt?: number | null;
+  endedAt?: number | null;
+  archivedAt: number;
+  headline?: string | null;
+}
+export interface HistoryRunDetail extends HistoryRun {
+  digest: RunDigest | null;
+}

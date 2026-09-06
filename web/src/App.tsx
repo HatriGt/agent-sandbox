@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Link, useLocation } from "react-router";
-import { Bell, BellOff, Flame, Keyboard, LayoutGrid, LogOut, Moon, PanelLeftClose, PanelLeftOpen, Pause, Plug, Plus, Search, Shield, Sun, TriangleAlert, UserRound } from "lucide-react";
+import { Bell, BellOff, Clock, Flame, Keyboard, LayoutGrid, LogOut, Moon, PanelLeftClose, PanelLeftOpen, Pause, Plug, Plus, Search, Shield, Sun, TriangleAlert, UserRound } from "lucide-react";
 import { Lightning } from "@phosphor-icons/react";
 import { AnimatePresence, motion } from "motion/react";
 import { api, type FleetLifecycle, type FleetSnapshot } from "@/lib/api";
@@ -35,6 +35,7 @@ import { cn } from "@/lib/utils";
 const Sandboxes = React.lazy(() => import("@/components/Sandboxes").then((m) => ({ default: m.Sandboxes })));
 const Integrations = React.lazy(() => import("@/components/Integrations").then((m) => ({ default: m.Integrations })));
 const SkillsPage = React.lazy(() => import("@/components/SkillsPage").then((m) => ({ default: m.SkillsPage })));
+const History = React.lazy(() => import("@/components/History").then((m) => ({ default: m.History })));
 const PullRequestPage = React.lazy(() => import("@/components/pr/PullRequestPage").then((m) => ({ default: m.PullRequestPage })));
 /** Hovering the nav item warms the chunk and both payloads, so the page paints complete on click. */
 function prefetchIntegrations() {
@@ -42,6 +43,10 @@ function prefetchIntegrations() {
   void prefetch("accounts", api.accounts).catch(() => {});
   void prefetch("mcp", api.mcpServers).catch(() => {});
 }
+function prefetchHistory() {
+  void import("@/components/History");
+}
+
 function prefetchSkills() {
   void import("@/components/SkillsPage");
   void prefetch("skills", api.skills).catch(() => {});
@@ -170,6 +175,10 @@ export default function App() {
     go({ view: "skills" });
     setMobileRail(false);
   }, [go]);
+  const showHistory = React.useCallback(() => {
+    go({ view: "history" });
+    setMobileRail(false);
+  }, [go]);
   const showAccount = React.useCallback(() => {
     go({ view: "account" });
     setMobileRail(false);
@@ -188,6 +197,7 @@ export default function App() {
   const paletteActions = React.useMemo<PaletteAction[]>(
     () => [
       { id: "fleet", label: "Fleet view", hint: "g f", icon: <LayoutGrid />, run: showFleet },
+      { id: "history", label: "History", hint: "g h", icon: <Clock />, run: showHistory },
       { id: "skills", label: "Skills", hint: "g s", icon: <Lightning weight="duotone" />, run: showSkills },
       { id: "integrations", label: "Integrations", hint: "g a", icon: <Plug />, run: showAccounts },
       { id: "theme", label: dark ? "Switch to light theme" : "Switch to dark theme", icon: dark ? <Sun /> : <Moon />, run: () => setDark(!dark) },
@@ -195,7 +205,7 @@ export default function App() {
       ...(getMe()?.mode === "saas" && getMe()?.role === "admin" ? [{ id: "admin", label: "Admin · users", icon: <Shield />, run: showAdmin }] : []),
       { id: "keys", label: "Keyboard shortcuts", hint: "?", icon: <Keyboard />, run: () => setShortcuts(true) },
     ],
-    [showFleet, showSkills, showAccounts, showAccount, showAdmin, dark, setDark]
+    [showFleet, showHistory, showSkills, showAccounts, showAccount, showAdmin, dark, setDark]
   );
 
   React.useEffect(() => {
@@ -236,6 +246,7 @@ export default function App() {
         return;
       }
       if (pendingG && e.key === "f") return showFleet();
+      if (pendingG && e.key === "h") return showHistory();
       if (pendingG && e.key === "s") return showSkills();
       if (pendingG && e.key === "a") return showAccounts();
       if (e.key === "n") return newTask();
@@ -255,7 +266,7 @@ export default function App() {
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [runs_, selected, open, newTask, showFleet, showSkills, showAccounts]);
+  }, [runs_, selected, open, newTask, showFleet, showHistory, showSkills, showAccounts]);
 
   const ask = async (name: string, question: string) => {
     let index = 0;
@@ -290,7 +301,7 @@ export default function App() {
     // moved, but the fleet snapshot won't list the new box until the next poll. Falling through to
     // "hub" here rendered the composer on top of the box URL for a few seconds (observed live), so
     // hold the box-loading skeleton until the box surfaces (or the cleanup effect routes home).
-    view === "fleet" ? "fleet" : view === "skills" ? "skills" : view === "integrations" ? "integrations" : view === "account" ? "account" : view === "connect" ? "connect" : view === "welcome" ? "welcome" : view === "admin" ? "admin" : route.view === "pr" ? `pr:${route.repo}#${route.number}` : booting && !selectedBox ? "booting" : selectedBox ? `box:${selectedBox.name}` : view === "box" ? "box-loading" : "hub";
+    view === "fleet" ? "fleet" : view === "history" ? "history" : view === "skills" ? "skills" : view === "integrations" ? "integrations" : view === "account" ? "account" : view === "connect" ? "connect" : view === "welcome" ? "welcome" : view === "admin" ? "admin" : route.view === "pr" ? `pr:${route.repo}#${route.number}` : booting && !selectedBox ? "booting" : selectedBox ? `box:${selectedBox.name}` : view === "box" ? "box-loading" : "hub";
 
   return (
     <TooltipProvider delayDuration={400}>
@@ -352,6 +363,9 @@ export default function App() {
               <RailIcon onClick={newTask} icon={<Plus />} label="New task (n)" primary />
               <RailIcon onClick={openPalette} icon={<Search />} label="Search machines (⌘K)" />
               <RailIcon active={view === "fleet"} onClick={showFleet} icon={<LayoutGrid />} label="Fleet" badge={boxes.length || undefined} dot={waiting.length > 0} />
+              <span className="contents" onMouseEnter={prefetchHistory}>
+                <RailIcon active={view === "history"} onClick={showHistory} icon={<Clock />} label="History" />
+              </span>
               <span className="contents" onMouseEnter={prefetchSkills}>
                 <RailIcon active={view === "skills"} onClick={showSkills} icon={<Lightning weight="duotone" />} label="Skills" />
               </span>
@@ -437,6 +451,9 @@ export default function App() {
 
               <div className="flex flex-col gap-0.5 border-t px-2 py-2">
                 <NavItem active={view === "fleet"} onClick={showFleet} icon={<LayoutGrid />} label="Fleet view" badge={boxes.length || undefined} shortcut="g f" />
+                <span className="contents" onMouseEnter={prefetchHistory}>
+                  <NavItem active={view === "history"} onClick={showHistory} icon={<Clock />} label="History" shortcut="g h" />
+                </span>
                 <span className="contents" onMouseEnter={prefetchSkills}>
                   <NavItem active={view === "skills"} onClick={showSkills} icon={<Lightning weight="duotone" />} label="Skills" shortcut="g s" />
                 </span>
@@ -524,6 +541,10 @@ export default function App() {
                     onDestroyed={() => {}}
                     onBack={backToRail}
                   />
+                ) : view === "history" ? (
+                  <PageEnter className="h-full min-h-0">
+                    <History onBack={backToRail} onAgain={newTask} />
+                  </PageEnter>
                 ) : view === "skills" ? (
                   <PageEnter className="h-full min-h-0">
                     <SkillsPage onBack={backToRail} />
