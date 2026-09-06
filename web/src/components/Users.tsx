@@ -153,7 +153,7 @@ export function Users() {
             value={login}
             onChange={(e) => setLogin(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && create()}
-            placeholder="Login for the new user — e.g. priya"
+            placeholder="Login for the new user — e.g. neo"
             aria-label="New user login"
             className="placeholder:text-muted-foreground text-foreground h-8 min-w-0 flex-1 rounded-md bg-transparent px-1 text-meta outline-none"
           />

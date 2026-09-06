@@ -8,7 +8,7 @@ import { TypingDots } from "./ui/Motion";
 
 // Same staged copy as the web's WakingCard, advanced purely by elapsed time.
 const STAGES = [
-  { at: 0, text: "starting the microVM" },
+  { at: 0, text: "starting the sandbox" },
   { at: 4, text: "restoring workspace + session" },
   { at: 9, text: "reconnecting the transcript" },
 ];

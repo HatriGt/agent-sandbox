@@ -89,6 +89,18 @@ const MIGRATIONS: string[] = [
   ALTER TABLE users ADD COLUMN plan TEXT NOT NULL DEFAULT 'trial';
   ALTER TABLE users ADD COLUMN trial_ends_at TEXT;
   `,
+  `
+  -- Durable follow-up inbox: messages typed while a run is mid-turn survive controller restarts.
+  -- Mirrors the in-memory QueuedMessage shape (id, text, at) plus the box the queue belongs to.
+  CREATE TABLE IF NOT EXISTS inbox_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    box TEXT NOT NULL,
+    msg_id TEXT NOT NULL,
+    text TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS inbox_messages_box ON inbox_messages(box);
+  `,
 ];
 
 export function openDb(dataDir: string): Db {

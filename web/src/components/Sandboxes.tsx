@@ -494,7 +494,7 @@ function MachineRow({
                   <Trash2 />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Destroy — stops the microVM and discards its workspace</TooltipContent>
+              <TooltipContent>Destroy — stops the sandbox and discards its workspace</TooltipContent>
             </Tooltip>
           )}
         </div>

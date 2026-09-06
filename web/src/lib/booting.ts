@@ -5,5 +5,5 @@
  * cold boot (pool empty). Extracted so the warm-vs-cold branch is unit tested without React.
  */
 export function bootingLabel(warm: boolean): string {
-  return warm ? "Starting your task on a warm sandbox" : "Booting a fresh microVM";
+  return warm ? "Starting your task on a warm sandbox" : "Booting a fresh sandbox";
 }

@@ -783,7 +783,7 @@ function IdleEmpty({ box, onNew }: { box: BoxView; onNew: () => void }) {
       </p>
       <p className="text-muted-foreground max-w-[52ch] text-body">
         {warm
-          ? "This microVM is already booted with the agent installed. The next task you start claims it, so the run begins in seconds instead of waiting on a boot."
+          ? "This sandbox is already booted with the agent installed. The next task you start claims it, so the run begins in seconds instead of waiting on a boot."
           : "Nothing has run here yet. Send an instruction below to start the agent, or start a new task."}
       </p>
       <Button variant="outline" size="sm" onClick={onNew}>

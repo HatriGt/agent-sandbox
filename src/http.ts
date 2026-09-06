@@ -38,6 +38,7 @@ import { parseTrace } from "./trace.js";
 import { loadNotifySettings, normalizeNotifySettings, saveNotifySettings } from "./notify-store.js";
 import { createLocalUser, deleteUser, listUsers, ownerOf, setUserRole, validateSignup, createPasswordUser, authenticatePassword, setPassword, updateProfile, verifyPassword, PASSWORD_MIN, listSessions, revokeSession, revokeOtherSessions, startTrial, planOf, setPlan, TrialExpiredError } from "./identity.js";
 import { parseStore } from "./gh-token-store.js";
+import { seedStarterSkills } from "./starter-skills.js";
 import { parseMcpStore } from "./mcp-store.js";
 import { guardDeps, makeOwnership, NotOwnedError, QuotaError, withPrincipal } from "./tenancy.js";
 import { securityHeaders } from "./security-headers.js";
@@ -271,7 +272,8 @@ const watchHub = new WatchHub({ read: async (s) => redactSnap(await gatherWatch(
 // The dashboard's fleet read: gatherMonitor behind a short shared cache, plus lifecycle config and
 // sleeping (Stopped-but-resumable) boxes merged from memory.
 // Follow-ups typed while the agent is mid-turn wait here and are delivered when the run finishes.
-const inbox = new Inbox();
+// Backed by sqlite so a controller restart keeps the queue (hydrated messages just re-queue).
+const inbox = new Inbox(db);
 // Detached: kicks the run and returns; the transcript streams. (deps.resume would block up to
 // WAIT_TIMEOUT_MS for the agent's next boundary — fine for an MCP tool call, wrong for a chat send.)
 // Per-box sticky model (Cursor semantics: a pick holds until changed). In-memory: a controller
@@ -633,7 +635,11 @@ if (GITHUB_LOGIN) {
       const token = await githubExchangeCode(cfg.githubOauthClientId!, cfg.githubOauthClientSecret!, code, redirectUri);
       const gh = await githubIdentity(token);
       const user = upsertGithubUser(db, { githubId: gh.id, login: gh.login, email: gh.email, avatarUrl: gh.avatarUrl }, { adminLogins: cfg.adminLogins });
-      if (user.plan === "trial" && !user.trial_ends_at) startTrial(db, user.id, cfg.trialDays);
+      if (user.plan === "trial" && !user.trial_ends_at) {
+        // First sign-in of a brand-new account: stamp the trial and seed the starter skills.
+        startTrial(db, user.id, cfg.trialDays);
+        void seedStarterSkills(cfg, user.id);
+      }
       const sess = createSession(db, user.id, { ip: clientOf(req.headers, req.socket.remoteAddress), userAgent: String(req.headers["user-agent"] ?? "") });
       res.setHeader("Set-Cookie", sessionCookie(sess.id, { secure: SECURE_COOKIE }));
       res.redirect(st.redirectTo ?? "/dashboard/");
@@ -674,6 +680,7 @@ if (SAAS) {
       // by being first (open sign-up on a public instance must never hand out admin).
       const u = createPasswordUser(db, v, { adminLogins: cfg.adminLogins, firstIsAdmin: cfg.adminLogins.length === 0 });
       startTrial(db, u.id, cfg.trialDays);
+      void seedStarterSkills(cfg, u.id); // best-effort: a seeding failure never fails signup
       startSession(req, res, u.id);
       res.json({ ok: true, id: u.id, login: u.login, role: u.role });
     } catch (e) {

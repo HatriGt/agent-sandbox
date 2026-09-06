@@ -8,10 +8,14 @@
  * moment its run reaches `done`. A box that pauses on a QUESTION is not auto-fed (the queued text was
  * written before the question existed) — the UI offers "send as the answer" instead.
  *
- * In-memory: the queue is short-lived by nature and the UI shows it, so a controller restart losing
- * it is visible, not silent. Pure enough to test with injected read/resume.
+ * Memory-first, optionally durable: pass a Db and every mutation is mirrored to `inbox_messages`,
+ * and construction hydrates the queues so a controller restart resumes with the mail intact
+ * (hydrated messages are simply queued again — the delivery loop picks them up, no double-send).
+ * Persistence is best-effort: any sqlite failure logs to stderr and the inbox continues in memory
+ * (the old behavior). Pure enough to test with injected read/resume.
  */
 import type { WatchSnapshot } from "./monitor.js";
+import type { Db } from "./db.js";
 
 export interface QueuedMessage {
   id: string;
@@ -22,12 +26,46 @@ export interface QueuedMessage {
 export class Inbox {
   private readonly queues = new Map<string, QueuedMessage[]>();
   private seq = 0;
+  private readonly db?: Db;
+
+  constructor(db?: Db) {
+    this.db = db;
+    if (!db) return;
+    try {
+      const rows = db
+        .prepare(`SELECT box, msg_id, text, created_at FROM inbox_messages ORDER BY id`)
+        .all() as { box: string; msg_id: string; text: string; created_at: number }[];
+      for (const r of rows) {
+        const list = this.queues.get(r.box) ?? [];
+        list.push({ id: r.msg_id, text: r.text, at: r.created_at });
+        this.queues.set(r.box, list);
+        const n = /^q(\d+)$/.exec(r.msg_id);
+        if (n) this.seq = Math.max(this.seq, Number(n[1]));
+      }
+    } catch (e) {
+      process.stderr.write(`[inbox] hydrate from db failed, starting empty: ${(e as Error).message}\n`);
+    }
+  }
+
+  private persist(fn: (db: Db) => void): void {
+    if (!this.db) return;
+    try {
+      fn(this.db);
+    } catch (e) {
+      process.stderr.write(`[inbox] persistence failed (continuing in memory): ${(e as Error).message}\n`);
+    }
+  }
 
   enqueue(session: string, text: string, now = Date.now()): QueuedMessage {
     const m: QueuedMessage = { id: `q${++this.seq}`, text, at: now };
     const list = this.queues.get(session) ?? [];
     list.push(m);
     this.queues.set(session, list);
+    this.persist((db) =>
+      db
+        .prepare(`INSERT INTO inbox_messages (box, msg_id, text, created_at) VALUES (?, ?, ?, ?)`)
+        .run(session, m.id, m.text, m.at),
+    );
     return m;
   }
 
@@ -42,6 +80,7 @@ export class Inbox {
     if (next.length === list.length) return false;
     if (next.length) this.queues.set(session, next);
     else this.queues.delete(session);
+    this.persist((db) => db.prepare(`DELETE FROM inbox_messages WHERE box = ? AND msg_id = ?`).run(session, id));
     return true;
   }
 
@@ -49,11 +88,13 @@ export class Inbox {
   drain(session: string): QueuedMessage[] {
     const list = this.queues.get(session) ?? [];
     this.queues.delete(session);
+    if (list.length) this.persist((db) => db.prepare(`DELETE FROM inbox_messages WHERE box = ?`).run(session));
     return list;
   }
 
   clear(session: string): void {
     this.queues.delete(session);
+    this.persist((db) => db.prepare(`DELETE FROM inbox_messages WHERE box = ?`).run(session));
   }
 
   sessions(): string[] {

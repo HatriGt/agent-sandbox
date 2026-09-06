@@ -110,7 +110,7 @@ function fleetLine(boxes: BoxView[], lc: FleetLifecycle): string {
     ? `All ${lc.capacity} slots are in use — finish or destroy a machine to start another.`
     : warm
       ? "A warm machine is ready, so a new task starts in seconds."
-      : "No warm machine right now — a fresh microVM boots in a few seconds.";
+      : "No warm machine right now — a fresh sandbox boots in a few seconds.";
   return parts.length ? `${parts.join(", ")}. ${tail}` : tail;
 }
 
@@ -383,7 +383,7 @@ export function Hub({
             )}
             <PromptInputTextarea
               id="new-task"
-              placeholder="Describe a task. A fresh microVM picks it up…"
+              placeholder="Describe a task. A fresh sandbox picks it up…"
               className="min-h-14 px-2.5 pt-2 text-body"
             />
 

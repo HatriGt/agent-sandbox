@@ -435,7 +435,7 @@ export function BoxActionsSheet({
         {pane === "destroy" && (
           <View style={{ gap: 12 }}>
             <T variant="body" tone="muted">
-              Stops the microVM and discards its workspace — files, checkouts and uncommitted work. The
+              Stops the sandbox and discards its workspace — files, checkouts and uncommitted work. The
               conversation is not recoverable afterwards.
             </T>
             <View style={{ flexDirection: "row", gap: 8 }}>

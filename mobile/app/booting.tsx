@@ -259,7 +259,7 @@ export default function Booting() {
             {elapsed >= 12 ? (
               <FadeInUp>
                 <T variant="micro" tone="faint" style={{ marginTop: 10 }}>
-                  Cold boot — the pool was empty, so a fresh microVM is being built.
+                  Cold boot — the pool was empty, so a fresh sandbox is being built.
                 </T>
               </FadeInUp>
             ) : null}

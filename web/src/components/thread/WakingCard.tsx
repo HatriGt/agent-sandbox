@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
  * retry inside the pill; error dims to the alarm colour.
  */
 const STAGES = [
-  { at: 0, text: "starting the microVM" },
+  { at: 0, text: "starting the sandbox" },
   { at: 4, text: "restoring workspace + session" },
   { at: 9, text: "reconnecting the transcript" },
 ];

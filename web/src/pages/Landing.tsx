@@ -80,9 +80,9 @@ export default function Landing() {
           </Reveal>
           <Reveal delay={0.1}>
             <p className="text-muted-foreground mt-5 max-w-[52ch] text-lead leading-relaxed">
-              Hand a coding task to an autonomous agent running inside a throwaway microVM — from Cursor, Claude Code,
-              Codex, VS Code or any agentic IDE that speaks MCP, from this dashboard, or from a script. Watch it work
-              live, answer the one question it stops to ask, and get a pull request back.
+              Give a coding task to an autonomous agent in its own disposable sandbox — from Cursor, Claude Code,
+              Codex, VS Code or any agentic IDE that speaks MCP, from this dashboard, or from a script. Watch it
+              work live, answer the one question it stops to ask, and get a pull request back.
             </p>
           </Reveal>
           <Reveal delay={0.15}>
@@ -145,8 +145,8 @@ export default function Landing() {
           <Reveal>
             <h2 className="font-serif text-[clamp(1.8rem,3.2vw,2.5rem)] leading-tight tracking-[-0.015em]">How a task travels.</h2>
             <p className="text-muted-foreground mt-3 max-w-[60ch] text-body">
-              Every entry point speaks MCP to one small controller. It drives microsandbox over SSH, boots or claims a
-              KVM microVM, injects <em>your</em> GitHub credential, and streams the agent's transcript back to you alone.
+              Every entry point speaks MCP to one small controller. It boots or claims a hardware-isolated sandbox,
+              injects <em>your</em> GitHub credential, and streams the agent's transcript back to you alone.
             </p>
           </Reveal>
           <Reveal delay={0.08}>
@@ -164,7 +164,7 @@ export default function Landing() {
             </h2>
             <p className="text-muted-foreground mt-3 max-w-[60ch] text-body">
               The controller speaks MCP, so the same tools are available wherever you already work. Every entry point
-              lands in the same microVM, the same live thread, the same question card.
+              lands in the same sandbox, the same live thread, the same question card.
             </p>
           </Reveal>
           <div className="mt-10 grid gap-4 md:grid-cols-3">
@@ -229,7 +229,7 @@ export default function Landing() {
             </h2>
           </Reveal>
           <div className="mt-10 grid gap-x-10 gap-y-8 sm:grid-cols-2 lg:grid-cols-3">
-            <Feature icon={<ShieldCheck />} title="microVM isolation" body="Every run gets its own KVM microVM (microsandbox). Model-generated code never touches your host — a hardware boundary, not a container namespace." />
+            <Feature icon={<ShieldCheck />} title="True isolation" body="Every run gets its own hardware-isolated sandbox with its own kernel. Model-generated code never touches your host — a hardware boundary, not a container namespace." />
             <Feature icon={<Flame />} title="Warm pool" body="Pre-booted machines wait with the agent installed. A new task starts in seconds instead of a cold boot." />
             <Feature icon={<KeyRound />} title="Credential broker" body="GitHub accounts live on the controller, encrypted, never in the browser. The right account is injected per repo; if an agent asks for auth, the controller answers." />
             <Feature icon={<Timer />} title="Honest lifecycle" body="A run cap and an idle limit you configure. Quiet machines sleep with their workspace intact and wake on your reply; only you (or the cap) destroy anything." />
@@ -579,7 +579,7 @@ function Architecture() {
               tone={i === 0 ? "live" : i === 1 ? "attention" : "ok"}
             />
           ))}
-          <p className="text-muted-foreground text-micro">KVM microVMs (microsandbox) on your VPS</p>
+          <p className="text-muted-foreground text-micro">Isolated sandboxes on your own server</p>
         </div>
       </div>
     </div>
