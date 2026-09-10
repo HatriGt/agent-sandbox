@@ -9,7 +9,8 @@ const WorkspacePane = React.lazy(() => import("./WorkspacePane").then((m) => ({ 
 import { SleepingCard, WakingCard } from "./WakingCard";
 import { SessionContext } from "@/lib/session-context";
 import { friendlyName, isSleeping, POLL_MS, threadTitle } from "@/lib/format";
-import { currentDiskTier, currentMemoryTier, deadlineLabel, deadlineOf, displayState, fmtDuration, offerableTiers } from "@/lib/lifecycle";
+import { currentDiskTier, currentMemoryTier, deadlineLabel, deadlineOf, displayState, fmtDuration, offerableTiers, tierGib, usageLevel } from "@/lib/lifecycle";
+import { MemoryBumpCard } from "./MemoryCard";
 import { runStats, toMarkdown } from "@/lib/transcript";
 import { splitReplies } from "@/lib/replies";
 import { parseMcpName } from "@/lib/mcp";
@@ -295,6 +296,43 @@ export function Thread({
       setMemoryBusy(false);
     }
   };
+
+  // Out-of-memory rescue: when the agent is OOM-killed (exit 137) or memory is critically full
+  // mid-run, offer one action that raises the tier AND continues the task. The resize call returns
+  // once `msb modify --restart` has the box back up, so the forced resume can follow immediately.
+  const nextMemoryTier = React.useMemo(() => {
+    const cur = tierGib(memoryTier);
+    if (cur == null) return null;
+    const bigger = (lifecycle.memoryTiers ?? [])
+      .map((t) => ({ t, g: tierGib(t) ?? Infinity }))
+      .filter((x) => x.g > cur)
+      .sort((a, b) => a.g - b.g);
+    return bigger[0]?.t ?? null;
+  }, [memoryTier, lifecycle.memoryTiers]);
+  const [bumpPhase, setBumpPhase] = React.useState<"resizing" | "resuming" | null>(null);
+  // Remember which box+tier was already rescued so the card does not re-offer while the fleet poll
+  // still carries the pre-resize metrics.
+  const bumpedRef = React.useRef<string | null>(null);
+  const bumpAndContinue = async () => {
+    if (!nextMemoryTier || bumpPhase) return;
+    setBumpPhase("resizing");
+    wokeRef.current = box.name;
+    try {
+      await api.setMemory(box.name, nextMemoryTier);
+      setBumpPhase("resuming");
+      await api.resume(box.name, "The machine ran low on memory and was given more. Continue the task from where you left off.", { force: true });
+      bumpedRef.current = `${box.name}:${nextMemoryTier}`;
+      setGeneration((g) => g + 1);
+      toast.success(`${friendlyName(box.name)} now has ${nextMemoryTier}`, { description: "The agent is continuing the task." });
+    } catch (e) {
+      toast.error("Could not add memory", { description: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBumpPhase(null);
+    }
+  };
+  const memPressure = !sleeping && runState === "running" && usageLevel(box.memUsage) === "critical";
+  const oomKilled = !sleeping && runState !== "running" && exitCode === 137;
+  const showMemoryCard = !!nextMemoryTier && (oomKilled || memPressure) && bumpedRef.current !== `${box.name}:${nextMemoryTier}`;
 
   // Grow the root disk. Identical flow, but the offered tiers are filtered to >= the current size:
   // `msb modify --root-disk` cannot shrink a managed disk, so a smaller pick could only ever fail.
@@ -615,6 +653,10 @@ export function Thread({
 
             {idle && <IdleEmpty box={box} onNew={onNew} />}
 
+            {showMemoryCard && (
+              <MemoryBumpCard kind={oomKilled ? "oom" : "pressure"} nextTier={nextMemoryTier!} memUsage={box.memUsage} phase={bumpPhase} onBump={() => void bumpAndContinue()} />
+            )}
+
             {showQuestion && <QuestionCard question={question!} onAnswer={answer} busy={answering} />}
             {resuming && <WorkingIndicator label="Answer sent — the agent is resuming" />}
 
@@ -657,7 +699,7 @@ export function Thread({
                   exitCode == null || exitCode === 0
                     ? deadlineText ?? undefined
                     : exitCode === 137
-                      ? "the kernel killed the agent — raise this machine's memory from the ⋯ menu, then send a message to continue"
+                      ? "the kernel killed the agent — add memory above to continue where it left off"
                       : exitCode === 254
                         ? "the sandbox restarted mid-run — send a message to continue"
                         : exitCode === 253

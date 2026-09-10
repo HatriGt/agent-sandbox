@@ -446,7 +446,7 @@ export function YouItem({ text, label = "You", onRevert }: { text: string; label
           </Tooltip>
         )}
       {body && (
-        <div className="bg-muted text-foreground max-w-[min(72%,60ch)] rounded-xl rounded-br-md px-4 py-2.5 text-lead whitespace-pre-wrap">
+        <div className="bg-muted text-foreground min-w-0 max-w-[min(72%,60ch)] rounded-xl rounded-br-md px-4 py-2.5 text-lead break-words whitespace-pre-wrap [overflow-wrap:anywhere]">
           {skillName ? (
             <>
               <span className="border-live/30 bg-live/10 text-live stamp mr-1.5 inline-flex translate-y-[-1px] items-center gap-1 rounded-md border px-1.5 py-0.5 align-middle text-micro font-semibold">
@@ -546,7 +546,7 @@ export function QueuedItem({
           </button>
         )}
       </span>
-      <div className="text-foreground max-w-[min(72%,60ch)] rounded-xl rounded-br-md border border-dashed px-4 py-2.5 text-body leading-relaxed whitespace-pre-wrap">
+      <div className="text-foreground min-w-0 max-w-[min(72%,60ch)] rounded-xl rounded-br-md border border-dashed px-4 py-2.5 text-body leading-relaxed break-words whitespace-pre-wrap [overflow-wrap:anywhere]">
         {text}
       </div>
     </div>
@@ -620,7 +620,7 @@ export function ThinkingItem({ text, live }: { text: string; live?: boolean }) {
             transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
             className="overflow-hidden"
           >
-            <div className="text-muted-foreground mt-1 ml-2 border-l pl-4 text-meta leading-relaxed whitespace-pre-wrap">{text}</div>
+            <div className="text-muted-foreground mt-1 ml-2 border-l pl-4 text-meta leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere]">{text}</div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -665,7 +665,7 @@ export function AnsweredQuestionItem({ question, answer }: { question: string; a
         {chosen < 0 && (
           <div className="border-t px-4 py-2">
             <p className="label text-muted-foreground mb-0.5">Your answer</p>
-            <p className="text-foreground text-meta whitespace-pre-wrap">{answer}</p>
+            <p className="text-foreground text-meta whitespace-pre-wrap [overflow-wrap:anywhere]">{answer}</p>
           </div>
         )}
       </div>

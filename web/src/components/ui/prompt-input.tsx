@@ -121,6 +121,14 @@ function PromptInputTextarea({
   const adjustHeight = (el: HTMLTextAreaElement | null) => {
     if (!el || disableAutosize) return
 
+    // Measuring scrollHeight requires collapsing to "auto", which resets the textarea's own
+    // scroll position — on a message taller than maxHeight that made every keystroke jump the
+    // view to the top. Save it, measure, restore; and when the caret sits at the end (the normal
+    // typing case), pin the view to the bottom so the caret stays visible as lines are added.
+    const prevScrollTop = el.scrollTop
+    const caretAtEnd =
+      el.selectionStart === el.value.length && el.selectionEnd === el.value.length
+
     el.style.height = "auto"
 
     if (typeof maxHeight === "number") {
@@ -128,6 +136,8 @@ function PromptInputTextarea({
     } else {
       el.style.height = `min(${el.scrollHeight}px, ${maxHeight})`
     }
+
+    el.scrollTop = caretAtEnd ? el.scrollHeight : prevScrollTop
   }
 
   const handleRef = (el: HTMLTextAreaElement | null) => {
@@ -136,16 +146,7 @@ function PromptInputTextarea({
   }
 
   useLayoutEffect(() => {
-    if (!textareaRef.current || disableAutosize) return
-
-    const el = textareaRef.current
-    el.style.height = "auto"
-
-    if (typeof maxHeight === "number") {
-      el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`
-    } else {
-      el.style.height = `min(${el.scrollHeight}px, ${maxHeight})`
-    }
+    adjustHeight(textareaRef.current)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value, maxHeight, disableAutosize])
 
