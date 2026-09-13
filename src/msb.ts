@@ -856,6 +856,7 @@ const AGENT_LOG = "/workspace/.agent.log";
 const DONE_MARK = "/workspace/.agent.done"; // written with the exit code when the run finishes
 const RUN_MARK = "/workspace/.agent.running"; // present while a run is in flight
 const PID_MARK = "/workspace/.agent.pid"; // pid of the run wrapper, for liveness checks
+const START_MARK = "/workspace/.agent.start"; // guest /proc/uptime seconds when the run began
 const TASK_MARK = "/workspace/.agent.task"; // the current task/follow-up text, so `monitor` can show it
 
 /**
@@ -870,18 +871,33 @@ const TASK_MARK = "/workspace/.agent.task"; // the current task/follow-up text, 
  * A restart is not the only way a run can vanish, and it used to be the only one we reported: a box
  * with a 1 GiB cap and no swap OOM-kills the agent, the wrapper dies with it, and the user was told
  * three times over that the sandbox had "restarted" — so they retried a task that could never fit.
- * The guest kernel ring buffer is per-boot, so any "Killed process" in `dmesg` belongs to THIS boot;
- * when one is there, the honest answer is 137 (128+SIGKILL) and a pointer at the memory control.
+ * So a kill in the guest ring buffer means 137 (128+SIGKILL) and a pointer at the memory control.
+ *
+ * But "this boot" is NOT "this run", and treating them as the same misreported a LIVE run as
+ * OOM-killed: one manual `node` hog earlier in a box's life left a "Killed process" line in dmesg,
+ * and every later interruption on that boot inherited exit 137 — while `claude` was still running.
+ * The ring buffer is per-boot and monotonic, so the fix is to compare timestamps: a kill counts only
+ * if it happened AFTER this run started (START_MARK, recorded from /proc/uptime on the same clock).
+ * Both marks are missing on an old box mid-upgrade; no start time means we cannot attribute the
+ * kill, and 254 ("interrupted") is the honest answer over a confident wrong one.
  */
 const OOM_RE = "Out of memory: Killed process";
-const RUN_STATE_SH =
+// Last kill's kernel timestamp: "[ 2047.861194] Out of memory: ..." -> "2047.861194".
+const LAST_OOM_AT = `dmesg 2>/dev/null | grep ${shellQuote(OOM_RE)} | sed -n 's/^\\[[ ]*\\([0-9.]*\\)\\].*/\\1/p' | tail -1`;
+export const RUN_STATE_SH =
   `if [ -f ${RUN_MARK} ]; then ` +
   `p=$(cat ${PID_MARK} 2>/dev/null); ` +
   `if { [ -n "$p" ] && [ ! -d "/proc/$p" ]; } || [ ${RUN_MARK} -ot /proc/1 ]; then ` +
-  `if dmesg 2>/dev/null | grep -q ${shellQuote(OOM_RE)}; then c=137; ` +
+  // The start time is fed to awk as program text and START_MARK sits in the agent-writable
+  // workspace, so it is accepted only as a whole bare number. Stripping non-digits instead would
+  // salvage "0) || system(...) || (1" into "01" — injection-safe but a plausible-looking timestamp,
+  // which is worse than no answer. A mark that is not exactly a number is discarded: no start time
+  // means the kill cannot be attributed to this run, and 254 ("interrupted") is the honest report.
+  `k=$(${LAST_OOM_AT}); s=$(head -c 32 ${START_MARK} 2>/dev/null | grep -Ex '[0-9]+(\\.[0-9]+)?'); ` +
+  `if [ -n "$k" ] && [ -n "$s" ] && awk "BEGIN{exit !($k > $s)}" 2>/dev/null; then c=137; ` +
   `m="run interrupted: out of memory — the agent was killed by the kernel. Raise this machine memory from the menu, then send a message to continue."; ` +
   `else c=254; m="run interrupted: the sandbox restarted mid-run. Send a message to continue."; fi; ` +
-  `echo $c > ${DONE_MARK}; rm -f ${RUN_MARK}; ` +
+  `echo $c > ${DONE_MARK}; rm -f ${RUN_MARK} ${START_MARK}; ` +
   `echo "$m" >> ${AGENT_LOG}; ` +
   `echo "run:done exit=$c"; ` +
   `else echo "run:running"; fi; ` +
@@ -1017,14 +1033,21 @@ export function agentSh(workdir: string, resume: boolean): string {
     echoFollowup +
     // $$ is this wrapper's pid — the process that writes DONE_MARK at the end — recorded so status
     // reads can tell a live run from a stale marker left by a mid-run VM stop (see RUN_STATE_SH).
-    `rm -f ${DONE_MARK} ${QUESTION_MARK} && touch ${RUN_MARK} && echo $$ > ${PID_MARK} && ` +
+    //
+    // ORDER MATTERS: pid and start time are written BEFORE the run marker. RUN_STATE_SH reads the
+    // marker first and then the pid, so publishing the marker first leaves a window where a poll
+    // pairs a live run with the PREVIOUS run's dead pid, calls the marker stale, and heals a
+    // running agent to done. Writing the pid first means the marker is never visible without a
+    // current pid beside it.
+    `rm -f ${DONE_MARK} ${QUESTION_MARK} && echo $$ > ${PID_MARK} && ` +
+    `cut -d' ' -f1 /proc/uptime > ${START_MARK} && touch ${RUN_MARK} && ` +
     // pipefail so the recorded exit reflects claude's, not the formatter's. Claude's raw stderr also
     // lands in the log (errors aren't JSON). The formatter appends readable lines to the same log as
     // events stream in, tailing live for the dashboard. Run under bash (present in the node image) so
     // pipefail is available.
     `{ set -o pipefail; ` +
     `${claude} 2>> ${AGENT_LOG} | node "$HOME/.claude/stream-fmt.js" ${AGENT_LOG}; ` +
-    `echo $? > ${DONE_MARK}; rm -f ${RUN_MARK} ${PID_MARK}; }`;
+    `echo $? > ${DONE_MARK}; rm -f ${RUN_MARK} ${PID_MARK} ${START_MARK}; }`;
   // nohup + bash + & so the child outlives the exec shell; redirect all fds so exec doesn't block.
   return `nohup bash -c ${shellQuote(inner)} >/dev/null 2>&1 < /dev/null & echo started`;
 }
@@ -1297,7 +1320,7 @@ export async function interruptAgentRun(cfg: Config, box: string): Promise<boole
     `for i in 1 2 3 4 5 6 7 8 9 10; do [ ! -f ${RUN_MARK} ] && { echo interrupted; exit 0; }; sleep 1; done; ` +
     `pkill -KILL -P "$p" 2>/dev/null; ` +
     `for i in 1 2 3 4 5; do [ ! -f ${RUN_MARK} ] && { echo interrupted; exit 0; }; sleep 1; done; ` +
-    `kill -KILL "$p" 2>/dev/null; echo 253 > ${DONE_MARK}; rm -f ${RUN_MARK} ${PID_MARK}; echo forced`;
+    `kill -KILL "$p" 2>/dev/null; echo 253 > ${DONE_MARK}; rm -f ${RUN_MARK} ${PID_MARK} ${START_MARK}; echo forced`;
   const r = await msb(cfg, ["exec", box, "--", "bash", "-lc", sh], false);
   return !/(^|\n)no-run/.test(r.stdout);
 }
