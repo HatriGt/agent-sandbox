@@ -887,14 +887,31 @@ const LAST_OOM_AT = `dmesg 2>/dev/null | grep ${shellQuote(OOM_RE)} | sed -n 's/
 export const RUN_STATE_SH =
   `if [ -f ${RUN_MARK} ]; then ` +
   `p=$(cat ${PID_MARK} 2>/dev/null); ` +
-  `if { [ -n "$p" ] && [ ! -d "/proc/$p" ]; } || [ ${RUN_MARK} -ot /proc/1 ]; then ` +
-  // The start time is fed to awk as program text and START_MARK sits in the agent-writable
-  // workspace, so it is accepted only as a whole bare number. Stripping non-digits instead would
-  // salvage "0) || system(...) || (1" into "01" — injection-safe but a plausible-looking timestamp,
-  // which is worse than no answer. A mark that is not exactly a number is discarded: no start time
-  // means the kill cannot be attributed to this run, and 254 ("interrupted") is the honest report.
-  `k=$(${LAST_OOM_AT}); s=$(head -c 32 ${START_MARK} 2>/dev/null | grep -Ex '[0-9]+(\\.[0-9]+)?'); ` +
-  `if [ -n "$k" ] && [ -n "$s" ] && awk "BEGIN{exit !($k > $s)}" 2>/dev/null; then c=137; ` +
+  // A run is live only if its pid was recorded THIS boot and that process still exists. Anything
+  // else is stale. The two halves are both load-bearing:
+  //   · the pid must still exist — otherwise the wrapper died (crash, OOM, VM stop);
+  //   · PID_MARK must post-date /proc/1 — after a reboot the workspace still holds the old pid,
+  //     and pid numbers are recycled, so an unrelated process can inherit it and pin the box in
+  //     `running` forever. The old code used RUN_MARK's age for this, but the wrapper publishes
+  //     the pid BEFORE touching the run marker, so a poll in that window judged a marker that was
+  //     about to be refreshed and healed a LIVE run to done. Judging the pid file — the thing the
+  //     liveness claim actually rests on — has no such window.
+  `if [ -z "$p" ] || [ ! -d "/proc/$p" ] || [ ${PID_MARK} -ot /proc/1 ]; then ` +
+  // START_MARK sits in the agent-writable workspace, so it is read defensively: the FIRST line
+  // only (a forged "junk\n0" would otherwise pass a line-oriented filter and forge a start time of
+  // zero, back-dating the run so any kill in the buffer post-dates it), and it must be a bare
+  // number. Both values then go to awk as DATA via -v, never as program text, so nothing here is
+  // parsed as awk source — which also avoids awk reading a leading-zero value as octal.
+  //
+  // A start mark older than /proc/1 belongs to a previous boot. Uptime resets at boot, so such a
+  // mark is on a different epoch than the current dmesg timestamps and comparing them is
+  // meaningless — it would read a fresh kill as "after" a stale start and report a confident 137.
+  // That is the resize flow exactly (raise memory -> reboot -> marks survive), where the wrong
+  // answer tells a user who just added memory to add memory again. Discard it: no usable start
+  // time means the kill cannot be attributed to this run, and 254 ("interrupted") is honest.
+  `k=$(${LAST_OOM_AT}); s=$(head -n 1 ${START_MARK} 2>/dev/null | grep -Ex '[0-9]+(\\.[0-9]+)?'); ` +
+  `if [ -f ${START_MARK} ] && [ ${START_MARK} -ot /proc/1 ]; then s=; fi; ` +
+  `if [ -n "$k" ] && [ -n "$s" ] && awk -v k="$k" -v s="$s" 'BEGIN{exit !(k+0 > s+0)}' 2>/dev/null; then c=137; ` +
   `m="run interrupted: out of memory — the agent was killed by the kernel. Raise this machine memory from the menu, then send a message to continue."; ` +
   `else c=254; m="run interrupted: the sandbox restarted mid-run. Send a message to continue."; fi; ` +
   `echo $c > ${DONE_MARK}; rm -f ${RUN_MARK} ${START_MARK}; ` +
@@ -1034,13 +1051,17 @@ export function agentSh(workdir: string, resume: boolean): string {
     // $$ is this wrapper's pid — the process that writes DONE_MARK at the end — recorded so status
     // reads can tell a live run from a stale marker left by a mid-run VM stop (see RUN_STATE_SH).
     //
-    // ORDER MATTERS: pid and start time are written BEFORE the run marker. RUN_STATE_SH reads the
-    // marker first and then the pid, so publishing the marker first leaves a window where a poll
-    // pairs a live run with the PREVIOUS run's dead pid, calls the marker stale, and heals a
-    // running agent to done. Writing the pid first means the marker is never visible without a
-    // current pid beside it.
+    // ORDER MATTERS: the pid is written BEFORE the run marker. A status read treats a live pid as
+    // proof of a live run, so publishing the pid first means the marker is never visible while the
+    // PREVIOUS run's dead pid is still on disk — the window that healed a running agent to done.
+    //
+    // The start time is recorded on the same clock the guest's dmesg timestamps use, so an OOM kill
+    // can be attributed to this run rather than to anything earlier in the boot. It is deliberately
+    // NOT part of the && chain: a failure to write it (a full disk) must cost us the OOM hint, not
+    // the whole run — chaining it would skip `claude` entirely and, with DONE_MARK already removed
+    // and all output sent to /dev/null, the box would sit at `idle` with the user's message gone.
     `rm -f ${DONE_MARK} ${QUESTION_MARK} && echo $$ > ${PID_MARK} && ` +
-    `cut -d' ' -f1 /proc/uptime > ${START_MARK} && touch ${RUN_MARK} && ` +
+    `{ cut -d' ' -f1 /proc/uptime > ${START_MARK} || rm -f ${START_MARK}; }; touch ${RUN_MARK} && ` +
     // pipefail so the recorded exit reflects claude's, not the formatter's. Claude's raw stderr also
     // lands in the log (errors aren't JSON). The formatter appends readable lines to the same log as
     // events stream in, tailing live for the dashboard. Run under bash (present in the node image) so

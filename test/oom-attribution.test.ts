@@ -23,7 +23,15 @@ const DMESG = `[    0.000000] Linux version 6.1.0\n[ ${KILL_AT}] Out of memory: 
  * Run the fragment against a scratch dir standing in for /workspace, with a stub `dmesg` on PATH
  * (the test host has no guest ring buffer). `marks` are the sentinel files to lay down first.
  */
-function runState(marks: Record<string, string>, opts: { dmesg?: string; livePid?: boolean } = {}): string {
+interface Opts {
+  dmesg?: string;
+  /** Record a pid the shell can really see in /proc, as a live wrapper would. */
+  livePid?: boolean;
+  /** Mark names to back-date before /proc/1, standing in for marks that survived a reboot. */
+  preBoot?: string[];
+}
+
+function runState(marks: Record<string, string>, opts: Opts = {}): string {
   const dir = mkdtempSync(join(tmpdir(), "asb-oom-"));
   try {
     const bin = join(dir, "bin");
@@ -31,11 +39,24 @@ function runState(marks: Record<string, string>, opts: { dmesg?: string; livePid
     writeFileSync(join(bin, "dmesg"), `#!/bin/sh\ncat <<'EOF'\n${opts.dmesg ?? DMESG}EOF\n`, { mode: 0o755 });
     for (const [name, body] of Object.entries(marks)) writeFileSync(join(dir, name), body);
     const ws = `${dir.replaceAll("\\", "/")}/`;
-    // A live pid has to be one the RUNNING SHELL can see in /proc: on a Windows dev host the test
-    // process's own pid is not in the shell's /proc view, so the fixture spawns its own child.
-    // Redirected so the fixture's own stdout does not keep execFileSync waiting on the child.
-    const prelude = opts.livePid ? `sleep 30 >/dev/null 2>&1 & echo $! > ${ws}.agent.pid; ` : "";
-    const sh = prelude + RUN_STATE_SH.replaceAll("/workspace/", ws);
+    // /proc/1 is the guest's boot marker and is absent on this dev host, so the fixture supplies a
+    // stand-in: a file created NOW. "Pre-boot" marks are then stamped an hour earlier, reproducing
+    // sentinels that outlived a reboot (what the memory resize does) without needing a real VM.
+    const proc1 = `${ws}proc1`;
+    const setup =
+      // Back-dated a minute so the freshly-written marks are unambiguously NEWER than "boot".
+      // Creating it now instead leaves them within one filesystem timestamp tick, and `-ot`
+      // (strictly older) then reads as "not older" only by luck of the clock.
+      `: > ${proc1}; touch -d '1 minute ago' ${proc1}; ` +
+      (opts.livePid
+        ? // A live pid must be visible in the RUNNING SHELL's /proc: on a Windows dev host the test
+          // process's own pid is not, so the fixture spawns its own child. Output is redirected so
+          // the child does not hold execFileSync's stdout open for its whole lifetime.
+          `sleep 30 >/dev/null 2>&1 & echo $! > ${ws}.agent.pid; `
+        : "") +
+      (opts.preBoot ?? []).map((m) => `touch -d '1 hour ago' ${ws}${m}; `).join("");
+    // /proc/1 is referenced bare, so it is swapped separately from the /workspace/ prefix.
+    const sh = setup + RUN_STATE_SH.replaceAll("/workspace/", ws).replaceAll("/proc/1", proc1);
     return execFileSync("sh", ["-c", sh], {
       encoding: "utf8",
       env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}` },
@@ -53,6 +74,33 @@ test("a live run is never healed to done, even on a box that OOMed earlier", () 
   // The reported bug: pid alive, but an older kill in dmesg reported the run as OOM-killed.
   const out = runState({ ".agent.start": after("\n"), ".agent.running": "" }, { livePid: true });
   assert.equal(out, "run:running");
+});
+
+test("a live run whose RUN_MARK survived a reboot is still reported as running", () => {
+  // The wrapper reuses a marker left behind by a previous boot instead of recreating it, so a live
+  // run can legitimately hold a marker older than /proc/1. Condemning it on age alone healed a
+  // running agent to done — age must never outvote a live pid.
+  const out = runState({ ".agent.start": after("\n"), ".agent.running": "" }, { livePid: true, preBoot: [".agent.running"] });
+  assert.equal(out, "run:running");
+});
+
+test("a pid recorded before this boot is stale, even if some process now holds that number", () => {
+  // Pids are recycled: after a reboot the workspace still names the old wrapper, and an unrelated
+  // process can inherit the number. Without the age check on the pid file, that pins the box in
+  // `running` forever.
+  const out = runState({ ".agent.start": before("\n"), ".agent.running": "" }, { livePid: true, preBoot: [".agent.pid"] });
+  assert.equal(out, "run:done exit=137");
+});
+
+test("a start mark from a previous boot cannot be compared, so it reports a restart", () => {
+  // Uptime resets at boot, so a surviving mark is on a different epoch than the current dmesg
+  // timestamps. This is the resize flow (add memory -> reboot -> marks survive): blaming the kill
+  // would tell a user who just added memory to add memory again.
+  const out = runState(
+    { ".agent.pid": DEAD_PID, ".agent.start": before("\n"), ".agent.running": "" },
+    { preBoot: [".agent.start"] }
+  );
+  assert.equal(out, "run:done exit=254");
 });
 
 test("an interrupted run does NOT inherit an OOM kill from an earlier run", () => {
@@ -80,13 +128,30 @@ test("a missing start mark cannot attribute a kill, so it reports a restart", ()
 });
 
 test("the start mark is agent-writable, so only a bare number is trusted", () => {
-  // The mark lives in /workspace and is interpolated into an awk program. Stripping non-digits
-  // would turn this into "01" — a plausible timestamp that reads as a genuine OOM.
+  // The mark lives in /workspace and is fed to awk. Stripping non-digits would turn this into "01"
+  // — a plausible timestamp that reads as a genuine OOM.
   const out = runState({
     ".agent.pid": DEAD_PID,
     ".agent.start": '0) || system("touch /tmp/asb-pwned") || (1\n',
     ".agent.running": "",
   });
+  assert.equal(out, "run:done exit=254");
+});
+
+test("a forged start time on a later line is not salvaged", () => {
+  // A line-oriented filter accepts any line that parses, so "junk\n0" forges a start of zero and
+  // back-dates the run until every kill in the buffer looks like its own. Only line 1 is read.
+  const out = runState({ ".agent.pid": DEAD_PID, ".agent.start": "junk\n0\n", ".agent.running": "" });
+  assert.equal(out, "run:done exit=254");
+});
+
+test("a leading-zero start time is read as decimal, not octal", () => {
+  // Passed to awk as program text, "010" is an octal source constant worth 8. As data it is 10.
+  // With the kill at 9, decimal means the kill PREDATES the run (254); octal would say 137.
+  const out = runState(
+    { ".agent.pid": DEAD_PID, ".agent.start": "010\n", ".agent.running": "" },
+    { dmesg: "[    9.000000] Out of memory: Killed process 422 (node)\n" }
+  );
   assert.equal(out, "run:done exit=254");
 });
 
