@@ -519,22 +519,38 @@ function agentWorkdir(repos?: RepoLayout[]): string {
  * in the same cwd the first run used or it silently starts a brand-new session with no memory of the
  * conversation — the agent answers a follow-up by asking which PR you meant. Resume callers only
  * have a box id (the original plan is long gone), and passing `repos: undefined` made agentWorkdir
- * fall back to `/workspace` while the first run had used `/workspace/<repo>`. So: reconstruct the
- * layout from what is actually on disk, which is the same rule the first run applied to the same
- * directories. Falls back to `/workspace` if the listing fails — matching the multi-repo case, and
- * no worse than the bug it replaces.
+ * fall back to `/workspace` while the first run had used `/workspace/<repo>`.
+ *
+ * Source of truth is WORKDIR_MARK, written by the FIRST run: the live repo listing is NOT a proxy
+ * for where the session lives, because the layout can change mid-thread — attaching a second repo
+ * to a single-repo box flipped the derived cwd from /workspace/<repo> to /workspace, and the very
+ * next follow-up silently resumed as a fresh session (live incident: the agent re-asked what the
+ * task was, then reviewed a PR in the wrong repo). Only when the mark is absent (a box bootstrapped
+ * by an older controller) does the layout-derived guess apply; it is correct as long as the layout
+ * has not changed since the first run. Falls back to `/workspace` if the probe fails entirely.
  */
 async function boxAgentWorkdir(cfg: Config, box: string): Promise<string> {
   try {
-    const r = await exec(cfg, box, WORKSPACE_DIRS_SH);
-    return workdirFromWorkspaceListing(r.stdout);
+    const r = await exec(cfg, box, WORKDIR_PROBE_SH);
+    return workdirFromProbe(r.stdout);
   } catch {
     return "/workspace";
   }
 }
 
+// The FIRST run's cwd — where the Claude session lives, so resumes land there even after the repo
+// layout changes (attach_repo). Declared here, above the "stable in-box paths" block, because the
+// probe below embeds it at module init.
+const WORKDIR_MARK = "/workspace/.agent.workdir";
+
 /** Lists the repo dirs directly under /workspace, one basename per line (empty for a bare box). */
 export const WORKSPACE_DIRS_SH = 'for d in /workspace/*/; do basename "$d"; done';
+
+/**
+ * One probe for the resume cwd: the persisted mark first, then the repo listing after a `---` line.
+ * A single exec, so the mark and the fallback can never disagree about which box they describe.
+ */
+export const WORKDIR_PROBE_SH = `cat ${WORKDIR_MARK} 2>/dev/null; echo ---; ${WORKSPACE_DIRS_SH}`;
 
 /**
  * The workdir implied by a `WORKSPACE_DIRS_SH` listing. Pure so the resume-cwd rule is testable:
@@ -547,6 +563,18 @@ export function workdirFromWorkspaceListing(stdout: string): string {
     // An unmatched glob comes back literally as `*` on a bare box; not a repo.
     .filter((n) => n && n !== "*");
   return agentWorkdir(names.map((name) => ({ name })));
+}
+
+/**
+ * The workdir implied by a `WORKDIR_PROBE_SH` output: the persisted mark wins; the layout-derived
+ * guess covers boxes whose first run predates the mark. The mark must be an absolute path under
+ * /workspace — anything else (corruption, a stray error line) is ignored rather than trusted as a cwd.
+ */
+export function workdirFromProbe(stdout: string): string {
+  const sep = stdout.indexOf("---");
+  const mark = (sep >= 0 ? stdout.slice(0, sep) : "").trim();
+  if (mark === "/workspace" || /^\/workspace\/[^/\s]+$/.test(mark)) return mark;
+  return workdirFromWorkspaceListing(sep >= 0 ? stdout.slice(sep + 3) : stdout);
 }
 
 /**
@@ -1046,7 +1074,9 @@ export function agentSh(workdir: string, resume: boolean): string {
     // the FIRST run writes it: the marker is the ORIGINAL task, read back whole by the watch/fleet
     // probes for the thread's pinned Task bubble. Follow-ups are already first-class ⟦you⟧ turns in
     // the log; appending them here (the old behavior) just mashed them into the task text.
-    `cd ${workdir} && ${resume ? `true` : `printf '%s\\n' "$AGENT_TASK" > ${TASK_MARK}`} && ` +
+    // The workdir mark is (re)written on the FIRST run only, like TASK_MARK: it records where this
+    // thread's Claude session lives, so a resume lands there even if repos are attached later.
+    `cd ${workdir} && ${resume ? `true` : `printf '%s\\n' "$AGENT_TASK" > ${TASK_MARK} && printf '%s\\n' ${shellQuote(workdir)} > ${WORKDIR_MARK}`} && ` +
     echoFollowup +
     // $$ is this wrapper's pid — the process that writes DONE_MARK at the end — recorded so status
     // reads can tell a live run from a stale marker left by a mid-run VM stop (see RUN_STATE_SH).
