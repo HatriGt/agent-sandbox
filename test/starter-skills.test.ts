@@ -15,10 +15,10 @@ import type { Config } from "../src/config.js";
 const cfg = {} as Config;
 
 test("starter skills are valid per the store's own validation", () => {
-  assert.equal(STARTER_SKILLS.length, 4);
+  assert.equal(STARTER_SKILLS.length, 6);
   assert.deepEqual(
     STARTER_SKILLS.map((s) => s.name).sort(),
-    ["code-review", "fix-issue", "upgrade-deps", "write-tests"]
+    ["code-review", "fix-issue", "security-review", "upgrade-deps", "write-pr-description", "write-tests"]
   );
   const defs = starterSkillDefs(1234);
   for (const d of defs) {
@@ -38,7 +38,7 @@ test("seeding writes the starters for a fresh owner", async () => {
   registerUserStoreBackend({ db, box: makeSecretBox(crypto.randomBytes(32)) });
   await seedStarterSkills(cfg, "u_fresh");
   const store = await withOwner("u_fresh", () => loadSkillStore(cfg));
-  assert.deepEqual(Object.keys(store.skills).sort(), ["code-review", "fix-issue", "upgrade-deps", "write-tests"]);
+  assert.deepEqual(Object.keys(store.skills).sort(), ["code-review", "fix-issue", "security-review", "upgrade-deps", "write-pr-description", "write-tests"]);
   assert.equal(store.skills["fix-issue"].enabled, true);
   assert.ok(store.skills["code-review"].content.includes("adversarially"));
 });

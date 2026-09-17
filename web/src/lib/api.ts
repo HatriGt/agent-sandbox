@@ -218,7 +218,12 @@ export interface RunDigest {
   plan: DigestPlanStep[];
   files: { path: string; status: string; additions: number; deletions: number }[];
   failedCommands: { name: string; arg?: string }[];
+  /** Calls the in-box guard denied — trust made visible, split from ordinary failures.
+   *  Optional: archived digests written before the field exist without it. */
+  blocked?: { name: string; arg?: string }[];
   questions: { question: string; answer?: string }[];
+  /** Turn-end token usage from the log's ⟦usage⟧ sentinel; absent on older logs. */
+  usage?: { inputTokens: number; outputTokens: number; contextTokens: number };
   headline: string;
   /** Post-run verification, when the task was delegated with a `verify` clause. */
   verified?: { mode: "command" | "criterion"; pass: boolean; detail: string };

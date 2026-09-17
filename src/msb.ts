@@ -777,6 +777,14 @@ export const PLAN_CLOSE = "⟦/plan⟧";
  */
 export const DIFF_OPEN = "⟦diff⟧";
 export const DIFF_CLOSE = "⟦/diff⟧";
+
+/**
+ * Turn-end token usage, previously dropped on the floor: `⟦usage⟧ in=N out=N ctx=N`. `in`/`out` are
+ * the turn's cumulative totals from the `result` frame (input + cache reads + cache writes); `ctx`
+ * is the last request's context footprint — the "how full is the window" number the dashboard's
+ * context-health meter reads. One line per turn; the trace parser folds it into a `usage` event.
+ */
+export const USAGE_OPEN = "⟦usage⟧";
 export const DIFF_MAX_LINES = 200;
 export const DIFF_MAX_BYTES = 16384;
 
@@ -803,6 +811,11 @@ export function streamFmtScript(): string {
     `const seenText=new Set();` +
     // Whether the "session started" marker has been written for this turn (see the init branch).
     `let inited=false;` +
+    // Last per-request context footprint (input + cache + output of the most recent assistant
+    // message) — the number that says how full the window is; the result frame's input counters
+    // are CUMULATIVE across the turn and answer "what did this turn cost" instead.
+    `let ctx=0;` +
+    `function usum(u){return (u.input_tokens||0)+(u.cache_read_input_tokens||0)+(u.cache_creation_input_tokens||0)}` +
     // tool_use ids of TodoWrite calls: their result ("Todos have been modified successfully") is
     // noise once the plan block itself is in the log, so it is not written.
     `const planIds=new Set();` +
@@ -838,7 +851,7 @@ export function streamFmtScript(): string {
     // rendered as two "session started" lines back to back and read like the turn had restarted and
     // lost its context. It had not: same session, same conversation.
     `if(e.type==="system"&&e.subtype==="init"){if(!inited){inited=true;w("● session started (model "+(e.model||"?")+")")}return}` +
-    `if(e.type==="assistant"&&e.message){for(const b of e.message.content||[]){` +
+    `if(e.type==="assistant"&&e.message){if(e.message.usage)ctx=usum(e.message.usage)+(e.message.usage.output_tokens||0);for(const b of e.message.content||[]){` +
     // Trailing "\n" => a BLANK line after each text block. Consecutive assistant text blocks are
     // separate markdown documents (a table, then a fenced block); glued with a single newline the
     // renderer reads "| 1 | 2 |```bash" as one paragraph and the fence never opens.
@@ -882,7 +895,11 @@ export function streamFmtScript(): string {
     // Re-emit the run's final result ONLY when it is not simply the assistant text we already wrote.
     // Claude's `result` IS the last assistant message, so the unconditional re-emit appended the
     // whole closing summary a second time — the duplicate the reader sees at the end of every run.
-    `if(e.type==="result"){const r=e.result?String(e.result).trim():"";if(r&&!seenText.has(r))w(df(r));return}` +
+    `if(e.type==="result"){const r=e.result?String(e.result).trim():"";if(r&&!seenText.has(r))w(df(r));` +
+    // Turn-end usage sentinel: cumulative in/out from the result frame, context footprint from the
+    // last assistant message. Written raw (not via w's redaction path it still goes through, but not
+    // defanged) — this is FORMATTER structure, like ⟦plan⟧, so it must parse at column 0.
+    `if(e.usage){w("${USAGE_OPEN} in="+usum(e.usage)+" out="+(e.usage.output_tokens||0)+" ctx="+ctx)}return}` +
     `}catch(_){}}`;
   // base64 the whole script and decode in the box: shipping a large JS blob through
   // shell/SSH/msb-exec quoting was corrupting it (trailing garbage → SyntaxError at load).

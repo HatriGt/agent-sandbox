@@ -45,6 +45,11 @@ export interface RunDigest {
   plan: DigestPlanStep[];
   files: DigestFile[];
   failedCommands: Array<{ name: string; arg?: string }>;
+  /** Calls the in-box guard denied (src/guard.ts). Split from failures: a blocked exfiltration
+   *  attempt is a safety event the owner should SEE, not a command that merely errored. */
+  blocked: Array<{ name: string; arg?: string }>;
+  /** Turn-end token usage from the log's last ⟦usage⟧ sentinel; absent on logs from older boxes. */
+  usage?: { inputTokens: number; outputTokens: number; contextTokens: number };
   questions: Array<{ question: string; answer?: string }>;
   /** Verified-outcomes result: pass means checked, not just claimed. */
   verified?: VerifyResult;
@@ -70,6 +75,7 @@ export function headlineOf(x: {
   fileCount: number;
   stepCount: number;
   failedCount: number;
+  blockedCount?: number;
   openQuestions: number;
   verified?: VerifyResult;
 }): string {
@@ -87,6 +93,7 @@ export function headlineOf(x: {
   if (x.fileCount > 0) bits.push(`${x.fileCount} file${x.fileCount === 1 ? "" : "s"}`);
   if (x.stepCount > 0) bits.push(`${x.stepCount} step${x.stepCount === 1 ? "" : "s"}`);
   if (x.failedCount > 0) bits.push(`${x.failedCount} failed command${x.failedCount === 1 ? "" : "s"}`);
+  if ((x.blockedCount ?? 0) > 0) bits.push(`${x.blockedCount} blocked`);
   if (x.openQuestions > 0 && x.state !== "waiting") bits.push(`${x.openQuestions} unanswered question${x.openQuestions === 1 ? "" : "s"}`);
   if (x.verified) bits.push(x.verified.pass ? "verified" : "UNVERIFIED");
   return bits.join(" · ");
@@ -107,8 +114,10 @@ export function buildDigest(input: DigestInput): RunDigest {
   let startedAt: number | undefined;
   let endedAt: number | undefined;
   const failedCommands: Array<{ name: string; arg?: string }> = [];
+  const blocked: Array<{ name: string; arg?: string }> = [];
   const questions: Array<{ question: string; answer?: string }> = [];
   let pendingAsk: string | undefined;
+  let usage: RunDigest["usage"];
 
   for (const ev of input.events) {
     if (ev.kind === "plan") {
@@ -119,8 +128,15 @@ export function buildDigest(input: DigestInput): RunDigest {
         endedAt = ev.at;
       }
     } else if (ev.kind === "tool" && ev.failed) {
-      failedCommands.push({ name: ev.name, ...(ev.arg ? { arg: ev.arg } : {}) });
+      // A guard denial surfaces as an errored tool_result carrying the guard's reason, and every
+      // guard reason starts with "Refusing" (src/guard.ts). Split those out: "the sandbox stopped an
+      // exfiltration attempt" is a different fact from "npm test failed".
+      const entry = { name: ev.name, ...(ev.arg ? { arg: ev.arg } : {}) };
+      if (/^\s*Refusing /.test(ev.result ?? "")) blocked.push(entry);
+      else failedCommands.push(entry);
       if (activeStep >= 0) failedByStep.set(activeStep, true);
+    } else if (ev.kind === "usage") {
+      usage = { inputTokens: ev.inputTokens, outputTokens: ev.outputTokens, contextTokens: ev.contextTokens };
     } else if (ev.kind === "ask") {
       if (pendingAsk !== undefined) questions.push({ question: pendingAsk }); // an ask that was never answered
       pendingAsk = ev.text;
@@ -143,6 +159,7 @@ export function buildDigest(input: DigestInput): RunDigest {
     fileCount: input.files.length,
     stepCount: plan.length,
     failedCount: failedCommands.length,
+    blockedCount: blocked.length,
     openQuestions,
     verified: input.verified,
   });
@@ -157,7 +174,9 @@ export function buildDigest(input: DigestInput): RunDigest {
     plan,
     files: input.files,
     failedCommands,
+    blocked,
     questions,
+    ...(usage ? { usage } : {}),
     ...(input.verified ? { verified: input.verified } : {}),
     headline,
   };

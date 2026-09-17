@@ -27,7 +27,9 @@ export type TraceEvent =
   /** A TodoWrite snapshot. `at` is the formatter's wall-clock ms; absent on logs written before it. */
   | { kind: "plan"; items: PlanItem[]; at?: number }
   /** A question the operator answered; the answer follows as the next `you` event. */
-  | { kind: "ask"; text: string };
+  | { kind: "ask"; text: string }
+  /** Cumulative token usage stamped by the formatter at the end of a turn (⟦usage⟧ sentinel). */
+  | { kind: "usage"; inputTokens: number; outputTokens: number; contextTokens: number };
 
 export interface PlanItem {
   text: string;
@@ -85,6 +87,10 @@ const DIFF_OPEN = "⟦diff⟧";
 const DIFF_CLOSE = "⟦/diff⟧";
 const ASK_OPEN = "⟦ask⟧";
 const ASK_CLOSE = "⟦/ask⟧";
+// One line per turn, stamped by the formatter from the stream-json usage fields it used to drop:
+// `⟦usage⟧ in=<total input> out=<total output> ctx=<last request's context footprint>`. Column-0
+// only, like every sentinel; model text is defanged with a ZWSP so it can never forge one.
+const USAGE_RE = /^⟦usage⟧ in=(\d+) out=(\d+) ctx=(\d+)$/;
 const PLAN_LINE = /^\[( |x|>)\]\s*(.*)$/;
 
 /**
@@ -192,6 +198,13 @@ export function parseTrace(rawLog: string): TraceEvent[] {
     if (line === ASK_OPEN) {
       flushProse();
       ask = [];
+      target = null;
+      continue;
+    }
+    const usage = line.match(USAGE_RE);
+    if (usage) {
+      flushProse();
+      events.push({ kind: "usage", inputTokens: Number(usage[1]), outputTokens: Number(usage[2]), contextTokens: Number(usage[3]) });
       target = null;
       continue;
     }

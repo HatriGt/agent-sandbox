@@ -35,7 +35,8 @@ export function DigestCard({ digest }: { digest: RunDigest }) {
 
   const failed = digest.state === "failed";
   const duration = digest.startedAt && digest.endedAt && digest.endedAt > digest.startedAt ? fmtDuration(Math.round((digest.endedAt - digest.startedAt) / 1000)) : null;
-  const hasBody = digest.plan.length > 0 || digest.files.length > 0 || digest.failedCommands.length > 0 || digest.questions.length > 0;
+  const blocked = digest.blocked ?? [];
+  const hasBody = digest.plan.length > 0 || digest.files.length > 0 || digest.failedCommands.length > 0 || blocked.length > 0 || digest.questions.length > 0;
   const files = digest.files.slice(0, FILE_CAP);
   const moreFiles = digest.files.length - files.length;
 
@@ -78,7 +79,7 @@ export function DigestCard({ digest }: { digest: RunDigest }) {
               </ul>
             </div>
           )}
-          {(digest.files.length > 0 || digest.failedCommands.length > 0 || digest.questions.length > 0) && (
+          {(digest.files.length > 0 || digest.failedCommands.length > 0 || blocked.length > 0 || digest.questions.length > 0) && (
             <div className="flex min-w-0 flex-col gap-3">
               {digest.files.length > 0 && (
                 <div className="min-w-0">
@@ -101,6 +102,19 @@ export function DigestCard({ digest }: { digest: RunDigest }) {
                   <ul className="flex flex-col gap-0.5">
                     {digest.failedCommands.map((c, i) => (
                       <li key={i} className="stamp text-destructive min-w-0 truncate">
+                        {c.name}
+                        {c.arg ? ` ${c.arg}` : ""}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {blocked.length > 0 && (
+                <div className="min-w-0">
+                  <p className="label text-muted-foreground mb-1.5">{blocked.length === 1 ? "1 call blocked by the sandbox" : `${blocked.length} calls blocked by the sandbox`}</p>
+                  <ul className="flex flex-col gap-0.5">
+                    {blocked.map((c, i) => (
+                      <li key={i} className="stamp text-muted-foreground min-w-0 truncate">
                         {c.name}
                         {c.arg ? ` ${c.arg}` : ""}
                       </li>

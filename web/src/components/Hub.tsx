@@ -13,8 +13,10 @@ import {
   Loader2,
   ImagePlus,
   Lock,
+  Map,
   Plus,
   ShieldCheck,
+  TestTubes,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -24,6 +26,7 @@ import { motion } from "motion/react";
 import { api, type BoxView, type FleetLifecycle } from "@/lib/api";
 import { fmtAgo, friendlyName, shortName, threadSort, threadTitle } from "@/lib/format";
 import { readDraft, takePrefill, writeDraft } from "@/lib/draft";
+import { STARTERS as STARTER_DEFS, mergeStarterText, type StarterDef } from "@/lib/starters";
 import { getMe } from "@/lib/auth";
 import { GettingStarted } from "@/components/GettingStarted";
 import { TrialEndedNotice } from "@/components/TrialBadge";
@@ -50,11 +53,8 @@ import type { SessionRun } from "@/hooks/useSessionRuns";
  * runs this browser started, honest about the ones whose machines are gone.
  */
 
-interface Starter {
+interface Starter extends StarterDef {
   icon: React.ReactNode;
-  label: string;
-  task: string;
-  needsRepo?: boolean;
 }
 
 function greeting(): string {
@@ -65,43 +65,19 @@ function greeting(): string {
   return "Good evening";
 }
 
-const STARTERS: Starter[] = [
-  {
-    icon: <FileSearch />,
-    label: "Explain a codebase",
-    task: "Read this repository and write a concise architecture overview: the entry points, the main modules and how they depend on each other, and anything surprising. Do not change any files.",
-    needsRepo: true,
-  },
-  {
-    icon: <Bug />,
-    label: "Fix a bug, open a PR",
-    task: "Find and fix the following bug, add a regression test, and open a pull request:\n\n",
-    needsRepo: true,
-  },
-  {
-    icon: <FlaskConical />,
-    label: "Run the tests",
-    task: "Install dependencies, run the full test suite, and report exactly what fails with the command and the key error lines. Do not fix anything yet — stop and tell me what you found.",
-    needsRepo: true,
-  },
-  {
-    icon: <ClipboardCheck />,
-    label: "Review a diff",
-    task: "Review the changes on the current branch against main. Report correctness bugs first, then anything that could be simpler. Do not change files.",
-    needsRepo: true,
-  },
-  {
-    icon: <GitPullRequest />,
-    label: "Review a PR",
-    task: "Review the following pull request. Check out the PR branch, read the full diff, and leave a review on GitHub: comment on the specific lines for any correctness bug, risky change, or clear improvement. If nothing needs a change, approve the PR instead. Do not merge.\n\nPR: ",
-    needsRepo: true,
-  },
-  {
-    icon: <Layers />,
-    label: "Research, no repo",
-    task: "Write a thorough, well-sourced report on the following, into /workspace/report.md:\n\n",
-  },
-];
+// The briefs live in lib/starters.ts (pure data, tested); the icons are presentation and stay here.
+const STARTER_ICONS: Record<string, React.ReactNode> = {
+  "Explain a codebase": <FileSearch />,
+  "Fix a bug, open a PR": <Bug />,
+  "Run the tests": <FlaskConical />,
+  "Review a diff": <ClipboardCheck />,
+  "Review a PR": <GitPullRequest />,
+  "Plan first, then build": <Map />,
+  "TDD a feature": <TestTubes />,
+  "Research, no repo": <Layers />,
+};
+
+const STARTERS: Starter[] = STARTER_DEFS.map((s) => ({ ...s, icon: STARTER_ICONS[s.label] ?? <Layers /> }));
 
 /**
  * A failed delegate unmounts and remounts the Hub (the booting pane swaps in the moment you submit),
@@ -257,12 +233,8 @@ export function Hub({
 
   const applyStarter = (s: Starter) => {
     // Never destroy a typed brief: if the composer already holds text that is not just another
-    // starter, append the template under it instead of replacing it.
-    setTask((prev) => {
-      const t = prev.trim();
-      const isStarter = STARTERS.some((x) => t === x.task.trim());
-      return !t || isStarter ? s.task : `${prev.replace(/\s+$/, "")}\n\n${s.task}`;
-    });
+    // starter, append the template under it instead of replacing it (lib/starters.ts).
+    setTask((prev) => mergeStarterText(prev, s.task));
     if (s.needsRepo) setShowRepo(true);
     requestAnimationFrame(() => {
       const el = document.getElementById("new-task") as HTMLTextAreaElement | null;

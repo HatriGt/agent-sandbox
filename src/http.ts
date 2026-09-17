@@ -925,6 +925,7 @@ app.post("/users.json", (req: Request, res: Response) => {
   const { login, email, role } = (req.body ?? {}) as { login?: string; email?: string; role?: string };
   try {
     const u = createLocalUser(db, { login: String(login ?? ""), email: typeof email === "string" ? email : null, role: role === "admin" ? "admin" : "user" });
+    void seedStarterSkills(cfg, u.id); // admin-invited accounts get the same starters as signups
     const key = createApiKey(db, u.id, "first sign-in");
     res.json({ id: u.id, login: u.login, role: u.role, token: key.token });
   } catch (e) {

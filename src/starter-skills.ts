@@ -85,6 +85,38 @@ export const STARTER_SKILLS: StarterSkill[] = [
       "Zero findings is a valid result; say so plainly rather than inventing nitpicks.",
     ].join("\n"),
   },
+  {
+    name: "security-review",
+    description: "Use when asked to review code or a change for security issues, or before merging anything that touches auth, input handling, or secrets.",
+    content: [
+      "Review for what an attacker can do, not for style. Assume every input is hostile.",
+      "",
+      "1. Map the attack surface of the change: new inputs (HTTP params, file contents, env vars), new outputs (responses, logs, files), and any trust boundary crossed.",
+      "2. Hunt in order of damage: injection (SQL, shell, path traversal), broken auth/session handling, secrets in code or logs, unsafe deserialization, SSRF, then missing validation.",
+      "3. For every user-controlled value, trace it to every sink. A value that reaches a shell, a query, a path, or an HTML response unescaped is a finding.",
+      "4. Check the boring killers: default credentials, debug endpoints left on, permissive CORS, tokens logged, error messages leaking internals.",
+      "5. Try to exploit each candidate finding with a concrete input before reporting it — show the payload, not a hypothetical.",
+      "6. Report ranked by severity: what an attacker gains, the exact code path, and the minimal fix.",
+      "",
+      "No findings is a valid result. Never 'fix' security by obscurity (hiding, renaming) — fix the sink.",
+    ].join("\n"),
+  },
+  {
+    name: "write-pr-description",
+    description: "Use when opening a pull request, or when asked to write or improve a PR description.",
+    content: [
+      "A PR description is for the reviewer five minutes from now and the archaeologist two years from now.",
+      "",
+      "1. Title: imperative, under 70 chars, states the change not the activity ('Fix retry loop dropping the last attempt', not 'Updated retry.ts').",
+      "2. First paragraph: WHY. The problem or need that made this change necessary, in two or three sentences a non-author can follow.",
+      "3. Then WHAT: the approach taken and any alternatives rejected, briefly. Link the issue with `Fixes #N` when one exists.",
+      "4. Call out anything the diff hides: behaviour changes, migrations, config or env changes, follow-up work deliberately left out.",
+      "5. End with HOW VERIFIED: the exact commands run and their result. 'Tests pass' names the suite; a manual check names the steps.",
+      "6. Keep it honest: a known limitation stated in the PR is a note; discovered later it is a bug report.",
+      "",
+      "Skip boilerplate sections that would be empty. A three-line PR gets a three-line description.",
+    ].join("\n"),
+  },
 ];
 
 /** The starters as validated store entries (throws in tests if any starter is malformed). */

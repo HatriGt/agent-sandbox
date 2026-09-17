@@ -27,7 +27,9 @@ export type TraceEvent =
   /** A TodoWrite snapshot. `at` is the formatter's wall-clock ms; absent on logs written before it. */
   | { kind: "plan"; items: PlanItem[]; at?: number }
   /** A question the operator answered; the answer follows as the next `you` event. */
-  | { kind: "ask"; text: string };
+  | { kind: "ask"; text: string }
+  /** Cumulative token usage stamped by the formatter at the end of a turn (⟦usage⟧ sentinel). */
+  | { kind: "usage"; inputTokens: number; outputTokens: number; contextTokens: number };
 
 export interface PlanItem {
   text: string;
@@ -81,6 +83,8 @@ const PLAN_OPEN = "⟦plan⟧";
 const PLAN_CLOSE = "⟦/plan⟧";
 const ASK_OPEN = "⟦ask⟧";
 const ASK_CLOSE = "⟦/ask⟧";
+// Turn-end token usage stamped by the formatter (src/msb.ts USAGE_OPEN): one column-0 line per turn.
+const USAGE_RE = /^⟦usage⟧ in=(\d+) out=(\d+) ctx=(\d+)$/;
 // A per-edit diff block (src/msb.ts DIFF_*): -old/+new lines of the Edit/Write above it.
 const DIFF_OPEN = "⟦diff⟧";
 const DIFF_CLOSE = "⟦/diff⟧";
@@ -190,6 +194,13 @@ export function parseTrace(rawLog: string): TraceEvent[] {
     if (line === ASK_OPEN) {
       flushProse();
       ask = [];
+      target = null;
+      continue;
+    }
+    const usage = line.match(USAGE_RE);
+    if (usage) {
+      flushProse();
+      events.push({ kind: "usage", inputTokens: Number(usage[1]), outputTokens: Number(usage[2]), contextTokens: Number(usage[3]) });
       target = null;
       continue;
     }

@@ -2,6 +2,7 @@ import * as React from "react";
 import { Check, Copy, RotateCw } from "lucide-react";
 import { toast } from "sonner";
 import type { RunStats } from "@/lib/transcript";
+import type { ContextHealth } from "@/lib/context-health";
 import { fmtDuration } from "@/lib/lifecycle";
 import { cn } from "@/lib/utils";
 
@@ -16,6 +17,7 @@ export function RunSummary({
   stats,
   durationSec,
   failed,
+  context,
   onCopy,
   onAgain,
 }: {
@@ -24,6 +26,8 @@ export function RunSummary({
   stats: RunStats;
   durationSec?: number;
   failed?: boolean;
+  /** How full the agent's context window ended up (lib/context-health); shown when known. */
+  context?: ContextHealth | null;
   onCopy: () => Promise<string>;
   onAgain: () => void;
 }) {
@@ -34,6 +38,7 @@ export function RunSummary({
     stats.commands ? `${stats.commands} ${stats.commands === 1 ? "command" : "commands"}` : null,
     stats.failed ? `${stats.failed} failed` : null,
     durationSec && durationSec > 0 ? fmtDuration(durationSec) : null,
+    context ? `${Math.round(context.fraction * 100)}% context` : null,
   ].filter(Boolean) as string[];
 
   const copy = async () => {

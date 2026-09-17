@@ -12,6 +12,7 @@ import { friendlyName, isSleeping, POLL_MS, threadTitle } from "@/lib/format";
 import { currentDiskTier, currentMemoryTier, deadlineLabel, deadlineOf, displayState, fmtDuration, offerableTiers, tierGib, usageLevel } from "@/lib/lifecycle";
 import { MemoryBumpCard } from "./MemoryCard";
 import { runStats, toMarkdown } from "@/lib/transcript";
+import { contextHealth, lastUsage } from "@/lib/context-health";
 import { splitReplies } from "@/lib/replies";
 import { parseMcpName } from "@/lib/mcp";
 import { McpConnectItem } from "./McpItem";
@@ -332,6 +333,12 @@ export function Thread({
       setBumpPhase(null);
     }
   };
+  // Context-window health from the trace's ⟦usage⟧ events: shown on the run summary, and as a
+  // warning while running when the window is nearly full (the "start a fresh task" moment).
+  const ctxHealth = React.useMemo(() => {
+    const u = lastUsage(events);
+    return u ? contextHealth(u.contextTokens) : null;
+  }, [events]);
   const memPressure = !sleeping && runState === "running" && usageLevel(box.memUsage) === "critical";
   const oomKilled = !sleeping && runState !== "running" && exitCode === 137;
   const showMemoryCard = !!nextMemoryTier && (oomKilled || memPressure) && bumpedRef.current !== `${box.name}:${nextMemoryTier}`;
@@ -692,6 +699,13 @@ export function Thread({
 
             {!sleeping && !loadingTrace && artifacts.length > 0 && runState !== "running" && <ProducedFiles session={box.name} files={artifacts} />}
 
+            {/* Context nearly full: warn before quality degrades — the advice is the point. */}
+            {!sleeping && !loadingTrace && ctxHealth?.level === "critical" && (
+              <p className="text-attention-text enter text-micro" role="status">
+                {ctxHealth.label} — {ctxHealth.advice}
+              </p>
+            )}
+
             {!sleeping && !loadingTrace && runState === "done" && (
               <RunSummary
                 label={
@@ -717,6 +731,7 @@ export function Thread({
                 }
                 stats={runStats(events)}
                 durationSec={durationSec}
+                context={ctxHealth}
                 onCopy={async () => toMarkdown(events, { title, machine: friendlyName(box.name), url: window.location.href })}
                 onAgain={newFromThis}
               />
@@ -904,6 +919,8 @@ function groupTrace(events: TraceEvent[]): TraceGroup[] {
       // The plan is a living document: every TodoWrite re-emits the whole list. Show it ONCE, where
       // it first appeared, in its latest state — so the checklist ticks in place instead of stacking.
       if (board && !out.some((g) => g.kind === "plan")) out.push({ kind: "plan", board });
+    } else if (e.kind === "usage") {
+      // Bookkeeping, not conversation: the context meter reads it; the thread never renders it.
     } else {
       out.push({ kind: "say", text: e.text });
     }
