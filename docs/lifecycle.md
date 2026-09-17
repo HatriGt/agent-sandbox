@@ -26,6 +26,13 @@ Think about the machine from the operator's side. After a task is delegated ther
    RAM for nothing. Letting it **sleep after 15m** is correct: the question and session are preserved,
    and the answer wakes it. Keep this. What matters is that the *dashboard* keeps showing the question
    (it now does) and can notify the operator (desktop notifications, opt-in).
+   **Ask-park (`ASK_PARK=1`, opt-in):** the fleet sweep goes further — after a grace window (default
+   3m, `ASK_PARK_GRACE_MS`) a waiting box is stopped and its ask snapshot captured (`src/snapshot.ts
+   parkWaitingBox`), so it costs disk, not RAM, immediately instead of at the 15m idle timeout. A
+   parked box (host marker `~/.agent-sandbox/parked/<box>`) is held for `ASK_PARK_TTL` (default 48h)
+   rather than `MSB_SLEEP_TTL`, so an overnight question survives to be answered; answering wakes it
+   like any sleeping box and clears the marker. If the snapshot cannot be captured the box is
+   restarted — never parked without the safety copy.
 3. **Done.** The operator may want a follow-up ("also run lint") or to read the produced files. A
    **15m follow-up window before sleep** matches how people actually work: you read the result, react,
    and if you don't, the machine costs nothing while asleep. A sleeping box still allows a follow-up

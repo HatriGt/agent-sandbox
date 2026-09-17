@@ -70,3 +70,20 @@ export function diffForNewFile(content: string): ParsedDiff {
     binary: false,
   };
 }
+
+/** One file's section of a multi-file `git diff`, parsed — the Review-all panel's unit. */
+export interface DiffSection {
+  path: string;
+  diff: ParsedDiff;
+}
+
+/** Split a concatenated multi-file `git diff` into per-file parsed sections. Pure. */
+export function splitUnifiedDiff(text: string): DiffSection[] {
+  const out: DiffSection[] = [];
+  for (const part of text.split(/^(?=diff --git )/m)) {
+    const m = part.match(/^diff --git a\/.*? b\/(.*)$/m);
+    if (!m) continue;
+    out.push({ path: m[1], diff: parseUnifiedDiff(part) });
+  }
+  return out;
+}

@@ -51,6 +51,7 @@ export default defineConfig({
         "/mcp-servers.json",
         "/changes.json",
         "/diff.json",
+        "/rundiff.json",
         "/pr.json",
         "/keep.json",
         "/repos",

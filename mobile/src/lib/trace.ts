@@ -22,7 +22,7 @@ export type TraceEvent =
   | { kind: "lifecycle"; label: string; detail?: string }
   | { kind: "say"; text: string }
   | { kind: "you"; text: string }
-  | { kind: "tool"; name: string; arg?: string; result?: string; failed?: boolean }
+  | { kind: "tool"; name: string; arg?: string; result?: string; failed?: boolean; diff?: string }
   | { kind: "think"; text: string }
   /** A TodoWrite snapshot. `at` is the formatter's wall-clock ms; absent on logs written before it. */
   | { kind: "plan"; items: PlanItem[]; at?: number }
@@ -81,6 +81,9 @@ const PLAN_OPEN = "⟦plan⟧";
 const PLAN_CLOSE = "⟦/plan⟧";
 const ASK_OPEN = "⟦ask⟧";
 const ASK_CLOSE = "⟦/ask⟧";
+// A per-edit diff block (src/msb.ts DIFF_*): -old/+new lines of the Edit/Write above it.
+const DIFF_OPEN = "⟦diff⟧";
+const DIFF_CLOSE = "⟦/diff⟧";
 const PLAN_LINE = /^\[( |x|>)\]\s*(.*)$/;
 
 /**
@@ -107,6 +110,8 @@ export function parseTrace(rawLog: string): TraceEvent[] {
   // Wall-clock of the plan block currently being collected, from the open sentinel's suffix.
   let planAt: number | undefined;
   let ask: string[] | null = null;
+  // A ⟦diff⟧ block collects into the most recent tool event's `diff`.
+  let diff: string[] | null = null;
 
   // A log we are shown is a TAIL of the real one. When the cut lands inside a tool_result the block
   // arrives without its `→ Tool: arg` line, and every indented line of real command output would
@@ -159,6 +164,21 @@ export function parseTrace(rawLog: string): TraceEvent[] {
     // CONTENT — e.g. the agent catting its own .agent.log, which nests a copy of the transcript into a
     // tool result. Matching those flipped the parser into a think block and spilled the rest of the
     // result out as prose (bash commands "rendered as plain text").
+    if (diff !== null) {
+      if (line === DIFF_CLOSE) {
+        const text = diff.join("\n");
+        const lastTool = [...events].reverse().find((e) => e.kind === "tool");
+        if (lastTool?.kind === "tool" && text.trim()) lastTool.diff = text;
+        diff = null;
+      } else diff.push(line);
+      continue;
+    }
+    if (line === DIFF_OPEN) {
+      flushProse();
+      diff = [];
+      target = null;
+      continue;
+    }
     if (ask !== null) {
       if (line === ASK_CLOSE) {
         const text = ask.join("\n").trim();

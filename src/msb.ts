@@ -8,7 +8,8 @@
 import { assertBoxName } from "./sync.js";
 import { run, shellQuote } from "./exec.js";
 import { sshMuxOpts } from "./ssh.js";
-import { listClaims, listKept, markClaimed, shouldKeepStopped, unmarkClaimed, unmarkKept } from "./claims.js";
+import { listClaims, listKept, listParked, markClaimed, shouldKeepStopped, unmarkClaimed, unmarkKept, unmarkParked } from "./claims.js";
+import { askParkTtlSec } from "./snapshot.js";
 import { guardNodeProgram } from "./guard.js";
 import { loadMcpStore, toClaudeMcpConfig } from "./mcp-store.js";
 import { enabledSkills, loadSkillStore, toSkillMd } from "./skill-store.js";
@@ -40,7 +41,7 @@ import {
 } from "./monitor.js";
 import type { PollResult } from "./wait.js";
 import type { Config } from "./config.js";
-import { redactShapes } from "./redact.js";
+import { redactShapes, redactShapesSource } from "./redact.js";
 import { askSnapName } from "./snapshot.js";
 
 /**
@@ -281,6 +282,7 @@ async function forceRemoveBox(cfg: Config, box: string): Promise<void> {
   await msb(cfg, ["rm", "--force", box], false);
   await unmarkClaimed(cfg, box);
   await unmarkKept(cfg, box);
+  await unmarkParked(cfg, box).catch(() => {});
 }
 
 /**
@@ -293,6 +295,7 @@ export async function reapDeadPoolBoxes(cfg: Config): Promise<string[]> {
   const live: string[] = [];
   let claims: Map<string, number> | null = null;
   let kept: Set<string> | null = null;
+  let parked: Set<string> | null = null;
   const sleepTtlSec = parseDurationSec(cfg.sleepTtl) ?? 86_400;
   for (const b of boxes) {
     if (isRunning(b.status)) {
@@ -304,8 +307,12 @@ export async function reapDeadPoolBoxes(cfg: Config): Promise<string[]> {
     // survives until the sleep TTL. (The claim marker lives on the host — the box can't be asked.)
     claims ??= await listClaims(cfg);
     kept ??= await listKept(cfg);
+    parked ??= await listParked(cfg).catch(() => new Set<string>());
     const age = claims.get(b.name);
-    if (shouldKeepStopped(age, sleepTtlSec, kept.has(b.name))) {
+    // A PARKED box (stopped by the controller because a question is pending) costs disk only, so it
+    // is held to the much longer park TTL — an overnight question must survive to be answered.
+    const ttl = parked.has(b.name) ? Math.max(sleepTtlSec, askParkTtlSec()) : sleepTtlSec;
+    if (shouldKeepStopped(age, ttl, kept.has(b.name))) {
       console.error(
         kept.has(b.name)
           ? `[pool] keeping pinned run ${b.name} (asleep; held until the operator destroys it)`
@@ -360,12 +367,26 @@ export async function claimWarmBox(
   await copyTreeIntoBox(cfg, box, copyDir);
 }
 
+/**
+ * Version-aware Claude Code install: (re)install iff the installed version differs from the pin.
+ * A bare `command -v claude ||` guard meant a baked snapshot NEVER upgraded — the pin has to be
+ * consulted against `claude --version` (whose output is "X.Y.Z (Claude Code)") every time. The
+ * version string is validated here because it lands inside a shell command.
+ */
+export function claudeInstallSh(version: string): string {
+  if (!/^\d+\.\d+\.\d+(-[\w.]+)?$/.test(version)) throw new Error(`invalid Claude Code version: ${JSON.stringify(version)}`);
+  return (
+    `[ "$(claude --version 2>/dev/null | cut -d' ' -f1)" = "${version}" ] || ` +
+    `npm i -g @anthropic-ai/claude-code@${version}`
+  );
+}
+
 /** Install the agent toolchain (claude + gh) into a box. Used when baking the warm snapshot. */
 export async function installTools(cfg: Config, box: string) {
   return exec(
     cfg,
     box,
-    "set -e; command -v claude >/dev/null || npm i -g @anthropic-ai/claude-code; " +
+    `set -e; ${claudeInstallSh(cfg.claudeCodeVersion)}; ` +
       "command -v gh >/dev/null || (type apt-get >/dev/null 2>&1 && apt-get update -qq && " +
       "apt-get install -y -qq gh >/dev/null 2>&1) || true; claude --version; gh --version | head -1"
   );
@@ -747,11 +768,27 @@ export const THINK_CLOSE = "⟦/think⟧";
 export const PLAN_OPEN = "⟦plan⟧";
 export const PLAN_CLOSE = "⟦/plan⟧";
 
+/**
+ * Per-edit diff blocks: an Edit/Write/MultiEdit/NotebookEdit's content used to be dropped entirely
+ * (only the path survived as the headline arg), so the transcript could not show WHAT changed.
+ * The formatter now writes a ⟦diff⟧…⟦/diff⟧ block after the tool line — `-` old lines / `+` new
+ * lines — and the trace parser attaches it to the tool event. Capped: the point is a glanceable
+ * review of the change, not a byte-faithful archive (the end-of-run diff covers that).
+ */
+export const DIFF_OPEN = "⟦diff⟧";
+export const DIFF_CLOSE = "⟦/diff⟧";
+export const DIFF_MAX_LINES = 200;
+export const DIFF_MAX_BYTES = 16384;
+
 export function streamFmtScript(): string {
   const js =
     `const fs=require("fs");` +
     `const out=process.argv[2];` +
-    `function w(s){try{fs.appendFileSync(out,s+"\\n")}catch(e){}}` +
+    // Shape-redaction at WRITE time (src/redact.ts, serialized): .agent.log lives in the
+    // agent-readable workspace, so a credential leaked into tool output must never persist there —
+    // controller-side redaction only protects what is SERVED, not the on-disk copy.
+    `${redactShapesSource()}\n` +
+    `function w(s){try{fs.appendFileSync(out,redactShapes(String(s))+"\\n")}catch(e){}}` +
     // Defang transcript sentinels in MODEL-PRODUCED content before it reaches the log. The trace
     // parser treats a column-0 ⟦you⟧/⟦ask⟧/⟦think⟧/⟦plan⟧ or a line-leading ● as structure, and
     // assistant text is written at column 0 — so a prompt-injected agent could forge the record a
@@ -778,6 +815,15 @@ export function streamFmtScript(): string {
     `function emitPlan(){const live=tasks.filter(t=>t.s!=="deleted");if(!live.length)return;` +
     `w("${PLAN_OPEN} "+Date.now()+"\\n"+live.map(t=>(t.s==="completed"?"[x] ":t.s==="in_progress"?"[>] ":"[ ] ")+t.t).join("\\n")+"\\n${PLAN_CLOSE}")}` +
     `function oneLine(v){return df(String(v==null?"":v).replace(/\\s*\\n\\s*/g," ").trim().slice(0,160))}` +
+    // The -old/+new lines for an editing tool, or [] for anything else. MultiEdit folds each edit;
+    // Write/NotebookEdit render as all-added (there is no old side to show without reading the file).
+    `function pm(o,n){const out=[];for(const l of String(o).split("\\n"))out.push("-"+l);for(const l of String(n).split("\\n"))out.push("+"+l);return out}` +
+    `function diffLines(name,inp){` +
+    `if(name==="Edit"&&(inp.old_string!=null||inp.new_string!=null))return pm(inp.old_string||"",inp.new_string||"");` +
+    `if(name==="MultiEdit"&&Array.isArray(inp.edits))return inp.edits.flatMap(e=>e?pm(e.old_string||"",e.new_string||""):[]);` +
+    `if(name==="Write"&&inp.content!=null)return String(inp.content).split("\\n").map(l=>"+"+l);` +
+    `if(name==="NotebookEdit"&&inp.new_source!=null)return String(inp.new_source).split("\\n").map(l=>"+"+l);` +
+    `return []}` +
     `process.stdin.setEncoding("utf8");` +
     `process.stdin.on("data",d=>{buf+=d;let i;while((i=buf.indexOf("\\n"))>=0){const line=buf.slice(0,i);buf=buf.slice(i+1);handle(line)}});` +
     `process.stdin.on("end",()=>{if(buf.trim())handle(buf)});` +
@@ -818,7 +864,11 @@ export function streamFmtScript(): string {
     // Stamp the tool_use id (short tail) so a result can be matched to ITS OWN call. With parallel
     // tool use one assistant message issues N tool_use blocks and the N results arrive afterwards;
     // without a correlation token the parser can only attach every result to the most recent call.
-    `else if(b.type==="tool_use"){const inp=b.input||{};const arg=String(inp.command||inp.file_path||inp.path||inp.pattern||inp.description||"").replace(/\\s*\\n\\s*/g," ").trim();w("→ "+b.name+(arg?": "+df(arg.slice(0,200)):"")+(b.id?" ${ID_OPEN}"+String(b.id).slice(-8)+"${ID_CLOSE}":""))}` +
+    `else if(b.type==="tool_use"){const inp=b.input||{};const arg=String(inp.command||inp.file_path||inp.path||inp.pattern||inp.description||"").replace(/\\s*\\n\\s*/g," ").trim();w("→ "+b.name+(arg?": "+df(arg.slice(0,200)):"")+(b.id?" ${ID_OPEN}"+String(b.id).slice(-8)+"${ID_CLOSE}":""));` +
+    // Per-edit diff block: what the Edit/Write actually changes, as -old/+new lines. Defanged and
+    // capped (lines then bytes) — the truncation is announced, mirroring the tool_result budgets.
+    `const dd=diffLines(b.name,inp);if(dd.length){const head=[];let bytes=0;let cut=0;for(const l of dd){if(head.length>=${DIFF_MAX_LINES}||bytes+l.length+1>${DIFF_MAX_BYTES}){cut++;continue}bytes+=l.length+1;head.push(l)}` +
+    `if(cut>0)head.push("… "+cut+" more lines");w("${DIFF_OPEN}\\n"+df(head.join("\\n"))+"\\n${DIFF_CLOSE}")}}` +
     `}return}` +
     `if(e.type==="user"&&e.message){for(const b of e.message.content||[]){` +
     // Cap the result, but SAY SO. Silently dropping the tail made a truncated listing look like the
@@ -847,7 +897,7 @@ export function streamFmtScript(): string {
 function bootstrapScript(cfg: Config): string {
   const lines = [
     "set -e",
-    "command -v claude >/dev/null || npm i -g @anthropic-ai/claude-code",
+    claudeInstallSh(cfg.claudeCodeVersion),
     // Install gh if missing (Debian/Ubuntu node image). We do NOT run `gh auth setup-git` or set any
     // identity here: there is no default account. Git auth + commit identity are applied per-repo
     // afterwards (applyGitCredentials) from the access-resolved account for each repo.
@@ -1179,9 +1229,15 @@ export async function runAgentTask(
   const env = agentEnvFlags(cfg, task, repos, creds?.primaryToken, model);
   const workdir = agentWorkdir(repos);
   await msb(cfg, ["exec", box, ...env, "--", "sh", "-lc", bootstrapScript(cfg)]);
-  await applyGitCredentials(cfg, box, creds);
-  await trustWorkspace(cfg, box);
-  await Promise.all([installMcpConfig(cfg, box), installSkills(cfg, box)]);
+  // These four touch independent files (~/.git-credentials + per-repo config, ~/.claude.json,
+  // /root/.agent-mcp.json, ~/.claude/skills), so they run in parallel: each is an SSH→msb→guest
+  // round-trip, and serializing them was most of the delegate→first-token latency after boot.
+  await Promise.all([
+    applyGitCredentials(cfg, box, creds),
+    trustWorkspace(cfg, box),
+    installMcpConfig(cfg, box),
+    installSkills(cfg, box),
+  ]);
   return msb(cfg, ["exec", box, ...env, "--", "sh", "-lc", agentSh(workdir, false)]);
 }
 
@@ -1334,17 +1390,24 @@ export async function resumeAgentTask(
   model?: string
 ) {
   // A box that idle-timed-out while WAITING on a question is Stopped but intact — start it so the
-  // answer reaches the same Claude session instead of failing the exec.
+  // answer reaches the same Claude session instead of failing the exec. A PARKED box (ask-park)
+  // wakes the same way; the marker is cleared so the reaper's long park TTL stops applying.
   await startBoxIfStopped(cfg, box);
+  void unmarkParked(cfg, box).catch(() => {});
   // Ephemeral secrets are appended as extra -e flags on THIS exec only (not stored).
   const env = [...agentEnvFlags(cfg, message, repos, creds?.primaryToken, model), ...secretEnvFlags(secrets)];
-  await applyGitCredentials(cfg, box, creds);
-  await trustWorkspace(cfg, box);
   // The formatter AND the hooks are refreshed here too, not only at bootstrap: a box bootstrapped
   // by an older controller keeps that build's formatter/guard for the whole life of the sandbox
   // otherwise, so a deploy that changes the log format or a guard rule would never reach a
-  // long-running thread's follow-up turns.
-  await Promise.all([installMcpConfig(cfg, box), installSkills(cfg, box), exec(cfg, box, streamFmtScript()), exec(cfg, box, askHookScript())]);
+  // long-running thread's follow-up turns. All six touch independent files, so one parallel batch.
+  await Promise.all([
+    applyGitCredentials(cfg, box, creds),
+    trustWorkspace(cfg, box),
+    installMcpConfig(cfg, box),
+    installSkills(cfg, box),
+    exec(cfg, box, streamFmtScript()),
+    exec(cfg, box, askHookScript()),
+  ]);
   // The cwd is read from the box, not taken from `repos`: every resume path (dashboard follow-up,
   // inbox delivery, send-now, the credential broker, an elicited answer) only has a box id and used
   // to pass undefined here, which resumed a single-repo box in /workspace and lost the session.
@@ -1821,6 +1884,7 @@ export async function teardown(cfg: Config, box: string, stagingDir?: string): P
   await msb(cfg, ["snapshot", "rm", askSnapName(box)], false);
   await unmarkClaimed(cfg, box);
   await unmarkKept(cfg, box);
+  await unmarkParked(cfg, box).catch(() => {});
   if (stagingDir) {
     await ssh(cfg, `rm -rf ${shellQuote(stagingDir)}`, false);
   }

@@ -25,6 +25,12 @@ export interface Config {
   image: string;
   /** Snapshot name to warm-start from (Claude Code + gh pre-baked). Empty = boot from image. */
   snapshot: string;
+  /**
+   * Pinned Claude Code CLI version installed in every box. The in-box install is version-aware
+   * (claudeInstallSh): bumping this reaches cold boxes, warm-pool boxes AND baked snapshots on
+   * their next bootstrap — no rebake required (a rebake just makes the next cold boot faster).
+   */
+  claudeCodeVersion: string;
   /** Auto-stop after this idle period. */
   idleTimeout: string;
   /**
@@ -191,6 +197,8 @@ export function loadConfig(): Config {
     msb: req("MSB", "/root/.local/bin/msb"),
     image: req("MSB_IMAGE", "node"),
     snapshot: process.env.MSB_SNAPSHOT || "",
+    // Bump deliberately (after a smoke run), not automatically: the agent's behavior IS the product.
+    claudeCodeVersion: req("CLAUDE_CODE_VERSION", "2.1.273"),
     idleTimeout: req("MSB_IDLE_TIMEOUT", "15m"),
     // Warm boxes should outlive a long lull with no delegations; the maintainer replaces any that the
     // hard max-duration cap reaps. Default well above idleTimeout so the pool doesn't self-drain.

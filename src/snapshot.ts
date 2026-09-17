@@ -20,6 +20,7 @@
  * Gated behind SNAP_ASK=1 until the cost is validated in daily use.
  */
 import type { Config } from "./config.js";
+import { parseDurationSec } from "./monitor.js";
 
 /** The one rewind snapshot a box carries. Same charset as box names, so CLI/filesystem-safe. */
 export function askSnapName(box: string): string {
@@ -44,6 +45,74 @@ export function shouldCaptureBeforeAnswer(enabled: boolean, runState: string): b
 /** Feature flag: SNAP_ASK=1. Read from env (not Config) so it needs no config plumbing while v0. */
 export function snapAskEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.SNAP_ASK === "1";
+}
+
+/* ── Ask-park: release a waiting box's RAM (docs/lifecycle.md "burning RAM for nothing") ── */
+
+/** Feature flag: ASK_PARK=1. Env-read like snapAskEnabled while the behavior soaks. */
+export function askParkEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.ASK_PARK === "1";
+}
+
+/** How long a box may WAIT before it is parked. Short answers stay instant; default 3 minutes. */
+export function askParkGraceMs(env: NodeJS.ProcessEnv = process.env): number {
+  const n = Number(env.ASK_PARK_GRACE_MS);
+  return Number.isFinite(n) && n >= 0 ? n : 180_000;
+}
+
+/**
+ * How long a PARKED (question-pending, stopped) run is held before the reaper takes it — much longer
+ * than MSB_SLEEP_TTL, because a parked box costs disk only and an unanswered question is exactly the
+ * run the operator was promised would survive until they come back. Default 48h.
+ */
+export function askParkTtlSec(env: NodeJS.ProcessEnv = process.env): number {
+  return parseDurationSec(env.ASK_PARK_TTL || "") ?? 48 * 3600;
+}
+
+/** The parking decision for one sweep observation of one box. Pure, so the rule is testable. */
+export function shouldPark(o: {
+  enabled: boolean;
+  runState: string;
+  boxRunning: boolean;
+  /** When the sweep FIRST saw this box waiting; undefined on the first observation. */
+  waitingSinceMs: number | undefined;
+  graceMs: number;
+  nowMs: number;
+}): boolean {
+  if (!o.enabled || !o.boxRunning || o.runState !== "waiting") return false;
+  if (o.waitingSinceMs === undefined) return false; // clock starts at first observation
+  return o.nowMs - o.waitingSinceMs >= o.graceMs;
+}
+
+/**
+ * Park a waiting box: stop it, capture the ask snapshot, and LEAVE IT STOPPED — a stopped box costs
+ * disk, not RAM, and resumeAgentTask's startBoxIfStopped wakes it when the answer arrives. The
+ * snapshot is the safety copy (same name/mechanics as the SNAP_ASK rewind point): if the reaper or a
+ * crash removes the stopped box, rewindToAskSnapshot can still restore the exact asked-from state.
+ * If the snapshot cannot be captured the box is RESTARTED instead — never parked without the copy.
+ */
+export async function parkWaitingBox(io: SnapshotIo, box: string): Promise<boolean> {
+  const log = io.log ?? (() => {});
+  const name = askSnapName(box);
+  try {
+    const stop = await io.msb(["stop", box]);
+    if (stop.code !== 0) {
+      log(`[park] stop ${box} failed: ${stop.stderr.trim().slice(-200)}`);
+      return false;
+    }
+    await io.msb(["snapshot", "rm", name]); // replace: ignore "not found"
+    const create = await io.msb(["snapshot", "create", "--force", "--from", box, name]);
+    if (create.code !== 0) {
+      log(`[park] snapshot ${name} failed: ${create.stderr.trim().slice(-200)} — restarting ${box}`);
+      await io.msb(["start", box]);
+      return false;
+    }
+    log(`[park] parked ${box} (stopped, snapshot ${name})`);
+    return true;
+  } catch (e) {
+    log(`[park] parking ${box} errored: ${(e as Error).message}`);
+    return false;
+  }
 }
 
 /* ── IO: the msb verbs, injected-runner style so deps can wire the real msb ── */

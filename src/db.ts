@@ -121,6 +121,12 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX IF NOT EXISTS run_archive_owner_at ON run_archive(owner, archived_at);
   `,
+  `
+  -- End-of-run full diff (workspace-relative unified diff), captured at the finish edge while the
+  -- box is still up, so a finished run stays REVIEWABLE after teardown. Redacted before storage;
+  -- byte-capped at capture (FULL_DIFF_MAX_BYTES). NULL when capture failed or nothing changed.
+  ALTER TABLE run_archive ADD COLUMN diff_text TEXT;
+  `,
 ];
 
 export function openDb(dataDir: string): Db {

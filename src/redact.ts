@@ -70,6 +70,20 @@ export function redactSecrets(text: string, known: Iterable<string> = []): strin
 }
 
 /**
+ * The shape-redaction as self-contained JS source, for embedding in the IN-BOX stream formatter
+ * (the guard.ts serialization pattern): .agent.log sits in the agent-readable workspace, so a
+ * credential that leaks into tool output must be redacted BEFORE the line is written to disk, not
+ * only when the controller serves it. Serialized from this module so box and controller agree.
+ */
+export function redactShapesSource(): string {
+  return (
+    `const SHAPES=[${SHAPES.map(String).join(",")}];\n` +
+    `${tail.toString()}\n` +
+    `${redactShapes.toString()}`
+  );
+}
+
+/**
  * A redactor whose known-secret list refreshes lazily from the controller's stores. `secretsFn` is
  * awaited at most once per `ttlMs`; between refreshes the last list is used. A failing refresh keeps
  * the old list — redaction never blocks a log read.

@@ -512,6 +512,9 @@ export const api = {
   /** Unified diff for one file (or `untracked`). */
   diff: (session: string, path: string, signal?: AbortSignal) =>
     fetch(url("/diff.json", { session, path }), { headers: authHeaders, signal }).then(parse<FileDiff>),
+  /** The WHOLE workspace's unified diff (live box) — the Review-all panel. */
+  runDiff: (session: string, signal?: AbortSignal) =>
+    fetch(url("/rundiff.json", { session }), { headers: authHeaders, signal }).then(parse<{ diff: string }>),
   /** Pull request metadata for a card. */
   pull: (repo: string, number: number, signal?: AbortSignal) =>
     fetch(url("/pr.json", { repo, number: String(number) }), { headers: authHeaders, signal }).then(parse<PullInfo>),
@@ -719,4 +722,6 @@ export interface HistoryRun {
 }
 export interface HistoryRunDetail extends HistoryRun {
   digest: RunDigest | null;
+  /** The run's full workspace diff, captured at the finish edge — reviewable after teardown. */
+  diffText?: string;
 }

@@ -112,6 +112,12 @@ A sandbox run printed `git remote -v`, and the remote carried the clone token
    `xox…`, `glpat-…`, `npm_…`, `*_PASSWORD=…`). A 4-char tail is kept so the operator can tell WHICH
    credential leaked (`ghp_…ABCD`) without being able to use it. The known list refreshes lazily
    (60s) and a failing refresh keeps the previous list — redaction never blocks a read.
+3. **Redaction at the source (2026-09-16).** Edge redaction protected what was SERVED, but
+   `.agent.log` itself sat in the agent-readable workspace with any leaked credential verbatim. The
+   in-box stream formatter now applies the same shape redaction (`redactShapesSource()`, serialized
+   from `src/redact.ts` the way the guard is from `src/guard.ts`) before a line is written, so the
+   on-disk log never holds a recognizable credential. Known-secret redaction stays controller-side —
+   shipping the exact secret list into the box would itself be a leak.
 
 ## Hardening pass (2026-08-29) and the road to multi-tenant
 

@@ -8,6 +8,7 @@ import { setPrefill } from "@/lib/draft";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DigestCard } from "@/components/thread/DigestCard";
+import { ReviewAllPane } from "@/components/thread/ReviewAll";
 import { Bar } from "@/components/thread/Skeletons";
 import { cn } from "@/lib/utils";
 
@@ -353,13 +354,15 @@ function HistoryRow({
 
 /** The expanded record: the full digest fetched once, rendered as the run receipt. */
 function RunDetail({ id }: { id: number }) {
-  const [state, setState] = React.useState<{ digest: RunDigest | null; error?: string } | "loading">("loading");
+  const [state, setState] = React.useState<{ digest: RunDigest | null; diffText?: string; error?: string } | "loading">("loading");
+  const [review, setReview] = React.useState(false);
   React.useEffect(() => {
     setState("loading");
+    setReview(false);
     const ctrl = new AbortController();
     api
       .historyRun(id, ctrl.signal)
-      .then((r) => setState({ digest: r.run.digest }))
+      .then((r) => setState({ digest: r.run.digest, diffText: r.run.diffText }))
       .catch((e) => {
         if (!ctrl.signal.aborted) setState({ digest: null, error: e instanceof Error ? e.message : String(e) });
       });
@@ -376,7 +379,20 @@ function RunDetail({ id }: { id: number }) {
       ) : state.error ? (
         <p className="text-muted-foreground text-meta">Could not load the record: {state.error}</p>
       ) : state.digest ? (
-        <DigestCard digest={state.digest} />
+        <>
+          <DigestCard digest={state.digest} />
+          {state.diffText && (
+            <div className="mt-3">
+              {review ? (
+                <ReviewAllPane archivedDiff={state.diffText} onClose={() => setReview(false)} />
+              ) : (
+                <button type="button" onClick={() => setReview(true)} className="text-muted-foreground hover:text-foreground hover:bg-muted cursor-pointer rounded-md border px-2.5 py-1 text-micro font-medium">
+                  Review changes
+                </button>
+              )}
+            </div>
+          )}
+        </>
       ) : (
         <p className="text-muted-foreground text-meta">No receipt was kept for this run — only the facts in the row above.</p>
       )}

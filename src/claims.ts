@@ -73,6 +73,25 @@ export async function listKept(cfg: Config): Promise<Set<string>> {
   return new Set(out.split("\n").map((l) => l.trim()).filter((l) => l && l !== "*"));
 }
 
+/* ── parked markers: a box stopped BY THE CONTROLLER because it is waiting on a question ──
+ * The reaper cannot ask a stopped box whether a question is pending (exec would boot it), so the
+ * park sweep records the fact host-side, like claims. A parked box costs disk only and is held to
+ * the much longer ASK_PARK_TTL; answering (resume → start) or teardown clears the marker. */
+const PARK_DIR = '"$HOME/.agent-sandbox/parked"';
+
+export async function markParked(cfg: Config, box: string): Promise<void> {
+  assertBoxName(box);
+  await ssh(cfg, `mkdir -p ${PARK_DIR} && chmod 700 ${PARK_DIR} && : > ${PARK_DIR}/${shellQuote(box)}`);
+}
+export async function unmarkParked(cfg: Config, box: string): Promise<void> {
+  assertBoxName(box);
+  await ssh(cfg, `rm -f ${PARK_DIR}/${shellQuote(box)}`);
+}
+export async function listParked(cfg: Config): Promise<Set<string>> {
+  const out = await ssh(cfg, `[ -d ${PARK_DIR} ] && ls -1 ${PARK_DIR} 2>/dev/null || true`);
+  return new Set(out.split("\n").map((l) => l.trim()).filter((l) => l && l !== "*"));
+}
+
 /**
  * The reaping decision for a NON-running pool box: keep it if it is a claimed run that has been
  * asleep for less than the sleep TTL; otherwise it is dead capacity (or an abandoned run) and goes.

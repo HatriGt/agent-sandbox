@@ -31,7 +31,7 @@ function PopCount({ value }: { value: number }) {
   );
 }
 
-export function ChangesDock({ files, loading, onOpen, onRefresh, activePath }: { files: ChangedFile[]; loading?: boolean; onOpen: (f: ChangedFile) => void; onRefresh?: () => void; activePath?: string | null }) {
+export function ChangesDock({ files, loading, onOpen, onRefresh, onReviewAll, activePath }: { files: ChangedFile[]; loading?: boolean; onOpen: (f: ChangedFile) => void; onRefresh?: () => void; onReviewAll?: () => void; activePath?: string | null }) {
   const [open, setOpen] = React.useState(false);
   // Esc collapses the expanded list — unless a dialog/menu/input owns the key.
   React.useEffect(() => {
@@ -108,6 +108,11 @@ export function ChangesDock({ files, loading, onOpen, onRefresh, activePath }: {
             <span className="text-muted-foreground ml-auto hidden text-micro sm:inline">{open ? "Hide files" : "Show files"}</span>
             <ChevronUp className={cn("text-muted-foreground size-3.5 shrink-0 transition-transform", open && "rotate-180")} aria-hidden />
           </button>
+          {onReviewAll && (
+            <button type="button" onClick={onReviewAll} className="text-muted-foreground hover:text-foreground hover:bg-muted shrink-0 cursor-pointer rounded-md px-2 py-1 text-micro font-medium">
+              Review all
+            </button>
+          )}
           {onRefresh && (
             <button type="button" onClick={onRefresh} aria-label="Refresh changes" className="text-muted-foreground hover:text-foreground hover:bg-muted grid size-6 cursor-pointer place-items-center rounded-md">
               <RefreshCw className={cn("size-3", loading && "animate-spin")} aria-hidden />

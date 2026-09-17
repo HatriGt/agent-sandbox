@@ -247,22 +247,41 @@ function ShellItem({ event, live }: { event: ToolEvent; live?: boolean }) {
   );
 }
 
+/** The per-edit ⟦diff⟧ block: -old/+new lines from the formatter, tinted like a diff. */
+function EditDiff({ diff }: { diff: string }) {
+  return (
+    <pre className="bg-trace mt-2 ml-6 max-h-72 overflow-auto rounded-md border border-white/8 px-3 py-2 font-mono text-code whitespace-pre-wrap">
+      {diff.split("\n").map((l, i) => (
+        <div
+          key={i}
+          className={
+            l.startsWith("+") ? "bg-emerald-500/10 text-emerald-300" : l.startsWith("-") ? "bg-red-500/10 text-red-300" : "text-trace-fg/70"
+          }
+        >
+          {l || " "}
+        </div>
+      ))}
+    </pre>
+  );
+}
+
 /** Non-shell tool (Write / Read / Edit / Grep …): compact step row, arg as a code chip, output folded. */
 function StepItem({ event, live }: { event: ToolEvent; live?: boolean }) {
   const [open, setOpen] = React.useState(false);
   const summary = resultSummary(event.result);
   const lines = event.result ? lineCount(event.result) : 0;
+  const expandable = !!event.result || !!event.diff;
 
   return (
     <div className="enter min-w-0">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        disabled={!event.result}
-        aria-expanded={event.result ? open : undefined}
+        disabled={!expandable}
+        aria-expanded={expandable ? open : undefined}
         className={cn(
           "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1 text-left text-meta",
-          event.result && "hover:bg-muted cursor-pointer",
+          expandable && "hover:bg-muted cursor-pointer",
           live && "bg-live/6"
         )}
       >
@@ -279,7 +298,7 @@ function StepItem({ event, live }: { event: ToolEvent; live?: boolean }) {
             {event.arg}
           </code>
         )}
-        {event.result && (
+        {expandable && (
           <>
             {lines > 1 && <span className="label text-faint ml-auto shrink-0">{lines} lines</span>}
             <ChevronRight
@@ -294,6 +313,7 @@ function StepItem({ event, live }: { event: ToolEvent; live?: boolean }) {
         )}
       </button>
 
+      {open && event.diff && <EditDiff diff={event.diff} />}
       {event.result &&
         (open ? (
           <pre className="bg-trace text-trace-fg/80 mt-2 ml-6 max-h-72 overflow-auto rounded-md border border-white/8 px-3 py-2 font-mono text-code whitespace-pre-wrap">

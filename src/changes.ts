@@ -112,6 +112,55 @@ export async function listChanges(cfg: Config, box: string): Promise<ChangedFile
   return parseChanges(r.stdout);
 }
 
+/**
+ * The WHOLE workspace's unified diff, one capture — for the end-of-run review panel and the archive
+ * (docs/roadmap-saas.md #7 "digest + diff summary"). `git add -A -N` (intent-to-add, proven in
+ * handoff.ts) makes untracked files appear in `git diff HEAD` as all-added without staging content.
+ * Byte-bounded: this is stored per run, and a run that vendored a dependency must not become a
+ * megabyte row. Loose files outside a repo are already visible via /artifact; they have no diff.
+ */
+export const FULL_DIFF_MAX_BYTES = 400_000;
+
+export function fullDiffSh(): string {
+  return `cd /workspace 2>/dev/null || exit 0
+for g in */.git; do
+  [ -d "$g" ] || continue
+  r=$(dirname "$g")
+  echo "@@repo $r"
+  git -C "$r" add -A -N 2>/dev/null
+  git -C "$r" diff HEAD 2>/dev/null | head -c ${FULL_DIFF_MAX_BYTES}
+done`;
+}
+
+/**
+ * Rewrite each repo section's `a/…`/`b/…` paths to be workspace-relative (`a/<repo>/…`), so the
+ * archived diff's file names match /changes.json and the ChangesDock. Pure, tested.
+ */
+export function parseFullDiff(raw: string): string {
+  const out: string[] = [];
+  let repo = "";
+  for (const line of raw.split("\n")) {
+    if (line.startsWith("@@repo ")) {
+      repo = line.slice(7).trim();
+      continue;
+    }
+    if (!repo) continue;
+    out.push(
+      line
+        .replace(/^(diff --git )a\/(.*?) b\/(.*)$/, (_m, p, a, b) => `${p}a/${repo}/${a} b/${repo}/${b}`)
+        .replace(/^(--- )a\//, `$1a/${repo}/`)
+        .replace(/^(\+\+\+ )b\//, `$1b/${repo}/`)
+    );
+  }
+  return out.join("\n").trim();
+}
+
+/** Capture the workspace's full diff from a RUNNING box. Throws on exec failure — callers decide. */
+export async function readFullDiff(cfg: Config, box: string): Promise<string> {
+  const r = await exec(cfg, box, fullDiffSh());
+  return parseFullDiff(r.stdout);
+}
+
 /** Confine a client path to /workspace; throws on escape attempts. Returns the relative path. */
 export function safeRelPath(p: string): string {
   const rel = p.replace(/^\/workspace\/?/, "").replace(/^\/+/, "");

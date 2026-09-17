@@ -15,6 +15,8 @@ export interface ArchiveRecord {
   box: string;
   owner: string;
   digest: RunDigest;
+  /** The run's full workspace diff (unified, workspace-relative paths), already redacted+capped. */
+  diffText?: string;
   /** Wall-clock archive moment; defaults to Date.now(). Injectable for tests. */
   now?: number;
 }
@@ -75,10 +77,10 @@ export function archiveRun(db: Db, rec: ArchiveRecord): number | null {
   }
   const r = db
     .prepare(
-      `INSERT INTO run_archive (box, owner, task, state, exit_code, started_at, ended_at, archived_at, headline, digest_json)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO run_archive (box, owner, task, state, exit_code, started_at, ended_at, archived_at, headline, digest_json, diff_text)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .run(rec.box, rec.owner, d.task, d.state, d.exitCode ?? null, d.startedAt ?? null, d.endedAt ?? null, now, d.headline, JSON.stringify(d));
+    .run(rec.box, rec.owner, d.task, d.state, d.exitCode ?? null, d.startedAt ?? null, d.endedAt ?? null, now, d.headline, JSON.stringify(d), rec.diffText || null);
   return Number(r.lastInsertRowid);
 }
 
@@ -94,8 +96,8 @@ export function listRuns(db: Db, owner: string, opts: { limit?: number; before?:
   return rows.map(toRow);
 }
 
-/** One record, owner-scoped, with the digest parsed back out of digest_json. */
-export function getRun(db: Db, owner: string, id: number): (ArchivedRunRow & { digest: RunDigest | null }) | undefined {
+/** One record, owner-scoped, with the digest parsed back out of digest_json (and the diff, if kept). */
+export function getRun(db: Db, owner: string, id: number): (ArchivedRunRow & { digest: RunDigest | null; diffText?: string }) | undefined {
   const r = db.prepare(`SELECT * FROM run_archive WHERE id = ? AND owner = ?`).get(id, owner) as Record<string, unknown> | undefined;
   if (!r) return undefined;
   let digest: RunDigest | null = null;
@@ -104,7 +106,7 @@ export function getRun(db: Db, owner: string, id: number): (ArchivedRunRow & { d
   } catch {
     digest = null; // a corrupt row still lists; the detail degrades honestly
   }
-  return { ...toRow(r), digest };
+  return { ...toRow(r), digest, ...(r.diff_text ? { diffText: String(r.diff_text) } : {}) };
 }
 
 /** Owner-scoped delete. Returns true when a row was removed. */

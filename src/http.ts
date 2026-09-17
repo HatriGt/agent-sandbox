@@ -43,10 +43,11 @@ import { seedStarterSkills } from "./starter-skills.js";
 import { parseMcpStore } from "./mcp-store.js";
 import { guardDeps, makeOwnership, NotOwnedError, QuotaError, withPrincipal } from "./tenancy.js";
 import { securityHeaders } from "./security-headers.js";
-import { gatherMonitor, gatherWatch, askInBox, driverStateLine, startBoxIfStopped, noteRunning, stopBox, noteStopped, interruptAgentRun, setBoxMemory, isMemoryTier, MEMORY_TIERS, setBoxDisk, isDiskTier, DISK_TIERS } from "./msb.js";
+import { gatherMonitor, gatherWatch, askInBox, driverStateLine, startBoxIfStopped, noteRunning, stopBox, noteStopped, interruptAgentRun, setBoxMemory, isMemoryTier, MEMORY_TIERS, setBoxDisk, isDiskTier, DISK_TIERS, msbIo } from "./msb.js";
 import { isBoxName } from "./sync.js";
 import { shellQuote } from "./exec.js";
-import { touchClaimed } from "./claims.js";
+import { touchClaimed, markParked } from "./claims.js";
+import { askParkEnabled, askParkGraceMs, parkWaitingBox, shouldPark } from "./snapshot.js";
 import { safeWorkspacePath } from "./artifact.js";
 import { gitStatus, gitCommitAll, gitPush } from "./git-ops.js";
 import { loadTitles, generateTitle, forgetTitle, saveTitle, cleanTitle } from "./titles.js";
@@ -71,7 +72,7 @@ import { listClaims, listKept, markKept, unmarkKept } from "./claims.js";
 import { makeRedactor, isPlumbingError } from "./redact.js";
 import { isSecretKey, probeMcpServer } from "./mcp-store.js";
 import type { WatchSnapshot } from "./monitor.js";
-import { listChanges, readDiff, fetchPull, fetchPullDetail, forgetPull } from "./changes.js";
+import { listChanges, readDiff, readFullDiff, fetchPull, fetchPullDetail, forgetPull } from "./changes.js";
 import { loadRunMetas, saveRunMeta, forgetRunMeta } from "./run-memory.js";
 import { readArtifact } from "./artifact.js";
 import { existsSync } from "node:fs";
@@ -454,7 +455,11 @@ const archiveFinishedRun = async (box: string, opts: { withFiles: boolean } = { 
   // claimed but never delegated to). Those reach buildDigest as state "done" with an empty headline
   // and would land in history as phantom completed runs the user never started.
   if (snap.runState !== "done") return;
-  const files = opts.withFiles && /^running$/i.test(snap.boxStatus) ? await listChanges(cfg, box).catch(() => []) : [];
+  const up = /^running$/i.test(snap.boxStatus);
+  const files = opts.withFiles && up ? await listChanges(cfg, box).catch(() => []) : [];
+  // Full workspace diff, captured NOW because this is the last moment the box can answer: after
+  // teardown a run's only reviewable diff is this row. Redacted like everything box-produced.
+  const diffText = opts.withFiles && up ? await readFullDiff(cfg, box).then((d) => redactor.redact(d)).catch(() => "") : "";
   const digest = buildDigest({
     box,
     task: snap.task ?? "",
@@ -464,7 +469,7 @@ const archiveFinishedRun = async (box: string, opts: { withFiles: boolean } = { 
     files,
     verified: boxVerified.get(box),
   });
-  archiveRun(db, { box, owner: ownerOf(db, box) ?? OPERATOR_OWNER, digest });
+  archiveRun(db, { box, owner: ownerOf(db, box) ?? OPERATOR_OWNER, digest, ...(diffText ? { diffText } : {}) });
 };
 
 /**
@@ -481,6 +486,40 @@ const captureTurnCheckpoint = (box: string): Promise<void> =>
       console.error(`[ckpt] capture on ${box} errored: ${(e as Error).message.slice(0, 200)}`);
     }
   });
+
+// Ask-park (ASK_PARK=1): when the sweep first sees a box WAITING, and again past the grace window.
+const waitingSince = new Map<string, number>();
+const parkInFlight = new Set<string>();
+const maybePark = (boxes: Array<{ name: string; runState?: string; boxStatus?: string; role?: string }>) => {
+  if (!askParkEnabled()) return;
+  const now = Date.now();
+  for (const b of boxes) {
+    if (b.role === "pool-free") continue;
+    const running = /^running$/i.test(b.boxStatus ?? "");
+    if (b.runState !== "waiting" || !running) {
+      waitingSince.delete(b.name);
+      continue;
+    }
+    if (!waitingSince.has(b.name)) waitingSince.set(b.name, now);
+    if (
+      shouldPark({ enabled: true, runState: "waiting", boxRunning: true, waitingSinceMs: waitingSince.get(b.name), graceMs: askParkGraceMs(), nowMs: now }) &&
+      !parkInFlight.has(b.name)
+    ) {
+      parkInFlight.add(b.name);
+      void parkWaitingBox(msbIo(cfg), b.name)
+        .then(async (ok) => {
+          if (!ok) return;
+          noteStopped(b.name); // stop readers from exec-booting the box we just stopped
+          waitingSince.delete(b.name);
+          await markParked(cfg, b.name).catch(() => {});
+          await touchClaimed(cfg, b.name).catch(() => {}); // park clock counts from the park
+        })
+        .catch(() => {})
+        .finally(() => parkInFlight.delete(b.name));
+    }
+  }
+  for (const k of [...waitingSince.keys()]) if (!boxes.some((b) => b.name === k)) waitingSince.delete(k);
+};
 
 const lastSeenStatus = new Map<string, boolean>();
 const readFleet = makeFleetReader(
@@ -538,6 +577,9 @@ const readFleet = makeFleetReader(
       }
       prevRunViews = nextRunViews;
     }
+    // Ask-park: a box waiting past the grace window is snapshotted and stopped (fire-and-forget; the
+    // next sweep sees it Stopped and the fleet card shows it asleep-with-question).
+    maybePark(boxes);
     return boxes.map((b) => ({
       ...b,
       ...(titles[b.name] ? { title: titles[b.name] } : {}),
@@ -1762,6 +1804,21 @@ app.get("/changes.json", async (req: Request, res: Response) => {
     failWith(res, e);
   }
 });
+// The whole workspace's unified diff for the Review-all panel: live from the box while it is up.
+// (A finished run's diff survives teardown in the archive — /history.json?id=N carries diffText.)
+app.get("/rundiff.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const session = typeof req.query.session === "string" ? req.query.session : "";
+  if (!session) {
+    res.status(400).json({ error: "session query param required" });
+    return;
+  }
+  try {
+    res.json({ diff: redactor.redact(await readFullDiff(cfg, session)) });
+  } catch (e) {
+    res.status(400).json({ error: clientError(e) });
+  }
+});
 // The unified diff for one file (git diff HEAD), or "untracked" for a new file; path under /workspace.
 app.get("/diff.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
@@ -2434,4 +2491,11 @@ app.listen(cfg.httpPort, cfg.httpHost, () => {
   // Keep it topped up so a warm box is ALWAYS ready, even through a long lull with no delegations
   // (an unclaimed box idle/max-duration reaped can't trigger its own claim-based reseed).
   startPoolMaintainer(cfg);
+  // Cold-start nudge: without a baked snapshot every run pays the toolchain install in the box.
+  if (!cfg.snapshot) {
+    console.error(
+      `[agent-sandbox] MSB_SNAPSHOT is not set — every cold run installs claude+gh in the box (~10s). ` +
+        `Run 'npm run bake' once and set MSB_SNAPSHOT to the printed name.`
+    );
+  }
 });

@@ -32,6 +32,7 @@ import { PlanDock } from "./PlanBoard";
 import { ThreadMinimap, type Turn } from "./ThreadMinimap";
 import { useStickToBottom } from "use-stick-to-bottom";
 import { ChangesDock } from "./ChangesDock";
+import { ReviewAllPane } from "./ReviewAll";
 import { QuestionCard } from "./QuestionCard";
 import { ArrowDown } from "lucide-react";
 import { findPullRequests } from "@/lib/testReport";
@@ -152,6 +153,7 @@ export function Thread({
   const [changes, setChanges] = React.useState<ChangedFile[]>([]);
   const [changesLoading, setChangesLoading] = React.useState(false);
   const [openFile, setOpenFile] = React.useState<ChangedFile | null>(null);
+  const [reviewOpen, setReviewOpen] = React.useState(false);
   const [workspaceOpen, setWorkspaceOpen] = React.useState(false);
   const [workspaceFull, setWorkspaceFull] = React.useState(false);
   const showWorkspace = workspaceOpen || openFile !== null;
@@ -767,7 +769,12 @@ export function Thread({
         </AnimatePresence>
       </div>
 
-      {!sleeping && <ChangesDock files={changes} loading={changesLoading} onOpen={setOpenFile} onRefresh={refreshChanges} activePath={openFile?.path} />}
+      {reviewOpen && !sleeping && (
+        <div className="mx-auto w-full max-w-3xl px-3 pb-2 md:px-6">
+          <ReviewAllPane session={box.name} onClose={() => setReviewOpen(false)} />
+        </div>
+      )}
+      {!sleeping && <ChangesDock files={changes} loading={changesLoading} onOpen={setOpenFile} onRefresh={refreshChanges} onReviewAll={() => setReviewOpen((v) => !v)} activePath={openFile?.path} />}
       <SendBar
         boxName={box.name}
         runState={runState}
