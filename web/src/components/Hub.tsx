@@ -8,6 +8,7 @@ import {
   FileSearch,
   FlaskConical,
   GitBranch,
+  GitPullRequest,
   Layers,
   Loader2,
   ImagePlus,
@@ -90,11 +91,37 @@ const STARTERS: Starter[] = [
     needsRepo: true,
   },
   {
+    icon: <GitPullRequest />,
+    label: "Review a PR",
+    task: "Review the following pull request. Check out the PR branch, read the full diff, and leave a review on GitHub: comment on the specific lines for any correctness bug, risky change, or clear improvement. If nothing needs a change, approve the PR instead. Do not merge.\n\nPR: ",
+    needsRepo: true,
+  },
+  {
     icon: <Layers />,
     label: "Research, no repo",
     task: "Write a thorough, well-sourced report on the following, into /workspace/report.md:\n\n",
   },
 ];
+
+/**
+ * A failed delegate unmounts and remounts the Hub (the booting pane swaps in the moment you submit),
+ * so React state written after the failure lands on a dead instance. Everything the user would lose
+ * — images, repos, verify clause, the error itself — is stashed here at module level and restored by
+ * the next mount. One-shot, in-memory: a reload starts clean (the text draft alone survives, as before).
+ */
+interface FailedSubmit {
+  task: string;
+  images: { id: string; name: string; dataUrl: string }[];
+  picked: PickedRepo[];
+  verify?: { mode: "command" | "criterion"; text: string };
+  error: string;
+}
+let failedSubmit: FailedSubmit | null = null;
+function takeFailedSubmit(): FailedSubmit | null {
+  const s = failedSubmit;
+  failedSubmit = null;
+  return s;
+}
 
 /** One honest sentence about the fleet right now, built only from live data. */
 function fleetLine(boxes: BoxView[], lc: FleetLifecycle): string {
@@ -139,10 +166,14 @@ export function Hub({
   onOpen: (name: string) => void;
   onBack: () => void;
 }) {
-  // A handoff from a finished run wins; otherwise whatever was typed before a reload or detour.
-  const prefill = React.useRef(takePrefill());
-  const [task, setTask] = React.useState(() => prefill.current?.task ?? readDraft("hub"));
-  const [picked, setPicked] = React.useState<PickedRepo[]>([]);
+  // A handoff from a finished run wins; then a failed submit's stash; otherwise whatever was typed
+  // before a reload or detour. takePrefill is consumed lazily ONCE — evaluating it on every render
+  // would eat a prefill written while the Hub is mounted.
+  const [prefillOnce] = React.useState(() => takePrefill());
+  const prefill = React.useRef(prefillOnce);
+  const [stash] = React.useState(() => takeFailedSubmit());
+  const [task, setTask] = React.useState(() => prefill.current?.task ?? (stash?.task || readDraft("hub")));
+  const [picked, setPicked] = React.useState<PickedRepo[]>(() => stash?.picked ?? []);
   // Model for message 1 — the "new-task" scope key keeps it distinct from any box's sticky pick.
   const model = useModelChoice("new-task");
   const [showRepo, setShowRepo] = React.useState(() => !!prefill.current?.wantsRepo);
@@ -192,13 +223,13 @@ export function Hub({
     return () => document.removeEventListener("mousedown", onDown);
   }, [showRepo]);
   const [busy, setBusy] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
+  const [error, setError] = React.useState<string | null>(() => stash?.error ?? null);
 
   // Optional post-run verification: a command run in the sandbox, or a criterion a read-only checker
   // judges. Collapsed by default so the composer stays clean; the chip lights up when filled.
-  const [verifyOpen, setVerifyOpen] = React.useState(false);
-  const [verifyMode, setVerifyMode] = React.useState<"command" | "criterion">("command");
-  const [verifyText, setVerifyText] = React.useState("");
+  const [verifyOpen, setVerifyOpen] = React.useState(() => !!stash?.verify);
+  const [verifyMode, setVerifyMode] = React.useState<"command" | "criterion">(() => stash?.verify?.mode ?? "command");
+  const [verifyText, setVerifyText] = React.useState(() => stash?.verify?.text ?? "");
   const verifyActive = verifyText.trim().length > 0;
   const clearVerify = () => {
     setVerifyOpen(false);
@@ -225,7 +256,13 @@ export function Hub({
   });
 
   const applyStarter = (s: Starter) => {
-    setTask(s.task);
+    // Never destroy a typed brief: if the composer already holds text that is not just another
+    // starter, append the template under it instead of replacing it.
+    setTask((prev) => {
+      const t = prev.trim();
+      const isStarter = STARTERS.some((x) => t === x.task.trim());
+      return !t || isStarter ? s.task : `${prev.replace(/\s+$/, "")}\n\n${s.task}`;
+    });
     if (s.needsRepo) setShowRepo(true);
     requestAnimationFrame(() => {
       const el = document.getElementById("new-task") as HTMLTextAreaElement | null;
@@ -237,10 +274,13 @@ export function Hub({
 
   // Images pasted, dropped or picked go with the task: the controller stages them into the fresh
   // sandbox before the agent starts, and the task names them for the Read tool.
-  const [images, setImages] = React.useState<{ id: string; name: string; dataUrl: string }[]>([]);
+  const [images, setImages] = React.useState<{ id: string; name: string; dataUrl: string }[]>(() => stash?.images ?? []);
   const [preview, setPreview] = React.useState<{ name: string; dataUrl: string } | null>(null);
   const [dragOver, setDragOver] = React.useState(false);
   const fileInput = React.useRef<HTMLInputElement>(null);
+  // Files still being read when Enter lands would be silently dropped from the submit; count the
+  // in-flight reads so submit can hold until they land (they take milliseconds).
+  const [readsPending, setReadsPending] = React.useState(0);
   const addImages = (list: Iterable<File>) => {
     for (const f of list) {
       if (!f.type.startsWith("image/")) continue;
@@ -249,7 +289,10 @@ export function Hub({
         continue;
       }
       const reader = new FileReader();
+      setReadsPending((n) => n + 1);
+      reader.onerror = () => setReadsPending((n) => n - 1);
       reader.onload = () => {
+        setReadsPending((n) => n - 1);
         const ext = (f.type.split("/")[1] || "png").replace("jpeg", "jpg");
         const stem = (f.name || "pasted").replace(/\.[^.]+$/, "").replace(/[^\w.-]+/g, "-").slice(0, 40) || "image";
         setImages((prev) => [...prev, { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: `${stem}.${ext}`, dataUrl: String(reader.result) }]);
@@ -261,6 +304,12 @@ export function Hub({
   const submit = async () => {
     const t = task.trim();
     if ((!t && !images.length) || busy) return;
+    if (readsPending > 0) {
+      // An image is still being read; submitting now would silently drop it. The read resolves in
+      // milliseconds — ask for one more Enter rather than auto-firing with state that may have moved.
+      toast("One moment — still attaching your image", { icon: <ImagePlus className="size-4" /> });
+      return;
+    }
     voice.stop();
     const id = `pending-${Date.now()}`;
     setBusy(true);
@@ -277,7 +326,10 @@ export function Hub({
         ...(verifyActive ? { verify: verifyMode === "command" ? { command: verifyText.trim() } : { criterion: verifyText.trim() } } : {}),
       });
       if (res.ok) {
-        // Accepted: only now let go of the brief and the images (the draft effect clears storage too).
+        // Accepted. The Hub is already UNMOUNTED here (onBooting swapped in the booting pane), so the
+        // setState calls below are no-ops on a dead instance and the draft effect never fires — clear
+        // the stored draft directly, or the next new-task composer comes prefilled with this brief.
+        writeDraft("hub", "");
         setTask("");
         setImages([]);
         clearVerify();
@@ -289,14 +341,29 @@ export function Hub({
         }
         onStarted(res.box, t);
       } else {
+        // The Hub was swapped out for the booting pane, so setError would land on a dead instance.
+        // Stash everything for the remount that onFailed triggers; the toast covers the gap.
+        failedSubmit = {
+          task: t,
+          images: attached,
+          picked,
+          ...(verifyActive ? { verify: { mode: verifyMode, text: verifyText } } : {}),
+          error: res.question,
+        };
         onFailed();
         setError(res.question);
-        // The Hub may have been swapped out for the booting pane: the toast survives, the draft is still in storage.
         toast.error("Could not start the task", { description: res.question });
       }
     } catch (e) {
-      onFailed();
       const msg = e instanceof Error ? e.message : String(e);
+      failedSubmit = {
+        task: t,
+        images: attached,
+        picked,
+        ...(verifyActive ? { verify: { mode: verifyMode, text: verifyText } } : {}),
+        error: msg,
+      };
+      onFailed();
       setError(msg);
       toast.error("Could not start the task", { description: msg });
     } finally {

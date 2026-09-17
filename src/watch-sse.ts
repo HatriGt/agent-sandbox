@@ -95,6 +95,29 @@ export function isTerminal(runState: WatchSnapshot["runState"]): boolean {
   return runState === "done" || runState === "idle";
 }
 
+/**
+ * How long an `idle` stream is held open before the server treats it as terminal.
+ *
+ * A brand-new delegated box reports `idle` until the run sentinel is written — a few seconds after
+ * boot. The old behaviour sent `done` on the FIRST tick of such a box, which closed the browser's
+ * stream right as the run was starting; the client then refused to reconnect (a clean `done` is
+ * final) and the fresh thread sat blind until the 3s fleet poll noticed `running`. Holding idle
+ * streams open for this grace window makes a new run's first bytes arrive on the stream that was
+ * already connected. A box that stays idle past the window still terminates, so nothing leaks.
+ */
+export const IDLE_TERMINAL_GRACE_MS = 90_000;
+
+/**
+ * Pure decision for {@link streamWatch}: should this tick end the stream? `done` is always terminal;
+ * `idle` is terminal only once the run has been idle past the grace window, or after the stream has
+ * seen the run active (an active→idle flip means the log was replaced — reconnect fresh).
+ */
+export function shouldEndStream(i: { runState: WatchSnapshot["runState"]; sawActive: boolean; idleMs: number; graceMs?: number }): boolean {
+  if (i.runState === "done") return true;
+  if (i.runState !== "idle") return false;
+  return i.sawActive || i.idleMs >= (i.graceMs ?? IDLE_TERMINAL_GRACE_MS);
+}
+
 /** Serialise one SSE event frame. `id` lets a reconnect resume via Last-Event-ID (we use the offset). */
 export function sseFrame(event: string, data: unknown, id?: number): string {
   const lines = [`event: ${event}`];
@@ -110,6 +133,8 @@ export interface StreamWatchOpts {
   read: (session: string) => Promise<WatchSnapshot>;
   tickMs?: number;
   heartbeatMs?: number;
+  /** Override the idle-terminal grace window (tests). */
+  idleGraceMs?: number;
 }
 
 /**
@@ -136,7 +161,8 @@ export function streamWatch(res: Response, opts: StreamWatchOpts): () => void {
 
   let offset = Math.max(0, opts.from ?? 0);
   let lastMeta = "";
-  let lastRun: WatchSnapshot["runState"] | null = null;
+  let sawActive = false;
+  let idleSince: number | null = null;
   let sentSnapshot = false;
   let lastLog = "";
   let closed = false;
@@ -180,7 +206,6 @@ export function streamWatch(res: Response, opts: StreamWatchOpts): () => void {
       lastLog = snap.log;
       sentSnapshot = true;
       lastMeta = meaningfulStateKey(meta);
-      lastRun = snap.runState;
       send(sseFrame("snapshot", { meta, log: initial, from: startOffset }, offset));
     } else {
       const delta = diffLog(offset, snap.log, lastLog);
@@ -199,8 +224,18 @@ export function streamWatch(res: Response, opts: StreamWatchOpts): () => void {
       }
     }
 
+    // Track activity for the idle-grace decision: a run seen active makes any later idle terminal.
+    if (snap.runState === "running" || snap.runState === "waiting") {
+      sawActive = true;
+      idleSince = null;
+    } else if (snap.runState === "idle" && idleSince === null) {
+      idleSince = Date.now();
+    }
+
     // Terminal: send one final `done` and stop the loop so we stop hitting SSH for a finished run.
-    if (isTerminal(snap.runState) && lastRun !== null) {
+    // `idle` is held open for a grace window — a just-delegated box is idle for its first seconds,
+    // and closing then blinds the freshly-opened thread (see shouldEndStream).
+    if (shouldEndStream({ runState: snap.runState, sawActive, idleMs: idleSince ? Date.now() - idleSince : 0, graceMs: opts.idleGraceMs })) {
       send(sseFrame("done", { meta, exitCode: snap.exitCode }, offset));
       // Give the socket a beat to flush, then end it.
       stop();
@@ -211,7 +246,6 @@ export function streamWatch(res: Response, opts: StreamWatchOpts): () => void {
       }
       return;
     }
-    lastRun = snap.runState;
     if (!closed) tickTimer = setTimeout(tick, tickMs);
   };
 

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { diffLog, metaOf, isTerminal, sseFrame, meaningfulStateKey } from "../src/watch-sse.ts";
+import { diffLog, metaOf, isTerminal, sseFrame, meaningfulStateKey, shouldEndStream } from "../src/watch-sse.ts";
 import type { WatchSnapshot } from "../src/monitor.ts";
 import type { SnapshotMeta } from "../src/watch-sse.ts";
 
@@ -64,6 +64,27 @@ test("isTerminal: done and idle are terminal; running/waiting are not", () => {
   assert.equal(isTerminal("idle"), true);
   assert.equal(isTerminal("running"), false);
   assert.equal(isTerminal("waiting"), false);
+});
+
+test("shouldEndStream: done always ends; running/waiting never end", () => {
+  assert.equal(shouldEndStream({ runState: "done", sawActive: false, idleMs: 0 }), true);
+  assert.equal(shouldEndStream({ runState: "running", sawActive: true, idleMs: 0 }), false);
+  assert.equal(shouldEndStream({ runState: "waiting", sawActive: true, idleMs: 0 }), false);
+});
+
+test("shouldEndStream: a brand-new idle box (run not started yet) is held open through the grace window", () => {
+  // The regression: the first tick of a just-delegated box is `idle`; ending here blinded the
+  // freshly-opened thread until the fleet poll caught up.
+  assert.equal(shouldEndStream({ runState: "idle", sawActive: false, idleMs: 0 }), false);
+  assert.equal(shouldEndStream({ runState: "idle", sawActive: false, idleMs: 5_000, graceMs: 90_000 }), false);
+});
+
+test("shouldEndStream: idle past the grace window ends even if never seen active", () => {
+  assert.equal(shouldEndStream({ runState: "idle", sawActive: false, idleMs: 90_001, graceMs: 90_000 }), true);
+});
+
+test("shouldEndStream: active→idle ends immediately (log replaced; client should reconnect fresh)", () => {
+  assert.equal(shouldEndStream({ runState: "idle", sawActive: true, idleMs: 0 }), true);
 });
 
 test("sseFrame serialises event/id/data as a valid SSE frame", () => {

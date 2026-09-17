@@ -461,7 +461,12 @@ export function Thread({
       .finally(() => setSendingNow(null));
   };
 
-  const idle = runState === "idle" && events.length === 0 && !loadingTrace;
+  // A just-delegated box reports `idle` until the run sentinel is written (a few seconds after
+  // boot/claim) — that is "starting", not "idle": showing "Nothing has run here yet · send an
+  // instruction" there invites a duplicate task. A claimed box or one that already has a task is a
+  // run being set up, so the empty-idle card is reserved for genuinely unused boxes.
+  const starting = runState === "idle" && events.length === 0 && !sleeping && (box.role === "pool-claimed" || !!box.task) && exitCode == null;
+  const idle = runState === "idle" && events.length === 0 && !loadingTrace && !starting;
 
   // The title: the operator's rename wins immediately; the fleet catches up on its next read.
   const [renamed, setRenamed] = React.useState<{ box: string; title: string } | null>(null);
@@ -652,6 +657,8 @@ export function Thread({
             {!sleeping && runState === "running" && !["say", "think"].includes(groups[groups.length - 1]?.kind ?? "") && !loadingTrace && (
               <WorkingIndicator label={events.length ? "Working" : "Starting up"} detail={activity} />
             )}
+
+            {starting && <WorkingIndicator label="Starting up" detail="the sandbox is getting your task ready" />}
 
             {idle && <IdleEmpty box={box} onNew={onNew} />}
 

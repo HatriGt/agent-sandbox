@@ -39,6 +39,17 @@ export function peekWatchCache(session: string): WatchSnapshot | null {
   return cache.get(session) ?? null;
 }
 
+/**
+ * Forget everything cached for a box. A warm-pool box keeps its NAME when claimed for a new run, so
+ * a snapshot cached before the claim (a hover prefetch of the idle pool box) describes a different
+ * log: reopening the stream with that stale offset would splice the old content ahead of the new
+ * run's first bytes. Called at the pool-free → pool-claimed transition.
+ */
+export function dropWatchCache(session: string): void {
+  cache.delete(session);
+  cachedAt.delete(session);
+}
+
 /** Fire-and-forget warm-up for a box the user is about to open (hovering its row). */
 const prefetching = new Set<string>();
 export function prefetchWatch(session: string): void {

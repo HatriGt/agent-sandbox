@@ -9,6 +9,7 @@ import { legacyHashTarget, useConsoleRoute, useGo } from "@/lib/route";
 import { usePoll } from "@/hooks/usePoll";
 import { prefetch } from "@/lib/cache";
 import { useStableBoxes } from "@/hooks/useStableBoxes";
+import { dropWatchCache } from "@/hooks/useWatchStream";
 import { useSessionRuns } from "@/hooks/useSessionRuns";
 import { useNotifications } from "@/hooks/useNotifications";
 import { Button } from "@/components/ui/button";
@@ -133,7 +134,9 @@ export default function App() {
   const selected = route.view === "box" ? route.name : null;
   const [mobileRail, setMobileRail] = React.useState(() => route.view === "hub");
 
-  const [booting, setBooting] = React.useState<{ task: string; known: Map<string, string>; warm: boolean } | null>(null);
+  const [booting, setBooting] = React.useState<{ task: string; known: Map<string, string>; warm: boolean; loaded: boolean } | null>(null);
+  const bootingRef = React.useRef(booting);
+  bootingRef.current = booting;
   const [pending, setPending] = React.useState<{ id: string; task: string }[]>([]);
   const [asides, setAsides] = React.useState<Record<string, Aside[]>>({});
   const [replies, setReplies] = React.useState<Record<string, string[]>>({});
@@ -161,6 +164,9 @@ export default function App() {
     setBooting(null);
     go({ view: "hub" });
     setMobileRail(false);
+    // Land ready to type: the hub composer is the whole point of "n". Two frames — one for the
+    // route change to commit, one for the Hub to mount.
+    requestAnimationFrame(() => requestAnimationFrame(() => (document.getElementById("new-task") as HTMLTextAreaElement | null)?.focus()));
   }, [go]);
   const backToRail = () => setMobileRail(true);
   const showFleet = React.useCallback(() => {
@@ -217,6 +223,14 @@ export default function App() {
   // warm claim is an existing pool-free box whose role flips to pool-claimed (same name).
   React.useEffect(() => {
     if (!booting) return;
+    // Cold-tab guard: if the fleet had not loaded when the task was submitted, `known` is an empty
+    // snapshot and EVERY box in the first poll would look "fresh" — attaching would drop the user
+    // into some pre-existing run's thread. Re-baseline off that first real snapshot instead; only a
+    // box appearing AFTER it counts as ours.
+    if (!booting.loaded) {
+      if (data) setBooting({ ...booting, loaded: true, known: new Map(boxes.map((b) => [b.name, b.role])) });
+      return;
+    }
     const fresh = boxes.find((b) => {
       if (b.role === "pool-free") return false;
       const before = booting.known.get(b.name);
@@ -224,6 +238,9 @@ export default function App() {
       return before === "pool-free" && b.role === "pool-claimed";
     });
     if (!fresh) return;
+    // A warm claim reuses the pool box's NAME: anything cached about it (a hover prefetch of the
+    // idle pool box) is the previous life's log and would be spliced ahead of the new run's output.
+    if (booting.known.get(fresh.name) === "pool-free") dropWatchCache(fresh.name);
     go({ view: "box", name: fresh.name });
     setBooting(null);
     setPending([]);
@@ -253,7 +270,11 @@ export default function App() {
       if (e.key === "?") return setShortcuts(true);
       if (e.key === "/") {
         e.preventDefault();
-        focusComposer.current?.();
+        // The thread's SendBar registers a focuser; on the hub (or if the ref is a stale closure
+        // from an unmounted thread) fall back to the hub composer so "/" always does something.
+        const hub = document.getElementById("new-task") as HTMLTextAreaElement | null;
+        if (hub) hub.focus();
+        else focusComposer.current?.();
         return;
       }
       if (e.key === "j" || e.key === "k") {
@@ -622,11 +643,19 @@ export default function App() {
                         task,
                         known: new Map(boxes.map((b) => [b.name, b.role])),
                         warm: warmReady > 0,
+                        // A cold tab (no fleet snapshot yet) must re-baseline `known` off the first
+                        // real poll before the attach effect may fire — see that effect.
+                        loaded: !!data,
                       })
                     }
                     onStarted={(box, task) => {
                       remember(box, task);
-                      open(box);
+                      // delegate can resolve a minute after submit (it blocks until the agent's first
+                      // boundary). If the attach effect already put the user somewhere — this thread,
+                      // or anywhere they navigated since — don't yank them; only navigate when the
+                      // booting placeholder is still showing.
+                      if (bootingRef.current) open(box);
+                      else setBooting(null);
                     }}
                     onFailed={() => setBooting(null)}
                     onPending={(p) => setPending((prev) => [...prev, p])}
