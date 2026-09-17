@@ -32,6 +32,13 @@ export interface DelegateFlowInput {
    * route runs verification on the done edge of the fleet sweep and stamps the digest.
    */
   verify?: VerifyPlan;
+  /**
+   * Return as soon as the agent is LAUNCHED instead of blocking to the first interactive boundary.
+   * The dashboard path sets this: the browser only needs the box name (the thread attaches over
+   * SSE), and blocking the HTTP response on the wait window made "start a task" feel ~50s slower
+   * than it was. MCP callers keep the blocking default — the open tool call IS their listener.
+   */
+  detach?: boolean;
 }
 
 export type DelegateFlowResult =
@@ -86,6 +93,6 @@ export async function runDelegateFlow(
     };
   }
 
-  const r = await deps.runDelegation(cfg, v.plan, input.allowDomains, creds, {});
+  const r = await deps.runDelegation(cfg, v.plan, input.allowDomains, creds, { detach: input.detach });
   return { ok: true, box: r.box, warm: r.warm, output: r.output, repos: v.plan.repos };
 }

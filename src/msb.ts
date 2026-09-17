@@ -38,6 +38,7 @@ import {
   type WatchSnapshot,
   type RepoRef,
   parseDurationSec,
+  warmMaxDuration,
 } from "./monitor.js";
 import type { PollResult } from "./wait.js";
 import type { Config } from "./config.js";
@@ -246,8 +247,11 @@ export async function bootWarmBox(cfg: Config): Promise<string> {
     // poolIdleTimeout (not a session's idleTimeout) — otherwise it idle-stops and the pool drains.
     "--idle-timeout",
     cfg.poolIdleTimeout,
+    // max-duration is anchored at BOOT, not at claim: a warm box claimed near the end of a plain
+    // cfg.maxDuration was killed minutes into the user's run ("max duration exceeded" → exit 254).
+    // Budget the whole pool window PLUS a full run; acquireBox's freshness gate enforces the rest.
     "--max-duration",
-    cfg.maxDuration,
+    warmMaxDuration(cfg.poolIdleTimeout, cfg.maxDuration),
     "--pull",
     "never",
     "--from-snapshot",

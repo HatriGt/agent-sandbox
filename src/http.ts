@@ -2473,6 +2473,9 @@ app.post("/delegate.json", async (req: Request, res: Response) => {
       githubAccount: typeof body.githubAccount === "string" ? body.githubAccount : undefined,
       model,
       verify: verifyPlan,
+      // The browser needs only the box name (the thread attaches over SSE); blocking this response
+      // on the interactive wait window made task starts ~50s slower than the box actually was.
+      detach: true,
     });
     if (result.ok) {
       if (model) boxModels.set(result.box, model);

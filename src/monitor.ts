@@ -123,6 +123,18 @@ export function parseUptimeSec(raw: string | undefined): number | undefined {
 
 const POOL_PREFIX = "pool-";
 
+/**
+ * The --max-duration a WARM box should boot with: the whole pool idle window plus a full run, so a
+ * box claimed at the very end of its pool life still has maxDuration of runtime left (the timer is
+ * anchored at boot, not at claim). Falls back to the plain maxDuration when a string doesn't parse.
+ */
+export function warmMaxDuration(poolIdleTimeout: string, maxDuration: string): string {
+  const idle = parseDurationSec(poolIdleTimeout);
+  const run = parseDurationSec(maxDuration);
+  if (idle === undefined || run === undefined) return maxDuration;
+  return `${idle + run}s`;
+}
+
 /** True when the box's msb lifecycle status means it's actually running (vs stopped/exited). */
 export function isRunning(boxStatus: string): boolean {
   return /^running$/i.test(boxStatus.trim());

@@ -27,6 +27,8 @@ import { verifyPlanOf, formatVerifyResult, type VerifyPlan, type VerifyResult } 
 export interface Interact {
   elicit?: (question: string) => Promise<ElicitOutcome>;
   progress?: (message: string) => Promise<void>;
+  /** Return at launch instead of blocking to the first boundary (dashboard path — see delegate-flow). */
+  detach?: boolean;
 }
 
 export interface DelegationResult {

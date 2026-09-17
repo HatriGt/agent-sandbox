@@ -63,6 +63,22 @@ test("at capacity -> refused before touching the box count again", async () => {
   if (!r.ok) assert.match(r.question, /Refused/);
 });
 
+test("detach: the flag reaches runDelegation so a browser delegate returns at launch, not at the first boundary", async () => {
+  // The dashboard only needs the box name — the thread attaches via SSE. Blocking the HTTP response
+  // on driveInteractive's wait window (50s) was most of the observed 72s time-to-first-byte.
+  let seenDetach: boolean | undefined;
+  const r = await runDelegateFlow(cfg, {
+    countBoxes: async () => 0,
+    resolveGitAccess: okAccess,
+    runDelegation: async (_cfg: any, _plan: any, _domains: any, _creds: any, interact: any) => {
+      seenDetach = interact?.detach;
+      return { box: "box-d", warm: true, output: "run:started" };
+    },
+  } as any, { source: "git", repo: "o/n", task: "t", detach: true });
+  assert.equal(r.ok, true);
+  assert.equal(seenDetach, true);
+});
+
 test("task-only (no repo) is a valid plan", async () => {
   let seenRepos: any = null;
   const r = await runDelegateFlow(cfg, {

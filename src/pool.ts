@@ -11,7 +11,34 @@
  */
 import { createBox, bootWarmBox, listPoolBoxes, claimWarmBox, reapDeadPoolBoxes } from "./msb.js";
 import { stagingPathFor } from "./sync.js";
+import { parseDurationSec } from "./monitor.js";
 import type { Config } from "./config.js";
+
+/**
+ * A pool box's --max-duration clock starts at BOOT, not at claim. Observed live: a box booted at
+ * 04:24, claimed at 05:22, and killed by "max duration 3600s exceeded" at 05:24 — two minutes into
+ * the user's run, reported as "the sandbox restarted mid-run". Freshness is judged from the boot
+ * time embedded in the pool name (pool-<epochMs>-<rand>), which every bootWarmBox name carries.
+ */
+export function poolBoxAgeMs(name: string, nowMs = Date.now()): number | undefined {
+  const m = name.match(/^pool-(\d+)-/);
+  if (!m) return undefined;
+  const t = Number(m[1]);
+  return Number.isFinite(t) && t > 0 ? nowMs - t : undefined;
+}
+
+/** Only boxes young enough that a full run still fits before their own max-duration kill. An
+ *  undatable name is treated as stale — handing it out risks a mid-run kill. */
+export function freshPoolBoxes(available: readonly string[], maxAgeMs: number, nowMs = Date.now()): string[] {
+  return available.filter((b) => {
+    const age = poolBoxAgeMs(b, nowMs);
+    return age !== undefined && age <= maxAgeMs;
+  });
+}
+
+// The boot-time --max-duration budget lives in monitor.ts (next to parseDurationSec) because
+// msb.ts needs it too and pool.ts already imports msb.ts — a cycle otherwise.
+export { warmMaxDuration } from "./monitor.js";
 
 /** Whether this delegation is eligible to use a (open-egress) pooled box. */
 export function poolEligible(cfg: Config, allowDomainsProvided: boolean): boolean {
@@ -52,7 +79,12 @@ export async function acquireBox(
 ): Promise<{ box: string; warm: boolean }> {
   if (eligible) {
     // listPoolBoxes already reaps dead/wedged boxes, so anything it returns is Running + free.
-    const available = await listPoolBoxes(cfg);
+    // Freshness gate on top: warm boxes boot with max-duration = poolIdleTimeout + maxDuration
+    // (bootWarmBox), so any box younger than poolIdleTimeout still has a full run left. An older
+    // (or pre-fix) box may be killed mid-run by its own boot-anchored timer — cold-booting is
+    // slower but never dies two minutes in.
+    const maxAgeMs = (parseDurationSec(cfg.poolIdleTimeout) ?? 0) * 1000;
+    const available = freshPoolBoxes(await listPoolBoxes(cfg), maxAgeMs);
     const warm = pickFreeBox(available);
     if (warm) {
       claiming.add(warm);
