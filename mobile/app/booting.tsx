@@ -4,7 +4,8 @@ import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
 import { api, ApiError } from "@/lib/api";
-import { takePendingDelegate } from "@/lib/pending-delegate";
+import { setFailedSubmit, takePendingDelegate, type SubmitDraft } from "@/lib/pending-delegate";
+import { dropWatchCache } from "@/hooks/useWatch";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { T } from "@/components/ui/AppText";
@@ -111,8 +112,13 @@ export default function Booting() {
   const [error, setError] = useState<string | null>(null);
   const [question, setQuestion] = useState<string | null>(null);
   const task = useRef<string>("");
+  const draft = useRef<SubmitDraft | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const settled = useRef(false);
+  // Set on unmount: the user left this screen (back gesture, deep link). A delegate promise that
+  // resolves minutes later must NOT router.replace from a dead screen — that yanks the user out of
+  // wherever they navigated (expo-router's router is global, so the call would still fire).
+  const leftScreen = useRef(false);
 
   useEffect(() => {
     const p = takePendingDelegate();
@@ -121,9 +127,10 @@ export default function Booting() {
       return;
     }
     task.current = p.task;
+    draft.current = p.draft;
 
     const attach = (box: string) => {
-      if (settled.current) return;
+      if (settled.current || leftScreen.current) return;
       settled.current = true;
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
       router.replace(`/box/${encodeURIComponent(box)}`);
@@ -136,17 +143,30 @@ export default function Booting() {
     // drops on a flaky mobile network (the server keeps working regardless).
     let stop = false;
     void (async () => {
-      const known = await p.known;
+      let known = await p.known;
       while (!stop && !settled.current) {
         try {
           const s = await api.fleet();
-          const fresh = s.boxes.find((b) => {
-            if (b.role === "pool-free") return false;
-            const before = known.get(b.name);
-            if (before === undefined) return true;
-            return before === "pool-free"; // it just flipped to claimed/session
-          });
-          if (fresh) return attach(fresh.name);
+          // The submit-time fleet read failed (known === null): with no baseline, EVERY box in this
+          // poll would look "fresh" and we'd attach to some pre-existing run. Use this first
+          // successful poll as the baseline instead — only a box appearing after it is ours.
+          if (known === null) {
+            known = new Map(s.boxes.map((b) => [b.name, b.role]));
+          } else {
+            const k = known;
+            const fresh = s.boxes.find((b) => {
+              if (b.role === "pool-free") return false;
+              const before = k.get(b.name);
+              if (before === undefined) return true;
+              return before === "pool-free"; // it just flipped to claimed/session
+            });
+            if (fresh) {
+              // A warm claim reuses the pool box's NAME: anything cached about it is the previous
+              // life's transcript and must not seed the new run's thread.
+              if (k.get(fresh.name) === "pool-free") dropWatchCache(fresh.name);
+              return attach(fresh.name);
+            }
+          }
         } catch {
           /* transient; keep polling */
         }
@@ -159,11 +179,17 @@ export default function Booting() {
     // over mobile data and dropped) is NOT authoritative — the box usually
     // started anyway. Give the fleet poll a grace window to attach; only then
     // show the error, and even then keep polling so a late box still wins.
+    // Failure: stash the FULL submission so "Back to the task" restores repos, photos, model and
+    // verify — not just the text. One-shot; consumed by /new on mount.
+    const fail = (kind: "error" | "clarify", msg: string) => {
+      if (draft.current) setFailedSubmit({ ...draft.current, [kind === "error" ? "error" : "clarify"]: msg });
+    };
     p.promise
       .then((r) => {
         if (r.ok) attach(r.box);
         else {
           settled.current = true;
+          fail("clarify", r.question);
           setQuestion(r.question);
         }
       })
@@ -174,17 +200,22 @@ export default function Booting() {
         // No status = the socket died in transit; the delegation is probably still running.
         if (e instanceof ApiError && e.status > 0) {
           settled.current = true;
+          fail("error", msg);
           setError(msg);
           return;
         }
         setTimeout(() => {
-          if (!settled.current) setError(msg);
+          if (!settled.current) {
+            fail("error", msg);
+            setError(msg);
+          }
         }, 15_000);
       });
 
     const t = setInterval(() => setElapsed((s) => s + 1), 1000);
     return () => {
       stop = true;
+      leftScreen.current = true;
       clearInterval(t);
     };
   }, [router]);

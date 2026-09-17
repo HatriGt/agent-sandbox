@@ -11,6 +11,15 @@ const DONE_POLL_MS = 3000;
 const snapCache = new Map<string, { meta: Omit<WatchSnapshot, "log">; log: string }>();
 
 /**
+ * Forget everything cached for a box. A warm-pool box keeps its NAME when claimed for a new run, so
+ * a snapshot cached before the claim describes the previous life's log — seeding it would show the
+ * old transcript over the new run's. Called by /booting at the pool-free → claimed attach.
+ */
+export function dropWatchCache(session: string): void {
+  snapCache.delete(session);
+}
+
+/**
  * Live view of one box: SSE stream of the agent log with byte-offset resume,
  * falling back to a 3s poll after the server closes the stream (`done`).
  * On app suspend the stream is dropped; on resume it reconnects from the
@@ -146,7 +155,8 @@ export function useWatch(session: string | undefined) {
     // Seed from the cache so an already-seen thread paints instantly; a box we have never opened
     // still starts blank. The SSE snapshot frame replaces this wholesale moments later.
     const cached = snapCache.get(session);
-    logRef.current = cached?.log ?? "";
+    const seedLog = cached?.log ?? "";
+    logRef.current = seedLog;
     setLog(logRef.current);
     setMeta(cached?.meta ?? null);
     offset.current = undefined;
@@ -158,7 +168,12 @@ export function useWatch(session: string | undefined) {
       .then((snap) => {
         const { log: l, ...rest } = snap;
         setMeta((m) => m ?? rest);
-        setLogBoth((prev) => prev || l);
+        // The fresh server log wins over the cache SEED: for a reused name (warm claim, recreate)
+        // the cached log is a previous run's transcript, and `prev || l` kept it on screen whenever
+        // the SSE snapshot never arrived (the sleeping-box path). But this GET races the SSE
+        // snapshot — if live frames already replaced the seed, leave them alone; and keep the seed
+        // when the server returned nothing (the instant-paint blip).
+        setLogBoth((prev) => (prev === seedLog && l ? l : prev));
       })
       .catch((e) => {
         if ((e as { status?: number }).status === 404) setGone(true);

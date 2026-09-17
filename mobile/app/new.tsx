@@ -6,7 +6,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import * as WebBrowser from "expo-web-browser";
 import { api, type RepoInfo, type SkillView } from "@/lib/api";
-import { setPendingDelegate } from "@/lib/pending-delegate";
+import { setPendingDelegate, takeFailedSubmit } from "@/lib/pending-delegate";
 import { useKeyboardInset } from "@/hooks/useKeyboardInset";
 import { smartJoin, useVoiceInput } from "@/hooks/useVoiceInput";
 import { VoiceButton, VoicePill } from "@/components/VoiceButton";
@@ -45,6 +45,11 @@ const STARTERS: { label: string; text: string; needsRepo?: boolean }[] = [
     text: "Review the changes on the current branch against main. Report correctness bugs first, then anything that could be simpler. Do not change files.",
   },
   {
+    label: "Review a PR",
+    needsRepo: true,
+    text: "Review the following pull request. Check out the PR branch, read the full diff, and leave a review on GitHub: comment on the specific lines for any correctness bug, risky change, or clear improvement. If nothing needs a change, approve the PR instead. Do not merge.\n\nPR: ",
+  },
+  {
     label: "Research, no repo",
     text: "Write a thorough, well-sourced report on the following, into /workspace/report.md:\n\n",
   },
@@ -58,21 +63,24 @@ export default function NewTask() {
   const router = useRouter();
   const { palette } = useTheme();
   const { me } = useAuth();
-  const [task, setTask] = useState("");
+  // A failed delegate lands back here via /booting: the stash restores the WHOLE submission —
+  // repos, photos, model, verify, and what went wrong — not just the task text.
+  const [stash] = useState(() => takeFailedSubmit());
+  const [task, setTask] = useState(() => stash?.task ?? "");
   const [repoQuery, setRepoQuery] = useState("");
   const [repoResults, setRepoResults] = useState<RepoInfo[]>([]);
-  const [picked, setPicked] = useState<{ repo: string; ref?: string }[]>([]);
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [picked, setPicked] = useState<{ repo: string; ref?: string }[]>(() => stash?.picked ?? []);
+  const [attachments, setAttachments] = useState<Attachment[]>(() => stash?.attachments ?? []);
   const [skills, setSkills] = useState<SkillView[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [clarify, setClarify] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(() => stash?.error ?? null);
+  const [clarify, setClarify] = useState<string | null>(() => stash?.clarify ?? null);
   const [models, setModels] = useState<{ id: string; label: string }[]>([]);
-  const [model, setModel] = useState<string | null>(null);
+  const [model, setModel] = useState<string | null>(() => stash?.model ?? null);
   const [defaultModel, setDefaultModel] = useState<string | null>(null);
   const [showModels, setShowModels] = useState(false);
-  const [verifyOpen, setVerifyOpen] = useState(false);
-  const [verifyMode, setVerifyMode] = useState<"command" | "criterion">("command");
-  const [verifyText, setVerifyText] = useState("");
+  const [verifyOpen, setVerifyOpen] = useState(() => !!stash?.verify);
+  const [verifyMode, setVerifyMode] = useState<"command" | "criterion">(() => stash?.verify?.mode ?? "command");
+  const [verifyText, setVerifyText] = useState(() => stash?.verify?.text ?? "");
 
   const trialExpired = me?.kind === "user" && me.expired;
   const keyboardInset = useKeyboardInset();
@@ -132,9 +140,9 @@ export default function NewTask() {
     voice.stop();
     setError(null);
     setClarify(null);
-    setPendingDelegate(
-      task.trim(),
-      api.delegate({
+    setPendingDelegate({
+      task: task.trim(),
+      promise: api.delegate({
         task: task.trim(),
         repos: picked.length ? picked : undefined,
         attachments: attachments.length ? attachments : undefined,
@@ -145,11 +153,21 @@ export default function NewTask() {
       }),
       // Fleet-as-of-submit: /booting attaches the moment a NEW box (or a pool
       // box flipping pool-free -> claimed) surfaces — the web's early-attach.
-      api
+      // A rejected fleet read resolves to null (NOT an empty map): an empty map
+      // makes every box in the next poll look "fresh", attaching the user to
+      // some pre-existing run. /booting re-baselines off its first real poll.
+      known: api
         .fleet()
         .then((s) => new Map(s.boxes.map((b) => [b.name, b.role])))
-        .catch(() => new Map<string, string>()),
-    );
+        .catch(() => null),
+      draft: {
+        task: task.trim(),
+        picked,
+        attachments,
+        model,
+        ...(verifyText.trim() ? { verify: { mode: verifyMode, text: verifyText.trim() } } : {}),
+      },
+    });
     router.replace("/booting");
   };
 
@@ -219,16 +237,23 @@ export default function NewTask() {
             </T>
           ) : null}
 
-          {!task.trim() && (
-            <View style={{ gap: 6 }}>
-              <T variant="meta" weight="medium" tone="muted">
-                Starters
-              </T>
+          <View style={{ gap: 6 }}>
+            <T variant="meta" weight="medium" tone="muted">
+              Starters
+            </T>
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
                 {STARTERS.map((s) => (
                   <Pressable
                     key={s.label}
-                    onPress={() => setTask(s.text)}
+                    // Never destroy a typed brief (web parity): replace only an empty composer or
+                    // another untouched starter; otherwise append the template under the text.
+                    onPress={() =>
+                      setTask((prev) => {
+                        const t = prev.trim();
+                        const isStarter = STARTERS.some((x) => t === x.text.trim());
+                        return !t || isStarter ? s.text : `${prev.replace(/\s+$/, "")}\n\n${s.text}`;
+                      })
+                    }
                     style={({ pressed }) => ({
                       paddingVertical: 7,
                       paddingHorizontal: 12,
@@ -242,9 +267,8 @@ export default function NewTask() {
                     <T variant="meta">{s.label}</T>
                   </Pressable>
                 ))}
-              </View>
             </View>
-          )}
+          </View>
 
           {skills.length > 0 && (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
