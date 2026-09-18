@@ -2492,6 +2492,10 @@ app.listen(cfg.httpPort, cfg.httpHost, () => {
   console.error(`[agent-sandbox] HTTP MCP on ${cfg.httpHost}:${cfg.httpPort} (bearer-guarded)`);
   // Auto-seed the shared warm pool so the first remote delegation is fast too.
   void refillPool(cfg);
+  // Pre-warm the model catalog so the first delegate's model validation answers from cache (the
+  // stale-while-revalidate in fetchModels keeps it warm from then on). The repo list is per-owner
+  // (SaaS) so it cannot be pre-warmed here; its SWR cache covers everything after a user's first task.
+  void fetchModels(cfg).catch(() => {});
   // Keep it topped up so a warm box is ALWAYS ready, even through a long lull with no delegations
   // (an unclaimed box idle/max-duration reaped can't trigger its own claim-based reseed).
   startPoolMaintainer(cfg);

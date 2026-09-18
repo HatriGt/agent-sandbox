@@ -90,8 +90,9 @@ export function isAllowedModel(id: string, catalog: ModelInfo[], cfg: Pick<Confi
 const CACHE_TTL_MS = 5 * 60_000;
 let cached: { at: number; models: ModelInfo[] } | null = null;
 
-export async function fetchModels(cfg: Config): Promise<ModelInfo[]> {
-  if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.models;
+let refreshing: Promise<ModelInfo[]> | null = null;
+
+async function fetchModelsFresh(cfg: Config): Promise<ModelInfo[]> {
   const remote =
     `curl -sf -m 10 -H ${shellQuote(`Authorization: Bearer ${cfg.anthropicApiKey}`)} ` +
     `-H ${shellQuote(`x-api-key: ${cfg.anthropicApiKey}`)} ` +
@@ -100,5 +101,24 @@ export async function fetchModels(cfg: Config): Promise<ModelInfo[]> {
   const models = parseCatalog(r.stdout ?? "");
   // Never cache an empty result over a good one (transient proxy failure).
   if (models.length > 0 || !cached) cached = { at: Date.now(), models };
-  return cached.models;
+  return cached?.models ?? models;
+}
+
+/**
+ * Stale-while-revalidate: /delegate.json awaits this inline to validate the picked model, and the
+ * catalog changes ~never — a merely expired cache must answer instantly (refreshing in the
+ * background), not add an SSH+curl round trip to every task start after a 5-minute lull.
+ */
+export async function fetchModels(cfg: Config): Promise<ModelInfo[]> {
+  if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.models;
+  if (!refreshing) {
+    refreshing = fetchModelsFresh(cfg).finally(() => {
+      refreshing = null;
+    });
+  }
+  if (cached) {
+    refreshing.catch(() => {});
+    return cached.models;
+  }
+  return refreshing;
 }

@@ -122,28 +122,47 @@ export function inferRepos(task: string, known: RepoInfo[]): RepoInfo[] {
   return out;
 }
 
-/** Cached, store-driven listing. `fetchRepos(token)` is injected (GitHub over the VPS in production). */
+/**
+ * Cached, store-driven listing. `fetchRepos(token)` is injected (GitHub over the VPS in production).
+ *
+ * Stale-while-revalidate: a repository list changes rarely, but /delegate.json awaits this inline
+ * for task→repo inference — observed live, a merely EXPIRED cache turned a warm-claim task start
+ * from ~0.6s into 5.2s while up to 3 GitHub pages per account were re-fetched. Past the TTL the
+ * stale list is returned immediately and the refresh runs in the background; only the first-ever
+ * call per owner (or a changed account set, or force=true from the picker's refresh) blocks.
+ */
 export function makeRepoLister(
   cfg: Config,
   fetchRepos: (cfg: Config, token: string) => Promise<GhRepo[]>,
-  opts: { ttlMs?: number; now?: () => number } = {}
+  opts: {
+    ttlMs?: number;
+    now?: () => number;
+    /** Test seam for the connected accounts (production reads the token store). */
+    accountsOf?: () => Promise<Array<{ login: string; token: string }>>;
+  } = {}
 ) {
   const ttl = opts.ttlMs ?? 5 * 60_000;
   const now = opts.now ?? Date.now;
+  const accountsOf =
+    opts.accountsOf ?? (async () => Object.values((await loadStore(cfg)).accounts).map((a) => ({ login: a.login, token: a.token })));
   // One cache per owner: user A's repository list must never answer user B's picker.
   const caches = new Map<string, { at: number; logins: string; repos: RepoInfo[] }>();
   const inFlights = new Map<string, Promise<RepoInfo[]>>();
 
   return async function list(force = false): Promise<RepoInfo[]> {
     const owner = ownerKey();
-    const store = await loadStore(cfg);
-    const logins = Object.keys(store.accounts).sort().join(",");
+    const accounts = await accountsOf();
+    const logins = accounts.map((a) => a.login).sort().join(",");
     const cache = caches.get(owner);
     if (!force && cache && cache.logins === logins && now() - cache.at < ttl) return cache.repos;
     const inFlight = inFlights.get(owner);
-    if (inFlight) return inFlight;
+    if (inFlight) {
+      // A refresh is already running; a stale-but-matching cache answers now rather than joining it.
+      if (!force && cache && cache.logins === logins) return cache.repos;
+      return inFlight;
+    }
     const p = Promise.all(
-      Object.values(store.accounts).map(async (a) => ({
+      accounts.map(async (a) => ({
         login: a.login,
         repos: await fetchRepos(cfg, a.token).catch(() => [] as GhRepo[]),
       }))
@@ -157,6 +176,13 @@ export function makeRepoLister(
         inFlights.delete(owner);
       });
     inFlights.set(owner, p);
+    // Stale-while-revalidate: an expired cache for the SAME account set answers immediately; the
+    // in-flight refresh above lands in the cache for the next caller. force and a changed account
+    // set still block — those callers asked for (or require) the fresh truth.
+    if (!force && cache && cache.logins === logins) {
+      p.catch(() => {});
+      return cache.repos;
+    }
     return p;
   };
 }
