@@ -281,7 +281,7 @@ async function allPoolBoxes(cfg: Config): Promise<Array<{ name: string; status: 
  * msb reports as Stopped/exited but still has a stale record for — the source of the "already
  * running" desync that leaves a claimed box that never actually runs.
  */
-async function forceRemoveBox(cfg: Config, box: string): Promise<void> {
+export async function forceRemoveBox(cfg: Config, box: string): Promise<void> {
   await msb(cfg, ["stop", box], false);
   await msb(cfg, ["rm", "--force", box], false);
   await unmarkClaimed(cfg, box);

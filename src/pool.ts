@@ -9,7 +9,7 @@
  *
  * The pool state lives on the VPS (the running `pool-*` boxes), so it survives MCP respawns.
  */
-import { createBox, bootWarmBox, listPoolBoxes, claimWarmBox, reapDeadPoolBoxes } from "./msb.js";
+import { createBox, bootWarmBox, listPoolBoxes, claimWarmBox, reapDeadPoolBoxes, forceRemoveBox } from "./msb.js";
 import { stagingPathFor } from "./sync.js";
 import { parseDurationSec } from "./monitor.js";
 import type { Config } from "./config.js";
@@ -114,26 +114,61 @@ export async function acquireBox(
   return { box: session, warm: false };
 }
 
+/** IO seam for refillPool so its concurrency behavior is unit-testable without SSH. */
+export interface RefillIO {
+  listPoolBoxes: (cfg: Config) => Promise<string[]>;
+  bootWarmBox: (cfg: Config) => Promise<string>;
+  removeBox: (cfg: Config, box: string) => Promise<void>;
+}
+const realRefillIO: RefillIO = { listPoolBoxes, bootWarmBox, removeBox: forceRemoveBox };
+
 /**
- * Top the pool back up to poolSize with open-egress warm boxes. Fire-and-forget: errors are
- * logged to stderr and swallowed so a refill failure never breaks a delegation.
+ * At most ONE refill in flight per process. Observed live: a warm claim's reseed and the periodic
+ * maintainer both listed the pool before either boot registered, computed deficit=1 twice, and
+ * booted TWO warm boxes for poolSize=1 (3 seconds apart) — the surplus box then sat idle for the
+ * whole 6h pool window, eating 1G RAM and one of the 5 capacity slots. Concurrent callers now share
+ * the running flight; a caller arriving after it settled starts a fresh one (it re-lists anyway).
  */
-export async function refillPool(cfg: Config): Promise<void> {
-  if (cfg.poolSize <= 0 || !cfg.snapshot || !cfg.egressAllowAll) return;
-  try {
-    // Reap dead/wedged boxes first so the deficit is real and a fresh boot won't collide with a
-    // stale msb record ("cannot start: already running"). listPoolBoxes reaps as a side effect.
-    const available = await listPoolBoxes(cfg);
-    const deficit = cfg.poolSize - available.length;
-    if (deficit <= 0) return;
-    console.error(`[pool] refilling: ${available.length}/${cfg.poolSize} ready — booting ${deficit}`);
-    for (let i = 0; i < deficit; i++) {
-      const name = await bootWarmBox(cfg);
-      console.error(`[pool] warm box ready: ${name}`);
+let refillInFlight: Promise<void> | null = null;
+
+/**
+ * Reconcile the pool to exactly poolSize open-egress warm boxes: boot the deficit, or trim the
+ * OLDEST surplus (oldest = nearest its boot-anchored max-duration, so the least useful to keep).
+ * Fire-and-forget: errors are logged to stderr and swallowed so a refill failure never breaks a
+ * delegation.
+ */
+export function refillPool(cfg: Config, io: RefillIO = realRefillIO): Promise<void> {
+  if (cfg.poolSize <= 0 || !cfg.snapshot || !cfg.egressAllowAll) return Promise.resolve();
+  if (refillInFlight) return refillInFlight;
+  const flight = (async () => {
+    try {
+      // Reap dead/wedged boxes first so the deficit is real and a fresh boot won't collide with a
+      // stale msb record ("cannot start: already running"). listPoolBoxes reaps as a side effect.
+      const available = await io.listPoolBoxes(cfg);
+      const deficit = cfg.poolSize - available.length;
+      if (deficit > 0) {
+        console.error(`[pool] refilling: ${available.length}/${cfg.poolSize} ready — booting ${deficit}`);
+        for (let i = 0; i < deficit; i++) {
+          const name = await io.bootWarmBox(cfg);
+          console.error(`[pool] warm box ready: ${name}`);
+        }
+      } else if (deficit < 0) {
+        // A past double-refill left extras; keep the youngest (most run budget left), trim the rest.
+        const oldestFirst = [...available].sort((a, b) => (poolBoxAgeMs(b) ?? Infinity) - (poolBoxAgeMs(a) ?? Infinity));
+        for (const box of oldestFirst.slice(0, -deficit)) {
+          console.error(`[pool] trimming surplus warm box ${box} (${available.length}/${cfg.poolSize} ready)`);
+          await io.removeBox(cfg, box);
+        }
+      }
+    } catch (e) {
+      console.error("[pool] refill failed:", e);
     }
-  } catch (e) {
-    console.error("[pool] refill failed:", e);
-  }
+  })();
+  const tracked = flight.finally(() => {
+    if (refillInFlight === tracked) refillInFlight = null;
+  });
+  refillInFlight = tracked;
+  return tracked;
 }
 
 /**
