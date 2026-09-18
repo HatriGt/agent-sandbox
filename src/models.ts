@@ -99,8 +99,10 @@ async function fetchModelsFresh(cfg: Config): Promise<ModelInfo[]> {
     `${shellQuote(`${cfg.anthropicBaseUrl.replace(/\/+$/, "")}/v1/models`)}`;
   const r = await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, remote], { check: false });
   const models = parseCatalog(r.stdout ?? "");
-  // Never cache an empty result over a good one (transient proxy failure).
+  // Never cache an empty result over a good one (transient proxy failure) — but DO advance the
+  // clock on the kept entry, or a broken proxy turns every call into a fresh SSH+curl round trip.
   if (models.length > 0 || !cached) cached = { at: Date.now(), models };
+  else cached.at = Date.now();
   return cached?.models ?? models;
 }
 

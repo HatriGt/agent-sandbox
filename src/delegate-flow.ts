@@ -12,6 +12,7 @@ import type { Config } from "./config.js";
 import type { HandlerDeps } from "./handlers.js";
 import { validateDelegateInput, type DelegateSource, type Attachment } from "./delegate-input.js";
 import type { AgentCreds } from "./msb.js";
+import { reserveBox } from "./capacity.js";
 import type { VerifyPlan } from "./verify.js";
 
 export interface DelegateFlowInput {
@@ -86,13 +87,20 @@ export async function runDelegateFlow(
   }
 
   const live = await deps.countBoxes(cfg);
-  if (live >= cfg.maxBoxes) {
+  // reserveBox counts concurrent delegations that have passed this check but not yet booted, so a
+  // parallel fan-out cannot overshoot MSB_MAX_BOXES between the count and the boot.
+  const release = reserveBox(live, cfg.maxBoxes);
+  if (!release) {
     return {
       ok: false,
-      question: `Refused: ${live}/${cfg.maxBoxes} boxes already running. Tear one down or raise MSB_MAX_BOXES.`,
+      question: `Refused: ${live}/${cfg.maxBoxes} boxes already running or starting. Tear one down or raise MSB_MAX_BOXES.`,
     };
   }
 
-  const r = await deps.runDelegation(cfg, v.plan, input.allowDomains, creds, { detach: input.detach });
-  return { ok: true, box: r.box, warm: r.warm, output: r.output, repos: v.plan.repos };
+  try {
+    const r = await deps.runDelegation(cfg, v.plan, input.allowDomains, creds, { detach: input.detach });
+    return { ok: true, box: r.box, warm: r.warm, output: r.output, repos: v.plan.repos };
+  } finally {
+    release();
+  }
 }

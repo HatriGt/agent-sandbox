@@ -51,7 +51,9 @@ const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
 export function captureCmd(): string {
   const excludes = HEAVY_DIRS.map((d) => `--exclude=${q(`*/${d}`)}`).join(" ");
   return (
-    `n=$(( $(grep -a -c '^⟦you⟧' /workspace/.agent.log 2>/dev/null || echo 0) + 1 )); ` +
+    // NB: on zero matches `grep -c` PRINTS "0" and exits 1, so `|| echo 0` would yield "0\n0" and
+    // break the arithmetic. Capture the count, then default only when the file was unreadable.
+    `n=$(grep -a -c '^⟦you⟧' /workspace/.agent.log 2>/dev/null); n=$(( \${n:-0} + 1 )); ` +
     `f=${q(CKPT_DIR)}/t$n.tar; ` +
     `[ -f "$f" ] && { echo CKPT_HAVE t$n; exit 0; }; ` +
     `mkdir -p ${q(CKPT_DIR)} && ` +
@@ -105,7 +107,8 @@ export function revertCmd(n: number): string {
     `installed dependencies were kept and may include extras — run the package manager's install if builds act oddly`;
   return (
     `[ -f ${q(`${CKPT_DIR}/t${n}.tar`)} ] || { echo CKPT_MISSING t${n}; exit 9; }; ` +
-    `d=$(( $(grep -a -c '^⟦you⟧' /workspace/.agent.log 2>/dev/null || echo 0) + 1 - ${n} )); ` +
+    // Same grep -c pitfall as captureCmd: zero matches prints "0" AND exits 1.
+    `c=$(grep -a -c '^⟦you⟧' /workspace/.agent.log 2>/dev/null); d=$(( \${c:-0} + 1 - ${n} )); ` +
     `[ "$d" -lt 1 ] && d=1; ` +
     `find ${WORKSPACE} -mindepth 1 ${prune} -o \\( -type f -o -type l \\) -exec rm -f {} + 2>/dev/null; ` +
     `for i in 1 2 3 4; do find ${WORKSPACE} -mindepth 1 ${prune} -o -type d -empty -exec rmdir {} + 2>/dev/null; done; ` +

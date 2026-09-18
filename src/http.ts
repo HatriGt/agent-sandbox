@@ -30,7 +30,7 @@ import {
 } from "./identity.js";
 import { githubAuthorizeUrl, githubExchangeCode, githubIdentity } from "./github-oauth.js";
 import { keyFromEnvOrFile, makeSecretBox } from "./secretbox.js";
-import { allBlobs, registerUserStoreBackend, withOwner, OPERATOR_OWNER } from "./user-store.js";
+import { allBlobs, ownerKey, registerUserStoreBackend, withOwner, OPERATOR_OWNER } from "./user-store.js";
 import { detectTransitions, formatNotification, makeNotifier, type BoxRunView, type NotifyEvent } from "./notify.js";
 import { buildDigest } from "./digest.js";
 import { archiveRun, deleteRun, getRun, listRuns, pruneArchive } from "./run-archive.js";
@@ -41,7 +41,7 @@ import { createLocalUser, deleteUser, listUsers, ownerOf, setUserRole, validateS
 import { parseStore } from "./gh-token-store.js";
 import { seedStarterSkills } from "./starter-skills.js";
 import { parseMcpStore } from "./mcp-store.js";
-import { guardDeps, makeOwnership, NotOwnedError, QuotaError, withPrincipal } from "./tenancy.js";
+import { currentPrincipal, guardDeps, makeOwnership, NotOwnedError, QuotaError, withPrincipal } from "./tenancy.js";
 import { securityHeaders } from "./security-headers.js";
 import { gatherMonitor, gatherWatch, askInBox, driverStateLine, startBoxIfStopped, noteRunning, stopBox, noteStopped, interruptAgentRun, setBoxMemory, isMemoryTier, MEMORY_TIERS, setBoxDisk, isDiskTier, DISK_TIERS, msbIo } from "./msb.js";
 import { isBoxName } from "./sync.js";
@@ -346,6 +346,37 @@ const boxModels = new Map<string, string>();
 const boxVerify = new Map<string, VerifyPlan>();
 const boxVerified = new Map<string, VerifyResult>();
 
+// Per-user box quota on EVERY delegation lane. The browser route checks it inline, but the MCP
+// `delegate` tool reaches deps.runDelegation directly — without this wrapper a quota'd user could
+// drive /mcp and boot boxes up to the GLOBAL cap, starving other tenants.
+{
+  const rawRun = deps.runDelegation.bind(deps);
+  deps.runDelegation = async (c, plan, allowDomains, creds, interact) => {
+    if (ownership.isUser()) {
+      ownership.assertCanRun();
+      const p = currentPrincipal();
+      const max = (p.kind === "user" && getUser(db, p.userId)?.max_boxes) || cfg.userMaxBoxes;
+      ownership.assertQuota(ownership.liveOwned((await readFleet()).boxes), max);
+    }
+    return rawRun(c, plan, allowDomains, creds, interact);
+  };
+}
+
+// Per-box controller state must die with the box on EVERY teardown lane, not just /teardown.json —
+// the MCP `teardown` tool goes through deps.teardown too, and without this the maps above (plus the
+// watch cache and any queued inbox message for the gone box) grow for the life of the process.
+{
+  const rawTeardown = deps.teardown.bind(deps);
+  deps.teardown = async (c, session) => {
+    await rawTeardown(c, session);
+    watchHub.drop(session);
+    inbox.clear(session);
+    boxModels.delete(session);
+    boxVerify.delete(session);
+    boxVerified.delete(session);
+  };
+}
+
 const resumeQuietly = (session: string, message: string) => {
   // A resume boots a sleeping box; forget the "stopped" memory and the cached idle snapshot at once so
   // the thread does not show it asleep (and close its stream) for the next 15 s.
@@ -363,11 +394,20 @@ const resumeQuietly = (session: string, message: string) => {
     // done EDGE, so the sweep never checkpointed the turn. Capture here, right before the new
     // message changes anything — heavy dirs are excluded, so this is ~1 s on the send path at worst.
     await captureBeforeMessage(session).catch(() => {});
-    return withOwner(ownerOf(db, session) ?? null, () =>
-      deps.resumeDetached
-        ? deps.resumeDetached(cfg, session, message, undefined, boxModels.get(session))
-        : deps.resume(cfg, session, message, undefined, {}, boxModels.get(session)).then(() => undefined)
-    );
+    try {
+      return await withOwner(ownerOf(db, session) ?? null, () =>
+        deps.resumeDetached
+          ? deps.resumeDetached(cfg, session, message, undefined, boxModels.get(session))
+          : deps.resume(cfg, session, message, undefined, {}, boxModels.get(session)).then(() => undefined)
+      );
+    } catch (e) {
+      // The optimistic "running" note above was wrong — the resume never happened. Roll it back and
+      // drop the (now doubly wrong) cache so the fleet shows the honest stopped state immediately
+      // instead of a phantom live box until the next full sweep.
+      noteStopped(session);
+      watchHub.drop(session);
+      throw e;
+    }
   });
 };
 
@@ -405,9 +445,11 @@ const sendNotification = async (ev: NotifyEvent): Promise<void> => {
   const owner = ownerOf(db, ev.box) ?? OPERATOR_OWNER;
   const settings = loadNotifySettings(owner);
   const url = settings.url || process.env.NOTIFY_WEBHOOK_URL || "";
-  if (!url || !settings.events[ev.kind]) return;
+  // Consume the context BEFORE the config gates: box names are unique per run, so an entry left
+  // behind when notifications are unconfigured (the default) would leak forever, task text and all.
   const ctx = notifyCtx.get(ev.box) ?? {};
   notifyCtx.delete(ev.box);
+  if (!url || !settings.events[ev.kind]) return;
   // A finished run's notification carries the digest headline ("done · 3 files · 4 steps"), so the
   // push is a review-at-a-glance, not just a ping. Best-effort: a headline failure drops the
   // enrichment, never the notification.
@@ -613,10 +655,26 @@ deps.listRepos = async (_cfg, query) => {
   return all.map((r) => `${r.fullName}${r.private ? " (private)" : ""} · default ${r.defaultBranch}${r.description ? ` — ${r.description}` : ""}`).join("\n");
 };
 deps.attachRepo = async (c, session, repo, ref) => {
+  // Installed AFTER guardDeps wrapped the deps object, so the tenancy wrapper never saw this member —
+  // the ownership check must live here. Without it any signed-in user could attach (and inject their
+  // git credentials into) another tenant's box via the MCP attach_repo tool.
+  ownership.check(session);
   const r = await attachRepoToBox(c, session, repo, ref);
   inbox.enqueue(session, `The repository ${repo} is now checked out at /workspace/${r.name}${ref ? ` (ref ${ref})` : ""}. Use it for the task where relevant.`);
   return `Attached ${repo} to ${session} at /workspace/${r.name}${r.login ? ` as ${r.login}` : ""}. The agent is told at its next turn.`;
 };
+// Per-owner serialization of the whole-blob stores (accounts / MCP servers / skills). Each mutating
+// route does load → mutate → save of the entire blob; two overlapping requests would silently lose
+// the first writer's change. Same chain shape as withBoxLock.
+const storeLocks = new Map<string, Promise<unknown>>();
+function withStoreLock<T>(kind: string, fn: () => Promise<T>): Promise<T> {
+  const key = `${ownerKey()}|${kind}`;
+  const prev = storeLocks.get(key) ?? Promise.resolve();
+  const next = prev.then(fn, fn);
+  storeLocks.set(key, next.catch(() => {}));
+  return next;
+}
+
 // `@` mentions: a briefly cached file index per box.
 const fileIndex = makeFileIndex(async (box, sh) => (await execInBox(cfg, box, sh)).stdout);
 
@@ -646,10 +704,26 @@ app.use("/mcp", (req: Request, res: Response, next) => {
 
 // Per-session Streamable HTTP transports, keyed by the mcp-session-id header.
 const transports: Record<string, StreamableHTTPServerTransport> = {};
+// Idle expiry: a client that reconnects with a fresh `initialize` (network drop, editor restart)
+// never DELETEs its old session, so without a sweep each one leaks a transport + full McpServer
+// for the life of the process. An hour of silence means the client is gone; closing fires
+// transport.onclose, which removes the map entry.
+const transportSeen = new Map<string, number>();
+const MCP_IDLE_MS = 60 * 60_000;
+setInterval(() => {
+  const cutoff = Date.now() - MCP_IDLE_MS;
+  for (const [id, at] of transportSeen) {
+    if (at >= cutoff) continue;
+    transportSeen.delete(id);
+    const t = transports[id];
+    if (t) void t.close().catch(() => {});
+  }
+}, 10 * 60_000).unref();
 
 async function handle(req: Request, res: Response) {
   const sid = req.headers["mcp-session-id"] as string | undefined;
   let transport = sid ? transports[sid] : undefined;
+  if (sid && transport) transportSeen.set(sid, Date.now());
 
   if (isDeadSession(sid, Boolean(transport), req.body)) {
     res.status(404).json({
@@ -665,10 +739,14 @@ async function handle(req: Request, res: Response) {
       sessionIdGenerator: () => randomUUID(),
       onsessioninitialized: (id: string) => {
         transports[id] = transport!;
+        transportSeen.set(id, Date.now());
       },
     });
     transport.onclose = () => {
-      if (transport!.sessionId) delete transports[transport!.sessionId];
+      if (transport!.sessionId) {
+        delete transports[transport!.sessionId];
+        transportSeen.delete(transport!.sessionId);
+      }
     };
     const server = new McpServer({ name: "agent-sandbox", version: "0.1.0" });
     registerTools(
@@ -830,9 +908,15 @@ if (SAAS) {
       res.status(409).json({ error: clientError(e) });
     }
   });
+  // Global cap on scrypt work: each verification blocks the event loop ~70 ms, and the per-client
+  // throttle keys on X-Forwarded-For, which an attacker rotates freely. Whatever the headers say,
+  // the controller will not do more than this much synchronous hashing per window.
+  const loginWork = makeRateLimiter({ limit: 30, windowMs: 10_000 });
   app.post("/auth/login", (req: Request, res: Response) => {
     const client = clientOf(req.headers, req.socket.remoteAddress);
-    if (authThrottle.blocked(client)) {
+    const sock = req.socket.remoteAddress ?? "unknown";
+    // Throttle on the socket address too — XFF is attacker-controlled, the socket is not.
+    if (authThrottle.blocked(client) || (client !== sock && authThrottle.blocked(sock))) {
       res.setHeader("Retry-After", "600");
       res.status(429).json({ error: "too many attempts — try again later" });
       return;
@@ -841,10 +925,16 @@ if (SAAS) {
       res.status(403).json({ error: "bad origin" });
       return;
     }
+    if (loginWork.over("login")) {
+      res.setHeader("Retry-After", "10");
+      res.status(429).json({ error: "too many attempts — try again later" });
+      return;
+    }
     const { login, password } = (req.body ?? {}) as { login?: string; password?: string };
     const u = typeof login === "string" && typeof password === "string" ? authenticatePassword(db, login, password) : null;
     if (!u) {
       authThrottle.fail(client);
+      if (client !== sock) authThrottle.fail(sock);
       res.status(401).json({ error: "Wrong username or password." });
       return;
     }
@@ -1141,7 +1231,10 @@ app.get("/fleet.json", async (req: Request, res: Response) => {
     const fleet = await readFleet();
     // Let the broker look at every waiting box (fire-and-forget; guarded once per question).
     for (const b of fleet.boxes) {
-      if (b.runState === "waiting" && /^running$/i.test(b.boxStatus)) void withOwner(ownerOf(db, b.name) ?? null, () => brokerConsider(b.name, b.question));
+      if (b.runState === "waiting" && /^running$/i.test(b.boxStatus))
+        void withOwner(ownerOf(db, b.name) ?? null, () => brokerConsider(b.name, b.question)).catch((e) =>
+          console.error(`[broker] consider ${b.name} failed: ${(e as Error).message}`)
+        );
     }
     if (!ownership.isUser()) {
       res.json(fleet);
@@ -1403,8 +1496,11 @@ app.post("/accounts.json", async (req: Request, res: Response) => {
       res.status(422).json({ error: "GitHub rejected this token (invalid or expired)." });
       return;
     }
-    const store = upsertAccount(await loadStore(cfg), acc);
-    await saveStore(cfg, store);
+    const store = await withStoreLock("gh", async () => {
+      const s = upsertAccount(await loadStore(cfg), acc);
+      await saveStore(cfg, s);
+      return s;
+    });
     res.json({ accounts: viewAccounts(store, pickDefaultAccount(store)?.login), added: acc.login });
   } catch (e) {
     failWith(res, e);
@@ -1418,8 +1514,11 @@ app.delete("/accounts.json", async (req: Request, res: Response) => {
     return;
   }
   try {
-    const store = removeAccount(await loadStore(cfg), login);
-    await saveStore(cfg, store);
+    const store = await withStoreLock("gh", async () => {
+      const s = removeAccount(await loadStore(cfg), login);
+      await saveStore(cfg, s);
+      return s;
+    });
     res.json({ accounts: viewAccounts(store, pickDefaultAccount(store)?.login) });
   } catch (e) {
     failWith(res, e);
@@ -1433,8 +1532,11 @@ app.post("/accounts/default.json", async (req: Request, res: Response) => {
     return;
   }
   try {
-    const store = setDefaultAccount(await loadStore(cfg), login);
-    await saveStore(cfg, store);
+    const store = await withStoreLock("gh", async () => {
+      const s = setDefaultAccount(await loadStore(cfg), login);
+      await saveStore(cfg, s);
+      return s;
+    });
     res.json({ accounts: viewAccounts(store, pickDefaultAccount(store)?.login) });
   } catch (e) {
     failWith(res, e);
@@ -1472,8 +1574,11 @@ app.post("/accounts/device/poll.json", async (req: Request, res: Response) => {
       res.json({ status: "error", message: "GitHub issued a token the API rejected." });
       return;
     }
-    const store = upsertAccount(await loadStore(cfg), acc);
-    await saveStore(cfg, store);
+    const store = await withStoreLock("gh", async () => {
+      const s = upsertAccount(await loadStore(cfg), acc);
+      await saveStore(cfg, s);
+      return s;
+    });
     res.json({ status: "done", login: acc.login, accounts: viewAccounts(store, pickDefaultAccount(store)?.login) });
   } catch (e) {
     res.status(502).json({ error: String((e as Error).message ?? e) });
@@ -1524,44 +1629,48 @@ app.get("/mcp-servers.json", async (req: Request, res: Response) => {
 app.post("/mcp-servers.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   const body = (req.body ?? {}) as Record<string, unknown>;
+  const action = body.action;
+  if (!["upsert", "import", "replace", "remove", "toggle"].includes(String(action))) {
+    res.status(400).json({ error: "unknown action" });
+    return;
+  }
   try {
-    const store = await loadMcpStore(cfg);
-    const action = body.action;
-    if (action === "upsert") {
-      const s = normalizeServer(body.server as Partial<McpServerDef> & { name: string });
-      // Rename: the entry moves under the new name and the old one goes.
-      const previous = typeof body.previousName === "string" ? body.previousName : "";
-      if (previous && previous !== s.name && store.servers[previous]) {
-        const old = store.servers[previous];
-        s.addedAt = old.addedAt;
-        s.env = mergeSecrets(s.env, old.env) ?? old.env;
-        s.headers = mergeSecrets(s.headers, old.headers) ?? old.headers;
-        delete store.servers[previous];
+    const store = await withStoreLock("mcp", async () => {
+      const store = await loadMcpStore(cfg);
+      if (action === "upsert") {
+        const s = normalizeServer(body.server as Partial<McpServerDef> & { name: string });
+        // Rename: the entry moves under the new name and the old one goes.
+        const previous = typeof body.previousName === "string" ? body.previousName : "";
+        if (previous && previous !== s.name && store.servers[previous]) {
+          const old = store.servers[previous];
+          s.addedAt = old.addedAt;
+          s.env = mergeSecrets(s.env, old.env) ?? old.env;
+          s.headers = mergeSecrets(s.headers, old.headers) ?? old.headers;
+          delete store.servers[previous];
+        }
+        // Keep secret values the form left masked/blank: merge over the stored entry.
+        const prev = store.servers[s.name];
+        if (prev) {
+          s.addedAt = prev.addedAt;
+          s.env = mergeSecrets(s.env, prev.env);
+          s.headers = mergeSecrets(s.headers, prev.headers);
+        }
+        store.servers[s.name] = s;
+      } else if (action === "import") {
+        for (const s of parseMcpImport(String(body.json ?? ""))) store.servers[s.name] = s;
+      } else if (action === "replace") {
+        // The JSON editor saved the whole config.
+        const next = replaceFromJson(store, String(body.json ?? ""));
+        store.servers = next.servers;
+      } else if (action === "remove") {
+        delete store.servers[String(body.name ?? "")];
+      } else if (action === "toggle") {
+        const s = store.servers[String(body.name ?? "")];
+        if (s) s.enabled = body.enabled !== false;
       }
-      // Keep secret values the form left masked/blank: merge over the stored entry.
-      const prev = store.servers[s.name];
-      if (prev) {
-        s.addedAt = prev.addedAt;
-        s.env = mergeSecrets(s.env, prev.env);
-        s.headers = mergeSecrets(s.headers, prev.headers);
-      }
-      store.servers[s.name] = s;
-    } else if (action === "import") {
-      for (const s of parseMcpImport(String(body.json ?? ""))) store.servers[s.name] = s;
-    } else if (action === "replace") {
-      // The JSON editor saved the whole config.
-      const next = replaceFromJson(store, String(body.json ?? ""));
-      store.servers = next.servers;
-    } else if (action === "remove") {
-      delete store.servers[String(body.name ?? "")];
-    } else if (action === "toggle") {
-      const s = store.servers[String(body.name ?? "")];
-      if (s) s.enabled = body.enabled !== false;
-    } else {
-      res.status(400).json({ error: "unknown action" });
-      return;
-    }
-    await saveMcpStore(cfg, store);
+      await saveMcpStore(cfg, store);
+      return store;
+    });
     res.json({ servers: viewServers(store), config: toEditableConfig(store) });
   } catch (e) {
     res.status(400).json({ error: clientError(e) });
@@ -1644,29 +1753,33 @@ app.get("/skills.json", async (req: Request, res: Response) => {
 app.post("/skills.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   const body = (req.body ?? {}) as Record<string, unknown>;
+  const action = body.action;
+  if (!["upsert", "remove", "toggle"].includes(String(action))) {
+    res.status(400).json({ error: "unknown action" });
+    return;
+  }
   try {
-    const store = await loadSkillStore(cfg);
-    const action = body.action;
-    if (action === "upsert") {
-      const s = normalizeSkill(body.skill as Partial<SkillDef> & { name: string });
-      // Rename: the entry moves under the new name and the old one goes.
-      const previous = typeof body.previousName === "string" ? body.previousName : "";
-      if (previous && previous !== s.name && store.skills[previous]) {
-        s.addedAt = store.skills[previous].addedAt;
-        delete store.skills[previous];
+    const store = await withStoreLock("skills", async () => {
+      const store = await loadSkillStore(cfg);
+      if (action === "upsert") {
+        const s = normalizeSkill(body.skill as Partial<SkillDef> & { name: string });
+        // Rename: the entry moves under the new name and the old one goes.
+        const previous = typeof body.previousName === "string" ? body.previousName : "";
+        if (previous && previous !== s.name && store.skills[previous]) {
+          s.addedAt = store.skills[previous].addedAt;
+          delete store.skills[previous];
+        }
+        if (store.skills[s.name]) s.addedAt = store.skills[s.name].addedAt;
+        store.skills[s.name] = s;
+      } else if (action === "remove") {
+        delete store.skills[String(body.name ?? "")];
+      } else if (action === "toggle") {
+        const s = store.skills[String(body.name ?? "")];
+        if (s) s.enabled = body.enabled !== false;
       }
-      if (store.skills[s.name]) s.addedAt = store.skills[s.name].addedAt;
-      store.skills[s.name] = s;
-    } else if (action === "remove") {
-      delete store.skills[String(body.name ?? "")];
-    } else if (action === "toggle") {
-      const s = store.skills[String(body.name ?? "")];
-      if (s) s.enabled = body.enabled !== false;
-    } else {
-      res.status(400).json({ error: "unknown action" });
-      return;
-    }
-    await saveSkillStore(cfg, store);
+      await saveSkillStore(cfg, store);
+      return store;
+    });
     res.json({ skills: viewSkills(store) });
   } catch (e) {
     res.status(400).json({ error: clientError(e) });

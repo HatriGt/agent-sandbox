@@ -51,10 +51,32 @@ const CTRL_RE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g;
 
 /** Strip escape sequences and carriage-return spinner rewrites. */
 export function clean(raw: string): string {
-  return String(raw ?? "")
-    .replace(ANSI_RE, "")
-    .replace(/[^\n]*\r(?!\n)/g, "")
-    .replace(CTRL_RE, "");
+  return stripCrRewrites(String(raw ?? "").replace(ANSI_RE, "")).replace(CTRL_RE, "");
+}
+
+/**
+ * A bare `\r` mid-line is a spinner rewrite: only what follows the LAST one survives. Done with
+ * lastIndexOf per line, not the old `/[^\n]*\r(?!\n)/g` regex — that pattern backtracks
+ * quadratically on long CR-free lines (measured: seconds of blocked event loop on one 128 KB line
+ * of agent output), and parseTrace runs synchronously on the fleet sweep.
+ */
+function stripCrRewrites(s: string): string {
+  if (!s.includes("\r")) return s;
+  const lines = s.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i];
+    // `\r` at end-of-segment (originally `\r\n`) is not a rewrite; keep it. A `\r` ending the
+    // FINAL line has no `\n` after it, so it is still a rewrite marker.
+    let tail = "";
+    if (i < lines.length - 1 && line.endsWith("\r")) {
+      tail = "\r";
+      line = line.slice(0, -1);
+    }
+    const at = line.lastIndexOf("\r");
+    if (at !== -1) line = line.slice(at + 1);
+    lines[i] = line + tail;
+  }
+  return lines.join("\n");
 }
 
 /** `● session started (model X)` and friends — the formatter's own markers. */

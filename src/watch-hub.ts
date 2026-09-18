@@ -113,6 +113,18 @@ export class WatchHub {
     for (const s of [...this.entries.keys()]) this.drop(s);
   }
 
+  /**
+   * Evict quiet entries nobody has read for an hour. Boxes torn down through the controller get
+   * drop()ed explicitly, but pool-reaped or externally removed boxes never do — without this each
+   * one parks its last snapshot (often hundreds of KB of log) in the map forever.
+   */
+  private prune(pruneAfterMs = 60 * 60_000): void {
+    const cutoff = this.now() - pruneAfterMs;
+    for (const [s, e] of this.entries) {
+      if (!e.timer && !e.inFlight && e.waiters.length === 0 && e.lastReadAt < cutoff) this.entries.delete(s);
+    }
+  }
+
   private entry(session: string): Entry {
     let e = this.entries.get(session);
     if (!e) {
@@ -159,6 +171,7 @@ export class WatchHub {
     const idleFor = this.now() - e.lastReadAt;
     if (idleFor > this.graceMs && e.waiters.length === 0) {
       e.timer = null;
+      this.prune();
       return;
     }
     const terminal = e.snap ? isTerminal(e.snap.runState) || e.snap.boxStatus === "missing" || e.snap.boxStatus === "stopped" : false;

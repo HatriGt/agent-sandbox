@@ -354,6 +354,10 @@ function cachePut<V>(cache: Map<string, { at: number } & V>, key: string, value:
 }
 const pullCache = new Map<string, { at: number; info: PullInfo }>();
 const pullDetailCache = new Map<string, { at: number; detail: PullDetail }>();
+// Negative cache: a PR none of the stored accounts can read costs one ssh+curl PER ACCOUNT to
+// discover, and the dashboard polls its PR chips every few seconds. Without this a single
+// unreadable repo turns into a permanent probe storm.
+const pullMissCache = new Map<string, { at: number }>();
 // GitHub repo names are case-insensitive; canonicalize so a merge sent as "Owner/Repo" actually
 // invalidates the cache entry a viewer created as "owner/repo".
 const pullKey = (repo: string, number: number) => `${repo.toLowerCase()}#${number}`;
@@ -362,12 +366,15 @@ export function forgetPull(repo: string, number: number) {
   for (const k of [...pullCache.keys()]) if (k.endsWith(suffix)) pullCache.delete(k);
   // Both caches, or merging from the page would leave the page itself showing the stale state.
   for (const k of [...pullDetailCache.keys()]) if (k.endsWith(suffix)) pullDetailCache.delete(k);
+  for (const k of [...pullMissCache.keys()]) if (k.endsWith(suffix)) pullMissCache.delete(k);
 }
 
 export async function fetchPull(cfg: Config, repo: string, number: number): Promise<PullInfo | undefined> {
   const key = `${ownerKey()}|${pullKey(repo, number)}`;
   const c = pullCache.get(key);
   if (c && Date.now() - c.at < PULL_TTL) return c.info;
+  const miss = pullMissCache.get(key);
+  if (miss && Date.now() - miss.at < PULL_TTL) return undefined;
   const store = await loadStore(cfg);
   const accounts = [...candidateAccounts(store, repo), ...(pickDefaultAccount(store) ? [pickDefaultAccount(store)!] : []), ...Object.values(store.accounts)];
   for (const acc of accounts) {
@@ -384,6 +391,7 @@ export async function fetchPull(cfg: Config, repo: string, number: number): Prom
       return info;
     }
   }
+  cachePut(pullMissCache, key, { at: Date.now() });
   return undefined;
 }
 
@@ -396,6 +404,8 @@ export async function fetchPullDetail(cfg: Config, repo: string, number: number)
   const key = `${ownerKey()}|${pullKey(repo, number)}`;
   const c = pullDetailCache.get(key);
   if (c && Date.now() - c.at < PULL_TTL) return c.detail;
+  const miss = pullMissCache.get(key);
+  if (miss && Date.now() - miss.at < PULL_TTL) return undefined;
   const store = await loadStore(cfg);
   const accounts = [...candidateAccounts(store, repo), ...(pickDefaultAccount(store) ? [pickDefaultAccount(store)!] : []), ...Object.values(store.accounts)];
   for (const acc of accounts) {
@@ -465,5 +475,6 @@ export async function fetchPullDetail(cfg: Config, repo: string, number: number)
     cachePut(pullDetailCache, key, { at: Date.now(), detail });
     return detail;
   }
+  cachePut(pullMissCache, key, { at: Date.now() });
   return undefined;
 }

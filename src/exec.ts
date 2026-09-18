@@ -62,8 +62,13 @@ export async function run(
 
     let stdout = "";
     let stderr = "";
-    child.stdout?.on("data", (d) => (stdout += d.toString()));
-    child.stderr?.on("data", (d) => (stderr += d.toString()));
+    // setEncoding makes Node buffer partial multi-byte sequences across chunk boundaries; a raw
+    // per-chunk toString() turns a UTF-8 character split across two `data` events (e.g. a ⟦you⟧
+    // sentinel landing on a 64 KB pipe boundary) into U+FFFD, corrupting the parsed trace.
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (d) => (stdout += d));
+    child.stderr?.on("data", (d) => (stderr += d));
 
     // SIGKILL, not SIGTERM: a wedged ssh sitting in poll() is exactly the case this exists for, and
     // it may not act on a polite signal.

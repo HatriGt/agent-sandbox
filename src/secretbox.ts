@@ -24,6 +24,10 @@ export function keyFromEnvOrFile(env: string | undefined, dataDir: string): Buff
   if (existsSync(p)) {
     const b = Buffer.from(readFileSync(p, "utf8").trim(), "hex");
     if (b.length === 32) return b;
+    // A present-but-malformed key file (truncated write, disk corruption) must be a HARD stop:
+    // silently generating a fresh key here would permanently orphan every secret encrypted with the
+    // old one while the controller reports itself healthy. Restore the file from backup instead.
+    throw new Error(`${p} exists but does not contain a 32-byte hex key — refusing to overwrite it (restore it from backup, or delete it to knowingly discard all encrypted secrets)`);
   }
   const b = crypto.randomBytes(32);
   writeFileSync(p, b.toString("hex") + "\n", { mode: 0o600 });

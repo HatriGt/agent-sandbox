@@ -54,10 +54,18 @@ export function makeCredentialBroker(opts: {
     answered.add(key);
     inFlight.add(session);
     lastAnswered.set(session, now);
-    const login = await opts.defaultLogin();
+    let login: string | undefined;
+    try {
+      login = await opts.defaultLogin();
+    } catch (e) {
+      log(`[broker] token store read failed for ${session}: ${(e as Error).message}`);
+    }
     if (!login) {
+      // Nothing was sent; let a human (or a later store entry) handle it — including the cooldown,
+      // so a freshly connected account can answer immediately.
       inFlight.delete(session);
-      answered.delete(key); // nothing was sent; let a human (or a later store entry) handle it
+      answered.delete(key);
+      lastAnswered.delete(session);
       return false;
     }
     try {

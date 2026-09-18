@@ -282,20 +282,39 @@ export function isProbeableUrl(raw: string): boolean {
   if (!h.includes(".")) return false; // localhost, bare container names
   if (/^\d+\.\d+\.\d+\.\d+$/.test(h)) {
     const [a, b] = h.split(".").map(Number);
-    if (a === 127 || a === 10 || a === 0 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254)) return false;
+    if (a === 127 || a === 10 || a === 0 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254) || (a === 100 && b >= 64 && b <= 127)) return false;
   }
   if (h === "host.docker.internal" || h.endsWith(".local") || h.endsWith(".internal")) return false;
   if (h.startsWith("[") || h.includes(":")) return false; // IPv6 literals: not needed, hard to vet
   return true;
 }
 
+/** The lexical check can be dodged by DNS (evil.nip.io → 169.254.169.254): vet the RESOLVED address too. */
+async function resolvesToPublicAddress(hostname: string): Promise<boolean> {
+  try {
+    const { lookup } = await import("node:dns/promises");
+    const addrs = await lookup(hostname, { all: true });
+    return addrs.every((a) => {
+      if (a.family === 6) return false; // not needed, hard to vet
+      const [x, y] = a.address.split(".").map(Number);
+      return !(x === 127 || x === 10 || x === 0 || (x === 172 && y >= 16 && y <= 31) || (x === 192 && y === 168) || (x === 169 && y === 254) || (x === 100 && y >= 64 && y <= 127));
+    });
+  } catch {
+    return false;
+  }
+}
+
 export async function probeMcpServer(s: McpServer, timeoutMs = 8000): Promise<McpProbeResult> {
   if (s.type === "stdio") return { ok: true, detail: "stdio server — starts inside each sandbox; nothing to test from here." };
   if (!s.url || !isProbeableUrl(s.url)) return { ok: false, detail: "Only public https URLs can be tested from here (the sandbox itself may still reach it)." };
+  if (!(await resolvesToPublicAddress(new URL(s.url).hostname)))
+    return { ok: false, detail: "Only public https URLs can be tested from here (the sandbox itself may still reach it)." };
   const ac = new AbortController();
   const t = setTimeout(() => ac.abort(), timeoutMs);
   try {
+    // redirect:"manual": a public host 302ing to link-local/metadata must not be followed from here.
     const res = await fetch(s.url!, {
+      redirect: "manual",
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -310,6 +329,8 @@ export async function probeMcpServer(s: McpServer, timeoutMs = 8000): Promise<Mc
       }),
       signal: ac.signal,
     });
+    if (res.status >= 300 && res.status < 400)
+      return { ok: false, status: res.status, detail: `HTTP ${res.status} redirect — probes do not follow redirects; use the server's final URL.` };
     const body = await res.text().catch(() => "");
     return describeProbe(s, { status: res.status, body });
   } catch (e) {

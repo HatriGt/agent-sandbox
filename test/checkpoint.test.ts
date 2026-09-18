@@ -54,8 +54,11 @@ test("revertCmd guards on the tar, wipes around the heavy dirs, computes the sea
   assert.ok(cmd.indexOf("find /workspace") < cmd.indexOf("tar -xf"));
   // The agent home is restored whole (no heavy dirs there).
   assert.match(cmd, /rm -rf \/root\/\.claude/);
-  // Discarded count comes from the live log, before the wipe, never below 1.
-  assert.match(cmd, /d=\$\(\( \$\(grep -a -c '\^⟦you⟧'/);
+  // Discarded count comes from the live log, before the wipe, never below 1. The grep count is
+  // captured into a variable first: `grep -c` prints "0" AND exits 1 on no matches, so an inline
+  // `$(grep -c … || echo 0)` would expand to "0\n0" and break the arithmetic.
+  assert.match(cmd, /c=\$\(grep -a -c '\^⟦you⟧'/);
+  assert.match(cmd, /d=\$\(\( \$\{c:-0\} \+ 1 - 2 \)\)/);
   assert.match(cmd, /\[ "\$d" -lt 1 \] && d=1/);
   assert.match(cmd, /\$d later turn\(s\) discarded/);
   assert.match(cmd, /dependencies were kept/);

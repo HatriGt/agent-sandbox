@@ -133,12 +133,19 @@ export function Thread({
   const stream = useWatchStream(box.name, !sleeping, generation);
   // Fallback poll: held back so it never races the stream for the first byte, then only while the
   // stream is down. Through the server hub it is a cache hit, not an SSH round trip.
+  // A finished run's stream closed on purpose at the terminal `done` — do not poll it forever;
+  // once we have any snapshot of a not-alive box, the fleet poll covers state changes.
+  const [polledOnce, setPolledOnce] = React.useState(false);
+  React.useEffect(() => setPolledOnce(false), [box.name, generation]);
   const { data: polled } = usePoll<WatchSnapshot>(
     (signal) => api.watch(box.name, signal),
-    stream.ok || sleeping ? 0 : POLL_MS,
-    [box.name, stream.ok, sleeping],
+    stream.ok || sleeping || (!alive && polledOnce) ? 0 : POLL_MS,
+    [box.name, stream.ok, sleeping, alive, polledOnce],
     { initialDelayMs: 2500 }
   );
+  React.useEffect(() => {
+    if (polled?.name === box.name) setPolledOnce(true);
+  }, [polled, box.name]);
   React.useEffect(() => {
     if (polled && polled.name === box.name) seedWatchCache(polled);
   }, [polled, box.name]);

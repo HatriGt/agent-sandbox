@@ -16,6 +16,7 @@ import { validateDelegateInput, type DelegateSource, type DelegatePlan } from ".
 import { fetchModels, isAllowedModel } from "./models.js";
 import type { GitAccessResolution } from "./gh-token-store.js";
 import type { AgentCreds } from "./msb.js";
+import { reserveBox } from "./capacity.js";
 import type { ElicitOutcome } from "./interactive.js";
 import { verifyPlanOf, formatVerifyResult, type VerifyPlan, type VerifyResult } from "./verify.js";
 
@@ -399,13 +400,21 @@ export function registerTools(
       }
 
       const live = await deps.countBoxes(cfg);
-      if (live >= cfg.maxBoxes) {
+      // reserveBox counts concurrent delegations that passed the check but have not booted yet, so
+      // a client fanning out parallel delegate calls cannot overshoot MSB_MAX_BOXES.
+      const release = reserveBox(live, cfg.maxBoxes);
+      if (!release) {
         return text(
-          `Refused: ${live}/${cfg.maxBoxes} boxes already running. Tear one down (teardown) or raise MSB_MAX_BOXES.`
+          `Refused: ${live}/${cfg.maxBoxes} boxes already running or starting. Tear one down (teardown) or raise MSB_MAX_BOXES.`
         );
       }
 
-      const r = await deps.runDelegation(cfg, v.plan, allowDomains, creds, interactFrom(bridge));
+      let r: Awaited<ReturnType<typeof deps.runDelegation>>;
+      try {
+        r = await deps.runDelegation(cfg, v.plan, allowDomains, creds, interactFrom(bridge));
+      } finally {
+        release();
+      }
       const repoLine =
         v.plan.repos.length > 1
           ? `\nrepos: ${v.plan.repos.map((x) => `${x.repo} -> /workspace/${x.name}`).join(", ")}`

@@ -86,6 +86,8 @@ export function SendBar({
   const [dragOver, setDragOver] = React.useState(false);
   const [preview, setPreview] = React.useState<{ name: string; dataUrl: string } | null>(null);
   const fileInput = React.useRef<HTMLInputElement>(null);
+  // Readers still decoding a just-pasted image: a send racing them would silently drop the image.
+  const readersInFlight = React.useRef(0);
   const addImages = React.useCallback((list: Iterable<File>) => {
     for (const f of list) {
       if (!f.type.startsWith("image/")) continue;
@@ -94,7 +96,12 @@ export function SendBar({
         continue;
       }
       const reader = new FileReader();
+      readersInFlight.current++;
+      reader.onerror = () => {
+        readersInFlight.current--;
+      };
       reader.onload = () => {
+        readersInFlight.current--;
         const ext = (f.type.split("/")[1] || "png").replace("jpeg", "jpg");
         const stem = (f.name || "pasted").replace(/\.[^.]+$/, "").replace(/[^\w.-]+/g, "-").slice(0, 40) || "image";
         setImages((prev) => [...prev, { id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, name: `${stem}.${ext}`, dataUrl: String(reader.result), size: f.size }]);
@@ -205,6 +212,12 @@ export function SendBar({
   const send = async () => {
     const text = value.trim();
     if ((!text && !files.length && !images.length && !skill) || sending) return;
+    if (readersInFlight.current > 0) {
+      // A pasted image is still decoding; sending now would drop it. Retry (via the ref, so the
+      // retry sees the state that includes the decoded image) once the reader lands.
+      setTimeout(() => sendRef.current(), 60);
+      return;
+    }
     voice.stop();
     setSending(true);
     setError(null);
@@ -216,6 +229,7 @@ export function SendBar({
     if (chosenSkill) message = `/${chosenSkill.name}${message ? ` ${message}` : ""}`;
     try {
       // Upload images first so the message can name their in-box paths.
+      let imagesTail = "";
       if (attachedImages.length) {
         const stamp = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
         const paths: string[] = [];
@@ -224,7 +238,8 @@ export function SendBar({
           await api.writeFile(boxName, rel, img.dataUrl, "base64");
           paths.push(`/workspace/${rel}`);
         }
-        message = `${message}${message ? "\n\n" : ""}Attached ${paths.length === 1 ? "image" : "images"} (open with the Read tool):\n${paths.map((p) => `- ${p}`).join("\n")}`;
+        imagesTail = `Attached ${paths.length === 1 ? "image" : "images"} (open with the Read tool):\n${paths.map((p) => `- ${p}`).join("\n")}`;
+        message = `${message}${message ? "\n\n" : ""}${imagesTail}`;
       }
       if (!toAgent) {
         setValue("");
@@ -240,10 +255,13 @@ export function SendBar({
         // Echo NOW. The controller wakes/kicks the run in a few seconds; a message that only appears
         // when the server answers reads as a broken chat. The echo is withdrawn if delivery fails,
         // and the durable ⟦you⟧ line in the log replaces it once it lands.
+        const body = attached.length ? `${text}\n${attached.map((f) => `@${f}`).join(" ")}` : text;
         const echo =
           (chosenSkill ? `/${chosenSkill.name} ` : "") +
-          (attached.length ? `${text}\n${attached.map((f) => `@${f}`).join(" ")}` : text) +
-          (message.includes("Attached image") ? message.slice(message.indexOf("Attached image") - 2) : "");
+          body +
+          // Image-only sends have no body: the old indexOf-based slice went negative there and
+          // produced an empty echo (a permanent ghost bubble).
+          (imagesTail ? `${body ? "\n\n" : ""}${imagesTail}` : "");
         if (!busy) onReplied(echo);
         try {
           // The picked model rides the send once; the server makes it sticky for the box.
@@ -277,6 +295,8 @@ export function SendBar({
     setSent(true);
     window.setTimeout(() => setSent(false), 900);
   };
+  const sendRef = React.useRef(send);
+  sendRef.current = send;
 
   const hint = error
     ? null

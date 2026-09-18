@@ -150,9 +150,15 @@ function migrate(db: Db): void {
   db.exec(`CREATE TABLE IF NOT EXISTS schema_version (v INTEGER NOT NULL)`);
   const row = db.prepare(`SELECT v FROM schema_version`).get() as { v: number } | undefined;
   let v = row?.v ?? 0;
-  for (; v < MIGRATIONS.length; v++) db.exec(MIGRATIONS[v]);
-  if (row) db.prepare(`UPDATE schema_version SET v = ?`).run(v);
-  else db.prepare(`INSERT INTO schema_version (v) VALUES (?)`).run(v);
+  if (!row) db.prepare(`INSERT INTO schema_version (v) VALUES (?)`).run(v);
+  // Persist the version after EACH migration: if migration N+1 throws (or the process dies
+  // mid-loop), we must not re-run migration N on next start — ALTER TABLE ADD COLUMN would fail
+  // with "duplicate column name" and brick every startup.
+  const bump = db.prepare(`UPDATE schema_version SET v = ?`);
+  for (; v < MIGRATIONS.length; v++) {
+    db.exec(MIGRATIONS[v]);
+    bump.run(v + 1);
+  }
 }
 
 export const nowIso = (ms = Date.now()) => new Date(ms).toISOString();

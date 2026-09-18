@@ -409,7 +409,14 @@ function EditorSheet({
   }, [initial]);
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      // Escape while typing in a field (or the CodeMirror editor) means "leave the field", not
+      // "discard the draft" — closing here silently threw away unsaved edits.
+      const t = e.target as HTMLElement | null;
+      if (t && (t.closest("input, textarea, select, [contenteditable], .cm-editor") || t.isContentEditable)) {
+        (t as HTMLElement).blur?.();
+        return;
+      }
       if (full) setFull(false);
       else onClose();
     };
