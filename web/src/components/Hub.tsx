@@ -135,7 +135,7 @@ export function Hub({
   loading: boolean;
   sessionRuns: SessionRun[];
   onBooting: (task: string) => void;
-  onStarted: (box: string, task: string) => void;
+  onStarted: (box: string, task: string, inferred?: string[]) => void;
   onFailed: () => void;
   onPending: (p: { id: string; task: string }) => void;
   onSettled: (id: string) => void;
@@ -305,13 +305,9 @@ export function Hub({
         setTask("");
         setImages([]);
         clearVerify();
-        if (res.inferred?.length) {
-          toast("Attached from the task", {
-            description: `${res.inferred.join(", ")} — named in your task, so it was checked out for the agent.`,
-            icon: <GitBranch className="size-4" />,
-          });
-        }
-        onStarted(res.box, t);
+        // Repos inferred from the task ride along to render INLINE in the booting pane/thread —
+        // right under the task, where the reader is looking — not as a toast over a random corner.
+        onStarted(res.box, t, res.inferred);
       } else {
         // The Hub was swapped out for the booting pane, so setError would land on a dead instance.
         // Stash everything for the remount that onFailed triggers; the toast covers the gap.

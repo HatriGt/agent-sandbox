@@ -38,6 +38,7 @@ import { QuestionCard } from "./QuestionCard";
 import { ArrowDown } from "lucide-react";
 import { findPullRequests } from "@/lib/testReport";
 import { ThreadSkeleton } from "./Skeletons";
+import { AttachedFromTask } from "./BootingThread";
 import { SendBar } from "./SendBar";
 import { cn } from "@/lib/utils";
 
@@ -56,6 +57,7 @@ export interface Aside {
 export function Thread({
   box,
   lifecycle,
+  inferredRepos,
   asides,
   replies,
   onAsk,
@@ -69,6 +71,8 @@ export function Thread({
 }: {
   box: BoxView;
   lifecycle: FleetLifecycle;
+  /** Repos auto-attached because the task named them — shown inline under the task bubble. */
+  inferredRepos?: string[];
   asides: Aside[];
   replies: string[];
   onAsk: (question: string) => void;
@@ -610,6 +614,7 @@ export function Thread({
                 <YouItem text={box.task} label="Task" />
               </div>
             )}
+            {inferredRepos && inferredRepos.length > 0 && <AttachedFromTask repos={inferredRepos} />}
 
             {finished && digest && <DigestCard digest={digest} />}
 

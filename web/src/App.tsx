@@ -134,9 +134,20 @@ export default function App() {
   const selected = route.view === "box" ? route.name : null;
   const [mobileRail, setMobileRail] = React.useState(() => route.view === "hub");
 
-  const [booting, setBooting] = React.useState<{ task: string; known: Map<string, string>; warm: boolean; loaded: boolean } | null>(null);
+  const [booting, setBooting] = React.useState<{
+    task: string;
+    known: Map<string, string>;
+    warm: boolean;
+    loaded: boolean;
+    /** Set when delegate returns: the assigned box. The pane morphs to "connecting to <name>". */
+    machine?: string;
+    /** Repos attached because the task named them — shown inline, in the pane and the thread. */
+    inferred?: string[];
+  } | null>(null);
   const bootingRef = React.useRef(booting);
   bootingRef.current = booting;
+  // The inline "Attached from the task" note, keyed by box, surviving the booting→thread swap.
+  const [inferredNotes, setInferredNotes] = React.useState<Record<string, string[]>>({});
   const [pending, setPending] = React.useState<{ id: string; task: string }[]>([]);
   const [asides, setAsides] = React.useState<Record<string, Aside[]>>({});
   const [replies, setReplies] = React.useState<Record<string, string[]>>({});
@@ -231,12 +242,16 @@ export default function App() {
       if (data) setBooting({ ...booting, loaded: true, known: new Map(boxes.map((b) => [b.name, b.role])) });
       return;
     }
-    const fresh = boxes.find((b) => {
-      if (b.role === "pool-free") return false;
-      const before = booting.known.get(b.name);
-      if (before === undefined) return true;
-      return before === "pool-free" && b.role === "pool-claimed";
-    });
+    // Once delegate has returned, the box NAME is known — attach on it directly (exact, no
+    // heuristics). The role diff below remains for the window before delegate resolves.
+    const fresh = booting.machine
+      ? boxes.find((b) => b.name === booting.machine && b.role !== "pool-free")
+      : boxes.find((b) => {
+          if (b.role === "pool-free") return false;
+          const before = booting.known.get(b.name);
+          if (before === undefined) return true;
+          return before === "pool-free" && b.role === "pool-claimed";
+        });
     if (!fresh) return;
     // A warm claim reuses the pool box's NAME: anything cached about it (a hover prefetch of the
     // idle pool box) is the previous life's log and would be spliced ahead of the new run's output.
@@ -322,7 +337,9 @@ export default function App() {
     // moved, but the fleet snapshot won't list the new box until the next poll. Falling through to
     // "hub" here rendered the composer on top of the box URL for a few seconds (observed live), so
     // hold the box-loading skeleton until the box surfaces (or the cleanup effect routes home).
-    view === "fleet" ? "fleet" : view === "history" ? "history" : view === "skills" ? "skills" : view === "integrations" ? "integrations" : view === "account" ? "account" : view === "connect" ? "connect" : view === "welcome" ? "welcome" : view === "admin" ? "admin" : route.view === "pr" ? `pr:${route.repo}#${route.number}` : booting && !selectedBox ? "booting" : selectedBox ? `box:${selectedBox.name}` : view === "box" ? "box-loading" : "hub";
+    // Once the booting pane knows its machine it shares that box's pane key, so the swap to the real
+    // Thread is a content change inside one pane — not a fade-out/fade-in remount (the jump-cut).
+    view === "fleet" ? "fleet" : view === "history" ? "history" : view === "skills" ? "skills" : view === "integrations" ? "integrations" : view === "account" ? "account" : view === "connect" ? "connect" : view === "welcome" ? "welcome" : view === "admin" ? "admin" : route.view === "pr" ? `pr:${route.repo}#${route.number}` : booting && !selectedBox ? (booting.machine ? `box:${booting.machine}` : "booting") : selectedBox ? `box:${selectedBox.name}` : view === "box" ? "box-loading" : "hub";
 
   return (
     <TooltipProvider delayDuration={400}>
@@ -595,13 +612,14 @@ export default function App() {
                     <PullRequestPage session={route.name} repo={route.repo} number={route.number} />
                   </div>
                 ) : booting && !selectedBox ? (
-                  <BootingThread task={booting.task} warm={booting.warm} onBack={backToRail} />
+                  <BootingThread task={booting.task} warm={booting.warm} machine={booting.machine} inferred={booting.inferred} onBack={backToRail} />
                 ) : view === "box" && !selectedBox && !data ? (
                   <ThreadPageSkeleton />
                 ) : selectedBox ? (
                   <Thread
                     box={selectedBox}
                     lifecycle={lifecycle}
+                    inferredRepos={inferredNotes[selectedBox.name]}
                     asides={asides[selectedBox.name] ?? []}
                     replies={replies[selectedBox.name] ?? []}
                     onAsk={(q) => void ask(selectedBox.name, q)}
@@ -648,14 +666,15 @@ export default function App() {
                         loaded: !!data,
                       })
                     }
-                    onStarted={(box, task) => {
+                    onStarted={(box, task, inferred) => {
                       remember(box, task);
-                      // delegate can resolve a minute after submit (it blocks until the agent's first
-                      // boundary). If the attach effect already put the user somewhere — this thread,
-                      // or anywhere they navigated since — don't yank them; only navigate when the
-                      // booting placeholder is still showing.
-                      if (bootingRef.current) open(box);
-                      else setBooting(null);
+                      if (inferred?.length) setInferredNotes((prev) => ({ ...prev, [box]: inferred }));
+                      // Don't navigate yet: the fleet won't list this box until the next poll, so an
+                      // immediate open() lands on an intermediate skeleton (the jump-cut). Morph the
+                      // booting pane to "connecting to <name>" instead; the attach effect swaps in the
+                      // real Thread the moment the box surfaces. If the user already navigated away,
+                      // leave them alone.
+                      if (bootingRef.current) setBooting({ ...bootingRef.current, machine: box, inferred });
                     }}
                     onFailed={() => setBooting(null)}
                     onPending={(p) => setPending((prev) => [...prev, p])}
