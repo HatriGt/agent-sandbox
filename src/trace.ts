@@ -367,16 +367,41 @@ export function dedupeParagraphs(text: string): string {
   // Line-level, not paragraph-level. The re-emitted copy does not respect blank-line boundaries:
   // in real output the tail of the first copy and the head of the second share a paragraph, so
   // splitting on blank lines never finds a matching pair. Lines do match.
+  //
+  // Only duplicates in RUNS are dropped: the re-emitted copy is contiguous, so its duplicate lines
+  // come in streaks, while a legitimately repeated long line (a recurring table row, a repeated code
+  // line, a `----` separator) is isolated — dropping those silently deleted real content from the
+  // rendered transcript and the archived markdown.
+  const lines = text.split("\n");
   const seen = new Set<string>();
-  const kept: string[] = [];
-  for (const line of text.split("\n")) {
+  const dup = lines.map((line) => {
     const key = line.trim();
-    if (key.length >= DEDUPE_MIN_LEN) {
-      if (seen.has(key)) continue;
-      seen.add(key);
+    if (key.length < DEDUPE_MIN_LEN) return false;
+    if (seen.has(key)) return true;
+    seen.add(key);
+    return false;
+  });
+  // A substantial duplicate is dropped only when an adjacent substantial line (skipping blank/short
+  // filler) is also a duplicate.
+  const substantial = (i: number) => lines[i].trim().length >= DEDUPE_MIN_LEN;
+  const neighborDup = (i: number, step: number): boolean => {
+    for (let j = i + step; j >= 0 && j < lines.length; j += step) {
+      if (substantial(j)) return dup[j];
+      if (lines[j].trim().length > 0) return false; // real short content breaks the streak
     }
-    kept.push(line);
-  }
+    return false;
+  };
+  // One exception to the streak rule: a substantial line whose NEAREST substantial predecessor is
+  // the identical line (only blanks between) is a single-line re-emit — the whole final block was
+  // one line, so no streak exists — and must still collapse.
+  const echoOfPrev = (i: number): boolean => {
+    for (let j = i - 1; j >= 0; j--) {
+      if (substantial(j)) return lines[j].trim() === lines[i].trim();
+      if (lines[j].trim().length > 0) return false;
+    }
+    return false;
+  };
+  const kept = lines.filter((_, i) => !(dup[i] && (neighborDup(i, -1) || neighborDup(i, 1) || echoOfPrev(i))));
   return kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
@@ -400,11 +425,22 @@ const REPEAT_MIN_LEN = 80;
  */
 export function dropRepeatedTail(text: string): string {
   const t = text.trimEnd();
+  // Only tail candidates that START ON A LINE BOUNDARY: the re-emitted result block always begins on
+  // its own line, and trying every byte length was O(n²) — a single 100 KB column-0 prose block
+  // (an agent echoing a file) stalled the event loop for seconds, re-run on every SSE append in the
+  // browser and on every fleet sweep on the server. Line starts cut the candidates from ~n to ~lines.
   // Longest candidate first: prefer collapsing the whole duplicated block over a short inner echo.
-  for (let n = Math.floor(t.length / 2); n >= REPEAT_MIN_LEN; n--) {
-    const tail = t.slice(t.length - n).trim();
+  const half = Math.floor(t.length / 2);
+  const starts: number[] = [];
+  for (let i = t.indexOf("\n"); i !== -1; i = t.indexOf("\n", i + 1)) {
+    const s = i + 1;
+    if (t.length - s < REPEAT_MIN_LEN) break;
+    if (t.length - s <= half) starts.push(s);
+  }
+  for (const s of starts) {
+    const tail = t.slice(s).trim();
     if (tail.length < REPEAT_MIN_LEN) continue;
-    const head = t.slice(0, t.length - n).trimEnd();
+    const head = t.slice(0, s).trimEnd();
     if (head.endsWith(tail)) return head;
   }
   return text;

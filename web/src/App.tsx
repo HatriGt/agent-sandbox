@@ -60,16 +60,19 @@ const FLEET_CACHE_KEY = "asb-fleet-cache";
 function readFleetCache(): FleetSnapshot | null {
   try {
     const raw = sessionStorage.getItem(FLEET_CACHE_KEY);
-    const parsed = raw ? (JSON.parse(raw) as FleetSnapshot) : null;
-    // Stale beyond a minute is worse than a skeleton: the machines may all be gone.
-    return parsed && Array.isArray(parsed.boxes) && Date.now() - parsed.at < 60_000 ? parsed : null;
+    const parsed = raw ? (JSON.parse(raw) as FleetSnapshot & { cachedAt?: number }) : null;
+    // Stale beyond a minute is worse than a skeleton: the machines may all be gone. TTL against the
+    // CLIENT clock (`cachedAt`, stamped at write) — `at` is server time, and a skewed client clock
+    // made the cache permanently fresh (or never used) against it.
+    const at = parsed?.cachedAt ?? parsed?.at ?? 0;
+    return parsed && Array.isArray(parsed.boxes) && Date.now() - at < 60_000 ? parsed : null;
   } catch {
     return null;
   }
 }
 function writeFleetCache(s: FleetSnapshot) {
   try {
-    sessionStorage.setItem(FLEET_CACHE_KEY, JSON.stringify(s));
+    sessionStorage.setItem(FLEET_CACHE_KEY, JSON.stringify({ ...s, cachedAt: Date.now() }));
   } catch {
     /* quota / private mode */
   }

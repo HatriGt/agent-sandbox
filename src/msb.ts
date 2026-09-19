@@ -56,7 +56,13 @@ import { askSnapName } from "./snapshot.js";
  */
 async function msb(cfg: Config, rest: string[], check = true, timeoutMs?: number) {
   const remoteCmd = [cfg.msb, ...rest].map(shellQuote).join(" ");
-  return run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, remoteCmd], { check, timeoutMs });
+  // The command travels on STDIN to a remote `sh`, never as the ssh remote-command argument. The
+  // remote command IS the sshd child's argv — readable in /proc/*/cmdline by any local user on the
+  // VPS for the duration of the call — and these commands routinely carry `-e GH_TOKEN=…`,
+  // `-e ANTHROPIC_API_KEY=…` and the full task text. Inside the ssh channel none of that is
+  // host-visible. `"$(cat)"` slurps the WHOLE command before executing (a plain `ssh … sh` would
+  // stream it, and any inner command that reads stdin would eat the rest of the script).
+  return run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, 'sh -c "$(cat)"'], { check, timeoutMs, input: `${remoteCmd}\n` });
 }
 
 /**
@@ -284,6 +290,9 @@ async function allPoolBoxes(cfg: Config): Promise<Array<{ name: string; status: 
 export async function forceRemoveBox(cfg: Config, box: string): Promise<void> {
   await msb(cfg, ["stop", box], false);
   await msb(cfg, ["rm", "--force", box], false);
+  // A parked box always carries an ask snapshot (parkWaitingBox creates one); box names are unique
+  // per run, so a snapshot not removed here is orphaned host disk forever.
+  await msb(cfg, ["snapshot", "rm", askSnapName(box)], false);
   await unmarkClaimed(cfg, box);
   await unmarkKept(cfg, box);
   await unmarkParked(cfg, box).catch(() => {});
@@ -402,6 +411,9 @@ export async function installTools(cfg: Config, box: string) {
  */
 export async function countBoxes(cfg: Config): Promise<number> {
   const r = await msb(cfg, ["ls", "--format", "json"], false);
+  // Fail loud: a broken `msb ls` must not read as "0 boxes live" — that would wave any number of
+  // delegations past the capacity gate while the host is unreachable.
+  if (r.code !== 0) throw new Error(`msb ls failed (exit ${r.code}): ${r.stderr.slice(0, 200)}`);
   const entries = parseLsJson(r.stdout).filter((e) => isRunning(e.status));
 
   let count = 0;
@@ -808,7 +820,10 @@ export function streamFmtScript(): string {
     // (The resume echo is defanged host-side the same way — see DEFANG_SENTINELS_SED.) A zero-width
     // space before each ⟦ and each line-leading ● breaks the parse while reading identically to a
     // human. The formatter's OWN sentinels are appended after this, so real structure is untouched.
-    `function df(s){return String(s).replace(/\\u27e6/g,"\\u200b\\u27e6").replace(/^\\u25cf/gm,"\\u200b\\u25cf")}` +
+    // A column-0 `→ Name: arg` is also structure (a tool-call row): without defanging it, injected
+    // prose could forge authentic-looking tool cards (`→ Bash: git push …`) and fake Write rows that
+    // feed the produced-files artifact cards. Same zero-width-space treatment.
+    `function df(s){return String(s).replace(/\\u27e6/g,"\\u200b\\u27e6").replace(/^\\u25cf/gm,"\\u200b\\u25cf").replace(/^\\u2192/gm,"\\u200b\\u2192")}` +
     `let buf="";` +
     // Every assistant text block already written, so the run's final `result` (which IS one of them,
     // normally the last) is not appended a second time.
@@ -1008,14 +1023,23 @@ export const RUN_STATE_SH =
   // That is the resize flow exactly (raise memory -> reboot -> marks survive), where the wrong
   // answer tells a user who just added memory to add memory again. Discard it: no usable start
   // time means the kill cannot be attributed to this run, and 254 ("interrupted") is honest.
+  // The heal MUTATES (writes DONE_MARK, appends to the log) and is embedded in several unsynchronized
+  // probes (fleet sweep, watch-hub tick, MCP status) that can fire in the same second — without a
+  // winner, two probes both append the "interrupted" line and the transcript shows duplicate forged
+  // turn boundaries. `mv` of the run marker is atomic: exactly one prober takes the heal, the rest
+  // report the healed state read-only.
+  `if mv ${RUN_MARK} ${RUN_MARK}.healing 2>/dev/null; then ` +
   `k=$(${LAST_OOM_AT}); s=$(head -n 1 ${START_MARK} 2>/dev/null | grep -Ex '[0-9]+(\\.[0-9]+)?'); ` +
   `if [ -f ${START_MARK} ] && [ ${START_MARK} -ot /proc/1 ]; then s=; fi; ` +
   `if [ -n "$k" ] && [ -n "$s" ] && awk -v k="$k" -v s="$s" 'BEGIN{exit !(k+0 > s+0)}' 2>/dev/null; then c=137; ` +
   `m="run interrupted: out of memory — the agent was killed by the kernel. Raise this machine memory from the menu, then send a message to continue."; ` +
   `else c=254; m="run interrupted: the sandbox restarted mid-run. Send a message to continue."; fi; ` +
-  `echo $c > ${DONE_MARK}; rm -f ${RUN_MARK} ${START_MARK}; ` +
+  `echo $c > ${DONE_MARK}; rm -f ${RUN_MARK}.healing ${START_MARK}; ` +
   `echo "$m" >> ${AGENT_LOG}; ` +
   `echo "run:done exit=$c"; ` +
+  // Lost the mv race: another prober is healing right now — report done with its exit if already
+  // published, else the generic interrupted code (the state IS dead either way).
+  `else echo "run:done exit=$(cat ${DONE_MARK} 2>/dev/null || echo 254)"; fi; ` +
   `else echo "run:running"; fi; ` +
   `elif [ -f ${DONE_MARK} ]; then echo "run:done exit=$(cat ${DONE_MARK} 2>/dev/null)"; ` +
   `else echo "run:idle"; fi`;
@@ -1042,7 +1066,7 @@ const ASK_MARK_CLOSE = "⟦/ask⟧";
  * `^●` any more, while the text still reads identically to a human. Only the LOG copy is touched:
  * $AGENT_TASK reaches claude unmodified, so the agent still sees exactly what the caller wrote.
  */
-const DEFANG_SENTINELS_SED = `sed -e 's/⟦/​⟦/g' -e 's/^●/​●/'`;
+const DEFANG_SENTINELS_SED = `sed -e 's/⟦/​⟦/g' -e 's/^●/​●/' -e 's/^→/​→/'`;
 
 /** Where the dashboard-configured MCP servers are written inside the box for `claude --mcp-config`. */
 const MCP_CONFIG_PATH = "/root/.agent-mcp.json";
@@ -1135,9 +1159,16 @@ export function agentSh(workdir: string, resume: boolean): string {
   // status flipped to done while a run was still going. A resume therefore WAITS for a live
   // in-flight run to finish (dead-pid/stale marks don't count — same liveness rule as RUN_STATE_SH)
   // instead of starting a second one; the message is preserved, just delivered next.
+  // If the loop EXPIRES with the run still live (a >10-minute turn), ABORT instead of falling
+  // through: launching anyway is exactly the concurrent-`claude -c` stomp the wait exists to
+  // prevent, just deferred to long turns. The wrapper is detached (nohup, fds to /dev/null), so the
+  // abort is surfaced in the agent log the dashboard renders — never silently.
   const waitForRun = resume
     ? `i=0; while [ -f ${RUN_MARK} ] && [ $((i+=1)) -le 600 ]; do ` +
-      `p=$(cat ${PID_MARK} 2>/dev/null); { [ -z "$p" ] || [ ! -d "/proc/$p" ]; } && break; sleep 1; done; `
+      `p=$(cat ${PID_MARK} 2>/dev/null); { [ -z "$p" ] || [ ! -d "/proc/$p" ]; } && break; sleep 1; done; ` +
+      `if [ -f ${RUN_MARK} ]; then p=$(cat ${PID_MARK} 2>/dev/null); ` +
+      `if [ -n "$p" ] && [ -d "/proc/$p" ]; then ` +
+      `echo '[system] a follow-up arrived while a turn was still running after a 10-minute wait; it was NOT delivered — resend it when this turn finishes' >> ${AGENT_LOG}; exit 213; fi; fi; `
     : ``;
   const inner =
     waitForRun +
@@ -1500,6 +1531,10 @@ export function knownStopped(box: string, maxAgeMs = 15_000): boolean {
 
 export async function gatherMonitor(cfg: Config): Promise<BoxView[]> {
   const ls = await msb(cfg, ["ls", "--format", "json"], false, PROBE_TIMEOUT_MS);
+  // A failed `msb ls` (SSH refused, host restarting) must be an ERROR, not an empty fleet: an empty
+  // sweep result deletes every entry from fleet run-memory AND the durable store, permanently losing
+  // sleeping boxes' task/question metadata — and momentarily zeroes the capacity count.
+  if (ls.code !== 0) throw new Error(`msb ls failed (exit ${ls.code}): ${ls.stderr.slice(0, 200)}`);
   const entries = parseLsJson(ls.stdout);
   const now = Date.now();
   for (const e of entries) lastLsStatus.set(e.name, { status: e.status, at: now });
@@ -1772,7 +1807,11 @@ export async function gatherWatch(
       `${RUN_STATE_SH}; ` +
         `echo "---Q---"; cat ${QUESTION_MARK} 2>/dev/null || true; ` +
         `echo "---T---"; cat ${TASK_MARK} 2>/dev/null || true; ` +
-        `echo "---LOG---"; ${logTailCmd(logLines)}`
+        `echo "---LOG---"; ${logTailCmd(logLines)}`,
+      // Same bound as gatherMonitor's probe: an exec into a box caught mid-shutdown can park in
+      // poll() indefinitely, and this read sits behind every WatchHub tick — unbounded, one wedged
+      // box stalls all of its SSE viewers for the full 5-minute default.
+      { timeoutMs: PROBE_TIMEOUT_MS }
     );
     const out = r.stdout;
     const qStart = out.indexOf("---Q---");
@@ -1894,6 +1933,8 @@ export function msbIo(cfg: Config) {
   return {
     msb: (args: string[]) => msb(cfg, args, false),
     log: (m: string) => console.error(m),
+    noteStopped,
+    noteRunning,
   };
 }
 

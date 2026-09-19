@@ -32,6 +32,7 @@ import { githubAuthorizeUrl, githubExchangeCode, githubIdentity } from "./github
 import { keyFromEnvOrFile, makeSecretBox } from "./secretbox.js";
 import { allBlobs, ownerKey, registerUserStoreBackend, withOwner, OPERATOR_OWNER } from "./user-store.js";
 import { detectTransitions, formatNotification, makeNotifier, type BoxRunView, type NotifyEvent } from "./notify.js";
+import { fetchPinned } from "./net-guard.js";
 import { buildDigest } from "./digest.js";
 import { archiveRun, deleteRun, getRun, listRuns, pruneArchive } from "./run-archive.js";
 import { verifyPlanOf, type VerifyPlan, type VerifyResult } from "./verify.js";
@@ -377,6 +378,26 @@ const boxVerified = new Map<string, VerifyResult>();
   };
 }
 
+// The MCP resume lanes must hold the per-box checkpoint lock while `claude -c` launches: without it
+// an MCP `resume` landing during the ~1 s turn-end tar mutates /workspace mid-capture, and the torn
+// tar is ACCEPTED as a restore point (captureCmd tolerates tar exit 1 by design). The dashboard lane
+// already locks in resumeQuietly; these wrappers give the tool lane the same guarantee — the lock
+// covers only the launch, not deps.resume's long boundary wait. resumeQuietly below already takes
+// the lock itself, so it must call the RAW functions, never these wrappers (non-reentrant lock).
+const rawResume = deps.resume.bind(deps);
+const rawResumeDetached = deps.resumeDetached?.bind(deps);
+deps.resume = async (c, session, message, secrets, interact, model) => {
+  await withBoxLock(session, async () => captureBeforeMessage(session).catch(() => {}));
+  return rawResume(c, session, message, secrets, interact, model);
+};
+if (rawResumeDetached) {
+  deps.resumeDetached = (c, session, message, secrets, model) =>
+    withBoxLock(session, async () => {
+      await captureBeforeMessage(session).catch(() => {});
+      return rawResumeDetached(c, session, message, secrets, model);
+    });
+}
+
 const resumeQuietly = (session: string, message: string) => {
   // A resume boots a sleeping box; forget the "stopped" memory and the cached idle snapshot at once so
   // the thread does not show it asleep (and close its stream) for the next 15 s.
@@ -396,9 +417,9 @@ const resumeQuietly = (session: string, message: string) => {
     await captureBeforeMessage(session).catch(() => {});
     try {
       return await withOwner(ownerOf(db, session) ?? null, () =>
-        deps.resumeDetached
-          ? deps.resumeDetached(cfg, session, message, undefined, boxModels.get(session))
-          : deps.resume(cfg, session, message, undefined, {}, boxModels.get(session)).then(() => undefined)
+        rawResumeDetached
+          ? rawResumeDetached(cfg, session, message, undefined, boxModels.get(session))
+          : rawResume(cfg, session, message, undefined, {}, boxModels.get(session)).then(() => undefined)
       );
     } catch (e) {
       // The optimistic "running" note above was wrong — the resume never happened. Roll it back and
@@ -469,7 +490,9 @@ const sendNotification = async (ev: NotifyEvent): Promise<void> => {
   const ac = new AbortController();
   const t = setTimeout(() => ac.abort(), 5000);
   try {
-    await fetch(url, {
+    // fetchPinned re-vets the URL and pins the resolved address: stored blobs may predate the
+    // stricter validation, and the send runs on the controller — SSRF/rebinding surface.
+    await fetchPinned(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: msg.text, url: msg.url, event: msg.event }),
@@ -978,7 +1001,13 @@ if (SAAS) {
 }
 app.post("/auth/logout", (req: Request, res: Response) => {
   const p = res.locals.principal as Principal | null;
-  if (p?.kind === "user" && p.sessionId) deleteSession(db, p.sessionId);
+  // The CSRF check upstream nulls the principal on a cross-site POST. Clearing the cookie anyway
+  // would let any web page log the operator out at will; a forged logout must be a no-op.
+  if (!p) {
+    res.status(403).json({ error: "not signed in" });
+    return;
+  }
+  if (p.kind === "user" && p.sessionId) deleteSession(db, p.sessionId);
   res.setHeader("Set-Cookie", clearSessionCookie(SECURE_COOKIE));
   res.json({ ok: true });
 });
@@ -1292,6 +1321,9 @@ app.get("/watch.sse", (req: Request, res: Response) => {
   const stop = streamWatch(res, {
     session,
     from,
+    // The client's last bytes at `from` — proves its offset still points where it thinks in the
+    // sliding tail window; on mismatch streamWatch sends the full log instead of a corrupting slice.
+    expectTail: typeof req.query.tail === "string" ? req.query.tail.slice(0, 256) : undefined,
     read: (s) => watchHub.read(s),
   });
   // Stop the server-side tail the instant the browser goes away (tab closed, navigated, network drop)
@@ -1726,7 +1758,10 @@ app.post("/notify/test.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   const p = principalOf(res);
   const s = loadNotifySettings(p.kind === "user" ? p.userId : OPERATOR_OWNER);
-  const url = s.url || process.env.NOTIFY_WEBHOOK_URL || "";
+  // Only the caller's OWN webhook is testable on demand. The operator fallback still delivers real
+  // sweep events, but letting any tenant fire it at will would hand them an on-demand request
+  // generator against the operator's endpoint.
+  const url = s.url || (p.kind === "operator" ? process.env.NOTIFY_WEBHOOK_URL || "" : "");
   if (!url) {
     res.status(400).json({ error: "no webhook configured — set one first" });
     return;
@@ -1735,7 +1770,9 @@ app.post("/notify/test.json", async (req: Request, res: Response) => {
   try {
     const ac = new AbortController();
     const t = setTimeout(() => ac.abort(), 5000);
-    const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: msg.text, url: msg.url, event: msg.event }), signal: ac.signal }).finally(() => clearTimeout(t));
+    // fetchPinned: re-vets the URL (stored blobs may predate stricter validation) and pins the
+    // resolved IP — this endpoint must never become a status oracle against internal hosts.
+    const r = await fetchPinned(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: msg.text, url: msg.url, event: msg.event }), signal: ac.signal }).finally(() => clearTimeout(t));
     res.json({ ok: r.ok, status: r.status });
   } catch (e) {
     res.status(502).json({ error: `webhook unreachable: ${String((e as Error).message ?? e).slice(0, 200)}` });
@@ -2244,6 +2281,9 @@ app.post("/wake.json", async (req: Request, res: Response) => {
     return;
   }
   try {
+    // Waking a stopped machine is starting a machine: the trial gate applies here exactly as it
+    // does to delegation and resume.
+    ownership.assertCanRun();
     const outcome = await startBoxIfStopped(cfg, session);
     // Report honestly. Answering `ok` for a box the runtime never started is indistinguishable
     // from a real wake, so the client sits on a progress card forever waiting for a boot that was
@@ -2301,6 +2341,7 @@ app.post("/memory.json", async (req: Request, res: Response) => {
     return;
   }
   try {
+    ownership.assertCanRun(); // resize reboots the box back up — same gate as wake
     await setBoxMemory(cfg, session, memory);
     noteRunning(session);
     watchHub.drop(session);
@@ -2327,6 +2368,7 @@ app.post("/disk.json", async (req: Request, res: Response) => {
     return;
   }
   try {
+    ownership.assertCanRun(); // resize reboots the box back up — same gate as wake
     await setBoxDisk(cfg, session, disk);
     noteRunning(session);
     watchHub.drop(session);

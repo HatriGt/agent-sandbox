@@ -130,6 +130,13 @@ export function sseFrame(event: string, data: unknown, id?: number): string {
 export interface StreamWatchOpts {
   session: string;
   from?: number;
+  /**
+   * The tail of what the client already has at `from`. Offsets index a SLIDING tail window, not the
+   * durable log — after the window fills, the same number points at different content, and slicing
+   * blind splices an unrelated suffix onto the client's buffer (corrupting the transcript it then
+   * caches). When the tails disagree, the resume is refused and the full log is sent instead.
+   */
+  expectTail?: string;
   read: (session: string) => Promise<WatchSnapshot>;
   tickMs?: number;
   heartbeatMs?: number;
@@ -200,8 +207,13 @@ export function streamWatch(res: Response, opts: StreamWatchOpts): () => void {
     if (!sentSnapshot) {
       // First frame: full state + the log from the requested offset (a reconnect with ?from= gets
       // only the tail it missed; a fresh viewer with from=0 gets everything).
-      const initial = offset > 0 && offset <= snap.log.length ? snap.log.slice(offset) : snap.log;
-      const startOffset = offset > 0 && offset <= snap.log.length ? offset : 0;
+      const tail = opts.expectTail;
+      const resumable =
+        offset > 0 &&
+        offset <= snap.log.length &&
+        (!tail || snap.log.slice(Math.max(0, offset - tail.length), offset) === tail);
+      const initial = resumable ? snap.log.slice(offset) : snap.log;
+      const startOffset = resumable ? offset : 0;
       offset = snap.log.length;
       lastLog = snap.log;
       sentSnapshot = true;

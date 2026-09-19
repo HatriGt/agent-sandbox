@@ -312,9 +312,12 @@ export async function probeMcpServer(s: McpServer, timeoutMs = 8000): Promise<Mc
   const ac = new AbortController();
   const t = setTimeout(() => ac.abort(), timeoutMs);
   try {
-    // redirect:"manual": a public host 302ing to link-local/metadata must not be followed from here.
-    const res = await fetch(s.url!, {
-      redirect: "manual",
+    // fetchPinned resolves once, vets the addresses, and pins the connection to the vetted IP —
+    // without the pin a rebinding DNS server passes the lookup check above and re-resolves to
+    // 169.254.169.254 for the actual connect. It also never follows redirects (a public host
+    // 302ing to link-local/metadata must not be chased from here).
+    const { fetchPinned } = await import("./net-guard.js");
+    const res = await fetchPinned(s.url!, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

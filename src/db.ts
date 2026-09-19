@@ -151,14 +151,16 @@ function migrate(db: Db): void {
   const row = db.prepare(`SELECT v FROM schema_version`).get() as { v: number } | undefined;
   let v = row?.v ?? 0;
   if (!row) db.prepare(`INSERT INTO schema_version (v) VALUES (?)`).run(v);
-  // Persist the version after EACH migration: if migration N+1 throws (or the process dies
-  // mid-loop), we must not re-run migration N on next start — ALTER TABLE ADD COLUMN would fail
-  // with "duplicate column name" and brick every startup.
+  // Persist the version after EACH migration, and run migration + bump in ONE transaction: `exec`
+  // is not atomic across statements, so a crash between two ALTERs of the same migration would
+  // otherwise leave it half-applied with the version un-bumped — the re-run then fails with
+  // "duplicate column name" and bricks every startup.
   const bump = db.prepare(`UPDATE schema_version SET v = ?`);
-  for (; v < MIGRATIONS.length; v++) {
-    db.exec(MIGRATIONS[v]);
-    bump.run(v + 1);
-  }
+  const step = db.transaction((sql: string, next: number) => {
+    db.exec(sql);
+    bump.run(next);
+  });
+  for (; v < MIGRATIONS.length; v++) step(MIGRATIONS[v], v + 1);
 }
 
 export const nowIso = (ms = Date.now()) => new Date(ms).toISOString();

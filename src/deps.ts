@@ -513,7 +513,9 @@ export const deps: HandlerDeps = {
     const creds = await resolveCredsForBox(cfg, session);
     // Continue the in-box Claude session detached, then BLOCK until the next boundary (another
     // question, or done) or timeout — same turn-taking as delegate, so the answer→continue→next
-    // step feels synchronous to the caller.
+    // step feels synchronous to the caller. NB: callers hold the per-box checkpoint lock around
+    // this (http.ts resumeQuietly, the MCP deps wrapper) — the lock is non-reentrant, never take
+    // it here.
     await resumeAgentTask(cfg, session, message, undefined, secrets, creds, model);
     return driveInteractive(cfg, session, interact);
   },
@@ -529,6 +531,7 @@ export const deps: HandlerDeps = {
     // transcript live, so it only needs the run to be kicked off. Returns as soon as claude is
     // started in the box (a few seconds: wake if asleep, inject creds, exec).
     const creds = await resolveCredsForBox(cfg, session);
+    // Callers hold the per-box checkpoint lock (see `resume` above) — never take it here.
     await resumeAgentTask(cfg, session, message, undefined, secrets, creds, model);
   },
   async teardown(cfg, session) {

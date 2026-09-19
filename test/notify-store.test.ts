@@ -23,11 +23,13 @@ test("parse tolerates garbage and missing fields", () => {
 
 test("normalize rejects an invalid webhook URL with a human message", () => {
   assert.throws(() => normalizeNotifySettings({ url: "javascript:x", events: {} }), /http/i);
-  assert.throws(() => normalizeNotifySettings({ url: "https://u:p@h/x", events: {} }), /credential/i);
+  assert.throws(() => normalizeNotifySettings({ url: "https://u:p@h.example/x", events: {} }), /credential/i);
+  // Internal/private targets are refused — the POST runs on the controller (SSRF).
+  assert.throws(() => normalizeNotifySettings({ url: "https://127.0.0.1/x", events: {} }), /http/i);
   // Empty url = notifications off; always fine.
   assert.equal(normalizeNotifySettings({ url: "", events: {} }).url, "");
-  const ok = normalizeNotifySettings({ url: " https://h/x ", events: { waiting: false } });
-  assert.equal(ok.url, "https://h/x");
+  const ok = normalizeNotifySettings({ url: " https://h.example/x ", events: { waiting: false } });
+  assert.equal(ok.url, "https://h.example/x");
   assert.equal(ok.events.waiting, false);
 });
 

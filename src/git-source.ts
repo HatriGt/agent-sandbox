@@ -138,7 +138,10 @@ export async function cloneRepoInStaging(
     const clean = buildCloneUrl(repo);
     gitCmd += ` && git -C ${shellQuote(dest)} remote set-url origin ${shellQuote(clean)}`;
   }
-  const r = await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, gitCmd], { check: false });
+  // The command goes to a remote `sh` over STDIN, not as the ssh remote-command argument: the
+  // token-bearing clone URL in the sshd child's argv would be readable in /proc/*/cmdline by any
+  // local user on the VPS for the duration of the clone.
+  const r = await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, 'sh -c "$(cat)"'], { check: false, input: `${gitCmd}\n` });
   if (r.code !== 0) {
     // Callers get a message about the CHECKOUT, not a dump of our ssh plumbing (which reads like an
     // infrastructure outage and, before exec.ts learned to redact, even carried the token URL).

@@ -40,12 +40,15 @@ export function isSafeApiPath(path: string): boolean {
 
 /** curl a GitHub API path on the VPS with the token; returns the response body (empty on failure). */
 async function ghGet(cfg: Config, token: string, path: string): Promise<string> {
-  // Token and path are caller-supplied; both go through the VPS shell, so both are single-quoted.
+  // The path is caller-supplied and goes through the VPS shell, so it is single-quoted. The TOKEN
+  // must never ride in the remote command string: that string is the ssh argv, readable in
+  // /proc/*/cmdline by any local user on the VPS for the duration of the call. `curl -H @-` reads
+  // the Authorization header from stdin instead, which travels inside the ssh channel.
   if (!isSafeApiPath(path)) return "";
   const remote =
-    `curl -sf -H ${shellQuote(`Authorization: token ${token}`)} ` +
+    `curl -sf -H @- ` +
     `-H "Accept: application/vnd.github+json" ${shellQuote(`https://api.github.com${path}`)}`;
-  const r = await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, remote], { check: false });
+  const r = await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, remote], { check: false, input: `Authorization: token ${token}\n` });
   return r.stdout ?? "";
 }
 

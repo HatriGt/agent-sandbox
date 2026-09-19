@@ -87,18 +87,25 @@ export function upsertGithubUser(
   let existing = db.prepare(`SELECT * FROM users WHERE github_id = ?`).get(u.githubId) as UserRow | undefined;
   const now = nowIso();
   if (!existing) {
-    // An admin-created invite account (no GitHub id, no password) with the same login is the same
-    // person: link it. A password account with that login is NOT — someone may have squatted the
-    // name — so the GitHub identity gets its own user under a unique login instead.
+    // An admin-created invite account (no GitHub id, no password) may be the same person — but a
+    // GitHub login is chosen by whoever registers it, so a login match ALONE is squattable: anyone
+    // who grabs the name on GitHub would inherit the invited account's role and quota. Link only
+    // when the invite carries an email and the OAuth identity presents the same one; an invite
+    // without an email can only be claimed with its access token, never via OAuth.
     const byLogin = db.prepare(`SELECT * FROM users WHERE github_id IS NULL AND lower(login) = lower(?)`).get(u.login) as UserRow | undefined;
-    if (byLogin && !byLogin.password_hash) {
+    const emailMatches = !!byLogin?.email && !!u.email && byLogin.email.toLowerCase() === u.email.toLowerCase();
+    if (byLogin && !byLogin.password_hash && emailMatches) {
       db.prepare(`UPDATE users SET github_id = ? WHERE id = ?`).run(u.githubId, byLogin.id);
       existing = { ...byLogin, github_id: u.githubId };
     }
   }
   if (existing) {
-    db.prepare(`UPDATE users SET login = ?, email = COALESCE(?, email), avatar_url = COALESCE(?, avatar_url), last_seen_at = ? WHERE id = ?`).run(u.login, u.email ?? null, u.avatarUrl ?? null, now, existing.id);
-    return { ...existing, login: u.login, last_seen_at: now };
+    // A GitHub-side rename must not steal another row's login (unique identity in this table): on
+    // collision keep the stored login and update everything else.
+    const collides = db.prepare(`SELECT 1 FROM users WHERE lower(login) = lower(?) AND id != ?`).get(u.login, existing.id);
+    const login = collides ? existing.login : u.login;
+    db.prepare(`UPDATE users SET login = ?, email = COALESCE(?, email), avatar_url = COALESCE(?, avatar_url), last_seen_at = ? WHERE id = ?`).run(login, u.email ?? null, u.avatarUrl ?? null, now, existing.id);
+    return { ...existing, login, last_seen_at: now };
   }
   const id = `u_${rand(12)}`;
   const role = (opts.adminLogins ?? []).map((l) => l.toLowerCase()).includes(u.login.toLowerCase()) ? "admin" : "user";

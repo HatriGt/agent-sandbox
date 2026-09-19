@@ -148,7 +148,13 @@ export function useWatchStream(session: string, enabled = true, generation = 0):
     const loop = async () => {
       while (!stopped && !closedByUs) {
         try {
-          await openSse("/watch.sse", { session }, { signal: ctrl.signal, lastEventId: lastId, onFrame: handle, onOpen: () => { attempt = 0; setOk(true); } });
+          // `tail` proves our byte offset still points where we think inside the server's sliding
+          // log window; on mismatch the server sends the full log instead of a corrupting slice.
+          await openSse(
+            "/watch.sse",
+            { session, ...(lastId && log ? { tail: log.slice(-256) } : {}) },
+            { signal: ctrl.signal, lastEventId: lastId, onFrame: handle, onOpen: () => { attempt = 0; setOk(true); } }
+          );
           if (closedByUs || stopped) return;
           // Server ended without `done` (e.g. proxy idle cut): reconnect promptly.
         } catch (e) {

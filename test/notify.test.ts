@@ -141,16 +141,23 @@ test("formatter falls back to the box name when there is no title, and headline 
 
 /* ── webhook URL validation ───────────────────────────────────────────────── */
 
-test("webhook URLs must be http(s), have a host, and carry no credentials", () => {
+test("webhook URLs must be public https, have a real host, and carry no credentials", () => {
   assert.equal(isValidWebhookUrl("https://hooks.slack.com/services/T/B/x"), true);
-  assert.equal(isValidWebhookUrl("http://ntfy.internal:8080/topic"), true);
   for (const bad of [
     "ftp://x/y",
     "javascript:alert(1)",
-    "https://user:pass@host/hook", // credentials would end up in the stored blob AND the request line
+    "https://user:pass@host.example/hook", // credentials would end up in the stored blob AND the request line
     "not a url",
     "",
     "https://",
+    // SSRF shapes: the POST runs on the controller, so internal targets are refused outright.
+    "http://ntfy.example.com/topic", // plain http leaks the payload in transit
+    "https://localhost/hook",
+    "https://127.0.0.1/hook",
+    "https://10.0.0.5/hook",
+    "https://169.254.169.254/latest/meta-data",
+    "https://ntfy.internal:8080/topic",
+    "https://host.docker.internal/hook",
   ]) {
     assert.equal(isValidWebhookUrl(bad), false, bad);
   }

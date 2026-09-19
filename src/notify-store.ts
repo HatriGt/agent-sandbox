@@ -47,7 +47,7 @@ export function normalizeNotifySettings(input: { url?: unknown; events?: unknown
     throw new Error(
       /@/.test(url)
         ? "Webhook URL must not carry credentials — they would be stored and sent on every request."
-        : "Webhook must be an http(s) URL, e.g. https://hooks.slack.com/services/…"
+        : "Webhook must be a public https URL, e.g. https://hooks.slack.com/services/… (private/internal addresses are not allowed)"
     );
   }
   const ev = (input.events ?? {}) as Partial<NotifySettings["events"]>;

@@ -16,6 +16,8 @@
  *  - Text leaving the server goes through the caller-provided redaction before send (http.ts).
  */
 
+import { isPublicHttpUrl } from "./net-guard.js";
+
 /** The slice of a fleet box view the detector needs. Kept minimal so tests need no full BoxView. */
 export interface BoxRunView {
   name: string;
@@ -135,16 +137,11 @@ export function formatNotification(
 }
 
 /**
- * A webhook target we are willing to store and POST to: http(s), a real host, and no credentials —
- * a user:pass URL would put a secret into the stored blob AND every request line/proxy log.
+ * A webhook target we are willing to store and POST to. The POST runs ON the controller with a
+ * tenant-supplied URL — SSRF shape — so this is the full public-https vetting (no credentials, no
+ * loopback/RFC1918/link-local/metadata, no internal names), not just "parses as a URL". The send
+ * path additionally pins the resolved address (net-guard.ts) against DNS rebinding.
  */
 export function isValidWebhookUrl(raw: unknown): boolean {
-  if (typeof raw !== "string" || !raw) return false;
-  let u: URL;
-  try {
-    u = new URL(raw);
-  } catch {
-    return false;
-  }
-  return (u.protocol === "https:" || u.protocol === "http:") && !!u.hostname && !u.username && !u.password;
+  return isPublicHttpUrl(raw);
 }

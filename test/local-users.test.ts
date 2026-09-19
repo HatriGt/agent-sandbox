@@ -18,12 +18,17 @@ test("security: a password sign-up cannot claim an admin login, and cannot be hi
 
 test("local users: created by an admin, sign in with a key, later link a GitHub identity by login", () => {
   const db = openMemoryDb();
-  const u = createLocalUser(db, { login: "carol" });
+  const u = createLocalUser(db, { login: "carol", email: "carol@example.com" });
   assert.throws(() => createLocalUser(db, { login: "Carol" }), /already exists/);
   assert.throws(() => createLocalUser(db, { login: "bad name!" }));
   const k = createApiKey(db, u.id, "first sign-in");
   assert.equal(principalFromApiKey(db, k.token)?.kind, "user");
-  const linked = upsertGithubUser(db, { githubId: "77", login: "carol" });
+  // A login match alone is squattable (anyone can register the name on GitHub) — linking requires
+  // the OAuth identity to present the invited account's email.
+  const squatter = upsertGithubUser(db, { githubId: "66", login: "carol" });
+  assert.notEqual(squatter.id, u.id, "login match without email match gets a NEW account");
+  assert.equal(deleteUser(db, squatter.id), true);
+  const linked = upsertGithubUser(db, { githubId: "77", login: "carol", email: "carol@example.com" });
   assert.equal(linked.id, u.id, "same person, one account");
   assert.equal(listUsers(db)[0].keys, 1);
   recordBoxOwner(db, "pool-c", u.id);

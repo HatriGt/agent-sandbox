@@ -84,12 +84,33 @@ export class Inbox {
     return true;
   }
 
-  /** Take everything queued for a box (for delivery), leaving the queue empty. */
+  /**
+   * Take everything queued for a box (for delivery), leaving the in-memory queue empty. The durable
+   * rows are NOT deleted here — the caller commits them via {@link commitDelivered} only after the
+   * resume succeeded; deleting up-front meant a controller crash mid-delivery (a routine deploy
+   * restart) lost the typed messages from both memory and the table whose whole point is durability.
+   * A crash before commit re-hydrates the rows on restart and re-delivers (msg-id idempotent).
+   */
   drain(session: string): QueuedMessage[] {
     const list = this.queues.get(session) ?? [];
     this.queues.delete(session);
-    if (list.length) this.persist((db) => db.prepare(`DELETE FROM inbox_messages WHERE box = ?`).run(session));
     return list;
+  }
+
+  /** Delete the durable rows of a delivered batch (call after resume resolves). */
+  commitDelivered(session: string, batch: QueuedMessage[]): void {
+    if (!batch.length) return;
+    this.persist((db) => {
+      const del = db.prepare(`DELETE FROM inbox_messages WHERE box = ? AND msg_id = ?`);
+      for (const m of batch) del.run(session, m.id);
+    });
+  }
+
+  /** Put a failed batch back, keeping ids (rows still exist — no re-insert). */
+  restore(session: string, batch: QueuedMessage[]): void {
+    if (!batch.length) return;
+    const list = this.queues.get(session) ?? [];
+    this.queues.set(session, [...batch, ...list]);
   }
 
   clear(session: string): void {
@@ -138,9 +159,10 @@ export function startInboxDelivery(opts: {
           log(`[inbox] delivering ${batch.length} queued message(s) to ${session}`);
           try {
             await opts.resume(session, joinQueued(batch));
+            opts.inbox.commitDelivered(session, batch);
           } catch (e) {
             // Put them back so the operator can see and retry; never lose typed text silently.
-            for (const m of batch) opts.inbox.enqueue(session, m.text, m.at);
+            opts.inbox.restore(session, batch);
             log(`[inbox] delivery to ${session} failed: ${(e as Error).message}`);
           }
         }

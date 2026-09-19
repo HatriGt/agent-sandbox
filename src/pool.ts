@@ -154,7 +154,11 @@ export function refillPool(cfg: Config, io: RefillIO = realRefillIO): Promise<vo
         }
       } else if (deficit < 0) {
         // A past double-refill left extras; keep the youngest (most run budget left), trim the rest.
-        const oldestFirst = [...available].sort((a, b) => (poolBoxAgeMs(b) ?? Infinity) - (poolBoxAgeMs(a) ?? Infinity));
+        // Never trim a box an in-flight claim reserved: /.claimed lands only seconds after
+        // `claiming.add`, and removing the box in that window kills the delegation that just picked it.
+        const oldestFirst = [...available]
+          .filter((b) => !claiming.has(b))
+          .sort((a, b) => (poolBoxAgeMs(b) ?? Infinity) - (poolBoxAgeMs(a) ?? Infinity));
         for (const box of oldestFirst.slice(0, -deficit)) {
           console.error(`[pool] trimming surplus warm box ${box} (${available.length}/${cfg.poolSize} ready)`);
           await io.removeBox(cfg, box);

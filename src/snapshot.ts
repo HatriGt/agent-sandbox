@@ -95,8 +95,13 @@ export async function parkWaitingBox(io: SnapshotIo, box: string): Promise<boole
   const log = io.log ?? (() => {});
   const name = askSnapName(box);
   try {
+    // Mark asleep BEFORE stopping so no watch-hub tick execs into (and thereby boots) the box in
+    // the stop→snapshot window; a boot there makes `snapshot create` fail every time a viewer is
+    // watching — which, for a question being parked, is the common case.
+    io.noteStopped?.(box);
     const stop = await io.msb(["stop", box]);
     if (stop.code !== 0) {
+      io.noteRunning?.(box);
       log(`[park] stop ${box} failed: ${stop.stderr.trim().slice(-200)}`);
       return false;
     }
@@ -105,6 +110,7 @@ export async function parkWaitingBox(io: SnapshotIo, box: string): Promise<boole
     if (create.code !== 0) {
       log(`[park] snapshot ${name} failed: ${create.stderr.trim().slice(-200)} — restarting ${box}`);
       await io.msb(["start", box]);
+      io.noteRunning?.(box);
       return false;
     }
     log(`[park] parked ${box} (stopped, snapshot ${name})`);
@@ -121,6 +127,14 @@ export interface SnapshotIo {
   /** Run msb with argv; non-zero exit resolves (never throws) with the code. */
   msb(args: string[]): Promise<{ code: number; stdout: string; stderr: string }>;
   log?: (msg: string) => void;
+  /**
+   * Mark the box asleep/awake for the exec-probing readers (msb.ts noteStopped/noteRunning).
+   * CRITICAL around stop→snapshot: `msb exec` on a stopped box BOOTS it, and the watch hub ticks an
+   * open thread every 800 ms — without marking the box stopped first, the viewer's own tick races
+   * the snapshot create (which requires a stopped box) and boots the box out from under it.
+   */
+  noteStopped?: (box: string) => void;
+  noteRunning?: (box: string) => void;
 }
 
 /**
@@ -132,8 +146,11 @@ export async function captureAskSnapshot(io: SnapshotIo, box: string): Promise<b
   const log = io.log ?? (() => {});
   const name = askSnapName(box);
   try {
+    // Same stop→snapshot race as parkWaitingBox: mark asleep first so no reader boots the box.
+    io.noteStopped?.(box);
     const stop = await io.msb(["stop", box]);
     if (stop.code !== 0) {
+      io.noteRunning?.(box);
       log(`[snap] stop ${box} failed: ${stop.stderr.trim().slice(-200)}`);
       return false;
     }
@@ -141,6 +158,7 @@ export async function captureAskSnapshot(io: SnapshotIo, box: string): Promise<b
     const create = await io.msb(["snapshot", "create", "--from", box, name]);
     // Restart regardless — the box must come back even when the snapshot failed.
     const start = await io.msb(["start", box]);
+    io.noteRunning?.(box);
     if (start.code !== 0) log(`[snap] restart of ${box} failed: ${start.stderr.trim().slice(-200)}`);
     if (create.code !== 0) {
       log(`[snap] create ${name} failed: ${create.stderr.trim().slice(-200)}`);

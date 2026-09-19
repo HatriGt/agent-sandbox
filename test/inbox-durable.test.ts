@@ -48,9 +48,14 @@ test("durable inbox: remove/drain/clear delete rows", () => {
   assert.ok(ib.remove("b", a.id));
   assert.equal(rows(db).filter((r) => r.box === "b").length, 1);
 
-  assert.deepEqual(ib.drain("b").map((m) => m.text), ["two"]);
+  // drain leaves the durable rows in place (crash mid-delivery must not lose them); only an
+  // explicit commitDelivered removes them.
+  const batch = ib.drain("b");
+  assert.deepEqual(batch.map((m) => m.text), ["two"]);
+  assert.equal(rows(db).filter((r) => r.box === "b").length, 1, "drain keeps rows until commit");
+  ib.commitDelivered("b", batch);
   assert.equal(rows(db).filter((r) => r.box === "b").length, 0);
-  assert.equal(rows(db).filter((r) => r.box === "c").length, 1, "drain only touches its own box");
+  assert.equal(rows(db).filter((r) => r.box === "c").length, 1, "commit only touches its own batch");
 
   ib.clear("c");
   assert.equal(rows(db).length, 0);

@@ -189,14 +189,23 @@ export function Thread({
     return () => document.removeEventListener("keydown", onKey);
   }, [showWorkspace]);
 
+  // Guard against a late response after a box switch: without the name check, box A's in-flight
+  // changes resolve into box B's dock (and clicking a file would fetch A's paths against B).
+  const currentBoxRef = React.useRef(box.name);
+  currentBoxRef.current = box.name;
   const refreshChanges = React.useCallback(() => {
     if (sleeping) return;
+    const name = box.name;
     setChangesLoading(true);
     api
-      .changes(box.name)
-      .then((r) => setChanges(r.files))
+      .changes(name)
+      .then((r) => {
+        if (currentBoxRef.current === name) setChanges(r.files);
+      })
       .catch(() => {})
-      .finally(() => setChangesLoading(false));
+      .finally(() => {
+        if (currentBoxRef.current === name) setChangesLoading(false);
+      });
   }, [box.name, sleeping]);
   React.useEffect(() => {
     setChanges([]);
@@ -443,7 +452,12 @@ export function Thread({
   // Follow-ups queued while the agent was mid-turn (server-held; the fleet poll carries them).
   const [queued, setQueued] = React.useState<{ id: string; text: string }[] | null>(null);
   const refreshQueue = React.useCallback(() => {
-    api.inbox(box.name).then((r) => setQueued(r.queued)).catch(() => {});
+    // Same stale-response guard as refreshChanges: box A's late inbox reply must not populate box
+    // B's queue (cancel would then DELETE against B with A's message id).
+    const name = box.name;
+    api.inbox(name).then((r) => {
+      if (currentBoxRef.current === name) setQueued(r.queued);
+    }).catch(() => {});
   }, [box.name]);
   React.useEffect(() => {
     setQueued(null);
