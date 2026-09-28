@@ -215,15 +215,20 @@ export interface HttpCall {
 
 const METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
 
-/** ```http: one call per line — `GET /api/x → 200 OK · 48ms` (arrow, status text, timing optional). */
+/**
+ * ```http: one call per line — `GET /api/x → 200 OK · 48ms` (arrow, status text, timing optional).
+ * The URL part is everything between the method and the arrow, spaces included — agents shorten
+ * long query strings with `...` and parenthetical notes, and one decorated line must not knock the
+ * whole block back to a code fence.
+ */
 export function parseHttp(src: string): HttpCall[] | null {
   const lines = src.split("\n").map((l) => l.trim()).filter(Boolean);
-  if (lines.length === 0 || lines.length > 40) return null;
+  if (lines.length === 0 || lines.length > 60) return null;
   const out: HttpCall[] = [];
   for (const line of lines) {
-    const m = line.match(/^([A-Z]+)\s+(\S+)(?:\s*(?:→|->)\s*(\d{3})\s*([A-Za-z ]+?)?)?\s*(?:[·|]\s*(\S+))?$/);
-    if (!m || !METHODS.has(m[1])) return null;
-    out.push({ method: m[1], url: m[2], status: m[3] ? Number(m[3]) : undefined, statusText: m[4]?.trim(), time: m[5] });
+    const m = line.match(/^([A-Z]+)\s+(.+?)(?:\s*(?:→|->)\s*(\d{3})\b\s*([A-Za-z][A-Za-z ]*?)?)?\s*(?:[·|]\s*([\d.]+\s?(?:ms|s|m|µs)))?$/);
+    if (!m || !METHODS.has(m[1]) || !m[2].trim()) return null;
+    out.push({ method: m[1], url: m[2].trim(), status: m[3] ? Number(m[3]) : undefined, statusText: m[4]?.trim(), time: m[5] });
   }
   return out;
 }

@@ -1,5 +1,5 @@
 import * as React from "react";
-import { AlertTriangle, Brain, Check, ChevronRight, Clock, FileText, Loader2, MessageCircleQuestion, Sparkles, Terminal, Undo2 } from "lucide-react";
+import { AlertTriangle, Brain, Check, ChevronRight, Clock, FileText, Loader2, MessageCircleQuestion, Terminal, Undo2 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { resultSummary, type TraceEvent } from "@/lib/trace";
 export { PlanCard, PlanDock } from "./PlanBoard";
@@ -64,10 +64,11 @@ function skillOf(event: ToolEvent): string | null {
 }
 
 /**
- * A skill firing on the agent's own initiative. Same face the skill has everywhere else — the
- * tinted /name tag with its glyph — so "the playbook kicked in" reads at a glance, not as a
- * generic tool row. The launch result is noise ("Launching skill: x"), so it stays inline;
- * anything longer folds like a step.
+ * A skill firing on the agent's own initiative. One clean row: the skill's OWN glyph in a small
+ * tinted plate (never a generic AI sparkle — the per-skill icon is what makes two adjacent skill
+ * rows distinguishable), the /name in ink, and a short quiet caption. No redundant "Skill" word +
+ * chip + sentence stack — the glyph plate and the slash-name already say "playbook". The launch
+ * result is noise ("Launching skill: x"); anything longer folds like a step.
  */
 function SkillItem({ event, live }: { event: ToolEvent; live?: boolean }) {
   const name = skillOf(event);
@@ -80,29 +81,37 @@ function SkillItem({ event, live }: { event: ToolEvent; live?: boolean }) {
         onClick={() => extra && setOpen((v) => !v)}
         disabled={!extra}
         aria-expanded={extra ? open : undefined}
-        className={cn("flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1 text-left text-meta", extra && "hover:bg-muted cursor-pointer", live && "bg-live/6")}
+        className={cn("flex w-full min-w-0 items-center gap-2.5 rounded-md px-2 py-1 text-left text-meta", extra && "hover:bg-muted cursor-pointer")}
       >
-        {live ? (
-          <Loader2 className="text-live size-3.5 shrink-0 animate-spin" aria-hidden />
-        ) : event.failed ? (
-          <AlertTriangle className="text-destructive size-3.5 shrink-0" aria-hidden />
-        ) : (
-          <Sparkles className="text-live size-3.5 shrink-0" aria-hidden />
-        )}
-        <span className="text-foreground shrink-0 font-medium">Skill</span>
+        <span
+          className={cn(
+            "grid size-6 shrink-0 place-items-center rounded-md border",
+            event.failed ? "border-destructive/30 bg-destructive/10 text-destructive" : "border-live/25 bg-live/10 text-live"
+          )}
+          aria-hidden
+        >
+          {live ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : event.failed ? (
+            <AlertTriangle className="size-3.5" />
+          ) : name ? (
+            <SkillMark name={name} size={14} />
+          ) : (
+            <ChevronRight className="size-3.5" />
+          )}
+        </span>
         {name ? (
-          <span className="border-live/30 bg-live/10 text-live stamp inline-flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-micro font-semibold">
-            <SkillMark name={name} size={13} />
-            /{name}
-          </span>
+          <span className="text-foreground shrink-0 font-mono text-meta font-semibold">/{name}</span>
         ) : (
-          event.arg && <code className="text-muted-foreground bg-muted min-w-0 truncate rounded px-1.5 py-0.5 font-mono text-micro">{event.arg}</code>
+          <span className="text-foreground shrink-0 font-medium">Skill</span>
         )}
-        <span className="text-faint min-w-0 truncate text-micro">{live ? "loading the playbook…" : event.failed ? "failed to launch" : "playbook loaded — steps below follow it"}</span>
+        <span className="text-faint min-w-0 truncate text-micro">
+          {live ? "loading the playbook…" : event.failed ? "skill failed to launch" : "skill loaded · steps below follow its playbook"}
+        </span>
         {extra && <ChevronRight className={cn("text-muted-foreground ml-auto size-3.5 shrink-0 transition-transform duration-150", open && "rotate-90")} aria-hidden />}
       </button>
       {open && extra && (
-        <pre className="bg-trace text-trace-fg/80 mt-2 ml-6 max-h-72 overflow-auto rounded-md border border-white/8 px-3 py-2 font-mono text-code whitespace-pre-wrap">{extra}</pre>
+        <pre className="bg-trace text-trace-fg/80 mt-2 ml-8 max-h-72 overflow-auto rounded-md border border-white/8 px-3 py-2 font-mono text-code whitespace-pre-wrap">{extra}</pre>
       )}
     </div>
   );

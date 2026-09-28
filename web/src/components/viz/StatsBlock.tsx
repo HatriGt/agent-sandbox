@@ -10,14 +10,17 @@ import { VizFrame } from "./VizFrame";
  * direction is good (latency down = good).
  */
 export function StatsBlock({ stats, source }: { stats: Stat[]; source: string }) {
+  // Hero size is for NUMBERS. Agents sometimes put a sentence in the value slot ("3/3 instances
+  // RUNNING") — scale the type down with length so a prose value reads as a line, not a billboard.
+  const wide = stats.some((s) => s.value.length > 16 || s.label.length > 24);
   return (
     <VizFrame source={source} title={stats.length === 1 ? undefined : `${stats.length} metrics`}>
-      <div className="grid gap-px" style={{ gridTemplateColumns: `repeat(auto-fit, minmax(9rem, 1fr))` }}>
+      <div className="grid gap-px" style={{ gridTemplateColumns: `repeat(auto-fit, minmax(${wide ? "14rem" : "9rem"}, 1fr))` }}>
         {stats.map((s) => (
           <div key={s.label} className="bg-card px-4 py-3">
-            <div className="text-muted-foreground truncate text-micro font-medium">{s.label}</div>
+            <div className="text-muted-foreground truncate text-micro font-medium" title={s.label}>{s.label}</div>
             <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2">
-              <span className="text-foreground text-h2 font-semibold">{s.value}</span>
+              <span className={cn("text-foreground font-semibold", s.value.length <= 12 ? "text-h2" : s.value.length <= 28 ? "text-lead" : "text-meta")}>{s.value}</span>
               {s.delta && (
                 <span
                   className={cn(

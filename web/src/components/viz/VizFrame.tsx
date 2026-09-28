@@ -42,15 +42,16 @@ export function VizFrame({
     }
   };
   return (
-    <div className={cn("bg-card not-prose my-3 overflow-hidden rounded-xl border", className)}>
+    <div className={cn("group/viz bg-card not-prose my-3 overflow-hidden rounded-xl border", className)}>
       <div className="flex h-8 items-center gap-1 border-b px-3">
         <span className="text-muted-foreground min-w-0 flex-1 truncate text-micro font-medium">{title}</span>
         {actions}
+        {/* Utility controls stay quiet until the card is engaged — same reveal as code blocks. */}
         <button
           type="button"
           onClick={copy}
           aria-label="Copy source"
-          className="text-muted-foreground hover:text-foreground grid size-6 cursor-pointer place-items-center rounded-md"
+          className="text-muted-foreground hover:text-foreground grid size-6 cursor-pointer place-items-center rounded-md opacity-60 group-hover/viz:opacity-100 focus-visible:opacity-100"
         >
           {copied ? <Check className="size-3.5 text-ok" /> : <Copy className="size-3.5" />}
         </button>
@@ -61,7 +62,7 @@ export function VizFrame({
           aria-pressed={raw}
           className={cn(
             "grid size-6 cursor-pointer place-items-center rounded-md",
-            raw ? "text-foreground bg-muted" : "text-muted-foreground hover:text-foreground"
+            raw ? "text-foreground bg-muted opacity-100" : "text-muted-foreground hover:text-foreground opacity-60 group-hover/viz:opacity-100 focus-visible:opacity-100"
           )}
         >
           <Code2 className="size-3.5" />

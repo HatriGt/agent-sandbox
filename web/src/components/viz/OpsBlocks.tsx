@@ -22,7 +22,7 @@ export function HttpBlock({ calls, source }: { calls: HttpCall[]; source: string
             >
               {c.method}
             </span>
-            <span className="text-foreground min-w-0 flex-1 truncate font-mono text-micro">{c.url}</span>
+            <span className="text-foreground min-w-0 flex-1 truncate font-mono text-micro" title={c.url}>{c.url}</span>
             {c.status !== undefined && (
               <span
                 className={cn(
