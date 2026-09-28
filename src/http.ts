@@ -38,6 +38,7 @@ import { archiveRun, deleteRun, getRun, listRuns, pruneArchive } from "./run-arc
 import { verifyPlanOf, type VerifyPlan, type VerifyResult } from "./verify.js";
 import { parseTrace } from "./trace.js";
 import { loadNotifySettings, normalizeNotifySettings, saveNotifySettings } from "./notify-store.js";
+import { AGENT_KINDS, AGENT_LABELS, isAgentKind, loadAgentPrefs, normalizeAgentPrefs, saveAgentPrefs } from "./agent-kind.js";
 import { createLocalUser, deleteUser, listUsers, ownerOf, setUserRole, validateSignup, createPasswordUser, authenticatePassword, setPassword, updateProfile, verifyPassword, PASSWORD_MIN, listSessions, revokeSession, revokeOtherSessions, startTrial, planOf, setPlan, TrialExpiredError } from "./identity.js";
 import { parseStore } from "./gh-token-store.js";
 import { seedStarterSkills } from "./starter-skills.js";
@@ -1733,6 +1734,29 @@ app.post("/mcp-servers/test.json", async (req: Request, res: Response) => {
 // Walk-away notifications: view / set the caller's webhook and per-event toggles. The webhook is
 // per OWNER (encrypted blob, like skills) so each tenant routes their own boxes' events; the
 // NOTIFY_WEBHOOK_URL env is the deployment-wide fallback when an owner has none configured.
+// Default coding agent (Claude Code vs oh-my-pi): per-owner encrypted blob, same pattern as the
+// notify settings. The pick applies to NEW threads only; a running thread keeps the agent it
+// started on (the box's .agent.kind mark is the per-thread truth).
+app.get("/agent-prefs.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const p = principalOf(res);
+  res.json({
+    ...loadAgentPrefs(p.kind === "user" ? p.userId : OPERATOR_OWNER),
+    agents: AGENT_KINDS.map((id) => ({ id, label: AGENT_LABELS[id] })),
+  });
+});
+app.post("/agent-prefs.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const p = principalOf(res);
+  try {
+    const prefs = normalizeAgentPrefs(req.body ?? {});
+    saveAgentPrefs(prefs, p.kind === "user" ? p.userId : OPERATOR_OWNER);
+    res.json({ ...prefs, agents: AGENT_KINDS.map((id) => ({ id, label: AGENT_LABELS[id] })) });
+  } catch (e) {
+    res.status(400).json({ error: clientError(e) });
+  }
+});
+
 app.get("/notify.json", (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   const p = principalOf(res);
@@ -2622,7 +2646,21 @@ app.post("/delegate.json", async (req: Request, res: Response) => {
       }
       model = body.model.trim();
     }
+    // Agent pick for the thread: an explicit body.agent (closed enum) wins; otherwise the caller's
+    // stored default. Validated here so an unknown value 400s instead of becoming a question blob.
+    let agent: string;
+    if (typeof body.agent === "string" && body.agent.trim()) {
+      if (!isAgentKind(body.agent.trim())) {
+        res.status(400).json({ error: `Unknown agent '${body.agent}'. Allowed: ${AGENT_KINDS.join(", ")}` });
+        return;
+      }
+      agent = body.agent.trim();
+    } else {
+      const p = principalOf(res);
+      agent = loadAgentPrefs(p.kind === "user" ? p.userId : OPERATOR_OWNER).defaultAgent;
+    }
     const result = await runDelegateFlow(cfg, deps, {
+      agent,
       attachments: attachments.length ? attachments : undefined,
       // A browser has no local tree to ship: git only. (`source:"local"` would rsync a controller-host path.)
       source: "git",

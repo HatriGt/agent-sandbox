@@ -31,6 +31,11 @@ export interface Config {
    * their next bootstrap — no rebake required (a rebake just makes the next cold boot faster).
    */
   claudeCodeVersion: string;
+  /**
+   * oh-my-pi version installed for omp runs ("latest" or a pinned semver). Same version-aware
+   * install semantics as claudeCodeVersion; "latest" only presence-checks (no forced upgrade).
+   */
+  ompVersion: string;
   /** Auto-stop after this idle period. */
   idleTimeout: string;
   /**
@@ -199,6 +204,7 @@ export function loadConfig(): Config {
     snapshot: process.env.MSB_SNAPSHOT || "",
     // Bump deliberately (after a smoke run), not automatically: the agent's behavior IS the product.
     claudeCodeVersion: req("CLAUDE_CODE_VERSION", "2.1.273"),
+    ompVersion: req("OMP_VERSION", "latest"),
     idleTimeout: req("MSB_IDLE_TIMEOUT", "15m"),
     // Warm boxes should outlive a long lull with no delegations; the maintainer replaces any that the
     // hard max-duration cap reaps. Default well above idleTimeout so the pool doesn't self-drain.

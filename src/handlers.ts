@@ -248,6 +248,13 @@ export function registerTools(
           "Model alias for this run, from the controller's catalog (GET /models.json on the dashboard, " +
             "e.g. ak-claude-haiku-4.5). Invalid values are rejected with the allowed list. Omit for the default."
         ),
+      agent: z
+        .enum(["claude", "omp"])
+        .optional()
+        .describe(
+          "Coding agent for this thread: claude (Claude Code, default) or omp (oh-my-pi). The pick " +
+            "is fixed for the thread's lifetime — every resume continues the same agent's session."
+        ),
       githubAccount: z
         .string()
         .optional()
@@ -296,6 +303,7 @@ export function registerTools(
       githubToken,
       githubAccount,
       model,
+      agent,
       verify,
       after,
       carry,
@@ -310,6 +318,7 @@ export function registerTools(
       githubToken?: string;
       githubAccount?: string;
       model?: string;
+      agent?: "claude" | "omp";
       verify?: { command?: string; criterion?: string };
       after?: string;
       carry?: "patch" | "none";
@@ -373,6 +382,7 @@ export function registerTools(
         ref,
         patch,
         model,
+        agent,
       });
       if (!v.ok) return text(v.question);
 

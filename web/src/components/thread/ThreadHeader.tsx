@@ -163,7 +163,7 @@ export function ThreadHeader({
   const long = deadlineLabel(deadline);
   // Which resource's request is in flight — the confirm dialog is shared between the two.
   const busyFor = resizeTo?.kind === "disk" ? diskBusy : memoryBusy;
-  const vitals = [box.uptime && `${sleeping ? "ran for" : "up"} ${box.uptime}`, box.cpu && `cpu ${box.cpu}`, box.memUsage && `memory ${fmtUsage(box.memUsage)}`, box.disk && `disk ${fmtUsage(box.disk)}`, roleLabel(box.role)].filter(Boolean).join(" · ");
+  const vitals = [box.agent === "omp" && "agent oh-my-pi", box.uptime && `${sleeping ? "ran for" : "up"} ${box.uptime}`, box.cpu && `cpu ${box.cpu}`, box.memUsage && `memory ${fmtUsage(box.memUsage)}`, box.disk && `disk ${fmtUsage(box.disk)}`, roleLabel(box.role)].filter(Boolean).join(" · ");
 
   return (
     <header className="shrink-0 border-b px-3 py-2.5 md:px-5">
@@ -184,19 +184,21 @@ export function ThreadHeader({
             }}
             aria-label="Run title"
             maxLength={80}
-            className="text-foreground bg-muted h-8 min-w-0 flex-1 rounded-md px-2 text-h3 font-semibold tracking-[-0.01em] outline-none"
+            className="pop-in text-foreground bg-muted ring-ring/30 h-8 min-w-0 flex-1 rounded-md px-2 text-h3 font-semibold tracking-[-0.01em] ring-2 outline-none"
           />
         ) : (
-          <h1 className="group/title flex min-w-0 flex-1 items-center gap-1.5">
+          <h1 className="flex min-w-0 flex-1 items-center">
+            {/* The pencil lives INSIDE the button: the visible edit affordance must be clickable,
+                not just the text beside it. */}
             <button
               type="button"
               onClick={startRename}
               title="Rename"
-              className="text-foreground min-w-0 cursor-text truncate text-left text-h3 font-semibold tracking-[-0.01em] no-press"
+              className="group/title flex min-w-0 cursor-text items-center gap-1.5 text-left no-press"
             >
-              {title}
+              <span className="text-foreground min-w-0 truncate text-h3 font-semibold tracking-[-0.01em]">{title}</span>
+              <Pencil className="text-faint size-3 shrink-0 -translate-x-0.5 opacity-0 transition-[opacity,translate] duration-150 group-hover/title:translate-x-0 group-hover/title:opacity-100 group-focus-visible/title:opacity-100" aria-hidden />
             </button>
-            <Pencil className="text-faint size-3 shrink-0 opacity-0 transition-opacity group-hover/title:opacity-100" aria-hidden />
           </h1>
         )}
 

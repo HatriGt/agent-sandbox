@@ -8,6 +8,7 @@ import { Capacity } from "@/components/Capacity";
 import { Button } from "@/components/ui/button";
 import { ApiKeys } from "@/components/ApiKeys";
 import { NotifySettings } from "@/components/NotifySettings";
+import { AgentSettings } from "@/components/AgentSettings";
 import { Sessions } from "@/components/Sessions";
 import { AuditLog } from "@/components/AuditLog";
 import { cn } from "@/lib/utils";
@@ -189,6 +190,8 @@ export function Account({ onBack, onConnect, onAdmin }: { onBack: () => void; on
               </Button>
             </section>
           )}
+
+          <AgentSettings />
 
           <NotifySettings />
 

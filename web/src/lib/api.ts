@@ -37,6 +37,14 @@ export interface BoxView {
   queued?: string[];
   /** Repositories checked out under /workspace. */
   repos?: { name: string; branch?: string }[];
+  /** Which coding agent this thread runs on ("claude" | "omp"). Absent on older boxes. */
+  agent?: string;
+}
+
+/** Default coding agent for new threads (Claude Code vs oh-my-pi). */
+export interface AgentPrefs {
+  defaultAgent: "claude" | "omp";
+  agents: { id: "claude" | "omp"; label: string }[];
 }
 
 export interface RepoInfo {
@@ -651,6 +659,8 @@ export const api = {
     repos?: { repo: string; ref?: string }[];
     attachments?: { name: string; dataUrl: string }[];
     model?: string;
+    /** Coding agent for the new thread; omit to use the stored default. */
+    agent?: "claude" | "omp";
     /** Exactly one key: a command run in the sandbox after the run, or a criterion a read-only checker judges. */
     verify?: { command: string } | { criterion: string };
   }) =>
@@ -678,6 +688,12 @@ export const api = {
     fetch(url("/repos.json", refresh ? { q, refresh: "1" } : { q }), { headers: authHeaders, signal }).then(
       parse<{ repos: RepoInfo[]; total: number }>
     ),
+  /** Default coding agent for new threads (Claude Code vs oh-my-pi). */
+  agentPrefs: (signal?: AbortSignal) =>
+    fetch(url("/agent-prefs.json"), { headers: authHeaders, signal }).then(parse<AgentPrefs>),
+  saveAgentPrefs: (defaultAgent: "claude" | "omp") =>
+    post<AgentPrefs>("/agent-prefs.json", { defaultAgent }),
+
   /** Walk-away notifications: the caller's webhook and per-event toggles. */
   notifySettings: (signal?: AbortSignal) =>
     fetch(url("/notify.json"), { headers: authHeaders, signal }).then(parse<NotifySettings>),

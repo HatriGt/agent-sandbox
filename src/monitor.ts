@@ -49,6 +49,8 @@ export interface BoxView {
    * the box's memory cap.
    */
   memUsage?: Usage;
+  /** Which coding agent this thread runs on ("claude" | "omp"), from the box's .agent.kind mark. */
+  agent?: string;
   /** Unix seconds of the agent log's last write — when the agent last produced output. Best-effort. */
   lastOutputAt?: number;
   /** Follow-ups queued by the dashboard while the agent was mid-turn; delivered when it finishes. */
@@ -255,6 +257,8 @@ export interface WatchSnapshot {
   mem?: string;
   /** `mem` as numbers, for the thread's usage meter. Disk arrives via the fleet poll instead. */
   memUsage?: Usage;
+  /** Which coding agent this thread runs on ("claude" | "omp"), from the box's .agent.kind mark. */
+  agent?: string;
   /** The log tail (already limited to N lines by the caller). */
   log: string;
 }

@@ -14,6 +14,8 @@
  * so existing single-repo callers are unchanged.
  */
 
+import { isAgentKind, AGENT_KINDS, type AgentKind } from "./agent-kind.js";
+
 export type DelegateSource = "local" | "git";
 
 /**
@@ -46,6 +48,8 @@ export interface DelegateInput {
   patch?: string;
   /** Model alias for this run (validated against the catalog upstream in http/handlers). */
   model?: string;
+  /** Coding agent for this thread: "claude" (default) or "omp". Validated here (closed enum). */
+  agent?: string;
 }
 
 /** A validated repo with a unique in-box directory name derived from the repo. */
@@ -73,6 +77,8 @@ export interface DelegatePlan {
   attachments?: Attachment[];
   /** Model alias for message 1 (already allowlist-validated by the route/handler). */
   model?: string;
+  /** Coding agent for the thread; absent means claude. */
+  agent?: AgentKind;
   /** Back-compat accessor: the first repo's identifier. */
   repo: string;
   /** Back-compat accessor: the first repo's ref. */
@@ -155,6 +161,14 @@ export function validateDelegateInput(input: DelegateInput): DelegateValidation 
     };
   }
 
+  // An unknown agent is a caller mistake, and the kind lands inside a shell command — hard stop.
+  if (input.agent !== undefined && input.agent !== "" && !isAgentKind(input.agent)) {
+    return {
+      ok: false,
+      question: `Unknown agent '${input.agent}'. Pick one of: ${AGENT_KINDS.join(", ")}.`,
+    };
+  }
+
   const missing: string[] = [];
 
   // A repo is OPTIONAL: a sandbox can run a task with no repo at all ("write a report about X").
@@ -195,6 +209,7 @@ export function validateDelegateInput(input: DelegateInput): DelegateValidation 
       repos: refs,
       task: input.task!.trim(),
       ...(input.model?.trim() ? { model: input.model.trim() } : {}),
+      ...(isAgentKind(input.agent) && input.agent !== "claude" ? { agent: input.agent } : {}),
       // Back-compat accessor: first repo, or "" in task-only mode.
       repo: refs[0]?.repo ?? "",
       ref: refs[0]?.ref,

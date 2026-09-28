@@ -462,7 +462,7 @@ export const deps: HandlerDeps = {
     // it reaches an interactive boundary (asks a question / finishes) or the wait times out. The
     // open MCP call is the "listener" — this is what makes the calling agent wait for the box
     // instead of ending its turn. A timeout returns "still working, reconnect via status".
-    await runAgentTask(runCfg, box, plan.task, plan.repos, runCreds, plan.model);
+    await runAgentTask(runCfg, box, plan.task, plan.repos, runCreds, plan.model, plan.agent);
     // A detached caller (the dashboard) needs only the box name — its thread view attaches over
     // SSE. Blocking its HTTP response on the wait window added ~50s of perceived start latency.
     if (interact?.detach) return { box, warm, output: "run:started — attach via status/watch" };

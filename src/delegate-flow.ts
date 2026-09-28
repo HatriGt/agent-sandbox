@@ -27,6 +27,8 @@ export interface DelegateFlowInput {
   attachments?: Attachment[];
   /** Model alias for message 1 (already allowlist-validated by the route). */
   model?: string;
+  /** Coding agent for this thread ("claude" | "omp"); validated by validateDelegateInput. */
+  agent?: string;
   /**
    * Verified-outcomes clause (src/verify.ts), already validated by the route via verifyPlanOf.
    * The flow itself does not run it — a browser delegate returns before the run finishes, so the
@@ -63,6 +65,7 @@ export async function runDelegateFlow(
     task: input.task,
     ref: input.ref,
     model: input.model,
+    agent: input.agent,
   });
   if (!v.ok) return { ok: false, question: v.question };
   if (input.attachments?.length) v.plan.attachments = input.attachments;

@@ -30,6 +30,9 @@ export const RESERVED_SECRET_KEYS = new Set([
   "AGENT_SYS_PROMPT",
   "CLAUDE_CODE_ENABLE_TASKS",
   "NPM_TOKEN",
+  // The omp branch relies on this staying set (an interactive setup wizard would hang a headless
+  // run); a caller-supplied override could also flip omp into interactive paths.
+  "OMP_SKIP_SETUP",
 ]);
 
 /** POSIX-ish env name: letters, digits, underscore; never leading digit, never a flag. */
