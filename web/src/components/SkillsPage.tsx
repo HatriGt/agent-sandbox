@@ -1,11 +1,12 @@
 import * as React from "react";
-import { ArrowLeft, Check, Download, Eye, FileUp, Github, Loader2, Maximize2, Minimize2, PenLine, Plus, Search, Trash2, Upload, X } from "lucide-react";
+import { ArrowLeft, Check, ChevronRight, Download, Eye, FileUp, Github, Loader2, Maximize2, Minimize2, PenLine, Plus, Search, Trash2, Upload, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
 import { api, type SkillView } from "@/lib/api";
 import { useCached } from "@/lib/cache";
 import { fmtAgo } from "@/lib/format";
 import { SkillMark } from "@/lib/skillGlyph";
+import { FileIcon, FolderIcon } from "@/lib/vscodeIcons";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -301,6 +302,7 @@ function SkillRow({
       <span className={cn("flex min-w-0 items-center gap-2.5", !s.enabled && "opacity-50")}>
         <SkillMark name={s.name} size={16} className="text-muted-foreground" />
         <span className="stamp text-foreground truncate text-meta font-medium">/{s.name}</span>
+        {(s.files?.length ?? 0) > 0 && <span className="text-faint tabular shrink-0 text-micro">{s.files!.length + 1} files</span>}
       </span>
 
       <span className={cn("text-muted-foreground col-span-2 min-w-0 truncate text-meta md:col-span-1", !s.enabled && "opacity-60")} title={s.description}>
@@ -381,8 +383,10 @@ function EditorSheet({
   const [name, setName] = React.useState(initial?.name ?? draft?.name ?? "");
   const [description, setDescription] = React.useState(initial?.description ?? draft?.description ?? "");
   const [content, setContent] = React.useState(initial?.content ?? draft?.content ?? "");
-  // Supporting files (multi-file skills) ride along untouched: SKILL.md is the editable part.
-  const files = initial?.files ?? draft?.files;
+  // Supporting files (multi-file skills): browsable in the explorer, editable in place, saved with the skill.
+  const [files, setFiles] = React.useState<SkillFile[]>(initial?.files ?? draft?.files ?? []);
+  const [active, setActive] = React.useState("SKILL.md");
+  const activeFile = active === "SKILL.md" ? null : (files.find((f) => f.path === active) ?? null);
   const [tab, setTab] = React.useState<"write" | "preview">("write");
   const [busy, setBusy] = React.useState(false);
   const [armed, setArmed] = React.useState(false);
@@ -444,7 +448,7 @@ function EditorSheet({
         {
           action: "upsert",
           previousName: initial?.name,
-          skill: { name: name.trim(), description: description.trim(), content, files, enabled: initial?.enabled ?? true },
+          skill: { name: name.trim(), description: description.trim(), content, files: files.length ? files : undefined, enabled: initial?.enabled ?? true },
         },
         initial ? "Skill saved" : `/${name.trim()} is live — every sandbox gets it on its next turn`
       );
@@ -553,51 +557,72 @@ function EditorSheet({
 
           <div className="flex min-h-0 flex-1 flex-col gap-1.5">
             <div className="flex shrink-0 items-center justify-between">
-              <span className="label text-muted-foreground">Instructions</span>
+              <span className="label text-muted-foreground min-w-0 truncate">
+                {activeFile ? <span className="stamp normal-case">{activeFile.path}</span> : "Instructions"}
+              </span>
               <div className="flex items-center gap-3">
-                <span className={cn("tabular text-micro", content.length > 60_000 ? "text-destructive" : "text-faint")}>
-                  {content.length.toLocaleString()} / 65,536
-                </span>
-                <div role="radiogroup" aria-label="Editor mode" className="bg-muted inline-flex h-7 items-center gap-0.5 rounded-md p-0.5">
-                  <TabChip active={tab === "write"} onClick={() => setTab("write")} icon={<PenLine className="size-3" />} label="Write" />
-                  <TabChip active={tab === "preview"} onClick={() => setTab("preview")} icon={<Eye className="size-3" />} label="Preview" />
-                </div>
+                {activeFile ? (
+                  <>
+                    <span className="text-faint tabular text-micro">{fmtKb(new Blob([activeFile.content]).size)}</span>
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      aria-label={`Remove ${activeFile.path} from the skill`}
+                      className="text-muted-foreground hover:text-destructive"
+                      onClick={() => {
+                        setFiles((fs) => fs.filter((f) => f.path !== activeFile.path));
+                        setActive("SKILL.md");
+                      }}
+                    >
+                      <Trash2 />
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <span className={cn("tabular text-micro", content.length > 60_000 ? "text-destructive" : "text-faint")}>
+                      {content.length.toLocaleString()} / 65,536
+                    </span>
+                    <div role="radiogroup" aria-label="Editor mode" className="bg-muted inline-flex h-7 items-center gap-0.5 rounded-md p-0.5">
+                      <TabChip active={tab === "write"} onClick={() => setTab("write")} icon={<PenLine className="size-3" />} label="Write" />
+                      <TabChip active={tab === "preview"} onClick={() => setTab("preview")} icon={<Eye className="size-3" />} label="Preview" />
+                    </div>
+                  </>
+                )}
               </div>
             </div>
-            <div className="bg-background min-h-0 flex-1 overflow-hidden rounded-md border">
-              {tab === "write" ? (
-                <CodeEditor
-                  value={content}
-                  onChange={setContent}
-                  onSave={() => void save()}
-                  path="SKILL.md"
-                  ariaLabel="Skill instructions (markdown)"
-                  autoFocus={!!initial}
-                  className="h-full"
-                />
-              ) : content.trim() ? (
-                <div className="h-full overflow-y-auto px-4 py-3">
-                  <Markdown className="prose-agent">{content}</Markdown>
-                </div>
-              ) : (
-                <p className="text-muted-foreground px-4 py-3 text-meta">Nothing to preview yet.</p>
-              )}
+            <div className="flex min-h-0 flex-1 gap-2">
+              {files.length > 0 && <SkillFileTree files={files} active={active} onSelect={setActive} />}
+              <div className="bg-background min-h-0 min-w-0 flex-1 overflow-hidden rounded-md border">
+                {activeFile ? (
+                  <CodeEditor
+                    key={activeFile.path}
+                    value={activeFile.content}
+                    onChange={(v) => setFiles((fs) => fs.map((f) => (f.path === activeFile.path ? { ...f, content: v } : f)))}
+                    onSave={() => void save()}
+                    path={activeFile.path}
+                    ariaLabel={`Edit ${activeFile.path}`}
+                    className="h-full"
+                  />
+                ) : tab === "write" ? (
+                  <CodeEditor
+                    value={content}
+                    onChange={setContent}
+                    onSave={() => void save()}
+                    path="SKILL.md"
+                    ariaLabel="Skill instructions (markdown)"
+                    autoFocus={!!initial}
+                    className="h-full"
+                  />
+                ) : content.trim() ? (
+                  <div className="h-full overflow-y-auto px-4 py-3">
+                    <Markdown className="prose-agent">{content}</Markdown>
+                  </div>
+                ) : (
+                  <p className="text-muted-foreground px-4 py-3 text-meta">Nothing to preview yet.</p>
+                )}
+              </div>
             </div>
           </div>
-
-          {files && files.length > 0 && (
-            <div className="shrink-0">
-              <span className="label text-muted-foreground">Supporting files ({files.length}) — imported with the skill, edited at the source</span>
-              <ul className="bg-background mt-1.5 max-h-28 divide-y overflow-y-auto rounded-md border">
-                {files.map((f) => (
-                  <li key={f.path} className="flex items-center gap-3 px-2.5 py-1.5">
-                    <span className="stamp text-foreground min-w-0 flex-1 truncate text-micro">{f.path}</span>
-                    <span className="text-faint tabular shrink-0 text-micro">{fmtKb(new Blob([f.content]).size)}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
 
           {err && (
             <p role="alert" className="text-destructive shrink-0 text-meta">
@@ -652,6 +677,88 @@ function EditorSheet({
         </footer>
       </motion.div>
     </div>
+  );
+}
+
+/* ───────────────────────────── skill file explorer ───────────────────────────── */
+
+type FileNode = { name: string; path: string; children?: FileNode[] };
+
+/** Fold flat paths into a tree: folders first, then files, both alphabetical. */
+function buildFileTree(paths: string[]): FileNode[] {
+  const root: FileNode[] = [];
+  for (const path of [...paths].sort()) {
+    let level = root;
+    const parts = path.split("/");
+    parts.forEach((part, i) => {
+      const sub = parts.slice(0, i + 1).join("/");
+      let node = level.find((n) => n.name === part);
+      if (!node) {
+        node = i === parts.length - 1 ? { name: part, path: sub } : { name: part, path: sub, children: [] };
+        level.push(node);
+      }
+      level = node.children ?? level;
+    });
+  }
+  const sort = (nodes: FileNode[]): FileNode[] => {
+    nodes.sort((a, b) => Number(!!b.children) - Number(!!a.children) || a.name.localeCompare(b.name));
+    nodes.forEach((n) => n.children && sort(n.children));
+    return nodes;
+  };
+  return sort(root);
+}
+
+/**
+ * The skill's own little explorer — same visual language as the box workspace (file glyphs,
+ * indent guides, folding folders), scoped to the files this skill ships. SKILL.md is pinned on
+ * top; every file opens in the editor beside it.
+ */
+function SkillFileTree({ files, active, onSelect }: { files: SkillFile[]; active: string; onSelect: (path: string) => void }) {
+  const tree = React.useMemo(() => buildFileTree(files.map((f) => f.path)), [files]);
+  return (
+    <nav aria-label="Skill files" className="bg-background w-44 shrink-0 overflow-y-auto rounded-md border py-1">
+      <TreeRow name="SKILL.md" path="SKILL.md" depth={0} active={active} onSelect={onSelect} />
+      {tree.map((n) => (
+        <TreeNodeRow key={n.path} node={n} depth={0} active={active} onSelect={onSelect} />
+      ))}
+    </nav>
+  );
+}
+
+function TreeNodeRow({ node, depth, active, onSelect }: { node: FileNode; depth: number; active: string; onSelect: (p: string) => void }) {
+  const [open, setOpen] = React.useState(true);
+  if (!node.children) return <TreeRow name={node.name} path={node.path} depth={depth} active={active} onSelect={onSelect} />;
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="hover:bg-muted/60 flex w-full cursor-pointer items-center gap-1.5 px-2 py-1 text-left"
+        style={{ paddingLeft: `${8 + depth * 12}px` }}
+      >
+        <ChevronRight className={cn("text-muted-foreground size-3 shrink-0 transition-transform duration-150", open && "rotate-90")} aria-hidden />
+        <FolderIcon name={node.name} open={open} size={14} />
+        <span className="text-foreground min-w-0 truncate text-micro">{node.name}</span>
+      </button>
+      {open && node.children.map((c) => <TreeNodeRow key={c.path} node={c} depth={depth + 1} active={active} onSelect={onSelect} />)}
+    </div>
+  );
+}
+
+function TreeRow({ name, path, depth, active, onSelect }: { name: string; path: string; depth: number; active: string; onSelect: (p: string) => void }) {
+  const on = active === path;
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(path)}
+      aria-current={on || undefined}
+      className={cn("flex w-full cursor-pointer items-center gap-1.5 px-2 py-1 text-left transition-colors", on ? "bg-live/10" : "hover:bg-muted/60")}
+      style={{ paddingLeft: `${21 + depth * 12}px` }}
+    >
+      <FileIcon path={path} size={14} />
+      <span className={cn("min-w-0 truncate text-micro", on ? "text-live font-medium" : "text-foreground")}>{name}</span>
+    </button>
   );
 }
 

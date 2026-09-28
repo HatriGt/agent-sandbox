@@ -1,5 +1,5 @@
 import * as React from "react";
-import { AlertTriangle, Brain, Check, ChevronRight, Clock, FileText, Loader2, MessageCircleQuestion, Terminal, Undo2 } from "lucide-react";
+import { AlertTriangle, Brain, Check, ChevronRight, Clock, FileText, Loader2, MessageCircleQuestion, Sparkles, Terminal, Undo2 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { resultSummary, type TraceEvent } from "@/lib/trace";
 export { PlanCard, PlanDock } from "./PlanBoard";
@@ -52,7 +52,60 @@ function lineCount(result: string): number {
 function ToolItem({ event, live }: { event: ToolEvent; live?: boolean }) {
   const mcp = parseMcpName(event.name);
   if (mcp) return <McpItem event={event} call={mcp} live={live} />;
+  if (event.name === "Skill") return <SkillItem event={event} live={live} />;
   return SHELL_TOOLS.has(event.name) ? <ShellItem event={event} live={live} /> : <StepItem event={event} live={live} />;
+}
+
+/** The skill name of a Skill tool event: the arg when the formatter carried it, else the result's "Launching skill: X". */
+function skillOf(event: ToolEvent): string | null {
+  const fromArg = event.arg?.match(/^[a-z0-9][a-z0-9-]{0,49}/)?.[0];
+  if (fromArg) return fromArg;
+  return event.result?.match(/Launching skill:\s*([a-z0-9][a-z0-9-]{0,49})/i)?.[1] ?? null;
+}
+
+/**
+ * A skill firing on the agent's own initiative. Same face the skill has everywhere else — the
+ * tinted /name tag with its glyph — so "the playbook kicked in" reads at a glance, not as a
+ * generic tool row. The launch result is noise ("Launching skill: x"), so it stays inline;
+ * anything longer folds like a step.
+ */
+function SkillItem({ event, live }: { event: ToolEvent; live?: boolean }) {
+  const name = skillOf(event);
+  const extra = (event.result ?? "").replace(/^\s*Launching skill:.*$/im, "").trim();
+  const [open, setOpen] = React.useState(false);
+  return (
+    <div className="enter min-w-0">
+      <button
+        type="button"
+        onClick={() => extra && setOpen((v) => !v)}
+        disabled={!extra}
+        aria-expanded={extra ? open : undefined}
+        className={cn("flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1 text-left text-meta", extra && "hover:bg-muted cursor-pointer", live && "bg-live/6")}
+      >
+        {live ? (
+          <Loader2 className="text-live size-3.5 shrink-0 animate-spin" aria-hidden />
+        ) : event.failed ? (
+          <AlertTriangle className="text-destructive size-3.5 shrink-0" aria-hidden />
+        ) : (
+          <Sparkles className="text-live size-3.5 shrink-0" aria-hidden />
+        )}
+        <span className="text-foreground shrink-0 font-medium">Skill</span>
+        {name ? (
+          <span className="border-live/30 bg-live/10 text-live stamp inline-flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-0.5 text-micro font-semibold">
+            <SkillMark name={name} size={13} />
+            /{name}
+          </span>
+        ) : (
+          event.arg && <code className="text-muted-foreground bg-muted min-w-0 truncate rounded px-1.5 py-0.5 font-mono text-micro">{event.arg}</code>
+        )}
+        <span className="text-faint min-w-0 truncate text-micro">{live ? "loading the playbook…" : event.failed ? "failed to launch" : "playbook loaded — steps below follow it"}</span>
+        {extra && <ChevronRight className={cn("text-muted-foreground ml-auto size-3.5 shrink-0 transition-transform duration-150", open && "rotate-90")} aria-hidden />}
+      </button>
+      {open && extra && (
+        <pre className="bg-trace text-trace-fg/80 mt-2 ml-6 max-h-72 overflow-auto rounded-md border border-white/8 px-3 py-2 font-mono text-code whitespace-pre-wrap">{extra}</pre>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -94,8 +147,11 @@ export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolea
     const m = parseMcpName(e.name);
     if (m) mcpByServer.set(m.server, (mcpByServer.get(m.server) ?? 0) + 1);
   }
+  // Skills that fired inside the fold: named, because "the playbook ran" is the headline fact.
+  const skillsUsed = [...new Set(events.filter((e) => e.name === "Skill").map((e) => skillOf(e)).filter(Boolean))] as string[];
   const facts = [
     `${events.length} steps`,
+    ...skillsUsed.map((n) => `/${n}`),
     files.size ? `${files.size} ${files.size === 1 ? "file" : "files"}` : null,
     commands ? `${commands} ${commands === 1 ? "command" : "commands"}` : null,
     ...[...mcpByServer].map(([srv, n]) => `${n} ${srv} ${n === 1 ? "call" : "calls"}`),

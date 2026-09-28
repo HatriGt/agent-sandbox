@@ -896,7 +896,7 @@ export function streamFmtScript(): string {
     // Stamp the tool_use id (short tail) so a result can be matched to ITS OWN call. With parallel
     // tool use one assistant message issues N tool_use blocks and the N results arrive afterwards;
     // without a correlation token the parser can only attach every result to the most recent call.
-    `else if(b.type==="tool_use"){const inp=b.input||{};const arg=String(inp.command||inp.file_path||inp.path||inp.pattern||inp.description||"").replace(/\\s*\\n\\s*/g," ").trim();w("→ "+b.name+(arg?": "+df(arg.slice(0,200)):"")+(b.id?" ${ID_OPEN}"+String(b.id).slice(-8)+"${ID_CLOSE}":""));` +
+    `else if(b.type==="tool_use"){const inp=b.input||{};const arg=String(inp.command||inp.skill||inp.file_path||inp.path||inp.pattern||inp.description||"").replace(/\\s*\\n\\s*/g," ").trim();w("→ "+b.name+(arg?": "+df(arg.slice(0,200)):"")+(b.id?" ${ID_OPEN}"+String(b.id).slice(-8)+"${ID_CLOSE}":""));` +
     // Per-edit diff block: what the Edit/Write actually changes, as -old/+new lines. Defanged and
     // capped (lines then bytes) — the truncation is announced, mirroring the tool_result budgets.
     `const dd=diffLines(b.name,inp);if(dd.length){const head=[];let bytes=0;let cut=0;for(const l of dd){if(head.length>=${DIFF_MAX_LINES}||bytes+l.length+1>${DIFF_MAX_BYTES}){cut++;continue}bytes+=l.length+1;head.push(l)}` +
