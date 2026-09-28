@@ -1,10 +1,41 @@
 import * as React from "react";
 import { nodeText, parseChartSpec, parseDelimited, parseFlow, parseStats, parseTree, looksLikeTree } from "@/lib/viz";
+import {
+  calloutKind,
+  looksLikeCommits,
+  looksLikeDiffstat,
+  parseBadges,
+  parseCommits,
+  parseDag,
+  parseDeps,
+  parseDiffstat,
+  parseFunnel,
+  parseHeatmap,
+  parseHttp,
+  parseKeys,
+  parseKv,
+  parseLog,
+  parsePalette,
+  parseProgress,
+  parseScores,
+  parseSpans,
+  parseSteps,
+  parseTests,
+  parseTimeline,
+} from "@/lib/viz-extra";
+import { Markdown } from "@/components/ui/markdown";
 import { ChartBlock } from "./ChartBlock";
+import { CalloutBlock } from "./CalloutBlock";
+import { HeatmapBlock, FunnelBlock, SpansBlock } from "./ChartExtras";
 import { DataTable } from "./DataTable";
 import { FlowBlock } from "./FlowBlock";
+import { CommitsBlock, DepsBlock, DiffstatBlock } from "./GitBlocks";
+import { GraphBlock } from "./GraphBlock";
 import { JsonBlock } from "./JsonBlock";
+import { HttpBlock, LogBlock, TestsBlock } from "./OpsBlocks";
+import { BadgesBlock, KeysBlock, KvBlock, PaletteBlock, ProgressBlock, ScoreBlock } from "./SmallBlocks";
 import { StatsBlock } from "./StatsBlock";
+import { TimelineBlock, StepsBlock } from "./TimelineBlock";
 import { TreeBlock } from "./TreeBlock";
 
 /**
@@ -58,13 +89,128 @@ export function smartBlock(language: string, code: string): React.ReactElement |
       }
       break;
     }
+    case "timeline": {
+      const events = parseTimeline(src);
+      el = events && <TimelineBlock events={events} source={src} />;
+      break;
+    }
+    case "steps": {
+      const steps = parseSteps(src);
+      el = steps && <StepsBlock steps={steps} source={src} />;
+      break;
+    }
+    case "progress": {
+      const rows = parseProgress(src);
+      el = rows && <ProgressBlock rows={rows} source={src} />;
+      break;
+    }
+    case "kv": {
+      const rows = parseKv(src);
+      el = rows && <KvBlock rows={rows} source={src} />;
+      break;
+    }
+    case "badges": {
+      const badges = parseBadges(src);
+      el = badges && <BadgesBlock badges={badges} source={src} />;
+      break;
+    }
+    case "score": {
+      const scores = parseScores(src);
+      el = scores && <ScoreBlock scores={scores} source={src} />;
+      break;
+    }
+    case "keys":
+    case "shortcuts": {
+      const rows = parseKeys(src);
+      el = rows && <KeysBlock rows={rows} source={src} />;
+      break;
+    }
+    case "palette": {
+      const swatches = parsePalette(src);
+      el = swatches && <PaletteBlock swatches={swatches} source={src} />;
+      break;
+    }
+    case "http": {
+      const calls = parseHttp(src);
+      el = calls && <HttpBlock calls={calls} source={src} />;
+      break;
+    }
+    case "tests": {
+      const report = parseTests(src);
+      el = report && <TestsBlock report={report} source={src} />;
+      break;
+    }
+    case "log": {
+      const lines = parseLog(src);
+      el = lines && <LogBlock lines={lines} source={src} />;
+      break;
+    }
+    case "diffstat": {
+      const files = parseDiffstat(src);
+      el = files && <DiffstatBlock files={files} source={src} />;
+      break;
+    }
+    case "commits": {
+      const commits = parseCommits(src);
+      el = commits && <CommitsBlock commits={commits} source={src} />;
+      break;
+    }
+    case "deps": {
+      const deps = parseDeps(src);
+      el = deps && <DepsBlock deps={deps} source={src} />;
+      break;
+    }
+    case "graph":
+    case "dag": {
+      const dag = parseDag(src);
+      el = dag && <GraphBlock dag={dag} source={src} />;
+      break;
+    }
+    case "funnel": {
+      const stages = parseFunnel(src);
+      el = stages && <FunnelBlock stages={stages} source={src} />;
+      break;
+    }
+    case "gantt":
+    case "spans": {
+      const r = parseSpans(src);
+      el = r && <SpansBlock spans={r.spans} unit={r.unit} source={src} />;
+      break;
+    }
+    case "heatmap": {
+      const map = parseHeatmap(src);
+      el = map && <HeatmapBlock map={map} source={src} />;
+      break;
+    }
+    case "note":
+    case "info":
+    case "tip":
+    case "important":
+    case "warn":
+    case "warning":
+    case "caution":
+    case "danger":
+    case "success":
+    case "error": {
+      const kind = calloutKind(language);
+      // Callout content is markdown — it re-enters the same pipeline, so a table inside a warning
+      // still renders rich. No VizBoundary needed: CalloutBlock has no parser to disagree with.
+      if (kind) return <CalloutBlock kind={kind}>{<Markdown>{src}</Markdown>}</CalloutBlock>;
+      break;
+    }
     case "plaintext":
     case "text":
     case "": {
-      // Auto-upgrade: a bare fence that is clearly `tree`-style output.
+      // Auto-upgrades for bare fences with an unmistakable shape.
       if (looksLikeTree(src)) {
         const roots = parseTree(src);
         el = roots && <TreeBlock roots={roots} source={src} />;
+      } else if (looksLikeDiffstat(src)) {
+        const files = parseDiffstat(src);
+        el = files && <DiffstatBlock files={files} source={src} />;
+      } else if (looksLikeCommits(src)) {
+        const commits = parseCommits(src);
+        el = commits && <CommitsBlock commits={commits} source={src} />;
       }
       break;
     }

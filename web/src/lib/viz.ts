@@ -40,12 +40,14 @@ export interface ChartSeries {
   data: number[];
 }
 export interface ChartSpec {
-  type: "bar" | "line" | "area" | "donut" | "sparkline";
+  type: "bar" | "line" | "area" | "donut" | "sparkline" | "scatter";
   title?: string;
   labels: string[];
   series: ChartSeries[];
   /** Optional unit suffix rendered after values (e.g. "ms", "%"). */
   unit?: string;
+  /** Bars only: stack series instead of grouping them. */
+  stacked?: boolean;
 }
 
 /**
@@ -63,7 +65,7 @@ export function parseChartSpec(src: string): ChartSpec | null {
   if (typeof raw !== "object" || raw === null) return null;
   const o = raw as Record<string, unknown>;
   const type = o.type;
-  if (type !== "bar" && type !== "line" && type !== "area" && type !== "donut" && type !== "sparkline") return null;
+  if (type !== "bar" && type !== "line" && type !== "area" && type !== "donut" && type !== "sparkline" && type !== "scatter") return null;
   const labels = Array.isArray(o.labels) ? o.labels.map(String) : null;
   if (!labels || labels.length === 0 || labels.length > 60) return null;
   let series: ChartSeries[] = [];
@@ -85,12 +87,18 @@ export function parseChartSpec(src: string): ChartSpec | null {
   if (series.some((s) => s.data.length !== labels.length)) return null;
   if ((type === "donut" || type === "sparkline") && series.length > 1) return null;
   if (type === "donut" && series[0].data.some((n) => n < 0)) return null;
+  // Scatter puts every series pair side by side (all-pairs), where the palette validates only its
+  // first three slots — cap it there rather than ship indistinguishable dots.
+  if (type === "scatter" && series.length > 3) return null;
+  const stacked = o.stacked === true && type === "bar";
+  if (stacked && series.some((s) => s.data.some((n) => n < 0))) return null;
   return {
     type,
     title: typeof o.title === "string" ? o.title : undefined,
     labels,
     series,
     unit: typeof o.unit === "string" ? o.unit : undefined,
+    stacked: stacked || undefined,
   };
 }
 

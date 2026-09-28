@@ -14,7 +14,17 @@ export function ChartBlock({ spec, source }: { spec: ChartSpec; source: string }
   return (
     <VizFrame title={spec.title ?? spec.type} source={source} rawLanguage="json">
       <div className="px-4 py-3">
-        {spec.type === "donut" ? <Donut spec={spec} /> : spec.type === "sparkline" ? <Spark spec={spec} /> : spec.type === "bar" ? <Bars spec={spec} /> : <Lines spec={spec} area={spec.type === "area"} />}
+        {spec.type === "donut" ? (
+          <Donut spec={spec} />
+        ) : spec.type === "sparkline" ? (
+          <Spark spec={spec} />
+        ) : spec.type === "scatter" ? (
+          <Scatter spec={spec} />
+        ) : spec.type === "bar" ? (
+          spec.stacked ? <StackedBars spec={spec} /> : <Bars spec={spec} />
+        ) : (
+          <Lines spec={spec} area={spec.type === "area"} />
+        )}
         {spec.series.length >= 2 && (
           <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
             {spec.series.map((s, i) => (
@@ -122,6 +132,124 @@ function Bars({ spec }: { spec: ChartSpec }) {
             </g>
           );
         })}
+      </svg>
+      <Tip tip={tip} />
+    </div>
+  );
+}
+
+/** Stacked bars: one column per label, segments in slot order with a 2px surface gap between fills. */
+function StackedBars({ spec }: { spec: ChartSpec }) {
+  const reduced = useReduced();
+  const [tip, setTip] = React.useState<{ x: number; y: number; text: string } | null>(null);
+  const nL = spec.labels.length;
+  const totals = spec.labels.map((_, li) => spec.series.reduce((a, s) => a + s.data[li], 0));
+  const max = Math.max(...totals, 1);
+  const plotH = 140;
+  const H = plotH + 16;
+  const group = W / nL;
+  const barW = Math.max(6, Math.min(32, group - 12));
+  return (
+    <div className="relative">
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label={spec.title ?? "stacked bar chart"}>
+        {[0.25, 0.5, 0.75].map((f) => (
+          <line key={f} x1={0} x2={W} y1={plotH - f * (plotH - 18)} y2={plotH - f * (plotH - 18)} stroke="var(--viz-grid)" strokeWidth={1} />
+        ))}
+        <line x1={0} x2={W} y1={plotH} y2={plotH} stroke="var(--line-strong)" strokeWidth={1} />
+        {spec.labels.map((label, li) => {
+          const x = li * group + (group - barW) / 2;
+          let yCursor = plotH;
+          return (
+            <g key={li}>
+              {spec.series.map((s, si) => {
+                const v = s.data[li];
+                const h = (v / max) * (plotH - 18);
+                yCursor -= h;
+                const y = yCursor;
+                yCursor -= 2; // the 2px surface gap between stacked fills
+                if (h <= 0) return null;
+                return (
+                  <rect
+                    key={si}
+                    x={x}
+                    y={y}
+                    width={barW}
+                    height={Math.max(h - (si < spec.series.length - 1 ? 0 : 0), 1)}
+                    rx={si === spec.series.length - 1 ? Math.min(4, barW / 2) : 1}
+                    fill={seriesColor(si)}
+                    className={cn(!reduced && "viz-grow")}
+                    style={{ transformOrigin: `${x + barW / 2}px ${plotH}px`, animationDelay: `${li * 30}ms` }}
+                    onMouseEnter={(e) => {
+                      const host = (e.currentTarget.ownerSVGElement!.parentElement as HTMLElement).getBoundingClientRect();
+                      const r = e.currentTarget.getBoundingClientRect();
+                      setTip({ x: r.left - host.left + r.width / 2, y: r.top - host.top, text: `${label} · ${s.name}: ${fmt(v, spec.unit)} of ${fmt(totals[li], spec.unit)}` });
+                    }}
+                    onMouseLeave={() => setTip(null)}
+                  />
+                );
+              })}
+              <text x={x + barW / 2} y={H - 2} textAnchor="middle" className="fill-muted-foreground" fontSize={10}>
+                {label.length > Math.max(4, group / 7) ? label.slice(0, Math.max(3, Math.floor(group / 7))) + "…" : label}
+              </text>
+              {nL <= 12 && (
+                <text x={x + barW / 2} y={plotH - (totals[li] / max) * (plotH - 18) - 4 - (spec.series.length - 1) * 2} textAnchor="middle" className="fill-muted-foreground" fontSize={10}>
+                  {fmt(totals[li], spec.unit)}
+                </text>
+              )}
+            </g>
+          );
+        })}
+      </svg>
+      <Tip tip={tip} />
+    </div>
+  );
+}
+
+/** Scatter: dots at (label index, value); ≤ 3 series (the palette's all-pairs cap), ≥8px markers. */
+function Scatter({ spec }: { spec: ChartSpec }) {
+  const [tip, setTip] = React.useState<{ x: number; y: number; text: string } | null>(null);
+  const plotH = 140;
+  const H = plotH + 16;
+  const nL = spec.labels.length;
+  const all = spec.series.flatMap((s) => s.data);
+  const max = Math.max(...all, 0);
+  const min = Math.min(...all, 0);
+  const span = max - min || 1;
+  const px = (i: number) => (nL === 1 ? W / 2 : (i / (nL - 1)) * (W - 24) + 12);
+  const py = (v: number) => plotH - ((v - min) / span) * (plotH - 16) - 4;
+  return (
+    <div className="relative">
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label={spec.title ?? "scatter plot"}>
+        {[0.25, 0.5, 0.75].map((f) => (
+          <line key={f} x1={0} x2={W} y1={plotH * (1 - f)} y2={plotH * (1 - f)} stroke="var(--viz-grid)" strokeWidth={1} />
+        ))}
+        <line x1={0} x2={W} y1={plotH} y2={plotH} stroke="var(--line-strong)" strokeWidth={1} />
+        {spec.series.map((s, si) =>
+          s.data.map((v, i) => (
+            <circle
+              key={`${si}-${i}`}
+              cx={px(i)}
+              cy={py(v)}
+              r={4}
+              fill={seriesColor(si)}
+              stroke="var(--card)"
+              strokeWidth={2}
+              onMouseEnter={(e) => {
+                const host = (e.currentTarget.ownerSVGElement!.parentElement as HTMLElement).getBoundingClientRect();
+                const r = e.currentTarget.getBoundingClientRect();
+                setTip({ x: r.left - host.left + r.width / 2, y: r.top - host.top, text: `${spec.labels[i]}${spec.series.length > 1 ? ` · ${s.name}` : ""}: ${fmt(v, spec.unit)}` });
+              }}
+              onMouseLeave={() => setTip(null)}
+            />
+          ))
+        )}
+        {spec.labels.map((label, i) =>
+          nL <= 12 || i % Math.ceil(nL / 12) === 0 ? (
+            <text key={i} x={px(i)} y={H - 2} textAnchor="middle" className="fill-muted-foreground" fontSize={10}>
+              {label.length > 8 ? label.slice(0, 7) + "…" : label}
+            </text>
+          ) : null
+        )}
       </svg>
       <Tip tip={tip} />
     </div>

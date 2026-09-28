@@ -26,17 +26,21 @@ away — the beautifier is presentation, never authority.
 
 | Output | Rendering |
 |---|---|
-| GFM table | Sortable data table: numeric columns detected, right-aligned tabular figures, magnitude bars, copy-as-CSV |
+| GFM table | Sortable data table: numeric columns detected, right-aligned tabular figures, magnitude bars, copy-as-CSV; lone ✓/✗/yes/no/n-a cells toned (support matrices) |
 | Task list `- [x]` | Checklist card with "3 of 5 done" progress line |
-| ```json fence (multi-line object/array) | Collapsible JSON explorer, typed value colors, raw toggle |
+| `> [!NOTE]` / TIP / IMPORTANT / WARNING / CAUTION blockquote | Callout card with icon + named kind |
+| ```json fence (object/array; multi-line or a long one-liner) | Collapsible JSON explorer, typed value colors, raw toggle |
 | ```diff / ```patch | Syntax-highlighted diff (shiki) |
 | Bare fence that looks like `tree` output (`├──`/`└──`) | Collapsible tree with file icons |
+| Bare fence that looks like `git diff --stat` | Diffstat card (+/− bars per file) |
+| Bare fence that looks like `git log --oneline` | Commit list (hash chips, conventional-commit prefix toned) |
 
 ### Opt-in fences (agents: prefer these when they fit)
 
-- **````chart```** — JSON: `{"type":"bar"|"line"|"area"|"donut"|"sparkline", "title"?, "unit"?,
-  "labels":[...], "values":[...]}` or `"series":[{"name","data":[...]}]` (≤ 8 series, ≤ 60
-  labels, donut/sparkline single-series). Renders an inline SVG chart with hover tooltips,
+- **````chart```** — JSON: `{"type":"bar"|"line"|"area"|"donut"|"sparkline"|"scatter", "title"?,
+  "unit"?, "stacked"? (bar only), "labels":[...], "values":[...]}` or
+  `"series":[{"name","data":[...]}]` (≤ 8 series — scatter ≤ 3, the palette's all-pairs cap;
+  ≤ 60 labels; donut/sparkline single-series). Renders an inline SVG chart with hover tooltips,
   legend, direct value labels.
 - **````stats```** — one metric per line: `Label: value | +12% | note`. Delta sign picks the
   good/bad color; suffix `!` flips it for down-is-good metrics (`p95: 210ms | -40ms!`).
@@ -46,6 +50,31 @@ away — the beautifier is presentation, never authority.
 - **````flow```** — one chain per line: `checkout -> build ✓ -> test ✗`, `deploy …` marks in
   progress. Renders a step pipeline with state chips.
 - **````csv``` / ````tsv```** — header + rows. Renders the same sortable data table.
+- **````timeline```** — `time | event | note?` per line; event may end ✓ ✗ …. Vertical event rail.
+- **````steps```** — numbered lines (`1. Install ✓`), indented detail lines under a step;
+  ✓ done, ✗ failed, … active. Vertical wizard.
+- **````progress```** — `label: 72%` or `label: 34/50` per line. Labeled progress bars.
+- **````kv```** — `key: value` per line. Two-column definition panel (configs, env summaries).
+- **````badges```** — `label: state` per line; tone inferred from the state word
+  (healthy/degraded/down/running/…). Status chip row.
+- **````score```** — `label: 8/10 | note?`. Dot scale (max ≤ 10) or bar.
+- **````keys```** — `Ctrl+K: action` per line. Keyboard-shortcut list with real kbd caps.
+- **````palette```** — `#hex label?` or `label: #hex` per line. Color swatches.
+- **````http```** — `GET /path → 200 OK · 48ms` per line. Request list, status toned by class.
+- **````tests```** — `633 passed, 2 failed, 1 skipped in 65s` (or `passed: n` lines), plus
+  `✗ failing test name` lines. Verdict strip with proportion bar.
+- **````log```** — raw log lines; levels colored, one-click level filters. ≤ 2000 lines.
+- **````diffstat```** — git `--stat` rows, numstat, or `path +12 -3`. Changeset card.
+- **````commits```** — `git log --oneline` rows. Commit list.
+- **````deps```** — `name 1.2.3 → 2.0.0` per line. Upgrade table, semver jump toned.
+- **````graph``` / ````dag```** — `A -> B` edges (chains allowed), ≤ 24 nodes, acyclic.
+  Layered left→right SVG graph.
+- **````funnel```** — `stage: value` per line, ordered. Funnel bars with conversion %.
+- **````gantt``` / ````spans```** — `label | start | end` per line (shared unit). Span chart
+  (schedules, request waterfalls).
+- **````heatmap```** — JSON `{rows, cols, values[[…]], unit?}`. Sequential single-hue grid.
+- **````note``` / ````tip``` / ````important``` / ````warn``` / ````caution``` /
+  ````success``` / ````error```** — markdown body. Callout card (same as `> [!NOTE]` quotes).
 
 ### Guidance for the agent (also injected via `AGENT_SYS_PROMPT` in `src/msb.ts`)
 

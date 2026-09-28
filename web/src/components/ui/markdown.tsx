@@ -9,6 +9,8 @@ import { CodeBlock, CodeBlockCode } from "./code-block"
 import { LinkChip } from "./link-chip"
 import { smartBlock, tableFromMarkdown } from "@/components/viz/SmartBlock"
 import { ChecklistCard, taskItems } from "@/components/viz/ChecklistCard"
+import { CalloutBlock, alertFromBlockquote } from "@/components/viz/CalloutBlock"
+import { calloutKind } from "@/lib/viz-extra"
 
 export type MarkdownProps = {
   children: string
@@ -75,6 +77,12 @@ const INITIAL_COMPONENTS: Partial<Components> = {
     const rich = tableFromMarkdown(children)
     if (rich) return rich
     return <table>{children}</table>
+  },
+  // GitHub-style alerts (`> [!NOTE]` …) upgrade to callout cards; ordinary quotes stay quotes.
+  blockquote: function BlockquoteComponent({ children, node: _node, ...props }) {
+    const alert = alertFromBlockquote(children, calloutKind)
+    if (alert) return <CalloutBlock kind={alert.kind}>{alert.children}</CalloutBlock>
+    return <blockquote {...props}>{children}</blockquote>
   },
   // Task lists upgrade to a checklist card with a progress line; ordinary lists stay untouched.
   ul: function ListComponent({ children, node: _node, ...props }) {

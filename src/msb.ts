@@ -484,7 +484,14 @@ export const AGENT_SYS_PROMPT =
   "'Label: value | +12% | note' (append '!' to the delta when down is good). A file/directory layout → " +
   "a fenced ```tree block (tree glyphs or one path per line). A pipeline outcome → a fenced ```flow " +
   "block, one chain per line like 'build ✓ -> test ✗' ('…' marks in-progress). Emit well-formed JSON " +
-  "in ```json fences. Do not force these — use them only where they make the answer clearer. " +
+  "in ```json fences. More fences the console renders richly (each line-oriented unless noted): " +
+  "```timeline 'time | event ✓'; ```steps '1. Title ✓' (+indented detail); ```progress 'label: 72%'; " +
+  "```kv 'key: value'; ```badges 'label: healthy|degraded|down|running'; ```score 'label: 8/10'; " +
+  "```http 'GET /path → 200 OK · 48ms'; ```tests '633 passed, 2 failed in 65s' + '✗ name' lines; " +
+  "```log raw log lines; ```diffstat git --stat rows; ```commits git log --oneline rows; " +
+  "```deps 'pkg 1.2.3 → 2.0.0'; ```graph 'A -> B' edges (acyclic); ```funnel 'stage: value'; " +
+  "```gantt 'label | start | end'; ```heatmap JSON {rows,cols,values}; callouts via ```note/warn/error " +
+  "or '> [!NOTE]' quotes. Do not force any of these — use one only where it makes the answer clearer. " +
   "Never read or print /workspace/.agent.* files " +
   "(the log, task, question): they are the controller's channel, not context, and echoing the log " +
   "corrupts the transcript the caller is reading. " +

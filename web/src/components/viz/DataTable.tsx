@@ -102,8 +102,12 @@ export function DataTable({
               <tr key={ri} className="border-border/50 hover:bg-muted/50 border-b last:border-0">
                 {rows[ri].map((cell, c) => {
                   if (!numeric[c]) {
+                    // Support-matrix cells: a lone ✓ / ✗ / yes / no wears the functional hue
+                    // (still the glyph/word itself, never color alone).
+                    const t = (texts[ri][c] ?? "").trim().toLowerCase();
+                    const tone = ["✓", "✔", "yes"].includes(t) ? "text-ok" : ["✗", "✘", "no", "×"].includes(t) ? "text-destructive" : ["—", "-", "n/a"].includes(t) ? "text-faint" : "";
                     return (
-                      <td key={c} className="px-3 py-1.5 align-top">
+                      <td key={c} className={cn("px-3 py-1.5 align-top", tone, tone && "text-center font-medium")}>
                         {cell}
                       </td>
                     );
