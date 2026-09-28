@@ -77,7 +77,7 @@ function SkillItem({ event, live }: { event: ToolEvent; live?: boolean }) {
   return (
     <div className="enter min-w-0">
       <div className="flex min-w-0 items-center gap-3" role={extra ? undefined : "note"}>
-        <span className={cn("h-px w-6 shrink-0", event.failed ? "bg-destructive/30" : "bg-live/30")} aria-hidden />
+        <span className={cn("rule-draw rule-draw-r h-px w-6 shrink-0", event.failed ? "bg-destructive/30" : "bg-live/30")} aria-hidden />
         <button
           type="button"
           onClick={() => extra && setOpen((v) => !v)}
@@ -100,7 +100,7 @@ function SkillItem({ event, live }: { event: ToolEvent; live?: boolean }) {
           </span>
           {extra && <ChevronRight className={cn("text-muted-foreground size-3 shrink-0 transition-transform duration-150", open && "rotate-90")} aria-hidden />}
         </button>
-        <span className={cn("h-px min-w-6 flex-1", event.failed ? "bg-destructive/30" : "bg-live/30")} aria-hidden />
+        <span className={cn("rule-draw h-px min-w-6 flex-1", event.failed ? "bg-destructive/30" : "bg-live/30")} aria-hidden />
       </div>
       {open && extra && (
         <pre className="bg-trace text-trace-fg/80 mt-2 ml-9 max-h-72 overflow-auto rounded-md border border-white/8 px-3 py-2 font-mono text-code whitespace-pre-wrap">{extra}</pre>
@@ -506,7 +506,10 @@ export function YouItem({ text, label = "You", onRevert }: { text: string; label
           ))}
         </div>
       )}
-      <div className="flex max-w-full items-center justify-end gap-2">
+      {/* w-full, not fit-content: the bubble's 72% max-width must resolve against the whole column.
+          Against a shrink-to-fit row, the percentage is circular and (with overflow-wrap:anywhere
+          making min-content one character) the browser may collapse a short message onto two lines. */}
+      <div className="flex w-full items-center justify-end gap-2">
         {onRevert && (
           <Tooltip>
             <TooltipTrigger asChild>

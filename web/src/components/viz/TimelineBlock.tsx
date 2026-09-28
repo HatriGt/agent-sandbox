@@ -1,3 +1,4 @@
+import type * as React from "react";
 import { Check, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Step, TimelineEvent } from "@/lib/viz-extra";
@@ -9,7 +10,7 @@ export function TimelineBlock({ events, source }: { events: TimelineEvent[]; sou
     <VizFrame source={source}>
       <div className="px-4 py-3">
         {events.map((e, i) => (
-          <div key={i} className="flex gap-3">
+          <div key={i} className="stagger-item flex gap-3" style={{ "--i": Math.min(i, 12) } as React.CSSProperties}>
             <span className="text-muted-foreground w-24 shrink-0 pt-0.5 text-right font-mono text-micro tabular-nums">{e.time}</span>
             <span className="flex flex-col items-center">
               <span
@@ -43,7 +44,7 @@ export function StepsBlock({ steps, source }: { steps: Step[]; source: string })
     <VizFrame source={source}>
       <div className="px-4 py-3">
         {steps.map((s, i) => (
-          <div key={i} className="flex gap-3">
+          <div key={i} className="stagger-item flex gap-3" style={{ "--i": Math.min(i, 12) } as React.CSSProperties}>
             <span className="flex flex-col items-center">
               <span
                 className={cn(

@@ -1,3 +1,4 @@
+import type * as React from "react";
 import { cn } from "@/lib/utils";
 import { FileMark } from "@/lib/fileIcon";
 import type { Commit, DepUpdate, DiffStat } from "@/lib/viz-extra";
@@ -52,7 +53,7 @@ export function CommitsBlock({ commits, source }: { commits: Commit[]; source: s
         {commits.map((c, i) => {
           const m = c.message.match(/^(feat|fix|ux|docs|chore|refactor|perf|test|build|ci|style)(\([^)]*\))?(!)?:\s*(.*)$/);
           return (
-            <div key={i} className="border-border/50 flex items-baseline gap-2.5 border-b py-1.5 last:border-0">
+            <div key={i} className="border-border/50 stagger-item flex items-baseline gap-2.5 border-b py-1.5 last:border-0" style={{ "--i": Math.min(i, 12) } as React.CSSProperties}>
               <code className="bg-muted text-muted-foreground shrink-0 rounded px-1.5 py-0.5 font-mono text-micro">{c.hash.slice(0, 7)}</code>
               <span className="text-foreground min-w-0 truncate text-meta">
                 {m ? (

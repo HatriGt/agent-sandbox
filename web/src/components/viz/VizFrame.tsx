@@ -42,7 +42,7 @@ export function VizFrame({
     }
   };
   return (
-    <div className={cn("group/viz bg-card not-prose my-3 overflow-hidden rounded-xl border", className)}>
+    <div className={cn("group/viz bg-card not-prose enter my-3 overflow-hidden rounded-xl border", className)}>
       <div className="flex h-8 items-center gap-1 border-b px-3">
         <span className="text-muted-foreground min-w-0 flex-1 truncate text-micro font-medium">{title}</span>
         {actions}
@@ -53,7 +53,7 @@ export function VizFrame({
           aria-label="Copy source"
           className="text-muted-foreground hover:text-foreground grid size-6 cursor-pointer place-items-center rounded-md opacity-60 group-hover/viz:opacity-100 focus-visible:opacity-100"
         >
-          {copied ? <Check className="size-3.5 text-ok" /> : <Copy className="size-3.5" />}
+          {copied ? <Check className="pop-in size-3.5 text-ok" /> : <Copy className="size-3.5" />}
         </button>
         <button
           type="button"
@@ -68,12 +68,15 @@ export function VizFrame({
           <Code2 className="size-3.5" />
         </button>
       </div>
+      {/* Keyed wrapper: toggling raw ↔ rendered cross-fades instead of hard-swapping. */}
       {raw ? (
-        <CodeBlock className="my-0 rounded-none border-0">
-          <CodeBlockCode code={source} language={rawLanguage} />
-        </CodeBlock>
+        <div key="raw" className="enter">
+          <CodeBlock className="my-0 rounded-none border-0">
+            <CodeBlockCode code={source} language={rawLanguage} />
+          </CodeBlock>
+        </div>
       ) : (
-        children
+        <div key="viz" className="enter">{children}</div>
       )}
     </div>
   );

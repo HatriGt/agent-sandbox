@@ -1,3 +1,4 @@
+import type * as React from "react";
 import { TrendingDown, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Stat } from "@/lib/viz";
@@ -16,8 +17,8 @@ export function StatsBlock({ stats, source }: { stats: Stat[]; source: string })
   return (
     <VizFrame source={source} title={stats.length === 1 ? undefined : `${stats.length} metrics`}>
       <div className="grid gap-px" style={{ gridTemplateColumns: `repeat(auto-fit, minmax(${wide ? "14rem" : "9rem"}, 1fr))` }}>
-        {stats.map((s) => (
-          <div key={s.label} className="bg-card px-4 py-3">
+        {stats.map((s, i) => (
+          <div key={s.label} className="bg-card stagger-item px-4 py-3" style={{ "--i": Math.min(i, 12) } as React.CSSProperties}>
             <div className="text-muted-foreground truncate text-micro font-medium" title={s.label}>{s.label}</div>
             <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2">
               <span className={cn("text-foreground font-semibold", s.value.length <= 12 ? "text-h2" : s.value.length <= 28 ? "text-lead" : "text-meta")}>{s.value}</span>

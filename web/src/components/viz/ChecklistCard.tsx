@@ -24,7 +24,7 @@ export function ChecklistCard({ items }: { items: { checked: boolean; content: R
       </div>
       <ul className="flex list-none flex-col gap-1 px-3 py-2">
         {items.map((item, i) => (
-          <li key={i} className="flex items-start gap-2 text-meta">
+          <li key={i} className="stagger-item flex items-start gap-2 text-meta" style={{ "--i": Math.min(i, 12) } as React.CSSProperties}>
             {item.checked ? (
               <Check className="text-ok mt-0.5 size-3.5 shrink-0" aria-label="done" />
             ) : (

@@ -10,7 +10,7 @@ export function HttpBlock({ calls, source }: { calls: HttpCall[]; source: string
     <VizFrame title={`${calls.length} ${calls.length === 1 ? "request" : "requests"}`} source={source}>
       <div className="max-h-80 overflow-auto px-3 py-1.5">
         {calls.map((c, i) => (
-          <div key={i} className="border-border/50 flex items-center gap-2.5 border-b py-1.5 last:border-0">
+          <div key={i} className="border-border/50 stagger-item flex items-center gap-2.5 border-b py-1.5 last:border-0" style={{ "--i": Math.min(i, 12) } as React.CSSProperties}>
             <span
               className={cn(
                 "w-14 shrink-0 rounded-md border px-1 py-0.5 text-center font-mono text-micro font-semibold",
@@ -72,7 +72,7 @@ export function TestsBlock({ report, source }: { report: TestReport; source: str
         {report.failures.length > 0 && (
           <ul className="mt-2 flex list-none flex-col gap-0.5 border-t pt-2">
             {report.failures.map((f, i) => (
-              <li key={i} className="text-destructive flex items-start gap-1.5 font-mono text-micro">
+              <li key={i} className="text-destructive stagger-item flex items-start gap-1.5 font-mono text-micro" style={{ "--i": Math.min(i, 12) } as React.CSSProperties}>
                 <X className="mt-0.5 size-3 shrink-0" aria-hidden />
                 <span className="min-w-0 break-all">{f}</span>
               </li>

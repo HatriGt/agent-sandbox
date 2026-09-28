@@ -453,6 +453,7 @@
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
@@ -556,6 +557,56 @@
 }
 .enter {
   animation: enter 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Staggered row entrance inside a visualizer card: each row rises a beat after the last, reading
+   as the card "filling in". Delay comes from --i (set inline, capped upstream at ~12 so a long
+   list never keeps the reader waiting). One-shot; reduced motion zeroes both duration and delay. */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.stagger-item {
+  animation: rise-in 0.26s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--i, 0) * 24ms);
+}
+
+/* A tiny scale-pop for state confirmations (the copy button's check, a chip appearing). */
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.pop-in {
+  animation: pop-in 0.18s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* A hairline rule drawing itself outward — the skill section marker's entrance. */
+@keyframes rule-draw {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+.rule-draw {
+  animation: rule-draw 0.45s 0.1s cubic-bezier(0.22, 1, 0.36, 1) both;
+  transform-origin: left;
+}
+.rule-draw-r {
+  transform-origin: right;
 }
 
 /* Working… dots: three staggered lifts. A heartbeat, not a throbber. */
