@@ -64,11 +64,11 @@ function skillOf(event: ToolEvent): string | null {
 }
 
 /**
- * A skill firing on the agent's own initiative. One clean row: the skill's OWN glyph in a small
- * tinted plate (never a generic AI sparkle — the per-skill icon is what makes two adjacent skill
- * rows distinguishable), the /name in ink, and a short quiet caption. No redundant "Skill" word +
- * chip + sentence stack — the glyph plate and the slash-name already say "playbook". The launch
- * result is noise ("Launching skill: x"); anything longer folds like a step.
+ * A skill firing is a MODE CHANGE, not another tool step: from here on the agent follows that
+ * playbook. So it renders as a section marker — a compact pill sitting on a hairline rule — not as
+ * one more icon row competing with the tool timeline. The pill carries the skill's own glyph and
+ * its /name; the rule says "the steps below belong to this". Failure turns the pill red with the
+ * reason; while launching the glyph gives way to a spinner. Any real launch output folds under it.
  */
 function SkillItem({ event, live }: { event: ToolEvent; live?: boolean }) {
   const name = skillOf(event);
@@ -76,42 +76,34 @@ function SkillItem({ event, live }: { event: ToolEvent; live?: boolean }) {
   const [open, setOpen] = React.useState(false);
   return (
     <div className="enter min-w-0">
-      <button
-        type="button"
-        onClick={() => extra && setOpen((v) => !v)}
-        disabled={!extra}
-        aria-expanded={extra ? open : undefined}
-        className={cn("flex w-full min-w-0 items-center gap-2.5 rounded-md px-2 py-1 text-left text-meta", extra && "hover:bg-muted cursor-pointer")}
-      >
-        <span
+      <div className="flex min-w-0 items-center gap-3" role={extra ? undefined : "note"}>
+        <span className={cn("h-px w-6 shrink-0", event.failed ? "bg-destructive/30" : "bg-live/30")} aria-hidden />
+        <button
+          type="button"
+          onClick={() => extra && setOpen((v) => !v)}
+          disabled={!extra}
+          aria-expanded={extra ? open : undefined}
           className={cn(
-            "grid size-6 shrink-0 place-items-center rounded-md border",
-            event.failed ? "border-destructive/30 bg-destructive/10 text-destructive" : "border-live/25 bg-live/10 text-live"
+            "flex min-w-0 items-center gap-2 rounded-full border py-1 pr-3 pl-2",
+            event.failed ? "border-destructive/30 bg-destructive/5" : "border-live/25 bg-live/5",
+            extra && "cursor-pointer hover:bg-muted"
           )}
-          aria-hidden
         >
-          {live ? (
-            <Loader2 className="size-3.5 animate-spin" />
-          ) : event.failed ? (
-            <AlertTriangle className="size-3.5" />
-          ) : name ? (
-            <SkillMark name={name} size={14} />
-          ) : (
-            <ChevronRight className="size-3.5" />
-          )}
-        </span>
-        {name ? (
-          <span className="text-foreground shrink-0 font-mono text-meta font-semibold">/{name}</span>
-        ) : (
-          <span className="text-foreground shrink-0 font-medium">Skill</span>
-        )}
-        <span className="text-faint min-w-0 truncate text-micro">
-          {live ? "loading the playbook…" : event.failed ? "skill failed to launch" : "skill loaded · steps below follow its playbook"}
-        </span>
-        {extra && <ChevronRight className={cn("text-muted-foreground ml-auto size-3.5 shrink-0 transition-transform duration-150", open && "rotate-90")} aria-hidden />}
-      </button>
+          <span className={cn("grid size-4.5 shrink-0 place-items-center", event.failed ? "text-destructive" : "text-live")} aria-hidden>
+            {live ? <Loader2 className="size-3.5 animate-spin" /> : event.failed ? <AlertTriangle className="size-3.5" /> : name ? <SkillMark name={name} size={14} /> : <ChevronRight className="size-3.5" />}
+          </span>
+          <span className={cn("shrink-0 font-mono text-meta font-semibold", event.failed ? "text-destructive" : "text-foreground")}>
+            {name ? `/${name}` : "skill"}
+          </span>
+          <span className={cn("min-w-0 truncate text-micro", event.failed ? "text-destructive/80" : "text-faint")}>
+            {live ? "loading…" : event.failed ? "failed to launch" : "playbook"}
+          </span>
+          {extra && <ChevronRight className={cn("text-muted-foreground size-3 shrink-0 transition-transform duration-150", open && "rotate-90")} aria-hidden />}
+        </button>
+        <span className={cn("h-px min-w-6 flex-1", event.failed ? "bg-destructive/30" : "bg-live/30")} aria-hidden />
+      </div>
       {open && extra && (
-        <pre className="bg-trace text-trace-fg/80 mt-2 ml-8 max-h-72 overflow-auto rounded-md border border-white/8 px-3 py-2 font-mono text-code whitespace-pre-wrap">{extra}</pre>
+        <pre className="bg-trace text-trace-fg/80 mt-2 ml-9 max-h-72 overflow-auto rounded-md border border-white/8 px-3 py-2 font-mono text-code whitespace-pre-wrap">{extra}</pre>
       )}
     </div>
   );

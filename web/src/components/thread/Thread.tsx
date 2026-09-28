@@ -708,6 +708,12 @@ export function Thread({
             {pendingReplies.map((r, i) => (
               <YouItem key={`reply-${i}`} text={r} />
             ))}
+            {/* A follow-up on a finished run: the box still reports `done` for a few seconds until
+                the server resumes the session. That gap must read as "delivering", never as the old
+                "Completed" receipt sitting under the message you just sent. */}
+            {pendingReplies.length > 0 && runState !== "running" && !sleeping && !resuming && (
+              <WorkingIndicator label="Message sent" detail="the agent is picking it up" />
+            )}
 
             {queuedItems.map((q) => (
               <QueuedItem
@@ -723,7 +729,7 @@ export function Thread({
               <ObserverItem key={`aside-${i}`} question={a.question} answer={a.error ?? a.answer} />
             ))}
 
-            {!sleeping && !loadingTrace && artifacts.length > 0 && runState !== "running" && <ProducedFiles session={box.name} files={artifacts} />}
+            {!sleeping && !loadingTrace && artifacts.length > 0 && runState !== "running" && pendingReplies.length === 0 && <ProducedFiles session={box.name} files={artifacts} />}
 
             {/* Context nearly full: warn before quality degrades — the advice is the point. */}
             {!sleeping && !loadingTrace && ctxHealth?.level === "critical" && (
@@ -732,7 +738,7 @@ export function Thread({
               </p>
             )}
 
-            {!sleeping && !loadingTrace && runState === "done" && (
+            {!sleeping && !loadingTrace && runState === "done" && pendingReplies.length === 0 && (
               <RunSummary
                 label={
                   exitCode == null || exitCode === 0
