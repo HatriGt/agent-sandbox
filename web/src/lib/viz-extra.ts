@@ -121,9 +121,16 @@ const TONE_WORDS: Record<string, BadgeTone> = {
   warn: "warn", warning: "warn", degraded: "warn", flaky: "warn", pending: "warn", stale: "warn", deprecated: "warn",
   fail: "fail", failed: "fail", error: "fail", down: "fail", critical: "fail", broken: "fail", no: "fail", off: "fail", disabled: "fail",
   running: "live", building: "live", deploying: "live", working: "live", live: "live", streaming: "live",
+  recurring: "warn", present: "warn", rising: "warn", increasing: "warn", elevated: "warn",
 };
 
-/** ```badges: `label: state` per line → status chip row; tone inferred from the state word. */
+const OK_WORDS = new Set(["none", "zero", "0", "clear", "clean", "ok", "healthy", "resolved"]);
+
+/**
+ * ```badges: `label: state` per line → status chip row; tone inferred from the state word — and
+ * from the LABEL when it names trouble: `errors: recurring` must read as a warning even though
+ * "recurring" alone is neutral, while `errors: none` stays green.
+ */
 export function parseBadges(src: string): Badge[] | null {
   const lines = src.split("\n").map((l) => l.trim()).filter(Boolean);
   if (lines.length === 0 || lines.length > 16) return null;
@@ -131,9 +138,14 @@ export function parseBadges(src: string): Badge[] | null {
   for (const line of lines) {
     const idx = line.indexOf(":");
     if (idx <= 0) return null;
+    const label = line.slice(0, idx).trim();
     const value = line.slice(idx + 1).trim();
     if (!value || value.length > 40) return null;
-    out.push({ label: line.slice(0, idx).trim(), value, tone: TONE_WORDS[value.toLowerCase()] ?? "neutral" });
+    let tone: BadgeTone = TONE_WORDS[value.toLowerCase()] ?? "neutral";
+    if (/error|fail|crash|outage|incident/i.test(label)) {
+      tone = OK_WORDS.has(value.toLowerCase()) ? "ok" : tone === "neutral" || tone === "warn" ? "warn" : "fail";
+    }
+    out.push({ label, value, tone });
   }
   return out;
 }
