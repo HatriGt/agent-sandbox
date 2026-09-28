@@ -704,13 +704,13 @@ export function workdirFromProbe(stdout: string): string {
 export const KIND_MARK = "/workspace/.agent.kind";
 
 /**
- * Root-disk tier an omp box is grown to before bootstrap (bun + omp need ~1.5 GB; the default
- * rootfs is 1G). 8G, not 4G: a snapshot-booted box's msb record claims the runtime-default
- * "4 GiB" even though its actual fs is the 1G the snapshot was baked with, so `modify --root-disk
- * 4G` is refused as "already 4 GiB" while 8G resizes for real (measured live). The volume is
- * sparse — unused space costs no host disk.
+ * Root disk an omp box BOOTS with (bun + omp need ~1.5 GB; the default rootfs is 1G). omp boxes
+ * cold-boot from the base image with this size instead of claiming a pooled/snapshot box: growing
+ * a claimed box needed `msb modify --restart`, and the restart window made the box unexecable —
+ * the pool maintainer reaped it mid-claim (measured live). A cold boot has no such window, and the
+ * volume is sparse, so unused space costs no host disk.
  */
-export const OMP_MIN_DISK = "8G";
+export const OMP_MIN_DISK = "4G";
 
 /**
  * Parse the kind mark defensively: it sits in the agent-writable workspace, so only a clean
@@ -1493,13 +1493,6 @@ export async function runAgentTask(
 ) {
   const env = agentEnvFlags(cfg, task, repos, creds?.primaryToken, model, agent);
   const workdir = agentWorkdir(repos);
-  if (agent === "omp") {
-    // bun + omp (onnxruntime et al.) need ~1.5 GB the 1G default rootfs cannot hold (measured:
-    // ENOSPC). Grow BEFORE bootstrap — nothing is running yet, and the reboot the resize forces
-    // keeps the rootfs (the copied workspace included). Grow-only: a box already at or above the
-    // tier fails the modify harmlessly (check=false), and resumes never pass through here.
-    await msb(cfg, ["modify", box, "--root-disk", OMP_MIN_DISK, "--restart"], false);
-  }
   await msb(cfg, ["exec", box, ...env, "--", "sh", "-lc", bootstrapScript(cfg, agent)]);
   // These four touch independent files (~/.git-credentials + per-repo config, ~/.claude.json,
   // /root/.agent-mcp.json, ~/.claude/skills), so they run in parallel: each is an SSH→msb→guest

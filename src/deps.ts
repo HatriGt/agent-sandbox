@@ -29,6 +29,7 @@ import {
   execWithInput,
   WORKSPACE_DIRS_SH,
   msbIo,
+  OMP_MIN_DISK,
 } from "./msb.js";
 import { runInteractive } from "./interactive.js";
 import { runVerification } from "./verify.js";
@@ -393,9 +394,16 @@ export const deps: HandlerDeps = {
     interact?: Interact
   ): Promise<DelegationResult> {
     // Per-call egress extras merge onto the curated allowlist for this delegation only.
-    const runCfg = allowDomains?.length
+    let runCfg = allowDomains?.length
       ? { ...cfg, egressDomains: Array.from(new Set([...cfg.egressDomains, ...allowDomains])) }
       : cfg;
+    // An omp run cold-boots from the base image with a bigger root disk: bun + omp need ~1.5 GB
+    // the 1G snapshot rootfs cannot hold, and growing a claimed box requires a restart during
+    // which the pool maintainer reaps it as unexecable (measured live). snapshot:"" also makes
+    // this box pool-INELIGIBLE below, so a pooled 1G box is never claimed for it.
+    if (plan.agent === "omp") {
+      runCfg = { ...runCfg, snapshot: "", rootDisk: OMP_MIN_DISK };
+    }
 
     const id = newSessionId();
 
