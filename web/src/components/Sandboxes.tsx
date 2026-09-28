@@ -121,7 +121,7 @@ export function Sandboxes({
                       type="button"
                       onClick={() => onOpen(b.name)}
                       onMouseEnter={() => prefetchWatch(b.name)}
-                      className="border-attention/50 bg-attention/10 hover:bg-attention/20 flex w-full cursor-pointer items-start gap-3 rounded-xl border p-4 text-left transition-colors"
+                      className="border-attention/50 bg-attention/10 hover:bg-attention/20 hover-raise flex w-full cursor-pointer items-start gap-3 rounded-xl border p-4 text-left"
                     >
                       <span className="min-w-0 flex-1">
                         <span className="stamp text-muted-foreground block" title={shortName(b.name)}>

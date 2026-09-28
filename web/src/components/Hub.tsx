@@ -630,8 +630,8 @@ export function Hub({
                       <Bar className="h-2.5 w-16" />
                     </li>
                   ))
-                : runs.map((b) => (
-                    <li key={b.name}>
+                : runs.map((b, i) => (
+                    <li key={b.name} className="rise-in" style={{ "--i": i } as React.CSSProperties}>
                       <button
                         type="button"
                         onClick={() => onOpen(b.name)}
@@ -651,7 +651,7 @@ export function Hub({
                         <span className="stamp text-muted-foreground shrink-0" title={shortName(b.name)}>
                           {friendlyName(b.name)}
                         </span>
-                        <ArrowRight className="text-muted-foreground size-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
+                        <ArrowRight className="text-muted-foreground size-3.5 shrink-0 -translate-x-0.5 opacity-0 transition-[opacity,translate] duration-150 group-hover:translate-x-0 group-hover:opacity-100" />
                       </button>
                     </li>
                   ))}
@@ -694,7 +694,7 @@ export function Hub({
                         {friendlyName(r.box)}
                       </span>
                       {!gone && (
-                        <ArrowRight className="text-muted-foreground size-3.5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
+                        <ArrowRight className="text-muted-foreground size-3.5 shrink-0 -translate-x-0.5 opacity-0 transition-[opacity,translate] duration-150 group-hover:translate-x-0 group-hover:opacity-100" />
                       )}
                     </button>
                   </li>

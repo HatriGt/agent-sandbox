@@ -1,4 +1,7 @@
 @import "tailwindcss";
+/* Enter/exit utilities (animate-in / fade-in-0 / zoom-in-95 …) used by the tooltip, dropdown and
+   dialog primitives. Without this import those classes are silent no-ops. */
+@import "tw-animate-css";
 
 /*
  * agent-sandbox console — shadcn (neutral) + prompt-kit + Inter / Hedvig Letters Serif / Geist Mono.
@@ -544,8 +547,10 @@
   }
 }
 
-/* A turn landing in the thread: a short fade + rise, once on mount. Static history never re-animates. */
-@keyframes enter {
+/* A turn landing in the thread: a short fade + rise, once on mount. Static history never re-animates.
+   Named turn-enter, NOT enter: tw-animate-css owns `@keyframes enter` for its animate-in utilities,
+   and a same-named keyframe here would silently override it everywhere. */
+@keyframes turn-enter {
   from {
     opacity: 0;
     transform: translateY(6px);
@@ -556,7 +561,7 @@
   }
 }
 .enter {
-  animation: enter 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: turn-enter 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 /* Staggered row entrance inside a visualizer card: each row rises a beat after the last, reading
@@ -860,4 +865,15 @@ button:not(:disabled):active, [role="tab"]:active, [role="radio"]:active { trans
 /* A raised surface: lit top edge + contact shadow (Refactoring UI, "emulating a light source").
    On the light theme the face is near-white, so only the shadow does the work. */
 .raised { box-shadow: var(--shadow-e1); }
+
+/* An interactive card: rises 1px toward the cursor and gains a contact shadow. Uses `translate`
+   (not transform) so it composes with the global :active scale-press. */
+.hover-raise {
+  transition: translate 150ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 150ms cubic-bezier(0.22, 1, 0.36, 1), background-color 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.hover-raise:hover { translate: 0 -1px; box-shadow: var(--shadow-e2); }
+.hover-raise:active { translate: 0 0; box-shadow: var(--shadow-e1); }
+@media (prefers-reduced-motion: reduce) {
+  .hover-raise:hover { translate: none; }
+}
 .dark .raised { box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.06), var(--shadow-e1); }

@@ -11,24 +11,26 @@ import { cn } from "@/lib/utils";
  */
 const buttonVariants = cva(
   "inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 rounded-md font-medium whitespace-nowrap " +
-    "transition-[color,background-color,border-color,box-shadow,opacity] duration-150 outline-none " +
+    "transition-[color,background-color,border-color,box-shadow,opacity,translate] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] outline-none " +
     "disabled:pointer-events-none disabled:opacity-40 " +
     "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
         // THE action: ink fill, contrast text. Ideally the only filled element in view.
-        default: "bg-primary text-primary-foreground shadow-e1 hover:bg-primary/80 active:bg-primary/80",
-        primary: "bg-primary text-primary-foreground shadow-e1 hover:bg-primary/80 active:bg-primary/80",
+        // Filled buttons lift a hair on hover (translate, not transform, so the global :active
+        // scale-press still composes) and settle back when pressed.
+        default: "bg-primary text-primary-foreground shadow-e1 hover:bg-primary/80 hover:shadow-e2 hover:-translate-y-px active:translate-y-0 active:bg-primary/80 active:shadow-e1",
+        primary: "bg-primary text-primary-foreground shadow-e1 hover:bg-primary/80 hover:shadow-e2 hover:-translate-y-px active:translate-y-0 active:bg-primary/80 active:shadow-e1",
         // Secondary: hairline panel that fills on hover — never a shadow.
         outline: "border border-border bg-card text-foreground hover:bg-muted hover:border-line-strong",
         secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/60",
         ghost: "text-muted-foreground hover:bg-muted hover:text-foreground",
         // Destructive is text-only until armed; the caller flips to `destructive` for the confirm step.
         danger: "text-destructive hover:bg-destructive/10",
-        destructive: "bg-destructive text-white shadow-e1 hover:bg-destructive/80",
+        destructive: "bg-destructive text-white shadow-e1 hover:bg-destructive/80 hover:shadow-e2 hover:-translate-y-px active:translate-y-0 active:shadow-e1",
         // Amber: the one state with a deadline. Used for "Answer" on a waiting machine.
-        attention: "bg-attention text-attention-ink shadow-e1 hover:bg-attention/80",
+        attention: "bg-attention text-attention-ink shadow-e1 hover:bg-attention/80 hover:shadow-e2 hover:-translate-y-px active:translate-y-0 active:shadow-e1",
         link: "text-primary underline-offset-4 hover:underline",
       },
       size: {
