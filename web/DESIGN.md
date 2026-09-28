@@ -110,6 +110,17 @@ that precedes them — the bug that made the primary button ink-on-ink. Keep the
   list from `/files.json`, narrowed as you type, ↑/↓/Enter/Tab/Esc; mentions expand to
   `/workspace/<path>` references in the message. Dashed border in side-question mode.
 
+## Output visualizers
+
+Agent markdown upgrades itself (`docs/output-visualizers.md` is the contract): GFM tables become
+sortable data tables (numeric alignment, magnitude bars, copy-CSV), task lists become progress
+checklist cards, `json` fences a collapsible explorer, ASCII trees a real tree with file marks —
+and the opt-in fences `chart` / `stats` / `flow` / `tree` (taught to the agent via
+`AGENT_SYS_PROMPT`) render SVG charts, KPI tiles, and pipelines. All of it in
+`components/viz/`, wired at the single `ui/markdown.tsx` chokepoint so every surface and the
+streaming reveal get it. Series colors are the CVD-validated `--viz-1…8`; every card carries a raw
+toggle; anything malformed falls back to a plain code block — a visualizer never loses content.
+
 ## Sending
 
 The composer echoes a message the instant Enter is pressed (withdrawn only if delivery fails); the

@@ -473,6 +473,18 @@ export const AGENT_SYS_PROMPT =
   "of your progress while you work, so a stale or after-the-fact plan is worse than none. Skip it only for " +
   "genuinely single-step requests. Do not announce that you are planning and do not repeat the list in " +
   "your prose — writing it is enough, the caller sees it rendered. " +
+  // Output shaping for the console's visualizers (docs/output-visualizers.md). The transcript
+  // upgrades these shapes into interactive components; malformed fences just render as code, so
+  // this is a preference, never a requirement — plain prose beats a forced visualization.
+  "PRESENTING RESULTS (prose, not code): the caller's console renders structured output richly, so " +
+  "prefer these shapes when they genuinely fit. Tabular facts → a GFM markdown table. Step progress " +
+  "→ a task list (- [x]). A comparison, distribution, or trend worth seeing → a fenced ```chart block " +
+  'containing JSON {"type":"bar"|"line"|"area"|"donut","title","labels":[…],"values":[…]} (or ' +
+  '"series":[{"name","data":[…]}], max 8). Headline metrics → a fenced ```stats block, one per line: ' +
+  "'Label: value | +12% | note' (append '!' to the delta when down is good). A file/directory layout → " +
+  "a fenced ```tree block (tree glyphs or one path per line). A pipeline outcome → a fenced ```flow " +
+  "block, one chain per line like 'build ✓ -> test ✗' ('…' marks in-progress). Emit well-formed JSON " +
+  "in ```json fences. Do not force these — use them only where they make the answer clearer. " +
   "Never read or print /workspace/.agent.* files " +
   "(the log, task, question): they are the controller's channel, not context, and echoing the log " +
   "corrupts the transcript the caller is reading. " +

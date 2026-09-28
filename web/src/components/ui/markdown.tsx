@@ -7,6 +7,8 @@ import { normalizeBlocks } from "@/lib/markdown-normalize"
 import { isCodeBlock } from "@/lib/markdown-code"
 import { CodeBlock, CodeBlockCode } from "./code-block"
 import { LinkChip } from "./link-chip"
+import { smartBlock, tableFromMarkdown } from "@/components/viz/SmartBlock"
+import { ChecklistCard, taskItems } from "@/components/viz/ChecklistCard"
 
 export type MarkdownProps = {
   children: string
@@ -56,11 +58,29 @@ const INITIAL_COMPONENTS: Partial<Components> = {
 
     const language = extractLanguage(className)
 
+    // Output visualizers (docs/output-visualizers.md): opt-in fences (chart / stats / flow / tree /
+    // csv / tsv), parseable json, and auto-detected ASCII trees render rich; anything the router
+    // does not confidently understand — including a fence still streaming in — stays a code block.
+    const rich = smartBlock(language, text)
+    if (rich) return rich
+
     return (
       <CodeBlock className={className}>
         <CodeBlockCode code={text} language={language} />
       </CodeBlock>
     )
+  },
+  // GFM tables upgrade to the sortable DataTable (numeric alignment, magnitude bars, copy CSV).
+  table: function TableComponent({ children }) {
+    const rich = tableFromMarkdown(children)
+    if (rich) return rich
+    return <table>{children}</table>
+  },
+  // Task lists upgrade to a checklist card with a progress line; ordinary lists stay untouched.
+  ul: function ListComponent({ children, node: _node, ...props }) {
+    const items = taskItems(children)
+    if (items) return <ChecklistCard items={items} />
+    return <ul {...props}>{children}</ul>
   },
   pre: function PreComponent({ children }) {
     return <>{children}</>

@@ -147,6 +147,19 @@
   --shade-1: oklch(0 0 0 / 0.1);
   --shade-2: oklch(0 0 0 / 0.14);
   --shade-3: oklch(0 0 0 / 0.2);
+
+  /* Output-visualizer series colors (docs/output-visualizers.md). Fixed categorical order —
+     assigned by slot, never cycled; validated for CVD separation per mode (dataviz method).
+     Three light slots sit under 3:1 vs paper, so charts always carry direct value labels. */
+  --viz-1: #2a78d6;
+  --viz-2: #eb6834;
+  --viz-3: #1baf7a;
+  --viz-4: #eda100;
+  --viz-5: #e87ba4;
+  --viz-6: #008300;
+  --viz-7: #4a3aa7;
+  --viz-8: #e34948;
+  --viz-grid: #e1e0d9;
 }
 
 .dark {
@@ -185,6 +198,17 @@
   --shade-1: oklch(0 0 0 / 0.4);
   --shade-2: oklch(0 0 0 / 0.5);
   --shade-3: oklch(0 0 0 / 0.6);
+
+  /* Dark viz series: the same eight hues re-stepped for the dark surface (selected, not flipped). */
+  --viz-1: #3987e5;
+  --viz-2: #d95926;
+  --viz-3: #199e70;
+  --viz-4: #c98500;
+  --viz-5: #d55181;
+  --viz-6: #008300;
+  --viz-7: #9085e9;
+  --viz-8: #e66767;
+  --viz-grid: #2c2c2a;
 }
 
 @utility scrollbar-thin {
@@ -603,6 +627,33 @@
   );
   background-size: 200% 100%;
   animation: shimmer 1.6s ease-in-out infinite;
+}
+
+/* Output visualizers (docs/output-visualizers.md): one-shot draw-in for chart marks. Bars grow
+   from the baseline; lines draw along their path. Both are zeroed by the global reduced-motion
+   rule, and each runs once — never looped, never re-triggered by streaming re-renders. */
+@keyframes viz-grow {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+.viz-grow {
+  animation: viz-grow 0.35s cubic-bezier(0.2, 0, 0, 1) backwards;
+}
+@keyframes viz-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+.viz-draw {
+  stroke-dasharray: 1;
+  animation: viz-draw 0.6s cubic-bezier(0.2, 0, 0, 1);
 }
 
 /* Capacity slots: a filled slot for a working machine carries a slow sheen so the strip reads live. */
