@@ -68,7 +68,7 @@ import { viewAccounts, deviceStart, devicePoll } from "./accounts.js";
 import { makeRepoLister, fetchGithubRepos, matchRepos, inferRepos, attachRepoToBox } from "./repos.js";
 import { loadMcpStore, saveMcpStore, normalizeServer, parseMcpImport, viewServers, toEditableConfig, replaceFromJson, mergeSecrets, type McpServer as McpServerDef } from "./mcp-store.js";
 import { loadSkillStore, saveSkillStore, normalizeSkill, viewSkills, type SkillDef } from "./skill-store.js";
-import { listRepoSkills, fetchRepoFile } from "./github-skills.js";
+import { listRepoSkills, fetchRepoFile, fetchRepoSkillDir, resolveSkillRepoToken } from "./github-skills.js";
 import { listClaims, listKept, markKept, unmarkKept } from "./claims.js";
 import { makeRedactor, isPlumbingError } from "./redact.js";
 import { isSecretKey, probeMcpServer } from "./mcp-store.js";
@@ -129,8 +129,8 @@ const jsonMcp = express.json({ limit: "16mb" });
 app.use((req: Request, res: Response, next) =>
   (req.path === "/file.json" || req.path === "/delegate.json"
     ? jsonLarge
-    : req.path === "/mcp" || req.path.startsWith("/mcp/")
-    ? jsonMcp
+    : req.path === "/mcp" || req.path.startsWith("/mcp/") || req.path === "/skills.json"
+    ? jsonMcp // a multi-file skill upsert (scripts + docs) can be a few MB
     : jsonSmall)(req, res, next)
 );
 app.use((err: unknown, _req: Request, res: Response, next: express.NextFunction) => {
@@ -1824,8 +1824,10 @@ app.post("/skills.json", async (req: Request, res: Response) => {
 });
 
 /**
- * Browse a public GitHub repository for importable skills. Proxied here rather than fetched from
- * the page because the SPA runs under `connect-src 'self'` — see github-skills.ts for the why.
+ * Browse a GitHub repository for importable skills. Proxied here rather than fetched from the
+ * page because the SPA runs under `connect-src 'self'` — see github-skills.ts for the why. When
+ * a stored GitHub account can access the repo its token is used (private repos work); otherwise
+ * the reads are anonymous (public repos, no token spent).
  */
 app.post("/skill-repo.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
@@ -1834,10 +1836,14 @@ app.post("/skill-repo.json", async (req: Request, res: Response) => {
   const owner = str("owner");
   const repo = str("repo");
   try {
+    const token = await resolveSkillRepoToken(cfg, owner, repo);
     if (body.action === "list") {
-      res.json(await listRepoSkills(owner, repo, str("branch") || undefined, str("subpath") || undefined));
+      const r = await listRepoSkills(owner, repo, str("branch") || undefined, str("subpath") || undefined, token);
+      res.json({ ...r, authed: !!token });
     } else if (body.action === "fetch") {
-      res.json({ text: await fetchRepoFile(owner, repo, str("branch"), str("path")) });
+      res.json({ text: await fetchRepoFile(owner, repo, str("branch"), str("path"), token) });
+    } else if (body.action === "fetch-skill") {
+      res.json(await fetchRepoSkillDir(owner, repo, str("branch"), str("path"), token));
     } else {
       res.status(400).json({ error: "unknown action" });
     }

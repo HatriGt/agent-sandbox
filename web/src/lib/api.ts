@@ -134,6 +134,8 @@ export interface SkillView {
   name: string;
   description: string;
   content: string;
+  /** Supporting files beside SKILL.md (scripts, docs) — absent for single-file skills. */
+  files?: { path: string; content: string }[];
   enabled: boolean;
   addedAt: number;
   updatedAt: number;

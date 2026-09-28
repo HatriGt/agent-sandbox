@@ -13,7 +13,7 @@ import { Markdown } from "@/components/ui/markdown";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { CodeEditor } from "@/components/CodeEditor";
 import { Bar } from "@/components/thread/Skeletons";
-import { fetchRepoFile, listRepoSkills, parseRepoInput, parseSkillMd, toSkillMd, type RepoRef, type RepoSkillFile } from "@/lib/skillImport";
+import { fetchRepoFile, fetchRepoSkill, listRepoSkills, parseRepoInput, parseSkillMd, toSkillMd, type RepoRef, type RepoSkillEntry, type SkillFile } from "@/lib/skillImport";
 import { cn } from "@/lib/utils";
 
 /**
@@ -23,7 +23,16 @@ import { cn } from "@/lib/utils";
  * preview tab. No decoration that isn't information.
  */
 
-type Draft = { name: string; description: string; content: string };
+type Draft = { name: string; description: string; content: string; files?: SkillFile[] };
+
+function fmtKb(bytes: number): string {
+  return bytes >= 1024 ? `${Math.round(bytes / 1024)} KB` : `${bytes} B`;
+}
+
+/** "3 files · 12 KB" — how a multi-file skill announces its baggage. */
+function fmtBundle(fileCount: number, totalBytes: number): string {
+  return `${fileCount} file${fileCount === 1 ? "" : "s"} · ${fmtKb(totalBytes)}`;
+}
 
 const TEMPLATES: (Draft & { blurb: string })[] = [
   {
@@ -372,6 +381,8 @@ function EditorSheet({
   const [name, setName] = React.useState(initial?.name ?? draft?.name ?? "");
   const [description, setDescription] = React.useState(initial?.description ?? draft?.description ?? "");
   const [content, setContent] = React.useState(initial?.content ?? draft?.content ?? "");
+  // Supporting files (multi-file skills) ride along untouched: SKILL.md is the editable part.
+  const files = initial?.files ?? draft?.files;
   const [tab, setTab] = React.useState<"write" | "preview">("write");
   const [busy, setBusy] = React.useState(false);
   const [armed, setArmed] = React.useState(false);
@@ -433,7 +444,7 @@ function EditorSheet({
         {
           action: "upsert",
           previousName: initial?.name,
-          skill: { name: name.trim(), description: description.trim(), content, enabled: initial?.enabled ?? true },
+          skill: { name: name.trim(), description: description.trim(), content, files, enabled: initial?.enabled ?? true },
         },
         initial ? "Skill saved" : `/${name.trim()} is live — every sandbox gets it on its next turn`
       );
@@ -574,6 +585,20 @@ function EditorSheet({
             </div>
           </div>
 
+          {files && files.length > 0 && (
+            <div className="shrink-0">
+              <span className="label text-muted-foreground">Supporting files ({files.length}) — imported with the skill, edited at the source</span>
+              <ul className="bg-background mt-1.5 max-h-28 divide-y overflow-y-auto rounded-md border">
+                {files.map((f) => (
+                  <li key={f.path} className="flex items-center gap-3 px-2.5 py-1.5">
+                    <span className="stamp text-foreground min-w-0 flex-1 truncate text-micro">{f.path}</span>
+                    <span className="text-faint tabular shrink-0 text-micro">{fmtKb(new Blob([f.content]).size)}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           {err && (
             <p role="alert" className="text-destructive shrink-0 text-meta">
               {err}
@@ -639,10 +664,10 @@ const FEATURED_REPOS = [
 ];
 
 /**
- * Browse a public GitHub repository for skills and pull them in. All of it happens in the browser
- * against api.github.com / raw.githubusercontent.com — no token, public repos only, nothing about
- * your account leaves the page. Found files list with checkboxes: pick one to review it in the
- * editor first, or several to import in one go.
+ * Browse a GitHub repository for skills and pull them in. The controller does the fetching — with
+ * a saved GitHub token when one covers the repo, so private repositories work too. Skill folders
+ * come in whole (SKILL.md plus scripts/docs); loose markdown comes in as single-file skills. Pick
+ * one to review it in the editor first, or several to import in one go.
  */
 function RepoBrowser({
   open,
@@ -660,7 +685,7 @@ function RepoBrowser({
   const [input, setInput] = React.useState("");
   const [loading, setLoading] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
-  const [found, setFound] = React.useState<{ ref: RepoRef; branch: string; files: RepoSkillFile[] } | null>(null);
+  const [found, setFound] = React.useState<{ ref: RepoRef; branch: string; entries: RepoSkillEntry[]; authed: boolean } | null>(null);
   const [picked, setPicked] = React.useState<Set<string>>(new Set());
   const [importing, setImporting] = React.useState(false);
 
@@ -680,7 +705,7 @@ function RepoBrowser({
     try {
       const ref = parseRepoInput(raw);
       const r = await listRepoSkills(ref);
-      if (!r.files.length) setErr("No skills here — the repo has no SKILL.md files or skills/ markdown.");
+      if (!r.entries.length) setErr("No skills here — the repo has no SKILL.md folders or skills/ markdown.");
       else setFound({ ref, ...r });
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -693,8 +718,17 @@ function RepoBrowser({
     if (!found || !picked.size) return;
     setImporting(true);
     try {
-      const files = found.files.filter((f) => picked.has(f.path));
-      const drafts = await Promise.all(files.map(async (f) => parseSkillMd(await fetchRepoFile(found.ref, found.branch, f.path), f.name)));
+      const entries = found.entries.filter((f) => picked.has(f.path));
+      const drafts = await Promise.all(
+        entries.map(async (f): Promise<Draft> => {
+          if (f.kind === "dir") {
+            const r = await fetchRepoSkill(found.ref, found.branch, f.path);
+            if (r.skipped.length) toast.info(`/${f.name}: ${r.skipped.length} file${r.skipped.length === 1 ? "" : "s"} skipped`, { description: r.skipped.slice(0, 5).join(", ") });
+            return { ...parseSkillMd(r.skillMd, f.name), files: r.files };
+          }
+          return parseSkillMd(await fetchRepoFile(found.ref, found.branch, f.path), f.name);
+        })
+      );
       if (drafts.length === 1) return onEditOne(drafts[0]);
       let saved = 0;
       for (const d of drafts) {
@@ -716,7 +750,7 @@ function RepoBrowser({
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent title="Import from GitHub" description="Browse a public repository — SKILL.md folders and skills/ markdown come in as they are." className="w-[min(40rem,calc(100vw-2rem))]">
+      <DialogContent title="Import from GitHub" description="Skill folders come in whole — SKILL.md plus scripts and docs. Private repos work when a saved GitHub account can reach them." className="w-[min(40rem,calc(100vw-2rem))]">
         <form
           className="flex gap-2"
           onSubmit={(e) => {
@@ -779,18 +813,19 @@ function RepoBrowser({
                 <span className="stamp text-foreground">
                   {found.ref.owner}/{found.ref.repo}
                 </span>{" "}
-                @ {found.branch} · {found.files.length} found
+                @ {found.branch} · {found.entries.length} found
+                {found.authed && <span className="text-faint"> · via your saved GitHub token</span>}
               </p>
               <button
                 type="button"
-                onClick={() => setPicked(picked.size === found.files.length ? new Set() : new Set(found.files.map((f) => f.path)))}
+                onClick={() => setPicked(picked.size === found.entries.length ? new Set() : new Set(found.entries.map((f) => f.path)))}
                 className="text-live shrink-0 cursor-pointer text-meta font-medium hover:underline"
               >
-                {picked.size === found.files.length ? "Clear" : "Select all"}
+                {picked.size === found.entries.length ? "Clear" : "Select all"}
               </button>
             </div>
             <ul className="max-h-72 divide-y overflow-y-auto rounded-lg border">
-              {found.files.map((f) => {
+              {found.entries.map((f) => {
                 const on = picked.has(f.path);
                 return (
                   <li key={f.path}>
@@ -812,8 +847,9 @@ function RepoBrowser({
                       <SkillMark name={f.name} size={16} className="text-muted-foreground" />
                       <span className="min-w-0 flex-1">
                         <span className="stamp text-foreground block truncate text-meta font-medium">/{f.name}</span>
-                        <span className="text-faint block truncate text-micro">{f.path}</span>
+                        <span className="text-faint block truncate text-micro">{f.path || "(repository root)"}</span>
                       </span>
+                      {f.kind === "dir" && f.fileCount > 1 && <span className="text-muted-foreground shrink-0 text-micro">{fmtBundle(f.fileCount, f.totalBytes)}</span>}
                       {existing.has(f.name) && <span className="text-attention-text shrink-0 text-micro">replaces yours</span>}
                     </button>
                   </li>

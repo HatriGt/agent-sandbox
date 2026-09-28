@@ -12,7 +12,7 @@ import { listClaims, listKept, listParked, markClaimed, shouldKeepStopped, unmar
 import { askParkTtlSec } from "./snapshot.js";
 import { guardNodeProgram } from "./guard.js";
 import { loadMcpStore, toClaudeMcpConfig } from "./mcp-store.js";
-import { enabledSkills, loadSkillStore, toSkillMd } from "./skill-store.js";
+import { buildSkillsTarBase64, enabledSkills, loadSkillStore } from "./skill-store.js";
 import { reposPromptHint, type RepoLayout } from "./agent-prompt.js";
 import { secretEnvFlags } from "./secret-env.js";
 import {
@@ -1102,11 +1102,14 @@ const SKILLS_DIR = "/root/.claude/skills";
 export async function installSkills(cfg: Config, box: string): Promise<void> {
   try {
     const skills = enabledSkills(await loadSkillStore(cfg));
-    const parts = [`rm -rf ${SKILLS_DIR}`];
-    for (const s of skills) {
-      parts.push(`mkdir -p ${SKILLS_DIR}/${s.name} && printf '%s' ${shellQuote(toSkillMd(s))} > ${SKILLS_DIR}/${s.name}/SKILL.md`);
+    if (!skills.length) {
+      await exec(cfg, box, `rm -rf ${SKILLS_DIR}`);
+      return;
     }
-    await exec(cfg, box, parts.join(" && "));
+    // The payload rides stdin as a base64 tar, not argv: skills carry whole file trees now
+    // (scripts/, docs/, …) and a shell argument caps at ~128 KB — see execWithInput.
+    const tarB64 = buildSkillsTarBase64(skills);
+    await execWithInput(cfg, box, `rm -rf ${SKILLS_DIR} && mkdir -p ${SKILLS_DIR} && base64 -d | tar -xf - -C ${SKILLS_DIR}`, tarB64);
   } catch (e) {
     console.error(`[skills] could not install skills into ${box}:`, (e as Error).message);
   }

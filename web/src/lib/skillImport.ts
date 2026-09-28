@@ -8,10 +8,17 @@
  */
 import { api } from "./api";
 
+export interface SkillFile {
+  path: string;
+  content: string;
+}
+
 export interface ParsedSkill {
   name: string;
   description: string;
   content: string;
+  /** Supporting files beside SKILL.md when the import was a whole skill folder. */
+  files?: SkillFile[];
 }
 
 const NAME_RE = /^[a-z0-9][a-z0-9-]{0,49}$/;
@@ -85,11 +92,15 @@ export interface RepoRef {
   subpath?: string;
 }
 
-export interface RepoSkillFile {
-  /** Path of the markdown file inside the repo. */
+export interface RepoSkillEntry {
+  /** "dir": a whole skill folder (SKILL.md + supporting files). "file": a loose markdown file. */
+  kind: "dir" | "file";
+  /** Folder path (dir) or markdown file path (file) inside the repo. */
   path: string;
   /** The display name derived from the path (folder for SKILL.md, filename otherwise). */
   name: string;
+  fileCount: number;
+  totalBytes: number;
 }
 
 /**
@@ -107,15 +118,31 @@ export function parseRepoInput(input: string): RepoRef {
 }
 
 /**
- * List the skill files a repository carries: every `SKILL.md` (Claude Code skill folders), plus
- * loose `.md` files under a `skills/` or `commands/` directory. The controller does the fetching.
+ * List what a repository carries: whole skill folders (every `SKILL.md` with its supporting
+ * files), plus loose `.md` files under a `skills/` or `commands/` directory. The controller does
+ * the fetching — with a stored GitHub token when one covers the repo, so private repos work too.
  */
-export async function listRepoSkills(ref: RepoRef): Promise<{ branch: string; files: RepoSkillFile[] }> {
-  return api.skillRepo<{ branch: string; files: RepoSkillFile[] }>({ action: "list", owner: ref.owner, repo: ref.repo, branch: ref.branch, subpath: ref.subpath });
+export async function listRepoSkills(ref: RepoRef): Promise<{ branch: string; entries: RepoSkillEntry[]; authed: boolean }> {
+  return api.skillRepo<{ branch: string; entries: RepoSkillEntry[]; authed: boolean }>({ action: "list", owner: ref.owner, repo: ref.repo, branch: ref.branch, subpath: ref.subpath });
 }
 
 /** Fetch one file's raw text from the repo. */
 export async function fetchRepoFile(ref: RepoRef, branch: string, path: string): Promise<string> {
   const { text } = await api.skillRepo<{ text: string }>({ action: "fetch", owner: ref.owner, repo: ref.repo, branch, path });
   return text;
+}
+
+/** Fetch a whole skill folder: SKILL.md plus every supporting file (skipping what can't come). */
+export async function fetchRepoSkill(
+  ref: RepoRef,
+  branch: string,
+  dirPath: string
+): Promise<{ skillMd: string; files: SkillFile[]; skipped: string[] }> {
+  return api.skillRepo<{ skillMd: string; files: SkillFile[]; skipped: string[] }>({
+    action: "fetch-skill",
+    owner: ref.owner,
+    repo: ref.repo,
+    branch,
+    path: dirPath,
+  });
 }
