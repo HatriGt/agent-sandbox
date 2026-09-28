@@ -703,8 +703,14 @@ export function workdirFromProbe(stdout: string): string {
  */
 export const KIND_MARK = "/workspace/.agent.kind";
 
-/** Root-disk tier an omp box is grown to before bootstrap (bun + omp don't fit the 1G default). */
-export const OMP_MIN_DISK = "4G";
+/**
+ * Root-disk tier an omp box is grown to before bootstrap (bun + omp need ~1.5 GB; the default
+ * rootfs is 1G). 8G, not 4G: a snapshot-booted box's msb record claims the runtime-default
+ * "4 GiB" even though its actual fs is the 1G the snapshot was baked with, so `modify --root-disk
+ * 4G` is refused as "already 4 GiB" while 8G resizes for real (measured live). The volume is
+ * sparse — unused space costs no host disk.
+ */
+export const OMP_MIN_DISK = "8G";
 
 /**
  * Parse the kind mark defensively: it sits in the agent-writable workspace, so only a clean
