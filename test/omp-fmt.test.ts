@@ -43,13 +43,15 @@ test("plain (non-JSON) output passes through defanged", () => {
   assert.doesNotMatch(log, /^● session started \(model evil\)/m);
 });
 
-test("a session start event renders the ● marker once", () => {
+test("the ● marker comes from the FIRST assistant message (omp's session event has no model)", () => {
   const log = runFormatter([
-    { type: "agent_start", model: "ccproxy/ak-claude-opus-5" },
-    { type: "agent_start", model: "ccproxy/ak-claude-opus-5" },
+    { type: "session", version: 3, id: "01a0", cwd: "/tmp" },
+    { type: "agent_start" },
+    { type: "message_end", message: { role: "assistant", model: "ak-claude-opus-5", content: [{ type: "text", text: "one" }] } },
+    { type: "message_end", message: { role: "assistant", model: "ak-claude-opus-5", content: [{ type: "text", text: "two" }] } },
   ]);
   assert.equal(log.split("● session started").length - 1, 1);
-  assert.match(log, /ak-claude-opus-5/);
+  assert.match(log, /● session started \(model ak-claude-opus-5\)/);
 });
 
 test("assistant message: text, thinking and tool calls land in the shared grammar", () => {
@@ -63,9 +65,9 @@ test("assistant message: text, thinking and tool calls land in the shared gramma
           { type: "text", text: "I will list files" },
           { type: "toolCall", id: "call_abc12345", name: "bash", arguments: { command: "ls -la" } },
         ],
-        usage: { input: 100, output: 20, cacheRead: 50 },
       },
     },
+    { type: "turn_end", message: { role: "assistant", usage: { input: 100, output: 20, cacheRead: 50 } } },
   ]);
   assert.match(log, /⟦think⟧\npondering\n⟦\/think⟧/);
   assert.match(log, /I will list files/);
@@ -82,6 +84,9 @@ test("tool results attach by id and mark failures", () => {
         content: [{ type: "toolCall", id: "call_ok111111", name: "read", arguments: { path: "a.txt" } }],
       },
     },
+    // tool_execution_end precedes the toolResult message for the SAME call (measured live) — the
+    // formatter must take only ONE of them or every output doubles.
+    { type: "tool_execution_end", toolCallId: "call_ok111111", toolName: "read", result: { content: [{ type: "text", text: "file body" }] }, isError: false },
     { type: "message_end", message: { role: "toolResult", toolCallId: "call_ok111111", content: [{ type: "text", text: "file body" }], isError: false } },
     {
       type: "message_end",
@@ -94,6 +99,7 @@ test("tool results attach by id and mark failures", () => {
   ]);
   const events = parseTrace(log).filter((e) => e.kind === "tool");
   assert.equal(events.length, 2);
+  assert.equal(log.split("file body").length - 1, 1, "tool_execution_end + toolResult must not double-write");
   assert.match(log, /⟦#ok111111⟧ file body/);
   assert.match(log, /⟦#bad22222⟧ ⟦err⟧ boom/);
 });

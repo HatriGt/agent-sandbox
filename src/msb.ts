@@ -406,31 +406,35 @@ export function ompInstallSh(version: string): string {
   if (version !== "latest" && !/^\d+\.\d+\.\d+(-[\w.]+)?$/.test(version)) {
     throw new Error(`invalid oh-my-pi version: ${JSON.stringify(version)}`);
   }
-  const bun = `command -v bun >/dev/null 2>&1 || npm i -g bun >/dev/null 2>&1 || true`;
+  // --allow-scripts=bun: npm ≥11.5 blocks install scripts by default, and bun's postinstall IS the
+  // download of the actual binary — without it the global `bun` is a dead stub (measured live).
+  // Older npms warn about the unknown flag and proceed. BUN_INSTALL=/usr/local puts bun's global
+  // bin dir on the default PATH (its ~/.bun/bin default is invisible to the run's `sh -lc`).
+  const bun = `command -v bun >/dev/null 2>&1 || npm i -g bun --allow-scripts=bun >/dev/null 2>&1 || true`;
+  const install = (spec: string) =>
+    `OMP_SKIP_SETUP=1 BUN_INSTALL=/usr/local bun i -g ${spec} >/dev/null 2>&1 || npm i -g ${spec}`;
   if (version === "latest") {
-    return (
-      `${bun}; command -v omp >/dev/null 2>&1 || ` +
-      `bun i -g @oh-my-pi/pi-coding-agent >/dev/null 2>&1 || npm i -g @oh-my-pi/pi-coding-agent`
-    );
+    return `${bun}; command -v omp >/dev/null 2>&1 || { ${install("@oh-my-pi/pi-coding-agent")}; }`;
   }
   return (
     `${bun}; [ "$(OMP_SKIP_SETUP=1 omp --version 2>/dev/null | grep -oE '[0-9]+\\.[0-9]+\\.[0-9]+' | head -n1)" = "${version}" ] || ` +
-    `bun i -g @oh-my-pi/pi-coding-agent@${version} >/dev/null 2>&1 || npm i -g @oh-my-pi/pi-coding-agent@${version}`
+    `{ ${install(`@oh-my-pi/pi-coding-agent@${version}`)}; }`
   );
 }
 
-/** Install the agent toolchain (claude + gh + omp) into a box. Used when baking the warm snapshot. */
+/**
+ * Install the agent toolchain (claude + gh) into a box. Used when baking the warm snapshot.
+ * omp is deliberately NOT baked: bun + omp (onnxruntime and friends) need ~1.5 GB and would not fit
+ * the 1G default rootfs the snapshot pins for EVERY box — measured live: the bake ENOSPC'd and
+ * produced an unbootable snapshot. omp installs at bootstrap instead, after the omp run's disk grow.
+ */
 export async function installTools(cfg: Config, box: string) {
   return exec(
     cfg,
     box,
     `set -e; ${claudeInstallSh(cfg.claudeCodeVersion)}; ` +
       "command -v gh >/dev/null || (type apt-get >/dev/null 2>&1 && apt-get update -qq && " +
-      "apt-get install -y -qq gh >/dev/null 2>&1) || true; " +
-      // omp is best-effort at bake time: a registry hiccup must not brick the snapshot — the
-      // run-time bootstrap (agent === "omp") installs it again if the bake missed it.
-      `{ ${ompInstallSh(cfg.ompVersion)}; } || true; ` +
-      "claude --version; gh --version | head -1; OMP_SKIP_SETUP=1 omp --version 2>/dev/null || true"
+      "apt-get install -y -qq gh >/dev/null 2>&1) || true; claude --version; gh --version | head -1"
   );
 }
 
@@ -698,6 +702,9 @@ export function workdirFromProbe(stdout: string): string {
  * resuming omp (a mid-thread agent switch would orphan the session state of both CLIs).
  */
 export const KIND_MARK = "/workspace/.agent.kind";
+
+/** Root-disk tier an omp box is grown to before bootstrap (bun + omp don't fit the 1G default). */
+export const OMP_MIN_DISK = "4G";
 
 /**
  * Parse the kind mark defensively: it sits in the agent-writable workspace, so only a clean
@@ -1064,12 +1071,15 @@ export function ompFmtScript(): string {
     `function usage(u){if(!u)return;const inn=(u.input||u.input_tokens||0)+(u.cacheRead||u.cache_read_input_tokens||0)+(u.cacheWrite||u.cache_creation_input_tokens||0);` +
     `const o=(u.output||u.output_tokens||0);w("${USAGE_OPEN} in="+inn+" out="+o+" ctx="+(inn+o))}` +
     `function onMessage(m){if(!m||typeof m!=="object")return;const role=String(m.role||"");` +
+    // The session marker: omp's own "session" event carries no model, so the marker is emitted on
+    // the FIRST assistant message, whose .model is what actually answered (measured live).
+    `if(role==="assistant"&&!inited){inited=true;w("● session started (model "+String(m.model||"?")+")")}` +
     `if(role==="assistant"){for(const b of Array.isArray(m.content)?m.content:[]){if(!b)continue;` +
     `if(b.type==="text"&&String(b.text||"").trim())w(df(String(b.text).trim())+"\\n");` +
     `else if(b.type==="thinking"&&String(b.thinking||b.text||"").trim())w("${THINK_OPEN}\\n"+df(String(b.thinking||b.text).trim())+"\\n${THINK_CLOSE}");` +
     `else if(b.type==="toolCall"||b.type==="tool_call"||b.type==="tool_use")toolRow(b)}` +
     `if(typeof m.content==="string"&&m.content.trim())w(df(m.content.trim())+"\\n");` +
-    `usage(m.usage);return}` +
+    `return}` +
     `if(role==="toolResult"||role==="tool"||role==="tool_result"){const id=m.toolCallId||m.tool_call_id||m.toolUseId||m.id;` +
     `result(id,txt(m.content)||m.output||m.result||m.text,!!(m.isError||m.is_error));return}}` +
     `let buf="";` +
@@ -1080,9 +1090,12 @@ export function ompFmtScript(): string {
     `if(/^[\\[{]/.test(line.trim())){try{e=JSON.parse(line)}catch(_){e=null}}` +
     `if(!e||typeof e!=="object"||Array.isArray(e)||!e.type){w(df(line));return}` +
     `try{const t=String(e.type);` +
-    `if(t==="agent_start"||t==="session_start"||t==="agent_init"||t==="init"){if(!inited){inited=true;w("● session started (model "+String(e.model||(e.data&&e.data.model)||"?")+")")}return}` +
     `if(t==="message_end"||t==="message"){onMessage(e.message||e);return}` +
-    `if(t==="tool_result"||t==="tool_execution_end"){result(e.toolCallId||e.id,txt(e.content)||e.output||e.result,!!e.isError);return}` +
+    // Turn-end carries the turn's final assistant message with cumulative usage — ONE usage line
+    // per turn, like the Claude formatter's result frame. (tool results are NOT read from
+    // tool_execution_end: the same result arrives again as a role:"toolResult" message_end, and
+    // handling both wrote every output twice — measured live.)
+    `if(t==="turn_end"){usage(e.message&&e.message.usage);return}` +
     `if(t==="error"&&(e.message||e.error))w("${ERR_MARK} "+oneLine(String(e.message||e.error)));` +
     `}catch(_){}}`;
   const b64 = Buffer.from(js, "utf8").toString("base64");
@@ -1323,8 +1336,12 @@ export function agentSh(workdir: string, resume: boolean, agent: AgentKind = "cl
     `const y="providers:\\n  ccproxy:\\n    baseUrl: "+q(process.env.ANTHROPIC_BASE_URL||"")+"\\n    api: anthropic-messages\\n    apiKey: "+q(process.env.ANTHROPIC_API_KEY||"")+"\\n    models:\\n      - id: "+q(id)+"\\n        name: "+q(id)+"\\n        contextWindow: 200000\\n        maxTokens: 32000\\n";` +
     `fs.writeFileSync(p.join(d,"models.yml"),y)'`;
   const ompPrompt = resume ? `"$AGENT_TASK"` : `"$AGENT_SYS_PROMPT"$'\\n\\n'"$AGENT_TASK"`;
+  // --mode json: one NDJSON event per line for the formatter (plain -p buffers prose and shows no
+  // tool activity). --approval-mode=yolo: headless runs have no one to click "approve" — the box's
+  // isolation (microVM + egress allowlist) is the permission boundary, same stance as the claude
+  // branch's --allowedTools grant.
   const omp =
-    `${ompSeed} && OMP_SKIP_SETUP=1 omp ${resume ? `--continue ` : ``}` +
+    `${ompSeed} && OMP_SKIP_SETUP=1 omp ${resume ? `--continue ` : ``}--mode json --approval-mode=yolo ` +
     `--model "ccproxy/$ANTHROPIC_MODEL" -p ${ompPrompt}`;
   const launch =
     agent === "omp"
@@ -1470,6 +1487,13 @@ export async function runAgentTask(
 ) {
   const env = agentEnvFlags(cfg, task, repos, creds?.primaryToken, model, agent);
   const workdir = agentWorkdir(repos);
+  if (agent === "omp") {
+    // bun + omp (onnxruntime et al.) need ~1.5 GB the 1G default rootfs cannot hold (measured:
+    // ENOSPC). Grow BEFORE bootstrap — nothing is running yet, and the reboot the resize forces
+    // keeps the rootfs (the copied workspace included). Grow-only: a box already at or above the
+    // tier fails the modify harmlessly (check=false), and resumes never pass through here.
+    await msb(cfg, ["modify", box, "--root-disk", OMP_MIN_DISK, "--restart"], false);
+  }
   await msb(cfg, ["exec", box, ...env, "--", "sh", "-lc", bootstrapScript(cfg, agent)]);
   // These four touch independent files (~/.git-credentials + per-repo config, ~/.claude.json,
   // /root/.agent-mcp.json, ~/.claude/skills), so they run in parallel: each is an SSH→msb→guest
