@@ -9,6 +9,9 @@ import { CodeBlock, CodeBlockCode } from "./code-block"
 import { LinkChip } from "./link-chip"
 import { smartBlock, tableFromMarkdown } from "@/components/viz/SmartBlock"
 import { ChecklistCard, taskItems } from "@/components/viz/ChecklistCard"
+import { DefinitionListBlock, StatusListBlock, listItemTexts } from "@/components/viz/ListBlocks"
+import { LinksBlock } from "@/components/viz/AutoBlocks"
+import { parseDefinitions, parseLinks, parseStatusItems } from "@/lib/viz-auto"
 import { CalloutBlock, alertFromBlockquote } from "@/components/viz/CalloutBlock"
 import { calloutKind } from "@/lib/viz-extra"
 
@@ -73,13 +76,13 @@ const INITIAL_COMPONENTS: Partial<Components> = {
     )
   },
   // GFM tables upgrade to the sortable DataTable (numeric alignment, magnitude bars, copy CSV).
-  // …but only when there is enough data to sort: a three-row table under a paragraph is prose, and
-  // the sortable chrome (toolbar, magnitude bars) would outweigh it.
+  // …but only when there is something to sort or chart: a two-row table under a paragraph is prose,
+  // and the card chrome would outweigh it.
   table: function TableComponent({ children }) {
     const bodyRows = Children.toArray(children)
       .filter((s): s is ReactElement<{ children?: ReactNode }> => isValidElement(s) && s.type === "tbody")
       .reduce((n, s) => n + Children.toArray(s.props.children).length, 0)
-    const rich = bodyRows >= 5 ? tableFromMarkdown(children) : null
+    const rich = bodyRows >= 3 ? tableFromMarkdown(children) : null
     if (rich) return rich
     return (
       <div className="table-wrap">
@@ -97,6 +100,18 @@ const INITIAL_COMPONENTS: Partial<Components> = {
   ul: function ListComponent({ children, node: _node, ...props }) {
     const items = taskItems(children)
     if (items) return <ChecklistCard items={items} />
+    // Lists that are really structures: every item `Term — detail` (a glossary, a file-by-file
+    // summary) or every item opening with a status glyph (a checks report). Mixed lists stay lists.
+    const texts = listItemTexts(children)
+    if (texts) {
+      const joined = texts.join("\n")
+      const links = parseLinks(joined)
+      if (links) return <LinksBlock links={links} source={joined} />
+      const status = parseStatusItems(texts)
+      if (status) return <StatusListBlock items={status} />
+      const defs = parseDefinitions(texts)
+      if (defs) return <DefinitionListBlock items={defs} />
+    }
     return <ul {...props}>{children}</ul>
   },
   pre: function PreComponent({ children }) {

@@ -9,7 +9,9 @@ agent formats results.**
 ## Where it plugs in
 
 One integration point: `web/src/components/ui/markdown.tsx` routes fenced blocks through
-`web/src/components/viz/SmartBlock.tsx` and upgrades GFM tables and task lists. Every surface
+`web/src/components/viz/SmartBlock.tsx` (which asks `web/src/lib/viz-auto.ts` what a bare or
+unrendered fence really is) and upgrades GFM tables, task lists, definition lists, status lists
+and link lists. Every surface
 that renders agent markdown (thread, PR page, file pane, trace, skills) gets the same treatment,
 including the streaming reveal — a half-streamed fence renders as plain code and flips to the
 visualization when it completes.
@@ -34,6 +36,34 @@ away — the beautifier is presentation, never authority.
 | Bare fence that looks like `tree` output (`├──`/`└──`) | Collapsible tree with file icons |
 | Bare fence that looks like `git diff --stat` | Diffstat card (+/− bars per file) |
 | Bare fence that looks like `git log --oneline` | Commit list (hash chips, conventional-commit prefix toned) |
+| Bare fence of `KEY=value` lines (`.env`, `export`) | Env panel — secrets masked by key name/shape, per-row reveal, copy |
+| Bare fence that is a stack trace (Node, Python, Java, Go, Rust) | Stack card — error headline, app frames in ink, framework frames folded |
+| Bare fence of fixed-width columns (`docker ps`, `kubectl get`, `ps`, `df -h`) | Sortable data table |
+| Bare fence that is a psql / mysql / boxed grid | Sortable data table |
+| Bare fence of comma- or tab-separated rows | Sortable data table |
+| Bare fence of `ls -l` / `du -sh` output | File list — kind icons, size bars, total |
+| Bare fence of `$ command` lines (comments above) or plain commands | Command card — one copy per command, "Copy all" |
+| Bare fence of `label: before → after` lines | Before → after card — delta chip toned by direction, paired bars |
+| Bare fence of cron expressions (5 fields or `@daily`) | Schedule card — human description + per-field chips |
+| Bare fence that is exactly one URL | URL anatomy — host, path chips, decoded query table |
+| Bare fence that is exactly one JWT | Decoded header/payload (never verified), expiry chip |
+| Bare fence of `name 1.2.3 → 2.0.0` rows or an `npm outdated` table | Upgrade table, semver jump toned |
+| Bare fence of two or more links (bare, `[label](url)`, `label: url`) — or a markdown list of links | Link cards — PR / issue / commit / repo / docs icons, `owner/repo#n` refs |
+| Bare fence of `A -> B` edges | Layered graph |
+| Bare fence of `key: value` lines (≥3) | Definition panel |
+| Bare fence of `label: 72%` / `34/50` lines | Progress bars |
+| Bare fence of `label: healthy` status lines | Status chips |
+| Bare fence of `GET /path → 200` lines / test summaries / `time \| event` rows / numbered ✓ steps | The matching opt-in block, confirmed by its parser |
+| Bare fence of timestamped / levelled log lines | Log viewer with level filters |
+| Bare fence of `[section]` + `key = value` | INI panel |
+| Indented YAML-looking bare fence, or ```yaml | JSON explorer (YAML subset; anchors/tags stay code) |
+| ```toml / ```ini / ```properties | INI panel |
+| ```env / ```dotenv | Env panel |
+| ```mermaid `graph LR` / `flowchart TD` | Layered graph (node labels replace ids) |
+| ```bash / ```sh / ```console with `$` prompts | Command card (scripts without prompts stay code) |
+| Markdown list where every item is `Term — detail` / `**Term** detail` (≥3) | Definition grid |
+| Markdown list where every item opens with ✅ ❌ ⚠️ ⏳ / PASS / FAIL … | Status list with a tally |
+| GFM table with one label column and 1–3 numeric columns (2–12 rows) | Data table with a Table ⇄ Chart switch (bar chart) |
 
 ### Opt-in fences (agents: prefer these when they fit)
 

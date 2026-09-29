@@ -1,9 +1,7 @@
 import * as React from "react";
-import { nodeText, parseChartSpec, parseDelimited, parseFlow, parseStats, parseTree, looksLikeTree } from "@/lib/viz";
+import { nodeText, parseChartSpec, parseDelimited, parseFlow, parseStats, parseTree } from "@/lib/viz";
 import {
   calloutKind,
-  looksLikeCommits,
-  looksLikeDiffstat,
   parseBadges,
   parseCommits,
   parseDag,
@@ -37,6 +35,9 @@ import { BadgesBlock, KeysBlock, KvBlock, PaletteBlock, ProgressBlock, ScoreBloc
 import { StatsBlock } from "./StatsBlock";
 import { TimelineBlock, StepsBlock } from "./TimelineBlock";
 import { TreeBlock } from "./TreeBlock";
+import { sniffBare, sniffLanguage } from "@/lib/viz-auto";
+import type { AutoBlock } from "@/lib/viz-auto-types";
+import { CommandBlock, ComparisonBlock, CronBlock, EnvBlock, FileListBlock, IniBlock, JwtBlock, LinksBlock, StackTraceBlock, UrlBlock } from "./AutoBlocks";
 
 /**
  * The output-visualizer router (docs/output-visualizers.md). Given a fenced block's language and
@@ -200,22 +201,111 @@ export function smartBlock(language: string, code: string): React.ReactElement |
     }
     case "plaintext":
     case "text":
+    case "txt":
+    case "plain":
+    case "output":
+    case "console-output":
     case "": {
-      // Auto-upgrades for bare fences with an unmistakable shape.
-      if (looksLikeTree(src)) {
-        const roots = parseTree(src);
-        el = roots && <TreeBlock roots={roots} source={src} />;
-      } else if (looksLikeDiffstat(src)) {
-        const files = parseDiffstat(src);
-        el = files && <DiffstatBlock files={files} source={src} />;
-      } else if (looksLikeCommits(src)) {
-        const commits = parseCommits(src);
-        el = commits && <CommitsBlock commits={commits} source={src} />;
-      }
+      // Auto-upgrades for bare fences: the sniffer (lib/viz-auto.ts) recognises the shapes agents
+      // put in plain fences — env files, stack traces, `docker ps` columns, psql grids, `ls -l`,
+      // before → after lines, cron, URLs, JWTs… — and every existing opt-in shape it can confirm.
+      el = renderAuto(sniffBare(src), src);
       break;
+    }
+    default: {
+      // A language the router does not render rich on its own: yaml, toml/ini, env, mermaid, a
+      // `$`-prompted shell session.
+      el = renderAuto(sniffLanguage(language, src), src);
     }
   }
   return el && <VizBoundary source={src}>{el}</VizBoundary>;
+}
+
+/** One sniffed shape → its block. Shapes the existing parsers own are re-parsed from the source. */
+function renderAuto(auto: AutoBlock | null, src: string): React.ReactElement | null {
+  if (!auto) return null;
+  switch (auto.kind) {
+    case "table":
+      return <DataTable head={auto.table.head} rows={auto.table.rows} texts={auto.table.rows} title={auto.title} />;
+    case "csv": {
+      const t = parseDelimited(src, auto.delimiter === "|" ? "," : auto.delimiter);
+      return t && <DataTable head={t.head} rows={t.rows} texts={t.rows} />;
+    }
+    case "json":
+      return <JsonBlock value={auto.value} source={src} />;
+    case "kv":
+      return <KvBlock rows={auto.rows} source={src} />;
+    case "ini":
+      return <IniBlock sections={auto.sections} source={src} />;
+    case "env":
+      return <EnvBlock vars={auto.vars} source={src} />;
+    case "stack":
+      return <StackTraceBlock trace={auto.trace} source={src} />;
+    case "files":
+      return <FileListBlock entries={auto.entries} source={src} />;
+    case "links":
+      return <LinksBlock links={auto.links} source={src} />;
+    case "commands":
+      return <CommandBlock commands={auto.commands} source={src} />;
+    case "comparison":
+      return <ComparisonBlock rows={auto.rows} source={src} />;
+    case "cron":
+      return <CronBlock specs={auto.specs} source={src} />;
+    case "url":
+      return <UrlBlock url={auto.url} source={src} />;
+    case "jwt":
+      return <JwtBlock jwt={auto.jwt} source={src} />;
+    case "semver":
+      return <DepsBlock deps={auto.rows} source={src} />;
+    case "dag": {
+      const dag = parseDag(auto.edges.length ? auto.edges.map(([a, b]) => `${a} -> ${b}`).join("\n") : src);
+      return dag && <GraphBlock dag={dag} source={src} />;
+    }
+    case "progress": {
+      const rows = parseProgress(src);
+      return rows && <ProgressBlock rows={rows} source={src} />;
+    }
+    case "badges": {
+      const badges = parseBadges(src);
+      return badges && <BadgesBlock badges={badges} source={src} />;
+    }
+    case "http": {
+      const calls = parseHttp(src);
+      return calls && <HttpBlock calls={calls} source={src} />;
+    }
+    case "log": {
+      const lines = parseLog(src);
+      return lines && <LogBlock lines={lines} source={src} />;
+    }
+    case "tests": {
+      const report = parseTests(src);
+      return report && <TestsBlock report={report} source={src} />;
+    }
+    case "timeline": {
+      const events = parseTimeline(src);
+      return events && <TimelineBlock events={events} source={src} />;
+    }
+    case "steps": {
+      const steps = parseSteps(src);
+      return steps && <StepsBlock steps={steps} source={src} />;
+    }
+    case "deps": {
+      const deps = parseDeps(src);
+      return deps && <DepsBlock deps={deps} source={src} />;
+    }
+    case "diffstat": {
+      const files = parseDiffstat(src);
+      return files && <DiffstatBlock files={files} source={src} />;
+    }
+    case "commits": {
+      const commits = parseCommits(src);
+      return commits && <CommitsBlock commits={commits} source={src} />;
+    }
+    case "tree": {
+      const roots = parseTree(src);
+      return roots && <TreeBlock roots={roots} source={src} />;
+    }
+  }
 }
 
 /**

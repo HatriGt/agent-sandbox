@@ -3,6 +3,9 @@ import { ArrowDown, ArrowUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { cellNumber, csvField } from "@/lib/viz";
 import { VizFrame } from "./VizFrame";
+import { ChartBlock } from "./ChartBlock";
+import { AnimatedTabs } from "@/components/ui/animated-tabs";
+import type { ChartSpec } from "@/lib/viz";
 
 /**
  * Every markdown table (and ```csv / ```tsv fence) renders through this: sortable headers,
@@ -23,6 +26,7 @@ export function DataTable({
   title?: string;
 }) {
   const [sort, setSort] = React.useState<{ col: number; dir: 1 | -1 } | null>(null);
+  const [view, setView] = React.useState<"table" | "chart">("table");
 
   // A column is numeric when ≥80% of its non-empty cells parse as numbers.
   const numeric = React.useMemo(
@@ -34,12 +38,14 @@ export function DataTable({
       }),
     [head, texts]
   );
+  // Identifiers are numbers without magnitude: no bar for id / # / port / year columns.
+  const idLike = React.useMemo(() => head.map((h) => /^(id|#|no\.?|pk|index|idx|port|pid|year|version|code)$/i.test(typeof h === "string" ? h.trim() : "")), [head]);
   const maxima = React.useMemo(
     () =>
       head.map((_, c) =>
-        numeric[c] ? Math.max(...texts.map((r) => Math.abs(cellNumber(r[c] ?? "") ?? 0)), 0) : 0
+        numeric[c] && !idLike[c] ? Math.max(...texts.map((r) => Math.abs(cellNumber(r[c] ?? "") ?? 0)), 0) : 0
       ),
-    [head, texts, numeric]
+    [head, texts, numeric, idLike]
   );
 
   const order = React.useMemo(() => {
@@ -60,8 +66,30 @@ export function DataTable({
     [headTexts, texts]
   );
 
+  // A small table with one label column and a few numeric ones is also a bar chart: offer the
+  // switch, never force it (the table stays the default — it is what the agent wrote).
+  const chart = React.useMemo<ChartSpec | null>(() => {
+    const labelCols = numeric.map((n, i) => (!n ? i : -1)).filter((i) => i >= 0);
+    const numCols = numeric.map((n, i) => (n ? i : -1)).filter((i) => i >= 0);
+    if (labelCols.length !== 1 || numCols.length < 1 || numCols.length > 3 || texts.length < 2 || texts.length > 12) return null;
+    const labels = texts.map((row) => row[labelCols[0]] ?? "");
+    const series = numCols.map((c) => ({ name: headTexts[c] || `col ${c + 1}`, data: texts.map((row) => cellNumber(row[c] ?? "") ?? 0) }));
+    return { type: "bar", labels, series };
+  }, [numeric, texts, headTexts]);
+
+  if (chart && view === "chart") {
+    return (
+      <div className="relative">
+        <ChartBlock spec={chart} source={csv} />
+        <div className="absolute top-1 right-16">
+          <ViewSwitch view={view} onChange={setView} />
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <VizFrame title={title ?? `${texts.length} ${texts.length === 1 ? "row" : "rows"}`} source={csv} rawLanguage="text">
+    <VizFrame title={title ?? `${texts.length} ${texts.length === 1 ? "row" : "rows"}`} source={csv} rawLanguage="text" actions={chart && <ViewSwitch view={view} onChange={setView} />}>
       <div className="max-h-96 overflow-auto">
         <table className="w-full border-collapse text-meta">
           <thead>
@@ -134,5 +162,22 @@ export function DataTable({
         </table>
       </div>
     </VizFrame>
+  );
+}
+
+/** Table ⇄ Chart, in the card header. Only offered when the data has one obvious chart in it. */
+function ViewSwitch({ view, onChange }: { view: "table" | "chart"; onChange: (v: "table" | "chart") => void }) {
+  return (
+    <AnimatedTabs
+      ariaLabel="View as"
+      size="sm"
+      className="mr-1"
+      value={view}
+      onChange={onChange}
+      items={[
+        { value: "table", label: "Table" },
+        { value: "chart", label: "Chart" },
+      ]}
+    />
   );
 }

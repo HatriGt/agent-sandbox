@@ -36,7 +36,7 @@ export function GraphBlock({ dag, source }: { dag: Dag; source: string }) {
   return (
     <VizFrame title={`${dag.nodes.length} nodes`} source={source}>
       <div className="overflow-x-auto px-4 py-3">
-        <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} className="max-w-full" role="img" aria-label="dependency graph">
+        <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} className="block" role="img" aria-label="dependency graph">
           {dag.edges.map(([a, b], i) => {
             const x1 = pos[a].x + nodeW;
             const y1 = pos[a].y + nodeH / 2;
