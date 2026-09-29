@@ -3,9 +3,8 @@ import { EditorState, Compartment, type Extension } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection, dropCursor, rectangularSelection, crosshairCursor, highlightSpecialChars, scrollPastEnd } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
-import { bracketMatching, foldGutter, foldKeymap, indentOnInput, syntaxHighlighting, HighlightStyle, StreamLanguage, LanguageDescription } from "@codemirror/language";
-import { unifiedMergeView } from "@codemirror/merge";
-import { tags as t } from "@lezer/highlight";
+import { bracketMatching, foldGutter, foldKeymap, indentOnInput, syntaxHighlighting, HighlightStyle, StreamLanguage, LanguageDescription, LanguageSupport, Language } from "@codemirror/language";
+import { classHighlighter, highlightCode, tags as t } from "@lezer/highlight";
 import { javascript } from "@codemirror/lang-javascript";
 import { json } from "@codemirror/lang-json";
 import { markdown } from "@codemirror/lang-markdown";
@@ -21,8 +20,8 @@ import { cn } from "@/lib/utils";
  * The code editor, on CodeMirror 6 — a real editor: one scroller, native selection, undo history,
  * ⌘F search, bracket matching, folding, indentation-aware Enter, Tab as indent. Themed from the
  * console's own tokens (fonts, `--text-code`, muted/foreground), light and dark. `onChange` fires on
- * every document change so the caller can autosave; ⌘S calls `onSave`. `UnifiedDiff` renders the
- * HEAD version against the working copy as a unified merge view with per-hunk accept/revert.
+ * every document change so the caller can autosave; ⌘S calls `onSave`. `tokenizeLines` lends the
+ * same grammars to the two-gutter diff so code reads the same in the editor and in a diff.
  */
 export function languageFor(path: string): Extension {
   const base = path.slice(path.lastIndexOf("/") + 1).toLowerCase();
@@ -127,16 +126,6 @@ const chrome = EditorView.theme({
   ".cm-panel.cm-search": { padding: "6px 10px" },
   ".cm-panel.cm-search input, .cm-panel.cm-search button": { fontFamily: "var(--font-sans)", fontSize: "12px", borderRadius: "6px", border: "1px solid var(--border)", background: "var(--background)", color: "var(--foreground)", padding: "2px 8px" },
   ".cm-panel.cm-search label": { fontSize: "11px", color: "var(--muted-foreground)" },
-  // Merge view
-  ".cm-changedLine": { backgroundColor: "color-mix(in oklch, var(--ok) 12%, transparent)" },
-  ".cm-deletedChunk": { backgroundColor: "color-mix(in oklch, var(--destructive) 10%, transparent)", padding: "0 14px 0 6px" },
-  ".cm-deletedChunk .cm-deletedText": { textDecoration: "none", backgroundColor: "color-mix(in oklch, var(--destructive) 22%, transparent)" },
-  ".cm-changedText": { backgroundColor: "color-mix(in oklch, var(--ok) 28%, transparent)" },
-  ".cm-changeGutter": { width: "3px", paddingLeft: "2px" },
-  ".cm-changedLineGutter": { backgroundColor: "var(--ok)" },
-  ".cm-deletedLineGutter": { backgroundColor: "var(--destructive)" },
-  ".cm-chunkButtons": { fontFamily: "var(--font-sans)", fontSize: "11px" },
-  ".cm-chunkButtons button": { color: "var(--muted-foreground)", background: "var(--card)", border: "1px solid var(--border)", borderRadius: "5px", padding: "1px 6px", marginLeft: "4px", cursor: "pointer" },
 });
 
 const baseExtensions = (readOnly: boolean): Extension => [
@@ -247,23 +236,23 @@ export function CodeEditor({
   return <div ref={host} className={cn("cm-host h-full min-h-0 w-full overflow-hidden text-code", className)} />;
 }
 
-/** Unified merge view: HEAD (original) vs the working copy, with accept/revert per hunk (read-only). */
-export function UnifiedDiff({ original, modified, path, className }: { original: string; modified: string; path: string; className?: string }) {
-  const host = React.useRef<HTMLDivElement>(null);
-  const dark = useIsDark();
-  React.useEffect(() => {
-    if (!host.current) return;
-    const state = EditorState.create({
-      doc: modified,
-      extensions: [
-        baseExtensions(true),
-        syntaxHighlighting(dark ? darkHighlight : lightHighlight),
-        languageFor(path),
-        unifiedMergeView({ original, mergeControls: false, highlightChanges: true, gutter: true, collapseUnchanged: { margin: 3, minSize: 6 } }),
-      ],
-    });
-    const v = new EditorView({ state, parent: host.current });
-    return () => v.destroy();
-  }, [original, modified, path, dark]);
-  return <div ref={host} className={cn("cm-host h-full min-h-0 w-full overflow-hidden text-code", className)} />;
+/**
+ * Syntax tokens for a block of code, line by line, using the editor's grammar for `path` and the
+ * stable `tok-*` classes (styled in index.css for light and dark). Files without a grammar come back
+ * as one plain token per line. Sync, so a diff hunk highlights in the same render it appears.
+ */
+export type CodeToken = { text: string; cls: string };
+export function tokenizeLines(code: string, path: string): CodeToken[][] {
+  const ext = languageFor(path);
+  const lang = ext instanceof LanguageSupport ? ext.language : ext instanceof Language ? ext : null;
+  if (!lang) return code.split("\n").map((t) => (t ? [{ text: t, cls: "" }] : []));
+  const lines: CodeToken[][] = [[]];
+  highlightCode(
+    code,
+    lang.parser.parse(code),
+    classHighlighter,
+    (text, cls) => lines[lines.length - 1].push({ text, cls }),
+    () => lines.push([])
+  );
+  return lines;
 }

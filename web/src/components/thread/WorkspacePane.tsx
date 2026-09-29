@@ -6,7 +6,7 @@ import { api, ApiError, type ChangedFile, type GitStatus } from "@/lib/api";
 import { parseUnifiedDiff, diffForNewFile, type ParsedDiff } from "@/lib/diff";
 import { languageOf } from "@/lib/fileIcon";
 import { FileIcon, FolderIcon } from "@/lib/vscodeIcons";
-import { CodeEditor, UnifiedDiff } from "@/components/CodeEditor";
+import { CodeEditor } from "@/components/CodeEditor";
 import { AnimatedTabs } from "@/components/ui/animated-tabs";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -599,7 +599,6 @@ function EmptyEditor() {
 
 function FileView({ session, tab, change, onMode, onDraft, onSaving, onSaved }: { session: string; tab: Tab; change?: ChangedFile; onMode: (m: Tab["mode"]) => void; onDraft: (d: string, dirty: boolean) => void; onSaving: (s: Tab["saving"]) => void; onSaved: () => void }) {
   const [diff, setDiff] = React.useState<ParsedDiff | null>(null);
-  const [original, setOriginal] = React.useState<string | null>(null);
   const [content, setContent] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
@@ -624,8 +623,7 @@ function FileView({ session, tab, change, onMode, onDraft, onSaving, onSaved }: 
           } else {
             setDiff(parseUnifiedDiff(d.diff));
             if (typeof d.original === "string") {
-              setOriginal(d.original);
-              // The merge view needs the working copy too.
+              // Prefetch the working copy so the switch to Edit is instant.
               if (content === null) {
                 const text = await api.artifactText(session, tab.path);
                 if (!cancelled) setContent(text);
@@ -736,13 +734,9 @@ function FileView({ session, tab, change, onMode, onDraft, onSaving, onSaved }: 
             Loading {mode === "diff" ? "diff" : "file"}…
           </p>
         ) : mode === "diff" && diff ? (
-          original !== null && content !== null ? (
-            <UnifiedDiff original={original} modified={draft} path={tab.path} />
-          ) : (
-            <div className="h-full overflow-auto">
-              <DiffView diff={diff} path={tab.path} />
-            </div>
-          )
+          <div className="h-full overflow-auto">
+            <DiffView diff={diff} path={tab.path} />
+          </div>
         ) : mode === "edit" && content !== null ? (
           deleted ? (
             <p className="text-muted-foreground px-4 py-6 text-meta">This file was deleted in the working tree; see the diff.</p>

@@ -954,3 +954,39 @@ button:not(:disabled):active, [role="tab"]:active, [role="radio"]:active { trans
     animation: none;
   }
 }
+
+/* Syntax colours for the two-gutter diff (classHighlighter's stable tok-* classes). Same hues as the
+   editor's HighlightStyle so a line looks identical in the diff and in the editor. */
+.tok-keyword { color: #cf222e; }
+.tok-string, .tok-string2, .tok-url { color: #0a3069; }
+.tok-number, .tok-bool, .tok-atom, .tok-literal { color: #0550ae; }
+.tok-variableName.tok-definition, .tok-function { color: #8250df; }
+.tok-typeName, .tok-className, .tok-namespace { color: #953800; }
+.tok-propertyName, .tok-attributeName, .tok-labelName { color: #0550ae; }
+.tok-comment { color: #6e7781; font-style: italic; }
+.tok-meta, .tok-punctuation, .tok-operator { color: color-mix(in oklch, var(--foreground) 72%, transparent); }
+.tok-heading { font-weight: 600; color: #0550ae; }
+.tok-link { text-decoration: underline; }
+.tok-strong { font-weight: 600; }
+.tok-emphasis { font-style: italic; }
+.tok-invalid { color: #f85149; }
+.dark .tok-keyword { color: #ff7b72; }
+.dark .tok-string, .dark .tok-string2, .dark .tok-url { color: #a5d6ff; }
+.dark .tok-number, .dark .tok-bool, .dark .tok-atom, .dark .tok-literal { color: #79c0ff; }
+.dark .tok-variableName.tok-definition, .dark .tok-function { color: #d2a8ff; }
+.dark .tok-typeName, .dark .tok-className, .dark .tok-namespace { color: #ffa657; }
+.dark .tok-propertyName, .dark .tok-attributeName, .dark .tok-labelName { color: #79c0ff; }
+.dark .tok-comment { color: #8b949e; }
+.dark .tok-heading { color: #79c0ff; }
+.dark .tok-invalid { color: #ff7b72; }
+
+/* Two-gutter diff: row tints read against the card; the word that changed gets a stronger mark. */
+.diff-row-add { background: color-mix(in oklch, var(--ok) 9%, transparent); }
+.diff-row-del { background: color-mix(in oklch, var(--destructive) 8%, transparent); }
+.diff-gutter { background: var(--card); }
+.diff-row-add .diff-gutter { background: color-mix(in oklch, var(--ok) 16%, var(--card)); }
+.diff-row-del .diff-gutter { background: color-mix(in oklch, var(--destructive) 14%, var(--card)); }
+.diff-row-context:hover { background: color-mix(in oklch, var(--foreground) 3%, transparent); }
+.diff-mark { color: inherit; border-radius: 3px; padding: 1px 0; }
+.diff-row-add .diff-mark { background: color-mix(in oklch, var(--ok) 30%, transparent); }
+.diff-row-del .diff-mark { background: color-mix(in oklch, var(--destructive) 26%, transparent); }

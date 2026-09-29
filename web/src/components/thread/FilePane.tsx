@@ -1,8 +1,9 @@
 import * as React from "react";
-import { Download, FileCode2, FileDiff, Loader2, X } from "lucide-react";
+import { Download, FileCode2, FileDiff, FileQuestion, Loader2, X } from "lucide-react";
 import { motion } from "motion/react";
 import { api, ApiError, type ChangedFile } from "@/lib/api";
-import { parseUnifiedDiff, diffForNewFile, type ParsedDiff } from "@/lib/diff";
+import { parseUnifiedDiff, diffForNewFile, inlineChanges, pairChangedLines, type DiffHunk, type DiffLine, type ParsedDiff, type Span } from "@/lib/diff";
+import { tokenizeLines, type CodeToken } from "@/components/CodeEditor";
 import { FileMark, languageOf } from "@/lib/fileIcon";
 import { CodeBlock, CodeBlockCode } from "@/components/ui/code-block";
 import { Markdown } from "@/components/ui/markdown";
@@ -144,38 +145,145 @@ export function FilePane({ session, file, onClose }: { session: string; file: Ch
   );
 }
 
-/** Two-gutter unified diff: old/new line numbers, +/- rows tinted, hunk headers as dividers. */
+/**
+ * Two-gutter unified diff, the way a reviewer reads one: old and new line numbers in a gutter that
+ * stays put while long lines scroll sideways, +/- rows tinted edge to edge, the edited WORDS marked
+ * inside a changed pair, code coloured with the editor's own grammar, and hunks separated by a quiet
+ * "N unchanged lines" rule. Shared by the file pane, the workspace, Review-all and the PR page.
+ */
 export function DiffView({ diff, path }: { diff: ParsedDiff; path: string }) {
-  if (diff.binary) return <p className="text-muted-foreground px-4 py-6 text-meta">Binary file — no textual diff.</p>;
-  if (!diff.hunks.length) return <p className="text-muted-foreground px-4 py-6 text-meta">No differences against HEAD for {path}.</p>;
+  if (diff.binary) return <DiffNote>Binary file — no textual diff.</DiffNote>;
+  if (!diff.hunks.length) return <DiffNote>No differences against HEAD for {path}.</DiffNote>;
   return (
-    <div className="font-mono text-micro leading-[1.6]">
+    <div className="enter min-w-max pb-4 font-mono text-code leading-[1.65]" role="table" aria-label={`Diff of ${path}`}>
       {diff.hunks.map((h, i) => (
-        <div key={i}>
-          <div className="bg-muted/60 text-muted-foreground sticky top-0 flex items-center gap-2 border-y px-3 py-1 backdrop-blur">
-            <span className="text-live">@@</span>
-            <span className="truncate">{h.header || "…"}</span>
-          </div>
-          {h.lines.map((l, j) => (
-            <div
-              key={j}
-              className={cn(
-                "grid grid-cols-[3rem_3rem_1ch_1fr] items-start",
-                l.kind === "add" && "bg-ok/10",
-                l.kind === "del" && "bg-destructive/10",
-                l.kind === "meta" && "text-muted-foreground italic"
-              )}
-            >
-              <span className="text-faint select-none px-2 text-right tabular">{l.oldNo ?? ""}</span>
-              <span className="text-faint select-none px-2 text-right tabular">{l.newNo ?? ""}</span>
-              <span className={cn("select-none", l.kind === "add" ? "text-ok" : l.kind === "del" ? "text-destructive" : "text-transparent")}>
-                {l.kind === "add" ? "+" : l.kind === "del" ? "−" : " "}
-              </span>
-              <span className="text-foreground pr-4 whitespace-pre">{l.text || " "}</span>
-            </div>
-          ))}
-        </div>
+        <Hunk key={i} hunk={h} prev={diff.hunks[i - 1]} path={path} />
       ))}
     </div>
   );
+}
+
+function DiffNote({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="enter text-muted-foreground flex flex-col items-center gap-2 px-4 py-12 text-center text-meta">
+      <FileQuestion className="text-faint size-5" aria-hidden />
+      <p>{children}</p>
+    </div>
+  );
+}
+
+/** Lines the old side had (context + deletions) and the new side has (context + additions), in order. */
+function sides(lines: DiffLine[]) {
+  const old: string[] = [];
+  const neu: string[] = [];
+  const oldIdx: number[] = [];
+  const newIdx: number[] = [];
+  lines.forEach((l, i) => {
+    if (l.kind === "context" || l.kind === "del") {
+      oldIdx[i] = old.length;
+      old.push(l.text);
+    }
+    if (l.kind === "context" || l.kind === "add") {
+      newIdx[i] = neu.length;
+      neu.push(l.text);
+    }
+  });
+  return { old, neu, oldIdx, newIdx };
+}
+
+function Hunk({ hunk, prev, path }: { hunk: DiffHunk; prev?: DiffHunk; path: string }) {
+  const { lines } = hunk;
+  // Tokens come from parsing each side as one block, so a comment or template string that spans
+  // lines colours correctly; deletions are read from the old side, additions from the new.
+  const { oldToks, newToks, oldIdx, newIdx, marks } = React.useMemo(() => {
+    const s = sides(lines);
+    const marks = new Map<number, Span[]>();
+    pairChangedLines(lines).forEach((partner, i) => {
+      if (lines[i].kind !== "del") return;
+      const ch = inlineChanges(lines[i].text, lines[partner].text);
+      marks.set(i, ch.a);
+      marks.set(partner, ch.b);
+    });
+    return { oldToks: tokenizeLines(s.old.join("\n"), path), newToks: tokenizeLines(s.neu.join("\n"), path), oldIdx: s.oldIdx, newIdx: s.newIdx, marks };
+  }, [lines, path]);
+
+  const oldNos = lines.map((l) => l.oldNo).filter((n): n is number => n != null);
+  const newNos = lines.map((l) => l.newNo).filter((n): n is number => n != null);
+  const range = `-${oldNos[0] ?? 0},${oldNos.length} +${newNos[0] ?? 0},${newNos.length}`;
+  // The unchanged run this hunk skips over since the previous one — the reader's sense of distance.
+  const prevLast = prev?.lines.map((l) => l.newNo).filter((n): n is number => n != null).pop();
+  const gap = prevLast != null && newNos[0] != null ? newNos[0] - prevLast - 1 : 0;
+
+  return (
+    <section aria-label={hunk.header || range}>
+      <div className="bg-muted/70 sticky top-0 z-20 border-b backdrop-blur-sm [&:not(:first-child)]:border-t" role="row">
+        <div className="text-muted-foreground sticky left-0 flex w-max max-w-[calc(100vw-2rem)] items-center gap-2 px-3 py-1 text-micro">
+          {gap > 0 ? (
+            <span className="text-faint tabular-nums">⋯ {gap} unchanged {gap === 1 ? "line" : "lines"}</span>
+          ) : (
+            <span className="text-live font-semibold">@@</span>
+          )}
+          <span className="tabular-nums">{range}</span>
+          {hunk.header && <span className="text-faint truncate">{hunk.header}</span>}
+        </div>
+      </div>
+      {lines.map((l, i) => {
+        if (l.kind === "meta") {
+          return (
+            <div key={i} className="text-faint flex items-center gap-2 pl-[8.25rem] text-micro italic" role="row">
+              {l.text.replace(/^\\ /, "")}
+            </div>
+          );
+        }
+        const toks = l.kind === "add" ? newToks[newIdx[i]] : oldToks[oldIdx[i]];
+        return (
+          <div key={i} role="row" className={cn("flex", l.kind === "add" ? "diff-row-add" : l.kind === "del" ? "diff-row-del" : "diff-row-context")}>
+            <span className="diff-gutter sticky left-0 z-10 flex shrink-0 select-none border-r" role="rowheader">
+              <span className="text-faint w-[3.5rem] px-2 text-right tabular-nums">{l.oldNo ?? ""}</span>
+              <span className="text-faint w-[3.5rem] px-2 text-right tabular-nums">{l.newNo ?? ""}</span>
+              <span className={cn("w-5 text-center font-semibold", l.kind === "add" ? "text-ok" : l.kind === "del" ? "text-destructive" : "text-transparent")} aria-label={l.kind}>
+                {l.kind === "add" ? "+" : l.kind === "del" ? "\u2212" : " "}
+              </span>
+            </span>
+            <span className="text-foreground pr-6 pl-2 whitespace-pre" role="cell">
+              <Line tokens={toks ?? []} marks={marks.get(i)} />
+              {!l.text && " "}
+            </span>
+          </div>
+        );
+      })}
+    </section>
+  );
+}
+
+/** One line's coloured tokens, with the changed spans wrapped in a mark — tokens are split at span edges. */
+function Line({ tokens, marks }: { tokens: CodeToken[]; marks?: Span[] }) {
+  if (!marks?.length) return <>{tokens.map((t, i) => (t.cls ? <span key={i} className={t.cls}>{t.text}</span> : t.text))}</>;
+  const out: React.ReactNode[] = [];
+  let pos = 0;
+  let k = 0;
+  tokens.forEach((t, i) => {
+    let from = pos;
+    const end = pos + t.text.length;
+    while (from < end) {
+      while (k < marks.length && marks[k][1] <= from) k++;
+      const m = marks[k];
+      const inMark = !!m && m[0] <= from;
+      const to = m ? (inMark ? Math.min(m[1], end) : Math.min(m[0], end)) : end;
+      const piece = t.text.slice(from - pos, to - pos);
+      const node = t.cls ? <span className={t.cls}>{piece}</span> : piece;
+      out.push(
+        inMark ? (
+          <mark key={`${i}-${from}`} className="diff-mark">
+            {node}
+          </mark>
+        ) : (
+          <React.Fragment key={`${i}-${from}`}>{node}</React.Fragment>
+        )
+      );
+      from = to;
+    }
+    pos = end;
+  });
+  return <>{out}</>;
 }

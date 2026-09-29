@@ -1,5 +1,6 @@
 import * as React from "react";
 import { Slot } from "@radix-ui/react-slot";
+import { Loader2 } from "lucide-react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
@@ -51,15 +52,38 @@ const buttonVariants = cva(
   }
 );
 
+/**
+ * `loading` swaps the leading icon for a spinner, disables the button and marks it busy — while the
+ * label stays put, so the button does not change width mid-request.
+ */
 function Button({
   className,
   variant,
   size,
   asChild = false,
+  loading = false,
+  disabled,
+  children,
   ...props
-}: React.ComponentProps<"button"> & VariantProps<typeof buttonVariants> & { asChild?: boolean }) {
+}: React.ComponentProps<"button"> & VariantProps<typeof buttonVariants> & { asChild?: boolean; loading?: boolean }) {
   const Comp = asChild ? Slot : "button";
-  return <Comp data-slot="button" className={cn(buttonVariants({ variant, size, className }))} {...props} />;
+  if (asChild || !loading) {
+    return (
+      <Comp data-slot="button" className={cn(buttonVariants({ variant, size, className }))} disabled={disabled} {...props}>
+        {children}
+      </Comp>
+    );
+  }
+  // Drop the first leading icon (an svg) in favour of the spinner; keep every other child.
+  const kids = React.Children.toArray(children);
+  const firstIcon = kids.findIndex((k) => React.isValidElement(k) && typeof k.type !== "string");
+  const rest = firstIcon === 0 ? kids.slice(1) : kids;
+  return (
+    <Comp data-slot="button" className={cn(buttonVariants({ variant, size, className }))} disabled aria-busy="true" {...props}>
+      <Loader2 className="animate-spin" aria-hidden />
+      {rest}
+    </Comp>
+  );
 }
 
 export { Button, buttonVariants };
