@@ -451,7 +451,11 @@ export async function installOmpTools(cfg: Config, box: string) {
       "command -v gh >/dev/null || (type apt-get >/dev/null 2>&1 && apt-get update -qq && " +
       "apt-get install -y -qq gh >/dev/null 2>&1) || true; " +
       `${ompInstallSh(cfg.ompVersion)}; ` +
-      `npm cache clean --force >/dev/null 2>&1 || true; rm -rf /root/.bun/install/cache /tmp/* 2>/dev/null || true; ` +
+      // debugpy: omp's debug (DAP) tool has NO Node adapter, so Python is the language where the
+      // debugger genuinely works — bake its adapter so `debug` is usable out of the box.
+      `{ pip3 install --break-system-packages debugpy || pip3 install debugpy || ` +
+      `apt-get install -y -qq python3-debugpy; } >/dev/null 2>&1 || true; ` +
+      `npm cache clean --force >/dev/null 2>&1 || true; rm -rf /root/.bun/install/cache /root/.cache/pip /tmp/* 2>/dev/null || true; ` +
       "claude --version; OMP_SKIP_SETUP=1 omp --version",
     { timeoutMs: 600_000 }
   );
@@ -609,7 +613,11 @@ export const OMP_SYS_PROMPT =
   "DEBUGGING: you have first-class lsp and debug (DAP) tools. When diagnosing runtime behavior or a " +
   "failing test, PREFER the debug tool — set breakpoints, step, and inspect variables/stack frames — " +
   "over print-statement debugging, and use lsp (definitions, references, diagnostics, renames) over " +
-  "grep when navigating or refactoring code. Narrate briefly what the debugger shows as you go.";
+  "grep when navigating or refactoring code. Narrate briefly what the debugger shows as you go. " +
+  "Adapters: the debug tool works with debugpy (Python), dlv (Go), rdbg (Ruby), and gdb/lldb (C/C++). " +
+  "It has NO Node.js adapter — for JavaScript/TypeScript use `node inspect` (the built-in CLI " +
+  "debugger: setBreakpoint, cont, step, exec to inspect variables) and never spend turns trying to " +
+  "install or wire vscode-js-debug; it is incompatible with this environment.";
 
 function agentEnvFlags(
   cfg: Config,
@@ -1176,29 +1184,30 @@ export function ompFmtScript(): string {
  * Plain JS (not TS) so the payload is vm-parseable in tests and independent of loader behavior.
  */
 export function ompGuardScript(): string {
+  // Contract verified against omp 18.4.3's shipped types + live: the handler receives
+  // { toolName, toolCallId, input } and BLOCKS by returning { block: true, reason } — the reason is
+  // surfaced to the model as the tool error. (The docs' `return false` form is a silent no-op.)
+  // A single .js file in ~/.omp/agent/extensions/ is auto-scanned in headless -p runs.
   const indexJs =
     `import fs from "node:fs";\n` +
     `const Q = ${JSON.stringify(QUESTION_MARK)};\n` +
     `const AGENT_FILES = /\\/workspace\\/\\.agent\\./;\n` +
     `export default function asbGuard(pi) {\n` +
     `  pi.on("tool_call", (ev) => {\n` +
-    `    const name = String((ev && ev.tool && ev.tool.name) || (ev && (ev.toolName || ev.name)) || "");\n` +
+    `    const name = String((ev && ev.toolName) || "");\n` +
     `    let blob = "";\n` +
-    `    try { blob = JSON.stringify((ev && (ev.params || ev.args || ev.arguments || ev.input)) || {}); } catch (_) {}\n` +
+    `    try { blob = JSON.stringify((ev && ev.input) || {}); } catch (_) {}\n` +
     `    const isQuestionWrite = /write/i.test(name) && blob.includes(Q);\n` +
     // A pending question means the turn is OVER: deny everything until the caller answers.
-    `    try { if (fs.existsSync(Q)) return false; } catch (_) {}\n` +
+    `    try { if (fs.existsSync(Q)) return { block: true, reason: "A question is pending in " + Q + " and is awaiting the caller. Do NOT take any further action or guess an answer — end your turn now. The session will be resumed with the answer." }; } catch (_) {}\n` +
     // The controller's channel files are not context; only the question write may touch them.
-    `    if (AGENT_FILES.test(blob) && !isQuestionWrite) return false;\n` +
+    `    if (AGENT_FILES.test(blob) && !isQuestionWrite) return { block: true, reason: "/workspace/.agent.* files are the controller's channel, not context — never read, print, or modify them." };\n` +
     `  });\n` +
     `}\n`;
-  const pkg = JSON.stringify({ name: "asb-guard", version: "1.0.0", type: "module", omp: { extensions: ["./index.js"] } });
   const idxB64 = Buffer.from(indexJs, "utf8").toString("base64");
-  const pkgB64 = Buffer.from(pkg, "utf8").toString("base64");
   return (
-    `mkdir -p "$HOME/.omp/agent/extensions/asb-guard" && ` +
-    `printf '%s' '${pkgB64}' | base64 -d > "$HOME/.omp/agent/extensions/asb-guard/package.json" && ` +
-    `printf '%s' '${idxB64}' | base64 -d > "$HOME/.omp/agent/extensions/asb-guard/index.js"`
+    `mkdir -p "$HOME/.omp/agent/extensions" && rm -rf "$HOME/.omp/agent/extensions/asb-guard" && ` +
+    `printf '%s' '${idxB64}' | base64 -d > "$HOME/.omp/agent/extensions/asb-guard.js"`
   );
 }
 
