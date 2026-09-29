@@ -273,9 +273,13 @@ export async function bootWarmBox(cfg: Config, agent: AgentKind = "claude"): Pro
   // also lays down the formatter + asb-guard ahead of the claim.
   await msb(cfg, ["exec", name, ...agentEnvFlags(cfg, "noop", undefined, undefined, undefined, agent), "--", "sh", "-lc", bootstrapScript(cfg, agent)]);
   if (agent === "omp") {
-    // Pre-warm: the box's FIRST omp invocation pays bun's compile cache + cold page cache for the
-    // whole toolchain (~20s extra measured live — the "Starting up 31s" the user watched). A
-    // throwaway one-shot at pool-boot time pays it here, where nobody is waiting. Best-effort.
+    // Pre-warm: the box's FIRST omp session pays bun compile caches, cold module trees AND every
+    // MCP server's first-run side effects (connects, discovery, tool listing) — measured live as a
+    // ~50s "Starting up" on the first task; every later session is ~12s. Install the OPERATOR's
+    // MCP config first so the warm-up one-shot spawns the real servers (the claim rewrites the
+    // config for the actual owner; on this product the operator's set is the representative one),
+    // then run a throwaway prompt. All best-effort, at boot time where nobody is waiting.
+    await installMcpConfig(cfg, name).catch(() => {});
     const warm =
       `cd /tmp && ${ompSeedSh()} && OMP_SKIP_SETUP=1 timeout 90 omp --mode json --approval-mode=yolo ` +
       `--model "ccproxy/$ANTHROPIC_MODEL" -p "Reply with exactly: ok" >/dev/null 2>&1; rm -rf /root/.omp/sessions 2>/dev/null; ` +
