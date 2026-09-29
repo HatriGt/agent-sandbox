@@ -75,3 +75,17 @@ test("tenancy: quota counts only the user's running boxes", () => {
   });
   assert.doesNotThrow(() => own.assertQuota(99, 2), "operators are not quota'd");
 });
+
+test("tenancy: pool_status shows a user counts only — warm box names are infrastructure", async () => {
+  const db = openMemoryDb();
+  const alice = upsertGithubUser(db, { githubId: "1", login: "alice" });
+  const seen: Array<boolean | undefined> = [];
+  const deps = guardDeps(
+    { ...fakeDeps([]), poolStatus: async (_c: Config, o?: { names?: boolean }) => (seen.push(o?.names), "x") } as unknown as HandlerDeps,
+    makeOwnership(db, cfg)
+  );
+  await withPrincipal({ kind: "user", userId: alice.id, login: "alice", role: "user", via: "session" }, () => deps.poolStatus(cfg));
+  await withPrincipal({ kind: "user", userId: alice.id, login: "alice", role: "admin", via: "session" }, () => deps.poolStatus(cfg));
+  await deps.poolStatus(cfg); // operator
+  assert.deepEqual(seen, [false, true, true]);
+});

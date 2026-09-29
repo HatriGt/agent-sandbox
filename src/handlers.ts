@@ -77,7 +77,8 @@ export interface HandlerDeps {
   /** Stop + remove the box. */
   teardown(cfg: Config, session: string): Promise<void>;
   /** Warm pool status line. */
-  poolStatus(cfg: Config): Promise<string>;
+  /** `names: false` (users) reports counts only; the operator and admins see box names. */
+  poolStatus(cfg: Config, opts?: { names?: boolean }): Promise<string>;
   /** Fleet report: how many boxes are up and what each is doing (role/state/task/metrics). */
   monitor(cfg: Config): Promise<string>;
   /** Live over-the-shoulder view of ONE box: state + task + a log tail (lines default in impl). */

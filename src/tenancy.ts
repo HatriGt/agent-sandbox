@@ -121,6 +121,10 @@ export function guardDeps(deps: HandlerDeps, own: Ownership): HandlerDeps {
       own.check(session);
       return deps.ask(cfg, session, question, newThread);
     },
+    // Warm pool boxes belong to no one: a user sees how many are ready, never their names.
+    async poolStatus(cfg) {
+      return deps.poolStatus(cfg, { names: !own.isUser() });
+    },
     // The text fleet report (MCP `monitor`) shows a user only their own machines; the pool is infrastructure.
     async monitor(cfg) {
       if (!own.isUser()) return deps.monitor(cfg);

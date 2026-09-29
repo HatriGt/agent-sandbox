@@ -571,12 +571,8 @@ export const deps: HandlerDeps = {
     await msbTeardown(cfg, session, stagingPathFor(cfg, session));
   },
 
-  async poolStatus(cfg) {
-    const s = await poolStatus(cfg);
-    if (!s.enabled) {
-      return `Pool disabled (needs MSB_POOL_SIZE>0, a snapshot, and EGRESS_ALLOW_ALL=1). size=${s.size}`;
-    }
-    return `Pool ${s.available}/${s.size} ready${s.boxes.length ? `: ${s.boxes.join(", ")}` : ""}`;
+  async poolStatus(cfg, opts) {
+    return poolStatusText(await poolStatus(cfg), opts?.names ?? true);
   },
 
   async monitor(cfg) {
@@ -682,3 +678,12 @@ export const deps: HandlerDeps = {
     return `Stored GitHub account '${acc.login}' (${acc.type}).${orgs}${repoNote} It will be used automatically for repos it can access.`;
   },
 };
+
+/**
+ * The pool_status text. Box names only with `names`: the MCP tool reaches every user, and an
+ * unclaimed warm box is infrastructure that belongs to no one, so users get the counts alone.
+ */
+export function poolStatusText(s: { enabled: boolean; size: number; available: number; boxes: string[] }, names: boolean): string {
+  if (!s.enabled) return `Pool disabled (needs MSB_POOL_SIZE>0, a snapshot, and EGRESS_ALLOW_ALL=1). size=${s.size}`;
+  return `Pool ${s.available}/${s.size} ready${names && s.boxes.length ? `: ${s.boxes.join(", ")}` : ""}`;
+}

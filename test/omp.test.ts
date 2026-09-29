@@ -291,3 +291,10 @@ test("the pool warm-up leaves no operator state behind for whichever user claims
   // The caches that ARE the warm-up's point survive: bun's transpile cache and the model catalog.
   assert.doesNotMatch(OMP_WARM_SCRUB_SH, /\.bun|models\.db/);
 });
+
+test("poolStatusText lists warm box names only when asked to", async () => {
+  const { poolStatusText } = await import("../src/deps.js");
+  const s = { enabled: true, size: 2, available: 1, boxes: ["pool-1790000000000-omp-abc123"] };
+  assert.equal(poolStatusText(s, true), "Pool 1/2 ready: pool-1790000000000-omp-abc123");
+  assert.equal(poolStatusText(s, false), "Pool 1/2 ready");
+});
