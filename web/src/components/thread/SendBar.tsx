@@ -48,6 +48,7 @@ export function SendBar({
   onReplied,
   onQueued,
   onFocusRequest,
+  seed,
   onReplyFailed,
 }: {
   boxName: string;
@@ -60,6 +61,8 @@ export function SendBar({
   onFocusRequest?: (focus: () => void) => void;
   /** The server could not deliver this reply: the parent drops the optimistic echo. */
   onReplyFailed?: (text: string) => void;
+  /** Text to drop into the composer (e.g. a starter prompt); `n` changes to re-apply the same text. */
+  seed?: { text: string; n: number } | null;
 }) {
   const busy = runState === "running" && !sleeping;
   const canSide = !sleeping;
@@ -145,6 +148,15 @@ export function SendBar({
   React.useEffect(() => {
     onFocusRequest?.(() => textarea()?.focus());
   }, [onFocusRequest]);
+  React.useEffect(() => {
+    if (!seed) return;
+    setValue(seed.text);
+    requestAnimationFrame(() => {
+      const t = textarea();
+      t?.focus();
+      t?.setSelectionRange(seed.text.length, seed.text.length);
+    });
+  }, [seed]);
   React.useEffect(() => {
     if (!canSide && mode === "side") setMode("agent");
   }, [canSide, mode]);

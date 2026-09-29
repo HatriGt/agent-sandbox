@@ -3,7 +3,7 @@ import { Loader2, Plus, Undo2 } from "lucide-react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { api, type BoxView, type ChangedFile, type FleetLifecycle, type WatchSnapshot } from "@/lib/api";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 // The workspace (CodeMirror + merge view) is heavy and optional: loaded the first time it opens.
 const WorkspacePane = React.lazy(() => import("./WorkspacePane").then((m) => ({ default: m.WorkspacePane })));
 import { SleepingCard, WakingCard } from "./WakingCard";
@@ -28,7 +28,7 @@ import { seedWatchCache, useWatchStream } from "@/hooks/useWatchStream";
 import { Button } from "@/components/ui/button";
 import { ChatContainerContent, ChatContainerRoot, ChatContainerScrollAnchor } from "@/components/ui/chat-container";
 import type { TraceEvent } from "@/lib/trace";
-import { AnsweredQuestionItem, LifecycleItem, ObserverItem, PlanCard, QueuedItem, SayItem, ThinkingItem, ToolGroup, WorkingIndicator, YouItem } from "./TraceItems";
+import { AgentLabel, AnsweredQuestionItem, LifecycleItem, ObserverItem, PlanCard, QueuedItem, SayItem, ThinkingItem, ToolGroup, WorkingIndicator, YouItem } from "./TraceItems";
 import { PlanDock } from "./PlanBoard";
 import { ThreadMinimap, type Turn } from "./ThreadMinimap";
 import { useStickToBottom } from "use-stick-to-bottom";
@@ -255,6 +255,7 @@ export function Thread({
   // in-box checkpoint taken when turn k-1 finished). Refetched whenever a turn settles.
   const [revertable, setRevertable] = React.useState<Set<number>>(new Set());
   const [revertAsk, setRevertAsk] = React.useState<{ message: number; discarded: number } | null>(null);
+  const [seed, setSeed] = React.useState<{ text: string; n: number } | null>(null);
   const [reverting, setReverting] = React.useState(false);
   const canRevertNow = !sleeping && runState !== "running";
   React.useEffect(() => {
@@ -585,6 +586,27 @@ export function Thread({
       .finally(() => setKeeping(false));
   };
 
+  // ONE live status for the whole thread. Several moments (starting, working, resuming, delivering)
+  // used to render their own pill, so two could stack and each restarted its timer. Now a single
+  // pill morphs between stages, in priority order.
+  const lastKind = groups[groups.length - 1]?.kind ?? "";
+  const working: { label: string; detail?: string | null } | null = resuming
+    ? { label: "Answer sent — the agent is resuming" }
+    : sleeping
+      ? null
+      : starting
+        ? {
+            label: "Starting up",
+            detail: box.agent === "omp" ? "installing oh-my-pi and getting your task ready — the first start takes about a minute" : "the sandbox is getting your task ready",
+          }
+        : runState === "running" && !loadingTrace && !["say", "think"].includes(lastKind)
+          ? { label: events.length ? "Working" : "Starting up", detail: activity }
+          : pendingReplies.length > 0 && runState !== "running"
+            ? { label: "Message sent", detail: "the agent is picking it up" }
+            : null;
+  const agentKinds = ["say", "tools", "think", "plan"];
+  const still = useReducedMotion();
+
   return (
     <SessionContext.Provider value={box.name}>
     <div className="flex h-full min-h-0 min-w-0 flex-col">
@@ -628,8 +650,8 @@ export function Thread({
       <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col", showWorkspace && workspaceFull && "hidden md:hidden")}>
       <div className="relative min-h-0 min-w-0 flex-1">
         <ThreadMinimap turns={turns} scrollerRef={stick.scrollRef} />
-        <ChatContainerRoot className="relative h-full [&>div]:overflow-x-hidden" instance={stick}>
-          <ChatContainerContent className="mx-auto w-full max-w-3xl gap-7 px-4 pt-7 pb-12 md:px-6">
+        <ChatContainerRoot className="relative h-full [&>div]:overflow-x-hidden" instance={stick} aria-label="Conversation" aria-busy={runState === "running"}>
+          <ChatContainerContent className="mx-auto w-full max-w-3xl gap-5 px-4 pt-7 pb-12 md:px-6">
             {box.task && (
               <div data-turn="task">
                 <YouItem text={box.task} label="Task" />
@@ -654,14 +676,20 @@ export function Thread({
               const key = `${g.kind}-${i}`;
               // Operator-message index: the task is 1, each you/asked group after it increments.
               const msgIndex = 1 + groups.slice(0, i + 1).filter((x) => x.kind === "you" || x.kind === "asked").length;
+              // The agent's byline opens each of its runs, whatever it starts with (prose, tools, thinking).
+              const opensAgent = agentKinds.includes(g.kind) && (i === 0 || !agentKinds.includes(groups[i - 1].kind));
+              const liveHere = runState === "running" && isLast;
               return g.kind === "lifecycle" ? (
                 <LifecycleItem key={key} label={g.label} detail={g.detail} />
               ) : g.kind === "tools" ? (
-                <ToolGroup key={key} events={g.events} live={runState === "running" && isLast} />
+                <div key={key} className="min-w-0">
+                  {opensAgent && <AgentLabel live={liveHere} />}
+                  <ToolGroup events={g.events} live={liveHere} />
+                </div>
               ) : g.kind === "mcp-connect" ? (
                 <McpConnectItem key={key} server={g.server} />
               ) : g.kind === "you" ? (
-                <div key={key} data-turn={key}>
+                <div key={key} data-turn={key} className="mt-5">
                   <YouItem
                     text={g.text}
                     onRevert={
@@ -672,43 +700,31 @@ export function Thread({
                   />
                 </div>
               ) : g.kind === "asked" ? (
-                <div key={key} data-turn={key}>
+                <div key={key} data-turn={key} className="mt-5">
                   <AnsweredQuestionItem question={g.question} answer={g.answer} />
                 </div>
               ) : g.kind === "think" ? (
-                <ThinkingItem key={key} text={g.text} live={runState === "running" && isLast} />
+                <div key={key} className="min-w-0">
+                  {opensAgent && <AgentLabel live={liveHere} />}
+                  <ThinkingItem text={g.text} live={liveHere} />
+                </div>
               ) : g.kind === "plan" ? (
                 // The dock owns the plan on wide screens; in flow it would be the same board twice.
                 <div key={key} className="xl:hidden">
                   <PlanCard board={g.board} live={runState === "running"} />
                 </div>
               ) : (
-                <SayItem key={key} text={g.text} live={runState === "running" && isLast} label={i === 0 || !["say", "tools", "think", "plan"].includes(groups[i - 1].kind)} />
+                <SayItem key={key} text={g.text} live={liveHere} label={opensAgent} />
               );
             })}
 
-            {!sleeping && runState === "running" && !["say", "think"].includes(groups[groups.length - 1]?.kind ?? "") && !loadingTrace && (
-              <WorkingIndicator label={events.length ? "Working" : "Starting up"} detail={activity} />
-            )}
-
-            {starting && (
-              <WorkingIndicator
-                label="Starting up"
-                detail={box.agent === "omp" ? "installing oh-my-pi and getting your task ready — the first start takes about a minute" : "the sandbox is getting your task ready"}
-              />
-            )}
-
-            {idle && <IdleEmpty box={box} onNew={onNew} />}
+            {idle && <IdleEmpty box={box} onNew={onNew} onPick={(text) => setSeed({ text, n: Date.now() })} />}
 
             {showMemoryCard && (
               <MemoryBumpCard kind={oomKilled ? "oom" : "pressure"} nextTier={nextMemoryTier!} memUsage={box.memUsage} phase={bumpPhase} onBump={() => void bumpAndContinue()} />
             )}
 
             {showQuestion && <QuestionCard question={question!} onAnswer={answer} busy={answering} />}
-            {resuming && <WorkingIndicator label="Answer sent — the agent is resuming" />}
-
-
-
 
             {pendingReplies.map((r, i) => (
               <YouItem key={`reply-${i}`} text={r} />
@@ -716,9 +732,7 @@ export function Thread({
             {/* A follow-up on a finished run: the box still reports `done` for a few seconds until
                 the server resumes the session. That gap must read as "delivering", never as the old
                 "Completed" receipt sitting under the message you just sent. */}
-            {pendingReplies.length > 0 && runState !== "running" && !sleeping && !resuming && (
-              <WorkingIndicator label="Message sent" detail="the agent is picking it up" />
-            )}
+            {working && <WorkingIndicator label={working.label} detail={working.detail} />}
 
             {queuedItems.map((q) => (
               <QueuedItem
@@ -803,17 +817,18 @@ export function Thread({
             chat-app affordance for "there is more below than when you left". */}
         <AnimatePresence>
           {!stick.isAtBottom && (
+            <div className="pointer-events-none absolute inset-x-0 bottom-4 z-10 flex justify-center">
             <motion.button
               type="button"
-              layout
-              initial={{ opacity: 0, y: 6, scale: 0.9 }}
+              layout={!still}
+              initial={still ? false : { opacity: 0, y: 6, scale: 0.9 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 6, scale: 0.9 }}
-              transition={{ duration: 0.16 }}
+              exit={still ? { opacity: 0 } : { opacity: 0, y: 6, scale: 0.9 }}
+              transition={{ duration: still ? 0 : 0.16 }}
               onClick={() => void stick.scrollToBottom()}
               aria-label="Scroll to latest"
               className={cn(
-                "text-foreground absolute right-5 bottom-4 z-10 flex h-8 cursor-pointer items-center justify-center gap-1.5 rounded-full border shadow-e2",
+                "text-foreground pointer-events-auto flex h-8 cursor-pointer items-center justify-center gap-1.5 rounded-full border shadow-e2",
                 newBelow ? "border-live/40 bg-card px-3" : "bg-card hover:bg-muted w-8"
               )}
             >
@@ -824,12 +839,13 @@ export function Thread({
               )}
               <ArrowDown className={cn("size-4", newBelow && "text-live")} aria-hidden />
             </motion.button>
+            </div>
           )}
         </AnimatePresence>
       </div>
 
       {reviewOpen && !sleeping && (
-        <div className="mx-auto w-full max-w-3xl px-3 pb-2 md:px-6">
+        <div className="mx-auto w-full max-w-3xl border-t px-3 pt-2 pb-2 shadow-[0_-8px_16px_-12px_oklch(0_0_0/0.18)] md:px-6">
           <ReviewAllPane session={box.name} onClose={() => setReviewOpen(false)} />
         </div>
       )}
@@ -844,6 +860,7 @@ export function Thread({
         onQueued={refreshQueue}
         onFocusRequest={onFocusRequest}
         onReplyFailed={onReplyFailed}
+        seed={seed}
       />
       </div>
       {/* Sibling of the whole column (conversation + dock + composer), so opening it narrows all
@@ -882,22 +899,51 @@ export function Thread({
   );
 }
 
-function IdleEmpty({ box, onNew }: { box: BoxView; onNew: () => void }) {
+/** Starter prompts: an empty box should show what a good first instruction looks like, not a blank page. */
+const STARTERS = [
+  { title: "Explore a repo", text: "Clone the repository I attach, map its structure, and summarise how it is built and tested." },
+  { title: "Fix a failing test", text: "Run the test suite, find the first failing test, fix the root cause, and show me the diff." },
+  { title: "Add a feature", text: "Add a small feature: describe it here — then write tests for it and open a pull request." },
+  { title: "Review a PR", text: "Review pull request #<number> for bugs and risky changes, and leave me a short verdict." },
+];
+
+function IdleEmpty({ box, onNew, onPick }: { box: BoxView; onNew: () => void; onPick: (text: string) => void }) {
   const warm = box.role === "pool-free";
   return (
-    <div className="enter flex flex-col items-start gap-3 py-6">
-      <p className="text-foreground text-lead font-medium">
-        {friendlyName(box.name)} is {warm ? "warm and waiting" : "idle"}.
-      </p>
-      <p className="text-muted-foreground max-w-[52ch] text-body">
-        {warm
-          ? "This sandbox is already booted with the agent installed. The next task you start claims it, so the run begins in seconds instead of waiting on a boot."
-          : "Nothing has run here yet. Send an instruction below to start the agent, or start a new task."}
-      </p>
-      <Button variant="outline" size="sm" onClick={onNew}>
-        <Plus className="size-3.5" />
-        New task
-      </Button>
+    <div className="enter flex flex-col items-start gap-4 py-6">
+      <div className="flex flex-col gap-1.5">
+        <p className="text-foreground text-lead font-medium">
+          {friendlyName(box.name)} is {warm ? "warm and waiting" : "idle"}.
+        </p>
+        <p className="text-muted-foreground max-w-[52ch] text-body">
+          {warm
+            ? "This sandbox is already booted with the agent installed. The next task you start claims it, so the run begins in seconds instead of waiting on a boot."
+            : "Nothing has run here yet. Pick a starting point, or write your own instruction below."}
+        </p>
+      </div>
+      <ul className="rise-in grid w-full gap-2 sm:grid-cols-2">
+        {STARTERS.map((st) => (
+          <li key={st.title}>
+            <button
+              type="button"
+              onClick={() => onPick(st.text)}
+              className="bg-card hover:border-line-strong hover:shadow-e2 group flex h-full w-full cursor-pointer flex-col gap-1 rounded-xl border p-3.5 text-left shadow-e1 transition-[border-color,box-shadow,transform] duration-150 hover:-translate-y-px"
+            >
+              <span className="text-foreground text-meta font-medium">{st.title}</span>
+              <span className="text-muted-foreground line-clamp-2 text-micro">{st.text}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+      <div className="flex items-center gap-3">
+        <Button variant="outline" size="sm" onClick={onNew}>
+          <Plus className="size-3.5" />
+          New task
+        </Button>
+        <span className="text-faint text-micro">
+          <kbd className="rounded border px-1 font-mono">Enter</kbd> sends · <kbd className="rounded border px-1 font-mono">@</kbd> files · <kbd className="rounded border px-1 font-mono">/</kbd> skills
+        </span>
+      </div>
     </div>
   );
 }

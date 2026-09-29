@@ -64,7 +64,7 @@ export function StreamingMarkdown({ text }: { text: string }) {
   return (
     <div className="relative">
       <Markdown className="prose-agent">{safe}</Markdown>
-      {streaming && <span className="caret text-muted-foreground align-baseline" aria-hidden>▍</span>}
+      {streaming && <span className="caret-steady text-muted-foreground align-baseline" aria-hidden>▍</span>}
     </div>
   );
 }

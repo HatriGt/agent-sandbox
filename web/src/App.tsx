@@ -1,7 +1,7 @@
 import * as React from "react";
 import { Link, useLocation } from "react-router";
 import { Bell, BellOff, Clock, Flame, Keyboard, LayoutGrid, LogOut, Moon, PanelLeftClose, PanelLeftOpen, Pause, Plug, Plus, Search, Shield, Sun, TriangleAlert, UserRound } from "lucide-react";
-import { Lightning } from "@phosphor-icons/react";
+import { Zap } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { api, type FleetLifecycle, type FleetSnapshot } from "@/lib/api";
 import { POLL_MS, isUp, isVisible, threadSort } from "@/lib/format";
@@ -218,7 +218,7 @@ export default function App() {
     () => [
       { id: "fleet", label: "Fleet view", hint: "g f", icon: <LayoutGrid />, run: showFleet },
       { id: "history", label: "History", hint: "g h", icon: <Clock />, run: showHistory },
-      { id: "skills", label: "Skills", hint: "g s", icon: <Lightning weight="duotone" />, run: showSkills },
+      { id: "skills", label: "Skills", hint: "g s", icon: <Zap />, run: showSkills },
       { id: "integrations", label: "Integrations", hint: "g a", icon: <Plug />, run: showAccounts },
       { id: "theme", label: dark ? "Switch to light theme" : "Switch to dark theme", icon: dark ? <Sun /> : <Moon />, run: () => setDark(!dark) },
       { id: "account", label: "Account", icon: <UserRound />, run: showAccount },
@@ -408,7 +408,7 @@ export default function App() {
                 <RailIcon active={view === "history"} onClick={showHistory} icon={<Clock />} label="History" />
               </span>
               <span className="contents" onMouseEnter={prefetchSkills}>
-                <RailIcon active={view === "skills"} onClick={showSkills} icon={<Lightning weight="duotone" />} label="Skills" />
+                <RailIcon active={view === "skills"} onClick={showSkills} icon={<Zap />} label="Skills" />
               </span>
               <span className="contents" onMouseEnter={prefetchIntegrations}>
                 <RailIcon active={view === "integrations"} onClick={showAccounts} icon={<Plug />} label="Integrations" />
@@ -496,7 +496,7 @@ export default function App() {
                   <NavItem active={view === "history"} onClick={showHistory} icon={<Clock />} label="History" shortcut="g h" />
                 </span>
                 <span className="contents" onMouseEnter={prefetchSkills}>
-                  <NavItem active={view === "skills"} onClick={showSkills} icon={<Lightning weight="duotone" />} label="Skills" shortcut="g s" />
+                  <NavItem active={view === "skills"} onClick={showSkills} icon={<Zap />} label="Skills" shortcut="g s" />
                 </span>
                 <span className="contents" onMouseEnter={prefetchIntegrations}>
                   <NavItem active={view === "integrations"} onClick={showAccounts} icon={<Plug />} label="Integrations" shortcut="g a" />

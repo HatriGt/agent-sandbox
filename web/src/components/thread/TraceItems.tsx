@@ -1,5 +1,5 @@
 import * as React from "react";
-import { AlertTriangle, Brain, Check, ChevronRight, Clock, FileText, Loader2, MessageCircleQuestion, Terminal, Undo2 } from "lucide-react";
+import { AlertTriangle, Brain, Check, ChevronRight, Clock, Copy, FileText, Loader2, MessageCircleQuestion, Terminal, Undo2 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { resultSummary, type TraceEvent } from "@/lib/trace";
 export { PlanCard, PlanDock } from "./PlanBoard";
@@ -7,7 +7,7 @@ import { parseQuestion } from "@/lib/question";
 import { Pause as PauseIcon } from "lucide-react";
 import { parseTestReport } from "@/lib/testReport";
 import { TestResultsCard } from "./TestResultsCard";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Markdown } from "@/components/ui/markdown";
 import { StreamingMarkdown } from "./StreamingMarkdown";
 import { cn } from "@/lib/utils";
@@ -130,6 +130,7 @@ export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolea
     [events]
   );
   const [open, setOpen] = React.useState(notable);
+  const still = useReducedMotion();
   React.useEffect(() => {
     if (notable) setOpen(true);
   }, [notable]);
@@ -200,11 +201,12 @@ export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolea
       <AnimatePresence initial={false}>
         {open && (
           <motion.ol
-            initial={{ height: 0, opacity: 0 }}
+            initial={still ? false : { height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-            className="relative mt-1.5 overflow-hidden pl-0.5"
+            exit={still ? { opacity: 0 } : { height: 0, opacity: 0 }}
+            transition={{ duration: still ? 0 : 0.22, ease: [0.22, 1, 0.36, 1] }}
+            // Capped: a 60-step group opened by accident must not shove the conversation a screen down.
+            className="relative mt-1.5 max-h-[32rem] overflow-y-auto overscroll-contain pl-0.5"
           >
             {events.map((e, i) => {
               const running = !!live && !e.result;
@@ -212,7 +214,7 @@ export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolea
               return (
                 <motion.li
                   key={i}
-                  initial={{ opacity: 0, x: -4 }}
+                  initial={still ? false : { opacity: 0, x: -4 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ duration: 0.18, delay: Math.min(i, 8) * 0.03 }}
                   className="relative flex gap-3 pb-2 last:pb-0"
@@ -228,7 +230,7 @@ export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolea
                             : "border-line-strong bg-card text-muted-foreground"
                       )}
                     >
-                      {running ? <span className="bg-live size-1.5 animate-pulse rounded-full" /> : e.failed ? "!" : i + 1}
+                      {running ? <span className="bg-live size-1.5 animate-pulse rounded-full" /> : e.failed ? <AlertTriangle className="size-2" strokeWidth={3} aria-label="failed" /> : i + 1}
                     </span>
                     {!last && <span className="bg-border absolute top-[1.4rem] bottom-0 w-px" aria-hidden />}
                   </span>
@@ -373,11 +375,9 @@ function StepItem({ event, live }: { event: ToolEvent; live?: boolean }) {
       {open && event.diff && <EditDiff diff={event.diff} />}
       {event.result &&
         (open ? (
-          <pre className="bg-trace text-trace-fg/80 mt-2 ml-6 max-h-72 overflow-auto rounded-md border border-white/8 px-3 py-2 font-mono text-code whitespace-pre-wrap">
-            {event.result}
-          </pre>
+          <TraceOutput text={event.result} mode="term" className="bg-trace mt-2 ml-6 overflow-hidden rounded-md border border-white/8" />
         ) : (
-          summary && <p className="stamp text-muted-foreground ml-8 truncate">{summary}</p>
+          summary && <p className={cn("stamp ml-8 truncate", event.failed ? "text-destructive" : "text-muted-foreground")}>{summary}</p>
         ))}
     </div>
   );
@@ -420,19 +420,51 @@ function DumpItem({ text }: { text: string }) {
 export const SayItem = React.memo(function SayItem({ text, live, label = true }: { text: string; live?: boolean; label?: boolean }) {
   if (!live && looksLikeDump(text)) return <DumpItem text={text} />;
   return (
-    <div className="enter min-w-0">
-      {(label || live) && (
-        <span className="label text-muted-foreground mb-1.5 flex items-center gap-1.5">
-          <span className={cn("size-1.5 rounded-full", live ? "bg-live breathe" : "bg-faint")} aria-hidden />
-          Agent
-        </span>
-      )}
+    <div className="enter group/say min-w-0">
+      {(label || live) && <AgentLabel live={live} />}
       <div className="text-foreground min-w-0">
         {live ? <StreamingMarkdown text={text} /> : <Markdown className="prose-agent">{text}</Markdown>}
       </div>
+      {!live && <CopyMessage text={text} />}
     </div>
   );
 });
+
+/** The agent's byline, once per turn, so where the operator stops and the agent starts is never a guess. */
+export function AgentLabel({ live }: { live?: boolean }) {
+  return (
+    <span className="label text-muted-foreground mb-1.5 flex items-center gap-1.5">
+      <span className={cn("size-1.5 rounded-full", live ? "bg-live breathe" : "bg-faint")} aria-hidden />
+      Agent
+    </span>
+  );
+}
+
+/** Per-reply copy: fades in under the reply on hover; always shown on touch, where there is no hover. */
+function CopyMessage({ text }: { text: string }) {
+  const [copied, setCopied] = React.useState(false);
+  return (
+    <div className="mt-1 -ml-1.5 flex h-7 items-center opacity-0 transition-opacity duration-150 group-hover/say:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+      <button
+        type="button"
+        onClick={async () => {
+          try {
+            await navigator.clipboard.writeText(text);
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 1500);
+          } catch {
+            /* clipboard blocked: nothing to signal */
+          }
+        }}
+        aria-label={copied ? "Copied" : "Copy reply"}
+        className="text-muted-foreground hover:text-foreground hover:bg-muted flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 text-micro"
+      >
+        {copied ? <Check className="text-ok size-3.5" strokeWidth={2.5} aria-hidden /> : <Copy className="size-3.5" aria-hidden />}
+        {copied ? "Copied" : "Copy"}
+      </button>
+    </div>
+  );
+}
 
 /**
  * The "working…" beat between visible outputs — a live status pill, not dead air. It names what the
@@ -441,6 +473,7 @@ export const SayItem = React.memo(function SayItem({ text, live, label = true }:
  * keeps climbing next to a detail that stopped changing.
  */
 export function WorkingIndicator({ label = "Working", detail }: { label?: string; detail?: string | null }) {
+  const still = useReducedMotion();
   const [elapsed, setElapsed] = React.useState(0);
   React.useEffect(() => {
     const start = Date.now();
@@ -449,35 +482,37 @@ export function WorkingIndicator({ label = "Working", detail }: { label?: string
   }, []);
   const mins = Math.floor(elapsed / 60);
   const time = elapsed < 5 ? null : mins > 0 ? `${mins}m ${elapsed % 60}s` : `${elapsed}s`;
+  const swap = still
+    ? { initial: false as const, animate: { opacity: 1 }, exit: { opacity: 0 }, transition: { duration: 0 } }
+    : { initial: { opacity: 0, y: 6 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -6 }, transition: { duration: 0.18, ease: [0.22, 1, 0.36, 1] as const } };
   return (
-    <div className="enter flex items-center gap-2.5" aria-live="polite">
-      <div className="bg-card inline-flex max-w-full items-center gap-2.5 rounded-full border py-1.5 pr-3.5 pl-3 text-meta shadow-e1">
-        <span className="text-live flex shrink-0 items-center gap-1" aria-hidden>
-          <span className="dot dot-1 bg-current size-1.5 rounded-full" />
-          <span className="dot dot-2 bg-current size-1.5 rounded-full" />
-          <span className="dot dot-3 bg-current size-1.5 rounded-full" />
-        </span>
-        <span className="text-foreground shrink-0 font-medium">{label}</span>
+    <div className="enter flex items-center gap-2.5">
+      {/* Screen readers hear the stage when it changes, never the ticking timer. */}
+      <span className="sr-only" role="status">
+        {label}
+      </span>
+      {/* One pill that morphs between stages (Dynamic-Island style) instead of pills swapping in and out. */}
+      <motion.div
+        layout={!still}
+        transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+        className="bg-card inline-flex max-w-full items-center gap-2.5 overflow-hidden rounded-full border py-1.5 pr-3.5 pl-2 text-meta shadow-e1"
+        aria-hidden
+      >
+        <span className="orb shrink-0" />
+        <AnimatePresence mode="popLayout" initial={false}>
+          <motion.span key={label} {...swap} className="shimmer-text shrink-0 font-medium">
+            {label}
+          </motion.span>
+        </AnimatePresence>
         <AnimatePresence mode="popLayout" initial={false}>
           {detail && (
-            <motion.code
-              key={detail}
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
-              className="text-muted-foreground bg-muted min-w-0 truncate rounded px-1.5 py-0.5 font-mono text-micro"
-            >
+            <motion.code key={detail} {...swap} className="text-muted-foreground bg-muted min-w-0 truncate rounded px-1.5 py-0.5 font-mono text-micro">
               {detail}
             </motion.code>
           )}
         </AnimatePresence>
-        {time && (
-          <span className="text-faint shrink-0 text-micro tabular-nums" aria-label={`elapsed ${time}`}>
-            {time}
-          </span>
-        )}
-      </div>
+        {time && <span className="text-faint shrink-0 text-micro tabular-nums">{time}</span>}
+      </motion.div>
     </div>
   );
 }
@@ -517,7 +552,7 @@ export function YouItem({ text, label = "You", onRevert }: { text: string; label
                 type="button"
                 onClick={onRevert}
                 aria-label="Revert the sandbox to before this message"
-                className="text-muted-foreground hover:text-foreground hover:bg-muted grid size-7 shrink-0 cursor-pointer place-items-center rounded-full border opacity-0 transition-opacity duration-150 group-hover/you:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-70"
+                className="text-muted-foreground hover:text-foreground hover:bg-muted grid size-7 shrink-0 cursor-pointer place-items-center rounded-full border opacity-0 transition-opacity duration-150 group-hover/you:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
               >
                 <Undo2 className="size-3.5" aria-hidden />
               </button>
