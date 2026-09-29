@@ -278,7 +278,11 @@ export async function bootWarmBox(cfg: Config, agent: AgentKind = "claude"): Pro
     // throwaway one-shot at pool-boot time pays it here, where nobody is waiting. Best-effort.
     const warm =
       `cd /tmp && ${ompSeedSh()} && OMP_SKIP_SETUP=1 timeout 90 omp --mode json --approval-mode=yolo ` +
-      `--model "ccproxy/$ANTHROPIC_MODEL" -p "Reply with exactly: ok" >/dev/null 2>&1; rm -rf /root/.omp/sessions 2>/dev/null; true`;
+      `--model "ccproxy/$ANTHROPIC_MODEL" -p "Reply with exactly: ok" >/dev/null 2>&1; rm -rf /root/.omp/sessions 2>/dev/null; ` +
+      // Page-cache the MCP servers' module trees too: the first real session spawns ~7 node
+      // processes that read the whole global node_modules cold — measured as ~40s of the first
+      // task's start. Reading the files once here makes those spawns ~1s each.
+      `find /usr/local/lib/node_modules /usr/local/install -type f \\( -name '*.js' -o -name '*.json' -o -name '*.node' \\) -exec cat {} + >/dev/null 2>&1; true`;
     await msb(cfg, ["exec", name, ...agentEnvFlags(cfg, "noop", undefined, undefined, undefined, agent), "--", "bash", "-lc", warm], false, 150_000);
   }
   return name;
