@@ -88,3 +88,16 @@ test("cookies + csrf", () => {
   assert.equal(csrfOk({ "x-requested-with": "agent-sandbox", origin: "https://evil.example" }, "https://asb.example"), false);
   assert.equal(csrfOk({ "x-requested-with": "agent-sandbox", origin: "https://asb.example" }, "https://asb.example"), true);
 });
+
+test("requestSessions: the edge gate sees EVERY session a request names (body and query)", async () => {
+  const { requestSessions } = await import("../src/identity.js");
+  // The bypass: a JSON body on a GET carried session:"" (or the caller's own box) while the route
+  // read the victim's box from the query. Both values must reach the ownership check.
+  assert.deepEqual(requestSessions({ session: "" }, { session: "pool-victim" }), ["pool-victim"]);
+  assert.deepEqual(requestSessions({ session: "pool-mine" }, { session: "pool-victim" }), ["pool-mine", "pool-victim"]);
+  assert.deepEqual(requestSessions(undefined, { session: "pool-a" }), ["pool-a"]);
+  assert.deepEqual(requestSessions({ session: "pool-a" }, {}), ["pool-a"]);
+  assert.deepEqual(requestSessions({}, {}), []);
+  // A repeated query param parses to an array: it must surface (and then fail isBoxName), not vanish.
+  assert.deepEqual(requestSessions({}, { session: ["pool-a", "pool-b"] }), [["pool-a", "pool-b"]]);
+});

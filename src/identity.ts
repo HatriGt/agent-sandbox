@@ -369,3 +369,18 @@ export function csrfOk(headers: Record<string, string | string[] | undefined>, p
   if (o && publicOrigin && o !== publicOrigin) return false;
   return true;
 }
+
+/**
+ * Every `session` a request names, from the body AND the query. Routes read one or the other (GET
+ * routes read the query even when a JSON body is present), so a gate that checked only
+ * `body.session ?? query.session` could be sent `{"session":""}` in the body while the route acted
+ * on the query's box. Empty strings are dropped, since they name no box.
+ */
+export function requestSessions(body: unknown, query: unknown): unknown[] {
+  const out: unknown[] = [];
+  for (const src of [body, query]) {
+    const v = src && typeof src === "object" ? (src as Record<string, unknown>).session : undefined;
+    if (v !== undefined && v !== "") out.push(v);
+  }
+  return out;
+}

@@ -39,7 +39,7 @@ import { verifyPlanOf, type VerifyPlan, type VerifyResult } from "./verify.js";
 import { parseTrace } from "./trace.js";
 import { loadNotifySettings, normalizeNotifySettings, saveNotifySettings } from "./notify-store.js";
 import { AGENT_KINDS, AGENT_LABELS, isAgentKind, loadAgentPrefs, normalizeAgentPrefs, saveAgentPrefs } from "./agent-kind.js";
-import { createLocalUser, deleteUser, listUsers, ownerOf, setUserRole, validateSignup, createPasswordUser, authenticatePassword, setPassword, updateProfile, verifyPassword, PASSWORD_MIN, listSessions, revokeSession, revokeOtherSessions, startTrial, planOf, setPlan, TrialExpiredError } from "./identity.js";
+import { requestSessions, createLocalUser, deleteUser, listUsers, ownerOf, setUserRole, validateSignup, createPasswordUser, authenticatePassword, setPassword, updateProfile, verifyPassword, PASSWORD_MIN, listSessions, revokeSession, revokeOtherSessions, startTrial, planOf, setPlan, TrialExpiredError } from "./identity.js";
 import { parseStore } from "./gh-token-store.js";
 import { seedStarterSkills } from "./starter-skills.js";
 import { parseMcpStore } from "./mcp-store.js";
@@ -177,20 +177,18 @@ app.use((req: Request, res: Response, next) => {
   // to reject), and nothing at all on /tree.json, /files.json, /changes.json and /diff.json. One
   // check at the edge, on the same field the ownership check below already reads, is the version
   // that cannot drift as routes are added.
-  if (!isMcpPath) {
-    const s = (req.body as Record<string, unknown> | undefined)?.session ?? (req.query as Record<string, unknown>).session;
-    if (s !== undefined && s !== "" && !isBoxName(s)) {
-      res.status(400).json({ error: "invalid session name" });
-      return;
-    }
+  // BOTH the body's and the query's session are checked (requestSessions): GET routes read the query
+  // even when a JSON body is present, so checking only one let {"session":""} in the body wave a
+  // query-named box past the ownership check below.
+  const sessions = isMcpPath ? [] : requestSessions(req.body, req.query);
+  if (sessions.some((s) => !isBoxName(s))) {
+    res.status(400).json({ error: "invalid session name" });
+    return;
   }
   // Box-scoped JSON routes: a user may only name their own boxes. 404, not 403 — no existence oracle.
-  if (p && p.kind === "user" && p.role !== "admin" && !isMcpPath) {
-    const s = (req.body as Record<string, unknown> | undefined)?.session ?? (req.query as Record<string, unknown>).session;
-    if (typeof s === "string" && s && !mayAccess(db, p, s)) {
-      res.status(404).json({ error: "no such machine" });
-      return;
-    }
+  if (p && p.kind === "user" && p.role !== "admin" && sessions.some((s) => !mayAccess(db, p, s as string))) {
+    res.status(404).json({ error: "no such machine" });
+    return;
   }
   if (p) withPrincipal(p, next);
   else next();
@@ -387,16 +385,22 @@ const boxVerified = new Map<string, VerifyResult>();
 // the lock itself, so it must call the RAW functions, never these wrappers (non-reentrant lock).
 const rawResume = deps.resume.bind(deps);
 const rawResumeDetached = deps.resumeDetached?.bind(deps);
+// ownership.check comes FIRST in both: the checkpoint runs a command inside the box (and wakes a
+// sleeping one), so it must never run on a box the caller doesn't own. The wrapped raw functions
+// check again; this only moves the refusal ahead of the side effects.
 deps.resume = async (c, session, message, secrets, interact, model) => {
+  ownership.check(session);
   await withBoxLock(session, async () => captureBeforeMessage(session).catch(() => {}));
   return rawResume(c, session, message, secrets, interact, model);
 };
 if (rawResumeDetached) {
-  deps.resumeDetached = (c, session, message, secrets, model) =>
-    withBoxLock(session, async () => {
+  deps.resumeDetached = async (c, session, message, secrets, model) => {
+    ownership.check(session);
+    return withBoxLock(session, async () => {
       await captureBeforeMessage(session).catch(() => {});
       return rawResumeDetached(c, session, message, secrets, model);
     });
+  };
 }
 
 const resumeQuietly = (session: string, message: string) => {
