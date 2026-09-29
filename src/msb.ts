@@ -279,8 +279,6 @@ async function bootAndWarm(cfg: Config, name: string, agent: AgentKind): Promise
     "--max-memory",
     cfg.memory, // pin the hotplug ceiling too, or metrics report the default 4G as the total
     ...cpuFlags(cfg),
-    // No --root-disk: pool boxes always boot --from-snapshot, and the snapshot carries its own
-    // rootfs size (pinned at bake time in createBareBox) — see createBox.
     ...egressFlags(cfg, true), // pooled boxes always boot with open egress
     // An UNCLAIMED warm box must persist until a delegation claims it, so it uses the longer
     // poolIdleTimeout (not a session's idleTimeout) — otherwise it idle-stops and the pool drains.
@@ -293,8 +291,8 @@ async function bootAndWarm(cfg: Config, name: string, agent: AgentKind): Promise
     warmMaxDuration(cfg.poolIdleTimeout, cfg.maxDuration),
     "--pull",
     "never",
-    "--from-snapshot",
-    cfg.snapshot,
+    // A snapshot carries its own rootfs size (pinned at bake time); an image boot sizes it here.
+    ...rootSourceArgs(cfg),
     "--",
     "sleep",
     "infinity",
@@ -530,6 +528,82 @@ export async function installOmpTools(cfg: Config, box: string) {
       "claude --version; OMP_SKIP_SETUP=1 omp --version",
     { timeoutMs: 600_000 }
   );
+}
+
+/**
+ * Where an omp box's rootfs comes from. A baked image (MSB_OMP_IMAGE) wins over the snapshot:
+ * msb stores an image's layers ONCE on the host as shared read-only EROFS, so each box's private
+ * upper.ext4 starts sparse (~1.5 MB measured) — whereas a snapshot boot COPIES the snapshot's full
+ * upper (3.4 GB for agent-omp, no reflink on the host's ext4) into every box it boots.
+ */
+export function ompRootSource(cfg: Config): { image: string; snapshot: string } {
+  return cfg.ompImage ? { image: cfg.ompImage, snapshot: "" } : { image: cfg.image, snapshot: cfg.ompSnapshot };
+}
+
+/** The `msb run` rootfs flags: the snapshot (which pins its own disk size), or a sized image boot. */
+export function rootSourceArgs(cfg: Config): string[] {
+  return cfg.snapshot ? ["--from-snapshot", cfg.snapshot] : ["--root-disk", cfg.rootDisk, cfg.image];
+}
+
+/**
+ * Dockerfile for the omp image: the same toolchain installOmpTools bakes into the snapshot, plus
+ * the MCP server packages, in ONE RUN — a file deleted in a later layer still ships in the earlier
+ * one, so the prune only saves anything inside the layer that created the bytes. Pruned (measured
+ * on 18.4.3): onnxruntime's CUDA/TensorRT providers (~700M, no GPU in a microVM), its darwin/win32/
+ * arm64 binaries, bun's install cache (a hardlinked second copy of every package), and — when the
+ * build host has AVX2, which every box on it then has too — the unused baseline CPU builds of
+ * pi-natives and bun (the loaders pick "modern" first).
+ */
+export function ompImageDockerfile(cfg: Config, base: string, npx: string[]): string {
+  if (!/^[\w./:@-]+$/.test(base)) throw new Error(`invalid base image: ${JSON.stringify(base)}`);
+  const steps = [
+    "set -e",
+    claudeInstallSh(cfg.claudeCodeVersion),
+    "apt-get update -qq && apt-get install -y -qq --no-install-recommends gh >/dev/null",
+    ompInstallSh(cfg.ompVersion),
+    "{ pip3 install --break-system-packages debugpy || apt-get install -y -qq --no-install-recommends python3-debugpy; } >/dev/null 2>&1 || true",
+    preinstallSh(npx),
+    "find / -xdev \\( -name libonnxruntime_providers_cuda.so -o -name libonnxruntime_providers_tensorrt.so \\) -delete",
+    `for d in $(find / -xdev -type d -path '*onnxruntime-node/bin/napi-v*'); do rm -rf "$d/darwin" "$d/win32" "$d/linux/arm64"; done`,
+    "if grep -q avx2 /proc/cpuinfo; then rm -f /usr/local/install/global/node_modules/@oh-my-pi/pi-natives-linux-x64/*-baseline.node; " +
+      "rm -rf /usr/local/lib/node_modules/*/node_modules/@oven/bun-linux-x64-baseline; fi",
+    "npm cache clean --force >/dev/null 2>&1 || true",
+    "rm -rf /usr/local/install/cache /root/.bun/install/cache /root/.cache /root/.npm /tmp/* /var/lib/apt/lists/* /var/cache/apt/*",
+    "claude --version",
+    "omp --version",
+  ];
+  return `FROM ${base}\nENV BUN_INSTALL=/usr/local OMP_SKIP_SETUP=1\nRUN ${steps.join("; \\\n  ")}\n`;
+}
+
+/**
+ * Build the omp image on the VPS and load it into msb's image store as `tag`. Docker (host-side)
+ * builds it FROM the exact digest msb already caches for cfg.image, so the base layers dedupe with
+ * the plain boxes' image; `docker save | msb load` imports it; the docker copy is dropped after.
+ * The MCP package list is the operator's stored config plus `extraNpx` (OMP_BAKE_NPX).
+ */
+export async function bakeOmpImage(cfg: Config, tag: string, extraNpx: string[]): Promise<string> {
+  if (!/^[a-z0-9][\w.-]*:[\w.-]+$/.test(tag)) throw new Error(`invalid image tag: ${JSON.stringify(tag)}`);
+  const insp = await msb(cfg, ["image", "inspect", cfg.image]);
+  const digest = insp.stdout.match(/^Digest:\s+(sha256:[0-9a-f]{64})$/m)?.[1];
+  if (!digest) throw new Error(`cannot resolve the digest of ${cfg.image}`);
+  const repo = cfg.image.replace(/[:@].*$/, "");
+  let specs: string[] = [];
+  try {
+    const conf = toClaudeMcpConfig(await loadMcpStore(cfg));
+    if (conf) specs = npxPackagesOf(conf);
+  } catch {
+    // no operator MCP store reachable from this process — OMP_BAKE_NPX alone
+  }
+  const df = ompImageDockerfile(cfg, `${repo}@${digest}`, Array.from(new Set([...specs, ...extraNpx])));
+  const q = shellQuote(tag);
+  const r = await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, 'sh -c "$(cat)"'], {
+    timeoutMs: 1_800_000,
+    input:
+      `set -e; D=$(mktemp -d); printf '%s' ${shellQuote(Buffer.from(df).toString("base64"))} | base64 -d > "$D/Dockerfile"; ` +
+      `docker build -q -t ${q} "$D" >/dev/null; docker save ${q} | ${shellQuote(cfg.msb)} load -q -t ${q}; ` +
+      `docker rmi ${q} >/dev/null; rm -rf "$D"; ${shellQuote(cfg.msb)} image inspect ${q} | head -6\n`,
+  });
+  return r.stdout;
 }
 
 /**

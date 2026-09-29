@@ -239,3 +239,34 @@ test("isOrphanWarmBox: only a stale, never-ready box this process isn't warming 
   assert.equal(isOrphanWarmBox(old, "claimed", new Set(), now), false, "a claimed run is never touched");
   assert.equal(isOrphanWarmBox("pool-x-omp-abc", "warming", new Set(), now), false, "undatable names are left alone");
 });
+
+test("MSB_OMP_IMAGE wins over the snapshot: omp boxes boot the shared image layer, not a copied upper", async () => {
+  const { ompPoolCfg, ompPoolEligible } = await import("../src/pool.js");
+  const { ompRootSource, rootSourceArgs } = await import("../src/msb.js");
+  const base = { image: "node", ompSnapshot: "agent-omp", ompImage: "agent-omp:7", ompPoolSize: 1, poolSize: 1, snapshot: "agent-base", egressAllowAll: true } as never;
+  assert.deepEqual(ompRootSource(base), { image: "agent-omp:7", snapshot: "" });
+  assert.deepEqual(ompRootSource({ ...(base as object), ompImage: "" } as never), { image: "node", snapshot: "agent-omp" });
+  const pc = ompPoolCfg(base);
+  assert.equal(pc.image, "agent-omp:7");
+  assert.equal(pc.snapshot, "");
+  // An image boot MUST size its (sparse) root disk and name the image; a snapshot boot must not.
+  assert.deepEqual(rootSourceArgs(pc), ["--root-disk", "4G", "agent-omp:7"]);
+  assert.deepEqual(rootSourceArgs({ ...(pc as object), snapshot: "agent-omp" } as never), ["--from-snapshot", "agent-omp"]);
+  // The image alone is enough to run the omp pool.
+  assert.ok(ompPoolEligible({ ...(base as object), ompSnapshot: "" } as never, false));
+  assert.ok(!ompPoolEligible({ ...(base as object), ompSnapshot: "", ompImage: "" } as never, false));
+});
+
+test("ompImageDockerfile: one layer FROM the pinned base, toolchain + MCP packages, pruned", async () => {
+  const { ompImageDockerfile } = await import("../src/msb.js");
+  const df = ompImageDockerfile({ claudeCodeVersion: "2.1.273", ompVersion: "latest" } as never, "node@sha256:abc", ["mcp-remote", "chrome-devtools-mcp@latest"]);
+  assert.match(df, /^FROM node@sha256:abc$/m);
+  assert.equal(df.match(/^RUN /gm)?.length, 1, "a single RUN: pruning must happen in the SAME layer it saves in");
+  assert.match(df, /@anthropic-ai\/claude-code@2\.1\.273/);
+  assert.match(df, /@oh-my-pi\/pi-coding-agent/);
+  assert.match(df, /'chrome-devtools-mcp@latest'/);
+  assert.match(df, /libonnxruntime_providers_cuda\.so/);
+  assert.match(df, /\/usr\/local\/install\/cache/);
+  assert.match(df, /omp --version/);
+  assert.throws(() => ompImageDockerfile({ claudeCodeVersion: "2.1.273", ompVersion: "latest" } as never, "node\nRUN evil", []));
+});

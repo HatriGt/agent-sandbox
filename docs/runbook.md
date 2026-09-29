@@ -458,3 +458,23 @@ Keyed by **account login**, stored on the VPS at `~/.agent-sandbox/gh-tokens.jso
   a repo pulls private GitHub Packages.
 - `gh_token_add({token, repo?})` pre-registers a token; a token via `resume(secrets)` is also stored.
   Pure store/probe helpers are unit-tested.
+
+## omp boxes boot from a shared image, not a copied snapshot
+
+A `--from-snapshot` boot copies the snapshot's whole `upper.ext4` into the new box, and the host's
+ext4 cannot reflink. For `agent-omp` that meant 3.4 GB of real host disk per omp box, before the
+user did anything. An OCI image is different: msb stores its layers once, read-only and
+content-addressed, and every box booted from it starts with an empty sparse upper. Measured: about
+1.5 MB per box, a 0.9 s boot, and 3.9 GB free in the guest.
+
+```bash
+ssh hostbrr "cd /root/agent-sandbox-deploy && docker compose exec -T -e OMP_BAKE_NPX='@cap-js/mcp-server,hana-mcp-server,mcp-abap-abap-adt-api,@drawio/mcp,mcp-remote,btp-mcp-server,chrome-devtools-mcp@latest' agent-sandbox node dist/bake-omp-image.js agent-omp:1"
+# then set MSB_OMP_IMAGE=agent-omp:1 in .env and restart the controller
+```
+
+`MSB_OMP_IMAGE` takes precedence over `MSB_OMP_SNAPSHOT`, which stays as the fallback. Docker on
+the host builds `FROM` the digest msb already caches for `MSB_IMAGE`, so the base layers are shared
+with the plain image. `docker save | msb load` imports the result, and the Docker copy is removed
+afterwards. The build is one pruned `RUN`: it drops the onnxruntime CUDA/TensorRT providers
+(~700 MB), non-linux-x64 binaries, bun's hardlinked install cache, and the baseline CPU builds when
+the host has AVX2. That leaves a 1.44 GB layer. Remove old tags with `msb image rm`.

@@ -9,7 +9,7 @@
  *
  * The pool state lives on the VPS (the running `pool-*` boxes), so it survives MCP respawns.
  */
-import { createBox, bootWarmBox, listPoolBoxes, claimWarmBox, reapDeadPoolBoxes, forceRemoveBox, OMP_MIN_MEMORY, OMP_MIN_DISK, OMP_CPUS } from "./msb.js";
+import { createBox, bootWarmBox, listPoolBoxes, claimWarmBox, reapDeadPoolBoxes, forceRemoveBox, OMP_MIN_MEMORY, OMP_MIN_DISK, OMP_CPUS, ompRootSource } from "./msb.js";
 import { stagingPathFor } from "./sync.js";
 import { parseDurationSec } from "./monitor.js";
 import type { Config } from "./config.js";
@@ -57,14 +57,19 @@ export function poolBoxFlavor(name: string): AgentKind {
   return /^pool-\d+-omp-/.test(name) ? "omp" : "claude";
 }
 
-/** The Config an omp pool box boots with: the omp snapshot at omp's memory/disk tier. */
+/** The Config an omp pool box boots with: the omp image (or snapshot) at omp's memory/disk tier. */
 export function ompPoolCfg(cfg: Config): Config {
-  return { ...cfg, snapshot: cfg.ompSnapshot, memory: OMP_MIN_MEMORY, cpus: OMP_CPUS, rootDisk: OMP_MIN_DISK, poolSize: cfg.ompPoolSize };
+  return { ...cfg, ...ompRootSource(cfg), memory: OMP_MIN_MEMORY, cpus: OMP_CPUS, rootDisk: OMP_MIN_DISK, poolSize: cfg.ompPoolSize };
+}
+
+/** Is a baked omp rootfs (image or snapshot) configured? Without one an omp box cold-installs. */
+function ompSourceOn(cfg: Config): boolean {
+  return !!(cfg.ompImage || cfg.ompSnapshot);
 }
 
 /** Pool eligibility for an omp delegation (mirrors poolEligible on the omp fields). */
 export function ompPoolEligible(cfg: Config, allowDomainsProvided: boolean): boolean {
-  return cfg.ompPoolSize > 0 && !!cfg.ompSnapshot && cfg.egressAllowAll && !allowDomainsProvided;
+  return cfg.ompPoolSize > 0 && ompSourceOn(cfg) && cfg.egressAllowAll && !allowDomainsProvided;
 }
 
 /**
@@ -164,7 +169,7 @@ let refillInFlight: Promise<void> | null = null;
  */
 export function refillPool(cfg: Config, io: RefillIO = realRefillIO, wanted: Set<AgentKind> = preferredAgents()): Promise<void> {
   const claudeOn = cfg.poolSize > 0 && !!cfg.snapshot;
-  const ompOn = (cfg.ompPoolSize ?? 0) > 0 && !!cfg.ompSnapshot;
+  const ompOn = (cfg.ompPoolSize ?? 0) > 0 && ompSourceOn(cfg);
   if ((!claudeOn && !ompOn) || !cfg.egressAllowAll) return Promise.resolve();
   if (refillInFlight) return refillInFlight;
   const flight = (async () => {
@@ -221,7 +226,7 @@ export function refillPool(cfg: Config, io: RefillIO = realRefillIO, wanted: Set
  */
 export function startPoolMaintainer(cfg: Config): { stop: () => void } {
   const claudeOn = cfg.poolSize > 0 && !!cfg.snapshot;
-  const ompOn = (cfg.ompPoolSize ?? 0) > 0 && !!cfg.ompSnapshot;
+  const ompOn = (cfg.ompPoolSize ?? 0) > 0 && ompSourceOn(cfg);
   if ((!claudeOn && !ompOn) || !cfg.egressAllowAll || cfg.poolRefillIntervalMs <= 0) {
     return { stop: () => {} };
   }
@@ -247,7 +252,7 @@ export async function poolStatus(cfg: Config): Promise<{
 }> {
   const enabled = (cfg.poolSize > 0 && !!cfg.snapshot && cfg.egressAllowAll) || ompPoolEligible(cfg, false);
   const boxes = enabled ? await listPoolBoxes(cfg) : [];
-  return { size: cfg.poolSize + (cfg.ompSnapshot ? cfg.ompPoolSize : 0), available: boxes.length, boxes, enabled };
+  return { size: cfg.poolSize + (ompSourceOn(cfg) ? cfg.ompPoolSize : 0), available: boxes.length, boxes, enabled };
 }
 
 /** Staging path helper re-export so index.ts has one import site for pool wiring. */
