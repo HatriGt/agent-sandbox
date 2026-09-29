@@ -765,9 +765,9 @@ async function trustWorkspace(cfg: Config, box: string): Promise<void> {
  * enable `credential.useHttpPath` and write one `~/.git-credentials` line per owner path — git then
  * longest-prefix matches `github.com/<owner>/...` to the correct token. Returns "" when no tokens.
  */
-function gitCredentialsScript(ownerTokens: Record<string, string>): string {
+export function gitCredentialsScript(ownerTokens: Record<string, string>, fallbackToken?: string): string {
   const owners = Object.keys(ownerTokens).filter((o) => o && ownerTokens[o]);
-  if (owners.length === 0) return "";
+  if (owners.length === 0 && !fallbackToken) return "";
   const lines = [
     "git config --global credential.helper store",
     "git config --global credential.useHttpPath true",
@@ -778,6 +778,15 @@ function gitCredentialsScript(ownerTokens: Record<string, string>): string {
     const line = `https://x-access-token:${ownerTokens[owner]}@github.com/${owner}`;
     // printf keeps the token off the process list better than echo in ps; still env-free here.
     lines.push(`printf '%s\\n' ${shellQuote(line)} >> "$GC"`);
+  }
+  // Host-level fallback: the DEFAULT account's token, matched only when no per-owner entry wins the
+  // longest-prefix match. This is the git-over-https twin of the GH_TOKEN env the `gh` CLI already
+  // gets — without it a task-only box (no resolved repos, so no per-owner lines) had NO git
+  // credential helper at all, and the very first `git clone` of a private repo the connected
+  // account could read stopped the run to ask for a token the profile already holds. Commit
+  // IDENTITY is deliberately still never defaulted (applyGitCredentials sets it per resolved repo).
+  if (fallbackToken) {
+    lines.push(`printf '%s\\n' ${shellQuote(`https://x-access-token:${fallbackToken}@github.com`)} >> "$GC"`);
   }
   return lines.join(" && ");
 }
@@ -1264,20 +1273,30 @@ const DEFANG_SENTINELS_SED = `sed -e 's/⟦/​⟦/g' -e 's/^●/​●/' -e 's/
 /** Where the dashboard-configured MCP servers are written inside the box for `claude --mcp-config`. */
 const MCP_CONFIG_PATH = "/root/.agent-mcp.json";
 
+/** omp reads its user-level MCP servers from here (it does NOT read Claude's paths or a flag). */
+const OMP_MCP_CONFIG_PATH = "/root/.omp/agent/mcp.json";
+
 /**
- * Write the enabled MCP servers into the box (or remove a stale file when none are enabled). Runs
+ * Write the enabled MCP servers into the box (or remove stale files when none are enabled). Runs
  * before every agent start/resume so a server added on the dashboard reaches the very next turn.
+ * Written to BOTH agents' locations in one exec — the store shape ({mcpServers}) is the same, and
+ * writing both keeps a thread honest if the box is ever probed by the other agent's tooling.
  * Best-effort: an MCP misconfiguration must never block a run.
  */
 export async function installMcpConfig(cfg: Config, box: string): Promise<void> {
   try {
     const conf = toClaudeMcpConfig(await loadMcpStore(cfg));
     if (!conf) {
-      await exec(cfg, box, `rm -f ${MCP_CONFIG_PATH}`);
+      await exec(cfg, box, `rm -f ${MCP_CONFIG_PATH} ${OMP_MCP_CONFIG_PATH}`);
       return;
     }
     const json = JSON.stringify(conf);
-    await exec(cfg, box, `printf '%s' ${shellQuote(json)} > ${MCP_CONFIG_PATH} && chmod 600 ${MCP_CONFIG_PATH}`);
+    await exec(
+      cfg,
+      box,
+      `printf '%s' ${shellQuote(json)} > ${MCP_CONFIG_PATH} && chmod 600 ${MCP_CONFIG_PATH} && ` +
+        `mkdir -p /root/.omp/agent && printf '%s' ${shellQuote(json)} > ${OMP_MCP_CONFIG_PATH} && chmod 600 ${OMP_MCP_CONFIG_PATH}`
+    );
   } catch (e) {
     console.error(`[mcp] could not install MCP config into ${box}:`, (e as Error).message);
   }
@@ -1457,7 +1476,7 @@ export interface AgentCreds {
 export async function applyGitCredentials(cfg: Config, box: string, creds?: AgentCreds): Promise<void> {
   const lines: string[] = [];
 
-  const credScript = gitCredentialsScript(creds?.ownerTokens ?? {});
+  const credScript = gitCredentialsScript(creds?.ownerTokens ?? {}, creds?.primaryToken);
   if (credScript) lines.push(credScript);
 
   // Per-repo identity: for each in-box dir, look up its owner -> that owner's access login.
