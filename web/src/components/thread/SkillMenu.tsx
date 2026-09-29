@@ -1,6 +1,7 @@
 import * as React from "react";
 import { X } from "lucide-react";
-import { motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { menuMotion } from "./MentionMenu";
 import { api, type SkillView } from "@/lib/api";
 import { useCached } from "@/lib/cache";
 import { SkillMark } from "@/lib/skillGlyph";
@@ -28,6 +29,7 @@ export function SkillMenu({
 }) {
   const cached = useCached("skills", (signal) => api.skills(signal));
   const [cursor, setCursor] = React.useState(0);
+  const still = useReducedMotion();
   const q = state.query.toLowerCase();
   const matches = React.useMemo(
     () => (cached.data?.skills ?? []).filter((s) => s.enabled && s.name.includes(q)),
@@ -53,15 +55,18 @@ export function SkillMenu({
     return () => document.removeEventListener("asb:skill-nav", onNav);
   }, [matches, cursor, onPick, onClose]);
 
-  if (!matches.length) return null;
+  // Own AnimatePresence too: the menu also closes when the query stops matching while the component
+  // stays mounted; the composer's presence wrapper covers the token going away, and `propagate`
+  // lets that outer exit reach the listbox through this inner presence.
   return (
-    <motion.div
-      role="listbox"
-      aria-label="Skills"
-      initial={{ opacity: 0, y: 6, scale: 0.98 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
-      className="bg-popover text-popover-foreground absolute inset-x-2 bottom-full z-20 mb-2 max-h-72 overflow-y-auto rounded-xl border p-1 shadow-e3"
+    <AnimatePresence propagate>
+      {matches.length > 0 && (
+        <motion.div
+          key="skill-menu"
+          role="listbox"
+          aria-label="Skills"
+          {...menuMotion(still)}
+          className="bg-popover text-popover-foreground absolute inset-x-2 bottom-full z-20 mb-2 max-h-72 overflow-y-auto rounded-xl border p-1 shadow-e3"
     >
       <div className="text-muted-foreground flex items-center gap-2 px-2.5 py-1.5 text-micro">
         <span className="flex-1">Run a skill with the rest of your message</span>
@@ -79,17 +84,24 @@ export function SkillMenu({
             e.preventDefault(); // keep the textarea focused
             onPick(s.name);
           }}
-          className={cn(
-            "flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-meta transition-colors duration-100",
-            i === cursor ? "bg-accent text-foreground" : "text-foreground"
-          )}
+          className="text-foreground relative isolate flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-meta"
         >
+          {i === cursor && (
+            <motion.span
+              layoutId="skill-cursor"
+              className="bg-accent absolute inset-0 -z-10 rounded-md"
+              transition={still ? { duration: 0 } : { type: "spring", stiffness: 700, damping: 48, mass: 0.6 }}
+              aria-hidden
+            />
+          )}
           <SkillMark name={s.name} size={15} className="text-muted-foreground" />
           <span className="stamp shrink-0 font-medium">/{s.name}</span>
           <span className="text-muted-foreground min-w-0 truncate">{s.description}</span>
         </button>
       ))}
-    </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 }
 

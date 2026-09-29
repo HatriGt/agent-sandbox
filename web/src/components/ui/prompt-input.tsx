@@ -129,13 +129,24 @@ function PromptInputTextarea({
     const caretAtEnd =
       el.selectionStart === el.value.length && el.selectionEnd === el.value.length
 
+    // The height change is a CSS transition (see className), which only runs between two px
+    // values. Collapsing to "auto" to measure would make "auto" the before-change value and
+    // kill it, so: measure with transitions off, snap back to the old px height (still with
+    // transitions off, reflowed so it becomes the before-change value), then re-enable and set
+    // the target. All synchronous, so nothing paints in between and there is no flash.
+    const prevHeight = el.style.height
+    el.style.transition = "none"
     el.style.height = "auto"
-
-    if (typeof maxHeight === "number") {
-      el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`
-    } else {
-      el.style.height = `min(${el.scrollHeight}px, ${maxHeight})`
+    const next =
+      typeof maxHeight === "number"
+        ? `${Math.min(el.scrollHeight, maxHeight)}px`
+        : `min(${el.scrollHeight}px, ${maxHeight})`
+    if (prevHeight && prevHeight !== next) {
+      el.style.height = prevHeight
+      void el.offsetHeight // commit the old height as the transition's starting point
     }
+    el.style.transition = ""
+    el.style.height = next
 
     el.scrollTop = caretAtEnd ? el.scrollHeight : prevScrollTop
   }
@@ -171,6 +182,8 @@ function PromptInputTextarea({
       onKeyDown={handleKeyDown}
       className={cn(
         "text-primary min-h-[44px] w-full resize-none border-none bg-transparent shadow-none outline-none focus-visible:ring-0 focus-visible:ring-offset-0",
+        // Grows and shrinks with the text instead of snapping; the px height is set by adjustHeight.
+        "transition-[height] duration-[160ms] ease-[var(--ease-out-quint)] motion-reduce:transition-none",
         className
       )}
       rows={1}

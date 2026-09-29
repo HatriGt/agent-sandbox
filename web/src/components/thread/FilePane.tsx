@@ -7,6 +7,7 @@ import { FileMark, languageOf } from "@/lib/fileIcon";
 import { CodeBlock, CodeBlockCode } from "@/components/ui/code-block";
 import { Markdown } from "@/components/ui/markdown";
 import { Button } from "@/components/ui/button";
+import { AnimatedTabs } from "@/components/ui/animated-tabs";
 import { cn } from "@/lib/utils";
 
 /**
@@ -99,10 +100,16 @@ export function FilePane({ session, file, onClose }: { session: string; file: Ch
           {file.additions > 0 && <span className="text-ok">+{file.additions}</span>}
           {file.deletions > 0 && <span className="text-destructive">−{file.deletions}</span>}
         </span>
-        <div role="tablist" className="bg-muted ml-2 inline-flex h-7 items-center gap-0.5 rounded-md p-0.5">
-          <Tab active={tab === "diff"} onClick={() => setTab("diff")} icon={<FileDiff className="size-3.5" />} label="Diff" />
-          <Tab active={tab === "file"} onClick={() => setTab("file")} icon={<FileCode2 className="size-3.5" />} label="File" disabled={file.status === "deleted"} />
-        </div>
+        <AnimatedTabs
+          ariaLabel="File view"
+          className="ml-2"
+          value={tab}
+          onChange={setTab}
+          items={[
+            { value: "diff", icon: <FileDiff className="size-3.5" />, label: "Diff" },
+            { value: "file", icon: <FileCode2 className="size-3.5" />, label: "File", disabled: file.status === "deleted" },
+          ]}
+        />
         <Button variant="ghost" size="icon-sm" onClick={download} aria-label="Download" disabled={file.status === "deleted"}>
           <Download />
         </Button>
@@ -134,25 +141,6 @@ export function FilePane({ session, file, onClose }: { session: string; file: Ch
         ) : null}
       </div>
     </motion.aside>
-  );
-}
-
-function Tab({ active, onClick, icon, label, disabled }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string; disabled?: boolean }) {
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      disabled={disabled}
-      onClick={onClick}
-      className={cn(
-        "flex h-6 cursor-pointer items-center gap-1 rounded px-2 text-micro font-medium disabled:cursor-not-allowed disabled:opacity-40",
-        active ? "bg-card text-foreground shadow-e1" : "text-muted-foreground hover:text-foreground"
-      )}
-    >
-      {icon}
-      {label}
-    </button>
   );
 }
 

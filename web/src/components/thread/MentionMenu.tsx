@@ -1,9 +1,9 @@
 import * as React from "react";
 import { Folder, GitBranch } from "lucide-react";
+import { motion, useReducedMotion } from "motion/react";
 import { FileMark } from "@/lib/fileIcon";
 import { Bar } from "./Skeletons";
 import { api } from "@/lib/api";
-import { cn } from "@/lib/utils";
 
 /**
  * `@` file mentions, the Cursor way: typing `@` in the composer opens a list of workspace files that
@@ -44,6 +44,7 @@ export function MentionMenu({
   const [total, setTotal] = React.useState(0);
   const [loading, setLoading] = React.useState(true);
   const [cursor, setCursor] = React.useState(0);
+  const still = useReducedMotion();
 
   React.useEffect(() => {
     const ctrl = new AbortController();
@@ -80,9 +81,10 @@ export function MentionMenu({
   }, [files, cursor, onPick, onClose]);
 
   return (
-    <div
+    <motion.div
       role="listbox"
       aria-label="Files in the workspace"
+      {...menuMotion(still)}
       className="bg-popover text-popover-foreground absolute inset-x-2 bottom-full z-20 mb-2 max-h-72 overflow-y-auto rounded-xl border p-1 shadow-e3"
     >
       <MentionPeek session={session} path={files[cursor] ?? null} />
@@ -143,11 +145,17 @@ export function MentionMenu({
               e.preventDefault(); // keep the textarea focused
               onPick(f);
             }}
-            className={cn(
-              "flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-meta",
-              i === cursor ? "bg-accent text-foreground" : "text-foreground"
-            )}
+            className="text-foreground relative isolate flex w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-meta"
           >
+            {/* One highlight that glides between rows (CommandPalette's cursor), not a per-row bg swap. */}
+            {i === cursor && (
+              <motion.span
+                layoutId="mention-cursor"
+                className="bg-accent absolute inset-0 -z-10 rounded-md"
+                transition={still ? { duration: 0 } : { type: "spring", stiffness: 700, damping: 48, mass: 0.6 }}
+                aria-hidden
+              />
+            )}
             <FileMark path={f} />
             <span className="truncate font-medium">{base}</span>
             {dir && (
@@ -159,8 +167,22 @@ export function MentionMenu({
           </button>
         );
       })}
-    </div>
+    </motion.div>
   );
+}
+
+/**
+ * The menus open above the composer, so they grow out of their bottom-left corner (where the `@` or
+ * `/` was typed) and fold back into it on close. Reduced motion keeps only the fade.
+ */
+export function menuMotion(still: boolean | null) {
+  return {
+    initial: still ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 4 },
+    animate: { opacity: 1, scale: 1, y: 0 },
+    exit: still ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 4 },
+    transition: { duration: 0.16, ease: [0.22, 1, 0.36, 1] as const },
+    style: { transformOrigin: "0% 100%" },
+  };
 }
 
 /**

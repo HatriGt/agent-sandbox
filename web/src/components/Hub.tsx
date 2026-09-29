@@ -34,6 +34,7 @@ import { displayState, fmtDuration } from "@/lib/lifecycle";
 import { questionHeadline } from "@/lib/question";
 import { prefetchWatch } from "@/hooks/useWatchStream";
 import { Button } from "@/components/ui/button";
+import { AnimatedTabs } from "@/components/ui/animated-tabs";
 import { StateStamp } from "@/components/ui/stamp";
 import { PromptInput, PromptInputActions, PromptInputTextarea } from "@/components/ui/prompt-input";
 import { Lightbox } from "@/components/ui/lightbox";
@@ -451,23 +452,16 @@ export function Hub({
             {verifyOpen && (
               <div className="enter border-t px-1 pt-2 pb-1 mt-1" onClick={(e) => e.stopPropagation()}>
                 <div className="flex items-center gap-1.5">
-                  <span className="bg-muted flex h-7 items-center gap-px rounded-md p-0.5" role="tablist" aria-label="Verification mode">
-                    {(["command", "criterion"] as const).map((m) => (
-                      <button
-                        key={m}
-                        type="button"
-                        role="tab"
-                        aria-selected={verifyMode === m}
-                        onClick={() => setVerifyMode(m)}
-                        className={cn(
-                          "h-6 cursor-pointer rounded px-2 text-micro font-medium capitalize transition-colors",
-                          verifyMode === m ? "bg-card text-foreground shadow-e1" : "text-muted-foreground hover:text-foreground"
-                        )}
-                      >
-                        {m}
-                      </button>
-                    ))}
-                  </span>
+                  <AnimatedTabs
+                    ariaLabel="Verification mode"
+                    className="shrink-0"
+                    value={verifyMode}
+                    onChange={setVerifyMode}
+                    items={[
+                      { value: "command", label: "Command" },
+                      { value: "criterion", label: "Criterion" },
+                    ]}
+                  />
                   <input
                     value={verifyText}
                     onChange={(e) => setVerifyText(e.target.value)}

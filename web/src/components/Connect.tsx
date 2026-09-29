@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { api, type Me } from "@/lib/api";
 import { getMe } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
+import { AnimatedTabs, TabPanel } from "@/components/ui/animated-tabs";
 import { cn } from "@/lib/utils";
 
 /**
@@ -17,14 +18,16 @@ const CLIENTS = [
   { id: "vscode", label: "VS Code", how: ".vscode/mcp.json:", snippet: (u: string, k: string) => JSON.stringify({ servers: { "agent-sandbox": { type: "http", url: u, headers: { Authorization: `Bearer ${k}` } } } }, null, 2) },
   { id: "windsurf", label: "Windsurf", how: "~/.codeium/windsurf/mcp_config.json:", snippet: (u: string, k: string) => JSON.stringify({ mcpServers: { "agent-sandbox": { serverUrl: u, headers: { Authorization: `Bearer ${k}` } } } }, null, 2) },
   { id: "curl", label: "Any client / CI", how: "Plain HTTP with a bearer:", snippet: (u: string, k: string) => `curl -H "Authorization: Bearer ${k}" ${u.replace(/\/mcp$/, "")}/fleet.json` },
-];
+] as const;
+type ClientId = (typeof CLIENTS)[number]["id"];
+const CLIENT_ORDER: readonly ClientId[] = CLIENTS.map((c) => c.id);
 
 export function Connect({ onDone, onBack, welcome = false }: { onDone: () => void; onBack: () => void; welcome?: boolean }) {
   const me = getMe();
   const mcpUrl = `${location.origin}/mcp`;
   const [key, setKey] = React.useState<string | null>(null);
   const [minting, setMinting] = React.useState(false);
-  const [client, setClient] = React.useState(CLIENTS[0].id);
+  const [client, setClient] = React.useState<ClientId>(CLIENTS[0].id);
   const [copied, setCopied] = React.useState<string | null>(null);
   const [test, setTest] = React.useState<{ state: "idle" | "busy" | "ok" | "fail"; who?: Me | null }>({ state: "idle" });
   const auto = React.useRef(false);
@@ -109,28 +112,25 @@ export function Connect({ onDone, onBack, welcome = false }: { onDone: () => voi
 
         {/* 2 — the config */}
         <Step n={2} title="Add the server to your editor" done={copied === "snippet"}>
-          <div className="mb-3 flex flex-wrap gap-1" role="tablist" aria-label="Client">
-            {CLIENTS.map((x) => (
-              <button
-                key={x.id}
-                type="button"
-                role="tab"
-                aria-selected={client === x.id}
-                onClick={() => setClient(x.id)}
-                className={cn("h-8 cursor-pointer rounded-md px-3 text-meta transition-colors", client === x.id ? "bg-accent text-foreground font-medium" : "text-muted-foreground hover:text-foreground hover:bg-muted")}
-              >
-                {x.label}
-              </button>
-            ))}
-          </div>
-          <p className="text-muted-foreground mb-2 text-meta">{c.how}</p>
-          <div className="relative">
-            <pre className={cn("bg-card raised overflow-x-auto rounded-xl p-4 font-mono text-code leading-relaxed", !key && "text-muted-foreground")}>{snippet}</pre>
-            <Button size="sm" variant="outline" className="absolute top-2.5 right-2.5" onClick={() => copy("snippet", snippet)} disabled={!key}>
-              {copied === "snippet" ? <Check className="text-ok" /> : <Copy />}
-              {copied === "snippet" ? "Copied" : "Copy"}
-            </Button>
-          </div>
+          <AnimatedTabs
+            ariaLabel="Client"
+            idBase="connect-client"
+            size="md"
+            className="scrollbar-none mb-3 max-w-full overflow-x-auto"
+            value={client}
+            onChange={setClient}
+            items={CLIENTS.map((x) => ({ value: x.id, label: x.label }))}
+          />
+          <TabPanel value={client} order={CLIENT_ORDER} idBase="connect-client">
+            <p className="text-muted-foreground mb-2 text-meta">{c.how}</p>
+            <div className="relative">
+              <pre className={cn("bg-card raised overflow-x-auto rounded-xl p-4 font-mono text-code leading-relaxed", !key && "text-muted-foreground")}>{snippet}</pre>
+              <Button size="sm" variant="outline" className="absolute top-2.5 right-2.5" onClick={() => copy("snippet", snippet)} disabled={!key}>
+                {copied === "snippet" ? <Check className="text-ok" /> : <Copy />}
+                {copied === "snippet" ? "Copied" : "Copy"}
+              </Button>
+            </div>
+          </TabPanel>
           <p className="text-faint mt-2 text-micro">
             Endpoint <code className="font-mono">{mcpUrl}</code> · header <code className="font-mono">Authorization: Bearer &lt;key&gt;</code>
           </p>

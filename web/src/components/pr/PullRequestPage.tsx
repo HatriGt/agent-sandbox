@@ -8,7 +8,7 @@
  * can be pasted to someone else.
  *
  * The layout follows the console's own pages (Fleet, the thread header): a left-aligned h1 with a
- * tinted state pill and stamp-set machine data underneath, filter-chip section pills, hairline
+ * tinted state pill and stamp-set machine data underneath, sliding-pill section tabs, hairline
  * divide-y cards, dashed empty states. No hero, one accent at a time, motion only where state moves.
  */
 import * as React from "react";
@@ -23,10 +23,12 @@ import { cn } from "@/lib/utils";
 import { DiffView } from "@/components/thread/FilePane";
 import { Bar } from "@/components/thread/Skeletons";
 import { Markdown } from "@/components/ui/markdown";
+import { AnimatedTabs, TabPanel } from "@/components/ui/animated-tabs";
 import { ApproveControl, CommentComposer, LifecycleControl, MergeControl, PolicyRescue } from "./PullActions";
 import { reviewLabel, verdict, type MergeMethod, type Verdict } from "./verdict";
 
 type Tab = "conversation" | "commits" | "files" | "checks";
+const TABS: readonly Tab[] = ["conversation", "commits", "files", "checks"];
 
 export function PullRequestPage({ session, repo, number }: { session: string; repo: string; number: number }) {
   const go = useGo();
@@ -124,12 +126,20 @@ export function PullRequestPage({ session, repo, number }: { session: string; re
         {pr && <ActionBar pr={pr} v={v} session={session} repo={repo} number={number} onChanged={() => void load()} />}
 
         {/* ---- section pills, the Fleet filter-chip idiom ---- */}
-        <div role="tablist" aria-label="Pull request sections" className="scrollbar-none mt-6 mb-3 flex items-center gap-1 overflow-x-auto">
-          <SectionChip on={tab === "conversation"} onClick={() => setTab("conversation")} icon={MessageSquare} label="Conversation" count={pr ? (pr.comments?.length ?? 0) + 1 : undefined} />
-          <SectionChip on={tab === "commits"} onClick={() => setTab("commits")} icon={GitCommitHorizontal} label="Commits" count={pr?.commits?.length} />
-          <SectionChip on={tab === "files"} onClick={() => setTab("files")} icon={FileDiff} label="Files changed" count={pr?.files?.length} />
-          <SectionChip on={tab === "checks"} onClick={() => setTab("checks")} icon={ShieldCheck} label="Checks" count={pr?.checkRuns?.length} />
-        </div>
+        <AnimatedTabs
+          ariaLabel="Pull request sections"
+          idBase="pr-section"
+          size="md"
+          className="scrollbar-none mt-6 mb-3 max-w-full overflow-x-auto"
+          value={tab}
+          onChange={setTab}
+          items={[
+            { value: "conversation", icon: <MessageSquare className="size-3.5" aria-hidden />, label: "Conversation", badge: <Count n={pr ? (pr.comments?.length ?? 0) + 1 : undefined} /> },
+            { value: "commits", icon: <GitCommitHorizontal className="size-3.5" aria-hidden />, label: "Commits", badge: <Count n={pr?.commits?.length} /> },
+            { value: "files", icon: <FileDiff className="size-3.5" aria-hidden />, label: "Files changed", badge: <Count n={pr?.files?.length} /> },
+            { value: "checks", icon: <ShieldCheck className="size-3.5" aria-hidden />, label: "Checks", badge: <Count n={pr?.checkRuns?.length} /> },
+          ]}
+        />
 
         {!pr ? (
           <div className="overflow-hidden rounded-xl border">
@@ -141,14 +151,18 @@ export function PullRequestPage({ session, repo, number }: { session: string; re
               </div>
             ))}
           </div>
-        ) : tab === "conversation" ? (
-          <Conversation pr={pr} session={session} repo={repo} number={number} onPosted={() => void load()} />
-        ) : tab === "commits" ? (
-          <Commits pr={pr} repo={repo} />
-        ) : tab === "files" ? (
-          <Files pr={pr} />
         ) : (
-          <Checks pr={pr} />
+          <TabPanel value={tab} order={TABS} idBase="pr-section">
+            {tab === "conversation" ? (
+              <Conversation pr={pr} session={session} repo={repo} number={number} onPosted={() => void load()} />
+            ) : tab === "commits" ? (
+              <Commits pr={pr} repo={repo} />
+            ) : tab === "files" ? (
+              <Files pr={pr} />
+            ) : (
+              <Checks pr={pr} />
+            )}
+          </TabPanel>
         )}
       </div>
     </div>
@@ -166,26 +180,10 @@ function StatusPill({ v }: { v: Verdict }) {
   );
 }
 
-/** A section switcher in the Fleet's FilterChip shape: pill, count badge, active = inked. */
-function SectionChip({ on, onClick, icon: Icon, label, count }: { on: boolean; onClick: () => void; icon: React.ComponentType<{ className?: string; "aria-hidden"?: boolean }>; label: string; count?: number }) {
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={on}
-      onClick={onClick}
-      className={cn(
-        "flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-full border px-3 text-meta font-medium transition-[background-color,border-color,color,transform] duration-150",
-        on ? "border-foreground/20 bg-foreground text-background" : "bg-card text-muted-foreground hover:text-foreground hover:border-line-strong active:scale-[0.97]"
-      )}
-    >
-      <Icon className="size-3.5" aria-hidden />
-      {label}
-      {count !== undefined && (
-        <span className={cn("tabular rounded-full px-1.5 py-px text-micro font-semibold", on ? "bg-background/20 text-background" : "bg-muted text-muted-foreground")}>{count}</span>
-      )}
-    </button>
-  );
+/** The count badge on a section tab; nothing until the PR has loaded. */
+function Count({ n }: { n: number | undefined }) {
+  if (n === undefined) return null;
+  return <span className="tabular bg-muted-foreground/15 text-muted-foreground ml-0.5 rounded-full px-1.5 py-px text-micro font-semibold">{n}</span>;
 }
 
 /** Merge (or the reason you can't), approve, and the lifecycle verbs, in one band under the header. */

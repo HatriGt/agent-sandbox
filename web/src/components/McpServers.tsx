@@ -6,6 +6,7 @@ import { api, type McpServersResponse, type McpServerView, type McpTransport } f
 import { useCached } from "@/lib/cache";
 import { BrandGlyph } from "@/lib/brandIcon";
 import { Button } from "@/components/ui/button";
+import { AnimatedTabs } from "@/components/ui/animated-tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Bar } from "@/components/thread/Skeletons";
 import { JsonEditor, jsonErrorLine } from "@/components/JsonEditor";
@@ -76,15 +77,27 @@ export function McpServers() {
                   </button>
                 )}
               </label>
-              <Segmented value={filter} onChange={setFilter} options={[["all", "All"], ["on", "On"], ["off", "Off"]]} />
+              <AnimatedTabs
+                ariaLabel="Filter by state"
+                className="h-8"
+                value={filter}
+                onChange={setFilter}
+                items={[
+                  { value: "all", label: "All" },
+                  { value: "on", label: "On" },
+                  { value: "off", label: "Off" },
+                ]}
+              />
             </>
           )}
-          <Segmented
+          <AnimatedTabs
+            ariaLabel="View"
+            className="h-8"
             value={view}
             onChange={setView}
-            options={[
-              ["list", <><List className="size-3.5" /> List</>],
-              ["json", <><Braces className="size-3.5" /> JSON</>],
+            items={[
+              { value: "list", icon: <List className="size-3.5" />, label: "List" },
+              { value: "json", icon: <Braces className="size-3.5" />, label: "JSON" },
             ]}
           />
           {view === "list" && (
@@ -147,18 +160,6 @@ export function McpServers() {
         </div>
       )}
     </section>
-  );
-}
-
-function Segmented<T extends string>({ value, onChange, options }: { value: T; onChange: (v: T) => void; options: [T, React.ReactNode][] }) {
-  return (
-    <div role="radiogroup" className="bg-muted inline-flex h-8 items-center gap-0.5 rounded-md p-0.5">
-      {options.map(([k, label]) => (
-        <button key={k} type="button" role="radio" aria-checked={value === k} onClick={() => onChange(k)} className={cn("flex h-7 cursor-pointer items-center gap-1.5 rounded px-2.5 text-micro font-medium transition-colors", value === k ? "bg-card text-foreground shadow-e1" : "text-muted-foreground hover:text-foreground")}>
-          {label}
-        </button>
-      ))}
-    </div>
   );
 }
 
@@ -334,13 +335,7 @@ function ServerEditor({ initial, onMutate, onDone }: { initial?: McpServerView; 
           </div>
         </Field>
         <Field label="Transport">
-          <div role="radiogroup" className="bg-muted inline-flex h-9 items-center gap-0.5 rounded-md p-0.5">
-            {(["stdio", "http", "sse"] as McpTransport[]).map((t) => (
-              <button key={t} type="button" role="radio" aria-checked={type === t} onClick={() => setType(t)} className={cn("h-8 cursor-pointer rounded px-3 text-meta font-medium", type === t ? "bg-card text-foreground shadow-e1" : "text-muted-foreground")}>
-                {t}
-              </button>
-            ))}
-          </div>
+          <AnimatedTabs ariaLabel="Transport" size="md" value={type} onChange={setType} items={(["stdio", "http", "sse"] as McpTransport[]).map((t) => ({ value: t, label: t }))} />
         </Field>
       </div>
 

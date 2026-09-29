@@ -730,7 +730,7 @@ export function Thread({
             <AnimatePresence initial={false}>
               {pendingReplies.map((r, i) => (
                 <Rise key={`reply-${i}`} still={still}>
-                  <YouItem text={r} />
+                  <YouItem text={r} noEnter />
                 </Rise>
               ))}
             </AnimatePresence>
@@ -1030,7 +1030,9 @@ function sentence(s: string): string {
 /**
  * A transient thread row (pending reply, queued message, aside): rises into place on arrival and
  * folds away on exit so its neighbours glide rather than jump. Transform/opacity plus a height
- * collapse on exit only; reduced motion keeps a plain fade.
+ * collapse on exit only; reduced motion keeps a plain fade. The column's gap-5 is not ours to
+ * animate, so the exit also pulls marginBottom to -gap: the row's slot AND its gap close together
+ * instead of the gap snapping shut when the node finally unmounts.
  */
 function Rise({ still, children }: { still: boolean | null; children: React.ReactNode }) {
   return (
@@ -1038,7 +1040,7 @@ function Rise({ still, children }: { still: boolean | null; children: React.Reac
       layout={still ? false : "position"}
       initial={still ? { opacity: 0 } : { opacity: 0, y: 10, scale: 0.98 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={still ? { opacity: 0 } : { opacity: 0, scale: 0.98, height: 0, marginTop: 0, marginBottom: 0 }}
+      exit={still ? { opacity: 0 } : { opacity: 0, scale: 0.98, height: 0, marginTop: 0, marginBottom: "-1.25rem" }}
       transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
       style={{ transformOrigin: "100% 100%" }}
       className="min-w-0"

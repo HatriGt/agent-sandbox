@@ -328,8 +328,10 @@ export function SendBar({
       {/* Same column as the conversation and the changes dock: max-w-3xl with the same inner gutter. */}
       <div className="relative mx-auto min-w-0 max-w-3xl px-3 md:px-6">
         <VoicePill state={voice.state} interim={voice.interim} />
-        {mention && <MentionMenu session={boxName} repos={repos} state={mention} onPick={pickFile} onClose={() => setMention(null)} />}
-        {!mention && slash && <SkillMenu state={slash} onPick={pickSkill} onClose={() => setSlash(null)} onMatches={setSlashMatches} />}
+        <AnimatePresence>
+          {mention && <MentionMenu key="mention" session={boxName} repos={repos} state={mention} onPick={pickFile} onClose={() => setMention(null)} />}
+          {!mention && slash && <SkillMenu key="skill" state={slash} onPick={pickSkill} onClose={() => setSlash(null)} onMatches={setSlashMatches} />}
+        </AnimatePresence>
         <PromptInput
           value={value}
           onValueChange={(v) => {
@@ -363,8 +365,10 @@ export function SendBar({
             addImages(e.dataTransfer.files);
           }}
         >
+          {/* Chip rows stay mounted through their own exit: the last chip used to vanish with the row. */}
+          <AnimatePresence initial={false}>
           {images.length > 0 && (
-            <div className="flex flex-wrap gap-2 px-2 pt-1.5" onClick={(e) => e.stopPropagation()}>
+            <ChipRow key="images" still={still} className="flex flex-wrap gap-2 px-2 pt-1.5">
               <AnimatePresence initial={false} mode="popLayout">
               {images.map((img) => (
                 <motion.span key={img.id} {...chipMotion(still)} className="group relative block size-16 overflow-hidden rounded-md border" title={img.name}>
@@ -383,18 +387,20 @@ export function SendBar({
                 </motion.span>
               ))}
               </AnimatePresence>
-            </div>
+            </ChipRow>
           )}
           {skill && (
-            <div className="flex flex-wrap gap-1.5 px-2 pt-1.5" onClick={(e) => e.stopPropagation()}>
+            <ChipRow key="skill" still={still} className="flex flex-wrap gap-1.5 px-2 pt-1.5">
               <SkillChip skill={skill} onRemove={() => setSkill(null)} />
-            </div>
+            </ChipRow>
           )}
+          </AnimatePresence>
           <label htmlFor="send-input" className="sr-only">
             {toAgent ? "Message the agent" : "Ask a side question about this run"}
           </label>
+          <AnimatePresence initial={false}>
           {files.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 px-2 pt-1.5" onClick={(e) => e.stopPropagation()}>
+            <ChipRow key="files" still={still} className="flex flex-wrap gap-1.5 px-2 pt-1.5">
               <AnimatePresence initial={false} mode="popLayout">
               {files.map((f) => {
                 const base = f.slice(f.lastIndexOf("/") + 1);
@@ -416,8 +422,9 @@ export function SendBar({
                 );
               })}
               </AnimatePresence>
-            </div>
+            </ChipRow>
           )}
+          </AnimatePresence>
           <PromptInputTextarea
             id="send-input"
             className="px-2.5 pt-2 text-body"
@@ -580,6 +587,26 @@ function chipMotion(still: boolean | null) {
     exit: still ? { opacity: 0 } : { opacity: 0, scale: 0.85 },
     transition: { duration: 0.18, ease: [0.22, 1, 0.36, 1] as const },
   };
+}
+
+/**
+ * A row of chips that folds open when the first chip lands and closes when the last one goes. The
+ * row animates its own height/opacity, so the presence wrapper keeps it (and its last chip) around
+ * for the exit instead of unmounting the row the instant it empties.
+ */
+function ChipRow({ still, className, children }: { still: boolean | null; className: string; children: React.ReactNode }) {
+  return (
+    <motion.div
+      initial={still ? { opacity: 0 } : { height: 0, opacity: 0 }}
+      animate={still ? { opacity: 1 } : { height: "auto", opacity: 1 }}
+      exit={still ? { opacity: 0 } : { height: 0, opacity: 0 }}
+      transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+      className="overflow-hidden"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className={className}>{children}</div>
+    </motion.div>
+  );
 }
 
 function ModeChip({

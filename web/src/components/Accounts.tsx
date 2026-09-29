@@ -5,6 +5,7 @@ import { api, type AccountView } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { AnimatedTabs, TabPanel } from "@/components/ui/animated-tabs";
 import { Bar } from "@/components/thread/Skeletons";
 import { cn } from "@/lib/utils";
 import { useCached } from "@/lib/cache";
@@ -172,32 +173,36 @@ function AccountRow({ account: a, onChanged }: { account: AccountView; onChanged
   );
 }
 
+type AddMode = "oauth" | "pat";
+const ADD_MODES: readonly AddMode[] = ["oauth", "pat"];
+
 function AddAccount({ oauth, onDone }: { oauth: boolean; onDone: (list: AccountView[]) => void }) {
-  const [mode, setMode] = React.useState<"oauth" | "pat">(oauth ? "oauth" : "pat");
+  const [mode, setMode] = React.useState<AddMode>(oauth ? "oauth" : "pat");
   return (
     <div>
       {oauth && (
-        <div role="tablist" className="bg-muted mb-5 inline-flex h-9 items-center gap-0.5 rounded-md p-0.5">
-          <Tab active={mode === "oauth"} onClick={() => setMode("oauth")} icon={<Github className="size-3.5" />} label="Sign in with GitHub" />
-          <Tab active={mode === "pat"} onClick={() => setMode("pat")} icon={<KeyRound className="size-3.5" />} label="Paste a token" />
-        </div>
+        <AnimatedTabs
+          ariaLabel="How to add the account"
+          idBase="add-account"
+          size="md"
+          className="mb-5"
+          value={mode}
+          onChange={setMode}
+          items={[
+            { value: "oauth", icon: <Github className="size-3.5" />, label: "Sign in with GitHub" },
+            { value: "pat", icon: <KeyRound className="size-3.5" />, label: "Paste a token" },
+          ]}
+        />
       )}
-      {mode === "oauth" ? <DeviceFlow onDone={onDone} /> : <PatForm onDone={onDone} />}
+      <TabPanel value={mode} order={ADD_MODES} idBase={oauth ? "add-account" : undefined}>
+        {mode === "oauth" ? <DeviceFlow onDone={onDone} /> : <PatForm onDone={onDone} />}
+      </TabPanel>
       {!oauth && (
         <p className="text-muted-foreground mt-5 text-micro">
           Prefer one-click sign-in? Set <code className="font-mono">GITHUB_OAUTH_CLIENT_ID</code> on the controller (a GitHub OAuth App with device flow; no secret needed).
         </p>
       )}
     </div>
-  );
-}
-
-function Tab({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string }) {
-  return (
-    <button type="button" role="tab" aria-selected={active} onClick={onClick} className={cn("flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-3 text-meta font-medium", active ? "bg-card text-foreground shadow-e1" : "text-muted-foreground hover:text-foreground")}>
-      {icon}
-      {label}
-    </button>
   );
 }
 

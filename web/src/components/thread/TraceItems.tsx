@@ -670,8 +670,11 @@ export function WorkingIndicator({ label = "Working", detail }: { label?: string
  * When `onRevert` is set, hovering the row reveals a ⟲ control BEFORE the bubble (left of it,
  * fading in like the output-panel copy button): revert the box to the state before this message
  * was delivered. Confirmation happens upstream (Thread owns the dialog).
+ *
+ * `noEnter` drops the CSS entrance for callers that animate the row in themselves (Thread's `Rise`
+ * around pending replies) — otherwise the bubble would rise twice.
  */
-export function YouItem({ text, label = "You", onRevert, at }: { text: string; label?: string; onRevert?: () => void; at?: number }) {
+export function YouItem({ text, label = "You", onRevert, at, noEnter = false }: { text: string; label?: string; onRevert?: () => void; at?: number; noEnter?: boolean }) {
   // Image attachments ride in the message as in-box paths; show them as thumbnails, not as text.
   const attachments = React.useMemo(() => [...new Set(text.match(ATTACHMENT_RE) ?? [])], [text]);
   const body = React.useMemo(() => (attachments.length ? text.replace(/\n*Attached images? \(open with the Read tool\):[\s\S]*$/, "").trim() : text), [text, attachments.length]);
@@ -680,7 +683,7 @@ export function YouItem({ text, label = "You", onRevert, at }: { text: string; l
   const skillName = skillMatch?.[1] ?? null;
   const rest = skillMatch ? (skillMatch[2] ?? "").trim() : body;
   return (
-    <div className="enter group/you flex flex-col items-end gap-1.5">
+    <div className={cn(!noEnter && "enter", "group/you flex flex-col items-end gap-1.5")}>
       <span className="label text-muted-foreground flex items-center gap-1.5 pr-1">
         {/* The time sits BEFORE the label so the label keeps its right edge; hover-revealed like revert. */}
         {at !== undefined && (
