@@ -93,3 +93,26 @@ test("OMP_SYS_PROMPT keeps the question-file protocol and the security rules", (
   assert.doesNotMatch(OMP_SYS_PROMPT, /claude -c/, "no Claude-specific resume mechanics leak into omp's prompt");
   assert.doesNotMatch(OMP_SYS_PROMPT, /TodoWrite/);
 });
+
+test("npxPackagesOf: extracts installable specs, skips URLs/paths/non-npx", async () => {
+  const { npxPackagesOf } = await import("../src/msb.js");
+  const conf = {
+    mcpServers: {
+      a: { type: "stdio", command: "npx", args: ["-y", "@cap-js/mcp-server"] },
+      b: { type: "stdio", command: "npx", args: ["chrome-devtools-mcp@latest"] },
+      c: { type: "stdio", command: "npx", args: ["-y", "mcp-remote", "https://mcp.example/mp"] },
+      d: { type: "stdio", command: "node", args: ["server.js"] },
+      e: { type: "http", url: "https://x" },
+      f: { type: "stdio", command: "npx", args: ["-y", "./local/dir"] },
+    },
+  };
+  const specs = npxPackagesOf(conf).sort();
+  if (JSON.stringify(specs) !== JSON.stringify(["@cap-js/mcp-server", "chrome-devtools-mcp@latest", "mcp-remote"])) {
+    throw new Error("unexpected specs: " + JSON.stringify(specs));
+  }
+});
+
+test("agentSh omp filters ALL MCP warnings from the transcript stderr", () => {
+  const sh = agentSh("/workspace", false, "omp");
+  if (!sh.includes("grep -vE") || !sh.includes("^Warning: MCP server ")) throw new Error("stderr filter missing/narrow");
+});

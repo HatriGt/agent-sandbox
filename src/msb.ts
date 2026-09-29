@@ -1290,6 +1290,24 @@ const OMP_MCP_CONFIG_PATH = "/root/.omp/agent/mcp.json";
  * writing both keeps a thread honest if the box is ever probed by the other agent's tooling.
  * Best-effort: an MCP misconfiguration must never block a run.
  */
+/**
+ * The npm packages the config's `npx …` stdio servers will run, so they can be pre-installed.
+ * `npx -y` downloads the package on FIRST use — in a cold box that download races the agent's MCP
+ * startup timeout and loses ("not ready after 30000ms", measured live with omp's 30s cap). A global
+ * pre-install puts the bin on PATH, so npx starts it instantly. Pure and exported for tests.
+ */
+export function npxPackagesOf(conf: { mcpServers: Record<string, unknown> }): string[] {
+  const specs = new Set<string>();
+  for (const s of Object.values(conf.mcpServers) as Array<{ type?: string; command?: string; args?: string[] }>) {
+    if (s?.type !== "stdio" || s.command !== "npx") continue;
+    const spec = (s.args ?? []).find((a) => a && !a.startsWith("-"));
+    // Only things that look like npm package specs — an npx arg that is a URL or path is the
+    // server's OWN argument (e.g. `npx mcp-remote https://…`), never something to install.
+    if (spec && /^(@[\w.-]+\/)?[\w.-]+(@[\w.^~-]+)?$/.test(spec) && !/^https?:/.test(spec)) specs.add(spec);
+  }
+  return [...specs];
+}
+
 export async function installMcpConfig(cfg: Config, box: string): Promise<void> {
   try {
     const conf = toClaudeMcpConfig(await loadMcpStore(cfg));
@@ -1304,6 +1322,20 @@ export async function installMcpConfig(cfg: Config, box: string): Promise<void> 
       `printf '%s' ${shellQuote(json)} > ${MCP_CONFIG_PATH} && chmod 600 ${MCP_CONFIG_PATH} && ` +
         `mkdir -p /root/.omp/agent && printf '%s' ${shellQuote(json)} > ${OMP_MCP_CONFIG_PATH} && chmod 600 ${OMP_MCP_CONFIG_PATH}`
     );
+    // Pre-install the npx-served packages (presence-guarded: a bare-name bin check makes repeat
+    // runs a no-op). Best-effort with its own generous timeout — a registry hiccup must never
+    // block the run; the affected server just falls back to npx's own download.
+    const specs = npxPackagesOf(conf);
+    if (specs.length) {
+      const steps = specs.map((spec) => {
+        // Package NAME for the presence check: the spec minus any trailing @version (the leading
+        // @scope survives because only an "@" after index 0 is a version separator).
+        const at = spec.indexOf("@", 1);
+        const name = at > 0 ? spec.slice(0, at) : spec;
+        return `npm ls -g --depth=0 ${shellQuote(name)} >/dev/null 2>&1 || npm i -g ${shellQuote(spec)} >/dev/null 2>&1 || true`;
+      });
+      await exec(cfg, box, steps.join("; "), { timeoutMs: 300_000 });
+    }
   } catch (e) {
     console.error(`[mcp] could not install MCP config into ${box}:`, (e as Error).message);
   }
@@ -1387,7 +1419,7 @@ export function agentSh(workdir: string, resume: boolean, agent: AgentKind = "cl
   // with a wall of warnings on every task. They are per-run noise — the MCP settings page's Test
   // button is the diagnosis surface — so stderr is filtered before it reaches the log. Everything
   // else on stderr (real errors) still lands.
-  const ompStderr = `2> >(grep -vE '^Warning: MCP server .* failed to connect' >> ${AGENT_LOG})`;
+  const ompStderr = `2> >(grep -vE '^Warning: MCP server ' >> ${AGENT_LOG})`;
   const launch =
     agent === "omp"
       ? `${omp} ${ompStderr} | node "$HOME/.claude/omp-fmt.js" ${AGENT_LOG}; `
