@@ -268,6 +268,19 @@ export function isOrphanWarmBox(name: string, state: string, inFlight: ReadonlyS
   return !!m && nowMs - Number(m[1]) > WARM_UP_BUDGET_MS;
 }
 
+/**
+ * Wipe what the pool warm-up leaves behind before the box becomes claimable. The warm-up runs with
+ * the OPERATOR's MCP config and skills, but ANY user may claim the box. The claim rewrites the MCP
+ * config and skills for its owner, yet the servers' side effects would survive it: omp's agent.db
+ * (auth_credentials is where omp keeps MCP OAuth logins, plus the discovery cache), its logs and
+ * warm-up transcripts, the HANA client's secure store (~/.hdb), mcp-remote's OAuth dir and npm
+ * logs. Kept, because they are the point of warming: bun's transpile cache and the model catalog.
+ */
+export const OMP_WARM_SCRUB_SH =
+  "rm -rf /root/.agent-mcp.json /root/.omp/agent/mcp.json /root/.claude/skills /root/.omp/agent/agent.db* " +
+  "/root/.omp/agent/sessions /root/.omp/sessions /root/.omp/logs /root/.hdb /root/.mcp-auth /root/.npm/_logs " +
+  "/root/.local/share/chrome-devtools-mcp /workspace/* /workspace/.[!.]* /tmp/* 2>/dev/null; true";
+
 async function bootAndWarm(cfg: Config, name: string, agent: AgentKind): Promise<void> {
   await msb(cfg, [
     "run",
@@ -321,7 +334,7 @@ async function bootAndWarm(cfg: Config, name: string, agent: AgentKind): Promise
       ` -p "Reply with exactly: ok" </dev/null >/dev/null 2>&1`;
     const warm =
       `mkdir -p /workspace && cd /workspace && ${ompSeedSh()} && { ${oneShot}; ${oneShot}; }; ` +
-      `rm -rf /root/.omp/sessions 2>/dev/null; true`;
+      `${OMP_WARM_SCRUB_SH}`;
     // Generous budget: the warm-up one-shot IS the ~50s cold start being absorbed — a timeout that
     // kills it mid-flight (the first version's 150s did, together with a cache-priming find) just
     // moves the cost back onto the user's first task.
@@ -568,7 +581,7 @@ export function ompImageDockerfile(cfg: Config, base: string, npx: string[]): st
     "if grep -q avx2 /proc/cpuinfo; then rm -f /usr/local/install/global/node_modules/@oh-my-pi/pi-natives-linux-x64/*-baseline.node; " +
       "rm -rf /usr/local/lib/node_modules/*/node_modules/@oven/bun-linux-x64-baseline; fi",
     "npm cache clean --force >/dev/null 2>&1 || true",
-    "rm -rf /usr/local/install/cache /root/.bun/install/cache /root/.cache /root/.npm /tmp/* /var/lib/apt/lists/* /var/cache/apt/*",
+    "rm -rf /usr/local/install/cache /root/.bun/install/cache /root/.cache /root/.npm /root/.hdb /tmp/* /var/lib/apt/lists/* /var/cache/apt/*",
     "claude --version",
     "omp --version",
   ];

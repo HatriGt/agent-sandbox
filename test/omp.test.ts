@@ -270,3 +270,24 @@ test("ompImageDockerfile: one layer FROM the pinned base, toolchain + MCP packag
   assert.match(df, /omp --version/);
   assert.throws(() => ompImageDockerfile({ claudeCodeVersion: "2.1.273", ompVersion: "latest" } as never, "node\nRUN evil", []));
 });
+
+test("the pool warm-up leaves no operator state behind for whichever user claims the box", async () => {
+  const { OMP_WARM_SCRUB_SH } = await import("../src/msb.js");
+  // Everything the operator-config warm-up writes that is credential- or identity-bearing: the MCP
+  // configs, skills, omp's auth/state db, logs and transcripts, the HANA client store, MCP OAuth.
+  for (const p of [
+    "/root/.agent-mcp.json",
+    "/root/.omp/agent/mcp.json",
+    "/root/.claude/skills",
+    "/root/.omp/agent/agent.db",
+    "/root/.omp/agent/sessions",
+    "/root/.omp/logs",
+    "/root/.hdb",
+    "/root/.mcp-auth",
+    "/root/.npm/_logs",
+  ]) {
+    assert.ok(OMP_WARM_SCRUB_SH.includes(p), `scrub must remove ${p}`);
+  }
+  // The caches that ARE the warm-up's point survive: bun's transpile cache and the model catalog.
+  assert.doesNotMatch(OMP_WARM_SCRUB_SH, /\.bun|models\.db/);
+});
