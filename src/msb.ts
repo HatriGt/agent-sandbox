@@ -576,7 +576,14 @@ export const OMP_SYS_PROMPT =
   "log, or transmit them, and never write a secret value into the question file. " +
   "Never read, print, or modify /workspace/.agent.* files — they are the controller's channel, not " +
   "context. Prefer GFM markdown tables for tabular facts and fenced ```chart/```stats/```tree/" +
-  "```tests blocks where they genuinely fit — the caller's console renders them richly.";
+  "```tests blocks where they genuinely fit — the caller's console renders them richly. " +
+  // omp discovers ~/.claude/skills natively (verified live), but without this nudge the model never
+  // consults them — a live run asked the caller for credentials a synced skill already wrapped.
+  "SKILLS: the caller may have installed skills (reusable playbooks); they are available to you. " +
+  "BEFORE asking the caller for access, credentials, or procedures, check whether an available " +
+  "skill covers the task — skills often wrap exactly the access you would otherwise ask for. When " +
+  "a message starts with /<skill-name> matching an available skill, invoke that skill and follow " +
+  "it for the rest of the message; otherwise use a skill whenever its description matches the task.";
 
 function agentEnvFlags(
   cfg: Config,

@@ -17,8 +17,23 @@
 const GH_AUTH_RE =
   /\b(GH_TOKEN|GITHUB_TOKEN|gh auth login|gh auth|GitHub (auth|credential|token|PAT|personal access token)|authenticate (to|with) GitHub|hosts\.yml)\b/i;
 
+/**
+ * The question must actually ASK for GitHub auth, not merely mention the env vars. Live incident:
+ * an agent asking where some application logs lived listed "the only credentials available are
+ * GitHub tokens (GH_TOKEN/GITHUB_TOKEN)" among its context lines — the broker pattern-matched the
+ * mention, hijacked the question with "GitHub credentials are available again", and burned a turn
+ * answering something nobody asked. So: a lack/failure word must appear too…
+ */
+const GH_NEED_RE =
+  /\b(need(s|ed)?|missing|not set|unset|lost|re-?export|provide|supply|expired|invalid|revoked|denied|fail(s|ed|ing)?|401|403|unauthori[sz]ed|forbidden|login required|requires?|re-?authenticate|no (github )?(token|credential|auth))\b/i;
+
+/** …and a question that says the tokens ARE present is never an auth ask, whatever else it contains. */
+const GH_HAVE_RE =
+  /\bonly credentials? available\b|\bcredentials? available are github\b|\b(GH_TOKEN|GITHUB_TOKEN|github tokens?)\b[^.!?\n]{0,60}\b(are|is)\b[^.!?\n]{0,40}\b(available|set|present|working|injected)\b/i;
+
 export function isGithubAuthQuestion(question: string | undefined): boolean {
-  return !!question && GH_AUTH_RE.test(question);
+  if (!question) return false;
+  return GH_AUTH_RE.test(question) && GH_NEED_RE.test(question) && !GH_HAVE_RE.test(question);
 }
 
 export function brokerAnswer(login: string): string {

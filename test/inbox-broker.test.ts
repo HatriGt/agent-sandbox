@@ -70,6 +70,21 @@ test("broker: recognises GitHub auth questions only", () => {
   assert.ok(isGithubAuthQuestion("All gh calls fail with 'please run gh auth login'"));
   assert.equal(isGithubAuthQuestion("Should I mock the clock or widen the tolerance?"), false);
   assert.equal(isGithubAuthQuestion(undefined), false);
+  // A question that merely MENTIONS the env vars while asking about something else must not fire —
+  // live incident: the broker hijacked a "where are the QA logs?" question because its context
+  // lines listed GH_TOKEN as an available credential.
+  assert.equal(
+    isGithubAuthQuestion(
+      "Where can I read the deal QA API call logs from?\n\nThe only credentials available are GitHub tokens " +
+        "(GH_TOKEN/GITHUB_TOKEN). I have no access to logs, APM, or a gateway.\n\nOptions:\n" +
+        "- Provide an observability API (Datadog/Kibana) and the env var holding its credential (e.g. DD_API_KEY)"
+    ),
+    false
+  );
+  assert.equal(isGithubAuthQuestion("GH_TOKEN is set and working — which repo should I push to?"), false);
+  // The asks the broker exists for still fire.
+  assert.ok(isGithubAuthQuestion("I need a GitHub token with push access; set GH_TOKEN and resume."));
+  assert.ok(isGithubAuthQuestion("git push failed with 403 — provide a GitHub PAT."));
 });
 
 test("broker: answers once per (box, question) and only with a stored account", async () => {
