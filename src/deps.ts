@@ -411,6 +411,15 @@ export const deps: HandlerDeps = {
     }
 
     const id = newSessionId();
+    // Phase timings for start-latency work: one [timing] line per delegation, ms per phase.
+    const t0 = Date.now();
+    const marks: string[] = [];
+    let last = t0;
+    const mark = (label: string) => {
+      const now = Date.now();
+      marks.push(`${label}=${now - last}ms`);
+      last = now;
+    };
 
     // `creds` (owner->token/login) was resolved by the handler via resolveGitAccess (both sources).
     // Used to CLONE private repos and for the in-box per-owner git credentials, per-repo identity,
@@ -451,6 +460,7 @@ export const deps: HandlerDeps = {
       if (sessionRoot) void cleanupStaging(runCfg, sessionRoot);
       throw e;
     }
+    mark("stage");
     // Thread the name->owner map so applyGitCredentials can set per-repo identity.
     const runCreds: AgentCreds | undefined = creds ? { ...creds, repoOwners } : undefined;
 
@@ -459,6 +469,7 @@ export const deps: HandlerDeps = {
     // tier; with MSB_OMP_SNAPSHOT set, runCfg.snapshot alone would make it look eligible).
     const eligible = poolEligible(runCfg, !!allowDomains?.length) && plan.agent !== "omp";
     const { box, warm } = await acquireBox(runCfg, id, sessionRoot, eligible);
+    mark("acquire");
 
     // Operator attachments (pasted screenshots) land in the box before the agent's first tool call.
     for (const a of plan.attachments ?? []) {
@@ -478,6 +489,8 @@ export const deps: HandlerDeps = {
     // open MCP call is the "listener" — this is what makes the calling agent wait for the box
     // instead of ending its turn. A timeout returns "still working, reconnect via status".
     await runAgentTask(runCfg, box, plan.task, plan.repos, runCreds, plan.model, plan.agent);
+    mark("launch");
+    console.error(`[timing] delegate ${box} warm=${warm} total=${Date.now() - t0}ms ${marks.join(" ")}`);
     // A detached caller (the dashboard) needs only the box name — its thread view attaches over
     // SSE. Blocking its HTTP response on the wait window added ~50s of perceived start latency.
     if (interact?.detach) return { box, warm, output: "run:started — attach via status/watch" };

@@ -1658,8 +1658,11 @@ export async function runAgentTask(
   // (~60s on an omp box installing bun+omp). With the mark up early, every fleet/watch probe reads
   // a task and the dashboard renders "starting" instead. agentSh re-writes the same content on
   // launch (first-run marks), which is harmless. Best-effort: rides stdin, never argv.
+  const t0 = Date.now();
   await execWithInput(cfg, box, `cat > ${TASK_MARK}`, `${task}\n`).catch(() => {});
+  const t1 = Date.now();
   await msb(cfg, ["exec", box, ...env, "--", "sh", "-lc", bootstrapScript(cfg, agent)]);
+  const t2 = Date.now();
   // These four touch independent files (~/.git-credentials + per-repo config, ~/.claude.json,
   // /root/.agent-mcp.json, ~/.claude/skills), so they run in parallel: each is an SSH→msb→guest
   // round-trip, and serializing them was most of the delegate→first-token latency after boot.
@@ -1669,7 +1672,12 @@ export async function runAgentTask(
     installMcpConfig(cfg, box),
     installSkills(cfg, box),
   ]);
-  return msb(cfg, ["exec", box, ...env, "--", "sh", "-lc", agentSh(workdir, false, agent)]);
+  const t3 = Date.now();
+  const r = await msb(cfg, ["exec", box, ...env, "--", "sh", "-lc", agentSh(workdir, false, agent)]);
+  console.error(
+    `[timing] runAgentTask ${box} taskmark=${t1 - t0}ms bootstrap=${t2 - t1}ms prep=${t3 - t2}ms exec=${Date.now() - t3}ms`
+  );
+  return r;
 }
 
 /**

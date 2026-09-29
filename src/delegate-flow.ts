@@ -70,6 +70,7 @@ export async function runDelegateFlow(
   if (!v.ok) return { ok: false, question: v.question };
   if (input.attachments?.length) v.plan.attachments = input.attachments;
 
+  const tFlow = Date.now();
   let creds: AgentCreds | undefined;
   {
     const res = await deps.resolveGitAccess(cfg, v.plan, {
@@ -89,7 +90,9 @@ export async function runDelegateFlow(
     }
   }
 
+  const tAccess = Date.now();
   const live = await deps.countBoxes(cfg);
+  console.error(`[timing] flow access=${tAccess - tFlow}ms capacity=${Date.now() - tAccess}ms`);
   // reserveBox counts concurrent delegations that have passed this check but not yet booted, so a
   // parallel fan-out cannot overshoot MSB_MAX_BOXES between the count and the boot.
   const release = reserveBox(live, cfg.maxBoxes);
