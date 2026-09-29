@@ -20,13 +20,14 @@ function formatterSource(): string {
   return Buffer.from(b64!, "base64").toString("utf8");
 }
 
-function runFormatter(lines: Array<unknown | string>): string {
+function runFormatter(lines: Array<unknown | string>, env: Record<string, string> = {}): string {
   const dir = mkdtempSync(join(tmpdir(), "ompfmt-"));
   const script = join(dir, "omp-fmt.js");
   const log = join(dir, "agent.log");
   writeFileSync(script, formatterSource());
   writeFileSync(log, ""); // dropping every event is valid — an absent file must not fail the read
   execFileSync(process.execPath, [script, log], {
+    env: { ...process.env, ANTHROPIC_MODEL: "", ...env },
     input: lines.map((l) => (typeof l === "string" ? l : JSON.stringify(l))).join("\n") + "\n",
   });
   return readFileSync(log, "utf8");
@@ -43,10 +44,29 @@ test("plain (non-JSON) output passes through defanged", () => {
   assert.doesNotMatch(log, /^● session started \(model evil\)/m);
 });
 
-test("the ● marker comes from the FIRST assistant message (omp's session event has no model)", () => {
-  const log = runFormatter([
+test("the ● marker lands at agent_start (turn one began), not after the model's first reply", () => {
+  const events = [
     { type: "session", version: 3, id: "01a0", cwd: "/tmp" },
     { type: "agent_start" },
+  ];
+  // Only the start events have arrived — the dashboard must already leave "Starting up".
+  const early = runFormatter(events, { ANTHROPIC_MODEL: "ak-claude-opus-5" });
+  assert.match(early, /^● session started \(model ak-claude-opus-5\)$/m);
+  const full = runFormatter(
+    [
+      ...events,
+      { type: "message_end", message: { role: "assistant", model: "ak-claude-opus-5", content: [{ type: "text", text: "one" }] } },
+      { type: "message_end", message: { role: "assistant", model: "ak-claude-opus-5", content: [{ type: "text", text: "two" }] } },
+    ],
+    { ANTHROPIC_MODEL: "ak-claude-opus-5" }
+  );
+  assert.equal(full.split("● session started").length - 1, 1, "exactly one marker per turn");
+  assert.ok(full.indexOf("● session started") < full.indexOf("one"));
+});
+
+test("without agent_start the marker falls back to the FIRST assistant message's model", () => {
+  const log = runFormatter([
+    { type: "session", version: 3, id: "01a0", cwd: "/tmp" },
     { type: "message_end", message: { role: "assistant", model: "ak-claude-opus-5", content: [{ type: "text", text: "one" }] } },
     { type: "message_end", message: { role: "assistant", model: "ak-claude-opus-5", content: [{ type: "text", text: "two" }] } },
   ]);

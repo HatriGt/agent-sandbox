@@ -169,3 +169,73 @@ test("flavored pool: names, eligibility, refill reconciles both flavors", async 
   await refillPool(cfg, io as never, new Set(["claude", "omp"]) as never);
   if (JSON.stringify(boots.sort()) !== JSON.stringify(["omp"])) throw new Error("claude already ready; only omp boots: " + boots.join(","));
 });
+
+test("MCP_DIRECT_BIN_JS: installed npx servers run their bin directly; anything unmappable stays on npx", async () => {
+  const { MCP_DIRECT_BIN_JS } = await import("../src/msb.js");
+  const { mkdtempSync, mkdirSync, writeFileSync, readFileSync, statSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const { execFileSync } = await import("node:child_process");
+  const root = mkdtempSync(join(tmpdir(), "mcpbin-"));
+  const R = join(root, "node_modules");
+  const pkg = (name: string, bin: unknown, files: string[]) => {
+    const dir = join(R, name);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name, bin }));
+    for (const f of files) {
+      mkdirSync(join(dir, f, ".."), { recursive: true });
+      writeFileSync(join(dir, f), "");
+    }
+  };
+  pkg("@cap-js/mcp-server", { "mcp-server": "index.js" }, ["index.js"]);
+  pkg("chrome-devtools-mcp", "build/bin.js", ["build/bin.js"]);
+  pkg("mcp-remote", { "mcp-remote": "dist/proxy.js", "mcp-remote-client": "dist/client.js" }, ["dist/proxy.js"]);
+  pkg("multi", { a: "a.js", b: "b.js" }, ["a.js", "b.js"]);
+  pkg("ghost", { ghost: "missing.js" }, []);
+  const file = join(root, "mcp.json");
+  writeFileSync(
+    file,
+    JSON.stringify({
+      mcpServers: {
+        cds: { type: "stdio", command: "npx", args: ["-y", "@cap-js/mcp-server"] },
+        chrome: { type: "stdio", command: "npx", args: ["chrome-devtools-mcp@latest", "--headless"] },
+        remote: { type: "stdio", command: "npx", args: ["-y", "mcp-remote", "https://mcp.example/x"], env: { A: "1" } },
+        ambiguous: { type: "stdio", command: "npx", args: ["-y", "multi"] },
+        absentBin: { type: "stdio", command: "npx", args: ["-y", "ghost"] },
+        notInstalled: { type: "stdio", command: "npx", args: ["-y", "nope-mcp"] },
+        oddFlag: { type: "stdio", command: "npx", args: ["--package=x", "@cap-js/mcp-server"] },
+        http: { type: "http", url: "https://x" },
+      },
+    })
+  );
+  execFileSync(process.execPath, ["-e", MCP_DIRECT_BIN_JS, file], { env: { ...process.env, R } });
+  const s = JSON.parse(readFileSync(file, "utf8")).mcpServers;
+  assert.equal(s.cds.command, process.execPath);
+  assert.deepEqual(s.cds.args, [join(R, "@cap-js/mcp-server", "index.js")]);
+  assert.deepEqual(s.chrome.args, [join(R, "chrome-devtools-mcp", "build/bin.js"), "--headless"], "server args survive, @latest is not re-resolved");
+  assert.deepEqual(s.remote.args, [join(R, "mcp-remote", "dist/proxy.js"), "https://mcp.example/x"], "the bin named after the package wins");
+  assert.deepEqual(s.remote.env, { A: "1" });
+  for (const k of ["ambiguous", "absentBin", "notInstalled", "oddFlag"]) assert.equal(s[k].command, "npx", `${k} must stay on npx`);
+  assert.equal(s.http.url, "https://x");
+  if (process.platform !== "win32") assert.equal(statSync(file).mode & 0o777, 0o600);
+});
+
+test("omp boxes boot with 2 vCPUs, default boxes keep the runtime default", async () => {
+  const { OMP_CPUS } = await import("../src/msb.js");
+  const { ompPoolCfg } = await import("../src/pool.js");
+  assert.equal(OMP_CPUS, 2);
+  assert.equal(ompPoolCfg({ ompSnapshot: "agent-omp", ompPoolSize: 1 } as never).cpus, 2);
+});
+
+test("isOrphanWarmBox: only a stale, never-ready box this process isn't warming is reaped", async () => {
+  const { isOrphanWarmBox, WARM_UP_BUDGET_MS } = await import("../src/msb.js");
+  const now = 1_790_000_000_000;
+  const old = `pool-${now - WARM_UP_BUDGET_MS - 1000}-omp-abc`;
+  const young = `pool-${now - 60_000}-omp-abc`;
+  assert.equal(isOrphanWarmBox(old, "warming", new Set(), now), true);
+  assert.equal(isOrphanWarmBox(young, "warming", new Set(), now), false, "a warm-up still inside its budget is left alone");
+  assert.equal(isOrphanWarmBox(old, "warming", new Set([old]), now), false, "our own in-flight warm-up is never reaped");
+  assert.equal(isOrphanWarmBox(old, "free", new Set(), now), false);
+  assert.equal(isOrphanWarmBox(old, "claimed", new Set(), now), false, "a claimed run is never touched");
+  assert.equal(isOrphanWarmBox("pool-x-omp-abc", "warming", new Set(), now), false, "undatable names are left alone");
+});

@@ -150,6 +150,7 @@ export async function createBox(cfg: Config, opts: CreateBoxOpts): Promise<void>
     // what -m says. Pin the ceiling to the cap so the meters show the real limit.
     "--max-memory",
     cfg.memory,
+    ...cpuFlags(cfg),
     // Same story for the root disk: without --root-disk every box gets the runtime's default 4G
     // volume and the disk meter reads "of 3.9 GB". Boxes start at cfg.rootDisk (default 1G) and
     // the operator grows from there (msb modify --root-disk is grow-only). Snapshot boots skip
@@ -240,6 +241,34 @@ export async function bootWarmBox(cfg: Config, agent: AgentKind = "claude"): Pro
   // Flavor rides in the NAME (pool-<ts>-omp-<rand>) so every prefix/age-based pool mechanism
   // covers both flavors unchanged. Callers pass the flavored cfg (ompPoolCfg) for omp boots.
   const name = `${POOL_PREFIX}${Date.now()}-${agent === "omp" ? "omp-" : ""}${Math.random().toString(36).slice(2, 8)}`;
+  warming.add(name);
+  try {
+    await bootAndWarm(cfg, name, agent);
+  } finally {
+    warming.delete(name);
+  }
+  return name;
+}
+
+/**
+ * Pool boxes THIS process is booting/warming. A box whose warm-up was cut off (controller restart
+ * mid-warm-up) never gets /.ready, so it is neither claimable nor counted by the refill — which
+ * boots a replacement and leaves the half-warmed box running (2G RAM) until its max-duration.
+ * listPoolBoxes reaps such orphans; this set plus the age floor keeps it off live warm-ups.
+ */
+const warming = new Set<string>();
+
+/** Longer than any bootWarmBox run (boot + bootstrap + MCP/skills + the 360s warm-up exec). */
+export const WARM_UP_BUDGET_MS = 12 * 60_000;
+
+/** A running, unclaimed, never-ready pool box that is past the warm-up budget and not ours. Pure. */
+export function isOrphanWarmBox(name: string, state: string, inFlight: ReadonlySet<string>, nowMs = Date.now()): boolean {
+  if (state !== "warming" || inFlight.has(name)) return false;
+  const m = name.match(/^pool-(\d+)-/);
+  return !!m && nowMs - Number(m[1]) > WARM_UP_BUDGET_MS;
+}
+
+async function bootAndWarm(cfg: Config, name: string, agent: AgentKind): Promise<void> {
   await msb(cfg, [
     "run",
     "-d",
@@ -249,6 +278,7 @@ export async function bootWarmBox(cfg: Config, agent: AgentKind = "claude"): Pro
     cfg.memory,
     "--max-memory",
     cfg.memory, // pin the hotplug ceiling too, or metrics report the default 4G as the total
+    ...cpuFlags(cfg),
     // No --root-disk: pool boxes always boot --from-snapshot, and the snapshot carries its own
     // rootfs size (pinned at bake time in createBareBox) — see createBox.
     ...egressFlags(cfg, true), // pooled boxes always boot with open egress
@@ -297,7 +327,6 @@ export async function bootWarmBox(cfg: Config, agent: AgentKind = "claude"): Pro
   // box whose (multi-minute, for omp) warm-up is still running — that race put the whole cold
   // start back on the user's first task while the pool claimed to be "warm".
   await exec(cfg, name, "touch /.ready");
-  return name;
 }
 
 /**
@@ -385,8 +414,13 @@ export async function listPoolBoxes(cfg: Config): Promise<string[]> {
       // Free = unclaimed AND finished its boot-time warm-up (/.ready is bootWarmBox's LAST step).
       // Without the readiness gate a box was claimable seconds after boot, mid-warm-up, and the
       // user's first task paid the whole cold start the pool exists to hide.
-      const r = await exec(cfg, box, 'if [ -f /.claimed ] || [ ! -f /.ready ]; then echo claimed; else echo free; fi');
-      if (r.stdout.trim().endsWith("free")) available.push(box);
+      const r = await exec(cfg, box, 'if [ -f /.claimed ]; then echo claimed; elif [ ! -f /.ready ]; then echo warming; else echo free; fi');
+      const state = r.stdout.trim().split(/\s+/).pop() ?? "";
+      if (state === "free") available.push(box);
+      else if (isOrphanWarmBox(box, state, warming)) {
+        console.error(`[pool] reaping orphaned warm-up ${box} (never became ready; its warm-up was cut off)`);
+        await forceRemoveBox(cfg, box);
+      }
     } catch {
       // Not execable despite a Running status => wedged; reap it so refill can recreate.
       console.error(`[pool] reaping unexecable box ${box}`);
@@ -798,6 +832,18 @@ export const OMP_MIN_DISK = "4G";
 export const OMP_MIN_MEMORY = "2G";
 
 /**
+ * vCPUs an omp box boots with. omp's headless start waits for EVERY MCP server before turn one,
+ * and on the default single vCPU the ~8 server processes spawning at once serialized behind each
+ * other: time-to-first-turn on a hot box measured 6.3s at 1 vCPU vs 3.7-4.3s at 2. vCPUs are
+ * threads, not reserved cores, so an idle warm box costs the host nothing extra.
+ */
+export const OMP_CPUS = 2;
+
+function cpuFlags(cfg: Config): string[] {
+  return cfg.cpus && cfg.cpus > 0 ? ["-c", String(cfg.cpus)] : [];
+}
+
+/**
  * Parse the kind mark defensively: it sits in the agent-writable workspace, so only a clean
  * single-token "omp" is trusted; anything else (missing, claude, corruption) is claude — the agent
  * every box can run.
@@ -1190,6 +1236,12 @@ export function ompFmtScript(): string {
     `if(/^[\\[{]/.test(line.trim())){try{e=JSON.parse(line)}catch(_){e=null}}` +
     `if(!e||typeof e!=="object"||Array.isArray(e)||!e.type){w(df(line));return}` +
     `try{const t=String(e.type);` +
+    // The marker goes out at agent_start (turn one begins) rather than waiting for the first
+    // assistant message: the dashboard shows "Starting up" until this line lands, and on a real
+    // task the model's time-to-first-message added seconds of it after omp was already working.
+    // The model is the requested alias (what claude's init frame reports too); onMessage's
+    // first-assistant path stays as the fallback for an omp that stops emitting agent_start.
+    `if(t==="agent_start"){if(!inited){inited=true;w("● session started (model "+String(process.env.ANTHROPIC_MODEL||"?")+")")}return}` +
     `if(t==="message_end"||t==="message"){onMessage(e.message||e);return}` +
     // Turn-end carries the turn's final assistant message with cumulative usage — ONE usage line
     // per turn, like the Claude formatter's result frame. (tool results are NOT read from
@@ -1416,6 +1468,52 @@ export function npxPackagesOf(conf: { mcpServers: Record<string, unknown> }): st
   return [...specs];
 }
 
+/**
+ * In-box rewriter (node, argv = config files; env R = global node_modules root): every
+ * `npx [-y] <pkg> …args` stdio server whose package is globally installed becomes
+ * `<node> <pkg's bin file> …args`. Even with the package on disk, each npx launch is a full npm
+ * CLI startup plus resolution (and a REGISTRY round trip for `@latest` specs) before the server
+ * runs — with ~8 of them spawning at once on a 2-vCPU box that contention was ~6s of the omp
+ * headless start, which waits for every server before turn one. Anything it can't map exactly
+ * (unknown npx flags, ambiguous bins, package absent) is left on npx untouched.
+ */
+export const MCP_DIRECT_BIN_JS = String.raw`
+const fs = require("fs"), path = require("path");
+const R = process.env.R || "/usr/local/lib/node_modules";
+const NPX_FLAGS = new Set(["-y", "--yes", "-q", "--quiet"]);
+for (const file of process.argv.slice(1)) {
+  let conf;
+  try { conf = JSON.parse(fs.readFileSync(file, "utf8")); } catch { continue; }
+  let changed = false;
+  for (const s of Object.values(conf.mcpServers || {})) {
+    if (!s || s.type !== "stdio" || s.command !== "npx") continue;
+    const args = s.args || [];
+    let i = 0;
+    while (i < args.length && NPX_FLAGS.has(args[i])) i++;
+    const spec = args[i];
+    if (!spec || spec.startsWith("-") || !/^(@[\w.-]+\/)?[\w.-]+(@[\w.^~-]+)?$/.test(spec)) continue;
+    const at = spec.indexOf("@", 1);
+    const name = at > 0 ? spec.slice(0, at) : spec;
+    let pkg;
+    try { pkg = JSON.parse(fs.readFileSync(path.join(R, name, "package.json"), "utf8")); } catch { continue; }
+    const short = name.split("/").pop();
+    let rel;
+    if (typeof pkg.bin === "string") rel = pkg.bin;
+    else if (pkg.bin && typeof pkg.bin === "object") {
+      const keys = Object.keys(pkg.bin);
+      rel = pkg.bin[short] ?? (keys.length === 1 ? pkg.bin[keys[0]] : undefined);
+    }
+    if (!rel) continue;
+    const bin = path.join(R, name, rel);
+    if (!fs.existsSync(bin)) continue;
+    s.command = process.execPath;
+    s.args = [bin, ...args.slice(i + 1)];
+    changed = true;
+  }
+  if (changed) fs.writeFileSync(file, JSON.stringify(conf), { mode: 0o600 });
+}
+`;
+
 export async function installMcpConfig(cfg: Config, box: string): Promise<void> {
   try {
     const conf = toClaudeMcpConfig(await loadMcpStore(cfg));
@@ -1424,14 +1522,18 @@ export async function installMcpConfig(cfg: Config, box: string): Promise<void> 
       return;
     }
     const json = JSON.stringify(conf);
-    // ONE exec for the config writes AND the package pre-install: each exec is an SSH→msb→guest
-    // round trip on the task-start critical path.
+    const specs = npxPackagesOf(conf);
+    // ONE exec for the config writes, the package pre-install AND the npx→direct-bin rewrite: each
+    // exec is an SSH→msb→guest round trip on the task-start critical path.
+    const direct = specs.length
+      ? `; R="$R" node -e ${shellQuote(MCP_DIRECT_BIN_JS)} ${MCP_CONFIG_PATH} ${OMP_MCP_CONFIG_PATH} || true`
+      : "";
     await exec(
       cfg,
       box,
       `printf '%s' ${shellQuote(json)} > ${MCP_CONFIG_PATH} && chmod 600 ${MCP_CONFIG_PATH} && ` +
         `mkdir -p /root/.omp/agent && printf '%s' ${shellQuote(json)} > ${OMP_MCP_CONFIG_PATH} && chmod 600 ${OMP_MCP_CONFIG_PATH}` +
-        `; ${preinstallSh(npxPackagesOf(conf))}`,
+        `; ${preinstallSh(specs)}${direct}`,
       { timeoutMs: 300_000 }
     );
   } catch (e) {

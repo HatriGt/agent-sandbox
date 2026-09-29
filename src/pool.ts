@@ -9,7 +9,7 @@
  *
  * The pool state lives on the VPS (the running `pool-*` boxes), so it survives MCP respawns.
  */
-import { createBox, bootWarmBox, listPoolBoxes, claimWarmBox, reapDeadPoolBoxes, forceRemoveBox, OMP_MIN_MEMORY, OMP_MIN_DISK } from "./msb.js";
+import { createBox, bootWarmBox, listPoolBoxes, claimWarmBox, reapDeadPoolBoxes, forceRemoveBox, OMP_MIN_MEMORY, OMP_MIN_DISK, OMP_CPUS } from "./msb.js";
 import { stagingPathFor } from "./sync.js";
 import { parseDurationSec } from "./monitor.js";
 import type { Config } from "./config.js";
@@ -59,7 +59,7 @@ export function poolBoxFlavor(name: string): AgentKind {
 
 /** The Config an omp pool box boots with: the omp snapshot at omp's memory/disk tier. */
 export function ompPoolCfg(cfg: Config): Config {
-  return { ...cfg, snapshot: cfg.ompSnapshot, memory: OMP_MIN_MEMORY, rootDisk: OMP_MIN_DISK, poolSize: cfg.ompPoolSize };
+  return { ...cfg, snapshot: cfg.ompSnapshot, memory: OMP_MIN_MEMORY, cpus: OMP_CPUS, rootDisk: OMP_MIN_DISK, poolSize: cfg.ompPoolSize };
 }
 
 /** Pool eligibility for an omp delegation (mirrors poolEligible on the omp fields). */

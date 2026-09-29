@@ -66,6 +66,8 @@ export interface Config {
   sleepTtl: string;
   /** Per-box memory cap (e.g. 512M, 1G). */
   memory: string;
+  /** vCPUs a box boots with; unset keeps the runtime default (1). Set per-run, not from env. */
+  cpus?: number;
   /** Root-disk size every new box boots with (e.g. 1G). Grow-only after creation. */
   rootDisk: string;
   /** Max concurrent live boxes; new delegations are refused past this. */

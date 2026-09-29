@@ -31,6 +31,7 @@ import {
   msbIo,
   OMP_MIN_DISK,
   OMP_MIN_MEMORY,
+  OMP_CPUS,
 } from "./msb.js";
 import { runInteractive } from "./interactive.js";
 import { runVerification } from "./verify.js";
@@ -407,7 +408,7 @@ export const deps: HandlerDeps = {
       // "sandbox restarted"); omp boxes get the 2G tier from boot. When an agent-omp snapshot is
       // baked (MSB_OMP_SNAPSHOT), boot from it — bun + omp pre-installed on the 4G rootfs, so the
       // ~90s per-thread install disappears; otherwise cold-boot from the image and install.
-      runCfg = { ...runCfg, snapshot: cfg.ompSnapshot, rootDisk: OMP_MIN_DISK, memory: OMP_MIN_MEMORY };
+      runCfg = { ...runCfg, snapshot: cfg.ompSnapshot, rootDisk: OMP_MIN_DISK, memory: OMP_MIN_MEMORY, cpus: OMP_CPUS };
     }
 
     const id = newSessionId();
