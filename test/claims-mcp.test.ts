@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseClaims, shouldKeepStopped } from "../src/claims.ts";
-import { parseMcpImport, normalizeServer, toClaudeMcpConfig, viewServers, parseMcpStore, serializeMcpStore } from "../src/mcp-store.ts";
+import { parseMcpImport, normalizeServer, toClaudeMcpConfig, viewServers, parseMcpStore, serializeMcpStore, isBoxRunnableServer } from "../src/mcp-store.ts";
 
 test("claims: parse stat output into ages; keep a sleeping claimed box under the TTL", () => {
   const now = 1_000_000;
@@ -53,4 +53,13 @@ test("mcp: Claude config carries enabled servers only; the view masks secrets; s
   assert.ok(!JSON.stringify(view).includes("supersecretvalue"));
   assert.deepEqual(parseMcpStore(serializeMcpStore(store)).servers.b.url, "https://b/mcp");
   assert.equal(toClaudeMcpConfig({ servers: {} }), null);
+});
+
+test("host-bound stdio servers never reach the box config", () => {
+  assert.equal(isBoxRunnableServer({ type: "stdio", command: "/opt/homebrew/bin/node", args: ["x.js"] }), false);
+  assert.equal(isBoxRunnableServer({ type: "stdio", command: "node", args: ["/Users/ak/server.js"] }), false);
+  assert.equal(isBoxRunnableServer({ type: "stdio", command: "C:\\tools\\srv.exe" }), false);
+  assert.equal(isBoxRunnableServer({ type: "stdio", command: "C:/tools/srv.exe" }), false);
+  assert.equal(isBoxRunnableServer({ type: "stdio", command: "npx", args: ["-y", "btp-mcp-server"] }), true);
+  assert.equal(isBoxRunnableServer({ type: "http" }), true);
 });

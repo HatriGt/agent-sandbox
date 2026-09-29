@@ -1382,9 +1382,15 @@ export function agentSh(workdir: string, resume: boolean, agent: AgentKind = "cl
   const omp =
     `${ompSeed} && OMP_SKIP_SETUP=1 omp ${resume ? `--continue ` : ``}--mode json --approval-mode=yolo ` +
     `--model "ccproxy/$ANTHROPIC_MODEL" -p ${ompPrompt}`;
+  // omp prints one "Warning: MCP server X failed to connect" per unreachable server to stderr at
+  // EVERY session start (Claude Code fails the same connections silently), so the transcript led
+  // with a wall of warnings on every task. They are per-run noise — the MCP settings page's Test
+  // button is the diagnosis surface — so stderr is filtered before it reaches the log. Everything
+  // else on stderr (real errors) still lands.
+  const ompStderr = `2> >(grep -vE '^Warning: MCP server .* failed to connect' >> ${AGENT_LOG})`;
   const launch =
     agent === "omp"
-      ? `${omp} 2>> ${AGENT_LOG} | node "$HOME/.claude/omp-fmt.js" ${AGENT_LOG}; `
+      ? `${omp} ${ompStderr} | node "$HOME/.claude/omp-fmt.js" ${AGENT_LOG}; `
       : `${claude} 2>> ${AGENT_LOG} | node "$HOME/.claude/stream-fmt.js" ${AGENT_LOG}; `;
   // Clear any pending question up front: a new run or a resume (which carries the answer) means the
   // previous question is now handled, so status stops reporting "waiting".

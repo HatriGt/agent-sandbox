@@ -117,11 +117,25 @@ export function parseMcpImport(json: string, now = Date.now()): McpServer[] {
   return out;
 }
 
-/** What the in-box `claude --mcp-config` reads: enabled servers only, in Claude Code's shape. */
+/**
+ * A stdio server whose command or args reference paths that only exist on the OPERATOR'S machine
+ * (a Mac homebrew tree, a home directory, a Windows drive) can never run inside a Linux box —
+ * spawning it just burns memory and stamps a "failed to connect" warning into every transcript.
+ * Users routinely import their whole local MCP config into the dashboard, so this is common.
+ */
+const HOST_BOUND_PATH_RE = /^(\/opt\/homebrew\/|\/Users\/|\/home\/|~\/|[A-Za-z]:[\\/])/;
+
+export function isBoxRunnableServer(s: Pick<McpServer, "type" | "command" | "args">): boolean {
+  if (s.type !== "stdio") return true; // remote servers are reachable from anywhere (or fail for real reasons)
+  if (HOST_BOUND_PATH_RE.test(s.command ?? "")) return false;
+  return !(s.args ?? []).some((a) => HOST_BOUND_PATH_RE.test(a));
+}
+
+/** What the in-box `claude --mcp-config` reads: enabled, box-runnable servers, in Claude Code's shape. */
 export function toClaudeMcpConfig(store: McpStore): { mcpServers: Record<string, unknown> } | null {
   const mcpServers: Record<string, unknown> = {};
   for (const s of Object.values(store.servers)) {
-    if (!s.enabled) continue;
+    if (!s.enabled || !isBoxRunnableServer(s)) continue;
     mcpServers[s.name] =
       s.type === "stdio"
         ? { type: "stdio", command: s.command, ...(s.args?.length ? { args: s.args } : {}), ...(s.env ? { env: s.env } : {}) }
