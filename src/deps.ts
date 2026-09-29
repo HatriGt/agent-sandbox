@@ -12,7 +12,7 @@ import type { DelegatePlan } from "./delegate-input.js";
 import type { RepoLayout } from "./agent-prompt.js";
 import { syncTreeToVps, cleanupStaging, stagingPathFor, repoStagingPath } from "./sync.js";
 import { cloneRepoInStaging, applyPatchInStaging } from "./git-source.js";
-import { acquireBox, refillPool, poolEligible, poolStatus } from "./pool.js";
+import { acquireBox, refillPool, poolEligible, ompPoolEligible, poolStatus } from "./pool.js";
 import {
   runAgentTask,
   resumeAgentTask,
@@ -464,11 +464,14 @@ export const deps: HandlerDeps = {
     // Thread the name->owner map so applyGitCredentials can set per-repo identity.
     const runCreds: AgentCreds | undefined = creds ? { ...creds, repoOwners } : undefined;
 
-    // 2. A restricted-egress delegation must not reuse an open-egress pooled box — and an omp run
-    // must never claim a pooled box either (the pool is baked from the CLAUDE snapshot at the 1G
-    // tier; with MSB_OMP_SNAPSHOT set, runCfg.snapshot alone would make it look eligible).
-    const eligible = poolEligible(runCfg, !!allowDomains?.length) && plan.agent !== "omp";
-    const { box, warm } = await acquireBox(runCfg, id, sessionRoot, eligible);
+    // 2. A restricted-egress delegation must not reuse an open-egress pooled box. The pool carries
+    // both flavors now; a delegation is only eligible for (and only claims) its own agent's boxes.
+    const poolAgent: "claude" | "omp" = plan.agent === "omp" ? "omp" : "claude";
+    const eligible =
+      poolAgent === "omp"
+        ? ompPoolEligible(cfg, !!allowDomains?.length)
+        : poolEligible(runCfg, !!allowDomains?.length);
+    const { box, warm } = await acquireBox(runCfg, id, sessionRoot, eligible, poolAgent);
     mark("acquire");
 
     // Operator attachments (pasted screenshots) land in the box before the agent's first tool call.

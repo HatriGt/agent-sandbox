@@ -142,3 +142,23 @@ test("omp bootstrap and prompt carry the guard and the debugger guidance", () =>
   if (!boot.includes("asb-guard")) throw new Error("guard not installed at bootstrap");
   if (!OMP_SYS_PROMPT.includes("debug") || !OMP_SYS_PROMPT.includes("BLOCKED")) throw new Error("prompt missing debug/enforcement");
 });
+
+test("flavored pool: names, eligibility, refill reconciles both flavors", async () => {
+  const { poolBoxFlavor, ompPoolEligible, refillPool, freshPoolBoxes } = await import("../src/pool.js");
+  if (poolBoxFlavor("pool-1790000000000-abc123") !== "claude") throw new Error("claude flavor");
+  if (poolBoxFlavor("pool-1790000000000-omp-abc123") !== "omp") throw new Error("omp flavor");
+  // Age parsing still works for omp names (freshness gate must not discard them).
+  const fresh = freshPoolBoxes(["pool-" + (Date.now() - 1000) + "-omp-x"], 60_000);
+  if (fresh.length !== 1) throw new Error("omp pool name failed the freshness gate");
+  const cfg = { poolSize: 1, snapshot: "agent-base", egressAllowAll: true, ompPoolSize: 1, ompSnapshot: "agent-omp", ompVersion: "latest" } as never;
+  if (!ompPoolEligible(cfg, false)) throw new Error("omp pool should be eligible");
+  if (ompPoolEligible({ ...(cfg as object), ompSnapshot: "" } as never, false)) throw new Error("no snapshot = not eligible");
+  // Refill: empty pool boots one of EACH flavor.
+  const boots: string[] = [];
+  await refillPool(cfg, {
+    listPoolBoxes: async () => [],
+    bootWarmBox: async (_c, agent) => { boots.push(agent ?? "claude"); return `pool-${Date.now()}-${agent === "omp" ? "omp-" : ""}x`; },
+    removeBox: async () => {},
+  });
+  if (JSON.stringify(boots.sort()) !== JSON.stringify(["claude", "omp"])) throw new Error("refill flavors: " + boots.join(","));
+});

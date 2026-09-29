@@ -236,8 +236,10 @@ const POOL_PREFIX = "pool-";
  * Boot one warm pool box: snapshot + open egress + memory cap + auto-teardown, then
  * pre-bootstrap creds/tools so a claim only needs the repo copy. Requires cfg.snapshot.
  */
-export async function bootWarmBox(cfg: Config): Promise<string> {
-  const name = `${POOL_PREFIX}${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+export async function bootWarmBox(cfg: Config, agent: AgentKind = "claude"): Promise<string> {
+  // Flavor rides in the NAME (pool-<ts>-omp-<rand>) so every prefix/age-based pool mechanism
+  // covers both flavors unchanged. Callers pass the flavored cfg (ompPoolCfg) for omp boots.
+  const name = `${POOL_PREFIX}${Date.now()}-${agent === "omp" ? "omp-" : ""}${Math.random().toString(36).slice(2, 8)}`;
   await msb(cfg, [
     "run",
     "-d",
@@ -267,8 +269,9 @@ export async function bootWarmBox(cfg: Config): Promise<string> {
     "sleep",
     "infinity",
   ]);
-  // Pre-bootstrap so claims are instant (idempotent; persists in the box rootfs).
-  await msb(cfg, ["exec", name, ...agentEnvFlags(cfg, "noop"), "--", "sh", "-lc", bootstrapScript(cfg)]);
+  // Pre-bootstrap so claims are instant (idempotent; persists in the box rootfs). For omp this
+  // also lays down the formatter + asb-guard ahead of the claim.
+  await msb(cfg, ["exec", name, ...agentEnvFlags(cfg, "noop", undefined, undefined, undefined, agent), "--", "sh", "-lc", bootstrapScript(cfg, agent)]);
   return name;
 }
 
@@ -1421,9 +1424,11 @@ export async function preinstallNpmPackages(cfg: Config, box: string, specs: str
     // @scope survives because only an "@" after index 0 is a version separator).
     const at = spec.indexOf("@", 1);
     const name = at > 0 ? spec.slice(0, at) : spec;
-    return `npm ls -g --depth=0 ${shellQuote(name)} >/dev/null 2>&1 || { npm i -g ${shellQuote(spec)} >/dev/null 2>&1 && I=1; } || true`;
+    // A directory test, NOT `npm ls -g`: seven sequential npm invocations cost ~5s inside the box
+    // on every run start (measured); the dir test is free and the no-op path is the common one.
+    return `[ -d "$R"/${shellQuote(name)} ] || { npm i -g ${shellQuote(spec)} >/dev/null 2>&1 && I=1; } || true`;
   });
-  await exec(cfg, box, `I=; ${steps.join("; ")}; [ -n "$I" ] && npm cache clean --force >/dev/null 2>&1 || true`, { timeoutMs: 300_000 });
+  await exec(cfg, box, `R=$(npm root -g); I=; ${steps.join("; ")}; [ -n "$I" ] && npm cache clean --force >/dev/null 2>&1 || true`, { timeoutMs: 300_000 });
 }
 
 /** Where dashboard-configured skills land inside the box. `--setting-sources user` loads exactly

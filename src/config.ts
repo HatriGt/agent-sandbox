@@ -41,6 +41,8 @@ export interface Config {
    * `node dist/bake-snapshot.js agent-omp omp`). Empty = cold boot from the image + install.
    */
   ompSnapshot: string;
+  /** Warm omp boxes to keep pre-booted (the ~3G omp snapshot cold-boots in ~35s; a pool hides it). */
+  ompPoolSize: number;
   /** Auto-stop after this idle period. */
   idleTimeout: string;
   /**
@@ -211,6 +213,7 @@ export function loadConfig(): Config {
     claudeCodeVersion: req("CLAUDE_CODE_VERSION", "2.1.273"),
     ompVersion: req("OMP_VERSION", "latest"),
     ompSnapshot: process.env.MSB_OMP_SNAPSHOT || "",
+    ompPoolSize: Number(process.env.MSB_OMP_POOL_SIZE ?? "1"),
     idleTimeout: req("MSB_IDLE_TIMEOUT", "15m"),
     // Warm boxes should outlive a long lull with no delegations; the maintainer replaces any that the
     // hard max-duration cap reaps. Default well above idleTimeout so the pool doesn't self-drain.

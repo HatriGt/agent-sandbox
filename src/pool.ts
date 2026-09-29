@@ -9,10 +9,11 @@
  *
  * The pool state lives on the VPS (the running `pool-*` boxes), so it survives MCP respawns.
  */
-import { createBox, bootWarmBox, listPoolBoxes, claimWarmBox, reapDeadPoolBoxes, forceRemoveBox } from "./msb.js";
+import { createBox, bootWarmBox, listPoolBoxes, claimWarmBox, reapDeadPoolBoxes, forceRemoveBox, OMP_MIN_MEMORY, OMP_MIN_DISK } from "./msb.js";
 import { stagingPathFor } from "./sync.js";
 import { parseDurationSec } from "./monitor.js";
 import type { Config } from "./config.js";
+import type { AgentKind } from "./agent-kind.js";
 
 /**
  * A pool box's --max-duration clock starts at BOOT, not at claim. Observed live: a box booted at
@@ -46,6 +47,27 @@ export function poolEligible(cfg: Config, allowDomainsProvided: boolean): boolea
 }
 
 /**
+ * The pool carries TWO flavors since omp landed: claude boxes (1G, agent-base) and omp boxes
+ * (2G/4G, agent-omp — whose ~3G rootfs makes a cold snapshot boot ~35s, the whole reason omp needs
+ * a pool at all). The flavor is embedded in the NAME (pool-<epochMs>-omp-<rand>) so every existing
+ * pool mechanism — the prefix filters, reaping, capacity exclusion, the age-from-name freshness
+ * gate — applies to both flavors unchanged.
+ */
+export function poolBoxFlavor(name: string): AgentKind {
+  return /^pool-\d+-omp-/.test(name) ? "omp" : "claude";
+}
+
+/** The Config an omp pool box boots with: the omp snapshot at omp's memory/disk tier. */
+export function ompPoolCfg(cfg: Config): Config {
+  return { ...cfg, snapshot: cfg.ompSnapshot, memory: OMP_MIN_MEMORY, rootDisk: OMP_MIN_DISK, poolSize: cfg.ompPoolSize };
+}
+
+/** Pool eligibility for an omp delegation (mirrors poolEligible on the omp fields). */
+export function ompPoolEligible(cfg: Config, allowDomainsProvided: boolean): boolean {
+  return cfg.ompPoolSize > 0 && !!cfg.ompSnapshot && cfg.egressAllowAll && !allowDomainsProvided;
+}
+
+/**
  * Get a ready box for `session` with the repo copied in. Uses a warm box when eligible and one
  * is available; otherwise cold-boots via createBox. Returns the box name to use as the session.
  *
@@ -75,7 +97,8 @@ export async function acquireBox(
   cfg: Config,
   session: string,
   copyDir: string | undefined,
-  eligible: boolean
+  eligible: boolean,
+  agent: AgentKind = "claude"
 ): Promise<{ box: string; warm: boolean }> {
   if (eligible) {
     // listPoolBoxes already reaps dead/wedged boxes, so anything it returns is Running + free.
@@ -84,7 +107,9 @@ export async function acquireBox(
     // (or pre-fix) box may be killed mid-run by its own boot-anchored timer — cold-booting is
     // slower but never dies two minutes in.
     const maxAgeMs = (parseDurationSec(cfg.poolIdleTimeout) ?? 0) * 1000;
-    const available = freshPoolBoxes(await listPoolBoxes(cfg), maxAgeMs);
+    // Only THIS delegation's flavor: a claude task must never claim an omp box and vice versa —
+    // wrong toolchain, wrong memory tier, wrong snapshot.
+    const available = freshPoolBoxes(await listPoolBoxes(cfg), maxAgeMs).filter((b) => poolBoxFlavor(b) === agent);
     const warm = pickFreeBox(available);
     if (warm) {
       claiming.add(warm);
@@ -117,7 +142,7 @@ export async function acquireBox(
 /** IO seam for refillPool so its concurrency behavior is unit-testable without SSH. */
 export interface RefillIO {
   listPoolBoxes: (cfg: Config) => Promise<string[]>;
-  bootWarmBox: (cfg: Config) => Promise<string>;
+  bootWarmBox: (cfg: Config, agent?: AgentKind) => Promise<string>;
   removeBox: (cfg: Config, box: string) => Promise<void>;
 }
 const realRefillIO: RefillIO = { listPoolBoxes, bootWarmBox, removeBox: forceRemoveBox };
@@ -138,30 +163,41 @@ let refillInFlight: Promise<void> | null = null;
  * delegation.
  */
 export function refillPool(cfg: Config, io: RefillIO = realRefillIO): Promise<void> {
-  if (cfg.poolSize <= 0 || !cfg.snapshot || !cfg.egressAllowAll) return Promise.resolve();
+  const claudeOn = cfg.poolSize > 0 && !!cfg.snapshot;
+  const ompOn = (cfg.ompPoolSize ?? 0) > 0 && !!cfg.ompSnapshot;
+  if ((!claudeOn && !ompOn) || !cfg.egressAllowAll) return Promise.resolve();
   if (refillInFlight) return refillInFlight;
   const flight = (async () => {
     try {
       // Reap dead/wedged boxes first so the deficit is real and a fresh boot won't collide with a
       // stale msb record ("cannot start: already running"). listPoolBoxes reaps as a side effect.
-      const available = await io.listPoolBoxes(cfg);
-      const deficit = cfg.poolSize - available.length;
-      if (deficit > 0) {
-        console.error(`[pool] refilling: ${available.length}/${cfg.poolSize} ready — booting ${deficit}`);
-        for (let i = 0; i < deficit; i++) {
-          const name = await io.bootWarmBox(cfg);
-          console.error(`[pool] warm box ready: ${name}`);
-        }
-      } else if (deficit < 0) {
-        // A past double-refill left extras; keep the youngest (most run budget left), trim the rest.
-        // Never trim a box an in-flight claim reserved: /.claimed lands only seconds after
-        // `claiming.add`, and removing the box in that window kills the delegation that just picked it.
-        const oldestFirst = [...available]
-          .filter((b) => !claiming.has(b))
-          .sort((a, b) => (poolBoxAgeMs(b) ?? Infinity) - (poolBoxAgeMs(a) ?? Infinity));
-        for (const box of oldestFirst.slice(0, -deficit)) {
-          console.error(`[pool] trimming surplus warm box ${box} (${available.length}/${cfg.poolSize} ready)`);
-          await io.removeBox(cfg, box);
+      // ONE listing serves both flavors; each reconciles its own partition.
+      const all = await io.listPoolBoxes(cfg);
+      const flavors: Array<{ agent: AgentKind; size: number; bootCfg: Config; on: boolean }> = [
+        { agent: "claude", size: cfg.poolSize, bootCfg: cfg, on: claudeOn },
+        { agent: "omp", size: cfg.ompPoolSize ?? 0, bootCfg: ompPoolCfg(cfg), on: ompOn },
+      ];
+      for (const f of flavors) {
+        if (!f.on) continue;
+        const available = all.filter((b) => poolBoxFlavor(b) === f.agent);
+        const deficit = f.size - available.length;
+        if (deficit > 0) {
+          console.error(`[pool] refilling ${f.agent}: ${available.length}/${f.size} ready — booting ${deficit}`);
+          for (let i = 0; i < deficit; i++) {
+            const name = await io.bootWarmBox(f.bootCfg, f.agent);
+            console.error(`[pool] warm ${f.agent} box ready: ${name}`);
+          }
+        } else if (deficit < 0) {
+          // A past double-refill left extras; keep the youngest (most run budget left), trim the rest.
+          // Never trim a box an in-flight claim reserved: /.claimed lands only seconds after
+          // `claiming.add`, and removing the box in that window kills the delegation that just picked it.
+          const oldestFirst = [...available]
+            .filter((b) => !claiming.has(b))
+            .sort((a, b) => (poolBoxAgeMs(b) ?? Infinity) - (poolBoxAgeMs(a) ?? Infinity));
+          for (const box of oldestFirst.slice(0, -deficit)) {
+            console.error(`[pool] trimming surplus warm ${f.agent} box ${box} (${available.length}/${f.size} ready)`);
+            await io.removeBox(cfg, box);
+          }
         }
       }
     } catch (e) {
@@ -182,13 +218,15 @@ export function refillPool(cfg: Config, io: RefillIO = realRefillIO): Promise<vo
  * makes a warm box ALWAYS ready. Returns a stop handle; unref'd so it never holds the process open.
  */
 export function startPoolMaintainer(cfg: Config): { stop: () => void } {
-  if (cfg.poolSize <= 0 || !cfg.snapshot || !cfg.egressAllowAll || cfg.poolRefillIntervalMs <= 0) {
+  const claudeOn = cfg.poolSize > 0 && !!cfg.snapshot;
+  const ompOn = (cfg.ompPoolSize ?? 0) > 0 && !!cfg.ompSnapshot;
+  if ((!claudeOn && !ompOn) || !cfg.egressAllowAll || cfg.poolRefillIntervalMs <= 0) {
     return { stop: () => {} };
   }
   console.error(
-    `[pool] maintainer on: keeping ${cfg.poolSize} warm box(es) ready (every ${Math.round(
-      cfg.poolRefillIntervalMs / 1000
-    )}s)`
+    `[pool] maintainer on: keeping ${claudeOn ? `${cfg.poolSize} claude` : ""}${claudeOn && ompOn ? " + " : ""}${
+      ompOn ? `${cfg.ompPoolSize} omp` : ""
+    } warm box(es) ready (every ${Math.round(cfg.poolRefillIntervalMs / 1000)}s)`
   );
   const timer = setInterval(() => {
     void refillPool(cfg);
@@ -205,9 +243,9 @@ export async function poolStatus(cfg: Config): Promise<{
   boxes: string[];
   enabled: boolean;
 }> {
-  const enabled = cfg.poolSize > 0 && !!cfg.snapshot && cfg.egressAllowAll;
+  const enabled = (cfg.poolSize > 0 && !!cfg.snapshot && cfg.egressAllowAll) || ompPoolEligible(cfg, false);
   const boxes = enabled ? await listPoolBoxes(cfg) : [];
-  return { size: cfg.poolSize, available: boxes.length, boxes, enabled };
+  return { size: cfg.poolSize + (cfg.ompSnapshot ? cfg.ompPoolSize : 0), available: boxes.length, boxes, enabled };
 }
 
 /** Staging path helper re-export so index.ts has one import site for pool wiring. */
