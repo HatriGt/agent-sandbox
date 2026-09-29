@@ -1,6 +1,6 @@
 import * as React from "react";
-import { Link, useLocation } from "react-router";
-import { Bell, BellOff, Clock, Flame, Keyboard, LayoutGrid, LogOut, Moon, PanelLeftClose, PanelLeftOpen, Pause, Plug, Plus, Search, Shield, Sun, TriangleAlert, UserRound } from "lucide-react";
+import { Link, useLocation, useNavigationType } from "react-router";
+import { Bell, BellOff, Clock, Flame, Keyboard, LayoutGrid, LogOut, Menu, Moon, PanelLeftClose, PanelLeftOpen, Pause, Plug, Plus, Search, Shield, Sun, TriangleAlert, UserRound } from "lucide-react";
 import { Zap } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { api, type FleetLifecycle, type FleetSnapshot } from "@/lib/api";
@@ -26,7 +26,8 @@ import { CommandPalette, openPalette, type PaletteAction } from "@/components/Co
 import { ShortcutsDialog } from "@/components/ShortcutsDialog";
 import { Toaster } from "@/components/ui/sonner";
 import { getMe, signOut } from "@/lib/auth";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipKbd, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Thread, type Aside } from "@/components/thread/Thread";
 import { BootingThread } from "@/components/thread/BootingThread";
 import { Bar } from "@/components/thread/Skeletons";
@@ -135,7 +136,8 @@ export default function App() {
   }, []);
   const view = route.view;
   const selected = route.view === "box" ? route.name : null;
-  const [mobileRail, setMobileRail] = React.useState(() => route.view === "hub");
+  // Phone: the rail is a left drawer over the page (Sheet), never a replacement for it.
+  const [mobileRail, setMobileRail] = React.useState(false);
 
   const [booting, setBooting] = React.useState<{
     task: string;
@@ -269,6 +271,17 @@ export default function App() {
   const onFocusRequest = React.useCallback((f: () => void) => {
     focusComposer.current = f;
   }, []);
+  // A `g x` shortcut flashes the nav item it landed on (150ms bg-muted pulse) so the keystroke has a
+  // visible echo even when the page it opens is already showing.
+  const [flash, setFlash] = React.useState<string | null>(null);
+  const flashTimer = React.useRef<number | null>(null);
+  const pulse = React.useCallback((id: string) => {
+    if (flashTimer.current) window.clearTimeout(flashTimer.current);
+    setFlash(id);
+    flashTimer.current = window.setTimeout(() => setFlash(null), 150);
+  }, []);
+  React.useEffect(() => () => { if (flashTimer.current) window.clearTimeout(flashTimer.current); }, []);
+
   React.useEffect(() => {
     let pendingG = false;
     const onKey = (e: KeyboardEvent) => {
@@ -280,10 +293,10 @@ export default function App() {
         window.setTimeout(() => (pendingG = false), 800);
         return;
       }
-      if (pendingG && e.key === "f") return showFleet();
-      if (pendingG && e.key === "h") return showHistory();
-      if (pendingG && e.key === "s") return showSkills();
-      if (pendingG && e.key === "a") return showAccounts();
+      if (pendingG && e.key === "f") return (pulse("fleet"), showFleet());
+      if (pendingG && e.key === "h") return (pulse("history"), showHistory());
+      if (pendingG && e.key === "s") return (pulse("skills"), showSkills());
+      if (pendingG && e.key === "a") return (pulse("integrations"), showAccounts());
       if (e.key === "n") return newTask();
       if (e.key === "?") return setShortcuts(true);
       if (e.key === "/") {
@@ -305,7 +318,7 @@ export default function App() {
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [runs_, selected, open, newTask, showFleet, showHistory, showSkills, showAccounts]);
+  }, [runs_, selected, open, newTask, showFleet, showHistory, showSkills, showAccounts, pulse]);
 
   const ask = async (name: string, question: string) => {
     let index = 0;
@@ -346,16 +359,232 @@ export default function App() {
 
   const reduceMotion = useReducedMotion();
 
+  // View change: the page's scroller goes back to the top and focus lands on its h1 (or the main
+  // region), so keyboard and screen-reader users start at the heading, not wherever focus was
+  // stranded. Browser back (POP) restores the scroll offset that pane had when it was left.
+  const mainRef = React.useRef<HTMLElement>(null);
+  const navType = useNavigationType();
+  const scrollMemory = React.useRef(new Map<string, number>());
+  const scroller = () => mainRef.current?.querySelector<HTMLElement>("[data-scroll], .overflow-y-auto") ?? null;
+  React.useLayoutEffect(() => {
+    const key = paneKey;
+    return () => {
+      // Runs as the pane is about to swap: remember where the outgoing pane was scrolled to.
+      const el = scroller();
+      if (el) scrollMemory.current.set(key, el.scrollTop);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paneKey]);
+  React.useEffect(() => {
+    let alive = true;
+    // Two frames: one for the pane to commit, one for a code-split page to mount behind Suspense.
+    const raf = requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        if (!alive) return;
+        const el = scroller();
+        if (el) el.scrollTop = navType === "POP" ? (scrollMemory.current.get(paneKey) ?? 0) : 0;
+        const active = document.activeElement as HTMLElement | null;
+        // Something on the page (the hub composer via "n", a dialog) already claimed focus — leave it.
+        if (active && active !== document.body && mainRef.current?.contains(active) && active.tagName !== "MAIN") return;
+        if (active && (active.closest("[role=dialog]") || active.closest("[cmdk-root]"))) return;
+        const h1 = mainRef.current?.querySelector<HTMLElement>("h1");
+        const target = h1 ?? mainRef.current;
+        if (!target) return;
+        if (!target.hasAttribute("tabindex")) target.setAttribute("tabindex", "-1");
+        target.focus({ preventScroll: true });
+      })
+    );
+    return () => {
+      alive = false;
+      cancelAnimationFrame(raf);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paneKey]);
+
+  // The expanded rail body is rendered twice — in the desktop <aside> and inside the phone drawer.
+  const railBody = (
+    <>
+      <div className="flex flex-col gap-2 px-3 pt-1 pb-3">
+        <Button variant="primary" onClick={newTask} className="w-full justify-center">
+          <Plus />
+          New task
+          <kbd className="text-primary-foreground/60 ml-auto">n</kbd>
+        </Button>
+        <button
+          type="button"
+          onClick={openPalette}
+          className="text-muted-foreground hover:text-foreground hover:bg-muted flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md border px-3 text-left text-meta transition-colors"
+        >
+          <Search className="size-4 shrink-0" aria-hidden />
+          <span className="flex-1">Search machines</span>
+          <kbd className="text-muted-foreground rounded border px-1.5 py-0.5">⌘K</kbd>
+        </button>
+      </div>
+
+      <AnimatePresence initial={false}>
+        {waiting.length > 0 && (
+          <motion.button
+            key="queue"
+            type="button"
+            initial={{ opacity: 0, height: 0, marginBottom: 0 }}
+            animate={{ opacity: 1, height: "auto", marginBottom: 8 }}
+            exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+            transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+            onClick={() => open(waiting[0].name)}
+            className="border-attention/50 bg-attention/10 hover:bg-attention/20 mx-3 flex cursor-pointer items-center gap-2.5 overflow-hidden rounded-md border px-3 py-2.5 text-left transition-colors"
+          >
+            <Pause className="text-attention-text size-4 shrink-0" strokeWidth={2.5} aria-hidden />
+            <span className="text-foreground min-w-0 flex-1 truncate text-meta font-medium">
+              {waiting.length === 1 ? "1 machine needs you" : `${waiting.length} machines need you`}
+            </span>
+            <span className="text-attention-text text-micro font-semibold">Answer →</span>
+          </motion.button>
+        )}
+      </AnimatePresence>
+
+      <div className="flex items-center gap-2 px-4 pt-2 pb-1">
+        <p className="text-foreground text-meta font-semibold">Machines</p>
+        <span className="ml-auto">
+          {lifecycle.capacity > 0 ? (
+            <Capacity boxes={boxes} capacity={lifecycle.capacity} size="sm" />
+          ) : (
+            runs_.length > 0 && <span className="text-muted-foreground tabular text-micro">{runs_.length}</span>
+          )}
+        </span>
+      </div>
+
+      {error && (
+        <p role="alert" className="text-destructive mx-4 mb-2 flex items-start gap-1.5 text-micro">
+          <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+          {error}
+        </p>
+      )}
+
+      <MachineList boxes={runs_} pending={pending} selected={view === "box" ? selected : null} loading={loading} onSelect={open} sleepTtlSec={lifecycle.sleepTtlSec} />
+
+      {/* Warm capacity is a fact about the fleet, not a run: one quiet line, not a list row. */}
+      {warmReady > 0 && (
+        <button
+          type="button"
+          onClick={showFleet}
+          className="text-muted-foreground hover:text-foreground mx-3 mb-1 flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-micro transition-colors"
+        >
+          <Flame className="text-ok size-3.5 shrink-0" aria-hidden />
+          {warmReady === 1 ? "1 warm machine ready" : `${warmReady} warm machines ready`} — a new task starts in seconds
+        </button>
+      )}
+
+      <div className="flex flex-col gap-0.5 border-t px-2 py-2">
+        <NavItem active={view === "fleet"} flash={flash === "fleet"} onClick={showFleet} icon={<LayoutGrid />} label="Fleet view" badge={boxes.length || undefined} shortcut="g f" />
+        <span className="contents" onMouseEnter={prefetchHistory}>
+          <NavItem active={view === "history"} flash={flash === "history"} onClick={showHistory} icon={<Clock />} label="History" shortcut="g h" />
+        </span>
+        <span className="contents" onMouseEnter={prefetchSkills}>
+          <NavItem active={view === "skills"} flash={flash === "skills"} onClick={showSkills} icon={<Zap />} label="Skills" shortcut="g s" />
+        </span>
+        <span className="contents" onMouseEnter={prefetchIntegrations}>
+          <NavItem active={view === "integrations"} flash={flash === "integrations"} onClick={showAccounts} icon={<Plug />} label="Integrations" shortcut="g a" />
+        </span>
+        <TrialBadge className="mx-2.5 mt-1 self-start" />
+        {/* Account/Connect must be reachable in token mode too — the operator uses
+            notifications, API keys and the IDE wizard just like a saas user. */}
+        <NavItem
+          active={view === "account" || view === "connect" || view === "admin" || view === "welcome"}
+          onClick={showAccount}
+          icon={
+            getMe()?.kind === "user" ? (
+              <span className="bg-live/10 text-live grid size-4 place-items-center rounded-full text-[9px] font-semibold uppercase">{((getMe() as { name: string | null; login: string }).name || (getMe() as { login: string }).login).slice(0, 1)}</span>
+            ) : (
+              <UserRound />
+            )
+          }
+          label={getMe()?.kind === "user" ? (getMe() as { name: string | null; login: string }).name || (getMe() as { login: string }).login : "Operator"}
+        />
+
+        <div className="flex items-center justify-between px-2.5 pt-1">
+          <p className="text-muted-foreground text-micro">{live ? <>Updated <Freshness updatedAt={updatedAt} /></> : data ? "Reconnecting…" : error ? "Offline — retrying" : "Connecting…"}</p>
+          <div className="flex items-center">
+            {notify.supported && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon-xs" onClick={() => void notify.toggle()} aria-pressed={notify.enabled} aria-label="Desktop notifications">
+                    {notify.enabled ? <Bell className="text-live" /> : <BellOff />}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  {notify.enabled ? "Notifying when a machine needs you or finishes" : "Notify me when a machine needs me or finishes"}
+                </TooltipContent>
+              </Tooltip>
+            )}
+            {getMe()?.kind === "user" && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label="Sign out"
+                    onClick={() =>
+                      api
+                        .logout()
+                        .catch(() => {})
+                        .finally(() => signOut())
+                    }
+                  >
+                    <LogOut />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top">Sign out {getMe()?.kind === "user" ? (getMe() as { login: string }).login : ""}</TooltipContent>
+              </Tooltip>
+            )}
+            <Button variant="ghost" size="icon-xs" onClick={() => setDark(!dark)} aria-label={dark ? "Switch to light theme" : "Switch to dark theme"}>
+              {dark ? <Moon /> : <Sun />}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+
+  const healthDot = (
+    <span
+      className={cn(
+        "size-1.5 shrink-0 rounded-full",
+        health === "offline" && "bg-destructive",
+        health === "attention" && "bg-attention",
+        health === "ok" && "bg-ok breathe"
+      )}
+      aria-hidden
+    />
+  );
+  const healthLine = data ? (
+    <span className="tabular truncate">
+      {runs_.length} {runs_.length === 1 ? "run" : "runs"}
+      {working > 0 && <> · {working} working</>}
+      {waiting.length > 0 && <span className="text-attention-text"> · {waiting.length} waiting</span>}
+    </span>
+  ) : error ? (
+    <span className="text-destructive font-medium">offline</span>
+  ) : (
+    <span>connecting…</span>
+  );
+
   return (
-    <TooltipProvider delayDuration={400}>
-      <Toaster position="top-center" />
+    <TooltipProvider>
+      <Toaster />
       <div
         className={cn(
           "bg-background grid h-full grid-cols-1 transition-[grid-template-columns] duration-200",
           collapsed ? "md:grid-cols-[3.5rem_minmax(0,1fr)]" : "md:grid-cols-[17rem_minmax(0,1fr)]"
         )}
       >
-        <aside className={cn("bg-card flex min-h-0 flex-col overflow-hidden md:border-r", mobileRail ? "flex" : "hidden md:flex")}>
+        {/* Phone nav drawer: the same rail, over the page instead of in place of it. */}
+        <Sheet open={mobileRail} onOpenChange={setMobileRail}>
+          <SheetContent side="left" title="Agent Sandbox" className="w-[min(20rem,calc(100vw-3rem))] md:hidden">
+            <div className="-mx-3 flex flex-col">{railBody}</div>
+          </SheetContent>
+        </Sheet>
+
+        <aside className="bg-card hidden min-h-0 flex-col overflow-hidden md:flex md:border-r">
           <div className={cn("flex h-14 shrink-0 items-center gap-2.5 px-3", collapsed && "md:justify-center md:px-0")}>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -372,26 +601,8 @@ export default function App() {
                     Agent Sandbox
                   </Link>
                   <p className="text-muted-foreground flex items-center gap-1.5 text-micro leading-tight">
-                    <span
-                      className={cn(
-                        "size-1.5 shrink-0 rounded-full",
-                        health === "offline" && "bg-destructive",
-                        health === "attention" && "bg-attention",
-                        health === "ok" && "bg-ok breathe"
-                      )}
-                      aria-hidden
-                    />
-                    {data ? (
-                      <span className="tabular truncate">
-                        {runs_.length} {runs_.length === 1 ? "run" : "runs"}
-                        {working > 0 && <> · {working} working</>}
-                        {waiting.length > 0 && <span className="text-attention-text"> · {waiting.length} waiting</span>}
-                      </span>
-                    ) : error ? (
-                      <span className="text-destructive font-medium">offline</span>
-                    ) : (
-                      <span>connecting…</span>
-                    )}
+                    {healthDot}
+                    {healthLine}
                   </p>
                 </div>
                 <Button variant="ghost" size="icon-sm" onClick={() => setCollapsed(true)} aria-label="Collapse sidebar" className="hidden md:inline-flex">
@@ -403,17 +614,17 @@ export default function App() {
 
           {collapsed ? (
             <nav className="flex flex-1 flex-col items-center gap-1.5 px-2 pt-1 pb-3" aria-label="Sections">
-              <RailIcon onClick={newTask} icon={<Plus />} label="New task (n)" primary />
-              <RailIcon onClick={openPalette} icon={<Search />} label="Search machines (⌘K)" />
-              <RailIcon active={view === "fleet"} onClick={showFleet} icon={<LayoutGrid />} label="Fleet" badge={boxes.length || undefined} dot={waiting.length > 0} />
+              <RailIcon onClick={newTask} icon={<Plus />} label="New task" shortcut="n" primary />
+              <RailIcon onClick={openPalette} icon={<Search />} label="Search machines" shortcut="⌘K" />
+              <RailIcon active={view === "fleet"} flash={flash === "fleet"} onClick={showFleet} icon={<LayoutGrid />} label="Fleet" shortcut="g f" badge={boxes.length || undefined} dot={waiting.length > 0} />
               <span className="contents" onMouseEnter={prefetchHistory}>
-                <RailIcon active={view === "history"} onClick={showHistory} icon={<Clock />} label="History" />
+                <RailIcon active={view === "history"} flash={flash === "history"} onClick={showHistory} icon={<Clock />} label="History" shortcut="g h" />
               </span>
               <span className="contents" onMouseEnter={prefetchSkills}>
-                <RailIcon active={view === "skills"} onClick={showSkills} icon={<Zap />} label="Skills" />
+                <RailIcon active={view === "skills"} flash={flash === "skills"} onClick={showSkills} icon={<Zap />} label="Skills" shortcut="g s" />
               </span>
               <span className="contents" onMouseEnter={prefetchIntegrations}>
-                <RailIcon active={view === "integrations"} onClick={showAccounts} icon={<Plug />} label="Integrations" />
+                <RailIcon active={view === "integrations"} flash={flash === "integrations"} onClick={showAccounts} icon={<Plug />} label="Integrations" shortcut="g a" />
               </span>
               <div className="mt-auto flex flex-col items-center gap-1.5">
                 <RailIcon onClick={() => setDark(!dark)} icon={dark ? <Moon /> : <Sun />} label={dark ? "Light theme" : "Dark theme"} />
@@ -421,150 +632,27 @@ export default function App() {
               </div>
             </nav>
           ) : (
-            <>
-              <div className="flex flex-col gap-2 px-3 pt-1 pb-3">
-                <Button variant="primary" onClick={newTask} className="w-full justify-center">
-                  <Plus />
-                  New task
-                  <kbd className="text-primary-foreground/60 ml-auto">n</kbd>
-                </Button>
-                <button
-                  type="button"
-                  onClick={openPalette}
-                  className="text-muted-foreground hover:text-foreground hover:bg-muted flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md border px-3 text-left text-meta transition-colors"
-                >
-                  <Search className="size-4 shrink-0" aria-hidden />
-                  <span className="flex-1">Search machines</span>
-                  <kbd className="text-muted-foreground rounded border px-1.5 py-0.5">⌘K</kbd>
-                </button>
-              </div>
-
-              <AnimatePresence initial={false}>
-                {waiting.length > 0 && (
-                  <motion.button
-                    key="queue"
-                    type="button"
-                    initial={{ opacity: 0, height: 0, marginBottom: 0 }}
-                    animate={{ opacity: 1, height: "auto", marginBottom: 8 }}
-                    exit={{ opacity: 0, height: 0, marginBottom: 0 }}
-                    transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
-                    onClick={() => open(waiting[0].name)}
-                    className="border-attention/50 bg-attention/10 hover:bg-attention/20 mx-3 flex cursor-pointer items-center gap-2.5 overflow-hidden rounded-md border px-3 py-2.5 text-left transition-colors"
-                  >
-                    <Pause className="text-attention-text size-4 shrink-0" strokeWidth={2.5} aria-hidden />
-                    <span className="text-foreground min-w-0 flex-1 truncate text-meta font-medium">
-                      {waiting.length === 1 ? "1 machine needs you" : `${waiting.length} machines need you`}
-                    </span>
-                    <span className="text-attention-text text-micro font-semibold">Answer →</span>
-                  </motion.button>
-                )}
-              </AnimatePresence>
-
-              <div className="flex items-center gap-2 px-4 pt-2 pb-1">
-                <p className="text-foreground text-meta font-semibold">Machines</p>
-                <span className="ml-auto">
-                  {lifecycle.capacity > 0 ? (
-                    <Capacity boxes={boxes} capacity={lifecycle.capacity} size="sm" />
-                  ) : (
-                    runs_.length > 0 && <span className="text-muted-foreground tabular text-micro">{runs_.length}</span>
-                  )}
-                </span>
-              </div>
-
-              {error && (
-                <p role="alert" className="text-destructive mx-4 mb-2 flex items-start gap-1.5 text-micro">
-                  <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-                  {error}
-                </p>
-              )}
-
-              <MachineList boxes={runs_} pending={pending} selected={view === "box" ? selected : null} loading={loading} onSelect={open} sleepTtlSec={lifecycle.sleepTtlSec} />
-
-              {/* Warm capacity is a fact about the fleet, not a run: one quiet line, not a list row. */}
-              {warmReady > 0 && (
-                <button
-                  type="button"
-                  onClick={showFleet}
-                  className="text-muted-foreground hover:text-foreground mx-3 mb-1 flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-micro transition-colors"
-                >
-                  <Flame className="text-ok size-3.5 shrink-0" aria-hidden />
-                  {warmReady === 1 ? "1 warm machine ready" : `${warmReady} warm machines ready`} — a new task starts in seconds
-                </button>
-              )}
-
-              <div className="flex flex-col gap-0.5 border-t px-2 py-2">
-                <NavItem active={view === "fleet"} onClick={showFleet} icon={<LayoutGrid />} label="Fleet view" badge={boxes.length || undefined} shortcut="g f" />
-                <span className="contents" onMouseEnter={prefetchHistory}>
-                  <NavItem active={view === "history"} onClick={showHistory} icon={<Clock />} label="History" shortcut="g h" />
-                </span>
-                <span className="contents" onMouseEnter={prefetchSkills}>
-                  <NavItem active={view === "skills"} onClick={showSkills} icon={<Zap />} label="Skills" shortcut="g s" />
-                </span>
-                <span className="contents" onMouseEnter={prefetchIntegrations}>
-                  <NavItem active={view === "integrations"} onClick={showAccounts} icon={<Plug />} label="Integrations" shortcut="g a" />
-                </span>
-                <TrialBadge className="mx-2.5 mt-1 self-start" />
-                {/* Account/Connect must be reachable in token mode too — the operator uses
-                    notifications, API keys and the IDE wizard just like a saas user. */}
-                <NavItem
-                    active={view === "account" || view === "connect" || view === "admin" || view === "welcome"}
-                    onClick={showAccount}
-                    icon={
-                      getMe()?.kind === "user" ? (
-                        <span className="bg-live/10 text-live grid size-4 place-items-center rounded-full text-[9px] font-semibold uppercase">{((getMe() as { name: string | null; login: string }).name || (getMe() as { login: string }).login).slice(0, 1)}</span>
-                      ) : (
-                        <UserRound />
-                      )
-                    }
-                    label={getMe()?.kind === "user" ? (getMe() as { name: string | null; login: string }).name || (getMe() as { login: string }).login : "Operator"}
-                  />
-
-                <div className="flex items-center justify-between px-2.5 pt-1">
-                  <p className="text-muted-foreground text-micro">{live ? <>Updated <Freshness updatedAt={updatedAt} /></> : data ? "Reconnecting…" : error ? "Offline — retrying" : "Connecting…"}</p>
-                  <div className="flex items-center">
-                    {notify.supported && (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button variant="ghost" size="icon-xs" onClick={() => void notify.toggle()} aria-pressed={notify.enabled} aria-label="Desktop notifications">
-                            {notify.enabled ? <Bell className="text-live" /> : <BellOff />}
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="top">
-                          {notify.enabled ? "Notifying when a machine needs you or finishes" : "Notify me when a machine needs me or finishes"}
-                        </TooltipContent>
-                      </Tooltip>
-                    )}
-                    {getMe()?.kind === "user" && (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon-xs"
-                            aria-label="Sign out"
-                            onClick={() =>
-                              api
-                                .logout()
-                                .catch(() => {})
-                                .finally(() => signOut())
-                            }
-                          >
-                            <LogOut />
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side="top">Sign out {getMe()?.kind === "user" ? (getMe() as { login: string }).login : ""}</TooltipContent>
-                      </Tooltip>
-                    )}
-                    <Button variant="ghost" size="icon-xs" onClick={() => setDark(!dark)} aria-label={dark ? "Switch to light theme" : "Switch to dark theme"}>
-                      {dark ? <Moon /> : <Sun />}
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </>
+            railBody
           )}
         </aside>
 
-        <main className={cn("bg-background flex min-h-0 min-w-0 flex-col overflow-hidden", mobileRail ? "hidden md:flex" : "flex")}>
+        <main ref={mainRef} tabIndex={-1} className="bg-background flex min-h-0 min-w-0 flex-col overflow-hidden outline-none">
+          {/* Phone top bar: menu (opens the drawer), identity + health, new task. Desktop has the rail. */}
+          <div className="bg-card flex h-11 shrink-0 items-center gap-1 border-b px-1.5 md:hidden">
+            <Button variant="ghost" size="icon-sm" onClick={() => setMobileRail(true)} aria-label="Open menu" aria-expanded={mobileRail}>
+              <Menu className="size-4" />
+            </Button>
+            <Link to="/" className="text-foreground flex min-w-0 flex-1 items-center gap-2 px-1 text-meta font-semibold tracking-[-0.01em]">
+              <span className="truncate">Agent Sandbox</span>
+              <span className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-micro font-normal">
+                {healthDot}
+                {healthLine}
+              </span>
+            </Link>
+            <Button variant="ghost" size="icon-sm" onClick={newTask} aria-label="New task">
+              <Plus className="size-4" />
+            </Button>
+          </div>
           <AnimatePresence mode="wait" initial={false}>
             <motion.div
               key={paneKey}
@@ -753,6 +841,7 @@ const NAV_SPRING = { type: "spring", stiffness: 480, damping: 40, mass: 0.8 } as
 
 function NavItem({
   active,
+  flash,
   onClick,
   icon,
   label,
@@ -760,6 +849,8 @@ function NavItem({
   shortcut,
 }: {
   active: boolean;
+  /** Momentary highlight after the item's keyboard shortcut fired. */
+  flash?: boolean;
   onClick: () => void;
   icon: React.ReactNode;
   label: string;
@@ -767,13 +858,15 @@ function NavItem({
   shortcut?: string;
 }) {
   const reduce = useReducedMotion();
-  return (
+  const button = (
     <button
       type="button"
       onClick={onClick}
       aria-current={active ? "page" : undefined}
+      data-flash={flash ? "true" : undefined}
       className={cn(
-        "group relative isolate flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-meta transition-colors [&_svg]:size-4",
+        "group relative isolate flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-meta transition-colors duration-150 [&_svg]:size-4",
+        "data-[flash=true]:bg-muted",
         active ? "text-foreground font-medium" : "text-muted-foreground hover:text-foreground hover:bg-muted"
       )}
     >
@@ -784,27 +877,38 @@ function NavItem({
       )}
       {icon}
       {label}
-      <span className="ml-auto flex items-center gap-2">
-        {shortcut && <kbd className="text-faint hidden group-hover:inline">{shortcut}</kbd>}
-        {badge != null && <span className="text-muted-foreground tabular text-micro">{badge}</span>}
-      </span>
+      {badge != null && <span className="text-muted-foreground tabular ml-auto text-micro">{badge}</span>}
     </button>
+  );
+  if (!shortcut) return button;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{button}</TooltipTrigger>
+      <TooltipContent side="right">
+        {label}
+        <TooltipKbd>{shortcut}</TooltipKbd>
+      </TooltipContent>
+    </Tooltip>
   );
 }
 
 function RailIcon({
   active,
+  flash,
   onClick,
   icon,
   label,
+  shortcut,
   badge,
   dot,
   primary,
 }: {
   active?: boolean;
+  flash?: boolean;
   onClick: () => void;
   icon: React.ReactNode;
   label: string;
+  shortcut?: string;
   badge?: number;
   dot?: boolean;
   primary?: boolean;
@@ -816,10 +920,12 @@ function RailIcon({
         <button
           type="button"
           onClick={onClick}
-          aria-label={label}
+          aria-label={shortcut ? `${label} (${shortcut})` : label}
           aria-current={active ? "page" : undefined}
+          data-flash={flash ? "true" : undefined}
           className={cn(
-            "relative isolate grid size-10 cursor-pointer place-items-center rounded-md transition-colors [&_svg]:size-4",
+            "relative isolate grid size-10 cursor-pointer place-items-center rounded-md transition-colors duration-150 [&_svg]:size-4",
+            "data-[flash=true]:bg-muted",
             primary
               ? "bg-primary text-primary-foreground hover:bg-primary/80"
               : active
@@ -837,7 +943,10 @@ function RailIcon({
           )}
         </button>
       </TooltipTrigger>
-      <TooltipContent side="right">{label}</TooltipContent>
+      <TooltipContent side="right">
+        {label}
+        {shortcut && <TooltipKbd>{shortcut}</TooltipKbd>}
+      </TooltipContent>
     </Tooltip>
   );
 }

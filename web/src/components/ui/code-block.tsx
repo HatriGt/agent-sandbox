@@ -1,7 +1,12 @@
 import { cn } from "@/lib/utils"
-import { Check, Copy } from "lucide-react"
-import React, { useEffect, useState } from "react"
+import { Check, ChevronDown, Copy } from "lucide-react"
+import { motion, useReducedMotion } from "motion/react"
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react"
 import type { HighlighterCore } from "shiki/core"
+
+/** Blocks longer than this many lines start folded; a short overrun is not worth a fold. */
+const FOLD_AT = 24
+const FOLD_SLACK = 4
 
 export type CodeBlockProps = {
   children?: React.ReactNode
@@ -223,6 +228,9 @@ function CodeBlockCode({
     className
   )
 
+  const lineCount = code.replace(/\n$/, "").split("\n").length
+  const foldable = lineCount > FOLD_AT + FOLD_SLACK
+
   return (
     <>
       <CodeBlockHeader language={language} code={code} />
@@ -235,16 +243,80 @@ function CodeBlockCode({
         test/code-highlight-escaping.test.ts — which also fails if a second such sink appears.
         Never pass anything but highlighter output through here.
       */}
-      {highlightedHtml ? (
-        <div className={classNames} dangerouslySetInnerHTML={{ __html: highlightedHtml }} {...props} />
-      ) : (
-        <div className={classNames} {...props}>
-          <pre>
-            <code>{code}</code>
-          </pre>
-        </div>
-      )}
+      <Fold lines={lineCount} enabled={foldable}>
+        {highlightedHtml ? (
+          <div className={classNames} dangerouslySetInnerHTML={{ __html: highlightedHtml }} {...props} />
+        ) : (
+          <div className={classNames} {...props}>
+            <pre>
+              <code>{code}</code>
+            </pre>
+          </div>
+        )}
+      </Fold>
     </>
+  )
+}
+
+/**
+ * Caps a long block at FOLD_AT lines behind a bottom fade, with one control to unfold it. The
+ * collapsed height is measured from the rendered <pre> (its real line-height + padding) rather than
+ * guessed, so exactly 24 lines show and the fold never cuts a line in half. Expansion animates the
+ * height on the product curve; reduced motion snaps. Horizontal scrolling stays inside the clipped
+ * region, so wide code still scrolls while folded.
+ */
+function Fold({ lines, enabled, children }: { lines: number; enabled: boolean; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false)
+  const [collapsedH, setCollapsedH] = useState<number | null>(null)
+  const ref = useRef<HTMLDivElement>(null)
+  const still = useReducedMotion()
+
+  useLayoutEffect(() => {
+    if (!enabled) return
+    const pre = ref.current?.querySelector("pre")
+    if (!pre) return
+    const cs = getComputedStyle(pre)
+    const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.5 || 21
+    const pad = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0)
+    setCollapsedH(Math.round(FOLD_AT * lh + pad))
+  }, [enabled, children])
+
+  if (!enabled) return <>{children}</>
+
+  const hidden = lines - FOLD_AT
+  return (
+    <div>
+      <div className="relative">
+        <motion.div
+          ref={ref}
+          initial={false}
+          animate={{ height: open || collapsedH == null ? "auto" : collapsedH }}
+          transition={still ? { duration: 0 } : { duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+          className="overflow-hidden"
+        >
+          {children}
+        </motion.div>
+        {/* Fade over the last lines while folded; fades itself out on expand so the seam never pops. */}
+        <div
+          aria-hidden
+          className={cn(
+            "from-background/95 pointer-events-none absolute inset-x-0 bottom-0 h-14 bg-linear-to-t to-transparent transition-opacity duration-200",
+            open ? "opacity-0" : "opacity-100"
+          )}
+        />
+      </div>
+      <div className="border-border bg-muted/40 flex justify-center border-t">
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          className="text-muted-foreground hover:text-foreground flex w-full cursor-pointer items-center justify-center gap-1.5 px-3 py-2 text-micro font-medium transition-colors"
+        >
+          <ChevronDown className={cn("size-3.5 transition-transform duration-200 motion-reduce:transition-none", open && "rotate-180")} aria-hidden />
+          {open ? "Show less" : `Show ${hidden} more ${hidden === 1 ? "line" : "lines"}`}
+        </button>
+      </div>
+    </div>
   )
 }
 

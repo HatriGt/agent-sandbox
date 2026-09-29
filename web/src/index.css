@@ -355,18 +355,29 @@
     letter-spacing: -0.015em;
     text-wrap: balance;
   }
+  /* Sections in a long report must be findable at a glance: h1/h2 carry a hairline, h3 is a clear
+     step up from bold body text, h4 stays full-ink (muted headings vanish in dark mode). */
   .prose-agent h1 {
-    font-size: 1.3em;
+    font-size: 1.35em;
+    padding-bottom: 0.3em;
+    border-bottom: 1px solid var(--border);
   }
   .prose-agent h2 {
-    font-size: 1.15em;
+    font-size: 1.2em;
+    padding-bottom: 0.25em;
+    border-bottom: 1px solid var(--border);
   }
   .prose-agent h3 {
-    font-size: 1.05em;
+    font-size: 1.08em;
+    letter-spacing: -0.01em;
   }
   .prose-agent h4 {
-    font-size: 1em;
-    color: var(--muted-foreground);
+    font-size: 0.95em;
+    letter-spacing: 0.01em;
+    text-transform: uppercase;
+    font-size: 0.8em;
+    color: var(--foreground);
+    opacity: 0.85;
   }
   .prose-agent ul,
   .prose-agent ol {
@@ -431,18 +442,28 @@
   .dark .prose-agent :not(pre) > code {
     background: color-mix(in oklch, var(--foreground) 10%, transparent);
   }
-  .prose-agent table {
-    display: block;
-    width: max-content;
+  /* Plain tables: a bordered, rounded panel that scrolls sideways when wide, header on a muted band. */
+  .prose-agent .table-wrap {
+    margin: 1em 0;
     max-width: 100%;
     overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  .prose-agent table {
+    width: max-content;
+    min-width: 100%;
     border-collapse: collapse;
-    margin: 1em 0;
+    margin: 0;
     font-size: 0.9em;
     font-variant-numeric: tabular-nums;
   }
   .prose-agent thead {
+    background: color-mix(in oklch, var(--muted) 70%, transparent);
     border-bottom: 1px solid var(--line-strong);
+  }
+  .prose-agent tbody tr:hover {
+    background: color-mix(in oklch, var(--foreground) 2.5%, transparent);
   }
   .prose-agent th {
     text-align: left;
@@ -990,3 +1011,59 @@ button:not(:disabled):active, [role="tab"]:active, [role="radio"]:active { trans
 .diff-mark { color: inherit; border-radius: 3px; padding: 1px 0; }
 .diff-row-add .diff-mark { background: color-mix(in oklch, var(--ok) 30%, transparent); }
 .diff-row-del .diff-mark { background: color-mix(in oklch, var(--destructive) 26%, transparent); }
+
+/* Conversation surfaces ---------------------------------------------------------------------------- */
+
+/* The agent's mark: a 14px sphere in the live hue, lit from the top-left. Breathes while live. */
+.agent-mark {
+  display: inline-block;
+  width: 0.875rem;
+  height: 0.875rem;
+  border-radius: 9999px;
+  background: radial-gradient(circle at 32% 28%, color-mix(in oklch, var(--live) 40%, white) 0%, var(--live) 52%, color-mix(in oklch, var(--live) 65%, black) 100%);
+  box-shadow: 0 0 0 1px color-mix(in oklch, var(--live) 18%, transparent), 0 1px 2px color-mix(in oklch, var(--live) 30%, transparent);
+}
+.agent-mark-live {
+  animation: orb-bloom 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Your bubble: a muted fill with a hairline and a whisper of lift, so it sits ON the page. */
+.you-bubble {
+  background: color-mix(in oklch, var(--muted) 88%, var(--card));
+  border: 1px solid color-mix(in oklch, var(--border) 80%, transparent);
+  box-shadow: 0 1px 2px oklch(0 0 0 / 0.04);
+}
+.dark .you-bubble {
+  background: color-mix(in oklch, var(--muted) 80%, var(--card));
+  box-shadow: inset 0 1px 0 0 oklch(1 0 0 / 0.04);
+}
+
+/* The tool timeline's ground: a quiet inset panel, one step below the prose. */
+.work-surface {
+  padding: 0.625rem 0.75rem 0.625rem 0.5rem;
+  border-radius: 0.75rem;
+  border: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
+  background: color-mix(in oklch, var(--muted) 35%, transparent);
+}
+
+/* Composer depth: hairline plus soft elevation, and a top highlight that reads as a lit edge. */
+.composer-depth {
+  box-shadow:
+    inset 0 1px 0 0 oklch(1 0 0 / 0.5),
+    0 1px 2px oklch(0 0 0 / 0.05),
+    0 8px 24px -16px oklch(0 0 0 / 0.25);
+}
+.dark .composer-depth {
+  box-shadow:
+    inset 0 1px 0 0 oklch(1 0 0 / 0.05),
+    0 1px 2px oklch(0 0 0 / 0.3),
+    0 8px 24px -16px oklch(0 0 0 / 0.6);
+}
+
+/* A faint brand glow at the head of the conversation. */
+.thread-glow {
+  background: radial-gradient(60% 24rem at 50% 0%, color-mix(in oklch, var(--live) 5%, transparent), transparent 70%);
+}
+.dark .thread-glow {
+  background: radial-gradient(60% 24rem at 50% 0%, color-mix(in oklch, var(--live) 8%, transparent), transparent 70%);
+}

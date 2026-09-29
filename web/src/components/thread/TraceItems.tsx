@@ -339,7 +339,8 @@ export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolea
             // opacity stays a short tween so the fade never lags behind the reveal.
             transition={still ? { duration: 0 } : { height: SPRING, opacity: { duration: 0.16, ease: [0.22, 1, 0.36, 1] } }}
             // Capped: a 60-step group opened by accident must not shove the conversation a screen down.
-            className="relative mt-1.5 max-h-[32rem] overflow-y-auto overscroll-contain pl-0.5"
+            // The timeline sits on its own quiet surface, so "work" reads apart from the agent's prose.
+            className="work-surface relative mt-2 max-h-[32rem] overflow-y-auto overscroll-contain"
           >
             {events.map((e, i) => {
               const running = !!live && !e.result;
@@ -579,8 +580,9 @@ export const SayItem = React.memo(function SayItem({ text, live, label = true, a
  */
 export function AgentLabel({ live, at }: { live?: boolean; at?: number }) {
   return (
-    <span className="label text-muted-foreground mb-1.5 flex items-center gap-1.5">
-      <span className={cn("size-1.5 rounded-full", live ? "bg-live breathe" : "bg-faint")} aria-hidden />
+    <span className="label text-muted-foreground mb-1.5 flex items-center gap-2">
+      {/* The agent's mark: a small sphere in the live hue. It breathes only while the agent works. */}
+      <span className={cn("agent-mark", live && "agent-mark-live")} aria-hidden />
       Agent
       {at !== undefined && (
         <TimeStamp at={at} className="ml-0.5 normal-case tracking-normal opacity-0 transition-opacity duration-150 group-hover/say:opacity-100 [@media(hover:none)]:opacity-100" />
@@ -723,7 +725,7 @@ export function YouItem({ text, label = "You", onRevert, at, noEnter = false }: 
           </Tooltip>
         )}
       {body && (
-        <div className="bg-muted text-foreground min-w-0 max-w-[min(72%,60ch)] rounded-xl rounded-br-md px-4 py-2.5 text-lead break-words whitespace-pre-wrap [overflow-wrap:anywhere]">
+        <div className="you-bubble text-foreground min-w-0 max-w-[min(72%,60ch)] rounded-2xl rounded-br-md px-4 py-2.5 text-lead break-words whitespace-pre-wrap [overflow-wrap:anywhere]">
           {skillName ? (
             <>
               <span className="border-live/30 bg-live/10 text-live stamp mr-1.5 inline-flex translate-y-[-1px] items-center gap-1 rounded-md border px-1.5 py-0.5 align-middle text-micro font-semibold">

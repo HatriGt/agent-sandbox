@@ -47,6 +47,18 @@ export function RunSummary({
     context ? <><NumberTicker value={Math.round(context.fraction * 100)} />% context</> : null,
     detail || null,
   ].filter(Boolean) as React.ReactNode[];
+  // The same sentence as plain text, for the title: a truncated stat line must still be readable.
+  const plain = [
+    stats.steps ? `${stats.steps} ${stats.steps === 1 ? "step" : "steps"}` : null,
+    stats.files ? `${stats.files} ${stats.files === 1 ? "file" : "files"}` : null,
+    stats.commands ? `${stats.commands} ${stats.commands === 1 ? "command" : "commands"}` : null,
+    stats.failed ? `${stats.failed} failed` : null,
+    durationSec && durationSec > 0 ? fmtDuration(Math.round(durationSec)) : null,
+    context ? `${Math.round(context.fraction * 100)}% context` : null,
+    detail || null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   const copy = async () => {
     try {
@@ -71,7 +83,7 @@ export function RunSummary({
         {label}
       </span>
       {parts.length > 0 && (
-        <span className="text-faint truncate text-micro">
+        <span className="text-faint min-w-0 truncate text-micro" title={plain}>
           {parts.map((p, i) => (
             <React.Fragment key={i}>
               {i > 0 && " · "}

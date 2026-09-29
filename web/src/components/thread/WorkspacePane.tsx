@@ -1,6 +1,6 @@
 import * as React from "react";
 import { ArrowDown, ArrowUp, Check, ChevronRight, Download, Files, FileCode2, FileDiff, GitBranch, GitCommitHorizontal, Loader2, Maximize2, Minimize2, PanelRight, RefreshCw, Search, Table2, Upload, X } from "lucide-react";
-import { motion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 import { toast } from "sonner";
 import { api, ApiError, type ChangedFile, type GitStatus } from "@/lib/api";
 import { parseUnifiedDiff, diffForNewFile, type ParsedDiff } from "@/lib/diff";
@@ -176,6 +176,7 @@ export function WorkspacePane({ session, changes, open, onClose, onSaved, repos,
   };
 
   const filesTitle = view === "scm" ? "Changes" : "Files";
+  const still = useReducedMotion();
   return (
     <motion.aside
       initial={{ width: 0, opacity: 0 }}
@@ -196,7 +197,13 @@ export function WorkspacePane({ session, changes, open, onClose, onSaved, repos,
             const base = t.path.slice(t.path.lastIndexOf("/") + 1);
             return (
               <div key={t.path} role="tab" aria-selected={on} className={cn("group relative flex h-7 shrink-0 items-center gap-1.5 rounded-md pr-1 pl-2 text-meta transition-colors", on ? "text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-muted/60")}>
-                {on && <motion.span layoutId="ws-active-tab" className="bg-muted absolute inset-0 -z-10 rounded-md" transition={{ type: "spring", stiffness: 500, damping: 40 }} aria-hidden />}
+                {/* The active tab's pill glides between tabs (shared layoutId); an underline rides
+                    along its bottom edge so the active file reads even where the pill is faint. */}
+                {on && (
+                  <motion.span layoutId="ws-active-tab" className="bg-muted absolute inset-0 -z-10 rounded-md" transition={still ? { duration: 0 } : { type: "spring", stiffness: 500, damping: 40 }} aria-hidden>
+                    <span className="bg-foreground/70 absolute inset-x-2 bottom-0 h-px rounded-full" />
+                  </motion.span>
+                )}
                 <button type="button" onClick={() => setActive(t.path)} className="no-press flex cursor-pointer items-center gap-1.5">
                   <FileIcon path={t.path} size={14} />
                   <span className={cn("text-micro", t.dirty && "italic")}>{base}</span>
@@ -361,10 +368,10 @@ function TreeLevel({ node, depth, expanded, setExpanded, active, changeByPath, o
                   })
                 }
                 aria-expanded={isOpen}
-                className="hover:bg-muted text-foreground flex h-[26px] w-full cursor-pointer items-center gap-1 pr-2 text-left text-meta"
+                className="hover:bg-muted text-foreground flex h-[26px] w-full cursor-pointer items-center gap-1 pr-2 text-left text-meta transition-colors"
                 style={{ paddingLeft: `${8 + depth * 12}px` }}
               >
-                <ChevronRight className={cn("text-muted-foreground size-3.5 shrink-0 transition-transform duration-150", isOpen && "rotate-90")} />
+                <ChevronRight className={cn("text-muted-foreground size-3.5 shrink-0 transition-transform duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none", isOpen && "rotate-90")} />
                 <FolderIcon name={child.name} open={isOpen} />
                 <span className={cn("truncate", repo && "font-semibold")}>{child.name}</span>
                 {repo && (
@@ -389,12 +396,25 @@ function TreeLevel({ node, depth, expanded, setExpanded, active, changeByPath, o
   );
 }
 
-function FileRow({ path, depth, active, change, onOpen, showDir }: { path: string; depth: number; active: boolean; change?: ChangedFile; onOpen: () => void; showDir?: boolean }) {
+/**
+ * The selected row's highlight is one shared element (`layoutId`) that glides from the old row to
+ * the new one, instead of two tints swapping. Only one list is mounted at a time (Explorer / Go to
+ * file / Changes), so the id can be shared; Go to file passes `glide={false}` because its keyboard
+ * cursor and the open file may both be lit at once.
+ */
+function ActiveRow({ glide = true }: { glide?: boolean }) {
+  const still = useReducedMotion();
+  if (!glide || still) return <span className="bg-accent absolute inset-0 -z-10" aria-hidden />;
+  return <motion.span layoutId="ws-active-row" className="bg-accent absolute inset-0 -z-10" transition={{ type: "spring", stiffness: 520, damping: 42, mass: 0.7 }} aria-hidden />;
+}
+
+function FileRow({ path, depth, active, change, onOpen, showDir, glide }: { path: string; depth: number; active: boolean; change?: ChangedFile; onOpen: () => void; showDir?: boolean; glide?: boolean }) {
   const base = path.slice(path.lastIndexOf("/") + 1);
   const dir = path.slice(0, Math.max(0, path.lastIndexOf("/")));
   const st = change ? STATUS_LETTER[change.status] : null;
   return (
-    <button type="button" onClick={onOpen} className={cn("flex h-[26px] w-full cursor-pointer items-center gap-1.5 pr-2 text-left text-meta", active ? "bg-accent text-foreground" : "hover:bg-muted text-foreground")} style={{ paddingLeft: `${8 + depth * 12 + 18}px` }} title={path}>
+    <button type="button" onClick={onOpen} className={cn("text-foreground relative isolate flex h-[26px] w-full cursor-pointer items-center gap-1.5 pr-2 text-left text-meta transition-colors", !active && "hover:bg-muted")} style={{ paddingLeft: `${8 + depth * 12 + 18}px` }} title={path}>
+      {active && <ActiveRow glide={glide} />}
       <FileIcon path={path} size={15} />
       <span className={cn("truncate", change?.status === "deleted" && "line-through", st?.tone)}>{base}</span>
       {showDir && dir && <span className="stamp text-muted-foreground truncate">{dir}</span>}
@@ -431,7 +451,7 @@ function GoToFile({ paths, query: q, active, changeByPath, onOpen }: { paths: st
       <ul className="min-h-0 flex-1 overflow-auto pb-2">
         {matches.map((p, i) => (
           <li key={p}>
-            <FileRow path={p} depth={-1} active={active === p || i === cursor} change={changeByPath.get(p)} onOpen={() => onOpen(p)} showDir />
+            <FileRow path={p} depth={-1} active={active === p || i === cursor} change={changeByPath.get(p)} onOpen={() => onOpen(p)} showDir glide={false} />
           </li>
         ))}
         {paths && matches.length === 0 && <li className="text-muted-foreground px-3 py-2 text-micro">No file matches “{q.trim()}”.</li>}
@@ -550,7 +570,8 @@ function SourceControl({ session, repo, status, err, reload: load, changes, acti
           const st = STATUS_LETTER[c.status];
           return (
             <li key={c.path}>
-              <button type="button" onClick={() => onOpen(c.path)} className={cn("flex h-[26px] w-full cursor-pointer items-center gap-1.5 px-3 text-left text-meta", active === c.path ? "bg-accent" : "hover:bg-muted")} title={c.path}>
+              <button type="button" onClick={() => onOpen(c.path)} className={cn("relative isolate flex h-[26px] w-full cursor-pointer items-center gap-1.5 px-3 text-left text-meta transition-colors", active !== c.path && "hover:bg-muted")} title={c.path}>
+                {active === c.path && <ActiveRow />}
                 <FileIcon path={c.path} size={15} />
                 <span className={cn("truncate", c.status === "deleted" && "line-through")}>{base}</span>
                 {dir && <span className="stamp text-muted-foreground truncate">{dir}</span>}

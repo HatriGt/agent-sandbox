@@ -12,7 +12,7 @@
  * divide-y cards, dashed empty states. No hero, one accent at a time, motion only where state moves.
  */
 import * as React from "react";
-import { ArrowLeft, ArrowUpRight, Check, CircleDashed, FileDiff, GitBranch, GitCommitHorizontal, MessageSquare, ShieldCheck, X } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, Check, ChevronRight, CircleDashed, FileDiff, GitBranch, GitCommitHorizontal, MessageSquare, ShieldCheck, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
 import { api, type PullDetail } from "@/lib/api";
@@ -29,6 +29,47 @@ import { reviewLabel, verdict, type MergeMethod, type Verdict } from "./verdict"
 
 type Tab = "conversation" | "commits" | "files" | "checks";
 const TABS: readonly Tab[] = ["conversation", "commits", "files", "checks"];
+
+/**
+ * A long path with its middle folded — `src/…/Button.tsx` — because in a file list the two ends
+ * carry the meaning (which tree, which file) and the middle is what you can look up in the title.
+ */
+function middleEllipsis(path: string, max = 56): string {
+  if (path.length <= max) return path;
+  const segs = path.split("/");
+  // No folders to fold: cut the middle of the name itself.
+  if (segs.length <= 2) return `${path.slice(0, Math.floor(max / 2) - 1)}…${path.slice(-(Math.ceil(max / 2) - 1))}`;
+  const head = segs[0];
+  const tail = [segs[segs.length - 1]];
+  // Grow the tail back one folder at a time while it still fits beside the head and the "/…/".
+  for (let i = segs.length - 2; i > 0; i--) {
+    if (head.length + 3 + [segs[i], ...tail].join("/").length > max) break;
+    tail.unshift(segs[i]);
+  }
+  return `${head}/…/${tail.join("/")}`;
+}
+
+/** The row-end affordance: a chevron or external-link glyph that fades in with the hover tint. */
+const ROW = "group hover:bg-muted/60 transition-colors";
+const ROW_ICON = "text-faint size-3.5 shrink-0 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100";
+
+/**
+ * True once the sentinel above a sticky bar has scrolled out of the top of `root`. Drives a
+ * `data-scrolled` attribute so the bar's hairline can turn into a shadow only when it is floating
+ * over content — a shadow at rest is a lie about depth.
+ */
+function useScrolledPast(root: React.RefObject<HTMLElement | null>, sentinel: React.RefObject<HTMLElement | null>) {
+  const [scrolled, setScrolled] = React.useState(false);
+  React.useEffect(() => {
+    const r = root.current;
+    const s = sentinel.current;
+    if (!r || !s) return;
+    const io = new IntersectionObserver(([e]) => setScrolled(!e.isIntersecting), { root: r, rootMargin: "-1px 0px 0px 0px", threshold: 0 });
+    io.observe(s);
+    return () => io.disconnect();
+  }, [root, sentinel]);
+  return scrolled;
+}
 
 export function PullRequestPage({ session, repo, number }: { session: string; repo: string; number: number }) {
   const go = useGo();
@@ -57,9 +98,12 @@ export function PullRequestPage({ session, repo, number }: { session: string; re
   }, [load]);
 
   const v = verdict(pr);
+  const scroller = React.useRef<HTMLDivElement>(null);
+  const sentinel = React.useRef<HTMLDivElement>(null);
+  const scrolled = useScrolledPast(scroller, sentinel);
 
   return (
-    <div className="h-full min-w-0 overflow-y-auto">
+    <div ref={scroller} className="h-full min-w-0 overflow-y-auto">
       <div className="mx-auto max-w-[880px] px-5 py-7 md:px-8 md:py-9">
         {/* ---- header, in the Fleet page's shape: back, h1, meta line ---- */}
         <header className="mb-5">
@@ -95,9 +139,14 @@ export function PullRequestPage({ session, repo, number }: { session: string; re
                 </span>
                 <span className="stamp bg-muted text-foreground inline-flex max-w-full min-w-0 items-center gap-1 rounded-md px-1.5 py-0.5">
                   <GitBranch className="size-3 shrink-0 opacity-60" aria-hidden />
-                  <span className="truncate">{pr.head}</span>
+                  {/* Each branch may take at most half the pill, so a long head can never push the base out of view. */}
+                  <span className="max-w-[45%] truncate" title={pr.head}>
+                    {pr.head}
+                  </span>
                   <span className="text-muted-foreground shrink-0">→</span>
-                  <span className="truncate">{pr.base}</span>
+                  <span className="max-w-[45%] truncate" title={pr.base}>
+                    {pr.base}
+                  </span>
                 </span>
                 <a
                   href={pr.url ?? `https://github.com/${repo}/pull/${number}`}
@@ -125,21 +174,32 @@ export function PullRequestPage({ session, repo, number }: { session: string; re
         {/* ---- actions ---- */}
         {pr && <ActionBar pr={pr} v={v} session={session} repo={repo} number={number} onChanged={() => void load()} />}
 
-        {/* ---- section pills, the Fleet filter-chip idiom ---- */}
-        <AnimatedTabs
-          ariaLabel="Pull request sections"
-          idBase="pr-section"
-          size="md"
-          className="scrollbar-none mt-6 mb-3 max-w-full overflow-x-auto"
-          value={tab}
-          onChange={setTab}
-          items={[
-            { value: "conversation", icon: <MessageSquare className="size-3.5" aria-hidden />, label: "Conversation", badge: <Count n={pr ? (pr.comments?.length ?? 0) + 1 : undefined} /> },
-            { value: "commits", icon: <GitCommitHorizontal className="size-3.5" aria-hidden />, label: "Commits", badge: <Count n={pr?.commits?.length} /> },
-            { value: "files", icon: <FileDiff className="size-3.5" aria-hidden />, label: "Files changed", badge: <Count n={pr?.files?.length} /> },
-            { value: "checks", icon: <ShieldCheck className="size-3.5" aria-hidden />, label: "Checks", badge: <Count n={pr?.checkRuns?.length} /> },
-          ]}
-        />
+        {/* ---- section pills, the Fleet filter-chip idiom. The bar sticks to the top while you
+             read a long diff; the sentinel just above it tells us when it has started floating,
+             and the hairline underneath trades places with a shadow (border → shadow-e2). ---- */}
+        <div ref={sentinel} aria-hidden className="mt-6 h-px" />
+        <div
+          data-scrolled={scrolled || undefined}
+          className={cn(
+            "bg-background/95 sticky top-0 z-10 -mx-5 mb-3 border-b px-5 py-2 backdrop-blur transition-[box-shadow,border-color] duration-200 md:-mx-8 md:px-8",
+            scrolled ? "border-transparent shadow-e2" : "border-border"
+          )}
+        >
+          <AnimatedTabs
+            ariaLabel="Pull request sections"
+            idBase="pr-section"
+            size="md"
+            className="scrollbar-none max-w-full overflow-x-auto"
+            value={tab}
+            onChange={setTab}
+            items={[
+              { value: "conversation", icon: <MessageSquare className="size-3.5" aria-hidden />, label: "Conversation", badge: <Count n={pr ? (pr.comments?.length ?? 0) + 1 : undefined} /> },
+              { value: "commits", icon: <GitCommitHorizontal className="size-3.5" aria-hidden />, label: "Commits", badge: <Count n={pr?.commits?.length} /> },
+              { value: "files", icon: <FileDiff className="size-3.5" aria-hidden />, label: "Files changed", badge: <Count n={pr?.files?.length} /> },
+              { value: "checks", icon: <ShieldCheck className="size-3.5" aria-hidden />, label: "Checks", badge: <Count n={pr?.checkRuns?.length} /> },
+            ]}
+          />
+        </div>
 
         {!pr ? (
           <div className="overflow-hidden rounded-xl border">
@@ -293,22 +353,28 @@ function Commits({ pr, repo }: { pr: PullDetail; repo: string }) {
   if (!pr.commits?.length) return <Empty>No commits on this pull request.</Empty>;
   return (
     <ul className="divide-y overflow-hidden rounded-xl border">
-      {pr.commits.map((c) => (
-        <li key={c.sha} className="hover:bg-muted/40 flex items-center gap-3 px-3.5 py-2.5 transition-colors">
-          <GitCommitHorizontal className="text-muted-foreground size-4 shrink-0" aria-hidden />
-          <div className="min-w-0 flex-1">
-            {/* Only the subject line: a commit body belongs in the diff, not in a list row. */}
-            <p className="text-foreground truncate text-meta font-medium">{c.message.split("\n")[0]}</p>
-            <p className="text-muted-foreground mt-0.5 text-micro">
-              {c.author ?? "unknown"}
-              {c.date ? ` · ${relativeTime(c.date)}` : ""}
-            </p>
-          </div>
-          <a href={`https://github.com/${repo}/commit/${c.sha}`} target="_blank" rel="noreferrer noopener" className="stamp bg-muted text-muted-foreground hover:text-foreground shrink-0 rounded-md px-1.5 py-0.5 transition-colors">
-            {c.sha.slice(0, 7)}
-          </a>
-        </li>
-      ))}
+      {pr.commits.map((c) => {
+        const subject = c.message.split("\n")[0];
+        return (
+          <li key={c.sha} className={cn(ROW, "flex items-center gap-3 px-3.5 py-2.5")}>
+            <GitCommitHorizontal className="text-muted-foreground size-4 shrink-0" aria-hidden />
+            <div className="min-w-0 flex-1">
+              {/* Only the subject line: a commit body belongs in the diff, not in a list row. */}
+              <p className="text-foreground truncate text-meta font-medium" title={subject}>
+                {subject}
+              </p>
+              <p className="text-muted-foreground mt-0.5 text-micro">
+                {c.author ?? "unknown"}
+                {c.date ? ` · ${relativeTime(c.date)}` : ""}
+              </p>
+            </div>
+            <a href={`https://github.com/${repo}/commit/${c.sha}`} target="_blank" rel="noreferrer noopener" className="stamp bg-muted text-muted-foreground hover:text-foreground shrink-0 rounded-md px-1.5 py-0.5 transition-colors">
+              {c.sha.slice(0, 7)}
+            </a>
+            <ArrowUpRight className={ROW_ICON} aria-hidden />
+          </li>
+        );
+      })}
     </ul>
   );
 }
@@ -327,13 +393,17 @@ function Files({ pr }: { pr: PullDetail }) {
           const on = open === f.path;
           return (
             <div key={f.path}>
-              <button type="button" onClick={() => setOpen(on ? null : f.path)} aria-expanded={on} className="hover:bg-muted/40 flex w-full cursor-pointer items-center gap-2.5 px-3.5 py-2.5 text-left transition-colors">
+              <button type="button" onClick={() => setOpen(on ? null : f.path)} aria-expanded={on} className={cn(ROW, "flex w-full cursor-pointer items-center gap-2.5 px-3.5 py-2.5 text-left", on && "bg-muted/40")}>
                 <FileMark path={f.path} className="size-4 shrink-0" />
-                <span className="stamp text-foreground min-w-0 flex-1 truncate">{f.path}</span>
+                <span className="stamp text-foreground min-w-0 flex-1 truncate" title={f.path}>
+                  {middleEllipsis(f.path)}
+                </span>
                 {f.status !== "modified" && <span className="label text-faint shrink-0">{f.status}</span>}
                 <span className="stamp shrink-0">
                   <span className="text-ok">+{f.additions}</span> <span className="text-destructive">−{f.deletions}</span>
                 </span>
+                {/* The disclosure chevron: faint until hovered, always visible once the file is open, rotating to point down. */}
+                <ChevronRight className={cn(ROW_ICON, "transition-[opacity,rotate] motion-safe:duration-200", on && "rotate-90 opacity-100")} aria-hidden />
               </button>
               <AnimatePresence initial={false}>
                 {on && (
@@ -388,15 +458,17 @@ function Checks({ pr }: { pr: PullDetail }) {
             ) : (
               <X className="text-destructive size-3 shrink-0" aria-hidden strokeWidth={2.5} />
             )}
-            <span className="text-foreground min-w-0 flex-1 truncate text-meta">{c.name}</span>
+            <span className="text-foreground min-w-0 flex-1 truncate text-meta" title={c.name}>
+              {c.name}
+            </span>
             <span className={cn("label shrink-0", running ? "text-live" : ok ? "text-ok" : "text-destructive")}>{running ? "running" : (c.conclusion ?? "done")}</span>
-            {c.url && <ArrowUpRight className="text-faint size-3.5 shrink-0" aria-hidden />}
+            {c.url && <ArrowUpRight className={ROW_ICON} aria-hidden />}
           </>
         );
         return (
           <li key={`${c.name}-${i}`}>
             {c.url ? (
-              <a href={c.url} target="_blank" rel="noreferrer noopener" className="hover:bg-muted/40 flex items-center gap-2.5 px-3.5 py-2.5 transition-colors">
+              <a href={c.url} target="_blank" rel="noreferrer noopener" className={cn(ROW, "flex items-center gap-2.5 px-3.5 py-2.5")}>
                 {inner}
               </a>
             ) : (

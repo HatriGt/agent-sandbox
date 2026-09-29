@@ -653,6 +653,12 @@ export function Thread({
       <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col", showWorkspace && workspaceFull && "hidden md:hidden")}>
       <div className="relative min-h-0 min-w-0 flex-1">
         <ThreadMinimap turns={turns} scrollerRef={stick.scrollRef} />
+        {/* Ambient depth: a faint brand glow at the head of the conversation, and soft fades at the
+            top and bottom edges so messages dissolve under the header and into the composer rather
+            than being sliced by them. Pure decoration; pointer-events off. */}
+        <div aria-hidden className="thread-glow pointer-events-none absolute inset-0" />
+        <div aria-hidden className="from-background pointer-events-none absolute inset-x-0 top-0 z-10 h-6 bg-gradient-to-b to-transparent" />
+        <div aria-hidden className="to-background pointer-events-none absolute inset-x-0 bottom-0 z-10 h-8 bg-gradient-to-b from-transparent" />
         <ChatContainerRoot className="relative h-full [&>div]:overflow-x-hidden" instance={stick} aria-label="Conversation" aria-busy={runState === "running"}>
           <ChatContainerContent className="mx-auto w-full max-w-3xl gap-5 px-4 pt-7 pb-12 md:px-6">
             {box.task && (

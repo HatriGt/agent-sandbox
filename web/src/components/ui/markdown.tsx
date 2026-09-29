@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils"
 import { marked } from "marked"
-import { memo, useId, useMemo } from "react"
+import { Children, isValidElement, memo, useId, useMemo, type ReactElement, type ReactNode } from "react"
 import ReactMarkdown, { type Components } from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { normalizeBlocks } from "@/lib/markdown-normalize"
@@ -73,10 +73,19 @@ const INITIAL_COMPONENTS: Partial<Components> = {
     )
   },
   // GFM tables upgrade to the sortable DataTable (numeric alignment, magnitude bars, copy CSV).
+  // …but only when there is enough data to sort: a three-row table under a paragraph is prose, and
+  // the sortable chrome (toolbar, magnitude bars) would outweigh it.
   table: function TableComponent({ children }) {
-    const rich = tableFromMarkdown(children)
+    const bodyRows = Children.toArray(children)
+      .filter((s): s is ReactElement<{ children?: ReactNode }> => isValidElement(s) && s.type === "tbody")
+      .reduce((n, s) => n + Children.toArray(s.props.children).length, 0)
+    const rich = bodyRows >= 5 ? tableFromMarkdown(children) : null
     if (rich) return rich
-    return <table>{children}</table>
+    return (
+      <div className="table-wrap">
+        <table>{children}</table>
+      </div>
+    )
   },
   // GitHub-style alerts (`> [!NOTE]` …) upgrade to callout cards; ordinary quotes stay quotes.
   blockquote: function BlockquoteComponent({ children, node: _node, ...props }) {

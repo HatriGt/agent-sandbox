@@ -175,8 +175,30 @@ export function ThreadHeader({
   const busyFor = resizeTo?.kind === "disk" ? diskBusy : memoryBusy;
   const vitals = [box.agent === "omp" && "agent oh-my-pi", box.uptime && `${sleeping ? "ran for" : "up"} ${box.uptime}`, box.cpu && `cpu ${box.cpu}`, box.memUsage && `memory ${fmtUsage(box.memUsage)}`, box.disk && `disk ${fmtUsage(box.disk)}`, roleLabel(box.role)].filter(Boolean).join(" · ");
 
+  // The conversation scroller is a sibling rendered by Thread, not a child, so there is nothing to
+  // ref. Scroll events don't bubble but they DO capture, so one capture-phase listener on the
+  // header's parent hears every scroller below it; we keep only the conversation's (aria-label),
+  // and flip data-scrolled so the hairline underneath becomes a shadow while content is under it.
+  const headerRef = React.useRef<HTMLElement>(null);
+  const [scrolled, setScrolled] = React.useState(false);
+  React.useEffect(() => {
+    const parent = headerRef.current?.parentElement;
+    if (!parent) return;
+    const onScroll = (e: Event) => {
+      const t = e.target;
+      if (!(t instanceof HTMLElement) || !t.closest('[aria-label="Conversation"]')) return;
+      setScrolled(t.scrollTop > 2);
+    };
+    parent.addEventListener("scroll", onScroll, true);
+    return () => parent.removeEventListener("scroll", onScroll, true);
+  }, [box.name]);
+
   return (
-    <header className="shrink-0 border-b px-3 py-2.5 md:px-5">
+    <header
+      ref={headerRef}
+      data-scrolled={scrolled || undefined}
+      className={cn("relative z-10 shrink-0 border-b px-3 py-2.5 transition-[box-shadow,border-color] duration-200 md:px-5", scrolled ? "border-transparent shadow-e2" : "border-border")}
+    >
       {/* Line 1: identity + controls */}
       <div className="flex items-center gap-2">
         <Button variant="ghost" size="icon-sm" onClick={onBack} aria-label="Back to machines" className="-ml-1 md:hidden">
@@ -206,23 +228,25 @@ export function ThreadHeader({
               title="Rename"
               className="group/title flex min-w-0 cursor-text items-center gap-1.5 text-left no-press"
             >
-              {/* A rename crossfades: the old title lifts out, the new one rises in. */}
-              <Swap state={title} className="min-w-0">
-                <span className="text-foreground block min-w-0 truncate text-h3 font-semibold tracking-[-0.01em]">{title}</span>
+              {/* A rename crossfades: the old title lifts out, the new one rises in. min-w-0 all the
+                  way down, so on a phone the title truncates instead of shoving the controls off. */}
+              <Swap state={title} className="min-w-0 flex-1 overflow-hidden">
+                <span className="text-foreground block min-w-0 truncate text-h3 font-semibold tracking-[-0.01em]" title={title}>
+                  {title}
+                </span>
               </Swap>
               <Pencil className="text-faint size-3 shrink-0 -translate-x-0.5 opacity-0 transition-[opacity,translate] duration-150 group-hover/title:translate-x-0 group-hover/title:opacity-100 group-focus-visible/title:opacity-100" aria-hidden />
             </button>
           </h1>
         )}
 
+        {/* Under md the secondary actions (new task, files) fold into the ⋯ menu — one control beside
+            the title, so the title keeps the width. */}
         <div className="ml-auto flex shrink-0 items-center gap-1">
-          <Button variant="ghost" size="icon-sm" onClick={onNew} aria-label="New task" className="md:hidden">
-            <Plus />
-          </Button>
           <Tooltip>
             <TooltipTrigger asChild>
               {/* A disabled button emits no pointer events; the span carries the tooltip while asleep. */}
-              <span tabIndex={sleeping ? 0 : -1} className="inline-flex rounded-md outline-none">
+              <span tabIndex={sleeping ? 0 : -1} className="hidden rounded-md outline-none md:inline-flex">
                 <Button variant="ghost" size="sm" onClick={onToggleWorkspace} aria-pressed={showWorkspace} className={cn("text-muted-foreground", showWorkspace && "bg-accent text-foreground")} disabled={sleeping}>
                   <FolderTree />
                   <span className="hidden sm:inline">Files</span>
@@ -248,6 +272,16 @@ export function ThreadHeader({
                 }
               }}
             >
+              <DropdownMenuItem onSelect={onNew} className="md:hidden">
+                <Plus />
+                New task
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={onToggleWorkspace} disabled={sleeping} className="md:hidden" aria-pressed={showWorkspace}>
+                <FolderTree />
+                {showWorkspace ? "Hide files" : "Files"}
+                <MenuHint>{sleeping ? "asleep" : "browse, diff, edit"}</MenuHint>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator className="md:hidden" />
               {box.role !== "pool-free" && (
                 <DropdownMenuItem onSelect={onToggleKeep} disabled={keeping}>
                   {kept ? <PinOff /> : <Pin />}

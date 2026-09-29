@@ -345,7 +345,7 @@ export function SendBar({
           }}
           isLoading={sending}
           className={cn(
-            "bg-card raised composer-glow rounded-xl p-2",
+            "bg-card raised composer-glow composer-depth rounded-2xl p-2",
             toAgent ? "border-line-strong" : "border-border border-dashed",
             sleeping && "border-sleep/50",
             dragOver && "border-live ring-live/40 ring-2",
@@ -538,12 +538,7 @@ export function SendBar({
               />
             </div>
 
-            <p
-              className={cn("hidden min-w-0 flex-1 truncate text-micro sm:block", error ? "text-destructive" : "text-muted-foreground")}
-              role={error ? "alert" : undefined}
-            >
-              {error ?? hint}
-            </p>
+            <span className="min-w-0 flex-1" />
 
             <Button
               variant={toAgent ? "primary" : "outline"}
@@ -570,7 +565,9 @@ export function SendBar({
         </PromptInput>
         <Lightbox src={preview?.dataUrl ?? null} name={preview?.name ?? ""} open={!!preview} onClose={() => setPreview(null)} />
 
-        <p className={cn("mt-1.5 min-h-4 px-1 text-center text-micro sm:hidden", error ? "text-destructive" : "text-muted-foreground")}>
+        {/* The hint is a caption under the composer, never squeezed into the action row where it
+            truncated mid-sentence. Errors take the same slot in the destructive tone. */}
+        <p className={cn("mt-1.5 min-h-4 px-2 text-center text-micro sm:text-left", error ? "text-destructive" : "text-faint")} role={error ? "alert" : undefined}>
           {error ?? hint}
         </p>
       </div>

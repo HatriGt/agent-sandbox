@@ -14,15 +14,19 @@ import {
   ImagePlus,
   Lock,
   Map,
+  PencilLine,
   Plus,
   ShieldCheck,
+  Sparkles,
   TestTubes,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { RepoPicker, type PickedRepo } from "@/components/RepoPicker";
 import { ModelChip, useModelChoice } from "@/components/thread/ModelPicker";
-import { motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { Collapse } from "@/components/ui/collapse";
+import { StaggerItem } from "@/components/ui/swap";
 import { api, type BoxView, type FleetLifecycle } from "@/lib/api";
 import { fmtAgo, friendlyName, shortName, threadSort, threadTitle } from "@/lib/format";
 import { readDraft, takePrefill, writeDraft } from "@/lib/draft";
@@ -141,6 +145,67 @@ function fleetLine(boxes: BoxView[], lc: FleetLifecycle): React.ReactNode {
       ))}
       . {tail}
     </>
+  );
+}
+
+/**
+ * The first-run strip: how the product works in one line of three steps, shown above the composer
+ * until the first task has been started from this browser (then remembered in localStorage, so it
+ * never comes back on a reload). Not a tour — one glance, then out of the way.
+ */
+const HOWTO_KEY = "asb-hub-howto-done";
+function howtoDone(): boolean {
+  try {
+    return localStorage.getItem(HOWTO_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+function markHowtoDone() {
+  try {
+    localStorage.setItem(HOWTO_KEY, "1");
+  } catch {
+    /* storage blocked: the strip hides for this mount only */
+  }
+}
+const HOWTO_STEPS = [
+  { icon: <PencilLine />, title: "Describe a task", body: "in plain words, with a repo if it needs one" },
+  { icon: <Sparkles />, title: "The agent works in a sandbox", body: "a fresh machine, watched live" },
+  { icon: <GitPullRequest />, title: "Review the PR", body: "diff, checks and merge, right here" },
+];
+function HowItWorks({ open }: { open: boolean }) {
+  const still = useReducedMotion();
+  return (
+    <Collapse open={open}>
+      <motion.ol
+        aria-label="How it works"
+        initial={still ? false : { opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+        className="mb-4 grid grid-cols-1 gap-1.5 sm:grid-cols-[1fr_auto_1fr_auto_1fr] sm:items-center sm:gap-1"
+      >
+        {HOWTO_STEPS.map((s, i) => (
+          <React.Fragment key={s.title}>
+            {i > 0 && (
+              <li aria-hidden className="text-faint hidden justify-center sm:flex">
+                <ArrowRight className="size-3.5" />
+              </li>
+            )}
+            <li className="min-w-0">
+              <StaggerItem index={i} step={0.06} className="bg-muted/60 flex items-center gap-2.5 rounded-lg px-3 py-2">
+                <span className="bg-background text-muted-foreground grid size-7 shrink-0 place-items-center rounded-full [&_svg]:size-3.5" aria-hidden>
+                  {s.icon}
+                </span>
+                <span className="min-w-0">
+                  <span className="text-foreground block truncate text-meta font-medium">{s.title}</span>
+                  <span className="text-muted-foreground block truncate text-micro">{s.body}</span>
+                </span>
+              </StaggerItem>
+            </li>
+          </React.Fragment>
+        ))}
+      </motion.ol>
+    </Collapse>
   );
 }
 
@@ -275,8 +340,23 @@ export function Hub({
   // sandbox before the agent starts, and the task names them for the Read tool.
   const [images, setImages] = React.useState<{ id: string; name: string; dataUrl: string }[]>(() => stash?.images ?? []);
   const [preview, setPreview] = React.useState<{ name: string; dataUrl: string } | null>(null);
+  // dragenter/dragleave fire for every child crossed, so a boolean flickers as the cursor moves
+  // over the textarea and buttons. A depth counter only reaches zero when the drag truly leaves.
   const [dragOver, setDragOver] = React.useState(false);
+  const dragDepth = React.useRef(0);
+  const hasImages = (dt: DataTransfer) => [...dt.items].some((i) => i.type.startsWith("image/"));
+  const endDrag = () => {
+    dragDepth.current = 0;
+    setDragOver(false);
+  };
+  const still = useReducedMotion();
   const fileInput = React.useRef<HTMLInputElement>(null);
+  // The 3-step strip stays until this browser has started a task (see HowItWorks).
+  const [howto, setHowto] = React.useState(() => !howtoDone());
+  const finishHowto = () => {
+    markHowtoDone();
+    setHowto(false);
+  };
   // Files still being read when Enter lands would be silently dropped from the submit; count the
   // in-flight reads so submit can hold until they land (they take milliseconds).
   const [readsPending, setReadsPending] = React.useState(0);
@@ -329,6 +409,7 @@ export function Hub({
         // setState calls below are no-ops on a dead instance and the draft effect never fires — clear
         // the stored draft directly, or the next new-task composer comes prefilled with this brief.
         writeDraft("hub", "");
+        finishHowto();
         setTask("");
         setImages([]);
         clearVerify();
@@ -370,6 +451,13 @@ export function Hub({
   const live = new Set(boxes.map((b) => b.name));
   const fleet = [...boxes].sort(threadSort);
   const runs = fleet.filter((b) => b.role !== "pool-free");
+  // Anyone who already has runs (from another browser, or before this flag existed) has seen the
+  // loop work; don't teach it to them.
+  const firstRun = howto && !loading && runs.length === 0 && sessionRuns.length === 0;
+  React.useEffect(() => {
+    if (howto && !loading && (runs.length > 0 || sessionRuns.length > 0)) finishHowto();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [howto, loading, runs.length, sessionRuns.length]);
 
   return (
     <div className="h-full min-w-0 overflow-y-auto">
@@ -394,6 +482,7 @@ export function Hub({
 
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.05, ease: [0.22, 1, 0.36, 1] }}>
           <TrialEndedNotice />
+          <HowItWorks open={firstRun} />
           <div className="relative">
           <VoicePill state={voice.state} interim={voice.interim} />
           <PromptInput
@@ -402,8 +491,8 @@ export function Hub({
             onSubmit={getMe()?.kind === "user" && (getMe() as { expired?: boolean }).expired ? () => {} : submit}
             isLoading={busy}
             className={cn(
-              "bg-card border-line-strong focus-within:border-live/60 focus-within:shadow-[0_0_0_3px_color-mix(in_oklch,var(--live)_18%,transparent)] rounded-xl p-2 shadow-e1 transition-[border-color,box-shadow] duration-200",
-              dragOver && "border-live ring-live/40 ring-2",
+              "bg-card border-line-strong focus-within:border-live/60 focus-within:shadow-[0_0_0_3px_color-mix(in_oklch,var(--live)_18%,transparent)] relative rounded-xl p-2 shadow-e1 transition-[border-color,box-shadow] duration-200",
+              dragOver && "border-live",
               (voice.state === "listening" || voice.state === "arming") && "mic-glow"
             )}
             onPaste={(e) => {
@@ -413,34 +502,72 @@ export function Hub({
                 addImages(files);
               }
             }}
-            onDragOver={(e) => {
-              if ([...e.dataTransfer.items].some((i) => i.type.startsWith("image/"))) {
-                e.preventDefault();
-                setDragOver(true);
-              }
+            onDragEnter={(e) => {
+              if (!hasImages(e.dataTransfer)) return;
+              e.preventDefault();
+              dragDepth.current += 1;
+              setDragOver(true);
             }}
-            onDragLeave={() => setDragOver(false)}
+            onDragOver={(e) => {
+              if (hasImages(e.dataTransfer)) e.preventDefault();
+            }}
+            onDragLeave={() => {
+              if (dragDepth.current === 0) return;
+              dragDepth.current -= 1;
+              if (dragDepth.current === 0) setDragOver(false);
+            }}
             onDrop={(e) => {
               e.preventDefault();
-              setDragOver(false);
+              endDrag();
               addImages(e.dataTransfer.files);
             }}
           >
             <label htmlFor="new-task" className="sr-only">
               Describe the task for a new machine
             </label>
+            {/* The drop target is the WHOLE composer, said in words: a dashed veil over everything,
+                pointer-events off so the drop still lands on the PromptInput underneath. */}
+            <AnimatePresence>
+              {dragOver && (
+                <motion.div
+                  key="drop"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: still ? 0.08 : 0.15 }}
+                  aria-hidden
+                  className="bg-card/90 border-live text-live pointer-events-none absolute inset-0 z-10 grid place-items-center rounded-xl border-2 border-dashed backdrop-blur-[2px]"
+                >
+                  <span className="flex items-center gap-2 text-meta font-medium">
+                    <ImagePlus className="size-4" aria-hidden />
+                    Drop images to attach
+                  </span>
+                </motion.div>
+              )}
+            </AnimatePresence>
             {images.length > 0 && (
               <div className="flex flex-wrap gap-2 px-2 pt-1.5" onClick={(e) => e.stopPropagation()}>
-                {images.map((img) => (
-                  <span key={img.id} className="enter group relative block size-16 overflow-hidden rounded-md border" title={img.name}>
-                    <button type="button" onClick={() => setPreview(img)} aria-label={`Preview ${img.name}`} className="block size-full cursor-zoom-in">
-                      <img src={img.dataUrl} alt={img.name} className="size-full object-cover transition-transform duration-200 group-hover:scale-105" />
-                    </button>
-                    <button type="button" onClick={() => setImages((prev) => prev.filter((x) => x.id !== img.id))} aria-label={`Remove ${img.name}`} className="bg-card/80 text-foreground hover:bg-card absolute top-1 right-1 grid size-5 cursor-pointer place-items-center rounded-full opacity-0 shadow-e1 transition-opacity group-hover:opacity-100 focus-visible:opacity-100">
-                      <X className="size-3" />
-                    </button>
-                  </span>
-                ))}
+                <AnimatePresence initial={false}>
+                  {images.map((img) => (
+                    <motion.span
+                      key={img.id}
+                      layout={!still}
+                      initial={still ? { opacity: 0 } : { opacity: 0, scale: 0.8 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={still ? { opacity: 0 } : { opacity: 0, scale: 0.8 }}
+                      transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+                      className="group relative block size-16 overflow-hidden rounded-md border"
+                      title={img.name}
+                    >
+                      <button type="button" onClick={() => setPreview(img)} aria-label={`Preview ${img.name}`} className="block size-full cursor-zoom-in">
+                        <img src={img.dataUrl} alt={img.name} className="size-full object-cover transition-transform duration-200 group-hover:scale-105" />
+                      </button>
+                      <button type="button" onClick={() => setImages((prev) => prev.filter((x) => x.id !== img.id))} aria-label={`Remove ${img.name}`} className="bg-card/80 text-foreground hover:bg-card absolute top-1 right-1 grid size-5 cursor-pointer place-items-center rounded-full opacity-0 shadow-e1 transition-opacity group-hover:opacity-100 focus-visible:opacity-100">
+                        <X className="size-3" />
+                      </button>
+                    </motion.span>
+                  ))}
+                </AnimatePresence>
               </div>
             )}
             <PromptInputTextarea
@@ -692,7 +819,8 @@ export function Hub({
               </h2>
               <span className="text-muted-foreground text-micro">this session</span>
             </div>
-            <ul className="flex flex-col">
+            {/* Rows bleed 2 units past the heading so the hover tint has a gutter, like a real list. */}
+            <ul className="-mx-2 flex flex-col">
               {sessionRuns.slice(0, 6).map((r, i) => {
                 const box = boxes.find((b) => b.name === r.box);
                 const gone = !live.has(r.box);
@@ -702,9 +830,10 @@ export function Hub({
                       type="button"
                       disabled={gone}
                       onClick={() => onOpen(r.box)}
+                      onMouseEnter={() => !gone && prefetchWatch(r.box)}
                       className={cn(
-                        "group flex w-full items-center gap-3 border-b py-2.5 text-left last:border-b-0",
-                        gone ? "cursor-default" : "cursor-pointer"
+                        "group flex w-full items-center gap-3 border-b px-2 py-2.5 text-left transition-colors last:border-b-0",
+                        gone ? "cursor-default" : "hover:bg-muted cursor-pointer"
                       )}
                     >
                       {box ? (

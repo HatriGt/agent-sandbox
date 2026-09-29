@@ -16,6 +16,8 @@ export interface TestFile {
   name: string;
   status: TestStatus;
   tests: TestCase[];
+  /** The runner's own count for the file (vitest's "(9 tests)"), for output that lists no cases. */
+  total?: number;
 }
 export interface TestReport {
   runner: "vitest" | "jest" | "node" | "pytest" | "go";
@@ -62,7 +64,7 @@ function parseJestLike(t: string): TestReport | null {
   for (const l of t.split("\n")) {
     const file = l.match(/^\s*(?:✓|✔|✗|✕|×|❯|PASS|FAIL)\s+([\w./@-]+\.(?:test|spec)\.[cm]?[jt]sx?)\b(?:\s*\((\d+) tests?\))?/);
     if (file) {
-      cur = { name: file[1], status: /✗|✕|×|FAIL/.test(l) ? "fail" : "pass", tests: [] };
+      cur = { name: file[1], status: /✗|✕|×|FAIL/.test(l) ? "fail" : "pass", tests: [], total: file[2] ? Number(file[2]) : undefined };
       files.push(cur);
       continue;
     }

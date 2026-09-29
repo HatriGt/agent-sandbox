@@ -14,10 +14,23 @@ import { cn } from "@/lib/utils";
 import { METHOD_LABEL, type MergeMethod } from "./verdict";
 
 /**
+ * One button vocabulary for the whole PR surface, so a state never shows two competing fills:
+ *   filled   — THE action of the moment (merge, or the confirm step of a bypass);
+ *   outline  — the additive verbs (approve, request changes, reopen, mark ready), told apart by a
+ *              coloured ICON, not a coloured fill;
+ *   danger   — the ghost in red (close), arming into a /10 tint.
+ * Hover is always one step: solid fills go /80, everything else gets a `/10` tint.
+ */
+const BTN = "flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-micro font-medium transition-colors disabled:opacity-40";
+const FILLED = "bg-primary text-primary-foreground shadow-e1 hover:bg-primary/80";
+const OUTLINE = "border text-foreground hover:bg-muted";
+const DANGER = "text-destructive hover:bg-destructive/10";
+
+/**
  * The two ways past a branch-policy refusal, as ONE quiet decision row — not a stack of shouting
  * buttons. "Auto-merge" is the primary (the patient, policy-respecting path); "admin override" is
- * a text-weight action that swaps in place into an explicit amber confirm, so the bypass exists
- * without being dressed as a peer of the safe choice.
+ * a text-weight action that swaps in place into an explicit filled confirm (amber only in the
+ * warning text), so the bypass exists without being dressed as a peer of the safe choice.
  */
 export function PolicyRescue({ busy, onAuto, onAdmin }: { busy: boolean; onAuto: () => void; onAdmin: () => void }) {
   const [armed, setArmed] = React.useState(false);
@@ -35,7 +48,8 @@ export function PolicyRescue({ busy, onAuto, onAdmin }: { busy: boolean; onAuto:
               <ShieldAlert className="size-3.5 shrink-0" aria-hidden />
               <span className="truncate">Skips the policy's requirements.</span>
             </span>
-            <button type="button" disabled={busy} onClick={onAdmin} className="bg-attention text-attention-ink hover:bg-attention/85 ml-auto flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-micro font-semibold transition-colors disabled:opacity-60">
+            {/* The confirm step is the one filled thing in the row — it IS the action now. */}
+            <button type="button" disabled={busy} onClick={onAdmin} className={cn(BTN, FILLED, "ml-auto")}>
               {busy ? <Loader2 className="size-3 animate-spin" /> : <GitMerge className="size-3" aria-hidden />}
               Merge anyway
             </button>
@@ -45,8 +59,8 @@ export function PolicyRescue({ busy, onAuto, onAdmin }: { busy: boolean; onAuto:
           </motion.div>
         ) : (
           <motion.div key="choices" initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.15, ease: [0.22, 1, 0.36, 1] }} className="flex w-full items-center gap-2">
-            <button type="button" disabled={busy} onClick={onAuto} title="GitHub merges the moment approvals and checks are satisfied" className="bg-sleep/15 text-sleep hover:bg-sleep/25 flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-micro font-semibold transition-colors disabled:opacity-60">
-              {busy ? <Loader2 className="size-3 animate-spin" /> : <Sparkles className="size-3" aria-hidden />}
+            <button type="button" disabled={busy} onClick={onAuto} title="GitHub merges the moment approvals and checks are satisfied" className={cn(BTN, OUTLINE)}>
+              {busy ? <Loader2 className="size-3 animate-spin" /> : <Sparkles className="text-muted-foreground size-3" aria-hidden />}
               Auto-merge when ready
             </button>
             <button type="button" disabled={busy} onClick={() => setArmed(true)} className="text-muted-foreground hover:text-attention-text ml-auto shrink-0 cursor-pointer text-micro font-medium underline-offset-2 hover:underline">
@@ -80,12 +94,12 @@ export function MergeControl({ busy, onMerge }: { busy: boolean; onMerge: (metho
           type="button"
           disabled={busy}
           onClick={() => (armed ? onMerge(method, false) : setArmed(true))}
-          className={cn("bg-ok hover:bg-ok/85 flex h-9 flex-1 cursor-pointer items-center justify-center gap-2 text-meta font-semibold text-white transition-colors disabled:opacity-60", armed && "bg-ok/90 ring-ok/40 ring-2 ring-inset")}
+          className={cn("bg-primary text-primary-foreground hover:bg-primary/80 flex h-9 flex-1 cursor-pointer items-center justify-center gap-2 text-meta font-semibold transition-colors disabled:opacity-40", armed && "ring-ring/40 ring-2 ring-inset")}
         >
           {busy ? <Loader2 className="size-4 animate-spin" /> : <GitMerge className="size-4" aria-hidden />}
           {busy ? "Merging…" : armed ? "Confirm merge" : METHOD_LABEL[method].label}
         </button>
-        <button type="button" disabled={busy} onClick={() => setMenu((m) => !m)} aria-expanded={menu} aria-label="Merge options" className="bg-ok hover:bg-ok/85 grid w-9 cursor-pointer place-items-center text-white transition-colors disabled:opacity-60">
+        <button type="button" disabled={busy} onClick={() => setMenu((m) => !m)} aria-expanded={menu} aria-label="Merge options" className="bg-primary text-primary-foreground hover:bg-primary/80 grid w-9 cursor-pointer place-items-center transition-colors disabled:opacity-40">
           <ChevronDown className={cn("size-4 transition-transform duration-200", menu && "rotate-180")} aria-hidden />
         </button>
       </div>
@@ -106,9 +120,9 @@ export function MergeControl({ busy, onMerge }: { busy: boolean; onMerge: (metho
                       setMenu(false);
                       setArmed(false);
                     }}
-                    className={cn("flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-meta transition-colors", on ? "bg-ok/10 text-foreground" : "hover:bg-muted text-foreground")}
+                    className={cn("text-foreground flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-meta transition-colors", on ? "bg-muted" : "hover:bg-muted/60")}
                   >
-                    <span className={cn("grid size-4 shrink-0 place-items-center rounded-full border", on ? "border-ok bg-ok text-white" : "border-line-strong")} aria-hidden>
+                    <span className={cn("grid size-4 shrink-0 place-items-center rounded-full border transition-colors", on ? "border-primary bg-primary text-primary-foreground" : "border-line-strong")} aria-hidden>
                       {on && <Check className="size-2.5" strokeWidth={3} />}
                     </span>
                     <span className="min-w-0 flex-1">
@@ -125,9 +139,9 @@ export function MergeControl({ busy, onMerge }: { busy: boolean; onMerge: (metho
                   setMenu(false);
                   onMerge(method, true);
                 }}
-                className="hover:bg-sleep/10 text-foreground flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-meta transition-colors"
+                className="hover:bg-muted/60 text-foreground flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left text-meta transition-colors"
               >
-                <Sparkles className="text-sleep size-4 shrink-0" aria-hidden />
+                <Sparkles className="text-muted-foreground size-4 shrink-0" aria-hidden />
                 <span className="min-w-0 flex-1">
                   <span className="block font-medium">Auto-merge when ready</span>
                   <span className="text-muted-foreground block text-micro">GitHub merges the moment approvals and checks are satisfied</span>
@@ -171,8 +185,8 @@ export function ApproveControl({ session, repo, number, onApproved }: { session:
           <CircleCheck className="size-3.5" aria-hidden /> Approved with your connected account
         </span>
       ) : (
-        <button type="button" disabled={busy} onClick={() => void approve()} className="bg-ok/10 text-ok hover:bg-ok/20 flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-micro font-semibold transition-colors disabled:opacity-60">
-          {busy ? <Loader2 className="size-3 animate-spin" /> : <ThumbsUp className="size-3" aria-hidden />}
+        <button type="button" disabled={busy} onClick={() => void approve()} className={cn(BTN, OUTLINE)}>
+          {busy ? <Loader2 className="size-3 animate-spin" /> : <ThumbsUp className="text-ok size-3" aria-hidden />}
           Approve this PR
         </button>
       )}
@@ -218,16 +232,16 @@ export function CommentComposer({ session, repo, number, onPosted }: { session: 
         className="placeholder:text-faint text-foreground w-full resize-y bg-transparent text-meta outline-none"
       />
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <button type="button" disabled={empty || busy !== null} onClick={() => void send("comment")} className="bg-foreground text-background flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-micro font-semibold transition-opacity hover:opacity-85 disabled:opacity-40">
+        <button type="button" disabled={empty || busy !== null} onClick={() => void send("comment")} className={cn(BTN, FILLED, "font-semibold")}>
           {busy === "comment" ? <Loader2 className="size-3 animate-spin" /> : <MessageSquare className="size-3" aria-hidden />}
           Comment
         </button>
-        <button type="button" disabled={empty || busy !== null} onClick={() => void send("request-changes")} className="bg-attention/20 text-attention-text hover:bg-attention/30 flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-micro font-semibold transition-colors disabled:opacity-40">
-          {busy === "request-changes" ? <Loader2 className="size-3 animate-spin" /> : <ThumbsDown className="size-3" aria-hidden />}
+        <button type="button" disabled={empty || busy !== null} onClick={() => void send("request-changes")} className={cn(BTN, OUTLINE)}>
+          {busy === "request-changes" ? <Loader2 className="size-3 animate-spin" /> : <ThumbsDown className="text-attention-text size-3" aria-hidden />}
           Request changes
         </button>
-        <button type="button" disabled={busy !== null} onClick={() => void send("approve")} className="bg-ok/10 text-ok hover:bg-ok/20 flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-micro font-semibold transition-colors disabled:opacity-40">
-          {busy === "approve" ? <Loader2 className="size-3 animate-spin" /> : <ThumbsUp className="size-3" aria-hidden />}
+        <button type="button" disabled={busy !== null} onClick={() => void send("approve")} className={cn(BTN, OUTLINE)}>
+          {busy === "approve" ? <Loader2 className="size-3 animate-spin" /> : <ThumbsUp className="text-ok size-3" aria-hidden />}
           Approve
         </button>
       </div>
@@ -267,13 +281,13 @@ export function LifecycleControl({ session, repo, number, state, onDone }: { ses
   return (
     <div className="flex flex-wrap items-center gap-2">
       {state === "draft" && (
-        <button type="button" disabled={busy} onClick={() => void act("ready")} className="hover:bg-muted flex h-7 cursor-pointer items-center gap-1.5 rounded-md border px-2.5 text-micro font-medium transition-colors disabled:opacity-60">
+        <button type="button" disabled={busy} onClick={() => void act("ready")} className={cn(BTN, OUTLINE)}>
           {busy ? <Loader2 className="size-3 animate-spin" /> : <Check className="size-3" aria-hidden />}
           Mark ready for review
         </button>
       )}
       {state === "closed" ? (
-        <button type="button" disabled={busy} onClick={() => void act("reopen")} className="hover:bg-muted flex h-7 cursor-pointer items-center gap-1.5 rounded-md border px-2.5 text-micro font-medium transition-colors disabled:opacity-60">
+        <button type="button" disabled={busy} onClick={() => void act("reopen")} className={cn(BTN, OUTLINE)}>
           {busy ? <Loader2 className="size-3 animate-spin" /> : <RotateCcw className="size-3" aria-hidden />}
           Reopen
         </button>
@@ -282,7 +296,7 @@ export function LifecycleControl({ session, repo, number, state, onDone }: { ses
           type="button"
           disabled={busy}
           onClick={() => (armed ? void act("close") : setArmed(true))}
-          className={cn("flex h-7 cursor-pointer items-center gap-1.5 rounded-md border px-2.5 text-micro font-medium transition-colors disabled:opacity-60", armed ? "border-destructive/40 bg-destructive/8 text-destructive" : "text-muted-foreground hover:text-foreground hover:bg-muted")}
+          className={cn(BTN, "ml-auto", armed ? "bg-destructive/10 text-destructive" : DANGER)}
         >
           {busy ? <Loader2 className="size-3 animate-spin" /> : <GitPullRequestClosed className="size-3" aria-hidden />}
           {armed ? "Confirm close" : "Close pull request"}

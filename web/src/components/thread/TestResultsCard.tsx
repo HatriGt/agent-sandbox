@@ -78,7 +78,7 @@ function FileGroup({ file, defaultOpen }: { file: TestReport["files"][number]; d
         <span className="text-foreground min-w-0 flex-1 truncate font-mono text-meta">{file.name}</span>
         <span className="text-muted-foreground tabular text-micro">
           {fails > 0 ? `${fails} failing · ` : ""}
-          {file.tests.length} {file.tests.length === 1 ? "test" : "tests"}
+          {file.tests.length || file.total || 0} {(file.tests.length || file.total) === 1 ? "test" : "tests"}
         </span>
       </button>
       <Collapse open={open && file.tests.length > 0}>
