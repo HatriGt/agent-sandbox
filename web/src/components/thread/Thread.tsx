@@ -691,7 +691,12 @@ export function Thread({
               <WorkingIndicator label={events.length ? "Working" : "Starting up"} detail={activity} />
             )}
 
-            {starting && <WorkingIndicator label="Starting up" detail="the sandbox is getting your task ready" />}
+            {starting && (
+              <WorkingIndicator
+                label="Starting up"
+                detail={box.agent === "omp" ? "installing oh-my-pi and getting your task ready — the first start takes about a minute" : "the sandbox is getting your task ready"}
+              />
+            )}
 
             {idle && <IdleEmpty box={box} onNew={onNew} />}
 

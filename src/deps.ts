@@ -30,6 +30,7 @@ import {
   WORKSPACE_DIRS_SH,
   msbIo,
   OMP_MIN_DISK,
+  OMP_MIN_MEMORY,
 } from "./msb.js";
 import { runInteractive } from "./interactive.js";
 import { runVerification } from "./verify.js";
@@ -402,7 +403,9 @@ export const deps: HandlerDeps = {
     // which the pool maintainer reaps it as unexecable (measured live). snapshot:"" also makes
     // this box pool-INELIGIBLE below, so a pooled 1G box is never claimed for it.
     if (plan.agent === "omp") {
-      runCfg = { ...runCfg, snapshot: "", rootDisk: OMP_MIN_DISK };
+      // Memory too: bun + per-session npx MCP servers crashed a 1G microVM mid-run (healed as
+      // "sandbox restarted"); omp boxes get the 2G tier from boot.
+      runCfg = { ...runCfg, snapshot: "", rootDisk: OMP_MIN_DISK, memory: OMP_MIN_MEMORY };
     }
 
     const id = newSessionId();

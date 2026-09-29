@@ -720,6 +720,13 @@ export const KIND_MARK = "/workspace/.agent.kind";
 export const OMP_MIN_DISK = "4G";
 
 /**
+ * Memory an omp box boots with. omp's bun runtime plus the per-session stdio MCP servers (each an
+ * `npx …` node process) exhausted the 1G default: a live omp run's microVM died ~a minute in and
+ * healed to "sandbox restarted mid-run" (exit 254) once a probe re-booted it. 2G is the next tier.
+ */
+export const OMP_MIN_MEMORY = "2G";
+
+/**
  * Parse the kind mark defensively: it sits in the agent-writable workspace, so only a clean
  * single-token "omp" is trusted; anything else (missing, claude, corruption) is claude — the agent
  * every box can run.
@@ -1519,6 +1526,13 @@ export async function runAgentTask(
 ) {
   const env = agentEnvFlags(cfg, task, repos, creds?.primaryToken, model, agent);
   const workdir = agentWorkdir(repos);
+  // Publish the task BEFORE bootstrap, not only when agentSh launches. The thread view treats
+  // "runState idle + no task" as an unused box and shows the "Nothing has run here yet" card —
+  // which is exactly what a just-delegated cold boot looked like for the whole bootstrap window
+  // (~60s on an omp box installing bun+omp). With the mark up early, every fleet/watch probe reads
+  // a task and the dashboard renders "starting" instead. agentSh re-writes the same content on
+  // launch (first-run marks), which is harmless. Best-effort: rides stdin, never argv.
+  await execWithInput(cfg, box, `cat > ${TASK_MARK}`, `${task}\n`).catch(() => {});
   await msb(cfg, ["exec", box, ...env, "--", "sh", "-lc", bootstrapScript(cfg, agent)]);
   // These four touch independent files (~/.git-credentials + per-repo config, ~/.claude.json,
   // /root/.agent-mcp.json, ~/.claude/skills), so they run in parallel: each is an SSH→msb→guest
