@@ -313,11 +313,17 @@ async function bootAndWarm(cfg: Config, name: string, agent: AgentKind): Promise
     // Skills too: omp indexes them on first sight (onnxruntime embedding load — expensive), and
     // they otherwise arrive only at claim time, putting that cost back on the user's first task.
     await installSkills(cfg, name).catch(() => {});
-    const warm =
-      `mkdir -p /workspace && cd /workspace && ${ompSeedSh()} && OMP_SKIP_SETUP=1 timeout 180 omp --mode json --approval-mode=yolo ` +
+    // TWICE: measured on a warm box, the run right after a single warm-up still took 6.6s to
+    // reach turn one and every run after it ~3.5s — so with one pass the user's task WAS that
+    // second, half-primed run. The extra pass is ~5s at boot, when nobody is waiting.
+    const oneShot =
+      `OMP_SKIP_SETUP=1 timeout 180 omp --mode json --approval-mode=yolo ` +
       `--model "ccproxy/$ANTHROPIC_MODEL"` +
       `$([ -n "$ANTHROPIC_SMOL_MODEL" ] && printf -- ' --smol ccproxy/%s' "$ANTHROPIC_SMOL_MODEL")` +
-      ` -p "Reply with exactly: ok" >/dev/null 2>&1; rm -rf /root/.omp/sessions 2>/dev/null; true`;
+      ` -p "Reply with exactly: ok" </dev/null >/dev/null 2>&1`;
+    const warm =
+      `mkdir -p /workspace && cd /workspace && ${ompSeedSh()} && { ${oneShot}; ${oneShot}; }; ` +
+      `rm -rf /root/.omp/sessions 2>/dev/null; true`;
     // Generous budget: the warm-up one-shot IS the ~50s cold start being absorbed — a timeout that
     // kills it mid-flight (the first version's 150s did, together with a cache-priming find) just
     // moves the cost back onto the user's first task.
