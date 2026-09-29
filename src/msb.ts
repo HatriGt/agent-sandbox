@@ -583,7 +583,9 @@ export const OMP_SYS_PROMPT =
   "clear question to that file as your LAST action, then stop immediately — do no further work. " +
   "Shape: line 1 = the question in one sentence; blank line; optional 1-4 short context lines; blank " +
   "line; the literal line 'Options:' with one '- ' option per line (2-5, recommended first). Omit " +
-  "Options only for free-form answers. Never mention the file or mechanism in your prose. The caller " +
+  "Options only for free-form answers. Never mention the file or mechanism in your prose. " +
+  "(Enforcement: while that file exists, EVERY tool call you attempt is BLOCKED, so writing it and " +
+  "ending your turn is the only correct move — never try to work past it.) The caller " +
   "answers and this same session continues with their reply; when it does, first read and act on the " +
   "answer. STOP and ask — never guess — for ambiguous requirements, missing credentials (name the " +
   "exact env var you need), or environment blockers that prevent verifying your work; report the " +
@@ -602,7 +604,12 @@ export const OMP_SYS_PROMPT =
   "BEFORE asking the caller for access, credentials, or procedures, check whether an available " +
   "skill covers the task — skills often wrap exactly the access you would otherwise ask for. When " +
   "a message starts with /<skill-name> matching an available skill, invoke that skill and follow " +
-  "it for the rest of the message; otherwise use a skill whenever its description matches the task.";
+  "it for the rest of the message; otherwise use a skill whenever its description matches the task. " +
+  // omp's differentiators over plain shell loops — the reason a user picks this agent at all.
+  "DEBUGGING: you have first-class lsp and debug (DAP) tools. When diagnosing runtime behavior or a " +
+  "failing test, PREFER the debug tool — set breakpoints, step, and inspect variables/stack frames — " +
+  "over print-statement debugging, and use lsp (definitions, references, diagnostics, renames) over " +
+  "grep when navigating or refactoring code. Narrate briefly what the debugger shows as you go.";
 
 function agentEnvFlags(
   cfg: Config,
@@ -1159,6 +1166,42 @@ export function ompFmtScript(): string {
   );
 }
 
+/**
+ * Install the asb-guard omp extension: question-pause parity with the Claude ask-gate plus the
+ * control-plane file guard, as an in-process `tool_call` pre-event (omp has no PreToolUse hooks).
+ * Once ${QUESTION_MARK} exists every further tool call is BLOCKED, so writing a question truly
+ * ends the turn — same enforcement the Claude branch gets from ask-gate.sh. It also blocks any
+ * tool call whose params reference the controller's .agent.* files (except the question write
+ * itself) — a live omp run was observed reading .agent.question out of curiosity.
+ * Plain JS (not TS) so the payload is vm-parseable in tests and independent of loader behavior.
+ */
+export function ompGuardScript(): string {
+  const indexJs =
+    `import fs from "node:fs";\n` +
+    `const Q = ${JSON.stringify(QUESTION_MARK)};\n` +
+    `const AGENT_FILES = /\\/workspace\\/\\.agent\\./;\n` +
+    `export default function asbGuard(pi) {\n` +
+    `  pi.on("tool_call", (ev) => {\n` +
+    `    const name = String((ev && ev.tool && ev.tool.name) || (ev && (ev.toolName || ev.name)) || "");\n` +
+    `    let blob = "";\n` +
+    `    try { blob = JSON.stringify((ev && (ev.params || ev.args || ev.arguments || ev.input)) || {}); } catch (_) {}\n` +
+    `    const isQuestionWrite = /write/i.test(name) && blob.includes(Q);\n` +
+    // A pending question means the turn is OVER: deny everything until the caller answers.
+    `    try { if (fs.existsSync(Q)) return false; } catch (_) {}\n` +
+    // The controller's channel files are not context; only the question write may touch them.
+    `    if (AGENT_FILES.test(blob) && !isQuestionWrite) return false;\n` +
+    `  });\n` +
+    `}\n`;
+  const pkg = JSON.stringify({ name: "asb-guard", version: "1.0.0", type: "module", omp: { extensions: ["./index.js"] } });
+  const idxB64 = Buffer.from(indexJs, "utf8").toString("base64");
+  const pkgB64 = Buffer.from(pkg, "utf8").toString("base64");
+  return (
+    `mkdir -p "$HOME/.omp/agent/extensions/asb-guard" && ` +
+    `printf '%s' '${pkgB64}' | base64 -d > "$HOME/.omp/agent/extensions/asb-guard/package.json" && ` +
+    `printf '%s' '${idxB64}' | base64 -d > "$HOME/.omp/agent/extensions/asb-guard/index.js"`
+  );
+}
+
 export function bootstrapScript(cfg: Config, agent: AgentKind = "claude"): string {
   const lines = [
     "set -e",
@@ -1179,9 +1222,9 @@ export function bootstrapScript(cfg: Config, agent: AgentKind = "claude"): strin
     streamFmtScript(),
   ];
   if (agent === "omp") {
-    // oh-my-pi runs additionally need omp itself (idempotent when the snapshot baked it) and the
-    // omp event formatter. Claude-only runs skip the install cost entirely.
-    lines.push(ompInstallSh(cfg.ompVersion), ompFmtScript());
+    // oh-my-pi runs additionally need omp itself (idempotent when the snapshot baked it), the
+    // omp event formatter, and the asb-guard extension (question hard-stop + control-plane guard).
+    lines.push(ompInstallSh(cfg.ompVersion), ompFmtScript(), ompGuardScript());
   }
   if (cfg.npmToken) {
     lines.push(
@@ -1790,10 +1833,12 @@ export async function resumeAgentTask(
     installSkills(cfg, box),
     exec(cfg, box, streamFmtScript()),
     exec(cfg, box, askHookScript()),
-    // An omp thread also refreshes ITS formatter (same reasoning: a deploy that changes the log
-    // grammar must reach long-running threads) and re-checks the omp install for boxes bootstrapped
-    // before this thread's first omp turn — a no-op when already present.
-    ...(agent === "omp" ? [exec(cfg, box, ompFmtScript()), exec(cfg, box, ompInstallSh(cfg.ompVersion))] : []),
+    // An omp thread also refreshes ITS formatter and guard extension (same reasoning: a deploy that
+    // changes the log grammar or a guard rule must reach long-running threads) and re-checks the
+    // omp install for boxes bootstrapped before this thread's first omp turn — a no-op when present.
+    ...(agent === "omp"
+      ? [exec(cfg, box, ompFmtScript()), exec(cfg, box, ompGuardScript()), exec(cfg, box, ompInstallSh(cfg.ompVersion))]
+      : []),
   ]);
   // The cwd is read from the box, not taken from `repos`: every resume path (dashboard follow-up,
   // inbox delivery, send-now, the credential broker, an elicited answer) only has a box id and used

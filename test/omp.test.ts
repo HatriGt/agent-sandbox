@@ -116,3 +116,31 @@ test("agentSh omp filters ALL MCP warnings from the transcript stderr", () => {
   const sh = agentSh("/workspace", false, "omp");
   if (!sh.includes("grep -vE") || !sh.includes("^Warning: MCP server ")) throw new Error("stderr filter missing/narrow");
 });
+
+test("asb-guard extension: installs under ~/.omp, blocks .agent.* touches, allows normal calls", async () => {
+  const { ompGuardScript } = await import("../src/msb.js");
+  const sh = ompGuardScript();
+  if (!sh.includes(".omp/agent/extensions/asb-guard")) throw new Error("wrong install path");
+  const idxB64 = sh.match(/'([A-Za-z0-9+/=]+)' \| base64 -d > "\$HOME\/\.omp\/agent\/extensions\/asb-guard\/index\.js"/)?.[1];
+  const pkgB64 = sh.match(/'([A-Za-z0-9+/=]+)' \| base64 -d > "\$HOME\/\.omp\/agent\/extensions\/asb-guard\/package\.json"/)?.[1];
+  if (!idxB64 || !pkgB64) throw new Error("payloads missing");
+  const pkg = JSON.parse(Buffer.from(pkgB64, "base64").toString("utf8"));
+  if (pkg.omp.extensions[0] !== "./index.js") throw new Error("extension not declared");
+  // Run the REAL shipped module: register a fake pi, capture the tool_call handler, poke it.
+  const mod = await import("data:text/javascript;base64," + idxB64);
+  let handler: (ev: unknown) => unknown = () => undefined;
+  mod.default({ on: (name: string, fn: (ev: unknown) => unknown) => { if (name === "tool_call") handler = fn; } });
+  // Reading/writing controller files is blocked…
+  if (handler({ tool: { name: "read" }, params: { path: "/workspace/.agent.log" } }) !== false) throw new Error("agent-file read not blocked");
+  if (handler({ toolName: "bash", args: { command: "cat /workspace/.agent.task" } }) !== false) throw new Error("agent-file bash not blocked");
+  // …except the question write itself.
+  if (handler({ tool: { name: "write" }, params: { path: "/workspace/.agent.question", content: "q" } }) === false) throw new Error("question write must pass");
+  // Ordinary work passes.
+  if (handler({ tool: { name: "bash" }, params: { command: "npm test" } }) === false) throw new Error("normal call blocked");
+});
+
+test("omp bootstrap and prompt carry the guard and the debugger guidance", () => {
+  const boot = bootstrapScript({ claudeCodeVersion: "2.1.273", ompVersion: "latest" } as never, "omp");
+  if (!boot.includes("asb-guard")) throw new Error("guard not installed at bootstrap");
+  if (!OMP_SYS_PROMPT.includes("debug") || !OMP_SYS_PROMPT.includes("BLOCKED")) throw new Error("prompt missing debug/enforcement");
+});
