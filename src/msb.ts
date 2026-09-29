@@ -272,6 +272,15 @@ export async function bootWarmBox(cfg: Config, agent: AgentKind = "claude"): Pro
   // Pre-bootstrap so claims are instant (idempotent; persists in the box rootfs). For omp this
   // also lays down the formatter + asb-guard ahead of the claim.
   await msb(cfg, ["exec", name, ...agentEnvFlags(cfg, "noop", undefined, undefined, undefined, agent), "--", "sh", "-lc", bootstrapScript(cfg, agent)]);
+  if (agent === "omp") {
+    // Pre-warm: the box's FIRST omp invocation pays bun's compile cache + cold page cache for the
+    // whole toolchain (~20s extra measured live — the "Starting up 31s" the user watched). A
+    // throwaway one-shot at pool-boot time pays it here, where nobody is waiting. Best-effort.
+    const warm =
+      `cd /tmp && ${ompSeedSh()} && OMP_SKIP_SETUP=1 timeout 90 omp --mode json --approval-mode=yolo ` +
+      `--model "ccproxy/$ANTHROPIC_MODEL" -p "Reply with exactly: ok" >/dev/null 2>&1; rm -rf /root/.omp/sessions 2>/dev/null; true`;
+    await msb(cfg, ["exec", name, ...agentEnvFlags(cfg, "noop", undefined, undefined, undefined, agent), "--", "bash", "-lc", warm], false, 150_000);
+  }
   return name;
 }
 
@@ -1470,6 +1479,19 @@ export async function installSkills(cfg: Config, box: string): Promise<void> {
  * the task keeps running in the box. Completion is observable via the .agent.done sentinel (holds
  * the exit code); `status` reads it. `resume=true` continues the existing Claude session (-c).
  */
+/** Shell that (re)writes ~/.omp/agent/models.yml from the ANTHROPIC_* env — the ccproxy provider. */
+export function ompSeedSh(): string {
+  return (
+    `node -e 'const fs=require("fs"),os=require("os"),p=require("path");` +
+    `const d=p.join(os.homedir(),".omp","agent");fs.mkdirSync(d,{recursive:true});` +
+    `const q=JSON.stringify,id=process.env.ANTHROPIC_MODEL||"";` +
+    `const smol=process.env.ANTHROPIC_SMOL_MODEL||"";` +
+    `const ids=smol&&smol!==id?[id,smol]:[id];` +
+    `const y="providers:\\n  ccproxy:\\n    baseUrl: "+q(process.env.ANTHROPIC_BASE_URL||"")+"\\n    api: anthropic-messages\\n    apiKey: "+q(process.env.ANTHROPIC_API_KEY||"")+"\\n    models:\\n"+ids.map(m=>"      - id: "+q(m)+"\\n        name: "+q(m)+"\\n        contextWindow: 200000\\n        maxTokens: 32000\\n").join("");` +
+    `fs.writeFileSync(p.join(d,"models.yml"),y)'`
+  );
+}
+
 export function agentSh(workdir: string, resume: boolean, agent: AgentKind = "claude"): string {
   // --setting-sources user: load ONLY user settings, so a cloned repo's own .claude/settings.json
   // (and its hooks) is never loaded. Target repos commonly ship a UserPromptSubmit "plugin gate"
@@ -1498,14 +1520,7 @@ export function agentSh(workdir: string, resume: boolean, agent: AgentKind = "cl
   // the env at launch, so `--model ccproxy/$ANTHROPIC_MODEL` selects the controller-validated alias.
   // omp has no --append-system-prompt, so the standing policy is prefixed to the FIRST prompt only
   // (resumes continue the same omp session, which already carries it).
-  const ompSeed =
-    `node -e 'const fs=require("fs"),os=require("os"),p=require("path");` +
-    `const d=p.join(os.homedir(),".omp","agent");fs.mkdirSync(d,{recursive:true});` +
-    `const q=JSON.stringify,id=process.env.ANTHROPIC_MODEL||"";` +
-    `const smol=process.env.ANTHROPIC_SMOL_MODEL||"";` +
-    `const ids=smol&&smol!==id?[id,smol]:[id];` +
-    `const y="providers:\\n  ccproxy:\\n    baseUrl: "+q(process.env.ANTHROPIC_BASE_URL||"")+"\\n    api: anthropic-messages\\n    apiKey: "+q(process.env.ANTHROPIC_API_KEY||"")+"\\n    models:\\n"+ids.map(m=>"      - id: "+q(m)+"\\n        name: "+q(m)+"\\n        contextWindow: 200000\\n        maxTokens: 32000\\n").join("");` +
-    `fs.writeFileSync(p.join(d,"models.yml"),y)'`;
+  const ompSeed = ompSeedSh();
   const ompPrompt = resume ? `"$AGENT_TASK"` : `"$AGENT_SYS_PROMPT"$'\\n\\n'"$AGENT_TASK"`;
   // --mode json: one NDJSON event per line for the formatter (plain -p buffers prose and shows no
   // tool activity). --approval-mode=yolo: headless runs have no one to click "approve" — the box's
