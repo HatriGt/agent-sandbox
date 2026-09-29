@@ -293,6 +293,10 @@ export async function bootWarmBox(cfg: Config, agent: AgentKind = "claude"): Pro
     // moves the cost back onto the user's first task.
     await msb(cfg, ["exec", name, ...agentEnvFlags(cfg, "noop", undefined, undefined, undefined, agent), "--", "bash", "-lc", warm], false, 360_000);
   }
+  // Claimable only from here: the free-probe requires /.ready, so a delegation can never claim a
+  // box whose (multi-minute, for omp) warm-up is still running — that race put the whole cold
+  // start back on the user's first task while the pool claimed to be "warm".
+  await exec(cfg, name, "touch /.ready");
   return name;
 }
 
@@ -378,7 +382,10 @@ export async function listPoolBoxes(cfg: Config): Promise<string[]> {
   const available: string[] = [];
   for (const box of live) {
     try {
-      const r = await exec(cfg, box, "test -f /.claimed && echo claimed || echo free");
+      // Free = unclaimed AND finished its boot-time warm-up (/.ready is bootWarmBox's LAST step).
+      // Without the readiness gate a box was claimable seconds after boot, mid-warm-up, and the
+      // user's first task paid the whole cold start the pool exists to hide.
+      const r = await exec(cfg, box, 'if [ -f /.claimed ] || [ ! -f /.ready ]; then echo claimed; else echo free; fi');
       if (r.stdout.trim().endsWith("free")) available.push(box);
     } catch {
       // Not execable despite a Running status => wedged; reap it so refill can recreate.
