@@ -1348,22 +1348,30 @@ export async function installMcpConfig(cfg: Config, box: string): Promise<void> 
         `mkdir -p /root/.omp/agent && printf '%s' ${shellQuote(json)} > ${OMP_MCP_CONFIG_PATH} && chmod 600 ${OMP_MCP_CONFIG_PATH}`
     );
     // Pre-install the npx-served packages (presence-guarded: a bare-name bin check makes repeat
-    // runs a no-op). Best-effort with its own generous timeout — a registry hiccup must never
-    // block the run; the affected server just falls back to npx's own download.
-    const specs = npxPackagesOf(conf);
-    if (specs.length) {
-      const steps = specs.map((spec) => {
-        // Package NAME for the presence check: the spec minus any trailing @version (the leading
-        // @scope survives because only an "@" after index 0 is a version separator).
-        const at = spec.indexOf("@", 1);
-        const name = at > 0 ? spec.slice(0, at) : spec;
-        return `npm ls -g --depth=0 ${shellQuote(name)} >/dev/null 2>&1 || npm i -g ${shellQuote(spec)} >/dev/null 2>&1 || true`;
-      });
-      await exec(cfg, box, steps.join("; "), { timeoutMs: 300_000 });
-    }
+    // runs a no-op). Best-effort — a registry hiccup must never block the run; the affected server
+    // just falls back to npx's own download.
+    await preinstallNpmPackages(cfg, box, npxPackagesOf(conf));
   } catch (e) {
     console.error(`[mcp] could not install MCP config into ${box}:`, (e as Error).message);
   }
+}
+
+/**
+ * Globally install npm packages in the box so `npx <pkg>` starts instantly instead of downloading
+ * against the MCP startup timeout. Presence-guarded per package; the npm cache is cleaned only
+ * when something was actually installed (the tarballs are dead disk weight once bins are on PATH,
+ * but cleaning on every no-op pass would add a pointless write to every resume).
+ */
+export async function preinstallNpmPackages(cfg: Config, box: string, specs: string[]): Promise<void> {
+  if (!specs.length) return;
+  const steps = specs.map((spec) => {
+    // Package NAME for the presence check: the spec minus any trailing @version (the leading
+    // @scope survives because only an "@" after index 0 is a version separator).
+    const at = spec.indexOf("@", 1);
+    const name = at > 0 ? spec.slice(0, at) : spec;
+    return `npm ls -g --depth=0 ${shellQuote(name)} >/dev/null 2>&1 || { npm i -g ${shellQuote(spec)} >/dev/null 2>&1 && I=1; } || true`;
+  });
+  await exec(cfg, box, `I=; ${steps.join("; ")}; [ -n "$I" ] && npm cache clean --force >/dev/null 2>&1 || true`, { timeoutMs: 300_000 });
 }
 
 /** Where dashboard-configured skills land inside the box. `--setting-sources user` loads exactly

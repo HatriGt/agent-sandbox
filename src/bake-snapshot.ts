@@ -7,7 +7,7 @@
  */
 import { loadDotEnv } from "./dotenv.js";
 import { loadConfig } from "./config.js";
-import { createBareBox, installTools, installOmpTools, stopBox, snapshotCreate, teardown, OMP_MIN_DISK, OMP_MIN_MEMORY } from "./msb.js";
+import { createBareBox, installTools, installOmpTools, installMcpConfig, preinstallNpmPackages, stopBox, snapshotCreate, teardown, OMP_MIN_DISK, OMP_MIN_MEMORY } from "./msb.js";
 
 async function main() {
   loadDotEnv();
@@ -25,6 +25,19 @@ async function main() {
   console.log(`[bake] installing claude + gh${omp ? " + bun + omp" : ""} ...`);
   const r = await (omp ? installOmpTools(cfg, box) : installTools(cfg, box));
   console.log(r.stdout.trim() || r.stderr.trim());
+
+  if (omp) {
+    // Pre-install MCP server packages so a booted box skips the ~80s npm round: whatever the
+    // legacy-file store yields here (the encrypted per-owner store is not reachable from this
+    // standalone process) plus an explicit OMP_BAKE_NPX=pkg,pkg list for the deployment's known set.
+    console.log("[bake] pre-installing MCP server packages ...");
+    await installMcpConfig(cfg, box);
+    const extra = (process.env.OMP_BAKE_NPX ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+    if (extra.length) {
+      console.log(`[bake] pre-installing: ${extra.join(", ")}`);
+      await preinstallNpmPackages(cfg, box, extra);
+    }
+  }
 
   console.log(`[bake] stopping box + creating snapshot '${name}' ...`);
   await stopBox(cfg, box);
