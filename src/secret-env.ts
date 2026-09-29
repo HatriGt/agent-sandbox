@@ -33,6 +33,12 @@ export const RESERVED_SECRET_KEYS = new Set([
   // The omp branch relies on this staying set (an interactive setup wizard would hang a headless
   // run); a caller-supplied override could also flip omp into interactive paths.
   "OMP_SKIP_SETUP",
+  // omp model routing is a controller decision, exactly like ANTHROPIC_MODEL: these pick which
+  // alias omp's model roles run on, and a caller override would route traffic off-catalog.
+  "ANTHROPIC_SMOL_MODEL",
+  "PI_SMOL_MODEL",
+  "PI_SLOW_MODEL",
+  "PI_PLAN_MODEL",
 ]);
 
 /** POSIX-ish env name: letters, digits, underscore; never leading digit, never a flag. */

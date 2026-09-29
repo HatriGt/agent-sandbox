@@ -404,8 +404,10 @@ export const deps: HandlerDeps = {
     // this box pool-INELIGIBLE below, so a pooled 1G box is never claimed for it.
     if (plan.agent === "omp") {
       // Memory too: bun + per-session npx MCP servers crashed a 1G microVM mid-run (healed as
-      // "sandbox restarted"); omp boxes get the 2G tier from boot.
-      runCfg = { ...runCfg, snapshot: "", rootDisk: OMP_MIN_DISK, memory: OMP_MIN_MEMORY };
+      // "sandbox restarted"); omp boxes get the 2G tier from boot. When an agent-omp snapshot is
+      // baked (MSB_OMP_SNAPSHOT), boot from it — bun + omp pre-installed on the 4G rootfs, so the
+      // ~90s per-thread install disappears; otherwise cold-boot from the image and install.
+      runCfg = { ...runCfg, snapshot: cfg.ompSnapshot, rootDisk: OMP_MIN_DISK, memory: OMP_MIN_MEMORY };
     }
 
     const id = newSessionId();
@@ -452,8 +454,10 @@ export const deps: HandlerDeps = {
     // Thread the name->owner map so applyGitCredentials can set per-repo identity.
     const runCreds: AgentCreds | undefined = creds ? { ...creds, repoOwners } : undefined;
 
-    // 2. A restricted-egress delegation must not reuse an open-egress pooled box.
-    const eligible = poolEligible(runCfg, !!allowDomains?.length);
+    // 2. A restricted-egress delegation must not reuse an open-egress pooled box — and an omp run
+    // must never claim a pooled box either (the pool is baked from the CLAUDE snapshot at the 1G
+    // tier; with MSB_OMP_SNAPSHOT set, runCfg.snapshot alone would make it look eligible).
+    const eligible = poolEligible(runCfg, !!allowDomains?.length) && plan.agent !== "omp";
     const { box, warm } = await acquireBox(runCfg, id, sessionRoot, eligible);
 
     // Operator attachments (pasted screenshots) land in the box before the agent's first tool call.

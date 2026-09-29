@@ -439,6 +439,25 @@ export async function installTools(cfg: Config, box: string) {
 }
 
 /**
+ * Bake variant for the agent-omp snapshot: the claude toolchain PLUS bun + omp, then the caches
+ * are stripped — npm's and bun's download caches are pure dead weight once the binaries are on
+ * PATH, and everything left in the snapshot is paid again as disk by every box booted from it.
+ */
+export async function installOmpTools(cfg: Config, box: string) {
+  return exec(
+    cfg,
+    box,
+    `set -e; ${claudeInstallSh(cfg.claudeCodeVersion)}; ` +
+      "command -v gh >/dev/null || (type apt-get >/dev/null 2>&1 && apt-get update -qq && " +
+      "apt-get install -y -qq gh >/dev/null 2>&1) || true; " +
+      `${ompInstallSh(cfg.ompVersion)}; ` +
+      `npm cache clean --force >/dev/null 2>&1 || true; rm -rf /root/.bun/install/cache /tmp/* 2>/dev/null || true; ` +
+      "claude --version; OMP_SKIP_SETUP=1 omp --version",
+    { timeoutMs: 600_000 }
+  );
+}
+
+/**
  * Count live user sessions for the concurrency cap. Excludes UNCLAIMED warm pool boxes (they're
  * infrastructure); claimed pool boxes are real sessions and do count.
  */
@@ -622,6 +641,12 @@ function agentEnvFlags(
     "-e",
     "CLAUDE_CODE_ENABLE_TASKS=0",
   ];
+  // omp model roles: lightweight subtasks (summaries, quick lookups) run on the cheap "smol" alias
+  // instead of the driver model — the ask-lane alias is exactly that tier. The seed script writes
+  // this id into models.yml too, and agentSh passes `--smol ccproxy/<id>` when the env is present.
+  if (agent === "omp" && cfg.askModel) {
+    flags.push("-e", `ANTHROPIC_SMOL_MODEL=${cfg.askModel}`);
+  }
   // GH_TOKEN drives the `gh` CLI; it's the access-resolved token for the FIRST repo's owner. Per-repo
   // pushes use the ~/.git-credentials entries (per-owner). There is NO default cfg.ghToken fallback —
   // if nothing resolved, `gh` gets no token and the agent must ask for one (ask-then-resume).
@@ -1404,7 +1429,9 @@ export function agentSh(workdir: string, resume: boolean, agent: AgentKind = "cl
     `node -e 'const fs=require("fs"),os=require("os"),p=require("path");` +
     `const d=p.join(os.homedir(),".omp","agent");fs.mkdirSync(d,{recursive:true});` +
     `const q=JSON.stringify,id=process.env.ANTHROPIC_MODEL||"";` +
-    `const y="providers:\\n  ccproxy:\\n    baseUrl: "+q(process.env.ANTHROPIC_BASE_URL||"")+"\\n    api: anthropic-messages\\n    apiKey: "+q(process.env.ANTHROPIC_API_KEY||"")+"\\n    models:\\n      - id: "+q(id)+"\\n        name: "+q(id)+"\\n        contextWindow: 200000\\n        maxTokens: 32000\\n";` +
+    `const smol=process.env.ANTHROPIC_SMOL_MODEL||"";` +
+    `const ids=smol&&smol!==id?[id,smol]:[id];` +
+    `const y="providers:\\n  ccproxy:\\n    baseUrl: "+q(process.env.ANTHROPIC_BASE_URL||"")+"\\n    api: anthropic-messages\\n    apiKey: "+q(process.env.ANTHROPIC_API_KEY||"")+"\\n    models:\\n"+ids.map(m=>"      - id: "+q(m)+"\\n        name: "+q(m)+"\\n        contextWindow: 200000\\n        maxTokens: 32000\\n").join("");` +
     `fs.writeFileSync(p.join(d,"models.yml"),y)'`;
   const ompPrompt = resume ? `"$AGENT_TASK"` : `"$AGENT_SYS_PROMPT"$'\\n\\n'"$AGENT_TASK"`;
   // --mode json: one NDJSON event per line for the formatter (plain -p buffers prose and shows no
@@ -1413,7 +1440,8 @@ export function agentSh(workdir: string, resume: boolean, agent: AgentKind = "cl
   // branch's --allowedTools grant.
   const omp =
     `${ompSeed} && OMP_SKIP_SETUP=1 omp ${resume ? `--continue ` : ``}--mode json --approval-mode=yolo ` +
-    `--model "ccproxy/$ANTHROPIC_MODEL" -p ${ompPrompt}`;
+    `--model "ccproxy/$ANTHROPIC_MODEL"` +
+    `$([ -n "$ANTHROPIC_SMOL_MODEL" ] && printf -- ' --smol ccproxy/%s' "$ANTHROPIC_SMOL_MODEL") -p ${ompPrompt}`;
   // omp prints one "Warning: MCP server X failed to connect" per unreachable server to stderr at
   // EVERY session start (Claude Code fails the same connections silently), so the transcript led
   // with a wall of warnings on every task. They are per-run noise — the MCP settings page's Test

@@ -36,6 +36,11 @@ export interface Config {
    * install semantics as claudeCodeVersion; "latest" only presence-checks (no forced upgrade).
    */
   ompVersion: string;
+  /**
+   * Snapshot omp boxes boot from (bun + omp pre-baked on a 4G rootfs; bake with
+   * `node dist/bake-snapshot.js agent-omp omp`). Empty = cold boot from the image + install.
+   */
+  ompSnapshot: string;
   /** Auto-stop after this idle period. */
   idleTimeout: string;
   /**
@@ -205,6 +210,7 @@ export function loadConfig(): Config {
     // Bump deliberately (after a smoke run), not automatically: the agent's behavior IS the product.
     claudeCodeVersion: req("CLAUDE_CODE_VERSION", "2.1.273"),
     ompVersion: req("OMP_VERSION", "latest"),
+    ompSnapshot: process.env.MSB_OMP_SNAPSHOT || "",
     idleTimeout: req("MSB_IDLE_TIMEOUT", "15m"),
     // Warm boxes should outlive a long lull with no delegations; the maintainer replaces any that the
     // hard max-duration cap reaps. Default well above idleTimeout so the pool doesn't self-drain.
