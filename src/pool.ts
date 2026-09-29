@@ -13,7 +13,7 @@ import { createBox, bootWarmBox, listPoolBoxes, claimWarmBox, reapDeadPoolBoxes,
 import { stagingPathFor } from "./sync.js";
 import { parseDurationSec } from "./monitor.js";
 import type { Config } from "./config.js";
-import type { AgentKind } from "./agent-kind.js";
+import { preferredAgents, type AgentKind } from "./agent-kind.js";
 
 /**
  * A pool box's --max-duration clock starts at BOOT, not at claim. Observed live: a box booted at
@@ -162,7 +162,7 @@ let refillInFlight: Promise<void> | null = null;
  * Fire-and-forget: errors are logged to stderr and swallowed so a refill failure never breaks a
  * delegation.
  */
-export function refillPool(cfg: Config, io: RefillIO = realRefillIO): Promise<void> {
+export function refillPool(cfg: Config, io: RefillIO = realRefillIO, wanted: Set<AgentKind> = preferredAgents()): Promise<void> {
   const claudeOn = cfg.poolSize > 0 && !!cfg.snapshot;
   const ompOn = (cfg.ompPoolSize ?? 0) > 0 && !!cfg.ompSnapshot;
   if ((!claudeOn && !ompOn) || !cfg.egressAllowAll) return Promise.resolve();
@@ -171,11 +171,13 @@ export function refillPool(cfg: Config, io: RefillIO = realRefillIO): Promise<vo
     try {
       // Reap dead/wedged boxes first so the deficit is real and a fresh boot won't collide with a
       // stale msb record ("cannot start: already running"). listPoolBoxes reaps as a side effect.
-      // ONE listing serves both flavors; each reconciles its own partition.
+      // ONE listing serves both flavors; each reconciles its own partition. A flavor no user has
+      // picked as their default gets a target of ZERO — its idle boxes are trimmed, not kept: the
+      // pool follows the agent setting instead of paying RAM for both flavors at once.
       const all = await io.listPoolBoxes(cfg);
       const flavors: Array<{ agent: AgentKind; size: number; bootCfg: Config; on: boolean }> = [
-        { agent: "claude", size: cfg.poolSize, bootCfg: cfg, on: claudeOn },
-        { agent: "omp", size: cfg.ompPoolSize ?? 0, bootCfg: ompPoolCfg(cfg), on: ompOn },
+        { agent: "claude", size: wanted.has("claude") ? cfg.poolSize : 0, bootCfg: cfg, on: claudeOn },
+        { agent: "omp", size: wanted.has("omp") ? cfg.ompPoolSize ?? 0 : 0, bootCfg: ompPoolCfg(cfg), on: ompOn },
       ];
       for (const f of flavors) {
         if (!f.on) continue;

@@ -125,10 +125,23 @@ export function parseMcpImport(json: string, now = Date.now()): McpServer[] {
  */
 const HOST_BOUND_PATH_RE = /^(\/opt\/homebrew\/|\/Users\/|\/home\/|~\/|[A-Za-z]:[\\/])/;
 
-export function isBoxRunnableServer(s: Pick<McpServer, "type" | "command" | "args">): boolean {
-  if (s.type !== "stdio") return true; // remote servers are reachable from anywhere (or fail for real reasons)
+/**
+ * A private/LAN or loopback target is unreachable from a cloud microVM — and worse than useless:
+ * the TCP connect black-holes, and omp's print mode BLOCKS session start on MCP readiness for up
+ * to 30s (measured live as a 31s "Starting up" on every task). Matches bare hosts and hosts inside
+ * URLs in env/args values.
+ */
+const LAN_TARGET_RE =
+  /(^|[=@/])(localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)([:/]|$)/i;
+
+export function isBoxRunnableServer(s: Pick<McpServer, "type" | "command" | "args" | "env" | "url">): boolean {
+  if (s.type !== "stdio") {
+    // Remote servers: reachable from anywhere — unless they point INTO the operator's LAN.
+    return !LAN_TARGET_RE.test(s.url ?? "");
+  }
   if (HOST_BOUND_PATH_RE.test(s.command ?? "")) return false;
-  return !(s.args ?? []).some((a) => HOST_BOUND_PATH_RE.test(a));
+  if ((s.args ?? []).some((a) => HOST_BOUND_PATH_RE.test(a) || LAN_TARGET_RE.test(a))) return false;
+  return !Object.values(s.env ?? {}).some((v) => LAN_TARGET_RE.test(v));
 }
 
 /** What the in-box `claude --mcp-config` reads: enabled, box-runnable servers, in Claude Code's shape. */

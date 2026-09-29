@@ -7,7 +7,7 @@
  * `.agent.kind` sentinel written by the FIRST run, so every resume lane (dashboard, inbox, MCP,
  * broker) self-detects the agent without plumbing it through each caller.
  */
-import { loadBlob, saveBlob, ownerKey } from "./user-store.js";
+import { allBlobs, hasUserStoreBackend, loadBlob, saveBlob, ownerKey } from "./user-store.js";
 
 export type AgentKind = "claude" | "omp";
 
@@ -57,4 +57,32 @@ export function loadAgentPrefs(owner = ownerKey()): AgentPrefs {
 
 export function saveAgentPrefs(prefs: AgentPrefs, owner = ownerKey()): void {
   saveBlob(AGENT_PREFS_KIND, JSON.stringify(prefs), owner);
+}
+
+/**
+ * Which agents ANY owner has picked as their default — the warm pool keeps boxes only for these
+ * flavors, so a single-user deployment that switched to omp doesn't also burn 1G on an idle claude
+ * box (and vice versa). Union across owners: on a multi-user deployment each user's pick keeps
+ * their flavor warm. Caveat, documented deliberately: owners who never touched the setting store
+ * no blob and are invisible here — once at least one pref is stored, only stored picks count.
+ * No stored prefs at all (or no store backend, e.g. the stdio entry) means the classic claude pool.
+ */
+export function preferredAgents(): Set<AgentKind> {
+  const set = new Set<AgentKind>();
+  try {
+    if (hasUserStoreBackend()) {
+      for (const raw of allBlobs(AGENT_PREFS_KIND)) {
+        try {
+          const d = (JSON.parse(raw) as { defaultAgent?: unknown }).defaultAgent;
+          if (isAgentKind(d)) set.add(d);
+        } catch {
+          /* one bad blob never hides the rest */
+        }
+      }
+    }
+  } catch {
+    /* fall through to the default */
+  }
+  if (set.size === 0) set.add("claude");
+  return set;
 }

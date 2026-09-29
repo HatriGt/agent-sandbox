@@ -153,12 +153,19 @@ test("flavored pool: names, eligibility, refill reconciles both flavors", async 
   const cfg = { poolSize: 1, snapshot: "agent-base", egressAllowAll: true, ompPoolSize: 1, ompSnapshot: "agent-omp", ompVersion: "latest" } as never;
   if (!ompPoolEligible(cfg, false)) throw new Error("omp pool should be eligible");
   if (ompPoolEligible({ ...(cfg as object), ompSnapshot: "" } as never, false)) throw new Error("no snapshot = not eligible");
-  // Refill: empty pool boots one of EACH flavor.
+  // Refill follows the users' agent picks: only WANTED flavors are booted; the other is trimmed.
   const boots: string[] = [];
-  await refillPool(cfg, {
-    listPoolBoxes: async () => [],
-    bootWarmBox: async (_c, agent) => { boots.push(agent ?? "claude"); return `pool-${Date.now()}-${agent === "omp" ? "omp-" : ""}x`; },
-    removeBox: async () => {},
-  });
-  if (JSON.stringify(boots.sort()) !== JSON.stringify(["claude", "omp"])) throw new Error("refill flavors: " + boots.join(","));
+  const removed: string[] = [];
+  const io = {
+    listPoolBoxes: async () => [`pool-${Date.now()}-oldclaude`],
+    bootWarmBox: async (_c: never, agent?: string) => { boots.push(agent ?? "claude"); return `pool-${Date.now()}-${agent === "omp" ? "omp-" : ""}x`; },
+    removeBox: async (_c: never, box: string) => { removed.push(box); },
+  };
+  await refillPool(cfg, io as never, new Set(["omp"]) as never);
+  if (JSON.stringify(boots) !== JSON.stringify(["omp"])) throw new Error("should boot omp only: " + boots.join(","));
+  if (removed.length !== 1) throw new Error("unwanted claude box should be trimmed");
+  // Both wanted -> both flavors reconciled.
+  boots.length = 0; removed.length = 0;
+  await refillPool(cfg, io as never, new Set(["claude", "omp"]) as never);
+  if (JSON.stringify(boots.sort()) !== JSON.stringify(["omp"])) throw new Error("claude already ready; only omp boots: " + boots.join(","));
 });

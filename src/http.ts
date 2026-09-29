@@ -1751,6 +1751,9 @@ app.post("/agent-prefs.json", (req: Request, res: Response) => {
   try {
     const prefs = normalizeAgentPrefs(req.body ?? {});
     saveAgentPrefs(prefs, p.kind === "user" ? p.userId : OPERATOR_OWNER);
+    // The pool follows this setting (only the picked agent's flavor stays warm) — reconcile now
+    // instead of waiting for the maintainer tick, so the first task after switching is warm too.
+    void refillPool(cfg);
     res.json({ ...prefs, agents: AGENT_KINDS.map((id) => ({ id, label: AGENT_LABELS[id] })) });
   } catch (e) {
     res.status(400).json({ error: clientError(e) });
