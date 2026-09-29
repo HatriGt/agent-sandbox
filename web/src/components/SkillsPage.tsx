@@ -121,7 +121,7 @@ export function SkillsPage({ onBack }: { onBack: () => void }) {
 
         <header className="mb-6">
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-foreground text-h1 font-semibold tracking-[-0.02em]">Skills</h1>
+            <h1 className="text-foreground font-serif text-h1 font-normal tracking-[-0.01em]">Skills</h1>
             {skills && skills.length > 0 && (
               <span className="text-muted-foreground text-meta">
                 {skills.length} · {onCount} on

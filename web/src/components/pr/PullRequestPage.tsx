@@ -123,7 +123,7 @@ export function PullRequestPage({ session, repo, number }: { session: string; re
             </div>
           ) : null}
 
-          <h1 className="text-foreground text-h1 font-semibold tracking-[-0.02em] break-words">
+          <h1 className="text-foreground font-serif text-h1 font-normal tracking-[-0.01em] break-words">
             {pr?.title ?? <Bar className="inline-block h-6 w-80 max-w-full align-middle" />}
             <span className="text-faint ml-2.5 font-normal tracking-normal">#{number}</span>
           </h1>

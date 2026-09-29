@@ -87,7 +87,7 @@ export function Connect({ onDone, onBack, welcome = false }: { onDone: () => voi
         )}
         <header className="mb-8">
           {welcome && <p className="label text-live mb-2">Welcome{me?.kind === "user" && me.name ? `, ${me.name.split(" ")[0]}` : ""}</p>}
-          <h1 className="text-foreground text-h1 font-semibold tracking-[-0.02em]">Connect your IDE</h1>
+          <h1 className="text-foreground font-serif text-h1 font-normal tracking-[-0.01em]">Connect your IDE</h1>
           <p className="text-muted-foreground mt-1 text-body leading-relaxed">Your editor delegates tasks to machines through the MCP endpoint. This key identifies you; every machine it starts is yours alone.</p>
         </header>
 
@@ -134,8 +134,8 @@ export function Connect({ onDone, onBack, welcome = false }: { onDone: () => voi
           <TabPanel value={client} order={CLIENT_ORDER} idBase="connect-client">
             <p className="text-muted-foreground mb-2 text-meta">{c.how}</p>
             <div className="relative">
-              <pre className={cn("bg-card raised overflow-x-auto rounded-xl p-4 font-mono text-code leading-relaxed", !key && "text-muted-foreground")}>{snippet}</pre>
-              <CopyButton className="absolute top-2.5 right-2.5" copied={copied === "snippet"} onClick={() => void copy("snippet", snippet)} disabled={!key} />
+              <pre className={cn("bg-card raised overflow-x-auto rounded-xl p-4 pr-16 font-mono text-code leading-relaxed", !key && "text-muted-foreground")}>{snippet}</pre>
+              <CopyButton className="bg-card absolute top-2.5 right-2.5 shadow-e1" copied={copied === "snippet"} onClick={() => void copy("snippet", snippet)} disabled={!key} />
             </div>
           </TabPanel>
           <p className="text-faint mt-2 text-micro">

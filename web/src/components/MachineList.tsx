@@ -125,7 +125,7 @@ export function MachineList({
                       <div className="flex items-baseline gap-2">
                         <StateStamp state={state} exitCode={v.exitCode} />
                         <span className="label text-muted-foreground ml-auto truncate">
-                          {v.leaving ? "shutting down" : v.kept ? "kept" : state === "sleeping" ? (sleepTtlSec && v.asleepSec != null ? `gone in ${fmtDuration(Math.max(0, sleepTtlSec - v.asleepSec))}` : "wakes on reply") : roleLabel(v.role)}
+                          {v.leaving ? "shutting down" : v.kept ? "kept" : state === "sleeping" ? (sleepTtlSec && v.asleepSec != null ? `gone in ${fmtDuration(Math.max(0, sleepTtlSec - v.asleepSec))}` : "wakes on reply") : v.role === "session" ? "" : roleLabel(v.role)}
                         </span>
                       </div>
     

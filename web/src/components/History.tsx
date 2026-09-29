@@ -106,7 +106,7 @@ export function History({ onBack, onAgain }: { onBack: () => void; onAgain: () =
             <ArrowLeft className="size-4" />
             Machines
           </Button>
-          <h1 className="text-foreground text-h1 font-semibold tracking-[-0.02em]">History</h1>
+          <h1 className="text-foreground font-serif text-h1 font-normal tracking-[-0.01em]">History</h1>
           <p className="text-muted-foreground mt-1 text-meta">Finished runs, kept after their machines are gone.</p>
         </header>
 

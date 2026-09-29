@@ -467,7 +467,7 @@ export function Hub({
             <ArrowLeft className="size-4" />
             Machines
           </Button>
-          <h1 className="text-foreground text-h1 font-semibold tracking-[-0.02em] text-balance">
+          <h1 className="text-foreground font-serif text-h1 font-normal tracking-[-0.01em] text-balance">
             {greeting()}
           </h1>
           {loading ? (
@@ -698,12 +698,7 @@ export function Hub({
               </button>
               {voice.supported && <VoiceButton state={voice.state} level={voice.level} onToggle={voice.toggle} />}
               <input ref={fileInput} type="file" accept="image/*" multiple className="hidden" onChange={(e) => (addImages(e.target.files ?? []), (e.target.value = ""))} />
-              <p className={cn("hidden min-w-0 flex-1 truncate text-right text-micro sm:block", error ? "text-destructive" : "text-muted-foreground")}>
-                {error ??
-                  (lifecycle.maxDurationSec
-                    ? `Enter starts the machine · runs up to ${fmtDuration(lifecycle.maxDurationSec)}${lifecycle.idleTimeoutSec ? `, sleeps after ${fmtDuration(lifecycle.idleTimeoutSec)} quiet` : ""}`
-                    : "Enter starts the machine · a repo named in the task is attached automatically")}
-              </p>
+              <span className="min-w-0 flex-1" />
               <Button
                 size="icon"
                 onClick={submit}
@@ -715,6 +710,13 @@ export function Hub({
               </Button>
             </PromptInputActions>
           </PromptInput>
+            {/* The hint is a caption under the composer: it read mid-sentence when squeezed into the action row. */}
+            <p className={cn("mt-1.5 min-h-4 px-2 text-micro", error ? "text-destructive" : "text-faint")} role={error ? "alert" : undefined}>
+              {error ??
+                  (lifecycle.maxDurationSec
+                    ? `Enter starts the machine · runs up to ${fmtDuration(lifecycle.maxDurationSec)}${lifecycle.idleTimeoutSec ? `, sleeps after ${fmtDuration(lifecycle.idleTimeoutSec)} quiet` : ""}`
+                    : "Enter starts the machine · a repo named in the task is attached automatically")}
+            </p>
           </div>
           <Lightbox src={preview?.dataUrl ?? null} name={preview?.name ?? ""} open={!!preview} onClose={() => setPreview(null)} />
           {error && (

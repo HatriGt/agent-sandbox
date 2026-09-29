@@ -137,7 +137,7 @@ export function Account({ onBack, onConnect, onAdmin }: { onBack: () => void; on
         </Button>
         <header className="mb-7 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h1 className="text-foreground text-h1 font-semibold tracking-[-0.02em]">Account</h1>
+            <h1 className="text-foreground font-serif text-h1 font-normal tracking-[-0.01em]">Account</h1>
             <p className="text-muted-foreground mt-0.5 text-meta">
               {user ? `@${user.login}` : "Operator"} · {user?.role === "admin" || me?.kind === "operator" ? "admin" : "member"} ·{" "}
               {inUse !== null && maxBoxes ? `${inUse} of ${maxBoxes} machines in use` : `up to ${maxBoxes ?? "∞"} machines at once`}
@@ -238,7 +238,7 @@ export function Account({ onBack, onConnect, onAdmin }: { onBack: () => void; on
                 <label className="flex flex-col gap-1.5">
                   <span className="label text-muted-foreground">New</span>
                   <input type="password" autoComplete="new-password" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} className={inputCls} aria-describedby="pw-help" />
-                  <StrengthMeter value={pwStrong} visible={pw.next.length > 0} />
+                  <Collapse open={pw.next.length > 0}><StrengthMeter value={pwStrong} visible={pw.next.length > 0} /></Collapse>
                   <Hint show={pw.next.length > 0 && pw.next.length < 10} tone="bad">
                     <span id="pw-help">10+ characters · {10 - pw.next.length} to go</span>
                   </Hint>

@@ -391,6 +391,8 @@ export default function App() {
         const target = h1 ?? mainRef.current;
         if (!target) return;
         if (!target.hasAttribute("tabindex")) target.setAttribute("tabindex", "-1");
+        // Programmatic focus is for screen readers, not for the eye: no ring on the title.
+        target.style.outline = "none";
         target.focus({ preventScroll: true });
       })
     );
@@ -584,7 +586,7 @@ export default function App() {
           </SheetContent>
         </Sheet>
 
-        <aside className="bg-card hidden min-h-0 flex-col overflow-hidden md:flex md:border-r">
+        <aside className="bg-sidebar hidden min-h-0 flex-col overflow-hidden md:flex md:border-r">
           <div className={cn("flex h-14 shrink-0 items-center gap-2.5 px-3", collapsed && "md:justify-center md:px-0")}>
             <Tooltip>
               <TooltipTrigger asChild>

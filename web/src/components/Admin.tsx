@@ -11,7 +11,7 @@ export function Admin({ onBack }: { onBack: () => void }) {
           Account
         </Button>
         <header className="mb-7">
-          <h1 className="text-foreground text-h1 font-semibold tracking-[-0.02em]">Admin</h1>
+          <h1 className="text-foreground font-serif text-h1 font-normal tracking-[-0.01em]">Admin</h1>
           <p className="text-muted-foreground mt-0.5 text-meta">People on this controller. Admins see and can act on every machine.</p>
         </header>
         <Users />

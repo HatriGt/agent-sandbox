@@ -95,7 +95,7 @@ export function Sandboxes({
             Machines
           </Button>
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-            <h1 className="text-foreground text-h1 font-semibold tracking-[-0.02em]">Fleet</h1>
+            <h1 className="text-foreground font-serif text-h1 font-normal tracking-[-0.01em]">Fleet</h1>
             {loading ? <Bar className="h-3 w-56" /> : <Capacity boxes={boxes} capacity={lifecycle.capacity} />}
           </div>
           <p className="text-muted-foreground mt-1 text-meta">
@@ -424,7 +424,7 @@ function MachineRow({
           </span>
           {/* Words in the sans face; only the duration is data. */}
           <span className="font-sans text-micro">
-            {box.leaving ? "shutting down" : box.kept ? "kept · wakes on reply" : state === "sleeping" ? (deadline.kind === "sleep" && deadline.remainingSec != null ? `asleep · destroyed in ${deadline.remainingSec <= 0 ? "soon" : fmtDuration(deadline.remainingSec)}` : "asleep · wakes on reply") : roleLabel(box.role)}
+            {box.leaving ? "shutting down" : box.kept ? "kept · wakes on reply" : state === "sleeping" ? (deadline.kind === "sleep" && deadline.remainingSec != null ? `asleep · destroyed in ${deadline.remainingSec <= 0 ? "soon" : fmtDuration(deadline.remainingSec)}` : "asleep · wakes on reply") : box.role === "session" ? "" : roleLabel(box.role)}
           </span>
           {/* Data line: uptime · cpu — one row, never wrapping the words above. */}
           {(box.uptime || box.cpu) && (
@@ -490,7 +490,7 @@ function MachineRow({
             armedLabel="Destroy?"
             onConfirm={destroy}
             disabled={box.leaving}
-            className="text-muted-foreground opacity-60 group-hover:opacity-100"
+            className="text-muted-foreground opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100 data-[armed=true]:opacity-100 [@media(hover:none)]:opacity-60"
           />
         </div>
       </div>

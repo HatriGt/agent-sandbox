@@ -109,6 +109,8 @@
 
   /* Third text colour: tertiary content (footnotes, hints). Still ≥4.5:1 on its surface. */
   --color-faint: var(--faint);
+  /* The navigation column: one tone below the page, so the shell reads as layers. */
+  --color-sidebar: var(--sidebar);
 }
 
 :root {
@@ -126,6 +128,7 @@
   --foreground: oklch(0.21 0.006 285.9);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.21 0.006 285.9);
+  --sidebar: oklch(0.972 0.002 286);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.21 0.006 285.9);
   --primary: oklch(0.21 0.006 285.9);
@@ -178,6 +181,7 @@
   --foreground: oklch(0.95 0.002 286);
   --card: oklch(0.205 0.005 286);
   --card-foreground: oklch(0.95 0.002 286);
+  --sidebar: oklch(0.15 0.005 286);
   --popover: oklch(0.225 0.006 286);
   --popover-foreground: oklch(0.95 0.002 286);
   --primary: oklch(0.93 0.002 286);

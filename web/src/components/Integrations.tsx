@@ -19,7 +19,7 @@ export function Integrations({ onBack }: { onBack: () => void }) {
           Machines
         </Button>
         <header className="mb-7">
-          <h1 className="text-foreground text-h1 font-semibold tracking-[-0.02em]">Integrations</h1>
+          <h1 className="text-foreground font-serif text-h1 font-normal tracking-[-0.01em]">Integrations</h1>
           <p className="text-muted-foreground mt-0.5 text-meta">{getMe()?.mode === "saas" ? "Yours alone — given only to your machines, encrypted at rest." : "Given to every sandbox on its next run or turn. Stored on your server."}</p>
         </header>
         <div className="flex flex-col gap-10">
