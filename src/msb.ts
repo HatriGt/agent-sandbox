@@ -280,9 +280,14 @@ export async function bootWarmBox(cfg: Config, agent: AgentKind = "claude"): Pro
     // config for the actual owner; on this product the operator's set is the representative one),
     // then run a throwaway prompt. All best-effort, at boot time where nobody is waiting.
     await installMcpConfig(cfg, name).catch(() => {});
+    // Skills too: omp indexes them on first sight (onnxruntime embedding load — expensive), and
+    // they otherwise arrive only at claim time, putting that cost back on the user's first task.
+    await installSkills(cfg, name).catch(() => {});
     const warm =
-      `cd /tmp && ${ompSeedSh()} && OMP_SKIP_SETUP=1 timeout 90 omp --mode json --approval-mode=yolo ` +
-      `--model "ccproxy/$ANTHROPIC_MODEL" -p "Reply with exactly: ok" >/dev/null 2>&1; rm -rf /root/.omp/sessions 2>/dev/null; true`;
+      `mkdir -p /workspace && cd /workspace && ${ompSeedSh()} && OMP_SKIP_SETUP=1 timeout 180 omp --mode json --approval-mode=yolo ` +
+      `--model "ccproxy/$ANTHROPIC_MODEL"` +
+      `$([ -n "$ANTHROPIC_SMOL_MODEL" ] && printf -- ' --smol ccproxy/%s' "$ANTHROPIC_SMOL_MODEL")` +
+      ` -p "Reply with exactly: ok" >/dev/null 2>&1; rm -rf /root/.omp/sessions 2>/dev/null; true`;
     // Generous budget: the warm-up one-shot IS the ~50s cold start being absorbed — a timeout that
     // kills it mid-flight (the first version's 150s did, together with a cache-priming find) just
     // moves the cost back onto the user's first task.
