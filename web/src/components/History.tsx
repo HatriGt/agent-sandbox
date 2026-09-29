@@ -1,5 +1,6 @@
 import * as React from "react";
-import { ArrowLeft, Check, ChevronDown, RotateCw, Trash2, X } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, RotateCw, Trash2 } from "lucide-react";
+import { motion, useReducedMotion } from "motion/react";
 import { toast } from "sonner";
 import { api, type HistoryRun, type RunDigest } from "@/lib/api";
 import { ActivityHeatmap, type ActivityRun } from "@/components/ui/activity-heatmap";
@@ -8,6 +9,9 @@ import { fmtAgo, friendlyName, shortName } from "@/lib/format";
 import { fmtDuration } from "@/lib/lifecycle";
 import { setPrefill } from "@/lib/draft";
 import { Button } from "@/components/ui/button";
+import { ArmButton } from "@/components/ui/arm-button";
+import { Collapse } from "@/components/ui/collapse";
+import { StaggerItem, Swap } from "@/components/ui/swap";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DigestCard } from "@/components/thread/DigestCard";
 import { ReviewAllPane } from "@/components/thread/ReviewAll";
@@ -52,9 +56,13 @@ export function History({ onBack, onAgain }: { onBack: () => void; onAgain: () =
   const [expanded, setExpanded] = React.useState<number | null>(null);
   const [more, setMore] = React.useState(false); // another page may exist
   const [loadingMore, setLoadingMore] = React.useState(false);
+  // Rows past this index arrived via "Show more": they fade in as a fresh page, not as the first.
+  const [pageStart, setPageStart] = React.useState(0);
+  const [attempt, setAttempt] = React.useState(0);
 
   React.useEffect(() => {
     const ctrl = new AbortController();
+    setError(null);
     api
       .history({ limit: PAGE }, ctrl.signal)
       .then((r) => {
@@ -65,13 +73,14 @@ export function History({ onBack, onAgain }: { onBack: () => void; onAgain: () =
         if (!ctrl.signal.aborted) setError(e instanceof Error ? e.message : String(e));
       });
     return () => ctrl.abort();
-  }, []);
+  }, [attempt]);
 
   const showMore = async () => {
     if (!rows?.length) return;
     setLoadingMore(true);
     try {
       const r = await api.history({ limit: PAGE, before: rows[rows.length - 1].id });
+      setPageStart(rows.length);
       setRows((prev) => [...(prev ?? []), ...r.runs]);
       setMore(r.runs.length === PAGE);
     } catch (e) {
@@ -109,67 +118,78 @@ export function History({ onBack, onAgain }: { onBack: () => void; onAgain: () =
           <FilterChip active={filter === "failed"} onClick={() => setFilter("failed")} label="Failed" count={counts.failed} tone="destructive" />
         </div>
 
-        {error ? (
-          <div className="rounded-xl border border-dashed py-12 text-center">
-            <p className="text-destructive text-lead font-medium">Could not load history</p>
-            <p className="text-muted-foreground mt-1 text-meta">{error}</p>
-          </div>
-        ) : rows === null ? (
-          <div className="overflow-hidden rounded-xl border" aria-busy="true">
-            {[0, 1, 2, 3].map((i) => (
-              <div key={i} className="flex items-center gap-4 border-b px-4 py-4 last:border-b-0">
-                <Bar className="h-2.5 w-14" />
-                <Bar className="h-3 flex-1" />
-                <Bar className="h-3 w-28" />
-              </div>
-            ))}
-          </div>
-        ) : !rows.length ? (
-          <div className="rounded-xl border border-dashed py-14 text-center">
-            <p className="text-foreground text-lead font-medium">Nothing here yet</p>
-            <p className="text-muted-foreground mx-auto mt-1 max-w-sm text-meta">
-              When a run finishes, its receipt is kept even after the machine is reaped.
-            </p>
-          </div>
-        ) : !visible.length ? (
-          <div className="rounded-xl border border-dashed py-12 text-center">
-            <p className="text-foreground text-lead font-medium">Nothing matches</p>
-            <p className="text-muted-foreground mt-1 text-meta">No {filter} runs among the loaded records.</p>
-            <Button size="sm" variant="ghost" className="text-live mt-2" onClick={() => setFilter("all")}>
-              Show everything
-            </Button>
-          </div>
-        ) : (
-          <>
-            <div className="overflow-hidden rounded-xl border">
-              <ul>
-                {visible.map((r, i) => {
-                  const at = r.archivedAt || r.endedAt || 0;
-                  const prev = i > 0 ? visible[i - 1].archivedAt || visible[i - 1].endedAt || 0 : null;
-                  const head = at && (prev === null || dayLabel(prev) !== dayLabel(at)) ? dayLabel(at) : null;
-                  return (
-                    <HistoryRow
-                      key={r.id}
-                      run={r}
-                      head={head}
-                      open={expanded === r.id}
-                      onToggle={() => setExpanded((cur) => (cur === r.id ? null : r.id))}
-                      onAgain={onAgain}
-                      onDeleted={() => setRows((prevRows) => (prevRows ?? []).filter((x) => x.id !== r.id))}
-                    />
-                  );
-                })}
-              </ul>
+        <Swap state={error ? "error" : rows === null ? "loading" : !rows.length ? "empty" : !visible.length ? `none-${filter}` : "list"}>
+          {error ? (
+            <div className="border-destructive/30 bg-destructive/5 rounded-xl border border-dashed py-12 text-center" role="alert">
+              <p className="text-destructive text-lead font-medium">Could not load history</p>
+              <p className="text-muted-foreground mt-1 text-meta">{error}</p>
+              <Button size="sm" variant="outline" className="mt-3" onClick={() => setAttempt((n) => n + 1)}>
+                <RotateCw />
+                Retry
+              </Button>
             </div>
-            {more && (
-              <div className="mt-3 flex justify-center">
-                <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => void showMore()} disabled={loadingMore}>
-                  {loadingMore ? "Loading…" : "Show more"}
-                </Button>
+          ) : rows === null ? (
+            <div className="overflow-hidden rounded-xl border" aria-busy="true">
+              {[0, 1, 2, 3].map((i) => (
+                <div key={i} className="flex items-center gap-4 border-b px-4 py-4 last:border-b-0">
+                  <Bar className="h-2.5 w-14" />
+                  <Bar className="h-3 flex-1" />
+                  <Bar className="h-3 w-28" />
+                </div>
+              ))}
+            </div>
+          ) : !rows.length ? (
+            <div className="rounded-xl border border-dashed py-14 text-center">
+              <p className="text-foreground text-lead font-medium">Nothing here yet</p>
+              <p className="text-muted-foreground mx-auto mt-1 max-w-sm text-meta">
+                When a run finishes, its receipt is kept even after the machine is reaped.
+              </p>
+            </div>
+          ) : !visible.length ? (
+            <div className="rounded-xl border border-dashed py-12 text-center">
+              <p className="text-foreground text-lead font-medium">Nothing matches</p>
+              <p className="text-muted-foreground mt-1 text-meta">No {filter} runs among the loaded records.</p>
+              <Button size="sm" variant="ghost" className="text-live mt-2" onClick={() => setFilter("all")}>
+                Show everything
+              </Button>
+            </div>
+          ) : (
+            <>
+              <div className="overflow-hidden rounded-xl border">
+                {/* role=list: the stagger wrapper sits between list and item, so the semantics are explicit. */}
+                <div role="list">
+                  {visible.map((r, i) => {
+                    const at = r.archivedAt || r.endedAt || 0;
+                    const prev = i > 0 ? visible[i - 1].archivedAt || visible[i - 1].endedAt || 0 : null;
+                    const head = at && (prev === null || dayLabel(prev) !== dayLabel(at)) ? dayLabel(at) : null;
+                    // Stagger from the start of the page this row arrived on, so "Show more" rows rise
+                    // in as a fresh batch instead of waiting behind fifty already-visible ones.
+                    const idx = rows.indexOf(r);
+                    return (
+                      <StaggerItem key={r.id} index={Math.max(0, idx - pageStart)}>
+                        <HistoryRow
+                          run={r}
+                          head={head}
+                          open={expanded === r.id}
+                          onToggle={() => setExpanded((cur) => (cur === r.id ? null : r.id))}
+                          onAgain={onAgain}
+                          onDeleted={() => setRows((prevRows) => (prevRows ?? []).filter((x) => x.id !== r.id))}
+                        />
+                      </StaggerItem>
+                    );
+                  })}
+                </div>
               </div>
-            )}
-          </>
-        )}
+              {more && (
+                <div className="mt-3 flex justify-center">
+                  <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => void showMore()} loading={loadingMore}>
+                    Show more
+                  </Button>
+                </div>
+              )}
+            </>
+          )}
+        </Swap>
       </div>
     </div>
   );
@@ -228,31 +248,13 @@ function HistoryRow({
   const duration = run.startedAt && run.endedAt && run.endedAt > run.startedAt ? fmtDuration(Math.round((run.endedAt - run.startedAt) / 1000)) : null;
   const verified = /\bverified\s*$/i.test(run.headline ?? "");
 
-  const [armed, setArmed] = React.useState(false);
-  const [removing, setRemoving] = React.useState(false);
-  React.useEffect(() => {
-    if (!armed) return;
-    const t = window.setTimeout(() => setArmed(false), 4000);
-    const onEsc = (e: KeyboardEvent) => e.key === "Escape" && setArmed(false);
-    document.addEventListener("keydown", onEsc);
-    return () => {
-      window.clearTimeout(t);
-      document.removeEventListener("keydown", onEsc);
-    };
-  }, [armed]);
-
   const remove = async () => {
-    if (!armed) return setArmed(true);
-    setRemoving(true);
     try {
       await api.deleteHistoryRun(run.id);
       toast.success("Record deleted");
       onDeleted();
     } catch (e) {
       toast.error("Could not delete the record", { description: e instanceof Error ? e.message : String(e) });
-    } finally {
-      setRemoving(false);
-      setArmed(false);
     }
   };
 
@@ -263,13 +265,13 @@ function HistoryRow({
   };
 
   return (
-    <li className="border-b last:border-b-0">
+    <div role="listitem" className="border-b last:border-b-0">
       {head && (
         <p className="label text-faint bg-muted/30 border-b px-4 py-1.5" aria-hidden>
           {head}
         </p>
       )}
-      <div className={cn("group relative transition-colors", !open && "hover:bg-muted/50")}>
+      <div className={cn("group relative transition-colors duration-200", open ? "bg-muted/40" : "hover:bg-muted/50")}>
         <div className="grid grid-cols-1 items-center gap-2 px-4 py-3 md:grid-cols-[5.5rem_minmax(0,1fr)_auto] md:gap-3">
           {/* The row IS the expand action: a stretched button under the content. */}
           <button
@@ -289,7 +291,7 @@ function HistoryRow({
             <span className="text-foreground block truncate text-meta">
               {titleOf(run)}
               {verified && (
-                <span className="text-ok ml-2 inline-flex items-center gap-0.5 text-micro" title="The run's result was verified">
+                <span className="bg-ok/10 text-ok ml-2 inline-flex items-center gap-0.5 rounded-full px-1.5 py-px align-middle text-micro font-medium" title="The run's result was verified">
                   <Check className="size-3" aria-hidden />
                   verified
                 </span>
@@ -320,39 +322,24 @@ function HistoryRow({
               </TooltipTrigger>
               <TooltipContent>Run again — a new machine, the same brief (you can edit it first)</TooltipContent>
             </Tooltip>
-            {armed ? (
-              <>
-                <Button size="sm" variant="destructive" onClick={() => void remove()} disabled={removing}>
-                  <Trash2 />
-                  {removing ? "Deleting…" : "Confirm"}
-                </Button>
-                <Button size="icon-sm" variant="ghost" onClick={() => setArmed(false)} aria-label="Cancel">
-                  <X />
-                </Button>
-              </>
-            ) : (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    size="icon-sm"
-                    variant="ghost"
-                    onClick={() => void remove()}
-                    aria-label="Delete this record"
-                    className="text-muted-foreground opacity-60 transition-opacity group-hover:opacity-100"
-                  >
-                    <Trash2 />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Delete the record — the run itself already ended</TooltipContent>
-              </Tooltip>
-            )}
-            <ChevronDown className={cn("text-muted-foreground pointer-events-none size-4 transition-transform", open && "rotate-180")} aria-hidden />
+            <ArmButton
+              size="icon-sm"
+              variant="ghost"
+              icon={<Trash2 />}
+              label="Delete this record"
+              armedLabel="Delete?"
+              onConfirm={remove}
+              className="text-muted-foreground opacity-60 group-hover:opacity-100"
+            />
+            <ChevronDown className={cn("text-muted-foreground pointer-events-none size-4 transition-transform duration-200", open && "rotate-180")} aria-hidden />
           </span>
         </div>
 
-        {open && <RunDetail id={run.id} />}
+        <Collapse open={open}>
+          <RunDetail id={run.id} />
+        </Collapse>
       </div>
-    </li>
+    </div>
   );
 }
 
@@ -360,6 +347,7 @@ function HistoryRow({
 function RunDetail({ id }: { id: number }) {
   const [state, setState] = React.useState<{ digest: RunDigest | null; diffText?: string; error?: string } | "loading">("loading");
   const [review, setReview] = React.useState(false);
+  const [attempt, setAttempt] = React.useState(0);
   React.useEffect(() => {
     setState("loading");
     setReview(false);
@@ -371,35 +359,53 @@ function RunDetail({ id }: { id: number }) {
         if (!ctrl.signal.aborted) setState({ digest: null, error: e instanceof Error ? e.message : String(e) });
       });
     return () => ctrl.abort();
-  }, [id]);
+  }, [id, attempt]);
 
+  const still = useReducedMotion();
   return (
     <div className="border-t px-4 py-3">
-      {state === "loading" ? (
-        <div className="space-y-2" aria-busy="true">
-          <Bar className="h-3 w-[60%]" />
-          <Bar className="h-3 w-[40%]" />
-        </div>
-      ) : state.error ? (
-        <p className="text-muted-foreground text-meta">Could not load the record: {state.error}</p>
-      ) : state.digest ? (
-        <>
-          <DigestCard digest={state.digest} />
-          {state.diffText && (
-            <div className="mt-3">
-              {review ? (
-                <ReviewAllPane archivedDiff={state.diffText} onClose={() => setReview(false)} />
-              ) : (
-                <button type="button" onClick={() => setReview(true)} className="text-muted-foreground hover:text-foreground hover:bg-muted cursor-pointer rounded-md border px-2.5 py-1 text-micro font-medium">
-                  Review changes
-                </button>
-              )}
+      <Swap state={state === "loading" ? "loading" : state.error ? "error" : state.digest ? "digest" : "none"}>
+        {state === "loading" ? (
+          // Shaped like the DigestCard it becomes: a raised card with the status line, so the swap
+          // is a crossfade in place rather than a two-line stub growing into a card.
+          <div className="bg-card raised rounded-xl px-4 py-3" aria-busy="true">
+            <div className="flex items-center gap-2.5">
+              <Bar className="size-2 rounded-full" />
+              <Bar className="h-2.5 w-8" />
+              <Bar className="h-3 flex-1 max-w-[60%]" />
+              <Bar className="h-2.5 w-10" />
             </div>
-          )}
-        </>
-      ) : (
-        <p className="text-muted-foreground text-meta">No receipt was kept for this run — only the facts in the row above.</p>
-      )}
+            <Bar className="mt-2.5 ml-[18px] h-2.5 w-[40%]" />
+          </div>
+        ) : state.error ? (
+          <div className="border-destructive/30 bg-destructive/5 flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2" role="alert">
+            <p className="text-destructive text-meta">Could not load the record: {state.error}</p>
+            <Button size="xs" variant="outline" onClick={() => setAttempt((n) => n + 1)}>
+              <RotateCw />
+              Retry
+            </Button>
+          </div>
+        ) : state.digest ? (
+          <>
+            <DigestCard digest={state.digest} />
+            {state.diffText && (
+              <div className="mt-3">
+                {review ? (
+                  <motion.div initial={still ? { opacity: 0 } : { opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: still ? 0.1 : 0.2, ease: [0.22, 1, 0.36, 1] }}>
+                    <ReviewAllPane archivedDiff={state.diffText} onClose={() => setReview(false)} />
+                  </motion.div>
+                ) : (
+                  <Button size="sm" variant="outline" onClick={() => setReview(true)}>
+                    Review changes
+                  </Button>
+                )}
+              </div>
+            )}
+          </>
+        ) : (
+          <p className="text-muted-foreground text-meta">No receipt was kept for this run — only the facts in the row above.</p>
+        )}
+      </Swap>
     </div>
   );
 }

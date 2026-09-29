@@ -1,14 +1,17 @@
 import * as React from "react";
-import { ArrowLeft, ChevronRight, GitBranch, Hourglass, Pause, Search, Trash2, X } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { ArrowLeft, ChevronRight, GitBranch, Hourglass, Pause, Plus, Search, Server, Trash2, X } from "lucide-react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { toast } from "sonner";
 import { api, type FleetLifecycle } from "@/lib/api";
+import { useGo } from "@/lib/route";
 import { friendlyName, shortName, roleLabel, threadSort, threadTitle } from "@/lib/format";
 import { deadlineLabel, deadlineOf, displayState, fmtDuration } from "@/lib/lifecycle";
 import { questionHeadline } from "@/lib/question";
 import type { StableBox } from "@/hooks/useStableBoxes";
 import { prefetchWatch } from "@/hooks/useWatchStream";
 import { Button } from "@/components/ui/button";
+import { ArmButton } from "@/components/ui/arm-button";
+import { Swap } from "@/components/ui/swap";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { UsageMeter } from "@/components/ui/usage-meter";
 import { StateStamp } from "@/components/ui/stamp";
@@ -60,6 +63,7 @@ export function Sandboxes({
 }) {
   const [filter, setFilter] = React.useState<Filter>("all");
   const [query, setQuery] = React.useState("");
+  const go = useGo();
 
   const sorted = [...boxes].sort(threadSort);
   const counts = React.useMemo(() => {
@@ -174,43 +178,52 @@ export function Sandboxes({
             </div>
           </div>
 
-          {loading ? (
-            <div className="overflow-hidden rounded-xl border">
-              {[0, 1, 2].map((i) => (
-                <div key={i} className="flex items-center gap-4 border-b px-4 py-4 last:border-b-0">
-                  <Bar className="h-2.5 w-20" />
-                  <Bar className="h-3 flex-1" />
-                  <Bar className="h-3 w-40" />
-                  <Bar className="h-8 w-16 rounded-md" />
-                </div>
-              ))}
-            </div>
-          ) : !sorted.length ? (
-            <div className="rounded-xl border border-dashed py-14 text-center">
-              <p className="text-foreground text-lead font-medium">Nothing is up</p>
-              <p className="text-muted-foreground mt-1 text-meta">A machine boots in a few seconds when you start a task.</p>
-            </div>
-          ) : !visible.length ? (
-            <div className="rounded-xl border border-dashed py-12 text-center">
-              <p className="text-foreground text-lead font-medium">Nothing matches</p>
-              <p className="text-muted-foreground mt-1 text-meta">
-                {q ? <>No machine matches “{query.trim()}”{filter !== "all" && <> in {GROUP_LABEL[filter as Exclude<Filter, "all">].toLowerCase()}</>}.</> : <>No machines are {GROUP_LABEL[filter as Exclude<Filter, "all">].toLowerCase()} right now.</>}
-              </p>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="text-live mt-2"
-                onClick={() => {
-                  setQuery("");
-                  setFilter("all");
-                }}
-              >
-                Show everything
-              </Button>
-            </div>
-          ) : (
-            <MachineTable boxes={visible} grouped={grouped} lifecycle={lifecycle} onOpen={onOpen} onDestroyed={onDestroyed} />
-          )}
+          <Swap state={loading ? "loading" : !sorted.length ? "empty" : !visible.length ? "none" : "list"}>
+            {loading ? (
+              <div className="overflow-hidden rounded-xl border" aria-busy="true">
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="flex items-center gap-4 border-b px-4 py-4 last:border-b-0">
+                    <Bar className="h-2.5 w-20" />
+                    <Bar className="h-3 flex-1" />
+                    <Bar className="h-3 w-40" />
+                    <Bar className="h-8 w-16 rounded-md" />
+                  </div>
+                ))}
+              </div>
+            ) : !sorted.length ? (
+              <div className="flex flex-col items-center rounded-xl border border-dashed px-6 py-14 text-center">
+                <span className="bg-muted text-muted-foreground mb-4 grid size-12 place-items-center rounded-full" aria-hidden>
+                  <Server className="size-5" />
+                </span>
+                <p className="text-foreground text-lead font-medium">Nothing is up</p>
+                <p className="text-muted-foreground mt-1 max-w-[30em] text-meta">A machine boots in a few seconds when you start a task.</p>
+                <Button size="sm" className="mt-4" onClick={() => go({ view: "hub" })}>
+                  <Plus />
+                  Start a task
+                </Button>
+              </div>
+            ) : !visible.length ? (
+              <div className="rounded-xl border border-dashed py-12 text-center">
+                <p className="text-foreground text-lead font-medium">Nothing matches</p>
+                <p className="text-muted-foreground mt-1 text-meta">
+                  {q ? <>No machine matches “{query.trim()}”{filter !== "all" && <> in {GROUP_LABEL[filter as Exclude<Filter, "all">].toLowerCase()}</>}.</> : <>No machines are {GROUP_LABEL[filter as Exclude<Filter, "all">].toLowerCase()} right now.</>}
+                </p>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-live mt-2"
+                  onClick={() => {
+                    setQuery("");
+                    setFilter("all");
+                  }}
+                >
+                  Show everything
+                </Button>
+              </div>
+            ) : (
+              <MachineTable boxes={visible} grouped={grouped} lifecycle={lifecycle} onOpen={onOpen} onDestroyed={onDestroyed} />
+            )}
+          </Swap>
         </section>
       </div>
     </div>
@@ -321,26 +334,14 @@ function MachineRow({
   onOpen: (name: string) => void;
   onDestroyed: (name: string) => void;
 }) {
-  const [armed, setArmed] = React.useState(false);
-  const [removing, setRemoving] = React.useState(false);
-  React.useEffect(() => {
-    if (!armed) return;
-    const t = window.setTimeout(() => setArmed(false), 4000);
-    return () => window.clearTimeout(t);
-  }, [armed]);
-
+  const still = useReducedMotion();
   const destroy = async () => {
-    if (!armed) return setArmed(true);
-    setRemoving(true);
     try {
       await api.teardown(box.name);
       toast.success(`${friendlyName(box.name)} destroyed`);
       onDestroyed(box.name);
     } catch (e) {
       toast.error("Could not destroy the machine", { description: e instanceof Error ? e.message : String(e) });
-    } finally {
-      setRemoving(false);
-      setArmed(false);
     }
   };
 
@@ -358,11 +359,22 @@ function MachineRow({
       transition={{ type: "spring", stiffness: 500, damping: 40, mass: 0.8 }}
       className="border-b last:border-b-0"
     >
-      {head && (
-        <p className="label text-faint bg-muted/30 border-b px-4 py-1.5" aria-hidden>
-          {head}
-        </p>
-      )}
+      <AnimatePresence initial={false}>
+        {head && (
+          <motion.p
+            key={head}
+            layout="position"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: still ? 0.1 : 0.18 }}
+            className="label text-faint bg-muted/30 border-b px-4 py-1.5"
+            aria-hidden
+          >
+            {head}
+          </motion.p>
+        )}
+      </AnimatePresence>
       <div className={cn("group hover:bg-muted/50 relative grid grid-cols-1 gap-2 px-4 py-3 transition-colors md:items-center md:gap-3", COLS)}>
         {/* The row IS the open action: a stretched button under the content (first child, so every
             later positioned sibling — destroy, the time-left tooltip — paints and clicks above it).
@@ -384,7 +396,7 @@ function MachineRow({
 
         <div className="min-w-0">
           <p className="text-foreground truncate text-meta">
-            {box.task ? threadTitle(box) : <span className="text-muted-foreground">No task yet — claim it with a new task</span>}
+            {box.task ? threadTitle(box) : <span className="text-faint italic">No task yet — claim it with a new task</span>}
           </p>
           {box.question && <p className="text-attention-text truncate text-micro">Asking: {questionHeadline(box.question)}</p>}
           {(box.repos ?? []).length > 0 && (
@@ -470,33 +482,16 @@ function MachineRow({
               aria-hidden
             />
           )}
-          {armed ? (
-            <>
-              <Button size="sm" variant="destructive" onClick={destroy} disabled={removing}>
-                <Trash2 />
-                {removing ? "Destroying…" : "Confirm"}
-              </Button>
-              <Button size="icon-sm" variant="ghost" onClick={() => setArmed(false)} aria-label="Cancel">
-                <X />
-              </Button>
-            </>
-          ) : (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  onClick={destroy}
-                  disabled={box.leaving}
-                  aria-label={`Destroy ${friendlyName(box.name)}`}
-                  className="text-muted-foreground opacity-60 transition-opacity group-hover:opacity-100"
-                >
-                  <Trash2 />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Destroy — stops the sandbox and discards its workspace</TooltipContent>
-            </Tooltip>
-          )}
+          <ArmButton
+            size="icon-sm"
+            variant="ghost"
+            icon={<Trash2 />}
+            label={`Destroy ${friendlyName(box.name)}`}
+            armedLabel="Destroy?"
+            onConfirm={destroy}
+            disabled={box.leaving}
+            className="text-muted-foreground opacity-60 group-hover:opacity-100"
+          />
         </div>
       </div>
     </motion.li>
@@ -505,17 +500,8 @@ function MachineRow({
 
 /** Bulk clean-up: destroy every sleeping, non-kept sandbox (two clicks). */
 function DestroySleeping({ boxes, onDestroyed }: { boxes: StableBox[]; onDestroyed: (name: string) => void }) {
-  const [armed, setArmed] = React.useState(false);
-  const [busy, setBusy] = React.useState(false);
-  React.useEffect(() => {
-    if (!armed) return;
-    const t = window.setTimeout(() => setArmed(false), 5000);
-    return () => window.clearTimeout(t);
-  }, [armed]);
   if (!boxes.length) return null;
   const run = async () => {
-    if (!armed) return setArmed(true);
-    setBusy(true);
     let ok = 0;
     for (const b of boxes) {
       try {
@@ -527,13 +513,17 @@ function DestroySleeping({ boxes, onDestroyed }: { boxes: StableBox[]; onDestroy
       }
     }
     toast.success(`Destroyed ${ok} sleeping ${ok === 1 ? "sandbox" : "sandboxes"}`);
-    setBusy(false);
-    setArmed(false);
   };
   return (
-    <Button size="sm" variant={armed ? "destructive" : "ghost"} onClick={run} disabled={busy} className={cn(!armed && "text-muted-foreground")}>
-      <Trash2 />
-      {busy ? "Destroying…" : armed ? `Confirm: destroy ${boxes.length} sleeping` : `Destroy ${boxes.length} sleeping`}
-    </Button>
+    <ArmButton
+      size="sm"
+      variant="ghost"
+      icon={<Trash2 />}
+      label={`Destroy ${boxes.length} sleeping`}
+      armedLabel={`Confirm: destroy ${boxes.length} sleeping`}
+      autoDisarmMs={5000}
+      onConfirm={run}
+      className="text-muted-foreground"
+    />
   );
 }

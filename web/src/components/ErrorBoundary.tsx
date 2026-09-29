@@ -1,5 +1,6 @@
 import * as React from "react";
-import { RotateCw, TriangleAlert } from "lucide-react";
+import { Check, Copy, RotateCw, TriangleAlert } from "lucide-react";
+import { motion, useReducedMotion } from "motion/react";
 import { useRouteError } from "react-router";
 import { Button } from "@/components/ui/button";
 
@@ -16,9 +17,25 @@ export function RouteError() {
 }
 
 function Fallback({ message, retry }: { message: string; retry: () => void }) {
+  const still = useReducedMotion();
+  const [copied, setCopied] = React.useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(`${message}\n\n${location.href}\n${navigator.userAgent}`);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard denied: the text is selectable in the <pre> anyway */
+    }
+  };
   return (
     <div className="bg-background text-foreground flex min-h-full items-center justify-center px-6">
-      <div className="max-w-md">
+      <motion.div
+        initial={still ? { opacity: 0 } : { opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: still ? 0.12 : 0.26, ease: [0.22, 1, 0.36, 1] }}
+        className="max-w-md"
+      >
         <span className="bg-destructive/10 text-destructive grid size-10 place-items-center rounded-md">
           <TriangleAlert className="size-5" aria-hidden />
         </span>
@@ -27,7 +44,13 @@ function Fallback({ message, retry }: { message: string; retry: () => void }) {
           Usually a response the console didn't expect — for example while the controller is redeploying. Nothing on the
           server is affected.
         </p>
-        <pre className="bg-muted text-muted-foreground mt-4 overflow-x-auto rounded-md px-3 py-2 font-mono text-micro">{message}</pre>
+        <div className="group relative mt-4">
+          <pre className="bg-muted text-muted-foreground overflow-x-auto rounded-md px-3 py-2 pr-24 font-mono text-micro">{message}</pre>
+          <Button size="xs" variant="outline" onClick={() => void copy()} className="absolute top-1.5 right-1.5" aria-live="polite">
+            {copied ? <Check className="text-ok" /> : <Copy />}
+            {copied ? "Copied" : "Copy details"}
+          </Button>
+        </div>
         <div className="mt-5 flex gap-2">
           <Button onClick={retry}>
             <RotateCw />
@@ -37,7 +60,7 @@ function Fallback({ message, retry }: { message: string; retry: () => void }) {
             Reload
           </Button>
         </div>
-      </div>
+      </motion.div>
     </div>
   );
 }

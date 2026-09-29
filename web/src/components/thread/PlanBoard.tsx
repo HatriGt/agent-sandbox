@@ -3,6 +3,7 @@ import { AlertTriangle, Check, ChevronRight, Circle, CircleDot, Loader2, PanelRi
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { shortDuration, shortPath, type DerivedTask, type TaskBoard, type TaskEvidence } from "@/lib/planTasks";
 import { FileMark } from "@/lib/fileIcon";
+import { Collapse } from "@/components/ui/collapse";
 import { cn } from "@/lib/utils";
 
 /**
@@ -363,23 +364,13 @@ export function PlanCard({ board, live }: { board: TaskBoard; live?: boolean }) 
 
       <ProgressRail done={done} total={tasks.length} complete={complete} failed={failed > 0} />
 
-      <AnimatePresence initial={false}>
-        {open && (
-          <motion.ol
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.22, ease: EASE }}
-            className="overflow-hidden"
-          >
-            <div className="bg-muted/40 flex flex-col gap-1.5 border-t p-2">
-              {tasks.map((t, i) => (
-                <TaskRow key={`${i}-${t.text}`} task={t} live={live} />
-              ))}
-            </div>
-          </motion.ol>
-        )}
-      </AnimatePresence>
+      <Collapse open={open}>
+        <ol className="bg-muted/40 flex flex-col gap-1.5 border-t p-2">
+          {tasks.map((t, i) => (
+            <TaskRow key={`${i}-${t.text}`} task={t} live={live} />
+          ))}
+        </ol>
+      </Collapse>
     </div>
   );
 }

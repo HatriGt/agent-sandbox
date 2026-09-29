@@ -1,5 +1,5 @@
 import * as React from "react";
-import { CornerDownLeft, Plus, Search } from "lucide-react";
+import { CornerDownLeft, Plus, Search, SearchX } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import type { BoxView } from "@/lib/api";
 import { friendlyName, shortName, threadTitle } from "@/lib/format";
@@ -189,7 +189,14 @@ export function CommandPalette({
           </li>
         ))}
         {q && !matches.length && !acts.length && (
-          <li className="text-muted-foreground px-2.5 py-4 text-center text-meta">No machine matches “{query.trim()}”.</li>
+          // Empty state with a hint: say what IS searched, so a miss is a nudge rather than a dead end.
+          <li className="flex flex-col items-center gap-2 px-2.5 py-6 text-center">
+            <span className="bg-muted text-muted-foreground grid size-9 place-items-center rounded-full">
+              <SearchX className="size-4" aria-hidden />
+            </span>
+            <p className="text-foreground text-meta">No machine matches “{query.trim()}”.</p>
+            <p className="text-muted-foreground text-micro">Search by task text or machine name, or clear the search to see everything.</p>
+          </li>
         )}
       </ul>
     </dialog>

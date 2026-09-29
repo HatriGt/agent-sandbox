@@ -3,7 +3,10 @@ import { api, type AuditEventRow } from "@/lib/api";
 import { fmtAgo } from "@/lib/format";
 import { consolePath } from "@/lib/route";
 import { useLocation } from "react-router";
+import { ScrollText } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { StaggerItem, Swap } from "@/components/ui/swap";
+import { ListEmpty, ListSkeleton } from "@/components/ApiKeys";
 import { cn } from "@/lib/utils";
 
 const PAGE = 25;
@@ -61,6 +64,8 @@ export function AuditLog() {
   const [done, setDone] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const { search } = useLocation();
+  // Rows appended by "Show more" stagger from their own first index, not from row 0.
+  const pageStart = React.useRef(0);
 
   // The cursor is (at, id): `at` is not unique across a burst of requests, so paging on it alone
   // would silently drop every row sharing the boundary timestamp.
@@ -68,7 +73,11 @@ export function AuditLog() {
     setBusy(true);
     try {
       const r = await api.audit({ limit: PAGE, before: cursor?.at, beforeId: cursor?.id });
-      setRows((prev) => [...(cursor ? (prev ?? []) : []), ...r.events]);
+      setRows((prev) => {
+        const kept = cursor ? (prev ?? []) : [];
+        pageStart.current = kept.length;
+        return [...kept, ...r.events];
+      });
       if (r.events.length < PAGE) setDone(true);
     } catch {
       setRows((prev) => prev ?? []);
@@ -81,41 +90,49 @@ export function AuditLog() {
 
   return (
     <section aria-labelledby="audit-h">
-      <div className="mb-3 flex items-center gap-2">
+      <div className="mb-4 flex items-center gap-2">
         <h2 id="audit-h" className="text-foreground text-h3 font-semibold tracking-[-0.01em]">
           Recent activity
         </h2>
         <span className="text-muted-foreground text-meta">state-changing actions · kept 90 days</span>
       </div>
-      <ul className="divide-y rounded-xl border">
-        {rows === null && <li className="text-muted-foreground px-3.5 py-3 text-meta">Loading…</li>}
-        {(rows ?? []).map((e) => {
-          const d = describeEvent(e);
-          const at = Date.parse(e.at);
-          return (
-            <li key={e.id} className="flex items-baseline gap-3 px-3.5 py-2">
-              <span className="stamp text-faint shrink-0">{Number.isFinite(at) ? fmtAgo(at / 1000) : e.at}</span>
-              <span className={cn("text-meta min-w-0 truncate", e.status >= 400 ? "text-muted-foreground" : "text-foreground")}>
-                {d.verb}
-                {d.session && (
-                  <>
-                    {" "}
-                    <a href={`${consolePath({ view: "box", name: d.session })}${search}`} className="underline decoration-line-strong underline-offset-4 hover:decoration-current">
-                      {d.session}
-                    </a>
-                  </>
-                )}
-                {e.status >= 400 && <span className="text-destructive"> · failed {e.status}</span>}
-              </span>
-            </li>
-          );
-        })}
-        {rows !== null && rows.length === 0 && (
-          <li className="text-muted-foreground px-3.5 py-3 text-meta">Nothing yet — actions you take (starting, answering, destroying) appear here.</li>
-        )}
-      </ul>
+      <div className="rounded-xl border">
+        <Swap state={rows === null ? "loading" : rows.length === 0 ? "empty" : "list"}>
+          {rows === null ? (
+            <ListSkeleton rows={3} />
+          ) : rows.length === 0 ? (
+            <ListEmpty icon={ScrollText} title="Nothing yet" line="Actions you take (starting, answering, destroying) appear here." />
+          ) : (
+            <ul className="divide-y">
+              {rows.map((e, i) => {
+                const d = describeEvent(e);
+                const at = Date.parse(e.at);
+                return (
+                  <li key={e.id}>
+                    <StaggerItem index={Math.max(0, i - pageStart.current)} className="flex items-baseline gap-3 px-3.5 py-2">
+                      <span className="stamp text-faint shrink-0">{Number.isFinite(at) ? fmtAgo(at / 1000) : e.at}</span>
+                      <span className={cn("text-meta min-w-0 truncate", e.status >= 400 ? "text-muted-foreground" : "text-foreground")}>
+                        {d.verb}
+                        {d.session && (
+                          <>
+                            {" "}
+                            <a href={`${consolePath({ view: "box", name: d.session })}${search}`} className="underline decoration-line-strong underline-offset-4 hover:decoration-current">
+                              {d.session}
+                            </a>
+                          </>
+                        )}
+                        {e.status >= 400 && <span className="text-destructive"> · failed {e.status}</span>}
+                      </span>
+                    </StaggerItem>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </Swap>
+      </div>
       {rows !== null && rows.length > 0 && !done && (
-        <Button size="sm" variant="ghost" className="text-muted-foreground mt-2" disabled={busy} onClick={() => load({ at: rows[rows.length - 1].at, id: rows[rows.length - 1].id })}>
+        <Button size="sm" variant="ghost" className="text-muted-foreground mt-2" loading={busy} onClick={() => load({ at: rows[rows.length - 1].at, id: rows[rows.length - 1].id })}>
           Show more
         </Button>
       )}

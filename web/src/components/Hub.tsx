@@ -38,6 +38,7 @@ import { AnimatedTabs } from "@/components/ui/animated-tabs";
 import { StateStamp } from "@/components/ui/stamp";
 import { PromptInput, PromptInputActions, PromptInputTextarea } from "@/components/ui/prompt-input";
 import { Lightbox } from "@/components/ui/lightbox";
+import { NumberTicker } from "@/components/ui/number-ticker";
 import { Capacity } from "@/components/Capacity";
 import { Bar } from "@/components/thread/Skeletons";
 import { smartJoin, useVoiceInput } from "@/hooks/useVoiceInput";
@@ -100,22 +101,47 @@ function takeFailedSubmit(): FailedSubmit | null {
   return s;
 }
 
-/** One honest sentence about the fleet right now, built only from live data. */
-function fleetLine(boxes: BoxView[], lc: FleetLifecycle): string {
+/**
+ * One honest sentence about the fleet right now, built only from live data. The counts tick
+ * (NumberTicker) so a poll that changes "2 working" to "3 working" reads as a change, not a reprint;
+ * the slot count in the "full" tail is configuration and stays plain.
+ */
+function fleetLine(boxes: BoxView[], lc: FleetLifecycle): React.ReactNode {
   const waiting = boxes.filter((b) => b.runState === "waiting").length;
   const working = boxes.filter((b) => b.runState === "running" && displayState(b) === "running").length;
   const warm = boxes.filter((b) => b.role === "pool-free" && displayState(b) === "idle").length;
   const up = boxes.filter((b) => displayState(b) !== "sleeping").length;
-  const parts: string[] = [];
-  if (waiting) parts.push(`${waiting} ${waiting === 1 ? "machine needs" : "machines need"} your answer`);
-  if (working) parts.push(`${working} working`);
+  const parts: React.ReactNode[] = [];
+  if (waiting)
+    parts.push(
+      <React.Fragment key="waiting">
+        <NumberTicker value={waiting} from={waiting} className="text-foreground font-medium" /> {waiting === 1 ? "machine needs" : "machines need"} your answer
+      </React.Fragment>
+    );
+  if (working)
+    parts.push(
+      <React.Fragment key="working">
+        <NumberTicker value={working} from={working} className="text-foreground font-medium" /> working
+      </React.Fragment>
+    );
   const full = lc.capacity > 0 && up >= lc.capacity;
   const tail = full
     ? `All ${lc.capacity} slots are in use — finish or destroy a machine to start another.`
     : warm
       ? "A warm machine is ready, so a new task starts in seconds."
       : "No warm machine right now — a fresh sandbox boots in a few seconds.";
-  return parts.length ? `${parts.join(", ")}. ${tail}` : tail;
+  if (!parts.length) return tail;
+  return (
+    <>
+      {parts.map((p, i) => (
+        <React.Fragment key={i}>
+          {i > 0 && ", "}
+          {p}
+        </React.Fragment>
+      ))}
+      . {tail}
+    </>
+  );
 }
 
 export function Hub({

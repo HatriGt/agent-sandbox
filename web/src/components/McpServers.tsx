@@ -1,11 +1,14 @@
 import * as React from "react";
-import { Braces, Check, ChevronDown, Copy, KeyRound, List, Loader2, Plus, RotateCcw, Search, Stethoscope, Trash2, WandSparkles, X } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { Braces, Check, ChevronDown, Copy, KeyRound, List, Plus, RotateCcw, Search, Stethoscope, Trash2, WandSparkles, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, type McpServersResponse, type McpServerView, type McpTransport } from "@/lib/api";
 import { useCached } from "@/lib/cache";
 import { BrandGlyph } from "@/lib/brandIcon";
 import { Button } from "@/components/ui/button";
+import { ArmButton } from "@/components/ui/arm-button";
+import { Switch } from "@/components/ui/switch";
+import { Collapse } from "@/components/ui/collapse";
+import { Swap } from "@/components/ui/swap";
 import { AnimatedTabs } from "@/components/ui/animated-tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Bar } from "@/components/thread/Skeletons";
@@ -56,7 +59,7 @@ export function McpServers() {
 
   return (
     <section aria-labelledby="mcp-h">
-      <div className="mb-3 flex flex-wrap items-center gap-2">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         <h2 id="mcp-h" className="text-foreground text-h3 font-semibold tracking-[-0.01em]">
           MCP servers
         </h2>
@@ -109,23 +112,22 @@ export function McpServers() {
         </div>
       </div>
 
-      {cached.error && (
-        <p role="alert" className="text-destructive mb-3 text-meta">
+      <Collapse open={!!cached.error}>
+        <p role="alert" className="bg-destructive/10 text-destructive mb-3 rounded-lg px-3 py-2 text-meta">
           {cached.error}
         </p>
-      )}
+      </Collapse>
 
+      <Swap state={view}>
       {view === "json" ? (
         <JsonView config={config} onSave={(json) => mutate({ action: "replace", json }, "Configuration saved")} />
       ) : (
         <div className="bg-card overflow-hidden rounded-xl border">
-          <AnimatePresence initial={false}>
-            {open === "__new__" && (
-              <Expand key="new">
-                <ServerEditor onMutate={mutate} onDone={() => setOpen(null)} />
-              </Expand>
-            )}
-          </AnimatePresence>
+          <Collapse open={open === "__new__"}>
+            <div className="bg-muted/40 border-b px-4 py-4">
+              <ServerEditor onMutate={mutate} onDone={() => setOpen(null)} />
+            </div>
+          </Collapse>
           {servers === null ? (
             <ul className="divide-y">
               {[0, 1, 2, 3].map((i) => (
@@ -146,28 +148,19 @@ export function McpServers() {
               {visible.map((s) => (
                 <li key={s.name}>
                   <ServerRow server={s} open={open === s.name} onToggleOpen={() => setOpen(open === s.name ? null : s.name)} onMutate={mutate} />
-                  <AnimatePresence initial={false}>
-                    {open === s.name && (
-                      <Expand key="edit">
-                        <ServerEditor initial={s} onMutate={mutate} onDone={() => setOpen(null)} />
-                      </Expand>
-                    )}
-                  </AnimatePresence>
+                  <Collapse open={open === s.name}>
+                    <div className="bg-muted/40 border-b px-4 py-4">
+                      <ServerEditor initial={s} onMutate={mutate} onDone={() => setOpen(null)} />
+                    </div>
+                  </Collapse>
                 </li>
               ))}
             </ul>
           )}
         </div>
       )}
+      </Swap>
     </section>
-  );
-}
-
-function Expand({ children }: { children: React.ReactNode }) {
-  return (
-    <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }} className="overflow-hidden">
-      <div className="bg-muted/40 border-b px-4 py-4">{children}</div>
-    </motion.div>
   );
 }
 
@@ -234,27 +227,27 @@ function ServerRow({ server: s, open, onToggleOpen, onMutate }: { server: McpSer
       </button>
       <Tooltip>
         <TooltipTrigger asChild>
-          <button type="button" onClick={runTest} disabled={testing} aria-label={`Test ${s.name}`} className="text-muted-foreground hover:text-foreground hover:bg-muted grid size-7 shrink-0 cursor-pointer place-items-center rounded-md transition-colors">
-            {testing ? <Loader2 className="size-3.5 animate-spin" /> : <Stethoscope className="size-3.5" />}
-          </button>
+          <Button size="icon-xs" variant="ghost" onClick={runTest} loading={testing} aria-label={`Test ${s.name}`} className="text-muted-foreground hover:text-foreground">
+            <Stethoscope />
+          </Button>
         </TooltipTrigger>
         <TooltipContent>Test the connection — the same handshake the agent does at startup</TooltipContent>
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
-          <button type="button" role="switch" aria-checked={s.enabled} disabled={busy} onClick={toggle} className={cn("relative h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors", s.enabled ? "bg-live" : "bg-muted-foreground/40")} aria-label={s.enabled ? `Disable ${s.name}` : `Enable ${s.name}`}>
-            <span className={cn("bg-card absolute top-0.5 size-4 rounded-full shadow-e1 transition-[left]", s.enabled ? "left-[1.125rem]" : "left-0.5")} />
-          </button>
+          <Switch checked={s.enabled} onCheckedChange={toggle} disabled={busy} aria-label={s.enabled ? `Disable ${s.name}` : `Enable ${s.name}`} />
         </TooltipTrigger>
         <TooltipContent>{s.enabled ? "On — given to every new run and turn" : "Off — kept, not given to the agent"}</TooltipContent>
       </Tooltip>
     </div>
-    {health && (
-      <p role="status" className={cn("mt-1.5 flex items-start gap-1.5 pl-7 text-micro", health.ok ? "text-live" : "text-destructive")}>
-        {health.ok ? <Check className="mt-px size-3 shrink-0" aria-hidden /> : <X className="mt-px size-3 shrink-0" aria-hidden />}
-        <span className="min-w-0">{health.detail}</span>
-      </p>
-    )}
+    <Collapse open={health !== null}>
+      {health && (
+        <p role="status" className={cn("flex items-start gap-1.5 pt-1.5 pl-7 text-micro", health.ok ? "text-live" : "text-destructive")}>
+          {health.ok ? <Check className="mt-px size-3 shrink-0" aria-hidden /> : <X className="mt-px size-3 shrink-0" aria-hidden />}
+          <span className="min-w-0">{health.detail}</span>
+        </p>
+      )}
+    </Collapse>
     </div>
   );
 }
@@ -274,7 +267,6 @@ function ServerEditor({ initial, onMutate, onDone }: { initial?: McpServerView; 
   const [env, setEnv] = React.useState<KV[]>(() => toKV(initial?.env));
   const [headers, setHeaders] = React.useState<KV[]>(() => toKV(initial?.headers));
   const [busy, setBusy] = React.useState(false);
-  const [armed, setArmed] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
   const valid = name.trim() && (type === "stdio" ? command.trim() : /^https?:\/\//.test(url.trim()));
 
@@ -357,33 +349,19 @@ function ServerEditor({ initial, onMutate, onDone }: { initial?: McpServerView; 
       <KVTable label="Environment" rows={env} onChange={setEnv} keyPlaceholder="DATABASE_URL" />
       {type !== "stdio" && <KVTable label="Headers" rows={headers} onChange={setHeaders} keyPlaceholder="Authorization" />}
 
-      {err && (
-        <p className="text-destructive text-meta" role="alert">
+      <Collapse open={!!err}>
+        <p className="bg-destructive/10 text-destructive rounded-lg px-3 py-2 text-meta" role="alert">
           {err}
         </p>
-      )}
+      </Collapse>
       <div className="flex items-center gap-2">
-        {initial &&
-          (armed ? (
-            <>
-              <Button type="button" size="sm" variant="destructive" onClick={() => void remove()} disabled={busy}>
-                <Trash2 /> Remove {initial.name}
-              </Button>
-              <Button type="button" size="sm" variant="ghost" onClick={() => setArmed(false)}>
-                Keep
-              </Button>
-            </>
-          ) : (
-            <Button type="button" size="sm" variant="ghost" onClick={() => setArmed(true)} className="text-muted-foreground hover:text-destructive">
-              <Trash2 /> Remove
-            </Button>
-          ))}
+        {initial && <ArmButton size="sm" variant="ghost" icon={<Trash2 />} label="Remove" armedLabel={`Remove ${initial.name}?`} onConfirm={remove} disabled={busy} className="text-muted-foreground hover:text-destructive" />}
         <div className="ml-auto flex items-center gap-2">
           <Button type="button" size="sm" variant="ghost" onClick={onDone}>
             Cancel
           </Button>
-          <Button type="submit" size="sm" disabled={busy || !valid}>
-            {busy ? <Loader2 className="animate-spin" /> : <Check />}
+          <Button type="submit" size="sm" loading={busy} disabled={!valid}>
+            <Check />
             {initial ? "Save" : "Add server"}
           </Button>
         </div>
@@ -530,8 +508,8 @@ function JsonView({ config, onSave }: { config: McpServersResponse["config"] | n
           >
             <RotateCcw /> Reset
           </Button>
-          <Button size="sm" disabled={!dirty || "error" in parsed || busy} onClick={() => void save()}>
-            {busy ? <Loader2 className="animate-spin" /> : <Check />}
+          <Button size="sm" disabled={!dirty || "error" in parsed} loading={busy} onClick={() => void save()}>
+            <Check />
             Save
           </Button>
         </div>

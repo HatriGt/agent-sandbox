@@ -3,6 +3,7 @@ import { displayState } from "@/lib/lifecycle";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { NumberTicker } from "@/components/ui/number-ticker";
+import { Bar } from "@/components/thread/Skeletons";
 
 /**
  * The fleet's capacity as slots — `MSB_MAX_BOXES` cells, each coloured by the machine occupying it.
@@ -21,7 +22,20 @@ export function Capacity({
   size?: "sm" | "md";
   className?: string;
 }) {
-  if (!capacity) return null;
+  // Capacity arrives with the first fleet poll. Until then hold the strip's exact footprint (five
+  // cells and a "0/0"-width count) so the header does not jump when the real one lands.
+  if (!capacity) {
+    return (
+      <div className={cn("flex items-center gap-2", className)} aria-busy="true" aria-label="Loading capacity">
+        <div className={cn("flex items-center", size === "sm" ? "gap-1" : "gap-1.5")}>
+          {[0, 1, 2, 3, 4].map((i) => (
+            <Bar key={i} className={cn("rounded-[3px]", size === "sm" ? "h-2 w-3" : "h-2.5 w-5")} />
+          ))}
+        </div>
+        <Bar className={cn(size === "sm" ? "h-2.5 w-6" : "h-3 w-7")} />
+      </div>
+    );
+  }
   const live = boxes.filter((b) => /^running$/i.test(b.boxStatus));
   const cells = Array.from({ length: Math.max(capacity, live.length) }, (_, i) => live[i] ?? null);
   const free = Math.max(0, capacity - live.length);

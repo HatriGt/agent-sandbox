@@ -9,6 +9,7 @@ import { SkillMark } from "@/lib/skillGlyph";
 import { FileIcon, FolderIcon } from "@/lib/vscodeIcons";
 import { AnimatedTabs } from "@/components/ui/animated-tabs";
 import { Button } from "@/components/ui/button";
+import { Collapse } from "@/components/ui/collapse";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Markdown } from "@/components/ui/markdown";
@@ -747,7 +748,11 @@ function TreeNodeRow({ node, depth, active, onSelect }: { node: FileNode; depth:
         <FolderIcon name={node.name} open={open} size={14} />
         <span className="text-foreground min-w-0 truncate text-micro">{node.name}</span>
       </button>
-      {open && node.children.map((c) => <TreeNodeRow key={c.path} node={c} depth={depth + 1} active={active} onSelect={onSelect} />)}
+      <Collapse open={open}>
+        {node.children.map((c) => (
+          <TreeNodeRow key={c.path} node={c} depth={depth + 1} active={active} onSelect={onSelect} />
+        ))}
+      </Collapse>
     </div>
   );
 }

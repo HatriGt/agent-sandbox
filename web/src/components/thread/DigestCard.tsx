@@ -2,6 +2,7 @@ import * as React from "react";
 import { ChevronDown } from "lucide-react";
 import { api, type RunDigest } from "@/lib/api";
 import { fmtDuration } from "@/lib/lifecycle";
+import { Collapse } from "@/components/ui/collapse";
 import { cn } from "@/lib/utils";
 
 const FILE_CAP = 6;
@@ -62,7 +63,7 @@ export function DigestCard({ digest }: { digest: RunDigest }) {
         </p>
       )}
 
-      {open && hasBody && (
+      <Collapse open={open && hasBody}>
         <div className="mt-3 grid gap-x-8 gap-y-3 border-t pt-3 sm:grid-cols-2">
           {digest.plan.length > 0 && (
             <div className="min-w-0">
@@ -131,7 +132,7 @@ export function DigestCard({ digest }: { digest: RunDigest }) {
             </div>
           )}
         </div>
-      )}
+      </Collapse>
     </div>
   );
 }

@@ -24,7 +24,7 @@ export function Integrations({ onBack }: { onBack: () => void }) {
         </header>
         <div className="flex flex-col gap-10">
           <section aria-labelledby="gh-h">
-            <div className="mb-3 flex items-center gap-2">
+            <div className="mb-4 flex items-center gap-2">
               <h2 id="gh-h" className="text-foreground text-h3 font-semibold tracking-[-0.01em]">
                 GitHub accounts
               </h2>

@@ -1,7 +1,8 @@
 import * as React from "react";
 import { Check, ChevronDown, Search } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { api } from "@/lib/api";
+import { menuMotion } from "./MentionMenu";
 import { cn } from "@/lib/utils";
 
 /**
@@ -110,6 +111,7 @@ export function ModelChip({
   const [cursor, setCursor] = React.useState(0);
   const rootRef = React.useRef<HTMLDivElement>(null);
   const inputRef = React.useRef<HTMLInputElement>(null);
+  const still = useReducedMotion();
   const shown = React.useMemo(() => filterModels(models, query), [models, query]);
 
   // Opening resets the search; the caret lands in it via autoFocus + the effect below (the popover
@@ -181,10 +183,8 @@ export function ModelChip({
       <AnimatePresence>
         {open && (
           <motion.div
-            initial={{ opacity: 0, y: 4, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 4, scale: 0.98 }}
-            transition={{ duration: 0.15, ease: [0.22, 1, 0.36, 1] }}
+            // Same entrance as the @-mention menu: it grows out of the chip it sits above.
+            {...menuMotion(still)}
             className="bg-popover text-popover-foreground absolute bottom-full left-0 z-30 mb-1.5 w-64 overflow-hidden rounded-xl border shadow-e3"
           >
             <label className="flex h-9 items-center gap-2 border-b px-2.5">

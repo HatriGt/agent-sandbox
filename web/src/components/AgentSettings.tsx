@@ -2,6 +2,7 @@ import * as React from "react";
 import { Check, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, type AgentPrefs } from "@/lib/api";
+import { Swap } from "@/components/ui/swap";
 import { cn } from "@/lib/utils";
 
 const DESC: Record<string, string> = {
@@ -33,7 +34,7 @@ export function AgentSettings() {
     try {
       setPrefs(await api.saveAgentPrefs(id));
       setSaved(true);
-      window.setTimeout(() => setSaved(false), 1600);
+      window.setTimeout(() => setSaved(false), 1500);
     } catch (e) {
       toast.error("Could not save", { description: e instanceof Error ? e.message : String(e) });
     } finally {
@@ -45,15 +46,17 @@ export function AgentSettings() {
 
   return (
     <section aria-labelledby="agent-h">
-      <h2 id="agent-h" className="text-foreground mb-1 text-h3 font-semibold tracking-[-0.01em]">
+      <h2 id="agent-h" className="text-foreground mb-1 flex items-center gap-2 text-h3 font-semibold tracking-[-0.01em]">
         Coding agent
-        {saved && (
-          <span className="text-live ml-2 inline-flex items-center gap-1 text-micro font-normal">
-            <Check className="size-3.5" /> Saved
-          </span>
-        )}
+        <Swap state={saved} className="inline-flex" y={3}>
+          {saved ? (
+            <span role="status" className="text-live inline-flex items-center gap-1 text-micro font-normal">
+              <Check className="size-3.5" /> Saved
+            </span>
+          ) : null}
+        </Swap>
       </h2>
-      <p className="text-muted-foreground mb-3 max-w-[64ch] text-meta">
+      <p className="text-muted-foreground mb-4 max-w-[64ch] text-meta">
         Which agent new machines run. Threads already running keep the agent they started with.
       </p>
       <div role="radiogroup" aria-labelledby="agent-h" className="flex max-w-xl flex-col gap-2">

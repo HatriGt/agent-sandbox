@@ -18,6 +18,7 @@ import { parseMcpName } from "@/lib/mcp";
 import { McpItem } from "./McpItem";
 import { PanelFold, TraceOutput } from "./TraceOutput";
 import { Lightbox } from "@/components/ui/lightbox";
+import { Collapse } from "@/components/ui/collapse";
 
 /**
  * Thread items. Three voices, never confusable:
@@ -224,9 +225,9 @@ function SkillItem({ event, live }: { event: ToolEvent; live?: boolean }) {
         </button>
         <span className={cn("rule-draw h-px min-w-6 flex-1", event.failed ? "bg-destructive/30" : "bg-live/30")} aria-hidden />
       </div>
-      {open && extra && (
+      <Collapse open={open && !!extra}>
         <pre className="bg-trace text-trace-fg/80 mt-2 ml-9 max-h-72 overflow-auto rounded-md border border-white/8 px-3 py-2 font-mono text-code whitespace-pre-wrap">{extra}</pre>
-      )}
+      </Collapse>
     </div>
   );
 }
@@ -400,7 +401,9 @@ function ShellItem({ event, live }: { event: ToolEvent; live?: boolean }) {
           {event.arg}
         </p>
         <TestResultsCard report={report} onRaw={() => setOpen((v) => !v)} rawOpen={open} />
-        {open && <TraceOutput text={event.result!} mode="term" className="bg-trace rounded-md border border-white/8" />}
+        <Collapse open={open}>
+          <TraceOutput text={event.result!} mode="term" className="bg-trace rounded-md border border-white/8" />
+        </Collapse>
       </div>
     );
   }
@@ -435,7 +438,9 @@ function ShellItem({ event, live }: { event: ToolEvent; live?: boolean }) {
           {event.arg ?? ""}
           {live && !hasOutput && <span className="caret text-live" aria-hidden>▍</span>}
         </pre>
-        {hasOutput && open && <TraceOutput text={event.result!} mode="term" className="border-t border-white/8" />}
+        <Collapse open={hasOutput && open}>
+          <TraceOutput text={event.result!} mode="term" className="border-t border-white/8" />
+        </Collapse>
         {hasOutput && !open && (
           <button type="button" onClick={() => setOpen(true)} className="text-trace-fg/60 hover:text-trace-fg flex w-full cursor-pointer items-center gap-2 border-t border-white/8 px-3 py-1.5 text-left font-mono text-micro">
             <span className="text-trace-fg/40 select-none">›</span>
@@ -510,13 +515,11 @@ function StepItem({ event, live }: { event: ToolEvent; live?: boolean }) {
         </span>
       </button>
 
-      {open && event.diff && <EditDiff diff={event.diff} />}
-      {event.result &&
-        (open ? (
-          <TraceOutput text={event.result} mode="term" className="bg-trace mt-2 ml-6 overflow-hidden rounded-md border border-white/8" />
-        ) : (
-          summary && <p className={cn("stamp ml-8 truncate", event.failed ? "text-destructive" : "text-muted-foreground")}>{summary}</p>
-        ))}
+      <Collapse open={open && expandable}>
+        {event.diff && <EditDiff diff={event.diff} />}
+        {event.result && <TraceOutput text={event.result} mode="term" className="bg-trace mt-2 ml-6 overflow-hidden rounded-md border border-white/8" />}
+      </Collapse>
+      {event.result && !open && summary && <p className={cn("stamp ml-8 truncate", event.failed ? "text-destructive" : "text-muted-foreground")}>{summary}</p>}
     </div>
   );
 }
@@ -550,7 +553,9 @@ function DumpItem({ text }: { text: string }) {
         <span className="stamp">{n} lines</span>
         {!open && <span className="stamp min-w-0 truncate">{text.split("\n").find((l) => l.trim())?.trim().slice(0, 80)}</span>}
       </button>
-      {open && <pre className="bg-trace text-trace-fg/80 mt-1.5 max-h-96 overflow-auto rounded-md border border-white/8 px-3 py-2 font-mono text-code whitespace-pre-wrap">{text}</pre>}
+      <Collapse open={open}>
+        <pre className="bg-trace text-trace-fg/80 mt-1.5 max-h-96 overflow-auto rounded-md border border-white/8 px-3 py-2 font-mono text-code whitespace-pre-wrap">{text}</pre>
+      </Collapse>
     </div>
   );
 }
@@ -883,19 +888,9 @@ export function ThinkingItem({ text, live }: { text: string; live?: boolean }) {
         {!open && <span className={cn("stamp min-w-0 truncate", live ? "shimmer-text" : "text-muted-foreground")}>{teaser}</span>}
         <span className="stamp text-muted-foreground shrink-0">{words} words</span>
       </button>
-      <AnimatePresence initial={false}>
-        {open && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-            className="overflow-hidden"
-          >
-            <div className="text-muted-foreground mt-1 ml-2 border-l pl-4 text-meta leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere]">{text}</div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <Collapse open={open}>
+        <div className="text-muted-foreground mt-1 ml-2 border-l pl-4 text-meta leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere]">{text}</div>
+      </Collapse>
     </div>
   );
 }

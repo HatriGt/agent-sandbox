@@ -1,4 +1,5 @@
 import { ArrowLeft, GitBranch } from "lucide-react";
+import { motion } from "motion/react";
 import { Button } from "@/components/ui/button";
 import { bootingHeadline, bootingStage } from "@/lib/booting";
 import { friendlyName } from "@/lib/format";
@@ -35,7 +36,9 @@ export function BootingThread({
   const stage = bootingStage(machine);
   const name = machine ? friendlyName(machine) : undefined;
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col">
+    // Fades in (and, under AnimatePresence, out) so the hand-off to the real Thread — which fades in
+    // over the same layout — reads as one continuous view.
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }} className="flex h-full min-h-0 min-w-0 flex-col">
       <header className="flex h-14 items-center gap-2 border-b px-3 md:px-5">
         <Button variant="ghost" size="icon-sm" onClick={onBack} aria-label="Back to machines" className="md:hidden">
           <ArrowLeft />
@@ -61,7 +64,7 @@ export function BootingThread({
           </div>
         </div>
       </div>
-    </div>
+    </motion.div>
   );
 }
 

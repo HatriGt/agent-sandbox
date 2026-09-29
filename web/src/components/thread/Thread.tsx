@@ -38,6 +38,7 @@ import { QuestionCard } from "./QuestionCard";
 import { ArrowDown } from "lucide-react";
 import { findPullRequests } from "@/lib/testReport";
 import { ThreadSkeleton } from "./Skeletons";
+import { Swap } from "@/components/ui/swap";
 import { AttachedFromTask } from "./BootingThread";
 import { SendBar } from "./SendBar";
 import { cn } from "@/lib/utils";
@@ -609,7 +610,9 @@ export function Thread({
 
   return (
     <SessionContext.Provider value={box.name}>
-    <div className="flex h-full min-h-0 min-w-0 flex-col">
+    {/* Fades in on mount so the hand-off from BootingThread (same layout, swapped by App) is a
+        crossfade rather than a cut. Keyed by box in App, so a thread switch fades too. */}
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }} className="flex h-full min-h-0 min-w-0 flex-col">
       <ThreadHeader
         box={box}
         title={title}
@@ -661,8 +664,6 @@ export function Thread({
 
             {finished && digest && <DigestCard digest={digest} />}
 
-            {loadingTrace && <ThreadSkeleton withTask={!!box.task} />}
-
             <AnimatePresence mode="wait" initial={false}>
               {sleeping && !wake ? (
                 <SleepingCard key="sleeping" onWake={wakeNow} />
@@ -671,7 +672,11 @@ export function Thread({
               )}
             </AnimatePresence>
 
-            {groups.map((g, i) => {
+            {/* Skeleton → transcript is a crossfade, not a cut: the placeholder is shaped like the
+                content, so the swap reads as the bones filling in. */}
+            <Swap state={loadingTrace} className="flex flex-col gap-5">
+            {loadingTrace && <ThreadSkeleton withTask={!!box.task} />}
+            {!loadingTrace && groups.map((g, i) => {
               const isLast = i === groups.length - 1;
               const key = `${g.kind}-${i}`;
               // Operator-message index: the task is 1, each you/asked group after it increments.
@@ -718,6 +723,7 @@ export function Thread({
                 <SayItem key={key} text={g.text} live={liveHere} label={opensAgent} at={g.at} />
               );
             })}
+            </Swap>
 
             {idle && <IdleEmpty box={box} onNew={onNew} onPick={(text) => setSeed({ text, n: Date.now() })} />}
 
@@ -856,11 +862,22 @@ export function Thread({
         </AnimatePresence>
       </div>
 
-      {reviewOpen && !sleeping && (
-        <div className="mx-auto w-full max-w-3xl border-t px-3 pt-2 pb-2 shadow-[0_-8px_16px_-12px_oklch(0_0_0/0.18)] md:px-6">
-          <ReviewAllPane session={box.name} onClose={() => setReviewOpen(false)} />
-        </div>
-      )}
+      <AnimatePresence initial={false}>
+        {reviewOpen && !sleeping && (
+          // The review pane slides in from the right and leaves the same way — it is a drawer over
+          // the run, not part of the transcript.
+          <motion.div
+            key="review"
+            initial={still ? { opacity: 0 } : { opacity: 0, x: 24 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={still ? { opacity: 0 } : { opacity: 0, x: 24 }}
+            transition={{ duration: still ? 0.12 : 0.24, ease: [0.22, 1, 0.36, 1] }}
+            className="mx-auto w-full max-w-3xl border-t px-3 pt-2 pb-2 shadow-[0_-8px_16px_-12px_oklch(0_0_0/0.18)] md:px-6"
+          >
+            <ReviewAllPane session={box.name} onClose={() => setReviewOpen(false)} />
+          </motion.div>
+        )}
+      </AnimatePresence>
       {!sleeping && <ChangesDock files={changes} loading={changesLoading} onOpen={setOpenFile} onRefresh={refreshChanges} onReviewAll={() => setReviewOpen((v) => !v)} activePath={openFile?.path} />}
       <SendBar
         boxName={box.name}
@@ -906,7 +923,7 @@ export function Thread({
         )}
       </AnimatePresence>
       </div>
-    </div>
+    </motion.div>
     </SessionContext.Provider>
   );
 }

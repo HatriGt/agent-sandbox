@@ -1,5 +1,6 @@
 import * as React from "react";
-import { ArrowLeft, FileText, FolderTree, HardDrive, Link2, Loader2, MemoryStick, Moon, MoreHorizontal, Pencil, Pin, PinOff, Plus, RotateCw, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, FileText, FolderTree, HardDrive, Link2, Loader2, MemoryStick, Moon, MoreHorizontal, Pencil, Pin, PinOff, Plus, RotateCw, Trash2 } from "lucide-react";
+import { Swap } from "@/components/ui/swap";
 import { toast } from "sonner";
 import type { BoxView } from "@/lib/api";
 import { fmtAgo, friendlyName, roleLabel, shortName } from "@/lib/format";
@@ -143,9 +144,18 @@ export function ThreadHeader({
       toast.error("Could not copy the link", { description: e instanceof Error ? e.message : String(e) });
     }
   };
+  // The copy item's icon flips to a check for a beat — the menu may already be closed, but a
+  // reopen within the window still shows the confirmation in place.
+  const [copied, setCopied] = React.useState(false);
+  React.useEffect(() => {
+    if (!copied) return;
+    const t = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(t);
+  }, [copied]);
   const copyTranscript = async () => {
     try {
       await navigator.clipboard.writeText(await onCopyTranscript());
+      setCopied(true);
       toast.success("Transcript copied as Markdown");
     } catch (e) {
       toast.error("Could not copy", { description: e instanceof Error ? e.message : String(e) });
@@ -196,7 +206,10 @@ export function ThreadHeader({
               title="Rename"
               className="group/title flex min-w-0 cursor-text items-center gap-1.5 text-left no-press"
             >
-              <span className="text-foreground min-w-0 truncate text-h3 font-semibold tracking-[-0.01em]">{title}</span>
+              {/* A rename crossfades: the old title lifts out, the new one rises in. */}
+              <Swap state={title} className="min-w-0">
+                <span className="text-foreground block min-w-0 truncate text-h3 font-semibold tracking-[-0.01em]">{title}</span>
+              </Swap>
               <Pencil className="text-faint size-3 shrink-0 -translate-x-0.5 opacity-0 transition-[opacity,translate] duration-150 group-hover/title:translate-x-0 group-hover/title:opacity-100 group-focus-visible/title:opacity-100" aria-hidden />
             </button>
           </h1>
@@ -264,7 +277,7 @@ export function ThreadHeader({
                 Copy link
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={copyTranscript}>
-                <FileText />
+                {copied ? <Check className="text-ok" /> : <FileText />}
                 Copy transcript
                 <MenuHint>Markdown</MenuHint>
               </DropdownMenuItem>
@@ -415,7 +428,10 @@ export function ThreadHeader({
               <span className="max-w-[16rem] truncate">{activity}</span>
             </span>
           )}
-          {when && <span className="text-faint text-micro">{when}</span>}
+          {/* "finished 2m ago" → "asked just now": the meta changes with the state, so it crossfades with it. */}
+          <Swap state={when ?? ""} className="flex items-center">
+            {when && <span className="text-faint text-micro">{when}</span>}
+          </Swap>
           {when && short && <Dot />}
           {short && (
             <Tooltip>

@@ -1,7 +1,8 @@
 import * as React from "react";
 import { ArrowUpRight, Check, ChevronDown, CircleCheck, CircleDashed, CircleX, ExternalLink, FileDiff, GitBranch, GitMerge, Globe, Users, X } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { toast } from "sonner";
+import { menuMotion } from "./MentionMenu";
 import { api, type PullInfo } from "@/lib/api";
 import { useGo } from "@/lib/route";
 import { cn } from "@/lib/utils";
@@ -68,6 +69,14 @@ export function PullRequestFloat({ session, pulls }: { session: string; pulls: P
 
   const v = verdict(info);
   const Icon = v.icon;
+  const still = useReducedMotion();
+  // The card hangs BELOW the chip from its right edge, so it grows out of its top-right corner and
+  // the settle travels downward (the mention menu's helper, mirrored).
+  const cardMotion = (() => {
+    const m = menuMotion(still);
+    const edge = still ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: -4 };
+    return { ...m, initial: edge, exit: edge, style: { transformOrigin: "100% 0%" } };
+  })();
 
   return (
     <div ref={rootRef} className="relative flex shrink-0 items-center">
@@ -97,10 +106,7 @@ export function PullRequestFloat({ session, pulls }: { session: string; pulls: P
       <AnimatePresence>
         {open && (
           <motion.div
-            initial={{ opacity: 0, y: -6, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -6, scale: 0.98 }}
-            transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+            {...cardMotion}
             role="dialog"
             aria-label={`Pull request #${number}`}
             className="bg-card absolute top-full right-0 z-40 mt-2 w-[22rem] rounded-xl border p-1.5 shadow-e4"

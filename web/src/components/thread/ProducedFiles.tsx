@@ -4,6 +4,8 @@ import { api, ApiError } from "@/lib/api";
 import type { ProducedFile } from "@/lib/trace";
 import { Markdown } from "@/components/ui/markdown";
 import { CodeBlock, CodeBlockCode } from "@/components/ui/code-block";
+import { Collapse } from "@/components/ui/collapse";
+import { motion, useReducedMotion } from "motion/react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -16,16 +18,30 @@ import { cn } from "@/lib/utils";
  * shows a calm "no longer available" line instead of crashing the thread.
  */
 export function ProducedFiles({ session, files }: { session: string; files: ProducedFile[] }) {
+  const still = useReducedMotion();
   if (files.length === 0) return null;
   return (
-    <div className="flex flex-col gap-2">
+    // The block arrives when the run settles (null until then), so it rises in rather than popping.
+    <motion.div
+      initial={still ? { opacity: 0 } : { opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: still ? 0.12 : 0.26, ease: [0.22, 1, 0.36, 1] }}
+      className="flex flex-col gap-2"
+    >
       <span className="label text-muted-foreground">{files.length === 1 ? "Produced file" : "Produced files"}</span>
       <div className="flex flex-col gap-2">
-        {files.map((f) => (
-          <ArtifactCard key={f.relPath} session={session} file={f} />
+        {files.map((f, i) => (
+          <motion.div
+            key={f.relPath}
+            initial={still ? false : { opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.22, delay: 0.05 + Math.min(i, 8) * 0.03, ease: [0.22, 1, 0.36, 1] }}
+          >
+            <ArtifactCard session={session} file={f} />
+          </motion.div>
         ))}
       </div>
-    </div>
+    </motion.div>
   );
 }
 
@@ -107,7 +123,7 @@ function ArtifactCard({ session, file }: { session: string; file: ProducedFile }
         </button>
       </div>
 
-      {open && (
+      <Collapse open={open}>
         <div className="border-border/60 border-t">
           {load.state === "ready" ? (
             isMarkdown(file.name) ? (
@@ -125,7 +141,7 @@ function ArtifactCard({ session, file }: { session: string; file: ProducedFile }
             <p className="text-muted-foreground px-4 py-3 text-meta">Loading preview…</p>
           )}
         </div>
-      )}
+      </Collapse>
     </div>
   );
 }

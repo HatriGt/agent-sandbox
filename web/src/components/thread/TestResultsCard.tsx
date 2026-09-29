@@ -1,7 +1,7 @@
 import * as React from "react";
 import { ArrowRight, Check, ChevronDown, Circle, GitMerge, GitPullRequest, GitPullRequestDraft, X } from "lucide-react";
 import { api, type PullInfo } from "@/lib/api";
-import { AnimatePresence, motion } from "motion/react";
+import { Collapse } from "@/components/ui/collapse";
 import type { TestReport, TestStatus } from "@/lib/testReport";
 import { cn } from "@/lib/utils";
 
@@ -81,25 +81,17 @@ function FileGroup({ file, defaultOpen }: { file: TestReport["files"][number]; d
           {file.tests.length} {file.tests.length === 1 ? "test" : "tests"}
         </span>
       </button>
-      <AnimatePresence initial={false}>
-        {open && file.tests.length > 0 && (
-          <motion.ul
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-            className="overflow-hidden"
-          >
-            {file.tests.map((t, i) => (
-              <li key={`${i}-${t.name}`} className={cn("flex items-center gap-2.5 border-t py-1.5 pr-3.5 pl-10 text-meta", t.status === "fail" ? "text-foreground" : "text-foreground")}>
-                <StatusDot status={t.status} small />
-                <span className="min-w-0 flex-1 truncate">{t.name}</span>
-                {t.ms != null && <span className={cn("tabular text-micro", t.status === "fail" ? "text-destructive" : "text-muted-foreground")}>{fmtMs(t.ms)}</span>}
-              </li>
-            ))}
-          </motion.ul>
-        )}
-      </AnimatePresence>
+      <Collapse open={open && file.tests.length > 0}>
+        <ul>
+          {file.tests.map((t, i) => (
+            <li key={`${i}-${t.name}`} className={cn("flex items-center gap-2.5 border-t py-1.5 pr-3.5 pl-10 text-meta", t.status === "fail" ? "text-foreground" : "text-foreground")}>
+              <StatusDot status={t.status} small />
+              <span className="min-w-0 flex-1 truncate">{t.name}</span>
+              {t.ms != null && <span className={cn("tabular text-micro", t.status === "fail" ? "text-destructive" : "text-muted-foreground")}>{fmtMs(t.ms)}</span>}
+            </li>
+          ))}
+        </ul>
+      </Collapse>
     </li>
   );
 }

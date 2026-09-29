@@ -1,19 +1,70 @@
 import * as React from "react";
-import { ArrowLeft, Check, Loader2, PlugZap, Shield } from "lucide-react";
+import { motion, useReducedMotion } from "motion/react";
+import { ArrowLeft, PlugZap, Shield } from "lucide-react";
 import { toast } from "sonner";
 import { api, type BoxView } from "@/lib/api";
 import { getMe, setMe } from "@/lib/auth";
 import { isVisible } from "@/lib/format";
 import { Capacity } from "@/components/Capacity";
 import { Button } from "@/components/ui/button";
+import { Collapse } from "@/components/ui/collapse";
+import { Swap } from "@/components/ui/swap";
 import { ApiKeys } from "@/components/ApiKeys";
-import { NotifySettings } from "@/components/NotifySettings";
+import { NotifySettings, SaveButton } from "@/components/NotifySettings";
 import { AgentSettings } from "@/components/AgentSettings";
 import { Sessions } from "@/components/Sessions";
 import { AuditLog } from "@/components/AuditLog";
 import { cn } from "@/lib/utils";
 
-const inputCls = "border-line-strong focus:ring-ring text-foreground placeholder:text-muted-foreground h-9 w-full rounded-md border bg-transparent px-3 text-meta outline-none focus:ring-2";
+const inputCls = "border-line-strong focus:ring-ring text-foreground placeholder:text-muted-foreground h-9 w-full rounded-md border bg-transparent px-3 text-meta outline-none focus:ring-2 transition-[border-color,box-shadow] duration-150";
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** 0–4: length 10+, length 14+, mixed case or digits, a symbol. Coarse on purpose — a hint, not a gate. */
+function pwStrength(p: string): number {
+  if (!p) return 0;
+  let n = 0;
+  if (p.length >= 10) n++;
+  if (p.length >= 14) n++;
+  if (/[a-z]/.test(p) && /[A-Z]/.test(p)) n++;
+  else if (/\d/.test(p) && /[a-zA-Z]/.test(p)) n++;
+  if (/[^a-zA-Z0-9]/.test(p)) n++;
+  return Math.min(4, n);
+}
+const STRENGTH = ["", "weak", "fair", "good", "strong"] as const;
+
+/** Four segments that fill left to right; the filled ones tint from destructive → attention → ok. */
+function StrengthMeter({ value, visible }: { value: number; visible: boolean }) {
+  const still = useReducedMotion();
+  const tone = value <= 1 ? "bg-destructive" : value === 2 ? "bg-attention" : value === 3 ? "bg-live" : "bg-ok";
+  return (
+    <div className="flex items-center gap-2" aria-hidden={!visible}>
+      <div className="flex flex-1 gap-1">
+        {[0, 1, 2, 3].map((i) => (
+          <span key={i} className="bg-muted relative h-1 flex-1 overflow-hidden rounded-full">
+            <motion.span
+              className={cn("absolute inset-0 origin-left rounded-full", tone)}
+              initial={false}
+              animate={{ scaleX: visible && i < value ? 1 : 0 }}
+              transition={still ? { duration: 0 } : { type: "spring", stiffness: 500, damping: 36, delay: i < value ? i * 0.04 : 0 }}
+            />
+          </span>
+        ))}
+      </div>
+      <span className="text-muted-foreground w-10 text-right text-micro" aria-live="polite">
+        {visible ? STRENGTH[value] : ""}
+      </span>
+    </div>
+  );
+}
+
+/** One helper line under a field; swaps colour and text without shifting the layout. */
+function Hint({ show, tone = "muted", children }: { show: boolean; tone?: "muted" | "bad" | "ok"; children: React.ReactNode }) {
+  return (
+    <Collapse open={show}>
+      <span className={cn("block pt-1 text-micro", tone === "bad" ? "text-destructive" : tone === "ok" ? "text-ok" : "text-muted-foreground")}>{children}</span>
+    </Collapse>
+  );
+}
 
 export function Account({ onBack, onConnect, onAdmin }: { onBack: () => void; onConnect: () => void; onAdmin: () => void }) {
   const me = getMe();
@@ -39,7 +90,14 @@ export function Account({ onBack, onConnect, onAdmin }: { onBack: () => void; on
   const inUse = fleetBoxes ? fleetBoxes.filter((b) => /^running$/i.test(b.boxStatus)).length : null;
   const maxBoxes = user?.maxBoxes ?? null;
 
+  // Save is live only when something actually changed and the email (if any) parses.
+  const emailOk = email.trim() === "" || EMAIL.test(email.trim());
+  const dirty = name.trim() !== (user?.name ?? "").trim() || email.trim() !== (user?.email ?? "").trim();
+  const pwMatch = pw.again === "" || pw.next === pw.again;
+  const pwStrong = pwStrength(pw.next);
+
   const saveProfile = async () => {
+    if (!dirty || !emailOk) return;
     setSaving(true);
     try {
       await api.updateAccount({ name, email: email || null });
@@ -139,9 +197,10 @@ export function Account({ onBack, onConnect, onAdmin }: { onBack: () => void; on
           )}
           {user && (
             <section aria-labelledby="profile-h">
-              <h2 id="profile-h" className="text-foreground mb-3 text-h3 font-semibold tracking-[-0.01em]">
+              <h2 id="profile-h" className="text-foreground mb-1 text-h3 font-semibold tracking-[-0.01em]">
                 Profile
               </h2>
+              <p className="text-muted-foreground mb-4 text-meta">How you appear in the console and in notifications.</p>
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="flex flex-col gap-1.5">
                   <span className="label text-muted-foreground">Name</span>
@@ -149,14 +208,15 @@ export function Account({ onBack, onConnect, onAdmin }: { onBack: () => void; on
                 </label>
                 <label className="flex flex-col gap-1.5">
                   <span className="label text-muted-foreground">Email</span>
-                  <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={inputCls} placeholder="optional" />
+                  <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className={cn(inputCls, !emailOk && "border-destructive/60 focus:ring-destructive/40")} placeholder="optional" aria-invalid={!emailOk || undefined} />
+                  <Hint show={!emailOk} tone="bad">
+                    That does not look like an email address.
+                  </Hint>
                 </label>
               </div>
-              <div className="mt-3 flex items-center gap-3">
-                <Button size="sm" onClick={saveProfile} disabled={saving}>
-                  {saving ? <Loader2 className="animate-spin" /> : saved ? <Check /> : null}
-                  {saved ? "Saved" : "Save"}
-                </Button>
+              <div className="mt-4 flex items-center gap-3">
+                <SaveButton onClick={() => void saveProfile()} saving={saving} saved={saved} disabled={!dirty || !emailOk} />
+                <Swap state={dirty && !saving && !saved}>{dirty && !saving && !saved ? <span className="text-muted-foreground text-meta">Unsaved changes</span> : null}</Swap>
                 {user.github && <span className="text-muted-foreground text-meta">GitHub sign-in linked</span>}
               </div>
             </section>
@@ -167,7 +227,7 @@ export function Account({ onBack, onConnect, onAdmin }: { onBack: () => void; on
               <h2 id="pw-h" className="text-foreground mb-1 text-h3 font-semibold tracking-[-0.01em]">
                 {user.hasPassword ? "Change password" : "Set a password"}
               </h2>
-              <p className="text-muted-foreground mb-3 text-meta">{user.hasPassword ? "Sessions on other devices stay signed in." : "You signed in with a token or GitHub; a password lets you sign in with your username too."}</p>
+              <p className="text-muted-foreground mb-4 text-meta">{user.hasPassword ? "Sessions on other devices stay signed in." : "You signed in with a token or GitHub; a password lets you sign in with your username too."}</p>
               <div className={cn("grid gap-4", user.hasPassword ? "sm:grid-cols-3" : "sm:grid-cols-2")}>
                 {user.hasPassword && (
                   <label className="flex flex-col gap-1.5">
@@ -177,15 +237,21 @@ export function Account({ onBack, onConnect, onAdmin }: { onBack: () => void; on
                 )}
                 <label className="flex flex-col gap-1.5">
                   <span className="label text-muted-foreground">New</span>
-                  <input type="password" autoComplete="new-password" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} className={inputCls} />
+                  <input type="password" autoComplete="new-password" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} className={inputCls} aria-describedby="pw-help" />
+                  <StrengthMeter value={pwStrong} visible={pw.next.length > 0} />
+                  <Hint show={pw.next.length > 0 && pw.next.length < 10} tone="bad">
+                    <span id="pw-help">10+ characters · {10 - pw.next.length} to go</span>
+                  </Hint>
                 </label>
                 <label className="flex flex-col gap-1.5">
                   <span className="label text-muted-foreground">Again</span>
-                  <input type="password" autoComplete="new-password" value={pw.again} onChange={(e) => setPw({ ...pw, again: e.target.value })} className={inputCls} />
+                  <input type="password" autoComplete="new-password" value={pw.again} onChange={(e) => setPw({ ...pw, again: e.target.value })} className={cn(inputCls, !pwMatch && "border-destructive/60 focus:ring-destructive/40")} aria-invalid={!pwMatch || undefined} />
+                  <Hint show={pw.again.length > 0} tone={pwMatch ? "ok" : "bad"}>
+                    {pwMatch ? "Matches" : "Doesn't match"}
+                  </Hint>
                 </label>
               </div>
-              <Button size="sm" variant="outline" className="mt-3" onClick={changePw} disabled={pwBusy || pw.next.length < 10 || (user.hasPassword && !pw.current)}>
-                {pwBusy ? <Loader2 className="animate-spin" /> : null}
+              <Button size="sm" variant="outline" className="mt-4" onClick={() => void changePw()} loading={pwBusy} disabled={pw.next.length < 10 || !pwMatch || pw.again === "" || (user.hasPassword && !pw.current)}>
                 {user.hasPassword ? "Change password" : "Set password"}
               </Button>
             </section>

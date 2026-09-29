@@ -1,11 +1,15 @@
 import * as React from "react";
-import { ArrowLeft, ArrowRight, Check, Copy, KeyRound, Loader2, PlugZap, RotateCw } from "lucide-react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { ArrowLeft, ArrowRight, Check, KeyRound, PlugZap, RotateCw } from "lucide-react";
 import { toast } from "sonner";
 import { api, type Me } from "@/lib/api";
 import { getMe } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { AnimatedTabs, TabPanel } from "@/components/ui/animated-tabs";
+import { CopyButton } from "@/components/ApiKeys";
 import { cn } from "@/lib/utils";
+
+const EASE = [0.22, 1, 0.36, 1] as const;
 
 /**
  * "Connect your IDE": the moment after sign-up, and any time later from Account. One key, shown once,
@@ -70,6 +74,7 @@ export function Connect({ onDone, onBack, welcome = false }: { onDone: () => voi
   };
   const c = CLIENTS.find((x) => x.id === client)!;
   const snippet = c.snippet(mcpUrl, key ?? "asb_…your key…");
+  const still = useReducedMotion();
 
   return (
     <div className="h-full min-w-0 overflow-y-auto">
@@ -88,26 +93,31 @@ export function Connect({ onDone, onBack, welcome = false }: { onDone: () => voi
 
         {/* 1 — the key */}
         <Step n={1} title="Your API key" done={!!key}>
-          {key ? (
-            <>
-              <div className="flex items-center gap-2">
-                <code className="bg-muted text-foreground min-w-0 flex-1 truncate rounded-md px-2.5 py-2 font-mono text-code select-all">{key}</code>
-                <Button size="sm" variant="outline" onClick={() => copy("key", key)}>
-                  {copied === "key" ? <Check className="text-ok" /> : <Copy />}
-                  {copied === "key" ? "Copied" : "Copy"}
+          <AnimatePresence mode="wait" initial={false}>
+            {key ? (
+              <motion.div
+                key={key}
+                initial={still ? { opacity: 0 } : { opacity: 0, scale: 0.97, y: 4 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, transition: { duration: 0.12 } }}
+                transition={{ type: "spring", stiffness: 420, damping: 32 }}
+              >
+                <div className="flex items-center gap-2">
+                  <code className="bg-muted text-foreground min-w-0 flex-1 truncate rounded-md px-2.5 py-2 font-mono text-code select-all">{key}</code>
+                  <CopyButton copied={copied === "key"} onClick={() => void copy("key", key)} />
+                </div>
+                <p className="text-muted-foreground mt-2 text-micro">Shown once. It is already filled into the config below. Revoke it any time from Account.</p>
+              </motion.div>
+            ) : (
+              <motion.div key="mint" initial={false} exit={{ opacity: 0, transition: { duration: 0.12 } }} className="flex items-center gap-3">
+                <Button onClick={() => void mint()} loading={minting}>
+                  <KeyRound />
+                  {minting ? "Creating…" : "Create a key"}
                 </Button>
-              </div>
-              <p className="text-muted-foreground mt-2 text-micro">Shown once. It is already filled into the config below. Revoke it any time from Account.</p>
-            </>
-          ) : (
-            <div className="flex items-center gap-3">
-              <Button onClick={mint} disabled={minting}>
-                {minting ? <Loader2 className="animate-spin" /> : <KeyRound />}
-                {minting ? "Creating…" : "Create a key"}
-              </Button>
-              <span className="text-muted-foreground text-meta">One key per IDE is a good habit — revoke one without touching the others.</span>
-            </div>
-          )}
+                <span className="text-muted-foreground text-meta">One key per IDE is a good habit — revoke one without touching the others.</span>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </Step>
 
         {/* 2 — the config */}
@@ -125,10 +135,7 @@ export function Connect({ onDone, onBack, welcome = false }: { onDone: () => voi
             <p className="text-muted-foreground mb-2 text-meta">{c.how}</p>
             <div className="relative">
               <pre className={cn("bg-card raised overflow-x-auto rounded-xl p-4 font-mono text-code leading-relaxed", !key && "text-muted-foreground")}>{snippet}</pre>
-              <Button size="sm" variant="outline" className="absolute top-2.5 right-2.5" onClick={() => copy("snippet", snippet)} disabled={!key}>
-                {copied === "snippet" ? <Check className="text-ok" /> : <Copy />}
-                {copied === "snippet" ? "Copied" : "Copy"}
-              </Button>
+              <CopyButton className="absolute top-2.5 right-2.5" copied={copied === "snippet"} onClick={() => void copy("snippet", snippet)} disabled={!key} />
             </div>
           </TabPanel>
           <p className="text-faint mt-2 text-micro">
@@ -139,23 +146,25 @@ export function Connect({ onDone, onBack, welcome = false }: { onDone: () => voi
         {/* 3 — prove it */}
         <Step n={3} title="Test the connection" done={test.state === "ok"} last>
           <div className="flex flex-wrap items-center gap-3">
-            <Button variant="outline" onClick={runTest} disabled={!key || test.state === "busy"}>
-              {test.state === "busy" ? <Loader2 className="animate-spin" /> : test.state === "ok" ? <Check className="text-ok" /> : <PlugZap />}
+            <Button variant="outline" onClick={() => void runTest()} loading={test.state === "busy"} disabled={!key}>
+              {test.state === "ok" ? <Check className="text-ok" /> : <PlugZap />}
               {test.state === "busy" ? "Testing…" : test.state === "ok" ? "Connected" : "Test connection"}
             </Button>
-            {test.state === "ok" && test.who?.kind === "user" && (
-              <span className="text-ok text-meta">
-                The controller recognises this key as <span className="font-medium">{test.who.login}</span>. Your IDE will too.
-              </span>
-            )}
-            {test.state === "fail" && (
-              <span className="text-destructive flex items-center gap-2 text-meta">
-                The key was refused.
-                <button type="button" className="inline-flex cursor-pointer items-center gap-1 underline underline-offset-4" onClick={mint}>
-                  <RotateCw className="size-3" /> Make a new one
-                </button>
-              </span>
-            )}
+            <AnimatePresence mode="wait" initial={false}>
+              {test.state === "ok" && test.who?.kind === "user" && (
+                <ResultChip key="ok" tone="ok">
+                  Recognised as <span className="font-medium">{test.who.login}</span> — your IDE will be too.
+                </ResultChip>
+              )}
+              {test.state === "fail" && (
+                <ResultChip key="fail" tone="destructive">
+                  The key was refused.
+                  <button type="button" className="inline-flex cursor-pointer items-center gap-1 underline underline-offset-4" onClick={() => void mint()}>
+                    <RotateCw className="size-3" /> Make a new one
+                  </button>
+                </ResultChip>
+              )}
+            </AnimatePresence>
           </div>
         </Step>
 
@@ -171,11 +180,47 @@ export function Connect({ onDone, onBack, welcome = false }: { onDone: () => voi
   );
 }
 
+/** ok / destructive pill that springs in beside the test button. */
+function ResultChip({ tone, children }: { tone: "ok" | "destructive"; children: React.ReactNode }) {
+  const still = useReducedMotion();
+  return (
+    <motion.span
+      role="status"
+      initial={still ? { opacity: 0 } : { opacity: 0, scale: 0.92, x: -6 }}
+      animate={{ opacity: 1, scale: 1, x: 0 }}
+      exit={still ? { opacity: 0 } : { opacity: 0, scale: 0.96, transition: { duration: 0.12 } }}
+      transition={{ type: "spring", stiffness: 520, damping: 30 }}
+      className={cn("inline-flex flex-wrap items-center gap-2 rounded-full px-3 py-1.5 text-meta", tone === "ok" ? "bg-ok/10 text-ok" : "bg-destructive/10 text-destructive")}
+    >
+      {children}
+    </motion.span>
+  );
+}
+
+/**
+ * Numbered step. When it completes, the --ok fill grows from the centre behind the badge and the
+ * number crossfades to a tick — so "done" is a moment, not a colour change.
+ */
 function Step({ n, title, done, last = false, children }: { n: number; title: string; done: boolean; last?: boolean; children: React.ReactNode }) {
+  const still = useReducedMotion();
   return (
     <section className="relative flex gap-4">
       <div className="flex flex-col items-center">
-        <span className={cn("grid size-7 shrink-0 place-items-center rounded-full text-micro font-semibold transition-colors", done ? "bg-ok text-white" : "bg-muted text-muted-foreground")}>{done ? <Check className="size-3.5" /> : n}</span>
+        <span className={cn("bg-muted relative grid size-7 shrink-0 place-items-center overflow-hidden rounded-full text-micro font-semibold", done ? "text-white" : "text-muted-foreground")}>
+          <motion.span aria-hidden className="bg-ok absolute inset-0 rounded-full" initial={false} animate={{ scale: done ? 1 : 0, opacity: done ? 1 : 0 }} transition={still ? { duration: 0.1 } : { type: "spring", stiffness: 500, damping: 30 }} />
+          <AnimatePresence mode="popLayout" initial={false}>
+            <motion.span
+              key={done ? "done" : "n"}
+              className="relative inline-flex"
+              initial={still ? { opacity: 0 } : { opacity: 0, scale: 0.5 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={still ? { opacity: 0 } : { opacity: 0, scale: 0.5 }}
+              transition={{ duration: 0.16, ease: EASE, delay: done && !still ? 0.08 : 0 }}
+            >
+              {done ? <Check className="size-3.5" /> : n}
+            </motion.span>
+          </AnimatePresence>
+        </span>
         {!last && <span className="bg-border my-2 w-px flex-1" aria-hidden />}
       </div>
       <div className={cn("min-w-0 flex-1", !last && "pb-8")}>

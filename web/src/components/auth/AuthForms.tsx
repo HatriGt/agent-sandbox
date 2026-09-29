@@ -1,12 +1,13 @@
 import * as React from "react";
 import { Link } from "react-router";
-import { ArrowRight, Github, KeyRound, Loader2, ShieldCheck } from "lucide-react";
+import { ArrowRight, Check, Github, KeyRound, ShieldCheck } from "lucide-react";
 import { api, type AuthConfig } from "@/lib/api";
 import { setMe, setToken } from "@/lib/auth";
 import { Logo } from "@/components/ui/logo";
 import { Button } from "@/components/ui/button";
+import { Collapse } from "@/components/ui/collapse";
 import { cn } from "@/lib/utils";
-import { motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { AmbientPanel } from "@/components/auth/AmbientPanel";
 
 /**
@@ -69,8 +70,12 @@ export function Field({ label, hint, children }: { label: string; hint?: string;
     </label>
   );
 }
-export const inputCls =
-  "border-input focus:border-live/50 focus:ring-live/25 text-foreground placeholder:text-faint bg-background h-10 w-full rounded-md border px-3 text-meta outline-none transition-shadow focus:ring-[3px]";
+/** Focus ring eases in on the product curve (border + ring together), rather than snapping on. */
+const focusTransition = "transition-[border-color,box-shadow] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)]";
+export const inputCls = cn(
+  "border-input focus:border-live/50 focus:ring-live/25 text-foreground placeholder:text-faint bg-background h-10 w-full rounded-md border px-3 text-meta outline-none focus:ring-[3px]",
+  focusTransition
+);
 
 export function OrDivider() {
   return (
@@ -93,11 +98,57 @@ export function GithubButton({ to }: { to: string }) {
   );
 }
 
-function ErrorNote({ children }: { children: React.ReactNode }) {
+/**
+ * The error note grows in above the submit row (Collapse) so the form never jumps, and the row
+ * itself shakes once per NEW error — `.shake-once` is a one-shot CSS animation, so the row is
+ * re-keyed on each landing to restart it. `submit()` clears the error first, so a repeated
+ * message still counts as a landing. Reduced motion: Collapse fades, the global rule zeroes the shake.
+ */
+function ErrorNote({ error }: { error: string | null }) {
   return (
-    <p className="bg-destructive/10 text-destructive rounded-md px-3 py-2 text-meta" role="alert">
-      {children}
-    </p>
+    <Collapse open={!!error}>
+      <p className="bg-destructive/10 text-destructive mb-3 rounded-md px-3 py-2 text-meta" role="alert">
+        {error}
+      </p>
+    </Collapse>
+  );
+}
+
+function useErrorLanding(error: string | null) {
+  const [landings, setLandings] = React.useState(0);
+  React.useEffect(() => {
+    if (error) setLandings((n) => n + 1);
+  }, [error]);
+  return landings;
+}
+
+function SubmitRow({ error, children }: { error: string | null; children: React.ReactNode }) {
+  const landings = useErrorLanding(error);
+  return (
+    <div>
+      <ErrorNote error={error} />
+      <div key={landings} className={cn(landings > 0 && "shake-once")}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Success holds for a beat — the button flips to a check before the route changes — so the
+ * outcome registers instead of the page vanishing mid-click. Long enough to read, short enough
+ * not to feel like waiting.
+ */
+const SETTLE_MS = 420;
+const settle = () => new Promise<void>((r) => window.setTimeout(r, SETTLE_MS));
+
+function SubmitButton({ busy, done, disabled, idle, pending, settled, icon }: { busy: boolean; done: boolean; disabled: boolean; idle: string; pending: string; settled: string; icon?: React.ReactNode }) {
+  return (
+    <Button type="submit" size="lg" loading={busy && !done} disabled={disabled || done} className={cn("w-full justify-center", done && "bg-ok hover:bg-ok disabled:opacity-100")}>
+      {done ? <Check className="pop-in" /> : icon ?? null}
+      {done ? settled : busy ? pending : idle}
+      {!busy && !done && <ArrowRight className="size-4" />}
+    </Button>
   );
 }
 
@@ -106,6 +157,7 @@ export function PasswordLogin({ onDone }: { onDone: () => void }) {
   const [login, setLogin] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [busy, setBusy] = React.useState(false);
+  const [done, setDone] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const submit = async () => {
     if (!login.trim() || !password || busy) return;
@@ -114,6 +166,8 @@ export function PasswordLogin({ onDone }: { onDone: () => void }) {
     try {
       await api.login(login.trim(), password);
       setMe(await api.me());
+      setDone(true);
+      await settle();
       onDone();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -139,13 +193,10 @@ export function PasswordLogin({ onDone }: { onDone: () => void }) {
           <input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} className={inputCls} />
         </Field>
       </Rise>
-      {error && <ErrorNote>{error}</ErrorNote>}
       <Rise index={2}>
-        <Button type="submit" size="lg" disabled={busy || !login.trim() || !password} className="w-full justify-center">
-          {busy ? <Loader2 className="animate-spin" /> : <ShieldCheck />}
-          {busy ? "Signing in…" : "Sign in"}
-          {!busy && <ArrowRight className="size-4" />}
-        </Button>
+        <SubmitRow error={error}>
+          <SubmitButton busy={busy} done={done} disabled={busy || !login.trim() || !password} icon={<ShieldCheck />} idle="Sign in" pending="Signing in…" settled="Signed in" />
+        </SubmitRow>
       </Rise>
     </form>
   );
@@ -154,6 +205,7 @@ export function PasswordLogin({ onDone }: { onDone: () => void }) {
 export function SignUpForm({ min, onDone }: { min: number; onDone: () => void }) {
   const [f, setF] = React.useState({ name: "", login: "", email: "", password: "" });
   const [busy, setBusy] = React.useState(false);
+  const [done, setDone] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF((p) => ({ ...p, [k]: e.target.value }));
   const strength = f.password.length >= min + 6 ? 3 : f.password.length >= min ? 2 : f.password.length > 0 ? 1 : 0;
@@ -165,6 +217,8 @@ export function SignUpForm({ min, onDone }: { min: number; onDone: () => void })
     try {
       await api.signup({ login: f.login.trim(), name: f.name.trim(), email: f.email.trim(), password: f.password });
       setMe(await api.me());
+      setDone(true);
+      await settle();
       onDone();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -205,13 +259,10 @@ export function SignUpForm({ min, onDone }: { min: number; onDone: () => void })
           </span>
         </Field>
       </Rise>
-      {error && <ErrorNote>{error}</ErrorNote>}
       <Rise index={3}>
-        <Button type="submit" size="lg" disabled={busy || !ready} className="w-full justify-center">
-          {busy ? <Loader2 className="animate-spin" /> : null}
-          {busy ? "Creating…" : "Create account"}
-          {!busy && <ArrowRight className="size-4" />}
-        </Button>
+        <SubmitRow error={error}>
+          <SubmitButton busy={busy} done={done} disabled={busy || !ready} idle="Create account" pending="Creating…" settled="Account created" />
+        </SubmitRow>
       </Rise>
       <Rise index={4}>
         <p className="text-faint text-micro leading-relaxed">You get a private workspace on this controller: your machines, GitHub accounts and MCP servers are yours alone.</p>
@@ -224,6 +275,7 @@ export function SignUpForm({ min, onDone }: { min: number; onDone: () => void })
 export function TokenEntry({ saas = false, onDone }: { saas?: boolean; onDone: () => void }) {
   const [value, setValue] = React.useState("");
   const [busy, setBusy] = React.useState(false);
+  const [done, setDone] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const submit = async () => {
     const t = value.trim();
@@ -238,6 +290,10 @@ export function TokenEntry({ saas = false, onDone }: { saas?: boolean; onDone: (
       }
       setToken(t);
       if (saas) setMe(await api.me());
+      // In token mode the gate flips on setToken and the console takes over at once; on the
+      // multi-user sign-in page nothing navigates until onDone, so the check gets its beat.
+      setDone(true);
+      await settle();
       onDone();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -255,7 +311,7 @@ export function TokenEntry({ saas = false, onDone }: { saas?: boolean; onDone: (
     >
       <Rise index={0}>
         <Field label={saas ? "Access token" : "Token"}>
-          <div className="border-input focus-within:border-live/50 focus-within:ring-live/25 bg-background flex items-center gap-2 rounded-md border px-3 transition-shadow focus-within:ring-[3px]">
+          <div className={cn("border-input focus-within:border-live/50 focus-within:ring-live/25 bg-background flex items-center gap-2 rounded-md border px-3 focus-within:ring-[3px]", focusTransition)}>
             <KeyRound className="text-muted-foreground size-4 shrink-0" aria-hidden />
             <input
               type="password"
@@ -271,13 +327,10 @@ export function TokenEntry({ saas = false, onDone }: { saas?: boolean; onDone: (
           </div>
         </Field>
       </Rise>
-      {error && <ErrorNote>{error}</ErrorNote>}
       <Rise index={1}>
-        <Button type="submit" size="lg" disabled={busy || !value.trim()} className="w-full justify-center">
-          {busy ? <Loader2 className="animate-spin" /> : <ShieldCheck />}
-          {busy ? "Checking…" : "Open the console"}
-          {!busy && <ArrowRight className="size-4" />}
-        </Button>
+        <SubmitRow error={error}>
+          <SubmitButton busy={busy} done={done} disabled={busy || !value.trim()} icon={<ShieldCheck />} idle="Open the console" pending="Checking…" settled="Token accepted" />
+        </SubmitRow>
       </Rise>
     </form>
   );
@@ -300,6 +353,7 @@ export function OperatorEntry({ onDone }: { onDone: () => void }) {
 /** The multi-user sign-in page body. */
 export function SignInCard({ config, to, onDone }: { config: AuthConfig; to: string; onDone: () => void }) {
   const [useToken, setUseToken] = React.useState(false);
+  const reduced = useReducedMotion();
   return (
     <AuthShell>
       <div className="flex flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
@@ -311,7 +365,18 @@ export function SignInCard({ config, to, onDone }: { config: AuthConfig; to: str
         )}
       </div>
       <p className="text-muted-foreground mt-2 text-body leading-relaxed">Welcome back. Your machines, GitHub accounts and MCP servers are where you left them.</p>
-      {useToken ? <TokenEntry saas onDone={onDone} /> : <PasswordLogin onDone={onDone} />}
+      {/* password ↔ token: the outgoing form lifts out before the incoming one settles in (6px), never both at once */}
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.div
+          key={useToken ? "token" : "password"}
+          initial={reduced ? { opacity: 0 } : { opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={reduced ? { opacity: 0 } : { opacity: 0, y: -6 }}
+          transition={{ duration: reduced ? 0.1 : 0.18, ease: [0.22, 1, 0.36, 1] }}
+        >
+          {useToken ? <TokenEntry saas onDone={onDone} /> : <PasswordLogin onDone={onDone} />}
+        </motion.div>
+      </AnimatePresence>
       <OrDivider />
       <div className="flex flex-col gap-2">
         {config.providers.includes("github") && <GithubButton to={to} />}
