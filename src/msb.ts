@@ -1396,16 +1396,16 @@ export async function installMcpConfig(cfg: Config, box: string): Promise<void> 
       return;
     }
     const json = JSON.stringify(conf);
+    // ONE exec for the config writes AND the package pre-install: each exec is an SSH→msb→guest
+    // round trip on the task-start critical path.
     await exec(
       cfg,
       box,
       `printf '%s' ${shellQuote(json)} > ${MCP_CONFIG_PATH} && chmod 600 ${MCP_CONFIG_PATH} && ` +
-        `mkdir -p /root/.omp/agent && printf '%s' ${shellQuote(json)} > ${OMP_MCP_CONFIG_PATH} && chmod 600 ${OMP_MCP_CONFIG_PATH}`
+        `mkdir -p /root/.omp/agent && printf '%s' ${shellQuote(json)} > ${OMP_MCP_CONFIG_PATH} && chmod 600 ${OMP_MCP_CONFIG_PATH}` +
+        `; ${preinstallSh(npxPackagesOf(conf))}`,
+      { timeoutMs: 300_000 }
     );
-    // Pre-install the npx-served packages (presence-guarded: a bare-name bin check makes repeat
-    // runs a no-op). Best-effort — a registry hiccup must never block the run; the affected server
-    // just falls back to npx's own download.
-    await preinstallNpmPackages(cfg, box, npxPackagesOf(conf));
   } catch (e) {
     console.error(`[mcp] could not install MCP config into ${box}:`, (e as Error).message);
   }
@@ -1417,8 +1417,9 @@ export async function installMcpConfig(cfg: Config, box: string): Promise<void> 
  * when something was actually installed (the tarballs are dead disk weight once bins are on PATH,
  * but cleaning on every no-op pass would add a pointless write to every resume).
  */
-export async function preinstallNpmPackages(cfg: Config, box: string, specs: string[]): Promise<void> {
-  if (!specs.length) return;
+/** The shell for the presence-guarded install, so callers can splice it into an existing exec. */
+export function preinstallSh(specs: string[]): string {
+  if (!specs.length) return "true";
   const steps = specs.map((spec) => {
     // Package NAME for the presence check: the spec minus any trailing @version (the leading
     // @scope survives because only an "@" after index 0 is a version separator).
@@ -1428,7 +1429,14 @@ export async function preinstallNpmPackages(cfg: Config, box: string, specs: str
     // on every run start (measured); the dir test is free and the no-op path is the common one.
     return `[ -d "$R"/${shellQuote(name)} ] || { npm i -g ${shellQuote(spec)} >/dev/null 2>&1 && I=1; } || true`;
   });
-  await exec(cfg, box, `R=$(npm root -g); I=; ${steps.join("; ")}; [ -n "$I" ] && npm cache clean --force >/dev/null 2>&1 || true`, { timeoutMs: 300_000 });
+  // The global root is /usr/local/lib/node_modules in every box image we ship; `npm root -g` is
+  // itself a ~1s npm startup, so it is only the fallback for a nonstandard image.
+  return `R=/usr/local/lib/node_modules; [ -d "$R" ] || R=$(npm root -g); I=; ${steps.join("; ")}; { [ -n "$I" ] && npm cache clean --force >/dev/null 2>&1; } || true`;
+}
+
+export async function preinstallNpmPackages(cfg: Config, box: string, specs: string[]): Promise<void> {
+  if (!specs.length) return;
+  await exec(cfg, box, preinstallSh(specs), { timeoutMs: 300_000 });
 }
 
 /** Where dashboard-configured skills land inside the box. `--setting-sources user` loads exactly
@@ -1671,16 +1679,25 @@ export async function runAgentTask(
   // These four touch independent files (~/.git-credentials + per-repo config, ~/.claude.json,
   // /root/.agent-mcp.json, ~/.claude/skills), so they run in parallel: each is an SSH→msb→guest
   // round-trip, and serializing them was most of the delegate→first-token latency after boot.
+  const timed = async <T>(label: string, p: Promise<T>): Promise<T> => {
+    const s = Date.now();
+    try {
+      return await p;
+    } finally {
+      prepMarks.push(`${label}=${Date.now() - s}ms`);
+    }
+  };
+  const prepMarks: string[] = [];
   await Promise.all([
-    applyGitCredentials(cfg, box, creds),
-    trustWorkspace(cfg, box),
-    installMcpConfig(cfg, box),
-    installSkills(cfg, box),
+    timed("creds", applyGitCredentials(cfg, box, creds)),
+    timed("trust", trustWorkspace(cfg, box)),
+    timed("mcp", installMcpConfig(cfg, box)),
+    timed("skills", installSkills(cfg, box)),
   ]);
   const t3 = Date.now();
   const r = await msb(cfg, ["exec", box, ...env, "--", "sh", "-lc", agentSh(workdir, false, agent)]);
   console.error(
-    `[timing] runAgentTask ${box} taskmark=${t1 - t0}ms bootstrap=${t2 - t1}ms prep=${t3 - t2}ms exec=${Date.now() - t3}ms`
+    `[timing] runAgentTask ${box} taskmark=${t1 - t0}ms bootstrap=${t2 - t1}ms prep=${t3 - t2}ms (${prepMarks.join(" ")}) exec=${Date.now() - t3}ms`
   );
   return r;
 }
