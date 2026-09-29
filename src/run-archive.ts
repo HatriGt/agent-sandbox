@@ -96,6 +96,21 @@ export function listRuns(db: Db, owner: string, opts: { limit?: number; before?:
   return rows.map(toRow);
 }
 
+/**
+ * Activity feed for the History heatmap: just when each of the owner's runs finished (epoch ms) and
+ * whether it failed, newest first, since `since`. Owner-scoped like every other read here; bucketing
+ * into days happens in the browser so "a day" is the viewer's local day, not the server's.
+ */
+export function listActivity(db: Db, owner: string, since: number): Array<{ t: number; failed: boolean }> {
+  const rows = db
+    .prepare(
+      `SELECT COALESCE(ended_at, archived_at) AS t, state FROM run_archive
+       WHERE owner = ? AND COALESCE(ended_at, archived_at) >= ? ORDER BY id DESC LIMIT 1000`
+    )
+    .all(owner, since) as Array<{ t: number; state: string }>;
+  return rows.map((r) => ({ t: Number(r.t), failed: r.state === "failed" }));
+}
+
 /** One record, owner-scoped, with the digest parsed back out of digest_json (and the diff, if kept). */
 export function getRun(db: Db, owner: string, id: number): (ArchivedRunRow & { digest: RunDigest | null; diffText?: string }) | undefined {
   const r = db.prepare(`SELECT * FROM run_archive WHERE id = ? AND owner = ?`).get(id, owner) as Record<string, unknown> | undefined;

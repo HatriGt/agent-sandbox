@@ -112,6 +112,13 @@
 }
 
 :root {
+  /* Motion tokens: one easing vocabulary for every authored transition (CSS + motion/react mirror these). */
+  --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out-sine: cubic-bezier(0.4, 0, 0.6, 1);
+  --dur-fast: 150ms;
+  --dur-base: 220ms;
+  --dur-slow: 320ms;
   --radius: 0.5rem;
 
   /* Light: white paper, zinc ink. Read in daylight, so text tiers sit well above AA. */
@@ -476,7 +483,7 @@
   }
 }
 .breathe {
-  animation: breathe 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  animation: breathe 2.4s var(--ease-in-out-sine) infinite;
 }
 
 /* Dictation. Live mic = the --live hue, same functional-blue vocabulary as a working machine.
@@ -494,10 +501,10 @@
   }
 }
 .mic-ring {
-  animation: mic-ring 1.6s cubic-bezier(0.22, 1, 0.36, 1) infinite;
+  animation: mic-ring 1.6s var(--ease-out-quint) infinite;
 }
 .mic-breathe {
-  animation: breathe 1.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  animation: breathe 1.2s var(--ease-in-out-sine) infinite;
 }
 .mic-glow {
   border-color: color-mix(in oklch, var(--live) 55%, transparent) !important;
@@ -561,7 +568,7 @@
   }
 }
 .enter {
-  animation: turn-enter 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: turn-enter var(--dur-slow) var(--ease-out-quint) both;
 }
 
 /* Staggered row entrance inside a visualizer card: each row rises a beat after the last, reading
@@ -578,7 +585,7 @@
   }
 }
 .stagger-item {
-  animation: rise-in 0.26s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: rise-in 0.26s var(--ease-out-quint) both;
   animation-delay: calc(var(--i, 0) * 24ms);
 }
 
@@ -594,7 +601,7 @@
   }
 }
 .pop-in {
-  animation: pop-in 0.18s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: pop-in var(--dur-fast) var(--ease-out-quint) both;
 }
 
 /* A hairline rule drawing itself outward — the skill section marker's entrance. */
@@ -607,7 +614,7 @@
   }
 }
 .rule-draw {
-  animation: rule-draw 0.45s 0.1s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: rule-draw 0.45s 0.1s var(--ease-out-quint) both;
   transform-origin: left;
 }
 .rule-draw-r {
@@ -756,7 +763,7 @@
   to { stroke-dashoffset: 0; }
 }
 .wake-close {
-  animation: wake-close 0.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation: wake-close 0.5s var(--ease-out-quint) forwards;
 }
 @keyframes wake-check {
   from { stroke-dashoffset: 12; }
@@ -764,7 +771,7 @@
 }
 .wake-check {
   stroke-dashoffset: 12;
-  animation: wake-check 0.35s 0.4s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation: wake-check 0.35s 0.4s var(--ease-out-quint) forwards;
 }
 @keyframes wake-fill {
   0% { transform: translateX(-100%); }
@@ -772,7 +779,7 @@
   100% { transform: translateX(-8%); }
 }
 .wake-fill {
-  animation: wake-fill 4s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation: wake-fill 4s var(--ease-out-quint) forwards;
 }
 
 /* MCP: the server chip's radar ping while a call is in flight — outbound energy, not a spinner. */
@@ -833,7 +840,7 @@
 }
 .wire-check {
   stroke-dashoffset: 14;
-  animation: wire-check-draw 0.4s 0.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation: wire-check-draw 0.4s 0.5s var(--ease-out-quint) forwards;
 }
 
 /* Trailing "…" that types itself, for one-line status text. */
@@ -856,7 +863,7 @@
 button, [role="tab"], [role="radio"], [role="switch"], a[href], summary {
   transition-property: background-color, border-color, color, box-shadow, opacity, transform;
   transition-duration: 150ms;
-  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  transition-timing-function: var(--ease-out-quint);
 }
 button:not(:disabled):active, [role="tab"]:active, [role="radio"]:active { transform: scale(0.985); }
 /* Editor tabs and rows that already scale on hover keep their own transform. */
@@ -869,7 +876,7 @@ button:not(:disabled):active, [role="tab"]:active, [role="radio"]:active { trans
 /* An interactive card: rises 1px toward the cursor and gains a contact shadow. Uses `translate`
    (not transform) so it composes with the global :active scale-press. */
 .hover-raise {
-  transition: translate 150ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 150ms cubic-bezier(0.22, 1, 0.36, 1), background-color 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition: translate 150ms var(--ease-out-quint), box-shadow 150ms var(--ease-out-quint), background-color 150ms var(--ease-out-quint), border-color 150ms var(--ease-out-quint);
 }
 .hover-raise:hover { translate: 0 -1px; box-shadow: var(--shadow-e2); }
 .hover-raise:active { translate: 0 0; box-shadow: var(--shadow-e1); }
@@ -896,7 +903,7 @@ button:not(:disabled):active, [role="tab"]:active, [role="radio"]:active { trans
   height: 0.75rem;
   border-radius: 9999px;
   background: radial-gradient(circle at 32% 30%, color-mix(in oklch, var(--live) 35%, white) 0%, var(--live) 55%, color-mix(in oklch, var(--live) 70%, black) 100%);
-  animation: orb-bloom 1.8s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  animation: orb-bloom 1.8s var(--ease-in-out-sine) infinite;
 }
 
 /* While text is still arriving the caret holds steady; blinking at the growing edge reads as noise. */
@@ -904,4 +911,46 @@ button:not(:disabled):active, [role="tab"]:active, [role="radio"]:active { trans
   display: inline-block;
   width: 0.5ch;
   opacity: 0.8;
+}
+
+/* Composer focus: a soft ring eases in around the whole prompt box (box-shadow on the wrapper only,
+   no layout). Sits under the drag/voice states, which set their own ring. */
+.composer-glow {
+  transition:
+    border-color var(--dur-base) var(--ease-out-quint),
+    box-shadow var(--dur-slow) var(--ease-out-expo);
+}
+.composer-glow:focus-within {
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring) 22%, transparent), var(--shadow-e1, 0 1px 2px rgb(0 0 0 / 0.06));
+}
+
+/* A question landing: one gentle attention ring swells out of the card after it rises in, then
+   quiet. A pseudo-element ring (transform + opacity only) so the card's own shadow is untouched. */
+@keyframes attention-pulse {
+  0% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.025, 1.08);
+  }
+}
+.attention-pulse {
+  position: relative;
+}
+.attention-pulse::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  border: 2px solid var(--attention);
+  pointer-events: none;
+  opacity: 0;
+  animation: attention-pulse 0.9s 0.3s var(--ease-out-expo) 1 both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .attention-pulse::after {
+    animation: none;
+  }
 }

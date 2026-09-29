@@ -2,6 +2,8 @@ import * as React from "react";
 import { ArrowLeft, Check, ChevronDown, RotateCw, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, type HistoryRun, type RunDigest } from "@/lib/api";
+import { ActivityHeatmap, type ActivityRun } from "@/components/ui/activity-heatmap";
+import { NumberTicker } from "@/components/ui/number-ticker";
 import { fmtAgo, friendlyName, shortName } from "@/lib/format";
 import { fmtDuration } from "@/lib/lifecycle";
 import { setPrefill } from "@/lib/draft";
@@ -98,6 +100,8 @@ export function History({ onBack, onAgain }: { onBack: () => void; onAgain: () =
           <h1 className="text-foreground text-h1 font-semibold tracking-[-0.02em]">History</h1>
           <p className="text-muted-foreground mt-1 text-meta">Finished runs, kept after their machines are gone.</p>
         </header>
+
+        <ActivityPanel />
 
         <div role="radiogroup" aria-label="Filter runs" className="mb-3 flex flex-wrap items-center gap-1">
           <FilterChip active={filter === "all"} onClick={() => setFilter("all")} label="All" count={(rows ?? []).length} />
@@ -397,5 +401,39 @@ function RunDetail({ id }: { id: number }) {
         <p className="text-muted-foreground text-meta">No receipt was kept for this run — only the facts in the row above.</p>
       )}
     </div>
+  );
+}
+
+/**
+ * Activity over the archive's retention window (the controller prunes records past 90 days, so the
+ * grid stops at 13 weeks rather than drawing empty weeks it cannot know about). Fetched once; its own
+ * request so the heatmap is complete even when the list below is only one page deep.
+ */
+const ACTIVITY_WEEKS = 13;
+function ActivityPanel() {
+  const [runs, setRuns] = React.useState<ActivityRun[] | null>(null);
+  React.useEffect(() => {
+    const ctrl = new AbortController();
+    api
+      .historyActivity(Date.now() - ACTIVITY_WEEKS * 7 * 24 * 60 * 60 * 1000, ctrl.signal)
+      .then((r) => setRuns(r.runs))
+      .catch(() => {
+        if (!ctrl.signal.aborted) setRuns([]);
+      });
+    return () => ctrl.abort();
+  }, []);
+  if (!runs?.length) return null; // nothing to draw yet — the empty state below says it better
+  const failed = runs.filter((r) => r.failed).length;
+  return (
+    <section aria-label="Run activity" className="enter bg-card shadow-e1 mb-6 rounded-xl border px-4 py-3.5">
+      <div className="mb-3 flex items-baseline gap-4">
+        <span className="label text-muted-foreground">Activity</span>
+        <span className="text-faint text-micro">
+          <NumberTicker value={runs.length} className="text-foreground font-medium" /> {runs.length === 1 ? "run" : "runs"} ·{" "}
+          <NumberTicker value={runs.length - failed} /> done · <NumberTicker value={failed} /> failed
+        </span>
+      </div>
+      <ActivityHeatmap runs={runs} weeks={ACTIVITY_WEEKS} />
+    </section>
   );
 }

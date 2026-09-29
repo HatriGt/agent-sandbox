@@ -34,7 +34,7 @@ import { allBlobs, ownerKey, registerUserStoreBackend, withOwner, OPERATOR_OWNER
 import { detectTransitions, formatNotification, makeNotifier, type BoxRunView, type NotifyEvent } from "./notify.js";
 import { fetchPinned } from "./net-guard.js";
 import { buildDigest } from "./digest.js";
-import { archiveRun, deleteRun, getRun, listRuns, pruneArchive } from "./run-archive.js";
+import { archiveRun, deleteRun, getRun, listActivity, listRuns, pruneArchive } from "./run-archive.js";
 import { verifyPlanOf, type VerifyPlan, type VerifyResult } from "./verify.js";
 import { parseTrace } from "./trace.js";
 import { loadNotifySettings, normalizeNotifySettings, saveNotifySettings } from "./notify-store.js";
@@ -1953,6 +1953,21 @@ app.get("/history.json", (req: Request, res: Response) => {
         ...(Number.isInteger(before) ? { before } : {}),
       }),
     });
+  } catch (e) {
+    failWith(res, e);
+  }
+});
+
+// Run activity for the History heatmap: [{t, failed}] for the caller's owner since ?since (epoch ms,
+// clamped to the last 200 days). Read-only; same owner scoping as /history.json.
+app.get("/history/activity.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const p = principalOf(res);
+  const owner = p.kind === "user" ? p.userId : OPERATOR_OWNER;
+  try {
+    const floor = Date.now() - 200 * 24 * 60 * 60 * 1000;
+    const q = typeof req.query.since === "string" ? Number(req.query.since) : NaN;
+    res.json({ runs: listActivity(db, owner, Number.isFinite(q) ? Math.max(q, floor) : floor) });
   } catch (e) {
     failWith(res, e);
   }

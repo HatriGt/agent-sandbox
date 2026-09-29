@@ -44,6 +44,128 @@ export function LifecycleItem({ label, detail }: { label: string; detail?: strin
 const SHELL_TOOLS = new Set(["Bash", "Shell", "Terminal", "Run", "Exec", "sh", "bash"]);
 type ToolEvent = Extract<TraceEvent, { kind: "tool" }>;
 
+/* ── Timing ──────────────────────────────────────────────────────────────────────────────────────
+ * Times come from the formatter's ⟦at⟧ stamps (see src/trace.ts). Every field is optional: a log
+ * written before the stamps renders exactly as it always did, just without times. */
+
+/** `840ms` · `1.2s` · `14s` · `3m 4s` · `1h 12m` — compact enough for a chip. */
+export function formatDuration(ms: number): string {
+  const v = Math.max(0, ms);
+  if (v < 1000) return `${Math.round(v)}ms`;
+  const s = v / 1000;
+  if (s < 10) return `${s.toFixed(1)}s`;
+  if (s < 60) return `${Math.floor(s)}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${Math.floor(s % 60)}s`;
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
+/** `just now` · `4m ago` · `2h ago`, then the clock time (and the date once it is not today). */
+function relativeTime(at: number, now: number): string {
+  const d = Math.max(0, now - at);
+  if (d < 45_000) return "just now";
+  if (d < 3_600_000) return `${Math.round(d / 60_000)}m ago`;
+  if (d < 6 * 3_600_000) return `${Math.floor(d / 3_600_000)}h ago`;
+  const t = new Date(at);
+  const time = t.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return t.toDateString() === new Date(now).toDateString() ? time : `${t.toLocaleDateString([], { month: "short", day: "numeric" })}, ${time}`;
+}
+
+// One shared interval per cadence, not one per mounted row: a 60-step group must not run 60 timers.
+const tickers = new Map<number, { subs: Set<() => void>; id: number }>();
+function subscribeTick(every: number, cb: () => void) {
+  let t = tickers.get(every);
+  if (!t) {
+    const subs = new Set<() => void>();
+    t = { subs, id: window.setInterval(() => subs.forEach((f) => f()), every) };
+    tickers.set(every, t);
+  }
+  t.subs.add(cb);
+  return () => {
+    t!.subs.delete(cb);
+    if (!t!.subs.size) {
+      window.clearInterval(t!.id);
+      tickers.delete(every);
+    }
+  };
+}
+/** Wall clock that re-renders every `every` ms while `active`; frozen (and timer-free) otherwise. */
+function useNow(active: boolean, every = 1000): number {
+  const [now, setNow] = React.useState(() => Date.now());
+  React.useEffect(() => {
+    if (!active) return;
+    setNow(Date.now());
+    return subscribeTick(every, () => setNow(Date.now()));
+  }, [active, every]);
+  return now;
+}
+
+/** A quiet time next to a label: relative text, the full date and time on hover. */
+function TimeStamp({ at, className }: { at: number; className?: string }) {
+  const now = useNow(true, 30_000);
+  const full = new Date(at).toLocaleString([], { dateStyle: "medium", timeStyle: "medium" });
+  return (
+    <time dateTime={new Date(at).toISOString()} title={full} className={cn("stamp text-faint tabular-nums", className)}>
+      {relativeTime(at, now)}
+    </time>
+  );
+}
+
+/**
+ * A step's duration chip. Done: the measured `ms`. Running: a live elapsed that ticks each second,
+ * counted from the call's own stamp (or from when the row mounted, for a log without stamps).
+ */
+function DurationChip({ event, running, className }: { event: ToolEvent; running?: boolean; className?: string }) {
+  const mounted = React.useRef(Date.now());
+  const now = useNow(!!running);
+  const ms = running ? now - (event.at ?? mounted.current) : event.ms;
+  if (ms === undefined) return null;
+  return (
+    <span
+      className={cn("text-micro shrink-0 tabular-nums", running ? "text-live" : event.failed ? "text-destructive/80" : "text-faint", className)}
+      title={running ? "Running for" : "Took"}
+    >
+      {formatDuration(ms)}
+    </span>
+  );
+}
+
+/** Wall-clock span of a group: first call issued → last result in. Parallel calls are not double-counted. */
+function groupSpan(events: ToolEvent[]): number | undefined {
+  const timed = events.filter((e) => e.at !== undefined && e.ms !== undefined);
+  if (!timed.length) return undefined;
+  const start = Math.min(...timed.map((e) => e.at!));
+  const end = Math.max(...timed.map((e) => e.at! + e.ms!));
+  return end - start;
+}
+
+/** Spring for disclosure height and row entry: settles quickly, no visible overshoot. */
+const SPRING = { type: "spring", stiffness: 420, damping: 38, mass: 0.8 } as const;
+
+/**
+ * A status glyph that pops (scale 0.6 → 1) when it CHANGES — running → done, running → failed —
+ * so the moment a step lands is felt, not just seen. `state` keys the swap; reduced motion swaps flat.
+ */
+function StatusGlyph({ state, children, className }: { state: string; children: React.ReactNode; className?: string }) {
+  const still = useReducedMotion();
+  return (
+    <span className={cn("grid shrink-0 place-items-center", className)}>
+      <AnimatePresence mode="popLayout" initial={false}>
+        <motion.span
+          key={state}
+          className="col-start-1 row-start-1 grid place-items-center"
+          initial={still ? false : { scale: 0.6, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          exit={still ? { opacity: 0, transition: { duration: 0 } } : { scale: 0.6, opacity: 0, transition: { duration: 0.1 } }}
+          transition={still ? { duration: 0 } : { type: "spring", stiffness: 600, damping: 22 }}
+        >
+          {children}
+        </motion.span>
+      </AnimatePresence>
+    </span>
+  );
+}
+
 /** How many lines a result has, for the fold's label. */
 function lineCount(result: string): number {
   return result.replace(/\n+$/, "").split("\n").length;
@@ -137,6 +259,10 @@ export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolea
   const anyRunning = !!live && events.some((e) => !e.result);
   const failed = events.filter((e) => e.failed).length;
   const done = events.filter((e) => !!e.result).length;
+  const span = groupSpan(events);
+  // While working, the group's clock runs from its first stamped call.
+  const firstAt = events.find((e) => e.at !== undefined)?.at;
+  const now = useNow(anyRunning && firstAt !== undefined);
   if (events.length === 1) return <ToolItem event={events[0]} live={anyRunning} />;
 
   // Files touched (Write/Edit targets) and commands run — the two facts worth a glance.
@@ -182,9 +308,13 @@ export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolea
             <span className="text-muted-foreground font-normal tabular-nums">
               {done}/{events.length} steps
             </span>
+            {firstAt !== undefined && <span className="text-faint font-normal text-micro tabular-nums">{formatDuration(now - firstAt)}</span>}
           </span>
         ) : (
-          <span className="font-medium">Worked</span>
+          <span className="font-medium">
+            Worked
+            {span !== undefined && <span className="text-muted-foreground ml-1 font-normal tabular-nums">for {formatDuration(span)}</span>}
+          </span>
         )}
         {!anyRunning && (
           <span className="stamp text-muted-foreground min-w-0 truncate">
@@ -203,26 +333,31 @@ export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolea
           <motion.ol
             initial={still ? false : { height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
-            exit={still ? { opacity: 0 } : { height: 0, opacity: 0 }}
-            transition={{ duration: still ? 0 : 0.22, ease: [0.22, 1, 0.36, 1] }}
+            exit={still ? { opacity: 0, transition: { duration: 0 } } : { height: 0, opacity: 0 }}
+            // Height rides a spring (it tracks content that is still growing without a hard stop);
+            // opacity stays a short tween so the fade never lags behind the reveal.
+            transition={still ? { duration: 0 } : { height: SPRING, opacity: { duration: 0.16, ease: [0.22, 1, 0.36, 1] } }}
             // Capped: a 60-step group opened by accident must not shove the conversation a screen down.
             className="relative mt-1.5 max-h-[32rem] overflow-y-auto overscroll-contain pl-0.5"
           >
             {events.map((e, i) => {
               const running = !!live && !e.result;
               const last = i === events.length - 1;
+              const state = running ? "running" : e.failed ? "failed" : "done";
+              // Step and shell rows carry their own chip; MCP / skill rows get one here.
+              const ownChip = !parseMcpName(e.name) && e.name !== "Skill";
               return (
                 <motion.li
                   key={i}
-                  initial={still ? false : { opacity: 0, x: -4 }}
+                  initial={still ? false : { opacity: 0, x: -6 }}
                   animate={{ opacity: 1, x: 0 }}
-                  transition={{ duration: 0.18, delay: Math.min(i, 8) * 0.03 }}
+                  transition={still ? { duration: 0 } : { ...SPRING, delay: Math.min(i, 8) * 0.03 }}
                   className="relative flex gap-3 pb-2 last:pb-0"
                 >
                   <span className="relative flex w-4 shrink-0 flex-col items-center">
                     <span
                       className={cn(
-                        "z-10 mt-2 grid size-3.5 place-items-center rounded-full border text-[8.5px] font-semibold tabular-nums",
+                        "z-10 mt-2 grid size-3.5 place-items-center rounded-full border text-[8.5px] font-semibold tabular-nums transition-colors duration-200",
                         running
                           ? "border-live bg-live/20 text-live"
                           : e.failed
@@ -230,13 +365,16 @@ export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolea
                             : "border-line-strong bg-card text-muted-foreground"
                       )}
                     >
-                      {running ? <span className="bg-live size-1.5 animate-pulse rounded-full" /> : e.failed ? <AlertTriangle className="size-2" strokeWidth={3} aria-label="failed" /> : i + 1}
+                      <StatusGlyph state={state}>
+                        {running ? <span className="bg-live size-1.5 animate-pulse rounded-full" /> : e.failed ? <AlertTriangle className="size-2" strokeWidth={3} aria-label="failed" /> : i + 1}
+                      </StatusGlyph>
                     </span>
                     {!last && <span className="bg-border absolute top-[1.4rem] bottom-0 w-px" aria-hidden />}
                   </span>
                   <div className="min-w-0 flex-1">
                     <ToolItem event={e} live={running} />
                   </div>
+                  {!ownChip && <DurationChip event={e} running={running} className="mt-1.5" />}
                 </motion.li>
               );
             })}
@@ -275,16 +413,19 @@ function ShellItem({ event, live }: { event: ToolEvent; live?: boolean }) {
         )}
       >
         <div className="flex items-center gap-2 border-b border-white/8 px-3 py-1.5">
-          {live ? (
-            <Loader2 className="text-live size-3 shrink-0 animate-spin" aria-hidden />
-          ) : event.failed ? (
-            <AlertTriangle className="text-destructive size-3 shrink-0" aria-hidden />
-          ) : (
-            <Terminal className="text-trace-fg/60 size-3 shrink-0" aria-hidden />
-          )}
+          <StatusGlyph state={live ? "running" : event.failed ? "failed" : "done"}>
+            {live ? (
+              <Loader2 className="text-live size-3 animate-spin" aria-hidden />
+            ) : event.failed ? (
+              <AlertTriangle className="text-destructive size-3" aria-hidden />
+            ) : (
+              <Terminal className="text-trace-fg/60 size-3" aria-hidden />
+            )}
+          </StatusGlyph>
           <span className="label text-trace-fg/60">{event.name}</span>
           {live && <span className="label text-live">running</span>}
           {!live && event.failed && <span className="label text-destructive">failed</span>}
+          <DurationChip event={event} running={live} className={cn("ml-auto", !live && !event.failed && "text-trace-fg/45")} />
           {hasOutput && <PanelFold open={open} text={event.result!} onToggle={() => setOpen((v) => !v)} />}
         </div>
         <pre className="text-trace-fg px-3 py-2 font-mono text-code whitespace-pre-wrap [overflow-wrap:anywhere]">
@@ -344,32 +485,29 @@ function StepItem({ event, live }: { event: ToolEvent; live?: boolean }) {
           live && "bg-live/6"
         )}
       >
-        {live ? (
-          <Loader2 className="text-live size-3.5 shrink-0 animate-spin" aria-hidden />
-        ) : event.failed ? (
-          <AlertTriangle className="text-destructive size-3.5 shrink-0" aria-hidden />
-        ) : (
-          <FileText className="text-muted-foreground size-3.5 shrink-0" aria-hidden />
-        )}
+        <StatusGlyph state={live ? "running" : event.failed ? "failed" : "done"}>
+          {live ? (
+            <Loader2 className="text-live size-3.5 animate-spin" aria-hidden />
+          ) : event.failed ? (
+            <AlertTriangle className="text-destructive size-3.5" aria-hidden />
+          ) : (
+            <FileText className="text-muted-foreground size-3.5" aria-hidden />
+          )}
+        </StatusGlyph>
         <span className="text-foreground shrink-0 font-medium">{event.name}</span>
         {event.arg && (
           <code className="text-muted-foreground bg-muted min-w-0 truncate rounded px-1.5 py-0.5 font-mono text-micro">
             {event.arg}
           </code>
         )}
-        {expandable && (
-          <>
-            {lines > 1 && <span className="label text-faint ml-auto shrink-0">{lines} lines</span>}
-            <ChevronRight
-              className={cn(
-                "text-muted-foreground size-3.5 shrink-0 transition-transform duration-150",
-                lines > 1 ? "ml-1" : "ml-auto",
-                open && "rotate-90"
-              )}
-              aria-hidden
-            />
-          </>
-        )}
+        {/* Right-aligned tail: line count, duration, chevron. */}
+        <span className="ml-auto flex shrink-0 items-center gap-2 pl-1">
+          {expandable && lines > 1 && <span className="label text-faint">{lines} lines</span>}
+          <DurationChip event={event} running={live} />
+          {expandable && (
+            <ChevronRight className={cn("text-muted-foreground size-3.5 transition-transform duration-150", open && "rotate-90")} aria-hidden />
+          )}
+        </span>
       </button>
 
       {open && event.diff && <EditDiff diff={event.diff} />}
@@ -417,31 +555,40 @@ function DumpItem({ text }: { text: string }) {
   );
 }
 
-export const SayItem = React.memo(function SayItem({ text, live, label = true }: { text: string; live?: boolean; label?: boolean }) {
+export const SayItem = React.memo(function SayItem({ text, live, label = true, at }: { text: string; live?: boolean; label?: boolean; at?: number }) {
   if (!live && looksLikeDump(text)) return <DumpItem text={text} />;
   return (
     <div className="enter group/say min-w-0">
-      {(label || live) && <AgentLabel live={live} />}
+      {(label || live) && <AgentLabel live={live} at={at} />}
       <div className="text-foreground min-w-0">
         {live ? <StreamingMarkdown text={text} /> : <Markdown className="prose-agent">{text}</Markdown>}
       </div>
-      {!live && <CopyMessage text={text} />}
+      {!live && <CopyMessage text={text} at={label ? undefined : at} />}
     </div>
   );
 });
 
-/** The agent's byline, once per turn, so where the operator stops and the agent starts is never a guess. */
-export function AgentLabel({ live }: { live?: boolean }) {
+/**
+ * The agent's byline, once per turn, so where the operator stops and the agent starts is never a guess.
+ * With `at`, a quiet time follows the name — revealed on hover of the reply, always shown on touch.
+ */
+export function AgentLabel({ live, at }: { live?: boolean; at?: number }) {
   return (
     <span className="label text-muted-foreground mb-1.5 flex items-center gap-1.5">
       <span className={cn("size-1.5 rounded-full", live ? "bg-live breathe" : "bg-faint")} aria-hidden />
       Agent
+      {at !== undefined && (
+        <TimeStamp at={at} className="ml-0.5 normal-case tracking-normal opacity-0 transition-opacity duration-150 group-hover/say:opacity-100 [@media(hover:none)]:opacity-100" />
+      )}
     </span>
   );
 }
 
-/** Per-reply copy: fades in under the reply on hover; always shown on touch, where there is no hover. */
-function CopyMessage({ text }: { text: string }) {
+/**
+ * Per-reply copy: fades in under the reply on hover; always shown on touch, where there is no hover.
+ * A reply without its own byline (a continuation) carries its time here instead.
+ */
+function CopyMessage({ text, at }: { text: string; at?: number }) {
   const [copied, setCopied] = React.useState(false);
   return (
     <div className="mt-1 -ml-1.5 flex h-7 items-center opacity-0 transition-opacity duration-150 group-hover/say:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
@@ -462,6 +609,7 @@ function CopyMessage({ text }: { text: string }) {
         {copied ? <Check className="text-ok size-3.5" strokeWidth={2.5} aria-hidden /> : <Copy className="size-3.5" aria-hidden />}
         {copied ? "Copied" : "Copy"}
       </button>
+      {at !== undefined && <TimeStamp at={at} className="ml-1.5" />}
     </div>
   );
 }
@@ -523,7 +671,7 @@ export function WorkingIndicator({ label = "Working", detail }: { label?: string
  * fading in like the output-panel copy button): revert the box to the state before this message
  * was delivered. Confirmation happens upstream (Thread owns the dialog).
  */
-export function YouItem({ text, label = "You", onRevert }: { text: string; label?: string; onRevert?: () => void }) {
+export function YouItem({ text, label = "You", onRevert, at }: { text: string; label?: string; onRevert?: () => void; at?: number }) {
   // Image attachments ride in the message as in-box paths; show them as thumbnails, not as text.
   const attachments = React.useMemo(() => [...new Set(text.match(ATTACHMENT_RE) ?? [])], [text]);
   const body = React.useMemo(() => (attachments.length ? text.replace(/\n*Attached images? \(open with the Read tool\):[\s\S]*$/, "").trim() : text), [text, attachments.length]);
@@ -533,7 +681,13 @@ export function YouItem({ text, label = "You", onRevert }: { text: string; label
   const rest = skillMatch ? (skillMatch[2] ?? "").trim() : body;
   return (
     <div className="enter group/you flex flex-col items-end gap-1.5">
-      <span className="label text-muted-foreground pr-1">{label}</span>
+      <span className="label text-muted-foreground flex items-center gap-1.5 pr-1">
+        {/* The time sits BEFORE the label so the label keeps its right edge; hover-revealed like revert. */}
+        {at !== undefined && (
+          <TimeStamp at={at} className="normal-case tracking-normal opacity-0 transition-opacity duration-150 group-hover/you:opacity-100 [@media(hover:none)]:opacity-100" />
+        )}
+        {label}
+      </span>
       {attachments.length > 0 && (
         <div className="flex max-w-[min(72%,60ch)] flex-wrap justify-end gap-1.5">
           {attachments.map((p) => (

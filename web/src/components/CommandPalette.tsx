@@ -1,5 +1,6 @@
 import * as React from "react";
 import { CornerDownLeft, Plus, Search } from "lucide-react";
+import { motion, useReducedMotion } from "motion/react";
 import type { BoxView } from "@/lib/api";
 import { friendlyName, shortName, threadTitle } from "@/lib/format";
 import { StateStamp } from "@/components/ui/stamp";
@@ -42,6 +43,7 @@ export function CommandPalette({
   const input = React.useRef<HTMLInputElement>(null);
   const [query, setQuery] = React.useState("");
   const [cursor, setCursor] = React.useState(0);
+  const reduce = useReducedMotion();
 
   const close = React.useCallback(() => {
     dialog.current?.close();
@@ -105,7 +107,11 @@ export function CommandPalette({
         "text-foreground bg-popover m-0 w-[calc(100%-2rem)] max-w-xl rounded-xl border p-0",
         "shadow-e4",
         "fixed top-[12vh] left-1/2 -translate-x-1/2",
-        "backdrop:bg-black/40 backdrop:backdrop-blur-[2px] open:flex open:flex-col"
+        "backdrop:bg-black/40 backdrop:backdrop-blur-[2px] open:flex open:flex-col",
+        // Scale + fade in and out. `starting:` gives the entry frame; allow-discrete keeps the
+        // dialog painted (display/overlay) until the exit transition finishes.
+        "origin-top scale-[0.97] opacity-0 transition-[opacity,scale,display,overlay] transition-discrete duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]",
+        "open:scale-100 open:opacity-100 starting:open:scale-[0.97] starting:open:opacity-0 motion-reduce:scale-100 motion-reduce:duration-100"
       )}
     >
       <div className="flex items-center gap-2.5 border-b px-3.5 py-3">
@@ -145,10 +151,17 @@ export function CommandPalette({
               onMouseEnter={() => setCursor(i)}
               onClick={() => run(i)}
               className={cn(
-                "flex w-full cursor-pointer items-center gap-3 rounded-md px-2.5 py-2 text-left",
-                i === clamped && "bg-accent"
+                "relative isolate flex w-full cursor-pointer items-center gap-3 rounded-md px-2.5 py-2 text-left"
               )}
             >
+              {i === clamped && (
+                <motion.span
+                  layoutId="palette-cursor"
+                  className="bg-accent absolute inset-0 -z-10 rounded-md"
+                  transition={reduce ? { duration: 0 } : { type: "spring", stiffness: 700, damping: 48, mass: 0.6 }}
+                  aria-hidden
+                />
+              )}
               {row.kind === "new" ? (
                 <>
                   <span className="bg-primary text-primary-foreground grid size-6 shrink-0 place-items-center rounded-md">

@@ -542,3 +542,40 @@ test("an answered question is kept in the transcript as an ask event before the 
   const i = ev.findIndex((e) => e.kind === "ask");
   assert.equal(ev[i + 1].kind, "you");
 });
+
+test("⟦at⟧ stamps date say/you/tool events and give tool calls a duration", () => {
+  const log = [
+    "⟦at⟧ 1756713600000",
+    "⟦you⟧",
+    "run the tests",
+    "⟦/you⟧",
+    "⟦at⟧ 1756713601000",
+    "On it.",
+    "⟦at⟧ 1756713601500",
+    "→ Bash: npm test ⟦#t0000001⟧",
+    "⟦at⟧ 1756713604700",
+    "  ⟦#t0000001⟧ ok 3",
+    "  done",
+  ].join("\n");
+  const ev = parseTrace(log);
+  assert.deepEqual(ev[0], { kind: "you", text: "run the tests", at: 1756713600000 });
+  assert.deepEqual(ev[1], { kind: "say", text: "On it.", at: 1756713601000 });
+  const t = ev[2];
+  assert.ok(t.kind === "tool");
+  if (t.kind !== "tool") return;
+  assert.equal(t.at, 1756713601500);
+  assert.equal(t.ms, 3200);
+  assert.equal(t.result, "ok 3\ndone");
+});
+
+test("logs without ⟦at⟧ stamps parse with no time fields", () => {
+  const ev = parseTrace(["Hi.", "→ Bash: ls", "  a"].join("\n"));
+  assert.deepEqual(ev[0], { kind: "say", text: "Hi." });
+  assert.ok(ev[1].kind === "tool" && ev[1].at === undefined && ev[1].ms === undefined);
+});
+
+test("a stamp between two text blocks does not split the say", () => {
+  const ev = parseTrace(["⟦at⟧ 1756713600000", "First.", "", "⟦at⟧ 1756713609000", "Second."].join("\n"));
+  assert.equal(ev.length, 1);
+  assert.ok(ev[0].kind === "say" && ev[0].at === 1756713600000 && /First\.[\s\S]*Second\./.test(ev[0].text));
+});

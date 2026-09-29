@@ -1151,6 +1151,15 @@ export const DIFF_CLOSE = "⟦/diff⟧";
  * context-health meter reads. One line per turn; the trace parser folds it into a `usage` event.
  */
 export const USAGE_OPEN = "⟦usage⟧";
+
+/**
+ * Wall-clock stamp: a column-0 `⟦at⟧ <epoch ms>` line written just before an assistant text block, a
+ * tool call row, a tool result block and a ⟦you⟧ follow-up. The log had no clock of its own, so the
+ * transcript could not say WHEN something was said or how long a command took; the parser carries
+ * the latest stamp onto the next event and derives a tool's duration as result stamp − call stamp.
+ * Logs written before this simply carry no stamps and render exactly as before.
+ */
+export const AT_MARK = "⟦at⟧";
 export const DIFF_MAX_LINES = 200;
 export const DIFF_MAX_BYTES = 16384;
 
@@ -1174,6 +1183,7 @@ export function streamFmtScript(): string {
     // prose could forge authentic-looking tool cards (`→ Bash: git push …`) and fake Write rows that
     // feed the produced-files artifact cards. Same zero-width-space treatment.
     `function df(s){return String(s).replace(/\\u27e6/g,"\\u200b\\u27e6").replace(/^\\u25cf/gm,"\\u200b\\u25cf").replace(/^\\u2192/gm,"\\u200b\\u2192")}` +
+    `function st(){w("${AT_MARK} "+Date.now())}` +
     `let buf="";` +
     // Every assistant text block already written, so the run's final `result` (which IS one of them,
     // normally the last) is not appended a second time.
@@ -1224,7 +1234,7 @@ export function streamFmtScript(): string {
     // Trailing "\n" => a BLANK line after each text block. Consecutive assistant text blocks are
     // separate markdown documents (a table, then a fenced block); glued with a single newline the
     // renderer reads "| 1 | 2 |```bash" as one paragraph and the fence never opens.
-    `if(b.type==="text"&&b.text.trim()){const t=b.text.trim();seenText.add(t);w(df(t)+"\\n")}` +
+    `if(b.type==="text"&&b.text.trim()){const t=b.text.trim();seenText.add(t);st();w(df(t)+"\\n")}` +
     // Extended thinking arrives as its own block. It is written between sentinels so the UI can fold
     // it into a collapsed "Thought for a moment" panel instead of reading it as the agent's prose.
     `else if(b.type==="thinking"&&b.thinking&&String(b.thinking).trim()){w("${THINK_OPEN}\\n"+df(String(b.thinking).trim())+"\\n${THINK_CLOSE}")}` +
@@ -1246,7 +1256,7 @@ export function streamFmtScript(): string {
     // Stamp the tool_use id (short tail) so a result can be matched to ITS OWN call. With parallel
     // tool use one assistant message issues N tool_use blocks and the N results arrive afterwards;
     // without a correlation token the parser can only attach every result to the most recent call.
-    `else if(b.type==="tool_use"){const inp=b.input||{};const arg=String(inp.command||inp.skill||inp.file_path||inp.path||inp.pattern||inp.description||"").replace(/\\s*\\n\\s*/g," ").trim();w("→ "+b.name+(arg?": "+df(arg.slice(0,200)):"")+(b.id?" ${ID_OPEN}"+String(b.id).slice(-8)+"${ID_CLOSE}":""));` +
+    `else if(b.type==="tool_use"){const inp=b.input||{};const arg=String(inp.command||inp.skill||inp.file_path||inp.path||inp.pattern||inp.description||"").replace(/\\s*\\n\\s*/g," ").trim();st();w("→ "+b.name+(arg?": "+df(arg.slice(0,200)):"")+(b.id?" ${ID_OPEN}"+String(b.id).slice(-8)+"${ID_CLOSE}":""));` +
     // Per-edit diff block: what the Edit/Write actually changes, as -old/+new lines. Defanged and
     // capped (lines then bytes) — the truncation is announced, mirroring the tool_result budgets.
     `const dd=diffLines(b.name,inp);if(dd.length){const head=[];let bytes=0;let cut=0;for(const l of dd){if(head.length>=${DIFF_MAX_LINES}||bytes+l.length+1>${DIFF_MAX_BYTES}){cut++;continue}bytes+=l.length+1;head.push(l)}` +
@@ -1259,7 +1269,7 @@ export function streamFmtScript(): string {
     // is megabytes, and .agent.log is re-read whole on every SSE poll). Whichever binds first wins.
     // A FAILED tool call is marked, so the UI can show it failed. Without this a command that errored
     // renders exactly like one that succeeded — its stderr just looks like ordinary output.
-    `if(b.type==="tool_result"){if(b.tool_use_id&&planIds.has(b.tool_use_id))continue;const r=txt(b.content).trim();const id=b.tool_use_id?"${ID_OPEN}"+String(b.tool_use_id).slice(-8)+"${ID_CLOSE} ":"";if(r){w("  "+id+(b.is_error?"${ERR_MARK} ":"")+clip(df(r).split("\\n")).join("\\n  "))}else if(id)w("  "+id+(b.is_error?"${ERR_MARK} ":"")+"(no output)")}` +
+    `if(b.type==="tool_result"){if(b.tool_use_id&&planIds.has(b.tool_use_id))continue;const r=txt(b.content).trim();const id=b.tool_use_id?"${ID_OPEN}"+String(b.tool_use_id).slice(-8)+"${ID_CLOSE} ":"";if(r||id)st();if(r){w("  "+id+(b.is_error?"${ERR_MARK} ":"")+clip(df(r).split("\\n")).join("\\n  "))}else if(id)w("  "+id+(b.is_error?"${ERR_MARK} ":"")+"(no output)")}` +
     `}return}` +
     // Re-emit the run's final result ONLY when it is not simply the assistant text we already wrote.
     // Claude's `result` IS the last assistant message, so the unconditional re-emit appended the
@@ -1298,14 +1308,15 @@ export function ompFmtScript(): string {
     `function w(s){try{fs.appendFileSync(out,redactShapes(String(s))+"\\n")}catch(e){}}` +
     `function df(s){return String(s).replace(/\\u27e6/g,"\\u200b\\u27e6").replace(/^\\u25cf/gm,"\\u200b\\u25cf").replace(/^\\u2192/gm,"\\u200b\\u2192")}` +
     `let inited=false;` +
+    `function st(){w("${AT_MARK} "+Date.now())}` +
     `function oneLine(v){return df(String(v==null?"":v).replace(/\\s*\\n\\s*/g," ").trim().slice(0,200))}` +
     `function idTok(id){return id?" ${ID_OPEN}"+String(id).slice(-8)+"${ID_CLOSE}":""}` +
     `function txt(c){if(Array.isArray(c))return c.map(b=>b&&(b.type==="text"||b.type==="toolResult")?String(b.text||b.output||""):"").join("");return typeof c==="string"?c:""}` +
     `function clip(ls){const head=[];let bytes=0;for(const l0 of ls){if(head.length>=${RESULT_MAX_LINES})break;const l=l0.length>${RESULT_MAX_LINE_CHARS}?l0.slice(0,${RESULT_MAX_LINE_CHARS})+" …":l0;const b=Buffer.byteLength(l,"utf8")+3;if(head.length&&bytes+b>${RESULT_MAX_BYTES})break;bytes+=b;head.push(l)}` +
     `const cut=ls.length-head.length;if(cut>0)head.push("… "+cut+" more lines");return head}` +
     `function toolArg(a){a=a||{};return String(a.command||a.cmd||a.path||a.file_path||a.filePath||a.pattern||a.query||a.url||a.description||"")}` +
-    `function toolRow(b){const arg=oneLine(toolArg(b.arguments||b.args||b.input));w("→ "+String(b.name||b.toolName||"tool")+(arg?": "+arg:"")+idTok(b.id||b.toolCallId))}` +
-    `function result(id,body,isErr){const r=String(body==null?"":body).trim();const tok=id?"${ID_OPEN}"+String(id).slice(-8)+"${ID_CLOSE} ":"";` +
+    `function toolRow(b){const arg=oneLine(toolArg(b.arguments||b.args||b.input));st();w("→ "+String(b.name||b.toolName||"tool")+(arg?": "+arg:"")+idTok(b.id||b.toolCallId))}` +
+    `function result(id,body,isErr){const r=String(body==null?"":body).trim();const tok=id?"${ID_OPEN}"+String(id).slice(-8)+"${ID_CLOSE} ":"";if(r||tok)st();` +
     `if(r)w("  "+tok+(isErr?"${ERR_MARK} ":"")+clip(df(r).split("\\n")).join("\\n  "));else if(tok)w("  "+tok+(isErr?"${ERR_MARK} ":"")+"(no output)")}` +
     `function usage(u){if(!u)return;const inn=(u.input||u.input_tokens||0)+(u.cacheRead||u.cache_read_input_tokens||0)+(u.cacheWrite||u.cache_creation_input_tokens||0);` +
     `const o=(u.output||u.output_tokens||0);w("${USAGE_OPEN} in="+inn+" out="+o+" ctx="+(inn+o))}` +
@@ -1314,10 +1325,10 @@ export function ompFmtScript(): string {
     // the FIRST assistant message, whose .model is what actually answered (measured live).
     `if(role==="assistant"&&!inited){inited=true;w("● session started (model "+String(m.model||"?")+")")}` +
     `if(role==="assistant"){for(const b of Array.isArray(m.content)?m.content:[]){if(!b)continue;` +
-    `if(b.type==="text"&&String(b.text||"").trim())w(df(String(b.text).trim())+"\\n");` +
+    `if(b.type==="text"&&String(b.text||"").trim()){st();w(df(String(b.text).trim())+"\\n")}` +
     `else if(b.type==="thinking"&&String(b.thinking||b.text||"").trim())w("${THINK_OPEN}\\n"+df(String(b.thinking||b.text).trim())+"\\n${THINK_CLOSE}");` +
     `else if(b.type==="toolCall"||b.type==="tool_call"||b.type==="tool_use")toolRow(b)}` +
-    `if(typeof m.content==="string"&&m.content.trim())w(df(m.content.trim())+"\\n");` +
+    `if(typeof m.content==="string"&&m.content.trim()){st();w(df(m.content.trim())+"\\n")}` +
     `return}` +
     `if(role==="toolResult"||role==="tool"||role==="tool_result"){const id=m.toolCallId||m.tool_call_id||m.toolUseId||m.id;` +
     `result(id,txt(m.content)||m.output||m.result||m.text,!!(m.isError||m.is_error));return}}` +
@@ -1764,7 +1775,8 @@ export function agentSh(workdir: string, resume: boolean, agent: AgentKind = "cl
   // message so trailing agent prose is never absorbed into it.
   const echoFollowup = resume
     ? `if [ -s ${QUESTION_MARK} ]; then { printf '%s\\n' ${shellQuote(ASK_MARK_OPEN)}; cat ${QUESTION_MARK}; printf '\\n%s\\n' ${shellQuote(ASK_MARK_CLOSE)}; } >> ${AGENT_LOG}; fi; ` +
-      `{ printf '%s\\n' ${shellQuote(YOU_MARK_OPEN)}; printf '%s\\n' "$AGENT_TASK" | ${DEFANG_SENTINELS_SED}; printf '%s\\n' ${shellQuote(YOU_MARK_CLOSE)}; } >> ${AGENT_LOG} && `
+      // Stamped `date +%s` + "000": busybox date has no %N, and a bubble's time needs no more.
+      `{ printf '%s %s000\\n' ${shellQuote(AT_MARK)} "$(date +%s)"; printf '%s\\n' ${shellQuote(YOU_MARK_OPEN)}; printf '%s\\n' "$AGENT_TASK" | ${DEFANG_SENTINELS_SED}; printf '%s\\n' ${shellQuote(YOU_MARK_CLOSE)}; } >> ${AGENT_LOG} && `
     : ``;
   // Two resumes can land at once (an inbox delivery and an explicit resume raced in live testing):
   // both ran `claude -c` concurrently in the same dir, and the second's sentinel reset stomped the

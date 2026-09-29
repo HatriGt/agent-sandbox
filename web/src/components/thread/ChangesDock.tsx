@@ -1,6 +1,6 @@
 import * as React from "react";
 import { ChevronUp, RefreshCw } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { ChangedFile } from "@/lib/api";
 import { FileMark } from "@/lib/fileIcon";
 import { cn } from "@/lib/utils";
@@ -33,6 +33,7 @@ function PopCount({ value }: { value: number }) {
 
 export function ChangesDock({ files, loading, onOpen, onRefresh, onReviewAll, activePath }: { files: ChangedFile[]; loading?: boolean; onOpen: (f: ChangedFile) => void; onRefresh?: () => void; onReviewAll?: () => void; activePath?: string | null }) {
   const [open, setOpen] = React.useState(false);
+  const still = useReducedMotion();
   // Esc collapses the expanded list — unless a dialog/menu/input owns the key.
   React.useEffect(() => {
     if (!open) return;
@@ -54,17 +55,23 @@ export function ChangesDock({ files, loading, onOpen, onRefresh, onReviewAll, ac
         <AnimatePresence initial={false}>
           {open && (
             <motion.ul
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: "auto", opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+              initial={still ? { opacity: 0 } : { height: 0, opacity: 0 }}
+              animate={still ? { opacity: 1 } : { height: "auto", opacity: 1 }}
+              exit={still ? { opacity: 0 } : { height: 0, opacity: 0 }}
+              transition={{ duration: still ? 0.12 : 0.26, ease: [0.22, 1, 0.36, 1] }}
               className="max-h-64 overflow-y-auto border-b"
             >
-              {files.map((f) => {
+              {files.map((f, i) => {
                 const base = f.path.slice(f.path.lastIndexOf("/") + 1);
                 const dir = f.path.slice(0, Math.max(0, f.path.lastIndexOf("/")));
                 return (
-                  <li key={f.path}>
+                  <motion.li
+                    key={f.path}
+                    initial={still ? false : { opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    // Rows fill in a beat apart; capped so a 40-file list never keeps anyone waiting.
+                    transition={{ duration: 0.22, delay: 0.04 + Math.min(i, 10) * 0.022, ease: [0.22, 1, 0.36, 1] }}
+                  >
                     <button
                       type="button"
                       onClick={() => onOpen(f)}
@@ -79,7 +86,7 @@ export function ChangesDock({ files, loading, onOpen, onRefresh, onReviewAll, ac
                         {f.deletions > 0 && <span className="text-destructive">−{f.deletions}</span>}
                       </span>
                     </button>
-                  </li>
+                  </motion.li>
                 );
               })}
             </motion.ul>
@@ -106,7 +113,7 @@ export function ChangesDock({ files, loading, onOpen, onRefresh, onReviewAll, ac
               )}
             </span>
             <span className="text-muted-foreground ml-auto hidden text-micro sm:inline">{open ? "Hide files" : "Show files"}</span>
-            <ChevronUp className={cn("text-muted-foreground size-3.5 shrink-0 transition-transform", open && "rotate-180")} aria-hidden />
+            <ChevronUp className={cn("text-muted-foreground size-3.5 shrink-0 transition-transform duration-[var(--dur-base)] ease-[var(--ease-out-quint)]", open && "rotate-180")} aria-hidden />
           </button>
           {onReviewAll && (
             <button type="button" onClick={onReviewAll} className="text-muted-foreground hover:text-foreground hover:bg-muted shrink-0 cursor-pointer rounded-md px-2 py-1 text-micro font-medium">

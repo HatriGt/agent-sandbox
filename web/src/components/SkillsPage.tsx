@@ -7,6 +7,7 @@ import { useCached } from "@/lib/cache";
 import { fmtAgo } from "@/lib/format";
 import { SkillMark } from "@/lib/skillGlyph";
 import { FileIcon, FolderIcon } from "@/lib/vscodeIcons";
+import { AnimatedTabs } from "@/components/ui/animated-tabs";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -582,10 +583,15 @@ function EditorSheet({
                     <span className={cn("tabular text-micro", content.length > 60_000 ? "text-destructive" : "text-faint")}>
                       {content.length.toLocaleString()} / 65,536
                     </span>
-                    <div role="radiogroup" aria-label="Editor mode" className="bg-muted inline-flex h-7 items-center gap-0.5 rounded-md p-0.5">
-                      <TabChip active={tab === "write"} onClick={() => setTab("write")} icon={<PenLine className="size-3" />} label="Write" />
-                      <TabChip active={tab === "preview"} onClick={() => setTab("preview")} icon={<Eye className="size-3" />} label="Preview" />
-                    </div>
+                    <AnimatedTabs
+                      ariaLabel="Editor mode"
+                      value={tab}
+                      onChange={setTab}
+                      items={[
+                        { value: "write", icon: <PenLine className="size-3" />, label: "Write" },
+                        { value: "preview", icon: <Eye className="size-3" />, label: "Preview" },
+                      ]}
+                    />
                   </>
                 )}
               </div>
@@ -976,23 +982,5 @@ function RepoBrowser({
         )}
       </DialogContent>
     </Dialog>
-  );
-}
-
-function TabChip({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string }) {
-  return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={active}
-      onClick={onClick}
-      className={cn(
-        "flex h-6 cursor-pointer items-center gap-1 rounded px-2 text-micro font-medium transition-colors",
-        active ? "bg-card text-foreground shadow-e1" : "text-muted-foreground hover:text-foreground"
-      )}
-    >
-      {icon}
-      {label}
-    </button>
   );
 }

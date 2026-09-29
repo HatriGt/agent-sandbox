@@ -2,6 +2,7 @@ import type { BoxView } from "@/lib/api";
 import { displayState } from "@/lib/lifecycle";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { NumberTicker } from "@/components/ui/number-ticker";
 
 /**
  * The fleet's capacity as slots — `MSB_MAX_BOXES` cells, each coloured by the machine occupying it.
@@ -50,7 +51,7 @@ export function Capacity({
             })}
           </div>
           <span className={cn("text-muted-foreground tabular", size === "sm" ? "text-micro" : "text-meta")}>
-            {live.length}/{capacity}
+            <NumberTicker value={live.length} />/{capacity}
           </span>
         </div>
       </TooltipTrigger>

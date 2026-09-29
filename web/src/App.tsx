@@ -2,7 +2,7 @@ import * as React from "react";
 import { Link, useLocation } from "react-router";
 import { Bell, BellOff, Clock, Flame, Keyboard, LayoutGrid, LogOut, Moon, PanelLeftClose, PanelLeftOpen, Pause, Plug, Plus, Search, Shield, Sun, TriangleAlert, UserRound } from "lucide-react";
 import { Zap } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { api, type FleetLifecycle, type FleetSnapshot } from "@/lib/api";
 import { POLL_MS, isUp, isVisible, threadSort } from "@/lib/format";
 import { legacyHashTarget, useConsoleRoute, useGo } from "@/lib/route";
@@ -344,6 +344,8 @@ export default function App() {
     // Thread is a content change inside one pane — not a fade-out/fade-in remount (the jump-cut).
     view === "fleet" ? "fleet" : view === "history" ? "history" : view === "skills" ? "skills" : view === "integrations" ? "integrations" : view === "account" ? "account" : view === "connect" ? "connect" : view === "welcome" ? "welcome" : view === "admin" ? "admin" : route.view === "pr" ? `pr:${route.repo}#${route.number}` : booting && !selectedBox ? (booting.machine ? `box:${booting.machine}` : "booting") : selectedBox ? `box:${selectedBox.name}` : view === "box" ? "box-loading" : "hub";
 
+  const reduceMotion = useReducedMotion();
+
   return (
     <TooltipProvider delayDuration={400}>
       <Toaster position="top-center" />
@@ -567,10 +569,10 @@ export default function App() {
             <motion.div
               key={paneKey}
               className="min-h-0 flex-1"
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4 }}
-              transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+              initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 6, filter: "blur(2px)" }}
+              animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0, filter: "blur(0px)" }}
+              exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -4 }}
+              transition={{ duration: reduceMotion ? 0.12 : 0.2, ease: [0.22, 1, 0.36, 1] }}
             >
               <React.Suspense fallback={<PageSkeleton />}>
                 {view === "fleet" ? (
@@ -746,6 +748,9 @@ function PageSkeleton() {
   );
 }
 
+/** The sidebar/rail highlight glides between items rather than blinking from one to the next. */
+const NAV_SPRING = { type: "spring", stiffness: 480, damping: 40, mass: 0.8 } as const;
+
 function NavItem({
   active,
   onClick,
@@ -761,17 +766,22 @@ function NavItem({
   badge?: number;
   shortcut?: string;
 }) {
+  const reduce = useReducedMotion();
   return (
     <button
       type="button"
       onClick={onClick}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "group flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-meta transition-colors [&_svg]:size-4",
-        "relative",
-        active ? "bg-accent text-foreground font-medium before:bg-live before:absolute before:top-2 before:bottom-2 before:left-0 before:w-0.5 before:rounded-full" : "text-muted-foreground hover:text-foreground hover:bg-muted"
+        "group relative isolate flex cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-meta transition-colors [&_svg]:size-4",
+        active ? "text-foreground font-medium" : "text-muted-foreground hover:text-foreground hover:bg-muted"
       )}
     >
+      {active && (
+        <motion.span layoutId="nav-active" className="bg-accent absolute inset-0 -z-10 rounded-md" transition={reduce ? { duration: 0 } : NAV_SPRING} aria-hidden>
+          <span className="bg-live absolute top-2 bottom-2 left-0 w-0.5 rounded-full" />
+        </motion.span>
+      )}
       {icon}
       {label}
       <span className="ml-auto flex items-center gap-2">
@@ -799,6 +809,7 @@ function RailIcon({
   dot?: boolean;
   primary?: boolean;
 }) {
+  const reduce = useReducedMotion();
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -808,14 +819,15 @@ function RailIcon({
           aria-label={label}
           aria-current={active ? "page" : undefined}
           className={cn(
-            "relative grid size-10 cursor-pointer place-items-center rounded-md transition-colors [&_svg]:size-4",
+            "relative isolate grid size-10 cursor-pointer place-items-center rounded-md transition-colors [&_svg]:size-4",
             primary
               ? "bg-primary text-primary-foreground hover:bg-primary/80"
               : active
-                ? "bg-accent text-foreground"
+                ? "text-foreground"
                 : "text-muted-foreground hover:text-foreground hover:bg-muted"
           )}
         >
+          {active && !primary && <motion.span layoutId="rail-active" className="bg-accent absolute inset-0 -z-10 rounded-md" transition={reduce ? { duration: 0 } : NAV_SPRING} aria-hidden />}
           {icon}
           {dot && <span className="bg-attention ring-card absolute top-1.5 right-1.5 size-2 rounded-full ring-2" aria-hidden />}
           {badge != null && !dot && (

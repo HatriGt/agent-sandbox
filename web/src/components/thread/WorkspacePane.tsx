@@ -7,6 +7,7 @@ import { parseUnifiedDiff, diffForNewFile, type ParsedDiff } from "@/lib/diff";
 import { languageOf } from "@/lib/fileIcon";
 import { FileIcon, FolderIcon } from "@/lib/vscodeIcons";
 import { CodeEditor, UnifiedDiff } from "@/components/CodeEditor";
+import { AnimatedTabs } from "@/components/ui/animated-tabs";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DiffView } from "./FilePane";
@@ -252,18 +253,21 @@ export function WorkspacePane({ session, changes, open, onClose, onSaved, repos,
         {sidebar && (
           <section className="bg-muted/20 flex w-64 shrink-0 flex-col border-l" aria-label={filesTitle}>
             <div className="flex h-10 shrink-0 items-center gap-1 px-2">
-              <div role="radiogroup" className="bg-muted inline-flex h-7 items-center gap-0.5 rounded-md p-0.5">
-                <button type="button" role="radio" aria-checked={view !== "scm"} onClick={() => setView("explorer")} className={cn("flex h-6 cursor-pointer items-center gap-1 rounded px-2 text-micro font-medium", view !== "scm" ? "bg-card text-foreground shadow-e1" : "text-muted-foreground hover:text-foreground")}>
-                  <Files className="size-3.5" /> Files
-                </button>
-                <button type="button" role="radio" aria-checked={view === "scm"} onClick={() => setView("scm")} className={cn("flex h-6 cursor-pointer items-center gap-1 rounded px-2 text-micro font-medium", view === "scm" ? "bg-card text-foreground shadow-e1" : "text-muted-foreground hover:text-foreground")}>
-                  <GitBranch className="size-3.5" /> Changes
-                  {changes.length > 0 && <span className={cn("ml-0.5 rounded-full px-1.5 text-[9px] leading-4 font-semibold", view === "scm" ? "bg-live text-white" : "bg-live/20 text-live")}>{changes.length}</span>}
-                </button>
-                <button type="button" role="radio" aria-checked={view === "records"} onClick={() => setView("records")} className={cn("flex h-6 cursor-pointer items-center gap-1 rounded px-2 text-micro font-medium", view === "records" ? "bg-card text-foreground shadow-e1" : "text-muted-foreground hover:text-foreground")}>
-                  <Table2 className="size-3.5" /> All
-                </button>
-              </div>
+              <AnimatedTabs
+                ariaLabel="Sidebar view"
+                value={view === "scm" ? "scm" : view === "records" ? "records" : "explorer"}
+                onChange={(v) => setView(v)}
+                items={[
+                  { value: "explorer", icon: <Files className="size-3.5" />, label: "Files" },
+                  {
+                    value: "scm",
+                    icon: <GitBranch className="size-3.5" />,
+                    label: "Changes",
+                    badge: changes.length > 0 && <span className={cn("ml-0.5 rounded-full px-1.5 text-[9px] leading-4 font-semibold", view === "scm" ? "bg-live text-white" : "bg-live/20 text-live")}>{changes.length}</span>,
+                  },
+                  { value: "records", icon: <Table2 className="size-3.5" />, label: "All" },
+                ]}
+              />
               <button type="button" onClick={() => (view === "scm" ? loadGit() : void loadTree())} aria-label="Refresh" className="text-muted-foreground hover:text-foreground ml-auto grid size-7 cursor-pointer place-items-center rounded-md">
                 <RefreshCw className="size-3.5" />
               </button>
@@ -706,10 +710,15 @@ function FileView({ session, tab, change, onMode, onDraft, onSaving, onSaved }: 
           </span>
         )}
         {change && (
-          <div role="tablist" className="bg-muted inline-flex h-7 items-center gap-0.5 rounded-md p-0.5">
-            <ModeTab active={mode === "diff"} onClick={() => onMode("diff")} icon={<FileDiff className="size-3.5" />} label="Diff" />
-            <ModeTab active={mode === "edit"} onClick={() => onMode("edit")} icon={<FileCode2 className="size-3.5" />} label="File" disabled={deleted} />
-          </div>
+          <AnimatedTabs
+            ariaLabel="View mode"
+            value={mode === "diff" ? "diff" : "edit"}
+            onChange={(v) => onMode(v)}
+            items={[
+              { value: "diff", icon: <FileDiff className="size-3.5" />, label: "Diff" },
+              { value: "edit", icon: <FileCode2 className="size-3.5" />, label: "File", disabled: deleted },
+            ]}
+          />
         )}
         <span className={cn("stamp w-14 text-right transition-colors", saving ? "text-muted-foreground" : tab.dirty ? "text-attention-text" : "text-faint")} aria-live="polite">
           {saving ? "saving…" : tab.dirty ? "unsaved" : tab.saving === "saved" ? "saved" : ""}
@@ -767,14 +776,5 @@ function Breadcrumb({ path }: { path: string }) {
         <span className="max-w-[16rem] truncate">{file}</span>
       </span>
     </nav>
-  );
-}
-
-function ModeTab({ active, onClick, icon, label, disabled }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string; disabled?: boolean }) {
-  return (
-    <button type="button" role="tab" aria-selected={active} disabled={disabled} onClick={onClick} className={cn("flex h-6 cursor-pointer items-center gap-1 rounded px-2 text-micro font-medium disabled:cursor-not-allowed disabled:opacity-40", active ? "bg-card text-foreground shadow-e1" : "text-muted-foreground hover:text-foreground")}>
-      {icon}
-      {label}
-    </button>
   );
 }

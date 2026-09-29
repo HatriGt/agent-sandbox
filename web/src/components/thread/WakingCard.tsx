@@ -36,8 +36,8 @@ export function WakingCard({ awake, startedAt, error, onRetry }: { awake: boolea
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -4 }}
-      transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-      className="enter flex items-center gap-2.5"
+      transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+      className="flex items-center gap-2.5"
       role="status"
       aria-live="polite"
     >
@@ -102,8 +102,8 @@ export function SleepingCard({ onWake }: { onWake: () => void }) {
       initial={{ opacity: 0, y: 4 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -4 }}
-      transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-      className="enter flex items-center gap-2.5"
+      transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+      className="flex items-center gap-2.5"
       role="status"
     >
       <div className="bg-card inline-flex max-w-full items-center gap-2.5 rounded-full border py-1.5 pr-2 pl-3 text-meta shadow-e1">

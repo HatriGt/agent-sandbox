@@ -663,7 +663,7 @@ export function Thread({
 
             {loadingTrace && <ThreadSkeleton withTask={!!box.task} />}
 
-            <AnimatePresence>
+            <AnimatePresence mode="wait" initial={false}>
               {sleeping && !wake ? (
                 <SleepingCard key="sleeping" onWake={wakeNow} />
               ) : (
@@ -692,6 +692,7 @@ export function Thread({
                 <div key={key} data-turn={key} className="mt-5">
                   <YouItem
                     text={g.text}
+                    at={g.at}
                     onRevert={
                       canRevertNow && revertable.has(msgIndex)
                         ? () => setRevertAsk({ message: msgIndex, discarded: groups.filter((x) => x.kind === "you" || x.kind === "asked").length + 1 - (msgIndex - 1) })
@@ -714,7 +715,7 @@ export function Thread({
                   <PlanCard board={g.board} live={runState === "running"} />
                 </div>
               ) : (
-                <SayItem key={key} text={g.text} live={liveHere} label={opensAgent} />
+                <SayItem key={key} text={g.text} live={liveHere} label={opensAgent} at={g.at} />
               );
             })}
 
@@ -726,27 +727,38 @@ export function Thread({
 
             {showQuestion && <QuestionCard question={question!} onAnswer={answer} busy={answering} />}
 
-            {pendingReplies.map((r, i) => (
-              <YouItem key={`reply-${i}`} text={r} />
-            ))}
+            <AnimatePresence initial={false}>
+              {pendingReplies.map((r, i) => (
+                <Rise key={`reply-${i}`} still={still}>
+                  <YouItem text={r} />
+                </Rise>
+              ))}
+            </AnimatePresence>
             {/* A follow-up on a finished run: the box still reports `done` for a few seconds until
                 the server resumes the session. That gap must read as "delivering", never as the old
                 "Completed" receipt sitting under the message you just sent. */}
             {working && <WorkingIndicator label={working.label} detail={working.detail} />}
 
-            {queuedItems.map((q) => (
-              <QueuedItem
-                key={q.id}
-                text={q.text}
-                onCancel={() => cancelQueued(q.id)}
-                onSendNow={runState === "running" && !sleeping ? () => sendQueuedNow(q.id) : undefined}
-                sending={sendingNow === q.id}
-              />
-            ))}
+            <AnimatePresence initial={false}>
+              {queuedItems.map((q) => (
+                <Rise key={q.id} still={still}>
+                  <QueuedItem
+                    text={q.text}
+                    onCancel={() => cancelQueued(q.id)}
+                    onSendNow={runState === "running" && !sleeping ? () => sendQueuedNow(q.id) : undefined}
+                    sending={sendingNow === q.id}
+                  />
+                </Rise>
+              ))}
+            </AnimatePresence>
 
-            {asides.map((a, i) => (
-              <ObserverItem key={`aside-${i}`} question={a.question} answer={a.error ?? a.answer} />
-            ))}
+            <AnimatePresence initial={false}>
+              {asides.map((a, i) => (
+                <Rise key={`aside-${i}`} still={still}>
+                  <ObserverItem question={a.question} answer={a.error ?? a.answer} />
+                </Rise>
+              ))}
+            </AnimatePresence>
 
             {!sleeping && !loadingTrace && artifacts.length > 0 && runState !== "running" && pendingReplies.length === 0 && <ProducedFiles session={box.name} files={artifacts} />}
 
@@ -921,9 +933,9 @@ function IdleEmpty({ box, onNew, onPick }: { box: BoxView; onNew: () => void; on
             : "Nothing has run here yet. Pick a starting point, or write your own instruction below."}
         </p>
       </div>
-      <ul className="rise-in grid w-full gap-2 sm:grid-cols-2">
-        {STARTERS.map((st) => (
-          <li key={st.title}>
+      <ul className="grid w-full gap-2 sm:grid-cols-2">
+        {STARTERS.map((st, i) => (
+          <li key={st.title} className="stagger-item" style={{ "--i": i } as React.CSSProperties}>
             <button
               type="button"
               onClick={() => onPick(st.text)}
@@ -951,8 +963,8 @@ function IdleEmpty({ box, onNew, onPick }: { box: BoxView; onNew: () => void; on
 type ToolEvent = Extract<TraceEvent, { kind: "tool" }>;
 
 type TraceGroup =
-  | { kind: "say"; text: string }
-  | { kind: "you"; text: string }
+  | { kind: "say"; text: string; at?: number }
+  | { kind: "you"; text: string; at?: number }
   | { kind: "asked"; question: string; answer: string }
   | { kind: "lifecycle"; label: string; detail?: string }
   | { kind: "tools"; events: ToolEvent[] }
@@ -993,7 +1005,7 @@ function groupTrace(events: TraceEvent[]): TraceGroup[] {
       // "asked — answered" item, so the decision stays readable when scrolling back.
       const prev = out[out.length - 1];
       if (prev?.kind === "asked" && prev.answer === "") prev.answer = e.text;
-      else out.push({ kind: "you", text: e.text });
+      else out.push({ kind: "you", text: e.text, at: e.at });
     } else if (e.kind === "ask") {
       out.push({ kind: "asked", question: e.text, answer: "" });
     } else if (e.kind === "think") {
@@ -1005,7 +1017,7 @@ function groupTrace(events: TraceEvent[]): TraceGroup[] {
     } else if (e.kind === "usage") {
       // Bookkeeping, not conversation: the context meter reads it; the thread never renders it.
     } else {
-      out.push({ kind: "say", text: e.text });
+      out.push({ kind: "say", text: e.text, at: e.at });
     }
   }
   return out;
@@ -1015,3 +1027,23 @@ function sentence(s: string): string {
   return s ? s[0].toUpperCase() + s.slice(1) : s;
 }
 
+/**
+ * A transient thread row (pending reply, queued message, aside): rises into place on arrival and
+ * folds away on exit so its neighbours glide rather than jump. Transform/opacity plus a height
+ * collapse on exit only; reduced motion keeps a plain fade.
+ */
+function Rise({ still, children }: { still: boolean | null; children: React.ReactNode }) {
+  return (
+    <motion.div
+      layout={still ? false : "position"}
+      initial={still ? { opacity: 0 } : { opacity: 0, y: 10, scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={still ? { opacity: 0 } : { opacity: 0, scale: 0.98, height: 0, marginTop: 0, marginBottom: 0 }}
+      transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
+      style={{ transformOrigin: "100% 100%" }}
+      className="min-w-0"
+    >
+      {children}
+    </motion.div>
+  );
+}

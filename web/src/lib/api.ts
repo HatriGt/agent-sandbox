@@ -720,6 +720,10 @@ export const api = {
   historyRun: (id: number, signal?: AbortSignal) =>
     fetch(url("/history.json", { id: String(id) }), { headers: authHeaders, signal }).then(parse<{ run: HistoryRunDetail }>),
   /** Delete one archived run's record. */
+  historyActivity: (since: number, signal?: AbortSignal) =>
+    fetch(url("/history/activity.json", { since: String(since) }), { headers: authHeaders, signal }).then(
+      parse<{ runs: { t: number; failed: boolean }[] }>
+    ),
   deleteHistoryRun: (id: number) =>
     fetch(url("/history.json", { id: String(id) }), { method: "DELETE", headers: authHeaders }).then(parse<{ ok: true }>),
 };

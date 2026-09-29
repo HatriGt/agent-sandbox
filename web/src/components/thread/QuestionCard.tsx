@@ -90,7 +90,7 @@ export function QuestionCard({
         aria-label="Question from the agent"
         tabIndex={0}
         onKeyDown={onKey}
-        className="border-attention/50 bg-card focus-visible:ring-attention/40 attention-glow max-w-[72ch] rounded-xl border outline-none focus-visible:ring-2"
+        className="border-attention/50 bg-card focus-visible:ring-attention/40 attention-glow attention-pulse max-w-[72ch] rounded-xl border outline-none focus-visible:ring-2"
       >
         <div className="px-5 pt-4 pb-3">
           <p className="text-foreground text-lead leading-[1.5] font-medium text-balance">{parsed.title || question}</p>

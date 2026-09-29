@@ -631,7 +631,7 @@ export function Hub({
                     </li>
                   ))
                 : runs.map((b, i) => (
-                    <li key={b.name} className="rise-in" style={{ "--i": i } as React.CSSProperties}>
+                    <li key={b.name} className="stagger-item" style={{ "--i": Math.min(i, 12) } as React.CSSProperties}>
                       <button
                         type="button"
                         onClick={() => onOpen(b.name)}
@@ -660,7 +660,12 @@ export function Hub({
         )}
 
         {sessionRuns.length > 0 && (
-          <section aria-labelledby="started-here">
+          <motion.section
+            aria-labelledby="started-here"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.15, ease: [0.22, 1, 0.36, 1] }}
+          >
             <div className="flex items-baseline justify-between pb-2">
               <h2 id="started-here" className="text-foreground text-h3 font-semibold tracking-[-0.01em]">
                 Started from this browser
@@ -668,11 +673,11 @@ export function Hub({
               <span className="text-muted-foreground text-micro">this session</span>
             </div>
             <ul className="flex flex-col">
-              {sessionRuns.slice(0, 6).map((r) => {
+              {sessionRuns.slice(0, 6).map((r, i) => {
                 const box = boxes.find((b) => b.name === r.box);
                 const gone = !live.has(r.box);
                 return (
-                  <li key={r.box}>
+                  <li key={r.box} className="stagger-item" style={{ "--i": i + 2 } as React.CSSProperties}>
                     <button
                       type="button"
                       disabled={gone}
@@ -704,7 +709,7 @@ export function Hub({
             <p className="text-muted-foreground mt-3 text-micro">
               A machine's history dies with it — nothing here is stored on the server.
             </p>
-          </section>
+          </motion.section>
         )}
       </div>
     </div>

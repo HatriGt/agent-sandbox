@@ -20,9 +20,11 @@
 
 export type TraceEvent =
   | { kind: "lifecycle"; label: string; detail?: string }
-  | { kind: "say"; text: string }
-  | { kind: "you"; text: string }
-  | { kind: "tool"; name: string; arg?: string; result?: string; failed?: boolean; diff?: string }
+  /** `at` (epoch ms) comes from the formatter's ⟦at⟧ stamps; absent on logs written before them. */
+  | { kind: "say"; text: string; at?: number }
+  | { kind: "you"; text: string; at?: number }
+  /** `at` is when the call was issued; `ms` is result stamp − call stamp, once both are known. */
+  | { kind: "tool"; name: string; arg?: string; result?: string; failed?: boolean; diff?: string; at?: number; ms?: number }
   | { kind: "think"; text: string }
   /** A TodoWrite snapshot. `at` is the formatter's wall-clock ms; absent on logs written before it. */
   | { kind: "plan"; items: PlanItem[]; at?: number }
@@ -114,6 +116,9 @@ const ASK_CLOSE = "⟦/ask⟧";
 // only, like every sentinel; model text is defanged with a ZWSP so it can never forge one.
 const USAGE_RE = /^⟦usage⟧ in=(\d+) out=(\d+) ctx=(\d+)$/;
 const PLAN_LINE = /^\[( |x|>)\]\s*(.*)$/;
+// Wall-clock stamp (src/msb.ts AT_MARK): `⟦at⟧ <epoch ms>` on its own column-0 line, written just
+// before the text / tool call / result / follow-up it dates. Never an event itself.
+const AT_RE = /^⟦at⟧ (\d{10,})$/;
 
 /**
  * Parse a log into trace events. Consecutive prose lines coalesce into one `say`; indented lines
@@ -123,16 +128,26 @@ export function parseTrace(rawLog: string): TraceEvent[] {
   const lines = clean(rawLog).split("\n");
   const events: TraceEvent[] = [];
   let prose: string[] = [];
+  // The latest ⟦at⟧ stamp seen, and the one current when the pending prose run began.
+  let clock: number | undefined;
+  let proseAt: number | undefined;
 
   const flushProse = () => {
     const text = dedupeParagraphs(prose.join("\n").trim());
-    if (text) events.push({ kind: "say", text });
+    if (text) events.push(proseAt === undefined ? { kind: "say", text } : { kind: "say", text, at: proseAt });
     prose = [];
+    proseAt = undefined;
+  };
+  // Prose accumulates line by line; its time is the stamp current at its FIRST line.
+  const pushProse = (line: string) => {
+    if (!prose.length) proseAt = clock;
+    prose.push(line);
   };
 
   // While inside a ⟦you⟧…⟦/you⟧ block we collect the user's message verbatim, so agent prose that
   // follows the close marker is never merged into the user's bubble.
   let you: string[] | null = null;
+  let youAt: number | undefined;
   // Same shape for a thinking block and a plan block.
   let think: string[] | null = null;
   let plan: string[] | null = null;
@@ -223,6 +238,13 @@ export function parseTrace(rawLog: string): TraceEvent[] {
       target = null;
       continue;
     }
+    // A stamp only moves the clock: it neither flushes prose nor ends a result block, so a stamp
+    // between two text blocks or between a call and its result changes nothing about the grouping.
+    const stamp = line.match(AT_RE);
+    if (stamp) {
+      clock = Number(stamp[1]);
+      continue;
+    }
     const usage = line.match(USAGE_RE);
     if (usage) {
       flushProse();
@@ -248,7 +270,8 @@ export function parseTrace(rawLog: string): TraceEvent[] {
     }
     if (you !== null) {
       if (line === YOU_CLOSE) {
-        events.push({ kind: "you", text: you.join("\n").trim() });
+        const text = you.join("\n").trim();
+        events.push(youAt === undefined ? { kind: "you", text } : { kind: "you", text, at: youAt });
         you = null;
       } else {
         you.push(line);
@@ -258,6 +281,7 @@ export function parseTrace(rawLog: string): TraceEvent[] {
     if (line === YOU_OPEN) {
       flushProse();
       you = [];
+      youAt = clock;
       continue;
     }
 
@@ -282,6 +306,7 @@ export function parseTrace(rawLog: string): TraceEvent[] {
       const id = arg.match(TOOL_ID_RE);
       if (id) arg = arg.replace(TOOL_ID_RE, " ").trim();
       const ev: Extract<TraceEvent, { kind: "tool" }> = { kind: "tool", name: tool[1], arg: arg || undefined };
+      if (clock !== undefined) ev.at = clock;
       events.push(ev);
       if (id) byId.set(id[1], ev);
       target = null;
@@ -309,8 +334,12 @@ export function parseTrace(rawLog: string): TraceEvent[] {
         target = last?.kind === "tool" ? last : null;
       }
       if (!target) {
-        prose.push(line);
+        pushProse(line);
         continue;
+      }
+      // The first line of a result dates its arrival: duration = that stamp − the call's stamp.
+      if (target.result === undefined && target.at !== undefined && clock !== undefined && clock >= target.at) {
+        target.ms = clock - target.at;
       }
       // The formatter prefixes an errored tool_result's first line with the error sentinel. Strip it
       // and flag the call, so the UI can show the failure instead of printing a sentinel at the user.
@@ -323,13 +352,13 @@ export function parseTrace(rawLog: string): TraceEvent[] {
     }
 
     target = null;
-    prose.push(line);
+    pushProse(line);
   }
   // A ⟦you⟧ block still open at the end (log tail cut mid-message, or the close marker scrolled off):
   // emit what we have so the user's turn is never dropped.
   if (you !== null) {
     const text = you.join("\n").trim();
-    if (text) events.push({ kind: "you", text });
+    if (text) events.push(youAt === undefined ? { kind: "you", text } : { kind: "you", text, at: youAt });
   }
   flushProse();
   return dedupe(events).filter((e) => !isMechanism(e));

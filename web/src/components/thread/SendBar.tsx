@@ -1,7 +1,7 @@
 import * as React from "react";
 import { readDraft, writeDraft } from "@/lib/draft";
 import { ArrowUp, AtSign, Check as CheckIcon, Clock, ImagePlus, Loader2, MessageCircleQuestion, Terminal, X } from "lucide-react";
-import { motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { ATTACHMENTS_DIR } from "@/lib/session-context";
 import { Lightbox } from "@/components/ui/lightbox";
 import { FileMark } from "@/lib/fileIcon";
@@ -163,6 +163,9 @@ export function SendBar({
 
   const effective: Mode = canSide ? mode : "agent";
   const toAgent = effective === "agent";
+  const still = useReducedMotion();
+  // One slot, four faces: the icon morphs between them rather than swapping.
+  const sendIcon = sending ? "sending" : sent ? "sent" : busy && toAgent ? "queue" : "send";
 
   const updateMention = (next: string) => {
     const el = textarea();
@@ -340,7 +343,7 @@ export function SendBar({
           }}
           isLoading={sending}
           className={cn(
-            "bg-card raised rounded-xl p-2 transition-[border-color,box-shadow] duration-300",
+            "bg-card raised composer-glow rounded-xl p-2",
             toAgent ? "border-line-strong" : "border-border border-dashed",
             sleeping && "border-sleep/50",
             dragOver && "border-live ring-live/40 ring-2",
@@ -362,8 +365,9 @@ export function SendBar({
         >
           {images.length > 0 && (
             <div className="flex flex-wrap gap-2 px-2 pt-1.5" onClick={(e) => e.stopPropagation()}>
+              <AnimatePresence initial={false} mode="popLayout">
               {images.map((img) => (
-                <span key={img.id} className="enter group relative block size-16 overflow-hidden rounded-md border" title={img.name}>
+                <motion.span key={img.id} {...chipMotion(still)} className="group relative block size-16 overflow-hidden rounded-md border" title={img.name}>
                   <button type="button" onClick={() => setPreview(img)} aria-label={`Preview ${img.name}`} className="block size-full cursor-zoom-in">
                     <img src={img.dataUrl} alt={img.name} className="size-full object-cover transition-transform duration-200 group-hover:scale-105" />
                   </button>
@@ -376,8 +380,9 @@ export function SendBar({
                   >
                     <X className="size-3" />
                   </button>
-                </span>
+                </motion.span>
               ))}
+              </AnimatePresence>
             </div>
           )}
           {skill && (
@@ -390,11 +395,12 @@ export function SendBar({
           </label>
           {files.length > 0 && (
             <div className="flex flex-wrap gap-1.5 px-2 pt-1.5" onClick={(e) => e.stopPropagation()}>
+              <AnimatePresence initial={false} mode="popLayout">
               {files.map((f) => {
                 const base = f.slice(f.lastIndexOf("/") + 1);
                 const dir = f.slice(0, Math.max(0, f.lastIndexOf("/")));
                 return (
-                  <span key={f} className="bg-muted text-foreground enter inline-flex h-7 max-w-full items-center gap-1.5 rounded-md pl-2 pr-1 text-micro" title={f}>
+                  <motion.span key={f} {...chipMotion(still)} className="bg-muted text-foreground inline-flex h-7 max-w-full items-center gap-1.5 rounded-md pl-2 pr-1 text-micro" title={f}>
                     <FileMark path={f} />
                     <span className="font-mono font-medium">{base}</span>
                     {dir && <span className="text-muted-foreground hidden truncate font-mono sm:inline">{dir}</span>}
@@ -406,9 +412,10 @@ export function SendBar({
                     >
                       <X className="size-3" />
                     </button>
-                  </span>
+                  </motion.span>
                 );
               })}
+              </AnimatePresence>
             </div>
           )}
           <PromptInputTextarea
@@ -537,19 +544,20 @@ export function SendBar({
               onClick={send}
               disabled={sending || (!value.trim() && !files.length && !images.length && !skill)}
               aria-label={toAgent ? (busy ? "Queue for the agent" : "Send to the agent") : "Ask a side question"}
-              className="rounded-full transition-[opacity,transform,background-color] duration-200 disabled:opacity-35 enabled:hover:scale-105"
+              className="rounded-full transition-[opacity,scale,background-color] duration-[var(--dur-fast)] ease-[var(--ease-out-quint)] disabled:opacity-35 enabled:hover:scale-105 enabled:active:scale-90 motion-reduce:enabled:hover:scale-100 motion-reduce:enabled:active:scale-100"
             >
-              {sending ? (
-                <Loader2 className="animate-spin" />
-              ) : sent ? (
-                <motion.span key="sent" initial={{ scale: 0.4, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring", stiffness: 480, damping: 22 }} className="grid place-items-center">
-                  <CheckIcon />
+              <AnimatePresence initial={false} mode="popLayout">
+                <motion.span
+                  key={sendIcon}
+                  initial={still ? { opacity: 0 } : { scale: 0.4, opacity: 0, rotate: sendIcon === "queue" ? -90 : 0 }}
+                  animate={{ scale: 1, opacity: 1, rotate: 0 }}
+                  exit={still ? { opacity: 0 } : { scale: 0.4, opacity: 0 }}
+                  transition={still ? { duration: 0.12 } : { type: "spring", stiffness: 520, damping: 28, mass: 0.6 }}
+                  className="grid place-items-center"
+                >
+                  {sendIcon === "sending" ? <Loader2 className="animate-spin" /> : sendIcon === "sent" ? <CheckIcon /> : sendIcon === "queue" ? <Clock /> : <ArrowUp />}
                 </motion.span>
-              ) : busy && toAgent ? (
-                <Clock />
-              ) : (
-                <ArrowUp />
-              )}
+              </AnimatePresence>
             </Button>
           </PromptInputActions>
         </PromptInput>
@@ -561,6 +569,17 @@ export function SendBar({
       </div>
     </div>
   );
+}
+
+/** Attachment chips pop in from their own centre and shrink out; reduced motion keeps only the fade. */
+function chipMotion(still: boolean | null) {
+  return {
+    layout: !still,
+    initial: still ? { opacity: 0 } : { opacity: 0, scale: 0.85 },
+    animate: { opacity: 1, scale: 1 },
+    exit: still ? { opacity: 0 } : { opacity: 0, scale: 0.85 },
+    transition: { duration: 0.18, ease: [0.22, 1, 0.36, 1] as const },
+  };
 }
 
 function ModeChip({

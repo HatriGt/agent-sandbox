@@ -1,5 +1,5 @@
 import * as React from "react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -20,6 +20,7 @@ export interface Turn {
 export function ThreadMinimap({ turns, scrollerRef }: { turns: Turn[]; scrollerRef: React.RefObject<HTMLElement | null> }) {
   const [active, setActive] = React.useState(0);
   const [hover, setHover] = React.useState<number | null>(null);
+  const still = useReducedMotion();
 
   const measure = React.useCallback(() => {
     const el = scrollerRef.current;
@@ -71,24 +72,33 @@ export function ThreadMinimap({ turns, scrollerRef }: { turns: Turn[]; scrollerR
                 onBlur={() => setHover(null)}
                 aria-label={`Jump to ${t.label}: ${t.you.slice(0, 60)}`}
                 aria-current={on ? "true" : undefined}
-                className="group no-press -my-1 flex h-4 w-10 cursor-pointer items-center"
+                className="group no-press relative -my-1 flex h-4 w-10 cursor-pointer items-center"
               >
                 <span
                   className={cn(
                     "block h-[3px] rounded-full transition-[width,background-color] duration-200",
                     t.kind === "question"
                       ? on
-                        ? "bg-attention w-7"
+                        ? "w-7 bg-transparent"
                         : hover === i
                           ? "bg-attention/80 w-6"
                           : "bg-attention/60 w-3.5 group-hover:bg-attention/80"
                       : on
-                        ? "bg-foreground w-7"
+                        ? "w-7 bg-transparent"
                         : hover === i
                           ? "bg-foreground/60 w-6"
                           : "bg-muted-foreground/40 w-3.5 group-hover:bg-foreground/60"
                   )}
                 />
+                {/* The "you are here" marker is one element that glides between bars as you scroll. */}
+                {on && (
+                  <motion.span
+                    layoutId="minimap-active"
+                    transition={still ? { duration: 0 } : { type: "spring", stiffness: 520, damping: 40, mass: 0.7 }}
+                    className={cn("absolute left-0 top-1/2 -mt-[1.5px] block h-[3px] w-7 rounded-full", t.kind === "question" ? "bg-attention" : "bg-foreground")}
+                    aria-hidden
+                  />
+                )}
               </button>
               <AnimatePresence>
                 {hover === i && (
