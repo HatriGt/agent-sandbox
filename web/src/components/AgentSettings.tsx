@@ -45,7 +45,7 @@ export function AgentSettings() {
   if (!prefs) return null;
 
   return (
-    <section aria-labelledby="agent-h">
+    <section aria-labelledby="agent-h" className="scroll-mt-6">
       <h2 id="agent-h" className="text-foreground mb-1 flex items-center gap-2 text-h3 font-semibold tracking-[-0.01em]">
         Coding agent
         <Swap state={saved} className="inline-flex" y={3}>

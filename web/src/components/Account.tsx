@@ -8,6 +8,7 @@ import { isVisible } from "@/lib/format";
 import { Capacity } from "@/components/Capacity";
 import { Button } from "@/components/ui/button";
 import { Collapse } from "@/components/ui/collapse";
+import { SectionNav } from "@/components/ui/section-nav";
 import { Swap } from "@/components/ui/swap";
 import { ApiKeys } from "@/components/ApiKeys";
 import { NotifySettings, SaveButton } from "@/components/NotifySettings";
@@ -69,6 +70,7 @@ function Hint({ show, tone = "muted", children }: { show: boolean; tone?: "muted
 export function Account({ onBack, onConnect, onAdmin }: { onBack: () => void; onConnect: () => void; onAdmin: () => void }) {
   const me = getMe();
   const user = me?.kind === "user" ? me : null;
+  const scrollRef = React.useRef<HTMLDivElement>(null);
   const [name, setName] = React.useState(user?.name ?? "");
   const [email, setEmail] = React.useState(user?.email ?? "");
   const [saving, setSaving] = React.useState(false);
@@ -129,8 +131,15 @@ export function Account({ onBack, onConnect, onAdmin }: { onBack: () => void; on
   };
 
   return (
-    <div className="h-full min-w-0 overflow-y-auto">
-      <div className="mx-auto max-w-4xl px-5 py-6 md:px-8 md:py-8">
+    <div ref={scrollRef} className="h-full min-w-0 overflow-y-auto">
+      <div className="mx-auto max-w-4xl px-5 py-6 md:px-8 md:py-8 xl:max-w-5xl xl:grid xl:grid-cols-[minmax(0,1fr)_10rem] xl:gap-x-12">
+        {/* Wide screens: a sticky index of the sections, following the scroll. */}
+        <div className="hidden xl:col-start-2 xl:row-start-1 xl:row-span-2 xl:block">
+          <div className="sticky top-8 pt-[4.25rem]">
+            <SectionNav scrollRef={scrollRef} />
+          </div>
+        </div>
+        <div className="xl:col-start-1 xl:row-start-1">
         <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2 mb-3 md:hidden">
           <ArrowLeft className="size-4" />
           Machines
@@ -139,8 +148,10 @@ export function Account({ onBack, onConnect, onAdmin }: { onBack: () => void; on
           <div>
             <h1 className="text-foreground font-serif text-h1 font-normal tracking-[-0.01em]">Account</h1>
             <p className="text-muted-foreground mt-0.5 text-meta">
-              {user ? `@${user.login}` : "Operator"} · {user?.role === "admin" || me?.kind === "operator" ? "admin" : "member"} ·{" "}
-              {inUse !== null && maxBoxes ? `${inUse} of ${maxBoxes} machines in use` : `up to ${maxBoxes ?? "∞"} machines at once`}
+              {user ? `@${user.login}` : "Operator"} · {user?.role === "admin" || me?.kind === "operator" ? "admin" : "member"}
+              {!(user && user.mode === "saas" && (user.plan === "trial" || user.plan === "pro")) && (
+                <> · {inUse !== null && maxBoxes ? `${inUse} of ${maxBoxes} machines in use` : `up to ${maxBoxes ?? "∞"} machines at once`}</>
+              )}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -156,10 +167,11 @@ export function Account({ onBack, onConnect, onAdmin }: { onBack: () => void; on
             </Button>
           </div>
         </header>
+        </div>
 
-        <div className="flex flex-col gap-10">
+        <div className="flex flex-col gap-10 xl:col-start-1 xl:row-start-2">
           {user && user.mode === "saas" && (user.plan === "trial" || user.plan === "pro") && (
-            <section aria-labelledby="plan-h" className={cn("rounded-xl p-4", user.expired ? "bg-destructive/10" : "bg-card raised")}>
+            <section aria-labelledby="plan-h" className={cn("scroll-mt-6 rounded-xl p-4", user.expired ? "bg-destructive/10" : "bg-card raised")}>
               <h2 id="plan-h" className="text-foreground text-h3 font-semibold tracking-[-0.01em]">
                 {user.plan === "pro" ? "Pro" : user.expired ? "Trial ended" : "Free trial"}
               </h2>
@@ -196,7 +208,7 @@ export function Account({ onBack, onConnect, onAdmin }: { onBack: () => void; on
             </section>
           )}
           {user && (
-            <section aria-labelledby="profile-h">
+            <section aria-labelledby="profile-h" className="scroll-mt-6">
               <h2 id="profile-h" className="text-foreground mb-1 text-h3 font-semibold tracking-[-0.01em]">
                 Profile
               </h2>
@@ -223,7 +235,7 @@ export function Account({ onBack, onConnect, onAdmin }: { onBack: () => void; on
           )}
 
           {user && (
-            <section aria-labelledby="pw-h">
+            <section aria-labelledby="pw-h" className="scroll-mt-6">
               <h2 id="pw-h" className="text-foreground mb-1 text-h3 font-semibold tracking-[-0.01em]">
                 {user.hasPassword ? "Change password" : "Set a password"}
               </h2>

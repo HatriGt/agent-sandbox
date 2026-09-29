@@ -90,15 +90,17 @@ export function Accounts({ embedded = false, query = "", onCount }: { embedded?:
             </ul>
           )}
         </Swap>
-        <div className="bg-muted/40 flex items-center justify-between gap-3 border-t px-4 py-2.5">
-          <span className="text-muted-foreground text-micro">
-            {accounts?.length ? `${accounts.length} connected` : oauth ? "Sign in or paste a token" : "Paste a personal access token"}
-          </span>
-          <Button size="sm" variant="outline" onClick={() => setAdding(true)}>
-            <Plus />
-            Add account
-          </Button>
-        </div>
+        {state !== "empty" && (
+          <div className="bg-muted/40 flex items-center justify-between gap-3 border-t px-4 py-2.5">
+            <span className="text-muted-foreground text-micro">
+              {accounts?.length ? `${accounts.length} connected` : oauth ? "Sign in or paste a token" : "Paste a personal access token"}
+            </span>
+            <Button size="sm" variant="outline" onClick={() => setAdding(true)}>
+              <Plus />
+              Add account
+            </Button>
+          </div>
+        )}
       </div>
 
       <Dialog open={adding} onOpenChange={setAdding}>

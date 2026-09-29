@@ -48,7 +48,7 @@ export function Sessions() {
   const others = (rows ?? []).filter((s) => !s.current);
   const state = rows === null ? "loading" : rows.length === 0 ? "empty" : "list";
   return (
-    <section aria-labelledby="sess-h">
+    <section aria-labelledby="sess-h" className="scroll-mt-6">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <h2 id="sess-h" className="text-foreground text-h3 font-semibold tracking-[-0.01em]">
@@ -64,7 +64,7 @@ export function Sessions() {
           )}
         </AnimatePresence>
       </div>
-      <div className="rounded-xl border">
+      <div className="bg-card rounded-xl border shadow-e1">
         <Swap state={state}>
           {state === "loading" ? (
             <ListSkeleton rows={2} />

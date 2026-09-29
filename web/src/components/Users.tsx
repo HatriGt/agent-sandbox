@@ -1,6 +1,6 @@
 import * as React from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { KeyRound, Plus, Shield, Trash2, UserRound, Users as UsersIcon } from "lucide-react";
+import { Crown, Ellipsis, KeyRound, Plus, RotateCcw, Shield, ShieldOff, Trash2, UserRound, Users as UsersIcon } from "lucide-react";
 import { toast } from "sonner";
 import { api, type UserRow } from "@/lib/api";
 import { fmtAgo } from "@/lib/format";
@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { ArmButton } from "@/components/ui/arm-button";
 import { StaggerItem, Swap } from "@/components/ui/swap";
 import { FreshTokenCard, ListEmpty, ListSkeleton } from "@/components/ApiKeys";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, MenuHint } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 /**
@@ -115,7 +117,7 @@ export function Users() {
         )}
       </AnimatePresence>
 
-      <div className="divide-y rounded-xl border">
+      <div className="bg-card divide-y rounded-xl border shadow-e1">
         <Swap state={state}>
           {state === "loading" ? (
             <ListSkeleton rows={3} />
@@ -139,45 +141,82 @@ export function Users() {
                   const isMe = u.id === myId;
                   return (
                     <motion.li key={u.id} layout exit={{ opacity: 0, height: 0, transition: { duration: 0.2, ease: [0.22, 1, 0.36, 1] } }} className="overflow-hidden">
-                      <StaggerItem index={i} className="flex items-center gap-3 px-3.5 py-2.5">
-                        {u.role === "admin" ? <Shield className="text-live size-4 shrink-0" aria-label="Admin" /> : <UserRound className="text-muted-foreground size-4 shrink-0" aria-hidden />}
-                        <span className="text-foreground min-w-0 flex-1 truncate text-meta font-medium">
-                          {u.login}
-                          {isMe && <span className="text-faint ml-1.5 text-micro">you</span>}
+                      <StaggerItem index={i} className="group flex items-center gap-3 px-3.5 py-2.5">
+                        <span
+                          className={cn("grid size-8 shrink-0 place-items-center rounded-full border", u.role === "admin" ? "bg-live/8 border-live/15 text-live" : "bg-muted text-muted-foreground border-transparent")}
+                          aria-label={u.role === "admin" ? "Admin" : undefined}
+                        >
+                          {u.role === "admin" ? <Shield className="size-3.5" aria-hidden /> : <UserRound className="size-3.5" aria-hidden />}
                         </span>
-                        <span className={cn("shrink-0 rounded-full px-1.5 py-0.5 text-micro font-medium transition-colors duration-200", plan.cls)}>{plan.label}</span>
-                        <span className="text-faint hidden shrink-0 text-micro sm:inline">
-                          {u.boxes} {u.boxes === 1 ? "machine" : "machines"} · {u.keys} {u.keys === 1 ? "key" : "keys"}
-                          {u.github ? " · GitHub linked" : ""}
-                          {u.lastSeenAt && Number.isFinite(Date.parse(u.lastSeenAt)) ? ` · seen ${fmtAgo(Date.parse(u.lastSeenAt) / 1000)}` : ""}
+                        <span className="flex min-w-0 flex-1 flex-col">
+                          <span className="text-foreground flex min-w-0 items-center gap-1.5 text-meta font-medium">
+                            <span className="truncate">{u.login}</span>
+                            {isMe && <span className="text-faint text-micro font-normal">you</span>}
+                            {u.role === "admin" && <span className="text-live text-micro font-normal">admin</span>}
+                          </span>
+                          <span className="text-faint truncate text-micro">
+                            {u.boxes} {u.boxes === 1 ? "machine" : "machines"} · {u.keys} {u.keys === 1 ? "key" : "keys"}
+                            {u.github ? " · GitHub linked" : ""}
+                            {u.lastSeenAt && Number.isFinite(Date.parse(u.lastSeenAt)) ? ` · seen ${fmtAgo(Date.parse(u.lastSeenAt) / 1000)}` : ""}
+                          </span>
                         </span>
-                        {u.plan !== "pro" ? (
-                          <Button size="sm" variant="ghost" onClick={() => setPlan(u, "pro")} className="text-muted-foreground" title="Unlimited time">
-                            Make pro
-                          </Button>
-                        ) : (
-                          <Button size="sm" variant="ghost" onClick={() => setPlan(u, "trial", 7)} className="text-muted-foreground" title="Back to a 7-day trial">
-                            Trial
-                          </Button>
-                        )}
-                        {u.plan === "trial" && (
-                          <Button size="sm" variant="ghost" onClick={() => setPlan(u, "trial", 7)} className="text-muted-foreground" title="Give 7 more days">
-                            +7d
-                          </Button>
-                        )}
-                        <Button size="sm" variant="ghost" onClick={() => issue(u)} className="text-muted-foreground" title="Issue a new access token">
-                          <KeyRound />
-                          Token
-                        </Button>
-                        <ArmButton
-                          size="sm"
-                          variant="ghost"
-                          label={u.role === "admin" ? "Demote" : "Admin"}
-                          armedLabel={u.role === "admin" ? "Demote to user?" : "Make admin?"}
-                          onConfirm={() => toggleRole(u)}
-                          disabled={isMe}
-                          className="text-muted-foreground"
-                        />
+                        <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-micro font-medium transition-colors duration-200", plan.cls)}>{plan.label}</span>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button size="sm" variant="ghost" onClick={() => issue(u)} className="text-muted-foreground hidden sm:inline-flex">
+                              <KeyRound />
+                              Token
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Issue a fresh access token — shown once</TooltipContent>
+                        </Tooltip>
+                        <DropdownMenu>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <DropdownMenuTrigger asChild>
+                                <Button size="icon-sm" variant="ghost" aria-label={`Actions for ${u.login}`} className="text-muted-foreground">
+                                  <Ellipsis />
+                                </Button>
+                              </DropdownMenuTrigger>
+                            </TooltipTrigger>
+                            <TooltipContent>Plan and role</TooltipContent>
+                          </Tooltip>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuLabel>Plan</DropdownMenuLabel>
+                            {u.plan !== "pro" && (
+                              <DropdownMenuItem onSelect={() => void setPlan(u, "pro")}>
+                                <Crown />
+                                Make pro
+                                <MenuHint>unlimited time</MenuHint>
+                              </DropdownMenuItem>
+                            )}
+                            {u.plan === "trial" && (
+                              <DropdownMenuItem onSelect={() => void setPlan(u, "trial", 7)}>
+                                <RotateCcw />
+                                Extend trial
+                                <MenuHint>+7 days</MenuHint>
+                              </DropdownMenuItem>
+                            )}
+                            {u.plan === "pro" && (
+                              <DropdownMenuItem onSelect={() => void setPlan(u, "trial", 7)}>
+                                <RotateCcw />
+                                Back to trial
+                                <MenuHint>7 days</MenuHint>
+                              </DropdownMenuItem>
+                            )}
+                            <DropdownMenuItem onSelect={() => void issue(u)} className="sm:hidden">
+                              <KeyRound />
+                              Issue a token
+                            </DropdownMenuItem>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuLabel>Role</DropdownMenuLabel>
+                            <DropdownMenuItem disabled={isMe} onSelect={() => void toggleRole(u)}>
+                              {u.role === "admin" ? <ShieldOff /> : <Shield />}
+                              {u.role === "admin" ? "Demote to member" : "Make admin"}
+                              {isMe && <MenuHint>not yourself</MenuHint>}
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                         <ArmButton size="icon-sm" variant="ghost" icon={<Trash2 />} label={`Remove ${u.login}`} armedLabel="Confirm remove" onConfirm={() => remove(u)} disabled={isMe} className="text-muted-foreground hover:text-destructive" />
                       </StaggerItem>
                     </motion.li>

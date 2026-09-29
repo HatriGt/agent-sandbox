@@ -466,14 +466,14 @@ function MachineRow({
               <TooltipContent>{deadlineText}</TooltipContent>
             </Tooltip>
           ) : (
-            <span className="stamp text-faint">{box.kept ? "kept · until destroyed" : state === "sleeping" ? "asleep" : "—"}</span>
+            <span className="stamp text-faint whitespace-nowrap">{box.kept ? "kept" : state === "sleeping" ? "asleep" : "—"}</span>
           )}
         </div>
 
         {/* Trailing cell: destroy (lifted above the row button) + a cue for what a click does. */}
         <div className="relative flex items-center gap-1.5 md:justify-end">
           {waiting ? (
-            <span className="text-attention-text pointer-events-none mr-auto text-meta font-semibold md:order-last md:mr-0">
+            <span className="text-attention-text pointer-events-none mr-auto text-meta font-semibold whitespace-nowrap md:order-last md:mr-0">
               Answer →
             </span>
           ) : (

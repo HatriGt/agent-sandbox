@@ -151,7 +151,7 @@ export function ApiKeys() {
   const state = keys === null ? "loading" : active.length === 0 ? "empty" : "list";
 
   return (
-    <section aria-labelledby="keys-h">
+    <section aria-labelledby="keys-h" className="scroll-mt-6">
       <div className="mb-4 flex items-center gap-2">
         <h2 id="keys-h" className="text-foreground text-h3 font-semibold tracking-[-0.01em]">
           API keys
@@ -175,7 +175,7 @@ export function ApiKeys() {
         )}
       </AnimatePresence>
 
-      <div className="divide-y rounded-xl border">
+      <div className="bg-card divide-y rounded-xl border shadow-e1">
         <Swap state={state}>
           {state === "loading" ? (
             <ListSkeleton rows={2} />

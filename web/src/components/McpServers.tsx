@@ -122,7 +122,7 @@ export function McpServers() {
       {view === "json" ? (
         <JsonView config={config} onSave={(json) => mutate({ action: "replace", json }, "Configuration saved")} />
       ) : (
-        <div className="bg-card overflow-hidden rounded-xl border">
+        <div className="bg-card overflow-hidden rounded-xl border shadow-e1">
           <Collapse open={open === "__new__"}>
             <div className="bg-muted/40 border-b px-4 py-4">
               <ServerEditor onMutate={mutate} onDone={() => setOpen(null)} />
@@ -132,9 +132,11 @@ export function McpServers() {
             <ul className="divide-y">
               {[0, 1, 2, 3].map((i) => (
                 <li key={i} className="flex items-center gap-3 px-4 py-3">
-                  <Bar className="size-4 rounded" />
-                  <Bar className="h-3 w-28" />
-                  <Bar className="h-2.5 w-64" />
+                  <Bar className="size-9 rounded-lg" />
+                  <div className="flex flex-col gap-2">
+                    <Bar className="h-3 w-28" />
+                    <Bar className="h-2.5 w-64" />
+                  </div>
                   <Bar className="ml-auto h-5 w-9 rounded-full" />
                 </li>
               ))}
@@ -198,22 +200,28 @@ function ServerRow({ server: s, open, onToggleOpen, onMutate }: { server: McpSer
       .finally(() => setTesting(false));
   };
   return (
-    <div className={cn("group px-4 py-2.5 transition-colors", open ? "bg-muted/40" : "hover:bg-muted/40")}>
+    <div className={cn("group px-4 py-2.5 transition-colors", open ? "bg-muted/40" : "hover:bg-muted/40", !s.enabled && !open && "bg-muted/20")}>
     <div className="flex items-center gap-3">
       <button type="button" onClick={onToggleOpen} aria-expanded={open} className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 text-left">
-        <BrandGlyph hint={`${s.name} ${target}`} transport={s.type} className={cn(!s.enabled && "opacity-40 grayscale")} />
-        <span className={cn("shrink-0 text-body font-medium", s.enabled ? "text-foreground" : "text-muted-foreground")}>{s.name}</span>
-        <span className="label text-muted-foreground shrink-0 rounded border px-1 py-px">{s.type}</span>
-        {s.tokenExpired && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="label bg-destructive/10 text-destructive shrink-0 rounded px-1 py-px">token expired</span>
-            </TooltipTrigger>
-            <TooltipContent>The stored token expired {new Date(s.tokenExpiresAt!).toLocaleString()} — the agent silently loses this server. Paste a fresh one.</TooltipContent>
-          </Tooltip>
-        )}
-        <span className="stamp text-muted-foreground min-w-0 flex-1 truncate" title={target}>
-          {target}
+        <span className={cn("bg-card grid size-9 shrink-0 place-items-center rounded-lg border transition-colors", open && "border-line-strong", !s.enabled && "opacity-50 grayscale")} aria-hidden>
+          <BrandGlyph hint={`${s.name} ${target}`} transport={s.type} className="size-[18px]" />
+        </span>
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="flex min-w-0 items-center gap-2">
+            <span className={cn("truncate text-body font-medium", s.enabled ? "text-foreground" : "text-muted-foreground")}>{s.name}</span>
+            <span className="label text-muted-foreground shrink-0 rounded border px-1 py-px">{s.type}</span>
+            {s.tokenExpired && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="label bg-destructive/10 text-destructive shrink-0 rounded px-1 py-px">token expired</span>
+                </TooltipTrigger>
+                <TooltipContent>The stored token expired {new Date(s.tokenExpiresAt!).toLocaleString()} — the agent silently loses this server. Paste a fresh one.</TooltipContent>
+              </Tooltip>
+            )}
+          </span>
+          <span className="stamp text-muted-foreground min-w-0 truncate" title={target}>
+            {target}
+          </span>
         </span>
         {(envN > 0 || hdrN > 0) && (
           <span className="stamp text-muted-foreground hidden shrink-0 items-center gap-1 sm:inline-flex">
@@ -223,7 +231,7 @@ function ServerRow({ server: s, open, onToggleOpen, onMutate }: { server: McpSer
             {hdrN > 0 && `${hdrN} hdr`}
           </span>
         )}
-        <ChevronDown className={cn("text-muted-foreground size-3.5 shrink-0 transition-transform", open && "rotate-180")} aria-hidden />
+        <ChevronDown className={cn("text-muted-foreground size-3.5 shrink-0 transition-transform duration-200", open && "rotate-180")} aria-hidden />
       </button>
       <Tooltip>
         <TooltipTrigger asChild>
@@ -242,7 +250,7 @@ function ServerRow({ server: s, open, onToggleOpen, onMutate }: { server: McpSer
     </div>
     <Collapse open={health !== null}>
       {health && (
-        <p role="status" className={cn("flex items-start gap-1.5 pt-1.5 pl-7 text-micro", health.ok ? "text-live" : "text-destructive")}>
+        <p role="status" className={cn("flex items-start gap-1.5 pt-1.5 pl-12 text-micro", health.ok ? "text-live" : "text-destructive")}>
           {health.ok ? <Check className="mt-px size-3 shrink-0" aria-hidden /> : <X className="mt-px size-3 shrink-0" aria-hidden />}
           <span className="min-w-0">{health.detail}</span>
         </p>

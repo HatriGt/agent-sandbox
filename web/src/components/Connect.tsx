@@ -134,7 +134,7 @@ export function Connect({ onDone, onBack, welcome = false }: { onDone: () => voi
           <TabPanel value={client} order={CLIENT_ORDER} idBase="connect-client">
             <p className="text-muted-foreground mb-2 text-meta">{c.how}</p>
             <div className="relative">
-              <pre className={cn("bg-card raised overflow-x-auto rounded-xl p-4 pr-16 font-mono text-code leading-relaxed", !key && "text-muted-foreground")}>{snippet}</pre>
+              <pre className={cn("bg-card raised rounded-xl p-4 pr-16 font-mono text-code leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere]", !key && "text-muted-foreground")}>{snippet}</pre>
               <CopyButton className="bg-card absolute top-2.5 right-2.5 shadow-e1" copied={copied === "snippet"} onClick={() => void copy("snippet", snippet)} disabled={!key} />
             </div>
           </TabPanel>

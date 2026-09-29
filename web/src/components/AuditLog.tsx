@@ -89,14 +89,14 @@ export function AuditLog() {
   React.useEffect(() => void load(), [load]);
 
   return (
-    <section aria-labelledby="audit-h">
+    <section aria-labelledby="audit-h" className="scroll-mt-6">
       <div className="mb-4 flex items-center gap-2">
         <h2 id="audit-h" className="text-foreground text-h3 font-semibold tracking-[-0.01em]">
           Recent activity
         </h2>
         <span className="text-muted-foreground text-meta">state-changing actions · kept 90 days</span>
       </div>
-      <div className="rounded-xl border">
+      <div className="bg-card rounded-xl border shadow-e1">
         <Swap state={rows === null ? "loading" : rows.length === 0 ? "empty" : "list"}>
           {rows === null ? (
             <ListSkeleton rows={3} />

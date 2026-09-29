@@ -303,6 +303,11 @@ function HistoryRow({
               </span>
               {duration && <span className="stamp">{duration}</span>}
               {run.archivedAt > 0 && <span>archived {fmtAgo(Math.round(run.archivedAt / 1000))}</span>}
+              {run.headline && run.task && run.headline.trim() !== titleOf(run) && (
+                <span className="text-faint hidden min-w-0 truncate sm:inline" title={run.headline}>
+                  {run.headline.replace(/\s*verified\s*$/i, "")}
+                </span>
+              )}
             </span>
           </span>
 

@@ -642,7 +642,7 @@ export function Hub({
               </div>
             )}
             <PromptInputActions className="relative justify-between pt-1">
-              <div ref={pickerRef} className="relative" onClick={(e) => e.stopPropagation()}>
+              <div ref={pickerRef} className="relative flex flex-wrap items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
                 <button
                   type="button"
                   onClick={() => setShowRepo((v) => !v)}

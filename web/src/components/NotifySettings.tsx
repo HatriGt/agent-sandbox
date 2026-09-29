@@ -110,7 +110,7 @@ export function NotifySettings() {
   };
 
   return (
-    <section aria-labelledby="notify-h">
+    <section aria-labelledby="notify-h" className="scroll-mt-6">
       <h2 id="notify-h" className="text-foreground mb-1 text-h3 font-semibold tracking-[-0.01em]">
         Notifications
       </h2>

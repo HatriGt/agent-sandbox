@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowLeft, Check, ChevronRight, Download, Eye, FileUp, Github, Loader2, Maximize2, Minimize2, PenLine, Plus, Search, Trash2, Upload, X } from "lucide-react";
+import { ArrowLeft, Check, ChevronRight, Download, Eye, FileUp, Github, Loader2, Maximize2, Minimize2, PenLine, Plus, Search, Trash2, Upload, X, Zap } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
 import { api, type SkillView } from "@/lib/api";
@@ -10,6 +10,8 @@ import { FileIcon, FolderIcon } from "@/lib/vscodeIcons";
 import { AnimatedTabs } from "@/components/ui/animated-tabs";
 import { Button } from "@/components/ui/button";
 import { Collapse } from "@/components/ui/collapse";
+import { Switch } from "@/components/ui/switch";
+import { StaggerItem } from "@/components/ui/swap";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Markdown } from "@/components/ui/markdown";
@@ -194,10 +196,13 @@ export function SkillsPage({ onBack }: { onBack: () => void }) {
         {skills === null ? (
           <div className="overflow-hidden rounded-xl border">
             {[0, 1, 2].map((i) => (
-              <div key={i} className="flex items-center gap-4 border-b px-4 py-3.5 last:border-b-0">
-                <Bar className="h-3 w-32" />
-                <Bar className="h-3 flex-1" />
-                <Bar className="h-3 w-16" />
+              <div key={i} className="flex items-center gap-4 border-b px-4 py-3 last:border-b-0">
+                <Bar className="size-9 rounded-lg" />
+                <div className="flex flex-1 flex-col gap-2">
+                  <Bar className="h-3 w-32" />
+                  <Bar className="h-2.5 w-[60%]" />
+                </div>
+                <Bar className="h-3 w-12" />
                 <Bar className="h-5 w-9 rounded-full" />
               </div>
             ))}
@@ -212,6 +217,7 @@ export function SkillsPage({ onBack }: { onBack: () => void }) {
         ) : (
           <SkillTable skills={visible} onOpen={(s) => setEditing({ initial: s })} onMutate={mutate} />
         )}
+        {skills && skills.length > 0 && skills.length < 6 && !q && <TemplateStrip existing={new Set(skills.map((s) => s.name))} onPick={(d) => setEditing({ draft: d })} />}
       </div>
 
       <RepoBrowser
@@ -235,9 +241,7 @@ export function SkillsPage({ onBack }: { onBack: () => void }) {
   );
 }
 
-/* ───────────────────────────── table ───────────────────────────── */
-
-const COLS = "md:grid-cols-[12rem_minmax(0,1fr)_6.5rem_3rem]";
+/* ───────────────────────────── list ───────────────────────────── */
 
 function SkillTable({
   skills,
@@ -249,17 +253,11 @@ function SkillTable({
   onMutate: (b: Record<string, unknown>, ok?: string) => Promise<unknown>;
 }) {
   return (
-    <div className="overflow-hidden rounded-xl border">
-      <div className={cn("label text-muted-foreground bg-muted/60 hidden items-center gap-3 border-b px-4 py-2 md:grid", COLS)}>
-        <span>Skill</span>
-        <span>When the agent uses it</span>
-        <span>Updated</span>
-        <span className="text-right">On</span>
-      </div>
+    <div className="bg-card overflow-hidden rounded-xl border shadow-e1">
       <ul className="divide-y">
         <AnimatePresence initial={false}>
-          {skills.map((s) => (
-            <SkillRow key={s.name} skill={s} onOpen={() => onOpen(s)} onMutate={onMutate} />
+          {skills.map((s, i) => (
+            <SkillRow key={s.name} index={i} skill={s} onOpen={() => onOpen(s)} onMutate={onMutate} />
           ))}
         </AnimatePresence>
       </ul>
@@ -267,30 +265,37 @@ function SkillTable({
   );
 }
 
+/**
+ * One skill: a tinted tile with its glyph, the `/name` and the "when" line, then the facts (files,
+ * last edit) and the switch. The whole row opens the editor; a chevron slides in on hover to say so.
+ */
 function SkillRow({
   skill: s,
+  index,
   onOpen,
   onMutate,
 }: {
   skill: SkillView;
+  index: number;
   onOpen: () => void;
   onMutate: (b: Record<string, unknown>, ok?: string) => Promise<unknown>;
 }) {
   const [busy, setBusy] = React.useState(false);
-  const toggle = () => {
+  const toggle = (next: boolean) => {
     setBusy(true);
-    onMutate({ action: "toggle", name: s.name, enabled: !s.enabled })
+    onMutate({ action: "toggle", name: s.name, enabled: next })
       .catch((e: unknown) => toast.error("Could not update", { description: e instanceof Error ? e.message : String(e) }))
       .finally(() => setBusy(false));
   };
+  const files = s.files?.length ?? 0;
   return (
     <motion.li
       layout="position"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, height: 0 }}
-      transition={{ duration: 0.18 }}
-      className={cn("group hover:bg-muted/50 relative grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-4 py-3 transition-colors md:gap-3", COLS)}
+      transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1], delay: Math.min(index, 8) * 0.03 }}
+      className={cn("group hover:bg-muted/50 relative flex items-center gap-3.5 px-4 py-3 transition-colors md:gap-4", !s.enabled && "bg-muted/20")}
     >
       {/* The row IS the edit action: a stretched button under the content; the switch sits above it. */}
       <button
@@ -301,37 +306,84 @@ function SkillRow({
         className="focus-visible:ring-ring absolute inset-0 cursor-pointer focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset"
       />
 
-      <span className={cn("flex min-w-0 items-center gap-2.5", !s.enabled && "opacity-50")}>
-        <SkillMark name={s.name} size={16} className="text-muted-foreground" />
-        <span className="stamp text-foreground truncate text-meta font-medium">/{s.name}</span>
-        {(s.files?.length ?? 0) > 0 && <span className="text-faint tabular shrink-0 text-micro">{s.files!.length + 1} files</span>}
+      <span
+        className={cn(
+          "grid size-9 shrink-0 place-items-center rounded-lg border transition-colors duration-200",
+          s.enabled ? "bg-live/8 border-live/15 text-live group-hover:bg-live/12" : "bg-muted text-muted-foreground border-transparent"
+        )}
+        aria-hidden
+      >
+        <SkillMark name={s.name} size={17} />
       </span>
 
-      <span className={cn("text-muted-foreground col-span-2 min-w-0 truncate text-meta md:col-span-1", !s.enabled && "opacity-60")} title={s.description}>
-        {s.description}
+      <span className={cn("flex min-w-0 flex-1 flex-col gap-0.5", !s.enabled && "opacity-60")}>
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="stamp text-foreground truncate text-meta font-medium">/{s.name}</span>
+          {files > 0 && (
+            <span className="text-muted-foreground bg-muted tabular hidden shrink-0 rounded px-1.5 py-px text-micro sm:inline">
+              {files + 1} files
+            </span>
+          )}
+        </span>
+        <span className="text-muted-foreground min-w-0 truncate text-meta" title={s.description}>
+          {s.description}
+        </span>
       </span>
 
-      <span className="text-faint stamp hidden md:block">{fmtAgo(Math.floor(s.updatedAt / 1000))}</span>
+      <span className="text-faint stamp hidden shrink-0 md:block">{fmtAgo(Math.floor(s.updatedAt / 1000))}</span>
 
-      <span className="relative col-start-2 row-start-1 flex justify-end md:col-start-auto md:row-start-auto">
+      <span className="relative flex shrink-0 items-center gap-2">
         <Tooltip>
           <TooltipTrigger asChild>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={s.enabled}
-              disabled={busy}
-              onClick={toggle}
-              className={cn("relative h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors", s.enabled ? "bg-live" : "bg-muted-foreground/40")}
-              aria-label={s.enabled ? `Disable ${s.name}` : `Enable ${s.name}`}
-            >
-              <span className={cn("bg-card absolute top-0.5 size-4 rounded-full shadow-e1 transition-[left] duration-200", s.enabled ? "left-[1.125rem]" : "left-0.5")} />
-            </button>
+            <Switch checked={s.enabled} onCheckedChange={toggle} disabled={busy} aria-label={s.enabled ? `Disable ${s.name}` : `Enable ${s.name}`} />
           </TooltipTrigger>
           <TooltipContent>{s.enabled ? "On — synced into every sandbox on its next turn" : "Off — kept, not given to the agent"}</TooltipContent>
         </Tooltip>
+        <ChevronRight
+          className="text-muted-foreground pointer-events-none hidden size-4 -translate-x-1 opacity-0 transition-[opacity,transform] duration-150 group-focus-within:translate-x-0 group-focus-within:opacity-100 group-hover:translate-x-0 group-hover:opacity-100 md:block"
+          aria-hidden
+        />
       </span>
     </motion.li>
+  );
+}
+
+/**
+ * Templates, shown under a short list: the three playbooks most teams want first. Once the list is
+ * long the user knows what a skill is and the strip steps aside.
+ */
+function TemplateStrip({ existing, onPick }: { existing: Set<string>; onPick: (d: Draft) => void }) {
+  const open = TEMPLATES.filter((t) => !existing.has(t.name));
+  if (!open.length) return null;
+  return (
+    <section aria-labelledby="tpl-h" className="mt-8">
+      <div className="mb-3 flex items-baseline gap-2">
+        <h2 id="tpl-h" className="text-foreground text-body font-semibold tracking-[-0.01em]">
+          Start from a template
+        </h2>
+        <span className="text-muted-foreground text-meta">opens in the editor — edit before it goes live</span>
+      </div>
+      <ul className="grid gap-2 sm:grid-cols-3">
+        {open.map((t, i) => (
+          <StaggerItem key={t.name} index={i}>
+            <button
+              type="button"
+              onClick={() => onPick({ name: t.name, description: t.description, content: t.content })}
+              className="group bg-card hover-raise hover:border-line-strong flex h-full w-full cursor-pointer flex-col gap-2 rounded-xl border p-3.5 text-left transition-colors"
+            >
+              <span className="flex items-center gap-2">
+                <span className="bg-muted text-muted-foreground group-hover:text-foreground grid size-7 place-items-center rounded-md transition-colors" aria-hidden>
+                  <SkillMark name={t.name} size={14} />
+                </span>
+                <span className="stamp text-foreground text-meta font-medium">/{t.name}</span>
+                <Plus className="text-muted-foreground ml-auto size-3.5 opacity-0 transition-opacity group-hover:opacity-100" aria-hidden />
+              </span>
+              <span className="text-muted-foreground text-meta leading-snug">{t.blurb}</span>
+            </button>
+          </StaggerItem>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -339,30 +391,37 @@ function SkillRow({
 
 function EmptyState({ onPick }: { onPick: (d: Draft) => void }) {
   return (
-    <div className="overflow-hidden rounded-xl border">
-      <div className="border-b px-5 py-6">
-        <p className="text-foreground text-body font-medium">No skills yet</p>
-        <p className="text-muted-foreground mt-1 max-w-lg text-meta">
-          A skill is a playbook — how you review PRs, cut a release, fix CI — written once and followed in every
-          sandbox. Start from a template or write your own.
-        </p>
+    <div className="bg-card rounded-xl border p-5 shadow-e1 sm:p-6">
+      <div className="flex items-start gap-3.5">
+        <span className="bg-live/8 text-live grid size-10 shrink-0 place-items-center rounded-lg" aria-hidden>
+          <Zap className="size-5" strokeWidth={1.75} />
+        </span>
+        <div>
+          <p className="text-foreground text-lead font-medium">No skills yet</p>
+          <p className="text-muted-foreground mt-1 max-w-lg text-meta">
+            A skill is a playbook — how you review PRs, cut a release, fix CI — written once and followed in every
+            sandbox. Start from a template or write your own.
+          </p>
+        </div>
       </div>
-      <ul className="divide-y">
-        {TEMPLATES.map((t) => (
-          <li key={t.name}>
+      <ul className="mt-5 grid gap-2 sm:grid-cols-3">
+        {TEMPLATES.map((t, i) => (
+          <StaggerItem key={t.name} index={i}>
             <button
               type="button"
               onClick={() => onPick({ name: t.name, description: t.description, content: t.content })}
-              className="group hover:bg-muted/50 flex w-full cursor-pointer items-center gap-3 px-5 py-3 text-left transition-colors"
+              className="group bg-background hover-raise hover:border-line-strong flex h-full w-full cursor-pointer flex-col gap-2 rounded-xl border p-3.5 text-left transition-colors"
             >
-              <SkillMark name={t.name} size={16} className="text-muted-foreground" />
-              <span className="stamp text-foreground w-36 shrink-0 truncate text-meta font-medium">/{t.name}</span>
-              <span className="text-muted-foreground min-w-0 flex-1 truncate text-meta">{t.blurb}</span>
-              <span className="text-live shrink-0 text-meta font-medium opacity-0 transition-opacity duration-150 group-hover:opacity-100">
-                Use template →
+              <span className="flex items-center gap-2">
+                <span className="bg-muted text-muted-foreground group-hover:text-foreground grid size-7 place-items-center rounded-md transition-colors" aria-hidden>
+                  <SkillMark name={t.name} size={14} />
+                </span>
+                <span className="stamp text-foreground text-meta font-medium">/{t.name}</span>
+                <Plus className="text-muted-foreground ml-auto size-3.5 opacity-0 transition-opacity group-hover:opacity-100" aria-hidden />
               </span>
+              <span className="text-muted-foreground text-meta leading-snug">{t.blurb}</span>
             </button>
-          </li>
+          </StaggerItem>
         ))}
       </ul>
     </div>
