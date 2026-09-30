@@ -18,6 +18,7 @@ import { Icon } from "@/components/ui/Icon";
 import { Button } from "@/components/ui/Button";
 import { Field } from "@/components/ui/Field";
 import { TextInput } from "react-native";
+import { offerPushAfterHandoff } from "@/lib/push";
 
 type Attachment = { name: string; dataUrl: string };
 const MAX_ATTACHMENTS = 8;
@@ -140,9 +141,7 @@ export default function NewTask() {
     voice.stop();
     setError(null);
     setClarify(null);
-    setPendingDelegate({
-      task: task.trim(),
-      promise: api.delegate({
+    const promise = api.delegate({
         task: task.trim(),
         repos: picked.length ? picked : undefined,
         attachments: attachments.length ? attachments : undefined,
@@ -150,7 +149,12 @@ export default function NewTask() {
         ...(verifyText.trim()
           ? { verify: verifyMode === "command" ? { command: verifyText.trim() } : { criterion: verifyText.trim() } }
           : {}),
-      }),
+      });
+    // The moment push is worth asking for: a run just started and the user is about to walk away.
+    promise.then((r) => (r.ok ? offerPushAfterHandoff() : undefined)).catch(() => {});
+    setPendingDelegate({
+      task: task.trim(),
+      promise,
       // Fleet-as-of-submit: /booting attaches the moment a NEW box (or a pool
       // box flipping pool-free -> claimed) surfaces — the web's early-attach.
       // A rejected fleet read resolves to null (NOT an empty map): an empty map

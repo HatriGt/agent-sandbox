@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 import { Platform } from "react-native";
 import { api, setUnauthorizedHandler, type AuthConfig, type Me } from "@/lib/api";
 import { loadConfig, setBearer, setServerUrl } from "@/lib/config";
+import { unregisterPush } from "@/lib/push";
 
 type AuthState = {
   ready: boolean;
@@ -128,6 +129,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const signOut = useCallback(async () => {
+    // While still authenticated: a signed-out phone must stop receiving this account's runs.
+    await unregisterPush();
     try {
       await api.logout();
     } catch {

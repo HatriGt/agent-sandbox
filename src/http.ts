@@ -32,7 +32,8 @@ import {
 import { githubAuthorizeUrl, githubExchangeCode, githubIdentity } from "./github-oauth.js";
 import { keyFromEnvOrFile, makeSecretBox } from "./secretbox.js";
 import { allBlobs, ownerKey, registerUserStoreBackend, withOwner, OPERATOR_OWNER } from "./user-store.js";
-import { detectTransitions, formatNotification, makeNotifier, type BoxRunView, type NotifyEvent } from "./notify.js";
+import { detectTransitions, formatNotification, makeNotifier, toggleFor, type BoxRunView, type NotifyEvent } from "./notify.js";
+import { buildPushMessages, deviceCount, listDeviceTokens, makeOwnerRateCap, pruneToken, registerDevice, sendExpoPush, unregisterDevice } from "./push.js";
 import { fetchPinned } from "./net-guard.js";
 import { buildDigest } from "./digest.js";
 import { archiveRun, deleteRun, getRun, listActivity, listRuns, pruneArchive, ledgerTotals, listLedger, type LedgerFilter } from "./run-archive.js";
@@ -516,7 +517,13 @@ const sendNotification = async (ev: NotifyEvent): Promise<void> => {
   // behind when notifications are unconfigured (the default) would leak forever, task text and all.
   const ctx = notifyCtx.get(ev.box) ?? {};
   notifyCtx.delete(ev.box);
-  if (!url || !settings.events[ev.kind === "stalled" ? "failed" : ev.kind]) return;
+  if (!settings.events[toggleFor(ev.kind)]) return;
+  // Phone first and independent of the webhook: either channel failing never blocks the other.
+  const pushed = sendPushFor(owner, ev, ctx.title || ctx.task).catch((e) => {
+    console.error(`[push] ${ev.box}/${ev.kind}: ${(e as Error).message.slice(0, 200)}`);
+    throw e;
+  });
+  if (!url) return void (await pushed);
   // A finished run's notification carries the digest headline ("done · 3 files · 4 steps"), so the
   // push is a review-at-a-glance, not just a ping. Best-effort: a headline failure drops the
   // enrichment, never the notification.
@@ -547,6 +554,23 @@ const sendNotification = async (ev: NotifyEvent): Promise<void> => {
   } finally {
     clearTimeout(t);
   }
+  await pushed.catch(() => {}); // the webhook went out; a push failure alone must not re-fire it
+};
+/**
+ * Mobile push via the Expo service (src/push.ts). Only the owner's registered devices; the title is
+ * redacted and trimmed, the body is a fixed phrase — never the question or task text on a lock screen.
+ */
+const pushCap = makeOwnerRateCap();
+const sendPushFor = async (owner: string, ev: NotifyEvent, label: string | undefined): Promise<void> => {
+  const tokens = listDeviceTokens(db, secretBox, owner);
+  if (tokens.length === 0) return;
+  if (!pushCap.allow(owner)) return void console.error(`[push] rate cap hit for an owner; dropped ${ev.kind}`);
+  await sendExpoPush(buildPushMessages(ev, tokens, label ? redactor.redact(label) : ev.box), {
+    fetch,
+    prune: (tok) => pruneToken(db, tok),
+    accessToken: process.env.EXPO_ACCESS_TOKEN || undefined,
+    log: (m) => console.error(m),
+  });
 };
 /** Receipt provenance for a box: the agent mark from the snapshot, and the model only when known —
  *  the dashboard's explicit per-box pick. Not the controller default: an MCP delegate can pass its
@@ -1955,6 +1979,22 @@ app.post("/notify/test.json", async (req: Request, res: Response) => {
   } catch (e) {
     res.status(502).json({ error: `webhook unreachable: ${String((e as Error).message ?? e).slice(0, 200)}` });
   }
+});
+
+// Mobile push registration (owner-scoped). The token is never echoed back by any route.
+app.post("/push/register.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const p = principalOf(res);
+  const b = (req.body ?? {}) as { token?: unknown; platform?: unknown };
+  const r = registerDevice(db, secretBox, p.kind === "user" ? p.userId : OPERATOR_OWNER, b.token, b.platform);
+  if (!r.ok) return void res.status(400).json({ error: r.error });
+  res.json({ ok: true, id: r.id });
+});
+app.post("/push/unregister.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const p = principalOf(res);
+  const owner = p.kind === "user" ? p.userId : OPERATOR_OWNER;
+  res.json({ ok: true, removed: unregisterDevice(db, owner, (req.body ?? {}).token), devices: deviceCount(db, owner) });
 });
 
 app.get("/skills.json", async (req: Request, res: Response) => {

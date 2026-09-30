@@ -10,6 +10,7 @@ import { HedvigLettersSerif_400Regular } from "@expo-google-fonts/hedvig-letters
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ThemeProvider, useTheme } from "@/theme/ThemeContext";
 import { AuthProvider, useAuth } from "@/state/auth";
+import { PushBridge } from "@/components/PushBridge";
 
 // Hold the native splash until fonts and the stored credential are loaded, so
 // the first frame is the real app (the web dashboard inlines a shell skeleton
@@ -50,6 +51,7 @@ function Shell() {
       >
         <Stack.Screen name="new" options={{ presentation: "modal", animation: "slide_from_bottom" }} />
       </Stack>
+      <PushBridge />
       {intro && <AnimatedSplash onDone={() => setIntro(false)} />}
     </>
   );

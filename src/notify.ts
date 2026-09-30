@@ -32,8 +32,9 @@ export interface BoxRunView {
 
 export interface NotifyEvent {
   box: string;
-  /** `stalled` is delivered under the operator's "failed" toggle — both mean "this needs you". */
-  kind: "waiting" | "done" | "failed" | "stalled";
+  /** `stalled` is delivered under the operator's "failed" toggle — both mean "this needs you".
+   *  `budget` is a waiting edge whose question is a budget cap (src/budget.ts); it rides "waiting". */
+  kind: "waiting" | "done" | "failed" | "stalled" | "budget";
   /** Minutes since the last action, for a stalled event. */
   quietMin?: number;
   question?: string;
@@ -58,6 +59,13 @@ function terminalEvent(b: BoxRunView): NotifyEvent {
   return { box: b.name, kind: "failed", exitCode: code, ...(note ? { note } : {}) };
 }
 
+/** Budget asks are written by the controller with this fixed lead (src/budget.ts checkBudget). */
+export const isBudgetQuestion = (q: string | undefined) => /^Budget reached:/.test(q ?? "");
+
+/** Which of the operator's three toggles an event kind rides. */
+export const toggleFor = (k: NotifyEvent["kind"]): "waiting" | "done" | "failed" =>
+  k === "stalled" ? "failed" : k === "budget" ? "waiting" : k;
+
 /**
  * Pure edge detection between two consecutive fleet sweeps.
  *
@@ -74,7 +82,7 @@ export function detectTransitions(prev: readonly BoxRunView[], next: readonly Bo
     if (!was) continue; // first sighting: hydration, never a transition
     if (b.runState === "waiting") {
       const newQuestion = (b.question ?? "") !== "" && (was.runState !== "waiting" || was.question !== b.question);
-      if (newQuestion) out.push({ box: b.name, kind: "waiting", question: b.question });
+      if (newQuestion) out.push({ box: b.name, kind: isBudgetQuestion(b.question) ? "budget" : "waiting", question: b.question });
       continue;
     }
     if (b.runState === "done" && was.runState !== "done" && was.runState !== "idle") {
@@ -140,7 +148,7 @@ export function formatNotification(
 ): NotificationText {
   const label = ctx.title || ctx.task?.split("\n")[0] || e.box;
   const text =
-    e.kind === "waiting"
+    e.kind === "waiting" || e.kind === "budget"
       ? `“${label}” needs an answer: ${e.question}`
       : e.kind === "done"
         ? `“${label}” finished${ctx.headline ? ` — ${ctx.headline}` : ""} (${e.box})`

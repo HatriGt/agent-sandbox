@@ -189,6 +189,19 @@ const MIGRATIONS: string[] = [
   CREATE INDEX IF NOT EXISTS trigger_fires_trigger ON trigger_fires(trigger_id, at);
   CREATE INDEX IF NOT EXISTS trigger_fires_box ON trigger_fires(box);
   `,
+  `
+  -- Mobile push devices (src/push.ts). Expo push tokens are sealed with the controller key and
+  -- looked up by SHA-256: a token lets its holder push to that phone, so it is a secret.
+  CREATE TABLE IF NOT EXISTS push_devices (
+    token_hash TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    token_enc TEXT NOT NULL,
+    platform TEXT,
+    created_at INTEGER NOT NULL,
+    last_seen_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS push_devices_owner ON push_devices(owner);
+  `,
 ];
 
 export function openDb(dataDir: string): Db {
