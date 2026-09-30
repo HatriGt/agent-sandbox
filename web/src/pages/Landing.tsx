@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Link } from "react-router";
-import { ArrowRight, Box, Check, Circle, CircleDot, Clock, Copy, Smartphone, Cpu, Flame, GitBranch, Globe, KeyRound, Laptop, MessageCircleQuestion, Pause, Plug, Server, ShieldCheck, Terminal, Timer, X } from "lucide-react";
+import { TriangleAlert, ArrowRight, Box, Check, Circle, CircleDot, Clock, Copy, Smartphone, Cpu, Flame, GitBranch, Globe, KeyRound, Laptop, MessageCircleQuestion, Pause, Plug, Server, ShieldCheck, Terminal, Timer, X } from "lucide-react";
 import { motion, useInView, useReducedMotion } from "motion/react";
 import { Logo } from "@/components/ui/logo";
 import { cn } from "@/lib/utils";
@@ -8,7 +8,7 @@ import { useSession } from "@/lib/auth";
 
 /**
  * The public landing page. No data, no token. The hero is the honest drivers × model-sources matrix
- * (available vs planned); below it, a self-running replay of one delegation beside its steps, then
+ * (available · supervised: partial · planned, mirrored from the driver registry); below it, a self-running replay of one delegation beside its steps, then
  * security and the one-command self-host install (primary) with hosted signup (secondary).
  */
 export default function Landing() {
@@ -562,10 +562,32 @@ function QuestionMock() {
 
 /* ───────────────────────────── hero matrix ───────────────────────────── */
 
-const DRIVERS = ["Claude Code", "oh-my-pi", "Codex", "OpenCode", "Gemini CLI"] as const;
-const SOURCES = ["Anthropic", "OpenAI", "OpenAI-compatible", "Local"] as const;
-/** Honest availability: today both shipped drivers run Claude models (routed through ccproxy). Everything else is planned. */
-const AVAILABLE = new Set(["Claude Code|Anthropic", "oh-my-pi|Anthropic"]);
+type Cell = "available" | "partial" | "planned";
+const SOURCES = [
+  { key: "anthropic", label: "Anthropic" },
+  { key: "openai", label: "OpenAI" },
+  { key: "openai-compatible", label: "OpenAI-compatible" },
+  { key: "local", label: "Local" },
+] as const;
+type Source = (typeof SOURCES)[number]["key"];
+/**
+ * MIRROR of the server registry — the web bundle can't import src/drivers (node-only modules).
+ * `modelSources` = each driver's capabilities.modelSources; `supervised` = meetsSupervisionFloor
+ * (gate !== "none" && resume). Provider kinds map onto sources via src/providers.ts SOURCE_OF
+ * (anthropic + ccproxy → Anthropic, ollama → Local). Keep in sync when a driver changes.
+ */
+const DRIVERS: Array<{ label: string; modelSources: Source[]; supervised: boolean; shipped: boolean }> = [
+  { label: "Claude Code", modelSources: ["anthropic"], supervised: true, shipped: true },
+  { label: "oh-my-pi", modelSources: ["anthropic"], supervised: true, shipped: true },
+  { label: "Codex CLI", modelSources: ["openai", "openai-compatible"], supervised: true, shipped: true },
+  { label: "OpenCode", modelSources: ["anthropic", "openai", "openai-compatible", "local"], supervised: true, shipped: true },
+  { label: "Gemini CLI", modelSources: [], supervised: false, shipped: false },
+];
+function cellOf(d: (typeof DRIVERS)[number], s: Source): Cell {
+  if (!d.shipped || !d.modelSources.includes(s)) return "planned";
+  return d.supervised ? "available" : "partial";
+}
+const CELL_LABEL: Record<Cell, string> = { available: "available", partial: "supervised: partial", planned: "planned" };
 
 function Matrix() {
   return (
@@ -574,6 +596,7 @@ function Matrix() {
         <span className="text-foreground text-meta font-medium">Drivers × model sources</span>
         <span className="text-muted-foreground ml-auto flex items-center gap-3 text-micro">
           <span className="inline-flex items-center gap-1"><Check className="text-ok size-3" strokeWidth={3} /> available</span>
+          <span className="inline-flex items-center gap-1"><TriangleAlert className="text-attention size-3" /> supervised: partial</span>
           <span className="inline-flex items-center gap-1"><Clock className="size-3" /> planned</span>
         </span>
       </div>
@@ -584,26 +607,28 @@ function Matrix() {
             <tr>
               <th scope="col" className="w-[8.5rem] px-3 py-2.5"><span className="sr-only">Driver</span></th>
               {SOURCES.map((c) => (
-                <th key={c} scope="col" className="text-muted-foreground px-2 py-2.5 text-left text-micro font-medium">{c}</th>
+                <th key={c.key} scope="col" className="text-muted-foreground px-2 py-2.5 text-left text-micro font-medium">{c.label}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {DRIVERS.map((d) => (
-              <tr key={d} className="border-t">
-                <th scope="row" className="text-foreground px-3 py-2 text-left font-medium whitespace-nowrap">{d}</th>
+              <tr key={d.label} className="border-t">
+                <th scope="row" className="text-foreground px-3 py-2 text-left font-medium whitespace-nowrap">{d.label}</th>
                 {SOURCES.map((c) => {
-                  const on = AVAILABLE.has(`${d}|${c}`);
+                  const cell = cellOf(d, c.key);
                   return (
-                    <td key={c} className="px-1.5 py-1.5">
+                    <td key={c.key} className="px-1.5 py-1.5">
                       <span
                         className={cn(
                           "inline-flex h-7 w-full items-center gap-1.5 rounded-md px-2 text-micro whitespace-nowrap",
-                          on ? "bg-ok/10 text-ok ring-ok/25 font-semibold ring-1 ring-inset" : "text-muted-foreground border border-dashed"
+                          cell === "available" && "bg-ok/10 text-ok ring-ok/25 font-semibold ring-1 ring-inset",
+                          cell === "partial" && "bg-attention/10 text-attention-text ring-attention/30 font-semibold ring-1 ring-inset",
+                          cell === "planned" && "text-muted-foreground border border-dashed"
                         )}
                       >
-                        {on ? <Check className="size-3 shrink-0" strokeWidth={3} /> : <Clock className="size-3 shrink-0" />}
-                        {on ? "available" : "planned"}
+                        {cell === "available" ? <Check className="size-3 shrink-0" strokeWidth={3} /> : cell === "partial" ? <TriangleAlert className="size-3 shrink-0" /> : <Clock className="size-3 shrink-0" />}
+                        {CELL_LABEL[cell]}
                       </span>
                     </td>
                   );
@@ -615,7 +640,7 @@ function Matrix() {
       </div>
       <div className="text-muted-foreground flex flex-col gap-1 border-t px-4 py-3 text-micro">
         <span>Every cell: <span className="text-foreground">own microVM · asks instead of guessing</span></span>
-        <span>Triggers today: manual runs and <span className="stamp">after:</span> chains · schedules and events planned</span>
+        <span>Triggers: manual, schedules, webhooks, GitHub events and <span className="stamp">after:</span> chains</span>
       </div>
     </div>
   );
@@ -648,10 +673,10 @@ function InstallCommand() {
 }
 
 const DEMO_STEPS: Array<{ icon: React.ReactNode; title: string; body: string; needsYou?: boolean }> = [
-  { icon: <CircleDot />, title: "An issue becomes a task", body: "From the dashboard, your IDE over MCP or a script today — from an issue label once event triggers ship." },
+  { icon: <CircleDot />, title: "An issue becomes a task", body: "From the dashboard, your IDE over MCP, a schedule, a webhook, or a GitHub issue labelled `agent`." },
   { icon: <Box />, title: "It runs in an isolated box", body: "A warm microVM claims the task with your repo checked out and none of your secrets inside." },
   { icon: <Pause />, title: "It asks instead of guessing", body: "At a real decision it waits; every tool call is blocked until someone answers.", needsYou: true },
-  { icon: <Smartphone />, title: "You answer from your phone", body: "The question card is on the phone app, or a webhook tells you it's waiting. One tap and the run continues." },
+  { icon: <Smartphone />, title: "You answer from your phone", body: "A push notification opens the question card in the phone app. One tap and the run continues." },
   { icon: <GitBranch />, title: "A verified PR with a receipt", body: "The pull request comes back with its verify result and a digest of what ran and what was asked." },
 ];
 

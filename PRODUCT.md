@@ -23,12 +23,22 @@ remains the only deploy step. A React Native / Expo companion app lives in `mobi
 
 That sentence is the direction (plan: `docs/plan-agent-cloud.md`). What exists **today**:
 
-- **Drivers:** Claude Code and oh-my-pi (`src/agent-kind.ts`). Codex, OpenCode and Gemini CLI are
-  planned.
-- **Models:** the Claude catalog, routed through ccproxy (`src/models.ts`). OpenAI,
-  OpenAI-compatible endpoints and local models are planned.
-- **Triggers:** manual runs (dashboard, MCP, curl) and `after:` chains (`src/handoff.ts`).
-  Schedules, webhooks/GitHub events and long-running runs with budgets are planned.
+- **Drivers:** Claude Code, oh-my-pi, Codex CLI and OpenCode (`src/drivers/`). All four meet the
+  supervision floor (hook gate + resume); Codex and OpenCode carry documented caveats (Codex's
+  hosted web search bypasses the gate; OpenCode's transcript is best-effort, no plan card).
+  **Planned:** Gemini CLI.
+- **Models:** per-user providers (`src/providers.ts`): Anthropic, ccproxy, OpenAI,
+  OpenAI-compatible and Ollama (local). Which driver runs which source comes from each driver's
+  `capabilities.modelSources`: Claude Code / oh-my-pi → Anthropic; Codex → OpenAI,
+  OpenAI-compatible; OpenCode → all four.
+- **Triggers:** manual runs (dashboard, MCP, curl), schedules, generic webhooks, GitHub events
+  (issue labelled, `/agent` comment, PR opened) and chains (`src/triggers.ts`), managed on the
+  Automations page (web and mobile).
+- **Long-running:** per-run budgets that ask-and-stop, heartbeat and a stalled state
+  (`src/budget.ts`). Dollars only for models with a known price; otherwise tokens only.
+  **Planned:** continue-across-boxes.
+- **Walk-away:** mobile push + `asb://` deep links; harness bundles (export/import) and
+  two-harness compare. **Planned:** public harness gallery.
 - **Box:** built — a hardware-isolated microVM per run, warm pool, sleep/wake, checkpoints, keep.
 
 Every feature must be expressible as a field of one primitive, or it is out of scope:

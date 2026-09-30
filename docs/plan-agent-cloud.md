@@ -325,6 +325,24 @@ Two-week increments, each ending in a deploy and a live check. Effort is one per
 Metrics from increment 0 onward, all from the archive: runs per user per week, share started by a
 trigger, verified share, cost per run, questions per run, time-to-first-receipt for new accounts.
 
+### Status (2026-09-30)
+
+From the git history and the code; "not verified" means no commit clearly delivers it.
+
+- **0** — shipped: `PRODUCT.md` rewrite, landing matrix, receipt provenance on the digest card.
+  Not verified: notifications web UI as a separate deliverable. Cut: demo video.
+- **1** — shipped: driver extraction behind a contract (snapshot-locked), driver picker with
+  capability badges.
+- **2** — shipped: encrypted per-user provider registry, grouped model picker, OpenAI-compatible +
+  Ollama, derived egress. Pricing is partial: cost shown only for models with a known price.
+- **3** — shipped: Codex and OpenCode drivers, contract test, supervision floor (both meet it).
+- **4** — shipped: schedules, generic webhook, Automations page, run provenance; chains as triggers.
+- **5** — shipped: GitHub event triggers, PR receipt comment, History ledger with totals.
+- **6** — shipped: budgets via ask-and-stop, heartbeat/stalled. Cut: continue-across-boxes.
+- **7** — shipped: Expo push, `asb://` deep links, Automations on mobile.
+- **8** — shipped: saved harnesses, versioned bundles (export/import), two-harness compare. Cut: gallery.
+- Not started: Gemini CLI driver.
+
 ## 5. Risks and the decision each needs
 
 - **Codex gate.** If neither hooks nor a wrapper can reliably deny a tool call, Codex ships as
