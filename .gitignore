@@ -12,3 +12,5 @@ data/
 # Local dev controller state and render-check screenshots
 data-dev/
 .shots/*.png
+.shots/demo/
+.shots/*.log

@@ -14,7 +14,7 @@ const base = process.env.ASB_UI || "http://localhost:5173";
 
 const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: +w, height: +h }, colorScheme: dark ? "dark" : "light", deviceScaleFactor: 1 });
-await ctx.addInitScript((t) => localStorage.setItem("asb-token", t), token);
+if (!flags.includes("--anon")) await ctx.addInitScript((t) => localStorage.setItem("asb-token", t), token);
 const page = await ctx.newPage();
 const errors = [];
 page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
