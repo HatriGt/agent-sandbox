@@ -47,10 +47,17 @@ export function parseSkillMd(text: string, fallbackName: string): ParsedSkill {
   const fm = /^---\n([\s\S]*?)\n---\n?/.exec(src);
   if (fm) {
     body = src.slice(fm[0].length).trim();
-    for (const line of fm[1].split("\n")) {
-      const m = /^(name|description)\s*:\s*(.*)$/.exec(line);
+    const lines = fm[1].split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const m = /^(name|description)\s*:\s*(.*)$/.exec(lines[i]);
       if (!m) continue;
       let v = m[2].trim();
+      // YAML block scalars (`>` folded, `|` literal): the value is the indented lines that follow.
+      if (/^[>|][-+]?$/.test(v)) {
+        const block: string[] = [];
+        while (i + 1 < lines.length && (/^\s+\S/.test(lines[i + 1]) || !lines[i + 1].trim())) block.push(lines[++i].trim());
+        v = (v.startsWith(">") ? block.join(" ").replace(/\s+/g, " ") : block.join("\n")).trim();
+      }
       // Frontmatter written by us JSON-quotes the description; plain YAML quoting also lands here.
       if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
         try {

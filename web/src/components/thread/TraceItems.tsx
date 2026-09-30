@@ -278,10 +278,13 @@ export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolea
   }
   // Skills that fired inside the fold: named, because "the playbook ran" is the headline fact.
   const skillsUsed = [...new Set(events.filter((e) => e.name === "Skill").map((e) => skillOf(e)).filter(Boolean))] as string[];
+  // One or two edited files are named outright — "rateLimit.ts, rateLimit.test.ts" says more than
+  // "2 files" and costs no more width; beyond that the count keeps the line short.
+  const fileNames = [...files].map((f) => f.split("/").pop() ?? f);
   const facts = [
     `${events.length} steps`,
     ...skillsUsed.map((n) => `/${n}`),
-    files.size ? `${files.size} ${files.size === 1 ? "file" : "files"}` : null,
+    files.size ? (files.size <= 2 ? fileNames.join(", ") : `${files.size} files`) : null,
     commands ? `${commands} ${commands === 1 ? "command" : "commands"}` : null,
     ...[...mcpByServer].map(([srv, n]) => `${n} ${srv} ${n === 1 ? "call" : "calls"}`),
     !files.size && !commands && !mcpByServer.size && reads ? `${reads} lookups` : null,
@@ -303,7 +306,7 @@ export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolea
           aria-hidden
         />
         {anyRunning ? (
-          <span className="flex items-center gap-2 font-medium">
+          <span className="flex shrink-0 items-center gap-2 font-medium whitespace-nowrap">
             <span className="bg-live breathe size-1.5 rounded-full" aria-hidden />
             Working
             <span className="text-muted-foreground font-normal tabular-nums">
@@ -312,7 +315,7 @@ export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolea
             {firstAt !== undefined && <span className="text-faint font-normal text-micro tabular-nums">{formatDuration(now - firstAt)}</span>}
           </span>
         ) : (
-          <span className="font-medium">
+          <span className="shrink-0 font-medium whitespace-nowrap">
             Worked
             {span !== undefined && <span className="text-muted-foreground ml-1 font-normal tabular-nums">for {formatDuration(span)}</span>}
           </span>
@@ -340,7 +343,9 @@ export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolea
             transition={still ? { duration: 0 } : { height: SPRING, opacity: { duration: 0.16, ease: [0.22, 1, 0.36, 1] } }}
             // Capped: a 60-step group opened by accident must not shove the conversation a screen down.
             // The timeline sits on its own quiet surface, so "work" reads apart from the agent's prose.
-            className="work-surface relative mt-2 max-h-[32rem] overflow-y-auto overscroll-contain"
+            // No `overscroll-contain` here: on a scroll container it blocks scroll chaining even when
+            // the list is SHORTER than the cap, so a wheel over an open timeline scrolled nothing.
+            className="work-surface relative mt-2 max-h-[32rem] overflow-y-auto"
           >
             {events.map((e, i) => {
               const running = !!live && !e.result;
@@ -909,7 +914,7 @@ export function AnsweredQuestionItem({ question, answer }: { question: string; a
     <div className="enter flex flex-col gap-1.5">
       <span className="label text-muted-foreground flex items-center gap-1.5">
         <PauseIcon className="size-3" strokeWidth={2.5} aria-hidden />
-        The agent asked — you answered
+        {answer.trim() ? "The agent asked — you answered" : "The agent asked"}
       </span>
       <div className="bg-card max-w-[72ch] rounded-xl shadow-e1">
         <div className="px-4 pt-3 pb-2">
@@ -933,8 +938,14 @@ export function AnsweredQuestionItem({ question, answer }: { question: string; a
         )}
         {chosen < 0 && (
           <div className="border-t px-4 py-2">
-            <p className="label text-muted-foreground mb-0.5">Your answer</p>
-            <p className="text-foreground text-meta whitespace-pre-wrap [overflow-wrap:anywhere]">{answer}</p>
+            {answer.trim() ? (
+              <>
+                <p className="label text-muted-foreground mb-0.5">Your answer</p>
+                <p className="text-foreground text-meta whitespace-pre-wrap [overflow-wrap:anywhere]">{answer}</p>
+              </>
+            ) : (
+              <p className="text-muted-foreground text-meta">No answer was recorded — the run moved on without one.</p>
+            )}
           </div>
         )}
       </div>

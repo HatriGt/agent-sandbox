@@ -50,7 +50,11 @@ export function SendBar({
   onFocusRequest,
   seed,
   onReplyFailed,
+  phase,
 }: {
+  /** What the thread is in the middle of, for the composer's copy: a run being set up, a question
+   *  waiting on the card above, or a box that has never run anything. */
+  phase?: "starting" | "asked" | "fresh";
   boxName: string;
   runState: RunState;
   sleeping?: boolean;
@@ -320,7 +324,11 @@ export function SendBar({
       : toAgent
         ? busy
           ? "The agent is mid-turn. Your message is queued and delivered when this turn finishes."
-          : "Enter to send · Shift+Enter for a new line · paste or drop images"
+          : phase === "starting"
+            ? "The run is starting. Type ahead — it is delivered as soon as the agent is listening."
+            : phase === "asked"
+              ? "Pick an option on the card above — or type here: a message now reaches the agent as your answer."
+              : "Enter to send · Shift+Enter for a new line · paste or drop images"
         : "Answered by a separate read-only helper inside the sandbox. The agent is not interrupted.";
 
   return (
@@ -451,16 +459,25 @@ export function SendBar({
                   : toAgent
                     ? busy
                       ? "Queue a follow-up for when this turn finishes…"
-                      : "Send a follow-up instruction… ( / for skills · @ for files )"
+                      : phase === "fresh"
+                        ? "Describe a task for this machine… ( / skills · @ files )"
+                        : phase === "starting"
+                          ? "Type ahead — delivered once the agent is listening…"
+                          : phase === "asked"
+                            ? "Answer in your own words…"
+                            : "Send a follow-up… ( / skills · @ files )"
                     : "Ask about this run — what changed, what is it doing, why is it stuck…"
             }
           />
-          <PromptInputActions className="justify-between gap-2 pt-1">
-            <div className="flex items-center gap-1">
+          {/* One row, never two: everything is nowrap and the tool cluster can shrink (min-w-0) so the
+              send button always keeps its place at the right edge — on a phone as much as beside an
+              open workspace pane. */}
+          <PromptInputActions className="flex-nowrap justify-between gap-2 pt-1">
+            <div className="flex min-w-0 items-center gap-0.5 sm:gap-1">
               <div
                 role="radiogroup"
                 aria-label="Send to"
-                className="bg-muted inline-flex items-center gap-0.5 rounded-md p-0.5"
+                className="bg-muted inline-flex shrink-0 items-center gap-0.5 rounded-md p-0.5"
                 onClick={(e) => e.stopPropagation()}
               >
                 <ModeChip
@@ -546,7 +563,7 @@ export function SendBar({
               onClick={send}
               disabled={sending || (!value.trim() && !files.length && !images.length && !skill)}
               aria-label={toAgent ? (busy ? "Queue for the agent" : "Send to the agent") : "Ask a side question"}
-              className="rounded-full transition-[opacity,scale,background-color] duration-[var(--dur-fast)] ease-[var(--ease-out-quint)] disabled:opacity-35 enabled:hover:scale-105 enabled:active:scale-90 motion-reduce:enabled:hover:scale-100 motion-reduce:enabled:active:scale-100"
+              className="shrink-0 rounded-full transition-[opacity,scale,background-color] duration-[var(--dur-fast)] ease-[var(--ease-out-quint)] disabled:opacity-35 enabled:hover:scale-105 enabled:active:scale-90 motion-reduce:enabled:hover:scale-100 motion-reduce:enabled:active:scale-100"
             >
               <AnimatePresence initial={false} mode="popLayout">
                 <motion.span
@@ -567,7 +584,7 @@ export function SendBar({
 
         {/* The hint is a caption under the composer, never squeezed into the action row where it
             truncated mid-sentence. Errors take the same slot in the destructive tone. */}
-        <p className={cn("mt-1.5 min-h-4 px-2 text-center text-micro sm:text-left", error ? "text-destructive" : "text-faint")} role={error ? "alert" : undefined}>
+        <p className={cn("mt-1.5 min-h-4 truncate px-2 text-center text-micro sm:text-left", error ? "text-destructive" : "text-faint")} role={error ? "alert" : undefined} title={error ?? hint ?? undefined}>
           {error ?? hint}
         </p>
       </div>
@@ -626,27 +643,31 @@ function ModeChip({
       type="button"
       role="radio"
       aria-checked={active}
+      aria-label={label}
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        "flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2.5 text-micro font-medium transition-colors duration-150",
+        "flex h-7 cursor-pointer items-center gap-1.5 rounded-md text-micro font-medium whitespace-nowrap transition-colors duration-150",
         "disabled:cursor-not-allowed disabled:opacity-40",
-        active ? "bg-card text-foreground shadow-e1" : "text-muted-foreground hover:text-foreground"
+        // The active lane always shows its name; the other one is icon-only on a phone (its name
+        // is in the tooltip and aria-label), so the row never wraps under the send button.
+        active ? "bg-card text-foreground shadow-e1 px-2.5" : "text-muted-foreground hover:text-foreground px-2 sm:px-2.5"
       )}
     >
       {icon}
-      {label}
+      <span className={cn(!active && "hidden sm:inline")}>{label}</span>
     </button>
   );
-  if (!disabled || !disabledReason) return chip;
+  const tip = disabled && disabledReason ? disabledReason : active ? null : label;
+  if (!tip) return chip;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span tabIndex={0} className="inline-flex">
+        <span tabIndex={disabled ? 0 : -1} className="inline-flex">
           {chip}
         </span>
       </TooltipTrigger>
-      <TooltipContent side="top">{disabledReason}</TooltipContent>
+      <TooltipContent side="top">{tip}</TooltipContent>
     </Tooltip>
   );
 }

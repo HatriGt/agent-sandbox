@@ -9,3 +9,6 @@ out/
 # Deploy secrets (SSH key the container uses to reach the VPS host). NEVER commit.
 deploy/
 data/
+# Local dev controller state and render-check screenshots
+data-dev/
+.shots/*.png

@@ -377,12 +377,17 @@ export function ThreadHeader({
 
       {/* Line 2: context as a sentence. The state is the pill — it anchors the whole view, and its
           crossfade makes the working → needs-you → done transition an event rather than a blink. */}
-      <div className="text-muted-foreground mt-1 flex min-h-6 flex-wrap items-center gap-x-2 gap-y-1 text-meta">
-        <StatePill state={state} exitCode={exitCode} />
+      {/* One line at every width. On a phone the sentence is trimmed to what matters there (state,
+          machine, repos — the meters and lifecycle live in the machine's tooltip and the ⋯ menu),
+          and the repo chips scroll sideways rather than stacking into a third and fourth row. */}
+      <div className="text-muted-foreground mt-1 flex min-h-6 min-w-0 flex-nowrap items-center gap-x-2 text-meta">
+        <span className="shrink-0">
+          <StatePill state={state} exitCode={exitCode} />
+        </span>
         <Dot />
         <Tooltip>
           <TooltipTrigger asChild>
-            <span className="stamp inline-flex items-center gap-1" title={shortName(box.name)}>
+            <span className="stamp inline-flex shrink-0 items-center gap-1" title={shortName(box.name)}>
               {kept && <Pin className="text-live size-3 fill-current" aria-label="Kept" />}
               {friendlyName(box.name)}
             </span>
@@ -393,13 +398,13 @@ export function ThreadHeader({
         {!sleeping && (
           <>
             <Dot />
-            <span className="scrollbar-none flex min-w-0 items-center gap-1.5 overflow-x-auto">
+            <span className="scrollbar-none flex min-w-20 shrink items-center gap-1.5 overflow-x-auto">
               {repos.map((r) => (
                 <Tooltip key={r.name}>
                   <TooltipTrigger asChild>
-                    <span className="bg-muted text-foreground stamp inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5">
+                    <span className="bg-muted text-foreground stamp inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 whitespace-nowrap">
                       {r.name}
-                      {r.branch && <span className="text-muted-foreground">@{r.branch}</span>}
+                      {r.branch && <span className="text-muted-foreground hidden sm:inline">@{r.branch}</span>}
                     </span>
                   </TooltipTrigger>
                   <TooltipContent side="bottom">/workspace/{r.name} — @ mentions search here</TooltipContent>
@@ -445,32 +450,36 @@ export function ThreadHeader({
 
         {/* Live vitals as meters. They only render while awake — a frozen meter reads as live and
             lies, so mergeWithMemory drops the numbers when a box sleeps. */}
+        {/* Meters are a desktop luxury; on a phone the numbers live in the machine's tooltip. Above
+            xl the meters keep their readouts; between md and xl they are bars only, so the line
+            holds with a PR chip and the live activity beside them. */}
         {!sleeping && (box.memUsage || box.disk) && (
-          <>
+          <span className="hidden shrink-0 items-center gap-2 xl:flex">
             <Dot />
-            <span className="flex shrink-0 items-center gap-2.5">
+            <span className="flex shrink-0 items-center gap-2.5 [&_span]:whitespace-nowrap">
               <UsageMeter kind="memory" usage={box.memUsage} />
-              <UsageMeter kind="disk" usage={box.disk} />
+              {/* Disk is the slower story; it joins the line only where there is room. */}
+              <UsageMeter kind="disk" usage={box.disk} className="hidden 2xl:inline-flex" />
             </span>
-          </>
+          </span>
         )}
 
-        <span className="ml-auto flex items-center gap-2">
+        <span className="ml-auto flex shrink-0 items-center gap-2 pl-3 whitespace-nowrap">
           {activity && (
-            <span className="text-live inline-flex items-center gap-1.5 text-micro font-medium">
+            <span className="text-live hidden items-center gap-1.5 text-micro font-medium sm:inline-flex">
               <span className="bg-live breathe size-1.5 rounded-full" aria-hidden />
-              <span className="max-w-[16rem] truncate">{activity}</span>
+              <span className="max-w-[10rem] truncate lg:max-w-[16rem]">{activity}</span>
             </span>
           )}
           {/* "finished 2m ago" → "asked just now": the meta changes with the state, so it crossfades with it. */}
-          <Swap state={when ?? ""} className="flex items-center">
+          <Swap state={when ?? ""} className="hidden items-center sm:flex">
             {when && <span className="text-faint text-micro">{when}</span>}
           </Swap>
-          {when && short && <Dot />}
+          {when && short && <span className="hidden sm:inline"><Dot /></span>}
           {short && (
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className={cn("text-faint text-micro", deadline.remainingSec != null && deadline.remainingSec < 300 && "text-attention-text")}>{short}</span>
+                <span className={cn("text-faint text-micro", deadline.remainingSec != null && deadline.remainingSec < 300 ? "text-attention-text" : "hidden sm:inline")}>{short}</span>
               </TooltipTrigger>
               <TooltipContent side="bottom">{long}</TooltipContent>
             </Tooltip>

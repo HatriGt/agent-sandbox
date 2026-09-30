@@ -137,6 +137,14 @@ export interface McpServerView {
   addedAt: number;
 }
 
+/** Outcome of `mcpTest`; `tools` only when the server answered `tools/list`. */
+export interface McpProbe {
+  ok: boolean;
+  status?: number;
+  detail: string;
+  tools?: string[];
+}
+
 /** A skill: a reusable playbook synced into every sandbox as ~/.claude/skills/<name>/SKILL.md. */
 export interface SkillView {
   name: string;
@@ -673,8 +681,8 @@ export const api = {
   mcpServers: (signal?: AbortSignal) =>
     fetch(url("/mcp-servers.json"), { headers: authHeaders, signal }).then(parse<McpServersResponse>),
   mcpMutate: (body: Record<string, unknown>) => post<McpServersResponse>("/mcp-servers.json", body),
-  /** One server's health: the same MCP initialize handshake the in-box claude does at startup. */
-  mcpTest: (name: string) => post<{ ok: boolean; status?: number; detail: string }>("/mcp-servers/test.json", { name }),
+  /** One server's health: the same MCP initialize handshake the in-box claude does at startup, then `tools/list`. */
+  mcpTest: (name: string) => post<McpProbe>("/mcp-servers/test.json", { name }),
   skills: (signal?: AbortSignal) => fetch(url("/skills.json"), { headers: authHeaders, signal }).then(parse<SkillsResponse>),
   skillMutate: (body: Record<string, unknown>) => post<SkillsResponse>("/skills.json", body),
   /**

@@ -1,6 +1,6 @@
 import * as React from "react";
-import { EditorState, Compartment, type Extension } from "@codemirror/state";
-import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection, dropCursor, rectangularSelection, crosshairCursor, highlightSpecialChars, scrollPastEnd } from "@codemirror/view";
+import { EditorState, Compartment, Prec, type Extension } from "@codemirror/state";
+import { EditorView, keymap, lineNumbers, placeholder, highlightActiveLine, highlightActiveLineGutter, drawSelection, dropCursor, rectangularSelection, crosshairCursor, highlightSpecialChars, scrollPastEnd } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
 import { bracketMatching, foldGutter, foldKeymap, indentOnInput, syntaxHighlighting, HighlightStyle, StreamLanguage, LanguageDescription, LanguageSupport, Language } from "@codemirror/language";
@@ -117,6 +117,7 @@ const chrome = EditorView.theme({
   ".cm-foldGutter .cm-gutterElement": { color: "var(--muted-foreground)", opacity: "0.6" },
   ".cm-selectionBackground, &.cm-focused .cm-selectionBackground, ::selection": { backgroundColor: "color-mix(in oklch, var(--live) 22%, transparent) !important" },
   ".cm-cursor": { borderLeftColor: "var(--foreground)", borderLeftWidth: "1.5px" },
+  ".cm-placeholder": { color: "var(--muted-foreground)", opacity: "0.7", fontStyle: "normal" },
   ".cm-matchingBracket": { backgroundColor: "color-mix(in oklch, var(--live) 18%, transparent)", outline: "1px solid color-mix(in oklch, var(--live) 40%, transparent)" },
   ".cm-selectionMatch": { backgroundColor: "color-mix(in oklch, var(--attention) 22%, transparent)" },
   ".cm-searchMatch": { backgroundColor: "color-mix(in oklch, var(--attention) 35%, transparent)" },
@@ -126,6 +127,20 @@ const chrome = EditorView.theme({
   ".cm-panel.cm-search": { padding: "6px 10px" },
   ".cm-panel.cm-search input, .cm-panel.cm-search button": { fontFamily: "var(--font-sans)", fontSize: "12px", borderRadius: "6px", border: "1px solid var(--border)", background: "var(--background)", color: "var(--foreground)", padding: "2px 8px" },
   ".cm-panel.cm-search label": { fontSize: "11px", color: "var(--muted-foreground)" },
+});
+
+/**
+ * Authoring, not coding: a touch larger type, looser leading, wider measure padding and a gutter that
+ * sits back — for markdown a person writes and reads, like a skill's SKILL.md.
+ */
+const proseChrome = EditorView.theme({
+  "&": { fontSize: "13.5px" },
+  ".cm-scroller": { lineHeight: "1.75" },
+  ".cm-content": { padding: "18px 0 0" },
+  ".cm-line": { padding: "0 24px 0 10px" },
+  ".cm-gutters": { color: "color-mix(in oklch, var(--muted-foreground) 45%, transparent)", paddingLeft: "10px" },
+  ".cm-lineNumbers .cm-gutterElement": { minWidth: "2.6ch", padding: "0 8px 0 4px" },
+  ".cm-activeLine": { backgroundColor: "transparent" },
 });
 
 const baseExtensions = (readOnly: boolean): Extension => [
@@ -160,6 +175,8 @@ export function CodeEditor({
   className,
   ariaLabel = "Code",
   autoFocus = false,
+  prose = false,
+  placeholder: placeholderText,
 }: {
   value: string;
   onChange?: (v: string) => void;
@@ -171,6 +188,10 @@ export function CodeEditor({
   className?: string;
   ariaLabel?: string;
   autoFocus?: boolean;
+  /** Markdown a person writes: larger type, looser leading, quieter gutter. */
+  prose?: boolean;
+  /** Shown in the empty document. */
+  placeholder?: string;
 }) {
   const host = React.useRef<HTMLDivElement>(null);
   const view = React.useRef<EditorView | null>(null);
@@ -192,6 +213,8 @@ export function CodeEditor({
         baseExtensions(readOnly),
         themeComp.current.of(syntaxHighlighting(dark ? darkHighlight : lightHighlight)),
         langComp.current.of(langExt),
+        prose ? [Prec.high(proseChrome), EditorView.lineWrapping] : [],
+        placeholderText ? placeholder(placeholderText) : [],
         keymap.of([
           {
             key: "Mod-s",
@@ -216,7 +239,7 @@ export function CodeEditor({
     };
     // The document is seeded once; later external changes are applied through the effect below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [readOnly]);
+  }, [readOnly, prose, placeholderText]);
 
   // Theme + language follow props without recreating the view (keeps undo history and scroll).
   React.useEffect(() => {

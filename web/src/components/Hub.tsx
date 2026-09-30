@@ -32,7 +32,7 @@ import { fmtAgo, friendlyName, shortName, threadSort, threadTitle } from "@/lib/
 import { readDraft, takePrefill, writeDraft } from "@/lib/draft";
 import { STARTERS as STARTER_DEFS, mergeStarterText, type StarterDef } from "@/lib/starters";
 import { getMe } from "@/lib/auth";
-import { GettingStarted } from "@/components/GettingStarted";
+import { GettingStarted, gettingStartedDismissed } from "@/components/GettingStarted";
 import { TrialEndedNotice } from "@/components/TrialBadge";
 import { displayState, fmtDuration } from "@/lib/lifecycle";
 import { questionHeadline } from "@/lib/question";
@@ -170,7 +170,7 @@ function markHowtoDone() {
 }
 const HOWTO_STEPS = [
   { icon: <PencilLine />, title: "Describe a task", body: "in plain words, with a repo if it needs one" },
-  { icon: <Sparkles />, title: "The agent works in a sandbox", body: "a fresh machine, watched live" },
+  { icon: <Sparkles />, title: "An agent works on it", body: "in a fresh sandbox, watched live" },
   { icon: <GitPullRequest />, title: "Review the PR", body: "diff, checks and merge, right here" },
 ];
 function HowItWorks({ open }: { open: boolean }) {
@@ -192,13 +192,13 @@ function HowItWorks({ open }: { open: boolean }) {
               </li>
             )}
             <li className="min-w-0">
-              <StaggerItem index={i} step={0.06} className="bg-muted/60 flex items-center gap-2.5 rounded-lg px-3 py-2">
-                <span className="bg-background text-muted-foreground grid size-7 shrink-0 place-items-center rounded-full [&_svg]:size-3.5" aria-hidden>
+              <StaggerItem index={i} step={0.06} className="bg-muted/60 flex items-start gap-2.5 rounded-lg px-3 py-2">
+                <span className="bg-background text-muted-foreground mt-0.5 grid size-6 shrink-0 place-items-center rounded-full [&_svg]:size-3" aria-hidden>
                   {s.icon}
                 </span>
                 <span className="min-w-0">
-                  <span className="text-foreground block truncate text-meta font-medium">{s.title}</span>
-                  <span className="text-muted-foreground block truncate text-micro">{s.body}</span>
+                  <span className="text-foreground block text-meta leading-snug font-medium">{s.title}</span>
+                  <span className="text-muted-foreground block text-micro leading-snug">{s.body}</span>
                 </span>
               </StaggerItem>
             </li>
@@ -213,6 +213,7 @@ export function Hub({
   boxes,
   lifecycle,
   loading,
+  offline = false,
   sessionRuns,
   onBooting,
   onStarted,
@@ -225,6 +226,8 @@ export function Hub({
   boxes: BoxView[];
   lifecycle: FleetLifecycle;
   loading: boolean;
+  /** The fleet poll is failing and nothing has been received: the sentence must not promise a machine. */
+  offline?: boolean;
   sessionRuns: SessionRun[];
   onBooting: (task: string) => void;
   onStarted: (box: string, task: string, inferred?: string[]) => void;
@@ -353,6 +356,7 @@ export function Hub({
   const fileInput = React.useRef<HTMLInputElement>(null);
   // The 3-step strip stays until this browser has started a task (see HowItWorks).
   const [howto, setHowto] = React.useState(() => !howtoDone());
+  const [gsDismissed, setGsDismissed] = React.useState(gettingStartedDismissed);
   const finishHowto = () => {
     markHowtoDone();
     setHowto(false);
@@ -460,7 +464,7 @@ export function Hub({
   }, [howto, loading, runs.length, sessionRuns.length]);
 
   return (
-    <div className="h-full min-w-0 overflow-y-auto">
+    <div className="hub-stage h-full min-w-0 overflow-y-auto">
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-8 px-5 pt-8 pb-16 md:px-6 md:pt-[8vh]">
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}>
           <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2 mb-3 md:hidden" aria-label="Back to machines">
@@ -476,7 +480,13 @@ export function Hub({
               <Bar className="h-3 w-[40%]" />
             </div>
           ) : (
-            <p className="text-muted-foreground mt-2 max-w-[56ch] text-body">{fleetLine(boxes, lifecycle)}</p>
+            <p className="text-muted-foreground mt-2 max-w-[56ch] text-body">
+              {offline
+                ? boxes.length
+                  ? "The controller isn't answering — this is the last snapshot. A new task starts as soon as it's back."
+                  : "The fleet can't be reached right now. Your task is kept here until the connection comes back."
+                : fleetLine(boxes, lifecycle)}
+            </p>
           )}
         </motion.div>
 
@@ -491,7 +501,7 @@ export function Hub({
             onSubmit={getMe()?.kind === "user" && (getMe() as { expired?: boolean }).expired ? () => {} : submit}
             isLoading={busy}
             className={cn(
-              "bg-card border-line-strong focus-within:border-live/60 focus-within:shadow-[0_0_0_3px_color-mix(in_oklch,var(--live)_18%,transparent)] relative rounded-xl p-2 shadow-e1 transition-[border-color,box-shadow] duration-200",
+              "bg-card border-line-strong composer-depth focus-within:border-live/60 focus-within:shadow-[0_0_0_3px_color-mix(in_oklch,var(--live)_18%,transparent),0_1px_2px_oklch(0_0_0/0.05),0_8px_24px_-16px_oklch(0_0_0/0.25)] relative rounded-2xl p-2.5 transition-[border-color,box-shadow] duration-200",
               dragOver && "border-live",
               (voice.state === "listening" || voice.state === "arming") && "mic-glow"
             )}
@@ -536,7 +546,7 @@ export function Hub({
                   exit={{ opacity: 0 }}
                   transition={{ duration: still ? 0.08 : 0.15 }}
                   aria-hidden
-                  className="bg-card/90 border-live text-live pointer-events-none absolute inset-0 z-10 grid place-items-center rounded-xl border-2 border-dashed backdrop-blur-[2px]"
+                  className="bg-card/90 border-live text-live pointer-events-none absolute inset-0 z-10 grid place-items-center rounded-2xl border-2 border-dashed backdrop-blur-[2px]"
                 >
                   <span className="flex items-center gap-2 text-meta font-medium">
                     <ImagePlus className="size-4" aria-hidden />
@@ -573,13 +583,13 @@ export function Hub({
             <PromptInputTextarea
               id="new-task"
               placeholder="Describe a task. A fresh sandbox picks it up…"
-              className="min-h-14 px-2.5 pt-2 text-body"
+              className="min-h-[4.5rem] px-2.5 pt-2 text-lead"
             />
 
             {picked.length > 0 && (
               <div className="enter mt-1 flex flex-wrap gap-1.5 px-1" onClick={(e) => e.stopPropagation()}>
                 {picked.map((p) => (
-                  <span key={p.repo} className="bg-muted text-foreground inline-flex h-7 items-center gap-1.5 rounded-md pl-2 pr-1 font-mono text-micro">
+                  <span key={p.repo} className="bg-muted/80 text-foreground inline-flex h-7 items-center gap-1.5 rounded-md border border-transparent pr-1 pl-2 font-mono text-micro transition-colors focus-within:border-live/50">
                     {p.private && <Lock className="text-muted-foreground size-3" aria-label="private" />}
                     {p.repo}
                     <input
@@ -653,7 +663,9 @@ export function Hub({
                   )}
                 >
                   {picked.length ? <Plus className="size-3.5" aria-hidden /> : <GitBranch className="size-3.5" aria-hidden />}
-                  {picked.length ? "Add another repo" : "Attach repos"}
+                  {/* Phone: the action row has ~330px; the short label keeps every control on one line. */}
+                  <span className="hidden sm:inline">{picked.length ? "Add another repo" : "Attach repos"}</span>
+                  <span className="sm:hidden">{picked.length ? "Add repo" : "Repos"}</span>
                 </button>
                 <ModelChip current={model.current} models={model.models} defaultId={model.defaultId} onPick={model.pick} />
                 <button
@@ -662,8 +674,10 @@ export function Hub({
                   aria-expanded={verifyOpen}
                   title="Verify the result after the run"
                   className={cn(
-                    "flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2 text-micro font-medium transition-colors",
-                    verifyActive ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                    "h-7 cursor-pointer items-center gap-1.5 rounded-md px-2 text-micro font-medium transition-colors",
+                    // Phone: the row has ~330px and this is the advanced option — it stays reachable
+                    // once set (the chip is lit) but doesn't push the send button onto a second line.
+                    verifyActive ? "bg-muted text-foreground flex" : "text-muted-foreground hover:bg-muted hover:text-foreground hidden sm:flex"
                   )}
                 >
                   <ShieldCheck className="size-3.5" aria-hidden />
@@ -719,19 +733,17 @@ export function Hub({
             </p>
           </div>
           <Lightbox src={preview?.dataUrl ?? null} name={preview?.name ?? ""} open={!!preview} onClose={() => setPreview(null)} />
-          {error && (
-            <p className="text-destructive mt-2 px-1 text-micro sm:hidden" role="alert">
-              {error}
-            </p>
-          )}
 
-          <div className="mt-3 flex flex-wrap gap-1.5">
+          {/* Starters: one-tap briefs. Chips lift a hair on hover (hover-raise) — the same idiom as
+              the composer's send button — and the icon warms to say "this is what you'd get". */}
+          <div className="mt-3 flex flex-wrap gap-1.5" role="list" aria-label="Task starters">
             {STARTERS.map((s) => (
               <button
                 key={s.label}
                 type="button"
+                role="listitem"
                 onClick={() => applyStarter(s)}
-                className="text-muted-foreground hover:text-foreground hover:bg-muted flex cursor-pointer items-center gap-1.5 rounded-md px-2.5 py-1.5 text-meta transition-colors [&_svg]:size-3.5 [&_svg]:text-faint hover:[&_svg]:text-muted-foreground"
+                className="hover-raise bg-card text-muted-foreground hover:text-foreground hover:border-line-strong flex h-8 cursor-pointer items-center gap-1.5 rounded-full border pr-3 pl-2.5 text-meta [&_svg]:size-3.5 [&_svg]:text-faint [&_svg]:transition-colors [&_svg]:duration-150 hover:[&_svg]:text-live"
               >
                 {s.icon}
                 {s.label}
@@ -740,20 +752,30 @@ export function Hub({
           </div>
         </motion.div>
 
-        {!loading && runs.length === 0 && getMe()?.kind === "user" && <GettingStarted />}
-        {!loading && runs.length === 0 && (
+        {!loading && runs.length === 0 && getMe()?.kind === "user" && <GettingStarted onDismiss={() => setGsDismissed(true)} />}
+        {/* Offline: the headline already says the fleet can't be read; a "Nothing running" card
+            under it would be a claim about machines we cannot see. While the checklist is up it
+            already explains what appears here — one teaching card at a time. */}
+        {!loading && !offline && runs.length === 0 && (getMe()?.kind !== "user" || gsDismissed) && (
           <motion.section
             aria-label="No runs yet"
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
-            className="flex flex-col items-center px-6 py-10 text-center"
+            className="rounded-xl border border-dashed px-6 py-9 text-center"
           >
-            <span className="bg-muted text-muted-foreground mb-4 grid size-12 place-items-center rounded-full" aria-hidden>
-              <Layers className="size-5" />
+            <span className="bg-muted text-muted-foreground mx-auto mb-3 grid size-10 place-items-center rounded-full" aria-hidden>
+              <Layers className="size-4" />
             </span>
-            <p className="text-foreground text-lead font-medium">Nothing running</p>
-            <p className="text-muted-foreground mt-1 max-w-[28em] text-meta leading-relaxed">Pick a repository, describe the task, and it will appear here while it runs.</p>
+            <p className="text-foreground text-meta font-medium">Nothing running</p>
+            <p className="text-muted-foreground mx-auto mt-1 max-w-[30em] text-meta leading-relaxed">
+              Describe a task above — with a repository if it needs one — and the machine that picks it up appears here while it works.
+            </p>
+            {lifecycle.capacity > 0 && (
+              <div className="mt-4 flex justify-center">
+                <Capacity boxes={boxes} capacity={lifecycle.capacity} size="sm" />
+              </div>
+            )}
           </motion.section>
         )}
 
@@ -770,7 +792,7 @@ export function Hub({
               </h2>
               {loading ? <Bar className="h-3 w-20" /> : <Capacity boxes={boxes} capacity={lifecycle.capacity} size="sm" />}
             </div>
-            <ul className="divide-y rounded-xl border">
+            <ul className="bg-card divide-y overflow-hidden rounded-xl border">
               {loading
                 ? [0, 1, 2].map((i) => (
                     <li key={i} className="flex items-center gap-3 px-3.5 py-3">
@@ -785,22 +807,23 @@ export function Hub({
                         type="button"
                         onClick={() => onOpen(b.name)}
                         onMouseEnter={() => prefetchWatch(b.name)}
-                        className="group hover:bg-muted flex w-full cursor-pointer items-center gap-3 px-3.5 py-2.5 text-left transition-colors first:rounded-t-xl last:rounded-b-xl"
+                        className="group hover:bg-muted/70 flex h-11 w-full cursor-pointer items-center gap-3 px-3.5 text-left transition-colors duration-150"
                       >
                         <StateStamp state={displayState(b)} exitCode={b.exitCode} className="w-24 shrink-0" />
                         <span className="text-foreground min-w-0 flex-1 truncate text-meta">
                           {b.runState === "waiting" && b.question ? questionHeadline(b.question) : threadTitle(b)}
                         </span>
                         {b.lastOutputAt && (
-                          <span className="text-faint hidden shrink-0 text-micro sm:inline">
+                          <span className="text-faint tabular hidden shrink-0 text-micro sm:inline">
                             {b.runState === "running" ? "active " : ""}
                             {fmtAgo(b.lastOutputAt)}
                           </span>
                         )}
-                        <span className="stamp text-muted-foreground shrink-0" title={shortName(b.name)}>
+                        {/* Phone: the task wins the row; the machine name is on the thread it opens. */}
+                        <span className="stamp text-muted-foreground hidden shrink-0 sm:inline" title={shortName(b.name)}>
                           {friendlyName(b.name)}
                         </span>
-                        <ArrowRight className="text-muted-foreground size-3.5 shrink-0 -translate-x-0.5 opacity-0 transition-[opacity,translate] duration-150 group-hover:translate-x-0 group-hover:opacity-100" />
+                        <ArrowRight className="text-muted-foreground size-3.5 shrink-0 -translate-x-0.5 opacity-0 transition-[opacity,translate] duration-150 group-hover:translate-x-0 group-hover:opacity-100 group-focus-visible:translate-x-0 group-focus-visible:opacity-100" />
                       </button>
                     </li>
                   ))}
@@ -825,6 +848,8 @@ export function Hub({
             <ul className="-mx-2 flex flex-col">
               {sessionRuns.slice(0, 6).map((r, i) => {
                 const box = boxes.find((b) => b.name === r.box);
+                // With no snapshot at all, "gone" would be a guess: the row waits, unlabelled as dead.
+                const unknown = offline && boxes.length === 0;
                 const gone = !live.has(r.box);
                 return (
                   <li key={r.box} className="stagger-item" style={{ "--i": i + 2 } as React.CSSProperties}>
@@ -834,14 +859,14 @@ export function Hub({
                       onClick={() => onOpen(r.box)}
                       onMouseEnter={() => !gone && prefetchWatch(r.box)}
                       className={cn(
-                        "group flex w-full items-center gap-3 border-b px-2 py-2.5 text-left transition-colors last:border-b-0",
+                        "group flex min-h-11 w-full items-center gap-3 rounded-md px-2 py-2 text-left transition-colors duration-150",
                         gone ? "cursor-default" : "hover:bg-muted cursor-pointer"
                       )}
                     >
                       {box ? (
                         <StateStamp state={displayState(box)} exitCode={box.exitCode} className="w-24 shrink-0" />
                       ) : (
-                        <span className="label text-faint w-24 shrink-0">destroyed</span>
+                        <span className="label text-faint w-24 shrink-0">{unknown ? "unreachable" : "destroyed"}</span>
                       )}
                       <span className={cn("min-w-0 flex-1 truncate text-meta", gone ? "text-muted-foreground" : "text-foreground")}>
                         {box ? threadTitle(box) : r.task}

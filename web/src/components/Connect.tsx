@@ -6,7 +6,7 @@ import { api, type Me } from "@/lib/api";
 import { getMe } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { AnimatedTabs, TabPanel } from "@/components/ui/animated-tabs";
-import { CopyButton } from "@/components/ApiKeys";
+import { CopyButton } from "@/components/ui/secret";
 import { cn } from "@/lib/utils";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
@@ -78,9 +78,9 @@ export function Connect({ onDone, onBack, welcome = false }: { onDone: () => voi
 
   return (
     <div className="h-full min-w-0 overflow-y-auto">
-      <div className="mx-auto max-w-2xl px-5 py-8 md:px-8 md:py-12">
+      <div className="mx-auto max-w-2xl px-5 py-6 md:px-8 md:py-8">
         {!welcome && (
-          <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2 mb-4">
+          <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2 mb-3">
             <ArrowLeft className="size-4" />
             Account
           </Button>
@@ -88,7 +88,7 @@ export function Connect({ onDone, onBack, welcome = false }: { onDone: () => voi
         <header className="mb-8">
           {welcome && <p className="label text-live mb-2">Welcome{me?.kind === "user" && me.name ? `, ${me.name.split(" ")[0]}` : ""}</p>}
           <h1 className="text-foreground font-serif text-h1 font-normal tracking-[-0.01em]">Connect your IDE</h1>
-          <p className="text-muted-foreground mt-1 text-body leading-relaxed">Your editor delegates tasks to machines through the MCP endpoint. This key identifies you; every machine it starts is yours alone.</p>
+          <p className="text-muted-foreground mt-1 max-w-[64ch] text-meta">Your editor delegates tasks to machines through the MCP endpoint. This key identifies you; every machine it starts is yours alone.</p>
         </header>
 
         {/* 1 — the key */}

@@ -1,6 +1,7 @@
 import * as React from "react";
 import { Markdown } from "@/components/ui/markdown";
 import { stabilizeMarkdown } from "@/lib/markdown-stream";
+import { cn } from "@/lib/utils";
 
 /**
  * The live-feeling reveal for the NEWEST in-progress assistant block.
@@ -58,13 +59,17 @@ export function StreamingMarkdown({ text }: { text: string }) {
   const revealed = reduced ? text : text.slice(0, shown);
   const streaming = !reduced && shown < text.length;
   // Render the slice as the stable document it is becoming: a fence still being typed is hidden and
-  // an open fence is virtually closed, so a code block never flickers in as prose-then-panel.
-  const safe = React.useMemo(() => (streaming ? stabilizeMarkdown(revealed) : revealed), [revealed, streaming]);
+  // an open fence is virtually closed, so a code block never flickers in as prose-then-panel. The
+  // FULL text is stabilised too: the agent is mid-reply, so the log's tail can be an open fence.
+  const safe = React.useMemo(() => stabilizeMarkdown(revealed), [revealed]);
 
+  // The caret belongs to the whole live reply, not just to the reveal: between two log deltas the
+  // agent is still writing, and a caret that vanished there made every pause look like the end.
+  // It sits inline after the last glyph (see styles/thread.css) and blinks only once caught up.
   return (
-    <div className="relative">
+    <div className={cn("md-live relative", streaming && "md-catching-up")}>
       <Markdown className="prose-agent">{safe}</Markdown>
-      {streaming && <span className="caret-steady text-muted-foreground align-baseline" aria-hidden>▍</span>}
+      <span className="md-caret-block" aria-hidden />
     </div>
   );
 }

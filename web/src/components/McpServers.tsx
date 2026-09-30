@@ -1,33 +1,41 @@
 import * as React from "react";
-import { Braces, Check, ChevronDown, Copy, KeyRound, List, Plus, RotateCcw, Search, Stethoscope, Trash2, WandSparkles, X } from "lucide-react";
+import { Braces, Check, ClipboardPaste, Copy, List, Plug, Plus, RotateCcw, Search, WandSparkles, X } from "lucide-react";
 import { toast } from "sonner";
-import { api, type McpServersResponse, type McpServerView, type McpTransport } from "@/lib/api";
+import { api, type McpServersResponse, type McpServerView } from "@/lib/api";
 import { useCached } from "@/lib/cache";
-import { BrandGlyph } from "@/lib/brandIcon";
 import { Button } from "@/components/ui/button";
-import { ArmButton } from "@/components/ui/arm-button";
-import { Switch } from "@/components/ui/switch";
 import { Collapse } from "@/components/ui/collapse";
-import { Swap } from "@/components/ui/swap";
+import { Swap, StaggerItem } from "@/components/ui/swap";
 import { AnimatedTabs } from "@/components/ui/animated-tabs";
+import { FilterChip } from "@/components/ui/filter-chip";
+import { Sheet } from "@/components/ui/sheet";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { fieldClass } from "@/components/ui/field";
+import { Kbd } from "@/components/ui/kbd";
 import { Bar } from "@/components/thread/Skeletons";
 import { JsonEditor, jsonErrorLine } from "@/components/JsonEditor";
 import { cn } from "@/lib/utils";
+import { ServerRow, type Mutate } from "@/components/mcp/ServerRow";
+import { ServerSheet } from "@/components/mcp/ServerSheet";
+import { errMsg, type Health } from "@/components/mcp/model";
 
 /**
- * MCP servers, two ways to look at the same store:
+ * MCP servers — the tools every sandbox agent gets.
  *
- *   List — one row per server (brand glyph · name · transport · target · env count · switch). A row
- *          opens in place into an editor: name, transport, command + args, URL, env and headers as
- *          key/value rows. Secret values arrive masked; leaving one alone keeps what is stored.
- *   JSON — the whole config as the `{"mcpServers": …}` file every IDE speaks, in a real editor
- *          (gutter, colours, error line). Format, copy, reset, save. Saving replaces the store;
- *          masked secrets that were not touched survive.
+ *   List  — one row per server: brand glyph, name, a status pill that tells the truth (off · on ·
+ *           connected · N tools · failed · token expired) and a sentence saying what it runs or where
+ *           it connects. Test / edit / remove are always visible and quiet; the switch is the one
+ *           loud control. A test's verdict lands under the row as chips (tools) or a plain-language
+ *           explanation with a fix.
+ *   Sheet — add/edit as a guided form: transport picker with a sentence each, one command line
+ *           parsed into tokens, secret-aware key·value rows, and a live "what the agent sees" JSON —
+ *           or the same server as JSON. ⌘↵ saves, Esc closes.
+ *   Paste — the `{"mcpServers": …}` blob an IDE exports, imported in one go.
+ *   JSON  — the whole store as an editable file; saving replaces it. Masked secrets left alone survive.
  */
 type View = "list" | "json";
-type Filter = "all" | "on" | "off";
-const MASKED = /^(••••|.{2}….{3})$/;
+type Filter = "all" | "on" | "off" | "stdio" | "remote";
 
 export function McpServers() {
   const cached = useCached("mcp", (signal) => api.mcpServers(signal));
@@ -36,10 +44,13 @@ export function McpServers() {
   const [view, setView] = React.useState<View>("list");
   const [filter, setFilter] = React.useState<Filter>("all");
   const [query, setQuery] = React.useState("");
-  const [open, setOpen] = React.useState<string | null>(null); // row being edited, or "__new__"
+  const [editing, setEditing] = React.useState<{ server?: McpServerView } | null>(null);
+  const [pasting, setPasting] = React.useState(false);
+  const [health, setHealth] = React.useState<Record<string, Health>>({});
+  const [testing, setTesting] = React.useState<Record<string, boolean>>({});
 
-  const mutate = React.useCallback(
-    async (body: Record<string, unknown>, ok?: string) => {
+  const mutate = React.useCallback<Mutate>(
+    async (body, ok) => {
       const r = await api.mcpMutate(body);
       cached.setData(r);
       if (ok) toast.success(ok);
@@ -48,66 +59,83 @@ export function McpServers() {
     [cached]
   );
 
+  const test = React.useCallback((name: string) => {
+    setTesting((t) => ({ ...t, [name]: true }));
+    return api
+      .mcpTest(name)
+      .then((r) => {
+        setHealth((h) => ({ ...h, [name]: { ...r, at: Date.now() } }));
+        return r;
+      })
+      .catch((e: unknown) => {
+        const r = { ok: false, detail: errMsg(e), at: Date.now() };
+        setHealth((h) => ({ ...h, [name]: r }));
+        return r;
+      })
+      .finally(() => setTesting((t) => ({ ...t, [name]: false })));
+  }, []);
+  const dismiss = React.useCallback((name: string) => setHealth((h) => Object.fromEntries(Object.entries(h).filter(([k]) => k !== name))), []);
+
   const q = query.trim().toLowerCase();
-  const visible = (servers ?? []).filter((s) => {
+  const all = servers ?? [];
+  const counts = {
+    all: all.length,
+    on: all.filter((s) => s.enabled).length,
+    off: all.filter((s) => !s.enabled).length,
+    stdio: all.filter((s) => s.type === "stdio").length,
+    remote: all.filter((s) => s.type !== "stdio").length,
+  };
+  const visible = all.filter((s) => {
     if (filter === "on" && !s.enabled) return false;
     if (filter === "off" && s.enabled) return false;
+    if (filter === "stdio" && s.type !== "stdio") return false;
+    if (filter === "remote" && s.type === "stdio") return false;
     if (!q) return true;
     return [s.name, s.type, s.command, ...(s.args ?? []), s.url, ...Object.keys(s.env ?? {}), ...Object.keys(s.headers ?? {})].filter(Boolean).join(" ").toLowerCase().includes(q);
   });
-  const onCount = servers?.filter((s) => s.enabled).length ?? 0;
+  const noMatchLine = q ? `Nothing matches “${query.trim()}”.` : { all: "", on: "No servers are on.", off: "Every server is on.", stdio: "No command servers.", remote: "No remote servers." }[filter];
+  const hasServers = !!servers && servers.length > 0;
 
   return (
-    <section aria-labelledby="mcp-h">
-      <div className="mb-4 flex flex-wrap items-center gap-2">
+    <section aria-labelledby="mcp-h" className="scroll-mt-6">
+      <div className="mb-4 flex flex-wrap items-center gap-x-2 gap-y-3">
         <h2 id="mcp-h" className="text-foreground text-h3 font-semibold tracking-[-0.01em]">
           MCP servers
         </h2>
         {servers && (
-          <span className="text-muted-foreground text-meta">
-            {servers.length} · {onCount} on
+          <span className="text-muted-foreground text-meta tabular-nums">
+            {servers.length === 0 ? "none yet" : `${counts.on} of ${servers.length} on`}
           </span>
         )}
-        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-          {view === "list" && (
-            <>
-              <label className="bg-card focus-within:ring-ring flex h-8 items-center gap-1.5 rounded-md border px-2 focus-within:ring-2">
-                <Search className="text-muted-foreground size-3.5" aria-hidden />
-                <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter" aria-label="Filter servers" className="text-foreground placeholder:text-muted-foreground w-28 bg-transparent text-meta outline-none focus:w-44 transition-[width]" />
-                {query && (
-                  <button type="button" onClick={() => setQuery("")} aria-label="Clear" className="text-muted-foreground hover:text-foreground cursor-pointer">
-                    <X className="size-3.5" />
-                  </button>
-                )}
-              </label>
-              <AnimatedTabs
-                ariaLabel="Filter by state"
-                className="h-8"
-                value={filter}
-                onChange={setFilter}
-                items={[
-                  { value: "all", label: "All" },
-                  { value: "on", label: "On" },
-                  { value: "off", label: "Off" },
-                ]}
-              />
-            </>
+        <div className="ml-auto flex items-center gap-2">
+          {hasServers && (
+            <AnimatedTabs
+              ariaLabel="View"
+              className="h-8"
+              value={view}
+              onChange={setView}
+              items={[
+                { value: "list", icon: <List className="size-3.5" />, label: "List" },
+                { value: "json", icon: <Braces className="size-3.5" />, label: "JSON" },
+              ]}
+            />
           )}
-          <AnimatedTabs
-            ariaLabel="View"
-            className="h-8"
-            value={view}
-            onChange={setView}
-            items={[
-              { value: "list", icon: <List className="size-3.5" />, label: "List" },
-              { value: "json", icon: <Braces className="size-3.5" />, label: "JSON" },
-            ]}
-          />
-          {view === "list" && (
-            <Button size="sm" onClick={() => setOpen(open === "__new__" ? null : "__new__")}>
-              <Plus />
-              Add
-            </Button>
+          {view === "list" && hasServers && (
+            <>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button size="sm" variant="outline" onClick={() => setPasting(true)} aria-label="Paste config" className="px-2.5">
+                    <ClipboardPaste />
+                    <span className="hidden md:inline">Paste</span>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Import the mcpServers JSON your IDE exports</TooltipContent>
+              </Tooltip>
+              <Button size="sm" onClick={() => setEditing({})}>
+                <Plus />
+                Add server
+              </Button>
+            </>
           )}
         </div>
       </div>
@@ -119,322 +147,234 @@ export function McpServers() {
       </Collapse>
 
       <Swap state={view}>
-      {view === "json" ? (
-        <JsonView config={config} onSave={(json) => mutate({ action: "replace", json }, "Configuration saved")} />
-      ) : (
-        <div className="bg-card overflow-hidden rounded-xl border shadow-e1">
-          <Collapse open={open === "__new__"}>
-            <div className="bg-muted/40 border-b px-4 py-4">
-              <ServerEditor onMutate={mutate} onDone={() => setOpen(null)} />
+        {view === "json" ? (
+          <JsonView config={config} onSave={(json) => mutate({ action: "replace", json }, "Configuration saved")} />
+        ) : servers === null ? (
+          <ListSkeleton />
+        ) : servers.length === 0 ? (
+          <EmptyState onAdd={() => setEditing({})} onPaste={() => setPasting(true)} />
+        ) : (
+          <div className="bg-card overflow-hidden rounded-xl border shadow-e1">
+            <div className="bg-muted/30 flex flex-wrap items-center gap-2 border-b px-3 py-2.5 sm:px-4">
+              <div role="radiogroup" aria-label="Filter servers" className="flex flex-wrap items-center gap-1.5">
+                <FilterChip active={filter === "all"} onClick={() => setFilter("all")} label="All" count={counts.all} />
+                <FilterChip active={filter === "on"} onClick={() => setFilter("on")} label="On" count={counts.on} tone="live" />
+                <FilterChip active={filter === "off"} onClick={() => setFilter("off")} label="Off" count={counts.off} />
+                <span className="bg-border mx-0.5 hidden h-4 w-px sm:block" aria-hidden />
+                <FilterChip active={filter === "stdio"} onClick={() => setFilter("stdio")} label="Command" count={counts.stdio} className="hidden sm:flex" />
+                <FilterChip active={filter === "remote"} onClick={() => setFilter("remote")} label="Remote" count={counts.remote} className="hidden sm:flex" />
+              </div>
+              <label className={cn(fieldClass, "focus-within:border-ring focus-within:ring-ring/40 ml-auto flex h-8 w-full items-center gap-1.5 rounded-full px-2.5 focus-within:ring-2 sm:w-auto")}>
+                <Search className="text-muted-foreground size-3.5 shrink-0" aria-hidden />
+                <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search" aria-label="Search servers" className="text-foreground placeholder:text-muted-foreground w-full bg-transparent text-meta outline-none sm:w-28 sm:transition-[width] sm:duration-200 sm:focus:w-44" />
+                {query && (
+                  <button type="button" onClick={() => setQuery("")} aria-label="Clear search" className="text-muted-foreground hover:text-foreground grid size-5 cursor-pointer place-items-center rounded-full">
+                    <X className="size-3.5" />
+                  </button>
+                )}
+              </label>
             </div>
-          </Collapse>
-          {servers === null ? (
-            <ul className="divide-y">
-              {[0, 1, 2, 3].map((i) => (
-                <li key={i} className="flex items-center gap-3 px-4 py-3">
-                  <Bar className="size-9 rounded-lg" />
-                  <div className="flex flex-col gap-2">
-                    <Bar className="h-3 w-28" />
-                    <Bar className="h-2.5 w-64" />
-                  </div>
-                  <Bar className="ml-auto h-5 w-9 rounded-full" />
-                </li>
-              ))}
-            </ul>
-          ) : servers.length === 0 ? (
-            <Empty title="No MCP servers yet" line="The agent already has shell, files, GitHub and the web. Add Jira, a database, your API — or paste your IDE's JSON in the JSON view." />
-          ) : visible.length === 0 ? (
-            <Empty title="Nothing matches" line={q ? `No server matches “${query.trim()}”.` : filter === "on" ? "No servers are on." : "No servers are off."} />
-          ) : (
-            <ul className="divide-y">
-              {visible.map((s) => (
-                <li key={s.name}>
-                  <ServerRow server={s} open={open === s.name} onToggleOpen={() => setOpen(open === s.name ? null : s.name)} onMutate={mutate} />
-                  <Collapse open={open === s.name}>
-                    <div className="bg-muted/40 border-b px-4 py-4">
-                      <ServerEditor initial={s} onMutate={mutate} onDone={() => setOpen(null)} />
-                    </div>
-                  </Collapse>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
+            {visible.length === 0 ? (
+              <div className="px-6 py-12 text-center">
+                <p className="text-foreground text-body font-medium">Nothing here</p>
+                <p className="text-muted-foreground mt-1 text-meta">{noMatchLine}</p>
+                {(q || filter !== "all") && (
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    className="mt-3"
+                    onClick={() => {
+                      setQuery("");
+                      setFilter("all");
+                    }}
+                  >
+                    Show all
+                  </Button>
+                )}
+              </div>
+            ) : (
+              <ul className="divide-y">
+                {visible.map((s, i) => (
+                  <StaggerItem key={s.name} index={i} className="contents">
+                    <li>
+                      <ServerRow server={s} health={health[s.name]} testing={!!testing[s.name]} onTest={() => void test(s.name)} onEdit={() => setEditing({ server: s })} onDismiss={() => dismiss(s.name)} onMutate={mutate} />
+                    </li>
+                  </StaggerItem>
+                ))}
+              </ul>
+            )}
+            <div className="text-faint flex items-center gap-2 border-t px-4 py-2 text-micro">
+              <Plug className="size-3" aria-hidden />
+              Every sandbox gets the servers that are on, from its next run or turn.
+            </div>
+          </div>
+        )}
       </Swap>
+
+      <Sheet open={editing !== null} onOpenChange={(o) => !o && setEditing(null)}>
+        {editing && <ServerSheet initial={editing.server} health={editing.server ? health[editing.server.name] : undefined} testing={editing.server ? !!testing[editing.server.name] : false} onTest={test} onMutate={mutate} onClose={() => setEditing(null)} />}
+      </Sheet>
+      <Dialog open={pasting} onOpenChange={setPasting}>
+        {pasting && <PasteDialog onMutate={mutate} onClose={() => setPasting(false)} />}
+      </Dialog>
     </section>
   );
 }
 
-function Empty({ title, line }: { title: string; line: string }) {
+/* ───────────────────────────── loading / empty ───────────────────────────── */
+
+function ListSkeleton() {
   return (
-    <div className="px-6 py-10 text-center">
-      <p className="text-foreground text-body font-medium">{title}</p>
-      <p className="text-muted-foreground mx-auto mt-1 max-w-md text-meta">{line}</p>
+    <div className="bg-card overflow-hidden rounded-xl border shadow-e1" aria-busy="true" aria-label="Loading servers">
+      <div className="bg-muted/30 flex items-center gap-1.5 border-b px-4 py-2.5">
+        <Bar className="h-8 w-16 rounded-full" />
+        <Bar className="h-8 w-14 rounded-full" />
+        <Bar className="h-8 w-14 rounded-full" />
+        <Bar className="ml-auto h-8 w-32 rounded-full" />
+      </div>
+      <ul className="divide-y">
+        {[0, 1, 2].map((i) => (
+          <li key={i} className="flex items-center gap-3 px-4 py-3">
+            <Bar className="size-10 rounded-[10px]" />
+            <div className="flex flex-1 flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <Bar className="h-3.5 w-24" />
+                <Bar className="h-4 w-10 rounded-full" />
+              </div>
+              <Bar className="h-3 w-56" />
+            </div>
+            <Bar className="hidden h-6 w-14 rounded-md sm:block" />
+            <Bar className="h-5 w-9 rounded-full" />
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
 
-/* ───────────────────────────── list row ───────────────────────────── */
-
-function ServerRow({ server: s, open, onToggleOpen, onMutate }: { server: McpServerView; open: boolean; onToggleOpen: () => void; onMutate: (b: Record<string, unknown>, ok?: string) => Promise<unknown> }) {
-  const [busy, setBusy] = React.useState(false);
-  const [testing, setTesting] = React.useState(false);
-  const [health, setHealth] = React.useState<{ ok: boolean; detail: string } | null>(null);
-  const target = s.type === "stdio" ? [s.command, ...(s.args ?? [])].join(" ") : s.url ?? "";
-  const envN = Object.keys(s.env ?? {}).length;
-  const hdrN = Object.keys(s.headers ?? {}).length;
-  const toggle = () => {
-    setBusy(true);
-    onMutate({ action: "toggle", name: s.name, enabled: !s.enabled })
-      .catch((e: unknown) => toast.error("Could not update", { description: e instanceof Error ? e.message : String(e) }))
-      .finally(() => setBusy(false));
-  };
-  const runTest = () => {
-    setTesting(true);
-    setHealth(null);
-    api
-      .mcpTest(s.name)
-      .then((r) => setHealth(r))
-      .catch((e: unknown) => setHealth({ ok: false, detail: e instanceof Error ? e.message : String(e) }))
-      .finally(() => setTesting(false));
-  };
+function EmptyState({ onAdd, onPaste }: { onAdd: () => void; onPaste: () => void }) {
   return (
-    <div className={cn("group px-4 py-2.5 transition-colors", open ? "bg-muted/40" : "hover:bg-muted/40", !s.enabled && !open && "bg-muted/20")}>
-    <div className="flex items-center gap-3">
-      <button type="button" onClick={onToggleOpen} aria-expanded={open} className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 text-left">
-        <span className={cn("bg-card grid size-9 shrink-0 place-items-center rounded-lg border transition-colors", open && "border-line-strong", !s.enabled && "opacity-50 grayscale")} aria-hidden>
-          <BrandGlyph hint={`${s.name} ${target}`} transport={s.type} className="size-[18px]" />
+    <div className="enter bg-card relative overflow-hidden rounded-xl border p-6 shadow-e1 sm:p-8">
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-[radial-gradient(60%_100%_at_50%_0%,color-mix(in_oklab,var(--live)_10%,transparent),transparent)]" aria-hidden />
+      <div className="relative flex flex-col items-center text-center">
+        <span className="bg-card text-live grid size-12 place-items-center rounded-xl border shadow-e1" aria-hidden>
+          <Plug className="size-5" strokeWidth={1.75} />
         </span>
-        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="flex min-w-0 items-center gap-2">
-            <span className={cn("truncate text-body font-medium", s.enabled ? "text-foreground" : "text-muted-foreground")}>{s.name}</span>
-            <span className="label text-muted-foreground shrink-0 rounded border px-1 py-px">{s.type}</span>
-            {s.tokenExpired && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="label bg-destructive/10 text-destructive shrink-0 rounded px-1 py-px">token expired</span>
-                </TooltipTrigger>
-                <TooltipContent>The stored token expired {new Date(s.tokenExpiresAt!).toLocaleString()} — the agent silently loses this server. Paste a fresh one.</TooltipContent>
-              </Tooltip>
-            )}
-          </span>
-          <span className="stamp text-muted-foreground min-w-0 truncate" title={target}>
-            {target}
-          </span>
-        </span>
-        {(envN > 0 || hdrN > 0) && (
-          <span className="stamp text-muted-foreground hidden shrink-0 items-center gap-1 sm:inline-flex">
-            <KeyRound className="size-3" aria-hidden />
-            {envN > 0 && `${envN} env`}
-            {envN > 0 && hdrN > 0 && " · "}
-            {hdrN > 0 && `${hdrN} hdr`}
-          </span>
-        )}
-        <ChevronDown className={cn("text-muted-foreground size-3.5 shrink-0 transition-transform duration-200", open && "rotate-180")} aria-hidden />
-      </button>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button size="icon-xs" variant="ghost" onClick={runTest} loading={testing} aria-label={`Test ${s.name}`} className="text-muted-foreground hover:text-foreground">
-            <Stethoscope />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>Test the connection — the same handshake the agent does at startup</TooltipContent>
-      </Tooltip>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Switch checked={s.enabled} onCheckedChange={toggle} disabled={busy} aria-label={s.enabled ? `Disable ${s.name}` : `Enable ${s.name}`} />
-        </TooltipTrigger>
-        <TooltipContent>{s.enabled ? "On — given to every new run and turn" : "Off — kept, not given to the agent"}</TooltipContent>
-      </Tooltip>
-    </div>
-    <Collapse open={health !== null}>
-      {health && (
-        <p role="status" className={cn("flex items-start gap-1.5 pt-1.5 pl-12 text-micro", health.ok ? "text-live" : "text-destructive")}>
-          {health.ok ? <Check className="mt-px size-3 shrink-0" aria-hidden /> : <X className="mt-px size-3 shrink-0" aria-hidden />}
-          <span className="min-w-0">{health.detail}</span>
+        <p className="text-foreground mt-4 text-lead font-medium">Give the agent more tools</p>
+        <p className="text-muted-foreground mt-1 max-w-[40ch] text-meta">
+          An MCP server hands the agent extra tools — Jira, a database, your own API. It already has shell, files, GitHub and the web; anything added here is available in every sandbox on its next run.
         </p>
-      )}
-    </Collapse>
+      </div>
+      <div className="relative mt-6 grid gap-2 sm:grid-cols-2">
+        <button type="button" onClick={onAdd} className="group bg-background hover-raise hover:border-line-strong flex cursor-pointer items-start gap-3 rounded-xl border p-4 text-left transition-colors">
+          <span className="bg-primary text-primary-foreground grid size-8 shrink-0 place-items-center rounded-lg shadow-e1" aria-hidden>
+            <Plus className="size-4" />
+          </span>
+          <span className="flex min-w-0 flex-col gap-0.5">
+            <span className="text-foreground text-meta font-medium">Add a server</span>
+            <span className="text-muted-foreground text-micro leading-snug">A command the sandbox runs, or a URL it connects to — with its secrets.</span>
+          </span>
+        </button>
+        <button type="button" onClick={onPaste} className="group bg-background hover-raise hover:border-line-strong flex cursor-pointer items-start gap-3 rounded-xl border p-4 text-left transition-colors">
+          <span className="bg-muted text-muted-foreground group-hover:text-foreground grid size-8 shrink-0 place-items-center rounded-lg transition-colors" aria-hidden>
+            <ClipboardPaste className="size-4" />
+          </span>
+          <span className="flex min-w-0 flex-col gap-0.5">
+            <span className="text-foreground text-meta font-medium">Paste a config</span>
+            <span className="text-muted-foreground text-micro leading-snug">
+              The <span className="stamp">mcpServers</span> JSON from Cursor, Claude Code or VS Code, imported as-is.
+            </span>
+          </span>
+        </button>
+      </div>
     </div>
   );
 }
 
-/* ───────────────────────────── inline editor ───────────────────────────── */
+/* ───────────────────────────── paste config ───────────────────────────── */
 
-type KV = { k: string; v: string; secret: boolean };
-const toKV = (m?: Record<string, string>): KV[] => Object.entries(m ?? {}).map(([k, v]) => ({ k, v, secret: MASKED.test(v) }));
-const fromKV = (rows: KV[]) => Object.fromEntries(rows.filter((r) => r.k.trim()).map((r) => [r.k.trim(), r.v]));
-
-function ServerEditor({ initial, onMutate, onDone }: { initial?: McpServerView; onMutate: (b: Record<string, unknown>, ok?: string) => Promise<unknown>; onDone: () => void }) {
-  const [name, setName] = React.useState(initial?.name ?? "");
-  const [type, setType] = React.useState<McpTransport>(initial?.type ?? "stdio");
-  const [command, setCommand] = React.useState(initial?.command ?? "");
-  const [args, setArgs] = React.useState((initial?.args ?? []).join("\n"));
-  const [url, setUrl] = React.useState(initial?.url ?? "");
-  const [env, setEnv] = React.useState<KV[]>(() => toKV(initial?.env));
-  const [headers, setHeaders] = React.useState<KV[]>(() => toKV(initial?.headers));
+function PasteDialog({ onMutate, onClose }: { onMutate: Mutate; onClose: () => void }) {
+  const [text, setText] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [err, setErr] = React.useState<string | null>(null);
-  const valid = name.trim() && (type === "stdio" ? command.trim() : /^https?:\/\//.test(url.trim()));
-
-  const save = async () => {
+  const parsed = React.useMemo(() => {
+    if (!text.trim()) return null;
+    try {
+      const v: unknown = JSON.parse(text);
+      if (!v || typeof v !== "object" || Array.isArray(v)) return { error: "Expected a JSON object.", line: 1 };
+      const map = "mcpServers" in v && v.mcpServers && typeof v.mcpServers === "object" ? v.mcpServers : "name" in v ? { one: v } : v;
+      return { names: Object.keys(map as object) };
+    } catch (e) {
+      const msg = errMsg(e);
+      return { error: msg, line: jsonErrorLine(text, msg) };
+    }
+  }, [text]);
+  const names: string[] = parsed !== null && "names" in parsed && parsed.names ? parsed.names : [];
+  const count = names.length;
+  const submit = async () => {
+    if (count === 0 || busy) return;
     setBusy(true);
     setErr(null);
     try {
-      await onMutate(
-        {
-          action: "upsert",
-          previousName: initial?.name,
-          server: {
-            name: name.trim(),
-            type,
-            command: type === "stdio" ? command.trim() : undefined,
-            args: type === "stdio" ? args.split("\n").map((a) => a.trim()).filter(Boolean) : undefined,
-            url: type !== "stdio" ? url.trim() : undefined,
-            env: fromKV(env),
-            headers: type !== "stdio" ? fromKV(headers) : undefined,
-            enabled: initial?.enabled ?? true,
-          },
-        },
-        initial ? (initial.name !== name.trim() ? `Renamed to ${name.trim()}` : `Saved ${name.trim()}`) : `Added ${name.trim()}`
-      );
-      onDone();
+      await onMutate({ action: "import", json: text }, `Imported ${count} server${count === 1 ? "" : "s"}`);
+      onClose();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
-    } finally {
+      setErr(errMsg(e));
       setBusy(false);
     }
   };
-  const remove = async () => {
-    if (!initial) return;
-    setBusy(true);
-    try {
-      await onMutate({ action: "remove", name: initial.name }, `Removed ${initial.name}`);
-      onDone();
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
-      setBusy(false);
-    }
-  };
-
-  const field = "text-foreground placeholder:text-muted-foreground bg-card focus:ring-ring h-9 w-full rounded-md border px-2.5 font-mono text-meta outline-none focus:ring-2";
   return (
-    <form
-      className="grid gap-4"
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (valid) void save();
+    <DialogContent
+      title="Paste config"
+      description="The mcpServers JSON from Cursor, Claude Code, VS Code or Claude Desktop. Servers with the same name are replaced."
+      className="w-[min(40rem,calc(100vw-2rem))]"
+      onKeyDown={(e) => {
+        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+          e.preventDefault();
+          void submit();
+        }
       }}
     >
-      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
-        <Field label="Name">
-          <div className="flex items-center gap-2">
-            <BrandGlyph hint={`${name} ${command} ${url}`} transport={type} />
-            <input autoFocus={!initial} value={name} onChange={(e) => setName(e.target.value)} placeholder="atlassian" className={field} />
-          </div>
-        </Field>
-        <Field label="Transport">
-          <AnimatedTabs ariaLabel="Transport" size="md" value={type} onChange={setType} items={(["stdio", "http", "sse"] as McpTransport[]).map((t) => ({ value: t, label: t }))} />
-        </Field>
-      </div>
-
-      {type === "stdio" ? (
-        <div className="grid gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-          <Field label="Command" hint="Runs inside the sandbox.">
-            <input value={command} onChange={(e) => setCommand(e.target.value)} placeholder="npx" className={field} />
-          </Field>
-          <Field label="Arguments" hint="One per line.">
-            <textarea value={args} onChange={(e) => setArgs(e.target.value)} rows={Math.max(2, Math.min(6, args.split("\n").length))} placeholder={"-y\n@modelcontextprotocol/server-postgres"} className={cn(field, "h-auto resize-y py-1.5")} />
-          </Field>
+      <div className="flex flex-col gap-3">
+        <JsonEditor value={text} onChange={setText} onSave={() => void submit()} errorLine={parsed && "error" in parsed ? parsed.line : null} className="h-64" />
+        <div className={cn("min-h-[1.25rem] text-micro", parsed && "error" in parsed ? "text-destructive" : "text-muted-foreground")} role={parsed && "error" in parsed ? "alert" : undefined}>
+          {parsed === null ? (
+            <span className="stamp text-faint">{'{ "mcpServers": { "name": { "command": "npx", "args": ["…"] } } }'}</span>
+          ) : "error" in parsed ? (
+            `${parsed.error}${parsed.line ? ` (line ${parsed.line})` : ""}`
+          ) : (
+            <span className="flex flex-wrap items-center gap-1.5">
+              <Check className="text-ok size-3.5" aria-hidden />
+              {count} server{count === 1 ? "" : "s"} found
+              {names.slice(0, 6).map((n) => (
+                <span key={n} className="stamp bg-muted text-foreground rounded-md px-1.5 py-0.5">
+                  {n}
+                </span>
+              ))}
+              {count > 6 && <span className="text-faint">+{count - 6} more</span>}
+            </span>
+          )}
         </div>
-      ) : (
-        <Field label="URL">
-          <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://mcp.example.com/mcp" className={field} />
-        </Field>
-      )}
-
-      <KVTable label="Environment" rows={env} onChange={setEnv} keyPlaceholder="DATABASE_URL" />
-      {type !== "stdio" && <KVTable label="Headers" rows={headers} onChange={setHeaders} keyPlaceholder="Authorization" />}
-
-      <Collapse open={!!err}>
-        <p className="bg-destructive/10 text-destructive rounded-lg px-3 py-2 text-meta" role="alert">
-          {err}
-        </p>
-      </Collapse>
-      <div className="flex items-center gap-2">
-        {initial && <ArmButton size="sm" variant="ghost" icon={<Trash2 />} label="Remove" armedLabel={`Remove ${initial.name}?`} onConfirm={remove} disabled={busy} className="text-muted-foreground hover:text-destructive" />}
-        <div className="ml-auto flex items-center gap-2">
-          <Button type="button" size="sm" variant="ghost" onClick={onDone}>
+        <Collapse open={!!err}>
+          <p className="bg-destructive/10 text-destructive rounded-lg px-3 py-2 text-meta" role="alert">
+            {err}
+          </p>
+        </Collapse>
+        <div className="flex items-center gap-2">
+          <span className="text-faint hidden items-center gap-1 text-micro sm:inline-flex">
+            <Kbd>⌘</Kbd>
+            <Kbd>↵</Kbd> import
+          </span>
+          <Button type="button" size="sm" variant="ghost" onClick={onClose} className="ml-auto">
             Cancel
           </Button>
-          <Button type="submit" size="sm" loading={busy} disabled={!valid}>
-            <Check />
-            {initial ? "Save" : "Add server"}
+          <Button size="sm" loading={busy} disabled={count === 0} onClick={() => void submit()}>
+            <ClipboardPaste />
+            Import{count > 0 ? ` ${count}` : ""}
           </Button>
         </div>
       </div>
-    </form>
-  );
-}
-
-function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
-  return (
-    <label className="flex min-w-0 flex-col gap-1.5">
-      <span className="label text-muted-foreground flex items-baseline gap-2">
-        {label}
-        {hint && <span className="font-normal normal-case tracking-normal opacity-70">{hint}</span>}
-      </span>
-      {children}
-    </label>
-  );
-}
-
-function KVTable({ label, rows, onChange, keyPlaceholder }: { label: string; rows: KV[]; onChange: (r: KV[]) => void; keyPlaceholder: string }) {
-  const update = (i: number, patch: Partial<KV>) => onChange(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
-  const cell = "text-foreground placeholder:text-muted-foreground bg-card focus:ring-ring h-8 w-full rounded-md border px-2 font-mono text-meta outline-none focus:ring-2";
-  return (
-    <div className="flex flex-col gap-1.5">
-      <span className="label text-muted-foreground flex items-center gap-2">
-        {label}
-        {rows.length > 0 && <span className="font-normal normal-case tracking-normal opacity-70">{rows.length}</span>}
-      </span>
-      {rows.length > 0 && (
-        <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)_auto] gap-1.5">
-          {rows.map((r, i) => (
-            <React.Fragment key={i}>
-              <input value={r.k} onChange={(e) => update(i, { k: e.target.value })} placeholder={keyPlaceholder} aria-label={`${label} key ${i + 1}`} className={cell} />
-              <div className="relative">
-                <input
-                  value={r.v}
-                  onChange={(e) => update(i, { v: e.target.value, secret: false })}
-                  onFocus={(e) => r.secret && e.currentTarget.select()}
-                  placeholder="value"
-                  aria-label={`${label} value ${i + 1}`}
-                  className={cn(cell, r.secret && "text-muted-foreground pr-20")}
-                />
-                {r.secret && (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span className="text-muted-foreground absolute top-1/2 right-2 flex -translate-y-1/2 items-center gap-1 text-micro">
-                        <KeyRound className="size-3" aria-hidden /> stored
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent>Secret — shown masked. Type a new value to replace it; leave it to keep it.</TooltipContent>
-                  </Tooltip>
-                )}
-              </div>
-              <button type="button" onClick={() => onChange(rows.filter((_, j) => j !== i))} aria-label={`Remove ${r.k || "row"}`} className="text-muted-foreground hover:text-destructive grid size-8 cursor-pointer place-items-center rounded-md">
-                <X className="size-3.5" />
-              </button>
-            </React.Fragment>
-          ))}
-        </div>
-      )}
-      <button type="button" onClick={() => onChange([...rows, { k: "", v: "", secret: false }])} className="text-muted-foreground hover:text-foreground flex w-fit cursor-pointer items-center gap-1 text-micro">
-        <Plus className="size-3" aria-hidden /> Add {label.toLowerCase() === "headers" ? "header" : "variable"}
-      </button>
-    </div>
+    </DialogContent>
   );
 }
 
@@ -452,19 +392,16 @@ function JsonView({ config, onSave }: { config: McpServersResponse["config"] | n
 
   const parsed = React.useMemo(() => {
     try {
-      const v = JSON.parse(text) as { mcpServers?: Record<string, unknown> };
-      if (!v || typeof v !== "object" || !v.mcpServers || typeof v.mcpServers !== "object") return { error: 'Top level must be { "mcpServers": { … } }', line: 1 };
+      const v: unknown = JSON.parse(text);
+      if (!v || typeof v !== "object" || !("mcpServers" in v) || !v.mcpServers || typeof v.mcpServers !== "object") return { error: 'Top level must be { "mcpServers": { … } }', line: 1 };
       return { value: v, count: Object.keys(v.mcpServers).length };
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = errMsg(e);
       return { error: msg, line: jsonErrorLine(text, msg) };
     }
   }, [text]);
   const dirty = text !== pristine;
 
-  const format = () => {
-    if ("value" in parsed && parsed.value) setText(JSON.stringify(parsed.value, null, 2));
-  };
   const save = async () => {
     if (!dirty || "error" in parsed) return;
     setBusy(true);
@@ -472,7 +409,7 @@ function JsonView({ config, onSave }: { config: McpServersResponse["config"] | n
       await onSave(text);
       touched.current = false;
     } catch (e) {
-      toast.error("Could not save", { description: e instanceof Error ? e.message : String(e) });
+      toast.error("Could not save", { description: errMsg(e) });
     } finally {
       setBusy(false);
     }
@@ -486,27 +423,33 @@ function JsonView({ config, onSave }: { config: McpServersResponse["config"] | n
     );
   }
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-1.5">
-        <span className="stamp text-muted-foreground">~/.agent-sandbox/mcp.json · Claude Code / Cursor format · `disabled: true` = off</span>
+    <div className="bg-card overflow-hidden rounded-xl border shadow-e1">
+      <div className="bg-muted/30 flex flex-wrap items-center gap-1.5 border-b px-3 py-2 sm:px-4">
+        <span className="stamp text-muted-foreground min-w-0 truncate">~/.agent-sandbox/mcp.json</span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="text-faint hidden text-micro lg:inline">· Claude Code / Cursor format</span>
+          </TooltipTrigger>
+          <TooltipContent>The same file Cursor and Claude Code read. "disabled": true keeps a server off.</TooltipContent>
+        </Tooltip>
         <div className="ml-auto flex items-center gap-1">
-          <Button size="sm" variant="ghost" onClick={format} disabled={"error" in parsed}>
+          <Button size="xs" variant="ghost" onClick={() => "value" in parsed && setText(JSON.stringify(parsed.value, null, 2))} disabled={"error" in parsed}>
             <WandSparkles /> Format
           </Button>
           <Button
-            size="sm"
+            size="xs"
             variant="ghost"
             onClick={() => {
               navigator.clipboard
                 .writeText(text)
                 .then(() => toast.success("Copied"))
-                .catch((e: unknown) => toast.error("Could not copy", { description: e instanceof Error ? e.message : String(e) }));
+                .catch((e: unknown) => toast.error("Could not copy", { description: errMsg(e) }));
             }}
           >
             <Copy /> Copy
           </Button>
           <Button
-            size="sm"
+            size="xs"
             variant="ghost"
             disabled={!dirty}
             onClick={() => {
@@ -516,7 +459,7 @@ function JsonView({ config, onSave }: { config: McpServersResponse["config"] | n
           >
             <RotateCcw /> Reset
           </Button>
-          <Button size="sm" disabled={!dirty || "error" in parsed} loading={busy} onClick={() => void save()}>
+          <Button size="xs" disabled={!dirty || "error" in parsed} loading={busy} onClick={() => void save()} className="ml-1 min-w-[4.5rem]">
             <Check />
             Save
           </Button>
@@ -530,10 +473,28 @@ function JsonView({ config, onSave }: { config: McpServersResponse["config"] | n
         }}
         onSave={() => void save()}
         errorLine={"error" in parsed ? parsed.line : null}
-        className="h-[62vh]"
+        className="h-[60vh] rounded-none border-0"
       />
-      <p className={cn("text-micro", "error" in parsed ? "text-destructive" : "text-muted-foreground")} role={"error" in parsed ? "alert" : undefined}>
-        {"error" in parsed ? `${parsed.error}${parsed.line ? ` (line ${parsed.line})` : ""}` : `${parsed.count} server${parsed.count === 1 ? "" : "s"}${dirty ? " · unsaved changes — ⌘S to save" : ""}. Secrets show masked; untouched ones stay as stored when you save.`}
+      <p className={cn("flex items-center gap-1.5 border-t px-4 py-2 text-micro", "error" in parsed ? "text-destructive" : "text-muted-foreground")} role={"error" in parsed ? "alert" : undefined}>
+        {"error" in parsed ? (
+          <>
+            <X className="size-3 shrink-0" aria-hidden />
+            {parsed.error}
+            {parsed.line ? ` (line ${parsed.line})` : ""}
+          </>
+        ) : (
+          <>
+            <span className="tabular-nums">
+              {parsed.count} server{parsed.count === 1 ? "" : "s"}
+            </span>
+            {dirty && (
+              <span className="text-attention-text inline-flex items-center gap-1">
+                · unsaved <Kbd>⌘S</Kbd>
+              </span>
+            )}
+            <span className="text-faint ml-auto hidden sm:inline">Masked secrets left untouched stay as stored.</span>
+          </>
+        )}
       </p>
     </div>
   );

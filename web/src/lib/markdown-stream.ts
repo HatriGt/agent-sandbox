@@ -51,6 +51,45 @@ export function stabilizeMarkdown(revealed: string): string {
   // Virtually close a fence that is still open, so the code panel has an end and the content after
   // it does not reflow when the real closing fence arrives.
   if (open) lines.push(open.marker.repeat(open.len));
+  else {
+    holdPartialTable(lines);
+    holdPartialCodeSpan(lines);
+  }
 
   return lines.join("\n");
+}
+
+/**
+ * An inline code span being typed — "quota at `:5" — shows its opening backtick as a literal until
+ * the closing one lands, then snaps into a code chip. Hold the half-span back: the frame renders up
+ * to the backtick, and the chip appears whole when it closes.
+ */
+function holdPartialCodeSpan(lines: string[]): void {
+  const i = lines.length - 1;
+  if (i < 0) return;
+  const line = lines[i];
+  const ticks = (line.match(/`/g) ?? []).length;
+  if (ticks % 2 === 0) return;
+  lines[i] = line.slice(0, line.lastIndexOf("`")).replace(/\s+$/, "");
+}
+
+/** `| a | b | --- |` or `|:--|--:|` — the row that turns a pipe line above it into a table header. */
+const TABLE_DELIM_RE = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/;
+
+/**
+ * A GFM table is not a table until its delimiter row lands: for the frames between the header row
+ * and `| --- |`, the lexer sees a paragraph of pipes ("| Scenario | Before | After |") which then
+ * snaps into a table — the same prose-then-panel flicker as a fence. Hold back a trailing pipe row
+ * (or two) that has no delimiter yet; it renders as a table on the frame the delimiter completes.
+ */
+function holdPartialTable(lines: string[]): void {
+  let end = lines.length;
+  // Ignore a trailing line still being typed if it is empty.
+  while (end > 0 && lines[end - 1].trim() === "") end--;
+  let start = end;
+  while (start > 0 && /^\s*\|/.test(lines[start - 1]) && lines[start - 1].trim() !== "") start--;
+  const run = lines.slice(start, end);
+  if (!run.length || run.length > 2) return;
+  // Only a header row so far (or header + a delimiter still being typed): a table cannot render yet.
+  if (run.length === 1 || !TABLE_DELIM_RE.test(run[1])) lines.splice(start, lines.length - start);
 }

@@ -6,7 +6,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { describeProbe, isProbeableUrl, jwtExpiry, type McpServer } from "../src/mcp-store.ts";
+import { describeProbe, isProbeableUrl, jwtExpiry, parseJsonRpcResult, toolNamesOf, type McpServer } from "../src/mcp-store.ts";
 
 const jwt = (exp: number) =>
   `x.${Buffer.from(JSON.stringify({ sub: "s", exp })).toString("base64url")}.y`;
@@ -71,4 +71,13 @@ test("SSRF guard: only public https urls are probeable from the controller", () 
   assert.equal(isProbeableUrl("https://foo.internal/mcp"), false);
   assert.equal(isProbeableUrl("https://agent-sandbox/x"), false); // bare compose service name
   assert.equal(isProbeableUrl("not a url"), false);
+});
+
+test("tools/list parses from plain JSON and from an SSE-framed body; malformed tool entries are skipped", () => {
+  const result = { tools: [{ name: "search" }, { nope: 1 }, { name: "create_issue" }] };
+  assert.deepEqual(toolNamesOf(parseJsonRpcResult(JSON.stringify({ jsonrpc: "2.0", id: 2, result }))), ["search", "create_issue"]);
+  const sse = `event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", id: 2, result })}\n\n`;
+  assert.deepEqual(toolNamesOf(parseJsonRpcResult(sse)), ["search", "create_issue"]);
+  assert.equal(toolNamesOf(parseJsonRpcResult('{"jsonrpc":"2.0","id":2,"error":{"code":-32601}}')), undefined);
+  assert.equal(toolNamesOf(parseJsonRpcResult("not json")), undefined);
 });

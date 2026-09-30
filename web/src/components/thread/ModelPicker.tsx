@@ -170,15 +170,15 @@ export function ModelChip({
         aria-label={`Model: ${current.label}`}
         title="Switch model (⌘.)"
         className={cn(
-          "flex h-7 cursor-pointer items-center gap-1.5 rounded-md border px-2 text-micro font-medium transition-colors disabled:opacity-50",
+          "flex h-7 max-w-[9rem] cursor-pointer items-center gap-1.5 rounded-md border px-2 text-micro font-medium whitespace-nowrap transition-colors disabled:opacity-50",
           offDefault
             ? "border-live/40 bg-live/8 text-live"
             : "text-muted-foreground hover:text-foreground hover:bg-muted border-transparent"
         )}
       >
         <span className={cn("size-1.5 shrink-0 rounded-full", TIER_TINT[current.tier])} aria-hidden />
-        {current.label}
-        <ChevronDown className={cn("size-3 transition-transform duration-150", open && "rotate-180")} aria-hidden />
+        <span className="min-w-0 truncate">{current.label}</span>
+        <ChevronDown className={cn("size-3 shrink-0 transition-transform duration-150", open && "rotate-180")} aria-hidden />
       </button>
       <AnimatePresence>
         {open && (

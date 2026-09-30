@@ -1,4 +1,5 @@
 import * as React from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { api, type AuditEventRow } from "@/lib/api";
 import { fmtAgo } from "@/lib/format";
 import { consolePath } from "@/lib/route";
@@ -6,7 +7,8 @@ import { useLocation } from "react-router";
 import { ScrollText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StaggerItem, Swap } from "@/components/ui/swap";
-import { ListEmpty, ListSkeleton } from "@/components/ApiKeys";
+import { ListEmpty, ListSkeleton } from "@/components/ui/list-state";
+import { Panel, SettingsSection } from "@/components/ui/settings";
 import { cn } from "@/lib/utils";
 
 const PAGE = 25;
@@ -58,11 +60,76 @@ export function describeEvent(e: Pick<AuditEventRow, "method" | "path" | "sessio
   return { verb: hit[0], session: hit[1] ? s : null };
 }
 
-/** Recent stored audit events for this account — quiet meta-density rows under Sessions. */
+type Kind = "machines" | "code" | "account";
+/** Which lane an event belongs to — drives the filter chips and the dot colour. */
+export function eventKind(e: Pick<AuditEventRow, "path" | "session">): Kind {
+  const p = e.path;
+  if (/^\/(pr|git|repos)\b/.test(p)) return "code";
+  if (e.session || /^\/(delegate|teardown|resume|ask|wake|sleep|keep|rename|revert|memory|disk|file)\.json/.test(p)) return "machines";
+  return "account";
+}
+
+type Filter = "all" | Kind | "failed";
+const FILTERS: { value: Filter; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "machines", label: "Machines" },
+  { value: "code", label: "Code" },
+  { value: "account", label: "Account" },
+  { value: "failed", label: "Failed" },
+];
+
+const clock = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
+const day = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
+function dayKey(ms: number) {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+function dayLabel(ms: number) {
+  const today = dayKey(Date.now());
+  const k = dayKey(ms);
+  if (k === today) return "Today";
+  if (k === dayKey(Date.now() - 86400_000)) return "Yesterday";
+  return day.format(ms);
+}
+
+/** Filter chips: pill row, the active one filled. Counts are of the rows loaded so far. */
+function Chips({ value, onChange, counts }: { value: Filter; onChange: (f: Filter) => void; counts: Record<Filter, number> }) {
+  const still = useReducedMotion();
+  const id = React.useId();
+  return (
+    <div role="radiogroup" aria-label="Show" className="flex flex-wrap items-center gap-1">
+      {FILTERS.map((f) => {
+        const on = f.value === value;
+        const n = counts[f.value];
+        if (f.value !== "all" && n === 0 && !on) return null;
+        return (
+          <button
+            key={f.value}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            onClick={() => onChange(f.value)}
+            className={cn(
+              "relative isolate inline-flex h-6 cursor-pointer items-center gap-1 rounded-full px-2.5 text-micro font-medium transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-ring/40",
+              on ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            {on && <motion.span layoutId={`${id}-chip`} className="bg-muted absolute inset-0 -z-10 rounded-full" transition={still ? { duration: 0 } : { type: "spring", stiffness: 520, damping: 42, mass: 0.7 }} aria-hidden />}
+            {f.label}
+            <span className={cn("tabular-nums", f.value === "failed" && n > 0 ? "text-destructive" : "text-faint")}>{n}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Recent stored audit events for this account — a dense timeline: `HH:MM` stamp · dot · verb. */
 export function AuditLog() {
   const [rows, setRows] = React.useState<AuditEventRow[] | null>(null);
   const [done, setDone] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
+  const [filter, setFilter] = React.useState<Filter>("all");
   const { search } = useLocation();
   // Rows appended by "Show more" stagger from their own first index, not from row 0.
   const pageStart = React.useRef(0);
@@ -88,54 +155,86 @@ export function AuditLog() {
   }, []);
   React.useEffect(() => void load(), [load]);
 
+  const counts = React.useMemo(() => {
+    const c: Record<Filter, number> = { all: 0, machines: 0, code: 0, account: 0, failed: 0 };
+    for (const e of rows ?? []) {
+      c.all++;
+      c[eventKind(e)]++;
+      if (e.status >= 400) c.failed++;
+    }
+    return c;
+  }, [rows]);
+  const visible = React.useMemo(() => (rows ?? []).filter((e) => (filter === "all" ? true : filter === "failed" ? e.status >= 400 : eventKind(e) === filter)), [rows, filter]);
+  const state = rows === null ? "loading" : rows.length === 0 ? "empty" : visible.length === 0 ? "nomatch" : "list";
+
   return (
-    <section aria-labelledby="audit-h" className="scroll-mt-6">
-      <div className="mb-4 flex items-center gap-2">
-        <h2 id="audit-h" className="text-foreground text-h3 font-semibold tracking-[-0.01em]">
-          Recent activity
-        </h2>
-        <span className="text-muted-foreground text-meta">state-changing actions · kept 90 days</span>
-      </div>
-      <div className="bg-card rounded-xl border shadow-e1">
-        <Swap state={rows === null ? "loading" : rows.length === 0 ? "empty" : "list"}>
-          {rows === null ? (
-            <ListSkeleton rows={3} />
-          ) : rows.length === 0 ? (
-            <ListEmpty icon={ScrollText} title="Nothing yet" line="Actions you take (starting, answering, destroying) appear here." />
+    <SettingsSection id="audit" title="Recent activity" meta="kept 90 days" purpose="Every state-changing call made as you — from this console, an IDE or a script." actions={rows && rows.length > 0 ? <Chips value={filter} onChange={setFilter} counts={counts} /> : undefined}>
+      <Panel>
+        <Swap state={state}>
+          {state === "loading" ? (
+            <ListSkeleton rows={4} />
+          ) : state === "empty" ? (
+            <ListEmpty icon={ScrollText} title="Nothing yet" line="Starting, answering, destroying — each action lands here with its time." />
+          ) : state === "nomatch" ? (
+            <ListEmpty icon={ScrollText} title={`No ${filter} events loaded`} line={done ? "There are none in the last 90 days." : "Load more to look further back."} action={!done ? <Button size="sm" variant="outline" loading={busy} onClick={() => rows && load({ at: rows[rows.length - 1].at, id: rows[rows.length - 1].id })}>Show more</Button> : undefined} />
           ) : (
-            <ul className="divide-y">
-              {rows.map((e, i) => {
-                const d = describeEvent(e);
-                const at = Date.parse(e.at);
-                return (
-                  <li key={e.id}>
-                    <StaggerItem index={Math.max(0, i - pageStart.current)} className="flex items-baseline gap-3 px-3.5 py-2">
-                      <span className="stamp text-faint shrink-0">{Number.isFinite(at) ? fmtAgo(at / 1000) : e.at}</span>
-                      <span className={cn("text-meta min-w-0 truncate", e.status >= 400 ? "text-muted-foreground" : "text-foreground")}>
-                        {d.verb}
-                        {d.session && (
-                          <>
-                            {" "}
-                            <a href={`${consolePath({ view: "box", name: d.session })}${search}`} className="underline decoration-line-strong underline-offset-4 hover:decoration-current">
-                              {d.session}
-                            </a>
-                          </>
-                        )}
-                        {e.status >= 400 && <span className="text-destructive"> · failed {e.status}</span>}
-                      </span>
-                    </StaggerItem>
-                  </li>
-                );
-              })}
-            </ul>
+            <ol className="py-1">
+              <AnimatePresence initial={false}>
+                {visible.map((e, i) => {
+                  const d = describeEvent(e);
+                  const at = Date.parse(e.at);
+                  const failed = e.status >= 400;
+                  const kind = eventKind(e);
+                  const prev = visible[i - 1];
+                  const newDay = Number.isFinite(at) && (!prev || dayKey(Date.parse(prev.at)) !== dayKey(at));
+                  const idx = rows ? rows.indexOf(e) : i;
+                  return (
+                    <React.Fragment key={e.id}>
+                      {newDay && (
+                        <li aria-hidden className="flex items-center gap-3 px-3.5 pt-3 pb-1 first:pt-2">
+                          <span className="label text-faint w-12 shrink-0 text-right tabular-nums">{dayLabel(at)}</span>
+                          <span className="bg-border h-px flex-1" />
+                        </li>
+                      )}
+                      <motion.li layout="position" initial={false} exit={{ opacity: 0, transition: { duration: 0.12 } }}>
+                        <StaggerItem index={Math.max(0, idx - pageStart.current)} className="group relative flex items-baseline gap-3 px-3.5 py-1.5">
+                          <time dateTime={e.at} title={Number.isFinite(at) ? new Date(at).toLocaleString() : e.at} className="stamp text-faint w-12 shrink-0 text-right tabular-nums">
+                            {Number.isFinite(at) ? clock.format(at) : "—"}
+                          </time>
+                          <span className="relative flex w-3 shrink-0 justify-center self-stretch" aria-hidden>
+                            <span className="bg-border absolute inset-y-[-0.375rem] w-px group-first:top-1/2 group-last:bottom-1/2" />
+                            <span className={cn("ring-card relative mt-[0.45em] size-1.5 rounded-full ring-2", failed ? "bg-destructive" : kind === "machines" ? "bg-live" : kind === "code" ? "bg-ok" : "bg-faint")} />
+                          </span>
+                          <span className={cn("min-w-0 flex-1 truncate text-meta", failed ? "text-muted-foreground" : "text-foreground")}>
+                            {d.verb}
+                            {d.session && (
+                              <>
+                                {" "}
+                                <a href={`${consolePath({ view: "box", name: d.session })}${search}`} className="stamp text-foreground decoration-line-strong underline underline-offset-4 hover:decoration-current">
+                                  {d.session}
+                                </a>
+                              </>
+                            )}
+                            {failed && <span className="text-destructive"> · failed {e.status}</span>}
+                          </span>
+                          <span className="text-faint hidden shrink-0 text-micro tabular-nums sm:inline">{Number.isFinite(at) ? fmtAgo(at / 1000) : ""}</span>
+                        </StaggerItem>
+                      </motion.li>
+                    </React.Fragment>
+                  );
+                })}
+              </AnimatePresence>
+            </ol>
           )}
         </Swap>
-      </div>
-      {rows !== null && rows.length > 0 && !done && (
-        <Button size="sm" variant="ghost" className="text-muted-foreground mt-2" loading={busy} onClick={() => load({ at: rows[rows.length - 1].at, id: rows[rows.length - 1].id })}>
-          Show more
-        </Button>
-      )}
-    </section>
+        {rows !== null && rows.length > 0 && !done && state === "list" && (
+          <div className="bg-muted/40 border-t px-3.5 py-2">
+            <Button size="sm" variant="ghost" className="text-muted-foreground" loading={busy} onClick={() => load({ at: rows[rows.length - 1].at, id: rows[rows.length - 1].id })}>
+              Show more
+            </Button>
+          </div>
+        )}
+      </Panel>
+    </SettingsSection>
   );
 }

@@ -49,6 +49,20 @@ export function QuestionCard({
   const canSend = !!answer && !busy;
   const send = () => canSend && onAnswer(answer);
 
+  // The card is the thing that needs you, so it takes focus when it appears — unless you are
+  // already typing somewhere. That makes the number keys, arrows and Enter work at once, and
+  // scrolls the card into view on a phone where the composer would otherwise hide it.
+  const groupRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    const el = groupRef.current;
+    if (!el) return;
+    const a = document.activeElement as HTMLElement | null;
+    const typing = !!a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.isContentEditable) && (a as HTMLInputElement).value?.length > 0;
+    if (typing) return;
+    const t = window.setTimeout(() => el.focus({ preventScroll: false }), 80);
+    return () => window.clearTimeout(t);
+  }, [question]);
+
   const onKey = (e: React.KeyboardEvent) => {
     if (e.target instanceof HTMLTextAreaElement) return;
     const n = Number(e.key);
@@ -86,6 +100,7 @@ export function QuestionCard({
         Paused — the agent needs a decision
       </span>
       <div
+        ref={groupRef}
         role="group"
         aria-label="Question from the agent"
         tabIndex={0}

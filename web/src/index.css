@@ -596,6 +596,21 @@
   animation: turn-enter var(--dur-slow) var(--ease-out-quint) both;
 }
 
+/* Sidebar collapse/expand: the column width tweens (grid-template-columns, 200ms) while the body
+   that mounts for the new width fades in a beat behind it, so the swap between the icon rail and
+   the full rail is one motion. Exit is instant — the old body unmounts with the width change. */
+@keyframes rail-reveal {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.rail-reveal {
+  animation: rail-reveal 180ms var(--ease-out-quint) 60ms both;
+}
+
 /* Staggered row entrance inside a visualizer card: each row rises a beat after the last, reading
    as the card "filling in". Delay comes from --i (set inline, capped upstream at ~12 so a long
    list never keeps the reader waiting). One-shot; reduced motion zeroes both duration and delay. */
@@ -1062,6 +1077,33 @@ button:not(:disabled):active, [role="tab"]:active, [role="radio"]:active { trans
     inset 0 1px 0 0 oklch(1 0 0 / 0.05),
     0 1px 2px oklch(0 0 0 / 0.3),
     0 8px 24px -16px oklch(0 0 0 / 0.6);
+}
+
+/* Shell surfaces ------------------------------------------------------------------------------------ */
+
+/* The "can't reach the fleet" notice in the rail: a quiet inset panel, one tone below the sidebar —
+   deliberately NOT the destructive tint. Red is for a run that failed; offline is weather. */
+.offline-notice {
+  background: color-mix(in oklch, var(--muted) 55%, transparent);
+  border-color: color-mix(in oklch, var(--border) 100%, transparent);
+}
+.dark .offline-notice {
+  background: color-mix(in oklch, var(--muted) 45%, transparent);
+}
+
+/* A scrolling list inside the rail: the bottom edge dissolves so a clipped row reads as "more below"
+   instead of a cut. Only the last 14px are affected; the fade rides with the scroller. */
+.scroll-fade-y {
+  mask-image: linear-gradient(to bottom, black calc(100% - 14px), transparent);
+  -webkit-mask-image: linear-gradient(to bottom, black calc(100% - 14px), transparent);
+}
+
+/* The hub composer's stage: a faint brand bloom behind the hero so the page has a centre of gravity. */
+.hub-stage {
+  background: radial-gradient(48rem 20rem at 50% 12rem, color-mix(in oklch, var(--live) 4.5%, transparent), transparent 70%);
+}
+.dark .hub-stage {
+  background: radial-gradient(48rem 20rem at 50% 12rem, color-mix(in oklch, var(--live) 7%, transparent), transparent 70%);
 }
 
 /* A faint brand glow at the head of the conversation. */

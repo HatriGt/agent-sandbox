@@ -24,7 +24,8 @@ import { ThreadHeader } from "./ThreadHeader";
 import { parseTrace, producedFiles } from "@/lib/trace";
 import { deriveTaskBoard, type TaskBoard } from "@/lib/planTasks";
 import { usePoll } from "@/hooks/usePoll";
-import { seedWatchCache, useWatchStream } from "@/hooks/useWatchStream";
+import { peekWatchCache, seedWatchCache, useWatchStream } from "@/hooks/useWatchStream";
+import "@/styles/thread.css";
 import { Button } from "@/components/ui/button";
 import { ChatContainerContent, ChatContainerRoot, ChatContainerScrollAnchor } from "@/components/ui/chat-container";
 import type { TraceEvent } from "@/lib/trace";
@@ -153,7 +154,28 @@ export function Thread({
   // The stream when it is live; otherwise whichever of the cached stream copy and the poll is newer,
   // so a thread opened without SSE (or after a short turn the stream missed) keeps moving.
   const polledSnap = polled?.name === box.name ? polled : null;
-  const snap = stream.ok ? stream.snap ?? polledSnap : polledSnap && (!stream.snap || polledSnap.log.length >= stream.snap.log.length) ? polledSnap : stream.snap;
+  const liveSnap = stream.ok ? stream.snap ?? polledSnap : polledSnap && (!stream.snap || polledSnap.log.length >= stream.snap.log.length) ? polledSnap : stream.snap;
+  // Asleep, the stream cannot connect — but the LAST transcript this tab saw is still the run. Show
+  // it under the waking card instead of a blank column: a sleeping thread is a paused one, not gone.
+  const [asleepSnap, setAsleepSnap] = React.useState<WatchSnapshot | null>(null);
+  React.useEffect(() => {
+    // Nothing cached for a sleeping box (fresh tab): ask once. The controller may still hold the
+    // last log it read; if it cannot, the card alone is what we always showed.
+    setAsleepSnap(null);
+    if (!sleeping || peekWatchCache(box.name)) return;
+    const ctrl = new AbortController();
+    api
+      .watch(box.name, ctrl.signal)
+      .then((s) => {
+        if (s.name === box.name && s.log) {
+          seedWatchCache(s);
+          setAsleepSnap(s);
+        }
+      })
+      .catch(() => {});
+    return () => ctrl.abort();
+  }, [sleeping, box.name]);
+  const snap = liveSnap ?? (sleeping ? peekWatchCache(box.name) ?? asleepSnap : null);
 
   const events = React.useMemo(() => parseTrace(snap?.log ?? ""), [snap?.log]);
   const groups = React.useMemo(() => groupTrace(events), [events]);
@@ -532,15 +554,33 @@ export function Thread({
   // Turns for the minimap: the task plus every message you sent, each with how the agent replied.
   const stick = useStickToBottom({ resize: "smooth", initial: "instant" });
 
+  // Scrolling UP while the agent streams must win against the auto-scroll. The library's own wheel
+  // escape only fires when the scroller's computed `overflow` is exactly `auto`/`scroll`; ours is
+  // `hidden auto` (x is clipped so wide code never side-scrolls the page), so that guard never
+  // matched and a touchpad flick up was swallowed by the next smooth-scroll frame — the reader was
+  // pinned to the bottom until the reply ended. `stopScroll` is the library's escape hatch.
+  const { scrollRef: stickScrollRef, stopScroll } = stick;
+  React.useEffect(() => {
+    const el = stickScrollRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaY < 0 && el.scrollHeight > el.clientHeight) stopScroll();
+    };
+    el.addEventListener("wheel", onWheel, { passive: true });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [stickScrollRef, stopScroll, box.name]);
+
   // "New activity" on the jump-to-latest button: set when the trace grows while the reader is
   // scrolled up in history, cleared the moment they reach the bottom again.
   const [newBelow, setNewBelow] = React.useState(false);
-  const eventCount = events.length;
-  const prevCountRef = React.useRef(eventCount);
+  // Keyed on the log's length, not the event count: a paragraph still streaming grows the same
+  // event, and that is exactly the "more below" a reader scrolled up wants to know about.
+  const logLen = snap?.log.length ?? 0;
+  const prevLenRef = React.useRef(logLen);
   React.useEffect(() => {
-    if (eventCount > prevCountRef.current && !stick.isAtBottom) setNewBelow(true);
-    prevCountRef.current = eventCount;
-  }, [eventCount, stick.isAtBottom]);
+    if (logLen > prevLenRef.current && !stick.isAtBottom) setNewBelow(true);
+    prevLenRef.current = logLen;
+  }, [logLen, stick.isAtBottom]);
   React.useEffect(() => {
     if (stick.isAtBottom) setNewBelow(false);
   }, [stick.isAtBottom]);
@@ -616,7 +656,8 @@ export function Thread({
       <ThreadHeader
         box={box}
         title={title}
-        state={state}
+        // A run being set up is not "idle": the pill says working, matching the status below.
+        state={starting ? "running" : state}
         exitCode={exitCode}
         sleeping={sleeping}
         kept={kept}
@@ -670,14 +711,6 @@ export function Thread({
 
             {finished && digest && <DigestCard digest={digest} />}
 
-            <AnimatePresence mode="wait" initial={false}>
-              {sleeping && !wake ? (
-                <SleepingCard key="sleeping" onWake={wakeNow} />
-              ) : (
-                wake && <WakingCard key="waking" awake={!sleeping} startedAt={wake.startedAt} error={wake.error} onRetry={wakeNow} />
-              )}
-            </AnimatePresence>
-
             {/* Skeleton → transcript is a crossfade, not a cut: the placeholder is shaped like the
                 content, so the swap reads as the bones filling in. */}
             <Swap state={loadingTrace} className="flex flex-col gap-5">
@@ -712,9 +745,15 @@ export function Thread({
                   />
                 </div>
               ) : g.kind === "asked" ? (
+                // The ⟦ask⟧ block lands in the log the moment the agent asks. While that question
+                // is still the one waiting (or its answer is in flight), the live card below IS the
+                // question — rendering the transcript copy too showed it twice, once with an empty
+                // "Your answer". Once answered (or superseded) it stays as the recorded decision.
+                g.answer === "" && (showQuestion || resuming) && !groups.slice(i + 1).some((x) => x.kind === "asked") ? null : (
                 <div key={key} data-turn={key} className="mt-5">
                   <AnsweredQuestionItem question={g.question} answer={g.answer} />
                 </div>
+                )
               ) : g.kind === "think" ? (
                 <div key={key} className="min-w-0">
                   {opensAgent && <AgentLabel live={liveHere} />}
@@ -730,6 +769,17 @@ export function Thread({
               );
             })}
             </Swap>
+
+            {/* The sleep/wake card sits where the run left off — under the transcript when we still
+                have it, right under the task otherwise — so waking reads as "continuing", not as a
+                fresh page with the history gone. */}
+            <AnimatePresence mode="wait" initial={false}>
+              {sleeping && !wake ? (
+                <SleepingCard key="sleeping" onWake={wakeNow} />
+              ) : (
+                wake && <WakingCard key="waking" awake={!sleeping} startedAt={wake.startedAt} error={wake.error} onRetry={wakeNow} />
+              )}
+            </AnimatePresence>
 
             {idle && <IdleEmpty box={box} onNew={onNew} onPick={(text) => setSeed({ text, n: Date.now() })} />}
 
@@ -896,6 +946,7 @@ export function Thread({
         onFocusRequest={onFocusRequest}
         onReplyFailed={onReplyFailed}
         seed={seed}
+        phase={starting ? "starting" : showQuestion ? "asked" : idle ? "fresh" : undefined}
       />
       </div>
       {/* Sibling of the whole column (conversation + dock + composer), so opening it narrows all

@@ -40,6 +40,18 @@ export function skillIcon(name: string): React.ComponentType<LucideProps> {
   return Zap;
 }
 
+// One hue per category (oklch degrees), so review skills are always blue, releases orange, fixes
+// rose… and two unrelated skills never share a tint by accident. Unkeyed names spread by hash.
+const HUES = [262, 40, 150, 12, 300, 200, 230, 90, 330, 60, 180];
+export function skillHue(name: string): number {
+  const n = name.toLowerCase();
+  const i = KEYED.findIndex(([re]) => re.test(n));
+  if (i >= 0) return HUES[i];
+  let h = 0;
+  for (let k = 0; k < n.length; k++) h = (h * 31 + n.charCodeAt(k)) % 360;
+  return h;
+}
+
 export function SkillMark({ name, size = 16, className }: { name: string; size?: number; className?: string }) {
   const Icon = skillIcon(name);
   return <Icon size={size} strokeWidth={1.75} aria-hidden className={cn("shrink-0", className)} />;

@@ -1,6 +1,5 @@
 import { getMe } from "@/lib/auth";
-import { ArrowLeft } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { SettingsPage, SettingsSection } from "@/components/ui/settings";
 import { Accounts } from "@/components/Accounts";
 import { McpServers } from "@/components/McpServers";
 
@@ -12,29 +11,15 @@ import { McpServers } from "@/components/McpServers";
  */
 export function Integrations({ onBack }: { onBack: () => void }) {
   return (
-    <div className="h-full min-w-0 overflow-y-auto">
-      <div className="mx-auto max-w-4xl px-5 py-6 md:px-8 md:py-8">
-        <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2 mb-3 md:hidden" aria-label="Back to machines">
-          <ArrowLeft className="size-4" />
-          Machines
-        </Button>
-        <header className="mb-7">
-          <h1 className="text-foreground font-serif text-h1 font-normal tracking-[-0.01em]">Integrations</h1>
-          <p className="text-muted-foreground mt-0.5 text-meta">{getMe()?.mode === "saas" ? "Yours alone — given only to your machines, encrypted at rest." : "Given to every sandbox on its next run or turn. Stored on your server."}</p>
-        </header>
-        <div className="flex flex-col gap-10">
-          <section aria-labelledby="gh-h">
-            <div className="mb-4 flex items-center gap-2">
-              <h2 id="gh-h" className="text-foreground text-h3 font-semibold tracking-[-0.01em]">
-                GitHub accounts
-              </h2>
-              <span className="text-muted-foreground text-meta">clone · read PRs · push</span>
-            </div>
-            <Accounts embedded />
-          </section>
-          <McpServers />
-        </div>
-      </div>
-    </div>
+    <SettingsPage
+      title="Integrations"
+      purpose={getMe()?.mode === "saas" ? "Yours alone — given only to your machines, encrypted at rest." : "Given to every sandbox on its next run or turn. Stored on your server."}
+      back={{ label: "Machines", onClick: onBack, mobileOnly: true }}
+    >
+      <SettingsSection id="gh" title="GitHub accounts" meta="clone · read PRs · push">
+        <Accounts embedded />
+      </SettingsSection>
+      <McpServers />
+    </SettingsPage>
   );
 }

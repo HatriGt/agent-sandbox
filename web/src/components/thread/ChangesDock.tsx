@@ -93,31 +93,32 @@ export function ChangesDock({ files, loading, onOpen, onRefresh, onReviewAll, ac
           )}
         </AnimatePresence>
         <div className="flex items-center gap-2 px-3 py-2">
-          <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} className="flex min-w-0 flex-1 cursor-pointer items-center gap-2.5 text-left">
-            <span className="flex -space-x-1">
+          <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} aria-label={open ? "Hide the changed files" : "Show the changed files"} className="flex min-w-0 flex-1 cursor-pointer items-center gap-2.5 text-left">
+            <span className="flex shrink-0 -space-x-1">
               {files.slice(0, 4).map((f) => (
                 <FileMark key={f.path} path={f.path} className="ring-card ring-2" />
               ))}
             </span>
-            <span className="text-foreground text-meta font-medium">
+            <span className="text-foreground shrink-0 text-meta font-medium whitespace-nowrap">
               <PopCount value={files.length} /> {files.length === 1 ? "file" : "files"} changed
             </span>
-            <span className="stamp flex items-center gap-1.5">
+            <span className="stamp flex shrink-0 items-center gap-1.5 whitespace-nowrap">
               {adds > 0 && <span className="text-ok">+{adds}</span>}
               {dels > 0 && <span className="text-destructive">−{dels}</span>}
               {adds + dels > 0 && (
-                <span className="bg-muted flex h-1 w-10 overflow-hidden rounded-full" aria-hidden>
+                <span className="bg-muted hidden h-1 w-10 overflow-hidden rounded-full sm:flex" aria-hidden>
                   <span className="bg-ok h-full transition-[width] duration-300" style={{ width: `${(adds / (adds + dels)) * 100}%` }} />
                   <span className="bg-destructive/80 h-full flex-1 transition-[width] duration-300" />
                 </span>
               )}
             </span>
-            <span className="text-muted-foreground ml-auto hidden text-micro sm:inline">{open ? "Hide files" : "Show files"}</span>
-            <ChevronUp className={cn("text-muted-foreground size-3.5 shrink-0 transition-transform duration-[var(--dur-base)] ease-[var(--ease-out-quint)]", open && "rotate-180")} aria-hidden />
+            {/* The chevron carries the affordance; a "Show files" caption only ever fought the
+                buttons beside it for room (a phone, or the column beside an open workspace). */}
+            <ChevronUp className={cn("text-muted-foreground ml-auto size-3.5 shrink-0 transition-transform duration-[var(--dur-base)] ease-[var(--ease-out-quint)]", open && "rotate-180")} aria-hidden />
           </button>
           {onReviewAll && (
-            <button type="button" onClick={onReviewAll} className="text-muted-foreground hover:text-foreground hover:bg-muted shrink-0 cursor-pointer rounded-md px-2 py-1 text-micro font-medium">
-              Review all
+            <button type="button" onClick={onReviewAll} className="text-muted-foreground hover:text-foreground hover:bg-muted shrink-0 cursor-pointer rounded-md px-2 py-1 text-micro font-medium whitespace-nowrap">
+              Review<span className="hidden sm:inline"> all</span>
             </button>
           )}
           {onRefresh && (

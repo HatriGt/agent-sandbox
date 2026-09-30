@@ -17,16 +17,19 @@ const KEY = "asb-gs-dismissed";
  * draws a strike through its title; dismissing folds the whole panel closed instead of yanking
  * the dashboard up by a card's height.
  */
-export function GettingStarted() {
+/** Whether the checklist was dismissed in this browser — so a sibling can decide what to show instead. */
+export function gettingStartedDismissed(): boolean {
+  try {
+    return localStorage.getItem(KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function GettingStarted({ onDismiss }: { onDismiss?: () => void } = {}) {
   const go = useGo();
   const reduced = useReducedMotion();
-  const [hidden, setHidden] = React.useState(() => {
-    try {
-      return localStorage.getItem(KEY) === "1";
-    } catch {
-      return false;
-    }
-  });
+  const [hidden, setHidden] = React.useState(gettingStartedDismissed);
   const [accounts, setAccounts] = React.useState<number | null>(null);
   const [keys, setKeys] = React.useState<number | null>(null);
   React.useEffect(() => {
@@ -41,6 +44,7 @@ export function GettingStarted() {
       /* fine */
     }
     setHidden(true);
+    onDismiss?.();
   };
   const steps = [
     { done: (accounts ?? 0) > 0, icon: <Github />, title: "Connect a GitHub account", body: "So machines can clone your private repositories and open pull requests.", cta: "Integrations", run: () => go({ view: "integrations" }) },
@@ -66,24 +70,27 @@ export function GettingStarted() {
         <ol className="mt-4 grid gap-2 sm:grid-cols-3">
           {steps.map((s, i) => (
             <li key={s.title} className="min-w-0">
-              <StaggerItem index={i} step={0.05} className={cn("flex h-full flex-col gap-2 rounded-md p-3 transition-colors duration-300", s.done ? "bg-ok/10" : "bg-muted/60")}>
+              {/* A done step goes quiet — muted card, a small green check, "Done" where the action was —
+                  rather than a green slab with a struck-out title (which reads as "cancelled"). The
+                  card that still needs you is the one with ink. */}
+              <StaggerItem index={i} step={0.05} className={cn("flex h-full flex-col gap-2 rounded-lg border p-3 transition-colors duration-300", s.done ? "bg-transparent" : "bg-muted/60 border-transparent")}>
                 {/* re-keyed on completion so the check pops in fresh (one-shot .pop-in) */}
-                <span key={s.done ? "done" : "todo"} className={cn("grid size-7 place-items-center rounded-full [&_svg]:size-3.5", s.done ? "bg-ok pop-in text-white" : "bg-background text-muted-foreground")}>
-                  {s.done ? <Check strokeWidth={3} /> : s.icon}
+                <span key={s.done ? "done" : "todo"} className={cn("grid size-7 place-items-center rounded-full [&_svg]:size-3.5", s.done ? "bg-ok/12 text-ok pop-in" : "bg-background text-muted-foreground shadow-e1")}>
+                  {s.done ? <Check strokeWidth={2.5} /> : s.icon}
                 </span>
-                <span className={cn("relative self-start text-meta font-medium transition-colors duration-300", s.done ? "text-muted-foreground" : "text-foreground")}>
-                  {s.title}
-                  {/* the strike draws left→right; text-decoration cannot animate, a scaled rule can */}
+                <span className={cn("self-start text-meta font-medium transition-colors duration-300", s.done ? "text-muted-foreground" : "text-foreground")}>{s.title}</span>
+                <span className={cn("flex-1 text-micro leading-relaxed", s.done ? "text-faint" : "text-muted-foreground")}>{s.body}</span>
+                {s.done ? (
                   <motion.span
-                    aria-hidden
-                    className="bg-muted-foreground/70 pointer-events-none absolute top-1/2 left-0 h-px w-full origin-left"
-                    initial={false}
-                    animate={{ scaleX: s.done ? 1 : 0 }}
-                    transition={{ duration: reduced ? 0 : 0.32, delay: s.done && !reduced ? 0.12 : 0, ease: [0.22, 1, 0.36, 1] }}
-                  />
-                </span>
-                <span className="text-muted-foreground flex-1 text-micro leading-relaxed">{s.body}</span>
-                {!s.done && (
+                    initial={reduced ? false : { opacity: 0, y: 2 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.2, delay: reduced ? 0 : 0.12, ease: [0.22, 1, 0.36, 1] }}
+                    className="text-ok inline-flex items-center gap-1 text-micro font-medium"
+                  >
+                    <Check className="size-3" strokeWidth={2.5} aria-hidden />
+                    Done
+                  </motion.span>
+                ) : (
                   <button type="button" onClick={s.run} className="text-live group inline-flex cursor-pointer items-center gap-1 text-micro font-medium">
                     {s.cta}
                     <ArrowRight className="size-3 transition-transform duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] group-hover:translate-x-0.5" />

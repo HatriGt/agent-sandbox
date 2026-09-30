@@ -1,0 +1,59 @@
+/* Thread-only styles: the streaming caret and the conversation's small motion. Imported by
+   Thread.tsx so it ships with the thread chunk, not with every page. */
+
+/* ── Streaming caret ──────────────────────────────────────────────────────────────────────────────
+   The growing edge of a live reply. Inline, at the end of the last text block (a paragraph, heading,
+   list item, quote) — the way a text editor's caret follows the last glyph — never on a line of its
+   own under the message. When the last block is something a caret cannot sit inside (a code fence
+   still being typed, a table), a block caret below it takes over. `:has()` decides which. */
+.md-live .prose-agent > :is(p, h1, h2, h3, h4, blockquote):last-child::after,
+.md-live .prose-agent > :is(ul, ol):last-child > li:last-child::after {
+  content: "";
+  display: inline-block;
+  width: 0.55ch;
+  height: 1em;
+  margin-left: 0.15ch;
+  vertical-align: -0.15em;
+  border-radius: 1px;
+  background: var(--live);
+  opacity: 0.85;
+  animation: md-caret 1.1s steps(1, end) infinite;
+}
+/* Only once the reveal has caught up does the caret blink: while characters are still landing it
+   holds steady, since a caret flashing next to moving text reads as noise. */
+.md-live.md-catching-up .prose-agent > :is(p, h1, h2, h3, h4, blockquote):last-child::after,
+.md-live.md-catching-up .prose-agent > :is(ul, ol):last-child > li:last-child::after {
+  animation: none;
+}
+.md-live > .md-caret-block {
+  display: none;
+  width: 0.55ch;
+  height: 1em;
+  margin-top: 0.4rem;
+  border-radius: 1px;
+  background: var(--live);
+  opacity: 0.85;
+  animation: md-caret 1.1s steps(1, end) infinite;
+}
+.md-live:not(:has(.prose-agent > :is(p, h1, h2, h3, h4, blockquote, ul, ol):last-child)) > .md-caret-block {
+  display: block;
+}
+.md-live:has(.prose-agent:empty) > .md-caret-block {
+  display: block;
+}
+@keyframes md-caret {
+  0%,
+  100% {
+    opacity: 0.85;
+  }
+  50% {
+    opacity: 0.15;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .md-live .prose-agent > :is(p, h1, h2, h3, h4, blockquote):last-child::after,
+  .md-live .prose-agent > :is(ul, ol):last-child > li:last-child::after,
+  .md-live > .md-caret-block {
+    animation: none;
+  }
+}

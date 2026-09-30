@@ -250,6 +250,42 @@ export interface McpProbeResult {
   status?: number;
   /** Human-readable diagnosis — shown verbatim on the dashboard. */
   detail: string;
+  /** Tool names the server advertised on `tools/list` after a successful handshake (http/sse only). */
+  tools?: string[];
+}
+
+/**
+ * A JSON-RPC result out of an MCP response body. Streamable HTTP servers may answer a POST with
+ * plain JSON or with an SSE stream whose `data:` lines carry the same message; both are handled.
+ * Pure — testable without a network.
+ */
+export function parseJsonRpcResult(body: string): unknown {
+  const tryParse = (s: string): unknown => {
+    try {
+      const v: unknown = JSON.parse(s);
+      return v && typeof v === "object" && "result" in v ? v.result : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  const direct = tryParse(body);
+  if (direct !== undefined) return direct;
+  for (const line of body.split("\n")) {
+    if (!line.startsWith("data:")) continue;
+    const r = tryParse(line.slice(5).trim());
+    if (r !== undefined) return r;
+  }
+  return undefined;
+}
+
+/** Tool names out of a `tools/list` result; `undefined` when the shape is not one. */
+export function toolNamesOf(result: unknown): string[] | undefined {
+  if (!result || typeof result !== "object" || !("tools" in result) || !Array.isArray(result.tools)) return undefined;
+  const names: string[] = [];
+  for (const t of result.tools as unknown[]) {
+    if (t && typeof t === "object" && "name" in t && typeof t.name === "string") names.push(t.name);
+  }
+  return names;
 }
 
 /**
@@ -338,31 +374,39 @@ export async function probeMcpServer(s: McpServer, timeoutMs = 8000): Promise<Mc
     return { ok: false, detail: "Only public https URLs can be tested from here (the sandbox itself may still reach it)." };
   const ac = new AbortController();
   const t = setTimeout(() => ac.abort(), timeoutMs);
+  const baseHeaders = { "Content-Type": "application/json", Accept: "application/json, text/event-stream", ...(s.headers ?? {}) };
   try {
     // fetchPinned resolves once, vets the addresses, and pins the connection to the vetted IP —
     // without the pin a rebinding DNS server passes the lookup check above and re-resolves to
     // 169.254.169.254 for the actual connect. It also never follows redirects (a public host
     // 302ing to link-local/metadata must not be chased from here).
     const { fetchPinned } = await import("./net-guard.js");
-    const res = await fetchPinned(s.url!, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json, text/event-stream",
-        ...(s.headers ?? {}),
-      },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "initialize",
-        params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "agent-sandbox-health", version: "1" } },
-      }),
-      signal: ac.signal,
+    const rpc = (body: unknown, extra: Record<string, string> = {}) =>
+      fetchPinned(s.url!, { method: "POST", headers: { ...baseHeaders, ...extra }, body: JSON.stringify(body), signal: ac.signal });
+    const res = await rpc({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "agent-sandbox-health", version: "1" } },
     });
     if (res.status >= 300 && res.status < 400)
       return { ok: false, status: res.status, detail: `HTTP ${res.status} redirect — probes do not follow redirects; use the server's final URL.` };
     const body = await res.text().catch(() => "");
-    return describeProbe(s, { status: res.status, body });
+    const verdict = describeProbe(s, { status: res.status, body });
+    if (!verdict.ok) return verdict;
+    // Handshake done: ask what the agent would actually get. Best effort — a server that only
+    // speaks initialize still counts as connected, just without a tool count.
+    try {
+      const session = res.headers.get("mcp-session-id");
+      const sess: Record<string, string> = session ? { "mcp-session-id": session } : {};
+      await rpc({ jsonrpc: "2.0", method: "notifications/initialized" }, sess);
+      const list = await rpc({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }, sess);
+      const tools = toolNamesOf(parseJsonRpcResult(await list.text().catch(() => "")));
+      if (tools) return { ...verdict, detail: `Connected — ${tools.length} tool${tools.length === 1 ? "" : "s"} advertised.`, tools };
+    } catch {
+      /* connected, tools unknown */
+    }
+    return verdict;
   } catch (e) {
     return describeProbe(s, { error: ac.signal.aborted ? `timed out after ${Math.round(timeoutMs / 1000)}s` : (e as Error).message });
   } finally {

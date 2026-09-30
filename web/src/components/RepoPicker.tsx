@@ -3,6 +3,7 @@ import { Check, FolderGit2, GitBranch, Lock, RefreshCw, Search, SearchX } from "
 import { motion, useReducedMotion } from "motion/react";
 import { api, type RepoInfo } from "@/lib/api";
 import { Bar } from "@/components/thread/Skeletons";
+import { Kbd } from "@/components/ui/kbd";
 import { StaggerItem, Swap } from "@/components/ui/swap";
 import { cn } from "@/lib/utils";
 
@@ -135,9 +136,11 @@ export function RepoPicker({
               ))}
             </ul>
           ) : phase === "error" ? (
-            <p className="text-destructive px-3 py-4 text-meta" role="alert">
-              {error}
-            </p>
+            <div role="alert" className="px-3 py-4">
+              <p className="text-foreground text-meta font-medium">Couldn't load your repositories.</p>
+              <p className="text-muted-foreground mt-1 text-micro leading-relaxed">Check the connected GitHub accounts, then refresh the list.</p>
+              <pre className="stamp text-muted-foreground bg-muted/70 mt-2 max-h-16 overflow-auto rounded-md px-2 py-1.5 whitespace-pre-wrap [overflow-wrap:anywhere]">{error}</pre>
+            </div>
           ) : phase === "none" || phase === "nomatch" ? (
             <EmptyState
               icon={phase === "none" ? <FolderGit2 /> : <SearchX />}
@@ -210,7 +213,9 @@ export function RepoPicker({
           <span>
             {total} {total === 1 ? "repository" : "repositories"} across your accounts
           </span>
-          <span>↑↓ · Enter {multi ? "toggles" : "picks"} · Esc closes</span>
+          <span className="flex items-center gap-1.5">
+            <Kbd keys={["↑", "↓"]} /> <Kbd>↵</Kbd> {multi ? "toggles" : "picks"} <Kbd>esc</Kbd> closes
+          </span>
         </div>
       )}
     </div>

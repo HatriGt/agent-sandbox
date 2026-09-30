@@ -22,12 +22,15 @@ export function MachineList({
   selected,
   sleepTtlSec,
   loading,
+  offline = false,
   onSelect,
 }: {
   boxes: StableBox[];
   pending: { id: string; task: string }[];
   selected: string | null;
   loading: boolean;
+  /** The fleet can't be read and nothing was ever received: an empty list is unknown, not "nothing". */
+  offline?: boolean;
   onSelect: (name: string) => void;
   /** How long a non-kept sleeping sandbox lives before it is destroyed. */
   sleepTtlSec?: number;
@@ -41,11 +44,15 @@ export function MachineList({
   const empty = !loading && !sorted.length && !pending.length;
 
   return (
-    <nav aria-label="Machines" className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
+    <nav aria-label="Machines" className="scroll-fade-y min-h-0 flex-1 overflow-y-auto px-2 pb-4">
       {/* Skeleton ↔ empty ↔ list crossfade; the list itself is the third state so the rows never
           pop in under a skeleton that is still fading out. */}
-      <Swap state={loading ? "loading" : empty ? "empty" : "list"}>
-        {loading ? (
+      <Swap state={loading ? "loading" : empty ? (offline ? "offline" : "empty") : "list"}>
+        {empty && offline ? (
+          // The connection notice above already says what happened; a "Nothing running" here would
+          // be a claim about machines we cannot see.
+          <p className="text-faint px-3 py-4 text-micro leading-relaxed">Machines reappear here when the connection returns.</p>
+        ) : loading ? (
           <div className="space-y-1 px-1 py-1" aria-busy="true">
             {[0, 1, 2].map((i) => (
               <div key={i} className="space-y-2.5 rounded-md px-2 py-2.5">
@@ -60,9 +67,12 @@ export function MachineList({
             ))}
           </div>
         ) : empty ? (
-          <p className="text-muted-foreground px-3 py-5 text-meta leading-relaxed">
-            Nothing is up. Start a task and a machine boots in seconds; idle machines stop themselves.
-          </p>
+          <div className="px-3 py-5">
+            <p className="text-foreground text-meta font-medium">Nothing running</p>
+            <p className="text-muted-foreground mt-1 text-micro leading-relaxed">
+              Start a task and its machine appears here. Machines that go quiet sleep on their own.
+            </p>
+          </div>
         ) : (
           <ul className="flex flex-col gap-px">
             {pending.map((p) => (
@@ -117,15 +127,17 @@ export function MachineList({
                       onFocus={() => prefetchWatch(v.name)}
                       aria-current={active ? "true" : undefined}
                       className={cn(
-                        "group w-full cursor-pointer rounded-md px-3 py-2.5 text-left transition-colors duration-150",
-                        "relative",
-                        active ? "bg-accent before:bg-live before:absolute before:top-2.5 before:bottom-2.5 before:left-0 before:w-0.5 before:rounded-full" : "hover:bg-muted"
+                        "group relative w-full cursor-pointer rounded-md px-3 py-2.5 text-left transition-colors duration-150",
+                        active
+                          ? "bg-accent before:bg-live before:absolute before:top-2.5 before:bottom-2.5 before:left-0 before:w-0.5 before:rounded-full"
+                          : "hover:bg-muted",
+                        waiting && !active && "hover:bg-attention/10"
                       )}
                     >
                       <div className="flex items-baseline gap-2">
                         <StateStamp state={state} exitCode={v.exitCode} />
                         <span className="label text-muted-foreground ml-auto truncate">
-                          {v.leaving ? "shutting down" : v.kept ? "kept" : state === "sleeping" ? (sleepTtlSec && v.asleepSec != null ? `gone in ${fmtDuration(Math.max(0, sleepTtlSec - v.asleepSec))}` : "wakes on reply") : v.role === "session" ? "" : roleLabel(v.role)}
+                          {v.leaving ? "shutting down" : v.kept ? "kept" : state === "sleeping" ? (sleepTtlSec && v.asleepSec != null ? `gone in ${fmtDuration(Math.max(0, sleepTtlSec - v.asleepSec))}` : "wakes on reply") : v.role === "pool-free" ? roleLabel(v.role) : ""}
                         </span>
                       </div>
     

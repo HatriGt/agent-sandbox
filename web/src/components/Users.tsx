@@ -1,15 +1,18 @@
 import * as React from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { Crown, Ellipsis, KeyRound, Plus, RotateCcw, Shield, ShieldOff, Trash2, UserRound, Users as UsersIcon } from "lucide-react";
+import { Crown, Ellipsis, KeyRound, Plus, RotateCcw, Shield, Trash2, UserRound, Users as UsersIcon } from "lucide-react";
 import { toast } from "sonner";
 import { api, type UserRow } from "@/lib/api";
 import { fmtAgo } from "@/lib/format";
 import { getMe } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { ArmButton } from "@/components/ui/arm-button";
+import { Segmented } from "@/components/ui/segmented";
 import { StaggerItem, Swap } from "@/components/ui/swap";
-import { FreshTokenCard, ListEmpty, ListSkeleton } from "@/components/ApiKeys";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, MenuHint } from "@/components/ui/dropdown-menu";
+import { ListEmpty, ListSkeleton } from "@/components/ui/list-state";
+import { SecretReveal } from "@/components/ui/secret";
+import { Panel, PanelFooter, SettingsSection } from "@/components/ui/settings";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger, MenuHint } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
@@ -25,6 +28,11 @@ function planTone(u: UserRow): { cls: string; label: string } {
   return { cls: days <= 2 ? "bg-attention/20 text-attention-text" : "bg-live/10 text-live", label: `trial · ${days}d` };
 }
 
+const ROLES = [
+  { value: "user" as const, label: "Member" },
+  { value: "admin" as const, label: "Admin", icon: <Shield className="size-3" aria-hidden /> },
+];
+
 /**
  * Admin: the people on this controller. Create an account and hand over its first access token
  * (shown once); the person signs in with it, then mints their own keys. Everything they create —
@@ -34,6 +42,7 @@ export function Users() {
   const [users, setUsers] = React.useState<UserRow[] | null>(null);
   const [login, setLogin] = React.useState("");
   const [creating, setCreating] = React.useState(false);
+  const [roleBusy, setRoleBusy] = React.useState<string | null>(null);
   const [fresh, setFresh] = React.useState<{ login: string; token: string } | null>(null);
   const inputRef = React.useRef<HTMLInputElement>(null);
   const me = getMe();
@@ -67,17 +76,25 @@ export function Users() {
   const setPlan = async (u: UserRow, plan: "trial" | "pro" | "free", days?: number) => {
     try {
       await api.setUserPlan(u.id, plan, days);
+      toast.success(`${u.login} is now ${plan === "pro" ? "pro" : `on a ${days ?? 7}-day trial`}`);
       void load();
     } catch (e) {
       toast.error("Could not change the plan", { description: e instanceof Error ? e.message : String(e) });
     }
   };
-  const toggleRole = async (u: UserRow) => {
+  const setRole = async (u: UserRow, role: "user" | "admin") => {
+    if (u.role === role || roleBusy) return;
+    setRoleBusy(u.id);
+    // Optimistic: the pill glides now; a failure snaps it back with the reload.
+    setUsers((prev) => prev?.map((x) => (x.id === u.id ? { ...x, role } : x)) ?? prev);
     try {
-      await api.setUserRole(u.id, u.role === "admin" ? "user" : "admin");
-      await load();
+      await api.setUserRole(u.id, role);
+      toast.success(role === "admin" ? `${u.login} is now an admin` : `${u.login} is now a member`);
     } catch (e) {
       toast.error("Could not change the role", { description: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setRoleBusy(null);
+      void load();
     }
   };
   const remove = async (u: UserRow) => {
@@ -91,21 +108,16 @@ export function Users() {
     }
   };
   const state = users === null ? "loading" : users.length === 0 ? "empty" : "list";
+  const admins = (users ?? []).filter((u) => u.role === "admin").length;
 
   return (
-    <section aria-labelledby="users-h">
-      <div className="mb-4 flex items-center gap-2">
-        <h2 id="users-h" className="text-foreground text-h3 font-semibold tracking-[-0.01em]">
-          Users
-        </h2>
-        <span className="text-muted-foreground text-meta">each person gets their own machines, GitHub accounts and MCP servers</span>
-      </div>
-
+    <SettingsSection id="users" title="Users" meta={users ? `${users.length} · ${admins} admin${admins === 1 ? "" : "s"}` : undefined} purpose="Each person gets their own machines, GitHub accounts and MCP servers. Admins see and can act on everything.">
       <AnimatePresence initial={false}>
         {fresh && (
-          <FreshTokenCard
+          <SecretReveal
             key={`${fresh.login}:${fresh.token}`}
-            token={fresh.token}
+            className="mb-3"
+            value={fresh.token}
             onDone={() => setFresh(null)}
             title={
               <>
@@ -117,7 +129,7 @@ export function Users() {
         )}
       </AnimatePresence>
 
-      <div className="bg-card divide-y rounded-xl border shadow-e1">
+      <Panel>
         <Swap state={state}>
           {state === "loading" ? (
             <ListSkeleton rows={3} />
@@ -125,7 +137,7 @@ export function Users() {
             <ListEmpty
               icon={UsersIcon}
               title="No users yet"
-              line="Add one and hand them their token."
+              line="Add a login below; you get a one-time token to hand them."
               action={
                 <Button size="sm" variant="outline" onClick={() => inputRef.current?.focus()}>
                   <Plus />
@@ -139,85 +151,84 @@ export function Users() {
                 {(users ?? []).map((u, i) => {
                   const plan = planTone(u);
                   const isMe = u.id === myId;
+                  const seen = u.lastSeenAt && Number.isFinite(Date.parse(u.lastSeenAt)) ? fmtAgo(Date.parse(u.lastSeenAt) / 1000) : null;
                   return (
                     <motion.li key={u.id} layout exit={{ opacity: 0, height: 0, transition: { duration: 0.2, ease: [0.22, 1, 0.36, 1] } }} className="overflow-hidden">
-                      <StaggerItem index={i} className="group flex items-center gap-3 px-3.5 py-2.5">
+                      <StaggerItem index={i} className="group flex flex-wrap items-center gap-x-3 gap-y-2 px-3.5 py-2.5 sm:flex-nowrap">
                         <span
-                          className={cn("grid size-8 shrink-0 place-items-center rounded-full border", u.role === "admin" ? "bg-live/8 border-live/15 text-live" : "bg-muted text-muted-foreground border-transparent")}
-                          aria-label={u.role === "admin" ? "Admin" : undefined}
+                          className={cn("grid size-8 shrink-0 place-items-center rounded-full border transition-colors duration-200", u.role === "admin" ? "bg-live/8 border-live/15 text-live" : "bg-muted text-muted-foreground border-transparent")}
+                          aria-hidden
                         >
-                          {u.role === "admin" ? <Shield className="size-3.5" aria-hidden /> : <UserRound className="size-3.5" aria-hidden />}
+                          {u.role === "admin" ? <Shield className="size-3.5" /> : <UserRound className="size-3.5" />}
                         </span>
-                        <span className="flex min-w-0 flex-1 flex-col">
+                        <span className="flex min-w-0 flex-1 basis-40 flex-col">
                           <span className="text-foreground flex min-w-0 items-center gap-1.5 text-meta font-medium">
                             <span className="truncate">{u.login}</span>
                             {isMe && <span className="text-faint text-micro font-normal">you</span>}
-                            {u.role === "admin" && <span className="text-live text-micro font-normal">admin</span>}
                           </span>
-                          <span className="text-faint truncate text-micro">
+                          <span className="text-faint truncate text-micro tabular-nums">
                             {u.boxes} {u.boxes === 1 ? "machine" : "machines"} · {u.keys} {u.keys === 1 ? "key" : "keys"}
                             {u.github ? " · GitHub linked" : ""}
-                            {u.lastSeenAt && Number.isFinite(Date.parse(u.lastSeenAt)) ? ` · seen ${fmtAgo(Date.parse(u.lastSeenAt) / 1000)}` : ""}
+                            {seen ? ` · seen ${seen}` : " · never signed in"}
                           </span>
                         </span>
-                        <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-micro font-medium transition-colors duration-200", plan.cls)}>{plan.label}</span>
+                        <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-micro font-medium tabular-nums transition-colors duration-200", plan.cls)}>{plan.label}</span>
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <Button size="sm" variant="ghost" onClick={() => issue(u)} className="text-muted-foreground hidden sm:inline-flex">
-                              <KeyRound />
-                              Token
-                            </Button>
+                            <span className="inline-flex shrink-0">
+                              <Segmented ariaLabel={`Role for ${u.login}`} value={u.role} onChange={(r) => void setRole(u, r)} options={ROLES} disabled={isMe} busy={roleBusy === u.id ? u.role : null} />
+                            </span>
                           </TooltipTrigger>
-                          <TooltipContent>Issue a fresh access token — shown once</TooltipContent>
+                          <TooltipContent>{isMe ? "You cannot change your own role" : "Admins see and can act on every machine"}</TooltipContent>
                         </Tooltip>
-                        <DropdownMenu>
+                        {/* Secondary actions: revealed on hover/focus at ≥sm, always visible on touch. */}
+                        <span className="ml-auto flex shrink-0 items-center gap-0.5 sm:opacity-0 sm:transition-opacity sm:duration-150 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100 sm:has-[[data-armed]]:opacity-100 sm:has-[[data-state=open]]:opacity-100">
                           <Tooltip>
                             <TooltipTrigger asChild>
-                              <DropdownMenuTrigger asChild>
-                                <Button size="icon-sm" variant="ghost" aria-label={`Actions for ${u.login}`} className="text-muted-foreground">
-                                  <Ellipsis />
-                                </Button>
-                              </DropdownMenuTrigger>
+                              <Button size="icon-sm" variant="ghost" onClick={() => issue(u)} className="text-muted-foreground" aria-label={`Issue a token for ${u.login}`}>
+                                <KeyRound />
+                              </Button>
                             </TooltipTrigger>
-                            <TooltipContent>Plan and role</TooltipContent>
+                            <TooltipContent>Issue a fresh access token — shown once</TooltipContent>
                           </Tooltip>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuLabel>Plan</DropdownMenuLabel>
-                            {u.plan !== "pro" && (
-                              <DropdownMenuItem onSelect={() => void setPlan(u, "pro")}>
-                                <Crown />
-                                Make pro
-                                <MenuHint>unlimited time</MenuHint>
-                              </DropdownMenuItem>
-                            )}
-                            {u.plan === "trial" && (
-                              <DropdownMenuItem onSelect={() => void setPlan(u, "trial", 7)}>
-                                <RotateCcw />
-                                Extend trial
-                                <MenuHint>+7 days</MenuHint>
-                              </DropdownMenuItem>
-                            )}
-                            {u.plan === "pro" && (
-                              <DropdownMenuItem onSelect={() => void setPlan(u, "trial", 7)}>
-                                <RotateCcw />
-                                Back to trial
-                                <MenuHint>7 days</MenuHint>
-                              </DropdownMenuItem>
-                            )}
-                            <DropdownMenuItem onSelect={() => void issue(u)} className="sm:hidden">
-                              <KeyRound />
-                              Issue a token
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuLabel>Role</DropdownMenuLabel>
-                            <DropdownMenuItem disabled={isMe} onSelect={() => void toggleRole(u)}>
-                              {u.role === "admin" ? <ShieldOff /> : <Shield />}
-                              {u.role === "admin" ? "Demote to member" : "Make admin"}
-                              {isMe && <MenuHint>not yourself</MenuHint>}
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                        <ArmButton size="icon-sm" variant="ghost" icon={<Trash2 />} label={`Remove ${u.login}`} armedLabel="Confirm remove" onConfirm={() => remove(u)} disabled={isMe} className="text-muted-foreground hover:text-destructive" />
+                          <DropdownMenu>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <DropdownMenuTrigger asChild>
+                                  <Button size="icon-sm" variant="ghost" aria-label={`Plan for ${u.login}`} className="text-muted-foreground">
+                                    <Ellipsis />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                              </TooltipTrigger>
+                              <TooltipContent>Plan</TooltipContent>
+                            </Tooltip>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuLabel>Plan</DropdownMenuLabel>
+                              {u.plan !== "pro" && (
+                                <DropdownMenuItem onSelect={() => void setPlan(u, "pro")}>
+                                  <Crown />
+                                  Make pro
+                                  <MenuHint>unlimited time</MenuHint>
+                                </DropdownMenuItem>
+                              )}
+                              {u.plan === "trial" && (
+                                <DropdownMenuItem onSelect={() => void setPlan(u, "trial", 7)}>
+                                  <RotateCcw />
+                                  Extend trial
+                                  <MenuHint>+7 days</MenuHint>
+                                </DropdownMenuItem>
+                              )}
+                              {u.plan === "pro" && (
+                                <DropdownMenuItem onSelect={() => void setPlan(u, "trial", 7)}>
+                                  <RotateCcw />
+                                  Back to trial
+                                  <MenuHint>7 days</MenuHint>
+                                </DropdownMenuItem>
+                              )}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                          <ArmButton size="icon-sm" variant="ghost" icon={<Trash2 />} label={`Remove ${u.login}`} armedLabel="Confirm remove" onConfirm={() => remove(u)} disabled={isMe} className="text-muted-foreground hover:text-destructive" />
+                        </span>
                       </StaggerItem>
                     </motion.li>
                   );
@@ -226,7 +237,7 @@ export function Users() {
             </ul>
           )}
         </Swap>
-        <div className="flex items-center gap-2 px-3.5 py-2.5">
+        <PanelFooter>
           <input
             ref={inputRef}
             value={login}
@@ -240,8 +251,8 @@ export function Users() {
             <Plus />
             Add user
           </Button>
-        </div>
-      </div>
-    </section>
+        </PanelFooter>
+      </Panel>
+    </SettingsSection>
   );
 }

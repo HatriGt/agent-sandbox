@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { ArmButton } from "@/components/ui/arm-button";
 import { Collapse } from "@/components/ui/collapse";
 import { StaggerItem, Swap } from "@/components/ui/swap";
-import { CopyButton } from "@/components/ApiKeys";
+import { CopyButton } from "@/components/ui/secret";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { AnimatedTabs, TabPanel } from "@/components/ui/animated-tabs";
