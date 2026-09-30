@@ -837,9 +837,14 @@ export function Hub({
                         <span className="text-foreground min-w-0 flex-1 truncate text-meta">
                           {b.runState === "waiting" && b.question ? questionHeadline(b.question) : threadTitle(b)}
                         </span>
+                        {b.stalled && (
+                          <span className="text-destructive shrink-0 text-micro font-medium" title="Running, but no action for 10+ min">
+                            ⧖ stalled
+                          </span>
+                        )}
                         {b.lastOutputAt && (
-                          <span className="text-faint tabular hidden shrink-0 text-micro sm:inline">
-                            {b.runState === "running" ? "active " : ""}
+                          <span className={`${b.stalled ? "text-destructive" : "text-faint"} tabular hidden shrink-0 text-micro sm:inline`}>
+                            {b.runState === "running" ? "last action " : ""}
                             {fmtAgo(b.lastOutputAt)}
                           </span>
                         )}

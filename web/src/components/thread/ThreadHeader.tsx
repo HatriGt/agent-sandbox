@@ -169,11 +169,20 @@ export function ThreadHeader({
       : null
     : (state === "done" || state === "waiting") && box.lastOutputAt
       ? `${state === "done" ? "finished" : "asked"} ${fmtAgo(box.lastOutputAt)}`
-      : null;
+      : box.runState === "running" && box.lastOutputAt
+        ? `${box.stalled ? "⧖ stalled · " : ""}last action ${fmtAgo(box.lastOutputAt)}`
+        : null;
+  // Budget line: tokens always; dollars only when the model has a known price (never guessed).
+  const bud = box.budget;
+  const budgetLine = bud
+    ? `budget ${bud.tokens.toLocaleString("en-US")}${bud.maxTokens ? `/${bud.maxTokens.toLocaleString("en-US")}` : ""} tok` +
+      (bud.usd !== undefined ? ` · $${bud.usd.toFixed(2)}${bud.maxUsd ? `/$${bud.maxUsd.toFixed(2)}` : ""}` : bud.maxUsd ? " · $ n/a (unpriced model)" : "") +
+      ` · ${bud.maxMinutes} min cap`
+    : null;
   const long = deadlineLabel(deadline);
   // Which resource's request is in flight — the confirm dialog is shared between the two.
   const busyFor = resizeTo?.kind === "disk" ? diskBusy : memoryBusy;
-  const vitals = [box.agent && box.agent !== "claude" && `agent ${({ omp: "oh-my-pi", codex: "Codex CLI", opencode: "OpenCode" } as Record<string, string>)[box.agent] ?? box.agent}`, box.uptime && `${sleeping ? "ran for" : "up"} ${box.uptime}`, box.cpu && `cpu ${box.cpu}`, box.memUsage && `memory ${fmtUsage(box.memUsage)}`, box.disk && `disk ${fmtUsage(box.disk)}`, roleLabel(box.role)].filter(Boolean).join(" · ");
+  const vitals = [box.agent && box.agent !== "claude" && `agent ${({ omp: "oh-my-pi", codex: "Codex CLI", opencode: "OpenCode" } as Record<string, string>)[box.agent] ?? box.agent}`, box.uptime && `${sleeping ? "ran for" : "up"} ${box.uptime}`, box.cpu && `cpu ${box.cpu}`, box.memUsage && `memory ${fmtUsage(box.memUsage)}`, box.disk && `disk ${fmtUsage(box.disk)}`, roleLabel(box.role), budgetLine].filter(Boolean).join(" · ");
 
   // The conversation scroller is a sibling rendered by Thread, not a child, so there is nothing to
   // ref. Scroll events don't bubble but they DO capture, so one capture-phase listener on the
@@ -473,7 +482,7 @@ export function ThreadHeader({
           )}
           {/* "finished 2m ago" → "asked just now": the meta changes with the state, so it crossfades with it. */}
           <Swap state={when ?? ""} className="hidden items-center sm:flex">
-            {when && <span className="text-faint text-micro">{when}</span>}
+            {when && <span className={`${box.stalled ? "text-destructive" : "text-faint"} text-micro`}>{when}</span>}
           </Swap>
           {when && short && <span className="hidden sm:inline"><Dot /></span>}
           {short && (

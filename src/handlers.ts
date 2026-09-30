@@ -11,6 +11,7 @@
  */
 import { isBoxName } from "./sync.js";
 import { z } from "zod";
+import { normalizeBudget } from "./budget.js";
 import type { Config } from "./config.js";
 import { validateDelegateInput, type DelegateSource, type DelegatePlan } from "./delegate-input.js";
 import { fetchModels, isAllowedModel } from "./models.js";
@@ -292,6 +293,17 @@ export function registerTools(
             "Exactly one key. The result stamps the run as verified/UNVERIFIED — a failed check never " +
             "un-finishes it."
         ),
+      budget: z
+        .object({
+          maxMinutes: z.number().describe("Wall-clock cap in minutes (required when budget is given)."),
+          maxUsd: z.number().optional().describe("Dollar cap — enforced only for models with a known price."),
+          maxTokens: z.number().optional().describe("Total input+output token cap."),
+        })
+        .optional()
+        .describe(
+          "Per-run budget. When a cap is hit the run is NOT killed: it asks a question (continue/stop) " +
+            "and pauses at its next tool call. Token/$ totals update at turn end."
+        ),
     },
     async ({
       source,
@@ -308,6 +320,7 @@ export function registerTools(
       verify,
       after,
       carry,
+      budget,
     }: {
       source?: DelegateSource;
       repo?: string;
@@ -323,6 +336,7 @@ export function registerTools(
       verify?: { command?: string; criterion?: string };
       after?: string;
       carry?: "patch" | "none";
+      budget?: { maxMinutes: number; maxUsd?: number; maxTokens?: number };
     }) => {
       // Validate the verify clause FIRST — a malformed one must be a question before any box work.
       const vp = verifyPlanOf(verify);
@@ -386,6 +400,13 @@ export function registerTools(
         agent,
       });
       if (!v.ok) return text(v.question);
+      if (budget !== undefined) {
+        try {
+          v.plan.budget = normalizeBudget(budget);
+        } catch (e) {
+          return text((e as Error).message);
+        }
+      }
 
       // Resolve GitHub access by ACCESS from the login-keyed store (no default account anywhere):
       // pick, per repo, the account whose token can actually reach it. This drives the CLONE (git),

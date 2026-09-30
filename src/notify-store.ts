@@ -58,7 +58,8 @@ export function normalizeNotifySettings(input: { url?: unknown; events?: unknown
 }
 
 export function eventEnabled(s: NotifySettings, kind: NotifyEvent["kind"]): boolean {
-  return s.url !== "" && s.events[kind];
+  // A stall rides the "failed" toggle: both mean "this run needs you".
+  return s.url !== "" && s.events[kind === "stalled" ? "failed" : kind];
 }
 
 /* ───────────────────────────── IO (user_blobs) ───────────────────────────── */

@@ -53,6 +53,12 @@ export interface BoxView {
   agent?: string;
   /** Unix seconds of the agent log's last write — when the agent last produced output. Best-effort. */
   lastOutputAt?: number;
+  /** Running but the log has not moved for STALL_AFTER_MS (src/budget.ts): likely hung. */
+  stalled?: boolean;
+  /** The run's budget caps and spend so far; usd only for a model with a known price. */
+  budget?: { maxMinutes: number; maxUsd?: number; maxTokens?: number; tokens: number; usd?: number; tripped?: string[]; startedAt?: number };
+  /** A cap just exceeded (not yet asked): the fleet sweep writes this as the run's question. */
+  budgetHit?: { cap: string; question: string };
   /** Follow-ups queued by the dashboard while the agent was mid-turn; delivered when it finishes. */
   queued?: string[];
   /** Repositories checked out under /workspace (dir name + current branch). */

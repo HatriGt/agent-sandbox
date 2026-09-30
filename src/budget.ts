@@ -29,6 +29,8 @@ export type BudgetCap = "minutes" | "usd" | "tokens";
 /** What lives in BUDGET_PATH: the caps plus which ones already asked. */
 export interface BudgetState extends RunBudget {
   model?: string;
+  /** Epoch ms the delegation started — the maxMinutes clock (a follow-up does not reset it). */
+  startedAt?: number;
   tripped?: BudgetCap[];
 }
 
@@ -55,7 +57,12 @@ export function parseBudgetState(text: string | undefined): BudgetState | undefi
     const b = normalizeBudget(j);
     if (!b) return undefined;
     const tripped = Array.isArray(j.tripped) ? j.tripped.filter((c): c is BudgetCap => c === "minutes" || c === "usd" || c === "tokens") : [];
-    return { ...b, ...(typeof j.model === "string" ? { model: j.model } : {}), tripped };
+    return {
+      ...b,
+      ...(typeof j.model === "string" ? { model: j.model } : {}),
+      ...(Number.isFinite(j.startedAt) && (j.startedAt ?? 0) > 0 ? { startedAt: j.startedAt } : {}),
+      tripped,
+    };
   } catch {
     return undefined;
   }
@@ -123,8 +130,9 @@ export function checkBudget(
   const usd = costUsd(facts.usage, b.model, env);
   const spent = `${Math.round(tokens).toLocaleString("en-US")} tokens${usd !== undefined ? ` (~$${usd.toFixed(2)})` : ""}`;
   const tail = " Reply 'continue' to keep going past this cap (it will not ask again for it), or 'stop' to end here.";
-  if (!tripped.has("minutes") && facts.startedAtMs && facts.nowMs - facts.startedAtMs >= b.maxMinutes * 60_000) {
-    const mins = Math.round((facts.nowMs - facts.startedAtMs) / 60_000);
+  const started = facts.startedAtMs ?? b.startedAt;
+  if (!tripped.has("minutes") && started && facts.nowMs - started >= b.maxMinutes * 60_000) {
+    const mins = Math.round((facts.nowMs - started) / 60_000);
     return { cap: "minutes", question: `Budget reached: this run has been going ${mins} min (cap ${b.maxMinutes} min); spent ${spent}.${tail}` };
   }
   if (!tripped.has("tokens") && b.maxTokens && tokens >= b.maxTokens) {

@@ -497,7 +497,7 @@ export const deps: HandlerDeps = {
       await execWithInput(runCfg, box, `umask 077 && cat > ${PROVIDER_ENV_PATH}`, body);
     }
     if (plan.budget) {
-      const state: BudgetState = { ...plan.budget, ...(plan.model ? { model: plan.model } : {}), tripped: [] };
+      const state: BudgetState = { ...plan.budget, ...(plan.model ? { model: plan.model } : {}), startedAt: t0, tripped: [] };
       await execWithInput(runCfg, box, `umask 077 && cat > ${BUDGET_PATH}`, JSON.stringify(state));
     }
 

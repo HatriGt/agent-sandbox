@@ -53,7 +53,9 @@ import {
   upsertProvider,
   viewOf,
 } from "./providers.js";
-import { normalizeBudget, type RunBudget } from "./budget.js";
+import { BUDGET_PATH, normalizeBudget, type RunBudget } from "./budget.js";
+import { QUESTION_MARK } from "./drivers/sentinels.js";
+import type { BoxView } from "./monitor.js";
 import { requestSessions, createLocalUser, deleteUser, listUsers, ownerOf, setUserRole, validateSignup, createPasswordUser, authenticatePassword, setPassword, updateProfile, verifyPassword, PASSWORD_MIN, listSessions, revokeSession, revokeOtherSessions, startTrial, planOf, setPlan, TrialExpiredError } from "./identity.js";
 import { parseStore } from "./gh-token-store.js";
 import { seedStarterSkills } from "./starter-skills.js";
@@ -493,12 +495,12 @@ const sendNotification = async (ev: NotifyEvent): Promise<void> => {
   // behind when notifications are unconfigured (the default) would leak forever, task text and all.
   const ctx = notifyCtx.get(ev.box) ?? {};
   notifyCtx.delete(ev.box);
-  if (!url || !settings.events[ev.kind]) return;
+  if (!url || !settings.events[ev.kind === "stalled" ? "failed" : ev.kind]) return;
   // A finished run's notification carries the digest headline ("done · 3 files · 4 steps"), so the
   // push is a review-at-a-glance, not just a ping. Best-effort: a headline failure drops the
   // enrichment, never the notification.
   let headline: string | undefined;
-  if (ev.kind !== "waiting") {
+  if (ev.kind === "done" || ev.kind === "failed") {
     headline = await watchHub
       .read(ev.box)
       .then((snap) =>
@@ -618,6 +620,27 @@ const maybePark = (boxes: Array<{ name: string; runState?: string; boxStatus?: s
   for (const k of [...waitingSince.keys()]) if (!boxes.some((b) => b.name === k)) waitingSince.delete(k);
 };
 
+/**
+ * Budget ask-and-stop (src/budget.ts): a running box over a cap gets the cap's question written as
+ * its QUESTION_MARK — the driver's gate then denies the next tool call and the turn ends at the
+ * question, like any other ask. The run is never killed. The cap is marked tripped in the box's
+ * budget file in the same shell, so it asks once; a question already pending is never overwritten.
+ */
+const budgetInFlight = new Set<string>();
+const askBudget = (boxes: BoxView[]): void => {
+  for (const b of boxes) {
+    const hit = b.budgetHit;
+    if (!hit || b.question || budgetInFlight.has(b.name) || !/^(minutes|usd|tokens)$/.test(hit.cap)) continue;
+    budgetInFlight.add(b.name);
+    const mark =
+      `node -e 'const fs=require("fs"),f=process.argv[1],c=process.argv[2];const j=JSON.parse(fs.readFileSync(f,"utf8"));` +
+      `j.tripped=[...new Set([...(j.tripped||[]),c])];fs.writeFileSync(f,JSON.stringify(j))' ${BUDGET_PATH} ${hit.cap}`;
+    void execWithInput(cfg, b.name, `[ -f ${QUESTION_MARK} ] || { cat > ${QUESTION_MARK} && ${mark}; }`, hit.question)
+      .catch((e) => console.error(`[budget] ${b.name}: ${(e as Error).message.slice(0, 200)}`))
+      .finally(() => budgetInFlight.delete(b.name));
+  }
+};
+
 const lastSeenStatus = new Map<string, boolean>();
 const readFleet = makeFleetReader(
   cfg,
@@ -643,7 +666,7 @@ const readFleet = makeFleetReader(
     {
       const nextRunViews = boxes
         .filter((b) => b.role !== "pool-free")
-        .map((b) => ({ name: b.name, runState: b.runState, exitCode: b.exitCode, question: b.question }));
+        .map((b) => ({ name: b.name, runState: b.runState, exitCode: b.exitCode, question: b.question, stalled: b.stalled, lastOutputAt: b.lastOutputAt }));
       for (const ev of detectTransitions(prevRunViews, nextRunViews)) {
         notifyCtx.set(ev.box, { title: titles[ev.box], task: boxes.find((b) => b.name === ev.box)?.task });
         // Verified outcomes for dashboard runs: a clean finish runs the stored clause BEFORE the
@@ -677,6 +700,7 @@ const readFleet = makeFleetReader(
     // Ask-park: a box waiting past the grace window is snapshotted and stopped (fire-and-forget; the
     // next sweep sees it Stopped and the fleet card shows it asleep-with-question).
     maybePark(boxes);
+    askBudget(boxes);
     return boxes.map((b) => ({
       ...b,
       ...(titles[b.name] ? { title: titles[b.name] } : {}),

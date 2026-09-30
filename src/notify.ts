@@ -24,11 +24,18 @@ export interface BoxRunView {
   runState: "running" | "waiting" | "done" | "idle";
   exitCode?: number;
   question?: string;
+  /** Running, but its log has not moved for the stall window (src/budget.ts). */
+  stalled?: boolean;
+  /** Epoch seconds of the last log write, for the stall message. */
+  lastOutputAt?: number;
 }
 
 export interface NotifyEvent {
   box: string;
-  kind: "waiting" | "done" | "failed";
+  /** `stalled` is delivered under the operator's "failed" toggle — both mean "this needs you". */
+  kind: "waiting" | "done" | "failed" | "stalled";
+  /** Minutes since the last action, for a stalled event. */
+  quietMin?: number;
   question?: string;
   exitCode?: number;
   /** Human note for special exit codes (interrupted / stopped by operator). */
@@ -72,6 +79,11 @@ export function detectTransitions(prev: readonly BoxRunView[], next: readonly Bo
     }
     if (b.runState === "done" && was.runState !== "done" && was.runState !== "idle") {
       out.push(terminalEvent(b));
+    }
+    // A run that went quiet: one push on the edge, not every sweep while it stays stalled.
+    if (b.runState === "running" && b.stalled && !was.stalled) {
+      const quietMin = b.lastOutputAt ? Math.max(1, Math.round((Date.now() / 1000 - b.lastOutputAt) / 60)) : undefined;
+      out.push({ box: b.name, kind: "stalled", ...(quietMin ? { quietMin } : {}) });
     }
   }
   return out;
@@ -132,7 +144,9 @@ export function formatNotification(
       ? `“${label}” needs an answer: ${e.question}`
       : e.kind === "done"
         ? `“${label}” finished${ctx.headline ? ` — ${ctx.headline}` : ""} (${e.box})`
-        : `“${label}” failed${e.note ? ` — ${e.note}` : ` (exit ${e.exitCode})`} (${e.box})`;
+        : e.kind === "stalled"
+          ? `“${label}” looks stalled — no action for ${e.quietMin ?? "several"} min (${e.box})`
+          : `“${label}” failed${e.note ? ` — ${e.note}` : ` (exit ${e.exitCode})`} (${e.box})`;
   return { text, url: `${ctx.publicUrl.replace(/\/+$/, "")}/dashboard/#/box/${e.box}`, event: e };
 }
 
