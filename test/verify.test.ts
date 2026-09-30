@@ -62,7 +62,7 @@ test("command mode: exit 0 is pass, nonzero is fail with the tail of the output"
       },
     }
   );
-  assert.deepEqual(pass, { mode: "command", pass: true, detail: "all green" });
+  assert.deepEqual(pass, { mode: "command", pass: true, detail: "all green", command: "npm test" });
 
   const fail = await runVerification(
     { mode: "command", command: "npm test" },

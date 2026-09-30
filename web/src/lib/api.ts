@@ -838,6 +838,10 @@ export const api = {
   saveProvider: (body: { id?: string; kind: ProviderKind; label?: string; baseUrl?: string; apiKey?: string }) =>
     post<ProvidersResponse & { saved: string }>("/providers.json", body),
   deleteProvider: (id: string) => post<ProvidersResponse>("/providers/delete.json", { id }),
+  /** Repo setup profiles (src/setup-profile.ts): what each repo installs/builds/tests with. */
+  repoSetups: (signal?: AbortSignal) => fetch(url("/repo-setup.json"), { headers: authHeaders, signal }).then(parse<RepoSetupsResponse>),
+  saveRepoSetup: (repo: string, profile: Partial<RepoSetupProfile>) => post<RepoSetupsResponse>("/repo-setup.json", { repo, profile }),
+  resetRepoSetup: (repo: string) => post<RepoSetupsResponse>("/repo-setup/delete.json", { repo }),
   providerModels: (id: string, force?: boolean) =>
     post<{ models: string[]; cached: boolean; error?: string }>("/providers/models.json", { id, ...(force ? { force } : {}) }),
 
@@ -987,6 +991,23 @@ export interface LedgerTotals {
   costUsd: number | null;
   withCost: number;
 }
+/** Mirrors `SetupProfile` in src/setup-profile.ts. Env vars are names only — never values. */
+export interface RepoSetupProfile {
+  v: 1;
+  install?: string;
+  build?: string;
+  test?: string;
+  lint?: string;
+  runtimes: Record<string, string>;
+  envVars: string[];
+  notes?: string;
+  detectedAt: number;
+  confirmedBy: "detected" | "agent" | "user";
+}
+export interface RepoSetupsResponse {
+  profiles: Array<{ repo: string; profile: RepoSetupProfile; updatedAt: number }>;
+}
+
 /** Mirrors `RunOutcome` in src/outcome.ts — the outcome card. Every null is "unknown": render "—". */
 export interface RunOutcome {
   v: 1;
@@ -1001,6 +1022,8 @@ export interface RunOutcome {
     tests: { runner: string; passed: number; failed: number; skipped: number; source: "verify" | "trace" } | null;
     exitCode: number | null;
     verified: { pass: boolean; mode: string } | null;
+    /** The verify command that ran; absent on outcomes archived before it existed. */
+    testedWith?: string | null;
     prOnly: boolean;
     questions: number;
     openQuestions: number;

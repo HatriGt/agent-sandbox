@@ -57,6 +57,8 @@ export interface VerifyResult {
   mode: VerifyPlan["mode"];
   pass: boolean;
   detail: string;
+  /** Command mode: the command that ran (the outcome card's "Tested with `…`"). */
+  command?: string;
   /** Command mode: pass/fail counts when the command's output was a recognised test runner's. */
   tests?: TestCounts;
 }
@@ -111,7 +113,7 @@ export async function runVerification(
       // the failing assertion is usually a few lines up.
       const detail = (r.code === 0 ? lines.slice(-1) : lines.slice(-8)).join("\n").slice(-TAIL);
       const tests = parseTestCounts(r.output);
-      return { mode: "command", pass: r.code === 0, detail: detail || `exit ${r.code}`, ...(tests ? { tests } : {}) };
+      return { mode: "command", pass: r.code === 0, detail: detail || `exit ${r.code}`, command: plan.command, ...(tests ? { tests } : {}) };
     }
     const { answer } = await io.askCriterion(verdictPrompt(plan.criterion));
     const v = parseVerdict(answer);

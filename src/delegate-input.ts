@@ -90,6 +90,12 @@ export interface DelegatePlan {
   budget?: RunBudget;
   /** Harness skill selection (src/harness.ts): install exactly these; absent = the enabled set. */
   skills?: string[];
+  /**
+   * Repo setup profiles (src/setup-profile.ts) keyed by lowercase "owner/name", resolved by the
+   * route. Present (even empty) = learn-setup is on: warm install, prompt hint, and detection for
+   * repos with no profile. Absent = the run knows nothing about setup.
+   */
+  setup?: Record<string, import("./setup-profile.js").SetupProfile>;
   /** Back-compat accessor: the first repo's identifier. */
   repo: string;
   /** Back-compat accessor: the first repo's ref. */

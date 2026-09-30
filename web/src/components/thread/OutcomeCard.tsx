@@ -164,6 +164,11 @@ export function OutcomeCard({ outcome: o, className }: { outcome: RunOutcome; cl
             {tests.text}
             {o.trust.tests && <span className="text-muted-foreground stamp"> · {o.trust.tests.runner}</span>}
           </span>
+          {o.trust.testedWith && (
+            <span className="text-muted-foreground min-w-0 truncate text-micro" title={o.trust.testedWith}>
+              Tested with <code className="text-foreground font-mono">{o.trust.testedWith}</code>
+            </span>
+          )}
           {o.trust.verified && (
             <span className={cn("text-micro", o.trust.verified.pass ? "text-ok" : "text-destructive")}>{o.trust.verified.pass ? "✓ verified" : "UNVERIFIED"}</span>
           )}
