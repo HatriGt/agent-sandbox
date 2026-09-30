@@ -81,6 +81,10 @@ export default defineConfig({
         "/skills.json",
         "/sleep.json",
         "/users.json",
+        "/harnesses.json",
+        "/harnesses/export.json",
+        "/harnesses/import.json",
+        "/harness-compares.json",
       ].map((p) => [p, { target: process.env.ASB_API || "http://127.0.0.1:8787", changeOrigin: true }])
     ),
   },

@@ -25,6 +25,7 @@ import { toast } from "sonner";
 import { RepoPicker, type PickedRepo } from "@/components/RepoPicker";
 import { ModelChip, useModelChoice, type ModelChoice } from "@/components/thread/ModelPicker";
 import { BudgetChip } from "@/components/thread/BudgetChip";
+import { HarnessChip } from "@/components/harness/HarnessChip";
 import type { RunBudget } from "@/lib/api";
 import { useProviders } from "@/components/Providers";
 import { AgentChip, useAgentChoice } from "@/components/DriverPicker";
@@ -256,6 +257,7 @@ export function Hub({
   const providers = useProviders();
   const [provPick, setProvPick] = React.useState<ModelChoice | null>(null);
   const [budget, setBudget] = React.useState<RunBudget | null>(null);
+  const [harness, setHarness] = React.useState<string | null>(null);
   const provModels = React.useMemo<ModelChoice[]>(
     () => (providers?.providers ?? []).flatMap((p) => (p.models ?? []).map((id) => ({ id, label: id, tier: "other" as const, group: p.label, provider: p.id }))),
     [providers]
@@ -433,6 +435,7 @@ export function Hub({
         // The agent chip shows "partial" before the pick is sent, so choosing it IS the acknowledgement.
         ...(agent.picked ? { agent: agent.picked, ...(agent.current?.supervised === false ? { allowPartialSupervision: true } : {}) } : {}),
         ...(budget ? { budget } : {}),
+        ...(harness ? { harness } : {}),
         ...(verifyActive ? { verify: verifyMode === "command" ? { command: verifyText.trim() } : { criterion: verifyText.trim() } } : {}),
       });
       if (res.ok) {
@@ -697,6 +700,7 @@ export function Hub({
                 <AgentChip choices={agent.choices} current={agent.current} defaultId={agent.defaultId} onPick={agent.pick} />
                 <ModelChip current={provPick ?? model.current} models={pickerModels} defaultId={model.defaultId} onPick={pickModel} />
                 <BudgetChip value={budget} onChange={setBudget} modelId={provPick ? undefined : (model.picked ?? model.defaultId)} />
+                <HarnessChip value={harness} onChange={setHarness} />
                 <button
                   type="button"
                   onClick={() => setVerifyOpen((v) => !v)}

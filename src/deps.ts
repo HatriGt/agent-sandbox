@@ -38,6 +38,7 @@ import { runInteractive } from "./interactive.js";
 import { providerEgressDomains, providerEnv, providerEnvFile } from "./providers.js";
 import { PROVIDER_ENV_PATH } from "./drivers/sentinels.js";
 import { BUDGET_PATH, type BudgetState } from "./budget.js";
+import { setBoxSkillSelection } from "./skill-store.js";
 import { runVerification } from "./verify.js";
 import { handoffPlan, buildCarryDiffSh } from "./handoff.js";
 import { captureAskSnapshot, rewindToAskSnapshot, rewindRunFlags, shouldCaptureBeforeAnswer, snapAskEnabled } from "./snapshot.js";
@@ -509,6 +510,8 @@ export const deps: HandlerDeps = {
     // it reaches an interactive boundary (asks a question / finishes) or the wait times out. The
     // open MCP call is the "listener" — this is what makes the calling agent wait for the box
     // instead of ending its turn. A timeout returns "still working, reconnect via status".
+    // A harness run installs exactly its skills (src/harness.ts); set before the install below.
+    if (plan.skills) setBoxSkillSelection(box, plan.skills);
     await runAgentTask(runCfg, box, plan.task, plan.repos, runCreds, plan.model, plan.agent);
     mark("launch");
     console.error(`[timing] delegate ${box} warm=${warm} total=${Date.now() - t0}ms ${marks.join(" ")}`);

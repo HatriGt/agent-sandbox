@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Link, useLocation, useNavigationType } from "react-router";
-import { ArrowRight, Bell, BellOff, ChevronRight, Clock, Flame, Keyboard, LayoutGrid, LogOut, Menu, Moon, PanelLeftClose, PanelLeftOpen, Pause, Plug, PlugZap, Plus, Search, Shield, Sun, UserRound, WifiOff, Workflow, Zap } from "lucide-react";
+import { ArrowRight, Bell, BellOff, ChevronRight, Clock, Flame, Keyboard, Layers, LayoutGrid, LogOut, Menu, Moon, PanelLeftClose, PanelLeftOpen, Pause, Plug, PlugZap, Plus, Search, Shield, Sun, UserRound, WifiOff, Workflow, Zap } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { api, type FleetLifecycle, type FleetSnapshot } from "@/lib/api";
 import { POLL_MS, isUp, isVisible, threadSort, threadTitle } from "@/lib/format";
@@ -38,6 +38,7 @@ import { cn } from "@/lib/utils";
 const Sandboxes = React.lazy(() => import("@/components/Sandboxes").then((m) => ({ default: m.Sandboxes })));
 const Integrations = React.lazy(() => import("@/components/Integrations").then((m) => ({ default: m.Integrations })));
 const SkillsPage = React.lazy(() => import("@/components/SkillsPage").then((m) => ({ default: m.SkillsPage })));
+const HarnessesPage = React.lazy(() => import("@/components/HarnessesPage").then((m) => ({ default: m.HarnessesPage })));
 const Automations = React.lazy(() => import("@/components/Automations").then((m) => ({ default: m.Automations })));
 const History = React.lazy(() => import("@/components/History").then((m) => ({ default: m.History })));
 const PullRequestPage = React.lazy(() => import("@/components/pr/PullRequestPage").then((m) => ({ default: m.PullRequestPage })));
@@ -246,6 +247,10 @@ export default function App() {
     go({ view: "skills" });
     setMobileRail(false);
   }, [go]);
+  const showHarnesses = React.useCallback(() => {
+    go({ view: "harnesses" });
+    setMobileRail(false);
+  }, [go]);
   const showAutomations = React.useCallback(() => go({ view: "automations" }), [go]);
   const showHistory = React.useCallback(() => {
     go({ view: "history" });
@@ -272,6 +277,7 @@ export default function App() {
       { id: "automations", label: "Automations", icon: <Workflow />, group: "Go to", run: showAutomations },
       { id: "history", label: "History", hint: "g h", icon: <Clock />, group: "Go to", run: showHistory },
       { id: "skills", label: "Skills", hint: "g s", icon: <Zap />, group: "Go to", run: showSkills },
+      { id: "harnesses", label: "Harnesses", icon: <Layers />, group: "Go to", keywords: "drivers rules hooks egress budget compare bundle", run: showHarnesses },
       { id: "integrations", label: "Integrations", hint: "g a", icon: <Plug />, group: "Go to", run: showAccounts },
       { id: "account", label: "Account", icon: <UserRound />, group: "Go to", keywords: "settings profile keys notifications", run: showAccount },
       ...(getMe()?.mode === "saas" && getMe()?.role === "admin" ? [{ id: "admin", label: "Admin · users", icon: <Shield />, group: "Go to", keywords: "people members", run: showAdmin }] : []),
@@ -280,7 +286,7 @@ export default function App() {
       { id: "sidebar", label: collapsed ? "Expand sidebar" : "Collapse sidebar", icon: collapsed ? <PanelLeftOpen /> : <PanelLeftClose />, keywords: "rail navigation", run: () => setCollapsed(!collapsed) },
       { id: "keys", label: "Keyboard shortcuts", hint: "?", icon: <Keyboard />, keywords: "help keys", run: () => setShortcuts(true) },
     ],
-    [showFleet, showAutomations, showHistory, showSkills, showAccounts, showAccount, showAdmin, showConnect, dark, setDark, collapsed, setCollapsed]
+    [showFleet, showAutomations, showHistory, showSkills, showHarnesses, showAccounts, showAccount, showAdmin, showConnect, dark, setDark, collapsed, setCollapsed]
   );
 
   React.useEffect(() => {
@@ -539,6 +545,7 @@ export default function App() {
         <span className="contents" onMouseEnter={prefetchSkills}>
           <NavItem active={view === "skills"} flash={flash === "skills"} onClick={showSkills} icon={<Zap />} label="Skills" shortcut="g s" />
         </span>
+        <NavItem active={view === "harnesses"} onClick={showHarnesses} icon={<Layers />} label="Harnesses" />
         <span className="contents" onMouseEnter={prefetchIntegrations}>
           <NavItem active={view === "integrations"} flash={flash === "integrations"} onClick={showAccounts} icon={<Plug />} label="Integrations" shortcut="g a" />
         </span>
@@ -711,6 +718,7 @@ export default function App() {
               <span className="contents" onMouseEnter={prefetchSkills}>
                 <RailIcon active={view === "skills"} flash={flash === "skills"} onClick={showSkills} icon={<Zap />} label="Skills" shortcut="g s" />
               </span>
+              <RailIcon active={view === "harnesses"} onClick={showHarnesses} icon={<Layers />} label="Harnesses" />
               <span className="contents" onMouseEnter={prefetchIntegrations}>
                 <RailIcon active={view === "integrations"} flash={flash === "integrations"} onClick={showAccounts} icon={<Plug />} label="Integrations" shortcut="g a" />
               </span>
@@ -774,6 +782,10 @@ export default function App() {
                 ) : view === "skills" ? (
                   <PageEnter className="h-full min-h-0">
                     <SkillsPage onBack={backToRail} />
+                  </PageEnter>
+                ) : view === "harnesses" ? (
+                  <PageEnter className="h-full min-h-0">
+                    <HarnessesPage onBack={backToRail} onOpenBox={(b) => go({ view: "box", name: b })} />
                   </PageEnter>
                 ) : view === "integrations" ? (
                   <PageEnter className="h-full min-h-0">

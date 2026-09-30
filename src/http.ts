@@ -102,6 +102,10 @@ import { makeDispatcher } from "./trigger-dispatch.js";
 import { hookAuditPath, hookBodyParser, registerTriggerRoutes } from "./trigger-routes.js";
 import { pruneDeliveries } from "./trigger-store.js";
 import { candidateAccounts } from "./gh-token-store.js";
+import { applyHarness, getHarness, normalizeEgress, HARNESS_LIMITS, type HarnessDef } from "./harness.js";
+import { checkCompareSide, recordRunHarness, skillSelectionBackend } from "./harness-runs.js";
+import { registerHarnessRoutes } from "./harness-routes.js";
+import { registerSkillSelectionBackend } from "./skill-store.js";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -2825,16 +2829,70 @@ const dispatcher = makeDispatcher({
           if (!h.ok) return { ok: false as const, question: h.question };
           repos = h.repos;
         }
-        let model: string | undefined;
-        if (t.model) {
-          const catalog = await fetchModels(cfg).catch(() => []);
-          if (!isAllowedModel(t.model, catalog, cfg)) return { ok: false as const, question: `Unknown model '${t.model}'.` };
-          model = t.model;
+        // A trigger's harness fills what the trigger leaves out (its own agent/model win), through
+        // the same applyHarness the composer uses. A missing or unreviewed harness fails the fire.
+        let hb: Record<string, unknown> = { task: input.task, ...(t.agent ? { agent: t.agent } : {}), ...(t.model ? { model: t.model } : {}) };
+        const th = t.harnessId ? getHarness(t.harnessId, input.owner) : undefined;
+        if (t.harnessId && !th) return { ok: false as const, question: "The trigger's harness no longer exists." };
+        if (th) {
+          try {
+            hb = applyHarness(th, hb).body as Record<string, unknown>;
+          } catch (e) {
+            return { ok: false as const, question: (e as Error).message };
+          }
         }
-        const agent = t.agent && isAgentKind(t.agent) ? t.agent : loadAgentPrefs(input.owner).defaultAgent;
-        const r = await runDelegateFlow(cfg, deps, { agent, source: "git", ...(repos?.length ? { repos } : {}), task: input.task, model, detach: true });
+        const hProvider = typeof hb.provider === "string" ? getProvider(hb.provider, input.owner) : undefined;
+        if (typeof hb.provider === "string" && !hProvider) return { ok: false as const, question: "The harness's provider no longer exists." };
+        let model: string | undefined;
+        const wantModel = typeof hb.model === "string" ? hb.model : undefined;
+        if (wantModel && hProvider) {
+          if (hProvider.models?.length && !hProvider.models.includes(wantModel)) return { ok: false as const, question: `Unknown model '${wantModel}' for ${hProvider.label}.` };
+          model = wantModel;
+        } else if (wantModel) {
+          const catalog = await fetchModels(cfg).catch(() => []);
+          if (!isAllowedModel(wantModel, catalog, cfg)) return { ok: false as const, question: `Unknown model '${wantModel}'.` };
+          model = wantModel;
+        }
+        let hVerify: VerifyPlan | undefined;
+        if (hb.verify !== undefined) {
+          const vp = verifyPlanOf(hb.verify as Record<string, unknown>);
+          if (!vp.ok) return { ok: false as const, question: vp.question };
+          hVerify = vp.plan ?? undefined;
+        }
+        let hBudget: RunBudget | undefined;
+        try {
+          hBudget = th ? normalizeBudget(hb.budget) : undefined;
+        } catch (e) {
+          return { ok: false as const, question: (e as Error).message };
+        }
+        const hAgent = typeof hb.agent === "string" ? hb.agent : undefined;
+        const agent = hAgent && isAgentKind(hAgent) ? hAgent : loadAgentPrefs(input.owner).defaultAgent;
+        const hSkills = Array.isArray(hb.skills) ? (hb.skills as string[]) : undefined;
+        const hEgress = Array.isArray(hb.allowDomains) ? (hb.allowDomains as string[]) : undefined;
+        const r = await runDelegateFlow(cfg, deps, {
+          agent,
+          source: "git",
+          ...(repos?.length ? { repos } : {}),
+          task: typeof hb.task === "string" ? hb.task : input.task,
+          model,
+          ...(hProvider ? { provider: hProvider } : {}),
+          ...(hBudget ? { budget: hBudget } : {}),
+          ...(hVerify ? { verify: hVerify } : {}),
+          ...(hEgress?.length ? { allowDomains: hEgress } : {}),
+          ...(hSkills ? { skills: hSkills } : {}),
+          detach: true,
+        });
         if (!r.ok) return { ok: false as const, question: r.question };
         if (model) boxModels.set(r.box, model);
+        if (hProvider) boxProviders.set(r.box, hProvider.label);
+        if (hVerify) boxVerify.set(r.box, hVerify);
+        if (th) {
+          try {
+            recordRunHarness(db, { box: r.box, owner: input.owner, harnessId: th.id, harnessName: th.name, skills: hSkills });
+          } catch {
+            /* bookkeeping only */
+          }
+        }
         // PR-only at the git layer: a pre-push hook refusing the default branch (src/pr-only.ts).
         // Fail closed: no guard, no run. The box is torn down and the fire is recorded as failed.
         const guard = await guardOrStop(r.box, (b) => installPrOnlyGuard(cfg, b), (b) => deps.teardown(cfg, b));
@@ -2873,6 +2931,40 @@ registerTriggerRoutes(app, {
   redact: (s) => redactor.redact(s),
   publicUrl: cfg.publicUrl,
   audit: auditTrigger,
+});
+// Harnesses (src/harness.ts): definitions per owner, bundles, compares. The per-box skill selection
+// a harness sets is made durable through run_harness so a resume installs the same skills.
+registerSkillSelectionBackend(skillSelectionBackend(db));
+registerHarnessRoutes(app, {
+  cfg,
+  db,
+  dashAuthed,
+  ownerOf: (res) => providerOwner(res),
+  clientError: (e) => clientError(e),
+  redact: (s) => redactor.redact(s),
+  loadSkills: () => loadSkillStore(cfg),
+  addSkills: (skills) =>
+    withStoreLock("skills", async () => {
+      const store = await loadSkillStore(cfg);
+      // Never overwrite: planImport already renamed clashes; a name taken since is skipped.
+      for (const s of skills) if (!store.skills[s.name]) store.skills[s.name] = s;
+      await saveSkillStore(cfg, store);
+    }),
+  liveDigest: async (box) => {
+    const snap = await watchHub.read(box);
+    if (snap.boxStatus === "missing") return null;
+    const files = /^running$/i.test(snap.boxStatus) ? await listChanges(cfg, box).catch(() => []) : [];
+    return buildDigest({
+      box,
+      task: snap.task ?? "",
+      runState: snap.runState,
+      exitCode: snap.exitCode,
+      events: parseTrace(snap.log ?? ""),
+      files,
+      verified: boxVerified.get(box),
+      ...runProvenance(box, snap.agent),
+    }) as unknown as Record<string, unknown>;
+  },
 });
 setInterval(() => {
   try {
@@ -2918,12 +3010,55 @@ app.get("/history/ledger.json", (req: Request, res: Response) => {
 // local working tree to ship.
 app.post("/delegate.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const body = (req.body ?? {}) as Record<string, unknown>;
+  let body = (req.body ?? {}) as Record<string, unknown>;
   if (typeof body.task !== "string" || !body.task.trim()) {
     res.status(400).json({ error: "task is required" });
     return;
   }
+  const rawTask = body.task;
   try {
+    // A saved harness (src/harness.ts) fills the fields this body leaves out; explicit fields win.
+    // Merged BEFORE validation so every harness value passes the same gates as a typed one.
+    const hOwner = providerOwner(res);
+    let harness: HarnessDef | undefined;
+    let applied: string[] = [];
+    if (typeof body.harness === "string" && body.harness) {
+      harness = getHarness(body.harness, hOwner);
+      if (!harness) {
+        res.status(400).json({ error: "Unknown harness." });
+        return;
+      }
+      try {
+        const r = applyHarness(harness, body);
+        body = r.body as Record<string, unknown>;
+        applied = r.applied;
+      } catch (e) {
+        res.status(400).json({ error: (e as Error).message });
+        return;
+      }
+    }
+    let compareSide: "a" | "b" | undefined;
+    const compareId = typeof body.compareId === "string" && body.compareId ? body.compareId : undefined;
+    if (compareId) {
+      const c = checkCompareSide(db, hOwner, compareId, body.compareSide, harness?.id);
+      if (!c.ok) {
+        res.status(400).json({ error: c.error });
+        return;
+      }
+      compareSide = c.side;
+    }
+    let allowDomains: string[] | undefined;
+    let skills: string[] | undefined;
+    try {
+      allowDomains = body.allowDomains === undefined ? undefined : normalizeEgress(body.allowDomains);
+      if (body.skills !== undefined) {
+        if (!Array.isArray(body.skills) || body.skills.length > HARNESS_LIMITS.maxSkills || !body.skills.every((s) => typeof s === "string" && /^[\w.-]{1,80}$/.test(s))) throw new Error("skills must be a list of skill names.");
+        skills = [...new Set(body.skills as string[])];
+      }
+    } catch (e) {
+      res.status(400).json({ error: (e as Error).message });
+      return;
+    }
     // Explicit repos from the picker win. With none given, a repo the TASK names ("review the last PR
     // in elseco deal service") is attached automatically, so the agent starts with the checkout it
     // was clearly asked about instead of hunting for it with `gh search`.
@@ -2952,7 +3087,7 @@ app.post("/delegate.json", async (req: Request, res: Response) => {
     let repos = explicit;
     if (!repos.length && typeof body.repo !== "string") {
       try {
-        const matches = inferRepos(body.task, await listRepos());
+        const matches = inferRepos(rawTask, await listRepos());
         inferred = matches.map((m) => m.fullName);
         repos = matches.map((m) => ({ repo: m.fullName, ref: undefined }));
       } catch {
@@ -2966,9 +3101,10 @@ app.post("/delegate.json", async (req: Request, res: Response) => {
       .filter((a) => typeof a.dataUrl === "string" && a.dataUrl.length < 11_000_000)
       .slice(0, 8)
       .map((a, i) => ({ path: `.attachments/${stamp}-${i + 1}-${String(a.name ?? "image.png").replace(/[^\w.-]+/g, "-").slice(0, 60)}`, base64: a.dataUrl! }));
+    const baseTask = typeof body.task === "string" ? body.task : rawTask;
     const task = attachments.length
-      ? `${body.task}\n\nAttached ${attachments.length === 1 ? "image" : "images"} (open with the Read tool):\n${attachments.map((a) => `- /workspace/${a.path}`).join("\n")}`
-      : body.task;
+      ? `${baseTask}\n\nAttached ${attachments.length === 1 ? "image" : "images"} (open with the Read tool):\n${attachments.map((a) => `- /workspace/${a.path}`).join("\n")}`
+      : baseTask;
     if (ownership.isUser()) {
       ownership.assertCanRun();
       const p = principalOf(res);
@@ -3034,6 +3170,8 @@ app.post("/delegate.json", async (req: Request, res: Response) => {
       budget,
       allowPartialSupervision: body.allowPartialSupervision === true,
       verify: verifyPlan,
+      ...(allowDomains?.length ? { allowDomains } : {}),
+      ...(skills ? { skills } : {}),
       // The browser needs only the box name (the thread attaches over SSE); blocking this response
       // on the interactive wait window made task starts ~50s slower than the box actually was.
       detach: true,
@@ -3042,9 +3180,17 @@ app.post("/delegate.json", async (req: Request, res: Response) => {
       if (model) boxModels.set(result.box, model);
       if (provider) boxProviders.set(result.box, provider.label);
       if (verifyPlan) boxVerify.set(result.box, verifyPlan);
-      void generateTitle(cfg, result.box, task).catch(() => {});
+      if (harness || compareId) {
+        try {
+          recordRunHarness(db, { box: result.box, owner: hOwner, harnessId: harness?.id, harnessName: harness?.name, skills, compareId, side: compareSide });
+        } catch {
+          /* the link is bookkeeping; the run already started */
+        }
+      }
+      void generateTitle(cfg, result.box, rawTask).catch(() => {});
     }
-    res.json(inferred.length ? { ...result, inferred } : result);
+    const extra = { ...(inferred.length ? { inferred } : {}), ...(harness ? { harness: { id: harness.id, name: harness.name, applied } } : {}) };
+    res.json({ ...result, ...extra });
   } catch (e) {
     failWith(res, e);
   }

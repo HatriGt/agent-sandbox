@@ -24,6 +24,7 @@ export type ConsoleRoute =
   | { view: "history" }
   | { view: "automations" }
   | { view: "skills" }
+  | { view: "harnesses" }
   | { view: "integrations" }
   | { view: "account" }
   | { view: "connect" }
@@ -42,6 +43,7 @@ export function parseConsolePath(pathname: string): ConsoleRoute {
   if (/^\/history\/?$/.test(rest)) return { view: "history" };
   if (/^\/automations\/?$/.test(rest)) return { view: "automations" };
   if (/^\/skills\/?$/.test(rest)) return { view: "skills" };
+  if (/^\/harnesses\/?$/.test(rest)) return { view: "harnesses" };
   if (/^\/(accounts|integrations)\/?$/.test(rest)) return { view: "integrations" };
   if (/^\/account\/?$/.test(rest)) return { view: "account" };
   if (/^\/connect\/?$/.test(rest)) return { view: "connect" };
@@ -66,6 +68,8 @@ export function consolePath(r: ConsoleRoute): string {
       return `${BASE}/automations`;
     case "skills":
       return `${BASE}/skills`;
+    case "harnesses":
+      return `${BASE}/harnesses`;
     case "integrations":
       return `${BASE}/integrations`;
     case "account":
