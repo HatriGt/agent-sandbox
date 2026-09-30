@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowLeft, CalendarClock, Copy, GitPullRequest, Link2, Play, Plus, RotateCw, ShieldCheck, Trash2, Webhook, Zap } from "lucide-react";
+import { ArrowLeft, CalendarClock, Copy, GitPullRequest, Link2, Play, Plus, RotateCw, ShieldCheck, Trash2, Webhook, Workflow } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { toast } from "sonner";
 import { api, type Automation, type AutomationDraft, type AutomationKind, type GithubEvent } from "@/lib/api";
@@ -114,7 +114,7 @@ export function Automations({ onBack, onOpenBox }: { onBack: () => void; onOpenB
         <Swap state={error ? "error" : rows === null ? "loading" : rows.length ? "list" : "empty"}>
           {error ? (
             <EmptyState
-              icon={Zap}
+              icon={Workflow}
               tone="destructive"
               title="Could not load automations"
               line={error}
@@ -137,7 +137,7 @@ export function Automations({ onBack, onOpenBox }: { onBack: () => void; onOpenB
             </div>
           ) : !rows.length ? (
             <EmptyState
-              icon={Zap}
+              icon={Workflow}
               title="No automations yet"
               line="Start a run on a schedule, when a GitHub issue gets a label, when a webhook is called, or when another run finishes."
               action={
@@ -148,7 +148,7 @@ export function Automations({ onBack, onOpenBox }: { onBack: () => void; onOpenB
               }
               facts={[
                 { icon: CalendarClock, text: "“Weekdays 02:00: fix whatever broke overnight” — in your own timezone." },
-                { icon: GitPullRequest, text: "Label an issue `agent` and a run picks it up, then comments its receipt on the issue." },
+                { icon: GitPullRequest, text: "Label an issue “agent” and a run picks it up, then comments its receipt on the issue." },
                 { icon: ShieldCheck, text: "One run at a time by default, PR-only, and a storm cap of 12 fires an hour." },
               ]}
             />
@@ -249,9 +249,8 @@ function AutomationRow({ a, onEdit, onToggle, onOpenBox }: { a: Automation; onEd
       </span>
       <span className="min-w-0 flex-1">
         <span className="text-foreground block truncate text-meta font-medium">{a.name}</span>
-        <span className="text-muted-foreground mt-0.5 flex flex-wrap items-center gap-x-2 text-micro">
-          <span className="truncate">{a.when}</span>
-          <span aria-hidden>·</span>
+        <span className="text-muted-foreground mt-0.5 block truncate text-micro">{a.when}</span>
+        <span className="text-muted-foreground mt-0.5 flex items-center gap-x-2 text-micro">
           <LastResult a={a} onOpenBox={onOpenBox} />
           {a.enabled && a.nextFire && (
             <>
@@ -480,7 +479,7 @@ function Editor({
       )}
 
       <div>
-        <Label hint={<span className="font-mono">{"{{issue.title}} {{payload.x}} {{parent.headline}}"}</span>}>Task</Label>
+        <Label hint={<span className="hidden font-mono sm:inline">{"{{issue.title}} {{payload.x}} {{parent.headline}}"}</span>}>Task</Label>
         <Textarea className="min-h-28 font-mono text-meta" value={d.taskTemplate} onChange={(e) => set({ taskTemplate: e.target.value })} />
         <div className="bg-muted/40 mt-2 rounded-lg border px-3 py-2.5">
           <p className="label text-faint mb-1">
@@ -524,7 +523,7 @@ function Editor({
             <Switch size="sm" checked={d.prComment} onCheckedChange={(v) => set({ prComment: v })} />
           </label>
         )}
-        <p className="text-faint text-micro">Unattended runs are told to change code only on a branch and open a PR — never push to the default branch.</p>
+        <p className="text-faint text-micro">PR-only: pushes to the default branch are refused inside the machine, so changes land on a branch and a PR.</p>
       </div>
 
       {hook && (

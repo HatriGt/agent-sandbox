@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Link, useLocation, useNavigationType } from "react-router";
-import { ArrowRight, Bell, BellOff, ChevronRight, Clock, Flame, Keyboard, LayoutGrid, LogOut, Menu, Moon, PanelLeftClose, PanelLeftOpen, Pause, Plug, PlugZap, Plus, Search, Shield, Sun, UserRound, WifiOff, Zap } from "lucide-react";
+import { ArrowRight, Bell, BellOff, ChevronRight, Clock, Flame, Keyboard, LayoutGrid, LogOut, Menu, Moon, PanelLeftClose, PanelLeftOpen, Pause, Plug, PlugZap, Plus, Search, Shield, Sun, UserRound, WifiOff, Workflow, Zap } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { api, type FleetLifecycle, type FleetSnapshot } from "@/lib/api";
 import { POLL_MS, isUp, isVisible, threadSort, threadTitle } from "@/lib/format";
@@ -269,7 +269,7 @@ export default function App() {
   const paletteActions = React.useMemo<PaletteAction[]>(
     () => [
       { id: "fleet", label: "Fleet view", hint: "g f", icon: <LayoutGrid />, group: "Go to", run: showFleet },
-      { id: "automations", label: "Automations", icon: <Zap />, group: "Go to", run: showAutomations },
+      { id: "automations", label: "Automations", icon: <Workflow />, group: "Go to", run: showAutomations },
       { id: "history", label: "History", hint: "g h", icon: <Clock />, group: "Go to", run: showHistory },
       { id: "skills", label: "Skills", hint: "g s", icon: <Zap />, group: "Go to", run: showSkills },
       { id: "integrations", label: "Integrations", hint: "g a", icon: <Plug />, group: "Go to", run: showAccounts },
@@ -532,7 +532,7 @@ export default function App() {
 
       <div className="flex flex-col gap-0.5 border-t px-2 py-2">
         <NavItem active={view === "fleet"} flash={flash === "fleet"} onClick={showFleet} icon={<LayoutGrid />} label="Fleet view" badge={boxes.length || undefined} shortcut="g f" />
-        <NavItem active={view === "automations"} onClick={showAutomations} icon={<Zap />} label="Automations" />
+        <NavItem active={view === "automations"} onClick={showAutomations} icon={<Workflow />} label="Automations" />
         <span className="contents" onMouseEnter={prefetchHistory}>
           <NavItem active={view === "history"} flash={flash === "history"} onClick={showHistory} icon={<Clock />} label="History" shortcut="g h" />
         </span>
@@ -704,7 +704,7 @@ export default function App() {
               <RailIcon onClick={newTask} icon={<Plus />} label="New task" shortcut="n" primary />
               <RailIcon onClick={openPalette} icon={<Search />} label="Search" shortcut="⌘K" />
               <RailIcon active={view === "fleet"} flash={flash === "fleet"} onClick={showFleet} icon={<LayoutGrid />} label="Fleet view" shortcut="g f" badge={boxes.length || undefined} dot={waiting.length > 0} />
-              <RailIcon active={view === "automations"} onClick={showAutomations} icon={<Zap />} label="Automations" />
+              <RailIcon active={view === "automations"} onClick={showAutomations} icon={<Workflow />} label="Automations" />
               <span className="contents" onMouseEnter={prefetchHistory}>
                 <RailIcon active={view === "history"} flash={flash === "history"} onClick={showHistory} icon={<Clock />} label="History" shortcut="g h" />
               </span>
