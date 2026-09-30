@@ -258,6 +258,7 @@ export function Hub({
   const providers = useProviders();
   const [provPick, setProvPick] = React.useState<ModelChoice | null>(null);
   const [budget, setBudget] = React.useState<RunBudget | null>(null);
+  const [attempts, setAttempts] = React.useState<1 | 2 | 3>(1);
   const [harness, setHarness] = React.useState<string | null>(null);
   const provModels = React.useMemo<ModelChoice[]>(
     () => (providers?.providers ?? []).flatMap((p) => (p.models ?? []).map((id) => ({ id, label: id, tier: "other" as const, group: p.label, provider: p.id }))),
@@ -436,6 +437,7 @@ export function Hub({
         // The agent chip shows "partial" before the pick is sent, so choosing it IS the acknowledgement.
         ...(agent.picked ? { agent: agent.picked, ...(agent.current?.supervised === false ? { allowPartialSupervision: true } : {}) } : {}),
         ...(budget ? { budget } : {}),
+        ...(attempts > 1 ? { attempts } : {}),
         ...(harness ? { harness } : {}),
         ...(verifyActive ? { verify: verifyMode === "command" ? { command: verifyText.trim() } : { criterion: verifyText.trim() } } : {}),
       });
@@ -448,6 +450,7 @@ export function Hub({
         setTask("");
         setImages([]);
         clearVerify();
+        setAttempts(1);
         // Repos inferred from the task ride along to render INLINE in the booting pane/thread —
         // right under the task, where the reader is looking — not as a toast over a random corner.
         onStarted(res.box, t, res.inferred);
@@ -702,6 +705,18 @@ export function Hub({
                 <ModelChip current={provPick ?? model.current} models={pickerModels} defaultId={model.defaultId} onPick={pickModel} />
                 <BudgetChip value={budget} onChange={setBudget} modelId={provPick ? undefined : (model.picked ?? model.defaultId)} />
                 <HarnessChip value={harness} onChange={setHarness} />
+                <button
+                  type="button"
+                  onClick={() => setAttempts((n) => (n === 3 ? 1 : ((n + 1) as 2 | 3)))}
+                  title={`Attempts: ${attempts}. Run the task N ways in parallel; the best attempt gets the PR. A budget is the total, split across attempts. Click to cycle 1/2/3.`}
+                  aria-label={`Attempts: ${attempts}`}
+                  className={cn(
+                    "h-7 cursor-pointer items-center gap-1.5 rounded-md px-2 text-micro font-medium tabular-nums transition-colors",
+                    attempts > 1 ? "bg-muted text-foreground flex" : "text-muted-foreground hover:bg-muted hover:text-foreground hidden sm:flex"
+                  )}
+                >
+                  {attempts > 1 ? `${attempts} attempts` : "1 attempt"}
+                </button>
                 <button
                   type="button"
                   onClick={() => setVerifyOpen((v) => !v)}

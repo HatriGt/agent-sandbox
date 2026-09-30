@@ -40,7 +40,8 @@ That sentence is the direction (plan: `docs/plan-agent-cloud.md`). What exists *
   (`src/budget.ts`). Dollars only for models with a known price; otherwise tokens only.
   **Planned:** continue-across-boxes.
 - **Walk-away:** mobile push + `asb://` deep links; harness bundles (export/import) and
-  two-harness compare. **Planned:** public harness gallery.
+  two-harness compare; "tries several approaches" (2-3 parallel attempts, scored, one PR —
+  `src/attempts.ts`). **Planned:** public harness gallery.
 - **Box:** built — a hardware-isolated microVM per run, warm pool, sleep/wake, checkpoints, keep.
 
 Every feature must be expressible as a field of one primitive, or it is out of scope:

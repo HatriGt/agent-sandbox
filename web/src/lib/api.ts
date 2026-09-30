@@ -263,6 +263,49 @@ export interface CompareFacts {
   files: string[];
   headline: string;
 }
+export interface AttemptFacts {
+  index: number;
+  box: string | null;
+  state: "done" | "failed" | "running" | "gone" | "timeout" | "not-started";
+  exitCode: number | null;
+  verified: boolean | null;
+  tests: { passed: number; failed: number } | null;
+  diffLines: number | null;
+  files: number | null;
+  costUsd: number | null;
+  tokens: number | null;
+  durationMs: number | null;
+}
+
+export type AttemptGroupStatus = "running" | "deciding" | "needs-pick" | "decided" | "no-winner" | "failed";
+
+export interface AttemptGroupSummary {
+  id: string;
+  task: string;
+  status: AttemptGroupStatus;
+  createdAt: number;
+  winnerBox: string | null;
+  prUrls: string[];
+  attempts: Array<{ index: number; box: string | null; label: string }>;
+}
+
+export interface AttemptGroupView {
+  id: string;
+  task: string;
+  status: AttemptGroupStatus;
+  createdAt: number;
+  deadlineAt: number;
+  winnerBox: string | null;
+  decidedBy: "auto" | "user" | null;
+  decidedAt: number | null;
+  overrideUntil: number | null;
+  question: string | null;
+  choices: Array<{ label: string; answer: string; index: number; box: string | null }>;
+  prUrls: string[];
+  note: string | null;
+  attempts: Array<{ index: number; label: string; branch: string; box: string | null; error: string | null; tornDown: boolean; winner: boolean; facts: AttemptFacts | null }>;
+}
+
 export interface CompareDetail {
   id: string;
   task: string;
@@ -793,8 +836,12 @@ export const api = {
     harness?: string;
     compareId?: string;
     compareSide?: "a" | "b";
+    /** Run the task N ways in parallel; the best attempt gets the PR. */
+    attempts?: 1 | 2 | 3;
+    /** One entry per attempt (length must equal `attempts`); omit for server defaults. */
+    attemptSpecs?: Array<{ agent?: string; model?: string; provider?: string; harness?: string }>;
   }) =>
-    post<{ ok: true; box: string; warm: boolean; output: string; inferred?: string[]; harness?: { id: string; name: string; applied: string[] } } | { ok: false; question: string }>(
+    post<{ ok: true; box: string; warm: boolean; output: string; inferred?: string[]; harness?: { id: string; name: string; applied: string[] }; attemptGroup?: { id: string; attempts: Array<{ index: number; box: string | null; label: string; branch: string; error?: string }> } } | { ok: false; question: string }>(
       "/delegate.json",
       { source: "git", ...input }
     ),
@@ -815,6 +862,12 @@ export const api = {
   compareCreate: (body: { task: string; harnessA: string; harnessB: string }) => post<{ id: string }>("/harness-compares.json", body),
   compares: () => fetch(url("/harness-compares.json"), { headers: authHeaders }).then(parse<{ compares: Array<{ id: string; task: string; harnessA: string; harnessB: string; createdAt: number; sides: Array<{ side: "a" | "b"; box: string }> }> }>),
   compare: (id: string) => fetch(url(`/harness-compares.json?id=${encodeURIComponent(id)}`), { headers: authHeaders }).then(parse<CompareDetail>),
+  attemptGroups: () => fetch(url("/attempt-groups.json"), { headers: authHeaders }).then(parse<{ groups: AttemptGroupSummary[] }>),
+  attemptGroup: (id: string) => fetch(url(`/attempt-groups.json?id=${encodeURIComponent(id)}`), { headers: authHeaders }).then(parse<AttemptGroupView>),
+  attemptGroupOfBox: (box: string) =>
+    fetch(url(`/attempt-groups.json?box=${encodeURIComponent(box)}`), { headers: authHeaders }).then(parse<{ group: AttemptGroupView | null; index?: number }>),
+  /** `{id, box}` = pick this attempt instead; `{id, choice}` = answer the tie question. */
+  attemptPick: (body: { id: string; box: string } | { id: string; choice: number }) => post<AttemptGroupView>("/attempt-groups.json", body),
   /**
    * Browse a public GitHub repo for skills. Goes through the controller because the page's CSP is
    * `connect-src 'self'` — see lib/skillImport.ts. Caller supplies the response shape per action.

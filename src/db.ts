@@ -245,6 +245,21 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX IF NOT EXISTS trigger_delivery_log_trigger ON trigger_delivery_log(trigger_id, id);
   `,
+  `
+  -- "Tries several approaches" (src/attempts.ts): an attempt group is a harness_compares row with
+  -- kind='attempts'; its attempts link through run_harness (compare_id, side = "1".."3") like the
+  -- two compare sides. The row carries the controller's scoring state and the winner.
+  ALTER TABLE harness_compares ADD COLUMN kind TEXT NOT NULL DEFAULT 'harness';
+  ALTER TABLE harness_compares ADD COLUMN status TEXT;
+  ALTER TABLE harness_compares ADD COLUMN attempts_json TEXT;
+  ALTER TABLE harness_compares ADD COLUMN deadline_at INTEGER;
+  ALTER TABLE harness_compares ADD COLUMN winner_box TEXT;
+  ALTER TABLE harness_compares ADD COLUMN decided_by TEXT;
+  ALTER TABLE harness_compares ADD COLUMN decided_at INTEGER;
+  ALTER TABLE harness_compares ADD COLUMN question TEXT;
+  ALTER TABLE harness_compares ADD COLUMN note TEXT;
+  CREATE INDEX IF NOT EXISTS harness_compares_kind ON harness_compares(kind, status);
+  `,
 ];
 
 export function openDb(dataDir: string): Db {

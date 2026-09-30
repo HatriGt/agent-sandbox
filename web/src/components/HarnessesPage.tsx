@@ -11,7 +11,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { DriverBadges } from "@/components/DriverPicker";
 import { HarnessEditor } from "@/components/harness/HarnessEditor";
 import { ImportHarness } from "@/components/harness/ImportHarness";
-import { CompareLauncher, CompareList } from "@/components/harness/Compare";
+import { AttemptGroupList, CompareLauncher, CompareList } from "@/components/harness/Compare";
 import { budgetLine, downloadJson, rulesLine, type HarnessDraft, draftOf, emptyDraft } from "@/components/harness/model";
 
 const SkillsPage = React.lazy(() => import("@/components/SkillsPage").then((m) => ({ default: m.SkillsPage })));
@@ -235,6 +235,9 @@ export function HarnessesPage({ onBack, onOpenBox }: { onBack: () => void; onOpe
                       />
                     )}
                     <CompareList refresh={compareRefresh} onOpenBox={onOpenBox} canStart={list.filter((h) => !h.needsReview).length >= 2} />
+                  </SettingsSection>
+                  <SettingsSection id="attempts" title="Attempts" purpose="Tasks run several ways in parallel. The best attempt gets the PR; you can pick another one instead.">
+                    <AttemptGroupList onOpenBox={onOpenBox} />
                   </SettingsSection>
                 </>
               )}

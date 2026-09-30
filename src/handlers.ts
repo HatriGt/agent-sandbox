@@ -120,6 +120,25 @@ export interface HandlerDeps {
    * so the question can be answered differently. Returns a status line, or run:gone/plain error text.
    */
   rewind?(cfg: Config, session: string): Promise<string>;
+  /**
+   * "Tries several approaches" (src/attempts.ts): start the task as 2..3 attempts, each in its own
+   * box and branch; the controller scores them and opens the PR from the winner. Optional (HTTP entry).
+   */
+  delegateAttempts?(
+    cfg: Config,
+    input: {
+      task: string;
+      repo?: string;
+      repos?: Array<{ repo: string; ref?: string }>;
+      ref?: string;
+      model?: string;
+      agent?: string;
+      verify?: { command?: string; criterion?: string };
+      budget?: { maxMinutes: number; maxUsd?: number; maxTokens?: number };
+      attempts: number;
+      attemptSpecs?: Array<{ agent?: string; model?: string; provider?: string; harness?: string }>;
+    }
+  ): Promise<string>;
 }
 
 /** Minimal shape of the MCP server's `.tool()` we rely on (keeps this file transport-agnostic). */
@@ -305,6 +324,29 @@ export function registerTools(
           "Per-run budget. When a cap is hit the run is NOT killed: it asks a question (continue/stop) " +
             "and pauses at its next tool call. Token/$ totals update at turn end."
         ),
+      attempts: z
+        .number()
+        .int()
+        .min(1)
+        .max(3)
+        .optional()
+        .describe(
+          "Tries several approaches: 2 or 3 runs the task that many ways in parallel (each its own sandbox and " +
+            "branch, none opens a PR). When all finish the controller scores them — verify/tests pass first, then " +
+            "fewer failing tests, smaller diff, lower cost — and opens the PR from the winner; a tie is asked. " +
+            "budget is the TOTAL across attempts. Needs source:\"git\" and a free sandbox slot per attempt. Returns at launch."
+        ),
+      attemptSpecs: z
+        .array(
+          z.object({
+            agent: z.string().optional(),
+            model: z.string().optional(),
+            provider: z.string().optional().describe("Saved provider id."),
+            harness: z.string().optional().describe("Saved harness id."),
+          })
+        )
+        .optional()
+        .describe("Optional per-attempt setup (exactly `attempts` entries). Default: same driver with different models, then other drivers you have providers for."),
     },
     async ({
       source,
@@ -322,6 +364,8 @@ export function registerTools(
       after,
       carry,
       budget,
+      attempts,
+      attemptSpecs,
     }: {
       source?: DelegateSource;
       repo?: string;
@@ -338,10 +382,32 @@ export function registerTools(
       after?: string;
       carry?: "patch" | "none";
       budget?: { maxMinutes: number; maxUsd?: number; maxTokens?: number };
+      attempts?: number;
+      attemptSpecs?: Array<{ agent?: string; model?: string; provider?: string; harness?: string }>;
     }) => {
       // Validate the verify clause FIRST — a malformed one must be a question before any box work.
       const vp = verifyPlanOf(verify);
       if (!vp.ok) return text(vp.question);
+      if (attempts !== undefined && attempts > 1) {
+        if (!deps.delegateAttempts) return text("This entry point does not support `attempts`; use the HTTP (remote) MCP endpoint.");
+        if (after !== undefined || patch || repos?.some((r) => r.patch)) return text("attempts cannot be combined with `after` or `patch` — each attempt starts from a clean clone.");
+        if (source === "local") return text('attempts need source:"git" (each attempt clones the repo into its own sandbox).');
+        if (!task?.trim()) return text("attempts: what is the task?");
+        return text(
+          await deps.delegateAttempts(cfg, {
+            task,
+            ...(repo ? { repo } : {}),
+            ...(repos ? { repos: repos.map((r) => ({ repo: r.repo, ...(r.ref ? { ref: r.ref } : {}) })) } : {}),
+            ...(ref ? { ref } : {}),
+            ...(model ? { model } : {}),
+            ...(agent ? { agent } : {}),
+            ...(verify ? { verify } : {}),
+            ...(budget ? { budget } : {}),
+            attempts,
+            ...(attemptSpecs ? { attemptSpecs } : {}),
+          })
+        );
+      }
 
       // A handoff resolves the child's repos (and carry patches) FROM THE PARENT before validation:
       // the resolved list simply becomes this call's `repos`, so everything downstream (per-repo

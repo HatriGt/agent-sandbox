@@ -39,13 +39,13 @@ function sidesOf(db: Db, id: string): CompareRow["sides"] {
 }
 
 export function getCompare(db: Db, owner: string, id: string): CompareRow | undefined {
-  const r = db.prepare(`SELECT * FROM harness_compares WHERE id = ? AND owner = ?`).get(id, owner) as Record<string, unknown> | undefined;
+  const r = db.prepare(`SELECT * FROM harness_compares WHERE id = ? AND owner = ? AND kind = 'harness'`).get(id, owner) as Record<string, unknown> | undefined;
   if (!r) return undefined;
   return { id: String(r.id), owner, task: String(r.task), harnessA: String(r.harness_a), harnessB: String(r.harness_b), createdAt: Number(r.created_at), sides: sidesOf(db, String(r.id)) };
 }
 
 export function listCompares(db: Db, owner: string, limit = 20): CompareRow[] {
-  const rows = db.prepare(`SELECT id FROM harness_compares WHERE owner = ? ORDER BY created_at DESC LIMIT ?`).all(owner, Math.min(limit, 100)) as Array<{ id: string }>;
+  const rows = db.prepare(`SELECT id FROM harness_compares WHERE owner = ? AND kind = 'harness' ORDER BY created_at DESC LIMIT ?`).all(owner, Math.min(limit, 100)) as Array<{ id: string }>;
   return rows.map((r) => getCompare(db, owner, r.id)!).filter(Boolean);
 }
 
@@ -66,7 +66,7 @@ export function checkCompareSide(db: Db, owner: string, compareId: string, side:
 
 export function recordRunHarness(
   db: Db,
-  r: { box: string; owner: string; harnessId?: string; harnessName?: string; skills?: string[]; compareId?: string; side?: CompareSide },
+  r: { box: string; owner: string; harnessId?: string; harnessName?: string; skills?: string[]; compareId?: string; /** "a"|"b" for a harness compare, "1".."3" for an attempt group (src/attempts.ts). */ side?: string },
   now = Date.now()
 ): void {
   db.prepare(
