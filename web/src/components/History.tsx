@@ -2,7 +2,7 @@ import * as React from "react";
 import { ArrowLeft, Check, ChevronDown, RotateCw, Trash2 } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import { toast } from "sonner";
-import { api, type HistoryRun, type RunDigest } from "@/lib/api";
+import { api, type Automation, type HistoryRun, type LedgerQuery, type LedgerTotals, type RunDigest } from "@/lib/api";
 import { ActivityHeatmap, type ActivityRun } from "@/components/ui/activity-heatmap";
 import { NumberTicker } from "@/components/ui/number-ticker";
 import { fmtAgo, friendlyName, shortName } from "@/lib/format";
@@ -49,8 +49,90 @@ function titleOf(r: HistoryRun): string {
   return (r.headline ?? "").trim() || "Untitled run";
 }
 
+/** Server-side ledger filters. State stays client-side so its chips can count from the totals. */
+interface LedgerFilters {
+  startedBy: string; // "" | manual | mcp | after | trigger | unknown | "t:<triggerId>"
+  agent: string;
+  verified: string; // "" | yes | no | unchecked
+}
+const NO_FILTERS: LedgerFilters = { startedBy: "", agent: "", verified: "" };
+
+function toQuery(f: LedgerFilters): LedgerQuery {
+  const q: LedgerQuery = {};
+  if (f.startedBy.startsWith("t:")) (q.startedBy = "trigger"), (q.trigger = f.startedBy.slice(2));
+  else if (f.startedBy) q.startedBy = f.startedBy;
+  if (f.agent) q.agent = f.agent;
+  if (f.verified) q.verified = f.verified;
+  return q;
+}
+
+function fmtTokens(n: number): string {
+  if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e4) return `${Math.round(n / 1e3)}k`;
+  return n.toLocaleString();
+}
+
+/** The ledger's headline numbers. Every figure is counted from real records; nothing is estimated. */
+function LedgerTotalsStrip({ t }: { t: LedgerTotals | null }) {
+  const cells: Array<{ label: string; value: React.ReactNode; note?: string }> = [];
+  if (t) {
+    cells.push({ label: "Runs", value: <NumberTicker value={t.runs} />, note: t.failed ? `${t.failed} failed` : undefined });
+    cells.push(
+      t.checked
+        ? { label: "Verified", value: `${Math.round((t.passed / t.checked) * 100)}%`, note: `${t.passed} of ${t.checked} checked` }
+        : { label: "Verified", value: <span className="text-faint">—</span>, note: "no run had a check" }
+    );
+    cells.push(
+      t.withUsage
+        ? { label: "Tokens", value: fmtTokens(t.inputTokens + t.outputTokens), note: t.withUsage < t.runs ? `from ${t.withUsage} of ${t.runs} runs` : undefined }
+        : { label: "Tokens", value: <span className="text-faint">—</span>, note: "not reported" }
+    );
+    if (t.costUsd !== null) cells.push({ label: "Cost", value: `$${t.costUsd.toFixed(2)}`, note: t.withCost < t.runs ? `from ${t.withCost} priced runs` : undefined });
+  }
+  return (
+    <div className={cn("mb-4 grid gap-px overflow-hidden rounded-xl border bg-border", t && t.costUsd !== null ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-3")} aria-label="Ledger totals">
+      {(t ? cells : [0, 1, 2].map(() => null)).map((c, i) => (
+        <div key={i} className="bg-card px-4 py-3">
+          {c ? (
+            <>
+              <p className="label text-muted-foreground">{c.label}</p>
+              <p className="text-foreground tabular mt-0.5 text-lead font-medium">{c.value}</p>
+              {c.note && <p className="text-faint text-micro">{c.note}</p>}
+            </>
+          ) : (
+            <>
+              <Bar className="h-2.5 w-12" />
+              <Bar className="mt-2 h-4 w-16" />
+            </>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function FilterSelect({ label, value, onChange, options }: { label: string; value: string; onChange: (v: string) => void; options: Array<{ value: string; label: string }> }) {
+  return (
+    <label className={cn("flex h-8 items-center gap-1.5 rounded-full border px-3 text-meta", value ? "border-foreground/30 text-foreground" : "bg-card text-muted-foreground")}>
+      <span className="text-faint">{label}</span>
+      <select aria-label={label} className="cursor-pointer bg-transparent font-medium outline-none" value={value} onChange={(e) => onChange(e.target.value)}>
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 export function History({ onBack, onAgain }: { onBack: () => void; onAgain: () => void }) {
   const [rows, setRows] = React.useState<HistoryRun[] | null>(null);
+  const [totals, setTotals] = React.useState<LedgerTotals | null>(null);
+  const [lf, setLf] = React.useState<LedgerFilters>(NO_FILTERS);
+  const [automations, setAutomations] = React.useState<Automation[]>([]);
+  const [agents, setAgents] = React.useState<string[]>([]);
   const [error, setError] = React.useState<string | null>(null);
   const [filter, setFilter] = React.useState<Filter>("all");
   const [expanded, setExpanded] = React.useState<number | null>(null);
@@ -63,26 +145,40 @@ export function History({ onBack, onAgain }: { onBack: () => void; onAgain: () =
   React.useEffect(() => {
     const ctrl = new AbortController();
     setError(null);
+    setTotals(null);
     api
-      .history({ limit: PAGE }, ctrl.signal)
+      .ledger({ ...toQuery(lf), limit: PAGE }, ctrl.signal)
       .then((r) => {
-        setRows(r.runs);
-        setMore(r.runs.length === PAGE);
+        setRows(r.rows);
+        setTotals(r.totals);
+        setPageStart(0);
+        setMore(r.rows.length === PAGE);
+        // Agent options accumulate from what the ledger has actually shown — no hard-coded list.
+        setAgents((prev) => Array.from(new Set([...prev, ...r.rows.map((x) => x.agent).filter((a): a is string => !!a)])).sort());
       })
       .catch((e) => {
         if (!ctrl.signal.aborted) setError(e instanceof Error ? e.message : String(e));
       });
     return () => ctrl.abort();
-  }, [attempt]);
+  }, [attempt, lf]);
+
+  React.useEffect(() => {
+    const ctrl = new AbortController();
+    api
+      .triggers(ctrl.signal)
+      .then((r) => setAutomations(r.triggers))
+      .catch(() => {});
+    return () => ctrl.abort();
+  }, []);
 
   const showMore = async () => {
     if (!rows?.length) return;
     setLoadingMore(true);
     try {
-      const r = await api.history({ limit: PAGE, before: rows[rows.length - 1].id });
+      const r = await api.ledger({ ...toQuery(lf), limit: PAGE, before: rows[rows.length - 1].id });
       setPageStart(rows.length);
-      setRows((prev) => [...(prev ?? []), ...r.runs]);
-      setMore(r.runs.length === PAGE);
+      setRows((prev) => [...(prev ?? []), ...r.rows]);
+      setMore(r.rows.length === PAGE);
     } catch (e) {
       toast.error("Could not load more history", { description: e instanceof Error ? e.message : String(e) });
     } finally {
@@ -90,11 +186,9 @@ export function History({ onBack, onAgain }: { onBack: () => void; onAgain: () =
     }
   };
 
-  const counts = React.useMemo(() => {
-    const c = { done: 0, failed: 0 };
-    for (const r of rows ?? []) c[r.state === "failed" ? "failed" : "done"]++;
-    return c;
-  }, [rows]);
+  // Chip counts come from the ledger totals (the whole filtered set, not just the loaded page).
+  const counts = { all: totals?.runs ?? (rows ?? []).length, done: totals ? totals.runs - totals.failed : 0, failed: totals?.failed ?? 0 };
+  const filtered = lf.startedBy !== "" || lf.agent !== "" || lf.verified !== "";
 
   const visible = (rows ?? []).filter((r) => filter === "all" || (filter === "failed" ? r.state === "failed" : r.state !== "failed"));
 
@@ -112,8 +206,44 @@ export function History({ onBack, onAgain }: { onBack: () => void; onAgain: () =
 
         <ActivityPanel />
 
+        <LedgerTotalsStrip t={totals} />
+
+        <div className="mb-3 flex flex-wrap items-center gap-1">
+          <FilterSelect
+            label="Started by"
+            value={lf.startedBy}
+            onChange={(v) => setLf((f) => ({ ...f, startedBy: v }))}
+            options={[
+              { value: "", label: "anyone" },
+              { value: "manual", label: "dashboard" },
+              { value: "mcp", label: "MCP client" },
+              { value: "trigger", label: "any automation" },
+              ...automations.map((a) => ({ value: `t:${a.id}`, label: a.name })),
+              { value: "after", label: "handoff" },
+              { value: "unknown", label: "unrecorded" },
+            ]}
+          />
+          <FilterSelect label="Agent" value={lf.agent} onChange={(v) => setLf((f) => ({ ...f, agent: v }))} options={[{ value: "", label: "any" }, ...Array.from(new Set([...agents, ...(lf.agent ? [lf.agent] : [])])).map((a) => ({ value: a, label: a }))]} />
+          <FilterSelect
+            label="Verified"
+            value={lf.verified}
+            onChange={(v) => setLf((f) => ({ ...f, verified: v }))}
+            options={[
+              { value: "", label: "any" },
+              { value: "yes", label: "passed" },
+              { value: "no", label: "failed check" },
+              { value: "unchecked", label: "not checked" },
+            ]}
+          />
+          {filtered && (
+            <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => setLf(NO_FILTERS)}>
+              Clear
+            </Button>
+          )}
+        </div>
+
         <div role="radiogroup" aria-label="Filter runs" className="mb-3 flex flex-wrap items-center gap-1">
-          <FilterChip active={filter === "all"} onClick={() => setFilter("all")} label="All" count={(rows ?? []).length} />
+          <FilterChip active={filter === "all"} onClick={() => setFilter("all")} label="All" count={counts.all} />
           <FilterChip active={filter === "done"} onClick={() => setFilter("done")} label="Done" count={counts.done} tone="ok" />
           <FilterChip active={filter === "failed"} onClick={() => setFilter("failed")} label="Failed" count={counts.failed} tone="destructive" />
         </div>
@@ -137,6 +267,14 @@ export function History({ onBack, onAgain }: { onBack: () => void; onAgain: () =
                   <Bar className="h-3 w-28" />
                 </div>
               ))}
+            </div>
+          ) : !rows.length && filtered ? (
+            <div className="rounded-xl border border-dashed py-12 text-center">
+              <p className="text-foreground text-lead font-medium">Nothing matches</p>
+              <p className="text-muted-foreground mt-1 text-meta">No finished run fits these filters.</p>
+              <Button size="sm" variant="ghost" className="text-live mt-2" onClick={() => setLf(NO_FILTERS)}>
+                Clear filters
+              </Button>
             </div>
           ) : !rows.length ? (
             <div className="rounded-xl border border-dashed py-14 text-center">
