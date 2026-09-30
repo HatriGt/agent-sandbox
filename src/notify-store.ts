@@ -8,7 +8,7 @@
  * without per-vendor formatting code.
  */
 import { hasUserStoreBackend, loadBlob, saveBlob } from "./user-store.js";
-import { isValidWebhookUrl, type NotifyEvent } from "./notify.js";
+import { isValidWebhookUrl, toggleFor, type NotifyEvent } from "./notify.js";
 
 export interface NotifySettings {
   /** Webhook target; "" means notifications are off for this owner. */
@@ -58,8 +58,8 @@ export function normalizeNotifySettings(input: { url?: unknown; events?: unknown
 }
 
 export function eventEnabled(s: NotifySettings, kind: NotifyEvent["kind"]): boolean {
-  // A stall rides the "failed" toggle: both mean "this run needs you".
-  return s.url !== "" && s.events[kind === "stalled" ? "failed" : kind];
+  // A stall rides the "failed" toggle, a budget ask the "waiting" one.
+  return s.url !== "" && s.events[toggleFor(kind)];
 }
 
 /* ───────────────────────────── IO (user_blobs) ───────────────────────────── */
