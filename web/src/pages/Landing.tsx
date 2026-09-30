@@ -118,7 +118,7 @@ export default function Landing() {
                 <div>
                   <p className="label text-muted-foreground mb-3">Event to receipt, unattended</p>
                   <h2 id="demo-title" className="font-serif text-[clamp(1.9rem,3.6vw,2.9rem)] leading-[1.05] tracking-[-0.02em] text-balance">
-                    Outage at 3 a.m. Pull request in your inbox by 3:20.
+                    Outage at 3 a.m. Pull request in your inbox.
                   </h2>
                 </div>
                 <p className="text-muted-foreground max-w-[52ch] text-body leading-relaxed">
