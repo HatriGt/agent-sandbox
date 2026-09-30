@@ -386,6 +386,55 @@ export interface AutomationDelivery {
   test?: boolean;
 }
 
+/** "Tries several approaches" (GET /attempt-groups.json). Stamps are epoch ms. */
+export type AttemptGroupStatus = "running" | "deciding" | "needs-pick" | "decided" | "no-winner" | "failed";
+export interface AttemptFacts {
+  state: string;
+  exitCode: number | null;
+  verified: boolean | null;
+  tests: { passed: number; failed: number } | null;
+  diffLines: number | null;
+  files: number | null;
+  costUsd: number | null;
+  tokens: number | null;
+  durationMs: number | null;
+}
+export interface AttemptView {
+  index: number;
+  label: string;
+  branch: string;
+  box: string | null;
+  error: string | null;
+  tornDown: boolean;
+  winner: boolean;
+  facts: AttemptFacts | null;
+}
+export interface AttemptGroupView {
+  id: string;
+  task: string;
+  status: AttemptGroupStatus;
+  createdAt: number;
+  deadlineAt: number;
+  winnerBox: string | null;
+  decidedBy: "auto" | "user" | null;
+  decidedAt: number | null;
+  overrideUntil: number | null;
+  question: string | null;
+  choices: { label: string; answer: string; index: number; box: string | null }[];
+  prUrls: string[];
+  note: string | null;
+  attempts: AttemptView[];
+}
+export interface AttemptGroupRow {
+  id: string;
+  task: string;
+  status: AttemptGroupStatus;
+  createdAt: number;
+  winnerBox: string | null;
+  prUrls: string[];
+  attempts: { index: number; box: string | null; label: string }[];
+}
+
 export type DelegateResult =
   | { ok: true; box: string; warm: boolean; output: string; inferred?: string[] }
   | { ok: false; question: string };
@@ -537,6 +586,12 @@ export const api = {
   /** The outcome card of an archived run: by archive id, or the latest record for a box. */
   outcome: (q: { id: number } | { box: string }) =>
     get<{ id: number; box: string; outcome: RunOutcome }>("/history/outcome.json", "id" in q ? { id: String(q.id) } : { box: q.box }),
+  attemptGroups: () => get<{ groups: AttemptGroupRow[] }>("/attempt-groups.json"),
+  attemptGroup: (id: string) => get<AttemptGroupView>("/attempt-groups.json", { id }),
+  attemptGroupOfBox: (box: string) => get<{ group: AttemptGroupView | null; index?: number }>("/attempt-groups.json", { box }),
+  /** Override the winner ({box}) or answer a tie ({choice}: index into `choices`). */
+  attemptPick: (id: string, pick: { box: string } | { choice: number }) =>
+    post<AttemptGroupView>("/attempt-groups.json", { id, ...pick }),
   /** Remove one archived run's receipt permanently. */
   historyDelete: (id: number) => del<{ ok: true }>("/history.json", { id: String(id) }),
   delegate: (input: {
@@ -546,6 +601,8 @@ export const api = {
     model?: string;
     /** Exactly one key: a sandbox command (exit 0 = verified) or a plain-language criterion. */
     verify?: { command: string } | { criterion: string };
+    /** Run as 2-3 parallel attempts; the controller picks the winner. */
+    attempts?: 2 | 3;
   }) => post<DelegateResult>("/delegate.json", { source: "git", ...input }, AGENT_TIMEOUT_MS),
   resume: (session: string, message: string, opts: { force?: boolean; model?: string } = {}) =>
     post<{ output: string; queued?: undefined } | { queued: true; id: string }>("/resume.json", {

@@ -101,7 +101,7 @@ import { listChanges, readDiff, readFullDiff, fetchPull, fetchPullDetail, forget
 import { loadRunMetas, saveRunMeta, forgetRunMeta } from "./run-memory.js";
 import { readArtifact } from "./artifact.js";
 import { existsSync } from "node:fs";
-import { withStartedBy, currentStartedBy, recordStartedBy, startedByOf } from "./started-by.js";
+import { withStartedBy, currentStartedBy, recordStartedBy, startedByOf, type StartedBy } from "./started-by.js";
 import { makeDispatcher, type StartRunInput } from "./trigger-dispatch.js";
 import { makeFollowupEngine, type GhRequest } from "./pr-followup-engine.js";
 import { registerFollowupRoutes } from "./pr-followup-routes.js";
@@ -110,8 +110,10 @@ import { followupLine, normalizePrefs, type FollowupPrefs } from "./pr-followups
 import { hookAuditPath, hookBodyParser, registerTriggerRoutes } from "./trigger-routes.js";
 import { getTriggerById, logDelivery, pruneDeliveries, type TriggerRow } from "./trigger-store.js";
 import { candidateAccounts } from "./gh-token-store.js";
-import { applyHarness, getHarness, normalizeEgress, HARNESS_LIMITS, type HarnessDef } from "./harness.js";
-import { checkCompareSide, recordRunHarness, runHarnessOf, skillSelectionBackend } from "./harness-runs.js";
+import { applyHarness, getHarness, loadHarnesses, normalizeEgress, HARNESS_LIMITS, type HarnessDef } from "./harness.js";
+import { reservedBoxes } from "./capacity.js";
+import { archivedDigestOf, checkCompareSide, recordRunHarness, runHarnessOf, skillSelectionBackend } from "./harness-runs.js";
+import { defaultAttemptSpecs, getGroup, groupOfBox, listGroups, makeAttempts, normalizeAttempts, OVERRIDE_WINDOW_MS, specLabel, tieChoices, type AttemptGroup, type AttemptSpec } from "./attempts.js";
 import { registerHarnessRoutes } from "./harness-routes.js";
 import { registerSkillSelectionBackend } from "./skill-store.js";
 import { dirname, join, resolve } from "node:path";
@@ -699,6 +701,8 @@ const archiveFinishedRun = async (box: string, opts: { withFiles: boolean; budge
     }
     await followups.onRunFinished(box, digest, snap.log ?? "", archiveId).catch((e) => console.error(`[followup] ${box}: ${(e as Error).message.slice(0, 200)}`));
   }
+  // An attempt finishing may complete its group: score it now rather than at the next sweep tick.
+  if (archiveId !== null) sweepAttempts(true);
 };
 
 /**
@@ -831,6 +835,8 @@ const readFleet = makeFleetReader(
     // next sweep sees it Stopped and the fleet card shows it asleep-with-question).
     maybePark(boxes);
     askBudget(boxes);
+    // Attempt groups: deadlines and the losers' override window are time-based, so tick them here.
+    sweepAttempts();
     return boxes.map((b) => ({
       ...b,
       ...(titles[b.name] ? { title: titles[b.name] } : {}),
@@ -3254,42 +3260,41 @@ app.get("/history/ledger.json", (req: Request, res: Response) => {
 // Start a new delegation from the dashboard composer. Same validate -> resolve -> run flow as the
 // MCP `delegate` tool (see delegate-flow.ts); source defaults to "git" here since a browser has no
 // local working tree to ship.
-app.post("/delegate.json", async (req: Request, res: Response) => {
-  if (!dashAuthed(req, res)) return;
-  let body = (req.body ?? {}) as Record<string, unknown>;
-  if (typeof body.task !== "string" || !body.task.trim()) {
-    res.status(400).json({ error: "task is required" });
-    return;
-  }
+type DelegateReply = { status: number; json: Record<string, unknown> };
+/**
+ * The composer's delegation, factored out of the route so an attempt group (src/attempts.ts) and the
+ * MCP `attempts` lane start each attempt through exactly the same gates. `principal` replaces the
+ * response locals; `attempt` links the box to its group instead of a harness compare.
+ */
+const delegateOnce = async (body0: Record<string, unknown>, principal: Principal, attempt?: { groupId: string; index: number }): Promise<DelegateReply> => {
+  let body = body0;
+  if (typeof body.task !== "string" || !body.task.trim()) return { status: 400, json: { error: "task is required" } };
   const rawTask = body.task;
-  try {
+  {
     // A saved harness (src/harness.ts) fills the fields this body leaves out; explicit fields win.
     // Merged BEFORE validation so every harness value passes the same gates as a typed one.
-    const hOwner = providerOwner(res);
+    const hOwner = principal.kind === "user" ? principal.userId : OPERATOR_OWNER;
     let harness: HarnessDef | undefined;
     let applied: string[] = [];
     if (typeof body.harness === "string" && body.harness) {
       harness = getHarness(body.harness, hOwner);
       if (!harness) {
-        res.status(400).json({ error: "Unknown harness." });
-        return;
+        return { status: 400, json: { error: "Unknown harness." } };
       }
       try {
         const r = applyHarness(harness, body);
         body = r.body as Record<string, unknown>;
         applied = r.applied;
       } catch (e) {
-        res.status(400).json({ error: (e as Error).message });
-        return;
+        return { status: 400, json: { error: (e as Error).message } };
       }
     }
     let compareSide: "a" | "b" | undefined;
-    const compareId = typeof body.compareId === "string" && body.compareId ? body.compareId : undefined;
-    if (compareId) {
+    const compareId = attempt ? attempt.groupId : typeof body.compareId === "string" && body.compareId ? body.compareId : undefined;
+    if (compareId && !attempt) {
       const c = checkCompareSide(db, hOwner, compareId, body.compareSide, harness?.id);
       if (!c.ok) {
-        res.status(400).json({ error: c.error });
-        return;
+        return { status: 400, json: { error: c.error } };
       }
       compareSide = c.side;
     }
@@ -3302,16 +3307,14 @@ app.post("/delegate.json", async (req: Request, res: Response) => {
         skills = [...new Set(body.skills as string[])];
       }
     } catch (e) {
-      res.status(400).json({ error: (e as Error).message });
-      return;
+      return { status: 400, json: { error: (e as Error).message } };
     }
     // Explicit repos from the picker win. With none given, a repo the TASK names ("review the last PR
     // in elseco deal service") is attached automatically, so the agent starts with the checkout it
     // was clearly asked about instead of hunting for it with `gh search`.
     const REPO_RE = /^[\w.-]+\/[\w.-]+$/;
     if (typeof body.repo === "string" && !REPO_RE.test(body.repo.trim().replace(/\.git$/i, ""))) {
-      res.status(400).json({ error: "repo must be owner/name" });
-      return;
+      return { status: 400, json: { error: "repo must be owner/name" } };
     }
     // Verified outcomes: validate FIRST (same rule as the MCP tool — a malformed clause must fail
     // before any box work). The plan is stored on success and run on the done edge of the sweep.
@@ -3319,8 +3322,7 @@ app.post("/delegate.json", async (req: Request, res: Response) => {
     if (body.verify !== undefined) {
       const vp = verifyPlanOf(body.verify as Record<string, unknown>);
       if (!vp.ok) {
-        res.status(400).json({ error: vp.question });
-        return;
+        return { status: 400, json: { error: vp.question } };
       }
       verifyPlan = vp.plan ?? undefined;
     }
@@ -3353,37 +3355,33 @@ app.post("/delegate.json", async (req: Request, res: Response) => {
       : baseTask;
     if (ownership.isUser()) {
       ownership.assertCanRun();
-      const p = principalOf(res);
+      const p = principal;
       const max = (p.kind === "user" && getUser(db, p.userId)?.max_boxes) || cfg.userMaxBoxes;
       ownership.assertQuota(ownership.liveOwned((await readFleet()).boxes), max);
     }
     // Model pick for message 1: same catalog gate as /resume.json, and it seeds the sticky value.
     let model: string | undefined;
     // A user provider (src/providers.ts) brings its own model list; the controller catalog does not apply.
-    const provider = typeof body.provider === "string" && body.provider ? getProvider(body.provider, providerOwner(res)) : undefined;
+    const provider = typeof body.provider === "string" && body.provider ? getProvider(body.provider, hOwner) : undefined;
     if (typeof body.provider === "string" && body.provider && !provider) {
-      res.status(400).json({ error: "Unknown provider." });
-      return;
+      return { status: 400, json: { error: "Unknown provider." } };
     }
     let budget: RunBudget | undefined;
     try {
       budget = normalizeBudget(body.budget);
     } catch (e) {
-      res.status(400).json({ error: (e as Error).message });
-      return;
+      return { status: 400, json: { error: (e as Error).message } };
     }
     if (provider && typeof body.model === "string" && body.model.trim()) {
       const m = body.model.trim();
       if (!/^[\w.:\/@-]{1,120}$/.test(m) || (provider.models?.length && !provider.models.includes(m))) {
-        res.status(400).json({ error: `Unknown model '${m}' for ${provider.label}.` });
-        return;
+        return { status: 400, json: { error: `Unknown model '${m}' for ${provider.label}.` } };
       }
       model = m;
     } else if (typeof body.model === "string" && body.model.trim()) {
       const catalog = await fetchModels(cfg).catch(() => []);
       if (!isAllowedModel(body.model.trim(), catalog, cfg)) {
-        res.status(400).json({ error: `Unknown model '${body.model}'.` });
-        return;
+        return { status: 400, json: { error: `Unknown model '${body.model}'.` } };
       }
       model = body.model.trim();
     }
@@ -3392,12 +3390,11 @@ app.post("/delegate.json", async (req: Request, res: Response) => {
     let agent: string;
     if (typeof body.agent === "string" && body.agent.trim()) {
       if (!isAgentKind(body.agent.trim())) {
-        res.status(400).json({ error: `Unknown agent '${body.agent}'. Allowed: ${AGENT_KINDS.join(", ")}` });
-        return;
+        return { status: 400, json: { error: `Unknown agent '${body.agent}'. Allowed: ${AGENT_KINDS.join(", ")}` } };
       }
       agent = body.agent.trim();
     } else {
-      const p = principalOf(res);
+      const p = principal;
       agent = loadAgentPrefs(p.kind === "user" ? p.userId : OPERATOR_OWNER).defaultAgent;
     }
     // Repo setup (src/setup-profile.ts): this owner's learned profiles for the run's repos. A single
@@ -3447,7 +3444,7 @@ app.post("/delegate.json", async (req: Request, res: Response) => {
       }
       if (harness || compareId) {
         try {
-          recordRunHarness(db, { box: result.box, owner: hOwner, harnessId: harness?.id, harnessName: harness?.name, skills, compareId, side: compareSide });
+          recordRunHarness(db, { box: result.box, owner: hOwner, harnessId: harness?.id, harnessName: harness?.name, skills, compareId, side: attempt ? String(attempt.index) : compareSide });
         } catch {
           /* the link is bookkeeping; the run already started */
         }
@@ -3455,7 +3452,213 @@ app.post("/delegate.json", async (req: Request, res: Response) => {
       void generateTitle(cfg, result.box, rawTask).catch(() => {});
     }
     const extra = { ...(inferred.length ? { inferred } : {}), ...(harness ? { harness: { id: harness.id, name: harness.name, applied } } : {}) };
-    res.json({ ...result, ...extra });
+    return { status: 200, json: { ...result, ...extra } };
+  }
+};
+
+// "Tries several approaches" (src/attempts.ts): N attempts of one task, scored by the controller,
+// one PR. Each attempt is a delegateOnce with its own driver/model and a total budget split N ways.
+const attempts = makeAttempts({
+  db,
+  startOne: async (spec, task, budget, link) => {
+    const job = attemptJobs.get(link.groupId);
+    if (!job) return { ok: false, question: "attempt group context lost" };
+    const body: Record<string, unknown> = { ...job.body, task, attempts: undefined, attemptSpecs: undefined, compareId: undefined, compareSide: undefined };
+    for (const k of ["agent", "model", "provider", "harness"] as const) if (spec[k]) body[k] = spec[k];
+    if (spec.agent && !spec.model) delete body.model;
+    if (spec.agent && !spec.provider && spec.model) delete body.provider;
+    if (budget) body.budget = budget;
+    else delete body.budget;
+    const r = await withPrincipal(job.principal, () => withStartedBy(job.startedBy, () => delegateOnce(body, job.principal, link)));
+    const j = r.json as { ok?: boolean; box?: string; question?: string; error?: string };
+    return r.status === 200 && j.ok && j.box ? { ok: true, box: j.box } : { ok: false, question: j.question ?? j.error ?? `HTTP ${r.status}` };
+  },
+  archived: (owner, box) => archivedDigestOf(db, owner, box),
+  exists: async (box) => (await readFleet()).boxes.some((b) => b.name === box),
+  exec: async (box, script) => (await execInBox(cfg, box, script)).stdout,
+  teardown: (box) => deps.teardown(cfg, box),
+  log: (m) => console.error(m),
+});
+// The launching request's context, for the duration of the launch only.
+const attemptJobs = new Map<string, { body: Record<string, unknown>; principal: Principal; startedBy: StartedBy }>();
+let attemptSweepAt = 0;
+const sweepAttempts = (force = false) => {
+  if (!force && Date.now() - attemptSweepAt < 20_000) return;
+  attemptSweepAt = Date.now();
+  // As the operator: the sweep acts on every owner's groups, whichever request happened to tick it.
+  void withPrincipal({ kind: "operator" }, () => attempts.sweep()).catch((e) => console.error(`[attempts] sweep: ${(e as Error).message.slice(0, 200)}`));
+};
+
+const delegateAttempts = async (body: Record<string, unknown>, principal: Principal, n: number, given: AttemptSpec[] | undefined, startedBy: StartedBy): Promise<DelegateReply> => {
+  if (typeof body.task !== "string" || !body.task.trim()) return { status: 400, json: { error: "task is required" } };
+  if (body.compareId) return { status: 400, json: { error: "attempts cannot join a harness compare." } };
+  const owner = principal.kind === "user" ? principal.userId : OPERATOR_OWNER;
+  // Fleet + per-user quota for ALL attempts up front: a group is never half-started on purpose.
+  const live = await deps.countBoxes(cfg);
+  const free = cfg.maxBoxes - live - reservedBoxes();
+  if (free < n) {
+    return { status: 200, json: { ok: false, question: `Refused: ${n} attempts need ${n} free sandbox slots, but only ${Math.max(0, free)} of ${cfg.maxBoxes} are free. Use fewer attempts, tear a run down, or raise MSB_MAX_BOXES.` } };
+  }
+  if (principal.kind === "user") {
+    const max = getUser(db, principal.userId)?.max_boxes || cfg.userMaxBoxes;
+    const owned = await withPrincipal(principal, async () => ownership.liveOwned((await readFleet()).boxes));
+    if (owned + n > max) {
+      return { status: 429, json: { error: `${n} attempts need ${n} sandboxes; your plan allows ${max} at once and ${owned} are running. Use fewer attempts or tear a run down.` } };
+    }
+  }
+  let budget: RunBudget | undefined;
+  try {
+    budget = normalizeBudget(body.budget);
+  } catch (e) {
+    return { status: 400, json: { error: (e as Error).message } };
+  }
+  const baseAgent = typeof body.agent === "string" && body.agent ? body.agent : loadAgentPrefs(owner).defaultAgent;
+  const provs = loadProviders(owner);
+  const specs =
+    given ??
+    defaultAttemptSpecs(n, {
+      baseAgent,
+      ...(typeof body.model === "string" && body.model ? { baseModel: body.model } : {}),
+      ...(typeof body.provider === "string" && body.provider ? { baseProvider: body.provider } : {}),
+      catalog: (await fetchModels(cfg).catch(() => [])).map((m) => m.id),
+      providers: provs.map((p) => ({ id: p.id, drivers: driversFor(p.kind), models: p.models ?? [] })),
+    });
+  const harnessNames = Object.fromEntries(loadHarnesses(owner).map((h) => [h.id, h.name]));
+  const provNames = Object.fromEntries(provs.map((p) => [p.id, p.label]));
+  const labels = specs.map((s) =>
+    specLabel(s.agent || s.model || s.provider || s.harness ? s : { agent: baseAgent }, {
+      agent: (id) => (isAgentKind(id) ? AGENT_LABELS[id] : id),
+      provider: (id) => provNames[id] ?? id,
+      harness: (id) => harnessNames[id] ?? id,
+    })
+  );
+  // The group id is minted inside launch; the job context is looked up by it from startOne.
+  const job = { body, principal, startedBy };
+  const r = await attempts.launch({
+    owner,
+    task: body.task,
+    specs,
+    labels,
+    ...(budget ? { budget } : {}),
+    onCreated: (id) => attemptJobs.set(id, job),
+  });
+  for (const [k, v] of attemptJobs) if (v === job) attemptJobs.delete(k);
+  if (!r.ok) return { status: 200, json: { ok: false, question: r.question } };
+  const first = r.group.attempts.find((a) => a.box)!;
+  for (const a of r.group.attempts) if (a.box) void generateTitle(cfg, a.box, `${body.task} (attempt ${a.index})`).catch(() => {});
+  return {
+    status: 200,
+    json: {
+      ok: true,
+      box: first.box,
+      warm: false,
+      output: `Started ${r.group.attempts.filter((a) => a.box).length} of ${n} attempts.`,
+      attemptGroup: { id: r.group.id, attempts: r.group.attempts.map((a) => ({ index: a.index, box: a.box, label: a.label, branch: a.branch, ...(a.error ? { error: a.error } : {}) })) },
+    },
+  };
+};
+
+/** One attempt group, shaped for the comparison view (web + mobile). */
+const attemptGroupView = async (g: AttemptGroup) => {
+  const facts = await attempts.factsOf(g, false);
+  return {
+    id: g.id,
+    task: g.task,
+    status: g.status,
+    createdAt: g.createdAt,
+    deadlineAt: g.deadlineAt,
+    winnerBox: g.winnerBox,
+    decidedBy: g.decidedBy,
+    decidedAt: g.decidedAt,
+    overrideUntil: g.decidedAt !== null ? g.decidedAt + OVERRIDE_WINDOW_MS : null,
+    question: g.question ? redactor.redact(g.question) : null,
+    choices: tieChoices(g.question).map((c) => ({ label: c.label, answer: c.answer, index: c.index, box: g.attempts.find((a) => a.index === c.index)?.box ?? null })),
+    prUrls: g.prUrls,
+    note: g.note,
+    attempts: g.attempts.map((a) => ({
+      index: a.index,
+      label: a.label,
+      branch: a.branch,
+      box: a.box,
+      error: a.error ?? null,
+      tornDown: !!a.tornDown,
+      winner: !!a.box && a.box === g.winnerBox,
+      facts: facts.find((f) => f.index === a.index) ?? null,
+    })),
+  };
+};
+
+// The same lane for MCP clients (the `attempts` param on the delegate tool).
+deps.delegateAttempts = async (_c, input) => {
+  const n = normalizeAttempts(input.attempts, input.attemptSpecs);
+  if (!n.ok) return n.error;
+  const principal = currentPrincipal();
+  const body: Record<string, unknown> = { ...input, source: "git" };
+  delete body.attempts;
+  delete body.attemptSpecs;
+  const r = n.n > 1 ? await delegateAttempts(body, principal, n.n, n.specs, currentStartedBy() ?? { kind: "mcp" }) : await delegateOnce(body, principal);
+  const j = r.json as { ok?: boolean; question?: string; error?: string; attemptGroup?: { id: string; attempts: Array<{ index: number; box: string | null; label: string; branch: string; error?: string }> } };
+  if (!j.ok) return j.question ?? j.error ?? `Refused (HTTP ${r.status}).`;
+  const g = j.attemptGroup;
+  if (!g) return `Delegated. session=${(r.json as { box?: string }).box}`;
+  return (
+    `Started attempt group ${g.id}:\n` +
+    g.attempts.map((a) => `  ${a.index}. ${a.label} — ${a.box ? `session=${a.box} branch=${a.branch}` : `did not start: ${a.error}`}`).join("\n") +
+    `\n\nEach attempt works on its own branch and opens no PR. When all finish the controller scores them and opens the PR from the winner (a tie is asked in the dashboard/app). ` +
+    `Follow any attempt with status/watch; the comparison is at ${cfg.publicUrl ?? ""}/ (Harnesses → Attempts).`
+  );
+};
+
+app.get("/attempt-groups.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const owner = providerOwner(res);
+  try {
+    if (typeof req.query.box === "string") {
+      const hit = groupOfBox(db, owner, req.query.box);
+      return void res.json(hit ? { index: hit.index, group: await attemptGroupView(hit.group) } : { group: null });
+    }
+    if (typeof req.query.id === "string") {
+      const g = getGroup(db, owner, req.query.id);
+      if (!g) return void res.status(404).json({ error: "No such attempt group." });
+      return void res.json(await attemptGroupView(g));
+    }
+    const groups = listGroups(db, owner, 20);
+    res.json({
+      groups: groups.map((g) => ({ id: g.id, task: g.task, status: g.status, createdAt: g.createdAt, winnerBox: g.winnerBox, prUrls: g.prUrls, attempts: g.attempts.map((a) => ({ index: a.index, box: a.box, label: a.label })) })),
+    });
+  } catch (e) {
+    failWith(res, e);
+  }
+});
+
+// The user's pick: answering a tie ({id, choice}) or "Pick this one instead" ({id, box}).
+app.post("/attempt-groups.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const owner = providerOwner(res);
+  const b = (req.body ?? {}) as Record<string, unknown>;
+  if (typeof b.id !== "string") return void res.status(400).json({ error: "id is required" });
+  try {
+    const g = getGroup(db, owner, b.id);
+    if (!g) return void res.status(404).json({ error: "No such attempt group." });
+    let box = typeof b.box === "string" ? b.box : undefined;
+    if (!box && typeof b.choice === "number") box = tieChoices(g.question)[b.choice] ? (g.attempts.find((a) => a.index === tieChoices(g.question)[b.choice as number].index)?.box ?? undefined) : undefined;
+    if (!box) return void res.status(400).json({ error: "Pick an attempt (box or choice)." });
+    const r = await attempts.pick(owner, g.id, box);
+    if (!r.ok) return void res.status(r.status).json({ error: r.error });
+    res.json(await attemptGroupView(r.group));
+  } catch (e) {
+    failWith(res, e);
+  }
+});
+
+app.post("/delegate.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  try {
+    const n = normalizeAttempts(body.attempts, body.attemptSpecs);
+    if (!n.ok) return void res.status(400).json({ error: n.error });
+    const r = n.n > 1 ? await delegateAttempts(body, principalOf(res), n.n, n.specs, { kind: "manual" }) : await delegateOnce(body, principalOf(res));
+    res.status(r.status).json(r.json);
   } catch (e) {
     failWith(res, e);
   }
