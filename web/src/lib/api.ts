@@ -887,6 +887,8 @@ export const api = {
   setTriggerEnabled: (id: string, enabled: boolean) => post<{ trigger: Automation }>(`/triggers/${encodeURIComponent(id)}/enabled.json`, { enabled }),
   rotateTrigger: (id: string) => post<{ secret: string; hookUrl: string }>(`/triggers/${encodeURIComponent(id)}/rotate.json`, {}),
   runTrigger: (id: string) => post<{ result: AutomationResult }>(`/triggers/${encodeURIComponent(id)}/run.json`, {}),
+  testTrigger: (id: string) => post<{ ok: boolean; test: true; result?: AutomationResult; skipped?: string; ignored?: string }>(`/triggers/${encodeURIComponent(id)}/test.json`, {}),
+  triggerDeliveries: (id: string) => fetch(url(`/triggers/${encodeURIComponent(id)}/deliveries.json`), { headers: authHeaders }).then(parse<{ deliveries: AutomationDelivery[] }>),
   previewTrigger: (taskTemplate: string, id?: string, name?: string) =>
     post<{ text: string; missing: string[]; hasPayload: boolean }>("/triggers/preview.json", { taskTemplate, id, name }),
 };
@@ -903,6 +905,21 @@ export interface AutomationSpec {
   afterTrigger?: string;
   on?: "done" | "any";
   carry?: "patch" | "none";
+  /** webhook: alert-source preset (vendor signature + {{alert.*}} fields). */
+  preset?: AlertPreset;
+  /** preset: minutes one alert stays quiet after it fired. */
+  cooldownMin?: number;
+}
+export type AlertPreset = "sentry" | "datadog" | "pagerduty";
+/** One row of an automation's delivery log (GET /triggers/:id/deliveries.json), newest first. */
+export interface AutomationDelivery {
+  id: number;
+  at: number;
+  outcome: "fired" | "skipped" | "rejected" | "failed";
+  reason?: "cooldown" | "disabled" | "limit" | "dedupe" | "ignored" | "signature" | "payload" | "error";
+  detail?: string;
+  box?: string;
+  test?: boolean;
 }
 export interface AutomationDraft {
   name: string;
@@ -916,6 +933,9 @@ export interface AutomationDraft {
   prComment: boolean;
   agent?: string;
   model?: string;
+  harnessId?: string;
+  /** Write-only: the vendor's signing secret (Sentry client secret, PagerDuty webhook secret, Datadog header token). */
+  signingSecret?: string;
 }
 export interface AutomationResult {
   at: number;
@@ -932,6 +952,8 @@ export interface Automation extends AutomationDraft {
   nextFire: number | null;
   lastResult: AutomationResult | null;
   hasPayload: boolean;
+  hasSigningSecret?: boolean;
+  lastDelivery?: AutomationDelivery;
   active: number;
   createdAt: number;
   updatedAt: number;

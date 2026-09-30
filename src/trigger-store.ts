@@ -26,6 +26,8 @@ export interface TriggerRow extends TriggerInput {
   nextFire: number | null;
   lastResult: TriggerResult | null;
   hasPayload: boolean;
+  /** Alert presets: whether the vendor signing secret is set (never the secret itself). */
+  hasSigningSecret: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -59,6 +61,7 @@ function toRow(r: Record<string, any>): TriggerRow {
     nextFire: r.next_fire ?? null,
     lastResult: parse<TriggerResult | null>(r.last_result_json, null),
     hasPayload: !!r.last_payload_json,
+    hasSigningSecret: !!r.signing_secret_enc,
     createdAt: Number(r.created_at),
     updatedAt: Number(r.updated_at),
   };
@@ -111,7 +114,10 @@ export function setEnabled(db: Db, owner: string, id: string, enabled: boolean, 
 
 export function deleteTrigger(db: Db, owner: string, id: string): boolean {
   const n = db.prepare(`DELETE FROM triggers WHERE id = ? AND owner = ?`).run(id, owner).changes;
-  if (n) db.prepare(`DELETE FROM trigger_deliveries WHERE trigger_id = ?`).run(id);
+  if (n) {
+    db.prepare(`DELETE FROM trigger_deliveries WHERE trigger_id = ?`).run(id);
+    db.prepare(`DELETE FROM trigger_delivery_log WHERE trigger_id = ?`).run(id);
+  }
   return n > 0;
 }
 
@@ -161,6 +167,7 @@ export function markFired(db: Db, id: string, result: TriggerResult, now = Date.
   if (!t) return;
   const next = computeNextFire({ kind: t.kind, spec: JSON.parse(t.spec_json), enabled: !!t.enabled }, now);
   db.prepare(`UPDATE triggers SET last_fired = ?, next_fire = ?, last_result_json = ? WHERE id = ?`).run(now, next, JSON.stringify(result), id);
+  logFromResult(db, id, result);
 }
 
 /** Record a skip without touching last_fired (a skip is not a fire), but DO advance a schedule. */
@@ -169,6 +176,7 @@ export function markSkipped(db: Db, id: string, result: TriggerResult, now = Dat
   if (!t) return;
   const next = computeNextFire({ kind: t.kind, spec: JSON.parse(t.spec_json), enabled: !!t.enabled }, now);
   db.prepare(`UPDATE triggers SET next_fire = ?, last_result_json = ? WHERE id = ?`).run(next, JSON.stringify(result), id);
+  logFromResult(db, id, result);
 }
 
 export function markFinished(db: Db, id: string, box: string, finished: NonNullable<TriggerResult["finished"]>): void {
@@ -232,8 +240,21 @@ export function pruneDeliveries(db: Db, now = Date.now(), maxAgeMs = 7 * 24 * 36
 }
 
 /** The API view: adds "when" in words; never includes the secret. */
-export function viewTrigger(t: TriggerRow, names: Record<string, string>): TriggerRow & { when: string } {
-  return { ...t, when: describeWhen(t, names) };
+export function viewTrigger(t: TriggerRow, names: Record<string, string>, db?: Db): TriggerRow & { when: string; lastDelivery?: DeliveryEntry } {
+  const ld = db ? lastDelivery(db, t.id) : undefined;
+  return { ...t, when: describeWhen(t, names), ...(ld ? { lastDelivery: ld } : {}) };
+}
+
+/** Every dispatcher outcome (webhook, schedule, chain, run-now) lands in the delivery log. */
+function logFromResult(db: Db, id: string, result: TriggerResult): void {
+  const reason = reasonOf(result);
+  logDelivery(db, id, {
+    at: result.at,
+    outcome: result.outcome === "started" ? "fired" : result.outcome,
+    ...(reason ? { reason } : {}),
+    ...(result.reason ? { detail: result.reason } : {}),
+    ...(result.box ? { box: result.box } : {}),
+  });
 }
 
 /** Move a schedule's next_fire past `now` (called before a slow start so a crash can't refire it). */
@@ -241,4 +262,92 @@ export function advanceNextFire(db: Db, id: string, now = Date.now()): void {
   const t = db.prepare(`SELECT kind, spec_json, enabled FROM triggers WHERE id = ?`).get(id) as { kind: TriggerKind; spec_json: string; enabled: number } | undefined;
   if (!t) return;
   db.prepare(`UPDATE triggers SET next_fire = ? WHERE id = ?`).run(computeNextFire({ kind: t.kind, spec: JSON.parse(t.spec_json), enabled: !!t.enabled }, now), id);
+}
+
+/* ───────────────────────────── delivery log (bet 4) ───────────────────────────── */
+
+export type DeliveryOutcome = "fired" | "skipped" | "rejected" | "failed";
+/** Why a delivery didn't fire, in one word the UI can badge. */
+export type DeliveryReason = "cooldown" | "disabled" | "limit" | "dedupe" | "ignored" | "signature" | "payload" | "error";
+
+export interface DeliveryEntry {
+  id: number;
+  at: number;
+  outcome: DeliveryOutcome;
+  reason?: DeliveryReason;
+  detail?: string;
+  box?: string;
+  test?: boolean;
+}
+
+/** Deliveries kept per automation. A short log, not a live feed. */
+export const DELIVERY_LOG_MAX = 50;
+
+export function logDelivery(db: Db, triggerId: string, e: Omit<DeliveryEntry, "id">): number {
+  const id = Number(
+    db
+      .prepare(`INSERT INTO trigger_delivery_log (trigger_id, at, outcome, reason, detail, box, test) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .run(triggerId, e.at, e.outcome, e.reason ?? null, e.detail ? e.detail.slice(0, 300) : null, e.box ?? null, e.test ? 1 : 0).lastInsertRowid
+  );
+  db.prepare(
+    `DELETE FROM trigger_delivery_log WHERE trigger_id = ? AND id NOT IN (SELECT id FROM trigger_delivery_log WHERE trigger_id = ? ORDER BY id DESC LIMIT ?)`
+  ).run(triggerId, triggerId, DELIVERY_LOG_MAX);
+  return id;
+}
+
+const toEntry = (r: Record<string, any>): DeliveryEntry => ({
+  id: r.id,
+  at: Number(r.at),
+  outcome: r.outcome,
+  ...(r.reason ? { reason: r.reason } : {}),
+  ...(r.detail ? { detail: r.detail } : {}),
+  ...(r.box ? { box: r.box } : {}),
+  ...(r.test ? { test: true } : {}),
+});
+
+/** Newest first. Owner-scoped through the trigger row. */
+export function listDeliveries(db: Db, owner: string, triggerId: string, limit = DELIVERY_LOG_MAX): DeliveryEntry[] {
+  return (
+    db
+      .prepare(
+        `SELECT l.* FROM trigger_delivery_log l JOIN triggers t ON t.id = l.trigger_id WHERE l.trigger_id = ? AND t.owner = ? ORDER BY l.id DESC LIMIT ?`
+      )
+      .all(triggerId, owner, Math.min(limit, DELIVERY_LOG_MAX)) as Array<Record<string, any>>
+  ).map(toEntry);
+}
+
+export function lastDelivery(db: Db, triggerId: string): DeliveryEntry | undefined {
+  const r = db.prepare(`SELECT * FROM trigger_delivery_log WHERE trigger_id = ? ORDER BY id DESC LIMIT 1`).get(triggerId) as Record<string, any> | undefined;
+  return r ? toEntry(r) : undefined;
+}
+
+/** Mark the entry the dispatcher just wrote for this fire as a test delivery. */
+export function markDeliveryTest(db: Db, triggerId: string, at: number): void {
+  db.prepare(`UPDATE trigger_delivery_log SET test = 1 WHERE id = (SELECT id FROM trigger_delivery_log WHERE trigger_id = ? AND at = ? ORDER BY id DESC LIMIT 1)`).run(triggerId, at);
+}
+
+/** Map an admission / failure reason from the dispatcher onto a log badge. */
+export function reasonOf(result: TriggerResult): DeliveryReason | undefined {
+  if (result.outcome === "started") return undefined;
+  if (result.outcome === "failed") return "error";
+  const r = result.reason ?? "";
+  if (r === "disabled") return "disabled";
+  if (/^busy|^storm cap|budget/.test(r)) return "limit";
+  return "ignored";
+}
+
+/* ───────────────────────────── vendor signing secret (bet 3) ───────────────────────────── */
+
+export function setSigningSecret(db: Db, box: SecretBox, owner: string, id: string, secret: string): boolean {
+  return db.prepare(`UPDATE triggers SET signing_secret_enc = ? WHERE id = ? AND owner = ?`).run(box.seal(secret), id, owner).changes > 0;
+}
+
+export function revealSigningSecret(db: Db, box: SecretBox, id: string): string | undefined {
+  const r = db.prepare(`SELECT signing_secret_enc FROM triggers WHERE id = ?`).get(id) as { signing_secret_enc: string | null } | undefined;
+  if (!r?.signing_secret_enc) return undefined;
+  try {
+    return box.open(r.signing_secret_enc);
+  } catch {
+    return undefined;
+  }
 }

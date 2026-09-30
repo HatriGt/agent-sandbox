@@ -228,6 +228,23 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX IF NOT EXISTS harness_compares_owner ON harness_compares(owner, created_at);
   `,
+  `
+  -- Alert-source presets + delivery log (docs/plan-demo-parity.md bets 3-4). The vendor's signing
+  -- secret is sealed like the URL secret. The log keeps the last 50 deliveries per automation:
+  -- what arrived and what happened to it (fired → box / skipped / rejected / failed).
+  ALTER TABLE triggers ADD COLUMN signing_secret_enc TEXT;
+  CREATE TABLE IF NOT EXISTS trigger_delivery_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    trigger_id TEXT NOT NULL,
+    at INTEGER NOT NULL,
+    outcome TEXT NOT NULL,
+    reason TEXT,
+    detail TEXT,
+    box TEXT,
+    test INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE INDEX IF NOT EXISTS trigger_delivery_log_trigger ON trigger_delivery_log(trigger_id, id);
+  `,
 ];
 
 export function openDb(dataDir: string): Db {

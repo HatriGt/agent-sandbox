@@ -6,7 +6,7 @@ import { RefreshControl, ScrollView, Switch, View, Pressable } from "react-nativ
 import { Redirect, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
-import { api, type Automation, type AutomationResult } from "@/lib/api";
+import { api, type Automation, type AutomationDelivery, type AutomationResult } from "@/lib/api";
 import { ago } from "@/lib/format";
 import { useAuth } from "@/state/auth";
 import { useTheme } from "@/theme/ThemeContext";
@@ -24,12 +24,64 @@ function resultLine(r: AutomationResult | null): { text: string; tone: "muted" |
   return { text: `Failed to start ${ago(r.at)}${r.reason ? ` — ${r.reason}` : ""}`, tone: "destructive" };
 }
 
+const REASON: Record<NonNullable<AutomationDelivery["reason"]>, string> = {
+  cooldown: "cooldown",
+  disabled: "paused",
+  limit: "limit reached",
+  dedupe: "duplicate",
+  ignored: "not a match",
+  signature: "bad signature",
+  payload: "bad payload",
+  error: "error",
+};
+
+/** "fired → box-1" / "skipped · cooldown" / "rejected · bad signature" (mirrors the web). */
+function deliveryLine(d: AutomationDelivery): string {
+  const head = d.outcome === "fired" ? `fired${d.box ? ` → ${d.box}` : ""}` : `${d.outcome === "failed" ? "could not start" : d.outcome}${d.reason ? ` · ${REASON[d.reason]}` : ""}`;
+  return d.test ? `test · ${head}` : head;
+}
+const deliveryTone = (d: AutomationDelivery) => (d.outcome === "fired" ? ("ok" as const) : d.outcome === "skipped" ? ("muted" as const) : ("destructive" as const));
+
 function Row({ a, onChange }: { a: Automation; onChange: (a: Automation) => void }) {
   const router = useRouter();
   const { palette } = useTheme();
   const [busy, setBusy] = useState(false);
+  const [testing, setTesting] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const [log, setLog] = useState<AutomationDelivery[] | null>(null);
+  const [open, setOpen] = useState(false);
   const last = resultLine(a.lastResult);
+
+  const loadLog = async () => {
+    try {
+      setLog((await api.automationDeliveries(a.id)).deliveries);
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : String(e));
+    }
+  };
+  const toggleLog = () => {
+    const next = !open;
+    setOpen(next);
+    if (next) void loadLog();
+  };
+
+  const sendTest = async () => {
+    setTesting(true);
+    setNote(null);
+    try {
+      const r = await api.testAutomation(a.id);
+      const started = r.result?.outcome === "started";
+      void Haptics.notificationAsync(started ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Warning);
+      if (r.result) onChange({ ...a, lastResult: r.result });
+      setNote(started ? null : (r.result?.reason ?? r.skipped ?? r.ignored ?? "The test event did not fire."));
+      if (open) void loadLog();
+      if (started && r.result?.box) router.push(`/box/${encodeURIComponent(r.result.box)}`);
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTesting(false);
+    }
+  };
 
   const toggle = async (v: boolean) => {
     setNote(null);
@@ -95,13 +147,43 @@ function Row({ a, onChange }: { a: Automation; onChange: (a: Automation) => void
           </Pressable>
         )
       ) : null}
+      {a.lastDelivery ? (
+        <T variant="micro" tone={deliveryTone(a.lastDelivery)} numberOfLines={2}>
+          Last delivery {ago(a.lastDelivery.at)}: {deliveryLine(a.lastDelivery)}
+          {a.lastDelivery.detail && a.lastDelivery.outcome !== "fired" ? ` — ${a.lastDelivery.detail}` : ""}
+        </T>
+      ) : null}
       {note ? (
         <T variant="meta" tone="destructive" numberOfLines={3}>
           {note}
         </T>
       ) : null}
-      {a.kind !== "chain" ? (
-        <Button title="Run now" variant="secondary" small loading={busy} onPress={() => void runNow()} style={{ alignSelf: "flex-start" }} />
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+        {a.kind !== "chain" ? <Button title="Run now" variant="secondary" small loading={busy} onPress={() => void runNow()} /> : null}
+        {a.kind === "webhook" && a.spec?.preset ? <Button title="Send test event" variant="secondary" small loading={testing} onPress={() => void sendTest()} /> : null}
+        <Button title={open ? "Hide deliveries" : "Deliveries"} variant="ghost" small onPress={toggleLog} />
+      </View>
+      {open ? (
+        log === null ? (
+          <T variant="micro" tone="faint">
+            Loading…
+          </T>
+        ) : log.length === 0 ? (
+          <T variant="micro" tone="faint">
+            Nothing has arrived yet.
+          </T>
+        ) : (
+          <View style={{ gap: 4 }}>
+            {log.map((d) => (
+              <Pressable key={d.id} disabled={!d.box} onPress={() => d.box && router.push(`/box/${encodeURIComponent(d.box)}`)}>
+                <T variant="micro" tone={deliveryTone(d)} numberOfLines={2}>
+                  {ago(d.at)} · {deliveryLine(d)}
+                  {d.detail && d.outcome !== "fired" ? ` — ${d.detail}` : ""}
+                </T>
+              </Pressable>
+            ))}
+          </View>
+        )
       ) : null}
     </Card>
   );

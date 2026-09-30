@@ -13,6 +13,7 @@
  * runDelegateFlow path the composer uses.
  */
 import crypto from "node:crypto";
+import { ALERT_PRESETS, INCIDENT_HARNESS_ID, PRESET_LABEL, normalizeCooldown, type AlertPreset } from "./alert-presets.js";
 
 export type TriggerKind = "schedule" | "webhook" | "github" | "chain";
 export const TRIGGER_KINDS: readonly TriggerKind[] = ["schedule", "webhook", "github", "chain"];
@@ -37,6 +38,10 @@ export interface TriggerSpec {
   on?: "done" | "any";
   /** chain: carry the parent's uncommitted work (default "patch"). */
   carry?: "patch" | "none";
+  /** webhook: an alert-source preset (src/alert-presets.ts) — vendor signature + alert fields. */
+  preset?: AlertPreset;
+  /** webhook preset: minutes one alert fingerprint stays quiet after it fired (a storm = one run). */
+  cooldownMin?: number;
 }
 
 /** Safety defaults (plan §5 "Trigger safety"). Budget is recorded and shown now; enforcement is
@@ -303,6 +308,8 @@ export function templateContext(payload: unknown, extra: Record<string, unknown>
     ...(p.repository ? { repo: p.repository } : {}),
     ...(p.label ? { label: p.label } : {}),
     ...(p.sender ? { sender: p.sender } : {}),
+    // Alert presets: the receiver stamps normalised fields (src/alert-presets.ts) onto the payload.
+    ...(p.asb_alert && typeof p.asb_alert === "object" ? { alert: p.asb_alert } : {}),
     ...extra,
   };
 }
@@ -439,7 +446,7 @@ export interface TriggerInput {
 const REPO_RE = /^[\w.-]+\/[\w.-]+$/;
 
 /** Normalise + validate a create/update body. Unknown fields are dropped; defaults are the safe ones. */
-export function normalizeTrigger(body: unknown): { ok: true; trigger: TriggerInput } | { ok: false; error: string } {
+export function normalizeTrigger(body: unknown): { ok: true; trigger: TriggerInput; signingSecret?: string } | { ok: false; error: string } {
   const b = (body && typeof body === "object" ? body : {}) as Record<string, any>;
   const name = typeof b.name === "string" ? b.name.trim().slice(0, 80) : "";
   if (!name) return { ok: false, error: "name is required" };
@@ -479,6 +486,16 @@ export function normalizeTrigger(body: unknown): { ok: true; trigger: TriggerInp
     spec.afterTrigger = s.afterTrigger;
     spec.on = s.on === "any" ? "any" : "done";
     spec.carry = s.carry === "none" ? "none" : "patch";
+  } else if (kind === "webhook" && s.preset !== undefined && s.preset !== null && s.preset !== "") {
+    if (!ALERT_PRESETS.includes(s.preset as AlertPreset)) return { ok: false, error: `preset must be one of ${ALERT_PRESETS.join(", ")}` };
+    spec.preset = s.preset as AlertPreset;
+    spec.cooldownMin = normalizeCooldown(s.cooldownMin);
+  }
+  let signingSecret: string | undefined;
+  if (typeof b.signingSecret === "string" && b.signingSecret.trim()) {
+    if (!spec.preset) return { ok: false, error: "a signing secret only applies to an alert-source preset" };
+    signingSecret = b.signingSecret.trim();
+    if (signingSecret.length > 512) return { ok: false, error: "signing secret is too long" };
   }
   const conc = Number(b.concurrency);
   const concurrency = Number.isInteger(conc) && conc >= 1 ? Math.min(conc, MAX_CONCURRENCY) : DEFAULT_CONCURRENCY;
@@ -492,8 +509,12 @@ export function normalizeTrigger(body: unknown): { ok: true; trigger: TriggerInp
   if (b.harnessId !== undefined && b.harnessId !== null && b.harnessId !== "" && !(typeof b.harnessId === "string" && /^hrn_[\w-]{6,40}$/.test(b.harnessId))) {
     return { ok: false, error: "harnessId is not a saved harness id" };
   }
+  // Alert presets default to the built-in Incident responder harness (the owner can pick another).
+  const harnessId =
+    typeof b.harnessId === "string" && /^hrn_[\w-]{6,40}$/.test(b.harnessId) ? b.harnessId : spec.preset && b.harnessId === undefined ? INCIDENT_HARNESS_ID : undefined;
   return {
     ok: true,
+    ...(signingSecret ? { signingSecret } : {}),
     trigger: {
       name,
       kind,
@@ -507,7 +528,7 @@ export function normalizeTrigger(body: unknown): { ok: true; trigger: TriggerInp
       prComment: typeof b.prComment === "boolean" ? b.prComment : kind === "github",
       ...(typeof b.agent === "string" && b.agent.trim() ? { agent: b.agent.trim() } : {}),
       ...(typeof b.model === "string" && b.model.trim() ? { model: b.model.trim() } : {}),
-      ...(typeof b.harnessId === "string" && /^hrn_[\w-]{6,40}$/.test(b.harnessId) ? { harnessId: b.harnessId } : {}),
+      ...(harnessId ? { harnessId } : {}),
     },
   };
 }
@@ -518,7 +539,9 @@ export function describeWhen(t: { kind: TriggerKind; spec: TriggerSpec; repo?: s
     case "schedule":
       return `${describeCron(t.spec.cron ?? "")}${t.spec.timezone && t.spec.timezone !== "UTC" ? ` (${t.spec.timezone})` : " UTC"}`;
     case "webhook":
-      return "POST to its webhook URL";
+      return t.spec.preset
+        ? `${PRESET_LABEL[t.spec.preset]} alert${t.spec.cooldownMin ? ` · ${t.spec.cooldownMin} min cooldown per alert` : ""}`
+        : "POST to its webhook URL";
     case "github": {
       const on = t.repo ? ` on ${t.repo}` : "";
       if (t.spec.event === "issue_labeled") return `issue labelled \`${t.spec.label ?? "agent"}\`${on}`;
