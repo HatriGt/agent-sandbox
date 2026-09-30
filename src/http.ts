@@ -8,7 +8,7 @@
  * Each MCP session gets its own transport+server (SDK pattern); the session id lives in the
  * `mcp-session-id` header so multiple clients don't cross wires.
  */
-import { assertPrOnlyPush, installPrOnlyGuard } from "./pr-only.js";
+import { assertPrOnlyPush, guardOrStop, installPrOnlyGuard } from "./pr-only.js";
 import express, { type Request, type Response } from "express";
 import compression from "compression";
 import { randomUUID } from "node:crypto";
@@ -2687,7 +2687,9 @@ const dispatcher = makeDispatcher({
         if (!r.ok) return { ok: false as const, question: r.question };
         if (model) boxModels.set(r.box, model);
         // PR-only at the git layer: a pre-push hook refusing the default branch (src/pr-only.ts).
-        await installPrOnlyGuard(cfg, r.box).catch((e) => console.error(`[triggers] ${r.box}: PR-only hook not installed: ${(e as Error).message}`));
+        // Fail closed: no guard, no run. The box is torn down and the fire is recorded as failed.
+        const guard = await guardOrStop(r.box, (b) => installPrOnlyGuard(cfg, b), (b) => deps.teardown(cfg, b));
+        if (!guard.ok) return guard;
         void generateTitle(cfg, r.box, t.name).catch(() => {});
         return { ok: true as const, box: r.box };
       })

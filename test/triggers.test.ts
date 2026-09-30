@@ -282,6 +282,44 @@ test("PR-only: the pre-push hook refuses the default branch in a real repo", asy
   assert.throws(() => git(work, "push", "-q", "origin", "HEAD:main"), /refused push to main/);
   git(work, "push", "-q", "origin", "HEAD:agent/fix");
   assert.throws(() => git(work, "push", "-q", "origin", ":agent/fix"), /delete/);
+
+  // Chaining: the repo's own .git/hooks/pre-push runs after the guard, with the same stdin.
+  const { existsSync, readFileSync, rmSync, mkdirSync } = await import("node:fs");
+  const own = join(work, ".git", "hooks", "pre-push");
+  writeFileSync(own, `#!/bin/sh\ncat > "$(git rev-parse --git-dir)/chained.txt"\nexit 0\n`);
+  chmodSync(own, 0o755);
+  git(work, "push", "-q", "origin", "HEAD:agent/two");
+  assert.match(readFileSync(join(work, ".git", "chained.txt"), "utf8"), /refs\/heads\/agent\/two/);
+  writeFileSync(own, `#!/bin/sh\necho repo-hook-says-no >&2\nexit 1\n`);
+  assert.throws(() => git(work, "push", "-q", "origin", "HEAD:agent/three"), /repo-hook-says-no/);
+  // Husky: .husky/pre-push is chained when there is no .git/hooks one.
+  rmSync(own);
+  mkdirSync(join(work, ".husky"));
+  writeFileSync(join(work, ".husky", "pre-push"), `echo husky-says-no >&2\nexit 1\n`);
+  assert.throws(() => git(work, "push", "-q", "origin", "HEAD:agent/four"), /husky-says-no/);
+  assert.equal(existsSync(join(work, ".git", "hooks", "pre-push")), false);
+});
+
+test("PR-only: fails closed — a guard that will not install tears the box down with a reason", async () => {
+  const { guardOrStop } = await import("../src/pr-only.ts");
+  const torn: string[] = [];
+  let tries = 0;
+  const r = await guardOrStop(
+    "box-1",
+    async () => {
+      tries++;
+      throw new Error("exec failed");
+    },
+    async (b) => void torn.push(b),
+    () => {}
+  );
+  assert.equal(r.ok, false);
+  assert.match((r as { question: string }).question, /PR-only guard could not be installed.*exec failed/);
+  assert.deepEqual(torn, ["box-1"]);
+  assert.equal(tries, 2);
+  const ok = await guardOrStop("box-2", async () => {}, async (b) => void torn.push(b), () => {});
+  assert.deepEqual(ok, { ok: true });
+  assert.deepEqual(torn, ["box-1"]);
 });
 
 test("ledger: totals from stored columns; cost null when no run reported one", () => {
