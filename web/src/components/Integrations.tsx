@@ -3,6 +3,7 @@ import { SettingsPage, SettingsSection } from "@/components/ui/settings";
 import { Accounts } from "@/components/Accounts";
 import { McpServers } from "@/components/McpServers";
 import { Providers } from "@/components/Providers";
+import { RepoSetup } from "@/components/RepoSetup";
 
 /**
  * Integrations: what every sandbox is given — GitHub identities and MCP servers. One column, two
@@ -22,6 +23,7 @@ export function Integrations({ onBack }: { onBack: () => void }) {
         <Accounts embedded />
       </SettingsSection>
       <McpServers />
+      <RepoSetup />
     </SettingsPage>
   );
 }

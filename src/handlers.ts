@@ -38,6 +38,8 @@ export interface DelegationResult {
   box: string;
   warm: boolean;
   output: string;
+  /** Setup profiles detected in the box this run (repo key → profile), for the route to save. */
+  setupDetected?: Record<string, import("./setup-profile.js").SetupProfile>;
 }
 
 /** Injected side-effecting operations (real impls live in deps.ts; fakes in tests). */

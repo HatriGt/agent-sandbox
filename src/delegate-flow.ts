@@ -9,7 +9,8 @@
  * unit-testable with fakes and carries no VPS dependency of its own.
  */
 import type { Config } from "./config.js";
-import type { HandlerDeps } from "./handlers.js";
+import type { HandlerDeps, DelegationResult } from "./handlers.js";
+import type { DelegatePlan } from "./delegate-input.js";
 import { validateDelegateInput, type DelegateSource, type Attachment } from "./delegate-input.js";
 import type { AgentCreds } from "./msb.js";
 import { reserveBox } from "./capacity.js";
@@ -54,10 +55,12 @@ export interface DelegateFlowInput {
   budget?: RunBudget;
   /** Harness skill selection (already validated names). */
   skills?: string[];
+  /** Repo setup profiles for this owner (see DelegatePlan.setup). */
+  setup?: DelegatePlan["setup"];
 }
 
 export type DelegateFlowResult =
-  | { ok: true; box: string; warm: boolean; output: string; repos: Array<{ repo: string; name: string }> }
+  | { ok: true; box: string; warm: boolean; output: string; repos: Array<{ repo: string; name: string }>; setupDetected?: DelegationResult["setupDetected"] }
   | { ok: false; question: string };
 
 export async function runDelegateFlow(
@@ -94,6 +97,7 @@ export async function runDelegateFlow(
   }
   if (input.budget) v.plan.budget = input.budget;
   if (input.skills) v.plan.skills = input.skills;
+  if (input.setup) v.plan.setup = input.setup;
 
   const tFlow = Date.now();
   let creds: AgentCreds | undefined;
@@ -130,7 +134,7 @@ export async function runDelegateFlow(
 
   try {
     const r = await deps.runDelegation(cfg, v.plan, input.allowDomains, creds, { detach: input.detach });
-    return { ok: true, box: r.box, warm: r.warm, output: r.output, repos: v.plan.repos };
+    return { ok: true, box: r.box, warm: r.warm, output: r.output, repos: v.plan.repos, ...(r.setupDetected ? { setupDetected: r.setupDetected } : {}) };
   } finally {
     release();
   }

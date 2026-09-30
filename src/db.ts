@@ -291,6 +291,17 @@ const MIGRATIONS: string[] = [
     created_at INTEGER NOT NULL
   );
   `,
+  `
+  -- Repo setup profiles (src/setup-profile.ts): per owner × repo, how it installs/builds/tests.
+  -- profile_json never holds a secret value — env vars are stored by NAME only.
+  CREATE TABLE IF NOT EXISTS repo_setup (
+    owner TEXT NOT NULL,
+    repo TEXT NOT NULL,
+    profile_json TEXT NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (owner, repo)
+  );
+  `,
 ];
 
 export function openDb(dataDir: string): Db {

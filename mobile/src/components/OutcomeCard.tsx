@@ -147,6 +147,11 @@ export function OutcomeView({ outcome: o }: { outcome: RunOutcome }) {
             {tests.text}
             {o.trust.tests ? ` · ${o.trust.tests.runner}` : ""}
           </T>
+          {o.trust.testedWith ? (
+            <T variant="micro" tone="muted" numberOfLines={1}>
+              Tested with <T variant="micro" mono>{o.trust.testedWith}</T>
+            </T>
+          ) : null}
           {o.trust.verified ? (
             <T variant="micro" tone={o.trust.verified.pass ? "ok" : "destructive"}>
               {o.trust.verified.pass ? "✓ verified" : "UNVERIFIED"}

@@ -13,9 +13,17 @@ export interface RepoLayout {
   name: string;
   /** Set when a caller diff was applied over the checkout (uncommitted work from their machine). */
   patch?: string;
+  /** The repo's learned/detected setup block (src/setup-profile.ts setupPromptHint). */
+  setupHint?: string;
 }
 
 export function reposPromptHint(repos: RepoLayout[]): string {
+  const setup = repos.map((r) => r.setupHint).filter(Boolean).join(" ");
+  const layout = layoutHint(repos);
+  return setup ? `${layout} ${setup}` : layout;
+}
+
+function layoutHint(repos: RepoLayout[]): string {
   const base =
     repos.length === 1
       ? `The repository is checked out at /workspace/${repos[0].name}.`

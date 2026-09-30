@@ -169,6 +169,23 @@ export interface HistoryRun {
   headline: string;
   outcome?: RunOutcome | null;
 }
+/** Mirrors SetupProfile in src/setup-profile.ts. Env vars are names only — never values. */
+export interface RepoSetupProfile {
+  v: 1;
+  install?: string;
+  build?: string;
+  test?: string;
+  lint?: string;
+  runtimes: Record<string, string>;
+  envVars: string[];
+  notes?: string;
+  detectedAt: number;
+  confirmedBy: "detected" | "agent" | "user";
+}
+export interface RepoSetupsResponse {
+  profiles: Array<{ repo: string; profile: RepoSetupProfile; updatedAt: number }>;
+}
+
 /** Mirrors RunOutcome in src/outcome.ts — the outcome card. null means unknown: render "—". */
 export interface RunOutcome {
   v: 1;
@@ -184,6 +201,8 @@ export interface RunOutcome {
     tests: { runner: string; passed: number; failed: number; skipped: number; source: "verify" | "trace" } | null;
     exitCode: number | null;
     verified: { pass: boolean; mode: string } | null;
+    /** The verify command that ran; absent on outcomes archived before it existed. */
+    testedWith?: string | null;
     prOnly: boolean;
     questions: number;
     openQuestions: number;
@@ -610,6 +629,9 @@ export const api = {
   mcpServers: () => get<McpServersResponse>("/mcp-servers.json"),
   mcpMutate: (body: Record<string, unknown>) => post<McpServersResponse>("/mcp-servers.json", body),
   mcpTest: (name: string) => post<{ ok: boolean; error?: string }>("/mcp-servers/test.json", { name }),
+  repoSetups: () => get<RepoSetupsResponse>("/repo-setup.json"),
+  saveRepoSetup: (repo: string, profile: Partial<RepoSetupProfile>) => post<RepoSetupsResponse>("/repo-setup.json", { repo, profile }),
+  resetRepoSetup: (repo: string) => post<RepoSetupsResponse>("/repo-setup/delete.json", { repo }),
   notifySettings: () => get<NotifySettings>("/notify.json"),
   saveNotifySettings: (s: { url?: string; events?: Partial<NotifySettings["events"]> }) =>
     post<NotifySettings>("/notify.json", s),

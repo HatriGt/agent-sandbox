@@ -19,7 +19,9 @@ import { loadDotEnv } from "./dotenv.js";
 import { loadConfig } from "./config.js";
 import { registerTools } from "./handlers.js";
 import { makeBridge } from "./server-bridge.js";
-import { deps as rawDeps, resolveCredsForBox } from "./deps.js";
+import { deps as rawDeps, resolveCredsForBox, detectSetupInBox } from "./deps.js";
+import { SETUP_SENTINEL, parseSentinel, type SetupProfile } from "./setup-profile.js";
+import { deleteSetup, getSetup, listSetups, recordLearned, repoKey, repoSlugFromUrl, saveSetup } from "./setup-store.js";
 import { refillPool, startPoolMaintainer } from "./pool.js";
 import { checkBearer } from "./http-auth.js";
 import { clientOf, makeAuthThrottle, makeRateLimiter } from "./auth-throttle.js";
@@ -622,6 +624,36 @@ const notifier = makeNotifier({ send: sendNotification, log: (m) => console.erro
  * the digest derives — and therefore everything archived — is redacted at archive time; /history.json
  * can serve rows verbatim. Best-effort everywhere: archiving must never break the sweep or teardown.
  */
+/**
+ * Repo setup learning at the finish edge (src/setup-profile.ts): the agent's SETUP_SENTINEL refines
+ * the stored profile; a GitHub repo with no profile yet gets one detected from its files (covers
+ * runs that did not come through /delegate.json). Repos are identified from each dir's origin
+ * remote, so this works after a controller restart too. A user-edited profile is never touched.
+ */
+const collectRepoSetup = async (box: string, owner: string): Promise<void> => {
+  const r = await execInBox(
+    cfg,
+    box,
+    `for d in /workspace/*/; do n=$(basename "$d"); u=$(git -C "$d" remote get-url origin 2>/dev/null); [ -n "$u" ] && echo "@@R $n|$u"; done; ` +
+      `[ -f ${SETUP_SENTINEL} ] && { echo "@@S"; head -c 50000 ${SETUP_SENTINEL}; }; true`,
+    { timeoutMs: 20_000 }
+  );
+  const [head, sentinel] = r.stdout.split(/^@@S$/m);
+  const repos: Array<{ name: string; slug: string }> = [];
+  for (const m of head.matchAll(/^@@R ([^|\n]+)\|(.+)$/gm)) {
+    const slug = repoSlugFromUrl(m[2]);
+    if (slug) repos.push({ name: m[1].trim(), slug });
+  }
+  if (!repos.length) return;
+  const agent = sentinel ? parseSentinel(sentinel.trim(), repos.map((x) => x.name)) : {};
+  for (const { name, slug } of repos) {
+    const existing = getSetup(db, owner, slug);
+    const detected = !existing && !agent[name] ? await detectSetupInBox(cfg, box, `/workspace/${name}`) : undefined;
+    const saved = recordLearned(db, owner, slug, { agent: agent[name], detected });
+    if (saved) console.error(`[setup] ${box}: learned ${slug} (${saved.confirmedBy})`);
+  }
+};
+
 const archiveFinishedRun = async (box: string, opts: { withFiles: boolean; budget?: OutcomeBudget } = { withFiles: true }): Promise<void> => {
   const snap = await watchHub.read(box);
   if (snap.boxStatus === "missing") return;
@@ -652,6 +684,7 @@ const archiveFinishedRun = async (box: string, opts: { withFiles: boolean; budge
     console.error(`[outcome] ${box}: ${(e as Error).message.slice(0, 200)}`);
   }
   const runOwner = ownerOf(db, box) ?? OPERATOR_OWNER;
+  if (up) await collectRepoSetup(box, runOwner).catch((e) => console.error(`[setup] ${box}: ${(e as Error).message.slice(0, 200)}`));
   const archiveId = archiveRun(db, { box, owner: runOwner, digest, ...(diffText ? { diffText } : {}) });
   // A trigger-started run finishing frees its slot, stamps the automation's last result, posts the
   // receipt comment and fires any chain. Only on a NEW record (null = this finish was already seen).
@@ -1966,6 +1999,38 @@ app.post("/providers/models.json", async (req: Request, res: Response) => {
     return;
   }
   res.json(await refreshModels(b.id, { force: b.force === true, owner }));
+});
+
+// Repo setup profiles (src/setup-profile.ts): list / edit / reset, per caller. An edit is stamped
+// confirmedBy "user" and is never overwritten by a run; a reset makes the next run re-detect.
+const SETUP_REPO_RE = /^[\w.-]+\/[\w.-]+$/;
+const setupPayload = (owner: string) => ({ profiles: listSetups(db, owner) });
+app.get("/repo-setup.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  res.json(setupPayload(providerOwner(res)));
+});
+app.post("/repo-setup.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const owner = providerOwner(res);
+  const b = (req.body ?? {}) as { repo?: unknown; profile?: unknown };
+  if (typeof b.repo !== "string" || !SETUP_REPO_RE.test(b.repo.trim().replace(/\.git$/i, ""))) {
+    res.status(400).json({ error: "repo must be owner/name" });
+    return;
+  }
+  const prev = getSetup(db, owner, b.repo);
+  const input = { ...(b.profile && typeof b.profile === "object" ? b.profile : {}), ...(prev ? { detectedAt: prev.detectedAt } : {}) };
+  saveSetup(db, owner, b.repo, input, "user");
+  res.json(setupPayload(owner));
+});
+app.post("/repo-setup/delete.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const owner = providerOwner(res);
+  const repo = (req.body as { repo?: unknown } | undefined)?.repo;
+  if (typeof repo !== "string" || !deleteSetup(db, owner, repo)) {
+    res.status(404).json({ error: "no setup profile for that repo" });
+    return;
+  }
+  res.json(setupPayload(owner));
 });
 
 app.get("/notify.json", (req: Request, res: Response) => {
@@ -3335,7 +3400,19 @@ app.post("/delegate.json", async (req: Request, res: Response) => {
       const p = principalOf(res);
       agent = loadAgentPrefs(p.kind === "user" ? p.userId : OPERATOR_OWNER).defaultAgent;
     }
+    // Repo setup (src/setup-profile.ts): this owner's learned profiles for the run's repos. A single
+    // repo's test command becomes the default verify clause, so the outcome card gets real counts.
+    const setupSlugs = (repos.length ? repos.map((r) => r.repo) : typeof body.repo === "string" ? [body.repo] : []).map(repoKey);
+    const setup: Record<string, SetupProfile> = {};
+    for (const s of setupSlugs) {
+      const p = getSetup(db, hOwner, s);
+      if (p) setup[s] = p;
+    }
+    if (!verifyPlan && setupSlugs.length === 1 && setup[setupSlugs[0]]?.test) {
+      verifyPlan = { mode: "command", command: setup[setupSlugs[0]].test! };
+    }
     const result = await withStartedBy({ kind: "manual" }, () => runDelegateFlow(cfg, deps, {
+      ...(setupSlugs.length ? { setup } : {}),
       agent,
       attachments: attachments.length ? attachments : undefined,
       // A browser has no local tree to ship: git only. (`source:"local"` would rsync a controller-host path.)
@@ -3361,6 +3438,13 @@ app.post("/delegate.json", async (req: Request, res: Response) => {
       if (model) boxModels.set(result.box, model);
       if (provider) boxProviders.set(result.box, provider.label);
       if (verifyPlan) boxVerify.set(result.box, verifyPlan);
+      for (const [slug, p] of Object.entries(result.setupDetected ?? {})) {
+        try {
+          recordLearned(db, hOwner, slug, { detected: p });
+        } catch {
+          /* learning is bookkeeping; the run already started */
+        }
+      }
       if (harness || compareId) {
         try {
           recordRunHarness(db, { box: result.box, owner: hOwner, harnessId: harness?.id, harnessName: harness?.name, skills, compareId, side: compareSide });

@@ -48,6 +48,8 @@ export interface RunOutcome {
     tests: (TestCounts & { source: "verify" | "trace" }) | null;
     exitCode: number | null;
     verified: { pass: boolean; mode: string } | null;
+    /** The verify command that ran (e.g. the repo setup's test command) — "Tested with `npm test`". */
+    testedWith: string | null;
     /** Automation-started runs push through the PR-only guard (src/pr-only.ts). */
     prOnly: boolean;
     questions: number;
@@ -175,6 +177,7 @@ export function buildOutcome(i: OutcomeInput): RunOutcome {
       tests,
       exitCode: d.exitCode ?? null,
       verified: d.verified ? { pass: d.verified.pass, mode: d.verified.mode } : null,
+      testedWith: d.verified?.mode === "command" && d.verified.command ? d.verified.command : null,
       prOnly: sb?.kind === "trigger" || sb?.kind === "followup",
       questions: d.questions.length,
       openQuestions: d.questions.filter((q) => q.answer === undefined).length,

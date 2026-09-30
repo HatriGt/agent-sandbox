@@ -40,6 +40,8 @@ import { PROVIDER_ENV_PATH } from "./drivers/sentinels.js";
 import { BUDGET_PATH, type BudgetState } from "./budget.js";
 import { setBoxSkillSelection } from "./skill-store.js";
 import { runVerification } from "./verify.js";
+import { detectSetup, parseProbe, setupAskHint, setupProbeSh, setupPromptHint, type SetupProfile } from "./setup-profile.js";
+import { repoKey } from "./setup-store.js";
 import { handoffPlan, buildCarryDiffSh } from "./handoff.js";
 import { captureAskSnapshot, rewindToAskSnapshot, rewindRunFlags, shouldCaptureBeforeAnswer, snapAskEnabled } from "./snapshot.js";
 import { safeWorkspacePath } from "./artifact.js";
@@ -388,6 +390,51 @@ async function resolveGitAccessImpl(
   return { ok: true, ownerTokens, ownerLogins, primaryToken, primaryLogin };
 }
 
+/** Upper bound on the pre-agent install; past it the agent is told to run install itself. */
+const SETUP_INSTALL_TIMEOUT_MS = Number(process.env.ASB_SETUP_INSTALL_TIMEOUT_MS) || 300_000;
+
+/** Read a repo dir's probe files and detect its setup. Null when nothing is recognisable. */
+export async function detectSetupInBox(cfg: Config, box: string, dir: string): Promise<SetupProfile | null> {
+  const r = await exec(cfg, box, setupProbeSh(dir), { timeoutMs: 30_000 }).catch(() => ({ stdout: "" }));
+  return detectSetup(parseProbe(r.stdout));
+}
+
+async function prepareRepoSetup(
+  cfg: Config,
+  box: string,
+  repos: DelegatePlan["repos"],
+  known: NonNullable<DelegatePlan["setup"]>
+): Promise<{ layout: RepoLayout[]; detected: Record<string, SetupProfile> }> {
+  const detected: Record<string, SetupProfile> = {};
+  const multi = repos.length > 1;
+  const unknown: string[] = [];
+  const layout = await Promise.all(
+    repos.map(async (r): Promise<RepoLayout> => {
+      const key = repoKey(r.repo);
+      const dir = `/workspace/${r.name}`;
+      let profile: SetupProfile | null | undefined = known[key];
+      let installed: "ok" | "failed" | "skipped" = "skipped";
+      if (profile?.install) {
+        // Warm the workspace: the install the repo needs, before the agent's first turn.
+        const sh = `cd ${shellQuote(dir)} && { ${profile.install}\n} >/workspace/.asb/install-${r.name}.log 2>&1; echo "__IEXIT=$?"`;
+        const out = await exec(cfg, box, `mkdir -p /workspace/.asb && bash -lc ${shellQuote(sh)}`, { timeoutMs: SETUP_INSTALL_TIMEOUT_MS }).catch(() => ({ stdout: "" }));
+        installed = /__IEXIT=0\s*$/.test(out.stdout) ? "ok" : "failed";
+        console.error(`[setup] ${box} ${r.name}: install ${installed}`);
+      } else if (!profile) {
+        profile = await detectSetupInBox(cfg, box, dir);
+        if (profile) detected[key] = profile;
+      }
+      if (!profile) {
+        unknown.push(r.name);
+        return { ...r };
+      }
+      return { ...r, setupHint: setupPromptHint(r.name, profile, { installed, multi }) };
+    })
+  );
+  if (unknown.length) layout[layout.length - 1] = { ...layout[layout.length - 1], setupHint: [layout[layout.length - 1].setupHint, setupAskHint(unknown)].filter(Boolean).join(" ") };
+  return { layout, detected };
+}
+
 export const deps: HandlerDeps = {
   countBoxes: (cfg) => msbCountBoxes(cfg),
 
@@ -512,14 +559,26 @@ export const deps: HandlerDeps = {
     // instead of ending its turn. A timeout returns "still working, reconnect via status".
     // A harness run installs exactly its skills (src/harness.ts); set before the install below.
     if (plan.skills) setBoxSkillSelection(box, plan.skills);
-    await runAgentTask(runCfg, box, plan.task, plan.repos, runCreds, plan.model, plan.agent);
+    // Repo setup (src/setup-profile.ts): warm install from a known profile, or detect one from the
+    // repo's files; either way the agent's system prompt carries it. Best-effort — setup trouble
+    // never blocks the run.
+    let layout: RepoLayout[] = plan.repos;
+    let setupDetected: Record<string, SetupProfile> | undefined;
+    if (plan.setup && plan.repos.length) {
+      const r = await prepareRepoSetup(runCfg, box, plan.repos, plan.setup);
+      layout = r.layout;
+      if (Object.keys(r.detected).length) setupDetected = r.detected;
+      mark("setup");
+    }
+    await runAgentTask(runCfg, box, plan.task, layout, runCreds, plan.model, plan.agent);
     mark("launch");
     console.error(`[timing] delegate ${box} warm=${warm} total=${Date.now() - t0}ms ${marks.join(" ")}`);
+    const extra = setupDetected ? { setupDetected } : {};
     // A detached caller (the dashboard) needs only the box name — its thread view attaches over
     // SSE. Blocking its HTTP response on the wait window added ~50s of perceived start latency.
-    if (interact?.detach) return { box, warm, output: "run:started — attach via status/watch" };
+    if (interact?.detach) return { box, warm, output: "run:started — attach via status/watch", ...extra };
     const output = await driveInteractive(runCfg, box, interact);
-    return { box, warm, output };
+    return { box, warm, output, ...extra };
   },
 
   async status(cfg, session, interact) {
