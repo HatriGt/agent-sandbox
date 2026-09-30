@@ -43,6 +43,7 @@ export function outcomeFacts(o: RunOutcome): string[] {
   if (o.cost.tokens) out.push(`${fmtTokens(o.cost.tokens.input + o.cost.tokens.output)} tokens`);
   if (o.cost.usd !== null) out.push(fmtUsd(o.cost.usd));
   if (o.result.followedBy) out.push(`followed by ${friendlyName(o.result.followedBy.box)}`);
+  for (const f of o.result.followups ?? []) if (f.line) out.push(f.line);
   return out;
 }
 
@@ -157,6 +158,11 @@ export function OutcomeCard({ outcome: o, className }: { outcome: RunOutcome; cl
               followed by <Link href={`/dashboard/box/${encodeURIComponent(o.result.followedBy.box)}`}>{friendlyName(o.result.followedBy.box)}</Link>
             </span>
           )}
+          {(o.result.followups ?? []).map((f) => (
+            <span key={f.box} className={cn("text-micro", f.state === "failed" ? "text-destructive" : "text-muted-foreground")}>
+              <Link href={`/dashboard/box/${encodeURIComponent(f.box)}`}>{f.line ?? f.subject}</Link>
+            </span>
+          ))}
         </Col>
 
         <Col title="Can you trust it">

@@ -42,6 +42,9 @@ export interface TriggerSpec {
   preset?: AlertPreset;
   /** webhook preset: minutes one alert fingerprint stays quiet after it fired (a storm = one run). */
   cooldownMin?: number;
+  /** PR follow-ups (src/pr-followups.ts) for PRs this automation's runs open; unset = the owner's default. */
+  keepGreen?: boolean;
+  addressReviews?: boolean;
 }
 
 /** Safety defaults (plan §5 "Trigger safety"). Budget is recorded and shown now; enforcement is
@@ -491,6 +494,8 @@ export function normalizeTrigger(body: unknown): { ok: true; trigger: TriggerInp
     spec.preset = s.preset as AlertPreset;
     spec.cooldownMin = normalizeCooldown(s.cooldownMin);
   }
+  if (typeof s.keepGreen === "boolean") spec.keepGreen = s.keepGreen;
+  if (typeof s.addressReviews === "boolean") spec.addressReviews = s.addressReviews;
   let signingSecret: string | undefined;
   if (typeof b.signingSecret === "string" && b.signingSecret.trim()) {
     if (!spec.preset) return { ok: false, error: "a signing secret only applies to an alert-source preset" };

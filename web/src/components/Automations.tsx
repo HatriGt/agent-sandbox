@@ -14,6 +14,7 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { StaggerItem, Swap } from "@/components/ui/swap";
 import { Bar } from "@/components/thread/Skeletons";
 import { cn } from "@/lib/utils";
+import { PrFollowupsPanel } from "@/components/PrFollowupsPanel";
 
 /**
  * Automations: runs that start themselves — on a schedule, on a webhook, on a GitHub event, or after
@@ -198,6 +199,7 @@ export function Automations({ onBack, onOpenBox }: { onBack: () => void; onOpenB
             </div>
           )}
         </Swap>
+        <PrFollowupsPanel />
       </div>
 
       <Sheet open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
@@ -683,6 +685,20 @@ function Editor({
             <Switch size="sm" checked={d.prComment} onCheckedChange={(v) => set({ prComment: v })} />
           </label>
         )}
+        <label className="flex items-center justify-between gap-3">
+          <span className="text-meta">
+            Keep its PRs green
+            <span className="text-faint block text-micro">When CI fails on a PR this opened, fix it on the same branch (up to 3 tries).</span>
+          </span>
+          <Switch size="sm" checked={d.spec.keepGreen ?? true} onCheckedChange={(v) => setSpec({ keepGreen: v })} />
+        </label>
+        <label className="flex items-center justify-between gap-3">
+          <span className="text-meta">
+            Address review comments
+            <span className="text-faint block text-micro">Push fixes for review comments, then reply to and resolve the threads.</span>
+          </span>
+          <Switch size="sm" checked={d.spec.addressReviews ?? true} onCheckedChange={(v) => setSpec({ addressReviews: v })} />
+        </label>
         <p className="text-faint text-micro">PR-only: pushes to the default branch are refused inside the machine, so changes land on a branch and a PR.</p>
       </div>
 

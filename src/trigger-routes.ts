@@ -3,6 +3,7 @@ import type { Db } from "./db.js";
 import type { SecretBox } from "./secretbox.js";
 import type { Principal } from "./identity.js";
 import type { Dispatcher } from "./trigger-dispatch.js";
+import type { FollowupEngine } from "./pr-followup-engine.js";
 import { OPERATOR_OWNER } from "./user-store.js";
 import { deliveryKeys, matchGithub, normalizeTrigger, renderTemplate, safeEqual, templateContext, verifyGithubSignature } from "./triggers.js";
 import {
@@ -51,6 +52,8 @@ export interface TriggerRouteCtx {
   redact(s: string): string;
   publicUrl?: string;
   audit(owner: string, action: string, detail: Record<string, string | undefined>): void;
+  /** PR follow-ups: GitHub automations' hooks also carry CI/review events for agent PRs. */
+  followups?: Pick<FollowupEngine, "claims" | "handle">;
 }
 
 const ownerOfP = (p: Principal) => (p.kind === "user" ? p.userId : OPERATOR_OWNER);
@@ -257,6 +260,17 @@ export function registerTriggerRoutes(app: Express, c: TriggerRouteCtx): void {
     if (!claimDelivery(c.db, t.id, keys, at, 7 * 24 * 3600_000, t.kind === "github" ? 7 * 24 * 3600_000 : 60_000)) {
       note("skipped", "dedupe", "same delivery seen already");
       return { status: 200, body: { ok: true, duplicate: true } };
+    }
+    // PR follow-ups: CI results and review feedback on a PR one of this owner's runs opened are
+    // handled by the follow-up engine (src/pr-followup-engine.ts), not by this automation's filter.
+    if (t.kind === "github" && !test && c.followups) {
+      const cl = c.followups.claims(t.owner, ghEvent, payload);
+      if (cl.ok) {
+        void c.followups.handle({ id: t.id, owner: t.owner }, ghEvent, payload).catch((e) => {
+          logDelivery(c.db, t.id, { at, outcome: "failed", reason: "error", detail: `follow-up: ${(e as Error).message.slice(0, 200)}` });
+        });
+        return { status: 202, body: { ok: true, followup: true } };
+      }
     }
     // Stored for the editor's preview — redacted like every other stored text.
     try {

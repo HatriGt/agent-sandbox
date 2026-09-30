@@ -12,7 +12,9 @@ export type StartedBy =
   | { kind: "manual" }
   | { kind: "mcp" }
   | { kind: "after"; parent: string }
-  | { kind: "trigger"; triggerId: string; name: string; source: "schedule" | "webhook" | "github" | "chain"; event?: string; subject?: { kind: "issue" | "pr"; number: number; repo?: string }; /** chain: the box this run follows. */ parent?: string };
+  | { kind: "trigger"; triggerId: string; name: string; source: "schedule" | "webhook" | "github" | "chain"; event?: string; subject?: { kind: "issue" | "pr"; number: number; repo?: string }; /** chain: the box this run follows. */ parent?: string }
+  /** A PR follow-up (src/pr-followups.ts): back on the PR's branch after CI failed or review feedback. */
+  | { kind: "followup"; followup: "ci" | "review"; parent: string; pr: { repo: string; number: number }; attempt: number; subject: string; triggerId?: string };
 
 const als = new AsyncLocalStorage<StartedBy>();
 export const withStartedBy = <T>(s: StartedBy, fn: () => T): T => als.run(s, fn);
@@ -51,5 +53,7 @@ export function describeStartedBy(s: StartedBy | undefined): string | undefined 
       return `handoff after ${s.parent}`;
     case "trigger":
       return `${s.source} ${s.name}`;
+    case "followup":
+      return `${s.followup === "ci" ? "CI follow-up" : "review follow-up"} on ${s.pr.repo}#${s.pr.number}${s.attempt > 1 ? ` (attempt ${s.attempt})` : ""}`;
   }
 }

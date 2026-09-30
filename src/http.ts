@@ -31,7 +31,7 @@ import {
 } from "./identity.js";
 import { githubAuthorizeUrl, githubExchangeCode, githubIdentity } from "./github-oauth.js";
 import { keyFromEnvOrFile, makeSecretBox } from "./secretbox.js";
-import { allBlobs, ownerKey, registerUserStoreBackend, withOwner, OPERATOR_OWNER } from "./user-store.js";
+import { allBlobs, loadBlob, ownerKey, registerUserStoreBackend, saveBlob, withOwner, OPERATOR_OWNER } from "./user-store.js";
 import { detectTransitions, formatNotification, makeNotifier, toggleFor, type BoxRunView, type NotifyEvent } from "./notify.js";
 import { claimNonce, mintNonce, questionChoices, releaseNonce } from "./answer-choice.js";
 import { buildPushMessages, deviceCount, listDeviceTokens, makeOwnerRateCap, pruneToken, registerDevice, sendExpoPush, unregisterDevice } from "./push.js";
@@ -100,12 +100,16 @@ import { loadRunMetas, saveRunMeta, forgetRunMeta } from "./run-memory.js";
 import { readArtifact } from "./artifact.js";
 import { existsSync } from "node:fs";
 import { withStartedBy, currentStartedBy, recordStartedBy, startedByOf } from "./started-by.js";
-import { makeDispatcher } from "./trigger-dispatch.js";
+import { makeDispatcher, type StartRunInput } from "./trigger-dispatch.js";
+import { makeFollowupEngine, type GhRequest } from "./pr-followup-engine.js";
+import { registerFollowupRoutes } from "./pr-followup-routes.js";
+import { followupsForBox } from "./pr-followup-store.js";
+import { followupLine, normalizePrefs, type FollowupPrefs } from "./pr-followups.js";
 import { hookAuditPath, hookBodyParser, registerTriggerRoutes } from "./trigger-routes.js";
-import { pruneDeliveries } from "./trigger-store.js";
+import { getTriggerById, logDelivery, pruneDeliveries, type TriggerRow } from "./trigger-store.js";
 import { candidateAccounts } from "./gh-token-store.js";
 import { applyHarness, getHarness, normalizeEgress, HARNESS_LIMITS, type HarnessDef } from "./harness.js";
-import { checkCompareSide, recordRunHarness, skillSelectionBackend } from "./harness-runs.js";
+import { checkCompareSide, recordRunHarness, runHarnessOf, skillSelectionBackend } from "./harness-runs.js";
 import { registerHarnessRoutes } from "./harness-routes.js";
 import { registerSkillSelectionBackend } from "./skill-store.js";
 import { dirname, join, resolve } from "node:path";
@@ -647,10 +651,21 @@ const archiveFinishedRun = async (box: string, opts: { withFiles: boolean; budge
   } catch (e) {
     console.error(`[outcome] ${box}: ${(e as Error).message.slice(0, 200)}`);
   }
-  const archiveId = archiveRun(db, { box, owner: ownerOf(db, box) ?? OPERATOR_OWNER, digest, ...(diffText ? { diffText } : {}) });
+  const runOwner = ownerOf(db, box) ?? OPERATOR_OWNER;
+  const archiveId = archiveRun(db, { box, owner: runOwner, digest, ...(diffText ? { diffText } : {}) });
   // A trigger-started run finishing frees its slot, stamps the automation's last result, posts the
   // receipt comment and fires any chain. Only on a NEW record (null = this finish was already seen).
   if (archiveId !== null) await dispatcher.onRunFinished(box, digest, digest.provenance?.startedBy, archiveId);
+  // PR follow-ups: the PRs this run opened become agent PRs; a finished follow-up replies on GitHub.
+  if (archiveId !== null) {
+    try {
+      const harnessId = runHarnessOf(db, box)?.harnessId ?? undefined;
+      followups.onArchived({ box, owner: runOwner, digest, archiveId, ...(harnessId ? { harnessId } : {}) });
+    } catch (e) {
+      console.error(`[followup] ${box}: recording PRs failed: ${(e as Error).message.slice(0, 200)}`);
+    }
+    await followups.onRunFinished(box, digest, snap.log ?? "", archiveId).catch((e) => console.error(`[followup] ${box}: ${(e as Error).message.slice(0, 200)}`));
+  }
 };
 
 /**
@@ -2853,13 +2868,7 @@ function auditTrigger(owner: string, action: string, detail: Record<string, stri
     /* audit storage must never fail a fire */
   }
 }
-const dispatcher = makeDispatcher({
-  db,
-  publicUrl: cfg.publicUrl,
-  log: (m) => console.error(m),
-  audit: (owner, action, detail) => auditTrigger(owner, action, detail),
-  liveBoxes: async () => (await gatherMonitor(cfg)).map((b) => b.name),
-  startRun: (input) =>
+const startTriggerRun = (input: StartRunInput): Promise<{ ok: true; box: string } | { ok: false; question: string }> =>
     withOwner(input.owner, () =>
       withStartedBy(input.startedBy, async () => {
         const t = input.trigger;
@@ -2942,28 +2951,117 @@ const dispatcher = makeDispatcher({
         void generateTitle(cfg, r.box, t.name).catch(() => {});
         return { ok: true as const, box: r.box };
       })
-    ),
-  // The receipt comment on the issue/PR that fired the run, with the owner's own GitHub token.
-  postComment: (owner, repo, number, body) =>
-    withOwner(owner, async () => {
-      const acc = candidateAccounts(await loadStore(cfg), repo)[0];
-      if (!acc) throw new Error("no stored GitHub account can reach this repo");
-      const ctl = new AbortController();
-      const timer = setTimeout(() => ctl.abort(), 10_000);
-      try {
-        const r = await fetch(`https://api.github.com/repos/${repo}/issues/${number}/comments`, {
-          method: "POST",
-          headers: { authorization: `Bearer ${acc.token}`, accept: "application/vnd.github+json", "content-type": "application/json", "user-agent": "agent-sandbox" },
-          body: JSON.stringify({ body: redactor.redact(body) }),
-          signal: ctl.signal,
-        });
-        if (!r.ok) throw new Error(`GitHub answered ${r.status}`);
-      } finally {
-        clearTimeout(timer);
+    );
+/**
+ * The GitHub REST/GraphQL API as the owner, with their own stored token (the account that can
+ * reach `repo`). Server-side only: the dashboard CSP never talks to GitHub.
+ */
+const ghAsOwner = (owner: string, repo: string, req: GhRequest): Promise<any> =>
+  withOwner(owner, async () => {
+    const acc = candidateAccounts(await loadStore(cfg), repo)[0];
+    if (!acc) throw new Error("no stored GitHub account can reach this repo");
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 15_000);
+    try {
+      const r = await fetch(`https://api.github.com${req.path}`, {
+        method: req.method ?? "GET",
+        headers: {
+          authorization: `Bearer ${acc.token}`,
+          accept: "application/vnd.github+json",
+          "user-agent": "agent-sandbox",
+          ...(req.body !== undefined ? { "content-type": "application/json" } : {}),
+        },
+        ...(req.body !== undefined ? { body: JSON.stringify(req.body) } : {}),
+        redirect: "follow", // job logs answer with a redirect to blob storage
+        signal: ctl.signal,
+      });
+      if (!r.ok) throw new Error(`GitHub answered ${r.status}`);
+      if (req.text) {
+        const t = await r.text();
+        return t.length > 2_000_000 ? t.slice(-2_000_000) : t;
       }
-    }),
+      return r.status === 204 ? null : await r.json();
+    } finally {
+      clearTimeout(timer);
+    }
+  });
+const dispatcher = makeDispatcher({
+  db,
+  publicUrl: cfg.publicUrl,
+  log: (m) => console.error(m),
+  audit: (owner, action, detail) => auditTrigger(owner, action, detail),
+  liveBoxes: async () => (await gatherMonitor(cfg)).map((b) => b.name),
+  startRun: startTriggerRun,
+  // The receipt comment on the issue/PR that fired the run, with the owner's own GitHub token.
+  postComment: async (owner, repo, number, body) => {
+    await ghAsOwner(owner, repo, { method: "POST", path: `/repos/${repo}/issues/${number}/comments`, body: { body: redactor.redact(body) } });
+  },
+});
+const FOLLOWUP_PREFS_KIND = "pr-followups";
+const loadFollowupPrefs = (owner: string): FollowupPrefs => {
+  try {
+    const raw = loadBlob(FOLLOWUP_PREFS_KIND, owner);
+    return normalizePrefs(raw ? JSON.parse(raw) : {});
+  } catch {
+    return normalizePrefs({});
+  }
+};
+/**
+ * PR follow-ups (src/pr-followup-engine.ts): back on an agent PR's branch when CI fails or review
+ * feedback lands. Starts through the SAME trigger start path (harness, PR-only guard, title) with a
+ * synthetic automation row carrying the original run's harness/agent/model.
+ */
+const followups = makeFollowupEngine({
+  db,
+  publicUrl: cfg.publicUrl,
+  log: (m) => console.error(m),
+  redact: (s) => redactor.redact(s),
+  gh: ghAsOwner,
+  prefs: loadFollowupPrefs,
+  triggerSpec: (id) => getTriggerById(db, id)?.spec,
+  logDelivery: (id, e) => logDelivery(db, id, e),
+  startFollowup: (f) => {
+    const at = Date.now();
+    const pseudo: TriggerRow = {
+      id: f.pr.triggerId ?? `followup:${f.pr.repo}#${f.pr.number}`,
+      owner: f.owner,
+      name: `${f.startedBy.followup === "ci" ? "Fix CI" : "Address review"} · ${f.pr.repo}#${f.pr.number}`,
+      kind: "github",
+      spec: {},
+      repo: f.startedBy.pr.repo,
+      taskTemplate: f.task,
+      enabled: true,
+      concurrency: 1,
+      budget: { maxMinutes: 60 },
+      prComment: false,
+      ...(f.pr.agent ? { agent: f.pr.agent } : {}),
+      ...(f.pr.model ? { model: f.pr.model } : {}),
+      ...(f.pr.harnessId ? { harnessId: f.pr.harnessId } : {}),
+      lastFired: null,
+      nextFire: null,
+      lastResult: null,
+      hasPayload: false,
+      hasSigningSecret: false,
+      createdAt: at,
+      updatedAt: at,
+    };
+    return startTriggerRun({ owner: f.owner, trigger: pseudo, task: f.task, repos: [{ repo: f.startedBy.pr.repo, ref: f.branch }], startedBy: f.startedBy });
+  },
+});
+registerFollowupRoutes(app, {
+  db,
+  box: secretBox,
+  engine: followups,
+  dashAuthed,
+  principalOf,
+  failWith,
+  loadPrefs: loadFollowupPrefs,
+  savePrefs: (owner, p) => saveBlob(FOLLOWUP_PREFS_KIND, JSON.stringify(p), owner),
+  publicUrl: cfg.publicUrl,
+  audit: auditTrigger,
 });
 registerTriggerRoutes(app, {
+  followups,
   db,
   box: secretBox,
   dispatcher,
@@ -3021,7 +3119,13 @@ const outcomeWithFollow = (owner: string, box: string, digest: RunDigest | null 
   const o = outcomeOf(digest);
   if (!o) return null;
   const mine = (b: string) => (ownerOf(db, b) ?? OPERATOR_OWNER) === owner;
-  return { ...o, result: { ...o.result, followedBy: resolveFollowedBy(db, owner, box, mine) } };
+  let fu: ReturnType<typeof followupsForBox> = [];
+  try {
+    fu = followupsForBox(db, owner, box);
+  } catch {
+    fu = []; // follow-ups are an extra line on the card, never a reason it fails
+  }
+  return { ...o, result: { ...o.result, followedBy: resolveFollowedBy(db, owner, box, mine), followups: fu.map((f) => ({ ...f, line: followupLine(f) })) } };
 };
 
 // The outcome card (docs/plan-demo-parity.md bet 2): ?id=<archive id> or ?box=<name> (latest record).

@@ -135,6 +135,11 @@ export function OutcomeView({ outcome: o }: { outcome: RunOutcome }) {
               followed by {friendlyName(o.result.followedBy.box)} ›
             </T>
           ) : null}
+          {(o.result.followups ?? []).map((f) => (
+            <T key={f.box} variant="micro" tone="muted" onPress={() => openBox(f.box)}>
+              {f.line ?? f.subject} ›
+            </T>
+          ))}
         </Section>
 
         <Section title="Can you trust it">

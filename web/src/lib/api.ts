@@ -885,6 +885,12 @@ export const api = {
     ),
 
   /** Automations (triggers): schedules, webhooks, GitHub events and chains. */
+  prFollowups: (signal?: AbortSignal) =>
+    fetch(url("/pr-followups.json"), { headers: authHeaders, signal }).then(
+      parse<{ prefs: PrFollowupPrefs; hook: { id: string; createdAt: number; events: string[] } | null }>,
+    ),
+  setPrFollowups: (p: Partial<PrFollowupPrefs>) => post<{ prefs: PrFollowupPrefs }>("/pr-followups/settings.json", p),
+  rotatePrFollowupHook: () => post<{ id: string; secret: string; hookUrl: string; events: string[] }>("/pr-followups/hook.json", {}),
   triggers: (signal?: AbortSignal) => fetch(url("/triggers.json"), { headers: authHeaders, signal }).then(parse<{ triggers: Automation[] }>),
   createTrigger: (t: AutomationDraft) => post<{ trigger: Automation; secret?: string; hookUrl?: string }>("/triggers.json", t),
   updateTrigger: (id: string, t: AutomationDraft) => post<{ trigger: Automation }>(`/triggers/${encodeURIComponent(id)}.json`, t),
@@ -901,6 +907,9 @@ export const api = {
 export type AutomationKind = "schedule" | "webhook" | "github" | "chain";
 export type GithubEvent = "issue_labeled" | "issue_comment" | "pr_opened";
 export interface AutomationSpec {
+  /** PR follow-ups for this automation's PRs; unset = the user's default. */
+  keepGreen?: boolean;
+  addressReviews?: boolean;
   cron?: string;
   timezone?: string;
   event?: GithubEvent;
@@ -988,6 +997,11 @@ export interface LedgerTotals {
   withCost: number;
 }
 /** Mirrors `RunOutcome` in src/outcome.ts — the outcome card. Every null is "unknown": render "—". */
+export interface PrFollowupPrefs {
+  keepGreen: boolean;
+  addressReviews: boolean;
+}
+
 export interface RunOutcome {
   v: 1;
   state: "done" | "failed" | "waiting" | "running";
@@ -996,6 +1010,7 @@ export interface RunOutcome {
     prs: { url: string; repo: string; number: number }[];
     diff: { files: number; additions: number; deletions: number } | null;
     followedBy?: { box: string; archiveId: number | null } | null;
+    followups?: Array<{ box: string; kind: "ci" | "review"; subject: string; attempt: number; state: "running" | "done" | "failed"; archiveId: number | null; at: number; pr: { repo: string; number: number }; line?: string }>;
   };
   trust: {
     tests: { runner: string; passed: number; failed: number; skipped: number; source: "verify" | "trace" } | null;

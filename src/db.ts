@@ -245,6 +245,52 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX IF NOT EXISTS trigger_delivery_log_trigger ON trigger_delivery_log(trigger_id, id);
   `,
+  `
+  -- PR follow-ups (src/pr-followups.ts): which PRs this product opened (so CI failures and review
+  -- feedback only ever act on those), each follow-up run (loop guard, dedupe per head SHA / review,
+  -- the outcome card's "Fixed failing check" lines), and the per-owner GitHub webhook the events
+  -- arrive on (secret sealed like a trigger's). repo is stored lowercased.
+  CREATE TABLE IF NOT EXISTS agent_prs (
+    repo TEXT NOT NULL,
+    number INTEGER NOT NULL,
+    owner TEXT NOT NULL,
+    root_box TEXT NOT NULL,
+    branch TEXT,
+    harness_id TEXT,
+    agent TEXT,
+    model TEXT,
+    trigger_id TEXT,
+    archive_id INTEGER,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (repo, number)
+  );
+  CREATE INDEX IF NOT EXISTS agent_prs_branch ON agent_prs(repo, branch);
+  CREATE INDEX IF NOT EXISTS agent_prs_root ON agent_prs(root_box);
+  CREATE TABLE IF NOT EXISTS pr_followups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    repo TEXT NOT NULL,
+    number INTEGER NOT NULL,
+    owner TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    dedupe_key TEXT NOT NULL,
+    attempt INTEGER NOT NULL,
+    subject TEXT NOT NULL,
+    box TEXT,
+    state TEXT NOT NULL,
+    comments_json TEXT,
+    archive_id INTEGER,
+    at INTEGER NOT NULL,
+    finished_at INTEGER,
+    UNIQUE (repo, number, dedupe_key)
+  );
+  CREATE INDEX IF NOT EXISTS pr_followups_box ON pr_followups(box);
+  CREATE TABLE IF NOT EXISTS pr_followup_hooks (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL UNIQUE,
+    secret_enc TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 export function openDb(dataDir: string): Db {

@@ -14,6 +14,7 @@ import type { TraceEvent } from "./trace.js";
 import { costUsd, sumUsage } from "./budget.js";
 import { describeStartedBy, type StartedBy } from "./started-by.js";
 import { parseTestCounts, type TestCounts } from "./test-counts.js";
+import type { FollowupView } from "./pr-followups.js";
 
 export interface OutcomePr {
   url: string;
@@ -38,6 +39,8 @@ export interface RunOutcome {
     diff: { files: number; additions: number; deletions: number } | null;
     /** Resolved on read: the run that was chained / handed off after this one. */
     followedBy?: { box: string; archiveId: number | null } | null;
+    /** CI fixes / review rounds on this run's PR ("Fixed failing check `test` · 2nd attempt"). */
+    followups?: Array<FollowupView & { line?: string }>;
   };
   trust: {
     /** Parsed test counts — from the verify command if it ran a runner, else the last test run in
@@ -119,6 +122,8 @@ function headerOf(sb: StartedBy | undefined): RunOutcome["header"] {
       if (sb.subject.repo) link = { href: `https://github.com/${sb.subject.repo}/${sb.subject.kind === "pr" ? "pull" : "issues"}/${sb.subject.number}`, external: true };
     } else if (sb.event) label = `${label}: ${sb.event}`;
     if (!link && sb.parent) link = { href: `/dashboard/box/${encodeURIComponent(sb.parent)}`, external: false };
+  } else if (sb.kind === "followup") {
+    link = { href: `https://github.com/${sb.pr.repo}/pull/${sb.pr.number}`, external: true };
   } else if (sb.kind === "after") {
     link = { href: `/dashboard/box/${encodeURIComponent(sb.parent)}`, external: false };
   }
@@ -170,7 +175,7 @@ export function buildOutcome(i: OutcomeInput): RunOutcome {
       tests,
       exitCode: d.exitCode ?? null,
       verified: d.verified ? { pass: d.verified.pass, mode: d.verified.mode } : null,
-      prOnly: sb?.kind === "trigger",
+      prOnly: sb?.kind === "trigger" || sb?.kind === "followup",
       questions: d.questions.length,
       openQuestions: d.questions.filter((q) => q.answer === undefined).length,
       blocked: d.blocked?.length ?? 0,
