@@ -1,38 +1,19 @@
 import * as React from "react";
 import { Link } from "react-router";
-import {
-  ArrowRight,
-  Check,
-  Clock,
-  Copy,
-  FileCheck2,
-  GitPullRequest,
-  Globe,
-  KeyRound,
-  Layers,
-  Moon,
-  Pause,
-  Play,
-  ScrollText,
-  ShieldCheck,
-  Smartphone,
-  Sun,
-  Terminal,
-  Timer,
-  TriangleAlert,
-  Workflow,
-} from "lucide-react";
+import { ArrowRight, Check, Copy, Globe, GitPullRequest, KeyRound, Moon, ScrollText, ShieldCheck, Sun } from "lucide-react";
 import { motion, useInView, useReducedMotion } from "motion/react";
 import { Logo } from "@/components/ui/logo";
+import { AGENT_BRANDS, MODEL_BRANDS, type Brand } from "@/components/landing/BrandMarks";
+import { ScenarioDemo } from "@/components/landing/ScenarioDemo";
 import { cn } from "@/lib/utils";
 import { useSession } from "@/lib/auth";
 
 /**
  * The public landing page. No data, no token. Structure (docs/plan-agent-cloud.md §3):
- *   1. hero — the honest drivers × model-sources matrix, mirrored from the driver registry
- *   2. the demo video — the real dashboard, recorded by .shots/demo-video.mjs
- *   3. what's built today — shipped features only; planned items say so
- *   4. security
+ *   1. hero — headline, install, and a monochrome strip of the agents and model providers it runs
+ *   2. the scenario — a scripted, in-page run in the product's own UI (components/landing/ScenarioDemo)
+ *   3. what's built today — an editorial numbered list, no cards; the planned item says so
+ *   4. security — a two-column spec sheet on hairlines
  *   5. one-command self-host install (primary), hosted signup (secondary)
  * Follows the console's theme (stored `asb-dark`, else the OS preference); both themes are first-class.
  */
@@ -62,7 +43,7 @@ export default function Landing() {
         </div>
         <nav aria-label="Primary" className="flex items-center gap-1">
           {[
-            ["#demo", "Demo"],
+            ["#demo", "See a run"],
             ["#built", "Built today"],
             ["#security", "Security"],
           ].map(([href, label]) => (
@@ -93,147 +74,165 @@ export default function Landing() {
         {/* ───────────── 1. hero ───────────── */}
         <section className="relative isolate" aria-labelledby="hero-title">
           <HairlineGrid />
-          <div className="mx-auto grid max-w-6xl grid-cols-1 items-center gap-12 px-5 pt-8 pb-20 sm:px-6 lg:grid-cols-[0.95fr_1.05fr] lg:pt-14">
-            <div className="min-w-0">
-              <Reveal>
-                <p className="text-muted-foreground label mb-5 inline-flex items-center gap-2 rounded-full border px-3 py-1">
-                  <span className="bg-ok size-1.5 rounded-full" aria-hidden />
-                  Your own agent cloud · public beta
+          <div className="mx-auto max-w-6xl px-5 pt-10 pb-16 sm:px-6 lg:pt-20">
+            <Reveal>
+              <p className="text-muted-foreground label mb-6 inline-flex items-center gap-2 rounded-full border px-3 py-1">
+                <span className="bg-ok size-1.5 rounded-full" aria-hidden />
+                Your own agent cloud · public beta
+              </p>
+            </Reveal>
+            <Reveal delay={0.05}>
+              <h1 id="hero-title" className="font-serif text-[clamp(2.6rem,6.6vw,5.4rem)] leading-[0.98] tracking-[-0.03em] text-balance">
+                Delegate the work. <span className="text-muted-foreground lg:block">Keep the decisions.</span>
+              </h1>
+            </Reveal>
+            <div className="mt-8 grid gap-8 lg:mt-10 lg:grid-cols-[1fr_1.15fr] lg:gap-16">
+              <Reveal delay={0.1} className="min-w-0">
+                <p className="text-foreground/85 max-w-[46ch] text-[17px] leading-relaxed">
+                  Run any coding agent, on any model and account, in a microVM of its own. It starts from an issue, a
+                  schedule or a webhook, works while you're away, stops to ask when the call is yours, and hands back a
+                  verified pull request.
                 </p>
               </Reveal>
-              <Reveal delay={0.05}>
-                <h1 id="hero-title" className="font-serif text-[clamp(2.5rem,5.4vw,4.25rem)] leading-[1.03] tracking-[-0.025em] text-balance">
-                  Any coding agent, any model, any account.
-                </h1>
-              </Reveal>
-              <Reveal delay={0.1}>
-                <p className="text-muted-foreground mt-5 max-w-[50ch] text-lead leading-relaxed">
-                  Every run in its own microVM. Always on: manual, scheduled, event-triggered, long-running. When it needs
-                  a decision, it asks instead of guessing.
-                </p>
-              </Reveal>
-              <Reveal delay={0.15}>
+              <Reveal delay={0.15} className="min-w-0 [&>div]:mt-0">
                 <CtaPair consoleHref={consoleHref} hostedLabel={hostedLabel} hostedNote={hostedNote} showHosted={saas || signedIn || !ready} />
               </Reveal>
             </div>
-            <Reveal delay={0.12} className="min-w-0">
-              <Matrix />
+            <Reveal delay={0.2}>
+              <BrandStrip />
             </Reveal>
           </div>
         </section>
 
-        {/* ───────────── 2. the demo ───────────── */}
+        {/* ───────────── 2. the scenario ───────────── */}
         <section id="demo" className="scroll-mt-4 border-t" aria-labelledby="demo-title">
           <div className="mx-auto max-w-6xl px-5 py-20 sm:px-6">
             <Reveal>
-              <SectionHead id="demo-title" eyebrow="The loop" title="Triggered, asked, answered, shipped.">
-                A GitHub automation starts a run. The agent reproduces the bug, hits a decision that changes what the fix
-                means, and stops. One answer later it finishes on a branch with a PR and a receipt.
-              </SectionHead>
+              <div className="grid gap-4 lg:grid-cols-[1fr_1fr] lg:items-end lg:gap-16">
+                <div>
+                  <p className="label text-muted-foreground mb-3">One run, start to receipt</p>
+                  <h2 id="demo-title" className="font-serif text-[clamp(1.9rem,3.6vw,2.9rem)] leading-[1.05] tracking-[-0.02em] text-balance">
+                    2:07 a.m. A bug report, a question, a pull request.
+                  </h2>
+                </div>
+                <p className="text-muted-foreground max-w-[52ch] text-body leading-relaxed">
+                  An issue on a checkout service gets the <span className="text-foreground font-mono text-meta">agent</span> label. The run
+                  reproduces the double charge, finds a fix that changes what "retry" means for customers, and stops. The answer comes
+                  from a phone; the rest ships itself.
+                </p>
+              </div>
             </Reveal>
-            <Reveal delay={0.08}>
-              <DemoVideo dark={dark} />
+            <Reveal delay={0.06}>
+              <ScenarioDemo />
             </Reveal>
           </div>
         </section>
 
         {/* ───────────── 3. built today ───────────── */}
         <section id="built" className="scroll-mt-4 border-t" aria-labelledby="built-title">
-          <div className="mx-auto max-w-6xl px-5 py-20 sm:px-6">
-            <Reveal>
-              <SectionHead id="built-title" eyebrow="Shipped" title="What's built today.">
-                Runs that start themselves, stop when they should, and leave a record. Everything here is in the current
-                release; the one planned item is marked.
-              </SectionHead>
-            </Reveal>
-            <div className="mt-10 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {BUILT.map((b, i) => (
-                <Reveal key={b.title} delay={(i % 3) * 0.04} className="min-w-0">
-                  <article className="bg-card flex h-full flex-col rounded-xl border p-5">
-                    <span className="bg-muted text-foreground grid size-9 place-items-center rounded-md [&_svg]:size-[18px]" aria-hidden>
-                      {b.icon}
-                    </span>
-                    <h3 className="mt-4 text-body font-semibold tracking-[-0.005em]">{b.title}</h3>
-                    <p className="text-muted-foreground mt-1.5 text-meta leading-relaxed">{b.body}</p>
-                    {b.tags && (
-                      <ul className="mt-auto flex flex-wrap gap-1.5 pt-4" aria-label={`${b.title}: included`}>
-                        {b.tags.map((t) => (
-                          <li key={t} className="text-foreground/80 rounded-md border px-2 py-0.5 font-mono text-micro">
-                            {t}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </article>
-                </Reveal>
-              ))}
+          <div className="mx-auto grid max-w-6xl gap-10 px-5 py-20 sm:px-6 lg:grid-cols-[0.8fr_1.6fr] lg:gap-16">
+            <div className="lg:sticky lg:top-8 lg:self-start">
+              <Reveal>
+                <SectionHead id="built-title" eyebrow="Shipped" title="What's built today.">
+                  Runs that start themselves, stop when they should, and leave a record. All of it is in the current release; the one
+                  planned item is marked.
+                </SectionHead>
+              </Reveal>
             </div>
-            <Reveal>
-              <p className="text-muted-foreground mt-5 flex items-center gap-2 text-meta">
-                <Clock className="size-3.5 shrink-0" aria-hidden />
-                <span>
-                  <span className="text-foreground font-medium">Planned:</span> a Gemini CLI driver.
-                </span>
-              </p>
-            </Reveal>
-          </div>
-        </section>
-
-        {/* ───────────── 4. security ───────────── */}
-        <section id="security" className="scroll-mt-4 border-t" aria-labelledby="security-title">
-          <div className="mx-auto grid max-w-6xl gap-12 px-5 py-20 sm:px-6 lg:grid-cols-[0.8fr_1.2fr]">
-            <Reveal>
-              <SectionHead id="security-title" eyebrow="Security" title="Unattended only works if it's fenced.">
-                Runs that start from a webhook at 3 a.m. get the same boundary as the ones you watch: a separate machine,
-                a network allowlist, and a controller that keeps the credentials.
-              </SectionHead>
-            </Reveal>
-            <ul className="divide-y rounded-xl border">
-              {SECURITY.map((s, i) => (
-                <Reveal key={s.title} delay={i * 0.03}>
-                  <li className="flex gap-4 px-5 py-4">
-                    <span className="bg-muted text-foreground mt-0.5 grid size-8 shrink-0 place-items-center rounded-md [&_svg]:size-4" aria-hidden>
-                      {s.icon}
+            <ol className="border-t">
+              {BUILT.map((b, i) => (
+                <Reveal key={b.title} delay={0.03}>
+                  <li className="group grid grid-cols-[3rem_1fr] gap-x-4 border-b py-7 sm:grid-cols-[4.5rem_1fr] sm:gap-x-6">
+                    <span className="text-muted-foreground/70 group-hover:text-foreground font-serif text-[2.4rem] leading-none tabular-nums transition-colors duration-200 sm:text-[3rem]" aria-hidden>
+                      {String(i + 1).padStart(2, "0")}
                     </span>
                     <div className="min-w-0">
-                      <h3 className="text-body font-semibold">{s.title}</h3>
-                      <p className="text-muted-foreground mt-0.5 text-meta leading-relaxed">{s.body}</p>
+                      <h3 className="text-[19px] leading-snug font-semibold tracking-[-0.015em]">{b.title}</h3>
+                      <p className="text-muted-foreground mt-2 max-w-[62ch] text-body leading-relaxed">{b.body}</p>
+                      {b.tags && (
+                        <p className="text-foreground/75 mt-3 font-mono text-micro leading-relaxed">
+                          <span className="sr-only">Includes: </span>
+                          {b.tags.join("  ·  ")}
+                        </p>
+                      )}
                     </div>
                   </li>
                 </Reveal>
               ))}
-            </ul>
+              <li className="text-muted-foreground grid grid-cols-[3rem_1fr] gap-x-4 py-5 text-meta sm:grid-cols-[4.5rem_1fr] sm:gap-x-6">
+                <span className="stamp pt-0.5">Next</span>
+                <span>
+                  <span className="text-foreground font-medium">Planned:</span> a Gemini CLI driver.
+                </span>
+              </li>
+            </ol>
+          </div>
+        </section>
+
+        {/* ───────────── 4. security ───────────── */}
+        <section id="security" className="bg-sidebar/60 scroll-mt-4 border-t" aria-labelledby="security-title">
+          <div className="mx-auto max-w-6xl px-5 py-20 sm:px-6">
+            <Reveal>
+              <div className="grid gap-4 lg:grid-cols-[1fr_1fr] lg:items-end lg:gap-16">
+                <div>
+                  <p className="label text-muted-foreground mb-3">Security</p>
+                  <h2 id="security-title" className="font-serif text-[clamp(1.9rem,3.6vw,2.9rem)] leading-[1.05] tracking-[-0.02em] text-balance">
+                    Unattended only works if it's fenced.
+                  </h2>
+                </div>
+                <p className="text-muted-foreground max-w-[52ch] text-body leading-relaxed">
+                  A run that starts from a webhook at 3 a.m. gets the same boundary as the one you watch: a separate machine, a network
+                  allowlist, and a controller that keeps the credentials.
+                </p>
+              </div>
+            </Reveal>
+            <dl className="mt-12 grid gap-x-16 sm:grid-cols-2">
+              {SECURITY.map((s) => (
+                <Reveal key={s.title}>
+                  <div className="border-t py-6">
+                    <dt className="flex items-center gap-2.5 text-body font-semibold">
+                      <span className="text-muted-foreground [&_svg]:size-4" aria-hidden>
+                        {s.icon}
+                      </span>
+                      {s.title}
+                    </dt>
+                    <dd className="text-muted-foreground mt-2 text-meta leading-relaxed">{s.body}</dd>
+                  </div>
+                </Reveal>
+              ))}
+            </dl>
           </div>
         </section>
 
         {/* ───────────── 5. install ───────────── */}
         <section id="install" className="scroll-mt-4 border-t" aria-labelledby="install-title">
-          <div className="mx-auto max-w-6xl px-5 py-20 sm:px-6">
+          <div className="mx-auto max-w-6xl px-5 py-24 sm:px-6">
             <Reveal>
-              <div className="bg-card relative overflow-hidden rounded-2xl border px-6 py-10 sm:px-10 sm:py-14">
-                <div className="mx-auto max-w-2xl text-center">
-                  <h2 id="install-title" className="font-serif text-[clamp(1.9rem,3.6vw,2.75rem)] leading-tight tracking-[-0.02em]">
-                    Run it on your own server.
+              <div className="grid gap-10 lg:grid-cols-[1fr_1.1fr] lg:items-end lg:gap-16">
+                <div>
+                  <h2 id="install-title" className="font-serif text-[clamp(2.2rem,4.6vw,3.6rem)] leading-[1.02] tracking-[-0.025em] text-balance">
+                    Your agent cloud,
+                    <br />
+                    on your own server.
                   </h2>
-                  <p className="text-muted-foreground mx-auto mt-3 max-w-[54ch] text-body">
-                    One command on a KVM-capable Linux host. Open source under MIT. The hosted beta is the same product,
-                    run for you.
+                  <p className="text-muted-foreground mt-4 max-w-[48ch] text-body leading-relaxed">
+                    One command on a KVM-capable Linux host. Open source under MIT. The hosted beta is the same product, run for you.
                   </p>
                 </div>
-                <div className="mx-auto mt-8 max-w-2xl">
+                <div className="min-w-0">
                   <InstallCommand />
-                  <div className="mt-4 flex flex-wrap items-center justify-center gap-x-5 gap-y-3">
-                    <a href={SELF_HOST} target="_blank" rel="noreferrer" className={cn(focusRing, "text-foreground rounded-sm text-meta font-medium underline decoration-current/40 underline-offset-4 hover:decoration-current")}>
-                      Self-hosting guide
-                    </a>
+                  <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-3">
                     {(saas || signedIn) && (
                       <Link to={consoleHref} className={cn(focusRing, secondaryBtn)}>
                         {signedIn ? primaryLabel : saas ? "Sign up for hosted" : primaryLabel}
                         <ArrowRight className="size-3.5" aria-hidden />
                       </Link>
                     )}
+                    <a href={SELF_HOST} target="_blank" rel="noreferrer" className={cn(focusRing, "text-foreground rounded-sm text-meta font-medium underline decoration-current/40 underline-offset-4 hover:decoration-current")}>
+                      Self-hosting guide
+                    </a>
                   </div>
-                  {hostedNote && <p className="text-muted-foreground mt-3 text-center text-micro">{hostedNote}</p>}
+                  {hostedNote && <p className="text-muted-foreground mt-3 text-micro">{hostedNote}</p>}
                 </div>
               </div>
             </Reveal>
@@ -268,37 +267,31 @@ const focusRing = "focus-visible:ring-ring focus-visible:ring-offset-background 
 const navLink = cn(focusRing, "text-muted-foreground hover:text-foreground rounded-md px-3 py-1.5 text-meta transition-colors duration-200 ease-out");
 const secondaryBtn = "border-line-strong hover:bg-muted inline-flex h-10 items-center gap-2 rounded-md border px-4 text-meta font-medium transition-colors duration-200 ease-out";
 
-const BUILT: Array<{ icon: React.ReactNode; title: string; body: string; tags?: string[] }> = [
+const BUILT: Array<{ title: string; body: string; tags?: string[] }> = [
   {
-    icon: <Workflow />,
     title: "Triggers",
     body: "Runs start from the dashboard or any MCP client, on a schedule, from a webhook, from a GitHub event, or when another automation finishes.",
     tags: ["cron + timezone", "webhook", "issue labelled", "issue comment", "PR opened", "after: chains"],
   },
   {
-    icon: <Timer />,
     title: "Budgets that ask, then stop",
     body: "Per-run caps on time, and on dollars when the model has a known price (tokens otherwise). Hitting a cap doesn't kill the run: it asks continue or stop at its next tool call.",
   },
   {
-    icon: <FileCheck2 />,
     title: "Receipts and History",
     body: "Every finished run leaves a receipt: plan, files, failed commands, the questions it asked and your answers, and what started it. History is the ledger, with filters and period totals.",
     tags: ["receipt comment on the issue or PR"],
   },
   {
-    icon: <Smartphone />,
     title: "Mobile push",
     body: "The phone app gets a push when a run needs you; the notification deep-links to the question card. Automations on mobile: read, toggle, Run now.",
   },
   {
-    icon: <Layers />,
     title: "Harnesses",
     body: "Save a driver, model, skills, rules, verify step, egress and budget as one harness. Export and import versioned bundles; compare two harnesses on the same task.",
     tags: ["export", "import", "compare"],
   },
   {
-    icon: <KeyRound />,
     title: "Your models, your accounts",
     body: "An encrypted per-user provider registry: Anthropic, OpenAI, any OpenAI-compatible endpoint, and Ollama for local models. API keys first in every picker.",
   },
@@ -311,6 +304,51 @@ const SECURITY: Array<{ icon: React.ReactNode; title: string; body: string }> = 
   { icon: <ScrollText />, title: "Audit log", body: "Sign-ins, key changes, delegations, triggers and teardowns are recorded and readable by their owner. Another account's machine answers 404, not 403." },
   { icon: <GitPullRequest />, title: "PR-only, enforced in git", body: "Runs an automation starts can't push to the default branch: a pre-push hook in the machine refuses it, and the controller checks again. Changes land on a branch and a PR." },
 ];
+
+/* ───────────────────────────── brand strip ───────────────────────────── */
+
+/**
+ * MIRROR of the server driver registry (the web bundle can't import src/drivers). "partial" = the
+ * driver's stop-and-ask gate is built but not yet verified live (Codex, OpenCode); "soon" = planned.
+ * Keep in sync when a driver changes.
+ */
+function BrandStrip() {
+  return (
+    <div className="mt-16 border-t pt-6">
+      <div className="grid gap-6 lg:grid-cols-[auto_1fr] lg:gap-x-10">
+        <BrandRow label="Agents" brands={AGENT_BRANDS} />
+        <BrandRow label="Models" brands={MODEL_BRANDS} />
+      </div>
+      <p className="text-muted-foreground mt-5 text-micro">
+        Every agent runs in its own microVM, from any trigger, and leaves a receipt. <span className="text-foreground/80">Partial</span>: its
+        stop-and-ask gate is built, not yet verified live. Marks belong to their owners.
+      </p>
+    </div>
+  );
+}
+
+function BrandRow({ label, brands }: { label: string; brands: Brand[] }) {
+  return (
+    <>
+      <p className="label text-muted-foreground pt-1 lg:w-16">{label}</p>
+      <ul className="text-foreground/70 flex flex-wrap items-center gap-x-8 gap-y-4 sm:gap-x-10">
+        {brands.map((b) => (
+          <li key={b.key} className={cn("flex items-center gap-2 text-[17px]", b.mark === "soon" && "opacity-55")} title={b.mark ? `${b.name} (${b.mark === "soon" ? "soon" : "supervised: partial"})` : b.name}>
+            <span className="sr-only">{b.name}</span>
+            <span aria-hidden className="flex items-center gap-2">
+              {b.render("size-[18px] shrink-0")}
+            </span>
+            {b.mark && (
+              <span className="text-muted-foreground -translate-y-1.5 self-start font-mono text-[10px] tracking-wide uppercase">
+                {b.mark === "soon" ? "soon" : "partial"}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+}
 
 /* ───────────────────────────── building blocks ───────────────────────────── */
 
@@ -390,257 +428,6 @@ function CtaPair({ consoleHref, hostedLabel, hostedNote, showHosted }: { console
         )}
         <span className="text-muted-foreground text-micro">{hostedNote || "Self-host is free forever · MIT."}</span>
       </div>
-    </div>
-  );
-}
-
-/* ───────────────────────────── the demo video ───────────────────────────── */
-
-const DEMO_STEPS: Array<{ icon: React.ReactNode; title: string; body: string; at: number; needsYou?: boolean }> = [
-  { icon: <Workflow />, title: "A trigger starts the run", body: "A GitHub automation on issues labelled agent. Run now stands in for the label event.", at: 0 },
-  { icon: <Terminal />, title: "It works in its own microVM", body: "Reads the test, reproduces the flake, keeps a live plan.", at: 5 },
-  { icon: <Pause />, title: "It stops and asks", body: "Two fixes that prove different things. Every tool call is blocked until someone answers.", at: 12, needsYou: true },
-  { icon: <GitPullRequest />, title: "Answered, then shipped", body: "Edits, reruns the suite, opens the PR. The thread closes with the receipt.", at: 19 },
-];
-
-function DemoVideo({ dark }: { dark: boolean }) {
-  const reduced = useReducedMotion();
-  const ref = React.useRef<HTMLVideoElement>(null);
-  const [playing, setPlaying] = React.useState(false);
-  const [step, setStep] = React.useState(0);
-  // web/public is served under the Vite base (vite.config `base: "/dashboard/"`), same origin — CSP-safe.
-  const dir = "/dashboard/demo/";
-  const src = dark ? `${dir}demo-dark` : `${dir}demo`;
-  const poster = dark ? `${dir}demo-dark-poster.jpg` : `${dir}demo-poster.jpg`;
-
-  // Reduced motion: never autoplay. Otherwise play only while on screen.
-  React.useEffect(() => {
-    const v = ref.current;
-    if (!v || reduced) return;
-    const io = new IntersectionObserver(
-      ([e]) => {
-        if (e.isIntersecting) void v.play().catch(() => {});
-        else v.pause();
-      },
-      { threshold: 0.35 }
-    );
-    io.observe(v);
-    return () => io.disconnect();
-  }, [reduced, src]);
-
-  const toggle = () => {
-    const v = ref.current;
-    if (!v) return;
-    if (v.paused) void v.play().catch(() => {});
-    else v.pause();
-  };
-  const onTime = () => {
-    const t = ref.current?.currentTime ?? 0;
-    let s = 0;
-    DEMO_STEPS.forEach((d, i) => t >= d.at && (s = i));
-    setStep(s);
-  };
-
-  return (
-    <figure className="mt-10 grid gap-6 lg:grid-cols-[1fr_17.5rem] lg:items-start">
-      <div className="bg-card relative overflow-hidden rounded-xl border p-1.5 shadow-e5">
-        <div className="relative overflow-hidden rounded-lg border">
-          <video
-            key={src}
-            ref={ref}
-            className="block aspect-[8/5] w-full bg-[color:var(--muted)] object-cover"
-            muted
-            loop
-            playsInline
-            autoPlay={!reduced}
-            preload="metadata"
-            poster={poster}
-            aria-label="Screen recording of the Agent Sandbox dashboard: a GitHub automation starts a run, the agent stops to ask which fix to apply, the question is answered, and the run finishes with a pull request."
-            aria-describedby="demo-steps demo-note"
-            onPlay={() => setPlaying(true)}
-            onPause={() => setPlaying(false)}
-            onTimeUpdate={onTime}
-          >
-            <source src={`${src}.webm`} type="video/webm" />
-            <source src={`${src}.mp4`} type="video/mp4" />
-          </video>
-          {!playing && reduced && (
-            <button
-              type="button"
-              onClick={toggle}
-              className={cn(focusRing, "absolute inset-0 grid place-items-center bg-black/10 transition-colors duration-200 ease-out hover:bg-black/20")}
-              aria-label="Play the demo video"
-            >
-              <span className="bg-primary text-primary-foreground inline-flex h-11 items-center gap-2 rounded-full px-5 text-meta font-medium shadow-e5">
-                <Play className="size-4" aria-hidden /> Play the 30-second demo
-              </span>
-            </button>
-          )}
-          {(playing || !reduced) && (
-            <button
-              type="button"
-              onClick={toggle}
-              className={cn(focusRing, "bg-background/85 text-foreground absolute right-3 bottom-3 inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-micro font-medium backdrop-blur transition-colors duration-200 ease-out hover:bg-background")}
-              aria-label={playing ? "Pause the demo video" : "Play the demo video"}
-            >
-              {playing ? <Pause className="size-3.5" aria-hidden /> : <Play className="size-3.5" aria-hidden />}
-              {playing ? "Pause" : "Play"}
-            </button>
-          )}
-        </div>
-      </div>
-      <figcaption className="min-w-0">
-        <ol id="demo-steps" className="flex flex-col gap-2">
-          {DEMO_STEPS.map((d, i) => {
-            const on = playing && step === i;
-            return (
-              <li
-                key={d.title}
-                className={cn(
-                  "flex items-start gap-3 rounded-lg border px-3.5 py-3 transition-colors duration-200 ease-out",
-                  on ? (d.needsYou ? "border-attention/60 bg-attention/5" : "border-line-strong bg-muted/50") : "border-transparent"
-                )}
-              >
-                <span
-                  className={cn("mt-0.5 grid size-7 shrink-0 place-items-center rounded-md [&_svg]:size-3.5", d.needsYou ? "bg-attention/20 text-attention-text" : "bg-muted text-foreground")}
-                  aria-hidden
-                >
-                  {d.icon}
-                </span>
-                <span className="min-w-0">
-                  <span className="text-foreground flex items-baseline gap-2 text-meta font-semibold">
-                    <span className="stamp text-muted-foreground font-normal">{String(i + 1).padStart(2, "0")}</span>
-                    {d.title}
-                  </span>
-                  <span className="text-muted-foreground mt-0.5 block text-micro leading-relaxed">{d.body}</span>
-                </span>
-              </li>
-            );
-          })}
-        </ol>
-        <p id="demo-note" className="text-muted-foreground mt-4 border-t pt-3 text-micro leading-relaxed">
-          UI walkthrough: the real dashboard, driven with sample run data and sped up. The repo, timings and sizes on
-          screen are illustrative, not a measured result.
-        </p>
-      </figcaption>
-    </figure>
-  );
-}
-
-/* ───────────────────────────── hero matrix ───────────────────────────── */
-
-type Cell = "available" | "partial" | "planned";
-const SOURCES = [
-  { key: "anthropic", label: "Anthropic" },
-  { key: "openai", label: "OpenAI" },
-  { key: "openai-compatible", label: "OpenAI-compatible" },
-  { key: "local", label: "Local" },
-] as const;
-type Source = (typeof SOURCES)[number]["key"];
-/**
- * MIRROR of the server registry — the web bundle can't import src/drivers (node-only modules).
- * `modelSources` = each driver's capabilities.modelSources; `supervised` = the driver's stop-and-ask
- * gate is verified live (Codex and OpenCode ship "supervised: partial" until theirs are).
- * Provider kinds map onto sources via src/providers.ts SOURCE_OF (anthropic + ccproxy → Anthropic,
- * ollama → Local). Keep in sync when a driver changes.
- */
-const DRIVERS: Array<{ label: string; modelSources: Source[]; supervised: boolean; shipped: boolean }> = [
-  { label: "Claude Code", modelSources: ["anthropic"], supervised: true, shipped: true },
-  { label: "oh-my-pi", modelSources: ["anthropic"], supervised: true, shipped: true },
-  { label: "Codex CLI", modelSources: ["openai", "openai-compatible"], supervised: false, shipped: true },
-  { label: "OpenCode", modelSources: ["anthropic", "openai", "openai-compatible", "local"], supervised: false, shipped: true },
-  { label: "Gemini CLI", modelSources: [], supervised: false, shipped: false },
-];
-function cellOf(d: (typeof DRIVERS)[number], s: Source): Cell | null {
-  if (!d.shipped) return "planned";
-  if (!d.modelSources.includes(s)) return null;
-  return d.supervised ? "available" : "partial";
-}
-const CELL_LABEL: Record<Cell, string> = { available: "available", partial: "supervised: partial", planned: "planned" };
-
-function CellIcon({ cell }: { cell: Cell }) {
-  return cell === "available" ? <Check className="size-3 shrink-0" strokeWidth={3} aria-hidden /> : cell === "partial" ? <TriangleAlert className="size-3 shrink-0" aria-hidden /> : <Clock className="size-3 shrink-0" aria-hidden />;
-}
-
-function Matrix() {
-  return (
-    <div className="bg-card overflow-hidden rounded-xl border shadow-e5">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b px-4 py-3">
-        <span className="text-foreground text-meta font-medium">Drivers × model sources</span>
-        <span className="text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 text-micro sm:ml-auto">
-          <span className="inline-flex items-center gap-1"><Check className="text-ok size-3" strokeWidth={3} aria-hidden /> available</span>
-          <span className="inline-flex items-center gap-1"><TriangleAlert className="text-attention-text size-3" aria-hidden /> supervised: partial</span>
-          <span className="inline-flex items-center gap-1"><Clock className="size-3" aria-hidden /> planned</span>
-        </span>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[34rem] border-collapse text-meta">
-          <caption className="sr-only">Which coding agents run on which model sources today, and which are planned. An empty cell means that pairing is not supported.</caption>
-          <thead>
-            <tr>
-              <th scope="col" className="w-[7.5rem] px-3 py-2.5 text-left">
-                <span className="sr-only">Driver</span>
-              </th>
-              {SOURCES.map((c) => (
-                <th key={c.key} scope="col" className="text-muted-foreground px-1.5 py-2.5 text-left text-micro font-medium">
-                  {c.label}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {DRIVERS.map((d) => (
-              <tr key={d.label} className="border-t">
-                <th scope="row" className="text-foreground px-3 py-2 text-left font-medium whitespace-nowrap">
-                  {d.label}
-                </th>
-                {!d.shipped ? (
-                  <td colSpan={SOURCES.length} className="px-1.5 py-1.5">
-                    <span className="text-muted-foreground inline-flex h-7 w-full items-center gap-1.5 rounded-md border border-dashed px-2 text-micro">
-                      <CellIcon cell="planned" /> planned: driver not built yet
-                    </span>
-                  </td>
-                ) : (
-                  SOURCES.map((c) => {
-                    const cell = cellOf(d, c.key);
-                    return (
-                      <td key={c.key} className="px-1.5 py-1.5">
-                        {cell ? (
-                          <span
-                            className={cn(
-                              "inline-flex h-7 w-full items-center gap-1.5 rounded-md px-2 text-micro font-semibold whitespace-nowrap ring-1 ring-inset",
-                              cell === "available" && "bg-ok/10 text-ok ring-ok/25",
-                              cell === "partial" && "bg-attention/10 text-attention-text ring-attention/30"
-                            )}
-                          >
-                            <CellIcon cell={cell} />
-                            {cell === "partial" ? "partial" : CELL_LABEL[cell]}
-                            {cell === "partial" && <span className="sr-only"> (supervised: partial)</span>}
-                          </span>
-                        ) : (
-                          <span className="text-muted-foreground/60 flex h-7 items-center px-2 text-micro" aria-label="not supported">
-                            —
-                          </span>
-                        )}
-                      </td>
-                    );
-                  })
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <dl className="text-muted-foreground grid gap-x-6 gap-y-1.5 border-t px-4 py-3 text-micro sm:grid-cols-2">
-        <div>
-          <dt className="text-foreground inline font-medium">Every cell: </dt>
-          <dd className="inline">own microVM, any trigger, receipt.</dd>
-        </div>
-        <div>
-          <dt className="text-foreground inline font-medium">Partial: </dt>
-          <dd className="inline">stop-and-ask gate built, not yet verified live.</dd>
-        </div>
-      </dl>
     </div>
   );
 }
