@@ -91,10 +91,9 @@ export default function Landing() {
                 </Reveal>
                 <Reveal delay={0.1}>
                   <p className="text-foreground/85 mt-6 max-w-[50ch] text-[17px] leading-relaxed">
-                    Wake up to bugs fixed, tests green and pull requests ready for review. An error spike, a labelled issue or a
-                    nightly schedule starts the work on its own; Claude Code, Codex or OpenCode, on the model and account you
-                    choose, does it in a microVM of its own. The only thing it waits for is a decision that's yours, one
-                    tap on your phone. Every run ends in a receipt: what changed, what it verified, what it cost.
+                    Hand it a task, or let your tools hand it one: a new issue, a failing check, a nightly schedule. It picks up
+                    the work the moment it appears and brings back finished, tested changes ready to merge. You review the result
+                    instead of doing the work.
                   </p>
                 </Reveal>
                 <Reveal delay={0.15}>
