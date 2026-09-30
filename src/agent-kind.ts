@@ -9,17 +9,19 @@
  */
 import { allBlobs, hasUserStoreBackend, loadBlob, saveBlob, ownerKey } from "./user-store.js";
 
-export type AgentKind = "claude" | "omp";
+export type AgentKind = "claude" | "omp" | "codex" | "opencode";
 
-export const AGENT_KINDS: readonly AgentKind[] = ["claude", "omp"] as const;
+export const AGENT_KINDS: readonly AgentKind[] = ["claude", "omp", "codex", "opencode"] as const;
 
 export const AGENT_LABELS: Record<AgentKind, string> = {
   claude: "Claude Code",
   omp: "oh-my-pi",
+  codex: "Codex CLI",
+  opencode: "OpenCode",
 };
 
 export function isAgentKind(v: unknown): v is AgentKind {
-  return v === "claude" || v === "omp";
+  return v === "claude" || v === "omp" || v === "codex" || v === "opencode";
 }
 
 export interface AgentPrefs {

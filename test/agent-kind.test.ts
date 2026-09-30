@@ -25,7 +25,9 @@ test("isAgentKind accepts exactly the known kinds", () => {
   assert.equal(isAgentKind(""), false);
   assert.equal(isAgentKind(undefined), false);
   assert.equal(isAgentKind("omp; rm -rf /"), false);
-  assert.deepEqual(AGENT_KINDS, ["claude", "omp"]);
+  assert.equal(isAgentKind("codex"), true);
+  assert.equal(isAgentKind("opencode"), true);
+  assert.deepEqual(AGENT_KINDS, ["claude", "omp", "codex", "opencode"]);
 });
 
 test("normalizeAgentPrefs: defaults, accepts valid picks, rejects garbage", () => {

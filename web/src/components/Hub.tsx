@@ -24,6 +24,7 @@ import {
 import { toast } from "sonner";
 import { RepoPicker, type PickedRepo } from "@/components/RepoPicker";
 import { ModelChip, useModelChoice } from "@/components/thread/ModelPicker";
+import { AgentChip, useAgentChoice } from "@/components/DriverPicker";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Collapse } from "@/components/ui/collapse";
 import { StaggerItem } from "@/components/ui/swap";
@@ -247,6 +248,7 @@ export function Hub({
   const [picked, setPicked] = React.useState<PickedRepo[]>(() => stash?.picked ?? []);
   // Model for message 1 — the "new-task" scope key keeps it distinct from any box's sticky pick.
   const model = useModelChoice("new-task");
+  const agent = useAgentChoice();
   const [showRepo, setShowRepo] = React.useState(() => !!prefill.current?.wantsRepo);
   React.useEffect(() => writeDraft("hub", task), [task]);
   // Re-attach the source run's repositories: each checkout name is looked up across your accounts and
@@ -406,6 +408,8 @@ export function Hub({
         repos: picked.length ? picked.map((p) => ({ repo: p.repo, ref: p.ref || undefined })) : undefined,
         attachments: attached.length ? attached.map((i) => ({ name: i.name, dataUrl: i.dataUrl })) : undefined,
         ...(model.picked ? { model: model.picked } : {}),
+        // The agent chip shows "partial" before the pick is sent, so choosing it IS the acknowledgement.
+        ...(agent.picked ? { agent: agent.picked, ...(agent.current?.supervised === false ? { allowPartialSupervision: true } : {}) } : {}),
         ...(verifyActive ? { verify: verifyMode === "command" ? { command: verifyText.trim() } : { criterion: verifyText.trim() } } : {}),
       });
       if (res.ok) {
@@ -667,6 +671,7 @@ export function Hub({
                   <span className="hidden sm:inline">{picked.length ? "Add another repo" : "Attach repos"}</span>
                   <span className="sm:hidden">{picked.length ? "Add repo" : "Repos"}</span>
                 </button>
+                <AgentChip choices={agent.choices} current={agent.current} defaultId={agent.defaultId} onPick={agent.pick} />
                 <ModelChip current={model.current} models={model.models} defaultId={model.defaultId} onPick={model.pick} />
                 <button
                   type="button"

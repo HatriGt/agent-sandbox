@@ -250,10 +250,10 @@ export function registerTools(
             "e.g. ak-claude-haiku-4.5). Invalid values are rejected with the allowed list. Omit for the default."
         ),
       agent: z
-        .enum(["claude", "omp"])
+        .enum(["claude", "omp", "codex", "opencode"])
         .optional()
         .describe(
-          "Coding agent for this thread: claude (Claude Code, default) or omp (oh-my-pi). The pick " +
+          "Coding agent for this thread: claude (Claude Code, default), omp (oh-my-pi), codex (OpenAI Codex CLI) or opencode. The pick " +
             "is fixed for the thread's lifetime — every resume continues the same agent's session."
         ),
       githubAccount: z
@@ -319,7 +319,7 @@ export function registerTools(
       githubToken?: string;
       githubAccount?: string;
       model?: string;
-      agent?: "claude" | "omp";
+      agent?: "claude" | "omp" | "codex" | "opencode";
       verify?: { command?: string; criterion?: string };
       after?: string;
       carry?: "patch" | "none";

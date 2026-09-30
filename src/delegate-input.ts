@@ -15,6 +15,7 @@
  */
 
 import { isAgentKind, AGENT_KINDS, type AgentKind } from "./agent-kind.js";
+import { assertSelectable } from "./drivers/index.js";
 
 export type DelegateSource = "local" | "git";
 
@@ -50,6 +51,8 @@ export interface DelegateInput {
   model?: string;
   /** Coding agent for this thread: "claude" (default) or "omp". Validated here (closed enum). */
   agent?: string;
+  /** Explicit acknowledgement that the picked driver is "supervised: partial" (below the floor). */
+  allowPartialSupervision?: boolean;
 }
 
 /** A validated repo with a unique in-box directory name derived from the repo. */
@@ -167,6 +170,14 @@ export function validateDelegateInput(input: DelegateInput): DelegateValidation 
       ok: false,
       question: `Unknown agent '${input.agent}'. Pick one of: ${AGENT_KINDS.join(", ")}.`,
     };
+  }
+  // The supervision floor (plan §A): a driver a pending question cannot stop is never picked silently.
+  if (isAgentKind(input.agent)) {
+    try {
+      assertSelectable(input.agent, input.allowPartialSupervision === true);
+    } catch (e) {
+      return { ok: false, question: (e as Error).message };
+    }
   }
 
   const missing: string[] = [];

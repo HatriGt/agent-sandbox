@@ -683,6 +683,9 @@ export function agentEnvFlags(
   ];
   // Driver-specific env (e.g. omp's "smol" model role) — see each driver's envFlags.
   flags.push(...driver.envFlags(cfg));
+  // Non-Anthropic-native drivers (codex, opencode) read their model from $AGENT_MODEL (the launch
+  // passes it as -m only when set, so an unset model means the CLI's own default).
+  if (agent !== "claude" && agent !== "omp" && modelOverride) flags.push("-e", `AGENT_MODEL=${modelOverride}`);
   // GH_TOKEN drives the `gh` CLI; it's the access-resolved token for the FIRST repo's owner. Per-repo
   // pushes use the ~/.git-credentials entries (per-owner). There is NO default cfg.ghToken fallback —
   // if nothing resolved, `gh` gets no token and the agent must ask for one (ask-then-resume).
@@ -805,7 +808,8 @@ function cpuFlags(cfg: Config): string[] {
  * every box can run.
  */
 export function boxAgentKindFrom(stdout: string): AgentKind {
-  return stdout.trim() === "omp" ? "omp" : "claude";
+  const k = stdout.trim();
+  return k === "omp" || k === "codex" || k === "opencode" ? k : "claude";
 }
 
 /** Read the thread's agent kind from the box; claude when unreadable (older boxes, probe failure). */

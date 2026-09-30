@@ -13,8 +13,9 @@
  * thread can side-ask while they work (the lane itself always runs Claude Code).
  */
 import type { Config } from "../config.js";
+import type { AgentKind } from "../agent-kind.js";
 
-export type DriverKind = "claude" | "omp";
+export type DriverKind = AgentKind;
 
 /** Where a driver can get a model from; matches the provider kinds in src/providers.ts. */
 export type ModelSource = "anthropic" | "openai" | "openai-compatible" | "local";

@@ -42,9 +42,30 @@ export interface BoxView {
 }
 
 /** Default coding agent for new threads (Claude Code vs oh-my-pi). */
+export type AgentId = "claude" | "omp" | "codex" | "opencode";
+
+/** What a driver can actually do (src/drivers/types.ts) — shown as badges, never overstated. */
+export interface DriverCapabilities {
+  gate: "hook" | "wrapper" | "none";
+  sideQuestion: boolean;
+  planEvents: boolean;
+  resume: boolean;
+  modelSources: string[];
+  caveat?: string;
+}
+
+export interface AgentChoice {
+  id: AgentId;
+  label: string;
+  capabilities?: DriverCapabilities;
+  /** false → below the supervision floor: badge "supervised: partial". */
+  supervised?: boolean;
+}
+
+/** Default coding agent for new threads. */
 export interface AgentPrefs {
-  defaultAgent: "claude" | "omp";
-  agents: { id: "claude" | "omp"; label: string }[];
+  defaultAgent: AgentId;
+  agents: AgentChoice[];
 }
 
 export interface RepoInfo {
@@ -670,7 +691,9 @@ export const api = {
     attachments?: { name: string; dataUrl: string }[];
     model?: string;
     /** Coding agent for the new thread; omit to use the stored default. */
-    agent?: "claude" | "omp";
+    agent?: AgentId;
+    /** Sent only after the user saw the "supervised: partial" badge for a below-floor driver. */
+    allowPartialSupervision?: boolean;
     /** Exactly one key: a command run in the sandbox after the run, or a criterion a read-only checker judges. */
     verify?: { command: string } | { criterion: string };
   }) =>
@@ -701,8 +724,8 @@ export const api = {
   /** Default coding agent for new threads (Claude Code vs oh-my-pi). */
   agentPrefs: (signal?: AbortSignal) =>
     fetch(url("/agent-prefs.json"), { headers: authHeaders, signal }).then(parse<AgentPrefs>),
-  saveAgentPrefs: (defaultAgent: "claude" | "omp") =>
-    post<AgentPrefs>("/agent-prefs.json", { defaultAgent }),
+  saveAgentPrefs: (defaultAgent: AgentId, allowPartialSupervision?: boolean) =>
+    post<AgentPrefs>("/agent-prefs.json", { defaultAgent, ...(allowPartialSupervision ? { allowPartialSupervision } : {}) }),
 
   /** Walk-away notifications: the caller's webhook and per-event toggles. */
   notifySettings: (signal?: AbortSignal) =>

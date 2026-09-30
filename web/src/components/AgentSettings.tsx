@@ -2,6 +2,7 @@ import * as React from "react";
 import { Check, Loader2, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { api, type AgentPrefs } from "@/lib/api";
+import { DriverBadges } from "@/components/DriverPicker";
 import { Button } from "@/components/ui/button";
 import { SettingsSection } from "@/components/ui/settings";
 import { Swap } from "@/components/ui/swap";
@@ -13,7 +14,9 @@ type AgentId = AgentPrefs["defaultAgent"];
 const FACTORY: AgentId = "claude";
 const DESC: Record<AgentId, string> = {
   claude: "Anthropic's Claude Code CLI — question-pausing and the full toolset.",
-  omp: "oh-my-pi — a batteries-included pi fork (LSP, debugger, kernels). Beta: questions don't hard-pause the run yet.",
+  omp: "oh-my-pi — a batteries-included pi fork (LSP, debugger, kernels).",
+  codex: "OpenAI's Codex CLI — runs on OpenAI or OpenAI-compatible models.",
+  opencode: "OpenCode — open-source agent that runs on any provider, including local models.",
 };
 
 /**
@@ -38,7 +41,8 @@ export function AgentSettings() {
     if (!prefs || prefs.defaultAgent === id || busy) return;
     setBusy(id);
     try {
-      setPrefs(await api.saveAgentPrefs(id));
+      const choice = prefs.agents.find((a) => a.id === id);
+      setPrefs(await api.saveAgentPrefs(id, choice?.supervised === false));
       setSaved(true);
       window.setTimeout(() => setSaved(false), 1500);
     } catch (e) {
@@ -102,9 +106,11 @@ export function AgentSettings() {
                     <span className="text-foreground flex flex-wrap items-center gap-2 text-meta font-medium">
                       {a.label}
                       {a.id === FACTORY && <span className="text-faint text-micro font-normal">default</span>}
-                      {a.id === "omp" && <span className="border-line-strong text-muted-foreground rounded-full border px-1.5 py-px text-micro font-normal">beta</span>}
+                      {a.id !== "claude" && <span className="border-line-strong text-muted-foreground rounded-full border px-1.5 py-px text-micro font-normal">beta</span>}
                     </span>
                     <span className="text-muted-foreground mt-0.5 block text-micro">{DESC[a.id] ?? ""}</span>
+                    <span className="mt-1.5 block"><DriverBadges choice={a} /></span>
+                    {a.capabilities?.caveat && <span className="text-faint mt-1 block text-micro">{a.capabilities.caveat}</span>}
                   </span>
                 </button>
               );

@@ -39,6 +39,7 @@ import { verifyPlanOf, type VerifyPlan, type VerifyResult } from "./verify.js";
 import { parseTrace } from "./trace.js";
 import { loadNotifySettings, normalizeNotifySettings, saveNotifySettings } from "./notify-store.js";
 import { AGENT_KINDS, AGENT_LABELS, isAgentKind, loadAgentPrefs, normalizeAgentPrefs, saveAgentPrefs } from "./agent-kind.js";
+import { assertSelectable, listDrivers } from "./drivers/index.js";
 import { requestSessions, createLocalUser, deleteUser, listUsers, ownerOf, setUserRole, validateSignup, createPasswordUser, authenticatePassword, setPassword, updateProfile, verifyPassword, PASSWORD_MIN, listSessions, revokeSession, revokeOtherSessions, startTrial, planOf, setPlan, TrialExpiredError } from "./identity.js";
 import { parseStore } from "./gh-token-store.js";
 import { seedStarterSkills } from "./starter-skills.js";
@@ -1749,12 +1750,16 @@ app.post("/mcp-servers/test.json", async (req: Request, res: Response) => {
 // Default coding agent (Claude Code vs oh-my-pi): per-owner encrypted blob, same pattern as the
 // notify settings. The pick applies to NEW threads only; a running thread keeps the agent it
 // started on (the box's .agent.kind mark is the per-thread truth).
+/** The agent picker's choices: each driver with its capability badges and supervision floor. */
+function agentChoices() {
+  return listDrivers().map((d) => ({ id: d.kind, label: d.label, capabilities: d.capabilities, supervised: d.supervised }));
+}
 app.get("/agent-prefs.json", (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   const p = principalOf(res);
   res.json({
     ...loadAgentPrefs(p.kind === "user" ? p.userId : OPERATOR_OWNER),
-    agents: AGENT_KINDS.map((id) => ({ id, label: AGENT_LABELS[id] })),
+    agents: agentChoices(),
   });
 });
 app.post("/agent-prefs.json", (req: Request, res: Response) => {
@@ -1762,11 +1767,12 @@ app.post("/agent-prefs.json", (req: Request, res: Response) => {
   const p = principalOf(res);
   try {
     const prefs = normalizeAgentPrefs(req.body ?? {});
+    assertSelectable(prefs.defaultAgent, (req.body as { allowPartialSupervision?: unknown } | undefined)?.allowPartialSupervision === true);
     saveAgentPrefs(prefs, p.kind === "user" ? p.userId : OPERATOR_OWNER);
     // The pool follows this setting (only the picked agent's flavor stays warm) — reconcile now
     // instead of waiting for the maintainer tick, so the first task after switching is warm too.
     void refillPool(cfg);
-    res.json({ ...prefs, agents: AGENT_KINDS.map((id) => ({ id, label: AGENT_LABELS[id] })) });
+    res.json({ ...prefs, agents: agentChoices() });
   } catch (e) {
     res.status(400).json({ error: clientError(e) });
   }
