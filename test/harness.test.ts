@@ -8,7 +8,10 @@ import {
   applyHarness,
   approveHarness,
   buildHarnessBundle,
+  BUILTIN_HARNESSES,
+  deleteHarness,
   duplicateHarness,
+  ensureDefaultHarnesses,
   getHarness,
   HARNESS_LIMITS,
   loadHarnesses,
@@ -188,4 +191,38 @@ test("triggers accept a harness id and reject malformed ones", () => {
   assert.ok(ok.ok, JSON.stringify(ok));
   assert.equal(ok.ok && ok.trigger.harnessId, "hrn_abcdefgh");
   assert.equal(normalizeTrigger({ ...base, harnessId: "bad id" }).ok, false);
+});
+
+test("built-ins: seeded once per owner, idempotent, deletion hides, edits kept, restore, cap respected", () => {
+  setup();
+  assert.equal(ensureDefaultHarnesses("n1"), BUILTIN_HARNESSES.length);
+  assert.equal(ensureDefaultHarnesses("n1"), 0);
+  const list = loadHarnesses("n1");
+  assert.equal(list.length, BUILTIN_HARNESSES.length);
+  assert.ok(list.every((h) => h.builtin && h.id.startsWith("hrn_builtin-") && !h.needsReview));
+  assert.ok(list.find((h) => h.builtin === "incident-responder")!.rules.askBeforeGuess);
+  // Built-ins pass the same gates as any harness and bring no provider/model of their own.
+  const bug = getHarness("hrn_builtin-bug-fixer", "n1")!;
+  const r = applyHarness(bug, { task: "fix it" });
+  assert.deepEqual(r.applied.sort(), ["rules", "verify"]);
+  assert.match(String(r.body.task), /test that fails/);
+  // Edit in place keeps the built-in tag; a duplicate is custom.
+  const edited = upsertHarness({ ...bug, name: "My bug fixer" }, bug.id, "n1");
+  assert.equal(edited.builtin, "bug-fixer");
+  assert.equal(duplicateHarness(bug.id, "n1")!.builtin, undefined);
+  ensureDefaultHarnesses("n1");
+  assert.equal(getHarness(bug.id, "n1")!.name, "My bug fixer");
+  // Delete hides it; later reads never bring it back, restore does (without touching edits).
+  assert.ok(deleteHarness("hrn_builtin-code-reviewer", "n1"));
+  assert.equal(ensureDefaultHarnesses("n1"), 0);
+  assert.equal(getHarness("hrn_builtin-code-reviewer", "n1"), undefined);
+  assert.equal(ensureDefaultHarnesses("n1", { restore: true }), 1);
+  assert.equal(getHarness(bug.id, "n1")!.name, "My bug fixer");
+  // An existing account at the cap: nothing forced in; seeded once there is room.
+  for (let i = 0; i < HARNESS_LIMITS.maxHarnesses; i++) upsertHarness({ name: `C${i}`, rules: {} }, undefined, "full");
+  assert.equal(ensureDefaultHarnesses("full"), 0);
+  deleteHarness(loadHarnesses("full")[0].id, "full");
+  assert.equal(ensureDefaultHarnesses("full"), 1);
+  // A built-in id reaching the delegate path seeds lazily (e.g. the token-mode operator).
+  assert.equal(getHarness("hrn_builtin-test-writer", "operator")?.builtin, "test-writer");
 });

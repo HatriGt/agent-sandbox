@@ -39,7 +39,8 @@ export const HARNESS_VERSION = 1;
 export const HARNESSES_KIND = "harnesses";
 
 export const HARNESS_LIMITS = {
-  maxHarnesses: 30,
+  /** Includes the seeded built-ins (BUILTIN_HARNESSES). */
+  maxHarnesses: 40,
   maxName: 60,
   maxDescription: 300,
   maxRulesMd: 16_384,
@@ -85,6 +86,8 @@ export interface HarnessDef {
   /** An imported provider ref that matched none of the owner's providers (UI prompt to connect one). */
   unresolvedProvider?: ExportedProviderRef;
   origin?: HarnessOrigin;
+  /** Seeded from BUILTIN_HARNESSES (its key). Editable in place; deleting hides it (see seeding). */
+  builtin?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -184,6 +187,7 @@ export function normalizeHarness(input: unknown, existing?: HarnessDef, now = Da
   if (existing?.needsReview) def.needsReview = true;
   if (existing?.unresolvedProvider && !providerId) def.unresolvedProvider = existing.unresolvedProvider;
   if (existing?.origin) def.origin = existing.origin;
+  if (existing?.builtin) def.builtin = existing.builtin;
   return def;
 }
 
@@ -268,12 +272,20 @@ export function applyHarness(h: HarnessDef, body: HarnessableBody): { body: Harn
 /* ───────────────────────────── store ───────────────────────────── */
 
 export function parseHarnessStore(raw: string | null): Record<string, HarnessDef> {
-  if (!raw) return {};
+  return parseStoreFull(raw).harnesses;
+}
+
+/** The blob also records which built-ins were ever seeded, so a deleted one stays deleted. */
+function parseStoreFull(raw: string | null): { harnesses: Record<string, HarnessDef>; seeded: string[] } {
+  if (!raw) return { harnesses: {}, seeded: [] };
   try {
-    const j = JSON.parse(raw) as { harnesses?: Record<string, HarnessDef> };
-    return j && typeof j.harnesses === "object" && j.harnesses ? { ...j.harnesses } : {};
+    const j = JSON.parse(raw) as { harnesses?: Record<string, HarnessDef>; seeded?: unknown };
+    return {
+      harnesses: j && typeof j.harnesses === "object" && j.harnesses ? { ...j.harnesses } : {},
+      seeded: Array.isArray(j?.seeded) ? j.seeded.filter((x): x is string => typeof x === "string") : [],
+    };
   } catch {
-    return {};
+    return { harnesses: {}, seeded: [] };
   }
 }
 
@@ -282,12 +294,15 @@ export function loadHarnesses(owner = ownerKey()): HarnessDef[] {
 }
 
 export function getHarness(id: string, owner = ownerKey()): HarnessDef | undefined {
+  // A built-in id may reach the delegate route (API, trigger) before the list was ever loaded.
+  if (id.startsWith(BUILTIN_ID_PREFIX)) ensureDefaultHarnesses(owner);
   return parseHarnessStore(loadBlob(HARNESSES_KIND, owner))[id];
 }
 
-function saveAll(all: Record<string, HarnessDef>, owner: string): void {
+function saveAll(all: Record<string, HarnessDef>, owner: string, seeded?: string[]): void {
   if (Object.keys(all).length > HARNESS_LIMITS.maxHarnesses) throw new Error(`At most ${HARNESS_LIMITS.maxHarnesses} saved harnesses.`);
-  saveBlob(HARNESSES_KIND, JSON.stringify({ harnesses: all }), owner);
+  const keep = seeded ?? parseStoreFull(loadBlob(HARNESSES_KIND, owner)).seeded;
+  saveBlob(HARNESSES_KIND, JSON.stringify({ harnesses: all, ...(keep.length ? { seeded: keep } : {}) }), owner);
 }
 
 /** Create (no id) or update (id) from form input. Review state and origin are preserved, never set. */
@@ -335,10 +350,154 @@ export function duplicateHarness(id: string, owner = ownerKey()): HarnessDef | u
   let name = `${h.name} copy`.slice(0, HARNESS_LIMITS.maxName);
   for (let n = 2; names.has(name); n++) name = `${h.name} copy ${n}`.slice(0, HARNESS_LIMITS.maxName);
   const now = Date.now();
-  const copy: HarnessDef = { ...structuredClone(h), id: `hrn_${randomUUID().slice(0, 12)}`, name, createdAt: now, updatedAt: now, origin: { kind: "duplicate", source: h.name, at: now } };
+  const { builtin: _builtin, ...rest } = structuredClone(h);
+  const copy: HarnessDef = { ...rest, id: `hrn_${randomUUID().slice(0, 12)}`, name, createdAt: now, updatedAt: now, origin: { kind: "duplicate", source: h.name, at: now } };
   all[copy.id] = copy;
   saveAll(all, owner);
   return copy;
+}
+
+/* ───────────────────────────── built-ins ───────────────────────────── */
+
+/**
+ * Best-practice starting points every owner gets. Only fields the schema already has are used;
+ * driver, provider/model, budget and egress are left to the owner's defaults (nothing guessed).
+ * verifyOnDone without a command means the controller's criterion check (see applyHarness).
+ */
+export interface BuiltinHarness {
+  key: string;
+  name: string;
+  description: string;
+  rules: HarnessRules;
+  rulesMd: string;
+}
+
+export const BUILTIN_ID_PREFIX = "hrn_builtin-";
+
+export const BUILTIN_HARNESSES: readonly BuiltinHarness[] = [
+  {
+    key: "bug-fixer",
+    name: "Bug fixer",
+    description: "Reproduce the bug, pin it with a failing test, fix it, run the suite, open a PR.",
+    rules: { askBeforeGuess: true, planFirst: false, verifyOnDone: true },
+    rulesMd: [
+      "1. Reproduce the bug first and note the exact steps or command.",
+      "2. Write a test that fails because of the bug, and run it to see it fail.",
+      "3. Make the smallest change that makes that test pass. Fix the cause, not the symptom.",
+      "4. Run the full test suite (and typecheck/lint if the repo has them).",
+      "5. Open a pull request that states the cause, the fix and the new test.",
+      "If you cannot reproduce it, stop and report what you tried instead of guessing a fix.",
+    ].join("\n"),
+  },
+  {
+    key: "feature-builder",
+    name: "Feature builder",
+    description: "Plan first, ask when the request is ambiguous, add tests, open a PR.",
+    rules: { askBeforeGuess: true, planFirst: true, verifyOnDone: true },
+    rulesMd: [
+      "- Read the surrounding code and follow its existing patterns and style.",
+      "- Keep the change scoped to the request; list follow-ups instead of doing them.",
+      "- Add or update tests that cover the new behaviour.",
+      "- Run the tests, then open a pull request describing what changed and how to try it.",
+    ].join("\n"),
+  },
+  {
+    key: "code-reviewer",
+    name: "Code reviewer",
+    description: "Read-only review: findings as comments, no code changes.",
+    rules: { askBeforeGuess: false, planFirst: false, verifyOnDone: false },
+    rulesMd: [
+      "- This is a review. Do not edit, commit or push any files.",
+      "- Look for correctness bugs first, then security, then error handling, then clarity.",
+      "- Report each finding with file:line, why it matters and a suggested fix.",
+      "- Mark each finding as blocking or a nit. Say plainly when you found nothing serious.",
+      "- If you were given a pull request, leave the findings as review comments on it.",
+    ].join("\n"),
+  },
+  {
+    key: "test-writer",
+    name: "Test writer",
+    description: "Raise test coverage with the repo's existing test framework. No source changes.",
+    rules: { askBeforeGuess: false, planFirst: true, verifyOnDone: true },
+    rulesMd: [
+      "- Only add or change test files. Do not modify source code.",
+      "- Use the test framework and conventions the repo already has.",
+      "- Prefer tests of real behaviour and edge cases over tests of implementation details.",
+      "- If a test exposes a real bug, mark it skipped or expected-to-fail and report the bug.",
+      "- Run the suite; every new test must pass (or be the reported bug). Open a pull request.",
+    ].join("\n"),
+  },
+  {
+    key: "dependency-upgrader",
+    name: "Dependency upgrader",
+    description: "Upgrade dependencies in small steps, read changelogs, keep the build and tests green.",
+    rules: { askBeforeGuess: true, planFirst: true, verifyOnDone: true },
+    rulesMd: [
+      "- Use the repo's own package manager and keep the lockfile in sync.",
+      "- Upgrade one dependency (or one tightly coupled group) at a time.",
+      "- Read the changelog for every major version jump and apply the required migrations.",
+      "- Build and run the tests after each step; if one breaks and the fix is not clear, leave it and report why.",
+      "- Open a pull request listing each package's old and new version and any breaking changes handled.",
+    ].join("\n"),
+  },
+  {
+    key: "docs-changelog",
+    name: "Docs & changelog",
+    description: "Bring README, docs and the changelog in line with the code. No behaviour changes.",
+    rules: { askBeforeGuess: false, planFirst: false, verifyOnDone: true },
+    rulesMd: [
+      "- Only change documentation, comments and the changelog; do not change behaviour.",
+      "- Describe what the code does now; check every command and example you write.",
+      "- Follow the changelog's existing format and add entries under Unreleased.",
+      "- Open a pull request.",
+    ].join("\n"),
+  },
+  {
+    key: "incident-responder",
+    name: "Incident responder",
+    description: "For alert webhooks: find the breaking change, prepare a minimal fix or a revert, ask before choosing.",
+    rules: { askBeforeGuess: true, planFirst: false, verifyOnDone: true },
+    rulesMd: [
+      "1. Read the alert payload and logs; state the symptom and when it started.",
+      "2. Find the change that caused it (recent commits and deploys; git bisect with a reproducing check).",
+      "3. Prepare two options: a minimal forward fix, and a revert of the offending change.",
+      "4. Ask the operator which one to ship before opening a pull request. Never deploy or push to the default branch.",
+      "5. In the pull request, include the timeline, the root cause and how you verified the fix.",
+    ].join("\n"),
+  },
+];
+
+export function builtinHarnessDef(b: BuiltinHarness, now = Date.now()): HarnessDef {
+  const def = normalizeHarness({ id: `${BUILTIN_ID_PREFIX}${b.key}`, name: b.name, description: b.description, rules: b.rules, rulesMd: b.rulesMd }, undefined, now);
+  def.builtin = b.key;
+  return def;
+}
+
+/**
+ * Give an owner every built-in they have not had yet — new accounts, existing accounts and the
+ * token-mode operator alike, on first read. Idempotent: each built-in is seeded once per owner, so
+ * deleting one hides it for good (until `restore`), and edits are never overwritten. Never pushes an
+ * owner over the harness cap (a skipped one is retried when there is room). Returns how many were added.
+ */
+export function ensureDefaultHarnesses(owner = ownerKey(), opts: { restore?: boolean } = {}): number {
+  const { harnesses: all, seeded } = parseStoreFull(loadBlob(HARNESSES_KIND, owner));
+  const done = new Set(opts.restore ? [] : seeded);
+  const now = Date.now();
+  let added = 0;
+  let changed = false;
+  for (const b of BUILTIN_HARNESSES) {
+    if (done.has(b.key)) continue;
+    const id = `${BUILTIN_ID_PREFIX}${b.key}`;
+    if (!all[id]) {
+      if (Object.keys(all).length >= HARNESS_LIMITS.maxHarnesses) continue;
+      all[id] = builtinHarnessDef(b, now);
+      added++;
+    }
+    done.add(b.key);
+    changed = true;
+  }
+  if (changed) saveAll(all, owner, [...new Set([...seeded, ...done])].sort());
+  return added;
 }
 
 /* ───────────────────────────── bundles ───────────────────────────── */
