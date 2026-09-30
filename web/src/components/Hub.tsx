@@ -33,6 +33,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Collapse } from "@/components/ui/collapse";
 import { StaggerItem } from "@/components/ui/swap";
 import { api, type BoxView, type FleetLifecycle } from "@/lib/api";
+import { intakeApi, isUnfurlable } from "@/lib/intake-api";
 import { fmtAgo, friendlyName, shortName, threadSort, threadTitle } from "@/lib/format";
 import { readDraft, takePrefill, writeDraft } from "@/lib/draft";
 import { STARTERS as STARTER_DEFS, mergeStarterText, type StarterDef } from "@/lib/starters";
@@ -544,6 +545,20 @@ export function Hub({
               if (files.length) {
                 e.preventDefault();
                 addImages(files);
+                return;
+              }
+              // A lone GitHub / Sentry issue link into an empty composer: let the link land, fetch the
+              // issue server-side (CSP: connect-src 'self'), and swap it for title + body if the
+              // person has not typed over it meanwhile.
+              const pasted = e.clipboardData?.getData("text/plain")?.trim() ?? "";
+              if (!task.trim() && isUnfurlable(pasted)) {
+                intakeApi.unfurl(pasted).then(
+                  (u) => {
+                    setTask((prev) => (prev.trim() === pasted ? u.task : prev));
+                    toast.success(`Filled from ${u.source === "github" ? "GitHub" : "Sentry"}: ${u.title}`);
+                  },
+                  () => {}
+                );
               }
             }}
             onDragEnter={(e) => {

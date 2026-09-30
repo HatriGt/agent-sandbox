@@ -268,7 +268,7 @@ export function advanceNextFire(db: Db, id: string, now = Date.now()): void {
 
 export type DeliveryOutcome = "fired" | "skipped" | "rejected" | "failed";
 /** Why a delivery didn't fire, in one word the UI can badge. */
-export type DeliveryReason = "cooldown" | "disabled" | "limit" | "dedupe" | "ignored" | "signature" | "payload" | "error";
+export type DeliveryReason = "cooldown" | "disabled" | "limit" | "dedupe" | "ignored" | "signature" | "payload" | "error" | "sender" | "asked";
 
 export interface DeliveryEntry {
   id: number;

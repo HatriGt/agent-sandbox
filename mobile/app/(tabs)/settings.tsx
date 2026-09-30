@@ -88,6 +88,7 @@ export default function Settings() {
 
         {isUser && <RowLink title="Account" icon="user" hint="Name, email, password" onPress={() => router.push("/settings/account")} />}
         <RowLink title="Automations" icon="repeat" hint="Scheduled and event runs — pause or run now" onPress={() => router.push("/automations")} />
+        <RowLink title="Inbox" icon="inbox" hint="Start runs from email and Slack" onPress={() => router.push("/settings/inbox")} />
         <RowLink title="GitHub accounts" icon="github" hint="Tokens the agent clones and pushes with" onPress={() => router.push("/settings/accounts")} />
         <RowLink title="MCP servers" icon="tool" hint="Extra tools every sandbox gets" onPress={() => router.push("/settings/mcp")} />
         <RowLink title="Repo setup" icon="package" hint="How each repo installs and tests, learned once" onPress={() => router.push("/settings/repo-setup")} />

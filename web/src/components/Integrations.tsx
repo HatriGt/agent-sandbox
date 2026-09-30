@@ -4,6 +4,7 @@ import { Accounts } from "@/components/Accounts";
 import { McpServers } from "@/components/McpServers";
 import { Providers } from "@/components/Providers";
 import { RepoSetup } from "@/components/RepoSetup";
+import { InboxIntake } from "@/components/InboxIntake";
 
 /**
  * Integrations: what every sandbox is given — GitHub identities and MCP servers. One column, two
@@ -24,6 +25,7 @@ export function Integrations({ onBack }: { onBack: () => void }) {
       </SettingsSection>
       <McpServers />
       <RepoSetup />
+      <InboxIntake />
     </SettingsPage>
   );
 }

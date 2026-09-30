@@ -109,6 +109,7 @@ import { followupsForBox } from "./pr-followup-store.js";
 import { followupLine, normalizePrefs, type FollowupPrefs } from "./pr-followups.js";
 import { hookAuditPath, hookBodyParser, registerTriggerRoutes } from "./trigger-routes.js";
 import { getTriggerById, logDelivery, pruneDeliveries, type TriggerRow } from "./trigger-store.js";
+import { intakeBodyParser, registerIntakeRoutes } from "./intake-routes.js";
 import { candidateAccounts } from "./gh-token-store.js";
 import { applyHarness, getHarness, loadHarnesses, normalizeEgress, HARNESS_LIMITS, type HarnessDef } from "./harness.js";
 import { reservedBoxes } from "./capacity.js";
@@ -3142,6 +3143,42 @@ registerTriggerRoutes(app, {
   redact: (s) => redactor.redact(s),
   publicUrl: cfg.publicUrl,
   audit: auditTrigger,
+});
+// Intake (src/intake-routes.ts): email / Slack / pasted links start runs as the owner, through the
+// same runDelegateFlow as the composer. User-initiated, so no PR-only guard (unlike an automation).
+registerIntakeRoutes(app, {
+  db,
+  box: secretBox,
+  dashAuthed,
+  principalOf,
+  failWith,
+  publicUrl: cfg.publicUrl,
+  audit: auditTrigger,
+  // Only a GitHub-sourced address is verified; a password signup's email was never proven, so it
+  // must be added to the allowlist explicitly.
+  ownerEmail: (owner) => {
+    if (owner === OPERATOR_OWNER) return null;
+    const u = getUser(db, owner);
+    return u?.github_id ? u.email ?? null : null;
+  },
+  listRepos: (owner) => withOwner(owner, () => listRepos()),
+  githubToken: (owner, repo) => withOwner(owner, async () => candidateAccounts(await loadStore(cfg), repo)[0]?.token),
+  startRun: (owner, input) =>
+    withOwner(owner, () =>
+      withStartedBy(input.startedBy, async () => {
+        const r = await runDelegateFlow(cfg, deps, {
+          agent: loadAgentPrefs(owner).defaultAgent,
+          source: "git",
+          ...(input.repo ? { repo: input.repo } : {}),
+          task: input.task,
+          ...(input.attachments?.length ? { attachments: input.attachments } : {}),
+          detach: true,
+        });
+        if (!r.ok) return { ok: false as const, question: r.question };
+        void generateTitle(cfg, r.box, input.task).catch(() => {});
+        return { ok: true as const, box: r.box };
+      })
+    ),
 });
 // Harnesses (src/harness.ts): definitions per owner, bundles, compares. The per-box skill selection
 // a harness sets is made durable through run_harness so a resume installs the same skills.
