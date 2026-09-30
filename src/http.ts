@@ -34,7 +34,7 @@ import { allBlobs, ownerKey, registerUserStoreBackend, withOwner, OPERATOR_OWNER
 import { detectTransitions, formatNotification, makeNotifier, type BoxRunView, type NotifyEvent } from "./notify.js";
 import { fetchPinned } from "./net-guard.js";
 import { buildDigest } from "./digest.js";
-import { archiveRun, deleteRun, getRun, listActivity, listRuns, pruneArchive } from "./run-archive.js";
+import { archiveRun, deleteRun, getRun, listActivity, listRuns, pruneArchive, ledgerTotals, listLedger, type LedgerFilter } from "./run-archive.js";
 import { verifyPlanOf, type VerifyPlan, type VerifyResult } from "./verify.js";
 import { parseTrace } from "./trace.js";
 import { loadNotifySettings, normalizeNotifySettings, saveNotifySettings } from "./notify-store.js";
@@ -78,6 +78,11 @@ import { listChanges, readDiff, readFullDiff, fetchPull, fetchPullDetail, forget
 import { loadRunMetas, saveRunMeta, forgetRunMeta } from "./run-memory.js";
 import { readArtifact } from "./artifact.js";
 import { existsSync } from "node:fs";
+import { withStartedBy, currentStartedBy, recordStartedBy, startedByOf } from "./started-by.js";
+import { makeDispatcher } from "./trigger-dispatch.js";
+import { hookAuditPath, hookBodyParser, registerTriggerRoutes } from "./trigger-routes.js";
+import { pruneDeliveries } from "./trigger-store.js";
+import { candidateAccounts } from "./gh-token-store.js";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -96,7 +101,8 @@ if (!cfg.httpToken) {
 const db = openDb(cfg.dataDir);
 // Integrations (GitHub accounts, MCP servers) are per owner and encrypted at rest from here on. The
 // operator's row is seeded from the legacy shared files on first read.
-registerUserStoreBackend({ db, box: makeSecretBox(keyFromEnvOrFile(process.env.SECRETS_KEY, cfg.dataDir)) });
+const secretBox = makeSecretBox(keyFromEnvOrFile(process.env.SECRETS_KEY, cfg.dataDir));
+registerUserStoreBackend({ db, box: secretBox });
 const ownership = makeOwnership(db, cfg);
 const deps = guardDeps(rawDeps, ownership);
 const SAAS = cfg.authMode === "saas";
@@ -128,7 +134,9 @@ const jsonLarge = express.json({ limit: "96mb" }); // /file.json (≤8 MB file a
 // can't interpret. 16 MB bounds it without opening the firehose the file/image routes need.
 const jsonMcp = express.json({ limit: "16mb" });
 app.use((req: Request, res: Response, next) =>
-  (req.path === "/file.json" || req.path === "/delegate.json"
+  (req.path.startsWith("/hooks/")
+    ? hookBodyParser // raw bytes, 512 KB cap: the GitHub HMAC is over the exact body
+    : req.path === "/file.json" || req.path === "/delegate.json"
     ? jsonLarge
     : req.path === "/mcp" || req.path.startsWith("/mcp/") || req.path === "/skills.json"
     ? jsonMcp // a multi-file skill upsert (scripts + docs) can be a few MB
@@ -198,7 +206,9 @@ app.use((req: Request, res: Response, next) => {
 // machines or hammer sign-in faster than that. Reads are unlimited; /mcp has its own transport.
 const mutationLimiter = makeRateLimiter({ limit: Number(process.env.RATE_LIMIT_PER_MIN ?? "60") || 60, windowMs: 60_000 });
 app.use((req: Request, res: Response, next) => {
-  if (!MUTATING.has(req.method) || req.path === "/mcp" || req.path.startsWith("/mcp/")) return next();
+  // /hooks/ has its own per-trigger limiter (trigger-routes.ts): GitHub delivers every tenant's
+  // events from a shared pool of addresses, so a per-IP anonymous cap would throttle them all together.
+  if (!MUTATING.has(req.method) || req.path === "/mcp" || req.path.startsWith("/mcp/") || req.path.startsWith("/hooks/")) return next();
   const p = res.locals.principal as Principal | null;
   const key = p ? (p.kind === "user" ? p.userId : "operator") : `anon:${clientOf(req.headers, req.socket.remoteAddress)}`;
   if (mutationLimiter.over(key)) {
@@ -219,7 +229,8 @@ app.use((req: Request, res: Response, next) => {
       at: new Date(started).toISOString(),
       client: clientOf(req.headers, req.socket.remoteAddress),
       method: req.method,
-      path: req.path,
+      // The webhook secret is a path segment — never let it reach a log line or an audit row.
+      path: hookAuditPath(req.path),
       status: res.statusCode,
       ms: Date.now() - started,
       ...auditFields(req.body, req.query),
@@ -358,7 +369,15 @@ const boxVerified = new Map<string, VerifyResult>();
       const max = (p.kind === "user" && getUser(db, p.userId)?.max_boxes) || cfg.userMaxBoxes;
       ownership.assertQuota(ownership.liveOwned((await readFleet()).boxes), max);
     }
-    return rawRun(c, plan, allowDomains, creds, interact);
+    const r = await rawRun(c, plan, allowDomains, creds, interact);
+    // How it was started: whatever lane wrapped this call (composer: manual, trigger, MCP after:),
+    // else it came in over MCP. Best-effort — a provenance write must never fail a started run.
+    try {
+      recordStartedBy(db, r.box, currentStartedBy() ?? { kind: "mcp" });
+    } catch {
+      /* receipt degrades to no startedBy */
+    }
+    return r;
   };
 }
 
@@ -374,6 +393,7 @@ const boxVerified = new Map<string, VerifyResult>();
     boxModels.delete(session);
     boxVerify.delete(session);
     boxVerified.delete(session);
+    dispatcher.forget(session);
   };
 }
 
@@ -512,7 +532,13 @@ const sendNotification = async (ev: NotifyEvent): Promise<void> => {
  *  own model that this map never sees, so falling back would be a guess. */
 const runProvenance = (box: string, agent: string | undefined): { agent?: string; model?: string } => {
   const model = boxModels.get(box);
-  return { ...(agent ? { agent } : {}), ...(model ? { model } : {}) };
+  let startedBy: ReturnType<typeof startedByOf>;
+  try {
+    startedBy = startedByOf(db, box);
+  } catch {
+    startedBy = undefined;
+  }
+  return { ...(agent ? { agent } : {}), ...(model ? { model } : {}), ...(startedBy ? { startedBy } : {}) };
 };
 const notifier = makeNotifier({ send: sendNotification, log: (m) => console.error(m) });
 
@@ -547,7 +573,10 @@ const archiveFinishedRun = async (box: string, opts: { withFiles: boolean } = { 
     verified: boxVerified.get(box),
     ...runProvenance(box, snap.agent),
   });
-  archiveRun(db, { box, owner: ownerOf(db, box) ?? OPERATOR_OWNER, digest, ...(diffText ? { diffText } : {}) });
+  const archiveId = archiveRun(db, { box, owner: ownerOf(db, box) ?? OPERATOR_OWNER, digest, ...(diffText ? { diffText } : {}) });
+  // A trigger-started run finishing frees its slot, stamps the automation's last result, posts the
+  // receipt comment and fires any chain. Only on a NEW record (null = this finish was already seen).
+  if (archiveId !== null) await dispatcher.onRunFinished(box, digest, digest.provenance?.startedBy, archiveId);
 };
 
 /**
@@ -2605,6 +2634,126 @@ app.post("/teardown.json", async (req: Request, res: Response) => {
   }
 });
 
+// --- Triggers (docs/plan-agent-cloud.md, workstream C) ------------------------------------------
+// Every fire runs the SAME runDelegateFlow as the composer, under the trigger OWNER's principal (so
+// quota, trial gate and box ownership all apply) and tagged with a `trigger` StartedBy for the receipt.
+function auditTrigger(owner: string, action: string, detail: Record<string, string | undefined>): void {
+  try {
+    db.prepare(`INSERT INTO audit_events (at, user_id, client, method, path, status, session, action) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      new Date().toISOString(),
+      owner === OPERATOR_OWNER ? "operator" : owner,
+      "trigger",
+      "TRIGGER",
+      `/triggers/${detail.trigger ?? ""}`,
+      200,
+      detail.box ?? null,
+      `${action}${detail.outcome ? `:${detail.outcome}` : ""}`
+    );
+  } catch {
+    /* audit storage must never fail a fire */
+  }
+}
+const dispatcher = makeDispatcher({
+  db,
+  publicUrl: cfg.publicUrl,
+  log: (m) => console.error(m),
+  audit: (owner, action, detail) => auditTrigger(owner, action, detail),
+  startRun: (input) =>
+    withOwner(input.owner, () =>
+      withStartedBy(input.startedBy, async () => {
+        const t = input.trigger;
+        let repos = input.repos;
+        // A chain hands off from the finished parent: same repos@branch plus the carry diff.
+        if (input.after) {
+          if (!deps.handoff) return { ok: false as const, question: "handoff is not available on this controller" };
+          const h = await deps.handoff(cfg, input.after, { task: input.task, ...(t.repo ? { repo: t.repo } : {}), carry: t.spec.carry });
+          if (!h.ok) return { ok: false as const, question: h.question };
+          repos = h.repos;
+        }
+        let model: string | undefined;
+        if (t.model) {
+          const catalog = await fetchModels(cfg).catch(() => []);
+          if (!isAllowedModel(t.model, catalog, cfg)) return { ok: false as const, question: `Unknown model '${t.model}'.` };
+          model = t.model;
+        }
+        const agent = t.agent && isAgentKind(t.agent) ? t.agent : loadAgentPrefs(input.owner).defaultAgent;
+        const r = await runDelegateFlow(cfg, deps, { agent, source: "git", ...(repos?.length ? { repos } : {}), task: input.task, model, detach: true });
+        if (!r.ok) return { ok: false as const, question: r.question };
+        if (model) boxModels.set(r.box, model);
+        void generateTitle(cfg, r.box, t.name).catch(() => {});
+        return { ok: true as const, box: r.box };
+      })
+    ),
+  // The receipt comment on the issue/PR that fired the run, with the owner's own GitHub token.
+  postComment: (owner, repo, number, body) =>
+    withOwner(owner, async () => {
+      const acc = candidateAccounts(await loadStore(cfg), repo)[0];
+      if (!acc) throw new Error("no stored GitHub account can reach this repo");
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 10_000);
+      try {
+        const r = await fetch(`https://api.github.com/repos/${repo}/issues/${number}/comments`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${acc.token}`, accept: "application/vnd.github+json", "content-type": "application/json", "user-agent": "agent-sandbox" },
+          body: JSON.stringify({ body: redactor.redact(body) }),
+          signal: ctl.signal,
+        });
+        if (!r.ok) throw new Error(`GitHub answered ${r.status}`);
+      } finally {
+        clearTimeout(timer);
+      }
+    }),
+});
+registerTriggerRoutes(app, {
+  db,
+  box: secretBox,
+  dispatcher,
+  dashAuthed,
+  principalOf,
+  failWith,
+  redact: (s) => redactor.redact(s),
+  publicUrl: cfg.publicUrl,
+  audit: auditTrigger,
+});
+setInterval(() => {
+  try {
+    pruneDeliveries(db);
+  } catch {
+    /* retry next tick */
+  }
+}, 6 * 3600 * 1000).unref();
+
+// The History ledger: totals + filtered rows over the run archive. Totals come from stored columns
+// only — cost is summed where a run reported one, never estimated.
+app.get("/history/ledger.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const p = principalOf(res);
+  const owner = p.kind === "user" ? p.userId : OPERATOR_OWNER;
+  const q = req.query as Record<string, unknown>;
+  const str = (k: string) => (typeof q[k] === "string" && (q[k] as string).trim() ? (q[k] as string).trim().slice(0, 80) : undefined);
+  const num = (k: string) => {
+    const n = Number(q[k]);
+    return Number.isFinite(n) && n > 0 ? n : undefined;
+  };
+  const f: LedgerFilter = {
+    ...(num("since") ? { since: num("since") } : {}),
+    ...(num("until") ? { until: num("until") } : {}),
+    ...(str("startedBy") ? { startedBy: str("startedBy") } : {}),
+    ...(str("trigger") ? { triggerId: str("trigger") } : {}),
+    ...(str("agent") ? { agent: str("agent") } : {}),
+    ...(str("state") ? { state: str("state") } : {}),
+    ...(str("verified") ? { verified: str("verified") } : {}),
+  };
+  try {
+    res.json({
+      totals: ledgerTotals(db, owner, f),
+      rows: listLedger(db, owner, { ...f, limit: Math.min(num("limit") ?? 50, 200), ...(num("before") ? { before: num("before") } : {}) }),
+    });
+  } catch (e) {
+    failWith(res, e);
+  }
+});
+
 // Start a new delegation from the dashboard composer. Same validate -> resolve -> run flow as the
 // MCP `delegate` tool (see delegate-flow.ts); source defaults to "git" here since a browser has no
 // local working tree to ship.
@@ -2690,7 +2839,7 @@ app.post("/delegate.json", async (req: Request, res: Response) => {
       const p = principalOf(res);
       agent = loadAgentPrefs(p.kind === "user" ? p.userId : OPERATOR_OWNER).defaultAgent;
     }
-    const result = await runDelegateFlow(cfg, deps, {
+    const result = await withStartedBy({ kind: "manual" }, () => runDelegateFlow(cfg, deps, {
       agent,
       attachments: attachments.length ? attachments : undefined,
       // A browser has no local tree to ship: git only. (`source:"local"` would rsync a controller-host path.)
@@ -2706,7 +2855,7 @@ app.post("/delegate.json", async (req: Request, res: Response) => {
       // The browser needs only the box name (the thread attaches over SSE); blocking this response
       // on the interactive wait window made task starts ~50s slower than the box actually was.
       detach: true,
-    });
+    }));
     if (result.ok) {
       if (model) boxModels.set(result.box, model);
       if (verifyPlan) boxVerify.set(result.box, verifyPlan);
@@ -2729,6 +2878,8 @@ app.listen(cfg.httpPort, cfg.httpHost, () => {
   // Keep it topped up so a warm box is ALWAYS ready, even through a long lull with no delegations
   // (an unclaimed box idle/max-duration reaped can't trigger its own claim-based reseed).
   startPoolMaintainer(cfg);
+  // Triggers: fire due schedules (the webhook and finish-edge sources call the dispatcher directly).
+  dispatcher.start();
   // Cold-start nudge: without a baked snapshot every run pays the toolchain install in the box.
   if (!cfg.snapshot) {
     console.error(
