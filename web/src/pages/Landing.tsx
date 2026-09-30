@@ -86,14 +86,15 @@ export default function Landing() {
                 </Reveal>
                 <Reveal delay={0.05}>
                   <h1 id="hero-title" className="font-serif text-[clamp(2.5rem,5.4vw,4.6rem)] leading-[0.98] tracking-[-0.03em] text-balance">
-                    Something changes. <span className="text-muted-foreground">An agent is already on it.</span>
+                    Agents on tap and on trigger. <span className="text-muted-foreground">Sandboxed in the cloud.</span>
                   </h1>
                 </Reveal>
                 <Reveal delay={0.1}>
                   <p className="text-foreground/85 mt-6 max-w-[50ch] text-[17px] leading-relaxed">
-                    Agents that listen for webhooks, GitHub events, schedules and each other's finished runs, and start on their own:
-                    any agent, any model or account, each run in its own microVM. They ask only when a decision is yours and hand
-                    back a verified pull request, with a receipt.
+                    Wake up to bugs fixed, tests green and pull requests ready for review. An error spike, a labelled issue or a
+                    nightly schedule starts the work on its own; Claude Code, Codex or OpenCode, on the model and account you
+                    choose, does it in a microVM of its own. The only thing it waits for is a decision that's yours, one
+                    tap on your phone. Every run ends in a receipt: what changed, what it verified, what it cost.
                   </p>
                 </Reveal>
                 <Reveal delay={0.15}>
