@@ -297,6 +297,7 @@ export const claudeDriver: Driver = {
   capabilities: {
     // PreToolUse hook returning permissionDecision:"deny" (askHookScript) — the reference gate.
     gate: "hook",
+    gateVerifiedLive: true,
     sideQuestion: true,
     planEvents: true,
     resume: true,

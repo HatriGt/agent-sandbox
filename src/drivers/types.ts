@@ -29,6 +29,8 @@ export interface DriverCapabilities {
    *  - "none": nothing stops the agent after it writes a question; it may keep working.
    */
   gate: "hook" | "wrapper" | "none";
+  /** The gate has been seen denying a tool call on a live box, not only read off the CLI's docs. */
+  gateVerifiedLive: boolean;
   /** The read-only side-question lane can run next to this driver. */
   sideQuestion: boolean;
   /** Structured plan snapshots (⟦plan⟧) come out of the formatter. */
@@ -67,9 +69,10 @@ export interface Driver {
 
 /**
  * The supervision floor (plan §A): a driver is fully supervised only if a pending question can
- * stop it AND the session can be resumed with the answer. A driver below the floor may still be
- * selectable, but only with a visible "supervised: partial" badge — never silently.
+ * stop it AND the session can be resumed with the answer — and the gate was verified on a live box.
+ * A driver below the floor may still be selectable, but only with a visible "supervised: partial"
+ * badge — never silently.
  */
 export function meetsSupervisionFloor(c: DriverCapabilities): boolean {
-  return c.gate !== "none" && c.resume;
+  return c.gate !== "none" && c.gateVerifiedLive && c.resume;
 }

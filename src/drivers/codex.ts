@@ -100,6 +100,7 @@ export const codexDriver: Driver = {
   label: "Codex CLI",
   capabilities: {
     gate: "hook",
+    gateVerifiedLive: false,
     sideQuestion: true,
     planEvents: true,
     resume: true,

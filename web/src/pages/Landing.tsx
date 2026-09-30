@@ -579,8 +579,8 @@ type Source = (typeof SOURCES)[number]["key"];
 const DRIVERS: Array<{ label: string; modelSources: Source[]; supervised: boolean; shipped: boolean }> = [
   { label: "Claude Code", modelSources: ["anthropic"], supervised: true, shipped: true },
   { label: "oh-my-pi", modelSources: ["anthropic"], supervised: true, shipped: true },
-  { label: "Codex CLI", modelSources: ["openai", "openai-compatible"], supervised: true, shipped: true },
-  { label: "OpenCode", modelSources: ["anthropic", "openai", "openai-compatible", "local"], supervised: true, shipped: true },
+  { label: "Codex CLI", modelSources: ["openai", "openai-compatible"], supervised: false, shipped: true },
+  { label: "OpenCode", modelSources: ["anthropic", "openai", "openai-compatible", "local"], supervised: false, shipped: true },
   { label: "Gemini CLI", modelSources: [], supervised: false, shipped: false },
 ];
 function cellOf(d: (typeof DRIVERS)[number], s: Source): Cell {

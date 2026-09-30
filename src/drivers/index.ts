@@ -19,7 +19,7 @@ export const DRIVERS: Record<DriverKind, Driver> = {
 /**
  * The supervision floor, enforced: a driver below it can only be selected with an explicit
  * acknowledgement (`allowPartial`), which the UI sends only after showing "supervised: partial".
- * Every shipped driver meets the floor today; this is the lock that keeps a future one honest.
+ * Codex and OpenCode sit below it until their gates are seen denying a call on a live box.
  */
 export function assertSelectable(kind: DriverKind, allowPartial = false): Driver {
   const d = DRIVERS[kind];

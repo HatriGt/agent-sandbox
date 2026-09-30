@@ -23,9 +23,11 @@ remains the only deploy step. A React Native / Expo companion app lives in `mobi
 
 That sentence is the direction (plan: `docs/plan-agent-cloud.md`). What exists **today**:
 
-- **Drivers:** Claude Code, oh-my-pi, Codex CLI and OpenCode (`src/drivers/`). All four meet the
-  supervision floor (hook gate + resume); Codex and OpenCode carry documented caveats (Codex's
-  hosted web search bypasses the gate; OpenCode's transcript is best-effort, no plan card).
+- **Drivers:** Claude Code, oh-my-pi, Codex CLI and OpenCode (`src/drivers/`). Claude Code and
+  oh-my-pi meet the supervision floor (a hook gate seen denying calls on a live box, plus resume).
+  Codex and OpenCode are **supervised: partial** until their gates are verified live — they wire the
+  same ask gate through each CLI's documented hook, but Codex's hosted web search bypasses it and a
+  failing hook fails open; OpenCode's transcript is best-effort, no plan card.
   **Planned:** Gemini CLI.
 - **Models:** per-user providers (`src/providers.ts`): Anthropic, ccproxy, OpenAI,
   OpenAI-compatible and Ollama (local). Which driver runs which source comes from each driver's
@@ -113,9 +115,10 @@ voice dictation. Git/GitHub: full PR surface (merge/approve/review/checks) on we
 Walk-away layer: webhook notifications (`src/notify.ts`), run digest (`src/digest.ts`), verified
 outcomes (`src/verify.ts`), dependent delegations (`src/handoff.ts`).
 
-Not built: **other drivers** (Codex, OpenCode, Gemini CLI), **non-Claude model sources**,
-**scheduled / event triggers**, **budgets and cost on the receipt**, **billing** (free during beta; `plan` set by admin), **run history** (a torn-down box's
-history is gone — see Direction), **push notifications** (mobile has a local activity feed only).
+Not built: **Gemini CLI driver**, **live verification of the Codex/OpenCode gates**,
+**continuing a run across boxes** past the box's max duration, **cost for unpriced models**
+(tokens only, never a guessed dollar), **public harness gallery**, **billing** (free during beta;
+`plan` set by admin).
 
 ## Direction — the SaaS funnel (current focus)
 

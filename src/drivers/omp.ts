@@ -201,6 +201,7 @@ export const ompDriver: Driver = {
     // The asb-guard extension blocks tool calls in-process via omp's `tool_call` pre-event
     // (verified against omp 18.4.3's shipped types and live) — a real deny, not a kill.
     gate: "hook",
+    gateVerifiedLive: true,
     sideQuestion: true,
     // omp has no TodoWrite equivalent the formatter maps to ⟦plan⟧ yet.
     planEvents: false,

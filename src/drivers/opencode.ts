@@ -84,6 +84,7 @@ export const opencodeDriver: Driver = {
   label: "OpenCode",
   capabilities: {
     gate: "hook",
+    gateVerifiedLive: false,
     sideQuestion: true,
     planEvents: false,
     resume: true,

@@ -140,6 +140,10 @@ for (const [kind, events] of Object.entries(plans) as [DriverKind, unknown[]][])
 
 test("the supervision floor: every listed driver reports it, and it is enforced", () => {
   for (const d of listDrivers()) assert.equal(d.supervised, meetsSupervisionFloor(d.capabilities));
+  // A gate only read off the CLI's docs is not enough: codex/opencode stay partial until seen live.
+  const byKind = Object.fromEntries(listDrivers().map((d) => [d.kind, d.supervised]));
+  assert.deepEqual(byKind, { claude: true, omp: true, codex: false, opencode: false });
+  assert.throws(() => assertSelectable("codex"), /supervision floor/);
   // A hypothetical below-floor driver is refused unless the partial acknowledgement is passed.
   const saved = DRIVERS.opencode;
   try {
