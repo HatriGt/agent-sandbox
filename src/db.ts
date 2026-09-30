@@ -177,6 +177,17 @@ const MIGRATIONS: string[] = [
   ALTER TABLE run_archive ADD COLUMN input_tokens INTEGER;
   ALTER TABLE run_archive ADD COLUMN output_tokens INTEGER;
   ALTER TABLE run_archive ADD COLUMN cost_usd REAL;
+  -- Every fire attempt (storm cap) and the box it started (concurrency). Persisted so a controller
+  -- restart cannot reset either count; in-flight rows are reconciled against live boxes.
+  CREATE TABLE IF NOT EXISTS trigger_fires (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    trigger_id TEXT NOT NULL,
+    at INTEGER NOT NULL,
+    box TEXT,
+    finished_at INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS trigger_fires_trigger ON trigger_fires(trigger_id, at);
+  CREATE INDEX IF NOT EXISTS trigger_fires_box ON trigger_fires(box);
   `,
 ];
 

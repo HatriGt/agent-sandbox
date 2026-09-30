@@ -36,6 +36,12 @@ export interface DispatcherDeps {
   postComment?(owner: string, repo: string, number: number, body: string): Promise<void>;
   audit?(owner: string, action: string, detail: { trigger: string; box?: string; outcome: string }): void;
   publicUrl?: string;
+  /**
+   * Names of boxes that exist right now. Used to reconcile persisted in-flight fires whose box was
+   * torn down or lost while the controller was down. Throwing skips reconciliation (fail closed:
+   * a broken listing must never read as "nothing running" and free every slot).
+   */
+  liveBoxes?(): Promise<Iterable<string>>;
   log?(m: string): void;
   now?(): number;
 }
@@ -52,19 +58,44 @@ export interface FireContext {
 export function makeDispatcher(d: DispatcherDeps) {
   const now = () => (d.now ? d.now() : Date.now());
   const log = (m: string) => (d.log ? d.log(m) : console.error(m));
-  /** triggerId → boxes it started that have not finished yet (+ in-flight starts). */
-  const active = new Map<string, Set<string>>();
-  const starting = new Map<string, number>();
-  const fires = new Map<string, number[]>();
-  /** box → trigger id, for the finish edge. */
-  const boxTrigger = new Map<string, string>();
+  /*
+   * Concurrency and the storm cap live in `trigger_fires`, not memory, so a controller restart
+   * cannot reset them. A row is one fire attempt; `finished_at IS NULL` means it holds a slot
+   * (box NULL = still starting). A start interrupted by a crash dies with the process, so rows left
+   * "starting" from a previous process are closed at construction.
+   */
+  d.db.prepare(`UPDATE trigger_fires SET finished_at = ? WHERE box IS NULL AND finished_at IS NULL`).run(now());
   let ticking = false;
+  let lastReconcile = -Infinity;
 
-  const activeCount = (id: string) => (active.get(id)?.size ?? 0) + (starting.get(id) ?? 0);
+  const activeCount = (id: string) =>
+    (d.db.prepare(`SELECT COUNT(*) AS n FROM trigger_fires WHERE trigger_id = ? AND finished_at IS NULL`).get(id) as { n: number }).n;
+  const recentFires = (id: string, at: number) =>
+    (d.db.prepare(`SELECT at FROM trigger_fires WHERE trigger_id = ? AND at > ? ORDER BY at`).all(id, at - 3600_000) as Array<{ at: number }>).map((r) => r.at);
+  const triggerOfBox = (box: string) =>
+    (d.db.prepare(`SELECT trigger_id FROM trigger_fires WHERE box = ? AND finished_at IS NULL ORDER BY id DESC LIMIT 1`).get(box) as { trigger_id: string } | undefined)?.trigger_id;
+  const closeBox = (box: string) => d.db.prepare(`UPDATE trigger_fires SET finished_at = ? WHERE box = ? AND finished_at IS NULL`).run(now(), box);
+
+  /** Free slots held by boxes that no longer exist (torn down / lost across a restart). */
+  async function reconcile(): Promise<void> {
+    if (!d.liveBoxes) return;
+    let live: Set<string>;
+    try {
+      live = new Set(await d.liveBoxes());
+    } catch (e) {
+      log(`[triggers] reconcile skipped: ${(e as Error).message.slice(0, 200)}`);
+      return;
+    }
+    // Grace: a box that just started may not be listed yet.
+    const rows = d.db.prepare(`SELECT id, box FROM trigger_fires WHERE box IS NOT NULL AND finished_at IS NULL AND at < ?`).all(now() - 120_000) as Array<{ id: number; box: string }>;
+    const close = d.db.prepare(`UPDATE trigger_fires SET finished_at = ? WHERE id = ?`);
+    for (const r of rows) if (!live.has(r.box)) close.run(now(), r.id);
+    d.db.prepare(`DELETE FROM trigger_fires WHERE finished_at IS NOT NULL AND at < ?`).run(now() - 7 * 86_400_000);
+  }
 
   async function fire(t: TriggerRow, ctx: FireContext = {}): Promise<TriggerResult> {
     const at = now();
-    const recent = (fires.get(t.id) ?? []).filter((x) => at - x < 3600_000);
+    const recent = recentFires(t.id, at);
     // A manual "Run now" still respects concurrency and the storm cap, but not the enabled switch:
     // testing a paused automation is exactly what the button is for.
     const adm = admit({ enabled: ctx.manual ? true : t.enabled, concurrency: t.concurrency }, activeCount(t.id), recent, at);
@@ -100,25 +131,20 @@ export function makeDispatcher(d: DispatcherDeps) {
       ...(ctx.match?.subject && Number.isFinite(ctx.match.subject.number) ? { subject: { ...ctx.match.subject, ...(t.repo ? { repo: t.repo } : {}) } } : {}),
     };
 
-    fires.set(t.id, [...recent, at]);
-    starting.set(t.id, (starting.get(t.id) ?? 0) + 1);
+    const fireId = Number(d.db.prepare(`INSERT INTO trigger_fires (trigger_id, at) VALUES (?, ?)`).run(t.id, at).lastInsertRowid);
     let result: TriggerResult;
     try {
       const r = await d.startRun({ owner: t.owner, trigger: t, task, repos, ...(ctx.parent ? { after: ctx.parent.box } : {}), startedBy });
       if (r.ok) {
-        const set = active.get(t.id) ?? new Set<string>();
-        set.add(r.box);
-        active.set(t.id, set);
-        boxTrigger.set(r.box, t.id);
+        d.db.prepare(`UPDATE trigger_fires SET box = ? WHERE id = ?`).run(r.box, fireId);
         result = { at, outcome: "started", box: r.box };
       } else {
         result = { at, outcome: "failed", reason: r.question.slice(0, 300) };
       }
     } catch (e) {
       result = { at, outcome: "failed", reason: (e as Error).message.slice(0, 300) };
-    } finally {
-      starting.set(t.id, Math.max(0, (starting.get(t.id) ?? 1) - 1));
     }
+    if (result.outcome !== "started") d.db.prepare(`UPDATE trigger_fires SET finished_at = ? WHERE id = ?`).run(now(), fireId);
     markFired(d.db, t.id, result, at);
     d.audit?.(t.owner, "trigger.fire", { trigger: t.id, box: result.box, outcome: result.outcome });
     log(`[triggers] ${t.id} (${t.kind}) → ${result.outcome}${result.box ? ` ${result.box}` : ""}${result.reason ? `: ${result.reason}` : ""}`);
@@ -130,6 +156,11 @@ export function makeDispatcher(d: DispatcherDeps) {
     if (ticking) return;
     ticking = true;
     try {
+      // A full box listing is not free: reconcile on the first tick after start, then every 5 min.
+      if (now() - lastReconcile > 300_000) {
+        lastReconcile = now();
+        await reconcile();
+      }
       for (const t of dueSchedules(d.db, now())) {
         // Advance next_fire BEFORE the (slow) start, so a crash mid-start cannot refire in a loop.
         advanceNextFire(d.db, t.id, now());
@@ -146,10 +177,9 @@ export function makeDispatcher(d: DispatcherDeps) {
    * fires any chain that follows this trigger.
    */
   async function onRunFinished(box: string, digest: RunDigest, startedBy: StartedBy | undefined, archiveId?: number): Promise<void> {
-    const id = boxTrigger.get(box) ?? (startedBy?.kind === "trigger" ? startedBy.triggerId : undefined);
+    const id = triggerOfBox(box) ?? (startedBy?.kind === "trigger" ? startedBy.triggerId : undefined);
     if (!id) return;
-    boxTrigger.delete(box);
-    active.get(id)?.delete(box);
+    closeBox(box);
     const t = getTriggerById(d.db, id);
     if (!t) return;
     markFinished(d.db, id, box, { state: digest.state, headline: digest.headline, ...(archiveId ? { archiveId } : {}) });
@@ -179,10 +209,7 @@ export function makeDispatcher(d: DispatcherDeps) {
 
   /** A box torn down before it finished still frees its slot. */
   function forget(box: string): void {
-    const id = boxTrigger.get(box);
-    if (!id) return;
-    boxTrigger.delete(box);
-    active.get(id)?.delete(box);
+    closeBox(box);
   }
 
   function start(intervalMs = 20_000): { stop: () => void } {
@@ -191,7 +218,7 @@ export function makeDispatcher(d: DispatcherDeps) {
     return { stop: () => clearInterval(timer) };
   }
 
-  return { fire, tick, onRunFinished, forget, start, activeCount };
+  return { fire, tick, onRunFinished, forget, start, activeCount, reconcile };
 }
 
 export type Dispatcher = ReturnType<typeof makeDispatcher>;

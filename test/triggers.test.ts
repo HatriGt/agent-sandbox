@@ -21,6 +21,7 @@ import {
 } from "../src/triggers.ts";
 import { claimDelivery, createTrigger, getTrigger, getTriggerById, revealSecret } from "../src/trigger-store.ts";
 import { makeDispatcher } from "../src/trigger-dispatch.ts";
+import { PRE_PUSH_HOOK, refusePush } from "../src/pr-only.ts";
 import { archiveRun, ledgerTotals, listLedger } from "../src/run-archive.ts";
 import type { RunDigest } from "../src/digest.ts";
 
@@ -28,12 +29,12 @@ const box = makeSecretBox(crypto.randomBytes(32));
 
 test("cron: parse, next fire in UTC and in the owner's timezone", () => {
   const c = parseCron("0 2 * * 1-5");
-  // Wed 2026-09-30 10:00Z → next weekday 02:00 UTC is Thu 2026-10-01 02:00Z.
+  // Wed 2026-09-30 10:00Z â†’ next weekday 02:00 UTC is Thu 2026-10-01 02:00Z.
   const from = Date.UTC(2026, 8, 30, 10, 0);
   assert.equal(nextFire(c, from, "UTC"), Date.UTC(2026, 9, 1, 2, 0));
   // 02:00 in Berlin (CEST, UTC+2) is 00:00Z.
   assert.equal(nextFire(c, from, "Europe/Berlin"), Date.UTC(2026, 9, 1, 0, 0));
-  // Friday evening → Monday.
+  // Friday evening â†’ Monday.
   assert.equal(nextFire(c, Date.UTC(2026, 9, 2, 12, 0), "UTC"), Date.UTC(2026, 9, 5, 2, 0));
   assert.equal(nextFire(parseCron("*/15 * * * *"), Date.UTC(2026, 8, 30, 10, 7), "UTC"), Date.UTC(2026, 8, 30, 10, 15));
   assert.throws(() => parseCron("61 * * * *"));
@@ -87,7 +88,7 @@ test("dedupe: delivery id and body hash are claimed once", () => {
   assert.ok(!claimDelivery(db, "t1", keys, 2000), "replay rejected");
   assert.ok(!claimDelivery(db, "t1", deliveryKeys({ "x-github-delivery": "d-2" }, Buffer.from("{}")), 3000), "same body, new id rejected");
   assert.ok(claimDelivery(db, "t2", keys, 3000), "per trigger");
-  // Generic: short body window — the same ping later is legitimate.
+  // Generic: short body window â€” the same ping later is legitimate.
   const g = deliveryKeys({}, Buffer.from("ping"));
   assert.ok(claimDelivery(db, "t3", g, 0, 7 * 86400_000, 60_000));
   assert.ok(!claimDelivery(db, "t3", g, 30_000, 7 * 86400_000, 60_000));
@@ -201,6 +202,86 @@ test("dispatcher: fires through startRun with trigger provenance, holds the conc
   assert.equal(comments[0].number, 12);
   const r3 = await d.fire(getTriggerById(db, row.id)!, { payload, event: "issues", match });
   assert.equal(r3.outcome, "started");
+});
+
+test("dispatcher: concurrency and storm counts survive a controller restart; reconcile frees dead boxes", async () => {
+  const db = openMemoryDb();
+  const n = normalizeTrigger({ name: "Nightly", kind: "schedule", taskTemplate: "go", spec: { cron: "0 2 * * *" } });
+  assert.ok(n.ok);
+  if (!n.ok) return;
+  const { row } = createTrigger(db, box, "u1", n.trigger);
+  let t = 1_000_000_000_000;
+  let i = 0;
+  let live = new Set<string>();
+  const mk = () =>
+    makeDispatcher({
+      db,
+      log: () => {},
+      now: () => t,
+      liveBoxes: async () => live,
+      startRun: async () => {
+        const b = `box-${++i}`;
+        live.add(b);
+        return { ok: true, box: b };
+      },
+    });
+  const d1 = mk();
+  assert.equal((await d1.fire(row, { manual: true })).outcome, "started");
+  // "Restart": a fresh dispatcher over the same DB still sees the held slot.
+  const d2 = mk();
+  assert.equal(d2.activeCount(row.id), 1);
+  assert.equal((await d2.fire(row, { manual: true })).outcome, "skipped");
+  // The box vanished while the controller was down: reconcile (past the grace window) frees it.
+  live = new Set();
+  t += 180_000;
+  await d2.reconcile();
+  assert.equal(d2.activeCount(row.id), 0);
+  // A listing failure must not free slots.
+  assert.equal((await d2.fire(row, { manual: true })).outcome, "started");
+  const d3 = makeDispatcher({ db, log: () => {}, now: () => t + 600_000, liveBoxes: async () => { throw new Error("msb ls failed"); }, startRun: async () => ({ ok: true, box: "x" }) });
+  await d3.reconcile();
+  assert.equal(d3.activeCount(row.id), 1);
+  // Storm cap counts persisted attempts: finish each run and keep firing until the cap bites.
+  const d4 = mk();
+  let last = "";
+  for (let k = 0; k < 20; k++) {
+    for (const b of [...live]) await d4.onRunFinished(b, digest({ box: b }), undefined);
+    d4.forget("x");
+    last = (await d4.fire(row, { manual: true })).outcome;
+    t += 1000;
+  }
+  assert.equal(last, "skipped", "storm cap holds across dispatcher instances");
+});
+
+test("PR-only: default branch and deletions refused; feature branches pass", () => {
+  assert.ok(refusePush("refs/heads/main", "abc"));
+  assert.ok(refusePush("refs/heads/master", "abc"));
+  assert.ok(refusePush("refs/heads/develop", "abc", "develop"));
+  assert.ok(refusePush("refs/heads/agent/fix-12", "0000000000000000000000000000000000000000"));
+  assert.equal(refusePush("refs/heads/agent/fix-12", "abc", "main"), null);
+  assert.equal(refusePush("main-fix", "abc", "main"), null);
+});
+
+test("PR-only: the pre-push hook refuses the default branch in a real repo", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const { mkdtempSync, writeFileSync, chmodSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const dir = mkdtempSync(join(tmpdir(), "asb-prhook-"));
+  const hook = join(dir, "pre-push");
+  writeFileSync(hook, PRE_PUSH_HOOK);
+  chmodSync(hook, 0o755);
+  const git = (cwd: string, ...a: string[]) => execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...a], { cwd, stdio: "pipe" });
+  const remote = join(dir, "remote.git");
+  execFileSync("git", ["init", "-q", "--bare", "-b", "main", remote]);
+  const work = join(dir, "work");
+  execFileSync("git", ["init", "-q", "-b", "main", work]);
+  git(work, "commit", "-q", "--allow-empty", "-m", "x");
+  git(work, "remote", "add", "origin", remote);
+  git(work, "config", "core.hooksPath", dir);
+  assert.throws(() => git(work, "push", "-q", "origin", "HEAD:main"), /refused push to main/);
+  git(work, "push", "-q", "origin", "HEAD:agent/fix");
+  assert.throws(() => git(work, "push", "-q", "origin", ":agent/fix"), /delete/);
 });
 
 test("ledger: totals from stored columns; cost null when no run reported one", () => {

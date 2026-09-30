@@ -8,6 +8,7 @@
  * Each MCP session gets its own transport+server (SDK pattern); the session id lives in the
  * `mcp-session-id` header so multiple clients don't cross wires.
  */
+import { assertPrOnlyPush, installPrOnlyGuard } from "./pr-only.js";
 import express, { type Request, type Response } from "express";
 import compression from "compression";
 import { randomUUID } from "node:crypto";
@@ -2479,7 +2480,11 @@ app.post("/git.json", async (req: Request, res: Response) => {
   try {
     if (action === "status") res.json(await gitStatus(cfg, session, repo));
     else if (action === "commit") res.json(await gitCommitAll(cfg, session, repo, String(message ?? "")));
-    else if (action === "push") res.json({ output: redactor.redact((await gitPush(cfg, session, repo)).output) });
+    else if (action === "push") {
+      // PR-only for automation-started runs, enforced here too — independent of the box-side hook.
+      if (startedByOf(db, session)?.kind === "trigger") await assertPrOnlyPush(cfg, session, repo);
+      res.json({ output: redactor.redact((await gitPush(cfg, session, repo)).output) });
+    }
     else res.status(400).json({ error: "action must be status | commit | push" });
   } catch (e) {
     res.status(422).json({ error: clientError(e, 500) });
@@ -2658,6 +2663,7 @@ const dispatcher = makeDispatcher({
   publicUrl: cfg.publicUrl,
   log: (m) => console.error(m),
   audit: (owner, action, detail) => auditTrigger(owner, action, detail),
+  liveBoxes: async () => (await gatherMonitor(cfg)).map((b) => b.name),
   startRun: (input) =>
     withOwner(input.owner, () =>
       withStartedBy(input.startedBy, async () => {
@@ -2680,6 +2686,8 @@ const dispatcher = makeDispatcher({
         const r = await runDelegateFlow(cfg, deps, { agent, source: "git", ...(repos?.length ? { repos } : {}), task: input.task, model, detach: true });
         if (!r.ok) return { ok: false as const, question: r.question };
         if (model) boxModels.set(r.box, model);
+        // PR-only at the git layer: a pre-push hook refusing the default branch (src/pr-only.ts).
+        await installPrOnlyGuard(cfg, r.box).catch((e) => console.error(`[triggers] ${r.box}: PR-only hook not installed: ${(e as Error).message}`));
         void generateTitle(cfg, r.box, t.name).catch(() => {});
         return { ok: true as const, box: r.box };
       })
