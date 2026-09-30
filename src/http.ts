@@ -35,8 +35,9 @@ import { allBlobs, ownerKey, registerUserStoreBackend, withOwner, OPERATOR_OWNER
 import { detectTransitions, formatNotification, makeNotifier, toggleFor, type BoxRunView, type NotifyEvent } from "./notify.js";
 import { buildPushMessages, deviceCount, listDeviceTokens, makeOwnerRateCap, pruneToken, registerDevice, sendExpoPush, unregisterDevice } from "./push.js";
 import { fetchPinned } from "./net-guard.js";
-import { buildDigest } from "./digest.js";
-import { archiveRun, deleteRun, getRun, listActivity, listRuns, pruneArchive, ledgerTotals, listLedger, type LedgerFilter } from "./run-archive.js";
+import { buildDigest, type RunDigest } from "./digest.js";
+import { buildOutcome, outcomeOf, resolveFollowedBy, type OutcomeBudget } from "./outcome.js";
+import { archiveRun, deleteRun, getDigest, getRun, listActivity, listRuns, pruneArchive, ledgerTotals, listLedger, type LedgerFilter } from "./run-archive.js";
 import { verifyPlanOf, type VerifyPlan, type VerifyResult } from "./verify.js";
 import { parseTrace } from "./trace.js";
 import { loadNotifySettings, normalizeNotifySettings, saveNotifySettings } from "./notify-store.js";
@@ -610,7 +611,7 @@ const notifier = makeNotifier({ send: sendNotification, log: (m) => console.erro
  * the digest derives — and therefore everything archived — is redacted at archive time; /history.json
  * can serve rows verbatim. Best-effort everywhere: archiving must never break the sweep or teardown.
  */
-const archiveFinishedRun = async (box: string, opts: { withFiles: boolean } = { withFiles: true }): Promise<void> => {
+const archiveFinishedRun = async (box: string, opts: { withFiles: boolean; budget?: OutcomeBudget } = { withFiles: true }): Promise<void> => {
   const snap = await watchHub.read(box);
   if (snap.boxStatus === "missing") return;
   // Only a genuinely FINISHED run earns a record. Testing for "not running and not waiting" is not
@@ -633,6 +634,12 @@ const archiveFinishedRun = async (box: string, opts: { withFiles: boolean } = { 
     verified: boxVerified.get(box),
     ...runProvenance(box, snap.agent),
   });
+  // The outcome card (src/outcome.ts): persisted inside the archived digest, so it outlives the box.
+  try {
+    digest.outcome = buildOutcome({ digest, events: parseTrace(snap.log ?? ""), log: snap.log ?? "", filesKnown: opts.withFiles && up, diffText, ...(opts.budget ? { budget: opts.budget } : {}) });
+  } catch (e) {
+    console.error(`[outcome] ${box}: ${(e as Error).message.slice(0, 200)}`);
+  }
   const archiveId = archiveRun(db, { box, owner: ownerOf(db, box) ?? OPERATOR_OWNER, digest, ...(diffText ? { diffText } : {}) });
   // A trigger-started run finishing frees its slot, stamps the automation's last result, posts the
   // receipt comment and fires any chain. Only on a NEW record (null = this finish was already seen).
@@ -750,13 +757,13 @@ const readFleet = makeFleetReader(
             .finally(() => {
               void notifier.notify(ev);
               // Archive AFTER verification so the record carries the verified stamp.
-              void archiveFinishedRun(ev.box).catch((e) => console.error(`[archive] ${ev.box}: ${(e as Error).message.slice(0, 200)}`));
+              void archiveFinishedRun(ev.box, { withFiles: true, budget: boxes.find((b) => b.name === ev.box)?.budget }).catch((e) => console.error(`[archive] ${ev.box}: ${(e as Error).message.slice(0, 200)}`));
             });
         } else {
           void notifier.notify(ev);
           // Run history archive: persist the digest at the finish edge (box still up → files listable).
           if (ev.kind === "done" || ev.kind === "failed")
-            void archiveFinishedRun(ev.box).catch((e) => console.error(`[archive] ${ev.box}: ${(e as Error).message.slice(0, 200)}`));
+            void archiveFinishedRun(ev.box, { withFiles: true, budget: boxes.find((b) => b.name === ev.box)?.budget }).catch((e) => console.error(`[archive] ${ev.box}: ${(e as Error).message.slice(0, 200)}`));
         }
         // Turn-end checkpoint: the moment a turn settles (done or paused on a question) is the
         // restore point for whatever the operator sends next. Online in-box tar (~1 s, no VM stop)
@@ -2143,7 +2150,7 @@ app.get("/history.json", (req: Request, res: Response) => {
       runs: listRuns(db, owner, {
         ...(Number.isFinite(limit) ? { limit } : {}),
         ...(Number.isInteger(before) ? { before } : {}),
-      }),
+      }).map((r) => ({ ...r, outcome: outcomeWithFollow(owner, r.box, getDigest(db, owner, { id: r.id })?.digest) })),
     });
   } catch (e) {
     failWith(res, e);
@@ -2974,6 +2981,38 @@ setInterval(() => {
   }
 }, 6 * 3600 * 1000).unref();
 
+/** The outcome card for an archived digest, with "followed by" resolved now (owner-scoped). */
+const outcomeWithFollow = (owner: string, box: string, digest: RunDigest | null | undefined) => {
+  const o = outcomeOf(digest);
+  if (!o) return null;
+  const mine = (b: string) => (ownerOf(db, b) ?? OPERATOR_OWNER) === owner;
+  return { ...o, result: { ...o.result, followedBy: resolveFollowedBy(db, owner, box, mine) } };
+};
+
+// The outcome card (docs/plan-demo-parity.md bet 2): ?id=<archive id> or ?box=<name> (latest record).
+app.get("/history/outcome.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const p = principalOf(res);
+  const owner = p.kind === "user" ? p.userId : OPERATOR_OWNER;
+  const id = typeof req.query.id === "string" ? Number(req.query.id) : undefined;
+  const box = typeof req.query.box === "string" ? req.query.box : undefined;
+  if (id === undefined ? !box || !/^[\w.-]+$/.test(box) : !Number.isInteger(id)) {
+    res.status(400).json({ error: "id (integer) or box is required" });
+    return;
+  }
+  try {
+    const row = getDigest(db, owner, id !== undefined ? { id } : { box: box! });
+    const outcome = row ? outcomeWithFollow(owner, row.box, row.digest) : null;
+    if (!row || !outcome) {
+      res.status(404).json({ error: "no outcome for that run" });
+      return;
+    }
+    res.json({ id: row.id, box: row.box, outcome });
+  } catch (e) {
+    failWith(res, e);
+  }
+});
+
 // The History ledger: totals + filtered rows over the run archive. Totals come from stored columns
 // only — cost is summed where a run reported one, never estimated.
 app.get("/history/ledger.json", (req: Request, res: Response) => {
@@ -2998,7 +3037,10 @@ app.get("/history/ledger.json", (req: Request, res: Response) => {
   try {
     res.json({
       totals: ledgerTotals(db, owner, f),
-      rows: listLedger(db, owner, { ...f, limit: Math.min(num("limit") ?? 50, 200), ...(num("before") ? { before: num("before") } : {}) }),
+      rows: listLedger(db, owner, { ...f, limit: Math.min(num("limit") ?? 50, 200), ...(num("before") ? { before: num("before") } : {}) }).map((r) => ({
+        ...r,
+        outcome: outcomeWithFollow(owner, r.box, getDigest(db, owner, { id: r.id })?.digest),
+      })),
     });
   } catch (e) {
     failWith(res, e);

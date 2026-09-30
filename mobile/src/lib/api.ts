@@ -167,6 +167,34 @@ export interface HistoryRun {
   endedAt: number;
   archivedAt: number;
   headline: string;
+  outcome?: RunOutcome | null;
+}
+/** Mirrors RunOutcome in src/outcome.ts — the outcome card. null means unknown: render "—". */
+export interface RunOutcome {
+  v: 1;
+  state: "done" | "failed" | "waiting" | "running";
+  header: { startedBy: { kind: string } | null; label: string | null; link: { href: string; external: boolean } | null };
+  result: {
+    prs: { url: string; repo: string; number: number }[];
+    diff: { files: number; additions: number; deletions: number } | null;
+    followedBy?: { box: string; archiveId: number | null } | null;
+  };
+  trust: {
+    tests: { runner: string; passed: number; failed: number; skipped: number; source: "verify" | "trace" } | null;
+    exitCode: number | null;
+    verified: { pass: boolean; mode: string } | null;
+    prOnly: boolean;
+    questions: number;
+    openQuestions: number;
+    blocked: number;
+  };
+  cost: {
+    durationMs: number | null;
+    tokens: { input: number; output: number } | null;
+    usd: number | null;
+    model: string | null;
+    budget: { maxMinutes: number; maxUsd: number | null; maxTokens: number | null; tripped: string[] } | null;
+  };
 }
 export interface HistoryDetail extends HistoryRun {
   /** Full receipt when the archiver captured one; null for runs that left no digest. */
@@ -474,6 +502,9 @@ export const api = {
     }),
   /** One archived run with its full digest (null when none was captured). */
   historyDetail: (id: number) => get<{ run: HistoryDetail }>("/history.json", { id: String(id) }),
+  /** The outcome card of an archived run: by archive id, or the latest record for a box. */
+  outcome: (q: { id: number } | { box: string }) =>
+    get<{ id: number; box: string; outcome: RunOutcome }>("/history/outcome.json", "id" in q ? { id: String(q.id) } : { box: q.box }),
   /** Remove one archived run's receipt permanently. */
   historyDelete: (id: number) => del<{ ok: true }>("/history.json", { id: String(id) }),
   delegate: (input: {

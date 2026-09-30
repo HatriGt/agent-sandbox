@@ -20,6 +20,7 @@ import { setPrefill } from "@/lib/draft";
 import { RunSummary } from "./RunSummary";
 import { ProducedFiles } from "./ProducedFiles";
 import { DigestCard, useRunDigest } from "./DigestCard";
+import { OutcomeCard, useOutcome } from "./OutcomeCard";
 import { ThreadHeader } from "./ThreadHeader";
 import { parseTrace, producedFiles } from "@/lib/trace";
 import { deriveTaskBoard, type TaskBoard } from "@/lib/planTasks";
@@ -267,6 +268,7 @@ export function Thread({
   // resumes and finishes again gets a fresh digest). Silent on failure — the thread stands alone.
   const finished = !sleeping && !loadingTrace && (runState === "done" || (runState === "idle" && exitCode != null));
   const digest = useRunDigest(box.name, finished, `${exitCode ?? ""}-${events.length}`);
+  const outcome = useOutcome(finished ? { box: box.name } : null, `${exitCode ?? ""}-${events.length}`);
   const durationSec = digest?.startedAt && digest?.endedAt && digest.endedAt > digest.startedAt ? Math.round((digest.endedAt - digest.startedAt) / 1000) : undefined;
 
   const deadline = React.useMemo(() => deadlineOf(box, lifecycle), [box, lifecycle]);
@@ -830,6 +832,8 @@ export function Thread({
                 {ctxHealth.label} — {ctxHealth.advice}
               </p>
             )}
+
+            {finished && outcome && pendingReplies.length === 0 && <OutcomeCard outcome={outcome} />}
 
             {!sleeping && !loadingTrace && runState === "done" && pendingReplies.length === 0 && (
               <RunSummary

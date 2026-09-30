@@ -16,6 +16,8 @@
  * and the ask turn are wired in deps.ts/http.ts.
  */
 
+import { parseTestCounts, type TestCounts } from "./test-counts.js";
+
 export type VerifyPlan =
   | { mode: "command"; command: string }
   | { mode: "criterion"; criterion: string };
@@ -55,6 +57,8 @@ export interface VerifyResult {
   mode: VerifyPlan["mode"];
   pass: boolean;
   detail: string;
+  /** Command mode: pass/fail counts when the command's output was a recognised test runner's. */
+  tests?: TestCounts;
 }
 
 const VERDICT_RE = /^\s*VERDICT:\s*(pass|fail)\s*(?:[—–-]+\s*(.*))?$/gim;
@@ -106,7 +110,8 @@ export async function runVerification(
       // Pass: the last line is the summary ("all green", "24 passing"). Fail: keep a short tail —
       // the failing assertion is usually a few lines up.
       const detail = (r.code === 0 ? lines.slice(-1) : lines.slice(-8)).join("\n").slice(-TAIL);
-      return { mode: "command", pass: r.code === 0, detail: detail || `exit ${r.code}` };
+      const tests = parseTestCounts(r.output);
+      return { mode: "command", pass: r.code === 0, detail: detail || `exit ${r.code}`, ...(tests ? { tests } : {}) };
     }
     const { answer } = await io.askCriterion(verdictPrompt(plan.criterion));
     const v = parseVerdict(answer);
