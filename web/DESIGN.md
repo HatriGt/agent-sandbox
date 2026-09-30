@@ -31,6 +31,41 @@
 5. **The phone is the same product.** Single-pane on mobile (rail ↔ workspace), the same state pills,
    the same composer with the destination selector; vitals move to the Fleet view.
 
+## Inspiration sources
+
+Consult these before a UI polish pass — borrow taste and interaction patterns, never code. When the
+brief is "more modern", "smoother" or "premium", start here rather than inventing from scratch.
+
+**Component libraries and kits (settings surfaces, sheets, segmented controls, list states)**
+
+- [skiper ui](https://skiper-ui.com) — @Gur__vi. The bouncy accordion in the app is credited to it.
+- [cult ui](https://cult-ui.com) — @nolansym.
+- [amicro](https://amicro.vercel.app) — @SubhanHQ.
+- [bundui](https://bundui.io) — @TobyBelhome.
+- [string tune](https://string-tune.fiddle.digital) — @penev_tech.
+- [Emil Kowalski — design engineering skill](https://www.ui-skills.com/skills/emilkowalski/emil-design-eng)
+  — the motion rules we follow: 150–250 ms ease-out, few-but-meaningful animations, real touch
+  targets, respect `prefers-reduced-motion`.
+- [rareui.com/components](https://www.rareui.com/components) — component gallery.
+- [libraries.dev](https://libraries.dev) — index of component libraries.
+
+**Motion and interaction detail**
+
+- [60fps.design](https://60fps.design) — UI animation and interaction details (the first stop for
+  motion polish).
+- [codedvisuals.com/visuals](https://codedvisuals.com/visuals) — coded visual effects.
+
+**Layout, pages and galleries**
+
+- [loadmo.re](https://loadmo.re) — bold mobile websites (the reference for the mobile app).
+- [navbar.gallery](https://navbar.gallery) — navigation treatments.
+- [supahero.io](https://supahero.io) — hero sections.
+- [cta.gallery](https://cta.gallery) — calls to action.
+- [recent.design](https://recent.design), [inspora.design](https://inspora.design) — recent visual
+  design archives.
+- [styles.refero.design](https://styles.refero.design) — DESIGN.md files written for AI agents.
+- [posts.design](https://posts.design) — social post design.
+
 ## Layout
 
 Flat two-pane console — no floating cards, no gaps, one hairline between the panes.
