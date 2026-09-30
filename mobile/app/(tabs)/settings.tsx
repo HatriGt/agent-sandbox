@@ -87,10 +87,11 @@ export default function Settings() {
         </Card>
 
         {isUser && <RowLink title="Account" icon="user" hint="Name, email, password" onPress={() => router.push("/settings/account")} />}
+        <RowLink title="Automations" icon="repeat" hint="Scheduled and event runs — pause or run now" onPress={() => router.push("/automations")} />
         <RowLink title="GitHub accounts" icon="github" hint="Tokens the agent clones and pushes with" onPress={() => router.push("/settings/accounts")} />
         <RowLink title="MCP servers" icon="tool" hint="Extra tools every sandbox gets" onPress={() => router.push("/settings/mcp")} />
         <RowLink title="Skills" icon="book-open" hint="Reusable playbooks synced into each box" onPress={() => router.push("/settings/skills")} />
-        <RowLink title="Notifications" icon="bell" hint="Webhook pings when a machine needs you" onPress={() => router.push("/settings/notifications")} />
+        <RowLink title="Notifications" icon="bell" hint="Push and webhook pings when a run needs you" onPress={() => router.push("/settings/notifications")} />
         {isUser && <RowLink title="API keys" icon="key" hint="Bearer keys for scripts and devices" onPress={() => router.push("/settings/api-keys")} />}
         {isUser && <RowLink title="Signed-in devices" icon="smartphone" hint="Active sessions, revoke any" onPress={() => router.push("/settings/devices")} />}
         <RowLink title="Connect an IDE" icon="code" hint="MCP snippets for Cursor, Claude Code, Zed" onPress={() => router.push("/settings/connect")} />

@@ -305,6 +305,27 @@ export interface NotifySettings {
   fallbackConfigured?: boolean;
 }
 
+/** Mirrors GET /triggers.json rows (src/trigger-store.ts). Stamps are epoch ms. Never carries a secret. */
+export interface AutomationResult {
+  at: number;
+  outcome: "started" | "skipped" | "failed";
+  box?: string;
+  reason?: string;
+  finished?: { state: string; headline: string; archiveId?: number };
+}
+export interface Automation {
+  id: string;
+  name: string;
+  kind: "schedule" | "webhook" | "github" | "chain";
+  repo?: string;
+  enabled: boolean;
+  when: string;
+  lastFired: number | null;
+  nextFire: number | null;
+  lastResult: AutomationResult | null;
+  active: number;
+}
+
 export type DelegateResult =
   | { ok: true; box: string; warm: boolean; output: string; inferred?: string[] }
   | { ok: false; question: string };
@@ -549,6 +570,13 @@ export const api = {
   saveNotifySettings: (s: { url?: string; events?: Partial<NotifySettings["events"]> }) =>
     post<NotifySettings>("/notify.json", s),
   testNotify: () => post<{ ok: true }>("/notify/test.json", {}),
+  pushRegister: (token: string, platform: string) => post<{ ok: true; id: string }>("/push/register.json", { token, platform }),
+  pushUnregister: (token: string) => post<{ ok: true; removed: boolean }>("/push/unregister.json", { token }),
+
+  automations: () => get<{ triggers: Automation[] }>("/triggers.json"),
+  setAutomationEnabled: (id: string, enabled: boolean) =>
+    post<{ trigger: Automation }>(`/triggers/${encodeURIComponent(id)}/enabled.json`, { enabled }),
+  runAutomation: (id: string) => post<{ result: AutomationResult }>(`/triggers/${encodeURIComponent(id)}/run.json`, {}),
 
   models: (session?: string) =>
     get<{ default: string; current: string; models: { id: string; label: string; tier: "opus" | "sonnet" | "haiku" | "other" }[] }>(

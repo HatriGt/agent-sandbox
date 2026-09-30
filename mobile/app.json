@@ -2,7 +2,7 @@
   "expo": {
     "name": "Agent Sandbox",
     "slug": "agent-sandbox",
-    "version": "0.2.0",
+    "version": "0.3.0",
     "orientation": "portrait",
     "scheme": "asb",
     "userInterfaceStyle": "automatic",
@@ -57,6 +57,7 @@
       "expo-secure-store",
       "expo-font",
       "expo-asset",
+      ["expo-notifications", { "color": "#0f0f12" }],
       [
         "expo-speech-recognition",
         {
