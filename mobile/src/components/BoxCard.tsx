@@ -1,8 +1,8 @@
-import React from "react";
-import { View } from "react-native";
+import React, { useMemo, useState } from "react";
+import { Alert, View } from "react-native";
 import { useRouter } from "expo-router";
-import type { BoxView } from "@/lib/api";
-import { questionHeadline } from "@/lib/question";
+import { api, type BoxView } from "@/lib/api";
+import { parseQuestion, questionChoices, questionHeadline } from "@/lib/question";
 import { ago, friendlyName } from "@/lib/format";
 import { useTheme } from "@/theme/ThemeContext";
 import { T } from "./ui/AppText";
@@ -14,6 +14,52 @@ import { UsageMeter } from "./ui/UsageMeter";
 
 export function boxLabel(b: BoxView): string {
   return b.title || b.task?.split("\n")[0] || b.name;
+}
+
+/**
+ * One-tap answers on the inbox card (docs/plan-demo-parity.md bet 1): the same ≤ 3 choices the
+ * notification offers. The label is the chip; the whole option is sent. Free text lives in the Thread.
+ */
+function InboxChoices({ box, question }: { box: string; question: string }) {
+  const { palette } = useTheme();
+  const choices = useMemo(() => questionChoices(parseQuestion(question)), [question]);
+  const [sent, setSent] = useState<number | null>(null);
+  if (choices.length === 0) return null;
+  const answer = async (i: number) => {
+    if (sent != null) return;
+    setSent(i);
+    try {
+      await api.resume(box, choices[i].answer, { force: true });
+    } catch (e) {
+      setSent(null);
+      Alert.alert("Could not send the answer", e instanceof Error ? e.message : String(e));
+    }
+  };
+  return (
+    <View accessibilityRole="radiogroup" accessibilityLabel="Quick answers" style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+      {choices.map((c, i) => (
+        <Pressably key={c.answer} disabled={sent != null} onPress={() => void answer(i)}>
+          <View
+            accessibilityRole="button"
+            accessibilityLabel={`Answer: ${c.answer}`}
+            style={{
+              borderWidth: 1,
+              borderColor: palette.attentionInk,
+              borderRadius: 8,
+              paddingHorizontal: 10,
+              paddingVertical: 6,
+              opacity: sent != null && sent !== i ? 0.45 : 1,
+              backgroundColor: sent === i ? palette.attentionInk : "transparent",
+            }}
+          >
+            <T variant="meta" weight="semibold" numberOfLines={1} style={{ color: sent === i ? palette.attention : palette.attentionInk }}>
+              {c.label}
+            </T>
+          </View>
+        </Pressably>
+      ))}
+    </View>
+  );
 }
 
 /** One machine, triage-ready: title, state (icon+word+color), and what it needs. */
@@ -49,6 +95,7 @@ export function BoxCard({ box, onLongPress }: { box: BoxView; onLongPress?: (b: 
             </T>
           </View>
         ) : null}
+        {waiting && box.question ? <InboxChoices box={box.name} question={box.question} /> : null}
         <View style={{ flexDirection: "row", gap: 12, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 4, maxWidth: "100%" }}>
             <Icon name="box" size={11} color={ink} />

@@ -106,3 +106,29 @@ export function questionHeadline(raw: string | undefined, max = 140): string {
   const t = parseQuestion(raw ?? "").title || (raw ?? "").trim().split("\n")[0] || "";
   return t.length > max ? `${t.slice(0, max - 1)}…` : t;
 }
+
+/**
+ * Up to 3 one-tap choices for the question (server mirror: src/answer-choice.ts). An option may split
+ * a short button label from its detail with " | "; the WHOLE option is sent as the answer, so the
+ * agent always gets the detail it wrote. Fewer than 2 options means no choices.
+ */
+export interface Choice {
+  label: string;
+  answer: string;
+}
+export const CHOICE_LABEL_MAX = 32;
+export function questionChoices(parsed: ParsedQuestion): Choice[] {
+  const out: Choice[] = [];
+  const seen = new Set<string>();
+  for (const opt of parsed.options) {
+    const answer = opt.trim();
+    const bar = answer.indexOf(" | ");
+    const raw = (bar > 0 ? answer.slice(0, bar) : answer).trim();
+    const label = raw.length > CHOICE_LABEL_MAX ? `${raw.slice(0, CHOICE_LABEL_MAX - 1).trimEnd()}…` : raw;
+    if (!label || seen.has(answer)) continue;
+    seen.add(answer);
+    out.push({ label, answer });
+    if (out.length >= 3) break;
+  }
+  return out.length >= 2 ? out : [];
+}

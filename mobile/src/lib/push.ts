@@ -45,6 +45,47 @@ export function boxFromNotification(n: Notifications.Notification | null | undef
   return typeof data.url === "string" ? boxFromLink(data.url) : null;
 }
 
+/*
+ * Answer from the notification (docs/plan-demo-parity.md bet 1). The server sends a question's
+ * choice LABELS in the body ("1 Mock the clock · 2 Widen tolerance") with categoryId ask-choices-N
+ * and a one-use nonce in data. iOS action titles are fixed per category, so the buttons are "1".."3"
+ * matching the numbered labels. Every action requires an unlocked device and opens the app, which
+ * answers with the signed-in session (or asks the user to sign in and confirm) — a lock screen can
+ * never answer on its own.
+ */
+export const CHOICE_ACTION_PREFIX = "choice-";
+const NONCE_RE = /^[A-Za-z0-9_-]{8,100}$/;
+
+async function ensureChoiceCategories(): Promise<void> {
+  for (const n of [2, 3]) {
+    await Notifications.setNotificationCategoryAsync(
+      `ask-choices-${n}`,
+      Array.from({ length: n }, (_, i) => ({
+        identifier: `${CHOICE_ACTION_PREFIX}${i}`,
+        buttonTitle: `Answer ${i + 1}`,
+        options: { opensAppToForeground: true, isAuthenticationRequired: true },
+      })),
+    );
+  }
+}
+
+export interface ChoiceAction {
+  box: string;
+  nonce: string;
+  choice: number;
+}
+
+/** The choice a notification action carries, or null for a plain tap / malformed payload. */
+export function choiceFromResponse(r: Notifications.NotificationResponse | null | undefined): ChoiceAction | null {
+  if (!r || !r.actionIdentifier.startsWith(CHOICE_ACTION_PREFIX)) return null;
+  const choice = Number(r.actionIdentifier.slice(CHOICE_ACTION_PREFIX.length));
+  const data = (r.notification.request.content.data ?? {}) as { box?: unknown; nonce?: unknown; choices?: unknown };
+  if (!Number.isInteger(choice) || choice < 0 || choice > 2) return null;
+  if (typeof data.choices === "number" && choice >= data.choices) return null;
+  if (!isBoxName(data.box) || typeof data.nonce !== "string" || !NONCE_RE.test(data.nonce)) return null;
+  return { box: data.box, nonce: data.nonce, choice };
+}
+
 let handlerSet = false;
 /** Foreground presentation: show a banner but stay quiet — the user is already in the app. */
 export function configurePushPresentation(): void {
@@ -53,6 +94,8 @@ export function configurePushPresentation(): void {
   Notifications.setNotificationHandler({
     handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: false, shouldSetBadge: false }),
   });
+  // Categories must exist before a push arrives; idempotent, and harmless where unsupported (web).
+  void ensureChoiceCategories().catch(() => {});
 }
 
 async function ensureChannels(): Promise<void> {
@@ -115,7 +158,7 @@ export async function offerPushAfterHandoff(): Promise<void> {
   await AsyncStorage.setItem(ASKED_KEY, "1").catch(() => {});
   Alert.alert(
     "Get told when it needs you?",
-    "A notification when a run asks a question, finishes, or fails. Only the run's title is shown — never its question or code.",
+    "A notification when a run asks a question, finishes, or fails. Only the run's title and answer choices are shown — never its question or code.",
     [
       { text: "Not now", style: "cancel" },
       { text: "Turn on", onPress: () => void registerForPush({ prompt: true }) },

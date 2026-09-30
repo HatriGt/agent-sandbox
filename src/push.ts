@@ -90,7 +90,9 @@ export interface ExpoMessage {
   to: string;
   title: string;
   body: string;
-  data: { box: string; kind: NotifyEvent["kind"]; url: string };
+  data: { box: string; kind: NotifyEvent["kind"]; url: string; nonce?: string; choices?: number };
+  /** Registered in the app (mobile/src/lib/push.ts): `ask-choices-2` / `ask-choices-3` action buttons. */
+  categoryId?: string;
   sound: "default";
   priority: "high" | "default";
   channelId: string;
@@ -115,18 +117,41 @@ export function shortTitle(label: string | undefined, box: string): string {
   return one.length > TITLE_MAX ? `${one.slice(0, TITLE_MAX - 1).trimEnd()}…` : one;
 }
 
+/** Choice buttons for a waiting push (src/answer-choice.ts): redacted short labels + one-use nonce. */
+export interface PushChoices {
+  labels: readonly string[];
+  nonce: string;
+}
+
+/** Category ids the app registers; the count picks how many action buttons the OS shows. */
+export const choiceCategory = (n: number) => `ask-choices-${n}`;
+
 /**
  * One Expo message per device. Deliberately content-free beyond the title: the body is a fixed
- * phrase, never the question — see the module comment on lock screens.
+ * phrase, never the question — see the module comment on lock screens. A question with choices adds
+ * the choice LABELS only (numbered to match the "1 / 2 / 3" action buttons, whose titles are fixed
+ * per category on iOS) and the nonce in the data payload, which is never displayed.
  */
-export function buildPushMessages(e: NotifyEvent, tokens: readonly string[], title: string): ExpoMessage[] {
+export function buildPushMessages(e: NotifyEvent, tokens: readonly string[], title: string, choices?: PushChoices): ExpoMessage[] {
   const needsYou = e.kind === "waiting" || e.kind === "budget";
-  const body = e.kind === "failed" && e.note ? `Failed — ${e.note}` : PHRASE[e.kind];
+  const labels = needsYou && choices ? choices.labels.slice(0, 3).map((l) => l.replace(/\s+/g, " ").trim().slice(0, 40)).filter(Boolean) : [];
+  const withChoices = labels.length >= 2 && !!choices;
+  const body = withChoices
+    ? `${PHRASE[e.kind]} · ${labels.map((l, i) => `${i + 1} ${l}`).join(" · ")}`
+    : e.kind === "failed" && e.note
+      ? `Failed — ${e.note}`
+      : PHRASE[e.kind];
   return tokens.map((to) => ({
     to,
     title: shortTitle(title, e.box),
     body,
-    data: { box: e.box, kind: e.kind, url: `asb://box/${encodeURIComponent(e.box)}` },
+    data: {
+      box: e.box,
+      kind: e.kind,
+      url: `asb://box/${encodeURIComponent(e.box)}`,
+      ...(withChoices ? { nonce: choices!.nonce, choices: labels.length } : {}),
+    },
+    ...(withChoices ? { categoryId: choiceCategory(labels.length) } : {}),
     sound: "default",
     priority: needsYou ? "high" : "default",
     channelId: needsYou ? "needs-you" : "runs",

@@ -41,6 +41,7 @@ import { GettingStarted, gettingStartedDismissed } from "@/components/GettingSta
 import { TrialEndedNotice } from "@/components/TrialBadge";
 import { displayState, fmtDuration } from "@/lib/lifecycle";
 import { questionHeadline } from "@/lib/question";
+import { QuestionChoices } from "@/components/QuestionChoices";
 import { prefetchWatch } from "@/hooks/useWatchStream";
 import { Button } from "@/components/ui/button";
 import { AnimatedTabs } from "@/components/ui/animated-tabs";
@@ -858,6 +859,9 @@ export function Hub({
                         </span>
                         <ArrowRight className="text-muted-foreground size-3.5 shrink-0 -translate-x-0.5 opacity-0 transition-[opacity,translate] duration-150 group-hover:translate-x-0 group-hover:opacity-100 group-focus-visible:translate-x-0 group-focus-visible:opacity-100" />
                       </button>
+                      {b.runState === "waiting" && b.question && (
+                        <QuestionChoices box={b.name} question={b.question} className="px-3.5 pb-2.5 sm:pl-[8.5rem]" />
+                      )}
                     </li>
                   ))}
             </ul>

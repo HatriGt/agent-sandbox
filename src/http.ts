@@ -33,6 +33,7 @@ import { githubAuthorizeUrl, githubExchangeCode, githubIdentity } from "./github
 import { keyFromEnvOrFile, makeSecretBox } from "./secretbox.js";
 import { allBlobs, ownerKey, registerUserStoreBackend, withOwner, OPERATOR_OWNER } from "./user-store.js";
 import { detectTransitions, formatNotification, makeNotifier, toggleFor, type BoxRunView, type NotifyEvent } from "./notify.js";
+import { claimNonce, mintNonce, questionChoices, releaseNonce } from "./answer-choice.js";
 import { buildPushMessages, deviceCount, listDeviceTokens, makeOwnerRateCap, pruneToken, registerDevice, sendExpoPush, unregisterDevice } from "./push.js";
 import { fetchPinned } from "./net-guard.js";
 import { buildDigest } from "./digest.js";
@@ -569,7 +570,13 @@ const sendPushFor = async (owner: string, ev: NotifyEvent, label: string | undef
   const tokens = listDeviceTokens(db, secretBox, owner);
   if (tokens.length === 0) return;
   if (!pushCap.allow(owner)) return void console.error(`[push] rate cap hit for an owner; dropped ${ev.kind}`);
-  await sendExpoPush(buildPushMessages(ev, tokens, label ? redactor.redact(label) : ev.box), {
+  // Answer from the notification (src/answer-choice.ts): choice LABELS only, redacted, plus a
+  // one-use nonce in the (never displayed) data payload. The question text itself never leaves.
+  const choices = ev.kind === "waiting" || ev.kind === "budget" ? questionChoices(ev.question) : [];
+  const pushChoices = choices.length
+    ? { labels: choices.map((c) => redactor.redact(c.label)), nonce: mintNonce(db, owner, ev.box, ev.question ?? "") }
+    : undefined;
+  await sendExpoPush(buildPushMessages(ev, tokens, label ? redactor.redact(label) : ev.box, pushChoices), {
     fetch,
     prune: (tok) => pruneToken(db, tok),
     accessToken: process.env.EXPO_ACCESS_TOKEN || undefined,
@@ -1982,6 +1989,34 @@ app.post("/notify/test.json", async (req: Request, res: Response) => {
     res.json({ ok: r.ok, status: r.status });
   } catch (e) {
     res.status(502).json({ error: `webhook unreachable: ${String((e as Error).message ?? e).slice(0, 200)}` });
+  }
+});
+
+// Answer a question from a notification action (docs/plan-demo-parity.md bet 1). Auth is the normal
+// dashboard auth (the app's stored session); the nonce binds the tap to ONE (owner, box, question)
+// so a stale push can never answer a newer question. Answers once; a replay of the same choice is
+// an idempotent success, a different choice after the first is 409.
+app.post("/questions/answer.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const p = principalOf(res);
+  const owner = p.kind === "user" ? p.userId : OPERATOR_OWNER;
+  const b = (req.body ?? {}) as { box?: unknown; nonce?: unknown; choice?: unknown };
+  if (typeof b.box !== "string" || !b.box) return void res.status(400).json({ error: "box required" });
+  try {
+    const snap = await watchHub.read(b.box).catch(() => undefined);
+    const current = snap?.runState === "waiting" ? snap.question : undefined;
+    const r = claimNonce(db, { owner, box: b.box, nonce: b.nonce, choice: b.choice, currentQuestion: current });
+    if (!r.ok) return void res.status(r.status).json({ error: r.error });
+    if (r.already) return void res.json({ ok: true, already: true });
+    try {
+      await resumeQuietly(b.box, r.choice.answer);
+    } catch (e) {
+      releaseNonce(db, b.nonce as string);
+      throw e;
+    }
+    res.json({ ok: true, answer: redactor.redact(r.choice.label) });
+  } catch (e) {
+    failWith(res, e);
   }
 });
 

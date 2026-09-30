@@ -571,6 +571,9 @@ export const api = {
     post<NotifySettings>("/notify.json", s),
   testNotify: () => post<{ ok: true }>("/notify/test.json", {}),
   pushRegister: (token: string, platform: string) => post<{ ok: true; id: string }>("/push/register.json", { token, platform }),
+  /** Answer from a notification action: one-use nonce + choice index (server: src/answer-choice.ts). */
+  answerQuestion: (box: string, nonce: string, choice: number) =>
+    post<{ ok: true; already?: boolean; answer?: string }>("/questions/answer.json", { box, nonce, choice }, AGENT_TIMEOUT_MS),
   pushUnregister: (token: string) => post<{ ok: true; removed: boolean }>("/push/unregister.json", { token }),
 
   automations: () => get<{ triggers: Automation[] }>("/triggers.json"),

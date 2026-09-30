@@ -164,7 +164,17 @@ export function QuestionCard({
                     >
                       {on && <Check className="size-3" strokeWidth={3} />}
                     </span>
-                    <span className="min-w-0 flex-1">{opt}</span>
+                    <span className="min-w-0 flex-1">
+                      {/* "Label | detail" (src/drivers/prompts.ts): label reads first, detail muted. */}
+                      {opt.includes(" | ") ? (
+                        <>
+                          {opt.slice(0, opt.indexOf(" | "))}
+                          <span className="text-muted-foreground"> — {opt.slice(opt.indexOf(" | ") + 3)}</span>
+                        </>
+                      ) : (
+                        opt
+                      )}
+                    </span>
                     <kbd className="text-faint hidden sm:inline">{i + 1}</kbd>
                   </button>
                 </li>
