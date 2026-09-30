@@ -116,3 +116,22 @@ test("say text never leaks structure: digest is derived from typed events only",
   assert.equal(d.questions.length, 0);
   assert.equal(d.plan.length, 0);
 });
+
+test("receipt provenance: known agent + model ride on the digest, labelled", () => {
+  const d = buildDigest(baseInput({ agent: "omp", model: "some-model" }));
+  assert.deepEqual(d.provenance, { agent: "omp", agentLabel: "oh-my-pi", model: "some-model" });
+  assert.equal(buildDigest(baseInput({ agent: "claude" })).provenance?.agentLabel, "Claude Code");
+});
+
+test("receipt provenance: nothing known means no provenance field (never guessed), and no cost", () => {
+  const d = buildDigest(baseInput());
+  assert.equal(d.provenance, undefined);
+  assert.equal("cost" in d, false);
+  // An unknown kind passes through unlabelled rather than being coerced.
+  assert.deepEqual(buildDigest(baseInput({ agent: "future" })).provenance, { agent: "future" });
+});
+
+test("receipt provenance survives the archive's digest_json round-trip", () => {
+  const d = buildDigest(baseInput({ agent: "claude", model: "m1" }));
+  assert.deepEqual(JSON.parse(JSON.stringify(d)).provenance, d.provenance);
+});

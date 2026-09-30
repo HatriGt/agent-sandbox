@@ -10,6 +10,7 @@
  */
 import type { TraceEvent, PlanItem } from "./trace.js";
 import type { VerifyResult } from "./verify.js";
+import { AGENT_LABELS, isAgentKind } from "./agent-kind.js";
 
 export interface DigestFile {
   path: string;
@@ -27,6 +28,17 @@ export interface DigestInput {
   files: DigestFile[];
   /** Verified-outcomes result (src/verify.ts), when the run carried a verify clause. */
   verified?: VerifyResult;
+  /** Which coding agent ran (the box's .agent.kind mark), when known. */
+  agent?: string;
+  /** The model the run used, when the controller knows it (never guessed). */
+  model?: string;
+}
+
+/** Receipt provenance: who ran this. Only known facts; absent fields were not recorded. */
+export interface DigestProvenance {
+  agent?: string;
+  agentLabel?: string;
+  model?: string;
 }
 
 export interface DigestPlanStep extends PlanItem {
@@ -53,6 +65,8 @@ export interface RunDigest {
   questions: Array<{ question: string; answer?: string }>;
   /** Verified-outcomes result: pass means checked, not just claimed. */
   verified?: VerifyResult;
+  /** Receipt provenance (driver, model), when known. Persisted with the archived digest. */
+  provenance?: DigestProvenance;
   /** One sentence for notifications and list rows. */
   headline: string;
 }
@@ -164,6 +178,12 @@ export function buildDigest(input: DigestInput): RunDigest {
     verified: input.verified,
   });
 
+  const provenance: DigestProvenance = {
+    ...(input.agent ? { agent: input.agent } : {}),
+    ...(isAgentKind(input.agent) ? { agentLabel: AGENT_LABELS[input.agent] } : {}),
+    ...(input.model ? { model: input.model } : {}),
+  };
+
   return {
     box: input.box,
     task: input.task,
@@ -178,6 +198,7 @@ export function buildDigest(input: DigestInput): RunDigest {
     questions,
     ...(usage ? { usage } : {}),
     ...(input.verified ? { verified: input.verified } : {}),
+    ...(Object.keys(provenance).length ? { provenance } : {}),
     headline,
   };
 }

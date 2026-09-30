@@ -245,6 +245,8 @@ export interface RunDigest {
   headline: string;
   /** Post-run verification, when the task was delegated with a `verify` clause. */
   verified?: { mode: "command" | "criterion"; pass: boolean; detail: string };
+  /** Receipt provenance: which agent ran and on which model, only when known. */
+  provenance?: { agent?: string; agentLabel?: string; model?: string };
 }
 
 export interface AskResult {

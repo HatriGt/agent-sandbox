@@ -17,11 +17,27 @@ remains the only deploy step. A React Native / Expo companion app lives in `mobi
 
 ## What the product is
 
-**Agent Sandbox is sandbox-as-a-service for coding agents.** We provide hardware-isolated microVM
-sandboxes as a service: sign up on the hosted controller and use them immediately, or self-host the
-whole stack for free. Users reach their sandboxes from the **dashboard**, from **AI agents / IDEs
-over MCP** (Cursor, Claude Code, Codex, VS Code, Windsurf, Zed…), or from **scripts/CI over plain
-HTTP** — three peer entry points into the same fleet.
+> **Agent Sandbox — your own agent cloud.** Any coding agent, any model, any account. Every run in
+> its own microVM. Always on: manual, scheduled, event-triggered, long-running. When it needs a
+> decision, it asks instead of guessing.
+
+That sentence is the direction (plan: `docs/plan-agent-cloud.md`). What exists **today**:
+
+- **Drivers:** Claude Code and oh-my-pi (`src/agent-kind.ts`). Codex, OpenCode and Gemini CLI are
+  planned.
+- **Models:** the Claude catalog, routed through ccproxy (`src/models.ts`). OpenAI,
+  OpenAI-compatible endpoints and local models are planned.
+- **Triggers:** manual runs (dashboard, MCP, curl) and `after:` chains (`src/handoff.ts`).
+  Schedules, webhooks/GitHub events and long-running runs with budgets are planned.
+- **Box:** built — a hardware-isolated microVM per run, warm pool, sleep/wake, checkpoints, keep.
+
+Every feature must be expressible as a field of one primitive, or it is out of scope:
+`Run = Trigger × Harness × Box → Artifact, under Supervision`.
+
+Users reach their agent cloud from the **dashboard**, from **AI agents / IDEs over MCP** (Cursor,
+Claude Code, Codex, VS Code, Windsurf, Zed…), or from **scripts/CI over plain HTTP** — three peer
+entry points into the same fleet. Self-host is the identity; hosted is "we run your agent cloud for
+you" and stays feature-identical (open-core).
 
 **Business model:** hosted service, free for all during beta; self-hosting free forever
 (open-core). Billing is deliberately deferred, but the product must be **monetization-ready**:
@@ -34,7 +50,7 @@ Two personas now, and the product must serve both:
 
 1. **The hosted user** — signs up cold on the landing page. Has zero skills, zero GitHub accounts
    connected, no mental model. The funnel is: land → sign up → **activate** (first successful run,
-   ideally reaching the ask-and-stop "magic moment") → habit (runs per week) → convert (paid,
+   ideally reaching the asks-instead-of-guessing "magic moment") → habit (runs per week) → convert (paid,
    post-beta). Time-to-first-successful-run is the metric that decides whether beta produces
    advocates or churned emails.
 2. **The self-host operator** — owns the VPS, uses `AUTH_MODE=token`. The original persona. Their
@@ -46,8 +62,9 @@ uncommitted working tree), away from the desk (phone), and absent (CI/scripts).
 
 ## Product Purpose
 
-Give a coding task to an autonomous agent inside a throwaway microVM, stay in the loop while it
-works, and get a pull request back. The sandbox is the product; how you reach it is your choice.
+Run any coding agent, on any model and account, inside a throwaway microVM; be asked when it needs
+a decision; get a verified pull request back. The microVM is why "always on, unattended" is a safe
+sentence; supervision is what makes it worth leaving on. How you reach it is your choice.
 Any capability that works on only one entry path is a bug in the strategy.
 
 Success, restated for SaaS: **a delegated run never silently stalls waiting for a human who didn't
@@ -56,17 +73,20 @@ pulling the user back.**
 
 ## Positioning
 
-Four things a neighbouring agent-runner does not have together:
+Vendor cloud agents are each locked to one model, one account, one cloud; the popular self-hosted
+agents are model-agnostic but have no hard isolation boundary or supervision layer. Four things a
+neighbouring agent-runner does not have together:
 
 - **microVM isolation** (microsandbox/KVM), not containers — a hard boundary around
   model-generated code.
-- **Ask-and-stop interactivity.** A `PreToolUse` hook denies every further tool call while a
-  question sentinel exists, so the agent genuinely halts instead of guessing.
+- **Asks instead of guessing.** A `PreToolUse` hook denies every further tool call while a
+  question sentinel exists, so the agent genuinely waits for the answer.
 - **A read-only co-pilot lane.** A second agent in the same box answers questions about a run
   *without* pausing or perturbing the driver.
 - **Entry-point parity.** Browser, any MCP client, or curl — no privileged "real" client.
 
-Hosted pitch: *"the 5-minute self-host, in 0 minutes."* Quality pitch (once verify is surfaced):
+Self-host pitch: *"your own agent cloud, one command."* Hosted pitch: *"we run your agent cloud
+for you."* Quality pitch (once verify is surfaced):
 *"our sandbox doesn't just run your agent, it proves the work."*
 
 ## Capabilities (confirmed, shipped)
@@ -83,14 +103,15 @@ voice dictation. Git/GitHub: full PR surface (merge/approve/review/checks) on we
 Walk-away layer: webhook notifications (`src/notify.ts`), run digest (`src/digest.ts`), verified
 outcomes (`src/verify.ts`), dependent delegations (`src/handoff.ts`).
 
-Not built: **billing** (free during beta; `plan` set by admin), **run history** (a torn-down box's
+Not built: **other drivers** (Codex, OpenCode, Gemini CLI), **non-Claude model sources**,
+**scheduled / event triggers**, **budgets and cost on the receipt**, **billing** (free during beta; `plan` set by admin), **run history** (a torn-down box's
 history is gone — see Direction), **push notifications** (mobile has a local activity feed only).
 
 ## Direction — the SaaS funnel (current focus)
 
 Priorities, in order:
 
-1. **Activation.** A demo first run that reaches the ask-and-stop moment in minutes without a
+1. **Activation.** A demo first run that reaches the first question in minutes without a
    GitHub account; the welcome flow routed after signup; a curated skill library seeded into new
    accounts.
 2. **Retention loop.** Notifications configurable on every surface (web UI for `/notify.json`;
@@ -134,8 +155,8 @@ Priorities, in order:
 
 ## Brand Commitments
 
-Display name: **Agent Sandbox**. Repo and package: `agent-sandbox`. "Sandbox as a service" is the
-category line; "cloud agent sandbox" describes what it is. Mark: `web/src/components/ui/logo.tsx` +
+Display name: **Agent Sandbox**. Repo and package: `agent-sandbox`. "Your own agent cloud" is the
+tagline; the sandbox is the honest reason the rest is safe. Mark: `web/src/components/ui/logo.tsx` +
 `web/public/favicon.svg`. Full token system in `web/src/index.css`; light and dark first-class.
 Copy voice is direct and technical; the landing page adds a serif display headline. UX bar is
 premium: motion with purpose, real empty states, no fabricated data.

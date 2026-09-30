@@ -31,6 +31,28 @@ export function useRunDigest(box: string, finished: boolean, finishedKey: string
   return digest;
 }
 
+/**
+ * The receipt's provenance + supervision line, machine voice: agent · model · questions · tokens.
+ * Only recorded facts appear — no cost (no price data exists), no guessed model.
+ */
+export function receiptFacts(digest: RunDigest): string[] {
+  const out: string[] = [];
+  const p = digest.provenance;
+  if (p?.agentLabel || p?.agent) out.push(p.agentLabel ?? p.agent!);
+  if (p?.model) out.push(p.model);
+  const asked = digest.questions.length;
+  if (asked > 0) {
+    const answered = digest.questions.filter((q) => q.answer !== undefined).length;
+    out.push(`${asked} asked · ${answered} answered`);
+  }
+  if (digest.usage) out.push(`${fmtTokens(digest.usage.inputTokens + digest.usage.outputTokens)} tokens`);
+  return out;
+}
+
+function fmtTokens(n: number): string {
+  return n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k` : String(n);
+}
+
 export function DigestCard({ digest }: { digest: RunDigest }) {
   const [open, setOpen] = React.useState(true);
 
@@ -40,6 +62,7 @@ export function DigestCard({ digest }: { digest: RunDigest }) {
   const hasBody = digest.plan.length > 0 || digest.files.length > 0 || digest.failedCommands.length > 0 || blocked.length > 0 || digest.questions.length > 0;
   const files = digest.files.slice(0, FILE_CAP);
   const moreFiles = digest.files.length - files.length;
+  const facts = receiptFacts(digest);
 
   return (
     <div className="enter bg-card raised rounded-xl px-4 py-3">
@@ -55,6 +78,12 @@ export function DigestCard({ digest }: { digest: RunDigest }) {
         {duration && <span className="stamp text-muted-foreground shrink-0">{duration}</span>}
         {hasBody && <ChevronDown className={cn("text-muted-foreground size-3.5 shrink-0 transition-transform", open && "rotate-180")} aria-hidden />}
       </button>
+
+      {facts.length > 0 && (
+        <p className="stamp text-muted-foreground mt-1.5 min-w-0 truncate pl-[18px]" title={facts.join(" · ")}>
+          {facts.join(" · ")}
+        </p>
+      )}
 
       {digest.verified && (
         <p className={cn("mt-1.5 min-w-0 truncate pl-[18px] text-micro", digest.verified.pass ? "text-ok" : "text-destructive")}>

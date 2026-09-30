@@ -507,6 +507,13 @@ const sendNotification = async (ev: NotifyEvent): Promise<void> => {
     clearTimeout(t);
   }
 };
+/** Receipt provenance for a box: the agent mark from the snapshot, and the model only when known —
+ *  the dashboard's explicit per-box pick. Not the controller default: an MCP delegate can pass its
+ *  own model that this map never sees, so falling back would be a guess. */
+const runProvenance = (box: string, agent: string | undefined): { agent?: string; model?: string } => {
+  const model = boxModels.get(box);
+  return { ...(agent ? { agent } : {}), ...(model ? { model } : {}) };
+};
 const notifier = makeNotifier({ send: sendNotification, log: (m) => console.error(m) });
 
 /**
@@ -538,6 +545,7 @@ const archiveFinishedRun = async (box: string, opts: { withFiles: boolean } = { 
     events: parseTrace(snap.log ?? ""),
     files,
     verified: boxVerified.get(box),
+    ...runProvenance(box, snap.agent),
   });
   archiveRun(db, { box, owner: ownerOf(db, box) ?? OPERATOR_OWNER, digest, ...(diffText ? { diffText } : {}) });
 };
@@ -1910,6 +1918,7 @@ app.get("/digest.json", async (req: Request, res: Response) => {
       events: parseTrace(snap.log ?? ""),
       files,
       verified: boxVerified.get(session),
+      ...runProvenance(session, snap.agent),
     });
     // The snapshot's log/task/question are already redacted by the hub's reader; the trace-derived
     // strings inherit that. Task from the sentinel file is redacted there too.

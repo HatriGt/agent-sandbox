@@ -1,15 +1,15 @@
 import * as React from "react";
 import { Link } from "react-router";
-import { ArrowRight, Box, Check, Circle, CircleDot, Cpu, Flame, GitBranch, Globe, KeyRound, Laptop, MessageCircleQuestion, MoonStar, Pause, Plug, Server, ShieldCheck, Terminal, Timer, X } from "lucide-react";
+import { ArrowRight, Box, Check, Circle, CircleDot, Clock, Copy, Smartphone, Cpu, Flame, GitBranch, Globe, KeyRound, Laptop, MessageCircleQuestion, Pause, Plug, Server, ShieldCheck, Terminal, Timer, X } from "lucide-react";
 import { motion, useInView, useReducedMotion } from "motion/react";
 import { Logo } from "@/components/ui/logo";
 import { cn } from "@/lib/utils";
 import { useSession } from "@/lib/auth";
 
 /**
- * The public landing page. No data, no token — the product explained and DEMONSTRATED: the hero is a
- * live, self-running replay of a delegation (task → warm claim → plan → steps → question → answer →
- * done), built from the same visual vocabulary as the console so what you see is what you get.
+ * The public landing page. No data, no token. The hero is the honest drivers × model-sources matrix
+ * (available vs planned); below it, a self-running replay of one delegation beside its steps, then
+ * security and the one-command self-host install (primary) with hosted signup (secondary).
  */
 export default function Landing() {
   const { ready, config, me, token } = useSession();
@@ -31,11 +31,11 @@ export default function Landing() {
           <span className="text-body font-semibold tracking-[-0.01em]">Agent Sandbox</span>
         </div>
         <nav className="flex items-center gap-1">
-          <a href="#how" className="text-muted-foreground hover:text-foreground hidden rounded-md px-3 py-1.5 text-meta sm:inline-block">
-            How it works
+          <a href="#demo" className="text-muted-foreground hover:text-foreground hidden rounded-md px-3 py-1.5 text-meta sm:inline-block">
+            Demo
           </a>
           <a href="#trust" className="text-muted-foreground hover:text-foreground hidden rounded-md px-3 py-1.5 text-meta sm:inline-block">
-            Isolation
+            Security
           </a>
           <a
             href="https://github.com/HatriGt/agent-sandbox"
@@ -63,8 +63,8 @@ export default function Landing() {
       {/* ───────────── hero ───────────── */}
       <section className="relative isolate">
         <HairlineGrid />
-        <div className="mx-auto grid max-w-6xl items-start gap-12 px-6 pt-10 pb-20 lg:grid-cols-[1.05fr_1fr] lg:pt-16">
-        <div>
+        <div className="mx-auto grid max-w-6xl grid-cols-1 items-start gap-12 px-6 pt-10 pb-20 lg:grid-cols-[1.05fr_1fr] lg:pt-16">
+        <div className="min-w-0">
           <Reveal>
             <p className="text-live label mb-4 inline-flex items-center gap-2 rounded-full border px-3 py-1">
               <span className="bg-live breathe size-1.5 rounded-full" />
@@ -73,51 +73,35 @@ export default function Landing() {
           </Reveal>
           <Reveal delay={0.05}>
             <h1 className="font-serif text-[clamp(2.4rem,5.2vw,4.1rem)] leading-[1.05] tracking-[-0.02em] text-balance">
-              Delegate the task.
-              <br />
-              Keep the control.
+              Your own agent cloud.
             </h1>
           </Reveal>
           <Reveal delay={0.1}>
             <p className="text-muted-foreground mt-5 max-w-[52ch] text-lead leading-relaxed">
-              Give a coding task to an autonomous agent in its own disposable sandbox — from Cursor, Claude Code,
-              Codex, VS Code or any agentic IDE that speaks MCP, from this dashboard, or from a script. Watch it
-              work live, answer the one question it stops to ask, and get a pull request back.
+              Any coding agent, any model, any account. Every run in its own microVM. Always on: manual, scheduled,
+              event-triggered, long-running. When it needs a decision, it asks instead of guessing.
             </p>
           </Reveal>
           <Reveal delay={0.15}>
-            <div className="mt-7 flex flex-wrap items-center gap-3">
-              <Link
-                to={consoleHref}
-                className="bg-primary text-primary-foreground hover:bg-primary/80 inline-flex h-11 items-center gap-2 rounded-md px-5 text-body font-medium shadow-e1"
-              >
-                {primaryLabel}
-                <ArrowRight className="size-4" />
-              </Link>
-              {saas && signedIn && (
-                <Link to="/dashboard/connect" className="border-line-strong hover:bg-muted inline-flex h-11 items-center gap-2 rounded-md border px-5 text-body font-medium">
-                  <Plug className="size-4" />
-                  Connect your IDE
+            <div className="mt-7 flex max-w-xl flex-col gap-3">
+              <InstallCommand />
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                <Link
+                  to={consoleHref}
+                  className="border-line-strong hover:bg-muted inline-flex h-10 items-center gap-2 rounded-md border px-4 text-meta font-medium transition-colors duration-200 ease-out"
+                >
+                  {saas && !signedIn && primaryLabel !== "Sign in" ? "Or use the hosted beta" : primaryLabel}
+                  <ArrowRight className="size-3.5" />
                 </Link>
-              )}
+                <span className="text-muted-foreground text-micro">
+                  {saas && !signedIn ? (beta ? "Hosted is free during the public beta · no card." : trialDays ? `Hosted: ${trialDays} days free · no card.` : "") : "Self-host is free forever · MIT."}
+                </span>
+              </div>
             </div>
-            <p className="text-muted-foreground mt-3 text-meta">
-              {saas && !signedIn ? (beta ? "Free during the public beta · no card, nothing to cancel." : trialDays ? `${trialDays} days free · no card.` : "") : ""}
-              {saas && !signedIn && (
-                <>
-                  {" "}
-                  Prefer your own server?{" "}
-                  <a href="https://github.com/HatriGt/agent-sandbox/blob/main/docs/self-hosting.md" target="_blank" rel="noreferrer" className="text-foreground underline decoration-[oklch(0.55_0.02_286)] underline-offset-4 hover:decoration-current">
-                    Self-host — it's open source
-                  </a>
-                  .
-                </>
-              )}
-            </p>
           </Reveal>
           <Reveal delay={0.18}>
             <div className="text-muted-foreground mt-8 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-micro">
-              <span className="label mr-1">Works with</span>
+              <span className="label mr-1">Delegate from</span>
               {["Cursor", "Claude Code", "Codex", "VS Code", "Windsurf", "Zed", "any MCP client"].map((n) => (
                 <span key={n} className="rounded-md border px-2 py-0.5 font-medium">
                   {n}
@@ -125,17 +109,45 @@ export default function Landing() {
               ))}
             </div>
           </Reveal>
-          <Reveal delay={0.2}>
-            <dl className="text-muted-foreground mt-10 grid max-w-md grid-cols-3 gap-6 text-meta">
-              <Stat value="<1s" label="warm start from the pool" />
-              <Stat value="KVM" label="hardware isolation per run" />
-              <Stat value="0" label="secrets in the browser" />
-            </dl>
-          </Reveal>
         </div>
         <Reveal delay={0.12} className="min-w-0">
-          <Demo />
+          <Matrix />
         </Reveal>
+        </div>
+      </section>
+
+      {/* ───────────── the 30-second demo ───────────── */}
+      <section id="demo" className="border-t">
+        <div className="mx-auto grid max-w-6xl grid-cols-1 items-start gap-12 px-6 py-20 lg:grid-cols-[1fr_1.05fr]">
+          <div className="min-w-0">
+            <Reveal>
+              <h2 className="font-serif text-[clamp(1.8rem,3.2vw,2.5rem)] leading-tight tracking-[-0.015em]">One run, start to receipt.</h2>
+              <p className="text-muted-foreground mt-3 max-w-[56ch] text-body">
+                What a delegated run looks like end to end. The question is a real pause — a hook blocks every tool call
+                until you answer.
+              </p>
+            </Reveal>
+            <ol className="mt-8 flex flex-col gap-3">
+              {DEMO_STEPS.map((st, i) => (
+                <Reveal key={st.title} delay={i * 0.04}>
+                  <li className={cn("flex items-start gap-3 rounded-xl border px-4 py-3", st.needsYou && "border-attention/50")}>
+                    <span className={cn("grid size-8 shrink-0 place-items-center rounded-md [&_svg]:size-4", st.needsYou ? "bg-attention/20 text-attention-text" : "bg-muted text-foreground")}>{st.icon}</span>
+                    <span className="min-w-0">
+                      <span className="text-foreground flex items-center gap-2 text-body font-medium">
+                        <span className="stamp text-muted-foreground">{String(i + 1).padStart(2, "0")}</span>
+                        {st.title}
+                      </span>
+                      <span className="text-muted-foreground mt-0.5 block text-meta leading-relaxed">{st.body}</span>
+                    </span>
+                  </li>
+                </Reveal>
+              ))}
+            </ol>
+          </div>
+          <Reveal delay={0.1} className="min-w-0">
+            <Demo />
+            <p className="text-muted-foreground mt-3 text-micro">An illustrative replay built from the console's own components.</p>
+          </Reveal>
         </div>
       </section>
 
@@ -205,7 +217,7 @@ export default function Landing() {
               it. When it needs a decision it pauses — every tool call blocked — and you pick an option or type your own.
             </p>
             <ul className="mt-6 flex flex-col gap-3 text-body">
-              <Li icon={<Pause className="text-attention-text size-4" strokeWidth={2.5} />}>Ask-and-stop: a real pause, enforced by a hook, not a hope.</Li>
+              <Li icon={<Pause className="text-attention-text size-4" strokeWidth={2.5} />}>Asks instead of guessing: a real pause, enforced by a hook, not a hope.</Li>
               <Li icon={<MessageCircleQuestion className="text-muted-foreground size-4" />}>Side questions: a read-only helper explains the run without interrupting it.</Li>
               <Li icon={<Timer className="text-muted-foreground size-4" />}>Queued follow-ups: type while it works; delivered when the turn ends.</Li>
               <Li icon={<GitBranch className="text-muted-foreground size-4" />}>@-mention any file in the checked-out repos.</Li>
@@ -228,14 +240,43 @@ export default function Landing() {
               Built for code you didn't write yet.
             </h2>
           </Reveal>
-          <div className="mt-10 grid gap-x-10 gap-y-8 sm:grid-cols-2 lg:grid-cols-3">
-            <Feature icon={<ShieldCheck />} title="True isolation" body="Every run gets its own hardware-isolated sandbox with its own kernel. Model-generated code never touches your host — a hardware boundary, not a container namespace." />
-            <Feature icon={<Flame />} title="Warm pool" body="Pre-booted machines wait with the agent installed. A new task starts in seconds instead of a cold boot." />
-            <Feature icon={<KeyRound />} title="Credential broker" body="GitHub accounts live on the controller, encrypted, never in the browser. The right account is injected per repo; if an agent asks for auth, the controller answers." />
-            <Feature icon={<Timer />} title="Honest lifecycle" body="A run cap and an idle limit you configure. Quiet machines sleep with their workspace intact and wake on your reply; only you (or the cap) destroy anything." />
-            <Feature icon={<MoonStar />} title="Nothing hidden, nothing invented" body="The dashboard shows what is alive right now — capacity slots, real deadlines, real vitals. No fabricated analytics." />
-            <Feature icon={<Cpu />} title="Yours alone" body="Every machine has one owner. GitHub accounts and MCP servers are encrypted per user and reach only that user's runs; another account's box answers 404, not 403." />
+          <p className="text-muted-foreground mt-3 max-w-[60ch] text-body">
+            Always on only works if unattended is safe. Every run is fenced by a hardware boundary, a network allowlist
+            and a controller that keeps your credentials.
+          </p>
+          <div className="mt-10 grid gap-x-10 gap-y-8 sm:grid-cols-2">
+            <Feature icon={<ShieldCheck />} title="A microVM per run" body="Each run gets its own KVM-isolated machine with its own kernel. Model-generated code never touches your host — a hardware boundary, not a container namespace." />
+            <Feature icon={<Globe />} title="Egress allowlist" body="Choose which hosts a run may reach. Everything else is refused at the box's network edge." />
+            <Feature icon={<KeyRound />} title="Secrets kept out of the box" body="GitHub accounts and MCP credentials live encrypted on the controller, per user. The controller answers auth for the run; the browser never sees them." />
+            <Feature icon={<Cpu />} title="Audit log" body="Sign-ins, key changes, delegations and teardowns are recorded and readable by their owner. Another account's box answers 404, not 403." />
           </div>
+        </div>
+      </section>
+
+      {/* ───────────── install ───────────── */}
+      <section id="install" className="border-t">
+        <div className="mx-auto max-w-6xl px-6 py-20">
+          <Reveal>
+            <h2 className="font-serif text-[clamp(1.8rem,3.2vw,2.5rem)] leading-tight tracking-[-0.015em]">Run it on your own server.</h2>
+            <p className="text-muted-foreground mt-3 max-w-[60ch] text-body">
+              One command on a KVM-capable Linux host. Open source, MIT, free forever — the hosted beta is the same product,
+              run for you.
+            </p>
+            <div className="mt-8 flex max-w-2xl flex-col gap-4">
+              <InstallCommand />
+              <div className="flex flex-wrap items-center gap-4">
+                <a href={SELF_HOST} target="_blank" rel="noreferrer" className="text-foreground text-meta font-medium underline decoration-[oklch(0.55_0.02_286)] underline-offset-4 hover:decoration-current">
+                  Self-hosting guide
+                </a>
+                {saas && (
+                  <Link to={consoleHref} className="border-line-strong hover:bg-muted inline-flex h-10 items-center gap-2 rounded-md border px-4 text-meta font-medium transition-colors duration-200 ease-out">
+                    {signedIn ? primaryLabel : "Sign up for hosted"}
+                    <ArrowRight className="size-3.5" />
+                  </Link>
+                )}
+              </div>
+            </div>
+          </Reveal>
         </div>
       </section>
 
@@ -246,13 +287,13 @@ export default function Landing() {
             <p className="text-muted-foreground mt-1 text-meta">{saas && !signedIn ? (beta ? "Free during the beta. Sign up, add a GitHub account, start a task." : "Sign up, add a GitHub account, start a task.") : "Open the console, add a GitHub account, start a task."}</p>
           </div>
           <div className="flex items-center gap-3">
-            <Link to={consoleHref} className="bg-primary text-primary-foreground hover:bg-primary/80 inline-flex h-10 items-center gap-2 rounded-md px-4 text-meta font-medium">
-              {primaryLabel}
-              <ArrowRight className="size-4" />
-            </Link>
-            <a href={SELF_HOST} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-foreground text-meta">
+            <a href="#install" className="bg-primary text-primary-foreground hover:bg-primary/80 inline-flex h-10 items-center gap-2 rounded-md px-4 text-meta font-medium">
+              <Terminal className="size-4" />
               Self-host
             </a>
+            <Link to={consoleHref} className="text-muted-foreground hover:text-foreground text-meta">
+              {primaryLabel}
+            </Link>
             <a href="https://github.com/HatriGt/agent-sandbox" target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-foreground text-meta">
               Source · MIT
             </a>
@@ -289,15 +330,6 @@ function Reveal({ children, delay = 0, className }: { children: React.ReactNode;
     >
       {children}
     </motion.div>
-  );
-}
-
-function Stat({ value, label }: { value: string; label: string }) {
-  return (
-    <div>
-      <dt className="text-foreground font-serif text-h1 tracking-[-0.02em]">{value}</dt>
-      <dd className="mt-0.5 text-micro">{label}</dd>
-    </div>
   );
 }
 
@@ -527,6 +559,101 @@ function QuestionMock() {
   );
 }
 
+
+/* ───────────────────────────── hero matrix ───────────────────────────── */
+
+const DRIVERS = ["Claude Code", "oh-my-pi", "Codex", "OpenCode", "Gemini CLI"] as const;
+const SOURCES = ["Anthropic", "OpenAI", "OpenAI-compatible", "Local"] as const;
+/** Honest availability: today both shipped drivers run Claude models (routed through ccproxy). Everything else is planned. */
+const AVAILABLE = new Set(["Claude Code|Anthropic", "oh-my-pi|Anthropic"]);
+
+function Matrix() {
+  return (
+    <div className="bg-card overflow-hidden rounded-xl border shadow-e5">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b px-4 py-3">
+        <span className="text-foreground text-meta font-medium">Drivers × model sources</span>
+        <span className="text-muted-foreground ml-auto flex items-center gap-3 text-micro">
+          <span className="inline-flex items-center gap-1"><Check className="text-ok size-3" strokeWidth={3} /> available</span>
+          <span className="inline-flex items-center gap-1"><Clock className="size-3" /> planned</span>
+        </span>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[30rem] border-collapse text-meta">
+          <caption className="sr-only">Which coding agents run on which model sources today, and which are planned</caption>
+          <thead>
+            <tr>
+              <th scope="col" className="w-[8.5rem] px-3 py-2.5"><span className="sr-only">Driver</span></th>
+              {SOURCES.map((c) => (
+                <th key={c} scope="col" className="text-muted-foreground px-2 py-2.5 text-left text-micro font-medium">{c}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {DRIVERS.map((d) => (
+              <tr key={d} className="border-t">
+                <th scope="row" className="text-foreground px-3 py-2 text-left font-medium whitespace-nowrap">{d}</th>
+                {SOURCES.map((c) => {
+                  const on = AVAILABLE.has(`${d}|${c}`);
+                  return (
+                    <td key={c} className="px-1.5 py-1.5">
+                      <span
+                        className={cn(
+                          "inline-flex h-7 w-full items-center gap-1.5 rounded-md px-2 text-micro whitespace-nowrap",
+                          on ? "bg-ok/10 text-ok ring-ok/25 font-semibold ring-1 ring-inset" : "text-muted-foreground border border-dashed"
+                        )}
+                      >
+                        {on ? <Check className="size-3 shrink-0" strokeWidth={3} /> : <Clock className="size-3 shrink-0" />}
+                        {on ? "available" : "planned"}
+                      </span>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="text-muted-foreground flex flex-col gap-1 border-t px-4 py-3 text-micro">
+        <span>Every cell: <span className="text-foreground">own microVM · asks instead of guessing</span></span>
+        <span>Triggers today: manual runs and <span className="stamp">after:</span> chains · schedules and events planned</span>
+      </div>
+    </div>
+  );
+}
+
+function InstallCommand() {
+  const cmd = "git clone https://github.com/HatriGt/agent-sandbox && cd agent-sandbox && docker compose up -d --build";
+  const [copied, setCopied] = React.useState(false);
+  const copy = () => {
+    navigator.clipboard?.writeText(cmd).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    });
+  };
+  return (
+    <div className="bg-trace text-trace-fg flex items-center gap-2 rounded-md border py-1.5 pr-1.5 pl-3.5">
+      <span aria-hidden className="font-mono text-micro opacity-60 select-none">$</span>
+      <code className="min-w-0 flex-1 overflow-x-auto font-mono text-micro whitespace-nowrap">{cmd}</code>
+      <button
+        type="button"
+        onClick={copy}
+        className="bg-primary text-primary-foreground hover:bg-primary/80 inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-3 text-micro font-medium transition-colors duration-200 ease-out"
+        aria-label="Copy install command"
+      >
+        {copied ? <Check className="size-3.5" strokeWidth={3} /> : <Copy className="size-3.5" />}
+        {copied ? "Copied" : "Copy"}
+      </button>
+    </div>
+  );
+}
+
+const DEMO_STEPS: Array<{ icon: React.ReactNode; title: string; body: string; needsYou?: boolean }> = [
+  { icon: <CircleDot />, title: "An issue becomes a task", body: "From the dashboard, your IDE over MCP or a script today — from an issue label once event triggers ship." },
+  { icon: <Box />, title: "It runs in an isolated box", body: "A warm microVM claims the task with your repo checked out and none of your secrets inside." },
+  { icon: <Pause />, title: "It asks instead of guessing", body: "At a real decision it waits; every tool call is blocked until someone answers.", needsYou: true },
+  { icon: <Smartphone />, title: "You answer from your phone", body: "The question card is on the phone app, or a webhook tells you it's waiting. One tap and the run continues." },
+  { icon: <GitBranch />, title: "A verified PR with a receipt", body: "The pull request comes back with its verify result and a digest of what ran and what was asked." },
+];
 
 /* ───────────────────────────── visual elements ───────────────────────────── */
 
