@@ -38,6 +38,7 @@ import { cn } from "@/lib/utils";
 const Sandboxes = React.lazy(() => import("@/components/Sandboxes").then((m) => ({ default: m.Sandboxes })));
 const Integrations = React.lazy(() => import("@/components/Integrations").then((m) => ({ default: m.Integrations })));
 const SkillsPage = React.lazy(() => import("@/components/SkillsPage").then((m) => ({ default: m.SkillsPage })));
+const Automations = React.lazy(() => import("@/components/Automations").then((m) => ({ default: m.Automations })));
 const History = React.lazy(() => import("@/components/History").then((m) => ({ default: m.History })));
 const PullRequestPage = React.lazy(() => import("@/components/pr/PullRequestPage").then((m) => ({ default: m.PullRequestPage })));
 /** Hovering the nav item warms the chunk and both payloads, so the page paints complete on click. */
@@ -245,6 +246,7 @@ export default function App() {
     go({ view: "skills" });
     setMobileRail(false);
   }, [go]);
+  const showAutomations = React.useCallback(() => go({ view: "automations" }), [go]);
   const showHistory = React.useCallback(() => {
     go({ view: "history" });
     setMobileRail(false);
@@ -267,6 +269,7 @@ export default function App() {
   const paletteActions = React.useMemo<PaletteAction[]>(
     () => [
       { id: "fleet", label: "Fleet view", hint: "g f", icon: <LayoutGrid />, group: "Go to", run: showFleet },
+      { id: "automations", label: "Automations", icon: <Zap />, group: "Go to", run: showAutomations },
       { id: "history", label: "History", hint: "g h", icon: <Clock />, group: "Go to", run: showHistory },
       { id: "skills", label: "Skills", hint: "g s", icon: <Zap />, group: "Go to", run: showSkills },
       { id: "integrations", label: "Integrations", hint: "g a", icon: <Plug />, group: "Go to", run: showAccounts },
@@ -277,7 +280,7 @@ export default function App() {
       { id: "sidebar", label: collapsed ? "Expand sidebar" : "Collapse sidebar", icon: collapsed ? <PanelLeftOpen /> : <PanelLeftClose />, keywords: "rail navigation", run: () => setCollapsed(!collapsed) },
       { id: "keys", label: "Keyboard shortcuts", hint: "?", icon: <Keyboard />, keywords: "help keys", run: () => setShortcuts(true) },
     ],
-    [showFleet, showHistory, showSkills, showAccounts, showAccount, showAdmin, showConnect, dark, setDark, collapsed, setCollapsed]
+    [showFleet, showAutomations, showHistory, showSkills, showAccounts, showAccount, showAdmin, showConnect, dark, setDark, collapsed, setCollapsed]
   );
 
   React.useEffect(() => {
@@ -405,7 +408,7 @@ export default function App() {
     // hold the box-loading skeleton until the box surfaces (or the cleanup effect routes home).
     // Once the booting pane knows its machine it shares that box's pane key, so the swap to the real
     // Thread is a content change inside one pane — not a fade-out/fade-in remount (the jump-cut).
-    view === "fleet" ? "fleet" : view === "history" ? "history" : view === "skills" ? "skills" : view === "integrations" ? "integrations" : view === "account" ? "account" : view === "connect" ? "connect" : view === "welcome" ? "welcome" : view === "admin" ? "admin" : route.view === "pr" ? `pr:${route.repo}#${route.number}` : booting && !selectedBox ? (booting.machine ? `box:${booting.machine}` : "booting") : selectedBox ? `box:${selectedBox.name}` : view === "box" ? "box-loading" : "hub";
+    view === "fleet" ? "fleet" : view === "history" ? "history" : view === "automations" ? "automations" : view === "skills" ? "skills" : view === "integrations" ? "integrations" : view === "account" ? "account" : view === "connect" ? "connect" : view === "welcome" ? "welcome" : view === "admin" ? "admin" : route.view === "pr" ? `pr:${route.repo}#${route.number}` : booting && !selectedBox ? (booting.machine ? `box:${booting.machine}` : "booting") : selectedBox ? `box:${selectedBox.name}` : view === "box" ? "box-loading" : "hub";
 
   const reduceMotion = useReducedMotion();
 
@@ -529,6 +532,7 @@ export default function App() {
 
       <div className="flex flex-col gap-0.5 border-t px-2 py-2">
         <NavItem active={view === "fleet"} flash={flash === "fleet"} onClick={showFleet} icon={<LayoutGrid />} label="Fleet view" badge={boxes.length || undefined} shortcut="g f" />
+        <NavItem active={view === "automations"} onClick={showAutomations} icon={<Zap />} label="Automations" />
         <span className="contents" onMouseEnter={prefetchHistory}>
           <NavItem active={view === "history"} flash={flash === "history"} onClick={showHistory} icon={<Clock />} label="History" shortcut="g h" />
         </span>
@@ -700,6 +704,7 @@ export default function App() {
               <RailIcon onClick={newTask} icon={<Plus />} label="New task" shortcut="n" primary />
               <RailIcon onClick={openPalette} icon={<Search />} label="Search" shortcut="⌘K" />
               <RailIcon active={view === "fleet"} flash={flash === "fleet"} onClick={showFleet} icon={<LayoutGrid />} label="Fleet view" shortcut="g f" badge={boxes.length || undefined} dot={waiting.length > 0} />
+              <RailIcon active={view === "automations"} onClick={showAutomations} icon={<Zap />} label="Automations" />
               <span className="contents" onMouseEnter={prefetchHistory}>
                 <RailIcon active={view === "history"} flash={flash === "history"} onClick={showHistory} icon={<Clock />} label="History" shortcut="g h" />
               </span>
@@ -758,6 +763,10 @@ export default function App() {
                     onDestroyed={() => {}}
                     onBack={backToRail}
                   />
+                ) : view === "automations" ? (
+                  <PageEnter className="h-full min-h-0">
+                    <Automations onBack={backToRail} onOpenBox={(b) => go({ view: "box", name: b })} />
+                  </PageEnter>
                 ) : view === "history" ? (
                   <PageEnter className="h-full min-h-0">
                     <History onBack={backToRail} onAgain={newTask} />

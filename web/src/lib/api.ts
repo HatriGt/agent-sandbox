@@ -736,7 +736,102 @@ export const api = {
     ),
   deleteHistoryRun: (id: number) =>
     fetch(url("/history.json", { id: String(id) }), { method: "DELETE", headers: authHeaders }).then(parse<{ ok: true }>),
+  /** The History ledger: totals + filtered rows over the archive. */
+  ledger: (f: LedgerQuery = {}, signal?: AbortSignal) =>
+    fetch(url("/history/ledger.json", Object.fromEntries(Object.entries(f).filter(([, v]) => v !== undefined && v !== "").map(([k, v]) => [k, String(v)]))), { headers: authHeaders, signal }).then(
+      parse<{ totals: LedgerTotals; rows: LedgerRow[] }>
+    ),
+
+  /** Automations (triggers): schedules, webhooks, GitHub events and chains. */
+  triggers: (signal?: AbortSignal) => fetch(url("/triggers.json"), { headers: authHeaders, signal }).then(parse<{ triggers: Automation[] }>),
+  createTrigger: (t: AutomationDraft) => post<{ trigger: Automation; secret?: string; hookUrl?: string }>("/triggers.json", t),
+  updateTrigger: (id: string, t: AutomationDraft) => post<{ trigger: Automation }>(`/triggers/${encodeURIComponent(id)}.json`, t),
+  deleteTrigger: (id: string) => fetch(url(`/triggers/${encodeURIComponent(id)}.json`), { method: "DELETE", headers: authHeaders }).then(parse<{ ok: true }>),
+  setTriggerEnabled: (id: string, enabled: boolean) => post<{ trigger: Automation }>(`/triggers/${encodeURIComponent(id)}/enabled.json`, { enabled }),
+  rotateTrigger: (id: string) => post<{ secret: string; hookUrl: string }>(`/triggers/${encodeURIComponent(id)}/rotate.json`, {}),
+  runTrigger: (id: string) => post<{ result: AutomationResult }>(`/triggers/${encodeURIComponent(id)}/run.json`, {}),
+  previewTrigger: (taskTemplate: string, id?: string, name?: string) =>
+    post<{ text: string; missing: string[]; hasPayload: boolean }>("/triggers/preview.json", { taskTemplate, id, name }),
 };
+
+export type AutomationKind = "schedule" | "webhook" | "github" | "chain";
+export type GithubEvent = "issue_labeled" | "issue_comment" | "pr_opened";
+export interface AutomationSpec {
+  cron?: string;
+  timezone?: string;
+  event?: GithubEvent;
+  label?: string;
+  command?: string;
+  allowForks?: boolean;
+  afterTrigger?: string;
+  on?: "done" | "any";
+  carry?: "patch" | "none";
+}
+export interface AutomationDraft {
+  name: string;
+  kind: AutomationKind;
+  spec: AutomationSpec;
+  repo?: string;
+  taskTemplate: string;
+  enabled: boolean;
+  concurrency: number;
+  budget: { maxMinutes: number; maxUsd?: number; maxTokens?: number };
+  prComment: boolean;
+  agent?: string;
+  model?: string;
+}
+export interface AutomationResult {
+  at: number;
+  outcome: "started" | "skipped" | "failed";
+  box?: string;
+  reason?: string;
+  finished?: { state: string; headline: string; archiveId?: number };
+}
+/** Mirrors GET /triggers.json rows. Stamps are epoch ms. Never carries the webhook secret. */
+export interface Automation extends AutomationDraft {
+  id: string;
+  when: string;
+  lastFired: number | null;
+  nextFire: number | null;
+  lastResult: AutomationResult | null;
+  hasPayload: boolean;
+  active: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface LedgerQuery {
+  startedBy?: string;
+  trigger?: string;
+  agent?: string;
+  state?: string;
+  verified?: string;
+  since?: number;
+  limit?: number;
+  before?: number;
+}
+export interface LedgerTotals {
+  runs: number;
+  done: number;
+  failed: number;
+  checked: number;
+  passed: number;
+  inputTokens: number;
+  outputTokens: number;
+  withUsage: number;
+  /** null when no run in the set reported a cost — never an estimate. */
+  costUsd: number | null;
+  withCost: number;
+}
+export interface LedgerRow extends HistoryRun {
+  startedBy?: string | null;
+  triggerId?: string | null;
+  agent?: string | null;
+  verified?: boolean | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  costUsd?: number | null;
+}
 
 /** One archived run — a record kept after its machine is gone. Mirrors GET /history.json rows. */
 export interface HistoryRun {
