@@ -54,6 +54,7 @@ function toRow(r: Record<string, any>): TriggerRow {
     prComment: !!r.pr_comment,
     ...(r.agent ? { agent: r.agent } : {}),
     ...(r.model ? { model: r.model } : {}),
+    ...(r.harness_id ? { harnessId: r.harness_id } : {}),
     lastFired: r.last_fired ?? null,
     nextFire: r.next_fire ?? null,
     lastResult: parse<TriggerResult | null>(r.last_result_json, null),
@@ -77,11 +78,11 @@ export function createTrigger(db: Db, box: SecretBox, owner: string, t: TriggerI
   const id = "trg_" + crypto.randomBytes(9).toString("base64url");
   const secret = newSecret();
   db.prepare(
-    `INSERT INTO triggers (id, owner, name, kind, spec_json, repo, task_template, enabled, concurrency, budget_json, pr_comment, agent, model, secret_enc, next_fire, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO triggers (id, owner, name, kind, spec_json, repo, task_template, enabled, concurrency, budget_json, pr_comment, agent, model, harness_id, secret_enc, next_fire, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id, owner, t.name, t.kind, JSON.stringify(t.spec), t.repo ?? null, t.taskTemplate, t.enabled ? 1 : 0, t.concurrency,
-    JSON.stringify(t.budget), t.prComment ? 1 : 0, t.agent ?? null, t.model ?? null, box.seal(secret), computeNextFire(t, now), now, now
+    JSON.stringify(t.budget), t.prComment ? 1 : 0, t.agent ?? null, t.model ?? null, t.harnessId ?? null, box.seal(secret), computeNextFire(t, now), now, now
   );
   return { row: getTrigger(db, owner, id)!, secret };
 }
@@ -90,11 +91,11 @@ export function updateTrigger(db: Db, owner: string, id: string, t: TriggerInput
   const r = db
     .prepare(
       `UPDATE triggers SET name = ?, kind = ?, spec_json = ?, repo = ?, task_template = ?, enabled = ?, concurrency = ?, budget_json = ?,
-       pr_comment = ?, agent = ?, model = ?, next_fire = ?, updated_at = ? WHERE id = ? AND owner = ?`
+       pr_comment = ?, agent = ?, model = ?, harness_id = ?, next_fire = ?, updated_at = ? WHERE id = ? AND owner = ?`
     )
     .run(
       t.name, t.kind, JSON.stringify(t.spec), t.repo ?? null, t.taskTemplate, t.enabled ? 1 : 0, t.concurrency, JSON.stringify(t.budget),
-      t.prComment ? 1 : 0, t.agent ?? null, t.model ?? null, computeNextFire(t, now), now, id, owner
+      t.prComment ? 1 : 0, t.agent ?? null, t.model ?? null, t.harnessId ?? null, computeNextFire(t, now), now, id, owner
     );
   return r.changes ? getTrigger(db, owner, id) : undefined;
 }

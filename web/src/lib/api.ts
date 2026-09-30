@@ -213,6 +213,59 @@ export interface SkillsResponse {
   skills: SkillView[];
 }
 
+/** A saved harness (src/harness.ts). Never carries a key: a provider is referenced by id only. */
+export interface HarnessRules {
+  askBeforeGuess: boolean;
+  planFirst: boolean;
+  verifyOnDone: boolean;
+}
+export interface HarnessView {
+  id: string;
+  name: string;
+  description?: string;
+  driver?: AgentId;
+  providerId?: string;
+  model?: string;
+  skills?: string[];
+  rules: HarnessRules;
+  rulesMd?: string;
+  verifyCommand?: string;
+  egress?: string[];
+  budget?: RunBudget;
+  needsReview?: boolean;
+  unresolvedProvider?: { kind: string; label: string };
+  origin?: { kind: "file" | "github"; source?: string; at: number };
+  createdAt: number;
+  updatedAt: number;
+  provider?: { id: string; kind: string; label: string } | null;
+  providerMissing?: boolean;
+}
+export interface HarnessesResponse {
+  harnesses: HarnessView[];
+  limits: Record<string, number>;
+}
+export interface HarnessImportPreview {
+  preview: { harness: HarnessView; skills: Array<{ name: string; description: string; files: number }>; notes: string[] };
+}
+export interface CompareFacts {
+  box: string;
+  state: string;
+  verified: boolean | null;
+  verifyDetail?: string;
+  questions: number;
+  tokens: { input: number; output: number } | null;
+  costUsd: number | null;
+  durationMs: number | null;
+  files: string[];
+  headline: string;
+}
+export interface CompareDetail {
+  id: string;
+  task: string;
+  createdAt: number;
+  sides: Array<{ side: "a" | "b"; harnessId: string; harnessName: string; box: string | null; source: "not-started" | "gone" | "archive" | "live"; facts: CompareFacts | null }>;
+}
+
 export interface AccountView {
   login: string;
   type: "classic" | "fine-grained" | "unknown";
@@ -732,8 +785,12 @@ export const api = {
     budget?: RunBudget;
     /** Exactly one key: a command run in the sandbox after the run, or a criterion a read-only checker judges. */
     verify?: { command: string } | { criterion: string };
+    /** A saved harness id: fills the fields this input leaves out (explicit fields win). */
+    harness?: string;
+    compareId?: string;
+    compareSide?: "a" | "b";
   }) =>
-    post<{ ok: true; box: string; warm: boolean; output: string; inferred?: string[] } | { ok: false; question: string }>(
+    post<{ ok: true; box: string; warm: boolean; output: string; inferred?: string[]; harness?: { id: string; name: string; applied: string[] } } | { ok: false; question: string }>(
       "/delegate.json",
       { source: "git", ...input }
     ),
@@ -746,6 +803,14 @@ export const api = {
   mcpTest: (name: string) => post<McpProbe>("/mcp-servers/test.json", { name }),
   skills: (signal?: AbortSignal) => fetch(url("/skills.json"), { headers: authHeaders, signal }).then(parse<SkillsResponse>),
   skillMutate: (body: Record<string, unknown>) => post<SkillsResponse>("/skills.json", body),
+  harnesses: (signal?: AbortSignal) => fetch(url("/harnesses.json"), { headers: authHeaders, signal }).then(parse<HarnessesResponse>),
+  harnessMutate: (body: Record<string, unknown>) => post<HarnessesResponse & { saved?: string }>("/harnesses.json", body),
+  harnessExport: (id: string) =>
+    fetch(url(`/harnesses/export.json?id=${encodeURIComponent(id)}`), { headers: authHeaders }).then(parse<{ bundle: unknown; redacted: number; skipped: string[]; filename: string }>),
+  harnessImport: <T>(body: Record<string, unknown>) => post<T>("/harnesses/import.json", body),
+  compareCreate: (body: { task: string; harnessA: string; harnessB: string }) => post<{ id: string }>("/harness-compares.json", body),
+  compares: () => fetch(url("/harness-compares.json"), { headers: authHeaders }).then(parse<{ compares: Array<{ id: string; task: string; harnessA: string; harnessB: string; createdAt: number; sides: Array<{ side: "a" | "b"; box: string }> }> }>),
+  compare: (id: string) => fetch(url(`/harness-compares.json?id=${encodeURIComponent(id)}`), { headers: authHeaders }).then(parse<CompareDetail>),
   /**
    * Browse a public GitHub repo for skills. Goes through the controller because the page's CSP is
    * `connect-src 'self'` — see lib/skillImport.ts. Caller supplies the response shape per action.

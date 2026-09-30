@@ -88,6 +88,8 @@ export interface DelegatePlan {
   provider?: ProviderRecord;
   /** Per-run budget (src/budget.ts); the gate asks-and-stops when a cap is hit. */
   budget?: RunBudget;
+  /** Harness skill selection (src/harness.ts): install exactly these; absent = the enabled set. */
+  skills?: string[];
   /** Back-compat accessor: the first repo's identifier. */
   repo: string;
   /** Back-compat accessor: the first repo's ref. */

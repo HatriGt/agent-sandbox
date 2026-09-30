@@ -52,6 +52,8 @@ export interface DelegateFlowInput {
   provider?: ProviderRecord;
   /** Per-run budget, already normalized (src/budget.ts). */
   budget?: RunBudget;
+  /** Harness skill selection (already validated names). */
+  skills?: string[];
 }
 
 export type DelegateFlowResult =
@@ -91,6 +93,7 @@ export async function runDelegateFlow(
     v.plan.provider = input.provider;
   }
   if (input.budget) v.plan.budget = input.budget;
+  if (input.skills) v.plan.skills = input.skills;
 
   const tFlow = Date.now();
   let creds: AgentCreds | undefined;

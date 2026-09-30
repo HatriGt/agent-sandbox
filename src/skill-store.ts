@@ -158,6 +158,48 @@ export function enabledSkills(store: SkillStore): SkillDef[] {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/**
+ * The skills a box installs. With no per-box selection (the default) that is the enabled set; a
+ * run started on a harness (src/harness.ts) installs exactly the harness's named skills instead,
+ * enabled or not — imported harness skills are stored disabled precisely so they reach no other run.
+ */
+export function skillsForBox(store: SkillStore, selection: string[] | undefined): SkillDef[] {
+  if (!selection) return enabledSkills(store);
+  const want = new Set(selection);
+  return Object.values(store.skills)
+    .filter((s) => want.has(s.name))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Per-box skill selection. The in-memory map is the fast path; the controller registers a durable
+ * backend (a DB row per box) so a resume after a restart keeps the harness's selection.
+ */
+const boxSelections = new Map<string, string[]>();
+let selectionBackend: { get(box: string): string[] | undefined; set(box: string, names: string[]): void } | null = null;
+export function registerSkillSelectionBackend(b: typeof selectionBackend): void {
+  selectionBackend = b;
+}
+export function setBoxSkillSelection(box: string, names: string[]): void {
+  boxSelections.set(box, [...names]);
+  try {
+    selectionBackend?.set(box, names);
+  } catch {
+    /* the in-memory copy still covers this process */
+  }
+}
+export function boxSkillSelection(box: string): string[] | undefined {
+  const m = boxSelections.get(box);
+  if (m) return m;
+  try {
+    const d = selectionBackend?.get(box);
+    if (d) boxSelections.set(box, d);
+    return d;
+  } catch {
+    return undefined;
+  }
+}
+
 /** What the dashboard sees — nothing to mask, just a stable order. */
 export function viewSkills(store: SkillStore): SkillDef[] {
   return Object.values(store.skills).sort((a, b) => a.name.localeCompare(b.name));

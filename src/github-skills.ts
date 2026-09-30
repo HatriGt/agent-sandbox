@@ -242,3 +242,56 @@ export async function fetchRepoSkillDir(
   files.sort((a, b) => a.path.localeCompare(b.path));
   return { skillMd: await fetchRepoBlob(owner, repo, skillMd.sha, token), files, skipped };
 }
+
+/**
+ * Fetch a harness folder (src/harness.ts): the files the harness format reads under `dirPath`, off
+ * the tree we re-walk here. Unlike skill folders nothing is silently skipped for size — an
+ * oversized harness is refused, so the review panel always shows the whole thing. hooks/ is not
+ * fetched at all (imported bundles never install hooks).
+ */
+export async function fetchRepoHarnessDir(
+  owner: string,
+  repo: string,
+  branch: string | undefined,
+  dirPath: string,
+  limits: { maxFiles: number; maxBytes: number; maxFileBytes: number },
+  token?: string
+): Promise<{ ref: string; files: Array<{ path: string; content: string }>; skipped: string[] }> {
+  assertRef(owner, repo, branch);
+  const dir = dirPath.replace(/^\/+|\/+$/g, "");
+  if (dir) assertPath(dir, false);
+  const { ref, blobs } = await repoTree(owner, repo, branch, token);
+  const rel = (p: string) => (dir ? p.slice(dir.length + 1) : p);
+  const inside = blobs.filter((t) => (dir ? t.path.startsWith(`${dir}/`) : true));
+  if (!inside.some((t) => rel(t.path) === "harness.json")) throw new Error(`No harness.json under ${dir || "the repository root"}.`);
+  const skipped: string[] = [];
+  const wanted = inside.filter((t) => {
+    const r = rel(t.path);
+    if (/^hooks\//i.test(r)) {
+      skipped.push(`${r} (hooks are never imported)`);
+      return false;
+    }
+    // Only what the harness format reads; anything else (CI config, images) is not fetched.
+    return /^(harness\.json|rules\.md|verify\.sh|skills\/.+)$/i.test(r);
+  });
+  if (wanted.length > limits.maxFiles) throw new Error(`The harness folder has too many files (max ${limits.maxFiles}).`);
+  let total = 0;
+  for (const t of wanted) {
+    if ((t.size ?? 0) > limits.maxFileBytes) throw new Error(`${rel(t.path)} is too large to import.`);
+    total += t.size ?? 0;
+  }
+  if (total > limits.maxBytes) throw new Error("The harness folder is too large to import.");
+  const files: Array<{ path: string; content: string }> = [];
+  const queue = [...wanted];
+  await Promise.all(
+    Array.from({ length: 6 }, async () => {
+      for (let t = queue.shift(); t; t = queue.shift()) {
+        const content = await fetchRepoBlob(owner, repo, t.sha, token);
+        if (content.includes("\0")) skipped.push(`${rel(t.path)} (binary)`);
+        else files.push({ path: rel(t.path), content });
+      }
+    })
+  );
+  files.sort((a, b) => a.path.localeCompare(b.path));
+  return { ref, files, skipped };
+}

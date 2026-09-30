@@ -432,6 +432,8 @@ export interface TriggerInput {
   prComment: boolean;
   agent?: string;
   model?: string;
+  /** Saved harness (src/harness.ts); the trigger's own agent/model/budget win over it. */
+  harnessId?: string;
 }
 
 const REPO_RE = /^[\w.-]+\/[\w.-]+$/;
@@ -487,6 +489,9 @@ export function normalizeTrigger(body: unknown): { ok: true; trigger: TriggerInp
   const tok = num(bb.maxTokens, 1e9);
   if (usd !== undefined) budget.maxUsd = usd;
   if (tok !== undefined) budget.maxTokens = Math.round(tok);
+  if (b.harnessId !== undefined && b.harnessId !== null && b.harnessId !== "" && !(typeof b.harnessId === "string" && /^hrn_[\w-]{6,40}$/.test(b.harnessId))) {
+    return { ok: false, error: "harnessId is not a saved harness id" };
+  }
   return {
     ok: true,
     trigger: {
@@ -502,6 +507,7 @@ export function normalizeTrigger(body: unknown): { ok: true; trigger: TriggerInp
       prComment: typeof b.prComment === "boolean" ? b.prComment : kind === "github",
       ...(typeof b.agent === "string" && b.agent.trim() ? { agent: b.agent.trim() } : {}),
       ...(typeof b.model === "string" && b.model.trim() ? { model: b.model.trim() } : {}),
+      ...(typeof b.harnessId === "string" && /^hrn_[\w-]{6,40}$/.test(b.harnessId) ? { harnessId: b.harnessId } : {}),
     },
   };
 }

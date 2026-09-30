@@ -12,7 +12,7 @@ import { listClaims, listKept, listParked, markClaimed, shouldKeepStopped, unmar
 import { askParkTtlSec } from "./snapshot.js";
 import { guardNodeProgram } from "./guard.js";
 import { loadMcpStore, toClaudeMcpConfig } from "./mcp-store.js";
-import { buildSkillsTarBase64, enabledSkills, loadSkillStore } from "./skill-store.js";
+import { boxSkillSelection, buildSkillsTarBase64, loadSkillStore, skillsForBox } from "./skill-store.js";
 import { reposPromptHint, type RepoLayout } from "./agent-prompt.js";
 import { secretEnvFlags } from "./secret-env.js";
 import type { AgentKind } from "./agent-kind.js";
@@ -1171,7 +1171,7 @@ const SKILLS_DIR = "/root/.claude/skills";
  */
 export async function installSkills(cfg: Config, box: string): Promise<void> {
   try {
-    const skills = enabledSkills(await loadSkillStore(cfg));
+    const skills = skillsForBox(await loadSkillStore(cfg), boxSkillSelection(box));
     if (!skills.length) {
       await exec(cfg, box, `rm -rf ${SKILLS_DIR}`);
       return;

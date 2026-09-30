@@ -189,6 +189,32 @@ const MIGRATIONS: string[] = [
   CREATE INDEX IF NOT EXISTS trigger_fires_trigger ON trigger_fires(trigger_id, at);
   CREATE INDEX IF NOT EXISTS trigger_fires_box ON trigger_fires(box);
   `,
+  `
+  -- Harness bundles (docs/plan-agent-cloud.md workstream F). Harness definitions live in the
+  -- per-owner user_blobs store; these rows are only the links a run needs after a restart: which
+  -- harness (and skill selection) a box started on, and the side-by-side compare it belongs to.
+  ALTER TABLE triggers ADD COLUMN harness_id TEXT;
+  CREATE TABLE IF NOT EXISTS run_harness (
+    box TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    harness_id TEXT,
+    harness_name TEXT,
+    skills_json TEXT,
+    compare_id TEXT,
+    side TEXT,
+    at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS run_harness_compare ON run_harness(compare_id);
+  CREATE TABLE IF NOT EXISTS harness_compares (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    task TEXT NOT NULL,
+    harness_a TEXT NOT NULL,
+    harness_b TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS harness_compares_owner ON harness_compares(owner, created_at);
+  `,
 ];
 
 export function openDb(dataDir: string): Db {
