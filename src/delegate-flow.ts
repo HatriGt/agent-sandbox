@@ -21,7 +21,8 @@ import { AGENT_LABELS } from "./agent-kind.js";
 export interface DelegateFlowInput {
   source?: DelegateSource;
   repo?: string;
-  repos?: Array<{ repo: string; ref?: string }>;
+  /** `patch`: a handoff carry diff (src/handoff.ts) — set only by trigger chains. */
+  repos?: Array<{ repo: string; ref?: string; patch?: string }>;
   task?: string;
   ref?: string;
   allowDomains?: string[];

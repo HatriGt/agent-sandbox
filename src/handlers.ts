@@ -10,6 +10,7 @@
  * returns a plain-text question instead of failing. The caller re-calls delegate with the value.
  */
 import { isBoxName } from "./sync.js";
+import { withStartedBy } from "./started-by.js";
 import { z } from "zod";
 import { normalizeBudget } from "./budget.js";
 import type { Config } from "./config.js";
@@ -443,7 +444,9 @@ export function registerTools(
 
       let r: Awaited<ReturnType<typeof deps.runDelegation>>;
       try {
-        r = await deps.runDelegation(cfg, v.plan, allowDomains, creds, interactFrom(bridge));
+        const run = () => deps.runDelegation(cfg, v.plan, allowDomains, creds, interactFrom(bridge));
+        // A handoff child records its parent on the receipt (src/started-by.ts); others default to mcp.
+        r = await (after !== undefined ? withStartedBy({ kind: "after", parent: after }, run) : run());
       } finally {
         release();
       }

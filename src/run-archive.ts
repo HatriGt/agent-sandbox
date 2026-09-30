@@ -77,11 +77,143 @@ export function archiveRun(db: Db, rec: ArchiveRecord): number | null {
   }
   const r = db
     .prepare(
-      `INSERT INTO run_archive (box, owner, task, state, exit_code, started_at, ended_at, archived_at, headline, digest_json, diff_text)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO run_archive (box, owner, task, state, exit_code, started_at, ended_at, archived_at, headline, digest_json, diff_text,
+         started_by, trigger_id, agent, verified, input_tokens, output_tokens, cost_usd)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .run(rec.box, rec.owner, d.task, d.state, d.exitCode ?? null, d.startedAt ?? null, d.endedAt ?? null, now, d.headline, JSON.stringify(d), rec.diffText || null);
+    .run(
+      rec.box, rec.owner, d.task, d.state, d.exitCode ?? null, d.startedAt ?? null, d.endedAt ?? null, now, d.headline, JSON.stringify(d), rec.diffText || null,
+      ...ledgerColumns(d)
+    );
   return Number(r.lastInsertRowid);
+}
+
+/** The ledger facts of a digest, as stored columns. Unknowns stay NULL — never a guessed zero. */
+function ledgerColumns(d: RunDigest): Array<string | number | null> {
+  const sb = d.provenance?.startedBy;
+  // Cost only when the run itself carried one (a priced model — workstream B/D); never derived here.
+  const cost = (d as { cost?: { usd?: unknown } }).cost?.usd;
+  return [
+    sb?.kind ?? null,
+    sb?.kind === "trigger" ? sb.triggerId : null,
+    d.provenance?.agent ?? null,
+    d.verified ? (d.verified.pass ? 1 : 0) : null,
+    d.usage?.inputTokens ?? null,
+    d.usage?.outputTokens ?? null,
+    typeof cost === "number" && Number.isFinite(cost) ? cost : null,
+  ];
+}
+
+export interface LedgerFilter {
+  since?: number;
+  until?: number;
+  /** "manual" | "mcp" | "after" | "trigger" | "unknown" (rows archived before provenance existed). */
+  startedBy?: string;
+  triggerId?: string;
+  agent?: string;
+  state?: string;
+  /** "yes" | "no" | "unchecked" */
+  verified?: string;
+}
+
+export interface LedgerTotals {
+  runs: number;
+  done: number;
+  failed: number;
+  /** Runs that carried a verify clause, and how many of those passed. verified% = passed/checked. */
+  checked: number;
+  passed: number;
+  /** Token sums over the runs that reported usage; `withUsage` says how many that was. */
+  inputTokens: number;
+  outputTokens: number;
+  withUsage: number;
+  /** Cost sum over the runs that carried a price; null when none did (render tokens only). */
+  costUsd: number | null;
+  withCost: number;
+}
+
+function ledgerWhere(owner: string, f: LedgerFilter): { sql: string; args: Array<string | number> } {
+  const w: string[] = ["owner = ?"];
+  const args: Array<string | number> = [owner];
+  const t = "COALESCE(ended_at, archived_at)";
+  if (f.since !== undefined) (w.push(`${t} >= ?`), args.push(f.since));
+  if (f.until !== undefined) (w.push(`${t} < ?`), args.push(f.until));
+  if (f.startedBy === "unknown") w.push("started_by IS NULL");
+  else if (f.startedBy) (w.push("started_by = ?"), args.push(f.startedBy));
+  if (f.triggerId) (w.push("trigger_id = ?"), args.push(f.triggerId));
+  if (f.agent) (w.push("agent = ?"), args.push(f.agent));
+  if (f.state) (w.push("state = ?"), args.push(f.state));
+  if (f.verified === "yes") w.push("verified = 1");
+  else if (f.verified === "no") w.push("verified = 0");
+  else if (f.verified === "unchecked") w.push("verified IS NULL");
+  return { sql: w.join(" AND "), args };
+}
+
+/**
+ * History ledger totals — the ONE place aggregates are allowed (PRODUCT.md principle 4: this is a
+ * record). Counts only what rows actually carry: tokens over runs that reported usage, cost over runs
+ * that carried a price, verified% over runs that were checked. Nothing is extrapolated.
+ */
+export function ledgerTotals(db: Db, owner: string, f: LedgerFilter = {}): LedgerTotals {
+  const { sql, args } = ledgerWhere(owner, f);
+  const r = db
+    .prepare(
+      `SELECT COUNT(*) AS runs,
+         SUM(state = 'done') AS done, SUM(state = 'failed') AS failed,
+         SUM(verified IS NOT NULL) AS checked, SUM(verified = 1) AS passed,
+         SUM(COALESCE(input_tokens, 0)) AS inTok, SUM(COALESCE(output_tokens, 0)) AS outTok,
+         SUM(input_tokens IS NOT NULL OR output_tokens IS NOT NULL) AS withUsage,
+         SUM(cost_usd) AS cost, SUM(cost_usd IS NOT NULL) AS withCost
+       FROM run_archive WHERE ${sql}`
+    )
+    .get(...args) as Record<string, number | null>;
+  const n = (v: number | null | undefined) => Number(v ?? 0);
+  return {
+    runs: n(r.runs),
+    done: n(r.done),
+    failed: n(r.failed),
+    checked: n(r.checked),
+    passed: n(r.passed),
+    inputTokens: n(r.inTok),
+    outputTokens: n(r.outTok),
+    withUsage: n(r.withUsage),
+    costUsd: n(r.withCost) > 0 ? n(r.cost) : null,
+    withCost: n(r.withCost),
+  };
+}
+
+export interface LedgerRow extends ArchivedRunRow {
+  startedBy: string | null;
+  triggerId: string | null;
+  agent: string | null;
+  verified: boolean | null;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  costUsd: number | null;
+}
+
+/** Filtered, reverse-chronological ledger rows (cap 50, `before` pages by id). */
+export function listLedger(db: Db, owner: string, f: LedgerFilter & { limit?: number; before?: number } = {}): LedgerRow[] {
+  const { sql, args } = ledgerWhere(owner, f);
+  const limit = Math.min(Math.max(1, f.limit ?? 50), 50);
+  const rows = db
+    .prepare(
+      `SELECT id, box, owner, task, state, exit_code, started_at, ended_at, archived_at, headline,
+         started_by, trigger_id, agent, verified, input_tokens, output_tokens, cost_usd
+       FROM run_archive WHERE ${sql} ${f.before ? "AND id < ?" : ""} ORDER BY id DESC LIMIT ?`
+    )
+    .all(...args, ...(f.before ? [f.before] : []), limit) as Array<Record<string, unknown>>;
+  const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
+  return rows.map((r) => ({
+    ...toRow(r),
+    startedBy: (r.started_by as string | null) ?? null,
+    triggerId: (r.trigger_id as string | null) ?? null,
+    agent: (r.agent as string | null) ?? null,
+    verified: r.verified === null || r.verified === undefined ? null : Number(r.verified) === 1,
+    inputTokens: num(r.input_tokens),
+    outputTokens: num(r.output_tokens),
+    costUsd: num(r.cost_usd),
+  }));
 }
 
 /** Reverse-chronological list for one owner. `before` pages by row id (exclusive). Cap 50. */

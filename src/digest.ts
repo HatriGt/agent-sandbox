@@ -11,6 +11,7 @@
 import type { TraceEvent, PlanItem } from "./trace.js";
 import type { VerifyResult } from "./verify.js";
 import { AGENT_LABELS, isAgentKind } from "./agent-kind.js";
+import type { StartedBy } from "./started-by.js";
 
 export interface DigestFile {
   path: string;
@@ -34,6 +35,8 @@ export interface DigestInput {
   model?: string;
   /** The user model provider's label (src/providers.ts), when the thread named one. */
   provider?: string;
+  /** How the run was started, recorded at delegation time (src/started-by.ts). */
+  startedBy?: StartedBy;
 }
 
 /** Receipt provenance: who ran this. Only known facts; absent fields were not recorded. */
@@ -42,6 +45,8 @@ export interface DigestProvenance {
   agentLabel?: string;
   model?: string;
   provider?: string;
+  /** How the run was started: manual (dashboard), mcp, after: handoff, or a trigger. */
+  startedBy?: StartedBy;
 }
 
 export interface DigestPlanStep extends PlanItem {
@@ -186,6 +191,7 @@ export function buildDigest(input: DigestInput): RunDigest {
     ...(isAgentKind(input.agent) ? { agentLabel: AGENT_LABELS[input.agent] } : {}),
     ...(input.model ? { model: input.model } : {}),
     ...(input.provider ? { provider: input.provider } : {}),
+    ...(input.startedBy ? { startedBy: input.startedBy } : {}),
   };
 
   return {

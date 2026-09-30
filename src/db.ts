@@ -127,6 +127,68 @@ const MIGRATIONS: string[] = [
   -- byte-capped at capture (FULL_DIFF_MAX_BYTES). NULL when capture failed or nothing changed.
   ALTER TABLE run_archive ADD COLUMN diff_text TEXT;
   `,
+  `
+  -- Triggers (docs/plan-agent-cloud.md workstream C): runs that start without a human at the
+  -- keyboard, all through the same delegate flow. secret_enc is sealed with the controller key (the
+  -- HMAC check needs the plaintext, so it cannot be a hash). last_payload_json is the redacted, capped
+  -- last delivery — the editor's live template preview renders against it.
+  CREATE TABLE IF NOT EXISTS triggers (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    spec_json TEXT NOT NULL,
+    repo TEXT,
+    task_template TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    concurrency INTEGER NOT NULL DEFAULT 1,
+    budget_json TEXT,
+    pr_comment INTEGER NOT NULL DEFAULT 0,
+    agent TEXT,
+    model TEXT,
+    secret_enc TEXT,
+    last_fired INTEGER,
+    next_fire INTEGER,
+    last_result_json TEXT,
+    last_payload_json TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS triggers_owner ON triggers(owner);
+  -- Replay/dedupe: one row per (trigger, delivery key); pruned after 7 days.
+  CREATE TABLE IF NOT EXISTS trigger_deliveries (
+    trigger_id TEXT NOT NULL,
+    key TEXT NOT NULL,
+    at INTEGER NOT NULL,
+    PRIMARY KEY (trigger_id, key)
+  );
+  -- How each run was started (manual / mcp / after: handoff / trigger), keyed by box, written at
+  -- delegation time so the receipt knows it even after a controller restart.
+  CREATE TABLE IF NOT EXISTS run_started_by (
+    box TEXT PRIMARY KEY,
+    started_by_json TEXT NOT NULL,
+    at INTEGER NOT NULL
+  );
+  -- Ledger columns (History page filters/totals) — NULL on rows archived before this migration.
+  ALTER TABLE run_archive ADD COLUMN started_by TEXT;
+  ALTER TABLE run_archive ADD COLUMN trigger_id TEXT;
+  ALTER TABLE run_archive ADD COLUMN agent TEXT;
+  ALTER TABLE run_archive ADD COLUMN verified INTEGER;
+  ALTER TABLE run_archive ADD COLUMN input_tokens INTEGER;
+  ALTER TABLE run_archive ADD COLUMN output_tokens INTEGER;
+  ALTER TABLE run_archive ADD COLUMN cost_usd REAL;
+  -- Every fire attempt (storm cap) and the box it started (concurrency). Persisted so a controller
+  -- restart cannot reset either count; in-flight rows are reconciled against live boxes.
+  CREATE TABLE IF NOT EXISTS trigger_fires (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    trigger_id TEXT NOT NULL,
+    at INTEGER NOT NULL,
+    box TEXT,
+    finished_at INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS trigger_fires_trigger ON trigger_fires(trigger_id, at);
+  CREATE INDEX IF NOT EXISTS trigger_fires_box ON trigger_fires(box);
+  `,
 ];
 
 export function openDb(dataDir: string): Db {
