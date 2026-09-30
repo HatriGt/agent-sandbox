@@ -28,6 +28,7 @@ export function HarnessesPage({ onBack, onOpenBox }: { onBack: () => void; onOpe
   const [tab, setTab] = React.useState<Tab>("saved");
   const [harnesses, setHarnesses] = React.useState<HarnessView[] | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const [builtinCount, setBuiltinCount] = React.useState(0);
   const [drivers, setDrivers] = React.useState<AgentChoice[]>([]);
   const [defaultDriver, setDefaultDriver] = React.useState<string>("claude");
   const [providers, setProviders] = React.useState<ProviderView[]>([]);
@@ -42,6 +43,7 @@ export function HarnessesPage({ onBack, onOpenBox }: { onBack: () => void; onOpe
       .harnesses()
       .then((r) => {
         setHarnesses(r.harnesses);
+        setBuiltinCount(r.builtins ?? 0);
         setError(null);
       })
       .catch((e: Error) => setError(e.message));
@@ -150,7 +152,19 @@ export function HarnessesPage({ onBack, onOpenBox }: { onBack: () => void; onOpe
                 />
               ) : (
                 <>
-                  <SettingsSection id="saved" title="Saved harnesses" meta={harnesses ? list.length : undefined}>
+                  <SettingsSection
+                    id="saved"
+                    title="Saved harnesses"
+                    meta={harnesses ? list.length : undefined}
+                    purpose="Built-ins are best-practice starting points: edit them, duplicate them, or delete the ones you don't use."
+                    actions={
+                      harnesses && list.filter((h) => h.builtin).length < builtinCount ? (
+                        <Button variant="ghost" size="sm" onClick={() => void mutate({ action: "restore-defaults" }, "Built-in harnesses restored")}>
+                          Restore built-ins
+                        </Button>
+                      ) : undefined
+                    }
+                  >
                     {error ? (
                       <EmptyState icon={ShieldAlert} tone="destructive" title="Couldn't load harnesses" line={error} action={<Button variant="outline" size="sm" onClick={reload}>Retry</Button>} />
                     ) : !harnesses ? (
@@ -334,12 +348,20 @@ function HarnessRow({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="text-foreground truncate text-body font-medium">{h.name}</span>
+            {h.builtin && <span className="text-muted-foreground rounded border px-1.5 text-micro" title="A best-practice default. Edit it freely, duplicate it, or delete it to hide it.">built-in</span>}
             {h.needsReview && <span className="bg-attention text-attention-ink rounded px-1.5 text-micro font-medium">needs review</span>}
             {h.providerMissing && <span className="text-destructive text-micro">provider removed</span>}
           </div>
+          {h.description && <p className="text-muted-foreground mt-0.5 truncate text-micro">{h.description}</p>}
           <p className="text-muted-foreground mt-0.5 truncate text-micro">{facts.join(" · ")}</p>
           <p className="text-faint text-micro">
-            {h.origin ? `Imported ${h.origin.source ? `from ${h.origin.source} ` : "from a file "}` : "Updated "}
+            {h.origin?.kind === "duplicate"
+              ? `Copied from ${h.origin.source ?? "a harness"} `
+              : h.origin
+                ? `Imported ${h.origin.source ? `from ${h.origin.source} ` : "from a file "}`
+                : h.builtin && h.updatedAt === h.createdAt
+                  ? "Added "
+                  : "Updated "}
             {fmtAgo(h.origin?.at ?? h.updatedAt)}
           </p>
         </div>

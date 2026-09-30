@@ -234,7 +234,9 @@ export interface HarnessView {
   budget?: RunBudget;
   needsReview?: boolean;
   unresolvedProvider?: { kind: string; label: string };
-  origin?: { kind: "file" | "github"; source?: string; at: number };
+  origin?: { kind: "file" | "github" | "duplicate"; source?: string; at: number };
+  /** Set on the seeded best-practice defaults (its key); a duplicate is a plain custom harness. */
+  builtin?: string;
   createdAt: number;
   updatedAt: number;
   provider?: { id: string; kind: string; label: string } | null;
@@ -243,6 +245,8 @@ export interface HarnessView {
 export interface HarnessesResponse {
   harnesses: HarnessView[];
   limits: Record<string, number>;
+  /** How many built-in harnesses exist (for "Restore built-ins"). */
+  builtins?: number;
 }
 export interface HarnessImportPreview {
   preview: { harness: HarnessView; skills: Array<{ name: string; description: string; files: number }>; notes: string[] };

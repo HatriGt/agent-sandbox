@@ -26,12 +26,23 @@ export function HarnessChip({ value, onChange }: { value: string | null; onChang
       <span className="max-w-32 truncate">{cur ? cur.name : "Harness"}</span>
       <select aria-label="Harness" className="absolute inset-0 cursor-pointer opacity-0" value={value ?? ""} onChange={(e) => onChange(e.target.value || null)}>
         <option value="">No harness</option>
-        {list.map((h) => (
-          <option key={h.id} value={h.id} disabled={!!h.needsReview}>
-            {h.name}
-            {h.needsReview ? " (needs review)" : ""}
-          </option>
-        ))}
+        {(
+          [
+            ["Your harnesses", list.filter((h) => !h.builtin)],
+            ["Built-in", list.filter((h) => h.builtin)],
+          ] as const
+        ).map(([label, group]) =>
+          group.length ? (
+            <optgroup key={label} label={label}>
+              {group.map((h) => (
+                <option key={h.id} value={h.id} disabled={!!h.needsReview} title={h.description}>
+                  {h.name}
+                  {h.needsReview ? " (needs review)" : ""}
+                </option>
+              ))}
+            </optgroup>
+          ) : null
+        )}
       </select>
     </label>
   );

@@ -1,12 +1,14 @@
 import type { Express, Request, Response } from "express";
 import type { Db } from "./db.js";
 import {
+  BUILTIN_HARNESSES,
   HARNESS_LIMITS,
   approveHarness,
   buildHarnessBundle,
   compareFacts,
   deleteHarness,
   duplicateHarness,
+  ensureDefaultHarnesses,
   getHarness,
   loadHarnesses,
   parseBundleDocument,
@@ -50,7 +52,11 @@ function view(h: HarnessDef, owner: string) {
 }
 
 export function registerHarnessRoutes(app: Express, c: HarnessRouteCtx): void {
-  const payload = (owner: string) => ({ harnesses: loadHarnesses(owner).map((h) => view(h, owner)), limits: HARNESS_LIMITS });
+  // Every read seeds the built-ins an owner has not had yet (idempotent; see ensureDefaultHarnesses).
+  const payload = (owner: string) => {
+    ensureDefaultHarnesses(owner);
+    return { harnesses: loadHarnesses(owner).map((h) => view(h, owner)), limits: HARNESS_LIMITS, builtins: BUILTIN_HARNESSES.length };
+  };
   const bad = (res: Response, e: unknown, status = 400) => res.status(status).json({ error: c.clientError(e) });
 
   app.get("/harnesses.json", (req, res) => {
@@ -79,6 +85,9 @@ export function registerHarnessRoutes(app: Express, c: HarnessRouteCtx): void {
       } else if (b.action === "approve") {
         if (!id || !approveHarness(id, owner)) return void res.status(404).json({ error: "No such harness." });
         saved = id;
+      } else if (b.action === "restore-defaults") {
+        // Brings back deleted built-ins; ones still present (edited or not) are left as they are.
+        ensureDefaultHarnesses(owner, { restore: true });
       } else {
         return void res.status(400).json({ error: "unknown action" });
       }
