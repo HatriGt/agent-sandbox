@@ -12,7 +12,7 @@ export type StartedBy =
   | { kind: "manual" }
   | { kind: "mcp" }
   | { kind: "after"; parent: string }
-  | { kind: "trigger"; triggerId: string; name: string; source: "schedule" | "webhook" | "github" | "chain"; event?: string; subject?: { kind: "issue" | "pr"; number: number; repo?: string } };
+  | { kind: "trigger"; triggerId: string; name: string; source: "schedule" | "webhook" | "github" | "chain"; event?: string; subject?: { kind: "issue" | "pr"; number: number; repo?: string }; /** chain: the box this run follows. */ parent?: string };
 
 const als = new AsyncLocalStorage<StartedBy>();
 export const withStartedBy = <T>(s: StartedBy, fn: () => T): T => als.run(s, fn);

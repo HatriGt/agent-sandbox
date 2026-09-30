@@ -873,6 +873,11 @@ export const api = {
     ),
   deleteHistoryRun: (id: number) =>
     fetch(url("/history.json", { id: String(id) }), { method: "DELETE", headers: authHeaders }).then(parse<{ ok: true }>),
+  /** The outcome card of an archived run: by archive id, or the latest record for a box. */
+  outcome: (q: { id: number } | { box: string }, signal?: AbortSignal) =>
+    fetch(url("/history/outcome.json", "id" in q ? { id: String(q.id) } : { box: q.box }), { headers: authHeaders, signal }).then(
+      parse<{ id: number; box: string; outcome: RunOutcome }>
+    ),
   /** The History ledger: totals + filtered rows over the archive. */
   ledger: (f: LedgerQuery = {}, signal?: AbortSignal) =>
     fetch(url("/history/ledger.json", Object.fromEntries(Object.entries(f).filter(([, v]) => v !== undefined && v !== "").map(([k, v]) => [k, String(v)]))), { headers: authHeaders, signal }).then(
@@ -960,7 +965,35 @@ export interface LedgerTotals {
   costUsd: number | null;
   withCost: number;
 }
+/** Mirrors `RunOutcome` in src/outcome.ts — the outcome card. Every null is "unknown": render "—". */
+export interface RunOutcome {
+  v: 1;
+  state: "done" | "failed" | "waiting" | "running";
+  header: { startedBy: { kind: string } | null; label: string | null; link: { href: string; external: boolean } | null };
+  result: {
+    prs: { url: string; repo: string; number: number }[];
+    diff: { files: number; additions: number; deletions: number } | null;
+    followedBy?: { box: string; archiveId: number | null } | null;
+  };
+  trust: {
+    tests: { runner: string; passed: number; failed: number; skipped: number; source: "verify" | "trace" } | null;
+    exitCode: number | null;
+    verified: { pass: boolean; mode: string } | null;
+    prOnly: boolean;
+    questions: number;
+    openQuestions: number;
+    blocked: number;
+  };
+  cost: {
+    durationMs: number | null;
+    tokens: { input: number; output: number } | null;
+    usd: number | null;
+    model: string | null;
+    budget: { maxMinutes: number; maxUsd: number | null; maxTokens: number | null; tripped: string[] } | null;
+  };
+}
 export interface LedgerRow extends HistoryRun {
+  outcome?: RunOutcome | null;
   startedBy?: string | null;
   triggerId?: string | null;
   agent?: string | null;

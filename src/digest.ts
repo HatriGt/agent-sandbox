@@ -77,6 +77,8 @@ export interface RunDigest {
   provenance?: DigestProvenance;
   /** One sentence for notifications and list rows. */
   headline: string;
+  /** The outcome card (src/outcome.ts), attached at archive time. */
+  outcome?: import("./outcome.js").RunOutcome;
 }
 
 /** Exit codes the run wrapper reserves for non-agent terminations (msb.ts). */

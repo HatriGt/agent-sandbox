@@ -256,6 +256,23 @@ export function getRun(db: Db, owner: string, id: number): (ArchivedRunRow & { d
   return { ...toRow(r), digest, ...(r.diff_text ? { diffText: String(r.diff_text) } : {}) };
 }
 
+/** Just the parsed digest of one record (no diff) — by id, or the latest record for a box. */
+export function getDigest(db: Db, owner: string, key: { id: number } | { box: string }): { id: number; box: string; digest: RunDigest | null } | undefined {
+  const r = (
+    "id" in key
+      ? db.prepare(`SELECT id, box, digest_json FROM run_archive WHERE id = ? AND owner = ?`).get(key.id, owner)
+      : db.prepare(`SELECT id, box, digest_json FROM run_archive WHERE box = ? AND owner = ? ORDER BY id DESC LIMIT 1`).get(key.box, owner)
+  ) as { id: number; box: string; digest_json: string | null } | undefined;
+  if (!r) return undefined;
+  let digest: RunDigest | null = null;
+  try {
+    digest = r.digest_json ? (JSON.parse(r.digest_json) as RunDigest) : null;
+  } catch {
+    digest = null;
+  }
+  return { id: Number(r.id), box: String(r.box), digest };
+}
+
 /** Owner-scoped delete. Returns true when a row was removed. */
 export function deleteRun(db: Db, owner: string, id: number): boolean {
   return db.prepare(`DELETE FROM run_archive WHERE id = ? AND owner = ?`).run(id, owner).changes > 0;

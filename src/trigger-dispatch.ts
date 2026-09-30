@@ -128,6 +128,7 @@ export function makeDispatcher(d: DispatcherDeps) {
       name: t.name,
       source: t.kind,
       ...(ctx.event ? { event: ctx.event } : {}),
+      ...(ctx.parent ? { parent: ctx.parent.box } : {}),
       ...(ctx.match?.subject && Number.isFinite(ctx.match.subject.number) ? { subject: { ...ctx.match.subject, ...(t.repo ? { repo: t.repo } : {}) } } : {}),
     };
 

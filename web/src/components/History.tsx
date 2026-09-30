@@ -2,7 +2,7 @@ import * as React from "react";
 import { ArrowLeft, Check, ChevronDown, RotateCw, Trash2 } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import { toast } from "sonner";
-import { api, type Automation, type HistoryRun, type LedgerQuery, type LedgerTotals, type RunDigest } from "@/lib/api";
+import { api, type Automation, type LedgerRow as HistoryRun, type LedgerQuery, type LedgerTotals, type RunDigest, type RunOutcome } from "@/lib/api";
 import { ActivityHeatmap, type ActivityRun } from "@/components/ui/activity-heatmap";
 import { NumberTicker } from "@/components/ui/number-ticker";
 import { fmtAgo, friendlyName, shortName } from "@/lib/format";
@@ -14,6 +14,7 @@ import { Collapse } from "@/components/ui/collapse";
 import { StaggerItem, Swap } from "@/components/ui/swap";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DigestCard } from "@/components/thread/DigestCard";
+import { OutcomeCard, outcomeFacts } from "@/components/thread/OutcomeCard";
 import { ReviewAllPane } from "@/components/thread/ReviewAll";
 import { Bar } from "@/components/thread/Skeletons";
 import { cn } from "@/lib/utils";
@@ -441,12 +442,18 @@ function HistoryRow({
               </span>
               {duration && <span className="stamp">{duration}</span>}
               {run.archivedAt > 0 && <span>archived {fmtAgo(Math.round(run.archivedAt / 1000))}</span>}
+              {run.outcome?.header.label && <span title="Why it started">{run.outcome.header.label}</span>}
               {run.headline && run.task && run.headline.trim() !== titleOf(run) && (
                 <span className="text-faint hidden min-w-0 truncate sm:inline" title={run.headline}>
                   {run.headline.replace(/\s*verified\s*$/i, "")}
                 </span>
               )}
             </span>
+            {run.outcome && outcomeFacts(run.outcome).length > 0 && (
+              <span className="stamp text-muted-foreground mt-0.5 block truncate" title={outcomeFacts(run.outcome).join(" · ")}>
+                {outcomeFacts(run.outcome).join(" · ")}
+              </span>
+            )}
           </span>
 
           {/* Actions sit above the stretched button. */}
@@ -479,7 +486,7 @@ function HistoryRow({
         </div>
 
         <Collapse open={open}>
-          <RunDetail id={run.id} />
+          <RunDetail id={run.id} outcome={run.outcome ?? null} />
         </Collapse>
       </div>
     </div>
@@ -487,7 +494,7 @@ function HistoryRow({
 }
 
 /** The expanded record: the full digest fetched once, rendered as the run receipt. */
-function RunDetail({ id }: { id: number }) {
+function RunDetail({ id, outcome }: { id: number; outcome: RunOutcome | null }) {
   const [state, setState] = React.useState<{ digest: RunDigest | null; diffText?: string; error?: string } | "loading">("loading");
   const [review, setReview] = React.useState(false);
   const [attempt, setAttempt] = React.useState(0);
@@ -530,6 +537,7 @@ function RunDetail({ id }: { id: number }) {
           </div>
         ) : state.digest ? (
           <>
+            {outcome && <OutcomeCard outcome={outcome} className="mb-3" />}
             <DigestCard digest={state.digest} />
             {state.diffText && (
               <div className="mt-3">

@@ -12,6 +12,7 @@ import { Icon } from "./ui/Icon";
 import { FadeInUp } from "./ui/Motion";
 import { CardSkeleton } from "./ui/Skeleton";
 import { DigestView } from "./DigestCard";
+import { OutcomeView, outcomeFacts } from "./OutcomeCard";
 
 const PAGE = 25;
 
@@ -139,8 +140,15 @@ export function HistoryList() {
                   ) : null}
                 </View>
 
+                {r.outcome && outcomeFacts(r.outcome) ? (
+                  <T variant="micro" mono tone="muted" numberOfLines={1} style={{ marginTop: 4 }}>
+                    {outcomeFacts(r.outcome)}
+                  </T>
+                ) : null}
+
                 {openId === r.id ? (
                   <View style={{ marginTop: 10, gap: 8 }}>
+                    {r.outcome ? <OutcomeView outcome={r.outcome} /> : null}
                     <RunDetail id={r.id} />
                     <View style={{ flexDirection: "row", gap: 8 }}>
                       <Button
