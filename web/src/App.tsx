@@ -215,6 +215,15 @@ export default function App() {
   const runs_ = React.useMemo(() => boxes.filter((b) => b.role !== "pool-free"), [boxes]);
   const warmReady = boxes.filter((b) => b.role === "pool-free" && isUp(b)).length;
   const selectedBox = boxes.find((b) => b.name === selected) ?? null;
+  // The fleet reports a cold-booting box (boxStatus "creating"/"starting") but `isVisible` hides it
+  // until it is up. A box URL for such a box is a run being born — never "unknown, go home".
+  const selectedRaw = React.useMemo(
+    () => (selected && data && Array.isArray(data.boxes) ? data.boxes.find((b) => b.name === selected) ?? null : null),
+    [selected, data]
+  );
+  // The box this tab just launched. Booting pane → live Thread for it share ONE pane key, so the
+  // hand-off is a content change inside a mounted pane rather than a second keyed swap.
+  const [launched, setLaunched] = React.useState<string | null>(null);
   const waiting = runs_.filter((b) => b.runState === "waiting");
   const working = runs_.filter((b) => b.runState === "running" && isUp(b)).length;
 
@@ -291,8 +300,8 @@ export default function App() {
 
   React.useEffect(() => {
     if (booting || !data) return;
-    if (selected && !boxes.some((b) => b.name === selected)) go({ view: "hub" }, { replace: true });
-  }, [selected, data, boxes, booting, go]);
+    if (selected && !boxes.some((b) => b.name === selected) && !selectedRaw) go({ view: "hub" }, { replace: true });
+  }, [selected, selectedRaw, data, boxes, booting, go]);
 
   // Attach to the delegated box the instant it surfaces: a cold boot is a brand-new session box; a
   // warm claim is an existing pool-free box whose role flips to pool-claimed (same name).
@@ -320,10 +329,11 @@ export default function App() {
     // A warm claim reuses the pool box's NAME: anything cached about it (a hover prefetch of the
     // idle pool box) is the previous life's log and would be spliced ahead of the new run's output.
     if (booting.known.get(fresh.name) === "pool-free") dropWatchCache(fresh.name);
-    go({ view: "box", name: fresh.name });
+    setLaunched(fresh.name);
+    if (selected !== fresh.name) go({ view: "box", name: fresh.name });
     setBooting(null);
     setPending([]);
-  }, [booting, boxes, go]);
+  }, [booting, boxes, go, selected]);
 
   // Keyboard: n new · j/k machines · / composer · g f fleet · g a accounts.
   const focusComposer = React.useRef<(() => void) | null>(null);
@@ -414,7 +424,7 @@ export default function App() {
     // hold the box-loading skeleton until the box surfaces (or the cleanup effect routes home).
     // Once the booting pane knows its machine it shares that box's pane key, so the swap to the real
     // Thread is a content change inside one pane — not a fade-out/fade-in remount (the jump-cut).
-    view === "fleet" ? "fleet" : view === "history" ? "history" : view === "automations" ? "automations" : view === "skills" ? "skills" : view === "integrations" ? "integrations" : view === "account" ? "account" : view === "connect" ? "connect" : view === "welcome" ? "welcome" : view === "admin" ? "admin" : route.view === "pr" ? `pr:${route.repo}#${route.number}` : booting && !selectedBox ? (booting.machine ? `box:${booting.machine}` : "booting") : selectedBox ? `box:${selectedBox.name}` : view === "box" ? "box-loading" : "hub";
+    view === "fleet" ? "fleet" : view === "history" ? "history" : view === "automations" ? "automations" : view === "skills" ? "skills" : view === "integrations" ? "integrations" : view === "account" ? "account" : view === "connect" ? "connect" : view === "welcome" ? "welcome" : view === "admin" ? "admin" : route.view === "pr" ? `pr:${route.repo}#${route.number}` : booting && !selectedBox ? "launch" : selectedBox && selectedBox.name === launched ? "launch" : selectedBox ? `box:${selectedBox.name}` : view === "box" && selectedRaw ? `box:${selectedRaw.name}` : view === "box" ? "box-loading" : "hub";
 
   const reduceMotion = useReducedMotion();
 
@@ -813,6 +823,10 @@ export default function App() {
                   </div>
                 ) : booting && !selectedBox ? (
                   <BootingThread task={booting.task} warm={booting.warm} machine={booting.machine} inferred={booting.inferred} onBack={backToRail} />
+                ) : view === "box" && !selectedBox && selectedRaw ? (
+                  // Reopened (or refreshed) while the machine is still booting: show the run being set
+                  // up, not a blank pane or a bounce to the hub. The Thread takes over once it is up.
+                  <BootingThread task={selectedRaw.task ?? ""} warm={false} machine={selectedRaw.name} inferred={inferredNotes[selectedRaw.name]} onBack={backToRail} />
                 ) : view === "box" && !selectedBox && !data ? (
                   <ThreadPageSkeleton />
                 ) : selectedBox ? (
@@ -875,9 +889,20 @@ export default function App() {
                       // booting pane to "connecting to <name>" instead; the attach effect swaps in the
                       // real Thread the moment the box surfaces. If the user already navigated away,
                       // leave them alone.
-                      if (bootingRef.current) setBooting({ ...bootingRef.current, machine: box, inferred });
+                      // Navigate NOW so the URL is the run's (a refresh or share lands on it), while the
+                      // booting pane stays up under the same "launch" pane key — no second keyed swap,
+                      // which under AnimatePresence mode="wait" could strand the pane blank when it
+                      // landed mid-exit of the hub. The attach effect swaps in the real Thread.
+                      if (bootingRef.current) {
+                        setBooting({ ...bootingRef.current, machine: box, inferred });
+                        setLaunched(box);
+                        go({ view: "box", name: box });
+                      }
                     }}
-                    onFailed={() => setBooting(null)}
+                    onFailed={() => {
+                      setBooting(null);
+                      setLaunched(null);
+                    }}
                     onPending={(p) => setPending((prev) => [...prev, p])}
                     onSettled={(id) => setPending((prev) => prev.filter((p) => p.id !== id))}
                     onOpen={open}
