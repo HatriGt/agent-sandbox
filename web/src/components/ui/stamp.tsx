@@ -1,4 +1,4 @@
-import { CircleDot, Pause, Check, X, Circle, MoonStar, type LucideProps } from "lucide-react";
+import { CircleDot, Pause, Check, X, Circle, MoonStar, Hourglass, type LucideProps } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { cn } from "@/lib/utils";
 import { doneLabel, isFailedExit } from "@/lib/format";
@@ -17,7 +17,9 @@ import type { DisplayState } from "@/lib/lifecycle";
  */
 type Tone = { icon: React.ComponentType<LucideProps>; word: (exit?: number) => string; text: string; pill: string };
 
-const TONE: Record<DisplayState | "failed", Tone> = {
+const TONE: Record<DisplayState | "failed" | "stalled", Tone> = {
+  // Running, but no action for the stall window: the failed hue with its own glyph (src/budget.ts).
+  stalled: { icon: Hourglass, word: () => "stalled", text: "text-destructive", pill: "bg-destructive/10 text-destructive ring-destructive/20" },
   running: { icon: CircleDot, word: () => "working", text: "text-live", pill: "bg-live/10 text-live ring-live/20" },
   waiting: {
     icon: Pause,
@@ -41,24 +43,27 @@ const TONE: Record<DisplayState | "failed", Tone> = {
   },
 };
 
-function toneOf(state: DisplayState, exitCode?: number): Tone {
+function toneOf(state: DisplayState, exitCode?: number, stalled?: boolean): Tone {
+  if (stalled && state === "running") return TONE.stalled;
   return state === "done" && isFailedExit(exitCode) ? TONE.failed : TONE[state];
 }
 
 export function StateStamp({
   state,
   exitCode,
+  stalled,
   className,
 }: {
   state: DisplayState;
   exitCode?: number;
+  stalled?: boolean;
   className?: string;
 }) {
-  const t = toneOf(state, exitCode);
+  const t = toneOf(state, exitCode, stalled);
   const Icon = t.icon;
   return (
     <span className={cn("label inline-flex items-center gap-1.5 font-medium", t.text, className)}>
-      <Icon className={cn("size-3 shrink-0", state === "running" && "breathe")} aria-hidden strokeWidth={2.5} />
+      <Icon className={cn("size-3 shrink-0", state === "running" && !stalled && "breathe")} aria-hidden strokeWidth={2.5} />
       {t.word(exitCode)}
     </span>
   );
@@ -67,20 +72,22 @@ export function StateStamp({
 export function StatePill({
   state,
   exitCode,
+  stalled,
   className,
 }: {
   state: DisplayState;
   exitCode?: number;
+  stalled?: boolean;
   className?: string;
 }) {
-  const t = toneOf(state, exitCode);
+  const t = toneOf(state, exitCode, stalled);
   const Icon = t.icon;
   // The pill crossfades when the state flips (working → needs you → done → sleeping) instead of
   // snapping: a state change is an event worth a beat, and the beat makes it legible.
   return (
     <AnimatePresence mode="popLayout" initial={false}>
       <motion.span
-        key={`${state}-${exitCode ?? ""}`}
+        key={`${state}-${exitCode ?? ""}-${stalled ? "s" : ""}`}
         initial={{ opacity: 0, scale: 0.92 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.92 }}
@@ -91,7 +98,7 @@ export function StatePill({
           className
         )}
       >
-        <Icon className={cn("size-3 shrink-0", state === "running" && "breathe")} aria-hidden strokeWidth={2.5} />
+        <Icon className={cn("size-3 shrink-0", state === "running" && !stalled && "breathe")} aria-hidden strokeWidth={2.5} />
         {t.word(exitCode)}
       </motion.span>
     </AnimatePresence>

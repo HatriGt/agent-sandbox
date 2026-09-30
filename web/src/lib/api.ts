@@ -764,6 +764,7 @@ export const api = {
     post<AgentPrefs>("/agent-prefs.json", { defaultAgent, ...(allowPartialSupervision ? { allowPartialSupervision } : {}) }),
 
   /** Model providers: the caller's own keys/endpoints. Keys come back masked only. */
+  pricedModels: () => fetch(url("/budget/prices.json"), { headers: authHeaders }).then(parse<{ priced: string[] }>),
   providers: (signal?: AbortSignal) => fetch(url("/providers.json"), { headers: authHeaders, signal }).then(parse<ProvidersResponse>),
   saveProvider: (body: { id?: string; kind: ProviderKind; label?: string; baseUrl?: string; apiKey?: string }) =>
     post<ProvidersResponse & { saved: string }>("/providers.json", body),

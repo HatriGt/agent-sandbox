@@ -170,7 +170,7 @@ export function ThreadHeader({
     : (state === "done" || state === "waiting") && box.lastOutputAt
       ? `${state === "done" ? "finished" : "asked"} ${fmtAgo(box.lastOutputAt)}`
       : box.runState === "running" && box.lastOutputAt
-        ? `${box.stalled ? "⧖ stalled · " : ""}last action ${fmtAgo(box.lastOutputAt)}`
+        ? `last action ${fmtAgo(box.lastOutputAt)}`
         : null;
   // Budget line: tokens always; dollars only when the model has a known price (never guessed).
   const bud = box.budget;
@@ -391,7 +391,7 @@ export function ThreadHeader({
           and the repo chips scroll sideways rather than stacking into a third and fourth row. */}
       <div className="text-muted-foreground mt-1 flex min-h-6 min-w-0 flex-nowrap items-center gap-x-2 text-meta">
         <span className="shrink-0">
-          <StatePill state={state} exitCode={exitCode} />
+          <StatePill state={state} exitCode={exitCode} stalled={box.stalled} />
         </span>
         <Dot />
         <Tooltip>
@@ -491,6 +491,16 @@ export function ThreadHeader({
                 <span className={cn("text-faint text-micro", deadline.remainingSec != null && deadline.remainingSec < 300 ? "text-attention-text" : "hidden sm:inline")}>{short}</span>
               </TooltipTrigger>
               <TooltipContent side="bottom">{long}</TooltipContent>
+            </Tooltip>
+          )}
+          {bud && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="text-faint hidden text-micro tabular-nums sm:inline">
+                  <Dot /> {bud.usd !== undefined ? `$${bud.usd.toFixed(2)}${bud.maxUsd ? ` of $${bud.maxUsd}` : ""}` : `${Math.round(bud.tokens / 1000)}k tok`}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{budgetLine} — a cap pauses the run with a question</TooltipContent>
             </Tooltip>
           )}
         </span>

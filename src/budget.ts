@@ -107,6 +107,17 @@ export function priceFor(model: string | undefined, env: NodeJS.ProcessEnv = pro
   return KNOWN_PRICES[model];
 }
 
+/** Every model id with a price (built-in + MSB_MODEL_PRICES) — the composer offers $ only for these. */
+export function pricedModels(env: NodeJS.ProcessEnv = process.env): string[] {
+  let extra: string[] = [];
+  try {
+    extra = Object.keys(env.MSB_MODEL_PRICES ? (JSON.parse(env.MSB_MODEL_PRICES) as object) : {}).filter((k) => priceFor(k, env));
+  } catch {
+    /* ignored, as in priceFor */
+  }
+  return [...new Set([...Object.keys(KNOWN_PRICES), ...extra])];
+}
+
 /** Dollars for a usage total, or undefined when the model's price is unknown. */
 export function costUsd(u: UsageTotals, model: string | undefined, env?: NodeJS.ProcessEnv): number | undefined {
   const p = priceFor(model, env);

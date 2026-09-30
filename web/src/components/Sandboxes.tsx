@@ -390,7 +390,7 @@ function MachineRow({
         />
 
         <div className="flex items-center gap-2">
-          <StateStamp state={state} exitCode={box.exitCode} />
+          <StateStamp state={state} exitCode={box.exitCode} stalled={box.stalled} />
           <span className="label text-muted-foreground md:hidden">{box.leaving ? "shutting down" : roleLabel(box.role)}</span>
         </div>
 

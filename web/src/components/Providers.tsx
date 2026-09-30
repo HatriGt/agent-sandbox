@@ -64,11 +64,11 @@ export function Providers() {
       }
     >
       {!data ? (
-        <div className="flex max-w-xl flex-col gap-2" aria-busy="true" aria-label="Loading">
+        <div className="flex flex-col gap-2" aria-busy="true" aria-label="Loading">
           <Bar className="h-12 w-full rounded-lg" />
         </div>
       ) : (
-        <div className="flex max-w-xl flex-col gap-2">
+        <div className="flex flex-col gap-2">
           {data.providers.length === 0 && !adding && (
             <p className="text-muted-foreground text-micro">No providers yet — runs use the deployment's default model access.</p>
           )}
@@ -90,7 +90,7 @@ function ProviderRow({ p }: { p: ProviderView }) {
     try {
       const r = await api.providerModels(p.id, true);
       if (r.error) toast.error("Could not list models", { description: r.error });
-      else toast.success(`${r.models.length} models`);
+      else toast.success(`${r.models.length} model${r.models.length === 1 ? "" : "s"}`);
       publish(await api.providers());
     } finally {
       setBusy(null);
@@ -113,7 +113,7 @@ function ProviderRow({ p }: { p: ProviderView }) {
         <div className="text-muted-foreground truncate font-mono text-micro">{p.baseUrl}</div>
         <div className="text-faint mt-1 text-micro">
           {p.apiKeyMasked ? <span className="font-mono">{p.apiKeyMasked}</span> : "no key"} ·{" "}
-          {p.models ? `${p.models.length} models` : "models not fetched"} · runs {p.drivers.map((d) => DRIVER_LABEL[d] ?? d).join(", ") || "no driver"}
+          {p.models ? `${p.models.length} model${p.models.length === 1 ? "" : "s"}` : "models not fetched"} · runs {p.drivers.map((d) => DRIVER_LABEL[d] ?? d).join(", ") || "no driver"}
         </div>
       </div>
       <Button size="xs" variant="ghost" onClick={() => void refresh()} disabled={busy !== null} aria-label="Refresh models">

@@ -24,6 +24,8 @@ import {
 import { toast } from "sonner";
 import { RepoPicker, type PickedRepo } from "@/components/RepoPicker";
 import { ModelChip, useModelChoice, type ModelChoice } from "@/components/thread/ModelPicker";
+import { BudgetChip } from "@/components/thread/BudgetChip";
+import type { RunBudget } from "@/lib/api";
 import { useProviders } from "@/components/Providers";
 import { AgentChip, useAgentChoice } from "@/components/DriverPicker";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
@@ -253,6 +255,7 @@ export function Hub({
   // The user's own providers (Providers page) join the picker, grouped by provider label.
   const providers = useProviders();
   const [provPick, setProvPick] = React.useState<ModelChoice | null>(null);
+  const [budget, setBudget] = React.useState<RunBudget | null>(null);
   const provModels = React.useMemo<ModelChoice[]>(
     () => (providers?.providers ?? []).flatMap((p) => (p.models ?? []).map((id) => ({ id, label: id, tier: "other" as const, group: p.label, provider: p.id }))),
     [providers]
@@ -429,6 +432,7 @@ export function Hub({
         ...(provPick ? { model: provPick.id, provider: provPick.provider } : model.picked ? { model: model.picked } : {}),
         // The agent chip shows "partial" before the pick is sent, so choosing it IS the acknowledgement.
         ...(agent.picked ? { agent: agent.picked, ...(agent.current?.supervised === false ? { allowPartialSupervision: true } : {}) } : {}),
+        ...(budget ? { budget } : {}),
         ...(verifyActive ? { verify: verifyMode === "command" ? { command: verifyText.trim() } : { criterion: verifyText.trim() } } : {}),
       });
       if (res.ok) {
@@ -692,6 +696,7 @@ export function Hub({
                 </button>
                 <AgentChip choices={agent.choices} current={agent.current} defaultId={agent.defaultId} onPick={agent.pick} />
                 <ModelChip current={provPick ?? model.current} models={pickerModels} defaultId={model.defaultId} onPick={pickModel} />
+                <BudgetChip value={budget} onChange={setBudget} modelId={provPick ? undefined : (model.picked ?? model.defaultId)} />
                 <button
                   type="button"
                   onClick={() => setVerifyOpen((v) => !v)}
@@ -833,15 +838,10 @@ export function Hub({
                         onMouseEnter={() => prefetchWatch(b.name)}
                         className="group hover:bg-muted/70 flex h-11 w-full cursor-pointer items-center gap-3 px-3.5 text-left transition-colors duration-150"
                       >
-                        <StateStamp state={displayState(b)} exitCode={b.exitCode} className="w-24 shrink-0" />
+                        <StateStamp state={displayState(b)} exitCode={b.exitCode} stalled={b.stalled} className="w-24 shrink-0" />
                         <span className="text-foreground min-w-0 flex-1 truncate text-meta">
                           {b.runState === "waiting" && b.question ? questionHeadline(b.question) : threadTitle(b)}
                         </span>
-                        {b.stalled && (
-                          <span className="text-destructive shrink-0 text-micro font-medium" title="Running, but no action for 10+ min">
-                            ⧖ stalled
-                          </span>
-                        )}
                         {b.lastOutputAt && (
                           <span className={`${b.stalled ? "text-destructive" : "text-faint"} tabular hidden shrink-0 text-micro sm:inline`}>
                             {b.runState === "running" ? "last action " : ""}

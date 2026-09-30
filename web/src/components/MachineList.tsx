@@ -135,7 +135,7 @@ export function MachineList({
                       )}
                     >
                       <div className="flex items-baseline gap-2">
-                        <StateStamp state={state} exitCode={v.exitCode} />
+                        <StateStamp state={state} exitCode={v.exitCode} stalled={"stalled" in v ? !!v.stalled : undefined} />
                         <span className="label text-muted-foreground ml-auto truncate">
                           {v.leaving ? "shutting down" : v.kept ? "kept" : state === "sleeping" ? (sleepTtlSec && v.asleepSec != null ? `gone in ${fmtDuration(Math.max(0, sleepTtlSec - v.asleepSec))}` : "wakes on reply") : v.role === "pool-free" ? roleLabel(v.role) : ""}
                         </span>

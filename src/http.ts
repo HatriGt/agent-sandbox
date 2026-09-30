@@ -53,7 +53,7 @@ import {
   upsertProvider,
   viewOf,
 } from "./providers.js";
-import { BUDGET_PATH, normalizeBudget, type RunBudget } from "./budget.js";
+import { BUDGET_PATH, normalizeBudget, pricedModels, type RunBudget } from "./budget.js";
 import { QUESTION_MARK } from "./drivers/sentinels.js";
 import type { BoxView } from "./monitor.js";
 import { requestSessions, createLocalUser, deleteUser, listUsers, ownerOf, setUserRole, validateSignup, createPasswordUser, authenticatePassword, setPassword, updateProfile, verifyPassword, PASSWORD_MIN, listSessions, revokeSession, revokeOtherSessions, startTrial, planOf, setPlan, TrialExpiredError } from "./identity.js";
@@ -1829,6 +1829,10 @@ const providersPayload = (owner: string) => ({
   providers: loadProviders(owner).map(viewOf),
   kinds: PROVIDER_KINDS.map((k) => ({ id: k, label: PROVIDER_LABELS[k], drivers: driversFor(k) })),
   cliLoginPolicy: CLI_LOGIN_POLICY,
+});
+app.get("/budget/prices.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  res.json({ priced: pricedModels() });
 });
 app.get("/providers.json", (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;

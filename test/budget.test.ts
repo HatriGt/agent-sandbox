@@ -1,4 +1,4 @@
-﻿import { test } from "node:test";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 import { normalizeBudget, parseBudgetState, sumUsage, priceFor, costUsd, checkBudget, isStalled, usdEnforceable } from "../src/budget.js";
 import { detectTransitions } from "../src/notify.js";
