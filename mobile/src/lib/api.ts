@@ -352,6 +352,18 @@ export interface Automation {
   nextFire: number | null;
   lastResult: AutomationResult | null;
   active: number;
+  spec?: { preset?: "sentry" | "datadog" | "pagerduty"; cooldownMin?: number };
+  lastDelivery?: AutomationDelivery;
+}
+/** One row of an automation's delivery log, newest first (GET /triggers/:id/deliveries.json). */
+export interface AutomationDelivery {
+  id: number;
+  at: number;
+  outcome: "fired" | "skipped" | "rejected" | "failed";
+  reason?: "cooldown" | "disabled" | "limit" | "dedupe" | "ignored" | "signature" | "payload" | "error";
+  detail?: string;
+  box?: string;
+  test?: boolean;
 }
 
 export type DelegateResult =
@@ -611,6 +623,8 @@ export const api = {
   setAutomationEnabled: (id: string, enabled: boolean) =>
     post<{ trigger: Automation }>(`/triggers/${encodeURIComponent(id)}/enabled.json`, { enabled }),
   runAutomation: (id: string) => post<{ result: AutomationResult }>(`/triggers/${encodeURIComponent(id)}/run.json`, {}),
+  testAutomation: (id: string) => post<{ ok: boolean; result?: AutomationResult; skipped?: string; ignored?: string }>(`/triggers/${encodeURIComponent(id)}/test.json`, {}),
+  automationDeliveries: (id: string) => get<{ deliveries: AutomationDelivery[] }>(`/triggers/${encodeURIComponent(id)}/deliveries.json`),
 
   models: (session?: string) =>
     get<{ default: string; current: string; models: { id: string; label: string; tier: "opus" | "sonnet" | "haiku" | "other" }[] }>(

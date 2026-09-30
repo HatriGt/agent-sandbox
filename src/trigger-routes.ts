@@ -6,9 +6,12 @@ import type { Dispatcher } from "./trigger-dispatch.js";
 import { OPERATOR_OWNER } from "./user-store.js";
 import { deliveryKeys, matchGithub, normalizeTrigger, renderTemplate, safeEqual, templateContext, verifyGithubSignature } from "./triggers.js";
 import {
-  claimDelivery, createTrigger, deleteTrigger, getTrigger, getTriggerById, lastPayload, listTriggers, revealSecret, rotateSecret, savePayload,
-  setEnabled, updateTrigger, viewTrigger,
+  claimDelivery, createTrigger, deleteTrigger, getTrigger, getTriggerById, lastPayload, listDeliveries, listTriggers, logDelivery, markDeliveryTest,
+  revealSecret, revealSigningSecret, rotateSecret, savePayload, setEnabled, setSigningSecret, updateTrigger, viewTrigger,
+  type DeliveryReason, type TriggerRow,
 } from "./trigger-store.js";
+import { normalizeAlert, testPayload, verifyPreset } from "./alert-presets.js";
+import crypto from "node:crypto";
 import { makeRateLimiter } from "./auth-throttle.js";
 
 /**
@@ -61,7 +64,7 @@ export function registerTriggerRoutes(app: Express, c: TriggerRouteCtx): void {
     const owner = ownerOfP(c.principalOf(res));
     const all = listTriggers(c.db, owner);
     const nm = Object.fromEntries(all.map((t) => [t.id, t.name]));
-    res.json({ triggers: all.map((t) => ({ ...viewTrigger(t, nm), active: c.dispatcher.activeCount(t.id) })) });
+    res.json({ triggers: all.map((t) => ({ ...viewTrigger(t, nm, c.db), active: c.dispatcher.activeCount(t.id) })) });
   });
 
   app.post("/triggers.json", (req, res) => {
@@ -72,7 +75,10 @@ export function registerTriggerRoutes(app: Express, c: TriggerRouteCtx): void {
     if (v.trigger.kind === "chain" && !getTrigger(c.db, owner, v.trigger.spec.afterTrigger!)) return void res.status(400).json({ error: "the automation this chain follows does not exist" });
     if (listTriggers(c.db, owner).length >= 50) return void res.status(400).json({ error: "50 automations is the limit" });
     try {
-      const { row, secret } = createTrigger(c.db, c.box, owner, v.trigger);
+      const created = createTrigger(c.db, c.box, owner, v.trigger);
+      const secret = created.secret;
+      if (v.signingSecret) setSigningSecret(c.db, c.box, owner, created.row.id, v.signingSecret);
+      const row = getTrigger(c.db, owner, created.row.id)!;
       c.audit(owner, "trigger.create", { trigger: row.id, kind: row.kind });
       // The secret is shown ONCE, here. Lists never carry it.
       const needsUrl = row.kind === "webhook" || row.kind === "github";
@@ -102,8 +108,13 @@ export function registerTriggerRoutes(app: Express, c: TriggerRouteCtx): void {
     if (!v.ok) return void res.status(400).json({ error: v.error });
     if (v.trigger.kind === "chain" && (v.trigger.spec.afterTrigger === req.params.id || !getTrigger(c.db, owner, v.trigger.spec.afterTrigger!)))
       return void res.status(400).json({ error: "a chain must follow another existing automation" });
-    const row = updateTrigger(c.db, owner, req.params.id, v.trigger);
+    let row = updateTrigger(c.db, owner, req.params.id, v.trigger);
     if (!row) return void res.status(404).json({ error: "no such automation" });
+    // Write-only: an update without a signing secret keeps the stored one.
+    if (v.signingSecret) {
+      setSigningSecret(c.db, c.box, owner, row.id, v.signingSecret);
+      row = getTrigger(c.db, owner, row.id)!;
+    }
     c.audit(owner, "trigger.update", { trigger: row.id });
     res.json({ trigger: viewTrigger(row, names(owner)) });
   });
@@ -158,8 +169,143 @@ export function registerTriggerRoutes(app: Express, c: TriggerRouteCtx): void {
     res.json({ payload: lastPayload(c.db, owner, req.params.id) ?? null });
   });
 
+  // ─── deliveries (bet 4): the short log of what arrived and what happened to it ───
+  app.get("/triggers/:id/deliveries.json", (req, res) => {
+    if (!c.dashAuthed(req, res)) return;
+    const owner = ownerOfP(c.principalOf(res));
+    if (!getTrigger(c.db, owner, req.params.id)) return void res.status(404).json({ error: "no such automation" });
+    res.json({ deliveries: listDeliveries(c.db, owner, req.params.id) });
+  });
+
+  // "Send test event" (bet 3): a synthetic vendor-shaped delivery through the SAME pipeline as a real
+  // one, minus the vendor signature (the caller is the authenticated owner). Marked test everywhere:
+  // `asb_test` in the payload, "[TEST]" in the alert title, `test` in the log and the run's event.
+  app.post("/triggers/:id/test.json", async (req, res) => {
+    if (!c.dashAuthed(req, res)) return;
+    const owner = ownerOfP(c.principalOf(res));
+    const t = getTrigger(c.db, owner, req.params.id);
+    if (!t) return void res.status(404).json({ error: "no such automation" });
+    if (t.kind !== "webhook" || !t.spec.preset) return void res.status(400).json({ error: "test events are for alert-source automations (Sentry, Datadog, PagerDuty)" });
+    try {
+      const { payload, headers } = testPayload(t.spec.preset, crypto.randomBytes(6).toString("hex"));
+      const out = await receive(t, Buffer.from(JSON.stringify(payload)), headers, { test: true, wait: true });
+      res.status(out.status).json(out.body);
+    } catch (e) {
+      c.failWith(res, e);
+    }
+  });
+
   // ─── the receiver ───
   const perTrigger = makeRateLimiter({ limit: 60, windowMs: 60_000 });
+
+  type Out = { status: number; body: Record<string, unknown> };
+  /**
+   * One delivery, after the URL secret checked out. Every exit writes a delivery-log row (directly,
+   * or through the dispatcher's markFired/markSkipped), so an automation that did not fire always
+   * says why. `wait` (test events) awaits the fire so the caller gets the run id; real deliveries
+   * answer first (GitHub's 10 s timeout) and fire after.
+   */
+  async function receive(
+    t: TriggerRow,
+    raw: Buffer,
+    headers: Record<string, string | string[] | undefined>,
+    opt: { test?: boolean; wait?: boolean; secret?: string } = {}
+  ): Promise<Out> {
+    const at = Date.now();
+    const test = !!opt.test;
+    const note = (outcome: "skipped" | "rejected", reason: DeliveryReason, detail: string) =>
+      logDelivery(c.db, t.id, { at, outcome, reason, detail, ...(test ? { test } : {}) });
+    const ghEvent = typeof headers["x-github-event"] === "string" ? (headers["x-github-event"] as string) : "";
+    if (t.kind === "github") {
+      if (!verifyGithubSignature(opt.secret ?? "", raw, headers["x-hub-signature-256"] as string | undefined)) {
+        note("rejected", "signature", "bad X-Hub-Signature-256");
+        return { status: 401, body: { error: "bad signature (set the webhook secret to this automation's secret)" } };
+      }
+      if (ghEvent === "ping") return { status: 200, body: { ok: true, pong: true } };
+    }
+    if (t.spec.preset && !test) {
+      const v = verifyPreset(t.spec.preset, revealSigningSecret(c.db, c.box, t.id), raw, headers);
+      if (!v.ok) {
+        note("rejected", "signature", v.reason);
+        return { status: 401, body: { error: v.reason } };
+      }
+    }
+    let payload: unknown;
+    const text = raw.toString("utf8");
+    try {
+      payload = text.trim() ? JSON.parse(text) : {};
+    } catch {
+      if (t.kind === "github" || t.spec.preset) {
+        note("rejected", "payload", "body is not JSON");
+        return { status: 400, body: { error: "deliveries must be JSON (content type application/json)" } };
+      }
+      payload = { text: text.slice(0, 20_000) };
+    }
+    let alert: ReturnType<typeof normalizeAlert> | undefined;
+    if (t.spec.preset) {
+      // A real delivery can never pose as a test one.
+      if (!test && payload && typeof payload === "object") delete (payload as Record<string, unknown>).asb_test;
+      alert = normalizeAlert(t.spec.preset, payload, headers);
+      if (!alert.ok) {
+        note("rejected", "payload", alert.reason);
+        return { status: 400, body: { error: alert.reason } };
+      }
+      // Stamp the normalised fields where the template ({{alert.title}}) and the preview can see them.
+      payload = { ...(payload as Record<string, unknown>), asb_alert: alert.alert };
+    }
+    const keys = deliveryKeys(headers, raw);
+    if (!claimDelivery(c.db, t.id, keys, at, 7 * 24 * 3600_000, t.kind === "github" ? 7 * 24 * 3600_000 : 60_000)) {
+      note("skipped", "dedupe", "same delivery seen already");
+      return { status: 200, body: { ok: true, duplicate: true } };
+    }
+    // Stored for the editor's preview — redacted like every other stored text.
+    try {
+      savePayload(c.db, t.id, JSON.parse(c.redact(JSON.stringify(payload))));
+    } catch {
+      /* preview storage is best-effort */
+    }
+    if (!t.enabled && !test) {
+      note("skipped", "disabled", "automation is paused");
+      return { status: 202, body: { ok: true, skipped: "disabled" } };
+    }
+    let match: ReturnType<typeof matchGithub> | undefined;
+    if (t.kind === "github") {
+      match = matchGithub(t.spec, t.repo ?? "", ghEvent, payload);
+      if (!match.match) {
+        note("skipped", "ignored", match.reason);
+        return { status: 202, body: { ok: true, ignored: match.reason } };
+      }
+    }
+    if (alert?.ok) {
+      if (!alert.fire) {
+        note("skipped", "ignored", alert.reason);
+        return { status: 202, body: { ok: true, ignored: alert.reason } };
+      }
+      // Cooldown per alert fingerprint: a storm of the same alert is one run.
+      const cd = (t.spec.cooldownMin ?? 0) * 60_000;
+      const fp = alert.alert.fingerprint.slice(0, 200);
+      if (cd > 0 && !claimDelivery(c.db, t.id, [`alert:${fp}`], at, cd)) {
+        note("skipped", "cooldown", `alert ${fp.slice(0, 60)} already fired within ${t.spec.cooldownMin} min`);
+        return { status: 202, body: { ok: true, skipped: "cooldown" } };
+      }
+    }
+    const event = test ? `test:${t.spec.preset ?? t.kind}` : ghEvent || t.spec.preset || "webhook";
+    const fire = c.dispatcher.fire(t, { payload, event, ...(test ? { manual: true } : {}), ...(match?.match ? { match } : {}) }).then((r) => {
+      if (test) markDeliveryTest(c.db, t.id, r.at);
+      return r;
+    });
+    if (opt.wait) {
+      const result = await fire;
+      return { status: 200, body: { ok: true, test, result } };
+    }
+    // Answer now; the start can take longer than GitHub's 10 s delivery timeout. The outcome lands in
+    // the delivery log, the trigger's last result and the audit log.
+    void fire.catch((e) => {
+      logDelivery(c.db, t.id, { at, outcome: "failed", reason: "error", detail: (e as Error).message.slice(0, 200) });
+      console.error(`[triggers] ${t.id} fire failed: ${(e as Error).message.slice(0, 200)}`);
+    });
+    return { status: 202, body: { ok: true, accepted: true } };
+  }
   app.post("/hooks/:id/:secret", async (req: Request, res: Response) => {
     const id = String(req.params.id ?? "").slice(0, 64);
     if (perTrigger.over(id)) {
@@ -170,45 +316,15 @@ export function registerTriggerRoutes(app: Express, c: TriggerRouteCtx): void {
     const real = t && (t.kind === "webhook" || t.kind === "github") ? revealSecret(c.db, c.box, t.id) : undefined;
     // Always compare, even for an unknown id, so timing does not tell "no such trigger" from "wrong secret".
     const okSecret = safeEqual(real ?? "\u0000no-trigger\u0000", String(req.params.secret ?? ""));
+    if (t && real && !okSecret) logDelivery(c.db, t.id, { at: Date.now(), outcome: "rejected", reason: "signature", detail: "wrong secret in the URL" });
     if (!t || !real || !okSecret) return void res.status(404).json({ error: "not found" });
     const raw = Buffer.isBuffer(req.body) ? (req.body as Buffer) : Buffer.alloc(0);
-    const ghEvent = typeof req.headers["x-github-event"] === "string" ? (req.headers["x-github-event"] as string) : "";
-    if (t.kind === "github") {
-      if (!verifyGithubSignature(real, raw, req.headers["x-hub-signature-256"] as string | undefined)) {
-        return void res.status(401).json({ error: "bad signature (set the webhook secret to this automation's secret)" });
-      }
-      if (ghEvent === "ping") return void res.json({ ok: true, pong: true });
-    }
-    let payload: unknown;
-    const text = raw.toString("utf8");
     try {
-      payload = text.trim() ? JSON.parse(text) : {};
-    } catch {
-      if (t.kind === "github") return void res.status(400).json({ error: "GitHub deliveries must be JSON (content type application/json)" });
-      payload = { text: text.slice(0, 20_000) };
+      const out = await receive(t, raw, req.headers as Record<string, string | string[] | undefined>, { secret: real });
+      res.status(out.status).json(out.body);
+    } catch (e) {
+      c.failWith(res, e);
     }
-    const keys = deliveryKeys(req.headers as Record<string, string | string[] | undefined>, raw);
-    if (!claimDelivery(c.db, t.id, keys, Date.now(), 7 * 24 * 3600_000, t.kind === "github" ? 7 * 24 * 3600_000 : 60_000)) {
-      return void res.status(200).json({ ok: true, duplicate: true });
-    }
-    // Stored for the editor's preview — redacted like every other stored text.
-    try {
-      savePayload(c.db, t.id, JSON.parse(c.redact(JSON.stringify(payload))));
-    } catch {
-      /* preview storage is best-effort */
-    }
-    if (!t.enabled) return void res.status(202).json({ ok: true, skipped: "disabled" });
-    let match: ReturnType<typeof matchGithub> | undefined;
-    if (t.kind === "github") {
-      match = matchGithub(t.spec, t.repo ?? "", ghEvent, payload);
-      if (!match.match) return void res.status(202).json({ ok: true, ignored: match.reason });
-    }
-    // Answer now; the start can take longer than GitHub's 10 s delivery timeout. The outcome lands in
-    // the trigger's last result (and the audit log).
-    res.status(202).json({ ok: true, accepted: true });
-    void c.dispatcher
-      .fire(t, { payload, event: ghEvent || "webhook", ...(match?.match ? { match } : {}) })
-      .catch((e) => console.error(`[triggers] ${t.id} fire failed: ${(e as Error).message.slice(0, 200)}`));
   });
 }
 

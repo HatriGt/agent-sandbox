@@ -1,8 +1,8 @@
 import * as React from "react";
-import { ArrowLeft, CalendarClock, Copy, GitPullRequest, Link2, Play, Plus, RotateCw, ShieldCheck, Trash2, Webhook, Workflow } from "lucide-react";
+import { ArrowLeft, CalendarClock, Copy, FlaskConical, GitPullRequest, Link2, Play, Plus, RotateCw, ShieldCheck, Trash2, Webhook, Workflow } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { toast } from "sonner";
-import { api, type Automation, type AutomationDraft, type AutomationKind, type GithubEvent } from "@/lib/api";
+import { api, type AlertPreset, type Automation, type AutomationDelivery, type AutomationDraft, type AutomationKind, type GithubEvent } from "@/lib/api";
 import { fmtAgo } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { ArmButton } from "@/components/ui/arm-button";
@@ -34,6 +34,42 @@ const DEFAULT_TEMPLATES: Record<AutomationKind, string> = {
   github: "Fix issue #{{issue.number}}: {{issue.title}}\n\n{{issue.body}}",
   chain: "Review what the previous run did ({{parent.headline}}) and tighten it.",
 };
+
+/* ─── alert sources (Sentry / Datadog / PagerDuty presets) ─── */
+
+const PRESET_LABEL: Record<AlertPreset, string> = { sentry: "Sentry", datadog: "Datadog", pagerduty: "PagerDuty" };
+const INCIDENT_HARNESS_ID = "hrn_builtin-incident-responder";
+const ALERT_TEMPLATE = "{{alert.source}} alert: {{alert.title}}\n\nSeverity: {{alert.severity}}\nService: {{alert.service}}\nLink: {{alert.url}}\n\n{{alert.message}}";
+const PRESET_SECRET_HINT: Record<AlertPreset, string> = {
+  sentry: "The integration's Client Secret (Sentry → Settings → Custom Integrations). We check Sentry-Hook-Signature with it.",
+  pagerduty: "The webhook subscription's signing secret (shown once when you create it). We check X-PagerDuty-Signature with it.",
+  datadog: "Datadog doesn't sign webhooks. Pick a token, and add the custom header X-ASB-Token with it in the Datadog webhook.",
+};
+const DATADOG_PAYLOAD =
+  '{"id":"$ID","alert_id":"$ALERT_ID","aggreg_key":"$AGGREG_KEY","title":"$EVENT_TITLE","body":"$EVENT_MSG","transition":"$ALERT_TRANSITION","priority":"$PRIORITY","link":"$LINK","hostname":"$HOSTNAME","tags":"$TAGS"}';
+
+const REASON_LABEL: Record<NonNullable<AutomationDelivery["reason"]>, string> = {
+  cooldown: "cooldown",
+  disabled: "paused",
+  limit: "limit reached",
+  dedupe: "duplicate",
+  ignored: "not a match",
+  signature: "bad signature",
+  payload: "bad payload",
+  error: "error",
+};
+
+/** "fired → box-1" / "skipped · cooldown" / "rejected · bad signature". */
+export function deliveryLine(d: AutomationDelivery): string {
+  const head = d.outcome === "fired" ? `fired${d.box ? ` → ${d.box}` : ""}` : `${d.outcome === "failed" ? "could not start" : d.outcome}${d.reason ? ` · ${REASON_LABEL[d.reason]}` : ""}`;
+  return d.test ? `test · ${head}` : head;
+}
+function randomToken(): string {
+  const b = new Uint8Array(24);
+  crypto.getRandomValues(b);
+  return Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+}
+const deliveryTone =(d: AutomationDelivery) => (d.outcome === "fired" ? "text-ok" : d.outcome === "skipped" ? "text-muted-foreground" : "text-destructive");
 
 function blank(kind: AutomationKind = "schedule"): AutomationDraft {
   return {
@@ -189,6 +225,8 @@ export function Automations({ onBack, onOpenBox }: { onBack: () => void; onOpenB
                 setEditing(null);
               }}
               onRan={() => void load()}
+              onOpenBox={onOpenBox}
+              initialHasSecret={!!rows?.find((r) => r.id === editing.id)?.hasSigningSecret}
             />
           </SheetContent>
         )}
@@ -210,6 +248,7 @@ function toDraft(a: Automation): AutomationDraft {
     prComment: a.prComment,
     ...(a.agent ? { agent: a.agent } : {}),
     ...(a.model ? { model: a.model } : {}),
+    ...(a.harnessId ? { harnessId: a.harnessId } : {}),
   };
 }
 
@@ -252,6 +291,14 @@ function AutomationRow({ a, onEdit, onToggle, onOpenBox }: { a: Automation; onEd
         <span className="text-muted-foreground mt-0.5 block truncate text-micro">{a.when}</span>
         <span className="text-muted-foreground mt-0.5 flex items-center gap-x-2 text-micro">
           <LastResult a={a} onOpenBox={onOpenBox} />
+          {a.lastDelivery && (a.kind === "webhook" || a.kind === "github") && (
+            <>
+              <span aria-hidden>·</span>
+              <span className={cn("truncate", deliveryTone(a.lastDelivery))} title={a.lastDelivery.detail}>
+                last delivery {fmtAgo(Math.round(a.lastDelivery.at / 1000))}: {deliveryLine(a.lastDelivery)}
+              </span>
+            </>
+          )}
           {a.enabled && a.nextFire && (
             <>
               <span aria-hidden>·</span>
@@ -284,6 +331,8 @@ function Editor({
   onSaved,
   onDeleted,
   onRan,
+  onOpenBox,
+  initialHasSecret,
 }: {
   id: string | null;
   initial: AutomationDraft;
@@ -292,6 +341,8 @@ function Editor({
   onSaved: (t: Automation) => void;
   onDeleted: (id: string) => void;
   onRan: () => void;
+  onOpenBox: (box: string) => void;
+  initialHasSecret: boolean;
 }) {
   const [d, setD] = React.useState<AutomationDraft>(initial);
   const [saving, setSaving] = React.useState(false);
@@ -344,6 +395,34 @@ function Editor({
       toast.error("Could not start", { description: e instanceof Error ? e.message : String(e) });
     } finally {
       setRunning(false);
+      loadDeliveries();
+    }
+  };
+
+  const [testing, setTesting] = React.useState(false);
+  const [deliveries, setDeliveries] = React.useState<AutomationDelivery[] | null>(null);
+  const loadDeliveries = React.useCallback(() => {
+    if (!id) return;
+    api
+      .triggerDeliveries(id)
+      .then((r) => setDeliveries(r.deliveries))
+      .catch(() => setDeliveries([]));
+  }, [id]);
+  React.useEffect(() => loadDeliveries(), [loadDeliveries]);
+
+  const sendTest = async () => {
+    if (!id) return;
+    setTesting(true);
+    try {
+      const r = await api.testTrigger(id);
+      if (r.result?.outcome === "started") toast.success("Test event fired a run", { description: r.result.box });
+      else toast.error("Test event did not fire", { description: r.result?.reason ?? r.skipped ?? r.ignored });
+      onRan();
+    } catch (e) {
+      toast.error("Could not send the test event", { description: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setTesting(false);
+      loadDeliveries();
     }
   };
 
@@ -450,6 +529,87 @@ function Editor({
         </div>
       )}
 
+      {d.kind === "webhook" && (
+        <div className="flex flex-col gap-3">
+          <div>
+            <Label>Source</Label>
+            <Segmented<string>
+              ariaLabel="Alert source"
+              value={d.spec.preset ?? "generic"}
+              onChange={(v) => {
+                const preset = v === "generic" ? undefined : (v as AlertPreset);
+                setD((cur) => ({
+                  ...cur,
+                  spec: preset ? { preset, cooldownMin: cur.spec.cooldownMin ?? 30 } : {},
+                  // Swap the template only while it is still a default, never over the owner's words.
+                  taskTemplate: cur.taskTemplate === DEFAULT_TEMPLATES.webhook || cur.taskTemplate === ALERT_TEMPLATE ? (preset ? ALERT_TEMPLATE : DEFAULT_TEMPLATES.webhook) : cur.taskTemplate,
+                  ...(preset && !cur.harnessId ? { harnessId: INCIDENT_HARNESS_ID } : {}),
+                  ...(!preset && cur.harnessId === INCIDENT_HARNESS_ID ? { harnessId: undefined } : {}),
+                }));
+              }}
+              options={[{ value: "generic", label: "Any POST" }, ...(Object.keys(PRESET_LABEL) as AlertPreset[]).map((p) => ({ value: p, label: PRESET_LABEL[p] }))]}
+            />
+          </div>
+          {d.spec.preset && (
+            <>
+              <label className="block">
+                <Label hint={initialHasSecret ? "set — leave blank to keep it" : "required"}>{d.spec.preset === "datadog" ? "Header token" : "Signing secret"}</Label>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    className={cn(field, "font-mono")}
+                    type="password"
+                    autoComplete="off"
+                    value={d.signingSecret ?? ""}
+                    placeholder={initialHasSecret ? "••••••••" : ""}
+                    onChange={(e) => set({ signingSecret: e.target.value || undefined })}
+                  />
+                  {d.spec.preset === "datadog" && (
+                    <Button size="sm" variant="ghost" onClick={() => set({ signingSecret: randomToken() })}>
+                      Generate
+                    </Button>
+                  )}
+                </div>
+                <span className="text-faint mt-1 block text-micro">{PRESET_SECRET_HINT[d.spec.preset]}</span>
+              </label>
+              {d.spec.preset === "datadog" && d.signingSecret && (
+                <p className="text-faint -mt-1 text-micro">
+                  Copy the token now: <code className="font-mono">{d.signingSecret}</code>{" "}
+                  <button type="button" className="hover:text-foreground cursor-pointer underline" onClick={() => copy(d.signingSecret!)}>
+                    copy
+                  </button>
+                </p>
+              )}
+              {d.spec.preset === "datadog" && (
+                <div>
+                  <Label hint="Datadog → Integrations → Webhooks → Payload">Payload</Label>
+                  <div className="flex items-start gap-1.5">
+                    <code className="bg-muted/40 min-w-0 flex-1 rounded border px-2 py-1 font-mono text-micro break-all">{DATADOG_PAYLOAD}</code>
+                    <Button size="icon-sm" variant="ghost" aria-label="Copy payload" onClick={() => copy(DATADOG_PAYLOAD)}>
+                      <Copy />
+                    </Button>
+                  </div>
+                </div>
+              )}
+              <label className="flex items-center justify-between gap-3">
+                <span className="text-meta">
+                  Cooldown per alert, minutes
+                  <span className="text-faint block text-micro">The same alert firing again inside this window is skipped: a storm is one run.</span>
+                </span>
+                <input
+                  type="number"
+                  min={0}
+                  max={1440}
+                  className={cn(field, "w-24 text-right tabular")}
+                  value={d.spec.cooldownMin ?? 30}
+                  onChange={(e) => setSpec({ cooldownMin: Math.max(0, Number(e.target.value) || 0) })}
+                />
+              </label>
+              {d.harnessId === INCIDENT_HARNESS_ID && <p className="text-faint -mt-1 text-micro">Runs with the Incident responder harness: find the breaking change, prepare a fix or a revert, ask before choosing.</p>}
+            </>
+          )}
+        </div>
+      )}
+
       {d.kind === "chain" && (
         <div className="flex flex-col gap-3">
           <label className="block">
@@ -530,7 +690,11 @@ function Editor({
         <div className="border-live/30 bg-live/5 rounded-lg border px-3 py-3" role="status">
           <p className="text-foreground text-meta font-medium">Webhook URL — shown once</p>
           <p className="text-muted-foreground mt-0.5 text-micro">
-            {d.kind === "github" ? "In the repo's Settings → Webhooks: paste the URL, content type application/json, and use the secret below." : "POST to this URL. Anyone with it can start a run, so keep it private."}
+            {d.kind === "github"
+              ? "In the repo's Settings → Webhooks: paste the URL, content type application/json, and use the secret below."
+              : d.spec.preset
+                ? `Paste this as the webhook URL in ${PRESET_LABEL[d.spec.preset]}, then use “Send test event” to check the whole path.`
+                : "POST to this URL. Anyone with it can start a run, so keep it private."}
           </p>
           <div className="mt-2 flex items-center gap-1.5">
             <code className="bg-card min-w-0 flex-1 truncate rounded border px-2 py-1 text-micro">{hook.url}</code>
@@ -559,6 +723,12 @@ function Editor({
             Run now
           </Button>
         )}
+        {id && d.kind === "webhook" && initial.spec.preset && (
+          <Button size="sm" variant="outline" onClick={() => void sendTest()} loading={testing}>
+            <FlaskConical />
+            Send test event
+          </Button>
+        )}
         {id && (d.kind === "webhook" || d.kind === "github") && (
           <Button size="sm" variant="ghost" onClick={() => void rotate()}>
             <RotateCw />
@@ -569,6 +739,37 @@ function Editor({
         {id && <ArmButton size="sm" variant="ghost" icon={<Trash2 />} label="Delete" armedLabel="Delete?" onConfirm={remove} className="text-muted-foreground" />}
       </div>
       {id && d.kind === "chain" && d.spec.afterTrigger && <p className="text-faint -mt-3 text-micro">Runs after “{names[d.spec.afterTrigger] ?? "?"}” — run that one to test the chain.</p>}
+
+      {id && (
+        <div>
+          <Label hint={`last ${50}`}>Deliveries</Label>
+          {deliveries === null ? (
+            <p className="text-faint text-micro">…</p>
+          ) : deliveries.length === 0 ? (
+            <p className="text-faint text-micro">Nothing has arrived yet. Every delivery lands here: fired, skipped (and why) or rejected.</p>
+          ) : (
+            <ul className="divide-y rounded-lg border">
+              {deliveries.map((x) => (
+                <li key={x.id} className="flex items-baseline gap-3 px-3 py-1.5 text-micro">
+                  <span className="stamp text-faint w-28 shrink-0 tabular" title={new Date(x.at).toLocaleString()}>
+                    {new Date(x.at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                  </span>
+                  <span className={cn("shrink-0", deliveryTone(x))}>
+                    {x.outcome === "fired" && x.box ? (
+                      <button type="button" className="cursor-pointer hover:underline" onClick={() => onOpenBox(x.box!)}>
+                        {deliveryLine(x)}
+                      </button>
+                    ) : (
+                      deliveryLine(x)
+                    )}
+                  </span>
+                  {x.detail && <span className="text-faint min-w-0 truncate" title={x.detail}>{x.detail}</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
   );
 }
