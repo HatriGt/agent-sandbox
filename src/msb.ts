@@ -48,7 +48,7 @@ import { askSnapName } from "./snapshot.js";
 import { driverFor } from "./drivers/index.js";
 import { askHookScript, claudeDriver, claudeInstallSh, streamFmtScript } from "./drivers/claude.js";
 import { ompInstallSh, ompSeedSh } from "./drivers/omp.js";
-import { AGENT_LOG, AT_MARK, MCP_CONFIG_PATH, QUESTION_MARK } from "./drivers/sentinels.js";
+import { AGENT_LOG, AT_MARK, MCP_CONFIG_PATH, PROVIDER_ENV_PATH, QUESTION_MARK } from "./drivers/sentinels.js";
 
 // The driver pieces used to live here; re-exported so every existing importer keeps working.
 export { claudeInstallSh, streamFmtScript } from "./drivers/claude.js";
@@ -1194,7 +1194,9 @@ export async function installSkills(cfg: Config, box: string): Promise<void> {
 export function agentSh(workdir: string, resume: boolean, agent: AgentKind = "claude"): string {
   // The one driver-specific piece of the wrapper: the command that runs a turn and pipes its
   // native events through the driver's formatter into the agent log (src/drivers/).
-  const launch = driverFor(agent).launch({ resume });
+  // A per-thread provider (src/providers.ts) is written to PROVIDER_ENV_PATH by the first run and
+  // sourced by EVERY turn, so a resume from any lane keeps the provider the thread started on.
+  const launch = `[ -f ${PROVIDER_ENV_PATH} ] && . ${PROVIDER_ENV_PATH}; ` + driverFor(agent).launch({ resume });
   // Clear any pending question up front: a new run or a resume (which carries the answer) means the
   // previous question is now handled, so status stops reporting "waiting".
   // On resume, stamp the user's follow-up into the durable log BEFORE Claude runs, so the dashboard

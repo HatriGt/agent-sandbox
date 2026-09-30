@@ -39,6 +39,38 @@ export interface BoxView {
   repos?: { name: string; branch?: string }[];
   /** Which coding agent this thread runs on ("claude" | "omp"). Absent on older boxes. */
   agent?: string;
+  /** Running, but the log has not moved for the stall window (src/budget.ts STALL_AFTER_MS). */
+  stalled?: boolean;
+  /** The run's budget and what it has spent so far (usd only for a priced model). */
+  budget?: RunBudget & { tokens: number; usd?: number; tripped?: string[] };
+}
+
+/** Per-run budget caps. */
+export interface RunBudget {
+  maxMinutes: number;
+  maxUsd?: number;
+  maxTokens?: number;
+}
+
+export type ProviderKind = "anthropic" | "openai" | "openai-compatible" | "ollama" | "ccproxy";
+
+export interface ProviderView {
+  id: string;
+  kind: ProviderKind;
+  label: string;
+  baseUrl: string;
+  hasKey: boolean;
+  apiKeyMasked: string | null;
+  models?: string[];
+  modelsFetchedAt?: string;
+  source: string;
+  drivers: AgentId[];
+}
+
+export interface ProvidersResponse {
+  providers: ProviderView[];
+  kinds: { id: ProviderKind; label: string; drivers: AgentId[] }[];
+  cliLoginPolicy: string;
 }
 
 /** Default coding agent for new threads (Claude Code vs oh-my-pi). */
@@ -267,7 +299,7 @@ export interface RunDigest {
   /** Post-run verification, when the task was delegated with a `verify` clause. */
   verified?: { mode: "command" | "criterion"; pass: boolean; detail: string };
   /** Receipt provenance: which agent ran and on which model, only when known. */
-  provenance?: { agent?: string; agentLabel?: string; model?: string };
+  provenance?: { agent?: string; agentLabel?: string; model?: string; provider?: string };
 }
 
 export interface AskResult {
@@ -694,6 +726,10 @@ export const api = {
     agent?: AgentId;
     /** Sent only after the user saw the "supervised: partial" badge for a below-floor driver. */
     allowPartialSupervision?: boolean;
+    /** A saved model provider id (Providers page); the model then comes from its list. */
+    provider?: string;
+    /** Per-run budget: the run is asked (not killed) when a cap is hit. */
+    budget?: RunBudget;
     /** Exactly one key: a command run in the sandbox after the run, or a criterion a read-only checker judges. */
     verify?: { command: string } | { criterion: string };
   }) =>
@@ -726,6 +762,14 @@ export const api = {
     fetch(url("/agent-prefs.json"), { headers: authHeaders, signal }).then(parse<AgentPrefs>),
   saveAgentPrefs: (defaultAgent: AgentId, allowPartialSupervision?: boolean) =>
     post<AgentPrefs>("/agent-prefs.json", { defaultAgent, ...(allowPartialSupervision ? { allowPartialSupervision } : {}) }),
+
+  /** Model providers: the caller's own keys/endpoints. Keys come back masked only. */
+  providers: (signal?: AbortSignal) => fetch(url("/providers.json"), { headers: authHeaders, signal }).then(parse<ProvidersResponse>),
+  saveProvider: (body: { id?: string; kind: ProviderKind; label?: string; baseUrl?: string; apiKey?: string }) =>
+    post<ProvidersResponse & { saved: string }>("/providers.json", body),
+  deleteProvider: (id: string) => post<ProvidersResponse>("/providers/delete.json", { id }),
+  providerModels: (id: string, force?: boolean) =>
+    post<{ models: string[]; cached: boolean; error?: string }>("/providers/models.json", { id, ...(force ? { force } : {}) }),
 
   /** Walk-away notifications: the caller's webhook and per-event toggles. */
   notifySettings: (signal?: AbortSignal) =>

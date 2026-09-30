@@ -35,6 +35,9 @@ import {
   OMP_CPUS,
 } from "./msb.js";
 import { runInteractive } from "./interactive.js";
+import { providerEgressDomains, providerEnv, providerEnvFile } from "./providers.js";
+import { PROVIDER_ENV_PATH } from "./drivers/sentinels.js";
+import { BUDGET_PATH, type BudgetState } from "./budget.js";
 import { runVerification } from "./verify.js";
 import { handoffPlan, buildCarryDiffSh } from "./handoff.js";
 import { captureAskSnapshot, rewindToAskSnapshot, rewindRunFlags, shouldCaptureBeforeAnswer, snapAskEnabled } from "./snapshot.js";
@@ -396,6 +399,8 @@ export const deps: HandlerDeps = {
     creds?: AgentCreds,
     interact?: Interact
   ): Promise<DelegationResult> {
+    // A thread's model provider needs its endpoint reachable: derived, never typed in twice.
+    if (plan.provider) allowDomains = Array.from(new Set([...(allowDomains ?? []), ...providerEgressDomains(plan.provider)]));
     // Per-call egress extras merge onto the curated allowlist for this delegation only.
     let runCfg = allowDomains?.length
       ? { ...cfg, egressDomains: Array.from(new Set([...cfg.egressDomains, ...allowDomains])) }
@@ -483,6 +488,17 @@ export const deps: HandlerDeps = {
       const abs = `/workspace/${safe.relPath}`;
       const dir = abs.slice(0, abs.lastIndexOf("/"));
       await execWithInput(runCfg, box, `mkdir -p ${shellQuote(dir)} && base64 -d > ${shellQuote(abs)}`, a.base64.replace(/^data:[^,]*,/, ""));
+    }
+
+    // Provider env (sourced by every turn, so resumes keep it) and the run budget, both outside
+    // /workspace and mode 600, so neither lands in a diff or a checkpoint.
+    if (plan.provider) {
+      const body = providerEnvFile(providerEnv(plan.provider, plan.model));
+      await execWithInput(runCfg, box, `umask 077 && cat > ${PROVIDER_ENV_PATH}`, body);
+    }
+    if (plan.budget) {
+      const state: BudgetState = { ...plan.budget, ...(plan.model ? { model: plan.model } : {}), tripped: [] };
+      await execWithInput(runCfg, box, `umask 077 && cat > ${BUDGET_PATH}`, JSON.stringify(state));
     }
 
     // Staging is transient (already copied into the box). Clean it; refill pool on claim.

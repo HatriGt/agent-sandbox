@@ -16,6 +16,8 @@
 
 import { isAgentKind, AGENT_KINDS, type AgentKind } from "./agent-kind.js";
 import { assertSelectable } from "./drivers/index.js";
+import type { ProviderRecord } from "./providers.js";
+import type { RunBudget } from "./budget.js";
 
 export type DelegateSource = "local" | "git";
 
@@ -82,6 +84,10 @@ export interface DelegatePlan {
   model?: string;
   /** Coding agent for the thread; absent means claude. */
   agent?: AgentKind;
+  /** The user's model provider for this thread (src/providers.ts), resolved by the route. */
+  provider?: ProviderRecord;
+  /** Per-run budget (src/budget.ts); the gate asks-and-stops when a cap is hit. */
+  budget?: RunBudget;
   /** Back-compat accessor: the first repo's identifier. */
   repo: string;
   /** Back-compat accessor: the first repo's ref. */

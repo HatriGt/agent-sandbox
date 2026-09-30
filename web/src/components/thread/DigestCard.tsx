@@ -39,7 +39,8 @@ export function receiptFacts(digest: RunDigest): string[] {
   const out: string[] = [];
   const p = digest.provenance;
   if (p?.agentLabel || p?.agent) out.push(p.agentLabel ?? p.agent!);
-  if (p?.model) out.push(p.model);
+  if (p?.model) out.push(p.provider ? `${p.provider} / ${p.model}` : p.model);
+  else if (p?.provider) out.push(p.provider);
   const asked = digest.questions.length;
   if (asked > 0) {
     const answered = digest.questions.filter((q) => q.answer !== undefined).length;

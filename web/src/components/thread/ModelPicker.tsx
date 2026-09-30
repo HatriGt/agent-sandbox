@@ -19,6 +19,10 @@ export interface ModelChoice {
   id: string;
   label: string;
   tier: "opus" | "sonnet" | "haiku" | "other";
+  /** Section header in the picker (provider label); absent → one flat list, as before. */
+  group?: string;
+  /** A saved model-provider id (Providers page) this model comes from. */
+  provider?: string;
 }
 
 const TIER_TINT: Record<ModelChoice["tier"], string> = {
@@ -156,7 +160,7 @@ export function ModelChip({
   };
 
   if (!current || models.length === 0) return null;
-  const offDefault = current.id !== defaultId;
+  const offDefault = current.id !== defaultId || !!current.provider;
   return (
     <div ref={rootRef} className="relative">
       <button
@@ -221,10 +225,12 @@ export function ModelChip({
             <div role="listbox" aria-label="Model" className="max-h-56 overflow-y-auto p-1">
               {shown.length === 0 && <p className="text-muted-foreground px-2.5 py-3 text-micro">Nothing matches “{query}”.</p>}
               {shown.map((m, i) => {
-                const on = m.id === current.id;
+                const on = m.id === current.id && m.provider === current.provider;
+                const header = m.group && m.group !== shown[i - 1]?.group ? m.group : null;
                 return (
+                  <React.Fragment key={`${m.provider ?? ""}:${m.id}`}>
+                  {header && <div className="text-faint px-2.5 pt-2 pb-1 text-micro font-medium uppercase tracking-wide">{header}</div>}
                   <button
-                    key={m.id}
                     type="button"
                     role="option"
                     aria-selected={on}
@@ -248,6 +254,7 @@ export function ModelChip({
                     </span>
                     {on && <Check className="text-foreground size-3.5 shrink-0" strokeWidth={2.5} aria-hidden />}
                   </button>
+                  </React.Fragment>
                 );
               })}
             </div>

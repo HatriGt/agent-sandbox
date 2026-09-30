@@ -32,6 +32,8 @@ export interface DigestInput {
   agent?: string;
   /** The model the run used, when the controller knows it (never guessed). */
   model?: string;
+  /** The user model provider's label (src/providers.ts), when the thread named one. */
+  provider?: string;
 }
 
 /** Receipt provenance: who ran this. Only known facts; absent fields were not recorded. */
@@ -39,6 +41,7 @@ export interface DigestProvenance {
   agent?: string;
   agentLabel?: string;
   model?: string;
+  provider?: string;
 }
 
 export interface DigestPlanStep extends PlanItem {
@@ -182,6 +185,7 @@ export function buildDigest(input: DigestInput): RunDigest {
     ...(input.agent ? { agent: input.agent } : {}),
     ...(isAgentKind(input.agent) ? { agentLabel: AGENT_LABELS[input.agent] } : {}),
     ...(input.model ? { model: input.model } : {}),
+    ...(input.provider ? { provider: input.provider } : {}),
   };
 
   return {

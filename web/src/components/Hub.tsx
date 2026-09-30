@@ -23,7 +23,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { RepoPicker, type PickedRepo } from "@/components/RepoPicker";
-import { ModelChip, useModelChoice } from "@/components/thread/ModelPicker";
+import { ModelChip, useModelChoice, type ModelChoice } from "@/components/thread/ModelPicker";
+import { useProviders } from "@/components/Providers";
 import { AgentChip, useAgentChoice } from "@/components/DriverPicker";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Collapse } from "@/components/ui/collapse";
@@ -249,6 +250,24 @@ export function Hub({
   // Model for message 1 — the "new-task" scope key keeps it distinct from any box's sticky pick.
   const model = useModelChoice("new-task");
   const agent = useAgentChoice();
+  // The user's own providers (Providers page) join the picker, grouped by provider label.
+  const providers = useProviders();
+  const [provPick, setProvPick] = React.useState<ModelChoice | null>(null);
+  const provModels = React.useMemo<ModelChoice[]>(
+    () => (providers?.providers ?? []).flatMap((p) => (p.models ?? []).map((id) => ({ id, label: id, tier: "other" as const, group: p.label, provider: p.id }))),
+    [providers]
+  );
+  const pickerModels = React.useMemo(
+    () => (provModels.length ? [...model.models.map((m) => ({ ...m, group: "Deployment" })), ...provModels] : model.models),
+    [model.models, provModels]
+  );
+  const pickModel = (m: ModelChoice) => {
+    if (m.provider) setProvPick(m);
+    else {
+      setProvPick(null);
+      model.pick(m);
+    }
+  };
   const [showRepo, setShowRepo] = React.useState(() => !!prefill.current?.wantsRepo);
   React.useEffect(() => writeDraft("hub", task), [task]);
   // Re-attach the source run's repositories: each checkout name is looked up across your accounts and
@@ -407,7 +426,7 @@ export function Hub({
         task: t,
         repos: picked.length ? picked.map((p) => ({ repo: p.repo, ref: p.ref || undefined })) : undefined,
         attachments: attached.length ? attached.map((i) => ({ name: i.name, dataUrl: i.dataUrl })) : undefined,
-        ...(model.picked ? { model: model.picked } : {}),
+        ...(provPick ? { model: provPick.id, provider: provPick.provider } : model.picked ? { model: model.picked } : {}),
         // The agent chip shows "partial" before the pick is sent, so choosing it IS the acknowledgement.
         ...(agent.picked ? { agent: agent.picked, ...(agent.current?.supervised === false ? { allowPartialSupervision: true } : {}) } : {}),
         ...(verifyActive ? { verify: verifyMode === "command" ? { command: verifyText.trim() } : { criterion: verifyText.trim() } } : {}),
@@ -672,7 +691,7 @@ export function Hub({
                   <span className="sm:hidden">{picked.length ? "Add repo" : "Repos"}</span>
                 </button>
                 <AgentChip choices={agent.choices} current={agent.current} defaultId={agent.defaultId} onPick={agent.pick} />
-                <ModelChip current={model.current} models={model.models} defaultId={model.defaultId} onPick={model.pick} />
+                <ModelChip current={provPick ?? model.current} models={pickerModels} defaultId={model.defaultId} onPick={pickModel} />
                 <button
                   type="button"
                   onClick={() => setVerifyOpen((v) => !v)}

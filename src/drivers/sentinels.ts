@@ -79,3 +79,9 @@ export const AGENT_LOG = "/workspace/.agent.log";
 
 /** Where the dashboard-configured MCP servers are written inside the box for `claude --mcp-config`. */
 export const MCP_CONFIG_PATH = "/root/.agent-mcp.json";
+
+/**
+ * The thread's model-provider env (src/providers.ts), `export K='v'` lines, mode 600. Outside
+ * /workspace so it never lands in a diff or a checkpoint; sourced by every turn (agentSh).
+ */
+export const PROVIDER_ENV_PATH = "/root/.agent-provider.env";

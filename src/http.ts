@@ -40,6 +40,20 @@ import { parseTrace } from "./trace.js";
 import { loadNotifySettings, normalizeNotifySettings, saveNotifySettings } from "./notify-store.js";
 import { AGENT_KINDS, AGENT_LABELS, isAgentKind, loadAgentPrefs, normalizeAgentPrefs, saveAgentPrefs } from "./agent-kind.js";
 import { assertSelectable, listDrivers } from "./drivers/index.js";
+import {
+  allProviderSecrets,
+  CLI_LOGIN_POLICY,
+  deleteProvider,
+  driversFor,
+  getProvider,
+  loadProviders,
+  PROVIDER_KINDS,
+  PROVIDER_LABELS,
+  refreshModels,
+  upsertProvider,
+  viewOf,
+} from "./providers.js";
+import { normalizeBudget, type RunBudget } from "./budget.js";
 import { requestSessions, createLocalUser, deleteUser, listUsers, ownerOf, setUserRole, validateSignup, createPasswordUser, authenticatePassword, setPassword, updateProfile, verifyPassword, PASSWORD_MIN, listSessions, revokeSession, revokeOtherSessions, startTrial, planOf, setPlan, TrialExpiredError } from "./identity.js";
 import { parseStore } from "./gh-token-store.js";
 import { seedStarterSkills } from "./starter-skills.js";
@@ -311,6 +325,7 @@ const redactor = makeRedactor(async () => {
   }
   try {
     await loadMcpStore(cfg);
+    out.push(...allProviderSecrets());
     for (const raw of allBlobs("mcp"))
       for (const s of Object.values(parseMcpStore(raw).servers)) for (const m of [s.env, s.headers]) for (const [k, v] of Object.entries(m ?? {})) if (isSecretKey(k)) out.push(v);
   } catch {
@@ -340,6 +355,8 @@ const inbox = new Inbox(db);
 // restart falls back to the default, and the thread's "session started (model …)" lines keep the
 // historical truth regardless.
 const boxModels = new Map<string, string>();
+// The provider label a dashboard thread started on, for receipt provenance (same lifetime as boxModels).
+const boxProviders = new Map<string, string>();
 // Verified outcomes for dashboard runs: a browser delegate returns before the run finishes, so the
 // clause waits here and runs on the done edge of the fleet sweep; the result feeds /digest.json and
 // the done notification. In-memory like boxModels — a restart drops the pending clause (visible,
@@ -511,9 +528,10 @@ const sendNotification = async (ev: NotifyEvent): Promise<void> => {
 /** Receipt provenance for a box: the agent mark from the snapshot, and the model only when known —
  *  the dashboard's explicit per-box pick. Not the controller default: an MCP delegate can pass its
  *  own model that this map never sees, so falling back would be a guess. */
-const runProvenance = (box: string, agent: string | undefined): { agent?: string; model?: string } => {
+const runProvenance = (box: string, agent: string | undefined): { agent?: string; model?: string; provider?: string } => {
   const model = boxModels.get(box);
-  return { ...(agent ? { agent } : {}), ...(model ? { model } : {}) };
+  const provider = boxProviders.get(box);
+  return { ...(agent ? { agent } : {}), ...(model ? { model } : {}), ...(provider ? { provider } : {}) };
 };
 const notifier = makeNotifier({ send: sendNotification, log: (m) => console.error(m) });
 
@@ -1778,6 +1796,53 @@ app.post("/agent-prefs.json", (req: Request, res: Response) => {
   }
 });
 
+// Model providers (src/providers.ts): per-owner, keys sealed at rest and returned masked only.
+const providerOwner = (res: Response): string => {
+  const p = principalOf(res);
+  return p.kind === "user" ? p.userId : OPERATOR_OWNER;
+};
+const providersPayload = (owner: string) => ({
+  providers: loadProviders(owner).map(viewOf),
+  kinds: PROVIDER_KINDS.map((k) => ({ id: k, label: PROVIDER_LABELS[k], drivers: driversFor(k) })),
+  cliLoginPolicy: CLI_LOGIN_POLICY,
+});
+app.get("/providers.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  res.json(providersPayload(providerOwner(res)));
+});
+app.post("/providers.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const owner = providerOwner(res);
+  try {
+    const body = (req.body ?? {}) as { id?: unknown };
+    const rec = upsertProvider(req.body, typeof body.id === "string" && body.id ? body.id : undefined, owner);
+    void redactor.prime(); // the new key is redacted from transcripts from now on
+    res.json({ ...providersPayload(owner), saved: rec.id });
+  } catch (e) {
+    res.status(400).json({ error: clientError(e) });
+  }
+});
+app.post("/providers/delete.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const owner = providerOwner(res);
+  const id = (req.body as { id?: unknown } | undefined)?.id;
+  if (typeof id !== "string" || !deleteProvider(id, owner)) {
+    res.status(404).json({ error: "no such provider" });
+    return;
+  }
+  res.json(providersPayload(owner));
+});
+app.post("/providers/models.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const owner = providerOwner(res);
+  const b = (req.body ?? {}) as { id?: unknown; force?: unknown };
+  if (typeof b.id !== "string" || !getProvider(b.id, owner)) {
+    res.status(404).json({ error: "no such provider" });
+    return;
+  }
+  res.json(await refreshModels(b.id, { force: b.force === true, owner }));
+});
+
 app.get("/notify.json", (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   const p = principalOf(res);
@@ -2675,7 +2740,27 @@ app.post("/delegate.json", async (req: Request, res: Response) => {
     }
     // Model pick for message 1: same catalog gate as /resume.json, and it seeds the sticky value.
     let model: string | undefined;
-    if (typeof body.model === "string" && body.model.trim()) {
+    // A user provider (src/providers.ts) brings its own model list; the controller catalog does not apply.
+    const provider = typeof body.provider === "string" && body.provider ? getProvider(body.provider, providerOwner(res)) : undefined;
+    if (typeof body.provider === "string" && body.provider && !provider) {
+      res.status(400).json({ error: "Unknown provider." });
+      return;
+    }
+    let budget: RunBudget | undefined;
+    try {
+      budget = normalizeBudget(body.budget);
+    } catch (e) {
+      res.status(400).json({ error: (e as Error).message });
+      return;
+    }
+    if (provider && typeof body.model === "string" && body.model.trim()) {
+      const m = body.model.trim();
+      if (!/^[\w.:\/@-]{1,120}$/.test(m) || (provider.models?.length && !provider.models.includes(m))) {
+        res.status(400).json({ error: `Unknown model '${m}' for ${provider.label}.` });
+        return;
+      }
+      model = m;
+    } else if (typeof body.model === "string" && body.model.trim()) {
       const catalog = await fetchModels(cfg).catch(() => []);
       if (!isAllowedModel(body.model.trim(), catalog, cfg)) {
         res.status(400).json({ error: `Unknown model '${body.model}'.` });
@@ -2708,6 +2793,9 @@ app.post("/delegate.json", async (req: Request, res: Response) => {
       githubToken: typeof body.githubToken === "string" ? body.githubToken : undefined,
       githubAccount: typeof body.githubAccount === "string" ? body.githubAccount : undefined,
       model,
+      provider,
+      budget,
+      allowPartialSupervision: body.allowPartialSupervision === true,
       verify: verifyPlan,
       // The browser needs only the box name (the thread attaches over SSE); blocking this response
       // on the interactive wait window made task starts ~50s slower than the box actually was.
@@ -2715,6 +2803,7 @@ app.post("/delegate.json", async (req: Request, res: Response) => {
     });
     if (result.ok) {
       if (model) boxModels.set(result.box, model);
+      if (provider) boxProviders.set(result.box, provider.label);
       if (verifyPlan) boxVerify.set(result.box, verifyPlan);
       void generateTitle(cfg, result.box, task).catch(() => {});
     }

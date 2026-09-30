@@ -2,6 +2,7 @@ import { getMe } from "@/lib/auth";
 import { SettingsPage, SettingsSection } from "@/components/ui/settings";
 import { Accounts } from "@/components/Accounts";
 import { McpServers } from "@/components/McpServers";
+import { Providers } from "@/components/Providers";
 
 /**
  * Integrations: what every sandbox is given — GitHub identities and MCP servers. One column, two
@@ -12,10 +13,11 @@ import { McpServers } from "@/components/McpServers";
 export function Integrations({ onBack }: { onBack: () => void }) {
   return (
     <SettingsPage
-      title="Integrations"
+      title="Providers & Accounts"
       purpose={getMe()?.mode === "saas" ? "Yours alone — given only to your machines, encrypted at rest." : "Given to every sandbox on its next run or turn. Stored on your server."}
       back={{ label: "Machines", onClick: onBack, mobileOnly: true }}
     >
+      <Providers />
       <SettingsSection id="gh" title="GitHub accounts" meta="clone · read PRs · push">
         <Accounts embedded />
       </SettingsSection>
