@@ -637,3 +637,21 @@ export const api = {
     return res.status !== 401;
   },
 };
+
+// ---- "Starts from your inbox" (src/intake-routes.ts) ----
+export type IntakeEmailProvider = "postmark" | "sendgrid" | "mailgun" | "cloudflare";
+export interface IntakeView {
+  channel: { id: string; allowEmails: string[]; slackUsers: string[]; defaultRepo?: string; hasMailgunKey: boolean; hasSlackSecret: boolean; hasSlackBotToken: boolean; hasSentryToken: boolean };
+  accountEmail: string | null;
+  email: { urls: Record<IntakeEmailProvider, string>; cloudflareWorker: string };
+  slack: { url: string; manifest: string };
+  pending: Array<{ id: string; source: "email" | "slack"; task: string; choices: string[]; meta: { from?: string }; createdAt: number; attachmentCount: number }>;
+  deliveries: Array<{ id: number; at: number; outcome: "fired" | "skipped" | "rejected" | "failed"; reason?: string; detail?: string; box?: string }>;
+}
+export const intakeApi = {
+  get: () => get<IntakeView>("/intake.json"),
+  update: (u: { allowEmails?: string[]; slackUsers?: string[]; defaultRepo?: string }) => post<IntakeView>("/intake.json", u),
+  rotate: () => post<IntakeView>("/intake/rotate.json", {}),
+  answer: (id: string, repo: string) => post<{ ok: true; box: string; url: string }>(`/intake/pending/${encodeURIComponent(id)}/answer.json`, { repo }),
+  dismiss: (id: string) => post<{ ok: true }>(`/intake/pending/${encodeURIComponent(id)}/dismiss.json`, {}),
+};

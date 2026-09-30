@@ -12,6 +12,7 @@ export type StartedBy =
   | { kind: "manual" }
   | { kind: "mcp" }
   | { kind: "after"; parent: string }
+  | { kind: "intake"; source: "email" | "slack"; from?: string }
   | { kind: "trigger"; triggerId: string; name: string; source: "schedule" | "webhook" | "github" | "chain"; event?: string; subject?: { kind: "issue" | "pr"; number: number; repo?: string }; /** chain: the box this run follows. */ parent?: string };
 
 const als = new AsyncLocalStorage<StartedBy>();
@@ -51,5 +52,7 @@ export function describeStartedBy(s: StartedBy | undefined): string | undefined 
       return `handoff after ${s.parent}`;
     case "trigger":
       return `${s.source} ${s.name}`;
+    case "intake":
+      return s.source === "email" ? "email to your inbox address" : "Slack";
   }
 }

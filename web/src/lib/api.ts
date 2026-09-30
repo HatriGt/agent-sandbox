@@ -1049,3 +1049,6 @@ export interface HistoryRunDetail extends HistoryRun {
   /** The run's full workspace diff, captured at the finish edge — reviewable after teardown. */
   diffText?: string;
 }
+
+/** Low-level helpers for feature modules that keep their own endpoints (lib/intake-api.ts). */
+export const apiRaw = { url, parse, post, authHeaders };

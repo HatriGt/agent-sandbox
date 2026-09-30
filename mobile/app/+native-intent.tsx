@@ -6,6 +6,9 @@ import { boxFromLink } from "@/lib/push";
 
 export function redirectSystemPath({ path }: { path: string; initial: boolean }): string {
   try {
+    // The iOS share extension reopens the app as asb://dataUrl=<key>; the payload itself is read by
+    // ShareBridge from the native module, never from the URL. Just land somewhere harmless.
+    if (String(path).includes("dataUrl=")) return "/";
     const box = boxFromLink(path);
     if (box) return `/box/${encodeURIComponent(box)}`;
     // The PR route takes the repo as ONE encoded segment (owner%2Fname), as the dashboard emits it.

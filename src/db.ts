@@ -245,6 +245,40 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX IF NOT EXISTS trigger_delivery_log_trigger ON trigger_delivery_log(trigger_id, id);
   `,
+  `
+  -- Intake channels (src/intake.ts): one row per owner — the private email address token, the Slack
+  -- app's signing secret / bot token, the Sentry token for pasted links, sender and Slack-user
+  -- allowlists, the default repo. Secrets sealed like every other. Deliveries reuse
+  -- trigger_delivery_log keyed by the channel id. A pending row is an intake waiting for "which repo?".
+  CREATE TABLE IF NOT EXISTS intake_channels (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL UNIQUE,
+    email_token_enc TEXT NOT NULL,
+    mailgun_key_enc TEXT,
+    slack_signing_secret_enc TEXT,
+    slack_bot_token_enc TEXT,
+    sentry_token_enc TEXT,
+    allow_emails_json TEXT NOT NULL DEFAULT '[]',
+    slack_users_json TEXT NOT NULL DEFAULT '[]',
+    default_repo TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS intake_pending (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    channel_id TEXT NOT NULL,
+    source TEXT NOT NULL,
+    task TEXT NOT NULL,
+    attachments_json TEXT,
+    choices_json TEXT NOT NULL,
+    meta_json TEXT,
+    created_at INTEGER NOT NULL,
+    resolved_at INTEGER,
+    box TEXT
+  );
+  CREATE INDEX IF NOT EXISTS intake_pending_owner ON intake_pending(owner, created_at);
+  `,
 ];
 
 export function openDb(dataDir: string): Db {
