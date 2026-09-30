@@ -56,8 +56,8 @@ function PromptGlyph({ className }: MarkProps) {
 export type Brand = {
   key: string;
   name: string;
-  /** "partial": the stop-and-ask gate is built but not yet verified live. "soon": planned, not built. */
-  mark?: "partial" | "soon";
+  /** "soon": planned, not built yet. */
+  soon?: boolean;
   render: (cls: string) => React.ReactNode;
 };
 
@@ -65,15 +65,15 @@ const word = (text: string, cls?: string) => <span className={cn("leading-none w
 
 export const AGENT_BRANDS: Brand[] = [
   { key: "claude-code", name: "Claude Code", render: (c) => <><ClaudeGlyph className={c} />{word("Claude Code", "font-semibold tracking-[-0.02em]")}</> },
-  { key: "codex", name: "Codex CLI", mark: "partial", render: (c) => <><PromptGlyph className={c} />{word("Codex", "font-semibold tracking-[-0.02em]")}</> },
-  { key: "opencode", name: "OpenCode", mark: "partial", render: () => word("opencode", "font-mono font-semibold tracking-[-0.04em]") },
-  { key: "oh-my-pi", name: "oh-my-pi", render: () => <>{word("π", "font-serif text-[1.35em]")}{word("oh-my-pi", "font-mono font-medium tracking-[-0.03em]")}</> },
-  { key: "gemini", name: "Gemini CLI", mark: "soon", render: (c) => <><SparkleGlyph className={c} />{word("Gemini CLI", "font-medium tracking-[-0.01em]")}</> },
+  { key: "codex", name: "Codex CLI", render: (c) => <><PromptGlyph className={c} />{word("Codex", "font-semibold tracking-[-0.02em]")}</> },
+  { key: "opencode", name: "OpenCode", render: () => word("opencode", "font-mono font-semibold tracking-[-0.04em]") },
+  { key: "oh-my-pi", name: "oh-my-pi", render: () => <>{word("π", "font-serif text-[1.3em] -mt-0.5")}{word("oh-my-pi", "font-mono font-semibold tracking-[-0.03em]")}</> },
+  { key: "gemini", name: "Gemini CLI", soon: true, render: (c) => <><SparkleGlyph className={c} />{word("Gemini CLI", "font-semibold tracking-[-0.015em]")}</> },
 ];
 
 export const MODEL_BRANDS: Brand[] = [
   { key: "anthropic", name: "Anthropic", render: (c) => <><AnthropicGlyph className={c} />{word("Anthropic", "font-semibold tracking-[-0.01em]")}</> },
   { key: "openai", name: "OpenAI", render: () => word("OpenAI", "font-semibold tracking-[-0.035em]") },
-  { key: "compatible", name: "OpenAI-compatible endpoints", render: () => word("OpenAI-compatible", "font-medium tracking-[-0.02em]") },
+  { key: "compatible", name: "OpenAI-compatible endpoints", render: () => word("OpenAI-compatible", "font-semibold tracking-[-0.025em]") },
   { key: "ollama", name: "Ollama", render: () => word("ollama", "font-semibold tracking-[-0.03em]") },
 ];

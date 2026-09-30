@@ -5,12 +5,13 @@ import { motion, useInView, useReducedMotion } from "motion/react";
 import { Logo } from "@/components/ui/logo";
 import { AGENT_BRANDS, MODEL_BRANDS, type Brand } from "@/components/landing/BrandMarks";
 import { ScenarioDemo } from "@/components/landing/ScenarioDemo";
+import { HeroFeed } from "@/components/landing/HeroFeed";
 import { cn } from "@/lib/utils";
 import { useSession } from "@/lib/auth";
 
 /**
  * The public landing page. No data, no token. Structure (docs/plan-agent-cloud.md §3):
- *   1. hero — headline, install, and a monochrome strip of the agents and model providers it runs
+ *   1. hero — headline, install, a looping automations feed (HeroFeed), and the agents/models strip
  *   2. the scenario — a scripted, in-page run in the product's own UI (components/landing/ScenarioDemo)
  *   3. what's built today — an editorial numbered list, no cards; the planned item says so
  *   4. security — a two-column spec sheet on hairlines
@@ -74,28 +75,33 @@ export default function Landing() {
         {/* ───────────── 1. hero ───────────── */}
         <section className="relative isolate" aria-labelledby="hero-title">
           <HairlineGrid />
-          <div className="mx-auto max-w-6xl px-5 pt-10 pb-16 sm:px-6 lg:pt-20">
-            <Reveal>
-              <p className="text-muted-foreground label mb-6 inline-flex items-center gap-2 rounded-full border px-3 py-1">
-                <span className="bg-ok size-1.5 rounded-full" aria-hidden />
-                Your own agent cloud · public beta
-              </p>
-            </Reveal>
-            <Reveal delay={0.05}>
-              <h1 id="hero-title" className="font-serif text-[clamp(2.6rem,6.6vw,5.4rem)] leading-[0.98] tracking-[-0.03em] text-balance">
-                Delegate the work. <span className="text-muted-foreground lg:block">Keep the decisions.</span>
-              </h1>
-            </Reveal>
-            <div className="mt-8 grid gap-8 lg:mt-10 lg:grid-cols-[1fr_1.15fr] lg:gap-16">
-              <Reveal delay={0.1} className="min-w-0">
-                <p className="text-foreground/85 max-w-[46ch] text-[17px] leading-relaxed">
-                  Run any coding agent, on any model and account, in a microVM of its own. It starts from an issue, a
-                  schedule or a webhook, works while you're away, stops to ask when the call is yours, and hands back a
-                  verified pull request.
-                </p>
-              </Reveal>
-              <Reveal delay={0.15} className="min-w-0 [&>div]:mt-0">
-                <CtaPair consoleHref={consoleHref} hostedLabel={hostedLabel} hostedNote={hostedNote} showHosted={saas || signedIn || !ready} />
+          <div className="mx-auto max-w-6xl px-5 pt-8 pb-14 sm:px-6 lg:pt-16">
+            <div className="grid items-center gap-10 lg:grid-cols-[minmax(0,1.08fr)_minmax(0,0.92fr)] lg:gap-14">
+              <div className="min-w-0">
+                <Reveal>
+                  <p className="text-muted-foreground label mb-6 inline-flex items-center gap-2 rounded-full border px-3 py-1">
+                    <span className="bg-ok size-1.5 rounded-full" aria-hidden />
+                    Your own agent cloud · public beta
+                  </p>
+                </Reveal>
+                <Reveal delay={0.05}>
+                  <h1 id="hero-title" className="font-serif text-[clamp(2.5rem,5.4vw,4.6rem)] leading-[0.98] tracking-[-0.03em] text-balance">
+                    Something changes. <span className="text-muted-foreground">An agent is already on it.</span>
+                  </h1>
+                </Reveal>
+                <Reveal delay={0.1}>
+                  <p className="text-foreground/85 mt-6 max-w-[50ch] text-[17px] leading-relaxed">
+                    Agents that listen for webhooks, GitHub events, schedules and each other's finished runs, and start on their own:
+                    any agent, any model or account, each run in its own microVM. They ask only when a decision is yours and hand
+                    back a verified pull request, with a receipt.
+                  </p>
+                </Reveal>
+                <Reveal delay={0.15}>
+                  <CtaPair consoleHref={consoleHref} hostedLabel={hostedLabel} hostedNote={hostedNote} showHosted={saas || signedIn || !ready} />
+                </Reveal>
+              </div>
+              <Reveal delay={0.12} className="min-w-0">
+                <HeroFeed />
               </Reveal>
             </div>
             <Reveal delay={0.2}>
@@ -110,15 +116,15 @@ export default function Landing() {
             <Reveal>
               <div className="grid gap-4 lg:grid-cols-[1fr_1fr] lg:items-end lg:gap-16">
                 <div>
-                  <p className="label text-muted-foreground mb-3">One run, start to receipt</p>
+                  <p className="label text-muted-foreground mb-3">Event to receipt, unattended</p>
                   <h2 id="demo-title" className="font-serif text-[clamp(1.9rem,3.6vw,2.9rem)] leading-[1.05] tracking-[-0.02em] text-balance">
-                    2:07 a.m. A bug report, a question, a pull request.
+                    3:12 a.m. An alert fires. Nobody is awake.
                   </h2>
                 </div>
                 <p className="text-muted-foreground max-w-[52ch] text-body leading-relaxed">
-                  An issue on a checkout service gets the <span className="text-foreground font-mono text-meta">agent</span> label. The run
-                  reproduces the double charge, finds a fix that changes what "retry" means for customers, and stops. The answer comes
-                  from a phone; the rest ships itself.
+                  A production error spike arrives as a webhook. An automation starts a run in its own microVM; the agent reproduces
+                  it, bisects to the bad commit and writes the failing test on its own. One trade-off goes to a phone as a single tap.
+                  Then the fix ships, and a chained run writes the changelog.
                 </p>
               </div>
             </Reveal>
@@ -301,52 +307,53 @@ const SECURITY: Array<{ icon: React.ReactNode; title: string; body: string }> = 
   { icon: <ShieldCheck />, title: "A microVM per run", body: "Each run gets its own KVM-isolated machine with its own kernel. Model-generated code never touches the host: a hardware boundary, not a container namespace." },
   { icon: <Globe />, title: "Egress allowlist", body: "A run reaches only the hosts its harness needs (derived from its model providers) plus the ones you add. Everything else is refused at the machine's network edge." },
   { icon: <KeyRound />, title: "Secrets kept out of the box", body: "GitHub accounts, provider keys and MCP credentials live encrypted on the controller, per user. The controller answers auth for the run; the browser never sees them." },
-  { icon: <ScrollText />, title: "Audit log", body: "Sign-ins, key changes, delegations, triggers and teardowns are recorded and readable by their owner. Another account's machine answers 404, not 403." },
+  { icon: <ScrollText />, title: "Audit log", body: "Sign-ins, key changes, runs started, triggers and teardowns are recorded and readable by their owner. Another account's machine answers 404, not 403." },
   { icon: <GitPullRequest />, title: "PR-only, enforced in git", body: "Runs an automation starts can't push to the default branch: a pre-push hook in the machine refuses it, and the controller checks again. Changes land on a branch and a PR." },
 ];
 
 /* ───────────────────────────── brand strip ───────────────────────────── */
 
 /**
- * MIRROR of the server driver registry (the web bundle can't import src/drivers). "partial" = the
- * driver's stop-and-ask gate is built but not yet verified live (Codex, OpenCode); "soon" = planned.
- * Keep in sync when a driver changes.
+ * MIRROR of the server driver registry (the web bundle can't import src/drivers). `soon` = planned,
+ * not built (Gemini CLI). Keep in sync when a driver changes.
  */
 function BrandStrip() {
   return (
-    <div className="mt-16 border-t pt-6">
-      <div className="grid gap-6 lg:grid-cols-[auto_1fr] lg:gap-x-10">
-        <BrandRow label="Agents" brands={AGENT_BRANDS} />
-        <BrandRow label="Models" brands={MODEL_BRANDS} />
-      </div>
-      <p className="text-muted-foreground mt-5 text-micro">
-        Every agent runs in its own microVM, from any trigger, and leaves a receipt. <span className="text-foreground/80">Partial</span>: its
-        stop-and-ask gate is built, not yet verified live. Marks belong to their owners.
-      </p>
+    <div className="mt-16 lg:mt-20">
+      <BrandGroup label="Runs any agent" brands={AGENT_BRANDS} />
+      <BrandGroup label="On any model or account" brands={MODEL_BRANDS} />
+      <p className="text-muted-foreground/80 border-t pt-4 text-micro">Marks belong to their owners.</p>
     </div>
   );
 }
 
-function BrandRow({ label, brands }: { label: string; brands: Brand[] }) {
+function BrandGroup({ label, brands }: { label: string; brands: Brand[] }) {
   return (
-    <>
-      <p className="label text-muted-foreground pt-1 lg:w-16">{label}</p>
-      <ul className="text-foreground/70 flex flex-wrap items-center gap-x-8 gap-y-4 sm:gap-x-10">
+    <div className="grid gap-3 border-t py-5 md:grid-cols-[12rem_minmax(0,1fr)] md:items-center md:gap-8">
+      <p className="label text-muted-foreground">{label}</p>
+      <ul className="flex flex-wrap items-center gap-x-9 gap-y-3">
         {brands.map((b) => (
-          <li key={b.key} className={cn("flex items-center gap-2 text-[17px]", b.mark === "soon" && "opacity-55")} title={b.mark ? `${b.name} (${b.mark === "soon" ? "soon" : "supervised: partial"})` : b.name}>
-            <span className="sr-only">{b.name}</span>
+          <li
+            key={b.key}
+            className={cn(
+              "flex h-7 items-center gap-2 text-[16px] transition-colors duration-200 ease-out",
+              b.soon ? "text-foreground/40" : "text-foreground/65 hover:text-foreground"
+            )}
+            title={b.soon ? `${b.name}: coming soon` : b.name}
+          >
+            <span className="sr-only">{b.soon ? `${b.name} (coming soon)` : b.name}</span>
             <span aria-hidden className="flex items-center gap-2">
               {b.render("size-[18px] shrink-0")}
             </span>
-            {b.mark && (
-              <span className="text-muted-foreground -translate-y-1.5 self-start font-mono text-[10px] tracking-wide uppercase">
-                {b.mark === "soon" ? "soon" : "partial"}
+            {b.soon && (
+              <span aria-hidden className="text-muted-foreground rounded-full border border-dashed px-1.5 py-px text-[10px] leading-tight font-medium tracking-wide">
+                soon
               </span>
             )}
           </li>
         ))}
       </ul>
-    </>
+    </div>
   );
 }
 
