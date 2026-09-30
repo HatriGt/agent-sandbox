@@ -118,13 +118,12 @@ export default function Landing() {
                 <div>
                   <p className="label text-muted-foreground mb-3">Event to receipt, unattended</p>
                   <h2 id="demo-title" className="font-serif text-[clamp(1.9rem,3.6vw,2.9rem)] leading-[1.05] tracking-[-0.02em] text-balance">
-                    3:12 a.m. An alert fires. Nobody is awake.
+                    3 a.m. Prod breaks. You sleep.
                   </h2>
                 </div>
                 <p className="text-muted-foreground max-w-[52ch] text-body leading-relaxed">
-                  A production error spike arrives as a webhook. An automation starts a run in its own microVM; the agent reproduces
-                  it, bisects to the bad commit and writes the failing test on its own. One trade-off goes to a phone as a single tap.
-                  Then the fix ships, and a chained run writes the changelog.
+                  An error spike hits. An agent jumps on it, finds the bad commit, writes the fix and tests it. One quick question
+                  lands on your phone. By morning, a pull request is ready to merge and the changelog is already updated.
                 </p>
               </div>
             </Reveal>
@@ -321,9 +320,7 @@ function BrandStrip() {
   return (
     <div className="mt-16 lg:mt-20">
       <BrandGroup label="Runs any agent" brands={AGENT_BRANDS} />
-      <BrandGroup label="On any model or account" brands={MODEL_BRANDS} />
-      <p className="text-muted-foreground/80 border-t pt-4 text-micro">Marks belong to their owners.</p>
-    </div>
+      <BrandGroup label="On any model or account" brands={MODEL_BRANDS} />    </div>
   );
 }
 
