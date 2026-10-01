@@ -20,7 +20,7 @@ import { setPrefill } from "@/lib/draft";
 import { ProducedFiles } from "./ProducedFiles";
 import { useRunDigest } from "./DigestCard";
 import { useOutcome } from "./OutcomeCard";
-import { RunPill } from "./RunPill";
+import { RunPill, WatchPill } from "./RunPill";
 import { ThreadHeader } from "./ThreadHeader";
 import { parseTrace, producedFiles } from "@/lib/trace";
 import { deriveTaskBoard, type TaskBoard } from "@/lib/planTasks";
@@ -845,6 +845,7 @@ export function Thread({
             {/* A follow-up on a finished run: the box still reports `done` for a few seconds until
                 the server resumes the session. That gap must read as "delivering", never as the old
                 "Completed" receipt sitting under the message you just sent. */}
+            {runState === "running" && !sleeping && <WatchPill session={box.name} events={events} />}
             {working && !(loadingTrace && starting) && <WorkingIndicator label={working.label} detail={working.detail} />}
 
             <AnimatePresence initial={false}>
@@ -880,6 +881,7 @@ export function Thread({
 
             {((!sleeping && !loadingTrace && runState === "done") || (finished && (outcome || digest))) && pendingReplies.length === 0 && (
               <RunPill
+                events={events}
                 outcome={outcome}
                 digest={digest}
                 label={
