@@ -38,22 +38,17 @@ export const AGENT_SYS_PROMPT =
   // Output shaping for the console's visualizers (docs/output-visualizers.md). The transcript
   // upgrades these shapes into interactive components; malformed fences just render as code, so
   // this is a preference, never a requirement — plain prose beats a forced visualization.
-  "PRESENTING RESULTS (prose, not code): the caller's console renders structured output richly, so " +
-  "prefer these shapes when they genuinely fit. Tabular facts → a GFM markdown table. Step progress " +
-  "→ a task list (- [x]). A comparison, distribution, or trend worth seeing → a fenced ```chart block " +
-  'containing JSON {"type":"bar"|"line"|"area"|"donut","title","labels":[…],"values":[…]} (or ' +
-  '"series":[{"name","data":[…]}], max 8). Headline metrics → a fenced ```stats block, one per line: ' +
-  "'Label: value | +12% | note' (append '!' to the delta when down is good). A file/directory layout → " +
-  "a fenced ```tree block (tree glyphs or one path per line). A pipeline outcome → a fenced ```flow " +
-  "block, one chain per line like 'build ✓ -> test ✗' ('…' marks in-progress). Emit well-formed JSON " +
-  "in ```json fences. More fences the console renders richly (each line-oriented unless noted): " +
-  "```timeline 'time | event ✓'; ```steps '1. Title ✓' (+indented detail); ```progress 'label: 72%'; " +
-  "```kv 'key: value'; ```badges 'label: healthy|degraded|down|running'; ```score 'label: 8/10'; " +
-  "```http 'GET /path → 200 OK · 48ms'; ```tests '633 passed, 2 failed in 65s' + '✗ name' lines; " +
-  "```log raw log lines; ```diffstat git --stat rows; ```commits git log --oneline rows; " +
-  "```deps 'pkg 1.2.3 → 2.0.0'; ```graph 'A -> B' edges (acyclic); ```funnel 'stage: value'; " +
-  "```gantt 'label | start | end'; ```heatmap JSON {rows,cols,values}; callouts via ```note/warn/error " +
-  "or '> [!NOTE]' quotes. Do not force any of these — use one only where it makes the answer clearer. " +
+  "PRESENTING RESULTS (prose, not code): the caller's console renders these shapes richly; use one " +
+  "only where it makes the answer clearer. Tables → GFM table. Progress → task list (- [x]) or " +
+  "'- label: 72%' items. Trend/comparison → ```chart with JSON " +
+  '{"type":"bar"|"line"|"area"|"donut","title","labels":[…],"values":[…]} (or "series":[{"name","data"}], ' +
+  "max 8). Line-per-item fences: ```stats 'Label: value | +12% | note' ('!' after the delta when down " +
+  "is good); ```tree paths or tree glyphs; ```flow 'build ✓ -> test ✗' ('…' = running); ```timeline " +
+  "'time | event ✓'; ```steps '1. Title ✓'; ```progress 'label: 72%'; ```kv 'key: value'; ```badges " +
+  "'label: healthy|down'; ```http 'GET /path → 200 OK · 48ms'; ```deps 'pkg 1.2.3 → 2.0.0'; ```graph " +
+  "'A -> B'; ```funnel 'stage: value'; ```gantt 'label | start | end'. Callouts: '> [!NOTE]'. Write " +
+  "well-formed JSON. To update a block (a progress or stats panel), emit it again with the new values " +
+  "rather than describing the change. " +
   "Never read or print /workspace/.agent.* files " +
   "(the log, task, question): they are the controller's channel, not context, and echoing the log " +
   "corrupts the transcript the caller is reading. " +

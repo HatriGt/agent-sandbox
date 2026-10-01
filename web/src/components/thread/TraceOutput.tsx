@@ -2,6 +2,8 @@ import * as React from "react";
 import { Check, ChevronRight, Copy } from "lucide-react";
 import { outputStats, termLineKind, tokenizeJson, type JsonToken } from "@/lib/highlight";
 import { cn } from "@/lib/utils";
+import { smartBlock } from "@/components/viz/SmartBlock";
+import { toolOutputLanguage } from "@/lib/viz-tool-output";
 
 /**
  * Colored output on the dark trace ground. Two modes, chosen by the caller:
@@ -124,5 +126,39 @@ export function PanelFold({ open, text, onToggle }: { open: boolean; text: strin
       <span className="label">{open ? "hide output" : lines > 1 ? `${lines} lines` : "output"}</span>
       <ChevronRight className={cn("size-3.5 transition-transform duration-150", open && "rotate-90")} aria-hidden />
     </button>
+  );
+}
+
+/**
+ * A finished tool's printed output, drawn by the visualizer router when it has a recognisable
+ * shape (JSON, CSV/fixed-width tables, `git log`, `ls -l`, diffstat, http, stack traces…). Null
+ * while live, when too big (lib/viz-tool-output.ts gates it), or when nothing is recognised — the
+ * caller then shows the plain terminal. docs/output-visualizers.md "Tool output".
+ */
+export function useOutputVisual(text: string | undefined, live?: boolean): React.ReactElement | null {
+  return React.useMemo(() => {
+    const lang = toolOutputLanguage(text, { live });
+    if (lang === null) return null;
+    try {
+      return smartBlock(lang, text!.replace(/\s+$/, ""));
+    } catch {
+      return null;
+    }
+  }, [text, live]);
+}
+
+/** The small "Visual / Raw" segmented switch above a rendered tool output. */
+export function VisualRawSwitch({ raw, onChange }: { raw: boolean; onChange: (raw: boolean) => void }) {
+  const seg = (on: boolean) =>
+    cn("cursor-pointer rounded px-1.5 py-0.5 text-micro transition-colors", on ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground");
+  return (
+    <div role="group" aria-label="Output view" className="bg-muted inline-flex shrink-0 items-center gap-0.5 rounded-md p-0.5">
+      <button type="button" aria-pressed={!raw} onClick={() => onChange(false)} className={seg(!raw)}>
+        Visual
+      </button>
+      <button type="button" aria-pressed={raw} onClick={() => onChange(true)} className={seg(raw)}>
+        Raw
+      </button>
+    </div>
   );
 }
