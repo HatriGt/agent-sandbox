@@ -516,3 +516,39 @@ Now: one block, two lines (~64 px), one border.
 - The repo bar is gone; repos are chips in the context line with a quiet `+`.
 - **Run again** (was "New task from this"): the brief *and* the repositories carry over — the Hub resolves each checkout name to `owner/name` across your accounts and pre-attaches it; anything ambiguous opens the picker instead. Menu hint says what it does: *new machine, same brief*.
 - **When.** The context line's tail now answers it: `finished 14m ago`, `asked 3m ago`, `asleep 2h` — before the lifecycle phrase.
+
+## Round: a calm composer (2026-09-30)
+
+Was: the Hub action row carried eight controls (Attach repos · agent · model · budget · harness ·
+attempts · verify · image · voice) and wrapped onto a second line at 1280px; the thread composer had a
+two-way destination switch plus a model chip. Every option advertised itself whether or not it mattered.
+
+Now, following the design-eng rules we borrow from (one primary, progressive disclosure, defaults are
+invisible):
+
+- **One text area, one Settings control** (`thread/RunSettings.tsx`). The action row is `Repos ·
+  Settings … image · voice · send` on the Hub and `Side question · @ · image · voice · Settings … send`
+  on a thread. Nothing wraps at 390px.
+- **Settings is a popover** above/below the trigger on a desk (`side`), a **bottom sheet** on a phone
+  (`ui/sheet.tsx` gained `side="bottom"`). Inside: rows and sections, no cards. **Harness first** — the
+  one pick that sets everything else — with built-ins ahead of yours and unreviewed imports disabled;
+  then **Model** as a row that unfolds a radio list (search appears past six); then **More** for Agent,
+  Attempts (1/2/3) and Verify. "More" opens itself when something inside it is already set, and a
+  **Reset to defaults** link appears only when something is.
+- **Only non-defaults show**, as removable chips above the text (`RunOptionChips`): harness, model,
+  agent, "2 attempts", "Verify · npm test". Click a chip to open the panel, × to reset that option. A
+  quiet composer means defaults.
+- **Budget is gone from the composer** (the controller side is removed separately).
+- **Side question** is a single toggle (pressed = side helper), not a two-chip radio: the dashed border
+  and the caption already say which lane is live, and the send button's clock says "queued".
+- Keyboard: ⌘. opens Settings; ↑/↓/Home/End move through harness and model rows, Enter/Space picks,
+  Esc closes and returns focus to the trigger. Reduced motion drops the scale/slide and keeps the fade.
+- Amber check: Haiku's tier dot was amber — now grey. Fleet's "soon" time-left was amber — now the
+  foreground colour, and it says what happens ("sleeps any moment", "destroyed any moment").
+
+Audit fixes from the same pass (screenshots in `.shots/out/`): the thread header's repo chip clipped
+mid-glyph ("orders-api @") behind a hidden horizontal scroller — chips now shrink and ellipsise the
+branch; the MCP step header duplicated the folded footer's summary and overlapped the step's duration
+column on phones — header shows the check only below `sm`; History showed a shimmering totals strip
+forever next to a "Could not load" error — hidden on error; composer and question-card captions
+truncated mid-sentence at 390px — shorter copy, two lines on a phone.

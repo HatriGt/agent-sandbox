@@ -234,8 +234,11 @@ export function QuestionCard({
         )}
 
         <div className="flex items-center justify-between gap-3 border-t px-3 py-2">
-          <p className="text-muted-foreground min-w-0 truncate text-micro">
-            {hasOptions ? "Pick one (or press its number), then send. Every tool call is blocked until you do." : "Your answer releases the paused run."}
+          {/* Phone: the clause truncated mid-word beside the button; two lines read, one chopped line
+              does not. The number-key hint only applies with a keyboard anyway. */}
+          <p className="text-muted-foreground min-w-0 text-micro leading-snug line-clamp-2 sm:line-clamp-none sm:truncate">
+            <span className="sm:hidden">{hasOptions ? "Pick one, then send. The agent waits until you do." : "Your answer releases the paused run."}</span>
+            <span className="hidden sm:inline">{hasOptions ? "Pick one (or press its number), then send. Every tool call is blocked until you do." : "Your answer releases the paused run."}</span>
           </p>
           <Button variant="attention" size="sm" onClick={send} disabled={!canSend} className="shrink-0">
             {busy ? "Sending…" : "Send answer"}

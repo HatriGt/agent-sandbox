@@ -1,6 +1,6 @@
 import * as React from "react";
 import { readDraft, writeDraft } from "@/lib/draft";
-import { ArrowUp, AtSign, Check as CheckIcon, Clock, ImagePlus, Loader2, MessageCircleQuestion, Terminal, X } from "lucide-react";
+import { ArrowUp, AtSign, Check as CheckIcon, Clock, ImagePlus, Loader2, MessageCircleQuestion, X } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { ATTACHMENTS_DIR } from "@/lib/session-context";
 import { Lightbox } from "@/components/ui/lightbox";
@@ -11,7 +11,8 @@ import { Button } from "@/components/ui/button";
 import { PromptInput, PromptInputActions, PromptInputTextarea } from "@/components/ui/prompt-input";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { MentionMenu, expandMentions, mentionAt, type MentionState } from "./MentionMenu";
-import { ModelChip, useModelChoice } from "./ModelPicker";
+import { useModelChoice } from "./ModelPicker";
+import { RunOptionChips, RunSettings } from "./RunSettings";
 import { SkillChip, SkillMenu } from "./SkillMenu";
 import { slashAt, stripSlashToken, typedSkillToken, type SlashState } from "@/lib/slash";
 import { useCached } from "@/lib/cache";
@@ -74,6 +75,18 @@ export function SendBar({
   const [value, setValue] = React.useState(() => readDraft(boxName));
   React.useEffect(() => setValue(readDraft(boxName)), [boxName]);
   const model = useModelChoice(boxName);
+  const [settingsOpen, setSettingsOpen] = React.useState(false);
+  const modelOptions = {
+    current: model.current,
+    models: model.models,
+    defaultId: model.defaultId,
+    onPick: model.pick,
+    offDefault: !!model.current && model.current.id !== model.defaultId,
+    onReset: () => {
+      const d = model.models.find((m) => m.id === model.defaultId);
+      if (d) model.pick(d);
+    },
+  };
   React.useEffect(() => writeDraft(boxName, value), [boxName, value]);
   const [sending, setSending] = React.useState(false);
   const [sent, setSent] = React.useState(false);
@@ -320,16 +333,16 @@ export function SendBar({
   const hint = error
     ? null
     : sleeping
-      ? "Waking the sandbox. Type ahead — it is sent the moment the machine is back."
+      ? "Waking the sandbox — type ahead, it sends when the machine is back."
       : toAgent
         ? busy
-          ? "The agent is mid-turn. Your message is queued and delivered when this turn finishes."
+          ? "Agent is mid-turn — your message is queued until this turn ends."
           : phase === "starting"
-            ? "The run is starting. Type ahead — it is delivered as soon as the agent is listening."
+            ? "Starting up — type ahead, it is delivered once the agent is listening."
             : phase === "asked"
-              ? "Pick an option on the card above — or type here: a message now reaches the agent as your answer."
+              ? "Pick an option above, or answer here — it reaches the agent as your answer."
               : "Enter to send · Shift+Enter for a new line · paste or drop images"
-        : "Answered by a separate read-only helper inside the sandbox. The agent is not interrupted.";
+        : "Answered by a read-only helper in the sandbox — the agent is not interrupted.";
 
   return (
     <div className="pt-1 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
@@ -400,6 +413,11 @@ export function SendBar({
           {skill && (
             <ChipRow key="skill" still={still} className="flex flex-wrap gap-1.5 px-2 pt-1.5">
               <SkillChip skill={skill} onRemove={() => setSkill(null)} />
+            </ChipRow>
+          )}
+          {toAgent && modelOptions.offDefault && (
+            <ChipRow key="model" still={still} className="px-2 pt-1.5">
+              <RunOptionChips onOpen={() => setSettingsOpen(true)} model={modelOptions} />
             </ChipRow>
           )}
           </AnimatePresence>
@@ -474,29 +492,34 @@ export function SendBar({
               open workspace pane. */}
           <PromptInputActions className="flex-nowrap justify-between gap-2 pt-1">
             <div className="flex min-w-0 items-center gap-0.5 sm:gap-1">
-              <div
-                role="radiogroup"
-                aria-label="Send to"
-                className="bg-muted inline-flex shrink-0 items-center gap-0.5 rounded-md p-0.5"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <ModeChip
-                  active={toAgent}
-                  onClick={() => setMode("agent")}
-                  icon={busy ? <Clock className="size-3.5" /> : <Terminal className="size-3.5" />}
-                  label={busy ? "Queue for agent" : "Agent"}
-                />
-                <ModeChip
-                  active={!toAgent}
-                  disabled={!canSide}
-                  onClick={() => setMode("side")}
-                  icon={<MessageCircleQuestion className="size-3.5" />}
-                  label="Side question"
-                  disabledReason="A sleeping sandbox has nothing to inspect — wake it with a message first"
-                />
-              </div>
-              {/* Model switch: only for the AGENT lane — the side co-pilot stays on ASK_MODEL. */}
-              {toAgent && <ModelChip current={model.current} models={model.models} defaultId={model.defaultId} onPick={model.pick} disabled={sending} hotkey />}
+              {/* The one secondary destination, as a single toggle: off = the agent (always), on = the
+                  read-only side helper. The dashed border and the caption say which is live. */}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex" tabIndex={!canSide ? 0 : -1}>
+                    <button
+                      type="button"
+                      aria-pressed={!toAgent}
+                      disabled={!canSide}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setMode(toAgent ? "side" : "agent");
+                      }}
+                      className={cn(
+                        "flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2 text-micro font-medium whitespace-nowrap transition-colors duration-150",
+                        "disabled:cursor-not-allowed disabled:opacity-40",
+                        toAgent ? "text-muted-foreground hover:bg-muted hover:text-foreground" : "bg-muted text-foreground"
+                      )}
+                    >
+                      <MessageCircleQuestion className="size-3.5" aria-hidden />
+                      <span className={cn(toAgent && "hidden sm:inline")}>Side question</span>
+                    </button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  {!canSide ? "A sleeping sandbox has nothing to inspect — wake it with a message first" : toAgent ? "Ask about this run without interrupting the agent" : "Back to messaging the agent"}
+                </TooltipContent>
+              </Tooltip>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <button
@@ -542,6 +565,8 @@ export function SendBar({
                 <TooltipContent side="top">Attach an image — or paste / drop one</TooltipContent>
               </Tooltip>
               {voice.supported && <VoiceButton state={voice.state} level={voice.level} onToggle={voice.toggle} />}
+              {/* Model switch: only for the AGENT lane — the side helper stays on ASK_MODEL. */}
+              {toAgent && <RunSettings open={settingsOpen} onOpenChange={setSettingsOpen} model={modelOptions} disabled={sending} hotkey />}
               <input
                 ref={fileInput}
                 type="file"
@@ -584,7 +609,7 @@ export function SendBar({
 
         {/* The hint is a caption under the composer, never squeezed into the action row where it
             truncated mid-sentence. Errors take the same slot in the destructive tone. */}
-        <p className={cn("mt-1.5 min-h-4 truncate px-2 text-center text-micro sm:text-left", error ? "text-destructive" : "text-faint")} role={error ? "alert" : undefined} title={error ?? hint ?? undefined}>
+        <p className={cn("mt-1.5 min-h-4 px-2 text-center text-micro line-clamp-2 sm:line-clamp-none sm:truncate sm:text-left", error ? "text-destructive" : "text-faint")} role={error ? "alert" : undefined} title={error ?? hint ?? undefined}>
           {error ?? hint}
         </p>
       </div>
@@ -620,54 +645,5 @@ function ChipRow({ still, className, children }: { still: boolean | null; classN
     >
       <div className={className}>{children}</div>
     </motion.div>
-  );
-}
-
-function ModeChip({
-  active,
-  disabled,
-  onClick,
-  icon,
-  label,
-  disabledReason,
-}: {
-  active: boolean;
-  disabled?: boolean;
-  onClick: () => void;
-  icon: React.ReactNode;
-  label: string;
-  disabledReason?: string;
-}) {
-  const chip = (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={active}
-      aria-label={label}
-      onClick={onClick}
-      disabled={disabled}
-      className={cn(
-        "flex h-7 cursor-pointer items-center gap-1.5 rounded-md text-micro font-medium whitespace-nowrap transition-colors duration-150",
-        "disabled:cursor-not-allowed disabled:opacity-40",
-        // The active lane always shows its name; the other one is icon-only on a phone (its name
-        // is in the tooltip and aria-label), so the row never wraps under the send button.
-        active ? "bg-card text-foreground shadow-e1 px-2.5" : "text-muted-foreground hover:text-foreground px-2 sm:px-2.5"
-      )}
-    >
-      {icon}
-      <span className={cn(!active && "hidden sm:inline")}>{label}</span>
-    </button>
-  );
-  const tip = disabled && disabledReason ? disabledReason : active ? null : label;
-  if (!tip) return chip;
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span tabIndex={disabled ? 0 : -1} className="inline-flex">
-          {chip}
-        </span>
-      </TooltipTrigger>
-      <TooltipContent side="top">{tip}</TooltipContent>
-    </Tooltip>
   );
 }

@@ -16,17 +16,17 @@ import {
   Map,
   PencilLine,
   Plus,
-  ShieldCheck,
   Sparkles,
   TestTubes,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { RepoPicker, type PickedRepo } from "@/components/RepoPicker";
-import { ModelChip, useModelChoice, type ModelChoice } from "@/components/thread/ModelPicker";
-import { HarnessChip } from "@/components/harness/HarnessChip";
+import { useModelChoice, type ModelChoice } from "@/components/thread/ModelPicker";
+import { RunOptionChips, RunSettings, nonDefaults, type Attempts, type VerifySpec } from "@/components/thread/RunSettings";
+import type { HarnessView } from "@/lib/api";
 import { useProviders } from "@/components/Providers";
-import { AgentChip, useAgentChoice } from "@/components/DriverPicker";
+import { useAgentChoice } from "@/components/DriverPicker";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Collapse } from "@/components/ui/collapse";
 import { StaggerItem } from "@/components/ui/swap";
@@ -43,7 +43,6 @@ import { questionHeadline } from "@/lib/question";
 import { QuestionChoices } from "@/components/QuestionChoices";
 import { prefetchWatch } from "@/hooks/useWatchStream";
 import { Button } from "@/components/ui/button";
-import { AnimatedTabs } from "@/components/ui/animated-tabs";
 import { StateStamp } from "@/components/ui/stamp";
 import { PromptInput, PromptInputActions, PromptInputTextarea } from "@/components/ui/prompt-input";
 import { Lightbox } from "@/components/ui/lightbox";
@@ -256,8 +255,18 @@ export function Hub({
   // The user's own providers (Providers page) join the picker, grouped by provider label.
   const providers = useProviders();
   const [provPick, setProvPick] = React.useState<ModelChoice | null>(null);
-  const [attempts, setAttempts] = React.useState<1 | 2 | 3>(1);
+  const [attempts, setAttempts] = React.useState<Attempts>(1);
   const [harness, setHarness] = React.useState<string | null>(null);
+  const [harnesses, setHarnesses] = React.useState<HarnessView[]>([]);
+  React.useEffect(() => {
+    const ctrl = new AbortController();
+    api
+      .harnesses(ctrl.signal)
+      .then((r) => setHarnesses(r.harnesses))
+      .catch(() => {});
+    return () => ctrl.abort();
+  }, []);
+  const [settingsOpen, setSettingsOpen] = React.useState(false);
   const provModels = React.useMemo<ModelChoice[]>(
     () => (providers?.providers ?? []).flatMap((p) => (p.models ?? []).map((id) => ({ id, label: id, tier: "other" as const, group: p.label, provider: p.id }))),
     [providers]
@@ -323,15 +332,10 @@ export function Hub({
   const [error, setError] = React.useState<string | null>(() => stash?.error ?? null);
 
   // Optional post-run verification: a command run in the sandbox, or a criterion a read-only checker
-  // judges. Collapsed by default so the composer stays clean; the chip lights up when filled.
-  const [verifyOpen, setVerifyOpen] = React.useState(() => !!stash?.verify);
-  const [verifyMode, setVerifyMode] = React.useState<"command" | "criterion">(() => stash?.verify?.mode ?? "command");
-  const [verifyText, setVerifyText] = React.useState(() => stash?.verify?.text ?? "");
-  const verifyActive = verifyText.trim().length > 0;
-  const clearVerify = () => {
-    setVerifyOpen(false);
-    setVerifyText("");
-  };
+  // judges. Lives under Settings → More; shows as a chip only once filled.
+  const [verify, setVerify] = React.useState<VerifySpec | null>(() => stash?.verify ?? null);
+  const verifyActive = !!verify && verify.text.trim().length > 0;
+  const clearVerify = () => setVerify(null);
 
   // Dictation into the task box: finalized phrases land at the caret; sending stays manual.
   const voice = useVoiceInput({
@@ -436,7 +440,7 @@ export function Hub({
         ...(agent.picked ? { agent: agent.picked, ...(agent.current?.supervised === false ? { allowPartialSupervision: true } : {}) } : {}),
         ...(attempts > 1 ? { attempts } : {}),
         ...(harness ? { harness } : {}),
-        ...(verifyActive ? { verify: verifyMode === "command" ? { command: verifyText.trim() } : { criterion: verifyText.trim() } } : {}),
+        ...(verify && verifyActive ? { verify: verify.mode === "command" ? { command: verify.text.trim() } : { criterion: verify.text.trim() } } : {}),
       });
       if (res.ok) {
         // Accepted. The Hub is already UNMOUNTED here (onBooting swapped in the booting pane), so the
@@ -458,7 +462,7 @@ export function Hub({
           task: t,
           images: attached,
           picked,
-          ...(verifyActive ? { verify: { mode: verifyMode, text: verifyText } } : {}),
+          ...(verify && verifyActive ? { verify } : {}),
           error: res.question,
         };
         onFailed();
@@ -471,7 +475,7 @@ export function Hub({
         task: t,
         images: attached,
         picked,
-        ...(verifyActive ? { verify: { mode: verifyMode, text: verifyText } } : {}),
+        ...(verify && verifyActive ? { verify } : {}),
         error: msg,
       };
       onFailed();
@@ -482,6 +486,28 @@ export function Hub({
       setBusy(false);
     }
   };
+
+  // Everything behind the Settings control, in one object both the panel and the chips read.
+  const activeModel = provPick ?? model.current;
+  const runOptions = {
+    harness: { list: harnesses, value: harness, onChange: setHarness },
+    model: {
+      current: activeModel,
+      models: pickerModels,
+      defaultId: model.defaultId,
+      onPick: pickModel,
+      offDefault: !!activeModel && (activeModel.id !== model.defaultId || !!activeModel.provider),
+      onReset: () => {
+        setProvPick(null);
+        const d = model.models.find((m) => m.id === model.defaultId);
+        if (d) model.pick(d);
+      },
+    },
+    agent: { choices: agent.choices, current: agent.current, defaultId: agent.defaultId, onPick: agent.pick },
+    attempts: { value: attempts, onChange: setAttempts },
+    verify: { value: verify, onChange: setVerify },
+  };
+  const runOptionsSet = nonDefaults(runOptions) > 0;
 
   const live = new Set(boxes.map((b) => b.name));
   const fleet = [...boxes].sort(threadSort);
@@ -631,117 +657,53 @@ export function Hub({
               className="min-h-[4.5rem] px-2.5 pt-2 text-lead"
             />
 
-            {picked.length > 0 && (
+            {/* Context row: what this run gets that a default run would not — repositories with their
+                branch, and every option that is off its default. Nothing here when nothing is set. */}
+            {(picked.length > 0 || runOptionsSet) && (
               <div className="enter mt-1 flex flex-wrap gap-1.5 px-1" onClick={(e) => e.stopPropagation()}>
                 {picked.map((p) => (
-                  <span key={p.repo} className="bg-muted/80 text-foreground inline-flex h-7 items-center gap-1.5 rounded-md border border-transparent pr-1 pl-2 font-mono text-micro transition-colors focus-within:border-live/50">
-                    {p.private && <Lock className="text-muted-foreground size-3" aria-label="private" />}
-                    {p.repo}
+                  <span key={p.repo} className="bg-muted/80 text-foreground inline-flex h-7 max-w-full items-center gap-1.5 rounded-md border border-transparent pr-1 pl-2 font-mono text-micro transition-colors focus-within:border-live/50">
+                    {p.private && <Lock className="text-muted-foreground size-3 shrink-0" aria-label="private" />}
+                    <span className="truncate">{p.repo}</span>
                     <input
                       value={p.ref ?? ""}
                       onChange={(e) => setPicked((prev) => prev.map((x) => (x.repo === p.repo ? { ...x, ref: e.target.value } : x)))}
                       placeholder={p.defaultBranch ?? "branch"}
                       aria-label={`Branch for ${p.repo}`}
-                      className="placeholder:text-faint text-live w-24 bg-transparent font-mono text-micro outline-none"
+                      className="placeholder:text-faint text-live w-20 shrink-0 bg-transparent font-mono text-micro outline-none"
                     />
                     <button
                       type="button"
                       onClick={() => setPicked((prev) => prev.filter((x) => x.repo !== p.repo))}
                       aria-label={`Remove ${p.repo}`}
-                      className="text-muted-foreground hover:text-foreground grid size-5 cursor-pointer place-items-center rounded"
+                      className="text-muted-foreground hover:text-foreground grid size-5 shrink-0 cursor-pointer place-items-center rounded"
                     >
                       <X className="size-3" />
                     </button>
                   </span>
                 ))}
+                <RunOptionChips onOpen={() => setSettingsOpen(true)} {...runOptions} />
               </div>
             )}
 
-            {verifyOpen && (
-              <div className="enter border-t px-1 pt-2 pb-1 mt-1" onClick={(e) => e.stopPropagation()}>
-                <div className="flex items-center gap-1.5">
-                  <AnimatedTabs
-                    ariaLabel="Verification mode"
-                    className="shrink-0"
-                    value={verifyMode}
-                    onChange={setVerifyMode}
-                    items={[
-                      { value: "command", label: "Command" },
-                      { value: "criterion", label: "Criterion" },
-                    ]}
-                  />
-                  <input
-                    value={verifyText}
-                    onChange={(e) => setVerifyText(e.target.value)}
-                    placeholder={verifyMode === "command" ? "npm test" : "what must be true when it's done"}
-                    aria-label={verifyMode === "command" ? "Verification command" : "Verification criterion"}
-                    className={cn(
-                      "placeholder:text-faint text-foreground h-7 min-w-0 flex-1 bg-transparent px-1.5 outline-none",
-                      verifyMode === "command" ? "stamp" : "text-meta"
-                    )}
-                  />
-                  <button
-                    type="button"
-                    onClick={clearVerify}
-                    aria-label="Remove verification"
-                    className="text-muted-foreground hover:text-foreground grid size-6 shrink-0 cursor-pointer place-items-center rounded"
-                  >
-                    <X className="size-3" />
-                  </button>
-                </div>
-                <p className="text-muted-foreground mt-1 px-1 text-micro">
-                  {verifyMode === "command"
-                    ? "Runs in the sandbox after the agent finishes — exit 0 means verified."
-                    : "A read-only checker judges this against the workspace — it cannot edit anything."}
-                </p>
-              </div>
-            )}
-            <PromptInputActions className="relative justify-between pt-1">
-              <div ref={pickerRef} className="relative flex flex-wrap items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+            {/* One row, never two: a repo button, ONE settings control, the attach/voice icons and the
+                send button. Everything else lives behind Settings and surfaces as a chip when set. */}
+            <PromptInputActions className="relative flex-nowrap justify-between gap-1 pt-1">
+              <div ref={pickerRef} className="relative flex min-w-0 items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
                 <button
                   type="button"
                   onClick={() => setShowRepo((v) => !v)}
                   aria-expanded={showRepo}
+                  aria-label={picked.length ? "Add another repository" : "Attach repositories"}
                   className={cn(
-                    "flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2 text-micro font-medium transition-colors",
-                    picked.length ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                    "flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2 text-micro font-medium whitespace-nowrap transition-colors",
+                    showRepo ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"
                   )}
                 >
                   {picked.length ? <Plus className="size-3.5" aria-hidden /> : <GitBranch className="size-3.5" aria-hidden />}
-                  {/* Phone: the action row has ~330px; the short label keeps every control on one line. */}
-                  <span className="hidden sm:inline">{picked.length ? "Add another repo" : "Attach repos"}</span>
-                  <span className="sm:hidden">{picked.length ? "Add repo" : "Repos"}</span>
+                  <span>{picked.length ? "Add repo" : "Repos"}</span>
                 </button>
-                <AgentChip choices={agent.choices} current={agent.current} defaultId={agent.defaultId} onPick={agent.pick} />
-                <ModelChip current={provPick ?? model.current} models={pickerModels} defaultId={model.defaultId} onPick={pickModel} />
-                <HarnessChip value={harness} onChange={setHarness} />
-                <button
-                  type="button"
-                  onClick={() => setAttempts((n) => (n === 3 ? 1 : ((n + 1) as 2 | 3)))}
-                  title={`Attempts: ${attempts}. Run the task N ways in parallel; the best attempt gets the PR. Click to cycle 1/2/3.`}
-                  aria-label={`Attempts: ${attempts}`}
-                  className={cn(
-                    "h-7 cursor-pointer items-center gap-1.5 rounded-md px-2 text-micro font-medium tabular-nums transition-colors",
-                    attempts > 1 ? "bg-muted text-foreground flex" : "text-muted-foreground hover:bg-muted hover:text-foreground hidden sm:flex"
-                  )}
-                >
-                  {attempts > 1 ? `${attempts} attempts` : "1 attempt"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setVerifyOpen((v) => !v)}
-                  aria-expanded={verifyOpen}
-                  title="Verify the result after the run"
-                  className={cn(
-                    "h-7 cursor-pointer items-center gap-1.5 rounded-md px-2 text-micro font-medium transition-colors",
-                    // Phone: the row has ~330px and this is the advanced option — it stays reachable
-                    // once set (the chip is lit) but doesn't push the send button onto a second line.
-                    verifyActive ? "bg-muted text-foreground flex" : "text-muted-foreground hover:bg-muted hover:text-foreground hidden sm:flex"
-                  )}
-                >
-                  <ShieldCheck className="size-3.5" aria-hidden />
-                  Verify
-                </button>
+                <RunSettings open={settingsOpen} onOpenChange={setSettingsOpen} side="bottom" hotkey {...runOptions} />
                 {showRepo && (
                   <RepoPicker
                     className="absolute top-full left-0 z-20 mt-2"
@@ -757,6 +719,7 @@ export function Hub({
                   />
                 )}
               </div>
+              <span className="min-w-0 flex-1" />
               <button
                 type="button"
                 onClick={(e) => {
@@ -765,19 +728,18 @@ export function Hub({
                 }}
                 aria-label="Attach an image"
                 title="Attach an image — or paste / drop one"
-                className="text-muted-foreground hover:text-foreground hover:bg-muted grid size-7 cursor-pointer place-items-center rounded-md transition-colors"
+                className="text-muted-foreground hover:text-foreground hover:bg-muted grid size-7 shrink-0 cursor-pointer place-items-center rounded-md transition-colors"
               >
                 <ImagePlus className="size-3.5" />
               </button>
               {voice.supported && <VoiceButton state={voice.state} level={voice.level} onToggle={voice.toggle} />}
               <input ref={fileInput} type="file" accept="image/*" multiple className="hidden" onChange={(e) => (addImages(e.target.files ?? []), (e.target.value = ""))} />
-              <span className="min-w-0 flex-1" />
               <Button
                 size="icon"
                 onClick={submit}
                 disabled={busy || (!task.trim() && !images.length) || !!(getMe()?.kind === "user" && (getMe() as { expired?: boolean }).expired)}
                 aria-label="Start a machine with this task"
-                className="rounded-full"
+                className="ml-1 shrink-0 rounded-full"
               >
                 {busy ? <Loader2 className="animate-spin" /> : <ArrowUp />}
               </Button>
