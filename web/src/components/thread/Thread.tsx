@@ -560,6 +560,26 @@ export function Thread({
   // Turns for the minimap: the task plus every message you sent, each with how the agent replied.
   const stick = useStickToBottom({ resize: "smooth", initial: "instant" });
 
+  // A long agent message must not drag the view to its end. Once the newest reply's first line
+  // reaches the top while it is still the last thing in the thread, following stops there and the
+  // reader scrolls on at their own pace; scrolling back to the bottom resumes following.
+  const heldSay = React.useRef<Element | null>(null);
+  React.useLayoutEffect(() => {
+    const scroller = stick.scrollRef.current;
+    const content = stick.contentRef.current;
+    if (!scroller || !content || stick.escapedFromLock) return;
+    const says = content.querySelectorAll("[data-say]");
+    const last = says[says.length - 1];
+    if (!last || last === heldSay.current) return;
+    const r = last.getBoundingClientRect();
+    if (content.getBoundingClientRect().bottom - r.bottom > 160) return;
+    const top = r.top - scroller.getBoundingClientRect().top + scroller.scrollTop - 24;
+    if (top + scroller.clientHeight >= scroller.scrollHeight) return;
+    heldSay.current = last;
+    stick.stopScroll();
+    if (scroller.scrollTop > top) scroller.scrollTop = Math.max(0, top);
+  });
+
   // Scrolling UP while the agent streams must win against the auto-scroll. The library's own wheel
   // escape only fires when the scroller's computed `overflow` is exactly `auto`/`scroll`; ours is
   // `hidden auto` (x is clipped so wide code never side-scrolls the page), so that guard never
@@ -771,7 +791,9 @@ export function Thread({
                   <PlanCard board={g.board} live={runState === "running"} />
                 </div>
               ) : (
-                <SayItem key={key} text={g.text} live={liveHere} label={opensAgent} at={g.at} />
+                <div key={key} data-say className="min-w-0">
+                  <SayItem text={g.text} live={liveHere} label={opensAgent} at={g.at} />
+                </div>
               );
             })}
             </Swap>
