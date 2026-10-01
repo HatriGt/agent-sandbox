@@ -84,6 +84,8 @@ function holdPartialCodeSpan(lines: string[]): void {
   const i = lines.length - 1;
   if (i < 0) return;
   const line = lines[i];
+  // A closing fence ("```") is not a half-typed code span: stripping it would reopen the block.
+  if (FENCE_RE.test(line)) return;
   const ticks = (line.match(/`/g) ?? []).length;
   if (ticks % 2 === 0) return;
   lines[i] = line.slice(0, line.lastIndexOf("`")).replace(/\s+$/, "");

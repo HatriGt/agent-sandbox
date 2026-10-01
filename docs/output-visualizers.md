@@ -127,6 +127,24 @@ Fences draw while they stream instead of swapping in when the closing ``` arrive
   before it is complete — a number still being typed is not drawn as a smaller number.
 - Callouts render their markdown live; other open fences stay code.
 
+### Live updates (re-emitted blocks)
+
+An agent looping "tail → summarise" re-emits the same block. Within one run (until the next
+operator message) a visual fence with the same identity is ONE block (`web/src/lib/viz-identity.ts`,
+`web/src/components/viz/live-blocks.tsx`):
+
+- Identity = language + name: ```` ```stats id=traffic ```` (or `title="…"`), a chart's JSON
+  `title`, or a heading / bold-only line directly above the fence. Untitled fences never merge.
+- The latest COMPLETE version renders at the first occurrence (the live slot), so the mounted
+  visual gets new props and values roll instead of remounting. A version still streaming never
+  replaces a complete one.
+- Later occurrences collapse to a one-line row ("Backend traffic · updated 2× · last 10:02:13",
+  `↑ view` jumps to the slot); expanding it shows that version's raw text. The naming heading
+  folds into the row.
+- The slot's header shows a `--live` dot while the run works, then "updated Ns ago".
+- Why the first position: the block never moves (no remount, no portal), and each new version
+  adds one short row at the bottom instead of a full block, so the scroll-hold behaviour is kept.
+
 ### Tool output
 
 A finished tool's printed output (shell commands and file-reading steps in the trace,

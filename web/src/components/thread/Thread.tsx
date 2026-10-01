@@ -30,6 +30,8 @@ import "@/styles/thread.css";
 import { Button } from "@/components/ui/button";
 import { ChatContainerContent, ChatContainerRoot, ChatContainerScrollAnchor } from "@/components/ui/chat-container";
 import type { TraceEvent } from "@/lib/trace";
+import { LiveRegistryContext, SayKeyContext } from "@/components/viz/live-blocks";
+import { buildLiveRegistry, type SayInput } from "@/lib/viz-identity";
 import { AgentLabel, AnsweredQuestionItem, LifecycleItem, ObserverItem, PlanCard, QueuedItem, SayItem, ThinkingItem, ToolGroup, WorkingIndicator, YouItem } from "./TraceItems";
 import { PlanDock } from "./PlanBoard";
 import { ThreadMinimap, type Turn } from "./ThreadMinimap";
@@ -180,6 +182,17 @@ export function Thread({
 
   const events = React.useMemo(() => parseTrace(snap?.log ?? ""), [snap?.log]);
   const groups = React.useMemo(() => groupTrace(events), [events]);
+  // Visual fences the agent re-emits under one name within a run render as ONE block that updates
+  // in place at its first position (lib/viz-identity.ts); later copies collapse to a row.
+  const liveRegistry = React.useMemo(
+    () =>
+      buildLiveRegistry(
+        groups.flatMap((g, i): SayInput[] =>
+          g.kind === "say" ? [{ key: `say-${i}`, text: g.text, at: g.at }] : g.kind === "you" || g.kind === "asked" ? [{ key: `b-${i}`, text: "", boundary: true }] : []
+        )
+      ),
+    [groups]
+  );
   // Derived once here so the docked board and the in-flow card are the same object.
   const planBoard = React.useMemo(() => deriveTaskBoard(events), [events]);
   const artifacts = React.useMemo(() => producedFiles(events), [events]);
@@ -657,6 +670,7 @@ export function Thread({
   // used to render their own pill, so two could stack and each restarted its timer. Now a single
   // pill morphs between stages, in priority order.
   const lastKind = groups[groups.length - 1]?.kind ?? "";
+  const liveContext = React.useMemo(() => ({ registry: liveRegistry, working: runState === "running" }), [liveRegistry, runState]);
   const working: { label: string; detail?: string | null } | null = resuming
     ? { label: "Answer sent — the agent is resuming" }
     : sleeping
@@ -739,6 +753,7 @@ export function Thread({
 
             {/* Skeleton → transcript is a crossfade, not a cut: the placeholder is shaped like the
                 content, so the swap reads as the bones filling in. */}
+            <LiveRegistryContext.Provider value={liveContext}>
             <Swap state={loadingTrace} className="flex flex-col gap-5">
             {loadingTrace && <ThreadSkeleton withTask={!!box.task} />}
             {!loadingTrace && groups.map((g, i) => {
@@ -792,11 +807,14 @@ export function Thread({
                 </div>
               ) : (
                 <div key={key} data-say className="min-w-0">
-                  <SayItem text={g.text} live={liveHere} label={opensAgent} at={g.at} />
+                  <SayKeyContext.Provider value={`say-${i}`}>
+                    <SayItem text={g.text} live={liveHere} label={opensAgent} at={g.at} />
+                  </SayKeyContext.Provider>
                 </div>
               );
             })}
             </Swap>
+            </LiveRegistryContext.Provider>
 
             {/* The sleep/wake card sits where the run left off — under the transcript when we still
                 have it, right under the task otherwise — so waking reads as "continuing", not as a
