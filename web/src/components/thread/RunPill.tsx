@@ -36,11 +36,11 @@ function Action({ onClick, icon, label, title }: { onClick: () => void; icon: Re
     <button
       type="button"
       onClick={onClick}
-      title={title}
-      className="text-muted-foreground hover:text-foreground hover:bg-muted focus-visible:ring-ring flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2 text-micro font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none [&_svg]:size-3.5"
+      title={title ?? label}
+      aria-label={label}
+      className="text-muted-foreground hover:text-foreground hover:bg-muted focus-visible:ring-ring flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors focus-visible:ring-2 focus-visible:outline-none [&_svg]:size-3.5"
     >
       {icon}
-      {label}
     </button>
   );
 }
@@ -215,6 +215,7 @@ export function RunPill({
 
   return (
     <div data-run-pill={failed ? "failed" : "done"} className="enter flex min-w-0 flex-col items-start">
+      <div className="flex max-w-full min-w-0 items-center gap-0.5">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -230,6 +231,11 @@ export function RunPill({
         </span>
         <ChevronRight className={cn("size-3 shrink-0 transition-transform duration-200 motion-reduce:transition-none", open && "rotate-90")} aria-hidden />
       </button>
+      <span className="ml-1 flex items-center" data-run-pill-actions>
+        {onCopy && <Action onClick={copy} icon={copied ? <Check className="text-ok" /> : <Copy />} label={copied ? "Copied" : "Copy transcript"} />}
+        {onAgain && <Action onClick={onAgain} icon={<RotateCw />} label="Run again" title="Run again — new machine, same brief and repositories" />}
+      </span>
+      </div>
       <Collapse open={open} className="w-full">
         <dl id={bodyId} data-run-pill-details className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-4 gap-y-1 px-3 pt-2 pb-1 text-micro">
           {rows.map(([k, v], i) => (
@@ -238,16 +244,6 @@ export function RunPill({
               <dd className="text-foreground min-w-0 break-words">{v}</dd>
             </React.Fragment>
           ))}
-          {(onCopy || onAgain) && (
-            <dd className="col-span-2 -ml-2 flex flex-wrap items-center gap-1 pt-1" data-run-pill-actions>
-              {onCopy && (
-                <Action onClick={copy} icon={copied ? <Check className="text-ok" /> : <Copy />} label={copied ? "Copied" : "Copy transcript"} />
-              )}
-              {onAgain && (
-                <Action onClick={onAgain} icon={<RotateCw />} label="Run again" title="Start a new machine with the same brief and repositories — you can edit it first" />
-              )}
-            </dd>
-          )}
         </dl>
       </Collapse>
     </div>
