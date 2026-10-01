@@ -262,7 +262,11 @@ export function Thread({
   const question = sleeping ? box.question : snap?.question ?? box.question;
   const exitCode = snap?.exitCode ?? box.exitCode;
   const state = sleeping ? "sleeping" : displayState({ boxStatus: box.boxStatus, runState });
-  const loadingTrace = !snap && !sleeping;
+  // A launch's first snapshot is often EMPTY (the run sentinel is not written yet). Keep the
+  // skeleton through it: a blank column or an "empty thread" card there is the flicker. Real
+  // output (or the run ending) is what replaces it.
+  const emptyLaunch = !!snap && !snap.log.trim() && !!box.task && runState !== "done" && exitCode == null;
+  const loadingTrace = (!snap || emptyLaunch) && !sleeping;
 
   // The run receipt: fetched once when a run ends (keyed by exit code + trace length so a box that
   // resumes and finishes again gets a fresh digest). Silent on failure — the thread stands alone.
@@ -652,9 +656,10 @@ export function Thread({
 
   return (
     <SessionContext.Provider value={box.name}>
-    {/* Fades in on mount so the hand-off from BootingThread (same layout, swapped by App) is a
-        crossfade rather than a cut. Keyed by box in App, so a thread switch fades too. */}
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }} className="flex h-full min-h-0 min-w-0 flex-col">
+    {/* No mount animation: BootingThread (same layout, swapped by App inside one pane key) hands
+        off to this pixel for pixel; a fade here was the second blink. Thread switches fade via
+        App's pane crossfade. */}
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
       <ThreadHeader
         box={box}
         title={title}
@@ -706,7 +711,7 @@ export function Thread({
           <ChatContainerContent className="mx-auto w-full max-w-3xl gap-5 px-4 pt-7 pb-12 md:px-6">
             {box.task && (
               <div data-turn="task">
-                <YouItem text={box.task} label="Task" />
+                <YouItem text={box.task} label="Task" noEnter />
               </div>
             )}
             {inferredRepos && inferredRepos.length > 0 && <AttachedFromTask repos={inferredRepos} />}
@@ -800,7 +805,7 @@ export function Thread({
             {/* A follow-up on a finished run: the box still reports `done` for a few seconds until
                 the server resumes the session. That gap must read as "delivering", never as the old
                 "Completed" receipt sitting under the message you just sent. */}
-            {working && <WorkingIndicator label={working.label} detail={working.detail} />}
+            {working && !(loadingTrace && starting) && <WorkingIndicator label={working.label} detail={working.detail} />}
 
             <AnimatePresence initial={false}>
               {queuedItems.map((q) => (
@@ -984,7 +989,7 @@ export function Thread({
         )}
       </AnimatePresence>
       </div>
-    </motion.div>
+    </div>
     </SessionContext.Provider>
   );
 }

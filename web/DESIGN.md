@@ -162,6 +162,24 @@ The composer echoes a message the instant Enter is pressed (withdrawn only if de
 controller kicks the run detached instead of waiting for the agent's next boundary. Every new turn
 enters with the same short rise; the state pill crossfades on change.
 
+## Launch: one screen from Send to first output
+
+Pressing Send replaces the Hub with the thread layout in one 140ms fade (the Hub exits with no
+beat, nothing slides or morphs): header with the task title and a `Starting` pill, the Task bubble
+in its final spot, a thread-shaped shimmer below, an inert composer frame at the bottom. That
+screen holds through delegate pending, box booting, the URL moving to `/dashboard/box/<name>` and
+an empty first snapshot; only the skeleton is ever replaced, by real output.
+
+- `BootingThread` is a static copy of `Thread`'s shell (same header geometry, `ChatContainer`
+  column, `data-turn="task"` bubble, `ThreadSkeleton`). Change one, change the other.
+- Neither animates on mount; the Task bubble is `noEnter` in both. Pane key stays `"launch"` for the
+  launched box (App), so the URL change and the BootingThread → Thread hand-off are not pane swaps.
+- Thread keeps the skeleton while the snapshot's log is empty and the run has not ended
+  (`emptyLaunch`), and App backfills the task as typed when the fleet lists the box without one.
+- Delegate failure: back to the Hub, text restored, error shown.
+- Check: `node .shots/launch-frames.mjs [ok|fail] [reduce]` samples every 100ms and asserts the
+  bubble rect never changes and no frame lacks bubble + skeleton/content.
+
 ## Motion (`motion/react` + CSS)
 
 One idea — liveness — expressed consistently: `breathe` on working dots, the streaming caret, the
