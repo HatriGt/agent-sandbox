@@ -207,7 +207,8 @@ export function History({ onBack, onAgain }: { onBack: () => void; onAgain: () =
 
         <ActivityPanel />
 
-        <LedgerTotalsStrip t={totals} />
+        {/* A failed load shows its error below; a shimmer that never resolves above it would be a lie. */}
+        {!error && <LedgerTotalsStrip t={totals} />}
 
         <div className="mb-3 flex flex-wrap items-center gap-1">
           <FilterSelect

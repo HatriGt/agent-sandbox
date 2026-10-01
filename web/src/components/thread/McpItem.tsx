@@ -80,7 +80,9 @@ export function McpItem({ event, call, live }: { event: ToolEvent; call: McpCall
           {!live && !event.failed && hasOutput && (
             <span className="text-trace-fg/50 flex shrink-0 items-center gap-1 text-micro tabular-nums">
               <Check className="text-emerald-400/80 size-3" strokeWidth={2.5} aria-hidden />
-              {mcpSummary(view)}
+              {/* The folded footer repeats this summary; on a phone the header has no room for it
+                  twice (it was clipped against the step's duration column). */}
+              <span className="hidden sm:inline">{mcpSummary(view)}</span>
             </span>
           )}
           {hasOutput && <PanelFold open={open} text={output} onToggle={() => setOpen((v) => !v)} />}

@@ -450,10 +450,19 @@ function MachineRow({
             <Tooltip>
               <TooltipTrigger asChild>
                 <div className="flex flex-col gap-1.5">
-                  <span className={cn("inline-flex items-center gap-1.5 text-micro", deadline.remainingSec < 300 ? "text-attention-text" : "text-muted-foreground")}>
+                  {/* Amber is reserved for "needs you"; a run about to sleep is urgent-ish, not a question,
+                      so it steps up to the foreground colour instead. A bare "soon" said nothing about
+                      what happens soon — the phrase now names it. */}
+                  <span className={cn("inline-flex items-center gap-1.5 text-micro", deadline.remainingSec < 300 ? "text-foreground" : "text-muted-foreground")}>
                     <Hourglass className="size-3" aria-hidden />
-                    <span className="stamp">{deadline.remainingSec <= 0 ? "soon" : fmtDuration(deadline.remainingSec)}</span>
-                    <span className="opacity-80">{deadline.remainingSec != null && deadline.remainingSec <= 0 ? "" : deadline.kind === "idle" ? "if quiet" : deadline.kind === "sleep" ? "then destroyed" : "of the cap"}</span>
+                    {deadline.remainingSec <= 0 ? (
+                      <span>{deadline.kind === "idle" ? "sleeps any moment" : deadline.kind === "sleep" ? "destroyed any moment" : "cap reached"}</span>
+                    ) : (
+                      <>
+                        <span className="stamp">{fmtDuration(deadline.remainingSec)}</span>
+                        <span className="opacity-80">{deadline.kind === "idle" ? "if quiet" : deadline.kind === "sleep" ? "then destroyed" : "of the cap"}</span>
+                      </>
+                    )}
                   </span>
                   <span className="bg-border block h-1 w-28 overflow-hidden rounded-full">
                     <span

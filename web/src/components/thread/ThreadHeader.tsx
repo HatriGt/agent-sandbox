@@ -407,13 +407,15 @@ export function ThreadHeader({
         {!sleeping && (
           <>
             <Dot />
-            <span className="scrollbar-none flex min-w-20 shrink items-center gap-1.5 overflow-x-auto">
+            {/* Chips shrink and ellipsise their branch instead of the row clipping mid-glyph: a
+                hidden horizontal scroller read as a chopped "orders-api @" at 1280px. */}
+            <span className="flex min-w-20 shrink items-center gap-1.5 overflow-hidden">
               {repos.map((r) => (
                 <Tooltip key={r.name}>
                   <TooltipTrigger asChild>
-                    <span className="bg-muted text-foreground stamp inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 whitespace-nowrap">
-                      {r.name}
-                      {r.branch && <span className="text-muted-foreground hidden sm:inline">@{r.branch}</span>}
+                    <span className="bg-muted text-foreground stamp inline-flex min-w-0 max-w-64 shrink items-center gap-1 rounded-md px-1.5 py-0.5 whitespace-nowrap">
+                      <span className="shrink-0">{r.name}</span>
+                      {r.branch && <span className="text-muted-foreground hidden min-w-0 truncate sm:inline">@{r.branch}</span>}
                     </span>
                   </TooltipTrigger>
                   <TooltipContent side="bottom">/workspace/{r.name} — @ mentions search here</TooltipContent>

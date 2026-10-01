@@ -209,6 +209,15 @@ const repos = { repos: [
 ] };
 const skills = { skills: [] };
 const mcp = { servers: [], config: { mcpServers: {} } };
+const harnesses = {
+  harnesses: [
+    { id: "h_best", name: "Best practice", description: "Plan first, test before PR, strict egress.", builtin: "best-practice", rules: {}, createdAt: ms - 9e8, updatedAt: ms - 9e8 },
+    { id: "h_review", name: "Careful reviewer", description: "Read-only review with line comments; never pushes.", builtin: "reviewer", rules: {}, createdAt: ms - 9e8, updatedAt: ms - 9e8 },
+    { id: "h_mine", name: "Billing service", description: "Sonnet, /write-tests skill, allowlisted Stripe egress.", rules: {}, model: "claude-sonnet-4-5", createdAt: ms - 8e7, updatedAt: ms - 7e7 },
+    { id: "h_import", name: "Imported from gist", description: "Needs a look before it can run.", needsReview: true, rules: {}, createdAt: ms - 1e7, updatedAt: ms - 1e7 },
+  ],
+  limits: {},
+};
 
 const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: +w, height: +h }, colorScheme: dark ? "dark" : "light", deviceScaleFactor: 1 });
@@ -257,10 +266,16 @@ await mock("/notify.json", notify);
 await mock("/agent-prefs.json", agentPrefs);
 await mock("/models.json", models);
 await mock("/history.json", history);
+await mock("/history/ledger.json", {
+  totals: { runs: history.runs.length, done: history.runs.filter((r) => r.state === "done").length, failed: history.runs.filter((r) => r.state === "failed").length, checked: 2, passed: 2, inputTokens: 412_300, outputTokens: 58_900, withUsage: 3, costUsd: null, withCost: 0 },
+  rows: history.runs.map((r, i) => ({ ...r, startedBy: i % 2 ? "web" : "schedule", agent: "claude", verified: i < 2 ? true : null, inputTokens: 100_000, outputTokens: 15_000 })),
+});
 await mock("/history/activity.json", activity);
 await mock("/repos.json", repos);
 await mock("/skills.json", skills);
 await mock("/mcp-servers.json", mcp);
+await mock("/harnesses.json", harnesses);
+await mock("/providers.json", { providers: [] });
 await ctx.route((u) => new URL(u).pathname === "/watch.json", (r) =>
   r.fulfill(json({ name: "x", boxStatus: "Running", runState: "running", log: "" }))
 );
@@ -278,8 +293,12 @@ if (has("--stale")) {
 }
 const hover = val("hover");
 if (hover) await page.hover(hover).catch((e) => errors.push("hover: " + e.message));
+// `--click="a;;b;;c"` clicks several selectors in order (a flow: open a panel, pick a row, …).
 const click = val("click");
-if (click) await page.click(click).catch((e) => errors.push("click: " + e.message));
+for (const sel of click ? click.split(";;") : []) {
+  await page.click(sel).catch((e) => errors.push("click: " + e.message));
+  await page.waitForTimeout(250);
+}
 const key = val("key");
 if (key) await page.keyboard.press(key).catch((e) => errors.push("key: " + e.message));
 const type = val("type");

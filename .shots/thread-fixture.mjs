@@ -490,9 +490,17 @@ if (stream) {
   await page.waitForTimeout(600);
   await shot("-mention");
 } else if (interact === "model") {
-  await page.getByRole("button", { name: /model|opus/i }).first().click();
+  // The model lives behind the composer's Settings control: open it, unfold the Model row.
+  await page.locator("button[aria-label^='Run settings']").click();
+  await page.waitForTimeout(300);
+  await page.getByRole("button", { name: /^Model/ }).click();
   await page.waitForTimeout(400);
   await shot("-model");
+  // Pick Haiku → the panel closes and the off-default model shows as a chip above the text.
+  await page.locator("[role=radiogroup][aria-label='Model'] [role=radio]", { hasText: "Haiku" }).click();
+  await page.locator("button[aria-label='Close']").click();
+  await page.waitForTimeout(400);
+  await shot("-model-chip");
 } else if (interact === "multiline") {
   await input().click();
   for (let i = 1; i <= 10; i++) {
