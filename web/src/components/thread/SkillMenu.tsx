@@ -7,6 +7,7 @@ import { useCached } from "@/lib/cache";
 import { SkillMark } from "@/lib/skillGlyph";
 import type { SlashState } from "@/lib/slash";
 import { cn } from "@/lib/utils";
+import { SkillsEmpty } from "@/components/composer/Toolbar";
 
 /**
  * `/` skill invocation, the slash-command way: a `/` starting the message OR any word opens the
@@ -15,22 +16,30 @@ import { cn } from "@/lib/utils";
  * (unit-tested); the menu only exists while something matches, so typing `/workspace/...` just types.
  */
 
+const SHELL = "bg-popover text-popover-foreground absolute inset-x-2 z-20 rounded-xl border shadow-e3";
+
 export function SkillMenu({
   state,
   onPick,
   onClose,
   onMatches,
+  side = "top",
 }: {
   state: SlashState;
   onPick: (name: string) => void;
   onClose: () => void;
   /** Tells the composer whether anything matches, so Enter falls through to "send" when nothing does. */
   onMatches: (n: number) => void;
+  /** "top" opens above the composer (thread), "bottom" below it (the Hub, near the top of the page). */
+  side?: "top" | "bottom";
 }) {
   const cached = useCached("skills", (signal) => api.skills(signal));
   const [cursor, setCursor] = React.useState(0);
   const still = useReducedMotion();
   const q = state.query.toLowerCase();
+  const enabled = (cached.data?.skills ?? []).filter((s) => s.enabled).length;
+  // A bare `/` with no enabled skills at all: say so and point at the Skills page, rather than nothing.
+  const empty = !!cached.data && enabled === 0 && q === "";
   const matches = React.useMemo(
     () => (cached.data?.skills ?? []).filter((s) => s.enabled && s.name.includes(q)),
     [cached.data, q]
@@ -60,13 +69,18 @@ export function SkillMenu({
   // lets that outer exit reach the listbox through this inner presence.
   return (
     <AnimatePresence propagate>
+      {empty && (
+        <motion.div key="skill-empty" role="status" {...menuMotion(still)} className={cn(SHELL, side === "top" ? "bottom-full mb-2" : "top-full mt-2")}>
+          <SkillsEmpty onNavigate={onClose} />
+        </motion.div>
+      )}
       {matches.length > 0 && (
         <motion.div
           key="skill-menu"
           role="listbox"
           aria-label="Skills"
           {...menuMotion(still)}
-          className="bg-popover text-popover-foreground absolute inset-x-2 bottom-full z-20 mb-2 max-h-72 overflow-y-auto rounded-xl border p-1 shadow-e3"
+          className={cn(SHELL, "max-h-72 overflow-y-auto p-1", side === "top" ? "bottom-full mb-2" : "top-full mt-2")}
     >
       <div className="text-muted-foreground flex items-center gap-2 px-2.5 py-1.5 text-micro">
         <span className="flex-1">Run a skill with the rest of your message</span>

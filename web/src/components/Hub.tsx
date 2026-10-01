@@ -15,7 +15,6 @@ import {
   Lock,
   Map,
   PencilLine,
-  Plus,
   Sparkles,
   TestTubes,
   X,
@@ -23,8 +22,12 @@ import {
 import { toast } from "sonner";
 import { RepoPicker, type PickedRepo } from "@/components/RepoPicker";
 import { useModelChoice, type ModelChoice } from "@/components/thread/ModelPicker";
-import { RunOptionChips, RunSettings, nonDefaults, type Attempts, type VerifySpec } from "@/components/thread/RunSettings";
-import type { HarnessView } from "@/lib/api";
+import { RunOptionChips, type Attempts, type ChipKey, type VerifySpec } from "@/components/thread/RunSettings";
+import { ComposerToolbar, HarnessMenu, ModelMenu, MoreMenu, PlusMenu, SkillsMenu, useComposerMenus } from "@/components/composer/Toolbar";
+import { SkillChip, SkillMenu } from "@/components/thread/SkillMenu";
+import { slashAt, stripSlashToken, typedSkillToken, type SlashState } from "@/lib/slash";
+import { useCached } from "@/lib/cache";
+import type { HarnessView, SkillView } from "@/lib/api";
 import { useProviders } from "@/components/Providers";
 import { useAgentChoice } from "@/components/DriverPicker";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
@@ -266,7 +269,44 @@ export function Hub({
       .catch(() => {});
     return () => ctrl.abort();
   }, []);
-  const [settingsOpen, setSettingsOpen] = React.useState(false);
+  // One open toolbar menu at a time; ⌘. opens Model.
+  const menus = useComposerMenus("model");
+  // `/` skills, exactly as the thread composer does them (SendBar): a `/query` token opens the
+  // menu, a pick becomes a chip, and the send carries it as the leading `/name` of the task.
+  const skillsCache = useCached("skills", (signal) => api.skills(signal));
+  const [skill, setSkill] = React.useState<SkillView | null>(null);
+  const [slash, setSlash] = React.useState<SlashState | null>(null);
+  const [slashMatches, setSlashMatches] = React.useState(0);
+  const findSkill = (name: string) => (skillsCache.data?.skills ?? []).find((s) => s.enabled && s.name === name) ?? null;
+  const taskEl = () => document.getElementById("new-task") as HTMLTextAreaElement | null;
+  const updateSlash = (next: string) => {
+    const caret = taskEl()?.selectionStart ?? next.length;
+    setSlash(skill ? null : slashAt(next, caret));
+    if (!skill) {
+      const t = typedSkillToken(next);
+      const hit = t ? findSkill(t.name) : null;
+      if (hit && t) {
+        setSkill(hit);
+        setTask(next.slice(0, t.start) + next.slice(t.start + t.length));
+        setSlash(null);
+      }
+    }
+  };
+  const pickSkill = (name: string) => {
+    const hit = findSkill(name);
+    if (!hit) return;
+    // From the `/` menu the typed token goes; from the Skills button the text is left alone.
+    const stripped = slash ? stripSlashToken(task, slash.start) : { value: task, caret: task.length };
+    setSkill(hit);
+    setTask(stripped.value);
+    setSlash(null);
+    requestAnimationFrame(() => {
+      const t = taskEl();
+      if (!t) return;
+      t.focus();
+      t.setSelectionRange(stripped.caret, stripped.caret);
+    });
+  };
   const provModels = React.useMemo<ModelChoice[]>(
     () => (providers?.providers ?? []).flatMap((p) => (p.models ?? []).map((id) => ({ id, label: id, tier: "other" as const, group: p.label, provider: p.id }))),
     [providers]
@@ -415,8 +455,11 @@ export function Hub({
   };
 
   const submit = async () => {
-    const t = task.trim();
-    if ((!t && !images.length) || busy) return;
+    const typed = task.trim();
+    if ((!typed && !images.length && !skill) || busy) return;
+    // The skill rides as the leading /token, the same as a thread follow-up (SendBar) — the agent is
+    // instructed to invoke it for the message, and the skill is synced into every sandbox.
+    const t = skill ? `/${skill.name}${typed ? ` ${typed}` : ""}` : typed;
     if (readsPending > 0) {
       // An image is still being read; submitting now would silently drop it. The read resolves in
       // milliseconds — ask for one more Enter rather than auto-firing with state that may have moved.
@@ -450,6 +493,7 @@ export function Hub({
         finishHowto();
         setTask("");
         setImages([]);
+        setSkill(null);
         clearVerify();
         setAttempts(1);
         // Repos inferred from the task ride along to render INLINE in the booting pane/thread —
@@ -507,7 +551,9 @@ export function Hub({
     attempts: { value: attempts, onChange: setAttempts },
     verify: { value: verify, onChange: setVerify },
   };
-  const runOptionsSet = nonDefaults(runOptions) > 0;
+  // The model is not a chip: the Model button always names what will run.
+  const chipsSet = !!harness || (agent.current && agent.current.id !== agent.defaultId) || attempts > 1 || verifyActive;
+  const openChip = (key: ChipKey) => menus.set(key === "harness" ? "harness" : key === "model" ? "model" : "more");
 
   const live = new Set(boxes.map((b) => b.name));
   const fleet = [...boxes].sort(threadSort);
@@ -552,10 +598,14 @@ export function Hub({
           <HowItWorks open={firstRun} />
           <div className="relative">
           <VoicePill state={voice.state} interim={voice.interim} />
+          <AnimatePresence>{slash && <SkillMenu key="skill" side="bottom" state={slash} onPick={pickSkill} onClose={() => setSlash(null)} onMatches={setSlashMatches} />}</AnimatePresence>
           <PromptInput
             value={task}
-            onValueChange={setTask}
-            onSubmit={getMe()?.kind === "user" && (getMe() as { expired?: boolean }).expired ? () => {} : submit}
+            onValueChange={(v) => {
+              setTask(v);
+              updateSlash(v);
+            }}
+            onSubmit={getMe()?.kind === "user" && (getMe() as { expired?: boolean }).expired ? () => {} : () => (slash && slashMatches > 0 ? undefined : void submit())}
             isLoading={busy}
             className={cn(
               "bg-card border-line-strong composer-depth focus-within:border-live/60 focus-within:shadow-[0_0_0_3px_color-mix(in_oklch,var(--live)_18%,transparent),0_1px_2px_oklch(0_0_0/0.05),0_8px_24px_-16px_oklch(0_0_0/0.25)] relative rounded-2xl p-2.5 transition-[border-color,box-shadow] duration-200",
@@ -653,14 +703,25 @@ export function Hub({
             )}
             <PromptInputTextarea
               id="new-task"
-              placeholder="Describe a task. A fresh sandbox picks it up…"
+              placeholder={skill ? `Add details for /${skill.name} — or just start…` : "Describe a task. A fresh sandbox picks it up…  ( / skills )"}
               className="min-h-[4.5rem] px-2.5 pt-2 text-lead"
+              onKeyDown={(e) => {
+                if (!["ArrowDown", "ArrowUp", "Enter", "Tab", "Escape"].includes(e.key)) return;
+                if (slash && slashMatches > 0) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  document.dispatchEvent(new CustomEvent("asb:skill-nav", { detail: e.key }));
+                } else if (slash && e.key === "Escape") setSlash(null);
+              }}
+              onKeyUp={() => updateSlash(task)}
+              onClick={() => updateSlash(task)}
             />
 
-            {/* Context row: what this run gets that a default run would not — repositories with their
-                branch, and every option that is off its default. Nothing here when nothing is set. */}
-            {(picked.length > 0 || runOptionsSet) && (
-              <div className="enter mt-1 flex flex-wrap gap-1.5 px-1" onClick={(e) => e.stopPropagation()}>
+            {/* Context chips, inside the box above the toolbar: repositories with their branch, the
+                skill, and every run option that is off its default. Nothing here when nothing is set. */}
+            {(picked.length > 0 || skill || chipsSet) && (
+              <div className="enter mt-1 flex flex-wrap gap-1.5 px-1.5" onClick={(e) => e.stopPropagation()}>
+                {skill && <SkillChip skill={skill} onRemove={() => setSkill(null)} />}
                 {picked.map((p) => (
                   <span key={p.repo} className="bg-muted/80 text-foreground inline-flex h-7 max-w-full items-center gap-1.5 rounded-md border border-transparent pr-1 pl-2 font-mono text-micro transition-colors focus-within:border-live/50">
                     {p.private && <Lock className="text-muted-foreground size-3 shrink-0" aria-label="private" />}
@@ -682,28 +743,46 @@ export function Hub({
                     </button>
                   </span>
                 ))}
-                <RunOptionChips onOpen={() => setSettingsOpen(true)} {...runOptions} />
+                <RunOptionChips onOpen={openChip} harness={runOptions.harness} agent={runOptions.agent} attempts={runOptions.attempts} verify={runOptions.verify} />
               </div>
             )}
 
-            {/* One row, never two: a repo button, ONE settings control, the attach/voice icons and the
-                send button. Everything else lives behind Settings and surfaces as a chip when set. */}
-            <PromptInputActions className="relative flex-nowrap justify-between gap-1 pt-1">
-              <div ref={pickerRef} className="relative flex min-w-0 items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
-                <button
-                  type="button"
-                  onClick={() => setShowRepo((v) => !v)}
-                  aria-expanded={showRepo}
-                  aria-label={picked.length ? "Add another repository" : "Attach repositories"}
-                  className={cn(
-                    "flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2 text-micro font-medium whitespace-nowrap transition-colors",
-                    showRepo ? "bg-muted text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                  )}
-                >
-                  {picked.length ? <Plus className="size-3.5" aria-hidden /> : <GitBranch className="size-3.5" aria-hidden />}
-                  <span>{picked.length ? "Add repo" : "Repos"}</span>
-                </button>
-                <RunSettings open={settingsOpen} onOpenChange={setSettingsOpen} side="bottom" hotkey {...runOptions} />
+            {/* The toolbar: + / Harness Model ⋯ … voice send. One row at every width — labels drop
+                below `sm`, the left cluster shrinks, voice and send never move. */}
+            <PromptInputActions className="relative block pt-0">
+              <div ref={pickerRef} className="relative">
+                <ComposerToolbar
+                  left={
+                    <>
+                      <PlusMenu
+                        {...menus.props("plus")}
+                        side="bottom"
+                        items={[
+                          { key: "repo", icon: <GitBranch />, label: picked.length ? "Add another repository" : "Attach a repository", hint: "Clone it into the sandbox before the agent starts", run: () => setShowRepo(true) },
+                          { key: "image", icon: <ImagePlus />, label: "Add an image", hint: "Or paste / drop one into the box", run: () => fileInput.current?.click() },
+                        ]}
+                      />
+                      <SkillsMenu {...menus.props("skills")} side="bottom" current={skill?.name ?? null} onPick={pickSkill} />
+                      <HarnessMenu {...menus.props("harness")} side="bottom" harness={runOptions.harness} />
+                      <ModelMenu {...menus.props("model")} side="bottom" model={runOptions.model} />
+                      <MoreMenu {...menus.props("more")} side="bottom" agent={runOptions.agent} attempts={runOptions.attempts} verify={runOptions.verify} />
+                    </>
+                  }
+                  right={
+                    <>
+                      {voice.supported && <VoiceButton state={voice.state} level={voice.level} onToggle={voice.toggle} />}
+                      <Button
+                        size="icon"
+                        onClick={submit}
+                        disabled={busy || (!task.trim() && !images.length && !skill) || !!(getMe()?.kind === "user" && (getMe() as { expired?: boolean }).expired)}
+                        aria-label="Start a machine with this task"
+                        className="shrink-0 rounded-full"
+                      >
+                        {busy ? <Loader2 className="animate-spin" /> : <ArrowUp />}
+                      </Button>
+                    </>
+                  }
+                />
                 {showRepo && (
                   <RepoPicker
                     className="absolute top-full left-0 z-20 mt-2"
@@ -719,30 +798,7 @@ export function Hub({
                   />
                 )}
               </div>
-              <span className="min-w-0 flex-1" />
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  fileInput.current?.click();
-                }}
-                aria-label="Attach an image"
-                title="Attach an image — or paste / drop one"
-                className="text-muted-foreground hover:text-foreground hover:bg-muted grid size-7 shrink-0 cursor-pointer place-items-center rounded-md transition-colors"
-              >
-                <ImagePlus className="size-3.5" />
-              </button>
-              {voice.supported && <VoiceButton state={voice.state} level={voice.level} onToggle={voice.toggle} />}
               <input ref={fileInput} type="file" accept="image/*" multiple className="hidden" onChange={(e) => (addImages(e.target.files ?? []), (e.target.value = ""))} />
-              <Button
-                size="icon"
-                onClick={submit}
-                disabled={busy || (!task.trim() && !images.length) || !!(getMe()?.kind === "user" && (getMe() as { expired?: boolean }).expired)}
-                aria-label="Start a machine with this task"
-                className="ml-1 shrink-0 rounded-full"
-              >
-                {busy ? <Loader2 className="animate-spin" /> : <ArrowUp />}
-              </Button>
             </PromptInputActions>
           </PromptInput>
             {/* The hint is a caption under the composer: it read mid-sentence when squeezed into the action row. */}

@@ -139,7 +139,7 @@ that precedes them — the bug that made the primary button ink-on-ink. Keep the
   this turn finishes", cancel. The controller holds it and resumes the run the moment it ends.
 - `ObserverItem` — dashed card, "Side question · answered from the sandbox, not by the agent".
 - `WorkingIndicator` — three live-blue dots; label "Starting up" until the first output.
-- **Composer (`SendBar`)** — one input, the agent is the primary destination and is *always*
+- **Composer (`SendBar`, toolbar in `composer/Toolbar.tsx`)** — one input, the agent is the primary destination and is *always*
   sendable: mid-turn messages queue ("Queue for agent", clock icon) instead of being refused. The
   secondary chip is **Side question**. `@` (or the @ button) opens `MentionMenu` — the workspace file
   list from `/files.json`, narrowed as you type, ↑/↓/Enter/Tab/Esc; mentions expand to
@@ -552,3 +552,46 @@ branch; the MCP step header duplicated the folded footer's summary and overlappe
 column on phones — header shows the check only below `sm`; History showed a shimmering totals strip
 forever next to a "Could not load" error — hidden on error; composer and question-card captions
 truncated mid-sentence at 390px — shorter copy, two lines on a phone.
+
+## Round: the composer, round two (2026-09-30)
+
+What was wrong with the calm-composer round: it was calm by hiding things. Harness, model, agent,
+attempts and verify all sat behind one "Settings" popover, so the model you were about to run was
+invisible until you opened it, every change cost three or four clicks (Settings → Model row →
+unfold → pick), and the panel nested collapsibles inside a popover. Worse, the Hub had no skill
+picking at all: the `/` menu was wired only into the thread's `SendBar`.
+
+Now, with Claude.ai, ChatGPT, Cursor, v0 and T3 Chat as the target shape:
+
+- **One big rounded surface, text first; context inside the box.** Chips for the skill, repositories
+  (with their branch input), harness, agent, "2 attempts" and "Verify · …" sit under the text and
+  above the toolbar (Claude.ai / Cursor context pills). Image thumbnails stay above the text
+  (ChatGPT). The model is never a chip: the Model button always names it.
+- **A quiet bottom toolbar, shared** (`components/composer/Toolbar.tsx`, used by Hub and SendBar):
+  `+` (repository or image on the Hub; image only in a thread, where it acts directly) · `/ Skills` ·
+  `@` (thread only) · Side question (thread only) · **Harness ▾** (reads its name once picked) ·
+  **Model ▾** with a short label ("Sonnet 4.5", tier dot) · `⋯` for agent, attempts and verify ·
+  voice and a filled round send on the right. Every option is one click to open, one to pick.
+- **Icon + label on a desk, icon only below `sm`**; the left cluster shrinks and the row never wraps
+  (checked at 390px and 1280px, both themes — `.shots/composer-shots.mjs`). Buttons are 32px pills
+  with a 0.97 press scale (dropped under reduced motion); a small **live-blue** dot marks a menu with
+  something set inside. Amber stays reserved for needs-you.
+- **Menus are popovers on a desk, bottom sheets on a phone** (the v0 / T3 Chat mobile pattern); rows,
+  not cards; focus lands inside, ↑/↓/Home/End move, Enter/Space picks, Esc closes and returns focus.
+  The Hub's menus grow downward (the composer is near the top), the thread's upward.
+- **⌘. opens the Model menu** (it used to open Settings).
+- **Skills on the Hub.** Typing `/` or pressing Skills lists enabled skills; a pick becomes the
+  `SkillChip`, and the task is sent exactly as a thread follow-up is — the skill as the leading
+  `/name` token of the text (`/${name} ${task}`), which the agent is instructed to invoke. A
+  hand-typed `/name ` converts to the chip too. With no enabled skills, both the `/` menu and the
+  Skills button show an empty state linking to the Skills page.
+- `RunSettings.tsx` is now only primitives (harness/model lists, verify row, chips); the popover and
+  its "More" collapsible are deleted.
+
+Borrowed, and from where: the composer shape and in-box context chips from Claude.ai, ChatGPT and
+Cursor; the short model name in a toolbar dropdown from T3 Chat and v0; `+` as the single attach entry
+from ChatGPT; the motion rules (150–200 ms ease-out, origin-aware popovers that scale from the
+trigger, 0.97 press, reduced motion keeps the fade) from Emil Kowalski's design-engineering notes as
+already recorded above. The inspiration sites themselves could not be fetched this round (the fetch
+tool errored or was rate-limited / forbidden on skiper-ui, cult-ui, rareui, 60fps and ui-skills), so
+no new detail was taken from them beyond what this file already records.
