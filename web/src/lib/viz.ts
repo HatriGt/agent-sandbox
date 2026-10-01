@@ -50,10 +50,34 @@ export interface ChartSpec {
   stacked?: boolean;
 }
 
+const CHART_TYPES: Record<string, ChartSpec["type"]> = {
+  bar: "bar", bars: "bar", column: "bar", columns: "bar", histogram: "bar",
+  line: "line", lines: "line", area: "area",
+  donut: "donut", doughnut: "donut", pie: "donut",
+  sparkline: "sparkline", spark: "sparkline", scatter: "scatter",
+};
+
+/** A data value as agents write it: 12, "12", "1,234", "12%", "3.4 MB". */
+function chartNumber(v: unknown): number {
+  if (typeof v === "number") return v;
+  if (typeof v === "string") return cellNumber(v) ?? NaN;
+  return NaN;
+}
+
+const firstArray = (o: Record<string, unknown>, keys: string[]): unknown[] | undefined => {
+  for (const k of keys) if (Array.isArray(o[k])) return o[k] as unknown[];
+  return undefined;
+};
+
 /**
  * ```chart fence: JSON, either the full {type, labels, series:[{name,data}]} shape or the
  * shorthand {type, labels, values} for a single series. Bounded (≤ 60 categories, ≤ 8 series —
  * the palette's fixed order ends at 8; more must be folded upstream, never cycled).
+ *
+ * Agents drift from the spec, so the common spellings are accepted too: `x`/`categories` for
+ * labels, `y`/`data` for values, `kind` for type, `pie` for donut, a {name: data} series map,
+ * point lists ([{label, value}]), and numeric strings. Mismatched lengths are still rejected —
+ * padding would invent data.
  */
 export function parseChartSpec(src: string): ChartSpec | null {
   let raw: unknown;
@@ -62,29 +86,54 @@ export function parseChartSpec(src: string): ChartSpec | null {
   } catch {
     return null;
   }
-  if (typeof raw !== "object" || raw === null) return null;
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
   const o = raw as Record<string, unknown>;
-  const type = o.type;
-  if (type !== "bar" && type !== "line" && type !== "area" && type !== "donut" && type !== "sparkline" && type !== "scatter") return null;
-  const labels = Array.isArray(o.labels) ? o.labels.map(String) : null;
-  if (!labels || labels.length === 0 || labels.length > 60) return null;
+  const typeRaw = o.type ?? o.kind ?? o.chart;
+  const type = CHART_TYPES[String(typeRaw ?? "bar").toLowerCase().trim()];
+  if (!type) return null;
+  const title = typeof o.title === "string" ? o.title : undefined;
+  let labels = firstArray(o, ["labels", "x", "categories", "xLabels", "xAxis", "keys"])?.map(String) ?? null;
   let series: ChartSeries[] = [];
-  if (Array.isArray(o.values)) {
-    const data = o.values.map(Number);
-    if (data.some((n) => !Number.isFinite(n))) return null;
-    series = [{ name: typeof o.title === "string" ? o.title : "value", data }];
+  const toData = (arr: unknown[]): number[] | null => {
+    const d = arr.map(chartNumber);
+    return d.some((n) => !Number.isFinite(n)) ? null : d;
+  };
+  const flat = firstArray(o, ["values", "y", "data"]);
+  if (flat && flat.length > 0 && flat.every((p) => typeof p === "object" && p !== null && !Array.isArray(p))) {
+    // Point list: [{label, value}] / [{x, y}] / [{name, value}].
+    const pts = flat as Record<string, unknown>[];
+    const lab = pts.map((p) => p.label ?? p.name ?? p.x ?? p.key);
+    const val = pts.map((p) => p.value ?? p.y ?? p.count);
+    if (lab.some((l) => l == null) || val.some((v) => v == null)) return null;
+    const data = toData(val);
+    if (!data) return null;
+    labels = lab.map(String);
+    series = [{ name: title ?? "value", data }];
+  } else if (flat) {
+    const data = toData(flat);
+    if (!data) return null;
+    series = [{ name: title ?? "value", data }];
   } else if (Array.isArray(o.series)) {
     for (const s of o.series) {
       if (typeof s !== "object" || s === null) return null;
       const so = s as Record<string, unknown>;
-      if (!Array.isArray(so.data)) return null;
-      const data = so.data.map(Number);
-      if (data.some((n) => !Number.isFinite(n))) return null;
-      series.push({ name: String(so.name ?? `series ${series.length + 1}`), data });
+      const arr = firstArray(so, ["data", "values", "y"]);
+      if (!arr) return null;
+      const data = toData(arr);
+      if (!data) return null;
+      series.push({ name: String(so.name ?? so.label ?? `series ${series.length + 1}`), data });
+    }
+  } else if (typeof o.series === "object" && o.series !== null) {
+    for (const [name, arr] of Object.entries(o.series as Record<string, unknown>)) {
+      if (!Array.isArray(arr)) return null;
+      const data = toData(arr);
+      if (!data) return null;
+      series.push({ name, data });
     }
   } else return null;
+  if (!labels || labels.length === 0 || labels.length > 60) return null;
   if (series.length === 0 || series.length > 8) return null;
-  if (series.some((s) => s.data.length !== labels.length)) return null;
+  if (series.some((s) => s.data.length !== labels!.length)) return null;
   if ((type === "donut" || type === "sparkline") && series.length > 1) return null;
   if (type === "donut" && series[0].data.some((n) => n < 0)) return null;
   // Scatter puts every series pair side by side (all-pairs), where the palette validates only its
@@ -94,7 +143,7 @@ export function parseChartSpec(src: string): ChartSpec | null {
   if (stacked && series.some((s) => s.data.some((n) => n < 0))) return null;
   return {
     type,
-    title: typeof o.title === "string" ? o.title : undefined,
+    title,
     labels,
     series,
     unit: typeof o.unit === "string" ? o.unit : undefined,
@@ -296,4 +345,54 @@ export function parseDelimited(src: string, delim: "," | "\t"): ParsedTable | nu
 /** Escape one CSV field for the copy-as-CSV action. */
 export function csvField(s: string): string {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+// ---------------------------------------------------------------- fence tidy-up
+
+/** Colon-separated line fences: `label: value` per line. */
+const COLON_FENCES = new Set(["stats", "progress", "kv", "funnel", "badges", "score"]);
+
+/**
+ * Agents write line fences as markdown out of habit — `- ` bullets, `**bold**` labels, `=` or `|`
+ * instead of `:`, `-->` arrows, task-list steps. Normalize those spellings to the documented shape
+ * before parsing so the fence renders instead of falling back to code. Content is never added or
+ * dropped; only the punctuation of each line changes.
+ */
+export function tidyFence(language: string, src: string): string {
+  const lines = src.split("\n");
+  const bullet = /^\s*(?:[-*•+])\s+(?!\[[ xX]\])/;
+  const unbold = (l: string) => l.replace(/\*\*(.+?)\*\*|__(.+?)__/g, (_, a, b) => a ?? b);
+  if (COLON_FENCES.has(language)) {
+    return lines
+      .map((l) => {
+        let s = unbold(l.replace(bullet, ""));
+        if (s.trim() && !s.includes(":")) s = s.replace(/\s*(?:=|\|)\s*/, ": ");
+        return s;
+      })
+      .join("\n");
+  }
+  if (language === "timeline") {
+    return lines
+      .map((l) => {
+        const s = unbold(l.replace(bullet, ""));
+        return s.includes("|") ? s : s.replace(/^(\s*\S+(?:\s+(?:AM|PM|UTC|am|pm))?)\s+[-–—]\s+/, "$1 | ");
+      })
+      .join("\n");
+  }
+  if (language === "steps") {
+    let n = 0;
+    return lines
+      .map((l) => {
+        if (/^\s*\d+[.)]\s/.test(l)) return unbold(l);
+        const m = l.match(/^\s*[-*•+]\s+(?:\[([ xX])\]\s+)?(.*)$/);
+        if (!m) return l;
+        n++;
+        return `${n}. ${unbold(m[2])}${m[1] && m[1] !== " " ? " ✓" : ""}`;
+      })
+      .join("\n");
+  }
+  if (language === "flow") {
+    return lines.map((l) => unbold(l.replace(bullet, "")).replace(/\s*(?:-{2,}>|—>|={2,}>|~>)\s*/g, " -> ")).join("\n");
+  }
+  return src;
 }

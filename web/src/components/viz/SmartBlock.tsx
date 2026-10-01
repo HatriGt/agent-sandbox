@@ -1,5 +1,5 @@
 import * as React from "react";
-import { nodeText, parseChartSpec, parseDelimited, parseFlow, parseStats, parseTree } from "@/lib/viz";
+import { nodeText, parseChartSpec, parseDelimited, parseFlow, parseStats, parseTree, tidyFence } from "@/lib/viz";
 import {
   calloutKind,
   parseBadges,
@@ -48,6 +48,7 @@ import { CommandBlock, ComparisonBlock, CronBlock, EnvBlock, FileListBlock, IniB
  */
 export function smartBlock(language: string, code: string): React.ReactElement | null {
   const src = code.replace(/\n$/, "");
+  const tidy = tidyFence(language, src);
   let el: React.ReactElement | null = null;
   switch (language) {
     case "chart": {
@@ -56,12 +57,12 @@ export function smartBlock(language: string, code: string): React.ReactElement |
       break;
     }
     case "stats": {
-      const stats = parseStats(src);
+      const stats = parseStats(tidy);
       el = stats && <StatsBlock stats={stats} source={src} />;
       break;
     }
     case "flow": {
-      const chains = parseFlow(src);
+      const chains = parseFlow(tidy);
       el = chains && <FlowBlock chains={chains} source={src} />;
       break;
     }
@@ -91,32 +92,32 @@ export function smartBlock(language: string, code: string): React.ReactElement |
       break;
     }
     case "timeline": {
-      const events = parseTimeline(src);
+      const events = parseTimeline(tidy);
       el = events && <TimelineBlock events={events} source={src} />;
       break;
     }
     case "steps": {
-      const steps = parseSteps(src);
+      const steps = parseSteps(tidy);
       el = steps && <StepsBlock steps={steps} source={src} />;
       break;
     }
     case "progress": {
-      const rows = parseProgress(src);
+      const rows = parseProgress(tidy);
       el = rows && <ProgressBlock rows={rows} source={src} />;
       break;
     }
     case "kv": {
-      const rows = parseKv(src);
+      const rows = parseKv(tidy);
       el = rows && <KvBlock rows={rows} source={src} />;
       break;
     }
     case "badges": {
-      const badges = parseBadges(src);
+      const badges = parseBadges(tidy);
       el = badges && <BadgesBlock badges={badges} source={src} />;
       break;
     }
     case "score": {
-      const scores = parseScores(src);
+      const scores = parseScores(tidy);
       el = scores && <ScoreBlock scores={scores} source={src} />;
       break;
     }
@@ -168,7 +169,7 @@ export function smartBlock(language: string, code: string): React.ReactElement |
       break;
     }
     case "funnel": {
-      const stages = parseFunnel(src);
+      const stages = parseFunnel(tidy);
       el = stages && <FunnelBlock stages={stages} source={src} />;
       break;
     }
