@@ -1,6 +1,7 @@
 import * as React from "react";
 import { useReducedMotion } from "motion/react";
 import { cellNumber } from "@/lib/viz";
+import { cn } from "@/lib/utils";
 
 /**
  * Motion when a visual fence re-renders with new data (docs/output-visualizers.md). CSS-first:
@@ -116,3 +117,42 @@ export function RollNumber({ text, className }: { text: string; className?: stri
     </span>
   );
 }
+
+/**
+ * A per-digit odometer: each digit is a column 0–9 that slides to the new value, soft-masked at the
+ * top and bottom, so a count that changes every poll rolls instead of swapping. Non-digits (prefix,
+ * unit, separators) never move. Retargets mid-roll (a CSS transition, not a keyframe), width grows
+ * by a digit fading in. Reduced motion renders the plain text. Pattern after Rare UI's animated
+ * counter and Cult UI's rolling number.
+ */
+export function Odometer({ text, className }: { text: string; className?: string }) {
+  const reduce = useReducedMotion();
+  const first = React.useRef(true);
+  React.useEffect(() => {
+    first.current = false;
+  }, []);
+  if (reduce) return <span className={cn("tabular-nums", className)}>{text}</span>;
+  const chars = Array.from(text);
+  return (
+    <span className={cn("odometer inline-flex tabular-nums", className)}>
+      {/* The real value is the only text in the DOM; the digit wheels draw via CSS content. */}
+      <span className="sr-only">{text}</span>
+      {chars.map((c, i) =>
+        /\d/.test(c) ? (
+          <span key={`d${i}`} className={cn("odometer-digit", !first.current && "odometer-digit-new")} aria-hidden>
+            <span className="odometer-col" style={{ transform: `translateY(-${Number(c) * 10}%)` }}>
+              {DIGITS.map((d) => (
+                <span key={d} data-d={d} />
+              ))}
+            </span>
+          </span>
+        ) : (
+          <span key={`c${i}`} aria-hidden>
+            {c}
+          </span>
+        )
+      )}
+    </span>
+  );
+}
+const DIGITS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];

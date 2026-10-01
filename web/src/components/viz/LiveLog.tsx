@@ -2,7 +2,7 @@ import * as React from "react";
 import { ArrowDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { createLiveLog, feedLiveLog, formatMs, liveKind, p95, type LiveLogState, type LiveRow, type LogLevelName } from "@/lib/viz-live-log";
-import { RollNumber, useRowEntrance } from "./motion";
+import { Odometer, useRowEntrance } from "./motion";
 
 /**
  * A command's output drawn AS IT STREAMS (`tail -f`, `kubectl logs -f`): a strip of rolling
@@ -39,7 +39,7 @@ function Counter({ label, value, tone, title }: { label: string; value: string; 
   return (
     <span className="flex min-w-0 flex-col" title={title}>
       <span className="label text-faint">{label}</span>
-      <RollNumber text={value} className={cn("text-meta font-semibold tabular-nums", tone)} />
+      <Odometer text={value} className={cn("text-meta font-semibold transition-colors duration-200", tone)} />
     </span>
   );
 }
@@ -53,7 +53,7 @@ function Row({ row, entrance }: { row: LiveRow; entrance: { className: string; s
       data-seq={row.seq}
       className={cn(
         "border-border/50 flex min-w-0 items-center gap-2.5 border-b px-3 py-1 last:border-0",
-        bad && entrance.className === "viz-row-new" ? "live-row-alert" : entrance.className
+        entrance.className === "viz-row-new" ? (bad ? "live-row-alert" : "live-row-new") : entrance.className
       )}
       style={entrance.style}
     >
@@ -63,7 +63,7 @@ function Row({ row, entrance }: { row: LiveRow; entrance: { className: string; s
           <span className="text-foreground min-w-0 flex-1 truncate font-mono text-code" title={row.text}>
             {h.path}
           </span>
-          <span className={cn("shrink-0 rounded-md border px-1.5 py-0.5 font-mono text-micro font-semibold tabular-nums", statusTone(h.status))}>{h.status}</span>
+          <span className={cn("shrink-0 rounded-md border px-1.5 py-0.5 font-mono text-micro font-semibold tabular-nums transition-colors duration-200", statusTone(h.status))}>{h.status}</span>
           <span className="text-faint w-14 shrink-0 text-right font-mono text-micro tabular-nums">{h.ms !== undefined ? formatMs(h.ms) : ""}</span>
         </>
       ) : (
@@ -135,10 +135,13 @@ export function LiveLogView({ state, live, className }: { state: LiveLogState; l
   React.useEffect(() => () => cancelAnimationFrame(gliding.current), []);
 
   const toBottom = React.useCallback(() => {
+    const el = scroller.current;
+    cancelAnimationFrame(gliding.current);
+    gliding.current = 0;
+    if (el) el.scrollTop = el.scrollHeight;
     atBottom.current = true;
     setUnseen(0);
-    glide();
-  }, [glide]);
+  }, []);
 
   // Follow the tail only when the reader is already there; otherwise count what arrived below.
   React.useLayoutEffect(() => {

@@ -38,7 +38,7 @@ await page.goto(`${base}/dashboard/box/${BOX}`, { waitUntil: "load" });
 const bad = [];
 const pill = page.locator("[data-watch-pill]");
 try { await pill.waitFor({ timeout: 15000 }); } catch { bad.push("watching pill never appeared"); }
-const text = (await pill.count()) ? await pill.innerText() : "";
+const text = (await pill.count()) ? (await pill.innerText()).replace(/\s+/g, " ") : "";
 console.log("live pill:", JSON.stringify(text));
 if (!/Watching backend logs/.test(text)) bad.push("pill does not say Watching backend logs");
 if (!/3 updates/.test(text)) bad.push("pill does not count 3 updates");

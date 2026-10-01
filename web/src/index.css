@@ -1186,9 +1186,105 @@ button:not(:disabled):active, [role="tab"]:active, [role="radio"]:active { trans
     background-color: transparent;
   }
 }
+@keyframes live-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+.live-row-new {
+  animation: live-row-in 0.18s var(--ease-out-quint) both;
+  animation-delay: calc(var(--i, 0) * 30ms);
+}
 .live-row-alert {
   animation:
-    rise-in 0.22s cubic-bezier(0.2, 0, 0, 1) both,
+    live-row-in 0.18s var(--ease-out-quint) both,
     live-row-alert 1.6s ease-out both;
   animation-delay: calc(var(--i, 0) * 30ms);
+}
+
+/* Odometer (components/viz/motion.tsx): one digit column per place, slid by a transition so a
+   retarget mid-roll keeps its velocity instead of restarting; fade-masked top and bottom. */
+.odometer-digit {
+  display: inline-block;
+  height: 1.25em;
+  line-height: 1.25em;
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, transparent, #000 25%, #000 75%, transparent);
+}
+.odometer-digit-new {
+  animation: odometer-fade 0.18s var(--ease-out-quint) both;
+}
+.odometer-col {
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.5s var(--ease-out-quint);
+}
+.odometer-col > span {
+  height: 1.25em;
+  line-height: 1.25em;
+}
+.odometer-col > span::before {
+  content: attr(data-d);
+}
+@keyframes odometer-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+/* The Watching pill (components/thread/RunPill.tsx). The sweep is the next-poll clock: a hairline
+   that fills linearly over the poll interval and restarts on every update (linear = constant
+   motion). The fetching shimmer only shows while a poll is in flight. */
+@keyframes watch-sweep {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+.watch-sweep {
+  transform-origin: left;
+  animation: watch-sweep var(--sweep, 30s) linear both;
+}
+@keyframes watch-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+.watch-fetching {
+  background: linear-gradient(90deg, currentColor 0%, color-mix(in oklch, currentColor 35%, transparent) 50%, currentColor 100%);
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: watch-shimmer 2.4s linear infinite;
+}
+.blur-swap {
+  transition:
+    opacity 0.15s var(--ease-out-quint),
+    filter 0.15s var(--ease-out-quint);
+}
+.blur-swap[data-swapping] {
+  opacity: 0.6;
+  filter: blur(2px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .watch-sweep {
+    animation: none;
+    transform: none;
+    opacity: 0.4;
+  }
+  .watch-fetching {
+    animation: none;
+    color: inherit;
+    background: none;
+  }
+  .blur-swap[data-swapping] {
+    filter: none;
+  }
 }

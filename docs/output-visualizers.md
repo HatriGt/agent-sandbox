@@ -191,6 +191,8 @@ POSTs `/interrupt.json` (kills the turn, keeps the session; exit 253). After tha
 
 **Smoothness.** The live log follows its tail with a short eased glide, not a jump, and skips the glide under reduced motion or when far behind. Rows fade out under the counter strip, and a status-mix bar (2xx/3xx/4xx/5xx) resizes smoothly as calls arrive. A 5xx or error row that arrives while you watch gets one red wash that fades. Earlier runs of a command that runs again later (each poll of a watch) fold to one line (`PollRow`), so only the newest run keeps the full view. HTML comments such as the watch marker never render as prose. The Watching pill and the Working line share one row.
 
+**Reference pass (2026-10-01).** Patterns borrowed from Rare UI (animated counter), Cult UI (rolling number, dynamic island), Emil Kowalski's rules and Vercel/Linear log feeds: counters are per-digit odometers (`Odometer` in `viz/motion.tsx`, CSS-content digits so the DOM text stays the real value); new rows enter with a 6px lift over 180 ms ease-out, transform and opacity only; status badges only transition colour; the "N new" chip jumps instantly (a deliberate action) while auto-follow glides; the Watching pill morphs its width with a layout spring, rolls its update count, blur-crossfades the elapsed time, says "fetching…" with a slow shimmer while a poll is in flight, and carries a hairline sweep that fills linearly over the poll interval as the next-poll clock; Stop presses to 0.97.
+
 
 ## Design rules (for anyone adding or touching a visualizer)
 

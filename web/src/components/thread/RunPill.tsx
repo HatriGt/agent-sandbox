@@ -12,6 +12,8 @@ import { api } from "@/lib/api";
 import type { TraceEvent } from "@/lib/trace";
 import { deriveWatch, watchElapsedSec, type WatchState } from "@/lib/watch";
 import { fmtTokens, fmtUsd } from "./OutcomeCard";
+import { motion } from "motion/react";
+import { Odometer } from "@/components/viz/motion";
 
 /**
  * The run-end pill: one muted, single-line, rounded-full summary per finished run, replacing the
@@ -290,8 +292,13 @@ export function WatchPill({ session, events, running = true }: { session: string
   React.useEffect(() => {
     if (!running) setStopping(false);
   }, [running]);
+  // A poll is in flight when the newest tool call has no result yet: the pill says "fetching".
+  const polling = React.useMemo(() => {
+    const last = [...events].reverse().find((e) => e.kind === "tool" || e.kind === "say");
+    return !!last && last.kind === "tool" && (!last.result || !!last.streaming);
+  }, [events]);
   if (!watch || !running) return null;
-  return <WatchLine watch={watch} live={live} now={now} stopping={stopping} onStop={async () => {
+  return <WatchLine watch={watch} live={live} now={now} stopping={stopping} polling={polling} onStop={async () => {
     setStopping(true);
     try {
       await api.interrupt(session);
@@ -302,18 +309,60 @@ export function WatchPill({ session, events, running = true }: { session: string
   }} />;
 }
 
-function WatchLine({ watch, live, now, stopping, onStop }: { watch: WatchState; live: boolean; now: number; stopping: boolean; onStop: () => void }) {
+/** Text that crossfades through a 2px blur when it changes (Emil's crossfade), instead of snapping. */
+function BlurSwap({ text, className }: { text: string; className?: string }) {
+  const [swapping, setSwapping] = React.useState(false);
+  const [shown, setShown] = React.useState(text);
+  React.useEffect(() => {
+    if (text === shown) return;
+    setSwapping(true);
+    const t = window.setTimeout(() => {
+      setShown(text);
+      setSwapping(false);
+    }, 150);
+    return () => window.clearTimeout(t);
+  }, [text, shown]);
+  return (
+    <span className={cn("blur-swap", className)} data-swapping={swapping ? "" : undefined}>
+      {shown}
+    </span>
+  );
+}
+
+/** "every 30s" → 30; null when the agent gave no interval. */
+function everySec(every: string | null): number | null {
+  const m = every?.match(/(d+(?:.d+)?)s*(ms|s|m|min|h)?/i);
+  if (!m) return null;
+  const n = Number(m[1]);
+  const u = (m[2] ?? "s").toLowerCase();
+  return u === "ms" ? n / 1000 : u.startsWith("m") ? n * 60 : u === "h" ? n * 3600 : n;
+}
+
+function WatchLine({ watch, live, now, stopping, polling, onStop }: { watch: WatchState; live: boolean; now: number; stopping: boolean; polling: boolean; onStop: () => void }) {
   const sec = watchElapsedSec(watch, live, now);
-  const bits = [watch.updates ? plural(watch.updates, "update") : "starting", sec != null ? fmtDuration(sec) : null].filter(Boolean);
   const word = stopping ? "Stopping" : watch.phase === "paused" ? "Watch paused:" : watch.phase === "ended" ? "Finished watching" : "Watching";
+  const every = everySec(watch.every);
+  const sweeping = live && !stopping && !polling && every != null && watch.lastAt != null;
   return (
     <div data-watch-pill={stopping ? "stopping" : live ? "live" : watch.phase} role="status" aria-live="polite" className="enter flex max-w-full min-w-0 items-center gap-1.5">
-      <span
+      <motion.span
+        layout
+        transition={{ type: "spring", duration: 0.4, bounce: 0 }}
         className={cn(
-          "border-border/60 text-muted-foreground flex h-7 max-w-full min-w-0 items-center gap-2 rounded-full border px-3 text-micro transition-[color,border-color,background-color] duration-200 ease-out",
+          "border-border/60 text-muted-foreground relative flex h-7 max-w-full min-w-0 items-center gap-2 overflow-hidden rounded-full border px-3 text-micro transition-[color,border-color,background-color] duration-200 ease-out",
           live && !stopping && "border-live/30 bg-live/5",
         )}
       >
+        {/* The next-poll clock: restarts on every update (keyed by lastAt), fills over the interval. */}
+        {sweeping && (
+          <span
+            key={watch.lastAt!}
+            data-watch-sweep
+            className="watch-sweep bg-live/50 absolute inset-x-0 bottom-0 h-px"
+            style={{ "--sweep": `${every}s` } as React.CSSProperties}
+            aria-hidden
+          />
+        )}
         <span
           className={cn(
             "size-1.5 shrink-0 rounded-full transition-colors duration-200 ease-out",
@@ -321,13 +370,31 @@ function WatchLine({ watch, live, now, stopping, onStop }: { watch: WatchState; 
           )}
           aria-hidden
         />
-        <span className="min-w-0 truncate">
-          <span className={cn("font-medium transition-colors duration-200 ease-out", live && !stopping ? "text-live" : "text-foreground")}>
+        <span className="flex min-w-0 items-baseline gap-1 truncate">
+          <span className={cn("truncate font-medium transition-colors duration-200 ease-out", live && !stopping ? "text-live" : "text-foreground")}>
             {word} {watch.target}
           </span>
-          <span className="stamp"> · {bits.join(" · ")}</span>
+          <span className="stamp flex shrink-0 items-baseline gap-1">
+            <span aria-hidden>·</span>
+            {polling && live && !stopping ? (
+              <span className="watch-fetching" data-watch-fetching>fetching…</span>
+            ) : watch.updates ? (
+              <>
+                <Odometer text={String(watch.updates)} />
+                <span>{watch.updates === 1 ? "update" : "updates"}</span>
+              </>
+            ) : (
+              <span>starting</span>
+            )}
+            {sec != null && (
+              <>
+                <span aria-hidden>·</span>
+                <BlurSwap text={fmtDuration(sec)} />
+              </>
+            )}
+          </span>
         </span>
-      </span>
+      </motion.span>
       {live && (
         <button
           type="button"
@@ -336,7 +403,7 @@ function WatchLine({ watch, live, now, stopping, onStop }: { watch: WatchState; 
           data-watch-stop
           aria-label={`Stop watching ${watch.target}`}
           title="Stop watching — the agent's session is kept; send a message to pick it back up"
-          className="text-foreground hover:bg-muted focus-visible:ring-ring border-border flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-full border px-3 text-micro font-medium transition-[background-color,opacity] duration-200 ease-out focus-visible:ring-2 focus-visible:outline-none disabled:cursor-default disabled:opacity-60 motion-reduce:transition-none [&_svg]:size-2.5"
+          className="text-foreground hover:bg-muted focus-visible:ring-ring border-border flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-full border px-3 text-micro font-medium transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] focus-visible:ring-2 focus-visible:outline-none disabled:cursor-default disabled:opacity-60 motion-reduce:transition-none [&_svg]:size-2.5"
         >
           <Square className="fill-current" aria-hidden />
           {stopping ? "Stopping…" : "Stop"}
