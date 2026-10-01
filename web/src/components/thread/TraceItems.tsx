@@ -175,7 +175,55 @@ function lineCount(result: string): number {
   return result.replace(/\n+$/, "").split("\n").length;
 }
 
+/**
+ * A watch re-runs the same command every cycle. Every earlier run of a command that runs again later
+ * is a "repeat": it folds to one quiet line so the thread does not grow a full card per poll, and
+ * only the newest run keeps the live view. Thread.tsx provides the set; nothing is dropped.
+ */
+export function repeatedPolls(events: readonly TraceEvent[]): WeakSet<object> {
+  const out = new WeakSet<object>();
+  const later = new Set<string>();
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i];
+    if (e.kind !== "tool" || !SHELL_TOOLS.has(e.name) || !e.arg) continue;
+    const key = `${e.name}|${e.arg}`;
+    if (later.has(key)) out.add(e);
+    else later.add(key);
+  }
+  return out;
+}
+export const RepeatedPolls = React.createContext<WeakSet<object>>(new WeakSet());
+
+/** An earlier run of a repeated command: one line (command · what it printed · time), opens in place. */
+function PollRow({ event }: { event: ToolEvent }) {
+  const [open, setOpen] = React.useState(false);
+  const summary = resultSummary(event.result);
+  return (
+    <div className="min-w-0" data-poll-row>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="hover:bg-muted flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-left transition-colors"
+      >
+        <ChevronRight className={cn("text-faint size-3 shrink-0 transition-transform duration-150", open && "rotate-90")} aria-hidden />
+        <span className={cn("shrink-0 font-mono text-micro select-none", event.failed ? "text-destructive" : "text-faint")}>$</span>
+        <span className="text-muted-foreground min-w-0 shrink truncate font-mono text-micro">{event.arg}</span>
+        {summary && <span className="text-faint min-w-0 flex-1 truncate text-micro">· {summary}</span>}
+        <span className="ml-auto shrink-0">
+          <DurationChip event={event} running={false} />
+        </span>
+      </button>
+      <Collapse open={open}>
+        <div className="pt-1.5">{open && <ShellItem event={event} />}</div>
+      </Collapse>
+    </div>
+  );
+}
+
 function ToolItem({ event, live }: { event: ToolEvent; live?: boolean }) {
+  const repeat = React.useContext(RepeatedPolls).has(event);
+  if (repeat && !live) return <PollRow event={event} />;
   const mcp = parseMcpName(event.name);
   if (mcp) return <McpItem event={event} call={mcp} live={live} />;
   if (event.name === "Skill") return <SkillItem event={event} live={live} />;
@@ -614,7 +662,15 @@ function DumpItem({ text }: { text: string }) {
   );
 }
 
-export const SayItem = React.memo(function SayItem({ text, live, label = true, at }: { text: string; live?: boolean; label?: boolean; at?: number }) {
+/** HTML comments (the `<!-- watch: … -->` marker) are instructions for the UI, never prose; a
+ *  half-streamed one is hidden too until it closes. */
+function stripComments(text: string): string {
+  return text.replace(/<!--[\s\S]*?-->/g, "").replace(/<!--[\s\S]*$/, "").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+export const SayItem = React.memo(function SayItem({ text: raw, live, label = true, at }: { text: string; live?: boolean; label?: boolean; at?: number }) {
+  const text = React.useMemo(() => stripComments(raw), [raw]);
+  if (!text && !live) return null;
   if (!live && looksLikeDump(text)) return <DumpItem text={text} />;
   return (
     <div className="enter group/say min-w-0">
@@ -694,7 +750,7 @@ export function WorkingIndicator({ label = "Working", detail }: { label?: string
     ? { initial: false as const, animate: { opacity: 1 }, exit: { opacity: 0 }, transition: { duration: 0 } }
     : { initial: { opacity: 0, y: 6 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -6 }, transition: { duration: 0.18, ease: [0.22, 1, 0.36, 1] as const } };
   return (
-    <div className="enter flex items-center gap-2.5">
+    <div className="enter inline-flex max-w-full min-w-0 items-center gap-2.5">
       {/* Screen readers hear the stage when it changes, never the ticking timer. */}
       <span className="sr-only" role="status">
         {label}

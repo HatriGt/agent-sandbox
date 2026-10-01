@@ -1172,3 +1172,23 @@ button:not(:disabled):active, [role="tab"]:active, [role="radio"]:active { trans
     animation: none;
   }
 }
+
+/* Live log view (components/viz/LiveLog.tsx): rows dissolve under the counter strip instead of
+   being sliced by it, and a failure that lands while you watch gets one red wash that settles. */
+.live-fade-top {
+  mask-image: linear-gradient(to bottom, transparent, #000 20px);
+}
+@keyframes live-row-alert {
+  from {
+    background-color: color-mix(in oklch, var(--destructive) 14%, transparent);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+.live-row-alert {
+  animation:
+    rise-in 0.22s cubic-bezier(0.2, 0, 0, 1) both,
+    live-row-alert 1.6s ease-out both;
+  animation-delay: calc(var(--i, 0) * 30ms);
+}

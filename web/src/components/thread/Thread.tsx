@@ -32,7 +32,7 @@ import { ChatContainerContent, ChatContainerRoot, ChatContainerScrollAnchor } fr
 import type { TraceEvent } from "@/lib/trace";
 import { LiveRegistryContext, SayKeyContext } from "@/components/viz/live-blocks";
 import { buildLiveRegistry, type SayInput } from "@/lib/viz-identity";
-import { AgentLabel, AnsweredQuestionItem, LifecycleItem, ObserverItem, PlanCard, QueuedItem, SayItem, ThinkingItem, ToolGroup, WorkingIndicator, YouItem } from "./TraceItems";
+import { AgentLabel, AnsweredQuestionItem, LifecycleItem, ObserverItem, PlanCard, QueuedItem, RepeatedPolls, SayItem, ThinkingItem, ToolGroup, WorkingIndicator, YouItem, repeatedPolls } from "./TraceItems";
 import { PlanDock } from "./PlanBoard";
 import { ThreadMinimap, type Turn } from "./ThreadMinimap";
 import { useStickToBottom } from "use-stick-to-bottom";
@@ -182,6 +182,7 @@ export function Thread({
 
   const events = React.useMemo(() => parseTrace(snap?.log ?? ""), [snap?.log]);
   const groups = React.useMemo(() => groupTrace(events), [events]);
+  const repeats = React.useMemo(() => repeatedPolls(events), [events]);
   // Visual fences the agent re-emits under one name within a run render as ONE block that updates
   // in place at its first position (lib/viz-identity.ts); later copies collapse to a row.
   const liveRegistry = React.useMemo(
@@ -754,6 +755,7 @@ export function Thread({
             {/* Skeleton → transcript is a crossfade, not a cut: the placeholder is shaped like the
                 content, so the swap reads as the bones filling in. */}
             <LiveRegistryContext.Provider value={liveContext}>
+            <RepeatedPolls.Provider value={repeats}>
             <Swap state={loadingTrace} className="flex flex-col gap-5">
             {loadingTrace && <ThreadSkeleton withTask={!!box.task} />}
             {!loadingTrace && groups.map((g, i) => {
@@ -814,6 +816,7 @@ export function Thread({
               );
             })}
             </Swap>
+            </RepeatedPolls.Provider>
             </LiveRegistryContext.Provider>
 
             {/* The sleep/wake card sits where the run left off — under the transcript when we still
@@ -845,8 +848,11 @@ export function Thread({
             {/* A follow-up on a finished run: the box still reports `done` for a few seconds until
                 the server resumes the session. That gap must read as "delivering", never as the old
                 "Completed" receipt sitting under the message you just sent. */}
-            {runState === "running" && !sleeping && <WatchPill session={box.name} events={events} />}
-            {working && !(loadingTrace && starting) && <WorkingIndicator label={working.label} detail={working.detail} />}
+            {/* While watching, the watch pill and the working line share one row: one status, not two stacked. */}
+            <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-2 empty:hidden">
+              {runState === "running" && !sleeping && <WatchPill session={box.name} events={events} />}
+              {working && !(loadingTrace && starting) && <WorkingIndicator label={working.label} detail={working.detail} />}
+            </div>
 
             <AnimatePresence initial={false}>
               {queuedItems.map((q) => (

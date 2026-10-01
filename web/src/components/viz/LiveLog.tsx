@@ -46,10 +46,15 @@ function Counter({ label, value, tone, title }: { label: string; value: string; 
 
 function Row({ row, entrance }: { row: LiveRow; entrance: { className: string; style?: React.CSSProperties } }) {
   const h = row.hit;
+  // A failure that arrives while you watch gets one soft red wash so it is noticed, then settles.
+  const bad = h ? h.status >= 500 : row.level === "error";
   return (
     <div
       data-seq={row.seq}
-      className={cn("border-border/50 flex min-w-0 items-center gap-2.5 border-b px-3 py-1 last:border-0", entrance.className)}
+      className={cn(
+        "border-border/50 flex min-w-0 items-center gap-2.5 border-b px-3 py-1 last:border-0",
+        bad && entrance.className === "viz-row-new" ? "live-row-alert" : entrance.className
+      )}
       style={entrance.style}
     >
       {h ? (
@@ -71,7 +76,28 @@ function Row({ row, entrance }: { row: LiveRow; entrance: { className: string; s
   );
 }
 
+/** The 2xx/3xx/4xx/5xx share of every call seen, as one hairline bar whose segments tween. */
+function StatusMix({ byClass, total }: { byClass: LiveLogState["byClass"]; total: number }) {
+  if (!total) return null;
+  const seg: [keyof LiveLogState["byClass"], string][] = [
+    ["2xx", "bg-ok"],
+    ["3xx", "bg-muted-foreground/50"],
+    ["4xx", "bg-foreground/60"],
+    ["5xx", "bg-destructive"],
+  ];
+  return (
+    <div className="bg-muted flex h-1 w-full gap-px overflow-hidden rounded-full" aria-hidden data-status-mix>
+      {seg.map(([k, tone]) => (
+        <span key={k} className={cn("viz-tween-w h-full", tone)} style={{ width: `${(byClass[k] / total) * 100}%` }} />
+      ))}
+    </div>
+  );
+}
+
 const AT_BOTTOM_PX = 16;
+const FOLLOW_MS = 220;
+
+const reducedMotion = () => typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
 export function LiveLogView({ state, live, className }: { state: LiveLogState; live: boolean; className?: string }) {
   const kind = liveKind(state) ?? "levelled";
@@ -83,27 +109,51 @@ export function LiveLogView({ state, live, className }: { state: LiveLogState; l
   const keys = React.useMemo(() => state.rows.map((r) => String(r.seq)), [state.rows]);
   const entrance = useRowEntrance(keys);
 
-  const toBottom = React.useCallback(() => {
+  const [scrolled, setScrolled] = React.useState(false);
+  // Following the tail glides instead of jumping. While the glide runs, onScroll must not read the
+  // mid-way position as "the reader scrolled up".
+  const gliding = React.useRef(0);
+  const glide = React.useCallback(() => {
     const el = scroller.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    cancelAnimationFrame(gliding.current);
+    const from = el.scrollTop;
+    if (reducedMotion() || el.scrollHeight - el.clientHeight - from > el.clientHeight * 2) {
+      el.scrollTop = el.scrollHeight;
+      gliding.current = 0;
+      return;
+    }
+    const t0 = performance.now();
+    const step = (now: number) => {
+      const p = Math.min(1, (now - t0) / FOLLOW_MS);
+      const to = el.scrollHeight - el.clientHeight; // re-read: rows may land mid-glide
+      el.scrollTop = from + (to - from) * (1 - Math.pow(1 - p, 3));
+      gliding.current = p < 1 ? requestAnimationFrame(step) : 0;
+    };
+    gliding.current = requestAnimationFrame(step);
+  }, []);
+  React.useEffect(() => () => cancelAnimationFrame(gliding.current), []);
+
+  const toBottom = React.useCallback(() => {
     atBottom.current = true;
     setUnseen(0);
-  }, []);
+    glide();
+  }, [glide]);
 
   // Follow the tail only when the reader is already there; otherwise count what arrived below.
   React.useLayoutEffect(() => {
     const added = lastSeq - seenSeq.current;
     seenSeq.current = lastSeq;
     if (added <= 0) return;
-    if (atBottom.current) {
-      const el = scroller.current;
-      if (el) el.scrollTop = el.scrollHeight;
-    } else setUnseen((n) => n + added);
-  }, [lastSeq]);
+    if (atBottom.current) glide();
+    else setUnseen((n) => n + added);
+  }, [lastSeq, glide]);
 
   const onScroll = () => {
     const el = scroller.current;
     if (!el) return;
+    setScrolled(el.scrollTop > 2);
+    if (gliding.current) return;
     atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight <= AT_BOTTOM_PX;
     if (atBottom.current) setUnseen(0);
   };
@@ -112,7 +162,8 @@ export function LiveLogView({ state, live, className }: { state: LiveLogState; l
   const hidden = state.lines - state.rows.length;
   return (
     <div data-live-log={kind} data-live={live ? "" : undefined} className={cn("bg-card overflow-hidden rounded-md border", className)}>
-      <div className="flex flex-wrap items-end gap-x-5 gap-y-2 border-b px-3 py-2" aria-live="off">
+      <div className="flex flex-col gap-2 border-b px-3 py-2">
+      <div className="flex flex-wrap items-end gap-x-5 gap-y-2" aria-live="off">
         {kind === "access" ? (
           <>
             <Counter label="calls" value={String(state.total)} />
@@ -142,6 +193,8 @@ export function LiveLogView({ state, live, className }: { state: LiveLogState; l
           )}
         </span>
       </div>
+      {kind === "access" && <StatusMix byClass={state.byClass} total={state.total} />}
+      </div>
       <div className="relative">
         <div
           ref={scroller}
@@ -149,7 +202,10 @@ export function LiveLogView({ state, live, className }: { state: LiveLogState; l
           tabIndex={0}
           role="log"
           aria-label={kind === "access" ? "Incoming requests" : "Log lines"}
-          className="focus-visible:ring-ring max-h-80 overflow-auto outline-none focus-visible:ring-2 focus-visible:ring-inset"
+          className={cn(
+            "focus-visible:ring-ring max-h-80 overflow-auto overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-inset",
+            scrolled && "live-fade-top"
+          )}
         >
           {hidden > 0 && <div className="text-faint px-3 py-1 text-micro">{hidden} earlier {hidden === 1 ? "line" : "lines"} counted above, not shown</div>}
           {state.rows.map((r) => (
@@ -160,7 +216,7 @@ export function LiveLogView({ state, live, className }: { state: LiveLogState; l
           <button
             type="button"
             onClick={toBottom}
-            className="bg-foreground text-background absolute bottom-2 left-1/2 flex -translate-x-1/2 cursor-pointer items-center gap-1 rounded-full px-2.5 py-1 text-micro font-medium shadow-md"
+            className="pop-in bg-foreground text-background hover:bg-foreground/85 absolute bottom-2 transition-colors left-1/2 flex -translate-x-1/2 cursor-pointer items-center gap-1 rounded-full px-2.5 py-1 text-micro font-medium shadow-md"
           >
             <ArrowDown className="size-3" aria-hidden />
             {unseen} new
