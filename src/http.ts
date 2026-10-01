@@ -1709,6 +1709,24 @@ app.post("/send-now.json", async (req: Request, res: Response) => {
   }
 });
 
+// Stop the running turn without removing anything: the "Stop" on a watch (a monitoring loop the
+// agent keeps going until told otherwise). Same interrupt as send-now (the session survives, so a
+// later message resumes it with `claude -c`), just with no message to deliver.
+app.post("/interrupt.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const { session } = (req.body ?? {}) as { session?: string };
+  if (!session) {
+    res.status(400).json({ error: "session is required" });
+    return;
+  }
+  try {
+    const stopped = await withOwner(ownerOf(db, session) ?? null, () => interruptAgentRun(cfg, session, "to stop the watch"));
+    res.json({ ok: true, stopped });
+  } catch (e) {
+    failWith(res, e);
+  }
+});
+
 // Stop and remove a box. Destructive; the dashboard confirms before calling this.
 // GitHub accounts — the login-keyed token store, tokens masked. Add by PAT or via device flow.
 app.get("/accounts.json", async (req: Request, res: Response) => {

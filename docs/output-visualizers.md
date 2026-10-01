@@ -146,6 +146,30 @@ metrics → ```stats; file layout → ```tree; a pipeline outcome → ```flow. T
 re-emit it with the new values. Never force one — plain prose beats a mis-shaped visualization,
 and malformed fences just render as code.
 
+### Watch mode (a monitoring loop the operator stops)
+
+When asked to keep watching/listening/monitoring something, the agent (prompted in
+`src/drivers/prompts.ts`) puts an invisible marker in its first reply and loops until stopped:
+
+```
+<!-- watch: backend logs | every 30s -->   start, or resume after a message (re-emit it)
+<!-- watch: end -->                        the operator's stated duration ran out
+Watch paused — say continue to keep watching.   (line) the ~1h run cap is near
+```
+
+An HTML comment because react-markdown drops raw HTML: nothing extra shows in the transcript, other
+renderers (mobile, Markdown export) ignore it, and it cannot be confused with a real fence or prose.
+Each loop step is ONE bounded poll (`timeout 30 tail -n 200 -f app.log`, `sleep 30; curl …`, never
+an unbounded `tail -f`), then the SAME titled block re-emitted (stable title or ```stats id=<name>),
+with a one-line narration only when something notable changes.
+
+`web/src/lib/watch.ts` (`deriveWatch`, tested in `test/watch.test.ts`) reads the parsed trace: the
+latest marker not followed by an operator message is the current watch; every later agent reply
+carrying a fence counts as an update. `WatchPill` (in `RunPill.tsx`) shows "Watching <target> ·
+N updates · 3m" with a live-blue breathing dot (not amber — nothing needs you) and a Stop button that
+POSTs `/interrupt.json` (kills the turn, keeps the session; exit 253). After that the run pill reads
+"Stopped watching <target> · N updates · 12m" and the last block stays where it was.
+
 ## Design rules (for anyone adding or touching a visualizer)
 
 Grounded in the dataviz skill's method, Refactoring UI, better-ui/emil-design-eng craft notes,

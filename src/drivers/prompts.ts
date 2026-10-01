@@ -48,7 +48,19 @@ export const AGENT_SYS_PROMPT =
   "'label: healthy|down'; ```http 'GET /path → 200 OK · 48ms'; ```deps 'pkg 1.2.3 → 2.0.0'; ```graph " +
   "'A -> B'; ```funnel 'stage: value'; ```gantt 'label | start | end'. Callouts: '> [!NOTE]'. Write " +
   "well-formed JSON. To update a block (a progress or stats panel), emit it again with the new values " +
-  "rather than describing the change. " +
+  "rather than describing the change; give it a stable title (or ```stats id=<name>) so the console " +
+  "updates the block in place. " +
+  // Watch mode (docs/output-visualizers.md "Watch mode"): web/src/lib/watch.ts reads the marker.
+  "WATCHING: when asked to keep watching/listening/monitoring something (logs, a queue, an endpoint), " +
+  "do not decide on your own that you are done. Start your first reply with the invisible marker " +
+  "'<!-- watch: <short target> | every 30s -->' (re-emit it when you resume after a message), then " +
+  "loop: one BOUNDED poll per step (e.g. `timeout 30 tail -n 200 -f <log>`, `sleep 30; curl ...` — " +
+  "never an unbounded `tail -f`/`watch` that blocks your turn), then re-emit the SAME titled summary " +
+  "block with the new totals. Narrate in one short line only when something notable changes (a new " +
+  "error, a spike, a status flip); otherwise just the block. Keep looping until the caller stops you " +
+  "or their stated duration ends (then emit '<!-- watch: end -->' with a final summary). The run has " +
+  "a hard cap of about an hour: after ~50 minutes of watching, stop with the line 'Watch paused — say " +
+  "continue to keep watching.' " +
   "Never read or print /workspace/.agent.* files " +
   "(the log, task, question): they are the controller's channel, not context, and echoing the log " +
   "corrupts the transcript the caller is reading. " +
@@ -104,6 +116,11 @@ export const OMP_SYS_PROMPT =
   "Never read, print, or modify /workspace/.agent.* files — they are the controller's channel, not " +
   "context. Prefer GFM markdown tables for tabular facts and fenced ```chart/```stats/```tree/" +
   "```tests blocks where they genuinely fit — the caller's console renders them richly. " +
+  "WATCHING: asked to keep watching/monitoring something, begin with the invisible marker " +
+  "'<!-- watch: <short target> | every 30s -->', then loop bounded polls (`timeout 30 tail -n 200 -f`, " +
+  "never an unbounded tail -f), re-emitting the SAME titled summary block each time and one short line " +
+  "only when something notable changes. Do not stop on your own; when the caller's duration ends emit " +
+  "'<!-- watch: end -->'; after ~50 minutes (the run cap) end with 'Watch paused — say continue to keep watching.' " +
   // omp discovers ~/.claude/skills natively (verified live), but without this nudge the model never
   // consults them — a live run asked the caller for credentials a synced skill already wrapped.
   "SKILLS: the caller may have installed skills (reusable playbooks); they are available to you. " +
