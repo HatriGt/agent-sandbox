@@ -4,6 +4,7 @@ import { chromium } from "file:///C:/Users/ak/AppData/Roaming/npm/node_modules/@
 const args = process.argv.slice(2);
 const w = Number(args.find((a) => a.startsWith("--w="))?.slice(4) ?? 1440);
 const h = Number(args.find((a) => a.startsWith("--h="))?.slice(4) ?? 900);
+const base = process.env.ASB_UI || "http://localhost:5173";
 const now = Date.now();
 const rules = (a, p, v) => ({ askBeforeGuess: a, planFirst: p, verifyOnDone: v });
 const harnesses = [
@@ -33,19 +34,19 @@ await page.route(/\.json(\?|$)/, (route) => {
   return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
 });
 const shot = (n) => page.screenshot({ path: `.shots/hn-${n}-${w}.png`, fullPage: true });
-await page.goto("http://localhost:5173/dashboard/harnesses", { waitUntil: "load" });
+await page.goto(`${base}/dashboard/harnesses`, { waitUntil: "load" });
 await page.waitForTimeout(1800);
 await shot("saved");
 await page.click("button:has-text('Review')").catch((e) => errors.push("review: " + e.message));
 await page.waitForTimeout(600);
 await shot("review");
-await page.goto("http://localhost:5173/dashboard/harnesses", { waitUntil: "load" });
+await page.goto(`${base}/dashboard/harnesses`, { waitUntil: "load" });
 await page.waitForTimeout(1500);
 await page.click("button:has-text('Add input validation')").catch((e) => errors.push("compare: " + e.message));
 await page.waitForTimeout(800);
 await page.locator("table").scrollIntoViewIfNeeded().catch(() => {});
 await shot("compare");
-for (const tab of ["Drivers", "Hooks", "Egress"]) {
+for (const tab of ["Drivers", "Skills"]) {
   await page.click(`[role=tab]:has-text('${tab}')`).catch((e) => errors.push(tab + ": " + e.message));
   await page.waitForTimeout(500);
   await shot(tab.toLowerCase());

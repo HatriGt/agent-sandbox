@@ -76,7 +76,7 @@ export function recordRunHarness(
   ).run(r.box, r.owner, r.harnessId ?? null, r.harnessName ?? null, r.skills ? JSON.stringify(r.skills) : null, r.compareId ?? null, r.side ?? null, now);
 }
 
-export function runHarnessOf(db: Db, box: string): { harnessId: string | null; harnessName: string | null; skills?: string[]; compareId: string | null } | undefined {
+export function runHarnessOf(db: Db, box: string): { owner: string; harnessId: string | null; harnessName: string | null; skills?: string[]; compareId: string | null } | undefined {
   const r = db.prepare(`SELECT * FROM run_harness WHERE box = ?`).get(box) as Record<string, string | null> | undefined;
   if (!r) return undefined;
   let skills: string[] | undefined;
@@ -85,7 +85,7 @@ export function runHarnessOf(db: Db, box: string): { harnessId: string | null; h
   } catch {
     skills = undefined;
   }
-  return { harnessId: r.harness_id, harnessName: r.harness_name, ...(skills ? { skills } : {}), compareId: r.compare_id };
+  return { owner: r.owner ?? "", harnessId: r.harness_id, harnessName: r.harness_name, ...(skills ? { skills } : {}), compareId: r.compare_id };
 }
 
 /** The durable backend for skill-store's per-box selection. */

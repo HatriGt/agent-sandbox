@@ -5,6 +5,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { runDelegateFlow } from "../src/delegate-flow.ts";
+import { applyHarness, normalizeHarness } from "../src/harness.ts";
+import { harnessPromptHint } from "../src/agent-prompt.ts";
 import type { Config } from "../src/config.ts";
 
 const cfg = { maxBoxes: 5 } as unknown as Config;
@@ -91,4 +93,67 @@ test("task-only (no repo) is a valid plan", async () => {
   } as any, { source: "git", task: "write a report" });
   assert.equal(r.ok, true);
   assert.deepEqual(seenRepos, []);
+});
+
+test("harness end to end: applyHarness output reaches the plan — task untouched, rules beside it, egress/skills/driver/verify set", async () => {
+  // The composer route folds a saved harness into the body (src/harness.ts) and hands the pieces
+  // to this flow; this pins the contract between the two so a harness demonstrably does something.
+  const h = normalizeHarness({
+    name: "Bug fixer",
+    driver: "codex",
+    egress: ["api.example.com"],
+    skills: ["triage"],
+    rules: { askBeforeGuess: true, planFirst: false, verifyOnDone: true },
+    rulesMd: "1. Reproduce the bug first.",
+    verifyCommand: "npm test",
+  });
+  const folded = applyHarness(h, { task: "fix the login bug" });
+  assert.equal(folded.body.task, "fix the login bug");
+  let seen: any;
+  let seenDomains: string[] | undefined;
+  const r = await runDelegateFlow(cfg, {
+    countBoxes: async () => 0,
+    resolveGitAccess: okAccess,
+    runDelegation: async (_cfg: any, plan: any, allowDomains?: string[]) => {
+      seen = plan;
+      seenDomains = allowDomains;
+      return { box: "box-h", warm: false, output: "" };
+    },
+  } as any, {
+    source: "git",
+    repo: "o/n",
+    task: folded.body.task as string,
+    agent: folded.body.agent as string,
+    // A harness-pinned codex/opencode carries the "supervised: partial" acknowledgement itself.
+    allowPartialSupervision: folded.body.allowPartialSupervision === true,
+    allowDomains: folded.body.allowDomains as string[],
+    skills: folded.body.skills as string[],
+    verify: { mode: "command", command: (folded.body.verify as { command: string }).command } as any,
+    rules: folded.rules,
+  });
+  assert.equal(r.ok, true);
+  // The operator's message is the task — nothing pasted on top of it.
+  assert.equal(seen.task, "fix the login bug");
+  // The rules travel separately, bound for the system prompt (msb.ts agentEnvFlags AGENT_RULES).
+  assert.match(seen.rules, /^Harness rules \(Bug fixer\):/);
+  assert.match(seen.rules, /Reproduce the bug first/);
+  assert.match(harnessPromptHint(seen.rules), /every turn/);
+  // Driver, egress and skills are effective on the plan the box is started from.
+  assert.equal(seen.agent, "codex");
+  assert.deepEqual(seenDomains, ["api.example.com"]);
+  assert.deepEqual(seen.skills, ["triage"]);
+  // Verify-on-done became a real verify clause (the route stores it and runs it on the done edge).
+  assert.deepEqual(folded.body.verify, { command: "npm test" });
+  assert.deepEqual(folded.applied.sort(), ["driver", "egress", "rules", "skills", "verify"]);
+  // No harness → no rules on the plan at all.
+  let plain: any;
+  await runDelegateFlow(cfg, {
+    countBoxes: async () => 0,
+    resolveGitAccess: okAccess,
+    runDelegation: async (_cfg: any, plan: any) => {
+      plain = plan;
+      return { box: "b", warm: false, output: "" };
+    },
+  } as any, { source: "git", repo: "o/n", task: "t" });
+  assert.equal(plain.rules, undefined);
 });

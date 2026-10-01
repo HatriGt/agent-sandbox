@@ -7,6 +7,9 @@
  * It adds no new run machinery: `applyHarness` folds a harness into a delegate body, and the
  * delegate route validates the merged body exactly as it validates a hand-typed one — so a
  * tampered store, or a bundle that slipped a bad value past import, still meets every existing gate.
+ * The RULES (toggles + RULES.md) are NOT part of the body: they come back separately as prompt text
+ * the run puts in the agent's SYSTEM prompt (src/agent-prompt.ts harnessPromptHint), so the task the
+ * operator typed stays exactly what the transcript shows as their message.
  *
  * Precedence (the one rule, stated in the UI too): an explicit per-run field wins; the harness only
  * fills fields the run left empty. Provider and model are ONE unit — a run that names either keeps
@@ -201,9 +204,13 @@ export interface HarnessableBody {
   [k: string]: unknown;
 }
 
-const present = (v: unknown) => v !== undefined && v !== null && !(typeof v === "string" && v.trim() === "");
+/** An empty list counts as "left empty" too: a composer that sends `skills: []` has picked nothing. */
+const present = (v: unknown) => v !== undefined && v !== null && !(typeof v === "string" && v.trim() === "") && !(Array.isArray(v) && v.length === 0);
 
-/** The rules block placed above the task. Plain prompt text — stated as such in the UI, not a hook. */
+/**
+ * The rules block for the agent's SYSTEM prompt (never the task). Plain prompt text — stated as
+ * such in the UI, not a hook. Empty when the harness has no toggles on and no RULES.md.
+ */
 export function rulesPreamble(h: Pick<HarnessDef, "name" | "rules" | "rulesMd">): string {
   const lines: string[] = [];
   if (h.rules.askBeforeGuess) lines.push("- When a requirement is ambiguous or a decision is the operator's to make, ask a question and wait instead of guessing.");
@@ -214,16 +221,38 @@ export function rulesPreamble(h: Pick<HarnessDef, "name" | "rules" | "rulesMd">)
   return [`Harness rules (${h.name}):`, ...lines, ...(md ? [md] : [])].join("\n");
 }
 
+/** The short human labels of the rule toggles that are on, in UI order. */
+export function ruleLabels(r: HarnessRules): string[] {
+  const out: string[] = [];
+  if (r.askBeforeGuess) out.push("asks before guessing");
+  if (r.planFirst) out.push("plans first");
+  if (r.verifyOnDone) out.push("verify on done");
+  return out;
+}
+
 /**
- * Fold a harness into a delegate body. Returns the merged body plus which fields the harness
- * supplied (the route echoes them, so a surprise is visible) — never mutates the input.
+ * One line for the thread header: "Bug fixer · asks before guessing · verify on done". Name only
+ * when nothing is toggled (RULES.md text is not summarised — it is shown on the Harnesses page).
  */
-export function applyHarness(h: HarnessDef, body: HarnessableBody): { body: HarnessableBody; applied: string[] } {
+export function harnessSummaryLine(h: Pick<HarnessDef, "name" | "rules">): string {
+  return [h.name, ...ruleLabels(h.rules)].join(" · ");
+}
+
+/**
+ * Fold a harness into a delegate body. Returns the merged body, which fields the harness supplied
+ * (the route echoes them, so a surprise is visible) and the rules text for the system prompt —
+ * never mutates the input, and never touches `task`: the operator's message stays their own.
+ */
+export function applyHarness(h: HarnessDef, body: HarnessableBody): { body: HarnessableBody; applied: string[]; rules?: string } {
   if (h.needsReview) throw new Error(`Harness "${h.name}" was imported and has not been reviewed yet — open it on the Harnesses page and approve it first.`);
   const out: HarnessableBody = { ...body };
   const applied: string[] = [];
   if (!present(body.agent) && h.driver) {
     out.agent = h.driver;
+    // The owner picked this driver in the editor, next to its supervision badge: that pick IS the
+    // "supervised: partial" acknowledgement the delegate gate asks for. Without it a harness pinning
+    // codex/opencode never started — the gate answered with a question the composer could not show.
+    out.allowPartialSupervision = true;
     applied.push("driver");
   }
   // Provider + model travel together (see header).
@@ -253,11 +282,8 @@ export function applyHarness(h: HarnessDef, body: HarnessableBody): { body: Harn
     applied.push("verify");
   }
   const pre = rulesPreamble(h);
-  if (pre && typeof body.task === "string") {
-    out.task = `${pre}\n\n${body.task}`;
-    applied.push("rules");
-  }
-  return { body: out, applied };
+  if (pre) applied.push("rules");
+  return { body: out, applied, ...(pre ? { rules: pre } : {}) };
 }
 
 /* ───────────────────────────── store ───────────────────────────── */
@@ -554,6 +580,7 @@ export function buildHarnessBundle(
     ...(h.egress?.length ? { egress: [...h.egress] } : {}),
   };
   const files: BundleFile[] = [];
+  // Strings were cleaned field by field above.
   const hjText = JSON.stringify(hj, null, 2) + "\n";
   files.push({ path: "harness.json", content: hjText });
   if (h.rulesMd) files.push({ path: "RULES.md", content: clean(h.rulesMd + "\n") });
@@ -614,7 +641,7 @@ export function verifyCommandOf(sh: string): string {
     .trim();
 }
 
-const HARNESS_KEYS = new Set(["format", "version", "name", "description", "driver", "provider", "model", "skills", "rules", "egress", "budget"]);
+const HARNESS_KEYS = new Set(["format", "version", "name", "description", "driver", "provider", "model", "skills", "rules", "egress"]);
 
 /**
  * Parse + strictly validate a harness folder (from an uploaded bundle or a GitHub directory).

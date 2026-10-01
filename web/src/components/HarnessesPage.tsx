@@ -16,13 +16,17 @@ import { downloadJson, rulesLine, type HarnessDraft, draftOf, emptyDraft } from 
 
 const SkillsPage = React.lazy(() => import("@/components/SkillsPage").then((m) => ({ default: m.SkillsPage })));
 
-type Tab = "saved" | "drivers" | "skills" | "rules" | "egress";
-const ORDER: readonly Tab[] = ["drivers", "skills", "rules", "egress", "saved"];
+type Tab = "saved" | "drivers" | "skills";
+const ORDER: readonly Tab[] = ["drivers", "skills", "saved"];
 
 /**
- * Harnesses: everything that shapes HOW a run works, in one place — drivers, skills, rules/hooks,
- * egress — plus saved combinations of them. A saved harness is picked in the composer
- * (or on a trigger) and fills whatever the run leaves out; explicit per-run choices still win.
+ * Harnesses: everything that shapes HOW a run works, in one place — drivers, skills, and saved
+ * combinations of them (driver · model · skills · rules · egress). A saved harness is picked in the
+ * composer (or on a trigger) and fills whatever the run leaves out; explicit per-run choices win.
+ *
+ * Three tabs, each with its own content. The former "Hooks & rules" and "Egress & budgets" tabs were
+ * one more listing of the same saved harnesses each (name + one column), which read as three tabs
+ * showing the same thing; rules and egress are now facts on each saved row and fields in its editor.
  */
 export function HarnessesPage({ onBack, onOpenBox }: { onBack: () => void; onOpenBox?: (box: string) => void }) {
   const [tab, setTab] = React.useState<Tab>("saved");
@@ -119,9 +123,6 @@ export function HarnessesPage({ onBack, onOpenBox }: { onBack: () => void; onOpe
             items={[
               { value: "drivers", label: "Drivers" },
               { value: "skills", label: "Skills" },
-              // Phone: the full labels wrapped to three lines inside the pill; the short form fits.
-              { value: "rules", label: <span className="whitespace-nowrap">Hooks<span className="hidden sm:inline"> & rules</span></span> },
-              { value: "egress", label: "Egress" },
               { value: "saved", label: "Saved", badge: reviewCount ? <span className="bg-attention text-attention-ink ml-1 rounded px-1 text-micro tabular-nums">{reviewCount}</span> : undefined },
             ]}
           />
@@ -180,7 +181,7 @@ export function HarnessesPage({ onBack, onOpenBox }: { onBack: () => void; onOpe
                       <EmptyState
                         icon={Layers}
                         title="No saved harnesses yet"
-                        line="Save a driver, model, skills and rules together, then pick it in the composer."
+                        line="Save a driver, model, skills, rules and egress together, then pick it in the composer."
                         action={
                           <>
                             <Button size="sm" onClick={() => setEditing(emptyDraft())}>
@@ -211,6 +212,10 @@ export function HarnessesPage({ onBack, onOpenBox }: { onBack: () => void; onOpe
                       </Panel>
                     )}
                   </SettingsSection>
+                  <Panel className="text-muted-foreground px-4 py-3 text-micro">
+                    Rules and RULES.md go to the agent as system-prompt instructions for the whole thread — your task text stays as you typed it. Verify on done is enforced: the controller runs the check.
+                    Executable hooks are never installed from a bundle (an imported <span className="text-foreground font-mono">hooks/</span> folder is ignored); the PR-only push guard and the supervision gate are built in and apply to every harness.
+                  </Panel>
                   <SettingsSection
                     id="compare"
                     title="Compare"
@@ -257,65 +262,16 @@ export function HarnessesPage({ onBack, onOpenBox }: { onBack: () => void; onOpe
                 ))}
               </Panel>
             </SettingsSection>
-          ) : tab === "skills" ? (
+          ) : (
             <div className="-mx-5 h-[calc(100dvh-14rem)] min-h-[32rem] md:-mx-8">
               <React.Suspense fallback={null}>
                 <SkillsPage onBack={() => setTab("saved")} />
               </React.Suspense>
             </div>
-          ) : tab === "rules" ? (
-            <div className="flex flex-col gap-10">
-              <SettingsSection
-                id="rules"
-                title="Rules"
-                purpose="Rule toggles and RULES.md are instructions placed above the task — the agent is told, not forced. Verify-on-done is enforced: the controller runs the check."
-              >
-                <RulesTable list={list} onEdit={(h) => { setTab("saved"); setEditing(draftOf(h)); }} />
-              </SettingsSection>
-              <SettingsSection id="hooks" title="Hooks" purpose="Executable hooks are never installed from a bundle. The PR-only push guard and the supervision gate are built in and apply to every harness.">
-                <Panel className="px-4 py-3 text-meta text-muted-foreground">
-                  An imported <span className="font-mono text-foreground">hooks/</span> folder is ignored. An imported <span className="font-mono text-foreground">verify.sh</span> stays off until you review and approve the harness.
-                </Panel>
-              </SettingsSection>
-            </div>
-          ) : (
-            <SettingsSection id="egress" title="Egress" purpose="Extra hosts a run may reach beyond the defaults. A run's own choices replace these.">
-              {list.length ? (
-                <Panel className="divide-y">
-                  {list.map((h) => (
-                    <button key={h.id} type="button" onClick={() => { setTab("saved"); setEditing(draftOf(h)); }} className="hover:bg-muted/50 flex w-full flex-col gap-1 px-4 py-3 text-left transition-colors sm:flex-row sm:items-center sm:gap-4">
-                      <span className="text-foreground min-w-0 truncate text-body font-medium sm:w-44 sm:shrink-0">{h.name}</span>
-                      <span className="text-muted-foreground min-w-0 flex-1 truncate font-mono text-micro">{h.egress?.length ? h.egress.join(", ") : "default egress"}</span>
-                    </button>
-                  ))}
-                </Panel>
-              ) : (
-                <EmptyState icon={Layers} title="Nothing configured yet" line="Egress extras are set per harness." action={<Button size="sm" onClick={() => { setTab("saved"); setEditing(emptyDraft()); }}>New harness</Button>} />
-              )}
-            </SettingsSection>
           )}
         </TabPanel>
       </div>
     </div>
-  );
-}
-
-function RulesTable({ list, onEdit }: { list: HarnessView[]; onEdit: (h: HarnessView) => void }) {
-  if (!list.length) return <p className="text-muted-foreground text-meta">No harnesses yet.</p>;
-  return (
-    <Panel className="divide-y">
-      {list.map((h) => (
-        <button key={h.id} type="button" onClick={() => onEdit(h)} className="hover:bg-muted/50 flex w-full flex-col gap-1 px-4 py-3 text-left transition-colors">
-          <span className="flex items-center gap-2">
-            <span className="text-foreground text-body font-medium">{h.name}</span>
-            <span className="text-muted-foreground text-micro">{rulesLine(h.rules)}</span>
-          </span>
-          {(h.verifyCommand || h.rulesMd) && (
-            <span className="text-faint truncate font-mono text-micro">{h.verifyCommand ? `verify: ${h.verifyCommand}` : `RULES.md · ${h.rulesMd!.length} chars`}</span>
-          )}
-        </button>
-      ))}
-    </Panel>
   );
 }
 
@@ -343,6 +299,9 @@ function HarnessRow({
     h.provider ? `${h.provider.label}${h.model ? ` · ${h.model}` : ""}` : h.model ?? null,
     h.skills?.length ? `${h.skills.length} skill${h.skills.length === 1 ? "" : "s"}` : null,
     rulesLine(h.rules),
+    h.rulesMd ? "RULES.md" : null,
+    h.verifyCommand ? `verify: ${h.verifyCommand}` : null,
+    h.egress?.length ? `egress: ${h.egress.join(", ")}` : null,
   ].filter(Boolean);
   return (
     <div className={cn("px-4 py-3", h.needsReview && "bg-attention/5")}>
@@ -412,7 +371,7 @@ function ReviewPanel({ h, skills, onApprove, onEdit }: { h: HarnessView; skills:
       <ReviewItem label="Egress — extra hosts the sandbox may reach">
         {h.egress?.length ? <span className="font-mono text-micro">{h.egress.join(", ")}</span> : <span className="text-faint">none beyond the defaults</span>}
       </ReviewItem>
-      <ReviewItem label="Rules placed above every task">
+      <ReviewItem label="Rules given to the agent (system prompt, every turn)">
         <span className="text-micro">{rulesLine(h.rules)}</span>
         {h.rulesMd && <pre className="bg-muted mt-1 max-h-48 overflow-auto rounded p-2 font-mono text-micro whitespace-pre-wrap">{h.rulesMd}</pre>}
       </ReviewItem>

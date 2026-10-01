@@ -41,6 +41,8 @@ export interface BoxView {
   agent?: string;
   /** Running, but the log has not moved for the stall window (src/stall.ts STALL_AFTER_MS). */
   stalled?: boolean;
+  /** The saved harness this thread started on, with its one-line summary for the header. */
+  harness?: { id: string; name: string; line: string };
 }
 
 export type ProviderKind = "anthropic" | "openai" | "openai-compatible" | "ollama" | "ccproxy";

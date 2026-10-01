@@ -88,6 +88,11 @@ export interface DelegatePlan {
   /** Harness skill selection (src/harness.ts): install exactly these; absent = the enabled set. */
   skills?: string[];
   /**
+   * Harness rules text (src/harness.ts rulesPreamble) for the agent's SYSTEM prompt. Never part of
+   * `task`: the operator's message is shown and recorded exactly as typed.
+   */
+  rules?: string;
+  /**
    * Repo setup profiles (src/setup-profile.ts) keyed by lowercase "owner/name", resolved by the
    * route. Present (even empty) = learn-setup is on: warm install, prompt hint, and detection for
    * repos with no profile. Absent = the run knows nothing about setup.

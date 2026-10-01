@@ -100,7 +100,7 @@ export function HarnessEditor({
 
           <fieldset className="flex flex-col gap-2">
             <legend className="text-foreground mb-1 text-meta font-medium">Rules</legend>
-            <p className="text-faint -mt-1 text-micro">Placed above the task as instructions. Verify on done is enforced by the controller.</p>
+            <p className="text-faint -mt-1 text-micro">Given to the agent as system-prompt instructions for the whole thread; your task text stays as you typed it. Verify on done is enforced by the controller.</p>
             {RULE_LABELS.map((r) => (
               <label key={r.key} className="flex cursor-pointer items-start gap-3 py-1">
                 <Switch size="sm" className="mt-0.5" checked={d.rules[r.key]} onCheckedChange={(v) => set("rules", { ...d.rules, [r.key]: v })} aria-label={r.label} />
@@ -147,7 +147,7 @@ export function HarnessEditor({
 
           <fieldset className="grid gap-4 sm:grid-cols-2">
             <legend className="text-foreground mb-2 text-meta font-medium">Egress</legend>
-            <Field label="Extra hosts" optional hint="Hostnames only, one per line.">
+            <Field label="Extra hosts" optional hint="Hostnames the sandbox may reach beyond the defaults. One per line.">
               {(w) => <textarea {...w} className={cn(inputClass, "h-24 py-2 font-mono text-micro")} value={d.egress} onChange={(e) => set("egress", e.target.value)} placeholder={"registry.npmjs.org\napi.stripe.com"} />}
             </Field>
           </fieldset>

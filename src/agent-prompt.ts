@@ -17,6 +17,21 @@ export interface RepoLayout {
   setupHint?: string;
 }
 
+/**
+ * The harness rules block for the agent's SYSTEM prompt (src/harness.ts rulesPreamble is the
+ * body; this frames it). It rides beside the standing policy — never inside the task — so the
+ * operator's message stays exactly what they typed. The controller hands it to the box as
+ * $AGENT_RULES; the run wrapper (msb.ts agentSh) stores it on the FIRST turn and appends it to
+ * $AGENT_SYS_PROMPT on EVERY turn, so the rules hold for the whole thread and reach each driver
+ * through the one prompt mechanism it already has (claude --append-system-prompt; codex, opencode
+ * and omp prefix $AGENT_SYS_PROMPT to their first prompt). Empty input → empty output.
+ */
+export function harnessPromptHint(rules: string | undefined): string {
+  const body = rules?.trim();
+  if (!body) return "";
+  return `The operator attached a harness to this run. Its rules apply to every turn of this thread, on top of the task:\n${body}`;
+}
+
 export function reposPromptHint(repos: RepoLayout[]): string {
   const setup = repos.map((r) => r.setupHint).filter(Boolean).join(" ");
   const layout = layoutHint(repos);

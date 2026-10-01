@@ -6,8 +6,11 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { reposPromptHint } from "../src/agent-prompt.ts";
-import { AGENT_SYS_PROMPT } from "../src/msb.ts";
+import { harnessPromptHint, reposPromptHint } from "../src/agent-prompt.ts";
+import { AGENT_SYS_PROMPT, agentEnvFlags, agentSh } from "../src/msb.ts";
+import { rulesPreamble } from "../src/harness.ts";
+import { driverFor } from "../src/drivers/index.ts";
+import type { Config } from "../src/config.ts";
 
 test("single repo: states only the location", () => {
   const h = reposPromptHint([{ name: "web" }]);
@@ -61,4 +64,51 @@ test("a patched repo warns the agent the dirty tree is intentional", () => {
   assert.match(hint, /Do not stash, reset, or discard/);
   // And a plain checkout gets no such warning — the agent should trust `git status` there.
   assert.doesNotMatch(reposPromptHint([{ name: "api" }]), /uncommitted/i);
+});
+
+test("harness rules ride in the SYSTEM prompt, framed for the whole thread; empty in -> empty out", () => {
+  assert.equal(harnessPromptHint(undefined), "");
+  assert.equal(harnessPromptHint("   "), "");
+  const h = harnessPromptHint(rulesPreamble({ name: "Bug fixer", rules: { askBeforeGuess: true, planFirst: false, verifyOnDone: true }, rulesMd: "1. Reproduce first." }));
+  assert.match(h, /harness/i);
+  assert.match(h, /every turn/i);
+  assert.match(h, /Harness rules \(Bug fixer\):/);
+  assert.match(h, /ask a question and wait/);
+  assert.match(h, /Reproduce first/);
+});
+
+test("the box env carries the task CLEAN and the rules as AGENT_RULES; the wrapper appends them to the system prompt every turn", () => {
+  const cfg = { anthropicBaseUrl: "http://p", anthropicApiKey: "k", anthropicModel: "m", egressDomains: [] } as unknown as Config;
+  const rules = rulesPreamble({ name: "Bug fixer", rules: { askBeforeGuess: true, planFirst: false, verifyOnDone: false } });
+  for (const kind of ["claude", "codex", "opencode", "omp"] as const) {
+    const env = agentEnvFlags(cfg, "fix the login bug", [{ name: "web" }], undefined, undefined, kind, rules);
+    const of = (k: string) => env.find((v) => v.startsWith(`${k}=`))?.slice(k.length + 1);
+    // The task is exactly what the operator typed — no preamble pasted on top of it.
+    assert.equal(of("AGENT_TASK"), "fix the login bug");
+    // The rules are their own variable, framed for the system prompt...
+    assert.match(of("AGENT_RULES")!, /Harness rules \(Bug fixer\)/);
+    assert.match(of("AGENT_RULES")!, /ask a question and wait/);
+    // ...and the standing policy is untouched here (the wrapper composes them in the box).
+    assert.doesNotMatch(of("AGENT_SYS_PROMPT")!, /Harness rules/);
+    // No harness: no variable at all.
+    assert.equal(agentEnvFlags(cfg, "t", undefined, undefined, undefined, kind).some((v) => v.startsWith("AGENT_RULES=")), false);
+
+    // First turn: store the rules in the box (or clear a stale mark) and append them to the prompt.
+    // (The wrapper is single-quoted for `bash -c`, so match on the unquoted fragments.)
+    const first = agentSh("/workspace/web", false, kind);
+    assert.ok(first.includes(`"$AGENT_RULES" > /workspace/.agent.rules; else rm -f /workspace/.agent.rules; fi`), kind);
+    assert.ok(first.includes(`AGENT_SYS_PROMPT="$AGENT_SYS_PROMPT $(cat /workspace/.agent.rules)"; export AGENT_SYS_PROMPT`), kind);
+    // Every later turn re-reads the stored copy but never rewrites it — the harness holds for the thread.
+    const resume = agentSh("/workspace/web", true, kind);
+    assert.ok(!resume.includes(`"$AGENT_RULES" > /workspace/.agent.rules`), kind);
+    assert.ok(resume.includes(`AGENT_SYS_PROMPT="$AGENT_SYS_PROMPT $(cat /workspace/.agent.rules)"`), kind);
+    // The append happens BEFORE the driver launch reads $AGENT_SYS_PROMPT.
+    assert.ok(first.indexOf("export AGENT_SYS_PROMPT") < first.indexOf("set -o pipefail"));
+  }
+});
+
+test("every driver's first-turn launch takes the policy from $AGENT_SYS_PROMPT, so harness rules reach codex/opencode/omp too", () => {
+  for (const kind of ["claude", "codex", "opencode", "omp"] as const) {
+    assert.match(driverFor(kind).launch({ resume: false }), /\$AGENT_SYS_PROMPT/, kind);
+  }
 });

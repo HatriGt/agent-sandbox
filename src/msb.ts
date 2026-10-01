@@ -13,7 +13,7 @@ import { askParkTtlSec } from "./snapshot.js";
 import { guardNodeProgram } from "./guard.js";
 import { loadMcpStore, toClaudeMcpConfig } from "./mcp-store.js";
 import { boxSkillSelection, buildSkillsTarBase64, loadSkillStore, skillsForBox } from "./skill-store.js";
-import { reposPromptHint, type RepoLayout } from "./agent-prompt.js";
+import { harnessPromptHint, reposPromptHint, type RepoLayout } from "./agent-prompt.js";
 import { secretEnvFlags } from "./secret-env.js";
 import type { AgentKind } from "./agent-kind.js";
 import {
@@ -650,7 +650,9 @@ export function agentEnvFlags(
   repos?: RepoLayout[],
   ghTokenOverride?: string,
   modelOverride?: string,
-  agent: AgentKind = "claude"
+  agent: AgentKind = "claude",
+  /** Harness rules text (src/harness.ts rulesPreamble) for the FIRST turn; see harnessPromptHint. */
+  rules?: string
 ): string[] {
   // The standing policy plus (when known) the goal-neutral repo-layout hint, so the agent knows
   // where each repo lives (/workspace/<name>). The TASK decides the goal. Passed as env, never argv.
@@ -659,6 +661,7 @@ export function agentEnvFlags(
   const sysPrompt = repos?.length
     ? `${basePrompt} ${reposPromptHint(repos)}`
     : basePrompt;
+  const rulesHint = harnessPromptHint(rules);
   const flags = [
     "-e",
     `ANTHROPIC_BASE_URL=${cfg.anthropicBaseUrl}`,
@@ -682,6 +685,11 @@ export function agentEnvFlags(
     "-e",
     "CLAUDE_CODE_ENABLE_TASKS=0",
   ];
+  // Harness rules travel as their own variable, not folded into AGENT_SYS_PROMPT here: the run
+  // wrapper (agentSh) persists them in the box on the first turn and appends them to the system
+  // prompt on every turn, so a follow-up from any resume lane keeps the harness without the caller
+  // knowing about it. Only the first turn carries a value; resumes read the stored copy.
+  if (rulesHint) flags.push("-e", `AGENT_RULES=${rulesHint}`);
   // Driver-specific env (e.g. omp's "smol" model role) — see each driver's envFlags.
   flags.push(...driver.envFlags(cfg));
   // Non-Anthropic-native drivers (codex, opencode) read their model from $AGENT_MODEL (the launch
@@ -934,6 +942,10 @@ const RUN_MARK = "/workspace/.agent.running"; // present while a run is in fligh
 const PID_MARK = "/workspace/.agent.pid"; // pid of the run wrapper, for liveness checks
 const START_MARK = "/workspace/.agent.start"; // guest /proc/uptime seconds when the run began
 const TASK_MARK = "/workspace/.agent.task"; // the current task/follow-up text, so `monitor` can show it
+// The harness rules the thread started on (src/agent-prompt.ts harnessPromptHint), written from
+// $AGENT_RULES by the FIRST turn and appended to $AGENT_SYS_PROMPT by EVERY turn, so a follow-up from
+// any resume lane keeps the harness. Lives beside the other marks, never in the task text.
+export const RULES_MARK = "/workspace/.agent.rules";
 
 /**
  * Shell fragment that reports the run state — with a liveness check. RUN_MARK alone is not proof of
@@ -1237,6 +1249,11 @@ export function agentSh(workdir: string, resume: boolean, agent: AgentKind = "cl
     // The workdir mark is (re)written on the FIRST run only, like TASK_MARK: it records where this
     // thread's Claude session lives, so a resume lands there even if repos are attached later.
     `cd ${workdir} && ${resume ? `true` : `printf '%s\\n' "$AGENT_TASK" > ${TASK_MARK} && printf '%s\\n' ${shellQuote(workdir)} > ${WORKDIR_MARK} && printf '%s\\n' ${shellQuote(agent)} > ${KIND_MARK}`} && ` +
+    // Harness rules: the first turn stores what the controller sent (or clears a stale mark on a
+    // reused box); every turn then appends the stored text to the system prompt. This is the ONE
+    // place the rules join the prompt, so the task the operator typed is never rewritten.
+    (resume ? `` : `{ if [ -n "$AGENT_RULES" ]; then printf '%s\\n' "$AGENT_RULES" > ${RULES_MARK}; else rm -f ${RULES_MARK}; fi; } && `) +
+    `{ if [ -s ${RULES_MARK} ]; then AGENT_SYS_PROMPT="$AGENT_SYS_PROMPT $(cat ${RULES_MARK})"; export AGENT_SYS_PROMPT; fi; } && ` +
     echoFollowup +
     // $$ is this wrapper's pid — the process that writes DONE_MARK at the end — recorded so status
     // reads can tell a live run from a stale marker left by a mid-run VM stop (see RUN_STATE_SH).
@@ -1335,9 +1352,11 @@ export async function runAgentTask(
   repos?: RepoLayout[],
   creds?: AgentCreds,
   model?: string,
-  agent: AgentKind = "claude"
+  agent: AgentKind = "claude",
+  /** Harness rules for the thread (src/harness.ts rulesPreamble); stored in the box by the first turn. */
+  rules?: string
 ) {
-  const env = agentEnvFlags(cfg, task, repos, creds?.primaryToken, model, agent);
+  const env = agentEnvFlags(cfg, task, repos, creds?.primaryToken, model, agent, rules);
   const workdir = agentWorkdir(repos);
   // Publish the task BEFORE bootstrap, not only when agentSh launches. The thread view treats
   // "runState idle + no task" as an unused box and shows the "Nothing has run here yet" card —
