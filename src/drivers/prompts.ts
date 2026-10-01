@@ -78,9 +78,10 @@ export const AGENT_SYS_PROMPT =
   "name the exact environment variable(s) you need and why, so the caller can re-run with them; " +
   "(3) an ENVIRONMENT BLOCKER that stops you from doing the task properly — e.g. `npm install` / build / " +
   "test / auth failures, a 401/403 from a package registry or API, a missing scope. A MISSING TOOL IS " +
-  "NOT A BLOCKER: you are root on Debian with apt-get, curl, npm, pip — install the CLI yourself " +
-  "(apt-get install -y, npm i -g, pip install, or curl the release binary into /usr/local/bin), then " +
-  "carry on; only report it if the install itself fails. Report the " +
+  "NOT A BLOCKER: run `need <cmd>` (the box's installer: it knows cf, kubectl, aws, az, gcloud, helm, " +
+  "terraform, psql, redis-cli and more, then falls back to apt/npm/pip) — bash also runs it for you " +
+  "on 'command not found'. You are root on Debian; failing that, apt-get install -y, npm i -g, pip " +
+  "install, or curl the release binary into /usr/local/bin. Only report a tool if the install itself fails. Report the " +
   "exact failure (command + key error line) and what would unblock it, then STOP. Do NOT declare the " +
   "task done, and do NOT skip a required step and press on, when a blocker prevented you from verifying " +
   "your work. " +
@@ -130,9 +131,10 @@ export const OMP_SYS_PROMPT =
   "only when something notable changes. Do not stop on your own; when the caller's duration ends emit " +
   "'<!-- watch: end -->'; ONLY after ~50 minutes (the run cap) end with 'Watch paused — say continue to keep watching.' — " +
   "never earlier; after one poll, poll again. If the live source needs a CLI that is missing (cf, kubectl, aws, gh…), install it and use it. " +
-  "TOOLS: a missing CLI is never a reason to stop or to say it isn't installed — you are root on Debian " +
-  "with apt-get, curl, npm and pip: install it (apt-get install -y, npm i -g, pip install, or curl the " +
-  "release binary into /usr/local/bin) and carry on; report it only if the install itself fails. " +
+  "TOOLS: a missing CLI is never a reason to stop or to say it isn't installed — run `need <cmd>` " +
+  "(the box's installer: cf, kubectl, aws, az, gcloud, helm, terraform, psql, redis-cli and more, then " +
+  "apt/npm/pip by name); you are root on Debian, so failing that apt-get install -y, npm i -g, pip install, " +
+  "or curl the release binary into /usr/local/bin. Carry on; report it only if the install itself fails. " +
   // omp discovers ~/.claude/skills natively (verified live), but without this nudge the model never
   // consults them — a live run asked the caller for credentials a synced skill already wrapped.
   "SKILLS: the caller may have installed skills (reusable playbooks); they are available to you. " +

@@ -49,6 +49,7 @@ import { askSnapName } from "./snapshot.js";
 import { driverFor } from "./drivers/index.js";
 import { askHookScript, claudeDriver, claudeInstallSh, streamFmtScript } from "./drivers/claude.js";
 import { ompInstallSh, ompSeedSh } from "./drivers/omp.js";
+import { NEED_HOOK, needSetup } from "./drivers/need.js";
 import { AGENT_LOG, AT_MARK, MCP_CONFIG_PATH, PROVIDER_ENV_PATH, QUESTION_MARK, USAGE_OPEN } from "./drivers/sentinels.js";
 import { isStalled } from "./stall.js";
 
@@ -685,6 +686,9 @@ export function agentEnvFlags(
     // understands both, so a box that ignores this flag degrades instead of losing its plan.
     "-e",
     "CLAUDE_CODE_ENABLE_TASKS=0",
+    // Every non-interactive bash the agent spawns sources the auto-install hook (src/drivers/need.ts).
+    "-e",
+    `BASH_ENV=${NEED_HOOK}`,
   ];
   // Harness rules travel as their own variable, not folded into AGENT_SYS_PROMPT here: the run
   // wrapper (agentSh) persists them in the box on the first turn and appends them to the system
@@ -913,6 +917,8 @@ export function bootstrapScript(cfg: Config, agent: AgentKind = "claude"): strin
     claudeDriver.gateScript()!,
     // Install the stream-json formatter so the dashboard terminal streams live progress.
     claudeDriver.formatter(),
+    // `need` + the command-not-found hook: a missing CLI installs itself instead of ending the task.
+    needSetup(),
   ];
   // Claude Code is ALWAYS installed (above): the read-only ask lane runs it next to any driver.
   // Another driver additionally needs its own CLI (idempotent when an image baked it), its event
