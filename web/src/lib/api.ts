@@ -213,6 +213,8 @@ export interface HarnessRules {
   askBeforeGuess: boolean;
   planFirst: boolean;
   verifyOnDone: boolean;
+  /** Failed-verification retries the controller issues (0–2; absent = 1). */
+  autoRetry?: number;
 }
 export interface HarnessView {
   id: string;
@@ -1081,7 +1083,8 @@ export interface RunOutcome {
   trust: {
     tests: { runner: string; passed: number; failed: number; skipped: number; source: "verify" | "trace" } | null;
     exitCode: number | null;
-    verified: { pass: boolean; mode: string } | null;
+    /** etries: how many times a failed verification sent the run back before this finish. */
+    verified: { pass: boolean; mode: string; retries?: number } | null;
     /** The verify command that ran; absent on outcomes archived before it existed. */
     testedWith?: string | null;
     prOnly: boolean;

@@ -118,6 +118,15 @@ export function HarnessEditor({
                 {(w) => <textarea {...w} className={cn(inputClass, "h-28 py-2 font-mono text-micro")} value={d.verifyCommand} maxLength={4000} onChange={(e) => set("verifyCommand", e.target.value)} placeholder="npm test" />}
               </Field>
             </div>
+            <Field label="Retry on failed verification" hint="When the check fails, the run is sent back with the failure to fix and re-verify, this many times at most. 0 only stamps the result.">
+              {(w) => (
+                <select {...w} className={inputClass} value={d.rules.autoRetry ?? 1} disabled={!d.rules.verifyOnDone} onChange={(e) => set("rules", { ...d.rules, autoRetry: Number(e.target.value) })}>
+                  <option value={0}>Never</option>
+                  <option value={1}>Once</option>
+                  <option value={2}>Twice</option>
+                </select>
+              )}
+            </Field>
           </fieldset>
 
           <fieldset className="flex flex-col gap-2">

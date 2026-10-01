@@ -62,14 +62,16 @@ test("command mode: exit 0 is pass, nonzero is fail with the tail of the output"
       },
     }
   );
-  assert.deepEqual(pass, { mode: "command", pass: true, detail: "all green", command: "npm test" });
+  assert.deepEqual(pass, { mode: "command", pass: true, detail: "all green", command: "npm test", code: 0 });
 
   const fail = await runVerification(
     { mode: "command", command: "npm test" },
     { execCommand: async () => ({ code: 1, output: "2 tests failed" }), askCriterion: async () => ({ answer: "" }) }
   );
   assert.equal(fail.pass, false);
+  assert.equal(fail.code, 1);
   assert.match(fail.detail, /2 tests failed/);
+  assert.equal(fail.output, "2 tests failed"); // the retry feedback's tail
 });
 
 test("criterion mode: the co-pilot's answer is parsed for the verdict", async () => {

@@ -61,6 +61,10 @@ export interface VerifyResult {
   command?: string;
   /** Command mode: pass/fail counts when the command's output was a recognised test runner's. */
   tests?: TestCounts;
+  /** Command mode: the exit code. */
+  code?: number;
+  /** A failure's tail (last RETRY_TAIL_LINES lines) — what the retry feedback hands back to the agent. */
+  output?: string;
 }
 
 const VERDICT_RE = /^\s*VERDICT:\s*(pass|fail)\s*(?:[—–-]+\s*(.*))?$/gim;
@@ -92,6 +96,8 @@ export function verdictPrompt(criterion: string): string {
 }
 
 const TAIL = 500;
+const RETRY_TAIL_LINES = 40;
+const RETRY_TAIL_CHARS = 4000;
 
 /**
  * Run one verification. IO is injected: `execCommand` runs a shell command in the box and returns
@@ -113,7 +119,8 @@ export async function runVerification(
       // the failing assertion is usually a few lines up.
       const detail = (r.code === 0 ? lines.slice(-1) : lines.slice(-8)).join("\n").slice(-TAIL);
       const tests = parseTestCounts(r.output);
-      return { mode: "command", pass: r.code === 0, detail: detail || `exit ${r.code}`, command: plan.command, ...(tests ? { tests } : {}) };
+      const output = r.code === 0 ? "" : lines.slice(-RETRY_TAIL_LINES).join("\n").slice(-RETRY_TAIL_CHARS);
+      return { mode: "command", pass: r.code === 0, detail: detail || `exit ${r.code}`, command: plan.command, code: r.code, ...(tests ? { tests } : {}), ...(output ? { output } : {}) };
     }
     const { answer } = await io.askCriterion(verdictPrompt(plan.criterion));
     const v = parseVerdict(answer);
@@ -128,4 +135,60 @@ export function formatVerifyResult(r: VerifyResult): string {
   return r.pass
     ? `verified (${r.mode}): ${r.detail}`
     : `UNVERIFIED (${r.mode}): ${r.detail}`;
+}
+
+/* ───────────────────────────── auto-retry ───────────────────────────── */
+
+/** The harness rule's bounds (src/harness.ts autoRetry): 0 = stamp only, up to two more turns. */
+export const AUTO_RETRY_DEFAULT = 1;
+export const AUTO_RETRY_MAX = 2;
+
+/** Clamp a harness rule value into the budget. Anything unparseable is the default. */
+export function autoRetryOf(v: unknown): number {
+  const n = typeof v === "number" && Number.isFinite(v) ? Math.floor(v) : AUTO_RETRY_DEFAULT;
+  return Math.min(AUTO_RETRY_MAX, Math.max(0, n));
+}
+
+/** What a failed verification tells the agent when the controller sends it back for another turn. */
+export function verifyRetryMessage(r: VerifyResult): string {
+  const what = r.mode === "command" ? (r.command ?? "verify command") : "criterion check";
+  const tail = (r.output ?? r.detail).trim();
+  return `Verification failed: ${what} — exit ${r.code ?? 1}.\n\n${tail}\n\nFix it and re-verify before finishing.`;
+}
+
+/**
+ * The retry loop's bookkeeping, kept out of the fleet sweep so it can be tested with a fake resume.
+ * `arm` records a run's budget when it starts; `consider` runs at the finish edge AFTER the
+ * verification resolved and returns true when it sent the run back — the caller then skips the
+ * notification and the archive for that intermediate finish. A run that ended on a question is
+ * never retried (the operator's answer is the next turn), and the counter is what the digest and
+ * the outcome card report as `retries`.
+ */
+export function makeVerifyRetrier(io: { resume: (box: string, message: string) => Promise<void>; log?: (msg: string) => void }) {
+  const budgets = new Map<string, { max: number; used: number }>();
+  return {
+    arm(box: string, max: number): void {
+      budgets.set(box, { max: autoRetryOf(max), used: 0 });
+    },
+    /** How many times this run was sent back so far (0 when never armed). */
+    retriesOf(box: string): number {
+      return budgets.get(box)?.used ?? 0;
+    },
+    forget(box: string): void {
+      budgets.delete(box);
+    },
+    async consider(box: string, result: VerifyResult | undefined, runState: string): Promise<boolean> {
+      const b = budgets.get(box);
+      if (!b || !result || result.pass || runState === "waiting" || b.used >= b.max) return false;
+      b.used += 1;
+      try {
+        await io.resume(box, verifyRetryMessage(result));
+        return true;
+      } catch (e) {
+        b.used -= 1;
+        io.log?.(`[verify] retry resume on ${box} failed: ${String((e as Error).message ?? e).slice(0, 200)}`);
+        return false;
+      }
+    },
+  };
 }

@@ -15,7 +15,8 @@ export interface HarnessDraft {
   egress: string;
 }
 
-export const RULE_LABELS: Array<{ key: keyof HarnessRules; label: string; line: string }> = [
+/** The on/off rules; autoRetry (a count) has its own field next to the verify command. */
+export const RULE_LABELS: Array<{ key: "askBeforeGuess" | "planFirst" | "verifyOnDone"; label: string; line: string }> = [
   { key: "askBeforeGuess", label: "Ask before guessing", line: "Ask and wait when a requirement is ambiguous." },
   { key: "planFirst", label: "Plan first", line: "Write a short numbered plan before changing anything." },
   { key: "verifyOnDone", label: "Verify on done", line: "Run the verify command (or a checker) when the run finishes." },

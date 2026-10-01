@@ -30,6 +30,8 @@ export interface DigestInput {
   files: DigestFile[];
   /** Verified-outcomes result (src/verify.ts), when the run carried a verify clause. */
   verified?: VerifyResult;
+  /** How many times a failed verification sent the run back (harness autoRetry) before this finish. */
+  retries?: number;
   /** Which coding agent ran (the box's .agent.kind mark), when known. */
   agent?: string;
   /** The model the run used, when the controller knows it (never guessed). */
@@ -78,6 +80,8 @@ export interface RunDigest {
   questions: Array<{ question: string; answer?: string }>;
   /** Verified-outcomes result: pass means checked, not just claimed. */
   verified?: VerifyResult;
+  /** Verification retries the controller issued before this finish (0 omitted). */
+  retries?: number;
   /** Receipt provenance (driver, model), when known. Persisted with the archived digest. */
   provenance?: DigestProvenance;
   /** One sentence for notifications and list rows. */
@@ -107,6 +111,7 @@ export function headlineOf(x: {
   blockedCount?: number;
   openQuestions: number;
   verified?: VerifyResult;
+  retries?: number;
 }): string {
   const bits: string[] = [];
   if (x.state === "failed") {
@@ -124,8 +129,15 @@ export function headlineOf(x: {
   if (x.failedCount > 0) bits.push(`${x.failedCount} failed command${x.failedCount === 1 ? "" : "s"}`);
   if ((x.blockedCount ?? 0) > 0) bits.push(`${x.blockedCount} blocked`);
   if (x.openQuestions > 0 && x.state !== "waiting") bits.push(`${x.openQuestions} unanswered question${x.openQuestions === 1 ? "" : "s"}`);
-  if (x.verified) bits.push(x.verified.pass ? "verified" : "UNVERIFIED");
+  if (x.verified) bits.push(verifiedLabel(x.verified.pass, x.retries));
   return bits.join(" · ");
+}
+
+/** "verified" / "verified on 2nd try" / "UNVERIFIED after 3 tries" — the retry loop's one visible trace. */
+export function verifiedLabel(pass: boolean, retries = 0): string {
+  const tries = retries + 1;
+  if (pass) return retries ? `verified on ${tries === 2 ? "2nd" : "3rd"} try` : "verified";
+  return retries ? `UNVERIFIED after ${tries} tries` : "UNVERIFIED";
 }
 
 /**
@@ -191,6 +203,7 @@ export function buildDigest(input: DigestInput): RunDigest {
     blockedCount: blocked.length,
     openQuestions,
     verified: input.verified,
+    retries: input.retries,
   });
 
   const provenance: DigestProvenance = {
@@ -216,6 +229,7 @@ export function buildDigest(input: DigestInput): RunDigest {
     questions,
     ...(usage ? { usage } : {}),
     ...(input.verified ? { verified: input.verified } : {}),
+    ...(input.retries ? { retries: input.retries } : {}),
     ...(Object.keys(provenance).length ? { provenance } : {}),
     headline,
   };

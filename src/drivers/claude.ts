@@ -288,7 +288,9 @@ export function streamFmtScript(): string {
 // box is an isolated microVM with a curated egress allowlist. --allowedTools takes multiple
 // space-separated values, so it goes LAST in the command.
 // Skill lets claude load dashboard-configured skills (installed under /root/.claude/skills).
-const ALLOWED_TOOLS = "Bash Edit Write Read Glob Grep TodoWrite TaskCreate TaskUpdate TaskList WebFetch WebSearch Skill";
+// Agent (sub-agents) is on: hooks apply to a sub-agent's tool calls too, so the ask-gate, inbox
+// delivery and the guard hold inside one exactly as they do for the main turn.
+const ALLOWED_TOOLS = "Bash Edit Write Read Glob Grep TodoWrite TaskCreate TaskUpdate TaskList WebFetch WebSearch Skill Agent";
 
 /** Shell for one Claude Code turn: `claude [-c] -p`, piped through stream-fmt.js into the log. */
 export function claudeLaunchSh(resume: boolean): string {

@@ -58,6 +58,14 @@ export const AGENT_SYS_PROMPT =
   "tool call was held ('The operator just said: …'): answer it in your next sentence and change course if " +
   "they asked, then carry on. Prefer a quick question over a guess. Never restate your plan or your " +
   "earlier replies; say what is new. " +
+  // Follow-through: a failed verification sends the run back (harness autoRetry, src/verify.ts), so
+  // the agent should get there on its own first.
+  "FOLLOW-THROUGH: keep going until the task is done AND verified (tests, build, a browser check — " +
+  "whatever the repo supports); stop only to ask when genuinely blocked. Before declaring done, " +
+  "re-read the task and state plainly what you did not do. " +
+  "DELEGATION: use the Agent tool for independent sub-tasks (research, parallel edits in separate " +
+  "areas, a verification pass) and fold the results back; never ask the operator from a sub-agent — " +
+  "surface the question yourself. " +
   "WATCHING: when asked to keep watching/listening/monitoring something (logs, a queue, an endpoint), " +
   "do not decide on your own that you are done. Start your first reply with the invisible marker " +
   "'<!-- watch: <short target> | every 30s -->' (re-emit it when you resume after a message), then " +
@@ -137,6 +145,9 @@ export const OMP_SYS_PROMPT =
   "tool call was held ('The operator just said: …'): answer it in your next sentence and change course if " +
   "they asked, then carry on. Prefer a quick question over a guess. Never restate your plan or your " +
   "earlier replies; say what is new. " +
+  "FOLLOW-THROUGH: keep going until the task is done AND verified (tests, build, a browser check — " +
+  "whatever the repo supports); stop only to ask when genuinely blocked. Before declaring done, " +
+  "re-read the task and state plainly what you did not do. " +
   "WATCHING: asked to keep watching/monitoring something, begin with the invisible marker " +
   "'<!-- watch: <short target> | every 30s -->', then loop bounded polls (`timeout 30 tail -n 200 -f`, " +
   "never an unbounded tail -f), exactly ONE poll cycle per tool call (never loop cycles inside one command, " +

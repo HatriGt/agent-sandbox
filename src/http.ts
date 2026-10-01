@@ -41,7 +41,7 @@ import { fetchPinned } from "./net-guard.js";
 import { buildDigest, type RunDigest } from "./digest.js";
 import { buildOutcome, outcomeOf, resolveFollowedBy } from "./outcome.js";
 import { archiveRun, deleteRun, getDigest, getRun, listActivity, listRuns, pruneArchive, ledgerTotals, listLedger, type LedgerFilter } from "./run-archive.js";
-import { verifyPlanOf, type VerifyPlan, type VerifyResult } from "./verify.js";
+import { autoRetryOf, makeVerifyRetrier, verifyPlanOf, type VerifyPlan, type VerifyResult } from "./verify.js";
 import { parseTrace } from "./trace.js";
 import { loadNotifySettings, normalizeNotifySettings, saveNotifySettings } from "./notify-store.js";
 import { AGENT_KINDS, AGENT_LABELS, isAgentKind, loadAgentPrefs, normalizeAgentPrefs, saveAgentPrefs } from "./agent-kind.js";
@@ -391,6 +391,12 @@ const boxProviders = new Map<string, string>();
 // not silent: the digest simply carries no verified stamp), never a queued answer.
 const boxVerify = new Map<string, VerifyPlan>();
 const boxVerified = new Map<string, VerifyResult>();
+// Done means verified: a harness run whose verification failed is sent back with the failure
+// (harness rule autoRetry, src/verify.ts). The budget is per box, in memory like boxVerify; the
+// retrier is built below resumeQuietly, which it needs.
+let verifyRetrier: ReturnType<typeof makeVerifyRetrier> | undefined;
+/** The digest's `retries` for a box (0 when it was never sent back). */
+const retriesOf = (box: string) => verifyRetrier?.retriesOf(box) ?? 0;
 
 // Per-user box quota on EVERY delegation lane. The browser route checks it inline, but the MCP
 // `delegate` tool reaches deps.runDelegation directly — without this wrapper a quota'd user could
@@ -428,6 +434,7 @@ const boxVerified = new Map<string, VerifyResult>();
     boxModels.delete(session);
     boxVerify.delete(session);
     boxVerified.delete(session);
+    verifyRetrier?.forget(session);
     dispatcher.forget(session);
   };
 }
@@ -501,6 +508,7 @@ const captureBeforeMessage = async (box: string): Promise<void> => {
   const r = await execInBox(cfg, box, captureCmd());
   if (!/CKPT_(OK|HAVE)/.test(r.stdout)) console.error(`[ckpt] pre-message capture on ${box}: ${r.stdout.trim().slice(-200)}`);
 };
+verifyRetrier = makeVerifyRetrier({ resume: resumeQuietly, log: (m) => console.error(m) });
 startInboxDelivery({
   inbox,
   read: (s) => watchHub.read(s),
@@ -546,7 +554,7 @@ const sendNotification = async (ev: NotifyEvent): Promise<void> => {
     headline = await watchHub
       .read(ev.box)
       .then((snap) =>
-        buildDigest({ box: ev.box, task: snap.task ?? "", runState: snap.runState, exitCode: snap.exitCode, events: parseTrace(snap.log ?? ""), files: [], verified: boxVerified.get(ev.box) }).headline
+        buildDigest({ box: ev.box, task: snap.task ?? "", runState: snap.runState, exitCode: snap.exitCode, events: parseTrace(snap.log ?? ""), files: [], verified: boxVerified.get(ev.box), retries: retriesOf(ev.box) }).headline
       )
       .catch(() => undefined);
   }
@@ -688,6 +696,7 @@ const archiveFinishedRun = async (box: string, opts: { withFiles: boolean } = { 
     events: parseTrace(snap.log ?? ""),
     files,
     verified: boxVerified.get(box),
+    retries: retriesOf(box),
     ...runProvenance(box, snap.agent),
   });
   // The outcome card (src/outcome.ts): persisted inside the archived digest, so it outlives the box.
@@ -825,11 +834,21 @@ const readFleet = makeFleetReader(
         const vplan = ev.kind === "done" || ev.kind === "failed" ? boxVerify.get(ev.box) : undefined;
         if (vplan) boxVerify.delete(ev.box);
         if (vplan && ev.kind === "done" && (ev.exitCode ?? 0) === 0 && deps.verify) {
+          const runState = nextRunViews.find((b) => b.name === ev.box)?.runState ?? "done";
           void deps
             .verify(cfg, ev.box, vplan)
             .then((r) => boxVerified.set(ev.box, r))
             .catch(() => {})
-            .finally(() => {
+            // Done means verified: a failed check with retry budget left sends the run back with the
+            // failure instead of stamping it. The clause is re-armed so the next finish is checked
+            // again; the intermediate finish gets no notification and no archive row — the operator
+            // hears once, when the loop ends.
+            .then(() => verifyRetrier!.consider(ev.box, boxVerified.get(ev.box), runState))
+            .then((retrying) => {
+              if (retrying) {
+                boxVerify.set(ev.box, vplan);
+                return;
+              }
               void notifier.notify(ev);
               // Archive AFTER verification so the record carries the verified stamp.
               void archiveFinishedRun(ev.box, { withFiles: true }).catch((e) => console.error(`[archive] ${ev.box}: ${(e as Error).message.slice(0, 200)}`));
@@ -2263,6 +2282,7 @@ app.get("/digest.json", async (req: Request, res: Response) => {
       events: parseTrace(snap.log ?? ""),
       files,
       verified: boxVerified.get(session),
+      retries: retriesOf(session),
       ...runProvenance(session, snap.agent),
     });
     // The snapshot's log/task/question are already redacted by the hub's reader; the trace-derived
@@ -2947,6 +2967,7 @@ app.post("/teardown.json", async (req: Request, res: Response) => {
     boxModels.delete(session);
     boxVerify.delete(session);
     boxVerified.delete(session);
+    verifyRetrier?.forget(session);
     void forgetTitle(cfg, session).catch(() => {});
     res.json({ ok: true });
   } catch (e) {
@@ -3041,6 +3062,7 @@ const startTriggerRun = (input: StartRunInput): Promise<{ ok: true; box: string 
         if (model) boxModels.set(r.box, model);
         if (hProvider) boxProviders.set(r.box, hProvider.label);
         if (hVerify) boxVerify.set(r.box, hVerify);
+        if (hVerify && th) verifyRetrier?.arm(r.box, autoRetryOf(th.rules.autoRetry));
         if (th) {
           try {
             recordRunHarness(db, { box: r.box, owner: input.owner, harnessId: th.id, harnessName: th.name, skills: hSkills });
@@ -3242,6 +3264,7 @@ registerHarnessRoutes(app, {
       events: parseTrace(snap.log ?? ""),
       files,
       verified: boxVerified.get(box),
+      retries: retriesOf(box),
       ...runProvenance(box, snap.agent),
     }) as unknown as Record<string, unknown>;
   },
@@ -3501,6 +3524,8 @@ const delegateOnce = async (body0: Record<string, unknown>, principal: Principal
       if (model) boxModels.set(result.box, model);
       if (provider) boxProviders.set(result.box, provider.label);
       if (verifyPlan) boxVerify.set(result.box, verifyPlan);
+      // The retry budget is a harness rule: a hand-typed verify clause without a harness stamps only.
+      if (verifyPlan && harness) verifyRetrier?.arm(result.box, autoRetryOf(harness.rules.autoRetry));
       for (const [slug, p] of Object.entries(result.setupDetected ?? {})) {
         try {
           recordLearned(db, hOwner, slug, { detected: p });

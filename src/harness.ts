@@ -34,6 +34,7 @@ import { AGENT_KINDS, isAgentKind, type AgentKind } from "./agent-kind.js";
 import { SKILL_LIMITS, normalizeSkill, validateSkillFilePath, type SkillDef, type SkillFile, type SkillStore } from "./skill-store.js";
 import { PROVIDER_KINDS, type ProviderKind, type ProviderRecord } from "./providers.js";
 import { redactShapes } from "./redact.js";
+import { AUTO_RETRY_MAX } from "./verify.js";
 
 export const HARNESS_FORMAT = "agent-sandbox/harness";
 export const HARNESS_BUNDLE_FORMAT = "agent-sandbox/harness-bundle";
@@ -59,6 +60,12 @@ export interface HarnessRules {
   askBeforeGuess: boolean;
   planFirst: boolean;
   verifyOnDone: boolean;
+  /**
+   * Done means verified: how many times a run whose verification FAILED is sent back with the
+   * failure to fix it (0–AUTO_RETRY_MAX, default AUTO_RETRY_DEFAULT; src/verify.ts). Optional so
+   * stored blobs and BUILTIN_HARNESSES from before the rule read as the default.
+   */
+  autoRetry?: number;
 }
 
 export interface HarnessOrigin {
@@ -164,6 +171,10 @@ export function normalizeHarness(input: unknown, existing?: HarnessDef, now = Da
   }
   const rr = (r.rules && typeof r.rules === "object" ? r.rules : {}) as Record<string, unknown>;
   const rules: HarnessRules = { askBeforeGuess: rr.askBeforeGuess === true, planFirst: rr.planFirst === true, verifyOnDone: rr.verifyOnDone === true };
+  if (rr.autoRetry !== undefined && rr.autoRetry !== null) {
+    if (typeof rr.autoRetry !== "number" || !Number.isInteger(rr.autoRetry) || rr.autoRetry < 0 || rr.autoRetry > AUTO_RETRY_MAX) throw new Error(`autoRetry must be a whole number from 0 to ${AUTO_RETRY_MAX}.`);
+    rules.autoRetry = rr.autoRetry;
+  }
   const rulesMd = cleanText(r.rulesMd, HARNESS_LIMITS.maxRulesMd, "RULES.md");
   const verifyCommand = cleanText(r.verifyCommand, HARNESS_LIMITS.maxVerify, "Verify command");
   const egress = normalizeEgress(r.egress);

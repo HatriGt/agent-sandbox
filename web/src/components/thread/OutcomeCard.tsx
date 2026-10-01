@@ -22,6 +22,13 @@ export function fmtUsd(n: number): string {
 }
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
+/** "✓ verified" / "✓ verified on 2nd try" / "verification failed after 2 tries" (src/digest.ts verifiedLabel). */
+function verifiedText(v: { pass: boolean; retries?: number }): string {
+  const tries = (v.retries ?? 0) + 1;
+  if (v.pass) return tries > 1 ? `✓ verified on ${tries === 2 ? "2nd" : "3rd"} try` : "✓ verified";
+  return tries > 1 ? `verification failed after ${tries} tries` : "UNVERIFIED";
+}
+
 export function testsText(o: RunOutcome): { text: string; tone: "ok" | "bad" | "plain" } {
   const t = o.trust.tests;
   if (t) {
@@ -175,7 +182,7 @@ export function OutcomeCard({ outcome: o, className }: { outcome: RunOutcome; cl
             </span>
           )}
           {o.trust.verified && (
-            <span className={cn("text-micro", o.trust.verified.pass ? "text-ok" : "text-destructive")}>{o.trust.verified.pass ? "✓ verified" : "UNVERIFIED"}</span>
+            <span className={cn("text-micro", o.trust.verified.pass ? "text-ok" : "text-destructive")}>{verifiedText(o.trust.verified)}</span>
           )}
           {o.trust.prOnly && (
             <span className="text-muted-foreground inline-flex items-center gap-1 text-micro" title="Pushes to the default branch were refused; changes land as a pull request">
