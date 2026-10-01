@@ -81,15 +81,15 @@ function LedgerTotalsStrip({ t }: { t: LedgerTotals | null }) {
     cells.push({ label: "Runs", value: <NumberTicker value={t.runs} />, note: t.failed ? `${t.failed} failed` : undefined });
     cells.push(
       t.checked
-        ? { label: "Verified", value: `${Math.round((t.passed / t.checked) * 100)}%`, note: `${t.passed} of ${t.checked} checked` }
+        ? { label: "Verified", value: <NumberTicker value={Math.round((t.passed / t.checked) * 100)} format={(n) => `${Math.round(n)}%`} />, note: `${t.passed} of ${t.checked} checked` }
         : { label: "Verified", value: <span className="text-faint">—</span>, note: "no run had a check" }
     );
     cells.push(
       t.withUsage
-        ? { label: "Tokens", value: fmtTokens(t.inputTokens + t.outputTokens), note: t.withUsage < t.runs ? `from ${t.withUsage} of ${t.runs} runs` : undefined }
+        ? { label: "Tokens", value: <NumberTicker value={t.inputTokens + t.outputTokens} format={(n) => fmtTokens(Math.round(n))} />, note: t.withUsage < t.runs ? `from ${t.withUsage} of ${t.runs} runs` : undefined }
         : { label: "Tokens", value: <span className="text-faint">—</span>, note: "not reported" }
     );
-    if (t.costUsd !== null) cells.push({ label: "Cost", value: `$${t.costUsd.toFixed(2)}`, note: t.withCost < t.runs ? `from ${t.withCost} priced runs` : undefined });
+    if (t.costUsd !== null) cells.push({ label: "Cost", value: <NumberTicker value={Math.round(t.costUsd * 100)} format={(c) => `$${(c / 100).toFixed(2)}`} />, note: t.withCost < t.runs ? `from ${t.withCost} priced runs` : undefined });
   }
   return (
     <div className={cn("mb-4 grid gap-px overflow-hidden rounded-xl border bg-border", t && t.costUsd !== null ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-3")} aria-label="Ledger totals">

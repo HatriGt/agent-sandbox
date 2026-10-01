@@ -552,3 +552,14 @@ branch; the MCP step header duplicated the folded footer's summary and overlappe
 column on phones — header shows the check only below `sm`; History showed a shimmering totals strip
 forever next to a "Could not load" error — hidden on error; composer and question-card captions
 truncated mid-sentence at 390px — shorter copy, two lines on a phone.
+
+## Round: motion pass 2 (2026-09-30)
+
+- **New task to box.** On send, the Hub records the composer textarea's rect (`recordLaunchOrigin`, `lib/launchMorph.ts`); the booting thread's Task bubble FLIPs from that rect to its own (spring, transform + opacity, one-shot, dropped if older than 2 s). `layoutId` cannot bridge the pane swap because `AnimatePresence mode="wait"` unmounts the Hub first. The BootingThread pill, title and working steps stagger in 50 ms apart.
+- **Pane switches** (`App.tsx`): 200 ms in / 160 ms out, 6px rise. On phones the direction follows depth (hub, page, box): going deeper enters from the right, going back from the left.
+- **Sidebar rows** (`MachineList.tsx`): rows rise and scale in from 0.98; the state word crossfades with a 3px lift when the state changes. The waiting-queue banner springs in.
+- **Thread**: turns rise in (`Rise`), tool groups animate their height when folding (`ToolGroup`), and the outcome card (`.card-spring`) and question card enter on a small spring.
+- **Lists**: Fleet table rows stagger on first paint (30 ms apart, capped at 12). History rows stagger by page, and the totals (runs, verified %, tokens, cost) tick.
+- **Overlays**: menus scale from the Radix trigger origin on a slight-overshoot curve (200 ms in, 120 ms out). Sheets slide in over 240 ms on a drawer curve.
+- **Press**: primary/default buttons press to 0.97; everything else keeps the global 0.985.
+- **Reduced motion**: `<MotionConfig reducedMotion="user">` in `main.tsx` turns off transform and layout animations app-wide, and the components that animate check `useReducedMotion` and fall back to opacity-only or instant changes.

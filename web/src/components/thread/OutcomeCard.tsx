@@ -101,7 +101,7 @@ export function OutcomeCard({ outcome: o, className }: { outcome: RunOutcome; cl
   const dur = o.cost.durationMs !== null ? fmtDuration(Math.round(o.cost.durationMs / 1000)) : DASH;
 
   return (
-    <section aria-label="Run outcome" className={cn("enter bg-card raised rounded-xl px-4 py-3", className)}>
+    <section aria-label="Run outcome" className={cn("card-spring bg-card raised rounded-xl px-4 py-3", className)}>
       <div className="flex min-w-0 items-center gap-2.5">
         <span className={cn("size-2 shrink-0 rounded-full", failed ? "bg-destructive" : "bg-ok")} aria-hidden />
         <span className={cn("label shrink-0", failed ? "text-destructive" : "text-ok")}>Outcome</span>

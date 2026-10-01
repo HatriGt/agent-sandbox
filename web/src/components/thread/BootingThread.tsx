@@ -1,5 +1,6 @@
 import { ArrowLeft, GitBranch } from "lucide-react";
-import { motion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
+import { useLaunchMorph } from "@/lib/launchMorph";
 import { Button } from "@/components/ui/button";
 import { bootingHeadline, bootingStage } from "@/lib/booting";
 import { friendlyName } from "@/lib/format";
@@ -35,6 +36,13 @@ export function BootingThread({
 }) {
   const stage = bootingStage(machine);
   const name = machine ? friendlyName(machine) : undefined;
+  const reduce = useReducedMotion();
+  const morph = useLaunchMorph<HTMLDivElement>(reduce);
+  // Skeleton staggers in under the morphing Task bubble: pill, title, then the working steps.
+  const rise = (i: number) =>
+    reduce
+      ? {}
+      : { initial: { opacity: 0, y: 6 }, animate: { opacity: 1, y: 0 }, transition: { duration: 0.22, delay: 0.06 + i * 0.05, ease: [0.22, 1, 0.36, 1] as const } };
   return (
     // Fades in (and, under AnimatePresence, out) so the hand-off to the real Thread — which fades in
     // over the same layout — reads as one continuous view.
@@ -43,25 +51,27 @@ export function BootingThread({
         <Button variant="ghost" size="icon-sm" onClick={onBack} aria-label="Back to machines" className="md:hidden">
           <ArrowLeft />
         </Button>
-        <span className="bg-live/10 text-live ring-live/20 inline-flex h-6 items-center gap-1.5 rounded-full px-2.5 text-micro font-semibold ring-1 ring-inset">
+        <motion.span {...rise(0)} className="bg-live/10 text-live ring-live/20 inline-flex h-6 items-center gap-1.5 rounded-full px-2.5 text-micro font-semibold ring-1 ring-inset">
           <span className="bg-live breathe size-2 rounded-full" aria-hidden />
           {stage}
-        </span>
-        <p className="text-muted-foreground min-w-0 truncate text-meta">
+        </motion.span>
+        <motion.p {...rise(1)} className="text-muted-foreground min-w-0 truncate text-meta">
           {name ? <>Machine <span className="text-foreground font-medium">{name}</span> is picking up your task…</> : "Finding a machine for your task…"}
-        </p>
+        </motion.p>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-7 px-4 pt-7 pb-16 md:px-6">
-          <YouItem text={task} label="Task" />
+          <div ref={morph} className="will-change-transform">
+            <YouItem text={task} label="Task" noEnter />
+          </div>
           {inferred && inferred.length > 0 && <AttachedFromTask repos={inferred} />}
-          <div className="flex flex-col gap-2">
+          <motion.div {...rise(2)} className="flex flex-col gap-2">
             <WorkingIndicator label={bootingHeadline(warm, name)} />
             <p className="text-muted-foreground text-meta">
               Its live output will appear here the moment it starts working.
             </p>
-          </div>
+          </motion.div>
         </div>
       </div>
     </motion.div>

@@ -14,7 +14,7 @@ function DropdownMenuContent({ className, ...props }: React.ComponentProps<typeo
         collisionPadding={8}
         className={cn(
           "bg-popover text-popover-foreground z-50 min-w-[13rem] rounded-xl border p-1.5 shadow-e3 outline-none",
-          "data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=closed]:animate-out data-[state=closed]:fade-out-0",
+          "data-[state=open]:animate-in data-[state=open]:fade-in-0 origin-(--radix-dropdown-menu-content-transform-origin) data-[state=open]:zoom-in-95 data-[state=open]:duration-200 data-[state=open]:ease-[cubic-bezier(0.34,1.3,0.64,1)] data-[state=closed]:animate-out data-[state=closed]:zoom-out-95 data-[state=closed]:duration-120 data-[state=closed]:fade-out-0",
           className
         )}
         {...props}

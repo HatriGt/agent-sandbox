@@ -34,7 +34,7 @@ function SheetContent({
             : "inset-y-0 w-[min(28rem,calc(100vw-2rem))] p-6",
           side === "right" && "right-0 border-l",
           side === "left" && "left-0 border-r",
-          "data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:duration-[240ms] data-[state=open]:ease-[cubic-bezier(0.22,1,0.36,1)]",
+          "data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:duration-[240ms] data-[state=open]:ease-[cubic-bezier(0.32,0.72,0,1)]",
           "data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:duration-[180ms]",
           side === "right" && "data-[state=open]:slide-in-from-right data-[state=closed]:slide-out-to-right",
           side === "left" && "data-[state=open]:slide-in-from-left data-[state=closed]:slide-out-to-left",
