@@ -12,7 +12,7 @@ import { PromptInput, PromptInputActions, PromptInputTextarea } from "@/componen
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { MentionMenu, expandMentions, mentionAt, type MentionState } from "./MentionMenu";
 import { useModelChoice } from "./ModelPicker";
-import { RunOptionChips, RunSettings } from "./RunSettings";
+import { ComposerToolbar, ModelMenu, PlusMenu, SkillsMenu, ToolButton, useComposerMenus } from "@/components/composer/Toolbar";
 import { SkillChip, SkillMenu } from "./SkillMenu";
 import { slashAt, stripSlashToken, typedSkillToken, type SlashState } from "@/lib/slash";
 import { useCached } from "@/lib/cache";
@@ -75,7 +75,7 @@ export function SendBar({
   const [value, setValue] = React.useState(() => readDraft(boxName));
   React.useEffect(() => setValue(readDraft(boxName)), [boxName]);
   const model = useModelChoice(boxName);
-  const [settingsOpen, setSettingsOpen] = React.useState(false);
+  const menus = useComposerMenus("model");
   const modelOptions = {
     current: model.current,
     models: model.models,
@@ -410,47 +410,10 @@ export function SendBar({
               </AnimatePresence>
             </ChipRow>
           )}
-          {skill && (
-            <ChipRow key="skill" still={still} className="flex flex-wrap gap-1.5 px-2 pt-1.5">
-              <SkillChip skill={skill} onRemove={() => setSkill(null)} />
-            </ChipRow>
-          )}
-          {toAgent && modelOptions.offDefault && (
-            <ChipRow key="model" still={still} className="px-2 pt-1.5">
-              <RunOptionChips onOpen={() => setSettingsOpen(true)} model={modelOptions} />
-            </ChipRow>
-          )}
           </AnimatePresence>
           <label htmlFor="send-input" className="sr-only">
             {toAgent ? "Message the agent" : "Ask a side question about this run"}
           </label>
-          <AnimatePresence initial={false}>
-          {files.length > 0 && (
-            <ChipRow key="files" still={still} className="flex flex-wrap gap-1.5 px-2 pt-1.5">
-              <AnimatePresence initial={false} mode="popLayout">
-              {files.map((f) => {
-                const base = f.slice(f.lastIndexOf("/") + 1);
-                const dir = f.slice(0, Math.max(0, f.lastIndexOf("/")));
-                return (
-                  <motion.span key={f} {...chipMotion(still)} className="bg-muted text-foreground inline-flex h-7 max-w-full items-center gap-1.5 rounded-md pl-2 pr-1 text-micro" title={f}>
-                    <FileMark path={f} />
-                    <span className="font-mono font-medium">{base}</span>
-                    {dir && <span className="text-muted-foreground hidden truncate font-mono sm:inline">{dir}</span>}
-                    <button
-                      type="button"
-                      onClick={() => setFiles((prev) => prev.filter((x) => x !== f))}
-                      aria-label={`Remove ${base}`}
-                      className="text-muted-foreground hover:text-foreground grid size-5 cursor-pointer place-items-center rounded"
-                    >
-                      <X className="size-3" />
-                    </button>
-                  </motion.span>
-                );
-              })}
-              </AnimatePresence>
-            </ChipRow>
-          )}
-          </AnimatePresence>
           <PromptInputTextarea
             id="send-input"
             className="px-2.5 pt-2 text-body"
@@ -487,43 +450,61 @@ export function SendBar({
                     : "Ask about this run — what changed, what is it doing, why is it stuck…"
             }
           />
+          {/* Context chips inside the box, above the toolbar: the skill, then @-mentioned files. */}
+          <AnimatePresence initial={false}>
+          {(skill || files.length > 0) && (
+            <ChipRow key="context" still={still} className="flex flex-wrap gap-1.5 px-2 pt-1.5">
+              {skill && <SkillChip skill={skill} onRemove={() => setSkill(null)} />}
+              <AnimatePresence initial={false} mode="popLayout">
+              {files.map((f) => {
+                const base = f.slice(f.lastIndexOf("/") + 1);
+                const dir = f.slice(0, Math.max(0, f.lastIndexOf("/")));
+                return (
+                  <motion.span key={f} {...chipMotion(still)} className="bg-muted text-foreground inline-flex h-7 max-w-full items-center gap-1.5 rounded-md pl-2 pr-1 text-micro" title={f}>
+                    <FileMark path={f} />
+                    <span className="font-mono font-medium">{base}</span>
+                    {dir && <span className="text-muted-foreground hidden truncate font-mono sm:inline">{dir}</span>}
+                    <button
+                      type="button"
+                      onClick={() => setFiles((prev) => prev.filter((x) => x !== f))}
+                      aria-label={`Remove ${base}`}
+                      className="text-muted-foreground hover:text-foreground grid size-5 cursor-pointer place-items-center rounded"
+                    >
+                      <X className="size-3" />
+                    </button>
+                  </motion.span>
+                );
+              })}
+              </AnimatePresence>
+            </ChipRow>
+          )}
+          </AnimatePresence>
           {/* One row, never two: everything is nowrap and the tool cluster can shrink (min-w-0) so the
               send button always keeps its place at the right edge — on a phone as much as beside an
               open workspace pane. */}
-          <PromptInputActions className="flex-nowrap justify-between gap-2 pt-1">
-            <div className="flex min-w-0 items-center gap-0.5 sm:gap-1">
-              {/* The one secondary destination, as a single toggle: off = the agent (always), on = the
-                  read-only side helper. The dashed border and the caption say which is live. */}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="inline-flex" tabIndex={!canSide ? 0 : -1}>
-                    <button
-                      type="button"
-                      aria-pressed={!toAgent}
-                      disabled={!canSide}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setMode(toAgent ? "side" : "agent");
-                      }}
-                      className={cn(
-                        "flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-2 text-micro font-medium whitespace-nowrap transition-colors duration-150",
-                        "disabled:cursor-not-allowed disabled:opacity-40",
-                        toAgent ? "text-muted-foreground hover:bg-muted hover:text-foreground" : "bg-muted text-foreground"
-                      )}
-                    >
-                      <MessageCircleQuestion className="size-3.5" aria-hidden />
-                      <span className={cn(toAgent && "hidden sm:inline")}>Side question</span>
-                    </button>
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  {!canSide ? "A sleeping sandbox has nothing to inspect — wake it with a message first" : toAgent ? "Ask about this run without interrupting the agent" : "Back to messaging the agent"}
-                </TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
+          {/* The shared toolbar (components/composer/Toolbar.tsx): + / @ · Side question · Model … voice
+              send. One row, never two — labels drop below `sm`, send keeps its place at the right. */}
+          <PromptInputActions className="block pt-0">
+            <ComposerToolbar
+              left={
+                <>
+                  <PlusMenu
+                    {...menus.props("plus")}
+                    items={[{ key: "image", icon: <ImagePlus />, label: "Attach an image — or paste / drop one", run: () => fileInput.current?.click() }]}
+                  />
+                  <SkillsMenu
+                    {...menus.props("skills")}
+                    current={skill?.name ?? null}
+                    onPick={(name) => {
+                      const hit = findSkill(name);
+                      if (hit) setSkill(hit);
+                      requestAnimationFrame(() => textarea()?.focus());
+                    }}
+                  />
+                  <ToolButton
+                    icon={<AtSign />}
+                    aria-label="Mention a workspace file"
+                    title="Mention a workspace file ( @ )"
                     onClick={(e) => {
                       e.stopPropagation();
                       const t = textarea();
@@ -540,48 +521,47 @@ export function SendBar({
                         setMention(mentionAt(next, pos));
                       });
                     }}
-                    aria-label="Mention a file"
-                    className="text-muted-foreground hover:text-foreground hover:bg-muted grid size-7 cursor-pointer place-items-center rounded-md transition-colors"
-                  >
-                    <AtSign className="size-3.5" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="top">Mention a workspace file</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      fileInput.current?.click();
+                  />
+                  {/* The one secondary destination, as a single toggle: off = the agent (always), on =
+                      the read-only side helper. The dashed border and the caption say which is live. */}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="inline-flex" tabIndex={!canSide ? 0 : -1}>
+                        <ToolButton
+                          icon={<MessageCircleQuestion />}
+                          label="Side question"
+                          aria-pressed={!toAgent}
+                          active={!toAgent}
+                          disabled={!canSide}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setMode(toAgent ? "side" : "agent");
+                          }}
+                        />
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="top">
+                      {!canSide ? "A sleeping sandbox has nothing to inspect — wake it with a message first" : toAgent ? "Ask about this run without interrupting the agent" : "Back to messaging the agent"}
+                    </TooltipContent>
+                  </Tooltip>
+                  {/* Model: only for the AGENT lane — the side helper stays on ASK_MODEL. */}
+                  {toAgent && <ModelMenu {...menus.props("model")} model={modelOptions} disabled={sending} />}
+                  <input
+                    ref={fileInput}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => {
+                      addImages(e.target.files ?? []);
+                      e.target.value = "";
                     }}
-                    aria-label="Attach an image"
-                    className="text-muted-foreground hover:text-foreground hover:bg-muted grid size-7 cursor-pointer place-items-center rounded-md transition-colors"
-                  >
-                    <ImagePlus className="size-3.5" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="top">Attach an image — or paste / drop one</TooltipContent>
-              </Tooltip>
-              {voice.supported && <VoiceButton state={voice.state} level={voice.level} onToggle={voice.toggle} />}
-              {/* Model switch: only for the AGENT lane — the side helper stays on ASK_MODEL. */}
-              {toAgent && <RunSettings open={settingsOpen} onOpenChange={setSettingsOpen} model={modelOptions} disabled={sending} hotkey />}
-              <input
-                ref={fileInput}
-                type="file"
-                accept="image/*"
-                multiple
-                className="hidden"
-                onChange={(e) => {
-                  addImages(e.target.files ?? []);
-                  e.target.value = "";
-                }}
-              />
-            </div>
-
-            <span className="min-w-0 flex-1" />
-
+                  />
+                </>
+              }
+              right={
+                <>
+                  {voice.supported && <VoiceButton state={voice.state} level={voice.level} onToggle={voice.toggle} />}
             <Button
               variant={toAgent ? "primary" : "outline"}
               size="icon"
@@ -603,6 +583,9 @@ export function SendBar({
                 </motion.span>
               </AnimatePresence>
             </Button>
+                </>
+              }
+            />
           </PromptInputActions>
         </PromptInput>
         <Lightbox src={preview?.dataUrl ?? null} name={preview?.name ?? ""} open={!!preview} onClose={() => setPreview(null)} />
