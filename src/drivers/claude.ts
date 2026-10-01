@@ -5,6 +5,7 @@
  */
 import { shellQuote } from "../exec.js";
 import { ASK_LANE_ENV, askGateNodeProgram } from "../ask.js";
+import { inboxDeliverFn } from "./inbox-gate.js";
 import { guardNodeProgram } from "../guard.js";
 import { redactShapesSource } from "../redact.js";
 import {
@@ -72,6 +73,26 @@ export function askHookScript(): string {
     `  node -e 'process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:"A question is pending in ${QUESTION_MARK} and is awaiting the caller. Do NOT take any further action or guess an answer — end your turn now. It will be resumed with the answer."}}))'\n` +
     `fi\n` +
     `exit 0\n`;
+  // Mid-turn mail (src/drivers/inbox-gate.ts): deliver a queued operator message by denying this one
+  // tool call with the message as the reason. Driver lane only, and only when no question is pending
+  // (ask-gate runs first and already ended the turn in that case).
+  const inboxHook =
+    `#!/bin/sh
+` +
+    `if [ -n "${ASK_LANE_ENV}" ]; then exit 0; fi
+` +
+    `if [ -f ${QUESTION_MARK} ]; then exit 0; fi
+` +
+    `exec node "$HOME/.claude/hooks/inbox-gate.js"
+`;
+  const inboxJs =
+    `const fs=require("fs");
+` +
+    inboxDeliverFn() +
+    `const why=asbInbox(fs);
+` +
+    `if(why)process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:why}}));
+`;
   // The ask lane's read-only gate: the mirror image of the ask-gate — it runs ONLY when the lane
   // flag is set, and denies anything that would mutate the box under the working driver.
   const roHook =
@@ -92,6 +113,7 @@ export function askHookScript(): string {
           matcher: "*",
           hooks: [
             { type: "command", command: "$HOME/.claude/hooks/ask-gate.sh" },
+            { type: "command", command: "$HOME/.claude/hooks/inbox-gate.sh" },
             { type: "command", command: "$HOME/.claude/hooks/ask-ro.sh" },
             { type: "command", command: "$HOME/.claude/hooks/guard.sh" },
           ],
@@ -103,6 +125,7 @@ export function askHookScript(): string {
   // survive shell + SSH + msb-exec quoting intact.
   const roB64 = Buffer.from(askGateNodeProgram(), "utf8").toString("base64");
   const guardB64 = Buffer.from(guardNodeProgram(), "utf8").toString("base64");
+  const inboxB64 = Buffer.from(inboxJs, "utf8").toString("base64");
   return (
     `mkdir -p "$HOME/.claude/hooks" && ` +
     `printf '%s' ${shellQuote(hook)} > "$HOME/.claude/hooks/ask-gate.sh" && ` +
@@ -110,6 +133,9 @@ export function askHookScript(): string {
     `printf '%s' ${shellQuote(roHook)} > "$HOME/.claude/hooks/ask-ro.sh" && ` +
     `chmod +x "$HOME/.claude/hooks/ask-ro.sh" && ` +
     `printf '%s' '${roB64}' | base64 -d > "$HOME/.claude/hooks/ask-ro.js" && ` +
+    `printf '%s' ${shellQuote(inboxHook)} > "$HOME/.claude/hooks/inbox-gate.sh" && ` +
+    `chmod +x "$HOME/.claude/hooks/inbox-gate.sh" && ` +
+    `printf '%s' '${inboxB64}' | base64 -d > "$HOME/.claude/hooks/inbox-gate.js" && ` +
     `printf '%s' ${shellQuote(guardHook)} > "$HOME/.claude/hooks/guard.sh" && ` +
     `chmod +x "$HOME/.claude/hooks/guard.sh" && ` +
     `printf '%s' '${guardB64}' | base64 -d > "$HOME/.claude/hooks/guard.js" && ` +

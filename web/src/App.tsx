@@ -166,6 +166,8 @@ export default function App() {
     document.documentElement.classList.toggle("dark", dark);
   }, [dark]);
   const [collapsed, setCollapsed] = usePersisted("asb-collapsed", false);
+  // Thread density: chat (default) folds the agent's work to one line per stretch; trace shows every step.
+  const [traceDensity, setTraceDensity] = usePersisted("asb-trace-density", false);
 
   const cached = React.useRef(readFleetCache());
   const { data, error, live, updatedAt } = usePoll<FleetSnapshot>((signal) => api.fleet(signal), POLL_MS, [], {
@@ -860,6 +862,8 @@ export default function App() {
                     }
                     onBack={backToRail}
                     onNew={newTask}
+                    density={traceDensity ? "trace" : "chat"}
+                    onDensity={(d) => setTraceDensity(d === "trace")}
                     onFocusRequest={onFocusRequest}
                     onRepliesFlushed={() => setReplies((prev) => ({ ...prev, [selectedBox.name]: [] }))}
                     onReplyFailed={(text) =>

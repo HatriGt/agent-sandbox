@@ -32,7 +32,7 @@ import { ChatContainerContent, ChatContainerRoot, ChatContainerScrollAnchor } fr
 import type { TraceEvent } from "@/lib/trace";
 import { LiveRegistryContext, SayKeyContext } from "@/components/viz/live-blocks";
 import { buildLiveRegistry, type SayInput } from "@/lib/viz-identity";
-import { AgentLabel, AnsweredQuestionItem, LifecycleItem, ObserverItem, PlanCard, QueuedItem, RepeatedPolls, SayItem, ThinkingItem, ToolGroup, WorkingIndicator, YouItem, repeatedPolls } from "./TraceItems";
+import { AgentLabel, AnsweredQuestionItem, Density, LifecycleItem, ObserverItem, PlanCard, QueuedItem, RepeatedPolls, SayItem, ThinkingItem, ToolGroup, WorkingIndicator, YouItem, repeatedPolls, type ThreadDensity } from "./TraceItems";
 import { PlanDock } from "./PlanBoard";
 import { ThreadMinimap, type Turn } from "./ThreadMinimap";
 import { useStickToBottom } from "use-stick-to-bottom";
@@ -73,6 +73,8 @@ export function Thread({
   onFocusRequest,
   onReplyFailed,
   onRepliesFlushed,
+  density = "chat",
+  onDensity = () => {},
 }: {
   box: BoxView;
   lifecycle: FleetLifecycle;
@@ -86,6 +88,9 @@ export function Thread({
   onRepliesFlushed?: () => void;
   onBack: () => void;
   onNew: () => void;
+  /** Chat (prose first, work folded) or trace (every step). Persisted by App. */
+  density?: ThreadDensity;
+  onDensity?: (d: ThreadDensity) => void;
   onTornDown: (name: string) => void;
   onFocusRequest?: (focus: () => void) => void;
   /** A reply the server could not deliver: the parent drops its optimistic echo. */
@@ -724,6 +729,8 @@ export function Thread({
         onBack={onBack}
         onNew={onNew}
         onToggleWorkspace={() => (showWorkspace ? closeWorkspace() : setWorkspaceOpen(true))}
+        density={density}
+        onToggleDensity={() => onDensity(density === "chat" ? "trace" : "chat")}
         onToggleKeep={toggleKeep}
         onRename={rename}
         onAttach={(full) => attach(full)}
@@ -756,6 +763,7 @@ export function Thread({
                 content, so the swap reads as the bones filling in. */}
             <LiveRegistryContext.Provider value={liveContext}>
             <RepeatedPolls.Provider value={repeats}>
+            <Density.Provider value={density}>
             <Swap state={loadingTrace} className="flex flex-col gap-5">
             {loadingTrace && <ThreadSkeleton withTask={!!box.task} />}
             {!loadingTrace && groups.map((g, i) => {
@@ -800,7 +808,7 @@ export function Thread({
               ) : g.kind === "think" ? (
                 <div key={key} className="min-w-0">
                   {opensAgent && <AgentLabel live={liveHere} />}
-                  <ThinkingItem text={g.text} live={liveHere} />
+                  {(density === "trace" || liveHere) && <ThinkingItem text={g.text} live={liveHere} />}
                 </div>
               ) : g.kind === "plan" ? (
                 // The dock owns the plan on wide screens; in flow it would be the same board twice.
@@ -816,6 +824,7 @@ export function Thread({
               );
             })}
             </Swap>
+            </Density.Provider>
             </RepeatedPolls.Provider>
             </LiveRegistryContext.Provider>
 

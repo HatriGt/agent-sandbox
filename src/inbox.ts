@@ -137,6 +137,9 @@ export function startInboxDelivery(opts: {
   inbox: Inbox;
   read: (session: string) => Promise<WatchSnapshot>;
   resume: (session: string, message: string) => Promise<unknown>;
+  /** Ids the box's gate delivered MID-turn (src/drivers/inbox-gate.ts); they leave the queue
+   *  without a resume. Polled only while a box has mail, so it costs nothing otherwise. */
+  delivered?: (session: string) => Promise<string[]>;
   intervalMs?: number;
   log?: (msg: string) => void;
 }): () => void {
@@ -152,6 +155,13 @@ export function startInboxDelivery(opts: {
         if (snap.boxStatus === "missing") {
           opts.inbox.clear(session);
           continue;
+        }
+        // Reconcile first, in every state: a message the gate delivered inside the turn must not be
+        // sent again when the turn ends a moment later.
+        if (opts.delivered) {
+          const ids = await opts.delivered(session).catch(() => [] as string[]);
+          for (const id of ids) if (opts.inbox.remove(session, id)) log(`[inbox] ${id} delivered mid-turn to ${session}`);
+          if (!opts.inbox.list(session).length) continue;
         }
         if (snap.runState === "done" || snap.runState === "idle") {
           const batch = opts.inbox.drain(session);

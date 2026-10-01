@@ -81,6 +81,9 @@ export const USAGE_OPEN = "⟦usage⟧";
  * Logs written before this simply carry no stamps and render exactly as before.
  */
 export const AT_MARK = "⟦at⟧";
+/** A user follow-up recorded as a first-class turn in the log (web/src/lib/trace.ts emits `you`). */
+export const YOU_MARK_OPEN = "⟦you⟧";
+export const YOU_MARK_CLOSE = "⟦/you⟧";
 export const DIFF_MAX_LINES = 200;
 export const DIFF_MAX_BYTES = 16384;
 

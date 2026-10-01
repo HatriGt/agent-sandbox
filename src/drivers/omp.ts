@@ -20,6 +20,7 @@ import {
   USAGE_OPEN,
 } from "./sentinels.js";
 import { OMP_SYS_PROMPT } from "./prompts.js";
+import { inboxDeliverFn } from "./inbox-gate.js";
 import type { Driver } from "./types.js";
 
 /**
@@ -151,6 +152,7 @@ export function ompGuardScript(): string {
     `import fs from "node:fs";\n` +
     `const Q = ${JSON.stringify(QUESTION_MARK)};\n` +
     `const AGENT_FILES = /\\/workspace\\/\\.agent\\./;\n` +
+    inboxDeliverFn() +
     `export default function asbGuard(pi) {\n` +
     `  pi.on("tool_call", (ev) => {\n` +
     `    const name = String((ev && ev.toolName) || "");\n` +
@@ -159,6 +161,9 @@ export function ompGuardScript(): string {
     `    const isQuestionWrite = /write/i.test(name) && blob.includes(Q);\n` +
     // A pending question means the turn is OVER: deny everything until the caller answers.
     `    try { if (fs.existsSync(Q)) return { block: true, reason: "A question is pending in " + Q + " and is awaiting the caller. Do NOT take any further action or guess an answer — end your turn now. The session will be resumed with the answer." }; } catch (_) {}\n` +
+    // Mid-turn mail from the operator (src/drivers/inbox-gate.ts): hold this call, quote the message.
+    `    try { var why = asbInbox(fs); if (why) return { block: true, reason: why }; } catch (_) {}
+` +
     // The controller's channel files are not context; only the question write may touch them.
     `    if (AGENT_FILES.test(blob) && !isQuestionWrite) return { block: true, reason: "/workspace/.agent.* files are the controller's channel, not context — never read, print, or modify them." };\n` +
     `  });\n` +

@@ -13,6 +13,7 @@
  * defensive (unknown types dropped, plain text passed through) and the plan card is not claimed.
  */
 import { AGENT_LOG, QUESTION_MARK } from "./sentinels.js";
+import { inboxDeliverFn } from "./inbox-gate.js";
 import { AGENT_SYS_PROMPT } from "./prompts.js";
 import { fmtLoop, fmtPrelude, installJs } from "./fmt-common.js";
 import type { Driver } from "./types.js";
@@ -28,6 +29,7 @@ export function opencodeGatePlugin(): string {
   return (
     `import fs from "node:fs";import os from "node:os";import path from "node:path";import cp from "node:child_process";\n` +
     `const Q=${JSON.stringify(QUESTION_MARK)};\n` +
+    inboxDeliverFn() +
     `const NAMES={bash:"Bash",edit:"Edit",write:"Write",read:"Read",glob:"Glob",grep:"Grep",webfetch:"WebFetch"};\n` +
     `function guard(tool,args){const g=path.join(os.homedir(),".claude","hooks","guard.js");if(!fs.existsSync(g))return null;\n` +
     `  const a=args||{};const input={hook_event_name:"PreToolUse",tool_name:NAMES[tool]||tool,tool_input:Object.assign({},a,a.filePath?{file_path:a.filePath}:{})};\n` +
@@ -37,6 +39,8 @@ export function opencodeGatePlugin(): string {
     `  return null}\n` +
     `export const AsbGate=async()=>({"tool.execute.before":async(input,output)=>{\n` +
     `  if(fs.existsSync(Q))throw new Error("A question is pending in "+Q+" and is awaiting the caller. Do NOT take any further action or guess an answer - end your turn now. It will be resumed with the answer.");\n` +
+    `  {const why=asbInbox(fs);if(why)throw new Error(why)}
+` +
     `  const why=guard(input&&input.tool,output&&output.args);if(why)throw new Error(why)}});\n`
   );
 }

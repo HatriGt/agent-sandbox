@@ -65,7 +65,7 @@ import { seedStarterSkills } from "./starter-skills.js";
 import { parseMcpStore } from "./mcp-store.js";
 import { currentPrincipal, guardDeps, makeOwnership, NotOwnedError, QuotaError, withPrincipal } from "./tenancy.js";
 import { securityHeaders } from "./security-headers.js";
-import { gatherMonitor, gatherWatch, askInBox, driverStateLine, startBoxIfStopped, noteRunning, stopBox, noteStopped, interruptAgentRun, setBoxMemory, isMemoryTier, MEMORY_TIERS, setBoxDisk, isDiskTier, DISK_TIERS, msbIo } from "./msb.js";
+import { gatherMonitor, gatherWatch, askInBox, driverStateLine, startBoxIfStopped, noteRunning, stopBox, noteStopped, interruptAgentRun, mirrorInboxMessage, takeDeliveredInbox, setBoxMemory, isMemoryTier, MEMORY_TIERS, setBoxDisk, isDiskTier, DISK_TIERS, msbIo } from "./msb.js";
 import { isBoxName } from "./sync.js";
 import { shellQuote } from "./exec.js";
 import { touchClaimed, markParked } from "./claims.js";
@@ -505,6 +505,7 @@ startInboxDelivery({
   inbox,
   read: (s) => watchHub.read(s),
   resume: resumeQuietly,
+  delivered: (s) => takeDeliveredInbox(cfg, s),
   log: (m) => console.error(m),
 });
 // Credential broker: a box that pauses to ask for GitHub auth is resumed with the stored account.
@@ -1651,7 +1652,10 @@ app.post("/resume.json", async (req: Request, res: Response) => {
       const snap = await watchHub.read(session);
       if (snap.runState === "running") {
         const q = inbox.enqueue(session, message);
-        res.json({ queued: true, id: q.id });
+        // Mirror it into the box: the gate delivers it at the agent's next tool call, inside the
+        // turn (src/drivers/inbox-gate.ts). Best-effort — turn-end delivery is the fallback.
+        mirrorInboxMessage(cfg, session, q).catch((e) => console.error(`[inbox] mirror to ${session} failed: ${(e as Error).message}`));
+        res.json({ queued: true, id: q.id, delivery: "next-step" });
         return;
       }
     }

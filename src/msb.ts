@@ -50,7 +50,8 @@ import { driverFor } from "./drivers/index.js";
 import { askHookScript, claudeDriver, claudeInstallSh, streamFmtScript } from "./drivers/claude.js";
 import { ompInstallSh, ompSeedSh } from "./drivers/omp.js";
 import { NEED_HOOK, needSetup } from "./drivers/need.js";
-import { AGENT_LOG, AT_MARK, MCP_CONFIG_PATH, PROVIDER_ENV_PATH, QUESTION_MARK, USAGE_OPEN } from "./drivers/sentinels.js";
+import { AGENT_LOG, AT_MARK, MCP_CONFIG_PATH, PROVIDER_ENV_PATH, QUESTION_MARK, USAGE_OPEN, YOU_MARK_CLOSE, YOU_MARK_OPEN } from "./drivers/sentinels.js";
+import { INBOX_APPEND_SH, INBOX_RESET_SH, INBOX_TAKE_DELIVERED_SH, inboxLine, type InboxLine } from "./drivers/inbox-gate.js";
 import { isStalled } from "./stall.js";
 
 // The driver pieces used to live here; re-exported so every existing importer keeps working.
@@ -1028,8 +1029,7 @@ export const RUN_STATE_SH =
 // Sentinels the resume path writes into the log to record a user follow-up as a first-class turn.
 // The trace parser (web/src/lib/trace.ts) recognises the same pair and emits a `you` event, so the
 // user's message is persisted in the durable log and ordered correctly relative to agent output.
-const YOU_MARK_OPEN = "⟦you⟧";
-const YOU_MARK_CLOSE = "⟦/you⟧";
+
 
 /** The question the operator answered, stamped into the log right before their ⟦you⟧ answer, so the
  *  transcript keeps question + options + answer together (the sentinel file itself is deleted). */
@@ -1297,7 +1297,8 @@ export function agentSh(workdir: string, resume: boolean, agent: AgentKind = "cl
     // NOT part of the && chain: a failure to write it (a full disk) must cost us the OOM hint, not
     // the whole run — chaining it would skip `claude` entirely and, with DONE_MARK already removed
     // and all output sent to /dev/null, the box would sit at `idle` with the user's message gone.
-    `rm -f ${DONE_MARK} ${QUESTION_MARK} && echo $$ > ${PID_MARK} && ` +
+    // A fresh turn starts with no stale mid-turn mail or delivery receipts (src/drivers/inbox-gate.ts).
+    `rm -f ${DONE_MARK} ${QUESTION_MARK}; ${INBOX_RESET_SH}; echo $ > ${PID_MARK} && ` +
     `{ cut -d' ' -f1 /proc/uptime > ${START_MARK} || rm -f ${START_MARK}; }; touch ${RUN_MARK} && ` +
     // pipefail so the recorded exit reflects claude's, not the formatter's. Claude's raw stderr also
     // lands in the log (errors aren't JSON). The formatter appends readable lines to the same log as
@@ -1617,6 +1618,26 @@ export async function resumeAgentTask(
  * Escalates TERM → KILL, and as a last resort heals the sentinels in place (exit 253) so the box
  * can never be left wedged in `running`. Returns false when nothing was running.
  */
+/**
+ * Mirror a queued message into a RUNNING box so its PreToolUse gate delivers it at the next tool
+ * call (src/drivers/inbox-gate.ts). Best-effort: a failure leaves the SQLite inbox as the only copy
+ * and the message delivers at turn end as before.
+ */
+export async function mirrorInboxMessage(cfg: Config, box: string, m: InboxLine): Promise<void> {
+  await execWithInput(cfg, box, INBOX_APPEND_SH, inboxLine(m));
+}
+
+/** Ids the box's gate has already delivered mid-turn (and clears the receipt), so the controller
+ *  never re-sends them at turn end. Empty on a sleeping or broken box. */
+export async function takeDeliveredInbox(cfg: Config, box: string): Promise<string[]> {
+  try {
+    const out = await msb(cfg, ["exec", box, "--", "sh", "-lc", INBOX_TAKE_DELIVERED_SH], true, PROBE_TIMEOUT_MS);
+    return out.stdout.split("\n").map((s) => s.trim()).filter((s) => /^q\d+$/.test(s));
+  } catch {
+    return [];
+  }
+}
+
 export async function interruptAgentRun(cfg: Config, box: string, why = "to deliver a message immediately"): Promise<boolean> {
   const reason = why.replace(/[^\w .,-]/g, "");
   const sh =

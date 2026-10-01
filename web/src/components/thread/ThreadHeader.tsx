@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowLeft, Check, FileText, FolderTree, HardDrive, Link2, Loader2, MemoryStick, Moon, MoreHorizontal, Pencil, Pin, PinOff, Plus, RotateCw, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, FileText, FolderTree, HardDrive, Link2, ListTree, Loader2, MemoryStick, MessageSquareText, Moon, MoreHorizontal, Pencil, Pin, PinOff, Plus, RotateCw, Trash2 } from "lucide-react";
 import { Swap } from "@/components/ui/swap";
 import { toast } from "sonner";
 import type { BoxView } from "@/lib/api";
@@ -54,6 +54,8 @@ export function ThreadHeader({
   onBack,
   onNew,
   onToggleWorkspace,
+  density = "chat",
+  onToggleDensity,
   onToggleKeep,
   onRename,
   onAttach,
@@ -93,6 +95,9 @@ export function ThreadHeader({
   onBack: () => void;
   onNew: () => void;
   onToggleWorkspace: () => void;
+  /** Chat (prose first) or trace (every step) — see TraceItems Density. */
+  density?: "chat" | "trace";
+  onToggleDensity?: () => void;
   onToggleKeep: () => void;
   onRename: (title: string) => Promise<void>;
   onAttach: (fullName: string) => void;
@@ -259,6 +264,25 @@ export function ThreadHeader({
             </TooltipTrigger>
             <TooltipContent side="bottom">{sleeping ? "Files — available once the sandbox is awake" : "Browse, diff and edit the workspace"}</TooltipContent>
           </Tooltip>
+
+          {onToggleDensity && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={onToggleDensity}
+                  aria-pressed={density === "trace"}
+                  data-density={density}
+                  className={cn("text-muted-foreground", density === "trace" && "bg-accent text-foreground")}
+                >
+                  {density === "trace" ? <ListTree /> : <MessageSquareText />}
+                  <span className="hidden sm:inline">{density === "trace" ? "Trace" : "Chat"}</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{density === "trace" ? "Every step shown — switch to chat to fold the work" : "Conversation first — switch to trace to see every step"}</TooltipContent>
+            </Tooltip>
+          )}
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

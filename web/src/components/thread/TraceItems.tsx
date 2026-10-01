@@ -21,6 +21,7 @@ import { Lightbox } from "@/components/ui/lightbox";
 import { Collapse } from "@/components/ui/collapse";
 import { LiveLogView, useLiveLog } from "@/components/viz/LiveLog";
 import { liveKind } from "@/lib/viz-live-log";
+import { toolOutputLanguage } from "@/lib/viz-tool-output";
 
 /**
  * Thread items. Three voices, never confusable:
@@ -194,6 +195,15 @@ export function repeatedPolls(events: readonly TraceEvent[]): WeakSet<object> {
 }
 export const RepeatedPolls = React.createContext<WeakSet<object>>(new WeakSet());
 
+/**
+ * How much of the agent's work the thread shows. "chat" (the default) reads like a conversation:
+ * the agent's prose, your messages, questions and results; every stretch of tool work folds to one
+ * line unless it is notable (a test run, a PR, a failed external call) or still running. "trace"
+ * shows every step as before. Thread.tsx provides it; the header toggles it.
+ */
+export type ThreadDensity = "chat" | "trace";
+export const Density = React.createContext<ThreadDensity>("chat");
+
 /** An earlier run of a repeated command: one line (command · what it printed · time), opens in place. */
 function PollRow({ event }: { event: ToolEvent }) {
   const [open, setOpen] = React.useState(false);
@@ -315,7 +325,13 @@ export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolea
   // While working, the group's clock runs from its first stamped call.
   const firstAt = events.find((e) => e.at !== undefined)?.at;
   const now = useNow(anyRunning && firstAt !== undefined);
-  if (events.length === 1) return <ToolItem event={events[0]} live={anyRunning} />;
+  const density = React.useContext(Density);
+  // In chat density a lone finished step folds like any other work — unless it is running, notable,
+  // or its output draws as a visual (a table, a request log…): that IS the result, so it stays.
+  const drawn = events.length === 1 && !!events[0].result && toolOutputLanguage(events[0].result) !== null;
+  if (events.length === 1 && (density === "trace" || anyRunning || notable || drawn)) {
+    return <ToolItem event={events[0]} live={anyRunning} />;
+  }
 
   // Files touched (Write/Edit targets) and commands run — the two facts worth a glance.
   const files = new Set(events.filter((e) => /^(write|edit|multiedit|notebookedit)$/i.test(e.name) && e.arg).map((e) => e.arg!.split(/\s/)[0]));
@@ -912,7 +928,12 @@ export function QueuedItem({
     <div className="enter flex flex-col items-end gap-1.5">
       <span className="label text-muted-foreground flex items-center gap-1.5 pr-1">
         <Clock className="size-3" aria-hidden />
-        {sending ? "Interrupting the turn to deliver this…" : "Queued · delivers when this turn finishes"}
+        {sending ? "Interrupting the turn to deliver this…" : (
+          <>
+            <span className="bg-live breathe size-1.5 rounded-full motion-reduce:animate-none" aria-hidden />
+            Delivering · the agent reads it at its next step
+          </>
+        )}
         {!sending && onSendNow && (
           <button
             type="button"

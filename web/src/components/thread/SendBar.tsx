@@ -301,8 +301,8 @@ export function SendBar({
           if ("queued" in res && res.queued) {
             if (!busy) onReplyFailed?.(echo);
             onQueued?.();
-            toast("Queued for the agent", {
-              description: "It is mid-turn. Your message is delivered the moment this turn finishes.",
+            toast("Sent to the agent", {
+              description: "It is mid-turn. It reads your message at its next step and replies in the thread.",
               icon: <Clock className="size-4" />,
             });
           }
@@ -336,7 +336,7 @@ export function SendBar({
       ? "Waking the sandbox — type ahead, it sends when the machine is back."
       : toAgent
         ? busy
-          ? "Agent is mid-turn — your message is queued until this turn ends."
+          ? "Agent is mid-turn — it reads your message at its next step."
           : phase === "starting"
             ? "Starting up — type ahead, it is delivered once the agent is listening."
             : phase === "asked"
@@ -439,7 +439,7 @@ export function SendBar({
                   ? "Type ahead — sends once the sandbox is awake…"
                   : toAgent
                     ? busy
-                      ? "Queue a follow-up for when this turn finishes…"
+                      ? "Say something — the agent reads it at its next step…"
                       : phase === "fresh"
                         ? "Describe a task for this machine… ( / skills · @ files )"
                         : phase === "starting"
