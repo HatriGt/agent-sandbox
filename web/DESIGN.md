@@ -605,3 +605,11 @@ no new detail was taken from them beyond what this file already records.
 - **Overlays**: menus scale from the Radix trigger origin on a slight-overshoot curve (200 ms in, 120 ms out). Sheets slide in over 240 ms on a drawer curve.
 - **Press**: primary/default buttons press to 0.97; everything else keeps the global 0.985.
 - **Reduced motion**: `<MotionConfig reducedMotion="user">` in `main.tsx` turns off transform and layout animations app-wide, and the components that animate check `useReducedMotion` and fall back to opacity-only or instant changes.
+
+## Run-end pill, not cards (2026-09-30)
+
+- A finished run ends with ONE pill (`thread/RunPill.tsx`, `[data-run-pill="done|failed"]`), replacing the outcome card and the digest card in the thread: rounded-full, `text-micro`, muted, single line, left-aligned with agent prose. Example: `● Done · PR #142 · 3 files +40 −12 · tests 48/48 ✓ · 2m 14s · 121k tokens ▸`.
+- Dot: green done, red failed. Amber never appears here (it means needs-you).
+- Collapsed by default. Click/Enter opens, via `Collapse` (height + fade; plain fade under reduced motion), a borderless key-value list (`[data-run-pill-details]`): summary, started by, driver, model, PR links, diff, tests, verify, exit code, failed commands, questions, sandbox blocks, duration, tokens, cost, followed by, follow-ups.
+- Only recorded facts. Unknown or empty rows are dropped: no "—", no "$ —", no "no questions asked", no "exit 0" when tests or verify already speak. A digest headline that just says "done" is dropped so the state is said once.
+- History keeps `OutcomeCard`/`DigestCard`; the data (`/history/outcome.json`, `/digest.json`) is unchanged.

@@ -19,8 +19,9 @@ import { McpConnectItem } from "./McpItem";
 import { setPrefill } from "@/lib/draft";
 import { RunSummary } from "./RunSummary";
 import { ProducedFiles } from "./ProducedFiles";
-import { DigestCard, useRunDigest } from "./DigestCard";
-import { OutcomeCard, useOutcome } from "./OutcomeCard";
+import { useRunDigest } from "./DigestCard";
+import { useOutcome } from "./OutcomeCard";
+import { RunPill } from "./RunPill";
 import { ThreadHeader } from "./ThreadHeader";
 import { parseTrace, producedFiles } from "@/lib/trace";
 import { deriveTaskBoard, type TaskBoard } from "@/lib/planTasks";
@@ -711,7 +712,6 @@ export function Thread({
             )}
             {inferredRepos && inferredRepos.length > 0 && <AttachedFromTask repos={inferredRepos} />}
 
-            {finished && digest && <DigestCard digest={digest} />}
 
             {/* Skeleton → transcript is a crossfade, not a cut: the placeholder is shaped like the
                 content, so the swap reads as the bones filling in. */}
@@ -833,7 +833,7 @@ export function Thread({
               </p>
             )}
 
-            {finished && outcome && pendingReplies.length === 0 && <OutcomeCard outcome={outcome} />}
+            {finished && (outcome || digest) && pendingReplies.length === 0 && <RunPill outcome={outcome} digest={digest} />}
 
             {!sleeping && !loadingTrace && runState === "done" && pendingReplies.length === 0 && (
               <RunSummary
