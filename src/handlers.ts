@@ -137,6 +137,9 @@ export interface HandlerDeps {
       agent?: string;
       verify?: { command?: string; criterion?: string };
       budget?: { maxMinutes: number; maxUsd?: number; maxTokens?: number };
+      allowDomains?: string[];
+      /** A saved harness id (src/harness.ts): fills what the call leaves out; `attempts: 1` runs one plain delegation. */
+      harness?: string;
       attempts: number;
       attemptSpecs?: Array<{ agent?: string; model?: string; provider?: string; harness?: string }>;
     }
@@ -349,6 +352,13 @@ export function registerTools(
         )
         .optional()
         .describe("Optional per-attempt setup (exactly `attempts` entries). Default: same driver with different models, then other drivers you have providers for."),
+      harness: z
+        .string()
+        .optional()
+        .describe(
+          "A saved harness id (Harnesses page; hrn_…). Fills the driver, provider/model, skills, egress and verify clause this call " +
+            "leaves out — explicit arguments win — and puts the harness rules in the agent's system prompt. Needs source:\"git\"."
+        ),
     },
     async ({
       source,
@@ -368,6 +378,7 @@ export function registerTools(
       budget,
       attempts,
       attemptSpecs,
+      harness,
     }: {
       source?: DelegateSource;
       repo?: string;
@@ -386,15 +397,21 @@ export function registerTools(
       budget?: { maxMinutes: number; maxUsd?: number; maxTokens?: number };
       attempts?: number;
       attemptSpecs?: Array<{ agent?: string; model?: string; provider?: string; harness?: string }>;
+      harness?: string;
     }) => {
       // Validate the verify clause FIRST — a malformed one must be a question before any box work.
       const vp = verifyPlanOf(verify);
       if (!vp.ok) return text(vp.question);
-      if (attempts !== undefined && attempts > 1) {
-        if (!deps.delegateAttempts) return text("This entry point does not support `attempts`; use the HTTP (remote) MCP endpoint.");
-        if (after !== undefined || patch || repos?.some((r) => r.patch)) return text("attempts cannot be combined with `after` or `patch` — each attempt starts from a clean clone.");
-        if (source === "local") return text('attempts need source:"git" (each attempt clones the repo into its own sandbox).');
-        if (!task?.trim()) return text("attempts: what is the task?");
+      // Attempt groups and harness runs share the controller's composer lane (http.ts delegateOnce):
+      // that is where a saved harness is resolved for the caller and folded in before validation,
+      // so an MCP `harness` goes the same way — as a one-attempt delegation — instead of a second copy.
+      const wantHarness = typeof harness === "string" && harness.trim() ? harness.trim() : undefined;
+      if ((attempts !== undefined && attempts > 1) || wantHarness) {
+        const what = attempts !== undefined && attempts > 1 ? "attempts" : "harness";
+        if (!deps.delegateAttempts) return text(`This entry point does not support \`${what}\`; use the HTTP (remote) MCP endpoint.`);
+        if (after !== undefined || patch || repos?.some((r) => r.patch)) return text(`${what} cannot be combined with \`after\` or \`patch\` — the run starts from a clean clone.`);
+        if (source === "local") return text(`${what} needs source:"git" (the sandbox clones the repo itself).`);
+        if (!task?.trim()) return text(`${what}: what is the task?`);
         return text(
           await deps.delegateAttempts(cfg, {
             task,
@@ -405,7 +422,9 @@ export function registerTools(
             ...(agent ? { agent } : {}),
             ...(verify ? { verify } : {}),
             ...(budget ? { budget } : {}),
-            attempts,
+            ...(allowDomains?.length ? { allowDomains } : {}),
+            ...(wantHarness ? { harness: wantHarness } : {}),
+            attempts: attempts ?? 1,
             ...(attemptSpecs ? { attemptSpecs } : {}),
           })
         );

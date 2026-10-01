@@ -20,6 +20,7 @@ import {
   planImport,
   upsertHarness,
   compareFacts,
+  harnessSummaryLine,
   type HarnessDef,
 } from "../src/harness.js";
 import { checkCompareSide, createCompare, getCompare, recordRunHarness, runHarnessOf, listCompares } from "../src/harness-runs.js";
@@ -62,23 +63,37 @@ test("store is per owner; duplicate and approve", () => {
 });
 
 test("resolution precedence: explicit fields win; provider+model travel as a unit; lists replace", () => {
-  const h = def({ driver: "codex" as never, providerId: "prv_x", model: "m-harness", egress: ["a.com"], skills: ["s1"], budget: { maxMinutes: 10 }, rules: { askBeforeGuess: true, planFirst: false, verifyOnDone: true }, verifyCommand: "npm test" });
+  const h = def({ driver: "codex" as never, providerId: "prv_x", model: "m-harness", egress: ["a.com"], skills: ["s1"], rules: { askBeforeGuess: true, planFirst: false, verifyOnDone: true }, verifyCommand: "npm test" });
   const all = applyHarness(h, { task: "do it" });
   assert.equal(all.body.agent, "codex");
   assert.equal(all.body.provider, "prv_x");
   assert.equal(all.body.model, "m-harness");
   assert.deepEqual(all.body.allowDomains, ["a.com"]);
+  assert.deepEqual(all.body.skills, ["s1"]);
   assert.deepEqual(all.body.verify, { command: "npm test" });
-  assert.match(String(all.body.task), /^Harness rules \(H\):[\s\S]*do it$/);
+  assert.deepEqual(all.applied.sort(), ["driver", "egress", "model", "provider", "rules", "skills", "verify"]);
+  // The TASK is the operator's message and stays exactly as typed; the rules come back separately.
+  assert.equal(all.body.task, "do it");
+  assert.match(all.rules!, /^Harness rules \(H\):/);
+  assert.match(all.rules!, /ask a question and wait/);
+  assert.ok(!("budget" in all.body));
   // Run names a model only: the harness's provider must NOT be paired with it.
-  const m = applyHarness(h, { task: "t", model: "mine", agent: "claude", allowDomains: ["b.com"], budget: { maxMinutes: 2 }, verify: { criterion: "x" } });
+  const m = applyHarness(h, { task: "t", model: "mine", agent: "claude", allowDomains: ["b.com"], verify: { criterion: "x" } });
   assert.equal(m.body.provider, undefined);
   assert.equal(m.body.model, "mine");
   assert.equal(m.body.agent, "claude");
   assert.deepEqual(m.body.allowDomains, ["b.com"]);
-  assert.deepEqual(m.body.budget, { maxMinutes: 2 });
   assert.deepEqual(m.body.verify, { criterion: "x" });
   assert.ok(!m.applied.includes("model") && !m.applied.includes("provider"));
+  // An EMPTY list is "nothing picked": the harness's egress and skills still apply.
+  const e = applyHarness(h, { task: "t", allowDomains: [], skills: [] });
+  assert.deepEqual(e.body.allowDomains, ["a.com"]);
+  assert.deepEqual(e.body.skills, ["s1"]);
+  // No toggles and no RULES.md: no rules text, and "rules" is not reported as applied.
+  const none = applyHarness(def(), { task: "t" });
+  assert.equal(none.rules, undefined);
+  assert.ok(!none.applied.includes("rules"));
+  assert.equal(none.body.task, "t");
   // verifyOnDone without a command: a criterion from the task.
   const c = applyHarness(def({ rules: { askBeforeGuess: false, planFirst: false, verifyOnDone: true } }), { task: "fix bug" });
   assert.match(String((c.body.verify as { criterion: string }).criterion), /fix bug/);
@@ -87,7 +102,7 @@ test("resolution precedence: explicit fields win; provider+model travel as a uni
 });
 
 test("export: no provider id/key, provider as kind+label, secrets redacted, secret files skipped", () => {
-  const h = def({ providerId: "prv_secret", model: "gpt", rulesMd: "Use key sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA please", verifyCommand: "TOKEN=ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA npm test", skills: ["s1"], budget: { maxMinutes: 5, maxTokens: 1000 } });
+  const h = def({ providerId: "prv_secret", model: "gpt", rulesMd: "Use key sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA please", verifyCommand: "TOKEN=ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA npm test", skills: ["s1"] });
   const out = buildHarnessBundle(h, {
     provider: { kind: "openai", label: "Work" },
     skills: [{ name: "s1", description: "d", content: "body", enabled: true, addedAt: 1, updatedAt: 1, files: [{ path: ".env", content: "X=1" }, { path: "ok.md", content: "fine" }] } as never],
@@ -101,7 +116,7 @@ test("export: no provider id/key, provider as kind+label, secrets redacted, secr
   assert.deepEqual(out.skipped, ["skills/s1/.env (secret file name)"]);
   const hjFile = JSON.parse(out.bundle.files.find((f) => f.path === "harness.json")!.content);
   assert.deepEqual(hjFile.provider, { kind: "openai", label: "Work" });
-  assert.equal(hjFile.budget.maxTokens, 1000);
+  assert.ok(!("budget" in hjFile));
   // Round-trip: the export re-imports cleanly.
   const parsed = parseHarnessFolder(out.bundle.files);
   assert.equal(parsed.harness.model, "gpt");
@@ -120,6 +135,7 @@ test("import limits: version, format, forbidden keys, secret shapes, sizes, trav
   const many = Array.from({ length: HARNESS_LIMITS.maxBundleFiles + 1 }, (_, i) => ({ path: `skills/a/f${i}.md`, content: "x" }));
   assert.throws(() => parseHarnessFolder([{ path: "harness.json", content: hj() }, ...many]), /too many/);
   const ok = parseHarnessFolder([
+    // An older bundle's budget block is an unknown field now: ignored with a warning, never refused.
     { path: "harness.json", content: hj({ budget: { maxMinutes: 5, maxTokens: 10 } }) },
     { path: "hooks/pre.sh", content: "rm -rf /" },
     { path: "verify.sh", content: "#!/bin/sh\n# c\nnpm test\n" },
@@ -127,6 +143,8 @@ test("import limits: version, format, forbidden keys, secret shapes, sizes, trav
   ]);
   assert.equal(ok.verifySh, "npm test");
   assert.ok(ok.warnings.some((w) => w.startsWith("hooks/")));
+  assert.ok(ok.warnings.some((w) => /"budget"/.test(w)));
+  assert.ok(!("budget" in ok.harness));
   assert.equal(ok.skills[0].enabled, false);
 });
 
@@ -205,7 +223,9 @@ test("built-ins: seeded once per owner, idempotent, deletion hides, edits kept, 
   const bug = getHarness("hrn_builtin-bug-fixer", "n1")!;
   const r = applyHarness(bug, { task: "fix it" });
   assert.deepEqual(r.applied.sort(), ["rules", "verify"]);
-  assert.match(String(r.body.task), /test that fails/);
+  assert.equal(r.body.task, "fix it");
+  assert.match(r.rules!, /test that fails/);
+  assert.equal(harnessSummaryLine(bug), "Bug fixer · asks before guessing · verify on done");
   // Edit in place keeps the built-in tag; a duplicate is custom.
   const edited = upsertHarness({ ...bug, name: "My bug fixer" }, bug.id, "n1");
   assert.equal(edited.builtin, "bug-fixer");

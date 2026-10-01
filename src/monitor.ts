@@ -69,6 +69,11 @@ export interface BoxView {
   title?: string;
   /** Seconds this stopped box has been asleep (claim age), when known. */
   asleepSec?: number;
+  /**
+   * The saved harness this thread started on (src/harness.ts), for the thread header: its name and
+   * the one-line summary ("Bug fixer · asks before guessing · verify on done"). From run_harness.
+   */
+  harness?: { id: string; name: string; line: string };
 }
 
 /** A used/total pair in MiB — the shape a usage meter needs. */

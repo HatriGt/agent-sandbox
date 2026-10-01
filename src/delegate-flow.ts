@@ -55,6 +55,8 @@ export interface DelegateFlowInput {
   budget?: RunBudget;
   /** Harness skill selection (already validated names). */
   skills?: string[];
+  /** Harness rules for the system prompt (src/harness.ts applyHarness `rules`); the task stays clean. */
+  rules?: string;
   /** Repo setup profiles for this owner (see DelegatePlan.setup). */
   setup?: DelegatePlan["setup"];
 }
@@ -97,6 +99,7 @@ export async function runDelegateFlow(
   }
   if (input.budget) v.plan.budget = input.budget;
   if (input.skills) v.plan.skills = input.skills;
+  if (input.rules?.trim()) v.plan.rules = input.rules;
   if (input.setup) v.plan.setup = input.setup;
 
   const tFlow = Date.now();

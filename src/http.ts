@@ -111,7 +111,7 @@ import { hookAuditPath, hookBodyParser, registerTriggerRoutes } from "./trigger-
 import { getTriggerById, logDelivery, pruneDeliveries, type TriggerRow } from "./trigger-store.js";
 import { intakeBodyParser, registerIntakeRoutes } from "./intake-routes.js";
 import { candidateAccounts } from "./gh-token-store.js";
-import { applyHarness, getHarness, loadHarnesses, normalizeEgress, HARNESS_LIMITS, type HarnessDef } from "./harness.js";
+import { applyHarness, getHarness, harnessSummaryLine, loadHarnesses, normalizeEgress, HARNESS_LIMITS, type HarnessDef } from "./harness.js";
 import { reservedBoxes } from "./capacity.js";
 import { archivedDigestOf, checkCompareSide, recordRunHarness, runHarnessOf, skillSelectionBackend } from "./harness-runs.js";
 import { defaultAttemptSpecs, getGroup, groupOfBox, listGroups, makeAttempts, normalizeAttempts, OVERRIDE_WINDOW_MS, specLabel, tieChoices, type AttemptGroup, type AttemptSpec } from "./attempts.js";
@@ -777,6 +777,32 @@ const askBudget = (boxes: BoxView[]): void => {
 };
 
 const lastSeenStatus = new Map<string, boolean>();
+/**
+ * The harness a box started on, as the thread header shows it ("Bug fixer · asks before guessing ·
+ * verify on done"). The link is in run_harness; the rule summary comes from the owner's current
+ * definition (so an edit shows up), falling back to the recorded name if the harness was deleted.
+ * Cached per box — a sweep polls every box every tick and the link never changes after the start.
+ */
+const harnessLineCache = new Map<string, { harness: { id: string; name: string; line: string } } | Record<string, never>>();
+const harnessLineOf = (box: string): { harness: { id: string; name: string; line: string } } | Record<string, never> => {
+  const hit = harnessLineCache.get(box);
+  if (hit) return hit;
+  let out: { harness: { id: string; name: string; line: string } } | Record<string, never> = {};
+  try {
+    const link = runHarnessOf(db, box);
+    if (link?.harnessId) {
+      const def = link.owner ? getHarness(link.harnessId, link.owner) : undefined;
+      const name = def?.name ?? link.harnessName ?? link.harnessId;
+      out = { harness: { id: link.harnessId, name, line: def ? harnessSummaryLine(def) : name } };
+    }
+  } catch {
+    /* a missing link is simply "no harness" */
+  }
+  // Only a found link is cached: a box whose link is recorded moments after its first sweep is
+  // re-checked until it has one (or forever stays a plain run, which costs one indexed read a tick).
+  if ("harness" in out) harnessLineCache.set(box, out);
+  return out;
+};
 const readFleet = makeFleetReader(
   cfg,
   async () => {
@@ -841,6 +867,7 @@ const readFleet = makeFleetReader(
     return boxes.map((b) => ({
       ...b,
       ...(titles[b.name] ? { title: titles[b.name] } : {}),
+      ...harnessLineOf(b.name),
       // The task and any pending question are operator/agent text too — same redaction as the log.
       ...(b.task ? { task: redactor.redact(b.task) } : {}),
       ...(b.question ? { question: redactor.redact(b.question) } : {}),
@@ -2957,9 +2984,12 @@ const startTriggerRun = (input: StartRunInput): Promise<{ ok: true; box: string 
         let hb: Record<string, unknown> = { task: input.task, ...(t.agent ? { agent: t.agent } : {}), ...(t.model ? { model: t.model } : {}) };
         const th = t.harnessId ? getHarness(t.harnessId, input.owner) : undefined;
         if (t.harnessId && !th) return { ok: false as const, question: "The trigger's harness no longer exists." };
+        let hRules: string | undefined;
         if (th) {
           try {
-            hb = applyHarness(th, hb).body as Record<string, unknown>;
+            const applied = applyHarness(th, hb);
+            hb = applied.body as Record<string, unknown>;
+            hRules = applied.rules;
           } catch (e) {
             return { ok: false as const, question: (e as Error).message };
           }
@@ -2982,12 +3012,6 @@ const startTriggerRun = (input: StartRunInput): Promise<{ ok: true; box: string 
           if (!vp.ok) return { ok: false as const, question: vp.question };
           hVerify = vp.plan ?? undefined;
         }
-        let hBudget: RunBudget | undefined;
-        try {
-          hBudget = th ? normalizeBudget(hb.budget) : undefined;
-        } catch (e) {
-          return { ok: false as const, question: (e as Error).message };
-        }
         const hAgent = typeof hb.agent === "string" ? hb.agent : undefined;
         const agent = hAgent && isAgentKind(hAgent) ? hAgent : loadAgentPrefs(input.owner).defaultAgent;
         const hSkills = Array.isArray(hb.skills) ? (hb.skills as string[]) : undefined;
@@ -2999,10 +3023,12 @@ const startTriggerRun = (input: StartRunInput): Promise<{ ok: true; box: string 
           task: typeof hb.task === "string" ? hb.task : input.task,
           model,
           ...(hProvider ? { provider: hProvider } : {}),
-          ...(hBudget ? { budget: hBudget } : {}),
           ...(hVerify ? { verify: hVerify } : {}),
           ...(hEgress?.length ? { allowDomains: hEgress } : {}),
           ...(hSkills ? { skills: hSkills } : {}),
+          ...(hRules ? { rules: hRules } : {}),
+          // A harness-pinned partial-supervision driver carries its own acknowledgement (applyHarness).
+          allowPartialSupervision: hb.allowPartialSupervision === true,
           detach: true,
         });
         if (!r.ok) return { ok: false as const, question: r.question };
@@ -3313,6 +3339,8 @@ const delegateOnce = async (body0: Record<string, unknown>, principal: Principal
     const hOwner = principal.kind === "user" ? principal.userId : OPERATOR_OWNER;
     let harness: HarnessDef | undefined;
     let applied: string[] = [];
+    // The harness RULES go to the agent's system prompt (DelegatePlan.rules), never into the task.
+    let harnessRules: string | undefined;
     if (typeof body.harness === "string" && body.harness) {
       harness = getHarness(body.harness, hOwner);
       if (!harness) {
@@ -3322,6 +3350,7 @@ const delegateOnce = async (body0: Record<string, unknown>, principal: Principal
         const r = applyHarness(harness, body);
         body = r.body as Record<string, unknown>;
         applied = r.applied;
+        harnessRules = r.rules;
       } catch (e) {
         return { status: 400, json: { error: (e as Error).message } };
       }
@@ -3464,6 +3493,7 @@ const delegateOnce = async (body0: Record<string, unknown>, principal: Principal
       verify: verifyPlan,
       ...(allowDomains?.length ? { allowDomains } : {}),
       ...(skills ? { skills } : {}),
+      ...(harnessRules ? { rules: harnessRules } : {}),
       // The browser needs only the box name (the thread attaches over SSE); blocking this response
       // on the interactive wait window made task starts ~50s slower than the box actually was.
       detach: true,
@@ -3634,10 +3664,13 @@ deps.delegateAttempts = async (_c, input) => {
   delete body.attempts;
   delete body.attemptSpecs;
   const r = n.n > 1 ? await delegateAttempts(body, principal, n.n, n.specs, currentStartedBy() ?? { kind: "mcp" }) : await delegateOnce(body, principal);
-  const j = r.json as { ok?: boolean; question?: string; error?: string; attemptGroup?: { id: string; attempts: Array<{ index: number; box: string | null; label: string; branch: string; error?: string }> } };
+  const j = r.json as { ok?: boolean; question?: string; error?: string; harness?: { name: string; applied: string[] }; attemptGroup?: { id: string; attempts: Array<{ index: number; box: string | null; label: string; branch: string; error?: string }> } };
   if (!j.ok) return j.question ?? j.error ?? `Refused (HTTP ${r.status}).`;
   const g = j.attemptGroup;
-  if (!g) return `Delegated. session=${(r.json as { box?: string }).box}`;
+  if (!g) {
+    const h = j.harness ? ` harness=${j.harness.name}${j.harness.applied.length ? ` (set: ${j.harness.applied.join(", ")})` : ""}` : "";
+    return `Delegated. session=${(r.json as { box?: string }).box}${h}\n\nrun:started — follow it with status/watch.`;
+  }
   return (
     `Started attempt group ${g.id}:\n` +
     g.attempts.map((a) => `  ${a.index}. ${a.label} — ${a.box ? `session=${a.box} branch=${a.branch}` : `did not start: ${a.error}`}`).join("\n") +

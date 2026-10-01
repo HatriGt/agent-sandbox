@@ -1,4 +1,4 @@
-import type { AgentId, HarnessRules, HarnessView, RunBudget } from "@/lib/api";
+import type { AgentId, HarnessRules, HarnessView } from "@/lib/api";
 
 /** The editor's working copy of a harness: strings for the free-text fields, parsed on save. */
 export interface HarnessDraft {
@@ -13,9 +13,6 @@ export interface HarnessDraft {
   rulesMd: string;
   verifyCommand: string;
   egress: string;
-  maxMinutes: string;
-  maxUsd: string;
-  maxTokens: string;
 }
 
 export const RULE_LABELS: Array<{ key: keyof HarnessRules; label: string; line: string }> = [
@@ -36,9 +33,6 @@ export function emptyDraft(): HarnessDraft {
     rulesMd: "",
     verifyCommand: "",
     egress: "",
-    maxMinutes: "",
-    maxUsd: "",
-    maxTokens: "",
   };
 }
 
@@ -55,9 +49,6 @@ export function draftOf(h: HarnessView): HarnessDraft {
     rulesMd: h.rulesMd ?? "",
     verifyCommand: h.verifyCommand ?? "",
     egress: (h.egress ?? []).join("\n"),
-    maxMinutes: h.budget?.maxMinutes ? String(h.budget.maxMinutes) : "",
-    maxUsd: h.budget?.maxUsd ? String(h.budget.maxUsd) : "",
-    maxTokens: h.budget?.maxTokens ? String(h.budget.maxTokens) : "",
   };
 }
 
@@ -67,11 +58,6 @@ export function bodyOf(d: HarnessDraft): Record<string, unknown> {
     .split(/[\s,]+/)
     .map((s) => s.trim())
     .filter(Boolean);
-  const budget: Partial<RunBudget> = {};
-  if (d.maxMinutes.trim()) budget.maxMinutes = Number(d.maxMinutes);
-  if (d.maxUsd.trim()) budget.maxUsd = Number(d.maxUsd);
-  if (d.maxTokens.trim()) budget.maxTokens = Number(d.maxTokens);
-  if (!budget.maxMinutes && (budget.maxUsd || budget.maxTokens)) budget.maxMinutes = 60;
   return {
     name: d.name.trim(),
     ...(d.description.trim() ? { description: d.description.trim() } : {}),
@@ -83,16 +69,7 @@ export function bodyOf(d: HarnessDraft): Record<string, unknown> {
     ...(d.rulesMd.trim() ? { rulesMd: d.rulesMd } : {}),
     ...(d.verifyCommand.trim() ? { verifyCommand: d.verifyCommand.trim() } : {}),
     ...(egress.length ? { egress } : {}),
-    ...(budget.maxMinutes ? { budget } : {}),
   };
-}
-
-export function budgetLine(b?: RunBudget): string {
-  if (!b) return "No default budget";
-  const parts = [`${b.maxMinutes} min`];
-  if (b.maxUsd) parts.push(`$${b.maxUsd}`);
-  if (b.maxTokens) parts.push(`${b.maxTokens.toLocaleString()} tokens`);
-  return parts.join(" · ");
 }
 
 export function rulesLine(r: HarnessRules): string {

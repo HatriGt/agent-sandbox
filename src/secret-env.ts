@@ -28,6 +28,9 @@ export const RESERVED_SECRET_KEYS = new Set([
   "ANTHROPIC_MODEL",
   "AGENT_TASK",
   "AGENT_SYS_PROMPT",
+  // Harness rules (src/agent-prompt.ts harnessPromptHint): a caller must not swap the harness the
+  // operator picked for text of their own on the first turn.
+  "AGENT_RULES",
   "CLAUDE_CODE_ENABLE_TASKS",
   "NPM_TOKEN",
   // The omp branch relies on this staying set (an interactive setup wizard would hang a headless

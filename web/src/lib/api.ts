@@ -43,6 +43,8 @@ export interface BoxView {
   stalled?: boolean;
   /** The run's budget and what it has spent so far (usd only for a priced model). */
   budget?: RunBudget & { tokens: number; usd?: number; tripped?: string[] };
+  /** The saved harness this thread started on, with its one-line summary for the header. */
+  harness?: { id: string; name: string; line: string };
 }
 
 /** Per-run budget caps. */
@@ -231,7 +233,6 @@ export interface HarnessView {
   rulesMd?: string;
   verifyCommand?: string;
   egress?: string[];
-  budget?: RunBudget;
   needsReview?: boolean;
   unresolvedProvider?: { kind: string; label: string };
   origin?: { kind: "file" | "github" | "duplicate"; source?: string; at: number };

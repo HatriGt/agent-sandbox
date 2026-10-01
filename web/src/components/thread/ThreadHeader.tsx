@@ -182,7 +182,9 @@ export function ThreadHeader({
   const long = deadlineLabel(deadline);
   // Which resource's request is in flight — the confirm dialog is shared between the two.
   const busyFor = resizeTo?.kind === "disk" ? diskBusy : memoryBusy;
-  const vitals = [box.agent && box.agent !== "claude" && `agent ${({ omp: "oh-my-pi", codex: "Codex CLI", opencode: "OpenCode" } as Record<string, string>)[box.agent] ?? box.agent}`, box.uptime && `${sleeping ? "ran for" : "up"} ${box.uptime}`, box.cpu && `cpu ${box.cpu}`, box.memUsage && `memory ${fmtUsage(box.memUsage)}`, box.disk && `disk ${fmtUsage(box.disk)}`, roleLabel(box.role), budgetLine].filter(Boolean).join(" · ");
+  // The harness this thread started on ("Harness: Bug fixer · asks before guessing · verify on done"):
+  // its rules live in the agent's system prompt, so this line is where the operator sees them applied.
+  const vitals = [box.harness && `Harness: ${box.harness.line}`, box.agent && box.agent !== "claude" && `agent ${({ omp: "oh-my-pi", codex: "Codex CLI", opencode: "OpenCode" } as Record<string, string>)[box.agent] ?? box.agent}`, box.uptime && `${sleeping ? "ran for" : "up"} ${box.uptime}`, box.cpu && `cpu ${box.cpu}`, box.memUsage && `memory ${fmtUsage(box.memUsage)}`, box.disk && `disk ${fmtUsage(box.disk)}`, roleLabel(box.role), budgetLine].filter(Boolean).join(" · ");
 
   // The conversation scroller is a sibling rendered by Thread, not a child, so there is nothing to
   // ref. Scroll events don't bubble but they DO capture, so one capture-phase listener on the
