@@ -2,6 +2,7 @@ import * as React from "react";
 import { Check, Copy, Code2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CodeBlock, CodeBlockCode } from "@/components/ui/code-block";
+import { LiveSlotBadge, LiveSlotContext, useLiveSlotTitle } from "./live-blocks";
 
 /** Fixed categorical slot → CSS var. Never cycles: callers cap series at 8 upstream. */
 export function seriesColor(i: number): string {
@@ -65,6 +66,9 @@ export function VizFrame({
   className?: string;
 }) {
   const [raw, setRaw] = React.useState(false);
+  // A live slot (a block the agent keeps re-emitting) names itself and shows its update age.
+  const slot = React.useContext(LiveSlotContext);
+  const slotTitle = useLiveSlotTitle();
   const [copied, setCopied] = React.useState(false);
   const copy = async () => {
     try {
@@ -76,9 +80,10 @@ export function VizFrame({
     }
   };
   return (
-    <div className={cn("group/viz bg-card not-prose enter my-3 overflow-hidden rounded-xl border", className)}>
+    <div className={cn("group/viz bg-card not-prose enter my-3 overflow-hidden rounded-xl border", className)} data-live-slot={slot ?? undefined}>
       <div className="flex h-8 items-center gap-1 border-b px-3">
-        <span className="text-muted-foreground min-w-0 flex-1 truncate text-micro font-medium">{title}</span>
+        <span className="text-muted-foreground min-w-0 flex-1 truncate text-micro font-medium">{title ?? slotTitle}</span>
+        <LiveSlotBadge />
         {actions}
         {/* Utility controls stay quiet until the card is engaged — same reveal as code blocks. */}
         <button

@@ -18,6 +18,8 @@ import { calloutKind } from "@/lib/viz-extra"
 import { nodeText } from "@/lib/viz"
 import { progressFromItems, tableWorthRich } from "@/lib/viz-tool-output"
 import { ProgressBlock } from "@/components/viz/SmallBlocks"
+import { COPY_LANG, splitLiveTag } from "@/lib/viz-identity"
+import { LiveCopyRow, LiveSlotContext } from "@/components/viz/live-blocks"
 
 export type MarkdownProps = {
   children: string
@@ -66,19 +68,26 @@ const INITIAL_COMPONENTS: Partial<Components> = {
     }
 
     // A fence still streaming in arrives tagged `<lang>__open` (lib/markdown-stream.ts).
-    const { language, open } = splitOpenFence(extractLanguage(className))
+    // A live block (lib/viz-identity.ts) is tagged `<lang>__live<n>`; a collapsed later copy is `vizwas`.
+    const { language: tagged, open } = splitOpenFence(extractLanguage(className))
+    if (tagged === COPY_LANG) return <LiveCopyRow spec={text} />
+    const { language, slot } = splitLiveTag(tagged)
 
     // Output visualizers (docs/output-visualizers.md): opt-in fences (chart / stats / flow / tree /
     // csv / tsv), parseable json, and auto-detected ASCII trees render rich; anything the router
     // does not confidently understand stays a code block. An OPEN fence of a visual language draws
     // the part that has arrived (or a skeleton) so it never flips from code into a chart.
+    // Always the same provider element around the block, so a fence that becomes a live slot (or
+    // gets a new version) keeps its mounted visual: values tween instead of the block replaying.
     const rich = smartBlock(language, text, { open })
-    if (rich) return rich
-
     return (
-      <CodeBlock className={open ? `language-${language}` : className}>
-        <CodeBlockCode code={text} language={language} />
-      </CodeBlock>
+      <LiveSlotContext.Provider value={slot}>
+        {rich ?? (
+          <CodeBlock className={`language-${language}`}>
+            <CodeBlockCode code={text} language={language} />
+          </CodeBlock>
+        )}
+      </LiveSlotContext.Provider>
     )
   },
   // GFM tables upgrade to the sortable DataTable (numeric alignment, magnitude bars, copy CSV).
