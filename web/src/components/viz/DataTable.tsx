@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowDown, ArrowUp } from "lucide-react";
+import { ArrowDown, ArrowUp, Pin, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { cellNumber, csvField } from "@/lib/viz";
 import { VizFrame } from "./VizFrame";
@@ -18,13 +18,22 @@ export function DataTable({
   rows,
   texts,
   title,
+  actions,
+  noChart,
 }: {
   head: React.ReactNode[];
   rows: React.ReactNode[][];
   /** Plain-text mirror of `rows`, used for sorting, CSV copy, and numeric detection. */
   texts: string[][];
   title?: string;
+  /** Extra header controls (ChartBlock's table view passes its chart switch here). */
+  actions?: React.ReactNode;
+  /** Never offer the Table/Chart switch (the host is already a chart). */
+  noChart?: boolean;
 }) {
+  const [query, setQuery] = React.useState("");
+  // Pinned rows are keyed by their text, so a pin survives rows streaming in or re-sorting.
+  const [pins, setPins] = React.useState<string[]>([]);
   const [sort, setSort] = React.useState<{ col: number; dir: 1 | -1 } | null>(null);
   const [view, setView] = React.useState<"table" | "chart">("table");
 
@@ -49,16 +58,25 @@ export function DataTable({
   );
 
   const order = React.useMemo(() => {
-    const idx = texts.map((_, i) => i);
-    if (!sort) return idx;
-    const { col, dir } = sort;
+    const q = query.trim().toLowerCase();
+    let idx = texts.map((_, i) => i);
+    if (q) idx = idx.filter((i) => texts[i].some((t) => (t ?? "").toLowerCase().includes(q)));
+    const pinRank = (i: number) => {
+      const k = pins.indexOf(rowKey(texts[i]));
+      return k < 0 ? Infinity : k;
+    };
+    const { col, dir } = sort ?? { col: -1, dir: 1 };
     return [...idx].sort((a, b) => {
+      const pa = pinRank(a);
+      const pb = pinRank(b);
+      if (pa !== pb) return pa < pb ? -1 : 1;
+      if (col < 0) return a - b;
       const ta = texts[a][col] ?? "";
       const tb = texts[b][col] ?? "";
       if (numeric[col]) return ((cellNumber(ta) ?? 0) - (cellNumber(tb) ?? 0)) * dir;
       return ta.localeCompare(tb) * dir;
     });
-  }, [texts, sort, numeric]);
+  }, [texts, sort, numeric, query, pins]);
 
   const headTexts = React.useMemo(() => head.map((h) => (typeof h === "string" ? h : "")), [head]);
   const csv = React.useMemo(
@@ -71,25 +89,59 @@ export function DataTable({
   const chart = React.useMemo<ChartSpec | null>(() => {
     const labelCols = numeric.map((n, i) => (!n ? i : -1)).filter((i) => i >= 0);
     const numCols = numeric.map((n, i) => (n ? i : -1)).filter((i) => i >= 0);
-    if (labelCols.length !== 1 || numCols.length < 1 || numCols.length > 3 || texts.length < 2 || texts.length > 12) return null;
+    if (noChart || labelCols.length !== 1 || numCols.length < 1 || numCols.length > 3 || texts.length < 2 || texts.length > 12) return null;
     const labels = texts.map((row) => row[labelCols[0]] ?? "");
     const series = numCols.map((c) => ({ name: headTexts[c] || `col ${c + 1}`, data: texts.map((row) => cellNumber(row[c] ?? "") ?? 0) }));
     return { type: "bar", labels, series };
-  }, [numeric, texts, headTexts]);
+  }, [numeric, texts, headTexts, noChart]);
 
   if (chart && view === "chart") {
     return (
-      <div className="relative">
-        <ChartBlock spec={chart} source={csv} />
-        <div className="absolute top-1 right-16">
-          <ViewSwitch view={view} onChange={setView} />
-        </div>
-      </div>
+      <ChartBlock
+        spec={chart}
+        source={csv}
+        noTable
+        actions={
+          <>
+            {actions}
+            <ViewSwitch view={view} onChange={setView} />
+          </>
+        }
+      />
     );
   }
 
   return (
-    <VizFrame title={title ?? `${texts.length} ${texts.length === 1 ? "row" : "rows"}`} source={csv} rawLanguage="text" actions={chart && <ViewSwitch view={view} onChange={setView} />}>
+    <VizFrame title={title ?? `${texts.length} ${texts.length === 1 ? "row" : "rows"}`} source={csv}
+      rawLanguage="text"
+      actions={
+        actions || chart ? (
+          <>
+            {actions}
+            {chart && <ViewSwitch view={view} onChange={setView} />}
+          </>
+        ) : undefined
+      }
+    >
+      {texts.length > 8 && (
+        <label className="flex items-center gap-2 border-b px-3 py-1.5">
+          <Search className="text-faint size-3.5 shrink-0" aria-hidden />
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => e.key === "Escape" && setQuery("")}
+            placeholder="Filter rows"
+            aria-label="Filter rows"
+            className="text-foreground placeholder:text-faint min-w-0 flex-1 bg-transparent text-meta outline-none"
+          />
+          {query && (
+            <span className="text-faint shrink-0 text-micro tabular-nums" aria-live="polite">
+              {order.length} of {texts.length}
+            </span>
+          )}
+        </label>
+      )}
       <div className="max-h-96 overflow-auto">
         <table className="w-full border-collapse text-meta">
           <thead>
@@ -126,8 +178,41 @@ export function DataTable({
             </tr>
           </thead>
           <tbody>
-            {order.map((ri) => (
-              <tr key={ri} className="border-border/50 hover:bg-muted/50 border-b last:border-0">
+            {order.length === 0 && (
+              <tr>
+                <td colSpan={head.length} className="text-faint px-3 py-3 text-center text-micro">
+                  No rows match “{query}”
+                </td>
+              </tr>
+            )}
+            {order.map((ri) => {
+              const key = rowKey(texts[ri]);
+              const pinned = pins.includes(key);
+              const togglePin = () => setPins((p) => (p.includes(key) ? p.filter((k) => k !== key) : [...p, key]));
+              return (
+              <tr
+                key={ri}
+                tabIndex={0}
+                aria-selected={pinned}
+                data-pinned={pinned || undefined}
+                onClick={(e) => {
+                  // Links and buttons inside cells keep their own click; selecting text never pins.
+                  if ((e.target as HTMLElement).closest("a, button")) return;
+                  if (window.getSelection()?.toString()) return;
+                  togglePin();
+                }}
+                onKeyDown={(e) => {
+                  if (e.target !== e.currentTarget) return;
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    togglePin();
+                  }
+                }}
+                className={cn(
+                  "border-border/50 hover:bg-muted/50 focus-visible:bg-muted/60 cursor-pointer border-b outline-none last:border-0",
+                  pinned && "bg-muted/40"
+                )}
+              >
                 {rows[ri].map((cell, c) => {
                   if (!numeric[c]) {
                     // Support-matrix cells: a lone ✓ / ✗ / yes / no wears the functional hue
@@ -136,6 +221,7 @@ export function DataTable({
                     const tone = ["✓", "✔", "yes"].includes(t) ? "text-ok" : ["✗", "✘", "no", "×"].includes(t) ? "text-destructive" : ["—", "-", "n/a"].includes(t) ? "text-faint" : "";
                     return (
                       <td key={c} className={cn("px-3 py-1.5 align-top", tone, tone && "text-center font-medium")}>
+                        {c === 0 && pinned && <Pin className="text-muted-foreground mr-1 inline size-3 -translate-y-px" aria-label="pinned" />}
                         {cell}
                       </td>
                     );
@@ -157,13 +243,16 @@ export function DataTable({
                   );
                 })}
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
     </VizFrame>
   );
 }
+
+const rowKey = (r: string[]) => r.join("\u0001");
 
 /** Table ⇄ Chart, in the card header. Only offered when the data has one obvious chart in it. */
 function ViewSwitch({ view, onChange }: { view: "table" | "chart"; onChange: (v: "table" | "chart") => void }) {

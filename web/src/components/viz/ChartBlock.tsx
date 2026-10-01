@@ -1,7 +1,9 @@
 import * as React from "react";
+import { BarChart3, Table2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ChartSpec } from "@/lib/viz";
 import { VizFrame, seriesColor } from "./VizFrame";
+import { DataTable } from "./DataTable";
 
 /**
  * ```chart fence → an inline SVG chart. Pure SVG on the app's tokens — no chart library, so it
@@ -9,30 +11,100 @@ import { VizFrame, seriesColor } from "./VizFrame";
  * rounded data-ends, 2px gaps between adjacent fills, one axis, fixed series colors (never cycled),
  * direct value labels on bars (the light palette's contrast relief), a legend for ≥2 series, and a
  * per-mark hover tooltip. Marks draw in once; `prefers-reduced-motion` renders them static.
+ *
+ * Interaction: legend entries toggle their series (by name, so the choice survives streaming
+ * growth; at least one stays visible); bar/line/area charts take a category-wide hover band and a
+ * keyboard scrub (←/→, Home/End, Enter pins, Esc clears); a header switch shows the same data as a
+ * table. Series keep their slot color when others hide — color is identity, never re-assigned.
  */
-export function ChartBlock({ spec, source }: { spec: ChartSpec; source: string }) {
+export function ChartBlock({
+  spec,
+  source,
+  actions,
+  noTable,
+}: {
+  spec: ChartSpec;
+  source: string;
+  /** Extra header controls (DataTable passes its own Table/Chart switch here). */
+  actions?: React.ReactNode;
+  /** Suppress the built-in table view (when the host already is a table). */
+  noTable?: boolean;
+}) {
+  const [hidden, setHidden] = React.useState<Set<string>>(() => new Set());
+  const [view, setView] = React.useState<"chart" | "table">("chart");
+  const multi = spec.series.length >= 2 && spec.type !== "donut" && spec.type !== "sparkline";
+  const slots = spec.series.map((_, i) => i).filter((i) => !multi || !hidden.has(spec.series[i].name));
+  const vis: ChartSpec = { ...spec, series: slots.map((i) => spec.series[i]) };
+  const toggle = (name: string) =>
+    setHidden((h) => {
+      const next = new Set(h);
+      if (next.has(name)) next.delete(name);
+      else if (spec.series.filter((s) => !next.has(s.name)).length > 1) next.add(name);
+      return next;
+    });
+  const tableable = !noTable && spec.type !== "sparkline" && spec.labels.length > 0;
+  const switcher = tableable && (
+    <button
+      type="button"
+      onClick={() => setView((v) => (v === "chart" ? "table" : "chart"))}
+      aria-label={view === "chart" ? "Show as table" : "Show as chart"}
+      aria-pressed={view === "table"}
+      className="text-muted-foreground hover:text-foreground grid size-6 cursor-pointer place-items-center rounded-md opacity-60 group-hover/viz:opacity-100 focus-visible:opacity-100"
+    >
+      {view === "chart" ? <Table2 className="size-3.5" /> : <BarChart3 className="size-3.5" />}
+    </button>
+  );
+  const headerActions =
+    actions || switcher ? (
+      <>
+        {actions}
+        {switcher}
+      </>
+    ) : undefined;
+
+  if (tableable && view === "table") {
+    const head = [spec.type === "donut" ? "label" : "", ...spec.series.map((s) => s.name)];
+    const texts = spec.labels.map((l, li) => [l, ...spec.series.map((s) => (s.data[li] === undefined ? "" : `${s.data[li]}${spec.unit ?? ""}`))]);
+    return <DataTable head={head} rows={texts} texts={texts} title={spec.title ?? spec.type} actions={headerActions} noChart />;
+  }
+
   return (
-    <VizFrame title={spec.title ?? spec.type} source={source} rawLanguage="json">
+    <VizFrame title={spec.title ?? spec.type} source={source} rawLanguage="json" actions={headerActions}>
       <div className="px-4 py-3">
         {spec.type === "donut" ? (
           <Donut spec={spec} />
         ) : spec.type === "sparkline" ? (
           <Spark spec={spec} />
         ) : spec.type === "scatter" ? (
-          <Scatter spec={spec} />
+          <Scatter spec={vis} slots={slots} />
         ) : spec.type === "bar" ? (
-          spec.stacked ? <StackedBars spec={spec} /> : <Bars spec={spec} />
+          spec.stacked ? <StackedBars spec={vis} slots={slots} /> : <Bars spec={vis} slots={slots} />
         ) : (
-          <Lines spec={spec} area={spec.type === "area"} />
+          <Lines spec={vis} slots={slots} area={spec.type === "area"} />
         )}
-        {spec.series.length >= 2 && (
-          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
-            {spec.series.map((s, i) => (
-              <span key={s.name} className="text-muted-foreground inline-flex items-center gap-1.5 text-micro">
-                <span aria-hidden className="size-2 rounded-full" style={{ background: seriesColor(i) }} />
-                {s.name}
-              </span>
-            ))}
+        {multi && (
+          <div className="mt-2 flex flex-wrap gap-x-1 gap-y-0.5" role="group" aria-label="Series">
+            {spec.series.map((s, i) => {
+              const off = hidden.has(s.name);
+              return (
+                <button
+                  key={s.name}
+                  type="button"
+                  onClick={() => toggle(s.name)}
+                  aria-pressed={!off}
+                  aria-label={`${off ? "Show" : "Hide"} series ${s.name}`}
+                  data-series={s.name}
+                  className={cn(
+                    "hover:bg-muted/60 inline-flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 text-micro transition-opacity duration-150",
+                    off ? "text-faint line-through opacity-60" : "text-muted-foreground"
+                  )}
+                >
+                  {/* Hidden = hollow ring + strikethrough: state is never carried by color alone. */}
+                  <span aria-hidden className="size-2 rounded-full border-2" style={{ borderColor: seriesColor(i), background: off ? "transparent" : seriesColor(i) }} />
+                  {s.name}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
@@ -40,8 +112,10 @@ export function ChartBlock({ spec, source }: { spec: ChartSpec; source: string }
   );
 }
 
-const fmt = (n: number, unit?: string) =>
-  `${Math.abs(n) >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : Math.abs(n) >= 1e4 ? `${(n / 1e3).toFixed(0)}k` : Number.isInteger(n) ? n : n.toFixed(2)}${unit ?? ""}`;
+const fmt = (n: number | undefined, unit?: string) =>
+  n === undefined || Number.isNaN(n)
+    ? "–"
+    : `${Math.abs(n) >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : Math.abs(n) >= 1e4 ? `${(n / 1e3).toFixed(0)}k` : Number.isInteger(n) ? n : n.toFixed(2)}${unit ?? ""}`;
 
 function useReduced(): boolean {
   return React.useSyncExternalStore(
@@ -55,68 +129,153 @@ function useReduced(): boolean {
   );
 }
 
-/** Shared hover state + tooltip bubble. */
-function Tip({ tip }: { tip: { x: number; y: number; text: string } | null }) {
+type TipState = { x: number | string; y: number | string; text: string; lines?: { color: string; text: string }[] };
+
+/** Shared tooltip bubble: one line, or a header plus a swatch row per series (crosshair read-out). */
+function Tip({ tip }: { tip: TipState | null }) {
   if (!tip) return null;
   return (
     <div
       className="bg-popover text-popover-foreground pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full rounded-md border px-2 py-1 text-micro whitespace-nowrap shadow-e2"
-      style={{ left: tip.x, top: tip.y - 6 }}
+      style={{ left: tip.x, top: typeof tip.y === "number" ? tip.y - 6 : `calc(${tip.y} - 6px)` }}
       role="status"
+      data-viz-tip
     >
-      {tip.text}
+      <div className={cn(tip.lines && "text-muted-foreground")}>{tip.text}</div>
+      {tip.lines?.map((l, i) => (
+        <div key={i} className="flex items-center gap-1.5 tabular-nums">
+          <span aria-hidden className="size-1.5 rounded-full" style={{ background: l.color }} />
+          {l.text}
+        </div>
+      ))}
     </div>
   );
 }
 
+/** Geometry follows streaming growth smoothly — position and size ease instead of jumping. */
+const EASE = "cubic-bezier(0.2, 0, 0, 1)";
+const geo = (reduced: boolean, props: string): React.CSSProperties =>
+  reduced ? {} : { transition: props.split(",").map((p) => `${p.trim()} 250ms ${EASE}`).join(", ") };
+
+/**
+ * Category scrub shared by bars and lines: hover band or ←/→ picks a category; Enter/click pins it
+ * (by label, so a pin survives labels growing while the block streams); Esc clears.
+ */
+function useScrub(labels: string[]) {
+  const [hover, setHover] = React.useState<number | null>(null);
+  const [pin, setPin] = React.useState<string | null>(null);
+  const nL = labels.length;
+  const pinIdx = pin !== null ? labels.indexOf(pin) : -1;
+  const active = hover !== null && hover < nL ? hover : pinIdx >= 0 ? pinIdx : null;
+  const togglePin = (i: number | null) => {
+    if (i !== null) setPin((p) => (p === labels[i] ? null : labels[i]));
+  };
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    let next: number | null = null;
+    if (e.key === "ArrowRight") next = active === null ? 0 : Math.min(nL - 1, active + 1);
+    else if (e.key === "ArrowLeft") next = active === null ? nL - 1 : Math.max(0, active - 1);
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = nL - 1;
+    else if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      togglePin(active);
+      return;
+    } else if (e.key === "Escape") {
+      setHover(null);
+      setPin(null);
+      return;
+    } else return;
+    e.preventDefault();
+    setHover(next);
+  };
+  return {
+    active,
+    pinned: pinIdx,
+    focusProps: { tabIndex: 0, onKeyDown, onBlur: () => setHover(null), onMouseLeave: () => setHover(null) },
+    setHover,
+    togglePin,
+  };
+}
+
+/** Pointer x in viewBox units. */
+const vbX = (e: React.MouseEvent<SVGSVGElement>) => {
+  const r = e.currentTarget.getBoundingClientRect();
+  return ((e.clientX - r.left) / (r.width || 1)) * W;
+};
+
+const FOCUS = "rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring/60";
+
 const W = 560;
 
-function Bars({ spec }: { spec: ChartSpec }) {
+function Bars({ spec, slots }: { spec: ChartSpec; slots: number[] }) {
   const reduced = useReduced();
-  const [tip, setTip] = React.useState<{ x: number; y: number; text: string } | null>(null);
   const nS = spec.series.length;
   const nL = spec.labels.length;
-  const max = Math.max(...spec.series.flatMap((s) => s.data.map((d) => Math.abs(d))), 1);
+  const scrub = useScrub(spec.labels);
+  const max = Math.max(...spec.series.flatMap((s) => s.data.map((d) => Math.abs(d || 0))), 1);
   const plotH = 140;
   const labelH = 16;
   const H = plotH + labelH;
-  const group = W / nL;
+  const group = W / Math.max(nL, 1);
   const barW = Math.max(3, Math.min(28, (group - 8) / nS - 2));
   const showValues = nL * nS <= 16; // selective direct labels, never a number on every mark of a dense chart
+  const a = scrub.active;
+  const tip: TipState | null =
+    a === null
+      ? null
+      : {
+          x: `${((a * group + group / 2) / W) * 100}%`,
+          y: `${((plotH - (Math.max(...spec.series.map((s) => Math.abs(s.data[a] || 0))) / max) * (plotH - 18)) / H) * 100}%`,
+          text: nS > 1 ? spec.labels[a] : `${spec.labels[a]}: ${fmt(spec.series[0].data[a], spec.unit)}`,
+          lines: nS > 1 ? spec.series.map((s, si) => ({ color: seriesColor(slots[si]), text: `${s.name}: ${fmt(s.data[a], spec.unit)}` })) : undefined,
+        };
   return (
     <div className="relative">
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label={spec.title ?? "bar chart"}>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        className={cn("w-full", FOCUS)}
+        role="img"
+        aria-label={`${spec.title ?? "bar chart"} — arrow keys read values, Enter pins`}
+        data-viz-scrub
+        {...scrub.focusProps}
+        onMouseMove={(e) => scrub.setHover(Math.max(0, Math.min(nL - 1, Math.floor(vbX(e) / group))))}
+        onClick={() => scrub.togglePin(a)}
+      >
         {[0.25, 0.5, 0.75].map((f) => (
           <line key={f} x1={0} x2={W} y1={plotH - f * (plotH - 18)} y2={plotH - f * (plotH - 18)} stroke="var(--viz-grid)" strokeWidth={1} />
         ))}
+        {a !== null && <rect x={a * group + 2} y={0} width={group - 4} height={plotH} rx={6} fill="var(--muted)" opacity={0.5} />}
         <line x1={0} x2={W} y1={plotH} y2={plotH} stroke="var(--line-strong)" strokeWidth={1} />
         {spec.labels.map((label, li) => {
           const cx = li * group + group / 2;
           const total = nS * barW + (nS - 1) * 2;
+          const dim = a !== null && a !== li;
           return (
-            <g key={li}>
+            <g key={li} opacity={dim ? 0.45 : 1} style={geo(reduced, "opacity")}>
               {spec.series.map((s, si) => {
-                const v = s.data[li];
+                const v = s.data[li] || 0;
                 const h = (Math.abs(v) / max) * (plotH - 18);
                 const x = cx - total / 2 + si * (barW + 2);
                 const y = plotH - h;
+                const hh = Math.max(h, 1);
                 return (
-                  <g key={si}>
+                  <g key={s.name}>
                     <rect
                       x={x}
                       y={y}
                       width={barW}
-                      height={Math.max(h, 1)}
+                      height={hh}
                       rx={Math.min(4, barW / 2)}
-                      fill={seriesColor(si)}
+                      fill={seriesColor(slots[si])}
                       className={cn(!reduced && "viz-grow")}
-                      style={{ transformOrigin: `${x + barW / 2}px ${plotH}px`, animationDelay: `${(li * nS + si) * 25}ms` }}
-                      onMouseEnter={(e) => {
-                        const host = (e.currentTarget.ownerSVGElement!.parentElement as HTMLElement).getBoundingClientRect();
-                        const r = e.currentTarget.getBoundingClientRect();
-                        setTip({ x: r.left - host.left + r.width / 2, y: r.top - host.top, text: `${label}${nS > 1 ? ` · ${s.name}` : ""}: ${fmt(v, spec.unit)}` });
-                      }}
-                      onMouseLeave={() => setTip(null)}
+                      style={
+                        {
+                          x, y, width: barW, height: hh,
+                          ...geo(reduced, "x, y, width, height"),
+                          transformOrigin: `${x + barW / 2}px ${plotH}px`,
+                          animationDelay: `${Math.min((li * nS + si) * 25, 300)}ms`,
+                        } as React.CSSProperties
+                      }
                     />
                     {showValues && (
                       <text x={x + barW / 2} y={y - 4} textAnchor="middle" className="fill-muted-foreground" fontSize={10}>
@@ -126,7 +285,8 @@ function Bars({ spec }: { spec: ChartSpec }) {
                   </g>
                 );
               })}
-              <text x={cx} y={H - 2} textAnchor="middle" className="fill-muted-foreground" fontSize={10}>
+              {scrub.pinned === li && <rect x={cx - 3} y={plotH + 1} width={6} height={2} rx={1} fill="var(--foreground)" aria-hidden />}
+              <text x={cx} y={H - 2} textAnchor="middle" className={scrub.pinned === li ? "fill-foreground" : "fill-muted-foreground"} fontSize={10}>
                 {label.length > Math.max(4, group / 7) ? label.slice(0, Math.max(3, Math.floor(group / 7))) + "…" : label}
               </text>
             </g>
@@ -139,56 +299,80 @@ function Bars({ spec }: { spec: ChartSpec }) {
 }
 
 /** Stacked bars: one column per label, segments in slot order with a 2px surface gap between fills. */
-function StackedBars({ spec }: { spec: ChartSpec }) {
+function StackedBars({ spec, slots }: { spec: ChartSpec; slots: number[] }) {
   const reduced = useReduced();
-  const [tip, setTip] = React.useState<{ x: number; y: number; text: string } | null>(null);
+  const scrub = useScrub(spec.labels);
   const nL = spec.labels.length;
-  const totals = spec.labels.map((_, li) => spec.series.reduce((a, s) => a + s.data[li], 0));
+  const totals = spec.labels.map((_, li) => spec.series.reduce((acc, s) => acc + (s.data[li] || 0), 0));
   const max = Math.max(...totals, 1);
   const plotH = 140;
   const H = plotH + 16;
-  const group = W / nL;
+  const group = W / Math.max(nL, 1);
   const barW = Math.max(6, Math.min(32, group - 12));
+  const a = scrub.active;
+  const tip: TipState | null =
+    a === null
+      ? null
+      : {
+          x: `${((a * group + group / 2) / W) * 100}%`,
+          y: `${((plotH - (totals[a] / max) * (plotH - 18)) / H) * 100}%`,
+          text: `${spec.labels[a]} · ${fmt(totals[a], spec.unit)}`,
+          lines: spec.series.map((s, si) => ({ color: seriesColor(slots[si]), text: `${s.name}: ${fmt(s.data[a], spec.unit)}` })).reverse(),
+        };
   return (
     <div className="relative">
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label={spec.title ?? "stacked bar chart"}>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        className={cn("w-full", FOCUS)}
+        role="img"
+        aria-label={`${spec.title ?? "stacked bar chart"} — arrow keys read values, Enter pins`}
+        data-viz-scrub
+        {...scrub.focusProps}
+        onMouseMove={(e) => scrub.setHover(Math.max(0, Math.min(nL - 1, Math.floor(vbX(e) / group))))}
+        onClick={() => scrub.togglePin(a)}
+      >
         {[0.25, 0.5, 0.75].map((f) => (
           <line key={f} x1={0} x2={W} y1={plotH - f * (plotH - 18)} y2={plotH - f * (plotH - 18)} stroke="var(--viz-grid)" strokeWidth={1} />
         ))}
+        {a !== null && <rect x={a * group + 2} y={0} width={group - 4} height={plotH} rx={6} fill="var(--muted)" opacity={0.5} />}
         <line x1={0} x2={W} y1={plotH} y2={plotH} stroke="var(--line-strong)" strokeWidth={1} />
         {spec.labels.map((label, li) => {
           const x = li * group + (group - barW) / 2;
           let yCursor = plotH;
+          const dim = a !== null && a !== li;
           return (
-            <g key={li}>
+            <g key={li} opacity={dim ? 0.45 : 1} style={geo(reduced, "opacity")}>
               {spec.series.map((s, si) => {
-                const v = s.data[li];
+                const v = s.data[li] || 0;
                 const h = (v / max) * (plotH - 18);
                 yCursor -= h;
                 const y = yCursor;
                 yCursor -= 2; // the 2px surface gap between stacked fills
                 if (h <= 0) return null;
+                const hh = Math.max(h, 1);
                 return (
                   <rect
-                    key={si}
+                    key={s.name}
                     x={x}
                     y={y}
                     width={barW}
-                    height={Math.max(h - (si < spec.series.length - 1 ? 0 : 0), 1)}
+                    height={hh}
                     rx={si === spec.series.length - 1 ? Math.min(4, barW / 2) : 1}
-                    fill={seriesColor(si)}
+                    fill={seriesColor(slots[si])}
                     className={cn(!reduced && "viz-grow")}
-                    style={{ transformOrigin: `${x + barW / 2}px ${plotH}px`, animationDelay: `${li * 30}ms` }}
-                    onMouseEnter={(e) => {
-                      const host = (e.currentTarget.ownerSVGElement!.parentElement as HTMLElement).getBoundingClientRect();
-                      const r = e.currentTarget.getBoundingClientRect();
-                      setTip({ x: r.left - host.left + r.width / 2, y: r.top - host.top, text: `${label} · ${s.name}: ${fmt(v, spec.unit)} of ${fmt(totals[li], spec.unit)}` });
-                    }}
-                    onMouseLeave={() => setTip(null)}
+                    style={
+                      {
+                        x, y, width: barW, height: hh,
+                        ...geo(reduced, "x, y, width, height"),
+                        transformOrigin: `${x + barW / 2}px ${plotH}px`,
+                        animationDelay: `${Math.min(li * 30, 300)}ms`,
+                      } as React.CSSProperties
+                    }
                   />
                 );
               })}
-              <text x={x + barW / 2} y={H - 2} textAnchor="middle" className="fill-muted-foreground" fontSize={10}>
+              {scrub.pinned === li && <rect x={x + barW / 2 - 3} y={plotH + 1} width={6} height={2} rx={1} fill="var(--foreground)" aria-hidden />}
+              <text x={x + barW / 2} y={H - 2} textAnchor="middle" className={scrub.pinned === li ? "fill-foreground" : "fill-muted-foreground"} fontSize={10}>
                 {label.length > Math.max(4, group / 7) ? label.slice(0, Math.max(3, Math.floor(group / 7))) + "…" : label}
               </text>
               {nL <= 12 && (
@@ -206,8 +390,8 @@ function StackedBars({ spec }: { spec: ChartSpec }) {
 }
 
 /** Scatter: dots at (label index, value); ≤ 3 series (the palette's all-pairs cap), ≥8px markers. */
-function Scatter({ spec }: { spec: ChartSpec }) {
-  const [tip, setTip] = React.useState<{ x: number; y: number; text: string } | null>(null);
+function Scatter({ spec, slots }: { spec: ChartSpec; slots: number[] }) {
+  const [tip, setTip] = React.useState<TipState | null>(null);
   const plotH = 140;
   const H = plotH + 16;
   const nL = spec.labels.length;
@@ -227,11 +411,11 @@ function Scatter({ spec }: { spec: ChartSpec }) {
         {spec.series.map((s, si) =>
           s.data.map((v, i) => (
             <circle
-              key={`${si}-${i}`}
+              key={`${s.name}-${i}`}
               cx={px(i)}
               cy={py(v)}
               r={4}
-              fill={seriesColor(si)}
+              fill={seriesColor(slots[si])}
               stroke="var(--card)"
               strokeWidth={2}
               onMouseEnter={(e) => {
@@ -256,21 +440,41 @@ function Scatter({ spec }: { spec: ChartSpec }) {
   );
 }
 
-function Lines({ spec, area }: { spec: ChartSpec; area: boolean }) {
+/** Line / area with a crosshair that reads every visible series at the hovered category. */
+function Lines({ spec, slots, area }: { spec: ChartSpec; slots: number[]; area: boolean }) {
   const reduced = useReduced();
-  const [tip, setTip] = React.useState<{ x: number; y: number; text: string } | null>(null);
+  const scrub = useScrub(spec.labels);
   const H = 156;
   const plotH = 140;
   const nL = spec.labels.length;
-  const all = spec.series.flatMap((s) => s.data);
+  const all = spec.series.flatMap((s) => s.data.filter((v) => typeof v === "number"));
   const max = Math.max(...all, 0);
   const min = Math.min(...all, 0);
   const span = max - min || 1;
   const px = (i: number) => (nL === 1 ? W / 2 : (i / (nL - 1)) * (W - 16) + 8);
-  const py = (v: number) => plotH - ((v - min) / span) * (plotH - 16) - 4;
+  const py = (v: number) => plotH - (((v || 0) - min) / span) * (plotH - 16) - 4;
+  const a = scrub.active;
+  const tip: TipState | null =
+    a === null
+      ? null
+      : {
+          x: `${(px(a) / W) * 100}%`,
+          y: `${(Math.min(...spec.series.map((s) => py(s.data[a]))) / H) * 100}%`,
+          text: spec.series.length > 1 ? spec.labels[a] : `${spec.labels[a]}: ${fmt(spec.series[0].data[a], spec.unit)}`,
+          lines: spec.series.length > 1 ? spec.series.map((s, si) => ({ color: seriesColor(slots[si]), text: `${s.name}: ${fmt(s.data[a], spec.unit)}` })) : undefined,
+        };
   return (
     <div className="relative">
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label={spec.title ?? "line chart"}>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        className={cn("w-full", FOCUS)}
+        role="img"
+        aria-label={`${spec.title ?? "line chart"} — arrow keys scrub, Enter pins`}
+        data-viz-scrub
+        {...scrub.focusProps}
+        onMouseMove={(e) => scrub.setHover(nL <= 1 ? 0 : Math.max(0, Math.min(nL - 1, Math.round(((vbX(e) - 8) / (W - 16)) * (nL - 1)))))}
+        onClick={() => scrub.togglePin(a)}
+      >
         {[0.25, 0.5, 0.75].map((f) => (
           <line key={f} x1={0} x2={W} y1={plotH * (1 - f)} y2={plotH * (1 - f)} stroke="var(--viz-grid)" strokeWidth={1} />
         ))}
@@ -278,38 +482,40 @@ function Lines({ spec, area }: { spec: ChartSpec; area: boolean }) {
         {spec.series.map((s, si) => {
           const d = s.data.map((v, i) => `${i ? "L" : "M"}${px(i)},${py(v)}`).join(" ");
           return (
-            <g key={si}>
-              {area && (
-                <path d={`${d} L${px(nL - 1)},${plotH} L${px(0)},${plotH} Z`} fill={seriesColor(si)} opacity={0.12} />
-              )}
-              <path d={d} fill="none" stroke={seriesColor(si)} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={cn(!reduced && "viz-draw")} pathLength={1} />
-              {s.data.map((v, i) => (
-                <circle
-                  key={i}
-                  cx={px(i)}
-                  cy={py(v)}
-                  r={8}
-                  fill="transparent"
-                  onMouseEnter={(e) => {
-                    const host = (e.currentTarget.ownerSVGElement!.parentElement as HTMLElement).getBoundingClientRect();
-                    const r = e.currentTarget.getBoundingClientRect();
-                    setTip({ x: r.left - host.left + r.width / 2, y: r.top - host.top + 4, text: `${spec.labels[i]}${spec.series.length > 1 ? ` · ${s.name}` : ""}: ${fmt(v, spec.unit)}` });
-                  }}
-                  onMouseLeave={() => setTip(null)}
-                />
-              ))}
+            <g key={s.name}>
+              {area && <path d={`${d} L${px(s.data.length - 1)},${plotH} L${px(0)},${plotH} Z`} fill={seriesColor(slots[si])} opacity={0.12} />}
+              <path d={d} fill="none" stroke={seriesColor(slots[si])} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className={cn(!reduced && "viz-draw")} pathLength={1} />
               {/* Direct end-label: name the line at its last point when few series (identity ≠ color alone). */}
               {spec.series.length <= 4 && spec.series.length >= 2 && (
-                <text x={px(nL - 1) - 2} y={py(s.data[nL - 1]) - 6} textAnchor="end" className="fill-muted-foreground" fontSize={10}>
+                <text x={px(s.data.length - 1) - 2} y={py(s.data[s.data.length - 1]) - 6} textAnchor="end" className="fill-muted-foreground" fontSize={10}>
                   {s.name}
                 </text>
               )}
             </g>
           );
         })}
+        {a !== null && (
+          <g aria-hidden pointerEvents="none">
+            <line x1={px(a)} x2={px(a)} y1={4} y2={plotH} stroke="var(--line-strong)" strokeWidth={1} strokeDasharray="3 3" />
+            {spec.series.map((s, si) =>
+              typeof s.data[a] === "number" ? (
+                <circle
+                  key={s.name}
+                  cx={px(a)}
+                  cy={py(s.data[a])}
+                  r={4}
+                  fill={seriesColor(slots[si])}
+                  stroke="var(--card)"
+                  strokeWidth={2}
+                  style={{ cx: px(a), cy: py(s.data[a]), ...geo(reduced, "cx, cy") } as React.CSSProperties}
+                />
+              ) : null
+            )}
+          </g>
+        )}
         {spec.labels.map((label, i) =>
-          nL <= 12 || i % Math.ceil(nL / 12) === 0 ? (
-            <text key={i} x={px(i)} y={H - 2} textAnchor="middle" className="fill-muted-foreground" fontSize={10}>
+          nL <= 12 || i % Math.ceil(nL / 12) === 0 || i === a ? (
+            <text key={i} x={px(i)} y={H - 2} textAnchor="middle" className={i === a || i === scrub.pinned ? "fill-foreground" : "fill-muted-foreground"} fontSize={10}>
               {label.length > 8 ? label.slice(0, 7) + "…" : label}
             </text>
           ) : null
@@ -321,7 +527,7 @@ function Lines({ spec, area }: { spec: ChartSpec; area: boolean }) {
 }
 
 function Donut({ spec }: { spec: ChartSpec }) {
-  const [tip, setTip] = React.useState<{ x: number; y: number; text: string } | null>(null);
+  const [tip, setTip] = React.useState<TipState | null>(null);
   const data = spec.series[0].data;
   const total = data.reduce((a, b) => a + b, 0) || 1;
   const R = 56;
