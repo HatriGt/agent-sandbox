@@ -70,6 +70,8 @@ export interface BoxView {
    * the one-line summary ("Bug fixer · asks before guessing · verify on done"). From run_harness.
    */
   harness?: { id: string; name: string; line: string };
+  /** Skills the run was pointed at: explicit `/name` from the user, or the controller's auto match. */
+  skills?: { name: string; how: "explicit" | "auto" }[];
 }
 
 /** A used/total pair in MiB — the shape a usage meter needs. */

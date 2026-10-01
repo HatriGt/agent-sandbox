@@ -12,6 +12,7 @@ import type { TraceEvent, PlanItem } from "./trace.js";
 import type { VerifyResult } from "./verify.js";
 import { AGENT_LABELS, isAgentKind } from "./agent-kind.js";
 import type { StartedBy } from "./started-by.js";
+import type { SkillPick } from "./skill-match.js";
 
 export interface DigestFile {
   path: string;
@@ -37,6 +38,8 @@ export interface DigestInput {
   provider?: string;
   /** How the run was started, recorded at delegation time (src/started-by.ts). */
   startedBy?: StartedBy;
+  /** Skills the controller pointed the run at (src/skill-match.ts), explicit or auto. */
+  skills?: SkillPick[];
 }
 
 /** Receipt provenance: who ran this. Only known facts; absent fields were not recorded. */
@@ -47,6 +50,8 @@ export interface DigestProvenance {
   provider?: string;
   /** How the run was started: manual (dashboard), mcp, after: handoff, or a trigger. */
   startedBy?: StartedBy;
+  /** Skills suggested (auto) or requested (explicit) for the run. */
+  skills?: SkillPick[];
 }
 
 export interface DigestPlanStep extends PlanItem {
@@ -194,6 +199,7 @@ export function buildDigest(input: DigestInput): RunDigest {
     ...(input.model ? { model: input.model } : {}),
     ...(input.provider ? { provider: input.provider } : {}),
     ...(input.startedBy ? { startedBy: input.startedBy } : {}),
+    ...(input.skills?.length ? { skills: input.skills } : {}),
   };
 
   return {

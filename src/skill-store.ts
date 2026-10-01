@@ -251,7 +251,7 @@ function ustarHeader(path: string, size: number, mtimeSec: number): Buffer {
  * installSkills streams into the box over stdin (`base64 -d | tar -x`). Pure, so it's testable;
  * base64 because the payload crosses ssh → msb exec → sh unmangled that way.
  */
-export function buildSkillsTarBase64(skills: SkillDef[]): string {
+export function buildSkillsTarBase64(skills: SkillDef[], index?: string): string {
   const blocks: Buffer[] = [];
   const add = (path: string, text: string, mtimeMs: number) => {
     const body = Buffer.from(text, "utf8");
@@ -268,6 +268,9 @@ export function buildSkillsTarBase64(skills: SkillDef[]): string {
       add(`${s.name}/${f.path}`, f.content, s.updatedAt);
     }
   }
+  // The skills index (src/skill-match.ts skillsIndex) at the tree root: no SKILL.md beside it, so
+  // Claude Code's loader ignores it; the run wrapper appends it to every driver's system prompt.
+  if (index) add("INDEX.md", `${index}\n`, Date.now());
   blocks.push(Buffer.alloc(1024)); // end-of-archive
   return Buffer.concat(blocks).toString("base64");
 }

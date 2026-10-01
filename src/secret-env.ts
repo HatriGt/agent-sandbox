@@ -31,6 +31,8 @@ export const RESERVED_SECRET_KEYS = new Set([
   // Harness rules (src/agent-prompt.ts harnessPromptHint): a caller must not swap the harness the
   // operator picked for text of their own on the first turn.
   "AGENT_RULES",
+  // The controller's per-turn skill line (src/skill-match.ts skillTurnHint).
+  "AGENT_SKILL_HINT",
   "CLAUDE_CODE_ENABLE_TASKS",
   "NPM_TOKEN",
   // The omp branch relies on this staying set (an interactive setup wizard would hang a headless

@@ -12,7 +12,8 @@ import { listClaims, listKept, listParked, markClaimed, shouldKeepStopped, unmar
 import { askParkTtlSec } from "./snapshot.js";
 import { guardNodeProgram } from "./guard.js";
 import { loadMcpStore, toClaudeMcpConfig } from "./mcp-store.js";
-import { boxSkillSelection, buildSkillsTarBase64, loadSkillStore, skillsForBox } from "./skill-store.js";
+import { boxSkillSelection, buildSkillsTarBase64, loadSkillStore, skillsForBox, type SkillDef } from "./skill-store.js";
+import { SKILLS_DIR, SKILLS_INDEX, recordSkillPicks, skillTurnHint, skillsIndex } from "./skill-match.js";
 import { harnessPromptHint, reposPromptHint, type RepoLayout } from "./agent-prompt.js";
 import { secretEnvFlags } from "./secret-env.js";
 import type { AgentKind } from "./agent-kind.js";
@@ -1174,27 +1175,38 @@ export async function preinstallNpmPackages(cfg: Config, box: string, specs: str
 
 /** Where dashboard-configured skills land inside the box. `--setting-sources user` loads exactly
  *  this tree, so the in-box claude discovers them natively (and repo-shipped skills never load). */
-const SKILLS_DIR = "/root/.claude/skills";
-
 /**
  * Sync the owner's enabled skills into the box before every run/resume: the whole tree is replaced,
  * so an edit, a disable, or a delete on the dashboard reaches the very next turn. One exec for all
- * of them. Best-effort: a skill must never block a run.
+ * of them, plus the skills index (SKILLS_INDEX) every driver's prompt picks up. Best-effort: a skill
+ * must never block a run. Returns the installed set (empty on failure) for the per-turn skill hint.
  */
-export async function installSkills(cfg: Config, box: string): Promise<void> {
+export async function installSkills(cfg: Config, box: string): Promise<SkillDef[]> {
   try {
     const skills = skillsForBox(await loadSkillStore(cfg), boxSkillSelection(box));
     if (!skills.length) {
       await exec(cfg, box, `rm -rf ${SKILLS_DIR}`);
-      return;
+      return [];
     }
     // The payload rides stdin as a base64 tar, not argv: skills carry whole file trees now
     // (scripts/, docs/, …) and a shell argument caps at ~128 KB — see execWithInput.
-    const tarB64 = buildSkillsTarBase64(skills);
+    const tarB64 = buildSkillsTarBase64(skills, skillsIndex(skills));
     await execWithInput(cfg, box, `rm -rf ${SKILLS_DIR} && mkdir -p ${SKILLS_DIR} && base64 -d | tar -xf - -C ${SKILLS_DIR}`, tarB64);
+    return skills;
   } catch (e) {
     console.error(`[skills] could not install skills into ${box}:`, (e as Error).message);
+    return [];
   }
+}
+
+/**
+ * The per-turn skill env (src/skill-match.ts skillTurnHint): an explicit `/name` on any turn, or the
+ * matcher's suggestions on the first. Recorded on the run so the UI can show "Skills: x (auto)".
+ */
+function skillHintFlags(box: string, task: string, skills: SkillDef[], firstTurn: boolean): string[] {
+  const { hint, picks } = skillTurnHint(task, skills, firstTurn);
+  recordSkillPicks(box, picks);
+  return hint ? ["-e", `AGENT_SKILL_HINT=${hint}`] : [];
 }
 
 /**
@@ -1254,7 +1266,19 @@ export function agentSh(workdir: string, resume: boolean, agent: AgentKind = "cl
     // place the rules join the prompt, so the task the operator typed is never rewritten.
     (resume ? `` : `{ if [ -n "$AGENT_RULES" ]; then printf '%s\\n' "$AGENT_RULES" > ${RULES_MARK}; else rm -f ${RULES_MARK}; fi; } && `) +
     `{ if [ -s ${RULES_MARK} ]; then AGENT_SYS_PROMPT="$AGENT_SYS_PROMPT $(cat ${RULES_MARK})"; export AGENT_SYS_PROMPT; fi; } && ` +
+    // Skills index (installSkills writes it each turn): appended the same way for every driver, so
+    // codex/opencode/omp learn the playbooks exist too, not only Claude Code's native loader.
+    `{ if [ -s ${SKILLS_INDEX} ]; then AGENT_SYS_PROMPT="$AGENT_SYS_PROMPT $(cat ${SKILLS_INDEX})"; export AGENT_SYS_PROMPT; fi; } && ` +
+    // Per-turn skill hint (skillHintFlags). First turn: system prompt, which every driver reads on
+    // turn one. Resume: prefixed to the task AFTER the ⟦you⟧ echo (the transcript keeps the clean
+    // message), because codex/opencode/omp only send $AGENT_SYS_PROMPT on their first prompt.
+    (resume
+      ? ``
+      : `{ if [ -n "$AGENT_SKILL_HINT" ]; then AGENT_SYS_PROMPT="$AGENT_SYS_PROMPT $AGENT_SKILL_HINT"; export AGENT_SYS_PROMPT; fi; } && `) +
     echoFollowup +
+    (resume
+      ? `{ if [ -n "$AGENT_SKILL_HINT" ]; then AGENT_TASK="$(printf '%s\\n\\n%s' "$AGENT_SKILL_HINT" "$AGENT_TASK")"; export AGENT_TASK; fi; } && `
+      : ``) +
     // $$ is this wrapper's pid — the process that writes DONE_MARK at the end — recorded so status
     // reads can tell a live run from a stale marker left by a mid-run VM stop (see RUN_STATE_SH).
     //
@@ -1381,14 +1405,14 @@ export async function runAgentTask(
     }
   };
   const prepMarks: string[] = [];
-  await Promise.all([
+  const [, , , skills] = await Promise.all([
     timed("creds", applyGitCredentials(cfg, box, creds)),
     timed("trust", trustWorkspace(cfg, box)),
     timed("mcp", installMcpConfig(cfg, box)),
     timed("skills", installSkills(cfg, box)),
   ]);
   const t3 = Date.now();
-  const r = await msb(cfg, ["exec", box, ...env, "--", "sh", "-lc", agentSh(workdir, false, agent)]);
+  const r = await msb(cfg, ["exec", box, ...env, ...skillHintFlags(box, task, skills, true), "--", "sh", "-lc", agentSh(workdir, false, agent)]);
   console.error(
     `[timing] runAgentTask ${box} taskmark=${t1 - t0}ms bootstrap=${t2 - t1}ms prep=${t3 - t2}ms (${prepMarks.join(" ")}) exec=${Date.now() - t3}ms`
   );
@@ -1558,7 +1582,7 @@ export async function resumeAgentTask(
   // by an older controller keeps that build's formatter/guard for the whole life of the sandbox
   // otherwise, so a deploy that changes the log format or a guard rule would never reach a
   // long-running thread's follow-up turns. All six touch independent files, so one parallel batch.
-  await Promise.all([
+  const [, , , skills] = await Promise.all([
     applyGitCredentials(cfg, box, creds),
     trustWorkspace(cfg, box),
     installMcpConfig(cfg, box),
@@ -1574,7 +1598,7 @@ export async function resumeAgentTask(
   // inbox delivery, send-now, the credential broker, an elicited answer) only has a box id and used
   // to pass undefined here, which resumed a single-repo box in /workspace and lost the session.
   const workdir = repos?.length ? agentWorkdir(repos) : await boxAgentWorkdir(cfg, box);
-  return msb(cfg, ["exec", box, ...env, "--", "sh", "-lc", agentSh(workdir, true, agent)]);
+  return msb(cfg, ["exec", box, ...env, ...skillHintFlags(box, message, skills, false), "--", "sh", "-lc", agentSh(workdir, true, agent)]);
 }
 
 /**

@@ -351,6 +351,14 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX IF NOT EXISTS intake_pending_owner ON intake_pending(owner, created_at);
   `,
+  `
+  -- Which skills a run was pointed at (src/skill-match.ts): [{name, how: "explicit"|"auto"}].
+  CREATE TABLE IF NOT EXISTS run_skills (
+    box TEXT PRIMARY KEY,
+    picks_json TEXT NOT NULL,
+    at INTEGER NOT NULL
+  );
+  `,
 ];
 
 export function openDb(dataDir: string): Db {

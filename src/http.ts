@@ -110,7 +110,8 @@ import { intakeBodyParser, registerIntakeRoutes } from "./intake-routes.js";
 import { candidateAccounts } from "./gh-token-store.js";
 import { applyHarness, getHarness, harnessSummaryLine, loadHarnesses, normalizeEgress, HARNESS_LIMITS, type HarnessDef } from "./harness.js";
 import { reservedBoxes } from "./capacity.js";
-import { archivedDigestOf, checkCompareSide, recordRunHarness, runHarnessOf, skillSelectionBackend } from "./harness-runs.js";
+import { archivedDigestOf, checkCompareSide, recordRunHarness, runHarnessOf, skillPickBackend, skillSelectionBackend } from "./harness-runs.js";
+import { registerSkillPickBackend, skillPicksOf, type SkillPick } from "./skill-match.js";
 import { defaultAttemptSpecs, getGroup, groupOfBox, listGroups, makeAttempts, normalizeAttempts, OVERRIDE_WINDOW_MS, specLabel, tieChoices, type AttemptGroup, type AttemptSpec } from "./attempts.js";
 import { registerHarnessRoutes } from "./harness-routes.js";
 import { registerSkillSelectionBackend } from "./skill-store.js";
@@ -598,6 +599,7 @@ const runProvenance = (box: string, agent: string | undefined): {
   model?: string;
   provider?: string;
   startedBy?: ReturnType<typeof startedByOf>;
+  skills?: SkillPick[];
 } => {
   const model = boxModels.get(box);
   const provider = boxProviders.get(box);
@@ -612,8 +614,18 @@ const runProvenance = (box: string, agent: string | undefined): {
     ...(model ? { model } : {}),
     ...(provider ? { provider } : {}),
     ...(startedBy ? { startedBy } : {}),
+    ...skillPicksView(box),
   };
 };
+/** The skills a run was pointed at ("Skills: fix-issue (auto)"); absent when none. */
+function skillPicksView(box: string): { skills?: SkillPick[] } {
+  try {
+    const picks = skillPicksOf(box);
+    return picks?.length ? { skills: picks } : {};
+  } catch {
+    return {};
+  }
+}
 const notifier = makeNotifier({ send: sendNotification, log: (m) => console.error(m) });
 
 /**
@@ -843,6 +855,7 @@ const readFleet = makeFleetReader(
       ...b,
       ...(titles[b.name] ? { title: titles[b.name] } : {}),
       ...harnessLineOf(b.name),
+      ...skillPicksView(b.name),
       // The task and any pending question are operator/agent text too — same redaction as the log.
       ...(b.task ? { task: redactor.redact(b.task) } : {}),
       ...(b.question ? { question: redactor.redact(b.question) } : {}),
@@ -3179,6 +3192,7 @@ registerIntakeRoutes(app, {
 // Harnesses (src/harness.ts): definitions per owner, bundles, compares. The per-box skill selection
 // a harness sets is made durable through run_harness so a resume installs the same skills.
 registerSkillSelectionBackend(skillSelectionBackend(db));
+registerSkillPickBackend(skillPickBackend(db));
 registerHarnessRoutes(app, {
   cfg,
   db,

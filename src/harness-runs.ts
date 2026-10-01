@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import type { Db } from "./db.js";
+import type { SkillPick } from "./skill-match.js";
 
 /**
  * The durable links between runs and harnesses (definitions themselves are in src/harness.ts):
@@ -108,4 +109,24 @@ export function archivedDigestOf(db: Db, owner: string, box: string): Record<str
   } catch {
     return undefined;
   }
+}
+
+/** The durable backend for skill-match's per-box skill picks (the run_skills table). */
+export function skillPickBackend(db: Db) {
+  return {
+    get: (box: string): SkillPick[] | undefined => {
+      const r = db.prepare(`SELECT picks_json FROM run_skills WHERE box = ?`).get(box) as { picks_json: string } | undefined;
+      if (!r) return undefined;
+      try {
+        return JSON.parse(r.picks_json) as SkillPick[];
+      } catch {
+        return undefined;
+      }
+    },
+    set: (box: string, picks: SkillPick[]) => {
+      db.prepare(
+        `INSERT INTO run_skills (box, picks_json, at) VALUES (?, ?, ?) ON CONFLICT(box) DO UPDATE SET picks_json = excluded.picks_json, at = excluded.at`
+      ).run(box, JSON.stringify(picks), Date.now());
+    },
+  };
 }

@@ -43,6 +43,8 @@ export interface BoxView {
   stalled?: boolean;
   /** The saved harness this thread started on, with its one-line summary for the header. */
   harness?: { id: string; name: string; line: string };
+  /** Skills the run was pointed at: explicit `/name` from the user, or the controller's auto match. */
+  skills?: { name: string; how: "explicit" | "auto" }[];
 }
 
 export type ProviderKind = "anthropic" | "openai" | "openai-compatible" | "ollama" | "ccproxy";
@@ -391,7 +393,7 @@ export interface RunDigest {
   /** Post-run verification, when the task was delegated with a `verify` clause. */
   verified?: { mode: "command" | "criterion"; pass: boolean; detail: string };
   /** Receipt provenance: which agent ran and on which model, only when known. */
-  provenance?: { agent?: string; agentLabel?: string; model?: string; provider?: string };
+  provenance?: { agent?: string; agentLabel?: string; model?: string; provider?: string; skills?: { name: string; how: "explicit" | "auto" }[] };
 }
 
 export interface AskResult {

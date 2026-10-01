@@ -21,7 +21,7 @@ export interface StarterSkill {
 export const STARTER_SKILLS: StarterSkill[] = [
   {
     name: "fix-issue",
-    description: "Use when given a GitHub issue reference (URL or #number) and the task is to fix it end to end.",
+    description: 'Use when the task points at a GitHub issue (URL or #number) and wants it fixed end to end. Triggers: "fix issue", "fix #123", "resolve this issue", "close the issue", "bug report", "github.com/.../issues/".',
     content: [
       "Take an issue from report to merged-ready PR. Reproduce before you touch anything.",
       "",
@@ -38,7 +38,7 @@ export const STARTER_SKILLS: StarterSkill[] = [
   },
   {
     name: "write-tests",
-    description: "Use when asked to add tests or raise coverage on a module or file.",
+    description: 'Use when asked to add tests or raise coverage on a module or file. Triggers: "write tests", "add tests", "unit tests", "test coverage", "increase coverage", "untested", "regression test".',
     content: [
       "Raise real coverage on the named module — tests that would catch a bug, not tests that restate the code.",
       "",
@@ -54,7 +54,7 @@ export const STARTER_SKILLS: StarterSkill[] = [
   },
   {
     name: "upgrade-deps",
-    description: "Use when asked to update or upgrade dependencies in a project.",
+    description: 'Use when asked to update or upgrade dependencies in a project. Triggers: "upgrade dependencies", "update deps", "bump packages", "outdated packages", "npm audit", "dependabot", "security advisory".',
     content: [
       "Update dependencies conservatively — the goal is a boring diff that ships, not the newest of everything.",
       "",
@@ -70,7 +70,7 @@ export const STARTER_SKILLS: StarterSkill[] = [
   },
   {
     name: "code-review",
-    description: "Use when asked to review code: the current diff, a branch, or a pull request.",
+    description: 'Use when asked to review code: the current diff, a branch, or a pull request. Triggers: "review this PR", "code review", "review my changes", "look over the diff", "give feedback on", "is this ready to merge".',
     content: [
       "Review adversarially — your job is to find what is wrong, not to describe what the code does.",
       "",
@@ -87,7 +87,7 @@ export const STARTER_SKILLS: StarterSkill[] = [
   },
   {
     name: "security-review",
-    description: "Use when asked to review code or a change for security issues, or before merging anything that touches auth, input handling, or secrets.",
+    description: 'Use when asked to review code or a change for security issues, or before merging anything that touches auth, input handling, or secrets. Triggers: "security review", "security audit", "vulnerabilities", "is this safe", "injection", "XSS", "leaked secrets".',
     content: [
       "Review for what an attacker can do, not for style. Assume every input is hostile.",
       "",
@@ -103,7 +103,7 @@ export const STARTER_SKILLS: StarterSkill[] = [
   },
   {
     name: "write-pr-description",
-    description: "Use when opening a pull request, or when asked to write or improve a PR description.",
+    description: 'Use when opening a pull request, or when asked to write or improve a PR description. Triggers: "open a PR", "create a pull request", "PR description", "write the PR", "summarize the changes for review".',
     content: [
       "A PR description is for the reviewer five minutes from now and the archaeologist two years from now.",
       "",
