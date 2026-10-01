@@ -612,4 +612,5 @@ no new detail was taken from them beyond what this file already records.
 - Dot: green done, red failed. Amber never appears here (it means needs-you).
 - Collapsed by default. Click/Enter opens, via `Collapse` (height + fade; plain fade under reduced motion), a borderless key-value list (`[data-run-pill-details]`): summary, started by, driver, model, PR links, diff, tests, verify, exit code, failed commands, questions, sandbox blocks, duration, tokens, cost, followed by, follow-ups.
 - Only recorded facts. Unknown or empty rows are dropped: no "—", no "$ —", no "no questions asked", no "exit 0" when tests or verify already speak. A digest headline that just says "done" is dropped so the state is said once.
+- The pill also absorbs `RunSummary`: its steps/commands go in a "work" row, its exit-code note in "note", and Copy transcript / Run again are the last row of the details (`[data-run-pill-actions]`). Nothing else renders at run end.
 - History keeps `OutcomeCard`/`DigestCard`; the data (`/history/outcome.json`, `/digest.json`) is unchanged.

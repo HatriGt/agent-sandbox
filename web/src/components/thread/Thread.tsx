@@ -17,7 +17,6 @@ import { splitReplies } from "@/lib/replies";
 import { parseMcpName } from "@/lib/mcp";
 import { McpConnectItem } from "./McpItem";
 import { setPrefill } from "@/lib/draft";
-import { RunSummary } from "./RunSummary";
 import { ProducedFiles } from "./ProducedFiles";
 import { useRunDigest } from "./DigestCard";
 import { useOutcome } from "./OutcomeCard";
@@ -833,10 +832,11 @@ export function Thread({
               </p>
             )}
 
-            {finished && (outcome || digest) && pendingReplies.length === 0 && <RunPill outcome={outcome} digest={digest} />}
 
-            {!sleeping && !loadingTrace && runState === "done" && pendingReplies.length === 0 && (
-              <RunSummary
+            {((!sleeping && !loadingTrace && runState === "done") || (finished && (outcome || digest))) && pendingReplies.length === 0 && (
+              <RunPill
+                outcome={outcome}
+                digest={digest}
                 label={
                   exitCode == null || exitCode === 0
                     ? "Completed"

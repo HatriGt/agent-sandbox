@@ -1,6 +1,9 @@
 import * as React from "react";
-import { ArrowUpRight, ChevronRight } from "lucide-react";
+import { ArrowUpRight, Check, ChevronRight, Copy, RotateCw } from "lucide-react";
+import { toast } from "sonner";
 import type { RunDigest, RunOutcome } from "@/lib/api";
+import type { RunStats } from "@/lib/transcript";
+import type { ContextHealth } from "@/lib/context-health";
 import { fmtDuration } from "@/lib/lifecycle";
 import { friendlyName } from "@/lib/format";
 import { Collapse } from "@/components/ui/collapse";
@@ -28,13 +31,62 @@ function A({ href, external, children }: { href: string; external?: boolean; chi
   );
 }
 
-export function RunPill({ outcome: o, digest: d }: { outcome: RunOutcome | null; digest: RunDigest | null }) {
-  const [open, setOpen] = React.useState(false);
-  const bodyId = React.useId();
-  if (!o && !d) return null;
+function Action({ onClick, icon, label, title }: { onClick: () => void; icon: React.ReactNode; label: string; title?: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      className="text-muted-foreground hover:text-foreground hover:bg-muted focus-visible:ring-ring flex h-7 cursor-pointer items-center gap-1.5 rounded-md px-2 text-micro font-medium transition-colors focus-visible:ring-2 focus-visible:outline-none [&_svg]:size-3.5"
+    >
+      {icon}
+      {label}
+    </button>
+  );
+}
 
-  const failed = (o?.state ?? d?.state) === "failed";
-  const durMs = o?.cost.durationMs ?? (d?.startedAt && d.endedAt && d.endedAt > d.startedAt ? d.endedAt - d.startedAt : null);
+export function RunPill({
+  outcome: o,
+  digest: d,
+  label,
+  detail,
+  failed: failedProp,
+  stats,
+  durationSec,
+  context,
+  onCopy,
+  onAgain,
+}: {
+  outcome: RunOutcome | null;
+  digest: RunDigest | null;
+  /** The live run's end label ("Completed", "Out of memory"…); used as the state word when it failed. */
+  label?: string;
+  detail?: string;
+  failed?: boolean;
+  stats?: RunStats;
+  durationSec?: number;
+  context?: ContextHealth | null;
+  onCopy?: () => Promise<string>;
+  onAgain?: () => void;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const [copied, setCopied] = React.useState(false);
+  const bodyId = React.useId();
+  if (!o && !d && !stats) return null;
+
+  const failed = failedProp || (o?.state ?? d?.state) === "failed";
+  const liveMs = durationSec && durationSec > 0 ? durationSec * 1000 : null;
+  const durMs = o?.cost.durationMs ?? (d?.startedAt && d.endedAt && d.endedAt > d.startedAt ? d.endedAt - d.startedAt : liveMs);
+  const copy = async () => {
+    if (!onCopy) return;
+    try {
+      await navigator.clipboard.writeText(await onCopy());
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    } catch (e) {
+      toast.error("Could not copy", { description: e instanceof Error ? e.message : String(e) });
+    }
+  };
   const duration = durMs != null && durMs > 0 ? fmtDuration(Math.round(durMs / 1000)) : null;
   const tok = o?.cost.tokens ? o.cost.tokens.input + o.cost.tokens.output : d?.usage ? d.usage.inputTokens + d.usage.outputTokens : null;
   const tokens = tok ? `${fmtTokens(tok)} tokens` : null;
@@ -58,7 +110,7 @@ export function RunPill({ outcome: o, digest: d }: { outcome: RunOutcome | null;
   const headline = d?.headline && !/^(done|failed|completed)\.?$/i.test(d.headline.trim()) ? d.headline : null;
 
   // Collapsed line: state, then the results that matter, then cost.
-  const summary: string[] = [failed ? "Failed" : "Done"];
+  const summary: string[] = [failed ? (label && label !== "Completed" ? label : "Failed") : "Done"];
   if (prs[0]) summary.push(`PR #${prs[0].number}${prs.length > 1 ? ` +${prs.length - 1}` : ""}`);
   if (diff && diff.files) summary.push(`${plural(diff.files, "file")} +${diff.additions} −${diff.deletions}`);
   if (t) summary.push(t.failed ? `tests ${t.passed}/${t.passed + t.failed} ✕` : `tests ${t.passed}/${t.passed} ✓`);
@@ -69,6 +121,7 @@ export function RunPill({ outcome: o, digest: d }: { outcome: RunOutcome | null;
 
   const rows: [string, React.ReactNode][] = [];
   if (headline) rows.push(["summary", headline]);
+  if (detail) rows.push(["note", <span className={failed ? "text-destructive" : undefined}>{detail}</span>]);
   if (o?.header.label)
     rows.push([
       "started by",
@@ -136,6 +189,16 @@ export function RunPill({ outcome: o, digest: d }: { outcome: RunOutcome | null;
   if (questions > 0) rows.push(["questions", `${questions} asked${openQ ? ` · ${openQ} unanswered` : ""}`]);
   if (blocked > 0) rows.push(["sandbox", `${plural(blocked, "call")} blocked`]);
   if (o?.trust.prOnly) rows.push(["pushes", "PR-only"]);
+  if (stats) {
+    const work = [
+      stats.steps ? plural(stats.steps, "step") : null,
+      stats.commands ? plural(stats.commands, "command") : null,
+      stats.failed ? `${stats.failed} failed` : null,
+      !diff && stats.files ? plural(stats.files, "file") + " touched" : null,
+    ].filter(Boolean);
+    if (work.length) rows.push(["work", work.join(" · ")]);
+  }
+  if (context) rows.push(["context", <span className="stamp">{Math.round(context.fraction * 100)}% used</span>]);
   if (duration) rows.push(["duration", <span className="stamp">{duration}</span>]);
   if (tokens) rows.push(["tokens", <span className="stamp">{tokens}</span>]);
   if (o && o.cost.usd !== null) rows.push(["cost", <span className="stamp">{fmtUsd(o.cost.usd)}</span>]);
@@ -175,6 +238,16 @@ export function RunPill({ outcome: o, digest: d }: { outcome: RunOutcome | null;
               <dd className="text-foreground min-w-0 break-words">{v}</dd>
             </React.Fragment>
           ))}
+          {(onCopy || onAgain) && (
+            <dd className="col-span-2 -ml-2 flex flex-wrap items-center gap-1 pt-1" data-run-pill-actions>
+              {onCopy && (
+                <Action onClick={copy} icon={copied ? <Check className="text-ok" /> : <Copy />} label={copied ? "Copied" : "Copy transcript"} />
+              )}
+              {onAgain && (
+                <Action onClick={onAgain} icon={<RotateCw />} label="Run again" title="Start a new machine with the same brief and repositories — you can edit it first" />
+              )}
+            </dd>
+          )}
         </dl>
       </Collapse>
     </div>
