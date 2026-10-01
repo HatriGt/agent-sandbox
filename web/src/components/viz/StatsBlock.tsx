@@ -1,8 +1,8 @@
-import type * as React from "react";
 import { TrendingDown, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Stat } from "@/lib/viz";
 import { VizFrame } from "./VizFrame";
+import { RollNumber, useRowEntrance } from "./motion";
 
 /**
  * ```stats fence → a row of stat tiles. The value is the hero (large, proportional figures — this
@@ -14,14 +14,17 @@ export function StatsBlock({ stats, source }: { stats: Stat[]; source: string })
   // Hero size is for NUMBERS. Agents sometimes put a sentence in the value slot ("3/3 instances
   // RUNNING") — scale the type down with length so a prose value reads as a line, not a billboard.
   const wide = stats.some((s) => s.value.length > 16 || s.label.length > 24);
+  const entrance = useRowEntrance(stats.map((s) => s.label));
   return (
     <VizFrame source={source} title={stats.length === 1 ? undefined : `${stats.length} metrics`}>
       <div className="grid gap-px" style={{ gridTemplateColumns: `repeat(auto-fit, minmax(${wide ? "14rem" : "9rem"}, 1fr))` }}>
-        {stats.map((s, i) => (
-          <div key={s.label} className="bg-card stagger-item px-4 py-3" style={{ "--i": Math.min(i, 12) } as React.CSSProperties}>
+        {stats.map((s) => {
+          const e = entrance(s.label);
+          return (
+          <div key={s.label} className={cn("bg-card px-4 py-3", e.className)} style={e.style}>
             <div className="text-muted-foreground truncate text-micro font-medium" title={s.label}>{s.label}</div>
             <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2">
-              <span className={cn("text-foreground font-semibold", s.value.length <= 12 ? "text-h2" : s.value.length <= 28 ? "text-lead" : "text-meta")}>{s.value}</span>
+              <RollNumber text={s.value} className={cn("text-foreground font-semibold", s.value.length <= 12 ? "text-h2" : s.value.length <= 28 ? "text-lead" : "text-meta")} />
               {s.delta && (
                 <span
                   className={cn(
@@ -34,13 +37,14 @@ export function StatsBlock({ stats, source }: { stats: Stat[]; source: string })
                   ) : (
                     <TrendingUp className="size-3" aria-hidden />
                   )}
-                  {s.delta}
+                  <RollNumber text={s.delta} />
                 </span>
               )}
             </div>
             {s.note && <div className="text-faint mt-0.5 truncate text-micro">{s.note}</div>}
           </div>
-        ))}
+          );
+        })}
       </div>
     </VizFrame>
   );

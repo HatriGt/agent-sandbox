@@ -3,6 +3,7 @@ import { AlertTriangle, Check, Clock, Info, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { nodeText } from "@/lib/viz";
 import type { Definition, StatusItem } from "@/lib/viz-auto-types";
+import { RollNumber, useRowEntrance } from "./motion";
 
 /**
  * Upgrades for ORDINARY markdown lists — no fence, no cooperation from the agent. A list whose
@@ -48,15 +49,16 @@ const STATE: Record<StatusItem["state"], { icon: React.ReactNode; tone: string; 
 
 export function StatusListBlock({ items }: { items: StatusItem[] }) {
   const tally = (["ok", "fail", "warn", "pending"] as const).map((s) => [s, items.filter((i) => i.state === s).length] as const).filter(([, n]) => n > 0);
+  const entrance = useRowEntrance(items.map((_, i) => String(i)));
   return (
     <div className="not-prose my-3 overflow-hidden rounded-xl border">
       <ul className="m-0 list-none p-0">
         {items.map((it, i) => {
           const s = STATE[it.state];
           return (
-            <li key={i} className={cn("flex items-start gap-3 px-4 py-2 text-body", i > 0 && "border-t")}>
+            <li key={i} className={cn("flex items-start gap-3 px-4 py-2 text-body", i > 0 && "border-t", entrance(String(i)).className)} style={entrance(String(i)).style}>
               <span className={cn("mt-0.5 grid size-5 shrink-0 place-items-center rounded-full", s.tone)} aria-label={s.word}>
-                {s.icon}
+                <span key={it.state} className="viz-mark grid place-items-center">{s.icon}</span>
               </span>
               <span className={cn("min-w-0 leading-relaxed", it.state === "pending" ? "text-muted-foreground" : "text-foreground")}>{it.text}</span>
             </li>
@@ -68,7 +70,7 @@ export function StatusListBlock({ items }: { items: StatusItem[] }) {
           <React.Fragment key={s}>
             {i > 0 && <span className="opacity-40">·</span>}
             <span className="tabular-nums">
-              {n} {STATE[s].word}
+              <RollNumber text={String(n)} /> {STATE[s].word}
             </span>
           </React.Fragment>
         ))}

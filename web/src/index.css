@@ -1130,3 +1130,45 @@ button:not(:disabled):active, [role="tab"]:active, [role="radio"]:active { trans
 .dark .thread-glow {
   background: radial-gradient(60% 24rem at 50% 0%, color-mix(in oklch, var(--live) 8%, transparent), transparent 70%);
 }
+
+/* Output visualizers, motion when data changes (components/viz/motion.tsx). Rows that arrive
+   while a block streams fade + lift in (30 ms stagger, capped in JS at 8); bars tween their
+   width; a state mark pops in when it flips; the active step's soft pulse is the ONLY loop and
+   only exists while something is active. All collapse under the global reduced-motion rule. */
+.viz-row-new {
+  animation: rise-in 0.22s cubic-bezier(0.2, 0, 0, 1) both;
+  animation-delay: calc(var(--i, 0) * 30ms);
+}
+.viz-tween-w {
+  transition: width 0.22s cubic-bezier(0.2, 0, 0, 1);
+}
+@keyframes viz-mark {
+  from {
+    opacity: 0;
+    transform: scale(0.4) rotate(-12deg);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.viz-mark {
+  animation: viz-mark 0.24s cubic-bezier(0.2, 0, 0, 1) both;
+}
+@keyframes viz-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--live) 45%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 4px color-mix(in oklab, var(--live) 0%, transparent);
+  }
+}
+.viz-pulse {
+  animation: viz-pulse 1.8s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .viz-pulse {
+    animation: none;
+  }
+}

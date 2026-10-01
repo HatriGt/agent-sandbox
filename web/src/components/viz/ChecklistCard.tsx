@@ -1,6 +1,7 @@
 import * as React from "react";
 import { Check, Circle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { RollNumber, useRowEntrance } from "./motion";
 
 /**
  * GFM task lists (`- [x] done / - [ ] todo`) auto-upgrade to this: a quiet card with a progress
@@ -9,24 +10,25 @@ import { cn } from "@/lib/utils";
  */
 export function ChecklistCard({ items }: { items: { checked: boolean; content: React.ReactNode }[] }) {
   const done = items.filter((i) => i.checked).length;
+  const entrance = useRowEntrance(items.map((_, i) => String(i)));
   return (
     <div className="bg-card not-prose my-3 rounded-xl border">
       <div className="flex h-8 items-center gap-2 border-b px-3">
         <span className="text-muted-foreground text-micro font-medium tabular-nums">
-          {done} of {items.length} done
+          <RollNumber text={String(done)} /> of {items.length} done
         </span>
         <span className="bg-muted h-1 min-w-0 flex-1 overflow-hidden rounded-full" role="progressbar" aria-valuenow={done} aria-valuemin={0} aria-valuemax={items.length}>
           <span
-            className="bg-ok block h-full rounded-full transition-[width] duration-300"
+            className="bg-ok block h-full rounded-full viz-tween-w"
             style={{ width: `${items.length ? (done / items.length) * 100 : 0}%` }}
           />
         </span>
       </div>
       <ul className="flex list-none flex-col gap-1 px-3 py-2">
         {items.map((item, i) => (
-          <li key={i} className="stagger-item flex items-start gap-2 text-meta" style={{ "--i": Math.min(i, 12) } as React.CSSProperties}>
+          <li key={i} className={cn("flex items-start gap-2 text-meta", entrance(String(i)).className)} style={entrance(String(i)).style}>
             {item.checked ? (
-              <Check className="text-ok mt-0.5 size-3.5 shrink-0" aria-label="done" />
+              <Check className="viz-mark text-ok mt-0.5 size-3.5 shrink-0" aria-label="done" />
             ) : (
               <Circle className="text-faint mt-0.5 size-3.5 shrink-0" aria-label="pending" />
             )}
