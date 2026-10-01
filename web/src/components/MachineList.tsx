@@ -96,8 +96,8 @@ export function MachineList({
                   <motion.li
                     key={v.name}
                     layout="position"
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: v.leaving ? 0.5 : 1, y: 0 }}
+                    initial={still ? { opacity: 0 } : { opacity: 0, y: 6, scale: 0.98 }}
+                    animate={{ opacity: v.leaving ? 0.5 : 1, y: 0, scale: 1 }}
                     // A destroyed machine dissolves — blur + drift + collapse — rather than snapping out;
                     // gone should feel like gone. (motion-safe: the blur is skipped under reduced motion
                     // by the global rule zeroing animation durations.)
@@ -135,7 +135,19 @@ export function MachineList({
                       )}
                     >
                       <div className="flex items-baseline gap-2">
-                        <StateStamp state={state} exitCode={v.exitCode} stalled={"stalled" in v ? !!v.stalled : undefined} />
+                        {/* The state word crossfades (with a 3px lift) when the run changes state. */}
+                        <AnimatePresence mode="popLayout" initial={false}>
+                          <motion.span
+                            key={state}
+                            className="inline-flex"
+                            initial={still ? { opacity: 0 } : { opacity: 0, y: 3 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={still ? { opacity: 0 } : { opacity: 0, y: -3 }}
+                            transition={{ duration: still ? 0 : 0.18, ease: [0.22, 1, 0.36, 1] }}
+                          >
+                            <StateStamp state={state} exitCode={v.exitCode} stalled={"stalled" in v ? !!v.stalled : undefined} />
+                          </motion.span>
+                        </AnimatePresence>
                         <span className="label text-muted-foreground ml-auto truncate">
                           {v.leaving ? "shutting down" : v.kept ? "kept" : state === "sleeping" ? (sleepTtlSec && v.asleepSec != null ? `gone in ${fmtDuration(Math.max(0, sleepTtlSec - v.asleepSec))}` : "wakes on reply") : v.role === "pool-free" ? roleLabel(v.role) : ""}
                         </span>

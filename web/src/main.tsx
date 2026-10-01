@@ -1,5 +1,6 @@
 import { StrictMode, Suspense, lazy } from "react";
 import { createRoot } from "react-dom/client";
+import { MotionConfig } from "motion/react";
 import { createBrowserRouter, RouterProvider } from "react-router";
 
 // Type faces, self-hosted (variable where available) via fontsource.
@@ -37,8 +38,12 @@ const router = createBrowserRouter([
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <Suspense fallback={<div className="bg-background h-full" aria-busy="true" />}>
-      <RouterProvider router={router} />
-    </Suspense>
+    {/* Under prefers-reduced-motion every motion/react transform/layout animation collapses to an
+        instant change (opacity fades are kept, short) — one switch instead of per-component checks. */}
+    <MotionConfig reducedMotion="user">
+      <Suspense fallback={<div className="bg-background h-full" aria-busy="true" />}>
+        <RouterProvider router={router} />
+      </Suspense>
+    </MotionConfig>
   </StrictMode>
 );

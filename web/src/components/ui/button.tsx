@@ -69,7 +69,7 @@ function Button({
   const Comp = asChild ? Slot : "button";
   if (asChild || !loading) {
     return (
-      <Comp data-slot="button" className={cn(buttonVariants({ variant, size, className }))} disabled={disabled} {...props}>
+      <Comp data-slot="button" data-variant={variant ?? "default"} className={cn(buttonVariants({ variant, size, className }))} disabled={disabled} {...props}>
         {children}
       </Comp>
     );
@@ -79,7 +79,7 @@ function Button({
   const firstIcon = kids.findIndex((k) => React.isValidElement(k) && typeof k.type !== "string");
   const rest = firstIcon === 0 ? kids.slice(1) : kids;
   return (
-    <Comp data-slot="button" className={cn(buttonVariants({ variant, size, className }))} disabled aria-busy="true" {...props}>
+    <Comp data-slot="button" data-variant={variant ?? "default"} className={cn(buttonVariants({ variant, size, className }))} disabled aria-busy="true" {...props}>
       <Loader2 className="animate-spin" aria-hidden />
       {rest}
     </Comp>

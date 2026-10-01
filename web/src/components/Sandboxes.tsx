@@ -294,6 +294,10 @@ function MachineTable({
   onOpen: (name: string) => void;
   onDestroyed: (name: string) => void;
 }) {
+  const firstPaint = React.useRef(true);
+  React.useEffect(() => {
+    firstPaint.current = false;
+  }, []);
   return (
     <div className="overflow-hidden rounded-xl border">
       <div className={cn("label text-muted-foreground bg-muted/60 hidden items-center gap-3 border-b px-4 py-2 md:grid", COLS)}>
@@ -304,13 +308,14 @@ function MachineTable({
         <span aria-hidden />{/* row is the action: click opens the thread */}
       </div>
       <ul>
-        <AnimatePresence initial={false}>
+        <AnimatePresence>
           {boxes.map((b, i) => (
             <MachineRow
               key={b.name}
               box={b}
               head={grouped && (i === 0 || groupOf(boxes[i - 1]) !== groupOf(b)) ? GROUP_LABEL[groupOf(b)] : null}
               lifecycle={lifecycle}
+              delay={firstPaint.current ? Math.min(i, 12) * 0.03 : 0}
               onOpen={onOpen}
               onDestroyed={onDestroyed}
             />
@@ -327,9 +332,11 @@ function MachineRow({
   lifecycle,
   onOpen,
   onDestroyed,
+  delay = 0,
 }: {
   box: StableBox;
   head: string | null;
+  delay?: number;
   lifecycle: FleetLifecycle;
   onOpen: (name: string) => void;
   onDestroyed: (name: string) => void;
@@ -356,7 +363,8 @@ function MachineRow({
       initial={{ opacity: 0, y: 6 }}
       animate={{ opacity: box.leaving ? 0.5 : 1, y: 0 }}
       exit={{ opacity: 0, height: 0 }}
-      transition={{ type: "spring", stiffness: 500, damping: 40, mass: 0.8 }}
+      // First paint of the table: rows stagger in (30 ms apart, capped at 12); afterwards no delay.
+      transition={{ type: "spring", stiffness: 500, damping: 40, mass: 0.8, delay }}
       className="border-b last:border-b-0"
     >
       <AnimatePresence initial={false}>

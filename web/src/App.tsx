@@ -427,6 +427,15 @@ export default function App() {
     view === "fleet" ? "fleet" : view === "history" ? "history" : view === "automations" ? "automations" : view === "skills" ? "skills" : view === "integrations" ? "integrations" : view === "account" ? "account" : view === "connect" ? "connect" : view === "welcome" ? "welcome" : view === "admin" ? "admin" : route.view === "pr" ? `pr:${route.repo}#${route.number}` : booting && !selectedBox ? "launch" : selectedBox && selectedBox.name === launched ? "launch" : selectedBox ? `box:${selectedBox.name}` : view === "box" && selectedRaw ? `box:${selectedRaw.name}` : view === "box" ? "box-loading" : "hub";
 
   const reduceMotion = useReducedMotion();
+  // Direction-aware pane motion: deeper (hub → page → box) enters from the right on phones, going
+  // back enters from the left; desktop keeps the plain 6px rise. Transform + opacity only.
+  const narrow = useNarrow();
+  const depth = paneDepth(paneKey);
+  const prevDepth = React.useRef(depth);
+  const paneDir = depth === prevDepth.current ? 0 : depth > prevDepth.current ? 1 : -1;
+  React.useEffect(() => {
+    prevDepth.current = depth;
+  }, [depth]);
 
   // View change: the page's scroller goes back to the top and focus lands on its h1 (or the main
   // region), so keyboard and screen-reader users start at the heading, not wherever focus was
@@ -497,10 +506,10 @@ export default function App() {
           <motion.button
             key="queue"
             type="button"
-            initial={{ opacity: 0, height: 0, marginBottom: 0 }}
-            animate={{ opacity: 1, height: "auto", marginBottom: 8 }}
-            exit={{ opacity: 0, height: 0, marginBottom: 0, transition: { duration: 0.15 } }}
-            transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+            initial={reduceMotion ? { opacity: 0 } : { opacity: 0, height: 0, marginBottom: 0, scale: 0.96 }}
+            animate={{ opacity: 1, height: "auto", marginBottom: 8, scale: 1 }}
+            exit={reduceMotion ? { opacity: 0, transition: { duration: 0 } } : { opacity: 0, height: 0, marginBottom: 0, scale: 0.97, transition: { duration: 0.15 } }}
+            transition={reduceMotion ? { duration: 0 } : { height: { duration: 0.25, ease: [0.22, 1, 0.36, 1] }, opacity: { duration: 0.2 }, scale: { type: "spring", stiffness: 420, damping: 26 } }}
             onClick={() => open(waiting[0].name)}
             className="border-attention/50 bg-attention/12 hover:bg-attention/20 group mx-3 flex cursor-pointer items-center gap-2.5 overflow-hidden rounded-lg border px-3 py-2.5 text-left transition-colors duration-150"
           >
@@ -762,14 +771,15 @@ export default function App() {
               <Plus className="size-4" />
             </Button>
           </div>
-          <AnimatePresence mode="wait" initial={false}>
+          <AnimatePresence mode="wait" initial={false} custom={paneDir}>
             <motion.div
               key={paneKey}
               className="min-h-0 flex-1"
-              initial={reduceMotion ? { opacity: 0 } : { opacity: 0, y: 6, filter: "blur(2px)" }}
-              animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0, filter: "blur(0px)" }}
-              exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -4 }}
-              transition={{ duration: reduceMotion ? 0.12 : 0.2, ease: [0.22, 1, 0.36, 1] }}
+              custom={paneDir}
+              variants={paneVariants(!!reduceMotion, narrow)}
+              initial="enter"
+              animate="center"
+              exit="exit"
             >
               <React.Suspense fallback={<PageSkeleton />}>
                 {view === "fleet" ? (
@@ -1075,4 +1085,38 @@ function RailIcon({
       </TooltipContent>
     </Tooltip>
   );
+}
+
+const PANE_EASE = [0.22, 1, 0.36, 1] as const;
+
+function paneDepth(key: string) {
+  return key === "hub" ? 0 : key === "launch" || key.startsWith("box") || key.startsWith("pr:") ? 2 : 1;
+}
+
+function paneVariants(reduce: boolean, narrow: boolean) {
+  if (reduce) {
+    return {
+      enter: { opacity: 0 },
+      center: { opacity: 1, transition: { duration: 0.12 } },
+      exit: { opacity: 0, transition: { duration: 0.1 } },
+    };
+  }
+  return {
+    enter: (dir: number) => (narrow && dir ? { opacity: 0, x: dir * 16, y: 0 } : { opacity: 0, x: 0, y: 6 }),
+    center: { opacity: 1, x: 0, y: 0, transition: { duration: 0.2, ease: PANE_EASE } },
+    exit: (dir: number) =>
+      narrow && dir ? { opacity: 0, x: dir * -12, transition: { duration: 0.16, ease: PANE_EASE } } : { opacity: 0, y: -6, transition: { duration: 0.16, ease: PANE_EASE } },
+  };
+}
+
+function useNarrow() {
+  const q = "(max-width: 767px)";
+  const [narrow, setNarrow] = React.useState(() => typeof window !== "undefined" && window.matchMedia(q).matches);
+  React.useEffect(() => {
+    const m = window.matchMedia(q);
+    const on = () => setNarrow(m.matches);
+    m.addEventListener("change", on);
+    return () => m.removeEventListener("change", on);
+  }, []);
+  return narrow;
 }
