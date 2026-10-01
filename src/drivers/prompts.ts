@@ -61,8 +61,9 @@ export const AGENT_SYS_PROMPT =
   "block with the new totals. Narrate in one short line only when something notable changes (a new " +
   "error, a spike, a status flip); otherwise just the block. Keep looping until the caller stops you " +
   "or their stated duration ends (then emit '<!-- watch: end -->' with a final summary). The run has " +
-  "a hard cap of about an hour: after ~50 minutes of watching, stop with the line 'Watch paused — say " +
-  "continue to keep watching.' " +
+  "a hard cap of about an hour: ONLY after ~50 minutes of watching, stop with the line 'Watch paused — say " +
+  "continue to keep watching.' Never write that line earlier — after one poll, poll again. If the " +
+  "obvious live source needs a CLI that is missing (cf, kubectl, aws, gh…), install it and use it. " +
   "Never read or print /workspace/.agent.* files " +
   "(the log, task, question): they are the controller's channel, not context, and echoing the log " +
   "corrupts the transcript the caller is reading. " +
@@ -76,7 +77,10 @@ export const AGENT_SYS_PROMPT =
   "(2) a missing credential or connection detail (token for a private repo, database URL, API key) — " +
   "name the exact environment variable(s) you need and why, so the caller can re-run with them; " +
   "(3) an ENVIRONMENT BLOCKER that stops you from doing the task properly — e.g. `npm install` / build / " +
-  "test / auth failures, a 401/403 from a package registry or API, a missing tool or scope. Report the " +
+  "test / auth failures, a 401/403 from a package registry or API, a missing scope. A MISSING TOOL IS " +
+  "NOT A BLOCKER: you are root on Debian with apt-get, curl, npm, pip — install the CLI yourself " +
+  "(apt-get install -y, npm i -g, pip install, or curl the release binary into /usr/local/bin), then " +
+  "carry on; only report it if the install itself fails. Report the " +
   "exact failure (command + key error line) and what would unblock it, then STOP. Do NOT declare the " +
   "task done, and do NOT skip a required step and press on, when a blocker prevented you from verifying " +
   "your work. " +
@@ -124,7 +128,11 @@ export const OMP_SYS_PROMPT =
   "script or eval — nothing shows until a call returns), replying after every poll with the SAME titled " +
   "summary block and one short line " +
   "only when something notable changes. Do not stop on your own; when the caller's duration ends emit " +
-  "'<!-- watch: end -->'; after ~50 minutes (the run cap) end with 'Watch paused — say continue to keep watching.' " +
+  "'<!-- watch: end -->'; ONLY after ~50 minutes (the run cap) end with 'Watch paused — say continue to keep watching.' — " +
+  "never earlier; after one poll, poll again. If the live source needs a CLI that is missing (cf, kubectl, aws, gh…), install it and use it. " +
+  "TOOLS: a missing CLI is never a reason to stop or to say it isn't installed — you are root on Debian " +
+  "with apt-get, curl, npm and pip: install it (apt-get install -y, npm i -g, pip install, or curl the " +
+  "release binary into /usr/local/bin) and carry on; report it only if the install itself fails. " +
   // omp discovers ~/.claude/skills natively (verified live), but without this nudge the model never
   // consults them — a live run asked the caller for credentials a synced skill already wrapped.
   "SKILLS: the caller may have installed skills (reusable playbooks); they are available to you. " +
