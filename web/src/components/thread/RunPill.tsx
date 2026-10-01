@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowUpRight, Check, ChevronRight, Copy, RotateCw } from "lucide-react";
+import { ArrowUpRight, Check, ChevronRight, Copy, RotateCw, Square } from "lucide-react";
 import { toast } from "sonner";
 import type { RunDigest, RunOutcome } from "@/lib/api";
 import type { RunStats } from "@/lib/transcript";
@@ -8,6 +8,9 @@ import { fmtDuration } from "@/lib/lifecycle";
 import { friendlyName } from "@/lib/format";
 import { Collapse } from "@/components/ui/collapse";
 import { cn } from "@/lib/utils";
+import { api } from "@/lib/api";
+import type { TraceEvent } from "@/lib/trace";
+import { deriveWatch, watchElapsedSec, type WatchState } from "@/lib/watch";
 import { fmtTokens, fmtUsd } from "./OutcomeCard";
 
 /**
@@ -56,6 +59,7 @@ export function RunPill({
   context,
   onCopy,
   onAgain,
+  events,
 }: {
   outcome: RunOutcome | null;
   digest: RunDigest | null;
@@ -68,13 +72,18 @@ export function RunPill({
   context?: ContextHealth | null;
   onCopy?: () => Promise<string>;
   onAgain?: () => void;
+  /** The trace, so a finished WATCH reads "Stopped watching <target> · 12m" instead of "Run interrupted". */
+  events?: TraceEvent[];
 }) {
   const [open, setOpen] = React.useState(false);
+  const watch = React.useMemo(() => (events ? deriveWatch(events) : null), [events]);
   const [copied, setCopied] = React.useState(false);
   const bodyId = React.useId();
   if (!o && !d && !stats) return null;
 
-  const failed = failedProp || (o?.state ?? d?.state) === "failed";
+  // Stopping a watch interrupts the turn (exit 253): that is the intended end, not a failure.
+  const stoppedWatch = !!watch && (!failedProp || label === "Run interrupted");
+  const failed = !stoppedWatch && (failedProp || (o?.state ?? d?.state) === "failed");
   const liveMs = durationSec && durationSec > 0 ? durationSec * 1000 : null;
   const durMs = o?.cost.durationMs ?? (d?.startedAt && d.endedAt && d.endedAt > d.startedAt ? d.endedAt - d.startedAt : liveMs);
   const copy = async () => {
@@ -110,18 +119,30 @@ export function RunPill({
   const headline = d?.headline && !/^(done|failed|completed)\.?$/i.test(d.headline.trim()) ? d.headline : null;
 
   // Collapsed line: state, then the results that matter, then cost.
-  const summary: string[] = [failed ? (label && label !== "Completed" ? label : "Failed") : "Done"];
+  const watchSec = watch ? watchElapsedSec(watch, false) : null;
+  const summary: string[] = [
+    stoppedWatch && watch
+      ? `${watch.phase === "paused" ? "Watch paused" : watch.phase === "ended" ? "Finished watching" : "Stopped watching"} ${watch.target}`
+      : failed
+        ? label && label !== "Completed" ? label : "Failed"
+        : "Done",
+  ];
+  if (stoppedWatch && watch) {
+    if (watch.updates) summary.push(plural(watch.updates, "update"));
+    if (watchSec) summary.push(fmtDuration(watchSec));
+  }
   if (prs[0]) summary.push(`PR #${prs[0].number}${prs.length > 1 ? ` +${prs.length - 1}` : ""}`);
   if (diff && diff.files) summary.push(`${plural(diff.files, "file")} +${diff.additions} −${diff.deletions}`);
   if (t) summary.push(t.failed ? `tests ${t.passed}/${t.passed + t.failed} ✕` : `tests ${t.passed}/${t.passed} ✓`);
   else if (verified) summary.push(verified.pass ? "verified ✓" : "unverified");
   if (!prs.length && diff && !diff.files) summary.push("no changes");
-  if (duration) summary.push(duration);
+  if (duration && !(stoppedWatch && watchSec)) summary.push(duration);
   if (tokens) summary.push(tokens);
 
   const rows: [string, React.ReactNode][] = [];
   if (headline) rows.push(["summary", headline]);
-  if (detail) rows.push(["note", <span className={failed ? "text-destructive" : undefined}>{detail}</span>]);
+  if (stoppedWatch && watch) rows.push(["watch", `${watch.target}${watch.every ? ` · every ${watch.every}` : ""}${watch.phase === "paused" ? " · say continue to resume" : ""}`]);
+  else if (detail) rows.push(["note", <span className={failed ? "text-destructive" : undefined}>{detail}</span>]);
   if (o?.header.label)
     rows.push([
       "started by",
@@ -214,7 +235,7 @@ export function RunPill({
   );
 
   return (
-    <div data-run-pill={failed ? "failed" : "done"} className="enter flex min-w-0 flex-col items-start">
+    <div data-run-pill={stoppedWatch ? "watch-stopped" : failed ? "failed" : "done"} className="enter flex min-w-0 flex-col items-start">
       <div className="flex max-w-full min-w-0 items-center gap-0.5">
       <button
         type="button"
@@ -224,7 +245,7 @@ export function RunPill({
         title={summary.join(" · ")}
         className="text-muted-foreground hover:text-foreground hover:bg-muted/60 focus-visible:ring-ring border-border/60 flex h-7 max-w-full min-w-0 cursor-pointer items-center gap-2 rounded-full border px-3 text-micro transition-colors focus-visible:ring-2 focus-visible:outline-none"
       >
-        <span className={cn("size-1.5 shrink-0 rounded-full", failed ? "bg-destructive" : "bg-ok")} aria-hidden />
+        <span className={cn("size-1.5 shrink-0 rounded-full transition-colors duration-200 ease-out", stoppedWatch ? "bg-faint" : failed ? "bg-destructive" : "bg-ok")} aria-hidden />
         <span className="min-w-0 truncate">
           <span className={cn("font-medium", failed ? "text-destructive" : "text-foreground")}>{summary[0]}</span>
           {summary.slice(1).map((s) => ` · ${s}`)}
@@ -246,6 +267,81 @@ export function RunPill({
           ))}
         </dl>
       </Collapse>
+    </div>
+  );
+}
+
+/**
+ * The live pill for a WATCH (the agent loops on a monitoring task until told to stop): "Watching
+ * backend logs · 4 updates · 3m", a calm live-blue breathing dot (never amber — nothing needs you),
+ * and a quiet Stop that interrupts the turn (session kept). Renders nothing unless the trace holds a
+ * current watch, so the thread can mount it unconditionally while a run is going.
+ */
+export function WatchPill({ session, events, running = true }: { session: string; events: TraceEvent[]; running?: boolean }) {
+  const watch = React.useMemo(() => deriveWatch(events), [events]);
+  const [stopping, setStopping] = React.useState(false);
+  const [now, setNow] = React.useState(() => Date.now());
+  const live = running && !!watch && watch.phase === "on";
+  React.useEffect(() => {
+    if (!live) return;
+    const t = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(t);
+  }, [live]);
+  React.useEffect(() => {
+    if (!running) setStopping(false);
+  }, [running]);
+  if (!watch || !running) return null;
+  return <WatchLine watch={watch} live={live} now={now} stopping={stopping} onStop={async () => {
+    setStopping(true);
+    try {
+      await api.interrupt(session);
+    } catch (e) {
+      setStopping(false);
+      toast.error("Could not stop the watch", { description: e instanceof Error ? e.message : String(e) });
+    }
+  }} />;
+}
+
+function WatchLine({ watch, live, now, stopping, onStop }: { watch: WatchState; live: boolean; now: number; stopping: boolean; onStop: () => void }) {
+  const sec = watchElapsedSec(watch, live, now);
+  const bits = [watch.updates ? plural(watch.updates, "update") : "starting", sec != null ? fmtDuration(sec) : null].filter(Boolean);
+  const word = stopping ? "Stopping" : watch.phase === "paused" ? "Watch paused:" : watch.phase === "ended" ? "Finished watching" : "Watching";
+  return (
+    <div data-watch-pill={stopping ? "stopping" : live ? "live" : watch.phase} role="status" aria-live="polite" className="enter flex max-w-full min-w-0 items-center gap-1.5">
+      <span
+        className={cn(
+          "border-border/60 text-muted-foreground flex h-7 max-w-full min-w-0 items-center gap-2 rounded-full border px-3 text-micro transition-[color,border-color,background-color] duration-200 ease-out",
+          live && !stopping && "border-live/30 bg-live/5",
+        )}
+      >
+        <span
+          className={cn(
+            "size-1.5 shrink-0 rounded-full transition-colors duration-200 ease-out",
+            live && !stopping ? "bg-live breathe motion-reduce:animate-none" : "bg-faint",
+          )}
+          aria-hidden
+        />
+        <span className="min-w-0 truncate">
+          <span className={cn("font-medium transition-colors duration-200 ease-out", live && !stopping ? "text-live" : "text-foreground")}>
+            {word} {watch.target}
+          </span>
+          <span className="stamp"> · {bits.join(" · ")}</span>
+        </span>
+      </span>
+      {live && (
+        <button
+          type="button"
+          onClick={onStop}
+          disabled={stopping}
+          data-watch-stop
+          aria-label={`Stop watching ${watch.target}`}
+          title="Stop watching — the agent's session is kept; send a message to pick it back up"
+          className="text-foreground hover:bg-muted focus-visible:ring-ring border-border flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-full border px-3 text-micro font-medium transition-[background-color,opacity] duration-200 ease-out focus-visible:ring-2 focus-visible:outline-none disabled:cursor-default disabled:opacity-60 motion-reduce:transition-none [&_svg]:size-2.5"
+        >
+          <Square className="fill-current" aria-hidden />
+          {stopping ? "Stopping…" : "Stop"}
+        </button>
+      )}
     </div>
   );
 }

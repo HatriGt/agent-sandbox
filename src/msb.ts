@@ -1611,11 +1611,12 @@ export async function resumeAgentTask(
  * Escalates TERM → KILL, and as a last resort heals the sentinels in place (exit 253) so the box
  * can never be left wedged in `running`. Returns false when nothing was running.
  */
-export async function interruptAgentRun(cfg: Config, box: string): Promise<boolean> {
+export async function interruptAgentRun(cfg: Config, box: string, why = "to deliver a message immediately"): Promise<boolean> {
+  const reason = why.replace(/[^\w .,-]/g, "");
   const sh =
     `p=$(cat ${PID_MARK} 2>/dev/null); ` +
     `if [ -z "$p" ] || [ ! -d "/proc/$p" ]; then echo no-run; exit 0; fi; ` +
-    `echo "run interrupted by the operator to deliver a message immediately." >> ${AGENT_LOG}; ` +
+    `echo "run interrupted by the operator ${reason}." >> ${AGENT_LOG}; ` +
     `pkill -TERM -P "$p" 2>/dev/null; ` +
     `for i in 1 2 3 4 5 6 7 8 9 10; do [ ! -f ${RUN_MARK} ] && { echo interrupted; exit 0; }; sleep 1; done; ` +
     `pkill -KILL -P "$p" 2>/dev/null; ` +

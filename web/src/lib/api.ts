@@ -784,6 +784,8 @@ export const api = {
    * never finish. Other queued messages stay queued.
    */
   sendNow: (session: string, id: string) => post<{ ok: true; queued: QueuedMessage[] }>("/send-now.json", { session, id }),
+  /** Stop the running turn (session kept; a later message resumes it). The watch pill's Stop. */
+  interrupt: (session: string) => post<{ ok: true; stopped: boolean }>("/interrupt.json", { session }),
   dequeue: (session: string, id?: string) =>
     fetch(url("/inbox.json", id ? { session, id } : { session }), { method: "DELETE", headers: authHeaders }).then(
       parse<{ queued: QueuedMessage[] }>
