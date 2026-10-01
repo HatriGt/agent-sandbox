@@ -106,12 +106,45 @@ away — the beautifier is presentation, never authority.
 - **````note``` / ````tip``` / ````important``` / ````warn``` / ````caution``` /
   ````success``` / ````error```** — markdown body. Callout card (same as `> [!NOTE]` quotes).
 
+### Prose upgrades (no fence)
+
+- A list whose every item (≥ 2) is `label: NN%` or `label: a/b` → the progress block.
+- A GFM table → the sortable DataTable when it has ≥ 3 body rows, or 2 rows with a numeric
+  column; a two-row table of words stays a plain table. Gates: `web/src/lib/viz-tool-output.ts`.
+
+### Live (streaming)
+
+Fences draw while they stream instead of swapping in when the closing ``` arrives:
+
+- `web/src/lib/markdown-stream.ts` (`splitOpenFence`) tags a still-open fence `<lang>__open`, so
+  the router (`smartBlock(lang, code, { open: true })`) knows the block is incomplete.
+- Partial parsing lives in `web/src/lib/viz-stream.ts`: line-oriented fences parse only
+  `completeLines` (the half-written last line is held back); JSON fences (`chart`, `json`) go
+  through `repairPartialJson`, which closes the prefix after its last finished value. A chart in
+  partial mode trims every series to the shortest array, so a bar never pairs with a label that
+  has not arrived.
+- Until anything parses, `VizSkeleton` (viz/VizFrame.tsx) holds the space. A value is never shown
+  before it is complete — a number still being typed is not drawn as a smaller number.
+- Callouts render their markdown live; other open fences stay code.
+
+### Tool output
+
+A finished tool's printed output (shell commands and file-reading steps in the trace,
+`thread/TraceItems.tsx`) goes through the same router: whole-output JSON → `smartBlock("json")`,
+anything else → `smartBlock("", output)` (the `sniffBare` path above — CSV/TSV/fixed-width and
+boxed tables, `git log` commits, `ls -l` file lists, diffstat, http, stack traces, env, …). When a
+shape is recognised it shows drawn with a small **Visual / Raw** switch (Visual by default; Raw is
+the colored terminal panel), like test runs and `TestResultsCard`. Never while the tool is still
+running, and only for output ≤ 200 lines / 20 KB (`toolOutputLanguage` in
+`web/src/lib/viz-tool-output.ts`) — bigger dumps stay raw.
+
 ### Guidance for the agent (also injected via `AGENT_SYS_PROMPT` in `src/msb.ts`)
 
-When presenting results (not code): tabular facts → a GFM table; progress → a task list; a
-distribution/comparison/trend worth seeing → a ```chart fence; headline metrics → ```stats;
-file layout → ```tree; a pipeline outcome → ```flow. Never force one — plain prose beats a
-mis-shaped visualization, and malformed fences just render as code.
+When presenting results (not code): tabular facts → a GFM table; progress → a task list or
+`label: NN%` items; a distribution/comparison/trend worth seeing → a ```chart fence; headline
+metrics → ```stats; file layout → ```tree; a pipeline outcome → ```flow. To update a block,
+re-emit it with the new values. Never force one — plain prose beats a mis-shaped visualization,
+and malformed fences just render as code.
 
 ## Design rules (for anyone adding or touching a visualizer)
 

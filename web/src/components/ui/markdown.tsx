@@ -15,6 +15,9 @@ import { LinksBlock } from "@/components/viz/AutoBlocks"
 import { parseDefinitions, parseLinks, parseStatusItems } from "@/lib/viz-auto"
 import { CalloutBlock, alertFromBlockquote } from "@/components/viz/CalloutBlock"
 import { calloutKind } from "@/lib/viz-extra"
+import { nodeText } from "@/lib/viz"
+import { progressFromItems, tableWorthRich } from "@/lib/viz-tool-output"
+import { ProgressBlock } from "@/components/viz/SmallBlocks"
 
 export type MarkdownProps = {
   children: string
@@ -79,13 +82,19 @@ const INITIAL_COMPONENTS: Partial<Components> = {
     )
   },
   // GFM tables upgrade to the sortable DataTable (numeric alignment, magnitude bars, copy CSV).
-  // …but only when there is something to sort or chart: a two-row table under a paragraph is prose,
-  // and the card chrome would outweigh it.
+  // …but only when there is something to sort or chart: three or more rows, or two rows with a
+  // numeric column. A two-row table of words under a paragraph is prose; card chrome would outweigh it.
   table: function TableComponent({ children }) {
-    const bodyRows = Children.toArray(children)
+    const body = Children.toArray(children)
       .filter((s): s is ReactElement<{ children?: ReactNode }> => isValidElement(s) && s.type === "tbody")
-      .reduce((n, s) => n + Children.toArray(s.props.children).length, 0)
-    const rich = bodyRows >= 3 ? tableFromMarkdown(children) : null
+      .flatMap((s) => Children.toArray(s.props.children))
+      .filter((tr): tr is ReactElement<{ children?: ReactNode }> => isValidElement(tr))
+      .map((tr) =>
+        Children.toArray(tr.props.children)
+          .filter((c): c is ReactElement<{ children?: ReactNode }> => isValidElement(c))
+          .map((c) => nodeText(c.props.children).trim())
+      )
+    const rich = tableWorthRich(body) ? tableFromMarkdown(children) : null
     if (rich) return rich
     return (
       <div className="table-wrap">
@@ -107,6 +116,9 @@ const INITIAL_COMPONENTS: Partial<Components> = {
     // summary) or every item opening with a status glyph (a checks report). Mixed lists stay lists.
     const texts = listItemTexts(children)
     if (texts) {
+      // Every item `label: NN%` / `label: a/b` → progress bars, no fence needed.
+      const progress = progressFromItems(texts)
+      if (progress) return <ProgressBlock rows={progress} source={texts.join("\n")} />
       const joined = texts.join("\n")
       const links = parseLinks(joined)
       if (links) return <LinksBlock links={links} source={joined} />

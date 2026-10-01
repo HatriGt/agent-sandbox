@@ -16,7 +16,7 @@ import { ATTACHMENT_RE, useSession } from "@/lib/session-context";
 import { SkillMark } from "@/lib/skillGlyph";
 import { parseMcpName } from "@/lib/mcp";
 import { McpItem } from "./McpItem";
-import { PanelFold, TraceOutput } from "./TraceOutput";
+import { PanelFold, TraceOutput, VisualRawSwitch, useOutputVisual } from "./TraceOutput";
 import { Lightbox } from "@/components/ui/lightbox";
 import { Collapse } from "@/components/ui/collapse";
 
@@ -399,6 +399,32 @@ function ShellItem({ event, live }: { event: ToolEvent; live?: boolean }) {
   // A test run renders as a results card (summary chips + per-file cases) with the terminal panel
   // demoted to "raw output"; anything else is the plain terminal.
   const report = React.useMemo(() => (live ? null : parseTestReport(event.result)), [event.result, live]);
+  // Any other finished output with a recognisable shape (a table, JSON, a commit log, `ls -l`…) is
+  // drawn — Visual by default, the terminal one click away under "Raw".
+  const visual = useOutputVisual(report ? undefined : event.result, live);
+  const [raw, setRaw] = React.useState(false);
+  if (!report && visual) {
+    return (
+      <div className="enter min-w-0 flex flex-col gap-1.5">
+        <div className="flex min-w-0 items-center gap-2 pl-1">
+          <p className="stamp text-muted-foreground min-w-0 truncate">
+            <span className={cn("mr-1.5 select-none", event.failed ? "text-destructive" : "text-ok")}>$</span>
+            {event.arg}
+          </p>
+          <span className="ml-auto flex shrink-0 items-center gap-2">
+            {event.failed && <span className="label text-destructive">failed</span>}
+            <DurationChip event={event} />
+            <VisualRawSwitch raw={raw} onChange={setRaw} />
+          </span>
+        </div>
+        {raw ? (
+          <TraceOutput text={event.result!} mode="term" className="bg-trace rounded-md border border-white/8" />
+        ) : (
+          <div className="min-w-0 [&>*]:my-0">{visual}</div>
+        )}
+      </div>
+    );
+  }
   if (report) {
     return (
       <div className="min-w-0 flex flex-col gap-2">
@@ -482,6 +508,9 @@ function StepItem({ event, live }: { event: ToolEvent; live?: boolean }) {
   const summary = resultSummary(event.result);
   const lines = event.result ? lineCount(event.result) : 0;
   const expandable = !!event.result || !!event.diff;
+  // Folded like any step, but a recognisable output (JSON, a table…) opens drawn, "Raw" beside it.
+  const visual = useOutputVisual(event.diff ? undefined : event.result, live);
+  const [raw, setRaw] = React.useState(false);
 
   return (
     <div className="enter min-w-0">
@@ -523,7 +552,16 @@ function StepItem({ event, live }: { event: ToolEvent; live?: boolean }) {
 
       <Collapse open={open && expandable}>
         {event.diff && <EditDiff diff={event.diff} />}
-        {event.result && <TraceOutput text={event.result} mode="term" className="bg-trace mt-2 ml-6 overflow-hidden rounded-md border border-white/8" />}
+        {event.result && visual && (
+          <div className="mt-2 ml-6 flex justify-end">
+            <VisualRawSwitch raw={raw} onChange={setRaw} />
+          </div>
+        )}
+        {event.result && visual && !raw ? (
+          <div className="mt-1.5 ml-6 min-w-0 [&>*]:my-0">{visual}</div>
+        ) : (
+          event.result && <TraceOutput text={event.result} mode="term" className="bg-trace mt-2 ml-6 overflow-hidden rounded-md border border-white/8" />
+        )}
       </Collapse>
       {event.result && !open && summary && <p className={cn("stamp ml-8 truncate", event.failed ? "text-destructive" : "text-muted-foreground")}>{summary}</p>}
     </div>
