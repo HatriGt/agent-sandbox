@@ -77,9 +77,10 @@ const firstArray = (o: Record<string, unknown>, keys: string[]): unknown[] | und
  * Agents drift from the spec, so the common spellings are accepted too: `x`/`categories` for
  * labels, `y`/`data` for values, `kind` for type, `pie` for donut, a {name: data} series map,
  * point lists ([{label, value}]), and numeric strings. Mismatched lengths are still rejected —
- * padding would invent data.
+ * padding would invent data. `partial` (a fence still streaming in, repaired by
+ * lib/viz-stream.ts) instead trims every array to the shortest, which drops nothing that is known.
  */
-export function parseChartSpec(src: string): ChartSpec | null {
+export function parseChartSpec(src: string, { partial = false }: { partial?: boolean } = {}): ChartSpec | null {
   let raw: unknown;
   try {
     raw = JSON.parse(src);
@@ -131,6 +132,13 @@ export function parseChartSpec(src: string): ChartSpec | null {
       series.push({ name, data });
     }
   } else return null;
+  if (partial && labels && series.length) {
+    // Mid-stream the label list and each series arrive at different times: draw only the
+    // categories every array has reached, so no bar is ever missing its label or its value.
+    const n = Math.min(labels.length, ...series.map((s) => s.data.length));
+    labels = labels.slice(0, n);
+    series = series.map((s) => ({ ...s, data: s.data.slice(0, n) }));
+  }
   if (!labels || labels.length === 0 || labels.length > 60) return null;
   if (series.length === 0 || series.length > 8) return null;
   if (series.some((s) => s.data.length !== labels!.length)) return null;

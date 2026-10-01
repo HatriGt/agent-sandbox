@@ -8,6 +8,40 @@ export function seriesColor(i: number): string {
   return `var(--viz-${Math.min(i, 7) + 1})`;
 }
 
+const SKELETON_TITLE: Record<string, string> = {
+  chart: "Drawing chart", json: "Reading JSON", jsonc: "Reading JSON", stats: "Collecting metrics", timeline: "Building timeline",
+  steps: "Listing steps", progress: "Measuring progress", tests: "Reading test results", log: "Reading log", flow: "Tracing flow",
+};
+
+/**
+ * Placeholder for a visual fence that is streaming in but has nothing drawable yet. Same frame
+ * and header as the finished block, so the swap to the real block is a fill-in, not a jump.
+ */
+export function VizSkeleton({ language }: { language: string }) {
+  const tall = language === "chart" || language === "heatmap" || language === "graph" || language === "dag";
+  return (
+    <div className="bg-card not-prose enter my-3 overflow-hidden rounded-xl border" aria-busy="true" data-viz-skeleton={language}>
+      <div className="flex h-8 items-center border-b px-3">
+        <span className="shimmer-text text-micro font-medium">{SKELETON_TITLE[language] ?? "Drawing"}…</span>
+      </div>
+      <div className={cn("flex flex-col justify-end gap-2 px-4 py-3", tall ? "h-44" : "h-16")} aria-hidden>
+        {tall ? (
+          <div className="flex h-full items-end gap-1.5">
+            {[40, 65, 50, 80, 35, 60].map((h, i) => (
+              <span key={i} className="shimmer flex-1 rounded-t" style={{ height: `${h}%` }} />
+            ))}
+          </div>
+        ) : (
+          <>
+            <span className="shimmer block h-3 w-2/3 rounded" />
+            <span className="shimmer block h-3 w-1/3 rounded" />
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /**
  * The shared card every visualizer sits in: hairline border (no shadow — one elevation cue per
  * surface), a quiet header with an optional title, copy-source, and a raw toggle that swaps the

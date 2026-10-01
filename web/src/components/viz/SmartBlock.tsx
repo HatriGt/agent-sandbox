@@ -36,6 +36,8 @@ import { StatsBlock } from "./StatsBlock";
 import { TimelineBlock, StepsBlock } from "./TimelineBlock";
 import { TreeBlock } from "./TreeBlock";
 import { sniffBare, sniffLanguage } from "@/lib/viz-auto";
+import { completeLines, repairPartialJson } from "@/lib/viz-stream";
+import { VizSkeleton } from "./VizFrame";
 import type { AutoBlock } from "@/lib/viz-auto-types";
 import { CommandBlock, ComparisonBlock, CronBlock, EnvBlock, FileListBlock, IniBlock, JwtBlock, LinksBlock, StackTraceBlock, UrlBlock } from "./AutoBlocks";
 
@@ -46,13 +48,18 @@ import { CommandBlock, ComparisonBlock, CronBlock, EnvBlock, FileListBlock, IniB
  * visualizer can never lose content or crash the transcript (parsers throw nothing; the boundary
  * below catches renderer bugs).
  */
-export function smartBlock(language: string, code: string): React.ReactElement | null {
-  const src = code.replace(/\n$/, "");
+export function smartBlock(language: string, code: string, { open = false }: { open?: boolean } = {}): React.ReactElement | null {
+  // A fence still streaming in: draw from what has certainly arrived — whole lines, or the JSON
+  // prefix closed after its last finished value (lib/viz-stream.ts) — so the block grows in place.
+  const live = open && (LINE_FENCES.has(language) || JSON_FENCES.has(language));
+  // Callouts hold markdown, which already renders mid-stream; every other open fence stays code.
+  if (open && !live && !calloutKind(language)) return null;
+  const src = !live ? code.replace(/\n$/, "") : LINE_FENCES.has(language) ? completeLines(code) : (repairPartialJson(code) ?? "");
   const tidy = tidyFence(language, src);
   let el: React.ReactElement | null = null;
   switch (language) {
     case "chart": {
-      const spec = parseChartSpec(src);
+      const spec = parseChartSpec(src, { partial: live });
       el = spec && <ChartBlock spec={spec} source={src} />;
       break;
     }
@@ -219,8 +226,19 @@ export function smartBlock(language: string, code: string): React.ReactElement |
       el = renderAuto(sniffLanguage(language, src), src);
     }
   }
+  // Nothing drawable has landed yet: a skeleton in the block's frame holds the place, so the block
+  // goes skeleton → growing visual and never shows a code panel that swaps out.
+  if (!el && live) el = <VizSkeleton language={language} />;
   return el && <VizBoundary source={src}>{el}</VizBoundary>;
 }
+
+/** Fences whose content is line-oriented: a streaming one is parsed up to its last whole line. */
+const LINE_FENCES = new Set([
+  "stats", "flow", "tree", "csv", "tsv", "timeline", "steps", "progress", "kv", "badges", "score", "keys", "shortcuts",
+  "palette", "http", "tests", "log", "diffstat", "commits", "deps", "graph", "dag", "funnel", "gantt", "spans", "heatmap",
+]);
+/** JSON fences: a streaming one is parsed from its repaired prefix. */
+const JSON_FENCES = new Set(["chart", "json", "jsonc"]);
 
 /** One sniffed shape → its block. Shapes the existing parsers own are re-parsed from the source. */
 function renderAuto(auto: AutoBlock | null, src: string): React.ReactElement | null {

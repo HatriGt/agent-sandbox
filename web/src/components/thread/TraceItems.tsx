@@ -572,7 +572,7 @@ export const SayItem = React.memo(function SayItem({ text, live, label = true, a
     <div className="enter group/say min-w-0">
       {(label || live) && <AgentLabel live={live} at={at} />}
       <div className="text-foreground min-w-0">
-        {live ? <StreamingMarkdown text={text} /> : <Markdown className="prose-agent">{text}</Markdown>}
+        <StreamingMarkdown text={text} live={!!live} />
       </div>
       {!live && <CopyMessage text={text} at={label ? undefined : at} />}
     </div>

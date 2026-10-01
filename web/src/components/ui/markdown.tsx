@@ -5,6 +5,7 @@ import ReactMarkdown, { type Components } from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { normalizeBlocks } from "@/lib/markdown-normalize"
 import { isCodeBlock } from "@/lib/markdown-code"
+import { splitOpenFence } from "@/lib/markdown-stream"
 import { CodeBlock, CodeBlockCode } from "./code-block"
 import { LinkChip } from "./link-chip"
 import { smartBlock, tableFromMarkdown } from "@/components/viz/SmartBlock"
@@ -61,16 +62,18 @@ const INITIAL_COMPONENTS: Partial<Components> = {
       )
     }
 
-    const language = extractLanguage(className)
+    // A fence still streaming in arrives tagged `<lang>__open` (lib/markdown-stream.ts).
+    const { language, open } = splitOpenFence(extractLanguage(className))
 
     // Output visualizers (docs/output-visualizers.md): opt-in fences (chart / stats / flow / tree /
     // csv / tsv), parseable json, and auto-detected ASCII trees render rich; anything the router
-    // does not confidently understand — including a fence still streaming in — stays a code block.
-    const rich = smartBlock(language, text)
+    // does not confidently understand stays a code block. An OPEN fence of a visual language draws
+    // the part that has arrived (or a skeleton) so it never flips from code into a chart.
+    const rich = smartBlock(language, text, { open })
     if (rich) return rich
 
     return (
-      <CodeBlock className={className}>
+      <CodeBlock className={open ? `language-${language}` : className}>
         <CodeBlockCode code={text} language={language} />
       </CodeBlock>
     )

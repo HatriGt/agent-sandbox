@@ -17,8 +17,10 @@ import { cn } from "@/lib/utils";
  *
  * `prefers-reduced-motion` short-circuits to showing the full text immediately (no caret, no reveal).
  */
-export function StreamingMarkdown({ text }: { text: string }) {
-  const reduced = usePrefersReducedMotion();
+export function StreamingMarkdown({ text, live = true }: { text: string; live?: boolean }) {
+  // A finished reply renders through the SAME element tree as the live one, so the visualizers
+  // that grew while it streamed stay mounted when it ends — no remount, no replayed draw-in.
+  const reduced = usePrefersReducedMotion() || !live;
   const [shown, setShown] = React.useState(() => (reduced ? text.length : 0));
 
   // The full target text lives in a ref so the rAF loop always reveals toward the latest poll's
@@ -61,15 +63,15 @@ export function StreamingMarkdown({ text }: { text: string }) {
   // Render the slice as the stable document it is becoming: a fence still being typed is hidden and
   // an open fence is virtually closed, so a code block never flickers in as prose-then-panel. The
   // FULL text is stabilised too: the agent is mid-reply, so the log's tail can be an open fence.
-  const safe = React.useMemo(() => stabilizeMarkdown(revealed), [revealed]);
+  const safe = React.useMemo(() => (live ? stabilizeMarkdown(revealed) : text), [live, revealed, text]);
 
   // The caret belongs to the whole live reply, not just to the reveal: between two log deltas the
   // agent is still writing, and a caret that vanished there made every pause look like the end.
   // It sits inline after the last glyph (see styles/thread.css) and blinks only once caught up.
   return (
-    <div className={cn("md-live relative", streaming && "md-catching-up")}>
+    <div className={cn("relative", live && "md-live", streaming && "md-catching-up")}>
       <Markdown className="prose-agent">{safe}</Markdown>
-      <span className="md-caret-block" aria-hidden />
+      {live && <span className="md-caret-block" aria-hidden />}
     </div>
   );
 }

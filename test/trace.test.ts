@@ -360,12 +360,20 @@ test("a half-typed fence marker is withheld until it is a real fence", async () 
   assert.equal(stabilizeMarkdown("intro\n``"), "intro");
   assert.equal(stabilizeMarkdown("intro\n`"), "intro");
   // Three backticks IS a fence — it must survive, virtually closed.
-  assert.equal(stabilizeMarkdown("intro\n```"), "intro\n```\n```");
+  assert.equal(stabilizeMarkdown("intro\n```"), "intro\n```__open\n```");
 });
 
 test("an open fence is virtually closed so the panel has an end", async () => {
   const { stabilizeMarkdown } = await import("../web/src/lib/markdown-stream.ts");
-  assert.equal(stabilizeMarkdown("```bash\nuname -a"), "```bash\nuname -a\n```");
+  assert.equal(stabilizeMarkdown("```bash\nuname -a"), "```bash__open\nuname -a\n```");
+});
+
+test("an open fence's language is tagged so visualizers know it is still arriving", async () => {
+  const { stabilizeMarkdown, splitOpenFence } = await import("../web/src/lib/markdown-stream.ts");
+  assert.equal(stabilizeMarkdown('```chart\n{"type":"bar"'), '```chart__open\n{"type":"bar"\n```');
+  assert.deepEqual(splitOpenFence("chart__open"), { language: "chart", open: true });
+  assert.deepEqual(splitOpenFence("__open"), { language: "plaintext", open: true });
+  assert.deepEqual(splitOpenFence("chart"), { language: "chart", open: false });
 });
 
 test("an already-closed fence is left exactly as it is", async () => {
@@ -377,7 +385,7 @@ test("an already-closed fence is left exactly as it is", async () => {
 test("a tilde fence is not closed by a backtick fence inside it", async () => {
   const { stabilizeMarkdown } = await import("../web/src/lib/markdown-stream.ts");
   // The ``` here is CONTENT of the ~~~ block; closing on it would truncate the block early.
-  assert.equal(stabilizeMarkdown("~~~md\n```\n"), "~~~md\n```\n\n~~~");
+  assert.equal(stabilizeMarkdown("~~~md\n```\n"), "~~~md__open\n```\n\n~~~");
 });
 
 test("stabilizing prose with no fences changes nothing", async () => {

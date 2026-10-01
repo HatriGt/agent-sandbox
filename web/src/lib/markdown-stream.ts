@@ -22,6 +22,15 @@ const FENCE_RE = /^\s{0,3}(`{3,}|~{3,})(.*)$/;
 /** A line that could still GROW into a fence: one or two markers, nothing else typed yet. */
 const PARTIAL_FENCE_RE = /^\s{0,3}(`{1,2}|~{1,2})$/;
 
+/** Appended to an open fence's language by stabilizeMarkdown; markdown.tsx strips it. */
+export const OPEN_FENCE_SUFFIX = "__open";
+
+/** `chart__open` → { language: "chart", open: true }; a bare open fence → plaintext. */
+export function splitOpenFence(language: string): { language: string; open: boolean } {
+  if (!language.endsWith(OPEN_FENCE_SUFFIX)) return { language, open: false };
+  return { language: language.slice(0, -OPEN_FENCE_SUFFIX.length) || "plaintext", open: true };
+}
+
 export function stabilizeMarkdown(revealed: string): string {
   const lines = revealed.split("\n");
 
@@ -34,24 +43,31 @@ export function stabilizeMarkdown(revealed: string): string {
   // Track fence state across the slice. Only a fence of the SAME marker character and at least the
   // same length closes an open one, matching CommonMark — otherwise a "```" inside a "~~~" block
   // would be mistaken for its close.
-  let open: { marker: string; len: number } | null = null;
-  for (const line of lines) {
+  let open: { marker: string; len: number; at: number } | null = null;
+  lines.forEach((line, at) => {
     const m = line.match(FENCE_RE);
-    if (!m) continue;
+    if (!m) return;
     const marker = m[1][0];
     const len = m[1].length;
     if (!open) {
       // An opening fence may carry an info string; a closing one may not.
-      open = { marker, len };
+      open = { marker, len, at };
     } else if (marker === open.marker && len >= open.len && !m[2].trim()) {
       open = null;
     }
-  }
+  });
 
   // Virtually close a fence that is still open, so the code panel has an end and the content after
-  // it does not reflow when the real closing fence arrives.
-  if (open) lines.push(open.marker.repeat(open.len));
-  else {
+  // it does not reflow when the real closing fence arrives. The info string is tagged
+  // `<lang>__open` so the visualizer router knows the block is still arriving (OPEN_FENCE_SUFFIX):
+  // it draws what has landed so far instead of showing code that later swaps into a chart.
+  if (open) {
+    const o = open as { marker: string; len: number; at: number };
+    const m = lines[o.at].match(FENCE_RE)!;
+    const lang = m[2].trim().split(/\s+/)[0] ?? "";
+    if (/^\w*$/.test(lang)) lines[o.at] = lines[o.at].replace(/(`{3,}|~{3,}).*$/, `$1${lang}${OPEN_FENCE_SUFFIX}`);
+    lines.push(o.marker.repeat(o.len));
+  } else {
     holdPartialTable(lines);
     holdPartialCodeSpan(lines);
   }
