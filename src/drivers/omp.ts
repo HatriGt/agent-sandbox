@@ -9,6 +9,8 @@ import {
   ERR_MARK,
   ID_CLOSE,
   ID_OPEN,
+  PARTIAL_MARK,
+  PARTIAL_RESET,
   QUESTION_MARK,
   RESULT_MAX_BYTES,
   RESULT_MAX_LINES,
@@ -75,6 +77,18 @@ export function ompFmtScript(): string {
     `function toolRow(b){const arg=oneLine(toolArg(b.arguments||b.args||b.input));st();w("→ "+String(b.name||b.toolName||"tool")+(arg?": "+arg:"")+idTok(b.id||b.toolCallId))}` +
     `function result(id,body,isErr){const r=String(body==null?"":body).trim();const tok=id?"${ID_OPEN}"+String(id).slice(-8)+"${ID_CLOSE} ":"";if(r||tok)st();` +
     `if(r)w("  "+tok+(isErr?"${ERR_MARK} ":"")+clip(df(r).split("\\n")).join("\\n  "));else if(tok)w("  "+tok+(isErr?"${ERR_MARK} ":"")+"(no output)")}` +
+        // Live output of a running tool (tool_execution_update carries the CUMULATIVE output so far):
+    // forward only finished lines, at most once a second, as PARTIAL chunks the trace folds into the
+    // call — without this a long poll shows nothing until it returns. Capped per call; the final
+    // result still arrives and replaces the chunks.
+    `const pSent={},pAt={},pPend={},pTimer={},pBytes={};`+
+    `function pText(r){if(r==null)return"";if(typeof r==="string")return r;return txt(r.content)||String(r.output||r.text||"")}`+
+    `function pFlush(id){pTimer[id]=0;const full=pPend[id];if(full==null)return;const cut=full.lastIndexOf("\\n");if(cut<0)return;const done=full.slice(0,cut+1);const prev=pSent[id]||"";if(done===prev)return;`+
+    `let mark="${PARTIAL_MARK}",delta;if(done.startsWith(prev))delta=done.slice(prev.length);else{mark="${PARTIAL_RESET}";delta=done}pSent[id]=done;pAt[id]=Date.now();`+
+    `const ls=df(delta.replace(/\\n$/,"")).split("\\n");if(!ls.join("").trim())return;pBytes[id]=(pBytes[id]||0)+Buffer.byteLength(delta);if(pBytes[id]>65536)return;`+
+    `st();w("  ${ID_OPEN}"+String(id).slice(-8)+"${ID_CLOSE} "+mark+" "+clip(ls).join("\\n  "))}`+
+    `function partial(id,r){if(!id)return;pPend[id]=pText(r);if(pTimer[id])return;const wait=Math.max(0,1000-(Date.now()-(pAt[id]||0)));pTimer[id]=setTimeout(()=>pFlush(id),wait)}`+
+    `function pDone(id){if(!id)return;if(pTimer[id])clearTimeout(pTimer[id]);delete pPend[id];delete pTimer[id]}`+
     `function usage(u){if(!u)return;const inn=(u.input||u.input_tokens||0)+(u.cacheRead||u.cache_read_input_tokens||0)+(u.cacheWrite||u.cache_creation_input_tokens||0);` +
     `const o=(u.output||u.output_tokens||0);w("${USAGE_OPEN} in="+inn+" out="+o+" ctx="+(inn+o))}` +
     `function onMessage(m){if(!m||typeof m!=="object")return;const role=String(m.role||"");` +
@@ -87,7 +101,7 @@ export function ompFmtScript(): string {
     `else if(b.type==="toolCall"||b.type==="tool_call"||b.type==="tool_use")toolRow(b)}` +
     `if(typeof m.content==="string"&&m.content.trim()){st();w(df(m.content.trim())+"\\n")}` +
     `return}` +
-    `if(role==="toolResult"||role==="tool"||role==="tool_result"){const id=m.toolCallId||m.tool_call_id||m.toolUseId||m.id;` +
+    `if(role==="toolResult"||role==="tool"||role==="tool_result"){const id=m.toolCallId||m.tool_call_id||m.toolUseId||m.id;pDone(id);` +
     `result(id,txt(m.content)||m.output||m.result||m.text,!!(m.isError||m.is_error));return}}` +
     `let buf="";` +
     `process.stdin.setEncoding("utf8");` +
@@ -108,6 +122,7 @@ export function ompFmtScript(): string {
     // per turn, like the Claude formatter's result frame. (tool results are NOT read from
     // tool_execution_end: the same result arrives again as a role:"toolResult" message_end, and
     // handling both wrote every output twice — measured live.)
+    `if(t==="tool_execution_update"){partial(e.toolCallId||e.id,e.partialResult);return}` +
     `if(t==="turn_end"){usage(e.message&&e.message.usage);return}` +
     `if(t==="error"&&(e.message||e.error))w("${ERR_MARK} "+oneLine(String(e.message||e.error)));` +
     `}catch(_){}}`;

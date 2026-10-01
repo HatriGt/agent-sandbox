@@ -24,6 +24,15 @@ export const ID_OPEN = "⟦#";
 export const ID_CLOSE = "⟧";
 
 /**
+ * Prefixes a PARTIAL tool result: output a still-running tool has produced so far (omp's
+ * `tool_execution_update`). Chunks append to the call's result and keep it `streaming`; the final
+ * id-stamped result block replaces them. PARTIAL_RESET means "replace what you have" — the tool's
+ * rolling output window moved, so the new chunk is not a continuation.
+ */
+export const PARTIAL_MARK = "⟦…⟧";
+export const PARTIAL_RESET = "⟦…!⟧";
+
+/**
  * How much of a tool_result survives into .agent.log.
  *
  * The tail a formatter drops is gone for good — the raw stream-json is never persisted, so the UI

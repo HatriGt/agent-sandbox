@@ -44,7 +44,8 @@ export function LifecycleItem({ label, detail }: { label: string; detail?: strin
   );
 }
 
-const SHELL_TOOLS = new Set(["Bash", "Shell", "Terminal", "Run", "Exec", "sh", "bash"]);
+// eval/python/js: omp's code-running tools print like a shell and stream partial output the same way.
+const SHELL_TOOLS = new Set(["Bash", "Shell", "Terminal", "Run", "Exec", "sh", "bash", "eval", "python", "js"]);
 type ToolEvent = Extract<TraceEvent, { kind: "tool" }>;
 
 /* ── Timing ──────────────────────────────────────────────────────────────────────────────────────

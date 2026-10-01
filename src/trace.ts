@@ -101,6 +101,9 @@ const ERR_MARK = "⟦err⟧";
 // each result to its own call. Logs written by an older formatter carry no token; those fall back to
 // "attach to the most recent tool", which is what they have always done.
 const ID_OPEN = "⟦#";
+// Partial output of a still-running tool (src/drivers/sentinels.ts PARTIAL_MARK/PARTIAL_RESET).
+const PARTIAL_MARK = "⟦…⟧";
+const PARTIAL_RESET = "⟦…!⟧";
 const TOOL_ID_RE = /\s*⟦#([^⟧]+)⟧\s*/;
 const YOU_OPEN = "⟦you⟧";
 const YOU_CLOSE = "⟦/you⟧";
@@ -183,6 +186,7 @@ export function parseTrace(rawLog: string): TraceEvent[] {
   // tool_use id tail -> the tool event it belongs to, so a result block stamped with that id lands
   // on its own call even when several calls were issued in one message.
   const byId = new Map<string, Extract<TraceEvent, { kind: "tool" }>>();
+  const partials = new Set<Extract<TraceEvent, { kind: "tool" }>>();
   // The tool the CURRENT result block is being appended to. A block's id is stamped on its first
   // line only; the remaining lines belong to the same target.
   let target: Extract<TraceEvent, { kind: "tool" }> | null = null;
@@ -334,6 +338,18 @@ export function parseTrace(rawLog: string): TraceEvent[] {
       if (id && body.trimStart().startsWith(ID_OPEN)) {
         body = body.replace(TOOL_ID_RE, "");
         target = byId.get(id[1]) ?? (last?.kind === "tool" ? last : target);
+        if (target && (body.startsWith(PARTIAL_MARK) || body.startsWith(PARTIAL_RESET))) {
+          // A live chunk: append (or replace, on reset) and keep the call streaming.
+          if (body.startsWith(PARTIAL_RESET)) target.result = undefined;
+          body = body.slice((body.startsWith(PARTIAL_MARK) ? PARTIAL_MARK : PARTIAL_RESET).length).replace(/^ /, "");
+          target.streaming = true;
+          partials.add(target);
+        } else if (target && partials.has(target)) {
+          // The final result supersedes the chunks streamed before it.
+          partials.delete(target);
+          target.result = undefined;
+          delete target.streaming;
+        }
       } else if (!target) {
         target = last?.kind === "tool" ? last : null;
       }

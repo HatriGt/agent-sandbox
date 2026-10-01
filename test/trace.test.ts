@@ -587,3 +587,21 @@ test("a stamp between two text blocks does not split the say", () => {
   assert.equal(ev.length, 1);
   assert.ok(ev[0].kind === "say" && ev[0].at === 1756713600000 && /First\.[\s\S]*Second\./.test(ev[0].text));
 });
+
+test("omp partial tool output streams, resets, and is superseded by the final result", () => {
+  const head = "→ eval: loop ⟦#12345678⟧\n";
+  const p1 = head + "  ⟦#12345678⟧ ⟦…⟧ a=1\n";
+  let t = parseTrace(p1).find((e) => e.kind === "tool") as any;
+  assert.equal(t.streaming, true);
+  assert.equal(t.result.trim(), "a=1");
+  const p2 = p1 + "  ⟦#12345678⟧ ⟦…⟧ a=2\n";
+  t = parseTrace(p2).find((e) => e.kind === "tool") as any;
+  assert.equal(t.result.trim(), "a=1\na=2");
+  const reset = p2 + "  ⟦#12345678⟧ ⟦…!⟧ b=1\n";
+  t = parseTrace(reset).find((e) => e.kind === "tool") as any;
+  assert.equal(t.result.trim(), "b=1");
+  const done = p2 + "  ⟦#12345678⟧ a=1\n  a=2\n  done\n";
+  t = parseTrace(done).find((e) => e.kind === "tool") as any;
+  assert.ok(!t.streaming);
+  assert.equal(t.result.trim(), "a=1\na=2\ndone");
+});

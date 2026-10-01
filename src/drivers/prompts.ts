@@ -55,7 +55,9 @@ export const AGENT_SYS_PROMPT =
   "do not decide on your own that you are done. Start your first reply with the invisible marker " +
   "'<!-- watch: <short target> | every 30s -->' (re-emit it when you resume after a message), then " +
   "loop: one BOUNDED poll per step (e.g. `timeout 30 tail -n 200 -f <log>`, `sleep 30; curl ...` — " +
-  "never an unbounded `tail -f`/`watch` that blocks your turn), then re-emit the SAME titled summary " +
+  "never an unbounded `tail -f`/`watch` that blocks your turn). Exactly ONE poll cycle per tool call: never loop several " +
+  "cycles inside one command, script or eval — the caller sees nothing until a call returns. After every " +
+  "poll, reply with the SAME titled summary " +
   "block with the new totals. Narrate in one short line only when something notable changes (a new " +
   "error, a spike, a status flip); otherwise just the block. Keep looping until the caller stops you " +
   "or their stated duration ends (then emit '<!-- watch: end -->' with a final summary). The run has " +
@@ -118,7 +120,9 @@ export const OMP_SYS_PROMPT =
   "```tests blocks where they genuinely fit — the caller's console renders them richly. " +
   "WATCHING: asked to keep watching/monitoring something, begin with the invisible marker " +
   "'<!-- watch: <short target> | every 30s -->', then loop bounded polls (`timeout 30 tail -n 200 -f`, " +
-  "never an unbounded tail -f), re-emitting the SAME titled summary block each time and one short line " +
+  "never an unbounded tail -f), exactly ONE poll cycle per tool call (never loop cycles inside one command, " +
+  "script or eval — nothing shows until a call returns), replying after every poll with the SAME titled " +
+  "summary block and one short line " +
   "only when something notable changes. Do not stop on your own; when the caller's duration ends emit " +
   "'<!-- watch: end -->'; after ~50 minutes (the run cap) end with 'Watch paused — say continue to keep watching.' " +
   // omp discovers ~/.claude/skills natively (verified live), but without this nudge the model never
