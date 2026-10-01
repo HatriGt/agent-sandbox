@@ -122,7 +122,7 @@ export function ScenarioDemo() {
     <figure ref={rootRef} className="mt-12" aria-labelledby="demo-title" aria-describedby="demo-summary">
       <p id="demo-summary" className="sr-only">
         At 3:12 a.m. a production error spike on a checkout service arrives as a webhook. An automation starts a run in its own
-        microVM with an egress allowlist and a budget. The agent reproduces the error from a captured event, bisects to the commit
+        microVM with an egress allowlist. The agent reproduces the error from a captured event, bisects to the commit
         that caused it, and writes a failing test. It then asks one question, patch forward or revert the release, answered with
         one tap on a phone push. It applies the fix, verifies it, opens a pull request, and posts a receipt on the alert. A chained
         automation then updates the changelog in a second run. Both runs appear in History.
@@ -550,7 +550,7 @@ function SidePanel({ t, state }: { t: number; state: RunState }) {
   const working = Math.max(0, Math.min(t, 10600) - 3000) + Math.max(0, Math.min(t, 17600) - 13700);
   const spend = t < 3000 ? 0 : 0.03 + working * 0.00007;
   const minutes = Math.round((Math.min(t, END) / END) * 19);
-  const focus = t < 1600 ? "trigger" : t < 3000 ? "machine" : t < 10600 ? "plan" : t < 13700 ? "budget" : t < 18400 ? "plan" : "trigger";
+  const focus = t < 1600 ? "trigger" : t < 3000 ? "machine" : t < 10600 ? "plan" : t < 13700 ? "cost" : t < 18400 ? "plan" : "trigger";
   return (
     <aside className="hidden flex-col border-l md:flex" aria-label="Run details">
       <Section label="Trigger" focus={focus === "trigger"}>
@@ -576,21 +576,16 @@ function SidePanel({ t, state }: { t: number; state: RunState }) {
         </ol>
       </Section>
       <Section
-        label="Budget"
-        focus={focus === "budget"}
+        label="Cost"
+        focus={focus === "cost"}
         right={
           <span className="text-foreground inline-flex items-center gap-1 rounded-md border px-1.5 py-px text-micro font-medium tabular-nums">
-            <Timer className="size-3" aria-hidden /> 45 min · $3
+            <Timer className="size-3" aria-hidden /> {minutes} min
           </span>
         }
       >
-        <div className="bg-muted mt-2.5 h-1 overflow-hidden rounded-full">
-          <div className="bg-foreground/70 h-full rounded-full" style={{ width: `${(spend / 3) * 100}%` }} />
-        </div>
-        <p className="stamp text-muted-foreground mt-1.5 tabular-nums">
-          ${spend.toFixed(2)} · {minutes} min of 45
-        </p>
-        <p className="text-muted-foreground mt-1.5 text-micro leading-snug">At a cap it asks continue or stop.</p>
+        <p className="stamp text-muted-foreground mt-2 tabular-nums">${spend.toFixed(2)} · {Math.round(working / 40).toLocaleString("en-US")}k tokens</p>
+        <p className="text-muted-foreground mt-1.5 text-micro leading-snug">Dollars only for a priced model; never a guess.</p>
       </Section>
       <Section label="Machine" focus={focus === "machine"}>
         <p className="text-foreground mt-2 flex items-center gap-2 text-micro font-medium">

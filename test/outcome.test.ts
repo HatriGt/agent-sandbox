@@ -66,7 +66,6 @@ test("outcome: PRs only from a create call, diff sums, tests from trace, unprice
   assert.deepEqual(o.cost.tokens, { input: 150, output: 25 });
   assert.equal(o.cost.usd, null);
   assert.equal(o.cost.durationMs, 60_000);
-  assert.equal(o.cost.budget, null);
 });
 
 test("outcome: priced model gets dollars; verify tests win; trigger header links the issue; PR-only", () => {
@@ -80,13 +79,11 @@ test("outcome: priced model gets dollars; verify tests win; trigger header links
     }),
     events: [{ kind: "tool", name: "Bash", arg: "npm test", result: "ℹ pass 9\nℹ fail 0" }],
     log: "⟦usage⟧ in=1000000 out=0 ctx=1\n",
-    budget: { maxMinutes: 30, maxUsd: 5, tripped: [] },
     env: {},
   });
   assert.equal(o.trust.tests?.source, "verify");
   assert.equal(o.trust.tests?.failed, 1);
   assert.equal(o.cost.usd, 3);
-  assert.deepEqual(o.cost.budget, { maxMinutes: 30, maxUsd: 5, maxTokens: null, tripped: [] });
   assert.equal(o.trust.prOnly, true);
   assert.equal(o.header.label, "github triage: issue #12");
   assert.deepEqual(o.header.link, { href: "https://github.com/o/r/issues/12", external: true });

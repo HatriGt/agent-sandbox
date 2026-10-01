@@ -16,7 +16,6 @@ import type { AgentCreds } from "./msb.js";
 import { reserveBox } from "./capacity.js";
 import type { VerifyPlan } from "./verify.js";
 import { providerFitsDriver, driversFor, type ProviderRecord } from "./providers.js";
-import type { RunBudget } from "./budget.js";
 import { AGENT_LABELS } from "./agent-kind.js";
 
 export interface DelegateFlowInput {
@@ -51,8 +50,6 @@ export interface DelegateFlowInput {
   allowPartialSupervision?: boolean;
   /** The caller's model provider (already resolved to the owner's record by the route). */
   provider?: ProviderRecord;
-  /** Per-run budget, already normalized (src/budget.ts). */
-  budget?: RunBudget;
   /** Harness skill selection (already validated names). */
   skills?: string[];
   /** Repo setup profiles for this owner (see DelegatePlan.setup). */
@@ -95,7 +92,6 @@ export async function runDelegateFlow(
     }
     v.plan.provider = input.provider;
   }
-  if (input.budget) v.plan.budget = input.budget;
   if (input.skills) v.plan.skills = input.skills;
   if (input.setup) v.plan.setup = input.setup;
 

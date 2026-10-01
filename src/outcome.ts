@@ -2,16 +2,15 @@
  * The outcome card (docs/plan-demo-parity.md bet 2): one record answering the three questions a
  * returning user has — what did I get, can I trust it, what did it cost — plus why the run started.
  *
- * Built at the archive moment from facts the system already has (the digest, the raw log, the
- * budget the fleet sweep read) and persisted inside the archived digest (digest.outcome), so it
- * survives teardown. Only "followed by" is resolved at READ time: the chained child starts after
+ * Built at the archive moment from facts the system already has (the digest, the raw log) and
+ * persisted inside the archived digest (digest.outcome), so it survives teardown. Only "followed by" is resolved at READ time: the chained child starts after
  * the parent is archived. Every unknown is null — never a guessed zero (PRODUCT.md: no made-up
  * numbers). Pure except resolveFollowedBy, which reads the db.
  */
 import type { Db } from "./db.js";
 import type { RunDigest } from "./digest.js";
 import type { TraceEvent } from "./trace.js";
-import { costUsd, sumUsage } from "./budget.js";
+import { costUsd, sumUsage } from "./cost.js";
 import { describeStartedBy, type StartedBy } from "./started-by.js";
 import { parseTestCounts, type TestCounts } from "./test-counts.js";
 import type { FollowupView } from "./pr-followups.js";
@@ -62,19 +61,7 @@ export interface RunOutcome {
     /** Dollars only for a priced model; null = unpriced (render "—"). */
     usd: number | null;
     model: string | null;
-    budget: { maxMinutes: number; maxUsd: number | null; maxTokens: number | null; tripped: string[] } | null;
   };
-}
-
-/** What the fleet sweep knows about the run's budget (monitor.ts BoxView.budget). */
-export interface OutcomeBudget {
-  maxMinutes: number;
-  maxUsd?: number;
-  maxTokens?: number;
-  tokens?: number;
-  usd?: number;
-  tripped?: string[];
-  startedAt?: number;
 }
 
 export interface OutcomeInput {
@@ -86,7 +73,6 @@ export interface OutcomeInput {
   filesKnown?: boolean;
   /** The archived unified diff, used for a size when the file list was not captured. */
   diffText?: string;
-  budget?: OutcomeBudget;
   env?: NodeJS.ProcessEnv;
 }
 
@@ -161,10 +147,9 @@ export function buildOutcome(i: OutcomeInput): RunOutcome {
       ? { input: d.usage.inputTokens, output: d.usage.outputTokens }
       : null;
   const model = d.provenance?.model ?? null;
-  const priced = tokens ? costUsd({ inputTokens: tokens.input, outputTokens: tokens.output }, model ?? undefined, i.env) : undefined;
-  const usd = priced ?? (typeof i.budget?.usd === "number" ? i.budget.usd : null);
+  const usd = (tokens ? costUsd({ inputTokens: tokens.input, outputTokens: tokens.output }, model ?? undefined, i.env) : undefined) ?? null;
 
-  const startedAt = d.startedAt ?? i.budget?.startedAt;
+  const startedAt = d.startedAt;
   const durationMs = startedAt !== undefined && d.endedAt !== undefined && d.endedAt >= startedAt ? d.endedAt - startedAt : null;
 
   const sb = d.provenance?.startedBy;
@@ -188,9 +173,6 @@ export function buildOutcome(i: OutcomeInput): RunOutcome {
       tokens,
       usd,
       model,
-      budget: i.budget
-        ? { maxMinutes: i.budget.maxMinutes, maxUsd: i.budget.maxUsd ?? null, maxTokens: i.budget.maxTokens ?? null, tripped: i.budget.tripped ?? [] }
-        : null,
     },
   };
 }

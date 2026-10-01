@@ -172,17 +172,10 @@ export function ThreadHeader({
       : box.runState === "running" && box.lastOutputAt
         ? `last action ${fmtAgo(box.lastOutputAt)}`
         : null;
-  // Budget line: tokens always; dollars only when the model has a known price (never guessed).
-  const bud = box.budget;
-  const budgetLine = bud
-    ? `budget ${bud.tokens.toLocaleString("en-US")}${bud.maxTokens ? `/${bud.maxTokens.toLocaleString("en-US")}` : ""} tok` +
-      (bud.usd !== undefined ? ` · $${bud.usd.toFixed(2)}${bud.maxUsd ? `/$${bud.maxUsd.toFixed(2)}` : ""}` : bud.maxUsd ? " · $ n/a (unpriced model)" : "") +
-      ` · ${bud.maxMinutes} min cap`
-    : null;
   const long = deadlineLabel(deadline);
   // Which resource's request is in flight — the confirm dialog is shared between the two.
   const busyFor = resizeTo?.kind === "disk" ? diskBusy : memoryBusy;
-  const vitals = [box.agent && box.agent !== "claude" && `agent ${({ omp: "oh-my-pi", codex: "Codex CLI", opencode: "OpenCode" } as Record<string, string>)[box.agent] ?? box.agent}`, box.uptime && `${sleeping ? "ran for" : "up"} ${box.uptime}`, box.cpu && `cpu ${box.cpu}`, box.memUsage && `memory ${fmtUsage(box.memUsage)}`, box.disk && `disk ${fmtUsage(box.disk)}`, roleLabel(box.role), budgetLine].filter(Boolean).join(" · ");
+  const vitals = [box.agent && box.agent !== "claude" && `agent ${({ omp: "oh-my-pi", codex: "Codex CLI", opencode: "OpenCode" } as Record<string, string>)[box.agent] ?? box.agent}`, box.uptime && `${sleeping ? "ran for" : "up"} ${box.uptime}`, box.cpu && `cpu ${box.cpu}`, box.memUsage && `memory ${fmtUsage(box.memUsage)}`, box.disk && `disk ${fmtUsage(box.disk)}`, roleLabel(box.role)].filter(Boolean).join(" · ");
 
   // The conversation scroller is a sibling rendered by Thread, not a child, so there is nothing to
   // ref. Scroll events don't bubble but they DO capture, so one capture-phase listener on the
@@ -491,16 +484,6 @@ export function ThreadHeader({
                 <span className={cn("text-faint text-micro", deadline.remainingSec != null && deadline.remainingSec < 300 ? "text-attention-text" : "hidden sm:inline")}>{short}</span>
               </TooltipTrigger>
               <TooltipContent side="bottom">{long}</TooltipContent>
-            </Tooltip>
-          )}
-          {bud && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="text-faint hidden text-micro tabular-nums sm:inline">
-                  <Dot /> {bud.usd !== undefined ? `$${bud.usd.toFixed(2)}${bud.maxUsd ? ` of $${bud.maxUsd}` : ""}` : `${Math.round(bud.tokens / 1000)}k tok`}
-                </span>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">{budgetLine} — a cap pauses the run with a question</TooltipContent>
             </Tooltip>
           )}
         </span>

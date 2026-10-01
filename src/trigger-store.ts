@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import type { Db } from "./db.js";
 import type { SecretBox } from "./secretbox.js";
-import { describeWhen, newSecret, nextFire, parseCron, type TriggerBudget, type TriggerInput, type TriggerKind, type TriggerSpec } from "./triggers.js";
+import { describeWhen, newSecret, nextFire, parseCron, type TriggerInput, type TriggerKind, type TriggerSpec } from "./triggers.js";
 
 /**
  * Owner-scoped persistence for triggers (the pure rules live in src/triggers.ts). Every read and
@@ -52,7 +52,7 @@ function toRow(r: Record<string, any>): TriggerRow {
     taskTemplate: r.task_template,
     enabled: !!r.enabled,
     concurrency: Number(r.concurrency) || 1,
-    budget: parse<TriggerBudget>(r.budget_json, { maxMinutes: 60 }),
+    // triggers.budget_json is orphaned: budgets were removed; the column is neither read nor written.
     prComment: !!r.pr_comment,
     ...(r.agent ? { agent: r.agent } : {}),
     ...(r.model ? { model: r.model } : {}),
@@ -81,11 +81,11 @@ export function createTrigger(db: Db, box: SecretBox, owner: string, t: TriggerI
   const id = "trg_" + crypto.randomBytes(9).toString("base64url");
   const secret = newSecret();
   db.prepare(
-    `INSERT INTO triggers (id, owner, name, kind, spec_json, repo, task_template, enabled, concurrency, budget_json, pr_comment, agent, model, harness_id, secret_enc, next_fire, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO triggers (id, owner, name, kind, spec_json, repo, task_template, enabled, concurrency, pr_comment, agent, model, harness_id, secret_enc, next_fire, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id, owner, t.name, t.kind, JSON.stringify(t.spec), t.repo ?? null, t.taskTemplate, t.enabled ? 1 : 0, t.concurrency,
-    JSON.stringify(t.budget), t.prComment ? 1 : 0, t.agent ?? null, t.model ?? null, t.harnessId ?? null, box.seal(secret), computeNextFire(t, now), now, now
+    t.prComment ? 1 : 0, t.agent ?? null, t.model ?? null, t.harnessId ?? null, box.seal(secret), computeNextFire(t, now), now, now
   );
   return { row: getTrigger(db, owner, id)!, secret };
 }
@@ -93,11 +93,11 @@ export function createTrigger(db: Db, box: SecretBox, owner: string, t: TriggerI
 export function updateTrigger(db: Db, owner: string, id: string, t: TriggerInput, now = Date.now()): TriggerRow | undefined {
   const r = db
     .prepare(
-      `UPDATE triggers SET name = ?, kind = ?, spec_json = ?, repo = ?, task_template = ?, enabled = ?, concurrency = ?, budget_json = ?,
+      `UPDATE triggers SET name = ?, kind = ?, spec_json = ?, repo = ?, task_template = ?, enabled = ?, concurrency = ?,
        pr_comment = ?, agent = ?, model = ?, harness_id = ?, next_fire = ?, updated_at = ? WHERE id = ? AND owner = ?`
     )
     .run(
-      t.name, t.kind, JSON.stringify(t.spec), t.repo ?? null, t.taskTemplate, t.enabled ? 1 : 0, t.concurrency, JSON.stringify(t.budget),
+      t.name, t.kind, JSON.stringify(t.spec), t.repo ?? null, t.taskTemplate, t.enabled ? 1 : 0, t.concurrency,
       t.prComment ? 1 : 0, t.agent ?? null, t.model ?? null, t.harnessId ?? null, computeNextFire(t, now), now, id, owner
     );
   return r.changes ? getTrigger(db, owner, id) : undefined;
@@ -332,7 +332,7 @@ export function reasonOf(result: TriggerResult): DeliveryReason | undefined {
   if (result.outcome === "failed") return "error";
   const r = result.reason ?? "";
   if (r === "disabled") return "disabled";
-  if (/^busy|^storm cap|budget/.test(r)) return "limit";
+  if (/^busy|^storm cap/.test(r)) return "limit";
   return "ignored";
 }
 

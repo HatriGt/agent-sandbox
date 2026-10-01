@@ -15,21 +15,19 @@
  *    (so "pick this one instead" still has a box to push from); every attempt's archived outcome is
  *    kept in history and linked to its siblings through the group.
  *
- * Budgets are a TOTAL across attempts: the $ and token caps are split evenly (minutes are
- * wall-clock, so each attempt keeps the full figure). Fleet quotas are checked for ALL attempts up
- * front — a group that cannot get every slot is refused, never half-started on purpose.
+ * Fleet quotas are checked for ALL attempts up front — a group that cannot get every slot is
+ * refused, never half-started on purpose.
  *
  * Pure parts (spec normalization, defaults, scoring, question text) are exported for tests; the
  * orchestrator takes its IO injected, like delegate-flow.ts.
  */
 import crypto from "node:crypto";
 import type { Db } from "./db.js";
-import type { RunBudget } from "./budget.js";
 import { questionChoices, type Choice } from "./answer-choice.js";
 
 export const MIN_ATTEMPTS = 2;
 export const MAX_ATTEMPTS = 3;
-/** Without a budget, a group waits this long for its slowest attempt before scoring what finished. */
+/** A group waits this long for its slowest attempt before scoring what finished. */
 export const DEFAULT_DEADLINE_MIN = 120;
 /** Grace after a decision during which a loser's box is kept so the user can override the pick. */
 export const OVERRIDE_WINDOW_MS = Number(process.env.ATTEMPT_OVERRIDE_WINDOW_MIN || 30) * 60_000;
@@ -140,16 +138,6 @@ export function defaultAttemptSpecs(n: number, ctx: DefaultsContext): AttemptSpe
   }
   while (out.length < n) out.push({ ...base });
   return out;
-}
-
-/** A total budget split across n attempts: $ and tokens divide, minutes are wall-clock and stay. */
-export function splitBudget(b: RunBudget | undefined, n: number): RunBudget | undefined {
-  if (!b) return undefined;
-  return {
-    maxMinutes: b.maxMinutes,
-    ...(b.maxUsd ? { maxUsd: Math.round((b.maxUsd / n) * 10_000) / 10_000 } : {}),
-    ...(b.maxTokens ? { maxTokens: Math.max(1, Math.floor(b.maxTokens / n)) } : {}),
-  };
 }
 
 export function branchFor(groupId: string, index: number): string {
@@ -414,7 +402,7 @@ export interface AttemptIo {
   db: Db;
   now?: () => number;
   /** Start ONE attempt as an ordinary delegation (the caller's validated path). */
-  startOne(spec: AttemptSpec, task: string, budget: RunBudget | undefined, link: { groupId: string; index: number }): Promise<{ ok: true; box: string } | { ok: false; question: string }>;
+  startOne(spec: AttemptSpec, task: string, link: { groupId: string; index: number }): Promise<{ ok: true; box: string } | { ok: false; question: string }>;
   /** Archived digest for a box, if its finish was recorded. */
   archived(owner: string, box: string): Record<string, unknown> | undefined;
   /** Is the box still in the fleet? */
@@ -430,7 +418,6 @@ export interface LaunchInput {
   task: string;
   specs: AttemptSpec[];
   labels: string[];
-  budget?: RunBudget;
   /** Called with the group id before any attempt starts (the caller keys its launch context by it). */
   onCreated?: (id: string) => void;
 }
@@ -442,13 +429,12 @@ export function makeAttempts(io: AttemptIo) {
 
   async function launch(inp: LaunchInput): Promise<{ ok: true; group: AttemptGroup } | { ok: false; question: string }> {
     const n = inp.specs.length;
-    const each = splitBudget(inp.budget, n);
-    const deadlineAt = now() + ((inp.budget?.maxMinutes ?? DEFAULT_DEADLINE_MIN) + 10) * 60_000;
+    const deadlineAt = now() + (DEFAULT_DEADLINE_MIN + 10) * 60_000;
     const placeholder = inp.specs.map((spec, i) => ({ index: i + 1, box: null, spec, label: inp.labels[i] ?? specLabel(spec), branch: "" }));
     const id = createGroup(io.db, inp.owner, { task: inp.task, deadlineAt, attempts: placeholder });
     inp.onCreated?.(id);
     const attempts: AttemptLink[] = placeholder.map((a) => ({ ...a, branch: branchFor(id, a.index) }));
-    const started = await Promise.allSettled(attempts.map((a) => io.startOne(a.spec, inp.task + attemptBrief(a.index, n, a.branch), each, { groupId: id, index: a.index })));
+    const started = await Promise.allSettled(attempts.map((a) => io.startOne(a.spec, inp.task + attemptBrief(a.index, n, a.branch), { groupId: id, index: a.index })));
     started.forEach((r, i) => {
       if (r.status === "fulfilled" && r.value.ok) attempts[i].box = r.value.box;
       else attempts[i].error = r.status === "rejected" ? String((r.reason as Error)?.message ?? r.reason).slice(0, 400) : (r.value as { question: string }).question.slice(0, 400);

@@ -80,7 +80,6 @@ function blank(kind: AutomationKind = "schedule"): AutomationDraft {
     taskTemplate: DEFAULT_TEMPLATES[kind],
     enabled: true,
     concurrency: 1,
-    budget: { maxMinutes: 60 },
     prComment: kind === "github",
   };
 }
@@ -246,7 +245,6 @@ function toDraft(a: Automation): AutomationDraft {
     taskTemplate: a.taskTemplate,
     enabled: a.enabled,
     concurrency: a.concurrency,
-    budget: a.budget,
     prComment: a.prComment,
     ...(a.agent ? { agent: a.agent } : {}),
     ...(a.model ? { model: a.model } : {}),
@@ -662,20 +660,6 @@ function Editor({
           <span className="text-meta">At most at once</span>
           <Segmented<string> ariaLabel="Concurrency" value={String(d.concurrency)} onChange={(v) => set({ concurrency: Number(v) })} options={["1", "2", "3", "5"].map((v) => ({ value: v, label: v }))} />
         </div>
-        <label className="flex items-center justify-between gap-3">
-          <span className="text-meta">
-            Time budget, minutes
-            <span className="text-faint block text-micro">Recorded with the automation; enforcement arrives with run budgets.</span>
-          </span>
-          <input
-            type="number"
-            min={1}
-            max={1440}
-            className={cn(field, "w-24 text-right tabular")}
-            value={d.budget.maxMinutes}
-            onChange={(e) => set({ budget: { ...d.budget, maxMinutes: Math.max(1, Number(e.target.value) || 60) } })}
-          />
-        </label>
         {(d.kind === "github" || d.repo) && (
           <label className="flex items-center justify-between gap-3">
             <span className="text-meta">

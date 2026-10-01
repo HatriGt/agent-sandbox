@@ -18,7 +18,7 @@ import type { DisplayState } from "@/lib/lifecycle";
 type Tone = { icon: React.ComponentType<LucideProps>; word: (exit?: number) => string; text: string; pill: string };
 
 const TONE: Record<DisplayState | "failed" | "stalled", Tone> = {
-  // Running, but no action for the stall window: the failed hue with its own glyph (src/budget.ts).
+  // Running, but no action for the stall window: the failed hue with its own glyph (src/stall.ts).
   stalled: { icon: Hourglass, word: () => "stalled", text: "text-destructive", pill: "bg-destructive/10 text-destructive ring-destructive/20" },
   running: { icon: CircleDot, word: () => "working", text: "text-live", pill: "bg-live/10 text-live ring-live/20" },
   waiting: {

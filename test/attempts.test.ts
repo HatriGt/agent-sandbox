@@ -1,5 +1,5 @@
 /**
- * "Tries several approaches" (src/attempts.ts): spec validation and defaults, the budget split,
+ * "Tries several approaches" (src/attempts.ts): spec validation and defaults,
  * scoring (pass → failing tests → diff → cost, ties asked), and the orchestrator end to end with
  * fake IO: launch → all finished → winner PR → losers kept for the override window → override.
  */
@@ -18,7 +18,6 @@ import {
   normalizeAttempts,
   OVERRIDE_WINDOW_MS,
   prUrlsOf,
-  splitBudget,
   tieChoices,
   tieQuestion,
   type AttemptFacts,
@@ -64,11 +63,6 @@ test("defaultAttemptSpecs: same driver first with different models, then other d
     { agent: "claude", model: "opus" },
     { agent: "claude", model: "haiku" },
   ]);
-});
-
-test("splitBudget: $ and tokens are a total, minutes are wall-clock", () => {
-  assert.equal(splitBudget(undefined, 2), undefined);
-  assert.deepEqual(splitBudget({ maxMinutes: 30, maxUsd: 3, maxTokens: 1000 }, 3), { maxMinutes: 30, maxUsd: 1, maxTokens: 333 });
 });
 
 test("branch + brief: own branch, no push, no PR", () => {
@@ -137,12 +131,12 @@ function harness(opts: { failStart?: number[] } = {}) {
   const alive = new Set<string>();
   const execs: Array<{ box: string; script: string }> = [];
   const torn: string[] = [];
-  const started: Array<{ task: string; budget: unknown; spec: unknown }> = [];
+  const started: Array<{ task: string; spec: unknown }> = [];
   const att = makeAttempts({
     db,
     now: () => t,
-    startOne: async (spec, task, budget, link) => {
-      started.push({ task, budget, spec });
+    startOne: async (spec, task, link) => {
+      started.push({ task, spec });
       if (opts.failStart?.includes(link.index)) return { ok: false, question: "no slot" };
       const box = `box-${++seq}`;
       alive.add(box);
@@ -167,12 +161,12 @@ function harness(opts: { failStart?: number[] } = {}) {
 
 test("orchestrator: launch, score on finish, PR from the winner, losers torn down after the window", async () => {
   const h = harness();
-  const r = await h.att.launch({ owner: "u1", task: "Fix the bug", specs: [{ agent: "claude" }, { agent: "codex" }], labels: ["A", "B"], budget: { maxMinutes: 30, maxUsd: 2 } });
+  const r = await h.att.launch({ owner: "u1", task: "Fix the bug", specs: [{ agent: "claude" }, { agent: "codex" }], labels: ["A", "B"] });
   assert.ok(r.ok);
   if (!r.ok) return;
   const g = r.group;
   assert.equal(g.attempts.length, 2);
-  assert.deepEqual(h.started.map((s) => s.budget), [{ maxMinutes: 30, maxUsd: 1 }, { maxMinutes: 30, maxUsd: 1 }]);
+  assert.equal(h.started.length, 2);
   assert.ok(h.started.every((s) => /Do NOT push/.test(s.task)));
   // Compares list stays harness-only; the box knows its siblings.
   assert.equal(listCompares(h.db, "u1").length, 0);

@@ -4,7 +4,7 @@ import { api, type HarnessView } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 /**
- * Composer harness picker. A harness fills driver/model/skills/rules/egress/budget for the run;
+ * Composer harness picker. A harness fills driver/model/skills/rules/egress for the run;
  * anything picked explicitly in the composer still wins. Unreviewed imports are listed but disabled.
  */
 export function HarnessChip({ value, onChange }: { value: string | null; onChange: (id: string | null) => void }) {

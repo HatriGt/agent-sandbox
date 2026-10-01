@@ -76,7 +76,6 @@ export function OutcomeView({ outcome: o }: { outcome: RunOutcome }) {
   const router = useRouter();
   const failed = o.state === "failed";
   const tests = testsLine(o);
-  const b = o.cost.budget;
   const tokens = o.cost.tokens ? o.cost.tokens.input + o.cost.tokens.output : null;
   const openBox = (box: string) => router.push({ pathname: "/box/[name]", params: { name: box } });
   const openLink = (l: { href: string; external: boolean }) => {
@@ -174,19 +173,11 @@ export function OutcomeView({ outcome: o }: { outcome: RunOutcome }) {
         <Section title="What it cost">
           <T variant="micro" mono>
             {o.cost.durationMs !== null ? shortDuration(o.cost.durationMs) : DASH}
-            {b ? ` of ${b.maxMinutes}m` : ""}
             {"  ·  "}
             {tokens !== null ? `${fmtTokens(tokens)} tokens` : `tokens ${DASH}`}
-            {b?.maxTokens ? ` of ${fmtTokens(b.maxTokens)}` : ""}
             {"  ·  "}
             {o.cost.usd !== null ? fmtUsd(o.cost.usd) : `$ ${DASH}`}
-            {b?.maxUsd ? ` of ${fmtUsd(b.maxUsd)}` : ""}
           </T>
-          {b && b.tripped.length ? (
-            <T variant="micro" tone="muted">
-              budget reached: {b.tripped.join(", ")}
-            </T>
-          ) : null}
         </Section>
       </View>
     </FadeInUp>

@@ -142,7 +142,7 @@ const MIGRATIONS: string[] = [
     task_template TEXT NOT NULL,
     enabled INTEGER NOT NULL DEFAULT 1,
     concurrency INTEGER NOT NULL DEFAULT 1,
-    budget_json TEXT,
+    budget_json TEXT, -- orphaned: run budgets were removed; never read or written (sqlite: not dropped)
     pr_comment INTEGER NOT NULL DEFAULT 0,
     agent TEXT,
     model TEXT,

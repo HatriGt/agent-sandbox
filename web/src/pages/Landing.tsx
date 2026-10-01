@@ -279,8 +279,8 @@ const BUILT: Array<{ title: string; body: string; tags?: string[] }> = [
     tags: ["cron + timezone", "webhook", "issue labelled", "issue comment", "PR opened", "after: chains"],
   },
   {
-    title: "Budgets that ask, then stop",
-    body: "Per-run caps on time, and on dollars when the model has a known price (tokens otherwise). Hitting a cap doesn't kill the run: it asks continue or stop at its next tool call.",
+    title: "Honest cost reporting",
+    body: "Every run reports its duration and tokens, and dollars when the model has a known price. No guessed numbers: an unpriced model shows a dash, never an estimate.",
   },
   {
     title: "Receipts and History",
@@ -293,7 +293,7 @@ const BUILT: Array<{ title: string; body: string; tags?: string[] }> = [
   },
   {
     title: "Harnesses",
-    body: "Save a driver, model, skills, rules, verify step, egress and budget as one harness. Export and import versioned bundles; compare two harnesses on the same task.",
+    body: "Save a driver, model, skills, rules, verify step and egress as one harness. Export and import versioned bundles; compare two harnesses on the same task.",
     tags: ["export", "import", "compare"],
   },
   {

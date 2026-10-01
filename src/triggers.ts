@@ -47,14 +47,7 @@ export interface TriggerSpec {
   addressReviews?: boolean;
 }
 
-/** Safety defaults (plan §5 "Trigger safety"). Budget is recorded and shown now; enforcement is
- *  workstream D's ask-and-stop gate. */
-export interface TriggerBudget {
-  maxMinutes: number;
-  maxUsd?: number;
-  maxTokens?: number;
-}
-export const DEFAULT_BUDGET: TriggerBudget = { maxMinutes: 60 };
+/** Safety defaults (plan §5 "Trigger safety"). */
 export const DEFAULT_CONCURRENCY = 1;
 export const MAX_CONCURRENCY = 5;
 /** Storm cap: no trigger fires more than this many runs per rolling hour, whatever the source says. */
@@ -438,11 +431,10 @@ export interface TriggerInput {
   taskTemplate: string;
   enabled: boolean;
   concurrency: number;
-  budget: TriggerBudget;
   prComment: boolean;
   agent?: string;
   model?: string;
-  /** Saved harness (src/harness.ts); the trigger's own agent/model/budget win over it. */
+  /** Saved harness (src/harness.ts); the trigger's own agent/model win over it. */
   harnessId?: string;
 }
 
@@ -504,13 +496,6 @@ export function normalizeTrigger(body: unknown): { ok: true; trigger: TriggerInp
   }
   const conc = Number(b.concurrency);
   const concurrency = Number.isInteger(conc) && conc >= 1 ? Math.min(conc, MAX_CONCURRENCY) : DEFAULT_CONCURRENCY;
-  const bb = (b.budget && typeof b.budget === "object" ? b.budget : {}) as Record<string, unknown>;
-  const num = (v: unknown, max: number) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.min(v, max) : undefined);
-  const budget: TriggerBudget = { maxMinutes: Math.round(num(bb.maxMinutes, 24 * 60) ?? DEFAULT_BUDGET.maxMinutes) };
-  const usd = num(bb.maxUsd, 1000);
-  const tok = num(bb.maxTokens, 1e9);
-  if (usd !== undefined) budget.maxUsd = usd;
-  if (tok !== undefined) budget.maxTokens = Math.round(tok);
   if (b.harnessId !== undefined && b.harnessId !== null && b.harnessId !== "" && !(typeof b.harnessId === "string" && /^hrn_[\w-]{6,40}$/.test(b.harnessId))) {
     return { ok: false, error: "harnessId is not a saved harness id" };
   }
@@ -528,7 +513,6 @@ export function normalizeTrigger(body: unknown): { ok: true; trigger: TriggerInp
       taskTemplate,
       enabled: b.enabled !== false,
       concurrency,
-      budget,
       // Receipt comment: ON by default for GitHub triggers (plan §5); opt-in for the rest.
       prComment: typeof b.prComment === "boolean" ? b.prComment : kind === "github",
       ...(typeof b.agent === "string" && b.agent.trim() ? { agent: b.agent.trim() } : {}),

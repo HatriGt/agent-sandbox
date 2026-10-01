@@ -39,17 +39,8 @@ export interface BoxView {
   repos?: { name: string; branch?: string }[];
   /** Which coding agent this thread runs on ("claude" | "omp"). Absent on older boxes. */
   agent?: string;
-  /** Running, but the log has not moved for the stall window (src/budget.ts STALL_AFTER_MS). */
+  /** Running, but the log has not moved for the stall window (src/stall.ts STALL_AFTER_MS). */
   stalled?: boolean;
-  /** The run's budget and what it has spent so far (usd only for a priced model). */
-  budget?: RunBudget & { tokens: number; usd?: number; tripped?: string[] };
-}
-
-/** Per-run budget caps. */
-export interface RunBudget {
-  maxMinutes: number;
-  maxUsd?: number;
-  maxTokens?: number;
 }
 
 export type ProviderKind = "anthropic" | "openai" | "openai-compatible" | "ollama" | "ccproxy";
@@ -231,7 +222,6 @@ export interface HarnessView {
   rulesMd?: string;
   verifyCommand?: string;
   egress?: string[];
-  budget?: RunBudget;
   needsReview?: boolean;
   unresolvedProvider?: { kind: string; label: string };
   origin?: { kind: "file" | "github" | "duplicate"; source?: string; at: number };
@@ -828,8 +818,6 @@ export const api = {
     allowPartialSupervision?: boolean;
     /** A saved model provider id (Providers page); the model then comes from its list. */
     provider?: string;
-    /** Per-run budget: the run is asked (not killed) when a cap is hit. */
-    budget?: RunBudget;
     /** Exactly one key: a command run in the sandbox after the run, or a criterion a read-only checker judges. */
     verify?: { command: string } | { criterion: string };
     /** A saved harness id: fills the fields this input leaves out (explicit fields win). */
@@ -886,7 +874,6 @@ export const api = {
     post<AgentPrefs>("/agent-prefs.json", { defaultAgent, ...(allowPartialSupervision ? { allowPartialSupervision } : {}) }),
 
   /** Model providers: the caller's own keys/endpoints. Keys come back masked only. */
-  pricedModels: () => fetch(url("/budget/prices.json"), { headers: authHeaders }).then(parse<{ priced: string[] }>),
   providers: (signal?: AbortSignal) => fetch(url("/providers.json"), { headers: authHeaders, signal }).then(parse<ProvidersResponse>),
   saveProvider: (body: { id?: string; kind: ProviderKind; label?: string; baseUrl?: string; apiKey?: string }) =>
     post<ProvidersResponse & { saved: string }>("/providers.json", body),
@@ -1000,7 +987,6 @@ export interface AutomationDraft {
   taskTemplate: string;
   enabled: boolean;
   concurrency: number;
-  budget: { maxMinutes: number; maxUsd?: number; maxTokens?: number };
   prComment: boolean;
   agent?: string;
   model?: string;
@@ -1102,7 +1088,6 @@ export interface RunOutcome {
     tokens: { input: number; output: number } | null;
     usd: number | null;
     model: string | null;
-    budget: { maxMinutes: number; maxUsd: number | null; maxTokens: number | null; tripped: string[] } | null;
   };
 }
 export interface LedgerRow extends HistoryRun {

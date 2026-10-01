@@ -213,7 +213,6 @@ export interface RunOutcome {
     tokens: { input: number; output: number } | null;
     usd: number | null;
     model: string | null;
-    budget: { maxMinutes: number; maxUsd: number | null; maxTokens: number | null; tripped: string[] } | null;
   };
 }
 export interface HistoryDetail extends HistoryRun {

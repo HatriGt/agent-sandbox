@@ -7,7 +7,7 @@ const h = Number(args.find((a) => a.startsWith("--h="))?.slice(4) ?? 900);
 const now = Date.now();
 const rules = (a, p, v) => ({ askBeforeGuess: a, planFirst: p, verifyOnDone: v });
 const harnesses = [
-  { id: "h_careful", name: "Careful reviewer", description: "Plans first, tests before done", driver: "claude", model: "claude-sonnet-4-6", skills: ["review-pr"], rules: rules(true, true, true), verifyCommand: "npm test", egress: ["registry.npmjs.org"], budget: { maxMinutes: 60, maxUsd: 2 }, createdAt: now - 864e5, updatedAt: now - 36e5 },
+  { id: "h_careful", name: "Careful reviewer", description: "Plans first, tests before done", driver: "claude", model: "claude-sonnet-4-6", skills: ["review-pr"], rules: rules(true, true, true), verifyCommand: "npm test", egress: ["registry.npmjs.org"], createdAt: now - 864e5, updatedAt: now - 36e5 },
   { id: "h_fast", name: "Fast fixer", driver: "codex", rules: rules(false, false, false), createdAt: now - 2 * 864e5, updatedAt: now - 2 * 864e5 },
   { id: "h_import", name: "acme strict", rules: rules(true, false, true), verifyCommand: "./scripts/check.sh && npm run lint", egress: ["api.acme.dev"], rulesMd: "Never touch migrations.", needsReview: true, unresolvedProvider: { kind: "openrouter", label: "team OR" }, origin: { kind: "github", source: "acme/harnesses/strict", at: now }, createdAt: now, updatedAt: now },
 ];

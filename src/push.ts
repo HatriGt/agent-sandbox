@@ -1,6 +1,6 @@
 /**
  * Mobile push (docs/plan-agent-cloud.md increment 7): the phone channel for the walk-away edges
- * notify.ts already detects (waiting / done / failed / stalled / budget).
+ * notify.ts already detects (waiting / done / failed / stalled).
  *
  * Delivery goes through the Expo push service (exp.host), so the controller needs no FCM/APNs keys;
  * EXPO_ACCESS_TOKEN is honoured when the Expo project has "enhanced push security" on.
@@ -104,7 +104,6 @@ export interface ExpoMessage {
 
 const PHRASE: Record<NotifyEvent["kind"], string> = {
   waiting: "Needs an answer",
-  budget: "Budget reached — continue or stop?",
   done: "Finished",
   failed: "Failed",
   stalled: "Looks stalled",
@@ -133,7 +132,7 @@ export const choiceCategory = (n: number) => `ask-choices-${n}`;
  * per category on iOS) and the nonce in the data payload, which is never displayed.
  */
 export function buildPushMessages(e: NotifyEvent, tokens: readonly string[], title: string, choices?: PushChoices): ExpoMessage[] {
-  const needsYou = e.kind === "waiting" || e.kind === "budget";
+  const needsYou = e.kind === "waiting";
   const labels = needsYou && choices ? choices.labels.slice(0, 3).map((l) => l.replace(/\s+/g, " ").trim().slice(0, 40)).filter(Boolean) : [];
   const withChoices = labels.length >= 2 && !!choices;
   const body = withChoices

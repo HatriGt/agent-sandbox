@@ -12,7 +12,7 @@ import { DriverBadges } from "@/components/DriverPicker";
 import { HarnessEditor } from "@/components/harness/HarnessEditor";
 import { ImportHarness } from "@/components/harness/ImportHarness";
 import { AttemptGroupList, CompareLauncher, CompareList } from "@/components/harness/Compare";
-import { budgetLine, downloadJson, rulesLine, type HarnessDraft, draftOf, emptyDraft } from "@/components/harness/model";
+import { downloadJson, rulesLine, type HarnessDraft, draftOf, emptyDraft } from "@/components/harness/model";
 
 const SkillsPage = React.lazy(() => import("@/components/SkillsPage").then((m) => ({ default: m.SkillsPage })));
 
@@ -21,7 +21,7 @@ const ORDER: readonly Tab[] = ["drivers", "skills", "rules", "egress", "saved"];
 
 /**
  * Harnesses: everything that shapes HOW a run works, in one place — drivers, skills, rules/hooks,
- * egress and budgets — plus saved combinations of them. A saved harness is picked in the composer
+ * egress — plus saved combinations of them. A saved harness is picked in the composer
  * (or on a trigger) and fills whatever the run leaves out; explicit per-run choices still win.
  */
 export function HarnessesPage({ onBack, onOpenBox }: { onBack: () => void; onOpenBox?: (box: string) => void }) {
@@ -94,7 +94,7 @@ export function HarnessesPage({ onBack, onOpenBox }: { onBack: () => void; onOpe
         <header className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div className="min-w-0">
             <h1 className="text-foreground font-serif text-h1 font-normal tracking-[-0.01em]">Harnesses</h1>
-            <p className="text-muted-foreground mt-1 text-meta">How your agents work: driver, model, skills, rules, egress and budget, saved as one pick.</p>
+            <p className="text-muted-foreground mt-1 text-meta">How your agents work: driver, model, skills, rules and egress, saved as one pick.</p>
           </div>
           {tab === "saved" && (
             <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -121,7 +121,7 @@ export function HarnessesPage({ onBack, onOpenBox }: { onBack: () => void; onOpe
               { value: "skills", label: "Skills" },
               // Phone: the full labels wrapped to three lines inside the pill; the short form fits.
               { value: "rules", label: <span className="whitespace-nowrap">Hooks<span className="hidden sm:inline"> & rules</span></span> },
-              { value: "egress", label: <span className="whitespace-nowrap">Egress<span className="hidden sm:inline"> & budgets</span></span> },
+              { value: "egress", label: "Egress" },
               { value: "saved", label: "Saved", badge: reviewCount ? <span className="bg-attention text-attention-ink ml-1 rounded px-1 text-micro tabular-nums">{reviewCount}</span> : undefined },
             ]}
           />
@@ -180,7 +180,7 @@ export function HarnessesPage({ onBack, onOpenBox }: { onBack: () => void; onOpe
                       <EmptyState
                         icon={Layers}
                         title="No saved harnesses yet"
-                        line="Save a driver, model, skills, rules and budget together, then pick it in the composer."
+                        line="Save a driver, model, skills and rules together, then pick it in the composer."
                         action={
                           <>
                             <Button size="sm" onClick={() => setEditing(emptyDraft())}>
@@ -279,19 +279,18 @@ export function HarnessesPage({ onBack, onOpenBox }: { onBack: () => void; onOpe
               </SettingsSection>
             </div>
           ) : (
-            <SettingsSection id="egress" title="Egress & budgets" purpose="Extra hosts a run may reach beyond the defaults, and the caps it is asked about when hit. A run's own choices replace these.">
+            <SettingsSection id="egress" title="Egress" purpose="Extra hosts a run may reach beyond the defaults. A run's own choices replace these.">
               {list.length ? (
                 <Panel className="divide-y">
                   {list.map((h) => (
                     <button key={h.id} type="button" onClick={() => { setTab("saved"); setEditing(draftOf(h)); }} className="hover:bg-muted/50 flex w-full flex-col gap-1 px-4 py-3 text-left transition-colors sm:flex-row sm:items-center sm:gap-4">
                       <span className="text-foreground min-w-0 truncate text-body font-medium sm:w-44 sm:shrink-0">{h.name}</span>
                       <span className="text-muted-foreground min-w-0 flex-1 truncate font-mono text-micro">{h.egress?.length ? h.egress.join(", ") : "default egress"}</span>
-                      <span className="text-muted-foreground text-micro tabular-nums sm:shrink-0">{budgetLine(h.budget)}</span>
                     </button>
                   ))}
                 </Panel>
               ) : (
-                <EmptyState icon={Layers} title="Nothing configured yet" line="Egress extras and budgets are set per harness." action={<Button size="sm" onClick={() => { setTab("saved"); setEditing(emptyDraft()); }}>New harness</Button>} />
+                <EmptyState icon={Layers} title="Nothing configured yet" line="Egress extras are set per harness." action={<Button size="sm" onClick={() => { setTab("saved"); setEditing(emptyDraft()); }}>New harness</Button>} />
               )}
             </SettingsSection>
           )}

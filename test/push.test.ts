@@ -20,7 +20,6 @@ import {
   unregisterDevice,
   type ExpoMessage,
 } from "../src/push.ts";
-import { detectTransitions } from "../src/notify.ts";
 
 const sb = makeSecretBox(randomBytes(32));
 const T1 = "ExponentPushToken[aaaaaaaaaaaaaaaaaaaaaa]";
@@ -79,15 +78,10 @@ test("payload carries only a short title and a fixed phrase — never the questi
   const [d] = buildPushMessages({ box: "b-1", kind: "done", exitCode: 0 }, [T1], "");
   assert.equal(d.title, "b-1", "falls back to the box name");
   assert.equal(d.priority, "default");
-  assert.equal(buildPushMessages({ box: "b", kind: "budget", question: "Budget reached: x" }, [T1], "t")[0].channelId, "needs-you");
+  assert.equal(buildPushMessages({ box: "b", kind: "waiting", question: "Which one?" }, [T1], "t")[0].channelId, "needs-you");
   assert.equal(buildPushMessages({ box: "b", kind: "stalled" }, [T1], "t")[0].body, "Looks stalled");
   assert.ok(shortTitle("x".repeat(200), "b").length <= 60);
   assert.equal(shortTitle("line one\nsecret second line", "b"), "line one");
-});
-
-test("budget questions are their own event kind", () => {
-  const ev = detectTransitions([{ name: "b", runState: "running" }], [{ name: "b", runState: "waiting", question: "Budget reached: ~$2.00 spent" }]);
-  assert.deepEqual(ev.map((e) => e.kind), ["budget"]);
 });
 
 test("send posts to exp.host and prunes DeviceNotRegistered tokens only", async () => {

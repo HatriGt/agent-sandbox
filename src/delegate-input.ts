@@ -17,7 +17,6 @@
 import { isAgentKind, AGENT_KINDS, type AgentKind } from "./agent-kind.js";
 import { assertSelectable } from "./drivers/index.js";
 import type { ProviderRecord } from "./providers.js";
-import type { RunBudget } from "./budget.js";
 
 export type DelegateSource = "local" | "git";
 
@@ -86,8 +85,6 @@ export interface DelegatePlan {
   agent?: AgentKind;
   /** The user's model provider for this thread (src/providers.ts), resolved by the route. */
   provider?: ProviderRecord;
-  /** Per-run budget (src/budget.ts); the gate asks-and-stops when a cap is hit. */
-  budget?: RunBudget;
   /** Harness skill selection (src/harness.ts): install exactly these; absent = the enabled set. */
   skills?: string[];
   /**

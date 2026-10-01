@@ -3,7 +3,7 @@
  *
  * A harness is a SAVED COMBINATION of run settings that already exist one by one:
  *   driver · provider + model · skills · rules (ask-before-guess / plan-first / verify-on-done +
- *   RULES.md text) · verify command · egress extras · default budget.
+ *   RULES.md text) · verify command · egress extras.
  * It adds no new run machinery: `applyHarness` folds a harness into a delegate body, and the
  * delegate route validates the merged body exactly as it validates a hand-typed one — so a
  * tampered store, or a bundle that slipped a bad value past import, still meets every existing gate.
@@ -28,7 +28,6 @@
 import { randomUUID } from "node:crypto";
 import { loadBlob, ownerKey, saveBlob } from "./user-store.js";
 import { AGENT_KINDS, isAgentKind, type AgentKind } from "./agent-kind.js";
-import { normalizeBudget, type RunBudget } from "./budget.js";
 import { SKILL_LIMITS, normalizeSkill, validateSkillFilePath, type SkillDef, type SkillFile, type SkillStore } from "./skill-store.js";
 import { PROVIDER_KINDS, type ProviderKind, type ProviderRecord } from "./providers.js";
 import { redactShapes } from "./redact.js";
@@ -80,7 +79,6 @@ export interface HarnessDef {
   rulesMd?: string;
   verifyCommand?: string;
   egress?: string[];
-  budget?: RunBudget;
   /** Imported and not yet approved by its owner: cannot start a run. */
   needsReview?: boolean;
   /** An imported provider ref that matched none of the owner's providers (UI prompt to connect one). */
@@ -166,7 +164,6 @@ export function normalizeHarness(input: unknown, existing?: HarnessDef, now = Da
   const rulesMd = cleanText(r.rulesMd, HARNESS_LIMITS.maxRulesMd, "RULES.md");
   const verifyCommand = cleanText(r.verifyCommand, HARNESS_LIMITS.maxVerify, "Verify command");
   const egress = normalizeEgress(r.egress);
-  const budget = r.budget === undefined || r.budget === null ? undefined : normalizeBudget(r.budget);
   const def: HarnessDef = {
     id: existing?.id ?? (typeof r.id === "string" && /^hrn_[\w-]{6,40}$/.test(r.id) ? r.id : `hrn_${randomUUID().slice(0, 12)}`),
     name,
@@ -182,7 +179,6 @@ export function normalizeHarness(input: unknown, existing?: HarnessDef, now = Da
   if (rulesMd) def.rulesMd = rulesMd;
   if (verifyCommand) def.verifyCommand = verifyCommand;
   if (egress?.length) def.egress = egress;
-  if (budget) def.budget = budget;
   // Review state is NEVER taken from client input: only import sets it, only approve clears it.
   if (existing?.needsReview) def.needsReview = true;
   if (existing?.unresolvedProvider && !providerId) def.unresolvedProvider = existing.unresolvedProvider;
@@ -199,7 +195,6 @@ export interface HarnessableBody {
   agent?: unknown;
   provider?: unknown;
   model?: unknown;
-  budget?: unknown;
   allowDomains?: unknown;
   verify?: unknown;
   skills?: unknown;
@@ -241,10 +236,6 @@ export function applyHarness(h: HarnessDef, body: HarnessableBody): { body: Harn
       out.model = h.model;
       applied.push("model");
     }
-  }
-  if (!present(body.budget) && h.budget) {
-    out.budget = { ...h.budget };
-    applied.push("budget");
   }
   if (!present(body.allowDomains) && h.egress?.length) {
     out.allowDomains = [...h.egress];
@@ -361,7 +352,7 @@ export function duplicateHarness(id: string, owner = ownerKey()): HarnessDef | u
 
 /**
  * Best-practice starting points every owner gets. Only fields the schema already has are used;
- * driver, provider/model, budget and egress are left to the owner's defaults (nothing guessed).
+ * driver, provider/model and egress are left to the owner's defaults (nothing guessed).
  * verifyOnDone without a command means the controller's criterion check (see applyHarness).
  */
 export interface BuiltinHarness {
@@ -525,7 +516,6 @@ export interface HarnessJson {
   skills?: string[];
   rules: HarnessRules;
   egress?: string[];
-  budget?: RunBudget;
 }
 
 /** Skill files that are secrets by NAME — never exported, whatever they contain. */
@@ -562,10 +552,8 @@ export function buildHarnessBundle(
     ...(h.skills ? { skills: [...h.skills] } : {}),
     rules: { ...h.rules },
     ...(h.egress?.length ? { egress: [...h.egress] } : {}),
-    ...(h.budget ? { budget: { ...h.budget } } : {}),
   };
   const files: BundleFile[] = [];
-  // Strings were cleaned field by field above; the numeric budget must not meet the KEY=value shape.
   const hjText = JSON.stringify(hj, null, 2) + "\n";
   files.push({ path: "harness.json", content: hjText });
   if (h.rulesMd) files.push({ path: "RULES.md", content: clean(h.rulesMd + "\n") });
@@ -663,6 +651,7 @@ export function parseHarnessFolder(files: BundleFile[]): ParsedBundle {
   if (hj.version > HARNESS_VERSION) throw new Error(`This harness uses schema version ${hj.version}; this controller reads up to ${HARNESS_VERSION}. Update the controller.`);
   const bad = scanKeys(hj);
   if (bad) throw new Error(`harness.json has a "${bad}" field — bundles must never carry keys, tokens or endpoints.`);
+  // Older bundles may still carry a numeric `budget` block (ignored); keep it out of the secret-shape scan.
   const { budget: _budget, ...hjStrings } = hj;
   const shapeText = JSON.stringify(hjStrings);
   if (redactShapes(shapeText) !== shapeText) throw new Error("harness.json contains something shaped like a secret — refusing it.");
@@ -677,7 +666,7 @@ export function parseHarnessFolder(files: BundleFile[]): ParsedBundle {
     if (extra.length) throw new Error(`provider may only name a kind and a label (found ${extra.join(", ")}).`);
     provider = { kind: p.kind as ProviderKind, label: typeof p.label === "string" ? p.label.trim().slice(0, 80) : String(p.kind) };
   }
-  // Reuse the one validator for everything else (driver, model, skills, rules, egress, budget).
+  // Reuse the one validator for everything else (driver, model, skills, rules, egress).
   const norm = normalizeHarness({ ...hj, providerId: undefined });
 
   const rulesMd = byPath.get("rules.md");
@@ -737,7 +726,6 @@ export function parseHarnessFolder(files: BundleFile[]): ParsedBundle {
     ...(listed.size || norm.skills ? { skills: [...listed].sort() } : {}),
     rules: norm.rules,
     ...(norm.egress ? { egress: norm.egress } : {}),
-    ...(norm.budget ? { budget: norm.budget } : {}),
   };
   return { harness, ...(rulesMd?.trim() ? { rulesMd: rulesMd.trim() } : {}), ...(verifySh ? { verifySh } : {}), skills, warnings };
 }
@@ -825,7 +813,6 @@ export function planImport(
       rulesMd: parsed.rulesMd,
       verifyCommand: parsed.verifySh,
       egress: parsed.harness.egress,
-      budget: parsed.harness.budget,
     },
     undefined,
     now

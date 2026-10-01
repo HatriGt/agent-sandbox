@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/Button";
 import { Field } from "@/components/ui/Field";
 
 const EVENTS: { key: keyof NotifySettings["events"]; label: string; hint: string }[] = [
-  { key: "waiting", label: "Needs you", hint: "The agent stopped on a question or hit its budget." },
+  { key: "waiting", label: "Needs you", hint: "The agent stopped on a question." },
   { key: "done", label: "Done", hint: "A run finished cleanly." },
   { key: "failed", label: "Failed or stalled", hint: "A run exited non-zero or went quiet." },
 ];

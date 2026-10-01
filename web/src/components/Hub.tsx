@@ -24,9 +24,7 @@ import {
 import { toast } from "sonner";
 import { RepoPicker, type PickedRepo } from "@/components/RepoPicker";
 import { ModelChip, useModelChoice, type ModelChoice } from "@/components/thread/ModelPicker";
-import { BudgetChip } from "@/components/thread/BudgetChip";
 import { HarnessChip } from "@/components/harness/HarnessChip";
-import type { RunBudget } from "@/lib/api";
 import { useProviders } from "@/components/Providers";
 import { AgentChip, useAgentChoice } from "@/components/DriverPicker";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
@@ -258,7 +256,6 @@ export function Hub({
   // The user's own providers (Providers page) join the picker, grouped by provider label.
   const providers = useProviders();
   const [provPick, setProvPick] = React.useState<ModelChoice | null>(null);
-  const [budget, setBudget] = React.useState<RunBudget | null>(null);
   const [attempts, setAttempts] = React.useState<1 | 2 | 3>(1);
   const [harness, setHarness] = React.useState<string | null>(null);
   const provModels = React.useMemo<ModelChoice[]>(
@@ -437,7 +434,6 @@ export function Hub({
         ...(provPick ? { model: provPick.id, provider: provPick.provider } : model.picked ? { model: model.picked } : {}),
         // The agent chip shows "partial" before the pick is sent, so choosing it IS the acknowledgement.
         ...(agent.picked ? { agent: agent.picked, ...(agent.current?.supervised === false ? { allowPartialSupervision: true } : {}) } : {}),
-        ...(budget ? { budget } : {}),
         ...(attempts > 1 ? { attempts } : {}),
         ...(harness ? { harness } : {}),
         ...(verifyActive ? { verify: verifyMode === "command" ? { command: verifyText.trim() } : { criterion: verifyText.trim() } } : {}),
@@ -718,12 +714,11 @@ export function Hub({
                 </button>
                 <AgentChip choices={agent.choices} current={agent.current} defaultId={agent.defaultId} onPick={agent.pick} />
                 <ModelChip current={provPick ?? model.current} models={pickerModels} defaultId={model.defaultId} onPick={pickModel} />
-                <BudgetChip value={budget} onChange={setBudget} modelId={provPick ? undefined : (model.picked ?? model.defaultId)} />
                 <HarnessChip value={harness} onChange={setHarness} />
                 <button
                   type="button"
                   onClick={() => setAttempts((n) => (n === 3 ? 1 : ((n + 1) as 2 | 3)))}
-                  title={`Attempts: ${attempts}. Run the task N ways in parallel; the best attempt gets the PR. A budget is the total, split across attempts. Click to cycle 1/2/3.`}
+                  title={`Attempts: ${attempts}. Run the task N ways in parallel; the best attempt gets the PR. Click to cycle 1/2/3.`}
                   aria-label={`Attempts: ${attempts}`}
                   className={cn(
                     "h-7 cursor-pointer items-center gap-1.5 rounded-md px-2 text-micro font-medium tabular-nums transition-colors",

@@ -338,7 +338,9 @@ From the git history and the code; "not verified" means no commit clearly delive
 - **3** — shipped: Codex and OpenCode drivers, contract test, supervision floor (both meet it).
 - **4** — shipped: schedules, generic webhook, Automations page, run provenance; chains as triggers.
 - **5** — shipped: GitHub event triggers, PR receipt comment, History ledger with totals.
-- **6** — shipped: budgets via ask-and-stop, heartbeat/stalled. Cut: continue-across-boxes.
+- **6** — shipped: heartbeat/stalled. Budgets via ask-and-stop shipped and were later REMOVED
+  from the product (only plain cost reporting remains: duration, tokens, $ for priced models).
+  Cut: continue-across-boxes.
 - **7** — shipped: Expo push, `asb://` deep links, Automations on mobile.
 - **8** — shipped: saved harnesses, versioned bundles (export/import), two-harness compare. Cut: gallery.
 - Not started: Gemini CLI driver.

@@ -103,7 +103,7 @@ async function ensureChannels(): Promise<void> {
   // PRIVATE: on a secure lock screen Android shows "contents hidden" instead of the run title.
   await Notifications.setNotificationChannelAsync("needs-you", {
     name: "Needs you",
-    description: "An agent stopped on a question or hit its budget.",
+    description: "An agent stopped on a question.",
     importance: Notifications.AndroidImportance.HIGH,
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
   });

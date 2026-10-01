@@ -62,7 +62,7 @@ test("store is per owner; duplicate and approve", () => {
 });
 
 test("resolution precedence: explicit fields win; provider+model travel as a unit; lists replace", () => {
-  const h = def({ driver: "codex" as never, providerId: "prv_x", model: "m-harness", egress: ["a.com"], skills: ["s1"], budget: { maxMinutes: 10 }, rules: { askBeforeGuess: true, planFirst: false, verifyOnDone: true }, verifyCommand: "npm test" });
+  const h = def({ driver: "codex" as never, providerId: "prv_x", model: "m-harness", egress: ["a.com"], skills: ["s1"], rules: { askBeforeGuess: true, planFirst: false, verifyOnDone: true }, verifyCommand: "npm test" });
   const all = applyHarness(h, { task: "do it" });
   assert.equal(all.body.agent, "codex");
   assert.equal(all.body.provider, "prv_x");
@@ -71,12 +71,11 @@ test("resolution precedence: explicit fields win; provider+model travel as a uni
   assert.deepEqual(all.body.verify, { command: "npm test" });
   assert.match(String(all.body.task), /^Harness rules \(H\):[\s\S]*do it$/);
   // Run names a model only: the harness's provider must NOT be paired with it.
-  const m = applyHarness(h, { task: "t", model: "mine", agent: "claude", allowDomains: ["b.com"], budget: { maxMinutes: 2 }, verify: { criterion: "x" } });
+  const m = applyHarness(h, { task: "t", model: "mine", agent: "claude", allowDomains: ["b.com"], verify: { criterion: "x" } });
   assert.equal(m.body.provider, undefined);
   assert.equal(m.body.model, "mine");
   assert.equal(m.body.agent, "claude");
   assert.deepEqual(m.body.allowDomains, ["b.com"]);
-  assert.deepEqual(m.body.budget, { maxMinutes: 2 });
   assert.deepEqual(m.body.verify, { criterion: "x" });
   assert.ok(!m.applied.includes("model") && !m.applied.includes("provider"));
   // verifyOnDone without a command: a criterion from the task.
@@ -87,7 +86,7 @@ test("resolution precedence: explicit fields win; provider+model travel as a uni
 });
 
 test("export: no provider id/key, provider as kind+label, secrets redacted, secret files skipped", () => {
-  const h = def({ providerId: "prv_secret", model: "gpt", rulesMd: "Use key sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA please", verifyCommand: "TOKEN=ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA npm test", skills: ["s1"], budget: { maxMinutes: 5, maxTokens: 1000 } });
+  const h = def({ providerId: "prv_secret", model: "gpt", rulesMd: "Use key sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA please", verifyCommand: "TOKEN=ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA npm test", skills: ["s1"] });
   const out = buildHarnessBundle(h, {
     provider: { kind: "openai", label: "Work" },
     skills: [{ name: "s1", description: "d", content: "body", enabled: true, addedAt: 1, updatedAt: 1, files: [{ path: ".env", content: "X=1" }, { path: "ok.md", content: "fine" }] } as never],
@@ -101,7 +100,7 @@ test("export: no provider id/key, provider as kind+label, secrets redacted, secr
   assert.deepEqual(out.skipped, ["skills/s1/.env (secret file name)"]);
   const hjFile = JSON.parse(out.bundle.files.find((f) => f.path === "harness.json")!.content);
   assert.deepEqual(hjFile.provider, { kind: "openai", label: "Work" });
-  assert.equal(hjFile.budget.maxTokens, 1000);
+  assert.equal(hjFile.budget, undefined);
   // Round-trip: the export re-imports cleanly.
   const parsed = parseHarnessFolder(out.bundle.files);
   assert.equal(parsed.harness.model, "gpt");
@@ -120,6 +119,7 @@ test("import limits: version, format, forbidden keys, secret shapes, sizes, trav
   const many = Array.from({ length: HARNESS_LIMITS.maxBundleFiles + 1 }, (_, i) => ({ path: `skills/a/f${i}.md`, content: "x" }));
   assert.throws(() => parseHarnessFolder([{ path: "harness.json", content: hj() }, ...many]), /too many/);
   const ok = parseHarnessFolder([
+    // An older bundle's `budget` block is tolerated and ignored.
     { path: "harness.json", content: hj({ budget: { maxMinutes: 5, maxTokens: 10 } }) },
     { path: "hooks/pre.sh", content: "rm -rf /" },
     { path: "verify.sh", content: "#!/bin/sh\n# c\nnpm test\n" },

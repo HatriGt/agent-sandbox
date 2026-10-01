@@ -39,7 +39,7 @@ import { claimNonce, mintNonce, questionChoices, releaseNonce } from "./answer-c
 import { buildPushMessages, deviceCount, listDeviceTokens, makeOwnerRateCap, pruneToken, registerDevice, sendExpoPush, unregisterDevice } from "./push.js";
 import { fetchPinned } from "./net-guard.js";
 import { buildDigest, type RunDigest } from "./digest.js";
-import { buildOutcome, outcomeOf, resolveFollowedBy, type OutcomeBudget } from "./outcome.js";
+import { buildOutcome, outcomeOf, resolveFollowedBy } from "./outcome.js";
 import { archiveRun, deleteRun, getDigest, getRun, listActivity, listRuns, pruneArchive, ledgerTotals, listLedger, type LedgerFilter } from "./run-archive.js";
 import { verifyPlanOf, type VerifyPlan, type VerifyResult } from "./verify.js";
 import { parseTrace } from "./trace.js";
@@ -59,9 +59,6 @@ import {
   upsertProvider,
   viewOf,
 } from "./providers.js";
-import { BUDGET_PATH, normalizeBudget, pricedModels, type RunBudget } from "./budget.js";
-import { QUESTION_MARK } from "./drivers/sentinels.js";
-import type { BoxView } from "./monitor.js";
 import { requestSessions, createLocalUser, deleteUser, listUsers, ownerOf, setUserRole, validateSignup, createPasswordUser, authenticatePassword, setPassword, updateProfile, verifyPassword, PASSWORD_MIN, listSessions, revokeSession, revokeOtherSessions, startTrial, planOf, setPlan, TrialExpiredError } from "./identity.js";
 import { parseStore } from "./gh-token-store.js";
 import { seedStarterSkills } from "./starter-skills.js";
@@ -582,7 +579,7 @@ const sendPushFor = async (owner: string, ev: NotifyEvent, label: string | undef
   if (!pushCap.allow(owner)) return void console.error(`[push] rate cap hit for an owner; dropped ${ev.kind}`);
   // Answer from the notification (src/answer-choice.ts): choice LABELS only, redacted, plus a
   // one-use nonce in the (never displayed) data payload. The question text itself never leaves.
-  const choices = ev.kind === "waiting" || ev.kind === "budget" ? questionChoices(ev.question) : [];
+  const choices = ev.kind === "waiting" ? questionChoices(ev.question) : [];
   const pushChoices = choices.length
     ? { labels: choices.map((c) => redactor.redact(c.label)), nonce: mintNonce(db, owner, ev.box, ev.question ?? "") }
     : undefined;
@@ -657,7 +654,7 @@ const collectRepoSetup = async (box: string, owner: string): Promise<void> => {
   }
 };
 
-const archiveFinishedRun = async (box: string, opts: { withFiles: boolean; budget?: OutcomeBudget } = { withFiles: true }): Promise<void> => {
+const archiveFinishedRun = async (box: string, opts: { withFiles: boolean } = { withFiles: true }): Promise<void> => {
   const snap = await watchHub.read(box);
   if (snap.boxStatus === "missing") return;
   // Only a genuinely FINISHED run earns a record. Testing for "not running and not waiting" is not
@@ -682,7 +679,7 @@ const archiveFinishedRun = async (box: string, opts: { withFiles: boolean; budge
   });
   // The outcome card (src/outcome.ts): persisted inside the archived digest, so it outlives the box.
   try {
-    digest.outcome = buildOutcome({ digest, events: parseTrace(snap.log ?? ""), log: snap.log ?? "", filesKnown: opts.withFiles && up, diffText, ...(opts.budget ? { budget: opts.budget } : {}) });
+    digest.outcome = buildOutcome({ digest, events: parseTrace(snap.log ?? ""), log: snap.log ?? "", filesKnown: opts.withFiles && up, diffText });
   } catch (e) {
     console.error(`[outcome] ${box}: ${(e as Error).message.slice(0, 200)}`);
   }
@@ -755,27 +752,6 @@ const maybePark = (boxes: Array<{ name: string; runState?: string; boxStatus?: s
   for (const k of [...waitingSince.keys()]) if (!boxes.some((b) => b.name === k)) waitingSince.delete(k);
 };
 
-/**
- * Budget ask-and-stop (src/budget.ts): a running box over a cap gets the cap's question written as
- * its QUESTION_MARK — the driver's gate then denies the next tool call and the turn ends at the
- * question, like any other ask. The run is never killed. The cap is marked tripped in the box's
- * budget file in the same shell, so it asks once; a question already pending is never overwritten.
- */
-const budgetInFlight = new Set<string>();
-const askBudget = (boxes: BoxView[]): void => {
-  for (const b of boxes) {
-    const hit = b.budgetHit;
-    if (!hit || b.question || budgetInFlight.has(b.name) || !/^(minutes|usd|tokens)$/.test(hit.cap)) continue;
-    budgetInFlight.add(b.name);
-    const mark =
-      `node -e 'const fs=require("fs"),f=process.argv[1],c=process.argv[2];const j=JSON.parse(fs.readFileSync(f,"utf8"));` +
-      `j.tripped=[...new Set([...(j.tripped||[]),c])];fs.writeFileSync(f,JSON.stringify(j))' ${BUDGET_PATH} ${hit.cap}`;
-    void execWithInput(cfg, b.name, `[ -f ${QUESTION_MARK} ] || { cat > ${QUESTION_MARK} && ${mark}; }`, hit.question)
-      .catch((e) => console.error(`[budget] ${b.name}: ${(e as Error).message.slice(0, 200)}`))
-      .finally(() => budgetInFlight.delete(b.name));
-  }
-};
-
 const lastSeenStatus = new Map<string, boolean>();
 const readFleet = makeFleetReader(
   cfg,
@@ -817,13 +793,13 @@ const readFleet = makeFleetReader(
             .finally(() => {
               void notifier.notify(ev);
               // Archive AFTER verification so the record carries the verified stamp.
-              void archiveFinishedRun(ev.box, { withFiles: true, budget: boxes.find((b) => b.name === ev.box)?.budget }).catch((e) => console.error(`[archive] ${ev.box}: ${(e as Error).message.slice(0, 200)}`));
+              void archiveFinishedRun(ev.box, { withFiles: true }).catch((e) => console.error(`[archive] ${ev.box}: ${(e as Error).message.slice(0, 200)}`));
             });
         } else {
           void notifier.notify(ev);
           // Run history archive: persist the digest at the finish edge (box still up → files listable).
           if (ev.kind === "done" || ev.kind === "failed")
-            void archiveFinishedRun(ev.box, { withFiles: true, budget: boxes.find((b) => b.name === ev.box)?.budget }).catch((e) => console.error(`[archive] ${ev.box}: ${(e as Error).message.slice(0, 200)}`));
+            void archiveFinishedRun(ev.box, { withFiles: true }).catch((e) => console.error(`[archive] ${ev.box}: ${(e as Error).message.slice(0, 200)}`));
         }
         // Turn-end checkpoint: the moment a turn settles (done or paused on a question) is the
         // restore point for whatever the operator sends next. Online in-box tar (~1 s, no VM stop)
@@ -835,7 +811,6 @@ const readFleet = makeFleetReader(
     // Ask-park: a box waiting past the grace window is snapshotted and stopped (fire-and-forget; the
     // next sweep sees it Stopped and the fleet card shows it asleep-with-question).
     maybePark(boxes);
-    askBudget(boxes);
     // Attempt groups: deadlines and the losers' override window are time-based, so tick them here.
     sweepAttempts();
     return boxes.map((b) => ({
@@ -1967,10 +1942,6 @@ const providersPayload = (owner: string) => ({
   kinds: PROVIDER_KINDS.map((k) => ({ id: k, label: PROVIDER_LABELS[k], drivers: driversFor(k) })),
   cliLoginPolicy: CLI_LOGIN_POLICY,
 });
-app.get("/budget/prices.json", (req: Request, res: Response) => {
-  if (!dashAuthed(req, res)) return;
-  res.json({ priced: pricedModels() });
-});
 app.get("/providers.json", (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   res.json(providersPayload(providerOwner(res)));
@@ -2982,12 +2953,6 @@ const startTriggerRun = (input: StartRunInput): Promise<{ ok: true; box: string 
           if (!vp.ok) return { ok: false as const, question: vp.question };
           hVerify = vp.plan ?? undefined;
         }
-        let hBudget: RunBudget | undefined;
-        try {
-          hBudget = th ? normalizeBudget(hb.budget) : undefined;
-        } catch (e) {
-          return { ok: false as const, question: (e as Error).message };
-        }
         const hAgent = typeof hb.agent === "string" ? hb.agent : undefined;
         const agent = hAgent && isAgentKind(hAgent) ? hAgent : loadAgentPrefs(input.owner).defaultAgent;
         const hSkills = Array.isArray(hb.skills) ? (hb.skills as string[]) : undefined;
@@ -2999,7 +2964,6 @@ const startTriggerRun = (input: StartRunInput): Promise<{ ok: true; box: string 
           task: typeof hb.task === "string" ? hb.task : input.task,
           model,
           ...(hProvider ? { provider: hProvider } : {}),
-          ...(hBudget ? { budget: hBudget } : {}),
           ...(hVerify ? { verify: hVerify } : {}),
           ...(hEgress?.length ? { allowDomains: hEgress } : {}),
           ...(hSkills ? { skills: hSkills } : {}),
@@ -3104,7 +3068,6 @@ const followups = makeFollowupEngine({
       taskTemplate: f.task,
       enabled: true,
       concurrency: 1,
-      budget: { maxMinutes: 60 },
       prComment: false,
       ...(f.pr.agent ? { agent: f.pr.agent } : {}),
       ...(f.pr.model ? { model: f.pr.model } : {}),
@@ -3403,12 +3366,6 @@ const delegateOnce = async (body0: Record<string, unknown>, principal: Principal
     if (typeof body.provider === "string" && body.provider && !provider) {
       return { status: 400, json: { error: "Unknown provider." } };
     }
-    let budget: RunBudget | undefined;
-    try {
-      budget = normalizeBudget(body.budget);
-    } catch (e) {
-      return { status: 400, json: { error: (e as Error).message } };
-    }
     if (provider && typeof body.model === "string" && body.model.trim()) {
       const m = body.model.trim();
       if (!/^[\w.:\/@-]{1,120}$/.test(m) || (provider.models?.length && !provider.models.includes(m))) {
@@ -3459,7 +3416,6 @@ const delegateOnce = async (body0: Record<string, unknown>, principal: Principal
       githubAccount: typeof body.githubAccount === "string" ? body.githubAccount : undefined,
       model,
       provider,
-      budget,
       allowPartialSupervision: body.allowPartialSupervision === true,
       verify: verifyPlan,
       ...(allowDomains?.length ? { allowDomains } : {}),
@@ -3494,18 +3450,16 @@ const delegateOnce = async (body0: Record<string, unknown>, principal: Principal
 };
 
 // "Tries several approaches" (src/attempts.ts): N attempts of one task, scored by the controller,
-// one PR. Each attempt is a delegateOnce with its own driver/model and a total budget split N ways.
+// one PR. Each attempt is a delegateOnce with its own driver/model.
 const attempts = makeAttempts({
   db,
-  startOne: async (spec, task, budget, link) => {
+  startOne: async (spec, task, link) => {
     const job = attemptJobs.get(link.groupId);
     if (!job) return { ok: false, question: "attempt group context lost" };
     const body: Record<string, unknown> = { ...job.body, task, attempts: undefined, attemptSpecs: undefined, compareId: undefined, compareSide: undefined };
     for (const k of ["agent", "model", "provider", "harness"] as const) if (spec[k]) body[k] = spec[k];
     if (spec.agent && !spec.model) delete body.model;
     if (spec.agent && !spec.provider && spec.model) delete body.provider;
-    if (budget) body.budget = budget;
-    else delete body.budget;
     const r = await withPrincipal(job.principal, () => withStartedBy(job.startedBy, () => delegateOnce(body, job.principal, link)));
     const j = r.json as { ok?: boolean; box?: string; question?: string; error?: string };
     return r.status === 200 && j.ok && j.box ? { ok: true, box: j.box } : { ok: false, question: j.question ?? j.error ?? `HTTP ${r.status}` };
@@ -3543,12 +3497,6 @@ const delegateAttempts = async (body: Record<string, unknown>, principal: Princi
       return { status: 429, json: { error: `${n} attempts need ${n} sandboxes; your plan allows ${max} at once and ${owned} are running. Use fewer attempts or tear a run down.` } };
     }
   }
-  let budget: RunBudget | undefined;
-  try {
-    budget = normalizeBudget(body.budget);
-  } catch (e) {
-    return { status: 400, json: { error: (e as Error).message } };
-  }
   const baseAgent = typeof body.agent === "string" && body.agent ? body.agent : loadAgentPrefs(owner).defaultAgent;
   const provs = loadProviders(owner);
   const specs =
@@ -3576,7 +3524,6 @@ const delegateAttempts = async (body: Record<string, unknown>, principal: Princi
     task: body.task,
     specs,
     labels,
-    ...(budget ? { budget } : {}),
     onCreated: (id) => attemptJobs.set(id, job),
   });
   for (const [k, v] of attemptJobs) if (v === job) attemptJobs.delete(k);

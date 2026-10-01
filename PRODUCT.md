@@ -36,9 +36,9 @@ That sentence is the direction (plan: `docs/plan-agent-cloud.md`). What exists *
 - **Triggers:** manual runs (dashboard, MCP, curl), schedules, generic webhooks, GitHub events
   (issue labelled, `/agent` comment, PR opened) and chains (`src/triggers.ts`), managed on the
   Automations page (web and mobile).
-- **Long-running:** per-run budgets that ask-and-stop, heartbeat and a stalled state
-  (`src/budget.ts`). Dollars only for models with a known price; otherwise tokens only.
-  **Planned:** continue-across-boxes.
+- **Long-running:** heartbeat and a stalled state (`src/stall.ts`); plain cost reporting on the
+  outcome card (`src/cost.ts`) — duration, tokens, and dollars only for models with a known price,
+  otherwise "—". There are no per-run budgets or caps. **Planned:** continue-across-boxes.
 - **Walk-away:** mobile push + `asb://` deep links; harness bundles (export/import) and
   two-harness compare; "tries several approaches" (2-3 parallel attempts, scored, one PR —
   `src/attempts.ts`). **Planned:** public harness gallery.

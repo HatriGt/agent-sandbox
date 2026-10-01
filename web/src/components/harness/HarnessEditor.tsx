@@ -146,21 +146,10 @@ export function HarnessEditor({
           </fieldset>
 
           <fieldset className="grid gap-4 sm:grid-cols-2">
-            <legend className="text-foreground mb-2 text-meta font-medium">Egress & budget</legend>
+            <legend className="text-foreground mb-2 text-meta font-medium">Egress</legend>
             <Field label="Extra hosts" optional hint="Hostnames only, one per line.">
               {(w) => <textarea {...w} className={cn(inputClass, "h-24 py-2 font-mono text-micro")} value={d.egress} onChange={(e) => set("egress", e.target.value)} placeholder={"registry.npmjs.org\napi.stripe.com"} />}
             </Field>
-            <div className="grid grid-cols-3 gap-2 self-start">
-              <Field label="Minutes" optional>
-                {(w) => <Input {...w} inputMode="numeric" value={d.maxMinutes} onChange={(e) => set("maxMinutes", e.target.value)} placeholder="—" />}
-              </Field>
-              <Field label="USD" optional>
-                {(w) => <Input {...w} inputMode="decimal" value={d.maxUsd} onChange={(e) => set("maxUsd", e.target.value)} placeholder="—" />}
-              </Field>
-              <Field label="Tokens" optional>
-                {(w) => <Input {...w} inputMode="numeric" value={d.maxTokens} onChange={(e) => set("maxTokens", e.target.value)} placeholder="—" />}
-              </Field>
-            </div>
           </fieldset>
         </div>
         <PanelFooter className="justify-end">

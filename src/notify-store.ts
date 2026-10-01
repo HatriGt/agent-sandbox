@@ -58,7 +58,7 @@ export function normalizeNotifySettings(input: { url?: unknown; events?: unknown
 }
 
 export function eventEnabled(s: NotifySettings, kind: NotifyEvent["kind"]): boolean {
-  // A stall rides the "failed" toggle, a budget ask the "waiting" one.
+  // A stall rides the "failed" toggle.
   return s.url !== "" && s.events[toggleFor(kind)];
 }
 

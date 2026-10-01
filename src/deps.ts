@@ -37,7 +37,6 @@ import {
 import { runInteractive } from "./interactive.js";
 import { providerEgressDomains, providerEnv, providerEnvFile } from "./providers.js";
 import { PROVIDER_ENV_PATH } from "./drivers/sentinels.js";
-import { BUDGET_PATH, type BudgetState } from "./budget.js";
 import { setBoxSkillSelection } from "./skill-store.js";
 import { runVerification } from "./verify.js";
 import { detectSetup, parseProbe, setupAskHint, setupProbeSh, setupPromptHint, type SetupProfile } from "./setup-profile.js";
@@ -538,15 +537,11 @@ export const deps: HandlerDeps = {
       await execWithInput(runCfg, box, `mkdir -p ${shellQuote(dir)} && base64 -d > ${shellQuote(abs)}`, a.base64.replace(/^data:[^,]*,/, ""));
     }
 
-    // Provider env (sourced by every turn, so resumes keep it) and the run budget, both outside
-    // /workspace and mode 600, so neither lands in a diff or a checkpoint.
+    // Provider env (sourced by every turn, so resumes keep it), outside /workspace and mode 600,
+    // so it never lands in a diff or a checkpoint.
     if (plan.provider) {
       const body = providerEnvFile(providerEnv(plan.provider, plan.model));
       await execWithInput(runCfg, box, `umask 077 && cat > ${PROVIDER_ENV_PATH}`, body);
-    }
-    if (plan.budget) {
-      const state: BudgetState = { ...plan.budget, ...(plan.model ? { model: plan.model } : {}), startedAt: t0, tripped: [] };
-      await execWithInput(runCfg, box, `umask 077 && cat > ${BUDGET_PATH}`, JSON.stringify(state));
     }
 
     // Staging is transient (already copied into the box). Clean it; refill pool on claim.

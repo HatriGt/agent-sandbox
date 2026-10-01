@@ -113,7 +113,6 @@ test("normalize: safe defaults and validation", () => {
     assert.equal(g.trigger.concurrency, 1);
     assert.equal(g.trigger.prComment, true);
     assert.equal(g.trigger.spec.label, "agent");
-    assert.equal(g.trigger.budget.maxMinutes, 60);
   }
   const s = normalizeTrigger({ name: "Nightly", kind: "schedule", taskTemplate: "t", spec: { cron: "@daily", timezone: "Europe/Berlin" } });
   assert.ok(s.ok && s.trigger.prComment === false);

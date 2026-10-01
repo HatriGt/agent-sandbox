@@ -12,7 +12,6 @@
 import { isBoxName } from "./sync.js";
 import { withStartedBy } from "./started-by.js";
 import { z } from "zod";
-import { normalizeBudget } from "./budget.js";
 import type { Config } from "./config.js";
 import { validateDelegateInput, type DelegateSource, type DelegatePlan } from "./delegate-input.js";
 import { fetchModels, isAllowedModel } from "./models.js";
@@ -136,7 +135,6 @@ export interface HandlerDeps {
       model?: string;
       agent?: string;
       verify?: { command?: string; criterion?: string };
-      budget?: { maxMinutes: number; maxUsd?: number; maxTokens?: number };
       attempts: number;
       attemptSpecs?: Array<{ agent?: string; model?: string; provider?: string; harness?: string }>;
     }
@@ -315,17 +313,6 @@ export function registerTools(
             "Exactly one key. The result stamps the run as verified/UNVERIFIED — a failed check never " +
             "un-finishes it."
         ),
-      budget: z
-        .object({
-          maxMinutes: z.number().describe("Wall-clock cap in minutes (required when budget is given)."),
-          maxUsd: z.number().optional().describe("Dollar cap — enforced only for models with a known price."),
-          maxTokens: z.number().optional().describe("Total input+output token cap."),
-        })
-        .optional()
-        .describe(
-          "Per-run budget. When a cap is hit the run is NOT killed: it asks a question (continue/stop) " +
-            "and pauses at its next tool call. Token/$ totals update at turn end."
-        ),
       attempts: z
         .number()
         .int()
@@ -336,7 +323,7 @@ export function registerTools(
           "Tries several approaches: 2 or 3 runs the task that many ways in parallel (each its own sandbox and " +
             "branch, none opens a PR). When all finish the controller scores them — verify/tests pass first, then " +
             "fewer failing tests, smaller diff, lower cost — and opens the PR from the winner; a tie is asked. " +
-            "budget is the TOTAL across attempts. Needs source:\"git\" and a free sandbox slot per attempt. Returns at launch."
+            "Needs source:\"git\" and a free sandbox slot per attempt. Returns at launch."
         ),
       attemptSpecs: z
         .array(
@@ -365,7 +352,6 @@ export function registerTools(
       verify,
       after,
       carry,
-      budget,
       attempts,
       attemptSpecs,
     }: {
@@ -383,7 +369,6 @@ export function registerTools(
       verify?: { command?: string; criterion?: string };
       after?: string;
       carry?: "patch" | "none";
-      budget?: { maxMinutes: number; maxUsd?: number; maxTokens?: number };
       attempts?: number;
       attemptSpecs?: Array<{ agent?: string; model?: string; provider?: string; harness?: string }>;
     }) => {
@@ -404,7 +389,6 @@ export function registerTools(
             ...(model ? { model } : {}),
             ...(agent ? { agent } : {}),
             ...(verify ? { verify } : {}),
-            ...(budget ? { budget } : {}),
             attempts,
             ...(attemptSpecs ? { attemptSpecs } : {}),
           })
@@ -469,13 +453,6 @@ export function registerTools(
         agent,
       });
       if (!v.ok) return text(v.question);
-      if (budget !== undefined) {
-        try {
-          v.plan.budget = normalizeBudget(budget);
-        } catch (e) {
-          return text((e as Error).message);
-        }
-      }
 
       // Resolve GitHub access by ACCESS from the login-keyed store (no default account anywhere):
       // pick, per repo, the account whose token can actually reach it. This drives the CLONE (git),

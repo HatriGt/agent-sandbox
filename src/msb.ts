@@ -49,7 +49,7 @@ import { driverFor } from "./drivers/index.js";
 import { askHookScript, claudeDriver, claudeInstallSh, streamFmtScript } from "./drivers/claude.js";
 import { ompInstallSh, ompSeedSh } from "./drivers/omp.js";
 import { AGENT_LOG, AT_MARK, MCP_CONFIG_PATH, PROVIDER_ENV_PATH, QUESTION_MARK, USAGE_OPEN } from "./drivers/sentinels.js";
-import { BUDGET_PATH, checkBudget, costUsd, isStalled, parseBudgetState, sumUsage, type BudgetState, type UsageTotals } from "./budget.js";
+import { isStalled } from "./stall.js";
 
 // The driver pieces used to live here; re-exported so every existing importer keeps working.
 export { claudeInstallSh, streamFmtScript } from "./drivers/claude.js";
@@ -1650,9 +1650,6 @@ export async function gatherMonitor(cfg: Config): Promise<BoxView[]> {
       let repos: RepoRef[] | undefined;
       let disk: { usedMib: number; totalMib: number } | undefined;
       let agent: AgentKind | undefined;
-      let budget: BoxView["budget"];
-      let budgetState: BudgetState | undefined;
-      let budgetUsage: UsageTotals | undefined;
 
       // The sentinel read and the metrics read are independent, so they go out together. They used
       // to be sequential, which doubled this endpoint's latency per box: with four boxes the whole
@@ -1678,10 +1675,7 @@ export async function gatherMonitor(cfg: Config): Promise<BoxView[]> {
             // human-readable rounding, which the client would have to re-parse.
             `echo "---D---"; df -k / 2>/dev/null | awk 'NR==2 {print $2, $3}' || true; ` +
             // Which agent the thread runs on, for the dashboard's thread header chip.
-            `echo "---K---"; cat ${KIND_MARK} 2>/dev/null || true; ` +
-            // Budget (src/budget.ts): the caps file and every per-turn ⟦usage⟧ line. Only when a
-            // budget exists — an unbudgeted box pays nothing extra for the grep.
-            `if [ -f ${BUDGET_PATH} ]; then echo "---B---"; cat ${BUDGET_PATH}; echo; echo "---U---"; grep -a '^${USAGE_OPEN} ' ${AGENT_LOG} 2>/dev/null | tail -n 500; fi`,
+            `echo "---K---"; cat ${KIND_MARK} 2>/dev/null || true`,
           // Bounded: this is the exact call that wedged forever on a box caught mid-shutdown and
           // took the whole fleet read with it. A rejection here is already handled below (execOk).
           { timeoutMs: PROBE_TIMEOUT_MS }
@@ -1729,27 +1723,7 @@ export async function gatherMonitor(cfg: Config): Promise<BoxView[]> {
         const mtime = Number(out.slice(mStart + "---M---".length, dStart).trim());
         lastOutputAt = Number.isFinite(mtime) && mtime > 0 ? mtime : undefined;
         const kStartRaw = out.indexOf("---K---");
-        const bStartRaw = out.indexOf("---B---");
-        if (kStartRaw >= 0) agent = boxAgentKindFrom(out.slice(kStartRaw + "---K---".length, bStartRaw >= 0 ? bStartRaw : out.length));
-        if (bStartRaw >= 0) {
-          const uStart = out.indexOf("---U---");
-          const state = parseBudgetState(out.slice(bStartRaw + "---B---".length, uStart >= 0 ? uStart : out.length));
-          if (state) {
-            const usage = sumUsage(uStart >= 0 ? out.slice(uStart + "---U---".length) : "");
-            const usd = costUsd(usage, state.model);
-            budget = {
-              maxMinutes: state.maxMinutes,
-              ...(state.maxUsd ? { maxUsd: state.maxUsd } : {}),
-              ...(state.maxTokens ? { maxTokens: state.maxTokens } : {}),
-              tokens: usage.inputTokens + usage.outputTokens,
-              ...(usd !== undefined ? { usd } : {}),
-              tripped: state.tripped ?? [],
-              ...(state.startedAt ? { startedAt: state.startedAt } : {}),
-            };
-            budgetState = state;
-            budgetUsage = usage;
-          }
-        }
+        if (kStartRaw >= 0) agent = boxAgentKindFrom(out.slice(kStartRaw + "---K---".length));
         if (dStartRaw >= 0) {
           // "<total-1k-blocks> <used-1k-blocks>" from df -k, or blank on an older box / failed df.
           const [totalK, usedK] = out
@@ -1779,8 +1753,6 @@ export async function gatherMonitor(cfg: Config): Promise<BoxView[]> {
 
       const nowMs = Date.now();
       const stalled = execOk && isStalled(runState, lastOutputAt, nowMs);
-      // A cap is only asked about while the run is actually going (a waiting run already stopped).
-      const budgetHit = budgetState && budgetUsage && runState === "running" ? checkBudget(budgetState, { nowMs, usage: budgetUsage }) : null;
 
       return {
         name: e.name,
@@ -1799,8 +1771,6 @@ export async function gatherMonitor(cfg: Config): Promise<BoxView[]> {
         repos,
         agent,
         ...(stalled ? { stalled } : {}),
-        ...(budget ? { budget } : {}),
-        ...(budgetHit ? { budgetHit } : {}),
       };
     })
   );

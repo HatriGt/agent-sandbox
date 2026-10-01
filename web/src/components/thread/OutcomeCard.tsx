@@ -98,7 +98,6 @@ export function OutcomeCard({ outcome: o, className }: { outcome: RunOutcome; cl
   const failed = o.state === "failed";
   const tests = testsText(o);
   const tokens = o.cost.tokens ? o.cost.tokens.input + o.cost.tokens.output : null;
-  const b = o.cost.budget;
   const dur = o.cost.durationMs !== null ? fmtDuration(Math.round(o.cost.durationMs / 1000)) : DASH;
 
   return (
@@ -192,19 +191,11 @@ export function OutcomeCard({ outcome: o, className }: { outcome: RunOutcome; cl
         </Col>
 
         <Col title="What it cost">
-          <span className="stamp text-foreground">
-            {dur}
-            {b && <span className="text-muted-foreground"> of {fmtDuration(b.maxMinutes * 60)}</span>}
-          </span>
-          <span className="stamp text-foreground">
-            {tokens !== null ? `${fmtTokens(tokens)} tokens` : `tokens ${DASH}`}
-            {b?.maxTokens && <span className="text-muted-foreground"> of {fmtTokens(b.maxTokens)}</span>}
-          </span>
+          <span className="stamp text-foreground">{dur}</span>
+          <span className="stamp text-foreground">{tokens !== null ? `${fmtTokens(tokens)} tokens` : `tokens ${DASH}`}</span>
           <span className="stamp text-foreground" title={o.cost.usd === null ? "No price is known for this model" : undefined}>
             {o.cost.usd !== null ? fmtUsd(o.cost.usd) : `$ ${DASH}`}
-            {b?.maxUsd && <span className="text-muted-foreground"> of {fmtUsd(b.maxUsd)}</span>}
           </span>
-          {b && b.tripped.length > 0 && <span className="text-muted-foreground text-micro">budget reached: {b.tripped.join(", ")}</span>}
         </Col>
       </div>
     </section>
