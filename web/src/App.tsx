@@ -224,6 +224,9 @@ export default function App() {
   // The box this tab just launched. Booting pane → live Thread for it share ONE pane key, so the
   // hand-off is a content change inside a mounted pane rather than a second keyed swap.
   const [launched, setLaunched] = React.useState<string | null>(null);
+  // The launched run's task as typed: the Task bubble must never blink out while the fleet has not
+  // yet reported the box (or its task) — the launch shell and the Thread both render it from here.
+  const launchTask = React.useRef("");
   const waiting = runs_.filter((b) => b.runState === "waiting");
   const working = runs_.filter((b) => b.runState === "running" && isUp(b)).length;
 
@@ -329,6 +332,7 @@ export default function App() {
     // A warm claim reuses the pool box's NAME: anything cached about it (a hover prefetch of the
     // idle pool box) is the previous life's log and would be spliced ahead of the new run's output.
     if (booting.known.get(fresh.name) === "pool-free") dropWatchCache(fresh.name);
+    launchTask.current = booting.task;
     setLaunched(fresh.name);
     if (selected !== fresh.name) go({ view: "box", name: fresh.name });
     setBooting(null);
@@ -424,7 +428,7 @@ export default function App() {
     // hold the box-loading skeleton until the box surfaces (or the cleanup effect routes home).
     // Once the booting pane knows its machine it shares that box's pane key, so the swap to the real
     // Thread is a content change inside one pane — not a fade-out/fade-in remount (the jump-cut).
-    view === "fleet" ? "fleet" : view === "history" ? "history" : view === "automations" ? "automations" : view === "skills" ? "skills" : view === "integrations" ? "integrations" : view === "account" ? "account" : view === "connect" ? "connect" : view === "welcome" ? "welcome" : view === "admin" ? "admin" : route.view === "pr" ? `pr:${route.repo}#${route.number}` : booting && !selectedBox ? "launch" : selectedBox && selectedBox.name === launched ? "launch" : selectedBox ? `box:${selectedBox.name}` : view === "box" && selectedRaw ? `box:${selectedRaw.name}` : view === "box" ? "box-loading" : "hub";
+    view === "fleet" ? "fleet" : view === "history" ? "history" : view === "automations" ? "automations" : view === "skills" ? "skills" : view === "integrations" ? "integrations" : view === "account" ? "account" : view === "connect" ? "connect" : view === "welcome" ? "welcome" : view === "admin" ? "admin" : route.view === "pr" ? `pr:${route.repo}#${route.number}` : (booting && !selectedBox) || (view === "box" && selected === launched) ? "launch" : selectedBox ? `box:${selectedBox.name}` : view === "box" && selectedRaw ? `box:${selectedRaw.name}` : view === "box" ? "box-loading" : "hub";
 
   const reduceMotion = useReducedMotion();
   // Direction-aware pane motion: deeper (hub → page → box) enters from the right on phones, going
@@ -436,6 +440,9 @@ export default function App() {
   React.useEffect(() => {
     prevDepth.current = depth;
   }, [depth]);
+  // Send → thread is ONE short fade: the outgoing hub leaves instantly (no exit beat under
+  // mode="wait", which read as a blank frame) and the launch shell fades in without a slide.
+  const paneCustom: PaneCustom = { dir: paneDir, launch: paneKey === "launch" };
 
   // View change: the page's scroller goes back to the top and focus lands on its h1 (or the main
   // region), so keyboard and screen-reader users start at the heading, not wherever focus was
@@ -771,11 +778,11 @@ export default function App() {
               <Plus className="size-4" />
             </Button>
           </div>
-          <AnimatePresence mode="wait" initial={false} custom={paneDir}>
+          <AnimatePresence mode="wait" initial={false} custom={paneCustom}>
             <motion.div
               key={paneKey}
               className="min-h-0 flex-1"
-              custom={paneDir}
+              custom={paneCustom}
               variants={paneVariants(!!reduceMotion, narrow)}
               initial="enter"
               animate="center"
@@ -833,15 +840,16 @@ export default function App() {
                   </div>
                 ) : booting && !selectedBox ? (
                   <BootingThread task={booting.task} warm={booting.warm} machine={booting.machine} inferred={booting.inferred} onBack={backToRail} />
-                ) : view === "box" && !selectedBox && selectedRaw ? (
-                  // Reopened (or refreshed) while the machine is still booting: show the run being set
-                  // up, not a blank pane or a bounce to the hub. The Thread takes over once it is up.
-                  <BootingThread task={selectedRaw.task ?? ""} warm={false} machine={selectedRaw.name} inferred={inferredNotes[selectedRaw.name]} onBack={backToRail} />
+                ) : view === "box" && !selectedBox && (selectedRaw || (selected && selected === launched)) ? (
+                  // Reopened (or refreshed) while the machine is still booting, or just launched and
+                  // not yet in the fleet: the same launch shell, never a blank pane or a bounce home.
+                  // The Thread takes over once it is up.
+                  <BootingThread task={selectedRaw?.task || (selected === launched ? launchTask.current : "")} warm={false} machine={selected ?? undefined} inferred={selected ? inferredNotes[selected] : undefined} onBack={backToRail} />
                 ) : view === "box" && !selectedBox && !data ? (
                   <ThreadPageSkeleton />
                 ) : selectedBox ? (
                   <Thread
-                    box={selectedBox}
+                    box={!selectedBox.task && selectedBox.name === launched && launchTask.current ? { ...selectedBox, task: launchTask.current } : selectedBox}
                     lifecycle={lifecycle}
                     inferredRepos={inferredNotes[selectedBox.name]}
                     asides={asides[selectedBox.name] ?? []}
@@ -894,17 +902,13 @@ export default function App() {
                     onStarted={(box, task, inferred) => {
                       remember(box, task);
                       if (inferred?.length) setInferredNotes((prev) => ({ ...prev, [box]: inferred }));
-                      // Don't navigate yet: the fleet won't list this box until the next poll, so an
-                      // immediate open() lands on an intermediate skeleton (the jump-cut). Morph the
-                      // booting pane to "connecting to <name>" instead; the attach effect swaps in the
-                      // real Thread the moment the box surfaces. If the user already navigated away,
-                      // leave them alone.
                       // Navigate NOW so the URL is the run's (a refresh or share lands on it), while the
                       // booting pane stays up under the same "launch" pane key — no second keyed swap,
                       // which under AnimatePresence mode="wait" could strand the pane blank when it
                       // landed mid-exit of the hub. The attach effect swaps in the real Thread.
                       if (bootingRef.current) {
                         setBooting({ ...bootingRef.current, machine: box, inferred });
+                        launchTask.current = task;
                         setLaunched(box);
                         go({ view: "box", name: box });
                       }
@@ -1093,19 +1097,27 @@ function paneDepth(key: string) {
   return key === "hub" ? 0 : key === "launch" || key.startsWith("box") || key.startsWith("pr:") ? 2 : 1;
 }
 
+type PaneCustom = { dir: number; launch: boolean };
+
 function paneVariants(reduce: boolean, narrow: boolean) {
+  // Entering the launch shell (Send): exit instantly, fade in with no transform.
+  const launchExit = { opacity: 0, transition: { duration: 0 } };
   if (reduce) {
     return {
       enter: { opacity: 0 },
       center: { opacity: 1, transition: { duration: 0.12 } },
-      exit: { opacity: 0, transition: { duration: 0.1 } },
+      exit: ({ launch }: PaneCustom) => (launch ? launchExit : { opacity: 0, transition: { duration: 0.1 } }),
     };
   }
   return {
-    enter: (dir: number) => (narrow && dir ? { opacity: 0, x: dir * 16, y: 0 } : { opacity: 0, x: 0, y: 6 }),
-    center: { opacity: 1, x: 0, y: 0, transition: { duration: 0.2, ease: PANE_EASE } },
-    exit: (dir: number) =>
-      narrow && dir ? { opacity: 0, x: dir * -12, transition: { duration: 0.16, ease: PANE_EASE } } : { opacity: 0, y: -6, transition: { duration: 0.16, ease: PANE_EASE } },
+    enter: ({ dir, launch }: PaneCustom) => (launch ? { opacity: 0, x: 0, y: 0 } : narrow && dir ? { opacity: 0, x: dir * 16, y: 0 } : { opacity: 0, x: 0, y: 6 }),
+    center: ({ launch }: PaneCustom) => ({ opacity: 1, x: 0, y: 0, transition: { duration: launch ? 0.14 : 0.2, ease: PANE_EASE } }),
+    exit: ({ dir, launch }: PaneCustom) =>
+      launch
+        ? launchExit
+        : narrow && dir
+          ? { opacity: 0, x: dir * -12, transition: { duration: 0.16, ease: PANE_EASE } }
+          : { opacity: 0, y: -6, transition: { duration: 0.16, ease: PANE_EASE } },
   };
 }
 

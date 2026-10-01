@@ -50,7 +50,6 @@ import { StateStamp } from "@/components/ui/stamp";
 import { PromptInput, PromptInputActions, PromptInputTextarea } from "@/components/ui/prompt-input";
 import { Lightbox } from "@/components/ui/lightbox";
 import { NumberTicker } from "@/components/ui/number-ticker";
-import { recordLaunchOrigin } from "@/lib/launchMorph";
 import { Capacity } from "@/components/Capacity";
 import { Bar } from "@/components/thread/Skeletons";
 import { smartJoin, useVoiceInput } from "@/hooks/useVoiceInput";
@@ -473,7 +472,6 @@ export function Hub({
     setError(null);
     const attached = images;
     onPending({ id, task: t });
-    recordLaunchOrigin(document.querySelector(".hub-stage textarea")); // motion: composer → Task bubble
     onBooting(t);
     try {
       const res = await api.delegate({
