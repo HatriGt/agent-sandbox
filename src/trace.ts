@@ -23,8 +23,12 @@ export type TraceEvent =
   /** `at` (epoch ms) comes from the formatter's ⟦at⟧ stamps; absent on logs written before them. */
   | { kind: "say"; text: string; at?: number }
   | { kind: "you"; text: string; at?: number }
-  /** `at` is when the call was issued; `ms` is result stamp − call stamp, once both are known. */
-  | { kind: "tool"; name: string; arg?: string; result?: string; failed?: boolean; diff?: string; at?: number; ms?: number }
+  /**
+   * `at` is when the call was issued; `ms` is result stamp − call stamp, once both are known.
+   * `streaming`: a background shell still producing output — `result` is the output seen so far,
+   * folded in from the agent's BashOutput/TaskOutput polls (see foldBackgroundShells).
+   */
+  | { kind: "tool"; name: string; arg?: string; result?: string; failed?: boolean; diff?: string; at?: number; ms?: number; streaming?: boolean }
   | { kind: "think"; text: string }
   /** A TodoWrite snapshot. `at` is the formatter's wall-clock ms; absent on logs written before it. */
   | { kind: "plan"; items: PlanItem[]; at?: number }
@@ -361,7 +365,84 @@ export function parseTrace(rawLog: string): TraceEvent[] {
     if (text) events.push(youAt === undefined ? { kind: "you", text } : { kind: "you", text, at: youAt });
   }
   flushProse();
-  return dedupe(events).filter((e) => !isMechanism(e));
+  return foldBackgroundShells(dedupe(events).filter((e) => !isMechanism(e)));
+}
+
+type ToolEv = Extract<TraceEvent, { kind: "tool" }>;
+const BG_START_RE = /running in background with ID:\s*([\w.-]+)/i;
+const POLL_TOOLS = new Set(["BashOutput", "TaskOutput"]);
+const KILL_TOOLS = new Set(["KillShell", "KillBash", "TaskStop"]);
+const SECTION_RE = /<(stdout|stderr|output)>\n?([\s\S]*?)\n?<\/(?:stdout|stderr|output)>/g;
+
+/** A poll result → { output, status }. Tagged shape (<status>…</status><stdout>…</stdout>) or plain text. */
+function pollBody(result: string): { output: string; status?: string } {
+  const status = result.match(/<status>\s*(\w+)\s*<\/status>/)?.[1]?.toLowerCase();
+  const parts = [...result.matchAll(SECTION_RE)].map((m) => m[2]);
+  if (parts.length) return { output: parts.join("\n").replace(/\s+$/, ""), status };
+  if (/<\w+>/.test(result) || /^\(?no (new )?output/i.test(result.trim())) return { output: "", status };
+  return { output: result.replace(/\s+$/, ""), status };
+}
+
+/**
+ * A command still running is only visible to us through the agent's own polling: Claude Code runs
+ * `tail -f` / `kubectl logs -f` / a long build as `Bash(run_in_background)` ("Command running in
+ * background with ID: X") and reads it with BashOutput/TaskOutput(X). None of the drivers' CLIs
+ * stream a foreground tool's partial output, so this is the one place partial output exists. Fold
+ * every poll into the call that started the shell: that call's `result` becomes the output so far
+ * and it stays `streaming` until a poll reports it finished or a Kill names it. The polls themselves
+ * and the Kill that ends them are dropped — mechanism; the shell panel is the information (and a
+ * kept Kill row would turn the one-step panel into a two-step group, remounting the live view).
+ */
+export function foldBackgroundShells(events: TraceEvent[]): TraceEvent[] {
+  const shells = new Map<string, ToolEv>();
+  const open: ToolEv[] = [];
+  const out: TraceEvent[] = [];
+  const close = (ev: ToolEv) => {
+    ev.streaming = false;
+    const i = open.indexOf(ev);
+    if (i >= 0) open.splice(i, 1);
+  };
+  for (const e of events) {
+    if (e.kind !== "tool") {
+      out.push(e);
+      continue;
+    }
+    const bg = e.result?.match(BG_START_RE);
+    if (bg && !POLL_TOOLS.has(e.name)) {
+      shells.set(bg[1], e);
+      open.push(e);
+      e.streaming = true;
+      e.result = undefined;
+      e.ms = undefined;
+      out.push(e);
+      continue;
+    }
+    const id = e.arg?.trim();
+    // Older logs carry no shell id on the poll line: fold it only when exactly one shell is open.
+    const shell = id ? shells.get(id) : open.length === 1 ? open[0] : undefined;
+    if (POLL_TOOLS.has(e.name) && shell) {
+      if (e.result !== undefined) {
+        const { output, status } = pollBody(e.result);
+        const prev = shell.result ?? "";
+        // BashOutput returns only what is new; TaskOutput can return the whole output — don't double it.
+        const next = !prev ? output : !output ? prev : output.startsWith(prev) ? output : `${prev}\n${output}`;
+        shell.result = next || undefined;
+        if (status && status !== "running") {
+          close(shell);
+          if (status === "failed") shell.failed = true;
+          if (shell.at !== undefined && e.at !== undefined) shell.ms = e.at - shell.at;
+        }
+      }
+      continue;
+    }
+    if (KILL_TOOLS.has(e.name) && shell) {
+      close(shell);
+      continue;
+    }
+    out.push(e);
+  }
+  for (const ev of shells.values()) if (!ev.streaming) delete ev.streaming;
+  return out;
 }
 
 /**

@@ -3,7 +3,7 @@ import { Check, ChevronRight, Copy } from "lucide-react";
 import { outputStats, termLineKind, tokenizeJson, type JsonToken } from "@/lib/highlight";
 import { cn } from "@/lib/utils";
 import { smartBlock } from "@/components/viz/SmartBlock";
-import { toolOutputLanguage } from "@/lib/viz-tool-output";
+import { liveToolOutputSource, toolOutputLanguage } from "@/lib/viz-tool-output";
 
 /**
  * Colored output on the dark trace ground. Two modes, chosen by the caller:
@@ -131,20 +131,23 @@ export function PanelFold({ open, text, onToggle }: { open: boolean; text: strin
 
 /**
  * A finished tool's printed output, drawn by the visualizer router when it has a recognisable
- * shape (JSON, CSV/fixed-width tables, `git log`, `ls -l`, diffstat, http, stack traces…). Null
- * while live, when too big (lib/viz-tool-output.ts gates it), or when nothing is recognised — the
- * caller then shows the plain terminal. docs/output-visualizers.md "Tool output".
+ * shape (JSON, CSV/fixed-width tables, `git log`, `ls -l`, diffstat, http, stack traces…). While
+ * live only its complete lines are sniffed — never a JSON document still being written. Null when
+ * too big (lib/viz-tool-output.ts gates it) or when nothing is recognised — the caller then shows
+ * the plain terminal. Log streams take the live request view instead (viz/LiveLog.tsx).
+ * docs/output-visualizers.md "Tool output", "Live (streaming)".
  */
 export function useOutputVisual(text: string | undefined, live?: boolean): React.ReactElement | null {
+  const src = React.useMemo(() => (live ? liveToolOutputSource(text) : text), [text, live]);
   return React.useMemo(() => {
-    const lang = toolOutputLanguage(text, { live });
-    if (lang === null) return null;
+    const lang = live ? (src ? "" : null) : toolOutputLanguage(src);
+    if (lang === null || !src) return null;
     try {
-      return smartBlock(lang, text!.replace(/\s+$/, ""));
+      return smartBlock(lang, src.replace(/\s+$/, ""));
     } catch {
       return null;
     }
-  }, [text, live]);
+  }, [src, live]);
 }
 
 /** The small "Visual / Raw" segmented switch above a rendered tool output. */

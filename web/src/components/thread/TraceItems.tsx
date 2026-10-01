@@ -19,6 +19,8 @@ import { McpItem } from "./McpItem";
 import { PanelFold, TraceOutput, VisualRawSwitch, useOutputVisual } from "./TraceOutput";
 import { Lightbox } from "@/components/ui/lightbox";
 import { Collapse } from "@/components/ui/collapse";
+import { LiveLogView, useLiveLog } from "@/components/viz/LiveLog";
+import { liveKind } from "@/lib/viz-live-log";
 
 /**
  * Thread items. Three voices, never confusable:
@@ -257,9 +259,9 @@ export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolea
   React.useEffect(() => {
     if (notable) setOpen(true);
   }, [notable]);
-  const anyRunning = !!live && events.some((e) => !e.result);
+  const anyRunning = !!live && events.some((e) => !e.result || e.streaming);
   const failed = events.filter((e) => e.failed).length;
-  const done = events.filter((e) => !!e.result).length;
+  const done = events.filter((e) => !!e.result && !e.streaming).length;
   const span = groupSpan(events);
   // While working, the group's clock runs from its first stamped call.
   const firstAt = events.find((e) => e.at !== undefined)?.at;
@@ -348,7 +350,7 @@ export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolea
             className="work-surface relative mt-2 max-h-[32rem] overflow-y-auto"
           >
             {events.map((e, i) => {
-              const running = !!live && !e.result;
+              const running = !!live && (!e.result || !!e.streaming);
               const last = i === events.length - 1;
               const state = running ? "running" : e.failed ? "failed" : "done";
               // Step and shell rows carry their own chip; MCP / skill rows get one here.
@@ -401,27 +403,34 @@ function ShellItem({ event, live }: { event: ToolEvent; live?: boolean }) {
   const report = React.useMemo(() => (live ? null : parseTestReport(event.result)), [event.result, live]);
   // Any other finished output with a recognisable shape (a table, JSON, a commit log, `ls -l`…) is
   // drawn — Visual by default, the terminal one click away under "Raw".
-  const visual = useOutputVisual(report ? undefined : event.result, live);
+  // A log stream (access log, levelled lines, JSON-lines logs) draws as a live request view while
+  // the command runs. Once shown it stays this view after the command ends: same element, same
+  // tally, no remount and no replayed entrance.
+  const logSticky = React.useRef(false);
+  const liveLog = useLiveLog(live || logSticky.current ? (event.result ?? "") : "", !live);
+  const isLog = !report && (live || logSticky.current) && liveKind(liveLog) !== null;
+  if (isLog) logSticky.current = true;
+  const generic = useOutputVisual(report || isLog ? undefined : event.result, live);
+  const visual = isLog ? <LiveLogView state={liveLog} live={!!live} /> : generic;
   const [raw, setRaw] = React.useState(false);
   if (!report && visual) {
     return (
       <div className="enter min-w-0 flex flex-col gap-1.5">
         <div className="flex min-w-0 items-center gap-2 pl-1">
           <p className="stamp text-muted-foreground min-w-0 truncate">
-            <span className={cn("mr-1.5 select-none", event.failed ? "text-destructive" : "text-ok")}>$</span>
+            <span className={cn("mr-1.5 select-none", event.failed ? "text-destructive" : live ? "text-live" : "text-ok")}>$</span>
             {event.arg}
           </p>
           <span className="ml-auto flex shrink-0 items-center gap-2">
-            {event.failed && <span className="label text-destructive">failed</span>}
-            <DurationChip event={event} />
+            {live && <Loader2 className="text-live size-3 animate-spin motion-reduce:animate-none" aria-label="running" />}
+            {!live && event.failed && <span className="label text-destructive">failed</span>}
+            <DurationChip event={event} running={live} />
             <VisualRawSwitch raw={raw} onChange={setRaw} />
           </span>
         </div>
-        {raw ? (
-          <TraceOutput text={event.result!} mode="term" className="bg-trace rounded-md border border-white/8" />
-        ) : (
-          <div className="min-w-0 [&>*]:my-0">{visual}</div>
-        )}
+        {/* Both stay mounted: flipping to Raw and back must not reset the live view's tally or scroll. */}
+        <div className={cn("min-w-0 [&>*]:my-0", raw && "hidden")}>{visual}</div>
+        {raw && <TraceOutput text={event.result!} mode="term" className="bg-trace rounded-md border border-white/8" />}
       </div>
     );
   }

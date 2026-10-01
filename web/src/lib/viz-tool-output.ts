@@ -1,4 +1,5 @@
 import { parseProgress, type ProgressRow } from "./viz-extra";
+import { completeLines } from "./viz-stream";
 
 /**
  * Phase 4 — render automatically, no special syntax. Pure gates shared by the trace (tool output)
@@ -50,4 +51,34 @@ export function tableWorthRich(body: string[][]): boolean {
   const cols = Math.max(...body.map((r) => r.length));
   for (let c = 0; c < cols; c++) if (body.every((r) => NUMERIC.test((r[c] ?? "").trim()))) return true;
   return false;
+}
+
+/**
+ * The part of a STILL-RUNNING tool's output worth sniffing (lib/viz-auto.ts, bare): only its
+ * complete lines (the last one may be mid-write), the newest {@link TOOL_OUTPUT_MAX_LINES} of them,
+ * and nothing while fewer than two lines have finished. A JSON document still being written
+ * (starts with `{`/`[` but is not JSON lines) waits for the command to end. Null → stay terminal.
+ */
+export function liveToolOutputSource(text: string | undefined | null): string | null {
+  if (!text) return null;
+  const done = completeLines(text).replace(/\s+$/, "");
+  if (!done.trim()) return null;
+  let lines = done.split("\n");
+  if (lines.length < 2) return null;
+  if (lines.length > TOOL_OUTPUT_MAX_LINES) lines = lines.slice(-TOOL_OUTPUT_MAX_LINES);
+  let out = lines.join("\n");
+  if (out.length > TOOL_OUTPUT_MAX_BYTES) out = out.slice(out.indexOf("\n", out.length - TOOL_OUTPUT_MAX_BYTES) + 1);
+  const s = out.trimStart();
+  if (s.startsWith("{") || s.startsWith("[")) {
+    const jsonLines = out.split("\n").every((l) => {
+      if (!l.trim()) return true;
+      try {
+        return typeof JSON.parse(l) === "object";
+      } catch {
+        return false;
+      }
+    });
+    if (!jsonLines) return null;
+  }
+  return out || null;
 }
