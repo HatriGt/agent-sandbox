@@ -89,6 +89,28 @@ export const DIFF_MAX_BYTES = 16384;
 
 export const AGENT_LOG = "/workspace/.agent.log";
 
+/**
+ * Memory across runs (src/memory-store.ts) — the `remember` grammar, shared by the controller's
+ * parser and the in-box `memory` tool (src/drivers/memory-tool.ts) so both sides agree on it:
+ *
+ *   <!-- remember: <kind> | <text> [| why: <text>] [| replaces: "<old note text>"] -->
+ *
+ * One note per line, several blocks allowed, anywhere in the run (the harvest is incremental). A
+ * line without a kind tag is a `fact` — the Phase 2 grammar, still valid. A playbook may continue
+ * on indented lines (its steps). The marker is an HTML comment so it is invisible when the agent's
+ * prose is rendered as Markdown, like `watch:` and `automate:`.
+ */
+export const MEMORY_KINDS = ["preference", "rule", "fact", "decision", "lesson", "playbook"] as const;
+export type MemoryKind = (typeof MEMORY_KINDS)[number];
+export const REMEMBER_OPEN = "<!-- remember:";
+export const REMEMBER_CLOSE = "-->";
+/** Matches each block; group 1 is the body (one note per line). */
+export const REMEMBER_RE = /<!--\s*remember:\s*([\s\S]*?)-->/g;
+/** The optional leading `<kind> |` of a note line; group 1 is the kind. */
+export const REMEMBER_KIND_RE = new RegExp(`^(${MEMORY_KINDS.join("|")})\\s*\\|\\s*`, "i");
+/** Splits the `| why:` / `| replaces:` fields off a note (the text itself may contain `|`). */
+export const REMEMBER_FIELD_RE = /\s*\|\s*(?=(?:why|replaces)\s*:)/i;
+
 /** Where the dashboard-configured MCP servers are written inside the box for `claude --mcp-config`. */
 export const MCP_CONFIG_PATH = "/root/.agent-mcp.json";
 

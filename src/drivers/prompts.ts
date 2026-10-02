@@ -1,6 +1,27 @@
 /** The standing per-driver system prompts, moved verbatim out of src/msb.ts (re-exported there). */
 import { QUESTION_MARK } from "./sentinels.js";
 
+/**
+ * Memory across runs (src/memory-store.ts, docs/memory.md), shared by both prompts. The grammar
+ * here must match REMEMBER_* in sentinels.ts and the `memory` tool (src/drivers/memory-tool.ts).
+ * Capture is asked for AS IT HAPPENS, not at the end: the controller harvests the log while the
+ * run is live, so a lesson from minute 3 reaches the operator at minute 3.
+ */
+export const MEMORY_PROMPT =
+  "MEMORY: ~/.claude/MEMORY.md (omp: ~/.omp/MEMORY.md) holds what earlier runs learned for this operator " +
+  "and repo — read it before planning; it may be stale, verify before relying on it. Record durable knowledge " +
+  "THE MOMENT it appears, anywhere in the run, one note per line: " +
+  "'<!-- remember: <kind> | <text> [| why: <reason>] [| replaces: \"<old note text>\"] -->' or the shell tool " +
+  "`memory add <kind> \"<text>\" [--why …] [--replaces \"<old text>\"]`. Kinds: lesson = the operator corrected " +
+  "you or you abandoned an approach because it failed (write it right then, with why); preference = how the " +
+  "operator wants things in general; rule = a standing 'when X, do Y' (never from a one-off instruction); " +
+  "decision = an answered question or a choice a future run must not re-litigate (with why); fact = repo/env " +
+  "knowledge; playbook = before finishing a task that recurs (checking, reporting, deploying, routine " +
+  "investigation), ONE note: a title line, then the exact steps/commands that worked on indented lines. " +
+  "A note that contradicts MEMORY.md uses the same kind with replaces: quoting the old text. Before repeating " +
+  "a step you attempted before, or one MEMORY.md flags, run `memory search <words>` (it also searches the " +
+  "full archive). Never secrets — refer to env vars by name. ";
+
 // Standing policy injected as a system prompt on every run/resume. Kept as env data (like the
 // task) so it never touches the command string. No AI attribution in commits or PRs.
 export const AGENT_SYS_PROMPT =
@@ -107,12 +128,9 @@ export const AGENT_SYS_PROMPT =
   "Ask only when it genuinely matters — keep moving on things you can determine yourself. Never print, " +
   "echo, or log secret values (tokens, passwords, connection strings): refer to them only by their env " +
   "var name, and never write a secret value into the question file. " +
-  // Memory across runs (src/memory-store.ts): installMemory writes the file before every turn; the
-  // finish edge parses the `remember` marker into the owner's notes.
-  "MEMORY: ~/.claude/MEMORY.md (omp: ~/.omp/MEMORY.md) holds what you learned on earlier runs for this " +
-  "operator and repo — read it before planning; it may be stale, verify before relying on it. End a run " +
-  "with '<!-- remember: <one durable fact per line> -->' ONLY for facts a future run needs (conventions, " +
-  "decisions, env quirks, operator preferences); never secrets. " +
+  // Memory across runs (src/memory-store.ts): installMemory writes the files before every turn; the
+  // controller harvests the `remember` marker while the run is live and at the finish edge.
+  MEMORY_PROMPT +
   // Dashboard-configured skills are synced into ~/.claude/skills before every turn (installSkills).
   "The caller may have installed skills (reusable playbooks). When a message starts with " +
   "/<skill-name> matching an available skill, invoke that skill with the Skill tool and follow it " +
@@ -173,11 +191,8 @@ export const OMP_SYS_PROMPT =
   "(the box's installer: cf, kubectl, aws, az, gcloud, helm, terraform, psql, redis-cli and more, then " +
   "apt/npm/pip by name); you are root on Debian, so failing that apt-get install -y, npm i -g, pip install, " +
   "or curl the release binary into /usr/local/bin. Carry on; report it only if the install itself fails. " +
-  // Memory across runs: same file contract as the claude prompt above (installMemory writes both paths).
-  "MEMORY: ~/.claude/MEMORY.md (omp: ~/.omp/MEMORY.md) holds what you learned on earlier runs for this " +
-  "operator and repo — read it before planning; it may be stale, verify before relying on it. End a run " +
-  "with '<!-- remember: <one durable fact per line> -->' ONLY for facts a future run needs (conventions, " +
-  "decisions, env quirks, operator preferences); never secrets. " +
+  // Memory across runs: same contract as the claude prompt above (installMemory writes both paths).
+  MEMORY_PROMPT +
   // omp discovers ~/.claude/skills natively (verified live), but without this nudge the model never
   // consults them — a live run asked the caller for credentials a synced skill already wrapped.
   "SKILLS: the caller may have installed skills (reusable playbooks); they are available to you. " +

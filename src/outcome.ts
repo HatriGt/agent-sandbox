@@ -14,6 +14,7 @@ import { costUsd, sumUsage } from "./cost.js";
 import { describeStartedBy, type StartedBy } from "./started-by.js";
 import { parseTestCounts, type TestCounts } from "./test-counts.js";
 import type { FollowupView } from "./pr-followups.js";
+import type { MemoryKind } from "./drivers/sentinels.js";
 
 export interface OutcomePr {
   url: string;
@@ -63,8 +64,10 @@ export interface RunOutcome {
     usd: number | null;
     model: string | null;
   };
-  /** Facts this run left in memory (src/memory-store.ts); absent on outcomes archived before it existed. */
+  /** Notes this run left in memory (src/memory-store.ts); absent on outcomes archived before it existed. */
   remembered?: number;
+  /** The same count by kind; absent on outcomes archived before Memory v2. */
+  rememberedKinds?: Partial<Record<MemoryKind, number>>;
 }
 
 export interface OutcomeInput {
@@ -178,6 +181,7 @@ export function buildOutcome(i: OutcomeInput): RunOutcome {
       model,
     },
     ...(d.remembered ? { remembered: d.remembered } : {}),
+    ...(d.rememberedKinds ? { rememberedKinds: d.rememberedKinds } : {}),
   };
 }
 
