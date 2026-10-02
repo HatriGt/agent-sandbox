@@ -1340,7 +1340,7 @@ export function agentSh(workdir: string, resume: boolean, agent: AgentKind = "cl
     // the whole run — chaining it would skip `claude` entirely and, with DONE_MARK already removed
     // and all output sent to /dev/null, the box would sit at `idle` with the user's message gone.
     // A fresh turn starts with no stale mid-turn mail or delivery receipts (src/drivers/inbox-gate.ts).
-    `rm -f ${DONE_MARK} ${QUESTION_MARK}; ${INBOX_RESET_SH}; echo $ > ${PID_MARK} && ` +
+    `rm -f ${DONE_MARK} ${QUESTION_MARK}; ${INBOX_RESET_SH}; echo $$ > ${PID_MARK} && ` +
     `{ cut -d' ' -f1 /proc/uptime > ${START_MARK} || rm -f ${START_MARK}; }; touch ${RUN_MARK} && ` +
     // pipefail so the recorded exit reflects claude's, not the formatter's. Claude's raw stderr also
     // lands in the log (errors aren't JSON). The formatter appends readable lines to the same log as

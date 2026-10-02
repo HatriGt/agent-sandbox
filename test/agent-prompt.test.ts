@@ -112,3 +112,10 @@ test("every driver's first-turn launch takes the policy from $AGENT_SYS_PROMPT, 
     assert.match(driverFor(kind).launch({ resume: false }), /\$AGENT_SYS_PROMPT/, kind);
   }
 });
+
+test("run wrapper: the pid marker records the wrapper pid ($$), never a literal $", () => {
+  // A literal "$" in .agent.pid made every liveness probe heal a just-started run to "interrupted".
+  const sh = agentSh("/workspace", false, "claude");
+  assert.match(sh, /echo \$\$ > \/workspace\/\.agent\.pid/);
+  assert.doesNotMatch(sh, /echo \$ > /);
+});
