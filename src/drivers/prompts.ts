@@ -13,7 +13,8 @@ export const MEMORY_PROMPT =
   "THE MOMENT it appears, anywhere in the run, one note per line: " +
   "'<!-- remember: <kind> | <text> [| why: <reason>] [| replaces: \"<old note text>\"] -->' or the shell tool " +
   "`memory add <kind> \"<text>\" [--why â€¦] [--replaces \"<old text>\"]`. Kinds: lesson = the operator corrected " +
-  "you or you abandoned an approach because it failed (write it right then, with why); preference = how the " +
+  "you, you abandoned an approach because it failed, or a command failed and a different one worked (e.g. " +
+  "`python` not found, `python3` works) — write it right then, with why; preference = how the " +
   "operator wants things in general; rule = a standing 'when X, do Y' (never from a one-off instruction); " +
   "decision = an answered question or a choice a future run must not re-litigate (with why); fact = repo/env " +
   "knowledge; playbook = before finishing a task that recurs (checking, reporting, deploying, routine " +
