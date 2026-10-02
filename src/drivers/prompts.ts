@@ -8,20 +8,28 @@ import { QUESTION_MARK } from "./sentinels.js";
  * run is live, so a lesson from minute 3 reaches the operator at minute 3.
  */
 export const MEMORY_PROMPT =
-  "MEMORY: ~/.claude/MEMORY.md (omp: ~/.omp/MEMORY.md) holds what earlier runs learned for this operator " +
-  "and repo — read it before planning; it may be stale, verify before relying on it. Record durable knowledge " +
-  "THE MOMENT it appears, anywhere in the run, one note per line: " +
+  "MEMORY: \/.claude/MEMORY.md (omp: \/.omp/MEMORY.md) holds what earlier runs learned for this operator " +
+  "and repo — read it before planning; it may be stale, verify before relying on it. Save ONLY what a " +
+  "future, different task would go better for knowing. The test: would this still matter next week, on " +
+  "another task? The request itself is never a note — 'merge this PR', 'deploy now', 'fix this test' are " +
+  "one-time instructions; do them, don't save them. The standing HOW inside a request is a note: 'always " +
+  "label PRs and title them <type>: <summary>' is a rule even if said while asking you to merge one PR. " +
+  "Also never save: what you just did (that is the reply), task-specific values (this branch, this file, " +
+  "this PR number), anything MEMORY.md already says, guesses. Most runs save nothing; that is correct. " +
+  "When something qualifies, record it THE MOMENT it appears, one note per line: " +
   "'<!-- remember: <kind> | <text> [| why: <reason>] [| replaces: \"<old note text>\"] -->' or the shell tool " +
-  "`memory add <kind> \"<text>\" [--why …] [--replaces \"<old text>\"]`. Kinds: lesson = the operator corrected " +
-  "you, you abandoned an approach because it failed, or a command failed and a different one worked (e.g. " +
-  "`python` not found, `python3` works) � write it right then, with why; preference = how the " +
-  "operator wants things in general; rule = a standing 'when X, do Y' (never from a one-off instruction); " +
-  "decision = an answered question or a choice a future run must not re-litigate (with why); fact = repo/env " +
-  "knowledge; playbook = before finishing a task that recurs (checking, reporting, deploying, routine " +
-  "investigation), ONE note: a title line, then the exact steps/commands that worked on indented lines. " +
-  "A note that contradicts MEMORY.md uses the same kind with replaces: quoting the old text. Before repeating " +
-  "a step you attempted before, or one MEMORY.md flags, run `memory search <words>` (it also searches the " +
-  "full archive). Never secrets — refer to env vars by name. ";
+  "`memory add <kind> \"<text>\" [--why …] [--replaces \"<old text>\"]`. Kinds: preference = how the " +
+  "operator wants things in general (format, tone, tools); rule = a standing 'when X, do Y' or 'always/never " +
+  "X' — only when they state it as general ('always', 'from now on', 'every time', 'in this repo we'), never " +
+  "inferred from one instruction; lesson = the operator corrected how you work, or a command failed and a " +
+  "different one worked (e.g. `python` not found, `python3` works) — write it right then, with why; " +
+  "decision = a choice a future run must not re-litigate (with why); fact = durable repo/env knowledge a " +
+  "newcomer would need; playbook = only for a task type that clearly recurs (checking, reporting, " +
+  "deploying, routine investigation) and took real discovery: ONE note, a title line, then the exact " +
+  "steps/commands that worked on indented lines. Write notes as general instructions ('Label every PR with " +
+  "its area'), not history ('I labelled PR 42'). A note that contradicts MEMORY.md uses the same kind with " +
+  "replaces: quoting the old text. Before repeating a step you attempted before, or one MEMORY.md flags, run " +
+  "`memory search <words>` (it also searches the full archive). Never secrets — refer to env vars by name. ";
 
 // Standing policy injected as a system prompt on every run/resume. Kept as env data (like the
 // task) so it never touches the command string. No AI attribution in commits or PRs.
