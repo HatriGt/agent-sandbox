@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Link, useLocation, useNavigationType } from "react-router";
-import { ArrowRight, Bell, BellOff, ChevronRight, Clock, Flame, Keyboard, Layers, LayoutGrid, LogOut, Menu, Moon, PanelLeftClose, PanelLeftOpen, Pause, Plug, PlugZap, Plus, Search, Shield, Sun, UserRound, WifiOff, Workflow, Zap } from "lucide-react";
+import { ArrowRight, Bell, BellOff, Brain, ChevronRight, Clock, Flame, Keyboard, Layers, LayoutGrid, LogOut, Menu, Moon, PanelLeftClose, PanelLeftOpen, Pause, Plug, PlugZap, Plus, Search, Shield, Sun, UserRound, WifiOff, Workflow, Zap } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { api, type FleetLifecycle, type FleetSnapshot } from "@/lib/api";
 import { POLL_MS, isUp, isVisible, threadSort, threadTitle } from "@/lib/format";
@@ -38,6 +38,7 @@ import { cn } from "@/lib/utils";
 const Sandboxes = React.lazy(() => import("@/components/Sandboxes").then((m) => ({ default: m.Sandboxes })));
 const Integrations = React.lazy(() => import("@/components/Integrations").then((m) => ({ default: m.Integrations })));
 const SkillsPage = React.lazy(() => import("@/components/SkillsPage").then((m) => ({ default: m.SkillsPage })));
+const MemoryPage = React.lazy(() => import("@/components/Memory").then((m) => ({ default: m.MemoryPage })));
 const HarnessesPage = React.lazy(() => import("@/components/HarnessesPage").then((m) => ({ default: m.HarnessesPage })));
 const Automations = React.lazy(() => import("@/components/Automations").then((m) => ({ default: m.Automations })));
 const History = React.lazy(() => import("@/components/History").then((m) => ({ default: m.History })));
@@ -261,6 +262,10 @@ export default function App() {
     go({ view: "skills" });
     setMobileRail(false);
   }, [go]);
+  const showMemory = React.useCallback(() => {
+    go({ view: "memory" });
+    setMobileRail(false);
+  }, [go]);
   const showHarnesses = React.useCallback(() => {
     go({ view: "harnesses" });
     setMobileRail(false);
@@ -291,6 +296,7 @@ export default function App() {
       { id: "automations", label: "Automations", icon: <Workflow />, group: "Go to", run: showAutomations },
       { id: "history", label: "History", hint: "g h", icon: <Clock />, group: "Go to", run: showHistory },
       { id: "skills", label: "Skills", hint: "g s", icon: <Zap />, group: "Go to", run: showSkills },
+      { id: "memory", label: "Memory", icon: <Brain />, group: "Go to", keywords: "notes remembered learned across runs", run: showMemory },
       { id: "harnesses", label: "Harnesses", icon: <Layers />, group: "Go to", keywords: "drivers rules hooks egress budget compare bundle", run: showHarnesses },
       { id: "integrations", label: "Integrations", hint: "g a", icon: <Plug />, group: "Go to", run: showAccounts },
       { id: "account", label: "Account", icon: <UserRound />, group: "Go to", keywords: "settings profile keys notifications", run: showAccount },
@@ -300,7 +306,7 @@ export default function App() {
       { id: "sidebar", label: collapsed ? "Expand sidebar" : "Collapse sidebar", icon: collapsed ? <PanelLeftOpen /> : <PanelLeftClose />, keywords: "rail navigation", run: () => setCollapsed(!collapsed) },
       { id: "keys", label: "Keyboard shortcuts", hint: "?", icon: <Keyboard />, keywords: "help keys", run: () => setShortcuts(true) },
     ],
-    [showFleet, showAutomations, showHistory, showSkills, showHarnesses, showAccounts, showAccount, showAdmin, showConnect, dark, setDark, collapsed, setCollapsed]
+    [showFleet, showAutomations, showHistory, showSkills, showMemory, showHarnesses, showAccounts, showAccount, showAdmin, showConnect, dark, setDark, collapsed, setCollapsed]
   );
 
   React.useEffect(() => {
@@ -430,7 +436,7 @@ export default function App() {
     // hold the box-loading skeleton until the box surfaces (or the cleanup effect routes home).
     // Once the booting pane knows its machine it shares that box's pane key, so the swap to the real
     // Thread is a content change inside one pane — not a fade-out/fade-in remount (the jump-cut).
-    view === "fleet" ? "fleet" : view === "history" ? "history" : view === "automations" ? "automations" : view === "skills" ? "skills" : view === "integrations" ? "integrations" : view === "account" ? "account" : view === "connect" ? "connect" : view === "welcome" ? "welcome" : view === "admin" ? "admin" : route.view === "pr" ? `pr:${route.repo}#${route.number}` : (booting && !selectedBox) || (view === "box" && selected === launched) ? "launch" : selectedBox ? `box:${selectedBox.name}` : view === "box" && selectedRaw ? `box:${selectedRaw.name}` : view === "box" ? "box-loading" : "hub";
+    view === "fleet" ? "fleet" : view === "history" ? "history" : view === "automations" ? "automations" : view === "skills" ? "skills" : view === "memory" ? "memory" : view === "integrations" ? "integrations" : view === "account" ? "account" : view === "connect" ? "connect" : view === "welcome" ? "welcome" : view === "admin" ? "admin" : route.view === "pr" ? `pr:${route.repo}#${route.number}` : (booting && !selectedBox) || (view === "box" && selected === launched) ? "launch" : selectedBox ? `box:${selectedBox.name}` : view === "box" && selectedRaw ? `box:${selectedRaw.name}` : view === "box" ? "box-loading" : "hub";
 
   const reduceMotion = useReducedMotion();
   // Direction-aware pane motion: deeper (hub → page → box) enters from the right on phones, going
@@ -573,6 +579,7 @@ export default function App() {
         <span className="contents" onMouseEnter={prefetchSkills}>
           <NavItem active={view === "skills"} flash={flash === "skills"} onClick={showSkills} icon={<Zap />} label="Skills" shortcut="g s" />
         </span>
+        <NavItem active={view === "memory"} onClick={showMemory} icon={<Brain />} label="Memory" />
         <NavItem active={view === "harnesses"} onClick={showHarnesses} icon={<Layers />} label="Harnesses" />
         <span className="contents" onMouseEnter={prefetchIntegrations}>
           <NavItem active={view === "integrations"} flash={flash === "integrations"} onClick={showAccounts} icon={<Plug />} label="Integrations" shortcut="g a" />
@@ -746,6 +753,7 @@ export default function App() {
               <span className="contents" onMouseEnter={prefetchSkills}>
                 <RailIcon active={view === "skills"} flash={flash === "skills"} onClick={showSkills} icon={<Zap />} label="Skills" shortcut="g s" />
               </span>
+              <RailIcon active={view === "memory"} onClick={showMemory} icon={<Brain />} label="Memory" />
               <RailIcon active={view === "harnesses"} onClick={showHarnesses} icon={<Layers />} label="Harnesses" />
               <span className="contents" onMouseEnter={prefetchIntegrations}>
                 <RailIcon active={view === "integrations"} flash={flash === "integrations"} onClick={showAccounts} icon={<Plug />} label="Integrations" shortcut="g a" />
@@ -811,6 +819,10 @@ export default function App() {
                 ) : view === "skills" ? (
                   <PageEnter className="h-full min-h-0">
                     <SkillsPage onBack={backToRail} />
+                  </PageEnter>
+                ) : view === "memory" ? (
+                  <PageEnter className="h-full min-h-0">
+                    <MemoryPage onBack={backToRail} />
                   </PageEnter>
                 ) : view === "harnesses" ? (
                   <PageEnter className="h-full min-h-0">

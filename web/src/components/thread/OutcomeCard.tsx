@@ -162,6 +162,11 @@ export function OutcomeCard({ outcome: o, className }: { outcome: RunOutcome; cl
               <Link href={`/dashboard/box/${encodeURIComponent(f.box)}`}>{f.line ?? f.subject}</Link>
             </span>
           ))}
+          {o.remembered ? (
+            <span className="text-muted-foreground text-micro">
+              <Link href="/dashboard/memory">Remembered {plural(o.remembered, "thing")}</Link> for future runs
+            </span>
+          ) : null}
         </Col>
 
         <Col title="Can you trust it">
