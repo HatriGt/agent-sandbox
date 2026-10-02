@@ -208,20 +208,45 @@ export interface SkillsResponse {
   skills: SkillView[];
 }
 
-/** A fact an earlier run left for future runs (src/memory-store.ts). */
+/** What a memory note is (src/memory-store.ts): taste, standing instruction, repo knowledge, a choice, a correction, a how-to. */
+export type MemoryKind = "preference" | "rule" | "fact" | "decision" | "lesson" | "playbook";
+/** A note an earlier run left for future runs (src/memory-store.ts). */
 export interface MemoryNote {
   id: string;
+  kind: MemoryKind;
+  /** preference/rule follow the operator everywhere; the rest belong to one repo when known. */
+  scope: "operator" | "repo";
+  /** pending = proposed by a run, awaiting the toast (auto-kept after a while); kept = confirmed. */
+  status: "pending" | "kept";
   text: string;
+  /** Rationale for a decision/lesson — "tried X, failed because Y". */
+  why?: string;
   at: number;
   /** The run (box id) that wrote it. */
   source: string;
   /** owner/name when the note belongs to one repo; absent = global. */
   repo?: string;
   pinned?: boolean;
+  /** The older note this one replaced. */
+  supersedes?: string;
+  /** Set when a newer note replaced this one: it leaves MEMORY.md but stays as history. */
+  until?: number;
+  /** Playbooks: how many runs matched it (promote-to-skill signal). */
+  uses?: number;
+  lastUsed?: number;
 }
 export interface MemoryNotesResponse {
   enabled: boolean;
   notes: MemoryNote[];
+}
+/** A note a running box just produced, carried on the watch snapshot so the thread can show the confirm toast. */
+export interface MemoryNew {
+  id: string;
+  kind: MemoryKind;
+  text: string;
+  why?: string;
+  status: "pending" | "kept";
+  at: number;
 }
 
 /** A saved harness (src/harness.ts). Never carries a key: a provider is referenced by id only. */
@@ -375,6 +400,8 @@ export interface FleetSnapshot {
 
 export interface WatchSnapshot extends Omit<BoxView, "role"> {
   log: string;
+  /** Notes this box produced recently (memory v2); absent on older controllers. */
+  memoryNew?: MemoryNew[];
 }
 
 /** Walk-away notifications: the owner's webhook + which run events fire it. */
@@ -868,9 +895,21 @@ export const api = {
   skillMutate: (body: Record<string, unknown>) => post<SkillsResponse>("/skills.json", body),
   /** Memory across runs: the owner's notes. Not /memory.json, which is the VM's RAM. */
   memoryNotes: (signal?: AbortSignal) => fetch(url("/memory-notes.json"), { headers: authHeaders, signal }).then(parse<MemoryNotesResponse>),
-  memoryNoteUpdate: (body: { id?: string; text?: string; pinned?: boolean; enabled?: boolean }) => post<MemoryNotesResponse>("/memory-notes.json", body),
+  memoryNoteUpdate: (body: { enabled: boolean } | { id: string; text?: string; why?: string; pinned?: boolean; status?: "kept" }) => post<MemoryNotesResponse>("/memory-notes.json", body),
+  /** Add a preference/rule by hand (the composer on the Memory page). */
+  memoryNoteAdd: (add: { kind: MemoryKind; text: string; why?: string; repo?: string }) => post<MemoryNotesResponse>("/memory-notes.json", { add }),
   memoryNoteDelete: (id: string) =>
-    fetch(url("/memory-notes.json"), { method: "DELETE", headers: { ...authHeaders, "Content-Type": "application/json" }, body: JSON.stringify({ id }) }).then(parse<MemoryNotesResponse>),
+    fetch(url("/memory-notes.json", { id }), { method: "DELETE", headers: authHeaders }).then(parse<MemoryNotesResponse>),
+  /** Turn a playbook note into a SKILL.md draft in the skill store. 409 when a skill of that name exists. */
+  memoryPromote: (id: string) => post<{ skill: { name: string }; enabled: boolean; notes: MemoryNote[] }>("/memory-promote.json", { id }),
+  /** Every kept note as one Markdown file (authenticated by header; the caller saves the blob). */
+  memoryExport: async (): Promise<Blob> => {
+    const res = await fetch(url("/memory-export.md"), { headers: authHeaders });
+    if (res.status === 401) signOut();
+    if (!res.ok) throw new ApiError(`Export failed (${res.status})`, res.status);
+    return res.blob();
+  },
+  memoryImport: (markdown: string) => post<MemoryNotesResponse>("/memory-import.json", { markdown }),
   harnesses: (signal?: AbortSignal) => fetch(url("/harnesses.json"), { headers: authHeaders, signal }).then(parse<HarnessesResponse>),
   harnessMutate: (body: Record<string, unknown>) => post<HarnessesResponse & { saved?: string }>("/harnesses.json", body),
   harnessExport: (id: string) =>
@@ -1129,6 +1168,8 @@ export interface RunOutcome {
   };
   /** Facts this run left in memory; absent on older outcomes. */
   remembered?: number;
+  /** The same count split by kind ("2 lessons, 1 playbook"); absent on outcomes archived before memory v2. */
+  rememberedKinds?: Partial<Record<MemoryKind, number>>;
 }
 export interface LedgerRow extends HistoryRun {
   outcome?: RunOutcome | null;
