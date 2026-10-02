@@ -117,6 +117,9 @@ import { archivedDigestOf, checkCompareSide, recordRunHarness, runHarnessOf, ski
 import { registerSkillPickBackend, skillPicksOf, type SkillPick } from "./skill-match.js";
 import { defaultAttemptSpecs, getGroup, groupOfBox, listGroups, makeAttempts, normalizeAttempts, OVERRIDE_WINDOW_MS, specLabel, tieChoices, type AttemptGroup, type AttemptSpec } from "./attempts.js";
 import { registerHarnessRoutes } from "./harness-routes.js";
+import { registerWorkflowRoutes } from "./workflow-routes.js";
+import { makeWorkflowEngine } from "./workflow-engine.js";
+import { firstTask, getWorkflow, type WorkflowDef } from "./workflow.js";
 import { registerSkillSelectionBackend } from "./skill-store.js";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -545,6 +548,12 @@ const captureBeforeMessage = async (box: string): Promise<void> => {
   if (!/CKPT_(OK|HAVE)/.test(r.stdout)) console.error(`[ckpt] pre-message capture on ${box}: ${r.stdout.trim().slice(-200)}`);
 };
 verifyRetrier = makeVerifyRetrier({ resume: resumeQuietly, log: (m) => console.error(m) });
+// Workflows ride the same quiet resume lane and the verify command lane (src/workflow-engine.ts).
+const workflowEngine = makeWorkflowEngine({
+  resume: resumeQuietly,
+  check: (box, command) => deps.verify!(cfg, box, { mode: "command", command }),
+  log: (m) => console.error(m),
+});
 startInboxDelivery({
   inbox,
   read: (s) => watchHub.read(s),
@@ -934,6 +943,11 @@ const lastSeenStatus = new Map<string, boolean>();
  * Cached per box — a sweep polls every box every tick and the link never changes after the start.
  */
 const harnessLineCache = new Map<string, { harness: { id: string; name: string; line: string } } | Record<string, never>>();
+/** The workflow a box is running (or just ran): name, step n/total, one line (src/workflow.ts viewOf). */
+const workflowLineOf = (box: string): { workflow: ReturnType<typeof workflowEngine.viewOf> } | Record<string, never> => {
+  const v = workflowEngine.viewOf(box);
+  return v ? { workflow: v } : {};
+};
 const harnessLineOf = (box: string): { harness: { id: string; name: string; line: string } } | Record<string, never> => {
   const hit = harnessLineCache.get(box);
   if (hit) return hit;
@@ -995,33 +1009,43 @@ const readFleet = makeFleetReader(
           if (ev.kind === "done" || ev.kind === "failed")
             await archiveFinishedRun(ev.box, { withFiles: true, quiet }).catch((e) => console.error(`[archive] ${ev.box}: ${(e as Error).message.slice(0, 200)}`));
         };
-        // Verified outcomes for dashboard runs: a clean finish runs the stored clause BEFORE the
-        // notification so the push can honestly say verified/UNVERIFIED. Failure paths drop the
-        // clause — verification of a failed run would prove nothing.
-        const vplan = ev.kind === "done" || ev.kind === "failed" ? boxVerify.get(ev.box) : undefined;
-        if (vplan) boxVerify.delete(ev.box);
-        if (vplan && ev.kind === "done" && (ev.exitCode ?? 0) === 0 && deps.verify) {
-          const runState = nextRunViews.find((b) => b.name === ev.box)?.runState ?? "done";
-          void deps
-            .verify(cfg, ev.box, vplan)
-            .then((r) => boxVerified.set(ev.box, r))
-            .catch(() => {})
-            // Done means verified: a failed check with retry budget left sends the run back with the
-            // failure instead of stamping it. The clause is re-armed so the next finish is checked
-            // again; the intermediate finish gets no notification and no archive row — the operator
-            // hears once, when the loop ends. Otherwise settle (quiet-aware notify + archive AFTER
-            // verification so the record carries the verified stamp).
-            .then(() => verifyRetrier!.consider(ev.box, boxVerified.get(ev.box), runState))
-            .then((retrying) => {
-              if (retrying) {
-                boxVerify.set(ev.box, vplan);
-                return;
-              }
-              void settle();
-            });
-        } else {
-          void settle();
-        }
+        // Off the sweep: a workflow check may run `npm test` for minutes, and the fleet read is what
+        // the dashboard polls on.
+        void (async () => {
+          // Workflows (src/workflow-engine.ts): a finish that only advances to the next step is the
+          // workflow's business — no notification, no archive row, no verify clause yet. The engine
+          // returns false when the finish is the run's own (no workflow, or it just ended), and the
+          // ordinary path below runs on that one finish.
+          const wfState = ev.kind === "waiting" ? "waiting" : ev.kind === "failed" ? "failed" : "done";
+          if (await workflowEngine.onFinish(ev.box, wfState, ev.exitCode)) return;
+          // Verified outcomes for dashboard runs: a clean finish runs the stored clause BEFORE the
+          // notification so the push can honestly say verified/UNVERIFIED. Failure paths drop the
+          // clause — verification of a failed run would prove nothing.
+          const vplan = ev.kind === "done" || ev.kind === "failed" ? boxVerify.get(ev.box) : undefined;
+          if (vplan) boxVerify.delete(ev.box);
+          if (vplan && ev.kind === "done" && (ev.exitCode ?? 0) === 0 && deps.verify) {
+            const runState = nextRunViews.find((b) => b.name === ev.box)?.runState ?? "done";
+            void deps
+              .verify(cfg, ev.box, vplan)
+              .then((r) => boxVerified.set(ev.box, r))
+              .catch(() => {})
+              // Done means verified: a failed check with retry budget left sends the run back with the
+              // failure instead of stamping it. The clause is re-armed so the next finish is checked
+              // again; the intermediate finish gets no notification and no archive row — the operator
+              // hears once, when the loop ends. Otherwise settle (quiet-aware notify + archive AFTER
+              // verification so the record carries the verified stamp).
+              .then(() => verifyRetrier!.consider(ev.box, boxVerified.get(ev.box), runState))
+              .then((retrying) => {
+                if (retrying) {
+                  boxVerify.set(ev.box, vplan);
+                  return;
+                }
+                void settle();
+              });
+          } else {
+            void settle();
+          }
+        })().catch((e) => console.error(`[finish] ${ev.box}: ${String((e as Error).message ?? e).slice(0, 200)}`));
         // Turn-end checkpoint: the moment a turn settles (done or paused on a question) is the
         // restore point for whatever the operator sends next. Online in-box tar (~1 s, no VM stop)
         // behind the per-box lock so a fast follow-up queues instead of racing the capture.
@@ -1040,6 +1064,7 @@ const readFleet = makeFleetReader(
       ...b,
       ...(titles[b.name] ? { title: titles[b.name] } : {}),
       ...harnessLineOf(b.name),
+      ...workflowLineOf(b.name),
       ...skillPicksView(b.name),
       // The task and any pending question are operator/agent text too — same redaction as the log.
       ...(b.task ? { task: redactor.redact(b.task) } : {}),
@@ -3543,6 +3568,12 @@ registerIntakeRoutes(app, {
 // a harness sets is made durable through run_harness so a resume installs the same skills.
 registerSkillSelectionBackend(skillSelectionBackend(db));
 registerSkillPickBackend(skillPickBackend(db));
+registerWorkflowRoutes(app, {
+  cfg,
+  dashAuthed,
+  ownerOf: (res) => providerOwner(res),
+  clientError: (e) => clientError(e),
+});
 registerHarnessRoutes(app, {
   cfg,
   db,
@@ -3690,6 +3721,18 @@ const delegateOnce = async (body0: Record<string, unknown>, principal: Principal
         return { status: 400, json: { error: (e as Error).message } };
       }
     }
+    // A workflow (src/workflow.ts) rewrites the task to its first step and arms the engine on
+    // success; the operator's typed text is kept as {{task}} and as the thread's title source.
+    let workflow: WorkflowDef | undefined;
+    let workflowCursor = 0;
+    if (body.workflow !== undefined && body.workflow !== null && body.workflow !== "") {
+      if (typeof body.workflow !== "string") return { status: 400, json: { error: "workflow must be a saved workflow id." } };
+      workflow = getWorkflow(body.workflow, hOwner);
+      if (!workflow) return { status: 400, json: { error: "Unknown workflow." } };
+      const f = firstTask(workflow, rawTask);
+      body = { ...body, task: f.task };
+      workflowCursor = f.cursor;
+    }
     let compareSide: "a" | "b" | undefined;
     const compareId = attempt ? attempt.groupId : typeof body.compareId === "string" && body.compareId ? body.compareId : undefined;
     if (compareId && !attempt) {
@@ -3830,6 +3873,7 @@ const delegateOnce = async (body0: Record<string, unknown>, principal: Principal
       if (model) boxModels.set(result.box, model);
       if (provider) boxProviders.set(result.box, provider.label);
       if (verifyPlan) boxVerify.set(result.box, verifyPlan);
+      if (workflow) workflowEngine.arm(result.box, workflow, rawTask, workflowCursor);
       // The retry budget is a harness rule: a hand-typed verify clause without a harness stamps only.
       if (verifyPlan && harness) verifyRetrier?.arm(result.box, autoRetryOf(harness.rules.autoRetry));
       for (const [slug, p] of Object.entries(result.setupDetected ?? {})) {

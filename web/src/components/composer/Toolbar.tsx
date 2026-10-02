@@ -1,8 +1,8 @@
 import * as React from "react";
 import { Link } from "react-router";
-import { ChevronDown, Layers, MoreHorizontal, Plus, RotateCcw, SquareSlash, Zap } from "lucide-react";
+import { Check, ChevronDown, Layers, ListChecks, MoreHorizontal, Plus, RotateCcw, SquareSlash, Zap } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { api, type AgentId } from "@/lib/api";
+import { api, type AgentId, type WorkflowView } from "@/lib/api";
 import { useCached } from "@/lib/cache";
 import { SkillMark } from "@/lib/skillGlyph";
 import { Segmented } from "@/components/ui/segmented";
@@ -25,7 +25,7 @@ import { cn } from "@/lib/utils";
  * returns focus to the trigger, reduced motion keeps only the fade.
  */
 
-export type MenuName = "plus" | "skills" | "harness" | "model" | "more";
+export type MenuName = "plus" | "skills" | "harness" | "workflow" | "model" | "more";
 
 /** One open menu per composer, plus ⌘. / Ctrl+. → the Model menu (pass `hotkey` on one composer per page). */
 export function useComposerMenus(hotkey?: MenuName | false) {
@@ -318,6 +318,47 @@ export function HarnessMenu({ harness, ...shell }: Shell & { harness: NonNullabl
           shell.onOpenChange(false);
         }}
       />
+    </ToolMenu>
+  );
+}
+
+/** Workflow ▾ — runs the task as a chain of steps (prompts and checks) on one machine. */
+export function WorkflowMenu({ list, value, onChange, ...shell }: Shell & { list: WorkflowView[]; value: string | null; onChange: (id: string | null) => void }) {
+  const cur = list.find((w) => w.id === value);
+  const items: (WorkflowView | null)[] = [null, ...list];
+  const rov = useRoving(items.length, Math.max(0, items.findIndex((w) => (w?.id ?? null) === value)));
+  if (!list.length) return null;
+  const pick = (id: string | null) => (onChange(id), shell.onOpenChange(false));
+  return (
+    <ToolMenu
+      {...shell}
+      title="Workflow"
+      trigger={{ icon: <ListChecks />, label: cur ? cur.name : "Workflow", caret: true, title: "Workflow — run the task as steps with checks", menu: "workflow", dot: !!cur }}
+    >
+      <p className="text-faint px-3 pt-1 pb-1 text-micro leading-snug">Steps run in order on the same machine; a failing check is sent back to the agent.</p>
+      <div role="menu" aria-label="Workflows">
+        {items.map((w, i) => (
+          <button
+            key={w?.id ?? "none"}
+            ref={(el) => {
+              rov.refs.current[i] = el;
+            }}
+            type="button"
+            role="menuitemradio"
+            aria-checked={(w?.id ?? null) === value}
+            tabIndex={rov.tabIndex(i)}
+            onKeyDown={rov.onKeyDown(i, (j) => pick(items[j]?.id ?? null))}
+            onClick={() => pick(w?.id ?? null)}
+            className="hover:bg-muted/60 focus-visible:bg-muted/60 flex min-h-9 w-full cursor-pointer items-center gap-2.5 px-3 py-1.5 text-left outline-none transition-colors"
+          >
+            <span className="min-w-0 flex-1">
+              <span className="text-foreground block text-meta font-medium">{w ? w.name : "No workflow"}</span>
+              <span className="text-muted-foreground block truncate text-micro">{w ? `${w.steps.length} step${w.steps.length === 1 ? "" : "s"}${w.description ? ` · ${w.description}` : ""}` : "One turn, as typed"}</span>
+            </span>
+            {(w?.id ?? null) === value && <Check className="text-live size-4 shrink-0" aria-hidden />}
+          </button>
+        ))}
+      </div>
     </ToolMenu>
   );
 }

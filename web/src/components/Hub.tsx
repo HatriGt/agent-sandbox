@@ -23,11 +23,11 @@ import { toast } from "sonner";
 import { RepoPicker, type PickedRepo } from "@/components/RepoPicker";
 import { useModelChoice, type ModelChoice } from "@/components/thread/ModelPicker";
 import { RunOptionChips, type Attempts, type ChipKey, type VerifySpec } from "@/components/thread/RunSettings";
-import { ComposerToolbar, HarnessMenu, ModelMenu, MoreMenu, PlusMenu, SkillsMenu, useComposerMenus } from "@/components/composer/Toolbar";
+import { ComposerToolbar, HarnessMenu, ModelMenu, WorkflowMenu, MoreMenu, PlusMenu, SkillsMenu, useComposerMenus } from "@/components/composer/Toolbar";
 import { SkillChip, SkillMenu } from "@/components/thread/SkillMenu";
 import { slashAt, stripSlashToken, typedSkillToken, type SlashState } from "@/lib/slash";
 import { useCached } from "@/lib/cache";
-import type { HarnessView, SkillView } from "@/lib/api";
+import type { HarnessView, SkillView, WorkflowView } from "@/lib/api";
 import { useProviders } from "@/components/Providers";
 import { useAgentChoice } from "@/components/DriverPicker";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
@@ -261,11 +261,17 @@ export function Hub({
   const [attempts, setAttempts] = React.useState<Attempts>(1);
   const [harness, setHarness] = React.useState<string | null>(null);
   const [harnesses, setHarnesses] = React.useState<HarnessView[]>([]);
+  const [workflow, setWorkflow] = React.useState<string | null>(null);
+  const [workflows, setWorkflows] = React.useState<WorkflowView[]>([]);
   React.useEffect(() => {
     const ctrl = new AbortController();
     api
       .harnesses(ctrl.signal)
       .then((r) => setHarnesses(r.harnesses))
+      .catch(() => {});
+    api
+      .workflows(ctrl.signal)
+      .then((r) => setWorkflows(r.workflows))
       .catch(() => {});
     return () => ctrl.abort();
   }, []);
@@ -483,6 +489,7 @@ export function Hub({
         ...(agent.picked ? { agent: agent.picked, ...(agent.current?.supervised === false ? { allowPartialSupervision: true } : {}) } : {}),
         ...(attempts > 1 ? { attempts } : {}),
         ...(harness ? { harness } : {}),
+        ...(workflow ? { workflow } : {}),
         ...(verify && verifyActive ? { verify: verify.mode === "command" ? { command: verify.text.trim() } : { criterion: verify.text.trim() } } : {}),
       });
       if (res.ok) {
@@ -764,6 +771,7 @@ export function Hub({
                       />
                       <SkillsMenu {...menus.props("skills")} side="bottom" current={skill?.name ?? null} onPick={pickSkill} />
                       <HarnessMenu {...menus.props("harness")} side="bottom" harness={runOptions.harness} />
+                      <WorkflowMenu {...menus.props("workflow")} side="bottom" list={workflows} value={workflow} onChange={setWorkflow} />
                       <ModelMenu {...menus.props("model")} side="bottom" model={runOptions.model} />
                       <MoreMenu {...menus.props("more")} side="bottom" agent={runOptions.agent} attempts={runOptions.attempts} verify={runOptions.verify} />
                     </>

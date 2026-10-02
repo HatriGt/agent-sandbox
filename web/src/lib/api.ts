@@ -43,6 +43,8 @@ export interface BoxView {
   stalled?: boolean;
   /** The saved harness this thread started on, with its one-line summary for the header. */
   harness?: { id: string; name: string; line: string };
+  /** The workflow this thread is running (or just ran): step n/total and what each step did. */
+  workflow?: WorkflowRunView;
   /** Skills the run was pointed at: explicit `/name` from the user, or the controller's auto match. */
   skills?: { name: string; how: "explicit" | "auto" }[];
 }
@@ -268,6 +270,39 @@ export interface MemoryNew {
   area?: string;
   /** The text of the older note this one rewrote (the toast reads "Updated" and shows it struck through). */
   revises?: string;
+}
+
+/** A saved workflow (src/workflow.ts): a task as a short script of agent turns and command checks. */
+export type WorkflowStep =
+  | { kind: "agent"; title?: string; prompt: string; skill?: string }
+  | { kind: "check"; title?: string; command: string; retry: number; feedback?: string };
+export interface WorkflowView {
+  id: string;
+  name: string;
+  description?: string;
+  steps: WorkflowStep[];
+  origin?: { kind: "repo"; repo: string; path: string; ref?: string } | { kind: "manual" };
+  createdAt: number;
+  updatedAt: number;
+}
+export interface WorkflowsResponse {
+  workflows: WorkflowView[];
+  limits: Record<string, number>;
+  /** Where a repository keeps its workflow files (`.agent-sandbox/workflows`). */
+  dir: string;
+  saved?: string;
+  imported?: string[];
+  skipped?: string[];
+}
+export interface WorkflowRunView {
+  id: string;
+  name: string;
+  line: string;
+  state: "running" | "done" | "failed";
+  step: number;
+  total: number;
+  history: Array<{ n: number; kind: "agent" | "check"; title: string; state: "done" | "failed"; attempts?: number; detail?: string }>;
+  failure?: string;
 }
 
 /** A saved harness (src/harness.ts). Never carries a key: a provider is referenced by id only. */
@@ -894,6 +929,8 @@ export const api = {
     verify?: { command: string } | { criterion: string };
     /** A saved harness id: fills the fields this input leaves out (explicit fields win). */
     harness?: string;
+    /** A saved workflow id: the task becomes its first step; later steps and checks run on the finish edge. */
+    workflow?: string;
     compareId?: string;
     compareSide?: "a" | "b";
     /** Run the task N ways in parallel; the best attempt gets the PR. */
@@ -932,6 +969,10 @@ export const api = {
     return res.blob();
   },
   memoryImport: (markdown: string) => post<MemoryNotesResponse>("/memory-import.json", { markdown }),
+  workflows: (signal?: AbortSignal) => fetch(url("/workflows.json"), { headers: authHeaders, signal }).then(parse<WorkflowsResponse>),
+  workflowMutate: (body: Record<string, unknown>) => post<WorkflowsResponse>("/workflows.json", body),
+  workflowPreview: (yaml: string) => post<{ ok: true; workflow: WorkflowView }>("/workflows.json", { action: "preview", yaml }),
+  workflowYaml: (id: string) => fetch(url(`/workflows/yaml.json?id=${encodeURIComponent(id)}`), { headers: authHeaders }).then(parse<{ id: string; yaml: string; filename: string }>),
   harnesses: (signal?: AbortSignal) => fetch(url("/harnesses.json"), { headers: authHeaders, signal }).then(parse<HarnessesResponse>),
   harnessMutate: (body: Record<string, unknown>) => post<HarnessesResponse & { saved?: string }>("/harnesses.json", body),
   harnessExport: (id: string) =>
@@ -1173,7 +1214,8 @@ export interface RunOutcome {
   trust: {
     tests: { runner: string; passed: number; failed: number; skipped: number; source: "verify" | "trace" } | null;
     exitCode: number | null;
-    /** etries: how many times a failed verification sent the run back before this finish. */
+    /** 
+etries: how many times a failed verification sent the run back before this finish. */
     verified: { pass: boolean; mode: string; retries?: number } | null;
     /** The verify command that ran; absent on outcomes archived before it existed. */
     testedWith?: string | null;

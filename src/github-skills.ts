@@ -295,3 +295,37 @@ export async function fetchRepoHarnessDir(
   files.sort((a, b) => a.path.localeCompare(b.path));
   return { ref, files, skipped };
 }
+
+/**
+ * Workflow files (src/workflow.ts): every `*.yaml` / `*.yml` directly under `dir` (default
+ * `.agent-sandbox/workflows`). Small by construction — a workflow is a short script — so an
+ * oversized file is skipped with a reason rather than fetched.
+ */
+export async function fetchRepoWorkflowFiles(
+  owner: string,
+  repo: string,
+  branch: string | undefined,
+  dir: string,
+  maxFileBytes: number,
+  token?: string
+): Promise<{ ref: string; files: Array<{ path: string; content: string }>; skipped: string[] }> {
+  assertRef(owner, repo, branch);
+  const d = dir.replace(/^\/+|\/+$/g, "");
+  assertPath(d, false);
+  const { ref, blobs } = await repoTree(owner, repo, branch, token);
+  const inside = blobs.filter((t) => t.type === "blob" && t.path.startsWith(`${d}/`) && !t.path.slice(d.length + 1).includes("/") && /\.ya?ml$/i.test(t.path));
+  const skipped: string[] = [];
+  const files: Array<{ path: string; content: string }> = [];
+  for (const t of inside.slice(0, 40)) {
+    if ((t.size ?? 0) > maxFileBytes) {
+      skipped.push(`${t.path} (too large)`);
+      continue;
+    }
+    const content = await fetchRepoBlob(owner, repo, t.sha, token);
+    if (content.includes("\0")) skipped.push(`${t.path} (binary)`);
+    else files.push({ path: t.path, content });
+  }
+  if (inside.length > 40) skipped.push(`${inside.length - 40} more files (max 40 per import)`);
+  files.sort((a, b) => a.path.localeCompare(b.path));
+  return { ref, files, skipped };
+}

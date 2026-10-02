@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Link, useLocation, useNavigationType } from "react-router";
-import { ArrowRight, Bell, BellOff, Brain, ChevronRight, Clock, Flame, Keyboard, Layers, LayoutGrid, LogOut, Menu, Moon, PanelLeftClose, PanelLeftOpen, Pause, Plug, PlugZap, Plus, Search, Shield, Sun, UserRound, WifiOff, Workflow, Zap } from "lucide-react";
+import { ArrowRight, Bell, BellOff, Brain, ChevronRight, Clock, Flame, Keyboard, Layers, LayoutGrid, ListChecks, LogOut, Menu, Moon, PanelLeftClose, PanelLeftOpen, Pause, Plug, PlugZap, Plus, Search, Shield, Sun, UserRound, WifiOff, Workflow, Zap } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { api, type FleetLifecycle, type FleetSnapshot } from "@/lib/api";
 import { POLL_MS, isUp, isVisible, threadSort, threadTitle } from "@/lib/format";
@@ -39,6 +39,7 @@ const Sandboxes = React.lazy(() => import("@/components/Sandboxes").then((m) => 
 const Integrations = React.lazy(() => import("@/components/Integrations").then((m) => ({ default: m.Integrations })));
 const SkillsPage = React.lazy(() => import("@/components/SkillsPage").then((m) => ({ default: m.SkillsPage })));
 const MemoryPage = React.lazy(() => import("@/components/Memory").then((m) => ({ default: m.MemoryPage })));
+const WorkflowsPage = React.lazy(() => import("@/components/WorkflowsPage").then((m) => ({ default: m.WorkflowsPage })));
 const HarnessesPage = React.lazy(() => import("@/components/HarnessesPage").then((m) => ({ default: m.HarnessesPage })));
 const Automations = React.lazy(() => import("@/components/Automations").then((m) => ({ default: m.Automations })));
 const History = React.lazy(() => import("@/components/History").then((m) => ({ default: m.History })));
@@ -270,6 +271,10 @@ export default function App() {
     go({ view: "harnesses" });
     setMobileRail(false);
   }, [go]);
+  const showWorkflows = React.useCallback(() => {
+    go({ view: "workflows" });
+    setMobileRail(false);
+  }, [go]);
   const showAutomations = React.useCallback(() => go({ view: "automations" }), [go]);
   const showHistory = React.useCallback(() => {
     go({ view: "history" });
@@ -298,6 +303,7 @@ export default function App() {
       { id: "skills", label: "Skills", hint: "g s", icon: <Zap />, group: "Go to", run: showSkills },
       { id: "memory", label: "Memory", icon: <Brain />, group: "Go to", keywords: "notes remembered learned across runs", run: showMemory },
       { id: "harnesses", label: "Harnesses", icon: <Layers />, group: "Go to", keywords: "drivers rules hooks egress budget compare bundle", run: showHarnesses },
+      { id: "workflows", label: "Workflows", icon: <ListChecks />, group: "Go to", keywords: "steps pipeline checks retry yaml", run: showWorkflows },
       { id: "integrations", label: "Integrations", hint: "g a", icon: <Plug />, group: "Go to", run: showAccounts },
       { id: "account", label: "Account", icon: <UserRound />, group: "Go to", keywords: "settings profile keys notifications", run: showAccount },
       ...(getMe()?.mode === "saas" && getMe()?.role === "admin" ? [{ id: "admin", label: "Admin · users", icon: <Shield />, group: "Go to", keywords: "people members", run: showAdmin }] : []),
@@ -306,7 +312,7 @@ export default function App() {
       { id: "sidebar", label: collapsed ? "Expand sidebar" : "Collapse sidebar", icon: collapsed ? <PanelLeftOpen /> : <PanelLeftClose />, keywords: "rail navigation", run: () => setCollapsed(!collapsed) },
       { id: "keys", label: "Keyboard shortcuts", hint: "?", icon: <Keyboard />, keywords: "help keys", run: () => setShortcuts(true) },
     ],
-    [showFleet, showAutomations, showHistory, showSkills, showMemory, showHarnesses, showAccounts, showAccount, showAdmin, showConnect, dark, setDark, collapsed, setCollapsed]
+    [showFleet, showAutomations, showHistory, showSkills, showMemory, showHarnesses, showWorkflows, showAccounts, showAccount, showAdmin, showConnect, dark, setDark, collapsed, setCollapsed]
   );
 
   React.useEffect(() => {
@@ -581,6 +587,7 @@ export default function App() {
         </span>
         <NavItem active={view === "memory"} onClick={showMemory} icon={<Brain />} label="Memory" />
         <NavItem active={view === "harnesses"} onClick={showHarnesses} icon={<Layers />} label="Harnesses" />
+        <NavItem active={view === "workflows"} onClick={showWorkflows} icon={<ListChecks />} label="Workflows" />
         <span className="contents" onMouseEnter={prefetchIntegrations}>
           <NavItem active={view === "integrations"} flash={flash === "integrations"} onClick={showAccounts} icon={<Plug />} label="Integrations" shortcut="g a" />
         </span>
@@ -755,6 +762,7 @@ export default function App() {
               </span>
               <RailIcon active={view === "memory"} onClick={showMemory} icon={<Brain />} label="Memory" />
               <RailIcon active={view === "harnesses"} onClick={showHarnesses} icon={<Layers />} label="Harnesses" />
+              <RailIcon active={view === "workflows"} onClick={showWorkflows} icon={<ListChecks />} label="Workflows" />
               <span className="contents" onMouseEnter={prefetchIntegrations}>
                 <RailIcon active={view === "integrations"} flash={flash === "integrations"} onClick={showAccounts} icon={<Plug />} label="Integrations" shortcut="g a" />
               </span>
@@ -827,6 +835,10 @@ export default function App() {
                 ) : view === "harnesses" ? (
                   <PageEnter className="h-full min-h-0">
                     <HarnessesPage onBack={backToRail} onOpenBox={(b) => go({ view: "box", name: b })} />
+                  </PageEnter>
+                ) : view === "workflows" ? (
+                  <PageEnter className="h-full min-h-0">
+                    <WorkflowsPage onBack={backToRail} />
                   </PageEnter>
                 ) : view === "integrations" ? (
                   <PageEnter className="h-full min-h-0">

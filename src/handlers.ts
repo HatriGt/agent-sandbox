@@ -138,6 +138,8 @@ export interface HandlerDeps {
       allowDomains?: string[];
       /** A saved harness id (src/harness.ts): fills what the call leaves out; `attempts: 1` runs one plain delegation. */
       harness?: string;
+      /** A saved workflow id (src/workflow.ts): the task becomes step 1; later steps and checks run on the finish edge. */
+      workflow?: string;
       attempts: number;
       attemptSpecs?: Array<{ agent?: string; model?: string; provider?: string; harness?: string }>;
     }
@@ -339,6 +341,14 @@ export function registerTools(
         )
         .optional()
         .describe("Optional per-attempt setup (exactly `attempts` entries). Default: same driver with different models, then other drivers you have providers for."),
+      workflow: z
+        .string()
+        .optional()
+        .describe(
+          "A saved workflow id (Workflows page; wf_…). The task is rendered into the workflow's first step; every later " +
+            "prompt step is sent as a follow-up turn in the same box and every command step runs as a check whose failure " +
+            "is handed back to the agent up to its retry count. Needs source:\"git\"."
+        ),
       harness: z
         .string()
         .optional()
@@ -360,6 +370,7 @@ export function registerTools(
       model,
       agent,
       verify,
+      workflow,
       after,
       carry,
       attempts,
@@ -383,6 +394,7 @@ export function registerTools(
       attempts?: number;
       attemptSpecs?: Array<{ agent?: string; model?: string; provider?: string; harness?: string }>;
       harness?: string;
+      workflow?: string;
     }) => {
       // Validate the verify clause FIRST — a malformed one must be a question before any box work.
       const vp = verifyPlanOf(verify);
@@ -391,8 +403,9 @@ export function registerTools(
       // that is where a saved harness is resolved for the caller and folded in before validation,
       // so an MCP `harness` goes the same way — as a one-attempt delegation — instead of a second copy.
       const wantHarness = typeof harness === "string" && harness.trim() ? harness.trim() : undefined;
-      if ((attempts !== undefined && attempts > 1) || wantHarness) {
-        const what = attempts !== undefined && attempts > 1 ? "attempts" : "harness";
+      const wantWorkflow = typeof workflow === "string" && workflow.trim() ? workflow.trim() : undefined;
+      if ((attempts !== undefined && attempts > 1) || wantHarness || wantWorkflow) {
+        const what = attempts !== undefined && attempts > 1 ? "attempts" : wantHarness ? "harness" : "workflow";
         if (!deps.delegateAttempts) return text(`This entry point does not support \`${what}\`; use the HTTP (remote) MCP endpoint.`);
         if (after !== undefined || patch || repos?.some((r) => r.patch)) return text(`${what} cannot be combined with \`after\` or \`patch\` — the run starts from a clean clone.`);
         if (source === "local") return text(`${what} needs source:"git" (the sandbox clones the repo itself).`);
@@ -408,6 +421,7 @@ export function registerTools(
             ...(verify ? { verify } : {}),
             ...(allowDomains?.length ? { allowDomains } : {}),
             ...(wantHarness ? { harness: wantHarness } : {}),
+            ...(wantWorkflow ? { workflow: wantWorkflow } : {}),
             attempts: attempts ?? 1,
             ...(attemptSpecs ? { attemptSpecs } : {}),
           })
