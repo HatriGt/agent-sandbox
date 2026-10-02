@@ -511,6 +511,31 @@
   animation: breathe 2.4s var(--ease-in-out-sine) infinite;
 }
 
+/* Memory proposal toast: a hairline that drains over the auto-keep window (linear — it is a
+   progress indicator, not motion). Pauses while the pointer or focus is on the toast; under
+   reduced motion it sits still at full width and the countdown is announced in text instead. */
+@keyframes memory-countdown {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+.memory-countdown {
+  transform-origin: left;
+  animation: memory-countdown var(--memory-countdown, 8s) linear forwards;
+}
+[data-paused="true"] .memory-countdown {
+  animation-play-state: paused;
+}
+@media (prefers-reduced-motion: reduce) {
+  .memory-countdown {
+    animation: none;
+    transform: scaleX(1);
+  }
+}
+
 /* Dictation. Live mic = the --live hue, same functional-blue vocabulary as a working machine.
    mic-ring: a soft expanding pulse around the button while listening.
    mic-glow: the composer container border/halo while dictation is active.

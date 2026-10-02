@@ -22,6 +22,13 @@ export function fmtUsd(n: number): string {
 }
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
+/** "2 lessons, 1 playbook" when the outcome knows the kinds; the bare count on older outcomes. */
+const KIND_ORDER = ["lesson", "playbook", "decision", "fact", "preference", "rule"] as const;
+function rememberedLine(o: RunOutcome): string {
+  const parts = KIND_ORDER.filter((k) => (o.rememberedKinds?.[k] ?? 0) > 0).map((k) => plural(o.rememberedKinds![k]!, k));
+  return parts.length ? parts.join(", ") : plural(o.remembered ?? 0, "thing");
+}
+
 /** "✓ verified" / "✓ verified on 2nd try" / "verification failed after 2 tries" (src/digest.ts verifiedLabel). */
 function verifiedText(v: { pass: boolean; retries?: number }): string {
   const tries = (v.retries ?? 0) + 1;
@@ -171,7 +178,7 @@ export function OutcomeCard({ outcome: o, className }: { outcome: RunOutcome; cl
           ))}
           {o.remembered ? (
             <span className="text-muted-foreground text-micro">
-              <Link href="/dashboard/memory">Remembered {plural(o.remembered, "thing")}</Link> for future runs
+              <Link href="/dashboard/memory">Remembered {rememberedLine(o)}</Link> for future runs
             </span>
           ) : null}
         </Col>

@@ -11,6 +11,7 @@ import { SessionContext } from "@/lib/session-context";
 import { friendlyName, isSleeping, POLL_MS, threadTitle } from "@/lib/format";
 import { currentDiskTier, currentMemoryTier, deadlineLabel, deadlineOf, displayState, fmtDuration, offerableTiers, tierGib, usageLevel } from "@/lib/lifecycle";
 import { MemoryBumpCard } from "./MemoryCard";
+import { useMemoryToasts } from "./MemoryToast";
 import { runStats, toMarkdown } from "@/lib/transcript";
 import { contextHealth, lastUsage } from "@/lib/context-health";
 import { splitReplies } from "@/lib/replies";
@@ -184,6 +185,8 @@ export function Thread({
     return () => ctrl.abort();
   }, [sleeping, box.name]);
   const snap = liveSnap ?? (sleeping ? peekWatchCache(box.name) ?? asleepSnap : null);
+  // Memory proposals (lesson/playbook) and auto-saved preferences this box just produced → toasts.
+  useMemoryToasts(snap?.memoryNew);
 
   const events = React.useMemo(() => parseTrace(snap?.log ?? ""), [snap?.log]);
   const groups = React.useMemo(() => groupTrace(events), [events]);
