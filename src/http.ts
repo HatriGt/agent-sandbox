@@ -21,7 +21,8 @@ import { registerTools } from "./handlers.js";
 import { makeBridge } from "./server-bridge.js";
 import { deps as rawDeps, resolveCredsForBox, detectSetupInBox } from "./deps.js";
 import { SETUP_SENTINEL, parseSentinel, type SetupProfile } from "./setup-profile.js";
-import { deleteNote, loadMemoryStore, rememberRun, saveMemoryStore, updateNote, viewMemory } from "./memory-store.js";
+import { addManualNote, deleteNote, exportMemoryMarkdown, getNote, importMemoryMarkdown, loadMemoryStore, playbookToSkill, saveMemoryStore, updateNote, viewMemory, type MemoryStore } from "./memory-store.js";
+import { MemoryHarvester } from "./memory-harvest.js";
 import { deleteSetup, getSetup, listSetups, recordLearned, repoKey, repoSlugFromUrl, saveSetup } from "./setup-store.js";
 import { refillPool, startPoolMaintainer } from "./pool.js";
 import { checkBearer } from "./http-auth.js";
@@ -83,7 +84,7 @@ import { makeCredentialBroker } from "./broker.js";
 import { FILE_INDEX_CAP, fileDetailsCommand, makeFileIndex, parseFileDetails } from "./files.js";
 import { canRevert, captureCmd, checkpointForMessage, listCmd, parseCkptLs, revertCmd, withBoxLock } from "./checkpoint.js";
 import { fetchModels, isAllowedModel } from "./models.js";
-import { exec as execInBox, execWithInput, execWithSecretEnv } from "./msb.js";
+import { exec as execInBox, execWithInput, execWithSecretEnv, boxRepoSlugs } from "./msb.js";
 import { loadStore, saveStore, pickDefaultAccount, upsertAccount, removeAccount, setDefaultAccount } from "./gh-token-store.js";
 import { probeToken } from "./gh-probe.js";
 import { viewAccounts, deviceStart, devicePoll } from "./accounts.js";
@@ -94,7 +95,7 @@ import { listRepoSkills, fetchRepoFile, fetchRepoSkillDir, resolveSkillRepoToken
 import { listClaims, listKept, markKept, unmarkKept } from "./claims.js";
 import { makeRedactor, isPlumbingError } from "./redact.js";
 import { isSecretKey, probeMcpServer } from "./mcp-store.js";
-import type { WatchSnapshot } from "./monitor.js";
+import type { BoxView, WatchSnapshot } from "./monitor.js";
 import { listChanges, readDiff, readFullDiff, fetchPull, fetchPullDetail, forgetPull } from "./changes.js";
 import { loadRunMetas, saveRunMeta, forgetRunMeta } from "./run-memory.js";
 import { readArtifact } from "./artifact.js";
@@ -268,6 +269,8 @@ app.use((req: Request, res: Response, next) => {
       status: res.statusCode,
       ms: Date.now() - started,
       ...auditFields(req.body, req.query),
+      // A route that knows the semantic action (memory.keep, …) names it; the body's field otherwise.
+      ...(typeof res.locals.auditAction === "string" ? { action: res.locals.auditAction as string } : {}),
     };
     console.error(formatAudit(ev));
     try {
@@ -373,7 +376,33 @@ const redactSnap = (snap: WatchSnapshot): WatchSnapshot => ({
   ...(snap.question ? { question: redactor.redact(snap.question) } : {}),
   ...(snap.task ? { task: redactor.redact(snap.task) } : {}),
 });
-const watchHub = new WatchHub({ read: async (s) => redactSnap(await gatherWatch(cfg, s, undefined, { metrics: false })) });
+// Memory v2 incremental harvest (src/memory-harvest.ts). It reads the REDACTED log the hub serves,
+// so a secret that leaked into the log can never become a note. Load→mutate→save runs synchronously
+// (no await in between), so it cannot interleave with a route's locked read-modify-write.
+const memoryHarvester = new MemoryHarvester({ load: (owner) => loadMemoryStore(owner), save: (store, owner) => saveMemoryStore(store, owner) });
+// The box's repo slugs for scoping notes mid-run, probed once per box (the same origin-remote probe
+// installMemory uses). A repo attached later files under the operator until the finish edge, which
+// re-reads the repos from the setup collector.
+const boxRepoCache = new Map<string, Promise<string[]>>();
+const reposOfBox = (box: string): Promise<string[]> => {
+  let p = boxRepoCache.get(box);
+  if (!p) {
+    p = boxRepoSlugs(cfg, box).catch(() => {
+      boxRepoCache.delete(box);
+      return [];
+    });
+    boxRepoCache.set(box, p);
+  }
+  return p;
+};
+/** Harvest a box's log into its owner's memory (idempotent per box); see MemoryHarvester.harvest. */
+const harvestMemory = (box: string, owner: string, log: string, repos: string[], opts: { questions?: Array<{ question: string; answer?: string }>; force?: boolean } = {}) =>
+  memoryHarvester.harvest(box, owner, log, repos, opts);
+const withMemoryNew = (snap: WatchSnapshot, box: string): WatchSnapshot => {
+  const memoryNew = memoryHarvester.memoryNew(box);
+  return memoryNew ? { ...snap, memoryNew } : snap;
+};
+const watchHub = new WatchHub({ read: async (s) => withMemoryNew(redactSnap(await gatherWatch(cfg, s, undefined, { metrics: false })), s) });
 // The dashboard's fleet read: gatherMonitor behind a short shared cache, plus lifecycle config and
 // sleeping (Stopped-but-resumable) boxes merged from memory.
 // Follow-ups typed while the agent is mid-turn wait here and are delivered when the run finishes.
@@ -438,6 +467,9 @@ const retriesOf = (box: string) => verifyRetrier?.retriesOf(box) ?? 0;
     boxVerified.delete(session);
     verifyRetrier?.forget(session);
     dispatcher.forget(session);
+    memoryHarvester.forget(session);
+    boxRepoCache.delete(session);
+    memoryTickAt.delete(session);
   };
 }
 
@@ -476,6 +508,8 @@ const resumeQuietly = (session: string, message: string) => {
   // forward would let the digest, the archive record and the done push all claim "verified" about
   // work nobody verified. Drop it here — the one choke point every resume lane goes through.
   boxVerified.delete(session);
+  // Same for the memory tally: the next finish reports what ITS turn remembered.
+  memoryHarvester.resetRun(session);
   // Whoever triggers it (inbox delivery, broker, an admin), the box runs with its OWNER's integrations.
   // Behind the checkpoint lock: a follow-up landing inside the ~1 s turn-end capture waits for it
   // instead of mutating the workspace mid-tar.
@@ -679,18 +713,57 @@ const collectRepoSetup = async (box: string, owner: string): Promise<Array<{ nam
 };
 
 /**
- * Memory across runs at the finish edge (src/memory-store.ts): the agent's `<!-- remember: … -->`
- * facts and the questions the operator answered become notes for the box's repo (global when it
- * had none or several). Returns how many were stored, for the digest's "Remembered N things".
+ * The live half of the memory harvest, from the fleet sweep: each running box whose log moved (its
+ * lastOutputAt changed) at most once per MEMORY_TICK_GAP_MS, reading the hub's cached snapshot. Also
+ * auto-keeps stale proposals for the owners in view, so a run that finished unwatched still has its
+ * lessons confirmed after the window. Never throws into the sweep.
  */
-const collectMemory = (box: string, owner: string, log: string, digest: RunDigest, repos: string[]): number => {
-  const store = loadMemoryStore(owner);
-  const n = rememberRun(store, { box, log, questions: digest.questions, repos });
-  if (n) {
-    saveMemoryStore(store, owner);
-    console.error(`[memory] ${box}: remembered ${n} note${n === 1 ? "" : "s"}`);
+const MEMORY_TICK_GAP_MS = 5_000;
+const memoryTickAt = new Map<string, { at: number; out: number | undefined }>();
+async function memoryTick(boxes: BoxView[]): Promise<void> {
+  const owners = new Set<string>();
+  const now = Date.now();
+  for (const b of boxes) {
+    if (b.role === "pool-free" || !/^running$/i.test(b.boxStatus)) continue;
+    const owner = ownerOf(db, b.name) ?? OPERATOR_OWNER;
+    owners.add(owner);
+    if (b.runState !== "running" && b.runState !== "waiting") continue;
+    const prev = memoryTickAt.get(b.name);
+    if (prev && (now - prev.at < MEMORY_TICK_GAP_MS || prev.out === b.lastOutputAt)) continue;
+    memoryTickAt.set(b.name, { at: now, out: b.lastOutputAt });
+    try {
+      const snap = await watchHub.read(b.name);
+      if (!snap.log) continue;
+      const { added } = harvestMemory(b.name, owner, snap.log, await reposOfBox(b.name));
+      if (added.length) console.error(`[memory] ${b.name}: remembered ${added.length} note${added.length === 1 ? "" : "s"} live`);
+    } catch (e) {
+      console.error(`[memory] ${b.name}: live harvest failed: ${(e as Error).message.slice(0, 200)}`);
+    }
   }
-  return n;
+  for (const k of [...memoryTickAt.keys()]) if (!boxes.some((b) => b.name === k)) memoryTickAt.delete(k);
+  for (const owner of owners) {
+    try {
+      memoryHarvester.sweepPending(owner);
+    } catch {
+      /* next sweep retries */
+    }
+  }
+}
+
+/**
+ * The finish-edge pass of the memory harvest (src/memory-harvest.ts): whatever the live tick has
+ * not seen yet, plus the questions the operator answered as decisions. Stamps the digest with this
+ * run's total (live + final) by kind.
+ */
+const finishMemory = (box: string, owner: string, log: string, digest: RunDigest, repos: string[]): void => {
+  const { added } = harvestMemory(box, owner, log, repos, { force: true, questions: digest.questions });
+  if (added.length) console.error(`[memory] ${box}: remembered ${added.length} note${added.length === 1 ? "" : "s"} at finish`);
+  const kinds = memoryHarvester.rememberedKinds(box);
+  const total = Object.values(kinds).reduce((a, b) => a + (b ?? 0), 0);
+  if (total) {
+    digest.remembered = total;
+    digest.rememberedKinds = kinds;
+  }
 };
 
 /**
@@ -762,8 +835,7 @@ const archiveFinishedRun = async (box: string, opts: { withFiles: boolean; quiet
   // that is already down keeps its notes too (as global ones — the repo can no longer be asked).
   const repos = up ? await collectRepoSetup(box, runOwner).catch((e) => (console.error(`[setup] ${box}: ${(e as Error).message.slice(0, 200)}`), [])) : [];
   try {
-    const n = collectMemory(box, runOwner, snap.log ?? "", digest, repos.map((r) => r.slug));
-    if (n) digest.remembered = n;
+    finishMemory(box, runOwner, snap.log ?? "", digest, repos.map((r) => r.slug));
   } catch (e) {
     console.error(`[memory] ${box}: ${(e as Error).message.slice(0, 200)}`);
   }
@@ -956,6 +1028,8 @@ const readFleet = makeFleetReader(
     maybePark(boxes);
     // Attempt groups: deadlines and the losers' override window are time-based, so tick them here.
     sweepAttempts();
+    // Memory v2: harvest live runs so a mid-run lesson reaches the thread now, not at the finish.
+    void memoryTick(boxes);
     return boxes.map((b) => ({
       ...b,
       ...(titles[b.name] ? { title: titles[b.name] } : {}),
@@ -2311,51 +2385,130 @@ app.post("/skills.json", async (req: Request, res: Response) => {
   }
 });
 
-// Memory across runs (src/memory-store.ts): the owner's notes, with edit/pin/delete and the on/off
-// switch. Not /memory.json — that one is the VM's RAM.
+// Memory across runs (src/memory-store.ts, docs/memory.md): the owner's notes with keep/edit/pin/
+// forget, manual add, promote-to-skill, Markdown export/import and the on/off switch. Not
+// /memory.json — that one is the VM's RAM. Every mutation is one synchronous load→mutate→save inside
+// the owner's store lock; the harvester is told about keeps/edits/forgets so the thread's toasts
+// (WatchSnapshot.memoryNew) match the store at the next read.
+const memoryOwner = (res: Response): string => {
+  const p = principalOf(res);
+  return p.kind === "user" ? p.userId : OPERATOR_OWNER;
+};
+const memoryView = (store: MemoryStore) => ({ enabled: store.enabled, notes: viewMemory(store) });
 app.get("/memory-notes.json", (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const p = principalOf(res);
-  const owner = p.kind === "user" ? p.userId : OPERATOR_OWNER;
   try {
-    const store = loadMemoryStore(owner);
-    res.json({ enabled: store.enabled, notes: viewMemory(store) });
+    res.json(memoryView(loadMemoryStore(memoryOwner(res))));
   } catch (e) {
     failWith(res, e);
   }
 });
 app.post("/memory-notes.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const p = principalOf(res);
-  const owner = p.kind === "user" ? p.userId : OPERATOR_OWNER;
+  const owner = memoryOwner(res);
   const body = (req.body ?? {}) as Record<string, unknown>;
   try {
     const store = await withStoreLock("memory", async () => {
       const store = loadMemoryStore(owner);
-      if (typeof body.enabled === "boolean") store.enabled = body.enabled;
-      if (typeof body.id === "string") updateNote(store, body.id, { text: body.text, pinned: body.pinned });
+      if (body.enabled !== undefined) {
+        if (typeof body.enabled !== "boolean") throw new Error("enabled must be true or false.");
+        store.enabled = body.enabled;
+      }
+      if (body.add !== undefined) {
+        if (!body.add || typeof body.add !== "object") throw new Error("add must be { kind, text, why?, repo? }.");
+        addManualNote(store, body.add as { kind: unknown; text: unknown; why?: unknown; repo?: unknown });
+        res.locals.auditAction = "memory.add";
+      } else if (body.id !== undefined) {
+        if (typeof body.id !== "string" || !body.id) throw new Error("id must be a note id.");
+        const before = getNote(store, body.id);
+        const wasPending = before?.status === "pending";
+        const note = updateNote(store, body.id, { text: body.text, why: body.why, pinned: body.pinned, status: body.status });
+        const edited = body.text !== undefined || body.why !== undefined;
+        res.locals.auditAction = edited ? "memory.edit" : wasPending && body.status === "kept" ? "memory.keep" : "memory.edit";
+        memoryHarvester.noteChanged(note.id, { status: note.status, ...(edited ? { text: note.text, why: note.why ?? "" } : {}) });
+      }
       saveMemoryStore(store, owner);
       return store;
     });
-    res.json({ enabled: store.enabled, notes: viewMemory(store) });
+    res.json(memoryView(store));
   } catch (e) {
     res.status(400).json({ error: clientError(e) });
   }
 });
 app.delete("/memory-notes.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const p = principalOf(res);
-  const owner = p.kind === "user" ? p.userId : OPERATOR_OWNER;
-  const { id } = (req.body ?? {}) as { id?: string };
+  const owner = memoryOwner(res);
+  // The contract is ?id=; a body id is still honoured for clients built before it.
+  const id = typeof req.query.id === "string" ? req.query.id : typeof (req.body as { id?: unknown } | undefined)?.id === "string" ? String((req.body as { id: string }).id) : "";
   try {
     const store = await withStoreLock("memory", async () => {
       const store = loadMemoryStore(owner);
-      if (id && deleteNote(store, id)) saveMemoryStore(store, owner);
+      if (id && deleteNote(store, id)) {
+        saveMemoryStore(store, owner);
+        memoryHarvester.noteDeleted(id);
+        res.locals.auditAction = "memory.forget";
+      }
       return store;
     });
-    res.json({ enabled: store.enabled, notes: viewMemory(store) });
+    res.json(memoryView(store));
   } catch (e) {
     failWith(res, e);
+  }
+});
+// A playbook that proved itself becomes a first-class skill. The note stays (it is history and
+// still feeds MEMORY.md); the skill is created enabled under a slug of the playbook's title.
+app.post("/memory-promote.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const owner = memoryOwner(res);
+  const id = (req.body as { id?: unknown } | undefined)?.id;
+  try {
+    if (typeof id !== "string" || !id) throw new Error("id must be a note id.");
+    const memStore = loadMemoryStore(owner);
+    const note = getNote(memStore, id);
+    if (!note) throw new Error("That note no longer exists.");
+    const draft = playbookToSkill(note);
+    const skill = normalizeSkill({ ...draft, enabled: true });
+    const clash = await withStoreLock("skills", async () => {
+      const store = await loadSkillStore(cfg);
+      if (store.skills[skill.name]) return true;
+      store.skills[skill.name] = skill;
+      await saveSkillStore(cfg, store);
+      return false;
+    });
+    if (clash) {
+      res.status(409).json({ error: `A skill named "${skill.name}" already exists — rename it or the playbook title first.` });
+      return;
+    }
+    res.locals.auditAction = "memory.promote";
+    res.json({ skill: { name: skill.name }, ...memoryView(memStore) });
+  } catch (e) {
+    res.status(400).json({ error: clientError(e) });
+  }
+});
+app.get("/memory-export.md", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  try {
+    res.type("text/markdown; charset=utf-8").send(exportMemoryMarkdown(loadMemoryStore(memoryOwner(res))));
+  } catch (e) {
+    failWith(res, e);
+  }
+});
+app.post("/memory-import.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const owner = memoryOwner(res);
+  const markdown = (req.body as { markdown?: unknown } | undefined)?.markdown;
+  try {
+    if (typeof markdown !== "string" || !markdown.trim()) throw new Error("markdown must be the exported Markdown text.");
+    if (markdown.length > 1_000_000) throw new Error("That file is too large to import (max 1 MB).");
+    const store = await withStoreLock("memory", async () => {
+      const store = loadMemoryStore(owner);
+      if (importMemoryMarkdown(store, markdown)) saveMemoryStore(store, owner);
+      return store;
+    });
+    res.locals.auditAction = "memory.import";
+    res.json(memoryView(store));
+  } catch (e) {
+    res.status(400).json({ error: clientError(e) });
   }
 });
 

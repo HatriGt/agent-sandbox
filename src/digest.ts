@@ -13,6 +13,7 @@ import type { VerifyResult } from "./verify.js";
 import { AGENT_LABELS, isAgentKind } from "./agent-kind.js";
 import type { StartedBy } from "./started-by.js";
 import type { SkillPick } from "./skill-match.js";
+import type { MemoryKind } from "./drivers/sentinels.js";
 
 export interface DigestFile {
   path: string;
@@ -86,8 +87,10 @@ export interface RunDigest {
   provenance?: DigestProvenance;
   /** One sentence for notifications and list rows. */
   headline: string;
-  /** Notes the finish edge stored in memory (src/memory-store.ts) from this run; absent = none. */
+  /** Notes this run left in memory (src/memory-store.ts), harvested live and at the finish edge; absent = none. */
   remembered?: number;
+  /** The same count by kind ("Remembered 2 lessons, 1 playbook"). */
+  rememberedKinds?: Partial<Record<MemoryKind, number>>;
   /** The outcome card (src/outcome.ts), attached at archive time. */
   outcome?: import("./outcome.js").RunOutcome;
 }

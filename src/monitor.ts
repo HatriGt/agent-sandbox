@@ -268,6 +268,12 @@ export interface WatchSnapshot {
   memUsage?: Usage;
   /** Which coding agent this thread runs on ("claude" | "omp"), from the box's .agent.kind mark. */
   agent?: string;
+  /**
+   * Memory notes this box produced in the last MEMORY_NEW_WINDOW_MS (src/memory-harvest.ts), both
+   * statuses, so the thread can toast them; absent when none. Decorated by the controller, never
+   * read from the box.
+   */
+  memoryNew?: Array<{ id: string; kind: string; text: string; why?: string; status: "pending" | "kept"; at: number }>;
   /** The log tail (already limited to N lines by the caller). */
   log: string;
 }

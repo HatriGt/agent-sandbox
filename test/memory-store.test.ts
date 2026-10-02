@@ -107,10 +107,10 @@ test("rememberRun: per-repo and global caps hold", () => {
   const store = emptyMemoryStore();
   const facts = (n: number, p: string) => Array.from({ length: n }, (_, i) => `${p} ${i}`);
   for (let r = 0; r < 4; r++) rememberRun(store, { box: `b${r}`, log: `<!-- remember:\n${facts(20, `run${r}`).join("\n")}\n-->`, repos: ["o/r"], now: r });
-  assert.equal(store.repos["o/r"].length, MEMORY_LIMITS.maxPerRepo);
+  assert.equal(store.repos["o/r"].length, MEMORY_LIMITS.perKind.fact);
   assert.equal(store.repos["o/r"][0].text, "run2 10"); // the oldest went first
   for (let r = 0; r < 5; r++) rememberRun(store, { box: `g${r}`, log: `<!-- remember:\n${facts(20, `g${r}`).join("\n")}\n-->`, repos: [], now: r });
-  assert.equal(store.global.length, MEMORY_LIMITS.maxGlobal);
+  assert.equal(store.global.length, MEMORY_LIMITS.perKind.fact);
 });
 
 test("updateNote / deleteNote / viewMemory", () => {
@@ -138,7 +138,7 @@ test("updateNote / deleteNote / viewMemory", () => {
   );
 });
 
-test("renderMemoryMd: global + attached repos only, pinned first, null when nothing applies", () => {
+test("renderMemoryMd: operator + attached repos only, pinned in Core, null when nothing applies", () => {
   const store = emptyMemoryStore();
   assert.equal(renderMemoryMd(store, ["o/r"]), null);
   rememberRun(store, { box: "b", log: "<!-- remember:\nolder\nnewer\n-->", repos: ["o/r"], now: 10 });
@@ -147,8 +147,8 @@ test("renderMemoryMd: global + attached repos only, pinned first, null when noth
   rememberRun(store, { box: "b", log: "<!-- remember: everywhere -->", repos: [], now: 12 });
   const md = renderMemoryMd(store, ["O/R"])!;
   assert.match(md, /may be stale/);
-  assert.match(md, /## For this operator \(any repo\)\n\n- everywhere/);
-  assert.match(md, /## O\/R\n\n- newer\n- older/);
+  assert.match(md, /## Core\n\n- \[pinned fact\] newer/);
+  assert.match(md, /- \[fact\] older\n- \[fact\] everywhere/);
   assert.doesNotMatch(md, /other repo/);
   assert.equal(renderMemoryMd({ ...store, enabled: false }, ["o/r"]), null);
 });

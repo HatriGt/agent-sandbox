@@ -14,7 +14,8 @@ import { guardNodeProgram } from "./guard.js";
 import { loadMcpStore, toClaudeMcpConfig } from "./mcp-store.js";
 import { boxSkillSelection, buildSkillsTarBase64, loadSkillStore, skillsForBox, type SkillDef } from "./skill-store.js";
 import { SKILLS_DIR, SKILLS_INDEX, recordSkillPicks, skillTurnHint, skillsIndex } from "./skill-match.js";
-import { loadMemoryStore, renderMemoryMd } from "./memory-store.js";
+import { loadMemoryStore, markPlaybooksUsed, playbookHint, renderMemoryArchive, renderMemoryMd, saveMemoryStore, selectMemory } from "./memory-store.js";
+import { MEMORY_ALL_MD, MEMORY_MD, memorySetup } from "./drivers/memory-tool.js";
 import { repoSlugFromUrl } from "./setup-store.js";
 import { harnessPromptHint, reposPromptHint, type RepoLayout } from "./agent-prompt.js";
 import { secretEnvFlags } from "./secret-env.js";
@@ -923,6 +924,8 @@ export function bootstrapScript(cfg: Config, agent: AgentKind = "claude"): strin
     claudeDriver.formatter(),
     // `need` + the command-not-found hook: a missing CLI installs itself instead of ending the task.
     needSetup(),
+    // `memory`: search what earlier runs learned, add a note mid-run (src/drivers/memory-tool.ts).
+    memorySetup(),
   ];
   // Claude Code is ALWAYS installed (above): the read-only ask lane runs it next to any driver.
   // Another driver additionally needs its own CLI (idempotent when an image baked it), its event
@@ -1208,53 +1211,83 @@ export async function installSkills(cfg: Config, box: string): Promise<SkillDef[
   }
 }
 
-/** Where the memory file lands for each driver (claude reads ~/.claude, omp ~/.omp). */
-const MEMORY_PATHS = ["/root/.claude/MEMORY.md", "/root/.omp/MEMORY.md"] as const;
+/** Where the memory files land for each driver (claude reads ~/.claude, omp ~/.omp). */
+const MEMORY_PATHS = [MEMORY_MD, "/root/.omp/MEMORY.md"] as const;
+const MEMORY_ALL_PATHS = [MEMORY_ALL_MD, "/root/.omp/MEMORY-all.md"] as const;
 
 /**
- * Drop the owner's memory (src/memory-store.ts) into the box before every run/resume: the global
- * notes plus those of the repos checked out here, identified from each dir's origin remote so a
- * resume — which only has a box id — gets the same file as the first turn. Replaced whole every
- * turn, so a dashboard edit or delete reaches the next turn; removed when there is nothing (or
- * memory is off) so a stale file never lingers. Best-effort: memory must never block a run.
+ * The GitHub slugs of the repos checked out in a box, from each dir's origin remote — a resume only
+ * has a box id, so this is how it gets the same memory as the first turn. Exported for the harvest
+ * (src/http.ts), which needs the scope of a note while the run is still going.
  */
-export async function installMemory(cfg: Config, box: string): Promise<void> {
+export async function boxRepoSlugs(cfg: Config, box: string): Promise<string[]> {
+  const r = await exec(cfg, box, `for d in /workspace/*/; do git -C "$d" remote get-url origin 2>/dev/null; done; true`);
+  const repos: string[] = [];
+  for (const line of (r.stdout ?? "").split(/\r?\n/)) {
+    const slug = repoSlugFromUrl(line);
+    if (slug && !repos.includes(slug)) repos.push(slug);
+  }
+  return repos;
+}
+
+/**
+ * Drop the owner's memory (src/memory-store.ts) into the box before every run/resume: MEMORY.md
+ * (Core + the notes relevant to `task`) and MEMORY-all.md (every note, for `memory search`), for
+ * the operator plus the repos checked out here. Replaced whole every turn, so a dashboard edit or
+ * delete reaches the next turn; removed when there is nothing (or memory is off) so a stale file
+ * never lingers. Playbooks the task matched get their use counter bumped, and on the first turn
+ * the returned `hint` names them (it rides the skill-hint env, see skillHintFlags). Best-effort:
+ * memory must never block a run.
+ */
+export async function installMemory(cfg: Config, box: string, task?: string, opts: { firstTurn?: boolean } = {}): Promise<{ hint: string }> {
   try {
     const store = loadMemoryStore();
-    const rm = `rm -f ${MEMORY_PATHS.join(" ")}`;
+    const rm = `rm -f ${[...MEMORY_PATHS, ...MEMORY_ALL_PATHS].join(" ")}`;
     if (!store.enabled || (!store.global.length && !Object.keys(store.repos).length)) {
       await exec(cfg, box, rm);
-      return;
+      return { hint: "" };
     }
-    const r = await exec(cfg, box, `for d in /workspace/*/; do git -C "$d" remote get-url origin 2>/dev/null; done; true`);
-    const repos: string[] = [];
-    for (const line of (r.stdout ?? "").split(/\r?\n/)) {
-      const slug = repoSlugFromUrl(line);
-      if (slug && !repos.includes(slug)) repos.push(slug);
-    }
-    const md = renderMemoryMd(store, repos);
-    if (!md) {
+    const repos = await boxRepoSlugs(cfg, box);
+    const md = renderMemoryMd(store, repos, task);
+    const all = renderMemoryArchive(store, repos);
+    if (!md || !all) {
       await exec(cfg, box, rm);
-      return;
+      return { hint: "" };
     }
-    // The file rides stdin (it can run past what a shell argument safely carries) and is written
+    const matched = selectMemory(store, repos, task).matchedPlaybooks;
+    if (markPlaybooksUsed(matched)) {
+      try {
+        saveMemoryStore(store);
+      } catch {
+        /* a lost counter bump is not worth failing the turn */
+      }
+    }
+    // Each file rides stdin (it can run past what a shell argument safely carries) and is written
     // once, then copied, so both drivers see the identical text.
-    const [first, ...rest] = MEMORY_PATHS;
-    const dirs = MEMORY_PATHS.map((p) => p.replace(/\/[^/]+$/, "")).join(" ");
-    await execWithInput(cfg, box, `mkdir -p ${dirs} && cat > ${first}${rest.map((p) => ` && cp ${first} ${p}`).join("")}`, md);
+    const write = (paths: readonly string[], text: string) => {
+      const [first, ...rest] = paths;
+      const dirs = paths.map((p) => p.replace(/\/[^/]+$/, "")).join(" ");
+      return execWithInput(cfg, box, `mkdir -p ${dirs} && cat > ${first}${rest.map((p) => ` && cp ${first} ${p}`).join("")}`, text);
+    };
+    await Promise.all([write(MEMORY_PATHS, md), write(MEMORY_ALL_PATHS, all)]);
+    return { hint: opts.firstTurn ? playbookHint(matched) : "" };
   } catch (e) {
     console.error(`[memory] could not install memory into ${box}:`, (e as Error).message);
+    return { hint: "" };
   }
 }
 
 /**
  * The per-turn skill env (src/skill-match.ts skillTurnHint): an explicit `/name` on any turn, or the
  * matcher's suggestions on the first. Recorded on the run so the UI can show "Skills: x (auto)".
+ * `extra` rides the same env — the memory playbook hint (installMemory) is the one other first-turn
+ * one-liner, and a second env would mean a second splice point in agentSh for no gain.
  */
-function skillHintFlags(box: string, task: string, skills: SkillDef[], firstTurn: boolean): string[] {
+function skillHintFlags(box: string, task: string, skills: SkillDef[], firstTurn: boolean, extra = ""): string[] {
   const { hint, picks } = skillTurnHint(task, skills, firstTurn);
   recordSkillPicks(box, picks);
-  return hint ? ["-e", `AGENT_SKILL_HINT=${hint}`] : [];
+  const line = [hint, extra].filter(Boolean).join(" ");
+  return line ? ["-e", `AGENT_SKILL_HINT=${line}`] : [];
 }
 
 /**
@@ -1454,15 +1487,15 @@ export async function runAgentTask(
     }
   };
   const prepMarks: string[] = [];
-  const [, , , skills] = await Promise.all([
+  const [, , , skills, memory] = await Promise.all([
     timed("creds", applyGitCredentials(cfg, box, creds)),
     timed("trust", trustWorkspace(cfg, box)),
     timed("mcp", installMcpConfig(cfg, box)),
     timed("skills", installSkills(cfg, box)),
-    timed("memory", installMemory(cfg, box)),
+    timed("memory", installMemory(cfg, box, task, { firstTurn: true })),
   ]);
   const t3 = Date.now();
-  const r = await msb(cfg, ["exec", box, ...env, ...skillHintFlags(box, task, skills, true), "--", "sh", "-lc", agentSh(workdir, false, agent)]);
+  const r = await msb(cfg, ["exec", box, ...env, ...skillHintFlags(box, task, skills, true, memory.hint), "--", "sh", "-lc", agentSh(workdir, false, agent)]);
   console.error(
     `[timing] runAgentTask ${box} taskmark=${t1 - t0}ms bootstrap=${t2 - t1}ms prep=${t3 - t2}ms (${prepMarks.join(" ")}) exec=${Date.now() - t3}ms`
   );
@@ -1637,7 +1670,7 @@ export async function resumeAgentTask(
     trustWorkspace(cfg, box),
     installMcpConfig(cfg, box),
     installSkills(cfg, box),
-    installMemory(cfg, box),
+    installMemory(cfg, box, message),
     exec(cfg, box, streamFmtScript()),
     exec(cfg, box, askHookScript()),
     // A non-claude thread also refreshes ITS formatter and gate (same reasoning: a deploy that

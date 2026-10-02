@@ -64,6 +64,7 @@ export interface SnapshotMeta {
   uptime?: string;
   cpu?: string;
   mem?: string;
+  memoryNew?: WatchSnapshot["memoryNew"];
 }
 
 export function metaOf(s: WatchSnapshot): SnapshotMeta {
@@ -79,6 +80,8 @@ export function metaOf(s: WatchSnapshot): SnapshotMeta {
  * chatter). Vitals still ride along inside whatever `snapshot`/`state`/`done` frame the meaningful
  * fields do trigger; they just no longer trigger a frame on their own. runState / boxStatus /
  * exitCode / question (waiting) are what flip the UI's state, so those still push immediately.
+ * A memory note arriving or changing status (memoryNew) is a toast the viewer must see now, so
+ * it counts too — by id and status, not text, so an edit does not re-toast.
  */
 export function meaningfulStateKey(m: SnapshotMeta): string {
   return JSON.stringify({
@@ -87,6 +90,7 @@ export function meaningfulStateKey(m: SnapshotMeta): string {
     exitCode: m.exitCode ?? null,
     question: m.question ?? null,
     task: m.task ?? null,
+    memoryNew: m.memoryNew?.map((n) => `${n.id}:${n.status}`) ?? null,
   });
 }
 
