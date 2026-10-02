@@ -308,7 +308,8 @@ export function parseNoteLine(line: string): ParsedNote | null {
   }
   const parts = rest.split(REMEMBER_FIELD_RE);
   const text = parts[0].trim();
-  if (!text) return null;
+  // A placeholder or a fragment (the agent quoting the grammar itself) is not knowledge.
+  if (!text || !/[a-z]/i.test(text) || /<(?:kind|text|slug|part\/subpart)>/i.test(text)) return null;
   const note: ParsedNote = { kind, text: clipText(kind, tidyNoteText(text, kind)) };
   for (const p of parts.slice(1)) {
     const m = /^(why|replaces|area|paths|links)\s*:\s*([\s\S]*)$/i.exec(p.trim());

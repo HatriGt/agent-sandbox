@@ -188,3 +188,10 @@ test("the thread row carries the area and whether the note updated an older one"
   assert.equal(mem.length, 1);
   assert.deepEqual(mem[0], { kind: "memory", note: "domain", text: "A refund reopens the order", area: "orders/refunds", updated: true });
 });
+
+test("a note that is only a placeholder or quotes the grammar is dropped", () => {
+  assert.equal(parseNoteLine("fact | …"), null);
+  assert.equal(parseNoteLine("fact | <kind> | <text> [| why: …]"), null);
+  assert.equal(parseNoteLine("domain | Notes use '<!-- remember: <kind> | <text> -->' | area: memory"), null);
+  assert.ok(parseNoteLine("fact | CI runs on Node 20"));
+});
