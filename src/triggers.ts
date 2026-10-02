@@ -328,6 +328,80 @@ export function unattendedPreamble(t: { name: string; kind: TriggerKind; prOnly:
   return lines.join("\n");
 }
 
+/* ───────────────────────────── quiet runs ───────────────────────────── */
+
+/** The agent ends a quiet run with this line when nothing needs the operator. */
+export const QUIET_MARK = "<!-- quiet -->";
+
+/**
+ * Appended after `unattendedPreamble` for a `quiet` automation: a scheduled check that reports only
+ * when something needs a human. The task's first line names what to investigate.
+ */
+export function quietPreamble(task: string): string {
+  const what = escapeValue(task.split("\n")[0].trim()).slice(0, 200) || "the task above";
+  return [
+    `This is a scheduled check. Investigate ${what}. If NOTHING needs the operator, end your reply with the line \`${QUIET_MARK}\` and one line saying what you checked.`,
+    `If something does (an error, a failing check, a decision), report it normally — do not write the quiet marker.`,
+  ].join("\n");
+}
+
+/** The marker in the LAST stretch of the log: a quiet run ends with it; a passing mention earlier is not one. */
+export function hasQuietMark(log: string): boolean {
+  return log.slice(-4000).includes(QUIET_MARK);
+}
+
+const PR_URL_RE = /https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/;
+
+/**
+ * Is this finished run quiet — nothing for the operator? The marker alone is not enough: a run that
+ * ended on a question or opened a pull request has something to show whatever it wrote last.
+ */
+export function isQuietRun(log: string, opts: { question?: string; prOpened?: boolean } = {}): boolean {
+  if (!hasQuietMark(log)) return false;
+  if ((opts.question ?? "").trim()) return false;
+  if (opts.prOpened ?? PR_URL_RE.test(log)) return false;
+  return true;
+}
+
+/* ───────────────────────────── agent-authored automations ───────────────────────────── */
+
+export interface AutomateProposal {
+  cron: string;
+  task: string;
+}
+
+// One marker per line; the task may not contain another marker's close, so an empty task can
+// never swallow the next proposal.
+const AUTOMATE_RE = /<!--\s*automate:\s*([^|\n]+?)\s*\|\s*((?:(?!-->)[^\n])*?)\s*-->/g;
+const MAX_PROPOSALS = 3;
+
+/**
+ * `<!-- automate: <5-field cron> | <task> -->` markers the agent left in its log. Each becomes a
+ * PAUSED trigger the operator approves in Automations. Invalid crons and empty tasks are dropped
+ * (the agent is not a trusted author), duplicates collapse, and a run proposes at most a few.
+ */
+export function parseAutomate(log: string): AutomateProposal[] {
+  const out: AutomateProposal[] = [];
+  const seen = new Set<string>();
+  for (const m of log.matchAll(AUTOMATE_RE)) {
+    const cron = m[1].trim();
+    const task = m[2].replace(/\s+/g, " ").trim().slice(0, 500);
+    if (!task) continue;
+    let source: string;
+    try {
+      source = parseCron(cron).source;
+    } catch {
+      continue;
+    }
+    const key = `${source}\n${task.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ cron: source, task });
+    if (out.length >= MAX_PROPOSALS) break;
+  }
+  return out;
+}
+
 /* ───────────────────────────── GitHub ───────────────────────────── */
 
 const TRUSTED_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
@@ -432,6 +506,8 @@ export interface TriggerInput {
   enabled: boolean;
   concurrency: number;
   prComment: boolean;
+  /** Quiet: a run that ends with QUIET_MARK (nothing needs the operator) sends no notification. */
+  quiet: boolean;
   agent?: string;
   model?: string;
   /** Saved harness (src/harness.ts); the trigger's own agent/model win over it. */
@@ -515,6 +591,7 @@ export function normalizeTrigger(body: unknown): { ok: true; trigger: TriggerInp
       concurrency,
       // Receipt comment: ON by default for GitHub triggers (plan §5); opt-in for the rest.
       prComment: typeof b.prComment === "boolean" ? b.prComment : kind === "github",
+      quiet: b.quiet === true,
       ...(typeof b.agent === "string" && b.agent.trim() ? { agent: b.agent.trim() } : {}),
       ...(typeof b.model === "string" && b.model.trim() ? { model: b.model.trim() } : {}),
       ...(harnessId ? { harnessId } : {}),

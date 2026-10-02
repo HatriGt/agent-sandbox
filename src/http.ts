@@ -34,7 +34,7 @@ import {
 import { githubAuthorizeUrl, githubExchangeCode, githubIdentity } from "./github-oauth.js";
 import { keyFromEnvOrFile, makeSecretBox } from "./secretbox.js";
 import { allBlobs, loadBlob, ownerKey, registerUserStoreBackend, saveBlob, withOwner, OPERATOR_OWNER } from "./user-store.js";
-import { detectTransitions, formatNotification, makeNotifier, toggleFor, type BoxRunView, type NotifyEvent } from "./notify.js";
+import { detectTransitions, formatNotification, makeNotifier, shouldNotify, toggleFor, type BoxRunView, type NotifyEvent } from "./notify.js";
 import { claimNonce, mintNonce, questionChoices, releaseNonce } from "./answer-choice.js";
 import { buildPushMessages, deviceCount, listDeviceTokens, makeOwnerRateCap, pruneToken, registerDevice, sendExpoPush, unregisterDevice } from "./push.js";
 import { fetchPinned } from "./net-guard.js";
@@ -105,7 +105,8 @@ import { registerFollowupRoutes } from "./pr-followup-routes.js";
 import { followupsForBox } from "./pr-followup-store.js";
 import { followupLine, normalizePrefs, type FollowupPrefs } from "./pr-followups.js";
 import { hookAuditPath, hookBodyParser, registerTriggerRoutes } from "./trigger-routes.js";
-import { getTriggerById, logDelivery, pruneDeliveries, type TriggerRow } from "./trigger-store.js";
+import { createTrigger, getTriggerById, listTriggers, logDelivery, pruneDeliveries, type TriggerRow } from "./trigger-store.js";
+import { isQuietRun, parseAutomate } from "./triggers.js";
 import { intakeBodyParser, registerIntakeRoutes } from "./intake-routes.js";
 import { candidateAccounts } from "./gh-token-store.js";
 import { applyHarness, getHarness, harnessSummaryLine, loadHarnesses, normalizeEgress, HARNESS_LIMITS, type HarnessDef } from "./harness.js";
@@ -675,7 +676,47 @@ const collectRepoSetup = async (box: string, owner: string): Promise<void> => {
   }
 };
 
-const archiveFinishedRun = async (box: string, opts: { withFiles: boolean } = { withFiles: true }): Promise<void> => {
+/**
+ * Agent-authored automations (Phase 4): `<!-- automate: <cron> | <task> -->` in a finished run's
+ * log becomes a PAUSED schedule, marked proposed, owned by the run's owner. The box never touches
+ * the controller; the operator enables or dismisses it in Automations. The repo is inherited from
+ * the automation that started the run, when there was one.
+ */
+const proposeAutomations = (box: string, owner: string, log: string, startedBy: StartedBy | undefined): void => {
+  const proposals = parseAutomate(log);
+  if (!proposals.length) return;
+  const parent = startedBy?.kind === "trigger" ? getTriggerById(db, startedBy.triggerId) : undefined;
+  const existing = listTriggers(db, owner);
+  for (const p of proposals) {
+    if (existing.length >= 50) break;
+    // The same proposal twice (a re-run, a chain) is one row, not two.
+    if (existing.some((t) => t.proposed && t.spec.cron === p.cron && t.taskTemplate === p.task)) continue;
+    const name = p.task.split(/[.!?]/)[0].trim().slice(0, 80) || "Proposed check";
+    const { row } = createTrigger(
+      db,
+      secretBox,
+      owner,
+      {
+        name,
+        kind: "schedule",
+        spec: { cron: p.cron, timezone: "UTC" },
+        ...(parent?.repo ? { repo: parent.repo } : {}),
+        taskTemplate: p.task,
+        enabled: false,
+        concurrency: 1,
+        prComment: false,
+        quiet: true,
+      },
+      Date.now(),
+      { proposed: true }
+    );
+    existing.push(row);
+    auditTrigger(owner, "trigger.propose", { trigger: row.id, box });
+    console.error(`[triggers] ${box} proposed ${row.id}: ${p.cron} — ${name}`);
+  }
+};
+
+const archiveFinishedRun = async (box: string, opts: { withFiles: boolean; quiet?: boolean } = { withFiles: true }): Promise<void> => {
   const snap = await watchHub.read(box);
   if (snap.boxStatus === "missing") return;
   // Only a genuinely FINISHED run earns a record. Testing for "not running and not waiting" is not
@@ -710,7 +751,15 @@ const archiveFinishedRun = async (box: string, opts: { withFiles: boolean } = { 
   const archiveId = archiveRun(db, { box, owner: runOwner, digest, ...(diffText ? { diffText } : {}) });
   // A trigger-started run finishing frees its slot, stamps the automation's last result, posts the
   // receipt comment and fires any chain. Only on a NEW record (null = this finish was already seen).
-  if (archiveId !== null) await dispatcher.onRunFinished(box, digest, digest.provenance?.startedBy, archiveId);
+  if (archiveId !== null) await dispatcher.onRunFinished(box, digest, digest.provenance?.startedBy, archiveId, { quiet: opts.quiet === true });
+  // Automations the agent proposed in its sign-off: created paused, pending the operator's approval.
+  if (archiveId !== null) {
+    try {
+      proposeAutomations(box, runOwner, snap.log ?? "", digest.provenance?.startedBy);
+    } catch (e) {
+      console.error(`[triggers] ${box}: proposal failed: ${(e as Error).message.slice(0, 200)}`);
+    }
+  }
   // PR follow-ups: the PRs this run opened become agent PRs; a finished follow-up replies on GitHub.
   if (archiveId !== null) {
     try {
@@ -828,6 +877,21 @@ const readFleet = makeFleetReader(
         .map((b) => ({ name: b.name, runState: b.runState, exitCode: b.exitCode, question: b.question, stalled: b.stalled, lastOutputAt: b.lastOutputAt }));
       for (const ev of detectTransitions(prevRunViews, nextRunViews)) {
         notifyCtx.set(ev.box, { title: titles[ev.box], task: boxes.find((b) => b.name === ev.box)?.task });
+        // Quiet automations: a done edge whose log ends with the quiet marker (and that asked nothing
+        // and opened no PR) is a check that found nothing — no notification, ledger row marked quiet.
+        // Everything else notifies as before. Best-effort: an unreadable log is a normal finish.
+        const quietDone = async (): Promise<boolean> => {
+          if (ev.kind !== "done" || !dispatcher.quietTriggerOf(ev.box)) return false;
+          const snap = await watchHub.read(ev.box).catch(() => undefined);
+          return !!snap && isQuietRun(snap.log ?? "", { question: snap.question });
+        };
+        const settle = async (): Promise<void> => {
+          const quiet = await quietDone();
+          if (shouldNotify(ev, { quiet })) void notifier.notify(ev);
+          // Run history archive: persist the digest at the finish edge (box still up → files listable).
+          if (ev.kind === "done" || ev.kind === "failed")
+            await archiveFinishedRun(ev.box, { withFiles: true, quiet }).catch((e) => console.error(`[archive] ${ev.box}: ${(e as Error).message.slice(0, 200)}`));
+        };
         // Verified outcomes for dashboard runs: a clean finish runs the stored clause BEFORE the
         // notification so the push can honestly say verified/UNVERIFIED. Failure paths drop the
         // clause — verification of a failed run would prove nothing.
@@ -842,22 +906,18 @@ const readFleet = makeFleetReader(
             // Done means verified: a failed check with retry budget left sends the run back with the
             // failure instead of stamping it. The clause is re-armed so the next finish is checked
             // again; the intermediate finish gets no notification and no archive row — the operator
-            // hears once, when the loop ends.
+            // hears once, when the loop ends. Otherwise settle (quiet-aware notify + archive AFTER
+            // verification so the record carries the verified stamp).
             .then(() => verifyRetrier!.consider(ev.box, boxVerified.get(ev.box), runState))
             .then((retrying) => {
               if (retrying) {
                 boxVerify.set(ev.box, vplan);
                 return;
               }
-              void notifier.notify(ev);
-              // Archive AFTER verification so the record carries the verified stamp.
-              void archiveFinishedRun(ev.box, { withFiles: true }).catch((e) => console.error(`[archive] ${ev.box}: ${(e as Error).message.slice(0, 200)}`));
+              void settle();
             });
         } else {
-          void notifier.notify(ev);
-          // Run history archive: persist the digest at the finish edge (box still up → files listable).
-          if (ev.kind === "done" || ev.kind === "failed")
-            void archiveFinishedRun(ev.box, { withFiles: true }).catch((e) => console.error(`[archive] ${ev.box}: ${(e as Error).message.slice(0, 200)}`));
+          void settle();
         }
         // Turn-end checkpoint: the moment a turn settles (done or paused on a question) is the
         // restore point for whatever the operator sends next. Online in-box tar (~1 s, no VM stop)
@@ -3159,6 +3219,8 @@ const followups = makeFollowupEngine({
       enabled: true,
       concurrency: 1,
       prComment: false,
+      quiet: false,
+      proposed: false,
       ...(f.pr.agent ? { agent: f.pr.agent } : {}),
       ...(f.pr.model ? { model: f.pr.model } : {}),
       ...(f.pr.harnessId ? { harnessId: f.pr.harnessId } : {}),
