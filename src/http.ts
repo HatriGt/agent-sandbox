@@ -3350,6 +3350,11 @@ const startTriggerRun = (input: StartRunInput): Promise<{ ok: true; box: string 
             return { ok: false as const, question: (e as Error).message };
           }
         }
+        // A trigger's workflow: the rendered task fills {{task}} in step one; later steps run on the finish edge.
+        const tw = t.workflowId ? getWorkflow(t.workflowId, input.owner) : undefined;
+        if (t.workflowId && !tw) return { ok: false as const, question: "The trigger's workflow no longer exists." };
+        const rawTask = typeof hb.task === "string" ? hb.task : input.task;
+        const tf = tw ? firstTask(tw, rawTask) : undefined;
         const hProvider = typeof hb.provider === "string" ? getProvider(hb.provider, input.owner) : undefined;
         if (typeof hb.provider === "string" && !hProvider) return { ok: false as const, question: "The harness's provider no longer exists." };
         let model: string | undefined;
@@ -3376,7 +3381,7 @@ const startTriggerRun = (input: StartRunInput): Promise<{ ok: true; box: string 
           agent,
           source: "git",
           ...(repos?.length ? { repos } : {}),
-          task: typeof hb.task === "string" ? hb.task : input.task,
+          task: tf ? tf.task : rawTask,
           model,
           ...(hProvider ? { provider: hProvider } : {}),
           ...(hVerify ? { verify: hVerify } : {}),
@@ -3392,6 +3397,7 @@ const startTriggerRun = (input: StartRunInput): Promise<{ ok: true; box: string 
         if (hProvider) boxProviders.set(r.box, hProvider.label);
         if (hVerify) boxVerify.set(r.box, hVerify);
         if (hVerify && th) verifyRetrier?.arm(r.box, autoRetryOf(th.rules.autoRetry));
+        if (tw && tf) workflowEngine.arm(r.box, tw, rawTask, tf.cursor);
         if (th) {
           try {
             recordRunHarness(db, { box: r.box, owner: input.owner, harnessId: th.id, harnessName: th.name, skills: hSkills });

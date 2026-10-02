@@ -60,6 +60,7 @@ function toRow(r: Record<string, any>): TriggerRow {
     ...(r.agent ? { agent: r.agent } : {}),
     ...(r.model ? { model: r.model } : {}),
     ...(r.harness_id ? { harnessId: r.harness_id } : {}),
+    ...(r.workflow_id ? { workflowId: r.workflow_id } : {}),
     lastFired: r.last_fired ?? null,
     nextFire: r.next_fire ?? null,
     lastResult: parse<TriggerResult | null>(r.last_result_json, null),
@@ -94,11 +95,11 @@ export function createTrigger(
   // A proposal is always created paused: the agent suggests, the owner enables.
   const enabled = opts.proposed ? false : t.enabled;
   db.prepare(
-    `INSERT INTO triggers (id, owner, name, kind, spec_json, repo, task_template, enabled, concurrency, pr_comment, quiet, proposed, agent, model, harness_id, secret_enc, next_fire, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO triggers (id, owner, name, kind, spec_json, repo, task_template, enabled, concurrency, pr_comment, quiet, proposed, agent, model, harness_id, workflow_id, secret_enc, next_fire, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id, owner, t.name, t.kind, JSON.stringify(t.spec), t.repo ?? null, t.taskTemplate, enabled ? 1 : 0, t.concurrency,
-    t.prComment ? 1 : 0, t.quiet ? 1 : 0, opts.proposed ? 1 : 0, t.agent ?? null, t.model ?? null, t.harnessId ?? null, box.seal(secret),
+    t.prComment ? 1 : 0, t.quiet ? 1 : 0, opts.proposed ? 1 : 0, t.agent ?? null, t.model ?? null, t.harnessId ?? null, t.workflowId ?? null, box.seal(secret),
     computeNextFire({ ...t, enabled }, now), now, now
   );
   return { row: getTrigger(db, owner, id)!, secret };
@@ -108,11 +109,11 @@ export function updateTrigger(db: Db, owner: string, id: string, t: TriggerInput
   const r = db
     .prepare(
       `UPDATE triggers SET name = ?, kind = ?, spec_json = ?, repo = ?, task_template = ?, enabled = ?, concurrency = ?,
-       pr_comment = ?, quiet = ?, agent = ?, model = ?, harness_id = ?, next_fire = ?, updated_at = ? WHERE id = ? AND owner = ?`
+       pr_comment = ?, quiet = ?, agent = ?, model = ?, harness_id = ?, workflow_id = ?, next_fire = ?, updated_at = ? WHERE id = ? AND owner = ?`
     )
     .run(
       t.name, t.kind, JSON.stringify(t.spec), t.repo ?? null, t.taskTemplate, t.enabled ? 1 : 0, t.concurrency,
-      t.prComment ? 1 : 0, t.quiet ? 1 : 0, t.agent ?? null, t.model ?? null, t.harnessId ?? null, computeNextFire(t, now), now, id, owner
+      t.prComment ? 1 : 0, t.quiet ? 1 : 0, t.agent ?? null, t.model ?? null, t.harnessId ?? null, t.workflowId ?? null, computeNextFire(t, now), now, id, owner
     );
   return r.changes ? getTrigger(db, owner, id) : undefined;
 }

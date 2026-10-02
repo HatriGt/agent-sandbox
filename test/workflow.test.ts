@@ -294,3 +294,25 @@ test("engine: an undeliverable step fails the workflow instead of leaving it arm
   assert.equal(eng.viewOf("b")?.state, "failed");
   assert.match(eng.viewOf("b")?.failure ?? "", /could not run: ssh refused/);
 });
+
+test("triggers carry a workflow id through validation and the store", async () => {
+  const crypto = await import("node:crypto");
+  const { normalizeTrigger } = await import("../src/triggers.ts");
+  const { openMemoryDb } = await import("../src/db.ts");
+  const { makeSecretBox } = await import("../src/secretbox.ts");
+  const { createTrigger, getTrigger, updateTrigger } = await import("../src/trigger-store.ts");
+  const base = { name: "Nightly", kind: "schedule", taskTemplate: "tidy up", spec: { cron: "0 2 * * *" } };
+  const ok = normalizeTrigger({ ...base, workflowId: "wf_abcdef123" });
+  assert.ok(ok.ok, JSON.stringify(ok));
+  assert.equal(ok.ok && ok.trigger.workflowId, "wf_abcdef123");
+  assert.equal(normalizeTrigger({ ...base, workflowId: "nope" }).ok, false);
+  const none = normalizeTrigger(base);
+  assert.ok(none.ok && none.trigger.workflowId === undefined);
+
+  const db = openMemoryDb();
+  const box = makeSecretBox(crypto.randomBytes(32));
+  const { row } = createTrigger(db, box, "u1", ok.ok ? ok.trigger : (null as never));
+  assert.equal(getTrigger(db, "u1", row.id)?.workflowId, "wf_abcdef123");
+  updateTrigger(db, "u1", row.id, none.ok ? none.trigger : (null as never));
+  assert.equal(getTrigger(db, "u1", row.id)?.workflowId, undefined);
+});

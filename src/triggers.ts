@@ -512,6 +512,8 @@ export interface TriggerInput {
   model?: string;
   /** Saved harness (src/harness.ts); the trigger's own agent/model win over it. */
   harnessId?: string;
+  /** Saved workflow (src/workflow.ts): the rendered task becomes its first step. */
+  workflowId?: string;
 }
 
 const REPO_RE = /^[\w.-]+\/[\w.-]+$/;
@@ -575,6 +577,10 @@ export function normalizeTrigger(body: unknown): { ok: true; trigger: TriggerInp
   if (b.harnessId !== undefined && b.harnessId !== null && b.harnessId !== "" && !(typeof b.harnessId === "string" && /^hrn_[\w-]{6,40}$/.test(b.harnessId))) {
     return { ok: false, error: "harnessId is not a saved harness id" };
   }
+  if (b.workflowId !== undefined && b.workflowId !== null && b.workflowId !== "" && !(typeof b.workflowId === "string" && /^wf_[\w-]{6,40}$/.test(b.workflowId))) {
+    return { ok: false, error: "workflowId is not a saved workflow id" };
+  }
+  const workflowId = typeof b.workflowId === "string" && b.workflowId ? b.workflowId : undefined;
   // Alert presets default to the built-in Incident responder harness (the owner can pick another).
   const harnessId =
     typeof b.harnessId === "string" && /^hrn_[\w-]{6,40}$/.test(b.harnessId) ? b.harnessId : spec.preset && b.harnessId === undefined ? INCIDENT_HARNESS_ID : undefined;
@@ -595,6 +601,7 @@ export function normalizeTrigger(body: unknown): { ok: true; trigger: TriggerInp
       ...(typeof b.agent === "string" && b.agent.trim() ? { agent: b.agent.trim() } : {}),
       ...(typeof b.model === "string" && b.model.trim() ? { model: b.model.trim() } : {}),
       ...(harnessId ? { harnessId } : {}),
+      ...(workflowId ? { workflowId } : {}),
     },
   };
 }

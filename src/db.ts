@@ -369,6 +369,10 @@ const MIGRATIONS: string[] = [
   ALTER TABLE triggers ADD COLUMN proposed INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE trigger_delivery_log ADD COLUMN quiet INTEGER;
   `,
+  `
+  -- A trigger can run a saved workflow (src/workflow.ts): its task fills {{task}} in step one.
+  ALTER TABLE triggers ADD COLUMN workflow_id TEXT;
+  `,
 ];
 
 export function openDb(dataDir: string): Db {

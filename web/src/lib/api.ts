@@ -1126,6 +1126,8 @@ export interface AutomationDraft {
   agent?: string;
   model?: string;
   harnessId?: string;
+  /** Saved workflow id: the rendered task fills {{task}} in its first step. */
+  workflowId?: string;
   /** Write-only: the vendor's signing secret (Sentry client secret, PagerDuty webhook secret, Datadog header token). */
   signingSecret?: string;
 }

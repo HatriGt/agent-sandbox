@@ -4,6 +4,7 @@ import type { LucideIcon } from "lucide-react";
 import { toast } from "sonner";
 import { api, type AlertPreset, type Automation, type AutomationDelivery, type AutomationDraft, type AutomationKind, type GithubEvent } from "@/lib/api";
 import { fmtAgo } from "@/lib/format";
+import { useCached } from "@/lib/cache";
 import { Button } from "@/components/ui/button";
 import { ArmButton } from "@/components/ui/arm-button";
 import { Switch } from "@/components/ui/switch";
@@ -327,6 +328,7 @@ function toDraft(a: Automation): AutomationDraft {
     ...(a.agent ? { agent: a.agent } : {}),
     ...(a.model ? { model: a.model } : {}),
     ...(a.harnessId ? { harnessId: a.harnessId } : {}),
+    ...(a.workflowId ? { workflowId: a.workflowId } : {}),
   };
 }
 
@@ -356,8 +358,39 @@ function LastResult({ a, onOpenBox }: { a: Automation; onOpenBox: (box: string) 
   );
 }
 
+function useWorkflowList() {
+  return useCached("workflows", (signal) => api.workflows(signal)).data?.workflows ?? [];
+}
+
+function useWorkflowName(id: string | undefined): string | undefined {
+  const list = useWorkflowList();
+  return id ? (list.find((w) => w.id === id)?.name ?? "missing") : undefined;
+}
+
+/** Run the task as a saved workflow: steps and checks on the same machine (src/workflow.ts). */
+function WorkflowPick({ value, onChange }: { value: string | undefined; onChange: (id: string | undefined) => void }) {
+  const list = useWorkflowList();
+  if (!list.length && !value) return null;
+  const cur = list.find((w) => w.id === value);
+  return (
+    <label className="block">
+      <Label hint="optional — the task fills {{task}} in step one">Workflow</Label>
+      <select className={field} value={value ?? ""} onChange={(e) => onChange(e.target.value || undefined)}>
+        <option value="">None — one run, as written</option>
+        {value && !cur && <option value={value}>Missing workflow — pick another</option>}
+        {list.map((w) => (
+          <option key={w.id} value={w.id}>
+            {w.name} · {w.steps.length} step{w.steps.length === 1 ? "" : "s"}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 function AutomationRow({ a, onEdit, onToggle, onOpenBox }: { a: Automation; onEdit: () => void; onToggle: (on: boolean) => void; onOpenBox: (box: string) => void }) {
   const Glyph = GLYPH[a.kind];
+  const wf = useWorkflowName(a.workflowId);
   return (
     <div role="listitem" className={cn("group relative flex items-center gap-3 border-b px-4 py-3 transition-colors last:border-b-0 hover:bg-muted/50", !a.enabled && "opacity-70")}>
       <button type="button" onClick={onEdit} aria-label={`Edit ${a.name}`} className="focus-visible:ring-ring absolute inset-0 cursor-pointer focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset" />
@@ -366,7 +399,10 @@ function AutomationRow({ a, onEdit, onToggle, onOpenBox }: { a: Automation; onEd
       </span>
       <span className="min-w-0 flex-1">
         <span className="text-foreground block truncate text-meta font-medium">{a.name}</span>
-        <span className="text-muted-foreground mt-0.5 block truncate text-micro">{a.when}</span>
+        <span className="text-muted-foreground mt-0.5 block truncate text-micro">
+          {a.when}
+          {wf ? ` · workflow: ${wf}` : ""}
+        </span>
         <span className="text-muted-foreground mt-0.5 flex items-center gap-x-2 text-micro">
           <LastResult a={a} onOpenBox={onOpenBox} />
           {a.quiet && a.counts && (
@@ -766,6 +802,8 @@ function Editor({
           )}
         </div>
       </div>
+
+      <WorkflowPick value={d.workflowId} onChange={(workflowId) => set({ workflowId })} />
 
       <div className="flex flex-col gap-3 rounded-lg border px-3 py-3">
         <p className="label text-muted-foreground">Guardrails</p>
