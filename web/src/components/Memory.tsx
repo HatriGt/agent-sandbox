@@ -688,6 +688,9 @@ function NoteRow({
   const [editing, setEditing] = React.useState(false);
   const [stepsOpen, setStepsOpen] = React.useState(false);
   const stepsId = React.useId();
+  const [historyOpen, setHistoryOpen] = React.useState(false);
+  const historyId = React.useId();
+  const history = note.history ?? [];
   const [draft, setDraft] = React.useState(note.text);
   const kb = !isOperatorKind(note.kind);
   const [dArea, setDArea] = React.useState(note.area ?? "");
@@ -823,6 +826,46 @@ function NoteRow({
                 </Button>
               )}
             </p>
+          )}
+          {history.length > 0 && (
+            <div className="mt-1">
+              <button
+                type="button"
+                onClick={() => setHistoryOpen((v) => !v)}
+                aria-expanded={historyOpen}
+                aria-controls={historyId}
+                className="text-faint hover:text-foreground focus-visible:ring-ring inline-flex cursor-pointer items-center gap-1 rounded-sm text-micro focus-visible:ring-2 focus-visible:outline-none"
+              >
+                <ChevronRight className={cn("size-3 transition-transform motion-reduce:transition-none", historyOpen && "rotate-90")} aria-hidden />
+                <History className="size-3" aria-hidden />
+                {plural(history.length, "earlier version")}
+              </button>
+              <Collapse open={historyOpen}>
+                <ol id={historyId} className="border-border mt-1.5 ml-1.5 flex flex-col gap-1.5 border-l pl-3">
+                  {history.map((v) => (
+                    <li key={v.id} className="min-w-0">
+                      <p className="text-muted-foreground text-meta leading-snug break-words">
+                        <Inline text={noteHeadline(v.text)} />
+                      </p>
+                      <p className="text-faint mt-0.5 text-micro tabular-nums">
+                        {v.source && v.source !== "operator" && v.source !== "you" ? (
+                          <>
+                            from{" "}
+                            <a href={`/dashboard/box/${encodeURIComponent(v.source)}`} className="hover:text-foreground focus-visible:ring-ring rounded-sm underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none">
+                              {friendlyName(v.source)}
+                            </a>
+                          </>
+                        ) : (
+                          "added by you"
+                        )}{" "}
+                        · {fmtAgo(Math.floor(v.at / 1000))}
+                        {v.until != null && ` · replaced ${fmtAgo(Math.floor(v.until / 1000))}`}
+                      </p>
+                    </li>
+                  ))}
+                </ol>
+              </Collapse>
+            </div>
           )}
           {pending && (
             <div className="mt-1.5 flex items-center gap-1">

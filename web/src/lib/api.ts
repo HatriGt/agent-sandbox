@@ -240,6 +240,18 @@ export interface MemoryNote {
   links?: string[];
   /** Set when a later run changed code the note is anchored to; cleared when reaffirmed or marked verified. */
   stale?: { at: number; box: string; paths: string[] };
+  /** Earlier versions this note replaced, the one it directly replaced first (only on revised notes; capped at 10). */
+  history?: MemoryNoteVersion[];
+}
+/** One earlier version of a note (see MemoryNote.history). */
+export interface MemoryNoteVersion {
+  id: string;
+  text: string;
+  why?: string;
+  at: number;
+  source: string;
+  /** When this version was superseded. */
+  until?: number;
 }
 export interface MemoryNotesResponse {
   enabled: boolean;
@@ -254,8 +266,8 @@ export interface MemoryNew {
   status: "pending" | "kept";
   at: number;
   area?: string;
-  /** The note rewrote an older one (the toast reads "Updated"). */
-  revises?: boolean;
+  /** The text of the older note this one rewrote (the toast reads "Updated" and shows it struck through). */
+  revises?: string;
 }
 
 /** A saved harness (src/harness.ts). Never carries a key: a provider is referenced by id only. */

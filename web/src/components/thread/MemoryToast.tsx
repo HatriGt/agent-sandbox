@@ -169,7 +169,7 @@ function ProposalToast({ note, toastId }: { note: MemoryNew; toastId: string | n
     if (!settled.has(note.id)) showProposal(note, editing ? "edit" : "view");
   }, [editing, note]);
 
-  const label = note.revises
+  const label = note.revises !== undefined
     ? `Updated${note.area ? ` · ${note.area}` : ""}`
     : note.kind === "playbook"
       ? "Playbook to remember"
@@ -223,8 +223,13 @@ function ProposalToast({ note, toastId }: { note: MemoryNew; toastId: string | n
             />
           ) : (
             <>
+              {note.revises && (
+                <p className="text-faint mt-0.5 break-words line-clamp-2 line-through decoration-faint" aria-label={`Was: ${note.revises}`}>
+                  {note.revises}
+                </p>
+              )}
               <p className="text-foreground mt-0.5 whitespace-pre-line break-words">{note.text}</p>
-              {note.why && <p className="text-muted-foreground mt-0.5 text-micro">{note.why}</p>}
+              {note.why && !(note.revises && note.why.startsWith("Revises: ")) && <p className="text-muted-foreground mt-0.5 text-micro">{note.why}</p>}
             </>
           )}
           <div className="mt-2 flex items-center gap-1">

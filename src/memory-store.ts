@@ -687,6 +687,36 @@ export function getNote(store: MemoryStore, id: string): MemoryNote | undefined 
   return hit ? hit.list[hit.index] : undefined;
 }
 
+/** One earlier version of a note, as the dashboard shows it under "N earlier versions". */
+export interface NoteHistoryEntry {
+  id: string;
+  text: string;
+  why?: string;
+  at: number;
+  source: string;
+  /** When this version was superseded. */
+  until?: number;
+}
+
+/**
+ * The earlier versions of a note, newest first (the one it directly replaced comes first, the oldest
+ * last), following `supersedes` links. A note that never replaced anything has `[]`. Pure; the walk
+ * stops at a missing note (history evicted) or a cycle, and at `max` entries.
+ */
+export function noteHistory(store: MemoryStore, id: string, max = 10): NoteHistoryEntry[] {
+  const out: NoteHistoryEntry[] = [];
+  const seen = new Set<string>([id]);
+  let cur = getNote(store, id);
+  while (cur?.supersedes && out.length < max) {
+    const prev = getNote(store, cur.supersedes);
+    if (!prev || seen.has(prev.id)) break;
+    seen.add(prev.id);
+    out.push({ id: prev.id, text: prev.text, ...(prev.why ? { why: prev.why } : {}), at: prev.at, source: prev.source, ...(prev.until !== undefined ? { until: prev.until } : {}) });
+    cur = prev;
+  }
+  return out;
+}
+
 /** Edit text / why / pin state, or confirm a proposal (`status: "kept"`). Throws a human message on bad input. */
 export function updateNote(
   store: MemoryStore,

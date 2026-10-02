@@ -13,6 +13,7 @@ import {
   exportMemoryMarkdown,
   importMemoryMarkdown,
   markStaleByPaths,
+  noteHistory,
   parseMemoryStore,
   parseNoteLine,
   pathMatches,
@@ -93,6 +94,29 @@ test("same-area rewrite without replaces: supersedes the old note as a pending r
   // Veto: the operator forgets the proposed rewrite → the old note is active again.
   assert.ok(deleteNote(store, rev.id));
   assert.equal(old.until, undefined);
+});
+
+test("noteHistory: a revision has one earlier version, a second revision two, an unrevised note none", () => {
+  const store = emptyMemoryStore();
+  const [v1] = run(store, "<!-- remember: fact | Tests need Node 18 | area: ci -->", "b1", 1000);
+  assert.deepEqual(noteHistory(store, v1.id), []);
+  const [v2] = run(store, '<!-- remember: fact | Tests need Node 20 | area: ci | replaces: "Tests need Node 18" -->', "b2", 2000);
+  const h1 = noteHistory(store, v2.id);
+  assert.equal(h1.length, 1);
+  assert.deepEqual(h1[0], { id: v1.id, text: "Tests need Node 18.", at: 1000, source: "b1", until: 2000 });
+  const [v3] = run(store, '<!-- remember: fact | Tests need Node 22 | area: ci | replaces: "Tests need Node 20" -->', "b3", 3000);
+  const h2 = noteHistory(store, v3.id);
+  assert.equal(h2.length, 2);
+  assert.deepEqual(
+    h2.map((v) => [v.id, v.until]),
+    [
+      [v2.id, 3000],
+      [v1.id, 2000],
+    ],
+    "the directly replaced version first, the oldest last"
+  );
+  assert.deepEqual(noteHistory(store, v1.id), []);
+  assert.deepEqual(noteHistory(store, "nope"), []);
 });
 
 test("explicit replaces: with an area resolves within that area first", () => {

@@ -19,6 +19,7 @@
 import {
   autoKeepPending,
   countKinds,
+  getNote,
   MEMORY_NEW_WINDOW_MS,
   markStaleByPaths,
   rememberRunNotes,
@@ -37,8 +38,8 @@ export interface MemoryNewItem {
   at: number;
   /** Knowledge-base page the note belongs to. */
   area?: string;
-  /** Set when the note supersedes an older one — the toast reads "Updated", not "Remembered". */
-  revises?: boolean;
+  /** The text of the older note this one supersedes — the toast reads "Updated" and shows the old text struck through. */
+  revises?: string;
 }
 
 export interface HarvesterDeps {
@@ -99,7 +100,7 @@ export class MemoryHarvester {
     if (added.length || autoKept.length) this.deps.save(store, owner);
     if (added.length) {
       const list = this.recent.get(box) ?? [];
-      list.push(...added.map(toNewItem));
+      list.push(...added.map((n) => toNewItem(n, store)));
       this.recent.set(box, list);
       this.tally.set(box, [...(this.tally.get(box) ?? []), ...added]);
     }
@@ -201,6 +202,7 @@ export class MemoryHarvester {
 
 const logSig = (log: string): string => `${log.length}:${log.slice(-64)}`;
 
-function toNewItem(n: MemoryNote): MemoryNewItem {
-  return { id: n.id, kind: n.kind, text: n.text, ...(n.why ? { why: n.why } : {}), status: n.status, at: n.at, ...(n.area ? { area: n.area } : {}), ...(n.supersedes ? { revises: true } : {}) };
+function toNewItem(n: MemoryNote, store: MemoryStore): MemoryNewItem {
+  const old = n.supersedes ? getNote(store, n.supersedes) : undefined;
+  return { id: n.id, kind: n.kind, text: n.text, ...(n.why ? { why: n.why } : {}), status: n.status, at: n.at, ...(n.area ? { area: n.area } : {}), ...(n.supersedes ? { revises: old?.text ?? "" } : {}) };
 }

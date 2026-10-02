@@ -21,7 +21,7 @@ import { registerTools } from "./handlers.js";
 import { makeBridge } from "./server-bridge.js";
 import { deps as rawDeps, resolveCredsForBox, detectSetupInBox } from "./deps.js";
 import { SETUP_SENTINEL, parseSentinel, type SetupProfile } from "./setup-profile.js";
-import { addManualNote, deleteNote, exportMemoryMarkdown, getNote, importMemoryMarkdown, loadMemoryStore, playbookToSkill, saveMemoryStore, updateNote, viewMemory, type MemoryStore } from "./memory-store.js";
+import { addManualNote, deleteNote, exportMemoryMarkdown, getNote, importMemoryMarkdown, loadMemoryStore, noteHistory, playbookToSkill, saveMemoryStore, updateNote, viewMemory, type MemoryStore } from "./memory-store.js";
 import { MemoryHarvester } from "./memory-harvest.js";
 import { deleteSetup, getSetup, listSetups, recordLearned, repoKey, repoSlugFromUrl, saveSetup } from "./setup-store.js";
 import { refillPool, startPoolMaintainer } from "./pool.js";
@@ -2404,7 +2404,15 @@ const memoryOwner = (res: Response): string => {
   const p = principalOf(res);
   return p.kind === "user" ? p.userId : OPERATOR_OWNER;
 };
-const memoryView = (store: MemoryStore) => ({ enabled: store.enabled, notes: viewMemory(store) });
+// A revised note carries its earlier versions (capped at 10); every other note stays as it is.
+const memoryView = (store: MemoryStore) => ({
+  enabled: store.enabled,
+  notes: viewMemory(store).map((n) => {
+    if (!n.supersedes) return n;
+    const history = noteHistory(store, n.id);
+    return history.length ? { ...n, history } : n;
+  }),
+});
 app.get("/memory-notes.json", (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   try {
