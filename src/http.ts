@@ -727,7 +727,9 @@ async function memoryTick(boxes: BoxView[]): Promise<void> {
     if (b.role === "pool-free" || !/^running$/i.test(b.boxStatus)) continue;
     const owner = ownerOf(db, b.name) ?? OPERATOR_OWNER;
     owners.add(owner);
-    if (b.runState !== "running" && b.runState !== "waiting") continue;
+    // Finished runs too: a run that ended between sweeps never produces a finish edge for this
+    // process, and the lastOutputAt gate below makes it one read per run.
+    if (!["running", "waiting", "done", "failed"].includes(b.runState)) continue;
     const prev = memoryTickAt.get(b.name);
     if (prev && (now - prev.at < MEMORY_TICK_GAP_MS || prev.out === b.lastOutputAt)) continue;
     memoryTickAt.set(b.name, { at: now, out: b.lastOutputAt });
@@ -1056,6 +1058,10 @@ const readFleet = makeFleetReader(
     },
   }
 );
+// Background sweep: finish edges, notifications and the memory harvest ride on fleet reads, so a
+// run nobody is watching still gets its history, push and memory.
+setInterval(() => void readFleet().catch(() => {}), 15_000).unref();
+
 // Repositories reachable through the connected accounts (picker, inference, attach).
 const listRepos = makeRepoLister(cfg, fetchGithubRepos);
 // The same repo capabilities for MCP clients (Cursor etc.): list_repos / attach_repo tools.
