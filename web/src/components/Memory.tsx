@@ -421,10 +421,16 @@ function NoteRow({
           <p className={cn("text-foreground text-body leading-snug break-words", playbook && "whitespace-pre-line")}>{note.text}</p>
           {note.why && <p className="text-muted-foreground mt-0.5 text-meta leading-snug break-words">{note.why}</p>}
           <p className="text-faint mt-0.5 text-micro tabular-nums">
-            from{" "}
-            <a href={`/dashboard/box/${encodeURIComponent(note.source)}`} className="hover:text-foreground focus-visible:ring-ring rounded-sm underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none">
-              {friendlyName(note.source)}
-            </a>{" "}
+            {note.source && note.source !== "operator" && note.source !== "you" ? (
+              <>
+                from{" "}
+                <a href={`/dashboard/box/${encodeURIComponent(note.source)}`} className="hover:text-foreground focus-visible:ring-ring rounded-sm underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none">
+                  {friendlyName(note.source)}
+                </a>
+              </>
+            ) : (
+              "added by you"
+            )}{" "}
             · {fmtAgo(Math.floor(note.at / 1000))}
             {note.pinned && " · pinned"}
             {playbook && uses > 0 && ` · used ${uses}×`}
