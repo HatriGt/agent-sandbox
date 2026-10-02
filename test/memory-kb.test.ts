@@ -195,3 +195,31 @@ test("a note that is only a placeholder or quotes the grammar is dropped", () =>
   assert.equal(parseNoteLine("domain | Notes use '<!-- remember: <kind> | <text> -->' | area: memory"), null);
   assert.ok(parseNoteLine("fact | CI runs on Node 20"));
 });
+
+test("a note that names its repo files under it even when the box has no repo, or several; the operator can re-home one", () => {
+  const store = emptyMemoryStore();
+  const log = [
+    "<!-- remember: domain | A Space deal is LOB 12 | area: space/deal-setup | repo: Elseco/Deal-Service -->",
+    "<!-- remember: fact | Tests need Node 20 | area: ops -->",
+    "<!-- remember: preference | Keep replies short | repo: elseco/deal-service -->",
+  ].join("\n");
+  const added = rememberRunNotes(store, { box: "b0", log, repos: [] });
+  assert.equal(added.length, 3);
+  assert.deepEqual(store.repos["elseco/deal-service"]?.map((n) => n.area), ["space/deal-setup"]);
+  // Nothing to file by: the fact lands on the operator list; the preference always does, repo: or not.
+  assert.deepEqual(store.global.map((n) => [n.kind, n.repo]), [["fact", undefined], ["preference", undefined]]);
+
+  const many = emptyMemoryStore();
+  rememberRunNotes(many, { box: "b1", log: "<!-- remember: fact | The API lives here | repo: acme/api -->\n<!-- remember: fact | Unplaced -->", repos: ["acme/web", "acme/api"] });
+  assert.equal(many.repos["acme/api"]?.length, 1);
+  assert.equal(many.global.length, 1);
+
+  const moved = updateNote(store, store.global[0].id, { repo: "Elseco/Deal-Service" });
+  assert.equal(moved.scope, "repo");
+  assert.equal(store.repos["elseco/deal-service"].length, 2);
+  assert.equal(store.global.length, 1);
+  assert.throws(() => updateNote(store, moved.id, { repo: "not a slug" }), /owner\/name/);
+  updateNote(store, moved.id, { repo: "" });
+  assert.equal(store.global.length, 2);
+  assert.match(memoryToolScript(), /--repo\) /);
+});

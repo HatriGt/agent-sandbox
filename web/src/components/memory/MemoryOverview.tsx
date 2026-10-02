@@ -1,7 +1,7 @@
 import * as React from "react";
 import type { MemoryNote } from "@/lib/api";
 import { isOperatorKind, KIND_LABEL, KINDS, plural } from "./kinds";
-import { KindMark, MemoryMap } from "./MemoryMap";
+import { KindMark, MemoryGraph } from "./MemoryGraph";
 
 const DAY = 86_400_000;
 const DAYS = 30;
@@ -59,7 +59,7 @@ export function MemoryOverview({
       </div>
 
       <div className="px-2 pt-1">
-        <MemoryMap notes={notes} onSelect={onSelect} onSection={onSection} />
+        <MemoryGraph notes={notes} onSelect={onSelect} onSection={onSection} />
       </div>
 
       {live.length === 0 ? (

@@ -36,12 +36,13 @@ usage() {
 usage: memory search <words...>                       find notes matching every word (case-insensitive)
        memory areas                                   the knowledge base index: every area of this repo
        memory area <slug>                             one area's page, with its related areas
-       memory add <kind> <text...> [--area <part/subpart>] [--paths <a,b>] [--links <area,…>]
+       memory add <kind> <text...> [--area <part/subpart>] [--paths <a,b>] [--links <area,…>] [--repo owner/name]
                                    [--why <text>] [--replaces <old note text>]
                                                       remember something for future runs
 kinds: ${kinds}
   domain     how the product works: an entity, a flow's steps, a business rule, who owns/consumes what
-             (always --area, --paths to the code that implements it, --links to related areas)
+             (always --area, --paths to the code that implements it, --links to related areas;
+              --repo when this box has no repo checked out, or several)
   lesson     a correction, or an approach you abandoned (say --why)
   preference how the operator wants things in general
   rule       "when X, do Y" standing instruction
@@ -87,7 +88,7 @@ case "$cmd" in
     kind=\${1:-}
     [ $# -gt 0 ] && shift
     case " $KINDS " in *" $kind "*) ;; *) echo "memory: kind must be one of: $KINDS" >&2; exit 2;; esac
-    text=""; why=""; rep=""; area=""; paths=""; links=""
+    text=""; why=""; rep=""; area=""; paths=""; links=""; repo=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --why) [ $# -ge 2 ] || { echo "memory: --why needs a value" >&2; exit 2; }; why=$2; shift 2;;
@@ -95,15 +96,17 @@ case "$cmd" in
         --area) [ $# -ge 2 ] || { echo "memory: --area needs a value" >&2; exit 2; }; area=$2; shift 2;;
         --paths) [ $# -ge 2 ] || { echo "memory: --paths needs a value" >&2; exit 2; }; paths=$2; shift 2;;
         --links) [ $# -ge 2 ] || { echo "memory: --links needs a value" >&2; exit 2; }; links=$2; shift 2;;
+        --repo) [ $# -ge 2 ] || { echo "memory: --repo needs owner/name" >&2; exit 2; }; repo=$2; shift 2;;
         *) text="$text\${text:+ }$1"; shift;;
       esac
     done
-    [ -n "$text" ] || { echo "usage: memory add <kind> <text...> [--area <slug>] [--paths <a,b>] [--links <a,b>] [--why <text>] [--replaces <old text>]" >&2; exit 2; }
+    [ -n "$text" ] || { echo "usage: memory add <kind> <text...> [--area <slug>] [--paths <a,b>] [--links <a,b>] [--repo owner/name] [--why <text>] [--replaces <old text>]" >&2; exit 2; }
     [ "$kind" = domain ] && [ -z "$area" ] && { echo "memory: a domain note needs --area <part/subpart> (see: memory areas)" >&2; exit 2; }
     line="${REMEMBER_OPEN} $kind | $text"
     [ -n "$area" ] && line="$line | area: $area"
     [ -n "$paths" ] && line="$line | paths: $paths"
     [ -n "$links" ] && line="$line | links: $links"
+    [ -n "$repo" ] && line="$line | repo: $repo"
     [ -n "$why" ] && line="$line | why: $why"
     [ -n "$rep" ] && line="$line | replaces: \\"$rep\\""
     line="$line ${REMEMBER_CLOSE}"

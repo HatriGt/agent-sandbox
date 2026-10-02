@@ -17,8 +17,8 @@ export const MEMORY_PROMPT =
   "Also never save: what you just did (that is the reply), task-specific values (this branch, this file, " +
   "this PR number), anything MEMORY.md already says, guesses. Most runs save nothing; that is correct. " +
   "When something qualifies, record it THE MOMENT it appears, one note per line: " +
-  "'<!-- remember: <kind> | <text> [| area: <part/subpart>] [| paths: <a, b>] [| links: <area, …>] [| why: <reason>] [| replaces: \"<old note text>\"] -->' or the shell tool " +
-  "`memory add <kind> \"<text>\" [--area …] [--paths …] [--links …] [--why …] [--replaces \"<old text>\"]`. Kinds: preference = how the " +
+  "'<!-- remember: <kind> | <text> [| area: <part/subpart>] [| paths: <a, b>] [| links: <area, …>] [| repo: <owner/name>] [| why: <reason>] [| replaces: \"<old note text>\"] -->' or the shell tool " +
+  "`memory add <kind> \"<text>\" [--area …] [--paths …] [--links …] [--repo owner/name] [--why …] [--replaces \"<old text>\"]`. Kinds: preference = how the " +
   "operator wants things in general (format, tone, tools); rule = a standing 'when X, do Y' or 'always/never " +
   "X' — only when they state it as general ('always', 'from now on', 'every time', 'in this repo we'), never " +
   "inferred from one instruction; lesson = the operator corrected how you work, or a command failed and a " +
@@ -32,12 +32,15 @@ export const MEMORY_PROMPT =
   "`memory search <words>` (it also searches the full archive). Never secrets — refer to env vars by name. " +
   "KNOWLEDGE BASE: MEMORY.md's 'Knowledge base' section is this repo's memory of how the product works, " +
   "segregated by area (a part of the app: `billing/invoicing`, `auth`, `orders/refunds`). When the task is a " +
-  "business requirement or changes how the product behaves, record what you learn about the domain as `domain` " +
-  "notes the moment you understand it — one statement per note: an entity and what it means, a flow and its " +
+  "business requirement, changes how the product behaves, or asks you to understand or explain how part of it " +
+  "works, record what you learn about the domain as `domain` notes the moment you understand it — an " +
+  "investigation that explains a flow and saves no domain notes is wasted: the next run redoes it. One statement per note: an entity and what it means, a flow and its " +
   "steps, a business rule or invariant, which service owns what and who consumes it. Every domain note carries " +
   "area: (an existing area from the index when one fits, else a new `part/subpart`), paths: (the files that " +
   "implement it) and links: (related areas, so the dots connect). fact/decision/lesson/playbook notes about one " +
-  "part of the app take area: too. Before working in an area, run `memory area <slug>` and read it. The base " +
+  "part of the app take area: too. A repo note files under the repo checked out in this box; when none is, or " +
+  "several are, add repo: <owner/name> (the GitHub slug the knowledge is about) or it lands under no repo. " +
+  "Knowledge taken from docs or skills rather than the code is still knowledge — note it, and say so in why:. Before working in an area, run `memory area <slug>` and read it. The base " +
   "updates itself through you: when what you learn changes a note, write the same kind with replaces: quoting " +
   "it — never a second note saying almost the same; a note marked unverified describes code that changed " +
   "since — reaffirm it (write it again with replaces: quoting itself) or replace it when you work there. " +

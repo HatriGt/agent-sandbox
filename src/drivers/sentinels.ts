@@ -109,9 +109,9 @@ export const REMEMBER_RE = /<!--\s*remember:\s*([\s\S]*?)-->/g;
 /** The optional leading `<kind> |` of a note line; group 1 is the kind. */
 export const REMEMBER_KIND_RE = new RegExp(`^(${MEMORY_KINDS.join("|")})\\s*\\|\\s*`, "i");
 /** Splits the `| why:` / `| replaces:` / `| area:` / `| paths:` / `| links:` fields off a note (the text itself may contain `|`). */
-export const REMEMBER_FIELD_RE = /\s*\|\s*(?=(?:why|replaces|area|paths|links)\s*:)/i;
+export const REMEMBER_FIELD_RE = /\s*\|\s*(?=(?:why|replaces|area|paths|links|repo)\s*:)/i;
 /** Every field a note line may carry after its text. */
-export const REMEMBER_FIELDS = ["why", "replaces", "area", "paths", "links"] as const;
+export const REMEMBER_FIELDS = ["why", "replaces", "area", "paths", "links", "repo"] as const;
 
 /** Where the dashboard-configured MCP servers are written inside the box for `claude --mcp-config`. */
 export const MCP_CONFIG_PATH = "/root/.agent-mcp.json";

@@ -2432,8 +2432,8 @@ app.post("/memory-notes.json", async (req: Request, res: Response) => {
         if (typeof body.id !== "string" || !body.id) throw new Error("id must be a note id.");
         const before = getNote(store, body.id);
         const wasPending = before?.status === "pending";
-        const note = updateNote(store, body.id, { text: body.text, why: body.why, pinned: body.pinned, status: body.status, area: body.area, paths: body.paths, links: body.links, verified: body.verified });
-        const edited = body.text !== undefined || body.why !== undefined || body.area !== undefined || body.paths !== undefined || body.links !== undefined;
+        const note = updateNote(store, body.id, { text: body.text, why: body.why, pinned: body.pinned, status: body.status, area: body.area, paths: body.paths, links: body.links, verified: body.verified, repo: body.repo });
+        const edited = body.text !== undefined || body.why !== undefined || body.area !== undefined || body.paths !== undefined || body.links !== undefined || body.repo !== undefined;
         res.locals.auditAction = edited ? "memory.edit" : wasPending && body.status === "kept" ? "memory.keep" : body.verified ? "memory.verify" : "memory.edit";
         memoryHarvester.noteChanged(note.id, { status: note.status, ...(edited ? { text: note.text, why: note.why ?? "" } : {}) });
       }

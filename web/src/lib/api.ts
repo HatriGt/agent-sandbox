@@ -904,7 +904,7 @@ export const api = {
   skillMutate: (body: Record<string, unknown>) => post<SkillsResponse>("/skills.json", body),
   /** Memory across runs: the owner's notes. Not /memory.json, which is the VM's RAM. */
   memoryNotes: (signal?: AbortSignal) => fetch(url("/memory-notes.json"), { headers: authHeaders, signal }).then(parse<MemoryNotesResponse>),
-  memoryNoteUpdate: (body: { enabled: boolean } | { id: string; text?: string; why?: string; pinned?: boolean; status?: "kept"; area?: string; paths?: string; links?: string; verified?: boolean }) =>
+  memoryNoteUpdate: (body: { enabled: boolean } | { id: string; text?: string; why?: string; pinned?: boolean; status?: "kept"; area?: string; paths?: string; links?: string; verified?: boolean; repo?: string }) =>
     post<MemoryNotesResponse>("/memory-notes.json", body),
   /** Add a preference/rule by hand (the composer on the Memory page). */
   memoryNoteAdd: (add: { kind: MemoryKind; text: string; why?: string; repo?: string; area?: string; paths?: string; links?: string }) => post<MemoryNotesResponse>("/memory-notes.json", { add }),

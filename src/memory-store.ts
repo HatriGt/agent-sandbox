@@ -89,6 +89,8 @@ export interface ParsedNote {
   area?: string;
   paths?: string[];
   links?: string[];
+  /** The repo (owner/name) a note files under when the box has none or several checked out. */
+  repo?: string;
 }
 
 export const MEMORY_LIMITS = {
@@ -312,7 +314,7 @@ export function parseNoteLine(line: string): ParsedNote | null {
   if (!text || !/[a-z]/i.test(text) || /<(?:kind|text|slug|part\/subpart)>/i.test(text)) return null;
   const note: ParsedNote = { kind, text: clipText(kind, tidyNoteText(text, kind)) };
   for (const p of parts.slice(1)) {
-    const m = /^(why|replaces|area|paths|links)\s*:\s*([\s\S]*)$/i.exec(p.trim());
+    const m = /^(why|replaces|area|paths|links|repo)\s*:\s*([\s\S]*)$/i.exec(p.trim());
     if (!m) continue;
     const v = m[2].trim();
     if (!v) continue;
@@ -325,6 +327,9 @@ export function parseNoteLine(line: string): ParsedNote | null {
     } else if (field === "paths") {
       const ps = pathList(stripQuotes(v));
       if (ps.length) note.paths = ps;
+    } else if (field === "repo") {
+      const r = repoSlug(stripQuotes(v));
+      if (r) note.repo = r;
     } else {
       const ls = linkList(stripQuotes(v));
       if (ls.length) note.links = ls;
@@ -336,6 +341,7 @@ export function parseNoteLine(line: string): ParsedNote | null {
     delete note.area;
     delete note.paths;
     delete note.links;
+    delete note.repo;
   }
   return note;
 }
@@ -414,9 +420,19 @@ export function memoryRepoKey(slug: string): string {
 }
 
 /** Where a note of this kind files: preferences/rules describe the operator; the rest the repo when there is exactly one. */
-export function scopeFor(kind: MemoryKind, repos: string[]): { scope: MemoryScope; repo?: string } {
-  if (!OPERATOR_KINDS.has(kind) && repos.length === 1) return { scope: "repo", repo: memoryRepoKey(repos[0]) };
+export function scopeFor(kind: MemoryKind, repos: string[], named?: string): { scope: MemoryScope; repo?: string } {
+  if (OPERATOR_KINDS.has(kind)) return { scope: "operator" };
+  // A note that names its repo files there — that is how a box with no or several repos still feeds one knowledge base.
+  const explicit = named && repoSlug(named);
+  if (explicit) return { scope: "repo", repo: explicit };
+  if (repos.length === 1) return { scope: "repo", repo: memoryRepoKey(repos[0]) };
   return { scope: "operator" };
+}
+
+/** `owner/name` (a GitHub slug), lowercased; anything else is not a repo. */
+export function repoSlug(raw: unknown): string | undefined {
+  const s = String(raw ?? "").trim().replace(/^https?:\/\/github\.com\//i, "").replace(/\.git$/i, "").toLowerCase();
+  return /^[a-z0-9][a-z0-9._-]{0,99}\/[a-z0-9][a-z0-9._-]{0,99}$/.test(s) ? s : undefined;
 }
 
 /** The list a scope resolves to, created on demand for a repo. */
@@ -615,12 +631,16 @@ export function rememberRunNotes(store: MemoryStore, i: RememberInput): MemoryNo
   const fresh = parsed.filter((p) => !i.seen?.has(noteKey(p)) && !forgotten.has(noteKey(p)));
   if (!fresh.length) return [];
   const added: MemoryNote[] = [];
-  for (const scope of [
-    { scope: "operator" as const },
-    ...(i.repos.length === 1 ? [{ scope: "repo" as const, repo: memoryRepoKey(i.repos[0]) }] : []),
-  ]) {
-    const mine = fresh.filter((p) => scopeFor(p.kind, i.repos).scope === scope.scope);
-    if (!mine.length) continue;
+  // Each note files by its kind, the box's repos and — when it names one — its own `repo:`.
+  const buckets = new Map<string, { scope: { scope: MemoryScope; repo?: string }; notes: ParsedNote[] }>();
+  for (const p of fresh) {
+    const scope = scopeFor(p.kind, i.repos, p.repo);
+    const k = scope.repo ?? "";
+    const b = buckets.get(k) ?? { scope, notes: [] };
+    b.notes.push(p);
+    buckets.set(k, b);
+  }
+  for (const { scope, notes: mine } of buckets.values()) {
     added.push(...addParsedNotes(listFor(store, scope), mine, { source: i.box, now: i.now, ...scope }));
   }
   if (i.seen) for (const p of fresh) i.seen.add(noteKey(p));
@@ -671,11 +691,27 @@ export function getNote(store: MemoryStore, id: string): MemoryNote | undefined 
 export function updateNote(
   store: MemoryStore,
   id: string,
-  patch: { text?: unknown; why?: unknown; pinned?: unknown; status?: unknown; area?: unknown; paths?: unknown; links?: unknown; verified?: unknown }
+  patch: { text?: unknown; why?: unknown; pinned?: unknown; status?: unknown; area?: unknown; paths?: unknown; links?: unknown; verified?: unknown; repo?: unknown }
 ): MemoryNote {
   const hit = findNote(store, id);
   if (!hit) throw new Error("That note no longer exists.");
   const note = hit.list[hit.index];
+  // Re-home a repo note (one a box without a checkout filed under "any repo") into a repo's knowledge base.
+  if (patch.repo !== undefined && !OPERATOR_KINDS.has(note.kind)) {
+    const target = patch.repo === "" || patch.repo === null ? undefined : repoSlug(patch.repo);
+    if (patch.repo && !target) throw new Error("A repo is owner/name.");
+    if (target !== note.repo) {
+      hit.list.splice(hit.index, 1);
+      if (target) {
+        note.scope = "repo";
+        note.repo = target;
+      } else {
+        note.scope = "operator";
+        delete note.repo;
+      }
+      listFor(store, { scope: note.scope, repo: target }).push(note);
+    }
+  }
   if (patch.text !== undefined) {
     const text = note.kind === "playbook" ? String(patch.text).replace(/\r\n/g, "\n").trim() : String(patch.text).replace(/\s+/g, " ").trim();
     if (!text) throw new Error("A note cannot be empty — delete it instead.");

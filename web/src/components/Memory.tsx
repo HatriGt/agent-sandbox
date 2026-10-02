@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Brain, Check, ChevronRight, Download, Link2, Pencil, Pin, PinOff, Plus, Search, ShieldCheck, Sparkles, Trash2, Upload, X } from "lucide-react";
+import { Brain, Check, ChevronRight, Download, FolderGit2, History, Link2, Pencil, Pin, PinOff, Plus, Search, ShieldCheck, Sparkles, Trash2, Upload, User, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError, type MemoryKind, type MemoryNote, type MemoryNotesResponse } from "@/lib/api";
 import { useCached } from "@/lib/cache";
@@ -15,7 +15,7 @@ import { Switch } from "@/components/ui/switch";
 import { Bar } from "@/components/thread/Skeletons";
 import { FilterChip } from "@/components/ui/filter-chip";
 import { MemoryOverview } from "@/components/memory/MemoryOverview";
-import { areaId, sectionId } from "@/components/memory/MemoryMap";
+import { areaId, sectionId } from "@/components/memory/MemoryGraph";
 import { Inline, NoteStatement, noteHeadline } from "@/components/memory/noteText";
 import { isOperatorKind, KIND_ICON, KIND_LABEL, KIND_PLURAL, KINDS, plural } from "@/components/memory/kinds";
 
@@ -26,6 +26,9 @@ import { isOperatorKind, KIND_ICON, KIND_LABEL, KIND_PLURAL, KINDS, plural } fro
  *     each area a page with the code it describes, the areas it links to, and its notes: domain
  *     knowledge first, then decisions, lessons, facts, playbooks. Notes without an area sit last.
  *   · Earlier — notes a newer one replaced; greyed, kept as history, out of MEMORY.md.
+ * The sections sit in a rail (You, each repo with its areas, "Any repo", Earlier); one is open at a
+ * time so a long list of repos reads as a table of contents, not a scroll. A note a box saved
+ * without a repo checked out lands under "Any repo" until it is edited into a repo.
  * A note whose anchored code changed since is "unverified" until a run reaffirms it or the operator
  * marks it verified here.
  * Every row is a stored note; nothing here is derived or guessed. Pending rows are proposals the
@@ -53,7 +56,8 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
   const data = cached.data ?? null;
   const notes = data?.notes ?? null;
   const [composing, setComposing] = React.useState(false);
-  const [earlierOpen, setEarlierOpen] = React.useState(false);
+  const [viewSel, setViewSel] = React.useState<string | null>(null);
+  const revealRef = React.useRef<string | null>(null);
   const [kindFilter, setKindFilter] = React.useState<MemoryKind | "all">("all");
   const [query, setQuery] = React.useState("");
   const reviewRef = React.useRef<HTMLElement>(null);
@@ -97,6 +101,18 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
     const replacedBy = new Map<string, MemoryNote>();
     for (const n of all) if (n.supersedes && byId.has(n.supersedes)) replacedBy.set(n.supersedes, n);
     const filtering = kindFilter !== "all" || !!q;
+    // Rail entries: every repo that has any live note (filtered or not), so the table of contents is stable while searching.
+    const allRepos = [...new Set(liveAll.filter((n) => !isOperatorKind(n.kind) && n.status !== "pending").map((n) => n.repo ?? ""))].sort((a, b) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b)));
+    const totals = new Map<string, number>();
+    for (const n of liveAll) if (!isOperatorKind(n.kind) && n.status !== "pending") totals.set(n.repo ?? "", (totals.get(n.repo ?? "") ?? 0) + 1);
+    const youTotal = liveAll.filter((n) => isOperatorKind(n.kind) && n.status !== "pending").length;
+    const earlierTotal = all.filter((n) => n.until != null).length;
+    const views = [
+      { key: "you", label: "You", total: youTotal, count: you.length },
+      ...allRepos.map((repo) => ({ key: `repo:${repo}`, label: repo || "Any repo", repo, total: totals.get(repo) ?? 0, count: byRepo.get(repo)?.length ?? 0, groups: areaGroups(byRepo.get(repo) ?? []) })),
+      ...(earlierTotal ? [{ key: "earlier", label: "Earlier", total: earlierTotal, count: earlier.length }] : []),
+    ];
+    const defaultView = allRepos.find((r) => r !== "") != null ? `repo:${allRepos.find((r) => r !== "")}` : "you";
     return {
       liveAll,
       counts,
@@ -106,8 +122,24 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
       earlier,
       replacedBy,
       filtering,
+      views,
+      defaultView,
     };
   }, [notes, kindFilter, query]);
+  const view = viewSel && model.views.some((v) => v.key === viewSel) ? viewSel : model.defaultView;
+  const viewOf = React.useCallback(
+    (elId: string): string => {
+      if (elId === "memory-you") return "you";
+      for (const v of model.views) if ("repo" in v && (elId === sectionId(v.repo!) || elId.startsWith(`${sectionId(v.repo!)}-area-`))) return v.key;
+      const id = elId.replace(/^mem-note-/, "");
+      const n = notes?.find((x) => x.id === id);
+      if (!n) return view;
+      if (n.until != null) return "earlier";
+      if (n.status === "pending") return view;
+      return isOperatorKind(n.kind) ? "you" : `repo:${n.repo ?? ""}`;
+    },
+    [model.views, notes, view],
+  );
 
   const exportMd = async () => {
     try {
@@ -138,29 +170,33 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
     }
   };
 
-  /** From the map or a link chip: show the row/section (clearing filters, opening history if needed), scroll to it, flash it. */
-  const reveal = (elId: string, ghost = false) => {
+  /** From the graph or a link chip: open the section the target lives in (clearing filters), scroll to it, flash it. */
+  const reveal = (elId: string) => {
     setQuery("");
     setKindFilter("all");
-    if (ghost) setEarlierOpen(true);
-    requestAnimationFrame(() =>
-      requestAnimationFrame(() => {
-        // A SettingsSection carries its id on the heading (`<id>-h`); rows and area pages on themselves.
-        const el = document.getElementById(elId) ?? document.getElementById(`${elId}-h`);
-        if (!el) return;
-        const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-        el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "center" });
-        el.classList.remove("mm-flash");
-        void el.offsetWidth;
-        el.classList.add("mm-flash");
-        setTimeout(() => el.classList.remove("mm-flash"), 2000);
-      }),
-    );
+    setViewSel(viewOf(elId));
+    revealRef.current = elId;
+    setTick((t) => t + 1);
   };
+  const [tick, setTick] = React.useState(0);
+  React.useEffect(() => {
+    const elId = revealRef.current;
+    if (!elId) return;
+    revealRef.current = null;
+    // A SettingsSection carries its id on the heading (`<id>-h`); rows and area pages on themselves.
+    const el = document.getElementById(elId) ?? document.getElementById(`${elId}-h`);
+    if (!el) return;
+    const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "center" });
+    el.classList.remove("mm-flash");
+    void el.offsetWidth;
+    el.classList.add("mm-flash");
+    setTimeout(() => el.classList.remove("mm-flash"), 2000);
+  }, [tick, view]);
   const rowProps = (n: MemoryNote) => ({
     note: n,
     onPin: (pinned: boolean) => void apply(api.memoryNoteUpdate({ id: n.id, pinned })),
-    onSave: (patch: { text?: string; area?: string; paths?: string; links?: string }) => apply(api.memoryNoteUpdate({ id: n.id, ...patch }), "Note updated"),
+    onSave: (patch: { text?: string; area?: string; paths?: string; links?: string; repo?: string }) => apply(api.memoryNoteUpdate({ id: n.id, ...patch }), patch.repo !== undefined ? (patch.repo ? `Filed under ${patch.repo}` : "Moved out of its repo") : "Note updated"),
     onDelete: () => void apply(api.memoryNoteDelete(n.id), "Forgotten"),
     onKeep: () => void apply(api.memoryNoteUpdate({ id: n.id, status: "kept" }), "Kept"),
     onVerify: n.stale ? () => void apply(api.memoryNoteUpdate({ id: n.id, verified: true }), "Marked verified") : undefined,
@@ -184,7 +220,7 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
   };
 
   const total = notes?.length ?? 0;
-  const selectNote = (id: string) => reveal(`mem-note-${id}`, notes?.find((n) => n.id === id)?.until != null);
+  const selectNote = (id: string) => reveal(`mem-note-${id}`);
   const dim = !data?.enabled && "opacity-60";
 
   return (
@@ -283,142 +319,184 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
             </div>
           </div>
 
-          {model.filtering && !model.you.length && !model.repos.length && !model.earlier.length && (
-            <p className="text-muted-foreground py-6 text-center text-meta" role="status">
-              No notes match.{" "}
-              <button type="button" className="text-foreground underline underline-offset-2" onClick={() => (setQuery(""), setKindFilter("all"))}>
-                Clear filters
-              </button>
-            </p>
-          )}
-
-          {(!model.filtering || model.you.length > 0) && (
-            <SettingsSection id="memory-you" title="You" meta={plural(model.you.length, "note")} purpose="Preferences and rules — in every run's MEMORY.md, whatever the repo.">
-              {model.you.length ? (
-                <Panel>
-                  <ul className={cn("divide-y", dim)}>
-                    {model.you.map((n) => (
-                      <NoteRow key={n.id} {...rowProps(n)} />
-                    ))}
-                  </ul>
-                </Panel>
-              ) : (
-                <p className="text-muted-foreground text-meta">No preferences yet — say how you like things done during a run, or add one above.</p>
-              )}
-            </SettingsSection>
-          )}
-
-          {model.repos.map(([repo, list]) => {
-            const groups = areaGroups(list);
-            const pages = groups.filter((g) => g.area);
-            return (
-              <SettingsSection
-                key={repo || "global"}
-                id={sectionId(repo)}
-                title={repo || "Any repo"}
-                meta={pages.length ? `${plural(pages.length, "area")} · ${plural(list.length, "note")}` : plural(list.length, "note")}
-                purpose={pages.length ? "Knowledge base — how this product works, by area. Runs read the areas a task is about and keep them current." : undefined}
-              >
-                {pages.length > 1 && (
-                  <nav aria-label={`Areas of ${repo || "any repo"}`} className="mb-2 flex flex-wrap gap-1.5">
-                    {pages.map((g) => (
+          <div className="flex flex-col gap-4 md:grid md:grid-cols-[13.5rem_minmax(0,1fr)] md:items-start">
+            <nav aria-label="Memory sections" className="md:sticky md:top-3">
+              <ul className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-1 md:mx-0 md:flex-col md:overflow-visible md:px-0 md:pb-0">
+                {model.views.map((v) => {
+                  const active = v.key === view;
+                  const Icon = v.key === "you" ? User : v.key === "earlier" ? History : FolderGit2;
+                  const groups = "groups" in v ? v.groups.filter((g) => g.area) : [];
+                  const stale = groups.reduce((a, g) => a + g.stale, 0);
+                  return (
+                    <li key={v.key} className="shrink-0">
                       <button
-                        key={g.area}
                         type="button"
-                        onClick={() => reveal(areaId(repo, g.area))}
-                        className="bg-muted/50 text-muted-foreground hover:text-foreground hover:border-line-strong focus-visible:ring-ring inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-micro focus-visible:ring-2 focus-visible:outline-none"
+                        aria-current={active ? "page" : undefined}
+                        onClick={() => setViewSel(v.key)}
+                        className={cn(
+                          "focus-visible:ring-ring flex w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left text-meta focus-visible:ring-2 focus-visible:outline-none",
+                          active ? "bg-card border-line-strong text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-muted/50 border-transparent",
+                        )}
                       >
-                        {g.area}
-                        <span className="text-faint tabular-nums">{g.notes.length}</span>
-                        {g.stale > 0 && <span className="text-faint" title={`${g.stale} unverified`}>· {g.stale}?</span>}
+                        <Icon className="size-3.5 shrink-0 opacity-70" aria-hidden />
+                        <span className="min-w-0 flex-1 truncate">{v.label}</span>
+                        <span className="text-faint shrink-0 text-micro tabular-nums">{model.filtering && v.count !== v.total ? `${v.count}/${v.total}` : v.total}</span>
                       </button>
-                    ))}
-                  </nav>
-                )}
-                <Panel>
-                  {groups.map((g) => (
-                    <div key={g.area || "unfiled"} id={g.area ? areaId(repo, g.area) : undefined} className="scroll-mt-24 border-b last:border-b-0">
-                      <AreaHeader group={g} onArea={(a) => reveal(areaId(repo, a))} unfiled={!g.area} />
-                      {REPO_KINDS.map((kind) => {
-                        const rows = g.notes.filter((n) => n.kind === kind);
-                        if (!rows.length) return null;
-                        return (
-                          <div key={kind}>
-                            {g.notes.length > 3 && (
-                              <h4 className="text-faint px-3.5 pt-2 pb-0.5 text-micro font-medium tracking-wide uppercase">
-                                {KIND_PLURAL[kind]} <span className="tabular-nums">· {rows.length}</span>
-                              </h4>
-                            )}
-                            <ul className={cn("divide-y", dim)}>
-                              {rows.map((n) => (
-                                <NoteRow key={n.id} {...rowProps(n)} inArea={!!g.area} />
-                              ))}
-                            </ul>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ))}
-                </Panel>
-              </SettingsSection>
-            );
-          })}
+                      {active && groups.length > 0 && (
+                        <ul className="mt-1 mb-1 ml-3 hidden border-l pl-2 md:block" aria-label={`Areas of ${v.label}`}>
+                          {groups.map((g) => (
+                            <li key={g.area}>
+                              <button
+                                type="button"
+                                onClick={() => reveal(areaId("repo" in v ? v.repo : "", g.area))}
+                                className="text-muted-foreground hover:text-foreground focus-visible:ring-ring flex w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-micro focus-visible:ring-2 focus-visible:outline-none"
+                              >
+                                <span className="min-w-0 flex-1 truncate">{g.area}</span>
+                                <span className="text-faint tabular-nums">{g.notes.length}</span>
+                                {g.stale > 0 && <span className="text-faint" title={`${g.stale} unverified`}>?</span>}
+                              </button>
+                            </li>
+                          ))}
+                          {stale > 0 && <li className="text-faint px-1.5 pt-1 text-micro tabular-nums">{stale} unverified</li>}
+                        </ul>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </nav>
 
-          {model.earlier.length > 0 && (
-            <SettingsSection
-              id="memory-earlier"
-              title={
-                <button
-                  type="button"
-                  onClick={() => setEarlierOpen((v) => !v)}
-                  aria-expanded={earlierOpen || model.filtering}
-                  aria-controls="memory-earlier-list"
-                  className="focus-visible:ring-ring -ml-1 inline-flex items-center gap-1 rounded-md px-1 focus-visible:ring-2 focus-visible:outline-none"
-                >
-                  <ChevronRight className={cn("text-muted-foreground size-4 transition-transform duration-150 motion-reduce:transition-none", earlierOpen && "rotate-90")} aria-hidden />
-                  Earlier
-                </button>
-              }
-              meta={plural(model.earlier.length, "replaced note")}
-            >
-              <Collapse open={earlierOpen || model.filtering}>
-                <Panel id="memory-earlier-list">
-                  <ul className="divide-y">
-                    {model.earlier.map((n) => (
-                      <li key={n.id} id={`mem-note-${n.id}`} className="text-muted-foreground flex scroll-mt-24 items-start gap-3 px-3.5 py-2.5">
-                        <KindGlyph kind={n.kind} />
-                        <div className="min-w-0 flex-1">
-                          <p className="text-meta leading-snug break-words line-through decoration-faint">
-                            <Inline text={noteHeadline(n.text)} />
-                          </p>
-                          <p className="text-faint mt-0.5 text-micro">
-                            {model.replacedBy.get(n.id) ? (
-                              <>
-                                replaced by <span className="text-muted-foreground">“{noteHeadline(model.replacedBy.get(n.id)!.text)}”</span>
-                              </>
-                            ) : (
-                              "replaced"
-                            )}
-                            {n.until != null && ` · ${fmtAgo(Math.floor(n.until / 1000))}`}
-                          </p>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          aria-label="Delete from history"
-                          title="Forget"
-                          className="hover:text-destructive shrink-0"
-                          onClick={() => void apply(api.memoryNoteDelete(n.id), "Forgotten")}
-                        >
-                          <Trash2 className="size-4" />
-                        </Button>
-                      </li>
-                    ))}
-                  </ul>
-                </Panel>
-              </Collapse>
-            </SettingsSection>
-          )}
+            <div className="min-w-0">
+              {view === "you" && (
+                <SettingsSection id="memory-you" title="You" meta={plural(model.you.length, "note")} purpose="Preferences and rules — in every run's MEMORY.md, whatever the repo.">
+                  {model.you.length ? (
+                    <Panel>
+                      <ul className={cn("divide-y", dim)}>
+                        {model.you.map((n) => (
+                          <NoteRow key={n.id} {...rowProps(n)} />
+                        ))}
+                      </ul>
+                    </Panel>
+                  ) : (
+                    <p className="text-muted-foreground text-meta">{model.filtering ? "No preference or rule matches." : "No preferences yet — say how you like things done during a run, or add one above."}</p>
+                  )}
+                </SettingsSection>
+              )}
+
+              {model.views.map((v) => {
+                if (v.key !== view || !("repo" in v)) return null;
+                const repo = v.repo!;
+                const groups = v.groups;
+                const pages = groups.filter((g) => g.area);
+                const list = groups.flatMap((g) => g.notes);
+                return (
+                  <SettingsSection
+                    key={v.key}
+                    id={sectionId(repo)}
+                    title={repo || "Any repo"}
+                    meta={pages.length ? `${plural(pages.length, "area")} · ${plural(list.length, "note")}` : plural(list.length, "note")}
+                    purpose={
+                      repo
+                        ? "Knowledge base — how this product works, by area. Runs read the areas a task is about and keep them current."
+                        : "Saved by runs that had no repo checked out, so they belong to no knowledge base. Edit a note and give it a repo to file it."
+                    }
+                  >
+                    {!list.length ? (
+                      <p className="text-muted-foreground text-meta">No note here matches.</p>
+                    ) : (
+                      <>
+                        {pages.length > 1 && (
+                          <nav aria-label={`Areas of ${repo || "any repo"}`} className="mb-2 flex flex-wrap gap-1.5 md:hidden">
+                            {pages.map((g) => (
+                              <button
+                                key={g.area}
+                                type="button"
+                                onClick={() => reveal(areaId(repo, g.area))}
+                                className="bg-muted/50 text-muted-foreground hover:text-foreground hover:border-line-strong focus-visible:ring-ring inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-micro focus-visible:ring-2 focus-visible:outline-none"
+                              >
+                                {g.area}
+                                <span className="text-faint tabular-nums">{g.notes.length}</span>
+                                {g.stale > 0 && <span className="text-faint" title={`${g.stale} unverified`}>· {g.stale}?</span>}
+                              </button>
+                            ))}
+                          </nav>
+                        )}
+                        <Panel>
+                          {groups.map((g) => (
+                            <div key={g.area || "unfiled"} id={g.area ? areaId(repo, g.area) : undefined} className="scroll-mt-24 border-b last:border-b-0">
+                              <AreaHeader group={g} onArea={(a) => reveal(areaId(repo, a))} unfiled={!g.area} />
+                              {REPO_KINDS.map((kind) => {
+                                const rows = g.notes.filter((n) => n.kind === kind);
+                                if (!rows.length) return null;
+                                return (
+                                  <div key={kind}>
+                                    {g.notes.length > 3 && (
+                                      <h4 className="text-faint px-3.5 pt-2 pb-0.5 text-micro font-medium tracking-wide uppercase">
+                                        {KIND_PLURAL[kind]} <span className="tabular-nums">· {rows.length}</span>
+                                      </h4>
+                                    )}
+                                    <ul className={cn("divide-y", dim)}>
+                                      {rows.map((n) => (
+                                        <NoteRow key={n.id} {...rowProps(n)} inArea={!!g.area} />
+                                      ))}
+                                    </ul>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ))}
+                        </Panel>
+                      </>
+                    )}
+                  </SettingsSection>
+                );
+              })}
+
+              {view === "earlier" && (
+                <SettingsSection id="memory-earlier" title="Earlier" meta={plural(model.earlier.length, "replaced note")} purpose="Notes a newer one replaced — kept as history, out of MEMORY.md.">
+                  {!model.earlier.length ? (
+                    <p className="text-muted-foreground text-meta">No replaced note matches.</p>
+                  ) : (
+                    <Panel id="memory-earlier-list">
+                      <ul className="divide-y">
+                        {model.earlier.map((n) => (
+                          <li key={n.id} id={`mem-note-${n.id}`} className="text-muted-foreground flex scroll-mt-24 items-start gap-3 px-3.5 py-2.5">
+                            <KindGlyph kind={n.kind} />
+                            <div className="min-w-0 flex-1">
+                              <p className="text-meta leading-snug break-words line-through decoration-faint">
+                                <Inline text={noteHeadline(n.text)} />
+                              </p>
+                              <p className="text-faint mt-0.5 text-micro">
+                                {model.replacedBy.get(n.id) ? (
+                                  <>
+                                    replaced by <span className="text-muted-foreground">“{noteHeadline(model.replacedBy.get(n.id)!.text)}”</span>
+                                  </>
+                                ) : (
+                                  "replaced"
+                                )}
+                                {n.until != null && ` · ${fmtAgo(Math.floor(n.until / 1000))}`}
+                                {n.repo && ` · ${n.repo}`}
+                              </p>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              aria-label="Delete from history"
+                              title="Forget"
+                              className="hover:text-destructive shrink-0"
+                              onClick={() => void apply(api.memoryNoteDelete(n.id), "Forgotten")}
+                            >
+                              <Trash2 className="size-4" />
+                            </Button>
+                          </li>
+                        ))}
+                      </ul>
+                    </Panel>
+                  )}
+                </SettingsSection>
+              )}
+            </div>
+          </div>
         </>
       )}
     </SettingsPage>
@@ -597,7 +675,7 @@ function NoteRow({
 }: {
   note: MemoryNote;
   onPin: (pinned: boolean) => void;
-  onSave: (patch: { text?: string; area?: string; paths?: string; links?: string }) => Promise<void>;
+  onSave: (patch: { text?: string; area?: string; paths?: string; links?: string; repo?: string }) => Promise<void>;
   onDelete: () => void;
   onKeep: () => void;
   onPromote?: () => void;
@@ -615,8 +693,10 @@ function NoteRow({
   const [dArea, setDArea] = React.useState(note.area ?? "");
   const [dPaths, setDPaths] = React.useState((note.paths ?? []).join(", "));
   const [dLinks, setDLinks] = React.useState((note.links ?? []).join(", "));
+  const [dRepo, setDRepo] = React.useState(note.repo ?? "");
   const startEdit = () => {
     setDraft(note.text);
+    setDRepo(note.repo ?? "");
     setDArea(note.area ?? "");
     setDPaths((note.paths ?? []).join(", "));
     setDLinks((note.links ?? []).join(", "));
@@ -630,9 +710,10 @@ function NoteRow({
   const save = async () => {
     const t = draft.trim();
     if (!t) return setEditing(false);
-    const patch: { text?: string; area?: string; paths?: string; links?: string } = {};
+    const patch: { text?: string; area?: string; paths?: string; links?: string; repo?: string } = {};
     if (t !== note.text) patch.text = t;
     if (kb) {
+      if (dRepo.trim().toLowerCase() !== (note.repo ?? "")) patch.repo = dRepo.trim();
       if (dArea.trim() !== (note.area ?? "")) patch.area = dArea.trim();
       if (dPaths.trim() !== (note.paths ?? []).join(", ")) patch.paths = dPaths.trim();
       if (dLinks.trim() !== (note.links ?? []).join(", ")) patch.links = dLinks.trim();
@@ -670,7 +751,8 @@ function NoteRow({
             aria-label="Note text"
           />
           {kb && (
-            <div className="grid gap-1.5 sm:grid-cols-3">
+            <div className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-4">
+              <input value={dRepo} onChange={(e) => setDRepo(e.target.value)} placeholder="repo · owner/name" className={cn(inputClass, "h-7 text-micro", !note.repo && "border-line-strong")} aria-label="Repo this note belongs to" />
               <input value={dArea} onChange={(e) => setDArea(e.target.value)} placeholder="area · billing/invoicing" className={cn(inputClass, "h-7 text-micro")} aria-label="Area" />
               <input value={dPaths} onChange={(e) => setDPaths(e.target.value)} placeholder="code paths, comma-separated" className={cn(inputClass, "h-7 font-mono text-[11px]")} aria-label="Code paths" />
               <input value={dLinks} onChange={(e) => setDLinks(e.target.value)} placeholder="related areas, comma-separated" className={cn(inputClass, "h-7 text-micro")} aria-label="Related areas" />
