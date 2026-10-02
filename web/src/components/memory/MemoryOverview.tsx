@@ -29,6 +29,8 @@ export function MemoryOverview({
   const repos = new Set(live.filter((n) => n.repo && !isOperatorKind(n.kind)).map((n) => n.repo)).size;
   const you = live.filter((n) => isOperatorKind(n.kind)).length;
   const replaced = notes.length - live.length;
+  const areas = new Set(live.filter((n) => n.area).map((n) => `${n.repo}|${n.area}`)).size;
+  const stale = live.filter((n) => n.stale).length;
 
   return (
     <section aria-label="Memory overview" className="bg-card overflow-hidden rounded-xl border">
@@ -39,6 +41,8 @@ export function MemoryOverview({
             <span className="text-muted-foreground font-normal">
               {" "}
               · {you} about you · {plural(repos, "repo")}
+              {areas > 0 && ` · ${plural(areas, "area")}`}
+              {stale > 0 && ` · ${stale} unverified`}
               {replaced > 0 && ` · ${replaced} replaced`}
             </span>
           )}
@@ -78,6 +82,24 @@ export function MemoryOverview({
               </svg>
               fresh → old
             </li>
+            {areas > 0 && (
+              <li className="text-faint flex items-center gap-1.5 text-micro">
+                <svg viewBox="0 0 22 10" width={22} height={10} aria-hidden className="text-foreground">
+                  <circle cx={4} cy={5} r={3.2} fill="none" stroke="currentColor" strokeOpacity={0.5} />
+                  <line x1={7.2} y1={5} x2={14.8} y2={5} stroke="currentColor" strokeOpacity={0.5} />
+                  <circle cx={18} cy={5} r={3.2} fill="none" stroke="currentColor" strokeOpacity={0.5} />
+                </svg>
+                linked areas
+              </li>
+            )}
+            {stale > 0 && (
+              <li className="text-faint flex items-center gap-1.5 text-micro">
+                <svg viewBox="0 0 12 12" width={11} height={11} aria-hidden className="text-foreground">
+                  <circle cx={6} cy={6} r={4.5} fill="none" stroke="currentColor" strokeOpacity={0.6} strokeWidth={1.2} strokeDasharray="1.5 2" />
+                </svg>
+                unverified
+              </li>
+            )}
             {pending > 0 && (
               <li className="text-faint flex items-center gap-1.5 text-micro">
                 <svg viewBox="0 0 12 12" width={11} height={11} aria-hidden>

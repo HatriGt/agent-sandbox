@@ -252,7 +252,7 @@ function ToolRow({ tool, last }: { tool: Extract<TraceEvent, { kind: "tool" }>; 
   );
 }
 
-const MEMORY_KIND: Record<string, string> = { preference: "Preference", rule: "Rule", fact: "Fact", decision: "Decision", lesson: "Lesson", playbook: "Playbook" };
+const MEMORY_KIND: Record<string, string> = { preference: "Preference", rule: "Rule", domain: "Domain", fact: "Fact", decision: "Decision", lesson: "Lesson", playbook: "Playbook" };
 
 /** A note the agent saved for future runs: one quiet line, never the raw `memory add` plumbing. */
 function MemoryRow({ note, text }: { note: string; text: string }) {

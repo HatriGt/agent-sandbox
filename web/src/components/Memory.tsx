@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Brain, Check, ChevronRight, Download, Pencil, Pin, PinOff, Plus, Search, Sparkles, Trash2, Upload, X } from "lucide-react";
+import { Brain, Check, ChevronRight, Download, Link2, Pencil, Pin, PinOff, Plus, Search, ShieldCheck, Sparkles, Trash2, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError, type MemoryKind, type MemoryNote, type MemoryNotesResponse } from "@/lib/api";
 import { useCached } from "@/lib/cache";
@@ -15,21 +15,36 @@ import { Switch } from "@/components/ui/switch";
 import { Bar } from "@/components/thread/Skeletons";
 import { FilterChip } from "@/components/ui/filter-chip";
 import { MemoryOverview } from "@/components/memory/MemoryOverview";
-import { sectionId } from "@/components/memory/MemoryMap";
+import { areaId, sectionId } from "@/components/memory/MemoryMap";
 import { Inline, NoteStatement, noteHeadline } from "@/components/memory/noteText";
 import { isOperatorKind, KIND_ICON, KIND_LABEL, KIND_PLURAL, KINDS, plural } from "@/components/memory/kinds";
 
 /**
  * Memory: what earlier runs left for future ones (src/memory-store.ts), typed and scoped.
  *   · You — preferences and rules that follow the operator into every run.
- *   · One section per repo — playbooks, lessons, decisions, facts the runs on that repo learned.
+ *   · One knowledge base per repo — its notes filed by AREA (a part of the app: `billing/invoicing`),
+ *     each area a page with the code it describes, the areas it links to, and its notes: domain
+ *     knowledge first, then decisions, lessons, facts, playbooks. Notes without an area sit last.
  *   · Earlier — notes a newer one replaced; greyed, kept as history, out of MEMORY.md.
+ * A note whose anchored code changed since is "unverified" until a run reaffirms it or the operator
+ * marks it verified here.
  * Every row is a stored note; nothing here is derived or guessed. Pending rows are proposals the
  * thread toast did not settle yet — Keep/Forget inline. The header adds a preference or rule by
  * hand, moves the whole set in and out as one Markdown file, and turns the feature off.
  */
 
-const REPO_KINDS: MemoryKind[] = ["playbook", "lesson", "decision", "fact"];
+const REPO_KINDS: MemoryKind[] = ["domain", "decision", "lesson", "fact", "playbook"];
+
+/** A repo's knowledge base: its areas (pages), biggest first, then the notes filed nowhere. */
+type AreaGroup = { area: string; notes: MemoryNote[]; paths: string[]; links: string[]; stale: number };
+function areaGroups(list: MemoryNote[]): AreaGroup[] {
+  const by = new Map<string, MemoryNote[]>();
+  for (const n of list) by.set(n.area ?? "", [...(by.get(n.area ?? "") ?? []), n]);
+  const uniq = (xs: string[]) => [...new Set(xs)];
+  return [...by.entries()]
+    .map(([area, notes]) => ({ area, notes, paths: uniq(notes.flatMap((n) => n.paths ?? [])), links: uniq(notes.flatMap((n) => n.links ?? [])).filter((l) => l !== area), stale: notes.filter((n) => n.stale).length }))
+    .sort((a, b) => (a.area === "" ? 1 : b.area === "" ? -1 : b.notes.length - a.notes.length || a.area.localeCompare(b.area)));
+}
 
 type Apply = (p: Promise<MemoryNotesResponse>, ok?: string) => Promise<void>;
 
@@ -60,7 +75,9 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
     const all = notes ?? [];
     const byId = new Map(all.map((n) => [n.id, n]));
     const q = query.trim().toLowerCase();
-    const matches = (n: MemoryNote) => (kindFilter === "all" || n.kind === kindFilter) && (!q || `${n.text} ${n.why ?? ""} ${n.repo ?? ""}`.toLowerCase().includes(q));
+    const matches = (n: MemoryNote) =>
+      (kindFilter === "all" || n.kind === kindFilter) &&
+      (!q || (q.startsWith("area:") ? (n.area ?? "").includes(q.slice(5).trim()) : `${n.text} ${n.why ?? ""} ${n.repo ?? ""} ${n.area ?? ""} ${(n.paths ?? []).join(" ")}`.toLowerCase().includes(q)));
     const liveAll = all.filter((n) => n.until == null);
     const counts = Object.fromEntries(KINDS.map((k) => [k, liveAll.filter((n) => n.kind === k).length])) as Record<MemoryKind, number>;
     // Pending proposals sit only in the review strip at the top, oldest first (closest to auto-keep).
@@ -121,12 +138,33 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
     }
   };
 
+  /** From the map or a link chip: show the row/section (clearing filters, opening history if needed), scroll to it, flash it. */
+  const reveal = (elId: string, ghost = false) => {
+    setQuery("");
+    setKindFilter("all");
+    if (ghost) setEarlierOpen(true);
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        // A SettingsSection carries its id on the heading (`<id>-h`); rows and area pages on themselves.
+        const el = document.getElementById(elId) ?? document.getElementById(`${elId}-h`);
+        if (!el) return;
+        const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+        el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "center" });
+        el.classList.remove("mm-flash");
+        void el.offsetWidth;
+        el.classList.add("mm-flash");
+        setTimeout(() => el.classList.remove("mm-flash"), 2000);
+      }),
+    );
+  };
   const rowProps = (n: MemoryNote) => ({
     note: n,
     onPin: (pinned: boolean) => void apply(api.memoryNoteUpdate({ id: n.id, pinned })),
-    onSave: (text: string) => apply(api.memoryNoteUpdate({ id: n.id, text }), "Note updated"),
+    onSave: (patch: { text?: string; area?: string; paths?: string; links?: string }) => apply(api.memoryNoteUpdate({ id: n.id, ...patch }), "Note updated"),
     onDelete: () => void apply(api.memoryNoteDelete(n.id), "Forgotten"),
     onKeep: () => void apply(api.memoryNoteUpdate({ id: n.id, status: "kept" }), "Kept"),
+    onVerify: n.stale ? () => void apply(api.memoryNoteUpdate({ id: n.id, verified: true }), "Marked verified") : undefined,
+    onArea: (area: string) => reveal(areaId(n.repo ?? "", area)),
     onPromote: n.kind === "playbook" ? () => promote(n) : undefined,
   });
   const promote = async (n: MemoryNote) => {
@@ -146,31 +184,13 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
   };
 
   const total = notes?.length ?? 0;
-  /** From the map: show the row (clearing filters, opening history if needed), scroll to it, flash it. */
-  const reveal = (elId: string, ghost = false) => {
-    setQuery("");
-    setKindFilter("all");
-    if (ghost) setEarlierOpen(true);
-    requestAnimationFrame(() =>
-      requestAnimationFrame(() => {
-        const el = document.getElementById(elId);
-        if (!el) return;
-        const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-        el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "center" });
-        el.classList.remove("mm-flash");
-        void el.offsetWidth;
-        el.classList.add("mm-flash");
-        setTimeout(() => el.classList.remove("mm-flash"), 2000);
-      }),
-    );
-  };
   const selectNote = (id: string) => reveal(`mem-note-${id}`, notes?.find((n) => n.id === id)?.until != null);
   const dim = !data?.enabled && "opacity-60";
 
   return (
     <SettingsPage
       title="Memory"
-      purpose="What your agents learned on earlier runs — your preferences, each repo's playbooks, lessons and facts — handed to every new run as MEMORY.md."
+      purpose="What your agents learned on earlier runs — your preferences, and a knowledge base per repo of how the product works, filed by area — handed to every new run as MEMORY.md."
       back={{ label: "Back", onClick: onBack, mobileOnly: true }}
       actions={
         data && (
@@ -258,7 +278,7 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
               <label className="relative ml-auto w-full sm:w-56">
                 <span className="sr-only">Search notes</span>
                 <Search className="text-faint pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2" aria-hidden />
-                <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Escape" && setQuery("")} placeholder="Search notes" className={cn(inputClass, "h-8 pl-8")} />
+                <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} onKeyDown={(e) => e.key === "Escape" && setQuery("")} placeholder="Search notes · area:billing" className={cn(inputClass, "h-8 pl-8")} />
               </label>
             </div>
           </div>
@@ -288,28 +308,61 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
             </SettingsSection>
           )}
 
-          {model.repos.map(([repo, list]) => (
-            <SettingsSection key={repo || "global"} id={sectionId(repo)} title={repo || "Any repo"} meta={plural(list.length, "note")}>
-              <Panel>
-                {REPO_KINDS.map((kind) => {
-                  const rows = list.filter((n) => n.kind === kind);
-                  if (!rows.length) return null;
-                  return (
-                    <div key={kind} className="border-b last:border-b-0">
-                      <h3 className="text-muted-foreground bg-muted/40 border-b px-3.5 py-1.5 text-micro font-medium tracking-wide uppercase">
-                        {KIND_PLURAL[kind]} <span className="text-faint tabular-nums">· {rows.length}</span>
-                      </h3>
-                      <ul className={cn("divide-y", dim)}>
-                        {rows.map((n) => (
-                          <NoteRow key={n.id} {...rowProps(n)} />
-                        ))}
-                      </ul>
+          {model.repos.map(([repo, list]) => {
+            const groups = areaGroups(list);
+            const pages = groups.filter((g) => g.area);
+            return (
+              <SettingsSection
+                key={repo || "global"}
+                id={sectionId(repo)}
+                title={repo || "Any repo"}
+                meta={pages.length ? `${plural(pages.length, "area")} · ${plural(list.length, "note")}` : plural(list.length, "note")}
+                purpose={pages.length ? "Knowledge base — how this product works, by area. Runs read the areas a task is about and keep them current." : undefined}
+              >
+                {pages.length > 1 && (
+                  <nav aria-label={`Areas of ${repo || "any repo"}`} className="mb-2 flex flex-wrap gap-1.5">
+                    {pages.map((g) => (
+                      <button
+                        key={g.area}
+                        type="button"
+                        onClick={() => reveal(areaId(repo, g.area))}
+                        className="bg-muted/50 text-muted-foreground hover:text-foreground hover:border-line-strong focus-visible:ring-ring inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-micro focus-visible:ring-2 focus-visible:outline-none"
+                      >
+                        {g.area}
+                        <span className="text-faint tabular-nums">{g.notes.length}</span>
+                        {g.stale > 0 && <span className="text-faint" title={`${g.stale} unverified`}>· {g.stale}?</span>}
+                      </button>
+                    ))}
+                  </nav>
+                )}
+                <Panel>
+                  {groups.map((g) => (
+                    <div key={g.area || "unfiled"} id={g.area ? areaId(repo, g.area) : undefined} className="scroll-mt-24 border-b last:border-b-0">
+                      <AreaHeader group={g} onArea={(a) => reveal(areaId(repo, a))} unfiled={!g.area} />
+                      {REPO_KINDS.map((kind) => {
+                        const rows = g.notes.filter((n) => n.kind === kind);
+                        if (!rows.length) return null;
+                        return (
+                          <div key={kind}>
+                            {g.notes.length > 3 && (
+                              <h4 className="text-faint px-3.5 pt-2 pb-0.5 text-micro font-medium tracking-wide uppercase">
+                                {KIND_PLURAL[kind]} <span className="tabular-nums">· {rows.length}</span>
+                              </h4>
+                            )}
+                            <ul className={cn("divide-y", dim)}>
+                              {rows.map((n) => (
+                                <NoteRow key={n.id} {...rowProps(n)} inArea={!!g.area} />
+                              ))}
+                            </ul>
+                          </div>
+                        );
+                      })}
                     </div>
-                  );
-                })}
-              </Panel>
-            </SettingsSection>
-          ))}
+                  ))}
+                </Panel>
+              </SettingsSection>
+            );
+          })}
 
           {model.earlier.length > 0 && (
             <SettingsSection
@@ -372,10 +425,48 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
   );
 }
 
-/** Add a preference or rule by hand. Other kinds come from runs; a hand-written "fact" is a preference. */
-function Composer({ id, onAdd, onCancel }: { id: string; onAdd: (add: { kind: MemoryKind; text: string }) => Promise<void>; onCancel: () => void }) {
-  const [kind, setKind] = React.useState<"preference" | "rule">("preference");
+/** The header of one knowledge-base page: the area, the code it describes, the areas it links to. */
+function AreaHeader({ group: g, onArea, unfiled }: { group: AreaGroup; onArea: (area: string) => void; unfiled: boolean }) {
+  return (
+    <div className="bg-muted/40 flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b px-3.5 py-2">
+      <h3 className="text-foreground text-meta font-medium">
+        {unfiled ? <span className="text-muted-foreground">Not filed under an area</span> : g.area}
+        <span className="text-faint ml-1.5 text-micro font-normal tabular-nums">{plural(g.notes.length, "note")}</span>
+        {g.stale > 0 && <span className="text-muted-foreground ml-1.5 text-micro font-normal tabular-nums">· {g.stale} unverified</span>}
+      </h3>
+      {g.paths.length > 0 && (
+        <p className="text-faint flex min-w-0 flex-wrap items-center gap-1 text-micro">
+          <span>code</span>
+          {g.paths.slice(0, 5).map((p) => (
+            <code key={p} className="bg-muted rounded px-1 py-px font-mono text-[11px] break-all">
+              {p}
+            </code>
+          ))}
+          {g.paths.length > 5 && <span>+{g.paths.length - 5}</span>}
+        </p>
+      )}
+      {g.links.length > 0 && (
+        <p className="text-faint flex flex-wrap items-center gap-1 text-micro">
+          <Link2 className="size-3" aria-hidden />
+          {g.links.map((l) => (
+            <button key={l} type="button" onClick={() => onArea(l)} className="hover:text-foreground focus-visible:ring-ring rounded-sm underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none">
+              {l}
+            </button>
+          ))}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Add a preference, rule, or a piece of domain knowledge by hand. */
+function Composer({ id, onAdd, onCancel }: { id: string; onAdd: (add: { kind: MemoryKind; text: string; repo?: string; area?: string; paths?: string; links?: string }) => Promise<void>; onCancel: () => void }) {
+  const [kind, setKind] = React.useState<"preference" | "rule" | "domain">("preference");
   const [text, setText] = React.useState("");
+  const [repo, setRepo] = React.useState("");
+  const [area, setArea] = React.useState("");
+  const [paths, setPaths] = React.useState("");
+  const [links, setLinks] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const ref = React.useRef<HTMLTextAreaElement>(null);
   React.useEffect(() => {
@@ -384,9 +475,10 @@ function Composer({ id, onAdd, onCancel }: { id: string; onAdd: (add: { kind: Me
   const submit = async () => {
     const t = text.trim();
     if (!t || busy) return;
+    if (kind === "domain" && (!repo.trim() || !area.trim())) return;
     setBusy(true);
     try {
-      await onAdd({ kind, text: t });
+      await onAdd(kind === "domain" ? { kind, text: t, repo: repo.trim(), area: area.trim(), paths: paths.trim() || undefined, links: links.trim() || undefined } : { kind, text: t });
       setText("");
     } finally {
       setBusy(false);
@@ -418,18 +510,35 @@ function Composer({ id, onAdd, onCancel }: { id: string; onAdd: (add: { kind: Me
               label: "Rule",
               title: "When X, do Y — a standing instruction",
             },
+            {
+              value: "domain",
+              label: "Domain",
+              title: "How the product works, filed under an area of a repo",
+            },
           ]}
         />
         <span className="text-muted-foreground text-micro">
-          {kind === "preference" ? "Taste that follows you into every run — “reply short”, “always pnpm”." : "A trigger and what to do — “when I say deploy, run the tests first”."}
+          {kind === "preference"
+            ? "Taste that follows you into every run — “reply short”, “always pnpm”."
+            : kind === "rule"
+              ? "A trigger and what to do — “when I say deploy, run the tests first”."
+              : "An entity, a flow, a business rule — “annual plans are invoiced on the 1st”. Filed under an area so runs find it."}
         </span>
       </div>
+      {kind === "domain" && (
+        <div className="grid gap-2 sm:grid-cols-2">
+          <input value={repo} onChange={(e) => setRepo(e.target.value)} placeholder="owner/repo" className={cn(inputClass, "h-8")} aria-label="Repo" required />
+          <input value={area} onChange={(e) => setArea(e.target.value)} placeholder="area · billing/invoicing" className={cn(inputClass, "h-8")} aria-label="Area" required />
+          <input value={paths} onChange={(e) => setPaths(e.target.value)} placeholder="code paths · src/billing/*, src/api/invoices.ts" className={cn(inputClass, "h-8 font-mono text-[12px]")} aria-label="Code paths" />
+          <input value={links} onChange={(e) => setLinks(e.target.value)} placeholder="related areas · orders/refunds" className={cn(inputClass, "h-8")} aria-label="Related areas" />
+        </div>
+      )}
       <textarea
         ref={ref}
         value={text}
-        maxLength={400}
+        maxLength={kind === "domain" ? 600 : 400}
         rows={2}
-        placeholder={kind === "preference" ? "Keep replies short; prefer pure SVG over chart libraries" : "When I say “ship it”, run the tests and open a PR instead of pushing to main"}
+        placeholder={kind === "preference" ? "Keep replies short; prefer pure SVG over chart libraries" : kind === "rule" ? "When I say “ship it”, run the tests and open a PR instead of pushing to main" : "A refund reopens the order for 24 hours; after that it needs a new order"}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === "Escape") onCancel();
@@ -439,14 +548,16 @@ function Composer({ id, onAdd, onCancel }: { id: string; onAdd: (add: { kind: Me
         aria-label={`${KIND_LABEL[kind]} text`}
       />
       <div className="flex items-center gap-1">
-        <Button type="submit" size="sm" disabled={!text.trim()} loading={busy}>
+        <Button type="submit" size="sm" disabled={!text.trim() || (kind === "domain" && (!repo.trim() || !area.trim()))} loading={busy}>
           <Check className="size-4" />
           Remember
         </Button>
         <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
           Cancel
         </Button>
-        <span className="text-faint ml-auto text-micro tabular-nums">{text.length}/400</span>
+        <span className="text-faint ml-auto text-micro tabular-nums">
+          {text.length}/{kind === "domain" ? 600 : 400}
+        </span>
       </div>
     </form>
   );
@@ -479,20 +590,38 @@ function NoteRow({
   onDelete,
   onKeep,
   onPromote,
+  onVerify,
+  onArea,
   showRepo,
+  inArea,
 }: {
   note: MemoryNote;
   onPin: (pinned: boolean) => void;
-  onSave: (text: string) => Promise<void>;
+  onSave: (patch: { text?: string; area?: string; paths?: string; links?: string }) => Promise<void>;
   onDelete: () => void;
   onKeep: () => void;
   onPromote?: () => void;
+  onVerify?: () => void;
+  onArea?: (area: string) => void;
   showRepo?: boolean;
+  /** The row sits under its area's header: don't repeat the area on the row. */
+  inArea?: boolean;
 }) {
   const [editing, setEditing] = React.useState(false);
   const [stepsOpen, setStepsOpen] = React.useState(false);
   const stepsId = React.useId();
   const [draft, setDraft] = React.useState(note.text);
+  const kb = !isOperatorKind(note.kind);
+  const [dArea, setDArea] = React.useState(note.area ?? "");
+  const [dPaths, setDPaths] = React.useState((note.paths ?? []).join(", "));
+  const [dLinks, setDLinks] = React.useState((note.links ?? []).join(", "));
+  const startEdit = () => {
+    setDraft(note.text);
+    setDArea(note.area ?? "");
+    setDPaths((note.paths ?? []).join(", "));
+    setDLinks((note.links ?? []).join(", "));
+    setEditing(true);
+  };
   const ref = React.useRef<HTMLTextAreaElement>(null);
   React.useEffect(() => {
     if (editing) ref.current?.focus();
@@ -500,8 +629,15 @@ function NoteRow({
 
   const save = async () => {
     const t = draft.trim();
-    if (!t || t === note.text) return setEditing(false);
-    await onSave(t);
+    if (!t) return setEditing(false);
+    const patch: { text?: string; area?: string; paths?: string; links?: string } = {};
+    if (t !== note.text) patch.text = t;
+    if (kb) {
+      if (dArea.trim() !== (note.area ?? "")) patch.area = dArea.trim();
+      if (dPaths.trim() !== (note.paths ?? []).join(", ")) patch.paths = dPaths.trim();
+      if (dLinks.trim() !== (note.links ?? []).join(", ")) patch.links = dLinks.trim();
+    }
+    if (Object.keys(patch).length) await onSave(patch);
     setEditing(false);
   };
   const pending = note.status === "pending";
@@ -523,7 +659,7 @@ function NoteRow({
           <textarea
             ref={ref}
             value={draft}
-            maxLength={playbook ? 1200 : 400}
+            maxLength={playbook ? 1200 : note.kind === "domain" ? 600 : 400}
             rows={playbook ? 6 : 2}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
@@ -533,6 +669,13 @@ function NoteRow({
             className={cn(inputClass, "h-auto resize-none py-1.5")}
             aria-label="Note text"
           />
+          {kb && (
+            <div className="grid gap-1.5 sm:grid-cols-3">
+              <input value={dArea} onChange={(e) => setDArea(e.target.value)} placeholder="area · billing/invoicing" className={cn(inputClass, "h-7 text-micro")} aria-label="Area" />
+              <input value={dPaths} onChange={(e) => setDPaths(e.target.value)} placeholder="code paths, comma-separated" className={cn(inputClass, "h-7 font-mono text-[11px]")} aria-label="Code paths" />
+              <input value={dLinks} onChange={(e) => setDLinks(e.target.value)} placeholder="related areas, comma-separated" className={cn(inputClass, "h-7 text-micro")} aria-label="Related areas" />
+            </div>
+          )}
           <div className="flex items-center gap-1">
             <Button type="submit" size="sm">
               <Check className="size-4" />
@@ -564,9 +707,41 @@ function NoteRow({
             )}{" "}
             · {fmtAgo(Math.floor(note.at / 1000))}
             {showRepo && ` · ${note.repo ?? (isOperatorKind(note.kind) ? "about you" : "any repo")}`}
+            {note.area && !inArea && (
+              <>
+                {" · "}
+                <button type="button" onClick={() => onArea?.(note.area!)} className="hover:text-foreground focus-visible:ring-ring rounded-sm underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none">
+                  {note.area}
+                </button>
+              </>
+            )}
             {note.pinned && " · pinned"}
             {playbook && uses > 0 && ` · used ${uses}×`}
+            {note.paths && note.paths.length > 0 && (
+              <>
+                {" · "}
+                <span className="font-mono">{note.paths.slice(0, 2).join(", ")}</span>
+                {note.paths.length > 2 && ` +${note.paths.length - 2}`}
+              </>
+            )}
           </p>
+          {note.stale && (
+            <p className="text-muted-foreground mt-0.5 flex flex-wrap items-center gap-x-2 text-micro">
+              <span>
+                Unverified since {fmtAgo(Math.floor(note.stale.at / 1000))} — <span className="font-mono">{note.stale.paths.slice(0, 2).join(", ")}</span> changed in{" "}
+                <a href={`/dashboard/box/${encodeURIComponent(note.stale.box)}`} className="hover:text-foreground underline-offset-2 hover:underline">
+                  {friendlyName(note.stale.box)}
+                </a>
+                . The next run in this area will confirm or replace it.
+              </span>
+              {onVerify && (
+                <Button size="xs" variant="outline" onClick={onVerify} aria-label={`Mark verified: ${noteHeadline(note.text).slice(0, 60)}`}>
+                  <ShieldCheck className="size-3.5" />
+                  Still true
+                </Button>
+              )}
+            </p>
+          )}
           {pending && (
             <div className="mt-1.5 flex items-center gap-1">
               <Button size="xs" onClick={onKeep} aria-label={`Keep: ${noteHeadline(note.text).slice(0, 60)}`}>
@@ -609,7 +784,7 @@ function NoteRow({
           >
             {note.pinned ? <PinOff className="size-4" /> : <Pin className="size-4" />}
           </Button>
-          <Button variant="ghost" size="icon-sm" aria-label="Edit note" title="Edit" onClick={() => (setDraft(note.text), setEditing(true))}>
+          <Button variant="ghost" size="icon-sm" aria-label="Edit note" title="Edit" onClick={startEdit}>
             <Pencil className="size-4" />
           </Button>
           <Button variant="ghost" size="icon-sm" aria-label="Delete note" title="Forget" className="hover:text-destructive" onClick={onDelete}>

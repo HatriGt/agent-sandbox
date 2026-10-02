@@ -209,7 +209,7 @@ export interface SkillsResponse {
 }
 
 /** What a memory note is (src/memory-store.ts): taste, standing instruction, repo knowledge, a choice, a correction, a how-to. */
-export type MemoryKind = "preference" | "rule" | "fact" | "decision" | "lesson" | "playbook";
+export type MemoryKind = "preference" | "rule" | "domain" | "fact" | "decision" | "lesson" | "playbook";
 /** A note an earlier run left for future runs (src/memory-store.ts). */
 export interface MemoryNote {
   id: string;
@@ -234,6 +234,12 @@ export interface MemoryNote {
   /** Playbooks: how many runs matched it (promote-to-skill signal). */
   uses?: number;
   lastUsed?: number;
+  /** Knowledge base: the area (page) a repo note belongs to, the code it describes, related areas. */
+  area?: string;
+  paths?: string[];
+  links?: string[];
+  /** Set when a later run changed code the note is anchored to; cleared when reaffirmed or marked verified. */
+  stale?: { at: number; box: string; paths: string[] };
 }
 export interface MemoryNotesResponse {
   enabled: boolean;
@@ -247,6 +253,9 @@ export interface MemoryNew {
   why?: string;
   status: "pending" | "kept";
   at: number;
+  area?: string;
+  /** The note rewrote an older one (the toast reads "Updated"). */
+  revises?: boolean;
 }
 
 /** A saved harness (src/harness.ts). Never carries a key: a provider is referenced by id only. */
@@ -895,9 +904,10 @@ export const api = {
   skillMutate: (body: Record<string, unknown>) => post<SkillsResponse>("/skills.json", body),
   /** Memory across runs: the owner's notes. Not /memory.json, which is the VM's RAM. */
   memoryNotes: (signal?: AbortSignal) => fetch(url("/memory-notes.json"), { headers: authHeaders, signal }).then(parse<MemoryNotesResponse>),
-  memoryNoteUpdate: (body: { enabled: boolean } | { id: string; text?: string; why?: string; pinned?: boolean; status?: "kept" }) => post<MemoryNotesResponse>("/memory-notes.json", body),
+  memoryNoteUpdate: (body: { enabled: boolean } | { id: string; text?: string; why?: string; pinned?: boolean; status?: "kept"; area?: string; paths?: string; links?: string; verified?: boolean }) =>
+    post<MemoryNotesResponse>("/memory-notes.json", body),
   /** Add a preference/rule by hand (the composer on the Memory page). */
-  memoryNoteAdd: (add: { kind: MemoryKind; text: string; why?: string; repo?: string }) => post<MemoryNotesResponse>("/memory-notes.json", { add }),
+  memoryNoteAdd: (add: { kind: MemoryKind; text: string; why?: string; repo?: string; area?: string; paths?: string; links?: string }) => post<MemoryNotesResponse>("/memory-notes.json", { add }),
   memoryNoteDelete: (id: string) =>
     fetch(url("/memory-notes.json", { id }), { method: "DELETE", headers: authHeaders }).then(parse<MemoryNotesResponse>),
   /** Turn a playbook note into a SKILL.md draft in the skill store. 409 when a skill of that name exists. */

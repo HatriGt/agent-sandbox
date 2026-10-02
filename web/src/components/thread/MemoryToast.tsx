@@ -41,6 +41,7 @@ function markSeen(ids: string[]) {
 const KIND_LABEL: Record<MemoryKind, string> = {
   preference: "Preference",
   rule: "Rule",
+  domain: "Domain knowledge",
   fact: "Fact",
   decision: "Decision",
   lesson: "Lesson",
@@ -168,7 +169,15 @@ function ProposalToast({ note, toastId }: { note: MemoryNew; toastId: string | n
     if (!settled.has(note.id)) showProposal(note, editing ? "edit" : "view");
   }, [editing, note]);
 
-  const label = note.kind === "playbook" ? "Playbook to remember" : note.kind === "lesson" ? "Lesson to remember" : `${KIND_LABEL[note.kind]} to remember`;
+  const label = note.revises
+    ? `Updated${note.area ? ` · ${note.area}` : ""}`
+    : note.kind === "playbook"
+      ? "Playbook to remember"
+      : note.kind === "lesson"
+        ? "Lesson to remember"
+        : note.kind === "domain"
+          ? `Domain knowledge${note.area ? ` · ${note.area}` : ""}`
+          : `${KIND_LABEL[note.kind]} to remember`;
   const canSave = draft.trim().length > 0;
 
   return (

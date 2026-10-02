@@ -48,6 +48,7 @@ export function LifecycleItem({ label, detail }: { label: string; detail?: strin
 const MEMORY_KIND: Record<string, string> = {
   preference: "Preference",
   rule: "Rule",
+  domain: "Domain",
   fact: "Fact",
   decision: "Decision",
   lesson: "Lesson",
@@ -59,7 +60,7 @@ const MEMORY_KIND: Record<string, string> = {
  * mechanics (the `memory add` call, the sentinel) never render; the note itself links to the
  * Memory page, where it can be edited or forgotten.
  */
-export function MemoryItem({ notes }: { notes: { note: string; text: string }[] }) {
+export function MemoryItem({ notes }: { notes: { note: string; text: string; area?: string; updated?: boolean }[] }) {
   return (
     <div className="enter flex min-w-0 items-start gap-3 py-0.5">
       <a
@@ -72,7 +73,12 @@ export function MemoryItem({ notes }: { notes: { note: string; text: string }[] 
       <ul className="min-w-0 flex-1 space-y-0.5">
         {notes.map((n, i) => (
           <li key={i} className="text-faint truncate text-micro" title={n.text}>
-            <span className="text-muted-foreground">{MEMORY_KIND[n.note] ?? "Note"}</span> · {n.text}
+            <span className="text-muted-foreground">
+              {n.updated ? "Updated · " : ""}
+              {MEMORY_KIND[n.note] ?? "Note"}
+              {n.area ? ` · ${n.area}` : ""}
+            </span>{" "}
+            · {n.text}
           </li>
         ))}
       </ul>

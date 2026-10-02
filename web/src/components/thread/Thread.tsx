@@ -1116,7 +1116,7 @@ type TraceGroup =
   | { kind: "mcp-connect"; server: string }
   | { kind: "think"; text: string }
   | { kind: "plan"; board: TaskBoard }
-  | { kind: "memory"; notes: { note: string; text: string }[] };
+  | { kind: "memory"; notes: { note: string; text: string; area?: string; updated?: boolean }[] };
 
 function groupTrace(events: TraceEvent[]): TraceGroup[] {
   const out: TraceGroup[] = [];
@@ -1163,8 +1163,9 @@ function groupTrace(events: TraceEvent[]): TraceGroup[] {
     } else if (e.kind === "memory") {
       // Saved-for-later notes sit apart from the work fold; back-to-back saves share one row.
       const last = out[out.length - 1];
-      if (last?.kind === "memory") last.notes.push({ note: e.note, text: e.text });
-      else out.push({ kind: "memory", notes: [{ note: e.note, text: e.text }] });
+      const row = { note: e.note, text: e.text, ...(e.area ? { area: e.area } : {}), ...(e.updated ? { updated: true } : {}) };
+      if (last?.kind === "memory") last.notes.push(row);
+      else out.push({ kind: "memory", notes: [row] });
     } else if (e.kind === "usage") {
       // Bookkeeping, not conversation: the context meter reads it; the thread never renders it.
     } else {
