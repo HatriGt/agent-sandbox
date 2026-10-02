@@ -33,7 +33,7 @@ import { ChatContainerContent, ChatContainerRoot, ChatContainerScrollAnchor } fr
 import type { TraceEvent } from "@/lib/trace";
 import { LiveRegistryContext, SayKeyContext } from "@/components/viz/live-blocks";
 import { buildLiveRegistry, type SayInput } from "@/lib/viz-identity";
-import { AgentLabel, AnsweredQuestionItem, Density, LifecycleItem, ObserverItem, PlanCard, QueuedItem, RepeatedPolls, SayItem, ThinkingItem, ToolGroup, WorkingIndicator, YouItem, repeatedPolls, type ThreadDensity } from "./TraceItems";
+import { AgentLabel, AnsweredQuestionItem, Density, LifecycleItem, MemoryItem, ObserverItem, PlanCard, QueuedItem, RepeatedPolls, SayItem, ThinkingItem, ToolGroup, WorkingIndicator, YouItem, repeatedPolls, type ThreadDensity } from "./TraceItems";
 import { PlanDock } from "./PlanBoard";
 import { ThreadMinimap, type Turn } from "./ThreadMinimap";
 import { useStickToBottom } from "use-stick-to-bottom";
@@ -813,6 +813,8 @@ export function Thread({
                   {opensAgent && <AgentLabel live={liveHere} />}
                   {(density === "trace" || liveHere) && <ThinkingItem text={g.text} live={liveHere} />}
                 </div>
+              ) : g.kind === "memory" ? (
+                <MemoryItem key={key} notes={g.notes} />
               ) : g.kind === "plan" ? (
                 // The dock owns the plan on wide screens; in flow it would be the same board twice.
                 <div key={key} className="xl:hidden">
@@ -1113,7 +1115,8 @@ type TraceGroup =
   | { kind: "tools"; events: ToolEvent[] }
   | { kind: "mcp-connect"; server: string }
   | { kind: "think"; text: string }
-  | { kind: "plan"; board: TaskBoard };
+  | { kind: "plan"; board: TaskBoard }
+  | { kind: "memory"; notes: { note: string; text: string }[] };
 
 function groupTrace(events: TraceEvent[]): TraceGroup[] {
   const out: TraceGroup[] = [];
@@ -1157,6 +1160,11 @@ function groupTrace(events: TraceEvent[]): TraceGroup[] {
       // The plan is a living document: every TodoWrite re-emits the whole list. Show it ONCE, where
       // it first appeared, in its latest state — so the checklist ticks in place instead of stacking.
       if (board && !out.some((g) => g.kind === "plan")) out.push({ kind: "plan", board });
+    } else if (e.kind === "memory") {
+      // Saved-for-later notes sit apart from the work fold; back-to-back saves share one row.
+      const last = out[out.length - 1];
+      if (last?.kind === "memory") last.notes.push({ note: e.note, text: e.text });
+      else out.push({ kind: "memory", notes: [{ note: e.note, text: e.text }] });
     } else if (e.kind === "usage") {
       // Bookkeeping, not conversation: the context meter reads it; the thread never renders it.
     } else {

@@ -605,3 +605,23 @@ test("omp partial tool output streams, resets, and is superseded by the final re
   assert.ok(!t.streaming);
   assert.equal(t.result.trim(), "a=1\na=2\ndone");
 });
+
+test("memory bookkeeping never reaches the chat: memory tool calls hidden, sentinels skipped mid-result", () => {
+  const log = [
+    "Noting that.",
+    "→ bash: memory add preference \"use du\" ⟦#aaa⟧",
+    "→ bash: du -sh /x ⟦#bbb⟧",
+    "<!-- remember: preference | use du -->",
+    "  ⟦#aaa⟧ memory: noted (preference). It reaches MEMORY.md on the next run.",
+    "  ⟦#bbb⟧ 160K\t/x",
+    "Done. <!-- remember: fact | x is small -->",
+  ].join("\n");
+  const ev = parseTrace(log);
+  const json = JSON.stringify(ev);
+  assert.ok(!/memory add|remember:|memory: noted|⟦/.test(json), json);
+  const du = ev.find((e) => e.kind === "tool" && e.arg === "du -sh /x");
+  assert.ok(du && du.kind === "tool" && du.result?.includes("160K"));
+  assert.ok(ev.some((e) => e.kind === "say" && e.text === "Done."));
+  const mem = ev.filter((e) => e.kind === "memory").map((e) => e.kind === "memory" && `${e.note}:${e.text}`);
+  assert.deepEqual(mem, ["preference:use du", "fact:x is small"]);
+});

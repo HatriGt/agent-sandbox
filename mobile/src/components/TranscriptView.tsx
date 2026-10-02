@@ -60,6 +60,8 @@ export const ThreadRow = memo(function ThreadRow({
         return <ThinkRow text={item.text} />;
       case "plan":
         return <PlanRow items={item.items} />;
+      case "memory":
+        return <MemoryRow note={item.note} text={item.text} />;
       case "lifecycle":
         return <LifecycleRow label={item.label} detail={item.detail} />;
       default:
@@ -247,6 +249,17 @@ function ToolRow({ tool, last }: { tool: Extract<TraceEvent, { kind: "tool" }>; 
         </View>
       ) : null}
     </View>
+  );
+}
+
+const MEMORY_KIND: Record<string, string> = { preference: "Preference", rule: "Rule", fact: "Fact", decision: "Decision", lesson: "Lesson", playbook: "Playbook" };
+
+/** A note the agent saved for future runs: one quiet line, never the raw `memory add` plumbing. */
+function MemoryRow({ note, text }: { note: string; text: string }) {
+  return (
+    <T variant="meta" tone="faint" numberOfLines={1} style={{ marginVertical: 4 }}>
+      Remembered · {MEMORY_KIND[note] ?? "Note"} — {text}
+    </T>
   );
 }
 

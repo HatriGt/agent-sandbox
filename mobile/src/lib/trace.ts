@@ -20,12 +20,23 @@
 
 export type TraceEvent =
   | { kind: "lifecycle"; label: string; detail?: string }
-  | { kind: "say"; text: string }
-  | { kind: "you"; text: string }
-  | { kind: "tool"; name: string; arg?: string; result?: string; failed?: boolean; diff?: string }
+  /** `at` (epoch ms) comes from the formatter's ⟦at⟧ stamps; absent on logs written before them. */
+  | { kind: "say"; text: string; at?: number }
+  | { kind: "you"; text: string; at?: number }
+  /**
+   * `at` is when the call was issued; `ms` is result stamp − call stamp, once both are known.
+   * `streaming`: a background shell still producing output — `result` is the output seen so far,
+   * folded in from the agent's BashOutput/TaskOutput polls (see foldBackgroundShells).
+   */
+  | { kind: "tool"; name: string; arg?: string; result?: string; failed?: boolean; diff?: string; at?: number; ms?: number; streaming?: boolean }
   | { kind: "think"; text: string }
   /** A TodoWrite snapshot. `at` is the formatter's wall-clock ms; absent on logs written before it. */
   | { kind: "plan"; items: PlanItem[]; at?: number }
+  /**
+   * Something the agent saved to memory (a `<!-- remember: … -->` sentinel, written by it or by the
+   * box's `memory add`). The controller harvests the note; the thread shows one quiet row for it.
+   */
+  | { kind: "memory"; note: string; text: string; at?: number }
   /** A question the operator answered; the answer follows as the next `you` event. */
   | { kind: "ask"; text: string }
   /** Cumulative token usage stamped by the formatter at the end of a turn (⟦usage⟧ sentinel). */
@@ -51,10 +62,32 @@ const CTRL_RE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g;
 
 /** Strip escape sequences and carriage-return spinner rewrites. */
 export function clean(raw: string): string {
-  return String(raw ?? "")
-    .replace(ANSI_RE, "")
-    .replace(/[^\n]*\r(?!\n)/g, "")
-    .replace(CTRL_RE, "");
+  return stripCrRewrites(String(raw ?? "").replace(ANSI_RE, "")).replace(CTRL_RE, "");
+}
+
+/**
+ * A bare `\r` mid-line is a spinner rewrite: only what follows the LAST one survives. Done with
+ * lastIndexOf per line, not the old `/[^\n]*\r(?!\n)/g` regex — that pattern backtracks
+ * quadratically on long CR-free lines (measured: seconds of blocked event loop on one 128 KB line
+ * of agent output), and parseTrace runs synchronously on the fleet sweep.
+ */
+function stripCrRewrites(s: string): string {
+  if (!s.includes("\r")) return s;
+  const lines = s.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i];
+    // `\r` at end-of-segment (originally `\r\n`) is not a rewrite; keep it. A `\r` ending the
+    // FINAL line has no `\n` after it, so it is still a rewrite marker.
+    let tail = "";
+    if (i < lines.length - 1 && line.endsWith("\r")) {
+      tail = "\r";
+      line = line.slice(0, -1);
+    }
+    const at = line.lastIndexOf("\r");
+    if (at !== -1) line = line.slice(at + 1);
+    lines[i] = line + tail;
+  }
+  return lines.join("\n");
 }
 
 /** `● session started (model X)` and friends — the formatter's own markers. */
@@ -73,6 +106,9 @@ const ERR_MARK = "⟦err⟧";
 // each result to its own call. Logs written by an older formatter carry no token; those fall back to
 // "attach to the most recent tool", which is what they have always done.
 const ID_OPEN = "⟦#";
+// Partial output of a still-running tool (src/drivers/sentinels.ts PARTIAL_MARK/PARTIAL_RESET).
+const PARTIAL_MARK = "⟦…⟧";
+const PARTIAL_RESET = "⟦…!⟧";
 const TOOL_ID_RE = /\s*⟦#([^⟧]+)⟧\s*/;
 const YOU_OPEN = "⟦you⟧";
 const YOU_CLOSE = "⟦/you⟧";
@@ -81,14 +117,20 @@ const THINK_OPEN = "⟦think⟧";
 const THINK_CLOSE = "⟦/think⟧";
 const PLAN_OPEN = "⟦plan⟧";
 const PLAN_CLOSE = "⟦/plan⟧";
-const ASK_OPEN = "⟦ask⟧";
-const ASK_CLOSE = "⟦/ask⟧";
-// Turn-end token usage stamped by the formatter (src/msb.ts USAGE_OPEN): one column-0 line per turn.
-const USAGE_RE = /^⟦usage⟧ in=(\d+) out=(\d+) ctx=(\d+)$/;
-// A per-edit diff block (src/msb.ts DIFF_*): -old/+new lines of the Edit/Write above it.
+// A per-edit diff block (src/msb.ts DIFF_*): the -old/+new lines of the Edit/Write immediately
+// above it. Attached to that tool event's `diff`, never rendered as prose.
 const DIFF_OPEN = "⟦diff⟧";
 const DIFF_CLOSE = "⟦/diff⟧";
+const ASK_OPEN = "⟦ask⟧";
+const ASK_CLOSE = "⟦/ask⟧";
+// One line per turn, stamped by the formatter from the stream-json usage fields it used to drop:
+// `⟦usage⟧ in=<total input> out=<total output> ctx=<last request's context footprint>`. Column-0
+// only, like every sentinel; model text is defanged with a ZWSP so it can never forge one.
+const USAGE_RE = /^⟦usage⟧ in=(\d+) out=(\d+) ctx=(\d+)$/;
 const PLAN_LINE = /^\[( |x|>)\]\s*(.*)$/;
+// Wall-clock stamp (src/msb.ts AT_MARK): `⟦at⟧ <epoch ms>` on its own column-0 line, written just
+// before the text / tool call / result / follow-up it dates. Never an event itself.
+const AT_RE = /^⟦at⟧ (\d{10,})$/;
 
 /**
  * Parse a log into trace events. Consecutive prose lines coalesce into one `say`; indented lines
@@ -98,16 +140,32 @@ export function parseTrace(rawLog: string): TraceEvent[] {
   const lines = clean(rawLog).split("\n");
   const events: TraceEvent[] = [];
   let prose: string[] = [];
+  // The latest ⟦at⟧ stamp seen, and the one current when the pending prose run began.
+  let clock: number | undefined;
+  let proseAt: number | undefined;
 
+  const pendingMemory: TraceEvent[] = [];
   const flushProse = () => {
-    const text = dedupeParagraphs(prose.join("\n").trim());
-    if (text) events.push({ kind: "say", text });
+    const raw = prose.join("\n");
+    // A sentinel written inline in the agent's reply becomes a memory row after that reply.
+    const notes = raw.includes("remember:") ? rememberNotes(raw).map((m) => (proseAt === undefined ? m : { ...m, at: proseAt })) : [];
+    const text = dedupeParagraphs((notes.length ? raw.replace(REMEMBER_LINE_RE, "") : raw).replace(/\n{3,}/g, "\n\n").trim());
+    if (text) events.push(proseAt === undefined ? { kind: "say", text } : { kind: "say", text, at: proseAt });
+    events.push(...pendingMemory, ...notes);
+    pendingMemory.length = 0;
     prose = [];
+    proseAt = undefined;
+  };
+  // Prose accumulates line by line; its time is the stamp current at its FIRST line.
+  const pushProse = (line: string) => {
+    if (!prose.length) proseAt = clock;
+    prose.push(line);
   };
 
   // While inside a ⟦you⟧…⟦/you⟧ block we collect the user's message verbatim, so agent prose that
   // follows the close marker is never merged into the user's bubble.
   let you: string[] | null = null;
+  let youAt: number | undefined;
   // Same shape for a thinking block and a plan block.
   let think: string[] | null = null;
   let plan: string[] | null = null;
@@ -139,11 +197,20 @@ export function parseTrace(rawLog: string): TraceEvent[] {
   // tool_use id tail -> the tool event it belongs to, so a result block stamped with that id lands
   // on its own call even when several calls were issued in one message.
   const byId = new Map<string, Extract<TraceEvent, { kind: "tool" }>>();
+  const partials = new Set<Extract<TraceEvent, { kind: "tool" }>>();
   // The tool the CURRENT result block is being appended to. A block's id is stamped on its first
   // line only; the remaining lines belong to the same target.
   let target: Extract<TraceEvent, { kind: "tool" }> | null = null;
 
   for (const line of lines) {
+    // A remember sentinel (often written by the box's `memory add` between a call and its result) is
+    // the controller's to harvest: skip it without breaking the result block it lands in.
+    if (/^<!--\s*remember:.*-->\s*$/.test(line)) {
+      // Anything pushed to events here would detach the result block from its call, so the row
+      // waits for the next prose flush.
+      for (const m of rememberNotes(line)) pendingMemory.push(clock === undefined ? m : { ...m, at: clock });
+      continue;
+    }
     if (think !== null) {
       if (line === THINK_CLOSE) {
         const text = think.join("\n").trim();
@@ -171,6 +238,7 @@ export function parseTrace(rawLog: string): TraceEvent[] {
     if (diff !== null) {
       if (line === DIFF_CLOSE) {
         const text = diff.join("\n");
+        // Attach to the tool call the block follows; a diff with no tool above it (tail cut) drops.
         const lastTool = [...events].reverse().find((e) => e.kind === "tool");
         if (lastTool?.kind === "tool" && text.trim()) lastTool.diff = text;
         diff = null;
@@ -195,6 +263,13 @@ export function parseTrace(rawLog: string): TraceEvent[] {
       flushProse();
       ask = [];
       target = null;
+      continue;
+    }
+    // A stamp only moves the clock: it neither flushes prose nor ends a result block, so a stamp
+    // between two text blocks or between a call and its result changes nothing about the grouping.
+    const stamp = line.match(AT_RE);
+    if (stamp) {
+      clock = Number(stamp[1]);
       continue;
     }
     const usage = line.match(USAGE_RE);
@@ -222,7 +297,8 @@ export function parseTrace(rawLog: string): TraceEvent[] {
     }
     if (you !== null) {
       if (line === YOU_CLOSE) {
-        events.push({ kind: "you", text: you.join("\n").trim() });
+        const text = you.join("\n").trim();
+        events.push(youAt === undefined ? { kind: "you", text } : { kind: "you", text, at: youAt });
         you = null;
       } else {
         you.push(line);
@@ -232,6 +308,7 @@ export function parseTrace(rawLog: string): TraceEvent[] {
     if (line === YOU_OPEN) {
       flushProse();
       you = [];
+      youAt = clock;
       continue;
     }
 
@@ -256,6 +333,7 @@ export function parseTrace(rawLog: string): TraceEvent[] {
       const id = arg.match(TOOL_ID_RE);
       if (id) arg = arg.replace(TOOL_ID_RE, " ").trim();
       const ev: Extract<TraceEvent, { kind: "tool" }> = { kind: "tool", name: tool[1], arg: arg || undefined };
+      if (clock !== undefined) ev.at = clock;
       events.push(ev);
       if (id) byId.set(id[1], ev);
       target = null;
@@ -279,12 +357,28 @@ export function parseTrace(rawLog: string): TraceEvent[] {
       if (id && body.trimStart().startsWith(ID_OPEN)) {
         body = body.replace(TOOL_ID_RE, "");
         target = byId.get(id[1]) ?? (last?.kind === "tool" ? last : target);
+        if (target && (body.startsWith(PARTIAL_MARK) || body.startsWith(PARTIAL_RESET))) {
+          // A live chunk: append (or replace, on reset) and keep the call streaming.
+          if (body.startsWith(PARTIAL_RESET)) target.result = undefined;
+          body = body.slice((body.startsWith(PARTIAL_MARK) ? PARTIAL_MARK : PARTIAL_RESET).length).replace(/^ /, "");
+          target.streaming = true;
+          partials.add(target);
+        } else if (target && partials.has(target)) {
+          // The final result supersedes the chunks streamed before it.
+          partials.delete(target);
+          target.result = undefined;
+          delete target.streaming;
+        }
       } else if (!target) {
         target = last?.kind === "tool" ? last : null;
       }
       if (!target) {
-        prose.push(line);
+        pushProse(line);
         continue;
+      }
+      // The first line of a result dates its arrival: duration = that stamp − the call's stamp.
+      if (target.result === undefined && target.at !== undefined && clock !== undefined && clock >= target.at) {
+        target.ms = clock - target.at;
       }
       // The formatter prefixes an errored tool_result's first line with the error sentinel. Strip it
       // and flag the call, so the UI can show the failure instead of printing a sentinel at the user.
@@ -297,16 +391,93 @@ export function parseTrace(rawLog: string): TraceEvent[] {
     }
 
     target = null;
-    prose.push(line);
+    pushProse(line);
   }
   // A ⟦you⟧ block still open at the end (log tail cut mid-message, or the close marker scrolled off):
   // emit what we have so the user's turn is never dropped.
   if (you !== null) {
     const text = you.join("\n").trim();
-    if (text) events.push({ kind: "you", text });
+    if (text) events.push(youAt === undefined ? { kind: "you", text } : { kind: "you", text, at: youAt });
   }
   flushProse();
-  return dedupe(events).filter((e) => !isMechanism(e));
+  return foldBackgroundShells(dedupeMemory(dedupe(events)).filter((e) => !isMechanism(e)));
+}
+
+type ToolEv = Extract<TraceEvent, { kind: "tool" }>;
+const BG_START_RE = /running in background with ID:\s*([\w.-]+)/i;
+const POLL_TOOLS = new Set(["BashOutput", "TaskOutput"]);
+const KILL_TOOLS = new Set(["KillShell", "KillBash", "TaskStop"]);
+const SECTION_RE = /<(stdout|stderr|output)>\n?([\s\S]*?)\n?<\/(?:stdout|stderr|output)>/g;
+
+/** A poll result → { output, status }. Tagged shape (<status>…</status><stdout>…</stdout>) or plain text. */
+function pollBody(result: string): { output: string; status?: string } {
+  const status = result.match(/<status>\s*(\w+)\s*<\/status>/)?.[1]?.toLowerCase();
+  const parts = [...result.matchAll(SECTION_RE)].map((m) => m[2]);
+  if (parts.length) return { output: parts.join("\n").replace(/\s+$/, ""), status };
+  if (/<\w+>/.test(result) || /^\(?no (new )?output/i.test(result.trim())) return { output: "", status };
+  return { output: result.replace(/\s+$/, ""), status };
+}
+
+/**
+ * A command still running is only visible to us through the agent's own polling: Claude Code runs
+ * `tail -f` / `kubectl logs -f` / a long build as `Bash(run_in_background)` ("Command running in
+ * background with ID: X") and reads it with BashOutput/TaskOutput(X). None of the drivers' CLIs
+ * stream a foreground tool's partial output, so this is the one place partial output exists. Fold
+ * every poll into the call that started the shell: that call's `result` becomes the output so far
+ * and it stays `streaming` until a poll reports it finished or a Kill names it. The polls themselves
+ * and the Kill that ends them are dropped — mechanism; the shell panel is the information (and a
+ * kept Kill row would turn the one-step panel into a two-step group, remounting the live view).
+ */
+export function foldBackgroundShells(events: TraceEvent[]): TraceEvent[] {
+  const shells = new Map<string, ToolEv>();
+  const open: ToolEv[] = [];
+  const out: TraceEvent[] = [];
+  const close = (ev: ToolEv) => {
+    ev.streaming = false;
+    const i = open.indexOf(ev);
+    if (i >= 0) open.splice(i, 1);
+  };
+  for (const e of events) {
+    if (e.kind !== "tool") {
+      out.push(e);
+      continue;
+    }
+    const bg = e.result?.match(BG_START_RE);
+    if (bg && !POLL_TOOLS.has(e.name)) {
+      shells.set(bg[1], e);
+      open.push(e);
+      e.streaming = true;
+      e.result = undefined;
+      e.ms = undefined;
+      out.push(e);
+      continue;
+    }
+    const id = e.arg?.trim();
+    // Older logs carry no shell id on the poll line: fold it only when exactly one shell is open.
+    const shell = id ? shells.get(id) : open.length === 1 ? open[0] : undefined;
+    if (POLL_TOOLS.has(e.name) && shell) {
+      if (e.result !== undefined) {
+        const { output, status } = pollBody(e.result);
+        const prev = shell.result ?? "";
+        // BashOutput returns only what is new; TaskOutput can return the whole output — don't double it.
+        const next = !prev ? output : !output ? prev : output.startsWith(prev) ? output : `${prev}\n${output}`;
+        shell.result = next || undefined;
+        if (status && status !== "running") {
+          close(shell);
+          if (status === "failed") shell.failed = true;
+          if (shell.at !== undefined && e.at !== undefined) shell.ms = e.at - shell.at;
+        }
+      }
+      continue;
+    }
+    if (KILL_TOOLS.has(e.name) && shell) {
+      close(shell);
+      continue;
+    }
+    out.push(e);
+  }
+  for (const ev of shells.values()) if (!ev.streaming) delete ev.streaming;
+  return out;
 }
 
 /**
@@ -317,7 +488,39 @@ export function parseTrace(rawLog: string): TraceEvent[] {
  */
 const SENTINEL_RE = /(^|\/)\.agent\.[a-z]+(\s|$)/i;
 function isMechanism(e: TraceEvent): boolean {
-  return e.kind === "tool" && !!e.arg && SENTINEL_RE.test(e.arg.trim().split(/\s+/)[0] ?? "");
+  if (e.kind !== "tool" || !e.arg) return false;
+  const first = e.arg.trim().split(/\s+/)[0] ?? "";
+  // The in-box memory tool is bookkeeping; its notes reach the operator as toasts, not chat.
+  return SENTINEL_RE.test(first) || (e.name === "bash" && first === "memory");
+}
+
+const REMEMBER_LINE_RE = /<!--\s*remember:[\s\S]*?-->/g;
+const NOTE_KINDS = ["preference", "rule", "fact", "decision", "lesson", "playbook"];
+
+/** The notes in remember sentinels, as thread rows: kind (untagged = fact) and the note's text. */
+function rememberNotes(src: string): Extract<TraceEvent, { kind: "memory" }>[] {
+  const out: Extract<TraceEvent, { kind: "memory" }>[] = [];
+  for (const m of src.matchAll(/<!--\s*remember:\s*([\s\S]*?)-->/g)) {
+    for (const line of m[1].split("\n")) {
+      const parts = line.split(/\s*\|\s*/).map((p) => p.trim());
+      const tagged = NOTE_KINDS.includes((parts[0] ?? "").toLowerCase());
+      const text = (tagged ? parts[1] : parts[0])?.replace(/\\"/g, '"').trim();
+      if (text) out.push({ kind: "memory", note: tagged ? parts[0].toLowerCase() : "fact", text });
+    }
+  }
+  return out;
+}
+
+/** One row per note: the agent's prose sentinel and `memory add`'s echo of it are the same note. */
+function dedupeMemory(events: TraceEvent[]): TraceEvent[] {
+  const seen = new Set<string>();
+  return events.filter((e) => {
+    if (e.kind !== "memory") return true;
+    const key = `${e.note}|${e.text.toLowerCase()}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 /**
@@ -341,16 +544,41 @@ export function dedupeParagraphs(text: string): string {
   // Line-level, not paragraph-level. The re-emitted copy does not respect blank-line boundaries:
   // in real output the tail of the first copy and the head of the second share a paragraph, so
   // splitting on blank lines never finds a matching pair. Lines do match.
+  //
+  // Only duplicates in RUNS are dropped: the re-emitted copy is contiguous, so its duplicate lines
+  // come in streaks, while a legitimately repeated long line (a recurring table row, a repeated code
+  // line, a `----` separator) is isolated — dropping those silently deleted real content from the
+  // rendered transcript and the archived markdown.
+  const lines = text.split("\n");
   const seen = new Set<string>();
-  const kept: string[] = [];
-  for (const line of text.split("\n")) {
+  const dup = lines.map((line) => {
     const key = line.trim();
-    if (key.length >= DEDUPE_MIN_LEN) {
-      if (seen.has(key)) continue;
-      seen.add(key);
+    if (key.length < DEDUPE_MIN_LEN) return false;
+    if (seen.has(key)) return true;
+    seen.add(key);
+    return false;
+  });
+  // A substantial duplicate is dropped only when an adjacent substantial line (skipping blank/short
+  // filler) is also a duplicate.
+  const substantial = (i: number) => lines[i].trim().length >= DEDUPE_MIN_LEN;
+  const neighborDup = (i: number, step: number): boolean => {
+    for (let j = i + step; j >= 0 && j < lines.length; j += step) {
+      if (substantial(j)) return dup[j];
+      if (lines[j].trim().length > 0) return false; // real short content breaks the streak
     }
-    kept.push(line);
-  }
+    return false;
+  };
+  // One exception to the streak rule: a substantial line whose NEAREST substantial predecessor is
+  // the identical line (only blanks between) is a single-line re-emit — the whole final block was
+  // one line, so no streak exists — and must still collapse.
+  const echoOfPrev = (i: number): boolean => {
+    for (let j = i - 1; j >= 0; j--) {
+      if (substantial(j)) return lines[j].trim() === lines[i].trim();
+      if (lines[j].trim().length > 0) return false;
+    }
+    return false;
+  };
+  const kept = lines.filter((_, i) => !(dup[i] && (neighborDup(i, -1) || neighborDup(i, 1) || echoOfPrev(i))));
   return kept.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
@@ -374,11 +602,22 @@ const REPEAT_MIN_LEN = 80;
  */
 export function dropRepeatedTail(text: string): string {
   const t = text.trimEnd();
+  // Only tail candidates that START ON A LINE BOUNDARY: the re-emitted result block always begins on
+  // its own line, and trying every byte length was O(n²) — a single 100 KB column-0 prose block
+  // (an agent echoing a file) stalled the event loop for seconds, re-run on every SSE append in the
+  // browser and on every fleet sweep on the server. Line starts cut the candidates from ~n to ~lines.
   // Longest candidate first: prefer collapsing the whole duplicated block over a short inner echo.
-  for (let n = Math.floor(t.length / 2); n >= REPEAT_MIN_LEN; n--) {
-    const tail = t.slice(t.length - n).trim();
+  const half = Math.floor(t.length / 2);
+  const starts: number[] = [];
+  for (let i = t.indexOf("\n"); i !== -1; i = t.indexOf("\n", i + 1)) {
+    const s = i + 1;
+    if (t.length - s < REPEAT_MIN_LEN) break;
+    if (t.length - s <= half) starts.push(s);
+  }
+  for (const s of starts) {
+    const tail = t.slice(s).trim();
     if (tail.length < REPEAT_MIN_LEN) continue;
-    const head = t.slice(0, t.length - n).trimEnd();
+    const head = t.slice(0, s).trimEnd();
     if (head.endsWith(tail)) return head;
   }
   return text;

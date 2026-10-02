@@ -32,6 +32,11 @@ export type TraceEvent =
   | { kind: "think"; text: string }
   /** A TodoWrite snapshot. `at` is the formatter's wall-clock ms; absent on logs written before it. */
   | { kind: "plan"; items: PlanItem[]; at?: number }
+  /**
+   * Something the agent saved to memory (a `<!-- remember: … -->` sentinel, written by it or by the
+   * box's `memory add`). The controller harvests the note; the thread shows one quiet row for it.
+   */
+  | { kind: "memory"; note: string; text: string; at?: number }
   /** A question the operator answered; the answer follows as the next `you` event. */
   | { kind: "ask"; text: string }
   /** Cumulative token usage stamped by the formatter at the end of a turn (⟦usage⟧ sentinel). */
@@ -139,9 +144,15 @@ export function parseTrace(rawLog: string): TraceEvent[] {
   let clock: number | undefined;
   let proseAt: number | undefined;
 
+  const pendingMemory: TraceEvent[] = [];
   const flushProse = () => {
-    const text = dedupeParagraphs(prose.join("\n").trim());
+    const raw = prose.join("\n");
+    // A sentinel written inline in the agent's reply becomes a memory row after that reply.
+    const notes = raw.includes("remember:") ? rememberNotes(raw).map((m) => (proseAt === undefined ? m : { ...m, at: proseAt })) : [];
+    const text = dedupeParagraphs((notes.length ? raw.replace(REMEMBER_LINE_RE, "") : raw).replace(/\n{3,}/g, "\n\n").trim());
     if (text) events.push(proseAt === undefined ? { kind: "say", text } : { kind: "say", text, at: proseAt });
+    events.push(...pendingMemory, ...notes);
+    pendingMemory.length = 0;
     prose = [];
     proseAt = undefined;
   };
@@ -192,6 +203,14 @@ export function parseTrace(rawLog: string): TraceEvent[] {
   let target: Extract<TraceEvent, { kind: "tool" }> | null = null;
 
   for (const line of lines) {
+    // A remember sentinel (often written by the box's `memory add` between a call and its result) is
+    // the controller's to harvest: skip it without breaking the result block it lands in.
+    if (/^<!--\s*remember:.*-->\s*$/.test(line)) {
+      // Anything pushed to events here would detach the result block from its call, so the row
+      // waits for the next prose flush.
+      for (const m of rememberNotes(line)) pendingMemory.push(clock === undefined ? m : { ...m, at: clock });
+      continue;
+    }
     if (think !== null) {
       if (line === THINK_CLOSE) {
         const text = think.join("\n").trim();
@@ -381,7 +400,7 @@ export function parseTrace(rawLog: string): TraceEvent[] {
     if (text) events.push(youAt === undefined ? { kind: "you", text } : { kind: "you", text, at: youAt });
   }
   flushProse();
-  return foldBackgroundShells(dedupe(events).filter((e) => !isMechanism(e)));
+  return foldBackgroundShells(dedupeMemory(dedupe(events)).filter((e) => !isMechanism(e)));
 }
 
 type ToolEv = Extract<TraceEvent, { kind: "tool" }>;
@@ -469,7 +488,39 @@ export function foldBackgroundShells(events: TraceEvent[]): TraceEvent[] {
  */
 const SENTINEL_RE = /(^|\/)\.agent\.[a-z]+(\s|$)/i;
 function isMechanism(e: TraceEvent): boolean {
-  return e.kind === "tool" && !!e.arg && SENTINEL_RE.test(e.arg.trim().split(/\s+/)[0] ?? "");
+  if (e.kind !== "tool" || !e.arg) return false;
+  const first = e.arg.trim().split(/\s+/)[0] ?? "";
+  // The in-box memory tool is bookkeeping; its notes reach the operator as toasts, not chat.
+  return SENTINEL_RE.test(first) || (e.name === "bash" && first === "memory");
+}
+
+const REMEMBER_LINE_RE = /<!--\s*remember:[\s\S]*?-->/g;
+const NOTE_KINDS = ["preference", "rule", "fact", "decision", "lesson", "playbook"];
+
+/** The notes in remember sentinels, as thread rows: kind (untagged = fact) and the note's text. */
+function rememberNotes(src: string): Extract<TraceEvent, { kind: "memory" }>[] {
+  const out: Extract<TraceEvent, { kind: "memory" }>[] = [];
+  for (const m of src.matchAll(/<!--\s*remember:\s*([\s\S]*?)-->/g)) {
+    for (const line of m[1].split("\n")) {
+      const parts = line.split(/\s*\|\s*/).map((p) => p.trim());
+      const tagged = NOTE_KINDS.includes((parts[0] ?? "").toLowerCase());
+      const text = (tagged ? parts[1] : parts[0])?.replace(/\\"/g, '"').trim();
+      if (text) out.push({ kind: "memory", note: tagged ? parts[0].toLowerCase() : "fact", text });
+    }
+  }
+  return out;
+}
+
+/** One row per note: the agent's prose sentinel and `memory add`'s echo of it are the same note. */
+function dedupeMemory(events: TraceEvent[]): TraceEvent[] {
+  const seen = new Set<string>();
+  return events.filter((e) => {
+    if (e.kind !== "memory") return true;
+    const key = `${e.note}|${e.text.toLowerCase()}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 /**

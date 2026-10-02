@@ -45,6 +45,41 @@ export function LifecycleItem({ label, detail }: { label: string; detail?: strin
   );
 }
 
+const MEMORY_KIND: Record<string, string> = {
+  preference: "Preference",
+  rule: "Rule",
+  fact: "Fact",
+  decision: "Decision",
+  lesson: "Lesson",
+  playbook: "Playbook",
+};
+
+/**
+ * Where the agent saved something for future runs: one quiet hairline row, not a chat message. The
+ * mechanics (the `memory add` call, the sentinel) never render; the note itself links to the
+ * Memory page, where it can be edited or forgotten.
+ */
+export function MemoryItem({ notes }: { notes: { note: string; text: string }[] }) {
+  return (
+    <div className="enter flex min-w-0 items-start gap-3 py-0.5">
+      <a
+        href="/dashboard/memory"
+        className="label text-muted-foreground hover:text-foreground focus-visible:ring-ring flex shrink-0 items-center gap-1.5 rounded-sm focus-visible:ring-2 focus-visible:outline-none"
+      >
+        <Brain className="size-3" aria-hidden />
+        Remembered
+      </a>
+      <ul className="min-w-0 flex-1 space-y-0.5">
+        {notes.map((n, i) => (
+          <li key={i} className="text-faint truncate text-micro" title={n.text}>
+            <span className="text-muted-foreground">{MEMORY_KIND[n.note] ?? "Note"}</span> · {n.text}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 // eval/python/js: omp's code-running tools print like a shell and stream partial output the same way.
 const SHELL_TOOLS = new Set(["Bash", "Shell", "Terminal", "Run", "Exec", "sh", "bash", "eval", "python", "js"]);
 type ToolEvent = Extract<TraceEvent, { kind: "tool" }>;
