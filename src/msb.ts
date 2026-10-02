@@ -14,6 +14,8 @@ import { guardNodeProgram } from "./guard.js";
 import { loadMcpStore, toClaudeMcpConfig } from "./mcp-store.js";
 import { boxSkillSelection, buildSkillsTarBase64, loadSkillStore, skillsForBox, type SkillDef } from "./skill-store.js";
 import { SKILLS_DIR, SKILLS_INDEX, recordSkillPicks, skillTurnHint, skillsIndex } from "./skill-match.js";
+import { loadMemoryStore, renderMemoryMd } from "./memory-store.js";
+import { repoSlugFromUrl } from "./setup-store.js";
 import { harnessPromptHint, reposPromptHint, type RepoLayout } from "./agent-prompt.js";
 import { secretEnvFlags } from "./secret-env.js";
 import type { AgentKind } from "./agent-kind.js";
@@ -356,6 +358,7 @@ async function bootAndWarm(cfg: Config, name: string, agent: AgentKind): Promise
     // Skills too: omp indexes them on first sight (onnxruntime embedding load — expensive), and
     // they otherwise arrive only at claim time, putting that cost back on the user's first task.
     await installSkills(cfg, name).catch(() => {});
+    await installMemory(cfg, name);
     // TWICE: measured on a warm box, the run right after a single warm-up still took 6.6s to
     // reach turn one and every run after it ~3.5s — so with one pass the user's task WAS that
     // second, half-primed run. The extra pass is ~5s at boot, when nobody is waiting.
@@ -1205,6 +1208,45 @@ export async function installSkills(cfg: Config, box: string): Promise<SkillDef[
   }
 }
 
+/** Where the memory file lands for each driver (claude reads ~/.claude, omp ~/.omp). */
+const MEMORY_PATHS = ["/root/.claude/MEMORY.md", "/root/.omp/MEMORY.md"] as const;
+
+/**
+ * Drop the owner's memory (src/memory-store.ts) into the box before every run/resume: the global
+ * notes plus those of the repos checked out here, identified from each dir's origin remote so a
+ * resume — which only has a box id — gets the same file as the first turn. Replaced whole every
+ * turn, so a dashboard edit or delete reaches the next turn; removed when there is nothing (or
+ * memory is off) so a stale file never lingers. Best-effort: memory must never block a run.
+ */
+export async function installMemory(cfg: Config, box: string): Promise<void> {
+  try {
+    const store = loadMemoryStore();
+    const rm = `rm -f ${MEMORY_PATHS.join(" ")}`;
+    if (!store.enabled || (!store.global.length && !Object.keys(store.repos).length)) {
+      await exec(cfg, box, rm);
+      return;
+    }
+    const r = await exec(cfg, box, `for d in /workspace/*/; do git -C "$d" remote get-url origin 2>/dev/null; done; true`);
+    const repos: string[] = [];
+    for (const line of (r.stdout ?? "").split(/\r?\n/)) {
+      const slug = repoSlugFromUrl(line);
+      if (slug && !repos.includes(slug)) repos.push(slug);
+    }
+    const md = renderMemoryMd(store, repos);
+    if (!md) {
+      await exec(cfg, box, rm);
+      return;
+    }
+    // The file rides stdin (it can run past what a shell argument safely carries) and is written
+    // once, then copied, so both drivers see the identical text.
+    const [first, ...rest] = MEMORY_PATHS;
+    const dirs = MEMORY_PATHS.map((p) => p.replace(/\/[^/]+$/, "")).join(" ");
+    await execWithInput(cfg, box, `mkdir -p ${dirs} && cat > ${first}${rest.map((p) => ` && cp ${first} ${p}`).join("")}`, md);
+  } catch (e) {
+    console.error(`[memory] could not install memory into ${box}:`, (e as Error).message);
+  }
+}
+
 /**
  * The per-turn skill env (src/skill-match.ts skillTurnHint): an explicit `/name` on any turn, or the
  * matcher's suggestions on the first. Recorded on the run so the UI can show "Skills: x (auto)".
@@ -1417,6 +1459,7 @@ export async function runAgentTask(
     timed("trust", trustWorkspace(cfg, box)),
     timed("mcp", installMcpConfig(cfg, box)),
     timed("skills", installSkills(cfg, box)),
+    timed("memory", installMemory(cfg, box)),
   ]);
   const t3 = Date.now();
   const r = await msb(cfg, ["exec", box, ...env, ...skillHintFlags(box, task, skills, true), "--", "sh", "-lc", agentSh(workdir, false, agent)]);
@@ -1594,6 +1637,7 @@ export async function resumeAgentTask(
     trustWorkspace(cfg, box),
     installMcpConfig(cfg, box),
     installSkills(cfg, box),
+    installMemory(cfg, box),
     exec(cfg, box, streamFmtScript()),
     exec(cfg, box, askHookScript()),
     // A non-claude thread also refreshes ITS formatter and gate (same reasoning: a deploy that

@@ -63,6 +63,8 @@ export interface RunOutcome {
     usd: number | null;
     model: string | null;
   };
+  /** Facts this run left in memory (src/memory-store.ts); absent on outcomes archived before it existed. */
+  remembered?: number;
 }
 
 export interface OutcomeInput {
@@ -175,6 +177,7 @@ export function buildOutcome(i: OutcomeInput): RunOutcome {
       usd,
       model,
     },
+    ...(d.remembered ? { remembered: d.remembered } : {}),
   };
 }
 

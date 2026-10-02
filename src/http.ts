@@ -21,6 +21,7 @@ import { registerTools } from "./handlers.js";
 import { makeBridge } from "./server-bridge.js";
 import { deps as rawDeps, resolveCredsForBox, detectSetupInBox } from "./deps.js";
 import { SETUP_SENTINEL, parseSentinel, type SetupProfile } from "./setup-profile.js";
+import { deleteNote, loadMemoryStore, rememberRun, saveMemoryStore, updateNote, viewMemory } from "./memory-store.js";
 import { deleteSetup, getSetup, listSetups, recordLearned, repoKey, repoSlugFromUrl, saveSetup } from "./setup-store.js";
 import { refillPool, startPoolMaintainer } from "./pool.js";
 import { checkBearer } from "./http-auth.js";
@@ -652,7 +653,7 @@ const notifier = makeNotifier({ send: sendNotification, log: (m) => console.erro
  * runs that did not come through /delegate.json). Repos are identified from each dir's origin
  * remote, so this works after a controller restart too. A user-edited profile is never touched.
  */
-const collectRepoSetup = async (box: string, owner: string): Promise<void> => {
+const collectRepoSetup = async (box: string, owner: string): Promise<Array<{ name: string; slug: string }>> => {
   const r = await execInBox(
     cfg,
     box,
@@ -666,7 +667,7 @@ const collectRepoSetup = async (box: string, owner: string): Promise<void> => {
     const slug = repoSlugFromUrl(m[2]);
     if (slug) repos.push({ name: m[1].trim(), slug });
   }
-  if (!repos.length) return;
+  if (!repos.length) return repos;
   const agent = sentinel ? parseSentinel(sentinel.trim(), repos.map((x) => x.name)) : {};
   for (const { name, slug } of repos) {
     const existing = getSetup(db, owner, slug);
@@ -674,6 +675,22 @@ const collectRepoSetup = async (box: string, owner: string): Promise<void> => {
     const saved = recordLearned(db, owner, slug, { agent: agent[name], detected });
     if (saved) console.error(`[setup] ${box}: learned ${slug} (${saved.confirmedBy})`);
   }
+  return repos;
+};
+
+/**
+ * Memory across runs at the finish edge (src/memory-store.ts): the agent's `<!-- remember: … -->`
+ * facts and the questions the operator answered become notes for the box's repo (global when it
+ * had none or several). Returns how many were stored, for the digest's "Remembered N things".
+ */
+const collectMemory = (box: string, owner: string, log: string, digest: RunDigest, repos: string[]): number => {
+  const store = loadMemoryStore(owner);
+  const n = rememberRun(store, { box, log, questions: digest.questions, repos });
+  if (n) {
+    saveMemoryStore(store, owner);
+    console.error(`[memory] ${box}: remembered ${n} note${n === 1 ? "" : "s"}`);
+  }
+  return n;
 };
 
 /**
@@ -740,14 +757,22 @@ const archiveFinishedRun = async (box: string, opts: { withFiles: boolean; quiet
     retries: retriesOf(box),
     ...runProvenance(box, snap.agent),
   });
+  const runOwner = ownerOf(db, box) ?? OPERATOR_OWNER;
+  // Repo setup first: it also yields the repos' slugs, which file this run's memory notes. A box
+  // that is already down keeps its notes too (as global ones — the repo can no longer be asked).
+  const repos = up ? await collectRepoSetup(box, runOwner).catch((e) => (console.error(`[setup] ${box}: ${(e as Error).message.slice(0, 200)}`), [])) : [];
+  try {
+    const n = collectMemory(box, runOwner, snap.log ?? "", digest, repos.map((r) => r.slug));
+    if (n) digest.remembered = n;
+  } catch (e) {
+    console.error(`[memory] ${box}: ${(e as Error).message.slice(0, 200)}`);
+  }
   // The outcome card (src/outcome.ts): persisted inside the archived digest, so it outlives the box.
   try {
     digest.outcome = buildOutcome({ digest, events: parseTrace(snap.log ?? ""), log: snap.log ?? "", filesKnown: opts.withFiles && up, diffText });
   } catch (e) {
     console.error(`[outcome] ${box}: ${(e as Error).message.slice(0, 200)}`);
   }
-  const runOwner = ownerOf(db, box) ?? OPERATOR_OWNER;
-  if (up) await collectRepoSetup(box, runOwner).catch((e) => console.error(`[setup] ${box}: ${(e as Error).message.slice(0, 200)}`));
   const archiveId = archiveRun(db, { box, owner: runOwner, digest, ...(diffText ? { diffText } : {}) });
   // A trigger-started run finishing frees its slot, stamps the automation's last result, posts the
   // receipt comment and fires any chain. Only on a NEW record (null = this finish was already seen).
@@ -2283,6 +2308,54 @@ app.post("/skills.json", async (req: Request, res: Response) => {
     res.json({ skills: viewSkills(store) });
   } catch (e) {
     res.status(400).json({ error: clientError(e) });
+  }
+});
+
+// Memory across runs (src/memory-store.ts): the owner's notes, with edit/pin/delete and the on/off
+// switch. Not /memory.json — that one is the VM's RAM.
+app.get("/memory-notes.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const p = principalOf(res);
+  const owner = p.kind === "user" ? p.userId : OPERATOR_OWNER;
+  try {
+    const store = loadMemoryStore(owner);
+    res.json({ enabled: store.enabled, notes: viewMemory(store) });
+  } catch (e) {
+    failWith(res, e);
+  }
+});
+app.post("/memory-notes.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const p = principalOf(res);
+  const owner = p.kind === "user" ? p.userId : OPERATOR_OWNER;
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  try {
+    const store = await withStoreLock("memory", async () => {
+      const store = loadMemoryStore(owner);
+      if (typeof body.enabled === "boolean") store.enabled = body.enabled;
+      if (typeof body.id === "string") updateNote(store, body.id, { text: body.text, pinned: body.pinned });
+      saveMemoryStore(store, owner);
+      return store;
+    });
+    res.json({ enabled: store.enabled, notes: viewMemory(store) });
+  } catch (e) {
+    res.status(400).json({ error: clientError(e) });
+  }
+});
+app.delete("/memory-notes.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const p = principalOf(res);
+  const owner = p.kind === "user" ? p.userId : OPERATOR_OWNER;
+  const { id } = (req.body ?? {}) as { id?: string };
+  try {
+    const store = await withStoreLock("memory", async () => {
+      const store = loadMemoryStore(owner);
+      if (id && deleteNote(store, id)) saveMemoryStore(store, owner);
+      return store;
+    });
+    res.json({ enabled: store.enabled, notes: viewMemory(store) });
+  } catch (e) {
+    failWith(res, e);
   }
 });
 

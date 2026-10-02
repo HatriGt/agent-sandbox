@@ -86,6 +86,8 @@ export interface RunDigest {
   provenance?: DigestProvenance;
   /** One sentence for notifications and list rows. */
   headline: string;
+  /** Notes the finish edge stored in memory (src/memory-store.ts) from this run; absent = none. */
+  remembered?: number;
   /** The outcome card (src/outcome.ts), attached at archive time. */
   outcome?: import("./outcome.js").RunOutcome;
 }

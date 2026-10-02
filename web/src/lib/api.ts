@@ -208,6 +208,22 @@ export interface SkillsResponse {
   skills: SkillView[];
 }
 
+/** A fact an earlier run left for future runs (src/memory-store.ts). */
+export interface MemoryNote {
+  id: string;
+  text: string;
+  at: number;
+  /** The run (box id) that wrote it. */
+  source: string;
+  /** owner/name when the note belongs to one repo; absent = global. */
+  repo?: string;
+  pinned?: boolean;
+}
+export interface MemoryNotesResponse {
+  enabled: boolean;
+  notes: MemoryNote[];
+}
+
 /** A saved harness (src/harness.ts). Never carries a key: a provider is referenced by id only. */
 export interface HarnessRules {
   askBeforeGuess: boolean;
@@ -850,6 +866,11 @@ export const api = {
   mcpTest: (name: string) => post<McpProbe>("/mcp-servers/test.json", { name }),
   skills: (signal?: AbortSignal) => fetch(url("/skills.json"), { headers: authHeaders, signal }).then(parse<SkillsResponse>),
   skillMutate: (body: Record<string, unknown>) => post<SkillsResponse>("/skills.json", body),
+  /** Memory across runs: the owner's notes. Not /memory.json, which is the VM's RAM. */
+  memoryNotes: (signal?: AbortSignal) => fetch(url("/memory-notes.json"), { headers: authHeaders, signal }).then(parse<MemoryNotesResponse>),
+  memoryNoteUpdate: (body: { id?: string; text?: string; pinned?: boolean; enabled?: boolean }) => post<MemoryNotesResponse>("/memory-notes.json", body),
+  memoryNoteDelete: (id: string) =>
+    fetch(url("/memory-notes.json"), { method: "DELETE", headers: { ...authHeaders, "Content-Type": "application/json" }, body: JSON.stringify({ id }) }).then(parse<MemoryNotesResponse>),
   harnesses: (signal?: AbortSignal) => fetch(url("/harnesses.json"), { headers: authHeaders, signal }).then(parse<HarnessesResponse>),
   harnessMutate: (body: Record<string, unknown>) => post<HarnessesResponse & { saved?: string }>("/harnesses.json", body),
   harnessExport: (id: string) =>
@@ -1106,6 +1127,8 @@ export interface RunOutcome {
     usd: number | null;
     model: string | null;
   };
+  /** Facts this run left in memory; absent on older outcomes. */
+  remembered?: number;
 }
 export interface LedgerRow extends HistoryRun {
   outcome?: RunOutcome | null;

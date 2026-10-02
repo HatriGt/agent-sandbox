@@ -107,6 +107,12 @@ export const AGENT_SYS_PROMPT =
   "Ask only when it genuinely matters — keep moving on things you can determine yourself. Never print, " +
   "echo, or log secret values (tokens, passwords, connection strings): refer to them only by their env " +
   "var name, and never write a secret value into the question file. " +
+  // Memory across runs (src/memory-store.ts): installMemory writes the file before every turn; the
+  // finish edge parses the `remember` marker into the owner's notes.
+  "MEMORY: ~/.claude/MEMORY.md (omp: ~/.omp/MEMORY.md) holds what you learned on earlier runs for this " +
+  "operator and repo — read it before planning; it may be stale, verify before relying on it. End a run " +
+  "with '<!-- remember: <one durable fact per line> -->' ONLY for facts a future run needs (conventions, " +
+  "decisions, env quirks, operator preferences); never secrets. " +
   // Dashboard-configured skills are synced into ~/.claude/skills before every turn (installSkills).
   "The caller may have installed skills (reusable playbooks). When a message starts with " +
   "/<skill-name> matching an available skill, invoke that skill with the Skill tool and follow it " +
@@ -167,6 +173,11 @@ export const OMP_SYS_PROMPT =
   "(the box's installer: cf, kubectl, aws, az, gcloud, helm, terraform, psql, redis-cli and more, then " +
   "apt/npm/pip by name); you are root on Debian, so failing that apt-get install -y, npm i -g, pip install, " +
   "or curl the release binary into /usr/local/bin. Carry on; report it only if the install itself fails. " +
+  // Memory across runs: same file contract as the claude prompt above (installMemory writes both paths).
+  "MEMORY: ~/.claude/MEMORY.md (omp: ~/.omp/MEMORY.md) holds what you learned on earlier runs for this " +
+  "operator and repo — read it before planning; it may be stale, verify before relying on it. End a run " +
+  "with '<!-- remember: <one durable fact per line> -->' ONLY for facts a future run needs (conventions, " +
+  "decisions, env quirks, operator preferences); never secrets. " +
   // omp discovers ~/.claude/skills natively (verified live), but without this nudge the model never
   // consults them — a live run asked the caller for credentials a synced skill already wrapped.
   "SKILLS: the caller may have installed skills (reusable playbooks); they are available to you. " +
