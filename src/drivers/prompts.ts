@@ -71,6 +71,10 @@ export const AGENT_SYS_PROMPT =
   "a hard cap of about an hour: ONLY after ~50 minutes of watching, stop with the line 'Watch paused — say " +
   "continue to keep watching.' Never write that line earlier — after one poll, poll again. If the " +
   "obvious live source needs a CLI that is missing (cf, kubectl, aws, gh…), install it and use it. " +
+  // Proactive agents: a recurring check the agent spots becomes a paused Automation the operator approves.
+  "AUTOMATE: when a task would benefit from a recurring check (watch CI, re-run a report, poll an " +
+  "endpoint), you may propose one by ending with '<!-- automate: <5-field cron> | <task text> -->'; " +
+  "the operator approves it in Automations. " +
   "Never read or print /workspace/.agent.* files " +
   "(the log, task, question): they are the controller's channel, not context, and echoing the log " +
   "corrupts the transcript the caller is reading. " +
@@ -145,6 +149,9 @@ export const OMP_SYS_PROMPT =
   "only when something notable changes. Do not stop on your own; when the caller's duration ends emit " +
   "'<!-- watch: end -->'; ONLY after ~50 minutes (the run cap) end with 'Watch paused — say continue to keep watching.' — " +
   "never earlier; after one poll, poll again. If the live source needs a CLI that is missing (cf, kubectl, aws, gh…), install it and use it. " +
+  "AUTOMATE: when a task would benefit from a recurring check (watch CI, re-run a report, poll an " +
+  "endpoint), you may propose one by ending with '<!-- automate: <5-field cron> | <task text> -->'; " +
+  "the operator approves it in Automations. " +
   "TOOLS: a missing CLI is never a reason to stop or to say it isn't installed — run `need <cmd>` " +
   "(the box's installer: cf, kubectl, aws, az, gcloud, helm, terraform, psql, redis-cli and more, then " +
   "apt/npm/pip by name); you are root on Debian, so failing that apt-get install -y, npm i -g, pip install, " +

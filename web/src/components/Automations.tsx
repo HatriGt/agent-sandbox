@@ -36,6 +36,35 @@ const DEFAULT_TEMPLATES: Record<AutomationKind, string> = {
   chain: "Review what the previous run did ({{parent.headline}}) and tighten it.",
 };
 
+/* ─── watch presets: scheduled, quiet checks over gh / curl (no new dispatcher) ─── */
+
+const WATCH_PRESETS: Array<{ id: string; label: string; name: string; cron: string; task: string }> = [
+  {
+    id: "ci",
+    label: "Failing CI on main",
+    name: "Failing CI on main",
+    cron: "*/30 * * * *",
+    task:
+      "Check CI on the default branch: run `gh run list --branch main --status failure --limit 5`. If a run failed, open its logs (`gh run view <id> --log-failed`), find the cause, and either fix it on a branch and open a PR or report what broke and why. If `gh` is missing, run `need gh`.",
+  },
+  {
+    id: "issues",
+    label: "New issues with label",
+    name: "New issues labelled <label>",
+    cron: "*/15 * * * *",
+    task:
+      "Triage new issues: run `gh issue list --label <label> --state open --limit 20`. For each issue nobody has replied to yet, read it, reproduce if you can, and summarise what it needs (a fix, more information, a decision). If `gh` is missing, run `need gh`.",
+  },
+  {
+    id: "endpoint",
+    label: "Endpoint returning errors",
+    name: "Endpoint <url> health",
+    cron: "*/10 * * * *",
+    task:
+      "Check the endpoint: run `curl -s -o /dev/null -w '%{http_code}' <url>`. Anything other than a 2xx or 3xx is a problem: fetch the body, check the service logs if you have access, find the likely cause and report it. If a CLI you need is missing, run `need <cli>`.",
+  },
+];
+
 /* ─── alert sources (Sentry / Datadog / PagerDuty presets) ─── */
 
 const PRESET_LABEL: Record<AlertPreset, string> = { sentry: "Sentry", datadog: "Datadog", pagerduty: "PagerDuty" };
@@ -64,6 +93,10 @@ const REASON_LABEL: Record<NonNullable<AutomationDelivery["reason"]>, string> = 
 export function deliveryLine(d: AutomationDelivery): string {
   const head = d.outcome === "fired" ? `fired${d.box ? ` → ${d.box}` : ""}` : `${d.outcome === "failed" ? "could not start" : d.outcome}${d.reason ? ` · ${REASON_LABEL[d.reason]}` : ""}`;
   return d.test ? `test · ${head}` : head;
+}
+/** "checked 12× · 1 report" — a quiet automation's runs that found nothing vs those that reported. */
+export function countsLine(c: { checked: number; reports: number }): string {
+  return `checked ${c.checked}× · ${c.reports} report${c.reports === 1 ? "" : "s"}`;
 }
 function randomToken(): string {
   const b = new Uint8Array(24);
@@ -125,7 +158,19 @@ export function Automations({ onBack, onOpenBox }: { onBack: () => void; onOpenB
     }
   };
 
+  const dismiss = async (a: Automation) => {
+    try {
+      await api.deleteTrigger(a.id);
+      setRows((prev) => (prev ?? []).filter((x) => x.id !== a.id));
+      toast.success("Proposal dismissed");
+    } catch (e) {
+      toast.error("Could not dismiss", { description: e instanceof Error ? e.message : String(e) });
+    }
+  };
+
   const names = Object.fromEntries((rows ?? []).map((r) => [r.id, r.name]));
+  const proposed = (rows ?? []).filter((r) => r.proposed);
+  const listed = (rows ?? []).filter((r) => !r.proposed);
 
   return (
     <div className="h-full min-w-0 overflow-y-auto">
@@ -147,7 +192,39 @@ export function Automations({ onBack, onOpenBox }: { onBack: () => void; onOpenB
           )}
         </header>
 
-        <Swap state={error ? "error" : rows === null ? "loading" : rows.length ? "list" : "empty"}>
+        {proposed.length > 0 && (
+          <section className="mb-5" aria-label="Proposed by the agent">
+            <p className="label text-muted-foreground mb-2">Proposed by the agent</p>
+            <div className="overflow-hidden rounded-xl border border-dashed" role="list">
+              {proposed.map((a) => (
+                <div key={a.id} role="listitem" className="flex flex-wrap items-center gap-3 border-b px-4 py-3 last:border-b-0">
+                  <span className="bg-muted text-muted-foreground grid size-8 shrink-0 place-items-center rounded-lg" aria-hidden>
+                    <CalendarClock className="size-4" strokeWidth={1.75} />
+                  </span>
+                  <span className="min-w-0 flex-1 basis-48">
+                    <span className="text-foreground block truncate text-meta font-medium">{a.name}</span>
+                    <span className="text-muted-foreground mt-0.5 block truncate text-micro">
+                      {a.when} · quiet{a.repo ? ` · ${a.repo}` : ""}
+                    </span>
+                  </span>
+                  <span className="flex shrink-0 items-center gap-1.5">
+                    <Button size="sm" variant="outline" onClick={() => setEditing({ id: a.id, draft: toDraft(a) })}>
+                      Edit
+                    </Button>
+                    <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => void dismiss(a)}>
+                      Dismiss
+                    </Button>
+                    <Button size="sm" onClick={() => void toggle(a, true)}>
+                      Enable
+                    </Button>
+                  </span>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        <Swap state={error ? "error" : rows === null ? "loading" : listed.length ? "list" : "empty"}>
           {error ? (
             <EmptyState
               icon={Workflow}
@@ -171,7 +248,7 @@ export function Automations({ onBack, onOpenBox }: { onBack: () => void; onOpenB
                 </div>
               ))}
             </div>
-          ) : !rows.length ? (
+          ) : !listed.length ? (
             <EmptyState
               icon={Workflow}
               title="No automations yet"
@@ -190,7 +267,7 @@ export function Automations({ onBack, onOpenBox }: { onBack: () => void; onOpenB
             />
           ) : (
             <div className="overflow-hidden rounded-xl border" role="list">
-              {rows.map((a, i) => (
+              {listed.map((a, i) => (
                 <StaggerItem key={a.id} index={i}>
                   <AutomationRow a={a} onEdit={() => setEditing({ id: a.id, draft: toDraft(a) })} onToggle={(on) => void toggle(a, on)} onOpenBox={onOpenBox} />
                 </StaggerItem>
@@ -204,7 +281,7 @@ export function Automations({ onBack, onOpenBox }: { onBack: () => void; onOpenB
       <Sheet open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
         {editing && (
           <SheetContent
-            title={editing.id ? "Edit automation" : "New automation"}
+            title={editing.id ? (rows?.find((r) => r.id === editing.id)?.proposed ? "Proposed by the agent" : "Edit automation") : "New automation"}
             description={editing.id ? rows?.find((r) => r.id === editing.id)?.when : "What starts it, and what the agent is asked to do."}
             className="w-[min(34rem,calc(100vw-1rem))]"
           >
@@ -246,6 +323,7 @@ function toDraft(a: Automation): AutomationDraft {
     enabled: a.enabled,
     concurrency: a.concurrency,
     prComment: a.prComment,
+    quiet: !!a.quiet,
     ...(a.agent ? { agent: a.agent } : {}),
     ...(a.model ? { model: a.model } : {}),
     ...(a.harnessId ? { harnessId: a.harnessId } : {}),
@@ -291,6 +369,14 @@ function AutomationRow({ a, onEdit, onToggle, onOpenBox }: { a: Automation; onEd
         <span className="text-muted-foreground mt-0.5 block truncate text-micro">{a.when}</span>
         <span className="text-muted-foreground mt-0.5 flex items-center gap-x-2 text-micro">
           <LastResult a={a} onOpenBox={onOpenBox} />
+          {a.quiet && a.counts && (
+            <>
+              <span aria-hidden>·</span>
+              <span className={cn("truncate", a.counts.reports > 0 ? "text-foreground" : "")} title="Quiet: only runs that found something notify">
+                {countsLine(a.counts)}
+              </span>
+            </>
+          )}
           {a.lastDelivery && (a.kind === "webhook" || a.kind === "github") && (
             <>
               <span aria-hidden>·</span>
@@ -487,6 +573,33 @@ function Editor({
         </div>
       )}
 
+      {d.kind === "schedule" && !id && (
+        <div>
+          <Label hint="a quiet check that only reports when something is wrong">Watch</Label>
+          <div className="flex flex-wrap gap-1.5">
+            {WATCH_PRESETS.map((p) => (
+              <Button
+                key={p.id}
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  setD((cur) => ({
+                    ...cur,
+                    name: cur.name.trim() && cur.name !== WATCH_PRESETS.find((w) => w.name === cur.name)?.name ? cur.name : p.name,
+                    spec: { ...cur.spec, cron: p.cron },
+                    taskTemplate: p.task,
+                    quiet: true,
+                  }))
+                }
+              >
+                {p.label}
+              </Button>
+            ))}
+          </div>
+          <p className="text-faint mt-1.5 text-micro">Fill in the &lt;placeholders&gt; in the task. A missing CLI is no blocker: the agent runs `need gh` (or any CLI) itself.</p>
+        </div>
+      )}
+
       {(d.kind === "github" || d.kind === "schedule" || d.kind === "webhook") && (
         <label className="block">
           <Label hint={d.kind === "github" ? "required" : "optional — the run clones it"}>Repository</Label>
@@ -671,6 +784,13 @@ function Editor({
         )}
         <label className="flex items-center justify-between gap-3">
           <span className="text-meta">
+            Quiet — only tell me when something needs me
+            <span className="text-faint block text-micro">A run that finds nothing ends silently and counts as a check. Questions, failures and PRs still notify.</span>
+          </span>
+          <Switch size="sm" checked={!!d.quiet} onCheckedChange={(v) => set({ quiet: v })} />
+        </label>
+        <label className="flex items-center justify-between gap-3">
+          <span className="text-meta">
             Keep its PRs green
             <span className="text-faint block text-micro">When CI fails on a PR this opened, fix it on the same branch (up to 3 tries).</span>
           </span>
@@ -763,6 +883,11 @@ function Editor({
                       deliveryLine(x)
                     )}
                   </span>
+                  {x.quiet && (
+                    <span className="text-faint shrink-0" title="Nothing needed you — no notification was sent">
+                      quiet
+                    </span>
+                  )}
                   {x.detail && <span className="text-faint min-w-0 truncate" title={x.detail}>{x.detail}</span>}
                 </li>
               ))}

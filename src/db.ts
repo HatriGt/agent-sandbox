@@ -359,6 +359,16 @@ const MIGRATIONS: string[] = [
     at INTEGER NOT NULL
   );
   `,
+  `
+  -- Proactive agents (Phase 4). triggers.quiet: a run that ends with the quiet marker (nothing needs
+  -- the operator) sends no notification. triggers.proposed: authored by an agent at its finish edge
+  -- (<!-- automate: cron | task -->), created paused until the operator enables or dismisses it.
+  -- trigger_delivery_log.quiet is stamped when the fired run finishes: 1 = quiet, 0 = reported,
+  -- NULL = not finished (or not a run) — the "checked N× · M reports" counter reads it.
+  ALTER TABLE triggers ADD COLUMN quiet INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE triggers ADD COLUMN proposed INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE trigger_delivery_log ADD COLUMN quiet INTEGER;
+  `,
 ];
 
 export function openDb(dataDir: string): Db {

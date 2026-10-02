@@ -984,6 +984,8 @@ export interface AutomationDelivery {
   detail?: string;
   box?: string;
   test?: boolean;
+  /** The fired run finished with the quiet marker — nothing needed the operator. */
+  quiet?: boolean;
 }
 export interface AutomationDraft {
   name: string;
@@ -994,6 +996,8 @@ export interface AutomationDraft {
   enabled: boolean;
   concurrency: number;
   prComment: boolean;
+  /** Quiet: a run that finds nothing for the operator sends no notification. */
+  quiet?: boolean;
   agent?: string;
   model?: string;
   harnessId?: string;
@@ -1017,6 +1021,10 @@ export interface Automation extends AutomationDraft {
   hasPayload: boolean;
   hasSigningSecret?: boolean;
   lastDelivery?: AutomationDelivery;
+  /** Proposed by an agent at the end of a run; paused until enabled (approve) or deleted (dismiss). */
+  proposed?: boolean;
+  /** Quiet automations only: runs that found nothing vs runs that reported something. */
+  counts?: { checked: number; reports: number };
   active: number;
   createdAt: number;
   updatedAt: number;

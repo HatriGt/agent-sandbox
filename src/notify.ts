@@ -93,6 +93,14 @@ export function detectTransitions(prev: readonly BoxRunView[], next: readonly Bo
 }
 
 /**
+ * Quiet runs (a quiet automation's check that found nothing): the done edge is NOT news. Everything
+ * else still is — a question, a failure, a stall — however the run signed off.
+ */
+export function shouldNotify(e: NotifyEvent, run: { quiet: boolean }): boolean {
+  return !(run.quiet && e.kind === "done");
+}
+
+/**
  * Delivery wrapper: dedupe + failure isolation.
  *
  * Dedupe key is (box, kind, question) — an identical re-detection inside `cooldownMs` is suppressed

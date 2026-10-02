@@ -28,6 +28,8 @@ export interface TriggerRow extends TriggerInput {
   hasPayload: boolean;
   /** Alert presets: whether the vendor signing secret is set (never the secret itself). */
   hasSigningSecret: boolean;
+  /** Authored by an agent (<!-- automate -->), paused until the owner enables or dismisses it. */
+  proposed: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -54,6 +56,7 @@ function toRow(r: Record<string, any>): TriggerRow {
     concurrency: Number(r.concurrency) || 1,
     // triggers.budget_json is orphaned: budgets were removed; the column is neither read nor written.
     prComment: !!r.pr_comment,
+    quiet: !!r.quiet,
     ...(r.agent ? { agent: r.agent } : {}),
     ...(r.model ? { model: r.model } : {}),
     ...(r.harness_id ? { harnessId: r.harness_id } : {}),
@@ -62,6 +65,7 @@ function toRow(r: Record<string, any>): TriggerRow {
     lastResult: parse<TriggerResult | null>(r.last_result_json, null),
     hasPayload: !!r.last_payload_json,
     hasSigningSecret: !!r.signing_secret_enc,
+    proposed: !!r.proposed,
     createdAt: Number(r.created_at),
     updatedAt: Number(r.updated_at),
   };
@@ -77,15 +81,25 @@ export function computeNextFire(t: Pick<TriggerInput, "kind" | "spec" | "enabled
   }
 }
 
-export function createTrigger(db: Db, box: SecretBox, owner: string, t: TriggerInput, now = Date.now()): { row: TriggerRow; secret: string } {
+export function createTrigger(
+  db: Db,
+  box: SecretBox,
+  owner: string,
+  t: TriggerInput,
+  now = Date.now(),
+  opts: { proposed?: boolean } = {}
+): { row: TriggerRow; secret: string } {
   const id = "trg_" + crypto.randomBytes(9).toString("base64url");
   const secret = newSecret();
+  // A proposal is always created paused: the agent suggests, the owner enables.
+  const enabled = opts.proposed ? false : t.enabled;
   db.prepare(
-    `INSERT INTO triggers (id, owner, name, kind, spec_json, repo, task_template, enabled, concurrency, pr_comment, agent, model, harness_id, secret_enc, next_fire, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO triggers (id, owner, name, kind, spec_json, repo, task_template, enabled, concurrency, pr_comment, quiet, proposed, agent, model, harness_id, secret_enc, next_fire, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
-    id, owner, t.name, t.kind, JSON.stringify(t.spec), t.repo ?? null, t.taskTemplate, t.enabled ? 1 : 0, t.concurrency,
-    t.prComment ? 1 : 0, t.agent ?? null, t.model ?? null, t.harnessId ?? null, box.seal(secret), computeNextFire(t, now), now, now
+    id, owner, t.name, t.kind, JSON.stringify(t.spec), t.repo ?? null, t.taskTemplate, enabled ? 1 : 0, t.concurrency,
+    t.prComment ? 1 : 0, t.quiet ? 1 : 0, opts.proposed ? 1 : 0, t.agent ?? null, t.model ?? null, t.harnessId ?? null, box.seal(secret),
+    computeNextFire({ ...t, enabled }, now), now, now
   );
   return { row: getTrigger(db, owner, id)!, secret };
 }
@@ -94,11 +108,11 @@ export function updateTrigger(db: Db, owner: string, id: string, t: TriggerInput
   const r = db
     .prepare(
       `UPDATE triggers SET name = ?, kind = ?, spec_json = ?, repo = ?, task_template = ?, enabled = ?, concurrency = ?,
-       pr_comment = ?, agent = ?, model = ?, harness_id = ?, next_fire = ?, updated_at = ? WHERE id = ? AND owner = ?`
+       pr_comment = ?, quiet = ?, agent = ?, model = ?, harness_id = ?, next_fire = ?, updated_at = ? WHERE id = ? AND owner = ?`
     )
     .run(
       t.name, t.kind, JSON.stringify(t.spec), t.repo ?? null, t.taskTemplate, t.enabled ? 1 : 0, t.concurrency,
-      t.prComment ? 1 : 0, t.agent ?? null, t.model ?? null, t.harnessId ?? null, computeNextFire(t, now), now, id, owner
+      t.prComment ? 1 : 0, t.quiet ? 1 : 0, t.agent ?? null, t.model ?? null, t.harnessId ?? null, computeNextFire(t, now), now, id, owner
     );
   return r.changes ? getTrigger(db, owner, id) : undefined;
 }
@@ -106,8 +120,9 @@ export function updateTrigger(db: Db, owner: string, id: string, t: TriggerInput
 export function setEnabled(db: Db, owner: string, id: string, enabled: boolean, now = Date.now()): TriggerRow | undefined {
   const cur = getTrigger(db, owner, id);
   if (!cur) return undefined;
-  db.prepare(`UPDATE triggers SET enabled = ?, next_fire = ?, updated_at = ? WHERE id = ? AND owner = ?`).run(
-    enabled ? 1 : 0, computeNextFire({ ...cur, enabled }, now), now, id, owner
+  // Enabling a proposal IS approving it: it stops being "proposed by the agent" and runs like any other.
+  db.prepare(`UPDATE triggers SET enabled = ?, proposed = CASE WHEN ? THEN 0 ELSE proposed END, next_fire = ?, updated_at = ? WHERE id = ? AND owner = ?`).run(
+    enabled ? 1 : 0, enabled ? 1 : 0, computeNextFire({ ...cur, enabled }, now), now, id, owner
   );
   return getTrigger(db, owner, id);
 }
@@ -239,10 +254,34 @@ export function pruneDeliveries(db: Db, now = Date.now(), maxAgeMs = 7 * 24 * 36
   return db.prepare(`DELETE FROM trigger_deliveries WHERE at < ?`).run(now - maxAgeMs).changes;
 }
 
-/** The API view: adds "when" in words; never includes the secret. */
-export function viewTrigger(t: TriggerRow, names: Record<string, string>, db?: Db): TriggerRow & { when: string; lastDelivery?: DeliveryEntry } {
+/** The API view: adds "when" in words (and the quiet counter for quiet automations); never includes the secret. */
+export function viewTrigger(t: TriggerRow, names: Record<string, string>, db?: Db): TriggerRow & { when: string; lastDelivery?: DeliveryEntry; counts?: QuietCounts } {
   const ld = db ? lastDelivery(db, t.id) : undefined;
-  return { ...t, when: describeWhen(t, names), ...(ld ? { lastDelivery: ld } : {}) };
+  const counts = db && t.quiet ? quietCounts(db, t.id) : undefined;
+  return { ...t, when: describeWhen(t, names), ...(ld ? { lastDelivery: ld } : {}), ...(counts ? { counts } : {}) };
+}
+
+/* ───────────────────────────── quiet runs ───────────────────────────── */
+
+export interface QuietCounts {
+  /** Fired runs that finished with the quiet marker: nothing needed the operator. */
+  checked: number;
+  /** Fired runs that finished with something to show. */
+  reports: number;
+}
+
+/** Stamp the fired delivery for `box` with how its run finished: quiet (nothing to show) or a report. */
+export function markDeliveryFinished(db: Db, triggerId: string, box: string, quiet: boolean): void {
+  db.prepare(`UPDATE trigger_delivery_log SET quiet = ? WHERE id = (SELECT id FROM trigger_delivery_log WHERE trigger_id = ? AND box = ? ORDER BY id DESC LIMIT 1)`).run(
+    quiet ? 1 : 0, triggerId, box
+  );
+}
+
+export function quietCounts(db: Db, triggerId: string): QuietCounts {
+  const r = db
+    .prepare(`SELECT SUM(CASE WHEN quiet = 1 THEN 1 ELSE 0 END) AS checked, SUM(CASE WHEN quiet = 0 THEN 1 ELSE 0 END) AS reports FROM trigger_delivery_log WHERE trigger_id = ? AND outcome = 'fired'`)
+    .get(triggerId) as { checked: number | null; reports: number | null };
+  return { checked: Number(r.checked ?? 0), reports: Number(r.reports ?? 0) };
 }
 
 /** Every dispatcher outcome (webhook, schedule, chain, run-now) lands in the delivery log. */
@@ -278,6 +317,8 @@ export interface DeliveryEntry {
   detail?: string;
   box?: string;
   test?: boolean;
+  /** The fired run finished with the quiet marker — nothing needed the operator. */
+  quiet?: boolean;
 }
 
 /** Deliveries kept per automation. A short log, not a live feed. */
@@ -303,6 +344,7 @@ const toEntry = (r: Record<string, any>): DeliveryEntry => ({
   ...(r.detail ? { detail: r.detail } : {}),
   ...(r.box ? { box: r.box } : {}),
   ...(r.test ? { test: true } : {}),
+  ...(r.quiet ? { quiet: true } : {}),
 });
 
 /** Newest first. Owner-scoped through the trigger row. */

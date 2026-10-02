@@ -4,12 +4,15 @@ import type { StartedBy } from "./started-by.js";
 import {
   admit,
   formatReceiptComment,
+  quietPreamble,
   renderTemplate,
   templateContext,
   unattendedPreamble,
   type GithubMatch,
 } from "./triggers.js";
-import { advanceNextFire, chainsAfter, dueSchedules, getTriggerById, markFinished, markFired, markSkipped, type TriggerResult, type TriggerRow } from "./trigger-store.js";
+import {
+  advanceNextFire, chainsAfter, dueSchedules, getTriggerById, markDeliveryFinished, markFinished, markFired, markSkipped, type TriggerResult, type TriggerRow,
+} from "./trigger-store.js";
 
 /**
  * The trigger dispatcher: one controller loop (modelled on the pool maintainer — setInterval,
@@ -113,7 +116,8 @@ export function makeDispatcher(d: DispatcherDeps) {
       ...(ctx.parent ? { parent: { box: ctx.parent.box, headline: ctx.parent.digest.headline, state: ctx.parent.digest.state, task: ctx.parent.digest.task } } : {}),
     };
     const rendered = renderTemplate(t.taskTemplate, templateContext(ctx.payload, extra));
-    const task = rendered.text.trim() + "\n" + unattendedPreamble({ name: t.name, kind: t.kind, prOnly: true });
+    const task =
+      rendered.text.trim() + "\n" + unattendedPreamble({ name: t.name, kind: t.kind, prOnly: true }) + (t.quiet ? "\n" + quietPreamble(rendered.text) : "");
 
     let repos: StartRunInput["repos"];
     if (!ctx.parent && t.repo) {
@@ -177,13 +181,15 @@ export function makeDispatcher(d: DispatcherDeps) {
    * the trigger's last result, posts the receipt comment (when on and the run has a subject), and
    * fires any chain that follows this trigger.
    */
-  async function onRunFinished(box: string, digest: RunDigest, startedBy: StartedBy | undefined, archiveId?: number): Promise<void> {
+  async function onRunFinished(box: string, digest: RunDigest, startedBy: StartedBy | undefined, archiveId?: number, opts: { quiet?: boolean } = {}): Promise<void> {
     const id = triggerOfBox(box) ?? (startedBy?.kind === "trigger" ? startedBy.triggerId : undefined);
     if (!id) return;
     closeBox(box);
     const t = getTriggerById(d.db, id);
     if (!t) return;
     markFinished(d.db, id, box, { state: digest.state, headline: digest.headline, ...(archiveId ? { archiveId } : {}) });
+    // The ledger row the Automations page reads: quiet (nothing needed the operator) or a report.
+    markDeliveryFinished(d.db, id, box, opts.quiet === true);
     const subj = startedBy?.kind === "trigger" ? startedBy.subject : undefined;
     if (t.prComment && subj && t.repo && d.postComment) {
       const body = formatReceiptComment({
@@ -213,13 +219,20 @@ export function makeDispatcher(d: DispatcherDeps) {
     closeBox(box);
   }
 
+  /** The quiet automation whose in-flight fire started `box`, if any (the finish edge asks before notifying). */
+  function quietTriggerOf(box: string): TriggerRow | undefined {
+    const id = triggerOfBox(box);
+    const t = id ? getTriggerById(d.db, id) : undefined;
+    return t?.quiet ? t : undefined;
+  }
+
   function start(intervalMs = 20_000): { stop: () => void } {
     const timer = setInterval(() => void tick(), intervalMs);
     if (typeof timer.unref === "function") timer.unref();
     return { stop: () => clearInterval(timer) };
   }
 
-  return { fire, tick, onRunFinished, forget, start, activeCount, reconcile };
+  return { fire, tick, onRunFinished, forget, start, activeCount, reconcile, quietTriggerOf };
 }
 
 export type Dispatcher = ReturnType<typeof makeDispatcher>;
