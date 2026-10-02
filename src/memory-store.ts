@@ -9,7 +9,7 @@
  * the agent to write `<!-- remember: <kind> | <text> [| why: …] [| replaces: "…"] -->` the moment
  * something durable happens; the controller harvests the log incrementally while the run is live
  * (src/memory-harvest.ts, driven from the fleet tick in src/http.ts) and once more at the finish
- * edge, where answered questions become decisions. Reads: msb.ts installMemory drops a relevance-
+ * edge (answered questions are left to the agent to record as decisions). Reads: msb.ts installMemory drops a relevance-
  * filtered MEMORY.md (Core + For this task) and a full MEMORY-all.md archive into ~/.claude and
  * ~/.omp before every turn; the in-box `memory` tool searches them and appends new notes.
  *
@@ -65,6 +65,8 @@ export interface MemoryStore {
   global: MemoryNote[];
   /** Repo-scope notes by slug. */
   repos: Record<string, MemoryNote[]>;
+  /** Keys of notes the operator forgot: a re-harvest of an old run's log must not bring them back. */
+  forgotten?: string[];
 }
 
 /** A note as parsed from the sentinel grammar, before it has an id/scope/status. */
@@ -125,7 +127,8 @@ export function parseMemoryStore(raw: string): MemoryStore {
         Array.isArray(v) ? v.filter((n) => n && typeof n.text === "string" && typeof n.id === "string").map((n) => migrateNote(n, scope)) : [];
       const repos: Record<string, MemoryNote[]> = {};
       if (obj.repos && typeof obj.repos === "object") for (const [k, v] of Object.entries(obj.repos)) repos[k] = notes(v, "repo");
-      return { enabled: obj.enabled !== false, global: notes(obj.global, "operator"), repos };
+      const forgotten = Array.isArray(obj.forgotten) ? obj.forgotten.filter((k: unknown): k is string => typeof k === "string") : [];
+      return { enabled: obj.enabled !== false, global: notes(obj.global, "operator"), repos, ...(forgotten.length ? { forgotten } : {}) };
     }
   } catch {
     /* fall through */
@@ -381,18 +384,17 @@ export interface RememberInput {
 }
 
 /**
- * Store what a run produced so far: parsed notes filed by their kind's scope, answered questions
- * as kept decisions. Keys in `seen` are skipped and the new ones added to it. Returns the notes
+ * Store what a run produced so far: parsed notes filed by their kind's scope, minus any the operator
+ * forgot. Keys in `seen` are skipped and the new ones added to it. Returns the notes
  * actually stored (empty when memory is off).
  */
 export function rememberRunNotes(store: MemoryStore, i: RememberInput): MemoryNote[] {
   if (!store.enabled) return [];
+  // Answered questions are NOT saved on their own: most ("which of these PRs?") only matter to the
+  // run that asked. A choice that should outlast it is the agent's to record as a decision.
   const parsed = parseRememberNotes(i.log);
-  for (const q of i.questions ?? []) {
-    const t = questionNoteText(q);
-    if (t) parsed.push({ kind: "decision", text: t });
-  }
-  const fresh = parsed.filter((p) => !i.seen?.has(noteKey(p)));
+  const forgotten = new Set(store.forgotten ?? []);
+  const fresh = parsed.filter((p) => !i.seen?.has(noteKey(p)) && !forgotten.has(noteKey(p)));
   if (!fresh.length) return [];
   const added: MemoryNote[] = [];
   for (const scope of [
@@ -479,7 +481,8 @@ export function updateNote(store: MemoryStore, id: string, patch: { text?: unkno
 export function deleteNote(store: MemoryStore, id: string): boolean {
   const hit = findNote(store, id);
   if (!hit) return false;
-  hit.list.splice(hit.index, 1);
+  const [gone] = hit.list.splice(hit.index, 1);
+  store.forgotten = [...(store.forgotten ?? []).filter((k) => k !== noteKey(gone)), noteKey(gone)].slice(-500);
   return true;
 }
 
@@ -500,6 +503,8 @@ export function addManualNote(store: MemoryStore, input: { kind: unknown; text: 
   if (repo && !/^[^/\s]+\/[^/\s]+$/.test(repo)) throw new Error("repo must be an owner/name slug.");
   const scope = scopeFor(kind, repo ? [repo] : []);
   const list = listFor(store, scope);
+  // Typing a note back in is the operator un-forgetting it.
+  if (store.forgotten) store.forgotten = store.forgotten.filter((k) => k !== noteKey({ kind, text }));
   const existing = list.find((n) => isActive(n) && noteKey(n) === noteKey({ kind, text }));
   if (existing) return existing;
   const [note] = addParsedNotes(list, [{ kind, text, ...(why ? { why } : {}) }], { source, now, status: () => "kept", ...scope });

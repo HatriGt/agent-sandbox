@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   MEMORY_LIMITS,
+  addManualNote,
   addNotes,
   deleteNote,
   emptyMemoryStore,
@@ -9,6 +10,7 @@ import {
   parseRemember,
   questionNoteText,
   rememberRun,
+  rememberRunNotes,
   renderMemoryMd,
   serializeMemoryStore,
   updateNote,
@@ -75,14 +77,14 @@ test("addNotes: everything pinned means nothing is evicted; known facts are not 
   );
 });
 
-test("rememberRun: sentinel facts + answered questions file under the single repo; several repos go global", () => {
+test("rememberRun: sentinel facts file under the single repo (answered questions are not saved); several repos go global", () => {
   const store = emptyMemoryStore();
   const log = "<!-- remember:\nCI runs on Node 20\n-->";
   const n = rememberRun(store, { box: "box-a", log, questions: [{ question: "Keep the old API?", answer: "yes" }, { question: "open?" }], repos: ["Acme/Widgets"] });
-  assert.equal(n, 2);
+  assert.equal(n, 1);
   assert.deepEqual(
     store.repos["acme/widgets"].map((x) => x.text),
-    ["CI runs on Node 20", "asked Keep the old API? → operator chose yes"]
+    ["CI runs on Node 20"]
   );
   assert.equal(store.repos["acme/widgets"][0].source, "box-a");
   assert.equal(store.repos["acme/widgets"][0].repo, "acme/widgets");
@@ -162,4 +164,16 @@ test("store round-trips and tolerates garbage", () => {
   assert.deepEqual(back.repos, store.repos);
   assert.deepEqual(parseMemoryStore("not json"), emptyMemoryStore());
   assert.deepEqual(parseMemoryStore('{"global":"nope","repos":{"a":[{"id":1}]}}'), { enabled: true, global: [], repos: { a: [] } });
+});
+
+test("a forgotten note is not resurrected by re-harvesting the run that wrote it; typing it back un-forgets", () => {
+  const store = emptyMemoryStore();
+  const log = "<!-- remember: preference | reply in bullets -->";
+  const [n] = rememberRunNotes(store, { box: "b", log, repos: [] });
+  assert.ok(deleteNote(store, n.id));
+  assert.deepEqual(rememberRunNotes(store, { box: "b", log, repos: [] }), []);
+  const back = parseMemoryStore(serializeMemoryStore(store));
+  assert.deepEqual(rememberRunNotes(back, { box: "b", log, repos: [] }), []);
+  addManualNote(back, { kind: "preference", text: "reply in bullets" });
+  assert.equal(back.forgotten?.length, 0);
 });
