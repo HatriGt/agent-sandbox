@@ -37,10 +37,10 @@ test("grammar: kinds, why, replaces (quotes stripped), untagged → fact, severa
     "-->",
   ].join("\n");
   assert.deepEqual(parseRememberNotes(log), [
-    { kind: "lesson", text: "preprod org is elseco-pp", why: "tried elseco-preprod, 404" },
-    { kind: "fact", text: "Tests need --runInBand" },
-    { kind: "preference", text: "reply in short bullets" },
-    { kind: "decision", text: "deploy from main only", why: "release train", replaces: "deploy from any branch" },
+    { kind: "lesson", text: "Preprod org is elseco-pp.", why: "Tried elseco-preprod, 404." },
+    { kind: "fact", text: "Tests need --runInBand." },
+    { kind: "preference", text: "Reply in short bullets." },
+    { kind: "decision", text: "Deploy from main only.", why: "Release train.", replaces: "deploy from any branch" },
   ]);
 });
 
@@ -52,7 +52,7 @@ test("grammar: a playbook's indented lines are its steps; the operator's own tur
   assert.equal(notes.length, 2);
   assert.equal(notes[0].kind, "playbook");
   assert.equal(notes[0].text, "Check staging health\n- curl /healthz\n- kubectl get pods -n staging");
-  assert.equal(notes[1].text, "after");
+  assert.equal(notes[1].text, "After.");
 });
 
 test("scope: preference/rule → operator; others → the single repo, else operator", () => {
@@ -104,7 +104,7 @@ test("caps: per kind, oldest unpinned within the kind; other kinds untouched", (
   const list = store.repos["o/r"];
   const pbs = list.filter((n) => n.kind === "playbook");
   assert.equal(pbs.length, cap);
-  assert.equal(pbs[0].text, "task 5");
+  assert.equal(pbs[0].text, "Task 5");
   assert.ok(list.some((n) => n.kind === "decision"));
 });
 
@@ -115,8 +115,8 @@ test("migration: v1 notes become kept facts in the scope of their list", () => {
     repos: { "o/r": [{ id: "b", text: "r", at: 2, source: "b", repo: "o/r", pinned: true }] },
   });
   const s = parseMemoryStore(v1);
-  assert.deepEqual(s.global[0], { id: "a", kind: "fact", scope: "operator", status: "kept", text: "g", at: 1, source: "b" });
-  assert.deepEqual(s.repos["o/r"][0], { id: "b", kind: "fact", scope: "repo", status: "kept", text: "r", at: 2, source: "b", repo: "o/r", pinned: true });
+  assert.deepEqual(s.global[0], { id: "a", kind: "fact", scope: "operator", status: "kept", text: "G.", at: 1, source: "b" });
+  assert.deepEqual(s.repos["o/r"][0], { id: "b", kind: "fact", scope: "repo", status: "kept", text: "R.", at: 2, source: "b", repo: "o/r", pinned: true });
 });
 
 test("retrieval: Core always; For this task picks by relevance, else newest; matched playbooks hint", () => {
@@ -130,7 +130,7 @@ test("retrieval: Core always; For this task picks by relevance, else newest; mat
   });
   const task = "rotate the billing webhook secret";
   const md = renderMemoryMd(store, ["o/r"], task)!;
-  assert.match(md, /## Core\n\n- \[preference\] answer in short bullets/);
+  assert.match(md, /## Core\n\n- \[preference\] Answer in short bullets\./);
   assert.match(md, /## For this task/);
   assert.match(md, /billing service/);
   assert.doesNotMatch(md, /mkdocs/);
@@ -261,8 +261,8 @@ test("manual add, export → import round trip, promote a playbook", () => {
   assert.throws(() => addManualNote(store, { kind: "fact", text: "  " }), /needs some text/);
   assert.equal(store.global[0].kind, "preference"); // an operator kind ignores the repo
   const md = exportMemoryMarkdown(store);
-  assert.match(md, /## operator\n\n- \[preference\] use pnpm/);
-  assert.match(md, /## o\/r\n\n- \[decision\] squash merges \| why: clean history\n- \[playbook\] Release the app\n {2}- npm version patch/);
+  assert.match(md, /## operator\n\n- \[preference\] Use pnpm\./);
+  assert.match(md, /## o\/r\n\n- \[decision\] Squash merges\. \| why: Clean history\.\n- \[playbook\] Release the app\n {2}- npm version patch/);
   const back = emptyMemoryStore();
   assert.equal(importMemoryMarkdown(back, md), 3);
   assert.equal(exportMemoryMarkdown(back), md);

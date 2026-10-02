@@ -20,12 +20,12 @@ import {
 
 test("parseRemember: one fact per line, trimmed, list markers dropped, empties ignored", () => {
   const log = "did things\n<!-- remember:\n  - Tests run with `pnpm test`  \n\n* The API lives in packages/api\n\n3. Operator prefers squash merges\n-->\nbye";
-  assert.deepEqual(parseRemember(log), ["Tests run with `pnpm test`", "The API lives in packages/api", "Operator prefers squash merges"]);
+  assert.deepEqual(parseRemember(log), ["Tests run with `pnpm test`.", "The API lives in packages/api.", "Operator prefers squash merges."]);
 });
 
 test("parseRemember: dedupes by normalised text, across several blocks", () => {
   const log = "<!-- remember: Use pnpm. -->\nmore\n<!-- remember:\nuse pnpm\nUSE  PNPM!\nNode 20 is required\n-->";
-  assert.deepEqual(parseRemember(log), ["Use pnpm.", "Node 20 is required"]);
+  assert.deepEqual(parseRemember(log), ["Use pnpm.", "Node 20 is required."]);
 });
 
 test("parseRemember: nothing on a log without the marker, or an empty one", () => {
@@ -84,7 +84,7 @@ test("rememberRun: sentinel facts file under the single repo (answered questions
   assert.equal(n, 1);
   assert.deepEqual(
     store.repos["acme/widgets"].map((x) => x.text),
-    ["CI runs on Node 20"]
+    ["CI runs on Node 20."]
   );
   assert.equal(store.repos["acme/widgets"][0].source, "box-a");
   assert.equal(store.repos["acme/widgets"][0].repo, "acme/widgets");
@@ -92,7 +92,7 @@ test("rememberRun: sentinel facts file under the single repo (answered questions
 
   const multi = emptyMemoryStore();
   assert.equal(rememberRun(multi, { box: "b", log, repos: ["a/x", "a/y"] }), 1);
-  assert.equal(multi.global[0].text, "CI runs on Node 20");
+  assert.equal(multi.global[0].text, "CI runs on Node 20.");
   assert.equal(multi.global[0].repo, undefined);
 });
 
@@ -110,7 +110,7 @@ test("rememberRun: per-repo and global caps hold", () => {
   const facts = (n: number, p: string) => Array.from({ length: n }, (_, i) => `${p} ${i}`);
   for (let r = 0; r < 4; r++) rememberRun(store, { box: `b${r}`, log: `<!-- remember:\n${facts(20, `run${r}`).join("\n")}\n-->`, repos: ["o/r"], now: r });
   assert.equal(store.repos["o/r"].length, MEMORY_LIMITS.perKind.fact);
-  assert.equal(store.repos["o/r"][0].text, "run2 10"); // the oldest went first
+  assert.equal(store.repos["o/r"][0].text, "Run2 10."); // the oldest went first
   for (let r = 0; r < 5; r++) rememberRun(store, { box: `g${r}`, log: `<!-- remember:\n${facts(20, `g${r}`).join("\n")}\n-->`, repos: [], now: r });
   assert.equal(store.global.length, MEMORY_LIMITS.perKind.fact);
 });
@@ -122,7 +122,7 @@ test("updateNote / deleteNote / viewMemory", () => {
   const all = viewMemory(store);
   assert.deepEqual(
     all.map((n) => n.text),
-    ["global", "one", "two"]
+    ["Global.", "One.", "Two."]
   ); // newest first
   const id = store.repos["o/r"][0].id;
   const edited = updateNote(store, id, { text: "  one   edited ", pinned: true });
@@ -136,7 +136,7 @@ test("updateNote / deleteNote / viewMemory", () => {
   assert.equal(deleteNote(store, id), false);
   assert.deepEqual(
     store.repos["o/r"].map((n) => n.text),
-    ["two"]
+    ["Two."]
   );
 });
 
@@ -149,8 +149,8 @@ test("renderMemoryMd: operator + attached repos only, pinned in Core, null when 
   rememberRun(store, { box: "b", log: "<!-- remember: everywhere -->", repos: [], now: 12 });
   const md = renderMemoryMd(store, ["O/R"])!;
   assert.match(md, /may be stale/);
-  assert.match(md, /## Core\n\n- \[pinned fact\] newer/);
-  assert.match(md, /- \[fact\] older\n- \[fact\] everywhere/);
+  assert.match(md, /## Core\n\n- \[pinned fact\] Newer\./);
+  assert.match(md, /- \[fact\] Older\.\n- \[fact\] Everywhere\./);
   assert.doesNotMatch(md, /other repo/);
   assert.equal(renderMemoryMd({ ...store, enabled: false }, ["o/r"]), null);
 });
@@ -176,4 +176,19 @@ test("a forgotten note is not resurrected by re-harvesting the run that wrote it
   assert.deepEqual(rememberRunNotes(back, { box: "b", log, repos: [] }), []);
   addManualNote(back, { kind: "preference", text: "reply in bullets" });
   assert.equal(back.forgotten?.length, 0);
+});
+
+test("notes are stored as clean statements, and v1 answered-question notes read as decisions", () => {
+  const store = emptyMemoryStore();
+  const log = [
+    "<!-- remember: rule | remember that   always label PRs with their area | why: operator said so -->",
+    "<!-- remember: fact | `pnpm test` needs Node 20 -->",
+    "<!-- remember: playbook | deploy the controller:\n  - push to main\n  - run deploy-asb.cmd\n-->",
+  ].join("\n");
+  const texts = rememberRunNotes(store, { box: "b", log, repos: [] }).map((n) => n.text);
+  assert.deepEqual(texts, ["Always label PRs with their area.", "`pnpm test` needs Node 20.", "Deploy the controller\n- push to main\n- run deploy-asb.cmd"]);
+  assert.equal(store.global.find((n) => n.kind === "rule")?.why, "Operator said so.");
+  const legacy = parseMemoryStore(JSON.stringify({ global: [{ id: "x", kind: "decision", text: "asked Which DB? → operator chose postgres" }] }));
+  assert.equal(legacy.global[0].text, "Decided: postgres.");
+  assert.equal(legacy.global[0].why, "Asked: Which DB?");
 });

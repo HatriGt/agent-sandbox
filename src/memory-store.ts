@@ -142,11 +142,16 @@ function migrateNote(n: Record<string, unknown>, scope: MemoryScope): MemoryNote
     kind: isMemoryKind(n.kind) ? n.kind : "fact",
     scope: n.scope === "operator" || n.scope === "repo" ? n.scope : scope,
     status: n.status === "pending" ? "pending" : "kept",
-    text: String(n.text),
+    text: tidyNoteText(String(n.text), isMemoryKind(n.kind) ? n.kind : "fact"),
     at: typeof n.at === "number" ? n.at : 0,
     source: typeof n.source === "string" ? n.source : "",
   };
   if (typeof n.why === "string" && n.why) out.why = n.why;
+  const asked = ASKED_RE.exec(String(n.text).trim());
+  if (asked) {
+    out.text = tidyNoteText(`Decided: ${asked[2].trim()}`, out.kind);
+    out.why ??= tidyNoteText(`Asked: ${asked[1].trim()}`, "fact");
+  }
   if (typeof n.repo === "string" && n.repo) out.repo = n.repo;
   if (n.pinned) out.pinned = true;
   if (typeof n.supersedes === "string") out.supersedes = n.supersedes;
@@ -178,6 +183,27 @@ export function noteKey(n: { kind: MemoryKind; text: string }): string {
 export const isActive = (n: MemoryNote): boolean => n.until === undefined;
 
 const clipText = (kind: MemoryKind, text: string): string => text.slice(0, kind === "playbook" ? MEMORY_LIMITS.maxPlaybookChars : MEMORY_LIMITS.maxNoteChars);
+/**
+ * A note as the operator should read it: one clean statement, not a log line. Whitespace collapsed,
+ * filler lead-ins ("Remember that", "Note:") dropped, first letter capitalised (unless it opens with
+ * code or a path), a full stop added. A playbook tidies its title line and keeps its steps as written.
+ */
+export function tidyNoteText(text: string, kind: MemoryKind): string {
+  const [head, ...steps] = kind === "playbook" ? text.replace(/\r\n/g, "\n").split("\n") : [text];
+  let t = head
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^(?:(?:please\s+)?remember(?:\s+that)?|note(?:\s+that)?|fyi|important)\s*[:,-]?\s+/i, "")
+    .replace(/^[-*•]\s+/, "");
+  if (/^[a-z]/.test(t) && !/^[a-z0-9_.-]+[/(]/.test(t)) t = t[0].toUpperCase() + t.slice(1);
+  if (kind === "playbook") t = t.replace(/[.:]+$/, "");
+  else if (/[\p{L}\p{N})`'"\]]$/u.test(t)) t += ".";
+  return [t, ...steps.map((l) => l.trim()).filter(Boolean)].join("\n");
+}
+
+/** v1 answered-question notes ("asked Q → operator chose A") read as the decision, with the question as why. */
+const ASKED_RE = /^asked\s+([\s\S]+?)\s*→\s*operator chose\s+([\s\S]+)$/i;
+
 const stripQuotes = (s: string): string => s.replace(/^["“'‘]+/, "").replace(/["”'’]+$/, "").trim();
 
 /**
@@ -196,13 +222,13 @@ export function parseNoteLine(line: string): ParsedNote | null {
   const parts = rest.split(REMEMBER_FIELD_RE);
   const text = parts[0].trim();
   if (!text) return null;
-  const note: ParsedNote = { kind, text: clipText(kind, text) };
+  const note: ParsedNote = { kind, text: clipText(kind, tidyNoteText(text, kind)) };
   for (const p of parts.slice(1)) {
     const m = /^(why|replaces)\s*:\s*([\s\S]*)$/i.exec(p.trim());
     if (!m) continue;
     const v = m[2].trim();
     if (!v) continue;
-    if (m[1].toLowerCase() === "why") note.why = v.slice(0, MEMORY_LIMITS.maxWhyChars);
+    if (m[1].toLowerCase() === "why") note.why = tidyNoteText(v, "fact").slice(0, MEMORY_LIMITS.maxWhyChars);
     else note.replaces = stripQuotes(v).slice(0, MEMORY_LIMITS.maxNoteChars);
   }
   return note;
@@ -493,11 +519,11 @@ export function deleteNote(store: MemoryStore, id: string): boolean {
 export function addManualNote(store: MemoryStore, input: { kind: unknown; text: unknown; why?: unknown; repo?: unknown }, now = Date.now(), source = "operator"): MemoryNote {
   if (!isMemoryKind(input.kind)) throw new Error(`kind must be one of ${MEMORY_KINDS.join(", ")}.`);
   const kind = input.kind;
-  const text = kind === "playbook" ? String(input.text ?? "").replace(/\r\n/g, "\n").trim() : String(input.text ?? "").replace(/\s+/g, " ").trim();
+  const text = tidyNoteText(kind === "playbook" ? String(input.text ?? "").replace(/\r\n/g, "\n").trim() : String(input.text ?? "").replace(/\s+/g, " ").trim(), kind);
   if (!text) throw new Error("A note needs some text.");
   const max = kind === "playbook" ? MEMORY_LIMITS.maxPlaybookChars : MEMORY_LIMITS.maxNoteChars;
   if (text.length > max) throw new Error(`A ${kind} is at most ${max} characters.`);
-  const why = String(input.why ?? "").replace(/\s+/g, " ").trim();
+  const why = tidyNoteText(String(input.why ?? ""), "fact");
   if (why.length > MEMORY_LIMITS.maxWhyChars) throw new Error(`A rationale is at most ${MEMORY_LIMITS.maxWhyChars} characters.`);
   const repo = typeof input.repo === "string" && input.repo.trim() ? memoryRepoKey(input.repo) : undefined;
   if (repo && !/^[^/\s]+\/[^/\s]+$/.test(repo)) throw new Error("repo must be an owner/name slug.");
