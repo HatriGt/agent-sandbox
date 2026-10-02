@@ -15,6 +15,8 @@ import { Switch } from "@/components/ui/switch";
 import { Bar } from "@/components/thread/Skeletons";
 import { FilterChip } from "@/components/ui/filter-chip";
 import { MemoryOverview } from "@/components/memory/MemoryOverview";
+import { sectionId } from "@/components/memory/MemoryMap";
+import { Inline, NoteStatement, noteHeadline } from "@/components/memory/noteText";
 import { isOperatorKind, KIND_ICON, KIND_LABEL, KIND_PLURAL, KINDS, plural } from "@/components/memory/kinds";
 
 /**
@@ -144,6 +146,25 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
   };
 
   const total = notes?.length ?? 0;
+  /** From the map: show the row (clearing filters, opening history if needed), scroll to it, flash it. */
+  const reveal = (elId: string, ghost = false) => {
+    setQuery("");
+    setKindFilter("all");
+    if (ghost) setEarlierOpen(true);
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        const el = document.getElementById(elId);
+        if (!el) return;
+        const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+        el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "center" });
+        el.classList.remove("mm-flash");
+        void el.offsetWidth;
+        el.classList.add("mm-flash");
+        setTimeout(() => el.classList.remove("mm-flash"), 2000);
+      }),
+    );
+  };
+  const selectNote = (id: string) => reveal(`mem-note-${id}`, notes?.find((n) => n.id === id)?.until != null);
   const dim = !data?.enabled && "opacity-60";
 
   return (
@@ -200,15 +221,11 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
           ))}
         </ul>
       ) : total === 0 ? (
-        <EmptyState
-          icon={Brain}
-          title="Nothing remembered yet"
-          line="Runs add notes as they go — a correction becomes a lesson, a recurring task a playbook, a stated preference follows you everywhere. Or add a preference above."
-        />
+        <MemoryOverview notes={[]} pending={0} onReview={() => {}} onSelect={() => {}} onSection={() => {}} />
       ) : (
         <>
           <div className="flex flex-col gap-4">
-            <MemoryOverview live={model.liveAll} pending={model.pending.length} onReview={() => reviewRef.current?.focus()} />
+            <MemoryOverview notes={notes} pending={model.pending.length} onReview={() => reviewRef.current?.focus()} onSelect={selectNote} onSection={(id) => reveal(id)} />
 
             {model.pending.length > 0 && (
               <section
@@ -272,7 +289,7 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
           )}
 
           {model.repos.map(([repo, list]) => (
-            <SettingsSection key={repo || "global"} id={`memory-${repo.replace(/[^\w-]/g, "-") || "global"}`} title={repo || "Any repo"} meta={plural(list.length, "note")}>
+            <SettingsSection key={repo || "global"} id={sectionId(repo)} title={repo || "Any repo"} meta={plural(list.length, "note")}>
               <Panel>
                 {REPO_KINDS.map((kind) => {
                   const rows = list.filter((n) => n.kind === kind);
@@ -315,14 +332,16 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
                 <Panel id="memory-earlier-list">
                   <ul className="divide-y">
                     {model.earlier.map((n) => (
-                      <li key={n.id} className="text-muted-foreground flex items-start gap-3 px-3.5 py-2.5">
+                      <li key={n.id} id={`mem-note-${n.id}`} className="text-muted-foreground flex scroll-mt-24 items-start gap-3 px-3.5 py-2.5">
                         <KindGlyph kind={n.kind} />
                         <div className="min-w-0 flex-1">
-                          <p className="text-meta leading-snug break-words line-through decoration-faint">{n.text}</p>
+                          <p className="text-meta leading-snug break-words line-through decoration-faint">
+                            <Inline text={noteHeadline(n.text)} />
+                          </p>
                           <p className="text-faint mt-0.5 text-micro">
                             {model.replacedBy.get(n.id) ? (
                               <>
-                                replaced by <span className="text-muted-foreground">“{model.replacedBy.get(n.id)!.text}”</span>
+                                replaced by <span className="text-muted-foreground">“{noteHeadline(model.replacedBy.get(n.id)!.text)}”</span>
                               </>
                             ) : (
                               "replaced"
@@ -491,7 +510,7 @@ function NoteRow({
   const proven = playbook && uses >= 2;
 
   return (
-    <li className="group flex items-start gap-3 px-3.5 py-2.5">
+    <li id={`mem-note-${note.id}`} className="group flex scroll-mt-24 items-start gap-3 px-3.5 py-2.5">
       <KindGlyph kind={note.kind} />
       {editing ? (
         <form
@@ -527,7 +546,7 @@ function NoteRow({
         </form>
       ) : (
         <div className="min-w-0 flex-1">
-          {playbook ? <PlaybookText text={note.text} open={stepsOpen} onToggle={() => setStepsOpen((v) => !v)} id={stepsId} /> : <p className="text-foreground text-body leading-snug break-words">{note.text}</p>}
+          {playbook ? <PlaybookText text={note.text} open={stepsOpen} onToggle={() => setStepsOpen((v) => !v)} id={stepsId} /> : <NoteStatement text={note.text} />}
           {note.why && <p className="text-muted-foreground mt-0.5 text-meta leading-snug break-words">{note.why}</p>}
           <p className="text-faint mt-0.5 text-micro tabular-nums">
             {note.source && note.source !== "operator" && note.source !== "you" ? (
@@ -550,11 +569,11 @@ function NoteRow({
           </p>
           {pending && (
             <div className="mt-1.5 flex items-center gap-1">
-              <Button size="xs" onClick={onKeep} aria-label={`Keep: ${note.text.slice(0, 60)}`}>
+              <Button size="xs" onClick={onKeep} aria-label={`Keep: ${noteHeadline(note.text).slice(0, 60)}`}>
                 <Check className="size-3.5" />
                 Keep
               </Button>
-              <Button size="xs" variant="ghost" className="hover:text-destructive" onClick={onDelete} aria-label={`Forget: ${note.text.slice(0, 60)}`}>
+              <Button size="xs" variant="ghost" className="hover:text-destructive" onClick={onDelete} aria-label={`Forget: ${noteHeadline(note.text).slice(0, 60)}`}>
                 Forget
               </Button>
             </div>
@@ -607,7 +626,9 @@ function PlaybookText({ text, open, onToggle, id }: { text: string; open: boolea
   const { title, steps } = splitPlaybook(text);
   return (
     <>
-      <p className="text-foreground text-body font-medium leading-snug break-words">{title}</p>
+      <p className="text-foreground text-body font-medium leading-snug break-words">
+        <Inline text={title} />
+      </p>
       {steps.length > 0 && (
         <>
           <button
@@ -621,10 +642,10 @@ function PlaybookText({ text, open, onToggle, id }: { text: string; open: boolea
             {plural(steps.length, "step")}
           </button>
           <Collapse open={open}>
-            <ol id={id} className="text-muted-foreground mt-1 flex flex-col gap-0.5 border-l pl-3 text-meta leading-snug">
+            <ol id={id} className="text-muted-foreground mt-1 flex list-decimal flex-col gap-0.5 pl-5 text-meta leading-snug marker:text-faint marker:tabular-nums">
               {steps.map((st, i) => (
                 <li key={i} className="break-words">
-                  {st}
+                  <Inline text={st.replace(/^(\d+[.)]|[-*•])\s+/, "")} />
                 </li>
               ))}
             </ol>

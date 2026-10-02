@@ -1313,3 +1313,52 @@ button:not(:disabled):active, [role="tab"]:active, [role="radio"]:active { trans
     filter: none;
   }
 }
+
+/* Memory map: fresh notes shimmer faintly; a row picked on the map flashes once. Both off under reduced motion. */
+@keyframes mm-shimmer {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.mm-shimmer {
+  animation: mm-shimmer 3.6s var(--ease-in-out-sine, ease-in-out) infinite;
+}
+.mm-focus:focus-visible {
+  outline: none;
+}
+.mm-focus:focus-visible text,
+.mm-focus:focus-visible rect {
+  text-decoration: underline;
+  stroke: var(--ring);
+  stroke-opacity: 1;
+}
+.mm-focus:focus-visible text {
+  stroke: none;
+}
+@keyframes mm-flash {
+  0%,
+  35% {
+    background-color: color-mix(in oklch, var(--foreground) 9%, transparent);
+    box-shadow: inset 3px 0 0 var(--foreground);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: inset 3px 0 0 transparent;
+  }
+}
+.mm-flash {
+  animation: mm-flash 1.8s ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mm-shimmer {
+    animation: none;
+  }
+  .mm-flash {
+    animation: none;
+    box-shadow: inset 3px 0 0 var(--foreground);
+  }
+}

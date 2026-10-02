@@ -1,70 +1,47 @@
 import * as React from "react";
 import type { MemoryNote } from "@/lib/api";
-import { cn } from "@/lib/utils";
-import { isOperatorKind, KIND_INK, KIND_LABEL, KINDS, plural } from "./kinds";
+import { isOperatorKind, KIND_LABEL, KINDS, plural } from "./kinds";
+import { KindMark, MemoryMap } from "./MemoryMap";
 
 const DAY = 86_400_000;
 const DAYS = 30;
-const YOU = "you";
-const ANY = "any";
 
 /**
- * The page's one glance: who the notes are about (You vs each repo, split by kind) and how memory
- * is growing (notes written per day, last 30 days). Every mark is a count of live notes from the
- * store — nothing estimated; an empty strip says so instead of drawing a flat line.
+ * The page's one glance: the memory map (who the notes are about, how fresh, what replaced what),
+ * a stat line, and a sparkline of how many notes the agent has known over the last 30 days. Every
+ * mark is a stored note; with nothing stored the map stays an empty sky and says so.
  */
-export function MemoryOverview({ live, pending, onReview }: { live: MemoryNote[]; pending: number; onReview: () => void }) {
-  const rows = React.useMemo(() => {
-    const groups = new Map<string, MemoryNote[]>();
-    for (const n of live) {
-      const k = isOperatorKind(n.kind) ? YOU : n.repo ? `r:${n.repo}` : ANY;
-      groups.set(k, [...(groups.get(k) ?? []), n]);
-    }
-    const all = [...groups.entries()].map(([key, list]) => ({
-      key,
-      label: key === YOU ? "You" : key === ANY ? "Any repo" : key.slice(2),
-      total: list.length,
-      byKind: KINDS.map((k) => [k, list.filter((n) => n.kind === k).length] as const).filter(([, c]) => c > 0),
-    }));
-    all.sort((a, b) => (a.key === YOU ? -1 : b.key === YOU ? 1 : b.total - a.total));
-    const rest = all.slice(6);
-    return {
-      shown: all.slice(0, 6),
-      restCount: rest.length,
-      restTotal: rest.reduce((s, r) => s + r.total, 0),
-    };
-  }, [live]);
-  const max = Math.max(1, ...rows.shown.map((r) => r.total));
-
-  const days = React.useMemo(() => {
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
-    const t0 = start.getTime() - (DAYS - 1) * DAY;
-    const counts = new Array<number>(DAYS).fill(0);
-    for (const n of live) {
-      const i = Math.floor((n.at - t0) / DAY);
-      if (i >= 0 && i < DAYS) counts[i]++;
-    }
-    return {
-      t0,
-      counts,
-      sum: counts.reduce((a, b) => a + b, 0),
-      peak: Math.max(0, ...counts),
-    };
-  }, [live]);
-
+export function MemoryOverview({
+  notes,
+  pending,
+  onReview,
+  onSelect,
+  onSection,
+}: {
+  notes: MemoryNote[];
+  pending: number;
+  onReview: () => void;
+  onSelect: (id: string) => void;
+  onSection: (id: string) => void;
+}) {
+  const live = React.useMemo(() => notes.filter((n) => n.until == null), [notes]);
   const present = new Set(live.map((n) => n.kind));
-  const repos = new Set(live.filter((n) => n.repo).map((n) => n.repo)).size;
+  const repos = new Set(live.filter((n) => n.repo && !isOperatorKind(n.kind)).map((n) => n.repo)).size;
   const you = live.filter((n) => isOperatorKind(n.kind)).length;
+  const replaced = notes.length - live.length;
 
   return (
-    <section aria-label="Memory overview" className="bg-card rounded-xl border px-4 py-3.5">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+    <section aria-label="Memory overview" className="bg-card overflow-hidden rounded-xl border">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 pt-3.5">
         <p className="text-foreground text-body font-medium tabular-nums">
-          {plural(live.length, "note")}{" "}
-          <span className="text-muted-foreground font-normal">
-            · {you} about you · {plural(repos, "repo")}
-          </span>
+          {live.length ? plural(live.length, "note") : "Nothing remembered yet"}
+          {live.length > 0 && (
+            <span className="text-muted-foreground font-normal">
+              {" "}
+              · {you} about you · {plural(repos, "repo")}
+              {replaced > 0 && ` · ${replaced} replaced`}
+            </span>
+          )}
         </p>
         {pending > 0 && (
           <button
@@ -77,85 +54,100 @@ export function MemoryOverview({ live, pending, onReview }: { live: MemoryNote[]
         )}
       </div>
 
-      <div className="mt-3 grid gap-x-8 gap-y-4 md:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-        <div>
-          <h3 className="text-faint mb-1.5 text-micro font-medium tracking-wide uppercase">What it knows</h3>
-          {rows.shown.length === 0 ? (
-            <p className="text-muted-foreground text-meta">No live notes — everything here was replaced.</p>
-          ) : (
-            <ul className="flex flex-col gap-1.5">
-              {rows.shown.map((r) => {
-                const w = (r.total / max) * 100;
-                let x = 0;
-                return (
-                  <li key={r.key} className="grid grid-cols-[minmax(0,9rem)_minmax(0,1fr)_2rem] items-center gap-2">
-                    <span className={cn("truncate text-meta", r.key === YOU ? "text-foreground" : "text-muted-foreground")} title={r.label}>
-                      {r.label}
-                    </span>
-                    <svg role="img" aria-label={`${r.label}: ${r.byKind.map(([k, c]) => `${c} ${KIND_LABEL[k].toLowerCase()}`).join(", ")}`} viewBox="0 0 100 8" preserveAspectRatio="none" className="h-2 w-full">
-                      {r.byKind.map(([k, c]) => {
-                        const seg = (c / r.total) * w;
-                        const el = (
-                          <rect key={k} x={x} y={0} width={Math.max(0.3, seg - 0.4)} height={8} className="fill-foreground" fillOpacity={KIND_INK[k]}>
-                            <title>{`${c} ${KIND_LABEL[k].toLowerCase()}`}</title>
-                          </rect>
-                        );
-                        x += seg;
-                        return el;
-                      })}
-                    </svg>
-                    <span className="text-muted-foreground text-right text-micro tabular-nums">{r.total}</span>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          {rows.restCount > 0 && (
-            <p className="text-faint mt-1 text-micro">
-              + {plural(rows.restCount, "more repo")} · {plural(rows.restTotal, "note")}
-            </p>
-          )}
-          <ul className="mt-2 flex flex-wrap gap-x-3 gap-y-1" aria-label="Kinds">
+      <div className="px-2 pt-1">
+        <MemoryMap notes={notes} onSelect={onSelect} onSection={onSection} />
+      </div>
+
+      {live.length === 0 ? (
+        <p className="text-muted-foreground mx-auto max-w-prose px-4 pb-4 text-center text-meta">
+          Runs add notes as they go — a correction becomes a lesson, a recurring task a playbook, a stated preference follows you everywhere. Or add a preference above.
+        </p>
+      ) : (
+        <div className="grid items-end gap-x-8 gap-y-3 border-t px-4 py-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
+          <ul className="flex flex-wrap gap-x-3.5 gap-y-1.5" aria-label="Legend">
             {KINDS.filter((k) => present.has(k)).map((k) => (
-              <li key={k} className="text-muted-foreground flex items-center gap-1 text-micro">
-                <svg viewBox="0 0 8 8" className="size-2" aria-hidden>
-                  <rect width={8} height={8} rx={1.5} className="fill-foreground" fillOpacity={KIND_INK[k]} />
-                </svg>
+              <li key={k} className="text-muted-foreground flex items-center gap-1.5 text-micro">
+                <KindMark kind={k} />
                 {KIND_LABEL[k]}
               </li>
             ))}
-          </ul>
-        </div>
-
-        <div>
-          <h3 className="text-faint mb-1.5 flex items-baseline text-micro font-medium tracking-wide uppercase">
-            Added, last 30 days
-            <span className="text-muted-foreground ml-auto font-normal tracking-normal normal-case tabular-nums">{days.sum ? plural(days.sum, "note") : "none"}</span>
-          </h3>
-          {days.sum === 0 ? (
-            <p className="text-muted-foreground text-meta">Nothing new in the last 30 days.</p>
-          ) : (
-            <>
-              <svg role="img" aria-label={`${plural(days.sum, "note")} added in the last 30 days, at most ${days.peak} on one day`} viewBox={`0 0 ${DAYS * 4} 32`} preserveAspectRatio="none" className="h-10 w-full">
-                <line x1={0} x2={DAYS * 4} y1={31.5} y2={31.5} className="stroke-border" strokeWidth={1} vectorEffect="non-scaling-stroke" />
-                {days.counts.map((c, i) => {
-                  const h = c ? Math.max(3, (c / days.peak) * 30) : 0;
-                  const d = new Date(days.t0 + i * DAY);
-                  return (
-                    <rect key={i} x={i * 4 + 0.5} y={31 - h} width={3} height={h} className="fill-foreground" fillOpacity={i === DAYS - 1 ? 0.8 : 0.5}>
-                      <title>{`${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })}: ${plural(c, "note")}`}</title>
-                    </rect>
-                  );
-                })}
+            <li className="text-faint flex items-center gap-1.5 text-micro">
+              <svg viewBox="0 0 20 10" width={20} height={10} aria-hidden className="text-foreground">
+                <circle cx={4} cy={5} r={3} fill="currentColor" />
+                <circle cx={15} cy={5} r={3} fill="currentColor" fillOpacity={0.3} />
               </svg>
-              <div className="text-faint mt-0.5 flex justify-between text-micro">
-                <span>30d ago</span>
-                <span>today</span>
-              </div>
-            </>
-          )}
+              fresh → old
+            </li>
+            {pending > 0 && (
+              <li className="text-faint flex items-center gap-1.5 text-micro">
+                <svg viewBox="0 0 12 12" width={11} height={11} aria-hidden>
+                  <circle cx={6} cy={6} r={4.5} fill="none" className="stroke-attention" strokeWidth={1.6} strokeDasharray="2.5 1.5" />
+                </svg>
+                needs you
+              </li>
+            )}
+          </ul>
+          <Growth live={live} />
         </div>
-      </div>
+      )}
     </section>
+  );
+}
+
+/** Notes known over time: live notes created on or before each day, last 30 days. */
+function Growth({ live }: { live: MemoryNote[] }) {
+  const g = React.useMemo(() => {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const t0 = start.getTime() - (DAYS - 1) * DAY;
+    const ats = live.map((n) => n.at).sort((a, b) => a - b);
+    const series = Array.from({ length: DAYS }, (_, i) => {
+      const end = t0 + (i + 1) * DAY;
+      let c = 0;
+      while (c < ats.length && ats[c] < end) c++;
+      return c;
+    });
+    const before = ats.filter((a) => a < t0).length;
+    return { t0, series, before, added: series[DAYS - 1] - before, max: Math.max(1, series[DAYS - 1]) };
+  }, [live]);
+  const w = 300, h = 44;
+  const pts = g.series.map((c, i) => [(i / (DAYS - 1)) * w, h - 2 - (c / g.max) * (h - 8)] as const);
+  const line = pts.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`).join("");
+  const id = React.useId().replace(/:/g, "");
+  return (
+    <figure className="min-w-0">
+      <figcaption className="text-faint mb-1 flex items-baseline text-micro font-medium tracking-wide uppercase">
+        Known, last 30 days
+        <span className="text-muted-foreground ml-auto font-normal tracking-normal normal-case tabular-nums">
+          {g.added > 0 ? `+${g.added} → ${g.series[DAYS - 1]}` : `${g.series[DAYS - 1]} · nothing new`}
+        </span>
+      </figcaption>
+      <svg
+        viewBox={`0 0 ${w} ${h}`}
+        preserveAspectRatio="none"
+        role="img"
+        aria-label={`${g.before} notes known 30 days ago, ${g.series[DAYS - 1]} today${g.added ? `, ${g.added} added` : ""}`}
+        className="text-foreground block h-11 w-full overflow-visible"
+      >
+        <defs>
+          <linearGradient id={`mg-${id}`} x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor="currentColor" stopOpacity={0.22} />
+            <stop offset="100%" stopColor="currentColor" stopOpacity={0} />
+          </linearGradient>
+        </defs>
+        <path d={`${line}L${w} ${h}L0 ${h}Z`} fill={`url(#mg-${id})`} />
+        <path d={line} fill="none" stroke="currentColor" strokeOpacity={0.75} strokeWidth={1.5} vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+        <line x1={0} x2={w} y1={h - 0.5} y2={h - 0.5} className="stroke-border" vectorEffect="non-scaling-stroke" />
+        {g.series.map((c, i) => (
+          <rect key={i} x={(i / DAYS) * w} y={0} width={w / DAYS} height={h} fill="transparent">
+            <title>{`${new Date(g.t0 + i * DAY).toLocaleDateString(undefined, { month: "short", day: "numeric" })}: ${plural(c, "note")} known`}</title>
+          </rect>
+        ))}
+      </svg>
+      <div className="text-faint mt-0.5 flex justify-between text-micro">
+        <span>30d ago</span>
+        <span>today</span>
+      </div>
+    </figure>
   );
 }
