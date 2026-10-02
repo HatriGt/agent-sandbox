@@ -34,15 +34,21 @@ KINDS="${kinds}"
 usage() {
   cat <<'EOF'
 usage: memory search <words...>                       find notes matching every word (case-insensitive)
-       memory add <kind> <text...> [--why <text>] [--replaces <old note text>]
+       memory areas                                   the knowledge base index: every area of this repo
+       memory area <slug>                             one area's page, with its related areas
+       memory add <kind> <text...> [--area <part/subpart>] [--paths <a,b>] [--links <area,…>]
+                                   [--why <text>] [--replaces <old note text>]
                                                       remember something for future runs
 kinds: ${kinds}
+  domain     how the product works: an entity, a flow's steps, a business rule, who owns/consumes what
+             (always --area, --paths to the code that implements it, --links to related areas)
   lesson     a correction, or an approach you abandoned (say --why)
   preference how the operator wants things in general
   rule       "when X, do Y" standing instruction
-  decision   an answered question or a choice future runs must not re-litigate (say --why)
+  decision   a choice future runs must not re-litigate (say --why)
   fact       repo/environment knowledge
   playbook   title then the exact steps that worked, for a task that recurs
+Writing a note that already exists reaffirms it (clears "unverified"); --replaces rewrites one.
 Notes land in MEMORY.md on the next run. Never put secrets in a note — name the env var instead.
 EOF
 }
@@ -59,20 +65,45 @@ case "$cmd" in
     if [ -s "$t" ]; then cat "$t"; else echo "memory: no note matches: $*"; fi
     rm -f "$t" "$t.n"
     ;;
+  areas)
+    cat "$ALL" 2>/dev/null | sed -n '/^## Areas/,/^## /p' | grep -- '^- ' || echo "memory: no areas yet — add a note with --area to start the knowledge base"
+    ;;
+  area)
+    slug=\${1:-}
+    [ -n "$slug" ] || { echo "usage: memory area <slug>" >&2; exit 2; }
+    t=$(mktemp)
+    cat "$MD" "$ALL" 2>/dev/null | grep -- '^- \\[' | sort -u > "$t"
+    echo "## $slug"
+    grep -F -- " · $slug]" "$t" || echo "memory: no notes in area $slug"
+    rel=$(grep -F -- " · $slug]" "$t" | grep -o '{links: [^}]*}' | sed -e 's/{links: //' -e 's/}//' | tr ',' '\\n' | sed 's/^ *//' | sort -u)
+    for a in $rel; do
+      [ "$a" = "$slug" ] && continue
+      echo; echo "## related: $a"
+      grep -F -- " · $a]" "$t" || echo "(no notes)"
+    done
+    rm -f "$t"
+    ;;
   add)
     kind=\${1:-}
     [ $# -gt 0 ] && shift
     case " $KINDS " in *" $kind "*) ;; *) echo "memory: kind must be one of: $KINDS" >&2; exit 2;; esac
-    text=""; why=""; rep=""
+    text=""; why=""; rep=""; area=""; paths=""; links=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --why) [ $# -ge 2 ] || { echo "memory: --why needs a value" >&2; exit 2; }; why=$2; shift 2;;
         --replaces) [ $# -ge 2 ] || { echo "memory: --replaces needs a value" >&2; exit 2; }; rep=$2; shift 2;;
+        --area) [ $# -ge 2 ] || { echo "memory: --area needs a value" >&2; exit 2; }; area=$2; shift 2;;
+        --paths) [ $# -ge 2 ] || { echo "memory: --paths needs a value" >&2; exit 2; }; paths=$2; shift 2;;
+        --links) [ $# -ge 2 ] || { echo "memory: --links needs a value" >&2; exit 2; }; links=$2; shift 2;;
         *) text="$text\${text:+ }$1"; shift;;
       esac
     done
-    [ -n "$text" ] || { echo "usage: memory add <kind> <text...> [--why <text>] [--replaces <old text>]" >&2; exit 2; }
+    [ -n "$text" ] || { echo "usage: memory add <kind> <text...> [--area <slug>] [--paths <a,b>] [--links <a,b>] [--why <text>] [--replaces <old text>]" >&2; exit 2; }
+    [ "$kind" = domain ] && [ -z "$area" ] && { echo "memory: a domain note needs --area <part/subpart> (see: memory areas)" >&2; exit 2; }
     line="${REMEMBER_OPEN} $kind | $text"
+    [ -n "$area" ] && line="$line | area: $area"
+    [ -n "$paths" ] && line="$line | paths: $paths"
+    [ -n "$links" ] && line="$line | links: $links"
     [ -n "$why" ] && line="$line | why: $why"
     [ -n "$rep" ] && line="$line | replaces: \\"$rep\\""
     line="$line ${REMEMBER_CLOSE}"

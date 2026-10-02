@@ -61,7 +61,7 @@ export function stem(word: string): string {
 }
 
 const words = (text: string): string[] => text.toLowerCase().match(/[a-z0-9]+/g) ?? [];
-const keyStems = (text: string): string[] => words(text).filter((w) => w.length >= 2 && !STOP.has(w)).map(stem);
+export const keyStems = (text: string): string[] => words(text).filter((w) => w.length >= 2 && !STOP.has(w)).map(stem);
 /** The text as a space-joined stem string, padded so phrase lookups match whole words only. */
 const stemLine = (text: string): string => ` ${words(text).map(stem).join(" ")} `;
 

@@ -26,7 +26,7 @@
  */
 import { hasUserStoreBackend, loadBlob, saveBlob, ownerKey } from "./user-store.js";
 import { MEMORY_KINDS, REMEMBER_FIELD_RE, REMEMBER_KIND_RE, REMEMBER_RE, type MemoryKind } from "./drivers/sentinels.js";
-import { scoreSkill } from "./skill-match.js";
+import { keyStems, scoreSkill } from "./skill-match.js";
 
 export { MEMORY_KINDS, type MemoryKind };
 export type MemoryScope = "operator" | "repo";
@@ -56,6 +56,16 @@ export interface MemoryNote {
   /** Playbooks: how often a task matched it (promote-to-skill signal) and when last. */
   uses?: number;
   lastUsed?: number;
+  /**
+   * Knowledge-base fields (repo-scoped kinds). `area` is the page a note belongs to — a slug like
+   * `billing/invoicing` (see areaKey); `paths` anchor it to the code that implements it; `links`
+   * name related areas. A note whose anchored code changed in a later run carries `stale` until the
+   * agent reaffirms/replaces it or the operator marks it verified.
+   */
+  area?: string;
+  paths?: string[];
+  links?: string[];
+  stale?: { at: number; box: string; paths: string[] };
 }
 
 export interface MemoryStore {
@@ -76,15 +86,20 @@ export interface ParsedNote {
   why?: string;
   /** The old note's text (quotes stripped) this one replaces. */
   replaces?: string;
+  area?: string;
+  paths?: string[];
+  links?: string[];
 }
 
 export const MEMORY_LIMITS = {
   /** Active (non-superseded) notes per kind within one list (operator or one repo). */
-  perKind: { preference: 40, rule: 40, fact: 30, decision: 30, lesson: 30, playbook: 15 } as Record<MemoryKind, number>,
+  perKind: { preference: 40, rule: 40, domain: 80, fact: 30, decision: 30, lesson: 30, playbook: 15 } as Record<MemoryKind, number>,
   /** Superseded notes kept as history per list; the oldest go first. */
   maxSuperseded: 60,
   /** Characters per note — a "durable fact", not a report. */
   maxNoteChars: 400,
+  /** A domain note is a rule or a flow — a little longer than a fact, still not an essay. */
+  maxDomainChars: 600,
   /** A playbook is a title line plus steps. */
   maxPlaybookChars: 1200,
   maxWhyChars: 300,
@@ -94,6 +109,16 @@ export const MEMORY_LIMITS = {
   relevantMax: 25,
   /** scoreSkill points a note needs to count as relevant to the task (else the newest win). */
   relevanceThreshold: 2,
+  /** Knowledge base: areas shown in full for a task, notes per shown area, index rows. */
+  relevantAreas: 3,
+  areaPageMax: 25,
+  indexMax: 40,
+  /** Anchors and links per note. */
+  maxPaths: 6,
+  maxLinks: 6,
+  maxPathChars: 120,
+  /** Stem overlap (0..1) at which a new same-kind note in the same area revises an existing one. */
+  revisionOverlap: 0.6,
 } as const;
 
 /** A pending (proposed) note nobody acted on is kept after this long — the toast is a veto, not a gate. */
@@ -158,7 +183,69 @@ function migrateNote(n: Record<string, unknown>, scope: MemoryScope): MemoryNote
   if (typeof n.until === "number") out.until = n.until;
   if (typeof n.uses === "number") out.uses = n.uses;
   if (typeof n.lastUsed === "number") out.lastUsed = n.lastUsed;
+  if (typeof n.area === "string" && areaKey(n.area)) out.area = areaKey(n.area);
+  const paths = pathList(n.paths);
+  if (paths.length) out.paths = paths;
+  const links = linkList(n.links);
+  if (links.length) out.links = links;
+  const st = n.stale as Record<string, unknown> | undefined;
+  if (st && typeof st === "object" && typeof st.at === "number") out.stale = { at: st.at, box: typeof st.box === "string" ? st.box : "", paths: pathList(st.paths) };
   return out;
+}
+
+/* ─────────────────────────── knowledge base: areas, paths, links ─────────────────────────── */
+
+/**
+ * An area slug: lowercase `[a-z0-9-]` segments joined by `/`, at most two levels
+ * (`billing/invoicing`, `auth`). Anything else is tidied into that shape; empty when nothing is left.
+ */
+export function areaKey(raw: unknown): string {
+  if (typeof raw !== "string") return "";
+  return raw
+    .toLowerCase()
+    .replace(/[\\]+/g, "/")
+    .split("/")
+    .map((seg) => seg.replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""))
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("/")
+    .slice(0, 60);
+}
+
+/** Comma/whitespace-separated anchors (or an array) → clean repo-relative paths, capped. */
+export function pathList(raw: unknown): string[] {
+  const parts = Array.isArray(raw) ? raw.map(String) : typeof raw === "string" ? raw.split(/[,\s]+/) : [];
+  const out: string[] = [];
+  for (const p of parts) {
+    const c = p.trim().replace(/^\.?\//, "").replace(/^["'`]+|["'`]+$/g, "").slice(0, MEMORY_LIMITS.maxPathChars);
+    if (c && !out.includes(c)) out.push(c);
+    if (out.length >= MEMORY_LIMITS.maxPaths) break;
+  }
+  return out;
+}
+
+/** Comma-separated related areas (or an array) → slugs, capped. */
+export function linkList(raw: unknown, self?: string): string[] {
+  const parts = Array.isArray(raw) ? raw.map(String) : typeof raw === "string" ? raw.split(/\s*,\s*/) : [];
+  const out: string[] = [];
+  for (const p of parts) {
+    const k = areaKey(p);
+    if (k && k !== self && !out.includes(k)) out.push(k);
+    if (out.length >= MEMORY_LIMITS.maxLinks) break;
+  }
+  return out;
+}
+
+/**
+ * Does a changed file fall under an anchor? Anchors are repo-relative files, directories (a prefix)
+ * or globs (`*` within a segment, `**` across segments).
+ */
+export function pathMatches(anchor: string, file: string): boolean {
+  const a = anchor.replace(/\/+$/, "");
+  const f = file.replace(/^\.?\//, "");
+  if (!a.includes("*")) return f === a || f.startsWith(a + "/");
+  const re = new RegExp("^" + a.split("**").map((part) => part.split("*").map((s) => s.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join("[^/]*")).join(".*") + "$");
+  return re.test(f);
 }
 
 export function serializeMemoryStore(store: MemoryStore): string {
@@ -182,7 +269,7 @@ export function noteKey(n: { kind: MemoryKind; text: string }): string {
 /** A note is active when nothing superseded it. Only active notes count for caps, MEMORY.md and dedupe. */
 export const isActive = (n: MemoryNote): boolean => n.until === undefined;
 
-const clipText = (kind: MemoryKind, text: string): string => text.slice(0, kind === "playbook" ? MEMORY_LIMITS.maxPlaybookChars : MEMORY_LIMITS.maxNoteChars);
+const clipText = (kind: MemoryKind, text: string): string => text.slice(0, maxCharsFor(kind));
 /**
  * A note as the operator should read it: one clean statement, not a log line. Whitespace collapsed,
  * filler lead-ins ("Remember that", "Note:") dropped, first letter capitalised (unless it opens with
@@ -224,14 +311,37 @@ export function parseNoteLine(line: string): ParsedNote | null {
   if (!text) return null;
   const note: ParsedNote = { kind, text: clipText(kind, tidyNoteText(text, kind)) };
   for (const p of parts.slice(1)) {
-    const m = /^(why|replaces)\s*:\s*([\s\S]*)$/i.exec(p.trim());
+    const m = /^(why|replaces|area|paths|links)\s*:\s*([\s\S]*)$/i.exec(p.trim());
     if (!m) continue;
     const v = m[2].trim();
     if (!v) continue;
-    if (m[1].toLowerCase() === "why") note.why = tidyNoteText(v, "fact").slice(0, MEMORY_LIMITS.maxWhyChars);
-    else note.replaces = stripQuotes(v).slice(0, MEMORY_LIMITS.maxNoteChars);
+    const field = m[1].toLowerCase();
+    if (field === "why") note.why = tidyNoteText(v, "fact").slice(0, MEMORY_LIMITS.maxWhyChars);
+    else if (field === "replaces") note.replaces = stripQuotes(v).slice(0, MEMORY_LIMITS.maxNoteChars);
+    else if (field === "area") {
+      const a = areaKey(stripQuotes(v));
+      if (a) note.area = a;
+    } else if (field === "paths") {
+      const ps = pathList(stripQuotes(v));
+      if (ps.length) note.paths = ps;
+    } else {
+      const ls = linkList(stripQuotes(v));
+      if (ls.length) note.links = ls;
+    }
+  }
+  if (note.links && note.area) note.links = note.links.filter((l) => l !== note.area);
+  // Preferences and rules describe the operator, not a part of the app.
+  if (OPERATOR_KINDS.has(kind)) {
+    delete note.area;
+    delete note.paths;
+    delete note.links;
   }
   return note;
+}
+
+/** Max characters of a note's text by kind. */
+export function maxCharsFor(kind: MemoryKind): number {
+  return kind === "playbook" ? MEMORY_LIMITS.maxPlaybookChars : kind === "domain" ? MEMORY_LIMITS.maxDomainChars : MEMORY_LIMITS.maxNoteChars;
 }
 
 /**
@@ -319,17 +429,61 @@ function listFor(store: MemoryStore, s: { scope: MemoryScope; repo?: string }): 
  * (for a quote of some length) the one whose text contains it — the agent quotes from MEMORY.md,
  * which may show a clipped line.
  */
-export function findReplaced(list: MemoryNote[], replaces: string): MemoryNote | undefined {
+export function findReplaced(list: MemoryNote[], replaces: string, area?: string): MemoryNote | undefined {
   const key = normalizeNoteText(replaces);
   if (!key) return undefined;
   const active = list.filter(isActive);
-  return active.find((n) => normalizeNoteText(n.text) === key) ?? (key.length >= 12 ? active.find((n) => normalizeNoteText(n.text).includes(key)) : undefined);
+  const within = (pool: MemoryNote[]) => pool.find((n) => normalizeNoteText(n.text) === key) ?? (key.length >= 12 ? pool.find((n) => normalizeNoteText(n.text).includes(key)) : undefined);
+  // The same area first: two areas may legitimately hold near-identical sentences.
+  return (area ? within(active.filter((n) => n.area === area)) : undefined) ?? within(active);
+}
+
+/** Stems shared between two texts over the smaller stem set — 1 when one text's words are all in the other. */
+export function textOverlap(a: string, b: string): number {
+  const sa = new Set(keyStems(a));
+  const sb = new Set(keyStems(b));
+  const small = sa.size <= sb.size ? sa : sb;
+  const big = small === sa ? sb : sa;
+  if (small.size < 3) return 0;
+  let hit = 0;
+  for (const s of small) if (big.has(s)) hit++;
+  return hit / small.size;
 }
 
 /**
- * Add parsed notes to a list: skip what is already active there (same kind + normalised text),
- * resolve `replaces:` and supersede the old note, append the rest, then apply the per-kind caps.
- * Returns the notes actually added (with their ids).
+ * The active note of the same kind in the same area that a new one most plausibly revises: the
+ * best stem overlap at or above MEMORY_LIMITS.revisionOverlap. Undefined when the note is new
+ * knowledge rather than a rewrite.
+ */
+export function findRevised(list: MemoryNote[], p: ParsedNote): MemoryNote | undefined {
+  if (!p.area || OPERATOR_KINDS.has(p.kind)) return undefined;
+  let best: { n: MemoryNote; s: number } | undefined;
+  for (const n of list) {
+    if (!isActive(n) || n.kind !== p.kind || n.area !== p.area) continue;
+    const s = textOverlap(n.text, p.text);
+    if (s >= MEMORY_LIMITS.revisionOverlap && (!best || s > best.s)) best = { n, s };
+  }
+  return best?.n;
+}
+
+/** Carry a note's anchors/links onto its successor (union, capped), so a rewrite keeps its coupling. */
+function inheritKb(from: { area?: string; paths?: string[]; links?: string[] }, to: MemoryNote): void {
+  if (!to.area && from.area) to.area = from.area;
+  const paths = pathList([...(to.paths ?? []), ...(from.paths ?? [])]);
+  if (paths.length) to.paths = paths;
+  const links = linkList([...(to.links ?? []), ...(from.links ?? [])], to.area);
+  if (links.length) to.links = links;
+}
+
+/**
+ * Add parsed notes to a list, in order:
+ *   · a note already active there (same kind + text) is REAFFIRMED — `at`/`source` refreshed, new
+ *     anchors/links merged, the stale flag cleared — never duplicated;
+ *   · `replaces:` resolves to the old note (same area first) and supersedes it;
+ *   · without `replaces:`, a same-kind note in the same area that reads as a rewrite of an existing
+ *     one (findRevised) supersedes it as a PENDING revision the operator may veto;
+ *   · everything else is appended; then the per-kind caps apply.
+ * Returns the notes ADDED (with their ids); a reaffirmation is silent.
  */
 export function addParsedNotes(
   list: MemoryNote[],
@@ -337,12 +491,22 @@ export function addParsedNotes(
   meta: { source: string; scope: MemoryScope; repo?: string; now?: number; status?: (kind: MemoryKind) => MemoryStatus }
 ): MemoryNote[] {
   const now = meta.now ?? Date.now();
-  const known = new Set(list.filter(isActive).map(noteKey));
+  const byKey = new Map(list.filter(isActive).map((n) => [noteKey(n), n] as const));
   const added: MemoryNote[] = [];
   for (const p of notes) {
     const key = noteKey(p);
-    if (!normalizeNoteText(p.text) || known.has(key)) continue;
-    known.add(key);
+    if (!normalizeNoteText(p.text)) continue;
+    const same = byKey.get(key);
+    if (same) {
+      // Reaffirmed: the agent wrote it again (often quoting itself via replaces: to clear a stale flag).
+      same.at = now;
+      same.source = meta.source;
+      if (p.why) same.why = p.why;
+      if (p.area) same.area = p.area;
+      inheritKb(p, same);
+      delete same.stale;
+      continue;
+    }
     const note: MemoryNote = {
       id: newNoteId(now),
       kind: p.kind,
@@ -354,19 +518,46 @@ export function addParsedNotes(
     };
     if (p.why) note.why = p.why;
     if (meta.repo) note.repo = meta.repo;
-    if (p.replaces) {
-      const old = findReplaced(list, p.replaces);
-      if (old && old.id !== note.id) {
-        old.until = now;
-        note.supersedes = old.id;
-        known.delete(noteKey(old));
+    if (p.area) note.area = p.area;
+    if (p.paths?.length) note.paths = p.paths;
+    if (p.links?.length) note.links = p.links;
+    const old = p.replaces ? findReplaced(list, p.replaces, p.area) : findRevised(list, p);
+    if (old && old.id !== note.id) {
+      old.until = now;
+      note.supersedes = old.id;
+      inheritKb(old, note);
+      byKey.delete(noteKey(old));
+      // An inferred rewrite is a proposal: the toast reads "Updated · area" and Forget restores the old note.
+      if (!p.replaces && !meta.status) {
+        note.status = "pending";
+        note.why ??= `Revises: ${old.text.split("\n")[0]}`;
       }
     }
+    byKey.set(key, note);
     list.push(note);
     added.push(note);
   }
   evict(list);
   return added;
+}
+
+/**
+ * Drift: flag the active notes of a repo whose anchored paths cover a file this run changed —
+ * unless the run itself wrote/reaffirmed the note. Returns the notes flagged by THIS call.
+ */
+export function markStaleByPaths(store: MemoryStore, repo: string, files: string[], meta: { box: string; now?: number }): MemoryNote[] {
+  const list = store.repos[memoryRepoKey(repo)];
+  if (!list || !files.length) return [];
+  const now = meta.now ?? Date.now();
+  const out: MemoryNote[] = [];
+  for (const n of list) {
+    if (!isActive(n) || !n.paths?.length || n.stale || n.source === meta.box) continue;
+    const hit = files.filter((f) => n.paths!.some((a) => pathMatches(a, f)));
+    if (!hit.length) continue;
+    n.stale = { at: now, box: meta.box, paths: hit.slice(0, MEMORY_LIMITS.maxPaths) };
+    out.push(n);
+  }
+  return out;
 }
 
 /**
@@ -476,17 +667,40 @@ export function getNote(store: MemoryStore, id: string): MemoryNote | undefined 
 }
 
 /** Edit text / why / pin state, or confirm a proposal (`status: "kept"`). Throws a human message on bad input. */
-export function updateNote(store: MemoryStore, id: string, patch: { text?: unknown; why?: unknown; pinned?: unknown; status?: unknown }): MemoryNote {
+export function updateNote(
+  store: MemoryStore,
+  id: string,
+  patch: { text?: unknown; why?: unknown; pinned?: unknown; status?: unknown; area?: unknown; paths?: unknown; links?: unknown; verified?: unknown }
+): MemoryNote {
   const hit = findNote(store, id);
   if (!hit) throw new Error("That note no longer exists.");
   const note = hit.list[hit.index];
   if (patch.text !== undefined) {
     const text = note.kind === "playbook" ? String(patch.text).replace(/\r\n/g, "\n").trim() : String(patch.text).replace(/\s+/g, " ").trim();
     if (!text) throw new Error("A note cannot be empty — delete it instead.");
-    const max = note.kind === "playbook" ? MEMORY_LIMITS.maxPlaybookChars : MEMORY_LIMITS.maxNoteChars;
+    const max = maxCharsFor(note.kind);
     if (text.length > max) throw new Error(`A ${note.kind} is at most ${max} characters.`);
     note.text = text;
   }
+  if (!OPERATOR_KINDS.has(note.kind)) {
+    if (patch.area !== undefined) {
+      const a = areaKey(patch.area);
+      if (a) note.area = a;
+      else delete note.area;
+    }
+    if (patch.paths !== undefined) {
+      const ps = pathList(patch.paths);
+      if (ps.length) note.paths = ps;
+      else delete note.paths;
+    }
+    if (patch.links !== undefined) {
+      const ls = linkList(patch.links, note.area);
+      if (ls.length) note.links = ls;
+      else delete note.links;
+    }
+  }
+  // The operator read it and says it still holds (or just rewrote it): the drift flag is answered.
+  if (patch.verified || patch.text !== undefined) delete note.stale;
   if (patch.why !== undefined) {
     const why = String(patch.why ?? "").replace(/\s+/g, " ").trim();
     if (why.length > MEMORY_LIMITS.maxWhyChars) throw new Error(`A rationale is at most ${MEMORY_LIMITS.maxWhyChars} characters.`);
@@ -509,6 +723,11 @@ export function deleteNote(store: MemoryStore, id: string): boolean {
   if (!hit) return false;
   const [gone] = hit.list.splice(hit.index, 1);
   store.forgotten = [...(store.forgotten ?? []).filter((k) => k !== noteKey(gone)), noteKey(gone)].slice(-500);
+  // Vetoing a proposed rewrite must not lose the knowledge it rewrote: the old note comes back.
+  if (gone.status === "pending" && gone.supersedes) {
+    const old = hit.list.find((n) => n.id === gone.supersedes);
+    if (old && old.until !== undefined && !hit.list.some((n) => n.supersedes === old.id && isActive(n))) delete old.until;
+  }
   return true;
 }
 
@@ -516,12 +735,17 @@ export function deleteNote(store: MemoryStore, id: string): boolean {
  * A note the operator types or imports: validated, filed by the kind's scope (a repo is honoured
  * only for repo-scoped kinds), kept at once. Throws a human message on bad input.
  */
-export function addManualNote(store: MemoryStore, input: { kind: unknown; text: unknown; why?: unknown; repo?: unknown }, now = Date.now(), source = "operator"): MemoryNote {
+export function addManualNote(
+  store: MemoryStore,
+  input: { kind: unknown; text: unknown; why?: unknown; repo?: unknown; area?: unknown; paths?: unknown; links?: unknown },
+  now = Date.now(),
+  source = "operator"
+): MemoryNote {
   if (!isMemoryKind(input.kind)) throw new Error(`kind must be one of ${MEMORY_KINDS.join(", ")}.`);
   const kind = input.kind;
   const text = tidyNoteText(kind === "playbook" ? String(input.text ?? "").replace(/\r\n/g, "\n").trim() : String(input.text ?? "").replace(/\s+/g, " ").trim(), kind);
   if (!text) throw new Error("A note needs some text.");
-  const max = kind === "playbook" ? MEMORY_LIMITS.maxPlaybookChars : MEMORY_LIMITS.maxNoteChars;
+  const max = maxCharsFor(kind);
   if (text.length > max) throw new Error(`A ${kind} is at most ${max} characters.`);
   const why = tidyNoteText(String(input.why ?? ""), "fact");
   if (why.length > MEMORY_LIMITS.maxWhyChars) throw new Error(`A rationale is at most ${MEMORY_LIMITS.maxWhyChars} characters.`);
@@ -533,7 +757,12 @@ export function addManualNote(store: MemoryStore, input: { kind: unknown; text: 
   if (store.forgotten) store.forgotten = store.forgotten.filter((k) => k !== noteKey({ kind, text }));
   const existing = list.find((n) => isActive(n) && noteKey(n) === noteKey({ kind, text }));
   if (existing) return existing;
-  const [note] = addParsedNotes(list, [{ kind, text, ...(why ? { why } : {}) }], { source, now, status: () => "kept", ...scope });
+  const kb = OPERATOR_KINDS.has(kind) ? {} : { area: areaKey(input.area) || undefined, paths: pathList(input.paths), links: linkList(input.links, areaKey(input.area) || undefined) };
+  const parsed: ParsedNote = { kind, text, ...(why ? { why } : {}) };
+  if (kb.area) parsed.area = kb.area;
+  if (kb.paths?.length) parsed.paths = kb.paths;
+  if (kb.links?.length) parsed.links = kb.links;
+  const [note] = addParsedNotes(list, [parsed], { source, now, status: () => "kept", ...scope });
   if (!note) throw new Error("That note is already known.");
   return note;
 }
@@ -554,6 +783,55 @@ export interface MemorySelection {
   matchedPlaybooks: MemoryNote[];
   /** True when `relevant` was chosen by score rather than recency. */
   byRelevance: boolean;
+  /** Knowledge base: every area of the box's repos (the index) and the ones shown in full for this task. */
+  areas: AreaSummary[];
+  areaPages: AreaSummary[];
+}
+
+/** One knowledge-base area (page) of a repo, with its active notes. */
+export interface AreaSummary {
+  repo: string;
+  area: string;
+  notes: MemoryNote[];
+  kinds: Partial<Record<MemoryKind, number>>;
+  paths: string[];
+  links: string[];
+  stale: number;
+  /** Newest `at` among its notes. */
+  updated: number;
+}
+
+/** Group a repo's active notes by area, biggest first. Notes without an area are not in the KB index. */
+export function areaIndex(store: MemoryStore, repos: string[]): AreaSummary[] {
+  const out: AreaSummary[] = [];
+  const seen = new Set<string>();
+  for (const r of repos) {
+    const key = memoryRepoKey(r);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const by = new Map<string, MemoryNote[]>();
+    for (const n of store.repos[key] ?? []) if (isActive(n) && n.area) by.set(n.area, [...(by.get(n.area) ?? []), n]);
+    for (const [area, notes] of by) {
+      const paths = pathList(notes.flatMap((n) => n.paths ?? []));
+      const links = linkList(notes.flatMap((n) => n.links ?? []), area);
+      out.push({ repo: key, area, notes: notes.sort((a, b) => a.at - b.at), kinds: countKinds(notes), paths, links, stale: notes.filter((n) => n.stale).length, updated: Math.max(...notes.map((n) => n.at)) });
+    }
+  }
+  return out.sort((a, b) => b.notes.length - a.notes.length || a.area.localeCompare(b.area));
+}
+
+/**
+ * How much a task is about an area: its notes' scores (each capped, so one long note cannot carry a
+ * page), the area's own name in the task, and any anchored path the task names.
+ */
+export function scoreArea(task: string, a: AreaSummary): number {
+  const t = task.toLowerCase();
+  let s = 0;
+  for (const n of a.notes) s += Math.min(6, scoreNote(task, n));
+  const stems = new Set(keyStems(task));
+  for (const seg of a.area.split(/[/-]/)) if (seg.length >= 3 && stems.has(keyStems(seg)[0] ?? "")) s += 3;
+  for (const p of a.paths) if (p.length >= 4 && t.includes(p.toLowerCase().replace(/\*+/g, "").replace(/\/$/, ""))) s += 4;
+  return s;
 }
 
 /** The lists a box sees: operator notes plus the notes of the repos checked out in it. */
@@ -583,7 +861,16 @@ export function scoreNote(task: string, n: MemoryNote): number {
 export function selectMemory(store: MemoryStore, repos: string[], task?: string): MemorySelection {
   const visible = visibleNotes(store, repos);
   const core = visible.filter((n) => OPERATOR_KINDS.has(n.kind) || n.pinned).sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned) || a.at - b.at);
-  const rest = visible.filter((n) => !OPERATOR_KINDS.has(n.kind) && !n.pinned);
+  // Area notes are served as pages; "For this task" is for the notes nobody filed under an area.
+  const rest = visible.filter((n) => !OPERATOR_KINDS.has(n.kind) && !n.pinned && !n.area);
+  const areas = areaIndex(store, repos);
+  let areaPages: AreaSummary[] = [];
+  if (areas.length) {
+    const scoredAreas = task?.trim() ? areas.map((a) => ({ a, s: scoreArea(task, a) })).filter((x) => x.s >= MEMORY_LIMITS.relevanceThreshold) : [];
+    areaPages = scoredAreas.length
+      ? scoredAreas.sort((x, y) => y.s - x.s || y.a.updated - x.a.updated).slice(0, MEMORY_LIMITS.relevantAreas).map((x) => x.a)
+      : [...areas].sort((x, y) => y.updated - x.updated).slice(0, 1);
+  }
   let relevant: MemoryNote[];
   let byRelevance = false;
   const scored = task?.trim() ? rest.map((n) => ({ n, s: scoreNote(task, n) })).filter((x) => x.s >= MEMORY_LIMITS.relevanceThreshold) : [];
@@ -595,21 +882,57 @@ export function selectMemory(store: MemoryStore, repos: string[], task?: string)
   }
   // Chronological inside the section so the file reads as a history.
   relevant.sort((a, b) => a.at - b.at);
-  const matchedPlaybooks = byRelevance ? relevant.filter((n) => n.kind === "playbook") : [];
-  return { core, relevant, matchedPlaybooks, byRelevance };
+  const matchedPlaybooks = byRelevance ? [...relevant, ...areaPages.flatMap((a) => a.notes)].filter((n) => n.kind === "playbook") : [];
+  return { core, relevant, matchedPlaybooks, byRelevance, areas, areaPages };
 }
 
-/** `- [kind] text (repo) | why: …`, a playbook's steps indented beneath its title. */
+const isoDay = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
+
+/** The `{paths: …} {links: …}` and drift suffix of a knowledge-base note line. */
+function kbSuffix(n: MemoryNote): string {
+  let s = "";
+  if (n.paths?.length) s += ` {paths: ${n.paths.join(", ")}}`;
+  if (n.links?.length) s += ` {links: ${n.links.join(", ")}}`;
+  if (n.stale) s += ` ⚠ unverified since ${isoDay(n.stale.at)} (changed: ${n.stale.paths.join(", ")}) — reaffirm it with replaces: "${n.text.split("\n")[0].slice(0, 80)}" or replace it`;
+  return s;
+}
+
+/** `- [kind · area] text (repo) {paths} {links} | why: …`, a playbook's steps indented beneath its title. */
 function noteLine(n: MemoryNote, showRepo: boolean): string {
-  const tag = n.pinned && !OPERATOR_KINDS.has(n.kind) ? `pinned ${n.kind}` : n.kind;
+  const kind = n.pinned && !OPERATOR_KINDS.has(n.kind) ? `pinned ${n.kind}` : n.kind;
+  const tag = n.area ? `${kind} · ${n.area}` : kind;
   const repo = showRepo && n.repo ? ` (${n.repo})` : "";
   const why = n.why ? ` | why: ${n.why}` : "";
   if (n.kind === "playbook") {
     const [title, ...steps] = n.text.split(/\r?\n/);
     const body = steps.filter((s) => s.trim()).map((s) => `    ${s.trim().replace(/^(?:[-*•]|\d+[.)])\s*/, "- ")}`);
-    return [`- [${tag}] ${title.trim()}${repo}${why}`, ...body].join("\n");
+    return [`- [${tag}] ${title.trim()}${repo}${kbSuffix(n)}${why}`, ...body].join("\n");
   }
-  return `- [${tag}] ${n.text.replace(/\s*\n\s*/g, " ")}${repo}${why}`;
+  return `- [${tag}] ${n.text.replace(/\s*\n\s*/g, " ")}${repo}${kbSuffix(n)}${why}`;
+}
+
+/** One index row of the knowledge base: `- billing/invoicing · 6 notes (4 domain, 2 decision) · paths … · links … · 1 unverified`. */
+function areaIndexLine(a: AreaSummary, showRepo: boolean): string {
+  const kinds = MEMORY_KINDS.filter((k) => a.kinds[k]).map((k) => `${a.kinds[k]} ${k}`).join(", ");
+  const parts = [`${a.area}${showRepo ? ` (${a.repo})` : ""}`, `${a.notes.length} note${a.notes.length === 1 ? "" : "s"} (${kinds})`];
+  if (a.paths.length) parts.push(`paths ${a.paths.slice(0, 3).join(", ")}${a.paths.length > 3 ? ", …" : ""}`);
+  if (a.links.length) parts.push(`links ${a.links.join(", ")}`);
+  if (a.stale) parts.push(`${a.stale} unverified`);
+  return `- ${parts.join(" · ")}`;
+}
+
+/** The order notes read in on an area page: what the product does first, then why, then the rest. */
+const PAGE_ORDER: MemoryKind[] = ["domain", "decision", "lesson", "fact", "playbook", "preference", "rule"];
+
+/** A knowledge-base page: the area's notes grouped by kind, domain first, capped. */
+export function renderAreaPage(a: AreaSummary, showRepo: boolean, max = MEMORY_LIMITS.areaPageMax): string {
+  const ordered = [...a.notes].sort((x, y) => PAGE_ORDER.indexOf(x.kind) - PAGE_ORDER.indexOf(y.kind) || x.at - y.at);
+  const lines = ordered.slice(0, max).map((n) => noteLine(n, showRepo));
+  if (ordered.length > max) lines.push(`- … ${ordered.length - max} more — \`memory area ${a.area}\``);
+  const head = [`### ${a.area}${showRepo ? ` (${a.repo})` : ""}`];
+  if (a.paths.length) head.push(`Code: ${a.paths.join(", ")}`);
+  if (a.links.length) head.push(`Related: ${a.links.join(", ")}`);
+  return `${head.join("\n")}\n\n${lines.join("\n")}`;
 }
 
 /**
@@ -619,10 +942,25 @@ function noteLine(n: MemoryNote, showRepo: boolean): string {
 export function renderMemoryMd(store: MemoryStore, repos: string[], task?: string): string | null {
   if (!store.enabled) return null;
   const sel = selectMemory(store, repos, task);
-  if (!sel.core.length && !sel.relevant.length) return null;
+  if (!sel.core.length && !sel.relevant.length && !sel.areas.length) return null;
   const showRepo = repos.length !== 1;
   const sections: string[] = [];
   if (sel.core.length) sections.push(`## Core\n\n${sel.core.map((n) => noteLine(n, showRepo)).join("\n")}`);
+  if (sel.areas.length) {
+    const idx = sel.areas.slice(0, MEMORY_LIMITS.indexMax).map((a) => areaIndexLine(a, showRepo));
+    if (sel.areas.length > MEMORY_LIMITS.indexMax) idx.push(`- … ${sel.areas.length - MEMORY_LIMITS.indexMax} more areas — \`memory areas\``);
+    const repoName = repos.length === 1 ? ` — ${memoryRepoKey(repos[0])}` : "";
+    const pages = sel.areaPages.map((a) => renderAreaPage(a, showRepo)).join("\n\n");
+    sections.push(
+      `## Knowledge base${repoName}\n\n` +
+        "How this product works, by area — what earlier runs learned about its entities, flows, rules and owners. " +
+        "Read an area before working in it: `memory area <slug>` prints it with its related areas. " +
+        "When you learn something that changes a note, write the same kind with `replaces:` quoting it; new knowledge gets `area:` (an existing area when one fits), `paths:` and `links:`. " +
+        "A note marked unverified describes code that changed since — confirm it (reaffirm) or replace it when you work there.\n\n" +
+        `${idx.join("\n")}` +
+        (pages ? `\n\n${sel.areaPages.length === sel.areas.length ? "" : "Areas this task is about:\n\n"}${pages}` : "")
+    );
+  }
   if (sel.relevant.length) {
     const head = sel.byRelevance ? "## For this task" : "## Recent";
     const scope = repos.length ? `${repos.join(", ")} and this operator` : "this operator";
@@ -631,8 +969,8 @@ export function renderMemoryMd(store: MemoryStore, repos: string[], task?: strin
   return (
     "# Memory from earlier runs\n\n" +
     "What earlier runs learned for this operator and these repos. Notes may be stale — verify before relying on one. " +
-    "`memory search <words>` searches everything; add a note with `memory add <kind> \"<text>\" [--why …] [--replaces \"<old text>\"]` " +
-    "or a line `<!-- remember: <kind> | <text> [| why: …] [| replaces: \"<old text>\"] -->`.\n\n" +
+    "`memory search <words>` searches everything; add a note with `memory add <kind> \"<text>\" [--area part/subpart] [--paths a,b] [--links area,…] [--why …] [--replaces \"<old text>\"]` " +
+    "or a line `<!-- remember: <kind> | <text> [| area: …] [| paths: …] [| links: …] [| why: …] [| replaces: \"<old text>\"] -->`.\n\n" +
     sections.join("\n\n") +
     "\n"
   );
@@ -648,7 +986,7 @@ export function renderMemoryArchive(store: MemoryStore, repos: string[]): string
   if (!visible.length) return null;
   const line = (n: MemoryNote): string => {
     const text = n.kind === "playbook" ? n.text.split(/\r?\n/).map((s) => s.trim()).filter(Boolean).join(" · ") : n.text.replace(/\s*\n\s*/g, " ");
-    return `- [${n.kind}] ${text}${n.repo ? ` (${n.repo})` : ""}${n.why ? ` | why: ${n.why}` : ""}`;
+    return `- [${n.area ? `${n.kind} · ${n.area}` : n.kind}] ${text}${n.repo ? ` (${n.repo})` : ""}${kbSuffix(n)}${n.why ? ` | why: ${n.why}` : ""}`;
   };
   const groups: string[] = [];
   const byScope = (scope: string, notes: MemoryNote[]) => {
@@ -661,7 +999,9 @@ export function renderMemoryArchive(store: MemoryStore, repos: string[]): string
   };
   byScope("operator", visible.filter((n) => n.scope === "operator"));
   for (const r of repos) byScope(memoryRepoKey(r), visible.filter((n) => n.repo === memoryRepoKey(r)));
-  return `# Memory archive\n\nEvery note for this operator and these repos; MEMORY.md is the relevant slice. Searched by \`memory search\`.\n\n${groups.join("\n\n")}\n`;
+  const idx = areaIndex(store, repos);
+  const kb = idx.length ? `## Areas\n\n${idx.map((a) => areaIndexLine(a, repos.length !== 1)).join("\n")}\n\n` : "";
+  return `# Memory archive\n\nEvery note for this operator and these repos; MEMORY.md is the relevant slice. Searched by \`memory search\`; \`memory area <slug>\` prints one area.\n\n${kb}${groups.join("\n\n")}\n`;
 }
 
 /** Bump the use counters of the playbooks a task matched. Returns true when anything changed. */
@@ -707,12 +1047,16 @@ export function playbookToSkill(n: MemoryNote): { name: string; description: str
  */
 export function exportMemoryMarkdown(store: MemoryStore): string {
   const line = (n: MemoryNote): string => {
-    const why = n.why ? ` | why: ${n.why}` : "";
+    const fields =
+      (n.area ? ` | area: ${n.area}` : "") +
+      (n.paths?.length ? ` | paths: ${n.paths.join(", ")}` : "") +
+      (n.links?.length ? ` | links: ${n.links.join(", ")}` : "") +
+      (n.why ? ` | why: ${n.why}` : "");
     if (n.kind === "playbook") {
       const [title, ...steps] = n.text.split(/\r?\n/);
-      return [`- [playbook] ${title.trim()}${why}`, ...steps.filter((s) => s.trim()).map((s) => `  ${s.trim().replace(/^(?:[-*•]|\d+[.)])\s*/, "- ")}`)].join("\n");
+      return [`- [playbook] ${title.trim()}${fields}`, ...steps.filter((s) => s.trim()).map((s) => `  ${s.trim().replace(/^(?:[-*•]|\d+[.)])\s*/, "- ")}`)].join("\n");
     }
-    return `- [${n.kind}] ${n.text.replace(/\s*\n\s*/g, " ")}${why}`;
+    return `- [${n.kind}] ${n.text.replace(/\s*\n\s*/g, " ")}${fields}`;
   };
   const section = (title: string, notes: MemoryNote[]): string | null => {
     const kept = notes.filter((n) => isActive(n) && n.status === "kept").sort((a, b) => MEMORY_KINDS.indexOf(a.kind) - MEMORY_KINDS.indexOf(b.kind) || a.at - b.at);
@@ -763,7 +1107,7 @@ export function importMemoryMarkdown(store: MemoryStore, markdown: string, now =
   for (const row of parseMemoryMarkdown(markdown)) {
     const before = allNotes(store).length;
     try {
-      addManualNote(store, { kind: row.kind, text: row.text, why: row.why, repo: row.repo }, now, "import");
+      addManualNote(store, { kind: row.kind, text: row.text, why: row.why, repo: row.repo, area: row.area, paths: row.paths, links: row.links }, now, "import");
     } catch {
       continue; // one bad row never fails the file
     }

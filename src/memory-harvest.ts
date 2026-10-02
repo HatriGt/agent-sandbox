@@ -20,6 +20,7 @@ import {
   autoKeepPending,
   countKinds,
   MEMORY_NEW_WINDOW_MS,
+  markStaleByPaths,
   rememberRunNotes,
   type MemoryKind,
   type MemoryNote,
@@ -34,6 +35,10 @@ export interface MemoryNewItem {
   why?: string;
   status: "pending" | "kept";
   at: number;
+  /** Knowledge-base page the note belongs to. */
+  area?: string;
+  /** Set when the note supersedes an older one — the toast reads "Updated", not "Remembered". */
+  revises?: boolean;
 }
 
 export interface HarvesterDeps {
@@ -100,6 +105,18 @@ export class MemoryHarvester {
     }
     for (const n of autoKept) this.noteChanged(n.id, { status: "kept" });
     return { added, autoKept };
+  }
+
+  /**
+   * Drift, at the finish edge: a note anchored to a file this run changed is flagged unverified
+   * (src/memory-store.ts markStaleByPaths) unless the run wrote or reaffirmed it. Returns the flagged notes.
+   */
+  markStale(box: string, owner: string, repos: string[], files: string[]): MemoryNote[] {
+    if (!files.length || !repos.length) return [];
+    const store = this.deps.load(owner);
+    const flagged = repos.flatMap((r) => markStaleByPaths(store, r, files, { box, now: this.now() }));
+    if (flagged.length) this.deps.save(store, owner);
+    return flagged;
   }
 
   /**
@@ -185,5 +202,5 @@ export class MemoryHarvester {
 const logSig = (log: string): string => `${log.length}:${log.slice(-64)}`;
 
 function toNewItem(n: MemoryNote): MemoryNewItem {
-  return { id: n.id, kind: n.kind, text: n.text, ...(n.why ? { why: n.why } : {}), status: n.status, at: n.at };
+  return { id: n.id, kind: n.kind, text: n.text, ...(n.why ? { why: n.why } : {}), status: n.status, at: n.at, ...(n.area ? { area: n.area } : {}), ...(n.supersedes ? { revises: true } : {}) };
 }

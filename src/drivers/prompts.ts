@@ -17,19 +17,32 @@ export const MEMORY_PROMPT =
   "Also never save: what you just did (that is the reply), task-specific values (this branch, this file, " +
   "this PR number), anything MEMORY.md already says, guesses. Most runs save nothing; that is correct. " +
   "When something qualifies, record it THE MOMENT it appears, one note per line: " +
-  "'<!-- remember: <kind> | <text> [| why: <reason>] [| replaces: \"<old note text>\"] -->' or the shell tool " +
-  "`memory add <kind> \"<text>\" [--why …] [--replaces \"<old text>\"]`. Kinds: preference = how the " +
+  "'<!-- remember: <kind> | <text> [| area: <part/subpart>] [| paths: <a, b>] [| links: <area, …>] [| why: <reason>] [| replaces: \"<old note text>\"] -->' or the shell tool " +
+  "`memory add <kind> \"<text>\" [--area …] [--paths …] [--links …] [--why …] [--replaces \"<old text>\"]`. Kinds: preference = how the " +
   "operator wants things in general (format, tone, tools); rule = a standing 'when X, do Y' or 'always/never " +
   "X' — only when they state it as general ('always', 'from now on', 'every time', 'in this repo we'), never " +
   "inferred from one instruction; lesson = the operator corrected how you work, or a command failed and a " +
   "different one worked (e.g. `python` not found, `python3` works) — write it right then, with why; " +
-  "decision = a choice a future run must not re-litigate (with why); fact = durable repo/env knowledge a " +
+  "domain = how the product works (see KNOWLEDGE BASE); decision = a choice a future run must not re-litigate (with why); fact = durable repo/env knowledge a " +
   "newcomer would need; playbook = only for a task type that clearly recurs (checking, reporting, " +
   "deploying, routine investigation) and took real discovery: ONE note, a title line, then the exact " +
   "steps/commands that worked on indented lines. Write notes as general instructions ('Label every PR with " +
   "its area'), not history ('I labelled PR 42'). A note that contradicts MEMORY.md uses the same kind with " +
   "replaces: quoting the old text. Before repeating a step you attempted before, or one MEMORY.md flags, run " +
-  "`memory search <words>` (it also searches the full archive). Never secrets — refer to env vars by name. ";
+  "`memory search <words>` (it also searches the full archive). Never secrets — refer to env vars by name. " +
+  "KNOWLEDGE BASE: MEMORY.md's 'Knowledge base' section is this repo's memory of how the product works, " +
+  "segregated by area (a part of the app: `billing/invoicing`, `auth`, `orders/refunds`). When the task is a " +
+  "business requirement or changes how the product behaves, record what you learn about the domain as `domain` " +
+  "notes the moment you understand it — one statement per note: an entity and what it means, a flow and its " +
+  "steps, a business rule or invariant, which service owns what and who consumes it. Every domain note carries " +
+  "area: (an existing area from the index when one fits, else a new `part/subpart`), paths: (the files that " +
+  "implement it) and links: (related areas, so the dots connect). fact/decision/lesson/playbook notes about one " +
+  "part of the app take area: too. Before working in an area, run `memory area <slug>` and read it. The base " +
+  "updates itself through you: when what you learn changes a note, write the same kind with replaces: quoting " +
+  "it — never a second note saying almost the same; a note marked unverified describes code that changed " +
+  "since — reaffirm it (write it again with replaces: quoting itself) or replace it when you work there. " +
+  "Describe how the product works, not what this task changed, and only once the change is real (merged or " +
+  "done). ";
 
 // Standing policy injected as a system prompt on every run/resume. Kept as env data (like the
 // task) so it never touches the command string. No AI attribution in commits or PRs.

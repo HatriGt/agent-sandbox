@@ -36,7 +36,7 @@ export type TraceEvent =
    * Something the agent saved to memory (a `<!-- remember: … -->` sentinel, written by it or by the
    * box's `memory add`). The controller harvests the note; the thread shows one quiet row for it.
    */
-  | { kind: "memory"; note: string; text: string; at?: number }
+  | { kind: "memory"; note: string; text: string; area?: string; updated?: boolean; at?: number }
   /** A question the operator answered; the answer follows as the next `you` event. */
   | { kind: "ask"; text: string }
   /** Cumulative token usage stamped by the formatter at the end of a turn (⟦usage⟧ sentinel). */
@@ -495,7 +495,7 @@ function isMechanism(e: TraceEvent): boolean {
 }
 
 const REMEMBER_LINE_RE = /<!--\s*remember:[\s\S]*?-->/g;
-const NOTE_KINDS = ["preference", "rule", "fact", "decision", "lesson", "playbook"];
+const NOTE_KINDS = ["preference", "rule", "domain", "fact", "decision", "lesson", "playbook"];
 
 /** The notes in remember sentinels, as thread rows: kind (untagged = fact) and the note's text. */
 function rememberNotes(src: string): Extract<TraceEvent, { kind: "memory" }>[] {
@@ -505,7 +505,14 @@ function rememberNotes(src: string): Extract<TraceEvent, { kind: "memory" }>[] {
       const parts = line.split(/\s*\|\s*/).map((p) => p.trim());
       const tagged = NOTE_KINDS.includes((parts[0] ?? "").toLowerCase());
       const text = (tagged ? parts[1] : parts[0])?.replace(/\\"/g, '"').trim();
-      if (text) out.push({ kind: "memory", note: tagged ? parts[0].toLowerCase() : "fact", text });
+      if (!text) continue;
+      const row: Extract<TraceEvent, { kind: "memory" }> = { kind: "memory", note: tagged ? parts[0].toLowerCase() : "fact", text };
+      for (const f of parts.slice(tagged ? 2 : 1)) {
+        const area = /^area\s*:\s*(.+)$/i.exec(f);
+        if (area) row.area = area[1].trim().toLowerCase();
+        if (/^replaces\s*:/i.test(f)) row.updated = true;
+      }
+      out.push(row);
     }
   }
   return out;

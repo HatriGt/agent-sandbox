@@ -838,6 +838,10 @@ const archiveFinishedRun = async (box: string, opts: { withFiles: boolean; quiet
   const repos = up ? await collectRepoSetup(box, runOwner).catch((e) => (console.error(`[setup] ${box}: ${(e as Error).message.slice(0, 200)}`), [])) : [];
   try {
     finishMemory(box, runOwner, snap.log ?? "", digest, repos.map((r) => r.slug));
+    // Knowledge-base drift: notes anchored to files this run touched are now "unverified" until a
+    // later run (or the operator) confirms them. Only files the box could still report count.
+    const stale = memoryHarvester.markStale(box, runOwner, repos.map((r) => r.slug), files.map((f) => f.path));
+    if (stale.length) console.error(`[memory] ${box}: ${stale.length} note${stale.length === 1 ? "" : "s"} may be outdated (${[...new Set(stale.map((n) => n.area ?? "unfiled"))].join(", ")})`);
   } catch (e) {
     console.error(`[memory] ${box}: ${(e as Error).message.slice(0, 200)}`);
   }
@@ -2421,16 +2425,16 @@ app.post("/memory-notes.json", async (req: Request, res: Response) => {
         store.enabled = body.enabled;
       }
       if (body.add !== undefined) {
-        if (!body.add || typeof body.add !== "object") throw new Error("add must be { kind, text, why?, repo? }.");
-        addManualNote(store, body.add as { kind: unknown; text: unknown; why?: unknown; repo?: unknown });
+        if (!body.add || typeof body.add !== "object") throw new Error("add must be { kind, text, why?, repo?, area?, paths?, links? }.");
+        addManualNote(store, body.add as { kind: unknown; text: unknown; why?: unknown; repo?: unknown; area?: unknown; paths?: unknown; links?: unknown });
         res.locals.auditAction = "memory.add";
       } else if (body.id !== undefined) {
         if (typeof body.id !== "string" || !body.id) throw new Error("id must be a note id.");
         const before = getNote(store, body.id);
         const wasPending = before?.status === "pending";
-        const note = updateNote(store, body.id, { text: body.text, why: body.why, pinned: body.pinned, status: body.status });
-        const edited = body.text !== undefined || body.why !== undefined;
-        res.locals.auditAction = edited ? "memory.edit" : wasPending && body.status === "kept" ? "memory.keep" : "memory.edit";
+        const note = updateNote(store, body.id, { text: body.text, why: body.why, pinned: body.pinned, status: body.status, area: body.area, paths: body.paths, links: body.links, verified: body.verified });
+        const edited = body.text !== undefined || body.why !== undefined || body.area !== undefined || body.paths !== undefined || body.links !== undefined;
+        res.locals.auditAction = edited ? "memory.edit" : wasPending && body.status === "kept" ? "memory.keep" : body.verified ? "memory.verify" : "memory.edit";
         memoryHarvester.noteChanged(note.id, { status: note.status, ...(edited ? { text: note.text, why: note.why ?? "" } : {}) });
       }
       saveMemoryStore(store, owner);
