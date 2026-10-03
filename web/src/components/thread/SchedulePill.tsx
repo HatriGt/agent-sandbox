@@ -35,7 +35,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 
 type Item = ThreadScheduleItem;
 
-const CATEGORY: Record<Item["category"], { label: string; icon: typeof Rocket }> = {
+export const CATEGORY: Record<Item["category"], { label: string; icon: typeof Rocket }> = {
   ci: { label: "CI", icon: GitPullRequest },
   deploy: { label: "Deploy", icon: Rocket },
   monitor: { label: "Monitor", icon: Activity },
