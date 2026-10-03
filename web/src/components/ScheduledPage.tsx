@@ -59,6 +59,7 @@ export function ScheduledPage({ onOpenBox, onAutomations }: { onOpenBox: (box: s
     }
   };
 
+  const showRepo = rows.some((t) => t.repo);
   const counts = { upcoming: all.filter((t) => UPCOMING.has(t.status)).length, done: all.filter((t) => !UPCOMING.has(t.status)).length, all: all.length };
   const th = "text-faint px-3 py-2 text-left text-micro font-medium tracking-wide whitespace-nowrap uppercase";
   const td = "px-3 py-2.5 align-top text-micro";
@@ -90,12 +91,12 @@ export function ScheduledPage({ onOpenBox, onAutomations }: { onOpenBox: (box: s
         </div>
       ) : (
         <div className="overflow-x-auto rounded-xl border">
-          <table className="w-full min-w-[760px] border-collapse">
+          <table className="w-full min-w-[680px] border-collapse">
             <thead className="bg-muted/40 border-b">
               <tr>
                 <th className={th}>Task</th>
                 <th className={th}>Chat</th>
-                <th className={th}>Repo</th>
+                {showRepo && <th className={th}>Repo</th>}
                 <th className={th}>When</th>
                 <th className={th}>Status</th>
                 <th className={th}>Result</th>
@@ -106,7 +107,7 @@ export function ScheduledPage({ onOpenBox, onAutomations }: { onOpenBox: (box: s
             </thead>
             <tbody>
               {rows.map((t) => (
-                <Row key={t.id} t={t} now={now} busy={busy === t.id} td={td} iconBtn={iconBtn} onOpenBox={onOpenBox} act={act} onAutomations={onAutomations} />
+                <Row key={t.id} t={t} now={now} busy={busy === t.id} td={td} iconBtn={iconBtn} showRepo={showRepo} onOpenBox={onOpenBox} act={act} onAutomations={onAutomations} />
               ))}
             </tbody>
           </table>
@@ -122,6 +123,7 @@ function Row({
   busy,
   td,
   iconBtn,
+  showRepo,
   onOpenBox,
   act,
   onAutomations,
@@ -131,6 +133,7 @@ function Row({
   busy: boolean;
   td: string;
   iconBtn: string;
+  showRepo: boolean;
   onOpenBox: (box: string) => void;
   act: (id: string, fn: () => Promise<unknown>, ok: string) => Promise<void>;
   onAutomations: () => void;
@@ -157,7 +160,7 @@ function Row({
         )}
       </td>
       <td className={cn(td, "max-w-[11rem]")}>{t.sourceBox ? link(t.sourceBox, t.sourceTitle || t.sourceBox) : <span className="text-faint">—</span>}</td>
-      <td className={cn(td, "font-mono text-[12px] whitespace-nowrap")}>{t.repo || <span className="text-faint font-sans">—</span>}</td>
+      {showRepo && <td className={cn(td, "font-mono text-[12px] whitespace-nowrap")}>{t.repo || <span className="text-faint font-sans">—</span>}</td>}
       <td className={cn(td, "whitespace-nowrap tabular-nums")}>
         <span
           className="text-foreground inline-flex items-center gap-1"
