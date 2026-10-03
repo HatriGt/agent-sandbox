@@ -106,7 +106,7 @@ export function threadSchedule(box: string, startedBy: StartedBy | undefined, tr
       ...(t.repo ? { repo: t.repo } : {}),
       enabled: t.enabled,
       task: t.taskTemplate.slice(0, 2000),
-      ...(relation === "proposed" ? { why: automateNeedsApproval(t.spec.cron ?? "", t.taskTemplate) ?? "The agent asked for your OK" } : {}),
+      ...(relation === "proposed" ? { why: automateNeedsApproval(t.spec.cron ?? "", t.taskTemplate) ?? "The agent asked you to confirm it first" } : {}),
     });
   for (const t of triggers) {
     // Paused ones stay listed (dimmed) so the pill can resume them; dismissing deletes.

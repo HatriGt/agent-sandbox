@@ -67,7 +67,7 @@ export function AutopilotPage({
                 {t.icon}
                 <span className="font-medium">{t.label}</span>
                 {t.count ? (
-                  <span className={cn("rounded-full px-1.5 text-micro tabular-nums", t.attention ? "bg-attention/15 text-attention-text" : "bg-muted text-muted-foreground")} title={t.attention ? "Something is waiting for your OK" : undefined}>
+                  <span className={cn("rounded-full px-1.5 text-micro tabular-nums", t.attention ? "bg-attention/15 text-attention-text" : "bg-muted text-muted-foreground")} title={t.attention ? "Something is awaiting your approval" : undefined}>
                     {t.count}
                   </span>
                 ) : null}

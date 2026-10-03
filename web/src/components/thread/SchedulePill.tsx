@@ -29,7 +29,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
  * The thread's schedule pill: what is scheduled as part of this chat, floating at the top-right of
  * the conversation. Absent when nothing is. Collapsed it is one line ("Next in 2h"); open it morphs
  * (one shared layout, spring) into a compact table — type, what, next run, options — and a row opens
- * its detail in place. Ink, not colour: the only amber is on an item that waits for your OK.
+ * its detail in place. Ink, not colour: the only amber is on an item that awaits approval.
  * Reduced motion keeps only the fades.
  */
 
@@ -46,7 +46,7 @@ const CATEGORY: Record<Item["category"], { label: string; icon: typeof Rocket }>
 };
 
 const ORIGIN: Record<Item["relation"], string> = {
-  proposed: "Scheduled by the agent in this chat — waiting for your OK",
+  proposed: "Scheduled by the agent in this chat — runs once you approve it",
   created: "Scheduled by the agent in this chat",
   repeats: "The schedule that started this chat — runs again",
   after: "Runs after this chat's automation finishes",
@@ -114,7 +114,7 @@ export function useThreadSchedule(box: string, runState: string) {
 }
 
 /** Re-render every 30s so "in 12 min" stays true. */
-function useNow(): number {
+export function useNow(): number {
   const [now, setNow] = React.useState(Date.now());
   React.useEffect(() => {
     const t = window.setInterval(() => setNow(Date.now()), 30_000);
@@ -133,15 +133,17 @@ export function useActions(reload: () => void) {
       await fn();
       toast.success(ok);
       reload();
+      return true;
     } catch (e) {
       toast.error((e as Error).message);
+      return false;
     } finally {
       setBusy(null);
     }
   };
   return {
     busy,
-    approve: (it: Item) => run(it.id, () => api.setTriggerEnabled(it.id, true), `Scheduled: ${it.name}`),
+    approve: (it: Item) => run(it.id, () => api.setTriggerEnabled(it.id, true), `Approved — ${it.name} is on the schedule`),
     dismiss: (it: Item) => run(it.id, () => api.deleteTrigger(it.id), "Dismissed"),
     remove: (it: Item) => run(it.id, () => api.deleteTrigger(it.id), `Deleted: ${it.name}`),
     runNow: (it: Item) => run(it.id, () => api.runTrigger(it.id), `Started: ${it.name}`),
@@ -196,7 +198,7 @@ export function SchedulePill({ box, runState, className }: { box: string; runSta
     .map((i) => i.nextFire)
     .filter((n): n is number => n !== null)
     .sort((a, b) => a - b)[0];
-  const summary = pending ? `${pending} need${pending === 1 ? "s" : ""} your OK` : next ? `Next ${fmtNext(next, now)}` : `${items.length} paused`;
+  const summary = pending ? `${pending} awaiting approval` : next ? `Next ${fmtNext(next, now)}` : `${items.length} paused`;
 
   const spring = still ? { duration: 0.15 } : { type: "spring" as const, bounce: 0.14, duration: 0.45 };
   const fade = { initial: { opacity: 0 }, animate: { opacity: 1, transition: { duration: 0.16, delay: still ? 0 : 0.08 } }, exit: { opacity: 0, transition: { duration: 0.08 } } };
@@ -231,7 +233,7 @@ export function SchedulePill({ box, runState, className }: { box: string; runSta
                       <p className="text-foreground text-meta leading-tight font-semibold">Scheduled in this chat</p>
                       <p className="text-muted-foreground text-micro tabular-nums">
                         {live} running on schedule
-                        {pending > 0 && <span className="text-attention-text"> · {pending} waiting for your OK</span>}
+                        {pending > 0 && <span className="text-attention-text"> · {pending} awaiting approval</span>}
                         {next && ` · next ${fmtNext(next, now)}`}
                       </p>
                     </div>
@@ -347,7 +349,7 @@ function Table({ items, now, still, actions, onOpen, onLeave }: { items: Item[];
             </span>
             <span role="cell" className="text-right text-micro tabular-nums">
               {it.relation === "proposed" ? (
-                <span className="bg-attention/15 text-attention-text inline-flex rounded-full px-2 py-0.5 font-medium">Needs OK</span>
+                <span className="bg-attention/15 text-attention-text inline-flex rounded-full px-2 py-0.5 font-medium">Pending</span>
               ) : it.status === "done" || it.status === "failed" || it.status === "running" || it.status === "cancelled" ? (
                 <span className={cn(it.status === "failed" ? "text-destructive" : "text-muted-foreground")}>{STATUS_LABEL[it.status]}</span>
               ) : it.nextFire !== null ? (
@@ -464,7 +466,7 @@ function Detail({ it, now, actions, onBack, onLeave }: { it: Item; now: number; 
         </div>
         {it.why && (
           <p className="bg-attention/10 text-attention-text mt-2.5 rounded-lg px-3 py-2 text-micro leading-snug">
-            <span className="font-semibold">Needs your OK.</span> {it.why}.
+            <span className="font-semibold">Approval required.</span> {it.why}.
           </p>
         )}
         <dl className="mt-3 grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-micro">

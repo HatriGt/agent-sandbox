@@ -406,7 +406,7 @@ const MIN_AUTO_INTERVAL_MS = 10 * 60_000;
 
 /** Why a proposal needs the owner's OK, or undefined when it can start on its own. `cron` is "" for a one-time run. */
 export function automateNeedsApproval(cron: string, task: string, agentAsked = false): string | undefined {
-  if (agentAsked) return "The agent asked for your OK";
+  if (agentAsked) return "The agent asked you to confirm it first";
   const hit = CRITICAL_RE.exec(task);
   if (hit) return `Touches something critical (“${hit[0]}”)`;
   if (!cron) return undefined;
