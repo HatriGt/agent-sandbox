@@ -385,6 +385,13 @@ const MIGRATIONS: string[] = [
     PRIMARY KEY (box, key)
   );
   `,
+  `
+  -- Scheduled vs Automations: what an agent scheduled from a chat (often once: "merge the PR at
+  -- 2pm") is 'scheduled'; standing rules made from the menu, or that the user asked an agent to set
+  -- up, are 'automation'. Everything an agent made from a chat so far was a chat follow-up.
+  ALTER TABLE triggers ADD COLUMN scope TEXT NOT NULL DEFAULT 'automation';
+  UPDATE triggers SET scope = 'scheduled' WHERE source_box IS NOT NULL;
+  `,
 ];
 
 export function openDb(dataDir: string): Db {

@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import type { Db } from "./db.js";
 import type { SecretBox } from "./secretbox.js";
+import { scheduleStatus, type ScheduleStatus } from "./thread-schedule.js";
 import { describeWhen, newSecret, nextFire, parseCron, type TriggerInput, type TriggerKind, type TriggerSpec } from "./triggers.js";
 
 /**
@@ -9,6 +10,8 @@ import { describeWhen, newSecret, nextFire, parseCron, type TriggerInput, type T
  * webhook secret is sealed at rest and only ever returned in plaintext by `revealSecret` (the route
  * shows it once, at creation or rotation).
  */
+
+export type TriggerScope = "automation" | "scheduled";
 
 export interface TriggerResult {
   at: number;
@@ -32,6 +35,8 @@ export interface TriggerRow extends TriggerInput {
   proposed: boolean;
   /** The thread an agent proposed it from. */
   sourceBox?: string;
+  /** scheduled: follow-up work an agent put on the calendar from a chat; automation: a standing rule. */
+  scope: TriggerScope;
   createdAt: number;
   updatedAt: number;
 }
@@ -75,14 +80,23 @@ function toRow(r: Record<string, any>): TriggerRow {
     hasSigningSecret: !!r.signing_secret_enc,
     proposed: !!r.proposed,
     ...(r.source_box ? { sourceBox: String(r.source_box) } : {}),
+    scope: r.scope === "scheduled" ? "scheduled" : "automation",
     createdAt: Number(r.created_at),
     updatedAt: Number(r.updated_at),
   };
 }
 
-/** The next fire for a schedule, or null (not a schedule / disabled / never matches). */
-export function computeNextFire(t: Pick<TriggerInput, "kind" | "spec" | "enabled">, now: number): number | null {
-  if (t.kind !== "schedule" || !t.enabled || !t.spec.cron) return null;
+/** A one-time run that could not start (busy, storm cap) tries again this much later. */
+const ONCE_RETRY_MS = 60_000;
+
+/**
+ * The next fire for a schedule, or null (not a schedule / disabled / never matches). A one-time
+ * run is due at its instant until it has fired; one approved after its time runs at once.
+ */
+export function computeNextFire(t: Pick<TriggerInput, "kind" | "spec" | "enabled">, now: number, fired = false): number | null {
+  if (t.kind !== "schedule" || !t.enabled) return null;
+  if (t.spec.at) return fired ? null : Math.max(t.spec.at, now);
+  if (!t.spec.cron) return null;
   try {
     return nextFire(parseCron(t.spec.cron), now, t.spec.timezone ?? "UTC");
   } catch {
@@ -96,24 +110,25 @@ export function createTrigger(
   owner: string,
   t: TriggerInput,
   now = Date.now(),
-  opts: { proposed?: boolean; sourceBox?: string } = {}
+  opts: { proposed?: boolean; sourceBox?: string; scope?: TriggerScope } = {}
 ): { row: TriggerRow; secret: string } {
   const id = "trg_" + crypto.randomBytes(9).toString("base64url");
   const secret = newSecret();
   // A proposal is always created paused: the agent suggests, the owner enables.
   const enabled = opts.proposed ? false : t.enabled;
   db.prepare(
-    `INSERT INTO triggers (id, owner, name, kind, spec_json, repo, task_template, enabled, concurrency, pr_comment, quiet, proposed, agent, model, harness_id, workflow_id, source_box, secret_enc, next_fire, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO triggers (id, owner, name, kind, spec_json, repo, task_template, enabled, concurrency, pr_comment, quiet, proposed, agent, model, harness_id, workflow_id, source_box, scope, secret_enc, next_fire, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id, owner, t.name, t.kind, JSON.stringify(t.spec), t.repo ?? null, t.taskTemplate, enabled ? 1 : 0, t.concurrency,
-    t.prComment ? 1 : 0, t.quiet ? 1 : 0, opts.proposed ? 1 : 0, t.agent ?? null, t.model ?? null, t.harnessId ?? null, t.workflowId ?? null, opts.sourceBox ?? null, box.seal(secret),
+    t.prComment ? 1 : 0, t.quiet ? 1 : 0, opts.proposed ? 1 : 0, t.agent ?? null, t.model ?? null, t.harnessId ?? null, t.workflowId ?? null, opts.sourceBox ?? null, opts.scope ?? "automation", box.seal(secret),
     computeNextFire({ ...t, enabled }, now), now, now
   );
   return { row: getTrigger(db, owner, id)!, secret };
 }
 
 export function updateTrigger(db: Db, owner: string, id: string, t: TriggerInput, now = Date.now()): TriggerRow | undefined {
+  const cur = getTrigger(db, owner, id);
   const r = db
     .prepare(
       `UPDATE triggers SET name = ?, kind = ?, spec_json = ?, repo = ?, task_template = ?, enabled = ?, concurrency = ?,
@@ -121,7 +136,7 @@ export function updateTrigger(db: Db, owner: string, id: string, t: TriggerInput
     )
     .run(
       t.name, t.kind, JSON.stringify(t.spec), t.repo ?? null, t.taskTemplate, t.enabled ? 1 : 0, t.concurrency,
-      t.prComment ? 1 : 0, t.quiet ? 1 : 0, t.agent ?? null, t.model ?? null, t.harnessId ?? null, t.workflowId ?? null, computeNextFire(t, now), now, id, owner
+      t.prComment ? 1 : 0, t.quiet ? 1 : 0, t.agent ?? null, t.model ?? null, t.harnessId ?? null, t.workflowId ?? null, computeNextFire(t, now, cur?.lastFired != null), now, id, owner
     );
   return r.changes ? getTrigger(db, owner, id) : undefined;
 }
@@ -131,8 +146,16 @@ export function setEnabled(db: Db, owner: string, id: string, enabled: boolean, 
   if (!cur) return undefined;
   // Enabling a proposal IS approving it: it stops being "proposed by the agent" and runs like any other.
   db.prepare(`UPDATE triggers SET enabled = ?, proposed = CASE WHEN ? THEN 0 ELSE proposed END, next_fire = ?, updated_at = ? WHERE id = ? AND owner = ?`).run(
-    enabled ? 1 : 0, enabled ? 1 : 0, computeNextFire({ ...cur, enabled }, now), now, id, owner
+    enabled ? 1 : 0, enabled ? 1 : 0, computeNextFire({ ...cur, enabled }, now, cur.lastFired !== null), now, id, owner
   );
+  return getTrigger(db, owner, id);
+}
+
+/** "Make it an automation": a repeating chat schedule becomes a standing rule. A one-time run can't. */
+export function promoteTrigger(db: Db, owner: string, id: string, now = Date.now()): TriggerRow | undefined {
+  const cur = getTrigger(db, owner, id);
+  if (!cur || cur.spec.at) return undefined;
+  db.prepare(`UPDATE triggers SET scope = 'automation', updated_at = ? WHERE id = ? AND owner = ?`).run(now, id, owner);
   return getTrigger(db, owner, id);
 }
 
@@ -189,7 +212,7 @@ export function rotateSecret(db: Db, box: SecretBox, owner: string, id: string, 
 export function markFired(db: Db, id: string, result: TriggerResult, now = Date.now()): void {
   const t = db.prepare(`SELECT kind, spec_json, enabled FROM triggers WHERE id = ?`).get(id) as { kind: TriggerKind; spec_json: string; enabled: number } | undefined;
   if (!t) return;
-  const next = computeNextFire({ kind: t.kind, spec: JSON.parse(t.spec_json), enabled: !!t.enabled }, now);
+  const next = computeNextFire({ kind: t.kind, spec: JSON.parse(t.spec_json), enabled: !!t.enabled }, now, true);
   db.prepare(`UPDATE triggers SET last_fired = ?, next_fire = ?, last_result_json = ? WHERE id = ?`).run(now, next, JSON.stringify(result), id);
   logFromResult(db, id, result);
 }
@@ -198,7 +221,8 @@ export function markFired(db: Db, id: string, result: TriggerResult, now = Date.
 export function markSkipped(db: Db, id: string, result: TriggerResult, now = Date.now()): void {
   const t = db.prepare(`SELECT kind, spec_json, enabled FROM triggers WHERE id = ?`).get(id) as { kind: TriggerKind; spec_json: string; enabled: number } | undefined;
   if (!t) return;
-  const next = computeNextFire({ kind: t.kind, spec: JSON.parse(t.spec_json), enabled: !!t.enabled }, now);
+  const spec = JSON.parse(t.spec_json) as TriggerSpec;
+  const next = spec.at ? (t.enabled ? now + ONCE_RETRY_MS : null) : computeNextFire({ kind: t.kind, spec, enabled: !!t.enabled }, now);
   db.prepare(`UPDATE triggers SET next_fire = ?, last_result_json = ? WHERE id = ?`).run(next, JSON.stringify(result), id);
   logFromResult(db, id, result);
 }
@@ -264,10 +288,10 @@ export function pruneDeliveries(db: Db, now = Date.now(), maxAgeMs = 7 * 24 * 36
 }
 
 /** The API view: adds "when" in words (and the quiet counter for quiet automations); never includes the secret. */
-export function viewTrigger(t: TriggerRow, names: Record<string, string>, db?: Db): TriggerRow & { when: string; lastDelivery?: DeliveryEntry; counts?: QuietCounts } {
+export function viewTrigger(t: TriggerRow, names: Record<string, string>, db?: Db): TriggerRow & { when: string; status: ScheduleStatus; lastDelivery?: DeliveryEntry; counts?: QuietCounts } {
   const ld = db ? lastDelivery(db, t.id) : undefined;
   const counts = db && t.quiet ? quietCounts(db, t.id) : undefined;
-  return { ...t, when: describeWhen(t, names), ...(ld ? { lastDelivery: ld } : {}), ...(counts ? { counts } : {}) };
+  return { ...t, when: describeWhen(t, names), status: scheduleStatus(t), ...(ld ? { lastDelivery: ld } : {}), ...(counts ? { counts } : {}) };
 }
 
 /* ───────────────────────────── quiet runs ───────────────────────────── */
@@ -309,7 +333,8 @@ function logFromResult(db: Db, id: string, result: TriggerResult): void {
 export function advanceNextFire(db: Db, id: string, now = Date.now()): void {
   const t = db.prepare(`SELECT kind, spec_json, enabled FROM triggers WHERE id = ?`).get(id) as { kind: TriggerKind; spec_json: string; enabled: number } | undefined;
   if (!t) return;
-  db.prepare(`UPDATE triggers SET next_fire = ? WHERE id = ?`).run(computeNextFire({ kind: t.kind, spec: JSON.parse(t.spec_json), enabled: !!t.enabled }, now), id);
+  // A one-time run is treated as fired here: a crash mid-start must not start it twice.
+  db.prepare(`UPDATE triggers SET next_fire = ? WHERE id = ?`).run(computeNextFire({ kind: t.kind, spec: JSON.parse(t.spec_json), enabled: !!t.enabled }, now, true), id);
 }
 
 /* ───────────────────────────── delivery log (bet 4) ───────────────────────────── */

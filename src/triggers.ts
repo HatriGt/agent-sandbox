@@ -24,6 +24,8 @@ export const GITHUB_EVENTS: readonly GithubEvent[] = ["issue_labeled", "issue_co
 export interface TriggerSpec {
   /** schedule: 5-field cron, evaluated in `timezone`. */
   cron?: string;
+  /** schedule, one time: fire once at this instant (epoch ms) instead of on a cron. */
+  at?: number;
   timezone?: string;
   /** github: which event, and its filter. */
   event?: GithubEvent;
@@ -365,28 +367,49 @@ export function isQuietRun(log: string, opts: { question?: string; prOpened?: bo
 
 /* ───────────────────────────── agent-authored automations ───────────────────────────── */
 
+/**
+ * What an agent can put on the calendar from a chat, as a marker line in its log:
+ *
+ *   <!-- schedule: <when> | <task> -->   follow-up work for this chat ("merge the PR at 2pm").
+ *       <when> is a time (2026-10-02T14:00Z, an offset, or "in 30m / 2h / 1d") → runs ONCE;
+ *       or a 5-field cron → repeats. Listed under Scheduled, not Automations.
+ *   <!-- automate: <cron> | <task> -->   a standing automation the user asked the agent to set up.
+ *       Listed under Automations like one made from the menu.
+ *
+ * `schedule?:` / `automate?:` ask for the owner's OK first; critical work asks regardless.
+ */
 export interface AutomateProposal {
-  cron: string;
+  scope: "scheduled" | "automation";
+  /** Repeats on this cron (UTC). */
+  cron?: string;
+  /** Runs once at this instant (epoch ms). */
+  at?: number;
   task: string;
-  /** The agent wrote `automate?:` — it wants the owner's OK first. */
+  /** The marker's own <when> text: the stable key (re-reading the log must not move "in 2h"). */
+  when: string;
+  /** The agent wrote `schedule?:` / `automate?:` — it wants the owner's OK first. */
   asked?: boolean;
 }
 
 // One marker per line; the task may not contain another marker's close, so an empty task can
 // never swallow the next proposal.
-const AUTOMATE_RE = /<!--\s*automate(\?)?:\s*([^|\n]+?)\s*\|\s*((?:(?!-->)[^\n])*?)\s*-->/g;
+const AUTOMATE_RE = /<!--\s*(automate|schedule)(\?)?:\s*([^|\n]+?)\s*\|\s*((?:(?!-->)[^\n])*?)\s*-->/g;
 const MAX_PROPOSALS = 3;
+/** A one-time run is at most a year out; a time a few minutes past (the agent was slow) runs now. */
+const MAX_AHEAD_MS = 366 * 86_400_000;
+const PAST_GRACE_MS = 10 * 60_000;
 
 /** Work that changes the outside world irreversibly: a schedule doing it waits for the owner's OK. */
 const CRITICAL_RE =
   /\b(deploy\w*|release|publish|rollback|roll back|delete|drop|destroy|truncate|wipe|purge|migrat\w*|force[- ]push|push to (main|master|prod\w*)|merge|prod(uction)?|payment|charge|refund|invoice|send (an? )?(email|sms|message)|email (the|all|customers|users)|rotate|revoke|terraform apply|kubectl (apply|delete)|rm -rf)\b/i;
 const MIN_AUTO_INTERVAL_MS = 10 * 60_000;
 
-/** Why a proposal needs the owner's OK, or undefined when it can start on its own. */
+/** Why a proposal needs the owner's OK, or undefined when it can start on its own. `cron` is "" for a one-time run. */
 export function automateNeedsApproval(cron: string, task: string, agentAsked = false): string | undefined {
   if (agentAsked) return "The agent asked for your OK";
   const hit = CRITICAL_RE.exec(task);
   if (hit) return `Touches something critical (“${hit[0]}”)`;
+  if (!cron) return undefined;
   try {
     const c = parseCron(cron);
     const a = nextFire(c, Date.now());
@@ -400,30 +423,53 @@ export function automateNeedsApproval(cron: string, task: string, agentAsked = f
   return undefined;
 }
 
+const IN_RE = /^in\s+(\d{1,4})\s*(m|mins?|minutes?|h|hrs?|hours?|d|days?)$/i;
+const ISO_RE = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?$/i;
+
+/** "in 2h", "2026-10-02T14:00Z" (no zone = UTC) → epoch ms; a cron → its source; else null. */
+export function parseWhen(when: string, now = Date.now()): { at: number } | { cron: string } | null {
+  const w = when.trim();
+  const rel = IN_RE.exec(w);
+  if (rel) {
+    const n = Number(rel[1]);
+    const unit = rel[2][0].toLowerCase();
+    const ms = n * (unit === "m" ? 60_000 : unit === "h" ? 3_600_000 : 86_400_000);
+    return ms > 0 && ms <= MAX_AHEAD_MS ? { at: now + ms } : null;
+  }
+  if (ISO_RE.test(w)) {
+    const iso = w.replace(" ", "T");
+    const at = Date.parse(/(Z|[+-]\d{2}:?\d{2})$/i.test(iso) ? iso : iso + "Z");
+    if (!Number.isFinite(at) || at < now - PAST_GRACE_MS || at > now + MAX_AHEAD_MS) return null;
+    return { at: Math.max(at, now) };
+  }
+  try {
+    return { cron: parseCron(w).source };
+  } catch {
+    return null;
+  }
+}
+
 /**
- * `<!-- automate: <5-field cron> | <task> -->` markers the agent left in its log. Each becomes a
- * schedule that starts on its own, unless it is critical (automateNeedsApproval) or the agent wrote
- * `automate?:` to ask; those wait paused for the owner. Invalid crons and empty tasks are dropped
- * (the agent is not a trusted author), duplicates collapse, and a run proposes at most a few.
+ * The schedule / automate markers the agent left in its log (see AutomateProposal). Each starts on
+ * its own unless it is critical (automateNeedsApproval) or the agent asked; those wait paused for
+ * the owner. Bad times, invalid crons and empty tasks are dropped (the agent is not a trusted
+ * author), an automation must repeat, duplicates collapse, and a run proposes at most a few.
  */
-export function parseAutomate(log: string): AutomateProposal[] {
+export function parseAutomate(log: string, now = Date.now()): AutomateProposal[] {
   const out: AutomateProposal[] = [];
   const seen = new Set<string>();
   for (const m of log.matchAll(AUTOMATE_RE)) {
-    const asked = m[1] === "?";
-    const cron = m[2].trim();
-    const task = m[3].replace(/\s+/g, " ").trim().slice(0, 500);
+    const scope = m[1] === "schedule" ? "scheduled" : "automation";
+    const asked = m[2] === "?";
+    const task = m[4].replace(/\s+/g, " ").trim().slice(0, 500);
     if (!task) continue;
-    let source: string;
-    try {
-      source = parseCron(cron).source;
-    } catch {
-      continue;
-    }
-    const key = `${source}\n${task.toLowerCase()}`;
+    const when = parseWhen(m[3], now);
+    if (!when || (scope === "automation" && !("cron" in when))) continue;
+    // The marker's own text is the key: re-reading the same log must not move a relative time.
+    const key = `${scope}\n${m[3].trim()}\n${task.toLowerCase()}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ cron: source, task, ...(asked ? { asked } : {}) });
+    out.push({ scope, ...when, task, when: m[3].trim(), ...(asked ? { asked } : {}) });
     if (out.length >= MAX_PROPOSALS) break;
   }
   return out;
@@ -559,7 +605,9 @@ export function normalizeTrigger(body: unknown): { ok: true; trigger: TriggerInp
   if (repo && !REPO_RE.test(repo)) return { ok: false, error: "repo must be owner/name" };
   const s = (b.spec && typeof b.spec === "object" ? b.spec : {}) as Record<string, unknown>;
   const spec: TriggerSpec = {};
-  if (kind === "schedule") {
+  if (kind === "schedule" && typeof s.at === "number" && Number.isFinite(s.at) && s.cron === undefined) {
+    spec.at = Math.round(s.at);
+  } else if (kind === "schedule") {
     const cron = typeof s.cron === "string" ? s.cron.trim() : "";
     try {
       parseCron(cron);
@@ -637,6 +685,7 @@ export function normalizeTrigger(body: unknown): { ok: true; trigger: TriggerInp
 export function describeWhen(t: { kind: TriggerKind; spec: TriggerSpec; repo?: string }, names: Record<string, string> = {}): string {
   switch (t.kind) {
     case "schedule":
+      if (t.spec.at) return `once, ${new Date(t.spec.at).toISOString().slice(0, 16).replace("T", " ")} UTC`;
       return `${describeCron(t.spec.cron ?? "")}${t.spec.timezone && t.spec.timezone !== "UTC" ? ` (${t.spec.timezone})` : " UTC"}`;
     case "webhook":
       return t.spec.preset

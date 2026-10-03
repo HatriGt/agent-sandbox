@@ -52,6 +52,8 @@ const ORIGIN: Record<Item["relation"], string> = {
   after: "Runs after this chat's automation finishes",
 };
 
+const STATUS_LABEL: Partial<Record<Item["status"], string>> = { done: "Done", failed: "Failed", running: "Running", cancelled: "Cancelled", waiting: "Waiting", paused: "Paused" };
+
 const POLL_MS = 30_000;
 const EASE = [0.22, 1, 0.36, 1] as const;
 
@@ -142,7 +144,7 @@ function useActions(reload: () => void) {
     remove: (it: Item) => run(it.id, () => api.deleteTrigger(it.id), `Deleted: ${it.name}`),
     runNow: (it: Item) => run(it.id, () => api.runTrigger(it.id), `Started: ${it.name}`),
     setOn: (it: Item, on: boolean) => run(it.id, () => api.setTriggerEnabled(it.id, on), `${on ? "Resumed" : "Paused"}: ${it.name}`),
-    openAutopilot: () => go({ view: "automations" }),
+    openAutopilot: (it?: Item) => go({ view: it?.scope === "scheduled" ? "scheduled" : "automations" }),
     openBox: (name: string) => go({ view: "box", name }),
   };
 }
@@ -343,6 +345,8 @@ function Table({ items, now, still, actions, onOpen, onLeave }: { items: Item[];
             <span role="cell" className="text-right text-micro tabular-nums">
               {it.relation === "proposed" ? (
                 <span className="bg-attention/15 text-attention-text inline-flex rounded-full px-2 py-0.5 font-medium">Needs OK</span>
+              ) : it.status === "done" || it.status === "failed" || it.status === "running" || it.status === "cancelled" ? (
+                <span className={cn(it.status === "failed" ? "text-destructive" : "text-muted-foreground")}>{STATUS_LABEL[it.status]}</span>
               ) : it.nextFire !== null ? (
                 <span className="text-foreground font-medium">{fmtNext(it.nextFire, now)}</span>
               ) : (
@@ -403,7 +407,7 @@ function RowMenu({ it, actions, onOpen, onLeave }: { it: Item; actions: Actions;
         <DropdownMenuItem onSelect={onOpen}>
           <ChevronRight /> View details
         </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => (onLeave(), actions.openAutopilot())}>
+        <DropdownMenuItem onSelect={() => (onLeave(), actions.openAutopilot(it))}>
           <ArrowUpRight /> Edit in Autopilot
         </DropdownMenuItem>
         {it.relation === "created" && (
@@ -422,7 +426,7 @@ function Detail({ it, now, actions, onBack, onLeave }: { it: Item; now: number; 
     "focus-visible:ring-live/50 inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-full px-3 text-micro font-medium outline-none transition-[background-color,scale] active:scale-[0.97] focus-visible:ring-2 disabled:opacity-50 [&_svg]:size-3.5";
   const rows: [string, React.ReactNode][] = [
     ["Schedule", <>{it.when}{it.cron && <code className="text-muted-foreground bg-muted ml-2 rounded px-1.5 py-0.5 font-mono text-[11px]">{it.cron}</code>}</>],
-    ["Next run", it.relation === "proposed" ? "After you approve" : it.nextFire !== null ? fmtNext(it.nextFire, now) : it.enabled ? "When its trigger finishes" : "Paused"],
+    ["Next run", it.relation === "proposed" ? "After you approve" : it.at && it.nextFire === null ? `Once — ${STATUS_LABEL[it.status] ?? it.status}` : it.nextFire !== null ? fmtNext(it.nextFire, now) : it.enabled ? "When its trigger finishes" : "Paused"],
     [
       "Last run",
       it.lastFired ? (
@@ -491,7 +495,7 @@ function Detail({ it, now, actions, onBack, onLeave }: { it: Item; now: number; 
             </button>
           </>
         )}
-        <button type="button" className={cn(btn, "text-muted-foreground hover:bg-muted hover:text-foreground ml-auto")} onClick={() => (onLeave(), actions.openAutopilot())}>
+        <button type="button" className={cn(btn, "text-muted-foreground hover:bg-muted hover:text-foreground ml-auto")} onClick={() => (onLeave(), actions.openAutopilot(it))}>
           Edit in Autopilot <ArrowUpRight />
         </button>
       </div>

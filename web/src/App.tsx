@@ -39,6 +39,7 @@ const Sandboxes = React.lazy(() => import("@/components/Sandboxes").then((m) => 
 const Integrations = React.lazy(() => import("@/components/Integrations").then((m) => ({ default: m.Integrations })));
 const SkillsPage = React.lazy(() => import("@/components/SkillsPage").then((m) => ({ default: m.SkillsPage })));
 const MemoryPage = React.lazy(() => import("@/components/Memory").then((m) => ({ default: m.MemoryPage })));
+type AutopilotTab = import("@/components/AutopilotPage").AutopilotTab;
 const AutopilotPage = React.lazy(() => import("@/components/AutopilotPage").then((m) => ({ default: m.AutopilotPage })));
 const HarnessesPage = React.lazy(() => import("@/components/HarnessesPage").then((m) => ({ default: m.HarnessesPage })));
 const History = React.lazy(() => import("@/components/History").then((m) => ({ default: m.History })));
@@ -275,6 +276,7 @@ export default function App() {
     setMobileRail(false);
   }, [go]);
   const showAutomations = React.useCallback(() => go({ view: "automations" }), [go]);
+  const goAutopilot = React.useCallback((t: AutopilotTab) => go({ view: t === "playbooks" ? "workflows" : t }), [go]);
   const showHistory = React.useCallback(() => {
     go({ view: "history" });
     setMobileRail(false);
@@ -577,7 +579,7 @@ export default function App() {
 
       <div className="flex flex-col gap-0.5 border-t px-2 py-2">
         <NavItem active={view === "fleet"} flash={flash === "fleet"} onClick={showFleet} icon={<LayoutGrid />} label="Fleet view" badge={boxes.length || undefined} shortcut="g f" />
-        <NavItem active={view === "automations" || view === "workflows"} onClick={showAutomations} icon={<Workflow />} label="Autopilot" />
+        <NavItem active={view === "automations" || view === "scheduled" || view === "workflows"} onClick={showAutomations} icon={<Workflow />} label="Autopilot" />
         <span className="contents" onMouseEnter={prefetchHistory}>
           <NavItem active={view === "history"} flash={flash === "history"} onClick={showHistory} icon={<Clock />} label="History" shortcut="g h" />
         </span>
@@ -751,7 +753,7 @@ export default function App() {
               <RailIcon onClick={newTask} icon={<Plus />} label="New task" shortcut="n" primary />
               <RailIcon onClick={openPalette} icon={<Search />} label="Search" shortcut="⌘K" />
               <RailIcon active={view === "fleet"} flash={flash === "fleet"} onClick={showFleet} icon={<LayoutGrid />} label="Fleet view" shortcut="g f" badge={boxes.length || undefined} dot={waiting.length > 0} />
-              <RailIcon active={view === "automations" || view === "workflows"} onClick={showAutomations} icon={<Workflow />} label="Autopilot" />
+              <RailIcon active={view === "automations" || view === "scheduled" || view === "workflows"} onClick={showAutomations} icon={<Workflow />} label="Autopilot" />
               <span className="contents" onMouseEnter={prefetchHistory}>
                 <RailIcon active={view === "history"} flash={flash === "history"} onClick={showHistory} icon={<Clock />} label="History" shortcut="g h" />
               </span>
@@ -813,9 +815,9 @@ export default function App() {
                     onDestroyed={() => {}}
                     onBack={backToRail}
                   />
-                ) : view === "automations" ? (
+                ) : view === "automations" || view === "scheduled" ? (
                   <PageEnter className="h-full min-h-0">
-                    <AutopilotPage tab="automations" onTab={(t) => go({ view: t === "playbooks" ? "workflows" : "automations" })} onBack={backToRail} onOpenBox={(b) => go({ view: "box", name: b })} />
+                    <AutopilotPage tab={view} onTab={goAutopilot} onBack={backToRail} onOpenBox={(b) => go({ view: "box", name: b })} />
                   </PageEnter>
                 ) : view === "history" ? (
                   <PageEnter className="h-full min-h-0">
@@ -835,7 +837,7 @@ export default function App() {
                   </PageEnter>
                 ) : view === "workflows" ? (
                   <PageEnter className="h-full min-h-0">
-                    <AutopilotPage tab="playbooks" onTab={(t) => go({ view: t === "playbooks" ? "workflows" : "automations" })} onBack={backToRail} onOpenBox={(b) => go({ view: "box", name: b })} />
+                    <AutopilotPage tab="playbooks" onTab={goAutopilot} onBack={backToRail} onOpenBox={(b) => go({ view: "box", name: b })} />
                   </PageEnter>
                 ) : view === "integrations" ? (
                   <PageEnter className="h-full min-h-0">

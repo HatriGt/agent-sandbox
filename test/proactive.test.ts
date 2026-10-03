@@ -59,7 +59,7 @@ test("parseAutomate: valid crons only, several per log, duplicates collapse, cap
     "<!-- automate: @hourly | Poll https://x.example/health -->",
     "<!-- automate: 5 * * * * | A fourth one past the cap -->",
   ].join("\n");
-  const out = parseAutomate(log);
+  const out = parseAutomate(log).map(({ cron, task }) => ({ cron, task }));
   assert.deepEqual(out, [
     { cron: "*/30 * * * *", task: "Check CI on main and report failures" },
     { cron: "0 9 * * 1-5", task: "Re-run the weekly report" },

@@ -17,6 +17,9 @@ export type ScheduleRelation = "proposed" | "created" | "repeats" | "after";
 /** What kind of work a scheduled task is, for the pill's table. Read off the task text. */
 export type ScheduleCategory = "ci" | "deploy" | "monitor" | "report" | "follow-up" | "maintenance" | "task";
 
+/** Where a scheduled thing stands, in one word (the Scheduled table and the pill share it). */
+export type ScheduleStatus = "needs-ok" | "waiting" | "running" | "done" | "failed" | "paused" | "cancelled";
+
 export interface ScheduleTrigger {
   id: string;
   name: string;
@@ -27,9 +30,10 @@ export interface ScheduleTrigger {
   proposed: boolean;
   nextFire: number | null;
   lastFired?: number | null;
-  lastResult?: { at: number; outcome: string; box?: string; reason?: string } | null;
+  lastResult?: { at: number; outcome: string; box?: string; reason?: string; finished?: { state: string } } | null;
   repo?: string;
   sourceBox?: string;
+  scope?: "automation" | "scheduled";
   when: string;
 }
 
@@ -40,6 +44,10 @@ export interface ScheduleItem {
   category: ScheduleCategory;
   when: string;
   cron?: string;
+  /** Runs once at this instant. */
+  at?: number;
+  scope: "automation" | "scheduled";
+  status: ScheduleStatus;
   nextFire: number | null;
   lastFired: number | null;
   lastOutcome?: string;
@@ -66,6 +74,18 @@ export function scheduleCategory(task: string): ScheduleCategory {
   return CATEGORIES.find(([, re]) => re.test(task))?.[0] ?? "task";
 }
 
+export function scheduleStatus(t: Pick<ScheduleTrigger, "enabled" | "proposed" | "spec" | "lastFired" | "lastResult">): ScheduleStatus {
+  if (t.proposed && !t.enabled) return "needs-ok";
+  const r = t.lastResult;
+  if (r?.outcome === "started" && r.box && !r.finished) return "running";
+  if (t.spec.at) {
+    if (r?.finished) return r.finished.state === "done" ? "done" : "failed";
+    if (t.lastFired) return r?.outcome === "failed" ? "failed" : "done";
+    return t.enabled ? "waiting" : "cancelled";
+  }
+  return t.enabled ? "waiting" : "paused";
+}
+
 export function threadSchedule(box: string, startedBy: StartedBy | undefined, triggers: ScheduleTrigger[]): ScheduleItem[] {
   const parentId = startedBy?.kind === "trigger" ? startedBy.triggerId : undefined;
   const out: ScheduleItem[] = [];
@@ -77,6 +97,9 @@ export function threadSchedule(box: string, startedBy: StartedBy | undefined, tr
       category: scheduleCategory(`${t.name} ${t.taskTemplate}`),
       when: t.when,
       ...(t.spec.cron ? { cron: t.spec.cron } : {}),
+      ...(t.spec.at ? { at: t.spec.at } : {}),
+      scope: t.scope ?? "automation",
+      status: scheduleStatus(t),
       nextFire: t.enabled ? t.nextFire : null,
       lastFired: t.lastFired ?? null,
       ...(t.lastResult ? { lastOutcome: t.lastResult.outcome, ...(t.lastResult.box ? { lastBox: t.lastResult.box } : {}) } : {}),

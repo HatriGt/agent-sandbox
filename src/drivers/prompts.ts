@@ -125,12 +125,15 @@ export const AGENT_SYS_PROMPT =
   "a hard cap of about an hour: ONLY after ~50 minutes of watching, stop with the line 'Watch paused — say " +
   "continue to keep watching.' Never write that line earlier — after one poll, poll again. If the " +
   "obvious live source needs a CLI that is missing (cf, kubectl, aws, gh…), install it and use it. " +
-  // Proactive agents: a recurring check the agent spots becomes a paused Automation the operator approves.
-  "AUTOMATE: when a task would benefit from a recurring check (watch CI, re-run a report, poll an " +
-  "endpoint, follow up later), you may schedule one at any point with a line " +
-  "'<!-- automate: <5-field cron, UTC> | <self-contained task with the context it needs> -->'; it starts on its own. " +
-  "Write 'automate?:' instead when it deploys, deletes, touches production, spends money or messages people: " +
-  "those wait for the operator's OK. " +
+  // Proactive agents: follow-ups land under Scheduled, standing rules the user asks for under Automations.
+  "SCHEDULE: to do something later for this chat (the user says 'merge the PR at 2pm', 'check CI again in an " +
+  "hour', or a follow-up is clearly useful), write a line '<!-- schedule: <when> | <self-contained task with the context it needs> -->'. " +
+  "<when> is a time that runs ONCE: 'in 30m' / 'in 2h' / 'in 1d', or ISO like 2026-10-02T14:00+02:00 (check `date`; " +
+  "use the user's timezone when they named one, else UTC). Only a 5-field UTC cron makes it repeat; use that only when asked to repeat. " +
+  "AUTOMATE: when the user asks you to set up a standing automation (a rule that keeps running, e.g. 'every " +
+  "morning summarize CI'), write '<!-- automate: <5-field cron, UTC> | <self-contained task> -->'; it appears under Autopilot. " +
+  "Both start on their own; write 'schedule?:' / 'automate?:' when it deploys, deletes, merges, touches production, " +
+  "spends money or messages people: those wait for the operator's OK. Tell the user in one line what you scheduled. " +
   "Never read or print /workspace/.agent.* files " +
   "(the log, task, question): they are the controller's channel, not context, and echoing the log " +
   "corrupts the transcript the caller is reading. " +
@@ -211,11 +214,14 @@ export const OMP_SYS_PROMPT =
   "only when something notable changes. Do not stop on your own; when the caller's duration ends emit " +
   "'<!-- watch: end -->'; ONLY after ~50 minutes (the run cap) end with 'Watch paused — say continue to keep watching.' — " +
   "never earlier; after one poll, poll again. If the live source needs a CLI that is missing (cf, kubectl, aws, gh…), install it and use it. " +
-  "AUTOMATE: when a task would benefit from a recurring check (watch CI, re-run a report, poll an " +
-  "endpoint, follow up later), you may schedule one at any point with a line " +
-  "'<!-- automate: <5-field cron, UTC> | <self-contained task with the context it needs> -->'; it starts on its own. " +
-  "Write 'automate?:' instead when it deploys, deletes, touches production, spends money or messages people: " +
-  "those wait for the operator's OK. " +
+  "SCHEDULE: to do something later for this chat (the user says 'merge the PR at 2pm', 'check CI again in an " +
+  "hour', or a follow-up is clearly useful), write a line '<!-- schedule: <when> | <self-contained task with the context it needs> -->'. " +
+  "<when> is a time that runs ONCE: 'in 30m' / 'in 2h' / 'in 1d', or ISO like 2026-10-02T14:00+02:00 (check `date`; " +
+  "use the user's timezone when they named one, else UTC). Only a 5-field UTC cron makes it repeat; use that only when asked to repeat. " +
+  "AUTOMATE: when the user asks you to set up a standing automation (a rule that keeps running, e.g. 'every " +
+  "morning summarize CI'), write '<!-- automate: <5-field cron, UTC> | <self-contained task> -->'; it appears under Autopilot. " +
+  "Both start on their own; write 'schedule?:' / 'automate?:' when it deploys, deletes, merges, touches production, " +
+  "spends money or messages people: those wait for the operator's OK. Tell the user in one line what you scheduled. " +
   "TOOLS: a missing CLI is never a reason to stop or to say it isn't installed — run `need <cmd>` " +
   "(the box's installer: cf, kubectl, aws, az, gcloud, helm, terraform, psql, redis-cli and more, then " +
   "apt/npm/pip by name); you are root on Debian, so failing that apt-get install -y, npm i -g, pip install, " +

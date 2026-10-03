@@ -1,17 +1,18 @@
 import * as React from "react";
 import { motion, useReducedMotion } from "motion/react";
-import { ArrowLeft, ListChecks, Workflow } from "lucide-react";
+import { ArrowLeft, CalendarClock, ListChecks, Workflow } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Automations, seedAutomation } from "@/components/Automations";
 import { WorkflowsPage } from "@/components/WorkflowsPage";
+import { ScheduledPage } from "@/components/ScheduledPage";
 
-export type AutopilotTab = "automations" | "playbooks";
+export type AutopilotTab = "automations" | "scheduled" | "playbooks";
 
 /**
- * One home for work that runs without you. Automations say WHEN work starts (a schedule, a webhook,
- * a GitHub event, another automation finishing); playbooks say HOW it gets done (agent turns and
- * command checks). An automation can run a playbook; a playbook can be automated from its row.
+ * One home for work that runs without you. Automations are standing rules (a schedule, a webhook, a
+ * GitHub event, another automation finishing); Scheduled is what a chat asked for later, usually once;
+ * playbooks say HOW it gets done. An automation can run a playbook; a playbook can be automated.
  */
 export function AutopilotPage({
   tab,
@@ -26,7 +27,8 @@ export function AutopilotPage({
 }) {
   const reduce = useReducedMotion();
   const tabs: { id: AutopilotTab; label: string; hint: string; icon: React.ReactNode }[] = [
-    { id: "automations", label: "Automations", hint: "When work starts", icon: <Workflow className="size-4" /> },
+    { id: "automations", label: "Automations", hint: "Standing rules", icon: <Workflow className="size-4" /> },
+    { id: "scheduled", label: "Scheduled", hint: "Asked for in a chat", icon: <CalendarClock className="size-4" /> },
     { id: "playbooks", label: "Playbooks", hint: "How it gets done", icon: <ListChecks className="size-4" /> },
   ];
   return (
@@ -72,6 +74,8 @@ export function AutopilotPage({
         <div role="tabpanel">
           {tab === "automations" ? (
             <Automations onOpenBox={onOpenBox} onOpenPlaybooks={() => onTab("playbooks")} />
+          ) : tab === "scheduled" ? (
+            <ScheduledPage onOpenBox={onOpenBox} onAutomations={() => onTab("automations")} />
           ) : (
             <WorkflowsPage
               onAutomate={(w) => {

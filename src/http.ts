@@ -784,11 +784,12 @@ const finishMemory = (box: string, owner: string, log: string, digest: RunDigest
 };
 
 /**
- * Agent-authored automations (Phase 4): `<!-- automate: <cron> | <task> -->` in a finished run's
- * log becomes a schedule owned by the run's owner, live at once. A critical one (deploys, deletes,
- * production, very frequent — see automateNeedsApproval) is created PAUSED and marked proposed
- * instead, for the owner to approve. The box never touches the controller. The repo is inherited from
- * the automation that started the run, when there was one.
+ * Agent-authored schedules (src/triggers.ts parseAutomate), owned by the run's owner and live at once:
+ *   `<!-- schedule: <time | in 2h | cron> | <task> -->`  follow-up work for this chat → Scheduled
+ *   `<!-- automate: <cron> | <task> -->`                  a standing automation the user asked for → Automations
+ * A critical one (deploys, deletes, merges, production, very frequent — see automateNeedsApproval),
+ * or one the agent flagged with `?`, is created PAUSED and marked proposed for the owner to approve.
+ * The box never touches the controller. The repo is inherited from the automation that started the run.
  */
 const proposeAutomations = (box: string, owner: string, log: string, startedBy: StartedBy | undefined): void => {
   const proposals = parseAutomate(log);
@@ -798,12 +799,12 @@ const proposeAutomations = (box: string, owner: string, log: string, startedBy: 
   for (const p of proposals) {
     if (existing.length >= 50) break;
     // Read from the live log on every sweep: one row per proposal per thread, and a dismissed one stays gone.
-    if (!firstSighting(db, box, `${p.cron}|${p.task}`)) continue;
-    // The same proposal from another run (a re-run, a chain) is one row, not two.
-    if (existing.some((t) => (t.proposed || t.sourceBox) && t.spec.cron === p.cron && t.taskTemplate === p.task)) continue;
-    const name = p.task.split(/[.!?]/)[0].trim().slice(0, 80) || "Proposed check";
-    // Routine schedules start on their own; critical ones (or ones the agent flagged) wait for the owner.
-    const ask = automateNeedsApproval(p.cron, p.task, p.asked);
+    if (!firstSighting(db, box, p.scope === "automation" ? `${p.cron}|${p.task}` : `${p.scope}|${p.when}|${p.task}`)) continue;
+    // The same repeating proposal from another run (a re-run, a chain) is one row, not two.
+    if (p.cron && existing.some((t) => t.sourceBox && t.spec.cron === p.cron && t.taskTemplate === p.task)) continue;
+    const name = p.task.split(/[.!?]/)[0].trim().slice(0, 80) || (p.scope === "automation" ? "Automation" : "Follow-up");
+    // Routine work starts on its own; critical work (or work the agent flagged) waits for the owner.
+    const ask = automateNeedsApproval(p.cron ?? "", p.task, p.asked);
     const { row } = createTrigger(
       db,
       secretBox,
@@ -811,20 +812,21 @@ const proposeAutomations = (box: string, owner: string, log: string, startedBy: 
       {
         name,
         kind: "schedule",
-        spec: { cron: p.cron, timezone: "UTC" },
+        spec: p.at ? { at: p.at } : { cron: p.cron, timezone: "UTC" },
         ...(parent?.repo ? { repo: parent.repo } : {}),
         taskTemplate: p.task,
         enabled: !ask,
         concurrency: 1,
         prComment: false,
-        quiet: true,
+        // Something asked for once ("merge the PR at 2pm") always reports back; a repeating check stays quiet when nothing is wrong.
+        quiet: !p.at,
       },
       Date.now(),
-      { proposed: !!ask, sourceBox: box }
+      { proposed: !!ask, sourceBox: box, scope: p.scope }
     );
     existing.push(row);
-    auditTrigger(owner, ask ? "trigger.propose" : "trigger.auto-create", { trigger: row.id, box, ...(ask ? { why: ask } : {}) });
-    console.error(`[triggers] ${box} ${ask ? `proposed (${ask})` : "scheduled"} ${row.id}: ${p.cron} — ${name}`);
+    auditTrigger(owner, ask ? "trigger.propose" : "trigger.auto-create", { trigger: row.id, box, scope: p.scope, ...(ask ? { why: ask } : {}) });
+    console.error(`[triggers] ${box} ${ask ? `proposed (${ask})` : "scheduled"} ${p.scope} ${row.id}: ${p.at ? new Date(p.at).toISOString() : p.cron} — ${name}`);
   }
 };
 
@@ -3507,6 +3509,7 @@ const followups = makeFollowupEngine({
       prComment: false,
       quiet: false,
       proposed: false,
+      scope: "automation",
       ...(f.pr.agent ? { agent: f.pr.agent } : {}),
       ...(f.pr.model ? { model: f.pr.model } : {}),
       ...(f.pr.harnessId ? { harnessId: f.pr.harnessId } : {}),
@@ -3544,6 +3547,8 @@ registerTriggerRoutes(app, {
   redact: (s) => redactor.redact(s),
   publicUrl: cfg.publicUrl,
   audit: auditTrigger,
+  // Chat names for the Scheduled table. Cosmetic: a slow fleet read just shows machine names.
+  titles: () => Promise.race([loadTitles(cfg).catch(() => ({})), new Promise<Record<string, string>>((r) => setTimeout(() => r({}), 1500))]),
 });
 // Intake (src/intake-routes.ts): email / Slack / pasted links start runs as the owner, through the
 // same runDelegateFlow as the composer. User-initiated, so no PR-only guard (unlike an automation).

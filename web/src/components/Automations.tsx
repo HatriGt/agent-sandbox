@@ -150,7 +150,8 @@ export function Automations({ onOpenBox, onOpenPlaybooks }: { onOpenBox: (box: s
     setError(null);
     return api
       .triggers(signal)
-      .then((r) => setRows(r.triggers))
+      // Chat schedules live on the Scheduled tab; this list is standing rules only.
+      .then((r) => setRows(r.triggers.filter((t) => t.scope !== "scheduled")))
       .catch((e) => {
         if (!signal?.aborted) setError(e instanceof Error ? e.message : String(e));
       });

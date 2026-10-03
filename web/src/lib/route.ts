@@ -23,6 +23,7 @@ export type ConsoleRoute =
   | { view: "fleet" }
   | { view: "history" }
   | { view: "automations" }
+  | { view: "scheduled" }
   | { view: "skills" }
   | { view: "memory" }
   | { view: "harnesses" }
@@ -44,6 +45,7 @@ export function parseConsolePath(pathname: string): ConsoleRoute {
   if (/^\/fleet\/?$/.test(rest)) return { view: "fleet" };
   if (/^\/history\/?$/.test(rest)) return { view: "history" };
   if (/^\/(automations|autopilot)\/?$/.test(rest)) return { view: "automations" };
+  if (/^\/autopilot\/scheduled\/?$/.test(rest)) return { view: "scheduled" };
   if (/^\/skills\/?$/.test(rest)) return { view: "skills" };
   if (/^\/memory\/?$/.test(rest)) return { view: "memory" };
   if (/^\/harnesses\/?$/.test(rest)) return { view: "harnesses" };
@@ -70,6 +72,8 @@ export function consolePath(r: ConsoleRoute): string {
       return `${BASE}/history`;
     case "automations":
       return `${BASE}/autopilot`;
+    case "scheduled":
+      return `${BASE}/autopilot/scheduled`;
     case "skills":
       return `${BASE}/skills`;
     case "memory":

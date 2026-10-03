@@ -1071,6 +1071,7 @@ export const api = {
   updateTrigger: (id: string, t: AutomationDraft) => post<{ trigger: Automation }>(`/triggers/${encodeURIComponent(id)}.json`, t),
   deleteTrigger: (id: string) => fetch(url(`/triggers/${encodeURIComponent(id)}.json`), { method: "DELETE", headers: authHeaders }).then(parse<{ ok: true }>),
   setTriggerEnabled: (id: string, enabled: boolean) => post<{ trigger: Automation }>(`/triggers/${encodeURIComponent(id)}/enabled.json`, { enabled }),
+  promoteTrigger: (id: string) => post<{ trigger: Automation }>(`/triggers/${encodeURIComponent(id)}/promote.json`, {}),
   rotateTrigger: (id: string) => post<{ secret: string; hookUrl: string }>(`/triggers/${encodeURIComponent(id)}/rotate.json`, {}),
   threadSchedule: (box: string, signal?: AbortSignal) =>
     fetch(url(`/triggers/for-box.json?box=${encodeURIComponent(box)}`), { headers: authHeaders, signal }).then(parse<{ items: ThreadScheduleItem[] }>),
@@ -1088,6 +1089,8 @@ export interface AutomationSpec {
   keepGreen?: boolean;
   addressReviews?: boolean;
   cron?: string;
+  /** One-time run at this epoch ms (chat schedules). */
+  at?: number;
   timezone?: string;
   event?: GithubEvent;
   label?: string;
@@ -1149,6 +1152,9 @@ export interface ThreadScheduleItem {
   category: "ci" | "deploy" | "monitor" | "report" | "follow-up" | "maintenance" | "task";
   when: string;
   cron?: string;
+  at?: number;
+  scope: AutomationScope;
+  status: ScheduleStatus;
   nextFire: number | null;
   lastFired: number | null;
   lastOutcome?: string;
@@ -1160,9 +1166,16 @@ export interface ThreadScheduleItem {
 }
 
 /** Mirrors GET /triggers.json rows. Stamps are epoch ms. Never carries the webhook secret. */
+export type AutomationScope = "scheduled" | "automation";
+export type ScheduleStatus = "needs-ok" | "waiting" | "running" | "done" | "failed" | "paused" | "cancelled";
 export interface Automation extends AutomationDraft {
   id: string;
   when: string;
+  /** scheduled: made from a chat (usually once) · automation: a standing rule. */
+  scope: AutomationScope;
+  status: ScheduleStatus;
+  sourceBox?: string;
+  sourceTitle?: string;
   lastFired: number | null;
   nextFire: number | null;
   lastResult: AutomationResult | null;

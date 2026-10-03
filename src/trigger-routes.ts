@@ -7,7 +7,7 @@ import type { FollowupEngine } from "./pr-followup-engine.js";
 import { OPERATOR_OWNER } from "./user-store.js";
 import { deliveryKeys, matchGithub, normalizeTrigger, renderTemplate, safeEqual, templateContext, verifyGithubSignature } from "./triggers.js";
 import {
-  claimDelivery, createTrigger, deleteTrigger, getTrigger, getTriggerById, lastPayload, listDeliveries, listTriggers, logDelivery, markDeliveryTest,
+  claimDelivery, createTrigger, promoteTrigger, deleteTrigger, getTrigger, getTriggerById, lastPayload, listDeliveries, listTriggers, logDelivery, markDeliveryTest,
   revealSecret, revealSigningSecret, rotateSecret, savePayload, setEnabled, setSigningSecret, updateTrigger, viewTrigger,
   type DeliveryReason, type TriggerRow,
 } from "./trigger-store.js";
@@ -56,6 +56,8 @@ export interface TriggerRouteCtx {
   audit(owner: string, action: string, detail: Record<string, string | undefined>): void;
   /** PR follow-ups: GitHub automations' hooks also carry CI/review events for agent PRs. */
   followups?: Pick<FollowupEngine, "claims" | "handle">;
+  /** Thread titles by box, for the chat a scheduled item came from. */
+  titles?: () => Promise<Record<string, string>>;
 }
 
 const ownerOfP = (p: Principal) => (p.kind === "user" ? p.userId : OPERATOR_OWNER);
@@ -64,12 +66,19 @@ export function registerTriggerRoutes(app: Express, c: TriggerRouteCtx): void {
   const hookUrl = (id: string, secret: string) => `${(c.publicUrl ?? "").replace(/\/$/, "")}/hooks/${id}/${secret}`;
   const names = (owner: string) => Object.fromEntries(listTriggers(c.db, owner).map((t) => [t.id, t.name]));
 
-  app.get("/triggers.json", (req, res) => {
+  app.get("/triggers.json", async (req, res) => {
     if (!c.dashAuthed(req, res)) return;
     const owner = ownerOfP(c.principalOf(res));
     const all = listTriggers(c.db, owner);
     const nm = Object.fromEntries(all.map((t) => [t.id, t.name]));
-    res.json({ triggers: all.map((t) => ({ ...viewTrigger(t, nm, c.db), active: c.dispatcher.activeCount(t.id) })) });
+    const titles = all.some((t) => t.sourceBox) && c.titles ? await c.titles() : {};
+    res.json({
+      triggers: all.map((t) => ({
+        ...viewTrigger(t, nm, c.db),
+        active: c.dispatcher.activeCount(t.id),
+        ...(t.sourceBox && titles[t.sourceBox] ? { sourceTitle: titles[t.sourceBox] } : {}),
+      })),
+    });
   });
 
   /** What is scheduled as part of one thread (the thread's schedule pill). Owner-scoped like the list. */
@@ -155,6 +164,16 @@ export function registerTriggerRoutes(app: Express, c: TriggerRouteCtx): void {
     const row = setEnabled(c.db, owner, req.params.id, (req.body as { enabled?: unknown })?.enabled === true);
     if (!row) return void res.status(404).json({ error: "no such automation" });
     c.audit(owner, row.enabled ? "trigger.enable" : "trigger.disable", { trigger: row.id });
+    res.json({ trigger: viewTrigger(row, names(owner)) });
+  });
+
+  /** "Make it an automation": a repeating chat schedule moves from Scheduled to Automations. */
+  app.post("/triggers/:id/promote.json", (req, res) => {
+    if (!c.dashAuthed(req, res)) return;
+    const owner = ownerOfP(c.principalOf(res));
+    const row = promoteTrigger(c.db, owner, req.params.id);
+    if (!row) return void res.status(400).json({ error: "only a repeating schedule can become an automation" });
+    c.audit(owner, "trigger.promote", { trigger: row.id });
     res.json({ trigger: viewTrigger(row, names(owner)) });
   });
 
