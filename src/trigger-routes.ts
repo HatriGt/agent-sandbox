@@ -5,7 +5,7 @@ import type { Principal } from "./identity.js";
 import type { Dispatcher } from "./trigger-dispatch.js";
 import type { FollowupEngine } from "./pr-followup-engine.js";
 import { OPERATOR_OWNER } from "./user-store.js";
-import { deliveryKeys, matchGithub, normalizeTrigger, renderTemplate, safeEqual, templateContext, verifyGithubSignature } from "./triggers.js";
+import { deliveryKeys, matchGithub, normalizeTrigger, renderTemplate, safeEqual, templateContext, verifyGithubSignature, type AutomateReject } from "./triggers.js";
 import {
   claimDelivery, createTrigger, promoteTrigger, deleteTrigger, getTrigger, getTriggerById, lastPayload, listDeliveries, listTriggers, logDelivery, markDeliveryTest,
   revealSecret, revealSigningSecret, rotateSecret, savePayload, setEnabled, setSigningSecret, updateTrigger, viewTrigger,
@@ -58,6 +58,8 @@ export interface TriggerRouteCtx {
   followups?: Pick<FollowupEngine, "claims" | "handle">;
   /** Thread titles by box, for the chat a scheduled item came from. */
   titles?: () => Promise<Record<string, string>>;
+  /** Schedule markers a box wrote that could not be scheduled (bad time), so its chat can say so. */
+  rejects?: (box: string) => AutomateReject[];
 }
 
 const ownerOfP = (p: Principal) => (p.kind === "user" ? p.userId : OPERATOR_OWNER);
@@ -95,7 +97,7 @@ export function registerTriggerRoutes(app: Express, c: TriggerRouteCtx): void {
     } catch {
       sb = undefined;
     }
-    res.json({ items: threadSchedule(box, sb, all.map((t) => viewTrigger(t, nm))) });
+    res.json({ items: threadSchedule(box, sb, all.map((t) => viewTrigger(t, nm))), rejected: c.rejects?.(box) ?? [] });
   });
 
   app.post("/triggers.json", (req, res) => {

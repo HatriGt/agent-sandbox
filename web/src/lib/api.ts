@@ -1074,7 +1074,7 @@ export const api = {
   promoteTrigger: (id: string) => post<{ trigger: Automation }>(`/triggers/${encodeURIComponent(id)}/promote.json`, {}),
   rotateTrigger: (id: string) => post<{ secret: string; hookUrl: string }>(`/triggers/${encodeURIComponent(id)}/rotate.json`, {}),
   threadSchedule: (box: string, signal?: AbortSignal) =>
-    fetch(url(`/triggers/for-box.json?box=${encodeURIComponent(box)}`), { headers: authHeaders, signal }).then(parse<{ items: ThreadScheduleItem[] }>),
+    fetch(url(`/triggers/for-box.json?box=${encodeURIComponent(box)}`), { headers: authHeaders, signal }).then(parse<{ items: ThreadScheduleItem[]; rejected?: ThreadScheduleReject[] }>),
   runTrigger: (id: string) => post<{ result: AutomationResult }>(`/triggers/${encodeURIComponent(id)}/run.json`, {}),
   testTrigger: (id: string) => post<{ ok: boolean; test: true; result?: AutomationResult; skipped?: string; ignored?: string }>(`/triggers/${encodeURIComponent(id)}/test.json`, {}),
   triggerDeliveries: (id: string) => fetch(url(`/triggers/${encodeURIComponent(id)}/deliveries.json`), { headers: authHeaders }).then(parse<{ deliveries: AutomationDelivery[] }>),
@@ -1163,6 +1163,13 @@ export interface ThreadScheduleItem {
   enabled: boolean;
   task: string;
   why?: string;
+}
+/** A schedule the agent tried to set up from this thread that the controller could not read. */
+export interface ThreadScheduleReject {
+  scope: AutomationScope;
+  when: string;
+  task: string;
+  reason: string;
 }
 
 /** Mirrors GET /triggers.json rows. Stamps are epoch ms. Never carries the webhook secret. */

@@ -423,18 +423,30 @@ export function automateNeedsApproval(cron: string, task: string, agentAsked = f
   return undefined;
 }
 
-const IN_RE = /^in\s+(\d{1,4})\s*(m|mins?|minutes?|h|hrs?|hours?|d|days?)$/i;
+// "in 5d", "5 days from now", "after 2 hours", "in 1 week", "+30m": agents phrase a delay many ways
+// and a dropped marker means a schedule the user was told about never exists.
+const IN_RE = /^(?:in|after|\+)?\s*(\d{1,4}|an?|one)\s*(m|mins?|minutes?|h|hrs?|hours?|d|days?|w|wks?|weeks?)(?:\s+from\s+now|\s+later)?$/i;
 const ISO_RE = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?$/i;
+const TOMORROW_RE = /^tomorrow(?:\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?)?$/i;
 
-/** "in 2h", "2026-10-02T14:00Z" (no zone = UTC) → epoch ms; a cron → its source; else null. */
+/** "in 2h", "5 days from now", "tomorrow 9am" (UTC), "2026-10-02T14:00Z" (no zone = UTC) → epoch ms; a cron → its source; else null. */
 export function parseWhen(when: string, now = Date.now()): { at: number } | { cron: string } | null {
   const w = when.trim();
   const rel = IN_RE.exec(w);
   if (rel) {
-    const n = Number(rel[1]);
+    const n = /^\d/.test(rel[1]) ? Number(rel[1]) : 1;
     const unit = rel[2][0].toLowerCase();
-    const ms = n * (unit === "m" ? 60_000 : unit === "h" ? 3_600_000 : 86_400_000);
+    const ms = n * (unit === "m" ? 60_000 : unit === "h" ? 3_600_000 : unit === "w" ? 7 * 86_400_000 : 86_400_000);
     return ms > 0 && ms <= MAX_AHEAD_MS ? { at: now + ms } : null;
+  }
+  const tm = TOMORROW_RE.exec(w);
+  if (tm) {
+    let h = tm[1] ? Number(tm[1]) : 9;
+    if (tm[3]?.toLowerCase() === "pm" && h < 12) h += 12;
+    if (tm[3]?.toLowerCase() === "am" && h === 12) h = 0;
+    const d = new Date(now);
+    const at = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1, h, tm[2] ? Number(tm[2]) : 0);
+    return h < 24 ? { at } : null;
   }
   if (ISO_RE.test(w)) {
     const iso = w.replace(" ", "T");
@@ -473,6 +485,28 @@ export function parseAutomate(log: string, now = Date.now()): AutomateProposal[]
     if (out.length >= MAX_PROPOSALS) break;
   }
   return out;
+}
+
+/** A marker the agent wrote that cannot become a schedule, and why — so the chat can say so instead of staying silent. */
+export interface AutomateReject {
+  scope: "scheduled" | "automation";
+  when: string;
+  task: string;
+  reason: string;
+}
+
+export function parseAutomateRejects(log: string, now = Date.now()): AutomateReject[] {
+  const out: AutomateReject[] = [];
+  for (const m of log.matchAll(AUTOMATE_RE)) {
+    const scope = m[1] === "schedule" ? "scheduled" : "automation";
+    const task = m[4].replace(/\s+/g, " ").trim().slice(0, 500);
+    const when = m[3].trim();
+    if (!task) continue;
+    const parsed = parseWhen(when, now);
+    if (!parsed) out.push({ scope, when, task, reason: `“${when}” is not a time I understand` });
+    else if (scope === "automation" && !("cron" in parsed)) out.push({ scope, when, task, reason: "an automation needs a repeating schedule (cron)" });
+  }
+  return out.slice(0, MAX_PROPOSALS);
 }
 
 /* ───────────────────────────── GitHub ───────────────────────────── */

@@ -837,7 +837,7 @@ export function Thread({
             </LiveRegistryContext.Provider>
 
             {/* What this chat scheduled, right under the message that scheduled it. */}
-            {!loadingTrace && <ScheduledCard box={box.name} runState={String(runState ?? "")} />}
+            {!loadingTrace && <ScheduledCard box={box.name} runState={String(runState ?? "")} onRetry={(text) => setSeed({ text, n: Date.now() })} />}
 
             {/* The sleep/wake card sits where the run left off — under the transcript when we still
                 have it, right under the task otherwise — so waking reads as "continuing", not as a

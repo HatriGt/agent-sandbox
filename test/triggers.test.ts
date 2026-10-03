@@ -13,6 +13,8 @@ import {
   nextFire,
   normalizeTrigger,
   parseCron,
+  parseAutomateRejects,
+  parseWhen,
   renderTemplate,
   safeEqual,
   templateContext,
@@ -336,4 +338,33 @@ test("ledger: totals from stored columns; cost null when no run reported one", (
   assert.equal(ledgerTotals(db, "u1", { triggerId: "t1" }).runs, 1);
   assert.equal(ledgerTotals(db, "u1", { verified: "yes" }).runs, 1);
   assert.equal(listLedger(db, "u1", { state: "failed" }).length, 1);
+});
+
+test("parseWhen reads the ways an agent phrases a delay", () => {
+  const now = Date.UTC(2026, 9, 3, 12, 0);
+  const at = (w: string) => (parseWhen(w, now) as { at: number } | null)?.at;
+  const DAY = 86_400_000;
+  assert.equal(at("in 5d"), now + 5 * DAY);
+  assert.equal(at("5 days from now"), now + 5 * DAY);
+  assert.equal(at("after 2 hours"), now + 2 * 3_600_000);
+  assert.equal(at("in 1 week"), now + 7 * DAY);
+  assert.equal(at("an hour"), now + 3_600_000);
+  assert.equal(at("+30m"), now + 30 * 60_000);
+  assert.equal(at("tomorrow"), Date.UTC(2026, 9, 4, 9, 0));
+  assert.equal(at("tomorrow at 2:30pm"), Date.UTC(2026, 9, 4, 14, 30));
+  assert.equal(parseWhen("someday", now), null);
+  assert.equal(parseWhen("in 0d", now), null);
+});
+
+test("parseAutomateRejects names the markers that could not be scheduled", () => {
+  const log = [
+    "<!-- schedule?: when it feels right | Merge the PR. -->",
+    "<!-- automate: in 2h | Summarize CI. -->",
+    "<!-- schedule: in 2h | Check CI again. -->",
+  ].join("\n");
+  const r = parseAutomateRejects(log);
+  assert.equal(r.length, 2);
+  assert.equal(r[0].task, "Merge the PR.");
+  assert.match(r[0].reason, /not a time/);
+  assert.match(r[1].reason, /repeating/);
 });

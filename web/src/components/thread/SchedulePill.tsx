@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { toast } from "sonner";
-import { api, type ThreadScheduleItem } from "@/lib/api";
+import { api, type ThreadScheduleItem, type ThreadScheduleReject } from "@/lib/api";
 import { useGo } from "@/lib/route";
 import { cn } from "@/lib/utils";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -88,16 +88,18 @@ function blurb(it: Item): string {
 
 export function useThreadSchedule(box: string, runState: string) {
   const [items, setItems] = React.useState<Item[]>([]);
+  const [rejected, setRejected] = React.useState<ThreadScheduleReject[]>([]);
   const load = React.useCallback(
     (signal?: AbortSignal) =>
       api
         .threadSchedule(box, signal)
-        .then((r) => setItems(r.items))
+        .then((r) => (setItems(r.items), setRejected(r.rejected ?? [])))
         .catch(() => {}),
     [box]
   );
   React.useEffect(() => {
     setItems([]);
+    setRejected([]);
   }, [box]);
   // On open, on every run-state change (the agent schedules mid-run or at sign-off), on focus, and on a slow poll.
   React.useEffect(() => {
@@ -108,7 +110,7 @@ export function useThreadSchedule(box: string, runState: string) {
     window.addEventListener("focus", onFocus);
     return () => (ctrl.abort(), window.clearInterval(t), window.removeEventListener("focus", onFocus));
   }, [load, runState]);
-  return { items, reload: load };
+  return { items, rejected, reload: load };
 }
 
 /** Re-render every 30s so "in 12 min" stays true. */

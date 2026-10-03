@@ -108,7 +108,7 @@ import { followupsForBox } from "./pr-followup-store.js";
 import { followupLine, normalizePrefs, type FollowupPrefs } from "./pr-followups.js";
 import { hookAuditPath, hookBodyParser, registerTriggerRoutes } from "./trigger-routes.js";
 import { createTrigger, firstSighting, getTriggerById, listTriggers, logDelivery, pruneDeliveries, type TriggerRow } from "./trigger-store.js";
-import { automateNeedsApproval, isQuietRun, parseAutomate } from "./triggers.js";
+import { automateNeedsApproval, isQuietRun, parseAutomate, parseAutomateRejects, type AutomateReject } from "./triggers.js";
 import { intakeBodyParser, registerIntakeRoutes } from "./intake-routes.js";
 import { candidateAccounts } from "./gh-token-store.js";
 import { applyHarness, getHarness, harnessSummaryLine, loadHarnesses, normalizeEgress, HARNESS_LIMITS, type HarnessDef } from "./harness.js";
@@ -791,7 +791,16 @@ const finishMemory = (box: string, owner: string, log: string, digest: RunDigest
  * or one the agent flagged with `?`, is created PAUSED and marked proposed for the owner to approve.
  * The box never touches the controller. The repo is inherited from the automation that started the run.
  */
+// Markers that could not become a schedule, per box: the chat shows them so "I set it up" is never
+// silently untrue. In memory — they are re-read from the live log on every sweep.
+const scheduleRejects = new Map<string, AutomateReject[]>();
+
 const proposeAutomations = (box: string, owner: string, log: string, startedBy: StartedBy | undefined): void => {
+  const rejects = parseAutomateRejects(log);
+  if (rejects.length) {
+    if (!scheduleRejects.has(box)) for (const r of rejects) console.error(`[triggers] ${box}: dropped ${r.scope} marker (${r.reason}): ${r.task.slice(0, 80)}`);
+    scheduleRejects.set(box, rejects);
+  } else scheduleRejects.delete(box);
   const proposals = parseAutomate(log);
   if (!proposals.length) return;
   const parent = startedBy?.kind === "trigger" ? getTriggerById(db, startedBy.triggerId) : undefined;
@@ -3551,6 +3560,7 @@ registerTriggerRoutes(app, {
   audit: auditTrigger,
   // Chat names for the Scheduled table. Cosmetic: a slow fleet read just shows machine names.
   titles: () => Promise.race([loadTitles(cfg).catch(() => ({})), new Promise<Record<string, string>>((r) => setTimeout(() => r({}), 1500))]),
+  rejects: (box) => scheduleRejects.get(box) ?? [],
 });
 // Intake (src/intake-routes.ts): email / Slack / pasted links start runs as the owner, through the
 // same runDelegateFlow as the composer. User-initiated, so no PR-only guard (unlike an automation).
