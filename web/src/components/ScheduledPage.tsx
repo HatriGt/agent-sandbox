@@ -6,6 +6,7 @@ import { useCached } from "@/lib/cache";
 import { fmtAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { fmtNext } from "@/components/thread/SchedulePill";
+import { ArmButton } from "@/components/ui/arm-button";
 
 /**
  * Scheduled: what you asked for in a chat — "merge the PR at 2pm", "check CI again in an hour".
@@ -89,16 +90,14 @@ export function ScheduledPage({ onOpenBox, onAutomations }: { onOpenBox: (box: s
         </div>
       ) : (
         <div className="overflow-x-auto rounded-xl border">
-          <table className="w-full min-w-[960px] border-collapse">
+          <table className="w-full min-w-[760px] border-collapse">
             <thead className="bg-muted/40 border-b">
               <tr>
                 <th className={th}>Task</th>
                 <th className={th}>Chat</th>
                 <th className={th}>Repo</th>
                 <th className={th}>When</th>
-                <th className={th}>Repeats</th>
                 <th className={th}>Status</th>
-                <th className={th}>Created</th>
                 <th className={th}>Result</th>
                 <th className={cn(th, "bg-muted sticky right-0")}>
                   <span className="sr-only">Actions</span>
@@ -160,14 +159,18 @@ function Row({
       <td className={cn(td, "max-w-[11rem]")}>{t.sourceBox ? link(t.sourceBox, t.sourceTitle || t.sourceBox) : <span className="text-faint">—</span>}</td>
       <td className={cn(td, "font-mono text-[12px] whitespace-nowrap")}>{t.repo || <span className="text-faint font-sans">—</span>}</td>
       <td className={cn(td, "whitespace-nowrap tabular-nums")}>
-        <span className="text-foreground">{once ? exact(t.spec.at!) : t.when}</span>
+        <span
+          className="text-foreground inline-flex items-center gap-1"
+          title={`${once ? new Date(t.spec.at!).toUTCString() : "Repeats " + t.when} · created ${fmtAgo(t.createdAt / 1000)}`}
+        >
+          {!once && <Repeat className="size-3" aria-label="Repeats" />}
+          {once ? exact(t.spec.at!) : t.when}
+        </span>
         {t.nextFire !== null && t.status !== "needs-ok" && <span className="text-muted-foreground block">{fmtNext(t.nextFire, now)}</span>}
       </td>
-      <td className={cn(td, "whitespace-nowrap")}>{once ? <span className="text-muted-foreground">Once</span> : <span className="text-foreground inline-flex items-center gap-1"><Repeat className="size-3" />{t.when}</span>}</td>
       <td className={td}>
         <span className={cn("inline-flex rounded-full px-2 py-0.5 font-medium whitespace-nowrap", st.cls)}>{st.label}</span>
       </td>
-      <td className={cn(td, "text-muted-foreground whitespace-nowrap tabular-nums")}>{fmtAgo(t.createdAt / 1000)}</td>
       <td className={cn(td, "max-w-[14rem]")}>
         {r ? (
           <div className="min-w-0">
@@ -197,16 +200,15 @@ function Row({
               <Workflow className="size-4" />
             </button>
           )}
-          <button
-            type="button"
-            disabled={busy}
-            title={UPCOMING.has(t.status) ? "Cancel and delete" : "Delete"}
-            aria-label="Delete"
-            className={cn(iconBtn, "hover:text-destructive")}
-            onClick={() => void act(t.id, () => api.deleteTrigger(t.id), "Deleted")}
-          >
-            <Trash2 className="size-4" />
-          </button>
+          <ArmButton
+            variant="ghost"
+            size="xs"
+            busy={busy}
+            icon={<Trash2 className="size-4" />}
+            label={<span className="sr-only">{UPCOMING.has(t.status) ? "Cancel and delete" : "Delete"}</span>}
+            armedLabel={UPCOMING.has(t.status) ? "Cancel it?" : "Delete?"}
+            onConfirm={() => act(t.id, () => api.deleteTrigger(t.id), "Deleted")}
+          />
         </div>
       </td>
     </tr>

@@ -802,7 +802,7 @@ const proposeAutomations = (box: string, owner: string, log: string, startedBy: 
     if (!firstSighting(db, box, p.scope === "automation" ? `${p.cron}|${p.task}` : `${p.scope}|${p.when}|${p.task}`)) continue;
     // The same repeating proposal from another run (a re-run, a chain) is one row, not two.
     if (p.cron && existing.some((t) => t.sourceBox && t.spec.cron === p.cron && t.taskTemplate === p.task)) continue;
-    const name = p.task.split(/[.!?]/)[0].trim().slice(0, 80) || (p.scope === "automation" ? "Automation" : "Follow-up");
+    const name = p.task.split(/[.!?](?=\s|$)/)[0].trim().slice(0, 80) || (p.scope === "automation" ? "Automation" : "Follow-up");
     // Routine work starts on its own; critical work (or work the agent flagged) waits for the owner.
     const ask = automateNeedsApproval(p.cron ?? "", p.task, p.asked);
     // A repo the task names ("in repo acme/api", a github.com URL) is cloned when it fires.

@@ -133,7 +133,7 @@ export const AGENT_SYS_PROMPT =
   "AUTOMATE: when the user asks you to set up a standing automation (a rule that keeps running, e.g. 'every " +
   "morning summarize CI'), write '<!-- automate: <5-field cron, UTC> | <self-contained task> -->'; it appears under Autopilot. " +
   "Both start on their own; write 'schedule?:' / 'automate?:' when it deploys, deletes, merges, touches production, " +
-  "spends money or messages people: those stay off until the user approves them in the chat's schedule pill (it is not set up yet; say so). Name the repo as owner/name in the task when it needs one. Tell the user in one line what you scheduled. " +
+  "spends money or messages people: those stay off until the user approves them in the chat's schedule pill (it is not set up yet; say so). Start every task with a short plain title sentence a person would write ('Merge PR #12 if CI is green.'), then the details; name the repo as owner/name when it needs one. Tell the user in one line what you scheduled. " +
   "Never read or print /workspace/.agent.* files " +
   "(the log, task, question): they are the controller's channel, not context, and echoing the log " +
   "corrupts the transcript the caller is reading. " +
@@ -221,7 +221,7 @@ export const OMP_SYS_PROMPT =
   "AUTOMATE: when the user asks you to set up a standing automation (a rule that keeps running, e.g. 'every " +
   "morning summarize CI'), write '<!-- automate: <5-field cron, UTC> | <self-contained task> -->'; it appears under Autopilot. " +
   "Both start on their own; write 'schedule?:' / 'automate?:' when it deploys, deletes, merges, touches production, " +
-  "spends money or messages people: those stay off until the user approves them in the chat's schedule pill (it is not set up yet; say so). Name the repo as owner/name in the task when it needs one. Tell the user in one line what you scheduled. " +
+  "spends money or messages people: those stay off until the user approves them in the chat's schedule pill (it is not set up yet; say so). Start every task with a short plain title sentence a person would write ('Merge PR #12 if CI is green.'), then the details; name the repo as owner/name when it needs one. Tell the user in one line what you scheduled. " +
   "TOOLS: a missing CLI is never a reason to stop or to say it isn't installed — run `need <cmd>` " +
   "(the box's installer: cf, kubectl, aws, az, gcloud, helm, terraform, psql, redis-cli and more, then " +
   "apt/npm/pip by name); you are root on Debian, so failing that apt-get install -y, npm i -g, pip install, " +

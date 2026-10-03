@@ -276,12 +276,13 @@ export function SchedulePill({ box, runState, className }: { box: string; runSta
                   onClick={() => setOpen(true)}
                   aria-expanded={false}
                   aria-haspopup="dialog"
-                  title="What's scheduled as part of this chat"
-                  className="hover:bg-muted/60 focus-visible:ring-live/50 relative flex h-8 cursor-pointer items-center gap-1.5 rounded-full pr-3 pl-2.5 text-meta font-medium whitespace-nowrap outline-none transition-colors focus-visible:ring-2"
+                  title={`Scheduled in this chat — ${summary}`}
+                  aria-label={`Scheduled in this chat: ${summary}`}
+                  className="hover:bg-muted/60 focus-visible:ring-live/50 relative flex h-8 cursor-pointer items-center gap-1.5 rounded-full px-2 text-meta @[68rem]:pr-3 @[68rem]:pl-2.5 font-medium whitespace-nowrap outline-none transition-colors focus-visible:ring-2"
                 >
-                  <CalendarClock className="text-muted-foreground size-4 shrink-0" aria-hidden />
-                  <span className={cn("tabular-nums", pending ? "text-attention-text" : "text-foreground")}>{summary}</span>
-                  {items.length > 1 && <span className="bg-muted text-muted-foreground grid h-4.5 min-w-4.5 place-items-center rounded-full px-1 text-micro tabular-nums">{items.length}</span>}
+                  <CalendarClock className={cn("size-4 shrink-0", pending ? "text-attention-text" : "text-muted-foreground")} aria-hidden />
+                  <span className={cn("hidden tabular-nums @[68rem]:inline", pending ? "text-attention-text" : "text-foreground")}>{summary}</span>
+                  {items.length > 1 && <span className="hidden @[68rem]:grid bg-muted text-muted-foreground h-4.5 min-w-4.5 place-items-center rounded-full px-1 text-micro tabular-nums">{items.length}</span>}
                   {pending > 0 && <span className="bg-attention absolute top-0.5 right-0.5 size-2 rounded-full ring-2 ring-[var(--popover)]" aria-hidden />}
                 </motion.button>
               )}
