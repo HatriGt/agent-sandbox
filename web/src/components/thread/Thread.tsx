@@ -24,6 +24,7 @@ import { useOutcome } from "./OutcomeCard";
 import { RunPill, WatchPill } from "./RunPill";
 import { ThreadHeader } from "./ThreadHeader";
 import { SchedulePill } from "./SchedulePill";
+import { ScheduledCard } from "./ScheduledCard";
 import { parseTrace, producedFiles } from "@/lib/trace";
 import { deriveTaskBoard, type TaskBoard } from "@/lib/planTasks";
 import { usePoll } from "@/hooks/usePoll";
@@ -834,6 +835,9 @@ export function Thread({
             </Density.Provider>
             </RepeatedPolls.Provider>
             </LiveRegistryContext.Provider>
+
+            {/* What this chat scheduled, right under the message that scheduled it. */}
+            {!loadingTrace && <ScheduledCard box={box.name} runState={String(runState ?? "")} />}
 
             {/* The sleep/wake card sits where the run left off — under the transcript when we still
                 have it, right under the task otherwise — so waking reads as "continuing", not as a

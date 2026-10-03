@@ -86,7 +86,7 @@ function blurb(it: Item): string {
   return rest || it.when;
 }
 
-function useThreadSchedule(box: string, runState: string) {
+export function useThreadSchedule(box: string, runState: string) {
   const [items, setItems] = React.useState<Item[]>([]);
   const load = React.useCallback(
     (signal?: AbortSignal) =>
@@ -122,7 +122,7 @@ function useNow(): number {
 }
 
 /** The actions every surface (row menu, detail footer) shares. */
-function useActions(reload: () => void) {
+export function useActions(reload: () => void) {
   const go = useGo();
   const [busy, setBusy] = React.useState<string | null>(null);
   const run = async (id: string, fn: () => Promise<unknown>, ok: string) => {
@@ -294,7 +294,7 @@ export function SchedulePill({ box, runState, className }: { box: string; runSta
   );
 }
 
-function CategoryChip({ c }: { c: Item["category"] }) {
+export function CategoryChip({ c }: { c: Item["category"] }) {
   const { label, icon: Icon } = CATEGORY[c];
   return (
     <span className="bg-muted text-foreground/80 inline-flex h-5.5 items-center gap-1 rounded-md px-1.5 text-micro font-medium whitespace-nowrap">
