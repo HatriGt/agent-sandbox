@@ -3,6 +3,8 @@ import { motion, useReducedMotion } from "motion/react";
 import { ArrowLeft, CalendarClock, ListChecks, Workflow } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { api } from "@/lib/api";
+import { useCached } from "@/lib/cache";
 import { Automations, seedAutomation } from "@/components/Automations";
 import { WorkflowsPage } from "@/components/WorkflowsPage";
 import { ScheduledPage } from "@/components/ScheduledPage";
@@ -26,10 +28,18 @@ export function AutopilotPage({
   onOpenBox: (box: string) => void;
 }) {
   const reduce = useReducedMotion();
-  const tabs: { id: AutopilotTab; label: string; hint: string; icon: React.ReactNode }[] = [
-    { id: "automations", label: "Automations", hint: "Standing rules", icon: <Workflow className="size-4" /> },
-    { id: "scheduled", label: "Scheduled", hint: "Asked for in a chat", icon: <CalendarClock className="size-4" /> },
-    { id: "playbooks", label: "Playbooks", hint: "How it gets done", icon: <ListChecks className="size-4" /> },
+  // Counts on the tabs: what is live, what is coming up, and (amber) what is waiting on you.
+  const trig = useCached("triggers", (signal) => api.triggers(signal));
+  const triggers = trig.data?.triggers;
+  // Each tab edits its own list; recount when you move between them.
+  React.useEffect(() => void trig.refresh(), [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+  const workflows = useCached("workflows", (signal) => api.workflows(signal)).data?.workflows;
+  const auto = triggers?.filter((t) => t.scope !== "scheduled");
+  const sched = triggers?.filter((t) => t.scope === "scheduled");
+  const tabs: { id: AutopilotTab; label: string; hint: string; icon: React.ReactNode; count?: number; attention?: boolean }[] = [
+    { id: "automations", label: "Automations", hint: "Standing rules", icon: <Workflow className="size-4" />, count: auto?.filter((t) => t.enabled).length, attention: auto?.some((t) => t.status === "needs-ok") },
+    { id: "scheduled", label: "Scheduled", hint: "Asked for in a chat", icon: <CalendarClock className="size-4" />, count: sched?.filter((t) => ["needs-ok", "waiting", "running"].includes(t.status)).length, attention: sched?.some((t) => t.status === "needs-ok") },
+    { id: "playbooks", label: "Playbooks", hint: "How it gets done", icon: <ListChecks className="size-4" />, count: workflows?.length },
   ];
   return (
     <div className="h-full min-w-0 overflow-y-auto">
@@ -59,7 +69,12 @@ export function AutopilotPage({
               >
                 {t.icon}
                 <span className="font-medium">{t.label}</span>
-                <span className="text-faint hidden text-micro sm:inline">{t.hint}</span>
+                {t.count ? (
+                  <span className={cn("rounded-full px-1.5 text-micro tabular-nums", t.attention ? "bg-attention/15 text-attention-text" : "bg-muted text-muted-foreground")} title={t.attention ? "Something is waiting for your OK" : undefined}>
+                    {t.count}
+                  </span>
+                ) : null}
+                <span className="text-faint hidden text-micro lg:inline">{t.hint}</span>
                 {on && (
                   <motion.span
                     layoutId="autopilot-tab"

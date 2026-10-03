@@ -1,5 +1,5 @@
 ﻿import * as React from "react";
-import { CalendarClock, Copy, FlaskConical, GitPullRequest, Link2, ListChecks, Play, Plus, RotateCw, ShieldCheck, Trash2, Webhook, Workflow } from "lucide-react";
+import { CalendarClock, ChevronRight, Copy, FlaskConical, GitPullRequest, Link2, ListChecks, Play, Plus, RotateCw, ShieldCheck, Trash2, Webhook, Workflow } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import { toast } from "sonner";
@@ -17,6 +17,7 @@ import { Swap } from "@/components/ui/swap";
 import { Bar } from "@/components/thread/Skeletons";
 import { cn } from "@/lib/utils";
 import { PrFollowupsPanel } from "@/components/PrFollowupsPanel";
+import { SchedulePicker, describeCron } from "@/components/SchedulePicker";
 
 /**
  * Automations: runs that start themselves — on a schedule, on a webhook, on a GitHub event, or after
@@ -673,28 +674,15 @@ function Editor({
         )}
       </div>
 
-      {d.kind === "schedule" && (
-        <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3">
-          <label className="block">
-            <Label hint="min hour day month weekday">Cron</Label>
-            <input className={cn(field, "font-mono")} value={d.spec.cron ?? ""} onChange={(e) => setSpec({ cron: e.target.value })} placeholder="0 2 * * 1-5" />
-          </label>
-          <label className="block">
-            <Label>Timezone</Label>
-            <input className={field} value={d.spec.timezone ?? ""} onChange={(e) => setSpec({ timezone: e.target.value })} placeholder="Europe/Berlin" />
-          </label>
-        </div>
-      )}
-
       {d.kind === "schedule" && !id && (
         <div>
-          <Label hint="a quiet check that only reports when something is wrong">Watch</Label>
+          <Label hint="quiet checks that only speak up when something is wrong">Start from</Label>
           <div className="flex flex-wrap gap-1.5">
             {WATCH_PRESETS.map((p) => (
               <Button
                 key={p.id}
                 size="sm"
-                variant="outline"
+                variant={d.taskTemplate === p.task ? "secondary" : "outline"}
                 onClick={() =>
                   setD((cur) => ({
                     ...cur,
@@ -709,7 +697,13 @@ function Editor({
               </Button>
             ))}
           </div>
-          <p className="text-faint mt-1.5 text-micro">Fill in the &lt;placeholders&gt; in the task. A missing CLI is no blocker: the agent runs `need gh` (or any CLI) itself.</p>
+        </div>
+      )}
+
+      {d.kind === "schedule" && (
+        <div>
+          <Label hint={describeCron(d.spec.cron ?? "") || undefined}>Runs</Label>
+          <SchedulePicker cron={d.spec.cron ?? ""} timezone={d.spec.timezone ?? ""} onChange={(p) => setSpec(p)} />
         </div>
       )}
 
@@ -882,8 +876,15 @@ function Editor({
 
       <WorkflowPick value={d.workflowId} onChange={(workflowId) => set({ workflowId })} />
 
-      <div className="flex flex-col gap-3 rounded-lg border px-3 py-3">
-        <p className="label text-muted-foreground">Guardrails</p>
+      <details className="group rounded-lg border px-3 py-3 open:pb-3">
+        <summary className="flex cursor-pointer list-none items-center gap-2 [&::-webkit-details-marker]:hidden">
+          <ChevronRight className="text-muted-foreground size-3.5 transition-transform group-open:rotate-90" aria-hidden />
+          <span className="label text-muted-foreground">Guardrails</span>
+          <span className="text-faint ml-auto truncate text-micro group-open:hidden">
+            {[`${d.concurrency} at a time`, d.quiet ? "quiet" : null, (d.spec.keepGreen ?? true) ? "keeps PRs green" : null, (d.spec.addressReviews ?? true) ? "answers reviews" : null].filter(Boolean).join(" · ")}
+          </span>
+        </summary>
+        <div className="mt-3 flex flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
           <span className="text-meta">At most at once</span>
           <Segmented<string> ariaLabel="Concurrency" value={String(d.concurrency)} onChange={(v) => set({ concurrency: Number(v) })} options={["1", "2", "3", "5"].map((v) => ({ value: v, label: v }))} />
@@ -919,7 +920,8 @@ function Editor({
           <Switch size="sm" checked={d.spec.addressReviews ?? true} onCheckedChange={(v) => setSpec({ addressReviews: v })} />
         </label>
         <p className="text-faint text-micro">PR-only: pushes to the default branch are refused inside the machine, so changes land on a branch and a PR.</p>
-      </div>
+        </div>
+      </details>
 
       {hook && (
         <div className="border-live/30 bg-live/5 rounded-lg border px-3 py-3" role="status">
