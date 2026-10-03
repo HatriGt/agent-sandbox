@@ -29,7 +29,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
  * The thread's schedule pill: what is scheduled as part of this chat, floating at the top-right of
  * the conversation. Absent when nothing is. Collapsed it is one line ("Next in 2h"); open it morphs
  * (one shared layout, spring) into a compact table — type, what, next run, options — and a row opens
- * its detail in place. Ink, not colour: the only amber is on an item that awaits approval.
+ * its detail in place. Ink, not colour: an item awaiting approval is marked by weight, not hue.
  * Reduced motion keeps only the fades.
  */
 

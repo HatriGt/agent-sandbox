@@ -8,8 +8,8 @@ import { CATEGORY, fmtNext, useActions, useNow, useThreadSchedule } from "./Sche
 /**
  * What this chat scheduled, under the agent's message that scheduled it — in the shape the question
  * card uses for anything the agent hands back to you: a label line, a plain card, a footer with the
- * action. One card per schedule. A card waiting on your approval carries the amber border; once
- * approved it is an ordinary ink card with when it runs. A schedule the agent wrote but the
+ * action. One card per schedule. A card waiting on your approval carries the strong hairline and
+ * halo; once approved it is a plain card with when it runs. A schedule the agent wrote but the
  * controller could not read is shown too, with a one-tap way to ask again — never a silent drop.
  */
 

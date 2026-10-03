@@ -8,7 +8,7 @@
  *
  * One neutral zinc ground that holds real contrast in a bright room AND a dark one, plus a small
  * FUNCTIONAL palette that is the whole point of the console: a machine is working (live blue), needs
- * you (teal — the only state with a deadline), finished (green), failed (red) or idle (grey). Colour
+ * you (ink — weight and a halo, the only state with a deadline), finished (green), failed (red) or idle (grey). Colour
  * is reserved for those states and for the single primary action; everything else is ink on paper.
  *
  * The app vocabulary (--live / --attention / --ok / --trace …) is exposed to Tailwind through
@@ -147,9 +147,11 @@
 
   /* functional */
   --live: oklch(0.52 0.2 262); /* working: electric indigo-blue, reads on white at 5.6:1 */
-  --attention: oklch(0.8 0.11 192); /* needs-you: teal fill — the one hue no other state uses */
-  --attention-text: oklch(0.46 0.1 200); /* teal as text on paper, 5.6:1 */
-  --attention-ink: oklch(0.22 0.04 200); /* text on the teal fill */
+  /* needs-you is ink, not a hue: a dark hairline, a soft halo, the one filled button. Weight and
+     motion (the ping) carry it; colour stays reserved for what the machine is doing. */
+  --attention: oklch(0.21 0.006 285.9);
+  --attention-text: oklch(0.21 0.006 285.9);
+  --attention-ink: oklch(0.985 0 0);
   --ok: oklch(0.52 0.14 152);
   --sleep: oklch(0.55 0.16 300); /* sleeping: an idle-stopped microVM that a reply wakes */
 
@@ -199,9 +201,9 @@
   --ring: oklch(0.72 0.16 262);
 
   --live: oklch(0.74 0.15 262);
-  --attention: oklch(0.78 0.11 192);
-  --attention-text: oklch(0.82 0.09 195);
-  --attention-ink: oklch(0.2 0.04 200);
+  --attention: oklch(0.93 0.002 286);
+  --attention-text: oklch(0.95 0.002 286);
+  --attention-ink: oklch(0.19 0.005 286);
   --ok: oklch(0.74 0.14 155);
   --sleep: oklch(0.76 0.13 300);
 
@@ -732,8 +734,8 @@
 .attention-glow {
   box-shadow:
     0 1px 2px oklch(0 0 0 / 0.05),
-    0 0 0 3px color-mix(in oklch, var(--attention) 28%, transparent),
-    0 8px 24px -12px color-mix(in oklch, var(--attention) 60%, transparent);
+    0 0 0 4px color-mix(in oklch, var(--attention) 7%, transparent),
+    0 12px 32px -14px color-mix(in oklch, var(--attention) 45%, transparent);
 }
 
 /* Skeleton shimmer: a soft highlight sweeping across placeholder bars while a thread's first frame
