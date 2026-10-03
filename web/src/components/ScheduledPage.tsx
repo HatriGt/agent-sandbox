@@ -38,6 +38,12 @@ export function ScheduledPage({ onOpenBox, onAutomations }: { onOpenBox: (box: s
   const all = (data?.triggers ?? []).filter((t) => t.scope === "scheduled").sort((a, b) => (a.nextFire ?? Infinity) - (b.nextFire ?? Infinity) || b.createdAt - a.createdAt);
   const rows = all.filter((t) => (filter === "all" ? true : filter === "upcoming" ? UPCOMING.has(t.status) : !UPCOMING.has(t.status)));
   const now = Date.now();
+  const live = all.some((t) => t.status === "running" || (t.nextFire !== null && t.nextFire - now < 5 * 60_000));
+  // Keep a run that is about to fire (or running) moving on screen without a reload.
+  React.useEffect(() => {
+    const id = window.setInterval(() => void refresh(), live ? 10_000 : 60_000);
+    return () => window.clearInterval(id);
+  }, [live, refresh]);
 
   const act = async (id: string, fn: () => Promise<unknown>, ok: string) => {
     setBusy(id);
@@ -94,7 +100,7 @@ export function ScheduledPage({ onOpenBox, onAutomations }: { onOpenBox: (box: s
                 <th className={th}>Status</th>
                 <th className={th}>Created</th>
                 <th className={th}>Result</th>
-                <th className={th}>
+                <th className={cn(th, "bg-muted sticky right-0")}>
                   <span className="sr-only">Actions</span>
                 </th>
               </tr>
@@ -142,9 +148,14 @@ function Row({
   return (
     <tr className={cn("hover:bg-muted/30 border-b last:border-b-0", (t.status === "done" || t.status === "cancelled") && "opacity-70")}>
       <td className={cn(td, "max-w-[18rem]")}>
-        <p className="text-foreground line-clamp-2 font-medium" title={t.taskTemplate}>
-          {t.taskTemplate}
+        <p className="text-foreground truncate font-medium" title={t.name}>
+          {t.name}
         </p>
+        {t.taskTemplate !== t.name && (
+          <p className="text-muted-foreground line-clamp-1" title={t.taskTemplate}>
+            {t.taskTemplate.startsWith(t.name) ? t.taskTemplate.slice(t.name.length).replace(/^[.!?\s]+/, "") : t.taskTemplate}
+          </p>
+        )}
       </td>
       <td className={cn(td, "max-w-[11rem]")}>{t.sourceBox ? link(t.sourceBox, t.sourceTitle || t.sourceBox) : <span className="text-faint">—</span>}</td>
       <td className={cn(td, "font-mono text-[12px] whitespace-nowrap")}>{t.repo || <span className="text-faint font-sans">—</span>}</td>
@@ -156,18 +167,18 @@ function Row({
       <td className={td}>
         <span className={cn("inline-flex rounded-full px-2 py-0.5 font-medium whitespace-nowrap", st.cls)}>{st.label}</span>
       </td>
-      <td className={cn(td, "text-muted-foreground whitespace-nowrap tabular-nums")}>{fmtAgo(t.createdAt)}</td>
+      <td className={cn(td, "text-muted-foreground whitespace-nowrap tabular-nums")}>{fmtAgo(t.createdAt / 1000)}</td>
       <td className={cn(td, "max-w-[14rem]")}>
         {r ? (
           <div className="min-w-0">
             {r.box ? link(r.box, r.finished?.headline || "Open run") : <span className="text-muted-foreground">{r.reason || r.outcome}</span>}
-            <span className="text-faint block tabular-nums">{fmtAgo(r.at)}</span>
+            <span className="text-faint block tabular-nums">{fmtAgo(r.at / 1000)}</span>
           </div>
         ) : (
           <span className="text-faint">Not yet</span>
         )}
       </td>
-      <td className={cn(td, "whitespace-nowrap")}>
+      <td className={cn(td, "bg-background sticky right-0 whitespace-nowrap shadow-[-8px_0_8px_-8px_rgb(0_0_0/0.12)]")}>
         <div className="flex items-center justify-end gap-0.5">
           {t.status === "needs-ok" && (
             <button type="button" disabled={busy} title="Approve" aria-label="Approve" className={iconBtn} onClick={() => void act(t.id, () => api.setTriggerEnabled(t.id, true), "Approved")}>

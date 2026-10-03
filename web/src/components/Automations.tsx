@@ -19,7 +19,7 @@ import { cn } from "@/lib/utils";
 import { PrFollowupsPanel } from "@/components/PrFollowupsPanel";
 
 /**
- * Automations: runs that start themselves â€” on a schedule, on a webhook, on a GitHub event, or after
+ * Automations: runs that start themselves — on a schedule, on a webhook, on a GitHub event, or after
  * another automation finishes. A LIST, not a canvas: each row says what fires it in words, how the
  * last fire went, when the next one is, and a switch. Editing happens in a side sheet with a live
  * preview of the task, rendered against the last real payload this automation received.
@@ -38,7 +38,7 @@ const DEFAULT_TEMPLATES: Record<AutomationKind, string> = {
   chain: "Review what the previous run did ({{parent.headline}}) and tighten it.",
 };
 
-/* â”€â”€â”€ watch presets: scheduled, quiet checks over gh / curl (no new dispatcher) â”€â”€â”€ */
+/* ─── watch presets: scheduled, quiet checks over gh / curl (no new dispatcher) ─── */
 
 const WATCH_PRESETS: Array<{ id: string; label: string; name: string; cron: string; task: string }> = [
   {
@@ -67,13 +67,13 @@ const WATCH_PRESETS: Array<{ id: string; label: string; name: string; cron: stri
   },
 ];
 
-/* â”€â”€â”€ alert sources (Sentry / Datadog / PagerDuty presets) â”€â”€â”€ */
+/* ─── alert sources (Sentry / Datadog / PagerDuty presets) ─── */
 
 const PRESET_LABEL: Record<AlertPreset, string> = { sentry: "Sentry", datadog: "Datadog", pagerduty: "PagerDuty" };
 const INCIDENT_HARNESS_ID = "hrn_builtin-incident-responder";
 const ALERT_TEMPLATE = "{{alert.source}} alert: {{alert.title}}\n\nSeverity: {{alert.severity}}\nService: {{alert.service}}\nLink: {{alert.url}}\n\n{{alert.message}}";
 const PRESET_SECRET_HINT: Record<AlertPreset, string> = {
-  sentry: "The integration's Client Secret (Sentry â†’ Settings â†’ Custom Integrations). We check Sentry-Hook-Signature with it.",
+  sentry: "The integration's Client Secret (Sentry → Settings → Custom Integrations). We check Sentry-Hook-Signature with it.",
   pagerduty: "The webhook subscription's signing secret (shown once when you create it). We check X-PagerDuty-Signature with it.",
   datadog: "Datadog doesn't sign webhooks. Pick a token, and add the custom header X-ASB-Token with it in the Datadog webhook.",
 };
@@ -91,14 +91,14 @@ const REASON_LABEL: Record<NonNullable<AutomationDelivery["reason"]>, string> = 
   error: "error",
 };
 
-/** "fired â†’ box-1" / "skipped Â· cooldown" / "rejected Â· bad signature". */
+/** "fired → box-1" / "skipped · cooldown" / "rejected · bad signature". */
 export function deliveryLine(d: AutomationDelivery): string {
-  const head = d.outcome === "fired" ? `fired${d.box ? ` â†’ ${d.box}` : ""}` : `${d.outcome === "failed" ? "could not start" : d.outcome}${d.reason ? ` Â· ${REASON_LABEL[d.reason]}` : ""}`;
-  return d.test ? `test Â· ${head}` : head;
+  const head = d.outcome === "fired" ? `fired${d.box ? ` → ${d.box}` : ""}` : `${d.outcome === "failed" ? "could not start" : d.outcome}${d.reason ? ` · ${REASON_LABEL[d.reason]}` : ""}`;
+  return d.test ? `test · ${head}` : head;
 }
-/** "checked 12Ã— Â· 1 report" â€” a quiet automation's runs that found nothing vs those that reported. */
+/** "checked 12× · 1 report" — a quiet automation's runs that found nothing vs those that reported. */
 export function countsLine(c: { checked: number; reports: number }): string {
-  return `checked ${c.checked}Ã— Â· ${c.reports} report${c.reports === 1 ? "" : "s"}`;
+  return `checked ${c.checked}× · ${c.reports} report${c.reports === 1 ? "" : "s"}`;
 }
 function randomToken(): string {
   const b = new Uint8Array(24);
@@ -119,7 +119,7 @@ function blank(kind: AutomationKind = "schedule"): AutomationDraft {
   };
 }
 
-/** "in 3h" / "in 12 min" â€” epoch ms in the future. */
+/** "in 3h" / "in 12 min" — epoch ms in the future. */
 function fmtIn(ms: number, now = Date.now()): string {
   const s = Math.max(0, Math.round((ms - now) / 1000));
   if (s < 60) return "in under a minute";
@@ -198,7 +198,7 @@ export function Automations({ onOpenBox, onOpenPlaybooks }: { onOpenBox: (box: s
       <div>
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <p className="text-muted-foreground min-w-0 flex-1 text-meta">
-            <span className="text-foreground">When</span> work starts on its own â€” a schedule, a webhook, a GitHub event, or after another run. Each opens a PR at most and leaves a receipt.
+            <span className="text-foreground">When</span> work starts on its own — a schedule, a webhook, a GitHub event, or after another run. Each opens a PR at most and leaves a receipt.
           </p>
           {rows && rows.length > 0 && (
             <Button size="sm" onClick={() => setEditing({ id: null, draft: blank() })}>
@@ -244,8 +244,8 @@ export function Automations({ onOpenBox, onOpenPlaybooks }: { onOpenBox: (box: s
                 </Button>
               }
               facts={[
-                { icon: CalendarClock, text: "â€œWeekdays 02:00: fix whatever broke overnightâ€ â€” in your own timezone." },
-                { icon: GitPullRequest, text: "Label an issue â€œagentâ€ and a run picks it up, then comments its receipt on the issue." },
+                { icon: CalendarClock, text: "“Weekdays 02:00: fix whatever broke overnight” — in your own timezone." },
+                { icon: GitPullRequest, text: "Label an issue “agent” and a run picks it up, then comments its receipt on the issue." },
                 { icon: ShieldCheck, text: "One run at a time by default, PR-only, and a storm cap of 12 fires an hour." },
               ]}
             />
@@ -358,13 +358,13 @@ function WorkflowPick({ value, onChange }: { value: string | undefined; onChange
   const cur = list.find((w) => w.id === value);
   return (
     <label className="block">
-      <Label hint="optional â€” how to do it; the task fills {{task}} in step one">Playbook</Label>
+      <Label hint="optional — how to do it; the task fills {{task}} in step one">Playbook</Label>
       <select className={field} value={value ?? ""} onChange={(e) => onChange(e.target.value || undefined)}>
-        <option value="">None â€” one run, as written</option>
-        {value && !cur && <option value={value}>Missing playbook â€” pick another</option>}
+        <option value="">None — one run, as written</option>
+        {value && !cur && <option value={value}>Missing playbook — pick another</option>}
         {list.map((w) => (
           <option key={w.id} value={w.id}>
-            {w.name} Â· {w.steps.length} step{w.steps.length === 1 ? "" : "s"}
+            {w.name} · {w.steps.length} step{w.steps.length === 1 ? "" : "s"}
           </option>
         ))}
       </select>
@@ -448,7 +448,7 @@ function AutomationTr({ a, onEdit, onToggle, onDismiss, onOpenBox, onOpenPlayboo
               {a.name}
             </button>
             <span className="text-muted-foreground block truncate text-micro" title={a.taskTemplate}>
-              {a.proposed ? "Scheduled by the agent Â· " : ""}
+              {a.proposed ? "Scheduled by the agent · " : ""}
               {a.taskTemplate.replace(/\s+/g, " ")}
             </span>
           </span>
@@ -467,7 +467,7 @@ function AutomationTr({ a, onEdit, onToggle, onDismiss, onOpenBox, onOpenPlayboo
             <span className="truncate">{wf}</span>
           </button>
         ) : (
-          <span className="text-faint">â€”</span>
+          <span className="text-faint">—</span>
         )}
       </td>
       <td className={cn(TD, "text-micro")}>
@@ -630,7 +630,7 @@ function Editor({
     try {
       const r = await api.rotateTrigger(id);
       setHook({ url: r.hookUrl, secret: r.secret });
-      toast.success("New secret issued â€” the old URL stops working now");
+      toast.success("New secret issued — the old URL stops working now");
     } catch (e) {
       toast.error("Could not rotate", { description: e instanceof Error ? e.message : String(e) });
     }
@@ -715,7 +715,7 @@ function Editor({
 
       {(d.kind === "github" || d.kind === "schedule" || d.kind === "webhook") && (
         <label className="block">
-          <Label hint={d.kind === "github" ? "required" : "optional â€” the run clones it"}>Repository</Label>
+          <Label hint={d.kind === "github" ? "required" : "optional — the run clones it"}>Repository</Label>
           <input className={field} value={d.repo ?? ""} onChange={(e) => set({ repo: e.target.value || undefined })} placeholder="owner/name" />
         </label>
       )}
@@ -779,14 +779,14 @@ function Editor({
           {d.spec.preset && (
             <>
               <label className="block">
-                <Label hint={initialHasSecret ? "set â€” leave blank to keep it" : "required"}>{d.spec.preset === "datadog" ? "Header token" : "Signing secret"}</Label>
+                <Label hint={initialHasSecret ? "set — leave blank to keep it" : "required"}>{d.spec.preset === "datadog" ? "Header token" : "Signing secret"}</Label>
                 <div className="flex items-center gap-1.5">
                   <input
                     className={cn(field, "font-mono")}
                     type="password"
                     autoComplete="off"
                     value={d.signingSecret ?? ""}
-                    placeholder={initialHasSecret ? "â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢" : ""}
+                    placeholder={initialHasSecret ? "••••••••" : ""}
                     onChange={(e) => set({ signingSecret: e.target.value || undefined })}
                   />
                   {d.spec.preset === "datadog" && (
@@ -807,7 +807,7 @@ function Editor({
               )}
               {d.spec.preset === "datadog" && (
                 <div>
-                  <Label hint="Datadog â†’ Integrations â†’ Webhooks â†’ Payload">Payload</Label>
+                  <Label hint="Datadog → Integrations → Webhooks → Payload">Payload</Label>
                   <div className="flex items-start gap-1.5">
                     <code className="bg-muted/40 min-w-0 flex-1 rounded border px-2 py-1 font-mono text-micro break-all">{DATADOG_PAYLOAD}</code>
                     <Button size="icon-sm" variant="ghost" aria-label="Copy payload" onClick={() => copy(DATADOG_PAYLOAD)}>
@@ -841,7 +841,7 @@ function Editor({
           <label className="block">
             <Label>Runs after</Label>
             <select className={field} value={d.spec.afterTrigger ?? ""} onChange={(e) => setSpec({ afterTrigger: e.target.value })}>
-              <option value="">Pick an automationâ€¦</option>
+              <option value="">Pick an automation…</option>
               {others
                 .filter((o) => o.kind !== "chain" || o.spec.afterTrigger !== id)
                 .map((o) => (
@@ -869,9 +869,9 @@ function Editor({
         <Textarea className="min-h-28 font-mono text-meta" value={d.taskTemplate} onChange={(e) => set({ taskTemplate: e.target.value })} />
         <div className="bg-muted/40 mt-2 rounded-lg border px-3 py-2.5">
           <p className="label text-faint mb-1">
-            Preview {preview?.hasPayload ? "Â· against the last real payload" : id ? "Â· no payload received yet" : ""}
+            Preview {preview?.hasPayload ? "· against the last real payload" : id ? "· no payload received yet" : ""}
           </p>
-          <p className="text-foreground text-meta whitespace-pre-wrap break-words">{preview ? preview.text || <span className="text-faint">empty</span> : "â€¦"}</p>
+          <p className="text-foreground text-meta whitespace-pre-wrap break-words">{preview ? preview.text || <span className="text-faint">empty</span> : "…"}</p>
           {preview && preview.missing.length > 0 && (
             <p className="text-attention-text mt-1.5 text-micro">
               Empty until a payload has: {preview.missing.map((m) => `{{${m}}}`).join(", ")}
@@ -892,14 +892,14 @@ function Editor({
           <label className="flex items-center justify-between gap-3">
             <span className="text-meta">
               Comment the receipt on the issue or PR
-              <span className="text-faint block text-micro">Headline, files, verified, time â€” with a link back.</span>
+              <span className="text-faint block text-micro">Headline, files, verified, time — with a link back.</span>
             </span>
             <Switch size="sm" checked={d.prComment} onCheckedChange={(v) => set({ prComment: v })} />
           </label>
         )}
         <label className="flex items-center justify-between gap-3">
           <span className="text-meta">
-            Quiet â€” only tell me when something needs me
+            Quiet — only tell me when something needs me
             <span className="text-faint block text-micro">A run that finds nothing ends silently and counts as a check. Questions, failures and PRs still notify.</span>
           </span>
           <Switch size="sm" checked={!!d.quiet} onCheckedChange={(v) => set({ quiet: v })} />
@@ -923,12 +923,12 @@ function Editor({
 
       {hook && (
         <div className="border-live/30 bg-live/5 rounded-lg border px-3 py-3" role="status">
-          <p className="text-foreground text-meta font-medium">Webhook URL â€” shown once</p>
+          <p className="text-foreground text-meta font-medium">Webhook URL — shown once</p>
           <p className="text-muted-foreground mt-0.5 text-micro">
             {d.kind === "github"
-              ? "In the repo's Settings â†’ Webhooks: paste the URL, content type application/json, and use the secret below."
+              ? "In the repo's Settings → Webhooks: paste the URL, content type application/json, and use the secret below."
               : d.spec.preset
-                ? `Paste this as the webhook URL in ${PRESET_LABEL[d.spec.preset]}, then use â€œSend test eventâ€ to check the whole path.`
+                ? `Paste this as the webhook URL in ${PRESET_LABEL[d.spec.preset]}, then use “Send test event” to check the whole path.`
                 : "POST to this URL. Anyone with it can start a run, so keep it private."}
           </p>
           <div className="mt-2 flex items-center gap-1.5">
@@ -973,13 +973,13 @@ function Editor({
         <span className="flex-1" />
         {id && <ArmButton size="sm" variant="ghost" icon={<Trash2 />} label="Delete" armedLabel="Delete?" onConfirm={remove} className="text-muted-foreground" />}
       </div>
-      {id && d.kind === "chain" && d.spec.afterTrigger && <p className="text-faint -mt-3 text-micro">Runs after â€œ{names[d.spec.afterTrigger] ?? "?"}â€ â€” run that one to test the chain.</p>}
+      {id && d.kind === "chain" && d.spec.afterTrigger && <p className="text-faint -mt-3 text-micro">Runs after “{names[d.spec.afterTrigger] ?? "?"}” — run that one to test the chain.</p>}
 
       {id && (
         <div>
           <Label hint={`last ${50}`}>Deliveries</Label>
           {deliveries === null ? (
-            <p className="text-faint text-micro">â€¦</p>
+            <p className="text-faint text-micro">…</p>
           ) : deliveries.length === 0 ? (
             <p className="text-faint text-micro">Nothing has arrived yet. Every delivery lands here: fired, skipped (and why) or rejected.</p>
           ) : (
@@ -999,7 +999,7 @@ function Editor({
                     )}
                   </span>
                   {x.quiet && (
-                    <span className="text-faint shrink-0" title="Nothing needed you â€” no notification was sent">
+                    <span className="text-faint shrink-0" title="Nothing needed you — no notification was sent">
                       quiet
                     </span>
                   )}

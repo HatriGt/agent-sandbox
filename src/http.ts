@@ -805,6 +805,8 @@ const proposeAutomations = (box: string, owner: string, log: string, startedBy: 
     const name = p.task.split(/[.!?]/)[0].trim().slice(0, 80) || (p.scope === "automation" ? "Automation" : "Follow-up");
     // Routine work starts on its own; critical work (or work the agent flagged) waits for the owner.
     const ask = automateNeedsApproval(p.cron ?? "", p.task, p.asked);
+    // A repo the task names ("in repo acme/api", a github.com URL) is cloned when it fires.
+    const repo = parent?.repo ?? p.task.match(/(?:\brepo(?:sitory)?\s+|github\.com\/)([\w.-]+\/[\w.-]+?)(?:\.git)?(?=[\s,;:)]|\.?$|\.\s)/i)?.[1];
     const { row } = createTrigger(
       db,
       secretBox,
@@ -813,7 +815,7 @@ const proposeAutomations = (box: string, owner: string, log: string, startedBy: 
         name,
         kind: "schedule",
         spec: p.at ? { at: p.at } : { cron: p.cron, timezone: "UTC" },
-        ...(parent?.repo ? { repo: parent.repo } : {}),
+        ...(repo ? { repo } : {}),
         taskTemplate: p.task,
         enabled: !ask,
         concurrency: 1,
