@@ -8,7 +8,7 @@
  *
  * One neutral zinc ground that holds real contrast in a bright room AND a dark one, plus a small
  * FUNCTIONAL palette that is the whole point of the console: a machine is working (live blue), needs
- * you (amber — the only state with a deadline), finished (green), failed (red) or idle (grey). Colour
+ * you (teal — the only state with a deadline), finished (green), failed (red) or idle (grey). Colour
  * is reserved for those states and for the single primary action; everything else is ink on paper.
  *
  * The app vocabulary (--live / --attention / --ok / --trace …) is exposed to Tailwind through
@@ -147,9 +147,9 @@
 
   /* functional */
   --live: oklch(0.52 0.2 262); /* working: electric indigo-blue, reads on white at 5.6:1 */
-  --attention: oklch(0.82 0.15 78); /* amber fill */
-  --attention-text: oklch(0.5 0.12 62); /* amber as text on paper, 5.4:1 */
-  --attention-ink: oklch(0.25 0.05 60); /* text on the amber fill */
+  --attention: oklch(0.8 0.11 192); /* needs-you: teal fill — the one hue no other state uses */
+  --attention-text: oklch(0.46 0.1 200); /* teal as text on paper, 5.6:1 */
+  --attention-ink: oklch(0.22 0.04 200); /* text on the teal fill */
   --ok: oklch(0.52 0.14 152);
   --sleep: oklch(0.55 0.16 300); /* sleeping: an idle-stopped microVM that a reply wakes */
 
@@ -199,9 +199,9 @@
   --ring: oklch(0.72 0.16 262);
 
   --live: oklch(0.74 0.15 262);
-  --attention: oklch(0.8 0.15 78);
-  --attention-text: oklch(0.85 0.12 80);
-  --attention-ink: oklch(0.22 0.05 60);
+  --attention: oklch(0.78 0.11 192);
+  --attention-text: oklch(0.82 0.09 195);
+  --attention-ink: oklch(0.2 0.04 200);
   --ok: oklch(0.74 0.14 155);
   --sleep: oklch(0.76 0.13 300);
 
@@ -728,7 +728,7 @@
   animation: caret 1s step-end infinite;
 }
 
-/* Amber attention halo for the composer while a machine waits on an answer: a soft, offset glow. */
+/* Attention halo for the composer while a machine waits on an answer: a soft, offset glow. */
 .attention-glow {
   box-shadow:
     0 1px 2px oklch(0 0 0 / 0.05),
