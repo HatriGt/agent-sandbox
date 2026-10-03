@@ -1,4 +1,4 @@
-import express, { type Express, type Request, type Response } from "express";
+﻿import express, { type Express, type Request, type Response } from "express";
 import type { Db } from "./db.js";
 import type { SecretBox } from "./secretbox.js";
 import type { Principal } from "./identity.js";
@@ -26,7 +26,7 @@ import { makeRateLimiter } from "./auth-throttle.js";
  *   1. raw body parser with a 512 KB cap (registered by http.ts BEFORE the JSON parsers for /hooks/)
  *   2. per-trigger rate limit (so one noisy repo can't eat the controller)
  *   3. secret compared in constant time; unknown id and wrong secret answer the SAME 404
- *   4. GitHub: HMAC over the raw bytes with the same secret — a URL that leaked into a log is not
+ *   4. GitHub: HMAC over the raw bytes with the same secret â€” a URL that leaked into a log is not
  *      enough to forge a GitHub event
  *   5. dedupe by delivery id and body hash (replays of a captured delivery fire nothing)
  *   6. admission (enabled, concurrency cap, storm cap) inside the dispatcher
@@ -37,7 +37,7 @@ export const HOOK_BODY_LIMIT = "512kb";
 /** The raw-body parser for /hooks/: HMAC needs the exact bytes, not re-serialised JSON. */
 export const hookBodyParser = express.raw({ type: () => true, limit: HOOK_BODY_LIMIT });
 
-/** `/hooks/<id>/<secret>` → `/hooks/<id>/***` for every log and audit row. */
+/** `/hooks/<id>/<secret>` â†’ `/hooks/<id>/***` for every log and audit row. */
 export function hookAuditPath(path: string): string {
   const m = path.match(/^\/hooks\/([^/]+)\/[^/]*/);
   return m ? `/hooks/${m[1]}/***` : path;
@@ -62,16 +62,24 @@ export interface TriggerRouteCtx {
   rejects?: (box: string) => AutomateReject[];
 }
 
-const ownerOfP = (p: Principal) => (p.kind === "user" ? p.userId : OPERATOR_OWNER);
+const isAdmin = (p: Principal): p is Extract<Principal, { kind: "user" }> => p.kind === "user" && p.role === "admin";
 
 export function registerTriggerRoutes(app: Express, c: TriggerRouteCtx): void {
+  // An admin sees the operator's machines (mayAccess), so they see the operator's schedules too:
+  // a run started over MCP with the bearer token has no user owner, and what its agent schedules
+  // would otherwise be invisible in the dashboard â€” the pill empty, the Scheduled tab blank.
+  const ownerOfP = (p: Principal, id?: string) => {
+    if (p.kind !== "user") return OPERATOR_OWNER;
+    if (id && isAdmin(p) && getTriggerById(c.db, id)?.owner === OPERATOR_OWNER) return OPERATOR_OWNER;
+    return p.userId;
+  };
+  const triggersOf = (p: Principal) => (isAdmin(p) ? [...listTriggers(c.db, p.userId), ...listTriggers(c.db, OPERATOR_OWNER)] : listTriggers(c.db, ownerOfP(p)));
   const hookUrl = (id: string, secret: string) => `${(c.publicUrl ?? "").replace(/\/$/, "")}/hooks/${id}/${secret}`;
   const names = (owner: string) => Object.fromEntries(listTriggers(c.db, owner).map((t) => [t.id, t.name]));
 
   app.get("/triggers.json", async (req, res) => {
     if (!c.dashAuthed(req, res)) return;
-    const owner = ownerOfP(c.principalOf(res));
-    const all = listTriggers(c.db, owner);
+    const all = triggersOf(c.principalOf(res));
     const nm = Object.fromEntries(all.map((t) => [t.id, t.name]));
     const titles = all.some((t) => t.sourceBox) && c.titles ? await c.titles() : {};
     res.json({
@@ -88,8 +96,7 @@ export function registerTriggerRoutes(app: Express, c: TriggerRouteCtx): void {
     if (!c.dashAuthed(req, res)) return;
     const box = typeof req.query.box === "string" ? req.query.box : "";
     if (!box) return void res.status(400).json({ error: "box is required" });
-    const owner = ownerOfP(c.principalOf(res));
-    const all = listTriggers(c.db, owner);
+    const all = triggersOf(c.principalOf(res));
     const nm = Object.fromEntries(all.map((t) => [t.id, t.name]));
     let sb;
     try {
@@ -122,13 +129,13 @@ export function registerTriggerRoutes(app: Express, c: TriggerRouteCtx): void {
   });
 
   // Live template preview: render a draft template against the trigger's last real payload (or a
-  // sample the editor supplies). Pure — nothing is started. Registered before
+  // sample the editor supplies). Pure â€” nothing is started. Registered before
   // /triggers/:id.json, which would otherwise match "preview.json".
   app.post("/triggers/preview.json", (req, res) => {
     if (!c.dashAuthed(req, res)) return;
-    const owner = ownerOfP(c.principalOf(res));
     const b = (req.body ?? {}) as { taskTemplate?: unknown; id?: unknown; name?: unknown };
     if (typeof b.taskTemplate !== "string") return void res.status(400).json({ error: "taskTemplate is required" });
+    const owner = ownerOfP(c.principalOf(res), typeof b.id === "string" ? b.id : undefined);
     const payload = typeof b.id === "string" ? lastPayload(c.db, owner, b.id) : undefined;
     const r = renderTemplate(b.taskTemplate, templateContext(payload, { trigger: { name: typeof b.name === "string" ? b.name : "" }, now: new Date().toISOString() }));
     res.json({ ...r, hasPayload: payload !== undefined });
@@ -136,7 +143,7 @@ export function registerTriggerRoutes(app: Express, c: TriggerRouteCtx): void {
 
   app.post("/triggers/:id.json", (req, res) => {
     if (!c.dashAuthed(req, res)) return;
-    const owner = ownerOfP(c.principalOf(res));
+    const owner = ownerOfP(c.principalOf(res), req.params.id);
     const v = normalizeTrigger(req.body);
     if (!v.ok) return void res.status(400).json({ error: v.error });
     if (v.trigger.kind === "chain" && (v.trigger.spec.afterTrigger === req.params.id || !getTrigger(c.db, owner, v.trigger.spec.afterTrigger!)))
@@ -154,7 +161,7 @@ export function registerTriggerRoutes(app: Express, c: TriggerRouteCtx): void {
 
   app.delete("/triggers/:id.json", (req, res) => {
     if (!c.dashAuthed(req, res)) return;
-    const owner = ownerOfP(c.principalOf(res));
+    const owner = ownerOfP(c.principalOf(res), req.params.id);
     if (!deleteTrigger(c.db, owner, req.params.id)) return void res.status(404).json({ error: "no such automation" });
     c.audit(owner, "trigger.delete", { trigger: req.params.id });
     res.json({ ok: true });
@@ -162,7 +169,7 @@ export function registerTriggerRoutes(app: Express, c: TriggerRouteCtx): void {
 
   app.post("/triggers/:id/enabled.json", (req, res) => {
     if (!c.dashAuthed(req, res)) return;
-    const owner = ownerOfP(c.principalOf(res));
+    const owner = ownerOfP(c.principalOf(res), req.params.id);
     const row = setEnabled(c.db, owner, req.params.id, (req.body as { enabled?: unknown })?.enabled === true);
     if (!row) return void res.status(404).json({ error: "no such automation" });
     c.audit(owner, row.enabled ? "trigger.enable" : "trigger.disable", { trigger: row.id });
@@ -172,7 +179,7 @@ export function registerTriggerRoutes(app: Express, c: TriggerRouteCtx): void {
   /** "Make it an automation": a repeating chat schedule moves from Scheduled to Automations. */
   app.post("/triggers/:id/promote.json", (req, res) => {
     if (!c.dashAuthed(req, res)) return;
-    const owner = ownerOfP(c.principalOf(res));
+    const owner = ownerOfP(c.principalOf(res), req.params.id);
     const row = promoteTrigger(c.db, owner, req.params.id);
     if (!row) return void res.status(400).json({ error: "only a repeating schedule can become an automation" });
     c.audit(owner, "trigger.promote", { trigger: row.id });
@@ -181,20 +188,20 @@ export function registerTriggerRoutes(app: Express, c: TriggerRouteCtx): void {
 
   app.post("/triggers/:id/rotate.json", (req, res) => {
     if (!c.dashAuthed(req, res)) return;
-    const owner = ownerOfP(c.principalOf(res));
+    const owner = ownerOfP(c.principalOf(res), req.params.id);
     const secret = rotateSecret(c.db, c.box, owner, req.params.id);
     if (!secret) return void res.status(404).json({ error: "no such automation" });
     c.audit(owner, "trigger.rotate", { trigger: req.params.id });
     res.json({ secret, hookUrl: hookUrl(req.params.id, secret) });
   });
 
-  // "Run now" — the test path. Renders against the last real payload when there is one.
+  // "Run now" â€” the test path. Renders against the last real payload when there is one.
   app.post("/triggers/:id/run.json", async (req, res) => {
     if (!c.dashAuthed(req, res)) return;
-    const owner = ownerOfP(c.principalOf(res));
+    const owner = ownerOfP(c.principalOf(res), req.params.id);
     const t = getTrigger(c.db, owner, req.params.id);
     if (!t) return void res.status(404).json({ error: "no such automation" });
-    if (t.kind === "chain") return void res.status(400).json({ error: "a chain runs after its parent — run the parent instead" });
+    if (t.kind === "chain") return void res.status(400).json({ error: "a chain runs after its parent â€” run the parent instead" });
     try {
       const payload = lastPayload(c.db, owner, t.id);
       const match = t.kind === "github" && payload ? matchGithub(t.spec, t.repo ?? "", githubEventOf(t.spec.event), payload) : undefined;
@@ -207,15 +214,15 @@ export function registerTriggerRoutes(app: Express, c: TriggerRouteCtx): void {
 
   app.get("/triggers/:id/payload.json", (req, res) => {
     if (!c.dashAuthed(req, res)) return;
-    const owner = ownerOfP(c.principalOf(res));
+    const owner = ownerOfP(c.principalOf(res), req.params.id);
     if (!getTrigger(c.db, owner, req.params.id)) return void res.status(404).json({ error: "no such automation" });
     res.json({ payload: lastPayload(c.db, owner, req.params.id) ?? null });
   });
 
-  // ─── deliveries (bet 4): the short log of what arrived and what happened to it ───
+  // â”€â”€â”€ deliveries (bet 4): the short log of what arrived and what happened to it â”€â”€â”€
   app.get("/triggers/:id/deliveries.json", (req, res) => {
     if (!c.dashAuthed(req, res)) return;
-    const owner = ownerOfP(c.principalOf(res));
+    const owner = ownerOfP(c.principalOf(res), req.params.id);
     if (!getTrigger(c.db, owner, req.params.id)) return void res.status(404).json({ error: "no such automation" });
     res.json({ deliveries: listDeliveries(c.db, owner, req.params.id) });
   });
@@ -225,7 +232,7 @@ export function registerTriggerRoutes(app: Express, c: TriggerRouteCtx): void {
   // `asb_test` in the payload, "[TEST]" in the alert title, `test` in the log and the run's event.
   app.post("/triggers/:id/test.json", async (req, res) => {
     if (!c.dashAuthed(req, res)) return;
-    const owner = ownerOfP(c.principalOf(res));
+    const owner = ownerOfP(c.principalOf(res), req.params.id);
     const t = getTrigger(c.db, owner, req.params.id);
     if (!t) return void res.status(404).json({ error: "no such automation" });
     if (t.kind !== "webhook" || !t.spec.preset) return void res.status(400).json({ error: "test events are for alert-source automations (Sentry, Datadog, PagerDuty)" });
@@ -238,7 +245,7 @@ export function registerTriggerRoutes(app: Express, c: TriggerRouteCtx): void {
     }
   });
 
-  // ─── the receiver ───
+  // â”€â”€â”€ the receiver â”€â”€â”€
   const perTrigger = makeRateLimiter({ limit: 60, windowMs: 60_000 });
 
   type Out = { status: number; body: Record<string, unknown> };
@@ -312,7 +319,7 @@ export function registerTriggerRoutes(app: Express, c: TriggerRouteCtx): void {
         return { status: 202, body: { ok: true, followup: true } };
       }
     }
-    // Stored for the editor's preview — redacted like every other stored text.
+    // Stored for the editor's preview â€” redacted like every other stored text.
     try {
       savePayload(c.db, t.id, JSON.parse(c.redact(JSON.stringify(payload))));
     } catch {
