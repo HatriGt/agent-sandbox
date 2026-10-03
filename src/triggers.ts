@@ -368,24 +368,51 @@ export function isQuietRun(log: string, opts: { question?: string; prOpened?: bo
 export interface AutomateProposal {
   cron: string;
   task: string;
+  /** The agent wrote `automate?:` — it wants the owner's OK first. */
+  asked?: boolean;
 }
 
 // One marker per line; the task may not contain another marker's close, so an empty task can
 // never swallow the next proposal.
-const AUTOMATE_RE = /<!--\s*automate:\s*([^|\n]+?)\s*\|\s*((?:(?!-->)[^\n])*?)\s*-->/g;
+const AUTOMATE_RE = /<!--\s*automate(\?)?:\s*([^|\n]+?)\s*\|\s*((?:(?!-->)[^\n])*?)\s*-->/g;
 const MAX_PROPOSALS = 3;
+
+/** Work that changes the outside world irreversibly: a schedule doing it waits for the owner's OK. */
+const CRITICAL_RE =
+  /\b(deploy\w*|release|publish|rollback|roll back|delete|drop|destroy|truncate|wipe|purge|migrat\w*|force[- ]push|push to (main|master|prod\w*)|merge|prod(uction)?|payment|charge|refund|invoice|send (an? )?(email|sms|message)|email (the|all|customers|users)|rotate|revoke|terraform apply|kubectl (apply|delete)|rm -rf)\b/i;
+const MIN_AUTO_INTERVAL_MS = 10 * 60_000;
+
+/** Why a proposal needs the owner's OK, or undefined when it can start on its own. */
+export function automateNeedsApproval(cron: string, task: string, agentAsked = false): string | undefined {
+  if (agentAsked) return "The agent asked for your OK";
+  const hit = CRITICAL_RE.exec(task);
+  if (hit) return `Touches something critical (“${hit[0]}”)`;
+  try {
+    const c = parseCron(cron);
+    const a = nextFire(c, Date.now());
+    if (a !== null) {
+      const b = nextFire(c, a);
+      if (b !== null && b - a < MIN_AUTO_INTERVAL_MS) return "Runs more often than every 10 minutes";
+    }
+  } catch {
+    /* parseAutomate already dropped invalid crons */
+  }
+  return undefined;
+}
 
 /**
  * `<!-- automate: <5-field cron> | <task> -->` markers the agent left in its log. Each becomes a
- * PAUSED trigger the operator approves in Automations. Invalid crons and empty tasks are dropped
+ * schedule that starts on its own, unless it is critical (automateNeedsApproval) or the agent wrote
+ * `automate?:` to ask; those wait paused for the owner. Invalid crons and empty tasks are dropped
  * (the agent is not a trusted author), duplicates collapse, and a run proposes at most a few.
  */
 export function parseAutomate(log: string): AutomateProposal[] {
   const out: AutomateProposal[] = [];
   const seen = new Set<string>();
   for (const m of log.matchAll(AUTOMATE_RE)) {
-    const cron = m[1].trim();
-    const task = m[2].replace(/\s+/g, " ").trim().slice(0, 500);
+    const asked = m[1] === "?";
+    const cron = m[2].trim();
+    const task = m[3].replace(/\s+/g, " ").trim().slice(0, 500);
     if (!task) continue;
     let source: string;
     try {
@@ -396,7 +423,7 @@ export function parseAutomate(log: string): AutomateProposal[] {
     const key = `${source}\n${task.toLowerCase()}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ cron: source, task });
+    out.push({ cron: source, task, ...(asked ? { asked } : {}) });
     if (out.length >= MAX_PROPOSALS) break;
   }
   return out;

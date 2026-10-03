@@ -108,7 +108,7 @@ import { followupsForBox } from "./pr-followup-store.js";
 import { followupLine, normalizePrefs, type FollowupPrefs } from "./pr-followups.js";
 import { hookAuditPath, hookBodyParser, registerTriggerRoutes } from "./trigger-routes.js";
 import { createTrigger, firstSighting, getTriggerById, listTriggers, logDelivery, pruneDeliveries, type TriggerRow } from "./trigger-store.js";
-import { isQuietRun, parseAutomate } from "./triggers.js";
+import { automateNeedsApproval, isQuietRun, parseAutomate } from "./triggers.js";
 import { intakeBodyParser, registerIntakeRoutes } from "./intake-routes.js";
 import { candidateAccounts } from "./gh-token-store.js";
 import { applyHarness, getHarness, harnessSummaryLine, loadHarnesses, normalizeEgress, HARNESS_LIMITS, type HarnessDef } from "./harness.js";
@@ -785,8 +785,9 @@ const finishMemory = (box: string, owner: string, log: string, digest: RunDigest
 
 /**
  * Agent-authored automations (Phase 4): `<!-- automate: <cron> | <task> -->` in a finished run's
- * log becomes a PAUSED schedule, marked proposed, owned by the run's owner. The box never touches
- * the controller; the operator enables or dismisses it in Automations. The repo is inherited from
+ * log becomes a schedule owned by the run's owner, live at once. A critical one (deploys, deletes,
+ * production, very frequent — see automateNeedsApproval) is created PAUSED and marked proposed
+ * instead, for the owner to approve. The box never touches the controller. The repo is inherited from
  * the automation that started the run, when there was one.
  */
 const proposeAutomations = (box: string, owner: string, log: string, startedBy: StartedBy | undefined): void => {
@@ -799,8 +800,10 @@ const proposeAutomations = (box: string, owner: string, log: string, startedBy: 
     // Read from the live log on every sweep: one row per proposal per thread, and a dismissed one stays gone.
     if (!firstSighting(db, box, `${p.cron}|${p.task}`)) continue;
     // The same proposal from another run (a re-run, a chain) is one row, not two.
-    if (existing.some((t) => t.proposed && t.spec.cron === p.cron && t.taskTemplate === p.task)) continue;
+    if (existing.some((t) => (t.proposed || t.sourceBox) && t.spec.cron === p.cron && t.taskTemplate === p.task)) continue;
     const name = p.task.split(/[.!?]/)[0].trim().slice(0, 80) || "Proposed check";
+    // Routine schedules start on their own; critical ones (or ones the agent flagged) wait for the owner.
+    const ask = automateNeedsApproval(p.cron, p.task, p.asked);
     const { row } = createTrigger(
       db,
       secretBox,
@@ -811,17 +814,17 @@ const proposeAutomations = (box: string, owner: string, log: string, startedBy: 
         spec: { cron: p.cron, timezone: "UTC" },
         ...(parent?.repo ? { repo: parent.repo } : {}),
         taskTemplate: p.task,
-        enabled: false,
+        enabled: !ask,
         concurrency: 1,
         prComment: false,
         quiet: true,
       },
       Date.now(),
-      { proposed: true, sourceBox: box }
+      { proposed: !!ask, sourceBox: box }
     );
     existing.push(row);
-    auditTrigger(owner, "trigger.propose", { trigger: row.id, box });
-    console.error(`[triggers] ${box} proposed ${row.id}: ${p.cron} — ${name}`);
+    auditTrigger(owner, ask ? "trigger.propose" : "trigger.auto-create", { trigger: row.id, box, ...(ask ? { why: ask } : {}) });
+    console.error(`[triggers] ${box} ${ask ? `proposed (${ask})` : "scheduled"} ${row.id}: ${p.cron} — ${name}`);
   }
 };
 

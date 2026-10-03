@@ -43,7 +43,7 @@ export function parseConsolePath(pathname: string): ConsoleRoute {
   if (box) return { view: "box", name: decodeURIComponent(box[1]) };
   if (/^\/fleet\/?$/.test(rest)) return { view: "fleet" };
   if (/^\/history\/?$/.test(rest)) return { view: "history" };
-  if (/^\/automations\/?$/.test(rest)) return { view: "automations" };
+  if (/^\/(automations|autopilot)\/?$/.test(rest)) return { view: "automations" };
   if (/^\/skills\/?$/.test(rest)) return { view: "skills" };
   if (/^\/memory\/?$/.test(rest)) return { view: "memory" };
   if (/^\/harnesses\/?$/.test(rest)) return { view: "harnesses" };
@@ -69,7 +69,7 @@ export function consolePath(r: ConsoleRoute): string {
     case "history":
       return `${BASE}/history`;
     case "automations":
-      return `${BASE}/automations`;
+      return `${BASE}/autopilot`;
     case "skills":
       return `${BASE}/skills`;
     case "memory":

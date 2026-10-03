@@ -1140,19 +1140,26 @@ export interface AutomationResult {
   reason?: string;
   finished?: { state: string; headline: string; archiveId?: number };
 }
-/** Mirrors GET /triggers.json rows. Stamps are epoch ms. Never carries the webhook secret. */
 /** Something scheduled as part of one thread (src/thread-schedule.ts). */
 export interface ThreadScheduleItem {
   id: string;
   name: string;
-  /** proposed: the agent suggested it here, waiting on you · created: approved from here · repeats: the schedule that started this thread · after: a chain that follows it */
+  /** proposed: critical, waiting on you · created: scheduled from here · repeats: the schedule that started this thread · after: a chain that follows it */
   relation: "proposed" | "created" | "repeats" | "after";
+  category: "ci" | "deploy" | "monitor" | "report" | "follow-up" | "maintenance" | "task";
   when: string;
+  cron?: string;
   nextFire: number | null;
+  lastFired: number | null;
+  lastOutcome?: string;
+  lastBox?: string;
+  repo?: string;
   enabled: boolean;
   task: string;
+  why?: string;
 }
 
+/** Mirrors GET /triggers.json rows. Stamps are epoch ms. Never carries the webhook secret. */
 export interface Automation extends AutomationDraft {
   id: string;
   when: string;

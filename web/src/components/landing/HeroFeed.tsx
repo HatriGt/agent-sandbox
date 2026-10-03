@@ -73,7 +73,7 @@ export function HeroFeed({ className }: { className?: string }) {
     <div ref={ref} className={cn("bg-card shadow-e5 overflow-hidden rounded-xl border", className)} role="img" aria-label="Illustrative automations feed: a schedule, an error webhook, two GitHub events and a chained run each start a run on their own. One stops to ask a question, the rest finish with pull requests and receipts.">
       <div className="flex h-11 items-center gap-2 border-b px-4">
         <span className="bg-ok size-1.5 rounded-full" aria-hidden />
-        <span className="text-meta font-semibold">Automations</span>
+        <span className="text-meta font-semibold">Autopilot</span>
         <span className="text-muted-foreground text-micro">· listening</span>
         <span className="stamp text-muted-foreground ml-auto tabular-nums">
           {receipts} new {receipts === 1 ? "receipt" : "receipts"}

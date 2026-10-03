@@ -182,8 +182,8 @@ export function Automations({ onBack, onOpenBox }: { onBack: () => void; onOpenB
               <ArrowLeft className="size-4" />
               Machines
             </Button>
-            <h1 className="text-foreground font-serif text-h1 font-normal tracking-[-0.01em]">Automations</h1>
-            <p className="text-muted-foreground mt-1 text-meta">Runs that start themselves. Every one opens a PR at most, and leaves a receipt.</p>
+            <h1 className="text-foreground font-serif text-h1 font-normal tracking-[-0.01em]">Autopilot</h1>
+            <p className="text-muted-foreground mt-1 text-meta">Work that runs itself — on a schedule, a webhook, a GitHub event, or after another run. Each opens a PR at most and leaves a receipt.</p>
           </div>
           {rows && rows.length > 0 && (
             <Button size="sm" onClick={() => setEditing({ id: null, draft: blank() })}>

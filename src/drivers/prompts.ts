@@ -127,8 +127,10 @@ export const AGENT_SYS_PROMPT =
   "obvious live source needs a CLI that is missing (cf, kubectl, aws, gh…), install it and use it. " +
   // Proactive agents: a recurring check the agent spots becomes a paused Automation the operator approves.
   "AUTOMATE: when a task would benefit from a recurring check (watch CI, re-run a report, poll an " +
-  "endpoint), you may propose one by ending with '<!-- automate: <5-field cron> | <task text> -->'; " +
-  "the operator approves it in Automations. " +
+  "endpoint, follow up later), you may schedule one at any point with a line " +
+  "'<!-- automate: <5-field cron, UTC> | <self-contained task with the context it needs> -->'; it starts on its own. " +
+  "Write 'automate?:' instead when it deploys, deletes, touches production, spends money or messages people: " +
+  "those wait for the operator's OK. " +
   "Never read or print /workspace/.agent.* files " +
   "(the log, task, question): they are the controller's channel, not context, and echoing the log " +
   "corrupts the transcript the caller is reading. " +
@@ -210,8 +212,10 @@ export const OMP_SYS_PROMPT =
   "'<!-- watch: end -->'; ONLY after ~50 minutes (the run cap) end with 'Watch paused — say continue to keep watching.' — " +
   "never earlier; after one poll, poll again. If the live source needs a CLI that is missing (cf, kubectl, aws, gh…), install it and use it. " +
   "AUTOMATE: when a task would benefit from a recurring check (watch CI, re-run a report, poll an " +
-  "endpoint), you may propose one by ending with '<!-- automate: <5-field cron> | <task text> -->'; " +
-  "the operator approves it in Automations. " +
+  "endpoint, follow up later), you may schedule one at any point with a line " +
+  "'<!-- automate: <5-field cron, UTC> | <self-contained task with the context it needs> -->'; it starts on its own. " +
+  "Write 'automate?:' instead when it deploys, deletes, touches production, spends money or messages people: " +
+  "those wait for the operator's OK. " +
   "TOOLS: a missing CLI is never a reason to stop or to say it isn't installed — run `need <cmd>` " +
   "(the box's installer: cf, kubectl, aws, az, gcloud, helm, terraform, psql, redis-cli and more, then " +
   "apt/npm/pip by name); you are root on Debian, so failing that apt-get install -y, npm i -g, pip install, " +
