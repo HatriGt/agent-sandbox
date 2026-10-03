@@ -29,10 +29,7 @@ export function AutopilotPage({
 }) {
   const reduce = useReducedMotion();
   // Counts on the tabs: what is live, what is coming up, and (amber) what is waiting on you.
-  const trig = useCached("triggers", (signal) => api.triggers(signal));
-  const triggers = trig.data?.triggers;
-  // Each tab edits its own list; recount when you move between them.
-  React.useEffect(() => void trig.refresh(), [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+  const triggers = useCached("triggers", (signal) => api.triggers(signal)).data?.triggers;
   const workflows = useCached("workflows", (signal) => api.workflows(signal)).data?.workflows;
   const auto = triggers?.filter((t) => t.scope !== "scheduled");
   const sched = triggers?.filter((t) => t.scope === "scheduled");

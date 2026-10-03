@@ -5,7 +5,7 @@ import { motion, useReducedMotion } from "motion/react";
 import { toast } from "sonner";
 import { api, type AlertPreset, type Automation, type AutomationDelivery, type AutomationDraft, type AutomationKind, type GithubEvent } from "@/lib/api";
 import { fmtAgo } from "@/lib/format";
-import { useCached } from "@/lib/cache";
+import { readCache, useCached, writeCache } from "@/lib/cache";
 import { Button } from "@/components/ui/button";
 import { ArmButton } from "@/components/ui/arm-button";
 import { Switch } from "@/components/ui/switch";
@@ -162,6 +162,13 @@ export function Automations({ onOpenBox, onOpenPlaybooks }: { onOpenBox: (box: s
     void load(ctrl.signal);
     return () => ctrl.abort();
   }, [attempt, load]);
+
+  // Every local edit (toggle, create, delete) flows back into the shared cache the tab counts read.
+  React.useEffect(() => {
+    if (!rows) return;
+    const cached = readCache<{ triggers: Automation[] }>("triggers")?.v.triggers ?? [];
+    writeCache("triggers", { triggers: [...cached.filter((t) => t.scope === "scheduled"), ...rows] });
+  }, [rows]);
 
   const toggle = async (a: Automation, on: boolean) => {
     setRows((prev) => (prev ?? []).map((x) => (x.id === a.id ? { ...x, enabled: on } : x)));
