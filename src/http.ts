@@ -107,7 +107,7 @@ import { registerFollowupRoutes } from "./pr-followup-routes.js";
 import { followupsForBox } from "./pr-followup-store.js";
 import { followupLine, normalizePrefs, type FollowupPrefs } from "./pr-followups.js";
 import { hookAuditPath, hookBodyParser, registerTriggerRoutes } from "./trigger-routes.js";
-import { createTrigger, getTriggerById, listTriggers, logDelivery, pruneDeliveries, type TriggerRow } from "./trigger-store.js";
+import { createTrigger, firstSighting, getTriggerById, listTriggers, logDelivery, pruneDeliveries, type TriggerRow } from "./trigger-store.js";
 import { isQuietRun, parseAutomate } from "./triggers.js";
 import { intakeBodyParser, registerIntakeRoutes } from "./intake-routes.js";
 import { candidateAccounts } from "./gh-token-store.js";
@@ -747,6 +747,12 @@ async function memoryTick(boxes: BoxView[]): Promise<void> {
       if (!snap.log) continue;
       const { added } = harvestMemory(b.name, owner, snap.log, await reposOfBox(b.name));
       if (added.length) console.error(`[memory] ${b.name}: remembered ${added.length} note${added.length === 1 ? "" : "s"} live`);
+      // Proposed automations surface mid-run (the thread's schedule pill), not only at sign-off.
+      try {
+        proposeAutomations(b.name, owner, snap.log, startedByOf(db, b.name));
+      } catch (e) {
+        console.error(`[triggers] ${b.name}: live proposal failed: ${(e as Error).message.slice(0, 200)}`);
+      }
     } catch (e) {
       console.error(`[memory] ${b.name}: live harvest failed: ${(e as Error).message.slice(0, 200)}`);
     }
@@ -790,7 +796,9 @@ const proposeAutomations = (box: string, owner: string, log: string, startedBy: 
   const existing = listTriggers(db, owner);
   for (const p of proposals) {
     if (existing.length >= 50) break;
-    // The same proposal twice (a re-run, a chain) is one row, not two.
+    // Read from the live log on every sweep: one row per proposal per thread, and a dismissed one stays gone.
+    if (!firstSighting(db, box, `${p.cron}|${p.task}`)) continue;
+    // The same proposal from another run (a re-run, a chain) is one row, not two.
     if (existing.some((t) => t.proposed && t.spec.cron === p.cron && t.taskTemplate === p.task)) continue;
     const name = p.task.split(/[.!?]/)[0].trim().slice(0, 80) || "Proposed check";
     const { row } = createTrigger(
@@ -809,7 +817,7 @@ const proposeAutomations = (box: string, owner: string, log: string, startedBy: 
         quiet: true,
       },
       Date.now(),
-      { proposed: true }
+      { proposed: true, sourceBox: box }
     );
     existing.push(row);
     auditTrigger(owner, "trigger.propose", { trigger: row.id, box });

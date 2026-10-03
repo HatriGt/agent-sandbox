@@ -30,11 +30,18 @@ export interface TriggerRow extends TriggerInput {
   hasSigningSecret: boolean;
   /** Authored by an agent (<!-- automate -->), paused until the owner enables or dismisses it. */
   proposed: boolean;
+  /** The thread an agent proposed it from. */
+  sourceBox?: string;
   createdAt: number;
   updatedAt: number;
 }
 
 const MAX_PAYLOAD_CHARS = 64_000;
+
+/** First sighting of a proposal in a thread → true; every later sweep (or after a dismissal) → false. */
+export function firstSighting(db: Db, box: string, key: string, now = Date.now()): boolean {
+  return db.prepare(`INSERT OR IGNORE INTO trigger_proposals_seen (box, key, at) VALUES (?, ?, ?)`).run(box, key, now).changes > 0;
+}
 
 function toRow(r: Record<string, any>): TriggerRow {
   const parse = <T>(s: unknown, d: T): T => {
@@ -67,6 +74,7 @@ function toRow(r: Record<string, any>): TriggerRow {
     hasPayload: !!r.last_payload_json,
     hasSigningSecret: !!r.signing_secret_enc,
     proposed: !!r.proposed,
+    ...(r.source_box ? { sourceBox: String(r.source_box) } : {}),
     createdAt: Number(r.created_at),
     updatedAt: Number(r.updated_at),
   };
@@ -88,18 +96,18 @@ export function createTrigger(
   owner: string,
   t: TriggerInput,
   now = Date.now(),
-  opts: { proposed?: boolean } = {}
+  opts: { proposed?: boolean; sourceBox?: string } = {}
 ): { row: TriggerRow; secret: string } {
   const id = "trg_" + crypto.randomBytes(9).toString("base64url");
   const secret = newSecret();
   // A proposal is always created paused: the agent suggests, the owner enables.
   const enabled = opts.proposed ? false : t.enabled;
   db.prepare(
-    `INSERT INTO triggers (id, owner, name, kind, spec_json, repo, task_template, enabled, concurrency, pr_comment, quiet, proposed, agent, model, harness_id, workflow_id, secret_enc, next_fire, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO triggers (id, owner, name, kind, spec_json, repo, task_template, enabled, concurrency, pr_comment, quiet, proposed, agent, model, harness_id, workflow_id, source_box, secret_enc, next_fire, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id, owner, t.name, t.kind, JSON.stringify(t.spec), t.repo ?? null, t.taskTemplate, enabled ? 1 : 0, t.concurrency,
-    t.prComment ? 1 : 0, t.quiet ? 1 : 0, opts.proposed ? 1 : 0, t.agent ?? null, t.model ?? null, t.harnessId ?? null, t.workflowId ?? null, box.seal(secret),
+    t.prComment ? 1 : 0, t.quiet ? 1 : 0, opts.proposed ? 1 : 0, t.agent ?? null, t.model ?? null, t.harnessId ?? null, t.workflowId ?? null, opts.sourceBox ?? null, box.seal(secret),
     computeNextFire({ ...t, enabled }, now), now, now
   );
   return { row: getTrigger(db, owner, id)!, secret };

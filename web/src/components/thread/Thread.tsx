@@ -23,6 +23,7 @@ import { useRunDigest } from "./DigestCard";
 import { useOutcome } from "./OutcomeCard";
 import { RunPill, WatchPill } from "./RunPill";
 import { ThreadHeader } from "./ThreadHeader";
+import { SchedulePill } from "./SchedulePill";
 import { parseTrace, producedFiles } from "@/lib/trace";
 import { deriveTaskBoard, type TaskBoard } from "@/lib/planTasks";
 import { usePoll } from "@/hooks/usePoll";
@@ -746,6 +747,7 @@ export function Thread({
       <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col", showWorkspace && workspaceFull && "hidden md:hidden")}>
       <div className="relative min-h-0 min-w-0 flex-1">
         <ThreadMinimap turns={turns} scrollerRef={stick.scrollRef} />
+        <SchedulePill box={box.name} runState={String(runState ?? "")} />
         {/* Ambient depth: a faint brand glow at the head of the conversation, and soft fades at the
             top and bottom edges so messages dissolve under the header and into the composer rather
             than being sliced by them. Pure decoration; pointer-events off. */}

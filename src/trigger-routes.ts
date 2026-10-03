@@ -13,6 +13,8 @@ import {
 } from "./trigger-store.js";
 import { normalizeAlert, testPayload, verifyPreset } from "./alert-presets.js";
 import crypto from "node:crypto";
+import { startedByOf } from "./started-by.js";
+import { threadSchedule } from "./thread-schedule.js";
 import { makeRateLimiter } from "./auth-throttle.js";
 
 /**
@@ -68,6 +70,23 @@ export function registerTriggerRoutes(app: Express, c: TriggerRouteCtx): void {
     const all = listTriggers(c.db, owner);
     const nm = Object.fromEntries(all.map((t) => [t.id, t.name]));
     res.json({ triggers: all.map((t) => ({ ...viewTrigger(t, nm, c.db), active: c.dispatcher.activeCount(t.id) })) });
+  });
+
+  /** What is scheduled as part of one thread (the thread's schedule pill). Owner-scoped like the list. */
+  app.get("/triggers/for-box.json", (req, res) => {
+    if (!c.dashAuthed(req, res)) return;
+    const box = typeof req.query.box === "string" ? req.query.box : "";
+    if (!box) return void res.status(400).json({ error: "box is required" });
+    const owner = ownerOfP(c.principalOf(res));
+    const all = listTriggers(c.db, owner);
+    const nm = Object.fromEntries(all.map((t) => [t.id, t.name]));
+    let sb;
+    try {
+      sb = startedByOf(c.db, box);
+    } catch {
+      sb = undefined;
+    }
+    res.json({ items: threadSchedule(box, sb, all.map((t) => viewTrigger(t, nm))) });
   });
 
   app.post("/triggers.json", (req, res) => {

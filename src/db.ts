@@ -373,6 +373,18 @@ const MIGRATIONS: string[] = [
   -- A trigger can run a saved workflow (src/workflow.ts): its task fills {{task}} in step one.
   ALTER TABLE triggers ADD COLUMN workflow_id TEXT;
   `,
+  `
+  -- The thread a proposed automation came from (the thread's schedule pill lists it), and which
+  -- proposals a thread already made: proposals are read from the live log on every sweep, so a
+  -- dismissed one must not come back.
+  ALTER TABLE triggers ADD COLUMN source_box TEXT;
+  CREATE TABLE IF NOT EXISTS trigger_proposals_seen (
+    box TEXT NOT NULL,
+    key TEXT NOT NULL,
+    at INTEGER NOT NULL,
+    PRIMARY KEY (box, key)
+  );
+  `,
 ];
 
 export function openDb(dataDir: string): Db {

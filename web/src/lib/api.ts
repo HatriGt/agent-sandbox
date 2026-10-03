@@ -1072,6 +1072,8 @@ export const api = {
   deleteTrigger: (id: string) => fetch(url(`/triggers/${encodeURIComponent(id)}.json`), { method: "DELETE", headers: authHeaders }).then(parse<{ ok: true }>),
   setTriggerEnabled: (id: string, enabled: boolean) => post<{ trigger: Automation }>(`/triggers/${encodeURIComponent(id)}/enabled.json`, { enabled }),
   rotateTrigger: (id: string) => post<{ secret: string; hookUrl: string }>(`/triggers/${encodeURIComponent(id)}/rotate.json`, {}),
+  threadSchedule: (box: string, signal?: AbortSignal) =>
+    fetch(url(`/triggers/for-box.json?box=${encodeURIComponent(box)}`), { headers: authHeaders, signal }).then(parse<{ items: ThreadScheduleItem[] }>),
   runTrigger: (id: string) => post<{ result: AutomationResult }>(`/triggers/${encodeURIComponent(id)}/run.json`, {}),
   testTrigger: (id: string) => post<{ ok: boolean; test: true; result?: AutomationResult; skipped?: string; ignored?: string }>(`/triggers/${encodeURIComponent(id)}/test.json`, {}),
   triggerDeliveries: (id: string) => fetch(url(`/triggers/${encodeURIComponent(id)}/deliveries.json`), { headers: authHeaders }).then(parse<{ deliveries: AutomationDelivery[] }>),
@@ -1139,6 +1141,18 @@ export interface AutomationResult {
   finished?: { state: string; headline: string; archiveId?: number };
 }
 /** Mirrors GET /triggers.json rows. Stamps are epoch ms. Never carries the webhook secret. */
+/** Something scheduled as part of one thread (src/thread-schedule.ts). */
+export interface ThreadScheduleItem {
+  id: string;
+  name: string;
+  /** proposed: the agent suggested it here, waiting on you · created: approved from here · repeats: the schedule that started this thread · after: a chain that follows it */
+  relation: "proposed" | "created" | "repeats" | "after";
+  when: string;
+  nextFire: number | null;
+  enabled: boolean;
+  task: string;
+}
+
 export interface Automation extends AutomationDraft {
   id: string;
   when: string;
