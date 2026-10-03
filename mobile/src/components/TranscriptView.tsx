@@ -1,10 +1,15 @@
-import React, { memo, useState } from "react";
+import React, { memo, useMemo, useState } from "react";
 import { Pressable, View } from "react-native";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
-import type { PlanItem, TraceEvent } from "@/lib/trace";
-import { resultSummary } from "@/lib/trace";
+import type { PlanItem, ProducedFile, TraceEvent } from "@/lib/trace";
+import { producedFiles, resultSummary } from "@/lib/trace";
+import { parseTestReport } from "@/lib/testReport";
+import { DiffText } from "./DiffText";
 import { MarkdownLite } from "./MarkdownLite";
+import { McpItem, parseMcpName } from "./McpItem";
+import { ProducedFiles } from "./ProducedFiles";
+import { TestResultsCard } from "./TestResultsCard";
 import { T } from "./ui/AppText";
 import { Icon, toolIcon } from "./ui/Icon";
 import { FadeInUp } from "./ui/Motion";
@@ -12,35 +17,61 @@ import { FadeInUp } from "./ui/Motion";
 /**
  * A rendered thread item. Consecutive tool calls are grouped into one "Worked"
  * card (like the web's folded tool work); prose stays prose; you-turns are
- * right-aligned bubbles.
+ * right-aligned bubbles. `produced` is appended once, after the run settles.
  */
 export type ThreadItem =
   | { kind: "tools"; tools: Extract<TraceEvent, { kind: "tool" }>[] }
-  | Exclude<TraceEvent, { kind: "tool" }>;
+  | { kind: "produced"; files: ProducedFile[] }
+  | Exclude<TraceEvent, { kind: "tool" | "usage" }>;
 
-export function groupEvents(events: TraceEvent[]): ThreadItem[] {
+/**
+ * Group trace events into thread items. Pass `{ done: true }` once the run has finished to append
+ * the produced-files row (the files the agent wrote under /workspace); while a run is live the row
+ * is withheld, like the web. `usage` events never render — see latestUsage.
+ */
+export function groupEvents(events: TraceEvent[], opts?: { done?: boolean }): ThreadItem[] {
   const out: ThreadItem[] = [];
   for (const e of events) {
     if (e.kind === "tool") {
       const last = out[out.length - 1];
       if (last && last.kind === "tools") last.tools.push(e);
       else out.push({ kind: "tools", tools: [e] });
+    } else if (e.kind === "usage") {
+      continue;
     } else {
       out.push(e);
     }
   }
+  if (opts?.done) {
+    const files = producedFiles(events);
+    if (files.length) out.push({ kind: "produced", files });
+  }
   return out;
+}
+
+export type UsageEvent = Extract<TraceEvent, { kind: "usage" }>;
+
+/** The last `usage` stamp of the run (cumulative in/out tokens + the latest context footprint), or null. */
+export function latestUsage(events: TraceEvent[]): UsageEvent | null {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i];
+    if (e.kind === "usage") return e;
+  }
+  return null;
 }
 
 export const ThreadRow = memo(function ThreadRow({
   item,
   animate,
   onRevert,
+  session,
 }: {
   item: ThreadItem;
   animate?: boolean;
   /** Set on revertable `you` items: called when the user confirms a revert to before this message. */
   onRevert?: (messageText: string) => void;
+  /** The box session; needed by the `produced` row to fetch/share files. Without it the row lists names only. */
+  session?: string;
 }) {
   const body = (() => {
     switch (item.kind) {
@@ -56,6 +87,8 @@ export const ThreadRow = memo(function ThreadRow({
         return <AskRow text={item.text} />;
       case "tools":
         return <ToolGroup tools={item.tools} />;
+      case "produced":
+        return session ? <ProducedFiles session={session} files={item.files} /> : <ProducedNames files={item.files} />;
       case "think":
         return <ThinkRow text={item.text} />;
       case "plan":
@@ -161,6 +194,9 @@ function ToolGroup({ tools }: { tools: Extract<TraceEvent, { kind: "tool" }>[] }
   const [open, setOpen] = useState(false);
   const failed = tools.filter((t) => t.failed).length;
   const single = tools.length === 1;
+  const mcp = single ? parseMcpName(tools[0].name) : null;
+  const headerIcon = single ? (mcp ? "zap" : toolIcon(tools[0].name)) : "layers";
+  const headerName = mcp ? `${mcp.server} · ${mcp.label}` : tools[0].name;
 
   return (
     <View
@@ -184,10 +220,10 @@ function ToolGroup({ tools }: { tools: Extract<TraceEvent, { kind: "tool" }>[] }
           opacity: pressed ? 0.7 : 1,
         })}
       >
-        <Icon name={single ? toolIcon(tools[0].name) : "layers"} size={15} color={failed ? palette.destructive : palette.mutedForeground} />
+        <Icon name={headerIcon} size={15} color={failed ? palette.destructive : palette.mutedForeground} />
         {single ? (
           <T variant="meta" weight="medium" numberOfLines={1} style={{ flex: 1, minWidth: 0 }} tone={failed ? "destructive" : "default"}>
-            {tools[0].name}
+            {headerName}
             {tools[0].arg ? (
               <T variant="meta" tone="faint" numberOfLines={1}>
                 {"  "}
@@ -216,38 +252,84 @@ function ToolGroup({ tools }: { tools: Extract<TraceEvent, { kind: "tool" }>[] }
   );
 }
 
+const RESULT_MAX_CHARS = 6000;
+const DIFF_MAX_LINES = 200;
+
 function ToolRow({ tool, last }: { tool: Extract<TraceEvent, { kind: "tool" }>; last: boolean }) {
   const { palette } = useTheme();
   const [open, setOpen] = useState(false);
-  const summary = resultSummary(tool.result);
+  const [raw, setRaw] = useState(false);
+  const mcp = parseMcpName(tool.name);
+  // A finished test run reads as a card, never as a wall of runner output; while the shell is
+  // still streaming the output is partial and the parse would flicker, so wait for it to settle.
+  const report = useMemo(() => (tool.streaming ? null : parseTestReport(tool.result)), [tool.result, tool.streaming]);
+  if (mcp) return <McpItem event={tool} call={mcp} last={last} />;
+
+  const expandable = !!tool.result || !!tool.diff;
+  const summary = report
+    ? `${report.passed} passed${report.failed ? ` · ${report.failed} failed` : ""}${report.skipped ? ` · ${report.skipped} skipped` : ""}`
+    : resultSummary(tool.result);
   return (
     <View style={{ borderBottomWidth: last ? 0 : 1, borderBottomColor: palette.border }}>
       <Pressable
-        onPress={() => tool.result && setOpen((o) => !o)}
+        onPress={() => expandable && setOpen((o) => !o)}
         style={{ flexDirection: "row", alignItems: "flex-start", gap: 8, paddingHorizontal: 12, paddingVertical: 8 }}
       >
-        <Icon name={toolIcon(tool.name)} size={13} color={tool.failed ? palette.destructive : palette.faint} style={{ marginTop: 2 }} />
+        <Icon
+          name={report ? (report.failed ? "x-circle" : "check-circle") : toolIcon(tool.name)}
+          size={13}
+          color={tool.failed || report?.failed ? palette.destructive : report ? palette.ok : palette.faint}
+          style={{ marginTop: 2 }}
+        />
         <View style={{ flex: 1, minWidth: 0 }}>
           <T variant="code" mono tone={tool.failed ? "destructive" : "muted"} numberOfLines={open ? undefined : 1}>
             {tool.name}
             {tool.arg ? `: ${tool.arg.split("\n")[0]}` : ""}
-            {tool.failed ? " — failed" : ""}
+            {tool.failed ? " — failed" : tool.streaming ? " — running" : ""}
           </T>
           {!open && summary ? (
-            <T variant="code" mono tone="faint" numberOfLines={1}>
+            <T variant="code" mono tone={report?.failed ? "destructive" : "faint"} numberOfLines={1}>
               {summary}
             </T>
           ) : null}
         </View>
-        {tool.result ? <Icon name={open ? "minimize-2" : "maximize-2"} size={12} color={palette.faint} style={{ marginTop: 3 }} /> : null}
+        {expandable ? <Icon name={open ? "minimize-2" : "maximize-2"} size={12} color={palette.faint} style={{ marginTop: 3 }} /> : null}
       </Pressable>
-      {open && tool.result ? (
-        <View style={{ backgroundColor: palette.trace, marginHorizontal: 12, marginBottom: 10, borderRadius: radius.lg, padding: 10 }}>
-          <T variant="code" mono selectable style={{ color: palette.traceFg }}>
-            {tool.result.length > 6000 ? `${tool.result.slice(0, 6000)}\n… (${tool.result.length - 6000} more chars)` : tool.result}
-          </T>
+      {open ? (
+        <View style={{ marginHorizontal: 12, marginBottom: 10, gap: 8 }}>
+          {tool.diff ? <DiffText diff={tool.diff} maxLines={DIFF_MAX_LINES} /> : null}
+          {report ? <TestResultsCard report={report} onRaw={() => setRaw((r) => !r)} rawOpen={raw} /> : null}
+          {tool.result && (!report || raw) ? (
+            <View style={{ backgroundColor: palette.trace, borderRadius: radius.lg, padding: 10 }}>
+              <T variant="code" mono selectable style={{ color: palette.traceFg }}>
+                {tool.result.length > RESULT_MAX_CHARS
+                  ? `${tool.result.slice(0, RESULT_MAX_CHARS)}\n… (${tool.result.length - RESULT_MAX_CHARS} more chars)`
+                  : tool.result}
+              </T>
+            </View>
+          ) : null}
         </View>
       ) : null}
+    </View>
+  );
+}
+
+/** The produced row without a session: names only (no fetch is possible). */
+function ProducedNames({ files }: { files: ProducedFile[] }) {
+  const { palette } = useTheme();
+  return (
+    <View style={{ gap: 6, marginVertical: 10 }}>
+      <T variant="micro" tone="muted" weight="semibold" style={{ textTransform: "uppercase", letterSpacing: 0.6 }}>
+        {files.length === 1 ? "Produced file" : "Produced files"}
+      </T>
+      {files.map((f) => (
+        <View key={f.relPath} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <Icon name="file" size={13} color={palette.mutedForeground} />
+          <T variant="meta" mono numberOfLines={1} ellipsizeMode="middle" style={{ flex: 1, minWidth: 0 }}>
+            {f.relPath}
+          </T>
+        </View>
+      ))}
     </View>
   );
 }

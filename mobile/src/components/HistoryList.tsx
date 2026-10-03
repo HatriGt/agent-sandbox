@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { View } from "react-native";
 import { useRouter } from "expo-router";
-import { api, type HistoryRun, type RunDigest } from "@/lib/api";
+import { api, type HistoryRun, type LedgerTotals, type RunDigest } from "@/lib/api";
 import { ago, durationWords, friendlyName } from "@/lib/format";
 import { useTheme } from "@/theme/ThemeContext";
 import { T } from "./ui/AppText";
@@ -97,6 +97,7 @@ export function HistoryList() {
 
   return (
     <View style={{ gap: 10 }}>
+      <LedgerHeader />
       {rows.map((r, i) => {
         const at = r.archivedAt || r.endedAt || 0;
         const prev = i > 0 ? rows[i - 1].archivedAt || rows[i - 1].endedAt || 0 : null;
@@ -226,4 +227,42 @@ function dayLabel(ms: number): string {
     month: "short",
     ...(d.getFullYear() !== today.getFullYear() ? { year: "numeric" as const } : {}),
   });
+}
+
+const compact = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n));
+
+/** Totals over the whole archive — runs, outcomes, checks, tokens, reported cost (never estimated). */
+function LedgerHeader() {
+  const { palette } = useTheme();
+  const [t, setT] = useState<LedgerTotals | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    api.ledger().then((r) => !cancelled && setT(r.totals)).catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  if (!t || !t.runs) return null;
+  const cells: [string, string][] = [
+    ["Runs", String(t.runs)],
+    ["Done", String(t.done)],
+    ["Failed", String(t.failed)],
+    ...(t.checked ? [["Checks passed", `${t.passed}/${t.checked}`] as [string, string]] : []),
+    ...(t.withUsage ? [["Tokens", `${compact(t.inputTokens)} in · ${compact(t.outputTokens)} out`] as [string, string]] : []),
+    ...(t.costUsd != null ? [["Cost", `$${t.costUsd.toFixed(2)}${t.withCost < t.runs ? ` (${t.withCost} runs)` : ""}`] as [string, string]] : []),
+  ];
+  return (
+    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, paddingBottom: 4 }}>
+      {cells.map(([k, v]) => (
+        <View key={k} style={{ borderWidth: 1, borderColor: palette.border, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6 }}>
+          <T variant="micro" tone="faint">
+            {k}
+          </T>
+          <T variant="meta" weight="semibold">
+            {v}
+          </T>
+        </View>
+      ))}
+    </View>
+  );
 }

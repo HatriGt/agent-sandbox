@@ -1,18 +1,22 @@
-// Automations on the phone (docs/plan-agent-cloud.md, Mobile): read the list, pause/resume, and
-// "Run now". Creating and editing stays on the web — the trigger editor (template preview, secrets
-// shown once) is a desk task.
-import React, { useCallback, useEffect, useState } from "react";
+// Automations on the phone (docs/plan-mobile-parity.md): the list with pause/resume, "Run now",
+// proposals to approve or dismiss, and a filter for one-off chat schedules. Tapping a row opens the
+// editor (app/automation/[id].tsx); "+ New" opens it blank.
+import React, { useCallback, useMemo, useState } from "react";
 import { RefreshControl, ScrollView, Switch, View, Pressable } from "react-native";
-import { Redirect, useRouter } from "expo-router";
+import { Redirect, useFocusEffect, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
-import { api, type Automation, type AutomationDelivery, type AutomationResult } from "@/lib/api";
+import { api, type Automation, type AutomationDelivery, type AutomationResult, type AutomationScope } from "@/lib/api";
 import { ago } from "@/lib/format";
 import { useAuth } from "@/state/auth";
 import { useTheme } from "@/theme/ThemeContext";
+import { radius } from "@/theme/tokens";
 import { T } from "@/components/ui/AppText";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { Segmented } from "@/components/settings/Segmented";
+
+type Filter = "all" | AutomationScope;
 
 const KIND: Record<Automation["kind"], string> = { schedule: "Schedule", webhook: "Webhook", github: "GitHub", chain: "After another" };
 
@@ -42,10 +46,13 @@ function deliveryLine(d: AutomationDelivery): string {
 }
 const deliveryTone = (d: AutomationDelivery) => (d.outcome === "fired" ? ("ok" as const) : d.outcome === "skipped" ? ("muted" as const) : ("destructive" as const));
 
-function Row({ a, onChange }: { a: Automation; onChange: (a: Automation) => void }) {
+function Row({ a, onChange, onRemove }: { a: Automation; onChange: (a: Automation) => void; onRemove: (id: string) => void }) {
   const router = useRouter();
   const { palette } = useTheme();
+  const pending = !!a.proposed && !a.enabled;
   const [busy, setBusy] = useState(false);
+  const [dismissing, setDismissing] = useState(false);
+  const [approving, setApproving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [log, setLog] = useState<AutomationDelivery[] | null>(null);
@@ -94,6 +101,31 @@ function Row({ a, onChange }: { a: Automation; onChange: (a: Automation) => void
     }
   };
 
+  const approve = async () => {
+    setApproving(true);
+    setNote(null);
+    try {
+      onChange((await api.setAutomationEnabled(a.id, true)).trigger);
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : String(e));
+    } finally {
+      setApproving(false);
+    }
+  };
+
+  const dismiss = async () => {
+    setDismissing(true);
+    setNote(null);
+    try {
+      await api.deleteAutomation(a.id);
+      onRemove(a.id);
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : String(e));
+      setDismissing(false);
+    }
+  };
+
   const runNow = async () => {
     setBusy(true);
     setNote(null);
@@ -111,24 +143,41 @@ function Row({ a, onChange }: { a: Automation; onChange: (a: Automation) => void
   };
 
   return (
-    <Card style={{ gap: 6 }}>
+    <Card
+      onPress={() => router.push(`/automation/${encodeURIComponent(a.id)}`)}
+      // "Needs you" is ink: a hairline, no tinted fill (theme commits 21d16af / 44fb21c).
+      style={[{ gap: 6 }, pending ? { borderColor: palette.lineStrong, borderRadius: radius.xl } : !a.enabled ? { opacity: 0.75 } : null]}
+    >
       <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
         <View style={{ flex: 1, minWidth: 0 }}>
           <T variant="body" weight="semibold" numberOfLines={1}>
             {a.name}
           </T>
           <T variant="micro" tone="faint" numberOfLines={2}>
+            {a.proposed ? "Scheduled by the agent · " : a.scope === "scheduled" ? "From a chat · " : ""}
             {KIND[a.kind]} · {a.when}
             {a.repo ? ` · ${a.repo}` : ""}
           </T>
         </View>
-        <Switch
-          value={a.enabled}
-          onValueChange={(v) => void toggle(v)}
-          trackColor={{ true: palette.live }}
-          accessibilityLabel={`${a.name} ${a.enabled ? "on" : "off"}`}
-        />
+        {pending ? (
+          <View style={{ flexDirection: "row", gap: 6, alignItems: "center" }}>
+            <Button title="Dismiss" variant="ghost" small loading={dismissing} onPress={() => void dismiss()} />
+            <Button title="Approve" small loading={approving} onPress={() => void approve()} />
+          </View>
+        ) : (
+          <Switch
+            value={a.enabled}
+            onValueChange={(v) => void toggle(v)}
+            trackColor={{ true: palette.live }}
+            accessibilityLabel={`${a.name} ${a.enabled ? "on" : "off"}`}
+          />
+        )}
       </View>
+      {pending ? (
+        <T variant="meta" weight="medium">
+          Waiting for your approval{a.sourceTitle ? ` — from "${a.sourceTitle}"` : ""}
+        </T>
+      ) : null}
       {a.active > 0 ? (
         <T variant="meta" tone="live">
           {a.active === 1 ? "1 run in progress" : `${a.active} runs in progress`}
@@ -201,6 +250,7 @@ function Automations() {
   const [list, setList] = useState<Automation[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [filter, setFilter] = useState<Filter>("all");
 
   const load = useCallback(async () => {
     try {
@@ -210,9 +260,26 @@ function Automations() {
       setError(e instanceof Error ? e.message : String(e));
     }
   }, []);
-  useEffect(() => void load(), [load]);
+  // Fires on mount and again when coming back from the editor, so a save shows up.
+  useFocusEffect(
+    useCallback(() => {
+      void load();
+    }, [load]),
+  );
 
   const replace = (a: Automation) => setList((l) => (l ?? []).map((x) => (x.id === a.id ? { ...x, ...a } : x)));
+  const remove = (id: string) => setList((l) => (l ?? []).filter((x) => x.id !== id));
+
+  // Waiting on you first, then live ones, then paused (same order as the web).
+  const shown = useMemo(() => {
+    const xs = (list ?? []).filter((a) => filter === "all" || a.scope === filter);
+    return xs.sort((a, b) => Number(!!b.proposed && !b.enabled) - Number(!!a.proposed && !a.enabled) || Number(b.enabled) - Number(a.enabled));
+  }, [list, filter]);
+  const counts = useMemo(() => {
+    const c = { all: list?.length ?? 0, automation: 0, scheduled: 0 };
+    for (const a of list ?? []) c[a.scope] += 1;
+    return c;
+  }, [list]);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: palette.background }} edges={["top"]}>
@@ -220,6 +287,12 @@ function Automations() {
         <Pressable onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)/home"))} hitSlop={12} style={{ padding: 8 }}>
           <T variant="body" tone="muted">
             ‹ Back
+          </T>
+        </Pressable>
+        <View style={{ flex: 1 }} />
+        <Pressable onPress={() => router.push("/automation/new")} hitSlop={12} style={{ padding: 8 }} accessibilityRole="button" accessibilityLabel="New automation">
+          <T variant="body" weight="medium">
+            + New
           </T>
         </Pressable>
       </View>
@@ -240,25 +313,37 @@ function Automations() {
           Automations
         </T>
         <T variant="body" tone="muted">
-          Runs that start on a schedule, a webhook, or a GitHub event. Create and edit them on the web dashboard.
+          Runs that start on a schedule, after another run, on a webhook, or on a GitHub event. Tap one to edit it.
         </T>
+        <Segmented
+          small
+          value={filter}
+          onChange={setFilter}
+          options={[
+            { value: "all", label: `All${counts.all ? ` · ${counts.all}` : ""}` },
+            { value: "automation", label: `Automations${counts.automation ? ` · ${counts.automation}` : ""}` },
+            { value: "scheduled", label: `Scheduled${counts.scheduled ? ` · ${counts.scheduled}` : ""}` },
+          ]}
+        />
         {error ? (
           <T variant="meta" tone="destructive">
             {error}
           </T>
         ) : null}
         {list === null && !error ? <T variant="meta" tone="faint">Loading…</T> : null}
-        {list?.length === 0 ? (
+        {list !== null && shown.length === 0 ? (
           <Card>
             <T variant="body" weight="medium">
-              No automations yet
+              {filter === "scheduled" ? "Nothing scheduled from a chat" : "No automations yet"}
             </T>
             <T variant="meta" tone="muted">
-              Add one under Automations on the web dashboard; it shows up here to pause or run.
+              {filter === "scheduled" ? "Ask the agent to run something later or on a schedule and it shows up here for your OK." : "Tap + New to run something on a schedule, after another run, or when an event arrives."}
             </T>
           </Card>
         ) : null}
-        {list?.map((a) => <Row key={a.id} a={a} onChange={replace} />)}
+        {shown.map((a) => (
+          <Row key={a.id} a={a} onChange={replace} onRemove={remove} />
+        ))}
       </ScrollView>
     </SafeAreaView>
   );

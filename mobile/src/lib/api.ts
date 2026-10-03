@@ -28,6 +28,173 @@ export interface BoxView {
   asleepSec?: number;
   queued?: string[];
   repos?: { name: string; branch?: string }[];
+  /** Which coding agent this thread runs on ("claude" | "omp" | …). Absent on older boxes. */
+  agent?: string;
+  /** Running, but the log has not moved for the stall window. */
+  stalled?: boolean;
+  /** The saved harness this thread started on, with its one-line summary for the header. */
+  harness?: { id: string; name: string; line: string };
+  /** The workflow this thread is running (or just ran): step n/total and what each step did. */
+  workflow?: WorkflowRunView;
+  /** Skills the run was pointed at: explicit `/name` from the user, or the controller's auto match. */
+  skills?: { name: string; how: "explicit" | "auto" }[];
+}
+
+export interface WorkflowRunView {
+  id: string;
+  name: string;
+  line: string;
+  state: "running" | "done" | "failed";
+  step: number;
+  total: number;
+  history: Array<{ n: number; kind: "agent" | "check"; title: string; state: "done" | "failed"; attempts?: number; detail?: string }>;
+  failure?: string;
+}
+
+/** Default coding agent for new threads. */
+export type AgentId = "claude" | "omp" | "codex" | "opencode";
+export interface DriverCapabilities {
+  gate: "hook" | "wrapper" | "none";
+  sideQuestion: boolean;
+  planEvents: boolean;
+  resume: boolean;
+  modelSources: string[];
+  caveat?: string;
+}
+export interface AgentChoice {
+  id: AgentId;
+  label: string;
+  capabilities?: DriverCapabilities;
+  /** false → below the supervision floor: badge "supervised: partial". */
+  supervised?: boolean;
+}
+export interface AgentPrefs {
+  defaultAgent: AgentId;
+  agents: AgentChoice[];
+}
+
+/** A saved harness (src/harness.ts). Never carries a key. Mobile only picks one; editing is on web. */
+export interface HarnessView {
+  id: string;
+  name: string;
+  description?: string;
+  driver?: AgentId;
+  providerId?: string;
+  model?: string;
+  skills?: string[];
+  rules: { askBeforeGuess: boolean; planFirst: boolean; verifyOnDone: boolean; autoRetry?: number };
+  verifyCommand?: string;
+  needsReview?: boolean;
+  builtin?: string;
+  createdAt: number;
+  updatedAt: number;
+  providerMissing?: boolean;
+}
+export interface WorkflowStep {
+  n: number;
+  kind: "agent" | "check";
+  title: string;
+}
+export interface WorkflowView {
+  id: string;
+  name: string;
+  description?: string;
+  steps: WorkflowStep[];
+  origin?: { kind: "repo"; repo: string; path: string; ref?: string } | { kind: "manual" };
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** What a memory note is (src/memory-store.ts). */
+export type MemoryKind = "preference" | "rule" | "domain" | "fact" | "decision" | "lesson" | "playbook";
+export interface MemoryNote {
+  id: string;
+  kind: MemoryKind;
+  scope: "operator" | "repo";
+  /** pending = proposed by a run, awaiting confirmation (auto-kept after a while); kept = confirmed. */
+  status: "pending" | "kept";
+  text: string;
+  why?: string;
+  at: number;
+  source: string;
+  repo?: string;
+  pinned?: boolean;
+  supersedes?: string;
+  until?: number;
+  uses?: number;
+  lastUsed?: number;
+  area?: string;
+  paths?: string[];
+  links?: string[];
+  stale?: { at: number; box: string; paths: string[] };
+  history?: { id: string; text: string; why?: string; at: number; source: string; until?: number }[];
+}
+export interface MemoryNotesResponse {
+  enabled: boolean;
+  notes: MemoryNote[];
+}
+/** A note a running box just produced, carried on the watch snapshot so the thread can offer Keep / Forget. */
+export interface MemoryNew {
+  id: string;
+  kind: MemoryKind;
+  text: string;
+  why?: string;
+  status: "pending" | "kept";
+  at: number;
+  area?: string;
+  /** The text of the older note this one rewrote. */
+  revises?: string;
+}
+
+export interface McpProbe {
+  ok: boolean;
+  status?: number;
+  detail: string;
+  tools?: string[];
+}
+
+export type ProviderKind = "anthropic" | "openai" | "openai-compatible" | "ollama" | "ccproxy";
+export interface ProviderView {
+  id: string;
+  kind: ProviderKind;
+  label: string;
+  baseUrl: string;
+  hasKey: boolean;
+  apiKeyMasked: string | null;
+  models?: string[];
+  modelsFetchedAt?: string;
+  source: string;
+  drivers: AgentId[];
+}
+export interface ProvidersResponse {
+  providers: ProviderView[];
+  kinds: { id: ProviderKind; label: string; drivers: AgentId[] }[];
+  cliLoginPolicy: string;
+}
+export interface LedgerTotals {
+  runs: number;
+  done: number;
+  failed: number;
+  checked: number;
+  passed: number;
+  inputTokens: number;
+  outputTokens: number;
+  withUsage: number;
+  /** null when no run in the set reported a cost — never an estimate. */
+  costUsd: number | null;
+  withCost: number;
+}
+
+/** One stored audit event, raw from the controller — the UI derives the human verb. */
+export interface AuditEventRow {
+  id: number;
+  at: string;
+  method: string;
+  path: string;
+  status: number;
+  session: string | null;
+  action: string | null;
+  client: string | null;
 }
 
 export interface FleetLifecycle {
@@ -53,6 +220,8 @@ export interface FleetSnapshot {
 
 export interface WatchSnapshot extends Omit<BoxView, "role"> {
   log: string;
+  /** Notes this box produced recently; absent on older controllers. */
+  memoryNew?: MemoryNew[];
 }
 
 export interface RepoInfo {
@@ -360,19 +529,93 @@ export interface AutomationResult {
   reason?: string;
   finished?: { state: string; headline: string; archiveId?: number };
 }
-export interface Automation {
-  id: string;
+export type AutomationKind = "schedule" | "webhook" | "github" | "chain";
+export type GithubEvent = "issue_labeled" | "issue_comment" | "pr_opened";
+export type AlertPreset = "sentry" | "datadog" | "pagerduty";
+export interface AutomationSpec {
+  keepGreen?: boolean;
+  addressReviews?: boolean;
+  cron?: string;
+  /** One-time run at this epoch ms (chat schedules). */
+  at?: number;
+  timezone?: string;
+  event?: GithubEvent;
+  label?: string;
+  command?: string;
+  allowForks?: boolean;
+  afterTrigger?: string;
+  on?: "done" | "any";
+  carry?: "patch" | "none";
+  preset?: AlertPreset;
+  cooldownMin?: number;
+}
+/** What the editor sends (POST /triggers.json, POST /triggers/:id.json). */
+export interface AutomationDraft {
   name: string;
-  kind: "schedule" | "webhook" | "github" | "chain";
+  kind: AutomationKind;
+  spec: AutomationSpec;
   repo?: string;
+  taskTemplate: string;
   enabled: boolean;
+  concurrency: number;
+  prComment: boolean;
+  quiet?: boolean;
+  agent?: string;
+  model?: string;
+  harnessId?: string;
+  workflowId?: string;
+  /** Write-only: the vendor's signing secret. */
+  signingSecret?: string;
+}
+/** scheduled: made from a chat (usually once) · automation: a standing rule. */
+export type AutomationScope = "scheduled" | "automation";
+export type ScheduleStatus = "needs-ok" | "waiting" | "running" | "done" | "failed" | "paused" | "cancelled";
+export interface Automation extends AutomationDraft {
+  id: string;
   when: string;
+  scope: AutomationScope;
+  status: ScheduleStatus;
+  sourceBox?: string;
+  sourceTitle?: string;
   lastFired: number | null;
   nextFire: number | null;
   lastResult: AutomationResult | null;
-  active: number;
-  spec?: { preset?: "sentry" | "datadog" | "pagerduty"; cooldownMin?: number };
+  hasPayload: boolean;
+  hasSigningSecret?: boolean;
   lastDelivery?: AutomationDelivery;
+  /** Proposed by an agent at the end of a run; paused until enabled (approve) or deleted (dismiss). */
+  proposed?: boolean;
+  counts?: { checked: number; reports: number };
+  active: number;
+  createdAt: number;
+  updatedAt: number;
+}
+/** Something scheduled as part of one thread (GET /triggers/for-box.json). */
+export interface ThreadScheduleItem {
+  id: string;
+  name: string;
+  /** proposed: waiting on you · created: scheduled from here · repeats: the schedule that started this thread · after: a chain that follows it */
+  relation: "proposed" | "created" | "repeats" | "after";
+  category: "ci" | "deploy" | "monitor" | "report" | "follow-up" | "maintenance" | "task";
+  when: string;
+  cron?: string;
+  at?: number;
+  scope: AutomationScope;
+  status: ScheduleStatus;
+  nextFire: number | null;
+  lastFired: number | null;
+  lastOutcome?: string;
+  lastBox?: string;
+  repo?: string;
+  enabled: boolean;
+  task: string;
+  why?: string;
+}
+export interface ThreadScheduleReject {
+  scope: AutomationScope;
+  when: string;
+  task: string;
+  reason: string;
 }
 /** One row of an automation's delivery log, newest first (GET /triggers/:id/deliveries.json). */
 export interface AutomationDelivery {
@@ -435,7 +678,15 @@ export interface AttemptGroupRow {
 }
 
 export type DelegateResult =
-  | { ok: true; box: string; warm: boolean; output: string; inferred?: string[] }
+  | {
+      ok: true;
+      box: string;
+      warm: boolean;
+      output: string;
+      inferred?: string[];
+      harness?: { id: string; name: string; applied: string[] };
+      attemptGroup?: { id: string; attempts: Array<{ index: number; box: string | null; label: string; branch: string; error?: string }> };
+    }
   | { ok: false; question: string };
 
 export class ApiError extends Error {
@@ -600,9 +851,22 @@ export const api = {
     model?: string;
     /** Exactly one key: a sandbox command (exit 0 = verified) or a plain-language criterion. */
     verify?: { command: string } | { criterion: string };
-    /** Run as 2-3 parallel attempts; the controller picks the winner. */
-    attempts?: 2 | 3;
+    /** Coding agent for the new thread; omit to use the stored default. */
+    agent?: AgentId;
+    /** Sent only after the user saw the "supervised: partial" badge for a below-floor driver. */
+    allowPartialSupervision?: boolean;
+    /** A saved model provider id; the model then comes from its list. */
+    provider?: string;
+    /** A saved harness id: fills the fields this input leaves out (explicit fields win). */
+    harness?: string;
+    /** A saved workflow id: the task becomes its first step. */
+    workflow?: string;
+    /** Run as 1-3 parallel attempts; the controller picks the winner. */
+    attempts?: 1 | 2 | 3;
+    attemptSpecs?: Array<{ agent?: string; model?: string; provider?: string; harness?: string }>;
   }) => post<DelegateResult>("/delegate.json", { source: "git", ...input }, AGENT_TIMEOUT_MS),
+  /** Stop the running turn now. The box stays up; the thread can be resumed. */
+  interrupt: (session: string) => post<{ ok: true; stopped: boolean }>("/interrupt.json", { session }),
   resume: (session: string, message: string, opts: { force?: boolean; model?: string } = {}) =>
     post<{ output: string; queued?: undefined } | { queued: true; id: string }>("/resume.json", {
       session,
@@ -638,11 +902,19 @@ export const api = {
   files: (session: string, q: string) =>
     get<{ files: string[]; total: number; truncated: boolean }>("/files.json", { session, q }),
   tree: (session: string) => get<{ files: string[]; total: number; truncated: boolean }>("/tree.json", { session }),
+  /** The whole run's diff as one unified patch (review-all). */
+  runDiff: (session: string) => get<{ diff: string }>("/rundiff.json", { session }),
   fileText: async (session: string, path: string): Promise<string> => {
-    const res = await fetch(url("/artifact", { session, path }), { headers: authHeaders(false) });
-    if (!res.ok) throw new ApiError(`Request failed (${res.status})`, res.status);
+    const res = await fetchWithTimeout(url("/artifact", { session, path }), { headers: authHeaders(false) }, READ_TIMEOUT_MS);
+    if (res.status === 401) onUnauthorized?.();
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      throw new ApiError(typeof body.error === "string" ? body.error : `Request failed (${res.status})`, res.status);
+    }
     return res.text();
   },
+  /** The URL a produced file can be shared/opened from (bearer must be attached by the caller). */
+  artifactUrl: (session: string, path: string) => url("/artifact", { session, path }),
   gitStatus: (session: string, repo: string) => post<GitStatus>("/git.json", { session, repo, action: "status" }),
   gitCommit: (session: string, repo: string, message: string) =>
     post<{ sha: string; summary: string }>("/git.json", { session, repo, action: "commit", message }),
@@ -684,7 +956,48 @@ export const api = {
   skillMutate: (body: Record<string, unknown>) => post<{ skills: SkillView[] }>("/skills.json", body),
   mcpServers: () => get<McpServersResponse>("/mcp-servers.json"),
   mcpMutate: (body: Record<string, unknown>) => post<McpServersResponse>("/mcp-servers.json", body),
-  mcpTest: (name: string) => post<{ ok: boolean; error?: string }>("/mcp-servers/test.json", { name }),
+  mcpTest: (name: string) => post<McpProbe>("/mcp-servers/test.json", { name }),
+  /** Browse a GitHub repo for SKILL.md folders / import them (body mirrors web/src/lib/skillImport.ts). */
+  skillRepo: <T,>(body: Record<string, unknown>) => post<T>("/skill-repo.json", body),
+
+  // ---- memory across runs (not /memory.json, which is the VM's RAM) ----
+  memoryNotes: () => get<MemoryNotesResponse>("/memory-notes.json"),
+  memoryNoteUpdate: (
+    body:
+      | { enabled: boolean }
+      | { id: string; text?: string; why?: string; pinned?: boolean; status?: "kept"; area?: string; paths?: string; links?: string; verified?: boolean; repo?: string },
+  ) => post<MemoryNotesResponse>("/memory-notes.json", body),
+  memoryNoteAdd: (add: { kind: MemoryKind; text: string; why?: string; repo?: string; area?: string }) =>
+    post<MemoryNotesResponse>("/memory-notes.json", { add }),
+  memoryNoteDelete: (id: string) => del<MemoryNotesResponse>("/memory-notes.json", { id }),
+  /** Turn a playbook note into a skill draft. 409 when a skill of that name exists. */
+  memoryPromote: (id: string) => post<{ skill: { name: string }; enabled: boolean; notes: MemoryNote[] }>("/memory-promote.json", { id }),
+
+  // ---- composer choices: agents, harnesses, workflows ----
+  agentPrefs: () => get<AgentPrefs>("/agent-prefs.json"),
+  saveAgentPrefs: (defaultAgent: AgentId, allowPartialSupervision?: boolean) =>
+    post<AgentPrefs>("/agent-prefs.json", { defaultAgent, ...(allowPartialSupervision ? { allowPartialSupervision } : {}) }),
+  harnesses: () => get<{ harnesses: HarnessView[]; limits: Record<string, number>; builtins?: number }>("/harnesses.json"),
+  workflows: () => get<{ workflows: WorkflowView[]; limits: Record<string, number>; dir: string }>("/workflows.json"),
+
+  // ---- providers ----
+  /** Model providers: the caller's own keys/endpoints. Keys come back masked only. */
+  providers: () => get<ProvidersResponse>("/providers.json"),
+  saveProvider: (body: { id?: string; kind: ProviderKind; label?: string; baseUrl?: string; apiKey?: string }) =>
+    post<ProvidersResponse & { saved: string }>("/providers.json", body),
+  deleteProvider: (id: string) => post<ProvidersResponse>("/providers/delete.json", { id }),
+  providerModels: (id: string, force?: boolean) =>
+    post<{ models: string[]; cached: boolean; error?: string }>("/providers/models.json", { id, ...(force ? { force } : {}) }),
+  /** History ledger totals over the archive (rows ignored here; the list pages separately). */
+  ledger: (since?: number) => get<{ totals: LedgerTotals }>("/history/ledger.json", { limit: "1", ...(since ? { since: String(since) } : {}) }),
+
+  // ---- audit ----
+  audit: (opts: { limit?: number; before?: string; beforeId?: number } = {}) =>
+    get<{ events: AuditEventRow[] }>("/audit.json", {
+      ...(opts.limit ? { limit: String(opts.limit) } : {}),
+      ...(opts.before ? { before: opts.before } : {}),
+      ...(opts.beforeId != null ? { beforeId: String(opts.beforeId) } : {}),
+    }),
   repoSetups: () => get<RepoSetupsResponse>("/repo-setup.json"),
   saveRepoSetup: (repo: string, profile: Partial<RepoSetupProfile>) => post<RepoSetupsResponse>("/repo-setup.json", { repo, profile }),
   resetRepoSetup: (repo: string) => post<RepoSetupsResponse>("/repo-setup/delete.json", { repo }),
@@ -704,6 +1017,15 @@ export const api = {
   runAutomation: (id: string) => post<{ result: AutomationResult }>(`/triggers/${encodeURIComponent(id)}/run.json`, {}),
   testAutomation: (id: string) => post<{ ok: boolean; result?: AutomationResult; skipped?: string; ignored?: string }>(`/triggers/${encodeURIComponent(id)}/test.json`, {}),
   automationDeliveries: (id: string) => get<{ deliveries: AutomationDelivery[] }>(`/triggers/${encodeURIComponent(id)}/deliveries.json`),
+  createAutomation: (t: AutomationDraft) => post<{ trigger: Automation; secret?: string; hookUrl?: string }>("/triggers.json", t),
+  updateAutomation: (id: string, t: AutomationDraft) => post<{ trigger: Automation }>(`/triggers/${encodeURIComponent(id)}.json`, t),
+  deleteAutomation: (id: string) => del<{ ok: true }>(`/triggers/${encodeURIComponent(id)}.json`),
+  /** Render a task template with sample payload fields; `missing` lists placeholders nothing fills. */
+  previewAutomation: (taskTemplate: string, id?: string, name?: string) =>
+    post<{ text: string; missing: string[]; hasPayload: boolean }>("/triggers/preview.json", { taskTemplate, id, name }),
+  /** Schedules proposed / created from one thread, plus anything the controller could not read. */
+  threadSchedules: (box: string) =>
+    get<{ items: ThreadScheduleItem[]; rejected?: ThreadScheduleReject[] }>("/triggers/for-box.json", { box }),
 
   models: (session?: string) =>
     get<{ default: string; current: string; models: { id: string; label: string; tier: "opus" | "sonnet" | "haiku" | "other" }[] }>(
@@ -733,4 +1055,27 @@ export const intakeApi = {
   rotate: () => post<IntakeView>("/intake/rotate.json", {}),
   answer: (id: string, repo: string) => post<{ ok: true; box: string; url: string }>(`/intake/pending/${encodeURIComponent(id)}/answer.json`, { repo }),
   dismiss: (id: string) => post<{ ok: true }>(`/intake/pending/${encodeURIComponent(id)}/dismiss.json`, {}),
+  /** A pasted GitHub issue/PR or Sentry link becomes a task (src/intake.ts). */
+  unfurl: (link: string) => post<Unfurled>("/intake/unfurl.json", { url: link }),
 };
+export interface Unfurled {
+  task: string;
+  title: string;
+  source: "github" | "sentry";
+  repo?: string;
+}
+
+/** Mirrors src/intake.ts parseIssueUrl — only whole-paste links worth a round trip. */
+export function isUnfurlable(text: string): boolean {
+  const s = text.trim();
+  if (!/^https:\/\/\S+$/.test(s)) return false;
+  try {
+    const u = new URL(s);
+    if (u.hostname === "github.com") return /^\/[\w.-]+\/[\w.-]+\/(issues|pull)\/\d+/.test(u.pathname);
+    if (u.hostname === "sentry.io") return /^\/organizations\/[\w-]+\/issues\/\d+/.test(u.pathname);
+    if (/^[\w-]+\.sentry\.io$/.test(u.hostname)) return /^\/issues\/\d+/.test(u.pathname);
+  } catch {
+    /* not a URL */
+  }
+  return false;
+}

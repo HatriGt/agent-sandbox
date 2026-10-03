@@ -87,12 +87,15 @@ export default function Settings() {
         </Card>
 
         {isUser && <RowLink title="Account" icon="user" hint="Name, email, password" onPress={() => router.push("/settings/account")} />}
-        <RowLink title="Automations" icon="repeat" hint="Scheduled and event runs — pause or run now" onPress={() => router.push("/automations")} />
+        <RowLink title="Memory" icon="layers" hint="What the agent remembers across runs — yours and per repo" onPress={() => router.push("/settings/memory")} />
+        <RowLink title="Automations" icon="repeat" hint="Scheduled, chained and event runs — create, approve, pause" onPress={() => router.push("/automations")} />
         <RowLink title="Inbox" icon="inbox" hint="Start runs from email and Slack" onPress={() => router.push("/settings/inbox")} />
         <RowLink title="GitHub accounts" icon="github" hint="Tokens the agent clones and pushes with" onPress={() => router.push("/settings/accounts")} />
         <RowLink title="MCP servers" icon="tool" hint="Extra tools every sandbox gets" onPress={() => router.push("/settings/mcp")} />
         <RowLink title="Repo setup" icon="package" hint="How each repo installs and tests, learned once" onPress={() => router.push("/settings/repo-setup")} />
         <RowLink title="Skills" icon="book-open" hint="Reusable playbooks synced into each box" onPress={() => router.push("/settings/skills")} />
+        <RowLink title="Providers" icon="cpu" hint="Your own model keys and endpoints" onPress={() => router.push("/settings/providers")} />
+        <RowLink title="Audit log" icon="list" hint="Who did what, newest first" onPress={() => router.push("/settings/audit")} />
         <RowLink title="Notifications" icon="bell" hint="Push and webhook pings when a run needs you" onPress={() => router.push("/settings/notifications")} />
         {isUser && <RowLink title="API keys" icon="key" hint="Bearer keys for scripts and devices" onPress={() => router.push("/settings/api-keys")} />}
         {isUser && <RowLink title="Signed-in devices" icon="smartphone" hint="Active sessions, revoke any" onPress={() => router.push("/settings/devices")} />}

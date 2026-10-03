@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Animated, Keyboard, Pressable, ScrollView, TextInput, View } from "react-native";
+import { ActivityIndicator, Animated, Keyboard, Pressable, ScrollView, TextInput, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import { api, type SkillView } from "@/lib/api";
+import { clearDraft, flushDraft, loadDraft, saveDraft, takePrefill } from "@/lib/draft";
 import { expandMentions, mentionAt, type MentionState } from "@/lib/mention";
 import { slashAt, stripSlashToken, typedSkillToken, type SlashState } from "@/lib/slash";
 import { smartJoin, useVoiceInput } from "@/hooks/useVoiceInput";
@@ -25,6 +26,9 @@ export function Composer({
   disabled,
   placeholder,
   accessoryLeft,
+  draftKey,
+  onStop,
+  prefill,
 }: {
   session?: string;
   onSend: (text: string) => Promise<void> | void;
@@ -34,6 +38,12 @@ export function Composer({
   disabled?: boolean;
   placeholder?: string;
   accessoryLeft?: React.ReactNode;
+  /** When set (e.g. `box:<name>`), unsent text survives leaving the thread or an app restart. */
+  draftKey?: string;
+  /** Stop the running turn. Shown next to send only while `running`; the thread wires `/interrupt.json`. */
+  onStop?: () => void;
+  /** Text pushed in by the screen while mounted (e.g. "ask again"); a new `nonce` applies it. */
+  prefill?: { text: string; nonce: number } | null;
 }) {
   const { palette } = useTheme();
   const [text, setText] = useState("");
@@ -49,6 +59,57 @@ export function Composer({
   const sendScale = useRef(new Animated.Value(0)).current;
   const hasContent = useRef(false);
   const inputRef = useRef<TextInput>(null);
+  const [stopping, setStopping] = useState(false);
+  // Drafts are saved only after the restore settled, so the empty first render never erases one.
+  const draftReady = useRef(false);
+  const textRef = useRef(text);
+  textRef.current = text;
+
+  // Mount: a one-shot prefill (handed off by another screen) wins; otherwise the saved draft, if
+  // the box is still empty by the time it loads.
+  useEffect(() => {
+    let cancelled = false;
+    const pre = takePrefill();
+    if (pre) {
+      setText(pre);
+      setCaret(pre.length);
+      syncSendButton(pre, files, skill);
+    }
+    if (!draftKey) {
+      draftReady.current = true;
+      return;
+    }
+    loadDraft(draftKey).then((d) => {
+      if (cancelled) return;
+      if (d && !textRef.current) {
+        setText(d);
+        setCaret(d.length);
+        syncSendButton(d, files, skill);
+      }
+      draftReady.current = true;
+    });
+    return () => {
+      cancelled = true;
+      // Leaving the thread: write whatever is still waiting on the debounce.
+      if (draftKey) flushDraft(draftKey);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey]);
+  useEffect(() => {
+    if (draftKey && draftReady.current) saveDraft(draftKey, text);
+  }, [draftKey, text]);
+  useEffect(() => {
+    if (!prefill?.text) return;
+    setLane("reply");
+    setText(prefill.text);
+    setCaret(prefill.text.length);
+    syncSendButton(prefill.text, files, skill);
+    inputRef.current?.focus();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefill?.nonce]);
+  useEffect(() => {
+    if (!running) setStopping(false);
+  }, [running]);
 
   // Dictation: finalized phrases land at the caret through updateText, so chips and menus keep
   // working; the interim phrase streams in the pill above. Sending stays behind the button.
@@ -163,6 +224,7 @@ export function Composer({
         if (skill) t = `/${skill}${t ? ` ${t}` : ""}`;
         await onSend(t);
       }
+      if (draftKey) clearDraft(draftKey);
     } catch {
       setText(draft.text);
       setFiles(draft.files);
@@ -430,6 +492,40 @@ export function Composer({
             <VoiceButton state={voice.state} level={voice.level} onToggle={voice.toggle} />
           </View>
         )}
+        {/* Stop the turn — only while the agent is working, and only when the thread wired it. A
+            hairline ring with a square, not a filled red button: it is an interrupt, not a destroy. */}
+        {onStop && running && !isAsk ? (
+          <Pressable
+            onPress={() => {
+              if (stopping) return;
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+              setStopping(true);
+              // The thread's `running` flips false once the turn actually stops; until then the
+              // control shows it took, and lets go after a few seconds if the state never arrives.
+              setTimeout(() => setStopping(false), 4000);
+              onStop();
+            }}
+            disabled={disabled || stopping}
+            accessibilityLabel="Stop the running turn"
+            style={({ pressed }) => ({
+              width: 38,
+              height: 38,
+              borderRadius: 19,
+              borderWidth: 1,
+              borderColor: palette.lineStrong,
+              alignItems: "center",
+              justifyContent: "center",
+              marginBottom: 1,
+              opacity: pressed || stopping ? 0.6 : 1,
+            })}
+          >
+            {stopping ? (
+              <ActivityIndicator size="small" color={palette.foreground} />
+            ) : (
+              <View style={{ width: 12, height: 12, borderRadius: 2, backgroundColor: palette.foreground }} />
+            )}
+          </Pressable>
+        ) : null}
         <Animated.View style={{ transform: [{ scale: sendScale }], opacity: sendScale }}>
           <Pressable
             onPress={send}

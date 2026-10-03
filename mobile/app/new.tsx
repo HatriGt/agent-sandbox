@@ -1,12 +1,14 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Image, KeyboardAvoidingView, Platform, Pressable, ScrollView, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import * as WebBrowser from "expo-web-browser";
-import { api, type RepoInfo, type SkillView } from "@/lib/api";
+import { api, intakeApi, isUnfurlable, type AgentId, type RepoInfo, type SkillView, type Unfurled } from "@/lib/api";
 import { setPendingDelegate, takeFailedSubmit } from "@/lib/pending-delegate";
+import { clearDraft, DRAFT_NEW, loadDraft, saveDraft, takePrefill } from "@/lib/draft";
+import { currentAgent, harnessSummary, RunOptionChips, RunSettingsSheet, useRunOptions } from "@/components/sheets/RunSettingsSheet";
 import { useKeyboardInset } from "@/hooks/useKeyboardInset";
 import { smartJoin, useVoiceInput } from "@/hooks/useVoiceInput";
 import { VoiceButton, VoicePill } from "@/components/VoiceButton";
@@ -67,7 +69,13 @@ export default function NewTask() {
   // A failed delegate lands back here via /booting: the stash restores the WHOLE submission —
   // repos, photos, model, verify, and what went wrong — not just the task text.
   const [stash] = useState(() => takeFailedSubmit());
-  const [task, setTask] = useState(() => stash?.task ?? "");
+  // A one-shot prefill ("new task from this run") beats the stash; the AsyncStorage draft is restored
+  // asynchronously below, only if nothing else filled the box first.
+  const [prefill] = useState(() => takePrefill());
+  const [task, setTask] = useState(() => prefill ?? stash?.task ?? "");
+  const taskRef = useRef(task);
+  taskRef.current = task;
+  const draftReady = useRef(false);
   const [repoQuery, setRepoQuery] = useState("");
   const [repoResults, setRepoResults] = useState<RepoInfo[]>([]);
   const [picked, setPicked] = useState<{ repo: string; ref?: string }[]>(() => stash?.picked ?? []);
@@ -82,6 +90,14 @@ export default function NewTask() {
   const [verifyOpen, setVerifyOpen] = useState(() => !!stash?.verify);
   const [verifyMode, setVerifyMode] = useState<"command" | "criterion">(() => stash?.verify?.mode ?? "command");
   const [verifyText, setVerifyText] = useState(() => stash?.verify?.text ?? "");
+  // Run settings: agent / harness / playbook / attempts. Agent, harness and playbook stick across
+  // launches; a failed submit restores exactly what was sent (including attempts).
+  const run = useRunOptions(stash?.run ? { ...stash.run, agent: stash.run.agent as AgentId | null } : null);
+  const [runOpen, setRunOpen] = useState(false);
+  // Link unfurl: a pasted GitHub issue/PR or Sentry link becomes a task (server-side fetch).
+  const [unfurled, setUnfurled] = useState<Unfurled | null>(null);
+  const unfurlGen = useRef(0);
+  const unfurlSeen = useRef<string | null>(null);
 
   const trialExpired = me?.kind === "user" && me.expired;
   const keyboardInset = useKeyboardInset();
@@ -98,6 +114,50 @@ export default function NewTask() {
     if (typeof params.task === "string" && params.task && !task) setTask(params.task);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.task]);
+
+  // Draft: restore on mount if nothing else filled the box (no stash, prefill or ?task=), then
+  // save as you type (debounced in draft.ts). Saving waits for the restore so an empty first
+  // render can never wipe a saved draft.
+  useEffect(() => {
+    let cancelled = false;
+    const hasParam = typeof params.task === "string" && !!params.task;
+    loadDraft(DRAFT_NEW).then((d) => {
+      if (cancelled) return;
+      if (d && !taskRef.current && !hasParam) setTask(d);
+      draftReady.current = true;
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (draftReady.current) saveDraft(DRAFT_NEW, task);
+  }, [task]);
+
+  // Unfurl: the whole box is one GitHub issue/PR or Sentry link → fetch it server-side (300 ms
+  // after the last edit) and swap the URL for title + body, unless the person typed over it
+  // meanwhile. Each URL is tried once; errors silently keep the pasted link.
+  useEffect(() => {
+    const s = task.trim();
+    if (!isUnfurlable(s) || unfurlSeen.current === s) return;
+    const gen = ++unfurlGen.current;
+    const t = setTimeout(() => {
+      unfurlSeen.current = s;
+      intakeApi.unfurl(s).then(
+        (u) => {
+          if (gen !== unfurlGen.current || taskRef.current.trim() !== s) return;
+          setTask(u.task);
+          setUnfurled(u);
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+          const repo = u.repo;
+          if (repo) setPicked((ps) => (ps.length ? ps : [{ repo }]));
+        },
+        () => {},
+      );
+    }, 300);
+    return () => clearTimeout(t);
+  }, [task]);
 
   useEffect(() => {
     api.skills().then((r) => setSkills(r.skills.filter((s) => s.enabled))).catch(() => {});
@@ -141,6 +201,7 @@ export default function NewTask() {
     voice.stop();
     setError(null);
     setClarify(null);
+    const agent = currentAgent(run.value, run.sources.prefs);
     const promise = api.delegate({
         task: task.trim(),
         repos: picked.length ? picked : undefined,
@@ -149,9 +210,24 @@ export default function NewTask() {
         ...(verifyText.trim()
           ? { verify: verifyMode === "command" ? { command: verifyText.trim() } : { criterion: verifyText.trim() } }
           : {}),
+        // Web parity: the agent goes only when explicitly picked; a below-floor driver carries the
+        // acknowledgement the sheet collected ("supervised: partial").
+        ...(run.value.agent
+          ? { agent: run.value.agent, ...(agent?.supervised === false ? { allowPartialSupervision: true } : {}) }
+          : {}),
+        ...(run.value.harness ? { harness: run.value.harness } : {}),
+        ...(run.value.workflow ? { workflow: run.value.workflow } : {}),
+        ...(run.value.attempts > 1 ? { attempts: run.value.attempts } : {}),
       });
     // The moment push is worth asking for: a run just started and the user is about to walk away.
-    promise.then((r) => (r.ok ? offerPushAfterHandoff() : undefined)).catch(() => {});
+    // The draft is gone once the server accepted the task — a failure comes back via the stash.
+    promise
+      .then((r) => {
+        if (!r.ok) return;
+        clearDraft(DRAFT_NEW);
+        return offerPushAfterHandoff();
+      })
+      .catch(() => {});
     setPendingDelegate({
       task: task.trim(),
       promise,
@@ -170,10 +246,13 @@ export default function NewTask() {
         attachments,
         model,
         ...(verifyText.trim() ? { verify: { mode: verifyMode, text: verifyText.trim() } } : {}),
+        run: { ...run.value },
       },
     });
     router.replace("/booting");
   };
+
+  const pickedHarness = run.value.harness ? run.sources.harnesses.find((x) => x.id === run.value.harness) : undefined;
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: palette.background }} edges={["top", "bottom"]}>
@@ -227,6 +306,57 @@ export default function NewTask() {
               </View>
             )}
           </View>
+
+          {unfurled ? (
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 4 }}>
+              <Icon name={unfurled.source === "github" ? "github" : "alert-circle"} size={12} color={palette.mutedForeground} />
+              <T variant="micro" tone="muted" numberOfLines={1} style={{ flex: 1, minWidth: 0 }}>
+                from {unfurled.source === "github" ? "GitHub" : "Sentry"}: {unfurled.title}
+              </T>
+              <Pressable onPress={() => setUnfurled(null)} hitSlop={10} accessibilityLabel="Dismiss">
+                <Icon name="x" size={12} color={palette.faint} />
+              </Pressable>
+            </View>
+          ) : null}
+
+          {/* Run settings: one chip opens the sheet; anything off its default sits beside it as a removable chip. */}
+          <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+            <Pressable
+              onPress={() => {
+                Haptics.selectionAsync().catch(() => {});
+                setRunOpen(true);
+              }}
+              accessibilityLabel="Run settings"
+              style={({ pressed }) => ({
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 6,
+                paddingVertical: 6,
+                paddingHorizontal: 12,
+                borderRadius: radius.pill,
+                borderWidth: 1,
+                borderColor: palette.border,
+                backgroundColor: palette.card,
+                opacity: pressed ? 0.7 : 1,
+              })}
+            >
+              <Icon name="sliders" size={12} color={palette.mutedForeground} />
+              <T variant="micro" weight="medium">
+                Settings
+              </T>
+              {run.sources.prefs ? (
+                <T variant="micro" tone="faint">
+                  · {currentAgent(run.value, run.sources.prefs)?.label ?? run.sources.prefs.defaultAgent}
+                </T>
+              ) : null}
+            </Pressable>
+            <RunOptionChips value={run.value} sources={run.sources} onOpen={() => setRunOpen(true)} onChange={run.update} />
+          </View>
+          {pickedHarness ? (
+            <T variant="micro" tone="faint" numberOfLines={2} style={{ paddingHorizontal: 4, marginTop: -8 }}>
+              {harnessSummary(pickedHarness)}
+            </T>
+          ) : null}
 
           {clarify ? (
             <View style={{ backgroundColor: palette.attention, borderRadius: radius.xl, padding: 12 }}>
@@ -550,6 +680,16 @@ export default function NewTask() {
             <Icon name="arrow-up" size={24} color={task.trim() && !trialExpired ? palette.primaryForeground : palette.faint} />
           </Pressable>
         </View>
+        <RunSettingsSheet
+          visible={runOpen}
+          onClose={() => setRunOpen(false)}
+          value={run.value}
+          onChange={run.update}
+          sources={run.sources}
+          loading={run.loading}
+          error={run.error}
+          onRetry={run.reload}
+        />
       </KeyboardAvoidingView>
     </SafeAreaView>
   );

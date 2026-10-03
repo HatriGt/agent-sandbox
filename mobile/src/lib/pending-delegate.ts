@@ -20,6 +20,8 @@ export type SubmitDraft = {
   attachments: { name: string; dataUrl: string }[];
   model: string | null;
   verify?: { mode: "command" | "criterion"; text: string };
+  /** Run settings (agent / harness / playbook / attempts) as picked at submit time. */
+  run?: { agent: string | null; harness: string | null; workflow: string | null; attempts: 1 | 2 | 3 };
 };
 
 export type PendingDelegate = {

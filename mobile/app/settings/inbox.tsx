@@ -1,11 +1,13 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Share, View } from "react-native";
 import { useRouter } from "expo-router";
-import { intakeApi, type IntakeEmailProvider, type IntakeView } from "@/lib/api";
+import { api, intakeApi, type IntakeEmailProvider, type IntakeView, type RepoInfo } from "@/lib/api";
 import { SettingsScreen } from "@/components/SettingsScreen";
 import { T } from "@/components/ui/AppText";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { ChipInput } from "@/components/settings/ChipInput";
+import { PickerRow, PickerSheet } from "@/components/settings/PickerSheet";
 
 const PROVIDERS: Array<{ id: IntakeEmailProvider; name: string }> = [
   { id: "cloudflare", name: "Cloudflare" },
@@ -17,20 +19,55 @@ const PROVIDERS: Array<{ id: IntakeEmailProvider; name: string }> = [
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /**
- * "Starts from your inbox": the questions an email / Slack intake is waiting on (which repo?), and
- * the addresses to paste into a mail provider or Slack app. Secrets and allowlists are edited on the
- * desktop dashboard (Integrations); the addresses are selectable and shareable here.
+ * "Starts from your inbox": the questions an email / Slack intake is waiting on (which repo?), the
+ * addresses to paste into a mail provider or Slack app, and the allowlists + default repo. Secrets
+ * (signing secret, Mailgun key) are still pasted on the desktop dashboard.
  */
 export default function Inbox() {
   const router = useRouter();
   const [v, setV] = useState<IntakeView | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  const [saving, setSaving] = useState<"allowEmails" | "slackUsers" | "defaultRepo" | null>(null);
   const [provider, setProvider] = useState<IntakeEmailProvider>("cloudflare");
+  const [repoSheet, setRepoSheet] = useState(false);
+  const [repos, setRepos] = useState<RepoInfo[]>([]);
+  const [repoBusy, setRepoBusy] = useState(false);
+  const repoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(() => {
     intakeApi.get().then(setV, (e) => setNote(msg(e)));
   }, []);
   useEffect(load, [load]);
+
+  const update = async (key: NonNullable<typeof saving>, u: Parameters<typeof intakeApi.update>[0]) => {
+    if (!v) return;
+    const prev = v;
+    setSaving(key);
+    setNote(null);
+    setV({ ...v, channel: { ...v.channel, ...u } }); // optimistic
+    try {
+      setV(await intakeApi.update(u));
+    } catch (e) {
+      setV(prev);
+      setNote(msg(e));
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const searchRepos = (q: string) => {
+    if (repoTimer.current) clearTimeout(repoTimer.current);
+    repoTimer.current = setTimeout(async () => {
+      setRepoBusy(true);
+      try {
+        setRepos((await api.repos(q)).repos);
+      } catch {
+        /* keep previous */
+      } finally {
+        setRepoBusy(false);
+      }
+    }, 250);
+  };
 
   const answer = async (id: string, repo: string) => {
     try {
@@ -77,6 +114,40 @@ export default function Inbox() {
             </Card>
           ))}
 
+          <Card style={{ gap: 12 }}>
+            <T variant="body" weight="semibold">Who may start runs</T>
+            <ChipInput
+              label="Email addresses"
+              values={v.channel.allowEmails}
+              onChange={(next) => void update("allowEmails", { allowEmails: next })}
+              placeholder="name@company.com"
+              hint={`${v.accountEmail ? `Your account email (${v.accountEmail}) is always accepted. ` : ""}Anything else is dropped.`}
+              disabled={saving !== null}
+            />
+            <ChipInput
+              label="Slack users"
+              values={v.channel.slackUsers}
+              onChange={(next) => void update("slackUsers", { slackUsers: next })}
+              placeholder="U0123ABCDEF"
+              hint="Slack member IDs (profile → ⋯ → Copy member ID)."
+              disabled={saving !== null}
+            />
+            <PickerRow
+              label="Default repo"
+              value={v.channel.defaultRepo}
+              placeholder="Ask each time"
+              onPress={() => {
+                setRepoSheet(true);
+                if (!repos.length) searchRepos("");
+              }}
+            />
+            {saving ? (
+              <T variant="micro" tone="faint">
+                Saving…
+              </T>
+            ) : null}
+          </Card>
+
           <Card>
             <T variant="body" weight="semibold">Email</T>
             <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginVertical: 8 }}>
@@ -87,14 +158,16 @@ export default function Inbox() {
             <T variant="micro" mono selectable>
               {v.email.urls[provider]}
             </T>
-            <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+            <View style={{ flexDirection: "row", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
               <Button small variant="outline" title="Share / copy" onPress={() => void Share.share({ message: v.email.urls[provider] })} />
               {provider === "cloudflare" ? <Button small variant="outline" title="Share worker code" onPress={() => void Share.share({ message: v.email.cloudflareWorker })} /> : null}
               <Button small variant="ghost" title="Rotate" onPress={rotate} />
             </View>
-            <T variant="micro" tone="muted" style={{ marginTop: 8 }}>
-              Accepted from {[v.accountEmail, ...v.channel.allowEmails].filter(Boolean).join(", ") || "nobody yet — add an address on the dashboard"}.
-            </T>
+            {provider === "mailgun" && !v.channel.hasMailgunKey ? (
+              <T variant="micro" tone="muted" style={{ marginTop: 8 }}>
+                Paste the Mailgun signing key on the desktop dashboard to verify deliveries.
+              </T>
+            ) : null}
           </Card>
 
           <Card>
@@ -106,8 +179,7 @@ export default function Inbox() {
               <Button small variant="outline" title="Share app manifest" onPress={() => void Share.share({ message: v.slack.manifest })} />
             </View>
             <T variant="micro" tone="muted" style={{ marginTop: 8 }}>
-              {v.channel.hasSlackSecret ? "Signing secret saved." : "Paste the app's signing secret on the dashboard."} {v.channel.slackUsers.length} linked Slack user
-              {v.channel.slackUsers.length === 1 ? "" : "s"}.
+              {v.channel.hasSlackSecret ? "Signing secret saved." : "Paste the app's signing secret on the desktop dashboard."}
             </T>
           </Card>
 
@@ -125,6 +197,20 @@ export default function Inbox() {
               ))
             )}
           </Card>
+
+          <PickerSheet
+            visible={repoSheet}
+            title="Default repo"
+            options={repos.map((r) => ({ value: r.fullName, label: r.fullName, hint: r.description }))}
+            value={v.channel.defaultRepo}
+            allowNone
+            noneLabel="Ask each time"
+            onPick={(r) => void update("defaultRepo", { defaultRepo: r ?? "" })}
+            onClose={() => setRepoSheet(false)}
+            onSearch={searchRepos}
+            searching={repoBusy}
+            emptyText="Type to search your repos."
+          />
         </>
       )}
     </SettingsScreen>

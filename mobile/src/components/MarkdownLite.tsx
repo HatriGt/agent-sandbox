@@ -1,76 +1,208 @@
 import React from "react";
-import { View } from "react-native";
+import { Pressable, ScrollView, View } from "react-native";
 import * as WebBrowser from "expo-web-browser";
+import * as Clipboard from "expo-clipboard";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
+import {
+  calloutKind,
+  parseGfmTable,
+  isTableDelimiterRow,
+  parseStatusItems,
+  progressFromItems,
+  smartBlock,
+  type CalloutKind,
+  type ParsedTable,
+  type SmartSpec,
+} from "@/lib/viz";
 import { T } from "./ui/AppText";
 import { Icon, type IconName } from "./ui/Icon";
+import { SmartBlockView, VizFrame } from "./viz/SmartBlockView";
+import { TableBlock } from "./viz/TableBlock";
+import { CalloutBlock, ChecklistBlock, ProgressBlock, StatusListBlock } from "./viz/SmallBlocks";
+import { MiniAction } from "./viz/VizFrame";
 
 /**
- * Lightweight markdown for agent prose: headings, fenced code, inline code,
- * bold, italics, lists, blockquotes — and links. Rendered at the .prose-agent
- * scale (15.5/1.7). Links match the web's LinkChip treatment: a URL in prose
- * becomes a tappable chip with an icon for what it points at (PR, issue,
- * commit, file, repo, web) and a short human label instead of the raw address.
+ * Lightweight markdown for agent prose, mirroring the web console's `Markdown` + viz router:
+ * headings, paragraphs, fenced code (with language label, copy, 80-line cap), GFM tables, task
+ * lists (checklist card), nested lists (3 levels), rules, blockquotes and `> [!NOTE]` callouts,
+ * images (as link chips — never fetched), inline code / bold / italic / strike / links (LinkChip).
+ *
+ * Viz fences (`stats`, `kv`, `badges`, `progress`, `steps`, `csv`, `tsv`, `json`, `tests`,
+ * `timeline`, callouts, `chart`) render natively through lib/viz.ts `smartBlock`; anything the
+ * router does not understand, or a fence still streaming in, stays a code block.
  */
 export function MarkdownLite({ text }: { text: string }) {
-  const { palette } = useTheme();
-  const blocks = splitBlocks(text);
+  const blocks = React.useMemo(() => splitBlocks(text), [text]);
+  return <Blocks blocks={blocks} />;
+}
+
+function Blocks({ blocks }: { blocks: Block[] }) {
   return (
     <View style={{ gap: 8 }}>
-      {blocks.map((b, i) => {
-        if (b.kind === "code") {
-          return (
-            <View
-              key={i}
-              style={{ backgroundColor: palette.trace, borderRadius: radius.lg, padding: 12 }}
-            >
-              {b.lang ? (
-                <T variant="micro" mono tone="faint" style={{ marginBottom: 6 }}>
-                  {b.lang}
-                </T>
-              ) : null}
-              <T variant="code" mono style={{ color: palette.traceFg }} selectable>
-                {b.text}
-              </T>
-            </View>
-          );
-        }
-        if (b.kind === "heading") {
-          return (
-            <T key={i} variant={b.level <= 2 ? "h3" : "body"} weight="semibold" selectable>
-              {stripInline(b.text)}
-            </T>
-          );
-        }
-        if (b.kind === "quote") {
-          return (
-            <View key={i} style={{ borderLeftWidth: 2, borderLeftColor: palette.lineStrong, paddingLeft: 10 }}>
-              <InlineText text={b.text} muted />
-            </View>
-          );
-        }
-        if (b.kind === "list") {
-          return (
-            <View key={i} style={{ gap: 4 }}>
-              {b.items.map((it, j) => (
-                <View key={j} style={{ flexDirection: "row", gap: 8 }}>
-                  <T variant="prose" tone="faint">
-                    {it.ordered ? `${it.n}.` : "•"}
-                  </T>
-                  <View style={{ flex: 1 }}>
-                    <InlineText text={it.text} />
-                  </View>
-                </View>
-              ))}
-            </View>
-          );
-        }
-        return <InlineText key={i} text={b.text} />;
-      })}
+      {blocks.map((b, i) => (
+        <BlockView key={i} block={b} />
+      ))}
     </View>
   );
 }
+
+function BlockView({ block: b }: { block: Block }) {
+  const { palette } = useTheme();
+  switch (b.kind) {
+    case "code": {
+      const raw = <CodeBlock text={b.text} lang={b.lang} />;
+      if (b.spec) return <SmartBlockView spec={b.spec} raw={raw} renderMarkdown={(t) => <MarkdownLite text={t} />} />;
+      return raw;
+    }
+    case "heading":
+      return (
+        <T variant={b.level === 1 ? "h2" : b.level === 2 ? "h3" : "body"} weight="semibold" selectable style={b.level <= 2 ? { marginTop: 4 } : undefined}>
+          {stripInline(b.text)}
+        </T>
+      );
+    case "hr":
+      return <View style={{ height: 1, backgroundColor: palette.border, marginVertical: 4 }} />;
+    case "quote":
+      return (
+        <View style={{ borderLeftWidth: 2, borderLeftColor: palette.lineStrong, paddingLeft: 10 }}>
+          <MarkdownLite text={b.text} />
+        </View>
+      );
+    case "callout":
+      return (
+        <CalloutBlock kind={b.callout} title={b.title}>
+          <MarkdownLite text={b.text} />
+        </CalloutBlock>
+      );
+    case "table":
+      return <TableBlock table={b.table} renderCell={(t) => <InlineText text={t} variant="meta" />} />;
+    case "list":
+      return <ListView items={b.items} />;
+    default:
+      return <InlineText text={b.text} />;
+  }
+}
+
+// ---------------------------------------------------------------- lists
+
+function ListView({ items }: { items: ListItem[] }) {
+  const { palette } = useTheme();
+  const tree = React.useMemo(() => nest(items), [items]);
+  const flat = items.every((it) => it.depth === 0);
+  // Task list → checklist card (every item must be a task; mixed lists stay lists).
+  if (flat && items.length > 0 && items.every((it) => it.task !== undefined)) {
+    return (
+      <ChecklistBlock
+        items={items.map((it) => ({ checked: it.task === true, text: it.text }))}
+        renderText={(t, muted) => <InlineText text={t} variant="meta" muted={muted} />}
+      />
+    );
+  }
+  if (flat && !items.some((it) => it.ordered)) {
+    const texts = items.map((it) => it.text);
+    const progress = progressFromItems(texts);
+    if (progress) {
+      return (
+        <VizFrame kind="progress" raw={<CodeBlock text={texts.join("\n")} />} icon="percent">
+          <ProgressBlock rows={progress} />
+        </VizFrame>
+      );
+    }
+    const status = parseStatusItems(texts);
+    if (status) return <StatusListBlock items={status} renderText={(t) => <InlineText text={t} />} />;
+  }
+  const render =(nodes: ListNode[], depth: number): React.ReactNode => (
+    <View style={{ gap: 4 }}>
+      {nodes.map((n, j) => (
+        <View key={j}>
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            {n.task !== undefined ? (
+              <Icon name={n.task ? "check-circle" : "circle"} size={14} color={n.task ? palette.ok : palette.faint} style={{ marginTop: 6 }} />
+            ) : (
+              <T variant="prose" tone="faint" style={{ minWidth: 14, textAlign: n.ordered ? "right" : "center" }}>
+                {n.ordered ? `${n.n}.` : depth === 0 ? "•" : depth === 1 ? "◦" : "▪"}
+              </T>
+            )}
+            <View style={{ flex: 1 }}>
+              <InlineText text={n.text} muted={n.task === true} />
+            </View>
+          </View>
+          {n.children.length ? <View style={{ paddingLeft: 22, paddingTop: 4 }}>{render(n.children, depth + 1)}</View> : null}
+        </View>
+      ))}
+    </View>
+  );
+  return <>{render(tree, 0)}</>;
+}
+
+type ListNode = ListItem & { children: ListNode[] };
+
+function nest(items: ListItem[]): ListNode[] {
+  const roots: ListNode[] = [];
+  const stack: ListNode[] = [];
+  for (const it of items) {
+    const node: ListNode = { ...it, children: [] };
+    // A deeper item with no parent at that depth attaches to the nearest existing ancestor.
+    const depth = Math.min(it.depth, stack.length);
+    while (stack.length > depth) stack.pop();
+    if (stack.length === 0) roots.push(node);
+    else stack[stack.length - 1].children.push(node);
+    stack.push(node);
+  }
+  return roots;
+}
+
+// ---------------------------------------------------------------- code block
+
+const CODE_LINE_CAP = 80;
+
+function CodeBlock({ text, lang }: { text: string; lang?: string }) {
+  const { palette } = useTheme();
+  const [all, setAll] = React.useState(false);
+  const [copied, setCopied] = React.useState(false);
+  const lines = React.useMemo(() => text.split("\n"), [text]);
+  const capped = !all && lines.length > CODE_LINE_CAP;
+  const shown = capped ? lines.slice(0, CODE_LINE_CAP).join("\n") : text;
+  const copy = () => {
+    Clipboard.setStringAsync(text)
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1200);
+      })
+      .catch(() => {});
+  };
+  return (
+    <View style={{ backgroundColor: palette.trace, borderRadius: radius.lg, overflow: "hidden" }}>
+      <View style={{ flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingTop: 8 }}>
+        <T variant="micro" mono style={{ color: palette.traceFg, opacity: 0.6, flex: 1 }}>
+          {lang || "text"}
+        </T>
+        <Pressable onPress={copy} hitSlop={8} accessibilityRole="button" accessibilityLabel="Copy code" style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+          <Icon name={copied ? "check" : "copy"} size={12} color={palette.traceFg} style={{ opacity: 0.7 }} />
+          <T variant="micro" style={{ color: palette.traceFg, opacity: 0.7 }}>
+            {copied ? "Copied" : "Copy"}
+          </T>
+        </Pressable>
+      </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} bounces={false} contentContainerStyle={{ padding: 12, paddingTop: 6 }}>
+        <T variant="code" mono style={{ color: palette.traceFg }} selectable>
+          {shown}
+        </T>
+      </ScrollView>
+      {capped ? (
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingBottom: 10 }}>
+          <T variant="micro" style={{ color: palette.traceFg, opacity: 0.6 }}>
+            …{lines.length - CODE_LINE_CAP} more lines
+          </T>
+          <MiniAction label="Show all" onPress={() => setAll(true)} />
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------- links
 
 /** What a URL points at, mirrored from the web's describeUrl: GitHub gets first-class treatment. */
 type LinkKind = "pr" | "issue" | "commit" | "file" | "repo" | "github" | "web";
@@ -108,49 +240,49 @@ const LINK_ICON: Record<LinkKind, IconName> = {
 };
 
 /** A URL as a tappable chip inside prose — icon · short label · arrow, like the web's LinkChip. */
-function LinkChip({ href, text }: { href: string; text?: string }) {
+function LinkChip({ href, text, image, variant = "prose" }: { href: string; text?: string; image?: boolean; variant?: "prose" | "meta" }) {
   const { palette } = useTheme();
   const d = describeUrl(href);
   const custom = text && text !== href && text.replace(/\/$/, "") !== href.replace(/\/$/, "");
   const tint = d.kind === "pr" ? palette.ok : d.kind === "issue" ? palette.live : palette.foreground;
+  const icon: IconName = image ? "image" : custom && d.kind === "web" ? "link" : LINK_ICON[d.kind];
   return (
     <T
-      variant="prose"
+      variant={variant}
       weight="semibold"
       onPress={() => WebBrowser.openBrowserAsync(href).catch(() => {})}
       style={{ backgroundColor: palette.muted, borderRadius: radius.sm, color: tint }}
     >
       {" "}
-      <Icon name={custom && d.kind === "web" ? "link" : LINK_ICON[d.kind]} size={12} color={tint} />{" "}
-      {custom ? text : d.label} <Icon name="arrow-up-right" size={11} color={palette.faint} />{" "}
+      <Icon name={icon} size={12} color={tint} /> {custom ? text : d.label} <Icon name="arrow-up-right" size={11} color={palette.faint} />{" "}
     </T>
   );
 }
 
-function InlineText({ text, muted }: { text: string; muted?: boolean }) {
+// ---------------------------------------------------------------- inline
+
+function InlineText({ text, muted, variant = "prose" }: { text: string; muted?: boolean; variant?: "prose" | "meta" }) {
   const { palette } = useTheme();
-  const parts = parseInline(text);
+  const parts = React.useMemo(() => parseInline(text), [text]);
   return (
-    <T variant="prose" tone={muted ? "muted" : "default"} selectable>
+    <T variant={variant} tone={muted ? "muted" : "default"} selectable>
       {parts.map((p, i) =>
         p.href ? (
-          <LinkChip key={i} href={p.href} text={p.text !== p.href ? p.text : undefined} />
+          <LinkChip key={i} href={p.href} text={p.text !== p.href ? p.text : undefined} image={p.image} variant={variant} />
         ) : p.code ? (
-          <T
-            key={i}
-            variant="code"
-            mono
-            selectable
-            style={{ backgroundColor: palette.muted, color: palette.foreground }}
-          >
+          <T key={i} variant="code" mono selectable style={{ backgroundColor: palette.muted, color: palette.foreground }}>
             {p.text}
           </T>
         ) : p.bold ? (
-          <T key={i} variant="prose" weight="semibold" selectable>
+          <T key={i} variant={variant} weight="semibold" selectable>
             {p.text}
           </T>
         ) : p.italic ? (
-          <T key={i} variant="prose" selectable style={{ fontStyle: "italic" }}>
+          <T key={i} variant={variant} selectable style={{ fontStyle: "italic" }}>
+            {p.text}
+          </T>
+        ) : p.strike ? (
+          <T key={i} variant={variant} tone="muted" selectable style={{ textDecorationLine: "line-through" }}>
             {p.text}
           </T>
         ) : (
@@ -161,13 +293,32 @@ function InlineText({ text, muted }: { text: string; muted?: boolean }) {
   );
 }
 
-type Block =
-  | { kind: "para" | "quote"; text: string }
-  | { kind: "heading"; level: number; text: string }
-  | { kind: "code"; text: string; lang?: string }
-  | { kind: "list"; items: { text: string; ordered: boolean; n: number }[] };
+// ---------------------------------------------------------------- block parser
 
-function splitBlocks(text: string): Block[] {
+type ListItem = { text: string; ordered: boolean; n: number; depth: number; task?: boolean };
+
+type Block =
+  | { kind: "para"; text: string }
+  | { kind: "quote"; text: string }
+  | { kind: "callout"; callout: CalloutKind; title?: string; text: string }
+  | { kind: "heading"; level: number; text: string }
+  | { kind: "hr" }
+  | { kind: "code"; text: string; lang?: string; closed: boolean; spec: SmartSpec | null }
+  | { kind: "table"; table: ParsedTable }
+  | { kind: "list"; items: ListItem[] };
+
+const LIST_RE = /^(\s*)([-*•+]|\d+[.)])\s+(.*)$/;
+const HR_RE = /^\s{0,3}([-*_])(\s*\1){2,}\s*$/;
+
+function isTableStart(lines: string[], i: number): boolean {
+  return lines[i].includes("|") && i + 1 < lines.length && isTableDelimiterRow(lines[i + 1]);
+}
+
+function startsBlock(line: string): boolean {
+  return /^```/.test(line) || /^(#{1,6})\s+/.test(line) || /^>\s?/.test(line) || LIST_RE.test(line) || HR_RE.test(line);
+}
+
+export function splitBlocks(text: string): Block[] {
   const lines = text.replace(/\r/g, "").split("\n");
   const blocks: Block[] = [];
   let i = 0;
@@ -177,77 +328,125 @@ function splitBlocks(text: string): Block[] {
       i++;
       continue;
     }
-    const fence = line.match(/^```(.*)$/);
+    const fence = line.match(/^\s{0,3}(`{3,}|~{3,})(.*)$/);
     if (fence) {
+      const marker = fence[1];
+      const closeRe = new RegExp(`^\\s{0,3}${marker[0] === "`" ? "`" : "~"}{${marker.length},}\\s*$`);
       const buf: string[] = [];
       i++;
-      while (i < lines.length && !/^```\s*$/.test(lines[i])) buf.push(lines[i++]);
-      i++;
-      const lang = fence[1].trim().split(/\s+/)[0].replace(/[^\w+#.-]/g, "");
-      blocks.push({ kind: "code", text: buf.join("\n"), lang: lang || undefined });
+      let closed = false;
+      while (i < lines.length) {
+        if (closeRe.test(lines[i])) {
+          closed = true;
+          i++;
+          break;
+        }
+        buf.push(lines[i++]);
+      }
+      const lang = fence[2].trim().split(/\s+/)[0].replace(/[^\w+#.-]/g, "").toLowerCase();
+      const code = buf.join("\n");
+      // smartBlock only on closed fences: a half-streamed chart must never flip between code and chart.
+      blocks.push({ kind: "code", text: code, lang: lang || undefined, closed, spec: closed && lang ? smartBlock(lang, code) : null });
       continue;
     }
     const h = line.match(/^(#{1,6})\s+(.*)$/);
     if (h) {
-      blocks.push({ kind: "heading", level: h[1].length, text: h[2] });
+      blocks.push({ kind: "heading", level: h[1].length, text: h[2].replace(/\s+#+\s*$/, "") });
+      i++;
+      continue;
+    }
+    if (isTableStart(lines, i)) {
+      const buf: string[] = [];
+      while (i < lines.length && lines[i].trim() && lines[i].includes("|")) buf.push(lines[i++]);
+      const table = parseGfmTable(buf);
+      if (table) {
+        blocks.push({ kind: "table", table });
+        continue;
+      }
+      blocks.push({ kind: "para", text: buf.join("\n") });
+      continue;
+    }
+    if (HR_RE.test(line)) {
+      blocks.push({ kind: "hr" });
       i++;
       continue;
     }
     if (/^>\s?/.test(line)) {
       const buf: string[] = [];
       while (i < lines.length && /^>\s?/.test(lines[i])) buf.push(lines[i++].replace(/^>\s?/, ""));
-      blocks.push({ kind: "quote", text: buf.join("\n") });
+      const alert = buf[0]?.match(/^\s*\[!([A-Za-z]+)\]\s*(.*)$/);
+      const ck = alert ? calloutKind(alert[1]) : null;
+      if (alert && ck) {
+        blocks.push({ kind: "callout", callout: ck, title: alert[2].trim() || undefined, text: buf.slice(1).join("\n") });
+      } else blocks.push({ kind: "quote", text: buf.join("\n") });
       continue;
     }
-    const li = line.match(/^\s*([-*•]|\d+[.)])\s+(.*)$/);
-    if (li) {
-      const items: { text: string; ordered: boolean; n: number }[] = [];
+    if (LIST_RE.test(line)) {
+      const items: ListItem[] = [];
+      const base = (line.match(LIST_RE) as RegExpMatchArray)[1].length;
       let n = 1;
       while (i < lines.length) {
-        const m = lines[i].match(/^\s*([-*•]|\d+[.)])\s+(.*)$/);
-        if (!m) break;
-        const ordered = /\d/.test(m[1]);
-        items.push({ text: m[2], ordered, n: ordered ? parseInt(m[1], 10) || n : n });
-        n++;
-        i++;
+        const cur = lines[i];
+        const m = cur.match(LIST_RE);
+        if (m) {
+          const indent = Math.max(0, m[1].length - base);
+          const depth = Math.min(2, Math.floor(indent / 2));
+          const ordered = /\d/.test(m[2]);
+          let body = m[3];
+          let task: boolean | undefined;
+          const tm = body.match(/^\[([ xX])\]\s+(.*)$/);
+          if (tm) {
+            task = tm[1] !== " ";
+            body = tm[2];
+          }
+          items.push({ text: body, ordered, n: ordered ? parseInt(m[2], 10) || n : n, depth, task });
+          if (depth === 0) n++;
+          i++;
+          continue;
+        }
+        // Lazy continuation: an indented non-empty line belongs to the previous item.
+        if (cur.trim() && /^\s+/.test(cur) && items.length && !/^\s{0,3}```/.test(cur)) {
+          items[items.length - 1].text += " " + cur.trim();
+          i++;
+          continue;
+        }
+        break;
       }
       blocks.push({ kind: "list", items });
       continue;
     }
     const buf: string[] = [];
-    while (
-      i < lines.length &&
-      lines[i].trim() &&
-      !/^```/.test(lines[i]) &&
-      !/^(#{1,6})\s+/.test(lines[i]) &&
-      !/^>\s?/.test(lines[i]) &&
-      !/^\s*([-*•]|\d+[.)])\s+/.test(lines[i])
-    ) {
-      buf.push(lines[i++]);
-    }
+    while (i < lines.length && lines[i].trim() && !startsBlock(lines[i]) && !isTableStart(lines, i)) buf.push(lines[i++]);
     if (!buf.length) buf.push(lines[i++]); // guarantee progress; never loop forever on an odd line
     blocks.push({ kind: "para", text: buf.join("\n") });
   }
   return blocks;
 }
 
-type InlinePart = { text: string; bold?: boolean; italic?: boolean; code?: boolean; href?: string };
+// ---------------------------------------------------------------- inline parser
 
-// Order matters: code first (a URL inside backticks stays code), then [text](url),
-// then bare URLs, then bold, then italics.
-// Underscore italics require word boundaries so snake_case identifiers stay intact.
-const INLINE_RE = /(`[^`\n]+`|\[[^\]\n]+\]\(https?:\/\/[^\s)]+\)|https?:\/\/[^\s<>()"']+|\*\*[^*\n]+\*\*|\*[^*\n]+\*|(?<![\w])_[^_\n]+_(?![\w]))/g;
+type InlinePart = { text: string; bold?: boolean; italic?: boolean; strike?: boolean; code?: boolean; href?: string; image?: boolean };
 
-function parseInline(text: string): InlinePart[] {
+// Order matters: code first (a URL inside backticks stays code), then ![alt](url), [text](url),
+// bare URLs, bold, strike, then italics. Underscore italics need word boundaries (snake_case).
+const INLINE_RE =
+  /(`[^`\n]+`|!\[[^\]\n]*\]\(https?:\/\/[^\s)]+\)|\[[^\]\n]+\]\(https?:\/\/[^\s)]+\)|https?:\/\/[^\s<>()"']+|\*\*[^*\n]+\*\*|~~[^~\n]+~~|\*[^*\n]+\*|(?<![\w])_[^_\n]+_(?![\w]))/g;
+
+export function parseInline(text: string): InlinePart[] {
   const out: InlinePart[] = [];
   let last = 0;
   for (const m of text.matchAll(INLINE_RE)) {
-    if (m.index! > last) out.push({ text: text.slice(last, m.index) });
+    const at = m.index ?? 0;
+    if (at > last) out.push({ text: text.slice(last, at) });
     const tok = m[0];
     if (tok.startsWith("`")) out.push({ text: tok.slice(1, -1), code: true });
-    else if (tok.startsWith("[")) {
+    else if (tok.startsWith("![")) {
+      const lm = tok.match(/^!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)$/);
+      if (lm) out.push({ text: lm[1] || "image", href: lm[2], image: true });
+      else out.push({ text: tok });
+    } else if (tok.startsWith("[")) {
       const lm = tok.match(/^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/);
-      if (lm) out.push({ text: lm[1], href: lm[2] });
+      if (lm) out.push({ text: stripInline(lm[1]), href: lm[2] });
       else out.push({ text: tok });
     } else if (/^https?:\/\//.test(tok)) {
       // Trailing punctuation belongs to the sentence, not the URL.
@@ -255,13 +454,17 @@ function parseInline(text: string): InlinePart[] {
       out.push({ text: trimmed, href: trimmed });
       if (trimmed.length < tok.length) out.push({ text: tok.slice(trimmed.length) });
     } else if (tok.startsWith("**")) out.push({ text: tok.slice(2, -2), bold: true });
+    else if (tok.startsWith("~~")) out.push({ text: tok.slice(2, -2), strike: true });
     else out.push({ text: tok.slice(1, -1), italic: true });
-    last = m.index! + tok.length;
+    last = at + tok.length;
   }
   if (last < text.length) out.push({ text: text.slice(last) });
   return out.length ? out : [{ text }];
 }
 
 function stripInline(text: string): string {
-  return text.replace(/\*\*([^*]+)\*\*/g, "$1").replace(/`([^`]+)`/g, "$1");
+  return text
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/~~([^~]+)~~/g, "$1")
+    .replace(/`([^`]+)`/g, "$1");
 }
