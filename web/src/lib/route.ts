@@ -47,7 +47,7 @@ export function parseConsolePath(pathname: string): ConsoleRoute {
   if (/^\/skills\/?$/.test(rest)) return { view: "skills" };
   if (/^\/memory\/?$/.test(rest)) return { view: "memory" };
   if (/^\/harnesses\/?$/.test(rest)) return { view: "harnesses" };
-  if (/^\/workflows\/?$/.test(rest)) return { view: "workflows" };
+  if (/^\/(workflows|autopilot\/playbooks)\/?$/.test(rest)) return { view: "workflows" };
   if (/^\/(accounts|integrations)\/?$/.test(rest)) return { view: "integrations" };
   if (/^\/account\/?$/.test(rest)) return { view: "account" };
   if (/^\/connect\/?$/.test(rest)) return { view: "connect" };
@@ -77,7 +77,7 @@ export function consolePath(r: ConsoleRoute): string {
     case "harnesses":
       return `${BASE}/harnesses`;
     case "workflows":
-      return `${BASE}/workflows`;
+      return `${BASE}/autopilot/playbooks`;
     case "integrations":
       return `${BASE}/integrations`;
     case "account":

@@ -1,6 +1,7 @@
-import * as React from "react";
-import { ArrowLeft, CalendarClock, Copy, FlaskConical, GitPullRequest, Link2, Play, Plus, RotateCw, ShieldCheck, Trash2, Webhook, Workflow } from "lucide-react";
+﻿import * as React from "react";
+import { CalendarClock, Copy, FlaskConical, GitPullRequest, Link2, ListChecks, Play, Plus, RotateCw, ShieldCheck, Trash2, Webhook, Workflow } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { motion, useReducedMotion } from "motion/react";
 import { toast } from "sonner";
 import { api, type AlertPreset, type Automation, type AutomationDelivery, type AutomationDraft, type AutomationKind, type GithubEvent } from "@/lib/api";
 import { fmtAgo } from "@/lib/format";
@@ -12,13 +13,13 @@ import { Segmented } from "@/components/ui/segmented";
 import { Textarea } from "@/components/ui/textarea";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
-import { StaggerItem, Swap } from "@/components/ui/swap";
+import { Swap } from "@/components/ui/swap";
 import { Bar } from "@/components/thread/Skeletons";
 import { cn } from "@/lib/utils";
 import { PrFollowupsPanel } from "@/components/PrFollowupsPanel";
 
 /**
- * Automations: runs that start themselves — on a schedule, on a webhook, on a GitHub event, or after
+ * Automations: runs that start themselves â€” on a schedule, on a webhook, on a GitHub event, or after
  * another automation finishes. A LIST, not a canvas: each row says what fires it in words, how the
  * last fire went, when the next one is, and a switch. Editing happens in a side sheet with a live
  * preview of the task, rendered against the last real payload this automation received.
@@ -37,7 +38,7 @@ const DEFAULT_TEMPLATES: Record<AutomationKind, string> = {
   chain: "Review what the previous run did ({{parent.headline}}) and tighten it.",
 };
 
-/* ─── watch presets: scheduled, quiet checks over gh / curl (no new dispatcher) ─── */
+/* â”€â”€â”€ watch presets: scheduled, quiet checks over gh / curl (no new dispatcher) â”€â”€â”€ */
 
 const WATCH_PRESETS: Array<{ id: string; label: string; name: string; cron: string; task: string }> = [
   {
@@ -66,13 +67,13 @@ const WATCH_PRESETS: Array<{ id: string; label: string; name: string; cron: stri
   },
 ];
 
-/* ─── alert sources (Sentry / Datadog / PagerDuty presets) ─── */
+/* â”€â”€â”€ alert sources (Sentry / Datadog / PagerDuty presets) â”€â”€â”€ */
 
 const PRESET_LABEL: Record<AlertPreset, string> = { sentry: "Sentry", datadog: "Datadog", pagerduty: "PagerDuty" };
 const INCIDENT_HARNESS_ID = "hrn_builtin-incident-responder";
 const ALERT_TEMPLATE = "{{alert.source}} alert: {{alert.title}}\n\nSeverity: {{alert.severity}}\nService: {{alert.service}}\nLink: {{alert.url}}\n\n{{alert.message}}";
 const PRESET_SECRET_HINT: Record<AlertPreset, string> = {
-  sentry: "The integration's Client Secret (Sentry → Settings → Custom Integrations). We check Sentry-Hook-Signature with it.",
+  sentry: "The integration's Client Secret (Sentry â†’ Settings â†’ Custom Integrations). We check Sentry-Hook-Signature with it.",
   pagerduty: "The webhook subscription's signing secret (shown once when you create it). We check X-PagerDuty-Signature with it.",
   datadog: "Datadog doesn't sign webhooks. Pick a token, and add the custom header X-ASB-Token with it in the Datadog webhook.",
 };
@@ -90,14 +91,14 @@ const REASON_LABEL: Record<NonNullable<AutomationDelivery["reason"]>, string> = 
   error: "error",
 };
 
-/** "fired → box-1" / "skipped · cooldown" / "rejected · bad signature". */
+/** "fired â†’ box-1" / "skipped Â· cooldown" / "rejected Â· bad signature". */
 export function deliveryLine(d: AutomationDelivery): string {
-  const head = d.outcome === "fired" ? `fired${d.box ? ` → ${d.box}` : ""}` : `${d.outcome === "failed" ? "could not start" : d.outcome}${d.reason ? ` · ${REASON_LABEL[d.reason]}` : ""}`;
-  return d.test ? `test · ${head}` : head;
+  const head = d.outcome === "fired" ? `fired${d.box ? ` â†’ ${d.box}` : ""}` : `${d.outcome === "failed" ? "could not start" : d.outcome}${d.reason ? ` Â· ${REASON_LABEL[d.reason]}` : ""}`;
+  return d.test ? `test Â· ${head}` : head;
 }
-/** "checked 12× · 1 report" — a quiet automation's runs that found nothing vs those that reported. */
+/** "checked 12Ã— Â· 1 report" â€” a quiet automation's runs that found nothing vs those that reported. */
 export function countsLine(c: { checked: number; reports: number }): string {
-  return `checked ${c.checked}× · ${c.reports} report${c.reports === 1 ? "" : "s"}`;
+  return `checked ${c.checked}Ã— Â· ${c.reports} report${c.reports === 1 ? "" : "s"}`;
 }
 function randomToken(): string {
   const b = new Uint8Array(24);
@@ -118,7 +119,7 @@ function blank(kind: AutomationKind = "schedule"): AutomationDraft {
   };
 }
 
-/** "in 3h" / "in 12 min" — epoch ms in the future. */
+/** "in 3h" / "in 12 min" â€” epoch ms in the future. */
 function fmtIn(ms: number, now = Date.now()): string {
   const s = Math.max(0, Math.round((ms - now) / 1000));
   if (s < 60) return "in under a minute";
@@ -127,7 +128,19 @@ function fmtIn(ms: number, now = Date.now()): string {
   return `in ${Math.round(s / 86_400)}d`;
 }
 
-export function Automations({ onBack, onOpenBox }: { onBack: () => void; onOpenBox: (box: string) => void }) {
+let automationSeed: Partial<AutomationDraft> | null = null;
+/** Open the new-automation sheet pre-filled the next time the Automations tab mounts. */
+export function seedAutomation(d: Partial<AutomationDraft>): void {
+  automationSeed = d;
+}
+function takeAutomationSeed(): Partial<AutomationDraft> | null {
+  const s = automationSeed;
+  automationSeed = null;
+  return s;
+}
+
+/** The Automations tab of Autopilot (AutopilotPage owns the page header and tabs). */
+export function Automations({ onOpenBox, onOpenPlaybooks }: { onOpenBox: (box: string) => void; onOpenPlaybooks: () => void }) {
   const [rows, setRows] = React.useState<Automation[] | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [attempt, setAttempt] = React.useState(0);
@@ -170,60 +183,29 @@ export function Automations({ onBack, onOpenBox }: { onBack: () => void; onOpenB
   };
 
   const names = Object.fromEntries((rows ?? []).map((r) => [r.id, r.name]));
-  const proposed = (rows ?? []).filter((r) => r.proposed);
-  const listed = (rows ?? []).filter((r) => !r.proposed);
+  // Waiting on you first, then live ones, then paused.
+  const listed = [...(rows ?? [])].sort((a, b) => Number(b.proposed && !b.enabled) - Number(a.proposed && !a.enabled) || Number(b.enabled) - Number(a.enabled));
+
+  // "Automate this playbook" on the Playbooks tab lands here with a draft.
+  React.useEffect(() => {
+    const s = takeAutomationSeed();
+    if (s) setEditing({ id: null, draft: { ...blank(), ...s } });
+  }, []);
 
   return (
-    <div className="h-full min-w-0 overflow-y-auto">
-      <div className="mx-auto max-w-[900px] px-5 py-7 md:px-8 md:py-9">
-        <header className="mb-6 flex flex-wrap items-end gap-3">
-          <div className="min-w-0 flex-1">
-            <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2 mb-3 md:hidden" aria-label="Back to machines">
-              <ArrowLeft className="size-4" />
-              Machines
-            </Button>
-            <h1 className="text-foreground font-serif text-h1 font-normal tracking-[-0.01em]">Autopilot</h1>
-            <p className="text-muted-foreground mt-1 text-meta">Work that runs itself — on a schedule, a webhook, a GitHub event, or after another run. Each opens a PR at most and leaves a receipt.</p>
-          </div>
+    <div className="min-w-0">
+      <div>
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          <p className="text-muted-foreground min-w-0 flex-1 text-meta">
+            <span className="text-foreground">When</span> work starts on its own â€” a schedule, a webhook, a GitHub event, or after another run. Each opens a PR at most and leaves a receipt.
+          </p>
           {rows && rows.length > 0 && (
             <Button size="sm" onClick={() => setEditing({ id: null, draft: blank() })}>
               <Plus />
               New automation
             </Button>
           )}
-        </header>
-
-        {proposed.length > 0 && (
-          <section className="mb-5" aria-label="Proposed by the agent">
-            <p className="label text-muted-foreground mb-2">Proposed by the agent</p>
-            <div className="overflow-hidden rounded-xl border border-dashed" role="list">
-              {proposed.map((a) => (
-                <div key={a.id} role="listitem" className="flex flex-wrap items-center gap-3 border-b px-4 py-3 last:border-b-0">
-                  <span className="bg-muted text-muted-foreground grid size-8 shrink-0 place-items-center rounded-lg" aria-hidden>
-                    <CalendarClock className="size-4" strokeWidth={1.75} />
-                  </span>
-                  <span className="min-w-0 flex-1 basis-48">
-                    <span className="text-foreground block truncate text-meta font-medium">{a.name}</span>
-                    <span className="text-muted-foreground mt-0.5 block truncate text-micro">
-                      {a.when} · quiet{a.repo ? ` · ${a.repo}` : ""}
-                    </span>
-                  </span>
-                  <span className="flex shrink-0 items-center gap-1.5">
-                    <Button size="sm" variant="outline" onClick={() => setEditing({ id: a.id, draft: toDraft(a) })}>
-                      Edit
-                    </Button>
-                    <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => void dismiss(a)}>
-                      Dismiss
-                    </Button>
-                    <Button size="sm" onClick={() => void toggle(a, true)}>
-                      Enable
-                    </Button>
-                  </span>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
+        </div>
 
         <Swap state={error ? "error" : rows === null ? "loading" : listed.length ? "list" : "empty"}>
           {error ? (
@@ -261,19 +243,20 @@ export function Automations({ onBack, onOpenBox }: { onBack: () => void; onOpenB
                 </Button>
               }
               facts={[
-                { icon: CalendarClock, text: "“Weekdays 02:00: fix whatever broke overnight” — in your own timezone." },
-                { icon: GitPullRequest, text: "Label an issue “agent” and a run picks it up, then comments its receipt on the issue." },
+                { icon: CalendarClock, text: "â€œWeekdays 02:00: fix whatever broke overnightâ€ â€” in your own timezone." },
+                { icon: GitPullRequest, text: "Label an issue â€œagentâ€ and a run picks it up, then comments its receipt on the issue." },
                 { icon: ShieldCheck, text: "One run at a time by default, PR-only, and a storm cap of 12 fires an hour." },
               ]}
             />
           ) : (
-            <div className="overflow-hidden rounded-xl border" role="list">
-              {listed.map((a, i) => (
-                <StaggerItem key={a.id} index={i}>
-                  <AutomationRow a={a} onEdit={() => setEditing({ id: a.id, draft: toDraft(a) })} onToggle={(on) => void toggle(a, on)} onOpenBox={onOpenBox} />
-                </StaggerItem>
-              ))}
-            </div>
+            <AutomationTable
+              rows={listed}
+              onEdit={(a) => setEditing({ id: a.id, draft: toDraft(a) })}
+              onToggle={(a, on) => void toggle(a, on)}
+              onDismiss={(a) => void dismiss(a)}
+              onOpenBox={onOpenBox}
+              onOpenPlaybook={onOpenPlaybooks}
+            />
           )}
         </Swap>
         <PrFollowupsPanel />
@@ -374,13 +357,13 @@ function WorkflowPick({ value, onChange }: { value: string | undefined; onChange
   const cur = list.find((w) => w.id === value);
   return (
     <label className="block">
-      <Label hint="optional — the task fills {{task}} in step one">Workflow</Label>
+      <Label hint="optional â€” how to do it; the task fills {{task}} in step one">Playbook</Label>
       <select className={field} value={value ?? ""} onChange={(e) => onChange(e.target.value || undefined)}>
-        <option value="">None — one run, as written</option>
-        {value && !cur && <option value={value}>Missing workflow — pick another</option>}
+        <option value="">None â€” one run, as written</option>
+        {value && !cur && <option value={value}>Missing playbook â€” pick another</option>}
         {list.map((w) => (
           <option key={w.id} value={w.id}>
-            {w.name} · {w.steps.length} step{w.steps.length === 1 ? "" : "s"}
+            {w.name} Â· {w.steps.length} step{w.steps.length === 1 ? "" : "s"}
           </option>
         ))}
       </select>
@@ -388,51 +371,144 @@ function WorkflowPick({ value, onChange }: { value: string | undefined; onChange
   );
 }
 
-function AutomationRow({ a, onEdit, onToggle, onOpenBox }: { a: Automation; onEdit: () => void; onToggle: (on: boolean) => void; onOpenBox: (box: string) => void }) {
+const TH = "text-faint px-3 py-2 text-micro font-medium tracking-wide uppercase first:pl-4 last:pr-4";
+const TD = "px-3 py-2.5 align-middle first:pl-4 last:pr-4";
+
+/** Every automation as one table: what, when, how (playbook), how it went, what's next, on/off. */
+function AutomationTable({
+  rows,
+  onEdit,
+  onToggle,
+  onDismiss,
+  onOpenBox,
+  onOpenPlaybook,
+}: {
+  rows: Automation[];
+  onEdit: (a: Automation) => void;
+  onToggle: (a: Automation, on: boolean) => void;
+  onDismiss: (a: Automation) => void;
+  onOpenBox: (box: string) => void;
+  onOpenPlaybook: () => void;
+}) {
+  const still = useReducedMotion();
+  return (
+    <div className="bg-card overflow-x-auto rounded-xl border">
+      <table className="w-full min-w-[40rem] table-fixed border-collapse text-left">
+        <colgroup>
+          <col />
+          <col className="w-[11rem]" />
+          <col className="hidden w-[9rem] lg:table-column" />
+          <col className="w-[9.5rem]" />
+          <col className="w-[6.5rem]" />
+          <col className="w-[5.5rem]" />
+        </colgroup>
+        <thead className="border-b">
+          <tr>
+            <th className={TH}>Automation</th>
+            <th className={TH}>Starts</th>
+            <th className={cn(TH, "hidden lg:table-cell")}>Playbook</th>
+            <th className={TH}>Last run</th>
+            <th className={TH}>Next</th>
+            <th className={cn(TH, "text-right")}>On</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((a, i) => (
+            <motion.tr
+              key={a.id}
+              initial={still ? { opacity: 0 } : { opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: still ? 0.1 : 0.24, delay: Math.min(i, 12) * 0.024, ease: [0.22, 1, 0.36, 1] }}
+              className={cn("hover:bg-muted/50 relative border-b transition-colors last:border-b-0", !a.enabled && !a.proposed && "opacity-70", a.proposed && !a.enabled && "bg-attention/[0.04]")}
+            >
+              <AutomationTr a={a} onEdit={() => onEdit(a)} onToggle={(on) => onToggle(a, on)} onDismiss={() => onDismiss(a)} onOpenBox={onOpenBox} onOpenPlaybook={onOpenPlaybook} />
+            </motion.tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function AutomationTr({ a, onEdit, onToggle, onDismiss, onOpenBox, onOpenPlaybook }: { a: Automation; onEdit: () => void; onToggle: (on: boolean) => void; onDismiss: () => void; onOpenBox: (box: string) => void; onOpenPlaybook: () => void }) {
   const Glyph = GLYPH[a.kind];
   const wf = useWorkflowName(a.workflowId);
+  const pending = a.proposed && !a.enabled;
+  const stop = (e: React.SyntheticEvent) => e.stopPropagation();
   return (
-    <div role="listitem" className={cn("group relative flex items-center gap-3 border-b px-4 py-3 transition-colors last:border-b-0 hover:bg-muted/50", !a.enabled && "opacity-70")}>
-      <button type="button" onClick={onEdit} aria-label={`Edit ${a.name}`} className="focus-visible:ring-ring absolute inset-0 cursor-pointer focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset" />
-      <span className={cn("grid size-8 shrink-0 place-items-center rounded-lg", a.enabled ? "bg-live/10 text-live" : "bg-muted text-muted-foreground")} aria-hidden>
-        <Glyph className="size-4" strokeWidth={1.75} />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="text-foreground block truncate text-meta font-medium">{a.name}</span>
-        <span className="text-muted-foreground mt-0.5 block truncate text-micro">
+    <>
+      <td className={TD}>
+        <span className="flex min-w-0 items-center gap-2.5">
+          <span className={cn("grid size-7 shrink-0 place-items-center rounded-md", a.enabled ? "bg-live/10 text-live" : "bg-muted text-muted-foreground")} aria-hidden>
+            <Glyph className="size-3.5" strokeWidth={1.75} />
+          </span>
+          <span className="min-w-0">
+            <button type="button" onClick={onEdit} className="text-foreground block max-w-full cursor-pointer truncate text-left text-meta font-medium after:absolute after:inset-0 focus-visible:outline-none" title={a.name}>
+              {a.name}
+            </button>
+            <span className="text-muted-foreground block truncate text-micro" title={a.taskTemplate}>
+              {a.proposed ? "Scheduled by the agent Â· " : ""}
+              {a.taskTemplate.replace(/\s+/g, " ")}
+            </span>
+          </span>
+        </span>
+      </td>
+      <td className={cn(TD, "text-micro")}>
+        <span className="text-foreground block truncate">{KIND_LABEL[a.kind]}</span>
+        <span className="text-muted-foreground block truncate" title={a.when}>
           {a.when}
-          {wf ? ` · workflow: ${wf}` : ""}
         </span>
-        <span className="text-muted-foreground mt-0.5 flex items-center gap-x-2 text-micro">
+      </td>
+      <td className={cn(TD, "hidden text-micro lg:table-cell")}>
+        {wf ? (
+          <button type="button" onClick={(e) => (stop(e), onOpenPlaybook())} className="bg-muted text-foreground relative z-10 inline-flex max-w-full cursor-pointer items-center gap-1 truncate rounded-md px-1.5 py-0.5 hover:underline">
+            <ListChecks className="size-3 shrink-0" aria-hidden />
+            <span className="truncate">{wf}</span>
+          </button>
+        ) : (
+          <span className="text-faint">â€”</span>
+        )}
+      </td>
+      <td className={cn(TD, "text-micro")}>
+        <span className="relative z-10 block truncate">
           <LastResult a={a} onOpenBox={onOpenBox} />
-          {a.quiet && a.counts && (
-            <>
-              <span aria-hidden>·</span>
-              <span className={cn("truncate", a.counts.reports > 0 ? "text-foreground" : "")} title="Quiet: only runs that found something notify">
-                {countsLine(a.counts)}
-              </span>
-            </>
-          )}
-          {a.lastDelivery && (a.kind === "webhook" || a.kind === "github") && (
-            <>
-              <span aria-hidden>·</span>
-              <span className={cn("truncate", deliveryTone(a.lastDelivery))} title={a.lastDelivery.detail}>
-                last delivery {fmtAgo(Math.round(a.lastDelivery.at / 1000))}: {deliveryLine(a.lastDelivery)}
-              </span>
-            </>
-          )}
-          {a.enabled && a.nextFire && (
-            <>
-              <span aria-hidden>·</span>
-              <span className="stamp" title={new Date(a.nextFire).toLocaleString()}>
-                next {fmtIn(a.nextFire)}
-              </span>
-            </>
-          )}
         </span>
-      </span>
-      <Switch className="relative" checked={a.enabled} onCheckedChange={onToggle} aria-label={a.enabled ? `Pause ${a.name}` : `Turn on ${a.name}`} />
-    </div>
+        {a.quiet && a.counts ? (
+          <span className={cn("block truncate", a.counts.reports > 0 ? "text-foreground" : "text-muted-foreground")} title="Quiet: only runs that found something notify">
+            {countsLine(a.counts)}
+          </span>
+        ) : a.lastDelivery && (a.kind === "webhook" || a.kind === "github") ? (
+          <span className={cn("block truncate", deliveryTone(a.lastDelivery))} title={a.lastDelivery.detail}>
+            {deliveryLine(a.lastDelivery)}
+          </span>
+        ) : null}
+      </td>
+      <td className={cn(TD, "text-micro tabular-nums")}>
+        {pending ? (
+          <span className="bg-attention/15 text-attention-text inline-flex rounded-full px-2 py-0.5 font-medium">Needs OK</span>
+        ) : a.enabled && a.nextFire ? (
+          <span className="text-foreground" title={new Date(a.nextFire).toLocaleString()}>
+            {fmtIn(a.nextFire)}
+          </span>
+        ) : (
+          <span className="text-faint">{a.enabled ? "on event" : "paused"}</span>
+        )}
+      </td>
+      <td className={cn(TD, "text-right")}>
+        {pending ? (
+          <span className="relative z-10 inline-flex items-center gap-1">
+            <Button size="xs" variant="ghost" className="text-muted-foreground" onClick={onDismiss} aria-label={`Dismiss ${a.name}`}>
+              <Trash2 />
+            </Button>
+            <Button size="xs" onClick={() => onToggle(true)}>
+              Approve
+            </Button>
+          </span>
+        ) : (
+          <Switch className="relative z-10" checked={a.enabled} onCheckedChange={onToggle} aria-label={a.enabled ? `Pause ${a.name}` : `Turn on ${a.name}`} />
+        )}
+      </td>
+    </>
   );
 }
 
@@ -553,7 +629,7 @@ function Editor({
     try {
       const r = await api.rotateTrigger(id);
       setHook({ url: r.hookUrl, secret: r.secret });
-      toast.success("New secret issued — the old URL stops working now");
+      toast.success("New secret issued â€” the old URL stops working now");
     } catch (e) {
       toast.error("Could not rotate", { description: e instanceof Error ? e.message : String(e) });
     }
@@ -638,7 +714,7 @@ function Editor({
 
       {(d.kind === "github" || d.kind === "schedule" || d.kind === "webhook") && (
         <label className="block">
-          <Label hint={d.kind === "github" ? "required" : "optional — the run clones it"}>Repository</Label>
+          <Label hint={d.kind === "github" ? "required" : "optional â€” the run clones it"}>Repository</Label>
           <input className={field} value={d.repo ?? ""} onChange={(e) => set({ repo: e.target.value || undefined })} placeholder="owner/name" />
         </label>
       )}
@@ -702,14 +778,14 @@ function Editor({
           {d.spec.preset && (
             <>
               <label className="block">
-                <Label hint={initialHasSecret ? "set — leave blank to keep it" : "required"}>{d.spec.preset === "datadog" ? "Header token" : "Signing secret"}</Label>
+                <Label hint={initialHasSecret ? "set â€” leave blank to keep it" : "required"}>{d.spec.preset === "datadog" ? "Header token" : "Signing secret"}</Label>
                 <div className="flex items-center gap-1.5">
                   <input
                     className={cn(field, "font-mono")}
                     type="password"
                     autoComplete="off"
                     value={d.signingSecret ?? ""}
-                    placeholder={initialHasSecret ? "••••••••" : ""}
+                    placeholder={initialHasSecret ? "â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢" : ""}
                     onChange={(e) => set({ signingSecret: e.target.value || undefined })}
                   />
                   {d.spec.preset === "datadog" && (
@@ -730,7 +806,7 @@ function Editor({
               )}
               {d.spec.preset === "datadog" && (
                 <div>
-                  <Label hint="Datadog → Integrations → Webhooks → Payload">Payload</Label>
+                  <Label hint="Datadog â†’ Integrations â†’ Webhooks â†’ Payload">Payload</Label>
                   <div className="flex items-start gap-1.5">
                     <code className="bg-muted/40 min-w-0 flex-1 rounded border px-2 py-1 font-mono text-micro break-all">{DATADOG_PAYLOAD}</code>
                     <Button size="icon-sm" variant="ghost" aria-label="Copy payload" onClick={() => copy(DATADOG_PAYLOAD)}>
@@ -764,7 +840,7 @@ function Editor({
           <label className="block">
             <Label>Runs after</Label>
             <select className={field} value={d.spec.afterTrigger ?? ""} onChange={(e) => setSpec({ afterTrigger: e.target.value })}>
-              <option value="">Pick an automation…</option>
+              <option value="">Pick an automationâ€¦</option>
               {others
                 .filter((o) => o.kind !== "chain" || o.spec.afterTrigger !== id)
                 .map((o) => (
@@ -792,9 +868,9 @@ function Editor({
         <Textarea className="min-h-28 font-mono text-meta" value={d.taskTemplate} onChange={(e) => set({ taskTemplate: e.target.value })} />
         <div className="bg-muted/40 mt-2 rounded-lg border px-3 py-2.5">
           <p className="label text-faint mb-1">
-            Preview {preview?.hasPayload ? "· against the last real payload" : id ? "· no payload received yet" : ""}
+            Preview {preview?.hasPayload ? "Â· against the last real payload" : id ? "Â· no payload received yet" : ""}
           </p>
-          <p className="text-foreground text-meta whitespace-pre-wrap break-words">{preview ? preview.text || <span className="text-faint">empty</span> : "…"}</p>
+          <p className="text-foreground text-meta whitespace-pre-wrap break-words">{preview ? preview.text || <span className="text-faint">empty</span> : "â€¦"}</p>
           {preview && preview.missing.length > 0 && (
             <p className="text-attention-text mt-1.5 text-micro">
               Empty until a payload has: {preview.missing.map((m) => `{{${m}}}`).join(", ")}
@@ -815,14 +891,14 @@ function Editor({
           <label className="flex items-center justify-between gap-3">
             <span className="text-meta">
               Comment the receipt on the issue or PR
-              <span className="text-faint block text-micro">Headline, files, verified, time — with a link back.</span>
+              <span className="text-faint block text-micro">Headline, files, verified, time â€” with a link back.</span>
             </span>
             <Switch size="sm" checked={d.prComment} onCheckedChange={(v) => set({ prComment: v })} />
           </label>
         )}
         <label className="flex items-center justify-between gap-3">
           <span className="text-meta">
-            Quiet — only tell me when something needs me
+            Quiet â€” only tell me when something needs me
             <span className="text-faint block text-micro">A run that finds nothing ends silently and counts as a check. Questions, failures and PRs still notify.</span>
           </span>
           <Switch size="sm" checked={!!d.quiet} onCheckedChange={(v) => set({ quiet: v })} />
@@ -846,12 +922,12 @@ function Editor({
 
       {hook && (
         <div className="border-live/30 bg-live/5 rounded-lg border px-3 py-3" role="status">
-          <p className="text-foreground text-meta font-medium">Webhook URL — shown once</p>
+          <p className="text-foreground text-meta font-medium">Webhook URL â€” shown once</p>
           <p className="text-muted-foreground mt-0.5 text-micro">
             {d.kind === "github"
-              ? "In the repo's Settings → Webhooks: paste the URL, content type application/json, and use the secret below."
+              ? "In the repo's Settings â†’ Webhooks: paste the URL, content type application/json, and use the secret below."
               : d.spec.preset
-                ? `Paste this as the webhook URL in ${PRESET_LABEL[d.spec.preset]}, then use “Send test event” to check the whole path.`
+                ? `Paste this as the webhook URL in ${PRESET_LABEL[d.spec.preset]}, then use â€œSend test eventâ€ to check the whole path.`
                 : "POST to this URL. Anyone with it can start a run, so keep it private."}
           </p>
           <div className="mt-2 flex items-center gap-1.5">
@@ -896,13 +972,13 @@ function Editor({
         <span className="flex-1" />
         {id && <ArmButton size="sm" variant="ghost" icon={<Trash2 />} label="Delete" armedLabel="Delete?" onConfirm={remove} className="text-muted-foreground" />}
       </div>
-      {id && d.kind === "chain" && d.spec.afterTrigger && <p className="text-faint -mt-3 text-micro">Runs after “{names[d.spec.afterTrigger] ?? "?"}” — run that one to test the chain.</p>}
+      {id && d.kind === "chain" && d.spec.afterTrigger && <p className="text-faint -mt-3 text-micro">Runs after â€œ{names[d.spec.afterTrigger] ?? "?"}â€ â€” run that one to test the chain.</p>}
 
       {id && (
         <div>
           <Label hint={`last ${50}`}>Deliveries</Label>
           {deliveries === null ? (
-            <p className="text-faint text-micro">…</p>
+            <p className="text-faint text-micro">â€¦</p>
           ) : deliveries.length === 0 ? (
             <p className="text-faint text-micro">Nothing has arrived yet. Every delivery lands here: fired, skipped (and why) or rejected.</p>
           ) : (
@@ -922,7 +998,7 @@ function Editor({
                     )}
                   </span>
                   {x.quiet && (
-                    <span className="text-faint shrink-0" title="Nothing needed you — no notification was sent">
+                    <span className="text-faint shrink-0" title="Nothing needed you â€” no notification was sent">
                       quiet
                     </span>
                   )}

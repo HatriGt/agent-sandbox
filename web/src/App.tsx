@@ -39,9 +39,8 @@ const Sandboxes = React.lazy(() => import("@/components/Sandboxes").then((m) => 
 const Integrations = React.lazy(() => import("@/components/Integrations").then((m) => ({ default: m.Integrations })));
 const SkillsPage = React.lazy(() => import("@/components/SkillsPage").then((m) => ({ default: m.SkillsPage })));
 const MemoryPage = React.lazy(() => import("@/components/Memory").then((m) => ({ default: m.MemoryPage })));
-const WorkflowsPage = React.lazy(() => import("@/components/WorkflowsPage").then((m) => ({ default: m.WorkflowsPage })));
+const AutopilotPage = React.lazy(() => import("@/components/AutopilotPage").then((m) => ({ default: m.AutopilotPage })));
 const HarnessesPage = React.lazy(() => import("@/components/HarnessesPage").then((m) => ({ default: m.HarnessesPage })));
-const Automations = React.lazy(() => import("@/components/Automations").then((m) => ({ default: m.Automations })));
 const History = React.lazy(() => import("@/components/History").then((m) => ({ default: m.History })));
 const PullRequestPage = React.lazy(() => import("@/components/pr/PullRequestPage").then((m) => ({ default: m.PullRequestPage })));
 /** Hovering the nav item warms the chunk and both payloads, so the page paints complete on click. */
@@ -303,7 +302,7 @@ export default function App() {
       { id: "skills", label: "Skills", hint: "g s", icon: <Zap />, group: "Go to", run: showSkills },
       { id: "memory", label: "Memory", icon: <Brain />, group: "Go to", keywords: "notes remembered learned across runs", run: showMemory },
       { id: "harnesses", label: "Harnesses", icon: <Layers />, group: "Go to", keywords: "drivers rules hooks egress budget compare bundle", run: showHarnesses },
-      { id: "workflows", label: "Workflows", icon: <ListChecks />, group: "Go to", keywords: "steps pipeline checks retry yaml", run: showWorkflows },
+      { id: "workflows", label: "Playbooks", icon: <ListChecks />, group: "Go to", keywords: "workflows steps pipeline checks retry yaml autopilot", run: showWorkflows },
       { id: "integrations", label: "Integrations", hint: "g a", icon: <Plug />, group: "Go to", run: showAccounts },
       { id: "account", label: "Account", icon: <UserRound />, group: "Go to", keywords: "settings profile keys notifications", run: showAccount },
       ...(getMe()?.mode === "saas" && getMe()?.role === "admin" ? [{ id: "admin", label: "Admin · users", icon: <Shield />, group: "Go to", keywords: "people members", run: showAdmin }] : []),
@@ -578,7 +577,7 @@ export default function App() {
 
       <div className="flex flex-col gap-0.5 border-t px-2 py-2">
         <NavItem active={view === "fleet"} flash={flash === "fleet"} onClick={showFleet} icon={<LayoutGrid />} label="Fleet view" badge={boxes.length || undefined} shortcut="g f" />
-        <NavItem active={view === "automations"} onClick={showAutomations} icon={<Workflow />} label="Autopilot" />
+        <NavItem active={view === "automations" || view === "workflows"} onClick={showAutomations} icon={<Workflow />} label="Autopilot" />
         <span className="contents" onMouseEnter={prefetchHistory}>
           <NavItem active={view === "history"} flash={flash === "history"} onClick={showHistory} icon={<Clock />} label="History" shortcut="g h" />
         </span>
@@ -587,7 +586,6 @@ export default function App() {
         </span>
         <NavItem active={view === "memory"} onClick={showMemory} icon={<Brain />} label="Memory" />
         <NavItem active={view === "harnesses"} onClick={showHarnesses} icon={<Layers />} label="Harnesses" />
-        <NavItem active={view === "workflows"} onClick={showWorkflows} icon={<ListChecks />} label="Workflows" />
         <span className="contents" onMouseEnter={prefetchIntegrations}>
           <NavItem active={view === "integrations"} flash={flash === "integrations"} onClick={showAccounts} icon={<Plug />} label="Integrations" shortcut="g a" />
         </span>
@@ -753,7 +751,7 @@ export default function App() {
               <RailIcon onClick={newTask} icon={<Plus />} label="New task" shortcut="n" primary />
               <RailIcon onClick={openPalette} icon={<Search />} label="Search" shortcut="⌘K" />
               <RailIcon active={view === "fleet"} flash={flash === "fleet"} onClick={showFleet} icon={<LayoutGrid />} label="Fleet view" shortcut="g f" badge={boxes.length || undefined} dot={waiting.length > 0} />
-              <RailIcon active={view === "automations"} onClick={showAutomations} icon={<Workflow />} label="Autopilot" />
+              <RailIcon active={view === "automations" || view === "workflows"} onClick={showAutomations} icon={<Workflow />} label="Autopilot" />
               <span className="contents" onMouseEnter={prefetchHistory}>
                 <RailIcon active={view === "history"} flash={flash === "history"} onClick={showHistory} icon={<Clock />} label="History" shortcut="g h" />
               </span>
@@ -762,7 +760,6 @@ export default function App() {
               </span>
               <RailIcon active={view === "memory"} onClick={showMemory} icon={<Brain />} label="Memory" />
               <RailIcon active={view === "harnesses"} onClick={showHarnesses} icon={<Layers />} label="Harnesses" />
-              <RailIcon active={view === "workflows"} onClick={showWorkflows} icon={<ListChecks />} label="Workflows" />
               <span className="contents" onMouseEnter={prefetchIntegrations}>
                 <RailIcon active={view === "integrations"} flash={flash === "integrations"} onClick={showAccounts} icon={<Plug />} label="Integrations" shortcut="g a" />
               </span>
@@ -818,7 +815,7 @@ export default function App() {
                   />
                 ) : view === "automations" ? (
                   <PageEnter className="h-full min-h-0">
-                    <Automations onBack={backToRail} onOpenBox={(b) => go({ view: "box", name: b })} />
+                    <AutopilotPage tab="automations" onTab={(t) => go({ view: t === "playbooks" ? "workflows" : "automations" })} onBack={backToRail} onOpenBox={(b) => go({ view: "box", name: b })} />
                   </PageEnter>
                 ) : view === "history" ? (
                   <PageEnter className="h-full min-h-0">
@@ -838,7 +835,7 @@ export default function App() {
                   </PageEnter>
                 ) : view === "workflows" ? (
                   <PageEnter className="h-full min-h-0">
-                    <WorkflowsPage onBack={backToRail} />
+                    <AutopilotPage tab="playbooks" onTab={(t) => go({ view: t === "playbooks" ? "workflows" : "automations" })} onBack={backToRail} onOpenBox={(b) => go({ view: "box", name: b })} />
                   </PageEnter>
                 ) : view === "integrations" ? (
                   <PageEnter className="h-full min-h-0">

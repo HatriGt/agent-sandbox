@@ -332,11 +332,11 @@ export function WorkflowMenu({ list, value, onChange, ...shell }: Shell & { list
   return (
     <ToolMenu
       {...shell}
-      title="Workflow"
-      trigger={{ icon: <ListChecks />, label: cur ? cur.name : "Workflow", caret: true, title: "Workflow — run the task as steps with checks", menu: "workflow", dot: !!cur }}
+      title="Playbook"
+      trigger={{ icon: <ListChecks />, label: cur ? cur.name : "Playbook", caret: true, title: "Playbook — run the task as steps with checks", menu: "workflow", dot: !!cur }}
     >
       <p className="text-faint px-3 pt-1 pb-1 text-micro leading-snug">Steps run in order on the same machine; a failing check is sent back to the agent.</p>
-      <div role="menu" aria-label="Workflows">
+      <div role="menu" aria-label="Playbooks">
         {items.map((w, i) => (
           <button
             key={w?.id ?? "none"}
@@ -352,7 +352,7 @@ export function WorkflowMenu({ list, value, onChange, ...shell }: Shell & { list
             className="hover:bg-muted/60 focus-visible:bg-muted/60 flex min-h-9 w-full cursor-pointer items-center gap-2.5 px-3 py-1.5 text-left outline-none transition-colors"
           >
             <span className="min-w-0 flex-1">
-              <span className="text-foreground block text-meta font-medium">{w ? w.name : "No workflow"}</span>
+              <span className="text-foreground block text-meta font-medium">{w ? w.name : "No playbook"}</span>
               <span className="text-muted-foreground block truncate text-micro">{w ? `${w.steps.length} step${w.steps.length === 1 ? "" : "s"}${w.description ? ` · ${w.description}` : ""}` : "One turn, as typed"}</span>
             </span>
             {(w?.id ?? null) === value && <Check className="text-live size-4 shrink-0" aria-hidden />}

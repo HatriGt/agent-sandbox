@@ -1,7 +1,8 @@
 import * as React from "react";
-import { ArrowLeft, Check, Copy, Github, ListChecks, Pencil, Plus, ShieldAlert, Terminal, Trash2, Wand2 } from "lucide-react";
+import { Check, Copy, Github, ListChecks, Pencil, Plus, ShieldAlert, Terminal, Trash2, Wand2, Zap } from "lucide-react";
 import { toast } from "sonner";
-import { api, type WorkflowStep, type WorkflowView } from "@/lib/api";
+import { api, type Automation, type WorkflowStep, type WorkflowView } from "@/lib/api";
+import { useCached } from "@/lib/cache";
 import { cn } from "@/lib/utils";
 import { fmtAgo } from "@/lib/format";
 import { Button } from "@/components/ui/button";
@@ -79,7 +80,7 @@ steps:
  * repo would hold), validated by the controller as you type, with the parsed steps shown beside it
  * so a prompt can never be mistaken for a command.
  */
-export function WorkflowsPage({ onBack }: { onBack: () => void }) {
+export function WorkflowsPage({ onAutomate }: { onAutomate: (w: WorkflowView) => void }) {
   const [list, setList] = React.useState<WorkflowView[] | null>(null);
   const [dir, setDir] = React.useState(".agent-sandbox/workflows");
   const [error, setError] = React.useState<string | null>(null);
@@ -120,18 +121,16 @@ export function WorkflowsPage({ onBack }: { onBack: () => void }) {
   };
 
   const items = list ?? [];
+  // Which automations run each playbook — the link between "how" and "when".
+  const triggers = useCached("triggers", (signal) => api.triggers(signal)).data?.triggers ?? [];
+  const usedBy = (id: string) => triggers.filter((t) => t.workflowId === id);
   return (
-    <div className="h-full min-w-0 overflow-y-auto">
-      <div className="mx-auto max-w-4xl px-5 py-6 md:px-8 md:py-8">
-        <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2 mb-3 md:hidden">
-          <ArrowLeft className="size-4" />
-          Back
-        </Button>
-        <header className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <div className="min-w-0">
-            <h1 className="text-foreground font-serif text-h1 font-normal tracking-[-0.01em]">Workflows</h1>
-            <p className="text-muted-foreground mt-1 text-meta">A task as a short script: agent turns and command checks, in order. Failed checks go back to the agent.</p>
-          </div>
+    <div className="min-w-0">
+      <div>
+        <header className="mb-4 flex flex-wrap items-center gap-3">
+          <p className="text-muted-foreground min-w-0 flex-1 text-meta">
+            <span className="text-foreground">How</span> a task gets done: agent turns and command checks, in order. Failed checks go back to the agent. Use one from the composer, or let an automation run it.
+          </p>
           {!editing && !importing && (
             <div className="flex shrink-0 flex-wrap items-center gap-2">
               <Button variant="outline" size="sm" onClick={() => setImporting(true)}>
@@ -140,7 +139,7 @@ export function WorkflowsPage({ onBack }: { onBack: () => void }) {
               </Button>
               <Button size="sm" onClick={() => setEditing({ yaml: EXAMPLE })}>
                 <Plus className="size-4" />
-                New workflow
+                New playbook
               </Button>
             </div>
           )}
@@ -152,7 +151,7 @@ export function WorkflowsPage({ onBack }: { onBack: () => void }) {
               isNew={!editing.id}
               onCancel={() => setEditing(null)}
               onSave={async (yaml) => {
-                const r = await mutate({ action: "upsert", ...(editing.id ? { id: editing.id } : {}), yaml }, editing.id ? "Workflow saved" : "Workflow created");
+                const r = await mutate({ action: "upsert", ...(editing.id ? { id: editing.id } : {}), yaml }, editing.id ? "Playbook saved" : "Playbook created");
                 if (r) setEditing(null);
               }}
             />
@@ -167,9 +166,9 @@ export function WorkflowsPage({ onBack }: { onBack: () => void }) {
             />
           ) : (
             <>
-              <SettingsSection id="saved" title="Saved workflows" meta={list ? items.length : undefined} purpose="Pick one in the composer; your task fills {{task}} in its first step.">
+              <SettingsSection id="saved" title="Saved playbooks" meta={list ? items.length : undefined} purpose="Pick one in the composer, or automate it; your task fills {{task}} in its first step.">
                 {error ? (
-                  <EmptyState icon={ShieldAlert} tone="destructive" title="Couldn't load workflows" line={error} action={<Button variant="outline" size="sm" onClick={reload}>Retry</Button>} />
+                  <EmptyState icon={ShieldAlert} tone="destructive" title="Couldn't load playbooks" line={error} action={<Button variant="outline" size="sm" onClick={reload}>Retry</Button>} />
                 ) : !list ? (
                   <Panel className="divide-y">
                     {[0, 1].map((i) => (
@@ -182,13 +181,13 @@ export function WorkflowsPage({ onBack }: { onBack: () => void }) {
                 ) : !items.length ? (
                   <EmptyState
                     icon={ListChecks}
-                    title="No workflows yet"
-                    line="Implement → test → review, with the test failure handed back to the agent. Write one here, or keep them in your repo."
+                    title="No playbooks yet"
+                    line="Implement → test → review, with the test failure handed back to the agent. Write one here, start from a template below, or keep them in your repo."
                     action={
                       <>
                         <Button size="sm" onClick={() => setEditing({ yaml: EXAMPLE })}>
                           <Plus className="size-4" />
-                          New workflow
+                          New playbook
                         </Button>
                         <Button variant="outline" size="sm" onClick={() => setImporting(true)}>
                           <Github className="size-4" />
@@ -198,11 +197,7 @@ export function WorkflowsPage({ onBack }: { onBack: () => void }) {
                     }
                   />
                 ) : (
-                  <Panel className="divide-y">
-                    {items.map((w) => (
-                      <WorkflowRow key={w.id} w={w} onEdit={() => void edit(w)} onDelete={() => void mutate({ action: "delete", id: w.id }, "Deleted")} />
-                    ))}
-                  </Panel>
+                  <PlaybookTable items={items} usedBy={usedBy} onEdit={(w) => void edit(w)} onDelete={(w) => void mutate({ action: "delete", id: w.id }, "Deleted")} onAutomate={onAutomate} />
                 )}
               </SettingsSection>
               <SettingsSection id="starters" title="Start from a template" purpose="Opens in the editor — change anything before you save.">
@@ -238,38 +233,105 @@ function stepLine(s: WorkflowStep): string {
   return s.title ?? (s.skill ? `/${s.skill}` : s.prompt.replace(/\s+/g, " ").slice(0, 60));
 }
 
-function WorkflowRow({ w, onEdit, onDelete }: { w: WorkflowView; onEdit: () => void; onDelete: () => void }) {
+const TH = "text-faint px-3 py-2 text-micro font-medium tracking-wide uppercase first:pl-4 last:pr-4";
+const TD = "px-3 py-2.5 align-middle first:pl-4 last:pr-4";
+
+/** Saved playbooks as a table: what it is, its steps, which automations run it, where it lives. */
+function PlaybookTable({
+  items,
+  usedBy,
+  onEdit,
+  onDelete,
+  onAutomate,
+}: {
+  items: WorkflowView[];
+  usedBy: (id: string) => Automation[];
+  onEdit: (w: WorkflowView) => void;
+  onDelete: (w: WorkflowView) => void;
+  onAutomate: (w: WorkflowView) => void;
+}) {
+  return (
+    <div className="bg-card overflow-x-auto rounded-xl border">
+      <table className="w-full min-w-[40rem] table-fixed border-collapse text-left">
+        <colgroup>
+          <col />
+          <col className="w-[34%]" />
+          <col className="w-[8.5rem]" />
+          <col className="w-[7rem]" />
+          <col className="w-[9.5rem]" />
+        </colgroup>
+        <thead className="border-b">
+          <tr>
+            <th className={TH}>Playbook</th>
+            <th className={TH}>Steps</th>
+            <th className={TH}>Automated by</th>
+            <th className={TH}>Source</th>
+            <th className={cn(TH, "text-right")}>
+              <span className="sr-only">Actions</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((w) => (
+            <PlaybookTr key={w.id} w={w} used={usedBy(w.id)} onEdit={() => onEdit(w)} onDelete={() => onDelete(w)} onAutomate={() => onAutomate(w)} />
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function PlaybookTr({ w, used, onEdit, onDelete, onAutomate }: { w: WorkflowView; used: Automation[]; onEdit: () => void; onDelete: () => void; onAutomate: () => void }) {
   const [armed, setArmed] = React.useState(false);
   const checks = w.steps.filter((s) => s.kind === "check").length;
   return (
-    <div className="px-4 py-3">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="text-foreground truncate text-body font-medium">{w.name}</span>
-            {w.origin?.kind === "repo" && (
-              <span className="text-muted-foreground rounded border px-1.5 text-micro" title={`${w.origin.repo} · ${w.origin.path}`}>
-                {w.origin.repo}
-              </span>
-            )}
-          </div>
-          {w.description && <p className="text-muted-foreground mt-0.5 truncate text-micro">{w.description}</p>}
-          <ol className="text-muted-foreground mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-micro">
-            {w.steps.map((s, i) => (
-              <li key={i} className="flex items-center gap-1.5">
-                {i > 0 && <span className="text-faint" aria-hidden>→</span>}
-                <span className={cn("inline-flex items-center gap-1 truncate", s.kind === "check" && "font-mono")}>
-                  {s.kind === "check" ? <Terminal className="size-3 shrink-0" aria-hidden /> : <Wand2 className="size-3 shrink-0" aria-hidden />}
-                  {stepLine(s)}
-                </span>
-              </li>
-            ))}
-          </ol>
-          <p className="text-faint mt-0.5 text-micro">
-            {w.steps.length} step{w.steps.length === 1 ? "" : "s"}, {checks} check{checks === 1 ? "" : "s"} · updated {fmtAgo(w.updatedAt)}
-          </p>
-        </div>
-        <div className="-ml-2 flex shrink-0 items-center gap-0.5 sm:ml-0">
+    <tr className="hover:bg-muted/50 relative border-b transition-colors last:border-b-0">
+      <td className={TD}>
+        <button type="button" onClick={onEdit} className="text-foreground block max-w-full cursor-pointer truncate text-left text-meta font-medium after:absolute after:inset-0 focus-visible:outline-none" title={w.name}>
+          {w.name}
+        </button>
+        <span className="text-muted-foreground block truncate text-micro" title={w.description}>
+          {w.description || `updated ${fmtAgo(w.updatedAt)}`}
+        </span>
+      </td>
+      <td className={cn(TD, "text-micro")}>
+        <span className="text-muted-foreground flex min-w-0 items-center gap-1 truncate" title={w.steps.map(stepLine).join(" → ")}>
+          {w.steps.slice(0, 4).map((s, i) => (
+            <React.Fragment key={i}>
+              {i > 0 && <span className="text-faint" aria-hidden>→</span>}
+              {s.kind === "check" ? <Terminal className="size-3 shrink-0" aria-label="check" /> : <Wand2 className="size-3 shrink-0" aria-label="agent turn" />}
+            </React.Fragment>
+          ))}
+          {w.steps.length > 4 && <span className="text-faint">+{w.steps.length - 4}</span>}
+        </span>
+        <span className="text-faint block truncate">
+          {w.steps.length} step{w.steps.length === 1 ? "" : "s"} · {checks} check{checks === 1 ? "" : "s"}
+        </span>
+      </td>
+      <td className={cn(TD, "text-micro")}>
+        {used.length ? (
+          <span className="text-foreground block truncate" title={used.map((t) => `${t.name} — ${t.when}`).join("\n")}>
+            {used.length === 1 ? used[0].name : `${used.length} automations`}
+          </span>
+        ) : (
+          <span className="text-faint">Manual only</span>
+        )}
+      </td>
+      <td className={cn(TD, "text-micro")}>
+        {w.origin?.kind === "repo" ? (
+          <span className="text-muted-foreground block truncate font-mono" title={`${w.origin.repo} · ${w.origin.path}`}>
+            {w.origin.repo}
+          </span>
+        ) : (
+          <span className="text-muted-foreground">Saved here</span>
+        )}
+      </td>
+      <td className={cn(TD, "text-right")}>
+        <span className="relative z-10 inline-flex items-center gap-0.5">
+          <Button variant="ghost" size="xs" onClick={onAutomate} title="Run this playbook on a schedule or event">
+            <Zap />
+            Automate
+          </Button>
           <Button variant="ghost" size="icon-xs" onClick={onEdit} aria-label={`Edit ${w.name}`} title="Edit">
             <Pencil />
           </Button>
@@ -283,9 +345,9 @@ function WorkflowRow({ w, onEdit, onDelete }: { w: WorkflowView; onEdit: () => v
           >
             {armed ? "Delete" : <Trash2 />}
           </Button>
-        </div>
-      </div>
-    </div>
+        </span>
+      </td>
+    </tr>
   );
 }
 

@@ -182,7 +182,7 @@ export function ThreadHeader({
   const busyFor = resizeTo?.kind === "disk" ? diskBusy : memoryBusy;
   // The harness this thread started on ("Harness: Bug fixer · asks before guessing · verify on done"):
   // its rules live in the agent's system prompt, so this line is where the operator sees them applied.
-  const vitals = [box.workflow && `Workflow: ${box.workflow.line}`, box.harness && `Harness: ${box.harness.line}`, box.agent && box.agent !== "claude" && `agent ${({ omp: "oh-my-pi", codex: "Codex CLI", opencode: "OpenCode" } as Record<string, string>)[box.agent] ?? box.agent}`, box.uptime && `${sleeping ? "ran for" : "up"} ${box.uptime}`, box.cpu && `cpu ${box.cpu}`, box.memUsage && `memory ${fmtUsage(box.memUsage)}`, box.disk && `disk ${fmtUsage(box.disk)}`, roleLabel(box.role)].filter(Boolean).join(" · ");
+  const vitals = [box.workflow && `Playbook: ${box.workflow.line}`, box.harness && `Harness: ${box.harness.line}`, box.agent && box.agent !== "claude" && `agent ${({ omp: "oh-my-pi", codex: "Codex CLI", opencode: "OpenCode" } as Record<string, string>)[box.agent] ?? box.agent}`, box.uptime && `${sleeping ? "ran for" : "up"} ${box.uptime}`, box.cpu && `cpu ${box.cpu}`, box.memUsage && `memory ${fmtUsage(box.memUsage)}`, box.disk && `disk ${fmtUsage(box.disk)}`, roleLabel(box.role)].filter(Boolean).join(" · ");
 
   // The conversation scroller is a sibling rendered by Thread, not a child, so there is nothing to
   // ref. Scroll events don't bubble but they DO capture, so one capture-phase listener on the
