@@ -8,7 +8,7 @@ import type { DisplayState } from "@/lib/lifecycle";
  * Run state, the loudest signal in the console.
  *
  * Each state pairs a functional hue with a drawn icon AND a word, so meaning survives colour-blindness
- * and bright sunlight: working → live blue, breathing · needs you → amber pause · done → green check ·
+ * and bright sunlight: working → live blue, breathing · needs you → ink pause on paper · done → green check ·
  * failed → red cross · idle → hollow grey circle · sleeping → violet moon (an idle-stopped microVM
  * whose workspace and session survive; a reply wakes it).
  *
@@ -25,7 +25,7 @@ const TONE: Record<DisplayState | "failed" | "stalled", Tone> = {
     icon: Pause,
     word: () => "needs you",
     text: "text-attention-text",
-    pill: "bg-attention/20 text-attention-text ring-attention/40",
+    pill: "bg-card text-attention-text ring-attention/60 shadow-e1",
   },
   done: { icon: Check, word: (e) => doneLabel(e), text: "text-ok", pill: "bg-ok/10 text-ok ring-ok/20" },
   failed: {

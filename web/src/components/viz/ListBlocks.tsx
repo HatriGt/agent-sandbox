@@ -42,7 +42,7 @@ export function DefinitionListBlock({ items }: { items: Definition[] }) {
 const STATE: Record<StatusItem["state"], { icon: React.ReactNode; tone: string; word: string }> = {
   ok: { icon: <Check className="size-3" strokeWidth={3} />, tone: "bg-ok/12 text-ok", word: "ok" },
   fail: { icon: <X className="size-3" strokeWidth={3} />, tone: "bg-destructive/12 text-destructive", word: "failed" },
-  warn: { icon: <AlertTriangle className="size-3" strokeWidth={2.5} />, tone: "bg-attention/25 text-attention-text", word: "warning" },
+  warn: { icon: <AlertTriangle className="size-3" strokeWidth={2.5} />, tone: "bg-warn/25 text-warn-text", word: "warning" },
   pending: { icon: <Clock className="size-3" strokeWidth={2.5} />, tone: "bg-muted text-muted-foreground", word: "pending" },
   info: { icon: <Info className="size-3" strokeWidth={2.5} />, tone: "bg-live/12 text-live", word: "info" },
 };

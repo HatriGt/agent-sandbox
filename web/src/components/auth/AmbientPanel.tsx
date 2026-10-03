@@ -64,7 +64,7 @@ export function AmbientPanel() {
         <div className="mt-10 flex flex-col gap-3">
           <ProofRow
             pill={
-              <span className="bg-attention/20 text-attention-text ring-attention/40 inline-flex h-6 items-center gap-1.5 rounded-full px-2.5 text-micro font-semibold ring-1 ring-inset">
+              <span className="bg-card text-attention-text ring-attention/60 inline-flex h-6 items-center gap-1.5 rounded-full px-2.5 text-micro font-semibold ring-1 ring-inset">
                 <Pause className="size-3" strokeWidth={2.5} />
                 needs you
               </span>

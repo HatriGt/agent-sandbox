@@ -131,7 +131,7 @@ export function MachineList({
                         active
                           ? "bg-accent before:bg-live before:absolute before:top-2.5 before:bottom-2.5 before:left-0 before:w-0.5 before:rounded-full"
                           : "hover:bg-muted",
-                        waiting && !active && "hover:bg-attention/10"
+                        waiting && !active && "hover:bg-muted/60"
                       )}
                     >
                       <div className="flex items-baseline gap-2">

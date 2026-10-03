@@ -288,7 +288,7 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
                 ref={reviewRef}
                 tabIndex={-1}
                 aria-labelledby="memory-review-title"
-                className="border-attention/60 bg-attention/5 focus-visible:ring-ring rounded-xl border border-l-4 focus-visible:ring-2 focus-visible:outline-none"
+                className="border-attention/40 bg-card shadow-e1 focus-visible:ring-ring rounded-xl border border-l-4 focus-visible:ring-2 focus-visible:outline-none"
               >
                 <header className="flex flex-wrap items-baseline gap-x-2 px-3.5 pt-3 pb-1">
                   <h2 id="memory-review-title" className="text-foreground text-body font-medium">

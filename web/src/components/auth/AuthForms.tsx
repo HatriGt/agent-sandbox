@@ -254,7 +254,7 @@ export function SignUpForm({ min, onDone }: { min: number; onDone: () => void })
           <input type="password" autoComplete="new-password" value={f.password} onChange={set("password")} className={inputCls} />
           <span className="mt-1 flex gap-1" aria-hidden>
             {[1, 2, 3].map((i) => (
-              <span key={i} className={cn("h-1 flex-1 rounded-full transition-colors duration-300", strength >= i ? (strength === 3 ? "bg-ok" : strength === 2 ? "bg-live" : "bg-attention") : "bg-muted")} />
+              <span key={i} className={cn("h-1 flex-1 rounded-full transition-colors duration-300", strength >= i ? (strength === 3 ? "bg-ok" : strength === 2 ? "bg-live" : "bg-warn") : "bg-muted")} />
             ))}
           </span>
         </Field>

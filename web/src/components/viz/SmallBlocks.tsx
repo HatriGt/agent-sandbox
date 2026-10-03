@@ -81,7 +81,7 @@ export function BadgesBlock({ badges, source }: { badges: Badge[]; source: strin
               className={cn(
                 "px-2 py-0.5",
                 b.tone === "ok" && "text-ok bg-ok/10",
-                b.tone === "warn" && "text-attention-text bg-attention/15",
+                b.tone === "warn" && "text-warn-text bg-warn/15",
                 b.tone === "fail" && "text-destructive bg-destructive/10",
                 b.tone === "live" && "text-live bg-live/10",
                 b.tone === "neutral" && "text-foreground bg-card"

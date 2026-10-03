@@ -494,7 +494,7 @@ function AutomationTr({ a, onEdit, onToggle, onDismiss, onOpenBox, onOpenPlayboo
       </td>
       <td className={cn(TD, "text-micro tabular-nums")}>
         {pending ? (
-          <span className="bg-attention/15 text-attention-text inline-flex rounded-full px-2 py-0.5 font-medium">Pending approval</span>
+          <span className="text-attention-text ring-attention/40 inline-flex rounded-full px-2 py-0.5 font-medium ring-1 ring-inset">Pending approval</span>
         ) : a.enabled && a.nextFire ? (
           <span className="text-foreground" title={new Date(a.nextFire).toLocaleString()}>
             {fmtIn(a.nextFire)}

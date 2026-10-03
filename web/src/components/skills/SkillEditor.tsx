@@ -391,7 +391,7 @@ export function SkillEditor({
           {activeFile ? (
             <div className="flex h-10 shrink-0 items-center gap-3 border-b px-4">
               <span className="stamp text-foreground min-w-0 truncate text-[12px]">{activeFile.path}</span>
-              {dirtyFiles[active] && <span className="bg-attention size-1.5 shrink-0 rounded-full" aria-hidden />}
+              {dirtyFiles[active] && <span className="bg-warn size-1.5 shrink-0 rounded-full" aria-hidden />}
               <span className="text-faint tabular ml-auto text-micro">{fmtKb(byteLength(activeFile.content))}</span>
             </div>
           ) : (
@@ -552,7 +552,7 @@ function SaveState({ dirty, savedFlash, isNew }: { dirty: boolean; savedFlash: b
           transition={{ duration: 0.16 }}
           className={cn("hidden shrink-0 items-center gap-1.5 text-micro font-medium sm:flex", state === "dirty" ? "text-attention-text" : state === "saved" ? "text-ok" : "text-muted-foreground")}
         >
-          <span className={cn("size-1.5 rounded-full", state === "dirty" ? "bg-attention" : state === "saved" ? "bg-ok" : "bg-muted-foreground/50")} aria-hidden />
+          <span className={cn("size-1.5 rounded-full", state === "dirty" ? "bg-warn" : state === "saved" ? "bg-ok" : "bg-muted-foreground/50")} aria-hidden />
           {state === "dirty" ? "Unsaved" : state === "saved" ? "Saved" : "Draft"}
         </motion.span>
       )}

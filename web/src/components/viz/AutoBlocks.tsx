@@ -111,7 +111,7 @@ export function StackTraceBlock({ trace, source }: { trace: StackTrace; source: 
               </button>
             </li>
           ) : (
-            <li key={k} className={cn("flex items-baseline gap-3 border-t px-4 py-1", r.i === firstApp && "bg-attention/10", trace.frames[r.i].vendor && "text-faint")}>
+            <li key={k} className={cn("flex items-baseline gap-3 border-t px-4 py-1", r.i === firstApp && "bg-warn/10", trace.frames[r.i].vendor && "text-faint")}>
               <span className="text-faint w-5 shrink-0 text-right tabular-nums">{r.i + 1}</span>
               <span className={cn("min-w-0 truncate", trace.frames[r.i].vendor ? "" : "text-foreground font-medium")}>{trace.frames[r.i].fn ?? "<anonymous>"}</span>
               {trace.frames[r.i].file && (
@@ -191,7 +191,7 @@ export function LinksBlock({ links, source }: { links: LinkItem[]; source: strin
         {links.map((l) => (
           <li key={l.url} className="min-w-0">
             <a href={l.url} target="_blank" rel="noopener noreferrer" className="group/link hover:bg-muted hover:border-line-strong flex min-w-0 items-center gap-2.5 rounded-lg border px-3 py-2 transition-colors">
-              <span className={cn("grid size-7 shrink-0 place-items-center rounded-md", l.kind === "pr" ? "bg-ok/12 text-ok" : l.kind === "issue" ? "bg-attention/25 text-attention-text" : l.kind === "commit" ? "bg-live/12 text-live" : "bg-muted text-muted-foreground")}>{LINK_ICON[l.kind]}</span>
+              <span className={cn("grid size-7 shrink-0 place-items-center rounded-md", l.kind === "pr" ? "bg-ok/12 text-ok" : l.kind === "issue" ? "bg-warn/25 text-warn-text" : l.kind === "commit" ? "bg-live/12 text-live" : "bg-muted text-muted-foreground")}>{LINK_ICON[l.kind]}</span>
               <span className="min-w-0 flex-1">
                 <span className="text-foreground block truncate text-meta font-medium">{l.label ?? l.ref ?? l.url.replace(/^https?:\/\//, "")}</span>
                 <span className="text-faint block truncate text-micro">{l.ref && l.label ? `${l.ref} · ` : ""}{l.host}</span>

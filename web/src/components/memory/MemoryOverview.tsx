@@ -51,7 +51,7 @@ export function MemoryOverview({
           <button
             type="button"
             onClick={onReview}
-            className="bg-attention/20 text-attention-text focus-visible:ring-ring ml-auto rounded-full px-2.5 py-0.5 text-meta font-medium tabular-nums focus-visible:ring-2 focus-visible:outline-none"
+            className="text-attention-text ring-attention/40 ring-1 ring-inset focus-visible:ring-ring ml-auto rounded-full px-2.5 py-0.5 text-meta font-medium tabular-nums focus-visible:ring-2 focus-visible:outline-none"
           >
             {pending} waiting for you
           </button>

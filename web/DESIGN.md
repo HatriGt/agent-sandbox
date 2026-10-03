@@ -11,14 +11,17 @@
 
 ## Principles that shape every screen
 
-1. **`needs you` is the loudest thing on screen.** Amber is reserved for it: the sidebar queue card,
-   the state pill, the paused-question card, the composer's halo, the "Answer" button. Nothing else
-   is amber.
-2. **Colour is functional.** Six states carry six hues, each with a drawn icon and a word so the
-   meaning survives colour-blindness and sunlight: working (live blue, breathing), needs you (amber),
-   done (green), failed (red), idle (grey), **sleeping** (violet — an idle-stopped microVM whose
-   workspace survives; a reply wakes it). The single primary action is ink. Everything else is ink on
-   paper.
+1. **`needs you` is the loudest thing on screen — and it is ink, not a hue.** Weight and motion
+   carry it: a strong hairline on paper, a soft wide halo, a ping dot, and the one filled button
+   (Answer / Approve). Never a tinted fill — a grey wash reads as *disabled*, the opposite of "your
+   turn". The sidebar queue card, the state pill, the question and scheduled cards, the composer's
+   halo and the approval chips all follow this (`--attention` tokens).
+2. **Colour is for what the machine is doing.** working (live blue, breathing), done (green), failed
+   (red), idle (grey), **sleeping** (violet — an idle-stopped microVM whose workspace survives; a reply
+   wakes it), each with a drawn icon and a word so the meaning survives colour-blindness and sunlight.
+   **Amber (`--warn`) is a fact, not a request:** a meter running high, a weak password, a PR with
+   changes requested, a trial ending, an unsaved file. Used sparingly; never for "needs you".
+   Everything else is ink on paper.
 3. **Two voices, never confusable.** The agent is full-measure prose with a small label. You are the
    one bubble (a quiet muted fill, right-aligned). A **side question** — answered by a separate
    read-only helper inside the sandbox, never by the agent — is a dashed card that says so every time.
@@ -48,8 +51,24 @@ brief is "more modern", "smoother" or "premium", start here rather than inventin
   targets, respect `prefers-reduced-motion`.
 - [rareui.com/components](https://www.rareui.com/components) — component gallery.
 - [libraries.dev](https://libraries.dev) — index of component libraries.
+- [vanta ui](https://vantaui.com) — @vanta_ui. Recreations of shipped SaaS products (Twenty, Wise,
+  Dropbox, OpenAI); the reference for *how a real dashboard spaces and weights things*.
+- [paceui](https://paceui.com) — shadcn/Base UI kit with an Agent Console template, light/dark pairs
+  for every block, and "Crafts" (small animated interactions).
+- [beste](https://ui.beste.co) — shadcn blocks and "pieces"; tonal colour, hairlines, tabular numerals,
+  every motion piece declares a reduced-motion fallback.
+- [great-ui](https://great-ui.com), [easyui](https://easyui.site), [obsidian ui](https://obsidianui.dev)
+  — @athrix_codes — free motion-first component sets (gooey/liquid/unfold effects; use for ideas, not
+  for the console's chrome).
+- [dev.cards](https://dev.cards) — complete interface sections with honest local behaviour; serif +
+  sans + mono mixing, square-cornered construction marks, one accent on a cream ground. The closest
+  cousin to this console's "ink on paper" rule.
 
 **Motion and interaction detail**
+
+- [hyperiux vault](https://vault.hyperiux.com) — @_hyperiux_. Source-first interaction effects;
+  the stated rule — "if motion does not earn its place, it does not belong" — is ours too.
+- [bencho](https://bencho.dev) — @cabralorenzo. Micro-interactions on ordinary controls.
 
 - [60fps.design](https://60fps.design) — UI animation and interaction details (the first stop for
   motion polish).
@@ -65,13 +84,17 @@ brief is "more modern", "smoother" or "premium", start here rather than inventin
   design archives.
 - [styles.refero.design](https://styles.refero.design) — DESIGN.md files written for AI agents.
 - [posts.design](https://posts.design) — social post design.
+- [cuedesign.space](https://cuedesign.space) — hand-curated Awwwards/Behance-tier component
+  references with a prompt per component; the taste bar, not a source of code.
+- [designbookmark.com](https://designbookmark.com) — directory of 2,500+ design tools and galleries;
+  start here when a reference above goes stale.
 
 ## Layout
 
 Flat two-pane console — no floating cards, no gaps, one hairline between the panes.
 
 - **Sidebar (17rem, collapsible to 3.5rem):** brand + live health line → **New task** (the primary
-  fill) → search (⌘K) → *needs-you queue card (amber, only when non-empty)* → **Machines** list,
+  fill) → search (⌘K) → *needs-you queue card (paper, ink hairline, only when non-empty)* → **Machines** list,
   triage-ordered (waiting → working → rest) → footer with **Fleet view**, freshness ("Updated 3s
   ago") and the theme toggle. No fabricated profile or avatar.
 - **Workspace:** Hub, Thread, Booting placeholder, or Fleet.
@@ -80,7 +103,7 @@ Flat two-pane console — no floating cards, no gaps, one hairline between the p
   *Live now* → *Started from this browser*.
 - **Thread header (one row, 56px):** state pill · task title · friendly name (mono) · vitals (mono,
   ≥lg only) · role tag · destroy (icon → armed "Confirm destroy" + cancel, 4s auto-disarm, Esc).
-- **Fleet:** title + inline counts → *Waiting on you* (amber cards) → aligned table (state / task /
+- **Fleet:** title + inline counts → *Waiting on you* (hairline cards) → aligned table (state / task /
   machine / actions), stacked rows on mobile.
 
 ## Tokens (`src/index.css`)
@@ -96,7 +119,8 @@ each usage is a real utility (`text-live`, `bg-attention/18`) — never an arbit
 | `--muted-foreground` | `oklch(.5 .016 286)` | `oklch(.7 .012 286)` | secondary text (≥4.5:1) |
 | `--primary` | ink | near-white | the one filled action |
 | `--live` | `oklch(.52 .2 262)` | `oklch(.74 .15 262)` | working, links, caret, selection, focus ring |
-| `--attention` / `-text` / `-ink` | amber fill / amber text / text-on-amber | needs you |
+| `--attention` / `-text` / `-ink` | ink / ink / paper | near-white / near-white / charcoal | needs you — hairline, halo, the one filled button; never a tinted fill |
+| `--warn` / `-text` | amber / dark amber | amber / light amber | a fact that is off (meter high, weak password, changes requested, trial ending) |
 | `--ok` | green | green | done, `$` prompt |
 | `--destructive` | red | red | failed, destroy |
 | `--trace` / `--trace-fg` | near-black / light | darker / light | terminal panels (dark in both themes) |

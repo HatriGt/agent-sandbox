@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 export type ChipTone = "attention" | "live" | "sleep" | "ok" | "destructive";
 
 const TONE: Record<ChipTone, string> = {
-  attention: "bg-attention/20 text-attention-text",
+  attention: "text-attention-text ring-1 ring-inset ring-attention/40",
   live: "bg-live/10 text-live",
   sleep: "bg-sleep/10 text-sleep",
   ok: "bg-ok/10 text-ok",

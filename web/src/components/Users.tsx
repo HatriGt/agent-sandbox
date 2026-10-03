@@ -25,7 +25,7 @@ function planTone(u: UserRow): { cls: string; label: string } {
   if (u.plan === "free") return { cls: "bg-muted text-muted-foreground", label: "free" };
   if (u.expired) return { cls: "bg-destructive/10 text-destructive", label: "trial ended" };
   const days = u.daysLeft ?? 0;
-  return { cls: days <= 2 ? "bg-attention/20 text-attention-text" : "bg-live/10 text-live", label: `trial · ${days}d` };
+  return { cls: days <= 2 ? "bg-warn/20 text-warn-text" : "bg-live/10 text-live", label: `trial · ${days}d` };
 }
 
 const ROLES = [

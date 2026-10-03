@@ -35,7 +35,7 @@ export function MemoryBumpCard({
     <div
       className={cn(
         "enter flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border px-4 py-3",
-        oom ? "border-destructive/40 bg-destructive/5" : "border-attention/40 bg-attention/5"
+        oom ? "border-destructive/40 bg-destructive/5" : "border-warn/40 bg-warn/5"
       )}
       role="alert"
     >

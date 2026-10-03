@@ -40,7 +40,7 @@ const KIND_LABEL = { webhook: "webhook", schedule: "schedule", github: "GitHub",
 
 const PILL: Record<S, string> = {
   working: "bg-live/10 text-live ring-live/20",
-  "needs you": "bg-attention/20 text-attention-text ring-attention/40",
+  "needs you": "bg-card text-attention-text ring-attention/60",
   done: "bg-ok/10 text-ok ring-ok/20",
 };
 

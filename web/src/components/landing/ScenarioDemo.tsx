@@ -188,7 +188,7 @@ const PILL: Record<RunState, string> = {
   triggered: "bg-muted text-muted-foreground ring-border",
   booting: "bg-live/10 text-live ring-live/20",
   working: "bg-live/10 text-live ring-live/20",
-  "needs you": "bg-attention/20 text-attention-text ring-attention/40",
+  "needs you": "bg-card text-attention-text ring-attention/60",
   done: "bg-ok/10 text-ok ring-ok/20",
 };
 

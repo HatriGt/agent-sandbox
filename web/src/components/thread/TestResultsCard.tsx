@@ -51,7 +51,7 @@ function Chip({ status, n, label }: { status: TestStatus; n: number; label: stri
         "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-meta font-medium",
         status === "pass" && "bg-ok/10 text-ok",
         status === "fail" && "bg-destructive/10 text-destructive",
-        status === "skip" && "bg-attention/20 text-attention-text"
+        status === "skip" && "bg-warn/20 text-warn-text"
       )}
     >
       <span className={cn("grid size-4 place-items-center rounded-full border-[1.5px]", status === "pass" && "border-ok", status === "fail" && "border-destructive", status === "skip" && "border-attention-text")}>

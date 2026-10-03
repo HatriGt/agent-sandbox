@@ -37,7 +37,7 @@ const STRENGTH = ["", "weak", "fair", "good", "strong"] as const;
 /** Four segments that fill left to right; the filled ones tint from destructive → attention → ok. */
 function StrengthMeter({ value, visible }: { value: number; visible: boolean }) {
   const still = useReducedMotion();
-  const tone = value <= 1 ? "bg-destructive" : value === 2 ? "bg-attention" : value === 3 ? "bg-live" : "bg-ok";
+  const tone = value <= 1 ? "bg-destructive" : value === 2 ? "bg-warn" : value === 3 ? "bg-live" : "bg-ok";
   return (
     <div className="flex items-center gap-2 pt-1" aria-hidden={!visible}>
       <div className="flex flex-1 gap-1">

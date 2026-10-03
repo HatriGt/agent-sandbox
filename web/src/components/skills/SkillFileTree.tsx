@@ -277,7 +277,7 @@ function TreeRow({
         <FileIcon path={path} size={14} />
         <span className={cn("min-w-0 truncate text-meta", on ? "text-foreground font-medium" : "text-foreground/85")}>{name}</span>
         {entry && <span className="text-faint ml-auto shrink-0 pr-1 text-micro">entry</span>}
-        {dirty && <span className={cn("bg-attention size-1.5 shrink-0 rounded-full", !entry && "ml-auto", "mr-1")} aria-label="Unsaved changes" />}
+        {dirty && <span className={cn("bg-warn size-1.5 shrink-0 rounded-full", !entry && "ml-auto", "mr-1")} aria-label="Unsaved changes" />}
       </button>
       {menu && <span className={cn("shrink-0 pr-1 transition-opacity duration-100", "opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100")}>{menu}</span>}
     </div>

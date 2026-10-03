@@ -12,7 +12,7 @@ export function TrialBadge({ className }: { className?: string }) {
   const tone = me.expired
     ? "text-destructive bg-destructive/10 hover:bg-destructive/20"
     : me.daysLeft <= 2
-      ? "text-attention-text bg-attention/20 hover:bg-attention/30"
+      ? "text-warn-text bg-warn/20 hover:bg-warn/30"
       : "text-muted-foreground bg-muted hover:bg-secondary hover:text-foreground";
   const label = me.expired ? "Trial ended" : me.daysLeft === 0 ? "Trial ends today" : `Trial · ${me.daysLeft}d left`;
   return (

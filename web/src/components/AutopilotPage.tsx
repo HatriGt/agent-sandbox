@@ -28,7 +28,7 @@ export function AutopilotPage({
   onOpenBox: (box: string) => void;
 }) {
   const reduce = useReducedMotion();
-  // Counts on the tabs: what is live, what is coming up, and (amber) what is waiting on you.
+  // Counts on the tabs: what is live, what is coming up, and (ink-ringed) what is waiting on you.
   const triggers = useCached("triggers", (signal) => api.triggers(signal)).data?.triggers;
   const workflows = useCached("workflows", (signal) => api.workflows(signal)).data?.workflows;
   const auto = triggers?.filter((t) => t.scope !== "scheduled");
@@ -67,7 +67,7 @@ export function AutopilotPage({
                 {t.icon}
                 <span className="font-medium">{t.label}</span>
                 {t.count ? (
-                  <span className={cn("rounded-full px-1.5 text-micro tabular-nums", t.attention ? "bg-attention/15 text-attention-text" : "bg-muted text-muted-foreground")} title={t.attention ? "Something is awaiting your approval" : undefined}>
+                  <span className={cn("rounded-full px-1.5 text-micro tabular-nums", t.attention ? "text-attention-text ring-1 ring-inset ring-attention/40" : "bg-muted text-muted-foreground")} title={t.attention ? "Something is awaiting your approval" : undefined}>
                     {t.count}
                   </span>
                 ) : null}

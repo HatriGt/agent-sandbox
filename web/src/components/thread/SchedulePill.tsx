@@ -349,7 +349,7 @@ function Table({ items, now, still, actions, onOpen, onLeave }: { items: Item[];
             </span>
             <span role="cell" className="text-right text-micro tabular-nums">
               {it.relation === "proposed" ? (
-                <span className="bg-attention/15 text-attention-text inline-flex rounded-full px-2 py-0.5 font-medium">Pending</span>
+                <span className="text-attention-text ring-attention/40 inline-flex rounded-full px-2 py-0.5 font-medium ring-1 ring-inset">Pending</span>
               ) : it.status === "done" || it.status === "failed" || it.status === "running" || it.status === "cancelled" ? (
                 <span className={cn(it.status === "failed" ? "text-destructive" : "text-muted-foreground")}>{STATUS_LABEL[it.status]}</span>
               ) : it.nextFire !== null ? (
@@ -465,7 +465,7 @@ function Detail({ it, now, actions, onBack, onLeave }: { it: Item; now: number; 
           <CategoryChip c={it.category} />
         </div>
         {it.why && (
-          <p className="bg-attention/10 text-attention-text mt-2.5 rounded-lg px-3 py-2 text-micro leading-snug">
+          <p className="border-attention/30 text-foreground mt-2.5 rounded-lg border px-3 py-2 text-micro leading-snug">
             <span className="font-semibold">Approval required.</span> {it.why}.
           </p>
         )}

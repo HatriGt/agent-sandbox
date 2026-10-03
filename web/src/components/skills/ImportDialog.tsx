@@ -174,7 +174,7 @@ function SkillPreview({ draft, files, existing, loading }: { draft: Draft | null
                 <>
                   <span className="flex items-center gap-2">
                     <span className="stamp text-foreground truncate text-[13px] font-medium">/{draft.name}</span>
-                    {existing && <span className="text-attention-text bg-attention/15 shrink-0 rounded px-1.5 py-px text-micro font-medium">replaces yours</span>}
+                    {existing && <span className="text-warn-text bg-warn/15 shrink-0 rounded px-1.5 py-px text-micro font-medium">replaces yours</span>}
                   </span>
                   <span className="text-muted-foreground block truncate text-meta">{draft.description}</span>
                 </>

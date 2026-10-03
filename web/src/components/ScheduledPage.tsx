@@ -17,7 +17,7 @@ import { ArmButton } from "@/components/ui/arm-button";
 type Filter = "upcoming" | "done" | "all";
 
 const STATUS: Record<ScheduleStatus, { label: string; cls: string }> = {
-  "needs-ok": { label: "Pending approval", cls: "bg-attention/15 text-attention-text" },
+  "needs-ok": { label: "Pending approval", cls: "text-attention-text ring-1 ring-inset ring-attention/40" },
   waiting: { label: "Waiting", cls: "bg-muted text-foreground" },
   running: { label: "Running", cls: "bg-live/15 text-foreground" },
   done: { label: "Done", cls: "text-muted-foreground" },

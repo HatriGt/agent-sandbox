@@ -533,7 +533,7 @@ export default function App() {
             exit={reduceMotion ? { opacity: 0, transition: { duration: 0 } } : { opacity: 0, height: 0, marginBottom: 0, scale: 0.97, transition: { duration: 0.15 } }}
             transition={reduceMotion ? { duration: 0 } : { height: { duration: 0.25, ease: [0.22, 1, 0.36, 1] }, opacity: { duration: 0.2 }, scale: { type: "spring", stiffness: 420, damping: 26 } }}
             onClick={() => open(waiting[0].name)}
-            className="border-attention/50 bg-attention/12 hover:bg-attention/20 group mx-3 flex cursor-pointer items-center gap-2.5 overflow-hidden rounded-lg border px-3 py-2.5 text-left transition-colors duration-150"
+            className="border-attention/40 bg-card shadow-e1 hover:border-attention/70 hover:shadow-e2 group mx-3 flex cursor-pointer items-center gap-2.5 overflow-hidden rounded-lg border px-3 py-2.5 text-left transition-[border-color,box-shadow] duration-150"
           >
             <span className="bg-attention text-attention-ink grid size-6 shrink-0 place-items-center rounded-full" aria-hidden>
               <Pause className="size-3" strokeWidth={3} />

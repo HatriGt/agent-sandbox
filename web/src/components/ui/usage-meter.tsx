@@ -48,7 +48,7 @@ export function UsageMeter({
             <span
               className={cn(
                 "block h-full rounded-full transition-[width] duration-700",
-                level === "critical" ? "bg-destructive" : level === "high" ? "bg-attention" : "bg-live",
+                level === "critical" ? "bg-destructive" : level === "high" ? "bg-warn" : "bg-live",
               )}
               style={{ width: `${Math.max(f * 100, 2)}%` }}
             />
