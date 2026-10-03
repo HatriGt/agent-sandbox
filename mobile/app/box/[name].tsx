@@ -406,8 +406,9 @@ function Thread() {
   const shownExtras = extras.slice(0, EXTRAS_MAX);
   const extraOverflow = extras.length - shownExtras.length;
 
-  const chips: { key: "changes" | "pr"; label: string; icon: IconName }[] = [
+  const chips: { key: "changes" | "pr" | "files"; label: string; icon: IconName }[] = [
     { key: "changes", label: "Changes", icon: "file-plus" },
+    { key: "files", label: "Files", icon: "folder" },
     ...(pr
       ? ([{ key: "pr" as const, label: pulls.length > 1 ? `PR #${pr.number} +${pulls.length - 1}` : `PR #${pr.number}`, icon: "git-pull-request" as IconName }])
       : []),
@@ -615,6 +616,7 @@ function Thread() {
                   item={it}
                   session={session}
                   animate={animate && i >= items.length - 2}
+                  live={running && i === items.length - 1}
                   onRevert={
                     revertableHere && msgIndex !== undefined
                       ? (text) => setRevertAsk({ message: msgIndex, text })
@@ -786,7 +788,7 @@ function Thread() {
           {chips.map((c) => (
             <Pressable
               key={c.key}
-              onPress={() => setSheet(c.key)}
+              onPress={() => (c.key === "files" ? router.push(`/files/${encodeURIComponent(session)}`) : setSheet(c.key))}
               style={({ pressed }) => ({
                 flexDirection: "row",
                 alignItems: "center",

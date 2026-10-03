@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Animated, Pressable, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { api, type AgentChoice, type AgentId, type AgentPrefs, type HarnessView, type WorkflowView } from "@/lib/api";
+import { api, type AgentChoice, type AgentId, type AgentPrefs, type HarnessView, type ProviderView, type WorkflowView } from "@/lib/api";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { T } from "../ui/AppText";
@@ -18,7 +18,7 @@ import { Sheet } from "../ui/Sheet";
  */
 
 export type Attempts = 1 | 2 | 3;
-export type RunSection = "agent" | "harness" | "workflow" | "attempts";
+export type RunSection = "agent" | "provider" | "harness" | "workflow" | "attempts";
 
 export interface RunOptions {
   /** null = the stored default agent (`AgentPrefs.defaultAgent`). */
@@ -26,6 +26,10 @@ export interface RunOptions {
   harness: string | null;
   workflow: string | null;
   attempts: Attempts;
+  /** A saved model provider (Providers page); null = the built-in model choice. */
+  provider?: string | null;
+  /** A model from that provider's list; null = the provider's default. */
+  providerModel?: string | null;
 }
 
 export const DEFAULT_RUN_OPTIONS: RunOptions = { agent: null, harness: null, workflow: null, attempts: 1 };
@@ -34,10 +38,11 @@ export interface RunSources {
   prefs: AgentPrefs | null;
   harnesses: HarnessView[];
   workflows: WorkflowView[];
+  providers: ProviderView[];
 }
 
 const STICKY_KEY = "asb-run-options";
-type Sticky = Pick<RunOptions, "agent" | "harness" | "workflow">;
+type Sticky = Pick<RunOptions, "agent" | "harness" | "workflow" | "provider" | "providerModel">;
 
 function isAgentId(v: unknown): v is AgentId {
   return v === "claude" || v === "omp" || v === "codex" || v === "opencode";
@@ -53,6 +58,8 @@ async function readSticky(): Promise<Sticky> {
       agent: isAgentId(o.agent) ? o.agent : null,
       harness: typeof o.harness === "string" ? o.harness : null,
       workflow: typeof o.workflow === "string" ? o.workflow : null,
+      provider: typeof o.provider === "string" ? o.provider : null,
+      providerModel: typeof o.providerModel === "string" ? o.providerModel : null,
     };
   } catch {
     return { agent: null, harness: null, workflow: null };
@@ -71,7 +78,7 @@ function writeSticky(s: Sticky) {
 export function useRunOptions(initial?: RunOptions | null) {
   const [value, setValue] = useState<RunOptions>(initial ?? DEFAULT_RUN_OPTIONS);
   const skipSticky = useRef(!!initial);
-  const [sources, setSources] = useState<RunSources>({ prefs: null, harnesses: [], workflows: [] });
+  const [sources, setSources] = useState<RunSources>({ prefs: null, harnesses: [], workflows: [], providers: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const stickyLoaded = useRef(false);
@@ -81,16 +88,17 @@ export function useRunOptions(initial?: RunOptions | null) {
     const g = ++gen.current;
     setLoading(true);
     setError(null);
-    Promise.all([api.agentPrefs(), api.harnesses(), api.workflows()])
-      .then(([prefs, h, w]) => {
+    Promise.all([api.agentPrefs(), api.harnesses(), api.workflows(), api.providers().catch(() => ({ providers: [] as ProviderView[] }))])
+      .then(([prefs, h, w, p]) => {
         if (g !== gen.current) return;
-        setSources({ prefs, harnesses: h.harnesses, workflows: w.workflows });
+        setSources({ prefs, harnesses: h.harnesses, workflows: w.workflows, providers: p.providers });
         // Reconcile the sticky picks against what actually exists now.
         setValue((v) => ({
           ...v,
           agent: v.agent && v.agent !== prefs.defaultAgent && prefs.agents.some((a) => a.id === v.agent) ? v.agent : null,
           harness: v.harness && h.harnesses.some((x) => x.id === v.harness && !x.needsReview) ? v.harness : null,
           workflow: v.workflow && w.workflows.some((x) => x.id === v.workflow) ? v.workflow : null,
+          ...(v.provider && !p.providers.some((x) => x.id === v.provider) ? { provider: null, providerModel: null } : {}),
         }));
       })
       .catch((e: unknown) => {
@@ -124,7 +132,7 @@ export function useRunOptions(initial?: RunOptions | null) {
   const update = useCallback((patch: Partial<RunOptions>) => {
     setValue((v) => {
       const next = { ...v, ...patch };
-      if (stickyLoaded.current) writeSticky({ agent: next.agent, harness: next.harness, workflow: next.workflow });
+      if (stickyLoaded.current) writeSticky({ agent: next.agent, harness: next.harness, workflow: next.workflow, provider: next.provider ?? null, providerModel: next.providerModel ?? null });
       return next;
     });
   }, []);
@@ -310,7 +318,7 @@ export function RunSettingsSheet({
   );
   const firstCustom = orderedHarnesses.findIndex((h) => !h.builtin);
 
-  const empty = !loading && !error && !prefs && !sources.harnesses.length && !sources.workflows.length;
+  const empty = !loading && !error && !prefs && !sources.harnesses.length && !sources.workflows.length && !sources.providers.length;
 
   return (
     <Sheet visible={visible} onClose={onClose} title="Run settings">
@@ -368,6 +376,58 @@ export function RunSettingsSheet({
                         <Button title="Use anyway" small variant="attention" onPress={() => pickAgent(a)} />
                         <Button title="Keep default" small variant="ghost" onPress={() => setConfirming(null)} />
                       </View>
+                    </View>
+                  ) : null}
+                </RadioRow>
+              );
+            })}
+          </>
+        ) : null}
+
+        {/* ── Model provider ── */}
+        {sources.providers.length > 0 ? (
+          <>
+            <SectionTitle title="Model provider" hint="Your own key or endpoint. Built-in uses the deployment's model." />
+            <RadioRow
+              on={!value.provider}
+              label="Built-in"
+              onPress={() => {
+                Haptics.selectionAsync().catch(() => {});
+                onChange({ provider: null, providerModel: null });
+              }}
+            />
+            {sources.providers.map((p) => {
+              const on = value.provider === p.id;
+              const fits = !activeAgent || p.drivers.includes(activeAgent);
+              return (
+                <RadioRow
+                  key={p.id}
+                  on={on}
+                  label={p.label}
+                  trailing={p.kind}
+                  detail={fits ? undefined : `Not usable with ${prefs?.agents.find((a) => a.id === activeAgent)?.label ?? activeAgent}`}
+                  disabled={!fits}
+                  onPress={() => {
+                    Haptics.selectionAsync().catch(() => {});
+                    onChange({ provider: p.id, providerModel: null });
+                  }}
+                >
+                  {on && p.models?.length ? (
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+                      {p.models.slice(0, 24).map((m) => {
+                        const picked = value.providerModel === m;
+                        return (
+                          <Pressable
+                            key={m}
+                            onPress={() => onChange({ providerModel: picked ? null : m })}
+                            style={{ borderWidth: 1, borderColor: picked ? palette.foreground : palette.border, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 3 }}
+                          >
+                            <T variant="micro" mono weight={picked ? "semibold" : "regular"}>
+                              {m}
+                            </T>
+                          </Pressable>
+                        );
+                      })}
                     </View>
                   ) : null}
                 </RadioRow>
@@ -528,6 +588,9 @@ export function RunOptionChips({
   const agent = currentAgent(value, sources.prefs);
   if (value.agent && agent && agent.id !== sources.prefs?.defaultAgent)
     chips.push({ key: "agent", icon: "cpu", label: agent.label, remove: () => onChange({ agent: null }) });
+  const provider = sources.providers.find((p) => p.id === value.provider);
+  if (value.provider)
+    chips.push({ key: "provider", icon: "zap", label: [provider?.label ?? value.provider, value.providerModel].filter(Boolean).join(" · "), remove: () => onChange({ provider: null, providerModel: null }) });
   const workflow = sources.workflows.find((w) => w.id === value.workflow);
   if (value.workflow) chips.push({ key: "workflow", icon: "list", label: workflow?.name ?? value.workflow, remove: () => onChange({ workflow: null }) });
   if (value.attempts > 1) chips.push({ key: "attempts", icon: "copy", label: `${value.attempts} attempts`, remove: () => onChange({ attempts: 1 }) });

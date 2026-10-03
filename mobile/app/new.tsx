@@ -206,7 +206,11 @@ export default function NewTask() {
         task: task.trim(),
         repos: picked.length ? picked : undefined,
         attachments: attachments.length ? attachments : undefined,
-        ...(model ? { model } : {}),
+        ...(run.value.provider
+          ? { provider: run.value.provider, ...(run.value.providerModel ? { model: run.value.providerModel } : {}) }
+          : model
+            ? { model }
+            : {}),
         ...(verifyText.trim()
           ? { verify: verifyMode === "command" ? { command: verifyText.trim() } : { criterion: verifyText.trim() } }
           : {}),

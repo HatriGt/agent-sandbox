@@ -25,7 +25,7 @@ matters* for configuration pages, and *deliberately absent* for desktop-only edi
 | MCP call items in tool groups | rendered as generic tools | **full** (icon + server name) |
 | Usage / context-health line from `usage` trace events | parsed, never rendered | small: one line under the header when > 60 % |
 | Streaming markdown reveal | whole block re-renders | later (polish) |
-| Workspace file browser / editor, commit from editor | missing | **not planned** (desktop) |
+| Workspace file browser / editor, commit from editor | missing | **done** (browse + edit; commit via Changes sheet) |
 | Records table | missing | not planned |
 
 ### Composer / new task
@@ -78,8 +78,10 @@ fences, and a simple bar/line `chart`. Everything else keeps the code block.
 2. **Wave 2 — composer + pages** (this pass): agent/harness/workflow/attempts pickers; follow-up
    attachments; unfurl; Memory page; Automations editor; MCP add/edit/remove; Admin full;
    Skills view/import; markdown + viz upgrade.
-3. **Wave 3** — done: providers page, audit log, intake allowlists, history ledger totals. Still later: streaming markdown,
-   drafts polish, workspace read-only browser if people ask.
+3. **Wave 3** — done: providers page, audit log, intake allowlists, history ledger totals. 
+4. **Wave 4** — done: streaming markdown reveal, harness + playbook editors, workspace file browser/editor
+   (commit stays in the Changes sheet), SVG line/area/donut/scatter charts, provider + model in run settings.
+   Still later: drafts polish.
 
 Conventions: mirror web's `lib/*.ts` pure helpers byte-for-byte where they are platform-neutral
 (`trace.ts` already is; `testReport.ts`, `question.ts`, `planTasks.ts` next), keep every new

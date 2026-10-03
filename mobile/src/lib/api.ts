@@ -83,7 +83,9 @@ export interface HarnessView {
   model?: string;
   skills?: string[];
   rules: { askBeforeGuess: boolean; planFirst: boolean; verifyOnDone: boolean; autoRetry?: number };
+  rulesMd?: string;
   verifyCommand?: string;
+  egress?: string[];
   needsReview?: boolean;
   builtin?: string;
   createdAt: number;
@@ -902,6 +904,13 @@ export const api = {
   files: (session: string, q: string) =>
     get<{ files: string[]; total: number; truncated: boolean }>("/files.json", { session, q }),
   tree: (session: string) => get<{ files: string[]; total: number; truncated: boolean }>("/tree.json", { session }),
+  /** Write a workspace file (UTF-8 text). */
+  writeFile: (session: string, path: string, content: string) =>
+    fetchWithTimeout(
+      url("/file.json"),
+      { method: "PUT", headers: { ...authHeaders(), "content-type": "application/json" }, body: JSON.stringify({ session, path, content }) },
+      WRITE_TIMEOUT_MS,
+    ).then((r) => parse<{ ok: true; path: string; bytes: number }>(r)),
   /** The whole run's diff as one unified patch (review-all). */
   runDiff: (session: string) => get<{ diff: string }>("/rundiff.json", { session }),
   fileText: async (session: string, path: string): Promise<string> => {
@@ -979,6 +988,12 @@ export const api = {
     post<AgentPrefs>("/agent-prefs.json", { defaultAgent, ...(allowPartialSupervision ? { allowPartialSupervision } : {}) }),
   harnesses: () => get<{ harnesses: HarnessView[]; limits: Record<string, number>; builtins?: number }>("/harnesses.json"),
   workflows: () => get<{ workflows: WorkflowView[]; limits: Record<string, number>; dir: string }>("/workflows.json"),
+  harnessMutate: (body: Record<string, unknown>) =>
+    post<{ harnesses: HarnessView[]; limits: Record<string, number>; builtins?: number; saved?: string }>("/harnesses.json", body),
+  workflowMutate: (body: Record<string, unknown>) =>
+    post<{ workflows: WorkflowView[]; limits: Record<string, number>; dir: string; saved?: string; imported?: string[]; skipped?: string[] }>("/workflows.json", body),
+  workflowPreview: (yaml: string) => post<{ ok: true; workflow: WorkflowView }>("/workflows.json", { action: "preview", yaml }),
+  workflowYaml: (id: string) => get<{ id: string; yaml: string; filename: string }>("/workflows/yaml.json", { id }),
 
   // ---- providers ----
   /** Model providers: the caller's own keys/endpoints. Keys come back masked only. */

@@ -7,6 +7,7 @@ import { producedFiles, resultSummary } from "@/lib/trace";
 import { parseTestReport } from "@/lib/testReport";
 import { DiffText } from "./DiffText";
 import { MarkdownLite } from "./MarkdownLite";
+import { StreamingMarkdown } from "./StreamingMarkdown";
 import { McpItem, parseMcpName } from "./McpItem";
 import { ProducedFiles } from "./ProducedFiles";
 import { TestResultsCard } from "./TestResultsCard";
@@ -65,8 +66,11 @@ export const ThreadRow = memo(function ThreadRow({
   animate,
   onRevert,
   session,
+  live,
 }: {
   item: ThreadItem;
+  /** The newest assistant block of a running turn: reveal its growing tail with a typewriter cadence. */
+  live?: boolean;
   animate?: boolean;
   /** Set on revertable `you` items: called when the user confirms a revert to before this message. */
   onRevert?: (messageText: string) => void;
@@ -80,7 +84,7 @@ export const ThreadRow = memo(function ThreadRow({
       case "say":
         return (
           <View style={{ paddingVertical: 8 }}>
-            <MarkdownLite text={item.text} />
+            <StreamingMarkdown text={item.text} live={!!live} />
           </View>
         );
       case "ask":

@@ -94,6 +94,8 @@ export default function Settings() {
         <RowLink title="MCP servers" icon="tool" hint="Extra tools every sandbox gets" onPress={() => router.push("/settings/mcp")} />
         <RowLink title="Repo setup" icon="package" hint="How each repo installs and tests, learned once" onPress={() => router.push("/settings/repo-setup")} />
         <RowLink title="Skills" icon="book-open" hint="Reusable playbooks synced into each box" onPress={() => router.push("/settings/skills")} />
+        <RowLink title="Harnesses" icon="sliders" hint="Driver, model, skills and rules saved as one pick" onPress={() => router.push("/settings/harnesses")} />
+        <RowLink title="Playbooks" icon="list" hint="Agent turns and command checks, in order" onPress={() => router.push("/settings/playbooks")} />
         <RowLink title="Providers" icon="cpu" hint="Your own model keys and endpoints" onPress={() => router.push("/settings/providers")} />
         <RowLink title="Audit log" icon="list" hint="Who did what, newest first" onPress={() => router.push("/settings/audit")} />
         <RowLink title="Notifications" icon="bell" hint="Push and webhook pings when a run needs you" onPress={() => router.push("/settings/notifications")} />
