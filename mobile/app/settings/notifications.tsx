@@ -30,6 +30,7 @@ export default function Notifications() {
   const [busy, setBusy] = useState(false);
   const [pushOn, setPushOn] = useState(false);
   const [pushNote, setPushNote] = useState<string | null>(null);
+  const [testing, setTesting] = useState(false);
 
   useEffect(() => {
     void pushEnabledHere().then(setPushOn);
@@ -52,6 +53,21 @@ export default function Notifications() {
     const st = await registerForPush({ prompt: true });
     setPushOn(st === "on");
     setPushNote(PUSH_NOTE[st]);
+  };
+
+  const sendTest = async () => {
+    setTesting(true);
+    setPushNote(null);
+    try {
+      // Re-register first so a token minted after a reinstall reaches the controller before the send.
+      await registerForPush({ prompt: false });
+      const r = await api.pushTest();
+      setPushNote(r.ok ? "Sent — it should arrive in a few seconds." : `Not delivered: ${r.errors.join(", ") || "unknown error"}`);
+    } catch (e) {
+      setPushNote(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTesting(false);
+    }
   };
 
   const save = async (next: { url?: string; events?: Partial<NotifySettings["events"]> }) => {
@@ -85,6 +101,11 @@ export default function Notifications() {
         <T variant="meta" tone="muted" onPress={pushNote.includes("system settings") ? () => void Linking.openSettings() : undefined}>
           {pushNote}
         </T>
+      ) : null}
+      {pushOn ? (
+        <View style={{ flexDirection: "row" }}>
+          <Button small variant="secondary" title="Send a test notification" loading={testing} onPress={() => void sendTest()} />
+        </View>
       ) : null}
       {EVENTS.map((ev) => (
         <View key={ev.key} style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>

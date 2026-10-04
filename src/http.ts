@@ -38,7 +38,7 @@ import { keyFromEnvOrFile, makeSecretBox } from "./secretbox.js";
 import { allBlobs, loadBlob, ownerKey, registerUserStoreBackend, saveBlob, withOwner, OPERATOR_OWNER } from "./user-store.js";
 import { detectTransitions, formatNotification, makeNotifier, shouldNotify, toggleFor, type BoxRunView, type NotifyEvent } from "./notify.js";
 import { claimNonce, mintNonce, questionChoices, releaseNonce } from "./answer-choice.js";
-import { buildPushMessages, deviceCount, listDeviceTokens, makeOwnerRateCap, pruneToken, registerDevice, sendExpoPush, unregisterDevice } from "./push.js";
+import { buildPushMessages, deviceCount, type ExpoMessage, listDeviceTokens, makeOwnerRateCap, pruneToken, registerDevice, sendExpoPush, unregisterDevice } from "./push.js";
 import { fetchPinned } from "./net-guard.js";
 import { buildDigest, type RunDigest } from "./digest.js";
 import { buildOutcome, outcomeOf, resolveFollowedBy } from "./outcome.js";
@@ -2398,6 +2398,27 @@ app.post("/push/unregister.json", (req: Request, res: Response) => {
   const p = principalOf(res);
   const owner = p.kind === "user" ? p.userId : OPERATOR_OWNER;
   res.json({ ok: true, removed: unregisterDevice(db, owner, (req.body ?? {}).token), devices: deviceCount(db, owner) });
+});
+
+// "Send a test notification" (Settings → Notifications): proves the whole path — token, FCM key on
+// Expo, delivery — without waiting for a run. Caller's own devices only; shares the owner rate cap.
+app.post("/push/test.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const p = principalOf(res);
+  const owner = p.kind === "user" ? p.userId : OPERATOR_OWNER;
+  const tokens = listDeviceTokens(db, secretBox, owner);
+  if (tokens.length === 0) return void res.status(404).json({ error: "No phone is registered for push on this account. Turn push on in the app first." });
+  if (!pushCap.allow(owner)) return void res.status(429).json({ error: "Too many notifications this minute — try again shortly." });
+  const errors: string[] = [];
+  try {
+    const accepted = await sendExpoPush(
+      tokens.map((to) => ({ to, title: "Agent Sandbox", body: "Test notification — push is working.", sound: "default", priority: "high", channelId: "runs", tag: "push-test", threadId: "push-test", ttl: 600 }) as unknown as ExpoMessage),
+      { fetch, prune: (tok) => pruneToken(db, tok), accessToken: process.env.EXPO_ACCESS_TOKEN || undefined, log: (m) => errors.push(m.replace(/^\[push\] ticket error: /, "")) }
+    );
+    res.json({ ok: accepted > 0, devices: tokens.length, accepted, errors });
+  } catch (e) {
+    failWith(res, e);
+  }
 });
 
 app.get("/skills.json", async (req: Request, res: Response) => {
