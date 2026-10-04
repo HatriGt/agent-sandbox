@@ -38,6 +38,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Firebase config for push (FCM). Android can't mint an Expo push token without it;
+      # app.config.js only wires it in when the file exists, so builds without the secret still work.
+      - name: Write google-services.json
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            printf '%s' "$GOOGLE_SERVICES_JSON" > google-services.json
+            echo "google-services.json written"
+          else
+            echo "::warning::GOOGLE_SERVICES_JSON secret not set — this APK cannot receive push"
+          fi
+
       - name: Prebuild android project
         run: npx expo prebuild --platform android --no-install
 

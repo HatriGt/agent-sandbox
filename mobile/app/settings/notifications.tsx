@@ -18,7 +18,7 @@ const PUSH_NOTE: Record<PushStatus, string | null> = {
   on: null,
   off: null,
   denied: "Notifications are blocked for this app in system settings.",
-  unavailable: "Push isn't available in this build (Expo Go or a simulator).",
+  unavailable: "Push isn't available in this build — Expo Go, a simulator, or an APK built without Firebase config.",
 };
 
 /** Push to this phone, plus server-side webhook pings (Slack, ntfy, Discord relay). The event toggles drive both. */
