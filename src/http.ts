@@ -38,7 +38,7 @@ import { keyFromEnvOrFile, makeSecretBox } from "./secretbox.js";
 import { allBlobs, loadBlob, ownerKey, registerUserStoreBackend, saveBlob, withOwner, OPERATOR_OWNER } from "./user-store.js";
 import { detectTransitions, formatNotification, makeNotifier, shouldNotify, toggleFor, type BoxRunView, type NotifyEvent } from "./notify.js";
 import { claimNonce, mintNonce, questionChoices, releaseNonce } from "./answer-choice.js";
-import { buildPushMessages, deviceCount, type ExpoMessage, listDeviceTokens, makeOwnerRateCap, pruneToken, registerDevice, sendExpoPush, unregisterDevice } from "./push.js";
+import { buildPushMessages, deviceCount, listDeviceTokens, makeOwnerRateCap, pruneToken, registerDevice, sendExpoPush, unregisterDevice } from "./push.js";
 import { fetchPinned } from "./net-guard.js";
 import { buildDigest, type RunDigest } from "./digest.js";
 import { buildOutcome, outcomeOf, resolveFollowedBy } from "./outcome.js";
@@ -584,13 +584,13 @@ const sendNotification = async (ev: NotifyEvent): Promise<void> => {
   // behind when notifications are unconfigured (the default) would leak forever, task text and all.
   const ctx = notifyCtx.get(ev.box) ?? {};
   notifyCtx.delete(ev.box);
-  if (!settings.events[toggleFor(ev.kind)]) return;
   // Phone first and independent of the webhook: either channel failing never blocks the other.
+  // Push has no settings — a registered phone always hears its runs; the toggles gate the webhook.
   const pushed = sendPushFor(owner, ev, ctx.title || ctx.task).catch((e) => {
     console.error(`[push] ${ev.box}/${ev.kind}: ${(e as Error).message.slice(0, 200)}`);
     throw e;
   });
-  if (!url) return void (await pushed);
+  if (!url || !settings.events[toggleFor(ev.kind)]) return void (await pushed);
   // A finished run's notification carries the digest headline ("done · 3 files · 4 steps"), so the
   // push is a review-at-a-glance, not just a ping. Best-effort: a headline failure drops the
   // enrichment, never the notification.
@@ -2398,27 +2398,6 @@ app.post("/push/unregister.json", (req: Request, res: Response) => {
   const p = principalOf(res);
   const owner = p.kind === "user" ? p.userId : OPERATOR_OWNER;
   res.json({ ok: true, removed: unregisterDevice(db, owner, (req.body ?? {}).token), devices: deviceCount(db, owner) });
-});
-
-// "Send a test notification" (Settings → Notifications): proves the whole path — token, FCM key on
-// Expo, delivery — without waiting for a run. Caller's own devices only; shares the owner rate cap.
-app.post("/push/test.json", async (req: Request, res: Response) => {
-  if (!dashAuthed(req, res)) return;
-  const p = principalOf(res);
-  const owner = p.kind === "user" ? p.userId : OPERATOR_OWNER;
-  const tokens = listDeviceTokens(db, secretBox, owner);
-  if (tokens.length === 0) return void res.status(404).json({ error: "No phone is registered for push on this account. Turn push on in the app first." });
-  if (!pushCap.allow(owner)) return void res.status(429).json({ error: "Too many notifications this minute — try again shortly." });
-  const errors: string[] = [];
-  try {
-    const accepted = await sendExpoPush(
-      tokens.map((to) => ({ to, title: "Agent Sandbox", body: "Test notification — push is working.", sound: "default", priority: "high", channelId: "runs", tag: "push-test", threadId: "push-test", ttl: 600 }) as unknown as ExpoMessage),
-      { fetch, prune: (tok) => pruneToken(db, tok), accessToken: process.env.EXPO_ACCESS_TOKEN || undefined, log: (m) => errors.push(m.replace(/^\[push\] ticket error: /, "")) }
-    );
-    res.json({ ok: accepted > 0, devices: tokens.length, accepted, errors });
-  } catch (e) {
-    failWith(res, e);
-  }
 });
 
 app.get("/skills.json", async (req: Request, res: Response) => {

@@ -20,7 +20,6 @@ import { Icon } from "@/components/ui/Icon";
 import { Button } from "@/components/ui/Button";
 import { Field } from "@/components/ui/Field";
 import { TextInput } from "react-native";
-import { offerPushAfterHandoff } from "@/lib/push";
 
 type Attachment = { name: string; dataUrl: string };
 const MAX_ATTACHMENTS = 8;
@@ -223,13 +222,10 @@ export default function NewTask() {
         ...(run.value.workflow ? { workflow: run.value.workflow } : {}),
         ...(run.value.attempts > 1 ? { attempts: run.value.attempts } : {}),
       });
-    // The moment push is worth asking for: a run just started and the user is about to walk away.
     // The draft is gone once the server accepted the task — a failure comes back via the stash.
     promise
       .then((r) => {
-        if (!r.ok) return;
-        clearDraft(DRAFT_NEW);
-        return offerPushAfterHandoff();
+        if (r.ok) clearDraft(DRAFT_NEW);
       })
       .catch(() => {});
     setPendingDelegate({

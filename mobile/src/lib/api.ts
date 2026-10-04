@@ -1024,7 +1024,6 @@ export const api = {
   /** Answer from a notification action: one-use nonce + choice index (server: src/answer-choice.ts). */
   answerQuestion: (box: string, nonce: string, choice: number) =>
     post<{ ok: true; already?: boolean; answer?: string }>("/questions/answer.json", { box, nonce, choice }, AGENT_TIMEOUT_MS),
-  pushTest: () => post<{ ok: boolean; devices: number; accepted: number; errors: string[] }>("/push/test.json", {}),
   pushUnregister: (token: string) => post<{ ok: true; removed: boolean }>("/push/unregister.json", { token }),
 
   automations: () => get<{ triggers: Automation[] }>("/triggers.json"),

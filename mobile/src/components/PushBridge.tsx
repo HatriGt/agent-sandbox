@@ -1,4 +1,4 @@
-// Glue between expo-notifications and the router: silent re-registration once signed in, and a
+// Glue between expo-notifications and the router: permission + registration once signed in, and a
 // tapped notification (warm or cold start) opens that box's Thread. A tapped choice action
 // ("Answer 1/2/3", docs/plan-demo-parity.md bet 1) answers with its one-use nonce first. Renders nothing.
 import { useEffect, useRef } from "react";
@@ -36,7 +36,7 @@ export function PushBridge() {
   const needsConfirm = useRef(new Set<string>());
 
   useEffect(() => {
-    if (signedIn) void registerForPush({ prompt: false });
+    if (signedIn) void registerForPush();
   }, [signedIn]);
 
   useEffect(() => {

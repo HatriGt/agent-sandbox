@@ -2,20 +2,15 @@
 // this module owns the phone side: permission, token registration, Android channels, and turning a
 // tapped notification or an asb:// link into a Thread route.
 //
-// When we ask: never on a cold first launch. The OS prompt is one-shot on iOS, so it is spent at a
-// moment the user can see the value — right after they hand off their first task ("we'll tell you
-// when it needs you"), or when they flip the toggle in Settings → Notifications. If permission is
-// already granted, app start re-registers silently (tokens can rotate).
-import { Alert, Platform } from "react-native";
+// No settings: once signed in the app asks the OS for permission (Android 13+ / iOS show their one
+// dialog) and registers this phone. Every later start re-registers silently — tokens can rotate.
+import { Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import { api } from "./api";
 
 const TOKEN_KEY = "asb.push.token";
-const ASKED_KEY = "asb.push.asked";
-/** Set when the user turned push off in Settings: silent re-registration must respect it. */
-const OPTOUT_KEY = "asb.push.optout";
 
 /** Box names are machine-generated slugs; anything else in a link is refused, not routed. */
 const BOX_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$/;
@@ -115,27 +110,19 @@ async function ensureChannels(): Promise<void> {
   });
 }
 
-export type PushStatus = "on" | "off" | "denied" | "unavailable";
+export type PushStatus = "on" | "denied" | "unavailable";
 
 function projectId(): string | undefined {
   const extra = Constants.expoConfig?.extra as { eas?: { projectId?: string } } | undefined;
   return extra?.eas?.projectId ?? Constants.easConfig?.projectId;
 }
 
-/**
- * Register this device with the controller. `prompt: false` never shows the OS dialog (used on
- * app start); `prompt: true` asks if the OS still lets us. Never throws — push is an enhancement.
- */
-export async function registerForPush(opts: { prompt: boolean }): Promise<PushStatus> {
+/** Ask (if the OS still lets us) and register this device with the controller. Never throws. */
+export async function registerForPush(): Promise<PushStatus> {
   try {
-    if (!opts.prompt && (await AsyncStorage.getItem(OPTOUT_KEY))) return "off";
-    if (opts.prompt) await AsyncStorage.removeItem(OPTOUT_KEY);
     let perm = await Notifications.getPermissionsAsync();
-    if (!perm.granted && opts.prompt && perm.canAskAgain) {
-      await AsyncStorage.setItem(ASKED_KEY, "1");
-      perm = await Notifications.requestPermissionsAsync({ ios: { allowAlert: true, allowSound: true, allowBadge: false } });
-    }
-    if (!perm.granted) return perm.canAskAgain ? "off" : "denied";
+    if (!perm.granted && perm.canAskAgain) perm = await Notifications.requestPermissionsAsync({ ios: { allowAlert: true, allowSound: true, allowBadge: false } });
+    if (!perm.granted) return "denied";
     await ensureChannels();
     const pid = projectId();
     // Throws in Expo Go on Android and on simulators without push support.
@@ -148,33 +135,11 @@ export async function registerForPush(opts: { prompt: boolean }): Promise<PushSt
   }
 }
 
-/** Ask once, at a moment of value (first handoff). Later calls are silent re-registrations. */
-export async function offerPushAfterHandoff(): Promise<void> {
-  const asked = await AsyncStorage.getItem(ASKED_KEY).catch(() => "1");
-  if (asked) return void (await registerForPush({ prompt: false }));
-  const perm = await Notifications.getPermissionsAsync().catch(() => null);
-  if (!perm || perm.granted || !perm.canAskAgain) return void (await registerForPush({ prompt: false }));
-  // In-app pre-prompt: the iOS system dialog is one-shot, so it is only shown after a yes here.
-  await AsyncStorage.setItem(ASKED_KEY, "1").catch(() => {});
-  Alert.alert(
-    "Get told when it needs you?",
-    "A notification when a run asks a question, finishes, or fails. Only the run's title and answer choices are shown — never its question or code.",
-    [
-      { text: "Not now", style: "cancel" },
-      { text: "Turn on", onPress: () => void registerForPush({ prompt: true }) },
-    ],
-  );
-}
-
-/** Stop this phone receiving pushes (sign-out, or the Settings toggle). Best-effort. */
-export async function unregisterPush(opts: { optOut?: boolean } = {}): Promise<void> {
-  if (opts.optOut) await AsyncStorage.setItem(OPTOUT_KEY, "1").catch(() => {});
+/** Stop this phone receiving pushes (sign-out). Best-effort. */
+export async function unregisterPush(): Promise<void> {
   const token = await AsyncStorage.getItem(TOKEN_KEY).catch(() => null);
   if (!token) return;
   await AsyncStorage.removeItem(TOKEN_KEY).catch(() => {});
   await api.pushUnregister(token).catch(() => {});
 }
 
-export async function pushEnabledHere(): Promise<boolean> {
-  return Boolean(await AsyncStorage.getItem(TOKEN_KEY).catch(() => null));
-}

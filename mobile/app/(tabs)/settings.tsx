@@ -98,7 +98,6 @@ export default function Settings() {
         <RowLink title="Playbooks" icon="list" hint="Agent turns and command checks, in order" onPress={() => router.push("/settings/playbooks")} />
         <RowLink title="Providers" icon="cpu" hint="Your own model keys and endpoints" onPress={() => router.push("/settings/providers")} />
         <RowLink title="Audit log" icon="list" hint="Who did what, newest first" onPress={() => router.push("/settings/audit")} />
-        <RowLink title="Notifications" icon="bell" hint="Push and webhook pings when a run needs you" onPress={() => router.push("/settings/notifications")} />
         {isUser && <RowLink title="API keys" icon="key" hint="Bearer keys for scripts and devices" onPress={() => router.push("/settings/api-keys")} />}
         {isUser && <RowLink title="Signed-in devices" icon="smartphone" hint="Active sessions, revoke any" onPress={() => router.push("/settings/devices")} />}
         <RowLink title="Connect an IDE" icon="code" hint="MCP snippets for Cursor, Claude Code, Zed" onPress={() => router.push("/settings/connect")} />
