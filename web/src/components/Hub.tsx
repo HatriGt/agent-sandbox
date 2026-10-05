@@ -32,7 +32,8 @@ import { useProviders } from "@/components/Providers";
 import { useAgentChoice } from "@/components/DriverPicker";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Collapse } from "@/components/ui/collapse";
-import { StaggerItem } from "@/components/ui/swap";
+import { StaggerItem, Swap } from "@/components/ui/swap";
+import { IconSwap } from "@/components/ui/icon-swap";
 import { api, type BoxView, type FleetLifecycle } from "@/lib/api";
 import { intakeApi, isUnfurlable } from "@/lib/intake-api";
 import { fmtAgo, friendlyName, shortName, threadSort, threadTitle } from "@/lib/format";
@@ -584,20 +585,22 @@ export function Hub({
           <h1 className="text-foreground font-serif text-h1 font-normal tracking-[-0.01em] text-balance">
             {greeting()}
           </h1>
-          {loading ? (
-            <div className="mt-3 flex flex-col gap-2">
-              <Bar className="h-3 w-[70%]" />
-              <Bar className="h-3 w-[40%]" />
-            </div>
-          ) : (
-            <p className="text-muted-foreground mt-2 max-w-[56ch] text-body">
-              {offline
-                ? boxes.length
-                  ? "The controller isn't answering — this is the last snapshot. A new task starts as soon as it's back."
-                  : "The fleet can't be reached right now. Your task is kept here until the connection comes back."
-                : fleetLine(boxes, lifecycle)}
-            </p>
-          )}
+          <Swap state={loading ? "loading" : offline ? "offline" : "line"}>
+            {loading ? (
+              <div className="mt-3 flex flex-col gap-2">
+                <Bar className="h-3 w-[70%]" />
+                <Bar className="h-3 w-[40%]" />
+              </div>
+            ) : (
+              <p className="text-muted-foreground mt-2 max-w-[56ch] text-body">
+                {offline
+                  ? boxes.length
+                    ? "The controller isn't answering — this is the last snapshot. A new task starts as soon as it's back."
+                    : "The fleet can't be reached right now. Your task is kept here until the connection comes back."
+                  : fleetLine(boxes, lifecycle)}
+              </p>
+            )}
+          </Swap>
         </motion.div>
 
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.05, ease: [0.22, 1, 0.36, 1] }}>
@@ -729,8 +732,17 @@ export function Hub({
             {(picked.length > 0 || skill || chipsSet) && (
               <div className="enter mt-1 flex flex-wrap gap-1.5 px-1.5" onClick={(e) => e.stopPropagation()}>
                 {skill && <SkillChip skill={skill} onRemove={() => setSkill(null)} />}
+                <AnimatePresence initial={false}>
                 {picked.map((p) => (
-                  <span key={p.repo} className="bg-muted/80 text-foreground inline-flex h-7 max-w-full items-center gap-1.5 rounded-md border border-transparent pr-1 pl-2 font-mono text-micro transition-colors focus-within:border-live/50">
+                  <motion.span
+                    key={p.repo}
+                    layout={!still}
+                    initial={still ? { opacity: 0 } : { opacity: 0, scale: 0.8 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={still ? { opacity: 0 } : { opacity: 0, scale: 0.8 }}
+                    transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+                    className="bg-muted/80 text-foreground inline-flex h-7 max-w-full items-center gap-1.5 rounded-md border border-transparent pr-1 pl-2 font-mono text-micro transition-colors focus-within:border-live/50"
+                  >
                     {p.private && <Lock className="text-muted-foreground size-3 shrink-0" aria-label="private" />}
                     <span className="truncate">{p.repo}</span>
                     <input
@@ -748,8 +760,9 @@ export function Hub({
                     >
                       <X className="size-3" />
                     </button>
-                  </span>
+                  </motion.span>
                 ))}
+                </AnimatePresence>
                 <RunOptionChips onOpen={openChip} harness={runOptions.harness} agent={runOptions.agent} attempts={runOptions.attempts} verify={runOptions.verify} />
               </div>
             )}
@@ -786,36 +799,48 @@ export function Hub({
                         aria-label="Start a machine with this task"
                         className="shrink-0 rounded-full"
                       >
-                        {busy ? <Loader2 className="animate-spin" /> : <ArrowUp />}
+                        <IconSwap state={busy}>{busy ? <Loader2 className="animate-spin" /> : <ArrowUp />}</IconSwap>
                       </Button>
                     </>
                   }
                 />
-                {showRepo && (
-                  <RepoPicker
-                    className="absolute top-full left-0 z-20 mt-2"
-                    selected={picked}
-                    onToggle={(r) =>
-                      setPicked((prev) =>
-                        prev.some((p) => p.repo.toLowerCase() === r.fullName.toLowerCase())
-                          ? prev.filter((p) => p.repo.toLowerCase() !== r.fullName.toLowerCase())
-                          : [...prev, { repo: r.fullName, defaultBranch: r.defaultBranch, private: r.private }]
-                      )
-                    }
-                    onClose={() => setShowRepo(false)}
-                  />
-                )}
+                <AnimatePresence>
+                  {showRepo && (
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.97, y: -4 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.98 }}
+                      transition={{ duration: 0.15, ease: [0.22, 1, 0.36, 1] }}
+                      style={{ transformOrigin: "top left" }}
+                      className="absolute top-full left-0 z-20 mt-2"
+                    >
+                      <RepoPicker
+                        selected={picked}
+                        onToggle={(r) =>
+                          setPicked((prev) =>
+                            prev.some((p) => p.repo.toLowerCase() === r.fullName.toLowerCase())
+                              ? prev.filter((p) => p.repo.toLowerCase() !== r.fullName.toLowerCase())
+                              : [...prev, { repo: r.fullName, defaultBranch: r.defaultBranch, private: r.private }]
+                          )
+                        }
+                        onClose={() => setShowRepo(false)}
+                      />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
               <input ref={fileInput} type="file" accept="image/*" multiple className="hidden" onChange={(e) => (addImages(e.target.files ?? []), (e.target.value = ""))} />
             </PromptInputActions>
           </PromptInput>
             {/* The hint is a caption under the composer: it read mid-sentence when squeezed into the action row. */}
-            <p className={cn("mt-1.5 min-h-4 px-2 text-micro", error ? "text-destructive" : "text-faint")} role={error ? "alert" : undefined}>
-              {error ??
-                  (lifecycle.maxDurationSec
-                    ? `Enter starts the machine · runs up to ${fmtDuration(lifecycle.maxDurationSec)}${lifecycle.idleTimeoutSec ? `, sleeps after ${fmtDuration(lifecycle.idleTimeoutSec)} quiet` : ""}`
-                    : "Enter starts the machine · a repo named in the task is attached automatically")}
-            </p>
+            <Swap state={!!error} className={cn("mt-1.5 min-h-4 px-2 text-micro", error ? "text-destructive shake-once" : "text-faint")}>
+              <p role={error ? "alert" : undefined}>
+                {error ??
+                    (lifecycle.maxDurationSec
+                      ? `Enter starts the machine · runs up to ${fmtDuration(lifecycle.maxDurationSec)}${lifecycle.idleTimeoutSec ? `, sleeps after ${fmtDuration(lifecycle.idleTimeoutSec)} quiet` : ""}`
+                      : "Enter starts the machine · a repo named in the task is attached automatically")}
+              </p>
+            </Swap>
           </div>
           <Lightbox src={preview?.dataUrl ?? null} name={preview?.name ?? ""} open={!!preview} onClose={() => setPreview(null)} />
 
@@ -841,8 +866,11 @@ export function Hub({
         {/* Offline: the headline already says the fleet can't be read; a "Nothing running" card
             under it would be a claim about machines we cannot see. While the checklist is up it
             already explains what appears here — one teaching card at a time. */}
+        <AnimatePresence mode="popLayout" initial={false}>
         {!loading && !offline && runs.length === 0 && (getMe()?.kind !== "user" || gsDismissed) && (
           <motion.section
+            key="empty"
+            exit={{ opacity: 0, y: -6, transition: { duration: 0.15 } }}
             aria-label="No runs yet"
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -866,6 +894,8 @@ export function Hub({
 
         {(loading || runs.length > 0) && (
           <motion.section
+            key="live"
+            exit={{ opacity: 0, y: -6, transition: { duration: 0.15 } }}
             aria-labelledby="live-now"
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -878,6 +908,7 @@ export function Hub({
               {loading ? <Bar className="h-3 w-20" /> : <Capacity boxes={boxes} capacity={lifecycle.capacity} size="sm" />}
             </div>
             <ul className="bg-card divide-y overflow-hidden rounded-xl border">
+              <AnimatePresence initial={false}>
               {loading
                 ? [0, 1, 2].map((i) => (
                     <li key={i} className="flex items-center gap-3 px-3.5 py-3">
@@ -887,7 +918,15 @@ export function Hub({
                     </li>
                   ))
                 : runs.map((b, i) => (
-                    <li key={b.name} className="stagger-item" style={{ "--i": Math.min(i, 12) } as React.CSSProperties}>
+                    <motion.li
+                      key={b.name}
+                      layout="position"
+                      initial={still ? { opacity: 0 } : { opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, height: 0, transition: { duration: 0.18, ease: [0.22, 1, 0.36, 1] } }}
+                      transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1], delay: Math.min(i, 12) * 0.024 }}
+                      className="overflow-hidden"
+                    >
                       <button
                         type="button"
                         onClick={() => onOpen(b.name)}
@@ -910,14 +949,16 @@ export function Hub({
                         </span>
                         <ArrowRight className="text-muted-foreground size-3.5 shrink-0 -translate-x-0.5 opacity-0 transition-[opacity,translate] duration-150 group-hover:translate-x-0 group-hover:opacity-100 group-focus-visible:translate-x-0 group-focus-visible:opacity-100" />
                       </button>
-                      {b.runState === "waiting" && b.question && (
-                        <QuestionChoices box={b.name} question={b.question} className="px-3.5 pb-2.5 sm:pl-[8.5rem]" />
-                      )}
-                    </li>
+                      <Collapse open={b.runState === "waiting" && !!b.question}>
+                        {b.question && <QuestionChoices box={b.name} question={b.question} className="px-3.5 pb-2.5 sm:pl-[8.5rem]" />}
+                      </Collapse>
+                    </motion.li>
                   ))}
+              </AnimatePresence>
             </ul>
           </motion.section>
         )}
+        </AnimatePresence>
 
         {sessionRuns.length > 0 && (
           <motion.section
@@ -948,7 +989,7 @@ export function Hub({
                       onMouseEnter={() => !gone && prefetchWatch(r.box)}
                       className={cn(
                         "group flex min-h-11 w-full items-center gap-3 rounded-md px-2 py-2 text-left transition-colors duration-150",
-                        gone ? "cursor-default" : "hover:bg-muted cursor-pointer"
+                        gone ? "cursor-default opacity-60" : "hover:bg-muted cursor-pointer"
                       )}
                     >
                       {box ? (

@@ -503,6 +503,13 @@
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+  /* Overlays keep a short fade (their travel/scale is already removed by motion-reduce: utilities);
+     a dialog that blinks into place with no fade reads as a glitch, not as "reduced". */
+  [data-slot="overlay"],
+  [data-slot="dialog-content"],
+  [data-slot="sheet-content"] {
+    animation-duration: 120ms !important;
+  }
 }
 
 /* The one authored motion in the console: liveness. A working machine breathes; nothing else pulses. */
@@ -933,18 +940,26 @@
   animation: dots 1.4s steps(1, end) infinite;
 }
 
-/* Interaction grammar (asb-interactive): controls ease colour/border/shadow in 150ms and give a
-   slight press. Applied globally so no component has to remember it. */
-button, [role="tab"], [role="radio"], [role="switch"], a[href], summary {
-  transition-property: background-color, border-color, color, box-shadow, opacity, transform;
-  transition-duration: 150ms;
-  transition-timing-function: var(--ease-out-quint);
+/* Interaction grammar (asb-interactive): controls ease colour/border/shadow/transform in 150ms and
+   give a slight press. Lives in @layer base so a component's own `transition-*`/`duration-*`
+   utilities still win (unlayered rules would beat every utility). `translate`/`scale`/`rotate` are
+   listed because Tailwind v4 drives its translate/scale/rotate utilities through those properties. */
+@layer base {
+  button, [role="tab"], [role="radio"], [role="switch"], a[href], summary, [data-slot="button"] {
+    transition-property: background-color, border-color, color, box-shadow, opacity, transform, translate, scale, rotate, filter;
+    transition-duration: 150ms;
+    transition-timing-function: var(--ease-out-quint);
+  }
+  button:not(:disabled):active, [role="tab"]:active, [role="radio"]:active, [data-slot="button"]:not([aria-disabled="true"]):active, .press:active { transform: scale(0.985); }
+  /* Editor tabs and rows that already scale on hover keep their own transform. */
+  .no-press:active { transform: none !important; }
+  /* The primary action presses a touch deeper than the global 0.985 — it is the one that matters. */
+  [data-slot="button"]:is([data-variant="primary"], [data-variant="default"], [data-variant="attention"], [data-variant="destructive"]):not(:disabled):active { transform: scale(0.97); }
 }
-button:not(:disabled):active, [role="tab"]:active, [role="radio"]:active { transform: scale(0.985); }
-/* Editor tabs and rows that already scale on hover keep their own transform. */
-.no-press:active { transform: none !important; }
-/* The primary action presses a touch deeper than the global 0.985 — it is the one that matters. */
-[data-slot="button"]:is([data-variant="primary"], [data-variant="default"]):not(:disabled):active { transform: scale(0.97); }
+/* Touch devices fire :hover on tap; hover lifts are pointer-only. */
+@media (hover: none) {
+  .hover-raise:hover { translate: none; box-shadow: var(--shadow-e1); }
+}
 
 /* Result cards (outcome) settle in on a small spring: 0.98 → ~1.01 → 1, transform + opacity only. */
 @keyframes card-spring {

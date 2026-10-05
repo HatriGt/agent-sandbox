@@ -19,6 +19,8 @@ import { McpItem } from "./McpItem";
 import { PanelFold, TraceOutput, VisualRawSwitch, useOutputVisual } from "./TraceOutput";
 import { Lightbox } from "@/components/ui/lightbox";
 import { Collapse } from "@/components/ui/collapse";
+import { Swap } from "@/components/ui/swap";
+import { Odometer } from "@/components/viz/motion";
 import { LiveLogView, useLiveLog } from "@/components/viz/LiveLog";
 import { liveKind } from "@/lib/viz-live-log";
 import { toolOutputLanguage } from "@/lib/viz-tool-output";
@@ -266,7 +268,7 @@ function PollRow({ event }: { event: ToolEvent }) {
         </span>
       </button>
       <Collapse open={open}>
-        <div className="pt-1.5">{open && <ShellItem event={event} />}</div>
+        <div className="pt-1.5"><ShellItem event={event} /></div>
       </Collapse>
     </div>
   );
@@ -413,32 +415,54 @@ export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolea
           className={cn("size-3.5 shrink-0 transition-transform duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]", open && "rotate-90")}
           aria-hidden
         />
-        {anyRunning ? (
-          <span className="flex shrink-0 items-center gap-2 font-medium whitespace-nowrap">
-            <span className="bg-live breathe size-1.5 rounded-full" aria-hidden />
-            Working
-            <span className="text-muted-foreground font-normal tabular-nums">
-              {done}/{events.length} steps
+        <Swap state={anyRunning} mode="popLayout" className="inline-flex shrink-0">
+          {anyRunning ? (
+            <span className="flex shrink-0 items-center gap-2 font-medium whitespace-nowrap">
+              <span className="bg-live breathe size-1.5 rounded-full" aria-hidden />
+              Working
+              <span className="text-muted-foreground font-normal tabular-nums">
+                <Odometer text={`${done}/${events.length}`} /> steps
+              </span>
+              {firstAt !== undefined && <span className="text-faint font-normal text-micro tabular-nums">{formatDuration(now - firstAt)}</span>}
             </span>
-            {firstAt !== undefined && <span className="text-faint font-normal text-micro tabular-nums">{formatDuration(now - firstAt)}</span>}
-          </span>
-        ) : (
-          <span className="shrink-0 font-medium whitespace-nowrap">
-            Worked
-            {span !== undefined && <span className="text-muted-foreground ml-1 font-normal tabular-nums">for {formatDuration(span)}</span>}
-          </span>
-        )}
-        {!anyRunning && (
-          <span className="stamp text-muted-foreground min-w-0 truncate">
-            {facts.map((f, i) => (
-              <React.Fragment key={f}>
-                {i > 0 && <span className="mx-1 opacity-50">·</span>}
-                {f}
-              </React.Fragment>
-            ))}
-          </span>
-        )}
-        {failed > 0 && !anyRunning && <span className="text-destructive stamp">{failed} failed</span>}
+          ) : (
+            <span className="shrink-0 font-medium whitespace-nowrap">
+              Worked
+              {span !== undefined && <span className="text-muted-foreground ml-1 font-normal tabular-nums">for {formatDuration(span)}</span>}
+            </span>
+          )}
+        </Swap>
+        <AnimatePresence initial={false}>
+          {!anyRunning && (
+            <motion.span
+              key="facts"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+              className="stamp text-muted-foreground min-w-0 truncate"
+            >
+              {facts.map((f, i) => (
+                <React.Fragment key={f}>
+                  {i > 0 && <span className="mx-1 opacity-50">·</span>}
+                  {f}
+                </React.Fragment>
+              ))}
+            </motion.span>
+          )}
+          {failed > 0 && !anyRunning && (
+            <motion.span
+              key="failed"
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+              className="text-destructive stamp"
+            >
+              {failed} failed
+            </motion.span>
+          )}
+        </AnimatePresence>
       </button>
       <AnimatePresence initial={false}>
         {open && (
@@ -481,7 +505,7 @@ export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolea
                       )}
                     >
                       <StatusGlyph state={state}>
-                        {running ? <span className="bg-live size-1.5 animate-pulse rounded-full" /> : e.failed ? <AlertTriangle className="size-2" strokeWidth={3} aria-label="failed" /> : i + 1}
+                        {running ? <span className="bg-live breathe size-1.5 rounded-full" /> : e.failed ? <AlertTriangle className="size-2" strokeWidth={3} aria-label="failed" /> : i + 1}
                       </StatusGlyph>
                     </span>
                     {!last && <span className="bg-border absolute top-[1.4rem] bottom-0 w-px" aria-hidden />}
@@ -588,12 +612,12 @@ function ShellItem({ event, live }: { event: ToolEvent; live?: boolean }) {
         <Collapse open={hasOutput && open}>
           <TraceOutput text={event.result!} mode="term" className="border-t border-white/8" />
         </Collapse>
-        {hasOutput && !open && (
+        <Collapse open={hasOutput && !open}>
           <button type="button" onClick={() => setOpen(true)} className="text-trace-fg/60 hover:text-trace-fg flex w-full cursor-pointer items-center gap-2 border-t border-white/8 px-3 py-1.5 text-left font-mono text-micro">
             <span className="text-trace-fg/40 select-none">›</span>
             <span className="truncate">{resultSummary(event.result)}</span>
           </button>
-        )}
+        </Collapse>
       </div>
     </div>
   );
@@ -678,7 +702,9 @@ function StepItem({ event, live }: { event: ToolEvent; live?: boolean }) {
           event.result && <TraceOutput text={event.result} mode="term" className="bg-trace mt-2 ml-6 overflow-hidden rounded-md border border-white/8" />
         )}
       </Collapse>
-      {event.result && !open && summary && <p className={cn("stamp ml-8 truncate", event.failed ? "text-destructive" : "text-muted-foreground")}>{summary}</p>}
+      <Collapse open={!!event.result && !open && !!summary}>
+        <p className={cn("stamp ml-8 truncate", event.failed ? "text-destructive" : "text-muted-foreground")}>{summary}</p>
+      </Collapse>
     </div>
   );
 }
@@ -710,7 +736,9 @@ function DumpItem({ text }: { text: string }) {
         <FileText className="size-3.5 shrink-0" aria-hidden />
         <span className="font-medium">Raw output</span>
         <span className="stamp">{n} lines</span>
-        {!open && <span className="stamp min-w-0 truncate">{text.split("\n").find((l) => l.trim())?.trim().slice(0, 80)}</span>}
+        <Collapse open={!open} className="min-w-0">
+          <span className="stamp block min-w-0 truncate">{text.split("\n").find((l) => l.trim())?.trim().slice(0, 80)}</span>
+        </Collapse>
       </button>
       <Collapse open={open}>
         <pre className="bg-trace text-trace-fg/80 mt-1.5 max-h-96 overflow-auto rounded-md border border-white/8 px-3 py-2 font-mono text-code whitespace-pre-wrap">{text}</pre>
@@ -1058,7 +1086,9 @@ export function ThinkingItem({ text, live }: { text: string; live?: boolean }) {
         <ChevronRight className={cn("size-3.5 shrink-0 transition-transform duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]", open && "rotate-90")} aria-hidden />
         <Brain className={cn("size-3.5 shrink-0", live && "text-live breathe")} aria-hidden />
         <span className={cn("font-medium", live && "shimmer-text")}>{live ? "Thinking" : "Thought"}</span>
-        {!open && <span className={cn("stamp min-w-0 truncate", live ? "shimmer-text" : "text-muted-foreground")}>{teaser}</span>}
+        <Collapse open={!open} className="min-w-0">
+          <span className={cn("stamp block min-w-0 truncate", live ? "shimmer-text" : "text-muted-foreground")}>{teaser}</span>
+        </Collapse>
         <span className="stamp text-muted-foreground shrink-0">{words} words</span>
       </button>
       <Collapse open={open}>

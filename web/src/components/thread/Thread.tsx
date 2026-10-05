@@ -850,13 +850,19 @@ export function Thread({
               )}
             </AnimatePresence>
 
-            {idle && <IdleEmpty box={box} onNew={onNew} onPick={(text) => setSeed({ text, n: Date.now() })} />}
-
-            {showMemoryCard && (
-              <MemoryBumpCard kind={oomKilled ? "oom" : "pressure"} nextTier={nextMemoryTier!} memUsage={box.memUsage} phase={bumpPhase} onBump={() => void bumpAndContinue()} />
-            )}
-
-            {showQuestion && <QuestionCard question={question!} onAnswer={answer} busy={answering} />}
+            <AnimatePresence initial={false}>
+              {idle && (
+                <Rise key="idle" still={still}>
+                  <IdleEmpty box={box} onNew={onNew} onPick={(text) => setSeed({ text, n: Date.now() })} />
+                </Rise>
+              )}
+              {showMemoryCard && (
+                <Rise key="memory" still={still}>
+                  <MemoryBumpCard kind={oomKilled ? "oom" : "pressure"} nextTier={nextMemoryTier!} memUsage={box.memUsage} phase={bumpPhase} onBump={() => void bumpAndContinue()} />
+                </Rise>
+              )}
+              {showQuestion && <QuestionCard key="question" question={question!} onAnswer={answer} busy={answering} />}
+            </AnimatePresence>
 
             <AnimatePresence initial={false}>
               {pendingReplies.map((r, i) => (

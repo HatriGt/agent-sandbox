@@ -3,6 +3,7 @@ import { Slot } from "@radix-ui/react-slot";
 import { Loader2 } from "lucide-react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
+import { IconSwap } from "@/components/ui/icon-swap";
 
 /**
  * Console actions. Every colour here is a theme utility (`text-primary-foreground`, `text-destructive`)
@@ -53,8 +54,10 @@ const buttonVariants = cva(
 );
 
 /**
- * `loading` swaps the leading icon for a spinner, disables the button and marks it busy — while the
- * label stays put, so the button does not change width mid-request.
+ * `loading` swaps the leading icon for a spinner (a 160ms crossfade, never a cut), disables the
+ * button and marks it busy — while the label stays put, so the button does not change width
+ * mid-request. The swap slot is always rendered when a leading icon exists, so the spinner's
+ * exit back to the icon is animated too.
  */
 function Button({
   className,
@@ -67,20 +70,29 @@ function Button({
   ...props
 }: React.ComponentProps<"button"> & VariantProps<typeof buttonVariants> & { asChild?: boolean; loading?: boolean }) {
   const Comp = asChild ? Slot : "button";
-  if (asChild || !loading) {
+  if (asChild) {
     return (
       <Comp data-slot="button" data-variant={variant ?? "default"} className={cn(buttonVariants({ variant, size, className }))} disabled={disabled} {...props}>
         {children}
       </Comp>
     );
   }
-  // Drop the first leading icon (an svg) in favour of the spinner; keep every other child.
   const kids = React.Children.toArray(children);
-  const firstIcon = kids.findIndex((k) => React.isValidElement(k) && typeof k.type !== "string");
-  const rest = firstIcon === 0 ? kids.slice(1) : kids;
+  const hasLeadingIcon = kids.length > 0 && React.isValidElement(kids[0]) && typeof kids[0].type !== "string";
+  const leading = hasLeadingIcon ? kids[0] : null;
+  const rest = hasLeadingIcon ? kids.slice(1) : kids;
   return (
-    <Comp data-slot="button" data-variant={variant ?? "default"} className={cn(buttonVariants({ variant, size, className }))} disabled aria-busy="true" {...props}>
-      <Loader2 className="animate-spin" aria-hidden />
+    <Comp
+      data-slot="button"
+      data-variant={variant ?? "default"}
+      className={cn(buttonVariants({ variant, size, className }))}
+      disabled={disabled || loading}
+      aria-busy={loading || undefined}
+      {...props}
+    >
+      {hasLeadingIcon || loading ? (
+        <IconSwap state={loading ? "busy" : "idle"}>{loading ? <Loader2 className="animate-spin" aria-hidden /> : leading}</IconSwap>
+      ) : null}
       {rest}
     </Comp>
   );

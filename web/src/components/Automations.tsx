@@ -1,7 +1,7 @@
 ﻿import * as React from "react";
 import { CalendarClock, ChevronRight, Copy, FlaskConical, GitPullRequest, Link2, ListChecks, Play, Plus, RotateCw, ShieldCheck, Trash2, Webhook, Workflow } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { toast } from "sonner";
 import { api, type AlertPreset, type Automation, type AutomationDelivery, type AutomationDraft, type AutomationKind, type GithubEvent } from "@/lib/api";
 import { fmtAgo } from "@/lib/format";
@@ -14,6 +14,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Swap } from "@/components/ui/swap";
+import { Collapse } from "@/components/ui/collapse";
 import { Bar } from "@/components/thread/Skeletons";
 import { cn } from "@/lib/utils";
 import { PrFollowupsPanel } from "@/components/PrFollowupsPanel";
@@ -146,6 +147,10 @@ export function Automations({ onOpenBox, onOpenPlaybooks }: { onOpenBox: (box: s
   const [error, setError] = React.useState<string | null>(null);
   const [attempt, setAttempt] = React.useState(0);
   const [editing, setEditing] = React.useState<{ id: string | null; draft: AutomationDraft } | null>(null);
+  // Keep the last draft while the sheet slides shut so its content doesn't vanish mid-exit.
+  const lastEditing = React.useRef<typeof editing>(null);
+  if (editing) lastEditing.current = editing;
+  const shown = editing ?? lastEditing.current;
 
   const load = React.useCallback((signal?: AbortSignal) => {
     setError(null);
@@ -208,12 +213,16 @@ export function Automations({ onOpenBox, onOpenPlaybooks }: { onOpenBox: (box: s
           <p className="text-muted-foreground min-w-0 flex-1 text-meta">
             <span className="text-foreground">When</span> work starts on its own — a schedule, a webhook, a GitHub event, or after another run. Each opens a PR at most and leaves a receipt.
           </p>
-          {rows && rows.length > 0 && (
-            <Button size="sm" onClick={() => setEditing({ id: null, draft: blank() })}>
-              <Plus />
-              New automation
-            </Button>
-          )}
+          <AnimatePresence initial={false}>
+            {rows && rows.length > 0 && (
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15, ease: [0.22, 1, 0.36, 1] }}>
+                <Button size="sm" onClick={() => setEditing({ id: null, draft: blank() })}>
+                  <Plus />
+                  New automation
+                </Button>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
 
         <Swap state={error ? "error" : rows === null ? "loading" : listed.length ? "list" : "empty"}>
@@ -272,17 +281,17 @@ export function Automations({ onOpenBox, onOpenPlaybooks }: { onOpenBox: (box: s
       </div>
 
       <Sheet open={!!editing} onOpenChange={(o) => !o && setEditing(null)}>
-        {editing && (
+        {shown && (
           <SheetContent
-            title={editing.id ? (rows?.find((r) => r.id === editing.id)?.proposed ? "Proposed by the agent" : "Edit automation") : "New automation"}
-            description={editing.id ? rows?.find((r) => r.id === editing.id)?.when : "What starts it, and what the agent is asked to do."}
+            title={shown.id ? (rows?.find((r) => r.id === shown.id)?.proposed ? "Proposed by the agent" : "Edit automation") : "New automation"}
+            description={shown.id ? rows?.find((r) => r.id === shown.id)?.when : "What starts it, and what the agent is asked to do."}
             className="w-[min(34rem,calc(100vw-1rem))]"
           >
             <Editor
-              key={editing.id ?? "new"}
-              id={editing.id}
-              initial={editing.draft}
-              others={(rows ?? []).filter((r) => r.id !== editing.id)}
+              key={shown.id ?? "new"}
+              id={shown.id}
+              initial={shown.draft}
+              others={(rows ?? []).filter((r) => r.id !== shown.id)}
               names={names}
               onSaved={(t) => {
                 setRows((prev) => {
@@ -297,7 +306,7 @@ export function Automations({ onOpenBox, onOpenPlaybooks }: { onOpenBox: (box: s
               }}
               onRan={() => void load()}
               onOpenBox={onOpenBox}
-              initialHasSecret={!!rows?.find((r) => r.id === editing.id)?.hasSigningSecret}
+              initialHasSecret={!!rows?.find((r) => r.id === shown.id)?.hasSigningSecret}
             />
           </SheetContent>
         )}
@@ -422,17 +431,21 @@ function AutomationTable({
           </tr>
         </thead>
         <tbody>
-          {rows.map((a, i) => (
-            <motion.tr
-              key={a.id}
-              initial={still ? { opacity: 0 } : { opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: still ? 0.1 : 0.24, delay: Math.min(i, 12) * 0.024, ease: [0.22, 1, 0.36, 1] }}
-              className={cn("hover:bg-muted/50 relative border-b transition-colors last:border-b-0", !a.enabled && !a.proposed && "opacity-70", a.proposed && !a.enabled && "bg-attention/[0.04]")}
-            >
-              <AutomationTr a={a} onEdit={() => onEdit(a)} onToggle={(on) => onToggle(a, on)} onDismiss={() => onDismiss(a)} onOpenBox={onOpenBox} onOpenPlaybook={onOpenPlaybook} />
-            </motion.tr>
-          ))}
+          <AnimatePresence initial={false}>
+            {rows.map((a, i) => (
+              <motion.tr
+                key={a.id}
+                layout="position"
+                initial={still ? { opacity: 0 } : { opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: still ? 0.1 : 0.24, delay: Math.min(i, 12) * 0.024, ease: [0.22, 1, 0.36, 1] }}
+                className={cn("hover:bg-muted/50 relative border-b transition-[background-color,opacity] duration-200 last:border-b-0", !a.enabled && !a.proposed && "opacity-70", a.proposed && !a.enabled && "bg-attention/[0.04]")}
+              >
+                <AutomationTr a={a} onEdit={() => onEdit(a)} onToggle={(on) => onToggle(a, on)} onDismiss={() => onDismiss(a)} onOpenBox={onOpenBox} onOpenPlaybook={onOpenPlaybook} />
+              </motion.tr>
+            ))}
+          </AnimatePresence>
         </tbody>
       </table>
     </div>
@@ -681,6 +694,7 @@ function Editor({
         )}
       </div>
 
+      <Swap state={d.kind} className="flex flex-col gap-5">
       {d.kind === "schedule" && !id && (
         <div>
           <Label hint="quiet checks that only speak up when something is wrong">Start from</Label>
@@ -732,19 +746,19 @@ function Editor({
               options={(Object.keys(EVENT_LABEL) as GithubEvent[]).map((ev) => ({ value: ev, label: EVENT_LABEL[ev] }))}
             />
           </div>
-          {d.spec.event === "issue_labeled" && (
+          <Collapse open={d.spec.event === "issue_labeled"}>
             <label className="block">
               <Label>Label</Label>
               <input className={field} value={d.spec.label ?? ""} onChange={(e) => setSpec({ label: e.target.value })} placeholder="agent" />
             </label>
-          )}
-          {d.spec.event === "issue_comment" && (
+          </Collapse>
+          <Collapse open={d.spec.event === "issue_comment"}>
             <label className="block">
               <Label hint="only owners, members and collaborators">Command</Label>
               <input className={cn(field, "font-mono")} value={d.spec.command ?? ""} onChange={(e) => setSpec({ command: e.target.value })} placeholder="/agent" />
             </label>
-          )}
-          {d.spec.event === "pr_opened" && (
+          </Collapse>
+          <Collapse open={d.spec.event === "pr_opened"}>
             <label className="flex items-center justify-between gap-3">
               <span className="text-meta">
                 Also run on PRs from forks
@@ -752,7 +766,7 @@ function Editor({
               </span>
               <Switch size="sm" checked={!!d.spec.allowForks} onCheckedChange={(v) => setSpec({ allowForks: v })} />
             </label>
-          )}
+          </Collapse>
         </div>
       )}
 
@@ -777,8 +791,8 @@ function Editor({
               options={[{ value: "generic", label: "Any POST" }, ...(Object.keys(PRESET_LABEL) as AlertPreset[]).map((p) => ({ value: p, label: PRESET_LABEL[p] }))]}
             />
           </div>
-          {d.spec.preset && (
-            <>
+          <Collapse open={!!d.spec.preset}>
+            <div className="flex flex-col gap-3">
               <label className="block">
                 <Label hint={initialHasSecret ? "set — leave blank to keep it" : "required"}>{d.spec.preset === "datadog" ? "Header token" : "Signing secret"}</Label>
                 <div className="flex items-center gap-1.5">
@@ -796,17 +810,17 @@ function Editor({
                     </Button>
                   )}
                 </div>
-                <span className="text-faint mt-1 block text-micro">{PRESET_SECRET_HINT[d.spec.preset]}</span>
+                <span className="text-faint mt-1 block text-micro">{d.spec.preset ? PRESET_SECRET_HINT[d.spec.preset] : null}</span>
               </label>
-              {d.spec.preset === "datadog" && d.signingSecret && (
+              <Collapse open={d.spec.preset === "datadog" && !!d.signingSecret}>
                 <p className="text-faint -mt-1 text-micro">
                   Copy the token now: <code className="font-mono">{d.signingSecret}</code>{" "}
                   <button type="button" className="hover:text-foreground cursor-pointer underline" onClick={() => copy(d.signingSecret!)}>
                     copy
                   </button>
                 </p>
-              )}
-              {d.spec.preset === "datadog" && (
+              </Collapse>
+              <Collapse open={d.spec.preset === "datadog"}>
                 <div>
                   <Label hint="Datadog → Integrations → Webhooks → Payload">Payload</Label>
                   <div className="flex items-start gap-1.5">
@@ -816,7 +830,7 @@ function Editor({
                     </Button>
                   </div>
                 </div>
-              )}
+              </Collapse>
               <label className="flex items-center justify-between gap-3">
                 <span className="text-meta">
                   Cooldown per alert, minutes
@@ -831,9 +845,11 @@ function Editor({
                   onChange={(e) => setSpec({ cooldownMin: Math.max(0, Number(e.target.value) || 0) })}
                 />
               </label>
-              {d.harnessId === INCIDENT_HARNESS_ID && <p className="text-faint -mt-1 text-micro">Runs with the Incident responder harness: find the breaking change, prepare a fix or a revert, ask before choosing.</p>}
-            </>
-          )}
+              <Collapse open={d.harnessId === INCIDENT_HARNESS_ID}>
+                <p className="text-faint -mt-1 text-micro">Runs with the Incident responder harness: find the breaking change, prepare a fix or a revert, ask before choosing.</p>
+              </Collapse>
+            </div>
+          </Collapse>
         </div>
       )}
 
@@ -864,6 +880,7 @@ function Editor({
           </div>
         </div>
       )}
+      </Swap>
 
       <div>
         <Label hint={<span className="hidden font-mono sm:inline">{"{{issue.title}} {{payload.x}} {{parent.headline}}"}</span>}>Task</Label>
@@ -930,8 +947,9 @@ function Editor({
         </div>
       </details>
 
-      {hook && (
-        <div className="border-live/30 bg-live/5 rounded-lg border px-3 py-3" role="status">
+      <Collapse open={!!hook}>
+        {hook && (
+        <div className="border-live/30 bg-live/5 card-spring rounded-lg border px-3 py-3" role="status">
           <p className="text-foreground text-meta font-medium">Webhook URL — shown once</p>
           <p className="text-muted-foreground mt-0.5 text-micro">
             {d.kind === "github"
@@ -955,7 +973,8 @@ function Editor({
             </div>
           )}
         </div>
-      )}
+        )}
+      </Collapse>
 
       <div className="flex flex-wrap items-center gap-2 border-t pt-4">
         <Button size="sm" onClick={() => void save()} loading={saving} disabled={!d.name.trim() || !d.taskTemplate.trim()}>
@@ -987,8 +1006,12 @@ function Editor({
       {id && (
         <div>
           <Label hint={`last ${50}`}>Deliveries</Label>
+          <Swap state={deliveries === null ? "loading" : deliveries.length === 0 ? "empty" : "list"}>
           {deliveries === null ? (
-            <p className="text-faint text-micro">…</p>
+            <div className="flex flex-col gap-2 py-1" aria-busy="true" aria-label="Loading deliveries">
+              <Bar className="h-3 w-[72%]" />
+              <Bar className="h-3 w-[56%]" />
+            </div>
           ) : deliveries.length === 0 ? (
             <p className="text-faint text-micro">Nothing has arrived yet. Every delivery lands here: fired, skipped (and why) or rejected.</p>
           ) : (
@@ -1017,6 +1040,7 @@ function Editor({
               ))}
             </ul>
           )}
+          </Swap>
         </div>
       )}
     </div>

@@ -6,6 +6,8 @@ import { smartJoin, useVoiceInput } from "@/hooks/useVoiceInput";
 import { VoiceButton } from "@/components/ui/voice-button";
 import { cn } from "@/lib/utils";
 import { motion } from "motion/react";
+import { Collapse } from "@/components/ui/collapse";
+import { IconSwap } from "@/components/ui/icon-swap";
 
 /**
  * The agent's question as a real decision control — the shape Claude Code, Codex and Cursor use when
@@ -89,6 +91,7 @@ export function QuestionCard({
     <motion.div
       initial={{ opacity: 0, y: 12, scale: 0.985 }}
       animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: -8, scale: 0.985, transition: { duration: 0.18, ease: [0.22, 1, 0.36, 1] } }}
       transition={{ type: "spring", stiffness: 320, damping: 26 }}
       className="flex flex-col gap-1.5"
     >
@@ -111,14 +114,16 @@ export function QuestionCard({
           <p className="text-foreground text-lead leading-[1.5] font-medium text-balance">{parsed.title || question}</p>
           {parsed.context && (
             <div className="mt-2">
-              <p
+              <motion.p
+                layout
+                transition={{ layout: { duration: 0.22, ease: [0.22, 1, 0.36, 1] } }}
                 className={cn(
                   "text-muted-foreground text-meta leading-relaxed whitespace-pre-wrap",
                   longContext && !showContext && "line-clamp-3"
                 )}
               >
                 {parsed.context}
-              </p>
+              </motion.p>
               {longContext && (
                 <button
                   type="button"
@@ -126,7 +131,7 @@ export function QuestionCard({
                   className="text-muted-foreground hover:text-foreground mt-1 inline-flex cursor-pointer items-center gap-1 text-micro font-medium"
                 >
                   {showContext ? "Less" : "More context"}
-                  <ChevronDown className={cn("size-3 transition-transform", showContext && "rotate-180")} aria-hidden />
+                  <ChevronDown className={cn("size-3 transition-transform duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]", showContext && "rotate-180")} aria-hidden />
                 </button>
               )}
             </div>
@@ -162,7 +167,14 @@ export function QuestionCard({
                       )}
                       aria-hidden
                     >
-                      {on && <Check className="size-3" strokeWidth={3} />}
+                      <motion.span
+                        initial={false}
+                        animate={on ? { scale: 1, opacity: 1 } : { scale: 0.4, opacity: 0 }}
+                        transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+                        className="grid place-items-center"
+                      >
+                        <Check className="size-3" strokeWidth={3} />
+                      </motion.span>
                     </span>
                     <span className="min-w-0 flex-1">
                       {/* "Label | detail" (src/drivers/prompts.ts): label reads first, detail muted. */}
@@ -202,7 +214,7 @@ export function QuestionCard({
                   )}
                   aria-hidden
                 >
-                  {other ? <Check className="size-3" strokeWidth={3} /> : <PenLine className="size-2.5" />}
+                  <IconSwap state={other}>{other ? <Check className="size-3" strokeWidth={3} /> : <PenLine className="size-2.5" />}</IconSwap>
                 </span>
                 Something else…
               </button>
@@ -210,7 +222,7 @@ export function QuestionCard({
           </ul>
         )}
 
-        {other && (
+        <Collapse open={other}>
           <div className="px-3 pb-2">
             <div className={cn("bg-muted focus-within:ring-attention/50 flex items-end gap-1 rounded-md pr-1.5 transition-shadow focus-within:ring-2", (voice.state === "listening" || voice.state === "arming") && "mic-glow ring-0")}>
               <textarea
@@ -231,7 +243,7 @@ export function QuestionCard({
               {voice.supported && <VoiceButton state={voice.state} level={voice.level} onToggle={voice.toggle} className="mb-1.5" />}
             </div>
           </div>
-        )}
+        </Collapse>
 
         <div className="flex items-center justify-between gap-3 border-t px-3 py-2">
           {/* Phone: the clause truncated mid-word beside the button; two lines read, one chopped line
@@ -240,9 +252,9 @@ export function QuestionCard({
             <span className="sm:hidden">{hasOptions ? "Pick one, then send. The agent waits until you do." : "Your answer releases the paused run."}</span>
             <span className="hidden sm:inline">{hasOptions ? "Pick one (or press its number), then send. Every tool call is blocked until you do." : "Your answer releases the paused run."}</span>
           </p>
-          <Button variant="attention" size="sm" onClick={send} disabled={!canSend} className="shrink-0">
-            {busy ? "Sending…" : "Send answer"}
+          <Button variant="attention" size="sm" onClick={send} disabled={!canSend} loading={busy} className="min-w-[8.5rem] shrink-0">
             <ArrowUp className="size-3.5" />
+            Send answer
           </Button>
         </div>
       </div>

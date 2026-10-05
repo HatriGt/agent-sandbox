@@ -1,6 +1,8 @@
 import * as React from "react";
 import { ArrowLeft, Check, FileText, FolderTree, HardDrive, Link2, ListTree, Loader2, MemoryStick, MessageSquareText, Moon, MoreHorizontal, Pencil, Pin, PinOff, Plus, RotateCw, Trash2 } from "lucide-react";
 import { Swap } from "@/components/ui/swap";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { menuMotion } from "./MentionMenu";
 import { toast } from "sonner";
 import type { BoxView } from "@/lib/api";
 import { fmtAgo, friendlyName, roleLabel, shortName } from "@/lib/format";
@@ -113,6 +115,7 @@ export function ThreadHeader({
   const [resizeTo, setResizeTo] = React.useState<{ kind: "memory" | "disk"; tier: string } | null>(null);
   const [addRepo, setAddRepo] = React.useState(false);
   const pickerRef = React.useRef<HTMLSpanElement>(null);
+  const still = useReducedMotion();
   const openFromMenu = React.useRef(false);
   React.useEffect(() => {
     if (!addRepo) return;
@@ -440,12 +443,21 @@ export function ThreadHeader({
                   <TooltipContent side="bottom">/workspace/{r.name} — @ mentions search here</TooltipContent>
                 </Tooltip>
               ))}
-              {attaching && (
-                <span className="stamp text-muted-foreground inline-flex items-center gap-1">
-                  <Loader2 className="size-3 animate-spin" aria-hidden />
-                  cloning {attaching.split("/")[1]}…
-                </span>
-              )}
+              <AnimatePresence initial={false}>
+                {attaching && (
+                  <motion.span
+                    key="attaching"
+                    initial={{ opacity: 0, scale: 0.92 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.92 }}
+                    transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+                    className="stamp text-muted-foreground inline-flex items-center gap-1"
+                  >
+                    <Loader2 className="size-3 animate-spin" aria-hidden />
+                    cloning {attaching.split("/")[1]}…
+                  </motion.span>
+                )}
+              </AnimatePresence>
             </span>
             <span ref={pickerRef} className="relative shrink-0">
                 <Tooltip>
@@ -464,9 +476,13 @@ export function ThreadHeader({
                   </TooltipTrigger>
                   <TooltipContent side="bottom">{repos.length ? "Attach another repository" : "The agent clones it into /workspace"}</TooltipContent>
                 </Tooltip>
-                {addRepo && (
-                  <RepoPicker className="absolute top-full left-0 z-20 mt-1" multi={false} selected={repos.map((r) => ({ repo: r.name }))} onToggle={(r) => (onAttach(r.fullName), setAddRepo(false))} onClose={() => setAddRepo(false)} />
-                )}
+                <AnimatePresence>
+                  {addRepo && (
+                    <motion.div key="repo-picker" {...menuMotion(still, "bottom")} className="absolute top-full left-0 z-20 mt-1">
+                      <RepoPicker multi={false} selected={repos.map((r) => ({ repo: r.name }))} onToggle={(r) => (onAttach(r.fullName), setAddRepo(false))} onClose={() => setAddRepo(false)} />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </span>
           </>
         )}
@@ -495,12 +511,23 @@ export function ThreadHeader({
         )}
 
         <span className="ml-auto flex shrink-0 items-center gap-2 pl-3 whitespace-nowrap">
-          {activity && (
-            <span className="text-live hidden items-center gap-1.5 text-micro font-medium sm:inline-flex">
-              <span className="bg-live breathe size-1.5 rounded-full" aria-hidden />
-              <span className="max-w-[10rem] truncate lg:max-w-[16rem]">{activity}</span>
-            </span>
-          )}
+          <AnimatePresence initial={false}>
+            {activity && (
+              <motion.span
+                key="activity"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+                className="text-live hidden items-center gap-1.5 text-micro font-medium sm:inline-flex"
+              >
+                <span className="bg-live breathe size-1.5 rounded-full" aria-hidden />
+                <Swap state={activity} mode="popLayout" className="max-w-[10rem] truncate lg:max-w-[16rem]">
+                  {activity}
+                </Swap>
+              </motion.span>
+            )}
+          </AnimatePresence>
           {/* "finished 2m ago" → "asked just now": the meta changes with the state, so it crossfades with it. */}
           <Swap state={when ?? ""} className="hidden items-center sm:flex">
             {when && <span className={`${box.stalled ? "text-destructive" : "text-faint"} text-micro`}>{when}</span>}

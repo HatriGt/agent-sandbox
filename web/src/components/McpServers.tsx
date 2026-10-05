@@ -45,6 +45,15 @@ export function McpServers() {
   const [filter, setFilter] = React.useState<Filter>("all");
   const [query, setQuery] = React.useState("");
   const [editing, setEditing] = React.useState<{ server?: McpServerView } | null>(null);
+  // Keep the last draft so <SheetContent> stays mounted through the close animation (see motion contract);
+  // `seq` bumps per open so each open gets a fresh ServerSheet instead of a stale draft.
+  const lastEditing = React.useRef<{ seq: number; server?: McpServerView } | null>(null);
+  const openedRef = React.useRef<object | null>(null);
+  if (editing && openedRef.current !== editing) {
+    openedRef.current = editing;
+    lastEditing.current = { seq: (lastEditing.current?.seq ?? 0) + 1, server: editing.server };
+  }
+  const shown = lastEditing.current;
   const [pasting, setPasting] = React.useState(false);
   const [health, setHealth] = React.useState<Record<string, Health>>({});
   const [testing, setTesting] = React.useState<Record<string, boolean>>({});
@@ -157,12 +166,12 @@ export function McpServers() {
           <div className="bg-card overflow-hidden rounded-xl border shadow-e1">
             <div className="bg-muted/30 flex flex-wrap items-center gap-2 border-b px-3 py-2.5 sm:px-4">
               <div role="radiogroup" aria-label="Filter servers" className="flex flex-wrap items-center gap-1.5">
-                <FilterChip active={filter === "all"} onClick={() => setFilter("all")} label="All" count={counts.all} />
-                <FilterChip active={filter === "on"} onClick={() => setFilter("on")} label="On" count={counts.on} tone="live" />
-                <FilterChip active={filter === "off"} onClick={() => setFilter("off")} label="Off" count={counts.off} />
+                <FilterChip group="mcp" active={filter === "all"} onClick={() => setFilter("all")} label="All" count={counts.all} />
+                <FilterChip group="mcp" active={filter === "on"} onClick={() => setFilter("on")} label="On" count={counts.on} tone="live" />
+                <FilterChip group="mcp" active={filter === "off"} onClick={() => setFilter("off")} label="Off" count={counts.off} />
                 <span className="bg-border mx-0.5 hidden h-4 w-px sm:block" aria-hidden />
-                <FilterChip active={filter === "stdio"} onClick={() => setFilter("stdio")} label="Command" count={counts.stdio} className="hidden sm:flex" />
-                <FilterChip active={filter === "remote"} onClick={() => setFilter("remote")} label="Remote" count={counts.remote} className="hidden sm:flex" />
+                <FilterChip group="mcp" active={filter === "stdio"} onClick={() => setFilter("stdio")} label="Command" count={counts.stdio} className="hidden sm:flex" />
+                <FilterChip group="mcp" active={filter === "remote"} onClick={() => setFilter("remote")} label="Remote" count={counts.remote} className="hidden sm:flex" />
               </div>
               <label className={cn(fieldClass, "focus-within:border-ring focus-within:ring-ring/40 ml-auto flex h-8 w-full items-center gap-1.5 rounded-full px-2.5 focus-within:ring-2 sm:w-auto")}>
                 <Search className="text-muted-foreground size-3.5 shrink-0" aria-hidden />
@@ -212,7 +221,7 @@ export function McpServers() {
       </Swap>
 
       <Sheet open={editing !== null} onOpenChange={(o) => !o && setEditing(null)}>
-        {editing && <ServerSheet initial={editing.server} health={editing.server ? health[editing.server.name] : undefined} testing={editing.server ? !!testing[editing.server.name] : false} onTest={test} onMutate={mutate} onClose={() => setEditing(null)} />}
+        {shown && <ServerSheet key={shown.seq} initial={shown.server} health={shown.server ? health[shown.server.name] : undefined} testing={shown.server ? !!testing[shown.server.name] : false} onTest={test} onMutate={mutate} onClose={() => setEditing(null)} />}
       </Sheet>
       <Dialog open={pasting} onOpenChange={setPasting}>
         {pasting && <PasteDialog onMutate={mutate} onClose={() => setPasting(false)} />}

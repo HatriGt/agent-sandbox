@@ -14,7 +14,7 @@ function DropdownMenuContent({ className, ...props }: React.ComponentProps<typeo
         collisionPadding={8}
         className={cn(
           "bg-popover text-popover-foreground z-50 min-w-[13rem] rounded-xl border p-1.5 shadow-e3 outline-none",
-          "data-[state=open]:animate-in data-[state=open]:fade-in-0 origin-(--radix-dropdown-menu-content-transform-origin) data-[state=open]:zoom-in-95 data-[state=open]:duration-200 data-[state=open]:ease-[cubic-bezier(0.34,1.3,0.64,1)] data-[state=closed]:animate-out data-[state=closed]:zoom-out-95 data-[state=closed]:duration-120 data-[state=closed]:fade-out-0",
+          "data-[state=open]:animate-in data-[state=open]:fade-in-0 origin-(--radix-dropdown-menu-content-transform-origin) data-[state=open]:zoom-in-95 data-[state=open]:duration-150 data-[state=open]:ease-[cubic-bezier(0.22,1,0.36,1)] data-[state=closed]:animate-out data-[state=closed]:zoom-out-[0.97] data-[state=closed]:duration-100 data-[state=closed]:fade-out-0",
           className
         )}
         {...props}
@@ -27,8 +27,8 @@ function DropdownMenuItem({ className, destructive, ...props }: React.ComponentP
   return (
     <DM.Item
       className={cn(
-        "flex h-8 cursor-pointer items-center gap-2.5 rounded-md px-2 text-meta outline-none select-none",
-        "data-[highlighted]:bg-accent data-[disabled]:pointer-events-none data-[disabled]:opacity-40",
+        "flex h-8 cursor-pointer items-center gap-2.5 rounded-md px-2 text-meta outline-none select-none transition-[background-color,transform] duration-100 ease-[cubic-bezier(0.22,1,0.36,1)]",
+        "data-[highlighted]:bg-accent active:scale-[0.985] data-[disabled]:pointer-events-none data-[disabled]:opacity-40",
         "[&_svg]:text-muted-foreground [&_svg]:size-4 [&_svg]:shrink-0",
         destructive && "text-destructive data-[highlighted]:bg-destructive/10 [&_svg]:text-destructive",
         className

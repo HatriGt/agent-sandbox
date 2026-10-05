@@ -12,6 +12,8 @@ import { prefetchWatch } from "@/hooks/useWatchStream";
 import { Button } from "@/components/ui/button";
 import { ArmButton } from "@/components/ui/arm-button";
 import { Swap } from "@/components/ui/swap";
+import { Collapse } from "@/components/ui/collapse";
+import { FilterChip } from "@/components/ui/filter-chip";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { UsageMeter } from "@/components/ui/usage-meter";
 import { StateStamp } from "@/components/ui/stamp";
@@ -86,6 +88,7 @@ export function Sandboxes({
 
   const waiting = boxes.filter((b) => b.runState === "waiting" && !b.leaving);
 
+  const sleepable = boxes.filter((b) => displayState(b) === "sleeping" && !b.kept && !b.leaving);
   return (
     <div className="h-full min-w-0 overflow-y-auto">
       <div className="mx-auto max-w-[1100px] px-5 py-7 md:px-8 md:py-9">
@@ -96,7 +99,7 @@ export function Sandboxes({
           </Button>
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
             <h1 className="text-foreground font-serif text-h1 font-normal tracking-[-0.01em]">Fleet</h1>
-            {loading ? <Bar className="h-3 w-56" /> : <Capacity boxes={boxes} capacity={lifecycle.capacity} />}
+            <Swap state={loading ? "loading" : "capacity"}>{loading ? <Bar className="h-3 w-56" /> : <Capacity boxes={boxes} capacity={lifecycle.capacity} />}</Swap>
           </div>
           <p className="text-muted-foreground mt-1 text-meta">
             Runs up to {lifecycle.maxDurationSec ? fmtDuration(lifecycle.maxDurationSec) : "the cap"} · sleeps after{" "}
@@ -104,7 +107,7 @@ export function Sandboxes({
           </p>
         </header>
 
-        {waiting.length > 0 && filter === "all" && !q && (
+        <Collapse open={waiting.length > 0 && filter === "all" && !q}>
           <section className="mb-7" aria-labelledby="queue">
             <h2 id="queue" className="text-attention-text mb-2.5 flex items-center gap-1.5 text-meta font-semibold">
               <Pause className="size-3.5" strokeWidth={2.5} aria-hidden />
@@ -143,18 +146,18 @@ export function Sandboxes({
               </AnimatePresence>
             </ul>
           </section>
-        )}
+        </Collapse>
 
         <section aria-labelledby="all">
           {/* Toolbar: the counts are the filter; search narrows within it. */}
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <div role="radiogroup" aria-label="Filter machines" className="flex flex-wrap items-center gap-1">
-              <FilterChip active={filter === "all"} onClick={() => setFilter("all")} label="All" count={boxes.filter((b) => !b.leaving).length} />
-              <FilterChip active={filter === "attention"} onClick={() => setFilter("attention")} label="Needs you" count={counts.attention} tone="attention" />
-              <FilterChip active={filter === "working"} onClick={() => setFilter("working")} label="Working" count={counts.working} tone="live" />
-              <FilterChip active={filter === "sleeping"} onClick={() => setFilter("sleeping")} label="Sleeping" count={counts.sleeping} tone="sleep" />
-              <FilterChip active={filter === "done"} onClick={() => setFilter("done")} label="Done" count={counts.done} />
-              <FilterChip active={filter === "warm"} onClick={() => setFilter("warm")} label="Warm" count={counts.warm} />
+              <FilterChip group="fleet" active={filter === "all"} onClick={() => setFilter("all")} label="All" count={boxes.filter((b) => !b.leaving).length} />
+              <FilterChip group="fleet" active={filter === "attention"} onClick={() => setFilter("attention")} label="Needs you" count={counts.attention} tone="attention" />
+              <FilterChip group="fleet" active={filter === "working"} onClick={() => setFilter("working")} label="Working" count={counts.working} tone="live" />
+              <FilterChip group="fleet" active={filter === "sleeping"} onClick={() => setFilter("sleeping")} label="Sleeping" count={counts.sleeping} tone="sleep" />
+              <FilterChip group="fleet" active={filter === "done"} onClick={() => setFilter("done")} label="Done" count={counts.done} />
+              <FilterChip group="fleet" active={filter === "warm"} onClick={() => setFilter("warm")} label="Warm" count={counts.warm} />
             </div>
             <div className="ml-auto flex items-center gap-2">
               <label className="bg-card focus-within:ring-ring flex h-8 items-center gap-1.5 rounded-md border px-2 transition-shadow focus-within:ring-2">
@@ -167,14 +170,18 @@ export function Sandboxes({
                   className="text-foreground placeholder:text-muted-foreground w-32 bg-transparent text-meta outline-none transition-[width] focus:w-48"
                 />
                 {query && (
-                  <button type="button" onClick={() => setQuery("")} aria-label="Clear search" className="text-muted-foreground hover:text-foreground cursor-pointer">
+                  <button type="button" onClick={() => setQuery("")} aria-label="Clear search" className="text-muted-foreground hover:text-foreground hover:bg-muted pop-in cursor-pointer rounded p-0.5">
                     <X className="size-3.5" />
                   </button>
                 )}
               </label>
-              {counts.sleeping > 0 && (
-                <DestroySleeping boxes={boxes.filter((b) => displayState(b) === "sleeping" && !b.kept && !b.leaving)} onDestroyed={onDestroyed} />
-              )}
+              <AnimatePresence initial={false}>
+                {sleepable.length > 0 && (
+                  <motion.span key="destroy-sleeping" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.15, ease: [0.22, 1, 0.36, 1] }} className="inline-flex">
+                    <DestroySleeping boxes={sleepable} onDestroyed={onDestroyed} />
+                  </motion.span>
+                )}
+              </AnimatePresence>
             </div>
           </div>
 
@@ -227,55 +234,6 @@ export function Sandboxes({
         </section>
       </div>
     </div>
-  );
-}
-
-function FilterChip({
-  active,
-  onClick,
-  label,
-  count,
-  tone,
-}: {
-  active: boolean;
-  onClick: () => void;
-  label: string;
-  count: number;
-  tone?: "attention" | "live" | "sleep";
-}) {
-  return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={active}
-      onClick={onClick}
-      disabled={count === 0 && !active}
-      className={cn(
-        "flex h-8 cursor-pointer items-center gap-1.5 rounded-full border px-3 text-meta font-medium transition-[background-color,border-color,color,transform] duration-150",
-        "disabled:cursor-default disabled:opacity-45",
-        active
-          ? "border-foreground/20 bg-foreground text-background"
-          : "bg-card text-muted-foreground hover:text-foreground hover:border-line-strong active:scale-[0.97]"
-      )}
-    >
-      {label}
-      <span
-        className={cn(
-          "tabular rounded-full px-1.5 py-px text-micro font-semibold",
-          active
-            ? "bg-background/20 text-background"
-            : tone === "attention" && count > 0
-              ? "bg-attention/20 text-attention-text"
-              : tone === "live" && count > 0
-                ? "bg-live/10 text-live"
-                : tone === "sleep" && count > 0
-                  ? "bg-sleep/10 text-sleep"
-                  : "bg-muted text-muted-foreground"
-        )}
-      >
-        {count}
-      </span>
-    </button>
   );
 }
 
@@ -365,7 +323,7 @@ function MachineRow({
       exit={{ opacity: 0, height: 0 }}
       // First paint of the table: rows stagger in (30 ms apart, capped at 12); afterwards no delay.
       transition={{ type: "spring", stiffness: 500, damping: 40, mass: 0.8, delay }}
-      className="border-b last:border-b-0"
+      className="overflow-hidden border-b last:border-b-0"
     >
       <AnimatePresence initial={false}>
         {head && (
@@ -474,8 +432,8 @@ function MachineRow({
                   </span>
                   <span className="bg-border block h-1 w-28 overflow-hidden rounded-full">
                     <span
-                      className={cn("block h-full rounded-full transition-[width] duration-700", deadline.kind === "idle" || deadline.kind === "sleep" ? "bg-sleep" : "bg-live")}
-                      style={{ width: `${Math.round((deadline.fraction ?? 0) * 100)}%` }}
+                      className={cn("block h-full w-full origin-left rounded-full transition-transform duration-700 ease-linear", deadline.kind === "idle" || deadline.kind === "sleep" ? "bg-sleep" : "bg-live")}
+                      style={{ transform: `scaleX(${Math.min(1, Math.max(0, deadline.fraction ?? 0))})` }}
                     />
                   </span>
                 </div>
@@ -517,7 +475,6 @@ function MachineRow({
 
 /** Bulk clean-up: destroy every sleeping, non-kept sandbox (two clicks). */
 function DestroySleeping({ boxes, onDestroyed }: { boxes: StableBox[]; onDestroyed: (name: string) => void }) {
-  if (!boxes.length) return null;
   const run = async () => {
     let ok = 0;
     for (const b of boxes) {

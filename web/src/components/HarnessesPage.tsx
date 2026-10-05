@@ -1,4 +1,5 @@
 import * as React from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { ArrowLeft, Copy, Download, GitCompare, Layers, Pencil, Plus, ShieldAlert, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { api, type AgentChoice, type HarnessView, type ProviderView, type SkillView } from "@/lib/api";
@@ -6,6 +7,9 @@ import { cn } from "@/lib/utils";
 import { fmtAgo } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { AnimatedTabs, TabPanel } from "@/components/ui/animated-tabs";
+import { Swap } from "@/components/ui/swap";
+import { Collapse } from "@/components/ui/collapse";
+import { Bar } from "@/components/thread/Skeletons";
 import { Panel, SettingsSection } from "@/components/ui/settings";
 import { EmptyState } from "@/components/ui/empty-state";
 import { DriverBadges } from "@/components/DriverPicker";
@@ -100,18 +104,26 @@ export function HarnessesPage({ onBack, onOpenBox }: { onBack: () => void; onOpe
             <h1 className="text-foreground font-serif text-h1 font-normal tracking-[-0.01em]">Harnesses</h1>
             <p className="text-muted-foreground mt-1 text-meta">How your agents work: driver, model, skills, rules and egress, saved as one pick.</p>
           </div>
-          {tab === "saved" && (
-            <div className="flex shrink-0 flex-wrap items-center gap-2">
-              <Button variant="outline" size="sm" onClick={() => setImporting(true)}>
-                <Upload className="size-4" />
-                Import
-              </Button>
-              <Button size="sm" onClick={() => setEditing(emptyDraft())}>
-                <Plus className="size-4" />
-                New harness
-              </Button>
-            </div>
-          )}
+          <AnimatePresence initial={false}>
+            {tab === "saved" && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.15, ease: [0.22, 1, 0.36, 1] }}
+                className="flex shrink-0 flex-wrap items-center gap-2"
+              >
+                <Button variant="outline" size="sm" onClick={() => setImporting(true)}>
+                  <Upload className="size-4" />
+                  Import
+                </Button>
+                <Button size="sm" onClick={() => setEditing(emptyDraft())}>
+                  <Plus className="size-4" />
+                  New harness
+                </Button>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </header>
         <div className="-mx-1 mb-6 overflow-x-auto px-1 pb-1">
           <AnimatedTabs
@@ -129,7 +141,7 @@ export function HarnessesPage({ onBack, onOpenBox }: { onBack: () => void; onOpe
         </div>
         <TabPanel value={tab} order={ORDER} idBase="harness-tabs">
           {tab === "saved" ? (
-            <div className="flex flex-col gap-10">
+            <Swap state={editing ? "editor" : importing ? "import" : "list"} className="flex flex-col gap-10">
               {editing ? (
                 <HarnessEditor
                   draft={editing}
@@ -172,8 +184,8 @@ export function HarnessesPage({ onBack, onOpenBox }: { onBack: () => void; onOpe
                       <Panel className="divide-y">
                         {[0, 1].map((i) => (
                           <div key={i} className="h-[4.25rem] px-4 py-3">
-                            <div className="bg-muted h-3.5 w-40 animate-pulse rounded" />
-                            <div className="bg-muted mt-2 h-3 w-64 animate-pulse rounded" />
+                            <Bar className="h-3.5 w-40" />
+                            <Bar className="mt-2 h-3 w-64" />
                           </div>
                         ))}
                       </Panel>
@@ -229,7 +241,7 @@ export function HarnessesPage({ onBack, onOpenBox }: { onBack: () => void; onOpe
                       ) : undefined
                     }
                   >
-                    {comparing && (
+                    <Collapse open={comparing}>
                       <CompareLauncher
                         harnesses={list.filter((h) => !h.needsReview)}
                         onCancel={() => setComparing(false)}
@@ -238,7 +250,7 @@ export function HarnessesPage({ onBack, onOpenBox }: { onBack: () => void; onOpe
                           setCompareRefresh((n) => n + 1);
                         }}
                       />
-                    )}
+                    </Collapse>
                     <CompareList refresh={compareRefresh} onOpenBox={onOpenBox} canStart={list.filter((h) => !h.needsReview).length >= 2} />
                   </SettingsSection>
                   <SettingsSection id="attempts" title="Attempts" purpose="Tasks run several ways in parallel. The best attempt gets the PR; you can pick another one instead.">
@@ -246,7 +258,7 @@ export function HarnessesPage({ onBack, onOpenBox }: { onBack: () => void; onOpe
                   </SettingsSection>
                 </>
               )}
-            </div>
+            </Swap>
           ) : tab === "drivers" ? (
             <SettingsSection id="drivers" title="Drivers" purpose="The coding agent a run starts. A harness can pin one; otherwise your default is used.">
               <Panel className="divide-y">

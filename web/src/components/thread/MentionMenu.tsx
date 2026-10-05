@@ -172,16 +172,18 @@ export function MentionMenu({
 }
 
 /**
- * The menus open above the composer, so they grow out of their bottom-left corner (where the `@` or
- * `/` was typed) and fold back into it on close. Reduced motion keeps only the fade.
+ * The menus grow out of the corner where the `@` or `/` was typed and fold back into it on close:
+ * bottom-left when they open above the composer, top-left when they drop below. Reduced motion keeps
+ * only the fade.
  */
-export function menuMotion(still: boolean | null) {
+export function menuMotion(still: boolean | null, side: "top" | "bottom" = "top") {
+  const y = side === "bottom" ? -4 : 4;
   return {
-    initial: still ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 4 },
+    initial: still ? { opacity: 0 } : { opacity: 0, scale: 0.96, y },
     animate: { opacity: 1, scale: 1, y: 0 },
-    exit: still ? { opacity: 0 } : { opacity: 0, scale: 0.96, y: 4 },
+    exit: still ? { opacity: 0 } : { opacity: 0, scale: 0.96, y },
     transition: { duration: 0.16, ease: [0.22, 1, 0.36, 1] as const },
-    style: { transformOrigin: "0% 100%" },
+    style: { transformOrigin: side === "bottom" ? "0% 0%" : "0% 100%" },
   };
 }
 

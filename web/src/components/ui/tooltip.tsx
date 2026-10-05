@@ -58,6 +58,8 @@ function TooltipContent({
           "data-[side=bottom]:slide-in-from-top-0.5 data-[side=left]:slide-in-from-right-0.5 data-[side=right]:slide-in-from-left-0.5 data-[side=top]:slide-in-from-bottom-0.5",
           "motion-reduce:data-[side=bottom]:slide-in-from-top-0 motion-reduce:data-[side=left]:slide-in-from-right-0 motion-reduce:data-[side=right]:slide-in-from-left-0 motion-reduce:data-[side=top]:slide-in-from-bottom-0",
           "data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:duration-100",
+          "data-[state=closed]:data-[side=bottom]:slide-out-to-top-0.5 data-[state=closed]:data-[side=left]:slide-out-to-right-0.5 data-[state=closed]:data-[side=right]:slide-out-to-left-0.5 data-[state=closed]:data-[side=top]:slide-out-to-bottom-0.5",
+          "motion-reduce:data-[state=closed]:data-[side=bottom]:slide-out-to-top-0 motion-reduce:data-[state=closed]:data-[side=left]:slide-out-to-right-0 motion-reduce:data-[state=closed]:data-[side=right]:slide-out-to-left-0 motion-reduce:data-[state=closed]:data-[side=top]:slide-out-to-bottom-0",
           className
         )}
         {...props}

@@ -210,7 +210,28 @@ One idea — liveness — expressed consistently: `breathe` on working dots, the
 working dots, the `sheen` on an occupied capacity slot. Structure moves with purpose only: machine
 rows `layout`-animate to their new triage position when a state flips; the needs-you card grows in
 and out; panes cross-fade in 160ms; the Hub's three blocks stagger in once. Loading is a `shimmer`
-skeleton shaped like the real thread. Everything collapses under `prefers-reduced-motion`.
+skeleton shaped like the real thread. Everything collapses under `prefers-reduced-motion`
+(`MotionConfig reducedMotion="user"` + the global CSS rule; dialogs and sheets keep a 120ms fade).
+
+**Nothing cuts.** Every state change goes through one of the shared primitives, never a bare
+conditional render:
+
+| Change | Primitive |
+|---|---|
+| skeleton → content, label A → B, tab panel, view switch | `ui/swap` `Swap` (`mode="popLayout"` for anything that ticks) |
+| a section/notice/sub-form appearing | `ui/collapse` `Collapse` (height auto + fade) |
+| rows entering / leaving / re-sorting | `AnimatePresence initial={false}` + `motion.li|tr layout="position"` with an opacity(+height) exit |
+| two icons sharing a slot (Sun↔Moon, Bell, Copy↔Check, spinner↔icon) | `ui/icon-swap` `IconSwap` (scale .6 + 2px blur crossfade, `rotate` for toggles) |
+| a count that changes | `ui/number-ticker` `NumberTicker from={value}` (tabular, springs) |
+| a filter radiogroup | `ui/filter-chip` `FilterChip group="…"` — the ink fill slides via `layoutId` |
+| a busy button | `<Button loading>` — the leading icon crossfades to the spinner, width never shifts |
+| a popover | scale .97 + 4px from its trigger side (`menuMotion(still, side)`) |
+| a Radix Sheet with conditional content | keep the last draft mounted while closing — `{editing && <SheetContent/>}` kills the exit |
+
+The interaction grammar (150ms colour/border/shadow/transform ease, 0.985 press, 0.97 on filled
+buttons) lives in `@layer base` so a component's own `transition-*`/`duration-*` utilities still
+win; it transitions `translate`/`scale`/`rotate` too, so Tailwind hover lifts ease rather than snap.
+Elements that own their own press add `.no-press`; links styled as buttons add `.press`.
 
 ## Instant switching
 

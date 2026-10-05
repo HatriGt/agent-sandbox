@@ -13,6 +13,7 @@ import { ArmButton } from "@/components/ui/arm-button";
 import { Collapse } from "@/components/ui/collapse";
 import { StaggerItem, Swap } from "@/components/ui/swap";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { FilterChip } from "@/components/ui/filter-chip";
 import { DigestCard } from "@/components/thread/DigestCard";
 import { OutcomeCard, outcomeFacts } from "@/components/thread/OutcomeCard";
 import { ReviewAllPane } from "@/components/thread/ReviewAll";
@@ -245,9 +246,9 @@ export function History({ onBack, onAgain }: { onBack: () => void; onAgain: () =
         </div>
 
         <div role="radiogroup" aria-label="Filter runs" className="mb-3 flex flex-wrap items-center gap-1">
-          <FilterChip active={filter === "all"} onClick={() => setFilter("all")} label="All" count={counts.all} />
-          <FilterChip active={filter === "done"} onClick={() => setFilter("done")} label="Done" count={counts.done} tone="ok" />
-          <FilterChip active={filter === "failed"} onClick={() => setFilter("failed")} label="Failed" count={counts.failed} tone="destructive" />
+          <FilterChip group="history" active={filter === "all"} onClick={() => setFilter("all")} label="All" count={counts.all} />
+          <FilterChip group="history" active={filter === "done"} onClick={() => setFilter("done")} label="Done" count={counts.done} tone="ok" />
+          <FilterChip group="history" active={filter === "failed"} onClick={() => setFilter("failed")} label="Failed" count={counts.failed} tone="destructive" />
         </div>
 
         <Swap state={error ? "error" : rows === null ? "loading" : !rows.length ? "empty" : !visible.length ? `none-${filter}` : "list"}>
@@ -332,39 +333,6 @@ export function History({ onBack, onAgain }: { onBack: () => void; onAgain: () =
         </Swap>
       </div>
     </div>
-  );
-}
-
-function FilterChip({ active, onClick, label, count, tone }: { active: boolean; onClick: () => void; label: string; count: number; tone?: "ok" | "destructive" }) {
-  return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={active}
-      onClick={onClick}
-      disabled={count === 0 && !active}
-      className={cn(
-        "flex h-8 cursor-pointer items-center gap-1.5 rounded-full border px-3 text-meta font-medium transition-[background-color,border-color,color,transform] duration-150",
-        "disabled:cursor-default disabled:opacity-45",
-        active ? "border-foreground/20 bg-foreground text-background" : "bg-card text-muted-foreground hover:text-foreground hover:border-line-strong active:scale-[0.97]"
-      )}
-    >
-      {label}
-      <span
-        className={cn(
-          "tabular rounded-full px-1.5 py-px text-micro font-semibold",
-          active
-            ? "bg-background/20 text-background"
-            : tone === "destructive" && count > 0
-              ? "bg-destructive/10 text-destructive"
-              : tone === "ok" && count > 0
-                ? "bg-ok/10 text-ok"
-                : "bg-muted text-muted-foreground"
-        )}
-      >
-        {count}
-      </span>
-    </button>
   );
 }
 

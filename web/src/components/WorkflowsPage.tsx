@@ -1,4 +1,5 @@
 import * as React from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { Check, Copy, Github, ListChecks, Pencil, Plus, ShieldAlert, Terminal, Trash2, Wand2, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { api, type Automation, type WorkflowStep, type WorkflowView } from "@/lib/api";
@@ -9,6 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/field";
 import { Panel, PanelFooter, SettingsSection } from "@/components/ui/settings";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Swap } from "@/components/ui/swap";
+import { Bar } from "@/components/thread/Skeletons";
 
 const EXAMPLE = `name: ship-feature
 description: implement, prove it with tests, then review your own diff
@@ -131,20 +134,28 @@ export function WorkflowsPage({ onAutomate }: { onAutomate: (w: WorkflowView) =>
           <p className="text-muted-foreground min-w-0 flex-1 text-meta">
             <span className="text-foreground">How</span> a task gets done: agent turns and command checks, in order. Failed checks go back to the agent. Use one from the composer, or let an automation run it.
           </p>
-          {!editing && !importing && (
-            <div className="flex shrink-0 flex-wrap items-center gap-2">
-              <Button variant="outline" size="sm" onClick={() => setImporting(true)}>
-                <Github className="size-4" />
-                From a repo
-              </Button>
-              <Button size="sm" onClick={() => setEditing({ yaml: EXAMPLE })}>
-                <Plus className="size-4" />
-                New playbook
-              </Button>
-            </div>
-          )}
+          <AnimatePresence initial={false}>
+            {!editing && !importing && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.15, ease: [0.22, 1, 0.36, 1] }}
+                className="flex shrink-0 flex-wrap items-center gap-2"
+              >
+                <Button variant="outline" size="sm" onClick={() => setImporting(true)}>
+                  <Github className="size-4" />
+                  From a repo
+                </Button>
+                <Button size="sm" onClick={() => setEditing({ yaml: EXAMPLE })}>
+                  <Plus className="size-4" />
+                  New playbook
+                </Button>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </header>
-        <div className="flex flex-col gap-10">
+        <Swap state={editing ? "editor" : importing ? "import" : "list"} className="flex flex-col gap-10">
           {editing ? (
             <WorkflowEditor
               initial={editing.yaml}
@@ -173,8 +184,8 @@ export function WorkflowsPage({ onAutomate }: { onAutomate: (w: WorkflowView) =>
                   <Panel className="divide-y">
                     {[0, 1].map((i) => (
                       <div key={i} className="h-[4.25rem] px-4 py-3">
-                        <div className="bg-muted h-3.5 w-40 animate-pulse rounded" />
-                        <div className="bg-muted mt-2 h-3 w-64 animate-pulse rounded" />
+                        <Bar className="h-3.5 w-40" />
+                        <Bar className="mt-2 h-3 w-64" />
                       </div>
                     ))}
                   </Panel>
@@ -222,7 +233,7 @@ export function WorkflowsPage({ onAutomate }: { onAutomate: (w: WorkflowView) =>
               </Panel>
             </>
           )}
-        </div>
+        </Swap>
       </div>
     </div>
   );
@@ -272,20 +283,29 @@ function PlaybookTable({
           </tr>
         </thead>
         <tbody>
-          {items.map((w) => (
-            <PlaybookTr key={w.id} w={w} used={usedBy(w.id)} onEdit={() => onEdit(w)} onDelete={() => onDelete(w)} onAutomate={() => onAutomate(w)} />
-          ))}
+          <AnimatePresence initial={false}>
+            {items.map((w, i) => (
+              <PlaybookTr key={w.id} index={i} w={w} used={usedBy(w.id)} onEdit={() => onEdit(w)} onDelete={() => onDelete(w)} onAutomate={() => onAutomate(w)} />
+            ))}
+          </AnimatePresence>
         </tbody>
       </table>
     </div>
   );
 }
 
-function PlaybookTr({ w, used, onEdit, onDelete, onAutomate }: { w: WorkflowView; used: Automation[]; onEdit: () => void; onDelete: () => void; onAutomate: () => void }) {
+function PlaybookTr({ w, index, used, onEdit, onDelete, onAutomate }: { w: WorkflowView; index: number; used: Automation[]; onEdit: () => void; onDelete: () => void; onAutomate: () => void }) {
   const [armed, setArmed] = React.useState(false);
   const checks = w.steps.filter((s) => s.kind === "check").length;
   return (
-    <tr className="hover:bg-muted/50 relative border-b transition-colors last:border-b-0">
+    <motion.tr
+      layout="position"
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1], delay: Math.min(index, 12) * 0.024 }}
+      className="hover:bg-muted/50 relative border-b transition-colors duration-150 last:border-b-0"
+    >
       <td className={TD}>
         <button type="button" onClick={onEdit} className="text-foreground block max-w-full cursor-pointer truncate text-left text-meta font-medium after:absolute after:inset-0 focus-visible:outline-none" title={w.name}>
           {w.name}
@@ -347,7 +367,7 @@ function PlaybookTr({ w, used, onEdit, onDelete, onAutomate }: { w: WorkflowView
           </Button>
         </span>
       </td>
-    </tr>
+    </motion.tr>
   );
 }
 

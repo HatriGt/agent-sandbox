@@ -70,7 +70,7 @@ export function SkillMenu({
   return (
     <AnimatePresence propagate>
       {empty && (
-        <motion.div key="skill-empty" role="status" {...menuMotion(still)} className={cn(SHELL, side === "top" ? "bottom-full mb-2" : "top-full mt-2")}>
+        <motion.div key="skill-empty" role="status" {...menuMotion(still, side)} className={cn(SHELL, side === "top" ? "bottom-full mb-2" : "top-full mt-2")}>
           <SkillsEmpty onNavigate={onClose} />
         </motion.div>
       )}
@@ -79,7 +79,7 @@ export function SkillMenu({
           key="skill-menu"
           role="listbox"
           aria-label="Skills"
-          {...menuMotion(still)}
+          {...menuMotion(still, side)}
           className={cn(SHELL, "max-h-72 overflow-y-auto p-1", side === "top" ? "bottom-full mb-2" : "top-full mt-2")}
     >
       <div className="text-muted-foreground flex items-center gap-2 px-2.5 py-1.5 text-micro">

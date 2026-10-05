@@ -32,6 +32,9 @@ import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Thread, type Aside } from "@/components/thread/Thread";
 import { BootingThread } from "@/components/thread/BootingThread";
 import { Bar } from "@/components/thread/Skeletons";
+import { Collapse } from "@/components/ui/collapse";
+import { IconSwap } from "@/components/ui/icon-swap";
+import { NumberTicker } from "@/components/ui/number-ticker";
 import { cn } from "@/lib/utils";
 
 // Secondary pages are code-split: the thread — the page you live in — never pays for them.
@@ -556,17 +559,19 @@ export default function App() {
           {lifecycle.capacity > 0 ? (
             <Capacity boxes={boxes} capacity={lifecycle.capacity} size="sm" />
           ) : (
-            runs_.length > 0 && <span className="text-muted-foreground tabular text-micro">{runs_.length}</span>
+            runs_.length > 0 && <NumberTicker value={runs_.length} from={runs_.length} className="text-muted-foreground tabular text-micro" />
           )}
         </span>
       </div>
 
-      {error && !live && <ConnectionNotice error={error} stale={!!data} />}
+      <Collapse open={!!error && !live}>
+        <ConnectionNotice error={error ?? ""} stale={!!data} />
+      </Collapse>
 
       <MachineList boxes={runs_} pending={pending} selected={view === "box" ? selected : null} loading={loading} offline={!!error && !live && !data} onSelect={open} sleepTtlSec={lifecycle.sleepTtlSec} />
 
       {/* Warm capacity is a fact about the fleet, not a run: one quiet line, not a list row. */}
-      {warmReady > 0 && (
+      <Collapse open={warmReady > 0}>
         <button
           type="button"
           onClick={showFleet}
@@ -575,7 +580,7 @@ export default function App() {
           <Flame className="text-ok size-3.5 shrink-0" aria-hidden />
           {warmReady === 1 ? "1 warm machine ready" : `${warmReady} warm machines ready`} — a new task starts in seconds
         </button>
-      )}
+      </Collapse>
 
       <div className="flex flex-col gap-0.5 border-t px-2 py-2">
         <NavItem active={view === "fleet"} flash={flash === "fleet"} onClick={showFleet} icon={<LayoutGrid />} label="Fleet view" badge={boxes.length || undefined} shortcut="g f" />
@@ -620,7 +625,7 @@ export default function App() {
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button variant="ghost" size="icon-xs" onClick={() => void notify.toggle()} aria-pressed={notify.enabled} aria-label="Desktop notifications">
-                    {notify.enabled ? <Bell className="text-live" /> : <BellOff />}
+                    <IconSwap state={notify.enabled} rotate>{notify.enabled ? <Bell className="text-live" /> : <BellOff />}</IconSwap>
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="top">
@@ -651,7 +656,7 @@ export default function App() {
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button variant="ghost" size="icon-xs" onClick={() => setDark(!dark)} aria-label={dark ? "Switch to light theme" : "Switch to dark theme"}>
-                  {dark ? <Moon /> : <Sun />}
+                  <IconSwap state={dark} rotate>{dark ? <Moon /> : <Sun />}</IconSwap>
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="top">{dark ? "Light theme" : "Dark theme"}</TooltipContent>
@@ -675,9 +680,9 @@ export default function App() {
   );
   const healthLine = data ? (
     <span className="tabular truncate">
-      {runs_.length} {runs_.length === 1 ? "run" : "runs"}
-      {working > 0 && <> · {working} working</>}
-      {waiting.length > 0 && <span className="text-attention-text"> · {waiting.length} waiting</span>}
+      <NumberTicker value={runs_.length} from={runs_.length} /> {runs_.length === 1 ? "run" : "runs"}
+      {working > 0 && <> · <NumberTicker value={working} from={working} /> working</>}
+      {waiting.length > 0 && <span className="text-attention-text"> · <NumberTicker value={waiting.length} from={waiting.length} /> waiting</span>}
     </span>
   ) : error ? (
     <span>offline · retrying</span>
@@ -709,7 +714,7 @@ export default function App() {
                   <Logo className="size-[18px]" />
                   {/* Collapsed: the brand line is gone, so the tile carries the one fact it held — attention or offline. */}
                   {collapsed && health !== "ok" && (
-                    <span className={cn("ring-sidebar absolute -top-0.5 -right-0.5 size-2 rounded-full ring-2", health === "attention" ? "bg-attention" : "bg-muted-foreground breathe")} aria-hidden />
+                    <span className={cn("ring-sidebar pop-in absolute -top-0.5 -right-0.5 size-2 rounded-full ring-2", health === "attention" ? "bg-attention" : "bg-muted-foreground breathe")} aria-hidden />
                   )}
                 </Link>
               </TooltipTrigger>
@@ -767,7 +772,7 @@ export default function App() {
               </span>
               <div className="mt-auto flex flex-col items-center gap-1.5">
                 <RailIcon active={view === "account" || view === "connect" || view === "admin" || view === "welcome"} onClick={showAccount} icon={<UserRound />} label={getMe()?.kind === "user" ? "Account" : "Operator"} />
-                <RailIcon onClick={() => setDark(!dark)} icon={dark ? <Moon /> : <Sun />} label={dark ? "Light theme" : "Dark theme"} />
+                <RailIcon onClick={() => setDark(!dark)} icon={<IconSwap state={dark} rotate>{dark ? <Moon /> : <Sun />}</IconSwap>} label={dark ? "Light theme" : "Dark theme"} />
                 <RailIcon onClick={() => setCollapsed(false)} icon={<PanelLeftOpen />} label="Expand sidebar" />
               </div>
             </nav>
@@ -860,9 +865,9 @@ export default function App() {
                     <Connect welcome onDone={() => go({ view: "hub" })} onBack={() => go({ view: "hub" })} />
                   </PageEnter>
                 ) : route.view === "pr" ? (
-                  <div className="h-full min-h-0">
+                  <PageEnter className="h-full min-h-0">
                     <PullRequestPage session={route.name} repo={route.repo} number={route.number} />
-                  </div>
+                  </PageEnter>
                 ) : booting && !selectedBox ? (
                   <BootingThread task={booting.task} warm={booting.warm} machine={booting.machine} inferred={booting.inferred} onBack={backToRail} />
                 ) : view === "box" && !selectedBox && (selectedRaw || (selected && selected === launched)) ? (
@@ -968,24 +973,24 @@ function ThreadPageSkeleton() {
   return (
     <div className="flex h-full min-h-0 flex-col" aria-busy="true" aria-label="Loading run">
       <div className="flex h-14 shrink-0 items-center gap-3 border-b px-5">
-        <span className="bg-muted h-6 w-16 animate-pulse rounded-full" />
-        <span className="bg-muted h-3.5 w-72 animate-pulse rounded" />
-        <span className="bg-muted ml-auto h-3 w-40 animate-pulse rounded" />
+        <Bar className="h-6 w-16 rounded-full" />
+        <Bar className="h-3.5 w-72" />
+        <Bar className="ml-auto h-3 w-40" />
       </div>
       <div className="h-9 shrink-0 border-b" />
       <div className="mx-auto w-full max-w-3xl flex-1 px-6 pt-8">
-        <div className="bg-muted ml-auto h-11 w-[46%] animate-pulse rounded-xl" />
+        <Bar className="ml-auto h-11 w-[46%] rounded-xl" />
         <div className="mt-8 space-y-2.5">
-          <div className="bg-muted h-2.5 w-14 animate-pulse rounded" />
-          <div className="bg-muted h-3.5 w-[92%] animate-pulse rounded" />
-          <div className="bg-muted h-3.5 w-[78%] animate-pulse rounded" />
-          <div className="bg-muted h-3.5 w-[85%] animate-pulse rounded" />
+          <Bar className="h-2.5 w-14" />
+          <Bar className="h-3.5 w-[92%]" />
+          <Bar className="h-3.5 w-[78%]" />
+          <Bar className="h-3.5 w-[85%]" />
         </div>
-        <div className="bg-muted mt-7 h-8 w-56 animate-pulse rounded-full" />
+        <Bar className="mt-7 h-8 w-56 rounded-full" />
         <div className="mt-7 space-y-2.5">
-          <div className="bg-muted h-2.5 w-14 animate-pulse rounded" />
-          <div className="bg-muted h-3.5 w-[88%] animate-pulse rounded" />
-          <div className="bg-muted h-3.5 w-[64%] animate-pulse rounded" />
+          <Bar className="h-2.5 w-14" />
+          <Bar className="h-3.5 w-[88%]" />
+          <Bar className="h-3.5 w-[64%]" />
         </div>
       </div>
       <div className="mx-auto w-full max-w-3xl px-6 pb-4">
@@ -1052,9 +1057,18 @@ function NavItem({
       )}
       {icon}
       <span className="min-w-0 flex-1 truncate">{label}</span>
-      {badge != null && <span className={cn("text-muted-foreground tabular text-micro", shortcut && "group-hover:hidden group-focus-visible:hidden")}>{badge}</span>}
-      {/* The shortcut surfaces on hover/focus, where the eye already is — no tooltip to wait for. */}
-      {shortcut && <Kbd keys={shortcut.split(" ")} className="hidden group-hover:inline-flex group-focus-visible:inline-flex" />}
+      {/* The shortcut surfaces on hover/focus, where the eye already is — no tooltip to wait for.
+          Badge and chord share one slot and crossfade so nothing blinks in or out. */}
+      {(badge != null || shortcut) && (
+        <span className="relative inline-grid place-items-end [&>*]:col-start-1 [&>*]:row-start-1">
+          {badge != null && (
+            <span className={cn("text-muted-foreground tabular text-micro transition-opacity duration-150", shortcut && "group-hover:opacity-0 group-focus-visible:opacity-0")}>
+              <NumberTicker value={badge} from={badge} />
+            </span>
+          )}
+          {shortcut && <Kbd keys={shortcut.split(" ")} className="opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100" aria-hidden />}
+        </span>
+      )}
     </button>
   );
 }
@@ -1105,7 +1119,7 @@ function RailIcon({
           {dot && <span className="bg-attention ring-card absolute top-1.5 right-1.5 size-2 rounded-full ring-2" aria-hidden />}
           {badge != null && !dot && (
             <span className="bg-live ring-card absolute top-0.5 right-0.5 grid min-w-4 place-items-center rounded-full px-1 text-[9px] leading-4 font-semibold text-white ring-2 tabular-nums">
-              {badge}
+              <NumberTicker value={badge} from={badge} />
             </span>
           )}
         </button>

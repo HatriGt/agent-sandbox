@@ -2,6 +2,8 @@ import * as React from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { ArrowLeft, CalendarClock, ListChecks, Workflow } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { TabPanel } from "@/components/ui/animated-tabs";
+import { NumberTicker } from "@/components/ui/number-ticker";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { useCached } from "@/lib/cache";
@@ -10,6 +12,7 @@ import { WorkflowsPage } from "@/components/WorkflowsPage";
 import { ScheduledPage } from "@/components/ScheduledPage";
 
 export type AutopilotTab = "automations" | "scheduled" | "playbooks";
+const ORDER: readonly AutopilotTab[] = ["automations", "scheduled", "playbooks"];
 
 /**
  * One home for work that runs without you. Automations are standing rules (a schedule, a webhook, a
@@ -67,8 +70,8 @@ export function AutopilotPage({
                 {t.icon}
                 <span className="font-medium">{t.label}</span>
                 {t.count ? (
-                  <span className={cn("rounded-full px-1.5 text-micro tabular-nums", t.attention ? "text-attention-text ring-1 ring-inset ring-attention/40" : "bg-muted text-muted-foreground")} title={t.attention ? "Something is awaiting your approval" : undefined}>
-                    {t.count}
+                  <span className={cn("pop-in rounded-full px-1.5 text-micro tabular-nums", t.attention ? "text-attention-text ring-1 ring-inset ring-attention/40" : "bg-muted text-muted-foreground")} title={t.attention ? "Something is awaiting your approval" : undefined}>
+                    <NumberTicker value={t.count} from={t.count} />
                   </span>
                 ) : null}
                 <span className="text-faint hidden text-micro lg:inline">{t.hint}</span>
@@ -83,7 +86,7 @@ export function AutopilotPage({
             );
           })}
         </div>
-        <div role="tabpanel">
+        <TabPanel value={tab} order={ORDER}>
           {tab === "automations" ? (
             <Automations onOpenBox={onOpenBox} onOpenPlaybooks={() => onTab("playbooks")} />
           ) : tab === "scheduled" ? (
@@ -96,7 +99,7 @@ export function AutopilotPage({
               }}
             />
           )}
-        </div>
+        </TabPanel>
       </div>
     </div>
   );

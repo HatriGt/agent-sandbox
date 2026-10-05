@@ -77,7 +77,7 @@ export function DigestCard({ digest }: { digest: RunDigest }) {
         <span className={cn("label shrink-0", failed ? "text-destructive" : "text-ok")}>{failed ? "Failed" : "Done"}</span>
         <span className="text-foreground min-w-0 flex-1 truncate text-meta">{digest.headline}</span>
         {duration && <span className="stamp text-muted-foreground shrink-0">{duration}</span>}
-        {hasBody && <ChevronDown className={cn("text-muted-foreground size-3.5 shrink-0 transition-transform", open && "rotate-180")} aria-hidden />}
+        {hasBody && <ChevronDown className={cn("text-muted-foreground size-3.5 shrink-0 transition-transform duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]", open && "rotate-180")} aria-hidden />}
       </button>
 
       {facts.length > 0 && (

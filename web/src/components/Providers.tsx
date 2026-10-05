@@ -1,11 +1,14 @@
 import * as React from "react";
-import { Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
+import { Plus, RefreshCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, type ProviderKind, type ProvidersResponse, type ProviderView } from "@/lib/api";
 import { getMe } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { SettingsSection } from "@/components/ui/settings";
 import { Bar } from "@/components/thread/Skeletons";
+import { Collapse } from "@/components/ui/collapse";
+import { Swap } from "@/components/ui/swap";
 
 const inputCls =
   "text-foreground placeholder:text-muted-foreground bg-muted focus:ring-ring h-9 rounded-md px-3 text-meta outline-none focus:ring-2";
@@ -63,22 +66,38 @@ export function Providers() {
         ) : undefined
       }
     >
-      {!data ? (
-        <div className="flex flex-col gap-2" aria-busy="true" aria-label="Loading">
-          <Bar className="h-12 w-full rounded-lg" />
-        </div>
-      ) : (
-        <div className="flex flex-col gap-2">
-          {data.providers.length === 0 && !adding && (
-            <p className="text-muted-foreground text-micro">No providers yet — runs use the deployment's default model access.</p>
-          )}
-          {data.providers.map((p) => (
-            <ProviderRow key={p.id} p={p} />
-          ))}
-          {adding && <ProviderForm kinds={data.kinds} onDone={() => setAdding(false)} />}
-          {!saas && <p className="text-faint mt-1 text-micro">{data.cliLoginPolicy}</p>}
-        </div>
-      )}
+      <Swap state={data ? "list" : "loading"}>
+        {!data ? (
+          <div className="flex flex-col gap-2" aria-busy="true" aria-label="Loading">
+            <Bar className="h-12 w-full rounded-lg" />
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            <Collapse open={data.providers.length === 0 && !adding}>
+              <p className="text-muted-foreground text-micro">No providers yet — runs use the deployment's default model access.</p>
+            </Collapse>
+            <AnimatePresence initial={false}>
+              {data.providers.map((p, i) => (
+                <motion.div
+                  key={p.id}
+                  layout="position"
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, height: 0, marginTop: 0 }}
+                  transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1], delay: Math.min(i, 12) * 0.024 }}
+                  className="overflow-hidden"
+                >
+                  <ProviderRow p={p} />
+                </motion.div>
+              ))}
+            </AnimatePresence>
+            <Collapse open={adding}>
+              <ProviderForm kinds={data.kinds} onDone={() => setAdding(false)} />
+            </Collapse>
+            {!saas && <p className="text-faint mt-1 text-micro">{data.cliLoginPolicy}</p>}
+          </div>
+        )}
+      </Swap>
     </SettingsSection>
   );
 }
@@ -116,11 +135,11 @@ function ProviderRow({ p }: { p: ProviderView }) {
           {p.models ? `${p.models.length} model${p.models.length === 1 ? "" : "s"}` : "models not fetched"} · runs {p.drivers.map((d) => DRIVER_LABEL[d] ?? d).join(", ") || "no driver"}
         </div>
       </div>
-      <Button size="xs" variant="ghost" onClick={() => void refresh()} disabled={busy !== null} aria-label="Refresh models">
-        {busy === "models" ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
+      <Button size="xs" variant="ghost" onClick={() => void refresh()} disabled={busy !== null} loading={busy === "models"} aria-label="Refresh models">
+        <RefreshCw className="size-3.5" />
       </Button>
-      <Button size="xs" variant="ghost" onClick={() => void del()} disabled={busy !== null} aria-label="Remove provider">
-        {busy === "del" ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+      <Button size="xs" variant="ghost" onClick={() => void del()} disabled={busy !== null} loading={busy === "del"} aria-label="Remove provider">
+        <Trash2 className="size-3.5" />
       </Button>
     </div>
   );
@@ -174,8 +193,8 @@ function ProviderForm({ kinds, onDone }: { kinds: ProvidersResponse["kinds"]; on
         <Button size="xs" variant="ghost" type="button" onClick={onDone}>
           Cancel
         </Button>
-        <Button size="xs" type="submit" disabled={busy}>
-          {busy && <Loader2 className="size-3.5 animate-spin" />} Save
+        <Button size="xs" type="submit" loading={busy}>
+          Save
         </Button>
       </div>
     </form>

@@ -21,8 +21,8 @@ export function ListSkeleton({ rows = 3, className }: { rows?: number; className
 /** An empty list that teaches: icon · what would be here · why it is empty · the one way to fill it. */
 export function ListEmpty({ icon: Icon, title, line, action, className }: { icon: LucideIcon; title: string; line?: React.ReactNode; action?: React.ReactNode; className?: string }) {
   return (
-    <div className={cn("m-3 flex flex-col items-center rounded-lg border border-dashed px-6 py-8 text-center", className)}>
-      <span className="bg-muted text-muted-foreground grid size-9 place-items-center rounded-full">
+    <div className={cn("enter m-3 flex flex-col items-center rounded-lg border border-dashed px-6 py-8 text-center", className)}>
+      <span className="bg-muted text-muted-foreground pop-in grid size-9 place-items-center rounded-full [animation-delay:80ms]">
         <Icon className="size-4" aria-hidden />
       </span>
       <p className="text-foreground mt-3 text-meta font-medium">{title}</p>

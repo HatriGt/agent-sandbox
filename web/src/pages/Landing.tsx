@@ -1,6 +1,7 @@
 import * as React from "react";
 import { Link } from "react-router";
 import { ArrowRight, Check, Copy, Globe, GitPullRequest, KeyRound, Moon, ScrollText, ShieldCheck, Sun } from "lucide-react";
+import { IconSwap } from "@/components/ui/icon-swap";
 import { motion, useInView, useReducedMotion } from "motion/react";
 import { Logo } from "@/components/ui/logo";
 import { AGENT_BRANDS, MODEL_BRANDS, type Brand } from "@/components/landing/BrandMarks";
@@ -61,7 +62,9 @@ export default function Landing() {
             aria-label={dark ? "Switch to light theme" : "Switch to dark theme"}
             className={cn(focusRing, "text-muted-foreground hover:text-foreground hover:bg-muted grid size-9 place-items-center rounded-md transition-colors duration-200 ease-out")}
           >
-            {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
+            <IconSwap state={dark} rotate>
+              {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
+            </IconSwap>
           </button>
           {saas && !signedIn && (
             <Link to="/signin" className={cn(navLink, "whitespace-nowrap")}>
@@ -78,33 +81,33 @@ export default function Landing() {
           <div className="mx-auto max-w-6xl px-5 pt-8 pb-14 sm:px-6 lg:pt-16">
             <div className="grid items-center gap-10 lg:grid-cols-[minmax(0,1.08fr)_minmax(0,0.92fr)] lg:gap-14">
               <div className="min-w-0">
-                <Reveal>
+                <Reveal eager>
                   <p className="text-muted-foreground label mb-6 inline-flex items-center gap-2 rounded-full border px-3 py-1">
                     <span className="bg-ok size-1.5 rounded-full" aria-hidden />
                     Your own agent cloud · public beta
                   </p>
                 </Reveal>
-                <Reveal delay={0.05}>
+                <Reveal eager delay={0.05}>
                   <h1 id="hero-title" className="font-serif text-[clamp(2.5rem,5.4vw,4.6rem)] leading-[0.98] tracking-[-0.03em] text-balance">
                     Agents on tap and on trigger. <span className="text-muted-foreground">Sandboxed in the cloud.</span>
                   </h1>
                 </Reveal>
-                <Reveal delay={0.1}>
+                <Reveal eager delay={0.1}>
                   <p className="text-foreground/85 mt-6 max-w-[50ch] text-[17px] leading-relaxed">
                     Hand it a task, or let your tools hand it one: a new issue, a failing check, a nightly schedule. It picks up
                     the work the moment it appears and brings back finished, tested changes ready to merge. You review the result
                     instead of doing the work.
                   </p>
                 </Reveal>
-                <Reveal delay={0.15}>
+                <Reveal eager delay={0.15}>
                   <CtaPair consoleHref={consoleHref} hostedLabel={hostedLabel} hostedNote={hostedNote} showHosted={saas || signedIn || !ready} />
                 </Reveal>
               </div>
-              <Reveal delay={0.12} className="min-w-0">
+              <Reveal eager delay={0.12} className="min-w-0">
                 <HeroFeed />
               </Reveal>
             </div>
-            <Reveal delay={0.2}>
+            <Reveal eager delay={0.2}>
               <BrandStrip />
             </Reveal>
           </div>
@@ -146,22 +149,20 @@ export default function Landing() {
             </div>
             <ol className="border-t">
               {BUILT.map((b, i) => (
-                <Reveal key={b.title} delay={0.03}>
-                  <li className="group grid grid-cols-[3rem_1fr] gap-x-4 border-b py-7 sm:grid-cols-[4.5rem_1fr] sm:gap-x-6">
-                    <span className="text-muted-foreground/70 group-hover:text-foreground font-serif text-[2.4rem] leading-none tabular-nums transition-colors duration-200 sm:text-[3rem]" aria-hidden>
-                      {String(i + 1).padStart(2, "0")}
-                    </span>
-                    <div className="min-w-0">
-                      <h3 className="text-[19px] leading-snug font-semibold tracking-[-0.015em]">{b.title}</h3>
-                      <p className="text-muted-foreground mt-2 max-w-[62ch] text-body leading-relaxed">{b.body}</p>
-                      {b.tags && (
-                        <p className="text-foreground/75 mt-3 font-mono text-micro leading-relaxed">
-                          <span className="sr-only">Includes: </span>
-                          {b.tags.join("  ·  ")}
-                        </p>
-                      )}
-                    </div>
-                  </li>
+                <Reveal key={b.title} as="li" delay={Math.min(i, 6) * 0.04} className="group grid grid-cols-[3rem_1fr] gap-x-4 border-b py-7 sm:grid-cols-[4.5rem_1fr] sm:gap-x-6">
+                  <span className="text-muted-foreground/70 group-hover:text-foreground font-serif text-[2.4rem] leading-none tabular-nums transition-colors duration-200 sm:text-[3rem]" aria-hidden>
+                    {String(i + 1).padStart(2, "0")}
+                  </span>
+                  <div className="min-w-0">
+                    <h3 className="text-[19px] leading-snug font-semibold tracking-[-0.015em]">{b.title}</h3>
+                    <p className="text-muted-foreground mt-2 max-w-[62ch] text-body leading-relaxed">{b.body}</p>
+                    {b.tags && (
+                      <p className="text-foreground/75 mt-3 font-mono text-micro leading-relaxed">
+                        <span className="sr-only">Includes: </span>
+                        {b.tags.join("  ·  ")}
+                      </p>
+                    )}
+                  </div>
                 </Reveal>
               ))}
               <li className="text-muted-foreground grid grid-cols-[3rem_1fr] gap-x-4 py-5 text-meta sm:grid-cols-[4.5rem_1fr] sm:gap-x-6">
@@ -192,8 +193,8 @@ export default function Landing() {
               </div>
             </Reveal>
             <dl className="mt-12 grid gap-x-16 sm:grid-cols-2">
-              {SECURITY.map((s) => (
-                <Reveal key={s.title}>
+              {SECURITY.map((s, i) => (
+                <Reveal key={s.title} delay={i * 0.04}>
                   <div className="border-t py-6">
                     <dt className="flex items-center gap-2.5 text-body font-semibold">
                       <span className="text-muted-foreground [&_svg]:size-4" aria-hidden>
@@ -270,7 +271,7 @@ const GITHUB = "https://github.com/HatriGt/agent-sandbox";
 const SELF_HOST = `${GITHUB}/blob/main/docs/self-hosting.md`;
 const focusRing = "focus-visible:ring-ring focus-visible:ring-offset-background outline-none focus-visible:ring-2 focus-visible:ring-offset-2";
 const navLink = cn(focusRing, "text-muted-foreground hover:text-foreground rounded-md px-3 py-1.5 text-meta transition-colors duration-200 ease-out");
-const secondaryBtn = "border-line-strong hover:bg-muted inline-flex h-10 items-center gap-2 rounded-md border px-4 text-meta font-medium transition-colors duration-200 ease-out";
+const secondaryBtn = "press border-line-strong hover:bg-muted inline-flex h-10 items-center gap-2 rounded-md border px-4 text-meta font-medium transition-colors duration-200 ease-out";
 
 const BUILT: Array<{ title: string; body: string; tags?: string[] }> = [
   {
@@ -320,7 +321,8 @@ function BrandStrip() {
   return (
     <div className="mt-16 lg:mt-20">
       <BrandGroup label="Runs any agent" brands={AGENT_BRANDS} />
-      <BrandGroup label="On any model or account" brands={MODEL_BRANDS} />    </div>
+      <BrandGroup label="On any model or account" brands={MODEL_BRANDS} />
+    </div>
   );
 }
 
@@ -333,7 +335,7 @@ function BrandGroup({ label, brands }: { label: string; brands: Brand[] }) {
           <li
             key={b.key}
             className={cn(
-              "flex h-7 items-center gap-2 text-[16px] transition-colors duration-200 ease-out",
+              "flex h-7 items-center gap-2 text-[16px] transition-[color,translate] duration-200 ease-out [@media(hover:hover)]:hover:-translate-y-px",
               b.soon ? "text-foreground/40" : "text-foreground/65 hover:text-foreground"
             )}
             title={b.soon ? `${b.name}: coming soon` : b.name}
@@ -380,21 +382,24 @@ function useLandingTheme(): [boolean, (v: boolean) => void] {
 }
 
 /**
- * Fade-and-rise once, when the block scrolls into view. A 1.6s fallback shows the block regardless,
- * so content can never stay hidden if an observer misfires (print, full-page capture, odd embeds).
+ * Fade-and-rise once, when the block scrolls into view. `eager` (above-the-fold hero blocks) adds a
+ * 1.6s fallback that shows the block regardless, so the first paint can never stay hidden if the
+ * observer misfires (print, full-page capture, odd embeds). Below-the-fold blocks wait for the viewport.
  */
-function Reveal({ children, delay = 0, className }: { children: React.ReactNode; delay?: number; className?: string }) {
+function Reveal({ children, delay = 0, className, eager = false, as = "div" }: { children: React.ReactNode; delay?: number; className?: string; eager?: boolean; as?: "div" | "li" }) {
   const reduced = useReducedMotion();
-  const ref = React.useRef<HTMLDivElement>(null);
+  const ref = React.useRef<HTMLDivElement & HTMLLIElement>(null);
   const inView = useInView(ref, { once: true, amount: 0.15 });
   const [forced, setForced] = React.useState(false);
   React.useEffect(() => {
+    if (!eager) return;
     const t = window.setTimeout(() => setForced(true), 1600);
     return () => window.clearTimeout(t);
-  }, []);
+  }, [eager]);
   const show = reduced || inView || forced;
+  const Tag = as === "li" ? motion.li : motion.div;
   return (
-    <motion.div
+    <Tag
       ref={ref}
       className={className}
       initial={reduced ? false : { opacity: 0, y: 10 }}
@@ -402,7 +407,7 @@ function Reveal({ children, delay = 0, className }: { children: React.ReactNode;
       transition={{ duration: 0.22, delay, ease: [0.22, 1, 0.36, 1] }}
     >
       {children}
-    </motion.div>
+    </Tag>
   );
 }
 
@@ -457,7 +462,9 @@ function InstallCommand() {
         className={cn(focusRing, "bg-primary text-primary-foreground hover:bg-primary/85 inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md px-3 text-micro font-medium transition-colors duration-200 ease-out")}
         aria-label={copied ? "Install command copied" : "Copy install command"}
       >
-        {copied ? <Check className="size-3.5" strokeWidth={3} aria-hidden /> : <Copy className="size-3.5" aria-hidden />}
+        <IconSwap state={copied}>
+          {copied ? <Check className="size-3.5" strokeWidth={3} aria-hidden /> : <Copy className="size-3.5" aria-hidden />}
+        </IconSwap>
         {copied ? "Copied" : "Copy"}
       </button>
     </div>

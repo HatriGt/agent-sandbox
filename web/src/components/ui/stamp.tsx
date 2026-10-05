@@ -63,8 +63,10 @@ export function StateStamp({
   const Icon = t.icon;
   return (
     <span className={cn("label inline-flex items-center gap-1.5 font-medium", t.text, className)}>
-      <Icon className={cn("size-3 shrink-0", state === "running" && !stalled && "breathe")} aria-hidden strokeWidth={2.5} />
-      {t.word(exitCode)}
+      <span key={`${state}-${exitCode ?? ""}-${stalled ? "s" : ""}`} className="pop-in inline-flex items-center gap-1.5">
+        <Icon className={cn("size-3 shrink-0", state === "running" && !stalled && "breathe")} aria-hidden strokeWidth={2.5} />
+        {t.word(exitCode)}
+      </span>
     </span>
   );
 }
@@ -84,23 +86,32 @@ export function StatePill({
   const Icon = t.icon;
   // The pill crossfades when the state flips (working → needs you → done → sleeping) instead of
   // snapping: a state change is an event worth a beat, and the beat makes it legible.
+  // The outer pill owns `layout` so its width glides between words (working → needs you) while the
+  // keyed content crossfades inside; colours ease via CSS so the tone change never snaps.
   return (
-    <AnimatePresence mode="popLayout" initial={false}>
-      <motion.span
-        key={`${state}-${exitCode ?? ""}-${stalled ? "s" : ""}`}
-        initial={{ opacity: 0, scale: 0.92 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.92 }}
-        transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
-        className={cn(
-          "inline-flex h-6 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-micro font-semibold ring-1 ring-inset",
-          t.pill,
-          className
-        )}
-      >
-        <Icon className={cn("size-3 shrink-0", state === "running" && !stalled && "breathe")} aria-hidden strokeWidth={2.5} />
-        {t.word(exitCode)}
-      </motion.span>
-    </AnimatePresence>
+    <motion.span
+      layout
+      transition={{ layout: { type: "spring", stiffness: 500, damping: 40 } }}
+      style={{ borderRadius: 9999 }}
+      className={cn(
+        "inline-flex h-6 shrink-0 items-center rounded-full px-2.5 text-micro font-semibold ring-1 ring-inset transition-colors duration-200",
+        t.pill,
+        className
+      )}
+    >
+      <AnimatePresence mode="popLayout" initial={false}>
+        <motion.span
+          key={`${state}-${exitCode ?? ""}-${stalled ? "s" : ""}`}
+          initial={{ opacity: 0, scale: 0.92 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.92 }}
+          transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+          className="inline-flex items-center gap-1.5 whitespace-nowrap"
+        >
+          <Icon className={cn("size-3 shrink-0", state === "running" && !stalled && "breathe")} aria-hidden strokeWidth={2.5} />
+          {t.word(exitCode)}
+        </motion.span>
+      </AnimatePresence>
+    </motion.span>
   );
 }

@@ -403,7 +403,7 @@ function WatchLine({ watch, live, now, stopping, polling, onStop }: { watch: Wat
           data-watch-stop
           aria-label={`Stop watching ${watch.target}`}
           title="Stop watching — the agent's session is kept; send a message to pick it back up"
-          className="text-foreground hover:bg-muted focus-visible:ring-ring border-border flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-full border px-3 text-micro font-medium transition-[background-color,opacity,transform] duration-150 ease-out active:scale-[0.97] focus-visible:ring-2 focus-visible:outline-none disabled:cursor-default disabled:opacity-60 motion-reduce:transition-none [&_svg]:size-2.5"
+          className="text-foreground hover:bg-muted focus-visible:ring-ring border-border flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-full border px-3 text-micro font-medium transition-[background-color,opacity] duration-150 ease-out focus-visible:ring-2 focus-visible:outline-none disabled:cursor-default disabled:opacity-60 motion-reduce:transition-none [&_svg]:size-2.5"
         >
           <Square className="fill-current" aria-hidden />
           {stopping ? "Stopping…" : "Stop"}

@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import { Swap } from "@/components/ui/swap";
+import { FilterChip } from "@/components/ui/filter-chip";
 import { ImportDialog } from "@/components/skills/ImportDialog";
 import { type Draft, type Mutate, sourceOf } from "@/components/skills/model";
 import { SkillEditor } from "@/components/skills/SkillEditor";
@@ -177,13 +178,13 @@ export function SkillsPage({ onBack }: { onBack: () => void }) {
                         )}
                       </label>
                       <div role="radiogroup" aria-label="Filter skills" className="flex flex-wrap items-center gap-1">
-                        <FilterChip active={filter === "all"} onClick={() => setFilter("all")} label="All" count={counts.all} />
-                        <FilterChip active={filter === "on"} onClick={() => setFilter("on")} label="On" count={counts.on} />
-                        <FilterChip active={filter === "off"} onClick={() => setFilter("off")} label="Off" count={counts.off} />
+                        <FilterChip group="skills" className="h-9 px-3.5" active={filter === "all"} onClick={() => setFilter("all")} label="All" count={counts.all} />
+                        <FilterChip group="skills" className="h-9 px-3.5" active={filter === "on"} onClick={() => setFilter("on")} label="On" count={counts.on} />
+                        <FilterChip group="skills" className="h-9 px-3.5" active={filter === "off"} onClick={() => setFilter("off")} label="Off" count={counts.off} />
                         {counts.starter > 0 && counts.custom > 0 && (
                           <>
-                            <FilterChip active={filter === "starter"} onClick={() => setFilter("starter")} label="Starter" count={counts.starter} />
-                            <FilterChip active={filter === "custom"} onClick={() => setFilter("custom")} label="Yours" count={counts.custom} />
+                            <FilterChip group="skills" className="h-9 px-3.5" active={filter === "starter"} onClick={() => setFilter("starter")} label="Starter" count={counts.starter} />
+                            <FilterChip group="skills" className="h-9 px-3.5" active={filter === "custom"} onClick={() => setFilter("custom")} label="Yours" count={counts.custom} />
                           </>
                         )}
                       </div>
@@ -240,25 +241,5 @@ export function SkillsPage({ onBack }: { onBack: () => void }) {
         }}
       />
     </div>
-  );
-}
-
-function FilterChip({ active, onClick, label, count }: { active: boolean; onClick: () => void; label: string; count: number }) {
-  return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={active}
-      onClick={onClick}
-      disabled={count === 0 && !active}
-      className={cn(
-        "flex h-9 cursor-pointer items-center gap-1.5 rounded-full border px-3.5 text-meta font-medium transition-[background-color,border-color,color,transform] duration-150",
-        "disabled:cursor-default disabled:opacity-45",
-        active ? "border-foreground/20 bg-foreground text-background" : "bg-card text-muted-foreground hover:text-foreground hover:border-line-strong active:scale-[0.97]"
-      )}
-    >
-      {label}
-      <span className={cn("tabular rounded-full px-1.5 py-px text-micro font-semibold", active ? "bg-background/20 text-background" : "bg-muted text-muted-foreground")}>{count}</span>
-    </button>
   );
 }

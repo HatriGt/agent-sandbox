@@ -75,17 +75,25 @@ export function MachineList({
           </div>
         ) : (
           <ul className="flex flex-col gap-px">
-            {pending.map((p) => (
-              <li key={p.id} className="enter rounded-md px-3 py-2.5" aria-busy="true">
-                <p className="label text-live flex items-center gap-1.5">
-                  <span className="bg-live breathe size-2 rounded-full" aria-hidden />
-                  booting
-                </p>
-                <p className="text-muted-foreground mt-1 line-clamp-2 text-meta leading-snug">{p.task}</p>
-              </li>
-            ))}
-    
             <AnimatePresence initial={false}>
+              {pending.map((p) => (
+                <motion.li
+                  key={p.id}
+                  layout="position"
+                  initial={still ? { opacity: 0 } : { opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, transition: { duration: 0.15 } }}
+                  transition={{ type: "spring", stiffness: 500, damping: 40, mass: 0.8 }}
+                  className="rounded-md px-3 py-2.5"
+                  aria-busy="true"
+                >
+                  <p className="label text-live flex items-center gap-1.5">
+                    <span className="bg-live breathe size-2 rounded-full" aria-hidden />
+                    booting
+                  </p>
+                  <p className="text-muted-foreground mt-1 line-clamp-2 text-meta leading-snug">{p.task}</p>
+                </motion.li>
+              ))}
               {sorted.map((v, idx) => {
                 const active = selected === v.name;
                 const group = groupOf(v);

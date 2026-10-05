@@ -11,6 +11,7 @@ import { Collapse } from "@/components/ui/collapse";
 import { Field, Input } from "@/components/ui/field";
 import { SaveButton } from "@/components/ui/save-button";
 import { SettingsPage, SettingsSection } from "@/components/ui/settings";
+import { NumberTicker } from "@/components/ui/number-ticker";
 import { Swap } from "@/components/ui/swap";
 import { ApiKeys } from "@/components/ApiKeys";
 import { NotifySettings } from "@/components/NotifySettings";
@@ -155,17 +156,19 @@ export function Account({ onBack, onConnect, onAdmin }: { onBack: () => void; on
                 ? "Your history and settings are kept; starting or resuming machines needs an upgrade — or self-host for free."
                 : `${user.daysLeft === 0 ? "Ends today" : `${user.daysLeft} day${user.daysLeft === 1 ? "" : "s"} left`} · ends ${new Date(user.trialEndsAt ?? 0).toLocaleDateString()} · no card on file`}
           </p>
-          {inUse !== null && maxBoxes ? (
-            <div className="mt-3 flex flex-wrap items-center gap-3">
-              <Capacity boxes={fleetBoxes ?? []} capacity={maxBoxes} size="sm" />
-              <span className="text-muted-foreground text-meta tabular-nums">
-                {inUse} of {maxBoxes} machines in use
-              </span>
-              {user.plan === "trial" && !user.expired && <span className="stamp text-muted-foreground">{user.daysLeft === 0 ? "ends today" : `${user.daysLeft}d left`}</span>}
-            </div>
-          ) : maxBoxes ? (
-            <p className="text-muted-foreground mt-3 text-meta">up to {maxBoxes} machines at once</p>
-          ) : null}
+          <Swap state={inUse !== null && maxBoxes ? "usage" : maxBoxes ? "cap" : "none"}>
+            {inUse !== null && maxBoxes ? (
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                <Capacity boxes={fleetBoxes ?? []} capacity={maxBoxes} size="sm" />
+                <span className="text-muted-foreground text-meta tabular-nums">
+                  <NumberTicker value={inUse} from={inUse} /> of {maxBoxes} machines in use
+                </span>
+                {user.plan === "trial" && !user.expired && <span className="stamp text-muted-foreground">{user.daysLeft === 0 ? "ends today" : `${user.daysLeft}d left`}</span>}
+              </div>
+            ) : maxBoxes ? (
+              <p className="text-muted-foreground mt-3 text-meta">up to {maxBoxes} machines at once</p>
+            ) : null}
+          </Swap>
           {user.plan !== "pro" && (
             <div className="mt-3 flex flex-wrap gap-2">
               <Button size="sm" asChild>

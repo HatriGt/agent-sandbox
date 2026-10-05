@@ -5,6 +5,7 @@ import { api, type RepoSetupProfile, type RepoSetupsResponse } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { SettingsSection } from "@/components/ui/settings";
 import { Bar } from "@/components/thread/Skeletons";
+import { Swap } from "@/components/ui/swap";
 
 /**
  * Repo setup (src/setup-profile.ts): what each repo installs, builds and tests with, learned once —
@@ -27,6 +28,7 @@ export function RepoSetup() {
   }, []);
   return (
     <SettingsSection id="repo-setup" title="Repo setup" meta="learned once · install · test · verify">
+      <Swap state={!data ? "loading" : data.profiles.length === 0 ? "empty" : "list"}>
       {!data ? (
         <div className="flex flex-col gap-2" aria-busy="true" aria-label="Loading">
           <Bar className="h-12 w-full rounded-lg" />
@@ -40,6 +42,7 @@ export function RepoSetup() {
           ))}
         </div>
       )}
+      </Swap>
     </SettingsSection>
   );
 }

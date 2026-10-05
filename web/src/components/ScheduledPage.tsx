@@ -1,4 +1,5 @@
 import * as React from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { ArrowUpRight, Check, Repeat, Trash2, Workflow } from "lucide-react";
 import { toast } from "sonner";
 import { api, type Automation, type ScheduleStatus } from "@/lib/api";
@@ -7,6 +8,9 @@ import { fmtAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { fmtNext } from "@/components/thread/SchedulePill";
 import { ArmButton } from "@/components/ui/arm-button";
+import { Swap } from "@/components/ui/swap";
+import { Collapse } from "@/components/ui/collapse";
+import { Bar } from "@/components/thread/Skeletons";
 
 /**
  * Scheduled: what you asked for in a chat — "merge the PR at 2pm", "check CI again in an hour".
@@ -76,18 +80,42 @@ export function ScheduledPage({ onOpenBox, onAutomations }: { onOpenBox: (box: s
               role="radio"
               aria-checked={filter === f}
               onClick={() => setFilter(f)}
-              className={cn("cursor-pointer rounded-full px-3 py-1 text-micro font-medium capitalize transition-colors", filter === f ? "bg-background text-foreground shadow-e1" : "text-muted-foreground hover:text-foreground")}
+              className={cn("relative cursor-pointer rounded-full px-3 py-1 text-micro font-medium capitalize transition-colors", filter === f ? "text-foreground" : "text-muted-foreground hover:text-foreground")}
             >
-              {f} <span className="text-faint tabular-nums">{counts[f]}</span>
+              {filter === f && (
+                <motion.span
+                  layoutId="sched-filter"
+                  className="bg-background shadow-e1 absolute inset-0 rounded-full"
+                  transition={{ type: "spring", stiffness: 500, damping: 40 }}
+                  aria-hidden
+                />
+              )}
+              <span className="relative">
+                {f} <span className="text-faint tabular-nums">{counts[f]}</span>
+              </span>
             </button>
           ))}
         </div>
         <p className="text-faint ml-auto text-micro">Ask in any chat: “merge this at 2pm”, “check CI again in an hour”.</p>
       </div>
-      {error && <p className="text-destructive mb-3 text-micro">{error}</p>}
-      {rows.length === 0 ? (
+      <Collapse open={!!error}>
+        <p className="text-destructive mb-3 text-micro">{error}</p>
+      </Collapse>
+      <Swap state={!data ? "loading" : rows.length === 0 ? "empty" : "table"}>
+      {!data ? (
+        <div className="flex flex-col gap-3 rounded-xl border px-4 py-4" aria-busy="true" aria-label="Loading scheduled runs">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="flex items-center gap-4">
+              <Bar className="h-3.5 w-[32%]" />
+              <Bar className="h-3 w-[18%]" />
+              <Bar className="h-3 w-[14%]" />
+              <Bar className="h-3 w-[12%]" />
+            </div>
+          ))}
+        </div>
+      ) : rows.length === 0 ? (
         <div className="text-muted-foreground rounded-xl border border-dashed px-6 py-10 text-center text-meta">
-          {data ? (filter === "upcoming" ? "Nothing scheduled. Ask an agent in a chat to do something later." : "Nothing here yet.") : "Loading…"}
+          {filter === "upcoming" ? "Nothing scheduled. Ask an agent in a chat to do something later." : "Nothing here yet."}
         </div>
       ) : (
         <div className="overflow-x-auto rounded-xl border">
@@ -106,19 +134,23 @@ export function ScheduledPage({ onOpenBox, onAutomations }: { onOpenBox: (box: s
               </tr>
             </thead>
             <tbody>
-              {rows.map((t) => (
-                <Row key={t.id} t={t} now={now} busy={busy === t.id} td={td} iconBtn={iconBtn} showRepo={showRepo} onOpenBox={onOpenBox} act={act} onAutomations={onAutomations} />
-              ))}
+              <AnimatePresence initial={false}>
+                {rows.map((t, i) => (
+                  <Row key={t.id} index={i} t={t} now={now} busy={busy === t.id} td={td} iconBtn={iconBtn} showRepo={showRepo} onOpenBox={onOpenBox} act={act} onAutomations={onAutomations} />
+                ))}
+              </AnimatePresence>
             </tbody>
           </table>
         </div>
       )}
+      </Swap>
     </div>
   );
 }
 
 function Row({
   t,
+  index,
   now,
   busy,
   td,
@@ -129,6 +161,7 @@ function Row({
   onAutomations,
 }: {
   t: Automation;
+  index: number;
   now: number;
   busy: boolean;
   td: string;
@@ -148,7 +181,14 @@ function Row({
     </button>
   );
   return (
-    <tr className={cn("hover:bg-muted/30 border-b last:border-b-0", (t.status === "done" || t.status === "cancelled") && "opacity-70")}>
+    <motion.tr
+      layout="position"
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1], delay: Math.min(index, 12) * 0.024 }}
+      className={cn("hover:bg-muted/30 border-b transition-colors duration-150 last:border-b-0", (t.status === "done" || t.status === "cancelled") && "opacity-70")}
+    >
       <td className={cn(td, "max-w-[18rem]")}>
         <p className="text-foreground truncate font-medium" title={t.name}>
           {t.name}
@@ -172,7 +212,9 @@ function Row({
         {t.nextFire !== null && t.status !== "needs-ok" && <span className="text-muted-foreground block">{fmtNext(t.nextFire, now)}</span>}
       </td>
       <td className={td}>
-        <span className={cn("inline-flex rounded-full px-2 py-0.5 font-medium whitespace-nowrap", st.cls)}>{st.label}</span>
+        <Swap state={t.status} mode="popLayout" className="inline-block">
+          <span className={cn("inline-flex rounded-full px-2 py-0.5 font-medium whitespace-nowrap", st.cls)}>{st.label}</span>
+        </Swap>
       </td>
       <td className={cn(td, "max-w-[14rem]")}>
         {r ? (
@@ -214,6 +256,6 @@ function Row({
           />
         </div>
       </td>
-    </tr>
+    </motion.tr>
   );
 }

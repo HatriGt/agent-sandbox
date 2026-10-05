@@ -1,4 +1,5 @@
 import * as React from "react";
+import { AnimatePresence, motion } from "motion/react";
 import { Brain, Check, ChevronRight, Download, FolderGit2, History, Link2, Pencil, Pin, PinOff, Plus, Search, ShieldCheck, Sparkles, Trash2, Upload, User, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, ApiError, type MemoryKind, type MemoryNote, type MemoryNotesResponse } from "@/lib/api";
@@ -14,6 +15,7 @@ import { Panel, SettingsPage, SettingsSection } from "@/components/ui/settings";
 import { Switch } from "@/components/ui/switch";
 import { Bar } from "@/components/thread/Skeletons";
 import { FilterChip } from "@/components/ui/filter-chip";
+import { Swap } from "@/components/ui/swap";
 import { MemoryOverview } from "@/components/memory/MemoryOverview";
 import { areaId, sectionId } from "@/components/memory/MemoryGraph";
 import { Inline, NoteStatement, noteHeadline } from "@/components/memory/noteText";
@@ -268,6 +270,7 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
         />
       </Collapse>
 
+      <Swap state={cached.error && !notes ? "error" : !notes ? "loading" : total === 0 ? "empty" : "list"}>
       {cached.error && !notes ? (
         <EmptyState icon={Brain} tone="destructive" title="Could not load memory" line={cached.error} />
       ) : !notes ? (
@@ -283,7 +286,7 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
           <div className="flex flex-col gap-4">
             <MemoryOverview notes={notes} pending={model.pending.length} onReview={() => reviewRef.current?.focus()} onSelect={selectNote} onSection={(id) => reveal(id)} />
 
-            {model.pending.length > 0 && (
+            <Collapse open={model.pending.length > 0}>
               <section
                 ref={reviewRef}
                 tabIndex={-1}
@@ -297,18 +300,20 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
                   <p className="text-muted-foreground text-micro">Proposed by runs — kept automatically unless you forget them.</p>
                 </header>
                 <ul className={cn("divide-y", dim)}>
-                  {model.pending.map((n) => (
-                    <NoteRow key={n.id} {...rowProps(n)} showRepo />
-                  ))}
+                  <AnimatePresence initial={false}>
+                    {model.pending.map((n) => (
+                      <NoteRow key={n.id} {...rowProps(n)} showRepo />
+                    ))}
+                  </AnimatePresence>
                 </ul>
               </section>
-            )}
+            </Collapse>
 
             <div className="flex flex-wrap items-center gap-2">
               <div role="radiogroup" aria-label="Filter by kind" className="flex flex-wrap gap-1.5">
-                <FilterChip active={kindFilter === "all"} onClick={() => setKindFilter("all")} label="All" count={model.liveAll.length} />
+                <FilterChip group="memory-kind" active={kindFilter === "all"} onClick={() => setKindFilter("all")} label="All" count={model.liveAll.length} />
                 {KINDS.map((k) => (
-                  <FilterChip key={k} active={kindFilter === k} onClick={() => setKindFilter(kindFilter === k ? "all" : k)} label={KIND_PLURAL[k]} count={model.counts[k]} />
+                  <FilterChip key={k} group="memory-kind" active={kindFilter === k} onClick={() => setKindFilter(kindFilter === k ? "all" : k)} label={KIND_PLURAL[k]} count={model.counts[k]} />
                 ))}
               </div>
               <label className="relative ml-auto w-full sm:w-56">
@@ -334,16 +339,17 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
                         aria-current={active ? "page" : undefined}
                         onClick={() => setViewSel(v.key)}
                         className={cn(
-                          "focus-visible:ring-ring flex w-full items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left text-meta focus-visible:ring-2 focus-visible:outline-none",
-                          active ? "bg-card border-line-strong text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-muted/50 border-transparent",
+                          "focus-visible:ring-ring relative flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-meta focus-visible:ring-2 focus-visible:outline-none",
+                          active ? "text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-muted/50",
                         )}
                       >
-                        <Icon className="size-3.5 shrink-0 opacity-70" aria-hidden />
-                        <span className="min-w-0 flex-1 truncate">{v.label}</span>
-                        <span className="text-faint shrink-0 text-micro tabular-nums">{model.filtering && v.count !== v.total ? `${v.count}/${v.total}` : v.total}</span>
+                        {active && <motion.span layoutId="memory-view" className="bg-card border-line-strong absolute inset-0 rounded-lg border" transition={{ type: "spring", stiffness: 520, damping: 42, mass: 0.7 }} aria-hidden />}
+                        <Icon className="relative size-3.5 shrink-0 opacity-70" aria-hidden />
+                        <span className="relative min-w-0 flex-1 truncate">{v.label}</span>
+                        <span className="text-faint relative shrink-0 text-micro tabular-nums">{model.filtering && v.count !== v.total ? `${v.count}/${v.total}` : v.total}</span>
                       </button>
-                      {active && groups.length > 0 && (
-                        <ul className="mt-1 mb-1 ml-3 hidden border-l pl-2 md:block" aria-label={`Areas of ${v.label}`}>
+                      <Collapse open={active && groups.length > 0} className="hidden md:block">
+                        <ul className="mt-1 mb-1 ml-3 border-l pl-2" aria-label={`Areas of ${v.label}`}>
                           {groups.map((g) => (
                             <li key={g.area}>
                               <button
@@ -359,22 +365,24 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
                           ))}
                           {stale > 0 && <li className="text-faint px-1.5 pt-1 text-micro tabular-nums">{stale} unverified</li>}
                         </ul>
-                      )}
+                      </Collapse>
                     </li>
                   );
                 })}
               </ul>
             </nav>
 
-            <div className="min-w-0">
+            <Swap state={view} className="min-w-0">
               {view === "you" && (
                 <SettingsSection id="memory-you" title="You" meta={plural(model.you.length, "note")} purpose="Preferences and rules — in every run's MEMORY.md, whatever the repo.">
                   {model.you.length ? (
                     <Panel>
                       <ul className={cn("divide-y", dim)}>
-                        {model.you.map((n) => (
-                          <NoteRow key={n.id} {...rowProps(n)} />
-                        ))}
+                        <AnimatePresence initial={false}>
+                          {model.you.map((n) => (
+                            <NoteRow key={n.id} {...rowProps(n)} />
+                          ))}
+                        </AnimatePresence>
                       </ul>
                     </Panel>
                   ) : (
@@ -436,9 +444,11 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
                                       </h4>
                                     )}
                                     <ul className={cn("divide-y", dim)}>
-                                      {rows.map((n) => (
-                                        <NoteRow key={n.id} {...rowProps(n)} inArea={!!g.area} />
-                                      ))}
+                                      <AnimatePresence initial={false}>
+                                        {rows.map((n) => (
+                                          <NoteRow key={n.id} {...rowProps(n)} inArea={!!g.area} />
+                                        ))}
+                                      </AnimatePresence>
                                     </ul>
                                   </div>
                                 );
@@ -459,8 +469,18 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
                   ) : (
                     <Panel id="memory-earlier-list">
                       <ul className="divide-y">
+                        <AnimatePresence initial={false}>
                         {model.earlier.map((n) => (
-                          <li key={n.id} id={`mem-note-${n.id}`} className="text-muted-foreground flex scroll-mt-24 items-start gap-3 px-3.5 py-2.5">
+                          <motion.li
+                            key={n.id}
+                            id={`mem-note-${n.id}`}
+                            layout="position"
+                            initial={{ opacity: 0, y: 6 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, height: 0, paddingTop: 0, paddingBottom: 0 }}
+                            transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+                            className="text-muted-foreground flex scroll-mt-24 items-start gap-3 overflow-hidden px-3.5 py-2.5"
+                          >
                             <KindGlyph kind={n.kind} />
                             <div className="min-w-0 flex-1">
                               <p className="text-meta leading-snug break-words line-through decoration-faint">
@@ -488,17 +508,19 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
                             >
                               <Trash2 className="size-4" />
                             </Button>
-                          </li>
+                          </motion.li>
                         ))}
+                        </AnimatePresence>
                       </ul>
                     </Panel>
                   )}
                 </SettingsSection>
               )}
-            </div>
+            </Swap>
           </div>
         </>
       )}
+      </Swap>
     </SettingsPage>
   );
 }
@@ -730,7 +752,15 @@ function NoteRow({
   const proven = playbook && uses >= 2;
 
   return (
-    <li id={`mem-note-${note.id}`} className="group flex scroll-mt-24 items-start gap-3 px-3.5 py-2.5">
+    <motion.li
+      id={`mem-note-${note.id}`}
+      layout="position"
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, height: 0, paddingTop: 0, paddingBottom: 0 }}
+      transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+      className="group flex scroll-mt-24 items-start gap-3 overflow-hidden px-3.5 py-2.5"
+    >
       <KindGlyph kind={note.kind} />
       {editing ? (
         <form
@@ -917,7 +947,7 @@ function NoteRow({
           </Button>
         </div>
       )}
-    </li>
+    </motion.li>
   );
 }
 

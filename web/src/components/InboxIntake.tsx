@@ -3,6 +3,8 @@ import { Check, Copy, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { SettingsSection } from "@/components/ui/settings";
+import { AnimatedTabs } from "@/components/ui/animated-tabs";
+import { Bar } from "@/components/thread/Skeletons";
 import { Input, inputClass } from "@/components/ui/field";
 import { cn } from "@/lib/utils";
 import { intakeApi, type EmailProvider, type IntakeUpdate, type IntakeView } from "@/lib/intake-api";
@@ -109,7 +111,15 @@ export function InboxIntake() {
   const safeSave = (u: IntakeUpdate) => save(u).catch(() => {});
 
   if (err) return <SettingsSection id="inbox" title="Starts from your inbox"><p className="text-destructive text-meta">{err}</p></SettingsSection>;
-  if (!v) return <SettingsSection id="inbox" title="Starts from your inbox"><p className="text-muted-foreground text-meta">Loading…</p></SettingsSection>;
+  if (!v)
+    return (
+      <SettingsSection id="inbox" title="Starts from your inbox">
+        <div className="flex flex-col gap-2" aria-busy="true" aria-label="Loading">
+          <Bar className="h-9 w-full rounded-md" />
+          <Bar className="h-9 w-3/4 rounded-md" />
+        </div>
+      </SettingsSection>
+    );
 
   const p = PROVIDERS.find((x) => x.id === provider)!;
   const allowed = [v.accountEmail, ...v.channel.allowEmails].filter(Boolean).join(", ");
@@ -175,13 +185,7 @@ export function InboxIntake() {
 
           <div>
             <h3 className="text-foreground text-body mb-2 font-semibold">Email</h3>
-            <div className="mb-3 flex flex-wrap gap-1.5" role="tablist">
-              {PROVIDERS.map((x) => (
-                <Button key={x.id} size="xs" role="tab" aria-selected={x.id === provider} variant={x.id === provider ? "secondary" : "ghost"} onClick={() => setProvider(x.id)}>
-                  {x.name}
-                </Button>
-              ))}
-            </div>
+            <AnimatedTabs ariaLabel="Email provider" className="mb-3 max-w-full overflow-x-auto" value={provider} onChange={setProvider} items={PROVIDERS.map((x) => ({ value: x.id, label: x.name }))} />
             <p className="text-muted-foreground text-meta mb-2">{p.how}</p>
             <Label>Your private webhook URL — anyone with it can submit mail, so keep it secret</Label>
             <CopyField label="email webhook URL" value={v.email.urls[provider]} />

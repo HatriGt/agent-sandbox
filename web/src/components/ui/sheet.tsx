@@ -24,8 +24,9 @@ function SheetContent({
   const bottom = side === "bottom";
   return (
     <DialogPrimitive.Portal>
-      <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[2px] data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:duration-[240ms] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:duration-[180ms]" />
+      <DialogPrimitive.Overlay data-slot="overlay" className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[2px] data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:duration-[240ms] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:duration-[180ms]" />
       <DialogPrimitive.Content
+        data-slot="sheet-content"
         className={cn(
           "bg-popover text-popover-foreground fixed z-50 flex flex-col shadow-e5 outline-none",
           // Bottom: a phone sheet — full width, capped height, the home-indicator inset respected.
@@ -35,7 +36,7 @@ function SheetContent({
           side === "right" && "right-0 border-l",
           side === "left" && "left-0 border-r",
           "data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:duration-[240ms] data-[state=open]:ease-[cubic-bezier(0.32,0.72,0,1)]",
-          "data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:duration-[180ms]",
+          "data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:duration-150 data-[state=closed]:ease-[cubic-bezier(0.22,1,0.36,1)]",
           side === "right" && "data-[state=open]:slide-in-from-right data-[state=closed]:slide-out-to-right",
           side === "left" && "data-[state=open]:slide-in-from-left data-[state=closed]:slide-out-to-left",
           bottom && "data-[state=open]:slide-in-from-bottom data-[state=closed]:slide-out-to-bottom",

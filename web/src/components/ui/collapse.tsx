@@ -21,9 +21,7 @@ export function Collapse({
   duration?: number;
 }) {
   const still = useReducedMotion();
-  const variants = still
-    ? { closed: { opacity: 0, height: unmount ? 0 : 0 }, open: { opacity: 1, height: "auto" } }
-    : { closed: { opacity: 0, height: 0 }, open: { opacity: 1, height: "auto" } };
+  const variants = { closed: { opacity: 0, height: 0 }, open: { opacity: 1, height: "auto" } };
   const transition = { duration: still ? 0.12 : duration, ease: [0.22, 1, 0.36, 1] as const };
   if (!unmount) {
     return (

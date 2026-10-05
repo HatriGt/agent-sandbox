@@ -1,4 +1,5 @@
 import type { BoxView } from "@/lib/api";
+import { motion } from "motion/react";
 import { displayState } from "@/lib/lifecycle";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -47,8 +48,10 @@ export function Capacity({
             {cells.map((b, i) => {
               const s = b ? displayState(b) : null;
               return (
-                <span
+                <motion.span
                   key={b?.name ?? `free-${i}`}
+                  layout
+                  transition={{ type: "spring", stiffness: 500, damping: 40 }}
                   className={cn(
                     "rounded-[3px] transition-colors duration-300",
                     size === "sm" ? "h-2 w-3" : "h-2.5 w-5",
