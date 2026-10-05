@@ -145,7 +145,7 @@ test("semver rows and npm outdated tables", () => {
 
 test("mermaid flowchart edges use node labels", () => {
   const e = parseMermaidFlow("graph LR\n  A[Checkout] --> B[Install]\n  B --> C{Test}\n  C -->|ok| D(Deploy)");
-  assert.deepEqual(e, [["Checkout", "Install"], ["Install", "Test"], ["Test", "Deploy"]]);
+  assert.deepEqual(e?.edges, [["Checkout", "Install"], ["Install", "Test"], ["Test", "Deploy"]]);
   assert.equal(parseMermaidFlow("sequenceDiagram\n  A->>B: hi"), null);
 });
 

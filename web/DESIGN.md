@@ -68,7 +68,27 @@ brief is "more modern", "smoother" or "premium", start here rather than inventin
 
 - [hyperiux vault](https://vault.hyperiux.com) — @_hyperiux_. Source-first interaction effects;
   the stated rule — "if motion does not earn its place, it does not belong" — is ours too.
-- [bencho](https://bencho.dev) — @cabralorenzo. Micro-interactions on ordinary controls.
+- [bencho](https://bencho.dev) — @cabralorenzo. Micro-interactions on ordinary controls; every
+  block is live, not mocked — the standard for the visualizer cards (hover a step, pin a node).
+- [kobra.systems](https://kobra.systems) — @haaarshsingh. Every state designed, light and dark;
+  reference for input states and the sweep/landing timings (0.4 s sweep with ~45 ms stagger,
+  spring `duration 0.3, bounce 0.2` for digits) — close to our `viz-row-new` 30 ms stagger.
+- [micro](https://micro.vercel.app) — micro-motions catalogue (was 404 on 2026-10-05; re-check).
+
+**Loaders and waiting states (what a visual fence shows while it streams — `VizSkeleton`, Working line)**
+
+- [generativeloaders.com](https://generativeloaders.com) — `generative-loaders`: Decode, Typewriter,
+  Skeleton, Cascade, Wipe, Line-by-line, Terminal, Dissolve… — text-shaped loaders for generative
+  UI. Our rule stays: a value is never shown before it is complete, so of these only the
+  shape-preserving ones (Skeleton, Cascade, Line by line) fit a visualizer; Decode/Typewriter
+  belong to prose streaming only.
+- [loading.daniasyrofi.com](https://loading.daniasyrofi.com) — @dani_asyrofi. Signal Relay, Orbit
+  Status, Sweep Track, Step Trace, Retrieval Fanout, Lift Queue: small loaders that *name the kind
+  of wait*. Honours reduced motion (preview goes still). Reference for the per-fence skeleton
+  (`SKELETON_TITLE`) — a sequence diagram waits differently from a table.
+- [metal.jakubantalik.com](https://metal.jakubantalik.com) — `metal-fx`, WebGL liquid-metal border.
+  Pure eye-candy; NOT for the console chrome (one accent, ink on paper). Noted only as the bar for
+  a "premium" upgrade CTA if one ever ships.
 
 - [60fps.design](https://60fps.design) — UI animation and interaction details (the first stop for
   motion polish).

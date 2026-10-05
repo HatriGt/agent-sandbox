@@ -34,18 +34,25 @@ export function parseTimeline(src: string): TimelineEvent[] | null {
 
 export interface Step {
   title: string;
+  /** Sub-steps / notes under the step, one per line. */
   detail?: string;
-  state: "done" | "active" | "todo" | "fail";
+  /** `plain` = a walkthrough with no status marks anywhere (a procedure, not a to-do list). */
+  state: "done" | "active" | "todo" | "fail" | "plain";
 }
+
+const SUB_STEP_RE = /^\s{2,}(?:[-•*]|[a-z]\)|[ivx]+\.|\d+[.)])\s+(.*)$/i;
 
 /**
  * ```steps: numbered lines (`1. Install deps ✓`), optional indented detail lines under each.
- * ✓ = done, ✗ = failed, … = active; unmarked steps after the first unmarked are upcoming.
+ * ✓ = done, ✗ = failed, … = active; unmarked steps are upcoming — unless NO step carries a mark,
+ * in which case the list is a procedure and every step is `plain`. Indented `- sub` / `a) sub` /
+ * `i. sub` lines become one detail line each; other indented text continues the previous line.
  */
 export function parseSteps(src: string): Step[] | null {
   const lines = src.split("\n").filter((l) => l.trim());
   if (lines.length === 0 || lines.length > 60) return null;
   const out: Step[] = [];
+  let marked = false;
   for (const raw of lines) {
     const m = raw.match(/^(\d+)[.)]\s+(.*)$/);
     if (m) {
@@ -54,13 +61,18 @@ export function parseSteps(src: string): Step[] | null {
       if (/[✓✔]$/.test(title)) (state = "done"), (title = title.replace(/\s*[✓✔]$/, ""));
       else if (/[✗✘]$/.test(title)) (state = "fail"), (title = title.replace(/\s*[✗✘]$/, ""));
       else if (/(\.\.\.|…)$/.test(title)) (state = "active"), (title = title.replace(/\s*(\.\.\.|…)$/, ""));
+      if (state !== "todo") marked = true;
       out.push({ title, state });
     } else if (/^\s+\S/.test(raw) && out.length) {
       const prev = out[out.length - 1];
-      prev.detail = (prev.detail ? prev.detail + " " : "") + raw.trim();
+      const sub = raw.match(SUB_STEP_RE);
+      if (sub) prev.detail = (prev.detail ? prev.detail + "\n" : "") + sub[1].trim();
+      else prev.detail = (prev.detail ? prev.detail + " " : "") + raw.trim();
     } else return null;
   }
-  return out.length >= 2 ? out : null;
+  if (out.length < 2) return null;
+  if (!marked) for (const s of out) s.state = "plain";
+  return out;
 }
 
 // ---------------------------------------------------------------- progress
@@ -423,17 +435,33 @@ export function parseLog(src: string): LogLine[] | null {
 
 // ---------------------------------------------------------------- graph (DAG)
 
+export type DagKind = "step" | "decision" | "terminal";
+
 export interface Dag {
   nodes: string[];
   edges: [number, number][];
   /** topological layer per node (longest path from a root). */
   layers: number[];
+  /** Edge labels (`A -> B: yes`, `A -|yes|-> B`), parallel to `edges`; absent when no edge has one. */
+  labels?: (string | undefined)[];
+  /** Node shapes (`{Decision?}`, `[Step]`, `(Start)` / `((End))`), parallel to `nodes`; absent when none is shaped. */
+  kinds?: DagKind[];
 }
 
-/** ```graph: `A -> B` edges (one or more per line, chains allowed) → layered DAG. Cycles → null. */
-export function parseDag(src: string): Dag | null {
-  const lines = src.split("\n").map((l) => l.trim()).filter(Boolean);
-  if (lines.length === 0 || lines.length > 40) return null;
+/** Strip a flowchart shape from a node name: `{X}` decision, `[X]` step, `(X)` / `((X))` terminal. */
+function shapedNode(raw: string): { name: string; kind?: DagKind } {
+  const m = raw.match(/^(?:\{(.+)\}|\[(.+)\]|\(\((.+)\)\)|\((.+)\))$/);
+  if (!m) return { name: raw };
+  if (m[1] !== undefined) return { name: m[1].trim(), kind: "decision" };
+  if (m[2] !== undefined) return { name: m[2].trim(), kind: "step" };
+  return { name: (m[3] ?? m[4]).trim(), kind: "terminal" };
+}
+
+/**
+ * Layer named edges into a {@link Dag}: dedupes nodes by name and edges by pair, longest-path
+ * layering. Null on < 2 or > 24 nodes, or a cycle. Shared by ```graph and mermaid flowcharts.
+ */
+export function dagFromEdges(edges: [string, string][], labels: (string | undefined)[] = [], kinds: Record<string, DagKind> = {}): Dag | null {
   const nodes: string[] = [];
   const idx = new Map<string, number>();
   const id = (name: string) => {
@@ -445,34 +473,75 @@ export function parseDag(src: string): Dag | null {
     }
     return i;
   };
-  const edges: [number, number][] = [];
-  const seen = new Set<string>();
-  for (const line of lines) {
-    const parts = line.split(/\s*(?:->|→)\s*/).map((p) => p.trim()).filter(Boolean);
-    if (parts.length < 2) return null;
-    for (let i = 0; i < parts.length - 1; i++) {
-      const [a, b] = [id(parts[i]), id(parts[i + 1])];
-      const key = `${a}>${b}`;
-      if (!seen.has(key)) {
-        seen.add(key);
-        edges.push([a, b]);
-      }
-    }
-  }
+  const out: [number, number][] = [];
+  const outLabels: (string | undefined)[] = [];
+  const seen = new Map<string, number>();
+  edges.forEach(([from, to], k) => {
+    const [a, b] = [id(from), id(to)];
+    const key = `${a}>${b}`;
+    const at = seen.get(key);
+    if (at === undefined) {
+      seen.set(key, out.length);
+      out.push([a, b]);
+      outLabels.push(labels[k]);
+    } else if (labels[k] && !outLabels[at]) outLabels[at] = labels[k];
+  });
   if (nodes.length < 2 || nodes.length > 24) return null;
   // Longest-path layering; detects cycles by exceeding node count.
   const layers = new Array<number>(nodes.length).fill(0);
   for (let pass = 0; pass <= nodes.length; pass++) {
     let changed = false;
-    for (const [a, b] of edges) {
+    for (const [a, b] of out) {
       if (layers[b] < layers[a] + 1) {
         layers[b] = layers[a] + 1;
         changed = true;
       }
     }
-    if (!changed) return { nodes, edges, layers };
+    if (!changed) {
+      const dag: Dag = { nodes, edges: out, layers };
+      if (outLabels.some(Boolean)) dag.labels = outLabels;
+      const shaped = nodes.map((n) => kinds[n]);
+      if (shaped.some(Boolean)) dag.kinds = shaped.map((k) => k ?? "step");
+      return dag;
+    }
   }
   return null; // cycle
+}
+
+/**
+ * ```graph: `A -> B` edges (one or more per line, chains allowed) → layered DAG. Cycles → null.
+ * Edge labels: `A -> B: yes` or `A -|yes|-> B`. Node shapes: `{Decision?}`, `[Step]`, `(Start)`, `((End))`.
+ */
+export function parseDag(src: string): Dag | null {
+  const lines = src.split("\n").map((l) => l.trim()).filter(Boolean);
+  if (lines.length === 0 || lines.length > 40) return null;
+  const edges: [string, string][] = [];
+  const labels: (string | undefined)[] = [];
+  const kinds: Record<string, DagKind> = {};
+  const node = (raw: string): string => {
+    const { name, kind } = shapedNode(raw);
+    if (kind) kinds[name] = kind;
+    return name;
+  };
+  for (const line of lines) {
+    // Tokens alternate node, arrow, node, arrow… — the arrow may carry `-|label|->`.
+    const parts = line.split(/\s*(->|→|-\|[^|]*\|->)\s*/).map((p) => p.trim());
+    if (parts.length < 3 || parts.length % 2 === 0 || !parts[0]) return null;
+    let from = node(parts[0]);
+    for (let i = 1; i < parts.length; i += 2) {
+      const arrow = parts[i];
+      let target = parts[i + 1];
+      if (!target) return null;
+      let label = arrow.length > 2 ? arrow.slice(2, -3).trim() || undefined : undefined;
+      const colon = target.match(/^(.*\S):\s+(.+)$/);
+      if (colon && !label) (target = colon[1]), (label = colon[2].trim());
+      const to = node(target);
+      edges.push([from, to]);
+      labels.push(label);
+      from = to;
+    }
+  }
+  return dagFromEdges(edges, labels, kinds);
 }
 
 // ---------------------------------------------------------------- funnel
@@ -572,4 +641,148 @@ export function calloutKind(name: string): CalloutKind | null {
   if (["success", "ok"].includes(k)) return "success";
   if (["error", "failure"].includes(k)) return "error";
   return null;
+}
+
+// ---------------------------------------------------------------- sequence
+
+export type SequenceItem =
+  | { kind: "msg"; from: number; to: number; text: string; reply: boolean }
+  | { kind: "note"; actor: number; text: string }
+  /** A `loop` / `alt` / `opt` / `else` section spanning items[start..end] (inclusive). */
+  | { kind: "block"; label: string; start: number; end: number };
+
+export interface Sequence {
+  actors: string[];
+  items: SequenceItem[];
+}
+
+const SEQ_MAX_ACTORS = 8;
+const SEQ_MAX_MSGS = 40;
+
+/**
+ * ```sequence (also mermaid `sequenceDiagram`): `Caller -> Callee: message` per line (`->>`,
+ * `-->>`, `-->` accepted; dashed = reply). Optional `participant X [as Y]`, `note over X: text`
+ * / `note right of X: text`, and `loop label` / `alt label` / `else label` / `opt label` … `end`
+ * blocks. Null when any line is not one of these, or on > 8 actors / > 40 messages.
+ */
+export function parseSequence(src: string): Sequence | null {
+  const lines = src.split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("%%"));
+  if (lines.length === 0 || lines.length > 120) return null;
+  const actors: string[] = [];
+  const idx = new Map<string, number>();
+  const actor = (raw: string): number => {
+    const name = raw.trim();
+    let i = idx.get(name);
+    if (i === undefined) {
+      i = actors.length;
+      actors.push(name);
+      idx.set(name, i);
+    }
+    return i;
+  };
+  const items: SequenceItem[] = [];
+  const open: { label: string; start: number }[] = [];
+  let msgs = 0;
+  for (const [n, line] of lines.entries()) {
+    if (n === 0 && /^sequenceDiagram$/i.test(line)) continue;
+    if (/^(autonumber|activate|deactivate|title|accTitle|accDescr)\b/i.test(line)) continue;
+    let m = line.match(/^participant\s+(\S+)(?:\s+as\s+(.+))?$/i) ?? line.match(/^actor\s+(\S+)(?:\s+as\s+(.+))?$/i);
+    if (m) {
+      actor(m[2] ?? m[1]);
+      if (m[2]) idx.set(m[1], idx.get(m[2])!);
+      continue;
+    }
+    m = line.match(/^note\s+(?:over|(?:right|left)\s+of)\s+([^:,]+?)(?:\s*,\s*[^:]+)?\s*:\s*(.+)$/i);
+    if (m) {
+      items.push({ kind: "note", actor: actor(m[1]), text: m[2].trim() });
+      continue;
+    }
+    m = line.match(/^(loop|alt|opt|par|critical|break|rect)\b\s*(.*)$/i);
+    if (m) {
+      open.push({ label: m[2].trim() || m[1].toLowerCase(), start: items.length });
+      continue;
+    }
+    m = line.match(/^(else|and)\b\s*(.*)$/i);
+    if (m) {
+      const cur = open.pop();
+      if (!cur) return null;
+      if (cur.start < items.length) items.push({ kind: "block", label: cur.label, start: cur.start, end: items.length - 1 });
+      open.push({ label: m[2].trim() || m[1].toLowerCase(), start: items.length });
+      continue;
+    }
+    if (/^end$/i.test(line)) {
+      const cur = open.pop();
+      if (!cur) return null;
+      if (cur.start < items.length) items.push({ kind: "block", label: cur.label, start: cur.start, end: items.length - 1 });
+      continue;
+    }
+    m = line.match(/^(.+?)\s*(-->>|->>|-->|->|—>|→|-x|--x|-\)|--\))\s*(.+?)\s*:\s*(.+)$/);
+    if (!m) return null;
+    const [, from, arrow, to, text] = m;
+    if (++msgs > SEQ_MAX_MSGS) return null;
+    items.push({ kind: "msg", from: actor(from), to: actor(to), text: text.trim(), reply: arrow.startsWith("--") });
+    if (actors.length > SEQ_MAX_ACTORS) return null;
+  }
+  if (open.length || msgs === 0 || actors.length < 2) return null;
+  return { actors, items };
+}
+
+// ---------------------------------------------------------------- findings
+
+export type Severity = "high" | "medium" | "low" | "info";
+
+export interface Finding {
+  severity: Severity;
+  where?: string;
+  text: string;
+}
+
+const SEVERITY_WORDS: Record<string, Severity> = {
+  critical: "high", blocker: "high", high: "high", severe: "high", major: "high", error: "high",
+  medium: "medium", moderate: "medium", warn: "medium", warning: "medium",
+  low: "low", minor: "low", nit: "low", trivial: "low",
+  info: "info", note: "info", informational: "info", suggestion: "info",
+};
+
+/** The severity a word like `High`, `[critical]`, `P1`-less "warn" names, or null. */
+export function severityOf(word: string): Severity | null {
+  return SEVERITY_WORDS[word.trim().toLowerCase().replace(/^\[|\]$/g, "")] ?? null;
+}
+
+export const SEVERITY_RANK: Record<Severity, number> = { high: 0, medium: 1, low: 2, info: 3 };
+
+/**
+ * ```findings (aliases `issues`, `risks`): one per line — `severity | where | what`,
+ * `[severity] where — what`, or `severity: what`. Null when any line lacks a severity word.
+ */
+export function parseFindings(src: string): Finding[] | null {
+  const lines = src.split("\n").map((l) => l.trim().replace(/^[-*•]\s+/, "")).filter(Boolean);
+  if (lines.length === 0 || lines.length > 40) return null;
+  const out: Finding[] = [];
+  for (const line of lines) {
+    let f: Finding | null = null;
+    if (line.includes("|")) {
+      const parts = line.split("|").map((p) => p.trim());
+      const severity = severityOf(parts[0]);
+      if (!severity || parts.length < 2) return null;
+      const where = parts.length >= 3 ? parts[1] : undefined;
+      const text = parts.slice(parts.length >= 3 ? 2 : 1).filter(Boolean).join(" — ");
+      f = { severity, where: where || undefined, text };
+    } else {
+      const bracket = line.match(/^\[([^\]]+)\]\s*(.+?)\s+[—–-]\s+(.+)$/) ?? line.match(/^\[([^\]]+)\]\s*(.+?)\s*:\s+(.+)$/);
+      const colon = bracket ? null : line.match(/^([A-Za-z]+)\s*[:\-–—]\s*(.+)$/);
+      const m = bracket ?? colon;
+      const severity = m ? severityOf(m[1]) : null;
+      if (!m || !severity) return null;
+      f = bracket ? { severity, where: bracket[2].trim(), text: bracket[3].trim() } : { severity, text: m[2].trim() };
+    }
+    if (!f.text) return null;
+    out.push(f);
+  }
+  return out;
+}
+
+/** Stable severity-descending order for rendering. */
+export function sortFindings(items: Finding[]): Finding[] {
+  return items.map((f, i) => [f, i] as const).sort((a, b) => SEVERITY_RANK[a[0].severity] - SEVERITY_RANK[b[0].severity] || a[1] - b[1]).map(([f]) => f);
 }

@@ -12,12 +12,13 @@ import { smartBlock, tableFromMarkdown } from "@/components/viz/SmartBlock"
 import { ChecklistCard, taskItems } from "@/components/viz/ChecklistCard"
 import { DefinitionListBlock, StatusListBlock, listItemTexts } from "@/components/viz/ListBlocks"
 import { LinksBlock } from "@/components/viz/AutoBlocks"
-import { parseDefinitions, parseLinks, parseStatusItems } from "@/lib/viz-auto"
+import { parseDefinitions, parseLinks, parseStatusItems, procedureFromItems } from "@/lib/viz-auto"
 import { CalloutBlock, alertFromBlockquote } from "@/components/viz/CalloutBlock"
 import { calloutKind } from "@/lib/viz-extra"
 import { nodeText } from "@/lib/viz"
 import { progressFromItems, tableWorthRich } from "@/lib/viz-tool-output"
 import { ProgressBlock } from "@/components/viz/SmallBlocks"
+import { StepsBlock } from "@/components/viz/TimelineBlock"
 import { COPY_LANG, splitLiveTag } from "@/lib/viz-identity"
 import { LiveCopyRow, LiveSlotContext } from "@/components/viz/live-blocks"
 
@@ -137,6 +138,20 @@ const INITIAL_COMPONENTS: Partial<Components> = {
       if (defs) return <DefinitionListBlock items={defs} />
     }
     return <ul {...props}>{children}</ul>
+  },
+  // Numbered walkthroughs ("1. Exits early… 2. Selects… 3. Groups…") upgrade to a plain procedure
+  // card when most items open with a verb; narrative numbered lists stay stock. The rendered `<li>`
+  // children stay as the step titles so inline code chips survive the upgrade.
+  ol: function OrderedListComponent({ children, node: _node, ...props }) {
+    const texts = listItemTexts(children)
+    const steps = texts ? procedureFromItems(texts) : null
+    if (steps && texts) {
+      const titles = Children.toArray(children)
+        .filter((li): li is ReactElement<{ children?: ReactNode }> => isValidElement(li))
+        .map((li) => li.props.children)
+      if (titles.length === steps.length) return <StepsBlock steps={steps.map((s, i) => ({ ...s, title: titles[i] }))} source={texts.map((t, i) => `${i + 1}. ${t}`).join("\n")} />
+    }
+    return <ol {...props}>{children}</ol>
   },
   pre: function PreComponent({ children }) {
     return <>{children}</>

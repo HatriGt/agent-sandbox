@@ -12,6 +12,7 @@ export function seriesColor(i: number): string {
 const SKELETON_TITLE: Record<string, string> = {
   chart: "Drawing chart", json: "Reading JSON", jsonc: "Reading JSON", stats: "Collecting metrics", timeline: "Building timeline",
   steps: "Listing steps", progress: "Measuring progress", tests: "Reading test results", log: "Reading log", flow: "Tracing flow",
+  sequence: "Drawing sequence", findings: "Ranking findings",
 };
 
 /**
@@ -19,7 +20,7 @@ const SKELETON_TITLE: Record<string, string> = {
  * and header as the finished block, so the swap to the real block is a fill-in, not a jump.
  */
 export function VizSkeleton({ language }: { language: string }) {
-  const tall = language === "chart" || language === "heatmap" || language === "graph" || language === "dag";
+  const tall = language === "chart" || language === "heatmap" || language === "graph" || language === "dag" || language === "sequence";
   return (
     <div className="bg-card not-prose enter my-3 overflow-hidden rounded-xl border" aria-busy="true" data-viz-skeleton={language}>
       <div className="flex h-8 items-center border-b px-3">

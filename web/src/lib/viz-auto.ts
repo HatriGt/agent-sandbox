@@ -6,7 +6,7 @@
  * is confident; `sniffBare` tries them in an order that keeps look-alikes apart (an env file is
  * not kv, a stack trace is not a log, a psql grid is not CSV). Pure; covered by test/viz-auto.test.ts.
  */
-import { looksLikeCommits, looksLikeDiffstat, parseBadges, parseDag, parseHttp, parseKv, parseProgress, parseSteps, parseTests, parseTimeline } from "./viz-extra";
+import { dagFromEdges, looksLikeCommits, looksLikeDiffstat, parseBadges, parseDag, parseHttp, parseKv, parseProgress, parseSequence, parseSteps, parseTests, parseTimeline, type Step } from "./viz-extra";
 import { looksLikeTree } from "./viz";
 import type { AutoBlock, Columns, CommandLine, Comparison, CronSpec, Definition, EnvVar, FileEntry, IniSection, JwtDecoded, LinkItem, SemverRow, StackFrame, StackTrace, StatusItem, UrlParts } from "./viz-auto-types";
 
@@ -561,37 +561,71 @@ export function parseSemver(src: string): SemverRow[] | null {
 
 // ---------------------------------------------------------------- mermaid flowchart
 
-/** `graph LR` / `flowchart TD` edges → label pairs for the DAG renderer. Labels replace ids. */
-export function parseMermaidFlow(src: string): [string, string][] | null {
+export interface MermaidFlow {
+  edges: [string, string][];
+  /** Parallel to `edges`: the `-->|label|` text, if any. */
+  labels: (string | undefined)[];
+  /** Node display names drawn as `{ }` (decision) or `(( ))` (terminal). */
+  kinds: Record<string, "decision" | "terminal">;
+}
+
+/** `graph LR` / `flowchart TD` edges → named pairs for the DAG renderer, with edge labels and node shapes. Labels replace ids. */
+export function parseMermaidFlow(src: string): MermaidFlow | null {
   const ls = nonEmpty(src).map((l) => l.trim()).filter((l) => !l.startsWith("%%"));
   if (ls.length < 2 || !/^(graph|flowchart)\s+(TD|TB|LR|RL|BT)\b/i.test(ls[0])) return null;
-  const labels = new Map<string, string>();
+  const names = new Map<string, string>();
+  const shapes = new Map<string, "decision" | "terminal">();
   const node = (s: string): string | null => {
-    const m = s.trim().match(/^([\w.-]+)\s*(?:\[\[?"?([^\]"]+)"?\]?\]|\(\(?"?([^)"]+)"?\)?\)|\{"?([^}"]+)"?\}|>"?([^\]"]+)"?\])?$/);
+    const m = s.trim().match(/^([\w.-]+)\s*(?:\[\[?"?([^\]"]+)"?\]?\]|\(\(("?[^)"]+"?)\)\)|\("?([^)"]+)"?\)|\{"?([^}"]+)"?\}|>"?([^\]"]+)"?\])?$/);
     if (!m) return null;
-    const label = (m[2] ?? m[3] ?? m[4] ?? m[5])?.trim();
-    if (label) labels.set(m[1], label);
+    const label = (m[2] ?? m[3] ?? m[4] ?? m[5] ?? m[6])?.replace(/"/g, "").trim();
+    if (label) names.set(m[1], label);
+    if (m[3] !== undefined) shapes.set(m[1], "terminal");
+    else if (m[5] !== undefined) shapes.set(m[1], "decision");
     return m[1];
   };
   const edges: [string, string][] = [];
+  const labels: (string | undefined)[] = [];
+  const ARROW = /\s*(?:-->|---|-\.->|==>|-\.-|~~~)(\|[^|]*\|)?\s*/;
   for (const l of ls.slice(1)) {
     if (/^(subgraph|end|classDef|class|style|click|linkStyle|direction)\b/.test(l)) continue;
     for (const stmt of l.split(";").map((s) => s.trim()).filter(Boolean)) {
-      const parts = stmt.split(/\s*(?:-->|---|-\.->|==>|-\.-|~~~)(?:\|[^|]*\|)?\s*/);
+      const parts = stmt.split(ARROW);
+      // split with one capture group alternates node, label|undefined, node, …
       if (parts.length === 1) {
         if (!node(parts[0])) return null;
         continue;
       }
-      for (let i = 0; i + 1 < parts.length; i++) {
+      for (let i = 0; i + 2 < parts.length; i += 2) {
         const a = node(parts[i]);
-        const b = node(parts[i + 1]);
+        const b = node(parts[i + 2]);
         if (!a || !b) return null;
         edges.push([a, b]);
+        labels.push(parts[i + 1]?.slice(1, -1).trim() || undefined);
       }
     }
   }
   if (edges.length === 0 || edges.length > 40) return null;
-  return edges.map(([a, b]) => [labels.get(a) ?? a, labels.get(b) ?? b]);
+  const kinds: Record<string, "decision" | "terminal"> = {};
+  for (const [id, k] of shapes) kinds[names.get(id) ?? id] = k;
+  return { edges: edges.map(([a, b]) => [names.get(a) ?? a, names.get(b) ?? b]), labels, kinds };
+}
+
+// ---------------------------------------------------------------- procedures (ordered lists)
+
+const IMPERATIVE_RE =
+  /^(?:\*\*)?(?:exits?|selects?|reads?|groups?|adds?|drops?|filters?|calls?|returns?|checks?|computes?|writes?|loads?|sends?|builds?|runs?|validates?|parses?|maps?|sorts?|deletes?|updates?|creates?|fetch(?:es)?|opens?|closes?|loops?|iterates?|collects?|sums?|if|when|for|then|otherwise|finally)\b/i;
+
+/**
+ * An ordinary ordered list that reads as a walkthrough (what a method does, step by step) → plain
+ * procedure steps. Gate: ≥ 4 items, each ≤ 220 chars, at least half opening with an imperative /
+ * present-tense verb. Null otherwise, so prose-y numbered lists stay stock markdown.
+ */
+export function procedureFromItems(texts: string[]): Step[] | null {
+  if (texts.length < 4 || texts.length > 60) return null;
+  if (texts.some((t) => !t.trim() || t.length > 220)) return null;
+  if (!mostly(texts, (t) => IMPERATIVE_RE.test(t.trim()), 0.5)) return null;
+  return texts.map((t) => ({ title: t.trim(), state: "plain" as const }));
 }
 
 // ---------------------------------------------------------------- lists (definitions / status)
@@ -674,7 +708,10 @@ export function sniffBare(code: string): AutoBlock | null {
   if (semver) return { kind: "semver", rows: semver };
   const cmp = parseComparison(src);
   if (cmp) return { kind: "comparison", rows: cmp };
-  if (looksLikeDagEdges(src) && parseDag(src)) return { kind: "dag", edges: [] };
+  if (looksLikeDagEdges(src)) {
+    const dag = parseDag(src);
+    if (dag) return { kind: "dag", dag };
+  }
   if (looksLikeCsv(src, "\t")) return { kind: "csv", delimiter: "\t" };
   if (looksLikeCsv(src, ",")) return { kind: "csv", delimiter: "," };
   const cols = parseFixedColumns(src);
@@ -726,8 +763,13 @@ export function sniffLanguage(language: string, code: string): AutoBlock | null 
       return e ? { kind: "env", vars: e } : null;
     }
     case "mermaid": {
-      const edges = parseMermaidFlow(src);
-      return edges ? { kind: "dag", edges } : null;
+      const flow = parseMermaidFlow(src);
+      if (flow) {
+        const dag = dagFromEdges(flow.edges, flow.labels, flow.kinds);
+        return dag ? { kind: "dag", dag } : null;
+      }
+      const seq = /^\s*sequenceDiagram\b/.test(src) ? parseSequence(src) : null;
+      return seq ? { kind: "sequence", sequence: seq } : null;
     }
     case "sh":
     case "bash":

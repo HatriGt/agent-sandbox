@@ -4,6 +4,7 @@
  * in lib/viz-auto.ts (pure, tested); renderers in components/viz/AutoBlocks.tsx. Every parser
  * returns null unless it is confident: the fallback is always the plain rendering.
  */
+import type { Dag, Sequence } from "./viz-extra";
 
 /** A `.env` / shell-export style listing. Secrets are detected by key name and masked by default. */
 export interface EnvVar {
@@ -138,7 +139,8 @@ export type AutoBlock =
   | { kind: "url"; url: UrlParts }
   | { kind: "jwt"; jwt: JwtDecoded }
   | { kind: "semver"; rows: SemverRow[] }
-  | { kind: "dag"; edges: [string, string][] }
+  | { kind: "dag"; dag: Dag }
+  | { kind: "sequence"; sequence: Sequence }
   | { kind: "progress"; rows: { label: string; value: number; max: number }[] }
   | { kind: "badges"; badges: { label: string; state: string }[] }
   | { kind: "http"; lines: string }

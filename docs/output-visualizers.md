@@ -59,11 +59,14 @@ away — the beautifier is presentation, never authority.
 | Indented YAML-looking bare fence, or ```yaml | JSON explorer (YAML subset; anchors/tags stay code) |
 | ```toml / ```ini / ```properties | INI panel |
 | ```env / ```dotenv | Env panel |
-| ```mermaid `graph LR` / `flowchart TD` | Layered graph (node labels replace ids) |
+| ```mermaid `graph LR` / `flowchart TD` | Layered graph (node labels replace ids; `-->|label|` edges, `{}` decisions, `(( ))` terminals kept) |
+| ```mermaid `sequenceDiagram` | Sequence diagram (same renderer as ```sequence) |
 | ```bash / ```sh / ```console with `$` prompts | Command card (scripts without prompts stay code) |
 | Markdown list where every item is `Term — detail` / `**Term** detail` (≥3) | Definition grid |
 | Markdown list where every item opens with ✅ ❌ ⚠️ ⏳ / PASS / FAIL … | Status list with a tally |
 | GFM table with one label column and 1–3 numeric columns (2–12 rows) | Data table with a Table ⇄ Chart switch (bar chart) |
+| GFM table with a Severity / Level / Risk / Priority column whose every cell is a severity word | Findings card (ranked, tallied) instead of the data table |
+| Ordered list (≥ 4 items, ≤ 220 chars each, no nesting) where at least half the items start with a verb (exits, selects, reads, calls, returns, if, then…) | Procedure — the ```steps walkthrough, inline code chips kept. A list of nouns stays a list |
 
 ### Opt-in fences (agents: prefer these when they fit)
 
@@ -81,8 +84,10 @@ away — the beautifier is presentation, never authority.
   progress. Renders a step pipeline with state chips.
 - **````csv``` / ````tsv```** — header + rows. Renders the same sortable data table.
 - **````timeline```** — `time | event | note?` per line; event may end ✓ ✗ …. Vertical event rail.
-- **````steps```** — numbered lines (`1. Install ✓`), indented detail lines under a step;
-  ✓ done, ✗ failed, … active. Vertical wizard.
+- **````steps``` / ````algorithm``` / ````procedure```** — numbered lines (`1. Install ✓`); ✓ done,
+  ✗ failed, … active. When NO step carries a mark it is a **walkthrough** (what a method does, in
+  order): every step full-contrast, numbered, no to-do greying. Indented `-` / `•` / `a)` lines
+  under a step become nested sub-steps. Vertical wizard.
 - **````progress```** — `label: 72%` or `label: 34/50` per line. Labeled progress bars.
 - **````kv```** — `key: value` per line. Two-column definition panel (configs, env summaries).
 - **````badges```** — `label: state` per line; tone inferred from the state word
@@ -97,8 +102,21 @@ away — the beautifier is presentation, never authority.
 - **````diffstat```** — git `--stat` rows, numstat, or `path +12 -3`. Changeset card.
 - **````commits```** — `git log --oneline` rows. Commit list.
 - **````deps```** — `name 1.2.3 → 2.0.0` per line. Upgrade table, semver jump toned.
-- **````graph``` / ````dag```** — `A -> B` edges (chains allowed), ≤ 24 nodes, acyclic.
-  Layered left→right SVG graph.
+- **````graph``` / ````dag```** — `A -> B` edges (chains allowed), ≤ 24 nodes, acyclic. Layered
+  left→right SVG graph; hover/pin a node to light its upstream and downstream. Code and business
+  flow extras: `A -> B: label` or `A -|label|-> B` labels an edge; `{Is open?}` is a decision
+  (diamond), `(Start)` / `((End))` a terminal (pill), `[Step]` a plain step. E.g.
+  `(Start) -> {Has BPs?} -|yes|-> Select docs -> Read open items -> ((End))` then
+  `{Has BPs?} -|no|-> ((End))`.
+- **````sequence```** — `Caller -> Callee: message` per line (`->>` same; `-->` / `-->>` = reply,
+  drawn dashed; `A -> A: …` = self call). Optional `participant X`, `note over X: text`,
+  `loop label` / `alt label` / `else` / `opt label` … `end` brackets. ≤ 8 participants, ≤ 40
+  messages. SVG with lifelines; hover a message to focus its row.
+- **````findings``` / ````issues``` / ````risks```** — one per line: `high | where | what`,
+  `[medium] where — what`, or `low: what`. Severity words: critical/high/blocker → high,
+  medium/moderate/warn → medium, low/minor/nit → low, info/note → info. Sorted by severity,
+  glyph + word pill, mono `where` chip, tally footer. A line without a severity → the whole fence
+  stays code.
 - **````funnel```** — `stage: value` per line, ordered. Funnel bars with conversion %.
 - **````gantt``` / ````spans```** — `label | start | end` per line (shared unit). Span chart
   (schedules, request waterfalls).
@@ -156,13 +174,26 @@ the colored terminal panel), like test runs and `TestResultsCard`. Never while t
 running, and only for output ≤ 200 lines / 20 KB (`toolOutputLanguage` in
 `web/src/lib/viz-tool-output.ts`) — bigger dumps stay raw.
 
-### Guidance for the agent (also injected via `AGENT_SYS_PROMPT` in `src/msb.ts`)
+### Guidance for the agent (also injected via the system prompts in `src/drivers/prompts.ts`)
 
 When presenting results (not code): tabular facts → a GFM table; progress → a task list or
 `label: NN%` items; a distribution/comparison/trend worth seeing → a ```chart fence; headline
 metrics → ```stats; file layout → ```tree; a pipeline outcome → ```flow. To update a block,
 re-emit it with the new values. Never force one — plain prose beats a mis-shaped visualization,
 and malformed fences just render as code.
+
+**Explaining code or a process — unprompted.** The 2026-10-05 review of a box thread (an agent
+walking through an ABAP method: a numbered "what it does", a severity-ranked bug table, a call
+chain in prose) rendered nothing rich even though every part had a shape. The prompt now tells the
+agent to draw these without being asked, and the console upgrades the prose forms too:
+
+| The agent is explaining… | Emit | Falls back to |
+|---|---|---|
+| Call chain, control flow, data flow, a business process | ```graph with `{decision}` nodes and `-|label|->` edges (or a mermaid flowchart) | — |
+| Who calls whom, in what order, with what reply | ```sequence (or mermaid `sequenceDiagram`) | — |
+| What a method / algorithm / job does, step by step | ```steps with no marks (a walkthrough) | A plain ordered list of verb-first items is auto-upgraded |
+| Bugs, risks, review results, ranked | ```findings `high \| where \| what` | A GFM table with a Severity column is auto-upgraded |
+| Which paths are dead / wasteful | ```findings with `low` / `info` rows, or a status list (❌/⚠️ items) | — |
 
 ### Watch mode (a monitoring loop the operator stops)
 

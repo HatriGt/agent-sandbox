@@ -392,7 +392,8 @@ export function tidyFence(language: string, src: string): string {
     return lines
       .map((l) => {
         if (/^\s*\d+[.)]\s/.test(l)) return unbold(l);
-        const m = l.match(/^\s*[-*•+]\s+(?:\[([ xX])\]\s+)?(.*)$/);
+        // Indented bullets are sub-steps (parseSteps keeps them under their step); only top-level bullets become steps.
+        const m = l.match(/^[-*•+]\s+(?:\[([ xX])\]\s+)?(.*)$/);
         if (!m) return l;
         n++;
         return `${n}. ${unbold(m[2])}${m[1] && m[1] !== " " ? " ✓" : ""}`;

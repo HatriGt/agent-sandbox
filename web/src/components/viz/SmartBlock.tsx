@@ -17,6 +17,8 @@ import {
   parseProgress,
   parseScores,
   parseSpans,
+  parseSequence,
+  parseFindings,
   parseSteps,
   parseTests,
   parseTimeline,
@@ -34,6 +36,8 @@ import { HttpBlock, LogBlock, TestsBlock } from "./OpsBlocks";
 import { BadgesBlock, KeysBlock, KvBlock, PaletteBlock, ProgressBlock, ScoreBlock } from "./SmallBlocks";
 import { StatsBlock } from "./StatsBlock";
 import { TimelineBlock, StepsBlock } from "./TimelineBlock";
+import { SequenceBlock } from "./SequenceBlock";
+import { FindingsBlock, findingsFromTable } from "./ReviewBlocks";
 import { TreeBlock } from "./TreeBlock";
 import { sniffBare, sniffLanguage } from "@/lib/viz-auto";
 import { completeLines, repairPartialJson } from "@/lib/viz-stream";
@@ -103,8 +107,10 @@ export function smartBlock(language: string, code: string, { open = false }: { o
       el = events && <TimelineBlock events={events} source={src} />;
       break;
     }
-    case "steps": {
-      const steps = parseSteps(tidy);
+    case "steps":
+    case "algorithm":
+    case "procedure": {
+      const steps = parseSteps(tidyFence("steps", src));
       el = steps && <StepsBlock steps={steps} source={src} />;
       break;
     }
@@ -175,6 +181,18 @@ export function smartBlock(language: string, code: string, { open = false }: { o
       el = dag && <GraphBlock dag={dag} source={src} />;
       break;
     }
+    case "sequence": {
+      const seq = parseSequence(src);
+      el = seq && <SequenceBlock sequence={seq} source={src} />;
+      break;
+    }
+    case "findings":
+    case "issues":
+    case "risks": {
+      const findings = parseFindings(src);
+      el = findings && <FindingsBlock findings={findings} source={src} />;
+      break;
+    }
     case "funnel": {
       const stages = parseFunnel(tidy);
       el = stages && <FunnelBlock stages={stages} source={src} />;
@@ -234,8 +252,8 @@ export function smartBlock(language: string, code: string, { open = false }: { o
 
 /** Fences whose content is line-oriented: a streaming one is parsed up to its last whole line. */
 const LINE_FENCES = new Set([
-  "stats", "flow", "tree", "csv", "tsv", "timeline", "steps", "progress", "kv", "badges", "score", "keys", "shortcuts",
-  "palette", "http", "tests", "log", "diffstat", "commits", "deps", "graph", "dag", "funnel", "gantt", "spans", "heatmap",
+  "stats", "flow", "tree", "csv", "tsv", "timeline", "steps", "algorithm", "procedure", "progress", "kv", "badges", "score", "keys", "shortcuts",
+  "palette", "http", "tests", "log", "diffstat", "commits", "deps", "graph", "dag", "sequence", "findings", "issues", "risks", "funnel", "gantt", "spans", "heatmap",
 ]);
 /** JSON fences: a streaming one is parsed from its repaired prefix. */
 const JSON_FENCES = new Set(["chart", "json", "jsonc"]);
@@ -276,10 +294,10 @@ function renderAuto(auto: AutoBlock | null, src: string): React.ReactElement | n
       return <JwtBlock jwt={auto.jwt} source={src} />;
     case "semver":
       return <DepsBlock deps={auto.rows} source={src} />;
-    case "dag": {
-      const dag = parseDag(auto.edges.length ? auto.edges.map(([a, b]) => `${a} -> ${b}`).join("\n") : src);
-      return dag && <GraphBlock dag={dag} source={src} />;
-    }
+    case "dag":
+      return <GraphBlock dag={auto.dag} source={src} />;
+    case "sequence":
+      return <SequenceBlock sequence={auto.sequence} source={src} />;
     case "progress": {
       const rows = parseProgress(src);
       return rows && <ProgressBlock rows={rows} source={src} />;
@@ -356,9 +374,11 @@ export function tableFromMarkdown(children: React.ReactNode): React.ReactElement
   if (!head || rows.length === 0 || rows.some((r) => r.length !== head!.length)) return null;
   const headTexts = head.map((h) => nodeText(h).trim());
   const source = [headTexts, ...texts].map((r) => r.join("\t")).join("\n");
+  // A severity-ranked review table reads better as findings than as a sortable grid.
+  const findings = findingsFromTable(headTexts, texts);
   return (
     <VizBoundary source={source}>
-      <DataTable head={headTexts.map((t, i) => t || head![i])} rows={rows} texts={texts} />
+      {findings ? <FindingsBlock findings={findings} source={source} /> : <DataTable head={headTexts.map((t, i) => t || head![i])} rows={rows} texts={texts} />}
     </VizBoundary>
   );
 }

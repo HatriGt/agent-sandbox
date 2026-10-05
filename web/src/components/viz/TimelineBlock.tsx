@@ -1,3 +1,4 @@
+import type * as React from "react";
 import { Check, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Step, TimelineEvent } from "@/lib/viz-extra";
@@ -39,8 +40,15 @@ export function TimelineBlock({ events, source }: { events: TimelineEvent[]; sou
   );
 }
 
-/** ```steps → the vertical wizard: numbered circles, connector line, done/active/failed states. */
-export function StepsBlock({ steps, source }: { steps: Step[]; source: string }) {
+/** A step whose title may carry rendered markdown (inline code chips) when it came from an `<ol>`. */
+export type StepView = Omit<Step, "title"> & { title: React.ReactNode };
+
+/**
+ * ```steps → the vertical wizard: numbered circles, connector line, done/active/failed states.
+ * A `plain` list (no marks anywhere) is a procedure: full-contrast titles and foreground numbers,
+ * because nothing is pending — it describes what happens, in order.
+ */
+export function StepsBlock({ steps, source }: { steps: StepView[]; source: string }) {
   const entrance = useRowEntrance(steps.map((_, i) => String(i)));
   return (
     <VizFrame source={source}>
@@ -54,7 +62,8 @@ export function StepsBlock({ steps, source }: { steps: Step[]; source: string })
                   s.state === "done" && "border-ok/50 text-ok",
                   s.state === "fail" && "border-destructive/50 text-destructive",
                   s.state === "active" && "border-live text-live viz-pulse",
-                  s.state === "todo" && "text-faint"
+                  s.state === "todo" && "text-faint",
+                  s.state === "plain" && "border-border text-foreground"
                 )}
               >
                 {s.state === "done" ? <Check className="viz-mark size-3" aria-label="done" /> : s.state === "fail" ? <X className="viz-mark size-3" aria-label="failed" /> : i + 1}
@@ -66,7 +75,16 @@ export function StepsBlock({ steps, source }: { steps: Step[]; source: string })
                 {s.title}
                 {s.state === "active" && <span className="text-live ml-1.5 text-micro">in progress</span>}
               </div>
-              {s.detail && <div className="text-faint text-micro">{s.detail}</div>}
+              {s.detail &&
+                (s.detail.includes("\n") ? (
+                  <ul className="text-muted-foreground m-0 mt-0.5 list-disc pl-4 text-micro leading-relaxed">
+                    {s.detail.split("\n").map((d, k) => (
+                      <li key={k}>{d}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div className="text-faint text-micro">{s.detail}</div>
+                ))}
             </div>
           </div>
         ))}
