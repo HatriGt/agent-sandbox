@@ -36,7 +36,7 @@ import { HttpBlock, LogBlock, TestsBlock } from "./OpsBlocks";
 import { BadgesBlock, KeysBlock, KvBlock, PaletteBlock, ProgressBlock, ScoreBlock } from "./SmallBlocks";
 import { StatsBlock } from "./StatsBlock";
 import { TimelineBlock, StepsBlock } from "./TimelineBlock";
-import { SequenceBlock } from "./SequenceBlock";
+import { MermaidBlock, SequenceBlock, mermaidKind } from "./MermaidBlock";
 import { FindingsBlock, findingsFromTable } from "./ReviewBlocks";
 import { TreeBlock } from "./TreeBlock";
 import { sniffBare, sniffLanguage } from "@/lib/viz-auto";
@@ -238,8 +238,19 @@ export function smartBlock(language: string, code: string, { open = false }: { o
       el = renderAuto(sniffBare(src), src);
       break;
     }
+    case "mermaid": {
+      // Flowcharts our parser understands draw on the xyflow canvas; every other mermaid diagram
+      // (sequence, state, class, er, gantt, pie, mindmap, timeline…) is drawn by mermaid itself.
+      const auto = sniffLanguage(language, src);
+      if (auto?.kind === "dag") el = renderAuto(auto, src);
+      else {
+        const kind = mermaidKind(src);
+        el = kind ? <MermaidBlock source={src} kind={kind} /> : null;
+      }
+      break;
+    }
     default: {
-      // A language the router does not render rich on its own: yaml, toml/ini, env, mermaid, a
+      // A language the router does not render rich on its own: yaml, toml/ini, env, a
       // `$`-prompted shell session.
       el = renderAuto(sniffLanguage(language, src), src);
     }

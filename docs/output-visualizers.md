@@ -61,6 +61,7 @@ away — the beautifier is presentation, never authority.
 | ```env / ```dotenv | Env panel |
 | ```mermaid `graph LR` / `flowchart TD` | Layered graph (node labels replace ids; `-->|label|` edges, `{}` decisions, `(( ))` terminals kept) |
 | ```mermaid `sequenceDiagram` | Sequence diagram (same renderer as ```sequence) |
+| ```mermaid `stateDiagram` / `classDiagram` / `erDiagram` / `gantt` / `journey` / `pie` / `mindmap` / `timeline` (and flowcharts our parser can't read) | Drawn by mermaid itself, themed from tokens; a render error shows the source as code |
 | ```bash / ```sh / ```console with `$` prompts | Command card (scripts without prompts stay code) |
 | Markdown list where every item is `Term — detail` / `**Term** detail` (≥3) | Definition grid |
 | Markdown list where every item opens with ✅ ❌ ⚠️ ⏳ / PASS / FAIL … | Status list with a tally |
@@ -103,7 +104,7 @@ away — the beautifier is presentation, never authority.
 - **````commits```** — `git log --oneline` rows. Commit list.
 - **````deps```** — `name 1.2.3 → 2.0.0` per line. Upgrade table, semver jump toned.
 - **````graph``` / ````dag```** — `A -> B` edges (chains allowed), ≤ 24 nodes, acyclic. Layered
-  left→right SVG graph; hover/pin a node to light its upstream and downstream. Code and business
+  left→right graph (xyflow canvas, dagre layout; top→bottom when deep and narrow); hover/pin a node to light its upstream and downstream. Code and business
   flow extras: `A -> B: label` or `A -|label|-> B` labels an edge; `{Is open?}` is a decision
   (diamond), `(Start)` / `((End))` a terminal (pill), `[Step]` a plain step. E.g.
   `(Start) -> {Has BPs?} -|yes|-> Select docs -> Read open items -> ((End))` then
@@ -111,7 +112,7 @@ away — the beautifier is presentation, never authority.
 - **````sequence```** — `Caller -> Callee: message` per line (`->>` same; `-->` / `-->>` = reply,
   drawn dashed; `A -> A: …` = self call). Optional `participant X`, `note over X: text`,
   `loop label` / `alt label` / `else` / `opt label` … `end` brackets. ≤ 8 participants, ≤ 40
-  messages. SVG with lifelines; hover a message to focus its row.
+  messages. Drawn by mermaid (our parse is re-serialized to `sequenceDiagram`); the hand SVG is the fallback if mermaid fails.
 - **````findings``` / ````issues``` / ````risks```** — one per line: `high | where | what`,
   `[medium] where — what`, or `low: what`. Severity words: critical/high/blocker → high,
   medium/moderate/warn → medium, low/minor/nit → low, info/note → info. Sorted by severity,
@@ -243,13 +244,18 @@ and the console's own `web/DESIGN.md` — which always wins on tokens and voice.
    looped, never re-triggered by streaming re-renders; `prefers-reduced-motion` renders static
    (the global rule zeroes durations — keep animations in CSS classes so it applies).
 5. **Cards are quiet**: `bg-card` + hairline border (one elevation cue — border or shadow, never
-   both), `rounded-xl`, an 8-height header strip with title, copy, and the raw toggle
-   (`VizFrame`). Concentric radii: inner = outer − padding.
+   both), `rounded-xl`, an 8-height header strip with title, copy, the raw toggle, and a maximize
+   button (`VizFrame`) that opens the block in a ~96vw×92vh dialog with zoom (buttons, `+`/`-`/`0`,
+   Ctrl/⌘+wheel, drag to pan; graphs use their own interactive canvas). Concentric radii: inner = outer − padding.
 6. **Hover layer by default**: per-mark tooltips with hit targets bigger than the mark
    (transparent ≥ 8px circles over 2px lines).
 7. **Numbers**: `tabular-nums` only where columns must align (tables, deltas); hero values in
    stat tiles stay proportional.
-8. **Pure SVG + tokens, no chart library.** Zero bundle cost, live theme following.
+8. **Charts are pure SVG + tokens; diagrams use libraries.** Charts, bars and tiles stay hand-drawn
+   SVG (zero bundle cost, live theme following). Diagrams use `@xyflow/react` + `@dagrejs/dagre`
+   (graphs) and `mermaid` (sequence and every other mermaid kind) — always lazy-loaded into their
+   own chunks, themed from the CSS tokens (`--xy-*` overrides; mermaid `themeVariables` read from
+   computed tokens, re-rendered on theme change).
 9. **Degrade, never break**: bound input sizes in the parser, return `null` on anything odd,
    keep the raw source reachable.
 

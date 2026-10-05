@@ -17,7 +17,21 @@ const Dialog = DialogPrimitive.Root;
 const DialogTrigger = DialogPrimitive.Trigger;
 const DialogClose = DialogPrimitive.Close;
 
-function DialogContent({ className, children, title, description, ...props }: React.ComponentProps<typeof DialogPrimitive.Content> & { title: string; description?: string }) {
+function DialogContent({
+  className,
+  children,
+  title,
+  description,
+  actions,
+  bodyClassName,
+  ...props
+}: React.ComponentProps<typeof DialogPrimitive.Content> & {
+  title: string;
+  description?: string;
+  /** Extra header controls, placed before the close button. */
+  actions?: React.ReactNode;
+  bodyClassName?: string;
+}) {
   return (
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay data-slot="overlay" className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[2px] data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:duration-[240ms] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:duration-[180ms]" />
@@ -46,11 +60,12 @@ function DialogContent({ className, children, title, description, ...props }: Re
             <DialogPrimitive.Title className="text-foreground text-h3 font-semibold tracking-[-0.01em]">{title}</DialogPrimitive.Title>
             {description && <DialogPrimitive.Description className="text-muted-foreground mt-1 text-meta">{description}</DialogPrimitive.Description>}
           </div>
+          {actions}
           <DialogPrimitive.Close className="text-muted-foreground hover:text-foreground hover:bg-muted grid size-8 shrink-0 cursor-pointer place-items-center rounded-md transition-colors" aria-label="Close">
             <X className="size-4" />
           </DialogPrimitive.Close>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6">{children}</div>
+        <div className={cn("min-h-0 flex-1 overflow-y-auto px-6 pb-6", bodyClassName)}>{children}</div>
       </DialogPrimitive.Content>
     </DialogPrimitive.Portal>
   );

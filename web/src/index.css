@@ -1387,3 +1387,43 @@
     box-shadow: inset 3px 0 0 var(--foreground);
   }
 }
+
+/* xyflow (GraphCanvas, lazy chunk): its stylesheet reads `--xy-*` with built-in defaults; point
+   them at our tokens so the canvas follows light/dark with no second palette. */
+.asb-flow .react-flow {
+  --xy-background-color: transparent;
+  --xy-background-pattern-dots-color: var(--line-strong);
+  --xy-edge-stroke: var(--muted-foreground);
+  --xy-edge-stroke-selected: var(--foreground);
+  --xy-edge-label-background-color: var(--card);
+  --xy-edge-label-color: var(--muted-foreground);
+  --xy-node-background-color: transparent;
+  --xy-node-border: none;
+  --xy-node-border-radius: 0;
+  --xy-node-boxshadow-hover: none;
+  --xy-node-boxshadow-selected: none;
+  --xy-node-color: var(--foreground);
+  --xy-controls-button-background-color: var(--card);
+  --xy-controls-button-background-color-hover: var(--muted);
+  --xy-controls-button-color: var(--muted-foreground);
+  --xy-controls-button-color-hover: var(--foreground);
+  --xy-controls-button-border-color: var(--border);
+  --xy-controls-box-shadow: var(--shadow-e1);
+  --xy-minimap-background-color: var(--card);
+  --xy-minimap-mask-background-color: color-mix(in oklch, var(--muted) 70%, transparent);
+  --xy-minimap-mask-stroke-color: var(--border);
+  --xy-minimap-node-background-color: var(--muted);
+  --xy-minimap-node-stroke-color: var(--line-strong);
+  font-family: var(--font-sans);
+}
+.asb-flow .react-flow__node { padding: 0; border: 0; background: transparent; box-shadow: none; }
+.asb-flow .react-flow__node:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 0.5rem; }
+.asb-flow .react-flow__controls { border-radius: 0.5rem; overflow: hidden; border: 1px solid var(--border); }
+.asb-flow .react-flow__controls-button { border-bottom-color: var(--border); }
+.asb-flow .react-flow__controls-button svg { fill: currentColor; }
+.asb-flow .react-flow__minimap { border-radius: 0.5rem; border: 1px solid var(--border); overflow: hidden; }
+
+/* Mermaid SVG (MermaidBlock): centred at its natural size, never wider than the card. */
+.mermaid-diagram { display: flex; justify-content: center; overflow-x: auto; }
+.mermaid-diagram svg { height: auto; max-width: 100%; max-height: 28rem; }
+[data-viz-fullscreen] .mermaid-diagram svg { max-height: none; }

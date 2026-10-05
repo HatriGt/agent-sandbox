@@ -1,7 +1,6 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 import type { Sequence } from "@/lib/viz-extra";
-import { VizFrame } from "./VizFrame";
 
 const LANE_W = 150;
 const HEAD_H = 28;
@@ -12,13 +11,13 @@ const PAD_TOP = 8;
 const CHAR_W = 6;
 
 /**
- * ```sequence → a UML-ish sequence diagram. Actors across the top, hairline lifelines, one row
- * per message with an arrowhead toward the callee; replies (`-->`) are dashed. Notes are small
- * card chips on a lane, `loop` / `alt` / `opt` blocks a labelled bracket around their rows.
- * Hovering a message lifts its row and dims the rest, so a 30-message exchange can be read one
- * step at a time. Headers are not repeated at the bottom: the lifelines already say who is who.
+ * The hand-drawn SVG sequence diagram, kept as the fallback when mermaid (DiagramBlocks.tsx)
+ * fails to load or render. Actors across the top, hairline lifelines, one row per message with an
+ * arrowhead toward the callee; replies (`-->`) are dashed. Notes are card chips on a lane,
+ * `loop` / `alt` / `opt` blocks a labelled bracket. Hovering a message dims the rest. Body only:
+ * the caller supplies the VizFrame.
  */
-export function SequenceBlock({ sequence, source }: { sequence: Sequence; source: string }) {
+export function SequenceFallback({ sequence }: { sequence: Sequence }) {
   const { actors, items } = sequence;
   const [hover, setHover] = React.useState<number | null>(null);
 
@@ -41,7 +40,6 @@ export function SequenceBlock({ sequence, source }: { sequence: Sequence; source
 
   const { rowY, W, H } = layout;
   const laneX = (i: number) => PAD_X + i * LANE_W + LANE_W / 2;
-  const msgs = items.filter((i) => i.kind === "msg").length;
   const fade = "transition-opacity duration-150 motion-reduce:transition-none";
   const dim = (i: number) => hover !== null && hover !== i;
   // Blocks nest by containment; outer ones draw a touch wider than inner ones.
@@ -49,7 +47,7 @@ export function SequenceBlock({ sequence, source }: { sequence: Sequence; source
   const depthOf = (b: (typeof blocks)[number]) => blocks.filter((o) => o !== b && o.start <= b.start && o.end >= b.end).length;
 
   return (
-    <VizFrame title={`${actors.length} participants · ${msgs} message${msgs === 1 ? "" : "s"}`} source={source}>
+    <>
       <div className="overflow-x-auto px-4 py-3" onMouseLeave={() => setHover(null)}>
         <svg viewBox={`0 0 ${W} ${H}`} width={W} height={H} className="block" role="group" aria-label="sequence diagram — hover a message to isolate it">
           {/* lifelines + headers */}
@@ -151,6 +149,6 @@ export function SequenceBlock({ sequence, source }: { sequence: Sequence; source
           })}
         </svg>
       </div>
-    </VizFrame>
+    </>
   );
 }

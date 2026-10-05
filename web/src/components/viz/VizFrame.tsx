@@ -1,8 +1,9 @@
 import * as React from "react";
-import { Check, Copy, Code2 } from "lucide-react";
+import { Check, Copy, Code2, Maximize2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CodeBlock, CodeBlockCode } from "@/components/ui/code-block";
 import { LiveSlotBadge, LiveSlotContext, useLiveSlotTitle } from "./live-blocks";
+import { VizFullscreen, VizFullscreenContext } from "./viz-fullscreen";
 
 /** Fixed categorical slot → CSS var. Never cycles: callers cap series at 8 upstream. */
 export function seriesColor(i: number): string {
@@ -26,20 +27,27 @@ export function VizSkeleton({ language }: { language: string }) {
       <div className="flex h-8 items-center border-b px-3">
         <span className="shimmer-text text-micro font-medium">{SKELETON_TITLE[language] ?? "Drawing"}…</span>
       </div>
-      <div className={cn("flex flex-col justify-end gap-2 px-4 py-3", tall ? "h-44" : "h-16")} aria-hidden>
-        {tall ? (
-          <div className="flex h-full items-end gap-1.5">
-            {[40, 65, 50, 80, 35, 60].map((h, i) => (
-              <span key={i} className="shimmer flex-1 rounded-t" style={{ height: `${h}%` }} />
-            ))}
-          </div>
-        ) : (
-          <>
-            <span className="shimmer block h-3 w-2/3 rounded" />
-            <span className="shimmer block h-3 w-1/3 rounded" />
-          </>
-        )}
-      </div>
+      <VizShimmer tall={tall} />
+    </div>
+  );
+}
+
+/** Shimmer body for a block still drawing: the skeleton's body, and mermaid's while it renders. */
+export function VizShimmer({ tall }: { tall: boolean }) {
+  return (
+    <div className={cn("flex flex-col justify-end gap-2 px-4 py-3", tall ? "h-44" : "h-16")} aria-hidden>
+      {tall ? (
+        <div className="flex h-full items-end gap-1.5">
+          {[40, 65, 50, 80, 35, 60].map((h, i) => (
+            <span key={i} className="shimmer flex-1 rounded-t" style={{ height: `${h}%` }} />
+          ))}
+        </div>
+      ) : (
+        <>
+          <span className="shimmer block h-3 w-2/3 rounded" />
+          <span className="shimmer block h-3 w-1/3 rounded" />
+        </>
+      )}
     </div>
   );
 }
@@ -48,7 +56,8 @@ export function VizSkeleton({ language }: { language: string }) {
  * The shared card every visualizer sits in: hairline border (no shadow — one elevation cue per
  * surface), a quiet header with an optional title, copy-source, and a raw toggle that swaps the
  * rendered view for the original fence text. The raw view is the trust anchor: nothing the
- * beautifier draws is more authoritative than what the agent actually wrote.
+ * beautifier draws is more authoritative than what the agent actually wrote. Maximize opens the
+ * same body in a fullscreen dialog with zoom (viz-fullscreen.tsx); `ownsZoom` blocks draw their own.
  */
 export function VizFrame({
   title,
@@ -57,6 +66,7 @@ export function VizFrame({
   actions,
   children,
   className,
+  ownsZoom,
 }: {
   title?: string;
   /** Original fence text, powering both the copy action and the raw toggle. */
@@ -65,12 +75,18 @@ export function VizFrame({
   actions?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
+  /** The body pans/zooms itself in fullscreen (reads VizFullscreenContext); skip the generic zoom. */
+  ownsZoom?: boolean;
 }) {
   const [raw, setRaw] = React.useState(false);
   // A live slot (a block the agent keeps re-emitting) names itself and shows its update age.
   const slot = React.useContext(LiveSlotContext);
   const slotTitle = useLiveSlotTitle();
   const [copied, setCopied] = React.useState(false);
+  const [full, setFull] = React.useState(false);
+  // Already inside a fullscreen dialog (a nested card): no second maximize.
+  const inFullscreen = React.useContext(VizFullscreenContext);
+  const quiet = "text-muted-foreground hover:text-foreground grid size-6 cursor-pointer place-items-center rounded-md opacity-60 group-hover/viz:opacity-100 focus-visible:opacity-100";
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(source);
@@ -87,12 +103,7 @@ export function VizFrame({
         <LiveSlotBadge />
         {actions}
         {/* Utility controls stay quiet until the card is engaged — same reveal as code blocks. */}
-        <button
-          type="button"
-          onClick={copy}
-          aria-label="Copy source"
-          className="text-muted-foreground hover:text-foreground grid size-6 cursor-pointer place-items-center rounded-md opacity-60 group-hover/viz:opacity-100 focus-visible:opacity-100"
-        >
+        <button type="button" onClick={copy} aria-label="Copy source" className={quiet}>
           {copied ? <Check className="pop-in size-3.5 text-ok" /> : <Copy className="size-3.5" />}
         </button>
         <button
@@ -107,6 +118,11 @@ export function VizFrame({
         >
           <Code2 className="size-3.5" />
         </button>
+        {!inFullscreen && (
+          <button type="button" onClick={() => setFull(true)} aria-label="Open fullscreen" className={quiet} data-viz-maximize>
+            <Maximize2 className="size-3.5" />
+          </button>
+        )}
       </div>
       {/* Keyed wrapper: toggling raw ↔ rendered cross-fades instead of hard-swapping. */}
       {raw ? (
@@ -117,6 +133,11 @@ export function VizFrame({
         </div>
       ) : (
         <div key="viz" className="enter">{children}</div>
+      )}
+      {full && (
+        <VizFullscreen open={full} onOpenChange={setFull} title={title ?? slotTitle ?? "Visualization"} ownsZoom={ownsZoom}>
+          {children}
+        </VizFullscreen>
       )}
     </div>
   );

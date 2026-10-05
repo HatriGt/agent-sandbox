@@ -200,6 +200,13 @@ and the opt-in fences `chart` / `stats` / `flow` / `tree` (taught to the agent v
 streaming reveal get it. Series colors are the CVD-validated `--viz-1…8`; every card carries a raw
 toggle; anything malformed falls back to a plain code block — a visualizer never loses content.
 
+**Diagram libraries.** Graphs (```graph / ```dag / mermaid flowcharts) render on `@xyflow/react`
+with a `@dagrejs/dagre` layout (`viz/GraphCanvas.tsx`); sequence diagrams and every other mermaid
+kind render with `mermaid` (`viz/MermaidBlock.tsx`). Both are `import()`ed on demand — never in the
+main chunk — and themed from tokens (`.asb-flow` `--xy-*` overrides in `index.css`; mermaid
+`themeVariables` resolved from computed CSS vars, re-rendered when `.dark` flips). Charts stay
+hand-drawn SVG. Every `VizFrame` card has a maximize button: fullscreen dialog with zoom/pan.
+
 ## Sending
 
 The composer echoes a message the instant Enter is pressed (withdrawn only if delivery fails); the
