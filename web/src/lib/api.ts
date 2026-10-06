@@ -1082,8 +1082,25 @@ export const api = {
     post<{ text: string; missing: string[]; hasPayload: boolean }>("/triggers/preview.json", { taskTemplate, id, name }),
 };
 
-export type AutomationKind = "schedule" | "webhook" | "github" | "chain";
+export type AutomationKind = "schedule" | "webhook" | "github" | "chain" | "watch";
 export type GithubEvent = "issue_labeled" | "issue_comment" | "pr_opened";
+/** Repo-activity events the controller polls GitHub for (kind "watch"); no webhook involved. */
+export type WatchEvent =
+  | "pr_opened"
+  | "pr_pushed"
+  | "pr_ready"
+  | "pr_merged"
+  | "pr_closed"
+  | "pr_reopened"
+  | "issue_opened"
+  | "issue_closed"
+  | "issue_reopened"
+  | "issue_labeled"
+  | "comment_created"
+  | "push"
+  | "run_failed"
+  | "run_succeeded"
+  | "release_published";
 export interface AutomationSpec {
   /** PR follow-ups for this automation's PRs; unset = the user's default. */
   keepGreen?: boolean;
@@ -1096,6 +1113,10 @@ export interface AutomationSpec {
   label?: string;
   command?: string;
   allowForks?: boolean;
+  /** kind "watch": the events that fire it (non-empty). */
+  watch?: WatchEvent[];
+  /** kind "watch": `push` branch (default = repo default branch); `run_*` filter (unset = any branch). */
+  branch?: string;
   afterTrigger?: string;
   on?: "done" | "any";
   carry?: "patch" | "none";

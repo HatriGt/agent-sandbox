@@ -392,6 +392,19 @@ const MIGRATIONS: string[] = [
   ALTER TABLE triggers ADD COLUMN scope TEXT NOT NULL DEFAULT 'automation';
   UPDATE triggers SET scope = 'scheduled' WHERE source_box IS NOT NULL;
   `,
+  `
+  -- Repo activity without a webhook (src/repo-watch.ts): per owner + repo + source (pulls, issues,
+  -- comments, runs, releases, push:<branch>, repo) the last ETag and the snapshot the next poll diffs against.
+  CREATE TABLE IF NOT EXISTS repo_watch (
+    owner TEXT NOT NULL,
+    repo TEXT NOT NULL,
+    source TEXT NOT NULL,
+    etag TEXT,
+    state_json TEXT,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (owner, repo, source)
+  );
+  `,
 ];
 
 export function openDb(dataDir: string): Db {

@@ -19,7 +19,7 @@ import { PressScale } from "@/components/motion";
 
 type Filter = "all" | AutomationScope;
 
-const KIND: Record<Automation["kind"], string> = { schedule: "Schedule", webhook: "Webhook", github: "GitHub", chain: "After another" };
+const KIND: Record<Automation["kind"], string> = { schedule: "Schedule", webhook: "Webhook", github: "GitHub", watch: "Repo activity", chain: "After another" };
 
 function resultLine(r: AutomationResult | null): { text: string; tone: "muted" | "ok" | "destructive" } | null {
   if (!r) return null;

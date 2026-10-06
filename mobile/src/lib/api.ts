@@ -565,8 +565,24 @@ export interface AutomationResult {
   reason?: string;
   finished?: { state: string; headline: string; archiveId?: number };
 }
-export type AutomationKind = "schedule" | "webhook" | "github" | "chain";
+export type AutomationKind = "schedule" | "webhook" | "github" | "watch" | "chain";
 export type GithubEvent = "issue_labeled" | "issue_comment" | "pr_opened";
+export type WatchEvent =
+  | "pr_opened"
+  | "pr_pushed"
+  | "pr_ready"
+  | "pr_merged"
+  | "pr_closed"
+  | "pr_reopened"
+  | "issue_opened"
+  | "issue_closed"
+  | "issue_reopened"
+  | "issue_labeled"
+  | "comment_created"
+  | "push"
+  | "run_failed"
+  | "run_succeeded"
+  | "release_published";
 export type AlertPreset = "sentry" | "datadog" | "pagerduty";
 export interface AutomationSpec {
   keepGreen?: boolean;
@@ -579,6 +595,10 @@ export interface AutomationSpec {
   label?: string;
   command?: string;
   allowForks?: boolean;
+  /** kind "watch": events that fire it (non-empty). */
+  watch?: WatchEvent[];
+  /** kind "watch": branch for `push` (default: repo default) and workflow runs (unset: any). */
+  branch?: string;
   afterTrigger?: string;
   on?: "done" | "any";
   carry?: "patch" | "none";

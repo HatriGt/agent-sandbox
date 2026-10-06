@@ -204,7 +204,7 @@ export function registerTriggerRoutes(app: Express, c: TriggerRouteCtx): void {
     if (t.kind === "chain") return void res.status(400).json({ error: "a chain runs after its parent â€” run the parent instead" });
     try {
       const payload = lastPayload(c.db, owner, t.id);
-      const match = t.kind === "github" && payload ? matchGithub(t.spec, t.repo ?? "", githubEventOf(t.spec.event), payload) : undefined;
+      const match = t.kind === "github" && payload ? matchGithub(t.spec, t.repo ?? "", githubEventOf(t.spec.event), payload) : t.kind === "watch" ? watchSubject(payload) : undefined;
       const result = await c.dispatcher.fire(t, { payload, manual: true, ...(match?.match ? { match } : {}) });
       res.json({ result });
     } catch (e) {
@@ -391,4 +391,12 @@ export function registerTriggerRoutes(app: Express, c: TriggerRouteCtx): void {
 
 function githubEventOf(e: string | undefined): string {
   return e === "issue_labeled" ? "issues" : e === "issue_comment" ? "issue_comment" : e === "pr_opened" ? "pull_request" : "";
+}
+
+/** Run now on a repo-activity automation: the issue/PR of its last change, so the receipt lands there. */
+function watchSubject(payload: unknown): { match: true; subject?: { kind: "issue" | "pr"; number: number } } {
+  const p = (payload && typeof payload === "object" ? payload : {}) as { pull_request?: { number?: number }; issue?: { number?: number; pull_request?: unknown } };
+  if (p.pull_request?.number) return { match: true, subject: { kind: "pr", number: p.pull_request.number } };
+  if (p.issue?.number) return { match: true, subject: { kind: p.issue.pull_request ? "pr" : "issue", number: p.issue.number } };
+  return { match: true };
 }

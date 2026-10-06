@@ -15,11 +15,28 @@
 import crypto from "node:crypto";
 import { ALERT_PRESETS, INCIDENT_HARNESS_ID, PRESET_LABEL, normalizeCooldown, type AlertPreset } from "./alert-presets.js";
 
-export type TriggerKind = "schedule" | "webhook" | "github" | "chain";
-export const TRIGGER_KINDS: readonly TriggerKind[] = ["schedule", "webhook", "github", "chain"];
+export type TriggerKind = "schedule" | "webhook" | "github" | "chain" | "watch";
+export const TRIGGER_KINDS: readonly TriggerKind[] = ["schedule", "webhook", "github", "chain", "watch"];
 
 export type GithubEvent = "issue_labeled" | "issue_comment" | "pr_opened";
 export const GITHUB_EVENTS: readonly GithubEvent[] = ["issue_labeled", "issue_comment", "pr_opened"];
+
+/** watch: repo changes the controller notices by polling GitHub (src/repo-watch.ts) — no webhook. */
+export type WatchEvent =
+  | "pr_opened" | "pr_pushed" | "pr_ready" | "pr_merged" | "pr_closed" | "pr_reopened"
+  | "issue_opened" | "issue_closed" | "issue_reopened" | "issue_labeled"
+  | "comment_created" | "push" | "run_failed" | "run_succeeded" | "release_published";
+export const WATCH_EVENTS: readonly WatchEvent[] = [
+  "pr_opened", "pr_pushed", "pr_ready", "pr_merged", "pr_closed", "pr_reopened",
+  "issue_opened", "issue_closed", "issue_reopened", "issue_labeled",
+  "comment_created", "push", "run_failed", "run_succeeded", "release_published",
+];
+const WATCH_WORDS: Record<WatchEvent, string> = {
+  pr_opened: "PR opened", pr_pushed: "PR pushed to", pr_ready: "PR ready for review", pr_merged: "PR merged", pr_closed: "PR closed",
+  pr_reopened: "PR reopened", issue_opened: "issue opened", issue_closed: "issue closed", issue_reopened: "issue reopened",
+  issue_labeled: "issue labelled", comment_created: "new comment", push: "push", run_failed: "workflow failed",
+  run_succeeded: "workflow succeeded", release_published: "release published",
+};
 
 export interface TriggerSpec {
   /** schedule: 5-field cron, evaluated in `timezone`. */
@@ -32,7 +49,7 @@ export interface TriggerSpec {
   label?: string;
   /** issue_comment: the command prefix (default "/agent"). */
   command?: string;
-  /** pr_opened: allow PRs from forks (default false — fork code with our push token is the risk). */
+  /** pr_opened / watch pr_*: allow PRs from forks (default false — fork code with our push token is the risk). */
   allowForks?: boolean;
   /** chain: fire when a run started by this trigger finishes. */
   afterTrigger?: string;
@@ -47,6 +64,10 @@ export interface TriggerSpec {
   /** PR follow-ups (src/pr-followups.ts) for PRs this automation's runs open; unset = the owner's default. */
   keepGreen?: boolean;
   addressReviews?: boolean;
+  /** watch: the repo changes that fire it (any of them). label/command/allowForks filter as above. */
+  watch?: WatchEvent[];
+  /** watch: `push` on this branch (default: the repo's default branch); run_* only on it (unset: any). */
+  branch?: string;
 }
 
 /** Safety defaults (plan §5 "Trigger safety"). */
@@ -308,6 +329,8 @@ export function templateContext(payload: unknown, extra: Record<string, unknown>
     ...(p.sender ? { sender: p.sender } : {}),
     // Alert presets: the receiver stamps normalised fields (src/alert-presets.ts) onto the payload.
     ...(p.asb_alert && typeof p.asb_alert === "object" ? { alert: p.asb_alert } : {}),
+    // Repo activity (src/repo-watch.ts) stamps which change fired it, so the preview and Run now see {{event}}.
+    ...(typeof p.asb_event === "string" ? { event: p.asb_event } : {}),
     ...extra,
   };
 }
@@ -663,6 +686,20 @@ export function normalizeTrigger(body: unknown): { ok: true; trigger: TriggerInp
       spec.command = cmd;
     }
     if (spec.event === "pr_opened") spec.allowForks = s.allowForks === true;
+  } else if (kind === "watch") {
+    if (!repo) return { ok: false, error: "a repo-activity automation watches one repo (owner/name)" };
+    const evs = Array.isArray(s.watch) ? [...new Set(s.watch)] : [];
+    if (!evs.length || !evs.every((e) => WATCH_EVENTS.includes(e as WatchEvent))) return { ok: false, error: `watch must list events from ${WATCH_EVENTS.join(", ")}` };
+    spec.watch = WATCH_EVENTS.filter((e) => evs.includes(e));
+    const str = (v: unknown, max: number) => (typeof v === "string" && v.trim() ? v.trim().slice(0, max) : undefined);
+    const branch = str(s.branch, 100);
+    if (branch && !/^[\w./-]+$/.test(branch)) return { ok: false, error: "branch is not a valid branch name" };
+    if (branch) spec.branch = branch;
+    const label = str(s.label, 50);
+    if (label) spec.label = label;
+    const command = str(s.command, 30);
+    if (command) spec.command = command;
+    if (s.allowForks === true) spec.allowForks = true;
   } else if (kind === "chain") {
     if (typeof s.afterTrigger !== "string" || !s.afterTrigger) return { ok: false, error: "a chain runs after another automation — pick it" };
     spec.afterTrigger = s.afterTrigger;
@@ -731,6 +768,11 @@ export function describeWhen(t: { kind: TriggerKind; spec: TriggerSpec; repo?: s
       if (t.spec.event === "issue_comment") return `comment starting ${t.spec.command ?? "/agent"}${on}`;
       if (t.spec.event === "pr_opened") return `pull request opened${on}`;
       return `GitHub event${on}`;
+    }
+    case "watch": {
+      const evs = (t.spec.watch ?? []).map((e) => WATCH_WORDS[e]);
+      const head = evs.length > 3 ? `${evs.slice(0, 3).join(", ")} +${evs.length - 3} more` : evs.join(", ") || "repo activity";
+      return `${head}${t.repo ? ` on ${t.repo}` : ""}`;
     }
     case "chain": {
       const parent = names[t.spec.afterTrigger ?? ""] ?? "another automation";

@@ -188,6 +188,11 @@ export function dueSchedules(db: Db, now: number): TriggerRow[] {
   return (db.prepare(`SELECT * FROM triggers WHERE kind = 'schedule' AND enabled = 1 AND next_fire IS NOT NULL AND next_fire <= ?`).all(now) as Array<Record<string, unknown>>).map(toRow);
 }
 
+/** Enabled repo-activity automations (the repo watcher's poll set). */
+export function watchTriggers(db: Db): TriggerRow[] {
+  return (db.prepare(`SELECT * FROM triggers WHERE kind = 'watch' AND enabled = 1`).all() as Array<Record<string, unknown>>).map(toRow);
+}
+
 /** Enabled chains that follow `parentId` (same owner only — a chain can't hang off a stranger). */
 export function chainsAfter(db: Db, owner: string, parentId: string): TriggerRow[] {
   return listTriggers(db, owner).filter((t) => t.kind === "chain" && t.enabled && t.spec.afterTrigger === parentId);

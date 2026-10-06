@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Db } from "./db.js";
+import type { TriggerKind } from "./triggers.js";
 
 /**
  * "How was this run started?" — the Trigger part of Run = Trigger × Harness × Box. Every delegation
@@ -13,7 +14,7 @@ export type StartedBy =
   | { kind: "mcp" }
   | { kind: "after"; parent: string }
   | { kind: "intake"; source: "email" | "slack"; from?: string }
-  | { kind: "trigger"; triggerId: string; name: string; source: "schedule" | "webhook" | "github" | "chain"; event?: string; subject?: { kind: "issue" | "pr"; number: number; repo?: string }; /** chain: the box this run follows. */ parent?: string }
+  | { kind: "trigger"; triggerId: string; name: string; source: TriggerKind; event?: string; subject?: { kind: "issue" | "pr"; number: number; repo?: string }; /** chain: the box this run follows. */ parent?: string }
   /** A PR follow-up (src/pr-followups.ts): back on the PR's branch after CI failed or review feedback. */
   | { kind: "followup"; followup: "ci" | "review"; parent: string; pr: { repo: string; number: number }; attempt: number; subject: string; triggerId?: string };
 

@@ -121,9 +121,11 @@ export function makeDispatcher(d: DispatcherDeps) {
 
     let repos: StartRunInput["repos"];
     if (!ctx.parent && t.repo) {
-      // PR opened in the same repo: start on the PR's head branch so the agent reviews what was pushed.
-      const p = (ctx.payload ?? {}) as Record<string, any>;
-      const headRef = ctx.match?.subject?.kind === "pr" && p.pull_request?.head?.repo?.full_name === t.repo ? String(p.pull_request.head.ref ?? "") : "";
+      // A PR event in the same repo: start on the PR's head branch so the agent sees what was pushed
+      // (not once the PR is closed — its branch is often deleted on merge).
+      const p = (ctx.payload ?? {}) as { pull_request?: { state?: string; head?: { ref?: string; repo?: { full_name?: string } | null } } };
+      const pr = p.pull_request;
+      const headRef = ctx.match?.subject?.kind === "pr" && pr?.state !== "closed" && pr?.head?.repo?.full_name === t.repo ? String(pr.head.ref ?? "") : "";
       repos = [{ repo: t.repo, ...(headRef ? { ref: headRef } : {}) }];
     }
     const startedBy: StartedBy = {

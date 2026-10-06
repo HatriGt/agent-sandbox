@@ -102,6 +102,7 @@ import { readArtifact } from "./artifact.js";
 import { existsSync } from "node:fs";
 import { withStartedBy, currentStartedBy, recordStartedBy, startedByOf, type StartedBy } from "./started-by.js";
 import { makeDispatcher, type StartRunInput } from "./trigger-dispatch.js";
+import { makeRepoWatcher } from "./repo-watch.js";
 import { makeFollowupEngine, type GhRequest } from "./pr-followup-engine.js";
 import { registerFollowupRoutes } from "./pr-followup-routes.js";
 import { followupsForBox } from "./pr-followup-store.js";
@@ -3482,6 +3483,26 @@ const dispatcher = makeDispatcher({
     await ghAsOwner(owner, repo, { method: "POST", path: `/repos/${repo}/issues/${number}/comments`, body: { body: redactor.redact(body) } });
   },
 });
+// Repo activity (src/repo-watch.ts): polls GitHub as each automation's owner, conditional on the
+// last ETag (a 304 is free against the rate limit), and fires matching automations on what changed.
+const repoWatcher = makeRepoWatcher({
+  db,
+  dispatcher,
+  redact: (s) => redactor.redact(s),
+  log: (m) => console.error(m),
+  get: (owner, repo, path, etag) =>
+    withOwner(owner, async () => {
+      const acc = candidateAccounts(await loadStore(cfg), repo)[0];
+      if (!acc) throw new Error("no stored GitHub account can reach this repo");
+      const r = await fetch(`https://api.github.com${path}`, {
+        headers: { authorization: `Bearer ${acc.token}`, accept: "application/vnd.github+json", "user-agent": "agent-sandbox", ...(etag ? { "if-none-match": etag } : {}) },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (r.status === 304) return { notModified: true as const };
+      if (!r.ok) throw new Error(`GitHub answered ${r.status} for ${path.split("?")[0]}`);
+      return { notModified: false as const, data: await r.json(), etag: r.headers.get("etag") ?? undefined, login: acc.login };
+    }),
+});
 const FOLLOWUP_PREFS_KIND = "pr-followups";
 const loadFollowupPrefs = (owner: string): FollowupPrefs => {
   try {
@@ -4146,6 +4167,7 @@ app.listen(cfg.httpPort, cfg.httpHost, () => {
   startPoolMaintainer(cfg);
   // Triggers: fire due schedules (the webhook and finish-edge sources call the dispatcher directly).
   dispatcher.start();
+  repoWatcher.start();
   // Cold-start nudge: without a baked snapshot every run pays the toolchain install in the box.
   if (!cfg.snapshot) {
     console.error(

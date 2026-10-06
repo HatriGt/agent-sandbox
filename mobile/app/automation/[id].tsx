@@ -13,6 +13,7 @@ import {
   type AutomationKind,
   type AutomationSpec,
   type GithubEvent,
+  type WatchEvent,
   type HarnessView,
   type RepoInfo,
   type WorkflowView,
@@ -34,8 +35,39 @@ import { Segmented } from "@/components/settings/Segmented";
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-const KIND_LABEL: Record<AutomationKind, string> = { schedule: "Schedule", chain: "After another", webhook: "Webhook", github: "GitHub" };
+const KIND_LABEL: Record<AutomationKind, string> = { schedule: "Schedule", chain: "After another", webhook: "Webhook", github: "GitHub", watch: "Repo activity" };
 const EVENT_LABEL: Record<GithubEvent, string> = { issue_labeled: "Issue labelled", issue_comment: "Comment command", pr_opened: "PR opened" };
+const WATCH_LABEL: Record<WatchEvent, string> = {
+  pr_opened: "PR opened",
+  pr_pushed: "PR pushed to",
+  pr_ready: "PR ready for review",
+  pr_merged: "PR merged",
+  pr_closed: "PR closed (unmerged)",
+  pr_reopened: "PR reopened",
+  issue_opened: "Issue opened",
+  issue_closed: "Issue closed",
+  issue_reopened: "Issue reopened",
+  issue_labeled: "Issue labelled",
+  comment_created: "New comment (issue or PR)",
+  push: "Push to branch",
+  run_failed: "Workflow run failed",
+  run_succeeded: "Workflow run succeeded",
+  release_published: "Release published",
+};
+const WATCH_GROUPS: { title: string; events: WatchEvent[] }[] = [
+  { title: "Pull requests", events: ["pr_opened", "pr_pushed", "pr_ready", "pr_merged", "pr_closed", "pr_reopened"] },
+  { title: "Issues", events: ["issue_opened", "issue_closed", "issue_reopened", "issue_labeled"] },
+  { title: "Comments", events: ["comment_created"] },
+  { title: "Branch & CI", events: ["push", "run_failed", "run_succeeded"] },
+  { title: "Releases", events: ["release_published"] },
+];
+const TASK_HINT: Record<AutomationKind, string | undefined> = {
+  schedule: undefined,
+  webhook: "Placeholders like {{payload.x}} are filled from the request body.",
+  github: "Placeholders like {{pr.title}}, {{issue.title}} or {{event}} are filled from the event.",
+  watch: "Placeholders like {{pr.title}}, {{issue.title}} or {{event}} are filled from the event.",
+  chain: "Placeholders like {{parent.headline}} are filled from the previous run.",
+};
 const PRESET_LABEL: Record<AlertPreset, string> = { sentry: "Sentry", datadog: "Datadog", pagerduty: "PagerDuty" };
 const PRESET_SECRET_HINT: Record<AlertPreset, string> = {
   sentry: "The integration's Client Secret (Sentry → Settings → Custom Integrations). We check Sentry-Hook-Signature with it.",
@@ -46,6 +78,7 @@ const DEFAULT_TEMPLATES: Record<AutomationKind, string> = {
   schedule: "Check the repo for failing tests and open a PR that fixes them.",
   webhook: "Handle this request: {{payload.text}}",
   github: "Fix issue #{{issue.number}}: {{issue.title}}\n\n{{issue.body}}",
+  watch: 'Review PR #{{pr.number}} "{{pr.title}}" ({{pr.html_url}}).\nRead the diff and post one review comment on the PR with concrete findings (bugs, risks, missing tests). Do not push commits.',
   chain: "Review what the previous run did ({{parent.headline}}) and tighten it.",
 };
 const ALERT_TEMPLATE = "{{alert.source}} alert: {{alert.title}}\n\nSeverity: {{alert.severity}}\nService: {{alert.service}}\nLink: {{alert.url}}\n\n{{alert.message}}";
@@ -54,11 +87,20 @@ function blank(kind: AutomationKind = "schedule"): AutomationDraft {
   return {
     name: "",
     kind,
-    spec: kind === "schedule" ? { cron: "0 9 * * 1-5", timezone: deviceTimezone() } : kind === "github" ? { event: "issue_labeled", label: "agent" } : kind === "chain" ? { on: "done", carry: "patch" } : {},
+    spec:
+      kind === "schedule"
+        ? { cron: "0 9 * * 1-5", timezone: deviceTimezone() }
+        : kind === "github"
+          ? { event: "issue_labeled", label: "agent" }
+          : kind === "watch"
+            ? { watch: ["pr_opened"] }
+            : kind === "chain"
+              ? { on: "done", carry: "patch" }
+              : {},
     taskTemplate: DEFAULT_TEMPLATES[kind],
     enabled: true,
     concurrency: 1,
-    prComment: kind === "github",
+    prComment: kind === "github" || kind === "watch",
   };
 }
 
@@ -196,6 +238,8 @@ function Editor() {
     if (d.kind === "github" && !d.repo) p.push("GitHub automations need a repo.");
     if (d.kind === "github" && d.spec.event === "issue_labeled" && !(d.spec.label ?? "").trim()) p.push("Which label?");
     if (d.kind === "github" && d.spec.event === "issue_comment" && !(d.spec.command ?? "").trim()) p.push("Which comment command?");
+    if (d.kind === "watch" && !d.repo) p.push("Repo activity automations need a repo.");
+    if (d.kind === "watch" && !d.spec.watch?.length) p.push("Pick at least one event.");
     return p;
   }, [d]);
 
@@ -426,7 +470,75 @@ function Editor() {
         </Card>
       ) : null}
 
-      <PickerRow label={d.kind === "github" ? "Repo" : "Repo (optional)"} value={d.repo} placeholder="owner/name" onPress={() => open("repo")} />
+      {d.kind === "watch" ? (
+        <Card style={{ gap: 12 }}>
+          <T variant="micro" tone="faint">
+            Checked every 15 s with your GitHub account — no webhook needed. Existing items are not replayed; only changes after you save fire.
+          </T>
+          {WATCH_GROUPS.map((g) => (
+            <View key={g.title} style={{ gap: 8 }}>
+              <T variant="meta" weight="medium" tone="muted">
+                {g.title}
+              </T>
+              {g.events.map((ev) => {
+                const on = !!d.spec.watch?.includes(ev);
+                return (
+                  <ToggleRow
+                    key={ev}
+                    label={WATCH_LABEL[ev]}
+                    value={on}
+                    onChange={(v) => {
+                      const cur = d.spec.watch ?? [];
+                      setSpec({ watch: v ? [...cur.filter((e) => e !== ev), ev] : cur.filter((e) => e !== ev) });
+                    }}
+                  />
+                );
+              })}
+            </View>
+          ))}
+          {(() => {
+            const w = d.spec.watch ?? [];
+            const push = w.includes("push");
+            const runs = w.includes("run_failed") || w.includes("run_succeeded");
+            const forks = w.some((e) => e.startsWith("pr_"));
+            return (
+              <>
+                {push || runs ? (
+                  <Field
+                    mono
+                    label="Branch"
+                    value={d.spec.branch ?? ""}
+                    onChangeText={(t) => setSpec({ branch: t || undefined })}
+                    placeholder={push ? "default branch" : "any branch"}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    hint={push && runs ? "Push: blank = the repo's default branch. Workflow runs: blank = any branch." : push ? "Blank = the repo's default branch." : "Blank = any branch."}
+                  />
+                ) : null}
+                {w.includes("issue_labeled") ? (
+                  <Field label="Label" value={d.spec.label ?? ""} onChangeText={(t) => setSpec({ label: t || undefined })} placeholder="any label" autoCapitalize="none" />
+                ) : null}
+                {w.includes("comment_created") ? (
+                  <Field
+                    mono
+                    label="Comment starts with"
+                    value={d.spec.command ?? ""}
+                    onChangeText={(t) => setSpec({ command: t || undefined })}
+                    placeholder="any comment"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                ) : null}
+                {forks ? (
+                  <ToggleRow label="Include PRs from forks" hint="Off by default — fork PRs can carry untrusted code." value={!!d.spec.allowForks} onChange={(v) => setSpec({ allowForks: v })} />
+                ) : null}
+              </>
+            );
+          })()}
+        </Card>
+      ) : null}
+
+      <PickerRow label={d.kind === "github" || d.kind === "watch" ? "Repo" : "Repo (optional)"} value={d.repo} placeholder="owner/name" onPress={() => open("repo")} />
 
       <Field
         label="Task"
@@ -437,7 +549,7 @@ function Editor() {
         }}
         multiline
         style={{ minHeight: 110, textAlignVertical: "top" }}
-        hint={d.kind === "schedule" ? undefined : "Placeholders like {{issue.title}}, {{payload.x}} or {{parent.headline}} are filled from the event."}
+        hint={TASK_HINT[d.kind]}
       />
       <View style={{ flexDirection: "row", gap: 8 }}>
         <Button small variant="secondary" title="Preview" loading={previewing} onPress={() => void runPreview()} />
@@ -500,7 +612,7 @@ function Editor() {
         title="Repo"
         options={repos.map((r) => ({ value: r.fullName, label: r.fullName, hint: r.description }))}
         value={d.repo}
-        allowNone={d.kind !== "github"}
+        allowNone={d.kind !== "github" && d.kind !== "watch"}
         noneLabel="No repo"
         onPick={(v) => set({ repo: v })}
         onClose={() => setSheet(null)}

@@ -1,9 +1,9 @@
 ﻿import * as React from "react";
-import { CalendarClock, ChevronRight, Copy, FlaskConical, GitPullRequest, Link2, ListChecks, Play, Plus, RotateCw, ShieldCheck, Trash2, Webhook, Workflow } from "lucide-react";
+import { CalendarClock, ChevronRight, Copy, FlaskConical, GitPullRequest, Link2, ListChecks, Play, Plus, Radar, RotateCw, ShieldCheck, Trash2, Webhook, Workflow } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { toast } from "sonner";
-import { api, type AlertPreset, type Automation, type AutomationDelivery, type AutomationDraft, type AutomationKind, type GithubEvent } from "@/lib/api";
+import { api, type AlertPreset, type Automation, type AutomationDelivery, type AutomationDraft, type AutomationKind, type GithubEvent, type WatchEvent } from "@/lib/api";
 import { fmtAgo } from "@/lib/format";
 import { readCache, useCached, writeCache } from "@/lib/cache";
 import { Button } from "@/components/ui/button";
@@ -27,9 +27,41 @@ import { SchedulePicker, describeCron } from "@/components/SchedulePicker";
  * preview of the task, rendered against the last real payload this automation received.
  */
 
-const GLYPH: Record<AutomationKind, LucideIcon> = { schedule: CalendarClock, webhook: Webhook, github: GitPullRequest, chain: Link2 };
-const KIND_LABEL: Record<AutomationKind, string> = { schedule: "Schedule", webhook: "Webhook", github: "GitHub", chain: "After another" };
+const GLYPH: Record<AutomationKind, LucideIcon> = { schedule: CalendarClock, webhook: Webhook, github: GitPullRequest, watch: Radar, chain: Link2 };
+const KIND_LABEL: Record<AutomationKind, string> = { schedule: "Schedule", webhook: "Webhook", github: "GitHub", watch: "Repo activity", chain: "After another" };
 const EVENT_LABEL: Record<GithubEvent, string> = { issue_labeled: "Issue labelled", issue_comment: "Comment command", pr_opened: "PR opened" };
+const WATCH_LABEL: Record<WatchEvent, string> = {
+  pr_opened: "PR opened",
+  pr_pushed: "PR pushed to",
+  pr_ready: "PR ready for review",
+  pr_merged: "PR merged",
+  pr_closed: "PR closed (unmerged)",
+  pr_reopened: "PR reopened",
+  issue_opened: "Issue opened",
+  issue_closed: "Issue closed",
+  issue_reopened: "Issue reopened",
+  issue_labeled: "Issue labelled",
+  comment_created: "New comment (issue or PR)",
+  push: "Push to branch",
+  run_failed: "Workflow run failed",
+  run_succeeded: "Workflow run succeeded",
+  release_published: "Release published",
+};
+const WATCH_GROUPS: Array<{ label: string; events: WatchEvent[] }> = [
+  { label: "Pull requests", events: ["pr_opened", "pr_pushed", "pr_ready", "pr_merged", "pr_closed", "pr_reopened"] },
+  { label: "Issues", events: ["issue_opened", "issue_closed", "issue_reopened", "issue_labeled"] },
+  { label: "Comments", events: ["comment_created"] },
+  { label: "Branch & CI", events: ["push", "run_failed", "run_succeeded"] },
+  { label: "Releases", events: ["release_published"] },
+];
+/** Template variables worth hinting per kind; schedule has no payload. */
+const TASK_HINT: Record<AutomationKind, string | null> = {
+  schedule: null,
+  webhook: "{{payload.x}}",
+  github: "{{issue.title}} {{pr.title}} {{comment.body}}",
+  watch: "{{pr.title}} {{issue.title}} {{event}}",
+  chain: "{{parent.headline}}",
+};
 
 const field = "border-input bg-transparent focus-visible:border-ring focus-visible:ring-ring/50 h-9 w-full rounded-md border px-3 text-meta outline-none focus-visible:ring-[3px]";
 
@@ -37,6 +69,7 @@ const DEFAULT_TEMPLATES: Record<AutomationKind, string> = {
   schedule: "Check the repo for failing tests and open a PR that fixes them.",
   webhook: "Handle this request: {{payload.text}}",
   github: "Fix issue #{{issue.number}}: {{issue.title}}\n\n{{issue.body}}",
+  watch: 'Review PR #{{pr.number}} "{{pr.title}}" ({{pr.html_url}}).\nRead the diff and post one review comment on the PR with concrete findings (bugs, risks, missing tests). Do not push commits.',
   chain: "Review what the previous run did ({{parent.headline}}) and tighten it.",
 };
 
@@ -113,11 +146,20 @@ function blank(kind: AutomationKind = "schedule"): AutomationDraft {
   return {
     name: "",
     kind,
-    spec: kind === "schedule" ? { cron: "0 2 * * 1-5", timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC" } : kind === "github" ? { event: "issue_labeled", label: "agent" } : kind === "chain" ? { on: "done", carry: "patch" } : {},
+    spec:
+      kind === "schedule"
+        ? { cron: "0 2 * * 1-5", timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC" }
+        : kind === "github"
+          ? { event: "issue_labeled", label: "agent" }
+          : kind === "watch"
+            ? { watch: ["pr_opened"] }
+            : kind === "chain"
+              ? { on: "done", carry: "patch" }
+              : {},
     taskTemplate: DEFAULT_TEMPLATES[kind],
     enabled: true,
     concurrency: 1,
-    prComment: kind === "github",
+    prComment: kind === "github" || kind === "watch",
   };
 }
 
@@ -499,7 +541,7 @@ function AutomationTr({ a, onEdit, onToggle, onDismiss, onOpenBox, onOpenPlayboo
           <span className={cn("block truncate", a.counts.reports > 0 ? "text-foreground" : "text-muted-foreground")} title="Quiet: only runs that found something notify">
             {countsLine(a.counts)}
           </span>
-        ) : a.lastDelivery && (a.kind === "webhook" || a.kind === "github") ? (
+        ) : a.lastDelivery && (a.kind === "webhook" || a.kind === "github" || a.kind === "watch") ? (
           <span className={cn("block truncate", deliveryTone(a.lastDelivery))} title={a.lastDelivery.detail}>
             {deliveryLine(a.lastDelivery)}
           </span>
@@ -540,6 +582,62 @@ function Label({ children, hint }: { children: React.ReactNode; hint?: React.Rea
       <span className="label text-muted-foreground">{children}</span>
       {hint && <span className="text-faint text-micro">{hint}</span>}
     </span>
+  );
+}
+
+/** Repo activity: grouped event toggles plus the filters only the chosen events use. */
+function WatchFields({ spec, setSpec }: { spec: AutomationDraft["spec"]; setSpec: (patch: Partial<AutomationDraft["spec"]>) => void }) {
+  const on = spec.watch ?? [];
+  // Keep the canonical group order so the saved spec reads the way the UI does.
+  const toggle = (ev: WatchEvent) => setSpec({ watch: WATCH_GROUPS.flatMap((g) => g.events).filter((e) => (e === ev ? !on.includes(e) : on.includes(e))) });
+  return (
+    <div className="flex flex-col gap-3">
+      <div>
+        <Label hint={on.length === 0 ? "pick at least one" : undefined}>Fires on</Label>
+        <div className="flex flex-col gap-2.5">
+          {WATCH_GROUPS.map((g) => (
+            <div key={g.label} role="group" aria-label={g.label}>
+              <p className="text-faint mb-1 text-micro">{g.label}</p>
+              <div className="flex flex-wrap gap-1.5">
+                {g.events.map((ev) => (
+                  <Button key={ev} size="sm" variant={on.includes(ev) ? "secondary" : "outline"} aria-pressed={on.includes(ev)} onClick={() => toggle(ev)}>
+                    {WATCH_LABEL[ev]}
+                  </Button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+        <p className="text-faint mt-2 text-micro">Checked every 15 s with your GitHub account — no webhook needed. Existing items are not replayed; only changes after you save fire.</p>
+      </div>
+      <Collapse open={on.includes("push") || on.includes("run_failed") || on.includes("run_succeeded")}>
+        <label className="block">
+          <Label hint={on.includes("push") ? "push: default branch if empty · runs: any branch if empty" : "empty = any branch"}>Branch</Label>
+          <input className={cn(field, "font-mono")} value={spec.branch ?? ""} onChange={(e) => setSpec({ branch: e.target.value || undefined })} placeholder="main" />
+        </label>
+      </Collapse>
+      <Collapse open={on.includes("issue_labeled")}>
+        <label className="block">
+          <Label hint="empty = any label">Label</Label>
+          <input className={field} value={spec.label ?? ""} onChange={(e) => setSpec({ label: e.target.value || undefined })} placeholder="agent" />
+        </label>
+      </Collapse>
+      <Collapse open={on.includes("comment_created")}>
+        <label className="block">
+          <Label hint="empty = any comment">Comment starts with</Label>
+          <input className={cn(field, "font-mono")} value={spec.command ?? ""} onChange={(e) => setSpec({ command: e.target.value || undefined })} placeholder="/agent" />
+        </label>
+      </Collapse>
+      <Collapse open={on.some((e) => e.startsWith("pr_"))}>
+        <label className="flex items-center justify-between gap-3">
+          <span className="text-meta">
+            Also run on PRs from forks
+            <span className="text-faint block text-micro">Off by default: a fork's code is untrusted.</span>
+          </span>
+          <Switch size="sm" checked={!!spec.allowForks} onCheckedChange={(v) => setSpec({ allowForks: v })} />
+        </label>
+      </Collapse>
+    </div>
   );
 }
 
@@ -728,9 +826,9 @@ function Editor({
         </div>
       )}
 
-      {(d.kind === "github" || d.kind === "schedule" || d.kind === "webhook") && (
+      {(d.kind === "github" || d.kind === "watch" || d.kind === "schedule" || d.kind === "webhook") && (
         <label className="block">
-          <Label hint={d.kind === "github" ? "required" : "optional — the run clones it"}>Repository</Label>
+          <Label hint={d.kind === "github" || d.kind === "watch" ? "required" : "optional — the run clones it"}>Repository</Label>
           <input className={field} value={d.repo ?? ""} onChange={(e) => set({ repo: e.target.value || undefined })} placeholder="owner/name" />
         </label>
       )}
@@ -769,6 +867,8 @@ function Editor({
           </Collapse>
         </div>
       )}
+
+      {d.kind === "watch" && <WatchFields spec={d.spec} setSpec={setSpec} />}
 
       {d.kind === "webhook" && (
         <div className="flex flex-col gap-3">
@@ -883,7 +983,7 @@ function Editor({
       </Swap>
 
       <div>
-        <Label hint={<span className="hidden font-mono sm:inline">{"{{issue.title}} {{payload.x}} {{parent.headline}}"}</span>}>Task</Label>
+        <Label hint={TASK_HINT[d.kind] ? <span className="hidden font-mono sm:inline">{TASK_HINT[d.kind]}</span> : undefined}>Task</Label>
         <Textarea className="min-h-28 font-mono text-meta" value={d.taskTemplate} onChange={(e) => set({ taskTemplate: e.target.value })} />
         <div className="bg-muted/40 mt-2 rounded-lg border px-3 py-2.5">
           <p className="label text-faint mb-1">
@@ -913,7 +1013,7 @@ function Editor({
           <span className="text-meta">At most at once</span>
           <Segmented<string> ariaLabel="Concurrency" value={String(d.concurrency)} onChange={(v) => set({ concurrency: Number(v) })} options={["1", "2", "3", "5"].map((v) => ({ value: v, label: v }))} />
         </div>
-        {(d.kind === "github" || d.repo) && (
+        {(d.kind === "github" || d.kind === "watch" || d.repo) && (
           <label className="flex items-center justify-between gap-3">
             <span className="text-meta">
               Comment the receipt on the issue or PR
@@ -947,7 +1047,7 @@ function Editor({
         </div>
       </details>
 
-      <Collapse open={!!hook}>
+      <Collapse open={!!hook && d.kind !== "watch"}>
         {hook && (
         <div className="border-live/30 bg-live/5 card-spring rounded-lg border px-3 py-3" role="status">
           <p className="text-foreground text-meta font-medium">Webhook URL — shown once</p>
@@ -977,7 +1077,7 @@ function Editor({
       </Collapse>
 
       <div className="flex flex-wrap items-center gap-2 border-t pt-4">
-        <Button size="sm" onClick={() => void save()} loading={saving} disabled={!d.name.trim() || !d.taskTemplate.trim()}>
+        <Button size="sm" onClick={() => void save()} loading={saving} disabled={!d.name.trim() || !d.taskTemplate.trim() || (d.kind === "watch" && (!d.repo?.trim() || !d.spec.watch?.length))}>
           {id ? "Save" : "Create"}
         </Button>
         {id && d.kind !== "chain" && (
