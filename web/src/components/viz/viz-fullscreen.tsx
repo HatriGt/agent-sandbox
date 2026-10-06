@@ -46,6 +46,10 @@ export function VizFullscreen({
         // Fade only: a scale-in makes canvases (xyflow, mermaid) measure a shrunken box mid-animation.
         className="h-[92dvh] max-h-[92dvh] w-[96vw] max-w-none sm:w-[96vw] data-[state=open]:zoom-in-100 data-[state=open]:slide-in-from-bottom-0 data-[state=closed]:zoom-out-100"
         bodyClassName="flex overflow-hidden px-3 pb-3"
+        // Chrome repaints a backdrop-filter layer whenever the page under it changes, and the
+        // transcript re-renders on every 3s poll, so the blur flickered behind the canvas.
+        // Nearly opaque, unblurred scrim: nothing behind a 96vw card is worth seeing anyway.
+        overlayClassName="bg-background/90 backdrop-blur-none"
         data-viz-fullscreen
         onKeyDown={(e) => {
           if (ownsZoom || e.metaKey || e.ctrlKey || e.altKey) return;

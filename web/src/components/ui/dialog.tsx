@@ -24,6 +24,7 @@ function DialogContent({
   description,
   actions,
   bodyClassName,
+  overlayClassName,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   title: string;
@@ -31,10 +32,11 @@ function DialogContent({
   /** Extra header controls, placed before the close button. */
   actions?: React.ReactNode;
   bodyClassName?: string;
+  overlayClassName?: string;
 }) {
   return (
     <DialogPrimitive.Portal>
-      <DialogPrimitive.Overlay data-slot="overlay" className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[2px] data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:duration-[240ms] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:duration-[180ms]" />
+      <DialogPrimitive.Overlay data-slot="overlay" className={cn("fixed inset-0 z-40 bg-black/40 backdrop-blur-[2px] data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:duration-[240ms] data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:duration-[180ms]", overlayClassName)} />
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
