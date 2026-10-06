@@ -18,6 +18,8 @@ import {
 import { T } from "./ui/AppText";
 import { Icon, type IconName } from "./ui/Icon";
 import { SmartBlockView, VizFrame } from "./viz/SmartBlockView";
+import { parseCodeRef, symbolRefs, type CodeRef } from "@/lib/code-refs";
+import { CodeRefLink, CodeRefSession, CodeRefSymbols } from "./CodeRef";
 import { TableBlock } from "./viz/TableBlock";
 import { CalloutBlock, ChecklistBlock, ProgressBlock, StatusListBlock } from "./viz/SmallBlocks";
 import { MiniAction } from "./viz/VizFrame";
@@ -28,13 +30,37 @@ import { MiniAction } from "./viz/VizFrame";
  * lists (checklist card), nested lists (3 levels), rules, blockquotes and `> [!NOTE]` callouts,
  * images (as link chips — never fetched), inline code / bold / italic / strike / links (LinkChip).
  *
- * Viz fences (`stats`, `kv`, `badges`, `progress`, `steps`, `csv`, `tsv`, `json`, `tests`,
- * `timeline`, callouts, `chart`) render natively through lib/viz.ts `smartBlock`; anything the
- * router does not understand, or a fence still streaming in, stays a code block.
+ * Viz fences (every kind web SmartBlock routes - charts, graphs, sequence/mermaid, findings,
+ * compare, annotate, layers, flow, tree, ops/git blocks, callouts - plus bare fences sniffed by
+ * lib/viz-auto.ts) render natively through lib/viz.ts `smartBlock`; anything the router does not
+ * understand, or a fence still streaming in, stays a code block.
  */
 export function MarkdownLite({ text }: { text: string }) {
   const blocks = React.useMemo(() => splitBlocks(text), [text]);
-  return <Blocks blocks={blocks} />;
+  const outer = React.useContext(CodeRefSymbols);
+  const symbols = React.useMemo(() => {
+    const own = symbolRefs(text);
+    return outer ? new Map([...own, ...outer]) : own;
+  }, [text, outer]);
+  return (
+    <CodeRefSymbols.Provider value={symbols}>
+      <Blocks blocks={blocks} />
+    </CodeRefSymbols.Provider>
+  );
+}
+
+/** Inline code; a file ref (or a symbol bound to one in this message) opens the file viewer when a box session is in scope. */
+function InlineCode({ text, refTo }: { text: string; refTo?: CodeRef }) {
+  const { palette } = useTheme();
+  const symbols = React.useContext(CodeRefSymbols);
+  const ref = refTo ?? symbols?.get(text);
+  const session = React.useContext(CodeRefSession);
+  if (ref && session) return <CodeRefLink refTo={ref} text={text} />;
+  return (
+    <T variant="code" mono selectable style={{ backgroundColor: palette.muted, color: palette.foreground }}>
+      {text}
+    </T>
+  );
 }
 
 function Blocks({ blocks }: { blocks: Block[] }) {
@@ -270,9 +296,7 @@ function InlineText({ text, muted, variant = "prose" }: { text: string; muted?: 
         p.href ? (
           <LinkChip key={i} href={p.href} text={p.text !== p.href ? p.text : undefined} image={p.image} variant={variant} />
         ) : p.code ? (
-          <T key={i} variant="code" mono selectable style={{ backgroundColor: palette.muted, color: palette.foreground }}>
-            {p.text}
-          </T>
+          <InlineCode key={i} text={p.text} refTo={p.ref} />
         ) : p.bold ? (
           <T key={i} variant={variant} weight="semibold" selectable>
             {p.text}
@@ -346,7 +370,8 @@ export function splitBlocks(text: string): Block[] {
       const lang = fence[2].trim().split(/\s+/)[0].replace(/[^\w+#.-]/g, "").toLowerCase();
       const code = buf.join("\n");
       // smartBlock only on closed fences: a half-streamed chart must never flip between code and chart.
-      blocks.push({ kind: "code", text: code, lang: lang || undefined, closed, spec: closed && lang ? smartBlock(lang, code) : null });
+      // Bare fences go through too - viz-auto sniffs what they really are.
+      blocks.push({ kind: "code", text: code, lang: lang || undefined, closed, spec: closed ? smartBlock(lang, code) : null });
       continue;
     }
     const h = line.match(/^(#{1,6})\s+(.*)$/);
@@ -425,12 +450,12 @@ export function splitBlocks(text: string): Block[] {
 
 // ---------------------------------------------------------------- inline parser
 
-type InlinePart = { text: string; bold?: boolean; italic?: boolean; strike?: boolean; code?: boolean; href?: string; image?: boolean };
+type InlinePart = { text: string; bold?: boolean; italic?: boolean; strike?: boolean; code?: boolean; href?: string; image?: boolean; ref?: CodeRef };
 
-// Order matters: code first (a URL inside backticks stays code), then ![alt](url), [text](url),
+// Order matters: code first (a URL inside backticks stays code), then ![alt](url), [text](target),
 // bare URLs, bold, strike, then italics. Underscore italics need word boundaries (snake_case).
 const INLINE_RE =
-  /(`[^`\n]+`|!\[[^\]\n]*\]\(https?:\/\/[^\s)]+\)|\[[^\]\n]+\]\(https?:\/\/[^\s)]+\)|https?:\/\/[^\s<>()"']+|\*\*[^*\n]+\*\*|~~[^~\n]+~~|\*[^*\n]+\*|(?<![\w])_[^_\n]+_(?![\w]))/g;
+  /(`[^`\n]+`|!\[[^\]\n]*\]\(https?:\/\/[^\s)]+\)|\[[^\]\n]+\]\([^\s)]+\)|https?:\/\/[^\s<>()"']+|\*\*[^*\n]+\*\*|~~[^~\n]+~~|\*[^*\n]+\*|(?<![\w])_[^_\n]+_(?![\w]))/g;
 
 export function parseInline(text: string): InlinePart[] {
   const out: InlinePart[] = [];
@@ -439,14 +464,19 @@ export function parseInline(text: string): InlinePart[] {
     const at = m.index ?? 0;
     if (at > last) out.push({ text: text.slice(last, at) });
     const tok = m[0];
-    if (tok.startsWith("`")) out.push({ text: tok.slice(1, -1), code: true });
-    else if (tok.startsWith("![")) {
+    if (tok.startsWith("`")) {
+      const code = tok.slice(1, -1);
+      const ref = parseCodeRef(code);
+      out.push(ref ? { text: code, code: true, ref } : { text: code, code: true });
+    } else if (tok.startsWith("![")) {
       const lm = tok.match(/^!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)$/);
       if (lm) out.push({ text: lm[1] || "image", href: lm[2], image: true });
       else out.push({ text: tok });
     } else if (tok.startsWith("[")) {
-      const lm = tok.match(/^\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)$/);
-      if (lm) out.push({ text: stripInline(lm[1]), href: lm[2] });
+      const lm = tok.match(/^\[([^\]]+)\]\(([^\s)]+)\)$/);
+      const ref = lm && !/^https?:\/\//.test(lm[2]) ? parseCodeRef(lm[2]) : null;
+      if (lm && /^https?:\/\//.test(lm[2])) out.push({ text: stripInline(lm[1]), href: lm[2] });
+      else if (lm && ref) out.push({ text: stripInline(lm[1]), code: true, ref });
       else out.push({ text: tok });
     } else if (/^https?:\/\//.test(tok)) {
       // Trailing punctuation belongs to the sentence, not the URL.

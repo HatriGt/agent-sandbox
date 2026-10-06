@@ -6,10 +6,63 @@
  * understand, is bounded in input size, and never throws. The markdown layer treats null as
  * "render the plain code block instead".
  *
- * UNSUPPORTED on mobile for now (these fence kinds stay code blocks): flow, tree, graph/dag,
- * gantt/spans, heatmap, http, log, diffstat, commits, deps, funnel, score, keys/shortcuts,
- * palette, and the bare-fence auto-sniffers (viz-auto).
+ * The second-wave parsers (viz-extra.ts), bare-fence sniffers (viz-auto.ts), mermaid helpers
+ * (viz-mermaid.ts) and code refs (code-refs.ts) are verbatim copies of their web counterparts.
  */
+
+import {
+  calloutKind,
+  parseAnnotate,
+  parseBadges,
+  parseCommits,
+  parseCompare,
+  parseDag,
+  parseDeps,
+  parseDiffstat,
+  parseFindings,
+  parseFunnel,
+  parseHeatmap,
+  parseHttp,
+  parseKeys,
+  parseKv,
+  parseLayers,
+  parseLog,
+  parsePalette,
+  parseProgress,
+  parseScores,
+  parseSequence,
+  parseSpans,
+  parseSteps,
+  parseTests,
+  parseTimeline,
+  type Annotated,
+  type Badge,
+  type CalloutKind,
+  type Commit,
+  type CompareOption,
+  type Dag,
+  type DepUpdate,
+  type DiffStat,
+  type Finding,
+  type Heatmap,
+  type HttpCall,
+  type Layer,
+  type LogLine,
+  type ProgressRow,
+  type Score,
+  type Sequence,
+  type Span,
+  type Step,
+  type Swatch,
+  type TestReport,
+  type TimelineEvent,
+} from "./viz-extra";
+import { sniffBare, sniffLanguage } from "./viz-auto";
+import type { AutoBlock, CommandLine, Comparison, CronSpec, EnvVar, FileEntry, IniSection, JwtDecoded, LinkItem, StackTrace, UrlParts } from "./viz-auto-types";
+
+export * from "./viz-extra";
+export type * from "./viz-auto-types";
+export { parseStatusItems } from "./viz-auto";
 
 // ---------------------------------------------------------------- numbers
 
@@ -240,9 +293,15 @@ export function parseGfmTable(lines: string[]): ParsedTable | null {
 
 // ---------------------------------------------------------------- fence tidy-up
 
+/** Colon-separated line fences: `label: value` per line. */
 const COLON_FENCES = new Set(["stats", "progress", "kv", "funnel", "badges", "score"]);
 
-/** Normalize the markdown-ish spellings agents use inside line fences (bullets, bold, `=`/`|`). */
+/**
+ * Agents write line fences as markdown out of habit — `- ` bullets, `**bold**` labels, `=` or `|`
+ * instead of `:`, `-->` arrows, task-list steps. Normalize those spellings to the documented shape
+ * before parsing so the fence renders instead of falling back to code. Content is never added or
+ * dropped; only the punctuation of each line changes.
+ */
 export function tidyFence(language: string, src: string): string {
   const lines = src.split("\n");
   const bullet = /^\s*(?:[-*•+])\s+(?!\[[ xX]\])/;
@@ -269,101 +328,135 @@ export function tidyFence(language: string, src: string): string {
     return lines
       .map((l) => {
         if (/^\s*\d+[.)]\s/.test(l)) return unbold(l);
-        const m = l.match(/^\s*[-*•+]\s+(?:\[([ xX])\]\s+)?(.*)$/);
+        // Indented bullets are sub-steps (parseSteps keeps them under their step); only top-level bullets become steps.
+        const m = l.match(/^[-*•+]\s+(?:\[([ xX])\]\s+)?(.*)$/);
         if (!m) return l;
         n++;
         return `${n}. ${unbold(m[2])}${m[1] && m[1] !== " " ? " ✓" : ""}`;
       })
       .join("\n");
   }
+  if (language === "flow") {
+    return lines.map((l) => unbold(l.replace(bullet, "")).replace(/\s*(?:-{2,}>|—>|={2,}>|~>)\s*/g, " -> ")).join("\n");
+  }
   return src;
 }
 
-// ---------------------------------------------------------------- timeline
+// ---------------------------------------------------------------- tree fence
 
-export interface TimelineEvent {
-  time: string;
-  text: string;
+export interface TreeNode {
+  name: string;
+  /** Annotation after the name (size, count, comment). */
   note?: string;
+  children: TreeNode[];
+}
+
+const TREE_GLYPHS = /[├└│]|\|--|`--/;
+
+/** Does a plain fence look like an ASCII tree? (auto-upgrade heuristic) */
+export function looksLikeTree(src: string): boolean {
+  const lines = src.split("\n").filter((l) => l.trim());
+  if (lines.length < 3) return false;
+  const glyphed = lines.filter((l) => TREE_GLYPHS.test(l)).length;
+  return glyphed >= Math.max(2, lines.length * 0.5);
+}
+
+/**
+ * Parse `tree`-style output (├── / └── / │, or plain 2-space indentation, or `a/b/c` paths — one
+ * entry per line) into a nested structure. Depth comes from the glyph/indent width.
+ */
+export function parseTree(src: string): TreeNode[] | null {
+  const lines = src.split("\n").filter((l) => l.trim().length > 0);
+  if (lines.length === 0 || lines.length > 500) return null;
+
+  // Path mode: every line is a slash path with no tree glyphs or leading spaces.
+  if (lines.every((l) => !TREE_GLYPHS.test(l) && !/^\s/.test(l)) && lines.filter((l) => l.includes("/")).length >= 2) {
+    const roots: TreeNode[] = [];
+    for (const line of lines) {
+      const [path, ...noteParts] = line.trim().split(/\s{2,}| — | # /);
+      const segs = path.split("/").filter(Boolean);
+      if (segs.length === 0) return null;
+      let level = roots;
+      let node: TreeNode | undefined;
+      for (const seg of segs) {
+        node = level.find((n) => n.name === seg || n.name === seg + "/");
+        if (!node) {
+          node = { name: seg, children: [] };
+          level.push(node);
+        }
+        level = node.children;
+      }
+      if (node && noteParts.length) node.note = noteParts.join(" ").trim() || undefined;
+    }
+    return roots;
+  }
+
+  // Glyph / indent mode.
+  interface Row {
+    depth: number;
+    name: string;
+    note?: string;
+  }
+  const rows: Row[] = [];
+  for (const raw of lines) {
+    // Strip the tree drawing; each glyph column is 4 chars wide ("│   ", "├── ").
+    const m = raw.match(/^((?:[│|]\s{0,3}|\s{2,4}|[├└`|][─-]{2}\s?)*)(.*)$/);
+    if (!m) return null;
+    const prefix = m[1];
+    const rest = m[2].trim();
+    if (!rest) continue;
+    const hadBranch = /[├└`]|[|]--/.test(prefix);
+    const depth = hadBranch ? Math.max(1, Math.round(prefix.length / 4)) : Math.round(prefix.length / 4);
+    const noteMatch = rest.match(/^(\S+)\s{2,}(.+)$|^(.+?)\s+(?:—|#)\s+(.+)$/);
+    const name = noteMatch ? (noteMatch[1] ?? noteMatch[3]).trim() : rest;
+    const note = noteMatch ? (noteMatch[2] ?? noteMatch[4]).trim() : undefined;
+    rows.push({ depth, name, note });
+  }
+  if (rows.length === 0) return null;
+  const roots: TreeNode[] = [];
+  const stack: { depth: number; node: TreeNode }[] = [];
+  for (const r of rows) {
+    const node: TreeNode = { name: r.name, note: r.note, children: [] };
+    while (stack.length && stack[stack.length - 1].depth >= r.depth) stack.pop();
+    if (stack.length === 0) roots.push(node);
+    else stack[stack.length - 1].node.children.push(node);
+    stack.push({ depth: r.depth, node });
+  }
+  return roots.length ? roots : null;
+}
+
+// ---------------------------------------------------------------- flow fence
+
+export interface FlowStep {
+  name: string;
+  /** ok | fail | active | plain — set by a trailing marker: ✓ / ✗ / … */
   state: "ok" | "fail" | "active" | "plain";
 }
 
-/** ```timeline: `time | text | note?` per line; text may end with ✓ ✗ or …. */
-export function parseTimeline(src: string): TimelineEvent[] | null {
+/** ```flow fence: each line is a chain `A -> B -> C`; steps may end with ✓ ✗ or … */
+export function parseFlow(src: string): FlowStep[][] | null {
   const lines = src.split("\n").map((l) => l.trim()).filter(Boolean);
-  if (lines.length < 2 || lines.length > 50) return null;
-  const out: TimelineEvent[] = [];
+  if (lines.length === 0 || lines.length > 12) return null;
+  const chains: FlowStep[][] = [];
   for (const line of lines) {
-    const parts = line.split("|").map((p) => p.trim());
-    if (parts.length < 2 || !parts[0] || !parts[1]) return null;
-    let text = parts[1];
-    let state: TimelineEvent["state"] = "plain";
-    if (/[✓✔]$/.test(text)) (state = "ok"), (text = text.replace(/\s*[✓✔]$/, ""));
-    else if (/[✗✘]$/.test(text)) (state = "fail"), (text = text.replace(/\s*[✗✘]$/, ""));
-    else if (/(\.\.\.|…)$/.test(text)) (state = "active"), (text = text.replace(/\s*(\.\.\.|…)$/, ""));
-    out.push({ time: parts[0], text, note: parts[2] || undefined, state });
+    const parts = line.split(/\s*(?:->|→|=>|⇒)\s*/).filter(Boolean);
+    chains.push(
+      parts.map((p) => {
+        let state: FlowStep["state"] = "plain";
+        let name = p;
+        if (/[✓✔]$/.test(p)) (state = "ok"), (name = p.replace(/\s*[✓✔]$/, ""));
+        else if (/[✗✘x]$/.test(p) && p.length > 2) (state = "fail"), (name = p.replace(/\s*[✗✘]$/, ""));
+        else if (/(\.\.\.|…)$/.test(p)) (state = "active"), (name = p.replace(/\s*(\.\.\.|…)$/, ""));
+        return { name: name.trim(), state };
+      })
+    );
   }
-  return out;
+  // A flow must actually chain somewhere; all-single-step lines are just a list, not a pipeline.
+  return chains.some((c) => c.length >= 2) ? chains : null;
 }
 
-// ---------------------------------------------------------------- steps
 
-export interface Step {
-  title: string;
-  detail?: string;
-  state: "done" | "active" | "todo" | "fail";
-}
-
-/** ```steps: `1. Install deps ✓` lines with optional indented detail lines. */
-export function parseSteps(src: string): Step[] | null {
-  const lines = src.split("\n").filter((l) => l.trim());
-  if (lines.length === 0 || lines.length > 60) return null;
-  const out: Step[] = [];
-  for (const raw of lines) {
-    const m = raw.match(/^(\d+)[.)]\s+(.*)$/);
-    if (m) {
-      let title = m[2].trim();
-      let state: Step["state"] = "todo";
-      if (/[✓✔]$/.test(title)) (state = "done"), (title = title.replace(/\s*[✓✔]$/, ""));
-      else if (/[✗✘]$/.test(title)) (state = "fail"), (title = title.replace(/\s*[✗✘]$/, ""));
-      else if (/(\.\.\.|…)$/.test(title)) (state = "active"), (title = title.replace(/\s*(\.\.\.|…)$/, ""));
-      out.push({ title, state });
-    } else if (/^\s+\S/.test(raw) && out.length) {
-      const prev = out[out.length - 1];
-      prev.detail = (prev.detail ? prev.detail + " " : "") + raw.trim();
-    } else return null;
-  }
-  return out.length >= 2 ? out : null;
-}
-
-// ---------------------------------------------------------------- progress
-
-export interface ProgressRow {
-  label: string;
-  frac: number;
-  text: string;
-}
-
-/** ```progress: `label: 72%` or `label: 34/50` per line. */
-export function parseProgress(src: string): ProgressRow[] | null {
-  const lines = src.split("\n").map((l) => l.trim()).filter(Boolean);
-  if (lines.length === 0 || lines.length > 20) return null;
-  const out: ProgressRow[] = [];
-  for (const line of lines) {
-    const idx = line.lastIndexOf(":");
-    if (idx <= 0) return null;
-    const label = line.slice(0, idx).trim();
-    const val = line.slice(idx + 1).trim();
-    let frac: number | null = null;
-    const pct = val.match(/^(\d+(?:\.\d+)?)\s*%$/);
-    const ratio = val.match(/^(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/);
-    if (pct) frac = Number(pct[1]) / 100;
-    else if (ratio && Number(ratio[2]) > 0) frac = Number(ratio[1]) / Number(ratio[2]);
-    if (frac === null || !Number.isFinite(frac)) return null;
-    out.push({ label, frac: Math.max(0, Math.min(1, frac)), text: val });
-  }
-  return out;
-}
+// ---------------------------------------------------------------- markdown list upgrades
 
 /** A bullet list whose every item is `label: NN%` / `label: a/b` → progress rows (web parity). */
 export function progressFromItems(items: string[] | null): ProgressRow[] | null {
@@ -371,149 +464,6 @@ export function progressFromItems(items: string[] | null): ProgressRow[] | null 
   const lines = items.map((t) => t.replace(/\*\*|__|`/g, "").trim());
   if (lines.some((l) => !l || l.includes("\n"))) return null;
   return parseProgress(lines.join("\n"));
-}
-
-// ---------------------------------------------------------------- kv
-
-/** ```kv: `key: value` per line. */
-export function parseKv(src: string): { key: string; value: string }[] | null {
-  const lines = src.split("\n").map((l) => l.trim()).filter(Boolean);
-  if (lines.length === 0 || lines.length > 40) return null;
-  const out: { key: string; value: string }[] = [];
-  for (const line of lines) {
-    const idx = line.indexOf(":");
-    if (idx <= 0 || idx > 40) return null;
-    out.push({ key: line.slice(0, idx).trim(), value: line.slice(idx + 1).trim() });
-  }
-  return out;
-}
-
-// ---------------------------------------------------------------- badges
-
-export type BadgeTone = "ok" | "warn" | "fail" | "live" | "neutral";
-export interface Badge {
-  label: string;
-  value: string;
-  tone: BadgeTone;
-}
-
-const TONE_WORDS: Record<string, BadgeTone> = {
-  ok: "ok", pass: "ok", passed: "ok", healthy: "ok", up: "ok", done: "ok", green: "ok", stable: "ok", active: "ok", enabled: "ok", yes: "ok", on: "ok",
-  warn: "warn", warning: "warn", degraded: "warn", flaky: "warn", pending: "warn", stale: "warn", deprecated: "warn",
-  fail: "fail", failed: "fail", error: "fail", down: "fail", critical: "fail", broken: "fail", no: "fail", off: "fail", disabled: "fail",
-  running: "live", building: "live", deploying: "live", working: "live", live: "live", streaming: "live",
-  recurring: "warn", present: "warn", rising: "warn", increasing: "warn", elevated: "warn",
-};
-const OK_WORDS = new Set(["none", "zero", "0", "clear", "clean", "ok", "healthy", "resolved"]);
-
-/** ```badges: `label: state` per line; tone inferred from the state word and a trouble-naming label. */
-export function parseBadges(src: string): Badge[] | null {
-  const lines = src.split("\n").map((l) => l.trim()).filter(Boolean);
-  if (lines.length === 0 || lines.length > 16) return null;
-  const out: Badge[] = [];
-  for (const line of lines) {
-    const idx = line.indexOf(":");
-    if (idx <= 0) return null;
-    const label = line.slice(0, idx).trim();
-    const value = line.slice(idx + 1).trim();
-    if (!value || value.length > 40) return null;
-    let tone: BadgeTone = TONE_WORDS[value.toLowerCase()] ?? "neutral";
-    if (/error|fail|crash|outage|incident/i.test(label)) {
-      tone = OK_WORDS.has(value.toLowerCase()) ? "ok" : tone === "neutral" || tone === "warn" ? "warn" : "fail";
-    }
-    out.push({ label, value, tone });
-  }
-  return out;
-}
-
-// ---------------------------------------------------------------- tests
-
-export interface TestReport {
-  passed: number;
-  failed: number;
-  skipped: number;
-  duration?: string;
-  failures: string[];
-}
-
-/** ```tests: a summary line (`633 passed, 2 failed in 65s`) or `key: n` lines, plus `✗ name` failures. */
-export function parseTests(src: string): TestReport | null {
-  const lines = src.split("\n").map((l) => l.trim()).filter(Boolean);
-  if (lines.length === 0 || lines.length > 60) return null;
-  const r: TestReport = { passed: 0, failed: 0, skipped: 0, failures: [] };
-  let sawCount = false;
-  for (const line of lines) {
-    if (/^[✗✘x]\s+/.test(line) && line.length > 2) {
-      r.failures.push(line.replace(/^[✗✘x]\s+/, ""));
-      continue;
-    }
-    let matched = false;
-    for (const m of line.matchAll(/(\d+)\s*(passed|failed|skipped|pass|fail|skip)\b/gi)) {
-      const n = Number(m[1]);
-      const k = m[2].toLowerCase();
-      if (k.startsWith("pass")) r.passed = n;
-      else if (k.startsWith("fail")) r.failed = n;
-      else r.skipped = n;
-      sawCount = matched = true;
-    }
-    const kv = line.match(/^(passed|failed|skipped)\s*:\s*(\d+)$/i);
-    if (kv) {
-      r[kv[1].toLowerCase() as "passed" | "failed" | "skipped"] = Number(kv[2]);
-      sawCount = matched = true;
-    }
-    const dur = line.match(/\b(?:in|duration:?)\s*([\d.]+\s*(?:ms|s|m|min))\b/i);
-    if (dur) (r.duration = dur[1]), (matched = true);
-    if (!matched) return null;
-  }
-  return sawCount && r.passed + r.failed + r.skipped > 0 ? r : null;
-}
-
-// ---------------------------------------------------------------- callout
-
-export type CalloutKind = "note" | "tip" | "important" | "warning" | "caution" | "success" | "error";
-
-/** GitHub alert names + fence aliases → the console's functional hues. */
-export function calloutKind(name: string): CalloutKind | null {
-  const k = name.toLowerCase();
-  if (["note", "info"].includes(k)) return "note";
-  if (["tip", "hint"].includes(k)) return "tip";
-  if (["important"].includes(k)) return "important";
-  if (["warning", "warn"].includes(k)) return "warning";
-  if (["caution", "danger"].includes(k)) return "caution";
-  if (["success", "ok"].includes(k)) return "success";
-  if (["error", "failure"].includes(k)) return "error";
-  return null;
-}
-
-// ---------------------------------------------------------------- status list (markdown upgrade)
-
-export interface StatusItem {
-  state: "ok" | "fail" | "warn" | "pending" | "info";
-  text: string;
-}
-
-const STATUS_RE = /^(✅|✔️?|✓|❌|✘|✗|⚠️?|⏳|🔄|🕒|ℹ️?|🟢|🔴|🟡|\[(?:x|X| )\]|PASS(?:ED)?|FAIL(?:ED)?|WARN(?:ING)?|OK|DONE|TODO|PENDING|SKIP(?:PED)?|ERROR|INFO)\s*[:\-–—]?\s*(.+)$/u;
-
-/** A list whose every item opens with a status glyph/word → status rows (web parity). */
-export function parseStatusItems(items: string[]): StatusItem[] | null {
-  if (items.length < 2 || items.length > 60) return null;
-  const out: StatusItem[] = [];
-  for (const raw of items) {
-    const m = raw.trim().match(STATUS_RE);
-    if (!m) return null;
-    const g = m[1].toUpperCase();
-    const state: StatusItem["state"] = /✅|✔|✓|PASS|OK|DONE|🟢|\[X\]/.test(g)
-      ? "ok"
-      : /❌|✘|✗|FAIL|ERROR|🔴/.test(g)
-        ? "fail"
-        : /⚠|WARN|🟡/.test(g)
-          ? "warn"
-          : /⏳|🔄|🕒|TODO|PENDING|SKIP|\[ \]/.test(g)
-            ? "pending"
-            : "info";
-    out.push({ state, text: m[2].trim() });
-  }
-  return out;
 }
 
 // ---------------------------------------------------------------- JSON tree
@@ -572,13 +522,47 @@ export type SmartSpec =
   | { kind: "json"; title?: string; value: JsonValue }
   | { kind: "tests"; title?: string; report: TestReport }
   | { kind: "timeline"; title?: string; events: TimelineEvent[] }
-  | { kind: "callout"; title?: string; callout: CalloutKind; body: string };
+  | { kind: "callout"; title?: string; callout: CalloutKind; body: string }
+  | { kind: "flow"; title?: string; chains: FlowStep[][] }
+  | { kind: "tree"; title?: string; roots: TreeNode[] }
+  | { kind: "score"; title?: string; scores: Score[] }
+  | { kind: "keys"; title?: string; rows: { keys: string[]; action: string }[] }
+  | { kind: "palette"; title?: string; swatches: Swatch[] }
+  | { kind: "http"; title?: string; calls: HttpCall[] }
+  | { kind: "log"; title?: string; lines: LogLine[] }
+  | { kind: "diffstat"; title?: string; files: DiffStat[] }
+  | { kind: "commits"; title?: string; commits: Commit[] }
+  | { kind: "deps"; title?: string; deps: DepUpdate[] }
+  | { kind: "graph"; title?: string; dag: Dag }
+  | { kind: "sequence"; title?: string; sequence: Sequence }
+  | { kind: "mermaid"; title?: string; source: string; label: string }
+  | { kind: "findings"; title?: string; findings: Finding[] }
+  | { kind: "compare"; title?: string; options: CompareOption[] }
+  | { kind: "annotate"; title?: string; data: Annotated }
+  | { kind: "layers"; title?: string; layers: Layer[] }
+  | { kind: "funnel"; title?: string; stages: { label: string; value: number }[] }
+  | { kind: "spans"; title?: string; spans: Span[]; unit?: string }
+  | { kind: "heatmap"; title?: string; map: Heatmap }
+  | { kind: "ini"; title?: string; sections: IniSection[] }
+  | { kind: "env"; title?: string; vars: EnvVar[] }
+  | { kind: "stack"; title?: string; trace: StackTrace }
+  | { kind: "files"; title?: string; entries: FileEntry[] }
+  | { kind: "links"; title?: string; links: LinkItem[] }
+  | { kind: "commands"; title?: string; commands: CommandLine[] }
+  | { kind: "comparison"; title?: string; rows: Comparison[] }
+  | { kind: "cron"; title?: string; specs: CronSpec[] }
+  | { kind: "url"; title?: string; url: UrlParts }
+  | { kind: "jwt"; title?: string; jwt: JwtDecoded };
 
-/** Fence kinds this router understands (anything else → plain code block). */
-export const SMART_LANGS = new Set([
-  "chart", "stats", "kv", "badges", "progress", "steps", "csv", "tsv", "json", "jsonc", "tests", "timeline",
-  "note", "info", "tip", "important", "warn", "warning", "caution", "danger", "success", "error",
+/** Fences whose content is line-oriented: a streaming one is parsed up to its last whole line (web LINE_FENCES). */
+export const LINE_FENCES = new Set([
+  "stats", "flow", "tree", "csv", "tsv", "timeline", "steps", "algorithm", "procedure", "progress", "kv", "badges", "score", "keys", "shortcuts",
+  "palette", "http", "tests", "log", "diffstat", "commits", "deps", "graph", "dag", "sequence", "findings", "issues", "risks", "funnel", "gantt", "spans", "heatmap",
+  "compare", "annotate", "layers",
 ]);
+
+/** Bare-ish fences the sniffer (viz-auto.ts) may upgrade. */
+const BARE_LANGS = new Set(["", "plaintext", "text", "txt", "plain", "output", "console-output"]);
 
 /** A leading `# title` or `title: …` line is a block title for line fences (stripped before parsing). */
 function splitTitle(src: string): { title?: string; body: string } {
@@ -590,36 +574,174 @@ function splitTitle(src: string): { title?: string; body: string } {
   return { title: (m[1] ?? m[2]).trim(), body: lines.slice(i + 1).join("\n") };
 }
 
+/** Mermaid diagram kinds drawn by mermaid itself (flowcharts that parse go to the graph block). */
+const MERMAID_KINDS: Record<string, string> = {
+  sequenceDiagram: "sequence diagram",
+  stateDiagram: "state diagram",
+  "stateDiagram-v2": "state diagram",
+  classDiagram: "class diagram",
+  erDiagram: "entity relationship diagram",
+  gantt: "gantt chart",
+  journey: "user journey",
+  pie: "pie chart",
+  mindmap: "mind map",
+  timeline: "timeline",
+  flowchart: "flowchart",
+  graph: "flowchart",
+};
+
+/** The diagram kind a raw mermaid fence declares on its first statement, or null. */
+export function mermaidKind(src: string): string | null {
+  const first = src
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => l && !l.startsWith("%%"));
+  const word = first?.split(/\s+/)[0];
+  return word && Object.prototype.hasOwnProperty.call(MERMAID_KINDS, word) ? MERMAID_KINDS[word] : null;
+}
+
+/** One sniffed shape → its spec. Shapes the existing parsers own are re-parsed from the source (web renderAuto). */
+function fromAuto(auto: AutoBlock | null, src: string): SmartSpec | null {
+  if (!auto) return null;
+  switch (auto.kind) {
+    case "table":
+      return { kind: "table", title: auto.title, table: { head: auto.table.head, rows: auto.table.rows } };
+    case "csv": {
+      const table = parseDelimited(src, auto.delimiter === "|" ? "," : auto.delimiter);
+      return table && { kind: "table", table };
+    }
+    case "json":
+      return { kind: "json", value: auto.value as JsonValue };
+    case "kv":
+      return { kind: "kv", rows: auto.rows };
+    case "ini":
+      return { kind: "ini", sections: auto.sections };
+    case "env":
+      return { kind: "env", vars: auto.vars };
+    case "stack":
+      return { kind: "stack", trace: auto.trace };
+    case "files":
+      return { kind: "files", entries: auto.entries };
+    case "links":
+      return { kind: "links", links: auto.links };
+    case "commands":
+      return { kind: "commands", commands: auto.commands };
+    case "comparison":
+      return { kind: "comparison", rows: auto.rows };
+    case "cron":
+      return { kind: "cron", specs: auto.specs };
+    case "url":
+      return { kind: "url", url: auto.url };
+    case "jwt":
+      return { kind: "jwt", jwt: auto.jwt };
+    case "semver":
+      return { kind: "deps", deps: auto.rows };
+    case "dag":
+      return { kind: "graph", dag: auto.dag };
+    case "sequence":
+      return { kind: "sequence", sequence: auto.sequence };
+    case "progress": {
+      const rows = parseProgress(src);
+      return rows && { kind: "progress", rows };
+    }
+    case "badges": {
+      const badges = parseBadges(src);
+      return badges && { kind: "badges", badges };
+    }
+    case "http": {
+      const calls = parseHttp(src);
+      return calls && { kind: "http", calls };
+    }
+    case "log": {
+      const lines = parseLog(src);
+      return lines && { kind: "log", lines };
+    }
+    case "tests": {
+      const report = parseTests(src);
+      return report && { kind: "tests", report };
+    }
+    case "timeline": {
+      const events = parseTimeline(src);
+      return events && { kind: "timeline", events };
+    }
+    case "steps": {
+      const steps = parseSteps(src);
+      return steps && { kind: "steps", steps };
+    }
+    case "deps": {
+      const deps = parseDeps(src);
+      return deps && { kind: "deps", deps };
+    }
+    case "diffstat": {
+      const files = parseDiffstat(src);
+      return files && { kind: "diffstat", files };
+    }
+    case "commits": {
+      const commits = parseCommits(src);
+      return commits && { kind: "commits", commits };
+    }
+    case "tree": {
+      const roots = parseTree(src);
+      return roots && { kind: "tree", roots };
+    }
+  }
+}
+
 /**
- * The output-visualizer router: fence language + text → a parsed spec, or null for "plain code".
- * Only call this on CLOSED fences; the markdown layer keeps open fences as code (streaming).
+ * The output-visualizer router (web SmartBlock): fence language + text → a parsed spec, or null
+ * for "plain code". Only call this on CLOSED fences; the markdown layer keeps open fences as code
+ * so a half-streamed block never flips between code and visual until it completes.
  */
 export function smartBlock(language: string, code: string): SmartSpec | null {
   const lang = language.toLowerCase();
-  if (!SMART_LANGS.has(lang)) return null;
   const src = code.replace(/\n$/, "");
   try {
     const ck = calloutKind(lang);
     if (ck) return src.trim() ? { kind: "callout", callout: ck, body: src } : null;
-    if (lang === "chart") {
-      const spec = parseChartSpec(src);
-      return spec ? { kind: "chart", title: spec.title, spec } : null;
+    switch (lang) {
+      case "chart": {
+        const spec = parseChartSpec(src);
+        return spec ? { kind: "chart", title: spec.title, spec } : null;
+      }
+      case "json":
+      case "jsonc": {
+        const value = parseJsonBlock(src);
+        return value ? { kind: "json", value } : null;
+      }
+      case "heatmap": {
+        const map = parseHeatmap(src);
+        return map ? { kind: "heatmap", map } : null;
+      }
+      case "mermaid": {
+        // Flowcharts our parser understands draw as a native graph; sequence diagrams that parse
+        // draw natively too (WebView mermaid first); every other kind goes to mermaid in a WebView.
+        const auto = sniffLanguage(lang, src);
+        if (auto?.kind === "dag") return fromAuto(auto, src);
+        const label = mermaidKind(src);
+        return label ? { kind: "mermaid", source: src, label } : null;
+      }
     }
-    if (lang === "json" || lang === "jsonc") {
-      const value = parseJsonBlock(src);
-      return value ? { kind: "json", value } : null;
-    }
+    if (BARE_LANGS.has(lang)) return fromAuto(sniffBare(src), src);
     if (lang === "csv" || lang === "tsv") {
       const { title, body } = splitTitle(src);
       const table = parseDelimited(body, lang === "csv" ? "," : "\t");
       return table ? { kind: "table", title, table } : null;
     }
+    if (!LINE_FENCES.has(lang)) return fromAuto(sniffLanguage(lang, src), src);
     const { title, body } = splitTitle(src);
     const tidy = tidyFence(lang, body);
     switch (lang) {
       case "stats": {
         const stats = parseStats(tidy);
         return stats ? { kind: "stats", title, stats } : null;
+      }
+      case "flow": {
+        const chains = parseFlow(tidy);
+        return chains ? { kind: "flow", title, chains } : null;
+      }
+      case "tree": {
+        const roots = parseTree(body);
+        return roots ? { kind: "tree", title, roots } : null;
       }
       case "kv": {
         const rows = parseKv(tidy);
@@ -633,8 +755,10 @@ export function smartBlock(language: string, code: string): SmartSpec | null {
         const rows = parseProgress(tidy);
         return rows ? { kind: "progress", title, rows } : null;
       }
-      case "steps": {
-        const steps = parseSteps(tidy);
+      case "steps":
+      case "algorithm":
+      case "procedure": {
+        const steps = parseSteps(tidyFence("steps", body));
         return steps ? { kind: "steps", title, steps } : null;
       }
       case "tests": {
@@ -644,6 +768,75 @@ export function smartBlock(language: string, code: string): SmartSpec | null {
       case "timeline": {
         const events = parseTimeline(tidy);
         return events ? { kind: "timeline", title, events } : null;
+      }
+      case "score": {
+        const scores = parseScores(tidy);
+        return scores ? { kind: "score", title, scores } : null;
+      }
+      case "keys":
+      case "shortcuts": {
+        const rows = parseKeys(body);
+        return rows ? { kind: "keys", title, rows } : null;
+      }
+      case "palette": {
+        const swatches = parsePalette(body);
+        return swatches ? { kind: "palette", title, swatches } : null;
+      }
+      case "http": {
+        const calls = parseHttp(body);
+        return calls ? { kind: "http", title, calls } : null;
+      }
+      case "log": {
+        const lines = parseLog(body);
+        return lines ? { kind: "log", title, lines } : null;
+      }
+      case "diffstat": {
+        const files = parseDiffstat(body);
+        return files ? { kind: "diffstat", title, files } : null;
+      }
+      case "commits": {
+        const commits = parseCommits(body);
+        return commits ? { kind: "commits", title, commits } : null;
+      }
+      case "deps": {
+        const deps = parseDeps(body);
+        return deps ? { kind: "deps", title, deps } : null;
+      }
+      case "graph":
+      case "dag": {
+        const dag = parseDag(body);
+        return dag ? { kind: "graph", title, dag } : null;
+      }
+      case "sequence": {
+        const sequence = parseSequence(body);
+        return sequence ? { kind: "sequence", title, sequence } : null;
+      }
+      case "findings":
+      case "issues":
+      case "risks": {
+        const findings = parseFindings(body);
+        return findings ? { kind: "findings", title, findings } : null;
+      }
+      case "compare": {
+        const options = parseCompare(body);
+        return options ? { kind: "compare", title, options } : null;
+      }
+      case "annotate": {
+        const data = parseAnnotate(src);
+        return data ? { kind: "annotate", data } : null;
+      }
+      case "layers": {
+        const layers = parseLayers(body);
+        return layers ? { kind: "layers", title, layers } : null;
+      }
+      case "funnel": {
+        const stages = parseFunnel(tidy);
+        return stages ? { kind: "funnel", title, stages } : null;
+      }
+      case "gantt":
+      case "spans": {
+        const r = parseSpans(body);
+        return r ? { kind: "spans", title, spans: r.spans, unit: r.unit } : null;
       }
     }
   } catch {

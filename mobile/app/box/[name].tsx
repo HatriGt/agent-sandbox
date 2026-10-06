@@ -40,6 +40,7 @@ import { FadeInUp, TypingDots } from "@/components/ui/Motion";
 import { StatePill } from "@/components/ui/StatePill";
 import { UsageMeter } from "@/components/ui/UsageMeter";
 import { WorkingDot } from "@/components/ui/WorkingDot";
+import { CodeRefSession } from "@/components/CodeRef";
 
 type AskEntry = { q: string; a?: string; pending: boolean };
 
@@ -415,6 +416,7 @@ function Thread() {
   ];
 
   return (
+    <CodeRefSession.Provider value={session || null}>
     <SafeAreaView style={{ flex: 1, backgroundColor: palette.background }} edges={["top", "bottom"]}>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
         {/* Header — one row, 56px, like the web thread (grows by one chip line for harness /
@@ -987,5 +989,6 @@ function Thread() {
         </View>
       </Sheet>
     </SafeAreaView>
+    </CodeRefSession.Provider>
   );
 }

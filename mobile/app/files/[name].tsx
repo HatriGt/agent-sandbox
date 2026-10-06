@@ -2,9 +2,10 @@
 // /tree.json's flat paths; a text file opens in a plain monospace editor and saves via PUT /file.json.
 // Commit and push stay where they already live: the thread's Changes sheet.
 import React, { useEffect, useMemo, useState } from "react";
-import { Pressable, View } from "react-native";
+import { Pressable, ScrollView, View } from "react-native";
 import { useLocalSearchParams } from "expo-router";
 import { api } from "@/lib/api";
+import { pathResolver } from "@/lib/code-refs";
 import { useTheme } from "@/theme/ThemeContext";
 import { SettingsScreen } from "@/components/SettingsScreen";
 import { T } from "@/components/ui/AppText";
@@ -16,7 +17,8 @@ const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const MAX_EDIT = 400_000;
 
 export default function Files() {
-  const { name } = useLocalSearchParams<{ name: string }>();
+  // `path` (+ optional `line`) deep-links from a code ref in chat: open that file at that line.
+  const { name, path: refPath, line: refLine } = useLocalSearchParams<{ name: string; path?: string; line?: string }>();
   const session = decodeURIComponent(name ?? "");
   const { palette } = useTheme();
   const [files, setFiles] = useState<string[] | null>(null);
@@ -24,7 +26,7 @@ export default function Files() {
   const [dir, setDir] = useState("");
   const [q, setQ] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [open, setOpen] = useState<{ path: string; text: string; original: string } | null>(null);
+  const [open, setOpen] = useState<{ path: string; text: string; original: string; line?: number } | null>(null);
   const [loadingFile, setLoadingFile] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -38,6 +40,20 @@ export default function Files() {
       })
       .catch((e) => setError(msg(e)));
   }, [session]);
+
+  // A code ref names a path as the agent wrote it; resolve it against the tree (exact, else unique suffix).
+  useEffect(() => {
+    if (!files || !refPath) return;
+    const hit = pathResolver(files)(refPath);
+    if (!hit) {
+      setError(`${refPath} is not in this workspace.`);
+      setQ(refPath.slice(refPath.lastIndexOf("/") + 1));
+      return;
+    }
+    const ln = Number(refLine);
+    void openFile(hit, Number.isInteger(ln) && ln > 0 ? ln : undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [files, refPath, refLine]);
 
   const entries = useMemo(() => {
     if (!files) return [];
@@ -58,7 +74,7 @@ export default function Files() {
     return [...[...folders].sort().map((d) => ({ name: d, path: prefix + d, folder: true })), ...out.sort((a, b) => a.name.localeCompare(b.name))];
   }, [files, dir, q]);
 
-  const openFile = async (path: string) => {
+  const openFile = async (path: string, line?: number) => {
     setLoadingFile(path);
     setError(null);
     setSaved(false);
@@ -68,7 +84,7 @@ export default function Files() {
         setError("That file is too large or not text — open it on the web.");
         return;
       }
-      setOpen({ path, text, original: text });
+      setOpen({ path, text, original: text, line });
     } catch (e) {
       setError(msg(e));
     } finally {
@@ -96,9 +112,12 @@ export default function Files() {
     return (
       <SettingsScreen title={open.path.split("/").pop() ?? open.path}>
         <T variant="micro" mono tone="faint" numberOfLines={2}>
-          {open.path}
+          {open.line ? `${open.path}:${open.line}` : open.path}
         </T>
-        <Field mono value={open.text} onChangeText={(t) => setOpen({ ...open, text: t })} multiline autoCapitalize="none" autoCorrect={false} spellCheck={false} style={{ minHeight: 360, textAlignVertical: "top", fontSize: 12 }} />
+        {open.line && !dirty ? <LineView text={open.text} line={open.line} onEdit={() => setOpen({ ...open, line: undefined })} /> : null}
+        {open.line && !dirty ? null : (
+          <Field mono value={open.text} onChangeText={(t) => setOpen({ ...open, text: t })} multiline autoCapitalize="none" autoCorrect={false} spellCheck={false} style={{ minHeight: 360, textAlignVertical: "top", fontSize: 12 }} />
+        )}
         {error ? (
           <T variant="meta" tone="destructive">
             {error}
@@ -156,5 +175,48 @@ export default function Files() {
         </T>
       ) : null}
     </SettingsScreen>
+  );
+}
+
+const BEFORE = 12;
+const AFTER = 60;
+
+/**
+ * A code ref's landing view: the lines around `line`, numbered, the target row highlighted, so the
+ * referenced spot is on screen without scrolling a 2,000-line editor. "Edit file" drops to the editor.
+ */
+function LineView({ text, line, onEdit }: { text: string; line: number; onEdit: () => void }) {
+  const { palette } = useTheme();
+  const all = text.split("\n");
+  const target = Math.min(line, all.length);
+  const from = Math.max(1, target - BEFORE);
+  const to = Math.min(all.length, target + AFTER);
+  const width = String(to).length * 8 + 8;
+  return (
+    <View style={{ gap: 8 }}>
+      {line > all.length ? (
+        <T variant="micro" tone="attention">
+          The file has {all.length} lines; showing the end.
+        </T>
+      ) : null}
+      <ScrollView horizontal style={{ backgroundColor: palette.card, borderWidth: 1, borderColor: palette.border, borderRadius: 10 }}>
+        <View style={{ paddingVertical: 6 }}>
+          {all.slice(from - 1, to).map((l, i) => {
+            const n = from + i;
+            return (
+              <View key={n} style={{ flexDirection: "row", paddingHorizontal: 8, backgroundColor: n === target ? palette.muted : "transparent" }}>
+                <T variant="code" mono tone={n === target ? "live" : "faint"} style={{ width, textAlign: "right", marginRight: 10, fontSize: 12 }}>
+                  {n}
+                </T>
+                <T variant="code" mono selectable style={{ fontSize: 12 }}>
+                  {l || " "}
+                </T>
+              </View>
+            );
+          })}
+        </View>
+      </ScrollView>
+      <Button variant="ghost" title="Edit file" onPress={onEdit} />
+    </View>
   );
 }
