@@ -123,6 +123,22 @@ const plans: Partial<Scenario> = {
     { type: "thread.started", thread_id: "t1" },
     { type: "item.started", item: { id: "item_p", type: "todo_list", items: [{ text: "read code", completed: true }, { text: "fix bug", completed: false }] } },
   ],
+  // omp's `todo` call carries ops; the result's details.phases is the whole list after the change
+  // (shape of omp 18.x toolResult message_end). Abandoned tasks are dropped from the card.
+  omp: [
+    { type: "agent_start" },
+    { type: "message_end", message: { role: "assistant", content: [{ type: "toolCall", id: "call_plan01", name: "todo", arguments: { ops: [{ op: "done", task: "read code" }] } }] } },
+    {
+      type: "message_end",
+      message: {
+        role: "toolResult",
+        toolCallId: "call_plan01",
+        toolName: "todo",
+        content: [{ type: "text", text: "Remaining: fix bug" }],
+        details: { op: "update", phases: [{ name: "Work", tasks: [{ content: "read code", status: "completed" }, { content: "old idea", status: "abandoned" }, { content: "fix bug", status: "pending" }] }] },
+      },
+    },
+  ],
 };
 
 test("every driver claiming planEvents has a plan scenario", () => {

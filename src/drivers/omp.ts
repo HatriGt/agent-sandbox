@@ -11,6 +11,8 @@ import {
   ID_OPEN,
   PARTIAL_MARK,
   PARTIAL_RESET,
+  PLAN_CLOSE,
+  PLAN_OPEN,
   QUESTION_MARK,
   RESULT_MAX_BYTES,
   RESULT_MAX_LINES,
@@ -76,6 +78,13 @@ export function ompFmtScript(): string {
     `const cut=ls.length-head.length;if(cut>0)head.push("… "+cut+" more lines");return head}` +
     `function toolArg(a){a=a||{};return String(a.command||a.cmd||a.path||a.file_path||a.filePath||a.pattern||a.query||a.url||a.description||"")}` +
     `function toolRow(b){const arg=oneLine(toolArg(b.arguments||b.args||b.input));st();w("→ "+String(b.name||b.toolName||"tool")+(arg?": "+arg:"")+idTok(b.id||b.toolCallId))}` +
+    // omp's `todo` tool is the plan. Its call carries ops (start/done/append…), not the list, but its
+    // result's details.phases holds the WHOLE list after the change: emit that as one ⟦plan⟧
+    // snapshot (same shape the Claude formatter writes) and drop the tool row + result as noise.
+    // Statuses: completed/abandoned → done-ish [x], in_progress → [>], pending/blocked → [ ].
+    `const planIds=new Set();` +
+    `function planFrom(d){const ph=d&&Array.isArray(d.phases)?d.phases:null;if(!ph)return false;const ts=[];for(const p of ph)for(const t of (p&&Array.isArray(p.tasks)?p.tasks:[]))if(t&&t.status!=="abandoned")ts.push(t);if(!ts.length)return true;` +
+    `w("${PLAN_OPEN} "+Date.now()+"\\n"+ts.map(t=>(t.status==="completed"?"[x] ":t.status==="in_progress"?"[>] ":"[ ] ")+df(String(t.content||"").replace(/\\s*\\n\\s*/g," ").slice(0,160))).join("\\n")+"\\n${PLAN_CLOSE}");return true}` +
     `function result(id,body,isErr){const r=String(body==null?"":body).trim();const tok=id?"${ID_OPEN}"+String(id).slice(-8)+"${ID_CLOSE} ":"";if(r||tok)st();` +
     `if(r)w("  "+tok+(isErr?"${ERR_MARK} ":"")+clip(df(r).split("\\n")).join("\\n  "));else if(tok)w("  "+tok+(isErr?"${ERR_MARK} ":"")+"(no output)")}` +
         // Live output of a running tool (tool_execution_update carries the CUMULATIVE output so far):
@@ -99,10 +108,13 @@ export function ompFmtScript(): string {
     `if(role==="assistant"){for(const b of Array.isArray(m.content)?m.content:[]){if(!b)continue;` +
     `if(b.type==="text"&&String(b.text||"").trim()){st();w(df(String(b.text).trim())+"\\n")}` +
     `else if(b.type==="thinking"&&String(b.thinking||b.text||"").trim())w("${THINK_OPEN}\\n"+df(String(b.thinking||b.text).trim())+"\\n${THINK_CLOSE}");` +
+    `else if((b.type==="toolCall"||b.type==="tool_call"||b.type==="tool_use")&&String(b.name||b.toolName)==="todo"){const id=b.id||b.toolCallId;if(id)planIds.add(id)}` +
     `else if(b.type==="toolCall"||b.type==="tool_call"||b.type==="tool_use")toolRow(b)}` +
     `if(typeof m.content==="string"&&m.content.trim()){st();w(df(m.content.trim())+"\\n")}` +
     `return}` +
     `if(role==="toolResult"||role==="tool"||role==="tool_result"){const id=m.toolCallId||m.tool_call_id||m.toolUseId||m.id;pDone(id);` +
+    // A todo result: render the plan. Fall back to a normal row only if the shape drifted.
+    `if(planIds.has(id)||m.toolName==="todo"){if(!m.isError&&planFrom(m.details))return;toolRow({name:"todo",id})}` +
     `result(id,txt(m.content)||m.output||m.result||m.text,!!(m.isError||m.is_error));return}}` +
     `let buf="";` +
     `process.stdin.setEncoding("utf8");` +
@@ -223,11 +235,10 @@ export const ompDriver: Driver = {
     gate: "hook",
     gateVerifiedLive: true,
     sideQuestion: true,
-    // omp has no TodoWrite equivalent the formatter maps to ⟦plan⟧ yet.
-    planEvents: false,
+    // omp's `todo` tool results carry the full list (details.phases); the formatter writes ⟦plan⟧.
+    planEvents: true,
     resume: true,
     modelSources: ["anthropic"],
-    caveat: "No plan card: oh-my-pi has no structured plan events the thread can render.",
   },
   install: (cfg) => ompInstallSh(cfg.ompVersion),
   launch: ({ resume }) => ompLaunchSh(resume),
