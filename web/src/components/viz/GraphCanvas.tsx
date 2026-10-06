@@ -9,6 +9,7 @@ import {
   MiniMap,
   Position,
   ReactFlow,
+  type ReactFlowInstance,
   getSmoothStepPath,
   type Edge,
   type EdgeProps,
@@ -175,6 +176,23 @@ export default function GraphCanvas({ dag, fullscreen }: { dag: Dag; fullscreen:
   const focus = focusName === null ? -1 : dag.nodes.indexOf(focusName);
   const reach = React.useMemo(() => (focus < 0 ? null : { up: walk(dag, focus, "up"), down: walk(dag, focus, "down") }), [dag, focus]);
 
+  // fitView on init alone measures whatever box exists at that instant — in fullscreen that is a
+  // dialog still settling, so the graph landed offset or tiny. Re-fit whenever the box resizes.
+  const box = React.useRef<HTMLDivElement>(null);
+  const flow = React.useRef<ReactFlowInstance<Node<NodeData>, Edge<EdgeData>> | null>(null);
+  const fitOpts = React.useMemo(() => ({ padding: fullscreen ? 0.15 : 0.08, maxZoom: fullscreen ? 1.5 : 1.1 }), [fullscreen]);
+  React.useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    let raf = 0;
+    const ro = new ResizeObserver(() => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => void flow.current?.fitView(fitOpts));
+    });
+    ro.observe(el);
+    return () => (cancelAnimationFrame(raf), ro.disconnect());
+  }, [fitOpts]);
+
   const nodes = React.useMemo<Node<NodeData>[]>(
     () =>
       dag.nodes.map((name, i) => ({
@@ -232,17 +250,20 @@ export default function GraphCanvas({ dag, fullscreen }: { dag: Dag; fullscreen:
 
   return (
     <div className={cn("flex flex-col", fullscreen && "size-full")}>
-      <div className="asb-flow" style={fullscreen ? { flex: 1, minHeight: 0 } : { height }} onMouseLeave={() => setHover(null)}>
+      <div ref={box} className="asb-flow" style={fullscreen ? { flex: 1, minHeight: 0 } : { height }} onMouseLeave={() => setHover(null)}>
         <ReactFlow
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           fitView
+          onInit={(inst) => (flow.current = inst)}
           style={{ width: "100%", height: "100%" }}
-          fitViewOptions={{ padding: fullscreen ? 0.15 : 0.08, maxZoom: fullscreen ? 1.5 : 1.1 }}
+          fitViewOptions={fitOpts}
           minZoom={0.1}
           maxZoom={4}
+          // MIT licence: attribution is a request, not a licence term. The operator chose to hide it.
+          proOptions={{ hideAttribution: true }}
           nodesDraggable={false}
           nodesConnectable={false}
           elementsSelectable

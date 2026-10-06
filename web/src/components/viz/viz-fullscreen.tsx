@@ -43,7 +43,8 @@ export function VizFullscreen({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         title={title}
-        className="h-[92dvh] max-h-[92dvh] w-[96vw] max-w-none sm:w-[96vw]"
+        // Fade only: a scale-in makes canvases (xyflow, mermaid) measure a shrunken box mid-animation.
+        className="h-[92dvh] max-h-[92dvh] w-[96vw] max-w-none sm:w-[96vw] data-[state=open]:zoom-in-100 data-[state=open]:slide-in-from-bottom-0 data-[state=closed]:zoom-out-100"
         bodyClassName="flex overflow-hidden px-3 pb-3"
         data-viz-fullscreen
         onKeyDown={(e) => {
