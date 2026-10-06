@@ -5,6 +5,7 @@ import { radius } from "@/theme/tokens";
 import type { TraceEvent } from "@/lib/trace";
 import { T } from "./ui/AppText";
 import { Icon } from "./ui/Icon";
+import { PressScale } from "@/components/motion";
 
 /**
  * MCP calls in the thread. The wire name `mcp__hana-qa__execute_sql` is claude's namespacing, not a
@@ -116,7 +117,7 @@ export function McpItem({ event, call, last }: { event: ToolEvent; call: McpCall
 
   return (
     <View style={{ borderBottomWidth: last ? 0 : 1, borderBottomColor: palette.border }}>
-      <Pressable
+      <PressScale
         onPress={() => hasOutput && setOpen((o) => !o)}
         style={{ flexDirection: "row", alignItems: "flex-start", gap: 8, paddingHorizontal: 12, paddingVertical: 8 }}
       >
@@ -159,7 +160,7 @@ export function McpItem({ event, call, last }: { event: ToolEvent; call: McpCall
           ) : null}
         </View>
         {hasOutput ? <Icon name={open ? "minimize-2" : "maximize-2"} size={12} color={palette.faint} style={{ marginTop: 3 }} /> : null}
-      </Pressable>
+      </PressScale>
       {open && hasOutput ? (
         <View style={{ backgroundColor: palette.trace, marginHorizontal: 12, marginBottom: 10, borderRadius: radius.lg, padding: 10 }}>
           <T variant="code" mono selectable style={{ color: palette.traceFg }}>

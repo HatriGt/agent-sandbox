@@ -4,7 +4,7 @@ import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { T } from "./ui/AppText";
 import { Icon } from "./ui/Icon";
-import { TypingDots } from "./ui/Motion";
+import { TypingDots, PressScale } from "@/components/motion";
 
 // Same staged copy as the web's WakingCard, advanced purely by elapsed time.
 const STAGES = [
@@ -115,7 +115,7 @@ export function WakingCard({
         </T>
       )}
       {stuck && onRetry && (
-        <Pressable
+        <PressScale
           onPress={onRetry}
           style={({ pressed }) => ({
             flexDirection: "row",
@@ -132,7 +132,7 @@ export function WakingCard({
           <T variant="micro" weight="semibold" tone="live">
             Retry
           </T>
-        </Pressable>
+        </PressScale>
       )}
     </Pill>
   );
@@ -154,7 +154,7 @@ export function SleepingCard({ onWake }: { onWake: () => void }) {
       <T variant="micro" tone="muted" numberOfLines={1} style={{ flexShrink: 1 }}>
         workspace and session kept
       </T>
-      <Pressable
+      <PressScale
         onPress={onWake}
         style={({ pressed }) => ({
           flexDirection: "row",
@@ -171,7 +171,7 @@ export function SleepingCard({ onWake }: { onWake: () => void }) {
         <T variant="micro" weight="semibold" tone="live">
           Wake
         </T>
-      </Pressable>
+      </PressScale>
     </Pill>
   );
 }

@@ -15,6 +15,7 @@ import { T } from "@/components/ui/AppText";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Segmented } from "@/components/settings/Segmented";
+import { PressScale } from "@/components/motion";
 
 type Filter = "all" | AutomationScope;
 
@@ -189,11 +190,11 @@ function Row({ a, onChange, onRemove }: { a: Automation; onChange: (a: Automatio
             {last.text}
           </T>
         ) : (
-          <Pressable onPress={() => a.lastResult?.box && router.push(`/box/${encodeURIComponent(a.lastResult.box)}`)} accessibilityRole="link">
+          <PressScale onPress={() => a.lastResult?.box && router.push(`/box/${encodeURIComponent(a.lastResult.box)}`)} accessibilityRole="link">
             <T variant="meta" tone={last.tone} numberOfLines={2}>
               {last.text}
             </T>
-          </Pressable>
+          </PressScale>
         )
       ) : null}
       {a.lastDelivery ? (
@@ -224,12 +225,12 @@ function Row({ a, onChange, onRemove }: { a: Automation; onChange: (a: Automatio
         ) : (
           <View style={{ gap: 4 }}>
             {log.map((d) => (
-              <Pressable key={d.id} disabled={!d.box} onPress={() => d.box && router.push(`/box/${encodeURIComponent(d.box)}`)}>
+              <PressScale key={d.id} disabled={!d.box} onPress={() => d.box && router.push(`/box/${encodeURIComponent(d.box)}`)}>
                 <T variant="micro" tone={deliveryTone(d)} numberOfLines={2}>
                   {ago(d.at)} · {deliveryLine(d)}
                   {d.detail && d.outcome !== "fired" ? ` — ${d.detail}` : ""}
                 </T>
-              </Pressable>
+              </PressScale>
             ))}
           </View>
         )
@@ -284,17 +285,17 @@ function Automations() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: palette.background }} edges={["top"]}>
       <View style={{ flexDirection: "row", alignItems: "center", height: 56, paddingHorizontal: 12 }}>
-        <Pressable onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)/home"))} hitSlop={12} style={{ padding: 8 }}>
+        <PressScale onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)/home"))} hitSlop={12} style={{ padding: 8 }}>
           <T variant="body" tone="muted">
             ‹ Back
           </T>
-        </Pressable>
+        </PressScale>
         <View style={{ flex: 1 }} />
-        <Pressable onPress={() => router.push("/automation/new")} hitSlop={12} style={{ padding: 8 }} accessibilityRole="button" accessibilityLabel="New automation">
+        <PressScale onPress={() => router.push("/automation/new")} hitSlop={12} style={{ padding: 8 }} accessibilityRole="button" accessibilityLabel="New automation">
           <T variant="body" weight="medium">
             + New
           </T>
-        </Pressable>
+        </PressScale>
       </View>
       <ScrollView
         contentContainerStyle={{ padding: 20, paddingTop: 0, gap: 12, paddingBottom: 40 }}

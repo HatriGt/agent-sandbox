@@ -2,6 +2,7 @@ import React from "react";
 import { Pressable, View, type StyleProp, type ViewStyle } from "react-native";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
+import { PressScale } from "@/components/motion";
 
 /** Raised card: bg-card + hairline border (border OR shadow, never both — we use border). */
 export function Card({
@@ -27,12 +28,12 @@ export function Card({
   };
   if (!onPress && !onLongPress) return <View style={[base, style]}>{children}</View>;
   return (
-    <Pressable
+    <PressScale
       onPress={onPress}
       onLongPress={onLongPress}
       style={({ pressed }) => [base, { opacity: pressed ? 0.85 : 1 }, style]}
     >
       {children}
-    </Pressable>
+    </PressScale>
   );
 }

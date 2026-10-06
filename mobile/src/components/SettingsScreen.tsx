@@ -4,6 +4,7 @@ import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useTheme } from "@/theme/ThemeContext";
 import { T } from "./ui/AppText";
+import { PressScale } from "@/components/motion";
 
 /** Shared chrome for settings sub-screens: back row + serif title. */
 export function SettingsScreen({ title, children }: { title: string; children: React.ReactNode }) {
@@ -12,11 +13,11 @@ export function SettingsScreen({ title, children }: { title: string; children: R
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: palette.background }} edges={["top"]}>
       <View style={{ flexDirection: "row", alignItems: "center", height: 56, paddingHorizontal: 12 }}>
-        <Pressable onPress={() => router.back()} hitSlop={12} style={{ padding: 8 }}>
+        <PressScale onPress={() => router.back()} hitSlop={12} style={{ padding: 8 }}>
           <T variant="body" tone="muted">
             ‹ Back
           </T>
-        </Pressable>
+        </PressScale>
       </View>
       <ScrollView contentContainerStyle={{ padding: 20, paddingTop: 0, gap: 12, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
         <T serif variant="h1">

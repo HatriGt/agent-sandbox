@@ -9,6 +9,7 @@ import { Button } from "../ui/Button";
 import { Field } from "../ui/Field";
 import { Icon } from "../ui/Icon";
 import { Sheet } from "../ui/Sheet";
+import { PressScale } from "@/components/motion";
 
 type Review = { state: "loading" } | { state: "error"; message: string } | { state: "ready"; files: DiffSection[] };
 
@@ -133,7 +134,7 @@ export function ChangesSheet({
             <T tone="muted">No uncommitted changes.</T>
           ) : (
             <>
-              <Pressable
+              <PressScale
                 onPress={openReview}
                 style={({ pressed }) => ({
                   flexDirection: "row",
@@ -156,9 +157,9 @@ export function ChangesSheet({
                   whole run · {files.length} {files.length === 1 ? "file" : "files"}
                 </T>
                 <Icon name="chevron-right" size={14} color={palette.faint} />
-              </Pressable>
+              </PressScale>
               {files.map((f) => (
-              <Pressable
+              <PressScale
                 key={f.path}
                 onPress={() => openDiff(f.path)}
                 style={{
@@ -181,7 +182,7 @@ export function ChangesSheet({
                 <T variant="micro" mono tone="destructive" style={{ flexShrink: 0 }}>
                   −{f.deletions}
                 </T>
-              </Pressable>
+              </PressScale>
               ))}
             </>
           )}
@@ -215,7 +216,7 @@ function ReviewFile({ section, defaultOpen }: { section: DiffSection; defaultOpe
   const binary = /^Binary files/m.test(section.diff);
   return (
     <View style={{ borderWidth: 1, borderColor: palette.border, borderRadius: radius.lg, backgroundColor: palette.card, overflow: "hidden" }}>
-      <Pressable
+      <PressScale
         onPress={() => setOpen((o) => !o)}
         style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 9, paddingHorizontal: 10, opacity: pressed ? 0.7 : 1 })}
       >
@@ -229,7 +230,7 @@ function ReviewFile({ section, defaultOpen }: { section: DiffSection; defaultOpe
         <T variant="micro" mono tone="destructive" style={{ flexShrink: 0 }}>
           −{dels}
         </T>
-      </Pressable>
+      </PressScale>
       {open ? (
         <View style={{ paddingHorizontal: 6, paddingBottom: 6 }}>
           {binary ? <T variant="meta" tone="muted" style={{ padding: 6 }}>Binary file.</T> : <DiffText diff={section.diff} maxLines={300} />}

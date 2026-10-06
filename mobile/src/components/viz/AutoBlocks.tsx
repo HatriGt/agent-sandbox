@@ -8,6 +8,7 @@ import type { CommandLine, Comparison, CronSpec, EnvVar, FileEntry, IniSection, 
 import { T } from "../ui/AppText";
 import { Icon, type IconName } from "../ui/Icon";
 import { MiniAction } from "./VizFrame";
+import { PressScale } from "@/components/motion";
 
 /**
  * RN bodies for the automatic visualizers (lib/viz-auto.ts), mirroring web/src/components/viz/AutoBlocks.tsx.
@@ -48,9 +49,9 @@ function CopyIcon({ text, label = "Copy", color }: { text: string; label?: strin
   const { palette } = useTheme();
   const [done, copy] = useCopied();
   return (
-    <Pressable onPress={() => copy(text)} accessibilityRole="button" accessibilityLabel={label} hitSlop={8} style={{ width: 24, height: 24, alignItems: "center", justifyContent: "center" }}>
+    <PressScale onPress={() => copy(text)} accessibilityRole="button" accessibilityLabel={label} hitSlop={8} style={{ width: 24, height: 24, alignItems: "center", justifyContent: "center" }}>
       <Icon name={done ? "check" : "copy"} size={14} color={done ? palette.ok : color} />
-    </Pressable>
+    </PressScale>
   );
 }
 
@@ -114,7 +115,7 @@ export function EnvBlock({ vars }: { vars: EnvVar[] }) {
       {shown.map((v, i) => {
         const visible = !v.secret || revealed.has(v.key);
         return (
-          <Pressable
+          <PressScale
             key={`${v.key}-${i}`}
             onPress={v.secret ? () => toggle(v.key) : undefined}
             disabled={!v.secret}
@@ -142,7 +143,7 @@ export function EnvBlock({ vars }: { vars: EnvVar[] }) {
                 {v.comment}
               </T>
             ) : null}
-          </Pressable>
+          </PressScale>
         );
       })}
       {more}
@@ -191,12 +192,12 @@ export function StackTraceBlock({ trace }: { trace: StackTrace }) {
       {shown.map((r, k) => {
         if (r.kind === "fold") {
           return (
-            <Pressable key={`f${r.at}`} onPress={() => setVendors(true)} accessibilityRole="button" style={{ ...rowBorder(k, palette.border), paddingVertical: 5, flexDirection: "row", gap: 8, alignItems: "center" }}>
+            <PressScale key={`f${r.at}`} onPress={() => setVendors(true)} accessibilityRole="button" style={{ ...rowBorder(k, palette.border), paddingVertical: 5, flexDirection: "row", gap: 8, alignItems: "center" }}>
               <Icon name="more-horizontal" size={12} color={palette.faint} />
               <T variant="micro" tone="faint">
                 {r.n} framework {r.n === 1 ? "frame" : "frames"}
               </T>
-            </Pressable>
+            </PressScale>
           );
         }
         const f = trace.frames[r.i];
@@ -318,7 +319,7 @@ export function LinksBlock({ links }: { links: LinkItem[] }) {
   return (
     <View style={{ gap: 6 }}>
       {shown.map((l, i) => (
-        <Pressable
+        <PressScale
           key={`${l.url}-${i}`}
           onPress={() => {
             WebBrowser.openBrowserAsync(l.url).catch(() => {});
@@ -350,7 +351,7 @@ export function LinksBlock({ links }: { links: LinkItem[] }) {
             </T>
           </View>
           <Icon name="arrow-up-right" size={14} />
-        </Pressable>
+        </PressScale>
       ))}
       {more}
     </View>

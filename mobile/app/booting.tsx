@@ -11,7 +11,7 @@ import { radius } from "@/theme/tokens";
 import { T } from "@/components/ui/AppText";
 import { Button } from "@/components/ui/Button";
 import { Icon } from "@/components/ui/Icon";
-import { FadeInUp } from "@/components/ui/Motion";
+import { FadeInUp } from "@/components/motion";
 
 /**
  * Shown the instant a task is submitted. Two ways out, whichever fires first:

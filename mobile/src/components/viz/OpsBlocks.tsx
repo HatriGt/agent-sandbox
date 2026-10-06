@@ -8,6 +8,7 @@ import type { Commit, DepUpdate, DiffStat, Heatmap, HttpCall, LogLevel, LogLine,
 import { T } from "../ui/AppText";
 import { Icon } from "../ui/Icon";
 import { MiniAction } from "./VizFrame";
+import { PressScale } from "@/components/motion";
 
 const CAP = 40;
 const tnum = { fontVariant: ["tabular-nums" as const] };
@@ -135,7 +136,7 @@ export function PaletteBlock({ swatches }: { swatches: Swatch[] }) {
   return (
     <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
       {swatches.map((s, i) => (
-        <Pressable
+        <PressScale
           key={i}
           accessibilityRole="button"
           accessibilityLabel={`Copy ${s.hex}`}
@@ -158,7 +159,7 @@ export function PaletteBlock({ swatches }: { swatches: Swatch[] }) {
               {s.label}
             </T>
           ) : null}
-        </Pressable>
+        </PressScale>
       ))}
     </View>
   );
@@ -238,7 +239,7 @@ export function LogBlock({ lines }: { lines: LogLine[] }) {
           if (l !== "all" && n === 0) return null;
           const active = filter === l;
           return (
-            <Pressable
+            <PressScale
               key={l}
               accessibilityRole="button"
               accessibilityState={{ selected: active }}
@@ -255,7 +256,7 @@ export function LogBlock({ lines }: { lines: LogLine[] }) {
               <T variant="micro" weight={active ? "semibold" : "regular"} style={{ color: l === "all" ? palette.foreground : levelColor(palette, l) }}>
                 {l} {n}
               </T>
-            </Pressable>
+            </PressScale>
           );
         })}
       </View>

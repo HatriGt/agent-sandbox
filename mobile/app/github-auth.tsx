@@ -7,6 +7,7 @@ import { useAuth } from "@/state/auth";
 import { DEFAULT_SERVER } from "@/lib/config";
 import { useTheme } from "@/theme/ThemeContext";
 import { T } from "@/components/ui/AppText";
+import { PressScale } from "@/components/motion";
 
 /**
  * "Sign in with GitHub" — the same server flow the web uses (/auth/github →
@@ -107,21 +108,21 @@ export default function GithubAuth() {
         <T variant="body" weight="semibold">
           Sign in with GitHub
         </T>
-        <Pressable onPress={() => router.back()} hitSlop={12}>
+        <PressScale onPress={() => router.back()} hitSlop={12}>
           <T variant="body" tone="muted">Cancel</T>
-        </Pressable>
+        </PressScale>
       </View>
       {error ? (
         <View style={{ padding: 16, gap: 12 }}>
           <T variant="body" tone="destructive">✕ {error}</T>
-          <Pressable
+          <PressScale
             onPress={() => {
               done.current = false;
               setError(null);
             }}
           >
             <T variant="body" tone="live">Try again</T>
-          </Pressable>
+          </PressScale>
         </View>
       ) : (
         <>

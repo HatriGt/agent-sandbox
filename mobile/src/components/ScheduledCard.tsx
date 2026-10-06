@@ -10,6 +10,7 @@ import { T } from "./ui/AppText";
 import { ArmButton } from "./ui/ArmButton";
 import { Button } from "./ui/Button";
 import { Icon, type IconName } from "./ui/Icon";
+import { PressScale } from "@/components/motion";
 
 /**
  * What this chat scheduled (web: thread/ScheduledCard + SchedulePill). One compact card with a row
@@ -328,24 +329,24 @@ function Row({ it, now, busy, run }: { it: Item; now: number; busy: boolean; run
       </T>
       <View style={{ flexDirection: "row", gap: 4, alignItems: "center", flexWrap: "wrap" }}>
         {!over ? (
-          <Pressable disabled={busy} hitSlop={6} onPress={() => void run(it.id, () => api.setAutomationEnabled(it.id, !it.enabled))} style={{ paddingVertical: 6, paddingHorizontal: 8 }}>
+          <PressScale disabled={busy} hitSlop={6} onPress={() => void run(it.id, () => api.setAutomationEnabled(it.id, !it.enabled))} style={{ paddingVertical: 6, paddingHorizontal: 8 }}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
               <Icon name={it.enabled ? "pause" : "play"} size={12} color={palette.foreground} />
               <T variant="micro" weight="medium">
                 {it.enabled ? "Pause" : "Resume"}
               </T>
             </View>
-          </Pressable>
+          </PressScale>
         ) : null}
         {canRunNow ? (
-          <Pressable disabled={busy} hitSlop={6} onPress={() => void run(it.id, () => api.runAutomation(it.id))} style={{ paddingVertical: 6, paddingHorizontal: 8 }}>
+          <PressScale disabled={busy} hitSlop={6} onPress={() => void run(it.id, () => api.runAutomation(it.id))} style={{ paddingVertical: 6, paddingHorizontal: 8 }}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
               <Icon name="zap" size={12} color={palette.foreground} />
               <T variant="micro" weight="medium">
                 {busy ? "Working…" : "Run now"}
               </T>
             </View>
-          </Pressable>
+          </PressScale>
         ) : null}
         <View style={{ flex: 1 }} />
         <ArmButton title="Delete" armedTitle="Delete it?" variant="ghost" small disabled={busy} onConfirm={() => run(it.id, () => api.deleteAutomation(it.id))} />

@@ -7,7 +7,7 @@ import { useTheme } from "@/theme/ThemeContext";
 import { T } from "@/components/ui/AppText";
 import { BrandMark } from "@/components/ui/BrandMark";
 import { Button } from "@/components/ui/Button";
-import { FadeInUp } from "@/components/ui/Motion";
+import { FadeInUp } from "@/components/motion";
 
 /** Landing: the serif voice of the web landing page, one screen. */
 export default function Welcome() {

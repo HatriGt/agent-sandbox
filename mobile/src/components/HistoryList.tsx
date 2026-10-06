@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useState } from "react";
-import { View } from "react-native";
+import React, { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { FlatList, View, type StyleProp, type ViewStyle } from "react-native";
 import { useRouter } from "expo-router";
 import { api, type HistoryRun, type LedgerTotals, type RunDigest } from "@/lib/api";
 import { ago, durationWords, friendlyName } from "@/lib/format";
@@ -9,10 +9,9 @@ import { ArmButton } from "./ui/ArmButton";
 import { Button } from "./ui/Button";
 import { Card } from "./ui/Card";
 import { Icon } from "./ui/Icon";
-import { FadeInUp } from "./ui/Motion";
-import { CardSkeleton } from "./ui/Skeleton";
 import { DigestView } from "./DigestCard";
 import { OutcomeView, outcomeFacts } from "./OutcomeCard";
+import { animateLayout, CardSkeleton, FadeInUp, stagger } from "@/components/motion";
 
 const PAGE = 25;
 
@@ -22,9 +21,7 @@ const PAGE = 25;
  * tab. A row expands into the archived receipt, and offers exactly two actions: run the same brief
  * again on a new machine, or forget the record.
  */
-export function HistoryList() {
-  const router = useRouter();
-  const { palette } = useTheme();
+export function HistoryList({ header, contentContainerStyle }: { header: React.ReactElement; contentContainerStyle?: StyleProp<ViewStyle> }) {
   const [rows, setRows] = useState<HistoryRun[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [more, setMore] = useState(false);
@@ -62,117 +59,160 @@ export function HistoryList() {
     }
   }, [rows]);
 
-  const forget = async (id: number) => {
+  const forget = useCallback(async (id: number) => {
     try {
       await api.historyDelete(id);
       setRows((prev) => (prev ?? []).filter((r) => r.id !== id));
     } catch {
       // Nothing removed — the row stays, which is the honest picture.
     }
-  };
-
-  if (error) {
-    return (
-      <T variant="body" tone="destructive">
-        Could not load history: {error}
-      </T>
-    );
-  }
-  if (rows === null) {
-    return (
-      <View style={{ gap: 10 }}>
-        <CardSkeleton />
-        <CardSkeleton />
-        <CardSkeleton />
-      </View>
-    );
-  }
-  if (!rows.length) {
-    return (
-      <T variant="body" tone="muted">
-        When a run finishes, its receipt is kept here — even after the machine is reaped. Nothing yet.
-      </T>
-    );
-  }
+  }, []);
+  const toggle = useCallback((id: number) => {
+    animateLayout();
+    setOpenId((cur) => (cur === id ? null : id));
+  }, []);
+  // Day headers precomputed once per page load, not re-derived inside every row render.
+  const heads = useMemo(() => {
+    const out: (string | null)[] = [];
+    let prev: string | null = null;
+    for (const r of rows ?? []) {
+      const at = r.archivedAt || r.endedAt || 0;
+      const label = at ? dayLabel(at) : null;
+      out.push(label && label !== prev ? label : null);
+      if (label) prev = label;
+    }
+    return out;
+  }, [rows]);
+  const renderItem = useCallback(
+    ({ item, index }: { item: HistoryRun; index: number }) => (
+      <HistoryRow r={item} i={index} head={heads[index]} open={openId === item.id} onToggle={toggle} onForget={forget} />
+    ),
+    [heads, openId, toggle, forget],
+  );
 
   return (
-    <View style={{ gap: 10 }}>
-      <LedgerHeader />
-      {rows.map((r, i) => {
-        const at = r.archivedAt || r.endedAt || 0;
-        const prev = i > 0 ? rows[i - 1].archivedAt || rows[i - 1].endedAt || 0 : null;
-        const head = at && (prev === null || dayLabel(prev) !== dayLabel(at)) ? dayLabel(at) : null;
-        const failed = r.state === "failed";
-        // Archive stamps are epoch ms; durationWords speaks seconds, ago speaks ms.
-        const secs = r.startedAt && r.endedAt && r.endedAt > r.startedAt ? Math.round((r.endedAt - r.startedAt) / 1000) : null;
-        return (
-          <React.Fragment key={r.id}>
-            {head ? (
-              <T variant="micro" tone="faint" weight="semibold" style={{ marginTop: i === 0 ? 0 : 6 }}>
-                {head.toUpperCase()}
-              </T>
-            ) : null}
-            <FadeInUp delay={Math.min(i, 8) * 40}>
-              <Card onPress={() => setOpenId((cur) => (cur === r.id ? null : r.id))}>
-                <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
-                  <Icon
-                    name={failed ? "x-circle" : "check-circle"}
-                    size={16}
-                    color={failed ? palette.destructive : palette.ok}
-                  />
-                  <T variant="body" weight="medium" style={{ flex: 1, minWidth: 0 }} numberOfLines={2}>
-                    {titleOf(r)}
-                  </T>
-                  <Icon name={openId === r.id ? "chevron-down" : "chevron-right"} size={14} color={palette.faint} />
-                </View>
-                <View style={{ flexDirection: "row", gap: 10, marginTop: 4, alignItems: "center" }}>
-                  <T variant="micro" mono tone="faint">
-                    {friendlyName(r.box)}
-                  </T>
-                  {secs ? (
-                    <T variant="micro" mono tone="faint">
-                      {durationWords(secs)}
-                    </T>
-                  ) : null}
-                  {at ? (
-                    <T variant="micro" tone="faint">
-                      {ago(at)}
-                    </T>
-                  ) : null}
-                </View>
-
-                {r.outcome && outcomeFacts(r.outcome) ? (
-                  <T variant="micro" mono tone="muted" numberOfLines={1} style={{ marginTop: 4 }}>
-                    {outcomeFacts(r.outcome)}
-                  </T>
-                ) : null}
-
-                {openId === r.id ? (
-                  <View style={{ marginTop: 10, gap: 8 }}>
-                    {r.outcome ? <OutcomeView outcome={r.outcome} /> : null}
-                    <RunDetail id={r.id} />
-                    <View style={{ flexDirection: "row", gap: 8 }}>
-                      <Button
-                        title="Run again"
-                        variant="secondary"
-                        small
-                        onPress={() => router.push({ pathname: "/new", params: { task: r.task ?? "" } })}
-                      />
-                      <ArmButton title="Forget" armedTitle="Delete record?" small onConfirm={() => forget(r.id)} />
-                    </View>
-                  </View>
-                ) : null}
-              </Card>
-            </FadeInUp>
-          </React.Fragment>
-        );
-      })}
-      {more ? (
-        <Button title={loadingMore ? "Loading…" : "Show more"} variant="ghost" onPress={() => void showMore()} disabled={loadingMore} />
-      ) : null}
-    </View>
+    <FlatList
+      data={rows ?? []}
+      keyExtractor={(r) => String(r.id)}
+      renderItem={renderItem}
+      extraData={openId}
+      initialNumToRender={10}
+      windowSize={9}
+      contentContainerStyle={contentContainerStyle}
+      ListHeaderComponent={
+        <View style={{ gap: 10 }}>
+          {header}
+          {rows?.length ? <LedgerHeader /> : null}
+        </View>
+      }
+      ListEmptyComponent={
+        error ? (
+          <T variant="body" tone="destructive">
+            Could not load history: {error}
+          </T>
+        ) : rows === null ? (
+          <View style={{ gap: 10 }}>
+            <CardSkeleton />
+            <CardSkeleton />
+            <CardSkeleton />
+          </View>
+        ) : (
+          <T variant="body" tone="muted">
+            When a run finishes, its receipt is kept here — even after the machine is reaped. Nothing yet.
+          </T>
+        )
+      }
+      ListFooterComponent={
+        more ? <Button title={loadingMore ? "Loading…" : "Show more"} variant="ghost" onPress={() => void showMore()} disabled={loadingMore} /> : null
+      }
+    />
   );
 }
+
+/** One archived run. Memoized: toggling a row or paging in more re-renders only the rows that changed. */
+const HistoryRow = memo(function HistoryRow({
+  r,
+  i,
+  head,
+  open,
+  onToggle,
+  onForget,
+}: {
+  r: HistoryRun;
+  i: number;
+  head: string | null;
+  open: boolean;
+  onToggle: (id: number) => void;
+  onForget: (id: number) => void;
+}) {
+  const router = useRouter();
+  const { palette } = useTheme();
+  const at = r.archivedAt || r.endedAt || 0;
+  const failed = r.state === "failed";
+  // Archive stamps are epoch ms; durationWords speaks seconds, ago speaks ms.
+  const secs = r.startedAt && r.endedAt && r.endedAt > r.startedAt ? Math.round((r.endedAt - r.startedAt) / 1000) : null;
+  return (
+    <>
+      {head ? (
+        <T variant="micro" tone="faint" weight="semibold" style={{ marginTop: i === 0 ? 0 : 6 }}>
+          {head.toUpperCase()}
+        </T>
+      ) : null}
+      <FadeInUp delay={stagger(i)}>
+        <Card onPress={() => onToggle(r.id)}>
+          <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
+            <Icon
+              name={failed ? "x-circle" : "check-circle"}
+              size={16}
+              color={failed ? palette.destructive : palette.ok}
+            />
+            <T variant="body" weight="medium" style={{ flex: 1, minWidth: 0 }} numberOfLines={2}>
+              {titleOf(r)}
+            </T>
+            <Icon name={open ? "chevron-down" : "chevron-right"} size={14} color={palette.faint} />
+          </View>
+          <View style={{ flexDirection: "row", gap: 10, marginTop: 4, alignItems: "center" }}>
+            <T variant="micro" mono tone="faint">
+              {friendlyName(r.box)}
+            </T>
+            {secs ? (
+              <T variant="micro" mono tone="faint">
+                {durationWords(secs)}
+              </T>
+            ) : null}
+            {at ? (
+              <T variant="micro" tone="faint">
+                {ago(at)}
+              </T>
+            ) : null}
+          </View>
+
+          {r.outcome && outcomeFacts(r.outcome) ? (
+            <T variant="micro" mono tone="muted" numberOfLines={1} style={{ marginTop: 4 }}>
+              {outcomeFacts(r.outcome)}
+            </T>
+          ) : null}
+
+          {open ? (
+            <View style={{ marginTop: 10, gap: 8 }}>
+              {r.outcome ? <OutcomeView outcome={r.outcome} /> : null}
+              <RunDetail id={r.id} />
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                <Button
+                  title="Run again"
+                  variant="secondary"
+                  small
+                  onPress={() => router.push({ pathname: "/new", params: { task: r.task ?? "" } })}
+                />
+                <ArmButton title="Forget" armedTitle="Delete record?" small onConfirm={() => onForget(r.id)} />
+              </View>
+            </View>
+          ) : null}
+        </Card>
+      </FadeInUp>
+    </>
+  );
+});
 
 /** The archived receipt, fetched once when a row opens. */
 function RunDetail({ id }: { id: number }) {

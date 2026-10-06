@@ -9,6 +9,7 @@ import { T } from "../ui/AppText";
 import { Button } from "../ui/Button";
 import { Icon, type IconName } from "../ui/Icon";
 import { Sheet } from "../ui/Sheet";
+import { PressScale } from "@/components/motion";
 
 /**
  * Run options for the NEXT thread, at web parity (web/src/components/thread/RunSettings.tsx +
@@ -207,7 +208,7 @@ function RadioRow({
 }) {
   const { palette } = useTheme();
   return (
-    <Pressable
+    <PressScale
       onPress={onPress}
       disabled={disabled}
       accessibilityRole="radio"
@@ -248,7 +249,7 @@ function RadioRow({
         ) : null}
         {children}
       </View>
-    </Pressable>
+    </PressScale>
   );
 }
 
@@ -417,7 +418,7 @@ export function RunSettingsSheet({
                       {p.models.slice(0, 24).map((m) => {
                         const picked = value.providerModel === m;
                         return (
-                          <Pressable
+                          <PressScale
                             key={m}
                             onPress={() => onChange({ providerModel: picked ? null : m })}
                             style={{ borderWidth: 1, borderColor: picked ? palette.foreground : palette.border, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 3 }}
@@ -425,7 +426,7 @@ export function RunSettingsSheet({
                             <T variant="micro" mono weight={picked ? "semibold" : "regular"}>
                               {m}
                             </T>
-                          </Pressable>
+                          </PressScale>
                         );
                       })}
                     </View>
@@ -531,7 +532,7 @@ export function RunSettingsSheet({
             {([1, 2, 3] as const).map((n, i) => {
               const on = value.attempts === n;
               return (
-                <Pressable
+                <PressScale
                   key={n}
                   accessibilityRole="radio"
                   accessibilityState={{ checked: on }}
@@ -550,7 +551,7 @@ export function RunSettingsSheet({
                   <T variant="meta" weight={on ? "semibold" : "regular"} style={{ color: on ? palette.primaryForeground : palette.foreground }}>
                     {n}
                   </T>
-                </Pressable>
+                </PressScale>
               );
             })}
           </View>
@@ -629,7 +630,7 @@ function Chip({ icon, label, onPress, onRemove }: { icon?: IconName; label: stri
         maxWidth: "100%",
       }}
     >
-      <Pressable
+      <PressScale
         onPress={onPress}
         style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 5, paddingLeft: 10, paddingVertical: 6, opacity: pressed ? 0.7 : 1 })}
       >
@@ -637,8 +638,8 @@ function Chip({ icon, label, onPress, onRemove }: { icon?: IconName; label: stri
         <T variant="micro" weight="medium" numberOfLines={1} style={{ maxWidth: 160 }}>
           {label}
         </T>
-      </Pressable>
-      <Pressable
+      </PressScale>
+      <PressScale
         onPress={() => {
           Haptics.selectionAsync().catch(() => {});
           onRemove();
@@ -648,7 +649,7 @@ function Chip({ icon, label, onPress, onRemove }: { icon?: IconName; label: stri
         style={({ pressed }) => ({ paddingHorizontal: 8, paddingVertical: 6, opacity: pressed ? 0.6 : 1 })}
       >
         <Icon name="x" size={11} color={palette.faint} />
-      </Pressable>
+      </PressScale>
     </Animated.View>
   );
 }

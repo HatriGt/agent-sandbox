@@ -20,6 +20,7 @@ import { Icon } from "@/components/ui/Icon";
 import { Button } from "@/components/ui/Button";
 import { Field } from "@/components/ui/Field";
 import { TextInput } from "react-native";
+import { PressScale } from "@/components/motion";
 
 type Attachment = { name: string; dataUrl: string };
 const MAX_ATTACHMENTS = 8;
@@ -259,9 +260,9 @@ export default function NewTask() {
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", padding: 16 }}>
           <T serif variant="h2">New task</T>
-          <Pressable onPress={() => router.back()} hitSlop={12}>
+          <PressScale onPress={() => router.back()} hitSlop={12}>
             <T variant="body" tone="muted">Cancel</T>
-          </Pressable>
+          </PressScale>
         </View>
         <ScrollView contentContainerStyle={{ paddingHorizontal: 16, gap: 14, paddingBottom: 24 }} keyboardShouldPersistTaps="handled">
           {trialExpired && me?.kind === "user" ? (
@@ -313,15 +314,15 @@ export default function NewTask() {
               <T variant="micro" tone="muted" numberOfLines={1} style={{ flex: 1, minWidth: 0 }}>
                 from {unfurled.source === "github" ? "GitHub" : "Sentry"}: {unfurled.title}
               </T>
-              <Pressable onPress={() => setUnfurled(null)} hitSlop={10} accessibilityLabel="Dismiss">
+              <PressScale onPress={() => setUnfurled(null)} hitSlop={10} accessibilityLabel="Dismiss">
                 <Icon name="x" size={12} color={palette.faint} />
-              </Pressable>
+              </PressScale>
             </View>
           ) : null}
 
           {/* Run settings: one chip opens the sheet; anything off its default sits beside it as a removable chip. */}
           <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
-            <Pressable
+            <PressScale
               onPress={() => {
                 Haptics.selectionAsync().catch(() => {});
                 setRunOpen(true);
@@ -349,7 +350,7 @@ export default function NewTask() {
                   · {currentAgent(run.value, run.sources.prefs)?.label ?? run.sources.prefs.defaultAgent}
                 </T>
               ) : null}
-            </Pressable>
+            </PressScale>
             <RunOptionChips value={run.value} sources={run.sources} onOpen={() => setRunOpen(true)} onChange={run.update} />
           </View>
           {pickedHarness ? (
@@ -377,7 +378,7 @@ export default function NewTask() {
             </T>
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
                 {STARTERS.map((s) => (
-                  <Pressable
+                  <PressScale
                     key={s.label}
                     // Never destroy a typed brief (web parity): replace only an empty composer or
                     // another untouched starter; otherwise append the template under the text.
@@ -399,7 +400,7 @@ export default function NewTask() {
                     })}
                   >
                     <T variant="meta">{s.label}</T>
-                  </Pressable>
+                  </PressScale>
                 ))}
             </View>
           </View>
@@ -407,7 +408,7 @@ export default function NewTask() {
           {skills.length > 0 && (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
               {skills.map((s) => (
-                <Pressable
+                <PressScale
                   key={s.name}
                   onPress={() => setTask((t) => (t.includes(`/${s.name}`) ? t : `${t}${t ? " " : ""}/${s.name} `))}
                   style={{
@@ -422,7 +423,7 @@ export default function NewTask() {
                   <T variant="meta" mono>
                     /{s.name}
                   </T>
-                </Pressable>
+                </PressScale>
               ))}
             </ScrollView>
           )}
@@ -455,11 +456,11 @@ export default function NewTask() {
                     paddingVertical: 2,
                   }}
                 />
-                <Pressable onPress={() => setPicked((ps) => ps.filter((x) => x.repo !== p.repo))} hitSlop={8}>
+                <PressScale onPress={() => setPicked((ps) => ps.filter((x) => x.repo !== p.repo))} hitSlop={8}>
                   <T variant="meta" tone="destructive">
                     ✕
                   </T>
-                </Pressable>
+                </PressScale>
               </View>
             ))}
             {/* Results ABOVE the search field so the keyboard never hides them. */}
@@ -481,7 +482,7 @@ export default function NewTask() {
                   repoResults
                     .filter((r) => !picked.some((p) => p.repo === r.fullName))
                     .map((r) => (
-                      <Pressable
+                      <PressScale
                         key={r.fullName}
                         onPress={() => {
                           setPicked((ps) => [...ps, { repo: r.fullName }]);
@@ -502,7 +503,7 @@ export default function NewTask() {
                             {r.description}
                           </T>
                         ) : null}
-                      </Pressable>
+                      </PressScale>
                     ))
                 )}
               </View>
@@ -520,7 +521,7 @@ export default function NewTask() {
                   {models.map((m) => {
                     const active = m.id === (model ?? defaultModel);
                     return (
-                      <Pressable
+                      <PressScale
                         key={m.id}
                         onPress={() => {
                           setModel(m.id === defaultModel ? null : m.id);
@@ -541,12 +542,12 @@ export default function NewTask() {
                           {m.label}
                           {m.id === defaultModel ? "  · default" : ""}
                         </T>
-                      </Pressable>
+                      </PressScale>
                     );
                   })}
                 </View>
               ) : (
-                <Pressable
+                <PressScale
                   onPress={() => setShowModels(true)}
                   style={({ pressed }) => ({
                     flexDirection: "row",
@@ -562,13 +563,13 @@ export default function NewTask() {
                   <T variant="meta" tone="faint">
                     change
                   </T>
-                </Pressable>
+                </PressScale>
               )}
             </View>
           )}
 
           <View style={{ gap: 8 }}>
-            <Pressable
+            <PressScale
               onPress={() => {
                 Haptics.selectionAsync().catch(() => {});
                 setVerifyOpen((o) => !o);
@@ -587,12 +588,12 @@ export default function NewTask() {
                 Verify the result{verifyText.trim() && !verifyOpen ? ` · ${verifyMode}` : ""}
               </T>
               <Icon name={verifyOpen ? "chevron-down" : "chevron-right"} size={14} color={palette.faint} />
-            </Pressable>
+            </PressScale>
             {verifyOpen && (
               <View style={{ gap: 8 }}>
                 <View style={{ flexDirection: "row", gap: 6 }}>
                   {(["command", "criterion"] as const).map((m) => (
-                    <Pressable
+                    <PressScale
                       key={m}
                       onPress={() => {
                         Haptics.selectionAsync().catch(() => {});
@@ -610,7 +611,7 @@ export default function NewTask() {
                       <T variant="meta" weight={verifyMode === m ? "semibold" : "regular"}>
                         {m === "command" ? "Command" : "Criterion"}
                       </T>
-                    </Pressable>
+                    </PressScale>
                   ))}
                 </View>
                 <TextInput
@@ -647,9 +648,9 @@ export default function NewTask() {
             </T>
             <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
               {attachments.map((a, i) => (
-                <Pressable key={i} onPress={() => setAttachments((as) => as.filter((_, j) => j !== i))}>
+                <PressScale key={i} onPress={() => setAttachments((as) => as.filter((_, j) => j !== i))}>
                   <Image source={{ uri: a.dataUrl }} style={{ width: 64, height: 64, borderRadius: radius.lg }} />
-                </Pressable>
+                </PressScale>
               ))}
             </View>
             <View style={{ flexDirection: "row", gap: 8 }}>
@@ -663,7 +664,7 @@ export default function NewTask() {
         </ScrollView>
         {/* Web parity: a circular arrow-up "Start a machine with this task". */}
         <View style={{ padding: 16, paddingBottom: 16 + keyboardInset, flexDirection: "row", justifyContent: "flex-end" }}>
-          <Pressable
+          <PressScale
             onPress={submit}
             disabled={!task.trim() || !!trialExpired}
             accessibilityLabel="Start a machine with this task"
@@ -678,7 +679,7 @@ export default function NewTask() {
             })}
           >
             <Icon name="arrow-up" size={24} color={task.trim() && !trialExpired ? palette.primaryForeground : palette.faint} />
-          </Pressable>
+          </PressScale>
         </View>
         <RunSettingsSheet
           visible={runOpen}

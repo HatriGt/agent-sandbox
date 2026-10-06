@@ -1,6 +1,6 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { View } from "react-native";
-import { api, type RepoSetupProfile } from "@/lib/api";
+import { api, type RepoSetupProfile, type RepoSetupsResponse } from "@/lib/api";
 import { SettingsScreen } from "@/components/SettingsScreen";
 import { T } from "@/components/ui/AppText";
 import { Button } from "@/components/ui/Button";
@@ -8,123 +8,138 @@ import { Card } from "@/components/ui/Card";
 import { Field } from "@/components/ui/Field";
 
 /**
- * Repo setup (src/setup-profile.ts): how each repo installs, builds and tests — detected on the
+ * Repo setup (web: RepoSetup.tsx): what each repo installs, builds and tests with — detected on the
  * first run, confirmed by the agent, editable here. Env vars are names only, never values.
  */
 const CMDS = ["install", "build", "test", "lint"] as const;
 const BY: Record<RepoSetupProfile["confirmedBy"], string> = { detected: "auto-detected", agent: "confirmed by the agent", user: "edited by you" };
-
-type Row = { repo: string; profile: RepoSetupProfile };
+const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 export default function RepoSetupScreen() {
-  const [rows, setRows] = useState<Row[] | null>(null);
+  const [data, setData] = useState<RepoSetupsResponse | null>(null);
   const [note, setNote] = useState<string | null>(null);
-  const [editing, setEditing] = useState<string | null>(null);
-  const load = useCallback(() => {
-    api.repoSetups().then((r) => setRows(r.profiles)).catch((e) => setNote(e instanceof Error ? e.message : String(e)));
+  useEffect(() => {
+    api.repoSetups().then(setData).catch(() => {});
   }, []);
-  useEffect(load, [load]);
-
-  const reset = async (repo: string) => {
-    try {
-      setRows((await api.resetRepoSetup(repo)).profiles);
-      setNote(`${repo} will be re-detected on its next run.`);
-    } catch (e) {
-      setNote(e instanceof Error ? e.message : String(e));
-    }
-  };
 
   return (
     <SettingsScreen title="Repo setup">
-      <T variant="body" tone="muted">
-        Learned once per repo: runs install before the agent starts and verify with the test command.
+      <T variant="micro" tone="faint">
+        learned once · install · test · verify
       </T>
       {note ? <T variant="meta" tone="muted">{note}</T> : null}
-      {rows === null ? (
+      {!data ? (
         <T tone="muted">Loading…</T>
-      ) : rows.length === 0 ? (
-        <T tone="muted">No repos learned yet — the first run on a repo detects its setup.</T>
+      ) : data.profiles.length === 0 ? (
+        <T variant="micro" tone="muted">
+          No repos learned yet — the first run on a repo detects how it installs and tests.
+        </T>
       ) : (
-        rows.map((r) =>
-          editing === r.repo ? (
-            <SetupForm
-              key={r.repo}
-              row={r}
-              onCancel={() => setEditing(null)}
-              onSaved={(next) => {
-                setRows(next);
-                setEditing(null);
-              }}
-              onError={setNote}
-            />
-          ) : (
-            <Card key={r.repo}>
-              <T variant="body" weight="semibold" numberOfLines={1}>
-                {r.repo}
-              </T>
-              {CMDS.filter((k) => r.profile[k]).map((k) => (
-                <T key={k} variant="micro" numberOfLines={1}>
-                  <T variant="micro" tone="muted">{k} </T>
-                  <T variant="micro" mono>{r.profile[k]}</T>
-                </T>
-              ))}
-              {Object.keys(r.profile.runtimes).length ? (
-                <T variant="micro" mono tone="muted" numberOfLines={1}>
-                  {Object.entries(r.profile.runtimes).map(([k, v]) => `${k} ${v}`).join(", ")}
-                </T>
-              ) : null}
-              {r.profile.envVars.length ? (
-                <T variant="micro" mono tone="muted" numberOfLines={2}>
-                  env: {r.profile.envVars.join(", ")}
-                </T>
-              ) : null}
-              <T variant="micro" tone="faint">{BY[r.profile.confirmedBy]}</T>
-              <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
-                <Button title="Edit" small variant="secondary" onPress={() => setEditing(r.repo)} />
-                <Button title="Reset" small variant="secondary" onPress={() => reset(r.repo)} />
-              </View>
-            </Card>
-          )
-        )
+        data.profiles.map((r) => <SetupRow key={r.repo} repo={r.repo} profile={r.profile} onChange={setData} onNote={setNote} />)
       )}
     </SettingsScreen>
   );
 }
 
-function SetupForm({ row, onCancel, onSaved, onError }: { row: Row; onCancel: () => void; onSaved: (rows: Row[]) => void; onError: (m: string) => void }) {
-  const p = row.profile;
+function SetupRow({ repo, profile: p, onChange, onNote }: { repo: string; profile: RepoSetupProfile; onChange: (r: RepoSetupsResponse) => void; onNote: (m: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const reset = async () => {
+    setBusy(true);
+    try {
+      onChange(await api.resetRepoSetup(repo));
+      onNote(`${repo} will be re-detected on its next run`);
+    } catch (e) {
+      onNote(`Could not reset — ${msg(e)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (editing) return <SetupForm repo={repo} profile={p} onDone={() => setEditing(false)} onChange={onChange} onNote={onNote} />;
+  const rt = Object.entries(p.runtimes);
+  const line = (k: string, v: string) => (
+    <T key={k} variant="micro" numberOfLines={1}>
+      <T variant="micro" tone="muted">{`${k}  `}</T>
+      <T variant="micro" mono>
+        {v}
+      </T>
+    </T>
+  );
+  return (
+    <Card>
+      <T variant="meta" weight="medium" numberOfLines={1}>
+        {repo}
+      </T>
+      <View style={{ marginTop: 4, gap: 2 }}>
+        {CMDS.filter((k) => p[k]).map((k) => line(k, p[k] as string))}
+        {rt.length > 0 ? line("runtimes", rt.map(([k, v]) => `${k} ${v}`).join(", ")) : null}
+        {p.envVars.length > 0 ? line("env", p.envVars.join(", ")) : null}
+      </View>
+      {p.notes ? (
+        <T variant="micro" tone="muted" style={{ marginTop: 4 }}>
+          {p.notes}
+        </T>
+      ) : null}
+      <T variant="micro" tone="faint" style={{ marginTop: 4 }}>
+        {BY[p.confirmedBy]}
+      </T>
+      <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+        <Button title="Edit" small variant="ghost" disabled={busy} onPress={() => setEditing(true)} />
+        <Button title="Reset" small variant="ghost" loading={busy} onPress={() => void reset()} />
+      </View>
+      <T variant="micro" tone="faint">
+        Reset forgets and re-detects on the next run.
+      </T>
+    </Card>
+  );
+}
+
+function SetupForm({ repo, profile: p, onDone, onChange, onNote }: { repo: string; profile: RepoSetupProfile; onDone: () => void; onChange: (r: RepoSetupsResponse) => void; onNote: (m: string) => void }) {
   const [cmds, setCmds] = useState<Record<(typeof CMDS)[number], string>>({ install: p.install ?? "", build: p.build ?? "", test: p.test ?? "", lint: p.lint ?? "" });
+  const [runtimes, setRuntimes] = useState(Object.entries(p.runtimes).map(([k, v]) => `${k} ${v}`).join(", "));
   const [env, setEnv] = useState(p.envVars.join(", "));
+  const [notes, setNotes] = useState(p.notes ?? "");
   const [busy, setBusy] = useState(false);
   const save = async () => {
     setBusy(true);
     try {
+      const rt: Record<string, string> = {};
+      for (const part of runtimes.split(",")) {
+        const [k, v] = part.trim().split(/\s+/);
+        if (k && v) rt[k] = v;
+      }
       const body: Partial<RepoSetupProfile> = {
         ...Object.fromEntries(CMDS.filter((k) => cmds[k].trim()).map((k) => [k, cmds[k].trim()])),
-        runtimes: p.runtimes,
+        runtimes: rt,
         envVars: env.split(/[,\s]+/).filter(Boolean),
-        ...(p.notes ? { notes: p.notes } : {}),
+        ...(notes.trim() ? { notes: notes.trim() } : {}),
       };
-      onSaved((await api.saveRepoSetup(row.repo, body)).profiles);
+      onChange(await api.saveRepoSetup(repo, body));
+      onDone();
     } catch (e) {
-      onError(e instanceof Error ? e.message : String(e));
+      onNote(`Could not save — ${msg(e)}`);
     } finally {
       setBusy(false);
     }
   };
   return (
     <Card>
-      <T variant="body" weight="semibold" numberOfLines={1}>
-        {row.repo}
+      <T variant="meta" weight="medium" numberOfLines={1}>
+        {repo}
       </T>
       <View style={{ gap: 10, marginTop: 8 }}>
         {CMDS.map((k) => (
-          <Field key={k} label={k} value={cmds[k]} onChangeText={(v) => setCmds({ ...cmds, [k]: v })} autoCapitalize="none" autoCorrect={false} mono />
+          <Field key={k} label={k} value={cmds[k]} onChangeText={(v) => setCmds({ ...cmds, [k]: v })} placeholder={k === "test" ? "npm test" : ""} autoCapitalize="none" autoCorrect={false} mono />
         ))}
-        <Field label="Env var names" hint="Names only — never a secret value." value={env} onChangeText={setEnv} autoCapitalize="characters" autoCorrect={false} mono />
-        <View style={{ flexDirection: "row", gap: 8 }}>
-          <Button title="Save" small loading={busy} onPress={save} />
-          <Button title="Cancel" small variant="secondary" onPress={onCancel} />
+        <Field label="runtimes" value={runtimes} onChangeText={setRuntimes} placeholder="node 20, python 3.12" autoCapitalize="none" autoCorrect={false} mono />
+        <Field label="env vars" value={env} onChangeText={setEnv} placeholder="DATABASE_URL, API_KEY" autoCapitalize="characters" autoCorrect={false} mono />
+        <Field label="notes" value={notes} onChangeText={setNotes} />
+        <T variant="micro" tone="faint">
+          Names only — never paste a secret value. The test command becomes the run's default verify check.
+        </T>
+        <View style={{ flexDirection: "row", gap: 8, justifyContent: "flex-end" }}>
+          <Button title="Cancel" small variant="ghost" onPress={onDone} />
+          <Button title="Save" small loading={busy} onPress={() => void save()} />
         </View>
       </View>
     </Card>

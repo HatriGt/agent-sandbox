@@ -8,7 +8,7 @@ import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { T } from "./ui/AppText";
 import { Icon } from "./ui/Icon";
-import { FadeInUp } from "./ui/Motion";
+import { FadeInUp, PressScale } from "@/components/motion";
 
 /**
  * The outcome card (docs/plan-demo-parity.md bet 2), mobile twin of
@@ -114,12 +114,12 @@ export function OutcomeView({ outcome: o }: { outcome: RunOutcome }) {
         <Section title="What you got">
           {o.result.prs.length ? (
             o.result.prs.map((p) => (
-              <Pressable key={p.url} onPress={() => void Linking.openURL(p.url)} accessibilityRole="link" style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+              <PressScale key={p.url} onPress={() => void Linking.openURL(p.url)} accessibilityRole="link" style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                 <Icon name="git-pull-request" size={12} color={palette.foreground} />
                 <T variant="meta" numberOfLines={1}>
                   {p.repo}#{p.number}
                 </T>
-              </Pressable>
+              </PressScale>
             ))
           ) : (
             <T variant="meta" tone="muted">

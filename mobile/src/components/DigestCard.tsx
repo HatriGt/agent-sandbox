@@ -6,7 +6,7 @@ import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { T } from "./ui/AppText";
 import { Icon } from "./ui/Icon";
-import { FadeInUp } from "./ui/Motion";
+import { FadeInUp, PressScale } from "@/components/motion";
 
 const FILE_CAP = 6;
 
@@ -71,7 +71,7 @@ export function DigestView({ digest }: { digest: RunDigest }) {
           overflow: "hidden",
         }}
       >
-        <Pressable
+        <PressScale
           disabled={!hasDetail}
           onPress={() => setOpen((o) => !o)}
           accessibilityLabel={open ? "Collapse run receipt" : "Expand run receipt"}
@@ -94,7 +94,7 @@ export function DigestView({ digest }: { digest: RunDigest }) {
             </T>
           ) : null}
           {hasDetail ? <Icon name={open ? "chevron-down" : "chevron-right"} size={14} color={palette.faint} /> : null}
-        </Pressable>
+        </PressScale>
 
         {digest.verified ? (
           <View

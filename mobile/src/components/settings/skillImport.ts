@@ -69,6 +69,11 @@ export function parseSkillMd(text: string, fallbackName: string): ParsedSkill {
   return { name, description, content: body || src };
 }
 
+/** The SKILL.md we hand back on export — identical to what the controller writes into the box. */
+export function toSkillMd(s: ParsedSkill): string {
+  return `---\nname: ${s.name}\ndescription: ${JSON.stringify(s.description)}\n---\n\n${s.content}\n`;
+}
+
 export interface RepoRef {
   owner: string;
   repo: string;
@@ -101,13 +106,4 @@ export async function fetchRepoFile(ref: RepoRef, branch: string, path: string):
 }
 export function fetchRepoSkill(ref: RepoRef, branch: string, dirPath: string) {
   return api.skillRepo<{ skillMd: string; files: SkillFile[]; skipped: string[] }>({ action: "fetch-skill", owner: ref.owner, repo: ref.repo, branch, path: dirPath });
-}
-
-/** Fetch + parse one listed entry into the draft `skillMutate({action:"upsert", skill})` takes. */
-export async function loadRepoSkill(ref: RepoRef, branch: string, f: RepoSkillEntry): Promise<ParsedSkill & { skipped?: string[] }> {
-  if (f.kind === "dir") {
-    const r = await fetchRepoSkill(ref, branch, f.path);
-    return { ...parseSkillMd(r.skillMd, f.name), files: r.files, skipped: r.skipped };
-  }
-  return parseSkillMd(await fetchRepoFile(ref, branch, f.path), f.name);
 }

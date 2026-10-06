@@ -7,6 +7,7 @@ import { radius } from "@/theme/tokens";
 import { T } from "./ui/AppText";
 import { Icon } from "./ui/Icon";
 import { Sheet } from "./ui/Sheet";
+import { PressScale } from "@/components/motion";
 
 /**
  * Follow-ups waiting for the running turn to end (web: TraceItems QueuedItem). The chip in the dock
@@ -18,7 +19,7 @@ import { Sheet } from "./ui/Sheet";
 export function QueuedChip({ count, onPress }: { count: number; onPress: () => void }) {
   const { palette } = useTheme();
   return (
-    <Pressable
+    <PressScale
       onPress={onPress}
       style={({ pressed }) => ({
         flexDirection: "row",
@@ -37,7 +38,7 @@ export function QueuedChip({ count, onPress }: { count: number; onPress: () => v
       <T variant="meta" weight="medium" tone="muted">
         {count} queued
       </T>
-    </Pressable>
+    </PressScale>
   );
 }
 
@@ -140,7 +141,7 @@ export function QueuedSheet({
                   <T variant="micro" tone="faint" style={{ flex: 1 }}>
                     {ago(m.at)}
                   </T>
-                  <Pressable
+                  <PressScale
                     disabled={inflight}
                     hitSlop={8}
                     onPress={() => (isArmed ? void act(m.id, () => api.sendNow(session, m.id)) : setArmed(m.id))}
@@ -148,12 +149,12 @@ export function QueuedSheet({
                     <T variant="micro" weight="medium" tone={isArmed ? "destructive" : "default"}>
                       {inflight ? "Sending…" : isArmed ? "Stop the turn & send?" : "Send now"}
                     </T>
-                  </Pressable>
-                  <Pressable disabled={inflight} hitSlop={8} onPress={() => void act(m.id, () => api.dequeue(session, m.id))}>
+                  </PressScale>
+                  <PressScale disabled={inflight} hitSlop={8} onPress={() => void act(m.id, () => api.dequeue(session, m.id))}>
                     <T variant="micro" weight="medium" tone="muted">
                       Remove
                     </T>
-                  </Pressable>
+                  </PressScale>
                 </View>
               </View>
             );

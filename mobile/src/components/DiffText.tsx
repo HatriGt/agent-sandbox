@@ -3,6 +3,7 @@ import { Pressable, ScrollView, View } from "react-native";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { T } from "./ui/AppText";
+import { PressScale } from "@/components/motion";
 
 /**
  * Unified diff, read-only, horizontally scrollable. Green/red are the functional hues.
@@ -38,11 +39,11 @@ export function DiffText({ diff, maxLines }: { diff: string; maxLines?: number }
         </View>
       </ScrollView>
       {capped ? (
-        <Pressable onPress={() => setAll(true)} hitSlop={6} style={{ paddingHorizontal: 10, paddingTop: 6 }}>
+        <PressScale onPress={() => setAll(true)} hitSlop={6} style={{ paddingHorizontal: 10, paddingTop: 6 }}>
           <T variant="micro" mono style={{ color: palette.faint }}>
             … {lines.length - shown.length} more lines
           </T>
-        </Pressable>
+        </PressScale>
       ) : null}
     </View>
   );

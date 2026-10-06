@@ -1,8 +1,11 @@
 import React, { useEffect, useRef } from "react";
 import { Animated, Pressable, View } from "react-native";
 import { useTheme } from "@/theme/ThemeContext";
+import { DUR } from "./motion";
+import { PressScale } from "@/components/motion";
 
-export type Turn = { key: string; kind: "task" | "you" | "question"; y: number };
+/** A turn in the thread. `index` is its row in the transcript list; -1 is the pinned task above it. */
+export type Turn = { key: string; kind: "task" | "you" | "question"; index: number };
 
 /**
  * Touch turn-navigator: appears only while browsing history (hidden at the
@@ -12,26 +15,27 @@ export type Turn = { key: string; kind: "task" | "you" | "question"; y: number }
 export function TurnRail({
   turns,
   visible,
-  scrollY,
+  topIndex,
   viewportH,
   onJump,
 }: {
   turns: Turn[];
   visible: boolean;
-  scrollY: number;
+  /** First transcript row currently on screen (from the list's viewability callback). */
+  topIndex: number;
   viewportH: number;
-  onJump: (y: number) => void;
+  onJump: (turn: Turn) => void;
 }) {
   const { palette } = useTheme();
   const fade = useRef(new Animated.Value(0)).current;
   useEffect(() => {
-    Animated.timing(fade, { toValue: visible && turns.length >= 2 ? 1 : 0, duration: 160, useNativeDriver: true }).start();
+    Animated.timing(fade, { toValue: visible && turns.length >= 2 ? 1 : 0, duration: DUR.fast, useNativeDriver: true }).start();
   }, [visible, turns.length, fade]);
 
   if (turns.length < 2) return null;
   let activeIdx = 0;
   turns.forEach((t, i) => {
-    if (t.y <= scrollY + viewportH * 0.4) activeIdx = i;
+    if (t.index <= topIndex) activeIdx = i;
   });
 
   // Each dot costs ~16px of height, so a long conversation would grow a rail taller than the phone
@@ -71,7 +75,7 @@ export function TurnRail({
           const active = i === activeIdx;
           const color = t.kind === "question" ? palette.attention : active ? palette.foreground : palette.lineStrong;
           return (
-            <Pressable key={t.key} onPress={() => onJump(t.y)} hitSlop={{ left: 14, right: 14, top: 5, bottom: 5 }}>
+            <PressScale key={t.key} onPress={() => onJump(t)} hitSlop={{ left: 14, right: 14, top: 5, bottom: 5 }}>
               <View
                 style={{
                   width: active ? 8 : 6,
@@ -80,7 +84,7 @@ export function TurnRail({
                   backgroundColor: color,
                 }}
               />
-            </Pressable>
+            </PressScale>
           );
         })}
       </View>

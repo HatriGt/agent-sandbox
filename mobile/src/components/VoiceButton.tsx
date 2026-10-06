@@ -6,6 +6,7 @@ import { radius } from "@/theme/tokens";
 import { T } from "./ui/AppText";
 import { Icon } from "./ui/Icon";
 import type { VoiceState } from "@/hooks/useVoiceInput";
+import { PressScale } from "@/components/motion";
 
 /**
  * The dictation control, native flavor of the web's voice-button: a mic that morphs into a live
@@ -52,7 +53,7 @@ export function VoiceButton({
   };
 
   return (
-    <Pressable onPress={press} hitSlop={8} accessibilityLabel={listening ? "Stop dictating" : "Dictate with your voice"} accessibilityState={{ selected: listening }}>
+    <PressScale onPress={press} hitSlop={8} accessibilityLabel={listening ? "Stop dictating" : "Dictate with your voice"} accessibilityState={{ selected: listening }}>
       <View style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>
         {listening && (
           <Animated.View
@@ -90,7 +91,7 @@ export function VoiceButton({
           )}
         </View>
       </View>
-    </Pressable>
+    </PressScale>
   );
 }
 

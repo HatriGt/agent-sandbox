@@ -14,6 +14,7 @@ import { Field } from "../ui/Field";
 import { Icon, type IconName } from "../ui/Icon";
 import { Sheet } from "../ui/Sheet";
 import { UsageMeter } from "../ui/UsageMeter";
+import { PressScale } from "@/components/motion";
 
 /** "812 MB used · 3.2 GB free" — the sentence under a vitals meter. */
 function usageWords(u: Usage): string {
@@ -88,7 +89,7 @@ function ActionRow({
   const { palette } = useTheme();
   const color = destructive ? palette.destructive : disabled ? palette.faint : palette.foreground;
   return (
-    <Pressable
+    <PressScale
       onPress={onPress}
       disabled={disabled}
       style={({ pressed }) => ({
@@ -127,7 +128,7 @@ function ActionRow({
       <View style={{ flexShrink: 0 }}>
         <Icon name="chevron-right" size={15} color={palette.faint} />
       </View>
-    </Pressable>
+    </PressScale>
   );
 }
 
@@ -400,7 +401,7 @@ export function BoxActionsSheet({
           <View style={{ gap: 8 }}>
             <Field placeholder="Search repos…" value={repoQuery} onChangeText={setRepoQuery} autoCapitalize="none" mono autoFocus />
             {repoHits.map((r) => (
-              <Pressable
+              <PressScale
                 key={r.fullName}
                 onPress={() =>
                   act(
@@ -427,7 +428,7 @@ export function BoxActionsSheet({
                   {r.fullName}
                 </T>
                 {r.private && <Icon name="lock" size={12} color={palette.faint} />}
-              </Pressable>
+              </PressScale>
             ))}
           </View>
         )}

@@ -12,6 +12,7 @@ import { T } from "@/components/ui/AppText";
 import { Button } from "@/components/ui/Button";
 import { Field } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
+import { PressScale } from "@/components/motion";
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const MAX_EDIT = 400_000;
@@ -140,12 +141,12 @@ export default function Files() {
     <SettingsScreen title="Files">
       <Field value={q} onChangeText={setQ} placeholder="Find a file" autoCapitalize="none" autoCorrect={false} />
       {!q.trim() && dir ? (
-        <Pressable onPress={() => setDir(dir.includes("/") ? dir.slice(0, dir.lastIndexOf("/")) : "")} style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 4 }}>
+        <PressScale onPress={() => setDir(dir.includes("/") ? dir.slice(0, dir.lastIndexOf("/")) : "")} style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingVertical: 4 }}>
           <Icon name="corner-left-up" size={14} color={palette.mutedForeground} />
           <T variant="meta" mono tone="muted" numberOfLines={1}>
             /{dir}
           </T>
-        </Pressable>
+        </PressScale>
       ) : null}
       {error ? (
         <T variant="meta" tone="destructive">
@@ -156,7 +157,7 @@ export default function Files() {
       {files && entries.length === 0 ? <T tone="muted">{q.trim() ? "No matches." : "Empty."}</T> : null}
       <View>
         {entries.map((e) => (
-          <Pressable
+          <PressScale
             key={e.path}
             onPress={() => (e.folder ? setDir(e.path) : void openFile(e.path))}
             style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: palette.border, opacity: pressed || loadingFile === e.path ? 0.5 : 1 })}
@@ -166,7 +167,7 @@ export default function Files() {
               {e.name}
             </T>
             {e.folder ? <Icon name="chevron-right" size={14} color={palette.faint} /> : null}
-          </Pressable>
+          </PressScale>
         ))}
       </View>
       {truncated ? (

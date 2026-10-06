@@ -7,7 +7,7 @@ import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { T } from "./ui/AppText";
 import { Icon } from "./ui/Icon";
-import { FadeInUp } from "./ui/Motion";
+import { FadeInUp, PressScale } from "@/components/motion";
 
 /**
  * "Tries several approaches": a task run as 2-3 parallel attempts, scored by the controller; the
@@ -136,7 +136,7 @@ export function AttemptGroupPanel({ group: g, currentBox, onChange }: { group: A
                 opacity: a.tornDown && !a.winner ? 0.6 : 1,
               }}
             >
-              <Pressable onPress={open} disabled={!open} accessibilityRole={open ? "link" : undefined} style={{ gap: 2 }}>
+              <PressScale onPress={open} disabled={!open} accessibilityRole={open ? "link" : undefined} style={{ gap: 2 }}>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                   {a.winner ? <Icon name="award" size={12} color={palette.ok} /> : null}
                   <T variant="meta" weight={a.winner ? "semibold" : "regular"} tone={a.winner ? "ok" : "default"} numberOfLines={1} style={{ flex: 1, minWidth: 0 }}>
@@ -148,7 +148,7 @@ export function AttemptGroupPanel({ group: g, currentBox, onChange }: { group: A
                 <T variant="micro" mono tone={a.error ? "destructive" : "muted"} numberOfLines={2}>
                   {factsLine(a)}
                 </T>
-              </Pressable>
+              </PressScale>
               {canPick ? (
                 <T variant="micro" tone="muted" weight="semibold" onPress={busy ? undefined : () => confirmPick(a)}>
                   Pick this one instead ›
@@ -163,7 +163,7 @@ export function AttemptGroupPanel({ group: g, currentBox, onChange }: { group: A
             {g.question ? <T variant="meta">{g.question}</T> : null}
             <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
               {g.choices.map((c, i) => (
-                <Pressable
+                <PressScale
                   key={i}
                   disabled={busy}
                   onPress={() => void submit({ choice: i })}
@@ -172,19 +172,19 @@ export function AttemptGroupPanel({ group: g, currentBox, onChange }: { group: A
                   <T variant="meta" tone="attention">
                     {c.label}
                   </T>
-                </Pressable>
+                </PressScale>
               ))}
             </View>
           </View>
         ) : null}
 
         {g.prUrls.map((u) => (
-          <Pressable key={u} onPress={() => void Linking.openURL(u)} accessibilityRole="link" style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <PressScale key={u} onPress={() => void Linking.openURL(u)} accessibilityRole="link" style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
             <Icon name="git-pull-request" size={12} color={palette.foreground} />
             <T variant="meta" numberOfLines={1}>
               {u.replace(/^https?:\/\/github\.com\//, "")}
             </T>
-          </Pressable>
+          </PressScale>
         ))}
         {g.note ? (
           <T variant="micro" tone="muted">

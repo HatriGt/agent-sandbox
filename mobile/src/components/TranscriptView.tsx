@@ -13,7 +13,7 @@ import { ProducedFiles } from "./ProducedFiles";
 import { TestResultsCard } from "./TestResultsCard";
 import { T } from "./ui/AppText";
 import { Icon, toolIcon } from "./ui/Icon";
-import { FadeInUp } from "./ui/Motion";
+import { animateLayout, FadeInUp, PressScale, ProgressFill } from "@/components/motion";
 
 /**
  * A rendered thread item. Consecutive tool calls are grouped into one "Worked"
@@ -48,6 +48,38 @@ export function groupEvents(events: TraceEvent[], opts?: { done?: boolean }): Th
     if (files.length) out.push({ kind: "produced", files });
   }
   return out;
+}
+
+/** Cheap structural equality for two thread items of the same slot (texts compared, tools field-by-field). */
+function sameItem(a: ThreadItem, b: ThreadItem): boolean {
+  if (a.kind !== b.kind) return false;
+  if (a.kind === "tools" && b.kind === "tools") {
+    if (a.tools.length !== b.tools.length) return false;
+    return a.tools.every((t, i) => {
+      const u = b.tools[i];
+      return t.name === u.name && t.arg === u.arg && t.result === u.result && t.failed === u.failed && t.diff === u.diff && t.ms === u.ms && t.streaming === u.streaming;
+    });
+  }
+  // Prose kinds can be long: their text is the whole identity, so skip serializing them.
+  if (a.kind === "say" || a.kind === "you" || a.kind === "think" || a.kind === "ask") return "text" in b && a.text === b.text;
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/**
+ * Structural sharing across stream ticks: every log tick re-parses the whole trace into fresh
+ * objects, which defeats `memo(ThreadRow)` and re-renders (and re-parses the markdown of) every
+ * message. Reusing the previous object for each unchanged slot means a tick renders only the rows
+ * that actually changed — normally just the growing tail.
+ */
+export function shareItems(prev: ThreadItem[], next: ThreadItem[]): ThreadItem[] {
+  let same = prev.length === next.length;
+  const out = next.map((it, i) => {
+    const p = prev[i];
+    if (p && sameItem(p, it)) return p;
+    same = false;
+    return it;
+  });
+  return same ? prev : out;
 }
 
 export type UsageEvent = Extract<TraceEvent, { kind: "usage" }>;
@@ -105,8 +137,11 @@ export const ThreadRow = memo(function ThreadRow({
         return null;
     }
   })();
+  // Frozen at mount: flipping the wrapper later would change the tree shape and remount the row
+  // (dropping its open/closed state and restarting the streaming reveal).
+  const [enter] = useState(!!animate);
   if (!body) return null;
-  return animate ? <FadeInUp>{body}</FadeInUp> : <>{body}</>;
+  return enter ? <FadeInUp>{body}</FadeInUp> : <>{body}</>;
 });
 
 function YouBubble({ text, onRevert }: { text: string; onRevert?: (messageText: string) => void }) {
@@ -147,8 +182,10 @@ function YouBubble({ text, onRevert }: { text: string; onRevert?: (messageText: 
 function RevertButton({ onConfirm }: { onConfirm: () => void }) {
   const { palette } = useTheme();
   return (
-    <Pressable
+    <PressScale
       onPress={onConfirm}
+      haptic="light"
+      scaleTo={0.9}
       hitSlop={8}
       style={({ pressed }) => ({
         width: 28,
@@ -164,7 +201,7 @@ function RevertButton({ onConfirm }: { onConfirm: () => void }) {
       })}
     >
       <Icon name="rotate-ccw" size={13} color={palette.mutedForeground} />
-    </Pressable>
+    </PressScale>
   );
 }
 
@@ -213,16 +250,19 @@ function ToolGroup({ tools }: { tools: Extract<TraceEvent, { kind: "tool" }>[] }
         overflow: "hidden",
       }}
     >
-      <Pressable
-        onPress={() => setOpen((o) => !o)}
-        style={({ pressed }) => ({
+      <PressScale
+        onPress={() => {
+          animateLayout();
+          setOpen((o) => !o);
+        }}
+        haptic="selection"
+        style={{
           flexDirection: "row",
           alignItems: "center",
           gap: 8,
           paddingHorizontal: 12,
           paddingVertical: 10,
-          opacity: pressed ? 0.7 : 1,
-        })}
+        }}
       >
         <Icon name={headerIcon} size={15} color={failed ? palette.destructive : palette.mutedForeground} />
         {single ? (
@@ -244,7 +284,7 @@ function ToolGroup({ tools }: { tools: Extract<TraceEvent, { kind: "tool" }>[] }
         <View style={{ flexShrink: 0 }}>
           <Icon name={open ? "chevron-up" : "chevron-down"} size={15} color={palette.faint} />
         </View>
-      </Pressable>
+      </PressScale>
       {open && (
         <View style={{ borderTopWidth: 1, borderTopColor: palette.border }}>
           {tools.map((t, i) => (
@@ -275,8 +315,12 @@ function ToolRow({ tool, last }: { tool: Extract<TraceEvent, { kind: "tool" }>; 
     : resultSummary(tool.result);
   return (
     <View style={{ borderBottomWidth: last ? 0 : 1, borderBottomColor: palette.border }}>
-      <Pressable
-        onPress={() => expandable && setOpen((o) => !o)}
+      <PressScale
+        onPress={() => {
+          if (!expandable) return;
+          animateLayout();
+          setOpen((o) => !o);
+        }}
         style={{ flexDirection: "row", alignItems: "flex-start", gap: 8, paddingHorizontal: 12, paddingVertical: 8 }}
       >
         <Icon
@@ -298,7 +342,7 @@ function ToolRow({ tool, last }: { tool: Extract<TraceEvent, { kind: "tool" }>; 
           ) : null}
         </View>
         {expandable ? <Icon name={open ? "minimize-2" : "maximize-2"} size={12} color={palette.faint} style={{ marginTop: 3 }} /> : null}
-      </Pressable>
+      </PressScale>
       {open ? (
         <View style={{ marginHorizontal: 12, marginBottom: 10, gap: 8 }}>
           {tool.diff ? <DiffText diff={tool.diff} maxLines={DIFF_MAX_LINES} /> : null}
@@ -353,12 +397,18 @@ function ThinkRow({ text }: { text: string }) {
   const { palette } = useTheme();
   const [open, setOpen] = useState(false);
   return (
-    <Pressable onPress={() => setOpen((o) => !o)} style={{ marginVertical: 6, flexDirection: "row", gap: 8 }}>
+    <PressScale
+      onPress={() => {
+        animateLayout();
+        setOpen((o) => !o);
+      }}
+      style={{ marginVertical: 6, flexDirection: "row", gap: 8 }}
+    >
       <Icon name="cloud" size={13} color={palette.faint} style={{ marginTop: 3 }} />
       <T variant="meta" tone="faint" style={{ fontStyle: "italic", flex: 1 }}>
         {open ? text : `Thought · ${text.split("\n")[0].slice(0, 80)}…`}
       </T>
-    </Pressable>
+    </PressScale>
   );
 }
 
@@ -374,8 +424,8 @@ function PlanRow({ items }: { items: PlanItem[] }) {
         <T variant="micro" tone="muted" weight="semibold" numberOfLines={1} style={{ flexShrink: 0 }}>
           Plan · {done}/{items.length}
         </T>
-        <View style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: palette.muted, marginLeft: 6 }}>
-          <View style={{ width: `${Math.round((done / Math.max(1, items.length)) * 100)}%`, height: 3, borderRadius: 2, backgroundColor: palette.ok }} />
+        <View style={{ flex: 1, height: 3, borderRadius: 2, backgroundColor: palette.muted, marginLeft: 6, overflow: "hidden" }}>
+          <ProgressFill fraction={done / Math.max(1, items.length)} color={palette.ok} height={3} />
         </View>
       </View>
       {items.map((it, i) => (

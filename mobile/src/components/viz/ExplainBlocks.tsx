@@ -5,6 +5,7 @@ import { radius, type Palette } from "@/theme/tokens";
 import { sortFindings, type Annotated, type CompareOption, type Finding, type FlowStep, type Layer, type Severity, type TreeNode } from "@/lib/viz";
 import { T } from "../ui/AppText";
 import { Icon, type IconName } from "../ui/Icon";
+import { PressScale } from "@/components/motion";
 
 /** Mobile bodies for findings, compare, annotate, layers, flow and tree (web ReviewBlocks / ExplainBlocks / FlowBlock / TreeBlock). */
 
@@ -150,7 +151,7 @@ export function AnnotateBlock({ data }: { data: Annotated }) {
       </ScrollView>
       <View style={{ gap: 8 }}>
         {data.notes.map((n, i) => (
-          <Pressable key={i} onPress={() => setActive(active === i ? null : i)} accessibilityRole="button" style={{ flexDirection: "row", gap: 8 }}>
+          <PressScale key={i} onPress={() => setActive(active === i ? null : i)} accessibilityRole="button" style={{ flexDirection: "row", gap: 8 }}>
             <View style={{ height: 20, justifyContent: "center" }}>
               <Marker n={i + 1} on={active === i} />
             </View>
@@ -160,7 +161,7 @@ export function AnnotateBlock({ data }: { data: Annotated }) {
               </T>
               <T variant="meta">{n.text}</T>
             </View>
-          </Pressable>
+          </PressScale>
         ))}
       </View>
     </View>
@@ -267,7 +268,7 @@ function TreeRow({ node, depth }: { node: TreeNode; depth: number }) {
   const folder = node.children.length > 0;
   return (
     <View>
-      <Pressable
+      <PressScale
         disabled={!folder}
         onPress={() => setOpen((o) => !o)}
         accessibilityRole={folder ? "button" : undefined}
@@ -283,7 +284,7 @@ function TreeRow({ node, depth }: { node: TreeNode; depth: number }) {
             {node.note}
           </T>
         ) : null}
-      </Pressable>
+      </PressScale>
       {folder && open ? node.children.map((c, i) => <TreeRow key={i} node={c} depth={depth + 1} />) : null}
     </View>
   );

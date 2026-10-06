@@ -11,6 +11,7 @@ import { fonts, radius, type } from "@/theme/tokens";
 import { T } from "./ui/AppText";
 import { Icon } from "./ui/Icon";
 import { VoiceButton, VoicePill } from "./VoiceButton";
+import { PressScale } from "@/components/motion";
 
 /**
  * The SendBar, at web parity: two lanes (agent / read-only ask), `@` file
@@ -266,7 +267,7 @@ export function Composer({
         >
           <ScrollView keyboardShouldPersistTaps="always">
             {slashHits.map((s) => (
-              <Pressable
+              <PressScale
                 key={s.name}
                 onPress={() => pickSkill(s.name)}
                 style={({ pressed }) => ({
@@ -285,11 +286,11 @@ export function Composer({
                 <T variant="micro" tone="faint" numberOfLines={1} style={{ flex: 1 }}>
                   {s.description}
                 </T>
-              </Pressable>
+              </PressScale>
             ))}
             {mention &&
               fileHits.map((f) => (
-                <Pressable
+                <PressScale
                   key={f}
                   onPress={() => pickFile(f)}
                   style={({ pressed }) => ({
@@ -308,7 +309,7 @@ export function Composer({
                   <T variant="micro" mono tone="faint" numberOfLines={1} style={{ flex: 1, textAlign: "right" }}>
                     {f.includes("/") ? f.slice(0, f.lastIndexOf("/")) : ""}
                   </T>
-                </Pressable>
+                </PressScale>
               ))}
           </ScrollView>
         </View>
@@ -318,7 +319,7 @@ export function Composer({
       {(skill || files.length > 0) && (
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
           {skill && (
-            <Pressable
+            <PressScale
               onPress={() => {
                 setSkill(null);
                 syncSendButton(text, files, null);
@@ -340,10 +341,10 @@ export function Composer({
                 /{skill}
               </T>
               <Icon name="x" size={11} color={palette.faint} />
-            </Pressable>
+            </PressScale>
           )}
           {files.map((f) => (
-            <Pressable
+            <PressScale
               key={f}
               onPress={() => {
                 const next = files.filter((x) => x !== f);
@@ -365,7 +366,7 @@ export function Composer({
                 {f.split("/").pop()}
               </T>
               <Icon name="x" size={11} color={palette.faint} />
-            </Pressable>
+            </PressScale>
           ))}
         </View>
       )}
@@ -377,7 +378,7 @@ export function Composer({
             const active = lane === l;
             const askDisabled = l === "ask" && sleeping;
             return (
-              <Pressable
+              <PressScale
                 key={l}
                 disabled={askDisabled}
                 onPress={() => {
@@ -405,7 +406,7 @@ export function Composer({
                 <T variant="micro" weight="medium" tone={active ? "default" : "faint"}>
                   {l === "reply" ? (running ? "Queue for agent" : "Agent") : "Side question"}
                 </T>
-              </Pressable>
+              </PressScale>
             );
           })}
           <View style={{ flex: 1 }} />
@@ -429,7 +430,7 @@ export function Composer({
         }}
       >
         {!isAsk && session ? (
-          <Pressable
+          <PressScale
             onPress={() => {
               const insert = text && !/\s$/.test(text) ? " @" : "@";
               const t = text + insert;
@@ -442,7 +443,7 @@ export function Composer({
             style={{ paddingBottom: 10 }}
           >
             <Icon name="at-sign" size={17} color={palette.faint} />
-          </Pressable>
+          </PressScale>
         ) : null}
         <TextInput
           ref={inputRef}
@@ -495,7 +496,7 @@ export function Composer({
         {/* Stop the turn — only while the agent is working, and only when the thread wired it. A
             hairline ring with a square, not a filled red button: it is an interrupt, not a destroy. */}
         {onStop && running && !isAsk ? (
-          <Pressable
+          <PressScale
             onPress={() => {
               if (stopping) return;
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
@@ -524,10 +525,10 @@ export function Composer({
             ) : (
               <View style={{ width: 12, height: 12, borderRadius: 2, backgroundColor: palette.foreground }} />
             )}
-          </Pressable>
+          </PressScale>
         ) : null}
         <Animated.View style={{ transform: [{ scale: sendScale }], opacity: sendScale }}>
-          <Pressable
+          <PressScale
             onPress={send}
             disabled={disabled || busy}
             style={({ pressed }) => ({
@@ -546,7 +547,7 @@ export function Composer({
               size={18}
               color={isAsk ? palette.foreground : palette.primaryForeground}
             />
-          </Pressable>
+          </PressScale>
         </Animated.View>
       </View>
       {hint ? (

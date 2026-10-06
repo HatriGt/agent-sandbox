@@ -10,6 +10,7 @@ import { Button } from "./ui/Button";
 import { Field } from "./ui/Field";
 import { smartJoin, useVoiceInput } from "@/hooks/useVoiceInput";
 import { VoiceButton, VoicePill } from "./VoiceButton";
+import { PressScale } from "@/components/motion";
 
 /**
  * The structured decision control: amber = needs you (the reserved hue),
@@ -59,7 +60,7 @@ export function QuestionCard({
       ) : null}
       {!other &&
         parsed.options.map((opt, i) => (
-          <Pressable
+          <PressScale
             key={i}
             disabled={busy}
             onPress={() => onAnswer(opt)}
@@ -85,7 +86,7 @@ export function QuestionCard({
             <View style={{ flexShrink: 0 }}>
               <Icon name="chevron-right" size={14} />
             </View>
-          </Pressable>
+          </PressScale>
         ))}
       {other ? (
         <View style={{ gap: 8 }}>
@@ -114,12 +115,12 @@ export function QuestionCard({
           </View>
         </View>
       ) : (
-        <Pressable onPress={() => setOther(true)} style={{ paddingVertical: 6, flexDirection: "row", alignItems: "center", gap: 6 }}>
+        <PressScale onPress={() => setOther(true)} style={{ paddingVertical: 6, flexDirection: "row", alignItems: "center", gap: 6 }}>
           <Icon name="edit-2" size={13} color={palette.attentionInk} />
           <T variant="body" weight="medium" style={{ color: palette.attentionInk }}>
             Something else…
           </T>
-        </Pressable>
+        </PressScale>
       )}
     </View>
   );

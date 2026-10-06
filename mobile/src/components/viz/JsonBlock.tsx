@@ -4,6 +4,7 @@ import { useTheme } from "@/theme/ThemeContext";
 import type { JsonValue } from "@/lib/viz";
 import { T } from "../ui/AppText";
 import { Icon } from "../ui/Icon";
+import { PressScale } from "@/components/motion";
 
 const AUTO_OPEN_DEPTH = 2;
 const MAX_CHILDREN = 200;
@@ -70,7 +71,7 @@ function JsonNode({ name, value, depth, last }: { name: string | null; value: Js
 
   return (
     <View>
-      <Pressable onPress={() => setOpen((o) => !o)} style={{ flexDirection: "row", alignItems: "center", paddingLeft: indent }} hitSlop={4}>
+      <PressScale onPress={() => setOpen((o) => !o)} style={{ flexDirection: "row", alignItems: "center", paddingLeft: indent }} hitSlop={4}>
         <Icon name={open ? "chevron-down" : "chevron-right"} size={12} color={palette.faint} style={{ marginLeft: -14, width: 14 }} />
         <T variant="code" mono>
           {key}
@@ -78,7 +79,7 @@ function JsonNode({ name, value, depth, last }: { name: string | null; value: Js
             {open ? openB : `${openB} ${summary(value)} ${closeB}${last ? "" : ","}`}
           </T>
         </T>
-      </Pressable>
+      </PressScale>
       {open ? (
         <View>
           {shown.map(([k, v], i) => (

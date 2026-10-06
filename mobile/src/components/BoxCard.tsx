@@ -1,16 +1,17 @@
-import React, { useMemo, useState } from "react";
+import React, { memo, useMemo, useState } from "react";
 import { Alert, View } from "react-native";
 import { useRouter } from "expo-router";
 import { api, type BoxView } from "@/lib/api";
 import { parseQuestion, questionChoices, questionHeadline } from "@/lib/question";
 import { ago, friendlyName } from "@/lib/format";
 import { useTheme } from "@/theme/ThemeContext";
+import { radius } from "@/theme/tokens";
 import { T } from "./ui/AppText";
 import { Card } from "./ui/Card";
 import { Icon } from "./ui/Icon";
-import { Pressably } from "./ui/Motion";
 import { StatePill } from "./ui/StatePill";
 import { UsageMeter } from "./ui/UsageMeter";
+import { haptic, LiveBorder, PressScale } from "@/components/motion";
 
 export function boxLabel(b: BoxView): string {
   return b.title || b.task?.split("\n")[0] || b.name;
@@ -28,8 +29,10 @@ function InboxChoices({ box, question }: { box: string; question: string }) {
   const answer = async (i: number) => {
     if (sent != null) return;
     setSent(i);
+    haptic("light");
     try {
       await api.resume(box, choices[i].answer, { force: true });
+      haptic("success");
     } catch (e) {
       setSent(null);
       Alert.alert("Could not send the answer", e instanceof Error ? e.message : String(e));
@@ -38,7 +41,7 @@ function InboxChoices({ box, question }: { box: string; question: string }) {
   return (
     <View accessibilityRole="radiogroup" accessibilityLabel="Quick answers" style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
       {choices.map((c, i) => (
-        <Pressably key={c.answer} disabled={sent != null} onPress={() => void answer(i)}>
+        <PressScale key={c.answer} disabled={sent != null} onPress={() => void answer(i)}>
           <View
             accessibilityRole="button"
             accessibilityLabel={`Answer: ${c.answer}`}
@@ -56,14 +59,14 @@ function InboxChoices({ box, question }: { box: string; question: string }) {
               {c.label}
             </T>
           </View>
-        </Pressably>
+        </PressScale>
       ))}
     </View>
   );
 }
 
 /** One machine, triage-ready: title, state (icon+word+color), and what it needs. */
-export function BoxCard({ box, onLongPress }: { box: BoxView; onLongPress?: (b: BoxView) => void }) {
+export const BoxCard = memo(function BoxCard({ box, onLongPress }: { box: BoxView; onLongPress?: (b: BoxView) => void }) {
   const router = useRouter();
   const { palette } = useTheme();
   const waiting = box.runState === "waiting";
@@ -71,10 +74,11 @@ export function BoxCard({ box, onLongPress }: { box: BoxView; onLongPress?: (b: 
   const ink = waiting ? palette.attentionInk : palette.faint;
 
   return (
-    <Pressably
+    <PressScale
       onPress={() => router.push(`/box/${encodeURIComponent(box.name)}`)}
       onLongPress={onLongPress ? () => onLongPress(box) : undefined}
     >
+      <LiveBorder active={box.runState === "running"} color={palette.live} borderRadius={radius.xl}>
       <Card attention={waiting}>
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
           <T
@@ -142,6 +146,9 @@ export function BoxCard({ box, onLongPress }: { box: BoxView; onLongPress?: (b: 
           </View>
         ) : null}
       </Card>
-    </Pressably>
+      </LiveBorder>
+    </PressScale>
   );
-}
+},
+// The fleet poll hands back fresh objects every 4s; compare by content so unchanged cards skip rendering.
+(a, b) => a.onLongPress === b.onLongPress && JSON.stringify(a.box) === JSON.stringify(b.box));

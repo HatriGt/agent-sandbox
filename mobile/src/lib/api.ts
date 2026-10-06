@@ -91,6 +91,38 @@ export interface HarnessView {
   createdAt: number;
   updatedAt: number;
   providerMissing?: boolean;
+  unresolvedProvider?: { kind: string; label: string };
+  origin?: { kind: "file" | "github" | "duplicate"; source?: string; at: number };
+  provider?: { id: string; kind: string; label: string } | null;
+}
+export interface HarnessImportPreview {
+  preview: { harness: HarnessView; skills: Array<{ name: string; description: string; files: number }>; notes: string[] };
+}
+export interface CompareFacts {
+  box: string;
+  state: string;
+  verified: boolean | null;
+  verifyDetail?: string;
+  questions: number;
+  tokens: { input: number; output: number } | null;
+  costUsd: number | null;
+  durationMs: number | null;
+  files: string[];
+  headline: string;
+}
+export interface CompareSummary {
+  id: string;
+  task: string;
+  harnessA: string;
+  harnessB: string;
+  createdAt: number;
+  sides: Array<{ side: "a" | "b"; box: string }>;
+}
+export interface CompareDetail {
+  id: string;
+  task: string;
+  createdAt: number;
+  sides: Array<{ side: "a" | "b"; harnessId: string; harnessName: string; box: string | null; source: "not-started" | "gone" | "archive" | "live"; facts: CompareFacts | null }>;
 }
 export interface WorkflowStep {
   n: number;
@@ -414,6 +446,8 @@ export interface SkillView {
   name: string;
   description: string;
   content: string;
+  /** Supporting files beside SKILL.md (scripts, docs) — absent for single-file skills. */
+  files?: { path: string; content: string }[];
   enabled: boolean;
   addedAt: number;
   updatedAt: number;
@@ -800,6 +834,11 @@ export const api = {
     post<{ ok: true; id: string; login: string; role: string }>("/auth/login", { login, password }),
   logout: () => post<{ ok: true }>("/auth/logout", {}),
   me: () => get<Me>("/me.json"),
+  /** Prove a bearer works — the "Test connection" on the Connect screen. */
+  whoIs: async (token: string): Promise<Me | null> => {
+    const res = await fetchWithTimeout(url("/me.json"), { headers: { Authorization: `Bearer ${token}` } }, READ_TIMEOUT_MS);
+    return res.ok ? ((await res.json()) as Me) : null;
+  },
   updateAccount: (p: { name?: string; email?: string | null; currentPassword?: string; newPassword?: string }) =>
     post<{ ok: true }>("/account.json", p),
   sessions: () => get<{ sessions: SessionRow[] }>("/sessions.json"),
@@ -866,6 +905,9 @@ export const api = {
     /** Run as 1-3 parallel attempts; the controller picks the winner. */
     attempts?: 1 | 2 | 3;
     attemptSpecs?: Array<{ agent?: string; model?: string; provider?: string; harness?: string }>;
+    /** Links this run to a harness compare (POST /harness-compares.json) as side a or b. */
+    compareId?: string;
+    compareSide?: "a" | "b";
   }) => post<DelegateResult>("/delegate.json", { source: "git", ...input }, AGENT_TIMEOUT_MS),
   /** Stop the running turn now. The box stays up; the thread can be resumed. */
   interrupt: (session: string) => post<{ ok: true; stopped: boolean }>("/interrupt.json", { session }),
@@ -976,11 +1018,19 @@ export const api = {
       | { enabled: boolean }
       | { id: string; text?: string; why?: string; pinned?: boolean; status?: "kept"; area?: string; paths?: string; links?: string; verified?: boolean; repo?: string },
   ) => post<MemoryNotesResponse>("/memory-notes.json", body),
-  memoryNoteAdd: (add: { kind: MemoryKind; text: string; why?: string; repo?: string; area?: string }) =>
+  memoryNoteAdd: (add: { kind: MemoryKind; text: string; why?: string; repo?: string; area?: string; paths?: string; links?: string }) =>
     post<MemoryNotesResponse>("/memory-notes.json", { add }),
   memoryNoteDelete: (id: string) => del<MemoryNotesResponse>("/memory-notes.json", { id }),
   /** Turn a playbook note into a skill draft. 409 when a skill of that name exists. */
   memoryPromote: (id: string) => post<{ skill: { name: string }; enabled: boolean; notes: MemoryNote[] }>("/memory-promote.json", { id }),
+  /** Every kept note as one Markdown document (GET /memory-export.md). */
+  memoryExport: async (): Promise<string> => {
+    const res = await fetchWithTimeout(url("/memory-export.md"), { headers: authHeaders(false) }, READ_TIMEOUT_MS);
+    if (res.status === 401) onUnauthorized?.();
+    if (!res.ok) throw new ApiError(`Export failed (${res.status})`, res.status);
+    return res.text();
+  },
+  memoryImport: (markdown: string) => post<MemoryNotesResponse>("/memory-import.json", { markdown }),
 
   // ---- composer choices: agents, harnesses, workflows ----
   agentPrefs: () => get<AgentPrefs>("/agent-prefs.json"),
@@ -992,6 +1042,11 @@ export const api = {
     post<{ harnesses: HarnessView[]; limits: Record<string, number>; builtins?: number; saved?: string }>("/harnesses.json", body),
   workflowMutate: (body: Record<string, unknown>) =>
     post<{ workflows: WorkflowView[]; limits: Record<string, number>; dir: string; saved?: string; imported?: string[]; skipped?: string[] }>("/workflows.json", body),
+  harnessExport: (id: string) => get<{ bundle: unknown; redacted: number; skipped: string[]; filename: string }>("/harnesses/export.json", { id }),
+  harnessImport: <T,>(body: Record<string, unknown>) => post<T>("/harnesses/import.json", body),
+  compareCreate: (body: { task: string; harnessA: string; harnessB: string }) => post<{ id: string }>("/harness-compares.json", body),
+  compares: () => get<{ compares: CompareSummary[] }>("/harness-compares.json"),
+  compare: (id: string) => get<CompareDetail>("/harness-compares.json", { id }),
   workflowPreview: (yaml: string) => post<{ ok: true; workflow: WorkflowView }>("/workflows.json", { action: "preview", yaml }),
   workflowYaml: (id: string) => get<{ id: string; yaml: string; filename: string }>("/workflows/yaml.json", { id }),
 
@@ -1019,7 +1074,7 @@ export const api = {
   notifySettings: () => get<NotifySettings>("/notify.json"),
   saveNotifySettings: (s: { url?: string; events?: Partial<NotifySettings["events"]> }) =>
     post<NotifySettings>("/notify.json", s),
-  testNotify: () => post<{ ok: true }>("/notify/test.json", {}),
+  testNotify: () => post<{ ok: boolean; status: number }>("/notify/test.json", {}),
   pushRegister: (token: string, platform: string) => post<{ ok: true; id: string }>("/push/register.json", { token, platform }),
   /** Answer from a notification action: one-use nonce + choice index (server: src/answer-choice.ts). */
   answerQuestion: (box: string, nonce: string, choice: number) =>
@@ -1066,7 +1121,7 @@ export interface IntakeView {
 }
 export const intakeApi = {
   get: () => get<IntakeView>("/intake.json"),
-  update: (u: { allowEmails?: string[]; slackUsers?: string[]; defaultRepo?: string }) => post<IntakeView>("/intake.json", u),
+  update: (u: { allowEmails?: string[]; slackUsers?: string[]; defaultRepo?: string; mailgunKey?: string; slackSigningSecret?: string; slackBotToken?: string; sentryToken?: string }) => post<IntakeView>("/intake.json", u),
   rotate: () => post<IntakeView>("/intake/rotate.json", {}),
   answer: (id: string, repo: string) => post<{ ok: true; box: string; url: string }>(`/intake/pending/${encodeURIComponent(id)}/answer.json`, { repo }),
   dismiss: (id: string) => post<{ ok: true }>(`/intake/pending/${encodeURIComponent(id)}/dismiss.json`, {}),

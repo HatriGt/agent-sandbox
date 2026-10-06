@@ -23,6 +23,7 @@ import { CodeRefLink, CodeRefSession, CodeRefSymbols } from "./CodeRef";
 import { TableBlock } from "./viz/TableBlock";
 import { CalloutBlock, ChecklistBlock, ProgressBlock, StatusListBlock } from "./viz/SmallBlocks";
 import { MiniAction } from "./viz/VizFrame";
+import { PressScale } from "@/components/motion";
 
 /**
  * Lightweight markdown for agent prose, mirroring the web console's `Markdown` + viz router:
@@ -204,12 +205,12 @@ function CodeBlock({ text, lang }: { text: string; lang?: string }) {
         <T variant="micro" mono style={{ color: palette.traceFg, opacity: 0.6, flex: 1 }}>
           {lang || "text"}
         </T>
-        <Pressable onPress={copy} hitSlop={8} accessibilityRole="button" accessibilityLabel="Copy code" style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+        <PressScale onPress={copy} hitSlop={8} accessibilityRole="button" accessibilityLabel="Copy code" style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
           <Icon name={copied ? "check" : "copy"} size={12} color={palette.traceFg} style={{ opacity: 0.7 }} />
           <T variant="micro" style={{ color: palette.traceFg, opacity: 0.7 }}>
             {copied ? "Copied" : "Copy"}
           </T>
-        </Pressable>
+        </PressScale>
       </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} bounces={false} contentContainerStyle={{ padding: 12, paddingTop: 6 }}>
         <T variant="code" mono style={{ color: palette.traceFg }} selectable>

@@ -1,5 +1,5 @@
-// Ported from web/src/components/memory/kinds.ts — labels, glyphs (Feather equivalents of the
-// lucide set) and the ink ramp. No hues: amber stays reserved for "needs you".
+// Ported from web/src/components/memory/kinds.ts — order, labels and glyphs (Feather equivalents
+// of the lucide set). Kinds are never coloured: amber stays reserved for "needs you".
 import type { MemoryKind } from "@/lib/api";
 import type { IconName } from "@/components/ui/Icon";
 
@@ -30,14 +30,5 @@ export const KIND_ICON: Record<MemoryKind, IconName> = {
   decision: "git-branch",
   lesson: "award",
   playbook: "book-open",
-};
-export const KIND_INK: Record<MemoryKind, number> = {
-  preference: 0.9,
-  rule: 0.7,
-  domain: 0.62,
-  playbook: 0.52,
-  lesson: 0.42,
-  decision: 0.3,
-  fact: 0.2,
 };
 export const isOperatorKind = (k: MemoryKind) => k === "preference" || k === "rule";

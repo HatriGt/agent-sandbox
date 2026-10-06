@@ -1,8 +1,7 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, View } from "react-native";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FlatList, KeyboardAvoidingView, Platform, Pressable, ScrollView, View, type ViewToken } from "react-native";
 import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import * as Haptics from "expo-haptics";
 import { useFleet } from "@/hooks/useFleet";
 import { useKeyboardInset } from "@/hooks/useKeyboardInset";
 import { useWatch } from "@/hooks/useWatch";
@@ -29,20 +28,21 @@ import { RunSummary } from "@/components/RunSummary";
 import { TurnRail, type Turn } from "@/components/TurnRail";
 import { SleepingCard, WakingCard } from "@/components/WakingCard";
 import { Button } from "@/components/ui/Button";
-import { groupEvents, ThreadRow } from "@/components/TranscriptView";
+import { groupEvents, shareItems, ThreadRow, type ThreadItem } from "@/components/TranscriptView";
 import { BoxActionsSheet, currentMemoryTier } from "@/components/sheets/BoxActionsSheet";
 import { ChangesSheet } from "@/components/sheets/ChangesSheet";
 import { PrSheet } from "@/components/sheets/PrSheet";
 import { T } from "@/components/ui/AppText";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { Sheet } from "@/components/ui/Sheet";
-import { FadeInUp, TypingDots } from "@/components/ui/Motion";
 import { StatePill } from "@/components/ui/StatePill";
 import { UsageMeter } from "@/components/ui/UsageMeter";
-import { WorkingDot } from "@/components/ui/WorkingDot";
 import { CodeRefSession } from "@/components/CodeRef";
+import { AgentLoader, FadeInUp, haptic, PressScale, TypingDots, WorkingDot } from "@/components/motion";
 
 type AskEntry = { q: string; a?: string; pending: boolean };
+
+const VIEWABILITY = { itemVisiblePercentThreshold: 10 };
 
 const PR_RE = /github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)/g;
 
@@ -99,11 +99,11 @@ function Thread() {
   const [note, setNote] = useState<string | null>(null);
   const [prefill, setPrefill] = useState<{ text: string; nonce: number } | null>(null);
   const [stick, setStick] = useState(true);
-  const scrollRef = useRef<ScrollView>(null);
-  const [scrollY, setScrollY] = useState(0);
+  const stickRef = useRef(true);
+  stickRef.current = stick;
+  const listRef = useRef<FlatList<ThreadItem>>(null);
+  const [topIndex, setTopIndex] = useState(0);
   const [viewportH, setViewportH] = useState(0);
-  const turnYs = useRef(new Map<string, number>());
-  const [turnTick, setTurnTick] = useState(0);
   const buzzedRef = useRef(false);
   const mountedAt = useRef(Date.now());
 
@@ -119,7 +119,10 @@ function Thread() {
 
   const events = useMemo(() => parseTrace(log), [log]);
   const done = merged?.runState === "done";
-  const items = useMemo(() => groupEvents(events, { done }), [events, done]);
+  // Every log tick re-parses into fresh objects; shareItems keeps the old object for each unchanged
+  // row so memoized rows skip re-rendering and only the growing tail does work.
+  const prevItems = useRef<ThreadItem[]>([]);
+  const items = useMemo(() => (prevItems.current = shareItems(prevItems.current, groupEvents(events, { done }))), [events, done]);
 
   // Optimistic echoes: a sent message shows instantly; the durable ⟦you⟧ log line replaces it once
   // the round-trip lands. Same mechanism as the web (see mobile/src/lib/replies.ts for the
@@ -242,7 +245,7 @@ function Thread() {
     try {
       await api.revert(session, revertAsk.message);
       setRevertAsk(null);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      haptic("success");
       await refresh();
     } catch (e) {
       setNote(e instanceof Error ? e.message : String(e));
@@ -275,7 +278,7 @@ function Thread() {
   useEffect(() => {
     if (waiting && !buzzedRef.current) {
       buzzedRef.current = true;
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+      haptic("warning");
     }
     if (!waiting) buzzedRef.current = false;
   }, [waiting]);
@@ -316,7 +319,7 @@ function Thread() {
     setNote(null);
     try {
       await api.interrupt(session);
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+      haptic("light");
       await refresh();
     } catch (e) {
       setStopping(false);
@@ -333,7 +336,7 @@ function Thread() {
     setNote(null);
     try {
       await api.resume(session, text, { force: true });
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      haptic("success");
       await refresh();
     } catch (e) {
       setNote(e instanceof Error ? e.message : String(e));
@@ -356,20 +359,43 @@ function Thread() {
 
   const boxForActions: BoxView | null = merged ? ({ role: "session", ...merged } as BoxView) : null;
 
+  const hasTask = !!merged?.task;
   const turns = useMemo<Turn[]>(() => {
-    void turnTick;
-    const out: Turn[] = [];
-    const taskY = turnYs.current.get("task");
-    if (taskY !== undefined) out.push({ key: "task", kind: "task", y: taskY });
+    const out: Turn[] = hasTask ? [{ key: "task", kind: "task", index: -1 }] : [];
     items.forEach((it, i) => {
-      const y = turnYs.current.get(`${it.kind}-${i}`);
-      if (y === undefined) return;
-      if (it.kind === "ask") out.push({ key: `ask-${i}`, kind: "question", y });
-      else if (it.kind === "you") out.push({ key: `you-${i}`, kind: "you", y });
+      if (it.kind === "ask") out.push({ key: `ask-${i}`, kind: "question", index: i });
+      else if (it.kind === "you") out.push({ key: `you-${i}`, kind: "you", index: i });
     });
-    return out.sort((a, b) => a.y - b.y);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, turnTick]);
+    return out;
+  }, [items, hasTask]);
+
+  // One stable revert callback per revertable message, so memoized rows keep their props identical.
+  const revertFns = useMemo(() => {
+    const m = new Map<number, (text: string) => void>();
+    if (!canRevertNow) return m;
+    msgIndexOf.forEach((msg, i) => {
+      if (revertable.has(msg)) m.set(i, (text) => setRevertAsk({ message: msg, text }));
+    });
+    return m;
+  }, [msgIndexOf, revertable, canRevertNow]);
+
+  const lastIndex = items.length - 1;
+  const renderItem = useCallback(
+    ({ item, index }: { item: ThreadItem; index: number }) => (
+      <ThreadRow
+        item={item}
+        session={session}
+        animate={animate && index >= lastIndex - 1}
+        live={running && index === lastIndex}
+        onRevert={revertFns.get(index)}
+      />
+    ),
+    [session, animate, lastIndex, running, revertFns],
+  );
+  const onViewable = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
+    const first = viewableItems.find((v) => v.index != null);
+    if (first?.index != null) setTopIndex(first.index);
+  }).current;
 
   if (gone) {
     return (
@@ -380,10 +406,10 @@ function Thread() {
           <T variant="body" tone="muted">
             It was destroyed or reaped — sandboxes are throwaway by design, and nothing outlives them.
           </T>
-          <Pressable onPress={() => router.back()} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <PressScale onPress={() => router.back()} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
             <Icon name="arrow-left" size={16} color={palette.live} />
             <T variant="body" tone="live">Back</T>
-          </Pressable>
+          </PressScale>
         </View>
       </SafeAreaView>
     );
@@ -433,13 +459,13 @@ function Thread() {
             borderBottomColor: palette.border,
           }}
         >
-          <Pressable
+          <PressScale
             onPress={() => router.back()}
             hitSlop={12}
             style={({ pressed }) => ({ padding: 8, opacity: pressed ? 0.5 : 1, transform: [{ scale: pressed ? 0.92 : 1 }] })}
           >
             <Icon name="chevron-left" size={22} color={palette.mutedForeground} />
-          </Pressable>
+          </PressScale>
           {/* minWidth:0 lets this column actually shrink; without it a long title or a third repo
               chip widens the row and shoves the state pill and ⋯ past the right edge. */}
           <View style={{ flex: 1, minWidth: 0 }}>
@@ -498,13 +524,13 @@ function Thread() {
             ) : null}
           </View>
           {merged ? <StatePill runState={merged.runState} boxStatus={merged.boxStatus} exitCode={merged.exitCode} /> : null}
-          <Pressable
+          <PressScale
             onPress={() => setSheet("actions")}
             hitSlop={12}
             style={({ pressed }) => ({ padding: 8, opacity: pressed ? 0.5 : 1, transform: [{ scale: pressed ? 0.92 : 1 }] })}
           >
             <Icon name="more-horizontal" size={20} color={palette.mutedForeground} />
-          </Pressable>
+          </PressScale>
         </View>
 
         {/* Vitals strip: memory and disk against their caps. Its own row rather than crowding the
@@ -529,21 +555,34 @@ function Thread() {
 
         {/* Transcript */}
         <View style={{ flex: 1 }}>
-          <ScrollView
-            ref={scrollRef}
+          <FlatList
+            ref={listRef}
             style={{ flex: 1 }}
+            data={items}
+            renderItem={renderItem}
+            // Index keys are stable here: the transcript only grows at the tail (a revert re-keys by
+            // refetching, which remounts anyway), and a row's identity is its position in the log.
+            keyExtractor={(_it, i) => String(i)}
             contentContainerStyle={{ padding: 16, paddingBottom: 8 }}
+            initialNumToRender={20}
+            maxToRenderPerBatch={12}
+            windowSize={11}
+            removeClippedSubviews={Platform.OS === "android"}
+            onViewableItemsChanged={onViewable}
+            viewabilityConfig={VIEWABILITY}
+            onLayout={(e) => setViewportH(e.nativeEvent.layout.height)}
             onScroll={(e) => {
               const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-              setStick(contentOffset.y + layoutMeasurement.height > contentSize.height - 80);
-              setScrollY(contentOffset.y);
-              setViewportH(layoutMeasurement.height);
+              const atEnd = contentOffset.y + layoutMeasurement.height > contentSize.height - 80;
+              if (atEnd !== stickRef.current) setStick(atEnd);
             }}
             scrollEventThrottle={100}
             onContentSizeChange={() => {
-              if (stick) scrollRef.current?.scrollToEnd({ animated: false });
+              if (stickRef.current) listRef.current?.scrollToEnd({ animated: false });
             }}
-          >
+            onScrollToIndexFailed={(info) => listRef.current?.scrollToOffset({ offset: info.averageItemLength * info.index, animated: true })}
+            ListHeaderComponent={
+              <>
             {booting && (
               <View style={{ alignItems: "center", paddingVertical: 60, gap: 12 }}>
                 <WorkingDot color={palette.live} size={12} />
@@ -596,50 +635,11 @@ function Thread() {
                 />
               )
             )}
-            {/* The task that started this run — pinned first, like the web's Task bubble. */}
-            {merged?.task ? (
-              <View
-                onLayout={(e) => {
-                  turnYs.current.set("task", e.nativeEvent.layout.y);
-                  setTurnTick((t) => t + 1);
-                }}
-              >
-                <ThreadRow item={{ kind: "you", text: merged.task }} />
-              </View>
-            ) : null}
-            {items.map((it, i) => {
-              const msgIndex = msgIndexOf.get(i);
-              const revertableHere =
-                it.kind === "you" && msgIndex !== undefined && revertable.has(msgIndex) && canRevertNow;
-              const isTurn = it.kind === "you" || it.kind === "ask";
-              const row = (
-                <ThreadRow
-                  key={isTurn ? undefined : i}
-                  item={it}
-                  session={session}
-                  animate={animate && i >= items.length - 2}
-                  live={running && i === items.length - 1}
-                  onRevert={
-                    revertableHere && msgIndex !== undefined
-                      ? (text) => setRevertAsk({ message: msgIndex, text })
-                      : undefined
-                  }
-                />
-              );
-              return isTurn ? (
-                <View
-                  key={i}
-                  onLayout={(e) => {
-                    turnYs.current.set(`${it.kind}-${i}`, e.nativeEvent.layout.y);
-                    setTurnTick((t) => t + 1);
-                  }}
-                >
-                  {row}
-                </View>
-              ) : (
-                <React.Fragment key={i}>{row}</React.Fragment>
-              );
-            })}
+            {merged?.task ? <ThreadRow item={{ kind: "you", text: merged.task }} /> : null}
+              </>
+            }
+            ListFooterComponent={
+              <>
             {/* Optimistic echoes — sent but not yet in the durable log */}
             {pendingEchoes.map((r, i) => (
               <FadeInUp key={`echo-${i}`}>
@@ -667,12 +667,12 @@ function Thread() {
             {running && (
               <FadeInUp>
                 <View style={{ flexDirection: "row", gap: 10, alignItems: "center", paddingVertical: 12 }}>
-                  <TypingDots color={palette.live} />
+                  <AgentLoader color={palette.live} size={16} />
                   <T variant="meta" tone="live" weight="medium" style={{ flex: 1 }}>
                     {stopping ? "stopping…" : "working"}
                     {connected ? "" : " · reconnecting…"}
                   </T>
-                  <Pressable
+                  <PressScale
                     onPress={() => void stop()}
                     disabled={stopping}
                     hitSlop={8}
@@ -693,7 +693,7 @@ function Thread() {
                     <T variant="micro" weight="medium">
                       {stopping ? "Stopping…" : "Stop"}
                     </T>
-                  </Pressable>
+                  </PressScale>
                 </View>
                 {merged?.stalled && !stopping ? (
                   <T variant="micro" tone="faint" style={{ marginTop: -6, paddingBottom: 8 }}>
@@ -739,20 +739,26 @@ function Thread() {
                 />
               </View>
             ) : null}
-          </ScrollView>
+              </>
+            }
+          />
 
           <TurnRail
             turns={turns}
             visible={!stick}
-            scrollY={scrollY}
+            topIndex={topIndex}
             viewportH={viewportH}
-            onJump={(y) => scrollRef.current?.scrollTo({ y: Math.max(0, y - 12), animated: true })}
+            onJump={(t) =>
+              t.index < 0
+                ? listRef.current?.scrollToOffset({ offset: 0, animated: true })
+                : listRef.current?.scrollToIndex({ index: t.index, animated: true, viewOffset: 12 })
+            }
           />
 
           {/* Scroll-to-bottom pill */}
           {!stick && (
-            <Pressable
-              onPress={() => scrollRef.current?.scrollToEnd({ animated: true })}
+            <PressScale
+              onPress={() => listRef.current?.scrollToEnd({ animated: true })}
               style={{
                 position: "absolute",
                 bottom: 12,
@@ -775,7 +781,7 @@ function Thread() {
             >
               <Icon name="arrow-down" size={14} color={palette.foreground} />
               <T variant="micro" weight="medium">Latest</T>
-            </Pressable>
+            </PressScale>
           )}
         </View>
 
@@ -788,8 +794,9 @@ function Thread() {
         >
           {board ? <PlanChip board={board} live={running} onPress={() => setSheet("plan")} /> : null}
           {chips.map((c) => (
-            <Pressable
+            <PressScale
               key={c.key}
+              haptic="selection"
               onPress={() => (c.key === "files" ? router.push(`/files/${encodeURIComponent(session)}`) : setSheet(c.key))}
               style={({ pressed }) => ({
                 flexDirection: "row",
@@ -806,7 +813,7 @@ function Thread() {
             >
               <Icon name={c.icon} size={13} color={palette.mutedForeground} />
               <T variant="meta" weight="medium" numberOfLines={1}>{c.label}</T>
-            </Pressable>
+            </PressScale>
           ))}
           {queuedCount > 0 ? <QueuedChip count={queuedCount} onPress={() => setSheet("queued")} /> : null}
         </ScrollView>
@@ -830,7 +837,7 @@ function Thread() {
               memUsage={merged?.memUsage}
               onDone={() => {
                 setBumped(`${session}:${nextMemoryTier}`);
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+                haptic("success");
                 void refresh();
               }}
               onError={(m) => setNote(`Could not add memory — ${m}`)}
@@ -857,7 +864,7 @@ function Thread() {
             disabled={booting}
             accessoryLeft={
               models.length > 0 ? (
-                <Pressable
+                <PressScale
                   onPress={() => setSheet("model")}
                   style={({ pressed }) => ({
                     flexDirection: "row",
@@ -877,7 +884,7 @@ function Thread() {
                   <T variant="micro" weight="medium" numberOfLines={1} tone={pickedModel ? "live" : "faint"} style={{ maxWidth: 120 }}>
                     {models.find((m) => m.id === (pickedModel ?? currentModel))?.label ?? "Model"}
                   </T>
-                </Pressable>
+                </PressScale>
               ) : null
             }
           />
@@ -951,7 +958,7 @@ function Thread() {
           {models.map((m) => {
             const active = m.id === (pickedModel ?? currentModel);
             return (
-              <Pressable
+              <PressScale
                 key={m.id}
                 onPress={() => {
                   setPickedModel(m.id === currentModel ? null : m.id);
@@ -983,7 +990,7 @@ function Thread() {
                     <Icon name="check" size={16} color={palette.ok} />
                   </View>
                 )}
-              </Pressable>
+              </PressScale>
             );
           })}
         </View>

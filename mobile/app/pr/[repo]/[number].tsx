@@ -29,7 +29,7 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Field } from "@/components/ui/Field";
 import { Icon, type IconName } from "@/components/ui/Icon";
-import { WorkingDot } from "@/components/ui/WorkingDot";
+import { WorkingDot, PressScale } from "@/components/motion";
 
 type Tab = "conversation" | "commits" | "files" | "checks";
 const TABS: { key: Tab; label: string }[] = [
@@ -78,13 +78,13 @@ function PullRequestScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: palette.background }} edges={["top"]}>
       {/* SettingsScreen chrome: back row, everything else scrolls */}
       <View style={{ flexDirection: "row", alignItems: "center", height: 56, paddingHorizontal: 12 }}>
-        <Pressable onPress={() => router.back()} hitSlop={12} style={{ padding: 8 }}>
+        <PressScale onPress={() => router.back()} hitSlop={12} style={{ padding: 8 }}>
           <T variant="body" tone="muted">
             ‹ Back
           </T>
-        </Pressable>
+        </PressScale>
         <View style={{ flex: 1 }} />
-        <Pressable
+        <PressScale
           onPress={() => void WebBrowser.openBrowserAsync(pr?.url ?? `https://github.com/${repo}/pull/${number}`)}
           hitSlop={12}
           style={{ flexDirection: "row", alignItems: "center", gap: 4, padding: 8 }}
@@ -92,7 +92,7 @@ function PullRequestScreen() {
           <T variant="meta" tone="muted">
             GitHub ↗
           </T>
-        </Pressable>
+        </PressScale>
       </View>
 
       <ScrollView contentContainerStyle={{ padding: 20, paddingTop: 0, gap: 12, paddingBottom: 40 }} keyboardShouldPersistTaps="handled">
@@ -169,7 +169,7 @@ function PullRequestScreen() {
                     : pr.checkRuns?.length
               : undefined;
             return (
-              <Pressable
+              <PressScale
                 key={t.key}
                 onPress={() => setTab(t.key)}
                 style={{
@@ -193,7 +193,7 @@ function PullRequestScreen() {
                     {count}
                   </T>
                 ) : null}
-              </Pressable>
+              </PressScale>
             );
           })}
         </View>
@@ -284,7 +284,7 @@ function ActionBar({ pr, session, repo, number, onChanged }: { pr: PullDetail; s
             {(["merge", "squash", "rebase"] as const).map((m) => {
               const on = m === method;
               return (
-                <Pressable
+                <PressScale
                   key={m}
                   onPress={() => setMethod(m)}
                   style={{
@@ -300,7 +300,7 @@ function ActionBar({ pr, session, repo, number, onChanged }: { pr: PullDetail; s
                   <T variant="micro" weight="semibold" style={{ color: on ? palette.ok : palette.mutedForeground }}>
                     {m}
                   </T>
-                </Pressable>
+                </PressScale>
               );
             })}
           </View>
@@ -446,7 +446,7 @@ function Commits({ pr, repo }: { pr: PullDetail; repo: string }) {
   return (
     <Card style={{ padding: 0, overflow: "hidden" }}>
       {pr.commits.map((c, i) => (
-        <Pressable
+        <PressScale
           key={c.sha}
           onPress={() => void WebBrowser.openBrowserAsync(`https://github.com/${repo}/commit/${c.sha}`)}
           style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14, paddingVertical: 10, borderTopWidth: i === 0 ? 0 : 1, borderTopColor: palette.border }}
@@ -467,7 +467,7 @@ function Commits({ pr, repo }: { pr: PullDetail; repo: string }) {
               {c.sha.slice(0, 7)}
             </T>
           </View>
-        </Pressable>
+        </PressScale>
       ))}
     </Card>
   );
@@ -494,7 +494,7 @@ function Files({ pr }: { pr: PullDetail }) {
           const on = open === f.path;
           return (
             <View key={f.path} style={{ borderTopWidth: i === 0 ? 0 : 1, borderTopColor: palette.border }}>
-              <Pressable onPress={() => setOpen(on ? null : f.path)} style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, paddingVertical: 10 }}>
+              <PressScale onPress={() => setOpen(on ? null : f.path)} style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, paddingVertical: 10 }}>
                 <Icon name={on ? "chevron-down" : "chevron-right"} size={13} color={palette.mutedForeground} />
                 <T variant="micro" mono numberOfLines={1} style={{ flex: 1, minWidth: 0 }}>
                   {f.path}
@@ -510,7 +510,7 @@ function Files({ pr }: { pr: PullDetail }) {
                 <T variant="micro" mono style={{ color: palette.destructive }}>
                   −{f.deletions}
                 </T>
-              </Pressable>
+              </PressScale>
               {on ? (
                 <View style={{ borderTopWidth: 1, borderTopColor: palette.border, paddingHorizontal: 10, paddingVertical: 8 }}>
                   {f.patch ? (
@@ -540,7 +540,7 @@ function Checks({ pr }: { pr: PullDetail }) {
         const ok = ["success", "neutral", "skipped"].includes(c.conclusion ?? "");
         const color = running ? palette.live : ok ? palette.ok : palette.destructive;
         return (
-          <Pressable
+          <PressScale
             key={`${c.name}-${i}`}
             disabled={!c.url}
             onPress={() => c.url && void WebBrowser.openBrowserAsync(c.url)}
@@ -555,7 +555,7 @@ function Checks({ pr }: { pr: PullDetail }) {
               {running ? "running" : (c.conclusion ?? "done")}
             </T>
             {c.url ? <Icon name="external-link" size={12} color={palette.faint} /> : null}
-          </Pressable>
+          </PressScale>
         );
       })}
     </Card>

@@ -4,6 +4,7 @@ import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { T } from "../ui/AppText";
 import { Icon, type IconName } from "../ui/Icon";
+import { PressScale } from "@/components/motion";
 
 /**
  * The card every output visualizer sits in: hairline border, a quiet header with the fence kind,
@@ -53,7 +54,7 @@ export function VizFrame({
         <T variant="micro" weight="medium" tone="muted" numberOfLines={1} style={{ flex: 1 }}>
           {title ?? ""}
         </T>
-        <Pressable
+        <PressScale
           onPress={() => setShowRaw((v) => !v)}
           hitSlop={8}
           accessibilityRole="button"
@@ -64,7 +65,7 @@ export function VizFrame({
           <T variant="micro" tone="faint">
             {showRaw ? "visual" : "raw"}
           </T>
-        </Pressable>
+        </PressScale>
       </View>
       {showRaw ? <View style={{ padding: 8 }}>{raw}</View> : <View style={{ padding: 12 }}>{children}</View>}
     </View>
@@ -75,7 +76,7 @@ export function VizFrame({
 export function MiniAction({ label, icon, onPress }: { label: string; icon?: IconName; onPress: () => void }) {
   const { palette } = useTheme();
   return (
-    <Pressable
+    <PressScale
       onPress={onPress}
       hitSlop={6}
       accessibilityRole="button"
@@ -94,6 +95,6 @@ export function MiniAction({ label, icon, onPress }: { label: string; icon?: Ico
       <T variant="micro" weight="medium" tone="muted">
         {label}
       </T>
-    </Pressable>
+    </PressScale>
   );
 }

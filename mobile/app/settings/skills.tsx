@@ -1,19 +1,24 @@
-// Skills library: list + enable/disable, read a playbook's content, import from a GitHub repo.
-// Authoring stays on the web.
-import React, { useCallback, useEffect, useState } from "react";
-import { Pressable, Switch, View } from "react-native";
+// Skills: the playbooks every sandbox gets — mirrors web/src/components/SkillsPage.tsx. The library
+// (search, filter chips, template strip, how skills reach the agent, recently edited) and the editor
+// over it; import is a sheet over the library.
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Pressable, Switch, TextInput, View } from "react-native";
 import { api, type SkillView } from "@/lib/api";
 import { ago } from "@/lib/format";
 import { useTheme } from "@/theme/ThemeContext";
+import { fonts, radius, type } from "@/theme/tokens";
 import { SettingsScreen } from "@/components/SettingsScreen";
-import { MarkdownLite } from "@/components/MarkdownLite";
 import { T } from "@/components/ui/AppText";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
-import { Field } from "@/components/ui/Field";
-import { Icon } from "@/components/ui/Icon";
-import { Sheet } from "@/components/ui/Sheet";
-import { listRepoSkills, loadRepoSkill, parseRepoInput, type RepoRef, type RepoSkillEntry } from "@/components/settings/skillImport";
+import { Icon, type IconName } from "@/components/ui/Icon";
+import { SkillEditor, StarterBadge } from "@/components/settings/SkillEditor";
+import { SkillImportSheet } from "@/components/settings/SkillImportSheet";
+import { byteLength, type Draft, fmtKb, type Mutate, sourceOf, TEMPLATES } from "@/components/settings/SkillModel";
+import { Skeleton } from "@/components/motion";
+
+type Filter = "all" | "on" | "off" | "starter" | "custom";
+type Editing = { initial?: SkillView; draft?: Draft };
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -22,239 +27,396 @@ export default function Skills() {
   const [skills, setSkills] = useState<SkillView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
-  const [viewing, setViewing] = useState<string | null>(null);
-  const [importing, setImporting] = useState(false);
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<Filter>("all");
+  const [editing, setEditing] = useState<Editing | null>(null);
+  const [importing, setImporting] = useState<{ repo?: string } | null>(null);
 
   const load = useCallback(() => {
-    api.skills().then((r) => setSkills(r.skills)).catch((e) => setError(msg(e)));
+    api
+      .skills()
+      .then((r) => setSkills(r.skills))
+      .catch((e) => setError(msg(e)));
   }, []);
   useEffect(load, [load]);
 
-  const toggle = async (s: SkillView, enabled: boolean) => {
-    setError(null);
-    setSkills((cur) => (cur ?? []).map((x) => (x.name === s.name ? { ...x, enabled } : x)));
-    try {
-      setSkills((await api.skillMutate({ action: "toggle", name: s.name, enabled })).skills);
-    } catch (e) {
-      setSkills((cur) => (cur ?? []).map((x) => (x.name === s.name ? { ...x, enabled: !enabled } : x)));
-      setError(msg(e));
-    }
-  };
+  const mutate = useCallback<Mutate>(async (body, ok) => {
+    const r = await api.skillMutate(body);
+    setSkills(r.skills);
+    setInfo(ok ?? null);
+    return r;
+  }, []);
 
-  const shown = skills?.find((s) => s.name === viewing) ?? null;
+  const newSkill = () => setEditing({ draft: { name: "", description: "", content: "" } });
+
+  const q = query.trim().toLowerCase();
+  const counts = useMemo(() => {
+    const c = { all: 0, on: 0, off: 0, starter: 0, custom: 0 };
+    for (const s of skills ?? []) {
+      c.all++;
+      c[s.enabled ? "on" : "off"]++;
+      c[sourceOf(s.name)]++;
+    }
+    return c;
+  }, [skills]);
+  const visible = (skills ?? []).filter((s) => {
+    if (filter === "on" && !s.enabled) return false;
+    if (filter === "off" && s.enabled) return false;
+    if ((filter === "starter" || filter === "custom") && sourceOf(s.name) !== filter) return false;
+    return !q || `${s.name} ${s.description}`.toLowerCase().includes(q);
+  });
+  const existing = useMemo(() => Object.fromEntries((skills ?? []).map((s) => [s.name, true as const])), [skills]);
+  const filtered = !!q || filter !== "all";
+  const lastEdited = skills?.length ? Math.max(...skills.map((s) => s.updatedAt)) : 0;
+  const recent = useMemo(() => [...(skills ?? [])].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 4), [skills]);
+  const chips: { value: Filter; label: string; count: number }[] = [
+    { value: "all", label: "All", count: counts.all },
+    { value: "on", label: "On", count: counts.on },
+    { value: "off", label: "Off", count: counts.off },
+    ...(counts.starter > 0 && counts.custom > 0
+      ? [
+          { value: "starter" as const, label: "Starter", count: counts.starter },
+          { value: "custom" as const, label: "Yours", count: counts.custom },
+        ]
+      : []),
+  ];
 
   return (
     <SettingsScreen title="Skills">
-      <T variant="body" tone="muted">
-        Reusable playbooks synced into every sandbox. Mention one in a task to make the agent follow it. Tap one to read it.
+      <T variant="meta" tone="muted">
+        {skills && skills.length > 0 ? (
+          `${skills.length} skill${skills.length === 1 ? "" : "s"} · ${counts.on} on${lastEdited > 0 ? ` · edited ${ago(lastEdited)}` : ""}`
+        ) : (
+          <>
+            Playbooks every sandbox follows — invoke one with{" "}
+            <T variant="meta" mono>
+              /name
+            </T>{" "}
+            in chat, or the agent picks it up when it fits.
+          </>
+        )}
       </T>
-      <View style={{ flexDirection: "row" }}>
-        <Button small variant="secondary" title="Import from GitHub" onPress={() => setImporting(true)} />
+      <View style={{ flexDirection: "row", gap: 8 }}>
+        <Button small variant="outline" title="Import" onPress={() => setImporting({})} />
+        <Button small title="New skill" onPress={newSkill} />
       </View>
       {error ? (
-        <T variant="meta" tone="destructive">
+        <T variant="meta" tone="destructive" accessibilityRole="alert">
           {error}
         </T>
       ) : null}
       {info ? (
-        <T variant="meta" tone="muted">
+        <T variant="meta" tone="ok">
           {info}
         </T>
       ) : null}
+
+      {skills && skills.length > 0 ? (
+        <>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8, height: 40, borderWidth: 1, borderColor: palette.input, borderRadius: radius.lg, backgroundColor: palette.card, paddingHorizontal: 12 }}>
+            <Icon name="search" size={14} />
+            <TextInput
+              value={query}
+              onChangeText={setQuery}
+              placeholder="Search skills"
+              placeholderTextColor={palette.faint}
+              accessibilityLabel="Search skills"
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={{ flex: 1, color: palette.foreground, fontFamily: fonts.sans, fontSize: type.meta.fontSize, padding: 0 }}
+            />
+            {query ? (
+              <Pressable onPress={() => setQuery("")} hitSlop={10} accessibilityRole="button" accessibilityLabel="Clear search">
+                <Icon name="x" size={14} />
+              </Pressable>
+            ) : null}
+          </View>
+          <View accessibilityRole="radiogroup" accessibilityLabel="Filter skills" style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+            {chips.map((c) => {
+              const on = filter === c.value;
+              return (
+                <Pressable
+                  key={c.value}
+                  onPress={() => setFilter(c.value)}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: on }}
+                  style={{ flexDirection: "row", alignItems: "center", gap: 6, height: 34, paddingHorizontal: 12, borderRadius: radius.pill, borderWidth: 1, borderColor: on ? palette.foreground : palette.border, backgroundColor: on ? palette.foreground : palette.card }}
+                >
+                  <T variant="meta" weight="medium" style={{ color: on ? palette.background : palette.foreground }}>
+                    {c.label}
+                  </T>
+                  <T variant="micro" style={{ color: on ? palette.background : palette.mutedForeground }}>
+                    {c.count}
+                  </T>
+                </Pressable>
+              );
+            })}
+          </View>
+        </>
+      ) : null}
+
       {skills === null && !error ? (
-        <T tone="muted">Loading…</T>
-      ) : skills?.length === 0 ? (
-        <T tone="muted">No skills yet — import some from a GitHub repo, or write one on the web.</T>
-      ) : (
-        skills?.map((s) => (
-          <Card key={s.name} onPress={() => setViewing(s.name)} style={!s.enabled ? { opacity: 0.75 } : undefined}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <T variant="body" weight="semibold" mono numberOfLines={1}>
-                  /{s.name}
-                </T>
-                <T variant="meta" tone="muted" numberOfLines={2} style={{ marginTop: 2 }}>
-                  {s.description}
-                </T>
+        <View style={{ gap: 10 }} accessibilityLabel="Loading skills">
+          {[0, 1, 2, 3].map((i) => (
+            <Card key={i}>
+              <View style={{ gap: 6 }}>
+                <Skeleton width={130} height={12} />
+                <Skeleton width="60%" height={10} />
               </View>
-              <Switch value={s.enabled} onValueChange={(v) => void toggle(s, v)} trackColor={{ true: palette.live }} accessibilityLabel={`/${s.name} ${s.enabled ? "on" : "off"}`} />
-            </View>
-          </Card>
-        ))
+            </Card>
+          ))}
+        </View>
+      ) : skills?.length === 0 ? (
+        <EmptyState onPick={(d) => setEditing({ draft: d })} onNew={newSkill} onImport={() => setImporting({})} />
+      ) : skills && visible.length === 0 ? (
+        <Card>
+          <View style={{ alignItems: "center", gap: 4, paddingVertical: 16 }}>
+            <T variant="lead" weight="medium">
+              Nothing matches
+            </T>
+            <T variant="meta" tone="muted">
+              {q ? `No skill matches “${query.trim()}”` : "No skill in this filter"}.
+            </T>
+            <Button
+              small
+              variant="ghost"
+              title="Clear filters"
+              onPress={() => {
+                setQuery("");
+                setFilter("all");
+              }}
+            />
+          </View>
+        </Card>
+      ) : (
+        visible.map((s) => <SkillRow key={s.name} skill={s} onOpen={() => setEditing({ initial: s })} onMutate={mutate} onError={setError} />)
       )}
 
-      <Sheet visible={shown !== null} onClose={() => setViewing(null)} title={shown ? `/${shown.name}` : ""}>
-        {shown ? (
-          <View style={{ gap: 12, paddingBottom: 8 }}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <T variant="meta" tone="muted">
-                  {shown.description}
-                </T>
-                <T variant="micro" tone="faint">
-                  Updated {ago(shown.updatedAt)}
-                </T>
-              </View>
-              <Switch value={shown.enabled} onValueChange={(v) => void toggle(shown, v)} trackColor={{ true: palette.live }} />
-            </View>
-            <MarkdownLite text={shown.content} />
-          </View>
-        ) : null}
-      </Sheet>
+      {skills && skills.length > 0 && skills.length <= 6 && !filtered ? <TemplateStrip existing={existing} onPick={(d) => setEditing({ draft: d })} onNew={newSkill} /> : null}
 
-      <ImportSheet
-        visible={importing}
-        existing={new Set((skills ?? []).map((s) => s.name))}
-        onClose={() => setImporting(false)}
-        onImported={(n, next) => {
-          if (next) setSkills(next);
-          else load();
-          setInfo(n === 1 ? "Imported 1 skill." : `Imported ${n} skills.`);
+      {skills && skills.length > 0 ? (
+        <View style={{ gap: 18, marginTop: 12 }}>
+          <RailSection title="How skills reach the agent">
+            <Fact icon="terminal" title="Typed as /name" line="In any chat, the way you would run a command." />
+            <Fact icon="star" title="Matched on its own" line="When a task fits the description, the agent picks it up unprompted." />
+            <Fact icon="refresh-cw" title="Synced on the next turn" line="Every sandbox gets the current version — turn one off to hold it back." />
+          </RailSection>
+          <RailSection title="Curated">
+            <Card onPress={() => setImporting({ repo: "anthropics/skills" })}>
+              <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
+                <Icon name="github" size={16} />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <T variant="meta" weight="medium" mono>
+                    anthropics/skills
+                  </T>
+                  <T variant="micro" tone="muted">
+                    Anthropic's own collection — documents, design, research. Browse and pull one in.
+                  </T>
+                </View>
+              </View>
+            </Card>
+          </RailSection>
+          <RailSection title="Recently edited">
+            {recent.map((s) => (
+              <Pressable key={s.name} onPress={() => setEditing({ initial: s })} accessibilityRole="button" style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 6, opacity: pressed ? 0.6 : s.enabled ? 1 : 0.6 })}>
+                <T variant="meta" weight="medium" mono numberOfLines={1} style={{ flex: 1 }}>
+                  /{s.name}
+                </T>
+                <Icon name="clock" size={11} />
+                <T variant="micro" tone="faint">
+                  {ago(s.updatedAt)}
+                </T>
+              </Pressable>
+            ))}
+          </RailSection>
+        </View>
+      ) : null}
+
+      <SkillEditor
+        visible={!!editing}
+        initial={editing?.initial}
+        draft={editing?.draft}
+        onMutate={mutate}
+        onSaved={(s) => setEditing((e) => (e ? { initial: s } : e))}
+        onClose={() => setEditing(null)}
+      />
+      <SkillImportSheet
+        visible={!!importing}
+        presetRepo={importing?.repo}
+        existing={existing}
+        onClose={() => setImporting(null)}
+        onImported={async (count) => {
+          setSkills((await api.skills()).skills);
+          setInfo(`Imported ${count} skill${count === 1 ? "" : "s"} — every sandbox gets them on its next turn`);
+        }}
+        onEditOne={(d) => {
+          setImporting(null);
+          setEditing({ draft: d });
         }}
       />
     </SettingsScreen>
   );
 }
 
-function ImportSheet({ visible, existing, onClose, onImported }: { visible: boolean; existing: Set<string>; onClose: () => void; onImported: (count: number, skills?: SkillView[]) => void }) {
+/** One skill: `/name` · starter badge · the "when" line · files + weight · last edit · on/off. */
+function SkillRow({ skill: s, onOpen, onMutate, onError }: { skill: SkillView; onOpen: () => void; onMutate: Mutate; onError: (e: string) => void }) {
   const { palette } = useTheme();
-  const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [found, setFound] = useState<{ ref: RepoRef; branch: string; entries: RepoSkillEntry[]; authed: boolean } | null>(null);
-  const [picked, setPicked] = useState<Record<string, boolean>>({});
   const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const [progress, setProgress] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!visible) {
-      setFound(null);
-      setPicked({});
-      setErr(null);
-      setProgress(null);
-    }
-  }, [visible]);
-
-  const browse = async () => {
-    setErr(null);
-    setFound(null);
-    setPicked({});
-    setLoading(true);
-    try {
-      const ref = parseRepoInput(input);
-      const r = await listRepoSkills(ref);
-      if (!r.entries.length) setErr("No skills here — the repo has no SKILL.md folders or skills/ markdown.");
-      else {
-        setFound({ ref, ...r });
-        // Preselect everything that isn't already in the library.
-        setPicked(Object.fromEntries(r.entries.filter((e) => !existing.has(e.name)).map((e) => [e.path, true])));
-      }
-    } catch (e) {
-      setErr(msg(e));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const pickedCount = Object.values(picked).filter(Boolean).length;
-
-  const doImport = async () => {
-    if (!found || !pickedCount) return;
+  const files = s.files?.length ?? 0;
+  const bytes = byteLength(s.content) + (s.files ?? []).reduce((n, f) => n + byteLength(f.content), 0);
+  const toggle = (next: boolean) => {
     setBusy(true);
-    setErr(null);
-    const entries = found.entries.filter((f) => picked[f.path]);
-    let saved = 0;
-    let last: SkillView[] | undefined;
-    const failed: string[] = [];
-    for (let i = 0; i < entries.length; i++) {
-      const f = entries[i];
-      setProgress(`Importing ${i + 1} of ${entries.length}: ${f.name}`);
-      try {
-        const d = await loadRepoSkill(found.ref, found.branch, f);
-        const { skipped: _skipped, ...skill } = d;
-        last = (await api.skillMutate({ action: "upsert", skill: { ...skill, enabled: true } })).skills;
-        saved++;
-      } catch (e) {
-        failed.push(`/${f.name}: ${msg(e)}`);
-      }
-    }
-    setProgress(null);
-    setBusy(false);
-    if (failed.length) setErr(failed.join("\n"));
-    if (saved) onImported(saved, last);
-    if (!failed.length) onClose();
+    onMutate({ action: "toggle", name: s.name, enabled: next })
+      .catch((e: unknown) => onError(`Could not update: ${msg(e)}`))
+      .finally(() => setBusy(false));
   };
-
   return (
-    <Sheet visible={visible} onClose={onClose} title="Import from GitHub">
-      <View style={{ gap: 12, paddingBottom: 8 }}>
-        <Field
-          mono
-          label="Repository"
-          value={input}
-          onChangeText={setInput}
-          placeholder="anthropics/skills or https://github.com/…/tree/main/skills/foo"
-          autoCapitalize="none"
-          autoCorrect={false}
-          keyboardType="url"
-          onSubmitEditing={() => void browse()}
-          returnKeyType="search"
-          hint="Every SKILL.md folder, plus loose markdown under skills/ or commands/. Private repos work when a saved GitHub token covers them."
-        />
-        <View style={{ flexDirection: "row" }}>
-          <Button small title="Browse" variant="secondary" loading={loading} disabled={!input.trim()} onPress={() => void browse()} />
-        </View>
-        {err ? (
-          <T variant="meta" tone="destructive">
-            {err}
-          </T>
-        ) : null}
-        {found ? (
-          <>
-            <T variant="micro" tone="faint">
-              {found.ref.owner}/{found.ref.repo} @ {found.branch}
-              {found.authed ? " · using your token" : ""} · {found.entries.length} found
+    <Card onPress={busy ? undefined : onOpen}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+        <View style={{ flex: 1, minWidth: 0, opacity: s.enabled ? 1 : 0.55 }} accessibilityLabel={`Edit skill ${s.name}`}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <T variant="body" weight="semibold" mono numberOfLines={1} style={{ flexShrink: 1 }}>
+              /{s.name}
             </T>
-            {found.entries.map((e) => {
-              const on = !!picked[e.path];
-              const dup = existing.has(e.name);
-              return (
-                <Pressable
-                  key={e.path}
-                  onPress={() => setPicked((p) => ({ ...p, [e.path]: !on }))}
-                  accessibilityRole="checkbox"
-                  accessibilityState={{ checked: on }}
-                  style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: palette.border, opacity: pressed ? 0.7 : 1 })}
-                >
-                  <View style={{ width: 20, height: 20, borderRadius: 6, borderWidth: 1, borderColor: on ? palette.foreground : palette.lineStrong, backgroundColor: on ? palette.foreground : "transparent", alignItems: "center", justifyContent: "center" }}>
-                    {on ? <Icon name="check" size={13} color={palette.background} /> : null}
-                  </View>
-                  <View style={{ flex: 1, minWidth: 0 }}>
-                    <T variant="body" mono numberOfLines={1}>
-                      /{e.name}
-                      {dup ? (
-                        <T variant="micro" tone="muted">
-                          {"  "}replaces yours
-                        </T>
-                      ) : null}
-                    </T>
-                    <T variant="micro" tone="faint" numberOfLines={1}>
-                      {e.path}
-                      {e.kind === "dir" ? ` · ${e.fileCount} ${e.fileCount === 1 ? "file" : "files"}` : ""}
-                    </T>
-                  </View>
-                </Pressable>
-              );
-            })}
-            {progress ? (
-              <T variant="micro" tone="muted">
-                {progress}
-              </T>
-            ) : null}
-            <Button title={pickedCount ? `Import ${pickedCount}` : "Import"} loading={busy} disabled={!pickedCount} onPress={() => void doImport()} />
-          </>
-        ) : null}
+            {sourceOf(s.name) === "starter" ? <StarterBadge /> : null}
+          </View>
+          <T variant="meta" tone="muted" numberOfLines={2} style={{ marginTop: 2 }}>
+            {s.description}
+          </T>
+          <T variant="micro" tone="faint" style={{ marginTop: 4 }}>
+            {files + 1} file{files ? "s" : ""} · {fmtKb(bytes)} · {ago(s.updatedAt)}
+          </T>
+        </View>
+        <Switch value={s.enabled} disabled={busy} onValueChange={toggle} trackColor={{ true: palette.live }} accessibilityLabel={s.enabled ? `Disable ${s.name}` : `Enable ${s.name}`} />
       </View>
-    </Sheet>
+    </Card>
+  );
+}
+
+function TemplateCard({ t, onPick }: { t: (typeof TEMPLATES)[number]; onPick: (d: Draft) => void }) {
+  const firstLine = t.content.split("\n")[0].replace(/^\d+\.\s*/, "");
+  return (
+    <Card onPress={() => onPick({ name: t.name, description: t.description, content: t.content })}>
+      <View style={{ gap: 4 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <T variant="meta" weight="medium" mono style={{ flex: 1 }}>
+            /{t.name}
+          </T>
+          <T variant="micro" weight="medium" tone="live">
+            Use ↗
+          </T>
+        </View>
+        <T variant="meta" weight="medium">
+          {t.blurb}
+        </T>
+        <T variant="micro" tone="muted" numberOfLines={2}>
+          “{firstLine}”
+        </T>
+        <T variant="micro" tone="faint" style={{ marginTop: 4 }}>
+          {t.steps} steps · edit before it goes live
+        </T>
+      </View>
+    </Card>
+  );
+}
+
+function TemplateStrip({ existing, onPick, onNew }: { existing: Record<string, true>; onPick: (d: Draft) => void; onNew: () => void }) {
+  const open = TEMPLATES.filter((t) => !existing[t.name]);
+  if (!open.length) return null;
+  return (
+    <View style={{ gap: 10, marginTop: 16 }}>
+      <T variant="h3" weight="semibold">
+        Start from a template
+      </T>
+      <T variant="meta" tone="muted">
+        Opens in the editor — edit before it goes live
+      </T>
+      {open.map((t) => (
+        <TemplateCard key={t.name} t={t} onPick={onPick} />
+      ))}
+      {open.length < 3 ? <Button variant="outline" title="Blank skill" onPress={onNew} /> : null}
+    </View>
+  );
+}
+
+/** No skills yet: say what one is in one breath, show how it fires, then three ways in. */
+function EmptyState({ onPick, onNew, onImport }: { onPick: (d: Draft) => void; onNew: () => void; onImport: () => void }) {
+  return (
+    <View style={{ gap: 12 }}>
+      <Card>
+        <View style={{ gap: 10 }}>
+          <Icon name="zap" size={22} />
+          <T variant="h2" weight="semibold">
+            Teach the agent how you work
+          </T>
+          <T variant="body" tone="muted">
+            A skill is a playbook — how you review PRs, cut a release, fix CI — written once as markdown and followed in every sandbox. It fires when you type{" "}
+            <T variant="body" mono>
+              /name
+            </T>{" "}
+            in chat, or on its own when a task matches its description.
+          </T>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+            <Button small title="Write your own" onPress={onNew} />
+            <Button small variant="outline" title="Import from GitHub" onPress={onImport} />
+          </View>
+          {[
+            ["1", "Write the steps in markdown", "Headings, lists, fenced code — anything the agent can read."],
+            ["2", "Give it a name and a “when”", "The name is the /command; the description is what it auto-matches on."],
+            ["3", "Save — it is in every sandbox", "Synced on the next turn. Turn it off any time without deleting."],
+          ].map(([n, t, d]) => (
+            <View key={n} style={{ flexDirection: "row", gap: 10 }}>
+              <T variant="meta" mono tone="muted">
+                {n}
+              </T>
+              <View style={{ flex: 1 }}>
+                <T variant="meta" weight="medium">
+                  {t}
+                </T>
+                <T variant="micro" tone="muted">
+                  {d}
+                </T>
+              </View>
+            </View>
+          ))}
+        </View>
+      </Card>
+      <T variant="h3" weight="semibold" style={{ marginTop: 8 }}>
+        Or start from a template
+      </T>
+      <T variant="meta" tone="muted">
+        Three playbooks most teams want first
+      </T>
+      {TEMPLATES.map((t) => (
+        <TemplateCard key={t.name} t={t} onPick={onPick} />
+      ))}
+    </View>
+  );
+}
+
+function RailSection({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <View style={{ gap: 8 }}>
+      <T variant="micro" weight="medium" tone="muted" style={{ textTransform: "uppercase", letterSpacing: 0.6 }}>
+        {title}
+      </T>
+      {children}
+    </View>
+  );
+}
+
+function Fact({ icon, title, line }: { icon: IconName; title: string; line: string }) {
+  return (
+    <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10 }}>
+      <Icon name={icon} size={14} style={{ marginTop: 3 }} />
+      <View style={{ flex: 1 }}>
+        <T variant="meta" weight="medium">
+          {title}
+        </T>
+        <T variant="micro" tone="muted">
+          {line}
+        </T>
+      </View>
+    </View>
   );
 }

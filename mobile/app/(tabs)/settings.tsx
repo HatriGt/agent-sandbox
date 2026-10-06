@@ -55,6 +55,14 @@ function RowLink({ title, hint, icon, onPress }: { title: string; hint?: string;
   );
 }
 
+function Group({ title }: { title: string }) {
+  return (
+    <T variant="micro" weight="medium" tone="faint" style={{ marginTop: 20, marginBottom: 2, textTransform: "uppercase", letterSpacing: 0.6 }}>
+      {title}
+    </T>
+  );
+}
+
 export default function Settings() {
   const router = useRouter();
   const { palette } = useTheme();
@@ -86,26 +94,30 @@ export default function Settings() {
           ) : null}
         </Card>
 
-        {isUser && <RowLink title="Account" icon="user" hint="Name, email, password" onPress={() => router.push("/settings/account")} />}
-        <RowLink title="Memory" icon="layers" hint="What the agent remembers across runs — yours and per repo" onPress={() => router.push("/settings/memory")} />
+        <Group title="Autopilot" />
         <RowLink title="Automations" icon="repeat" hint="Scheduled, chained and event runs — create, approve, pause" onPress={() => router.push("/automations")} />
-        <RowLink title="Inbox" icon="inbox" hint="Start runs from email and Slack" onPress={() => router.push("/settings/inbox")} />
-        <RowLink title="GitHub accounts" icon="github" hint="Tokens the agent clones and pushes with" onPress={() => router.push("/settings/accounts")} />
-        <RowLink title="MCP servers" icon="tool" hint="Extra tools every sandbox gets" onPress={() => router.push("/settings/mcp")} />
-        <RowLink title="Repo setup" icon="package" hint="How each repo installs and tests, learned once" onPress={() => router.push("/settings/repo-setup")} />
-        <RowLink title="Skills" icon="book-open" hint="Reusable playbooks synced into each box" onPress={() => router.push("/settings/skills")} />
-        <RowLink title="Harnesses" icon="sliders" hint="Driver, model, skills and rules saved as one pick" onPress={() => router.push("/settings/harnesses")} />
         <RowLink title="Playbooks" icon="list" hint="Agent turns and command checks, in order" onPress={() => router.push("/settings/playbooks")} />
-        <RowLink title="Providers" icon="cpu" hint="Your own model keys and endpoints" onPress={() => router.push("/settings/providers")} />
-        <RowLink title="Audit log" icon="list" hint="Who did what, newest first" onPress={() => router.push("/settings/audit")} />
-        {isUser && <RowLink title="API keys" icon="key" hint="Bearer keys for scripts and devices" onPress={() => router.push("/settings/api-keys")} />}
-        {isUser && <RowLink title="Signed-in devices" icon="smartphone" hint="Active sessions, revoke any" onPress={() => router.push("/settings/devices")} />}
-        <RowLink title="Connect an IDE" icon="code" hint="MCP snippets for Cursor, Claude Code, Zed" onPress={() => router.push("/settings/connect")} />
-        {admin && <RowLink title="Admin · Users" icon="users" hint="Manage accounts and plans" onPress={() => router.push("/settings/admin")} />}
+
+        <Group title="Library" />
+        <RowLink title="Skills" icon="book-open" hint="The playbooks every sandbox gets — write, toggle, import" onPress={() => router.push("/settings/skills")} />
+        <RowLink title="Memory" icon="layers" hint="What your agents learned on earlier runs — yours and per repo" onPress={() => router.push("/settings/memory")} />
+        <RowLink title="Harnesses" icon="sliders" hint="Driver, model, skills and rules saved as one pick" onPress={() => router.push("/settings/harnesses")} />
+
+        <Group title="Providers & Accounts" />
+        <RowLink title="Model providers" icon="cpu" hint="Your keys · any endpoint · local models" onPress={() => router.push("/settings/providers")} />
+        <RowLink title="GitHub accounts" icon="github" hint="Clone · read PRs · push" onPress={() => router.push("/settings/accounts")} />
+        <RowLink title="MCP servers" icon="tool" hint="Extra tools every sandbox gets" onPress={() => router.push("/settings/mcp")} />
+        <RowLink title="Repo setup" icon="package" hint="Learned once · install · test · verify" onPress={() => router.push("/settings/repo-setup")} />
+        <RowLink title="Starts from your inbox" icon="inbox" hint="Email · Slack" onPress={() => router.push("/settings/inbox")} />
+
+        <Group title={isUser ? "Account" : "Operator"} />
+        <RowLink title="Account" icon="user" hint="Plan, profile, password, coding agent, notifications, keys, devices, activity" onPress={() => router.push("/settings/account")} />
+        <RowLink title="Connect an IDE" icon="code" hint="MCP setup for Claude Code, Cursor, VS Code, Windsurf" onPress={() => router.push("/settings/connect")} />
+        {admin && me?.mode === "saas" && <RowLink title="Admin · users" icon="users" hint="People on this controller" onPress={() => router.push("/settings/admin")} />}
 
         <View style={{ marginTop: 20, gap: 8 }}>
-          <T variant="meta" weight="medium" tone="muted">
-            Appearance
+          <T variant="micro" weight="medium" tone="faint" style={{ textTransform: "uppercase", letterSpacing: 0.6 }}>
+            Theme
           </T>
           <View style={{ flexDirection: "row", gap: 6 }}>
             {(["system", "light", "dark"] as ThemePref[]).map((p) => (

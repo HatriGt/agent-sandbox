@@ -5,6 +5,7 @@ import { radius } from "@/theme/tokens";
 import type { TestFile, TestReport, TestStatus } from "@/lib/testReport";
 import { T } from "./ui/AppText";
 import { Icon, type IconName } from "./ui/Icon";
+import { PressScale } from "@/components/motion";
 
 /**
  * A test run as a result card (mirrors web/src/components/thread/TestResultsCard.tsx): summary
@@ -31,11 +32,11 @@ export function TestResultsCard({ report, onRaw, rawOpen }: { report: TestReport
           {report.runner}
         </T>
         {onRaw ? (
-          <Pressable onPress={onRaw} hitSlop={8}>
+          <PressScale onPress={onRaw} hitSlop={8}>
             <T variant="micro" tone="muted" style={{ textDecorationLine: "underline" }}>
               {rawOpen ? "hide raw" : "raw"}
             </T>
-          </Pressable>
+          </PressScale>
         ) : null}
       </View>
       {report.files.length > 0 ? (
@@ -75,7 +76,7 @@ function FileGroup({ file, defaultOpen, last }: { file: TestFile; defaultOpen: b
   const count = file.tests.length || file.total || 0;
   return (
     <View style={{ borderBottomWidth: last ? 0 : 1, borderBottomColor: palette.border }}>
-      <Pressable
+      <PressScale
         onPress={() => setOpen((v) => !v)}
         disabled={file.tests.length === 0}
         style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingVertical: 8, opacity: pressed ? 0.7 : 1 })}
@@ -89,7 +90,7 @@ function FileGroup({ file, defaultOpen, last }: { file: TestFile; defaultOpen: b
           {fails > 0 ? `${fails} failing · ` : ""}
           {count} {count === 1 ? "test" : "tests"}
         </T>
-      </Pressable>
+      </PressScale>
       {open && file.tests.length > 0 ? (
         <View>
           {file.tests.map((t, i) => (

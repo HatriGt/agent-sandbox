@@ -13,8 +13,7 @@ import { BoxActionsSheet } from "@/components/sheets/BoxActionsSheet";
 import { T } from "@/components/ui/AppText";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { BrandMark } from "@/components/ui/BrandMark";
-import { FadeInUp } from "@/components/ui/Motion";
-import { CardSkeleton } from "@/components/ui/Skeleton";
+import { CardSkeleton, FadeInUp, PressScale } from "@/components/motion";
 
 function SectionHeader({ icon, label, tone }: { icon: IconName; label: string; tone: "attention" | "live" | "muted" }) {
   const { palette } = useTheme();
@@ -67,7 +66,7 @@ export default function Home() {
           {snap ? fleetSentence(boxes) : error ? `Can't reach the server — ${error}` : "Checking the fleet…"}
         </T>
 
-        <Pressable
+        <PressScale
           onPress={() => router.push("/new")}
           style={({ pressed }) => ({
             flexDirection: "row",
@@ -87,7 +86,7 @@ export default function Home() {
             Delegate a task…
           </T>
           <Icon name="camera" size={16} color={palette.faint} />
-        </Pressable>
+        </PressScale>
 
         {!snap && !error && (
           <View style={{ gap: 8, marginTop: 12 }}>

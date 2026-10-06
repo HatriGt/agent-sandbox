@@ -3,7 +3,7 @@ import { View } from "react-native";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius, stateColor } from "@/theme/tokens";
 import { T } from "./AppText";
-import { WorkingDot } from "./WorkingDot";
+import { WorkingDot } from "@/components/motion";
 
 const GLYPH = { dot: "●", hand: "◆", check: "✓", x: "✕", moon: "☾", circle: "○" } as const;
 

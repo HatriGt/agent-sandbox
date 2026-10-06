@@ -11,6 +11,7 @@ import { Button } from "../ui/Button";
 import { Icon } from "../ui/Icon";
 import { Sheet } from "../ui/Sheet";
 import { METHOD_HINT, toneColor, verdict } from "@/lib/prVerdict";
+import { PressScale } from "@/components/motion";
 
 export type PullRef = { repo: string; number: number };
 
@@ -130,7 +131,7 @@ export function PrSheet({
                     const rv = verdict(i ?? null);
                     const rc = toneColor(palette, rv.tone);
                     return (
-                      <Pressable
+                      <PressScale
                         key={keyOf(p)}
                         onPress={() => setPicked(keyOf(p))}
                         style={({ pressed }) => ({
@@ -171,7 +172,7 @@ export function PrSheet({
                           </T>
                         )}
                         <Icon name="chevron-right" size={14} color={palette.faint} />
-                      </Pressable>
+                      </PressScale>
                     );
                   })}
               </React.Fragment>
@@ -180,7 +181,7 @@ export function PrSheet({
         ) : (
           <>
         {many && (
-          <Pressable
+          <PressScale
             onPress={() => setPicked(null)}
             style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 4, opacity: pressed ? 0.6 : 1 })}
           >
@@ -188,7 +189,7 @@ export function PrSheet({
             <T variant="meta" tone="muted" weight="medium">
               All {pulls.length} pull requests
             </T>
-          </Pressable>
+          </PressScale>
         )}
 
         {!pr ? (
@@ -217,9 +218,9 @@ export function PrSheet({
                   {checks?.total ? ` · ${checks.success}/${checks.total} checks` : ` · ${repo}`}
                 </T>
               </View>
-              <Pressable onPress={() => WebBrowser.openBrowserAsync(pr.url)} hitSlop={8} style={{ padding: 6 }}>
+              <PressScale onPress={() => WebBrowser.openBrowserAsync(pr.url)} hitSlop={8} style={{ padding: 6 }}>
                 <Icon name="external-link" size={16} color={palette.mutedForeground} />
-              </Pressable>
+              </PressScale>
             </View>
             {v.blocked && (
               <T variant="meta" tone="muted">
@@ -247,7 +248,7 @@ export function PrSheet({
             </View>
 
             {/* The sheet is the glance; the body, commits, diffs and conversation live on a page. */}
-            <Pressable
+            <PressScale
               onPress={() => {
                 onClose();
                 router.push({
@@ -272,7 +273,7 @@ export function PrSheet({
                 View full details
               </T>
               <Icon name="chevron-right" size={14} color={palette.mutedForeground} />
-            </Pressable>
+            </PressScale>
 
             {/* Review — decision, reviewers, and Approve */}
             <View style={{ gap: 6 }}>
@@ -337,7 +338,7 @@ export function PrSheet({
               <>
                 <View style={{ flexDirection: "row", gap: 6 }}>
                   {(["merge", "squash", "rebase"] as const).map((m) => (
-                    <Pressable
+                    <PressScale
                       key={m}
                       onPress={() => setMethod(m)}
                       style={{
@@ -354,7 +355,7 @@ export function PrSheet({
                       <T variant="micro" tone="faint" numberOfLines={1}>
                         {METHOD_HINT[m]}
                       </T>
-                    </Pressable>
+                    </PressScale>
                   ))}
                 </View>
                 {v.canMerge && <Button title={`Merge (${method})`} onPress={() => merge()} loading={busy} />}

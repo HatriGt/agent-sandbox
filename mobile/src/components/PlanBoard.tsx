@@ -6,6 +6,7 @@ import { radius } from "@/theme/tokens";
 import { T } from "./ui/AppText";
 import { Icon } from "./ui/Icon";
 import { Sheet } from "./ui/Sheet";
+import { animateLayout, PressScale, ProgressFill } from "@/components/motion";
 
 /**
  * The agent's plan joined to the work it actually did — mobile presentation of
@@ -120,23 +121,15 @@ function StepMark({ state, live, failed }: { state: DerivedTask["state"]; live?:
   );
 }
 
-/** Determinate 2px progress rail, animating width as steps complete. */
+/** Determinate 2px progress rail, animating (native scaleX) as steps complete. */
 function ProgressRail({ done, total, complete, failed }: { done: number; total: number; complete: boolean; failed?: boolean }) {
   const { palette } = useTheme();
-  const w = useRef(new Animated.Value(total ? done / total : 0)).current;
-  useEffect(() => {
-    Animated.timing(w, { toValue: total ? done / total : 0, duration: 500, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start();
-  }, [done, total, w]);
   return (
-    <View style={{ height: 2, backgroundColor: palette.border, overflow: "hidden" }}>
-      <Animated.View
-        style={{
-          height: 2,
-          width: w.interpolate({ inputRange: [0, 1], outputRange: ["0%", "100%"] }),
-          backgroundColor: complete ? (failed ? palette.destructive : palette.ok) : palette.live,
-        }}
-      />
-    </View>
+    <ProgressFill
+      fraction={total ? done / total : 0}
+      height={2}
+      color={complete ? (failed ? palette.destructive : palette.ok) : palette.live}
+    />
   );
 }
 
@@ -160,9 +153,12 @@ function TaskRow({ task, live, last }: { task: DerivedTask; live?: boolean; last
         overflow: "hidden",
       }}
     >
-      <Pressable
+      <PressScale
         disabled={!hasDetail}
-        onPress={() => setOpen((o) => !o)}
+        onPress={() => {
+          animateLayout();
+          setOpen((o) => !o);
+        }}
         style={({ pressed }) => ({
           flexDirection: "row",
           alignItems: "flex-start",
@@ -199,7 +195,7 @@ function TaskRow({ task, live, last }: { task: DerivedTask; live?: boolean; last
         {hasDetail ? (
           <Icon name={open ? "chevron-down" : "chevron-right"} size={14} color={palette.faint} style={{ marginTop: 3 }} />
         ) : null}
-      </Pressable>
+      </PressScale>
       {open && hasDetail ? (
         <View style={{ paddingLeft: 42, paddingRight: 12, paddingBottom: 10, gap: 6 }}>
           {summary ? (
@@ -266,7 +262,7 @@ export function PlanChip({ board, live, onPress }: { board: TaskBoard; live?: bo
   const failed = tasks.some((t) => t.evidence.failed);
   const color = complete ? (failed ? palette.destructive : palette.ok) : palette.live;
   return (
-    <Pressable
+    <PressScale
       onPress={onPress}
       style={({ pressed }) => ({
         flexDirection: "row",
@@ -310,7 +306,7 @@ export function PlanChip({ board, live, onPress }: { board: TaskBoard; live?: bo
           />
         ))}
       </View>
-    </Pressable>
+    </PressScale>
   );
 }
 

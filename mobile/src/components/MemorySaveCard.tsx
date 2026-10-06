@@ -6,7 +6,7 @@ import { radius } from "@/theme/tokens";
 import { T } from "./ui/AppText";
 import { Button } from "./ui/Button";
 import { Icon } from "./ui/Icon";
-import { FadeInUp } from "./ui/Motion";
+import { FadeInUp, PressScale } from "@/components/motion";
 
 /**
  * The operator moment for memory (web: MemoryToast). A run proposes a note → a quiet card with the
@@ -178,11 +178,11 @@ function KeptRow({ n, busy, onUndo }: { n: MemoryNew; busy: boolean; onUndo: () 
       <T variant="meta" tone="muted" numberOfLines={1} style={{ flex: 1, minWidth: 0 }}>
         Remembered · {n.text}
       </T>
-      <Pressable disabled={busy} hitSlop={8} onPress={onUndo}>
+      <PressScale disabled={busy} hitSlop={8} onPress={onUndo}>
         <T variant="meta" weight="medium">
           {busy ? "Undoing…" : "Undo"}
         </T>
-      </Pressable>
+      </PressScale>
     </View>
   );
 }

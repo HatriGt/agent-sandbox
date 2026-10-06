@@ -1,199 +1,461 @@
-// Add / edit one MCP server. The upsert body mirrors web/src/components/mcp/ServerSheet.tsx exactly:
-// { action: "upsert", previousName?, server: { name, type, command?, args?, url?, env, headers?, enabled } }.
-import React, { useEffect, useState } from "react";
-import { View } from "react-native";
-import { api, type McpProbe, type McpServerView, type McpServersResponse, type McpTransport } from "@/lib/api";
+// Add / edit one MCP server — mirrors web/src/components/mcp/ServerSheet.tsx: Fields | JSON editor,
+// transport picker with a sentence each, command tokens, secret-aware key·value rows, "What the agent
+// sees" preview, connection test for saved remote servers. Same upsert body as the web.
+import React, { useEffect, useMemo, useState } from "react";
+import { Pressable, TextInput, View } from "react-native";
+import type { McpServerView } from "@/lib/api";
+import { useTheme } from "@/theme/ThemeContext";
+import { fonts, radius, type as typeScale } from "@/theme/tokens";
+import { ago } from "@/lib/format";
 import { T } from "@/components/ui/AppText";
 import { ArmButton } from "@/components/ui/ArmButton";
 import { Button } from "@/components/ui/Button";
 import { Field } from "@/components/ui/Field";
+import { Icon } from "@/components/ui/Icon";
 import { Sheet } from "@/components/ui/Sheet";
 import { Segmented } from "./Segmented";
+import {
+  TRANSPORTS,
+  commandOf,
+  draftOf,
+  errMsg,
+  fromDef,
+  hintFor,
+  jsonErrorLine,
+  packageOf,
+  previewJson,
+  shellSplit,
+  statusOf,
+  toDef,
+  validate,
+  type Draft,
+  type Health,
+  type KV,
+  type Status,
+} from "./McpModel";
 
-const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
-const NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
+export type Mutate = (b: Record<string, unknown>, ok?: string) => Promise<unknown>;
+const SECRET_KEY = /token|secret|key|password|passwd|auth|credential|cookie/i;
 
-/** "KEY=value" per line → record; blank lines and lines without "=" are skipped. */
-function parseKv(text: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const raw of text.split("\n")) {
-    const line = raw.trim();
-    const i = line.indexOf("=");
-    if (i <= 0) continue;
-    out[line.slice(0, i).trim()] = line.slice(i + 1).trim();
-  }
-  return out;
+/* ───────────────────────────── status pill + verdict (shared with the list) ───────────────────────────── */
+
+export function StatusPill({ status }: { status: Status }) {
+  const { palette } = useTheme();
+  const color = status.kind === "off" ? palette.mutedForeground : status.kind === "connected" ? palette.ok : status.kind === "failed" || status.kind === "expired" ? palette.destructive : palette.live;
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 8, height: 20, borderRadius: radius.pill, borderWidth: 1, borderColor: palette.border }}>
+      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: color }} />
+      <T variant="micro" weight="medium" style={{ color }}>
+        {status.word}
+      </T>
+    </View>
+  );
 }
-const toKv = (r?: Record<string, string>) => Object.entries(r ?? {}).map(([k, v]) => `${k}=${v}`).join("\n");
 
-/** Split "npx -y @foo/bar --flag" into command + args, honouring simple quotes. */
-function splitCommand(s: string): { command: string; args: string[] } {
-  const parts = s.match(/"[^"]*"|'[^']*'|\S+/g)?.map((p) => p.replace(/^(["'])(.*)\1$/, "$2")) ?? [];
-  return { command: parts[0] ?? "", args: parts.slice(1) };
+export function Verdict({ health, onDismiss, onRetry, retrying }: { health: Health; onDismiss?: () => void; onRetry?: () => void; retrying?: boolean }) {
+  const { palette } = useTheme();
+  const [all, setAll] = useState(false);
+  const tools = health.tools ?? [];
+  const shown = all ? tools : tools.slice(0, 8);
+  const hint = health.ok ? null : hintFor(health.detail);
+  const title = health.ok ? (health.tools ? `${tools.length} ${tools.length === 1 ? "tool" : "tools"} available` : "Connected") : "Could not connect";
+  const detail = health.ok && /^connected\b/i.test(health.detail) && health.tools ? null : health.detail;
+  return (
+    <View accessibilityRole="summary" style={{ borderRadius: radius.lg, borderWidth: 1, borderColor: health.ok ? palette.ok : palette.destructive, padding: 10, gap: 4 }}>
+      <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
+        <T variant="meta" style={{ flex: 1 }} tone={health.ok ? "default" : "destructive"}>
+          <T variant="meta" weight="medium" tone={health.ok ? "default" : "destructive"}>
+            {health.ok ? "✓ " : "✕ "}
+            {title}
+          </T>
+          <T variant="meta" tone="muted"> · {ago(health.at)}</T>
+        </T>
+        {onRetry ? <Button small variant="ghost" title="Test again" loading={retrying} onPress={onRetry} /> : null}
+        {onDismiss ? (
+          <Pressable onPress={onDismiss} hitSlop={8} accessibilityRole="button" accessibilityLabel="Dismiss result">
+            <Icon name="x" size={15} />
+          </Pressable>
+        ) : null}
+      </View>
+      {detail ? (
+        <T variant="micro" tone={health.ok ? "muted" : "destructive"}>
+          {detail}
+        </T>
+      ) : null}
+      {hint ? (
+        <T variant="micro" tone="muted">
+          {hint}
+        </T>
+      ) : null}
+      {tools.length > 0 ? (
+        <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4, marginTop: 4 }} accessibilityLabel="Tools advertised">
+          {shown.map((t) => (
+            <T key={t} variant="micro" mono style={{ borderWidth: 1, borderColor: palette.border, borderRadius: radius.sm, paddingHorizontal: 6, paddingVertical: 2 }}>
+              {t}
+            </T>
+          ))}
+          {tools.length > 8 ? (
+            <T variant="micro" mono tone="muted" onPress={() => setAll((a) => !a)} style={{ paddingHorizontal: 6, paddingVertical: 2 }}>
+              {all ? "show fewer" : `+${tools.length - 8} more`}
+            </T>
+          ) : null}
+        </View>
+      ) : null}
+      {health.ok && health.tools && health.tools.length === 0 ? (
+        <T variant="micro" tone="muted">
+          The server answered but advertised no tools.
+        </T>
+      ) : null}
+    </View>
+  );
 }
+
+/* ───────────────────────────── pieces ───────────────────────────── */
+
+function Tokens({ line }: { line: string }) {
+  const { palette } = useTheme();
+  const parts = shellSplit(line);
+  if (parts.length < 2) return null;
+  const pkg = packageOf(parts[0], parts.slice(1));
+  return (
+    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 4 }} accessibilityLabel="Parsed command">
+      {parts.map((p, i) => {
+        const isPkg = p === pkg || p.replace(/@(latest|next|\d[\w.-]*)$/, "") === pkg;
+        return (
+          <T
+            key={i}
+            variant="micro"
+            mono
+            numberOfLines={1}
+            tone={i === 0 ? "default" : isPkg ? "live" : "muted"}
+            style={{ borderWidth: 1, borderColor: isPkg ? palette.live : palette.border, borderRadius: radius.sm, paddingHorizontal: 6, paddingVertical: 2, backgroundColor: i === 0 ? palette.muted : "transparent" }}
+          >
+            {p}
+          </T>
+        );
+      })}
+    </View>
+  );
+}
+
+function KVRows({ label, rows, onChange, keyPlaceholder, valuePlaceholder, addLabel, hint }: { label: string; rows: KV[]; onChange: (r: KV[]) => void; keyPlaceholder: string; valuePlaceholder: string; addLabel: string; hint: string }) {
+  const { palette } = useTheme();
+  const [shown, setShown] = useState<Record<number, boolean>>({});
+  const update = (i: number, patch: Partial<KV>) => onChange(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const cell = { borderWidth: 1, borderColor: palette.input, borderRadius: radius.md, paddingHorizontal: 10, paddingVertical: 8, color: palette.foreground, backgroundColor: palette.card, fontFamily: fonts.mono, fontSize: typeScale.code.fontSize } as const;
+  return (
+    <View style={{ gap: 8 }}>
+      <View style={{ flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
+        <T variant="meta" weight="medium" tone="muted">
+          {label}
+          {rows.length > 0 ? <T variant="meta" tone="faint">{`  ${rows.length}`}</T> : null}
+        </T>
+        <T variant="micro" tone="faint">
+          {hint}
+        </T>
+      </View>
+      {rows.map((r, i) => {
+        const sensitive = r.secret || SECRET_KEY.test(r.k);
+        const hidden = sensitive && !shown[i] && !r.secret;
+        return (
+          <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+            <TextInput value={r.k} onChangeText={(k) => update(i, { k })} placeholder={keyPlaceholder} placeholderTextColor={palette.faint} accessibilityLabel={`${label} name ${i + 1}`} autoCapitalize="none" autoCorrect={false} style={[cell, { flex: 5 }]} />
+            <View style={{ flex: 7, justifyContent: "center" }}>
+              <TextInput
+                value={r.v}
+                onChangeText={(v) => update(i, { v, secret: false })}
+                placeholder={r.secret ? "" : valuePlaceholder}
+                placeholderTextColor={palette.faint}
+                secureTextEntry={hidden}
+                selectTextOnFocus={r.secret}
+                accessibilityLabel={`${label} value ${i + 1}`}
+                autoCapitalize="none"
+                autoCorrect={false}
+                style={[cell, r.secret ? { color: palette.mutedForeground, paddingRight: 64 } : sensitive ? { paddingRight: 34 } : null]}
+              />
+              {r.secret ? (
+                <T variant="micro" weight="medium" tone="muted" accessibilityHint="Saved on the server and never sent back. Type to replace it; leave it to keep it." style={{ position: "absolute", right: 8 }}>
+                  🔑 stored
+                </T>
+              ) : sensitive ? (
+                <Pressable onPress={() => setShown((s) => ({ ...s, [i]: !s[i] }))} hitSlop={8} accessibilityRole="button" accessibilityLabel={hidden ? "Show value" : "Hide value"} style={{ position: "absolute", right: 8 }}>
+                  <Icon name={hidden ? "eye" : "eye-off"} size={14} />
+                </Pressable>
+              ) : null}
+            </View>
+            <Pressable onPress={() => onChange(rows.filter((_, j) => j !== i))} hitSlop={6} accessibilityRole="button" accessibilityLabel={`Remove ${r.k || "row"}`}>
+              <Icon name="x" size={15} />
+            </Pressable>
+          </View>
+        );
+      })}
+      <View style={{ flexDirection: "row" }}>
+        <Button small variant="ghost" title={`+ ${addLabel}`} onPress={() => onChange([...rows, { k: "", v: "", secret: false }])} />
+      </View>
+    </View>
+  );
+}
+
+function Preview({ name, def }: { name: string; def: Record<string, unknown> }) {
+  const { palette } = useTheme();
+  const [open, setOpen] = useState(false);
+  return (
+    <View style={{ borderWidth: 1, borderColor: palette.border, borderRadius: radius.lg, backgroundColor: palette.muted }}>
+      <Pressable onPress={() => setOpen((o) => !o)} accessibilityRole="button" accessibilityState={{ expanded: open }} style={{ flexDirection: "row", alignItems: "center", gap: 8, padding: 10 }}>
+        <Icon name="code" size={14} />
+        <T variant="meta" weight="medium">
+          What the agent sees
+        </T>
+        <T variant="micro" tone="faint" numberOfLines={1} style={{ flex: 1 }}>
+          ~/.agent-sandbox/mcp.json
+        </T>
+        <Icon name={open ? "chevron-up" : "chevron-down"} size={15} />
+      </Pressable>
+      {open ? (
+        <T variant="micro" mono tone="muted" selectable style={{ borderTopWidth: 1, borderColor: palette.border, padding: 10 }}>
+          {previewJson(name, def)}
+        </T>
+      ) : null}
+    </View>
+  );
+}
+
+/* ───────────────────────────── the sheet ───────────────────────────── */
 
 export function McpServerSheet({
   visible,
   initial,
+  health,
+  testing,
+  onTest,
+  onMutate,
   onClose,
-  onSaved,
 }: {
   visible: boolean;
   /** Editing an existing server; undefined = add. */
   initial?: McpServerView;
+  health?: Health;
+  testing: boolean;
+  onTest: (name: string) => void;
+  onMutate: Mutate;
   onClose: () => void;
-  onSaved: (r: McpServersResponse) => void;
 }) {
-  const [name, setName] = useState("");
-  const [type, setType] = useState<McpTransport>("http");
-  const [url, setUrl] = useState("");
-  const [command, setCommand] = useState("");
-  const [headers, setHeaders] = useState("");
-  const [env, setEnv] = useState("");
+  const { palette } = useTheme();
+  const [d, setD] = useState<Draft>(() => draftOf(initial));
+  const [touched, setTouched] = useState<Record<string, boolean>>({});
+  const [submitted, setSubmitted] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [testing, setTesting] = useState(false);
-  const [probe, setProbe] = useState<McpProbe | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [touched, setTouched] = useState(false);
+  const [mode, setMode] = useState<"fields" | "json">("fields");
+  const [jsonText, setJsonText] = useState("");
+  const [jsonErr, setJsonErr] = useState<{ msg: string; line: number | null } | null>(null);
 
   useEffect(() => {
     if (!visible) return;
-    setName(initial?.name ?? "");
-    setType(initial?.type ?? "http");
-    setUrl(initial?.url ?? "");
-    setCommand(initial ? [initial.command ?? "", ...(initial.args ?? [])].filter(Boolean).join(" ") : "");
-    setHeaders(toKv(initial?.headers));
-    setEnv(toKv(initial?.env));
-    setProbe(null);
+    setD(draftOf(initial));
+    setTouched({});
+    setSubmitted(false);
+    setBusy(false);
     setErr(null);
-    setTouched(false);
+    setMode("fields");
+    setJsonErr(null);
   }, [visible, initial]);
 
-  const problems: string[] = [];
-  const nm = name.trim();
-  if (!nm) problems.push("Name it.");
-  else if (!NAME_RE.test(nm)) problems.push("Name: letters, digits, . - and _ only.");
-  if (type === "stdio" && !splitCommand(command).command) problems.push("Command is required.");
-  if (type !== "stdio" && !/^https?:\/\//i.test(url.trim())) problems.push("URL must start with http:// or https://.");
+  const patch = (p: Partial<Draft>) => setD((x) => ({ ...x, ...p }));
+  const errors = validate(d);
+  const show = (k: keyof typeof errors) => (submitted || touched[k] ? errors[k] : undefined);
+  const valid = Object.keys(errors).length === 0;
+  const dirty = JSON.stringify(d) !== JSON.stringify(draftOf(initial));
+  const def = useMemo(() => toDef(d), [d]);
+  const { command, args } = commandOf(d);
+  const current = TRANSPORTS.find((t) => t.value === d.type) ?? TRANSPORTS[0];
 
-  const serverBody = () => {
-    const cmd = splitCommand(command);
-    return {
-      name: nm,
-      type,
-      command: type === "stdio" ? cmd.command : undefined,
-      args: type === "stdio" ? cmd.args : undefined,
-      url: type !== "stdio" ? url.trim() : undefined,
-      env: parseKv(env),
-      headers: type !== "stdio" ? parseKv(headers) : undefined,
-      enabled: initial?.enabled ?? true,
-    };
+  const switchMode = (m: "fields" | "json") => {
+    if (m === mode) return;
+    if (m === "json") {
+      setJsonText(JSON.stringify(def, null, 2));
+      setJsonErr(null);
+      setMode("json");
+      return;
+    }
+    try {
+      setD(fromDef(jsonText, d));
+      setMode("fields");
+    } catch (e) {
+      const msg = errMsg(e);
+      setJsonErr({ msg, line: jsonErrorLine(jsonText, msg) });
+    }
   };
 
   const save = async () => {
-    setTouched(true);
-    if (problems.length) return;
+    if (busy) return;
+    let draft = d;
+    if (mode === "json") {
+      try {
+        draft = fromDef(jsonText, d);
+        setD(draft);
+      } catch (e) {
+        const msg = errMsg(e);
+        setJsonErr({ msg, line: jsonErrorLine(jsonText, msg) });
+        return;
+      }
+    }
+    setSubmitted(true);
+    if (Object.keys(validate(draft)).length) {
+      if (mode === "json") setMode("fields");
+      return;
+    }
     setBusy(true);
     setErr(null);
+    const name = draft.name.trim();
+    const cmd = commandOf(draft);
     try {
-      const r = await api.mcpMutate({ action: "upsert", previousName: initial?.name, server: serverBody() });
-      onSaved(r);
+      await onMutate(
+        {
+          action: "upsert",
+          previousName: initial?.name,
+          server: {
+            name,
+            type: draft.type,
+            command: draft.type === "stdio" ? cmd.command : undefined,
+            args: draft.type === "stdio" ? cmd.args : undefined,
+            url: draft.type !== "stdio" ? draft.url.trim() : undefined,
+            env: Object.fromEntries(draft.env.filter((r) => r.k.trim()).map((r) => [r.k.trim(), r.v])),
+            headers: draft.type !== "stdio" ? Object.fromEntries(draft.headers.filter((r) => r.k.trim()).map((r) => [r.k.trim(), r.v])) : undefined,
+            enabled: initial?.enabled ?? true,
+          },
+        },
+        initial ? (initial.name !== name ? `Renamed to ${name}` : `Saved ${name}`) : `Added ${name} — every sandbox gets it on its next run`
+      );
       onClose();
     } catch (e) {
-      setErr(msg(e));
-    } finally {
+      setErr(errMsg(e));
       setBusy(false);
     }
   };
-
-  /** Test saves first (the probe runs server-side against the stored config), then probes by name. */
-  const test = async () => {
-    setTouched(true);
-    if (problems.length) return;
-    setTesting(true);
-    setErr(null);
-    setProbe(null);
-    try {
-      const r = await api.mcpMutate({ action: "upsert", previousName: initial?.name, server: serverBody() });
-      onSaved(r);
-      setProbe(await api.mcpTest(nm));
-    } catch (e) {
-      setErr(msg(e));
-    } finally {
-      setTesting(false);
-    }
-  };
-
   const remove = async () => {
     if (!initial) return;
     setBusy(true);
-    setErr(null);
     try {
-      onSaved(await api.mcpMutate({ action: "remove", name: initial.name }));
+      await onMutate({ action: "remove", name: initial.name }, `Removed ${initial.name}`);
       onClose();
     } catch (e) {
-      setErr(msg(e));
+      setErr(errMsg(e));
       setBusy(false);
     }
   };
 
   return (
-    <Sheet visible={visible} onClose={onClose} title={initial ? `Edit ${initial.name}` : "Add MCP server"}>
-      <View style={{ gap: 12, paddingBottom: 8 }}>
-        <Field label="Name" value={name} onChangeText={setName} placeholder="github" autoCapitalize="none" autoCorrect={false} mono />
+    <Sheet visible={visible} onClose={onClose} title={initial ? initial.name : "Add MCP server"}>
+      <View style={{ gap: 18, paddingBottom: 8 }}>
+        <T variant="meta" tone="muted">
+          {initial ? "Changes reach every sandbox on its next run or turn." : "A set of tools every sandbox agent gets, from its next run."}
+        </T>
         <View style={{ gap: 6 }}>
-          <T variant="meta" weight="medium" tone="muted">
-            Transport
-          </T>
           <Segmented
             small
-            value={type}
-            onChange={setType}
+            value={mode}
+            onChange={switchMode}
             options={[
-              { value: "http", label: "HTTP" },
-              { value: "sse", label: "SSE" },
-              { value: "stdio", label: "Command" },
+              { value: "fields", label: "Fields" },
+              { value: "json", label: "JSON" },
             ]}
           />
+          {mode === "fields" && !initial ? (
+            <T variant="micro" tone="faint">
+              Copying from a README?{" "}
+              <T variant="micro" tone="muted" style={{ textDecorationLine: "underline" }} onPress={() => switchMode("json")}>
+                Paste its JSON
+              </T>
+            </T>
+          ) : null}
         </View>
-        {type === "stdio" ? (
-          <>
-            <Field mono label="Command" value={command} onChangeText={setCommand} placeholder="npx -y @modelcontextprotocol/server-filesystem /work" autoCapitalize="none" autoCorrect={false} hint="Runs inside each sandbox. First word is the command, the rest are arguments." />
-            <Field mono label="Environment" value={env} onChangeText={setEnv} placeholder={"API_KEY=…\nREGION=eu"} multiline style={{ minHeight: 72, textAlignVertical: "top" }} autoCapitalize="none" autoCorrect={false} hint="One KEY=value per line." />
-          </>
+
+        {initial && initial.type !== "stdio" && mode === "fields" ? (
+          <View style={{ gap: 8, borderWidth: 1, borderColor: palette.border, borderRadius: radius.lg, padding: 10, backgroundColor: palette.muted }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <T variant="meta" weight="medium">
+                    Connection
+                  </T>
+                  <StatusPill status={statusOf(initial, health, testing)} />
+                </View>
+                <T variant="micro" tone="muted">
+                  {dirty ? "Tests what is saved — save first to test these edits." : health ? "Re-run the handshake to refresh the verdict." : "Not checked yet — run the handshake the agent does at startup."}
+                </T>
+              </View>
+              <Button small variant="outline" title="Test" loading={testing} onPress={() => onTest(initial.name)} />
+            </View>
+            {health ? <Verdict health={health} /> : null}
+          </View>
+        ) : null}
+
+        {mode === "json" ? (
+          <View style={{ gap: 6 }}>
+            <Field
+              mono
+              multiline
+              value={jsonText}
+              onChangeText={(v) => {
+                setJsonText(v);
+                setJsonErr(null);
+              }}
+              autoCapitalize="none"
+              autoCorrect={false}
+              accessibilityLabel="Server JSON"
+              style={{ minHeight: 260, textAlignVertical: "top" }}
+            />
+            <T variant="micro" tone={jsonErr ? "destructive" : "faint"}>
+              {jsonErr ? `${jsonErr.msg}${jsonErr.line ? ` (line ${jsonErr.line})` : ""}` : "One server: the object under its name in an mcpServers file. A whole file with a single entry works too."}
+            </T>
+          </View>
         ) : (
           <>
-            <Field mono label="URL" value={url} onChangeText={setUrl} placeholder="https://mcp.example.com/mcp" autoCapitalize="none" autoCorrect={false} keyboardType="url" />
-            <Field mono label="Headers" value={headers} onChangeText={setHeaders} placeholder={"Authorization=Bearer …"} multiline style={{ minHeight: 72, textAlignVertical: "top" }} autoCapitalize="none" autoCorrect={false} hint="One Header=value per line." />
-            <Field mono label="Environment" value={env} onChangeText={setEnv} placeholder={"TOKEN=…"} multiline style={{ minHeight: 56, textAlignVertical: "top" }} autoCapitalize="none" autoCorrect={false} hint="Optional. One KEY=value per line." />
+            <View style={{ gap: 6 }}>
+              <Segmented small value={d.type} onChange={(type) => patch({ type })} options={TRANSPORTS.map((t) => ({ value: t.value, label: `${t.label} · ${t.short}` }))} />
+              <T variant="micro" tone="muted">
+                {current.blurb}
+              </T>
+            </View>
+            <View style={{ gap: 4 }}>
+              <Field label="Name" mono autoFocus={!initial} value={d.name} onChangeText={(name) => patch({ name })} onBlur={() => setTouched((t) => ({ ...t, name: true }))} placeholder="postgres" autoCapitalize="none" autoCorrect={false} />
+              <T variant="micro" tone={show("name") ? "destructive" : "faint"}>
+                {show("name") ?? "Short and lowercase; tools appear to the agent as name__tool."}
+              </T>
+            </View>
+            {d.type === "stdio" ? (
+              <View style={{ gap: 6 }}>
+                <Field label="Command" mono value={d.commandLine} onChangeText={(commandLine) => patch({ commandLine })} onBlur={() => setTouched((t) => ({ ...t, commandLine: true }))} placeholder="npx -y @modelcontextprotocol/server-postgres" autoCapitalize="none" autoCorrect={false} />
+                <Tokens line={d.commandLine} />
+                <T variant="micro" tone={show("commandLine") ? "destructive" : "faint"}>
+                  {show("commandLine") ?? (args.length ? `${command} with ${args.length} argument${args.length === 1 ? "" : "s"}` : "The full line from the README — quotes are respected, arguments split for you.")}
+                </T>
+              </View>
+            ) : (
+              <View style={{ gap: 4 }}>
+                <Field label="Endpoint URL" mono value={d.url} onChangeText={(url) => patch({ url })} onBlur={() => setTouched((t) => ({ ...t, url: true }))} placeholder={d.type === "sse" ? "https://mcp.example.com/sse" : "https://mcp.example.com/mcp"} keyboardType="url" autoCapitalize="none" autoCorrect={false} />
+                <T variant="micro" tone={show("url") ? "destructive" : "faint"}>
+                  {show("url") ?? (d.type === "sse" ? "Usually ends in /sse." : "Usually ends in /mcp.")}
+                </T>
+              </View>
+            )}
+            {d.type !== "stdio" ? <KVRows label="Headers" rows={d.headers} onChange={(headers) => patch({ headers })} keyPlaceholder="Authorization" valuePlaceholder="Bearer …" addLabel="Add header" hint="Sent with every request" /> : null}
+            <KVRows label="Environment" rows={d.env} onChange={(env) => patch({ env })} keyPlaceholder={d.type === "stdio" ? "DATABASE_URL" : "API_KEY"} valuePlaceholder="value" addLabel="Add variable" hint={d.type === "stdio" ? "Set for the process in the sandbox" : "Available to the agent's run"} />
+            <Preview name={d.name.trim()} def={def} />
           </>
         )}
-        {touched && problems.length ? (
-          <T variant="micro" tone="muted">
-            {problems.join(" ")}
-          </T>
-        ) : null}
-        {probe ? (
-          <T variant="meta" tone={probe.ok ? "ok" : "destructive"}>
-            {probe.ok ? `✓ Answered the MCP handshake${probe.tools?.length ? ` · ${probe.tools.length} ${probe.tools.length === 1 ? "tool" : "tools"}` : ""}` : `✕ ${probe.detail || "failed"}${probe.status ? ` (HTTP ${probe.status})` : ""}`}
-            {probe.ok && probe.detail ? ` — ${probe.detail}` : ""}
-          </T>
-        ) : null}
-        {probe?.ok && probe.tools?.length ? (
-          <T variant="micro" mono tone="faint" numberOfLines={4}>
-            {probe.tools.join(", ")}
-          </T>
-        ) : null}
+
         {err ? (
           <T variant="meta" tone="destructive">
             {err}
           </T>
         ) : null}
         <View style={{ flexDirection: "row", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <Button title={initial ? "Save" : "Add"} loading={busy} onPress={() => void save()} />
-          <Button title="Save & test" variant="secondary" loading={testing} onPress={() => void test()} />
+          {initial ? <ArmButton small variant="ghost" title="Remove" armedTitle={`Remove ${initial.name}?`} disabled={busy} onConfirm={remove} /> : null}
           <View style={{ flex: 1 }} />
-          {initial ? <ArmButton small title="Remove" armedTitle="Tap again to remove" variant="ghost" onConfirm={remove} /> : null}
+          <Button small variant="ghost" title="Cancel" onPress={onClose} />
+          <Button small title={initial ? "Save" : "Add server"} loading={busy} disabled={mode === "fields" && submitted && !valid} onPress={() => void save()} />
         </View>
       </View>
     </Sheet>

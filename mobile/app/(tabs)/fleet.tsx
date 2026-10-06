@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { RefreshControl, ScrollView, View } from "react-native";
+import React, { useCallback, useMemo, useState } from "react";
+import { FlatList, RefreshControl, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFleet } from "@/hooks/useFleet";
 import type { BoxView } from "@/lib/api";
@@ -8,7 +8,7 @@ import { useTheme } from "@/theme/ThemeContext";
 import { BoxCard } from "@/components/BoxCard";
 import { BoxActionsSheet } from "@/components/sheets/BoxActionsSheet";
 import { T } from "@/components/ui/AppText";
-import { FadeInUp } from "@/components/ui/Motion";
+import { CardSkeleton, CountUp, FadeInUp, ProgressFill, stagger } from "@/components/motion";
 
 const ORDER: Record<string, number> = { waiting: 0, running: 1, done: 2, idle: 3 };
 
@@ -19,20 +19,36 @@ export default function Fleet() {
   const [refreshing, setRefreshing] = useState(false);
   const [actions, setActions] = useState<BoxView | null>(null);
 
-  const boxes = (snap?.boxes ?? [])
-    .slice()
-    .sort((a, b) => {
-      const ap = a.role === "pool-free" ? 9 : isSleeping(a.boxStatus) ? 4 : (ORDER[a.runState] ?? 5);
-      const bp = b.role === "pool-free" ? 9 : isSleeping(b.boxStatus) ? 4 : (ORDER[b.runState] ?? 5);
-      return ap - bp;
-    });
-  const occupied = boxes.filter((b) => b.role !== "pool-free").length;
+  const boxes = useMemo(
+    () =>
+      (snap?.boxes ?? []).slice().sort((a, b) => {
+        const ap = a.role === "pool-free" ? 9 : isSleeping(a.boxStatus) ? 4 : (ORDER[a.runState] ?? 5);
+        const bp = b.role === "pool-free" ? 9 : isSleeping(b.boxStatus) ? 4 : (ORDER[b.runState] ?? 5);
+        return ap - bp;
+      }),
+    [snap],
+  );
+  const owned = useMemo(() => boxes.filter((b) => b.role !== "pool-free"), [boxes]);
+  const occupied = owned.length;
   const capacity = snap?.lifecycle.capacity ?? 0;
-  const poolFree = boxes.filter((b) => b.role === "pool-free").length;
+  const poolFree = boxes.length - occupied;
+  const renderItem = useCallback(
+    ({ item, index }: { item: BoxView; index: number }) => (
+      <FadeInUp delay={stagger(index, 50, 6)}>
+        <BoxCard box={item} onLongPress={setActions} />
+      </FadeInUp>
+    ),
+    [],
+  );
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: palette.background }} edges={["top"]}>
-      <ScrollView
+      <FlatList
+        data={owned}
+        keyExtractor={(b) => b.name}
+        renderItem={renderItem}
+        initialNumToRender={10}
+        windowSize={9}
         contentContainerStyle={{ padding: 20, gap: 10, paddingBottom: 110 }}
         refreshControl={
           <RefreshControl
@@ -45,7 +61,8 @@ export default function Fleet() {
             tintColor={palette.mutedForeground}
           />
         }
-      >
+        ListHeaderComponent={
+          <View style={{ gap: 10 }}>
         <T serif variant="h1" style={{ marginTop: 12 }}>
           Fleet
         </T>
@@ -53,7 +70,7 @@ export default function Fleet() {
           {error
             ? `Can't reach the server — ${error}`
             : capacity
-              ? `${occupied} of ${capacity} slots occupied${poolFree ? `, ${plural(poolFree, "warm box")} ready` : ""}.`
+              ? <><CountUp value={occupied} /> of {capacity} slots occupied{poolFree ? `, ${plural(poolFree, "warm box")} ready` : ""}.</>
               : `${plural(occupied, "machine")}.`}
         </T>
         {snap && occupied === 0 && !error && (
@@ -82,32 +99,31 @@ export default function Fleet() {
         )}
         {capacity > 24 && (
           <View style={{ height: 6, borderRadius: 3, backgroundColor: palette.muted, marginBottom: 6, overflow: "hidden" }}>
-            <View
-              style={{
-                height: 6,
-                borderRadius: 3,
-                backgroundColor: palette.live,
-                width: `${Math.min(100, Math.round((occupied / capacity) * 100))}%`,
-              }}
-            />
+            <ProgressFill fraction={occupied / capacity} color={palette.live} height={6} />
           </View>
         )}
-        {boxes
-          .filter((b) => b.role !== "pool-free")
-          .map((b, i) => (
-            <FadeInUp key={b.name} delay={Math.min(i, 6) * 50}>
-              <BoxCard box={b} onLongPress={setActions} />
-            </FadeInUp>
-          ))}
+        {!snap && !error ? (
+          <View style={{ gap: 10 }}>
+            <CardSkeleton />
+            <CardSkeleton />
+            <CardSkeleton />
+          </View>
+        ) : null}
+          </View>
+        }
+        ListFooterComponent={
+          <View style={{ gap: 6 }}>
         {poolFree > 0 && (
-          <T variant="micro" tone="faint" style={{ marginTop: 8 }}>
+          <T variant="micro" tone="faint" style={{ marginTop: 2 }}>
             {plural(poolFree, "pre-booted box")} in the warm pool — a new task claims one instantly.
           </T>
         )}
         <T variant="micro" tone="faint" style={{ marginTop: 6 }}>
           Long-press a machine for pin, sleep and destroy.
         </T>
-      </ScrollView>
+          </View>
+        }
+      />
       <BoxActionsSheet box={actions} memoryTiers={snap?.lifecycle.memoryTiers} memoryDefault={snap?.lifecycle.memoryDefault} diskTiers={snap?.lifecycle.diskTiers} visible={!!actions} onClose={() => setActions(null)} onChanged={refresh} />
     </SafeAreaView>
   );

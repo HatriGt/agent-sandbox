@@ -8,8 +8,8 @@ import { MarkdownLite } from "./MarkdownLite";
 import { T } from "./ui/AppText";
 import { Button } from "./ui/Button";
 import { Icon, type IconName } from "./ui/Icon";
-import { FadeInUp } from "./ui/Motion";
 import { Sheet } from "./ui/Sheet";
+import { FadeInUp, PressScale } from "@/components/motion";
 
 /**
  * The files the agent produced this run, as a row of artifact cards (mirrors
@@ -138,7 +138,7 @@ function ArtifactSheet({ session, file, onClose }: { session: string; file: Prod
           </View>
         )}
         {load.state === "ready" ? (
-          <Pressable
+          <PressScale
             onPress={() => {
               setShare(null);
               Share.share({ message: load.text, title: file?.name }).catch((e: unknown) => setShare(errorText(e)));
@@ -149,7 +149,7 @@ function ArtifactSheet({ session, file, onClose }: { session: string; file: Prod
             <T variant="meta" tone="muted" weight="medium">
               Share
             </T>
-          </Pressable>
+          </PressScale>
         ) : null}
         {share ? (
           <T variant="meta" tone="muted">
