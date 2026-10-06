@@ -22,6 +22,9 @@ import {
   parseSteps,
   parseTests,
   parseTimeline,
+  parseCompare,
+  parseAnnotate,
+  parseLayers,
 } from "@/lib/viz-extra";
 import { Markdown } from "@/components/ui/markdown";
 import { ChartBlock } from "./ChartBlock";
@@ -38,6 +41,7 @@ import { StatsBlock } from "./StatsBlock";
 import { TimelineBlock, StepsBlock } from "./TimelineBlock";
 import { MermaidBlock, SequenceBlock, mermaidKind } from "./MermaidBlock";
 import { FindingsBlock, findingsFromTable } from "./ReviewBlocks";
+import { AnnotateBlock, CompareBlock, LayersBlock } from "./ExplainBlocks";
 import { TreeBlock } from "./TreeBlock";
 import { sniffBare, sniffLanguage } from "@/lib/viz-auto";
 import { completeLines, repairPartialJson } from "@/lib/viz-stream";
@@ -193,6 +197,21 @@ export function smartBlock(language: string, code: string, { open = false }: { o
       el = findings && <FindingsBlock findings={findings} source={src} />;
       break;
     }
+    case "compare": {
+      const options = parseCompare(src);
+      el = options && <CompareBlock options={options} source={src} />;
+      break;
+    }
+    case "annotate": {
+      const data = parseAnnotate(src);
+      el = data && <AnnotateBlock data={data} source={src} />;
+      break;
+    }
+    case "layers": {
+      const layers = parseLayers(src);
+      el = layers && <LayersBlock layers={layers} source={src} />;
+      break;
+    }
     case "funnel": {
       const stages = parseFunnel(tidy);
       el = stages && <FunnelBlock stages={stages} source={src} />;
@@ -265,6 +284,7 @@ export function smartBlock(language: string, code: string, { open = false }: { o
 const LINE_FENCES = new Set([
   "stats", "flow", "tree", "csv", "tsv", "timeline", "steps", "algorithm", "procedure", "progress", "kv", "badges", "score", "keys", "shortcuts",
   "palette", "http", "tests", "log", "diffstat", "commits", "deps", "graph", "dag", "sequence", "findings", "issues", "risks", "funnel", "gantt", "spans", "heatmap",
+  "compare", "annotate", "layers",
 ]);
 /** JSON fences: a streaming one is parsed from its repaired prefix. */
 const JSON_FENCES = new Set(["chart", "json", "jsonc"]);

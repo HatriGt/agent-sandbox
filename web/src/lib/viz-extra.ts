@@ -786,3 +786,123 @@ export function parseFindings(src: string): Finding[] | null {
 export function sortFindings(items: Finding[]): Finding[] {
   return items.map((f, i) => [f, i] as const).sort((a, b) => SEVERITY_RANK[a[0].severity] - SEVERITY_RANK[b[0].severity] || a[1] - b[1]).map(([f]) => f);
 }
+
+// ---------------------------------------------------------------- compare
+
+export type CompareTone = "pro" | "con" | "note";
+export interface CompareOption {
+  name: string;
+  picked: boolean;
+  items: { tone: CompareTone; text: string }[];
+}
+
+const PICK_RE = /\s*(?:\((?:recommended|pick|chosen)\)|★)\s*/gi;
+
+/**
+ * ```compare: `## Name` starts an option (`(recommended)` or `★` marks the pick), then `+ pro`,
+ * `- con`, `~ note` or a plain line (neutral note). 2–6 options, at most one pick; text before the
+ * first heading, an empty option name, or more than 20 lines in one option → null.
+ */
+export function parseCompare(src: string): CompareOption[] | null {
+  const lines = src.split("\n").map((l) => l.trim()).filter(Boolean);
+  if (lines.length > 120) return null;
+  const out: CompareOption[] = [];
+  for (const line of lines) {
+    const head = line.match(/^##\s+(.+)$/);
+    if (head) {
+      const picked = /\((?:recommended|pick|chosen)\)|★/i.test(head[1]);
+      const name = head[1].replace(PICK_RE, " ").trim();
+      if (!name || name.length > 60) return null;
+      out.push({ name, picked, items: [] });
+      continue;
+    }
+    const cur = out[out.length - 1];
+    if (!cur || cur.items.length >= 20) return null;
+    const m = line.match(/^([+\-~•*])\s*(.*)$/);
+    const mark = m?.[1];
+    const text = (m ? m[2] : line).trim();
+    if (!text) continue;
+    cur.items.push({ tone: mark === "+" ? "pro" : mark === "-" ? "con" : "note", text });
+  }
+  if (out.length < 2 || out.length > 6 || out.filter((o) => o.picked).length > 1) return null;
+  return out;
+}
+
+// ---------------------------------------------------------------- annotate
+
+export interface AnnotateNote {
+  /** Inclusive line range in the displayed numbering (file numbering when a start line was given). */
+  from: number;
+  to: number;
+  text: string;
+}
+export interface Annotated {
+  file?: string;
+  /** Number of the snippet's first line (1 without a `file: path:N` header). */
+  startLine: number;
+  code: string;
+  notes: AnnotateNote[];
+}
+
+const NOTE_RE = /^L?(\d{1,6})(?:\s*[-–]\s*L?(\d{1,6}))?\s*:\s*(.+)$/i;
+
+/**
+ * ```annotate: optional `file: path/to/x.ts:40` first line, the code, a `---` line, then notes
+ * `L42: why` / `42-45: why`. The LAST `---` splits (code may hold its own). Notes whose start lies
+ * outside the snippet are dropped, ends clamp; no `---`, no code, a non-note line after the split,
+ * or no surviving note → null.
+ */
+export function parseAnnotate(src: string): Annotated | null {
+  const lines = src.replace(/\r/g, "").split("\n");
+  let sep = -1;
+  for (let i = lines.length - 1; i >= 0; i--) if (lines[i].trim() === "---") (sep = i), i = -1;
+  if (sep < 0) return null;
+  let body = lines.slice(0, sep);
+  let file: string | undefined;
+  let startLine = 1;
+  const header = body[0]?.match(/^\s*file:\s*(\S+?)(?::(\d{1,6}))?\s*$/i);
+  if (header) {
+    file = header[1];
+    if (header[2]) startLine = Math.max(1, Number(header[2]));
+    body = body.slice(1);
+  }
+  while (body.length && !body[0].trim()) body.shift();
+  while (body.length && !body[body.length - 1].trim()) body.pop();
+  if (body.length === 0 || body.length > 200) return null;
+  const last = startLine + body.length - 1;
+  const notes: AnnotateNote[] = [];
+  for (const raw of lines.slice(sep + 1)) {
+    const line = raw.trim().replace(/^[-*•]\s+/, "");
+    if (!line) continue;
+    const m = line.match(NOTE_RE);
+    if (!m) return null;
+    const from = Number(m[1]);
+    const to = m[2] ? Number(m[2]) : from;
+    if (to < from || from < startLine || from > last) continue;
+    notes.push({ from, to: Math.min(to, last), text: m[3].trim() });
+  }
+  if (notes.length === 0 || notes.length > 30) return null;
+  return { file, startLine, code: body.join("\n"), notes };
+}
+
+// ---------------------------------------------------------------- layers
+
+export interface Layer {
+  name: string;
+  items: string[];
+}
+
+/** ```layers: `Layer name: item, item` per line, top → bottom. 2–10 layers, ≤ 16 items each. */
+export function parseLayers(src: string): Layer[] | null {
+  const lines = src.split("\n").map((l) => l.trim().replace(/^[-*•]\s+/, "")).filter(Boolean);
+  if (lines.length < 2 || lines.length > 10) return null;
+  const out: Layer[] = [];
+  for (const line of lines) {
+    const m = line.match(/^([^:]{1,40}?)\s*:(?:\s+(.*))?$/);
+    if (!m || !m[1].trim()) return null;
+    const items = (m[2] ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+    if (items.length > 16) return null;
+    out.push({ name: m[1].trim(), items });
+  }
+  return out;
+}

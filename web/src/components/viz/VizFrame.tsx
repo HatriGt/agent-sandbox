@@ -13,7 +13,7 @@ export function seriesColor(i: number): string {
 const SKELETON_TITLE: Record<string, string> = {
   chart: "Drawing chart", json: "Reading JSON", jsonc: "Reading JSON", stats: "Collecting metrics", timeline: "Building timeline",
   steps: "Listing steps", progress: "Measuring progress", tests: "Reading test results", log: "Reading log", flow: "Tracing flow",
-  sequence: "Drawing sequence", findings: "Ranking findings",
+  sequence: "Drawing sequence", findings: "Ranking findings", compare: "Weighing options", annotate: "Annotating code", layers: "Stacking layers",
 };
 
 /**

@@ -8,6 +8,9 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 const WorkspacePane = React.lazy(() => import("./WorkspacePane").then((m) => ({ default: m.WorkspacePane })));
 import { SleepingCard, WakingCard } from "./WakingCard";
 import { SessionContext } from "@/lib/session-context";
+import { CodeNavContext } from "@/components/ui/code-ref";
+import type { CodeRef } from "@/lib/code-refs";
+import type { OpenRequest } from "./WorkspacePane";
 import { friendlyName, isSleeping, POLL_MS, threadTitle } from "@/lib/format";
 import { currentDiskTier, currentMemoryTier, deadlineLabel, deadlineOf, displayState, fmtDuration, offerableTiers, tierGib, usageLevel } from "@/lib/lifecycle";
 import { MemoryBumpCard } from "./MemoryCard";
@@ -212,7 +215,11 @@ export function Thread({
   // every 20s while running. Opening a file shows it in the side pane.
   const [changes, setChanges] = React.useState<ChangedFile[]>([]);
   const [changesLoading, setChangesLoading] = React.useState(false);
-  const [openFile, setOpenFile] = React.useState<ChangedFile | null>(null);
+  // Each request is a new object so re-opening the same file (at another line) still navigates.
+  const [openFile, setOpenFile] = React.useState<OpenRequest | null>(null);
+  const openChange = React.useCallback((f: ChangedFile) => setOpenFile({ path: f.path }), []);
+  // Code refs in the agent's messages (`web/src/x.ts:42`) open here, at the line.
+  const openRef = React.useCallback((r: CodeRef) => setOpenFile({ path: r.path, line: r.line, endLine: r.endLine }), []);
   const [reviewOpen, setReviewOpen] = React.useState(false);
   const [workspaceOpen, setWorkspaceOpen] = React.useState(false);
   const [workspaceFull, setWorkspaceFull] = React.useState(false);
@@ -701,6 +708,7 @@ export function Thread({
 
   return (
     <SessionContext.Provider value={box.name}>
+    <CodeNavContext.Provider value={openRef}>
     {/* No mount animation: BootingThread (same layout, swapped by App inside one pane key) hands
         off to this pixel for pixel; a fade here was the second blink. Thread switches fade via
         App's pane crossfade. */}
@@ -1017,7 +1025,7 @@ export function Thread({
           </motion.div>
         )}
       </AnimatePresence>
-      {!sleeping && <ChangesDock files={changes} loading={changesLoading} onOpen={setOpenFile} onRefresh={refreshChanges} onReviewAll={() => setReviewOpen((v) => !v)} activePath={openFile?.path} />}
+      {!sleeping && <ChangesDock files={changes} loading={changesLoading} onOpen={openChange} onRefresh={refreshChanges} onReviewAll={() => setReviewOpen((v) => !v)} activePath={openFile?.path} />}
       <SendBar
         boxName={box.name}
         runState={runState}
@@ -1064,6 +1072,7 @@ export function Thread({
       </AnimatePresence>
       </div>
     </div>
+    </CodeNavContext.Provider>
     </SessionContext.Provider>
   );
 }

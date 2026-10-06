@@ -23,7 +23,10 @@ import { cn } from "@/lib/utils";
  * changes dock; edits save back with ⌘S and refresh the change list.
  */
 type Node = { name: string; path: string; children?: Map<string, Node> };
-type Tab = { path: string; mode: "diff" | "edit"; draft?: string; dirty?: boolean; saving?: "saving" | "saved" };
+type Reveal = { from: number; to: number; nonce: number };
+type Tab = { path: string; mode: "diff" | "edit"; draft?: string; dirty?: boolean; saving?: "saving" | "saved"; reveal?: Reveal };
+/** A request to show a file, optionally at a line range. A new object each time, so repeats navigate. */
+export type OpenRequest = { path: string; line?: number; endLine?: number };
 type View = "explorer" | "search" | "scm" | "records";
 type Repo = { name: string; branch?: string };
 
@@ -54,7 +57,7 @@ const STATUS_LETTER: Record<ChangedFile["status"], { l: string; tone: string }> 
   renamed: { l: "R", tone: "text-live" },
 };
 
-export function WorkspacePane({ session, changes, open, onClose, onSaved, repos, full = false, onToggleFull }: { session: string; changes: ChangedFile[]; open: ChangedFile | null; onClose: () => void; onSaved: () => void; repos: Repo[]; full?: boolean; onToggleFull?: () => void }) {
+export function WorkspacePane({ session, changes, open, onClose, onSaved, repos, full = false, onToggleFull }: { session: string; changes: ChangedFile[]; open: OpenRequest | null; onClose: () => void; onSaved: () => void; repos: Repo[]; full?: boolean; onToggleFull?: () => void }) {
   const [paths, setPaths] = React.useState<string[] | null>(null);
   const [treeErr, setTreeErr] = React.useState<string | null>(null);
   const [expanded, setExpanded] = React.useState<Set<string>>(() => new Set(repos.map((r) => r.name)));
@@ -84,8 +87,16 @@ export function WorkspacePane({ session, changes, open, onClose, onSaved, repos,
   const changeByPath = React.useMemo(() => new Map(changes.map((c) => [c.path, c])), [changes]);
 
   const openPath = React.useCallback(
-    (path: string, mode?: Tab["mode"]) => {
-      setTabs((t) => (t.some((x) => x.path === path) ? t : [...t, { path, mode: mode ?? "edit" }]));
+    (path: string, mode?: Tab["mode"], reveal?: Reveal) => {
+      // A targeted line always shows the file itself, not its diff.
+      const m = reveal ? "edit" : mode;
+      setTabs((t) =>
+        t.some((x) => x.path === path)
+          ? reveal
+            ? t.map((x) => (x.path === path ? { ...x, mode: "edit", reveal } : x))
+            : t
+          : [...t, { path, mode: m ?? "edit", reveal }]
+      );
       setActive(path);
       setExpanded((e) => {
         const n = new Set(e);
@@ -97,9 +108,11 @@ export function WorkspacePane({ session, changes, open, onClose, onSaved, repos,
     [changeByPath]
   );
   React.useEffect(() => {
-    if (open) openPath(open.path, changeByPath.has(open.path) ? "diff" : "edit");
+    if (!open) return;
+    const reveal = open.line ? { from: open.line, to: open.endLine ?? open.line, nonce: Date.now() } : undefined;
+    openPath(open.path, changeByPath.has(open.path) ? "diff" : "edit", reveal);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open?.path]);
+  }, [open]);
 
   const closeTab = (path: string) => {
     setTabs((t) => {
@@ -762,7 +775,7 @@ function FileView({ session, tab, change, onMode, onDraft, onSaving, onSaved }: 
           deleted ? (
             <p className="text-muted-foreground px-4 py-6 text-meta">This file was deleted in the working tree; see the diff.</p>
           ) : (
-            <CodeEditor value={draft} onChange={(v) => onDraft(v, v !== content)} onSave={() => void save()} path={tab.path} ariaLabel={`Edit ${base}`} autoFocus />
+            <CodeEditor value={draft} onChange={(v) => onDraft(v, v !== content)} onSave={() => void save()} path={tab.path} ariaLabel={`Edit ${base}`} autoFocus reveal={tab.reveal} />
           )
         ) : null}
       </div>

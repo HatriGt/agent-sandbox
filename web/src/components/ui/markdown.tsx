@@ -1,13 +1,15 @@
 import { cn } from "@/lib/utils"
 import { marked } from "marked"
 import { Children, isValidElement, memo, useId, useMemo, type ReactElement, type ReactNode } from "react"
-import ReactMarkdown, { type Components } from "react-markdown"
+import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { normalizeBlocks } from "@/lib/markdown-normalize"
 import { isCodeBlock } from "@/lib/markdown-code"
 import { splitOpenFence } from "@/lib/markdown-stream"
 import { CodeBlock, CodeBlockCode } from "./code-block"
 import { LinkChip } from "./link-chip"
+import { CodeRefLink, CodeRefScope, InlineCode } from "./code-ref"
+import { parseCodeRef } from "@/lib/code-refs"
 import { smartBlock, tableFromMarkdown } from "@/components/viz/SmartBlock"
 import { ChecklistCard, taskItems } from "@/components/viz/ChecklistCard"
 import { DefinitionListBlock, StatusListBlock, listItemTexts } from "@/components/viz/ListBlocks"
@@ -52,8 +54,11 @@ const INITIAL_COMPONENTS: Partial<Components> = {
     const text = typeof children === "string" ? children : Array.isArray(children) ? children.join("") : ""
 
     if (!isCodeBlock(className, text)) {
+      // On the box page a path (`web/src/x.ts:42`) or a symbol bound earlier in the message opens
+      // the file in the workspace; everywhere else, and for anything unresolved, plain inline code.
       return (
-        <code
+        <InlineCode
+          text={text}
           className={cn(
             // A tinted chip, not the invisible near-white fill this used to carry. Claude's inline
             // code is a subtle bg + a distinct accent text colour; we mirror that with our tokens so
@@ -64,7 +69,7 @@ const INITIAL_COMPONENTS: Partial<Components> = {
           {...props}
         >
           {children}
-        </code>
+        </InlineCode>
       )
     }
 
@@ -160,9 +165,17 @@ const INITIAL_COMPONENTS: Partial<Components> = {
   // what it points at and a short label (`queue-service#142`, `github.com/acme/…`).
   a: function LinkComponent({ href, children }) {
     if (!href) return <>{children}</>
-    return <LinkChip href={href}>{children}</LinkChip>
+    // A relative path (`[parseDag](web/src/lib/viz-extra.ts:515)`) is a code ref, not a web link.
+    const ref = parseCodeRef(href)
+    const chip = <LinkChip href={href}>{children}</LinkChip>
+    if (ref) return <CodeRefLink parsed={ref} fallback={chip}>{children}</CodeRefLink>
+    return chip
   },
 }
+
+// `viz.ts:42` looks like a `viz.ts:` scheme to the default sanitiser, which would blank it; a
+// relative code path is kept as written (it never becomes an href — see the `a` override).
+const urlTransform = (url: string) => (parseCodeRef(url) && !/^[a-z][\w+.-]*:\/\//i.test(url) ? url : defaultUrlTransform(url))
 
 const MemoizedMarkdownBlock = memo(
   function MarkdownBlock({
@@ -173,7 +186,7 @@ const MemoizedMarkdownBlock = memo(
     components?: Partial<Components>
   }) {
     return (
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components} urlTransform={urlTransform}>
         {content}
       </ReactMarkdown>
     )
@@ -197,13 +210,15 @@ function MarkdownComponent({
 
   return (
     <div className={className}>
-      {blocks.map((block, index) => (
-        <MemoizedMarkdownBlock
-          key={`${blockId}-block-${index}`}
-          content={block}
-          components={components}
-        />
-      ))}
+      <CodeRefScope markdown={children}>
+        {blocks.map((block, index) => (
+          <MemoizedMarkdownBlock
+            key={`${blockId}-block-${index}`}
+            content={block}
+            components={components}
+          />
+        ))}
+      </CodeRefScope>
     </div>
   )
 }

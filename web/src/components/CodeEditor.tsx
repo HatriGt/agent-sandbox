@@ -1,6 +1,6 @@
 import * as React from "react";
-import { EditorState, Compartment, Prec, type Extension } from "@codemirror/state";
-import { EditorView, keymap, lineNumbers, placeholder, highlightActiveLine, highlightActiveLineGutter, drawSelection, dropCursor, rectangularSelection, crosshairCursor, highlightSpecialChars, scrollPastEnd } from "@codemirror/view";
+import { EditorState, EditorSelection, Compartment, Prec, StateEffect, StateField, type Extension } from "@codemirror/state";
+import { Decoration, type DecorationSet, EditorView, keymap, lineNumbers, placeholder, highlightActiveLine, highlightActiveLineGutter, drawSelection, dropCursor, rectangularSelection, crosshairCursor, highlightSpecialChars, scrollPastEnd } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
 import { bracketMatching, foldGutter, foldKeymap, indentOnInput, syntaxHighlighting, HighlightStyle, StreamLanguage, LanguageDescription, LanguageSupport, Language } from "@codemirror/language";
@@ -117,6 +117,9 @@ const chrome = EditorView.theme({
   ".cm-foldGutter .cm-gutterElement": { color: "var(--muted-foreground)", opacity: "0.6" },
   ".cm-selectionBackground, &.cm-focused .cm-selectionBackground, ::selection": { backgroundColor: "color-mix(in oklch, var(--live) 22%, transparent) !important" },
   ".cm-cursor": { borderLeftColor: "var(--foreground)", borderLeftWidth: "1.5px" },
+  // A revealed line (a code ref clicked in chat) flashes, then settles to nothing.
+  ".cm-reveal-line": { animation: "cm-reveal 2s ease-out forwards" },
+  "@keyframes cm-reveal": { "0%, 35%": { backgroundColor: "color-mix(in oklch, var(--live) 18%, transparent)" }, "100%": { backgroundColor: "transparent" } },
   ".cm-placeholder": { color: "var(--muted-foreground)", opacity: "0.7", fontStyle: "normal" },
   ".cm-matchingBracket": { backgroundColor: "color-mix(in oklch, var(--live) 18%, transparent)", outline: "1px solid color-mix(in oklch, var(--live) 40%, transparent)" },
   ".cm-selectionMatch": { backgroundColor: "color-mix(in oklch, var(--attention) 22%, transparent)" },
@@ -165,6 +168,38 @@ const baseExtensions = (readOnly: boolean): Extension => [
   chrome,
 ];
 
+/** Lines flashed by `reveal`: a tint that fades out (`.cm-reveal-line` in index.css). */
+const setRevealLines = StateEffect.define<{ from: number; to: number } | null>();
+const revealLine = Decoration.line({ class: "cm-reveal-line" });
+const revealField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(deco, tr) {
+    deco = deco.map(tr.changes);
+    for (const e of tr.effects) {
+      if (!e.is(setRevealLines)) continue;
+      if (!e.value) return Decoration.none;
+      const doc = tr.state.doc;
+      const ranges = [];
+      for (let n = e.value.from; n <= e.value.to; n++) ranges.push(revealLine.range(doc.line(n).from));
+      deco = Decoration.set(ranges);
+    }
+    return deco;
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});
+
+/** Select lines `from`–`to` (1-based, clamped), centre them and flash them. */
+function revealLines(v: EditorView, from: number, to: number) {
+  const doc = v.state.doc;
+  const a = Math.min(Math.max(1, from), doc.lines);
+  const b = Math.min(Math.max(a, to), doc.lines);
+  const start = doc.line(a).from;
+  v.dispatch({
+    selection: EditorSelection.single(start, a === b ? start : doc.line(b).to),
+    effects: [setRevealLines.of({ from: a, to: b }), EditorView.scrollIntoView(start, { y: "center" })],
+  });
+}
+
 export function CodeEditor({
   value,
   onChange,
@@ -177,6 +212,7 @@ export function CodeEditor({
   autoFocus = false,
   prose = false,
   placeholder: placeholderText,
+  reveal,
 }: {
   value: string;
   onChange?: (v: string) => void;
@@ -192,6 +228,8 @@ export function CodeEditor({
   prose?: boolean;
   /** Shown in the empty document. */
   placeholder?: string;
+  /** Scroll to, select and flash lines `from`–`to` (1-based); a new `nonce` repeats it. */
+  reveal?: { from: number; to: number; nonce: number };
 }) {
   const host = React.useRef<HTMLDivElement>(null);
   const view = React.useRef<EditorView | null>(null);
@@ -211,6 +249,7 @@ export function CodeEditor({
       doc: value,
       extensions: [
         baseExtensions(readOnly),
+        revealField,
         themeComp.current.of(syntaxHighlighting(dark ? darkHighlight : lightHighlight)),
         langComp.current.of(langExt),
         prose ? [Prec.high(proseChrome), EditorView.lineWrapping] : [],
@@ -255,6 +294,14 @@ export function CodeEditor({
     const cur = v.state.doc.toString();
     if (cur !== value) v.dispatch({ changes: { from: 0, to: cur.length, insert: value } });
   }, [value]);
+  // Reveal after the doc is in place (declared after the value effect, so it runs on the loaded text).
+  React.useEffect(() => {
+    const v = view.current;
+    if (!v || !reveal) return;
+    revealLines(v, reveal.from, reveal.to);
+    const t = window.setTimeout(() => view.current?.dispatch({ effects: setRevealLines.of(null) }), 2000);
+    return () => window.clearTimeout(t);
+  }, [reveal?.nonce, readOnly, prose, placeholderText]);
 
   return <div ref={host} className={cn("cm-host h-full min-h-0 w-full overflow-hidden text-code", className)} />;
 }

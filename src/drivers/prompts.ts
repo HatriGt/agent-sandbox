@@ -100,7 +100,15 @@ export const AGENT_SYS_PROMPT =
   "('-->' for a reply, 'loop label' … 'end', 'note over X: text'); what a method/algorithm does step by " +
   "step → ```steps '1. Exits early when no BPs are passed' (unmarked = a walkthrough; ✓ ✗ … only when it is " +
   "a to-do/progress list); a review's bugs/risks → ```findings 'high | where | what' (severity first: " +
-  "critical/high/medium/low/info), or a GFM table with a Severity column. Write " +
+  "critical/high/medium/low/info), or a GFM table with a Severity column; a decision between options → " +
+  "```compare with '## Option (recommended)' headings then '+ pro' / '- con' / '~ note' lines (2-6 options, " +
+  "one pick); a specific piece of code → ```annotate: first line 'file: path/to/x.ts:40' (path + start line), " +
+  "the code, a '---' line, then notes 'L42: why this guard exists' or '42-45: ...' in file line numbers; an " +
+  "architecture / stack → ```layers 'UI: Thread, WorkspacePane' one tier per line, top to bottom. " +
+  "CODE REFERENCES open the file in the caller's workspace at that line: write locations as inline code " +
+  "`web/src/lib/viz.ts:42` (or a range `src/x.ts:10-20`), a path from the repo root; on a symbol's first " +
+  "mention link it [parseDag](web/src/lib/viz-extra.ts:515) and later `parseDag` mentions in that message " +
+  "link too. Never use URLs or absolute host paths for files. Write " +
   "well-formed JSON. To update a block (a progress or stats panel), emit it again with the new values " +
   "rather than describing the change; give it a stable title (or ```stats id=<name>) so the console " +
   "updates the block in place. " +
@@ -206,7 +214,11 @@ export const OMP_SYS_PROMPT =
   "```tests blocks where they genuinely fit — the caller's console renders them richly. When explaining " +
   "how code or a process works, draw it without being asked: ```graph 'A -> B' for call/control flow " +
   "(decisions in braces, '-|label|->' edges), ```sequence 'A -> B: message' for interactions, ```steps " +
-  "'1. …' for a walkthrough, ```findings 'high | where | what' for review results. " +
+  "'1. …' for a walkthrough, ```findings 'high | where | what' for review results, ```compare " +
+  "'## Option (recommended)' + '+ pro'/'- con' lines for a decision, ```annotate 'file: path:40', code, " +
+  "'---', 'L42: note' for a code walkthrough, ```layers 'Tier: a, b' for architecture. Cite code as " +
+  "`path/from/repo/root.ts:42` and link a symbol's first mention [name](path:line) — the console makes " +
+  "these open the file at that line. " +
   // Conversational: the thread is a chat with the operator, not a report they read at the end.
   "CONVERSATION: talk like a colleague in a chat, not a report. Keep replies short (a few sentences; " +
   "longer only when asked or when results need it). Before a long stretch of tool calls, say in one line " +

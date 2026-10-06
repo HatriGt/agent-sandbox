@@ -124,12 +124,37 @@ away — the beautifier is presentation, never authority.
 - **````heatmap```** — JSON `{rows, cols, values[[…]], unit?}`. Sequential single-hue grid.
 - **````note``` / ````tip``` / ````important``` / ````warn``` / ````caution``` /
   ````success``` / ````error```** — markdown body. Callout card (same as `> [!NOTE]` quotes).
+- **````compare```** — options for a decision, side by side. `## Name` starts an option;
+  `(recommended)` or `★` marks the single pick (accent ring + "Recommended" badge). `+` pro, `-` con,
+  `~` or a plain line is a muted note. 2–6 options; text before the first `##`, 1 or 7+ options, or
+  two picks → plain code.
+- **````annotate```** — code walkthrough. Optional first line `file: path:N` sets the path and start
+  line; then the code; then a `---` line (the last one splits); then notes `L42: …` / `42-45: …` in
+  file numbering (1-based without a start line). Numbered gutter markers; notes beside the code when
+  wide, below when narrow; hovering a note highlights its lines and vice versa. On the box page the
+  file header is a code reference (opens the file at the start line). Missing `---`, no code, a
+  non-note line after `---`, or no valid notes → plain code.
+- **````layers```** — architecture stack: `Layer: item, item` per line, top to bottom, as bands with
+  item chips and connectors. 2–10 layers, ≤ 16 items each; a line without `name:` → plain code.
 
 ### Prose upgrades (no fence)
 
 - A list whose every item (≥ 2) is `label: NN%` or `label: a/b` → the progress block.
 - A GFM table → the sortable DataTable when it has ≥ 3 body rows, or 2 rows with a numeric
   column; a two-row table of words stays a plain table. Gates: `web/src/lib/viz-tool-output.ts`.
+
+### Code references (box page)
+
+Inline code that is a path, optionally with a line, becomes a link that opens the file in the
+workspace pane, scrolled to the line with a brief highlight: `web/src/lib/viz.ts`, `viz.ts:42`,
+`src/x.ts:10-20`, `src/x.ts#L42`. Markdown links with a relative-path href
+(`[parseDag](web/src/lib/viz-extra.ts:515)`) do the same instead of opening a new tab. Once a
+message ties a name to a location (`[name](path:line)`, `` `name` (`path:line`) `` or
+`` `name` in `path:line` ``), later `` `name` `` mentions in that message link too. A ref links only
+when it matches a real file in the box tree (`/tree.json`, fetched once per box); a short path
+links only on a unique suffix match. URLs, text with spaces, bare words and versions (`1.2.3`) are
+never refs. Off the box page everything renders as before. Parsing: `web/src/lib/code-refs.ts`;
+UI: `web/src/components/ui/code-ref.tsx`; editor reveal: `CodeEditor` `reveal` prop.
 
 ### Live (streaming)
 
@@ -195,6 +220,10 @@ agent to draw these without being asked, and the console upgrades the prose form
 | What a method / algorithm / job does, step by step | ```steps with no marks (a walkthrough) | A plain ordered list of verb-first items is auto-upgraded |
 | Bugs, risks, review results, ranked | ```findings `high \| where \| what` | A GFM table with a Severity column is auto-upgraded |
 | Which paths are dead / wasteful | ```findings with `low` / `info` rows, or a status list (❌/⚠️ items) | — |
+| Choosing between options, a design decision | ```compare `## Option (recommended)` + `+ pro` / `- con` | — |
+| A specific piece of code, line by line | ```annotate `file: path:N`, code, `---`, `L42: why` | — |
+| Architecture, tiers, what lives where | ```layers `Tier: a, b` | — |
+| Any file, line or symbol | Inline code `path:line`; link the first symbol mention `[name](path:line)` | Plain inline code when unresolved |
 
 ### Watch mode (a monitoring loop the operator stops)
 

@@ -352,3 +352,17 @@ export async function highlightHtml(code: string, language: string, dark: boolea
   return hl.codeToHtml(code, { lang, theme: dark ? "github-dark" : "github-light" })
 }
 
+/** A highlighted token: text plus its theme colour (absent → inherit). */
+export type CodeToken = { content: string; color?: string }
+
+/**
+ * Per-line tokens for blocks that lay out their own lines (the annotate gutter). React renders the
+ * spans, so no HTML sink is involved. Null for languages we do not bundle (caller draws plain text).
+ */
+export async function highlightTokens(code: string, language: string, dark: boolean): Promise<CodeToken[][] | null> {
+  const hl = await getHighlighter()
+  const lang = await ensureLang(hl, language)
+  if (!lang) return null
+  return hl.codeToTokens(code, { lang, theme: dark ? "github-dark" : "github-light" }).tokens.map((line) => line.map((t) => ({ content: t.content, color: t.color })))
+}
+
