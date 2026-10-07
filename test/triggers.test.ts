@@ -253,7 +253,9 @@ test("dispatcher: in-flight and storm counts survive a controller restart; recon
 });
 
 test("box policy: destroy only finished runs, per the automation's setting; normalize keeps it", async () => {
-  assert.equal(shouldDestroyBox(undefined, "done"), false);
+  assert.equal(shouldDestroyBox(undefined, "done"), true, "unset = destroy after a clean finish");
+  assert.equal(shouldDestroyBox(undefined, "failed"), false);
+  assert.equal(shouldDestroyBox("keep", "done"), false);
   assert.equal(shouldDestroyBox("done", "done"), true);
   assert.equal(shouldDestroyBox("done", "failed"), false, "a failed box is kept to inspect");
   assert.equal(shouldDestroyBox("always", "failed"), true);
@@ -264,6 +266,8 @@ test("box policy: destroy only finished runs, per the automation's setting; norm
   assert.equal(n.trigger.spec.destroy, "always");
   const bad = normalizeTrigger({ name: "Review", kind: "watch", repo: "o/r", taskTemplate: "t", spec: { watch: ["pr_opened"], destroy: "nuke" } });
   assert.ok(bad.ok && bad.trigger.spec.destroy === undefined);
+  const keep = normalizeTrigger({ name: "Review", kind: "watch", repo: "o/r", taskTemplate: "t", spec: { watch: ["pr_opened"], destroy: "keep" } });
+  assert.ok(keep.ok && keep.trigger.spec.destroy === "keep", "an explicit keep is stored, since unset now destroys");
   const db = openMemoryDb();
   const { row } = createTrigger(db, box, "u1", n.trigger);
   const d = makeDispatcher({ db, log: () => {}, startRun: async () => ({ ok: true, box: "b1" }) });

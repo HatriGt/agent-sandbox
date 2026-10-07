@@ -991,19 +991,19 @@ function Editor({
           <ChevronRight className="text-muted-foreground size-3.5 transition-transform group-open:rotate-90" aria-hidden />
           <span className="label text-muted-foreground">Guardrails</span>
           <span className="text-faint ml-auto truncate text-micro group-open:hidden">
-            {[d.spec.destroy === "always" ? "box destroyed on finish" : d.spec.destroy === "done" ? "box destroyed when done" : null, d.quiet ? "quiet" : null, (d.spec.keepGreen ?? true) ? "keeps PRs green" : null, (d.spec.addressReviews ?? true) ? "answers reviews" : null].filter(Boolean).join(" · ") || "every event gets its own box"}
+            {[d.spec.destroy === "always" ? "box destroyed on finish" : d.spec.destroy === "keep" ? "box kept after the run" : "box destroyed when done", d.quiet ? "quiet" : null, (d.spec.keepGreen ?? true) ? "keeps PRs green" : null, (d.spec.addressReviews ?? true) ? "answers reviews" : null].filter(Boolean).join(" · ")}
           </span>
         </summary>
         <div className="mt-3 flex flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
           <span className="text-meta">
             Box after the run
-            <span className="text-faint block text-micro">Keep = the global sleep rule. Destroying skips runs paused on a question and boxes you pinned.</span>
+            <span className="text-faint block text-micro">Keep = the global sleep rule. Destroying skips runs paused on a question, failed runs (unless Always) and boxes you pinned.</span>
           </span>
           <Segmented<"keep" | "done" | "always">
             ariaLabel="Box after the run"
-            value={d.spec.destroy ?? "keep"}
-            onChange={(v) => setSpec({ destroy: v === "keep" ? undefined : v })}
+            value={d.spec.destroy ?? "done"}
+            onChange={(v) => setSpec({ destroy: v === "done" ? undefined : v })}
             options={[
               { value: "keep", label: "Keep" },
               { value: "done", label: "Destroy if done", title: "Destroy after a clean finish; keep a failed run's box to inspect" },

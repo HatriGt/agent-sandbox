@@ -1105,7 +1105,7 @@ export interface AutomationSpec {
   /** PR follow-ups for this automation's PRs; unset = the user's default. */
   keepGreen?: boolean;
   addressReviews?: boolean;
-  /** Box when a run finishes: unset/"keep" = global sleep TTL; "done" = destroy after a clean finish; "always" = destroy on any finish. */
+  /** Box when a run finishes: unset/"done" = destroy after a clean finish; "always" = destroy on any finish; "keep" = global sleep TTL. */
   destroy?: "keep" | "done" | "always";
   cron?: string;
   /** One-time run at this epoch ms (chat schedules). */
