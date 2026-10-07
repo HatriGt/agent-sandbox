@@ -1253,6 +1253,51 @@
   animation-delay: calc(var(--i, 0) * 30ms);
 }
 
+/* DataTable motion (ui/data-table.tsx), after Orbit: rows rise 5px in on first paint with a short
+   stagger (capped so long tables don't drag), a row that arrives later flashes once, a sort replays
+   a quicker stagger, live status dots ping a ring outward (box-shadow, not a scaled copy), and
+   loading cells shimmer. Transform + opacity only; reduced motion keeps the colour, drops movement. */
+@keyframes dt-row-in {
+  from { opacity: 0; transform: translateY(5px); }
+}
+@keyframes dt-row-flash {
+  from { background-color: color-mix(in oklab, var(--live) 14%, transparent); }
+}
+@keyframes dt-ping {
+  from { box-shadow: 0 0 0 0 color-mix(in oklab, currentColor 55%, transparent); }
+  to { box-shadow: 0 0 0 6px transparent; }
+}
+@keyframes dt-shim {
+  from { background-position: 100% 0; }
+  to { background-position: -50% 0; }
+}
+[data-slot="table-row"][data-enter] {
+  animation: dt-row-in 0.32s var(--ease-out-quint) both;
+  animation-delay: calc(min(var(--i, 0), 14) * 26ms);
+}
+[data-slot="table-row"][data-enter="sort"] {
+  animation-duration: 0.22s;
+  animation-delay: calc(min(var(--i, 0), 14) * 12ms);
+}
+[data-slot="table-row"][data-new] {
+  animation:
+    dt-row-in 0.28s var(--ease-out-quint) both,
+    dt-row-flash 1.6s ease-out;
+}
+.dt-ping {
+  animation: dt-ping 1.9s var(--ease-out-quint) infinite;
+}
+.dt-shim {
+  background: linear-gradient(90deg, var(--muted) 30%, color-mix(in oklab, var(--muted) 40%, var(--card)) 50%, var(--muted) 70%);
+  background-size: 300% 100%;
+  animation: dt-shim 1.4s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-slot="table-row"][data-enter],
+  [data-slot="table-row"][data-new] { animation: dt-row-flash 0.01s both; }
+  .dt-ping, .dt-shim { animation: none; }
+}
+
 /* Odometer (components/viz/motion.tsx): one digit column per place, slid by a transition so a
    retarget mid-roll keeps its velocity instead of restarting; fade-masked top and bottom. */
 .odometer-digit {

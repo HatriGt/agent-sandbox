@@ -79,6 +79,10 @@ brief is "more modern", "smoother" or "premium", start here rather than inventin
 - [kargulstudio/sales-crm](https://github.com/kargulstudio/sales-crm) — MIT. Taken: 38/42px head/cell
   heights, meta lines with a 1px divider, `$`-style muted unit prefixes on numbers, the 120px
   centred empty row, active row = card tint.
+- Motion (index.css `dt-*`): rows rise 5px in, 26ms stagger capped at 14 rows; a sort replays a 12ms
+  stagger; a row that arrives on a later poll rises and flashes live-blue once; live dots ring outward
+  (box-shadow ping); loading cells shimmer; the sort icon morphs (chevrons → arrow, rotates for desc).
+  Polls never replay entrances. Reduced motion drops all movement.
 
 **Motion and interaction detail**
 

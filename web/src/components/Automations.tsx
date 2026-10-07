@@ -465,6 +465,7 @@ function AutomationList({
   const columns: Column<Automation>[] = [
     {
       id: "name",
+      primary: true,
       header: "Name",
       sort: (a) => a.name,
       cell: (a) => {

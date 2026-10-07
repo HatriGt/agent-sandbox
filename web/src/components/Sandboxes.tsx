@@ -267,7 +267,7 @@ function MachineTable({
       width: "w-[7.5rem]",
       cell: (b) => stateDot(b),
     },
-    { id: "task", header: "Task", cell: (b) => <TaskCell box={b} lifecycle={lifecycle} /> },
+    { id: "task", header: "Task", primary: true, cell: (b) => <TaskCell box={b} lifecycle={lifecycle} /> },
     { id: "machine", header: "Machine", width: "w-52", hideBelow: "md", cell: (b) => <MachineCell box={b} lifecycle={lifecycle} /> },
     { id: "left", header: "Time left", width: "w-[8.5rem]", hideBelow: "md", cell: (b) => <TimeLeft box={b} lifecycle={lifecycle} /> },
     // The row is the action (click opens the thread); this cell holds destroy + the click cue.
@@ -407,13 +407,13 @@ function RowActions({ box, onDestroyed }: { box: StableBox; onDestroyed: (name: 
         armedLabel="Destroy?"
         onConfirm={destroy}
         disabled={box.leaving}
-        className="text-muted-foreground opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100 data-[armed=true]:opacity-100 [@media(hover:none)]:opacity-60"
+        className="text-muted-foreground opacity-0 transition-opacity duration-150 group-hover/row:opacity-100 group-focus-within/row:opacity-100 data-[armed=true]:opacity-100 [@media(hover:none)]:opacity-60"
       />
       {box.runState === "waiting" ? (
         <span className="text-attention-text pointer-events-none text-meta font-semibold whitespace-nowrap">Answer →</span>
       ) : (
         <ChevronRight
-          className="text-muted-foreground pointer-events-none size-4 -translate-x-0.5 opacity-0 transition-[opacity,transform] duration-150 group-focus-within:translate-x-0 group-focus-within:opacity-100 group-hover:translate-x-0 group-hover:opacity-100 group-focus:translate-x-0 group-focus:opacity-100"
+          className="text-muted-foreground pointer-events-none size-4 -translate-x-1 opacity-0 transition-[opacity,translate] duration-200 ease-(--ease-out-quint) group-focus-within/row:translate-x-0 group-focus-within/row:opacity-100 group-hover/row:translate-x-0 group-hover/row:opacity-100 group-focus/row:translate-x-0 group-focus/row:opacity-100"
           aria-hidden
         />
       )}

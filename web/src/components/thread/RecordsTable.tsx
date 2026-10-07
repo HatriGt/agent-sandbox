@@ -21,6 +21,7 @@ interface Row {
 const COLUMNS: Column<Row>[] = [
   {
     id: "path",
+    primary: true,
     header: "File",
     sort: (r) => r.path,
     cell: (r) => {

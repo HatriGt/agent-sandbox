@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowDown, ArrowUp, ChevronsUpDown } from "lucide-react";
+import { ArrowUp, ChevronsUpDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, type TableProps } from "@/components/ui/table";
 
@@ -21,6 +21,8 @@ export interface Column<T> {
   width?: string;
   /** Hide below this breakpoint (the primary column should carry a mobile meta line instead). */
   hideBelow?: "sm" | "md" | "lg";
+  /** The column that names the row: bright ink and medium weight; every other column stays muted (Orbit). */
+  primary?: boolean;
   className?: string;
 }
 
@@ -82,7 +84,24 @@ export function DataTable<T>({
     });
   }, [rows, columns, sort]);
 
-  const cycle = (id: string) => setSort((s) => (s?.id !== id ? { id, dir: "asc" } : s.dir === "asc" ? { id, dir: "desc" } : null));
+  // Motion bookkeeping. Each row's entrance is decided once, the first time its key renders under
+  // this sort epoch: first paint → "in" (staggered rise), after a sort → "sort" (quick re-stagger;
+  // the epoch is in the React key so rows remount and replay), a key never seen before → "new"
+  // (rise + one flash). Polling re-renders keep the stored value, so nothing replays on refresh.
+  const [epoch, setEpoch] = React.useState(0);
+  const seen = React.useRef<Set<string> | null>(null);
+  const enterOf = React.useRef(new Map<string, "in" | "sort" | "new">());
+  const cycle = (id: string) => {
+    enterOf.current.clear();
+    setEpoch((n) => n + 1);
+    setSort((s) => (s?.id !== id ? { id, dir: "asc" } : s.dir === "asc" ? { id, dir: "desc" } : null));
+  };
+  React.useEffect(() => {
+    // Not until real rows arrive: an empty first render must not make every later row "new".
+    if (loading || (!seen.current && !rows.length)) return;
+    seen.current ??= new Set();
+    for (const r of rows) seen.current.add(rowKey(r));
+  }, [rows, rowKey, loading]);
   const grouped = !!groupOf && !sort;
 
   return (
@@ -102,10 +121,13 @@ export function DataTable<T>({
                   <button
                     type="button"
                     onClick={() => cycle(c.id)}
-                    className={cn("hover:text-foreground -mx-1.5 inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 transition-colors", on && "text-foreground", c.align === "end" && "flex-row-reverse")}
+                    className={cn("hover:text-foreground group/sort -mx-1.5 inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 uppercase transition-colors duration-150", on && "text-foreground", c.align === "end" && "flex-row-reverse")}
                   >
                     {c.header}
-                    {on === "asc" ? <ArrowUp className="size-3" /> : on === "desc" ? <ArrowDown className="size-3" /> : <ChevronsUpDown className="size-3 opacity-40" />}
+                    <span className="relative inline-grid size-3 place-items-center">
+                      <ChevronsUpDown className={cn("absolute size-3 transition-[opacity,scale] duration-200 ease-(--ease-out-quint)", on ? "scale-75 opacity-0" : "opacity-30 group-hover/sort:opacity-70")} />
+                      <ArrowUp className={cn("absolute size-3 transition-[opacity,rotate,scale] duration-200 ease-(--ease-out-quint)", on ? "opacity-100" : "scale-75 opacity-0", on === "desc" && "rotate-180")} />
+                    </span>
                   </button>
                 ) : (
                   c.header
@@ -121,7 +143,7 @@ export function DataTable<T>({
             <TableRow key={`sk${i}`}>
               {columns.map((c) => (
                 <TableCell key={c.id} className={cn(c.hideBelow && HIDE[c.hideBelow])}>
-                  <span className="bg-muted block h-3.5 max-w-32 animate-pulse rounded" style={{ width: `${55 + ((i * 17 + c.id.length * 7) % 40)}%` }} />
+                  <span className="dt-shim block h-3 max-w-32 rounded-full" style={{ width: `${55 + ((i * 17 + c.id.length * 7) % 40)}%` }} />
                 </TableCell>
               ))}
             </TableRow>
@@ -138,11 +160,18 @@ export function DataTable<T>({
             const head = grouped && g && (i === 0 || groupOf!(sorted[i - 1]) !== g);
             const p = rowProps?.(r);
             const click = onRowClick && (rowClickable?.(r) ?? true) ? () => onRowClick(r) : undefined;
+            const key = rowKey(r);
+            let enter = enterOf.current.get(key);
+            if (!enter) {
+              enter = !seen.current ? "in" : !seen.current.has(key) ? "new" : "sort";
+              enterOf.current.set(key, enter);
+            }
+            const motion = { "data-enter": enter === "new" ? undefined : enter, "data-new": enter === "new" ? "" : undefined, style: { ...p?.style, "--i": i } as React.CSSProperties };
             return (
-              <React.Fragment key={rowKey(r)}>
+              <React.Fragment key={`${epoch}:${key}`}>
                 {head && (
-                  <TableRow className="hover:bg-(--table-bg)">
-                    <TableCell colSpan={columns.length} className="label text-faint bg-(--table-head-bg,var(--table-bg)) py-1.5">
+                  <TableRow className="hover:bg-(--table-bg)" data-enter={motion["data-enter"]} style={motion.style}>
+                    <TableCell colSpan={columns.length} className="text-faint bg-(--table-head-bg,var(--table-bg)) h-auto py-2 pt-4 text-[11px] font-medium tracking-[0.05em] uppercase">
                       {g}
                     </TableCell>
                   </TableRow>
@@ -166,10 +195,12 @@ export function DataTable<T>({
                       : undefined
                   }
                   className={p?.className}
-                  style={p?.style}
+                  data-enter={motion["data-enter"]}
+                  data-new={motion["data-new"]}
+                  style={motion.style}
                 >
                   {columns.map((c) => (
-                    <TableCell key={c.id} align={c.align} className={cn("overflow-hidden", c.hideBelow && HIDE[c.hideBelow], c.className)}>
+                    <TableCell key={c.id} align={c.align} className={cn("overflow-hidden", c.hideBelow && HIDE[c.hideBelow], c.primary && "text-foreground font-medium", c.className)}>
                       {c.cell(r)}
                     </TableCell>
                   ))}
@@ -192,10 +223,7 @@ export function StatusDot({ tone, pulse, children, className }: { tone: "ok" | "
   const text = { ok: "text-ok", live: "text-live", attention: "text-attention-text", destructive: "text-destructive", muted: "text-muted-foreground" }[tone];
   return (
     <span className={cn("inline-flex items-center gap-1.5 text-meta font-medium", text, className)}>
-      <span className="relative inline-flex size-1.5 shrink-0">
-        {pulse && <span className={cn("absolute inset-0 animate-ping rounded-full opacity-60", dot)} />}
-        <span className={cn("relative size-1.5 rounded-full", dot)} />
-      </span>
+      <span className={cn("relative inline-flex size-1.5 shrink-0 rounded-full", dot, pulse && "dt-ping")} />
       {children}
     </span>
   );

@@ -261,6 +261,7 @@ function PlaybookTable({
   const columns: Column<WorkflowView>[] = [
     {
       id: "name",
+      primary: true,
       header: "Playbook",
       sort: (w) => w.name,
       cell: (w) => (

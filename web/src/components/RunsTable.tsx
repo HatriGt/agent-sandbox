@@ -120,12 +120,12 @@ const openable = (d: AutomationDelivery) => d.outcome === "fired" && !!d.box;
 
 export function RunsTable({ a, rows, onOpenBox }: { a: Automation | undefined; rows: AutomationDelivery[]; onOpenBox: (box: string) => void }) {
   const columns: Column<AutomationDelivery>[] = [
-    ...columnsFor(a).map((c) => ({ id: c, header: HEAD[c], width: WIDTH[c], sort: SORT[c], cell: (d: AutomationDelivery) => cell(c, d, d.facts) })),
+    ...columnsFor(a).map((c) => ({ id: c, header: HEAD[c], width: WIDTH[c], sort: SORT[c], primary: c === "subject" || c === "headline" || c === "alert", cell: (d: AutomationDelivery) => cell(c, d, d.facts) })),
     {
       id: "open",
       header: <span className="sr-only">Open</span>,
       width: "w-8",
-      cell: (d) => openable(d) && <ArrowUpRight className="text-faint group-hover/row:text-muted-foreground size-3.5" aria-hidden />,
+      cell: (d) => openable(d) && <ArrowUpRight className="text-faint size-3.5 transition-[color,translate] duration-200 ease-(--ease-out-quint) group-hover/row:text-foreground group-hover/row:translate-x-0.5 group-hover/row:-translate-y-0.5" aria-hidden />,
     },
   ];
   return (

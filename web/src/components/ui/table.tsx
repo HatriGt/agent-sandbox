@@ -31,21 +31,23 @@ function useScrollEdges(el: HTMLDivElement | null) {
   }, [el]);
 }
 
+/* Orbit's measures: 38px rows / 30px head, hairlines at ~6% ink, hover a 2.5–3% ink wash on 120ms.
+   `plain` (default) is Orbit's frameless list under a top hairline; `surface` is the card. */
 const tableVariants = cva(
-  "group/table relative w-full min-w-0 [--table-bg:var(--background)] [--table-hover:color-mix(in_oklab,var(--muted)_55%,var(--table-bg))]",
+  "group/table relative w-full min-w-0 [--table-bg:transparent] [--table-hover:color-mix(in_oklab,var(--foreground)_3%,transparent)] [--table-line:color-mix(in_oklab,var(--foreground)_7%,transparent)]",
   {
     variants: {
       variant: {
-        plain: "",
+        plain: "border-t border-(--table-line) [--table-head-bg:var(--background)]",
         surface:
-          "isolate overflow-clip rounded-xl border bg-(--table-bg) shadow-e1 [--table-bg:var(--card)] [--table-head-bg:color-mix(in_oklab,var(--muted)_70%,var(--table-bg))]",
+          "isolate overflow-clip rounded-xl border bg-(--table-bg) shadow-e1 [--table-bg:var(--card)] [--table-head-bg:color-mix(in_oklab,var(--muted)_55%,var(--card))]",
       },
       size: {
-        sm: "[--table-cell-px:--spacing(3)] [--table-cell-py:--spacing(1.5)] [--table-head-h:--spacing(8)]",
-        default: "[--table-cell-px:--spacing(3)] [--table-cell-py:--spacing(2.5)] [--table-head-h:--spacing(9)]",
+        sm: "[--table-cell-px:--spacing(2)] [--table-cell-py:--spacing(1.5)] [--table-head-h:--spacing(7.5)] [--table-row-h:34px]",
+        default: "[--table-cell-px:--spacing(2.5)] [--table-cell-py:--spacing(2)] [--table-head-h:--spacing(7.5)] [--table-row-h:38px]",
       },
     },
-    defaultVariants: { variant: "surface", size: "default" },
+    defaultVariants: { variant: "plain", size: "default" },
   }
 );
 
@@ -59,7 +61,7 @@ function Table({ className, variant, size, stickyHeader, containerClassName, ...
   const [el, setEl] = React.useState<HTMLDivElement | null>(null);
   useScrollEdges(el);
   return (
-    <div data-slot="table-frame" data-variant={variant ?? "surface"} className={tableVariants({ variant, size })}>
+    <div data-slot="table-frame" data-variant={variant ?? "plain"} className={tableVariants({ variant, size })}>
       <div
         ref={setEl}
         data-slot="table-container"
@@ -89,8 +91,8 @@ function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
     <tr
       data-slot="table-row"
       className={cn(
-        "group/row bg-(--table-bg) transition-colors duration-150 hover:bg-(--table-hover) data-[state=selected]:bg-muted",
-        "data-clickable:cursor-pointer data-clickable:outline-none data-clickable:focus-visible:bg-(--table-hover) data-clickable:focus-visible:shadow-[inset_2px_0_0_var(--ring)]",
+        "group/row relative bg-(--table-bg) transition-[background-color] duration-[120ms] hover:bg-(--table-hover) data-[state=selected]:bg-muted",
+        "data-clickable:cursor-pointer data-clickable:outline-none data-clickable:focus-visible:bg-(--table-hover) data-clickable:focus-visible:shadow-[inset_2px_0_0_var(--ring)] data-clickable:active:bg-[color-mix(in_oklab,var(--foreground)_6%,transparent)]",
         className
       )}
       {...props}
@@ -101,7 +103,7 @@ function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
 type Align = "start" | "center" | "end";
 
 const cellBase =
-  "border-b align-middle whitespace-nowrap data-[align=center]:text-center data-[align=end]:text-end data-[align=end]:tabular-nums group-data-[variant=surface]/table:first:ps-4 group-data-[variant=surface]/table:last:pe-4";
+  "border-b border-(--table-line) align-middle whitespace-nowrap data-[align=center]:text-center data-[align=end]:text-end data-[align=end]:tabular-nums group-data-[variant=surface]/table:first:ps-4 group-data-[variant=surface]/table:last:pe-4";
 
 function TableHead({ className, align, ...props }: Omit<React.ComponentProps<"th">, "align"> & { align?: Align }) {
   return (
@@ -111,7 +113,7 @@ function TableHead({ className, align, ...props }: Omit<React.ComponentProps<"th
       scope="col"
       className={cn(
         cellBase,
-        "label text-faint h-(--table-head-h) bg-(--table-head-bg,var(--table-bg)) px-(--table-cell-px) text-start font-medium",
+        "text-faint h-(--table-head-h) bg-(--table-head-bg,var(--table-bg)) px-(--table-cell-px) text-start text-[11px] font-medium tracking-[0.05em] uppercase",
         "in-data-scrolled-top:shadow-[inset_0_-1px_0_var(--border)] in-data-sticky-header:sticky in-data-sticky-header:top-0 in-data-sticky-header:z-2",
         className
       )}
@@ -121,7 +123,7 @@ function TableHead({ className, align, ...props }: Omit<React.ComponentProps<"th
 }
 
 function TableCell({ className, align, ...props }: Omit<React.ComponentProps<"td">, "align"> & { align?: Align }) {
-  return <td data-slot="table-cell" data-align={align} className={cn(cellBase, "px-(--table-cell-px) py-(--table-cell-py)", className)} {...props} />;
+  return <td data-slot="table-cell" data-align={align} className={cn(cellBase, "text-muted-foreground h-(--table-row-h) px-(--table-cell-px) py-(--table-cell-py)", className)} {...props} />;
 }
 
 export { Table, TableHeader, TableBody, TableRow, TableHead, TableCell, tableVariants };

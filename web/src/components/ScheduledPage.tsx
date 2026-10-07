@@ -73,6 +73,7 @@ export function ScheduledPage({ onOpenBox, onAutomations }: { onOpenBox: (box: s
   const columns: Column<Automation>[] = [
     {
       id: "task",
+      primary: true,
       header: "Task",
       cell: (t) => (
         <>
