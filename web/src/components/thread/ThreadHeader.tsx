@@ -1,18 +1,16 @@
 import * as React from "react";
-import { ArrowLeft, Check, FileText, FolderTree, HardDrive, Link2, ListTree, Loader2, MemoryStick, MessageSquareText, Moon, MoreHorizontal, Pencil, Pin, PinOff, Plus, RotateCw, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, FileText, FolderTree, HardDrive, Link2, ListTree, Loader2, MemoryStick, MessageSquareText, Moon, MoreHorizontal, Pencil, Pin, PinOff, Plus, RotateCw, Square, Trash2 } from "lucide-react";
 import { Swap } from "@/components/ui/swap";
 import { AnimatePresence, motion } from "motion/react";
 import { useReducedMotion } from "@/lib/motion-pref";
 import { menuMotion } from "./MentionMenu";
 import { toast } from "sonner";
 import type { BoxView } from "@/lib/api";
-import { fmtAgo, friendlyName, roleLabel, shortName } from "@/lib/format";
+import { fmtAgo, friendlyName, isFailedExit, roleLabel, shortName } from "@/lib/format";
 import { deadlineLabel, deadlineShort, fmtDuration, fmtUsage, type Deadline, type DisplayState } from "@/lib/lifecycle";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, MenuHint } from "@/components/ui/dropdown-menu";
-import { StatePill } from "@/components/ui/stamp";
-import { UsageMeter } from "@/components/ui/usage-meter";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { RepoPicker } from "@/components/RepoPicker";
 import { PullRequestFloat } from "./PullRequestFloat";
@@ -21,10 +19,10 @@ import { cn } from "@/lib/utils";
 /**
  * The thread's masthead: one block, two lines.
  *
- *   line 1 — the title (the only bold thing) and two controls: Files, and a ⋯ menu holding everything
- *            else (keep, rename, copy link/transcript, new task from this, destroy).
- *   line 2 — context as a sentence in the secondary colour: state · machine · repos · PR · lifecycle,
- *            and while the agent works, what it is doing right now.
+ *   line 1 — the Orbit task line: a mono id chip, the live state pill, the title, and the controls:
+ *            Stop (while a turn runs), Files, and a ⋯ menu holding everything else.
+ *   line 2 — meta separated by hairlines: machine · repos · PR · Started HH:MM · elapsed (ticking while
+ *            running, frozen once done) · agent/harness, and while the agent works, what it is doing.
  *
  * Telemetry lives in the machine name's tooltip; the loud red button lives inside the confirm dialog,
  * where destroying genuinely is the primary action.
@@ -42,6 +40,10 @@ export function ThreadHeader({
   attaching,
   pulls,
   activity,
+  startedAt,
+  endedAt,
+  onStop,
+  stopping,
   showWorkspace,
   removing,
   sleepNow,
@@ -79,6 +81,13 @@ export function ThreadHeader({
   pulls?: { url: string; repo: string; number: number }[];
   /** What the agent is doing right now, while running. */
   activity?: string | null;
+  /** Epoch ms of the run's first stamped event (or the digest's start). Omitted → no Started/elapsed. */
+  startedAt?: number;
+  /** Epoch ms of the last stamped event — where the elapsed timer freezes once the run is not running. */
+  endedAt?: number;
+  /** Stop the running turn (session kept). Present only while a turn runs. */
+  onStop?: () => void;
+  stopping?: boolean;
   showWorkspace: boolean;
   removing: boolean;
   /** Put the machine to sleep now (msb stop, nothing removed). Hidden while already asleep. */
@@ -182,6 +191,9 @@ export function ThreadHeader({
         ? `last action ${fmtAgo(box.lastOutputAt)}`
         : null;
   const long = deadlineLabel(deadline);
+  const running = state === "running";
+  const elapsed = useElapsed(startedAt, running ? undefined : endedAt, running);
+  const agentName = box.harness?.name ?? (box.agent ? (({ omp: "oh-my-pi", codex: "Codex CLI", opencode: "OpenCode", claude: "Claude Code" } as Record<string, string>)[box.agent] ?? box.agent) : null);
   // Which resource's request is in flight — the confirm dialog is shared between the two.
   const busyFor = resizeTo?.kind === "disk" ? diskBusy : memoryBusy;
   // The harness this thread started on ("Harness: Bug fixer · asks before guessing · verify on done"):
@@ -217,6 +229,13 @@ export function ThreadHeader({
         <Button variant="ghost" size="icon-sm" onClick={onBack} aria-label="Back to machines" className="-ml-1 md:hidden">
           <ArrowLeft />
         </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="bg-muted text-muted-foreground hidden shrink-0 rounded px-1.5 py-0.5 font-mono text-micro sm:inline">{box.name.slice(-6)}</span>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">{box.name}</TooltipContent>
+        </Tooltip>
+        <LiveStatePill state={state} exitCode={exitCode} stalled={box.stalled} />
         {editing ? (
           <input
             ref={inputRef}
@@ -256,6 +275,17 @@ export function ThreadHeader({
         {/* Under md the secondary actions (new task, files) fold into the ⋯ menu — one control beside
             the title, so the title keeps the width. */}
         <div className="ml-auto flex shrink-0 items-center gap-1">
+          {onStop && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="sm" onClick={onStop} disabled={stopping} className="text-muted-foreground">
+                  {stopping ? <Loader2 className="animate-spin" /> : <Square className="fill-current" />}
+                  <span className="hidden sm:inline">{stopping ? "Stopping…" : "Stop"}</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Stop this turn — the session is kept; a message resumes it</TooltipContent>
+            </Tooltip>
+          )}
           <Tooltip>
             <TooltipTrigger asChild>
               {/* A disabled button emits no pointer events; the span carries the tooltip while asleep. */}
@@ -413,10 +443,6 @@ export function ThreadHeader({
           machine, repos — the meters and lifecycle live in the machine's tooltip and the ⋯ menu),
           and the repo chips scroll sideways rather than stacking into a third and fourth row. */}
       <div className="text-muted-foreground mt-1 flex min-h-6 min-w-0 flex-nowrap items-center gap-x-2 text-meta">
-        <span className="shrink-0">
-          <StatePill state={state} exitCode={exitCode} stalled={box.stalled} />
-        </span>
-        <Dot />
         <Tooltip>
           <TooltipTrigger asChild>
             <span className="stamp inline-flex shrink-0 items-center gap-1" title={shortName(box.name)}>
@@ -495,19 +521,22 @@ export function ThreadHeader({
           </>
         )}
 
-        {/* Live vitals as meters. They only render while awake — a frozen meter reads as live and
-            lies, so mergeWithMemory drops the numbers when a box sleeps. */}
-        {/* Meters are a desktop luxury; on a phone the numbers live in the machine's tooltip. Above
-            xl the meters keep their readouts; between md and xl they are bars only, so the line
-            holds with a PR chip and the live activity beside them. */}
-        {!sleeping && (box.memUsage || box.disk) && (
-          <span className="hidden shrink-0 items-center gap-2 xl:flex">
+        {startedAt !== undefined && (
+          <>
             <Dot />
-            <span className="flex shrink-0 items-center gap-2.5 [&_span]:whitespace-nowrap">
-              <UsageMeter kind="memory" usage={box.memUsage} />
-              {/* Disk is the slower story; it joins the line only where there is room. */}
-              <UsageMeter kind="disk" usage={box.disk} className="hidden 2xl:inline-flex" />
-            </span>
+            <span className="hidden shrink-0 whitespace-nowrap sm:inline">Started {new Date(startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}</span>
+            {elapsed && (
+              <span className={cn("stamp shrink-0 tabular-nums", running ? "text-live" : "text-faint")} aria-label={`Elapsed ${elapsed}`}>
+                {elapsed}
+              </span>
+            )}
+          </>
+        )}
+
+        {agentName && (
+          <span className="hidden shrink-0 items-center gap-2 whitespace-nowrap lg:flex">
+            <Dot />
+            <span>{agentName}</span>
           </span>
         )}
 
@@ -600,10 +629,55 @@ export function ThreadHeader({
   );
 }
 
+/** Hairline meta separator. */
 function Dot() {
+  return <span className="bg-border inline-block h-3 w-px shrink-0 self-center" aria-hidden />;
+}
+
+/** `mm:ss` (or `h:mm:ss`) from start to end — ticking each second while `live`, frozen otherwise. */
+function useElapsed(start: number | undefined, end: number | undefined, live: boolean): string | null {
+  const [now, setNow] = React.useState(() => Date.now());
+  React.useEffect(() => {
+    if (!live || start === undefined) return;
+    setNow(Date.now());
+    const t = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(t);
+  }, [live, start]);
+  if (start === undefined) return null;
+  const stop = live ? now : end;
+  if (stop === undefined) return null;
+  const s = Math.max(0, Math.floor((stop - start) / 1000));
+  const h = Math.floor(s / 3600);
+  const mm = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
+  const ss = String(s % 60).padStart(2, "0");
+  return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
+/**
+ * The Orbit state pill, in the shared live vocabulary: Working (text shimmer + pinging dot) ·
+ * Needs you · Asleep · Done · Failed · Idle. Colours are the existing state tokens.
+ */
+function LiveStatePill({ state, exitCode, stalled }: { state: DisplayState; exitCode?: number; stalled?: boolean }) {
+  const failed = state === "done" && isFailedExit(exitCode);
+  const working = state === "running" && !stalled;
+  const [word, tone] =
+    state === "running"
+      ? stalled
+        ? ["Stalled", "text-destructive bg-destructive/10"]
+        : ["Working", "text-live bg-live/10"]
+      : state === "waiting"
+        ? ["Needs you", "text-attention-text bg-attention/15"]
+        : state === "sleeping"
+          ? ["Asleep", "text-sleep bg-sleep/10"]
+          : state === "done"
+            ? failed
+              ? ["Failed", "text-destructive bg-destructive/10"]
+              : ["Done", "text-ok bg-ok/10"]
+            : ["Idle", "text-muted-foreground bg-muted"];
   return (
-    <span className="text-faint select-none" aria-hidden>
-      ·
+    <span key={word} className={cn("pop-in inline-flex h-5 shrink-0 items-center gap-1.5 rounded-full px-2 text-micro font-medium transition-colors duration-200", tone)}>
+      <span className={cn("size-1.5 rounded-full bg-current", working && "dt-ping")} aria-hidden />
+      <span className={cn(working && "shimmer-text")}>{word}</span>
     </span>
   );
 }

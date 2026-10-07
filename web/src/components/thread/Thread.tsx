@@ -39,7 +39,7 @@ import { ChatContainerContent, ChatContainerRoot, ChatContainerScrollAnchor } fr
 import type { TraceEvent } from "@/lib/trace";
 import { LiveRegistryContext, SayKeyContext } from "@/components/viz/live-blocks";
 import { buildLiveRegistry, type SayInput } from "@/lib/viz-identity";
-import { AgentLabel, AnsweredQuestionItem, Density, LifecycleItem, MemoryItem, ObserverItem, PlanCard, QueuedItem, RepeatedPolls, SayItem, ThinkingItem, ToolGroup, WorkingIndicator, YouItem, repeatedPolls, type ThreadDensity } from "./TraceItems";
+import { AgentLabel, AnsweredQuestionItem, Density, ExpandAll, LifecycleItem, MemoryItem, ObserverItem, PlanCard, QueuedItem, RepeatedPolls, SayItem, ThinkingItem, ToolGroup, WorkingIndicator, YouItem, repeatedPolls, type ThreadDensity } from "./TraceItems";
 import { PlanDock } from "./PlanBoard";
 import { ThreadMinimap, type Turn } from "./ThreadMinimap";
 import { useStickToBottom } from "use-stick-to-bottom";
@@ -588,6 +588,31 @@ export function Thread({
     }
     return events.length ? "working" : "starting";
   }, [events, runState, sleeping]);
+  // The run's clock for the header: first stamped event → now while running, → last stamp once done.
+  const stamps = React.useMemo(() => {
+    let first: number | undefined;
+    let last: number | undefined;
+    for (const e of events) {
+      const at = "at" in e ? e.at : undefined;
+      if (at === undefined) continue;
+      if (first === undefined) first = at;
+      const end = e.kind === "tool" && e.ms !== undefined ? at + e.ms : at;
+      if (last === undefined || end > last) last = end;
+    }
+    return { first: digest?.startedAt ?? first, last: digest?.endedAt ?? last };
+  }, [events, digest?.startedAt, digest?.endedAt]);
+  const [stopping, setStopping] = React.useState(false);
+  React.useEffect(() => setStopping(false), [box.name, runState]);
+  const stopTurn = async () => {
+    setStopping(true);
+    try {
+      await api.interrupt(box.name);
+    } catch (e) {
+      setStopping(false);
+      toast.error("Could not stop the turn", { description: e instanceof Error ? e.message : String(e) });
+    }
+  };
+  const [expandAll, setExpandAll] = React.useState({ v: 0, open: false });
 
   // Turns for the minimap: the task plus every message you sent, each with how the agent replied.
   const stick = useStickToBottom({ resize: "smooth", initial: "instant" });
@@ -728,6 +753,10 @@ export function Thread({
         attaching={attaching}
         pulls={pulls.length > 0 && !loadingTrace ? pulls : undefined}
         activity={activity}
+        startedAt={stamps.first}
+        endedAt={stamps.last}
+        onStop={runState === "running" && !sleeping ? stopTurn : undefined}
+        stopping={stopping}
         showWorkspace={showWorkspace}
         removing={removing}
         sleepNow={sleepNow}
@@ -766,6 +795,12 @@ export function Thread({
         <div aria-hidden className="to-background pointer-events-none absolute inset-x-0 bottom-0 z-10 h-8 bg-gradient-to-b from-transparent" />
         <ChatContainerRoot className="relative h-full [&>div]:overflow-x-hidden" instance={stick} aria-label="Conversation" aria-busy={runState === "running"}>
           <ChatContainerContent className="mx-auto w-full max-w-3xl gap-5 px-4 pt-7 pb-12 md:px-6">
+            {/* The dock is hidden below xl (or behind the workspace): the plan opens the conversation instead. */}
+            {planBoard && !sleeping && !loadingTrace && (
+              <div className={cn(showWorkspace ? "" : "xl:hidden")}>
+                <PlanCard board={planBoard} live={runState === "running"} />
+              </div>
+            )}
             {box.task && (
               <div data-turn="task">
                 <YouItem text={box.task} label="Task" noEnter />
@@ -776,6 +811,18 @@ export function Thread({
 
             {/* Skeleton → transcript is a crossfade, not a cut: the placeholder is shaped like the
                 content, so the swap reads as the bones filling in. */}
+            {!loadingTrace && groups.some((g) => g.kind === "tools" || g.kind === "think") && (
+              <div className="text-muted-foreground -mb-2 flex h-7 items-center gap-1 border-b text-micro">
+                <span className="label mr-auto font-semibold tracking-wider uppercase">Execution</span>
+                <button type="button" onClick={() => setExpandAll((s) => ({ v: s.v + 1, open: true }))} className="hover:bg-muted hover:text-foreground cursor-pointer rounded-md px-2 py-1 transition-colors">
+                  Expand all
+                </button>
+                <button type="button" onClick={() => setExpandAll((s) => ({ v: s.v + 1, open: false }))} className="hover:bg-muted hover:text-foreground cursor-pointer rounded-md px-2 py-1 transition-colors">
+                  Collapse all
+                </button>
+              </div>
+            )}
+            <ExpandAll.Provider value={expandAll}>
             <LiveRegistryContext.Provider value={liveContext}>
             <RepeatedPolls.Provider value={repeats}>
             <Density.Provider value={density}>
@@ -823,15 +870,13 @@ export function Thread({
               ) : g.kind === "think" ? (
                 <div key={key} className="min-w-0">
                   {opensAgent && <AgentLabel live={liveHere} />}
-                  {(density === "trace" || liveHere) && <ThinkingItem text={g.text} live={liveHere} />}
+                  {(density === "trace" || liveHere) && <ThinkingItem text={g.text} live={liveHere} ms={g.ms} />}
                 </div>
               ) : g.kind === "memory" ? (
                 <MemoryItem key={key} notes={g.notes} />
               ) : g.kind === "plan" ? (
-                // The dock owns the plan on wide screens; in flow it would be the same board twice.
-                <div key={key} className="xl:hidden">
-                  <PlanCard board={g.board} live={runState === "running"} />
-                </div>
+                // The plan renders once, at the head of the conversation (or in the dock on wide screens).
+                null
               ) : (
                 <div key={key} data-say className="min-w-0">
                   <SayKeyContext.Provider value={`say-${i}`}>
@@ -844,6 +889,7 @@ export function Thread({
             </Density.Provider>
             </RepeatedPolls.Provider>
             </LiveRegistryContext.Provider>
+            </ExpandAll.Provider>
 
             {/* What this chat scheduled, right under the message that scheduled it. */}
             {!loadingTrace && <ScheduledCard box={box.name} runState={String(runState ?? "")} onRetry={(text) => setSeed({ text, n: Date.now() })} />}
@@ -1136,7 +1182,7 @@ type TraceGroup =
   | { kind: "lifecycle"; label: string; detail?: string }
   | { kind: "tools"; events: ToolEvent[] }
   | { kind: "mcp-connect"; server: string }
-  | { kind: "think"; text: string }
+  | { kind: "think"; text: string; ms?: number }
   | { kind: "plan"; board: TaskBoard }
   | { kind: "memory"; notes: { note: string; text: string; area?: string; updated?: boolean }[] };
 
@@ -1148,7 +1194,8 @@ function groupTrace(events: TraceEvent[]): TraceGroup[] {
   // First contact with each MCP server gets a lifecycle hairline — so a server that SHOULD appear
   // but never does (silently dropped at handshake) is visible by absence.
   const seenServers = new Set<string>();
-  for (const e of events) {
+  for (let idx = 0; idx < events.length; idx++) {
+    const e = events[idx];
     if (e.kind === "tool") {
       const mcp = parseMcpName(e.name);
       if (mcp && !seenServers.has(mcp.server)) {
@@ -1177,7 +1224,19 @@ function groupTrace(events: TraceEvent[]): TraceGroup[] {
     } else if (e.kind === "ask") {
       out.push({ kind: "asked", question: e.text, answer: "" });
     } else if (e.kind === "think") {
-      out.push({ kind: "think", text: e.text });
+      // Think events carry no stamp; the gap between the stamped events around it bounds it.
+      let before: number | undefined;
+      for (let j = idx - 1; j >= 0 && before === undefined; j--) {
+        const p = events[j];
+        if (p.kind === "tool" && p.at !== undefined) before = p.at + (p.ms ?? 0);
+        else if ((p.kind === "say" || p.kind === "you" || p.kind === "plan" || p.kind === "memory") && p.at !== undefined) before = p.at;
+      }
+      let after: number | undefined;
+      for (let j = idx + 1; j < events.length && after === undefined; j++) {
+        const n = events[j];
+        if ("at" in n && n.at !== undefined) after = n.at;
+      }
+      out.push({ kind: "think", text: e.text, ...(before !== undefined && after !== undefined && after > before ? { ms: after - before } : {}) });
     } else if (e.kind === "plan") {
       // The plan is a living document: every TodoWrite re-emits the whole list. Show it ONCE, where
       // it first appeared, in its latest state — so the checklist ticks in place instead of stacking.

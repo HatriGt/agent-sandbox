@@ -3,13 +3,13 @@ import { Link, useLocation, useNavigationType } from "react-router";
 import { ArrowRight, Bell, BellOff, Brain, ChevronRight, Clock, Flame, Keyboard, Layers, LayoutGrid, ListChecks, LogOut, Menu, Moon, PanelLeftClose, PanelLeftOpen, Pause, Plug, PlugZap, Plus, Search, Shield, Sparkles, Sun, UserRound, WifiOff, Workflow, Zap } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { setMotionPref, useMotionPref, useReducedMotion, type MotionPref } from "@/lib/motion-pref";
-import { api, type FleetLifecycle, type FleetSnapshot } from "@/lib/api";
+import { api, type Automation, type FleetLifecycle, type FleetSnapshot } from "@/lib/api";
 import { POLL_MS, isUp, isVisible, threadSort, threadTitle } from "@/lib/format";
 import { questionHeadline } from "@/lib/question";
 import { legacyHashTarget, useConsoleRoute, useGo } from "@/lib/route";
 import type { AutopilotTab } from "@/components/AutopilotPage";
 import { usePoll } from "@/hooks/usePoll";
-import { prefetch } from "@/lib/cache";
+import { prefetch, readCache } from "@/lib/cache";
 import { useStableBoxes } from "@/hooks/useStableBoxes";
 import { dropWatchCache } from "@/hooks/useWatchStream";
 import { useSessionRuns } from "@/hooks/useSessionRuns";
@@ -26,6 +26,8 @@ import { PageEnter } from "@/components/ui/page";
 import { TrialBadge } from "@/components/TrialBadge";
 import { Capacity } from "@/components/Capacity";
 import { CommandPalette, openPalette, type PaletteAction } from "@/components/CommandPalette";
+import { TopBar, type Crumb } from "@/components/TopBar";
+import { ShellTabs, useShellTabs } from "@/components/ShellTabs";
 import { ShortcutsDialog } from "@/components/ShortcutsDialog";
 import { Toaster } from "@/components/ui/sonner";
 import { getMe, signOut } from "@/lib/auth";
@@ -518,6 +520,38 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paneKey]);
 
+  // Frame: breadcrumbs + the editor-style tabs both name the current route the same way.
+  const automationName =
+    route.view === "automation-runs" ? readCache<{ triggers: Automation[] }>("triggers")?.v.triggers.find((t) => t.id === route.id)?.name : undefined;
+  const routeBox = selectedBox ?? selectedRaw;
+  const routeLabel =
+    route.view === "box" ? (routeBox ? threadTitle(routeBox) : route.name) : route.view === "automation-runs" ? automationName || route.id : route.view === "pr" ? `PR #${route.number}` : "";
+  const goHub = React.useCallback(() => go({ view: "hub" }), [go]);
+  const shellTabs = useShellTabs({ route, label: routeLabel, fleet: data && Array.isArray(data.boxes) ? data.boxes : null, fleetAt: updatedAt, go });
+  const autopilot: Crumb = { label: "Autopilot", onClick: showAutomations };
+  const crumbs: Crumb[] =
+    route.view === "hub"
+      ? [{ label: "Home" }]
+      : route.view === "box"
+        ? [{ label: "Machines", onClick: showFleet }, { label: routeLabel }]
+        : route.view === "pr"
+          ? [{ label: "Machines", onClick: showFleet }, { label: routeBox ? threadTitle(routeBox) : route.name, onClick: () => open(route.name) }, { label: routeLabel }]
+          : route.view === "automation-runs"
+            ? [autopilot, { label: "Automations", onClick: showAutomations }, { label: routeLabel }]
+            : route.view === "automations"
+              ? [autopilot, { label: "Automations" }]
+              : route.view === "scheduled"
+                ? [autopilot, { label: "Scheduled" }]
+                : route.view === "workflows"
+                  ? [autopilot, { label: "Playbooks" }]
+                  : route.view === "fleet"
+                    ? [{ label: "Fleet view" }]
+                    : route.view === "admin"
+                      ? [{ label: "Account", onClick: showAccount }, { label: "Admin" }]
+                      : route.view === "connect"
+                        ? [{ label: "Account", onClick: showAccount }, { label: "Connect an IDE" }]
+                        : [{ label: { history: "History", skills: "Skills", memory: "Memory", harnesses: "Harnesses", integrations: "Integrations", account: "Account", welcome: "Welcome" }[route.view] }];
+
   // The expanded rail body is rendered twice — in the desktop <aside> and inside the phone drawer.
   const railBody = (
     <>
@@ -527,14 +561,14 @@ export default function App() {
           New task
           <Kbd tone="inverse" className="ml-auto">n</Kbd>
         </Button>
+        {/* Desktop searches from the top bar; the phone drawer keeps its own entry. */}
         <button
           type="button"
           onClick={openPalette}
-          className="text-muted-foreground hover:text-foreground hover:border-line-strong bg-background/60 hover:bg-background flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md border px-3 text-left text-meta transition-[color,background-color,border-color] duration-150"
+          className="text-muted-foreground hover:text-foreground bg-background/60 flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md border px-3 text-left text-meta transition-colors duration-150 md:hidden"
         >
           <Search className="size-4 shrink-0" aria-hidden />
           <span className="flex-1">Search</span>
-          <Kbd keys={["⌘", "K"]} />
         </button>
       </div>
 
@@ -594,12 +628,14 @@ export default function App() {
         </button>
       </Collapse>
 
-      <div className="flex flex-col gap-0.5 border-t px-2 py-2">
-        <NavItem active={view === "fleet"} flash={flash === "fleet"} onClick={showFleet} icon={<LayoutGrid />} label="Fleet view" badge={boxes.length || undefined} shortcut="g f" />
+      <div className="flex flex-col gap-px border-t px-2 py-2">
+        <p className="label text-faint px-2.5 pt-1 pb-1 text-[10px] tracking-[0.08em] uppercase">Workspace</p>
+        <NavItem active={view === "fleet"} flash={flash === "fleet"} onClick={showFleet} icon={<LayoutGrid />} label="Fleet view" badge={boxes.length || undefined} attention={waiting.length || undefined} shortcut="g f" />
         <NavItem active={view === "automations" || view === "automation-runs" || view === "scheduled" || view === "workflows"} onClick={showAutomations} icon={<Workflow />} label="Autopilot" />
         <span className="contents" onMouseEnter={prefetchHistory}>
           <NavItem active={view === "history"} flash={flash === "history"} onClick={showHistory} icon={<Clock />} label="History" shortcut="g h" />
         </span>
+        <p className="label text-faint px-2.5 pt-3 pb-1 text-[10px] tracking-[0.08em] uppercase">Resources</p>
         <span className="contents" onMouseEnter={prefetchSkills}>
           <NavItem active={view === "skills"} flash={flash === "skills"} onClick={showSkills} icon={<Zap />} label="Skills" shortcut="g s" />
         </span>
@@ -608,7 +644,8 @@ export default function App() {
         <span className="contents" onMouseEnter={prefetchIntegrations}>
           <NavItem active={view === "integrations"} flash={flash === "integrations"} onClick={showAccounts} icon={<Plug />} label="Integrations" shortcut="g a" />
         </span>
-        <TrialBadge className="mx-2.5 mt-1 self-start" />
+        <div className="mt-2 border-t pt-2" />
+        <TrialBadge className="mx-2.5 mb-1 self-start" />
         {/* Account/Connect must be reachable in token mode too — the operator uses
             notifications, API keys and the IDE wizard just like a saas user. */}
         <NavItem
@@ -768,12 +805,12 @@ export default function App() {
           {collapsed ? (
             <nav key="rail" className="rail-reveal flex flex-1 flex-col items-center gap-1.5 px-2 pt-1 pb-3" aria-label="Sections">
               <RailIcon onClick={newTask} icon={<Plus />} label="New task" shortcut="n" primary />
-              <RailIcon onClick={openPalette} icon={<Search />} label="Search" shortcut="⌘K" />
-              <RailIcon active={view === "fleet"} flash={flash === "fleet"} onClick={showFleet} icon={<LayoutGrid />} label="Fleet view" shortcut="g f" badge={boxes.length || undefined} dot={waiting.length > 0} />
+              <RailIcon active={view === "fleet"} flash={flash === "fleet"} onClick={showFleet} icon={<LayoutGrid />} label={waiting.length ? `Fleet view · ${waiting.length} need you` : "Fleet view"} shortcut="g f" badge={boxes.length || undefined} dot={waiting.length > 0} />
               <RailIcon active={view === "automations" || view === "automation-runs" || view === "scheduled" || view === "workflows"} onClick={showAutomations} icon={<Workflow />} label="Autopilot" />
               <span className="contents" onMouseEnter={prefetchHistory}>
                 <RailIcon active={view === "history"} flash={flash === "history"} onClick={showHistory} icon={<Clock />} label="History" shortcut="g h" />
               </span>
+              <span className="bg-border my-0.5 h-px w-6" aria-hidden />
               <span className="contents" onMouseEnter={prefetchSkills}>
                 <RailIcon active={view === "skills"} flash={flash === "skills"} onClick={showSkills} icon={<Zap />} label="Skills" shortcut="g s" />
               </span>
@@ -812,6 +849,8 @@ export default function App() {
               <Plus className="size-4" />
             </Button>
           </div>
+          <TopBar crumbs={crumbs} working={working} waiting={waiting.length} onOpenWaiting={() => waiting[0] && open(waiting[0].name)} collapsed={collapsed} onToggleSidebar={() => setCollapsed(!collapsed)} />
+          <ShellTabs tabs={shellTabs.tabs} activeKey={shellTabs.activeKey} homeActive={route.view === "hub"} gone={shellTabs.gone} boxes={boxes} onSelect={go} onHome={goHub} onClose={shellTabs.close} />
           <AnimatePresence mode="wait" initial={false} custom={paneCustom}>
             <motion.div
               key={paneKey}
@@ -1041,6 +1080,7 @@ function NavItem({
   icon,
   label,
   badge,
+  attention,
   shortcut,
 }: {
   active: boolean;
@@ -1050,6 +1090,8 @@ function NavItem({
   icon: React.ReactNode;
   label: string;
   badge?: number;
+  /** Needs-you count, shown in the attention colour beside the label. */
+  attention?: number;
   shortcut?: string;
 }) {
   const reduce = useReducedMotion();
@@ -1061,7 +1103,7 @@ function NavItem({
       aria-keyshortcuts={shortcut?.replace(" ", "+")}
       data-flash={flash ? "true" : undefined}
       className={cn(
-        "group relative isolate flex h-9 cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-meta transition-colors duration-150 [&_svg]:size-4 [&_svg]:shrink-0",
+        "group relative isolate flex h-8 cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-[13px] transition-colors duration-150 [&_svg]:size-4 [&_svg]:shrink-0",
         "data-[flash=true]:bg-muted",
         active ? "text-foreground font-medium" : "text-muted-foreground hover:text-foreground hover:bg-muted [&_svg]:text-faint hover:[&_svg]:text-muted-foreground"
       )}
@@ -1072,7 +1114,13 @@ function NavItem({
         </motion.span>
       )}
       {icon}
-      <span className="min-w-0 flex-1 truncate">{label}</span>
+      <span className="min-w-0 truncate">{label}</span>
+      {attention != null && (
+        <span className="text-attention-text bg-attention/10 pop-in shrink-0 rounded px-1.5 text-[11px] leading-[18px] font-medium tabular-nums">
+          <NumberTicker value={attention} from={attention} /> need you
+        </span>
+      )}
+      <span className="flex-1" />
       {/* The shortcut surfaces on hover/focus, where the eye already is — no tooltip to wait for.
           Badge and chord share one slot and crossfade so nothing blinks in or out. */}
       {(badge != null || shortcut) && (
@@ -1148,7 +1196,8 @@ function RailIcon({
   );
 }
 
-const PANE_EASE = [0.22, 1, 0.36, 1] as const;
+/** Orbit's ease: quick out, soft landing. */
+const PANE_EASE = [0.2, 0.8, 0.2, 1] as const;
 
 function paneDepth(key: string) {
   return key === "hub" ? 0 : key === "launch" || key.startsWith("box") || key.startsWith("pr:") ? 2 : 1;

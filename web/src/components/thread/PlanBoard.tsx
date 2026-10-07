@@ -1,5 +1,5 @@
 import * as React from "react";
-import { AlertTriangle, Check, ChevronRight, Circle, CircleDot, Loader2, PanelRightClose, PanelRightOpen } from "lucide-react";
+import { AlertTriangle, ChevronRight, PanelRightClose, PanelRightOpen } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useReducedMotion } from "@/lib/motion-pref";
 import { shortDuration, shortPath, type DerivedTask, type TaskBoard, type TaskEvidence } from "@/lib/planTasks";
@@ -22,18 +22,29 @@ import { cn } from "@/lib/utils";
  * Evidence per step comes from `deriveTaskBoard` — see `lib/planTasks.ts` for the attribution rule.
  */
 
-/** `2 files · 9s` — the facts that fit on the row, in the same voice as the Worked line. */
+/** `2 files` — the evidence that fits on the row; the step's duration has its own right-aligned slot. */
 function evidenceSummary(e: TaskEvidence): string {
-  const parts: string[] = [];
-  if (e.files.length) parts.push(`${e.files.length} file${e.files.length > 1 ? "s" : ""}`);
-  else if (e.commands.length) parts.push(`${e.commands.length} command${e.commands.length > 1 ? "s" : ""}`);
-  else if (e.steps) parts.push(`${e.steps} step${e.steps > 1 ? "s" : ""}`);
-  if (e.ms !== undefined) parts.push(shortDuration(e.ms));
-  return parts.join(" · ");
+  if (e.files.length) return `${e.files.length} file${e.files.length > 1 ? "s" : ""}`;
+  if (e.commands.length) return `${e.commands.length} command${e.commands.length > 1 ? "s" : ""}`;
+  if (e.steps) return `${e.steps} step${e.steps > 1 ? "s" : ""}`;
+  return "";
 }
 
 const SPRING = { type: "spring", stiffness: 460, damping: 34 } as const;
-const EASE = [0.22, 1, 0.36, 1] as const;
+/** Orbit's ease. */
+const EASE = [0.2, 0.8, 0.2, 1] as const;
+const BRAILLE = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
+
+/** The active step's braille spinner; a still frame under reduced motion or when the run is not live. */
+function Braille({ spin }: { spin: boolean }) {
+  const [i, setI] = React.useState(0);
+  React.useEffect(() => {
+    if (!spin) return;
+    const t = window.setInterval(() => setI((n) => (n + 1) % BRAILLE.length), 80);
+    return () => window.clearInterval(t);
+  }, [spin]);
+  return <span className="font-mono leading-none">{BRAILLE[i]}</span>;
+}
 
 /**
  * The step marker. A completed step STAMPS in — the one place a spring is louder than a fade.
@@ -46,65 +57,71 @@ const EASE = [0.22, 1, 0.36, 1] as const;
 function StepMark({ state, live, failed }: { state: DerivedTask["state"]; live?: boolean; failed?: boolean }) {
   const reduce = useReducedMotion();
   if (state === "done") {
+    // The check DRAWS in (path length), so a step completing is a stroke, not a swap.
     return (
-      <motion.span
-        initial={reduce ? false : { scale: 0.5, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        transition={SPRING}
+      <span
         title={failed ? "Done, but a call in this step returned an error" : undefined}
-        className={cn(
-          "grid size-5 shrink-0 place-items-center rounded-md",
-          failed ? "bg-destructive/15 text-destructive" : "bg-ok/20 text-ok"
-        )}
+        className={cn("grid size-4 shrink-0 place-items-center", failed ? "text-destructive" : "text-ok")}
       >
-        <Check className="size-3" strokeWidth={3} aria-hidden />
-      </motion.span>
+        <svg viewBox="0 0 16 16" className="size-3.5" fill="none" stroke="currentColor" strokeWidth={2.25} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <motion.path d="M3.5 8.5l3 3 6-7" initial={reduce ? false : { pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 0.32, ease: EASE }} />
+        </svg>
+      </span>
     );
   }
   if (state === "active") {
     return (
-      <span className="relative grid size-5 shrink-0 place-items-center">
-        {/* A halo behind the live marker, so the eye lands on the step in progress first. */}
-        {live && !reduce && (
-          <motion.span
-            className="bg-live/20 absolute inset-0 rounded-md"
-            animate={{ scale: [1, 1.35, 1], opacity: [0.6, 0, 0.6] }}
-            transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
-          />
-        )}
-        <span className="bg-live/10 text-live relative grid size-5 place-items-center rounded-md">
-          <CircleDot className={cn("size-3", live && "breathe")} strokeWidth={2.5} aria-hidden />
-        </span>
+      <span className="text-live grid size-4 shrink-0 place-items-center text-meta" aria-label="in progress">
+        <Braille spin={!!live && !reduce} />
       </span>
     );
   }
   return (
-    <span className="text-faint grid size-5 shrink-0 place-items-center rounded-md border">
-      <Circle className="size-2" aria-hidden />
+    <span className="grid size-4 shrink-0 place-items-center" aria-hidden>
+      <span className="border-line-strong size-2.5 rounded-full border" />
     </span>
   );
 }
 
-/** Determinate progress, and the card's structural divider in one 2px line. */
-function ProgressRail({ done, total, complete, failed, layoutId }: { done: number; total: number; complete: boolean; failed?: boolean; layoutId?: string }) {
-  const pct = total ? (done / total) * 100 : 0;
+/** One thin segment per step: filled when done, shimmering while active, empty otherwise. */
+function ProgressRail({ tasks, live, layoutId }: { tasks: DerivedTask[]; live?: boolean; layoutId?: string }) {
+  const reduce = useReducedMotion();
+  const done = tasks.filter((t) => t.state === "done").length;
   return (
-    <div
+    <motion.div
+      layoutId={layoutId}
       role="progressbar"
       aria-valuemin={0}
-      aria-valuemax={total}
+      aria-valuemax={tasks.length}
       aria-valuenow={done}
-      aria-label={`${done} of ${total} steps done`}
-      className="bg-border relative h-0.5 w-full shrink-0 overflow-hidden"
+      aria-label={`${done} of ${tasks.length} steps done`}
+      className="flex h-1 w-full shrink-0 gap-0.5"
     >
-      <motion.div
-        layoutId={layoutId}
-        className={cn("absolute inset-y-0 left-0", complete ? (failed ? "bg-destructive" : "bg-ok") : "bg-live")}
-        initial={false}
-        animate={{ width: `${pct}%` }}
-        transition={{ duration: 0.5, ease: EASE }}
-      />
-    </div>
+      {tasks.map((t, i) => (
+        <span key={`${i}-${t.text}`} className="bg-border relative h-full flex-1 overflow-hidden rounded-full">
+          <motion.span
+            className={cn("absolute inset-y-0 left-0 rounded-full", t.state === "done" ? (t.evidence.failed ? "bg-destructive" : "bg-live") : "bg-live/45")}
+            // The active segment sweeps (dt-shim's keyframes, in the live hue); reduced motion keeps it still.
+            style={t.state === "active" && live && !reduce ? { backgroundImage: "linear-gradient(90deg, transparent 30%, color-mix(in oklab, var(--live) 70%, white) 50%, transparent 70%)", backgroundSize: "300% 100%", animation: "dt-shim 1.4s linear infinite" } : undefined}
+            initial={false}
+            animate={{ width: t.state === "done" ? "100%" : t.state === "active" ? "100%" : "0%", opacity: t.state === "todo" ? 0 : 1 }}
+            transition={reduce ? { duration: 0 } : { duration: 0.5, ease: EASE, delay: Math.min(i * 0.03, 0.2) }}
+          />
+        </span>
+      ))}
+    </motion.div>
+  );
+}
+
+/** `PLAN  2 of 5` — the Orbit section label with a rolling count. */
+function PlanLabel({ done, total }: { done: number; total: number }) {
+  return (
+    <span className="text-muted-foreground flex shrink-0 items-baseline gap-2 text-micro">
+      <span className="label font-semibold tracking-wider uppercase">Plan</span>
+      <span className="stamp">
+        <RollingCount value={done} /> of {total}
+      </span>
+    </span>
   );
 }
 
@@ -145,8 +162,8 @@ function TaskRow({ task, live, compact }: { task: DerivedTask; live?: boolean; c
         <span className="relative inline-block max-w-full align-bottom">
           <span
             className={cn(
-              "block truncate text-body",
-              active ? "text-foreground font-medium" : task.state === "done" ? "text-muted-foreground" : "text-foreground"
+              "block truncate text-meta",
+              active ? cn("text-foreground font-medium", live && "shimmer-text") : task.state === "done" ? "text-muted-foreground" : "text-foreground/80"
             )}
           >
             {task.text}
@@ -175,6 +192,7 @@ function TaskRow({ task, live, compact }: { task: DerivedTask; live?: boolean; c
         <AlertTriangle className="text-destructive size-3.5 shrink-0" aria-label="a call in this step failed" />
       )}
       {summary && <span className={cn("text-faint stamp shrink-0 text-micro", compact ? "hidden" : "hidden sm:block")}>{summary}</span>}
+      {e.ms !== undefined && e.ms >= 1000 && <span className="text-faint stamp shrink-0 text-micro tabular-nums">{shortDuration(e.ms)}</span>}
       {hasDetail && (
         <ChevronRight className={cn("text-faint size-3.5 shrink-0 transition-transform duration-150", open && "rotate-90")} aria-hidden />
       )}
@@ -187,17 +205,11 @@ function TaskRow({ task, live, compact }: { task: DerivedTask; live?: boolean; c
     // lifts (shadow + slight scale), its siblings shuffle down on layout springs. The active step
     // carries the live tint on its border, not just a wash.
     <motion.li
-      layout={reduce ? undefined : true}
-      transition={reduce ? { duration: 0 } : { type: "spring", stiffness: 380, damping: 28 }}
-      whileHover={hasDetail && !reduce && !open ? { scale: 1.012 } : undefined}
+      layout={reduce ? undefined : "position"}
+      transition={reduce ? { duration: 0 } : { duration: 0.26, ease: EASE }}
       className={cn(
-        "overflow-hidden rounded-xl border transition-[box-shadow,border-color,background-color] duration-200",
-        active && live
-          ? "border-live/40 bg-live/6 shadow-[0_0_0_3px_color-mix(in_oklch,var(--live)_8%,transparent)]"
-          : open
-            ? "border-line-strong bg-card shadow-e2"
-            : "bg-card/60 hover:bg-card hover:shadow-e1 border-transparent",
-        task.state === "done" && !open && "opacity-85"
+        "overflow-hidden rounded-md transition-colors duration-200",
+        active && live ? "bg-live/6" : open ? "bg-muted/60" : "hover:bg-muted/40"
       )}
     >
       {hasDetail ? (
@@ -205,12 +217,12 @@ function TaskRow({ task, live, compact }: { task: DerivedTask; live?: boolean; c
           type="button"
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
-          className="flex w-full cursor-pointer items-center gap-3 px-3 py-2.5 text-left"
+          className="flex min-h-7 w-full cursor-pointer items-center gap-2.5 px-2 py-1 text-left"
         >
           {body}
         </button>
       ) : (
-        <div className="flex w-full items-center gap-3 px-3 py-2.5">{body}</div>
+        <div className="flex min-h-7 w-full items-center gap-2.5 px-2 py-1">{body}</div>
       )}
 
       <AnimatePresence initial={false}>
@@ -219,10 +231,10 @@ function TaskRow({ task, live, compact }: { task: DerivedTask; live?: boolean; c
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0, transition: { duration: 0.18, ease: EASE } }}
-            transition={reduce ? { duration: 0 } : { type: "spring", stiffness: 300, damping: 26, mass: 0.9 }}
+            transition={reduce ? { duration: 0 } : { duration: 0.26, ease: EASE }}
             className="overflow-hidden"
           >
-            <div className="flex flex-col gap-2 px-3 pb-3 pl-11">
+            <div className="flex flex-col gap-2 px-2 pb-2 pl-8">
               {compact && summary && <div className="text-faint stamp text-micro">{summary}</div>}
               {e.files.length > 0 && (
                 <div className="flex flex-wrap gap-1.5">
@@ -273,24 +285,8 @@ function TaskRow({ task, live, compact }: { task: DerivedTask; live?: boolean; c
 function BoardHeadline({ complete, live, failed }: { complete: boolean; live?: boolean; failed?: boolean }) {
   // "Plan complete" is true even with a failure — every step is done — but on its own it reads as
   // "all well", which the footer then contradicts. Say both things in the one line.
-  if (complete) return <>{failed ? "Complete, not clean" : "Plan complete"}</>;
-  return <>{live ? "Working the plan" : "Plan"}</>;
-}
-
-function BoardIcon({ complete, live, failed }: { complete: boolean; live?: boolean; failed?: boolean }) {
-  const reduce = useReducedMotion();
-  if (complete)
-    return (
-      <motion.span
-        initial={reduce ? false : { scale: 0.4, rotate: -18, opacity: 0 }}
-        animate={{ scale: 1, rotate: 0, opacity: 1 }}
-        transition={SPRING}
-        className="shrink-0"
-      >
-        <Check className={cn("size-4", failed ? "text-destructive" : "text-ok")} strokeWidth={2.5} aria-hidden />
-      </motion.span>
-    );
-  return <Loader2 className={cn("text-live size-4 shrink-0", live && "animate-spin")} aria-hidden />;
+  if (complete) return <>{failed ? "Complete, not clean" : "Complete"}</>;
+  return <span className={cn(live && "shimmer-text")}>{live ? "Working" : "In progress"}</span>;
 }
 
 /**
@@ -344,35 +340,30 @@ export function PlanCard({ board, live }: { board: TaskBoard; live?: boolean }) 
   const failed = tasks.filter((t) => t.evidence.failed).length;
   const sweep = useCompletionSweep(complete);
   return (
-    <div className="enter bg-card relative max-w-[72ch] overflow-hidden rounded-xl border shadow-e1">
+    <section aria-label="Plan" className="enter relative overflow-hidden">
       <Sweep on={sweep} failed={failed > 0} />
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex w-full cursor-pointer items-center gap-2.5 px-4 py-2.5 text-left"
+        className="flex h-7 w-full cursor-pointer items-center gap-2.5 text-left"
       >
-        <BoardIcon complete={complete} live={live} failed={failed > 0} />
-        <span className="text-foreground flex-1 truncate text-body font-medium">
+        <PlanLabel done={done} total={tasks.length} />
+        <span className="text-faint min-w-0 flex-1 truncate text-micro">
           <BoardHeadline complete={complete} live={live} failed={failed > 0} />
-        </span>
-        <span className="text-muted-foreground stamp flex shrink-0 items-baseline text-micro">
-          <RollingCount value={done} /> of {tasks.length}
           {board.ms !== undefined ? ` · ${shortDuration(board.ms)}` : ""}
         </span>
         <ChevronRight className={cn("text-faint size-3.5 shrink-0 transition-transform duration-150", open && "rotate-90")} aria-hidden />
       </button>
-
-      <ProgressRail done={done} total={tasks.length} complete={complete} failed={failed > 0} />
-
+      <ProgressRail tasks={tasks} live={live} />
       <Collapse open={open}>
-        <ol className="bg-muted/40 flex flex-col gap-1.5 border-t p-2">
+        <ol className="mt-1.5 flex flex-col">
           {tasks.map((t, i) => (
             <TaskRow key={`${i}-${t.text}`} task={t} live={live} />
           ))}
         </ol>
       </Collapse>
-    </div>
+    </section>
   );
 }
 
@@ -418,12 +409,9 @@ export function PlanDock({ board, live }: { board: TaskBoard; live?: boolean }) 
         {open ? (
           <>
             <div className="flex h-10 shrink-0 items-center gap-2 px-3">
-              <BoardIcon complete={complete} live={live} failed={failed > 0} />
-              <span className="text-foreground min-w-0 flex-1 truncate text-meta font-semibold">
+              <PlanLabel done={done} total={tasks.length} />
+              <span className="text-faint min-w-0 flex-1 truncate text-micro">
                 <BoardHeadline complete={complete} live={live} failed={failed > 0} />
-              </span>
-              <span className="text-muted-foreground stamp flex shrink-0 items-baseline text-micro">
-                <RollingCount value={done} />/{tasks.length}
               </span>
               <button
                 type="button"
@@ -436,8 +424,10 @@ export function PlanDock({ board, live }: { board: TaskBoard; live?: boolean }) 
                 <PanelRightClose className="size-4" aria-hidden />
               </button>
             </div>
-            <ProgressRail done={done} total={tasks.length} complete={complete} failed={failed > 0} layoutId="plan-rail" />
-            <ol className="bg-muted/40 flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto p-2">
+            <div className="px-3 pb-1">
+              <ProgressRail tasks={tasks} live={live} layoutId="plan-rail" />
+            </div>
+            <ol className="flex min-h-0 flex-1 flex-col overflow-y-auto p-1.5">
               {tasks.map((t, i) => (
                 <TaskRow key={`${i}-${t.text}`} task={t} live={live} compact />
               ))}

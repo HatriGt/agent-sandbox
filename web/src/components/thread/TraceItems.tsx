@@ -27,6 +27,21 @@ import { liveKind } from "@/lib/viz-live-log";
 import { toolOutputLanguage } from "@/lib/viz-tool-output";
 
 /**
+ * The Execution toolbar's Expand all / Collapse all. `v` bumps on every press so pressing the same
+ * button twice re-applies it after a row was toggled by hand; `v === 0` means "never pressed".
+ */
+export const ExpandAll = React.createContext<{ v: number; open: boolean }>({ v: 0, open: false });
+
+/** Opens/closes a collapsible whenever the toolbar fires. */
+function useExpandAll(setOpen: (open: boolean) => void) {
+  const { v, open } = React.useContext(ExpandAll);
+  React.useEffect(() => {
+    if (v > 0) setOpen(open);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [v]);
+}
+
+/**
  * Thread items. Three voices, never confusable:
  *
  *   · the AGENT has no bubble — full-measure prose, a quiet label above. Its output is prose.
@@ -362,6 +377,7 @@ export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolea
   React.useEffect(() => {
     if (notable) setOpen(true);
   }, [notable]);
+  useExpandAll(setOpen);
   const anyRunning = !!live && events.some((e) => !e.result || e.streaming);
   const failed = events.filter((e) => e.failed).length;
   const done = events.filter((e) => !!e.result && !e.streaming).length;
@@ -1065,14 +1081,15 @@ export function ObserverItem({ question, answer }: { question: string; answer?: 
 }
 
 /**
- * Extended thinking, folded. Collapsed by default to a one-line "Thought about …" with the first
- * sentence as a teaser; expands to the full reasoning in a quieter voice than the agent's prose. While
- * live it shows the shimmer of a thought still forming.
+ * Extended thinking, folded. Collapsed by default to one line — `Thought for 12s` once settled,
+ * `Thinking…` with the live-text shimmer while it is still forming. Expands to the full reasoning in a
+ * quieter voice than the agent's prose (height + opacity on the Orbit ease).
  */
-export function ThinkingItem({ text, live }: { text: string; live?: boolean }) {
+export function ThinkingItem({ text, live, ms }: { text: string; live?: boolean; ms?: number }) {
   const [open, setOpen] = React.useState(false);
-  const words = text.trim().split(/\s+/).length;
-  const teaser = text.trim().split(/(?<=[.!?])\s+/)[0]?.slice(0, 120) ?? "";
+  useExpandAll(setOpen);
+  const still = useReducedMotion();
+  const secs = ms !== undefined ? Math.max(1, Math.round(ms / 1000)) : null;
   return (
     <div className="enter min-w-0">
       <button
@@ -1084,17 +1101,23 @@ export function ThinkingItem({ text, live }: { text: string; live?: boolean }) {
           live ? "text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
         )}
       >
-        <ChevronRight className={cn("size-3.5 shrink-0 transition-transform duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]", open && "rotate-90")} aria-hidden />
-        <Brain className={cn("size-3.5 shrink-0", live && "text-live breathe")} aria-hidden />
-        <span className={cn("font-medium", live && "shimmer-text")}>{live ? "Thinking" : "Thought"}</span>
-        <Collapse open={!open} className="min-w-0">
-          <span className={cn("stamp block min-w-0 truncate", live ? "shimmer-text" : "text-muted-foreground")}>{teaser}</span>
-        </Collapse>
-        <span className="stamp text-muted-foreground shrink-0">{words} words</span>
+        <ChevronRight className={cn("size-3.5 shrink-0 transition-transform duration-200 ease-[cubic-bezier(.2,.8,.2,1)]", open && "rotate-90")} aria-hidden />
+        <Brain className={cn("size-3.5 shrink-0", live && "text-live")} aria-hidden />
+        <span className={cn("font-medium", live && "shimmer-text")}>{live ? "Thinking…" : secs !== null ? `Thought for ${secs}s` : "Thought"}</span>
       </button>
-      <Collapse open={open}>
-        <div className="text-muted-foreground mt-1 ml-2 border-l pl-4 text-meta leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere]">{text}</div>
-      </Collapse>
+      <AnimatePresence initial={false}>
+        {open && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: still ? 0.12 : 0.26, ease: [0.2, 0.8, 0.2, 1] }}
+            className="overflow-hidden"
+          >
+            <div className="text-muted-foreground mt-1 ml-2 border-l pl-4 text-meta leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere]">{text}</div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
