@@ -1,7 +1,7 @@
 ﻿import * as React from "react";
 import { CalendarClock, ChevronRight, Copy, FlaskConical, GitPullRequest, History as HistoryIcon, Link2, ListChecks, Play, Plus, Radar, RotateCw, ShieldCheck, Trash2, Webhook, Workflow, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
 import { api, type AlertPreset, type Automation, type AutomationDelivery, type AutomationDraft, type AutomationKind, type GithubEvent, type WatchEvent } from "@/lib/api";
 import { fmtAgo } from "@/lib/format";
@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils";
 import { PrFollowupsPanel } from "@/components/PrFollowupsPanel";
 import { SchedulePicker, describeCron } from "@/components/SchedulePicker";
 import { RepoPicker } from "@/components/RepoPicker";
+import { DataTable, MetaLine, StatusDot, stopRow, type Column } from "@/components/ui/data-table";
 
 /**
  * Automations: runs that start themselves — on a schedule, on a webhook, on a GitHub event, or after
@@ -243,7 +244,7 @@ export function Automations({ onOpenBox, onOpenPlaybooks, onOpenRuns }: { onOpen
 
   const names = Object.fromEntries((rows ?? []).map((r) => [r.id, r.name]));
   // Waiting on you first, then live ones, then paused.
-  const listed = [...(rows ?? [])].sort((a, b) => Number(b.proposed && !b.enabled) - Number(a.proposed && !a.enabled) || Number(b.enabled) - Number(a.enabled));
+  const listed = [...(rows ?? [])].sort((a, b) => Number(isPending(b)) - Number(isPending(a)) || Number(b.enabled) - Number(a.enabled));
 
   // "Automate this playbook" on the Playbooks tab lands here with a draft.
   React.useEffect(() => {
@@ -378,39 +379,44 @@ function toDraft(a: Automation): AutomationDraft {
   };
 }
 
+/** How the last fire went, as a dot + word; "started" without a finish opens its box. */
 function LastResult({ a, onOpenBox }: { a: Automation; onOpenBox: (box: string) => void }) {
   const r = a.lastResult;
-  if (a.active > 0) return <span className="text-live">running now</span>;
-  if (!r) return <span className="text-faint">never fired</span>;
-  const ago = fmtAgo(Math.round(r.at / 1000));
+  if (a.active > 0)
+    return (
+      <StatusDot tone="live" pulse>
+        running now
+      </StatusDot>
+    );
+  if (!r) return <StatusDot tone="muted">never fired</StatusDot>;
+  const ago = <span className="font-mono tabular font-normal">{fmtAgo(Math.round(r.at / 1000))}</span>;
   if (r.outcome === "started" && r.finished) {
     const failed = r.finished.state === "failed";
     return (
-      <span className={failed ? "text-destructive" : "text-ok"} title={r.finished.headline}>
-        {failed ? "failed" : "done"} {ago}
-      </span>
+      <StatusDot tone={failed ? "destructive" : "ok"} className="max-w-full">
+        <span className="truncate" title={r.finished.headline}>
+          {failed ? "failed" : "done"} {ago}
+        </span>
+      </StatusDot>
     );
   }
   if (r.outcome === "started")
     return (
-      <button type="button" className="text-live relative cursor-pointer hover:underline" onClick={() => r.box && onOpenBox(r.box)}>
-        started {ago}
+      <button type="button" className="cursor-pointer hover:underline" onClick={(e) => (stopRow(e), r.box && onOpenBox(r.box))}>
+        <StatusDot tone="live">started {ago}</StatusDot>
       </button>
     );
   return (
-    <span className={r.outcome === "failed" ? "text-destructive" : "text-muted-foreground"} title={r.reason}>
-      {r.outcome === "failed" ? "could not start" : "skipped"} {ago}
-    </span>
+    <StatusDot tone={r.outcome === "failed" ? "destructive" : "muted"} className="max-w-full">
+      <span className="truncate" title={r.reason}>
+        {r.outcome === "failed" ? "could not start" : "skipped"} {ago}
+      </span>
+    </StatusDot>
   );
 }
 
 function useWorkflowList() {
   return useCached("workflows", (signal) => api.workflows(signal)).data?.workflows ?? [];
-}
-
-function useWorkflowName(id: string | undefined): string | undefined {
-  const list = useWorkflowList();
-  return id ? (list.find((w) => w.id === id)?.name ?? "missing") : undefined;
 }
 
 /** Run the task as a saved workflow: steps and checks on the same machine (src/workflow.ts). */
@@ -434,7 +440,9 @@ function WorkflowPick({ value, onChange }: { value: string | undefined; onChange
   );
 }
 
-/** Every automation as one row: glyph, name + what fires it, how the last run went and what's next, then Runs, the switch and a chevron. The whole row opens the editor. */
+const isPending = (a: Automation) => !!a.proposed && !a.enabled;
+
+/** Every automation as one table row: name + what fires it, when, how the last run went, then Runs and the switch (or Approve/Dismiss for a proposal). The whole row opens the editor. */
 function AutomationList({
   rows,
   onEdit,
@@ -452,122 +460,104 @@ function AutomationList({
   onOpenBox: (box: string) => void;
   onOpenPlaybook: () => void;
 }) {
-  const still = useReducedMotion();
-  return (
-    <ul className="bg-card overflow-hidden rounded-xl border shadow-e1">
-      <AnimatePresence initial={false}>
-        {rows.map((a, i) => (
-          <motion.li
-            key={a.id}
-            layout="position"
-            initial={still ? { opacity: 0 } : { opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: still ? 0.1 : 0.24, delay: Math.min(i, 12) * 0.03, ease: [0.22, 1, 0.36, 1] }}
-            className="border-b last:border-b-0"
-          >
-            <AutomationRow a={a} onEdit={() => onEdit(a)} onRuns={() => onRuns(a)} onToggle={(on) => onToggle(a, on)} onDismiss={() => onDismiss(a)} onOpenBox={onOpenBox} onOpenPlaybook={onOpenPlaybook} />
-          </motion.li>
-        ))}
-      </AnimatePresence>
-    </ul>
-  );
-}
-
-/** Keeps clicks on a control inside the row from also opening the editor. */
-const stop = (e: React.SyntheticEvent) => e.stopPropagation();
-
-function AutomationRow({ a, onEdit, onRuns, onToggle, onDismiss, onOpenBox, onOpenPlaybook }: { a: Automation; onEdit: () => void; onRuns: () => void; onToggle: (on: boolean) => void; onDismiss: () => void; onOpenBox: (box: string) => void; onOpenPlaybook: () => void }) {
-  const Glyph = GLYPH[a.kind];
-  const wf = useWorkflowName(a.workflowId);
-  const pending = a.proposed && !a.enabled;
-  const fires = a.lastDelivery && (a.kind === "webhook" || a.kind === "github" || a.kind === "watch");
-  return (
-    <div
-      role="button"
-      tabIndex={0}
-      aria-label={`Edit ${a.name}`}
-      onClick={onEdit}
-      onKeyDown={(e) => {
-        if (e.target !== e.currentTarget) return;
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onEdit();
-        }
-      }}
-      className={cn(
-        "group/row relative flex cursor-pointer items-center gap-4 px-4 py-3.5 outline-none transition-[background-color,opacity] duration-150",
-        "hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-ring/40 focus-visible:ring-2 focus-visible:ring-inset",
-        !a.enabled && !pending && "opacity-60 hover:opacity-100 focus-visible:opacity-100",
-        pending && "bg-attention/[0.04]"
-      )}
-    >
-      {pending && <span className="bg-attention absolute inset-y-3 left-0 w-0.5 rounded-r" aria-hidden />}
-      <span className={cn("grid size-9 shrink-0 place-items-center rounded-lg border transition-colors", a.enabled ? "border-live/20 bg-live/10 text-live" : "border-border bg-muted text-muted-foreground")} aria-hidden>
-        <Glyph className="size-4" strokeWidth={1.75} />
-      </span>
-
-      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="flex min-w-0 items-center gap-2">
-          <span className="text-foreground truncate text-body font-medium" title={a.name}>
-            {a.name}
-          </span>
-          {pending && <span className="text-attention-text ring-attention/40 shrink-0 rounded-full px-2 py-px text-micro font-medium ring-1 ring-inset">Pending approval</span>}
-          {a.active > 0 && (
-            <span className="text-live inline-flex shrink-0 items-center gap-1 text-micro font-medium">
-              <span className="bg-live size-1.5 animate-pulse rounded-full" aria-hidden />
-              running
+  const workflows = useWorkflowList();
+  const anyPending = rows.some(isPending);
+  const columns: Column<Automation>[] = [
+    {
+      id: "name",
+      header: "Name",
+      sort: (a) => a.name,
+      cell: (a) => {
+        const Glyph = GLYPH[a.kind];
+        const wf = a.workflowId ? (workflows.find((w) => w.id === a.workflowId)?.name ?? "missing") : undefined;
+        const playbook = wf && (
+          <button type="button" onClick={(e) => (stopRow(e), onOpenPlaybook())} className="hover:text-foreground inline-flex max-w-full cursor-pointer items-center gap-1" title={`Playbook: ${wf}`}>
+            <ListChecks className="size-3 shrink-0" aria-hidden />
+            <span className="truncate">{wf}</span>
+          </button>
+        );
+        return (
+          <span className="flex min-w-0 items-center gap-3">
+            <Glyph className={cn("size-4 shrink-0", a.enabled ? "text-live" : "text-muted-foreground")} strokeWidth={1.75} aria-hidden />
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <span className="text-foreground truncate font-medium" title={a.name}>
+                {a.name}
+              </span>
+              <MetaLine className="md:hidden" parts={[KIND_LABEL[a.kind], <span title={a.when}>{a.when}</span>, playbook]} />
+              <MetaLine className="hidden md:flex" parts={[KIND_LABEL[a.kind], playbook]} />
+              {a.lastDelivery?.facts && <RunFactsLine f={a.lastDelivery.facts} className="flex-nowrap overflow-hidden" />}
             </span>
-          )}
-        </span>
-        <span className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-meta">
-          <span className="text-foreground/80 shrink-0">{KIND_LABEL[a.kind]}</span>
-          <span className="text-faint shrink-0">·</span>
-          <span className="truncate" title={a.when}>
-            {a.when}
           </span>
-          {wf && (
+        );
+      },
+    },
+    {
+      id: "when",
+      header: "When",
+      width: "w-[28%]",
+      hideBelow: "md",
+      cell: (a) => (
+        <span className="text-muted-foreground block truncate text-meta" title={a.when}>
+          {a.when}
+        </span>
+      ),
+    },
+    {
+      id: "last",
+      header: "Last run",
+      width: "w-44",
+      hideBelow: "sm",
+      sort: (a) => (a.active > 0 ? Number.MAX_SAFE_INTEGER : a.lastResult?.at),
+      cell: (a) => {
+        const fires = a.lastDelivery && (a.kind === "webhook" || a.kind === "github" || a.kind === "watch");
+        return (
+          <span className="flex min-w-0 flex-col gap-0.5">
+            <LastResult a={a} onOpenBox={onOpenBox} />
+            <span className="text-faint truncate font-mono text-micro tabular">
+              {a.quiet && a.counts ? countsLine(a.counts) : fires ? deliveryLine(a.lastDelivery!) : isPending(a) ? "waiting on you" : a.enabled && a.nextFire ? `next ${fmtIn(a.nextFire)}` : a.enabled ? "on event" : "paused"}
+            </span>
+          </span>
+        );
+      },
+    },
+    {
+      id: "status",
+      header: <span className="sr-only">Status</span>,
+      width: "w-36 md:w-48",
+      align: "end",
+      cell: (a) => (
+        <span className="inline-flex items-center justify-end gap-1.5" onClick={stopRow} onKeyDown={stopRow}>
+          <Button size="sm" variant="outline" onClick={() => onRuns(a)} aria-label={`Runs of ${a.name}`} className="h-8 px-2.5">
+            <HistoryIcon className="size-3.5" />
+            <span className="hidden md:inline">Runs</span>
+          </Button>
+          {isPending(a) ? (
             <>
-              <span className="text-faint shrink-0">·</span>
-              <button type="button" onClick={(e) => (stop(e), onOpenPlaybook())} className="hover:text-foreground inline-flex min-w-0 shrink-0 cursor-pointer items-center gap-1 truncate" title={`Playbook: ${wf}`}>
-                <ListChecks className="size-3 shrink-0" aria-hidden />
-                <span className="truncate">{wf}</span>
-              </button>
+              <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => onDismiss(a)} aria-label={`Dismiss ${a.name}`}>
+                <Trash2 />
+              </Button>
+              <Button size="sm" onClick={() => onToggle(a, true)}>
+                Approve
+              </Button>
             </>
+          ) : (
+            <Switch checked={a.enabled} onCheckedChange={(on) => onToggle(a, on)} aria-label={a.enabled ? `Pause ${a.name}` : `Turn on ${a.name}`} />
           )}
         </span>
-        {a.lastDelivery?.facts && <RunFactsLine f={a.lastDelivery.facts} className="flex-nowrap overflow-hidden" />}
-      </span>
-
-      <span className="hidden w-44 shrink-0 flex-col gap-0.5 text-right text-meta sm:flex">
-        <span className="truncate" onClick={stop}>
-          <LastResult a={a} onOpenBox={onOpenBox} />
-        </span>
-        <span className="text-faint truncate text-micro tabular">
-          {a.quiet && a.counts ? countsLine(a.counts) : fires ? deliveryLine(a.lastDelivery!) : pending ? "waiting on you" : a.enabled && a.nextFire ? `next ${fmtIn(a.nextFire)}` : a.enabled ? "on event" : "paused"}
-        </span>
-      </span>
-
-      <span className="flex shrink-0 items-center gap-1.5" onClick={stop}>
-        <Button size="sm" variant="outline" onClick={onRuns} aria-label={`Runs of ${a.name}`} className="h-8 px-2.5">
-          <HistoryIcon className="size-3.5" />
-          <span className="hidden md:inline">Runs</span>
-        </Button>
-        {pending ? (
-          <>
-            <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={onDismiss} aria-label={`Dismiss ${a.name}`}>
-              <Trash2 />
-            </Button>
-            <Button size="sm" onClick={() => onToggle(true)}>
-              Approve
-            </Button>
-          </>
-        ) : (
-          <Switch checked={a.enabled} onCheckedChange={onToggle} aria-label={a.enabled ? `Pause ${a.name}` : `Turn on ${a.name}`} />
-        )}
-      </span>
-      <ChevronRight className="text-faint group-hover/row:text-muted-foreground size-4 shrink-0 transition-[color,transform] group-hover/row:translate-x-0.5" aria-hidden />
-    </div>
+      ),
+    },
+  ];
+  return (
+    <DataTable
+      aria-label="Automations"
+      rows={rows}
+      columns={columns}
+      rowKey={(a) => a.id}
+      onRowClick={onEdit}
+      rowLabel={(a) => `Edit ${a.name}`}
+      groupOf={anyPending ? (a) => (isPending(a) ? "Proposed — waiting on you" : "Automations") : undefined}
+      rowProps={(a) => ({ className: isPending(a) ? "bg-attention/[0.04]" : !a.enabled ? "opacity-60 hover:opacity-100 focus-visible:opacity-100" : undefined })}
+    />
   );
 }
 

@@ -1,10 +1,10 @@
 import * as React from "react";
 import { ArrowLeft, ChevronRight, GitBranch, Hourglass, Pause, Plus, Search, Server, Trash2, X } from "lucide-react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
 import { api, type FleetLifecycle } from "@/lib/api";
 import { useGo } from "@/lib/route";
-import { friendlyName, shortName, roleLabel, threadSort, threadTitle } from "@/lib/format";
+import { doneLabel, friendlyName, isFailedExit, shortName, roleLabel, threadSort, threadTitle } from "@/lib/format";
 import { deadlineLabel, deadlineOf, displayState, fmtDuration } from "@/lib/lifecycle";
 import { questionHeadline } from "@/lib/question";
 import type { StableBox } from "@/hooks/useStableBoxes";
@@ -16,7 +16,7 @@ import { Collapse } from "@/components/ui/collapse";
 import { FilterChip } from "@/components/ui/filter-chip";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { UsageMeter } from "@/components/ui/usage-meter";
-import { StateStamp } from "@/components/ui/stamp";
+import { DataTable, MetaLine, StatusDot, stopRow, type Column } from "@/components/ui/data-table";
 import { Capacity } from "@/components/Capacity";
 import { Bar } from "@/components/thread/Skeletons";
 import { cn } from "@/lib/utils";
@@ -187,16 +187,7 @@ export function Sandboxes({
 
           <Swap state={loading ? "loading" : !sorted.length ? "empty" : !visible.length ? "none" : "list"}>
             {loading ? (
-              <div className="overflow-hidden rounded-xl border" aria-busy="true">
-                {[0, 1, 2].map((i) => (
-                  <div key={i} className="flex items-center gap-4 border-b px-4 py-4 last:border-b-0">
-                    <Bar className="h-2.5 w-20" />
-                    <Bar className="h-3 flex-1" />
-                    <Bar className="h-3 w-40" />
-                    <Bar className="h-8 w-16 rounded-md" />
-                  </div>
-                ))}
-              </div>
+              <MachineTable boxes={[]} grouped={false} lifecycle={lifecycle} loading onOpen={onOpen} onDestroyed={onDestroyed} />
             ) : !sorted.length ? (
               <div className="flex flex-col items-center rounded-xl border border-dashed px-6 py-14 text-center">
                 <span className="bg-muted text-muted-foreground mb-4 grid size-12 place-items-center rounded-full" aria-hidden>
@@ -237,69 +228,166 @@ export function Sandboxes({
   );
 }
 
-const COLS = "md:grid-cols-[7.5rem_minmax(0,1fr)_13rem_8.5rem_5.5rem]";
+const stateDot = (box: StableBox) => {
+  const state = displayState(box);
+  if (box.stalled && state === "running") return <StatusDot tone="destructive">stalled</StatusDot>;
+  switch (state) {
+    case "running":
+      return <StatusDot tone="live" pulse>working</StatusDot>;
+    case "waiting":
+      return <StatusDot tone="attention">needs you</StatusDot>;
+    case "done":
+      return <StatusDot tone={isFailedExit(box.exitCode) ? "destructive" : "ok"}>{doneLabel(box.exitCode)}</StatusDot>;
+    case "sleeping":
+      return <StatusDot tone="muted">sleeping</StatusDot>;
+    default:
+      return <StatusDot tone="muted">idle</StatusDot>;
+  }
+};
 
 function MachineTable({
   boxes,
   grouped,
   lifecycle,
+  loading,
   onOpen,
   onDestroyed,
 }: {
   boxes: StableBox[];
   grouped: boolean;
   lifecycle: FleetLifecycle;
+  loading?: boolean;
   onOpen: (name: string) => void;
   onDestroyed: (name: string) => void;
 }) {
-  const firstPaint = React.useRef(true);
-  React.useEffect(() => {
-    firstPaint.current = false;
-  }, []);
+  const columns: Column<StableBox>[] = [
+    {
+      id: "state",
+      header: "State",
+      width: "w-[7.5rem]",
+      cell: (b) => stateDot(b),
+    },
+    { id: "task", header: "Task", cell: (b) => <TaskCell box={b} lifecycle={lifecycle} /> },
+    { id: "machine", header: "Machine", width: "w-52", hideBelow: "md", cell: (b) => <MachineCell box={b} lifecycle={lifecycle} /> },
+    { id: "left", header: "Time left", width: "w-[8.5rem]", hideBelow: "md", cell: (b) => <TimeLeft box={b} lifecycle={lifecycle} /> },
+    // The row is the action (click opens the thread); this cell holds destroy + the click cue.
+    { id: "actions", header: <span className="sr-only">Actions</span>, width: "w-[5.5rem]", align: "end", cell: (b) => <RowActions box={b} onDestroyed={onDestroyed} /> },
+  ];
   return (
-    <div className="overflow-hidden rounded-xl border">
-      <div className={cn("label text-muted-foreground bg-muted/60 hidden items-center gap-3 border-b px-4 py-2 md:grid", COLS)}>
-        <span>State</span>
-        <span>Task</span>
-        <span>Machine</span>
-        <span>Time left</span>
-        <span aria-hidden />{/* row is the action: click opens the thread */}
-      </div>
-      <ul>
-        <AnimatePresence>
-          {boxes.map((b, i) => (
-            <MachineRow
-              key={b.name}
-              box={b}
-              head={grouped && (i === 0 || groupOf(boxes[i - 1]) !== groupOf(b)) ? GROUP_LABEL[groupOf(b)] : null}
-              lifecycle={lifecycle}
-              delay={firstPaint.current ? Math.min(i, 12) * 0.03 : 0}
-              onOpen={onOpen}
-              onDestroyed={onDestroyed}
-            />
+    <DataTable
+      aria-label="Machines"
+      rows={boxes}
+      columns={columns}
+      rowKey={(b) => b.name}
+      loading={loading}
+      onRowClick={(b) => !b.leaving && onOpen(b.name)}
+      rowLabel={(b) => `Open ${friendlyName(b.name)} — ${b.task ? threadTitle(b) : "no task yet"}`}
+      rowProps={(b) => ({ className: cn("group", b.leaving && "pointer-events-none opacity-50"), onMouseEnter: () => prefetchWatch(b.name) })}
+      groupOf={grouped ? (b) => GROUP_LABEL[groupOf(b)] : undefined}
+    />
+  );
+}
+
+function TaskCell({ box, lifecycle }: { box: StableBox; lifecycle: FleetLifecycle }) {
+  const deadline = deadlineOf(box, lifecycle);
+  const repos = box.repos ?? [];
+  return (
+    <div className="min-w-0">
+      <p className="text-foreground truncate text-meta">
+        {box.task ? threadTitle(box) : <span className="text-faint italic">No task yet — claim it with a new task</span>}
+      </p>
+      {box.question && <p className="text-attention-text truncate text-micro">Asking: {questionHeadline(box.question)}</p>}
+      {repos.length > 0 && (
+        <span className="mt-1 flex flex-wrap items-center gap-1">
+          {repos.slice(0, 3).map((r) => (
+            <span key={r.name} className="bg-muted text-muted-foreground stamp inline-flex items-center gap-1 rounded px-1.5 py-px text-[10px]" title={r.branch ? `${r.name} · ${r.branch}` : r.name}>
+              <GitBranch className="size-2.5 shrink-0" aria-hidden />
+              {r.name}
+              {r.branch && <span className="text-faint hidden sm:inline">· {r.branch}</span>}
+            </span>
           ))}
-        </AnimatePresence>
-      </ul>
+          {repos.length > 3 && <span className="text-faint text-[10px]">+{repos.length - 3}</span>}
+        </span>
+      )}
+      {/* Mobile meta line: the machine and time columns are hidden below md. */}
+      <MetaLine
+        className="stamp mt-0.5 md:hidden"
+        parts={[
+          <span title={shortName(box.name)}>{friendlyName(box.name)}</span>,
+          box.leaving ? "shutting down" : roleLabel(box.role),
+          box.uptime && `up ${box.uptime}`,
+          deadline.remainingSec != null && `${deadline.remainingSec <= 0 ? "soon" : fmtDuration(deadline.remainingSec)} left`,
+        ]}
+      />
     </div>
   );
 }
 
-function MachineRow({
-  box,
-  head,
-  lifecycle,
-  onOpen,
-  onDestroyed,
-  delay = 0,
-}: {
-  box: StableBox;
-  head: string | null;
-  delay?: number;
-  lifecycle: FleetLifecycle;
-  onOpen: (name: string) => void;
-  onDestroyed: (name: string) => void;
-}) {
-  const still = useReducedMotion();
+function MachineCell({ box, lifecycle }: { box: StableBox; lifecycle: FleetLifecycle }) {
+  const state = displayState(box);
+  const deadline = deadlineOf(box, lifecycle);
+  return (
+    <div className="stamp text-muted-foreground flex min-w-0 flex-col gap-0.5">
+      <span className="text-foreground truncate" title={shortName(box.name)}>
+        {friendlyName(box.name)}
+      </span>
+      {/* Words in the sans face; only the duration is data. */}
+      <span className="font-sans text-micro">
+        {box.leaving ? "shutting down" : box.kept ? "kept · wakes on reply" : state === "sleeping" ? (deadline.kind === "sleep" && deadline.remainingSec != null ? `asleep · destroyed in ${deadline.remainingSec <= 0 ? "soon" : fmtDuration(deadline.remainingSec)}` : "asleep · wakes on reply") : box.role === "session" ? "" : roleLabel(box.role)}
+      </span>
+      {(box.uptime || box.cpu) && (
+        <span className="truncate" title={[box.uptime && `${state === "sleeping" ? "ran" : "up"} ${box.uptime}`, box.cpu && `cpu ${box.cpu}`].filter(Boolean).join(" · ")}>
+          {box.uptime && <>{state === "sleeping" ? "ran" : "up"} {box.uptime}</>}
+          {box.cpu && <>{box.uptime ? " · " : ""}{box.cpu.split(" / ")[0]}c</>}
+        </span>
+      )}
+      {/* Memory and disk as meters: the ratio is the point, "nearly full" visible at a glance. */}
+      {(box.memUsage || box.disk) && (
+        <span className="flex items-center gap-2">
+          <UsageMeter kind="memory" usage={box.memUsage} width="w-10" />
+          <UsageMeter kind="disk" usage={box.disk} width="w-10" />
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** The nearer of the run cap and the idle-stop estimate, with a slim track. */
+function TimeLeft({ box, lifecycle }: { box: StableBox; lifecycle: FleetLifecycle }) {
+  const deadline = deadlineOf(box, lifecycle);
+  if (deadline.remainingSec == null) {
+    return <span className="stamp text-faint whitespace-nowrap">{box.kept ? "kept" : displayState(box) === "sleeping" ? "asleep" : "—"}</span>;
+  }
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <div className="flex flex-col gap-1.5">
+          {/* Amber is reserved for "needs you"; a run about to sleep steps up to the foreground colour. */}
+          <span className={cn("inline-flex items-center gap-1.5 text-micro", deadline.remainingSec < 300 ? "text-foreground" : "text-muted-foreground")}>
+            <Hourglass className="size-3" aria-hidden />
+            {deadline.remainingSec <= 0 ? (
+              <span>{deadline.kind === "idle" ? "sleeps any moment" : deadline.kind === "sleep" ? "destroyed any moment" : "cap reached"}</span>
+            ) : (
+              <>
+                <span className="stamp">{fmtDuration(deadline.remainingSec)}</span>
+                <span className="opacity-80">{deadline.kind === "idle" ? "if quiet" : deadline.kind === "sleep" ? "then destroyed" : "of the cap"}</span>
+              </>
+            )}
+          </span>
+          <span className="bg-border block h-1 w-28 max-w-full overflow-hidden rounded-full">
+            <span
+              className={cn("block h-full w-full origin-left rounded-full transition-transform duration-700 ease-linear", deadline.kind === "idle" || deadline.kind === "sleep" ? "bg-sleep" : "bg-live")}
+              style={{ transform: `scaleX(${Math.min(1, Math.max(0, deadline.fraction ?? 0))})` }}
+            />
+          </span>
+        </div>
+      </TooltipTrigger>
+      <TooltipContent>{deadlineLabel(deadline)}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function RowActions({ box, onDestroyed }: { box: StableBox; onDestroyed: (name: string) => void }) {
   const destroy = async () => {
     try {
       await api.teardown(box.name);
@@ -309,167 +397,27 @@ function MachineRow({
       toast.error("Could not destroy the machine", { description: e instanceof Error ? e.message : String(e) });
     }
   };
-
-  const state = displayState(box);
-  const waiting = box.runState === "waiting";
-  const deadline = deadlineOf(box, lifecycle);
-  const deadlineText = deadlineLabel(deadline);
-
   return (
-    <motion.li
-      layout="position"
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: box.leaving ? 0.5 : 1, y: 0 }}
-      exit={{ opacity: 0, height: 0 }}
-      // First paint of the table: rows stagger in (30 ms apart, capped at 12); afterwards no delay.
-      transition={{ type: "spring", stiffness: 500, damping: 40, mass: 0.8, delay }}
-      className="overflow-hidden border-b last:border-b-0"
-    >
-      <AnimatePresence initial={false}>
-        {head && (
-          <motion.p
-            key={head}
-            layout="position"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: still ? 0.1 : 0.18 }}
-            className="label text-faint bg-muted/30 border-b px-4 py-1.5"
-            aria-hidden
-          >
-            {head}
-          </motion.p>
-        )}
-      </AnimatePresence>
-      <div className={cn("group hover:bg-muted/50 relative grid grid-cols-1 gap-2 px-4 py-3 transition-colors md:items-center md:gap-3", COLS)}>
-        {/* The row IS the open action: a stretched button under the content (first child, so every
-            later positioned sibling — destroy, the time-left tooltip — paints and clicks above it).
-            Real button, so it stays keyboard-tabbable and screen-reader announced. */}
-        <button
-          type="button"
-          onClick={() => onOpen(box.name)}
-          onMouseEnter={() => prefetchWatch(box.name)}
-          onFocus={() => prefetchWatch(box.name)}
-          disabled={box.leaving}
-          aria-label={`Open ${friendlyName(box.name)} — ${box.task ? threadTitle(box) : "no task yet"}`}
-          className="focus-visible:ring-ring absolute inset-0 cursor-pointer rounded-none focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset"
+    <div className="flex items-center justify-end gap-1.5" onClick={stopRow} onKeyDown={stopRow}>
+      <ArmButton
+        size="icon-sm"
+        variant="ghost"
+        icon={<Trash2 />}
+        label={`Destroy ${friendlyName(box.name)}`}
+        armedLabel="Destroy?"
+        onConfirm={destroy}
+        disabled={box.leaving}
+        className="text-muted-foreground opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100 data-[armed=true]:opacity-100 [@media(hover:none)]:opacity-60"
+      />
+      {box.runState === "waiting" ? (
+        <span className="text-attention-text pointer-events-none text-meta font-semibold whitespace-nowrap">Answer →</span>
+      ) : (
+        <ChevronRight
+          className="text-muted-foreground pointer-events-none size-4 -translate-x-0.5 opacity-0 transition-[opacity,transform] duration-150 group-focus-within:translate-x-0 group-focus-within:opacity-100 group-hover:translate-x-0 group-hover:opacity-100 group-focus:translate-x-0 group-focus:opacity-100"
+          aria-hidden
         />
-
-        <div className="flex items-center gap-2">
-          <StateStamp state={state} exitCode={box.exitCode} stalled={box.stalled} />
-          <span className="label text-muted-foreground md:hidden">{box.leaving ? "shutting down" : roleLabel(box.role)}</span>
-        </div>
-
-        <div className="min-w-0">
-          <p className="text-foreground truncate text-meta">
-            {box.task ? threadTitle(box) : <span className="text-faint italic">No task yet — claim it with a new task</span>}
-          </p>
-          {box.question && <p className="text-attention-text truncate text-micro">Asking: {questionHeadline(box.question)}</p>}
-          {(box.repos ?? []).length > 0 && (
-            <span className="mt-1 flex flex-wrap items-center gap-1">
-              {(box.repos ?? []).slice(0, 3).map((r) => (
-                <span key={r.name} className="bg-muted text-muted-foreground stamp inline-flex items-center gap-1 rounded px-1.5 py-px text-[10px]" title={r.branch ? `${r.name} · ${r.branch}` : r.name}>
-                  <GitBranch className="size-2.5 shrink-0" aria-hidden />
-                  {r.name}
-                  {r.branch && <span className="text-faint hidden sm:inline">· {r.branch}</span>}
-                </span>
-              ))}
-              {(box.repos ?? []).length > 3 && <span className="text-faint text-[10px]">+{(box.repos ?? []).length - 3}</span>}
-            </span>
-          )}
-          <p className="stamp text-muted-foreground mt-0.5 md:hidden" title={shortName(box.name)}>
-            {friendlyName(box.name)}
-            {box.uptime && <span className="ml-2 opacity-70">up {box.uptime}</span>}
-            {deadline.remainingSec != null && <span className="ml-2 opacity-70">· {(deadline.remainingSec <= 0 ? "soon" : fmtDuration(deadline.remainingSec))} left</span>}
-          </p>
-        </div>
-
-        <div className="stamp text-muted-foreground hidden min-w-0 flex-col gap-0.5 md:flex">
-          <span className="text-foreground" title={shortName(box.name)}>
-            {friendlyName(box.name)}
-          </span>
-          {/* Words in the sans face; only the duration is data. */}
-          <span className="font-sans text-micro">
-            {box.leaving ? "shutting down" : box.kept ? "kept · wakes on reply" : state === "sleeping" ? (deadline.kind === "sleep" && deadline.remainingSec != null ? `asleep · destroyed in ${deadline.remainingSec <= 0 ? "soon" : fmtDuration(deadline.remainingSec)}` : "asleep · wakes on reply") : box.role === "session" ? "" : roleLabel(box.role)}
-          </span>
-          {/* Data line: uptime · cpu — one row, never wrapping the words above. */}
-          {(box.uptime || box.cpu) && (
-            <span className="truncate" title={[box.uptime && `${state === "sleeping" ? "ran" : "up"} ${box.uptime}`, box.cpu && `cpu ${box.cpu}`].filter(Boolean).join(" · ")}>
-              {box.uptime && <>{state === "sleeping" ? "ran" : "up"} {box.uptime}</>}
-              {box.cpu && <>{box.uptime ? " · " : ""}{box.cpu.split(" / ")[0]}c</>}
-            </span>
-          )}
-          {/* Memory and disk get meters instead of a text fragment: the ratio is the point, and the
-              bar is what makes "nearly full" visible at a glance down a list of machines. */}
-          {(box.memUsage || box.disk) && (
-            <span className="flex items-center gap-2">
-              <UsageMeter kind="memory" usage={box.memUsage} width="w-10" />
-              <UsageMeter kind="disk" usage={box.disk} width="w-10" />
-            </span>
-          )}
-        </div>
-
-        {/* Time left: the nearer of the run cap and the idle-stop estimate, with a slim track.
-            `relative` lifts it above the stretched row button so its tooltip still hovers. */}
-        <div className="relative hidden md:block">
-          {deadline.remainingSec != null ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div className="flex flex-col gap-1.5">
-                  {/* Amber is reserved for "needs you"; a run about to sleep is urgent-ish, not a question,
-                      so it steps up to the foreground colour instead. A bare "soon" said nothing about
-                      what happens soon — the phrase now names it. */}
-                  <span className={cn("inline-flex items-center gap-1.5 text-micro", deadline.remainingSec < 300 ? "text-foreground" : "text-muted-foreground")}>
-                    <Hourglass className="size-3" aria-hidden />
-                    {deadline.remainingSec <= 0 ? (
-                      <span>{deadline.kind === "idle" ? "sleeps any moment" : deadline.kind === "sleep" ? "destroyed any moment" : "cap reached"}</span>
-                    ) : (
-                      <>
-                        <span className="stamp">{fmtDuration(deadline.remainingSec)}</span>
-                        <span className="opacity-80">{deadline.kind === "idle" ? "if quiet" : deadline.kind === "sleep" ? "then destroyed" : "of the cap"}</span>
-                      </>
-                    )}
-                  </span>
-                  <span className="bg-border block h-1 w-28 overflow-hidden rounded-full">
-                    <span
-                      className={cn("block h-full w-full origin-left rounded-full transition-transform duration-700 ease-linear", deadline.kind === "idle" || deadline.kind === "sleep" ? "bg-sleep" : "bg-live")}
-                      style={{ transform: `scaleX(${Math.min(1, Math.max(0, deadline.fraction ?? 0))})` }}
-                    />
-                  </span>
-                </div>
-              </TooltipTrigger>
-              <TooltipContent>{deadlineText}</TooltipContent>
-            </Tooltip>
-          ) : (
-            <span className="stamp text-faint whitespace-nowrap">{box.kept ? "kept" : state === "sleeping" ? "asleep" : "—"}</span>
-          )}
-        </div>
-
-        {/* Trailing cell: destroy (lifted above the row button) + a cue for what a click does. */}
-        <div className="relative flex items-center gap-1.5 md:justify-end">
-          {waiting ? (
-            <span className="text-attention-text pointer-events-none mr-auto text-meta font-semibold whitespace-nowrap md:order-last md:mr-0">
-              Answer →
-            </span>
-          ) : (
-            <ChevronRight
-              className="text-muted-foreground pointer-events-none mr-auto size-4 -translate-x-0.5 opacity-0 transition-[opacity,transform] duration-150 group-focus-within:translate-x-0 group-focus-within:opacity-100 group-hover:translate-x-0 group-hover:opacity-100 md:order-last md:mr-0"
-              aria-hidden
-            />
-          )}
-          <ArmButton
-            size="icon-sm"
-            variant="ghost"
-            icon={<Trash2 />}
-            label={`Destroy ${friendlyName(box.name)}`}
-            armedLabel="Destroy?"
-            onConfirm={destroy}
-            disabled={box.leaving}
-            className="text-muted-foreground opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100 data-[armed=true]:opacity-100 [@media(hover:none)]:opacity-60"
-          />
-        </div>
-      </div>
-    </motion.li>
+      )}
+    </div>
   );
 }
 

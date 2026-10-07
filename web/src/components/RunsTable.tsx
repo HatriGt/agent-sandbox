@@ -2,7 +2,8 @@ import { ArrowUpRight } from "lucide-react";
 import type { Automation, AutomationDelivery, RunFacts } from "@/lib/api";
 import { fmtAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { deliveryLine, deliveryTone } from "@/components/Automations";
+import { deliveryLine } from "@/components/Automations";
+import { DataTable, StatusDot, stopRow, type Column } from "@/components/ui/data-table";
 
 /**
  * One automation's deliveries as a table whose columns follow what the automation does: a PR review
@@ -39,7 +40,7 @@ export function columnsFor(a: Automation | undefined): Col[] {
 
 const dash = <span className="text-faint">—</span>;
 const ext = (url: string, body: React.ReactNode, className?: string) => (
-  <a href={url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className={cn("hover:underline underline-offset-2", className)}>
+  <a href={url} target="_blank" rel="noreferrer" onClick={stopRow} className={cn("hover:underline underline-offset-2", className)}>
     {body}
   </a>
 );
@@ -60,11 +61,12 @@ function cell(col: Col, d: AutomationDelivery, f: RunFacts | undefined): React.R
     case "outcome": {
       const running = d.outcome === "fired" && f && !f.state;
       const word = running ? "running" : d.outcome === "fired" ? (f?.state ?? "fired") : deliveryLine(d);
+      const tone = running ? "live" : f?.state === "failed" ? "destructive" : d.outcome === "fired" ? "ok" : d.outcome === "skipped" ? "muted" : "destructive";
       return (
-        <span className={cn("font-medium", running ? "text-live" : f?.state === "failed" ? "text-destructive" : deliveryTone(d))}>
-          {d.test ? `test · ${word}` : word}
-          {d.quiet && <span className="text-faint ml-1.5 font-normal">quiet</span>}
-        </span>
+        <StatusDot tone={tone} pulse={!!running} className="max-w-full">
+          <span className="truncate">{d.test ? `test · ${word}` : word}</span>
+          {d.quiet && <span className="text-faint font-normal">quiet</span>}
+        </StatusDot>
       );
     }
     case "subject":
@@ -109,45 +111,35 @@ function cell(col: Col, d: AutomationDelivery, f: RunFacts | undefined): React.R
   }
 }
 
+const SORT: Partial<Record<Col, (d: AutomationDelivery) => number | null | undefined>> = {
+  time: (d) => d.at,
+  duration: (d) => d.facts?.durationMs,
+};
+
+const openable = (d: AutomationDelivery) => d.outcome === "fired" && !!d.box;
+
 export function RunsTable({ a, rows, onOpenBox }: { a: Automation | undefined; rows: AutomationDelivery[]; onOpenBox: (box: string) => void }) {
-  const cols = columnsFor(a);
+  const columns: Column<AutomationDelivery>[] = [
+    ...columnsFor(a).map((c) => ({ id: c, header: HEAD[c], width: WIDTH[c], sort: SORT[c], cell: (d: AutomationDelivery) => cell(c, d, d.facts) })),
+    {
+      id: "open",
+      header: <span className="sr-only">Open</span>,
+      width: "w-8",
+      cell: (d) => openable(d) && <ArrowUpRight className="text-faint group-hover/row:text-muted-foreground size-3.5" aria-hidden />,
+    },
+  ];
   return (
-    <div className="bg-card overflow-x-auto rounded-xl border shadow-e1">
-      <table className="w-full min-w-[640px] table-fixed text-meta">
-        <thead>
-          <tr className="border-b">
-            {cols.map((c) => (
-              <th key={c} scope="col" className={cn("label text-faint px-3 py-2 text-left font-normal", WIDTH[c])}>
-                {HEAD[c]}
-              </th>
-            ))}
-            <th className="w-8" aria-label="Open" />
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((d) => {
-            const openable = d.outcome === "fired" && !!d.box;
-            return (
-              <tr
-                key={d.id}
-                onClick={openable ? () => onOpenBox(d.box!) : undefined}
-                className={cn("group/run border-b last:border-b-0", openable && "hover:bg-muted/40 cursor-pointer")}
-                tabIndex={openable ? 0 : undefined}
-                aria-label={openable ? `Open ${d.box}` : undefined}
-                onKeyDown={openable ? (e) => e.key === "Enter" && onOpenBox(d.box!) : undefined}
-              >
-                {cols.map((c) => (
-                  <td key={c} className="min-w-0 overflow-hidden px-3 py-2.5 align-middle">
-                    {cell(c, d, d.facts)}
-                  </td>
-                ))}
-                <td className="pr-3">{openable && <ArrowUpRight className="text-faint group-hover/run:text-muted-foreground size-3.5" aria-hidden />}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
+    <DataTable
+      aria-label="Runs"
+      rows={rows}
+      columns={columns}
+      rowKey={(d) => String(d.id)}
+      rowClickable={openable}
+      onRowClick={(d) => onOpenBox(d.box!)}
+      rowLabel={(d) => `Open ${d.box}`}
+      minWidth="min-w-[640px]"
+      size="sm"
+    />
   );
 }
 

@@ -1,5 +1,5 @@
 import * as React from "react";
-import { AnimatePresence, motion } from "motion/react";
+import { motion } from "motion/react";
 import { ArrowUpRight, Check, Repeat, Trash2, Workflow } from "lucide-react";
 import { toast } from "sonner";
 import { api, type Automation, type ScheduleStatus } from "@/lib/api";
@@ -8,26 +8,25 @@ import { fmtAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { fmtNext } from "@/components/thread/SchedulePill";
 import { ArmButton } from "@/components/ui/arm-button";
-import { Swap } from "@/components/ui/swap";
 import { Collapse } from "@/components/ui/collapse";
-import { Bar } from "@/components/thread/Skeletons";
+import { DataTable, StatusDot, type Column } from "@/components/ui/data-table";
 
 /**
  * Scheduled: what you asked for in a chat — "merge the PR at 2pm", "check CI again in an hour".
- * Usually one-time; one plain table with every column and a delete per row. Standing rules made
+ * Usually one-time; one plain table with every column and actions per row. Standing rules made
  * from the menu (or that you asked an agent to set up) live on the Automations tab instead.
  */
 
 type Filter = "upcoming" | "done" | "all";
 
-const STATUS: Record<ScheduleStatus, { label: string; cls: string }> = {
-  "needs-ok": { label: "Pending approval", cls: "text-attention-text ring-1 ring-inset ring-attention/40" },
-  waiting: { label: "Waiting", cls: "bg-muted text-foreground" },
-  running: { label: "Running", cls: "bg-live/15 text-foreground" },
-  done: { label: "Done", cls: "text-muted-foreground" },
-  failed: { label: "Failed", cls: "bg-destructive/10 text-destructive" },
-  paused: { label: "Paused", cls: "text-muted-foreground" },
-  cancelled: { label: "Cancelled", cls: "text-faint" },
+const STATUS: Record<ScheduleStatus, { label: string; tone: React.ComponentProps<typeof StatusDot>["tone"] }> = {
+  "needs-ok": { label: "Pending approval", tone: "attention" },
+  waiting: { label: "Waiting", tone: "muted" },
+  running: { label: "Running", tone: "live" },
+  done: { label: "Done", tone: "ok" },
+  failed: { label: "Failed", tone: "destructive" },
+  paused: { label: "Paused", tone: "muted" },
+  cancelled: { label: "Cancelled", tone: "muted" },
 };
 
 const UPCOMING = new Set<ScheduleStatus>(["needs-ok", "waiting", "running", "paused"]);
@@ -65,9 +64,100 @@ export function ScheduledPage({ onOpenBox, onAutomations }: { onOpenBox: (box: s
 
   const showRepo = rows.some((t) => t.repos?.length);
   const counts = { upcoming: all.filter((t) => UPCOMING.has(t.status)).length, done: all.filter((t) => !UPCOMING.has(t.status)).length, all: all.length };
-  const th = "text-faint px-3 py-2 text-left text-micro font-medium tracking-wide whitespace-nowrap uppercase";
-  const td = "px-3 py-2.5 align-top text-micro";
-  const iconBtn = "text-muted-foreground hover:bg-muted hover:text-foreground grid size-7 cursor-pointer place-items-center rounded-md disabled:opacity-40";
+  const link = (box: string, label: string) => (
+    <button type="button" onClick={() => onOpenBox(box)} className="text-foreground inline-flex max-w-full cursor-pointer items-center gap-0.5 underline-offset-2 hover:underline">
+      <span className="truncate">{label}</span>
+      <ArrowUpRight className="size-3 shrink-0" />
+    </button>
+  );
+  const columns: Column<Automation>[] = [
+    {
+      id: "task",
+      header: "Task",
+      cell: (t) => (
+        <>
+          <p className="text-foreground truncate font-medium" title={t.name}>
+            {t.name}
+          </p>
+          {t.taskTemplate !== t.name && (
+            <p className="text-muted-foreground truncate text-micro" title={t.taskTemplate}>
+              {t.taskTemplate.startsWith(t.name) ? t.taskTemplate.slice(t.name.length).replace(/^[.!?\s]+/, "") : t.taskTemplate}
+            </p>
+          )}
+        </>
+      ),
+    },
+    {
+      id: "chat",
+      header: "Chat",
+      width: "w-[11rem]",
+      cell: (t) => (t.sourceBox ? link(t.sourceBox, t.sourceTitle || t.sourceBox) : <span className="text-faint">—</span>),
+    },
+    ...(showRepo
+      ? [
+          {
+            id: "repo",
+            header: "Repo",
+            width: "w-[9rem]",
+            cell: (t: Automation) => <span className="block truncate font-mono text-micro">{t.repos?.join(", ") || <span className="text-faint font-sans">—</span>}</span>,
+          },
+        ]
+      : []),
+    {
+      id: "when",
+      header: "When",
+      width: "w-[11rem]",
+      className: "tabular-nums",
+      cell: (t) => {
+        const once = t.spec.at != null;
+        return (
+          <>
+            <span className="text-foreground inline-flex items-center gap-1" title={`${once ? new Date(t.spec.at!).toUTCString() : "Repeats " + t.when} · created ${fmtAgo(t.createdAt / 1000)}`}>
+              {!once && <Repeat className="size-3" aria-label="Repeats" />}
+              {once ? exact(t.spec.at!) : t.when}
+            </span>
+            {t.nextFire !== null && t.status !== "needs-ok" && <span className="text-muted-foreground block text-micro">{fmtNext(t.nextFire, now)}</span>}
+          </>
+        );
+      },
+    },
+    {
+      id: "status",
+      header: "Status",
+      width: "w-[9rem]",
+      cell: (t) => {
+        const st = STATUS[t.status];
+        return (
+          <StatusDot tone={st.tone} pulse={t.status === "running"}>
+            {st.label}
+          </StatusDot>
+        );
+      },
+    },
+    {
+      id: "result",
+      header: "Result",
+      width: "w-[12rem]",
+      cell: (t) => {
+        const r = t.lastResult;
+        return r ? (
+          <div className="min-w-0">
+            {r.box ? link(r.box, r.finished?.headline || "Open run") : <span className="text-muted-foreground block truncate">{r.reason || r.outcome}</span>}
+            <span className="text-faint block text-micro tabular-nums">{fmtAgo(r.at / 1000)}</span>
+          </div>
+        ) : (
+          <span className="text-faint">Not yet</span>
+        );
+      },
+    },
+    {
+      id: "actions",
+      header: <span className="sr-only">Actions</span>,
+      width: "w-[7.5rem]",
+      align: "end",
+      cell: (t) => <Actions t={t} busy={busy === t.id} act={act} onAutomations={onAutomations} />,
+    },
+  ];
 
   return (
     <div>
@@ -101,161 +191,50 @@ export function ScheduledPage({ onOpenBox, onAutomations }: { onOpenBox: (box: s
       <Collapse open={!!error}>
         <p className="text-destructive mb-3 text-micro">{error}</p>
       </Collapse>
-      <Swap state={!data ? "loading" : rows.length === 0 ? "empty" : "table"}>
-      {!data ? (
-        <div className="flex flex-col gap-3 rounded-xl border px-4 py-4" aria-busy="true" aria-label="Loading scheduled runs">
-          {[0, 1, 2].map((i) => (
-            <div key={i} className="flex items-center gap-4">
-              <Bar className="h-3.5 w-[32%]" />
-              <Bar className="h-3 w-[18%]" />
-              <Bar className="h-3 w-[14%]" />
-              <Bar className="h-3 w-[12%]" />
-            </div>
-          ))}
-        </div>
-      ) : rows.length === 0 ? (
-        <div className="text-muted-foreground rounded-xl border border-dashed px-6 py-10 text-center text-meta">
-          {filter === "upcoming" ? "Nothing scheduled. Ask an agent in a chat to do something later." : "Nothing here yet."}
-        </div>
-      ) : (
-        <div className="overflow-x-auto rounded-xl border">
-          <table className="w-full min-w-[680px] border-collapse">
-            <thead className="bg-muted/40 border-b">
-              <tr>
-                <th className={th}>Task</th>
-                <th className={th}>Chat</th>
-                {showRepo && <th className={th}>Repo</th>}
-                <th className={th}>When</th>
-                <th className={th}>Status</th>
-                <th className={th}>Result</th>
-                <th className={cn(th, "bg-muted sticky right-0")}>
-                  <span className="sr-only">Actions</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              <AnimatePresence initial={false}>
-                {rows.map((t, i) => (
-                  <Row key={t.id} index={i} t={t} now={now} busy={busy === t.id} td={td} iconBtn={iconBtn} showRepo={showRepo} onOpenBox={onOpenBox} act={act} onAutomations={onAutomations} />
-                ))}
-              </AnimatePresence>
-            </tbody>
-          </table>
-        </div>
-      )}
-      </Swap>
+      <DataTable
+        aria-label="Scheduled runs"
+        rows={rows}
+        columns={columns}
+        rowKey={(t) => t.id}
+        rowProps={(t) => ({ className: cn((t.status === "done" || t.status === "cancelled") && "opacity-70") })}
+        loading={!data}
+        empty={filter === "upcoming" ? "Nothing scheduled. Ask an agent in a chat to do something later." : "Nothing here yet."}
+        minWidth="min-w-[680px]"
+      />
     </div>
   );
 }
 
-function Row({
-  t,
-  index,
-  now,
-  busy,
-  td,
-  iconBtn,
-  showRepo,
-  onOpenBox,
-  act,
-  onAutomations,
-}: {
-  t: Automation;
-  index: number;
-  now: number;
-  busy: boolean;
-  td: string;
-  iconBtn: string;
-  showRepo: boolean;
-  onOpenBox: (box: string) => void;
-  act: (id: string, fn: () => Promise<unknown>, ok: string) => Promise<void>;
-  onAutomations: () => void;
-}) {
-  const once = t.spec.at != null;
-  const st = STATUS[t.status];
-  const r = t.lastResult;
-  const link = (box: string, label: string) => (
-    <button type="button" onClick={() => onOpenBox(box)} className="text-foreground inline-flex max-w-full cursor-pointer items-center gap-0.5 underline-offset-2 hover:underline">
-      <span className="truncate">{label}</span>
-      <ArrowUpRight className="size-3 shrink-0" />
-    </button>
-  );
+function Actions({ t, busy, act, onAutomations }: { t: Automation; busy: boolean; act: (id: string, fn: () => Promise<unknown>, ok: string) => Promise<void>; onAutomations: () => void }) {
+  const iconBtn = "text-muted-foreground hover:bg-muted hover:text-foreground grid size-7 cursor-pointer place-items-center rounded-md disabled:opacity-40";
   return (
-    <motion.tr
-      layout="position"
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1], delay: Math.min(index, 12) * 0.024 }}
-      className={cn("hover:bg-muted/30 border-b transition-colors duration-150 last:border-b-0", (t.status === "done" || t.status === "cancelled") && "opacity-70")}
-    >
-      <td className={cn(td, "max-w-[18rem]")}>
-        <p className="text-foreground truncate font-medium" title={t.name}>
-          {t.name}
-        </p>
-        {t.taskTemplate !== t.name && (
-          <p className="text-muted-foreground line-clamp-1" title={t.taskTemplate}>
-            {t.taskTemplate.startsWith(t.name) ? t.taskTemplate.slice(t.name.length).replace(/^[.!?\s]+/, "") : t.taskTemplate}
-          </p>
-        )}
-      </td>
-      <td className={cn(td, "max-w-[11rem]")}>{t.sourceBox ? link(t.sourceBox, t.sourceTitle || t.sourceBox) : <span className="text-faint">—</span>}</td>
-      {showRepo && <td className={cn(td, "font-mono text-[12px] whitespace-nowrap")}>{t.repos?.join(", ") || <span className="text-faint font-sans">—</span>}</td>}
-      <td className={cn(td, "whitespace-nowrap tabular-nums")}>
-        <span
-          className="text-foreground inline-flex items-center gap-1"
-          title={`${once ? new Date(t.spec.at!).toUTCString() : "Repeats " + t.when} · created ${fmtAgo(t.createdAt / 1000)}`}
+    <div className="flex items-center justify-end gap-0.5">
+      {t.status === "needs-ok" && (
+        <button type="button" disabled={busy} title="Approve" aria-label="Approve" className={iconBtn} onClick={() => void act(t.id, () => api.setTriggerEnabled(t.id, true), "Approved")}>
+          <Check className="size-4" />
+        </button>
+      )}
+      {t.spec.at == null && (
+        <button
+          type="button"
+          disabled={busy}
+          title="Make it an automation"
+          aria-label="Make it an automation"
+          className={iconBtn}
+          onClick={() => void act(t.id, () => api.promoteTrigger(t.id), "Moved to Automations").then(onAutomations)}
         >
-          {!once && <Repeat className="size-3" aria-label="Repeats" />}
-          {once ? exact(t.spec.at!) : t.when}
-        </span>
-        {t.nextFire !== null && t.status !== "needs-ok" && <span className="text-muted-foreground block">{fmtNext(t.nextFire, now)}</span>}
-      </td>
-      <td className={td}>
-        <Swap state={t.status} mode="popLayout" className="inline-block">
-          <span className={cn("inline-flex rounded-full px-2 py-0.5 font-medium whitespace-nowrap", st.cls)}>{st.label}</span>
-        </Swap>
-      </td>
-      <td className={cn(td, "max-w-[14rem]")}>
-        {r ? (
-          <div className="min-w-0">
-            {r.box ? link(r.box, r.finished?.headline || "Open run") : <span className="text-muted-foreground">{r.reason || r.outcome}</span>}
-            <span className="text-faint block tabular-nums">{fmtAgo(r.at / 1000)}</span>
-          </div>
-        ) : (
-          <span className="text-faint">Not yet</span>
-        )}
-      </td>
-      <td className={cn(td, "bg-background sticky right-0 whitespace-nowrap shadow-[-8px_0_8px_-8px_rgb(0_0_0/0.12)]")}>
-        <div className="flex items-center justify-end gap-0.5">
-          {t.status === "needs-ok" && (
-            <button type="button" disabled={busy} title="Approve" aria-label="Approve" className={iconBtn} onClick={() => void act(t.id, () => api.setTriggerEnabled(t.id, true), "Approved")}>
-              <Check className="size-4" />
-            </button>
-          )}
-          {!once && (
-            <button
-              type="button"
-              disabled={busy}
-              title="Make it an automation"
-              aria-label="Make it an automation"
-              className={iconBtn}
-              onClick={() => void act(t.id, () => api.promoteTrigger(t.id), "Moved to Automations").then(onAutomations)}
-            >
-              <Workflow className="size-4" />
-            </button>
-          )}
-          <ArmButton
-            variant="ghost"
-            size="xs"
-            busy={busy}
-            icon={<Trash2 className="size-4" />}
-            label={<span className="sr-only">{UPCOMING.has(t.status) ? "Cancel and delete" : "Delete"}</span>}
-            armedLabel={UPCOMING.has(t.status) ? "Cancel it?" : "Delete?"}
-            onConfirm={() => act(t.id, () => api.deleteTrigger(t.id), "Deleted")}
-          />
-        </div>
-      </td>
-    </motion.tr>
+          <Workflow className="size-4" />
+        </button>
+      )}
+      <ArmButton
+        variant="ghost"
+        size="xs"
+        busy={busy}
+        icon={<Trash2 className="size-4" />}
+        label={<span className="sr-only">{UPCOMING.has(t.status) ? "Cancel and delete" : "Delete"}</span>}
+        armedLabel={UPCOMING.has(t.status) ? "Cancel it?" : "Delete?"}
+        onConfirm={() => act(t.id, () => api.deleteTrigger(t.id), "Deleted")}
+      />
+    </div>
   );
 }

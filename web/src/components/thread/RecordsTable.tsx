@@ -1,10 +1,9 @@
 import * as React from "react";
-import { ArrowDown, ArrowUp, Loader2, RefreshCw, Search, X } from "lucide-react";
-import { motion } from "motion/react";
+import { Loader2, RefreshCw, Search, X } from "lucide-react";
 import { api } from "@/lib/api";
 import { fmtAgo } from "@/lib/format";
 import { FileMark } from "@/lib/fileIcon";
-import { cn } from "@/lib/utils";
+import { DataTable, type Column } from "@/components/ui/data-table";
 
 /**
  * The workspace as a records table — every file with type mark, size and modified time, sortable by
@@ -19,7 +18,26 @@ interface Row {
   mtime: number;
 }
 
-type SortKey = "path" | "bytes" | "mtime";
+const COLUMNS: Column<Row>[] = [
+  {
+    id: "path",
+    header: "File",
+    sort: (r) => r.path,
+    cell: (r) => {
+      const cut = r.path.lastIndexOf("/");
+      const dir = r.path.slice(0, Math.max(0, cut));
+      return (
+        <span className="flex min-w-0 items-center gap-2">
+          <FileMark path={r.path} />
+          <span className="text-foreground truncate font-mono text-micro">{r.path.slice(cut + 1)}</span>
+          {dir && <span className="text-faint hidden truncate text-micro sm:inline">{dir}</span>}
+        </span>
+      );
+    },
+  },
+  { id: "bytes", header: "Size", align: "end", width: "w-24", sort: (r) => r.bytes, cell: (r) => <span className="text-muted-foreground font-mono text-micro">{fmtBytes(r.bytes)}</span> },
+  { id: "mtime", header: "Modified", align: "end", width: "w-28", sort: (r) => r.mtime, cell: (r) => <span className="text-muted-foreground text-micro">{fmtAgo(r.mtime)}</span> },
+];
 
 export function fmtBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -31,7 +49,6 @@ export function RecordsTable({ session, onOpen }: { session: string; onOpen: (pa
   const [rows, setRows] = React.useState<Row[] | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [query, setQuery] = React.useState("");
-  const [sort, setSort] = React.useState<{ key: SortKey; dir: 1 | -1 }>({ key: "mtime", dir: -1 });
   const [loading, setLoading] = React.useState(false);
 
   const load = React.useCallback(async () => {
@@ -52,32 +69,8 @@ export function RecordsTable({ session, onOpen }: { session: string; onOpen: (pa
 
   const shown = React.useMemo(() => {
     const q = query.trim().toLowerCase();
-    const filtered = q ? (rows ?? []).filter((r) => r.path.toLowerCase().includes(q)) : (rows ?? []);
-    return [...filtered].sort((a, b) => {
-      const d = sort.key === "path" ? a.path.localeCompare(b.path) : a[sort.key] - b[sort.key];
-      return d * sort.dir;
-    });
-  }, [rows, query, sort]);
-
-  const header = (key: SortKey, label: string, right?: boolean) => {
-    const on = sort.key === key;
-    return (
-      <th className={cn("px-3 py-1.5", right && "text-right")}>
-        <button
-          type="button"
-          onClick={() => setSort((s) => (s.key === key ? { key, dir: s.dir === 1 ? -1 : 1 } : { key, dir: key === "path" ? 1 : -1 }))}
-          className={cn(
-            "inline-flex cursor-pointer items-center gap-1 text-micro font-medium",
-            on ? "text-foreground" : "text-muted-foreground hover:text-foreground"
-          )}
-          aria-sort={on ? (sort.dir === 1 ? "ascending" : "descending") : undefined}
-        >
-          {label}
-          {on && (sort.dir === 1 ? <ArrowUp className="size-3" aria-hidden /> : <ArrowDown className="size-3" aria-hidden />)}
-        </button>
-      </th>
-    );
-  };
+    return q ? (rows ?? []).filter((r) => r.path.toLowerCase().includes(q)) : (rows ?? []);
+  }, [rows, query]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -104,53 +97,26 @@ export function RecordsTable({ session, onOpen }: { session: string; onOpen: (pa
           {loading ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
         </button>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto">
-        {error ? (
-          <p className="text-muted-foreground px-4 py-6 text-meta">{error}</p>
-        ) : rows === null ? (
-          <div className="flex flex-col gap-2 p-4">
-            {[0, 1, 2, 3, 4].map((i) => (
-              <div key={i} className="shimmer h-4 rounded" style={{ animationDelay: `${i * 0.1}s`, width: `${85 - i * 9}%` }} />
-            ))}
-          </div>
-        ) : (
-          <table className="w-full border-collapse text-meta">
-            <thead>
-              <tr className="bg-background sticky top-0 z-10 border-b text-left">
-                {header("path", "File")}
-                {header("bytes", "Size", true)}
-                {header("mtime", "Modified", true)}
-              </tr>
-            </thead>
-            <tbody>
-              {shown.map((r, i) => {
-                const base = r.path.slice(r.path.lastIndexOf("/") + 1);
-                const dir = r.path.slice(0, Math.max(0, r.path.lastIndexOf("/")));
-                return (
-                  <motion.tr
-                    key={r.path}
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    transition={{ duration: 0.15, delay: Math.min(i, 14) * 0.02 }}
-                    onClick={() => onOpen(r.path)}
-                    className="hover:bg-muted/60 cursor-pointer border-b border-border/50 last:border-0"
-                  >
-                    <td className="max-w-0 px-3 py-1.5">
-                      <span className="flex min-w-0 items-center gap-2">
-                        <FileMark path={r.path} />
-                        <span className="text-foreground truncate font-mono text-micro">{base}</span>
-                        {dir && <span className="text-faint hidden truncate text-micro sm:inline">{dir}</span>}
-                      </span>
-                    </td>
-                    <td className="text-muted-foreground px-3 py-1.5 text-right font-mono text-micro whitespace-nowrap tabular-nums">{fmtBytes(r.bytes)}</td>
-                    <td className="text-muted-foreground px-3 py-1.5 text-right text-micro whitespace-nowrap tabular-nums">{fmtAgo(r.mtime)}</td>
-                  </motion.tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
-      </div>
+      {error ? (
+        <p className="text-muted-foreground px-4 py-6 text-meta">{error}</p>
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-col p-3 *:data-[slot=table-frame]:flex *:data-[slot=table-frame]:min-h-0 *:data-[slot=table-frame]:flex-col">
+          <DataTable
+            aria-label="Workspace files"
+            rows={shown}
+            columns={COLUMNS}
+            rowKey={(r) => r.path}
+            onRowClick={(r) => onOpen(r.path)}
+            rowLabel={(r) => `Open ${r.path}`}
+            initialSort={{ id: "mtime", dir: "desc" }}
+            loading={rows === null}
+            empty={query ? "No files match." : "No files."}
+            size="sm"
+            stickyHeader
+            containerClassName="min-h-0"
+          />
+        </div>
+      )}
     </div>
   );
 }

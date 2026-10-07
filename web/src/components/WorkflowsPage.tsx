@@ -4,7 +4,6 @@ import { Check, Copy, Github, ListChecks, Pencil, Plus, ShieldAlert, Terminal, T
 import { toast } from "sonner";
 import { api, type Automation, type WorkflowStep, type WorkflowView } from "@/lib/api";
 import { useCached } from "@/lib/cache";
-import { cn } from "@/lib/utils";
 import { fmtAgo } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/field";
@@ -12,6 +11,7 @@ import { Panel, PanelFooter, SettingsSection } from "@/components/ui/settings";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Swap } from "@/components/ui/swap";
 import { Bar } from "@/components/thread/Skeletons";
+import { DataTable, stopRow, type Column } from "@/components/ui/data-table";
 
 const EXAMPLE = `name: ship-feature
 description: implement, prove it with tests, then review your own diff
@@ -244,10 +244,7 @@ function stepLine(s: WorkflowStep): string {
   return s.title ?? (s.skill ? `/${s.skill}` : s.prompt.replace(/\s+/g, " ").slice(0, 60));
 }
 
-const TH = "text-faint px-3 py-2 text-micro font-medium tracking-wide uppercase first:pl-4 last:pr-4";
-const TD = "px-3 py-2.5 align-middle first:pl-4 last:pr-4";
-
-/** Saved playbooks as a table: what it is, its steps, which automations run it, where it lives. */
+/** Saved playbooks as a table: what it is, its steps, which automations run it, where it lives. The row opens the editor. */
 function PlaybookTable({
   items,
   usedBy,
@@ -261,113 +258,110 @@ function PlaybookTable({
   onDelete: (w: WorkflowView) => void;
   onAutomate: (w: WorkflowView) => void;
 }) {
-  return (
-    <div className="bg-card overflow-x-auto rounded-xl border">
-      <table className="w-full min-w-[40rem] table-fixed border-collapse text-left">
-        <colgroup>
-          <col />
-          <col className="w-[34%]" />
-          <col className="w-[8.5rem]" />
-          <col className="w-[7rem]" />
-          <col className="w-[9.5rem]" />
-        </colgroup>
-        <thead className="border-b">
-          <tr>
-            <th className={TH}>Playbook</th>
-            <th className={TH}>Steps</th>
-            <th className={TH}>Automated by</th>
-            <th className={TH}>Source</th>
-            <th className={cn(TH, "text-right")}>
-              <span className="sr-only">Actions</span>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          <AnimatePresence initial={false}>
-            {items.map((w, i) => (
-              <PlaybookTr key={w.id} index={i} w={w} used={usedBy(w.id)} onEdit={() => onEdit(w)} onDelete={() => onDelete(w)} onAutomate={() => onAutomate(w)} />
-            ))}
-          </AnimatePresence>
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function PlaybookTr({ w, index, used, onEdit, onDelete, onAutomate }: { w: WorkflowView; index: number; used: Automation[]; onEdit: () => void; onDelete: () => void; onAutomate: () => void }) {
-  const [armed, setArmed] = React.useState(false);
-  const checks = w.steps.filter((s) => s.kind === "check").length;
-  return (
-    <motion.tr
-      layout="position"
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1], delay: Math.min(index, 12) * 0.024 }}
-      className="hover:bg-muted/50 relative border-b transition-colors duration-150 last:border-b-0"
-    >
-      <td className={TD}>
-        <button type="button" onClick={onEdit} className="text-foreground block max-w-full cursor-pointer truncate text-left text-meta font-medium after:absolute after:inset-0 focus-visible:outline-none" title={w.name}>
-          {w.name}
-        </button>
-        <span className="text-muted-foreground block truncate text-micro" title={w.description}>
-          {w.description || `updated ${fmtAgo(w.updatedAt)}`}
-        </span>
-      </td>
-      <td className={cn(TD, "text-micro")}>
-        <span className="text-muted-foreground flex min-w-0 items-center gap-1 truncate" title={w.steps.map(stepLine).join(" → ")}>
-          {w.steps.slice(0, 4).map((s, i) => (
-            <React.Fragment key={i}>
-              {i > 0 && <span className="text-faint" aria-hidden>→</span>}
-              {s.kind === "check" ? <Terminal className="size-3 shrink-0" aria-label="check" /> : <Wand2 className="size-3 shrink-0" aria-label="agent turn" />}
-            </React.Fragment>
-          ))}
-          {w.steps.length > 4 && <span className="text-faint">+{w.steps.length - 4}</span>}
-        </span>
-        <span className="text-faint block truncate">
-          {w.steps.length} step{w.steps.length === 1 ? "" : "s"} · {checks} check{checks === 1 ? "" : "s"}
-        </span>
-      </td>
-      <td className={cn(TD, "text-micro")}>
-        {used.length ? (
-          <span className="text-foreground block truncate" title={used.map((t) => `${t.name} — ${t.when}`).join("\n")}>
+  const columns: Column<WorkflowView>[] = [
+    {
+      id: "name",
+      header: "Playbook",
+      sort: (w) => w.name,
+      cell: (w) => (
+        <>
+          <span className="text-foreground block truncate font-medium" title={w.name}>
+            {w.name}
+          </span>
+          <span className="text-muted-foreground block truncate text-micro" title={w.description}>
+            {w.description || `updated ${fmtAgo(w.updatedAt)}`}
+          </span>
+        </>
+      ),
+    },
+    {
+      id: "steps",
+      header: "Steps",
+      width: "w-[34%]",
+      sort: (w) => w.steps.length,
+      cell: (w) => {
+        const checks = w.steps.filter((s) => s.kind === "check").length;
+        return (
+          <>
+            <span className="text-muted-foreground flex min-w-0 items-center gap-1 truncate text-micro" title={w.steps.map(stepLine).join(" → ")}>
+              {w.steps.slice(0, 4).map((s, i) => (
+                <React.Fragment key={i}>
+                  {i > 0 && <span className="text-faint" aria-hidden>→</span>}
+                  {s.kind === "check" ? <Terminal className="size-3 shrink-0" aria-label="check" /> : <Wand2 className="size-3 shrink-0" aria-label="agent turn" />}
+                </React.Fragment>
+              ))}
+              {w.steps.length > 4 && <span className="text-faint">+{w.steps.length - 4}</span>}
+            </span>
+            <span className="text-faint block truncate text-micro tabular-nums">
+              {w.steps.length} step{w.steps.length === 1 ? "" : "s"} · {checks} check{checks === 1 ? "" : "s"}
+            </span>
+          </>
+        );
+      },
+    },
+    {
+      id: "used",
+      header: "Automated by",
+      width: "w-[8.5rem]",
+      sort: (w) => usedBy(w.id).length,
+      cell: (w) => {
+        const used = usedBy(w.id);
+        return used.length ? (
+          <span className="text-foreground block truncate text-micro" title={used.map((t) => `${t.name} — ${t.when}`).join("\n")}>
             {used.length === 1 ? used[0].name : `${used.length} automations`}
           </span>
         ) : (
-          <span className="text-faint">Manual only</span>
-        )}
-      </td>
-      <td className={cn(TD, "text-micro")}>
-        {w.origin?.kind === "repo" ? (
-          <span className="text-muted-foreground block truncate font-mono" title={`${w.origin.repo} · ${w.origin.path}`}>
+          <span className="text-faint text-micro">Manual only</span>
+        );
+      },
+    },
+    {
+      id: "source",
+      header: "Source",
+      width: "w-[7rem]",
+      sort: (w) => (w.origin?.kind === "repo" ? w.origin.repo : ""),
+      cell: (w) =>
+        w.origin?.kind === "repo" ? (
+          <span className="text-muted-foreground block truncate font-mono text-micro" title={`${w.origin.repo} · ${w.origin.path}`}>
             {w.origin.repo}
           </span>
         ) : (
-          <span className="text-muted-foreground">Saved here</span>
-        )}
-      </td>
-      <td className={cn(TD, "text-right")}>
-        <span className="relative z-10 inline-flex items-center gap-0.5">
-          <Button variant="ghost" size="xs" onClick={onAutomate} title="Run this playbook on a schedule or event">
-            <Zap />
-            Automate
-          </Button>
-          <Button variant="ghost" size="icon-xs" onClick={onEdit} aria-label={`Edit ${w.name}`} title="Edit">
-            <Pencil />
-          </Button>
-          <Button
-            variant={armed ? "destructive" : "ghost"}
-            size={armed ? "xs" : "icon-xs"}
-            onClick={() => (armed ? onDelete() : setArmed(true))}
-            onBlur={() => setArmed(false)}
-            aria-label={`Delete ${w.name}`}
-            title="Delete"
-          >
-            {armed ? "Delete" : <Trash2 />}
-          </Button>
-        </span>
-      </td>
-    </motion.tr>
+          <span className="text-muted-foreground text-micro">Saved here</span>
+        ),
+    },
+    {
+      id: "actions",
+      header: <span className="sr-only">Actions</span>,
+      width: "w-[9.5rem]",
+      align: "end",
+      cell: (w) => <PlaybookActions w={w} onEdit={() => onEdit(w)} onDelete={() => onDelete(w)} onAutomate={() => onAutomate(w)} />,
+    },
+  ];
+  return <DataTable aria-label="Saved playbooks" rows={items} columns={columns} rowKey={(w) => w.id} onRowClick={onEdit} rowLabel={(w) => `Edit ${w.name}`} minWidth="min-w-[40rem]" />;
+}
+
+function PlaybookActions({ w, onEdit, onDelete, onAutomate }: { w: WorkflowView; onEdit: () => void; onDelete: () => void; onAutomate: () => void }) {
+  const [armed, setArmed] = React.useState(false);
+  return (
+    <span className="inline-flex items-center gap-0.5" onClick={stopRow} onKeyDown={stopRow}>
+      <Button variant="ghost" size="xs" onClick={onAutomate} title="Run this playbook on a schedule or event">
+        <Zap />
+        Automate
+      </Button>
+      <Button variant="ghost" size="icon-xs" onClick={onEdit} aria-label={`Edit ${w.name}`} title="Edit">
+        <Pencil />
+      </Button>
+      <Button
+        variant={armed ? "destructive" : "ghost"}
+        size={armed ? "xs" : "icon-xs"}
+        onClick={() => (armed ? onDelete() : setArmed(true))}
+        onBlur={() => setArmed(false)}
+        aria-label={`Delete ${w.name}`}
+        title="Delete"
+      >
+        {armed ? "Delete" : <Trash2 />}
+      </Button>
+    </span>
   );
 }
 

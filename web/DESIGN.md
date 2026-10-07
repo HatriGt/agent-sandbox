@@ -64,6 +64,22 @@ brief is "more modern", "smoother" or "premium", start here rather than inventin
   sans + mono mixing, square-cornered construction marks, one accent on a cream ground. The closest
   cousin to this console's "ink on paper" rule.
 
+**Tables (the shared `ui/table.tsx` + `ui/data-table.tsx` come from these)**
+
+- [HextaUI — Table / Data table](https://hextaui.com/docs/data-table) — MIT, shadcn API. The source of
+  our table primitive: CSS-variable density (`--table-cell-px/py`, `--table-head-h`), the `surface`
+  frame (rounded-xl hairline ring, tinted head), color-mix hover, sticky head with a hairline once
+  scrolled, `align="end"` → tabular numerals, `h-24` empty cell, skeleton rows.
+- [EasyUI — Advanced data table](https://www.easyui.site/components/advanced-data-table) — MIT. Taken:
+  the empty state (icon chip, title, one action), ChevronsUpDown at 30% when unsorted, and
+  asc → desc → none cycling. Not taken: its own `surface-*` tokens, bulk-action bar.
+- [Orbit agent workspace](https://orbit-agent-workspace.vercel.app/) — the taste bar for density: 38px
+  rows, 30px uppercase 11px header in the faintest ink, hairlines at 6% white, whole row is the
+  button, hover at 2.5% white, status as dot + word (not a filled pill), ids/times in 12px mono.
+- [kargulstudio/sales-crm](https://github.com/kargulstudio/sales-crm) — MIT. Taken: 38/42px head/cell
+  heights, meta lines with a 1px divider, `$`-style muted unit prefixes on numbers, the 120px
+  centred empty row, active row = card tint.
+
 **Motion and interaction detail**
 
 - [hyperiux vault](https://vault.hyperiux.com) — @_hyperiux_. Source-first interaction effects;
