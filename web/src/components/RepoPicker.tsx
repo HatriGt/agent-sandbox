@@ -1,6 +1,7 @@
 import * as React from "react";
 import { Check, FolderGit2, GitBranch, Lock, RefreshCw, Search, SearchX } from "lucide-react";
-import { motion, useReducedMotion } from "motion/react";
+import { motion } from "motion/react";
+import { useReducedMotion } from "@/lib/motion-pref";
 import { api, type RepoInfo } from "@/lib/api";
 import { Bar } from "@/components/thread/Skeletons";
 import { Kbd } from "@/components/ui/kbd";

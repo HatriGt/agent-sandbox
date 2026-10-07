@@ -1,5 +1,6 @@
 import * as React from "react";
-import { motion, useReducedMotion } from "motion/react";
+import { motion } from "motion/react";
+import { useReducedMotion } from "@/lib/motion-pref";
 import { ArrowLeft, CalendarClock, ListChecks, Workflow } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TabPanel } from "@/components/ui/animated-tabs";

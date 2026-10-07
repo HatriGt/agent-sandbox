@@ -18,6 +18,9 @@
  */
 
 @custom-variant dark (&:where(.dark, .dark *));
+/* Motion follows the in-app setting (lib/motion-pref.ts sets <html data-motion>), not the raw OS query. */
+@custom-variant motion-reduce (&:where([data-motion=reduced], [data-motion=reduced] *));
+@custom-variant motion-safe (&:where([data-motion=full], [data-motion=full] *));
 
 @theme inline {
   /* shadcn semantic contract (consumed by prompt-kit + our components) */
@@ -493,7 +496,7 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
+:root[data-motion="reduced"] {
   *,
   *::before,
   *::after {
@@ -546,7 +549,7 @@
 [data-paused="true"] .memory-countdown {
   animation-play-state: paused;
 }
-@media (prefers-reduced-motion: reduce) {
+:root[data-motion="reduced"] {
   .memory-countdown {
     animation: none;
     transform: scaleX(1);
@@ -606,7 +609,7 @@
   background: linear-gradient(100deg, transparent 30%, color-mix(in oklch, var(--live) 8%, transparent) 50%, transparent 70%);
   animation: mic-sheen 2.6s ease-in-out infinite;
 }
-@media (prefers-reduced-motion: reduce) {
+:root[data-motion="reduced"] {
   .mic-ring,
   .mic-idle-bar,
   .mic-sheen {
@@ -894,7 +897,7 @@
   -webkit-text-fill-color: transparent;
   animation: shimmer-text 2.2s linear infinite;
 }
-@media (prefers-reduced-motion: reduce) {
+:root[data-motion="reduced"] {
   .shimmer-text {
     animation: none;
     background: none;
@@ -990,7 +993,7 @@
 }
 .hover-raise:hover { translate: 0 -1px; box-shadow: var(--shadow-e2); }
 .hover-raise:active { translate: 0 0; box-shadow: var(--shadow-e1); }
-@media (prefers-reduced-motion: reduce) {
+:root[data-motion="reduced"] {
   .hover-raise:hover { translate: none; }
 }
 .dark .raised { box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.06), var(--shadow-e1); }
@@ -1059,7 +1062,7 @@
   opacity: 0;
   animation: attention-pulse 0.9s 0.3s var(--ease-out-expo) 1 both;
 }
-@media (prefers-reduced-motion: reduce) {
+:root[data-motion="reduced"] {
   .attention-pulse::after {
     animation: none;
   }
@@ -1220,7 +1223,7 @@
 .viz-pulse {
   animation: viz-pulse 1.8s ease-in-out infinite;
 }
-@media (prefers-reduced-motion: reduce) {
+:root[data-motion="reduced"] {
   .viz-pulse {
     animation: none;
   }
@@ -1257,9 +1260,12 @@
 }
 
 /* DataTable motion (ui/data-table.tsx), after Orbit: rows rise 5px in on first paint with a short
-   stagger (capped so long tables don't drag), a row that arrives later flashes once, a sort replays
-   a quicker stagger, live status dots ping a ring outward (box-shadow, not a scaled copy), and
-   loading cells shimmer. Transform + opacity only; reduced motion keeps the colour, drops movement. */
+   stagger (capped so long tables don't drag), a row that arrives later flashes once, a sort or a
+   search edit replays a quicker stagger, rows a search filters out fade before they drop, live
+   status dots ping a ring outward (box-shadow, not a scaled copy), and loading cells shimmer. A
+   clickable row's 2px accent bar grows from its centre (scaleY) on hover, keyboard focus or
+   selection; a row's trailing actions fade in with it (always shown on touch). Transform + opacity
+   only; reduced motion keeps the colour, drops movement. */
 @keyframes dt-row-in {
   from { opacity: 0; transform: translateY(5px); }
 }
@@ -1295,10 +1301,53 @@
   background-size: 300% 100%;
   animation: dt-shim 1.4s linear infinite;
 }
-@media (prefers-reduced-motion: reduce) {
+[data-slot="table-row"] > [data-slot="table-cell"]:first-child {
+  position: relative;
+}
+[data-slot="table-row"] > [data-slot="table-cell"]:first-child::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  width: 2px;
+  background: var(--primary);
+  transform: scaleY(0);
+  opacity: 0;
+  transition:
+    transform 0.22s var(--ease-out-quint),
+    opacity 0.22s var(--ease-out-quint);
+  pointer-events: none;
+}
+[data-slot="table-row"][data-clickable]:hover > [data-slot="table-cell"]:first-child::before,
+[data-slot="table-row"][data-clickable]:focus-visible > [data-slot="table-cell"]:first-child::before,
+[data-slot="table-row"][data-state="selected"] > [data-slot="table-cell"]:first-child::before {
+  transform: scaleY(1);
+  opacity: 1;
+}
+[data-slot="table-row"][data-leave] {
+  opacity: 0;
+  transition: opacity 0.18s var(--ease-out-quint);
+  @starting-style { opacity: 1; }
+}
+.dt-actions {
+  opacity: 0;
+  transition: opacity 0.15s var(--ease-out-quint);
+}
+[data-slot="table-row"]:hover .dt-actions,
+[data-slot="table-row"]:focus-visible .dt-actions,
+[data-slot="table-row"]:focus-within .dt-actions,
+[data-slot="table-row"][data-state="selected"] .dt-actions {
+  opacity: 1;
+}
+@media (hover: none) {
+  .dt-actions { opacity: 1; }
+}
+:root[data-motion="reduced"] {
   [data-slot="table-row"][data-enter],
   [data-slot="table-row"][data-new] { animation: dt-row-flash 0.01s both; }
   .dt-ping, .dt-shim { animation: none; }
+  [data-slot="table-row"] > [data-slot="table-cell"]:first-child::before { transform: none; transition: opacity 0.12s linear; }
+  [data-slot="table-row"][data-leave] { transition: none; }
 }
 
 /* Odometer (components/viz/motion.tsx): one digit column per place, slid by a transition so a
@@ -1371,7 +1420,7 @@
   opacity: 0.6;
   filter: blur(2px);
 }
-@media (prefers-reduced-motion: reduce) {
+:root[data-motion="reduced"] {
   .watch-sweep {
     animation: none;
     transform: none;
@@ -1426,7 +1475,7 @@
 .mm-flash {
   animation: mm-flash 1.8s ease-out;
 }
-@media (prefers-reduced-motion: reduce) {
+:root[data-motion="reduced"] {
   .mm-shimmer {
     animation: none;
   }

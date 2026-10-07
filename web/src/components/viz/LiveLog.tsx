@@ -1,4 +1,5 @@
 import * as React from "react";
+import { resolvedReduced } from "@/lib/motion-pref";
 import { ArrowDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { createLiveLog, feedLiveLog, formatMs, liveKind, p95, type LiveLogState, type LiveRow, type LogLevelName } from "@/lib/viz-live-log";
@@ -97,8 +98,6 @@ function StatusMix({ byClass, total }: { byClass: LiveLogState["byClass"]; total
 const AT_BOTTOM_PX = 16;
 const FOLLOW_MS = 220;
 
-const reducedMotion = () => typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-
 export function LiveLogView({ state, live, className }: { state: LiveLogState; live: boolean; className?: string }) {
   const kind = liveKind(state) ?? "levelled";
   const scroller = React.useRef<HTMLDivElement>(null);
@@ -118,7 +117,7 @@ export function LiveLogView({ state, live, className }: { state: LiveLogState; l
     if (!el) return;
     cancelAnimationFrame(gliding.current);
     const from = el.scrollTop;
-    if (reducedMotion() || el.scrollHeight - el.clientHeight - from > el.clientHeight * 2) {
+    if (resolvedReduced() || el.scrollHeight - el.clientHeight - from > el.clientHeight * 2) {
       el.scrollTop = el.scrollHeight;
       gliding.current = 0;
       return;

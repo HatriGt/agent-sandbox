@@ -5,7 +5,8 @@ import type { ProducedFile } from "@/lib/trace";
 import { Markdown } from "@/components/ui/markdown";
 import { CodeBlock, CodeBlockCode } from "@/components/ui/code-block";
 import { Collapse } from "@/components/ui/collapse";
-import { motion, useReducedMotion } from "motion/react";
+import { motion } from "motion/react";
+import { useReducedMotion } from "@/lib/motion-pref";
 import { cn } from "@/lib/utils";
 
 /**

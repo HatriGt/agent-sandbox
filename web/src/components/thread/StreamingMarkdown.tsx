@@ -1,4 +1,5 @@
 import * as React from "react";
+import { useReducedMotion } from "@/lib/motion-pref";
 import { Markdown } from "@/components/ui/markdown";
 import { stabilizeMarkdown } from "@/lib/markdown-stream";
 import { cn } from "@/lib/utils";
@@ -16,12 +17,12 @@ import { useLiveRewrite } from "@/components/viz/live-blocks";
  * Content is rendered through the same `Markdown` as static blocks, so a table/code fence that has
  * fully arrived reads correctly even mid-stream; the blinking caret marks the growing edge.
  *
- * `prefers-reduced-motion` short-circuits to showing the full text immediately (no caret, no reveal).
+ * Reduced motion (the in-app setting) short-circuits to showing the full text immediately (no caret, no reveal).
  */
 export function StreamingMarkdown({ text, live = true }: { text: string; live?: boolean }) {
   // A finished reply renders through the SAME element tree as the live one, so the visualizers
   // that grew while it streamed stay mounted when it ends — no remount, no replayed draw-in.
-  const reduced = usePrefersReducedMotion() || !live;
+  const reduced = useReducedMotion() || !live;
   const [shown, setShown] = React.useState(() => (reduced ? text.length : 0));
 
   // The full target text lives in a ref so the rAF loop always reveals toward the latest poll's
@@ -80,16 +81,3 @@ export function StreamingMarkdown({ text, live = true }: { text: string; live?: 
   );
 }
 
-/** Track the reduced-motion preference reactively so a mid-session toggle is respected. */
-function usePrefersReducedMotion(): boolean {
-  const [reduced, setReduced] = React.useState(
-    () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  );
-  React.useEffect(() => {
-    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const on = () => setReduced(mq.matches);
-    mq.addEventListener("change", on);
-    return () => mq.removeEventListener("change", on);
-  }, []);
-  return reduced;
-}

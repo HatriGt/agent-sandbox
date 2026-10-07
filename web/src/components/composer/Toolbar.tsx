@@ -1,7 +1,8 @@
 import * as React from "react";
 import { Link } from "react-router";
 import { Check, ChevronDown, Layers, ListChecks, MoreHorizontal, Plus, RotateCcw, SquareSlash, Zap } from "lucide-react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "@/lib/motion-pref";
 import { api, type AgentId, type WorkflowView } from "@/lib/api";
 import { useCached } from "@/lib/cache";
 import { SkillMark } from "@/lib/skillGlyph";

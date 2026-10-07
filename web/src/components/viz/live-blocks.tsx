@@ -1,4 +1,5 @@
 import * as React from "react";
+import { resolvedReduced } from "@/lib/motion-pref";
 import { ArrowUp, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { completeVersions, EMPTY_REGISTRY, rewriteLiveBlocks, type LiveRegistry, type LiveSlot } from "@/lib/viz-identity";
@@ -96,7 +97,7 @@ export function LiveCopyRow({ spec }: { spec: string }) {
   const jump = () => {
     const thread = ref.current?.closest("[aria-label='Conversation']") ?? document;
     const target = thread.querySelector<HTMLElement>(`[data-live-slot='${slot.n}']`);
-    target?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" });
+    target?.scrollIntoView({ behavior: resolvedReduced() ? "auto" : "smooth", block: "center" });
   };
   return (
     <div ref={ref} className="not-prose my-2" data-live-copy={slot.n}>

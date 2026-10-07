@@ -1,5 +1,5 @@
 ﻿import * as React from "react";
-import { CalendarClock, ChevronRight, Copy, FlaskConical, GitPullRequest, History as HistoryIcon, Link2, ListChecks, Play, Plus, Radar, RotateCw, ShieldCheck, Trash2, Webhook, Workflow, X } from "lucide-react";
+import { CalendarClock, ChevronRight, Copy, FlaskConical, GitPullRequest, History as HistoryIcon, Link2, ListChecks, PanelRight, Play, Plus, Radar, RotateCw, ShieldCheck, Trash2, Webhook, Workflow, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
@@ -187,6 +187,12 @@ function takeAutomationSeed(): Partial<AutomationDraft> | null {
   return s;
 }
 
+let editSeed: string | null = null;
+/** Open an existing automation's editor sheet the next time the Automations tab mounts (the runs page's View). */
+export function editAutomation(id: string): void {
+  editSeed = id;
+}
+
 /** The Automations tab of Autopilot (AutopilotPage owns the page header and tabs). */
 export function Automations({ onOpenBox, onOpenPlaybooks, onOpenRuns }: { onOpenBox: (box: string) => void; onOpenPlaybooks: () => void; onOpenRuns: (id: string) => void }) {
   const [rows, setRows] = React.useState<Automation[] | null>(null);
@@ -251,6 +257,13 @@ export function Automations({ onOpenBox, onOpenPlaybooks, onOpenRuns }: { onOpen
     const s = takeAutomationSeed();
     if (s) setEditing({ id: null, draft: { ...blank(), ...s } });
   }, []);
+  // The runs page's View lands here: open that automation's editor once the list has it.
+  React.useEffect(() => {
+    if (!editSeed || !rows) return;
+    const a = rows.find((r) => r.id === editSeed);
+    editSeed = null;
+    if (a) setEditing({ id: a.id, draft: toDraft(a) });
+  }, [rows]);
 
   return (
     <div className="min-w-0">
@@ -442,7 +455,7 @@ function WorkflowPick({ value, onChange }: { value: string | undefined; onChange
 
 const isPending = (a: Automation) => !!a.proposed && !a.enabled;
 
-/** Every automation as one table row: name + what fires it, when, how the last run went, then Runs and the switch (or Approve/Dismiss for a proposal). The whole row opens the editor. */
+/** Every automation as one table row: name + what fires it, when, how the last run went. The row opens its runs; the actions cell holds View (the editor sheet) and the switch (or Approve/Dismiss for a proposal). */
 function AutomationList({
   rows,
   onEdit,
@@ -521,16 +534,21 @@ function AutomationList({
         );
       },
     },
-    {
-      id: "status",
-      header: <span className="sr-only">Status</span>,
-      width: "w-36 md:w-48",
-      align: "end",
-      cell: (a) => (
+  ];
+  return (
+    <DataTable
+      aria-label="Automations"
+      rows={rows}
+      columns={columns}
+      rowKey={(a) => a.id}
+      onRowClick={onRuns}
+      rowLabel={(a) => `Open runs of ${a.name}`}
+      search={{ placeholder: "Search automations", text: (a) => [a.name, a.when, ...(a.repos ?? [])].join(" ") }}
+      actions={(a) => (
         <span className="inline-flex items-center justify-end gap-1.5" onClick={stopRow} onKeyDown={stopRow}>
-          <Button size="sm" variant="outline" onClick={() => onRuns(a)} aria-label={`Runs of ${a.name}`} className="h-8 px-2.5">
-            <HistoryIcon className="size-3.5" />
-            <span className="hidden md:inline">Runs</span>
+          <Button size="sm" variant="ghost" onClick={() => onEdit(a)} aria-label={`View ${a.name}`} className="h-8 px-2.5">
+            <PanelRight className="size-3.5" />
+            <span className="hidden md:inline">View</span>
           </Button>
           {isPending(a) ? (
             <>
@@ -545,17 +563,7 @@ function AutomationList({
             <Switch checked={a.enabled} onCheckedChange={(on) => onToggle(a, on)} aria-label={a.enabled ? `Pause ${a.name}` : `Turn on ${a.name}`} />
           )}
         </span>
-      ),
-    },
-  ];
-  return (
-    <DataTable
-      aria-label="Automations"
-      rows={rows}
-      columns={columns}
-      rowKey={(a) => a.id}
-      onRowClick={onEdit}
-      rowLabel={(a) => `Edit ${a.name}`}
+      )}
       groupOf={anyPending ? (a) => (isPending(a) ? "Proposed — waiting on you" : "Automations") : undefined}
       rowProps={(a) => ({ className: isPending(a) ? "bg-attention/[0.04]" : !a.enabled ? "opacity-60 hover:opacity-100 focus-visible:opacity-100" : undefined })}
     />

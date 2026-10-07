@@ -18,7 +18,8 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "@/lib/motion-pref";
 import { toast } from "sonner";
 import { api, type ThreadScheduleItem, type ThreadScheduleReject } from "@/lib/api";
 import { useGo } from "@/lib/route";

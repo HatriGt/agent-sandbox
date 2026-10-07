@@ -1,6 +1,7 @@
 import * as React from "react";
 import { Folder, GitBranch } from "lucide-react";
-import { motion, useReducedMotion } from "motion/react";
+import { motion } from "motion/react";
+import { useReducedMotion } from "@/lib/motion-pref";
 import { FileMark } from "@/lib/fileIcon";
 import { Bar } from "./Skeletons";
 import { api } from "@/lib/api";

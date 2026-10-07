@@ -1,6 +1,7 @@
 import * as React from "react";
-import { ArrowLeft, Check, ChevronDown, RotateCw, Trash2 } from "lucide-react";
-import { motion, useReducedMotion } from "motion/react";
+import { ArrowLeft, Check, RotateCw, Trash2 } from "lucide-react";
+import { motion } from "motion/react";
+import { useReducedMotion } from "@/lib/motion-pref";
 import { toast } from "sonner";
 import { api, type Automation, type LedgerRow as HistoryRun, type LedgerQuery, type LedgerTotals, type RunDigest, type RunOutcome } from "@/lib/api";
 import { ActivityHeatmap, type ActivityRun } from "@/components/ui/activity-heatmap";
@@ -10,8 +11,9 @@ import { fmtDuration } from "@/lib/lifecycle";
 import { setPrefill } from "@/lib/draft";
 import { Button } from "@/components/ui/button";
 import { ArmButton } from "@/components/ui/arm-button";
-import { Collapse } from "@/components/ui/collapse";
-import { StaggerItem, Swap } from "@/components/ui/swap";
+import { Swap } from "@/components/ui/swap";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { DataTable, MetaLine, StatusDot, type Column } from "@/components/ui/data-table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { FilterChip } from "@/components/ui/filter-chip";
 import { DigestCard } from "@/components/thread/DigestCard";
@@ -23,7 +25,7 @@ import { cn } from "@/lib/utils";
 /**
  * History: the record of what your agents did. Every run here is FINISHED and its machine may be
  * long gone — the page is an archive, deliberately still: fetched once on mount (plus "Show more"),
- * no polling, no breathing dots. A row expands in place into the run's receipt (the digest), and
+ * no polling, no breathing dots. A row opens the run's receipt (the digest) in a side sheet, and
  * offers exactly two actions: run the same brief again on a new machine, or delete the record.
  */
 
@@ -137,11 +139,9 @@ export function History({ onBack, onAgain }: { onBack: () => void; onAgain: () =
   const [agents, setAgents] = React.useState<string[]>([]);
   const [error, setError] = React.useState<string | null>(null);
   const [filter, setFilter] = React.useState<Filter>("all");
-  const [expanded, setExpanded] = React.useState<number | null>(null);
+  const [opened, setOpened] = React.useState<number | null>(null);
   const [more, setMore] = React.useState(false); // another page may exist
   const [loadingMore, setLoadingMore] = React.useState(false);
-  // Rows past this index arrived via "Show more": they fade in as a fresh page, not as the first.
-  const [pageStart, setPageStart] = React.useState(0);
   const [attempt, setAttempt] = React.useState(0);
 
   React.useEffect(() => {
@@ -153,7 +153,6 @@ export function History({ onBack, onAgain }: { onBack: () => void; onAgain: () =
       .then((r) => {
         setRows(r.rows);
         setTotals(r.totals);
-        setPageStart(0);
         setMore(r.rows.length === PAGE);
         // Agent options accumulate from what the ledger has actually shown — no hard-coded list.
         setAgents((prev) => Array.from(new Set([...prev, ...r.rows.map((x) => x.agent).filter((a): a is string => !!a)])).sort());
@@ -178,7 +177,6 @@ export function History({ onBack, onAgain }: { onBack: () => void; onAgain: () =
     setLoadingMore(true);
     try {
       const r = await api.ledger({ ...toQuery(lf), limit: PAGE, before: rows[rows.length - 1].id });
-      setPageStart(rows.length);
       setRows((prev) => [...(prev ?? []), ...r.rows]);
       setMore(r.rows.length === PAGE);
     } catch (e) {
@@ -193,6 +191,11 @@ export function History({ onBack, onAgain }: { onBack: () => void; onAgain: () =
   const filtered = lf.startedBy !== "" || lf.agent !== "" || lf.verified !== "";
 
   const visible = (rows ?? []).filter((r) => filter === "all" || (filter === "failed" ? r.state === "failed" : r.state !== "failed"));
+  const openRun = opened === null ? null : ((rows ?? []).find((x) => x.id === opened) ?? null);
+  const removeRow = (id: number) => {
+    setRows((prevRows) => (prevRows ?? []).filter((x) => x.id !== id));
+    setOpened((cur) => (cur === id ? null : cur));
+  };
 
   return (
     <div className="h-full min-w-0 overflow-y-auto">
@@ -296,31 +299,19 @@ export function History({ onBack, onAgain }: { onBack: () => void; onAgain: () =
             </div>
           ) : (
             <>
-              <div className="overflow-hidden rounded-xl border">
-                {/* role=list: the stagger wrapper sits between list and item, so the semantics are explicit. */}
-                <div role="list">
-                  {visible.map((r, i) => {
-                    const at = r.archivedAt || r.endedAt || 0;
-                    const prev = i > 0 ? visible[i - 1].archivedAt || visible[i - 1].endedAt || 0 : null;
-                    const head = at && (prev === null || dayLabel(prev) !== dayLabel(at)) ? dayLabel(at) : null;
-                    // Stagger from the start of the page this row arrived on, so "Show more" rows rise
-                    // in as a fresh batch instead of waiting behind fifty already-visible ones.
-                    const idx = rows.indexOf(r);
-                    return (
-                      <StaggerItem key={r.id} index={Math.max(0, idx - pageStart)}>
-                        <HistoryRow
-                          run={r}
-                          head={head}
-                          open={expanded === r.id}
-                          onToggle={() => setExpanded((cur) => (cur === r.id ? null : r.id))}
-                          onAgain={onAgain}
-                          onDeleted={() => setRows((prevRows) => (prevRows ?? []).filter((x) => x.id !== r.id))}
-                        />
-                      </StaggerItem>
-                    );
-                  })}
-                </div>
-              </div>
+              <DataTable
+                aria-label="History"
+                rows={visible}
+                columns={HISTORY_COLUMNS}
+                rowKey={(r) => String(r.id)}
+                onRowClick={(r) => setOpened(r.id)}
+                rowLabel={(r) => `${titleOf(r)} — ${r.state === "failed" ? "failed" : "done"}, show details`}
+                rowProps={(r) => ({ selected: opened === r.id })}
+                groupOf={(r) => { const t = r.archivedAt || r.endedAt; return t ? dayLabel(t) : null; }}
+                minWidth="min-w-[40rem]"
+                search={{ placeholder: "Search runs", text: (r) => `${titleOf(r)} ${r.headline ?? ""} ${r.box} ${friendlyName(r.box)} ${r.agent ?? ""} ${r.outcome?.header.label ?? ""}` }}
+                actions={(r) => <HistoryActions run={r} onAgain={onAgain} onDeleted={() => removeRow(r.id)} />}
+              />
               {more && (
                 <div className="mt-3 flex justify-center">
                   <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => void showMore()} loading={loadingMore}>
@@ -331,31 +322,102 @@ export function History({ onBack, onAgain }: { onBack: () => void; onAgain: () =
             </>
           )}
         </Swap>
+        <Sheet open={!!openRun} onOpenChange={(o) => !o && setOpened(null)}>
+          {openRun && (
+            <SheetContent title={titleOf(openRun)} description={`${openRun.state === "failed" ? "Failed" : "Done"} · ${friendlyName(openRun.box)}`} className="w-[min(44rem,calc(100vw-2rem))]">
+              <div className="mb-3 flex justify-end">
+                <HistoryActions run={openRun} onAgain={onAgain} onDeleted={() => removeRow(openRun.id)} />
+              </div>
+              <RunDetail id={openRun.id} outcome={openRun.outcome ?? null} />
+            </SheetContent>
+          )}
+        </Sheet>
       </div>
     </div>
   );
 }
 
-function HistoryRow({
-  run,
-  head,
-  open,
-  onToggle,
-  onAgain,
-  onDeleted,
-}: {
-  run: HistoryRun;
-  head: string | null;
-  open: boolean;
-  onToggle: () => void;
-  onAgain: () => void;
-  onDeleted: () => void;
-}) {
-  const failed = run.state === "failed";
+function runDuration(run: HistoryRun): number | null {
   // Archive stamps are epoch ms (see HistoryRun); fmtDuration and fmtAgo both speak seconds.
-  const duration = run.startedAt && run.endedAt && run.endedAt > run.startedAt ? fmtDuration(Math.round((run.endedAt - run.startedAt) / 1000)) : null;
-  const verified = /\bverified\s*$/i.test(run.headline ?? "");
+  return run.startedAt && run.endedAt && run.endedAt > run.startedAt ? Math.round((run.endedAt - run.startedAt) / 1000) : null;
+}
 
+const HISTORY_COLUMNS: Column<HistoryRun>[] = [
+  {
+    id: "state",
+    header: "Status",
+    width: "w-24",
+    sort: (r) => r.state,
+    cell: (r) => (r.state === "failed" ? <StatusDot tone="destructive">failed</StatusDot> : <StatusDot tone="ok">done</StatusDot>),
+  },
+  {
+    id: "title",
+    header: "Run",
+    primary: true,
+    sort: (r) => titleOf(r),
+    cell: (r) => {
+      const verified = /\bverified\s*$/i.test(r.headline ?? "");
+      const facts = r.outcome ? outcomeFacts(r.outcome) : [];
+      return (
+        <span className="flex min-w-0 flex-col">
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="truncate">{titleOf(r)}</span>
+            {verified && (
+              <span className="bg-ok/10 text-ok inline-flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-px text-micro font-medium" title="The run's result was verified">
+                <Check className="size-3" aria-hidden />
+                verified
+              </span>
+            )}
+          </span>
+          <MetaLine
+            className="font-normal"
+            parts={[
+              r.outcome?.header.label ? <span title="Why it started">{r.outcome.header.label}</span> : null,
+              facts.length ? <span className="stamp" title={facts.join(" · ")}>{facts.join(" · ")}</span> : null,
+              r.headline && r.task && r.headline.trim() !== titleOf(r) ? <span className="text-faint" title={r.headline}>{r.headline.replace(/\s*verified\s*$/i, "")}</span> : null,
+            ]}
+          />
+        </span>
+      );
+    },
+  },
+  {
+    id: "box",
+    header: "Machine",
+    width: "w-36",
+    hideBelow: "md",
+    sort: (r) => friendlyName(r.box),
+    cell: (r) => (
+      <span className="stamp text-muted-foreground block truncate" title={shortName(r.box)}>
+        {friendlyName(r.box)}
+      </span>
+    ),
+  },
+  {
+    id: "duration",
+    header: "Duration",
+    width: "w-24",
+    hideBelow: "sm",
+    align: "end",
+    sort: runDuration,
+    cell: (r) => {
+      const d = runDuration(r);
+      return <span className="stamp text-muted-foreground tabular-nums">{d != null ? fmtDuration(d) : "—"}</span>;
+    },
+  },
+  {
+    id: "archived",
+    header: "Archived",
+    width: "w-28",
+    hideBelow: "sm",
+    align: "end",
+    sort: (r) => r.archivedAt || r.endedAt || null,
+    cell: (r) => <span className="text-muted-foreground text-micro tabular-nums">{r.archivedAt > 0 ? fmtAgo(Math.round(r.archivedAt / 1000)) : "—"}</span>,
+  },
+];
+
+/** Run again (prefill the Hub composer, then go there — same as the thread header) and delete. */
+function HistoryActions({ run, onAgain, onDeleted }: { run: HistoryRun; onAgain: () => void; onDeleted: () => void }) {
   const remove = async () => {
     try {
       await api.deleteHistoryRun(run.id);
@@ -365,104 +427,31 @@ function HistoryRow({
       toast.error("Could not delete the record", { description: e instanceof Error ? e.message : String(e) });
     }
   };
-
-  /** Same shape as the thread header's Run again: prefill the Hub composer, then go there. */
-  const again = () => {
-    setPrefill({ task: run.task ?? "" });
-    onAgain();
-  };
-
   return (
-    <div role="listitem" className="border-b last:border-b-0">
-      {head && (
-        <p className="label text-faint bg-muted/30 border-b px-4 py-1.5" aria-hidden>
-          {head}
-        </p>
-      )}
-      <div className={cn("group relative transition-colors duration-200", open ? "bg-muted/40" : "hover:bg-muted/50")}>
-        <div className="grid grid-cols-1 items-center gap-2 px-4 py-3 md:grid-cols-[5.5rem_minmax(0,1fr)_auto] md:gap-3">
-          {/* The row IS the expand action: a stretched button under the content. */}
-          <button
-            type="button"
-            onClick={onToggle}
-            aria-expanded={open}
-            aria-label={`${titleOf(run)} — ${failed ? "failed" : "done"}, show details`}
-            className="focus-visible:ring-ring absolute inset-0 cursor-pointer rounded-none focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset"
-          />
-
-          <span className="flex items-center gap-1.5">
-            <span className={cn("size-2 shrink-0 rounded-full", failed ? "bg-destructive" : "bg-ok")} aria-hidden />
-            <span className={cn("label", failed ? "text-destructive" : "text-ok")}>{failed ? "failed" : "done"}</span>
-          </span>
-
-          <span className="min-w-0">
-            <span className="text-foreground block truncate text-meta">
-              {titleOf(run)}
-              {verified && (
-                <span className="bg-ok/10 text-ok ml-2 inline-flex items-center gap-0.5 rounded-full px-1.5 py-px align-middle text-micro font-medium" title="The run's result was verified">
-                  <Check className="size-3" aria-hidden />
-                  verified
-                </span>
-              )}
-            </span>
-            <span className="text-muted-foreground mt-0.5 flex flex-wrap items-center gap-x-2 text-micro">
-              <span className="stamp" title={shortName(run.box)}>
-                {friendlyName(run.box)}
-              </span>
-              {duration && <span className="stamp">{duration}</span>}
-              {run.archivedAt > 0 && <span>archived {fmtAgo(Math.round(run.archivedAt / 1000))}</span>}
-              {run.outcome?.header.label && <span title="Why it started">{run.outcome.header.label}</span>}
-              {run.headline && run.task && run.headline.trim() !== titleOf(run) && (
-                <span className="text-faint hidden min-w-0 truncate sm:inline" title={run.headline}>
-                  {run.headline.replace(/\s*verified\s*$/i, "")}
-                </span>
-              )}
-            </span>
-            {run.outcome && outcomeFacts(run.outcome).length > 0 && (
-              <span className="stamp text-muted-foreground mt-0.5 block truncate" title={outcomeFacts(run.outcome).join(" · ")}>
-                {outcomeFacts(run.outcome).join(" · ")}
-              </span>
-            )}
-          </span>
-
-          {/* Actions sit above the stretched button. */}
-          <span className="relative flex items-center gap-1.5 md:justify-end">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label="Run again — new machine, same brief"
-                  className="text-muted-foreground opacity-60 transition-opacity group-hover:opacity-100"
-                  onClick={again}
-                >
-                  <RotateCw />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Run again — a new machine, the same brief (you can edit it first)</TooltipContent>
-            </Tooltip>
-            <ArmButton
-              size="icon-sm"
-              variant="ghost"
-              icon={<Trash2 />}
-              label="Delete this record"
-              armedLabel="Delete?"
-              onConfirm={remove}
-              className="text-muted-foreground opacity-60 group-hover:opacity-100"
-            />
-            <ChevronDown className={cn("text-muted-foreground pointer-events-none size-4 transition-transform duration-200", open && "rotate-180")} aria-hidden />
-          </span>
-        </div>
-
-        <Collapse open={open}>
-          <RunDetail id={run.id} outcome={run.outcome ?? null} />
-        </Collapse>
-      </div>
-    </div>
+    <span className="inline-flex items-center gap-0.5">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            aria-label="Run again — new machine, same brief"
+            className="text-muted-foreground"
+            onClick={() => {
+              setPrefill({ task: run.task ?? "" });
+              onAgain();
+            }}
+          >
+            <RotateCw />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Run again — a new machine, the same brief (you can edit it first)</TooltipContent>
+      </Tooltip>
+      <ArmButton size="icon-sm" variant="ghost" icon={<Trash2 />} label="Delete this record" armedLabel="Delete?" onConfirm={remove} className="text-muted-foreground" />
+    </span>
   );
 }
 
-/** The expanded record: the full digest fetched once, rendered as the run receipt. */
+/** The opened record: the full digest fetched once, rendered as the run receipt. */
 function RunDetail({ id, outcome }: { id: number; outcome: RunOutcome | null }) {
   const [state, setState] = React.useState<{ digest: RunDigest | null; diffText?: string; error?: string } | "loading">("loading");
   const [review, setReview] = React.useState(false);
@@ -482,7 +471,7 @@ function RunDetail({ id, outcome }: { id: number; outcome: RunOutcome | null }) 
 
   const still = useReducedMotion();
   return (
-    <div className="border-t px-4 py-3">
+    <div>
       <Swap state={state === "loading" ? "loading" : state.error ? "error" : state.digest ? "digest" : "none"}>
         {state === "loading" ? (
           // Shaped like the DigestCard it becomes: a raised card with the status line, so the swap

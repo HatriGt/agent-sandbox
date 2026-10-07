@@ -1,6 +1,7 @@
 import * as React from "react";
 import { Check, Layers, Search, ShieldCheck, X } from "lucide-react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "@/lib/motion-pref";
 import type { AgentChoice, AgentId, HarnessView } from "@/lib/api";
 import type { ModelChoice } from "./ModelPicker";
 import { Segmented } from "@/components/ui/segmented";

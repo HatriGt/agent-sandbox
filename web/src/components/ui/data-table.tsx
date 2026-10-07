@@ -1,13 +1,17 @@
 import * as React from "react";
-import { ArrowUp, ChevronsUpDown } from "lucide-react";
+import { ArrowUp, ChevronsUpDown, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { NumberTicker } from "@/components/ui/number-ticker";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, type TableProps } from "@/components/ui/table";
 
 /**
  * The one data table of the app (fleet, automations, runs, scheduled, playbooks). Columns declare a
  * header, a cell renderer, an optional sort key and the breakpoint below which they hide; the table
- * owns sorting (asc → desc → off, as EasyUI), clickable rows (the row is the button, as Orbit),
- * optional group heads, skeleton rows and the empty state. Visual language: DESIGN.md → Tables.
+ * owns sorting (asc → desc → off, as EasyUI), clickable rows (the row is the button, as Orbit; ↑/↓
+ * or j/k move between them, Enter opens), an optional search toolbar, a trailing actions cell,
+ * optional group heads, skeleton rows and the empty state. Bordered card by default; `bordered={false}`
+ * is the frameless list. Visual language: DESIGN.md → Tables.
  */
 
 export interface Column<T> {
@@ -30,6 +34,14 @@ const HIDE: Record<NonNullable<Column<unknown>["hideBelow"]>, string> = { sm: "h
 
 type Sort = { id: string; dir: "asc" | "desc" } | null;
 
+const NO_GHOSTS: ReadonlySet<string> = new Set();
+
+/** Moves focus to the previous/next clickable row of the same body (ghost rows are never clickable). */
+function focusSibling(row: HTMLElement, dir: 1 | -1) {
+  const all = Array.from(row.parentElement?.querySelectorAll<HTMLElement>(":scope > tr[data-clickable]") ?? []);
+  all[all.indexOf(row) + dir]?.focus();
+}
+
 export function DataTable<T>({
   rows,
   columns,
@@ -47,6 +59,10 @@ export function DataTable<T>({
   stickyHeader,
   containerClassName,
   "aria-label": ariaLabel,
+  bordered = true,
+  search,
+  actions,
+  toolbar,
 }: {
   rows: T[];
   columns: Column<T>[];
@@ -67,6 +83,14 @@ export function DataTable<T>({
   stickyHeader?: boolean;
   containerClassName?: string;
   "aria-label"?: string;
+  /** Default true: the table sits in a rounded bordered card. False → Orbit's frameless list. */
+  bordered?: boolean;
+  /** Renders a search toolbar above the table (`/` focuses, Esc clears) that filters by `text(row)`. */
+  search?: { placeholder: string; text: (row: T) => string };
+  /** Trailing, right-aligned actions cell; fades in on row hover/focus (always shown on touch). */
+  actions?: (row: T) => React.ReactNode;
+  /** Extra controls at the right of the search toolbar. */
+  toolbar?: React.ReactNode;
 }) {
   const [sort, setSort] = React.useState<Sort>(initialSort);
   const sorted = React.useMemo(() => {
@@ -102,14 +126,64 @@ export function DataTable<T>({
     seen.current ??= new Set();
     for (const r of rows) seen.current.add(rowKey(r));
   }, [rows, rowKey, loading]);
+
+  // Search. Changing the query bumps the epoch so the rows still shown re-enter with the quick sort
+  // stagger; rows that stop matching stay in place as inert "ghosts" for one fade, then drop out.
+  const [query, setQuery] = React.useState("");
+  const [ghosts, setGhosts] = React.useState<ReadonlySet<string>>(NO_GHOSTS);
+  const ghostTimer = React.useRef<number>(undefined);
+  React.useEffect(() => () => clearTimeout(ghostTimer.current), []);
+  const inputRef = React.useRef<HTMLInputElement>(null);
+  const textOf = search?.text;
+  const needle = query.trim().toLowerCase();
+  const matches = (r: T, q = needle) => !q || !textOf || textOf(r).toLowerCase().includes(q);
+  const shown = needle && textOf ? sorted.filter((r) => matches(r)) : sorted;
+  const list = ghosts.size ? sorted.filter((r) => matches(r) || ghosts.has(rowKey(r))) : shown;
+  const applyQuery = (next: string) => {
+    const q = next.trim().toLowerCase();
+    setQuery(next);
+    if (q === needle) return;
+    const gone = shown.filter((r) => !matches(r, q)).map(rowKey);
+    enterOf.current.clear();
+    setEpoch((n) => n + 1);
+    clearTimeout(ghostTimer.current);
+    setGhosts(gone.length ? new Set(gone) : NO_GHOSTS);
+    if (gone.length) ghostTimer.current = window.setTimeout(() => setGhosts(NO_GHOSTS), 200);
+  };
+  const hasSearch = !!search;
+  React.useEffect(() => {
+    if (!hasSearch) return;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target;
+      if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey || (t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)))) return;
+      const el = inputRef.current;
+      if (!el || !el.offsetParent) return;
+      e.preventDefault();
+      el.focus();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [hasSearch]);
+
+  const span = columns.length + (actions ? 1 : 0);
+  const searchMiss = !!needle && !!search && shown.length === 0 && rows.length > 0;
   const grouped = !!groupOf && !sort;
 
-  return (
-    <Table aria-label={ariaLabel} size={size} stickyHeader={stickyHeader} containerClassName={containerClassName} className={cn("table-fixed", minWidth)} aria-busy={loading || undefined}>
+  const table = (
+    <Table
+      aria-label={ariaLabel}
+      variant={bordered ? "surface" : "plain"}
+      size={size}
+      stickyHeader={stickyHeader}
+      containerClassName={containerClassName}
+      className={cn("table-fixed", minWidth)}
+      aria-busy={loading || undefined}
+    >
       <colgroup>
         {columns.map((c) => (
           <col key={c.id} className={cn(c.width, c.hideBelow && HIDE[c.hideBelow].replace(/table-cell/g, "table-column"))} />
         ))}
+        {actions && <col className="w-28" />}
       </colgroup>
       <TableHeader>
         <TableRow>
@@ -135,6 +209,11 @@ export function DataTable<T>({
               </TableHead>
             );
           })}
+          {actions && (
+            <TableHead align="end">
+              <span className="sr-only">Actions</span>
+            </TableHead>
+          )}
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -146,32 +225,49 @@ export function DataTable<T>({
                   <span className="dt-shim block h-3 max-w-32 rounded-full" style={{ width: `${55 + ((i * 17 + c.id.length * 7) % 40)}%` }} />
                 </TableCell>
               ))}
+              {actions && <TableCell />}
             </TableRow>
           ))
-        ) : sorted.length === 0 ? (
+        ) : searchMiss && !ghosts.size ? (
           <TableRow className="hover:bg-(--table-bg)">
-            <TableCell colSpan={columns.length} className="text-muted-foreground h-28 text-center whitespace-normal">
+            <TableCell colSpan={span} className="h-28 text-center whitespace-normal">
+              <span className="flex flex-col items-center gap-2">
+                <span>
+                  No rows match <span className="text-foreground">“{query.trim()}”</span>
+                </span>
+                <Button size="xs" variant="outline" onClick={() => applyQuery("")}>
+                  Clear search
+                </Button>
+              </span>
+            </TableCell>
+          </TableRow>
+        ) : list.length === 0 ? (
+          <TableRow className="hover:bg-(--table-bg)">
+            <TableCell colSpan={span} className="text-muted-foreground h-28 text-center whitespace-normal">
               {empty ?? "Nothing here yet."}
             </TableCell>
           </TableRow>
         ) : (
-          sorted.map((r, i) => {
+          list.map((r, i) => {
             const g = grouped ? groupOf!(r) : null;
-            const head = grouped && g && (i === 0 || groupOf!(sorted[i - 1]) !== g);
+            const head = grouped && g && (i === 0 || groupOf!(list[i - 1]) !== g);
             const p = rowProps?.(r);
-            const click = onRowClick && (rowClickable?.(r) ?? true) ? () => onRowClick(r) : undefined;
             const key = rowKey(r);
+            const ghost = ghosts.has(key) && !matches(r);
+            const click = !ghost && onRowClick && (rowClickable?.(r) ?? true) ? () => onRowClick(r) : undefined;
             let enter = enterOf.current.get(key);
             if (!enter) {
               enter = !seen.current ? "in" : !seen.current.has(key) ? "new" : "sort";
               enterOf.current.set(key, enter);
             }
-            const motion = { "data-enter": enter === "new" ? undefined : enter, "data-new": enter === "new" ? "" : undefined, style: { ...p?.style, "--i": i } as React.CSSProperties };
+            const motion = ghost
+              ? { "data-enter": undefined, "data-new": undefined, style: p?.style }
+              : { "data-enter": enter === "new" ? undefined : enter, "data-new": enter === "new" ? "" : undefined, style: { ...p?.style, "--i": i } as React.CSSProperties };
             return (
               <React.Fragment key={`${epoch}:${key}`}>
                 {head && (
                   <TableRow className="hover:bg-(--table-bg)" data-enter={motion["data-enter"]} style={motion.style}>
-                    <TableCell colSpan={columns.length} className="text-faint bg-(--table-head-bg,var(--table-bg)) h-auto py-2 pt-4 text-[11px] font-medium tracking-[0.05em] uppercase">
+                    <TableCell colSpan={span} className="text-faint bg-(--table-head-bg,var(--table-bg)) h-auto py-2 pt-4 text-[11px] font-medium tracking-[0.05em] uppercase">
                       {g}
                     </TableCell>
                   </TableRow>
@@ -179,6 +275,9 @@ export function DataTable<T>({
                 <TableRow
                   data-clickable={click ? "" : undefined}
                   data-state={p?.selected ? "selected" : undefined}
+                  data-leave={ghost ? "" : undefined}
+                  aria-hidden={ghost || undefined}
+                  inert={ghost || undefined}
                   tabIndex={click ? 0 : undefined}
                   aria-label={click && rowLabel ? rowLabel(r) : undefined}
                   onClick={click}
@@ -190,6 +289,10 @@ export function DataTable<T>({
                           if (e.key === "Enter" || e.key === " ") {
                             e.preventDefault();
                             click();
+                          } else if (e.key === "ArrowDown" || e.key === "j" || e.key === "ArrowUp" || e.key === "k") {
+                            if (e.metaKey || e.ctrlKey || e.altKey) return;
+                            e.preventDefault();
+                            focusSibling(e.currentTarget, e.key === "ArrowDown" || e.key === "j" ? 1 : -1);
                           }
                         }
                       : undefined
@@ -204,6 +307,11 @@ export function DataTable<T>({
                       {c.cell(r)}
                     </TableCell>
                   ))}
+                  {actions && (
+                    <TableCell align="end" className="overflow-visible" onClick={stopRow} onKeyDown={stopRow}>
+                      <div className="dt-actions inline-flex items-center justify-end gap-1">{actions(r)}</div>
+                    </TableCell>
+                  )}
                 </TableRow>
               </React.Fragment>
             );
@@ -211,6 +319,60 @@ export function DataTable<T>({
         )}
       </TableBody>
     </Table>
+  );
+
+  if (!search && !toolbar) return table;
+  return (
+    <div data-slot="data-table" className="flex min-w-0 flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-2">
+        {search && (
+          <>
+            <label className="bg-card focus-within:ring-ring/40 focus-within:border-ring flex h-8 w-full max-w-72 min-w-0 items-center gap-1.5 rounded-md border px-2 transition-[border-color,box-shadow] duration-150 focus-within:ring-2 sm:w-64">
+              <Search className="text-muted-foreground size-3.5 shrink-0" aria-hidden />
+              <input
+                ref={inputRef}
+                type="search"
+                value={query}
+                onChange={(e) => applyQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key !== "Escape") return;
+                  if (query) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    applyQuery("");
+                  } else e.currentTarget.blur();
+                }}
+                placeholder={search.placeholder}
+                aria-label={search.placeholder}
+                className="text-foreground placeholder:text-muted-foreground min-w-0 flex-1 bg-transparent text-meta outline-none [&::-webkit-search-cancel-button]:hidden"
+              />
+              {query ? (
+                <button type="button" onClick={() => { applyQuery(""); inputRef.current?.focus(); }} aria-label="Clear search" className="text-muted-foreground hover:text-foreground hover:bg-muted pop-in cursor-pointer rounded p-0.5">
+                  <X className="size-3.5" />
+                </button>
+              ) : (
+                <kbd className="text-faint border-border hidden rounded border px-1 font-mono text-[10px] leading-4 sm:inline" aria-hidden>
+                  /
+                </kbd>
+              )}
+            </label>
+            {!loading && (
+              <span className="text-muted-foreground text-micro" aria-live="polite">
+                {needle ? (
+                  <>
+                    <NumberTicker value={shown.length} from={rows.length} className="text-foreground" /> of <span className="tabular-nums">{rows.length}</span>
+                  </>
+                ) : (
+                  <span className="tabular-nums">{rows.length}</span>
+                )}
+              </span>
+            )}
+          </>
+        )}
+        {toolbar && <div className="ml-auto flex flex-wrap items-center gap-2">{toolbar}</div>}
+      </div>
+      {table}
+    </div>
   );
 }
 

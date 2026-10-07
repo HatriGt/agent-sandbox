@@ -20,7 +20,8 @@ import {
   Webhook,
   X,
 } from "lucide-react";
-import { AnimatePresence, motion, useInView, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion, useInView } from "motion/react";
+import { useReducedMotion } from "@/lib/motion-pref";
 import { Logo } from "@/components/ui/logo";
 import { cn } from "@/lib/utils";
 

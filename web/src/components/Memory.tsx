@@ -1,4 +1,5 @@
 import * as React from "react";
+import { resolvedReduced } from "@/lib/motion-pref";
 import { AnimatePresence, motion } from "motion/react";
 import { Brain, Check, ChevronRight, Download, FolderGit2, History, Link2, Pencil, Pin, PinOff, Plus, Search, ShieldCheck, Sparkles, Trash2, Upload, User, X } from "lucide-react";
 import { toast } from "sonner";
@@ -188,7 +189,7 @@ export function MemoryPage({ onBack }: { onBack: () => void }) {
     // A SettingsSection carries its id on the heading (`<id>-h`); rows and area pages on themselves.
     const el = document.getElementById(elId) ?? document.getElementById(`${elId}-h`);
     if (!el) return;
-    const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const reduce = resolvedReduced();
     el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "center" });
     el.classList.remove("mm-flash");
     void el.offsetWidth;

@@ -1,5 +1,7 @@
 import * as React from "react";
-import { motion, useReducedMotion } from "motion/react";
+import { motion } from "motion/react";
+import { setMotionPref, useMotionPref, useReducedMotion, type MotionPref } from "@/lib/motion-pref";
+import { Segmented } from "@/components/ui/segmented";
 import { PlugZap, Shield } from "lucide-react";
 import { toast } from "sonner";
 import { api, type BoxView } from "@/lib/api";
@@ -33,6 +35,31 @@ function pwStrength(p: string): number {
   if (/[^a-zA-Z0-9]/.test(p)) n++;
   return Math.min(4, n);
 }
+
+/** Device-local appearance: how much the console animates. Stored in this browser only. */
+function AppearanceSettings() {
+  const pref = useMotionPref();
+  const reduced = useReducedMotion();
+  return (
+    <SettingsSection id="appearance" title="Appearance" meta={pref === "system" ? (reduced ? "Reduced (from OS)" : "Full (from OS)") : undefined} purpose="Saved in this browser.">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <span className="text-foreground text-meta font-medium">Motion</span>
+        <Segmented<MotionPref>
+          ariaLabel="Motion"
+          value={pref}
+          onChange={setMotionPref}
+          options={[
+            { value: "full", label: "Full" },
+            { value: "system", label: "System" },
+            { value: "reduced", label: "Reduced" },
+          ]}
+        />
+        <p className="text-muted-foreground w-full text-micro">System follows your OS &lsquo;animation effects&rsquo; setting.</p>
+      </div>
+    </SettingsSection>
+  );
+}
+
 const STRENGTH = ["", "weak", "fair", "good", "strong"] as const;
 
 /** Four segments that fill left to right; the filled ones tint from destructive → attention → ok. */
@@ -245,6 +272,7 @@ export function Account({ onBack, onConnect, onAdmin }: { onBack: () => void; on
         </SettingsSection>
       )}
 
+      <AppearanceSettings />
       <AgentSettings />
       <NotifySettings />
       {user && <ApiKeys />}

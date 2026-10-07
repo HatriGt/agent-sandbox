@@ -1,4 +1,5 @@
 import * as React from "react";
+import { useReducedMotion } from "@/lib/motion-pref";
 import { BarChart3, Table2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ChartSpec } from "@/lib/viz";
@@ -10,7 +11,7 @@ import { DataTable } from "./DataTable";
  * costs nothing in the bundle and follows the theme live. Follows the dataviz method: thin marks,
  * rounded data-ends, 2px gaps between adjacent fills, one axis, fixed series colors (never cycled),
  * direct value labels on bars (the light palette's contrast relief), a legend for ≥2 series, and a
- * per-mark hover tooltip. Marks draw in once; `prefers-reduced-motion` renders them static.
+ * per-mark hover tooltip. Marks draw in once; reduced motion renders them static.
  *
  * Interaction: legend entries toggle their series (by name, so the choice survives streaming
  * growth; at least one stays visible); bar/line/area charts take a category-wide hover band and a
@@ -117,17 +118,6 @@ const fmt = (n: number | undefined, unit?: string) =>
     ? "–"
     : `${Math.abs(n) >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : Math.abs(n) >= 1e4 ? `${(n / 1e3).toFixed(0)}k` : Number.isInteger(n) ? n : n.toFixed(2)}${unit ?? ""}`;
 
-function useReduced(): boolean {
-  return React.useSyncExternalStore(
-    (cb) => {
-      const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
-      mq.addEventListener("change", cb);
-      return () => mq.removeEventListener("change", cb);
-    },
-    () => window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-    () => false
-  );
-}
 
 type TipState = { x: number | string; y: number | string; text: string; lines?: { color: string; text: string }[] };
 
@@ -208,7 +198,7 @@ const FOCUS = "rounded-md outline-none focus-visible:ring-2 focus-visible:ring-r
 const W = 560;
 
 function Bars({ spec, slots }: { spec: ChartSpec; slots: number[] }) {
-  const reduced = useReduced();
+  const reduced = useReducedMotion();
   const nS = spec.series.length;
   const nL = spec.labels.length;
   const scrub = useScrub(spec.labels);
@@ -300,7 +290,7 @@ function Bars({ spec, slots }: { spec: ChartSpec; slots: number[] }) {
 
 /** Stacked bars: one column per label, segments in slot order with a 2px surface gap between fills. */
 function StackedBars({ spec, slots }: { spec: ChartSpec; slots: number[] }) {
-  const reduced = useReduced();
+  const reduced = useReducedMotion();
   const scrub = useScrub(spec.labels);
   const nL = spec.labels.length;
   const totals = spec.labels.map((_, li) => spec.series.reduce((acc, s) => acc + (s.data[li] || 0), 0));
@@ -442,7 +432,7 @@ function Scatter({ spec, slots }: { spec: ChartSpec; slots: number[] }) {
 
 /** Line / area with a crosshair that reads every visible series at the hovered category. */
 function Lines({ spec, slots, area }: { spec: ChartSpec; slots: number[]; area: boolean }) {
-  const reduced = useReduced();
+  const reduced = useReducedMotion();
   const scrub = useScrub(spec.labels);
   const H = 156;
   const plotH = 140;

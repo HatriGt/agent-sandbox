@@ -1,5 +1,6 @@
 import * as React from "react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "@/lib/motion-pref";
 import { Braces, Check, ChevronDown, Eye, EyeOff, KeyRound, Plus, Trash2, X, Zap } from "lucide-react";
 import type { McpProbe, McpServerView, McpTransport } from "@/lib/api";
 import { BrandGlyph } from "@/lib/brandIcon";
@@ -14,7 +15,7 @@ import { Field, Input, inputClass } from "@/components/ui/field";
 import { Kbd } from "@/components/ui/kbd";
 import { JsonEditor, jsonErrorLine } from "@/components/JsonEditor";
 import { cn } from "@/lib/utils";
-import { StatusPill, Verdict, type Mutate } from "./ServerRow";
+import { StatusPill, Verdict, type Mutate } from "./Verdict";
 import { TRANSPORTS, commandOf, draftOf, errMsg, fromDef, packageOf, previewJson, shellSplit, statusOf, toDef, validate, type Draft, type Health, type KV } from "./model";
 
 const EASE = [0.22, 1, 0.36, 1] as const;

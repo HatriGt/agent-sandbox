@@ -1,6 +1,7 @@
 import * as React from "react";
 import { ArrowLeft, Copy, Download, Eye, FileText, Info, MoreHorizontal, PanelRightClose, PanelRightOpen, PenLine, Power, Trash2 } from "lucide-react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "@/lib/motion-pref";
 import { toast } from "sonner";
 import type { SkillView } from "@/lib/api";
 import { SkillMark } from "@/lib/skillGlyph";

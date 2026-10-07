@@ -1,5 +1,5 @@
 import { Check, CircleDot, Pause } from "lucide-react";
-import { useReducedMotion } from "motion/react";
+import { useReducedMotion } from "@/lib/motion-pref";
 import { cn } from "@/lib/utils";
 
 /**

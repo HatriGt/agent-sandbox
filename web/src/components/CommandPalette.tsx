@@ -1,6 +1,7 @@
 import * as React from "react";
 import { CornerDownLeft, History, Plus, Search, SearchX } from "lucide-react";
-import { motion, useReducedMotion } from "motion/react";
+import { motion } from "motion/react";
+import { useReducedMotion } from "@/lib/motion-pref";
 import type { BoxView } from "@/lib/api";
 import { fmtAgo, friendlyName, shortName, threadTitle } from "@/lib/format";
 import { StateStamp } from "@/components/ui/stamp";

@@ -1,15 +1,42 @@
 import * as React from "react";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence } from "motion/react";
 import { KeyRound, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, type ApiKeyRow } from "@/lib/api";
 import { fmtAgo } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { ArmButton } from "@/components/ui/arm-button";
-import { StaggerItem, Swap } from "@/components/ui/swap";
+import { Swap } from "@/components/ui/swap";
 import { ListEmpty, ListSkeleton } from "@/components/ui/list-state";
 import { SecretReveal } from "@/components/ui/secret";
 import { Panel, PanelFooter, SettingsSection } from "@/components/ui/settings";
+import { DataTable, type Column } from "@/components/ui/data-table";
+
+const time = (s: string | null) => (s && Number.isFinite(Date.parse(s)) ? Date.parse(s) : null);
+
+const COLUMNS: Column<ApiKeyRow>[] = [
+  {
+    id: "name",
+    header: "Name",
+    primary: true,
+    sort: (k) => k.name,
+    cell: (k) => (
+      <span className="flex min-w-0 items-center gap-2.5">
+        <KeyRound className="text-muted-foreground size-4 shrink-0" aria-hidden />
+        <span className="truncate">{k.name}</span>
+      </span>
+    ),
+  },
+  { id: "prefix", header: "Key", width: "w-44", hideBelow: "sm", cell: (k) => <span className="stamp text-muted-foreground truncate">{masked(k.prefix)}</span> },
+  { id: "created", header: "Created", width: "w-28", hideBelow: "md", sort: (k) => time(k.created_at), cell: (k) => <span className="text-muted-foreground text-micro tabular-nums">{time(k.created_at) ? fmtAgo(time(k.created_at)! / 1000) : "—"}</span> },
+  {
+    id: "used",
+    header: "Last used",
+    width: "w-28",
+    sort: (k) => time(k.last_used_at),
+    cell: (k) => <span className="text-muted-foreground text-micro tabular-nums">{time(k.last_used_at) ? fmtAgo(time(k.last_used_at)! / 1000) : "never"}</span>,
+  },
+];
 
 /** `asb_ab12…` → `asb_ab12 •••• ••••` so the list reads as masked, not truncated. */
 function masked(prefix: string) {
@@ -98,31 +125,15 @@ export function ApiKeys() {
               }
             />
           ) : (
-            <ul className="divide-y">
-              <AnimatePresence initial={false}>
-                {active.map((k, i) => (
-                  <motion.li key={k.id} layout exit={{ opacity: 0, height: 0, transition: { duration: 0.18, ease: [0.22, 1, 0.36, 1] } }} className="overflow-hidden">
-                    <StaggerItem index={i} className="group flex items-center gap-3 px-3.5 py-2.5">
-                      <KeyRound className="text-muted-foreground size-4 shrink-0" aria-hidden />
-                      <span className="flex min-w-0 flex-1 flex-col sm:flex-row sm:items-center sm:gap-3">
-                        <span className="text-foreground min-w-0 truncate text-meta font-medium">{k.name}</span>
-                        <span className="stamp text-muted-foreground shrink-0">{masked(k.prefix)}</span>
-                      </span>
-                      <span className="text-faint hidden shrink-0 text-micro tabular-nums sm:inline">{k.last_used_at && Number.isFinite(Date.parse(k.last_used_at)) ? `used ${fmtAgo(Date.parse(k.last_used_at) / 1000)}` : "never used"}</span>
-                      <ArmButton
-                        size="icon-sm"
-                        variant="ghost"
-                        icon={<Trash2 />}
-                        label={`Revoke ${k.name}`}
-                        armedLabel="Revoke?"
-                        onConfirm={() => revoke(k)}
-                        className="text-muted-foreground hover:text-destructive sm:opacity-0 sm:transition-opacity sm:group-focus-within:opacity-100 sm:group-hover:opacity-100 sm:data-[armed=true]:opacity-100"
-                      />
-                    </StaggerItem>
-                  </motion.li>
-                ))}
-              </AnimatePresence>
-            </ul>
+            <DataTable
+              aria-label="API keys"
+              bordered={false}
+              rows={active}
+              columns={COLUMNS}
+              rowKey={(k) => k.id}
+              search={active.length > 8 ? { placeholder: "Search keys", text: (k) => `${k.name} ${k.prefix}` } : undefined}
+              actions={(k) => <ArmButton size="icon-sm" variant="ghost" icon={<Trash2 />} label={`Revoke ${k.name}`} armedLabel="Revoke?" onConfirm={() => revoke(k)} className="text-muted-foreground hover:text-destructive" />}
+            />
           )}
         </Swap>
         <PanelFooter>

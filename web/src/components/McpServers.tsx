@@ -1,33 +1,37 @@
 import * as React from "react";
-import { Braces, Check, ClipboardPaste, Copy, List, Plug, Plus, RotateCcw, Search, WandSparkles, X } from "lucide-react";
+import { Braces, Check, ClipboardPaste, Copy, List, Pencil, Plug, Plus, RotateCcw, Trash2, WandSparkles, X, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { api, type McpServersResponse, type McpServerView } from "@/lib/api";
 import { useCached } from "@/lib/cache";
 import { Button } from "@/components/ui/button";
 import { Collapse } from "@/components/ui/collapse";
-import { Swap, StaggerItem } from "@/components/ui/swap";
+import { Swap } from "@/components/ui/swap";
 import { AnimatedTabs } from "@/components/ui/animated-tabs";
 import { FilterChip } from "@/components/ui/filter-chip";
 import { Sheet } from "@/components/ui/sheet";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { fieldClass } from "@/components/ui/field";
 import { Kbd } from "@/components/ui/kbd";
+import { ArmButton } from "@/components/ui/arm-button";
+import { Switch } from "@/components/ui/switch";
+import { DataTable, MetaLine, StatusDot, type Column } from "@/components/ui/data-table";
 import { Bar } from "@/components/thread/Skeletons";
 import { JsonEditor, jsonErrorLine } from "@/components/JsonEditor";
+import { BrandGlyph } from "@/lib/brandIcon";
+import { fmtAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { ServerRow, type Mutate } from "@/components/mcp/ServerRow";
+import { useTick, Verdict, type Mutate } from "@/components/mcp/Verdict";
 import { ServerSheet } from "@/components/mcp/ServerSheet";
-import { errMsg, type Health } from "@/components/mcp/model";
+import { describe, errMsg, statusOf, type Health, type Status } from "@/components/mcp/model";
 
 /**
  * MCP servers — the tools every sandbox agent gets.
  *
- *   List  — one row per server: brand glyph, name, a status pill that tells the truth (off · on ·
- *           connected · N tools · failed · token expired) and a sentence saying what it runs or where
- *           it connects. Test / edit / remove are always visible and quiet; the switch is the one
- *           loud control. A test's verdict lands under the row as chips (tools) or a plain-language
- *           explanation with a fix.
+ *   List  — a DataTable: server (brand glyph, name, what it runs or where it connects), transport,
+ *           a status that tells the truth (off · on · checking · connected · failed · token expired),
+ *           tool count and last check. Test / edit / remove / on-off sit in the trailing actions cell;
+ *           the row opens the editor. A test's verdict lands under the table as chips (tools) or a
+ *           plain-language explanation with a fix.
  *   Sheet — add/edit as a guided form: transport picker with a sentence each, one command line
  *           parsed into tokens, secret-aware key·value rows, and a live "what the agent sees" JSON —
  *           or the same server as JSON. ⌘↵ saves, Esc closes.
@@ -43,7 +47,7 @@ export function McpServers() {
   const config = cached.data?.config ?? null;
   const [view, setView] = React.useState<View>("list");
   const [filter, setFilter] = React.useState<Filter>("all");
-  const [query, setQuery] = React.useState("");
+  useTick(30_000);
   const [editing, setEditing] = React.useState<{ server?: McpServerView } | null>(null);
   // Keep the last draft so <SheetContent> stays mounted through the close animation (see motion contract);
   // `seq` bumps per open so each open gets a fresh ServerSheet instead of a stale draft.
@@ -85,7 +89,6 @@ export function McpServers() {
   }, []);
   const dismiss = React.useCallback((name: string) => setHealth((h) => Object.fromEntries(Object.entries(h).filter(([k]) => k !== name))), []);
 
-  const q = query.trim().toLowerCase();
   const all = servers ?? [];
   const counts = {
     all: all.length,
@@ -99,10 +102,11 @@ export function McpServers() {
     if (filter === "off" && s.enabled) return false;
     if (filter === "stdio" && s.type !== "stdio") return false;
     if (filter === "remote" && s.type === "stdio") return false;
-    if (!q) return true;
-    return [s.name, s.type, s.command, ...(s.args ?? []), s.url, ...Object.keys(s.env ?? {}), ...Object.keys(s.headers ?? {})].filter(Boolean).join(" ").toLowerCase().includes(q);
+    return true;
   });
-  const noMatchLine = q ? `Nothing matches “${query.trim()}”.` : { all: "", on: "No servers are on.", off: "Every server is on.", stdio: "No command servers.", remote: "No remote servers." }[filter];
+  const noMatchLine = { all: "", on: "No servers are on.", off: "Every server is on.", stdio: "No command servers.", remote: "No remote servers." }[filter];
+  const verdicts = visible.filter((s) => s.type !== "stdio" && health[s.name]);
+  const columns = React.useMemo(() => serverColumns(health, testing), [health, testing]);
   const hasServers = !!servers && servers.length > 0;
 
   return (
@@ -163,59 +167,49 @@ export function McpServers() {
         ) : servers.length === 0 ? (
           <EmptyState onAdd={() => setEditing({})} onPaste={() => setPasting(true)} />
         ) : (
-          <div className="bg-card overflow-hidden rounded-xl border shadow-e1">
-            <div className="bg-muted/30 flex flex-wrap items-center gap-2 border-b px-3 py-2.5 sm:px-4">
-              <div role="radiogroup" aria-label="Filter servers" className="flex flex-wrap items-center gap-1.5">
-                <FilterChip group="mcp" active={filter === "all"} onClick={() => setFilter("all")} label="All" count={counts.all} />
-                <FilterChip group="mcp" active={filter === "on"} onClick={() => setFilter("on")} label="On" count={counts.on} tone="live" />
-                <FilterChip group="mcp" active={filter === "off"} onClick={() => setFilter("off")} label="Off" count={counts.off} />
-                <span className="bg-border mx-0.5 hidden h-4 w-px sm:block" aria-hidden />
-                <FilterChip group="mcp" active={filter === "stdio"} onClick={() => setFilter("stdio")} label="Command" count={counts.stdio} className="hidden sm:flex" />
-                <FilterChip group="mcp" active={filter === "remote"} onClick={() => setFilter("remote")} label="Remote" count={counts.remote} className="hidden sm:flex" />
-              </div>
-              <label className={cn(fieldClass, "focus-within:border-ring focus-within:ring-ring/40 ml-auto flex h-8 w-full items-center gap-1.5 rounded-full px-2.5 focus-within:ring-2 sm:w-auto")}>
-                <Search className="text-muted-foreground size-3.5 shrink-0" aria-hidden />
-                <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search" aria-label="Search servers" className="text-foreground placeholder:text-muted-foreground w-full bg-transparent text-meta outline-none sm:w-28 sm:transition-[width] sm:duration-200 sm:focus:w-44" />
-                {query && (
-                  <button type="button" onClick={() => setQuery("")} aria-label="Clear search" className="text-muted-foreground hover:text-foreground grid size-5 cursor-pointer place-items-center rounded-full">
-                    <X className="size-3.5" />
-                  </button>
-                )}
-              </label>
-            </div>
-            {visible.length === 0 ? (
-              <div className="px-6 py-12 text-center">
-                <p className="text-foreground text-body font-medium">Nothing here</p>
-                <p className="text-muted-foreground mt-1 text-meta">{noMatchLine}</p>
-                {(q || filter !== "all") && (
-                  <Button
-                    size="xs"
-                    variant="ghost"
-                    className="mt-3"
-                    onClick={() => {
-                      setQuery("");
-                      setFilter("all");
-                    }}
-                  >
+          <div className="flex flex-col gap-3">
+            <DataTable
+              aria-label="MCP servers"
+              rows={visible}
+              columns={columns}
+              rowKey={(s) => s.name}
+              onRowClick={(s) => setEditing({ server: s })}
+              rowLabel={(s) => `Open ${s.name}`}
+              rowProps={(s) => ({ className: cn(!s.enabled && "[&_td]:text-muted-foreground") })}
+              search={{ placeholder: "Search servers", text: (s) => [s.name, s.type, s.command, ...(s.args ?? []), s.url, ...Object.keys(s.env ?? {}), ...Object.keys(s.headers ?? {})].filter(Boolean).join(" ") }}
+              toolbar={
+                <div role="radiogroup" aria-label="Filter servers" className="flex flex-wrap items-center gap-1.5">
+                  <FilterChip group="mcp" active={filter === "all"} onClick={() => setFilter("all")} label="All" count={counts.all} />
+                  <FilterChip group="mcp" active={filter === "on"} onClick={() => setFilter("on")} label="On" count={counts.on} tone="live" />
+                  <FilterChip group="mcp" active={filter === "off"} onClick={() => setFilter("off")} label="Off" count={counts.off} />
+                  <span className="bg-border mx-0.5 hidden h-4 w-px sm:block" aria-hidden />
+                  <FilterChip group="mcp" active={filter === "stdio"} onClick={() => setFilter("stdio")} label="Command" count={counts.stdio} className="hidden sm:flex" />
+                  <FilterChip group="mcp" active={filter === "remote"} onClick={() => setFilter("remote")} label="Remote" count={counts.remote} className="hidden sm:flex" />
+                </div>
+              }
+              actions={(s) => <ServerActions server={s} health={health[s.name]} testing={!!testing[s.name]} onTest={() => void test(s.name)} onEdit={() => setEditing({ server: s })} onMutate={mutate} />}
+              empty={
+                <span className="flex flex-col items-center gap-1">
+                  <span className="text-foreground text-body font-medium">Nothing here</span>
+                  <span className="text-meta">{noMatchLine}</span>
+                  <Button size="xs" variant="ghost" className="mt-2" onClick={() => setFilter("all")}>
                     Show all
                   </Button>
-                )}
-              </div>
-            ) : (
-              <ul className="divide-y">
-                {visible.map((s, i) => (
-                  <StaggerItem key={s.name} index={i} className="contents">
-                    <li>
-                      <ServerRow server={s} health={health[s.name]} testing={!!testing[s.name]} onTest={() => void test(s.name)} onEdit={() => setEditing({ server: s })} onDismiss={() => dismiss(s.name)} onMutate={mutate} />
-                    </li>
-                  </StaggerItem>
+                </span>
+              }
+              minWidth="min-w-[44rem]"
+            />
+            <Collapse open={verdicts.length > 0}>
+              <div className="flex flex-col gap-2">
+                {verdicts.map((s) => (
+                  <Verdict key={s.name} title={s.name} health={health[s.name]} onDismiss={() => dismiss(s.name)} onRetry={() => void test(s.name)} retrying={!!testing[s.name]} />
                 ))}
-              </ul>
-            )}
-            <div className="text-faint flex items-center gap-2 border-t px-4 py-2 text-micro">
+              </div>
+            </Collapse>
+            <p className="text-faint flex items-center gap-2 px-1 text-micro">
               <Plug className="size-3" aria-hidden />
               Every sandbox gets the servers that are on, from its next run or turn.
-            </div>
+            </p>
           </div>
         )}
       </Swap>
@@ -227,6 +221,134 @@ export function McpServers() {
         {pasting && <PasteDialog onMutate={mutate} onClose={() => setPasting(false)} />}
       </Dialog>
     </section>
+  );
+}
+
+/* ───────────────────────────── table ───────────────────────────── */
+
+const TONE: Record<Status["kind"], React.ComponentProps<typeof StatusDot>["tone"]> = {
+  off: "muted",
+  on: "live",
+  checking: "live",
+  connected: "ok",
+  failed: "destructive",
+  expired: "destructive",
+};
+
+function serverColumns(health: Record<string, Health>, testing: Record<string, boolean>): Column<McpServerView>[] {
+  return [
+    {
+      id: "server",
+      header: "Server",
+      primary: true,
+      sort: (s) => s.name,
+      cell: (s) => {
+        const secrets = Object.keys(s.env ?? {}).length + Object.keys(s.headers ?? {}).length;
+        return (
+          <span className="flex min-w-0 items-center gap-3">
+            <span className={cn("bg-card grid size-8 shrink-0 place-items-center rounded-lg border shadow-e1", !s.enabled && "opacity-55 grayscale")} aria-hidden>
+              <BrandGlyph hint={`${s.name} ${s.command ?? ""} ${(s.args ?? []).join(" ")} ${s.url ?? ""}`} transport={s.type} className="size-4" />
+            </span>
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <span className={cn("truncate", !s.enabled && "text-muted-foreground")}>{s.name}</span>
+              <MetaLine parts={[<span title={s.url ?? [s.command, ...(s.args ?? [])].filter(Boolean).join(" ")}>{describe(s)}</span>, secrets > 0 && `${secrets} ${secrets === 1 ? "secret" : "secrets"}`]} />
+            </span>
+          </span>
+        );
+      },
+    },
+    {
+      id: "transport",
+      header: "Transport",
+      width: "w-28",
+      hideBelow: "md",
+      sort: (s) => s.type,
+      cell: (s) => <span className="stamp">{s.type}</span>,
+    },
+    {
+      id: "status",
+      header: "Status",
+      width: "w-36",
+      sort: (s) => statusOf(s, health[s.name], !!testing[s.name]).word,
+      cell: (s) => {
+        const st = statusOf(s, health[s.name], !!testing[s.name]);
+        return (
+          <StatusDot tone={TONE[st.kind]} pulse={st.kind === "checking"}>
+            {st.word}
+          </StatusDot>
+        );
+      },
+    },
+    {
+      id: "tools",
+      header: "Tools",
+      width: "w-20",
+      align: "end",
+      hideBelow: "sm",
+      sort: (s) => health[s.name]?.tools?.length,
+      cell: (s) => {
+        const n = health[s.name]?.tools?.length;
+        return n == null ? <span className="text-faint" title={s.type === "stdio" ? "Counted inside the sandbox at run time" : "Not tested yet"}>—</span> : <span className="tabular-nums">{n}</span>;
+      },
+    },
+    {
+      id: "checked",
+      header: "Last checked",
+      width: "w-32",
+      hideBelow: "lg",
+      sort: (s) => health[s.name]?.at,
+      cell: (s) => {
+        const h = health[s.name];
+        return h ? <span className="tabular-nums">{fmtAgo(Math.floor(h.at / 1000))}</span> : <span className="text-faint">never</span>;
+      },
+    },
+  ];
+}
+
+/** Trailing actions of a server row: test (remote only), edit, remove, on/off. */
+function ServerActions({ server: s, health, testing, onTest, onEdit, onMutate }: { server: McpServerView; health?: Health; testing: boolean; onTest: () => void; onEdit: () => void; onMutate: Mutate }) {
+  const [busy, setBusy] = React.useState(false);
+  const toggle = () => {
+    setBusy(true);
+    onMutate({ action: "toggle", name: s.name, enabled: !s.enabled }, s.enabled ? `${s.name} is off` : `${s.name} is on — every sandbox gets it on its next run`)
+      .catch((e: unknown) => toast.error("Could not update", { description: errMsg(e) }))
+      .finally(() => setBusy(false));
+  };
+  const remove = async () => {
+    await onMutate({ action: "remove", name: s.name }, `Removed ${s.name}`).catch((e: unknown) => toast.error("Could not remove", { description: errMsg(e) }));
+  };
+  return (
+    <span className="inline-flex items-center gap-1">
+      {s.type !== "stdio" && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button size="xs" variant="ghost" onClick={onTest} loading={testing} disabled={!s.enabled && !health} className="text-muted-foreground">
+              <Zap className="size-3.5" />
+              Test
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>Run the MCP handshake and list its tools</TooltipContent>
+        </Tooltip>
+      )}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button size="icon-xs" variant="ghost" onClick={onEdit} aria-label={`Edit ${s.name}`}>
+            <Pencil />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Edit</TooltipContent>
+      </Tooltip>
+      <ArmButton size="icon-xs" variant="ghost" icon={<Trash2 />} label={`Remove ${s.name}`} armedLabel="Remove?" onConfirm={remove} className="hover:text-destructive" />
+      <Tooltip>
+        {/* A span, not the Switch itself: TooltipTrigger asChild injects an onClick that Switch's prop spread would let override its own toggle. */}
+        <TooltipTrigger asChild>
+          <span className="ml-1 inline-flex">
+            <Switch checked={s.enabled} onCheckedChange={toggle} disabled={busy} aria-label={s.enabled ? `Disable ${s.name}` : `Enable ${s.name}`} />
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>{s.enabled ? "On — given to every new run and turn" : "Off — kept, not given to the agent"}</TooltipContent>
+      </Tooltip>
+    </span>
   );
 }
 

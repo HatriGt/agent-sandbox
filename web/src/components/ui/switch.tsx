@@ -1,5 +1,6 @@
 import * as React from "react";
-import { motion, useReducedMotion } from "motion/react";
+import { motion } from "motion/react";
+import { useReducedMotion } from "@/lib/motion-pref";
 import { cn } from "@/lib/utils";
 
 /**

@@ -1,6 +1,7 @@
 import * as React from "react";
 import { Check, Copy, RotateCw, TriangleAlert } from "lucide-react";
-import { motion, useReducedMotion } from "motion/react";
+import { motion } from "motion/react";
+import { useReducedMotion } from "@/lib/motion-pref";
 import { useRouteError } from "react-router";
 import { Button } from "@/components/ui/button";
 

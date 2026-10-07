@@ -1,6 +1,7 @@
 import * as React from "react";
 import { ChevronUp, RefreshCw } from "lucide-react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "@/lib/motion-pref";
 import type { ChangedFile } from "@/lib/api";
 import { FileMark } from "@/lib/fileIcon";
 import { cn } from "@/lib/utils";

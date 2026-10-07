@@ -1,6 +1,7 @@
 import * as React from "react";
 import { ArrowUpRight, Check, ChevronDown, CircleCheck, CircleDashed, CircleX, ExternalLink, FileDiff, GitBranch, GitMerge, Globe, Users, X } from "lucide-react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "@/lib/motion-pref";
 import { toast } from "sonner";
 import { menuMotion } from "./MentionMenu";
 import { api, type PullInfo } from "@/lib/api";

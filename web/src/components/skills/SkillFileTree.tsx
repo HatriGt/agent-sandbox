@@ -1,6 +1,7 @@
 import * as React from "react";
 import { ChevronRight, FilePlus2, MoreHorizontal, PenLine, Trash2 } from "lucide-react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "@/lib/motion-pref";
 import type { SkillFile } from "@/lib/skillImport";
 import { FileIcon, FolderIcon } from "@/lib/vscodeIcons";
 import { cn } from "@/lib/utils";

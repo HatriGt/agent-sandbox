@@ -50,7 +50,7 @@
     opacity: 0.15;
   }
 }
-@media (prefers-reduced-motion: reduce) {
+:root[data-motion="reduced"] {
   .md-live .prose-agent > :is(p, h1, h2, h3, h4, blockquote):last-child::after,
   .md-live .prose-agent > :is(ul, ol):last-child > li:last-child::after,
   .md-live > .md-caret-block {

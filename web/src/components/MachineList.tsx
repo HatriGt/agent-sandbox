@@ -1,5 +1,6 @@
 import { Clock } from "lucide-react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "@/lib/motion-pref";
 import { Swap } from "@/components/ui/swap";
 import type { StableBox } from "@/hooks/useStableBoxes";
 import { prefetchWatch } from "@/hooks/useWatchStream";

@@ -1,5 +1,5 @@
 import * as React from "react";
-import { useReducedMotion } from "motion/react";
+import { useReducedMotion } from "@/lib/motion-pref";
 import { cellNumber } from "@/lib/viz";
 import { cn } from "@/lib/utils";
 

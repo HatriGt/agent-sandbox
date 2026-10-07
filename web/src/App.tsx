@@ -1,7 +1,8 @@
 import * as React from "react";
 import { Link, useLocation, useNavigationType } from "react-router";
-import { ArrowRight, Bell, BellOff, Brain, ChevronRight, Clock, Flame, Keyboard, Layers, LayoutGrid, ListChecks, LogOut, Menu, Moon, PanelLeftClose, PanelLeftOpen, Pause, Plug, PlugZap, Plus, Search, Shield, Sun, UserRound, WifiOff, Workflow, Zap } from "lucide-react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { ArrowRight, Bell, BellOff, Brain, ChevronRight, Clock, Flame, Keyboard, Layers, LayoutGrid, ListChecks, LogOut, Menu, Moon, PanelLeftClose, PanelLeftOpen, Pause, Plug, PlugZap, Plus, Search, Shield, Sparkles, Sun, UserRound, WifiOff, Workflow, Zap } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
+import { setMotionPref, useMotionPref, useReducedMotion, type MotionPref } from "@/lib/motion-pref";
 import { api, type FleetLifecycle, type FleetSnapshot } from "@/lib/api";
 import { POLL_MS, isUp, isVisible, threadSort, threadTitle } from "@/lib/format";
 import { questionHeadline } from "@/lib/question";
@@ -300,6 +301,7 @@ export default function App() {
 
   const notify = useNotifications(boxes, open);
   const [shortcuts, setShortcuts] = React.useState(false);
+  const motionPref = useMotionPref();
   const paletteActions = React.useMemo<PaletteAction[]>(
     () => [
       { id: "fleet", label: "Fleet view", hint: "g f", icon: <LayoutGrid />, group: "Go to", run: showFleet },
@@ -314,10 +316,19 @@ export default function App() {
       ...(getMe()?.mode === "saas" && getMe()?.role === "admin" ? [{ id: "admin", label: "Admin · users", icon: <Shield />, group: "Go to", keywords: "people members", run: showAdmin }] : []),
       { id: "connect", label: "Connect an IDE", icon: <PlugZap />, group: "Go to", keywords: "cursor claude code mcp api key", run: showConnect },
       { id: "theme", label: dark ? "Switch to light theme" : "Switch to dark theme", icon: dark ? <Sun /> : <Moon />, keywords: "theme dark light mode appearance", run: () => setDark(!dark) },
+      ...(["full", "system", "reduced"] as const)
+        .filter((p) => p !== motionPref)
+        .map((p: MotionPref) => ({
+          id: `motion-${p}`,
+          label: `Motion: ${p === "full" ? "Full" : p === "system" ? "System (follow OS)" : "Reduced"}`,
+          icon: <Sparkles />,
+          keywords: "motion animation reduce reduced effects appearance accessibility",
+          run: () => setMotionPref(p),
+        })),
       { id: "sidebar", label: collapsed ? "Expand sidebar" : "Collapse sidebar", icon: collapsed ? <PanelLeftOpen /> : <PanelLeftClose />, keywords: "rail navigation", run: () => setCollapsed(!collapsed) },
       { id: "keys", label: "Keyboard shortcuts", hint: "?", icon: <Keyboard />, keywords: "help keys", run: () => setShortcuts(true) },
     ],
-    [showFleet, showAutomations, showHistory, showSkills, showMemory, showHarnesses, showWorkflows, showAccounts, showAccount, showAdmin, showConnect, dark, setDark, collapsed, setCollapsed]
+    [showFleet, showAutomations, showHistory, showSkills, showMemory, showHarnesses, showWorkflows, showAccounts, showAccount, showAdmin, showConnect, dark, setDark, collapsed, setCollapsed, motionPref]
   );
 
   React.useEffect(() => {

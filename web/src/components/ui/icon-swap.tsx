@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
  * in the same 160 ms so nothing ever reads as "two icons". Popped layout keeps the slot's size.
  *
  * Give each state a distinct `state` key; `rotate` adds a quarter-turn (theme toggles, chevrons).
- * Under reduced motion `MotionConfig reducedMotion="user"` drops the transform; the fade stays.
+ * Under reduced motion the app-level `MotionConfig` (motion setting) drops the transform; the fade stays.
  */
 export function IconSwap({
   state,

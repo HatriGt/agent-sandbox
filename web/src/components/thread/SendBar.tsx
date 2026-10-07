@@ -1,7 +1,8 @@
 import * as React from "react";
 import { readDraft, writeDraft } from "@/lib/draft";
 import { ArrowUp, AtSign, Check as CheckIcon, Clock, ImagePlus, Loader2, MessageCircleQuestion, X } from "lucide-react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "@/lib/motion-pref";
 import { ATTACHMENTS_DIR } from "@/lib/session-context";
 import { Lightbox } from "@/components/ui/lightbox";
 import { FileMark } from "@/lib/fileIcon";

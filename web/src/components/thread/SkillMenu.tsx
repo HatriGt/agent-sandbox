@@ -1,6 +1,7 @@
 import * as React from "react";
 import { X } from "lucide-react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "@/lib/motion-pref";
 import { menuMotion } from "./MentionMenu";
 import { api, type SkillView } from "@/lib/api";
 import { useCached } from "@/lib/cache";

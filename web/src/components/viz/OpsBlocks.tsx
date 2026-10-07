@@ -1,4 +1,5 @@
 import * as React from "react";
+import { resolvedReduced } from "@/lib/motion-pref";
 import { Check, CornerDownRight, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { HttpCall, LogLine, LogLevel, TestReport } from "@/lib/viz-extra";
@@ -119,7 +120,7 @@ export function LogBlock({ lines, source }: { lines: LogLine[]; source: string }
     requestAnimationFrame(() => {
       const row = scroller.current?.querySelector<HTMLElement>(`[data-line="${firstError}"]`);
       const box = scroller.current;
-      if (row && box) box.scrollTo({ top: row.offsetTop - 12, behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+      if (row && box) box.scrollTo({ top: row.offsetTop - 12, behavior: resolvedReduced() ? "auto" : "smooth" });
     });
     window.setTimeout(() => setFlash((f) => (f === firstError ? null : f)), 1600);
   };

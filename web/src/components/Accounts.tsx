@@ -1,12 +1,14 @@
 import * as React from "react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { motion } from "motion/react";
+import { useReducedMotion } from "@/lib/motion-pref";
 import { Check, ExternalLink, Github, KeyRound, Loader2, Lock, Plus, Star, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { api, type AccountView } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { ArmButton } from "@/components/ui/arm-button";
 import { Collapse } from "@/components/ui/collapse";
-import { StaggerItem, Swap } from "@/components/ui/swap";
+import { Swap } from "@/components/ui/swap";
+import { DataTable, MetaLine, type Column } from "@/components/ui/data-table";
 import { CopyButton } from "@/components/ui/secret";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -77,17 +79,15 @@ export function Accounts({ embedded = false, query = "", onCount }: { embedded?:
               <p className="text-muted-foreground mt-1 text-meta">No account matches “{query.trim()}”.</p>
             </div>
           ) : (
-            <ul className="divide-y">
-              <AnimatePresence initial={false}>
-                {visible.map((a, i) => (
-                  <motion.li key={a.login} layout exit={{ opacity: 0, height: 0, transition: { duration: 0.2, ease: [0.22, 1, 0.36, 1] } }} className="overflow-hidden">
-                    <StaggerItem index={i}>
-                      <AccountRow account={a} onChanged={setAccounts} />
-                    </StaggerItem>
-                  </motion.li>
-                ))}
-              </AnimatePresence>
-            </ul>
+            <DataTable
+              aria-label="GitHub accounts"
+              bordered={false}
+              rows={visible}
+              columns={ACCOUNT_COLUMNS}
+              rowKey={(a) => a.login}
+              search={visible.length > 8 ? { placeholder: "Search accounts", text: (a) => [a.login, a.type, ...a.orgs].join(" ") } : undefined}
+              actions={(a) => <AccountActions account={a} onChanged={setAccounts} />}
+            />
           )}
         </Swap>
         {state !== "empty" && (
@@ -112,8 +112,58 @@ export function Accounts({ embedded = false, query = "", onCount }: { embedded?:
   );
 }
 
-function AccountRow({ account: a, onChanged }: { account: AccountView; onChanged: (list: AccountView[]) => void }) {
+function DefaultBadge() {
   const still = useReducedMotion();
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        {/* One badge in the list; `layoutId` lets it glide to the new default instead of blinking. */}
+        <motion.span layoutId={still ? undefined : "gh-default-badge"} transition={{ type: "spring", stiffness: 500, damping: 36 }} className="bg-live/10 text-live inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-micro font-semibold">
+          <Star className="size-3 fill-current" aria-hidden /> default
+        </motion.span>
+      </TooltipTrigger>
+      <TooltipContent>Used for task-only runs (no repository attached)</TooltipContent>
+    </Tooltip>
+  );
+}
+
+const ACCOUNT_COLUMNS: Column<AccountView>[] = [
+  {
+    id: "login",
+    header: "Account",
+    primary: true,
+    sort: (a) => a.login,
+    cell: (a) => (
+      <span className="flex min-w-0 items-center gap-2.5">
+        <img src={`https://github.com/${encodeURIComponent(a.login)}.png?size=64`} alt="" width={28} height={28} loading="lazy" className="bg-muted size-7 shrink-0 rounded-full" />
+        <span className="flex min-w-0 flex-col">
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="truncate">{a.login}</span>
+            {a.isDefault && <DefaultBadge />}
+          </span>
+          <MetaLine className="sm:hidden" parts={[a.tokenHint, a.orgs.join(", ")]} />
+        </span>
+      </span>
+    ),
+  },
+  {
+    id: "token",
+    header: "Token",
+    width: "w-48",
+    hideBelow: "sm",
+    sort: (a) => a.type,
+    cell: (a) => (
+      <span className="stamp text-muted-foreground flex min-w-0 items-center gap-1.5">
+        <Lock className="size-3 shrink-0" aria-hidden />
+        <span className="truncate">{a.tokenHint}</span>
+        <span className="text-faint shrink-0">{a.type === "fine-grained" ? "fine-grained" : a.type === "classic" ? "classic" : "token"}</span>
+      </span>
+    ),
+  },
+  { id: "orgs", header: "Orgs", width: "w-40", hideBelow: "md", sort: (a) => a.orgs.length, cell: (a) => <span className="text-muted-foreground block truncate text-micro" title={a.orgs.join(", ")}>{a.orgs.join(", ") || "—"}</span> },
+];
+
+function AccountActions({ account: a, onChanged }: { account: AccountView; onChanged: (list: AccountView[]) => void }) {
   const [busy, setBusy] = React.useState<"default" | "remove" | null>(null);
   const alive = React.useRef(true);
   React.useEffect(() => {
@@ -137,58 +187,26 @@ function AccountRow({ account: a, onChanged }: { account: AccountView; onChanged
       });
   };
   return (
-    <div className="group flex items-center gap-3 px-4 py-3">
-      <img src={`https://github.com/${encodeURIComponent(a.login)}.png?size=64`} alt="" width={32} height={32} loading="lazy" className="bg-muted size-8 shrink-0 rounded-full" />
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <span className="text-foreground text-body font-medium">{a.login}</span>
-          {a.isDefault && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                {/* One badge in the list; `layoutId` lets it glide to the new default instead of blinking. */}
-                <motion.span layoutId={still ? undefined : "gh-default-badge"} transition={{ type: "spring", stiffness: 500, damping: 36 }} className="bg-live/10 text-live inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-micro font-semibold">
-                  <Star className="size-3 fill-current" aria-hidden /> default
-                </motion.span>
-              </TooltipTrigger>
-              <TooltipContent>Used for task-only runs (no repository attached)</TooltipContent>
-            </Tooltip>
-          )}
-        </div>
-        <div className="stamp text-muted-foreground mt-0.5 flex flex-wrap items-center gap-x-2">
-          <span className="inline-flex items-center gap-1">
-            <Lock className="size-3" aria-hidden /> {a.tokenHint}
-          </span>
-          <span className="opacity-40">·</span>
-          <span>{a.type === "fine-grained" ? "fine-grained" : a.type === "classic" ? "classic" : "token"}</span>
-          {a.orgs.length > 0 && (
-            <>
-              <span className="opacity-40">·</span>
-              <span className="truncate">{a.orgs.join(", ")}</span>
-            </>
-          )}
-        </div>
-      </div>
-      <div className="flex items-center gap-1">
-        {!a.isDefault && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button size="icon-sm" variant="ghost" onClick={() => void run(api.setDefaultAccount(a.login), "default")} loading={busy === "default"} disabled={busy !== null} aria-label="Make default">
-                <Star />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Make default</TooltipContent>
-          </Tooltip>
-        )}
+    <span className="inline-flex items-center gap-1">
+      {!a.isDefault && (
         <Tooltip>
           <TooltipTrigger asChild>
-            <span className="inline-flex">
-              <ArmButton size="icon-sm" variant="ghost" icon={<Trash2 />} label={`Remove ${a.login}`} armedLabel="Remove" onConfirm={() => run(api.removeAccount(a.login), "remove", `Removed ${a.login}`)} disabled={busy === "default"} busy={busy === "remove"} />
-            </span>
+            <Button size="icon-sm" variant="ghost" onClick={() => void run(api.setDefaultAccount(a.login), "default")} loading={busy === "default"} disabled={busy !== null} aria-label="Make default">
+              <Star />
+            </Button>
           </TooltipTrigger>
-          <TooltipContent>Remove — sandboxes lose this account's access</TooltipContent>
+          <TooltipContent>Make default</TooltipContent>
         </Tooltip>
-      </div>
-    </div>
+      )}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="inline-flex">
+            <ArmButton size="icon-sm" variant="ghost" icon={<Trash2 />} label={`Remove ${a.login}`} armedLabel="Remove" onConfirm={() => run(api.removeAccount(a.login), "remove", `Removed ${a.login}`)} disabled={busy === "default"} busy={busy === "remove"} />
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>Remove — sandboxes lose this account's access</TooltipContent>
+      </Tooltip>
+    </span>
   );
 }
 

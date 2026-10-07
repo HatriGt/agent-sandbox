@@ -32,7 +32,9 @@ function useScrollEdges(el: HTMLDivElement | null) {
 }
 
 /* Orbit's measures: 38px rows / 30px head, hairlines at ~6% ink, hover a 2.5–3% ink wash on 120ms.
-   `plain` (default) is Orbit's frameless list under a top hairline; `surface` is the card. */
+   `plain` is Orbit's frameless list under a top hairline; `surface` is the bordered card (DataTable's
+   default): rounded-xl hairline, card fill, shadow-xs, head row tinted like bg-muted/40 (mixed opaque
+   so a sticky head still covers the rows under it). */
 const tableVariants = cva(
   "group/table relative w-full min-w-0 [--table-bg:transparent] [--table-hover:color-mix(in_oklab,var(--foreground)_3%,transparent)] [--table-line:color-mix(in_oklab,var(--foreground)_7%,transparent)]",
   {
@@ -40,7 +42,7 @@ const tableVariants = cva(
       variant: {
         plain: "border-t border-(--table-line) [--table-head-bg:var(--background)]",
         surface:
-          "isolate overflow-clip rounded-xl border bg-(--table-bg) shadow-e1 [--table-bg:var(--card)] [--table-head-bg:color-mix(in_oklab,var(--muted)_55%,var(--card))]",
+          "isolate overflow-hidden rounded-xl border bg-card shadow-xs [--table-bg:var(--card)] [--table-head-bg:color-mix(in_oklab,var(--muted)_40%,var(--card))]",
       },
       size: {
         sm: "[--table-cell-px:--spacing(2)] [--table-cell-py:--spacing(1.5)] [--table-head-h:--spacing(7.5)] [--table-row-h:34px]",
@@ -92,7 +94,7 @@ function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
       data-slot="table-row"
       className={cn(
         "group/row relative bg-(--table-bg) transition-[background-color] duration-[120ms] hover:bg-(--table-hover) data-[state=selected]:bg-muted",
-        "data-clickable:cursor-pointer data-clickable:outline-none data-clickable:focus-visible:bg-(--table-hover) data-clickable:focus-visible:shadow-[inset_2px_0_0_var(--ring)] data-clickable:active:bg-[color-mix(in_oklab,var(--foreground)_6%,transparent)]",
+        "data-clickable:cursor-pointer data-clickable:outline-none data-clickable:focus-visible:bg-(--table-hover) data-clickable:active:bg-[color-mix(in_oklab,var(--foreground)_6%,transparent)]",
         className
       )}
       {...props}

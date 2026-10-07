@@ -1,7 +1,8 @@
 import * as React from "react";
 import { ArrowLeft, Check, FileText, FolderTree, HardDrive, Link2, ListTree, Loader2, MemoryStick, MessageSquareText, Moon, MoreHorizontal, Pencil, Pin, PinOff, Plus, RotateCw, Trash2 } from "lucide-react";
 import { Swap } from "@/components/ui/swap";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "@/lib/motion-pref";
 import { menuMotion } from "./MentionMenu";
 import { toast } from "sonner";
 import type { BoxView } from "@/lib/api";

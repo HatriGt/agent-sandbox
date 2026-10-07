@@ -137,6 +137,7 @@ export function RunsTable({ a, rows, onOpenBox }: { a: Automation | undefined; r
       rowClickable={openable}
       onRowClick={(d) => onOpenBox(d.box!)}
       rowLabel={(d) => `Open ${d.box}`}
+      search={{ placeholder: "Search runs", text: (d) => [d.facts?.subject ? `#${d.facts.subject.number} ${d.facts.subject.title ?? ""} ${d.facts.subject.author ?? ""}` : "", d.facts?.headline ?? "", d.facts?.alert?.title ?? "", d.detail ?? ""].join(" ") }}
       minWidth="min-w-[640px]"
       size="sm"
     />

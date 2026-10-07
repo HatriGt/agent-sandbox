@@ -1,5 +1,5 @@
 import * as React from "react";
-import { useReducedMotion } from "motion/react";
+import { useReducedMotion } from "@/lib/motion-pref";
 import { Crosshair, Minus, Pause, Play, Plus } from "lucide-react";
 import type { MemoryKind, MemoryNote } from "@/lib/api";
 import { fmtAgo } from "@/lib/format";

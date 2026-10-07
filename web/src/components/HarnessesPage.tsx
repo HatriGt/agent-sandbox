@@ -3,9 +3,11 @@ import { AnimatePresence, motion } from "motion/react";
 import { ArrowLeft, Copy, Download, GitCompare, Layers, Pencil, Plus, ShieldAlert, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { api, type AgentChoice, type HarnessView, type ProviderView, type SkillView } from "@/lib/api";
-import { cn } from "@/lib/utils";
+import { DataTable, MetaLine, StatusDot, type Column } from "@/components/ui/data-table";
 import { fmtAgo } from "@/lib/format";
 import { Button } from "@/components/ui/button";
+import { ArmButton } from "@/components/ui/arm-button";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { AnimatedTabs, TabPanel } from "@/components/ui/animated-tabs";
 import { Swap } from "@/components/ui/swap";
 import { Collapse } from "@/components/ui/collapse";
@@ -208,20 +210,15 @@ export function HarnessesPage({ onBack, onOpenBox }: { onBack: () => void; onOpe
                         }
                       />
                     ) : (
-                      <Panel className="divide-y">
-                        {list.map((h) => (
-                          <HarnessRow
-                            key={h.id}
-                            h={h}
-                            skills={skills}
-                            onEdit={() => setEditing(draftOf(h))}
-                            onDuplicate={() => void mutate({ action: "duplicate", id: h.id }, "Duplicated")}
-                            onExport={() => void exportOne(h)}
-                            onDelete={() => void mutate({ action: "delete", id: h.id }, "Deleted")}
-                            onApprove={() => void mutate({ action: "approve", id: h.id }, `${h.name} can run now`)}
-                          />
-                        ))}
-                      </Panel>
+                      <HarnessTable
+                        rows={list}
+                        skills={skills}
+                        onEdit={(h) => setEditing(draftOf(h))}
+                        onDuplicate={(h) => void mutate({ action: "duplicate", id: h.id }, "Duplicated")}
+                        onExport={(h) => void exportOne(h)}
+                        onDelete={(h) => void mutate({ action: "delete", id: h.id }, "Deleted")}
+                        onApprove={(h) => mutate({ action: "approve", id: h.id }, `${h.name} can run now`)}
+                      />
                     )}
                   </SettingsSection>
                   <Panel className="text-muted-foreground px-4 py-3 text-micro">
@@ -287,8 +284,80 @@ export function HarnessesPage({ onBack, onOpenBox }: { onBack: () => void; onOpe
   );
 }
 
-function HarnessRow({
-  h,
+/** "Updated 2h ago" / "Imported from x 3d ago" — where the harness came from and when it last changed. */
+function provenance(h: HarnessView): string {
+  const lead =
+    h.origin?.kind === "duplicate"
+      ? `Copied from ${h.origin.source ?? "a harness"} `
+      : h.origin
+        ? `Imported ${h.origin.source ? `from ${h.origin.source} ` : "from a file "}`
+        : h.builtin && h.updatedAt === h.createdAt
+          ? "Added "
+          : "Updated ";
+  return `${lead}${fmtAgo(h.origin?.at ?? h.updatedAt)}`;
+}
+
+const HARNESS_COLUMNS: Column<HarnessView>[] = [
+  {
+    id: "name",
+    header: "Harness",
+    primary: true,
+    sort: (h) => h.name,
+    cell: (h) => {
+      const facts = [
+        h.skills?.length ? `${h.skills.length} skill${h.skills.length === 1 ? "" : "s"}` : null,
+        rulesLine(h.rules),
+        h.rulesMd ? "RULES.md" : null,
+        h.verifyCommand ? `verify: ${h.verifyCommand}` : null,
+        h.egress?.length ? `egress: ${h.egress.join(", ")}` : null,
+      ];
+      return (
+        <span className="flex min-w-0 flex-col">
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="truncate">{h.name}</span>
+            {h.builtin && <span className="text-muted-foreground shrink-0 rounded border px-1.5 text-micro font-normal" title="A best-practice default. Edit it freely, duplicate it, or delete it to hide it.">built-in</span>}
+          </span>
+          {h.description && <span className="text-muted-foreground truncate text-micro font-normal">{h.description}</span>}
+          <MetaLine className="font-normal" parts={facts} />
+        </span>
+      );
+    },
+  },
+  {
+    id: "state",
+    header: "Status",
+    width: "w-36",
+    sort: (h) => (h.needsReview ? 0 : h.providerMissing ? 1 : 2),
+    cell: (h) => (h.needsReview ? <StatusDot tone="attention">needs review</StatusDot> : h.providerMissing ? <StatusDot tone="destructive">provider removed</StatusDot> : <StatusDot tone="ok">ready</StatusDot>),
+  },
+  {
+    id: "model",
+    header: "Driver · model",
+    width: "w-48",
+    hideBelow: "md",
+    sort: (h) => `${h.driver ?? ""} ${h.provider?.label ?? ""} ${h.model ?? ""}`,
+    cell: (h) => <MetaLine parts={[h.driver ?? "default driver", h.provider ? `${h.provider.label}${h.model ? ` · ${h.model}` : ""}` : (h.model ?? null)]} />,
+  },
+  {
+    id: "updated",
+    header: "Updated",
+    width: "w-32",
+    hideBelow: "lg",
+    sort: (h) => h.origin?.at ?? h.updatedAt,
+    cell: (h) => (
+      <span className="text-faint block truncate text-micro" title={provenance(h)}>
+        {fmtAgo(h.origin?.at ?? h.updatedAt)}
+      </span>
+    ),
+  },
+];
+
+/**
+ * Saved harnesses as a table. A row opens the editor; an imported harness that still needs review
+ * opens its review sheet instead, since it may not run (or be edited blind) until approved.
+ */
+function HarnessTable({
+  rows,
   skills,
   onEdit,
   onDuplicate,
@@ -296,78 +365,65 @@ function HarnessRow({
   onDelete,
   onApprove,
 }: {
-  h: HarnessView;
+  rows: HarnessView[];
   skills: SkillView[];
-  onEdit: () => void;
-  onDuplicate: () => void;
-  onExport: () => void;
-  onDelete: () => void;
-  onApprove: () => void;
+  onEdit: (h: HarnessView) => void;
+  onDuplicate: (h: HarnessView) => void;
+  onExport: (h: HarnessView) => void;
+  onDelete: (h: HarnessView) => void;
+  onApprove: (h: HarnessView) => Promise<unknown>;
 }) {
-  const [armed, setArmed] = React.useState(false);
-  const [reviewOpen, setReviewOpen] = React.useState(false);
-  const facts = [
-    h.driver ?? "default driver",
-    h.provider ? `${h.provider.label}${h.model ? ` · ${h.model}` : ""}` : h.model ?? null,
-    h.skills?.length ? `${h.skills.length} skill${h.skills.length === 1 ? "" : "s"}` : null,
-    rulesLine(h.rules),
-    h.rulesMd ? "RULES.md" : null,
-    h.verifyCommand ? `verify: ${h.verifyCommand}` : null,
-    h.egress?.length ? `egress: ${h.egress.join(", ")}` : null,
-  ].filter(Boolean);
+  const [reviewing, setReviewing] = React.useState<string | null>(null);
+  const shown = rows.find((h) => h.id === reviewing && h.needsReview) ?? null;
   return (
-    <div className={cn("px-4 py-3", h.needsReview && "bg-attention/5")}>
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="text-foreground truncate text-body font-medium">{h.name}</span>
-            {h.builtin && <span className="text-muted-foreground rounded border px-1.5 text-micro" title="A best-practice default. Edit it freely, duplicate it, or delete it to hide it.">built-in</span>}
-            {h.needsReview && <span className="bg-attention text-attention-ink rounded px-1.5 text-micro font-medium">needs review</span>}
-            {h.providerMissing && <span className="text-destructive text-micro">provider removed</span>}
-          </div>
-          {h.description && <p className="text-muted-foreground mt-0.5 truncate text-micro">{h.description}</p>}
-          <p className="text-muted-foreground mt-0.5 truncate text-micro">{facts.join(" · ")}</p>
-          <p className="text-faint text-micro">
-            {h.origin?.kind === "duplicate"
-              ? `Copied from ${h.origin.source ?? "a harness"} `
-              : h.origin
-                ? `Imported ${h.origin.source ? `from ${h.origin.source} ` : "from a file "}`
-                : h.builtin && h.updatedAt === h.createdAt
-                  ? "Added "
-                  : "Updated "}
-            {fmtAgo(h.origin?.at ?? h.updatedAt)}
-          </p>
-        </div>
-        <div className="-ml-2 flex shrink-0 items-center gap-0.5 sm:ml-0">
-          {h.needsReview ? (
-            <Button variant="attention" size="xs" onClick={() => setReviewOpen((v) => !v)}>
-              {reviewOpen ? "Hide review" : "Review"}
+    <>
+      <DataTable
+        aria-label="Saved harnesses"
+        rows={rows}
+        columns={HARNESS_COLUMNS}
+        rowKey={(h) => h.id}
+        onRowClick={(h) => (h.needsReview ? setReviewing(h.id) : onEdit(h))}
+        rowLabel={(h) => (h.needsReview ? `Review ${h.name}` : `Edit ${h.name}`)}
+        rowProps={(h) => ({ className: h.needsReview ? "bg-attention/5" : undefined })}
+        minWidth="min-w-[36rem]"
+        search={rows.length > 8 ? { placeholder: "Search harnesses", text: (h) => [h.name, h.description, h.driver, h.provider?.label, h.model, ...(h.skills ?? [])].filter(Boolean).join(" ") } : undefined}
+        actions={(h) => (
+          <span className="inline-flex items-center gap-0.5">
+            {h.needsReview ? (
+              <Button variant="attention" size="xs" onClick={() => setReviewing(h.id)}>
+                Review
+              </Button>
+            ) : (
+              <Button variant="ghost" size="icon-xs" onClick={() => onEdit(h)} aria-label={`Edit ${h.name}`} title="Edit">
+                <Pencil />
+              </Button>
+            )}
+            <Button variant="ghost" size="icon-xs" onClick={() => onDuplicate(h)} aria-label={`Duplicate ${h.name}`} title="Duplicate">
+              <Copy />
             </Button>
-          ) : (
-            <Button variant="ghost" size="icon-xs" onClick={onEdit} aria-label={`Edit ${h.name}`} title="Edit">
-              <Pencil />
+            <Button variant="ghost" size="icon-xs" onClick={() => onExport(h)} aria-label={`Export ${h.name}`} title="Export bundle">
+              <Download />
             </Button>
-          )}
-          <Button variant="ghost" size="icon-xs" onClick={onDuplicate} aria-label={`Duplicate ${h.name}`} title="Duplicate">
-            <Copy />
-          </Button>
-          <Button variant="ghost" size="icon-xs" onClick={onExport} aria-label={`Export ${h.name}`} title="Export bundle">
-            <Download />
-          </Button>
-          <Button
-            variant={armed ? "destructive" : "ghost"}
-            size={armed ? "xs" : "icon-xs"}
-            onClick={() => (armed ? onDelete() : setArmed(true))}
-            onBlur={() => setArmed(false)}
-            aria-label={`Delete ${h.name}`}
-            title="Delete"
-          >
-            {armed ? "Delete" : <Trash2 />}
-          </Button>
-        </div>
-      </div>
-      {h.needsReview && reviewOpen && <ReviewPanel h={h} skills={skills} onApprove={onApprove} onEdit={onEdit} />}
-    </div>
+            <ArmButton size="icon-xs" variant="ghost" icon={<Trash2 />} label={`Delete ${h.name}`} armedLabel="Delete" onConfirm={() => onDelete(h)} />
+          </span>
+        )}
+      />
+      <Sheet open={!!shown} onOpenChange={(o) => !o && setReviewing(null)}>
+        {shown && (
+          <SheetContent title={`Review ${shown.name}`} description={provenance(shown)} className="w-[min(36rem,calc(100vw-2rem))]">
+            <ReviewPanel
+              h={shown}
+              skills={skills}
+              onApprove={() => void onApprove(shown).then((r) => r && setReviewing(null))}
+              onEdit={() => {
+                setReviewing(null);
+                onEdit(shown);
+              }}
+            />
+          </SheetContent>
+        )}
+      </Sheet>
+    </>
   );
 }
 

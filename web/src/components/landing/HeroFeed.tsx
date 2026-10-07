@@ -1,6 +1,7 @@
 import * as React from "react";
 import { CalendarClock, Check, CircleDot, GitPullRequest, Link2, Pause, Webhook } from "lucide-react";
-import { AnimatePresence, motion, useInView, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion, useInView } from "motion/react";
+import { useReducedMotion } from "@/lib/motion-pref";
 import { cn } from "@/lib/utils";
 
 /**

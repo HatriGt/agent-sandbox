@@ -1,14 +1,16 @@
 import * as React from "react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { motion } from "motion/react";
+import { useReducedMotion } from "@/lib/motion-pref";
 import { api, type AuditEventRow } from "@/lib/api";
 import { fmtAgo } from "@/lib/format";
 import { consolePath } from "@/lib/route";
 import { useLocation } from "react-router";
 import { ScrollText } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { StaggerItem, Swap } from "@/components/ui/swap";
+import { Swap } from "@/components/ui/swap";
 import { ListEmpty, ListSkeleton } from "@/components/ui/list-state";
 import { Panel, SettingsSection } from "@/components/ui/settings";
+import { DataTable, StatusDot, stopRow, type Column } from "@/components/ui/data-table";
 import { cn } from "@/lib/utils";
 
 const PAGE = 25;
@@ -131,8 +133,6 @@ export function AuditLog() {
   const [busy, setBusy] = React.useState(false);
   const [filter, setFilter] = React.useState<Filter>("all");
   const { search } = useLocation();
-  // Rows appended by "Show more" stagger from their own first index, not from row 0.
-  const pageStart = React.useRef(0);
 
   // The cursor is (at, id): `at` is not unique across a burst of requests, so paging on it alone
   // would silently drop every row sharing the boundary timestamp.
@@ -140,11 +140,7 @@ export function AuditLog() {
     setBusy(true);
     try {
       const r = await api.audit({ limit: PAGE, before: cursor?.at, beforeId: cursor?.id });
-      setRows((prev) => {
-        const kept = cursor ? (prev ?? []) : [];
-        pageStart.current = kept.length;
-        return [...kept, ...r.events];
-      });
+      setRows((prev) => [...(cursor ? (prev ?? []) : []), ...r.events]);
       if (r.events.length < PAGE) setDone(true);
     } catch {
       setRows((prev) => prev ?? []);
@@ -166,6 +162,55 @@ export function AuditLog() {
   }, [rows]);
   const visible = React.useMemo(() => (rows ?? []).filter((e) => (filter === "all" ? true : filter === "failed" ? e.status >= 400 : eventKind(e) === filter)), [rows, filter]);
   const state = rows === null ? "loading" : rows.length === 0 ? "empty" : visible.length === 0 ? "nomatch" : "list";
+  const columns: Column<AuditEventRow>[] = [
+    {
+      id: "at",
+      header: "Time",
+      width: "w-20",
+      sort: (e) => Date.parse(e.at) || null,
+      cell: (e) => {
+        const at = Date.parse(e.at);
+        return (
+          <time dateTime={e.at} title={Number.isFinite(at) ? new Date(at).toLocaleString() : e.at} className="stamp text-faint tabular-nums">
+            {Number.isFinite(at) ? clock.format(at) : "—"}
+          </time>
+        );
+      },
+    },
+    {
+      id: "event",
+      header: "Event",
+      primary: true,
+      sort: (e) => describeEvent(e).verb,
+      cell: (e) => {
+        const d = describeEvent(e);
+        return (
+          <span className={cn("block truncate font-normal", e.status >= 400 && "text-muted-foreground")}>
+            {d.verb}
+            {d.session && (
+              <>
+                {" "}
+                <a href={`${consolePath({ view: "box", name: d.session })}${search}`} onClick={stopRow} className="stamp text-foreground decoration-line-strong underline underline-offset-4 hover:decoration-current">
+                  {d.session}
+                </a>
+              </>
+            )}
+          </span>
+        );
+      },
+    },
+    {
+      id: "kind",
+      header: "Status",
+      width: "w-28",
+      sort: (e) => (e.status >= 400 ? "failed" : eventKind(e)),
+      cell: (e) => {
+        const kind = eventKind(e);
+        return e.status >= 400 ? <StatusDot tone="destructive">failed {e.status}</StatusDot> : <StatusDot tone={kind === "machines" ? "live" : kind === "code" ? "ok" : "muted"}>{kind}</StatusDot>;
+      },
+    },
+    { id: "ago", header: "When", width: "w-24", hideBelow: "sm", align: "end", cell: (e) => <span className="text-faint text-micro tabular-nums">{Number.isFinite(Date.parse(e.at)) ? fmtAgo(Date.parse(e.at) / 1000) : ""}</span> },
+  ];
 
   return (
     <SettingsSection id="audit" title="Recent activity" meta="kept 90 days" purpose="Every state-changing call made as you — from this console, an IDE or a script." actions={rows && rows.length > 0 ? <Chips value={filter} onChange={setFilter} counts={counts} /> : undefined}>
@@ -178,53 +223,19 @@ export function AuditLog() {
           ) : state === "nomatch" ? (
             <ListEmpty icon={ScrollText} title={`No ${filter} events loaded`} line={done ? "There are none in the last 90 days." : "Load more to look further back."} action={!done ? <Button size="sm" variant="outline" loading={busy} onClick={() => rows && load({ at: rows[rows.length - 1].at, id: rows[rows.length - 1].id })}>Show more</Button> : undefined} />
           ) : (
-            <ol className="py-1">
-              <AnimatePresence initial={false}>
-                {visible.map((e, i) => {
-                  const d = describeEvent(e);
-                  const at = Date.parse(e.at);
-                  const failed = e.status >= 400;
-                  const kind = eventKind(e);
-                  const prev = visible[i - 1];
-                  const newDay = Number.isFinite(at) && (!prev || dayKey(Date.parse(prev.at)) !== dayKey(at));
-                  const idx = rows ? rows.indexOf(e) : i;
-                  return (
-                    <React.Fragment key={e.id}>
-                      {newDay && (
-                        <li aria-hidden className="flex items-center gap-3 px-3.5 pt-3 pb-1 first:pt-2">
-                          <span className="label text-faint w-12 shrink-0 text-right tabular-nums">{dayLabel(at)}</span>
-                          <span className="bg-border h-px flex-1" />
-                        </li>
-                      )}
-                      <motion.li layout="position" initial={false} exit={{ opacity: 0, transition: { duration: 0.12 } }}>
-                        <StaggerItem index={Math.max(0, idx - pageStart.current)} className="group relative flex items-baseline gap-3 px-3.5 py-1.5">
-                          <time dateTime={e.at} title={Number.isFinite(at) ? new Date(at).toLocaleString() : e.at} className="stamp text-faint w-12 shrink-0 text-right tabular-nums">
-                            {Number.isFinite(at) ? clock.format(at) : "—"}
-                          </time>
-                          <span className="relative flex w-3 shrink-0 justify-center self-stretch" aria-hidden>
-                            <span className="bg-border absolute inset-y-[-0.375rem] w-px group-first:top-1/2 group-last:bottom-1/2" />
-                            <span className={cn("ring-card relative mt-[0.45em] size-1.5 rounded-full ring-2", failed ? "bg-destructive" : kind === "machines" ? "bg-live" : kind === "code" ? "bg-ok" : "bg-faint")} />
-                          </span>
-                          <span className={cn("min-w-0 flex-1 truncate text-meta", failed ? "text-muted-foreground" : "text-foreground")}>
-                            {d.verb}
-                            {d.session && (
-                              <>
-                                {" "}
-                                <a href={`${consolePath({ view: "box", name: d.session })}${search}`} className="stamp text-foreground decoration-line-strong underline underline-offset-4 hover:decoration-current">
-                                  {d.session}
-                                </a>
-                              </>
-                            )}
-                            {failed && <span className="text-destructive"> · failed {e.status}</span>}
-                          </span>
-                          <span className="text-faint hidden shrink-0 text-micro tabular-nums sm:inline">{Number.isFinite(at) ? fmtAgo(at / 1000) : ""}</span>
-                        </StaggerItem>
-                      </motion.li>
-                    </React.Fragment>
-                  );
-                })}
-              </AnimatePresence>
-            </ol>
+            <DataTable
+              aria-label="Recent activity"
+              bordered={false}
+              size="sm"
+              rows={visible}
+              columns={columns}
+              rowKey={(e) => String(e.id)}
+              groupOf={(e) => (Number.isFinite(Date.parse(e.at)) ? dayLabel(Date.parse(e.at)) : null)}
+              search={{
+                placeholder: "Search activity",
+                text: (e) => `${describeEvent(e).verb} ${e.session ?? ""} ${e.method} ${e.path} ${e.status}`,
+              }}
+            />
           )}
         </Swap>
         {rows !== null && rows.length > 0 && !done && state === "list" && (

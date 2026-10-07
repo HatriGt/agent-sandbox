@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowLeft, FlaskConical, History as HistoryIcon, Play, RotateCw } from "lucide-react";
+import { ArrowLeft, FlaskConical, History as HistoryIcon, PanelRight, Play, RotateCw } from "lucide-react";
 import { toast } from "sonner";
 import { api, type Automation, type AutomationDelivery } from "@/lib/api";
 import { useCached } from "@/lib/cache";
@@ -10,12 +10,12 @@ import { FilterChip } from "@/components/ui/filter-chip";
 import { Swap } from "@/components/ui/swap";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Bar } from "@/components/thread/Skeletons";
-import { GLYPH, KIND_LABEL, countsLine } from "@/components/Automations";
+import { GLYPH, KIND_LABEL, countsLine, editAutomation } from "@/components/Automations";
 
 /**
  * One automation's run history: every delivery the controller saw for it, newest first — what fired
- * (and the box it opened), what was skipped and why, what was rejected. Reached from the Runs button
- * on an automation row; the editor stays about the rule, this page is about what the rule did.
+ * (and the box it opened), what was skipped and why, what was rejected. Reached by clicking an
+ * automation row; View goes back to the list with this automation's editor sheet open.
  */
 
 type Filter = "all" | "fired" | "skipped" | "rejected";
@@ -126,6 +126,17 @@ export function AutomationRunsPage({ id, onBack, onOpenBox }: { id: string; onBa
           </div>
           {a && (
             <div className="flex shrink-0 items-center gap-2">
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  editAutomation(a.id);
+                  onBack();
+                }}
+              >
+                <PanelRight />
+                View
+              </Button>
               {a.kind !== "chain" && (
                 <Button size="sm" variant="outline" onClick={() => void act("run")} loading={busy === "run"}>
                   <Play />

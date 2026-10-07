@@ -1,6 +1,7 @@
 import * as React from "react";
 import { ArrowDown, ArrowUp, Check, ChevronRight, Download, Files, FileCode2, FileDiff, GitBranch, GitCommitHorizontal, Loader2, Maximize2, Minimize2, PanelRight, RefreshCw, Search, Table2, Upload, X } from "lucide-react";
-import { motion, useReducedMotion } from "motion/react";
+import { motion } from "motion/react";
+import { useReducedMotion } from "@/lib/motion-pref";
 import { toast } from "sonner";
 import { api, ApiError, type ChangedFile, type GitStatus } from "@/lib/api";
 import { parseUnifiedDiff, diffForNewFile, type ParsedDiff } from "@/lib/diff";

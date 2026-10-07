@@ -82,7 +82,20 @@ brief is "more modern", "smoother" or "premium", start here rather than inventin
 - Motion (index.css `dt-*`): rows rise 5px in, 26ms stagger capped at 14 rows; a sort replays a 12ms
   stagger; a row that arrives on a later poll rises and flashes live-blue once; live dots ring outward
   (box-shadow ping); loading cells shimmer; the sort icon morphs (chevrons → arrow, rotates for desc).
-  Polls never replay entrances. Reduced motion drops all movement.
+  A clickable row shows a 2px ink accent bar on its left edge that grows from the centre (scaleY,
+  220ms) on hover, keyboard focus or selection. A search edit fades the rows that stop matching
+  (180ms) and re-staggers the survivors with the sort stagger; the "n of m" count springs
+  (`NumberTicker`). Polls never replay entrances. Reduced motion (`[data-motion="reduced"]`) drops
+  all movement.
+- `DataTable` props beyond rows/columns: `bordered` (default **true**: `rounded-xl border bg-card
+  shadow-xs`, head row at muted/40, last row without a bottom hairline; skeleton rows sit in the same
+  card) — pass `bordered={false}` only where the table already lives inside another surface, never
+  wrap a bordered table in a Card/Panel. `search={{ placeholder, text }}` adds a toolbar above the
+  card: search input (`/` focuses, Esc clears), live "n of m", and a "No rows match … · Clear search"
+  row. `toolbar` puts extra controls (filter chips, buttons) at the right of that toolbar.
+  `actions={(row) => …}` adds a right-aligned trailing cell that fades in on row hover/focus (always
+  visible on touch); clicks inside it never open the row. Keyboard: ↑/↓ or `j`/`k` move between
+  clickable rows, Enter (or Space) opens. A sorted column's header is bright ink.
 
 **Motion and interaction detail**
 

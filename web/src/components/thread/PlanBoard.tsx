@@ -1,6 +1,7 @@
 import * as React from "react";
 import { AlertTriangle, Check, ChevronRight, Circle, CircleDot, Loader2, PanelRightClose, PanelRightOpen } from "lucide-react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "@/lib/motion-pref";
 import { shortDuration, shortPath, type DerivedTask, type TaskBoard, type TaskEvidence } from "@/lib/planTasks";
 import { FileMark } from "@/lib/fileIcon";
 import { Collapse } from "@/components/ui/collapse";

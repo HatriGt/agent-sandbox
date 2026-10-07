@@ -1,23 +1,23 @@
 import * as React from "react";
-import { ArrowLeft, Download, Plus, Search, X } from "lucide-react";
-import { AnimatePresence, type HTMLMotionProps, motion, useReducedMotion } from "motion/react";
+import { ArrowLeft, Download, Plus } from "lucide-react";
+import { AnimatePresence, type HTMLMotionProps, motion } from "motion/react";
+import { useReducedMotion } from "@/lib/motion-pref";
 import { toast } from "sonner";
 import { api, type SkillView } from "@/lib/api";
 import { useCached } from "@/lib/cache";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
-import { Swap } from "@/components/ui/swap";
 import { FilterChip } from "@/components/ui/filter-chip";
 import { ImportDialog } from "@/components/skills/ImportDialog";
 import { type Draft, type Mutate, sourceOf } from "@/components/skills/model";
 import { SkillEditor } from "@/components/skills/SkillEditor";
-import { EmptyState, SkillList, SkillListSkeleton, TemplateStrip } from "@/components/skills/SkillLibrary";
+import { EmptyState, SkillTable, TemplateStrip } from "@/components/skills/SkillLibrary";
 import { SkillRail } from "@/components/skills/SkillRail";
 import { fmtAgo } from "@/lib/format";
 
 /**
- * Skills: the playbooks every sandbox gets. Two surfaces in one page — the library (a list with
+ * Skills: the playbooks every sandbox gets. Two surfaces in one page — the library (a DataTable with
  * search `/`, filter chips and a curated template strip) and the editor, which takes the whole page
  * when a skill is opened and slides back out to the list. Import is a dialog over the library.
  * `n` starts a new skill while the list has focus.
@@ -30,11 +30,9 @@ export function SkillsPage({ onBack }: { onBack: () => void }) {
   const still = useReducedMotion();
   const cached = useCached("skills", (signal) => api.skills(signal));
   const skills = cached.data?.skills ?? null;
-  const [query, setQuery] = React.useState("");
   const [filter, setFilter] = React.useState<Filter>("all");
   const [editing, setEditing] = React.useState<Editing | null>(null);
   const [importing, setImporting] = React.useState<{ repo?: string } | null>(null);
-  const searchRef = React.useRef<HTMLInputElement>(null);
   const seq = React.useRef(0);
   const open = React.useCallback((e: Omit<Editing, "key">) => setEditing({ ...e, key: ++seq.current }), []);
 
@@ -50,27 +48,20 @@ export function SkillsPage({ onBack }: { onBack: () => void }) {
 
   const newSkill = React.useCallback(() => open({ draft: { name: "", description: "", content: "" } }), [open]);
 
-  // `/` focuses search, `n` starts a skill — only while the library is the surface.
+  // `n` starts a skill — only while the library is the surface (`/` belongs to the table's search).
   React.useEffect(() => {
     if (editing || importing) return;
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       const typing = t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
-      if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key === "/" && skills?.length) {
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        searchRef.current?.focus();
-      } else if (e.key === "n") {
-        e.stopImmediatePropagation();
-        newSkill();
-      }
+      if (typing || e.metaKey || e.ctrlKey || e.altKey || e.key !== "n") return;
+      e.stopImmediatePropagation();
+      newSkill();
     };
     document.addEventListener("keydown", onKey, true);
     return () => document.removeEventListener("keydown", onKey, true);
-  }, [editing, importing, skills, newSkill]);
+  }, [editing, importing, newSkill]);
 
-  const q = query.trim().toLowerCase();
   const counts = React.useMemo(() => {
     const c = { all: 0, on: 0, off: 0, starter: 0, custom: 0 };
     for (const s of skills ?? []) {
@@ -84,10 +75,10 @@ export function SkillsPage({ onBack }: { onBack: () => void }) {
     if (filter === "on" && !s.enabled) return false;
     if (filter === "off" && s.enabled) return false;
     if ((filter === "starter" || filter === "custom") && sourceOf(s.name) !== filter) return false;
-    return !q || `${s.name} ${s.description}`.toLowerCase().includes(q);
+    return true;
   });
   const existing = React.useMemo(() => Object.fromEntries((skills ?? []).map((s) => [s.name, true as const])), [skills]);
-  const filtered = !!q || filter !== "all";
+  const filtered = filter !== "all";
   const lastEdited = React.useMemo(() => (skills?.length ? Math.max(...skills.map((s) => s.updatedAt)) : 0), [skills]);
 
   const EASE = [0.22, 1, 0.36, 1] as const;
@@ -156,66 +147,38 @@ export function SkillsPage({ onBack }: { onBack: () => void }) {
 
               <div className={cn("grid gap-10", skills && skills.length > 0 && "xl:grid-cols-[minmax(0,1fr)_17rem] xl:gap-12")}>
                 <div className="min-w-0">
-                  {skills && skills.length > 0 && (
-                    <div className="mb-3 flex flex-wrap items-center gap-2">
-                      <label className="bg-card focus-within:border-ring focus-within:ring-ring/40 flex h-9 min-w-0 basis-full items-center gap-2 rounded-lg border px-3 transition-[border-color,box-shadow] duration-150 focus-within:ring-2 sm:basis-auto sm:flex-1 sm:max-w-xs">
-                        <Search className="text-muted-foreground size-3.5 shrink-0" aria-hidden />
-                        <input
-                          ref={searchRef}
-                          value={query}
-                          onChange={(e) => setQuery(e.target.value)}
-                          onKeyDown={(e) => e.key === "Escape" && (query ? setQuery("") : e.currentTarget.blur())}
-                          placeholder="Search skills"
-                          aria-label="Search skills"
-                          className="text-foreground placeholder:text-muted-foreground h-full w-full min-w-0 bg-transparent text-meta outline-none"
-                        />
-                        {query ? (
-                          <button type="button" onClick={() => setQuery("")} aria-label="Clear search" className="text-muted-foreground hover:text-foreground cursor-pointer">
-                            <X className="size-3.5" />
-                          </button>
-                        ) : (
-                          <Kbd className="hidden sm:inline-flex">/</Kbd>
-                        )}
-                      </label>
-                      <div role="radiogroup" aria-label="Filter skills" className="flex flex-wrap items-center gap-1">
-                        <FilterChip group="skills" className="h-9 px-3.5" active={filter === "all"} onClick={() => setFilter("all")} label="All" count={counts.all} />
-                        <FilterChip group="skills" className="h-9 px-3.5" active={filter === "on"} onClick={() => setFilter("on")} label="On" count={counts.on} />
-                        <FilterChip group="skills" className="h-9 px-3.5" active={filter === "off"} onClick={() => setFilter("off")} label="Off" count={counts.off} />
-                        {counts.starter > 0 && counts.custom > 0 && (
-                          <>
-                            <FilterChip group="skills" className="h-9 px-3.5" active={filter === "starter"} onClick={() => setFilter("starter")} label="Starter" count={counts.starter} />
-                            <FilterChip group="skills" className="h-9 px-3.5" active={filter === "custom"} onClick={() => setFilter("custom")} label="Yours" count={counts.custom} />
-                          </>
-                        )}
-                      </div>
-                    </div>
+                  {skills?.length === 0 ? (
+                    <EmptyState onPick={(d) => open({ draft: d })} onNew={newSkill} onImport={() => setImporting({})} />
+                  ) : (
+                    <SkillTable
+                      skills={visible}
+                      loading={skills === null}
+                      onOpen={(s) => open({ initial: s })}
+                      onMutate={mutate}
+                      toolbar={
+                        <div role="radiogroup" aria-label="Filter skills" className="flex flex-wrap items-center gap-1">
+                          <FilterChip group="skills" active={filter === "all"} onClick={() => setFilter("all")} label="All" count={counts.all} />
+                          <FilterChip group="skills" active={filter === "on"} onClick={() => setFilter("on")} label="On" count={counts.on} />
+                          <FilterChip group="skills" active={filter === "off"} onClick={() => setFilter("off")} label="Off" count={counts.off} />
+                          {counts.starter > 0 && counts.custom > 0 && (
+                            <>
+                              <FilterChip group="skills" active={filter === "starter"} onClick={() => setFilter("starter")} label="Starter" count={counts.starter} />
+                              <FilterChip group="skills" active={filter === "custom"} onClick={() => setFilter("custom")} label="Yours" count={counts.custom} />
+                            </>
+                          )}
+                        </div>
+                      }
+                      empty={
+                        <span className="flex flex-col items-center gap-1">
+                          <span className="text-foreground text-body font-medium">Nothing matches</span>
+                          <span className="text-meta">No skill in this filter.</span>
+                          <Button size="xs" variant="ghost" className="mt-2" onClick={() => setFilter("all")}>
+                            Clear filters
+                          </Button>
+                        </span>
+                      }
+                    />
                   )}
-
-                  <Swap state={skills === null ? "loading" : skills.length === 0 ? "empty" : visible.length === 0 ? "none" : "list"}>
-                    {skills === null ? (
-                      <SkillListSkeleton />
-                    ) : skills.length === 0 ? (
-                      <EmptyState onPick={(d) => open({ draft: d })} onNew={newSkill} onImport={() => setImporting({})} />
-                    ) : visible.length === 0 ? (
-                      <div className="rounded-xl border border-dashed py-12 text-center">
-                        <p className="text-foreground text-lead font-medium">Nothing matches</p>
-                        <p className="text-muted-foreground mt-1 text-meta">{q ? `No skill matches “${query.trim()}”` : "No skill in this filter"}.</p>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="mt-3"
-                          onClick={() => {
-                            setQuery("");
-                            setFilter("all");
-                          }}
-                        >
-                          Clear filters
-                        </Button>
-                      </div>
-                    ) : (
-                      <SkillList skills={visible} onOpen={(s) => open({ initial: s })} onMutate={mutate} />
-                    )}
-                  </Swap>
                   {skills && skills.length > 0 && skills.length <= 6 && !filtered && <TemplateStrip existing={existing} onPick={(d) => open({ draft: d })} onNew={newSkill} />}
                 </div>
 

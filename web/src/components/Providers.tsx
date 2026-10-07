@@ -1,5 +1,5 @@
 import * as React from "react";
-import { AnimatePresence, motion } from "motion/react";
+import { DataTable, MetaLine, StatusDot, type Column } from "@/components/ui/data-table";
 import { Plus, RefreshCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, type ProviderKind, type ProvidersResponse, type ProviderView } from "@/lib/api";
@@ -76,21 +76,17 @@ export function Providers() {
             <Collapse open={data.providers.length === 0 && !adding}>
               <p className="text-muted-foreground text-micro">No providers yet — runs use the deployment's default model access.</p>
             </Collapse>
-            <AnimatePresence initial={false}>
-              {data.providers.map((p, i) => (
-                <motion.div
-                  key={p.id}
-                  layout="position"
-                  initial={{ opacity: 0, y: 6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, height: 0, marginTop: 0 }}
-                  transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1], delay: Math.min(i, 12) * 0.024 }}
-                  className="overflow-hidden"
-                >
-                  <ProviderRow p={p} />
-                </motion.div>
-              ))}
-            </AnimatePresence>
+            {data.providers.length > 0 && (
+              <DataTable
+                aria-label="Model providers"
+                rows={data.providers}
+                columns={PROVIDER_COLUMNS}
+                rowKey={(p) => p.id}
+                minWidth="min-w-[34rem]"
+                search={data.providers.length > 8 ? { placeholder: "Search providers", text: (p) => `${p.label} ${p.kind} ${p.baseUrl} ${p.drivers.join(" ")}` } : undefined}
+                actions={(p) => <ProviderActions p={p} />}
+              />
+            )}
             <Collapse open={adding}>
               <ProviderForm kinds={data.kinds} onDone={() => setAdding(false)} />
             </Collapse>
@@ -102,7 +98,47 @@ export function Providers() {
   );
 }
 
-function ProviderRow({ p }: { p: ProviderView }) {
+const PROVIDER_COLUMNS: Column<ProviderView>[] = [
+  {
+    id: "label",
+    header: "Provider",
+    primary: true,
+    sort: (p) => p.label,
+    cell: (p) => (
+      <span className="flex min-w-0 flex-col">
+        <span className="truncate">{p.label}</span>
+        <span className="text-muted-foreground truncate font-mono text-micro font-normal" title={p.baseUrl}>
+          {p.baseUrl}
+        </span>
+      </span>
+    ),
+  },
+  {
+    id: "key",
+    header: "Key",
+    width: "w-36",
+    hideBelow: "sm",
+    sort: (p) => (p.apiKeyMasked ? 0 : 1),
+    cell: (p) => (p.apiKeyMasked ? <span className="stamp text-muted-foreground truncate">{p.apiKeyMasked}</span> : <StatusDot tone="muted">no key</StatusDot>),
+  },
+  {
+    id: "models",
+    header: "Models",
+    width: "w-28",
+    sort: (p) => p.models?.length ?? -1,
+    cell: (p) => (p.models ? <span className="text-muted-foreground text-micro tabular-nums">{`${p.models.length} model${p.models.length === 1 ? "" : "s"}`}</span> : <StatusDot tone="attention">not fetched</StatusDot>),
+  },
+  {
+    id: "drivers",
+    header: "Runs",
+    width: "w-40",
+    hideBelow: "md",
+    sort: (p) => p.drivers.length,
+    cell: (p) => <MetaLine parts={p.drivers.length ? p.drivers.map((d) => DRIVER_LABEL[d] ?? d) : ["no driver"]} />,
+  },
+];
+
+function ProviderActions({ p }: { p: ProviderView }) {
   const [busy, setBusy] = React.useState<"models" | "del" | null>(null);
   const refresh = async () => {
     setBusy("models");
@@ -126,22 +162,14 @@ function ProviderRow({ p }: { p: ProviderView }) {
     }
   };
   return (
-    <div className="border-border flex items-start gap-3 rounded-lg border p-3">
-      <div className="min-w-0 flex-1">
-        <div className="text-foreground text-meta font-medium">{p.label}</div>
-        <div className="text-muted-foreground truncate font-mono text-micro">{p.baseUrl}</div>
-        <div className="text-faint mt-1 text-micro">
-          {p.apiKeyMasked ? <span className="font-mono">{p.apiKeyMasked}</span> : "no key"} ·{" "}
-          {p.models ? `${p.models.length} model${p.models.length === 1 ? "" : "s"}` : "models not fetched"} · runs {p.drivers.map((d) => DRIVER_LABEL[d] ?? d).join(", ") || "no driver"}
-        </div>
-      </div>
-      <Button size="xs" variant="ghost" onClick={() => void refresh()} disabled={busy !== null} loading={busy === "models"} aria-label="Refresh models">
+    <span className="inline-flex items-center gap-0.5">
+      <Button size="xs" variant="ghost" onClick={() => void refresh()} disabled={busy !== null} loading={busy === "models"} aria-label={`Refresh models for ${p.label}`}>
         <RefreshCw className="size-3.5" />
       </Button>
-      <Button size="xs" variant="ghost" onClick={() => void del()} disabled={busy !== null} loading={busy === "del"} aria-label="Remove provider">
+      <Button size="xs" variant="ghost" onClick={() => void del()} disabled={busy !== null} loading={busy === "del"} aria-label={`Remove ${p.label}`}>
         <Trash2 className="size-3.5" />
       </Button>
-    </div>
+    </span>
   );
 }
 

@@ -1,6 +1,5 @@
 import * as React from "react";
-import { ArrowUpRight, ChevronRight, Download, Files, PenLine, Plus, Sparkles, Zap } from "lucide-react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { ArrowUpRight, Download, Files, PenLine, Plus, Sparkles, Zap } from "lucide-react";
 import { toast } from "sonner";
 import type { SkillView } from "@/lib/api";
 import { fmtAgo } from "@/lib/format";
@@ -11,32 +10,99 @@ import { Kbd } from "@/components/ui/kbd";
 import { Switch } from "@/components/ui/switch";
 import { StaggerItem } from "@/components/ui/swap";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { Bar } from "@/components/thread/Skeletons";
+import { DataTable, MetaLine, StatusDot, type Column } from "@/components/ui/data-table";
 import { byteLength, type Draft, fmtKb, type Mutate, type SkillSource, sourceOf, TEMPLATES } from "./model";
 
-/* ───────────────────────────── list ───────────────────────────── */
+/* ───────────────────────────── table ───────────────────────────── */
 
-export function SkillList({ skills, onOpen, onMutate }: { skills: SkillView[]; onOpen: (s: SkillView) => void; onMutate: Mutate }) {
+/** SKILL.md plus every attached file, in bytes. */
+const sizeOf = (s: SkillView) => byteLength(s.content) + (s.files ?? []).reduce((n, f) => n + byteLength(f.content), 0);
+
+const COLUMNS: Column<SkillView>[] = [
+  {
+    id: "name",
+    header: "Name",
+    primary: true,
+    sort: (s) => s.name,
+    cell: (s) => (
+      <span className={cn("flex min-w-0 items-center gap-3 transition-opacity duration-200", !s.enabled && "opacity-55")}>
+        <SkillTile name={s.name} enabled={s.enabled} size="sm" />
+        <span className="flex min-w-0 flex-col gap-0.5">
+          <span className="stamp text-foreground truncate text-[13px] font-medium">/{s.name}</span>
+          <MetaLine parts={[<span title={s.description}>{s.description}</span>]} />
+        </span>
+      </span>
+    ),
+  },
+  {
+    id: "source",
+    header: "Source",
+    width: "w-28",
+    hideBelow: "md",
+    sort: (s) => sourceOf(s.name),
+    cell: (s) => (sourceOf(s.name) === "starter" ? <SourceBadge source="starter" /> : <span>Yours</span>),
+  },
+  {
+    id: "scope",
+    header: "Scope",
+    width: "w-36",
+    sort: (s) => (s.enabled ? 0 : 1),
+    cell: (s) => <StatusDot tone={s.enabled ? "live" : "muted"}>{s.enabled ? "Every sandbox" : "Off"}</StatusDot>,
+  },
+  {
+    id: "size",
+    header: "Files",
+    width: "w-28",
+    align: "end",
+    hideBelow: "sm",
+    sort: sizeOf,
+    cell: (s) => {
+      const files = (s.files?.length ?? 0) + 1;
+      return (
+        <span className="tabular inline-flex items-center gap-2" title={`${files} file${files > 1 ? "s" : ""}`}>
+          <span className="inline-flex items-center gap-1">
+            <Files className="size-3" aria-hidden />
+            {files}
+          </span>
+          <span className="text-faint">{fmtKb(sizeOf(s))}</span>
+        </span>
+      );
+    },
+  },
+  {
+    id: "updated",
+    header: "Updated",
+    width: "w-28",
+    hideBelow: "lg",
+    sort: (s) => s.updatedAt,
+    cell: (s) => <span className="tabular">{fmtAgo(Math.floor(s.updatedAt / 1000))}</span>,
+  },
+];
+
+/**
+ * The library as a table: `/name` with its glyph and "when" line, source, scope, files + weight,
+ * last edit. The row opens the editor; the trailing cell holds Edit and the on/off switch.
+ */
+export function SkillTable({ skills, loading, onOpen, onMutate, toolbar, empty }: { skills: SkillView[]; loading?: boolean; onOpen: (s: SkillView) => void; onMutate: Mutate; toolbar?: React.ReactNode; empty?: React.ReactNode }) {
   return (
-    <div className="bg-card overflow-hidden rounded-xl border shadow-e1">
-      <ul className="divide-y">
-        <AnimatePresence initial={false}>
-          {skills.map((s, i) => (
-            <SkillRow key={s.name} index={i} skill={s} onOpen={() => onOpen(s)} onMutate={onMutate} />
-          ))}
-        </AnimatePresence>
-      </ul>
-    </div>
+    <DataTable
+      aria-label="Skills"
+      rows={skills}
+      columns={COLUMNS}
+      rowKey={(s) => s.name}
+      onRowClick={onOpen}
+      rowLabel={(s) => `Edit skill ${s.name}`}
+      loading={loading}
+      search={{ placeholder: "Search skills", text: (s) => `${s.name} ${s.description}` }}
+      toolbar={toolbar}
+      actions={(s) => <SkillActions skill={s} onOpen={() => onOpen(s)} onMutate={onMutate} />}
+      empty={empty}
+      minWidth="min-w-[40rem]"
+    />
   );
 }
 
-/**
- * One skill, as an object: glyph tile · `/name` · the "when" line · files + weight · last edit ·
- * on/off. The whole row opens the editor; the chevron slides in to say so. The switch sits above the
- * stretched button so toggling never opens. Off rows fade, they do not shrink.
- */
-function SkillRow({ skill: s, index, onOpen, onMutate }: { skill: SkillView; index: number; onOpen: () => void; onMutate: Mutate }) {
-  const still = useReducedMotion();
+function SkillActions({ skill: s, onOpen, onMutate }: { skill: SkillView; onOpen: () => void; onMutate: Mutate }) {
   const [busy, setBusy] = React.useState(false);
   const toggle = (next: boolean) => {
     setBusy(true);
@@ -44,70 +110,26 @@ function SkillRow({ skill: s, index, onOpen, onMutate }: { skill: SkillView; ind
       .catch((e: unknown) => toast.error("Could not update", { description: e instanceof Error ? e.message : String(e) }))
       .finally(() => setBusy(false));
   };
-  const files = s.files?.length ?? 0;
-  const bytes = byteLength(s.content) + (s.files ?? []).reduce((n, f) => n + byteLength(f.content), 0);
-  const source = sourceOf(s.name);
   return (
-    <motion.li
-      layout={still ? false : "position"}
-      initial={still ? { opacity: 0 } : { opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, height: 0, transition: { duration: 0.16 } }}
-      transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1], delay: Math.min(index, 8) * 0.03 }}
-      className={cn("group relative flex min-h-16 items-center gap-4 px-4 py-3.5 transition-colors duration-150 sm:px-5", "[@media(hover:hover)]:hover:bg-muted/40")}
-    >
-      <button
-        type="button"
-        onClick={onOpen}
-        disabled={busy}
-        aria-label={`Edit skill ${s.name}`}
-        className="focus-visible:ring-ring absolute inset-0 cursor-pointer focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset"
-      />
-
-      <SkillTile name={s.name} enabled={s.enabled} />
-
-      <span className={cn("pointer-events-none flex min-w-0 flex-1 flex-col gap-0.5 transition-opacity duration-200", !s.enabled && "opacity-55")}>
-        <span className="flex min-w-0 items-center gap-2">
-          <span className="stamp text-foreground truncate text-[13px] font-medium">/{s.name}</span>
-          <SourceBadge source={source} />
-        </span>
-        <span className="text-foreground/70 min-w-0 truncate text-meta" title={s.description}>
-          {s.description}
-        </span>
-      </span>
-
-      <span className="text-muted-foreground tabular pointer-events-none hidden shrink-0 items-center gap-1.5 text-micro md:flex">
-        <span className="bg-muted/70 inline-flex h-6 items-center gap-2 rounded-md px-2">
-          <span className="inline-flex items-center gap-1" title={`${files + 1} file${files ? "s" : ""}`}>
-            <Files className="size-3" aria-hidden />
-            {files + 1}
-          </span>
-          <span className="bg-border h-3 w-px" aria-hidden />
-          <span>{fmtKb(bytes)}</span>
-        </span>
-        <span className="text-faint hidden w-14 text-right xl:inline">{fmtAgo(Math.floor(s.updatedAt / 1000))}</span>
-      </span>
-
-      <span className="relative flex shrink-0 items-center gap-2.5">
-        <Tooltip>
-          <TooltipTrigger asChild>
+    <span className="inline-flex items-center gap-1.5">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button size="icon-xs" variant="ghost" onClick={onOpen} aria-label={`Edit ${s.name}`}>
+            <PenLine />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Edit</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        {/* A span, not the Switch itself: TooltipTrigger asChild injects an onClick that Switch's prop spread would let override its own toggle. */}
+        <TooltipTrigger asChild>
+          <span className="inline-flex">
             <Switch checked={s.enabled} onCheckedChange={toggle} disabled={busy} aria-label={s.enabled ? `Disable ${s.name}` : `Enable ${s.name}`} />
-          </TooltipTrigger>
-          <TooltipContent>{s.enabled ? "On — synced into every sandbox on its next turn" : "Off — kept, not given to the agent"}</TooltipContent>
-        </Tooltip>
-        <span
-          className={cn(
-            "text-muted-foreground pointer-events-none inline-flex h-7 items-center gap-1 rounded-md border px-2 text-micro font-medium transition-[opacity,transform,color,border-color] duration-150 ease-out",
-            "max-xl:border-transparent max-xl:px-0",
-            "md:-translate-x-1 md:opacity-0 md:group-focus-within:translate-x-0 md:group-focus-within:opacity-100 md:group-hover:translate-x-0 md:group-hover:opacity-100 xl:group-hover:border-line-strong md:group-hover:text-foreground"
-          )}
-          aria-hidden
-        >
-          <span className="hidden xl:inline">Open</span>
-          <ChevronRight className="size-3.5" />
-        </span>
-      </span>
-    </motion.li>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>{s.enabled ? "On — synced into every sandbox on its next turn" : "Off — kept, not given to the agent"}</TooltipContent>
+      </Tooltip>
+    </span>
   );
 }
 
@@ -141,24 +163,6 @@ export function SourceBadge({ source, className }: { source: SkillSource; classN
       <Sparkles className="size-2.5" aria-hidden />
       starter
     </span>
-  );
-}
-
-export function SkillListSkeleton() {
-  return (
-    <div className="bg-card overflow-hidden rounded-xl border shadow-e1" aria-busy="true" aria-label="Loading skills">
-      {[0, 1, 2, 3].map((i) => (
-        <div key={i} className="flex items-center gap-4 border-b px-5 py-3.5 last:border-b-0">
-          <Bar className="size-11 rounded-xl" />
-          <div className="flex flex-1 flex-col gap-2">
-            <Bar className="h-3 w-32" />
-            <Bar className="h-2.5 w-[60%]" />
-          </div>
-          <Bar className="hidden h-3 w-24 md:block" />
-          <Bar className="h-5 w-9 rounded-full" />
-        </div>
-      ))}
-    </div>
   );
 }
 

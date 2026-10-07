@@ -5,10 +5,43 @@ import { toast } from "sonner";
 import { api, type SessionRow } from "@/lib/api";
 import { fmtAgo } from "@/lib/format";
 import { ArmButton } from "@/components/ui/arm-button";
-import { StaggerItem, Swap } from "@/components/ui/swap";
+import { Swap } from "@/components/ui/swap";
 import { ListEmpty, ListSkeleton } from "@/components/ui/list-state";
 import { Panel, SettingsSection } from "@/components/ui/settings";
+import { DataTable, StatusDot, type Column } from "@/components/ui/data-table";
 import { cn } from "@/lib/utils";
+
+const time = (s: string | null) => (s && Number.isFinite(Date.parse(s)) ? Date.parse(s) : null);
+
+const COLUMNS: Column<SessionRow>[] = [
+  {
+    id: "device",
+    header: "Device",
+    primary: true,
+    sort: (s) => describe(s.userAgent).label,
+    cell: (s) => {
+      const d = describe(s.userAgent);
+      return (
+        <span className="flex min-w-0 items-center gap-2.5">
+          <span className={cn("grid size-7 shrink-0 place-items-center rounded-full", s.current ? "bg-live/10 text-live" : "bg-muted text-muted-foreground")} aria-hidden>
+            {d.mobile ? <Smartphone className="size-3.5" /> : <Laptop className="size-3.5" />}
+          </span>
+          <span className="truncate">{d.label}</span>
+        </span>
+      );
+    },
+  },
+  { id: "state", header: "Status", width: "w-32", sort: (s) => Number(s.current), cell: (s) => (s.current ? <StatusDot tone="live">This device</StatusDot> : <StatusDot tone="muted">Signed in</StatusDot>) },
+  { id: "ip", header: "IP", width: "w-36", hideBelow: "md", sort: (s) => s.ip, cell: (s) => <span className="stamp text-muted-foreground truncate">{s.ip ?? "—"}</span> },
+  {
+    id: "seen",
+    header: "Last active",
+    width: "w-28",
+    hideBelow: "sm",
+    sort: (s) => time(s.lastSeenAt),
+    cell: (s) => <span className="text-muted-foreground text-micro tabular-nums">{time(s.lastSeenAt) ? fmtAgo(time(s.lastSeenAt)! / 1000) : "no activity"}</span>,
+  },
+];
 
 function describe(ua: string | null): { label: string; mobile: boolean } {
   const s = ua ?? "";
@@ -71,44 +104,18 @@ export function Sessions() {
           ) : state === "empty" ? (
             <ListEmpty icon={MonitorSmartphone} title="No browser sessions" line="You are signed in with an access token, so there is nothing to sign out here." />
           ) : (
-            <ul className="divide-y">
-              <AnimatePresence initial={false}>
-                {sorted.map((s, i) => {
-                  const d = describe(s.userAgent);
-                  const seen = s.lastSeenAt && Number.isFinite(Date.parse(s.lastSeenAt)) ? fmtAgo(Date.parse(s.lastSeenAt) / 1000) : null;
-                  return (
-                    <motion.li key={s.id} layout exit={{ opacity: 0, height: 0, transition: { duration: 0.2, ease: [0.22, 1, 0.36, 1] } }} className="overflow-hidden">
-                      <StaggerItem index={i} className={cn("group flex items-center gap-3 px-3.5 py-2.5", s.current && "bg-live/[0.04]")}>
-                        <span className={cn("relative grid size-8 shrink-0 place-items-center rounded-full", s.current ? "bg-live/10 text-live" : "bg-muted text-muted-foreground")} aria-hidden>
-                          {d.mobile ? <Smartphone className="size-3.5" /> : <Laptop className="size-3.5" />}
-                          {s.current && <span className="bg-live ring-card absolute -right-px -bottom-px size-2 rounded-full ring-2" />}
-                        </span>
-                        <span className="flex min-w-0 flex-1 flex-col">
-                          <span className="text-foreground flex min-w-0 items-center gap-1.5 text-meta font-medium">
-                            <span className="truncate">{d.label}</span>
-                            {s.current && <span className="bg-live/10 text-live rounded-full px-1.5 py-px text-micro font-medium">this device</span>}
-                          </span>
-                          <span className="text-faint truncate text-micro tabular-nums">
-                            {[s.ip, seen ? `active ${seen}` : null].filter(Boolean).join(" · ") || "no activity yet"}
-                          </span>
-                        </span>
-                        {!s.current && (
-                          <ArmButton
-                            size="sm"
-                            variant="ghost"
-                            icon={<LogOut className="size-3.5" />}
-                            label="Sign out"
-                            armedLabel="Sign out?"
-                            onConfirm={() => revoke(s)}
-                            className="text-muted-foreground hover:text-destructive sm:opacity-0 sm:transition-opacity sm:group-focus-within:opacity-100 sm:group-hover:opacity-100 sm:data-[armed]:opacity-100"
-                          />
-                        )}
-                      </StaggerItem>
-                    </motion.li>
-                  );
-                })}
-              </AnimatePresence>
-            </ul>
+            <DataTable
+              aria-label="Signed-in devices"
+              bordered={false}
+              rows={sorted}
+              columns={COLUMNS}
+              rowKey={(s) => s.id}
+              rowProps={(s) => ({ className: s.current ? "bg-live/[0.04]" : undefined })}
+              search={sorted.length > 8 ? { placeholder: "Search devices", text: (s) => `${describe(s.userAgent).label} ${s.ip ?? ""}` } : undefined}
+              actions={(s) =>
+                s.current ? null : <ArmButton size="sm" variant="ghost" icon={<LogOut className="size-3.5" />} label="Sign out" armedLabel="Sign out?" onConfirm={() => revoke(s)} className="text-muted-foreground hover:text-destructive" />
+              }
+            />
           )}
         </Swap>
       </Panel>
