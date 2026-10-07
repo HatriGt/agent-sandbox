@@ -31,6 +31,9 @@ export interface Column<T> {
 }
 
 const HIDE: Record<NonNullable<Column<unknown>["hideBelow"]>, string> = { sm: "hidden sm:table-cell", md: "hidden md:table-cell", lg: "hidden lg:table-cell" };
+// Literal classes (Tailwind only generates what it can read): a hidden <col> must come back as a column, or its width is lost.
+const HIDE_COL: Record<NonNullable<Column<unknown>["hideBelow"]>, string> = { sm: "hidden sm:table-column", md: "hidden md:table-column", lg: "hidden lg:table-column" };
+const BP: Record<NonNullable<Column<unknown>["hideBelow"]>, string> = { sm: "(min-width: 40rem)", md: "(min-width: 48rem)", lg: "(min-width: 64rem)" };
 
 type Sort = { id: string; dir: "asc" | "desc" } | null;
 
@@ -45,11 +48,18 @@ function focusSibling(row: HTMLElement, dir: 1 | -1) {
 const MIN_COL = 56;
 const AUTO_MAX = 360;
 
+/** A Tailwind width class ("w-28", "w-[8.5rem]", "w-[28%]") as a CSS length, for `max(header, declared)`. */
+function twWidth(cls: string): string {
+  const m = /^w-(?:\[(.+)\]|(\d+(?:\.\d+)?))$/.exec(cls);
+  return m ? (m[1] ?? `calc(var(--spacing) * ${m[2]})`) : "0px";
+}
+
 /**
- * Column widths. Auto: once real rows paint, every sized column is fitted to its widest content
- * (header included, clamped 56–360px) and the flexible column takes the rest. Manual: dragging a
- * header edge sets that column in px and is remembered per table (localStorage); double-click the
- * edge to hand it back to auto.
+ * Column widths. Every column's header is measured on first paint and is a hard floor: no column
+ * (fitted, dragged, declared or flexible) is ever narrower than its own label + sort icon. Auto:
+ * once real rows paint, every sized column is fitted to its widest content (clamped to 360px) and
+ * the flexible column takes the rest. Manual: dragging a header edge sets that column in px and is
+ * remembered per table (localStorage); double-click the edge to hand it back to auto.
  */
 function useColumnWidths(storeKey: string | undefined, ready: boolean, signature: string) {
   const colgroup = React.useRef<HTMLTableColElement>(null);
@@ -63,33 +73,43 @@ function useColumnWidths(storeKey: string | undefined, ready: boolean, signature
   });
   const [auto, setAuto] = React.useState<Record<string, number>>({});
   const fitted = React.useRef("");
+  // Header floors: the width each header needs to show its label + sort icon in full. No column is
+  // ever narrower than this - not before rows load, not after a drag, not the flexible one.
+  const [floor, setFloor] = React.useState<Record<string, number>>({});
   React.useLayoutEffect(() => {
     const table = colgroup.current?.closest("table");
-    if (!ready || !table || fitted.current === signature) return;
-    fitted.current = signature;
-    const next: Record<string, number> = {};
+    const key = `${ready}|${signature}`;
+    if (!table || fitted.current === key) return;
+    fitted.current = key;
+    const fit: Record<string, number> = {};
+    const head: Record<string, number> = {};
     const cols = Array.from(colgroup.current!.children) as HTMLElement[];
-    // Measure natural widths with one synchronous relayout: auto layout at max-content lets every
-    // cell (truncating ones included) take its content's width; restored before paint.
+    // One synchronous relayout before paint: auto layout at max-content lets every cell (truncating
+    // ones included) take its content's natural width; everything is restored afterwards.
     const saved = [table.style.tableLayout, table.style.width, table.style.minWidth];
     const savedCols = cols.map((c) => c.style.width);
     cols.forEach((c) => (c.style.width = "auto"));
     table.style.tableLayout = "auto";
     table.style.width = "max-content";
     table.style.minWidth = "0";
+    const headRow = table.tHead?.rows[0];
     cols.forEach((col, i) => {
       const id = col.dataset.col;
-      if (!id || col.dataset.flex !== undefined) return;
+      if (!id) return;
+      const th = headRow?.cells[i];
+      if (th?.offsetParent) head[id] = Math.ceil(th.getBoundingClientRect().width) + 2;
+      if (!ready || col.dataset.flex !== undefined) return;
       let w = 0;
-      for (const row of Array.from(table.rows)) {
+      for (const row of Array.from(table.tBodies[0]?.rows ?? [])) {
         const c = row.cells[i];
         if (c && c.colSpan === 1 && c.offsetParent) w = Math.max(w, c.getBoundingClientRect().width);
       }
-      if (w > 0) next[id] = Math.min(AUTO_MAX, Math.max(MIN_COL, Math.ceil(w)));
+      if (w > 0) fit[id] = Math.min(AUTO_MAX, Math.max(MIN_COL, Math.ceil(w) + 2));
     });
     [table.style.tableLayout, table.style.width, table.style.minWidth] = saved;
     cols.forEach((c, i) => (c.style.width = savedCols[i]));
-    setAuto(next);
+    setFloor(head);
+    if (ready) setAuto(fit);
   }, [ready, signature]);
   const persist = (m: Record<string, number>) => {
     setManual(m);
@@ -106,7 +126,7 @@ function useColumnWidths(storeKey: string | undefined, ready: boolean, signature
     document.documentElement.dataset.colResize = "";
     let latest = manual;
     const move = (ev: PointerEvent) => {
-      latest = { ...manual, [id]: Math.max(MIN_COL, Math.round(startW + ev.clientX - startX)) };
+      latest = { ...manual, [id]: Math.max(floor[id] ?? MIN_COL, Math.round(startW + ev.clientX - startX)) };
       setManual(latest);
     };
     const up = () => {
@@ -122,13 +142,25 @@ function useColumnWidths(storeKey: string | undefined, ready: boolean, signature
   };
   const nudge = (id: string, th: HTMLElement | null, by: number) => {
     const w = manual[id] ?? th?.getBoundingClientRect().width ?? MIN_COL;
-    persist({ ...manual, [id]: Math.max(MIN_COL, Math.round(w + by)) });
+    persist({ ...manual, [id]: Math.max(floor[id] ?? MIN_COL, Math.round(w + by)) });
   };
   const reset = (id: string) => {
     const { [id]: _, ...rest } = manual;
     persist(rest);
   };
-  return { colgroup, width: (id: string) => manual[id] ?? auto[id], isManual: (id: string) => id in manual, startResize, nudge, reset };
+  return {
+    colgroup,
+    floor: (id: string) => floor[id],
+    // Never under the header's own width, whatever was stored or fitted.
+    width: (id: string) => {
+      const w = manual[id] ?? auto[id];
+      return w === undefined ? undefined : Math.max(w, floor[id] ?? 0);
+    },
+    isManual: (id: string) => id in manual,
+    startResize,
+    nudge,
+    reset,
+  };
 }
 
 export function DataTable<T>({
@@ -271,18 +303,23 @@ export function DataTable<T>({
       containerClassName={containerClassName}
       className={cn("table-fixed", minWidth)}
       style={(() => {
-        // Sized columns + 240px for the flexible one: below that the card scrolls sideways instead of crushing the name.
-        const fixed = columns.reduce((s, c) => s + (cols.width(c.id) ?? 0), 0) + (actions ? 112 : 0);
-        return fixed ? { minWidth: fixed + (columns.some((c) => !c.width) ? 240 : 0) } : undefined;
+        // Sized columns + the flexible one's share (≥240px and ≥ its header): below that the card scrolls sideways.
+        // Columns hidden at this breakpoint take no room, so they don't count.
+        const shown = columns.filter((c) => !c.hideBelow || window.matchMedia(BP[c.hideBelow]).matches);
+        const fixed = shown.reduce((s, c) => s + (c.width || cols.isManual(c.id) ? Math.max(cols.width(c.id) ?? 0, cols.floor(c.id) ?? 0) : Math.max(240, cols.floor(c.id) ?? 0)), 0) + (actions ? 112 : 0);
+        return fixed ? { minWidth: fixed } : undefined;
       })()}
       aria-busy={loading || undefined}
     >
       <colgroup ref={cols.colgroup}>
         {columns.map((c) => {
+          // Manual > fitted content > declared class, and never under the header's own width: the
+          // header floor is measured on first paint (no rows needed), so a "w-16" column whose label
+          // needs 84px gets 84px from the start. The flexible column fills what's left.
+          const f = cols.floor(c.id);
           const w = cols.width(c.id);
-          // A manual width always wins; an auto fit only resizes columns that declared a width (the flexible one fills).
-          const px = cols.isManual(c.id) || (w && c.width) ? w : undefined;
-          return <col key={c.id} data-col={c.id} data-flex={c.width ? undefined : ""} style={px ? { width: px } : undefined} className={cn(!px && c.width, c.hideBelow && HIDE[c.hideBelow].replace(/table-cell/g, "table-column"))} />;
+          const px = cols.isManual(c.id) || (w && c.width) ? w : c.width && f ? `max(${f}px, ${twWidth(c.width)})` : undefined;
+          return <col key={c.id} data-col={c.id} data-flex={c.width ? undefined : ""} style={px ? { width: px } : undefined} className={cn(!px && c.width, c.hideBelow && HIDE_COL[c.hideBelow])} />;
         })}
         {actions && <col className="w-28" />}
       </colgroup>
@@ -291,7 +328,7 @@ export function DataTable<T>({
           {columns.map((c) => {
             const on = sort?.id === c.id ? sort.dir : null;
             return (
-              <TableHead key={c.id} align={c.align} aria-sort={on ? (on === "asc" ? "ascending" : "descending") : c.sort ? "none" : undefined} className={cn("group/th relative", c.hideBelow && HIDE[c.hideBelow])}>
+              <TableHead key={c.id} align={c.align} aria-sort={on ? (on === "asc" ? "ascending" : "descending") : c.sort ? "none" : undefined} className={cn("group/th relative whitespace-nowrap", c.hideBelow && HIDE[c.hideBelow])}>
                 {c.sort ? (
                   <button
                     type="button"
