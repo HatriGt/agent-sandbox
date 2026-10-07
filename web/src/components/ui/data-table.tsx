@@ -224,7 +224,7 @@ export function StatusDot({ tone, pulse, children, className }: { tone: "ok" | "
   return (
     <span className={cn("inline-flex items-center gap-1.5 text-meta font-medium", text, className)}>
       <span className={cn("relative inline-flex size-1.5 shrink-0 rounded-full", dot, pulse && "dt-ping")} />
-      {children}
+      {pulse ? <span className="shimmer-text min-w-0 truncate [--shim-dim:color-mix(in_oklab,currentColor_70%,transparent)] [--shim-hi:var(--foreground)]">{children}</span> : children}
     </span>
   );
 }

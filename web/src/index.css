@@ -872,24 +872,27 @@
 .mcp-ping {
   animation: mcp-ping 1.6s cubic-bezier(0, 0, 0.2, 1) infinite;
 }
-/* Live "Thinking" label: a soft highlight sweeps through the word while reasoning is in flight —
-   the AI-chat convention for "the model is working on words you cannot see yet". */
+/* Live text ("Thinking", "working", "running"): Orbit's sweep - one band (dim -> bright -> dim over
+   the middle quarter) on a 300% canvas, so the highlight enters off one edge and leaves off the other
+   with no wrap or doubled band. --shim-dim / --shim-hi let a tinted label sweep in its own colour. */
 @keyframes shimmer-text {
-  from { background-position: 200% 0; }
-  to { background-position: -200% 0; }
+  from { background-position: 100% 0; }
+  to { background-position: 0% 0; }
 }
 .shimmer-text {
   background: linear-gradient(
     90deg,
-    var(--muted-foreground) 40%,
-    var(--foreground) 50%,
-    var(--muted-foreground) 60%
+    var(--shim-dim, var(--muted-foreground)) 0%,
+    var(--shim-dim, var(--muted-foreground)) 38%,
+    var(--shim-hi, var(--foreground)) 50%,
+    var(--shim-dim, var(--muted-foreground)) 62%,
+    var(--shim-dim, var(--muted-foreground)) 100%
   );
-  background-size: 200% 100%;
+  background-size: 300% 100%;
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
-  animation: shimmer-text 2s linear infinite;
+  animation: shimmer-text 2.2s linear infinite;
 }
 @media (prefers-reduced-motion: reduce) {
   .shimmer-text {
