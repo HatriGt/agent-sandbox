@@ -3,7 +3,7 @@ import { ArrowUpRight, Download, Files, PenLine, Plus, Sparkles, Zap } from "luc
 import { toast } from "sonner";
 import type { SkillView } from "@/lib/api";
 import { fmtAgo } from "@/lib/format";
-import { skillHue, SkillMark } from "@/lib/skillGlyph";
+import { SkillMark } from "@/lib/skillGlyph";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
@@ -26,7 +26,7 @@ const COLUMNS: Column<SkillView>[] = [
     sort: (s) => s.name,
     cell: (s) => (
       <span className={cn("flex min-w-0 items-center gap-3 transition-opacity duration-200", !s.enabled && "opacity-55")}>
-        <SkillTile name={s.name} enabled={s.enabled} size="sm" />
+        <SkillTile name={s.name} enabled={s.enabled} />
         <span className="flex min-w-0 flex-col gap-0.5">
           <span className="stamp text-foreground truncate text-[13px] font-medium">/{s.name}</span>
           <MetaLine parts={[<span title={s.description}>{s.description}</span>]} />
@@ -133,24 +133,15 @@ function SkillActions({ skill: s, onOpen, onMutate }: { skill: SkillView; onOpen
   );
 }
 
-/** Glyph tile with a soft hue derived from the name, so a list of skills reads as distinct objects. */
-export function SkillTile({ name, enabled = true, size = "md", className }: { name: string; enabled?: boolean; size?: "sm" | "md"; className?: string }) {
-  const h = skillHue(name);
-  const dims = size === "sm" ? "size-8 rounded-lg" : "size-11 rounded-xl";
+/**
+ * The skill's glyph as a plain icon — no plate, no tint — sized and coloured like every other icon
+ * in a row. Keeps the old tile's footprint so columns don't shift. Enabled reads as muted ink,
+ * off as faint ink; the row's hover lifts it to the foreground.
+ */
+export function SkillTile({ name, enabled = true, className }: { name: string; enabled?: boolean; className?: string }) {
   return (
-    <span
-      className={cn(
-        "pointer-events-none grid shrink-0 place-items-center border transition-[background-color,border-color,color,transform] duration-200 ease-out group-active:scale-[0.97]",
-        dims,
-        enabled
-          ? "text-[oklch(0.48_0.17_var(--tile-h))] bg-[color-mix(in_oklch,oklch(0.62_0.16_var(--tile-h))_11%,var(--card))] border-[color-mix(in_oklch,oklch(0.62_0.16_var(--tile-h))_24%,transparent)] dark:text-[oklch(0.8_0.13_var(--tile-h))] dark:bg-[color-mix(in_oklch,oklch(0.7_0.14_var(--tile-h))_16%,var(--card))] dark:border-[color-mix(in_oklch,oklch(0.7_0.14_var(--tile-h))_28%,transparent)]"
-          : "bg-muted text-muted-foreground border-transparent",
-        className
-      )}
-      style={{ "--tile-h": String(h) } as React.CSSProperties}
-      aria-hidden
-    >
-      <SkillMark name={name} size={size === "sm" ? 15 : 19} />
+    <span className={cn("pointer-events-none grid size-8 shrink-0 place-items-center transition-colors duration-200", enabled ? "text-muted-foreground group-hover:text-foreground" : "text-faint", className)} aria-hidden>
+      <SkillMark name={name} size={16} />
     </span>
   );
 }
@@ -186,9 +177,7 @@ function TemplateCard({ t, index, onPick, surface }: { t: (typeof TEMPLATES)[num
         )}
       >
         <span className="flex items-center gap-2.5">
-          <span className="bg-muted text-muted-foreground group-hover:bg-live/10 group-hover:text-live grid size-8 place-items-center rounded-lg transition-colors duration-200" aria-hidden>
-            <SkillMark name={t.name} size={15} />
-          </span>
+          <SkillMark name={t.name} size={16} className="text-muted-foreground group-hover:text-live transition-colors duration-200" />
           <span className="stamp text-foreground text-[13px] font-medium">/{t.name}</span>
           <span className="text-live ml-auto flex items-center gap-1 text-micro font-medium opacity-0 transition-[opacity,transform] duration-150 ease-out group-hover:opacity-100 group-focus-visible:opacity-100 [@media(hover:hover)]:-translate-x-1 [@media(hover:hover)]:group-hover:translate-x-0" aria-hidden>
             Use

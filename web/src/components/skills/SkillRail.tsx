@@ -45,7 +45,7 @@ export function SkillRail({ skills, onOpen, onImport, className }: { skills: Ski
             {recent.map((s) => (
               <li key={s.name}>
                 <button type="button" onClick={() => onOpen(s)} className="group hover:bg-muted/50 flex w-full cursor-pointer items-center gap-2.5 px-3 py-2 text-left transition-colors duration-100">
-                  <SkillTile name={s.name} enabled={s.enabled} size="sm" />
+                  <SkillTile name={s.name} enabled={s.enabled} />
                   <span className="min-w-0 flex-1">
                     <span className="stamp text-foreground block truncate text-[12px] font-medium">/{s.name}</span>
                     <span className="text-faint flex items-center gap-1 text-micro">

@@ -15,7 +15,70 @@ import { claimDelivery, savePayload, watchTriggers, type TriggerRow } from "./tr
  * restart between "noticed" and "recorded" cannot fire the same change twice.
  */
 
-export type WatchGet = (owner: string, repo: string, path: string, etag?: string) => Promise<{ notModified: true } | { notModified: false; data: unknown; etag?: string; login: string }>;
+export type WatchAnswer = ({ notModified: true } | { notModified: false; data: unknown; etag?: string; login: string }) & { rate?: RateInfo };
+export type WatchGet = (owner: string, repo: string, path: string, etag?: string) => Promise<WatchAnswer>;
+
+/** What GitHub's rate-limit headers said on the last answer (primary limit and secondary `Retry-After`). */
+export interface RateInfo {
+  remaining?: number;
+  /** Epoch ms when the primary window resets. */
+  resetAt?: number;
+  /** Secondary limit: GitHub asks to wait this long. */
+  retryAfterMs?: number;
+}
+
+/** `X-RateLimit-Remaining` / `X-RateLimit-Reset` (epoch seconds) / `Retry-After` (seconds) → RateInfo. */
+export function rateInfoOf(headers: { get(name: string): string | null }): RateInfo {
+  const num = (name: string) => {
+    const v = headers.get(name);
+    const n = v === null ? NaN : Number(v);
+    return Number.isFinite(n) ? n : undefined;
+  };
+  const remaining = num("x-ratelimit-remaining");
+  const reset = num("x-ratelimit-reset");
+  const retry = num("retry-after");
+  return {
+    ...(remaining !== undefined ? { remaining } : {}),
+    ...(reset !== undefined ? { resetAt: reset * 1000 } : {}),
+    ...(retry !== undefined ? { retryAfterMs: retry * 1000 } : {}),
+  };
+}
+
+/** A 403/429 from GitHub: the poller backs off instead of retrying on the next tick. */
+export class GhRateLimitError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly rate: RateInfo,
+    path: string
+  ) {
+    super(`GitHub answered ${status} for ${path} (rate limited)`);
+  }
+}
+
+/** Primary quota left under which polling slows to one round per minute, and under which it waits for the reset. */
+const RATE_SLOW_BELOW = 300;
+const RATE_WAIT_BELOW = 50;
+const RATE_SLOW_MS = 60_000;
+
+/**
+ * When may the next request to GitHub go out, given what the last answer said? `undefined` = no
+ * pause. A 403/429 honours `Retry-After`, else the primary reset, else a minute (secondary limits
+ * often carry no headers). On a healthy answer a nearly spent primary quota waits for its reset
+ * when almost gone, and slows to a minute between rounds when merely low, so the watcher never
+ * burns the owner's whole quota that their dashboard and runs also draw on.
+ */
+export function backoffUntil(rate: RateInfo | undefined, status: number | undefined, now: number): number | undefined {
+  const reset = rate?.resetAt !== undefined && rate.resetAt > now ? rate.resetAt : undefined;
+  if (status === 403 || status === 429) {
+    if (rate?.retryAfterMs !== undefined) return now + rate.retryAfterMs;
+    if (rate?.remaining === 0 && reset !== undefined) return reset;
+    return now + RATE_SLOW_MS;
+  }
+  if (rate?.remaining === undefined) return undefined;
+  if (rate.remaining < RATE_WAIT_BELOW) return reset ?? now + RATE_SLOW_MS;
+  if (rate.remaining < RATE_SLOW_BELOW) return now + RATE_SLOW_MS;
+  return undefined;
+}
 
 export interface WatchDeps {
   db: Db;
@@ -355,16 +418,36 @@ export function makeRepoWatcher(d: WatchDeps) {
       )
       .run(owner, repo, source, etag ?? null, JSON.stringify(state ?? null), now());
 
-  /** One conditional read. `undefined` = unchanged since the last poll. */
+  /**
+   * One conditional read. `undefined` = unchanged since the last poll. Every answer's rate-limit
+   * headers (304s carry them too) feed the owner's pause.
+   */
   async function read(owner: string, repo: string, source: Source, path: string): Promise<{ data: unknown; etag?: string; login: string; prev: unknown } | undefined> {
     const row = load(owner, repo, source);
-    const r = await d.get(owner, repo, `/repos/${repo}${path}`, row?.etag ?? undefined);
+    let r: WatchAnswer;
+    try {
+      r = await d.get(owner, repo, `/repos/${repo}${path}`, row?.etag ?? undefined);
+    } catch (e) {
+      if (e instanceof GhRateLimitError) pause(owner, backoffUntil(e.rate, e.status, now()));
+      throw e;
+    }
+    pause(owner, backoffUntil(r.rate, undefined, now()));
     if (r.notModified) {
       touch(owner, repo, source);
       return undefined;
     }
     return { data: r.data, etag: r.etag, login: r.login, prev: row?.state_json ? JSON.parse(row.state_json) : undefined };
   }
+
+  /** Rate limits are per token, so a pause covers every repo the owner watches. */
+  const pausedUntil = new Map<string, number>();
+  const pause = (owner: string, until: number | undefined) => {
+    if (until === undefined) return pausedUntil.delete(owner);
+    if ((pausedUntil.get(owner) ?? 0) < until) {
+      log(`[watch] ${owner}: GitHub rate limit low, next poll in ${Math.ceil((until - now()) / 1000)} s`);
+      pausedUntil.set(owner, until);
+    }
+  };
 
   async function pollGroup(owner: string, repo: string, triggers: TriggerRow[]): Promise<void> {
     const events = new Set(triggers.flatMap((t) => t.spec.watch ?? []));
@@ -441,6 +524,7 @@ export function makeRepoWatcher(d: WatchDeps) {
       }
       for (const [k, g] of groups) {
         const [owner, repo] = k.split("\u0000");
+        if ((pausedUntil.get(owner) ?? 0) > now()) continue;
         try {
           await pollGroup(owner, g.repo, g.triggers);
           lastError.delete(k);

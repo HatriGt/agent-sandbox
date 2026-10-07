@@ -5,7 +5,7 @@ import { openMemoryDb } from "../src/db.ts";
 import { makeSecretBox } from "../src/secretbox.ts";
 import { normalizeTrigger } from "../src/triggers.ts";
 import { createTrigger } from "../src/trigger-store.ts";
-import { diffComments, diffPulls, diffRuns, makeRepoWatcher, watchMatches, type WatchGet } from "../src/repo-watch.ts";
+import { backoffUntil, diffComments, diffPulls, diffRuns, GhRateLimitError, makeRepoWatcher, rateInfoOf, watchMatches, type WatchGet } from "../src/repo-watch.ts";
 
 const T0 = Date.UTC(2026, 9, 6, 10, 0);
 const pr = (n: number, o: Record<string, unknown> = {}) => ({
@@ -116,4 +116,54 @@ test("watcher tick: conditional reads, one fire per change across ticks, 304 fir
   const p0 = fired[0].payload;
   assert.ok(p0 && typeof p0 === "object" && "asb_event" in p0 && p0.asb_event === "pr_opened");
   assert.deepEqual(etags, [undefined, '"0"', '"0"', '"1"']);
+});
+
+test("rate limit: headers parse; backoff honours Retry-After, reset, low quota; healthy quota never pauses", () => {
+  const h = (o: Record<string, string>) => ({ get: (k: string) => o[k] ?? null });
+  assert.deepEqual(rateInfoOf(h({ "x-ratelimit-remaining": "12", "x-ratelimit-reset": "1700000000", "retry-after": "30" })), { remaining: 12, resetAt: 1_700_000_000_000, retryAfterMs: 30_000 });
+  assert.deepEqual(rateInfoOf(h({ "x-ratelimit-remaining": "nope" })), {});
+
+  const reset = T0 + 600_000;
+  assert.equal(backoffUntil({ remaining: 4000 }, undefined, T0), undefined);
+  assert.equal(backoffUntil(undefined, undefined, T0), undefined);
+  assert.equal(backoffUntil({ remaining: 299, resetAt: reset }, undefined, T0), T0 + 60_000);
+  assert.equal(backoffUntil({ remaining: 10, resetAt: reset }, undefined, T0), reset);
+  // A reset already in the past is not a pause into the past.
+  assert.equal(backoffUntil({ remaining: 10, resetAt: T0 - 1 }, undefined, T0), T0 + 60_000);
+  assert.equal(backoffUntil({ remaining: 5000, retryAfterMs: 90_000 }, 403, T0), T0 + 90_000);
+  assert.equal(backoffUntil({ remaining: 0, resetAt: reset }, 403, T0), reset);
+  assert.equal(backoffUntil({}, 429, T0), T0 + 60_000);
+});
+
+test("watcher tick: a 403 pauses every repo of that owner until Retry-After, then polling resumes", async () => {
+  const db = openMemoryDb();
+  const box = makeSecretBox(crypto.randomBytes(32));
+  for (const repo of ["o/a", "o/b"]) {
+    const v = normalizeTrigger({ name: repo, kind: "watch", repo, taskTemplate: "t", spec: { watch: ["pr_opened"] } });
+    assert.ok(v.ok);
+    if (v.ok) createTrigger(db, box, "u1", v.trigger);
+  }
+  let now = T0;
+  let limited = false;
+  const calls: string[] = [];
+  const get: WatchGet = async (_o, _r, path) => {
+    calls.push(path);
+    if (limited) throw new GhRateLimitError(403, { retryAfterMs: 120_000 }, path);
+    if (!path.includes("/pulls")) return { notModified: false, data: { full_name: path.slice(7), default_branch: "main" }, login: "me" };
+    return { notModified: false, data: [], etag: '"x"', login: "me", rate: { remaining: 4000 } };
+  };
+  const w = makeRepoWatcher({ db, get, redact: (s) => s, now: () => now, log: () => {}, dispatcher: { fire: async () => ({ at: now, outcome: "started" as const, box: "b" }) } });
+  await w.tick();
+  assert.equal(calls.length, 4);
+  limited = true;
+  now += 15_000;
+  await w.tick(); // first repo hits the 403; the second is skipped
+  assert.equal(calls.length, 5);
+  now += 15_000;
+  await w.tick(); // still paused
+  assert.equal(calls.length, 5);
+  limited = false;
+  now += 120_000;
+  await w.tick();
+  assert.equal(calls.length, 9);
 });

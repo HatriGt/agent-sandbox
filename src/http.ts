@@ -102,7 +102,7 @@ import { readArtifact } from "./artifact.js";
 import { existsSync } from "node:fs";
 import { withStartedBy, currentStartedBy, recordStartedBy, startedByOf, type StartedBy } from "./started-by.js";
 import { makeDispatcher, type StartRunInput } from "./trigger-dispatch.js";
-import { makeRepoWatcher } from "./repo-watch.js";
+import { GhRateLimitError, makeRepoWatcher, rateInfoOf } from "./repo-watch.js";
 import { makeFollowupEngine, type GhRequest } from "./pr-followup-engine.js";
 import { registerFollowupRoutes } from "./pr-followup-routes.js";
 import { followupsForBox } from "./pr-followup-store.js";
@@ -3501,6 +3501,8 @@ const dispatcher = makeDispatcher({
 });
 // Repo activity (src/repo-watch.ts): polls GitHub as each automation's owner, conditional on the
 // last ETag (a 304 is free against the rate limit), and fires matching automations on what changed.
+// Rate-limit headers ride back on every answer so the watcher can slow down before the owner's
+// quota (shared with their dashboard and runs) is spent; a 403/429 is a typed error it backs off on.
 const repoWatcher = makeRepoWatcher({
   db,
   dispatcher,
@@ -3514,9 +3516,11 @@ const repoWatcher = makeRepoWatcher({
         headers: { authorization: `Bearer ${acc.token}`, accept: "application/vnd.github+json", "user-agent": "agent-sandbox", ...(etag ? { "if-none-match": etag } : {}) },
         signal: AbortSignal.timeout(15_000),
       });
-      if (r.status === 304) return { notModified: true as const };
+      const rate = rateInfoOf(r.headers);
+      if (r.status === 304) return { notModified: true as const, rate };
+      if (r.status === 403 || r.status === 429) throw new GhRateLimitError(r.status, rate, path.split("?")[0]);
       if (!r.ok) throw new Error(`GitHub answered ${r.status} for ${path.split("?")[0]}`);
-      return { notModified: false as const, data: await r.json(), etag: r.headers.get("etag") ?? undefined, login: acc.login };
+      return { notModified: false as const, data: await r.json(), etag: r.headers.get("etag") ?? undefined, login: acc.login, rate };
     }),
 });
 const FOLLOWUP_PREFS_KIND = "pr-followups";
