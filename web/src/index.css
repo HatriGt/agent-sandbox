@@ -1342,6 +1342,24 @@
 @media (hover: none) {
   .dt-actions { opacity: 1; }
 }
+/* Column resize grip: a hairline that appears on header hover, brightens while dragged or focused. */
+.dt-resize::after {
+  content: "";
+  position: absolute;
+  inset: 25% 3px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--border);
+  opacity: 0;
+  transition: opacity 0.15s var(--ease-out-quint), background-color 0.15s var(--ease-out-quint);
+}
+[data-slot="table-header"] tr:hover .dt-resize::after { opacity: 1; }
+.dt-resize:hover::after,
+.dt-resize:focus-visible::after,
+.dt-resize:active::after { opacity: 1; background: var(--live); inset-block: 0; }
+:root[data-col-resize], :root[data-col-resize] * { cursor: col-resize !important; user-select: none; }
+col { transition: width 0.2s var(--ease-out-quint); }
+:root[data-col-resize] col { transition: none; }
 :root[data-motion="reduced"] {
   [data-slot="table-row"][data-enter],
   [data-slot="table-row"][data-new] { animation: dt-row-flash 0.01s both; }

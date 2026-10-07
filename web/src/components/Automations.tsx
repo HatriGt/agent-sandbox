@@ -5,7 +5,6 @@ import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
 import { api, type AlertPreset, type Automation, type AutomationDelivery, type AutomationDraft, type AutomationKind, type GithubEvent, type WatchEvent } from "@/lib/api";
 import { fmtAgo } from "@/lib/format";
-import { RunFactsLine } from "@/components/RunFactsLine";
 import { readCache, useCached, writeCache } from "@/lib/cache";
 import { Button } from "@/components/ui/button";
 import { ArmButton } from "@/components/ui/arm-button";
@@ -21,7 +20,7 @@ import { cn } from "@/lib/utils";
 import { PrFollowupsPanel } from "@/components/PrFollowupsPanel";
 import { SchedulePicker, describeCron } from "@/components/SchedulePicker";
 import { RepoPicker } from "@/components/RepoPicker";
-import { DataTable, MetaLine, StatusDot, stopRow, type Column } from "@/components/ui/data-table";
+import { DataTable, StatusDot, stopRow, type Column } from "@/components/ui/data-table";
 
 /**
  * Automations: runs that start themselves — on a schedule, on a webhook, on a GitHub event, or after
@@ -493,22 +492,26 @@ function AutomationList({
         return (
           <span className="flex min-w-0 items-center gap-3">
             <Glyph className={cn("size-4 shrink-0", a.enabled ? "text-live" : "text-muted-foreground")} strokeWidth={1.75} aria-hidden />
-            <span className="flex min-w-0 flex-col gap-0.5">
-              <span className="text-foreground truncate font-medium" title={a.name}>
-                {a.name}
-              </span>
-              <MetaLine className="md:hidden" parts={[KIND_LABEL[a.kind], <span title={a.when}>{a.when}</span>, playbook]} />
-              <MetaLine className="hidden md:flex" parts={[KIND_LABEL[a.kind], playbook]} />
-              {a.lastDelivery?.facts && <RunFactsLine f={a.lastDelivery.facts} className="flex-nowrap overflow-hidden" />}
+            <span className="text-foreground min-w-0 truncate font-medium" title={a.name}>
+              {a.name}
             </span>
+            {playbook && <span className="text-muted-foreground shrink-0 text-micro">{playbook}</span>}
           </span>
         );
       },
     },
     {
+      id: "kind",
+      header: "Type",
+      width: "w-28",
+      hideBelow: "lg",
+      sort: (a) => KIND_LABEL[a.kind],
+      cell: (a) => <span className="text-muted-foreground text-meta">{KIND_LABEL[a.kind]}</span>,
+    },
+    {
       id: "when",
       header: "When",
-      width: "w-[28%]",
+      width: "w-64",
       hideBelow: "md",
       cell: (a) => (
         <span className="text-muted-foreground block truncate text-meta" title={a.when}>

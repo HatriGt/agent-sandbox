@@ -12,13 +12,16 @@ import { DataTable, StatusDot, stopRow, type Column } from "@/components/ui/data
  * read the per-delivery facts (src/run-facts.ts), so older rows without facts show dashes.
  */
 
-type Col = "time" | "outcome" | "subject" | "alert" | "verdict" | "findings" | "headline" | "result" | "duration" | "comment";
+type Col = "time" | "outcome" | "subject" | "repo" | "author" | "alert" | "severity" | "verdict" | "findings" | "headline" | "result" | "duration" | "comment";
 
 const HEAD: Record<Col, string> = {
   time: "When",
-  outcome: "Outcome",
-  subject: "Pull request / issue",
+  outcome: "Status",
+  subject: "Pull request",
+  repo: "Repository",
+  author: "Author",
   alert: "Alert",
+  severity: "Severity",
   verdict: "Verdict",
   findings: "Findings",
   headline: "What happened",
@@ -27,15 +30,15 @@ const HEAD: Record<Col, string> = {
   comment: "Comment",
 };
 
-/** The column set for an automation: what its deliveries are about decides what is worth a column. */
+/** The column set for an automation, in reading order: what it was about, where, who, how it went, what it left. */
 export function columnsFor(a: Automation | undefined): Col[] {
-  if (a?.kind === "github") {
-    return a.spec.event === "pr_opened"
-      ? ["time", "outcome", "subject", "verdict", "findings", "comment", "duration"]
-      : ["time", "outcome", "subject", "headline", "result", "comment", "duration"];
+  if (a?.kind === "github" || a?.kind === "watch") {
+    return a.kind === "github" && a.spec.event === "pr_opened"
+      ? ["subject", "repo", "author", "outcome", "verdict", "findings", "comment", "duration", "time"]
+      : ["subject", "repo", "author", "outcome", "headline", "result", "comment", "duration", "time"];
   }
-  if (a?.kind === "webhook" && a.spec.preset) return ["time", "outcome", "alert", "headline", "result", "duration"];
-  return ["time", "outcome", "headline", "result", "duration"];
+  if (a?.kind === "webhook" && a.spec.preset) return ["alert", "severity", "outcome", "headline", "result", "duration", "time"];
+  return ["headline", "outcome", "result", "duration", "time"];
 }
 
 const dash = <span className="text-faint">—</span>;
@@ -73,13 +76,40 @@ function cell(col: Col, d: AutomationDelivery, f: RunFacts | undefined): React.R
       return f?.subject
         ? ext(
             f.subject.url,
-            <span className="block truncate">
-              <span className="tabular">#{f.subject.number}</span> {f.subject.title ?? ""}
-              {f.subject.author && <span className="text-faint"> @{f.subject.author}</span>}
+            <span className="flex min-w-0 items-center gap-2">
+              <span className="text-muted-foreground tabular shrink-0 font-mono text-micro">#{f.subject.number}</span>
+              <span className="truncate">{f.subject.title ?? `${f.subject.kind === "pr" ? "PR" : "Issue"} #${f.subject.number}`}</span>
+              <ArrowUpRight className="text-faint size-3 shrink-0 opacity-0 transition-opacity group-hover/row:opacity-100" aria-hidden />
             </span>,
-            "text-foreground/90 block min-w-0",
+            "text-foreground block min-w-0",
           )
         : d.detail ? <span className="text-faint block truncate" title={d.detail}>{d.detail}</span> : dash;
+    case "repo": {
+      const r = f?.subject?.repo;
+      if (!r) return dash;
+      const [owner, name] = r.split("/");
+      return ext(
+        `https://github.com/${r}`,
+        <span className="block truncate text-meta" title={r}>
+          <span className="text-faint">{owner}/</span>
+          <span className="text-muted-foreground">{name}</span>
+        </span>,
+        "block min-w-0",
+      );
+    }
+    case "author":
+      return f?.subject?.author
+        ? ext(
+            `https://github.com/${f.subject.author}`,
+            <span className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-meta">
+              <img src={`https://github.com/${f.subject.author}.png?size=32`} alt="" className="size-4 shrink-0 rounded-full" loading="lazy" />
+              <span className="truncate">{f.subject.author}</span>
+            </span>,
+            "block min-w-0",
+          )
+        : dash;
+    case "severity":
+      return f?.alert?.severity ? <span className={cn("text-meta capitalize", /crit|high|error|p1/i.test(f.alert.severity) ? "text-destructive" : "text-muted-foreground")}>{f.alert.severity}</span> : dash;
     case "alert":
       if (!f?.alert) return d.detail ? <span className="text-faint block truncate">{d.detail}</span> : dash;
       return (
@@ -111,16 +141,28 @@ function cell(col: Col, d: AutomationDelivery, f: RunFacts | undefined): React.R
   }
 }
 
-const SORT: Partial<Record<Col, (d: AutomationDelivery) => number | null | undefined>> = {
+const SORT: Partial<Record<Col, (d: AutomationDelivery) => number | string | null | undefined>> = {
   time: (d) => d.at,
   duration: (d) => d.facts?.durationMs,
+  subject: (d) => d.facts?.subject?.number,
+  repo: (d) => d.facts?.subject?.repo,
+  author: (d) => d.facts?.subject?.author,
 };
 
 const openable = (d: AutomationDelivery) => d.outcome === "fired" && !!d.box;
 
 export function RunsTable({ a, rows, onOpenBox }: { a: Automation | undefined; rows: AutomationDelivery[]; onOpenBox: (box: string) => void }) {
   const columns: Column<AutomationDelivery>[] = [
-    ...columnsFor(a).map((c) => ({ id: c, header: HEAD[c], width: WIDTH[c], sort: SORT[c], primary: c === "subject" || c === "headline" || c === "alert", cell: (d: AutomationDelivery) => cell(c, d, d.facts) })),
+    ...columnsFor(a).map((c) => ({
+      id: c,
+      header: c === "subject" && a?.kind === "github" && a.spec.event !== "pr_opened" ? "Pull request / issue" : HEAD[c],
+      width: WIDTH[c],
+      sort: SORT[c],
+      hideBelow: HIDE_BELOW[c],
+      align: c === "duration" || c === "time" ? ("end" as const) : undefined,
+      primary: c === "subject" || c === "headline" || c === "alert",
+      cell: (d: AutomationDelivery) => cell(c, d, d.facts),
+    })),
     {
       id: "open",
       header: <span className="sr-only">Open</span>,
@@ -137,22 +179,26 @@ export function RunsTable({ a, rows, onOpenBox }: { a: Automation | undefined; r
       rowClickable={openable}
       onRowClick={(d) => onOpenBox(d.box!)}
       rowLabel={(d) => `Open ${d.box}`}
-      search={{ placeholder: "Search runs", text: (d) => [d.facts?.subject ? `#${d.facts.subject.number} ${d.facts.subject.title ?? ""} ${d.facts.subject.author ?? ""}` : "", d.facts?.headline ?? "", d.facts?.alert?.title ?? "", d.detail ?? ""].join(" ") }}
-      minWidth="min-w-[640px]"
+      search={{ placeholder: "Search runs", text: (d) => [d.facts?.subject ? `#${d.facts.subject.number} ${d.facts.subject.title ?? ""} ${d.facts.subject.author ?? ""} ${d.facts.subject.repo}` : "", d.facts?.headline ?? "", d.facts?.alert?.title ?? "", d.detail ?? ""].join(" ") }}
+      minWidth="min-w-[760px]"
       size="sm"
+      resizeKey={`runs:${a?.kind ?? "x"}:${a?.kind === "github" ? a.spec.event : ""}`}
     />
   );
 }
 
-const WIDTH: Record<Col, string> = {
+/** Starting widths; the flexible columns (no width) share what's left. Users can drag any header edge. */
+const WIDTH: Partial<Record<Col, string>> = {
+  repo: "w-48",
+  author: "w-36",
+  severity: "w-24",
   time: "w-24",
-  outcome: "w-32",
-  subject: "w-auto",
-  alert: "w-auto",
+  outcome: "w-28",
   verdict: "w-28",
   findings: "w-36",
-  headline: "w-auto",
   result: "w-40",
   duration: "w-16",
-  comment: "w-20",
+  comment: "w-24",
 };
+
+const HIDE_BELOW: Partial<Record<Col, "sm" | "md" | "lg">> = { author: "lg", findings: "md", comment: "md", duration: "sm", severity: "md", result: "md" };

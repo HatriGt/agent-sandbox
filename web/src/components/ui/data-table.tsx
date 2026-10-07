@@ -42,6 +42,95 @@ function focusSibling(row: HTMLElement, dir: 1 | -1) {
   all[all.indexOf(row) + dir]?.focus();
 }
 
+const MIN_COL = 56;
+const AUTO_MAX = 360;
+
+/**
+ * Column widths. Auto: once real rows paint, every sized column is fitted to its widest content
+ * (header included, clamped 56–360px) and the flexible column takes the rest. Manual: dragging a
+ * header edge sets that column in px and is remembered per table (localStorage); double-click the
+ * edge to hand it back to auto.
+ */
+function useColumnWidths(storeKey: string | undefined, ready: boolean, signature: string) {
+  const colgroup = React.useRef<HTMLTableColElement>(null);
+  const [manual, setManual] = React.useState<Record<string, number>>(() => {
+    if (!storeKey) return {};
+    try {
+      return JSON.parse(localStorage.getItem(`asb.cols.${storeKey}`) ?? "{}");
+    } catch {
+      return {};
+    }
+  });
+  const [auto, setAuto] = React.useState<Record<string, number>>({});
+  const fitted = React.useRef("");
+  React.useLayoutEffect(() => {
+    const table = colgroup.current?.closest("table");
+    if (!ready || !table || fitted.current === signature) return;
+    fitted.current = signature;
+    const next: Record<string, number> = {};
+    const cols = Array.from(colgroup.current!.children) as HTMLElement[];
+    // Measure natural widths with one synchronous relayout: auto layout at max-content lets every
+    // cell (truncating ones included) take its content's width; restored before paint.
+    const saved = [table.style.tableLayout, table.style.width, table.style.minWidth];
+    const savedCols = cols.map((c) => c.style.width);
+    cols.forEach((c) => (c.style.width = "auto"));
+    table.style.tableLayout = "auto";
+    table.style.width = "max-content";
+    table.style.minWidth = "0";
+    cols.forEach((col, i) => {
+      const id = col.dataset.col;
+      if (!id || col.dataset.flex !== undefined) return;
+      let w = 0;
+      for (const row of Array.from(table.rows)) {
+        const c = row.cells[i];
+        if (c && c.colSpan === 1 && c.offsetParent) w = Math.max(w, c.getBoundingClientRect().width);
+      }
+      if (w > 0) next[id] = Math.min(AUTO_MAX, Math.max(MIN_COL, Math.ceil(w)));
+    });
+    [table.style.tableLayout, table.style.width, table.style.minWidth] = saved;
+    cols.forEach((c, i) => (c.style.width = savedCols[i]));
+    setAuto(next);
+  }, [ready, signature]);
+  const persist = (m: Record<string, number>) => {
+    setManual(m);
+    if (storeKey) localStorage.setItem(`asb.cols.${storeKey}`, JSON.stringify(m));
+  };
+  const startResize = (id: string, e: React.PointerEvent<HTMLElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const th = e.currentTarget.closest("th")!;
+    const startX = e.clientX;
+    const startW = th.getBoundingClientRect().width;
+    const handle = e.currentTarget;
+    handle.setPointerCapture(e.pointerId);
+    document.documentElement.dataset.colResize = "";
+    let latest = manual;
+    const move = (ev: PointerEvent) => {
+      latest = { ...manual, [id]: Math.max(MIN_COL, Math.round(startW + ev.clientX - startX)) };
+      setManual(latest);
+    };
+    const up = () => {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", up);
+      handle.removeEventListener("pointercancel", up);
+      delete document.documentElement.dataset.colResize;
+      persist(latest);
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", up);
+    handle.addEventListener("pointercancel", up);
+  };
+  const nudge = (id: string, th: HTMLElement | null, by: number) => {
+    const w = manual[id] ?? th?.getBoundingClientRect().width ?? MIN_COL;
+    persist({ ...manual, [id]: Math.max(MIN_COL, Math.round(w + by)) });
+  };
+  const reset = (id: string) => {
+    const { [id]: _, ...rest } = manual;
+    persist(rest);
+  };
+  return { colgroup, width: (id: string) => manual[id] ?? auto[id], isManual: (id: string) => id in manual, startResize, nudge, reset };
+}
+
 export function DataTable<T>({
   rows,
   columns,
@@ -63,6 +152,7 @@ export function DataTable<T>({
   search,
   actions,
   toolbar,
+  resizeKey,
 }: {
   rows: T[];
   columns: Column<T>[];
@@ -91,7 +181,10 @@ export function DataTable<T>({
   actions?: (row: T) => React.ReactNode;
   /** Extra controls at the right of the search toolbar. */
   toolbar?: React.ReactNode;
+  /** Where dragged column widths are remembered; defaults to the aria-label. */
+  resizeKey?: string;
 }) {
+  const cols = useColumnWidths(resizeKey ?? ariaLabel, !loading && rows.length > 0, `${columns.map((c) => c.id).join(",")}|${rows.length}`);
   const [sort, setSort] = React.useState<Sort>(initialSort);
   const sorted = React.useMemo(() => {
     const col = sort && columns.find((c) => c.id === sort.id);
@@ -177,12 +270,20 @@ export function DataTable<T>({
       stickyHeader={stickyHeader}
       containerClassName={containerClassName}
       className={cn("table-fixed", minWidth)}
+      style={(() => {
+        // Sized columns + 240px for the flexible one: below that the card scrolls sideways instead of crushing the name.
+        const fixed = columns.reduce((s, c) => s + (cols.width(c.id) ?? 0), 0) + (actions ? 112 : 0);
+        return fixed ? { minWidth: fixed + (columns.some((c) => !c.width) ? 240 : 0) } : undefined;
+      })()}
       aria-busy={loading || undefined}
     >
-      <colgroup>
-        {columns.map((c) => (
-          <col key={c.id} className={cn(c.width, c.hideBelow && HIDE[c.hideBelow].replace(/table-cell/g, "table-column"))} />
-        ))}
+      <colgroup ref={cols.colgroup}>
+        {columns.map((c) => {
+          const w = cols.width(c.id);
+          // A manual width always wins; an auto fit only resizes columns that declared a width (the flexible one fills).
+          const px = cols.isManual(c.id) || (w && c.width) ? w : undefined;
+          return <col key={c.id} data-col={c.id} data-flex={c.width ? undefined : ""} style={px ? { width: px } : undefined} className={cn(!px && c.width, c.hideBelow && HIDE[c.hideBelow].replace(/table-cell/g, "table-column"))} />;
+        })}
         {actions && <col className="w-28" />}
       </colgroup>
       <TableHeader>
@@ -190,7 +291,7 @@ export function DataTable<T>({
           {columns.map((c) => {
             const on = sort?.id === c.id ? sort.dir : null;
             return (
-              <TableHead key={c.id} align={c.align} aria-sort={on ? (on === "asc" ? "ascending" : "descending") : c.sort ? "none" : undefined} className={cn(c.hideBelow && HIDE[c.hideBelow])}>
+              <TableHead key={c.id} align={c.align} aria-sort={on ? (on === "asc" ? "ascending" : "descending") : c.sort ? "none" : undefined} className={cn("group/th relative", c.hideBelow && HIDE[c.hideBelow])}>
                 {c.sort ? (
                   <button
                     type="button"
@@ -206,6 +307,22 @@ export function DataTable<T>({
                 ) : (
                   c.header
                 )}
+                <span
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label={`Resize ${typeof c.header === "string" ? c.header : c.id} column`}
+                  tabIndex={0}
+                  title="Drag to resize · double-click to fit"
+                  onPointerDown={(e) => cols.startResize(c.id, e)}
+                  onDoubleClick={() => cols.reset(c.id)}
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => {
+                    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+                    e.preventDefault();
+                    cols.nudge(c.id, e.currentTarget.closest("th"), e.key === "ArrowRight" ? 16 : -16);
+                  }}
+                  className="dt-resize absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize touch-none outline-none"
+                />
               </TableHead>
             );
           })}
