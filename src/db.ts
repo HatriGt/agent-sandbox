@@ -405,6 +405,18 @@ const MIGRATIONS: string[] = [
     PRIMARY KEY (owner, repo, source)
   );
   `,
+  `
+  -- What a delivery was about and what its run produced (src/run-facts.ts): the subject PR/issue or
+  -- alert at fire time, then verdict, findings, PRs, tests and the receipt link at the finish edge.
+  -- The Runs table reads this instead of joining the archive.
+  ALTER TABLE trigger_delivery_log ADD COLUMN facts_json TEXT;
+  `,
+  `
+  -- An automation can listen to / clone several repos: repos_json is the list; the old single-repo
+  -- column is copied over once and is neither read nor written afterwards.
+  ALTER TABLE triggers ADD COLUMN repos_json TEXT;
+  UPDATE triggers SET repos_json = json_array(repo) WHERE repo IS NOT NULL AND repo != '';
+  `,
 ];
 
 export function openDb(dataDir: string): Db {

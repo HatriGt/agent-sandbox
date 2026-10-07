@@ -448,7 +448,7 @@ function Detail({ it, now, actions, onBack, onLeave }: { it: Item; now: number; 
         <span className="text-muted-foreground">Not yet</span>
       ),
     ],
-    ...(it.repo ? ([["Repository", <span className="font-mono text-[12px]">{it.repo}</span>]] as [string, React.ReactNode][]) : []),
+    ...(it.repos?.length ? ([[it.repos.length > 1 ? "Repositories" : "Repository", <span className="font-mono text-[12px]">{it.repos.join(", ")}</span>]] as [string, React.ReactNode][]) : []),
     ["Origin", ORIGIN[it.relation]],
   ];
   return (

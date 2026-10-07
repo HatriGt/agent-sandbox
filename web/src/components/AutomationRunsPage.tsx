@@ -1,17 +1,16 @@
 import * as React from "react";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { ArrowLeft, ArrowUpRight, FlaskConical, History as HistoryIcon, Play, RotateCw } from "lucide-react";
+import { ArrowLeft, FlaskConical, History as HistoryIcon, Play, RotateCw } from "lucide-react";
 import { toast } from "sonner";
 import { api, type Automation, type AutomationDelivery } from "@/lib/api";
 import { useCached } from "@/lib/cache";
-import { fmtAgo } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { RunsTable } from "@/components/RunsTable";
 import { Button } from "@/components/ui/button";
 import { FilterChip } from "@/components/ui/filter-chip";
 import { Swap } from "@/components/ui/swap";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Bar } from "@/components/thread/Skeletons";
-import { GLYPH, KIND_LABEL, countsLine, deliveryLine, deliveryTone } from "@/components/Automations";
+import { GLYPH, KIND_LABEL, countsLine } from "@/components/Automations";
 
 /**
  * One automation's run history: every delivery the controller saw for it, newest first — what fired
@@ -21,25 +20,7 @@ import { GLYPH, KIND_LABEL, countsLine, deliveryLine, deliveryTone } from "@/com
 
 type Filter = "all" | "fired" | "skipped" | "rejected";
 
-const OUTCOME_WORD: Record<AutomationDelivery["outcome"], string> = { fired: "Fired", skipped: "Skipped", rejected: "Rejected", failed: "Could not start" };
-
-/** Rows sit under a day heading, so the stamp is the time alone — second precision so bursts read as separate events. */
-function stamp(at: number): string {
-  return new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-}
-
-/** Calendar-day buckets ("Today", "Yesterday", "Tue 3 Oct") so a long log has landmarks. */
-function dayLabel(at: number, now = Date.now()): string {
-  const d = new Date(at);
-  const today = new Date(now);
-  const yesterday = new Date(now - 86_400_000);
-  if (d.toDateString() === today.toDateString()) return "Today";
-  if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
-  return d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" });
-}
-
 export function AutomationRunsPage({ id, onBack, onOpenBox }: { id: string; onBack: () => void; onOpenBox: (box: string) => void }) {
-  const still = useReducedMotion();
   const triggers = useCached("triggers", (signal) => api.triggers(signal));
   const a: Automation | undefined = triggers.data?.triggers.find((t) => t.id === id);
   const [deliveries, setDeliveries] = React.useState<AutomationDelivery[] | null>(null);
@@ -96,14 +77,6 @@ export function AutomationRunsPage({ id, onBack, onOpenBox }: { id: string; onBa
     rejected: all.filter((d) => d.outcome === "rejected" || d.outcome === "failed").length,
   };
   const rows = all.filter((d) => (filter === "all" ? true : filter === "rejected" ? d.outcome === "rejected" || d.outcome === "failed" : d.outcome === filter));
-  // Group by calendar day, keeping the newest-first order from the controller.
-  const groups: { day: string; items: AutomationDelivery[] }[] = [];
-  for (const d of rows) {
-    const day = dayLabel(d.at);
-    const last = groups[groups.length - 1];
-    if (last && last.day === day) last.items.push(d);
-    else groups.push({ day, items: [d] });
-  }
 
   const Glyph = a ? GLYPH[a.kind] : HistoryIcon;
   const canTest = a?.kind === "webhook" && !!a.spec.preset;
@@ -216,73 +189,10 @@ export function AutomationRunsPage({ id, onBack, onOpenBox }: { id: string; onBa
               }
             />
           ) : (
-            <div className="flex flex-col gap-5">
-              {groups.map((g) => (
-                <section key={g.day} aria-label={g.day}>
-                  <p className="label text-faint mb-2 px-1">{g.day}</p>
-                  <ol className="bg-card overflow-hidden rounded-xl border shadow-e1">
-                    <AnimatePresence initial={false}>
-                      {g.items.map((d, i) => (
-                        <motion.li
-                          key={d.id}
-                          layout="position"
-                          initial={still ? { opacity: 0 } : { opacity: 0, y: 4 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0 }}
-                          transition={{ duration: still ? 0.1 : 0.2, delay: Math.min(i, 10) * 0.025, ease: [0.22, 1, 0.36, 1] }}
-                          className="border-b last:border-b-0"
-                        >
-                          <DeliveryRow d={d} onOpenBox={onOpenBox} />
-                        </motion.li>
-                      ))}
-                    </AnimatePresence>
-                  </ol>
-                </section>
-              ))}
-            </div>
+            <RunsTable a={a} rows={rows} onOpenBox={onOpenBox} />
           )}
         </Swap>
       </div>
     </div>
-  );
-}
-
-function DeliveryRow({ d, onOpenBox }: { d: AutomationDelivery; onOpenBox: (box: string) => void }) {
-  const tone = deliveryTone(d);
-  const dot = d.outcome === "fired" ? "bg-ok" : d.outcome === "skipped" ? "bg-muted-foreground/50" : "bg-destructive";
-  const openable = d.outcome === "fired" && !!d.box;
-  const body = (
-    <>
-      <span className={cn("mt-[7px] size-2 shrink-0 rounded-full", dot)} aria-hidden />
-      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
-          <span className={cn("text-meta font-medium", tone)}>{d.test ? `Test · ${OUTCOME_WORD[d.outcome]}` : OUTCOME_WORD[d.outcome]}</span>
-          {d.reason && d.outcome !== "fired" && <span className="text-muted-foreground text-meta">{deliveryLine(d).split(" · ").slice(1).join(" · ")}</span>}
-          {d.box && <span className="stamp text-muted-foreground truncate">{d.box}</span>}
-          {d.quiet && (
-            <span className="text-faint text-micro" title="Nothing needed you — no notification was sent">
-              quiet
-            </span>
-          )}
-        </span>
-        {d.detail && (
-          <span className="text-faint truncate text-micro" title={d.detail}>
-            {d.detail}
-          </span>
-        )}
-      </span>
-      <span className="stamp text-faint shrink-0 tabular text-right" title={new Date(d.at).toLocaleString()}>
-        <span className="hidden sm:inline">{stamp(d.at)}</span>
-        <span className="sm:hidden">{fmtAgo(Math.round(d.at / 1000))}</span>
-      </span>
-      {openable && <ArrowUpRight className="text-faint group-hover/run:text-muted-foreground size-3.5 shrink-0 transition-colors" aria-hidden />}
-    </>
-  );
-  return openable ? (
-    <button type="button" onClick={() => onOpenBox(d.box!)} className="group/run hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-ring/40 flex w-full cursor-pointer items-start gap-3 px-4 py-3 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset" aria-label={`Open ${d.box}`}>
-      {body}
-    </button>
-  ) : (
-    <div className="flex items-start gap-3 px-4 py-3">{body}</div>
   );
 }

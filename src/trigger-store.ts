@@ -3,6 +3,7 @@ import type { Db } from "./db.js";
 import type { SecretBox } from "./secretbox.js";
 import { scheduleStatus, type ScheduleStatus } from "./thread-schedule.js";
 import { describeWhen, newSecret, nextFire, parseCron, type TriggerInput, type TriggerKind, type TriggerSpec } from "./triggers.js";
+import type { RunFacts } from "./run-facts.js";
 
 /**
  * Owner-scoped persistence for triggers (the pure rules live in src/triggers.ts). Every read and
@@ -43,26 +44,28 @@ export interface TriggerRow extends TriggerInput {
 
 const MAX_PAYLOAD_CHARS = 64_000;
 
+/** A stored JSON column, or `d` when empty or corrupt. */
+function parse<T>(s: unknown, d: T): T {
+  try {
+    return s ? (JSON.parse(String(s)) as T) : d;
+  } catch {
+    return d;
+  }
+}
+
 /** First sighting of a proposal in a thread → true; every later sweep (or after a dismissal) → false. */
 export function firstSighting(db: Db, box: string, key: string, now = Date.now()): boolean {
   return db.prepare(`INSERT OR IGNORE INTO trigger_proposals_seen (box, key, at) VALUES (?, ?, ?)`).run(box, key, now).changes > 0;
 }
 
 function toRow(r: Record<string, any>): TriggerRow {
-  const parse = <T>(s: unknown, d: T): T => {
-    try {
-      return s ? (JSON.parse(String(s)) as T) : d;
-    } catch {
-      return d;
-    }
-  };
   return {
     id: r.id,
     owner: r.owner,
     name: r.name,
     kind: r.kind as TriggerKind,
     spec: parse<TriggerSpec>(r.spec_json, {}),
-    ...(r.repo ? { repo: r.repo } : {}),
+    ...(r.repos_json ? { repos: parse<string[]>(r.repos_json, []) } : {}),
     taskTemplate: r.task_template,
     enabled: !!r.enabled,
     // triggers.concurrency is orphaned: every fire gets its own box; the column is neither read nor written.
@@ -117,10 +120,10 @@ export function createTrigger(
   // A proposal is always created paused: the agent suggests, the owner enables.
   const enabled = opts.proposed ? false : t.enabled;
   db.prepare(
-    `INSERT INTO triggers (id, owner, name, kind, spec_json, repo, task_template, enabled, pr_comment, quiet, proposed, agent, model, harness_id, workflow_id, source_box, scope, secret_enc, next_fire, created_at, updated_at)
+    `INSERT INTO triggers (id, owner, name, kind, spec_json, repos_json, task_template, enabled, pr_comment, quiet, proposed, agent, model, harness_id, workflow_id, source_box, scope, secret_enc, next_fire, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
-    id, owner, t.name, t.kind, JSON.stringify(t.spec), t.repo ?? null, t.taskTemplate, enabled ? 1 : 0,
+    id, owner, t.name, t.kind, JSON.stringify(t.spec), t.repos?.length ? JSON.stringify(t.repos) : null, t.taskTemplate, enabled ? 1 : 0,
     t.prComment ? 1 : 0, t.quiet ? 1 : 0, opts.proposed ? 1 : 0, t.agent ?? null, t.model ?? null, t.harnessId ?? null, t.workflowId ?? null, opts.sourceBox ?? null, opts.scope ?? "automation", box.seal(secret),
     computeNextFire({ ...t, enabled }, now), now, now
   );
@@ -131,11 +134,11 @@ export function updateTrigger(db: Db, owner: string, id: string, t: TriggerInput
   const cur = getTrigger(db, owner, id);
   const r = db
     .prepare(
-      `UPDATE triggers SET name = ?, kind = ?, spec_json = ?, repo = ?, task_template = ?, enabled = ?,
+      `UPDATE triggers SET name = ?, kind = ?, spec_json = ?, repos_json = ?, task_template = ?, enabled = ?,
        pr_comment = ?, quiet = ?, agent = ?, model = ?, harness_id = ?, workflow_id = ?, next_fire = ?, updated_at = ? WHERE id = ? AND owner = ?`
     )
     .run(
-      t.name, t.kind, JSON.stringify(t.spec), t.repo ?? null, t.taskTemplate, t.enabled ? 1 : 0,
+      t.name, t.kind, JSON.stringify(t.spec), t.repos?.length ? JSON.stringify(t.repos) : null, t.taskTemplate, t.enabled ? 1 : 0,
       t.prComment ? 1 : 0, t.quiet ? 1 : 0, t.agent ?? null, t.model ?? null, t.harnessId ?? null, t.workflowId ?? null, computeNextFire(t, now, cur?.lastFired != null), now, id, owner
     );
   return r.changes ? getTrigger(db, owner, id) : undefined;
@@ -214,12 +217,12 @@ export function rotateSecret(db: Db, box: SecretBox, owner: string, id: string, 
   return n ? secret : undefined;
 }
 
-export function markFired(db: Db, id: string, result: TriggerResult, now = Date.now()): void {
+export function markFired(db: Db, id: string, result: TriggerResult, now = Date.now(), facts?: Partial<RunFacts>): void {
   const t = db.prepare(`SELECT kind, spec_json, enabled FROM triggers WHERE id = ?`).get(id) as { kind: TriggerKind; spec_json: string; enabled: number } | undefined;
   if (!t) return;
   const next = computeNextFire({ kind: t.kind, spec: JSON.parse(t.spec_json), enabled: !!t.enabled }, now, true);
   db.prepare(`UPDATE triggers SET last_fired = ?, next_fire = ?, last_result_json = ? WHERE id = ?`).run(now, next, JSON.stringify(result), id);
-  logFromResult(db, id, result);
+  logFromResult(db, id, result, facts);
 }
 
 /** Record a skip without touching last_fired (a skip is not a fire), but DO advance a schedule. */
@@ -308,11 +311,20 @@ export interface QuietCounts {
   reports: number;
 }
 
-/** Stamp the fired delivery for `box` with how its run finished: quiet (nothing to show) or a report. */
-export function markDeliveryFinished(db: Db, triggerId: string, box: string, quiet: boolean): void {
-  db.prepare(`UPDATE trigger_delivery_log SET quiet = ? WHERE id = (SELECT id FROM trigger_delivery_log WHERE trigger_id = ? AND box = ? ORDER BY id DESC LIMIT 1)`).run(
-    quiet ? 1 : 0, triggerId, box
-  );
+/** Stamp the fired delivery for `box` with how its run finished: quiet (nothing to show) or a report, plus the result facts. */
+export function markDeliveryFinished(db: Db, triggerId: string, box: string, quiet: boolean, facts?: Partial<RunFacts>): void {
+  const row = db.prepare(`SELECT id, facts_json FROM trigger_delivery_log WHERE trigger_id = ? AND box = ? ORDER BY id DESC LIMIT 1`).get(triggerId, box) as { id: number; facts_json: string | null } | undefined;
+  if (!row) return;
+  const merged: RunFacts = { ...parse<RunFacts>(row.facts_json, { v: 1 }), ...facts, v: 1 };
+  db.prepare(`UPDATE trigger_delivery_log SET quiet = ?, facts_json = ? WHERE id = ?`).run(quiet ? 1 : 0, JSON.stringify(merged), row.id);
+}
+
+/** The receipt comment landed after the finish stamp: add its link to the same row. */
+export function markDeliveryReceipt(db: Db, triggerId: string, box: string, receiptUrl: string): void {
+  const row = db.prepare(`SELECT id, facts_json FROM trigger_delivery_log WHERE trigger_id = ? AND box = ? ORDER BY id DESC LIMIT 1`).get(triggerId, box) as { id: number; facts_json: string | null } | undefined;
+  if (!row) return;
+  const merged: RunFacts = { ...parse<RunFacts>(row.facts_json, { v: 1 }), receiptUrl, v: 1 };
+  db.prepare(`UPDATE trigger_delivery_log SET facts_json = ? WHERE id = ?`).run(JSON.stringify(merged), row.id);
 }
 
 export function quietCounts(db: Db, triggerId: string): QuietCounts {
@@ -323,7 +335,7 @@ export function quietCounts(db: Db, triggerId: string): QuietCounts {
 }
 
 /** Every dispatcher outcome (webhook, schedule, chain, run-now) lands in the delivery log. */
-function logFromResult(db: Db, id: string, result: TriggerResult): void {
+function logFromResult(db: Db, id: string, result: TriggerResult, facts?: Partial<RunFacts>): void {
   const reason = reasonOf(result);
   logDelivery(db, id, {
     at: result.at,
@@ -331,6 +343,7 @@ function logFromResult(db: Db, id: string, result: TriggerResult): void {
     ...(reason ? { reason } : {}),
     ...(result.reason ? { detail: result.reason } : {}),
     ...(result.box ? { box: result.box } : {}),
+    ...(facts && Object.keys(facts).length ? { facts: { v: 1, ...facts } } : {}),
   });
 }
 
@@ -358,6 +371,8 @@ export interface DeliveryEntry {
   test?: boolean;
   /** The fired run finished with the quiet marker — nothing needed the operator. */
   quiet?: boolean;
+  /** What it was about and what the run produced (src/run-facts.ts). */
+  facts?: RunFacts;
 }
 
 /** Deliveries kept per automation. A short log, not a live feed. */
@@ -366,8 +381,8 @@ export const DELIVERY_LOG_MAX = 50;
 export function logDelivery(db: Db, triggerId: string, e: Omit<DeliveryEntry, "id">): number {
   const id = Number(
     db
-      .prepare(`INSERT INTO trigger_delivery_log (trigger_id, at, outcome, reason, detail, box, test) VALUES (?, ?, ?, ?, ?, ?, ?)`)
-      .run(triggerId, e.at, e.outcome, e.reason ?? null, e.detail ? e.detail.slice(0, 300) : null, e.box ?? null, e.test ? 1 : 0).lastInsertRowid
+      .prepare(`INSERT INTO trigger_delivery_log (trigger_id, at, outcome, reason, detail, box, test, facts_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(triggerId, e.at, e.outcome, e.reason ?? null, e.detail ? e.detail.slice(0, 300) : null, e.box ?? null, e.test ? 1 : 0, e.facts ? JSON.stringify(e.facts) : null).lastInsertRowid
   );
   db.prepare(
     `DELETE FROM trigger_delivery_log WHERE trigger_id = ? AND id NOT IN (SELECT id FROM trigger_delivery_log WHERE trigger_id = ? ORDER BY id DESC LIMIT ?)`
@@ -384,6 +399,7 @@ const toEntry = (r: Record<string, any>): DeliveryEntry => ({
   ...(r.box ? { box: r.box } : {}),
   ...(r.test ? { test: true } : {}),
   ...(r.quiet ? { quiet: true } : {}),
+  ...(r.facts_json ? { facts: parse<RunFacts>(r.facts_json, { v: 1 }) } : {}),
 });
 
 /** Newest first. Owner-scoped through the trigger row. */

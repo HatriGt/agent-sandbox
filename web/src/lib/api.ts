@@ -1128,23 +1128,42 @@ export interface AutomationSpec {
   cooldownMin?: number;
 }
 export type AlertPreset = "sentry" | "datadog" | "pagerduty";
+/** What a delivery was about and what its run produced (src/run-facts.ts). Fire-time fields first, finish-time ones after. */
+export interface RunFacts {
+  v: 1;
+  subject?: { kind: "pr" | "issue"; number: number; repo: string; url: string; title?: string; author?: string };
+  alert?: { source: string; title: string; severity?: string; url?: string };
+  event?: string;
+  state?: "done" | "failed" | "waiting" | "running";
+  headline?: string;
+  archiveId?: number;
+  prs?: Array<{ url: string; repo: string; number: number }>;
+  tests?: { passed: number; failed: number } | null;
+  diff?: { files: number; additions: number; deletions: number } | null;
+  verified?: boolean | null;
+  review?: { verdict: "approve" | "needs-work" | null; findings?: Record<"high" | "medium" | "low" | "info", number>; blocking: number } | null;
+  receiptUrl?: string;
+  durationMs?: number | null;
+  usd?: number | null;
+}
 /** One row of an automation's delivery log (GET /triggers/:id/deliveries.json), newest first. */
 export interface AutomationDelivery {
   id: number;
   at: number;
   outcome: "fired" | "skipped" | "rejected" | "failed";
-  reason?: "cooldown" | "disabled" | "limit" | "dedupe" | "ignored" | "signature" | "payload" | "error";
+  reason?: "cooldown" | "disabled" | "limit" | "dedupe" | "ignored" | "signature" | "payload" | "error" | "sender" | "asked";
   detail?: string;
   box?: string;
   test?: boolean;
   /** The fired run finished with the quiet marker — nothing needed the operator. */
   quiet?: boolean;
+  facts?: RunFacts;
 }
 export interface AutomationDraft {
   name: string;
   kind: AutomationKind;
   spec: AutomationSpec;
-  repo?: string;
+  repos?: string[];
   taskTemplate: string;
   enabled: boolean;
   prComment: boolean;
@@ -1181,7 +1200,7 @@ export interface ThreadScheduleItem {
   lastFired: number | null;
   lastOutcome?: string;
   lastBox?: string;
-  repo?: string;
+  repos?: string[];
   enabled: boolean;
   task: string;
   why?: string;

@@ -1,6 +1,8 @@
 import type { Db } from "./db.js";
 import type { RunDigest } from "./digest.js";
 import type { StartedBy } from "./started-by.js";
+import type { TraceEvent } from "./trace.js";
+import { resultFacts, subjectFacts } from "./run-facts.js";
 import {
   admit,
   formatReceiptComment,
@@ -12,7 +14,7 @@ import {
   type GithubMatch,
 } from "./triggers.js";
 import {
-  advanceNextFire, chainsAfter, dueSchedules, getTriggerById, markDeliveryFinished, markFinished, markFired, markSkipped, type TriggerResult, type TriggerRow,
+  advanceNextFire, chainsAfter, dueSchedules, getTriggerById, markDeliveryFinished, markDeliveryReceipt, markFinished, markFired, markSkipped, type TriggerResult, type TriggerRow,
 } from "./trigger-store.js";
 
 /**
@@ -36,8 +38,8 @@ export interface StartRunInput {
 export interface DispatcherDeps {
   db: Db;
   startRun(input: StartRunInput): Promise<{ ok: true; box: string } | { ok: false; question: string }>;
-  /** Post a receipt comment on an issue/PR with the owner's GitHub token. */
-  postComment?(owner: string, repo: string, number: number, body: string): Promise<void>;
+  /** Post a receipt comment on an issue/PR with the owner's GitHub token; answers the comment's web URL when GitHub gave one. */
+  postComment?(owner: string, repo: string, number: number, body: string): Promise<string | undefined | void>;
   audit?(owner: string, action: string, detail: { trigger: string; box?: string; outcome: string }): void;
   publicUrl?: string;
   /**
@@ -121,13 +123,16 @@ export function makeDispatcher(d: DispatcherDeps) {
       rendered.text.trim() + "\n" + unattendedPreamble({ name: t.name, kind: t.kind, prOnly: true }) + (t.quiet ? "\n" + quietPreamble(rendered.text) : "");
 
     let repos: StartRunInput["repos"];
-    if (!ctx.parent && t.repo) {
+    // The repo this event came from (a multi-repo automation fires once per event, in that repo).
+    const subjectRepo = ctx.match?.subject?.repo ?? (t.repos?.length === 1 ? t.repos[0] : undefined);
+    if (!ctx.parent && t.repos?.length) {
       // A PR event in the same repo: start on the PR's head branch so the agent sees what was pushed
       // (not once the PR is closed — its branch is often deleted on merge).
       const p = (ctx.payload ?? {}) as { pull_request?: { state?: string; head?: { ref?: string; repo?: { full_name?: string } | null } } };
       const pr = p.pull_request;
-      const headRef = ctx.match?.subject?.kind === "pr" && pr?.state !== "closed" && pr?.head?.repo?.full_name === t.repo ? String(pr.head.ref ?? "") : "";
-      repos = [{ repo: t.repo, ...(headRef ? { ref: headRef } : {}) }];
+      const headRef = subjectRepo && ctx.match?.subject?.kind === "pr" && pr?.state !== "closed" && pr?.head?.repo?.full_name?.toLowerCase() === subjectRepo.toLowerCase() ? String(pr.head.ref ?? "") : "";
+      // An event clones the repo it is about; a schedule / webhook / manual run without one clones every listed repo.
+      repos = ctx.match?.subject?.repo ? [{ repo: ctx.match.subject.repo, ...(headRef ? { ref: headRef } : {}) }] : t.repos.map((repo) => ({ repo, ...(headRef && repo === subjectRepo ? { ref: headRef } : {}) }));
     }
     const startedBy: StartedBy = {
       kind: "trigger",
@@ -136,7 +141,7 @@ export function makeDispatcher(d: DispatcherDeps) {
       source: t.kind,
       ...(ctx.event ? { event: ctx.event } : {}),
       ...(ctx.parent ? { parent: ctx.parent.box } : {}),
-      ...(ctx.match?.subject && Number.isFinite(ctx.match.subject.number) ? { subject: { ...ctx.match.subject, ...(t.repo ? { repo: t.repo } : {}) } } : {}),
+      ...(ctx.match?.subject && Number.isFinite(ctx.match.subject.number) ? { subject: { kind: ctx.match.subject.kind, number: ctx.match.subject.number, ...(subjectRepo ? { repo: subjectRepo } : {}) } } : {}),
     };
 
     const fireId = Number(d.db.prepare(`INSERT INTO trigger_fires (trigger_id, at) VALUES (?, ?)`).run(t.id, at).lastInsertRowid);
@@ -153,7 +158,7 @@ export function makeDispatcher(d: DispatcherDeps) {
       result = { at, outcome: "failed", reason: (e as Error).message.slice(0, 300) };
     }
     if (result.outcome !== "started") d.db.prepare(`UPDATE trigger_fires SET finished_at = ? WHERE id = ?`).run(now(), fireId);
-    markFired(d.db, t.id, result, at);
+    markFired(d.db, t.id, result, at, subjectFacts(ctx.payload, ctx.match?.subject, subjectRepo, ctx.event));
     d.audit?.(t.owner, "trigger.fire", { trigger: t.id, box: result.box, outcome: result.outcome });
     log(`[triggers] ${t.id} (${t.kind}) → ${result.outcome}${result.box ? ` ${result.box}` : ""}${result.reason ? `: ${result.reason}` : ""}`);
     return result;
@@ -185,17 +190,18 @@ export function makeDispatcher(d: DispatcherDeps) {
    * fires any chain that follows this trigger. Answers whether the automation's box policy wants the
    * box destroyed now; the caller does it after its own finish work (follow-ups) is through.
    */
-  async function onRunFinished(box: string, digest: RunDigest, startedBy: StartedBy | undefined, archiveId?: number, opts: { quiet?: boolean } = {}): Promise<{ destroy: boolean }> {
+  async function onRunFinished(box: string, digest: RunDigest, startedBy: StartedBy | undefined, archiveId?: number, opts: { quiet?: boolean; events?: TraceEvent[] } = {}): Promise<{ destroy: boolean }> {
     const id = triggerOfBox(box) ?? (startedBy?.kind === "trigger" ? startedBy.triggerId : undefined);
     if (!id) return { destroy: false };
     closeBox(box);
     const t = getTriggerById(d.db, id);
     if (!t) return { destroy: false };
     markFinished(d.db, id, box, { state: digest.state, headline: digest.headline, ...(archiveId ? { archiveId } : {}) });
-    // The ledger row the Automations page reads: quiet (nothing needed the operator) or a report.
-    markDeliveryFinished(d.db, id, box, opts.quiet === true);
+    // The ledger row the Automations page reads: quiet (nothing needed the operator) or a report, plus the result facts.
+    markDeliveryFinished(d.db, id, box, opts.quiet === true, resultFacts(digest, opts.events ?? [], archiveId));
     const subj = startedBy?.kind === "trigger" ? startedBy.subject : undefined;
-    if (t.prComment && subj && t.repo && d.postComment) {
+    const receiptRepo = subj?.repo;
+    if (t.prComment && subj && receiptRepo && d.postComment) {
       const body = formatReceiptComment({
         triggerName: t.name,
         headline: digest.headline,
@@ -210,7 +216,12 @@ export function makeDispatcher(d: DispatcherDeps) {
         ...(digest.startedAt && digest.endedAt ? { durationMs: digest.endedAt - digest.startedAt } : {}),
         ...(d.publicUrl ? { url: `${d.publicUrl.replace(/\/$/, "")}/dashboard/box/${encodeURIComponent(box)}` } : {}),
       });
-      await d.postComment(t.owner, t.repo, subj.number, body).catch((e) => log(`[triggers] receipt comment on ${t.repo}#${subj.number} failed: ${(e as Error).message.slice(0, 200)}`));
+      try {
+        const url = await d.postComment(t.owner, receiptRepo, subj.number, body);
+        if (typeof url === "string" && url) markDeliveryReceipt(d.db, id, box, url);
+      } catch (e) {
+        log(`[triggers] receipt comment on ${receiptRepo}#${subj.number} failed: ${(e as Error).message.slice(0, 200)}`);
+      }
     }
     // Chains start (and carry the parent's patch) BEFORE the parent may be destroyed: fire awaits startRun.
     for (const c of chainsAfter(d.db, t.owner, id)) {

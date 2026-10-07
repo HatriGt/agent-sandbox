@@ -419,7 +419,7 @@ export function makeRepoWatcher(d: WatchDeps) {
           /* preview storage is best-effort */
         }
         await d.dispatcher
-          .fire(t, { payload, event: hit.event, match: { match: true, ...(hit.subject ? { subject: hit.subject } : {}) } })
+          .fire(t, { payload, event: hit.event, match: { match: true, ...(hit.subject ? { subject: { ...hit.subject, repo: repoInfo.full_name ?? repo } } : {}) } })
           .catch((e) => log(`[watch] ${t.id} ${hit.event}: ${(e as Error).message.slice(0, 200)}`));
       }
     }
@@ -430,16 +430,19 @@ export function makeRepoWatcher(d: WatchDeps) {
     if (ticking) return;
     ticking = true;
     try {
-      const groups = new Map<string, TriggerRow[]>();
+      const groups = new Map<string, { repo: string; triggers: TriggerRow[] }>();
       for (const t of watchTriggers(d.db)) {
-        if (!t.repo) continue;
-        const k = `${t.owner}\u0000${t.repo.toLowerCase()}`;
-        groups.set(k, [...(groups.get(k) ?? []), t]);
+        for (const repo of t.repos ?? []) {
+          const k = `${t.owner}\u0000${repo.toLowerCase()}`;
+          const g = groups.get(k) ?? { repo, triggers: [] };
+          g.triggers.push(t);
+          groups.set(k, g);
+        }
       }
-      for (const [k, ts] of groups) {
+      for (const [k, g] of groups) {
         const [owner, repo] = k.split("\u0000");
         try {
-          await pollGroup(owner, ts[0].repo!, ts);
+          await pollGroup(owner, g.repo, g.triggers);
           lastError.delete(k);
         } catch (e) {
           const msg = (e as Error).message.slice(0, 200);

@@ -31,7 +31,7 @@ export interface ScheduleTrigger {
   nextFire: number | null;
   lastFired?: number | null;
   lastResult?: { at: number; outcome: string; box?: string; reason?: string; finished?: { state: string } } | null;
-  repo?: string;
+  repos?: string[];
   sourceBox?: string;
   scope?: "automation" | "scheduled";
   when: string;
@@ -52,7 +52,7 @@ export interface ScheduleItem {
   lastFired: number | null;
   lastOutcome?: string;
   lastBox?: string;
-  repo?: string;
+  repos?: string[];
   enabled: boolean;
   task: string;
   /** Why a pending one waits for the owner. */
@@ -103,7 +103,7 @@ export function threadSchedule(box: string, startedBy: StartedBy | undefined, tr
       nextFire: t.enabled ? t.nextFire : null,
       lastFired: t.lastFired ?? null,
       ...(t.lastResult ? { lastOutcome: t.lastResult.outcome, ...(t.lastResult.box ? { lastBox: t.lastResult.box } : {}) } : {}),
-      ...(t.repo ? { repo: t.repo } : {}),
+      ...(t.repos?.length ? { repos: t.repos } : {}),
       enabled: t.enabled,
       task: t.taskTemplate.slice(0, 2000),
       ...(relation === "proposed" ? { why: automateNeedsApproval(t.spec.cron ?? "", t.taskTemplate) ?? "The agent asked you to confirm it first" } : {}),

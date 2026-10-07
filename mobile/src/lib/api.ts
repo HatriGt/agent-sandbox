@@ -612,7 +612,7 @@ export interface AutomationDraft {
   name: string;
   kind: AutomationKind;
   spec: AutomationSpec;
-  repo?: string;
+  repos?: string[];
   taskTemplate: string;
   enabled: boolean;
   prComment: boolean;
@@ -663,7 +663,7 @@ export interface ThreadScheduleItem {
   lastFired: number | null;
   lastOutcome?: string;
   lastBox?: string;
-  repo?: string;
+  repos?: string[];
   enabled: boolean;
   task: string;
   why?: string;

@@ -109,7 +109,7 @@ function toDraft(a: Automation): AutomationDraft {
     name: a.name,
     kind: a.kind,
     spec: { ...a.spec },
-    repo: a.repo,
+    repos: a.repos,
     taskTemplate: a.taskTemplate,
     enabled: a.enabled,
     prComment: a.prComment,
@@ -184,7 +184,7 @@ function Editor() {
       if (!cur || cur.kind === kind) return cur;
       const b = blank(kind);
       const keepTask = cur.taskTemplate.trim() && cur.taskTemplate !== DEFAULT_TEMPLATES[cur.kind] && cur.taskTemplate !== ALERT_TEMPLATE;
-      return { ...b, name: cur.name, repo: cur.repo, taskTemplate: keepTask ? cur.taskTemplate : b.taskTemplate, agent: cur.agent, model: cur.model, harnessId: cur.harnessId, workflowId: cur.workflowId, quiet: cur.quiet };
+      return { ...b, name: cur.name, repos: cur.repos, taskTemplate: keepTask ? cur.taskTemplate : b.taskTemplate, agent: cur.agent, model: cur.model, harnessId: cur.harnessId, workflowId: cur.workflowId, quiet: cur.quiet };
     });
 
   // Repo search (debounced) while the repo sheet is open.
@@ -233,10 +233,10 @@ function Editor() {
     if (!d.taskTemplate.trim()) p.push("Write the task.");
     if (d.kind === "schedule" && !(d.spec.cron ?? "").trim()) p.push("Pick a schedule.");
     if (d.kind === "chain" && !d.spec.afterTrigger) p.push("Pick the automation this runs after.");
-    if (d.kind === "github" && !d.repo) p.push("GitHub automations need a repo.");
+    if (d.kind === "github" && !d.repos?.length) p.push("GitHub automations need a repo.");
     if (d.kind === "github" && d.spec.event === "issue_labeled" && !(d.spec.label ?? "").trim()) p.push("Which label?");
     if (d.kind === "github" && d.spec.event === "issue_comment" && !(d.spec.command ?? "").trim()) p.push("Which comment command?");
-    if (d.kind === "watch" && !d.repo) p.push("Repo activity automations need a repo.");
+    if (d.kind === "watch" && !d.repos?.length) p.push("Repo activity automations need a repo.");
     if (d.kind === "watch" && !d.spec.watch?.length) p.push("Pick at least one event.");
     return p;
   }, [d]);
@@ -248,7 +248,7 @@ function Editor() {
     const body: AutomationDraft = {
       ...d,
       name: d.name.trim(),
-      repo: d.repo?.trim() || undefined,
+      repos: d.repos?.length ? d.repos : undefined,
       signingSecret: d.signingSecret?.trim() || undefined,
       spec: d.kind === "schedule" ? { ...d.spec, timezone: d.spec.timezone?.trim() || deviceTimezone() } : d.spec,
     };
@@ -536,7 +536,7 @@ function Editor() {
         </Card>
       ) : null}
 
-      <PickerRow label={d.kind === "github" || d.kind === "watch" ? "Repo" : "Repo (optional)"} value={d.repo} placeholder="owner/name" onPress={() => open("repo")} />
+      <PickerRow label={d.kind === "github" || d.kind === "watch" ? "Repos" : "Repos (optional)"} value={d.repos?.join(", ")} placeholder="owner/name" onPress={() => open("repo")} />
 
       <Field
         label="Task"
@@ -619,12 +619,12 @@ function Editor() {
 
       <PickerSheet
         visible={sheet === "repo"}
-        title="Repo"
-        options={repos.map((r) => ({ value: r.fullName, label: r.fullName, hint: r.description }))}
-        value={d.repo}
+        title="Repos — tap to add or remove"
+        options={repos.map((r) => ({ value: r.fullName, label: `${(d.repos ?? []).some((x) => x.toLowerCase() === r.fullName.toLowerCase()) ? "✓ " : ""}${r.fullName}`, hint: r.description }))}
+        value={undefined}
         allowNone={d.kind !== "github" && d.kind !== "watch"}
-        noneLabel="No repo"
-        onPick={(v) => set({ repo: v })}
+        noneLabel="No repos"
+        onPick={(v) => set({ repos: !v ? undefined : (d.repos ?? []).some((r) => r.toLowerCase() === v.toLowerCase()) ? (d.repos ?? []).filter((r) => r.toLowerCase() !== v.toLowerCase()) : [...(d.repos ?? []), v] })}
         onClose={() => setSheet(null)}
         onSearch={searchRepos}
         searching={repoBusy}

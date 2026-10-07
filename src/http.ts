@@ -816,7 +816,7 @@ const proposeAutomations = (box: string, owner: string, log: string, startedBy: 
     // Routine work starts on its own; critical work (or work the agent flagged) waits for the owner.
     const ask = automateNeedsApproval(p.cron ?? "", p.task, p.asked);
     // A repo the task names ("in repo acme/api", a github.com URL) is cloned when it fires.
-    const repo = parent?.repo ?? p.task.match(/(?:\brepo(?:sitory)?\s+|github\.com\/)([\w.-]+\/[\w.-]+?)(?:\.git)?(?=[\s,;:)]|\.?$|\.\s)/i)?.[1];
+    const repo = parent?.repos?.[0] ?? p.task.match(/(?:\brepo(?:sitory)?\s+|github\.com\/)([\w.-]+\/[\w.-]+?)(?:\.git)?(?=[\s,;:)]|\.?$|\.\s)/i)?.[1];
     const { row } = createTrigger(
       db,
       secretBox,
@@ -825,7 +825,7 @@ const proposeAutomations = (box: string, owner: string, log: string, startedBy: 
         name,
         kind: "schedule",
         spec: p.at ? { at: p.at } : { cron: p.cron, timezone: "UTC" },
-        ...(repo ? { repo } : {}),
+        ...(repo ? { repos: [repo] } : {}),
         taskTemplate: p.task,
         enabled: !ask,
         prComment: false,
@@ -854,12 +854,13 @@ const archiveFinishedRun = async (box: string, opts: { withFiles: boolean; quiet
   // Full workspace diff, captured NOW because this is the last moment the box can answer: after
   // teardown a run's only reviewable diff is this row. Redacted like everything box-produced.
   const diffText = opts.withFiles && up ? await readFullDiff(cfg, box).then((d) => redactor.redact(d)).catch(() => "") : "";
+  const events = parseTrace(snap.log ?? "");
   const digest = buildDigest({
     box,
     task: snap.task ?? "",
     runState: snap.runState,
     exitCode: snap.exitCode,
-    events: parseTrace(snap.log ?? ""),
+    events,
     files,
     verified: boxVerified.get(box),
     retries: retriesOf(box),
@@ -880,14 +881,14 @@ const archiveFinishedRun = async (box: string, opts: { withFiles: boolean; quiet
   }
   // The outcome card (src/outcome.ts): persisted inside the archived digest, so it outlives the box.
   try {
-    digest.outcome = buildOutcome({ digest, events: parseTrace(snap.log ?? ""), log: snap.log ?? "", filesKnown: opts.withFiles && up, diffText });
+    digest.outcome = buildOutcome({ digest, events, log: snap.log ?? "", filesKnown: opts.withFiles && up, diffText });
   } catch (e) {
     console.error(`[outcome] ${box}: ${(e as Error).message.slice(0, 200)}`);
   }
   const archiveId = archiveRun(db, { box, owner: runOwner, digest, ...(diffText ? { diffText } : {}) });
   // A trigger-started run finishing frees its slot, stamps the automation's last result, posts the
   // receipt comment and fires any chain. Only on a NEW record (null = this finish was already seen).
-  const fin = archiveId !== null ? await dispatcher.onRunFinished(box, digest, digest.provenance?.startedBy, archiveId, { quiet: opts.quiet === true }) : { destroy: false };
+  const fin = archiveId !== null ? await dispatcher.onRunFinished(box, digest, digest.provenance?.startedBy, archiveId, { quiet: opts.quiet === true, events }) : { destroy: false };
   // Automations the agent proposed in its sign-off: created paused, pending the operator's approval.
   if (archiveId !== null) {
     try {
@@ -3370,7 +3371,7 @@ const startTriggerRun = (input: StartRunInput): Promise<{ ok: true; box: string 
         // A chain hands off from the finished parent: same repos@branch plus the carry diff.
         if (input.after) {
           if (!deps.handoff) return { ok: false as const, question: "handoff is not available on this controller" };
-          const h = await deps.handoff(cfg, input.after, { task: input.task, ...(t.repo ? { repo: t.repo } : {}), carry: t.spec.carry });
+          const h = await deps.handoff(cfg, input.after, { task: input.task, ...(t.repos?.length === 1 ? { repo: t.repos[0] } : {}), carry: t.spec.carry });
           if (!h.ok) return { ok: false as const, question: h.question };
           repos = h.repos;
         }
@@ -3494,7 +3495,8 @@ const dispatcher = makeDispatcher({
   startRun: startTriggerRun,
   // The receipt comment on the issue/PR that fired the run, with the owner's own GitHub token.
   postComment: async (owner, repo, number, body) => {
-    await ghAsOwner(owner, repo, { method: "POST", path: `/repos/${repo}/issues/${number}/comments`, body: { body: redactor.redact(body) } });
+    const r = await ghAsOwner(owner, repo, { method: "POST", path: `/repos/${repo}/issues/${number}/comments`, body: { body: redactor.redact(body) } });
+    return typeof r?.html_url === "string" ? r.html_url : undefined;
   },
 });
 // Repo activity (src/repo-watch.ts): polls GitHub as each automation's owner, conditional on the
@@ -3548,7 +3550,7 @@ const followups = makeFollowupEngine({
       name: `${f.startedBy.followup === "ci" ? "Fix CI" : "Address review"} · ${f.pr.repo}#${f.pr.number}`,
       kind: "github",
       spec: {},
-      repo: f.startedBy.pr.repo,
+      repos: [f.startedBy.pr.repo],
       taskTemplate: f.task,
       enabled: true,
       prComment: false,

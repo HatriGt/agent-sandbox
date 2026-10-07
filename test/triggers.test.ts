@@ -122,18 +122,18 @@ test("normalize: safe defaults and validation", () => {
 
 test("github filter: repo, label, trusted commenter, bots, forks", () => {
   const repo = { full_name: "o/r" };
-  assert.equal(matchGithub({ event: "issue_labeled", label: "agent" }, "o/r", "issues", { action: "labeled", label: { name: "agent" }, issue: { number: 3 }, repository: repo }).match, true);
-  assert.equal(matchGithub({ event: "issue_labeled", label: "agent" }, "o/r", "issues", { action: "labeled", label: { name: "bug" }, issue: { number: 3 }, repository: repo }).match, false);
-  assert.equal(matchGithub({ event: "issue_labeled" }, "o/r", "issues", { action: "labeled", label: { name: "agent" }, repository: { full_name: "x/y" } }).match, false);
+  assert.equal(matchGithub({ event: "issue_labeled", label: "agent" }, ["o/r"], "issues", { action: "labeled", label: { name: "agent" }, issue: { number: 3 }, repository: repo }).match, true);
+  assert.equal(matchGithub({ event: "issue_labeled", label: "agent" }, ["o/r"], "issues", { action: "labeled", label: { name: "bug" }, issue: { number: 3 }, repository: repo }).match, false);
+  assert.equal(matchGithub({ event: "issue_labeled" }, ["o/r"], "issues", { action: "labeled", label: { name: "agent" }, repository: { full_name: "x/y" } }).match, false);
   const comment = (assoc: string, sender = "User") => ({ action: "created", comment: { body: "/agent fix it", author_association: assoc }, issue: { number: 4 }, repository: repo, sender: { type: sender } });
-  const m = matchGithub({ event: "issue_comment", command: "/agent" }, "o/r", "issue_comment", comment("MEMBER"));
+  const m = matchGithub({ event: "issue_comment", command: "/agent" }, ["o/r"], "issue_comment", comment("MEMBER"));
   assert.ok(m.match && m.command === "fix it");
-  assert.equal(matchGithub({ event: "issue_comment" }, "o/r", "issue_comment", comment("NONE")).match, false);
-  assert.equal(matchGithub({ event: "issue_comment" }, "o/r", "issue_comment", comment("OWNER", "Bot")).match, false);
+  assert.equal(matchGithub({ event: "issue_comment" }, ["o/r"], "issue_comment", comment("NONE")).match, false);
+  assert.equal(matchGithub({ event: "issue_comment" }, ["o/r"], "issue_comment", comment("OWNER", "Bot")).match, false);
   const pr = (head: string) => ({ action: "opened", pull_request: { number: 9, head: { repo: { full_name: head } } }, repository: repo });
-  assert.equal(matchGithub({ event: "pr_opened" }, "o/r", "pull_request", pr("fork/r")).match, false);
-  assert.equal(matchGithub({ event: "pr_opened", allowForks: true }, "o/r", "pull_request", pr("fork/r")).match, true);
-  assert.equal(matchGithub({ event: "pr_opened" }, "o/r", "pull_request", pr("o/r")).match, true);
+  assert.equal(matchGithub({ event: "pr_opened" }, ["o/r"], "pull_request", pr("fork/r")).match, false);
+  assert.equal(matchGithub({ event: "pr_opened", allowForks: true }, ["o/r"], "pull_request", pr("fork/r")).match, true);
+  assert.equal(matchGithub({ event: "pr_opened" }, ["o/r"], "pull_request", pr("o/r")).match, true);
 });
 
 test("store: secret sealed at rest, owner-scoped reads", () => {
@@ -183,7 +183,7 @@ test("dispatcher: fires through startRun with trigger provenance; overlapping ev
     postComment: async (owner, repo, number, body) => void comments.push({ owner, repo, number, body }),
   });
   const payload = { action: "labeled", label: { name: "agent" }, issue: { number: 12 }, repository: { full_name: "o/r" } };
-  const match = matchGithub(n.trigger.spec, "o/r", "issues", payload);
+  const match = matchGithub(n.trigger.spec, ["o/r"], "issues", payload);
   assert.ok(match.match);
   if (!match.match) return;
   const r1 = await d.fire(row, { payload, event: "issues", match });

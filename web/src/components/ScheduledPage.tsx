@@ -63,7 +63,7 @@ export function ScheduledPage({ onOpenBox, onAutomations }: { onOpenBox: (box: s
     }
   };
 
-  const showRepo = rows.some((t) => t.repo);
+  const showRepo = rows.some((t) => t.repos?.length);
   const counts = { upcoming: all.filter((t) => UPCOMING.has(t.status)).length, done: all.filter((t) => !UPCOMING.has(t.status)).length, all: all.length };
   const th = "text-faint px-3 py-2 text-left text-micro font-medium tracking-wide whitespace-nowrap uppercase";
   const td = "px-3 py-2.5 align-top text-micro";
@@ -200,7 +200,7 @@ function Row({
         )}
       </td>
       <td className={cn(td, "max-w-[11rem]")}>{t.sourceBox ? link(t.sourceBox, t.sourceTitle || t.sourceBox) : <span className="text-faint">—</span>}</td>
-      {showRepo && <td className={cn(td, "font-mono text-[12px] whitespace-nowrap")}>{t.repo || <span className="text-faint font-sans">—</span>}</td>}
+      {showRepo && <td className={cn(td, "font-mono text-[12px] whitespace-nowrap")}>{t.repos?.join(", ") || <span className="text-faint font-sans">—</span>}</td>}
       <td className={cn(td, "whitespace-nowrap tabular-nums")}>
         <span
           className="text-foreground inline-flex items-center gap-1"

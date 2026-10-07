@@ -157,7 +157,6 @@ function Row({ a, onChange, onRemove }: { a: Automation; onChange: (a: Automatio
           <T variant="micro" tone="faint" numberOfLines={2}>
             {a.proposed ? "Scheduled by the agent · " : a.scope === "scheduled" ? "From a chat · " : ""}
             {KIND[a.kind]} · {a.when}
-            {a.repo ? ` · ${a.repo}` : ""}
           </T>
         </View>
         {pending ? (

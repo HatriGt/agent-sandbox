@@ -204,7 +204,7 @@ export function registerTriggerRoutes(app: Express, c: TriggerRouteCtx): void {
     if (t.kind === "chain") return void res.status(400).json({ error: "a chain runs after its parent â€” run the parent instead" });
     try {
       const payload = lastPayload(c.db, owner, t.id);
-      const match = t.kind === "github" && payload ? matchGithub(t.spec, t.repo ?? "", githubEventOf(t.spec.event), payload) : t.kind === "watch" ? watchSubject(payload) : undefined;
+      const match = t.kind === "github" && payload ? matchGithub(t.spec, t.repos ?? [], githubEventOf(t.spec.event), payload) : t.kind === "watch" ? watchSubject(payload) : undefined;
       const result = await c.dispatcher.fire(t, { payload, manual: true, ...(match?.match ? { match } : {}) });
       res.json({ result });
     } catch (e) {
@@ -331,7 +331,7 @@ export function registerTriggerRoutes(app: Express, c: TriggerRouteCtx): void {
     }
     let match: ReturnType<typeof matchGithub> | undefined;
     if (t.kind === "github") {
-      match = matchGithub(t.spec, t.repo ?? "", ghEvent, payload);
+      match = matchGithub(t.spec, t.repos ?? [], ghEvent, payload);
       if (!match.match) {
         note("skipped", "ignored", match.reason);
         return { status: 202, body: { ok: true, ignored: match.reason } };
@@ -394,9 +394,10 @@ function githubEventOf(e: string | undefined): string {
 }
 
 /** Run now on a repo-activity automation: the issue/PR of its last change, so the receipt lands there. */
-function watchSubject(payload: unknown): { match: true; subject?: { kind: "issue" | "pr"; number: number } } {
-  const p = (payload && typeof payload === "object" ? payload : {}) as { pull_request?: { number?: number }; issue?: { number?: number; pull_request?: unknown } };
-  if (p.pull_request?.number) return { match: true, subject: { kind: "pr", number: p.pull_request.number } };
-  if (p.issue?.number) return { match: true, subject: { kind: p.issue.pull_request ? "pr" : "issue", number: p.issue.number } };
+function watchSubject(payload: unknown): { match: true; subject?: { kind: "issue" | "pr"; number: number; repo?: string } } {
+  const p = (payload && typeof payload === "object" ? payload : {}) as { pull_request?: { number?: number }; issue?: { number?: number; pull_request?: unknown }; repository?: { full_name?: string } };
+  const repo = p.repository?.full_name ? { repo: p.repository.full_name } : {};
+  if (p.pull_request?.number) return { match: true, subject: { kind: "pr", number: p.pull_request.number, ...repo } };
+  if (p.issue?.number) return { match: true, subject: { kind: p.issue.pull_request ? "pr" : "issue", number: p.issue.number, ...repo } };
   return { match: true };
 }

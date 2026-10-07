@@ -549,25 +549,26 @@ export function parseAutomateRejects(log: string, now = Date.now()): AutomateRej
 
 const TRUSTED_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
 
-export type GithubMatch = { match: true; subject?: { kind: "issue" | "pr"; number: number }; command?: string } | { match: false; reason: string };
+export type GithubMatch = { match: true; subject?: { kind: "issue" | "pr"; number: number; repo?: string }; command?: string } | { match: false; reason: string };
 
 /**
  * Does this GitHub delivery fire this trigger? Checks the event header + action, the repo (a trigger
- * is bound to ONE repo — a leaked URL on another repo's webhook fires nothing), and the per-event
- * filter. Comments must come from someone with write-ish association and never from a bot (our own
- * receipt comments cannot re-trigger); fork PRs are skipped unless explicitly allowed.
+ * is bound to its listed repos — a leaked URL on another repo's webhook fires nothing), and the
+ * per-event filter. Comments must come from someone with write-ish association and never from a bot
+ * (our own receipt comments cannot re-trigger); fork PRs are skipped unless explicitly allowed. The
+ * subject carries the repo the event came from, so the run and the receipt land there.
  */
-export function matchGithub(spec: TriggerSpec, repo: string, eventHeader: string, payload: unknown): GithubMatch {
+export function matchGithub(spec: TriggerSpec, repos: string[], eventHeader: string, payload: unknown): GithubMatch {
   const p = (payload && typeof payload === "object" ? payload : {}) as Record<string, any>;
   const full = String(p.repository?.full_name ?? "");
-  if (!full || full.toLowerCase() !== repo.toLowerCase()) return { match: false, reason: `repository ${full || "?"} is not ${repo}` };
+  if (!full || !repos.some((r) => r.toLowerCase() === full.toLowerCase())) return { match: false, reason: `repository ${full || "?"} is not ${repos.join(", ") || "configured"}` };
   if (p.sender?.type === "Bot") return { match: false, reason: "sender is a bot" };
   switch (spec.event) {
     case "issue_labeled": {
       if (eventHeader !== "issues" || p.action !== "labeled") return { match: false, reason: `not issues.labeled (${eventHeader}.${p.action})` };
       const want = (spec.label ?? "agent").toLowerCase();
       if (String(p.label?.name ?? "").toLowerCase() !== want) return { match: false, reason: `label is not '${want}'` };
-      return { match: true, subject: { kind: "issue", number: Number(p.issue?.number) } };
+      return { match: true, subject: { kind: "issue", number: Number(p.issue?.number), repo: full } };
     }
     case "issue_comment": {
       if (eventHeader !== "issue_comment" || p.action !== "created") return { match: false, reason: `not issue_comment.created` };
@@ -576,13 +577,13 @@ export function matchGithub(spec: TriggerSpec, repo: string, eventHeader: string
       if (!(body === prefix || body.startsWith(prefix + " ") || body.startsWith(prefix + "\n"))) return { match: false, reason: `comment does not start with ${prefix}` };
       if (!TRUSTED_ASSOCIATIONS.has(String(p.comment?.author_association ?? ""))) return { match: false, reason: "commenter is not an owner, member or collaborator" };
       const isPr = !!p.issue?.pull_request;
-      return { match: true, subject: { kind: isPr ? "pr" : "issue", number: Number(p.issue?.number) }, command: body.slice(prefix.length).trim() };
+      return { match: true, subject: { kind: isPr ? "pr" : "issue", number: Number(p.issue?.number), repo: full }, command: body.slice(prefix.length).trim() };
     }
     case "pr_opened": {
       if (eventHeader !== "pull_request" || p.action !== "opened") return { match: false, reason: "not pull_request.opened" };
       const head = String(p.pull_request?.head?.repo?.full_name ?? "");
       if (!spec.allowForks && head.toLowerCase() !== full.toLowerCase()) return { match: false, reason: "PR is from a fork" };
-      return { match: true, subject: { kind: "pr", number: Number(p.pull_request?.number) } };
+      return { match: true, subject: { kind: "pr", number: Number(p.pull_request?.number), repo: full } };
     }
     default:
       return { match: false, reason: "no GitHub event configured" };
@@ -643,7 +644,8 @@ export interface TriggerInput {
   name: string;
   kind: TriggerKind;
   spec: TriggerSpec;
-  repo?: string;
+  /** owner/name repos: GitHub/watch automations listen to each; runs without an event subject clone them all. */
+  repos?: string[];
   taskTemplate: string;
   enabled: boolean;
   prComment: boolean;
@@ -658,6 +660,7 @@ export interface TriggerInput {
 }
 
 const REPO_RE = /^[\w.-]+\/[\w.-]+$/;
+const MAX_REPOS = 20;
 
 /** Normalise + validate a create/update body. Unknown fields are dropped; defaults are the safe ones. */
 export function normalizeTrigger(body: unknown): { ok: true; trigger: TriggerInput; signingSecret?: string } | { ok: false; error: string } {
@@ -669,8 +672,16 @@ export function normalizeTrigger(body: unknown): { ok: true; trigger: TriggerInp
   const taskTemplate = typeof b.taskTemplate === "string" ? b.taskTemplate.trim() : "";
   if (!taskTemplate) return { ok: false, error: "task template is required" };
   if (taskTemplate.length > MAX_TASK_CHARS) return { ok: false, error: "task template is too long" };
-  const repo = typeof b.repo === "string" && b.repo.trim() ? b.repo.trim().replace(/\.git$/i, "") : undefined;
-  if (repo && !REPO_RE.test(repo)) return { ok: false, error: "repo must be owner/name" };
+  // `repos` is the list; a lone `repo` string is still read from older mobile builds.
+  const rawRepos: unknown[] = Array.isArray(b.repos) ? b.repos : typeof b.repo === "string" ? [b.repo] : [];
+  const repos: string[] = [];
+  for (const r of rawRepos) {
+    if (typeof r !== "string" || !r.trim()) continue;
+    const v = r.trim().replace(/\.git$/i, "");
+    if (!repos.some((x) => x.toLowerCase() === v.toLowerCase())) repos.push(v);
+  }
+  if (repos.some((r) => !REPO_RE.test(r))) return { ok: false, error: "each repo must be owner/name" };
+  if (repos.length > MAX_REPOS) return { ok: false, error: `at most ${MAX_REPOS} repos` };
   const s = (b.spec && typeof b.spec === "object" ? b.spec : {}) as Record<string, unknown>;
   const spec: TriggerSpec = {};
   if (kind === "schedule" && typeof s.at === "number" && Number.isFinite(s.at) && s.cron === undefined) {
@@ -687,7 +698,7 @@ export function normalizeTrigger(body: unknown): { ok: true; trigger: TriggerInp
     spec.cron = cron;
     spec.timezone = tz;
   } else if (kind === "github") {
-    if (!repo) return { ok: false, error: "a GitHub trigger is bound to one repo (owner/name)" };
+    if (!repos.length) return { ok: false, error: "a GitHub trigger needs at least one repo (owner/name)" };
     if (!GITHUB_EVENTS.includes(s.event as GithubEvent)) return { ok: false, error: `event must be one of ${GITHUB_EVENTS.join(", ")}` };
     spec.event = s.event as GithubEvent;
     if (spec.event === "issue_labeled") spec.label = typeof s.label === "string" && s.label.trim() ? s.label.trim().slice(0, 50) : "agent";
@@ -698,7 +709,7 @@ export function normalizeTrigger(body: unknown): { ok: true; trigger: TriggerInp
     }
     if (spec.event === "pr_opened") spec.allowForks = s.allowForks === true;
   } else if (kind === "watch") {
-    if (!repo) return { ok: false, error: "a repo-activity automation watches one repo (owner/name)" };
+    if (!repos.length) return { ok: false, error: "a repo-activity automation needs at least one repo (owner/name)" };
     const evs = Array.isArray(s.watch) ? [...new Set(s.watch)] : [];
     if (!evs.length || !evs.every((e) => WATCH_EVENTS.includes(e as WatchEvent))) return { ok: false, error: `watch must list events from ${WATCH_EVENTS.join(", ")}` };
     spec.watch = WATCH_EVENTS.filter((e) => evs.includes(e));
@@ -747,7 +758,7 @@ export function normalizeTrigger(body: unknown): { ok: true; trigger: TriggerInp
       name,
       kind,
       spec,
-      ...(repo ? { repo } : {}),
+      ...(repos.length ? { repos } : {}),
       taskTemplate,
       enabled: b.enabled !== false,
       // Receipt comment: ON by default for GitHub triggers (plan §5); opt-in for the rest.
@@ -762,7 +773,9 @@ export function normalizeTrigger(body: unknown): { ok: true; trigger: TriggerInp
 }
 
 /** "Weekdays 02:00 (Europe/Berlin)", "issue labelled `agent` on o/r", "after ‹nightly› succeeds". */
-export function describeWhen(t: { kind: TriggerKind; spec: TriggerSpec; repo?: string }, names: Record<string, string> = {}): string {
+export function describeWhen(t: { kind: TriggerKind; spec: TriggerSpec; repos?: string[] }, names: Record<string, string> = {}): string {
+  const rs = t.repos ?? [];
+  const where = rs.length > 2 ? `${rs[0]} +${rs.length - 1} more` : rs.join(", ");
   switch (t.kind) {
     case "schedule":
       if (t.spec.at) return `once, ${new Date(t.spec.at).toISOString().slice(0, 16).replace("T", " ")} UTC`;
@@ -772,7 +785,7 @@ export function describeWhen(t: { kind: TriggerKind; spec: TriggerSpec; repo?: s
         ? `${PRESET_LABEL[t.spec.preset]} alert${t.spec.cooldownMin ? ` · ${t.spec.cooldownMin} min cooldown per alert` : ""}`
         : "POST to its webhook URL";
     case "github": {
-      const on = t.repo ? ` on ${t.repo}` : "";
+      const on = where ? ` on ${where}` : "";
       if (t.spec.event === "issue_labeled") return `issue labelled \`${t.spec.label ?? "agent"}\`${on}`;
       if (t.spec.event === "issue_comment") return `comment starting ${t.spec.command ?? "/agent"}${on}`;
       if (t.spec.event === "pr_opened") return `pull request opened${on}`;
@@ -781,7 +794,7 @@ export function describeWhen(t: { kind: TriggerKind; spec: TriggerSpec; repo?: s
     case "watch": {
       const evs = (t.spec.watch ?? []).map((e) => WATCH_WORDS[e]);
       const head = evs.length > 3 ? `${evs.slice(0, 3).join(", ")} +${evs.length - 3} more` : evs.join(", ") || "repo activity";
-      return `${head}${t.repo ? ` on ${t.repo}` : ""}`;
+      return `${head}${where ? ` on ${where}` : ""}`;
     }
     case "chain": {
       const parent = names[t.spec.afterTrigger ?? ""] ?? "another automation";

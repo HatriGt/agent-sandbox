@@ -1,10 +1,11 @@
 ﻿import * as React from "react";
-import { CalendarClock, ChevronRight, Copy, FlaskConical, GitPullRequest, History as HistoryIcon, Link2, ListChecks, Play, Plus, Radar, RotateCw, ShieldCheck, Trash2, Webhook, Workflow } from "lucide-react";
+import { CalendarClock, ChevronRight, Copy, FlaskConical, GitPullRequest, History as HistoryIcon, Link2, ListChecks, Play, Plus, Radar, RotateCw, ShieldCheck, Trash2, Webhook, Workflow, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { toast } from "sonner";
 import { api, type AlertPreset, type Automation, type AutomationDelivery, type AutomationDraft, type AutomationKind, type GithubEvent, type WatchEvent } from "@/lib/api";
 import { fmtAgo } from "@/lib/format";
+import { RunFactsLine } from "@/components/RunFactsLine";
 import { readCache, useCached, writeCache } from "@/lib/cache";
 import { Button } from "@/components/ui/button";
 import { ArmButton } from "@/components/ui/arm-button";
@@ -19,6 +20,7 @@ import { Bar } from "@/components/thread/Skeletons";
 import { cn } from "@/lib/utils";
 import { PrFollowupsPanel } from "@/components/PrFollowupsPanel";
 import { SchedulePicker, describeCron } from "@/components/SchedulePicker";
+import { RepoPicker } from "@/components/RepoPicker";
 
 /**
  * Automations: runs that start themselves — on a schedule, on a webhook, on a GitHub event, or after
@@ -124,6 +126,8 @@ const REASON_LABEL: Record<NonNullable<AutomationDelivery["reason"]>, string> = 
   signature: "bad signature",
   payload: "bad payload",
   error: "error",
+  sender: "sender not allowed",
+  asked: "needs an answer",
 };
 
 /** "fired → box-1" / "skipped · cooldown" / "rejected · bad signature". */
@@ -362,7 +366,7 @@ function toDraft(a: Automation): AutomationDraft {
     name: a.name,
     kind: a.kind,
     spec: a.spec,
-    ...(a.repo ? { repo: a.repo } : {}),
+    ...(a.repos?.length ? { repos: a.repos } : {}),
     taskTemplate: a.taskTemplate,
     enabled: a.enabled,
     prComment: a.prComment,
@@ -532,6 +536,7 @@ function AutomationRow({ a, onEdit, onRuns, onToggle, onDismiss, onOpenBox, onOp
             </>
           )}
         </span>
+        {a.lastDelivery?.facts && <RunFactsLine f={a.lastDelivery.facts} className="flex-nowrap overflow-hidden" />}
       </span>
 
       <span className="hidden w-44 shrink-0 flex-col gap-0.5 text-right text-meta sm:flex">
@@ -762,7 +767,7 @@ function Editor({
           <Segmented<AutomationKind>
             ariaLabel="What starts it"
             value={d.kind}
-            onChange={(k) => setD((cur) => ({ ...blank(k), name: cur.name, repo: cur.repo }))}
+            onChange={(k) => setD((cur) => ({ ...blank(k), name: cur.name, repos: cur.repos }))}
             options={(Object.keys(KIND_LABEL) as AutomationKind[]).map((k) => {
               const G = GLYPH[k];
               return { value: k, label: KIND_LABEL[k], icon: <G className="size-3.5" />, disabled: k === "chain" && others.length === 0, title: k === "chain" && others.length === 0 ? "Create another automation first" : undefined };
@@ -806,10 +811,10 @@ function Editor({
       )}
 
       {(d.kind === "github" || d.kind === "watch" || d.kind === "schedule" || d.kind === "webhook") && (
-        <label className="block">
-          <Label hint={d.kind === "github" || d.kind === "watch" ? "required" : "optional — the run clones it"}>Repository</Label>
-          <input className={field} value={d.repo ?? ""} onChange={(e) => set({ repo: e.target.value || undefined })} placeholder="owner/name" />
-        </label>
+        <div>
+          <Label hint={d.kind === "github" || d.kind === "watch" ? "required — each one fires on its own events" : "optional — the run clones them"}>Repositories</Label>
+          <RepoField value={d.repos ?? []} onChange={(repos) => set({ repos: repos.length ? repos : undefined })} />
+        </div>
       )}
 
       {d.kind === "github" && (
@@ -1004,7 +1009,7 @@ function Editor({
             ]}
           />
         </div>
-        {(d.kind === "github" || d.kind === "watch" || d.repo) && (
+        {(d.kind === "github" || d.kind === "watch" || !!d.repos?.length) && (
           <label className="flex items-center justify-between gap-3">
             <span className="text-meta">
               Comment the receipt on the issue or PR
@@ -1068,7 +1073,7 @@ function Editor({
       </Collapse>
 
       <div className="flex flex-wrap items-center gap-2 border-t pt-4">
-        <Button size="sm" onClick={() => void save()} loading={saving} disabled={!d.name.trim() || !d.taskTemplate.trim() || (d.kind === "watch" && (!d.repo?.trim() || !d.spec.watch?.length))}>
+        <Button size="sm" onClick={() => void save()} loading={saving} disabled={!d.name.trim() || !d.taskTemplate.trim() || ((d.kind === "watch" || d.kind === "github") && !d.repos?.length) || (d.kind === "watch" && !d.spec.watch?.length)}>
           {id ? "Save" : "Create"}
         </Button>
         {id && d.kind !== "chain" && (
@@ -1099,6 +1104,63 @@ function Editor({
         {id && <ArmButton size="sm" variant="ghost" icon={<Trash2 />} label="Delete" armedLabel="Delete?" onConfirm={remove} className="text-muted-foreground" />}
       </div>
       {id && d.kind === "chain" && d.spec.afterTrigger && <p className="text-faint -mt-3 text-micro">Runs after “{names[d.spec.afterTrigger] ?? "?"}” — run that one to test the chain.</p>}
+    </div>
+  );
+}
+
+/** Repos an automation listens to / clones: chips, a picker over the connected accounts, and typed owner/name. */
+function RepoField({ value, onChange }: { value: string[]; onChange: (repos: string[]) => void }) {
+  const [open, setOpen] = React.useState(false);
+  const [typed, setTyped] = React.useState("");
+  const ref = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+  const has = (r: string) => value.some((v) => v.toLowerCase() === r.toLowerCase());
+  const toggle = (r: string) => onChange(has(r) ? value.filter((v) => v.toLowerCase() !== r.toLowerCase()) : [...value, r]);
+  const addTyped = () => {
+    const r = typed.trim().replace(/\.git$/i, "");
+    if (/^[\w.-]+\/[\w.-]+$/.test(r) && !has(r)) onChange([...value, r]);
+    setTyped("");
+  };
+  return (
+    <div ref={ref} className="relative">
+      <div className="flex flex-wrap items-center gap-1.5 rounded-lg border px-2 py-1.5">
+        {value.map((r) => (
+          <span key={r} className="bg-muted text-meta inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-mono">
+            {r}
+            <button type="button" aria-label={`Remove ${r}`} className="text-faint hover:text-foreground" onClick={() => toggle(r)}>
+              <X className="size-3" />
+            </button>
+          </span>
+        ))}
+        <input
+          className="text-meta min-w-32 flex-1 bg-transparent font-mono outline-none"
+          value={typed}
+          placeholder={value.length ? "add owner/name" : "owner/name — or pick"}
+          onChange={(e) => setTyped(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === ",") {
+              e.preventDefault();
+              addTyped();
+            } else if (e.key === "Backspace" && !typed && value.length) onChange(value.slice(0, -1));
+          }}
+          onBlur={addTyped}
+        />
+        <Button type="button" size="sm" variant="ghost" onClick={() => setOpen((o) => !o)}>
+          Pick
+        </Button>
+      </div>
+      {open && (
+        <div className="absolute top-full left-0 z-20 mt-1">
+          <RepoPicker selected={value.map((repo) => ({ repo }))} onToggle={(r) => toggle(r.fullName)} onClose={() => setOpen(false)} />
+        </div>
+      )}
     </div>
   );
 }
