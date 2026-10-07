@@ -20,6 +20,7 @@ import {
   templateContext,
   verifyGithubSignature,
   MAX_FIRES_PER_HOUR,
+  shouldDestroyBox,
 } from "../src/triggers.ts";
 import { claimDelivery, createTrigger, getTrigger, getTriggerById, revealSecret } from "../src/trigger-store.ts";
 import { makeDispatcher } from "../src/trigger-dispatch.ts";
@@ -97,22 +98,19 @@ test("dedupe: delivery id and body hash are claimed once", () => {
   assert.ok(claimDelivery(db, "t3", g, 120_000, 7 * 86400_000, 60_000));
 });
 
-test("admission: concurrency cap (default 1), disabled, storm cap", () => {
-  assert.deepEqual(admit({ enabled: true, concurrency: 1 }, 0, [], 0), { ok: true });
-  assert.equal(admit({ enabled: true, concurrency: 1 }, 1, [], 0).ok, false);
-  assert.equal(admit({ enabled: true, concurrency: 2 }, 1, [], 0).ok, true);
-  assert.equal(admit({ enabled: false, concurrency: 1 }, 0, [], 0).ok, false);
+test("admission: disabled and storm cap; runs already going never block a new fire", () => {
+  assert.deepEqual(admit({ enabled: true }, [], 0), { ok: true });
+  assert.equal(admit({ enabled: false }, [], 0).ok, false);
   const now = 10 * 3600_000;
   const recent = Array.from({ length: MAX_FIRES_PER_HOUR }, (_, i) => now - i * 1000);
-  assert.equal(admit({ enabled: true, concurrency: 5 }, 0, recent, now).ok, false);
-  assert.equal(admit({ enabled: true, concurrency: 5 }, 0, recent, now + 3600_000).ok, true);
+  assert.equal(admit({ enabled: true }, recent, now).ok, false);
+  assert.equal(admit({ enabled: true }, recent, now + 3600_000).ok, true);
 });
 
 test("normalize: safe defaults and validation", () => {
   const g = normalizeTrigger({ name: "Fix", kind: "github", repo: "o/r", taskTemplate: "t", spec: { event: "issue_labeled" } });
   assert.ok(g.ok);
   if (g.ok) {
-    assert.equal(g.trigger.concurrency, 1);
     assert.equal(g.trigger.prComment, true);
     assert.equal(g.trigger.spec.label, "agent");
   }
@@ -120,7 +118,6 @@ test("normalize: safe defaults and validation", () => {
   assert.ok(s.ok && s.trigger.prComment === false);
   assert.equal(normalizeTrigger({ name: "x", kind: "schedule", taskTemplate: "t", spec: { cron: "bad" } }).ok, false);
   assert.equal(normalizeTrigger({ name: "x", kind: "github", taskTemplate: "t", spec: { event: "issue_labeled" } }).ok, false);
-  assert.equal(normalizeTrigger({ name: "x", kind: "schedule", taskTemplate: "t", spec: { cron: "@daily" }, concurrency: 99 }).ok && true, true);
 });
 
 test("github filter: repo, label, trusted commenter, bots, forks", () => {
@@ -167,7 +164,7 @@ const digest = (over: Partial<RunDigest> = {}): RunDigest => ({
   ...over,
 });
 
-test("dispatcher: fires through startRun with trigger provenance, holds the concurrency slot until finish", async () => {
+test("dispatcher: fires through startRun with trigger provenance; overlapping events each get their own box", async () => {
   const db = openMemoryDb();
   const n = normalizeTrigger({ name: "Fix", kind: "github", repo: "o/r", taskTemplate: "Fix #{{issue.number}}", spec: { event: "issue_labeled" } });
   assert.ok(n.ok);
@@ -196,16 +193,16 @@ test("dispatcher: fires through startRun with trigger provenance, holds the conc
   assert.equal(calls[0].startedBy.subject.number, 12);
   assert.deepEqual(calls[0].repos, [{ repo: "o/r" }]);
   const r2 = await d.fire(getTriggerById(db, row.id)!, { payload, event: "issues", match });
-  assert.equal(r2.outcome, "skipped", "concurrency 1 holds the second fire");
-  assert.equal(calls.length, 1);
+  assert.equal(r2.outcome, "started", "a second event while the first run is going starts its own box");
+  assert.equal(r2.box, "box-2");
+  assert.equal(d.activeCount(row.id), 2);
   await d.onRunFinished("box-1", digest({ box: "box-1" }), calls[0].startedBy, 1);
   assert.equal(comments.length, 1, "receipt comment on by default for GitHub triggers");
   assert.equal(comments[0].number, 12);
-  const r3 = await d.fire(getTriggerById(db, row.id)!, { payload, event: "issues", match });
-  assert.equal(r3.outcome, "started");
+  assert.equal(d.activeCount(row.id), 1);
 });
 
-test("dispatcher: concurrency and storm counts survive a controller restart; reconcile frees dead boxes", async () => {
+test("dispatcher: in-flight and storm counts survive a controller restart; reconcile frees dead boxes", async () => {
   const db = openMemoryDb();
   const n = normalizeTrigger({ name: "Nightly", kind: "schedule", taskTemplate: "go", spec: { cron: "0 2 * * *" } });
   assert.ok(n.ok);
@@ -231,7 +228,8 @@ test("dispatcher: concurrency and storm counts survive a controller restart; rec
   // "Restart": a fresh dispatcher over the same DB still sees the held slot.
   const d2 = mk();
   assert.equal(d2.activeCount(row.id), 1);
-  assert.equal((await d2.fire(row, { manual: true })).outcome, "skipped");
+  assert.equal((await d2.fire(row, { manual: true })).outcome, "started", "no cap: a second run starts alongside");
+  assert.equal(d2.activeCount(row.id), 2);
   // The box vanished while the controller was down: reconcile (past the grace window) frees it.
   live = new Set();
   t += 180_000;
@@ -252,6 +250,26 @@ test("dispatcher: concurrency and storm counts survive a controller restart; rec
     t += 1000;
   }
   assert.equal(last, "skipped", "storm cap holds across dispatcher instances");
+});
+
+test("box policy: destroy only finished runs, per the automation's setting; normalize keeps it", async () => {
+  assert.equal(shouldDestroyBox(undefined, "done"), false);
+  assert.equal(shouldDestroyBox("done", "done"), true);
+  assert.equal(shouldDestroyBox("done", "failed"), false, "a failed box is kept to inspect");
+  assert.equal(shouldDestroyBox("always", "failed"), true);
+  assert.equal(shouldDestroyBox("always", "waiting"), false, "a run paused on a question has not finished");
+  const n = normalizeTrigger({ name: "Review", kind: "watch", repo: "o/r", taskTemplate: "t", spec: { watch: ["pr_opened"], destroy: "always" } });
+  assert.ok(n.ok);
+  if (!n.ok) return;
+  assert.equal(n.trigger.spec.destroy, "always");
+  const bad = normalizeTrigger({ name: "Review", kind: "watch", repo: "o/r", taskTemplate: "t", spec: { watch: ["pr_opened"], destroy: "nuke" } });
+  assert.ok(bad.ok && bad.trigger.spec.destroy === undefined);
+  const db = openMemoryDb();
+  const { row } = createTrigger(db, box, "u1", n.trigger);
+  const d = makeDispatcher({ db, log: () => {}, startRun: async () => ({ ok: true, box: "b1" }) });
+  assert.equal((await d.fire(row, { manual: true })).box, "b1");
+  assert.deepEqual(await d.onRunFinished("b1", digest({ box: "b1", state: "failed" }), undefined, 1), { destroy: true });
+  assert.deepEqual(await d.onRunFinished("stranger", digest({ box: "stranger" }), undefined, 2), { destroy: false }, "a box no automation started is never destroyed");
 });
 
 test("PR-only: default branch and deletions refused; feature branches pass", () => {

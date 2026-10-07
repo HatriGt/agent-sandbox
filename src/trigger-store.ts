@@ -65,7 +65,7 @@ function toRow(r: Record<string, any>): TriggerRow {
     ...(r.repo ? { repo: r.repo } : {}),
     taskTemplate: r.task_template,
     enabled: !!r.enabled,
-    concurrency: Number(r.concurrency) || 1,
+    // triggers.concurrency is orphaned: every fire gets its own box; the column is neither read nor written.
     // triggers.budget_json is orphaned: budgets were removed; the column is neither read nor written.
     prComment: !!r.pr_comment,
     quiet: !!r.quiet,
@@ -86,7 +86,7 @@ function toRow(r: Record<string, any>): TriggerRow {
   };
 }
 
-/** A one-time run that could not start (busy, storm cap) tries again this much later. */
+/** A one-time run that could not start (storm cap) tries again this much later. */
 const ONCE_RETRY_MS = 60_000;
 
 /**
@@ -117,10 +117,10 @@ export function createTrigger(
   // A proposal is always created paused: the agent suggests, the owner enables.
   const enabled = opts.proposed ? false : t.enabled;
   db.prepare(
-    `INSERT INTO triggers (id, owner, name, kind, spec_json, repo, task_template, enabled, concurrency, pr_comment, quiet, proposed, agent, model, harness_id, workflow_id, source_box, scope, secret_enc, next_fire, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO triggers (id, owner, name, kind, spec_json, repo, task_template, enabled, pr_comment, quiet, proposed, agent, model, harness_id, workflow_id, source_box, scope, secret_enc, next_fire, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
-    id, owner, t.name, t.kind, JSON.stringify(t.spec), t.repo ?? null, t.taskTemplate, enabled ? 1 : 0, t.concurrency,
+    id, owner, t.name, t.kind, JSON.stringify(t.spec), t.repo ?? null, t.taskTemplate, enabled ? 1 : 0,
     t.prComment ? 1 : 0, t.quiet ? 1 : 0, opts.proposed ? 1 : 0, t.agent ?? null, t.model ?? null, t.harnessId ?? null, t.workflowId ?? null, opts.sourceBox ?? null, opts.scope ?? "automation", box.seal(secret),
     computeNextFire({ ...t, enabled }, now), now, now
   );
@@ -131,11 +131,11 @@ export function updateTrigger(db: Db, owner: string, id: string, t: TriggerInput
   const cur = getTrigger(db, owner, id);
   const r = db
     .prepare(
-      `UPDATE triggers SET name = ?, kind = ?, spec_json = ?, repo = ?, task_template = ?, enabled = ?, concurrency = ?,
+      `UPDATE triggers SET name = ?, kind = ?, spec_json = ?, repo = ?, task_template = ?, enabled = ?,
        pr_comment = ?, quiet = ?, agent = ?, model = ?, harness_id = ?, workflow_id = ?, next_fire = ?, updated_at = ? WHERE id = ? AND owner = ?`
     )
     .run(
-      t.name, t.kind, JSON.stringify(t.spec), t.repo ?? null, t.taskTemplate, t.enabled ? 1 : 0, t.concurrency,
+      t.name, t.kind, JSON.stringify(t.spec), t.repo ?? null, t.taskTemplate, t.enabled ? 1 : 0,
       t.prComment ? 1 : 0, t.quiet ? 1 : 0, t.agent ?? null, t.model ?? null, t.harnessId ?? null, t.workflowId ?? null, computeNextFire(t, now, cur?.lastFired != null), now, id, owner
     );
   return r.changes ? getTrigger(db, owner, id) : undefined;
@@ -413,7 +413,7 @@ export function reasonOf(result: TriggerResult): DeliveryReason | undefined {
   if (result.outcome === "failed") return "error";
   const r = result.reason ?? "";
   if (r === "disabled") return "disabled";
-  if (/^busy|^storm cap/.test(r)) return "limit";
+  if (/^storm cap/.test(r)) return "limit";
   return "ignored";
 }
 

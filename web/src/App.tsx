@@ -6,6 +6,7 @@ import { api, type FleetLifecycle, type FleetSnapshot } from "@/lib/api";
 import { POLL_MS, isUp, isVisible, threadSort, threadTitle } from "@/lib/format";
 import { questionHeadline } from "@/lib/question";
 import { legacyHashTarget, useConsoleRoute, useGo } from "@/lib/route";
+import type { AutopilotTab } from "@/components/AutopilotPage";
 import { usePoll } from "@/hooks/usePoll";
 import { prefetch } from "@/lib/cache";
 import { useStableBoxes } from "@/hooks/useStableBoxes";
@@ -42,8 +43,8 @@ const Sandboxes = React.lazy(() => import("@/components/Sandboxes").then((m) => 
 const Integrations = React.lazy(() => import("@/components/Integrations").then((m) => ({ default: m.Integrations })));
 const SkillsPage = React.lazy(() => import("@/components/SkillsPage").then((m) => ({ default: m.SkillsPage })));
 const MemoryPage = React.lazy(() => import("@/components/Memory").then((m) => ({ default: m.MemoryPage })));
-type AutopilotTab = import("@/components/AutopilotPage").AutopilotTab;
 const AutopilotPage = React.lazy(() => import("@/components/AutopilotPage").then((m) => ({ default: m.AutopilotPage })));
+const AutomationRunsPage = React.lazy(() => import("@/components/AutomationRunsPage").then((m) => ({ default: m.AutomationRunsPage })));
 const HarnessesPage = React.lazy(() => import("@/components/HarnessesPage").then((m) => ({ default: m.HarnessesPage })));
 const History = React.lazy(() => import("@/components/History").then((m) => ({ default: m.History })));
 const PullRequestPage = React.lazy(() => import("@/components/pr/PullRequestPage").then((m) => ({ default: m.PullRequestPage })));
@@ -446,7 +447,7 @@ export default function App() {
     // hold the box-loading skeleton until the box surfaces (or the cleanup effect routes home).
     // Once the booting pane knows its machine it shares that box's pane key, so the swap to the real
     // Thread is a content change inside one pane — not a fade-out/fade-in remount (the jump-cut).
-    view === "fleet" ? "fleet" : view === "history" ? "history" : view === "automations" ? "automations" : view === "skills" ? "skills" : view === "memory" ? "memory" : view === "integrations" ? "integrations" : view === "account" ? "account" : view === "connect" ? "connect" : view === "welcome" ? "welcome" : view === "admin" ? "admin" : route.view === "pr" ? `pr:${route.repo}#${route.number}` : (booting && !selectedBox) || (view === "box" && selected === launched) ? "launch" : selectedBox ? `box:${selectedBox.name}` : view === "box" && selectedRaw ? `box:${selectedRaw.name}` : view === "box" ? "box-loading" : "hub";
+    view === "fleet" ? "fleet" : view === "history" ? "history" : view === "automations" ? "automations" : route.view === "automation-runs" ? `automation-runs:${route.id}` : view === "skills" ? "skills" : view === "memory" ? "memory" : view === "integrations" ? "integrations" : view === "account" ? "account" : view === "connect" ? "connect" : view === "welcome" ? "welcome" : view === "admin" ? "admin" : route.view === "pr" ? `pr:${route.repo}#${route.number}` : (booting && !selectedBox) || (view === "box" && selected === launched) ? "launch" : selectedBox ? `box:${selectedBox.name}` : view === "box" && selectedRaw ? `box:${selectedRaw.name}` : view === "box" ? "box-loading" : "hub";
 
   const reduceMotion = useReducedMotion();
   // Direction-aware pane motion: deeper (hub → page → box) enters from the right on phones, going
@@ -584,7 +585,7 @@ export default function App() {
 
       <div className="flex flex-col gap-0.5 border-t px-2 py-2">
         <NavItem active={view === "fleet"} flash={flash === "fleet"} onClick={showFleet} icon={<LayoutGrid />} label="Fleet view" badge={boxes.length || undefined} shortcut="g f" />
-        <NavItem active={view === "automations" || view === "scheduled" || view === "workflows"} onClick={showAutomations} icon={<Workflow />} label="Autopilot" />
+        <NavItem active={view === "automations" || view === "automation-runs" || view === "scheduled" || view === "workflows"} onClick={showAutomations} icon={<Workflow />} label="Autopilot" />
         <span className="contents" onMouseEnter={prefetchHistory}>
           <NavItem active={view === "history"} flash={flash === "history"} onClick={showHistory} icon={<Clock />} label="History" shortcut="g h" />
         </span>
@@ -758,7 +759,7 @@ export default function App() {
               <RailIcon onClick={newTask} icon={<Plus />} label="New task" shortcut="n" primary />
               <RailIcon onClick={openPalette} icon={<Search />} label="Search" shortcut="⌘K" />
               <RailIcon active={view === "fleet"} flash={flash === "fleet"} onClick={showFleet} icon={<LayoutGrid />} label="Fleet view" shortcut="g f" badge={boxes.length || undefined} dot={waiting.length > 0} />
-              <RailIcon active={view === "automations" || view === "scheduled" || view === "workflows"} onClick={showAutomations} icon={<Workflow />} label="Autopilot" />
+              <RailIcon active={view === "automations" || view === "automation-runs" || view === "scheduled" || view === "workflows"} onClick={showAutomations} icon={<Workflow />} label="Autopilot" />
               <span className="contents" onMouseEnter={prefetchHistory}>
                 <RailIcon active={view === "history"} flash={flash === "history"} onClick={showHistory} icon={<Clock />} label="History" shortcut="g h" />
               </span>
@@ -822,7 +823,11 @@ export default function App() {
                   />
                 ) : view === "automations" || view === "scheduled" ? (
                   <PageEnter className="h-full min-h-0">
-                    <AutopilotPage tab={view} onTab={goAutopilot} onBack={backToRail} onOpenBox={(b) => go({ view: "box", name: b })} />
+                    <AutopilotPage tab={view} onTab={goAutopilot} onBack={backToRail} onOpenBox={(b) => go({ view: "box", name: b })} onOpenRuns={(id) => go({ view: "automation-runs", id })} />
+                  </PageEnter>
+                ) : route.view === "automation-runs" ? (
+                  <PageEnter className="h-full min-h-0">
+                    <AutomationRunsPage id={route.id} onBack={showAutomations} onOpenBox={(b) => go({ view: "box", name: b })} />
                   </PageEnter>
                 ) : view === "history" ? (
                   <PageEnter className="h-full min-h-0">
@@ -842,7 +847,7 @@ export default function App() {
                   </PageEnter>
                 ) : view === "workflows" ? (
                   <PageEnter className="h-full min-h-0">
-                    <AutopilotPage tab="playbooks" onTab={goAutopilot} onBack={backToRail} onOpenBox={(b) => go({ view: "box", name: b })} />
+                    <AutopilotPage tab="playbooks" onTab={goAutopilot} onBack={backToRail} onOpenBox={(b) => go({ view: "box", name: b })} onOpenRuns={(id) => go({ view: "automation-runs", id })} />
                   </PageEnter>
                 ) : view === "integrations" ? (
                   <PageEnter className="h-full min-h-0">

@@ -4,6 +4,7 @@ import type { StartedBy } from "./started-by.js";
 import {
   admit,
   formatReceiptComment,
+  shouldDestroyBox,
   quietPreamble,
   renderTemplate,
   templateContext,
@@ -62,8 +63,8 @@ export function makeDispatcher(d: DispatcherDeps) {
   const now = () => (d.now ? d.now() : Date.now());
   const log = (m: string) => (d.log ? d.log(m) : console.error(m));
   /*
-   * Concurrency and the storm cap live in `trigger_fires`, not memory, so a controller restart
-   * cannot reset them. A row is one fire attempt; `finished_at IS NULL` means it holds a slot
+   * In-flight runs and the storm cap live in `trigger_fires`, not memory, so a controller restart
+   * cannot reset them. A row is one fire attempt; `finished_at IS NULL` means its run is still going
    * (box NULL = still starting). A start interrupted by a crash dies with the process, so rows left
    * "starting" from a previous process are closed at construction.
    */
@@ -99,9 +100,9 @@ export function makeDispatcher(d: DispatcherDeps) {
   async function fire(t: TriggerRow, ctx: FireContext = {}): Promise<TriggerResult> {
     const at = now();
     const recent = recentFires(t.id, at);
-    // A manual "Run now" still respects concurrency and the storm cap, but not the enabled switch:
-    // testing a paused automation is exactly what the button is for.
-    const adm = admit({ enabled: ctx.manual ? true : t.enabled, concurrency: t.concurrency }, activeCount(t.id), recent, at);
+    // A manual "Run now" still respects the storm cap, but not the enabled switch: testing a paused
+    // automation is exactly what the button is for. Runs already going never block a new one.
+    const adm = admit({ enabled: ctx.manual ? true : t.enabled }, recent, at);
     if (!adm.ok) {
       const r: TriggerResult = { at, outcome: "skipped", reason: adm.reason };
       markSkipped(d.db, t.id, r, at);
@@ -179,16 +180,17 @@ export function makeDispatcher(d: DispatcherDeps) {
   }
 
   /**
-   * The finish edge: a run reached done/failed and was archived. Frees the concurrency slot, stamps
+   * The finish edge: a run reached done/failed and was archived. Closes its fire row, stamps
    * the trigger's last result, posts the receipt comment (when on and the run has a subject), and
-   * fires any chain that follows this trigger.
+   * fires any chain that follows this trigger. Answers whether the automation's box policy wants the
+   * box destroyed now; the caller does it after its own finish work (follow-ups) is through.
    */
-  async function onRunFinished(box: string, digest: RunDigest, startedBy: StartedBy | undefined, archiveId?: number, opts: { quiet?: boolean } = {}): Promise<void> {
+  async function onRunFinished(box: string, digest: RunDigest, startedBy: StartedBy | undefined, archiveId?: number, opts: { quiet?: boolean } = {}): Promise<{ destroy: boolean }> {
     const id = triggerOfBox(box) ?? (startedBy?.kind === "trigger" ? startedBy.triggerId : undefined);
-    if (!id) return;
+    if (!id) return { destroy: false };
     closeBox(box);
     const t = getTriggerById(d.db, id);
-    if (!t) return;
+    if (!t) return { destroy: false };
     markFinished(d.db, id, box, { state: digest.state, headline: digest.headline, ...(archiveId ? { archiveId } : {}) });
     // The ledger row the Automations page reads: quiet (nothing needed the operator) or a report.
     markDeliveryFinished(d.db, id, box, opts.quiet === true);
@@ -210,10 +212,12 @@ export function makeDispatcher(d: DispatcherDeps) {
       });
       await d.postComment(t.owner, t.repo, subj.number, body).catch((e) => log(`[triggers] receipt comment on ${t.repo}#${subj.number} failed: ${(e as Error).message.slice(0, 200)}`));
     }
+    // Chains start (and carry the parent's patch) BEFORE the parent may be destroyed: fire awaits startRun.
     for (const c of chainsAfter(d.db, t.owner, id)) {
       if (c.spec.on !== "any" && digest.state !== "done") continue;
       await fire(c, { parent: { box, digest } }).catch((e) => log(`[triggers] chain ${c.id}: ${(e as Error).message}`));
     }
+    return { destroy: shouldDestroyBox(t.spec.destroy, digest.state) };
   }
 
   /** A box torn down before it finished still frees its slot. */

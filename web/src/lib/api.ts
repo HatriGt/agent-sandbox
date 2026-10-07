@@ -1105,6 +1105,8 @@ export interface AutomationSpec {
   /** PR follow-ups for this automation's PRs; unset = the user's default. */
   keepGreen?: boolean;
   addressReviews?: boolean;
+  /** Box when a run finishes: unset/"keep" = global sleep TTL; "done" = destroy after a clean finish; "always" = destroy on any finish. */
+  destroy?: "keep" | "done" | "always";
   cron?: string;
   /** One-time run at this epoch ms (chat schedules). */
   at?: number;
@@ -1145,7 +1147,6 @@ export interface AutomationDraft {
   repo?: string;
   taskTemplate: string;
   enabled: boolean;
-  concurrency: number;
   prComment: boolean;
   /** Quiet: a run that finds nothing for the operator sends no notification. */
   quiet?: boolean;

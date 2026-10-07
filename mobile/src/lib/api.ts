@@ -587,6 +587,8 @@ export type AlertPreset = "sentry" | "datadog" | "pagerduty";
 export interface AutomationSpec {
   keepGreen?: boolean;
   addressReviews?: boolean;
+  /** Box when a run finishes: unset/"keep" = global sleep TTL; "done" = destroy after a clean finish; "always" = destroy on any finish. */
+  destroy?: "keep" | "done" | "always";
   cron?: string;
   /** One-time run at this epoch ms (chat schedules). */
   at?: number;
@@ -613,7 +615,6 @@ export interface AutomationDraft {
   repo?: string;
   taskTemplate: string;
   enabled: boolean;
-  concurrency: number;
   prComment: boolean;
   quiet?: boolean;
   agent?: string;

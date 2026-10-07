@@ -828,7 +828,6 @@ const proposeAutomations = (box: string, owner: string, log: string, startedBy: 
         ...(repo ? { repo } : {}),
         taskTemplate: p.task,
         enabled: !ask,
-        concurrency: 1,
         prComment: false,
         // Something asked for once ("merge the PR at 2pm") always reports back; a repeating check stays quiet when nothing is wrong.
         quiet: !p.at,
@@ -888,7 +887,7 @@ const archiveFinishedRun = async (box: string, opts: { withFiles: boolean; quiet
   const archiveId = archiveRun(db, { box, owner: runOwner, digest, ...(diffText ? { diffText } : {}) });
   // A trigger-started run finishing frees its slot, stamps the automation's last result, posts the
   // receipt comment and fires any chain. Only on a NEW record (null = this finish was already seen).
-  if (archiveId !== null) await dispatcher.onRunFinished(box, digest, digest.provenance?.startedBy, archiveId, { quiet: opts.quiet === true });
+  const fin = archiveId !== null ? await dispatcher.onRunFinished(box, digest, digest.provenance?.startedBy, archiveId, { quiet: opts.quiet === true }) : { destroy: false };
   // Automations the agent proposed in its sign-off: created paused, pending the operator's approval.
   if (archiveId !== null) {
     try {
@@ -909,6 +908,21 @@ const archiveFinishedRun = async (box: string, opts: { withFiles: boolean; quiet
   }
   // An attempt finishing may complete its group: score it now rather than at the next sweep tick.
   if (archiveId !== null) sweepAttempts(true);
+  // The automation's box policy: destroy the finished box now instead of waiting out the global
+  // sleep TTL. Last, so the archive, memory, chains and follow-ups above have read what they need.
+  // A box the operator pinned (Keep) stays; a listing failure keeps it too (fail safe).
+  if (fin.destroy && opts.withFiles) {
+    const kept = await listKept(cfg).catch(() => null);
+    if (kept && !kept.has(box)) {
+      await deps
+        .teardown(cfg, box)
+        .then(() => {
+          void forgetTitle(cfg, box).catch(() => {});
+          console.error(`[triggers] ${box}: destroyed on finish (automation box policy)`);
+        })
+        .catch((e) => console.error(`[triggers] ${box}: destroy on finish failed: ${(e as Error).message.slice(0, 200)}`));
+    }
+  }
 };
 
 /**
@@ -3537,7 +3551,6 @@ const followups = makeFollowupEngine({
       repo: f.startedBy.pr.repo,
       taskTemplate: f.task,
       enabled: true,
-      concurrency: 1,
       prComment: false,
       quiet: false,
       proposed: false,

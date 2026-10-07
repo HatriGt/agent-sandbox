@@ -99,7 +99,6 @@ function blank(kind: AutomationKind = "schedule"): AutomationDraft {
               : {},
     taskTemplate: DEFAULT_TEMPLATES[kind],
     enabled: true,
-    concurrency: 1,
     prComment: kind === "github" || kind === "watch",
   };
 }
@@ -113,7 +112,6 @@ function toDraft(a: Automation): AutomationDraft {
     repo: a.repo,
     taskTemplate: a.taskTemplate,
     enabled: a.enabled,
-    concurrency: a.concurrency,
     prComment: a.prComment,
     quiet: a.quiet,
     agent: a.agent,
@@ -574,9 +572,21 @@ function Editor() {
         <ToggleRow label="Quiet" hint="Don't push-notify when a run from this automation finishes." value={!!d.quiet} onChange={(v) => set({ quiet: v || undefined })} />
         <View style={{ gap: 6 }}>
           <T variant="meta" weight="medium" tone="muted">
-            Runs at once
+            Box after the run
           </T>
-          <Segmented small value={String(d.concurrency)} onChange={(v) => set({ concurrency: Number(v) })} options={[1, 2, 3].map((n) => ({ value: String(n), label: String(n) }))} />
+          <Segmented
+            small
+            value={d.spec.destroy ?? "keep"}
+            onChange={(v) => setSpec({ destroy: v === "keep" ? undefined : (v as "done" | "always") })}
+            options={[
+              { value: "keep", label: "Keep" },
+              { value: "done", label: "If done" },
+              { value: "always", label: "Always" },
+            ]}
+          />
+          <T variant="micro" tone="muted">
+            Destroy the box when the run finishes. Keep = the global sleep rule; pinned boxes and runs waiting on a question stay.
+          </T>
         </View>
       </Card>
 

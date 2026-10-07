@@ -1,5 +1,5 @@
 ﻿import * as React from "react";
-import { CalendarClock, ChevronRight, Copy, FlaskConical, GitPullRequest, Link2, ListChecks, Play, Plus, Radar, RotateCw, ShieldCheck, Trash2, Webhook, Workflow } from "lucide-react";
+import { CalendarClock, ChevronRight, Copy, FlaskConical, GitPullRequest, History as HistoryIcon, Link2, ListChecks, Play, Plus, Radar, RotateCw, ShieldCheck, Trash2, Webhook, Workflow } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { toast } from "sonner";
@@ -27,8 +27,8 @@ import { SchedulePicker, describeCron } from "@/components/SchedulePicker";
  * preview of the task, rendered against the last real payload this automation received.
  */
 
-const GLYPH: Record<AutomationKind, LucideIcon> = { schedule: CalendarClock, webhook: Webhook, github: GitPullRequest, watch: Radar, chain: Link2 };
-const KIND_LABEL: Record<AutomationKind, string> = { schedule: "Schedule", webhook: "Webhook", github: "GitHub", watch: "Repo activity", chain: "After another" };
+export const GLYPH: Record<AutomationKind, LucideIcon> = { schedule: CalendarClock, webhook: Webhook, github: GitPullRequest, watch: Radar, chain: Link2 };
+export const KIND_LABEL: Record<AutomationKind, string> = { schedule: "Schedule", webhook: "Webhook", github: "GitHub", watch: "Repo activity", chain: "After another" };
 const EVENT_LABEL: Record<GithubEvent, string> = { issue_labeled: "Issue labelled", issue_comment: "Comment command", pr_opened: "PR opened" };
 const WATCH_LABEL: Record<WatchEvent, string> = {
   pr_opened: "PR opened",
@@ -140,7 +140,7 @@ function randomToken(): string {
   crypto.getRandomValues(b);
   return Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 }
-const deliveryTone =(d: AutomationDelivery) => (d.outcome === "fired" ? "text-ok" : d.outcome === "skipped" ? "text-muted-foreground" : "text-destructive");
+export const deliveryTone = (d: AutomationDelivery) => (d.outcome === "fired" ? "text-ok" : d.outcome === "skipped" ? "text-muted-foreground" : "text-destructive");
 
 function blank(kind: AutomationKind = "schedule"): AutomationDraft {
   return {
@@ -158,7 +158,6 @@ function blank(kind: AutomationKind = "schedule"): AutomationDraft {
               : {},
     taskTemplate: DEFAULT_TEMPLATES[kind],
     enabled: true,
-    concurrency: 1,
     prComment: kind === "github" || kind === "watch",
   };
 }
@@ -184,7 +183,7 @@ function takeAutomationSeed(): Partial<AutomationDraft> | null {
 }
 
 /** The Automations tab of Autopilot (AutopilotPage owns the page header and tabs). */
-export function Automations({ onOpenBox, onOpenPlaybooks }: { onOpenBox: (box: string) => void; onOpenPlaybooks: () => void }) {
+export function Automations({ onOpenBox, onOpenPlaybooks, onOpenRuns }: { onOpenBox: (box: string) => void; onOpenPlaybooks: () => void; onOpenRuns: (id: string) => void }) {
   const [rows, setRows] = React.useState<Automation[] | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [attempt, setAttempt] = React.useState(0);
@@ -309,9 +308,10 @@ export function Automations({ onOpenBox, onOpenPlaybooks }: { onOpenBox: (box: s
               ]}
             />
           ) : (
-            <AutomationTable
+            <AutomationList
               rows={listed}
               onEdit={(a) => setEditing({ id: a.id, draft: toDraft(a) })}
+              onRuns={(a) => onOpenRuns(a.id)}
               onToggle={(a, on) => void toggle(a, on)}
               onDismiss={(a) => void dismiss(a)}
               onOpenBox={onOpenBox}
@@ -347,7 +347,7 @@ export function Automations({ onOpenBox, onOpenPlaybooks }: { onOpenBox: (box: s
                 setEditing(null);
               }}
               onRan={() => void load()}
-              onOpenBox={onOpenBox}
+              onOpenRuns={onOpenRuns}
               initialHasSecret={!!rows?.find((r) => r.id === shown.id)?.hasSigningSecret}
             />
           </SheetContent>
@@ -365,7 +365,6 @@ function toDraft(a: Automation): AutomationDraft {
     ...(a.repo ? { repo: a.repo } : {}),
     taskTemplate: a.taskTemplate,
     enabled: a.enabled,
-    concurrency: a.concurrency,
     prComment: a.prComment,
     quiet: !!a.quiet,
     ...(a.agent ? { agent: a.agent } : {}),
@@ -431,13 +430,11 @@ function WorkflowPick({ value, onChange }: { value: string | undefined; onChange
   );
 }
 
-const TH = "text-faint px-3 py-2 text-micro font-medium tracking-wide uppercase first:pl-4 last:pr-4";
-const TD = "px-3 py-2.5 align-middle first:pl-4 last:pr-4";
-
-/** Every automation as one table: what, when, how (playbook), how it went, what's next, on/off. */
-function AutomationTable({
+/** Every automation as one row: glyph, name + what fires it, how the last run went and what's next, then Runs, the switch and a chevron. The whole row opens the editor. */
+function AutomationList({
   rows,
   onEdit,
+  onRuns,
   onToggle,
   onDismiss,
   onOpenBox,
@@ -445,6 +442,7 @@ function AutomationTable({
 }: {
   rows: Automation[];
   onEdit: (a: Automation) => void;
+  onRuns: (a: Automation) => void;
   onToggle: (a: Automation, on: boolean) => void;
   onDismiss: (a: Automation) => void;
   onOpenBox: (box: string) => void;
@@ -452,127 +450,119 @@ function AutomationTable({
 }) {
   const still = useReducedMotion();
   return (
-    <div className="bg-card overflow-x-auto rounded-xl border">
-      <table className="w-full min-w-[40rem] table-fixed border-collapse text-left">
-        <colgroup>
-          <col />
-          <col className="w-[11rem]" />
-          <col className="hidden w-[9rem] lg:table-column" />
-          <col className="w-[9.5rem]" />
-          <col className="w-[6.5rem]" />
-          <col className="w-[5.5rem]" />
-        </colgroup>
-        <thead className="border-b">
-          <tr>
-            <th className={TH}>Automation</th>
-            <th className={TH}>Starts</th>
-            <th className={cn(TH, "hidden lg:table-cell")}>Playbook</th>
-            <th className={TH}>Last run</th>
-            <th className={TH}>Next</th>
-            <th className={cn(TH, "text-right")}>On</th>
-          </tr>
-        </thead>
-        <tbody>
-          <AnimatePresence initial={false}>
-            {rows.map((a, i) => (
-              <motion.tr
-                key={a.id}
-                layout="position"
-                initial={still ? { opacity: 0 } : { opacity: 0, y: 6 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: still ? 0.1 : 0.24, delay: Math.min(i, 12) * 0.024, ease: [0.22, 1, 0.36, 1] }}
-                className={cn("hover:bg-muted/50 relative border-b transition-[background-color,opacity] duration-200 last:border-b-0", !a.enabled && !a.proposed && "opacity-70", a.proposed && !a.enabled && "bg-attention/[0.04]")}
-              >
-                <AutomationTr a={a} onEdit={() => onEdit(a)} onToggle={(on) => onToggle(a, on)} onDismiss={() => onDismiss(a)} onOpenBox={onOpenBox} onOpenPlaybook={onOpenPlaybook} />
-              </motion.tr>
-            ))}
-          </AnimatePresence>
-        </tbody>
-      </table>
-    </div>
+    <ul className="bg-card overflow-hidden rounded-xl border shadow-e1">
+      <AnimatePresence initial={false}>
+        {rows.map((a, i) => (
+          <motion.li
+            key={a.id}
+            layout="position"
+            initial={still ? { opacity: 0 } : { opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: still ? 0.1 : 0.24, delay: Math.min(i, 12) * 0.03, ease: [0.22, 1, 0.36, 1] }}
+            className="border-b last:border-b-0"
+          >
+            <AutomationRow a={a} onEdit={() => onEdit(a)} onRuns={() => onRuns(a)} onToggle={(on) => onToggle(a, on)} onDismiss={() => onDismiss(a)} onOpenBox={onOpenBox} onOpenPlaybook={onOpenPlaybook} />
+          </motion.li>
+        ))}
+      </AnimatePresence>
+    </ul>
   );
 }
 
-function AutomationTr({ a, onEdit, onToggle, onDismiss, onOpenBox, onOpenPlaybook }: { a: Automation; onEdit: () => void; onToggle: (on: boolean) => void; onDismiss: () => void; onOpenBox: (box: string) => void; onOpenPlaybook: () => void }) {
+/** Keeps clicks on a control inside the row from also opening the editor. */
+const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+
+function AutomationRow({ a, onEdit, onRuns, onToggle, onDismiss, onOpenBox, onOpenPlaybook }: { a: Automation; onEdit: () => void; onRuns: () => void; onToggle: (on: boolean) => void; onDismiss: () => void; onOpenBox: (box: string) => void; onOpenPlaybook: () => void }) {
   const Glyph = GLYPH[a.kind];
   const wf = useWorkflowName(a.workflowId);
   const pending = a.proposed && !a.enabled;
-  const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+  const fires = a.lastDelivery && (a.kind === "webhook" || a.kind === "github" || a.kind === "watch");
   return (
-    <>
-      <td className={TD}>
-        <span className="flex min-w-0 items-center gap-2.5">
-          <span className={cn("grid size-7 shrink-0 place-items-center rounded-md", a.enabled ? "bg-live/10 text-live" : "bg-muted text-muted-foreground")} aria-hidden>
-            <Glyph className="size-3.5" strokeWidth={1.75} />
+    <div
+      role="button"
+      tabIndex={0}
+      aria-label={`Edit ${a.name}`}
+      onClick={onEdit}
+      onKeyDown={(e) => {
+        if (e.target !== e.currentTarget) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onEdit();
+        }
+      }}
+      className={cn(
+        "group/row relative flex cursor-pointer items-center gap-4 px-4 py-3.5 outline-none transition-[background-color,opacity] duration-150",
+        "hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:ring-ring/40 focus-visible:ring-2 focus-visible:ring-inset",
+        !a.enabled && !pending && "opacity-60 hover:opacity-100 focus-visible:opacity-100",
+        pending && "bg-attention/[0.04]"
+      )}
+    >
+      {pending && <span className="bg-attention absolute inset-y-3 left-0 w-0.5 rounded-r" aria-hidden />}
+      <span className={cn("grid size-9 shrink-0 place-items-center rounded-lg border transition-colors", a.enabled ? "border-live/20 bg-live/10 text-live" : "border-border bg-muted text-muted-foreground")} aria-hidden>
+        <Glyph className="size-4" strokeWidth={1.75} />
+      </span>
+
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="text-foreground truncate text-body font-medium" title={a.name}>
+            {a.name}
           </span>
-          <span className="min-w-0">
-            <button type="button" onClick={onEdit} className="text-foreground block max-w-full cursor-pointer truncate text-left text-meta font-medium after:absolute after:inset-0 focus-visible:outline-none" title={a.name}>
-              {a.name}
-            </button>
-            <span className="text-muted-foreground block truncate text-micro" title={a.taskTemplate}>
-              {a.proposed ? "Scheduled by the agent · " : ""}
-              {a.taskTemplate.replace(/\s+/g, " ")}
+          {pending && <span className="text-attention-text ring-attention/40 shrink-0 rounded-full px-2 py-px text-micro font-medium ring-1 ring-inset">Pending approval</span>}
+          {a.active > 0 && (
+            <span className="text-live inline-flex shrink-0 items-center gap-1 text-micro font-medium">
+              <span className="bg-live size-1.5 animate-pulse rounded-full" aria-hidden />
+              running
             </span>
+          )}
+        </span>
+        <span className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-meta">
+          <span className="text-foreground/80 shrink-0">{KIND_LABEL[a.kind]}</span>
+          <span className="text-faint shrink-0">·</span>
+          <span className="truncate" title={a.when}>
+            {a.when}
           </span>
+          {wf && (
+            <>
+              <span className="text-faint shrink-0">·</span>
+              <button type="button" onClick={(e) => (stop(e), onOpenPlaybook())} className="hover:text-foreground inline-flex min-w-0 shrink-0 cursor-pointer items-center gap-1 truncate" title={`Playbook: ${wf}`}>
+                <ListChecks className="size-3 shrink-0" aria-hidden />
+                <span className="truncate">{wf}</span>
+              </button>
+            </>
+          )}
         </span>
-      </td>
-      <td className={cn(TD, "text-micro")}>
-        <span className="text-foreground block truncate">{KIND_LABEL[a.kind]}</span>
-        <span className="text-muted-foreground block truncate" title={a.when}>
-          {a.when}
-        </span>
-      </td>
-      <td className={cn(TD, "hidden text-micro lg:table-cell")}>
-        {wf ? (
-          <button type="button" onClick={(e) => (stop(e), onOpenPlaybook())} className="bg-muted text-foreground relative z-10 inline-flex max-w-full cursor-pointer items-center gap-1 truncate rounded-md px-1.5 py-0.5 hover:underline">
-            <ListChecks className="size-3 shrink-0" aria-hidden />
-            <span className="truncate">{wf}</span>
-          </button>
-        ) : (
-          <span className="text-faint">—</span>
-        )}
-      </td>
-      <td className={cn(TD, "text-micro")}>
-        <span className="relative z-10 block truncate">
+      </span>
+
+      <span className="hidden w-44 shrink-0 flex-col gap-0.5 text-right text-meta sm:flex">
+        <span className="truncate" onClick={stop}>
           <LastResult a={a} onOpenBox={onOpenBox} />
         </span>
-        {a.quiet && a.counts ? (
-          <span className={cn("block truncate", a.counts.reports > 0 ? "text-foreground" : "text-muted-foreground")} title="Quiet: only runs that found something notify">
-            {countsLine(a.counts)}
-          </span>
-        ) : a.lastDelivery && (a.kind === "webhook" || a.kind === "github" || a.kind === "watch") ? (
-          <span className={cn("block truncate", deliveryTone(a.lastDelivery))} title={a.lastDelivery.detail}>
-            {deliveryLine(a.lastDelivery)}
-          </span>
-        ) : null}
-      </td>
-      <td className={cn(TD, "text-micro tabular-nums")}>
+        <span className="text-faint truncate text-micro tabular">
+          {a.quiet && a.counts ? countsLine(a.counts) : fires ? deliveryLine(a.lastDelivery!) : pending ? "waiting on you" : a.enabled && a.nextFire ? `next ${fmtIn(a.nextFire)}` : a.enabled ? "on event" : "paused"}
+        </span>
+      </span>
+
+      <span className="flex shrink-0 items-center gap-1.5" onClick={stop}>
+        <Button size="sm" variant="outline" onClick={onRuns} aria-label={`Runs of ${a.name}`} className="h-8 px-2.5">
+          <HistoryIcon className="size-3.5" />
+          <span className="hidden md:inline">Runs</span>
+        </Button>
         {pending ? (
-          <span className="text-attention-text ring-attention/40 inline-flex rounded-full px-2 py-0.5 font-medium ring-1 ring-inset">Pending approval</span>
-        ) : a.enabled && a.nextFire ? (
-          <span className="text-foreground" title={new Date(a.nextFire).toLocaleString()}>
-            {fmtIn(a.nextFire)}
-          </span>
-        ) : (
-          <span className="text-faint">{a.enabled ? "on event" : "paused"}</span>
-        )}
-      </td>
-      <td className={cn(TD, "text-right")}>
-        {pending ? (
-          <span className="relative z-10 inline-flex items-center gap-1">
-            <Button size="xs" variant="ghost" className="text-muted-foreground" onClick={onDismiss} aria-label={`Dismiss ${a.name}`}>
+          <>
+            <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={onDismiss} aria-label={`Dismiss ${a.name}`}>
               <Trash2 />
             </Button>
-            <Button size="xs" onClick={() => onToggle(true)}>
+            <Button size="sm" onClick={() => onToggle(true)}>
               Approve
             </Button>
-          </span>
+          </>
         ) : (
-          <Switch className="relative z-10" checked={a.enabled} onCheckedChange={onToggle} aria-label={a.enabled ? `Pause ${a.name}` : `Turn on ${a.name}`} />
+          <Switch checked={a.enabled} onCheckedChange={onToggle} aria-label={a.enabled ? `Pause ${a.name}` : `Turn on ${a.name}`} />
         )}
-      </td>
-    </>
+      </span>
+      <ChevronRight className="text-faint group-hover/row:text-muted-foreground size-4 shrink-0 transition-[color,transform] group-hover/row:translate-x-0.5" aria-hidden />
+    </div>
   );
 }
 
@@ -649,7 +639,7 @@ function Editor({
   onSaved,
   onDeleted,
   onRan,
-  onOpenBox,
+  onOpenRuns,
   initialHasSecret,
 }: {
   id: string | null;
@@ -659,7 +649,7 @@ function Editor({
   onSaved: (t: Automation) => void;
   onDeleted: (id: string) => void;
   onRan: () => void;
-  onOpenBox: (box: string) => void;
+  onOpenRuns: (id: string) => void;
   initialHasSecret: boolean;
 }) {
   const [d, setD] = React.useState<AutomationDraft>(initial);
@@ -713,20 +703,10 @@ function Editor({
       toast.error("Could not start", { description: e instanceof Error ? e.message : String(e) });
     } finally {
       setRunning(false);
-      loadDeliveries();
     }
   };
 
   const [testing, setTesting] = React.useState(false);
-  const [deliveries, setDeliveries] = React.useState<AutomationDelivery[] | null>(null);
-  const loadDeliveries = React.useCallback(() => {
-    if (!id) return;
-    api
-      .triggerDeliveries(id)
-      .then((r) => setDeliveries(r.deliveries))
-      .catch(() => setDeliveries([]));
-  }, [id]);
-  React.useEffect(() => loadDeliveries(), [loadDeliveries]);
 
   const sendTest = async () => {
     if (!id) return;
@@ -740,7 +720,6 @@ function Editor({
       toast.error("Could not send the test event", { description: e instanceof Error ? e.message : String(e) });
     } finally {
       setTesting(false);
-      loadDeliveries();
     }
   };
 
@@ -1005,13 +984,25 @@ function Editor({
           <ChevronRight className="text-muted-foreground size-3.5 transition-transform group-open:rotate-90" aria-hidden />
           <span className="label text-muted-foreground">Guardrails</span>
           <span className="text-faint ml-auto truncate text-micro group-open:hidden">
-            {[`${d.concurrency} at a time`, d.quiet ? "quiet" : null, (d.spec.keepGreen ?? true) ? "keeps PRs green" : null, (d.spec.addressReviews ?? true) ? "answers reviews" : null].filter(Boolean).join(" · ")}
+            {[d.spec.destroy === "always" ? "box destroyed on finish" : d.spec.destroy === "done" ? "box destroyed when done" : null, d.quiet ? "quiet" : null, (d.spec.keepGreen ?? true) ? "keeps PRs green" : null, (d.spec.addressReviews ?? true) ? "answers reviews" : null].filter(Boolean).join(" · ") || "every event gets its own box"}
           </span>
         </summary>
         <div className="mt-3 flex flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
-          <span className="text-meta">At most at once</span>
-          <Segmented<string> ariaLabel="Concurrency" value={String(d.concurrency)} onChange={(v) => set({ concurrency: Number(v) })} options={["1", "2", "3", "5"].map((v) => ({ value: v, label: v }))} />
+          <span className="text-meta">
+            Box after the run
+            <span className="text-faint block text-micro">Keep = the global sleep rule. Destroying skips runs paused on a question and boxes you pinned.</span>
+          </span>
+          <Segmented<"keep" | "done" | "always">
+            ariaLabel="Box after the run"
+            value={d.spec.destroy ?? "keep"}
+            onChange={(v) => setSpec({ destroy: v === "keep" ? undefined : v })}
+            options={[
+              { value: "keep", label: "Keep" },
+              { value: "done", label: "Destroy if done", title: "Destroy after a clean finish; keep a failed run's box to inspect" },
+              { value: "always", label: "Always destroy" },
+            ]}
+          />
         </div>
         {(d.kind === "github" || d.kind === "watch" || d.repo) && (
           <label className="flex items-center justify-between gap-3">
@@ -1098,51 +1089,16 @@ function Editor({
             New URL
           </Button>
         )}
+        {id && (
+          <Button size="sm" variant="ghost" onClick={() => onOpenRuns(id)}>
+            <HistoryIcon />
+            Runs
+          </Button>
+        )}
         <span className="flex-1" />
         {id && <ArmButton size="sm" variant="ghost" icon={<Trash2 />} label="Delete" armedLabel="Delete?" onConfirm={remove} className="text-muted-foreground" />}
       </div>
       {id && d.kind === "chain" && d.spec.afterTrigger && <p className="text-faint -mt-3 text-micro">Runs after “{names[d.spec.afterTrigger] ?? "?"}” — run that one to test the chain.</p>}
-
-      {id && (
-        <div>
-          <Label hint={`last ${50}`}>Deliveries</Label>
-          <Swap state={deliveries === null ? "loading" : deliveries.length === 0 ? "empty" : "list"}>
-          {deliveries === null ? (
-            <div className="flex flex-col gap-2 py-1" aria-busy="true" aria-label="Loading deliveries">
-              <Bar className="h-3 w-[72%]" />
-              <Bar className="h-3 w-[56%]" />
-            </div>
-          ) : deliveries.length === 0 ? (
-            <p className="text-faint text-micro">Nothing has arrived yet. Every delivery lands here: fired, skipped (and why) or rejected.</p>
-          ) : (
-            <ul className="divide-y rounded-lg border">
-              {deliveries.map((x) => (
-                <li key={x.id} className="flex items-baseline gap-3 px-3 py-1.5 text-micro">
-                  <span className="stamp text-faint w-28 shrink-0 tabular" title={new Date(x.at).toLocaleString()}>
-                    {new Date(x.at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-                  </span>
-                  <span className={cn("shrink-0", deliveryTone(x))}>
-                    {x.outcome === "fired" && x.box ? (
-                      <button type="button" className="cursor-pointer hover:underline" onClick={() => onOpenBox(x.box!)}>
-                        {deliveryLine(x)}
-                      </button>
-                    ) : (
-                      deliveryLine(x)
-                    )}
-                  </span>
-                  {x.quiet && (
-                    <span className="text-faint shrink-0" title="Nothing needed you — no notification was sent">
-                      quiet
-                    </span>
-                  )}
-                  {x.detail && <span className="text-faint min-w-0 truncate" title={x.detail}>{x.detail}</span>}
-                </li>
-              ))}
-            </ul>
-          )}
-          </Swap>
-        </div>
-      )}
     </div>
   );
 }

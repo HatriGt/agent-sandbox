@@ -68,13 +68,26 @@ export interface TriggerSpec {
   watch?: WatchEvent[];
   /** watch: `push` on this branch (default: the repo's default branch); run_* only on it (unset: any). */
   branch?: string;
+  /**
+   * What happens to a run's box when it finishes: kept for the global sleep TTL (default, "keep"),
+   * destroyed after a clean finish ("done"), or destroyed on any finish ("always"). A box waiting on
+   * a question has not finished; a box the operator pinned (Keep) is never destroyed.
+   */
+  destroy?: BoxDestroy;
 }
 
-/** Safety defaults (plan §5 "Trigger safety"). */
-export const DEFAULT_CONCURRENCY = 1;
-export const MAX_CONCURRENCY = 5;
-/** Storm cap: no trigger fires more than this many runs per rolling hour, whatever the source says. */
+/** Storm cap (plan §5 "Trigger safety"): no trigger fires more than this many runs per rolling hour, whatever the source says. Every fire gets its own box; there is no per-automation run cap. */
 export const MAX_FIRES_PER_HOUR = 12;
+
+export const BOX_DESTROY = ["keep", "done", "always"] as const;
+export type BoxDestroy = (typeof BOX_DESTROY)[number];
+
+/** Should the box of a run that finished in `state` be destroyed now, under this policy? */
+export function shouldDestroyBox(policy: BoxDestroy | undefined, state: "done" | "failed" | "waiting" | "running"): boolean {
+  if (state === "waiting" || state === "running") return false;
+  return policy === "always" || (policy === "done" && state === "done");
+}
+
 
 /* ───────────────────────────── cron ───────────────────────────── */
 
@@ -613,13 +626,12 @@ export function deliveryKeys(headers: Record<string, string | string[] | undefin
 export type Admission = { ok: true } | { ok: false; reason: string };
 
 /**
- * May this trigger start one more run now? `active` = its runs currently live or starting;
- * `recentFires` = epoch ms of its fires (any window; only the last hour counts).
+ * May this trigger start one more run now? Each fire is its own box, so runs already going never
+ * hold a new one back; only the switch and the storm cap do. `recentFires` = epoch ms of its fires
+ * (any window; only the last hour counts).
  */
-export function admit(t: { enabled: boolean; concurrency: number }, active: number, recentFires: number[], now: number): Admission {
+export function admit(t: { enabled: boolean }, recentFires: number[], now: number): Admission {
   if (!t.enabled) return { ok: false, reason: "disabled" };
-  const cap = Math.min(Math.max(1, t.concurrency || DEFAULT_CONCURRENCY), MAX_CONCURRENCY);
-  if (active >= cap) return { ok: false, reason: `busy: ${active} of ${cap} run${cap === 1 ? "" : "s"} already going` };
   const lastHour = recentFires.filter((t0) => now - t0 < 3600_000).length;
   if (lastHour >= MAX_FIRES_PER_HOUR) return { ok: false, reason: `storm cap: ${lastHour} fires in the last hour` };
   return { ok: true };
@@ -634,7 +646,6 @@ export interface TriggerInput {
   repo?: string;
   taskTemplate: string;
   enabled: boolean;
-  concurrency: number;
   prComment: boolean;
   /** Quiet: a run that ends with QUIET_MARK (nothing needs the operator) sends no notification. */
   quiet: boolean;
@@ -712,14 +723,13 @@ export function normalizeTrigger(body: unknown): { ok: true; trigger: TriggerInp
   }
   if (typeof s.keepGreen === "boolean") spec.keepGreen = s.keepGreen;
   if (typeof s.addressReviews === "boolean") spec.addressReviews = s.addressReviews;
+  if (BOX_DESTROY.includes(s.destroy as BoxDestroy) && s.destroy !== "keep") spec.destroy = s.destroy as BoxDestroy;
   let signingSecret: string | undefined;
   if (typeof b.signingSecret === "string" && b.signingSecret.trim()) {
     if (!spec.preset) return { ok: false, error: "a signing secret only applies to an alert-source preset" };
     signingSecret = b.signingSecret.trim();
     if (signingSecret.length > 512) return { ok: false, error: "signing secret is too long" };
   }
-  const conc = Number(b.concurrency);
-  const concurrency = Number.isInteger(conc) && conc >= 1 ? Math.min(conc, MAX_CONCURRENCY) : DEFAULT_CONCURRENCY;
   if (b.harnessId !== undefined && b.harnessId !== null && b.harnessId !== "" && !(typeof b.harnessId === "string" && /^hrn_[\w-]{6,40}$/.test(b.harnessId))) {
     return { ok: false, error: "harnessId is not a saved harness id" };
   }
@@ -740,7 +750,6 @@ export function normalizeTrigger(body: unknown): { ok: true; trigger: TriggerInp
       ...(repo ? { repo } : {}),
       taskTemplate,
       enabled: b.enabled !== false,
-      concurrency,
       // Receipt comment: ON by default for GitHub triggers (plan §5); opt-in for the rest.
       prComment: typeof b.prComment === "boolean" ? b.prComment : kind === "github",
       quiet: b.quiet === true,

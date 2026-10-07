@@ -102,7 +102,7 @@ test("receiver: Sentry preset — bad signature rejected, storm = one run (coold
     const created = await fetch(`${h.base}/triggers.json`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: "Sentry", kind: "webhook", taskTemplate: "Fix {{alert.title}}", spec: { preset: "sentry", cooldownMin: 30 }, signingSecret: "cs", concurrency: 5 }),
+      body: JSON.stringify({ name: "Sentry", kind: "webhook", taskTemplate: "Fix {{alert.title}}", spec: { preset: "sentry", cooldownMin: 30 }, signingSecret: "cs" }),
     }).then((r) => r.json() as Promise<any>);
     const id = created.trigger.id;
     assert.equal(created.trigger.hasSigningSecret, true);

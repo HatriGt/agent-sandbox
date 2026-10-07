@@ -24,11 +24,13 @@ export function AutopilotPage({
   onTab,
   onBack,
   onOpenBox,
+  onOpenRuns,
 }: {
   tab: AutopilotTab;
   onTab: (t: AutopilotTab) => void;
   onBack: () => void;
   onOpenBox: (box: string) => void;
+  onOpenRuns: (id: string) => void;
 }) {
   const reduce = useReducedMotion();
   // Counts on the tabs: what is live, what is coming up, and (ink-ringed) what is waiting on you.
@@ -88,7 +90,7 @@ export function AutopilotPage({
         </div>
         <TabPanel value={tab} order={ORDER}>
           {tab === "automations" ? (
-            <Automations onOpenBox={onOpenBox} onOpenPlaybooks={() => onTab("playbooks")} />
+            <Automations onOpenBox={onOpenBox} onOpenPlaybooks={() => onTab("playbooks")} onOpenRuns={onOpenRuns} />
           ) : tab === "scheduled" ? (
             <ScheduledPage onOpenBox={onOpenBox} onAutomations={() => onTab("automations")} />
           ) : (

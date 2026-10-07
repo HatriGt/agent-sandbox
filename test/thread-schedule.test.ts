@@ -96,13 +96,13 @@ test("store: a one-time schedule is due once, retries when busy, and never refir
   const db = openMemoryDb();
   const sb = makeSecretBox(crypto.randomBytes(32));
   const at = Date.now() + 60_000;
-  const input = { name: "merge", kind: "schedule" as const, spec: { at }, taskTemplate: "Merge PR #1", enabled: true, concurrency: 1, prComment: false, quiet: false };
+  const input = { name: "merge", kind: "schedule" as const, spec: { at }, taskTemplate: "Merge PR #1", enabled: true, prComment: false, quiet: false };
   const { row } = createTrigger(db, sb, "o", input, Date.now(), { sourceBox: "b1", scope: "scheduled" });
   assert.equal(row.scope, "scheduled");
   assert.equal(row.nextFire, at);
   advanceNextFire(db, row.id, at);
   assert.equal(getTrigger(db, "o", row.id)!.nextFire, null);
-  markSkipped(db, row.id, { at, outcome: "skipped", reason: "busy" }, at);
+  markSkipped(db, row.id, { at, outcome: "skipped", reason: "storm cap" }, at);
   assert.equal(getTrigger(db, "o", row.id)!.nextFire, at + 60_000);
   markFired(db, row.id, { at: at + 60_000, outcome: "started", box: "b2" }, at + 60_000);
   assert.equal(getTrigger(db, "o", row.id)!.nextFire, null);
