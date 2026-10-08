@@ -10,13 +10,14 @@
     "icon": "./assets/icon.png",
     "splash": {
       "image": "./assets/splash-icon.png",
-      "backgroundColor": "#0f0f12",
+      "backgroundColor": "#000000",
       "resizeMode": "contain",
       "imageWidth": 160
     },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "dev.ajeethkumar.agentsandbox",
+      "entitlements": { "com.apple.developer.usernotifications.time-sensitive": true },
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "Attach screenshots and photos to delegated tasks.",
         "NSCameraUsageDescription": "Photograph a whiteboard or bug to delegate it as a task."
@@ -26,7 +27,7 @@
       "package": "dev.ajeethkumar.agentsandbox",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#0f0f12"
+        "backgroundColor": "#000000"
       },
       "intentFilters": [
         {
@@ -45,11 +46,11 @@
         "expo-splash-screen",
         {
           "image": "./assets/splash-icon.png",
-          "backgroundColor": "#0f0f12",
+          "backgroundColor": "#000000",
           "imageWidth": 200,
           "dark": {
             "image": "./assets/splash-icon.png",
-            "backgroundColor": "#0f0f12"
+            "backgroundColor": "#000000"
           }
         }
       ],
@@ -57,7 +58,7 @@
       "expo-secure-store",
       "expo-font",
       "expo-asset",
-      ["expo-notifications", { "color": "#0f0f12" }],
+      ["expo-notifications", { "color": "#000000" }],
       [
         "expo-speech-recognition",
         {

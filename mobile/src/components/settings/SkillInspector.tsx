@@ -1,7 +1,7 @@
 // How the agent sees a skill — ported from web/src/components/skills/SkillInspector.tsx: the two ways
 // it fires, its on/off status, where it lands in the sandbox, what it weighs, when it was saved.
 import React, { useMemo, useState } from "react";
-import { Switch, View } from "react-native";
+import { View } from "react-native";
 import { PressScale } from "@/components/motion";
 import * as Clipboard from "expo-clipboard";
 import type { SkillView } from "@/lib/api";
@@ -10,6 +10,7 @@ import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { T } from "@/components/ui/AppText";
 import { Icon } from "@/components/ui/Icon";
+import { Toggle } from "@/components/ui/Toggle";
 import type { SkillFile } from "./skillImport";
 import { byteLength, fmtKb, MAX_CONTENT } from "./SkillModel";
 
@@ -81,7 +82,7 @@ export function SkillInspector({
                 {enabled ? "Synced into every sandbox on its next turn." : "Kept here, not given to the agent."}
               </T>
             </View>
-            <Switch value={enabled} onValueChange={onToggle} disabled={toggling} trackColor={{ true: palette.live }} accessibilityLabel={enabled ? "Turn off" : "Turn on"} />
+            <Toggle value={enabled} onValueChange={onToggle} disabled={toggling} accessibilityLabel={enabled ? "Turn off" : "Turn on"} />
           </View>
         </Section>
       ) : null}

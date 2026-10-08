@@ -65,13 +65,14 @@ function RecentRuns({ onHistory }: { onHistory: () => void }) {
   return (
     <FadeInUp delay={150} style={{ gap: 6, marginTop: 12 }}>
       <StripHeader title="Recent runs" onAll={onHistory} />
-      {rows.map((r) => {
+      {rows.map((r, i) => {
         const failed = r.state === "failed";
         const first = (r.task ?? "").trim().split("\n")[0] || (r.headline ?? "").trim() || "Untitled run";
         const secs = r.startedAt && r.endedAt && r.endedAt > r.startedAt ? Math.round((r.endedAt - r.startedAt) / 1000) : null;
         const tokens = r.inputTokens != null || r.outputTokens != null ? (r.inputTokens ?? 0) + (r.outputTokens ?? 0) : null;
         return (
-          <PressScale key={r.id} onPress={onHistory} accessibilityLabel={`${first} — open history`} style={{ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 36, paddingVertical: 4 }}>
+          <FadeInUp key={r.id} delay={stagger(i, 30)}>
+          <PressScale onPress={onHistory} accessibilityLabel={`${first} — open history`} style={{ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 36, paddingVertical: 4 }}>
             <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: failed ? palette.destructive : palette.ok }} />
             <View style={{ flex: 1, minWidth: 0 }}>
               <T variant="meta" numberOfLines={1}>
@@ -87,6 +88,7 @@ function RecentRuns({ onHistory }: { onHistory: () => void }) {
               {ago(r.archivedAt || r.endedAt)}
             </T>
           </PressScale>
+          </FadeInUp>
         );
       })}
     </FadeInUp>

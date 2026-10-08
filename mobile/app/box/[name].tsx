@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FlatList, KeyboardAvoidingView, Platform, RefreshControl, ScrollView, View, type ViewToken } from "react-native";
+import { Animated, KeyboardAvoidingView, Platform, RefreshControl, ScrollView, View, type FlatList, type NativeScrollEvent, type NativeSyntheticEvent, type ViewToken } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -40,7 +40,7 @@ import { Icon, type IconName } from "@/components/ui/Icon";
 import { Sheet } from "@/components/ui/Sheet";
 import { UsageMeter } from "@/components/ui/UsageMeter";
 import { CodeRefSession } from "@/components/CodeRef";
-import { AgentLoader, FadeInUp, haptic, PressScale, TypingDots, WorkingDot } from "@/components/motion";
+import { AgentLoader, FadeInUp, haptic, PressScale, ScalePresence, TypingDots, WorkingDot } from "@/components/motion";
 
 type AskEntry = { q: string; a?: string; pending: boolean };
 
@@ -429,6 +429,23 @@ function Thread() {
     const first = viewableItems.find((v) => v.index != null);
     if (first?.index != null) setTopIndex(first.index);
   }).current;
+  // Scroll offset on the native thread (drives the header parallax); the stick flag reads the
+  // same event on the JS side.
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const onScroll = useMemo(
+    () =>
+      Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], {
+        useNativeDriver: true,
+        listener: (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+          const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+          const atEnd = contentOffset.y + layoutMeasurement.height > contentSize.height - 80;
+          if (atEnd !== stickRef.current) setStick(atEnd);
+        },
+      }),
+    // setStick/stickRef are stable refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [scrollY],
+  );
 
   if (gone) {
     return (
@@ -487,6 +504,7 @@ function Thread() {
           onBack={() => router.back()}
           onInfo={() => setSheet("inspector")}
           onMore={() => setSheet("actions")}
+          scrollY={scrollY}
         />
 
         {/* Vitals strip: memory and disk against their caps. Its own row rather than crowding the
@@ -511,7 +529,7 @@ function Thread() {
 
         {/* Transcript */}
         <View style={{ flex: 1 }}>
-          <FlatList
+          <Animated.FlatList
             ref={listRef}
             style={{ flex: 1 }}
             data={items}
@@ -528,12 +546,8 @@ function Thread() {
             onViewableItemsChanged={onViewable}
             viewabilityConfig={VIEWABILITY}
             onLayout={(e) => setViewportH(e.nativeEvent.layout.height)}
-            onScroll={(e) => {
-              const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-              const atEnd = contentOffset.y + layoutMeasurement.height > contentSize.height - 80;
-              if (atEnd !== stickRef.current) setStick(atEnd);
-            }}
-            scrollEventThrottle={100}
+            onScroll={onScroll}
+            scrollEventThrottle={16}
             onContentSizeChange={() => {
               if (stickRef.current) listRef.current?.scrollToEnd({ animated: false });
             }}
@@ -681,16 +695,13 @@ function Thread() {
             }
           />
 
-          {/* Scroll-to-bottom pill */}
-          {!stick && (
+          {/* Scroll-to-bottom pill: springs in when you leave the tail, springs out when you're back. */}
+          <ScalePresence visible={!stick} style={{ position: "absolute", bottom: 12, alignSelf: "center" }}>
             <PressScale
               onPress={() => listRef.current?.scrollToEnd({ animated: true })}
               hitSlop={10}
               accessibilityLabel="Scroll to latest"
               style={{
-                position: "absolute",
-                bottom: 12,
-                alignSelf: "center",
                 flexDirection: "row",
                 alignItems: "center",
                 gap: 6,
@@ -708,7 +719,7 @@ function Thread() {
               <Icon name="arrow-down" size={14} color={palette.foreground} />
               <T variant="micro" weight="medium">Latest</T>
             </PressScale>
-          )}
+          </ScalePresence>
         </View>
 
         {/* Dock chips */}

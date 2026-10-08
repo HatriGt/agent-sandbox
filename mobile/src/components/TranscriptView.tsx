@@ -13,7 +13,7 @@ import { ProducedFiles } from "./ProducedFiles";
 import { TestResultsCard } from "./TestResultsCard";
 import { T } from "./ui/AppText";
 import { Icon, toolIcon } from "./ui/Icon";
-import { animateLayout, FadeInUp, PressScale, ProgressFill } from "@/components/motion";
+import { animateLayout, CrossFade, FadeInUp, PressScale, ProgressFill } from "@/components/motion";
 
 /**
  * A rendered thread item. Consecutive tool calls are grouped into one "Worked"
@@ -470,12 +470,13 @@ function PlanRow({ items }: { items: PlanItem[] }) {
       </View>
       {items.map((it, i) => (
         <View key={i} style={{ flexDirection: "row", gap: 8, alignItems: "flex-start" }}>
-          <Icon
-            name={it.state === "done" ? "check-circle" : it.state === "active" ? "loader" : "circle"}
-            size={14}
-            color={it.state === "done" ? palette.ok : it.state === "active" ? palette.live : palette.faint}
-            style={{ marginTop: 2 }}
-          />
+          <CrossFade id={it.state} style={{ marginTop: 2 }}>
+            <Icon
+              name={it.state === "done" ? "check-circle" : it.state === "active" ? "loader" : "circle"}
+              size={14}
+              color={it.state === "done" ? palette.ok : it.state === "active" ? palette.live : palette.faint}
+            />
+          </CrossFade>
           <T
             variant="body"
             tone={it.state === "todo" ? "muted" : "default"}

@@ -10,6 +10,7 @@ import { ArmButton } from "@/components/ui/ArmButton";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Field } from "@/components/ui/Field";
+import { FadeIn, FadeInUp, stagger } from "@/components/motion";
 
 /** Matches src/secrets-store.ts SECRET_NAME_RE: an env-var name, as the agent will see it. */
 const NAME_RE = /^[A-Z_][A-Z0-9_]{0,127}$/;
@@ -68,12 +69,12 @@ export default function Secrets() {
         Tokens and keys a run may need as environment variables. Stored encrypted; a value is never shown again — only replaced. Grant a name to a harness or a repo and every run there gets it.
       </T>
       {error ? (
-        <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
+        <FadeIn style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
           <T variant="meta" tone="destructive" style={{ flex: 1 }}>
             {error}
           </T>
           <Button small variant="ghost" title="Dismiss" onPress={() => setError(null)} />
-        </View>
+        </FadeIn>
       ) : null}
       {note ? (
         <T variant="meta" tone="muted">
@@ -91,8 +92,9 @@ export default function Secrets() {
           </T>
         </Card>
       ) : null}
-      {rows.map((s) => (
-        <Card key={s.name} style={{ gap: 4 }}>
+      {rows.map((s, i) => (
+        <FadeInUp key={s.name} delay={stagger(i)}>
+        <Card style={{ gap: 4 }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
             <View style={{ flex: 1, minWidth: 0 }}>
               <T variant="body" mono weight="medium" numberOfLines={1}>
@@ -108,6 +110,7 @@ export default function Secrets() {
             {s.grantedTo.length ? `Granted to ${s.grantedTo.map((g) => g.label).join(", ")}` : "No grant yet"}
           </T>
         </Card>
+        </FadeInUp>
       ))}
       {data ? (
         <T variant="micro" tone="muted">

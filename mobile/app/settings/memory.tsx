@@ -2,7 +2,7 @@
 // "Waiting for you" review strip, kind filters + search, the section rail (You, one per repo,
 // Any repo, Earlier) and the open section. The overview graph stays on web.
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { ScrollView, Share, Switch, View } from "react-native";
+import { ScrollView, Share, View } from "react-native";
 import { useRouter } from "expo-router";
 import { ApiError, api, type MemoryKind, type MemoryNote, type MemoryNotesResponse } from "@/lib/api";
 import { plural } from "@/lib/format";
@@ -13,9 +13,11 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Field } from "@/components/ui/Field";
 import { Sheet } from "@/components/ui/Sheet";
+import { Toggle } from "@/components/ui/Toggle";
 import { EarlierNoteRow, MemoryChip, MemoryNoteRow, type NoteActions } from "@/components/settings/MemoryNoteRow";
 import { Segmented } from "@/components/settings/Segmented";
 import { KINDS, KIND_PLURAL, isOperatorKind } from "@/components/settings/memoryKinds";
+import { animateLayout, FadeIn, FadeInUp, stagger } from "@/components/motion";
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const REPO_KINDS: MemoryKind[] = ["domain", "decision", "lesson", "fact", "playbook"];
@@ -146,18 +148,19 @@ export default function MemoryPage() {
           <T variant="meta" tone={data.enabled ? "default" : "muted"}>
             On
           </T>
-          <Switch
+          <Toggle
             value={data.enabled}
             accessibilityLabel="Memory across runs"
             onValueChange={(on) => void apply(api.memoryNoteUpdate({ enabled: on }), on ? "Memory on" : "Memory off — runs start from scratch").catch((e) => setError(msg(e)))}
-            trackColor={{ true: palette.live }}
           />
         </View>
       ) : null}
       {error ? (
-        <T variant="meta" tone="destructive">
-          {error}
-        </T>
+        <FadeIn>
+          <T variant="meta" tone="destructive">
+            {error}
+          </T>
+        </FadeIn>
       ) : null}
       {info ? (
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -196,32 +199,37 @@ export default function MemoryPage() {
               <T variant="micro" tone="muted">
                 Proposed by runs — kept automatically unless you forget them.
               </T>
-              {model.pending.map((n) => (
-                <MemoryNoteRow key={n.id} note={n} actions={actions} showRepo dim={dim} />
+              {model.pending.map((n, i) => (
+                <FadeInUp key={n.id} delay={stagger(i)}>
+                  <MemoryNoteRow note={n} actions={actions} showRepo dim={dim} />
+                </FadeInUp>
               ))}
             </Card>
           ) : null}
 
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }} accessibilityLabel="Filter by kind">
-            <MemoryChip label="All" count={model.liveAll.length} active={kindFilter === "all"} onPress={() => setKindFilter("all")} />
+            <MemoryChip label="All" count={model.liveAll.length} active={kindFilter === "all"} onPress={() => (animateLayout(), setKindFilter("all"))} />
             {KINDS.map((k) => (
-              <MemoryChip key={k} label={KIND_PLURAL[k]} count={model.counts[k]} active={kindFilter === k} onPress={() => setKindFilter(kindFilter === k ? "all" : k)} />
+              <MemoryChip key={k} label={KIND_PLURAL[k]} count={model.counts[k]} active={kindFilter === k} onPress={() => (animateLayout(), setKindFilter(kindFilter === k ? "all" : k))} />
             ))}
           </View>
           <Field value={query} onChangeText={setQuery} placeholder="Search notes · area:billing" autoCapitalize="none" autoCorrect={false} accessibilityLabel="Search notes" clearButtonMode="while-editing" />
 
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }} accessibilityLabel="Memory sections">
             {model.views.map((v) => (
-              <MemoryChip key={v.key} label={v.label} count={model.filtering && v.count !== v.total ? `${v.count}/${v.total}` : v.total} active={v.key === view} onPress={() => (setViewSel(v.key), setAreaSel(null))} />
+              <MemoryChip key={v.key} label={v.label} count={model.filtering && v.count !== v.total ? `${v.count}/${v.total}` : v.total} active={v.key === view} onPress={() => (animateLayout(), setViewSel(v.key), setAreaSel(null))} />
             ))}
           </ScrollView>
 
           {view === "you" ? (
+            <FadeIn key="you">
             <Section title="You" meta={plural(model.you.length, "note")} purpose="Preferences and rules — in every run's MEMORY.md, whatever the repo.">
               {model.you.length ? (
                 <Card style={{ paddingTop: 0 }}>
-                  {model.you.map((n) => (
-                    <MemoryNoteRow key={n.id} note={n} actions={actions} dim={dim} />
+                  {model.you.map((n, i) => (
+                    <FadeInUp key={n.id} delay={stagger(i)}>
+                      <MemoryNoteRow note={n} actions={actions} dim={dim} />
+                    </FadeInUp>
                   ))}
                 </Card>
               ) : (
@@ -230,25 +238,31 @@ export default function MemoryPage() {
                 </T>
               )}
             </Section>
+            </FadeIn>
           ) : null}
 
           {current?.groups ? (
+            <FadeIn key={current.key}>
             <RepoSection
               repo={current.repo ?? ""}
               groups={current.groups}
               areaSel={areaSel}
-              onArea={(a) => setAreaSel(areaSel === a ? null : a)}
+              onArea={(a) => (animateLayout(), setAreaSel(areaSel === a ? null : a))}
               actions={actions}
               dim={dim}
             />
+            </FadeIn>
           ) : null}
 
           {view === "earlier" ? (
+            <FadeIn key="earlier">
             <Section title="Earlier" meta={plural(model.earlier.length, "replaced note")} purpose="Notes a newer one replaced — kept as history, out of MEMORY.md.">
               {model.earlier.length ? (
                 <Card style={{ paddingTop: 0 }}>
-                  {model.earlier.map((n) => (
-                    <EarlierNoteRow key={n.id} note={n} replacedBy={model.replacedBy.get(n.id)} onDelete={() => apply(api.memoryNoteDelete(n.id), "Forgotten").catch((e) => setError(msg(e)))} />
+                  {model.earlier.map((n, i) => (
+                    <FadeInUp key={n.id} delay={stagger(i)}>
+                      <EarlierNoteRow note={n} replacedBy={model.replacedBy.get(n.id)} onDelete={() => apply(api.memoryNoteDelete(n.id), "Forgotten").catch((e) => setError(msg(e)))} />
+                    </FadeInUp>
                   ))}
                 </Card>
               ) : (
@@ -257,6 +271,7 @@ export default function MemoryPage() {
                 </T>
               )}
             </Section>
+            </FadeIn>
           ) : null}
         </>
       )}
@@ -363,8 +378,10 @@ function RepoSection({ repo, groups, areaSel, onArea, actions, dim }: { repo: st
                           {`${KIND_PLURAL[kind]} · ${rows.length}`}
                         </T>
                       ) : null}
-                      {rows.map((n) => (
-                        <MemoryNoteRow key={n.id} note={n} actions={actions} inArea={!!g.area} dim={dim} />
+                      {rows.map((n, i) => (
+                        <FadeInUp key={n.id} delay={stagger(i)}>
+                          <MemoryNoteRow note={n} actions={actions} inArea={!!g.area} dim={dim} />
+                        </FadeInUp>
                       ))}
                     </View>
                   );

@@ -11,7 +11,7 @@ import { Button } from "./ui/Button";
 import { Field } from "./ui/Field";
 import { smartJoin, useVoiceInput } from "@/hooks/useVoiceInput";
 import { VoiceButton, VoicePill } from "./VoiceButton";
-import { PressScale } from "@/components/motion";
+import { animateLayout, FadeInUp, PressScale, stagger } from "@/components/motion";
 
 /**
  * The structured decision control: amber = needs you (the reserved hue),
@@ -68,8 +68,8 @@ export function QuestionCard({
       {session ? <ProvideSecretRow name={missingSecretOf(question)} session={session} repo={repo ?? null} /> : null}
       {!other &&
         parsed.options.map((opt, i) => (
+          <FadeInUp key={i} delay={stagger(i, 30)}>
           <PressScale
-            key={i}
             disabled={busy}
             haptic="light"
             onPress={() => onAnswer(opt)}
@@ -96,6 +96,7 @@ export function QuestionCard({
               <Icon name="chevron-right" size={14} />
             </View>
           </PressScale>
+          </FadeInUp>
         ))}
       {other ? (
         <View style={{ gap: 8 }}>
@@ -120,11 +121,17 @@ export function QuestionCard({
               style={{ flex: 1 }}
             />
             {voice.supported && <VoiceButton state={voice.state} level={voice.level} onToggle={voice.toggle} size={38} />}
-            <Button title="Back" variant="secondary" onPress={() => { voice.stop(); setOther(false); }} />
+            <Button title="Back" variant="secondary" onPress={() => { voice.stop(); animateLayout(); setOther(false); }} />
           </View>
         </View>
       ) : (
-        <PressScale onPress={() => setOther(true)} style={{ paddingVertical: 12, flexDirection: "row", alignItems: "center", gap: 6 }}>
+        <PressScale
+          onPress={() => {
+            animateLayout();
+            setOther(true);
+          }}
+          style={{ paddingVertical: 12, flexDirection: "row", alignItems: "center", gap: 6 }}
+        >
           <Icon name="edit-2" size={13} color={palette.attentionInk} />
           <T variant="body" weight="medium" style={{ color: palette.attentionInk }}>
             Something else…

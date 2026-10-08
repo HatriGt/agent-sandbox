@@ -1,8 +1,8 @@
 // Automations on the phone (docs/plan-mobile-parity.md): the list with pause/resume, "Run now",
 // proposals to approve or dismiss, and a filter for one-off chat schedules. Tapping a row opens the
 // editor (app/automation/[id].tsx); "+ New" opens it blank.
-import React, { useCallback, useMemo, useState } from "react";
-import { RefreshControl, ScrollView, Switch, View, Pressable } from "react-native";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { RefreshControl, ScrollView, View } from "react-native";
 import { Redirect, useFocusEffect, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
@@ -15,8 +15,10 @@ import { radius } from "@/theme/tokens";
 import { T } from "@/components/ui/AppText";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { Toggle } from "@/components/ui/Toggle";
 import { Segmented } from "@/components/settings/Segmented";
-import { PressScale } from "@/components/motion";
+import { SwipeRow } from "@/components/ui/SwipeRow";
+import { FadeIn, FadeInUp, PressScale, stagger } from "@/components/motion";
 
 /** One list for everything that runs on its own: standing rules and what a chat asked for later. */
 type Filter = "all" | "rules" | "chat";
@@ -32,7 +34,7 @@ function resultLine(r: AutomationResult | null): { text: string; tone: "muted" |
   return { text: `Failed to start ${ago(r.at)}${r.reason ? ` — ${r.reason}` : ""}`, tone: "destructive" };
 }
 
-function Row({ a, onChange, onRemove }: { a: Automation; onChange: (a: Automation) => void; onRemove: (id: string) => void }) {
+function Row({ a, index, onChange, onRemove }: { a: Automation; index: number; onChange: (a: Automation) => void; onRemove: (id: string) => void }) {
   const router = useRouter();
   const { palette } = useTheme();
   const pending = !!a.proposed && !a.enabled;
@@ -42,6 +44,21 @@ function Row({ a, onChange, onRemove }: { a: Automation; onChange: (a: Automatio
   const [testing, setTesting] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const last = resultLine(a.lastResult);
+  // Swipe-to-delete keeps the arm/confirm step (same contract as HistoryList): first tap arms, second
+  // (within 4s) deletes.
+  const [armed, setArmed] = useState(false);
+  const disarm = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(disarm.current), []);
+  const swipeDelete = () => {
+    if (!armed) {
+      setArmed(true);
+      disarm.current = setTimeout(() => setArmed(false), 4000);
+      return;
+    }
+    clearTimeout(disarm.current);
+    setArmed(false);
+    void dismiss();
+  };
 
   const sendTest = async () => {
     setTesting(true);
@@ -113,6 +130,13 @@ function Row({ a, onChange, onRemove }: { a: Automation; onChange: (a: Automatio
   };
 
   return (
+    <FadeInUp delay={stagger(index)}>
+    <SwipeRow
+      actions={[
+        ...(pending ? [] : [{ label: a.enabled ? "Pause" : "Resume", icon: a.enabled ? ("pause" as const) : ("play" as const), onPress: () => void toggle(!a.enabled) }]),
+        { label: armed ? "Delete?" : "Delete", icon: "trash-2" as const, tone: "destructive" as const, stayOpen: !armed, onPress: swipeDelete },
+      ]}
+    >
     <Card
       onPress={() => router.push(`/automation/${encodeURIComponent(a.id)}`)}
       // "Needs you" is ink: a hairline, no tinted fill (theme commits 21d16af / 44fb21c).
@@ -134,10 +158,9 @@ function Row({ a, onChange, onRemove }: { a: Automation; onChange: (a: Automatio
             <Button title="Approve" small loading={approving} onPress={() => void approve()} />
           </View>
         ) : (
-          <Switch
+          <Toggle
             value={a.enabled}
             onValueChange={(v) => void toggle(v)}
-            trackColor={{ true: palette.live }}
             accessibilityLabel={`${a.name} ${a.enabled ? "on" : "off"}`}
           />
         )}
@@ -172,9 +195,11 @@ function Row({ a, onChange, onRemove }: { a: Automation; onChange: (a: Automatio
         </T>
       ) : null}
       {note ? (
-        <T variant="meta" tone="destructive" numberOfLines={3}>
-          {note}
-        </T>
+        <FadeIn>
+          <T variant="meta" tone="destructive" numberOfLines={3}>
+            {note}
+          </T>
+        </FadeIn>
       ) : null}
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
         {a.kind !== "chain" ? <Button title="Run now" variant="secondary" small loading={busy} onPress={() => void runNow()} /> : null}
@@ -182,6 +207,8 @@ function Row({ a, onChange, onRemove }: { a: Automation; onChange: (a: Automatio
         <Button title="Runs" variant="ghost" small onPress={() => router.push(`/automation/${encodeURIComponent(a.id)}`)} />
       </View>
     </Card>
+    </SwipeRow>
+    </FadeInUp>
   );
 }
 
@@ -273,9 +300,11 @@ function Automations() {
           ]}
         />
         {error ? (
-          <T variant="meta" tone="destructive">
-            {error}
-          </T>
+          <FadeIn>
+            <T variant="meta" tone="destructive">
+              {error}
+            </T>
+          </FadeIn>
         ) : null}
         {list === null && !error ? <T variant="meta" tone="faint">Loading…</T> : null}
         {list !== null && shown.length === 0 ? (
@@ -288,8 +317,8 @@ function Automations() {
             </T>
           </Card>
         ) : null}
-        {shown.map((a) => (
-          <Row key={a.id} a={a} onChange={replace} onRemove={remove} />
+        {shown.map((a, i) => (
+          <Row key={a.id} a={a} index={i} onChange={replace} onRemove={remove} />
         ))}
       </ScrollView>
     </SafeAreaView>

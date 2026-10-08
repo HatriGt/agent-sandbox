@@ -1,5 +1,5 @@
-import React, { useEffect, useRef } from "react";
-import { Animated, Easing, LayoutAnimation, type StyleProp, type ViewStyle } from "react-native";
+import React, { useEffect, useRef, useState } from "react";
+import { Animated, Easing, LayoutAnimation, StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
 import { isReducedMotion } from "./reducedMotion";
 
 /** Motion timing vocabulary — everything lands inside 150–300ms with an ease-out tail. */
@@ -71,6 +71,73 @@ export function FadeIn({ children, style }: { children: React.ReactNode; style?:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return <Animated.View style={[{ opacity: t }, style]}>{children}</Animated.View>;
+}
+
+/**
+ * Cross-fade between versions of a small piece of content keyed by `id` (a state word, a count):
+ * the old content fades out, the new fades in, instead of snapping. The outgoing content is kept
+ * for one fade so the swap is readable; sized by the incoming content, so it works inline.
+ */
+export function CrossFade({ id, children, style }: { id: string | number; children: React.ReactNode; style?: StyleProp<ViewStyle> }) {
+  const t = useRef(new Animated.Value(1)).current;
+  // Last rendered (id, node) so a key change can snapshot the outgoing content.
+  const last = useRef<{ id: string | number; node: React.ReactNode }>({ id, node: children });
+  const [prev, setPrev] = useState<React.ReactNode>(null);
+  useEffect(() => {
+    const was = last.current;
+    last.current = { id, node: children };
+    if (id === was.id || isReducedMotion()) return;
+    setPrev(was.node);
+    t.setValue(0);
+    const a = Animated.timing(t, { toValue: 1, duration: DUR.base, easing: EASE_OUT, useNativeDriver: true });
+    a.start(({ finished }) => finished && setPrev(null));
+    return () => a.stop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, children]);
+  return (
+    <View style={style}>
+      {prev ? (
+        <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, { opacity: t.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }) }]}>
+          {prev}
+        </Animated.View>
+      ) : null}
+      <Animated.View style={{ opacity: t }}>{children}</Animated.View>
+    </View>
+  );
+}
+
+/**
+ * Mount/unmount presence with a spring: the child scales and fades in when `visible` flips true
+ * and springs back out before leaving the tree. For floating pills and buttons that appear
+ * mid-interaction (jump-to-latest, stop). Reduce-motion: a plain show/hide.
+ */
+export function ScalePresence({ visible, children, style, from = 0.8 }: { visible: boolean; children: React.ReactNode; style?: StyleProp<ViewStyle>; from?: number }) {
+  const reduced = isReducedMotion();
+  const t = useRef(new Animated.Value(visible ? 1 : 0)).current;
+  const [mounted, setMounted] = useState(visible);
+  useEffect(() => {
+    if (visible) setMounted(true);
+    if (reduced) {
+      t.setValue(visible ? 1 : 0);
+      if (!visible) setMounted(false);
+      return;
+    }
+    const a = Animated.spring(t, { toValue: visible ? 1 : 0, useNativeDriver: true, ...(visible ? SPRING.snap : SPRING.press) });
+    a.start(({ finished }) => {
+      if (finished && !visible) setMounted(false);
+    });
+    return () => a.stop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
+  if (!mounted) return null;
+  return (
+    <Animated.View
+      pointerEvents={visible ? "auto" : "none"}
+      style={[{ opacity: t, transform: [{ scale: t.interpolate({ inputRange: [0, 1], outputRange: [from, 1] }) }] }, style]}
+    >
+      {children}
+    </Animated.View>
+  );
 }
 
 // app.json sets newArchEnabled: Fabric runs LayoutAnimation on both platforms with no opt-in.

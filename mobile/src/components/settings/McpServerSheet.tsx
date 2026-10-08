@@ -3,7 +3,7 @@
 // sees" preview, connection test for saved remote servers. Same upsert body as the web.
 import React, { useEffect, useMemo, useState } from "react";
 import { TextInput, View } from "react-native";
-import { PressScale } from "@/components/motion";
+import { animateLayout, FadeIn, PressScale } from "@/components/motion";
 import type { McpServerView } from "@/lib/api";
 import { useTheme } from "@/theme/ThemeContext";
 import { fonts, radius, type as typeScale } from "@/theme/tokens";
@@ -13,6 +13,7 @@ import { ArmButton } from "@/components/ui/ArmButton";
 import { Button } from "@/components/ui/Button";
 import { Field } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
+import { Chevron } from "@/components/ui/Chevron";
 import { Sheet } from "@/components/ui/Sheet";
 import { Segmented } from "./Segmented";
 import {
@@ -202,7 +203,15 @@ function Preview({ name, def }: { name: string; def: Record<string, unknown> }) 
   const [open, setOpen] = useState(false);
   return (
     <View style={{ borderWidth: 1, borderColor: palette.border, borderRadius: radius.lg, backgroundColor: palette.muted }}>
-      <PressScale onPress={() => setOpen((o) => !o)} accessibilityRole="button" accessibilityState={{ expanded: open }} style={{ flexDirection: "row", alignItems: "center", gap: 8, padding: 10 }}>
+      <PressScale
+        onPress={() => {
+          animateLayout();
+          setOpen((o) => !o);
+        }}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        style={{ flexDirection: "row", alignItems: "center", gap: 8, padding: 10 }}
+      >
         <Icon name="code" size={14} />
         <T variant="meta" weight="medium">
           What the agent sees
@@ -210,7 +219,7 @@ function Preview({ name, def }: { name: string; def: Record<string, unknown> }) 
         <T variant="micro" tone="faint" numberOfLines={1} style={{ flex: 1 }}>
           ~/.agent-sandbox/mcp.json
         </T>
-        <Icon name={open ? "chevron-up" : "chevron-down"} size={15} />
+        <Chevron open={open} from="down" size={15} />
       </PressScale>
       {open ? (
         <T variant="micro" mono tone="muted" selectable style={{ borderTopWidth: 1, borderColor: palette.border, padding: 10 }}>
@@ -273,6 +282,7 @@ export function McpServerSheet({
 
   const switchMode = (m: "fields" | "json") => {
     if (m === mode) return;
+    animateLayout();
     if (m === "json") {
       setJsonText(JSON.stringify(def, null, 2));
       setJsonErr(null);
@@ -414,7 +424,15 @@ export function McpServerSheet({
         ) : (
           <>
             <View style={{ gap: 6 }}>
-              <Segmented small value={d.type} onChange={(type) => patch({ type })} options={TRANSPORTS.map((t) => ({ value: t.value, label: `${t.label} · ${t.short}` }))} />
+              <Segmented
+                small
+                value={d.type}
+                onChange={(type) => {
+                  animateLayout();
+                  patch({ type });
+                }}
+                options={TRANSPORTS.map((t) => ({ value: t.value, label: `${t.label} · ${t.short}` }))}
+              />
               <T variant="micro" tone="muted">
                 {current.blurb}
               </T>
@@ -448,9 +466,11 @@ export function McpServerSheet({
         )}
 
         {err ? (
-          <T variant="meta" tone="destructive">
-            {err}
-          </T>
+          <FadeIn>
+            <T variant="meta" tone="destructive">
+              {err}
+            </T>
+          </FadeIn>
         ) : null}
         <View style={{ flexDirection: "row", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           {initial ? <ArmButton small variant="ghost" title="Remove" armedTitle={`Remove ${initial.name}?`} disabled={busy} onConfirm={remove} /> : null}

@@ -1,5 +1,5 @@
 import React from "react";
-import { View } from "react-native";
+import { Animated, View } from "react-native";
 import { useNow } from "@/hooks/useNow";
 import type { BoxView, FleetLifecycle, RunState } from "@/lib/api";
 import { friendlyName, isSleeping } from "@/lib/format";
@@ -8,7 +8,7 @@ import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { T } from "../ui/AppText";
 import { Icon, type IconName } from "../ui/Icon";
-import { PressScale, WorkingDot } from "@/components/motion";
+import { CrossFade, PressScale, WorkingDot } from "@/components/motion";
 
 /**
  * The thread's masthead (web ThreadHeader): back · title + context line · state pill · ⓘ · ⋯.
@@ -42,16 +42,18 @@ function LiveStatePill({ state, exitCode, stalled }: { state: DisplayState; exit
     : palette.mutedForeground;
   const bg = tone === "attention" ? palette.attention : tone === "muted" ? palette.secondary : `${color}1a`;
   return (
-    <View
-      accessibilityRole="text"
-      accessibilityLabel={`State: ${word}`}
-      style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 9, height: 22, borderRadius: radius.pill, backgroundColor: bg, flexShrink: 0 }}
-    >
-      {state === "running" && !stalled ? <WorkingDot color={color} size={6} /> : <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: color }} />}
-      <T variant="micro" weight="medium" numberOfLines={1} style={{ color }}>
-        {word}
-      </T>
-    </View>
+    <CrossFade id={word} style={{ flexShrink: 0 }}>
+      <View
+        accessibilityRole="text"
+        accessibilityLabel={`State: ${word}`}
+        style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 9, height: 22, borderRadius: radius.pill, backgroundColor: bg, flexShrink: 0 }}
+      >
+        {state === "running" && !stalled ? <WorkingDot color={color} size={6} /> : <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: color }} />}
+        <T variant="micro" weight="medium" numberOfLines={1} style={{ color }}>
+          {word}
+        </T>
+      </View>
+    </CrossFade>
   );
 }
 
@@ -76,6 +78,7 @@ export function ThreadHeader({
   onBack,
   onInfo,
   onMore,
+  scrollY,
 }: {
   session: string;
   box: (Partial<BoxView> & Pick<BoxView, "runState" | "boxStatus">) | null;
@@ -89,6 +92,8 @@ export function ThreadHeader({
   onBack: () => void;
   onInfo: () => void;
   onMore: () => void;
+  /** Transcript scroll offset (native-driven): the context lines dim and lift slightly as you scroll down. */
+  scrollY?: Animated.Value;
 }) {
   const { palette } = useTheme();
   const running = state === "running";
@@ -103,6 +108,13 @@ export function ThreadHeader({
   const shownExtras = extras.slice(0, EXTRAS_MAX);
   const extraOverflow = extras.length - shownExtras.length;
   const iconBtn = ({ pressed }: { pressed: boolean }) => ({ padding: 8, opacity: pressed ? 0.5 : 1 });
+  // Parallax-lite: the context line fades to 0.5 and rises 2px over the first 80px of scroll.
+  const context = scrollY
+    ? {
+        opacity: scrollY.interpolate({ inputRange: [0, 80], outputRange: [1, 0.5], extrapolate: "clamp" }),
+        transform: [{ translateY: scrollY.interpolate({ inputRange: [0, 80], outputRange: [0, -2], extrapolate: "clamp" }) }],
+      }
+    : null;
 
   return (
     <View
@@ -125,7 +137,7 @@ export function ThreadHeader({
         <T variant="body" weight="semibold" numberOfLines={1}>
           {title}
         </T>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+        <Animated.View style={[{ flexDirection: "row", alignItems: "center", gap: 6 }, context]}>
           <T variant="micro" mono tone="faint" numberOfLines={1} style={{ flexShrink: 1, minWidth: 0 }}>
             {friendlyName(session)}
           </T>
@@ -153,7 +165,7 @@ export function ThreadHeader({
               +{box.repos.length - 2}
             </T>
           ) : null}
-        </View>
+        </Animated.View>
         {shownExtras.length > 0 ? (
           <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 }}>
             {shownExtras.map((x) => (

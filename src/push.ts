@@ -94,7 +94,9 @@ export interface ExpoMessage {
   /** Registered in the app (mobile/src/lib/push.ts): `ask-choices-2` / `ask-choices-3` action buttons. */
   categoryId?: string;
   sound: "default";
-  priority: "high" | "default";
+  priority: "high";
+  /** iOS 15+: `time-sensitive` breaks through Focus modes (needs the entitlement in app.json). */
+  interruptionLevel: "active" | "time-sensitive";
   channelId: string;
   /** iOS groups by thread id; Android replaces a notification with the same tag. */
   threadId: string;
@@ -152,8 +154,11 @@ export function buildPushMessages(e: NotifyEvent, tokens: readonly string[], tit
     },
     ...(withChoices ? { categoryId: choiceCategory(labels.length) } : {}),
     sound: "default",
-    priority: needsYou ? "high" : "default",
-    channelId: needsYou ? "needs-you" : "runs",
+    // Every push is high priority: FCM wakes the device out of Doze, APNs delivers immediately.
+    // Time-sensitive on iOS breaks through Focus for the two kinds the operator must act on.
+    priority: "high",
+    interruptionLevel: needsYou || e.kind === "failed" ? "time-sensitive" : "active",
+    channelId: needsYou ? "needs-you-v2" : "runs-v2",
     threadId: e.box,
     tag: `${e.box}:${needsYou ? "ask" : "run"}`,
     // A question that is hours old is still actionable; a "done" a day later is not news.

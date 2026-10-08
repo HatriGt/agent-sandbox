@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { View } from "react-native";
-import { PressScale } from "@/components/motion";
+import { animateLayout, FadeIn, PressScale } from "@/components/motion";
 import { useRouter } from "expo-router";
 import type { MemoryNote } from "@/lib/api";
 import { ago, friendlyName, plural } from "@/lib/format";
@@ -11,7 +11,9 @@ import { ArmButton } from "@/components/ui/ArmButton";
 import { Button } from "@/components/ui/Button";
 import { Field } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
+import { Chevron } from "@/components/ui/Chevron";
 import { KIND_ICON, KIND_LABEL, isOperatorKind } from "./memoryKinds";
+import { SelectionFill } from "./Segmented";
 
 export type NotePatch = { text?: string; area?: string; paths?: string; links?: string; repo?: string };
 
@@ -77,12 +79,16 @@ export function MemoryNoteRow({ note: n, actions, showRepo, inArea, dim }: { not
     setDArea(n.area ?? "");
     setDPaths((n.paths ?? []).join(", "));
     setDLinks((n.links ?? []).join(", "));
+    animateLayout();
     setEditing(true);
   };
   const save = () =>
     run("save", async () => {
       const t = draft.trim();
-      if (!t) return setEditing(false);
+      if (!t) {
+        animateLayout();
+        return setEditing(false);
+      }
       const patch: NotePatch = {};
       if (t !== n.text) patch.text = t;
       if (kb) {
@@ -92,6 +98,7 @@ export function MemoryNoteRow({ note: n, actions, showRepo, inArea, dim }: { not
         if (dLinks.trim() !== (n.links ?? []).join(", ")) patch.links = dLinks.trim();
       }
       if (Object.keys(patch).length) await actions.onSave(n, patch);
+      animateLayout();
       setEditing(false);
     });
 
@@ -164,7 +171,7 @@ export function MemoryNoteRow({ note: n, actions, showRepo, inArea, dim }: { not
           ) : null}
           <View style={{ flexDirection: "row", gap: 8 }}>
             <Button small title="Save" loading={busy === "save"} onPress={() => void save()} />
-            <Button small variant="ghost" title="Cancel" onPress={() => (setDraft(n.text), setEditing(false))} />
+            <Button small variant="ghost" title="Cancel" onPress={() => (setDraft(n.text), animateLayout(), setEditing(false))} />
           </View>
         </View>
       ) : (
@@ -174,8 +181,16 @@ export function MemoryNoteRow({ note: n, actions, showRepo, inArea, dim }: { not
           </T>
           {steps.length ? (
             <>
-              <PressScale onPress={() => setStepsOpen((v) => !v)} accessibilityRole="button" accessibilityState={{ expanded: stepsOpen }} style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>
-                <Icon name={stepsOpen ? "chevron-down" : "chevron-right"} size={13} color={palette.mutedForeground} />
+              <PressScale
+                onPress={() => {
+                  animateLayout();
+                  setStepsOpen((v) => !v);
+                }}
+                accessibilityRole="button"
+                accessibilityState={{ expanded: stepsOpen }}
+                style={{ flexDirection: "row", alignItems: "center", gap: 2 }}
+              >
+                <Chevron open={stepsOpen} size={13} color={palette.mutedForeground} />
                 <T variant="meta" tone="muted">
                   {plural(steps.length, "step")}
                 </T>
@@ -226,8 +241,16 @@ export function MemoryNoteRow({ note: n, actions, showRepo, inArea, dim }: { not
           ) : null}
           {history.length ? (
             <>
-              <PressScale onPress={() => setHistoryOpen((v) => !v)} accessibilityRole="button" accessibilityState={{ expanded: historyOpen }} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                <Icon name={historyOpen ? "chevron-down" : "chevron-right"} size={12} color={palette.faint} />
+              <PressScale
+                onPress={() => {
+                  animateLayout();
+                  setHistoryOpen((v) => !v);
+                }}
+                accessibilityRole="button"
+                accessibilityState={{ expanded: historyOpen }}
+                style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
+              >
+                <Chevron open={historyOpen} size={12} color={palette.faint} />
                 <Icon name="clock" size={12} color={palette.faint} />
                 <T variant="micro" tone="faint">
                   {plural(history.length, "earlier version")}
@@ -269,9 +292,11 @@ export function MemoryNoteRow({ note: n, actions, showRepo, inArea, dim }: { not
         </>
       )}
       {err ? (
-        <T variant="micro" tone="destructive">
-          {err}
-        </T>
+        <FadeIn>
+          <T variant="micro" tone="destructive">
+            {err}
+          </T>
+        </FadeIn>
       ) : null}
     </View>
   );
@@ -318,9 +343,10 @@ export function MemoryChip({ label, count, active, onPress }: { label: string; c
         borderRadius: radius.pill,
         borderWidth: 1,
         borderColor: active ? palette.lineStrong : palette.border,
-        backgroundColor: active ? palette.accent : "transparent",
+        overflow: "hidden",
       }}
     >
+      <SelectionFill on={!!active} color={palette.accent} />
       <T variant="micro" weight={active ? "semibold" : "regular"} tone={active ? "default" : "muted"}>
         {label}
       </T>

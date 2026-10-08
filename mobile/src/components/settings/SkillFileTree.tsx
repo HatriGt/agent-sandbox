@@ -3,7 +3,8 @@
 // here is a draft until the skill is saved.
 import React, { useMemo, useState } from "react";
 import { Alert, TextInput, View } from "react-native";
-import { PressScale } from "@/components/motion";
+import { animateLayout, PressScale } from "@/components/motion";
+import { Chevron } from "@/components/ui/Chevron";
 import { useTheme } from "@/theme/ThemeContext";
 import { fonts, radius, type } from "@/theme/tokens";
 import { T } from "@/components/ui/AppText";
@@ -145,8 +146,16 @@ function Folder({ node, depth, render }: { node: FileNode; depth: number; render
   const [open, setOpen] = useState(true);
   return (
     <View>
-      <PressScale onPress={() => setOpen((v) => !v)} accessibilityRole="button" accessibilityState={{ expanded: open }} style={{ flexDirection: "row", alignItems: "center", gap: 6, height: 40, paddingLeft: 6 + depth * 14 }}>
-        <Icon name={open ? "chevron-down" : "chevron-right"} size={13} />
+      <PressScale
+        onPress={() => {
+          animateLayout();
+          setOpen((v) => !v);
+        }}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        style={{ flexDirection: "row", alignItems: "center", gap: 6, height: 40, paddingLeft: 6 + depth * 14 }}
+      >
+        <Chevron open={open} size={13} />
         <Icon name="folder" size={14} />
         <T variant="meta" tone="muted" numberOfLines={1}>
           {node.name}

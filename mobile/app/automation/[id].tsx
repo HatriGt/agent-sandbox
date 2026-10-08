@@ -2,7 +2,7 @@
 // the server returns on create (webhook secret / hook URL) are shown once from component state and
 // never persisted.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Switch, View } from "react-native";
+import { View } from "react-native";
 import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
 import {
@@ -20,9 +20,9 @@ import {
   type WorkflowView,
   type AgentChoice,
 } from "@/lib/api";
-import { deliveryLine, deliveryTone } from "@/lib/automationRuns";
+import { deliveryParts, deliveryTone } from "@/lib/automationRuns";
 import { ago } from "@/lib/format";
-import { PressScale } from "@/components/motion";
+import { animateLayout, FadeIn, FadeInUp, PressScale, stagger } from "@/components/motion";
 import { useAuth } from "@/state/auth";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
@@ -32,6 +32,7 @@ import { ArmButton } from "@/components/ui/ArmButton";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Field } from "@/components/ui/Field";
+import { Toggle } from "@/components/ui/Toggle";
 import { OneTimeSecret } from "@/components/settings/OneTimeSecret";
 import { PickerRow, PickerSheet, type PickerOption } from "@/components/settings/PickerSheet";
 import { SchedulePicker, deviceTimezone } from "@/components/settings/SchedulePicker";
@@ -180,16 +181,27 @@ function Editor() {
   }, [id]);
   useEffect(() => void load(), [load]);
 
-  const set = (patch: Partial<AutomationDraft>) => setD((cur) => (cur ? { ...cur, ...patch } : cur));
-  const setSpec = (patch: Partial<AutomationSpec>) => setD((cur) => (cur ? { ...cur, spec: { ...cur.spec, ...patch } } : cur));
+  // The first edit glides the Save button in; spec changes (toggles, segments) reveal fields, so
+  // they always glide. Typing afterwards must not re-run a layout pass per keystroke.
+  const dirtyRef = useRef(false);
+  const set = (patch: Partial<AutomationDraft>) => {
+    if (!dirtyRef.current) animateLayout();
+    setD((cur) => (cur ? { ...cur, ...patch } : cur));
+  };
+  const setSpec = (patch: Partial<AutomationSpec>) => {
+    animateLayout();
+    setD((cur) => (cur ? { ...cur, spec: { ...cur.spec, ...patch } } : cur));
+  };
 
-  const changeKind = (kind: AutomationKind) =>
+  const changeKind = (kind: AutomationKind) => {
+    animateLayout();
     setD((cur) => {
       if (!cur || cur.kind === kind) return cur;
       const b = blank(kind);
       const keepTask = cur.taskTemplate.trim() && cur.taskTemplate !== DEFAULT_TEMPLATES[cur.kind] && cur.taskTemplate !== ALERT_TEMPLATE;
       return { ...b, name: cur.name, repos: cur.repos, taskTemplate: keepTask ? cur.taskTemplate : b.taskTemplate, agent: cur.agent, model: cur.model, harnessId: cur.harnessId, workflowId: cur.workflowId, quiet: cur.quiet };
     });
+  };
 
   // Repo search (debounced) while the repo sheet is open.
   const repoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -321,6 +333,9 @@ function Editor() {
   const chainOptions: PickerOption[] = all.filter((a) => a.id !== id && a.kind !== "chain").map((a) => ({ value: a.id, label: a.name, hint: `${KIND_LABEL[a.kind]} · ${a.when}` }));
   const afterName = all.find((a) => a.id === d.spec.afterTrigger)?.name;
   const pendingProposal = !!existing?.proposed && !existing.enabled;
+  // New automations are always savable; an existing one shows Save only once something changed.
+  const dirty = !existing || JSON.stringify(d) !== JSON.stringify(toDraft(existing));
+  dirtyRef.current = dirty;
 
   return (
     <SettingsScreen title={title}>
@@ -404,6 +419,7 @@ function Editor() {
               value={d.spec.preset ?? "generic"}
               onChange={(v) => {
                 const preset = v === "generic" ? undefined : (v as AlertPreset);
+                animateLayout();
                 setD((cur) => {
                   if (!cur) return cur;
                   const genericTask = !cur.taskTemplate.trim() || cur.taskTemplate === DEFAULT_TEMPLATES.webhook || cur.taskTemplate === ALERT_TEMPLATE;
@@ -466,7 +482,7 @@ function Editor() {
                   Off by default — fork PRs can carry untrusted code.
                 </T>
               </View>
-              <Switch value={!!d.spec.allowForks} onValueChange={(v) => setSpec({ allowForks: v })} trackColor={{ true: palette.live }} />
+              <Toggle value={!!d.spec.allowForks} onValueChange={(v) => setSpec({ allowForks: v })} accessibilityLabel="Include PRs from forks" />
             </View>
           ) : null}
         </Card>
@@ -610,11 +626,17 @@ function Editor() {
         </T>
       ) : null}
       {err ? (
-        <T variant="meta" tone="destructive">
-          {err}
-        </T>
+        <FadeIn>
+          <T variant="meta" tone="destructive">
+            {err}
+          </T>
+        </FadeIn>
       ) : null}
-      <Button title={id ? "Save" : "Create"} loading={saving} disabled={problems.length > 0} onPress={() => void save()} />
+      {dirty ? (
+        <FadeIn>
+          <Button title={id ? "Save" : "Create"} loading={saving} disabled={problems.length > 0} onPress={() => void save()} />
+        </FadeIn>
+      ) : null}
       {id ? (
         <View style={{ alignItems: "flex-start", marginTop: 8 }}>
           <ArmButton title={pendingProposal ? "Dismiss proposal" : "Delete automation"} armedTitle="Tap again to delete" variant="ghost" onConfirm={remove} />
@@ -743,23 +765,75 @@ function Runs({ id }: { id: string }) {
           {counts.all === 0 ? "Nothing has arrived yet. Every delivery lands here: fired (with the box it opened), skipped and why, or rejected." : "Nothing matches this filter."}
         </T>
       ) : (
-        <View style={{ gap: 6 }}>
-          {shown.map((d) => (
-            <PressScale key={d.id} disabled={!d.box} onPress={() => d.box && router.push(`/box/${encodeURIComponent(d.box)}`)} accessibilityRole={d.box ? "link" : undefined}>
-              <T variant="meta" tone={deliveryTone(d)} numberOfLines={2}>
-                {ago(d.at)} · {deliveryLine(d)}
-                {d.detail && d.outcome !== "fired" ? ` — ${d.detail}` : ""}
-              </T>
-            </PressScale>
-          ))}
-        </View>
+        <RunsTable rows={shown} onOpen={(box) => router.push(`/box/${encodeURIComponent(box)}`)} />
       )}
     </Card>
   );
 }
 
-function ToggleRow({ label, hint, value, onChange }: { label: string; hint?: string; value: boolean; onChange: (v: boolean) => void }) {
+const COL = { when: 64, outcome: 92, box: 60 } as const;
+
+/**
+ * Delivery log as a table: When · Outcome · Why · Box. Fixed narrow columns so the eye can scan
+ * down them; Why takes the rest and wraps to two lines; a fired row is a link to its box.
+ */
+function RunsTable({ rows, onOpen }: { rows: AutomationDelivery[]; onOpen: (box: string) => void }) {
   const { palette } = useTheme();
+  const head = (label: string, style: object) => (
+    <T variant="micro" weight="semibold" tone="faint" style={style}>
+      {label}
+    </T>
+  );
+  return (
+    <View style={{ borderWidth: 1, borderColor: palette.border, borderRadius: radius.lg, overflow: "hidden" }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: palette.muted }}>
+        {head("When", { width: COL.when })}
+        {head("Outcome", { width: COL.outcome })}
+        {head("Why", { flex: 1 })}
+        {head("Box", { width: COL.box, textAlign: "right" })}
+      </View>
+      {rows.map((d, i) => {
+        const p = deliveryParts(d);
+        return (
+          <FadeInUp key={d.id} delay={stagger(i, 24)}>
+            <PressScale
+              disabled={!d.box}
+              onPress={() => d.box && onOpen(d.box)}
+              accessibilityRole={d.box ? "link" : undefined}
+              accessibilityLabel={`${ago(d.at)}, ${p.outcome}${p.why ? `, ${p.why}` : ""}${d.box ? `, open ${d.box}` : ""}`}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 10,
+                paddingHorizontal: 10,
+                minHeight: 40,
+                paddingVertical: 6,
+                borderTopWidth: 1,
+                borderTopColor: palette.border,
+                backgroundColor: i % 2 ? palette.muted : "transparent",
+              }}
+            >
+              <T variant="micro" tone="muted" tnum numberOfLines={1} style={{ width: COL.when }}>
+                {ago(d.at)}
+              </T>
+              <T variant="micro" weight="semibold" tone={deliveryTone(d)} numberOfLines={1} style={{ width: COL.outcome }}>
+                {p.outcome}
+              </T>
+              <T variant="micro" tone="muted" numberOfLines={2} style={{ flex: 1 }}>
+                {p.why || "—"}
+              </T>
+              <T variant="micro" tone={d.box ? "default" : "faint"} mono numberOfLines={1} style={{ width: COL.box, textAlign: "right" }}>
+                {d.box ?? "—"}
+              </T>
+            </PressScale>
+          </FadeInUp>
+        );
+      })}
+    </View>
+  );
+}
+
+function ToggleRow({ label, hint, value, onChange }: { label: string; hint?: string; value: boolean; onChange: (v: boolean) => void }) {
   return (
     <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
       <View style={{ flex: 1, minWidth: 0 }}>
@@ -770,7 +844,7 @@ function ToggleRow({ label, hint, value, onChange }: { label: string; hint?: str
           </T>
         ) : null}
       </View>
-      <Switch value={value} onValueChange={onChange} trackColor={{ true: palette.live }} />
+      <Toggle value={value} onValueChange={onChange} accessibilityLabel={label} />
     </View>
   );
 }

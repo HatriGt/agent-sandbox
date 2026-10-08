@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Field } from "@/components/ui/Field";
 import { Segmented } from "@/components/settings/Segmented";
+import { FadeIn, FadeInUp, stagger } from "@/components/motion";
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -41,9 +42,11 @@ export default function Providers() {
         your keys · any endpoint · local models
       </T>
       {error ? (
-        <T variant="meta" tone="destructive">
-          {error}
-        </T>
+        <FadeIn>
+          <T variant="meta" tone="destructive">
+            {error}
+          </T>
+        </FadeIn>
       ) : null}
       {note ? (
         <T variant="meta" tone="muted">
@@ -56,9 +59,9 @@ export default function Providers() {
           No providers yet — runs use the deployment's default model access.
         </T>
       ) : null}
-      {r?.providers.map((p) => (
+      {r?.providers.map((p, i) => (
+        <FadeInUp key={p.id} delay={stagger(i)}>
         <ProviderRow
-          key={p.id}
           p={p}
           onChanged={setR}
           onNote={(n, isErr) => {
@@ -71,6 +74,7 @@ export default function Providers() {
             }
           }}
         />
+        </FadeInUp>
       ))}
       {r && !adding ? (
         <View style={{ flexDirection: "row" }}>

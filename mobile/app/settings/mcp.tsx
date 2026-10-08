@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Switch, View } from "react-native";
-import { PressScale } from "@/components/motion";
+import { View } from "react-native";
+import { FadeIn, FadeInUp, PressScale, stagger } from "@/components/motion";
 import * as Clipboard from "expo-clipboard";
 import { api, type McpServersResponse, type McpServerView } from "@/lib/api";
 import { useTheme } from "@/theme/ThemeContext";
@@ -13,6 +13,7 @@ import { Card } from "@/components/ui/Card";
 import { Field } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
 import { Sheet } from "@/components/ui/Sheet";
+import { Toggle } from "@/components/ui/Toggle";
 import { Segmented } from "@/components/settings/Segmented";
 import { McpServerSheet, StatusPill, Verdict, type Mutate } from "@/components/settings/McpServerSheet";
 import { describe, errMsg, jsonErrorLine, statusOf, type Health } from "@/components/settings/McpModel";
@@ -103,9 +104,11 @@ export default function McpServers() {
         </View>
       ) : null}
       {error ? (
-        <T variant="meta" tone="destructive">
-          {error}
-        </T>
+        <FadeIn>
+          <T variant="meta" tone="destructive">
+            {error}
+          </T>
+        </FadeIn>
       ) : null}
       {note ? (
         <T variant="meta" tone="muted">
@@ -181,8 +184,10 @@ export default function McpServers() {
               ) : null}
             </View>
           ) : (
-            visible.map((s) => (
-              <ServerRow key={s.name} server={s} health={health[s.name]} testing={!!testing[s.name]} onTest={() => test(s.name)} onEdit={() => setEditing({ open: true, server: s })} onDismiss={() => dismiss(s.name)} onMutate={mutate} onError={setError} />
+            visible.map((s, i) => (
+              <FadeInUp key={s.name} delay={stagger(i)}>
+                <ServerRow server={s} health={health[s.name]} testing={!!testing[s.name]} onTest={() => test(s.name)} onEdit={() => setEditing({ open: true, server: s })} onDismiss={() => dismiss(s.name)} onMutate={mutate} onError={setError} />
+              </FadeInUp>
             ))
           )}
           <T variant="micro" tone="faint">
@@ -231,7 +236,7 @@ function ServerRow({ server: s, health, testing, onTest, onEdit, onDismiss, onMu
             {secrets > 0 ? <T variant="micro" tone="faint">{` · 🔑 ${secrets} ${secrets === 1 ? "secret" : "secrets"}`}</T> : null}
           </T>
         </PressScale>
-        <Switch value={s.enabled} onValueChange={toggle} disabled={busy} trackColor={{ true: palette.live }} accessibilityLabel={s.enabled ? `Disable ${s.name}` : `Enable ${s.name}`} />
+        <Toggle value={s.enabled} onValueChange={toggle} disabled={busy} accessibilityLabel={s.enabled ? `Disable ${s.name}` : `Enable ${s.name}`} />
       </View>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 8 }}>
         {remote ? (
@@ -245,9 +250,9 @@ function ServerRow({ server: s, health, testing, onTest, onEdit, onDismiss, onMu
         <ArmButton small variant="ghost" title="Remove" armedTitle="Remove?" onConfirm={() => onMutate({ action: "remove", name: s.name }, `Removed ${s.name}`).then(() => undefined, (e: unknown) => onError(`Could not remove — ${errMsg(e)}`))} />
       </View>
       {health && remote ? (
-        <View style={{ marginTop: 8 }}>
+        <FadeIn style={{ marginTop: 8 }}>
           <Verdict health={health} onDismiss={onDismiss} onRetry={onTest} retrying={testing} />
-        </View>
+        </FadeIn>
       ) : null}
     </Card>
   );

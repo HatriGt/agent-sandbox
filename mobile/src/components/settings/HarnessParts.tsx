@@ -2,7 +2,7 @@
 // HarnessesPage.tsx (ReviewPanel, DriverBadges).
 import React, { useEffect, useState } from "react";
 import { View } from "react-native";
-import { PressScale } from "@/components/motion";
+import { animateLayout, PressScale } from "@/components/motion";
 import { useRouter } from "expo-router";
 import { api, type AgentChoice, type AttemptGroupRow, type AttemptGroupView, type CompareDetail, type CompareFacts, type CompareSummary, type HarnessImportPreview, type HarnessView, type SkillView } from "@/lib/api";
 import { ago } from "@/lib/format";
@@ -12,7 +12,7 @@ import { T } from "@/components/ui/AppText";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Field } from "@/components/ui/Field";
-import { Icon } from "@/components/ui/Icon";
+import { Chevron } from "@/components/ui/Chevron";
 import { AttemptGroupPanel } from "@/components/AttemptGroupCard";
 import { PickerSheet } from "./PickerSheet";
 import { Segmented } from "./Segmented";
@@ -350,7 +350,7 @@ function Disclosure({ open, onPress, title, trailing, children }: { open: boolea
   return (
     <View style={{ borderBottomWidth: 1, borderBottomColor: palette.border }}>
       <PressScale onPress={onPress} accessibilityRole="button" accessibilityState={{ expanded: open }} style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 12 }}>
-        <Icon name={open ? "chevron-down" : "chevron-right"} size={15} color={palette.mutedForeground} />
+        <Chevron open={open} size={15} color={palette.mutedForeground} />
         <T variant="meta" numberOfLines={1} style={{ flex: 1 }}>
           {title}
         </T>
@@ -380,7 +380,10 @@ export function CompareList({ refresh, canStart }: { refresh: number; canStart: 
         <Disclosure
           key={c.id}
           open={open === c.id}
-          onPress={() => setOpen(open === c.id ? null : c.id)}
+          onPress={() => {
+            animateLayout();
+            setOpen(open === c.id ? null : c.id);
+          }}
           title={c.task}
           trailing={
             <T variant="micro" tone="faint">
@@ -472,7 +475,10 @@ export function AttemptGroupList() {
         <Disclosure
           key={g.id}
           open={open === g.id}
-          onPress={() => setOpen(open === g.id ? null : g.id)}
+          onPress={() => {
+            animateLayout();
+            setOpen(open === g.id ? null : g.id);
+          }}
           title={g.task}
           trailing={
             <T variant="micro" tone={g.status === "needs-pick" ? "default" : "faint"} weight={g.status === "needs-pick" ? "medium" : undefined}>

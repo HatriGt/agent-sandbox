@@ -20,3 +20,10 @@ export function deliveryLine(d: AutomationDelivery): string {
 }
 
 export const deliveryTone = (d: AutomationDelivery): "ok" | "muted" | "destructive" => (d.outcome === "fired" ? "ok" : d.outcome === "skipped" ? "muted" : "destructive");
+
+/** The same facts split for the Runs table: outcome word, and a one-line why (reason or detail). */
+export function deliveryParts(d: AutomationDelivery): { outcome: string; why: string } {
+  const outcome = d.outcome === "failed" ? "could not start" : d.outcome;
+  const why = d.outcome === "fired" ? "" : [d.reason ? REASON[d.reason] : "", d.detail ?? ""].filter(Boolean).join(" — ");
+  return { outcome: d.test ? `test · ${outcome}` : outcome, why };
+}

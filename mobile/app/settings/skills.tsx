@@ -2,7 +2,7 @@
 // (search, filter chips, template strip, how skills reach the agent, recently edited) and the editor
 // over it; import is a sheet over the library.
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Switch, TextInput, View } from "react-native";
+import { TextInput, View } from "react-native";
 import { api, type SkillView } from "@/lib/api";
 import { ago } from "@/lib/format";
 import { useTheme } from "@/theme/ThemeContext";
@@ -12,10 +12,11 @@ import { T } from "@/components/ui/AppText";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Icon, type IconName } from "@/components/ui/Icon";
+import { Toggle } from "@/components/ui/Toggle";
 import { SkillEditor, StarterBadge } from "@/components/settings/SkillEditor";
 import { SkillImportSheet } from "@/components/settings/SkillImportSheet";
 import { byteLength, type Draft, fmtKb, type Mutate, sourceOf, TEMPLATES } from "@/components/settings/SkillModel";
-import { PressScale, Skeleton } from "@/components/motion";
+import { FadeIn, FadeInUp, PressScale, Skeleton, stagger } from "@/components/motion";
 
 type Filter = "all" | "on" | "off" | "starter" | "custom";
 type Editing = { initial?: SkillView; draft?: Draft };
@@ -101,9 +102,11 @@ export default function Skills() {
         <Button small title="New skill" onPress={newSkill} />
       </View>
       {error ? (
-        <T variant="meta" tone="destructive" accessibilityRole="alert">
-          {error}
-        </T>
+        <FadeIn>
+          <T variant="meta" tone="destructive" accessibilityRole="alert">
+            {error}
+          </T>
+        </FadeIn>
       ) : null}
       {info ? (
         <T variant="meta" tone="ok">
@@ -190,7 +193,11 @@ export default function Skills() {
           </View>
         </Card>
       ) : (
-        visible.map((s) => <SkillRow key={s.name} skill={s} onOpen={() => setEditing({ initial: s })} onMutate={mutate} onError={setError} />)
+        visible.map((s, i) => (
+          <FadeInUp key={s.name} delay={stagger(i)}>
+            <SkillRow skill={s} onOpen={() => setEditing({ initial: s })} onMutate={mutate} onError={setError} />
+          </FadeInUp>
+        ))
       )}
 
       {skills && skills.length > 0 && skills.length <= 6 && !filtered ? <TemplateStrip existing={existing} onPick={(d) => setEditing({ draft: d })} onNew={newSkill} /> : null}
@@ -288,7 +295,7 @@ function SkillRow({ skill: s, onOpen, onMutate, onError }: { skill: SkillView; o
             {files + 1} file{files ? "s" : ""} · {fmtKb(bytes)} · {ago(s.updatedAt)}
           </T>
         </View>
-        <Switch value={s.enabled} disabled={busy} onValueChange={toggle} trackColor={{ true: palette.live }} accessibilityLabel={s.enabled ? `Disable ${s.name}` : `Enable ${s.name}`} />
+        <Toggle value={s.enabled} disabled={busy} onValueChange={toggle} accessibilityLabel={s.enabled ? `Disable ${s.name}` : `Enable ${s.name}`} />
       </View>
     </Card>
   );

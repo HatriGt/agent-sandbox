@@ -11,7 +11,7 @@ import { fonts, radius, type } from "@/theme/tokens";
 import { T } from "./ui/AppText";
 import { Icon } from "./ui/Icon";
 import { VoiceButton, VoicePill } from "./VoiceButton";
-import { PressScale, SPRING } from "@/components/motion";
+import { PressScale, ScalePresence, SPRING } from "@/components/motion";
 
 /**
  * The SendBar, at web parity: two lanes (agent / read-only ask), `@` file
@@ -505,7 +505,7 @@ export function Composer({
         )}
         {/* Stop the turn — only while the agent is working, and only when the thread wired it. A
             hairline ring with a square, not a filled red button: it is an interrupt, not a destroy. */}
-        {onStop && running && !isAsk ? (
+        <ScalePresence visible={!!onStop && !!running && !isAsk}>
           <PressScale
             onPress={() => {
               if (stopping) return;
@@ -515,7 +515,7 @@ export function Composer({
               // control shows it took, and lets go after a few seconds if the state never arrives.
               clearTimeout(stopFallback.current);
               stopFallback.current = setTimeout(() => setStopping(false), 4000) as unknown as number;
-              onStop();
+              onStop?.();
             }}
             disabled={disabled || stopping}
             accessibilityLabel="Stop the running turn"
@@ -537,7 +537,7 @@ export function Composer({
               <View style={{ width: 12, height: 12, borderRadius: 2, backgroundColor: palette.foreground }} />
             )}
           </PressScale>
-        ) : null}
+        </ScalePresence>
         <Animated.View
           pointerEvents={hasContent.current ? "auto" : "none"}
           style={{ transform: [{ scale: sendScale.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1] }) }], opacity: sendScale }}

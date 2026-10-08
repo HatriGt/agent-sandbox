@@ -7,7 +7,7 @@ import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { T } from "./ui/AppText";
 import { Icon } from "./ui/Icon";
-import { FadeInUp, PressScale } from "@/components/motion";
+import { animateLayout, FadeInUp, PressScale } from "@/components/motion";
 import { useNow } from "@/hooks/useNow";
 
 /**
@@ -79,7 +79,10 @@ export function AttemptGroupPanel({ group: g, currentBox, onChange }: { group: A
     async (pick: { box: string } | { choice: number }) => {
       setBusy(true);
       try {
-        onChange(await api.attemptPick(g.id, pick));
+        const next = await api.attemptPick(g.id, pick);
+        // The choices row leaves and the winner row changes shape; glide rather than pop.
+        animateLayout();
+        onChange(next);
       } catch (e) {
         Alert.alert("Couldn't pick", e instanceof Error ? e.message : String(e));
       } finally {

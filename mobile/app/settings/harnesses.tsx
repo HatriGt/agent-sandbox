@@ -16,6 +16,7 @@ import { Card } from "@/components/ui/Card";
 import { Segmented } from "@/components/settings/Segmented";
 import { AttemptGroupList, CompareLauncher, CompareList, ImportHarness, ReviewPanel, rulesLine } from "@/components/settings/HarnessParts";
 import { AcctAgentSection } from "@/components/settings/AcctSections";
+import { animateLayout, FadeIn, FadeInUp, stagger } from "@/components/motion";
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 type Tab = "drivers" | "skills" | "saved";
@@ -81,7 +82,10 @@ export default function Harnesses() {
       </T>
       <Segmented
         value={tab}
-        onChange={setTab}
+        onChange={(t) => {
+          animateLayout();
+          setTab(t);
+        }}
         options={[
           { value: "drivers", label: "Drivers" },
           { value: "skills", label: "Skills" },
@@ -89,9 +93,11 @@ export default function Harnesses() {
         ]}
       />
       {error ? (
-        <T variant="meta" tone="destructive">
-          {error}
-        </T>
+        <FadeIn>
+          <T variant="meta" tone="destructive">
+            {error}
+          </T>
+        </FadeIn>
       ) : null}
       {info ? (
         <T variant="meta" tone="muted">
@@ -163,17 +169,18 @@ export default function Harnesses() {
                 </View>
               </Card>
             ) : (
-              all.map((h) => (
-                <HarnessRow
-                  key={h.id}
-                  h={h}
-                  skills={skills}
-                  onEdit={() => edit(h)}
-                  onDuplicate={() => void mutate({ action: "duplicate", id: h.id }, "Duplicated")}
-                  onExport={() => void exportOne(h)}
-                  onDelete={() => mutate({ action: "delete", id: h.id }, "Deleted")}
-                  onApprove={() => mutate({ action: "approve", id: h.id }, `${h.name} can run now`)}
-                />
+              all.map((h, i) => (
+                <FadeInUp key={h.id} delay={stagger(i)}>
+                  <HarnessRow
+                    h={h}
+                    skills={skills}
+                    onEdit={() => edit(h)}
+                    onDuplicate={() => void mutate({ action: "duplicate", id: h.id }, "Duplicated")}
+                    onExport={() => void exportOne(h)}
+                    onDelete={() => mutate({ action: "delete", id: h.id }, "Deleted")}
+                    onApprove={() => mutate({ action: "approve", id: h.id }, `${h.name} can run now`)}
+                  />
+                </FadeInUp>
               ))
             )}
           </Section>
@@ -307,7 +314,7 @@ function HarnessRow({
       </T>
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
         {h.needsReview ? (
-          <Button small variant="attention" title={reviewOpen ? "Hide review" : "Review"} onPress={() => setReviewOpen((v) => !v)} />
+          <Button small variant="attention" title={reviewOpen ? "Hide review" : "Review"} onPress={() => (animateLayout(), setReviewOpen((v) => !v))} />
         ) : (
           <Button small variant="ghost" title="Edit" onPress={onEdit} />
         )}

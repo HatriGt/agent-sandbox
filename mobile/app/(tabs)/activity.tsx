@@ -23,7 +23,7 @@ import { Card } from "@/components/ui/Card";
 import { HistoryList } from "@/components/HistoryList";
 import { Segmented as Chips } from "@/components/settings/Segmented";
 import { radius, type Palette } from "@/theme/tokens";
-import { CardSkeleton, FadeIn, haptic, isReducedMotion, PressScale } from "@/components/motion";
+import { CardSkeleton, FadeIn, FadeInUp, haptic, isReducedMotion, PressScale, stagger } from "@/components/motion";
 
 type Tab = "activity" | "history";
 const TABS: Tab[] = ["activity", "history"];
@@ -95,7 +95,7 @@ function toneColor(palette: Palette, tone: RowTone) {
 }
 
 /** One timeline line: clock · dot · verb + box link · detail · status. Memoized per row. */
-const TimelineLine = memo(function TimelineLine({ r, head, first, onRun }: { r: TimelineRow; head: string | null; first: boolean; onRun: () => void }) {
+const TimelineLine = memo(function TimelineLine({ r, head, first, index, onRun }: { r: TimelineRow; head: string | null; first: boolean; index: number; onRun: () => void }) {
   const router = useRouter();
   const { palette } = useTheme();
   const failed = r.tone === "destructive";
@@ -137,7 +137,7 @@ const TimelineLine = memo(function TimelineLine({ r, head, first, onRun }: { r: 
     </View>
   );
   return (
-    <>
+    <FadeInUp delay={stagger(index)}>
       {head ? (
         <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingTop: first ? 4 : 12, paddingBottom: 4 }}>
           <T variant="micro" tone="faint" weight="medium" style={{ width: 40, textAlign: "right" }}>
@@ -153,7 +153,7 @@ const TimelineLine = memo(function TimelineLine({ r, head, first, onRun }: { r: 
       ) : (
         body
       )}
-    </>
+    </FadeInUp>
   );
 });
 
@@ -238,7 +238,7 @@ export default function Activity() {
   const more = () => oldest && void loadAudit({ at: oldest.at, id: oldest.id });
   const openHistory = useCallback(() => setTab("history"), []);
   const renderItem = useCallback(
-    ({ item, index }: { item: TimelineRow; index: number }) => <TimelineLine r={item} head={heads[index]} first={index === 0} onRun={openHistory} />,
+    ({ item, index }: { item: TimelineRow; index: number }) => <TimelineLine r={item} head={heads[index]} first={index === 0} index={index} onRun={openHistory} />,
     [heads, openHistory],
   );
 

@@ -12,6 +12,7 @@ import { Card } from "@/components/ui/Card";
 import { Field } from "@/components/ui/Field";
 import { Sheet } from "@/components/ui/Sheet";
 import { Segmented } from "@/components/settings/Segmented";
+import { FadeIn, FadeInUp, stagger } from "@/components/motion";
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -35,12 +36,12 @@ export default function GithubAccounts() {
         clone · read PRs · push
       </T>
       {error ? (
-        <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
+        <FadeIn style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
           <T variant="meta" tone="destructive" style={{ flex: 1 }}>
             {error}
           </T>
           <Button small variant="ghost" title="Dismiss" onPress={() => setError(null)} />
-        </View>
+        </FadeIn>
       ) : null}
       {note ? (
         <T variant="meta" tone="muted">
@@ -59,8 +60,10 @@ export default function GithubAccounts() {
           <Button small variant="outline" title="+ Add account" onPress={() => setAdding(true)} style={{ marginTop: 8 }} />
         </Card>
       ) : null}
-      {accounts?.map((a) => (
-        <AccountRow key={a.login} account={a} onChanged={setAccounts} onNote={setNote} />
+      {accounts?.map((a, i) => (
+        <FadeInUp key={a.login} delay={stagger(i)}>
+          <AccountRow account={a} onChanged={setAccounts} onNote={setNote} />
+        </FadeInUp>
       ))}
       {accounts && accounts.length > 0 ? (
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 }}>

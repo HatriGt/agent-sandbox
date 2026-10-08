@@ -99,7 +99,9 @@ export function configurePushPresentation(): void {
         (typeof c.categoryIdentifier === "string" && c.categoryIdentifier.startsWith("ask-choices-")) ||
         (c.data as { kind?: unknown } | null)?.kind === "waiting";
       const inApp = needsYou && AppState.currentState === "active";
-      return { shouldShowBanner: !inApp, shouldShowList: true, shouldPlaySound: false, shouldSetBadge: false };
+      // A question needs the operator now: heads-up banner with sound, even over a foreground app
+      // on another screen. Done/failed arrive quietly in the list when the app is open.
+      return { shouldShowBanner: !inApp, shouldShowList: true, shouldPlaySound: needsYou && !inApp, shouldSetBadge: false };
     },
   });
   // Categories must exist before a push arrives; idempotent, and harmless where unsupported (web).
@@ -109,16 +111,17 @@ export function configurePushPresentation(): void {
 async function ensureChannels(): Promise<void> {
   if (Platform.OS !== "android") return;
   // PRIVATE: on a secure lock screen Android shows "contents hidden" instead of the run title.
-  await Notifications.setNotificationChannelAsync("needs-you", {
+  await Notifications.setNotificationChannelAsync("needs-you-v2", {
     name: "Needs you",
     description: "An agent stopped on a question.",
-    importance: Notifications.AndroidImportance.HIGH,
+    importance: Notifications.AndroidImportance.MAX,
+    bypassDnd: true,
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
   });
-  await Notifications.setNotificationChannelAsync("runs", {
+  await Notifications.setNotificationChannelAsync("runs-v2", {
     name: "Runs",
     description: "A run finished, failed, or went quiet.",
-    importance: Notifications.AndroidImportance.DEFAULT,
+    importance: Notifications.AndroidImportance.HIGH,
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PRIVATE,
   });
 }

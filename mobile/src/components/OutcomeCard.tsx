@@ -8,7 +8,7 @@ import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { T } from "./ui/AppText";
 import { Icon, type IconName } from "./ui/Icon";
-import { FadeInUp, PressScale } from "@/components/motion";
+import { FadeInUp, PressScale, stagger } from "@/components/motion";
 
 /**
  * The outcome card (docs/plan-demo-parity.md bet 2), mobile twin of
@@ -107,6 +107,18 @@ export function useOutcome(session: string, fetchKey: string, enabled: boolean):
   return o;
 }
 
+/** An outcome section; hoisted so a re-render keeps its identity (an inline component would remount and replay the entrance). */
+function Section({ title, index, children }: { title: string; index: number; children: React.ReactNode }) {
+  return (
+    <FadeInUp delay={stagger(index, 60)} style={{ gap: 3 }}>
+      <T variant="micro" tone="faint" weight="semibold">
+        {title}
+      </T>
+      {children}
+    </FadeInUp>
+  );
+}
+
 export function OutcomeView({ outcome: o }: { outcome: RunOutcome }) {
   const { palette } = useTheme();
   const router = useRouter();
@@ -121,15 +133,6 @@ export function OutcomeView({ outcome: o }: { outcome: RunOutcome }) {
       if (m) openBox(decodeURIComponent(m[1]));
     }
   };
-
-  const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
-    <View style={{ gap: 3 }}>
-      <T variant="micro" tone="faint" weight="semibold">
-        {title}
-      </T>
-      {children}
-    </View>
-  );
 
   return (
     <FadeInUp>
@@ -154,7 +157,7 @@ export function OutcomeView({ outcome: o }: { outcome: RunOutcome }) {
           </View>
         ) : null}
 
-        <Section title="What you got">
+        <Section title="What you got" index={1}>
           {o.result.prs.length ? (
             o.result.prs.map((p) => (
               <PressScale key={p.url} onPress={() => void Linking.openURL(p.url)} accessibilityRole="link" style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
@@ -181,7 +184,7 @@ export function OutcomeView({ outcome: o }: { outcome: RunOutcome }) {
           ))}
         </Section>
 
-        <Section title="Can you trust it">
+        <Section title="Can you trust it" index={2}>
           <T variant="meta" tone={tests.tone}>
             {tests.text}
             {o.trust.tests ? ` · ${o.trust.tests.runner}` : ""}

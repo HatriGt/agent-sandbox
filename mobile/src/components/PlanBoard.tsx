@@ -7,7 +7,7 @@ import { radius } from "@/theme/tokens";
 import { T } from "./ui/AppText";
 import { Icon } from "./ui/Icon";
 import { Sheet } from "./ui/Sheet";
-import { animateLayout, PressScale, ProgressFill } from "@/components/motion";
+import { animateLayout, FadeInUp, PressScale, ProgressFill, stagger } from "@/components/motion";
 
 /**
  * The agent's plan joined to the work it actually did — mobile presentation of
@@ -370,7 +370,9 @@ export function PlanSheet({
             screen, not a constant — 440 plus the header is taller than a short phone. */}
         <ScrollView style={{ maxHeight: Math.min(440, screenH * 0.5) }} contentContainerStyle={{ backgroundColor: `${palette.muted}66`, borderRadius: radius.xl, padding: 8 }}>
           {tasks.map((t, i) => (
-            <TaskRow key={`${i}-${t.text}`} task={t} index={i} total={tasks.length} live={live} since={t.state === "active" ? board.activeSince : undefined} last={i === tasks.length - 1} />
+            <FadeInUp key={`${i}-${t.text}`} delay={stagger(i, 30)}>
+              <TaskRow task={t} index={i} total={tasks.length} live={live} since={t.state === "active" ? board.activeSince : undefined} last={i === tasks.length - 1} />
+            </FadeInUp>
           ))}
         </ScrollView>
       </View>

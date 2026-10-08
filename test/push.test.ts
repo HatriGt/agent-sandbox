@@ -74,11 +74,14 @@ test("payload carries only a short title and a fixed phrase — never the questi
   assert.deepEqual(m.data, { box: "b-1", kind: "waiting", url: "asb://box/b-1" });
   assert.ok(!JSON.stringify(m).includes("password"));
   assert.equal(m.priority, "high");
+  assert.equal(m.interruptionLevel, "time-sensitive");
   assert.equal(m.tag, "b-1:ask");
   const [d] = buildPushMessages({ box: "b-1", kind: "done", exitCode: 0 }, [T1], "");
   assert.equal(d.title, "b-1", "falls back to the box name");
-  assert.equal(d.priority, "default");
-  assert.equal(buildPushMessages({ box: "b", kind: "waiting", question: "Which one?" }, [T1], "t")[0].channelId, "needs-you");
+  assert.equal(d.priority, "high", "a finished run still wakes the device");
+  assert.equal(d.interruptionLevel, "active", "but does not break through Focus");
+  assert.equal(buildPushMessages({ box: "b", kind: "failed", exitCode: 1 }, [T1], "t")[0].interruptionLevel, "time-sensitive");
+  assert.equal(buildPushMessages({ box: "b", kind: "waiting", question: "Which one?" }, [T1], "t")[0].channelId, "needs-you-v2");
   assert.equal(buildPushMessages({ box: "b", kind: "stalled" }, [T1], "t")[0].body, "Looks stalled");
   assert.ok(shortTitle("x".repeat(200), "b").length <= 60);
   assert.equal(shortTitle("line one\nsecret second line", "b"), "line one");

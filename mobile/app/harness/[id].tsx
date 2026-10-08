@@ -1,6 +1,6 @@
 // Harness editor (web: components/harness/HarnessEditor.tsx). `id` is `new` for create.
 import React, { useEffect, useState } from "react";
-import { Switch, View } from "react-native";
+import { View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { api, type AgentChoice, type AgentId, type HarnessView, type ProviderView, type SkillView } from "@/lib/api";
 import { useTheme } from "@/theme/ThemeContext";
@@ -9,8 +9,10 @@ import { T } from "@/components/ui/AppText";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Field } from "@/components/ui/Field";
+import { Toggle } from "@/components/ui/Toggle";
 import { PickerRow, PickerSheet } from "@/components/settings/PickerSheet";
 import { Segmented } from "@/components/settings/Segmented";
+import { animateLayout, FadeIn, FadeInUp, stagger } from "@/components/motion";
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -139,6 +141,7 @@ export default function HarnessEditor() {
       <Card>
         <PickerRow label="Driver" value={drivers.find((a) => a.id === d.driver)?.label ?? (d.driver || undefined)} placeholder="Run's default" onPress={() => setSheet("driver")} />
         <PickerRow label="Provider" value={provider?.label} placeholder="Built-in" onPress={() => setSheet("provider")} />
+        {/* Provider changes swap the Model row between picker and free text; that swap glides. */}
         {provider?.models?.length ? (
           <PickerRow label="Model" value={d.model || undefined} placeholder="Provider default" onPress={() => setSheet("model")} />
         ) : (
@@ -159,7 +162,7 @@ export default function HarnessEditor() {
                   {r.line}
                 </T>
               </View>
-              <Switch value={d.rules[r.key]} onValueChange={(v) => set({ rules: { ...d.rules, [r.key]: v } })} trackColor={{ true: palette.live }} />
+              <Toggle value={d.rules[r.key]} onValueChange={(v) => set({ rules: { ...d.rules, [r.key]: v } })} accessibilityLabel={r.label} />
             </View>
           ))}
           <View style={{ gap: 6 }}>
@@ -175,7 +178,7 @@ export default function HarnessEditor() {
       <Field mono label="Allowed hosts (egress)" value={d.egress} onChangeText={(t) => set({ egress: t })} placeholder={"registry.npmjs.org\napi.github.com"} multiline style={{ minHeight: 72, textAlignVertical: "top" }} autoCapitalize="none" autoCorrect={false} hint="One per line. Blank keeps the default network policy." />
 
       {skills.length ? (
-        <>
+        <FadeInUp delay={stagger(1)}>
           <T variant="meta" weight="medium" tone="muted">
             Skills
           </T>
@@ -187,13 +190,15 @@ export default function HarnessEditor() {
               );
             })}
           </View>
-        </>
+        </FadeInUp>
       ) : null}
 
       {error ? (
-        <T variant="meta" tone="destructive">
-          {error}
-        </T>
+        <FadeIn>
+          <T variant="meta" tone="destructive">
+            {error}
+          </T>
+        </FadeIn>
       ) : null}
       <View style={{ flexDirection: "row", gap: 8 }}>
         <Button title={isNew ? "Create" : "Save"} loading={saving} disabled={!d.name.trim()} onPress={() => void save()} />
@@ -201,7 +206,7 @@ export default function HarnessEditor() {
       </View>
 
       <PickerSheet visible={sheet === "driver"} title="Driver" options={drivers.map((a) => ({ value: a.id, label: a.label, hint: a.supervised === false ? "supervised: partial" : undefined }))} value={d.driver || undefined} allowNone noneLabel="Run's default" onPick={(v) => set({ driver: (v as AgentId) ?? "" })} onClose={() => setSheet(null)} />
-      <PickerSheet visible={sheet === "provider"} title="Provider" options={providers.map((p) => ({ value: p.id, label: p.label, hint: p.kind }))} value={d.providerId || undefined} allowNone noneLabel="Built-in" onPick={(v) => set({ providerId: v ?? "", model: "" })} onClose={() => setSheet(null)} emptyText="No providers — add one in Settings → Providers." />
+      <PickerSheet visible={sheet === "provider"} title="Provider" options={providers.map((p) => ({ value: p.id, label: p.label, hint: p.kind }))} value={d.providerId || undefined} allowNone noneLabel="Built-in" onPick={(v) => (animateLayout(), set({ providerId: v ?? "", model: "" }))} onClose={() => setSheet(null)} emptyText="No providers — add one in Settings → Providers." />
       <PickerSheet visible={sheet === "model"} title="Model" options={(provider?.models ?? []).map((m) => ({ value: m, label: m }))} value={d.model || undefined} allowNone noneLabel="Provider default" onPick={(v) => set({ model: v ?? "" })} onClose={() => setSheet(null)} />
     </SettingsScreen>
   );

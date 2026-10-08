@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Linking, Switch, View } from "react-native";
+import { ActivityIndicator, Linking, View } from "react-native";
 import { api, autopilotApi, type AgentId, type AgentPrefs, type HarnessView, type NotifySettings } from "@/lib/api";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
@@ -7,9 +7,10 @@ import { T } from "@/components/ui/AppText";
 import { Button } from "@/components/ui/Button";
 import { Field } from "@/components/ui/Field";
 import { Icon, type IconName } from "@/components/ui/Icon";
+import { Toggle } from "@/components/ui/Toggle";
 import { PickerRow, PickerSheet } from "@/components/settings/PickerSheet";
 import { DriverBadges } from "@/components/settings/HarnessParts";
-import { animateLayout, FadeIn, haptic, PressScale } from "@/components/motion";
+import { animateLayout, FadeIn, PressScale } from "@/components/motion";
 import { pushStatus, registerForPush, unregisterPush, type PushStatus } from "@/lib/push";
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -265,7 +266,6 @@ export function AcctNotifySection() {
     }
   };
   const setPush_ = async (next: boolean) => {
-    haptic("selection");
     setPushBusy(true);
     try {
       if (next) setPush(await registerForPush(true));
@@ -334,11 +334,10 @@ export function AcctNotifySection() {
               {push === "denied" ? (
                 <Button small variant="outline" title="Open settings" onPress={() => void Linking.openSettings()} />
               ) : (
-                <Switch
+                <Toggle
                   accessibilityLabel="Push notifications on this phone"
                   value={push === "on"}
                   disabled={push === null || pushBusy}
-                  trackColor={{ true: palette.live }}
                   onValueChange={(next) => void setPush_(next)}
                 />
               )}
@@ -362,14 +361,10 @@ export function AcctNotifySection() {
                         {ev.desc}
                       </T>
                     </View>
-                    <Switch
+                    <Toggle
                       accessibilityLabel={`${ev.label} notifications`}
                       value={events[ev.key]}
-                      trackColor={{ true: palette.live }}
-                      onValueChange={(next) => {
-                        haptic("selection");
-                        setEvents((s) => ({ ...s, [ev.key]: next }));
-                      }}
+                      onValueChange={(next) => setEvents((s) => ({ ...s, [ev.key]: next }))}
                     />
                   </View>
                 ))}
