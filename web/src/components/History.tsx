@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowLeft, Check, RotateCw, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, RotateCw, Trash2, X } from "lucide-react";
 import { motion } from "motion/react";
 import { useReducedMotion } from "@/lib/motion-pref";
 import { toast } from "sonner";
@@ -18,7 +18,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { FilterChip } from "@/components/ui/filter-chip";
 import { DigestCard } from "@/components/thread/DigestCard";
 import { OutcomeCard, fmtTokens, fmtUsd, outcomeFacts } from "@/components/thread/OutcomeCard";
-import { ReviewAllPane } from "@/components/thread/ReviewAll";
+import { ReviewView } from "@/components/thread/review/ReviewView";
 import { Bar } from "@/components/thread/Skeletons";
 import { cn } from "@/lib/utils";
 
@@ -549,7 +549,12 @@ function RunDetail({ id, outcome }: { id: number; outcome: RunOutcome | null }) 
               <div className="mt-3">
                 {review ? (
                   <motion.div initial={still ? { opacity: 0 } : { opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: still ? 0.1 : 0.2, ease: [0.22, 1, 0.36, 1] }}>
-                    <ReviewAllPane archivedDiff={state.diffText} onClose={() => setReview(false)} />
+                    <div className="bg-card raised relative flex max-h-[70vh] flex-col overflow-hidden rounded-xl">
+                      <ReviewView archivedDiff={state.diffText} />
+                      <button type="button" onClick={() => setReview(false)} aria-label="Close review" className="text-muted-foreground hover:text-foreground hover:bg-muted absolute top-1.5 right-2 z-40 grid size-6 cursor-pointer place-items-center rounded-md">
+                        <X className="size-3.5" aria-hidden />
+                      </button>
+                    </div>
                   </motion.div>
                 ) : (
                   <Button size="sm" variant="outline" onClick={() => setReview(true)}>

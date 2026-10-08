@@ -437,6 +437,12 @@ const MIGRATIONS: string[] = [
     PRIMARY KEY (owner, name)
   );
   `,
+  `
+  -- The outcome card as archived (src/outcome.ts, built at the finish edge), so a History page lists
+  -- 50 rows without parsing 50 digests. NULL on rows archived before this migration (outcomeOf falls
+  -- back to the digest for those).
+  ALTER TABLE run_archive ADD COLUMN outcome_json TEXT;
+  `,
 ];
 
 export function openDb(dataDir: string): Db {

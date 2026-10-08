@@ -17,7 +17,7 @@ import { SkillRail } from "@/components/skills/SkillRail";
 import { fmtAgo } from "@/lib/format";
 
 /**
- * Skills: the playbooks every sandbox gets. Two surfaces in one page — the library (a DataTable with
+ * Skills: the skills every sandbox gets. Two surfaces in one page — the library (a DataTable with
  * search `/`, filter chips and a curated template strip) and the editor, which takes the whole page
  * when a skill is opened and slides back out to the list. Import is a dialog over the library.
  * `n` starts a new skill while the list has focus.
@@ -121,7 +121,7 @@ export function SkillsPage({ onBack }: { onBack: () => void }) {
                       </span>
                     ) : (
                       <>
-                        Playbooks every sandbox follows — invoke one with <span className="stamp text-foreground">/name</span> in chat, or the agent picks it up when it fits.
+                        Skills every sandbox can use — invoke one with <span className="stamp text-foreground">/name</span> in chat, or the agent picks it up when it fits.
                       </>
                     )}
                   </p>

@@ -40,13 +40,13 @@ import { ChatContainerContent, ChatContainerRoot, ChatContainerScrollAnchor } fr
 import type { TraceEvent } from "@/lib/trace";
 import { LiveRegistryContext, SayKeyContext } from "@/components/viz/live-blocks";
 import { buildLiveRegistry, type SayInput } from "@/lib/viz-identity";
-import { AnsweredQuestionItem, Density, ExpandAll, LifecycleItem, MemoryItem, ObserverItem, PlanCard, QueuedItem, RepeatedPolls, SayItem, ToolGroup, WorkingIndicator, YouItem, repeatedPolls, type ThreadDensity } from "./TraceItems";
+import { AnsweredQuestionItem, Density, ExpandAll, LifecycleItem, MemoryItem, ObserverItem, QueuedItem, RepeatedPolls, SayItem, ToolGroup, WorkingIndicator, YouItem, repeatedPolls, type ThreadDensity } from "./TraceItems";
 import { ReasoningTrail, type TrailItem } from "./ReasoningTrail";
-import { PlanDock } from "./PlanBoard";
+import { PlanBoard, type PlanVariant } from "./PlanBoard";
+import { useMediaQuery } from "./RunSettings";
 import { ThreadMinimap, type Turn } from "./ThreadMinimap";
 import { useStickToBottom } from "use-stick-to-bottom";
 import { ChangesDock } from "./ChangesDock";
-import { ReviewAllPane } from "./ReviewAll";
 import { QuestionCard } from "./QuestionCard";
 import { ArrowDown } from "lucide-react";
 import { findPullRequests } from "@/lib/testReport";
@@ -228,7 +228,6 @@ export function Thread({
   const openChange = React.useCallback((f: ChangedFile) => setOpenFile({ path: f.path }), []);
   // Code refs in the agent's messages (`web/src/x.ts:42`) open here, at the line.
   const openRef = React.useCallback((r: CodeRef) => setOpenFile({ path: r.path, line: r.line, endLine: r.endLine }), []);
-  const [reviewOpen, setReviewOpen] = React.useState(false);
   const [workspaceOpen, setWorkspaceOpen] = React.useState(false);
   const [workspaceFull, setWorkspaceFull] = React.useState(false);
   const [inspectorOpen, setInspectorOpen] = React.useState(false);
@@ -242,6 +241,17 @@ export function Thread({
     setWorkspaceFull(false);
     setOpenFile(null);
   };
+  // "Review all": the workspace pane on its Review view. A nonce, so a repeat lands there again.
+  const [reviewNonce, setReviewNonce] = React.useState(0);
+  const openReview = React.useCallback(() => {
+    setInspectorOpen(false);
+    setWorkspaceOpen(true);
+    setReviewNonce((n) => n + 1);
+  }, []);
+  // THE plan placement, decided once: docked beside the conversation when the row is wide (xl)
+  // and no other aside has the room; a card in the flow otherwise. Never both, never neither.
+  const wide = useMediaQuery("(min-width: 80rem)");
+  const planPlacement: PlanVariant = wide && !showWorkspace && !inspectorOpen ? "dock" : "card";
 
   // Esc closes the workspace pane — but never steals the key from a dialog, menu or focused input
   // (those own Escape themselves and either prevent default or match the focus guard below).
@@ -284,7 +294,7 @@ export function Thread({
       if (path) setOpenFile({ path });
       else setWorkspaceOpen(true);
     };
-    const onReview = () => setReviewOpen((v) => !v);
+    const onReview = openReview;
     const onStop = () => void stopTurnRef.current?.();
     window.addEventListener("keydown", onKey);
     window.addEventListener("asb:toggle-inspector", onToggle);
@@ -298,7 +308,7 @@ export function Thread({
       window.removeEventListener("asb:review-changes", onReview);
       window.removeEventListener("asb:stop-turn", onStop);
     };
-  }, [toggleInspector]);
+  }, [toggleInspector, openReview]);
   // stopTurn is defined later (it needs the box and state); the listener above reaches it by ref.
   const stopTurnRef = React.useRef<(() => Promise<void>) | null>(null);
 
@@ -868,12 +878,7 @@ export function Thread({
         <div aria-hidden className="to-background pointer-events-none absolute inset-x-0 bottom-0 z-10 h-8 bg-gradient-to-b from-transparent" />
         <ChatContainerRoot className="relative h-full [&>div]:overflow-x-hidden" instance={stick} aria-label="Conversation" aria-busy={runState === "running"}>
           <ChatContainerContent className="mx-auto w-full max-w-3xl gap-5 px-4 pt-7 pb-12 md:px-6">
-            {/* The dock is hidden below xl (or behind the workspace): the plan opens the conversation instead. */}
-            {planBoard && !sleeping && !loadingTrace && (
-              <div className={cn(showWorkspace ? "" : "xl:hidden")}>
-                <PlanCard board={planBoard} live={runState === "running"} />
-              </div>
-            )}
+            {planBoard && !sleeping && !loadingTrace && planPlacement === "card" && <PlanBoard board={planBoard} live={runState === "running"} variant="card" />}
             {box.task && (
               <div data-turn="task">
                 <YouItem text={box.task} label="Task" noEnter />
@@ -1119,23 +1124,7 @@ export function Thread({
         </AnimatePresence>
       </div>
 
-      <AnimatePresence initial={false}>
-        {reviewOpen && !sleeping && (
-          // The review pane slides in from the right and leaves the same way — it is a drawer over
-          // the run, not part of the transcript.
-          <motion.div
-            key="review"
-            initial={still ? { opacity: 0 } : { opacity: 0, x: 24 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={still ? { opacity: 0 } : { opacity: 0, x: 24 }}
-            transition={{ duration: still ? 0.12 : 0.24, ease: [0.22, 1, 0.36, 1] }}
-            className="mx-auto w-full max-w-3xl border-t px-3 pt-2 pb-2 shadow-[0_-8px_16px_-12px_oklch(0_0_0/0.18)] md:px-6"
-          >
-            <ReviewAllPane session={box.name} onClose={() => setReviewOpen(false)} />
-          </motion.div>
-        )}
-      </AnimatePresence>
-      {!sleeping && <ChangesDock files={changes} loading={changesLoading} onOpen={openChange} onRefresh={refreshChanges} onReviewAll={() => setReviewOpen((v) => !v)} activePath={openFile?.path} />}
+      {!sleeping && <ChangesDock files={changes} loading={changesLoading} onOpen={openChange} onRefresh={refreshChanges} onReviewAll={openReview} activePath={openFile?.path} />}
       <SendBar
         boxName={box.name}
         runState={runState}
@@ -1151,9 +1140,8 @@ export function Thread({
       />
       </div>
       {/* Sibling of the whole column (conversation + dock + composer), so opening it narrows all
-          three together and the composer stays aligned with the text. Hidden while the workspace
-          pane is open — two asides would leave the conversation a sliver. */}
-      {planBoard && !sleeping && !showWorkspace && !inspectorOpen && <PlanDock board={planBoard} live={runState === "running"} />}
+          three together and the composer stays aligned with the text. */}
+      {planBoard && !sleeping && planPlacement === "dock" && <PlanBoard board={planBoard} live={runState === "running"} variant="dock" />}
       <AnimatePresence>
         {inspectorOpen && !showWorkspace && (
           <RunInspector
@@ -1195,7 +1183,7 @@ export function Thread({
               </aside>
             }
           >
-            <WorkspacePane session={box.name} changes={changes} open={openFile} onClose={closeWorkspace} onSaved={refreshChanges} repos={repos} full={workspaceFull} onToggleFull={() => setWorkspaceFull((v) => !v)} />
+            <WorkspacePane session={box.name} changes={changes} open={openFile} review={reviewNonce} onClose={closeWorkspace} onSaved={refreshChanges} repos={repos} full={workspaceFull} onToggleFull={() => setWorkspaceFull((v) => !v)} />
           </React.Suspense>
         )}
       </AnimatePresence>

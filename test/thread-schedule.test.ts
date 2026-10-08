@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { openMemoryDb } from "../src/db.js";
 import { makeSecretBox } from "../src/secretbox.js";
-import { advanceNextFire, createTrigger, getTrigger, markFired, markSkipped, promoteTrigger } from "../src/trigger-store.js";
+import { advanceNextFire, createTrigger, getTrigger, markFired, markSkipped } from "../src/trigger-store.js";
 import { scheduleCategory, scheduleStatus, threadSchedule, type ScheduleTrigger } from "../src/thread-schedule.js";
 import { automateNeedsApproval, parseAutomate } from "../src/triggers.js";
 
@@ -106,5 +106,4 @@ test("store: a one-time schedule is due once, retries when busy, and never refir
   assert.equal(getTrigger(db, "o", row.id)!.nextFire, at + 60_000);
   markFired(db, row.id, { at: at + 60_000, outcome: "started", box: "b2" }, at + 60_000);
   assert.equal(getTrigger(db, "o", row.id)!.nextFire, null);
-  assert.equal(promoteTrigger(db, "o", row.id), undefined);
 });

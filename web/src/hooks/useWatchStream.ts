@@ -152,7 +152,7 @@ export function useWatchStream(session: string, enabled = true, generation = 0):
           // log window; on mismatch the server sends the full log instead of a corrupting slice.
           await openSse(
             "/watch.sse",
-            { session, ...(lastId && log ? { tail: log.slice(-256) } : {}) },
+            { box: session, ...(lastId && log ? { tail: log.slice(-256) } : {}) },
             { signal: ctrl.signal, lastEventId: lastId, onFrame: handle, onOpen: () => { attempt = 0; setOk(true); } }
           );
           if (closedByUs || stopped) return;

@@ -2,10 +2,11 @@ import * as React from "react";
 import { motion } from "motion/react";
 import { setMotionPref, useMotionPref, useReducedMotion, type MotionPref } from "@/lib/motion-pref";
 import { Segmented } from "@/components/ui/segmented";
-import { PlugZap, Shield } from "lucide-react";
+import { Activity as ActivityIcon, PlugZap, Shield } from "lucide-react";
 import { toast } from "sonner";
 import { api, type BoxView } from "@/lib/api";
 import { getMe, setMe } from "@/lib/auth";
+import { useGo } from "@/lib/route";
 import { isVisible } from "@/lib/format";
 import { Capacity } from "@/components/Capacity";
 import { Button } from "@/components/ui/button";
@@ -17,10 +18,7 @@ import { NumberTicker } from "@/components/ui/number-ticker";
 import { Swap } from "@/components/ui/swap";
 import { ApiKeys } from "@/components/ApiKeys";
 import { NotifySettings } from "@/components/NotifySettings";
-import { AgentSettings } from "@/components/AgentSettings";
-import { SecretsSettings } from "@/components/SecretsSettings";
 import { Sessions } from "@/components/Sessions";
-import { AuditLog } from "@/components/AuditLog";
 import { cn } from "@/lib/utils";
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -89,6 +87,7 @@ function StrengthMeter({ value, visible }: { value: number; visible: boolean }) 
 }
 
 export function Account({ onBack, onConnect, onAdmin }: { onBack: () => void; onConnect: () => void; onAdmin: () => void }) {
+  const go = useGo();
   const me = getMe();
   const user = me?.kind === "user" ? me : null;
   const [name, setName] = React.useState(user?.name ?? "");
@@ -168,6 +167,10 @@ export function Account({ onBack, onConnect, onAdmin }: { onBack: () => void; on
               Manage users
             </Button>
           )}
+          <Button variant="ghost" onClick={() => go({ view: "activity" })} className="text-muted-foreground">
+            <ActivityIcon />
+            View activity
+          </Button>
           <Button variant="outline" onClick={onConnect}>
             <PlugZap />
             Connect an IDE
@@ -274,12 +277,9 @@ export function Account({ onBack, onConnect, onAdmin }: { onBack: () => void; on
       )}
 
       <AppearanceSettings />
-      <AgentSettings />
-      <SecretsSettings />
       <NotifySettings />
       {user && <ApiKeys />}
       {user && <Sessions />}
-      <AuditLog />
       {!user && (
         <p className="text-muted-foreground max-w-[64ch] text-meta">
           You are signed in with the operator token — the deployment's root identity. For day-to-day work, sign up for a personal account and, if you need to manage people, use{" "}

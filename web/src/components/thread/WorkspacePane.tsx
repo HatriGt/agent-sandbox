@@ -13,10 +13,11 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DiffView, useHunkReview } from "./FilePane";
 import { RecordsTable } from "./RecordsTable";
+import { ReviewView, type ReviewFocus } from "./review/ReviewView";
 import { cn } from "@/lib/utils";
 
 /**
- * The workspace as an editor: an activity bar (Explorer · Search · Source Control), a sidebar view,
+ * The workspace as an editor: an activity bar (Explorer · Search · Source Control · Review), a sidebar view,
  * an editor group with tabs, breadcrumbs and Diff / File / Edit modes, and a status bar. The tree
  * uses a coloured icon theme and indent guides; Source Control shows the branch with ahead/behind,
  * a commit box, and the changes with VS Code's status letters — commit and push run inside the
@@ -28,7 +29,7 @@ type Reveal = { from: number; to: number; nonce: number };
 type Tab = { path: string; mode: "diff" | "edit"; draft?: string; dirty?: boolean; saving?: "saving" | "saved"; reveal?: Reveal };
 /** A request to show a file, optionally at a line range. A new object each time, so repeats navigate. */
 export type OpenRequest = { path: string; line?: number; endLine?: number };
-type View = "explorer" | "search" | "scm" | "records";
+type View = "explorer" | "search" | "scm" | "review" | "records";
 type Repo = { name: string; branch?: string };
 
 function buildTree(paths: string[]): Node {
@@ -58,7 +59,7 @@ const STATUS_LETTER: Record<ChangedFile["status"], { l: string; tone: string }> 
   renamed: { l: "R", tone: "text-live" },
 };
 
-export function WorkspacePane({ session, changes, open, onClose, onSaved, repos, full = false, onToggleFull }: { session: string; changes: ChangedFile[]; open: OpenRequest | null; onClose: () => void; onSaved: () => void; repos: Repo[]; full?: boolean; onToggleFull?: () => void }) {
+export function WorkspacePane({ session, changes, open, review, onClose, onSaved, repos, full = false, onToggleFull }: { session: string; changes: ChangedFile[]; open: OpenRequest | null; /** Bumped to switch the pane to the Review view (the whole run's diff). */ review?: number; onClose: () => void; onSaved: () => void; repos: Repo[]; full?: boolean; onToggleFull?: () => void }) {
   const [paths, setPaths] = React.useState<string[] | null>(null);
   const [treeErr, setTreeErr] = React.useState<string | null>(null);
   const [expanded, setExpanded] = React.useState<Set<string>>(() => new Set(repos.map((r) => r.name)));
@@ -114,6 +115,13 @@ export function WorkspacePane({ session, changes, open, onClose, onSaved, repos,
     openPath(open.path, changeByPath.has(open.path) ? "diff" : "edit", reveal);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+  // "Review all" (the ChangesDock shortcut, the palette) lands on the whole-run diff.
+  const [reviewFocus, setReviewFocus] = React.useState<ReviewFocus | null>(null);
+  React.useEffect(() => {
+    if (!review) return;
+    setView("review");
+    setSidebar(true);
+  }, [review]);
 
   const closeTab = (path: string) => {
     setTabs((t) => {
@@ -189,7 +197,7 @@ export function WorkspacePane({ session, changes, open, onClose, onSaved, repos,
     window.addEventListener("pointerup", up);
   };
 
-  const filesTitle = view === "scm" ? "Changes" : "Files";
+  const filesTitle = view === "scm" || view === "review" ? "Changes" : "Files";
   const still = useReducedMotion();
   return (
     <motion.aside
@@ -261,7 +269,9 @@ export function WorkspacePane({ session, changes, open, onClose, onSaved, repos,
       <div className="flex min-h-0 flex-1">
         {/* Editor group */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          {view === "records" ? (
+          {view === "review" ? (
+            <ReviewView session={session} focus={reviewFocus} className="h-full" />
+          ) : view === "records" ? (
             <RecordsTable session={session} onOpen={(p) => (setView("explorer"), openPath(p))} />
           ) : activeTab ? (
             <FileView key={activeTab.path} session={session} tab={activeTab} change={changeByPath.get(activeTab.path)} onMode={(m) => patchTab(activeTab.path, { mode: m })} onDraft={(d, dirty) => patchTab(activeTab.path, { draft: d, dirty })} onSaving={(s) => patchTab(activeTab.path, { saving: s })} onSaved={onSaved} />
@@ -276,7 +286,7 @@ export function WorkspacePane({ session, changes, open, onClose, onSaved, repos,
             <div className="flex h-10 shrink-0 items-center gap-1 px-2">
               <AnimatedTabs
                 ariaLabel="Sidebar view"
-                value={view === "scm" ? "scm" : view === "records" ? "records" : "explorer"}
+                value={view === "search" ? "explorer" : view}
                 onChange={(v) => setView(v)}
                 items={[
                   { value: "explorer", icon: <Files className="size-3.5" />, label: "Files" },
@@ -286,15 +296,16 @@ export function WorkspacePane({ session, changes, open, onClose, onSaved, repos,
                     label: "Changes",
                     badge: changes.length > 0 && <span className={cn("ml-0.5 rounded-full px-1.5 text-[9px] leading-4 font-semibold", view === "scm" ? "bg-live text-white" : "bg-live/20 text-live")}>{changes.length}</span>,
                   },
+                  { value: "review", icon: <FileDiff className="size-3.5" />, label: "Review" },
                   { value: "records", icon: <Table2 className="size-3.5" />, label: "All" },
                 ]}
               />
-              <button type="button" onClick={() => (view === "scm" ? loadGit() : void loadTree())} aria-label="Refresh" className="text-muted-foreground hover:text-foreground ml-auto grid size-7 cursor-pointer place-items-center rounded-md">
+              <button type="button" onClick={() => (view === "scm" || view === "review" ? loadGit() : void loadTree())} aria-label="Refresh" className="text-muted-foreground hover:text-foreground ml-auto grid size-7 cursor-pointer place-items-center rounded-md">
                 <RefreshCw className="size-3.5" />
               </button>
             </div>
-            {view === "scm" ? (
-              <SourceControl session={session} repo={activeRepo} status={git} err={gitErr} reload={loadGit} changes={changes} active={active} onOpen={(p) => openPath(p, "diff")} onChanged={onSaved} />
+            {view === "scm" || view === "review" ? (
+              <SourceControl session={session} repo={activeRepo} status={git} err={gitErr} reload={loadGit} changes={changes} active={view === "review" ? reviewFocus?.path ?? null : active} onOpen={(p) => (view === "review" ? setReviewFocus({ path: p, nonce: Date.now() }) : openPath(p, "diff"))} onChanged={onSaved} />
             ) : (
               <>
                 <label className="mx-2 mb-1 flex h-8 items-center gap-1.5 rounded-md border bg-card px-2 focus-within:ring-2 focus-within:ring-ring">

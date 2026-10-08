@@ -80,12 +80,12 @@ steps:
 ];
 
 /**
- * Workflows: a task as a short script — agent turns and command checks — saved per user or read from
+ * Playbooks: a task as a short script — agent turns and command checks — saved per user or read from
  * a repository's .agent-sandbox/workflows/ folder. The editor is the YAML itself (the same file a
  * repo would hold), validated by the controller as you type, with the parsed steps shown beside it
  * so a prompt can never be mistaken for a command.
  */
-export function WorkflowsPage({ boxes, onAutomate }: { boxes: BoxView[]; onAutomate: (w: WorkflowView) => void }) {
+export function PlaybooksPage({ boxes, onAutomate }: { boxes: BoxView[]; onAutomate: (w: WorkflowView) => void }) {
   const go = useGo();
   const [list, setList] = React.useState<WorkflowView[] | null>(null);
   const [dir, setDir] = React.useState(".agent-sandbox/workflows");

@@ -14,6 +14,7 @@ import { deriveWatch, watchElapsedSec, type WatchState } from "@/lib/watch";
 import { fmtTokens, fmtUsd } from "./OutcomeCard";
 import { motion } from "motion/react";
 import { Odometer } from "@/components/viz/motion";
+import { useNow } from "@/hooks/useNow";
 
 /**
  * The run-end pill: one muted, single-line, rounded-full summary per finished run, replacing the
@@ -282,13 +283,8 @@ export function RunPill({
 export function WatchPill({ session, events, running = true }: { session: string; events: TraceEvent[]; running?: boolean }) {
   const watch = React.useMemo(() => deriveWatch(events), [events]);
   const [stopping, setStopping] = React.useState(false);
-  const [now, setNow] = React.useState(() => Date.now());
   const live = running && !!watch && watch.phase === "on";
-  React.useEffect(() => {
-    if (!live) return;
-    const t = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(t);
-  }, [live]);
+  const now = useNow(live);
   React.useEffect(() => {
     if (!running) setStopping(false);
   }, [running]);

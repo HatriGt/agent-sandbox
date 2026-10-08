@@ -167,15 +167,13 @@ export function isSecretKey(key: string): boolean {
   return SECRET_KEY_RE.test(key);
 }
 
-/** 2/3 head/tail, min 6 — FIXED: mergeSecrets compares a submitted value against mask(stored) to
- *  mean "unchanged", so a saved form from before any change to these numbers must still match. */
-export function mask(v: string): string {
-  return maskSecret(v, { head: 2, tail: 3, min: 6 });
-}
+/** 2/3 head/tail, min 6 — FIXED: mergeSecrets compares a submitted value against the mask of the
+ *  stored value to mean "unchanged", so a saved form from before any change to these numbers must still match. */
+export const MCP_MASK = { head: 2, tail: 3, min: 6 } as const;
 
 function maskMap(m: Record<string, string> | undefined): Record<string, string> | undefined {
   if (!m) return undefined;
-  return Object.fromEntries(Object.entries(m).map(([k, v]) => [k, isSecretKey(k) ? mask(v) : v]));
+  return Object.fromEntries(Object.entries(m).map(([k, v]) => [k, isSecretKey(k) ? maskSecret(v, MCP_MASK) : v]));
 }
 
 /** What the dashboard sees: secret VALUES masked, everything else as stored — plus, when a header
@@ -208,7 +206,7 @@ export function mergeSecrets(incoming: Record<string, string> | undefined, prev:
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(incoming)) {
     const stored = prev?.[k];
-    out[k] = stored !== undefined && (v === "" || v === mask(stored)) ? stored : v;
+    out[k] = stored !== undefined && (v === "" || v === maskSecret(stored, MCP_MASK)) ? stored : v;
   }
   return Object.keys(out).length ? out : undefined;
 }

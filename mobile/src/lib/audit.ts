@@ -1,6 +1,6 @@
 import type { AuditEventRow } from "./api";
 
-/** Mirrors web/src/components/AuditLog.tsx `describeEvent` / `eventKind`: raw method+path → a human verb. */
+/** Mirrors web/src/lib/activity.ts `describeEvent` / `eventKind`: raw method+path → a human verb. */
 const TABLE: Record<string, [string, boolean]> = {
   "POST /delegate.json": ["Started a machine", false],
   "POST /teardown.json": ["Destroyed", true],
@@ -23,6 +23,7 @@ const TABLE: Record<string, [string, boolean]> = {
   "POST /api-keys.json": ["Created an API key", false],
   "DELETE /api-keys.json": ["Revoked an API key", false],
   "DELETE /sessions.json": ["Signed out a device", false],
+  "DELETE /devices.json": ["Signed out a device", false],
   "POST /account.json": ["Updated the profile", false],
   "POST /notify.json": ["Changed notification settings", false],
   "POST /accounts.json": ["Connected a GitHub account", false],

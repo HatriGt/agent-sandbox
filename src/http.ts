@@ -41,7 +41,7 @@ import { claimNonce, mintNonce, questionChoices, releaseNonce } from "./answer-c
 import { buildPushMessages, deviceCount, listDeviceTokens, makeOwnerRateCap, pruneToken, registerDevice, sendExpoPush, unregisterDevice } from "./push.js";
 import { fetchPinned } from "./net-guard.js";
 import { buildDigest, type RunDigest } from "./digest.js";
-import { buildOutcome, outcomeOf, resolveFollowedBy } from "./outcome.js";
+import { buildOutcome, outcomeOf, resolveFollowedBy, type RunOutcome } from "./outcome.js";
 import { archiveRun, deleteRun, getDigest, getRun, listActivity, listRuns, pruneArchive, ledgerTotals, listLedger, type LedgerFilter } from "./run-archive.js";
 import { autoRetryOf, makeVerifyRetrier, verifyPlanOf, type VerifyPlan, type VerifyResult } from "./verify.js";
 import { parseTrace } from "./trace.js";
@@ -61,7 +61,7 @@ import {
   upsertProvider,
   viewOf,
 } from "./providers.js";
-import { requestSessions, createLocalUser, deleteUser, listUsers, ownerOf, setUserRole, validateSignup, createPasswordUser, authenticatePassword, setPassword, updateProfile, verifyPassword, PASSWORD_MIN, listSessions, revokeSession, revokeOtherSessions, startTrial, planOf, setPlan, TrialExpiredError } from "./identity.js";
+import { requestSessions, boxParam, createLocalUser, deleteUser, listUsers, ownerOf, setUserRole, validateSignup, createPasswordUser, authenticatePassword, setPassword, updateProfile, verifyPassword, PASSWORD_MIN, listSessions, revokeSession, revokeOtherSessions, startTrial, planOf, setPlan, TrialExpiredError } from "./identity.js";
 import { parseStore } from "./gh-token-store.js";
 import { seedStarterSkills } from "./starter-skills.js";
 import { parseMcpStore } from "./mcp-store.js";
@@ -107,10 +107,11 @@ import { makeFollowupEngine, type GhRequest } from "./pr-followup-engine.js";
 import { registerFollowupRoutes } from "./pr-followup-routes.js";
 import { followupsForBox } from "./pr-followup-store.js";
 import { followupLine, normalizePrefs, type FollowupPrefs } from "./pr-followups.js";
-import { hookAuditPath, hookBodyParser, registerTriggerRoutes } from "./trigger-routes.js";
+import { registerTriggerRoutes } from "./trigger-routes.js";
+import { hookAuditPath, hookBodyParser } from "./hooks.js";
 import { createTrigger, firstSighting, getTriggerById, listTriggers, logDelivery, pruneDeliveries, type TriggerRow } from "./trigger-store.js";
 import { automateNeedsApproval, isQuietRun, parseAutomate, parseAutomateRejects, type AutomateReject } from "./triggers.js";
-import { intakeBodyParser, registerIntakeRoutes } from "./intake-routes.js";
+import { registerIntakeRoutes } from "./intake-routes.js";
 import { candidateAccounts } from "./gh-token-store.js";
 import { applyHarness, getHarness, harnessSummaryLine, loadHarnesses, normalizeEgress, putHarness, HARNESS_LIMITS, type HarnessDef } from "./harness.js";
 import { allSecretValues, deleteSecret, listSecrets, resolveSecrets, saveSecret, secretName } from "./secrets-store.js";
@@ -175,7 +176,7 @@ const jsonLarge = express.json({ limit: "96mb" }); // /file.json (≤8 MB file a
 const jsonMcp = express.json({ limit: "16mb" });
 app.use((req: Request, res: Response, next) =>
   (req.path.startsWith("/hooks/")
-    ? hookBodyParser // raw bytes, 512 KB cap: the GitHub HMAC is over the exact body
+    ? hookBodyParser // raw bytes, capped (src/hooks.ts): the vendor HMAC is over the exact body
     : req.path === "/file.json" || req.path === "/delegate.json"
     ? jsonLarge
     : req.path === "/mcp" || req.path.startsWith("/mcp/") || req.path === "/skills.json"
@@ -215,17 +216,19 @@ function resolvePrincipal(req: Request): Principal | null {
   if (p && MUTATING.has(req.method) && !csrfOk(req.headers as Record<string, string | string[] | undefined>, cfg.publicUrl)) return null;
   return p;
 }
+/** Routes whose `box` may be gone from the fleet (archived runs): owner-scoped by their own queries. */
+const ARCHIVED_BOX_ROUTES: Record<string, true> = { "/history/outcome.json": true, "/attempt-groups.json": true, "/questions/answer.json": true, "/triggers/for-box.json": true };
 app.use((req: Request, res: Response, next) => {
   const p = resolvePrincipal(req);
   res.locals.principal = p;
   const isMcpPath = req.path === "/mcp" || req.path.startsWith("/mcp/");
-  // A `session` on any non-MCP route names a box, and a box name becomes a directory name and a
-  // shell word downstream. Routes validated it individually and inconsistently: isBoxName on four,
-  // an ad-hoc /^[\w.-]+$/ on four more (which accepts "." and ".." — exactly what isBoxName exists
-  // to reject), and nothing at all on /tree.json, /files.json, /changes.json and /diff.json. One
-  // check at the edge, on the same field the ownership check below already reads, is the version
-  // that cannot drift as routes are added.
-  // BOTH the body's and the query's session are checked (requestSessions): GET routes read the query
+  // A `box` (or, from older clients, `session`) on any non-MCP route names a box, and a box name
+  // becomes a directory name and a shell word downstream. Routes validated it individually and
+  // inconsistently: isBoxName on four, an ad-hoc /^[\w.-]+$/ on four more (which accepts "." and
+  // ".." — exactly what isBoxName exists to reject), and nothing at all on /tree.json, /files.json,
+  // /changes.json and /diff.json. One check at the edge, on the same fields the ownership check
+  // below already reads, is the version that cannot drift as routes are added.
+  // BOTH the body's and the query's keys are checked (requestSessions): GET routes read the query
   // even when a JSON body is present, so checking only one let {"session":""} in the body wave a
   // query-named box past the ownership check below.
   const sessions = isMcpPath ? [] : requestSessions(req.body, req.query);
@@ -234,7 +237,9 @@ app.use((req: Request, res: Response, next) => {
     return;
   }
   // Box-scoped JSON routes: a user may only name their own boxes. 404, not 403 — no existence oracle.
-  if (p && p.kind === "user" && p.role !== "admin" && sessions.some((s) => !mayAccess(db, p, s as string))) {
+  // The archive routes name boxes whose ownership record a teardown already dropped; they scope by
+  // owner in their own queries instead.
+  if (p && p.kind === "user" && p.role !== "admin" && !ARCHIVED_BOX_ROUTES[req.path] && sessions.some((s) => !mayAccess(db, p, s as string))) {
     res.status(404).json({ error: "no such machine" });
     return;
   }
@@ -1591,8 +1596,10 @@ app.delete("/users.json", (req: Request, res: Response) => {
   res.json({ ok: true });
 });
 
-// Signed-in devices: list and revoke browser sessions.
-app.get("/sessions.json", (req: Request, res: Response) => {
+// Signed-in devices: list and revoke browser logins. `/sessions.json` is the old name (a "session"
+// elsewhere is a box); remove the alias once mobile builds older than 2026-10 have aged out.
+const DEVICES_PATHS = ["/devices.json", "/sessions.json"];
+app.get(DEVICES_PATHS, (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   const p = principalOf(res);
   if (p.kind !== "user") {
@@ -1601,7 +1608,7 @@ app.get("/sessions.json", (req: Request, res: Response) => {
   }
   res.json({ sessions: listSessions(db, p.userId).map((s) => ({ id: s.id.slice(0, 8), current: s.id === p.sessionId, createdAt: s.created_at, lastSeenAt: s.last_seen_at, ip: s.ip, userAgent: s.user_agent })) });
 });
-app.delete("/sessions.json", (req: Request, res: Response) => {
+app.delete(DEVICES_PATHS, (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   const p = principalOf(res);
   const { id, others } = (req.body ?? {}) as { id?: string; others?: boolean };
@@ -1723,16 +1730,6 @@ if (HAS_WEB) {
   });
 }
 
-// Fleet snapshot as JSON (what `monitor` renders as text).
-app.get("/monitor.json", async (req: Request, res: Response) => {
-  if (!dashAuthed(req, res)) return;
-  try {
-    res.json(ownership.visible(await gatherMonitor(cfg)).map((b) => ({ ...b, ...(b.task ? { task: redactor.redact(b.task) } : {}), ...(b.question ? { question: redactor.redact(b.question) } : {}) })));
-  } catch (e) {
-    failWith(res, e);
-  }
-});
-
 // The dashboard's fleet read: boxes + lifecycle facts (idle/max timeouts, capacity) + sleeping boxes.
 // Cached ~1.5s server-side so N tabs cost one SSH sweep.
 app.get("/fleet.json", async (req: Request, res: Response) => {
@@ -1763,7 +1760,7 @@ app.get("/fleet.json", async (req: Request, res: Response) => {
 // An explicit ?lines= bypasses the hub (different truncation → different snapshot).
 app.get("/watch.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const session = typeof req.query.session === "string" ? req.query.session : "";
+  const session = boxParam(req.query);
   if (!session) {
     res.status(400).json({ error: "session query param required" });
     return;
@@ -1784,7 +1781,7 @@ app.get("/watch.json", async (req: Request, res: Response) => {
 // pushes only deltas; the old /watch.json poll stays as the fallback for clients/proxies without SSE.
 app.get("/watch.sse", (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const session = typeof req.query.session === "string" ? req.query.session : "";
+  const session = boxParam(req.query);
   if (!session) {
     res.status(400).json({ error: "session query param required" });
     return;
@@ -1818,7 +1815,7 @@ app.get("/watch.sse", (req: Request, res: Response) => {
 // size check before any bytes are read. Never serves text/html; unknown types force a download.
 app.get("/artifact", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const session = typeof req.query.session === "string" ? req.query.session : "";
+  const session = boxParam(req.query);
   const path = typeof req.query.path === "string" ? req.query.path : "";
   if (!session) {
     res.status(400).json({ error: "session query param required" });
@@ -1874,11 +1871,8 @@ app.get("/artifact", async (req: Request, res: Response) => {
 // One turn is capped in-box by ASK_TIMEOUT_MS, so this request is bounded too.
 app.post("/ask.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const { session, question, newThread } = (req.body ?? {}) as {
-    session?: string;
-    question?: string;
-    newThread?: boolean;
-  };
+  const session = boxParam(req.body);
+  const { question, newThread } = (req.body ?? {}) as { question?: string; newThread?: boolean };
   if (!session || !question?.trim()) {
     res.status(400).json({ error: "session and question are required" });
     return;
@@ -1901,7 +1895,8 @@ app.post("/ask.json", async (req: Request, res: Response) => {
 // WAIT_TIMEOUT_MS driving the same interactive loop resume() uses over MCP.
 app.post("/resume.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const { session, message, force, model, secrets } = (req.body ?? {}) as { session?: string; message?: string; force?: boolean; model?: string; secrets?: unknown };
+  const session = boxParam(req.body);
+  const { message, force, model, secrets } = (req.body ?? {}) as { message?: string; force?: boolean; model?: string; secrets?: unknown };
   if (!session || !message?.trim()) {
     res.status(400).json({ error: "session and message are required" });
     return;
@@ -1954,7 +1949,7 @@ app.get("/models.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   try {
     const models = await fetchModels(cfg);
-    const session = typeof req.query.session === "string" ? req.query.session : "";
+    const session = boxParam(req.query);
     res.json({
       default: cfg.anthropicModel,
       current: (session && boxModels.get(session)) || cfg.anthropicModel,
@@ -1974,7 +1969,8 @@ app.get("/models.json", async (req: Request, res: Response) => {
 // resume is a normal `claude -c`), so the dashboard confirms before calling this.
 app.post("/send-now.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const { session, id } = (req.body ?? {}) as { session?: string; id?: string };
+  const session = boxParam(req.body);
+  const { id } = (req.body ?? {}) as { id?: string };
   if (!session || !id) {
     res.status(400).json({ error: "session and id are required" });
     return;
@@ -2000,7 +1996,7 @@ app.post("/send-now.json", async (req: Request, res: Response) => {
 // later message resumes it with `claude -c`), just with no message to deliver.
 app.post("/interrupt.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const { session } = (req.body ?? {}) as { session?: string };
+  const session = boxParam(req.body);
   if (!session) {
     res.status(400).json({ error: "session is required" });
     return;
@@ -2144,7 +2140,8 @@ app.get("/repos.json", async (req: Request, res: Response) => {
 // /workspace/<name>, and tell the agent (queued, delivered at its next boundary).
 app.post("/repos/attach.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const { session, repo, ref } = (req.body ?? {}) as { session?: string; repo?: string; ref?: string };
+  const session = boxParam(req.body);
+  const { repo, ref } = (req.body ?? {}) as { repo?: string; ref?: string };
   if (!isBoxName(session) || !repo || !/^[\w.-]+\/[\w.-]+$/.test(repo.trim())) {
     res.status(400).json({ error: "session and repo (owner/name) are required" });
     return;
@@ -2710,7 +2707,7 @@ app.post("/skill-repo.json", async (req: Request, res: Response) => {
 // same log the thread renders plus the changed-files listing — no extra instrumentation in the box.
 app.get("/digest.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const session = typeof req.query.session === "string" ? req.query.session : "";
+  const session = boxParam(req.query);
   if (!session) {
     res.status(400).json({ error: "session query param required" });
     return;
@@ -2774,7 +2771,7 @@ app.get("/history.json", (req: Request, res: Response) => {
       runs: listRuns(db, owner, {
         ...(Number.isFinite(limit) ? { limit } : {}),
         ...(Number.isInteger(before) ? { before } : {}),
-      }).map((r) => ({ ...r, outcome: outcomeWithFollow(owner, r.box, getDigest(db, owner, { id: r.id })?.digest) })),
+      }).map((r) => ({ ...r, outcome: outcomeWithFollow(owner, r.box, r.outcome) })),
     });
   } catch (e) {
     failWith(res, e);
@@ -2819,7 +2816,7 @@ app.delete("/history.json", (req: Request, res: Response) => {
 
 app.get("/changes.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const session = typeof req.query.session === "string" ? req.query.session : "";
+  const session = boxParam(req.query);
   if (!session) {
     res.status(400).json({ error: "session query param required" });
     return;
@@ -2834,7 +2831,7 @@ app.get("/changes.json", async (req: Request, res: Response) => {
 // (A finished run's diff survives teardown in the archive — /history.json?id=N carries diffText.)
 app.get("/rundiff.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const session = typeof req.query.session === "string" ? req.query.session : "";
+  const session = boxParam(req.query);
   if (!session) {
     res.status(400).json({ error: "session query param required" });
     return;
@@ -2848,7 +2845,7 @@ app.get("/rundiff.json", async (req: Request, res: Response) => {
 // The unified diff for one file (git diff HEAD), or "untracked" for a new file; path under /workspace.
 app.get("/diff.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const session = typeof req.query.session === "string" ? req.query.session : "";
+  const session = boxParam(req.query);
   const path = typeof req.query.path === "string" ? req.query.path : "";
   if (!session || !path) {
     res.status(400).json({ error: "session and path are required" });
@@ -2867,7 +2864,8 @@ app.get("/diff.json", async (req: Request, res: Response) => {
 // Answers with the refreshed file list so the dock's counts roll without a second round trip.
 app.post("/discard.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const { session, path, hunk } = (req.body ?? {}) as { session?: string; path?: string; hunk?: string };
+  const session = boxParam(req.body);
+  const { path, hunk } = (req.body ?? {}) as { path?: string; hunk?: string };
   if (!isBoxName(session) || typeof path !== "string" || !path || (hunk !== undefined && typeof hunk !== "string")) {
     res.status(400).json({ error: "session and path are required" });
     return;
@@ -2894,7 +2892,8 @@ app.post("/discard.json", async (req: Request, res: Response) => {
 // that opened it, so the merge is attributed like the agent's own pushes. Method is merge-commit.
 app.post("/pr/merge.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const { session, repo, number, method, auto, admin } = (req.body ?? {}) as { session?: string; repo?: string; number?: number; method?: string; auto?: boolean; admin?: boolean };
+  const session = boxParam(req.body);
+  const { repo, number, method, auto, admin } = (req.body ?? {}) as { repo?: string; number?: number; method?: string; auto?: boolean; admin?: boolean };
   if (!session || !/^[\w.-]+$/.test(session) || !repo || !/^[\w.-]+\/[\w.-]+$/.test(repo) || !(Number.isInteger(Number(number)) && Number(number) > 0)) {
     res.status(400).json({ error: "session, repo (owner/name) and number are required" });
     return;
@@ -2941,7 +2940,8 @@ app.post("/pr/merge.json", async (req: Request, res: Response) => {
 // --approve` with the owner's token. GitHub refuses self-approval; that message is surfaced as-is.
 app.post("/pr/approve.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const { session, repo, number } = (req.body ?? {}) as { session?: string; repo?: string; number?: number };
+  const session = boxParam(req.body);
+  const { repo, number } = (req.body ?? {}) as { repo?: string; number?: number };
   if (!session || !/^[\w.-]+$/.test(session) || !repo || !/^[\w.-]+\/[\w.-]+$/.test(repo) || !(Number.isInteger(Number(number)) && Number(number) > 0)) {
     res.status(400).json({ error: "session, repo (owner/name) and number are required" });
     return;
@@ -2974,7 +2974,8 @@ app.post("/pr/approve.json", async (req: Request, res: Response) => {
  */
 async function runPrAction(req: Request, res: Response, build: (number: number, repo: string) => string | { error: string }) {
   if (!dashAuthed(req, res)) return;
-  const { session, repo, number } = (req.body ?? {}) as { session?: string; repo?: string; number?: number };
+  const session = boxParam(req.body);
+  const { repo, number } = (req.body ?? {}) as { repo?: string; number?: number };
   if (!session || !/^[\w.-]+$/.test(session) || !repo || !/^[\w.-]+\/[\w.-]+$/.test(repo) || !(Number.isInteger(Number(number)) && Number(number) > 0)) {
     res.status(400).json({ error: "session, repo (owner/name) and number are required" });
     return;
@@ -3083,7 +3084,8 @@ app.get("/pr.json", async (req: Request, res: Response) => {
 // Keep (pin) a sandbox: it still sleeps like any other, but is never reaped — only Destroy removes it.
 app.post("/keep.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const { session, keep } = (req.body ?? {}) as { session?: string; keep?: boolean };
+  const session = boxParam(req.body);
+  const { keep } = (req.body ?? {}) as { keep?: boolean };
   if (!isBoxName(session)) {
     res.status(400).json({ error: "session is required" });
     return;
@@ -3105,7 +3107,7 @@ app.post("/keep.json", async (req: Request, res: Response) => {
 // Queued follow-ups for a box: list, or remove one (`?id=`) / all.
 app.get("/inbox.json", (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const session = typeof req.query.session === "string" ? req.query.session : "";
+  const session = boxParam(req.query);
   if (!session) {
     res.status(400).json({ error: "session query param required" });
     return;
@@ -3114,7 +3116,7 @@ app.get("/inbox.json", (req: Request, res: Response) => {
 });
 app.delete("/inbox.json", (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const session = typeof req.query.session === "string" ? req.query.session : "";
+  const session = boxParam(req.query);
   const id = typeof req.query.id === "string" ? req.query.id : "";
   if (!session) {
     res.status(400).json({ error: "session query param required" });
@@ -3129,7 +3131,7 @@ app.delete("/inbox.json", (req: Request, res: Response) => {
 // Name a run from its first message via the in-box helper. Idempotent; sleeping boxes are skipped.
 app.post("/title.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const { session } = (req.body ?? {}) as { session?: string };
+  const session = boxParam(req.body);
   if (!session || !/^[\w.-]+$/.test(session)) {
     res.status(400).json({ error: "session is required" });
     return;
@@ -3154,7 +3156,8 @@ app.post("/title.json", async (req: Request, res: Response) => {
 // Rename a run. The generated title is a guess; the operator's word replaces it everywhere.
 app.post("/rename.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const { session, title } = (req.body ?? {}) as { session?: string; title?: string };
+  const session = boxParam(req.body);
+  const { title } = (req.body ?? {}) as { title?: string };
   if (!session || !/^[\w.-]+$/.test(session)) {
     res.status(400).json({ error: "session is required" });
     return;
@@ -3175,7 +3178,7 @@ app.post("/rename.json", async (req: Request, res: Response) => {
 // Wake a sleeping sandbox the moment its thread is opened — no need to type first. Idempotent.
 app.post("/wake.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const { session } = (req.body ?? {}) as { session?: string };
+  const session = boxParam(req.body);
   if (!session || !/^[\w.-]+$/.test(session)) {
     res.status(400).json({ error: "session is required" });
     return;
@@ -3208,7 +3211,7 @@ app.post("/wake.json", async (req: Request, res: Response) => {
 // persist exactly as with the idle timeout; opening the thread (or a reply) wakes it again.
 app.post("/sleep.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const { session } = (req.body ?? {}) as { session?: string };
+  const session = boxParam(req.body);
   if (!session || !/^[\w.-]+$/.test(session)) {
     res.status(400).json({ error: "session is required" });
     return;
@@ -3231,7 +3234,8 @@ app.post("/sleep.json", async (req: Request, res: Response) => {
  */
 app.post("/memory.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const { session, memory } = (req.body ?? {}) as { session?: string; memory?: string };
+  const session = boxParam(req.body);
+  const { memory } = (req.body ?? {}) as { memory?: string };
   if (!session || !/^[\w.-]+$/.test(session)) {
     res.status(400).json({ error: "session is required" });
     return;
@@ -3258,7 +3262,8 @@ app.post("/memory.json", async (req: Request, res: Response) => {
  */
 app.post("/disk.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const { session, disk } = (req.body ?? {}) as { session?: string; disk?: string };
+  const session = boxParam(req.body);
+  const { disk } = (req.body ?? {}) as { disk?: string };
   if (!session || !/^[\w.-]+$/.test(session)) {
     res.status(400).json({ error: "session is required" });
     return;
@@ -3281,7 +3286,8 @@ app.post("/disk.json", async (req: Request, res: Response) => {
 // Source control for one cloned repo, from the workspace pane: status / commit-all / push.
 app.post("/git.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const { session, repo, action, message } = (req.body ?? {}) as { session?: string; repo?: string; action?: string; message?: string };
+  const session = boxParam(req.body);
+  const { repo, action, message } = (req.body ?? {}) as { repo?: string; action?: string; message?: string };
   if (!session || !/^[\w.-]+$/.test(session) || !repo) {
     res.status(400).json({ error: "session and repo are required" });
     return;
@@ -3303,7 +3309,7 @@ app.post("/git.json", async (req: Request, res: Response) => {
 // Every file under /workspace (same exclusions as the @-mention index), for the file explorer.
 app.get("/tree.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const session = typeof req.query.session === "string" ? req.query.session : "";
+  const session = boxParam(req.query);
   if (!session) {
     res.status(400).json({ error: "session query param required" });
     return;
@@ -3327,7 +3333,8 @@ app.get("/tree.json", async (req: Request, res: Response) => {
 // body travels base64 so no byte can escape the shell quoting. Size-capped at 2 MB.
 app.put("/file.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const { session, path, content, encoding } = (req.body ?? {}) as { session?: string; path?: string; content?: string; encoding?: string };
+  const session = boxParam(req.body);
+  const { path, content, encoding } = (req.body ?? {}) as { path?: string; content?: string; encoding?: string };
   if (!session || !/^[\w.-]+$/.test(session) || typeof path !== "string" || typeof content !== "string") {
     res.status(400).json({ error: "session, path and content are required" });
     return;
@@ -3362,7 +3369,7 @@ app.put("/file.json", async (req: Request, res: Response) => {
 
 app.get("/files.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const session = typeof req.query.session === "string" ? req.query.session : "";
+  const session = boxParam(req.query);
   const q = typeof req.query.q === "string" ? req.query.q : "";
   if (!session) {
     res.status(400).json({ error: "session query param required" });
@@ -3379,7 +3386,7 @@ app.get("/files.json", async (req: Request, res: Response) => {
 // Checkpoints are in-box tars (src/checkpoint.ts) — restore is ~1 s, no VM stop/boot.
 app.get("/revert-points.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const session = typeof req.query.session === "string" ? req.query.session : "";
+  const session = boxParam(req.query);
   if (!isBoxName(session)) {
     res.status(400).json({ error: "session query param required" });
     return;
@@ -3396,7 +3403,8 @@ app.get("/revert-points.json", async (req: Request, res: Response) => {
 });
 app.post("/revert.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const { session, message } = (req.body ?? {}) as { session?: string; message?: number };
+  const session = boxParam(req.body);
+  const { message } = (req.body ?? {}) as { message?: number };
   const k = Number(message);
   const turn = checkpointForMessage(k);
   if (!isBoxName(session) || turn === null) {
@@ -3423,7 +3431,7 @@ app.post("/revert.json", async (req: Request, res: Response) => {
 
 app.post("/teardown.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const { session } = (req.body ?? {}) as { session?: string };
+  const session = boxParam(req.body);
   if (!isBoxName(session)) {
     res.status(400).json({ error: "session is required" });
     return;
@@ -3796,9 +3804,8 @@ setInterval(() => {
   }
 }, 6 * 3600 * 1000).unref();
 
-/** The outcome card for an archived digest, with "followed by" resolved now (owner-scoped). */
-const outcomeWithFollow = (owner: string, box: string, digest: RunDigest | null | undefined) => {
-  const o = outcomeOf(digest);
+/** An archived outcome card with "followed by" resolved now (owner-scoped). */
+const outcomeWithFollow = (owner: string, box: string, o: RunOutcome | null) => {
   if (!o) return null;
   const mine = (b: string) => (ownerOf(db, b) ?? OPERATOR_OWNER) === owner;
   let fu: ReturnType<typeof followupsForBox> = [];
@@ -3823,7 +3830,7 @@ app.get("/history/outcome.json", (req: Request, res: Response) => {
   }
   try {
     const row = getDigest(db, owner, id !== undefined ? { id } : { box: box! });
-    const outcome = row ? outcomeWithFollow(owner, row.box, row.digest) : null;
+    const outcome = row ? outcomeWithFollow(owner, row.box, outcomeOf(row.digest)) : null;
     if (!row || !outcome) {
       res.status(404).json({ error: "no outcome for that run" });
       return;
@@ -3861,7 +3868,7 @@ app.get("/history/ledger.json", (req: Request, res: Response) => {
       totals: ledgerTotals(db, owner, f),
       rows: listLedger(db, owner, { ...f, limit: Math.min(num("limit") ?? 50, 200), ...(num("before") ? { before: num("before") } : {}) }).map((r) => ({
         ...r,
-        outcome: outcomeWithFollow(owner, r.box, getDigest(db, owner, { id: r.id })?.digest),
+        outcome: outcomeWithFollow(owner, r.box, r.outcome),
       })),
     });
   } catch (e) {

@@ -1,4 +1,4 @@
-// Playbook editor (web: WorkflowsPage → editor). The YAML is the document; the controller validates
+// Playbook editor (web: PlaybooksPage → editor). The YAML is the document; the controller validates
 // it as you type and the parsed steps are shown below so a prompt is never mistaken for a command.
 import React, { useEffect, useRef, useState } from "react";
 import { View } from "react-native";

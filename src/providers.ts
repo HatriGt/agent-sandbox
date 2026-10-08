@@ -14,7 +14,7 @@ import { randomUUID } from "node:crypto";
 import { allBlobs, loadBlob, ownerKey, saveBlob } from "./user-store.js";
 import type { DriverKind, ModelSource } from "./drivers/types.js";
 import { DRIVERS } from "./drivers/index.js";
-import { maskSecret as maskSecretValue } from "./redact.js";
+import { maskSecret } from "./redact.js";
 
 export type ProviderKind = "anthropic" | "openai" | "openai-compatible" | "ollama" | "ccproxy";
 export const PROVIDER_KINDS: readonly ProviderKind[] = ["anthropic", "openai", "openai-compatible", "ollama", "ccproxy"];
@@ -69,10 +69,6 @@ export interface ProviderView extends Omit<ProviderRecord, "apiKey"> {
 
 export const PROVIDERS_KIND = "providers";
 
-export function maskSecret(k: string | undefined | null): string | null {
-  return k ? maskSecretValue(k) : null;
-}
-
 export function driversFor(kind: ProviderKind): DriverKind[] {
   const src = SOURCE_OF[kind];
   return (Object.values(DRIVERS).filter((d) => d.capabilities.modelSources.includes(src)).map((d) => d.kind));
@@ -80,7 +76,7 @@ export function driversFor(kind: ProviderKind): DriverKind[] {
 
 export function viewOf(p: ProviderRecord): ProviderView {
   const { apiKey, ...rest } = p;
-  return { ...rest, hasKey: !!apiKey, apiKeyMasked: maskSecret(apiKey), source: SOURCE_OF[p.kind], drivers: driversFor(p.kind) };
+  return { ...rest, hasKey: !!apiKey, apiKeyMasked: apiKey ? maskSecret(apiKey) : null, source: SOURCE_OF[p.kind], drivers: driversFor(p.kind) };
 }
 
 function isKind(v: unknown): v is ProviderKind {

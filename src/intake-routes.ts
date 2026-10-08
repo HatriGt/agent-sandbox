@@ -1,14 +1,14 @@
 import crypto from "node:crypto";
-import express, { type Express, type Request, type Response } from "express";
+import type { Express, Request, Response } from "express";
 import type { Db } from "./db.js";
 import type { SecretBox } from "./secretbox.js";
 import type { Principal } from "./identity.js";
 import type { RepoInfo } from "./repos.js";
 import type { StartedBy } from "./started-by.js";
 import { OPERATOR_OWNER } from "./user-store.js";
-import { safeEqual } from "./triggers.js";
 import { claimDelivery, logDelivery } from "./trigger-store.js";
 import { makeRateLimiter } from "./auth-throttle.js";
+import { registerHook, rotateSecret } from "./hooks.js";
 import {
   authVerdict, emailTask, isEmailProvider, isSlackResponseUrl, parseInboundEmail, parseIssueUrl, parseSlack, resolveIntakeRepo, senderAllowed,
   slackText, splitAttachments, threadTask, unfurlTask, verifyMailgun, verifySlack, SLACK_SHORTCUT_ID, type EmailProvider, type IssueLink,
@@ -25,14 +25,11 @@ import {
  *   POST /hooks/intake/email/:channel/:token/:provider   Postmark · SendGrid · Mailgun · Cloudflare
  *   POST /hooks/intake/slack/:channel                    slash command + shortcut + button clicks
  *
- * Both sit under /hooks/ so http.ts gives them raw bytes (signatures are over the exact body) and
- * masks the path in the audit log. Every delivery writes a row to the delivery log, including the
- * rejected ones, so "I emailed it and nothing happened" always has an answer.
+ * Both sit under /hooks/ so the shared front door (src/hooks.ts) gives them raw bytes (signatures
+ * are over the exact body; 25 MB cap for attachments), rate-limits per channel and masks the path
+ * in the audit log. Every delivery writes a row to the delivery log, including the rejected ones,
+ * so "I emailed it and nothing happened" always has an answer.
  */
-
-export const INTAKE_BODY_LIMIT = "25mb";
-/** Raw parser for /hooks/intake/ — email with image attachments is far past the 512 KB hook cap. */
-export const intakeBodyParser = express.raw({ type: () => true, limit: INTAKE_BODY_LIMIT });
 
 type Attachment = { path: string; base64: string };
 export type IntakeStart = { ok: true; box: string } | { ok: false; question: string };
@@ -138,14 +135,19 @@ export function registerIntakeRoutes(app: Express, c: IntakeRouteCtx): void {
     }
   });
 
-  app.post("/intake/rotate.json", (req, res) => {
-    if (!c.dashAuthed(req, res)) return;
-    const owner = ownerOfP(c.principalOf(res));
-    getOrCreateChannel(c.db, c.box, owner);
-    rotateEmailToken(c.db, c.box, owner);
-    c.audit(owner, "intake.rotate", {});
-    res.json(view(req, owner));
-  });
+  app.post("/intake/rotate.json", (req, res) =>
+    rotateSecret(c, req, res, {
+      owner: ownerOfP,
+      action: "intake.rotate",
+      rotate: (owner) => {
+        getOrCreateChannel(c.db, c.box, owner);
+        rotateEmailToken(c.db, c.box, owner);
+        return true;
+      },
+      notFound: "not found",
+      body: (_r, owner) => view(req, owner),
+    })
+  );
 
   app.post("/intake/pending/:id/answer.json", async (req, res) => {
     if (!c.dashAuthed(req, res)) return;
@@ -324,68 +326,70 @@ export function registerIntakeRoutes(app: Express, c: IntakeRouteCtx): void {
 
   const perChannel = makeRateLimiter({ limit: 30, windowMs: 60_000 });
 
-  app.post("/hooks/intake/email/:id/:token/:provider", async (req: Request, res: Response) => {
-    const id = String(req.params.id ?? "").slice(0, 64);
-    const provider = String(req.params.provider ?? "");
-    if (perChannel.over(`email:${id}`)) {
-      res.setHeader("Retry-After", "60");
-      return void res.status(429).json({ error: "slow down" });
-    }
-    const ch = getChannelById(c.db, id);
-    const real = ch ? revealChannelSecret(c.db, c.box, ch.id, "email_token_enc") : undefined;
-    // Always compare, so timing does not tell "no such channel" from "wrong token".
-    const okToken = safeEqual(real ?? "\u0000no-channel\u0000", String(req.params.token ?? ""));
-    if (ch && real && !okToken) logDelivery(c.db, ch.id, { at: Date.now(), outcome: "rejected", reason: "signature", detail: "email: wrong token in the URL" });
-    if (!ch || !real || !okToken || !isEmailProvider(provider)) return void res.status(404).json({ error: "not found" });
-    const at = Date.now();
-    const note = (reason: "signature" | "payload" | "sender" | "dedupe", detail: string) => logDelivery(c.db, ch.id, { at, outcome: reason === "dedupe" ? "skipped" : "rejected", reason, detail: `email: ${detail}` });
-    const raw = Buffer.isBuffer(req.body) ? (req.body as Buffer) : Buffer.alloc(0);
-    const parsed = parseInboundEmail(provider, req.headers["content-type"], raw);
-    if (!parsed.ok) {
-      note("payload", parsed.reason);
-      return void res.status(400).json({ error: parsed.reason });
-    }
-    if (provider === "mailgun") {
-      const key = revealChannelSecret(c.db, c.box, ch.id, "mailgun_key_enc");
-      if (key) {
-        const v = verifyMailgun(key, parsed.mailgun ?? {});
-        if (!v.ok) {
-          note("signature", v.reason);
-          return void res.status(401).json({ error: v.reason });
+  registerHook<IntakeChannel>(app, {
+    path: "/hooks/intake/email/:id/:token/:provider",
+    limiter: perChannel,
+    key: (id) => `email:${id}`,
+    resolve: (id) => {
+      const ch = getChannelById(c.db, id);
+      if (!ch) return undefined;
+      const secret = revealChannelSecret(c.db, c.box, ch.id, "email_token_enc");
+      return secret ? { target: ch, secret } : { target: ch };
+    },
+    onWrongSecret: (ch) => logDelivery(c.db, ch.id, { at: Date.now(), outcome: "rejected", reason: "signature", detail: "email: wrong token in the URL" }),
+    failWith: c.failWith,
+    handle: async (ch, raw, req, res) => {
+      const provider = String(req.params.provider ?? "");
+      if (!isEmailProvider(provider)) return void res.status(404).json({ error: "not found" });
+      const at = Date.now();
+      const note = (reason: "signature" | "payload" | "sender" | "dedupe", detail: string) => logDelivery(c.db, ch.id, { at, outcome: reason === "dedupe" ? "skipped" : "rejected", reason, detail: `email: ${detail}` });
+      const parsed = parseInboundEmail(provider, req.headers["content-type"], raw);
+      if (!parsed.ok) {
+        note("payload", parsed.reason);
+        return void res.status(400).json({ error: parsed.reason });
+      }
+      if (provider === "mailgun") {
+        const key = revealChannelSecret(c.db, c.box, ch.id, "mailgun_key_enc");
+        if (key) {
+          const v = verifyMailgun(key, parsed.mailgun ?? {});
+          if (!v.ok) {
+            note("signature", v.reason);
+            return void res.status(401).json({ error: v.reason });
+          }
         }
       }
-    }
-    const e = parsed.email;
-    // Policy rejections answer 200: a provider retries on anything else, and a retry changes nothing.
-    const allow = [c.ownerEmail(ch.owner) ?? "", ...ch.allowEmails].filter(Boolean);
-    if (!senderAllowed(e.from, allow)) {
-      note("sender", `${e.from || "unknown sender"} is not on the allowed senders list`);
-      return void res.status(200).json({ ok: true, ignored: "sender not allowed" });
-    }
-    const auth = authVerdict(e.auth);
-    if (!auth.ok) {
-      note("sender", `${e.from}: ${auth.reason}`);
-      return void res.status(200).json({ ok: true, ignored: auth.reason });
-    }
-    const keys = [e.messageId ? `msg:${e.messageId.slice(0, 200)}` : `body:${hash(raw)}`, ...(parsed.mailgun?.token ? [`mg:${parsed.mailgun.token.slice(0, 100)}`] : [])];
-    if (!claimDelivery(c.db, ch.id, keys, at)) {
-      note("dedupe", "same message seen already");
-      return void res.status(200).json({ ok: true, duplicate: true });
-    }
-    const stamp = new Date(at).toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
-    const atts = splitAttachments(e.attachments, stamp);
-    const task = emailTask(e, atts);
-    if (!task) {
-      note("payload", "empty subject and body");
-      return void res.status(200).json({ ok: true, ignored: "empty" });
-    }
-    const label = `email from ${e.from}: ${(e.subject || task).slice(0, 80)}`;
-    // Answer now (providers time out); the outcome lands in the delivery log.
-    void accept(ch, { source: "email", task, attachments: atts.images, from: e.from, label }).catch((err) => {
-      logDelivery(c.db, ch.id, { at, outcome: "failed", reason: "error", detail: `${label}: ${(err as Error).message.slice(0, 160)}` });
-      log(`[intake] ${ch.id} email failed: ${(err as Error).message.slice(0, 200)}`);
-    });
-    res.status(200).json({ ok: true, accepted: true });
+      const e = parsed.email;
+      // Policy rejections answer 200: a provider retries on anything else, and a retry changes nothing.
+      const allow = [c.ownerEmail(ch.owner) ?? "", ...ch.allowEmails].filter(Boolean);
+      if (!senderAllowed(e.from, allow)) {
+        note("sender", `${e.from || "unknown sender"} is not on the allowed senders list`);
+        return void res.status(200).json({ ok: true, ignored: "sender not allowed" });
+      }
+      const auth = authVerdict(e.auth);
+      if (!auth.ok) {
+        note("sender", `${e.from}: ${auth.reason}`);
+        return void res.status(200).json({ ok: true, ignored: auth.reason });
+      }
+      const keys = [e.messageId ? `msg:${e.messageId.slice(0, 200)}` : `body:${hash(raw)}`, ...(parsed.mailgun?.token ? [`mg:${parsed.mailgun.token.slice(0, 100)}`] : [])];
+      if (!claimDelivery(c.db, ch.id, keys, at)) {
+        note("dedupe", "same message seen already");
+        return void res.status(200).json({ ok: true, duplicate: true });
+      }
+      const stamp = new Date(at).toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
+      const atts = splitAttachments(e.attachments, stamp);
+      const task = emailTask(e, atts);
+      if (!task) {
+        note("payload", "empty subject and body");
+        return void res.status(200).json({ ok: true, ignored: "empty" });
+      }
+      const label = `email from ${e.from}: ${(e.subject || task).slice(0, 80)}`;
+      // Answer now (providers time out); the outcome lands in the delivery log.
+      void accept(ch, { source: "email", task, attachments: atts.images, from: e.from, label }).catch((err) => {
+        logDelivery(c.db, ch.id, { at, outcome: "failed", reason: "error", detail: `${label}: ${(err as Error).message.slice(0, 160)}` });
+        log(`[intake] ${ch.id} email failed: ${(err as Error).message.slice(0, 200)}`);
+      });
+      res.status(200).json({ ok: true, accepted: true });
+    },
   });
 
   /* ─────────── Slack receiver ─────────── */
@@ -432,50 +436,52 @@ export function registerIntakeRoutes(app: Express, c: IntakeRouteCtx): void {
     }
   }
 
-  app.post("/hooks/intake/slack/:id", async (req: Request, res: Response) => {
-    const id = String(req.params.id ?? "").slice(0, 64);
-    if (perChannel.over(`slack:${id}`)) {
-      res.setHeader("Retry-After", "60");
-      return void res.status(429).json({ error: "slow down" });
-    }
-    const ch = getChannelById(c.db, id);
-    if (!ch) return void res.status(404).json({ error: "not found" });
-    const raw = Buffer.isBuffer(req.body) ? (req.body as Buffer) : Buffer.alloc(0);
-    const at = Date.now();
-    const v = verifySlack(revealChannelSecret(c.db, c.box, ch.id, "slack_signing_secret_enc"), req.headers as Record<string, string | string[] | undefined>, raw);
-    if (!v.ok) {
-      logDelivery(c.db, ch.id, { at, outcome: "rejected", reason: "signature", detail: `slack: ${v.reason}` });
-      return void res.status(401).json({ error: v.reason });
-    }
-    // Slack retries when we were slow; the first attempt already did the work.
-    if (req.headers["x-slack-retry-num"]) return void res.status(200).send("");
-    const s = parseSlack(raw);
-    if (s.kind === "other") return void res.status(200).send("");
-    if (!ch.slackUsers.includes(s.userId)) {
-      logDelivery(c.db, ch.id, { at, outcome: "rejected", reason: "sender", detail: `slack: user ${s.userId.slice(0, 20)} is not linked` });
-      const text = `Your Slack user ID (${s.userId}) is not linked to this Agent Sandbox account. Add it under Integrations → Inbox → Slack.`;
-      if (s.kind === "command") return void res.status(200).json({ response_type: "ephemeral", text });
-      res.status(200).send("");
-      return void slackPost(s.responseUrl, { response_type: "ephemeral", text });
-    }
-    if (s.kind === "choice") {
-      res.status(200).send("");
-      const out = await answer(ch.owner, s.pendingId, s.repo).catch((e) => ({ ok: false as const, status: 500, error: (e as Error).message }));
-      return void slackPost(s.responseUrl, out.ok ? { replace_original: true, text: `Started on ${s.repo}: ${runUrl(base0(), out.box)}` } : { replace_original: false, response_type: "ephemeral", text: `Could not start: ${out.error}` });
-    }
-    let task = slackText(s.text);
-    if (s.kind === "command" && !task) return void res.status(200).json({ response_type: "ephemeral", text: "Usage: /agent <what to do> — name the repo (owner/name) or set a default under Integrations → Inbox." });
-    // Answer inside Slack's 3 s window; the run link follows on the response URL.
-    if (s.kind === "command") res.status(200).json({ response_type: "ephemeral", text: "On it — starting a machine…" });
-    else res.status(200).send("");
-    if (s.kind === "shortcut") {
-      const thread = await fetchThread(ch, s.channelId, s.threadTs ?? s.messageTs);
-      if (thread) task = thread;
-      if (!task) return void slackPost(s.responseUrl, { response_type: "ephemeral", text: "That message has no text to send." });
-    }
-    const label = `slack ${s.kind === "command" ? "/agent" : "shortcut"}: ${task.slice(0, 80)}`;
-    const a = await accept(ch, { source: "slack", task, attachments: [], label, responseUrl: s.responseUrl }).catch((e): Accepted => ({ kind: "failed", reason: (e as Error).message }));
-    await slackPost(s.responseUrl, slackOutcome(a));
+  registerHook<IntakeChannel>(app, {
+    path: "/hooks/intake/slack/:id",
+    limiter: perChannel,
+    key: (id) => `slack:${id}`,
+    resolve: (id) => {
+      const ch = getChannelById(c.db, id);
+      return ch ? { target: ch } : undefined;
+    },
+    failWith: c.failWith,
+    handle: async (ch, raw, req, res) => {
+      const at = Date.now();
+      const v = verifySlack(revealChannelSecret(c.db, c.box, ch.id, "slack_signing_secret_enc"), req.headers as Record<string, string | string[] | undefined>, raw);
+      if (!v.ok) {
+        logDelivery(c.db, ch.id, { at, outcome: "rejected", reason: "signature", detail: `slack: ${v.reason}` });
+        return void res.status(401).json({ error: v.reason });
+      }
+      // Slack retries when we were slow; the first attempt already did the work.
+      if (req.headers["x-slack-retry-num"]) return void res.status(200).send("");
+      const s = parseSlack(raw);
+      if (s.kind === "other") return void res.status(200).send("");
+      if (!ch.slackUsers.includes(s.userId)) {
+        logDelivery(c.db, ch.id, { at, outcome: "rejected", reason: "sender", detail: `slack: user ${s.userId.slice(0, 20)} is not linked` });
+        const text = `Your Slack user ID (${s.userId}) is not linked to this Agent Sandbox account. Add it under Integrations → Inbox → Slack.`;
+        if (s.kind === "command") return void res.status(200).json({ response_type: "ephemeral", text });
+        res.status(200).send("");
+        return void slackPost(s.responseUrl, { response_type: "ephemeral", text });
+      }
+      if (s.kind === "choice") {
+        res.status(200).send("");
+        const out = await answer(ch.owner, s.pendingId, s.repo).catch((e) => ({ ok: false as const, status: 500, error: (e as Error).message }));
+        return void slackPost(s.responseUrl, out.ok ? { replace_original: true, text: `Started on ${s.repo}: ${runUrl(base0(), out.box)}` } : { replace_original: false, response_type: "ephemeral", text: `Could not start: ${out.error}` });
+      }
+      let task = slackText(s.text);
+      if (s.kind === "command" && !task) return void res.status(200).json({ response_type: "ephemeral", text: "Usage: /agent <what to do> — name the repo (owner/name) or set a default under Integrations → Inbox." });
+      // Answer inside Slack's 3 s window; the run link follows on the response URL.
+      if (s.kind === "command") res.status(200).json({ response_type: "ephemeral", text: "On it — starting a machine…" });
+      else res.status(200).send("");
+      if (s.kind === "shortcut") {
+        const thread = await fetchThread(ch, s.channelId, s.threadTs ?? s.messageTs);
+        if (thread) task = thread;
+        if (!task) return void slackPost(s.responseUrl, { response_type: "ephemeral", text: "That message has no text to send." });
+      }
+      const label = `slack ${s.kind === "command" ? "/agent" : "shortcut"}: ${task.slice(0, 80)}`;
+      const a = await accept(ch, { source: "slack", task, attachments: [], label, responseUrl: s.responseUrl }).catch((e): Accepted => ({ kind: "failed", reason: (e as Error).message }));
+      await slackPost(s.responseUrl, slackOutcome(a));
+    },
   });
 }
 

@@ -7,7 +7,6 @@ import { registerUserStoreBackend } from "../src/user-store.js";
 import { withPrincipal } from "../src/tenancy.js";
 import {
   normalizeProviderInput,
-  maskSecret,
   upsertProvider,
   loadProviders,
   deleteProvider,
@@ -55,7 +54,6 @@ test("keys are masked in views and blank key on update keeps the stored one", ()
     assert.equal(deleteProvider(p.id), true);
     assert.equal(loadProviders().length, 0);
   });
-  assert.equal(maskSecret("short"), "••••");
 });
 
 test("model lists: per-kind request shape, parse, cache, failure keeps cache", async () => {

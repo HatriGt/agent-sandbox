@@ -14,8 +14,8 @@ import "@/styles/plan.css";
  *
  * ONE board (`PlanBoard`) with two placements (`variant`): docked beside the conversation when the
  * row has room, because the plan is the answer to "where is this run up to" and a card that scrolls
- * away with the transcript cannot answer it; inline in the flow otherwise. The caller makes that
- * one decision (`useDockRoom()` + which asides are open) and renders the board exactly once.
+ * away with the transcript cannot answer it; a card in the flow otherwise. Thread.tsx makes that
+ * one decision (`useMediaQuery` + which asides are open) and renders the board exactly once.
  *
  * Evidence per step comes from `deriveTaskBoard` — see `lib/planTasks.ts` for the attribution rule.
  */
@@ -201,13 +201,8 @@ function StepList({ board, live, compact, className }: { board: TaskBoard; live?
 
 /** The active step's braille spinner; a still frame under reduced motion or when the run is not live. */
 function Braille({ spin }: { spin: boolean }) {
-  const [i, setI] = React.useState(0);
-  React.useEffect(() => {
-    if (!spin) return;
-    const t = window.setInterval(() => setI((n) => (n + 1) % BRAILLE.length), 80);
-    return () => window.clearInterval(t);
-  }, [spin]);
-  return <span className="font-mono leading-none">{BRAILLE[i]}</span>;
+  const now = useNow(spin, 80);
+  return <span className="font-mono leading-none">{BRAILLE[Math.floor(now / 80) % BRAILLE.length]}</span>;
 }
 
 /**
@@ -517,40 +512,19 @@ function Sweep({ on, failed }: { on: boolean; failed?: boolean }) {
 }
 
 const DOCK_KEY = "asb-plan-dock";
-/** Tailwind's `xl` — the width at which the thread row has room for a docked aside. */
-const DOCK_QUERY = "(min-width: 80rem)";
 
-/**
- * Whether the viewport is wide enough for the docked board. Thread.tsx folds this into ONE layout
- * decision — `useDockRoom() && !workspace && !inspector ? "dock" : "inline"` — so the plan is on
- * screen exactly once, instead of a CSS breakpoint on the card and booleans on the dock disagreeing.
- */
-export function useDockRoom(): boolean {
-  const get = () => typeof window !== "undefined" && !!window.matchMedia?.(DOCK_QUERY).matches;
-  const [room, setRoom] = React.useState(get);
-  React.useEffect(() => {
-    if (typeof window === "undefined" || !window.matchMedia) return;
-    const mq = window.matchMedia(DOCK_QUERY);
-    const on = () => setRoom(mq.matches);
-    on();
-    mq.addEventListener("change", on);
-    return () => mq.removeEventListener("change", on);
-  }, []);
-  return room;
-}
-
-export type PlanVariant = "inline" | "dock";
+export type PlanVariant = "card" | "dock";
 
 /**
  * THE plan board. One component, two placements:
- *  - `inline` — in the conversation's flow, where there is no room beside it (or another aside has
+ *  - `card` — in the conversation's flow, where there is no room beside it (or another aside has
  *    the room). Folds under its header.
- *  - `dock`   — an aside pinned beside the conversation so the plan never scrolls away; collapses to
+ *  - `dock` — an aside pinned beside the conversation so the plan never scrolls away; collapses to
  *    a slim rail that still carries the fraction and a pip per step. Remembered per session.
  * The dock is a SIBLING of the conversation+composer column, never an overlay: the column narrows
  * with it, so the composer stays aligned with the text and nothing is covered.
  */
-export function PlanBoard({ board, live, variant = "inline", className }: { board: TaskBoard; live?: boolean; variant?: PlanVariant; className?: string }) {
+export function PlanBoard({ board, live, variant = "card", className }: { board: TaskBoard; live?: boolean; variant?: PlanVariant; className?: string }) {
   const reduce = useReducedMotion();
   const { tasks, done, complete } = board;
   const failed = tasks.filter((t) => t.evidence.failed).length;
@@ -563,7 +537,7 @@ export function PlanBoard({ board, live, variant = "inline", className }: { boar
       return !v;
     });
 
-  if (variant === "inline") {
+  if (variant === "card") {
     return (
       <section aria-label="Plan" className={cn("enter relative overflow-hidden", className)}>
         <Sweep on={sweep} failed={failed > 0} />
@@ -671,16 +645,4 @@ export function PlanBoard({ board, live, variant = "inline", className }: { boar
       </motion.div>
     </motion.aside>
   );
-}
-
-/**
- * Thin wrappers, same props as before, so Thread.tsx keeps compiling until it moves to `PlanBoard`
- * with one `variant`. PlanDock keeps its old breakpoint gate only here — the component itself has
- * none; the caller decides.
- */
-export function PlanCard({ board, live }: { board: TaskBoard; live?: boolean }) {
-  return <PlanBoard board={board} live={live} variant="inline" />;
-}
-export function PlanDock({ board, live }: { board: TaskBoard; live?: boolean }) {
-  return <PlanBoard board={board} live={live} variant="dock" className="hidden xl:flex" />;
 }

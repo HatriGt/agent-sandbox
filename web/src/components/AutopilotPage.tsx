@@ -1,7 +1,7 @@
 import * as React from "react";
 import { motion } from "motion/react";
 import { useReducedMotion } from "@/lib/motion-pref";
-import { ArrowLeft, CalendarClock, ListChecks, Workflow } from "lucide-react";
+import { ArrowLeft, ListChecks, Workflow } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TabPanel } from "@/components/ui/animated-tabs";
 import { NumberTicker } from "@/components/ui/number-ticker";
@@ -9,15 +9,14 @@ import { cn } from "@/lib/utils";
 import { api, type BoxView } from "@/lib/api";
 import { useCached } from "@/lib/cache";
 import { Automations, seedAutomation } from "@/components/Automations";
-import { WorkflowsPage } from "@/components/WorkflowsPage";
-import { ScheduledPage } from "@/components/ScheduledPage";
+import { PlaybooksPage } from "@/components/PlaybooksPage";
 
-export type AutopilotTab = "automations" | "scheduled" | "playbooks";
-const ORDER: readonly AutopilotTab[] = ["automations", "scheduled", "playbooks"];
+export type AutopilotTab = "automations" | "playbooks";
+const ORDER: readonly AutopilotTab[] = ["automations", "playbooks"];
 
 /**
  * One home for work that runs without you. Automations are standing rules (a schedule, a webhook, a
- * GitHub event, another automation finishing); Scheduled is what a chat asked for later, usually once;
+ * GitHub event, another automation finishing) and what a chat asked for later ("From chat" filter);
  * playbooks say HOW it gets done. An automation can run a playbook; a playbook can be automated.
  */
 export function AutopilotPage({
@@ -40,11 +39,8 @@ export function AutopilotPage({
   // Counts on the tabs: what is live, what is coming up, and (ink-ringed) what is waiting on you.
   const triggers = useCached("triggers", (signal) => api.triggers(signal)).data?.triggers;
   const workflows = useCached("workflows", (signal) => api.workflows(signal)).data?.workflows;
-  const auto = triggers?.filter((t) => t.scope !== "scheduled");
-  const sched = triggers?.filter((t) => t.scope === "scheduled");
   const tabs: { id: AutopilotTab; label: string; hint: string; icon: React.ReactNode; count?: number; attention?: boolean }[] = [
-    { id: "automations", label: "Automations", hint: "Standing rules", icon: <Workflow className="size-4" />, count: auto?.filter((t) => t.enabled).length, attention: auto?.some((t) => t.status === "needs-ok") },
-    { id: "scheduled", label: "Scheduled", hint: "Asked for in a chat", icon: <CalendarClock className="size-4" />, count: sched?.filter((t) => ["needs-ok", "waiting", "running"].includes(t.status)).length, attention: sched?.some((t) => t.status === "needs-ok") },
+    { id: "automations", label: "Automations", hint: "When it starts", icon: <Workflow className="size-4" />, count: triggers?.filter((t) => t.enabled).length, attention: triggers?.some((t) => t.status === "needs-ok") },
     { id: "playbooks", label: "Playbooks", hint: "How it gets done", icon: <ListChecks className="size-4" />, count: workflows?.length },
   ];
   return (
@@ -95,10 +91,8 @@ export function AutopilotPage({
         <TabPanel value={tab} order={ORDER}>
           {tab === "automations" ? (
             <Automations onOpenBox={onOpenBox} onOpenPlaybooks={() => onTab("playbooks")} onOpenRuns={onOpenRuns} />
-          ) : tab === "scheduled" ? (
-            <ScheduledPage onOpenBox={onOpenBox} onAutomations={() => onTab("automations")} />
           ) : (
-            <WorkflowsPage
+            <PlaybooksPage
               boxes={boxes}
               onAutomate={(w) => {
                 seedAutomation({ name: w.name, workflowId: w.id, taskTemplate: w.description || `Run the ${w.name} playbook` });

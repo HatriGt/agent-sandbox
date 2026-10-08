@@ -25,11 +25,10 @@ export type ConsoleRoute =
   | { view: "activity" }
   | { view: "automations" }
   | { view: "automation-runs"; id: string }
-  | { view: "scheduled" }
   | { view: "skills" }
   | { view: "memory" }
   | { view: "harnesses" }
-  | { view: "workflows" }
+  | { view: "playbooks" }
   | { view: "integrations" }
   | { view: "account" }
   | { view: "connect" }
@@ -50,11 +49,10 @@ export function parseConsolePath(pathname: string): ConsoleRoute {
   if (/^\/(automations|autopilot)\/?$/.test(rest)) return { view: "automations" };
   const runs = rest.match(/^\/autopilot\/automations\/([^/]+)\/runs\/?$/);
   if (runs) return { view: "automation-runs", id: decodeURIComponent(runs[1]) };
-  if (/^\/autopilot\/scheduled\/?$/.test(rest)) return { view: "scheduled" };
   if (/^\/skills\/?$/.test(rest)) return { view: "skills" };
   if (/^\/memory\/?$/.test(rest)) return { view: "memory" };
   if (/^\/harnesses\/?$/.test(rest)) return { view: "harnesses" };
-  if (/^\/(workflows|autopilot\/playbooks)\/?$/.test(rest)) return { view: "workflows" };
+  if (/^\/autopilot\/playbooks\/?$/.test(rest)) return { view: "playbooks" };
   if (/^\/(accounts|integrations)\/?$/.test(rest)) return { view: "integrations" };
   if (/^\/account\/?$/.test(rest)) return { view: "account" };
   if (/^\/connect\/?$/.test(rest)) return { view: "connect" };
@@ -81,15 +79,13 @@ export function consolePath(r: ConsoleRoute): string {
       return `${BASE}/autopilot`;
     case "automation-runs":
       return `${BASE}/autopilot/automations/${encodeURIComponent(r.id)}/runs`;
-    case "scheduled":
-      return `${BASE}/autopilot/scheduled`;
     case "skills":
       return `${BASE}/skills`;
     case "memory":
       return `${BASE}/memory`;
     case "harnesses":
       return `${BASE}/harnesses`;
-    case "workflows":
+    case "playbooks":
       return `${BASE}/autopilot/playbooks`;
     case "integrations":
       return `${BASE}/integrations`;

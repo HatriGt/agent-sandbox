@@ -159,3 +159,20 @@ test("ledger: plan counts and workflow id are stored; a planless run reads as no
   assert.deepEqual(listLedger(db, "A", { workflow: "wf_1" }).map((r) => r.box), ["p"], "workflow filter");
   assert.deepEqual(listLedger(db, "A", { workflow: "wf_other" }), []);
 });
+
+test("ledger: a new archive's row carries the stored outcome without reading the digest; older rows fall back to it", () => {
+  const db = openMemoryDb();
+  const d = digest({ box: "s", endedAt: 1 });
+  const id = archiveRun(db, { box: "s", owner: "A", digest: d, now: 10 })!;
+  // Blank the digest: the ledger must not need it for a row archived with outcome_json.
+  db.prepare(`UPDATE run_archive SET digest_json = NULL WHERE id = ?`).run(id);
+  const row = listLedger(db, "A").find((r) => r.id === id)!;
+  assert.equal(row.outcome?.v, 1);
+  assert.equal(row.outcome?.state, "done");
+  assert.equal(listRuns(db, "A")[0].outcome?.state, "done");
+
+  // A row from before the column (outcome_json NULL) derives its outcome from the digest.
+  const old = archiveRun(db, { box: "o", owner: "A", digest: digest({ box: "o", endedAt: 2, state: "failed", exitCode: 1 }), now: 20 })!;
+  db.prepare(`UPDATE run_archive SET outcome_json = NULL WHERE id = ?`).run(old);
+  assert.equal(listLedger(db, "A").find((r) => r.id === old)!.outcome?.state, "failed");
+});

@@ -1,17 +1,18 @@
 ﻿import * as React from "react";
-import { CalendarClock, ChevronRight, Copy, FlaskConical, GitPullRequest, History as HistoryIcon, Link2, ListChecks, PanelRight, Play, Plus, Radar, RotateCw, ShieldCheck, Trash2, Webhook, Workflow, X } from "lucide-react";
+import { ArrowUpRight, CalendarClock, ChevronRight, Copy, FlaskConical, GitPullRequest, History as HistoryIcon, Link2, ListChecks, PanelRight, Play, Plus, Radar, RotateCw, ShieldCheck, Trash2, Webhook, Workflow, X } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
 import { api, type AlertPreset, type Automation, type AutomationDelivery, type AutomationDraft, type AutomationKind, type GithubEvent, type WatchEvent } from "@/lib/api";
 import { fmtAgo } from "@/lib/format";
-import { readCache, useCached, writeCache } from "@/lib/cache";
+import { useCached, writeCache } from "@/lib/cache";
 import { Button } from "@/components/ui/button";
 import { ArmButton } from "@/components/ui/arm-button";
 import { Switch } from "@/components/ui/switch";
 import { Segmented } from "@/components/ui/segmented";
 import { Textarea } from "@/components/ui/textarea";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FilterChip } from "@/components/ui/filter-chip";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Swap } from "@/components/ui/swap";
 import { Collapse } from "@/components/ui/collapse";
@@ -192,11 +193,21 @@ export function editAutomation(id: string): void {
   editSeed = id;
 }
 
+/** One list for everything that runs on its own: standing rules and what a chat asked for later. */
+type Source = "all" | "rules" | "chat";
+const SOURCES: { value: Source; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "rules", label: "Standing rules" },
+  { value: "chat", label: "From chat" },
+];
+const fromChat = (a: Automation) => a.scope === "scheduled";
+
 /** The Automations tab of Autopilot (AutopilotPage owns the page header and tabs). */
 export function Automations({ onOpenBox, onOpenPlaybooks, onOpenRuns }: { onOpenBox: (box: string) => void; onOpenPlaybooks: () => void; onOpenRuns: (id: string) => void }) {
   const [rows, setRows] = React.useState<Automation[] | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [attempt, setAttempt] = React.useState(0);
+  const [source, setSource] = React.useState<Source>("all");
   const [editing, setEditing] = React.useState<{ id: string | null; draft: AutomationDraft } | null>(null);
   // Keep the last draft while the sheet slides shut so its content doesn't vanish mid-exit.
   const lastEditing = React.useRef<typeof editing>(null);
@@ -207,8 +218,7 @@ export function Automations({ onOpenBox, onOpenPlaybooks, onOpenRuns }: { onOpen
     setError(null);
     return api
       .triggers(signal)
-      // Chat schedules live on the Scheduled tab; this list is standing rules only.
-      .then((r) => setRows(r.triggers.filter((t) => t.scope !== "scheduled")))
+      .then((r) => setRows(r.triggers))
       .catch((e) => {
         if (!signal?.aborted) setError(e instanceof Error ? e.message : String(e));
       });
@@ -221,9 +231,7 @@ export function Automations({ onOpenBox, onOpenPlaybooks, onOpenRuns }: { onOpen
 
   // Every local edit (toggle, create, delete) flows back into the shared cache the tab counts read.
   React.useEffect(() => {
-    if (!rows) return;
-    const cached = readCache<{ triggers: Automation[] }>("triggers")?.v.triggers ?? [];
-    writeCache("triggers", { triggers: [...cached.filter((t) => t.scope === "scheduled"), ...rows] });
+    if (rows) writeCache("triggers", { triggers: rows });
   }, [rows]);
 
   const toggle = async (a: Automation, on: boolean) => {
@@ -248,8 +256,11 @@ export function Automations({ onOpenBox, onOpenPlaybooks, onOpenRuns }: { onOpen
   };
 
   const names = Object.fromEntries((rows ?? []).map((r) => [r.id, r.name]));
+  const counts = { all: rows?.length ?? 0, rules: rows?.filter((a) => !fromChat(a)).length ?? 0, chat: rows?.filter(fromChat).length ?? 0 };
   // Waiting on you first, then live ones, then paused.
-  const listed = [...(rows ?? [])].sort((a, b) => Number(isPending(b)) - Number(isPending(a)) || Number(b.enabled) - Number(a.enabled));
+  const listed = (rows ?? [])
+    .filter((a) => (source === "all" ? true : source === "chat" ? fromChat(a) : !fromChat(a)))
+    .sort((a, b) => Number(isPending(b)) - Number(isPending(a)) || Number(b.enabled) - Number(a.enabled));
 
   // "Automate this playbook" on the Playbooks tab lands here with a draft.
   React.useEffect(() => {
@@ -282,6 +293,13 @@ export function Automations({ onOpenBox, onOpenPlaybooks, onOpenRuns }: { onOpen
             )}
           </AnimatePresence>
         </div>
+        {rows && rows.length > 0 && (
+          <div role="radiogroup" aria-label="Source" className="mb-3 flex flex-wrap gap-1.5">
+            {SOURCES.map((s) => (
+              <FilterChip key={s.value} group="automation-source" active={source === s.value} onClick={() => setSource(s.value)} label={s.label} count={counts[s.value]} />
+            ))}
+          </div>
+        )}
 
         <Swap state={error ? "error" : rows === null ? "loading" : listed.length ? "list" : "empty"}>
           {error ? (
@@ -307,6 +325,8 @@ export function Automations({ onOpenBox, onOpenPlaybooks, onOpenRuns }: { onOpen
                 </div>
               ))}
             </div>
+          ) : !listed.length && source === "chat" ? (
+            <EmptyState icon={CalendarClock} title="Nothing scheduled from a chat" line="Ask the agent to run something later or on a schedule and it shows up here." />
           ) : !listed.length ? (
             <EmptyState
               icon={Workflow}
@@ -496,6 +516,17 @@ function AutomationList({
               {a.name}
             </span>
             {playbook && <span className="text-muted-foreground shrink-0 text-micro">{playbook}</span>}
+            {a.sourceBox && (
+              <button
+                type="button"
+                onClick={(e) => (stopRow(e), onOpenBox(a.sourceBox!))}
+                className="text-muted-foreground hover:text-foreground inline-flex max-w-[14rem] shrink-0 cursor-pointer items-center gap-0.5 text-micro underline-offset-2 hover:underline"
+                title={`From chat: ${a.sourceTitle || a.sourceBox}`}
+              >
+                <span className="truncate">{a.sourceTitle || a.sourceBox}</span>
+                <ArrowUpRight className="size-3 shrink-0" aria-hidden />
+              </button>
+            )}
           </span>
         );
       },

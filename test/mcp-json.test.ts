@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isSecretKey, mask, mergeSecrets, replaceFromJson, toEditableConfig, viewServers, type McpStore } from "../src/mcp-store.ts";
+import { isSecretKey, MCP_MASK, mergeSecrets, replaceFromJson, toEditableConfig, viewServers, type McpStore } from "../src/mcp-store.ts";
+import { maskSecret } from "../src/redact.ts";
 
 const store: McpStore = {
   servers: {
@@ -22,7 +23,7 @@ test("only secret-looking keys are masked; plain config values show in full", ()
   assert.equal(isSecretKey("HANA_HOST"), false);
   const view = viewServers(store).find((s) => s.name === "hana")!;
   assert.equal(view.env!.HANA_HOST, "db.internal");
-  assert.equal(view.env!.HANA_PASSWORD, mask("sup3r-secret-value"));
+  assert.equal(view.env!.HANA_PASSWORD, maskSecret("sup3r-secret-value", MCP_MASK));
 });
 
 test("the editable config is Claude/Cursor shaped, with disabled:true for off servers", () => {
@@ -30,7 +31,7 @@ test("the editable config is Claude/Cursor shaped, with disabled:true for off se
   assert.deepEqual(Object.keys(cfg.mcpServers), ["hana", "linear"]);
   assert.equal((cfg.mcpServers.linear as { disabled?: boolean }).disabled, true);
   assert.equal((cfg.mcpServers.hana as { disabled?: boolean }).disabled, undefined);
-  assert.equal((cfg.mcpServers.hana as { env: Record<string, string> }).env.HANA_PASSWORD, mask("sup3r-secret-value"));
+  assert.equal((cfg.mcpServers.hana as { env: Record<string, string> }).env.HANA_PASSWORD, maskSecret("sup3r-secret-value", MCP_MASK));
 });
 
 test("replacing from edited JSON keeps stored secrets the editor only saw masked, and respects renames/removals", () => {
@@ -50,6 +51,6 @@ test("replacing from edited JSON keeps stored secrets the editor only saw masked
 
 test("mergeSecrets: blank or masked incoming → stored; anything else replaces", () => {
   const prev = { A: "keep-me-please", B: "old" };
-  assert.deepEqual(mergeSecrets({ A: mask("keep-me-please"), B: "new", C: "c" }, prev), { A: "keep-me-please", B: "new", C: "c" });
+  assert.deepEqual(mergeSecrets({ A: maskSecret("keep-me-please", MCP_MASK), B: "new", C: "c" }, prev), { A: "keep-me-please", B: "new", C: "c" });
   assert.deepEqual(mergeSecrets({ A: "" }, prev), { A: "keep-me-please" });
 });

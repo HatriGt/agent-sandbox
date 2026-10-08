@@ -322,9 +322,10 @@ makes a warm claim read as one clean transition (booting placeholder → claimed
 
 ## Reasoning and plans
 
-`ThinkingItem` folds extended-thinking blocks (collapsed to "Thought — <teaser> · N words"); `PlanCard`
-renders the agent's TodoWrite plan as a live checklist (done ✓ / in progress / todo, n/m), shown once
-in its latest state. Both come from sentinel blocks the in-box formatter writes (`⟦think⟧`, `⟦plan⟧`).
+Thinking blocks fold to "Thought for Ns" (live: "Thinking…"); `PlanBoard` renders the agent's
+TodoWrite plan as a live checklist (done ✓ / in progress / todo, n/m, per-step durations), shown once
+in its latest state — as a dock beside the thread on wide screens, inline otherwise. Both come from
+sentinel blocks the in-box formatter writes (`⟦think⟧`, `⟦plan⟧`).
 
 ## Integrations
 
@@ -393,9 +394,9 @@ all-added) and **File** (shiki-highlighted content, markdown rendered) tabs, plu
 
 A Bash step whose output is a test run (vitest/jest, node:test, pytest, go test) renders as a
 `TestResultsCard` — passed/failed/skipped chips, duration, per-file cases with timing, raw output one
-click away; groups containing one open by default. A PR URL in the transcript becomes a
-`PullRequestCard` that reads like GitHub: state glyph, `#142 Title`, `repo · head → base · +/- · files`
-(metadata via `/pr.json` through a connected account; a plain link until it arrives). Answering a question hides the card at once and shows "Answer sent — resuming".
+click away; groups containing one open by default. PRs the run opened surface in the
+`PullRequestFloat` (state glyph, `#142 Title`, `repo · head → base · +/- · files`; metadata via
+`/pr.json` through a connected account). Answering a question hides the card at once and shows "Answer sent — resuming".
 
 ## Keyboard
 

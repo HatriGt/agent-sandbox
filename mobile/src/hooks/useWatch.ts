@@ -77,7 +77,7 @@ export function useWatch(session: string | undefined) {
     if (!session || stopped.current) return;
     handle.current?.close();
     handle.current = openSse(
-      `/watch.sse?session=${encodeURIComponent(session)}${offset.current ? `&from=${offset.current}` : ""}`,
+      `/watch.sse?box=${encodeURIComponent(session)}${offset.current ? `&from=${offset.current}` : ""}`,
       {
         lastEventId: offset.current,
         onFrame: (f) => {

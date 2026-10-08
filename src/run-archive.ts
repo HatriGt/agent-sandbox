@@ -1,5 +1,6 @@
 import type { Db } from "./db.js";
 import type { RunDigest } from "./digest.js";
+import { outcomeOf, type RunOutcome } from "./outcome.js";
 
 /**
  * Run history archive (docs/roadmap-saas.md #7). A finished run used to evaporate at teardown; this
@@ -80,8 +81,8 @@ export function archiveRun(db: Db, rec: ArchiveRecord): number | null {
   const r = db
     .prepare(
       `INSERT INTO run_archive (box, owner, task, state, exit_code, started_at, ended_at, archived_at, headline, digest_json, diff_text,
-         started_by, trigger_id, agent, verified, input_tokens, output_tokens, cost_usd, workflow_id, plan_done, plan_total)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         started_by, trigger_id, agent, verified, input_tokens, output_tokens, cost_usd, workflow_id, plan_done, plan_total, outcome_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       rec.box, rec.owner, d.task, d.state, d.exitCode ?? null, d.startedAt ?? null, d.endedAt ?? null, now, d.headline, JSON.stringify(d), rec.diffText || null,
@@ -89,7 +90,8 @@ export function archiveRun(db: Db, rec: ArchiveRecord): number | null {
       rec.workflowId ?? null,
       // Plan counts only when the run carried a plan: a planless run is "no plan", not "0 of 0".
       d.plan.length ? d.plan.filter((s) => s.state === "done").length : null,
-      d.plan.length ? d.plan.length : null
+      d.plan.length ? d.plan.length : null,
+      JSON.stringify(outcomeOf(d, rec.diffText))
     );
   return Number(r.lastInsertRowid);
 }
@@ -110,6 +112,26 @@ function ledgerColumns(d: RunDigest): Array<string | number | null> {
   ];
 }
 
+/**
+ * The archived outcome of a row: the stored column, else (rows archived before `outcome_json`) the
+ * one derived from the digest, which is loaded only then.
+ */
+function outcomeColumn(db: Db, r: Record<string, unknown>): RunOutcome | null {
+  if (typeof r.outcome_json === "string") {
+    try {
+      return JSON.parse(r.outcome_json) as RunOutcome;
+    } catch {
+      /* fall through to the digest */
+    }
+  }
+  const old = db.prepare(`SELECT digest_json FROM run_archive WHERE id = ?`).get(r.id) as { digest_json: string | null } | undefined;
+  if (!old?.digest_json) return null;
+  try {
+    return outcomeOf(JSON.parse(old.digest_json) as RunDigest);
+  } catch {
+    return null;
+  }
+}
 export interface LedgerFilter {
   since?: number;
   until?: number;
@@ -192,6 +214,8 @@ export function ledgerTotals(db: Db, owner: string, f: LedgerFilter = {}): Ledge
 }
 
 export interface LedgerRow extends ArchivedRunRow {
+  /** The outcome card as archived (null only when the digest could not be read). */
+  outcome: RunOutcome | null;
   startedBy: string | null;
   triggerId: string | null;
   agent: string | null;
@@ -212,13 +236,14 @@ export function listLedger(db: Db, owner: string, f: LedgerFilter & { limit?: nu
   const rows = db
     .prepare(
       `SELECT id, box, owner, task, state, exit_code, started_at, ended_at, archived_at, headline,
-         started_by, trigger_id, agent, verified, input_tokens, output_tokens, cost_usd, workflow_id, plan_done, plan_total
+         started_by, trigger_id, agent, verified, input_tokens, output_tokens, cost_usd, workflow_id, plan_done, plan_total, outcome_json
        FROM run_archive WHERE ${sql} ${f.before ? "AND id < ?" : ""} ORDER BY id DESC LIMIT ?`
     )
     .all(...args, ...(f.before ? [f.before] : []), limit) as Array<Record<string, unknown>>;
   const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
   return rows.map((r) => ({
     ...toRow(r),
+    outcome: outcomeColumn(db, r),
     startedBy: (r.started_by as string | null) ?? null,
     triggerId: (r.trigger_id as string | null) ?? null,
     agent: (r.agent as string | null) ?? null,
@@ -232,16 +257,16 @@ export function listLedger(db: Db, owner: string, f: LedgerFilter & { limit?: nu
   }));
 }
 
-/** Reverse-chronological list for one owner. `before` pages by row id (exclusive). Cap 50. */
-export function listRuns(db: Db, owner: string, opts: { limit?: number; before?: number } = {}): ArchivedRunRow[] {
+/** Reverse-chronological list for one owner, each with its archived outcome. `before` pages by row id (exclusive). Cap 50. */
+export function listRuns(db: Db, owner: string, opts: { limit?: number; before?: number } = {}): Array<ArchivedRunRow & { outcome: RunOutcome | null }> {
   const limit = Math.min(Math.max(1, opts.limit ?? 50), 50);
   const rows = db
     .prepare(
-      `SELECT id, box, owner, task, state, exit_code, started_at, ended_at, archived_at, headline
+      `SELECT id, box, owner, task, state, exit_code, started_at, ended_at, archived_at, headline, outcome_json
        FROM run_archive WHERE owner = ? ${opts.before ? "AND id < ?" : ""} ORDER BY id DESC LIMIT ?`
     )
     .all(...(opts.before ? [owner, opts.before, limit] : [owner, limit])) as Array<Record<string, unknown>>;
-  return rows.map(toRow);
+  return rows.map((r) => ({ ...toRow(r), outcome: outcomeColumn(db, r) }));
 }
 
 /**

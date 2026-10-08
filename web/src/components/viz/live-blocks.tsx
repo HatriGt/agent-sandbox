@@ -3,6 +3,7 @@ import { resolvedReduced } from "@/lib/motion-pref";
 import { ArrowUp, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { completeVersions, EMPTY_REGISTRY, rewriteLiveBlocks, type LiveRegistry, type LiveSlot } from "@/lib/viz-identity";
+import { useNow } from "@/hooks/useNow";
 
 /**
  * React side of live blocks (lib/viz-identity.ts). Thread builds the registry once per trace and
@@ -34,15 +35,6 @@ function versionTime(slot: LiveSlot, i: number): number {
   return firstSeen.get(k)!;
 }
 
-function useNow(every: number): number {
-  const [now, setNow] = React.useState(() => Date.now());
-  React.useEffect(() => {
-    const t = window.setInterval(() => setNow(Date.now()), every);
-    return () => window.clearInterval(t);
-  }, [every]);
-  return now;
-}
-
 function ago(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));
   if (s < 5) return "just now";
@@ -59,7 +51,7 @@ export function LiveSlotBadge() {
   const n = React.useContext(LiveSlotContext);
   const { registry, working } = React.useContext(LiveRegistryContext);
   const slot = n === null ? undefined : registry.slots[n];
-  const now = useNow(5000);
+  const now = useNow(true, 5000);
   if (!slot || completeVersions(slot) < 2) return null;
   const live = working && slot.run === registry.lastRun;
   const at = versionTime(slot, slot.latest);

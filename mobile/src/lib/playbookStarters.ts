@@ -1,4 +1,4 @@
-// Playbook starters — copied from web/src/components/WorkflowsPage.tsx (EXAMPLE + STARTERS).
+// Playbook starters — copied from web/src/components/PlaybooksPage.tsx (EXAMPLE + STARTERS).
 export const EXAMPLE = `name: ship-feature
 description: implement, prove it with tests, then review your own diff
 steps:

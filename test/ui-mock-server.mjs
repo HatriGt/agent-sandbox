@@ -97,7 +97,6 @@ const server = createServer(async (req, res) => {
   // --- fleet ---
   if (p === "/fleet.json")
     return json(res, 200, { boxes: [boxView()], lifecycle: { capacity: 4, poolSize: 0, idleTimeoutSec: 900, maxDurationSec: 7200 }, at: Date.now() });
-  if (p === "/monitor.json") return json(res, 200, { boxes: [boxView()] });
   if (p === "/watch.json") return json(res, 200, { ...meta(), log: state.log });
   if (p === "/changes.json") return json(res, 200, { files: [] });
   if (p === "/skills.json") return json(res, 200, { skills: [] });

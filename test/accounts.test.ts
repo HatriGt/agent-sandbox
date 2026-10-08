@@ -1,14 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { maskToken, viewAccounts, deviceStart, devicePoll } from "../src/accounts.ts";
+import { viewAccounts, deviceStart, devicePoll } from "../src/accounts.ts";
 import { parseStore, serializeStore, upsertAccount, removeAccount, setDefaultAccount, pickDefaultAccount } from "../src/gh-token-store.ts";
 
 const acc = (login: string, orgs: string[] = []) => ({ login, token: `ghp_${login}abcdefgh1234`, type: "classic" as const, orgs, verifiedRepos: [] });
 
-test("maskToken keeps only the prefix and the last four characters", () => {
-  assert.equal(maskToken("ghp_abcdefghijklmnop1234"), "ghp_…1234");
-  assert.equal(maskToken("github_pat_11ABCDEFG_xyz9876"), "github_pat_…9876");
-  assert.equal(maskToken("short"), "••••");
+test("the account view keeps only the token's type prefix and last four characters", () => {
+  const hint = (token: string) => viewAccounts(upsertAccount({ accounts: {} }, { ...acc("a"), token }), undefined)[0].tokenHint;
+  assert.equal(hint("ghp_abcdefghijklmnop1234"), "ghp_…1234");
+  assert.equal(hint("github_pat_11ABCDEFG_xyz9876"), "github_pat_…9876");
+  assert.equal(hint("short"), "••••");
 });
 
 test("store: explicit default survives round-trip, wins over the heuristic, clears on removal", () => {

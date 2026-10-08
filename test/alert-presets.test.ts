@@ -9,7 +9,8 @@ import { INCIDENT_HARNESS_ID, normalizeAlert, testPayload, verifyPreset } from "
 import { normalizeTrigger, renderTemplate, templateContext } from "../src/triggers.ts";
 import { DELIVERY_LOG_MAX, listDeliveries, logDelivery, createTrigger } from "../src/trigger-store.ts";
 import { makeDispatcher } from "../src/trigger-dispatch.ts";
-import { hookBodyParser, registerTriggerRoutes } from "../src/trigger-routes.ts";
+import { registerTriggerRoutes } from "../src/trigger-routes.ts";
+import { hookBodyParser } from "../src/hooks.ts";
 import { BUILTIN_HARNESSES, BUILTIN_ID_PREFIX } from "../src/harness.ts";
 
 const box = makeSecretBox(crypto.randomBytes(32));

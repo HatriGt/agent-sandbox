@@ -4,7 +4,8 @@ import { useReducedMotion } from "@/lib/motion-pref";
 import type { ThreadScheduleItem, ThreadScheduleReject } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { CATEGORY, fmtNext, useActions, useNow, useThreadSchedule } from "./SchedulePill";
+import { CATEGORY, fmtNext, useActions, useThreadSchedule } from "./SchedulePill";
+import { useNow } from "@/hooks/useNow";
 
 /**
  * What this chat scheduled, under the agent's message that scheduled it — in the shape the question
@@ -22,7 +23,7 @@ export function ScheduledCard({ box, runState, onRetry, onDiscuss }: { box: stri
   const { items, rejected, reload } = useThreadSchedule(box, runState);
   const actions = useActions(() => void reload());
   const still = !!useReducedMotion();
-  const now = useNow();
+  const now = useNow(true, 30_000);
 
   const mine = items.filter((i) => i.relation === "proposed" || i.relation === "created");
   const pending = mine.filter((i) => i.relation === "proposed").length;
@@ -125,7 +126,7 @@ function Card({ it, now, still, busy, actions, onDiscuss }: { it: ThreadSchedule
         ) : (
           <>
             <p className="text-muted-foreground min-w-0 truncate text-micro leading-snug">{it.relation === "created" && it.enabled && !over ? "On the schedule. You can pause or run it early from Autopilot." : "Kept in Autopilot."}</p>
-            <Button variant="ghost" size="xs" className="shrink-0" onClick={() => actions.openAutopilot(it)}>
+            <Button variant="ghost" size="xs" className="shrink-0" onClick={() => actions.openAutopilot()}>
               Open in Autopilot <ArrowUpRight className="size-3.5" />
             </Button>
           </>

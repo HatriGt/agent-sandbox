@@ -36,6 +36,7 @@ export function describeEvent(e: Pick<AuditEventRow, "method" | "path" | "sessio
     "POST /api-keys.json": ["Created an API key", false],
     "DELETE /api-keys.json": ["Revoked an API key", false],
     "DELETE /sessions.json": ["Signed out a device", false],
+    "DELETE /devices.json": ["Signed out a device", false],
     "POST /account.json": ["Updated the profile", false],
     "POST /notify.json": ["Changed notification settings", false],
     "POST /accounts.json": ["Connected a GitHub account", false],

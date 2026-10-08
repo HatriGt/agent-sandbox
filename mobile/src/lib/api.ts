@@ -862,9 +862,9 @@ export const api = {
   },
   updateAccount: (p: { name?: string; email?: string | null; currentPassword?: string; newPassword?: string }) =>
     post<{ ok: true }>("/account.json", p),
-  sessions: () => get<{ sessions: SessionRow[] }>("/sessions.json"),
-  revokeSession: (id: string) => del<{ ok: true }>("/sessions.json", {}, { id }),
-  revokeOtherSessions: () => del<{ ok: true; revoked: number }>("/sessions.json", {}, { others: true }),
+  sessions: () => get<{ sessions: SessionRow[] }>("/devices.json"),
+  revokeSession: (id: string) => del<{ ok: true }>("/devices.json", {}, { id }),
+  revokeOtherSessions: () => del<{ ok: true; revoked: number }>("/devices.json", {}, { others: true }),
   apiKeys: () => get<{ keys: ApiKeyRow[] }>("/api-keys.json"),
   createApiKey: (name: string) => post<{ id: string; token: string; prefix: string }>("/api-keys.json", { name }),
   revokeApiKey: (id: string) => del<{ ok: true }>("/api-keys.json", {}, { id }),
@@ -884,9 +884,9 @@ export const api = {
     const snap = await get<FleetSnapshot>("/fleet.json");
     return { ...snap, lifecycle: snap.lifecycle ?? { capacity: 0, poolSize: 0 } };
   },
-  watch: (session: string) => get<WatchSnapshot>("/watch.json", { session }),
+  watch: (session: string) => get<WatchSnapshot>("/watch.json", { box: session }),
   /** The run receipt for a finished thread — headline, plan, files, questions. */
-  digest: (session: string) => get<RunDigest>("/digest.json", { session }),
+  digest: (session: string) => get<RunDigest>("/digest.json", { box: session }),
   /** Archived finished runs, reverse-chron. `before` pages past the given id; `limit` caps at 50 server-side. */
   history: (opts: { limit?: number; before?: number } = {}) =>
     get<{ runs: HistoryRun[] }>("/history.json", {
@@ -931,53 +931,53 @@ export const api = {
     compareSide?: "a" | "b";
   }) => post<DelegateResult>("/delegate.json", { source: "git", ...input }, AGENT_TIMEOUT_MS),
   /** Stop the running turn now. The box stays up; the thread can be resumed. */
-  interrupt: (session: string) => post<{ ok: true; stopped: boolean }>("/interrupt.json", { session }),
+  interrupt: (session: string) => post<{ ok: true; stopped: boolean }>("/interrupt.json", { box: session }),
   resume: (session: string, message: string, opts: { force?: boolean; model?: string } = {}) =>
     post<{ output: string; queued?: undefined } | { queued: true; id: string }>("/resume.json", {
-      session,
+      box: session,
       message,
       force: opts.force,
       ...(opts.model ? { model: opts.model } : {}),
     }, AGENT_TIMEOUT_MS),
   ask: (session: string, question: string, newThread = false) =>
-    post<AskResult>("/ask.json", { session, question, newThread }, AGENT_TIMEOUT_MS),
-  teardown: (session: string) => post<{ ok: true }>("/teardown.json", { session }),
-  keep: (session: string, keep: boolean) => post<{ ok: true; kept: boolean }>("/keep.json", { session, keep }),
-  wake: (session: string) => post<{ ok: true }>("/wake.json", { session }),
-  sleep: (session: string) => post<{ ok: true }>("/sleep.json", { session }),
+    post<AskResult>("/ask.json", { box: session, question, newThread }, AGENT_TIMEOUT_MS),
+  teardown: (session: string) => post<{ ok: true }>("/teardown.json", { box: session }),
+  keep: (session: string, keep: boolean) => post<{ ok: true; kept: boolean }>("/keep.json", { box: session, keep }),
+  wake: (session: string) => post<{ ok: true }>("/wake.json", { box: session }),
+  sleep: (session: string) => post<{ ok: true }>("/sleep.json", { box: session }),
   /** Resize a box's memory. Always reboots the machine — this runtime has no live resize. */
   setMemory: (session: string, memory: string) =>
-    post<{ ok: true; memory: string }>("/memory.json", { session, memory }),
+    post<{ ok: true; memory: string }>("/memory.json", { box: session, memory }),
   /** Grow a box's root disk. Grow-only and always reboots; the server rejects a smaller tier. */
-  setDisk: (session: string, disk: string) => post<{ ok: true; disk: string }>("/disk.json", { session, disk }),
-  rename: (session: string, title: string) => post<{ title: string }>("/rename.json", { session, title }),
-  title: (session: string) => post<{ title?: string }>("/title.json", { session }),
-  inbox: (session: string) => get<{ queued: QueuedMessage[] }>("/inbox.json", { session }),
-  sendNow: (session: string, id: string) => post<{ ok: true; queued: QueuedMessage[] }>("/send-now.json", { session, id }),
+  setDisk: (session: string, disk: string) => post<{ ok: true; disk: string }>("/disk.json", { box: session, disk }),
+  rename: (session: string, title: string) => post<{ title: string }>("/rename.json", { box: session, title }),
+  title: (session: string) => post<{ title?: string }>("/title.json", { box: session }),
+  inbox: (session: string) => get<{ queued: QueuedMessage[] }>("/inbox.json", { box: session }),
+  sendNow: (session: string, id: string) => post<{ ok: true; queued: QueuedMessage[] }>("/send-now.json", { box: session, id }),
   dequeue: (session: string, id?: string) =>
-    del<{ queued: QueuedMessage[] }>("/inbox.json", id ? { session, id } : { session }),
+    del<{ queued: QueuedMessage[] }>("/inbox.json", id ? { box: session, id } : { box: session }),
 
   // ---- checkpoints ----
-  revertPoints: (session: string) => get<{ messages: number[] }>("/revert-points.json", { session }),
-  revert: (session: string, message: number) => post<{ ok: true; message: number }>("/revert.json", { session, message }),
+  revertPoints: (session: string) => get<{ messages: number[] }>("/revert-points.json", { box: session }),
+  revert: (session: string, message: number) => post<{ ok: true; message: number }>("/revert.json", { box: session, message }),
 
   // ---- code / repo ----
-  changes: (session: string) => get<{ files: ChangedFile[] }>("/changes.json", { session }),
-  diff: (session: string, path: string) => get<FileDiff>("/diff.json", { session, path }),
+  changes: (session: string) => get<{ files: ChangedFile[] }>("/changes.json", { box: session }),
+  diff: (session: string, path: string) => get<FileDiff>("/diff.json", { box: session, path }),
   files: (session: string, q: string) =>
-    get<{ files: string[]; total: number; truncated: boolean }>("/files.json", { session, q }),
-  tree: (session: string) => get<{ files: string[]; total: number; truncated: boolean }>("/tree.json", { session }),
+    get<{ files: string[]; total: number; truncated: boolean }>("/files.json", { box: session, q }),
+  tree: (session: string) => get<{ files: string[]; total: number; truncated: boolean }>("/tree.json", { box: session }),
   /** Write a workspace file (UTF-8 text). */
   writeFile: (session: string, path: string, content: string) =>
     fetchWithTimeout(
       url("/file.json"),
-      { method: "PUT", headers: { ...authHeaders(), "content-type": "application/json" }, body: JSON.stringify({ session, path, content }) },
+      { method: "PUT", headers: { ...authHeaders(), "content-type": "application/json" }, body: JSON.stringify({ box: session, path, content }) },
       WRITE_TIMEOUT_MS,
     ).then((r) => parse<{ ok: true; path: string; bytes: number }>(r)),
   /** The whole run's diff as one unified patch (review-all). */
-  runDiff: (session: string) => get<{ diff: string }>("/rundiff.json", { session }),
+  runDiff: (session: string) => get<{ diff: string }>("/rundiff.json", { box: session }),
   fileText: async (session: string, path: string): Promise<string> => {
-    const res = await fetchWithTimeout(url("/artifact", { session, path }), { headers: authHeaders(false) }, READ_TIMEOUT_MS);
+    const res = await fetchWithTimeout(url("/artifact", { box: session, path }), { headers: authHeaders(false) }, READ_TIMEOUT_MS);
     if (res.status === 401) onUnauthorized?.();
     if (!res.ok) {
       const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
@@ -986,28 +986,28 @@ export const api = {
     return res.text();
   },
   /** The URL a produced file can be shared/opened from (bearer must be attached by the caller). */
-  artifactUrl: (session: string, path: string) => url("/artifact", { session, path }),
-  gitStatus: (session: string, repo: string) => post<GitStatus>("/git.json", { session, repo, action: "status" }),
+  artifactUrl: (session: string, path: string) => url("/artifact", { box: session, path }),
+  gitStatus: (session: string, repo: string) => post<GitStatus>("/git.json", { box: session, repo, action: "status" }),
   gitCommit: (session: string, repo: string, message: string) =>
-    post<{ sha: string; summary: string }>("/git.json", { session, repo, action: "commit", message }),
-  gitPush: (session: string, repo: string) => post<{ output: string }>("/git.json", { session, repo, action: "push" }),
+    post<{ sha: string; summary: string }>("/git.json", { box: session, repo, action: "commit", message }),
+  gitPush: (session: string, repo: string) => post<{ output: string }>("/git.json", { box: session, repo, action: "push" }),
   pull: (repo: string, number: number) => get<PullInfo>("/pr.json", { repo, number: String(number) }),
   mergePull: (
     session: string,
     repo: string,
     number: number,
     opts?: { method?: "merge" | "squash" | "rebase"; auto?: boolean; admin?: boolean },
-  ) => post<{ ok: true; auto: boolean; output: string }>("/pr/merge.json", { session, repo, number, ...opts }),
+  ) => post<{ ok: true; auto: boolean; output: string }>("/pr/merge.json", { box: session, repo, number, ...opts }),
   approvePull: (session: string, repo: string, number: number) =>
-    post<{ ok: true; output: string }>("/pr/approve.json", { session, repo, number }),
+    post<{ ok: true; output: string }>("/pr/approve.json", { box: session, repo, number }),
   /** Everything the dedicated PR screen shows, in one request. */
   pullDetail: (repo: string, number: number) => get<PullDetail>("/pr/detail.json", { repo, number: String(number) }),
   commentPull: (session: string, repo: string, number: number, body: string) =>
-    post<{ ok: true; output: string }>("/pr/comment.json", { session, repo, number, body }),
+    post<{ ok: true; output: string }>("/pr/comment.json", { box: session, repo, number, body }),
   reviewPull: (session: string, repo: string, number: number, event: "approve" | "request-changes" | "comment", body?: string) =>
-    post<{ ok: true; output: string }>("/pr/review.json", { session, repo, number, event, body }),
+    post<{ ok: true; output: string }>("/pr/review.json", { box: session, repo, number, event, body }),
   setPullState: (session: string, repo: string, number: number, action: "close" | "reopen" | "ready") =>
-    post<{ ok: true; output: string }>("/pr/state.json", { session, repo, number, action }),
+    post<{ ok: true; output: string }>("/pr/state.json", { box: session, repo, number, action }),
 
   // ---- integrations ----
   accounts: () => get<AccountsResponse>("/accounts.json"),
@@ -1023,7 +1023,7 @@ export const api = {
   repos: (q: string, refresh = false) =>
     get<{ repos: RepoInfo[] }>("/repos.json", refresh ? { q, refresh: "1" } : { q }),
   attachRepo: (session: string, repo: string, ref?: string) =>
-    post<{ ok: true; name: string; login?: string }>("/repos/attach.json", { session, repo, ref }),
+    post<{ ok: true; name: string; login?: string }>("/repos/attach.json", { box: session, repo, ref }),
   skills: () => get<{ skills: SkillView[] }>("/skills.json"),
   skillMutate: (body: Record<string, unknown>) => post<{ skills: SkillView[] }>("/skills.json", body),
   mcpServers: () => get<McpServersResponse>("/mcp-servers.json"),
@@ -1121,7 +1121,7 @@ export const api = {
   models: (session?: string) =>
     get<{ default: string; current: string; models: { id: string; label: string; tier: "opus" | "sonnet" | "haiku" | "other" }[] }>(
       "/models.json",
-      session ? { session } : {},
+      session ? { box: session } : {},
     ),
 
   verifyToken: async (token: string): Promise<boolean> => {

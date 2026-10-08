@@ -10,11 +10,12 @@ import { DiffView, FileReviewBar, useHunkReview } from "../FilePane";
 
 /**
  * The whole run's diff in one scroll — the review moment between "run finished" and "do I trust
- * this". Lives in the workspace pane's editor group (beside Source control); History's archived
- * diff reuses it read-only through the ReviewAllPane shim. Fed either live (/rundiff.json, box still
- * up) or from the archive (history rows carry diffText after teardown). One concatenated multi-file
- * unified diff in, per-file DiffViews out (splitUnifiedDiff lives in lib/diff so the node suite
- * covers it). Live, each file carries the accept / reject controls (per hunk, and whole file).
+ * this". Lives in the workspace pane's editor group as the Review view (beside Source control, which
+ * doubles as its file list); History renders it directly, read-only, for a finished run's stored
+ * diff. Fed either live (/rundiff.json, box still up) or from the archive (history rows carry
+ * diffText after teardown). One concatenated multi-file unified diff in, per-file DiffViews out
+ * (splitUnifiedDiff lives in lib/diff so the node suite covers it). Live, each file carries the
+ * accept / reject controls (per hunk, and whole file).
  */
 
 const EASE = [0.22, 1, 0.36, 1] as const;

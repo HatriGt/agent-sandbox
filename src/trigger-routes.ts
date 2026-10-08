@@ -1,14 +1,14 @@
-﻿import express, { type Express, type Request, type Response } from "express";
+﻿import type { Express, Request, Response } from "express";
 import type { Db } from "./db.js";
 import type { SecretBox } from "./secretbox.js";
 import type { Principal } from "./identity.js";
 import type { Dispatcher } from "./trigger-dispatch.js";
 import type { FollowupEngine } from "./pr-followup-engine.js";
 import { OPERATOR_OWNER } from "./user-store.js";
-import { deliveryKeys, matchGithub, normalizeTrigger, renderTemplate, safeEqual, templateContext, verifyGithubSignature, type AutomateReject } from "./triggers.js";
+import { deliveryKeys, matchGithub, normalizeTrigger, renderTemplate, templateContext, verifyGithubSignature, type AutomateReject } from "./triggers.js";
 import {
-  claimDelivery, createTrigger, promoteTrigger, deleteTrigger, getTrigger, getTriggerById, lastPayload, listDeliveries, listTriggers, logDelivery, markDeliveryTest,
-  revealSecret, revealSigningSecret, rotateSecret, savePayload, setEnabled, setSigningSecret, updateTrigger, viewTrigger,
+  claimDelivery, createTrigger, deleteTrigger, getTrigger, getTriggerById, lastPayload, listDeliveries, listTriggers, logDelivery, markDeliveryTest,
+  revealSecret, revealSigningSecret, rotateSecret as rotateTriggerSecret, savePayload, setEnabled, setSigningSecret, updateTrigger, viewTrigger,
   type DeliveryReason, type TriggerRow,
 } from "./trigger-store.js";
 import { normalizeAlert, testPayload, verifyPreset } from "./alert-presets.js";
@@ -16,32 +16,22 @@ import crypto from "node:crypto";
 import { startedByOf } from "./started-by.js";
 import { threadSchedule } from "./thread-schedule.js";
 import { makeRateLimiter } from "./auth-throttle.js";
+import { registerHook, rotateSecret } from "./hooks.js";
 
 /**
  * HTTP surface for triggers: the owner-scoped CRUD the Automations page uses, and the unauthenticated
  * `POST /hooks/:triggerId/:secret` receiver (generic webhooks; GitHub on the same route with
  * X-Hub-Signature-256). Kept out of http.ts so the controller only wires it.
  *
- * Webhook security, in order:
- *   1. raw body parser with a 512 KB cap (registered by http.ts BEFORE the JSON parsers for /hooks/)
+ * Webhook security, in order (1–3 are the shared front door in src/hooks.ts):
+ *   1. raw body parser with a 512 KB cap
  *   2. per-trigger rate limit (so one noisy repo can't eat the controller)
  *   3. secret compared in constant time; unknown id and wrong secret answer the SAME 404
- *   4. GitHub: HMAC over the raw bytes with the same secret â€” a URL that leaked into a log is not
+ *   4. GitHub: HMAC over the raw bytes with the same secret — a URL that leaked into a log is not
  *      enough to forge a GitHub event
  *   5. dedupe by delivery id and body hash (replays of a captured delivery fire nothing)
  *   6. admission (enabled, concurrency cap, storm cap) inside the dispatcher
- * The secret is in the path, so http.ts's audit line masks /hooks/ paths (hookAuditPath).
  */
-
-export const HOOK_BODY_LIMIT = "512kb";
-/** The raw-body parser for /hooks/: HMAC needs the exact bytes, not re-serialised JSON. */
-export const hookBodyParser = express.raw({ type: () => true, limit: HOOK_BODY_LIMIT });
-
-/** `/hooks/<id>/<secret>` â†’ `/hooks/<id>/***` for every log and audit row. */
-export function hookAuditPath(path: string): string {
-  const m = path.match(/^\/hooks\/([^/]+)\/[^/]*/);
-  return m ? `/hooks/${m[1]}/***` : path;
-}
 
 export interface TriggerRouteCtx {
   db: Db;
@@ -176,24 +166,16 @@ export function registerTriggerRoutes(app: Express, c: TriggerRouteCtx): void {
     res.json({ trigger: viewTrigger(row, names(owner)) });
   });
 
-  /** "Make it an automation": a repeating chat schedule moves from Scheduled to Automations. */
-  app.post("/triggers/:id/promote.json", (req, res) => {
-    if (!c.dashAuthed(req, res)) return;
-    const owner = ownerOfP(c.principalOf(res), req.params.id);
-    const row = promoteTrigger(c.db, owner, req.params.id);
-    if (!row) return void res.status(400).json({ error: "only a repeating schedule can become an automation" });
-    c.audit(owner, "trigger.promote", { trigger: row.id });
-    res.json({ trigger: viewTrigger(row, names(owner)) });
-  });
-
-  app.post("/triggers/:id/rotate.json", (req, res) => {
-    if (!c.dashAuthed(req, res)) return;
-    const owner = ownerOfP(c.principalOf(res), req.params.id);
-    const secret = rotateSecret(c.db, c.box, owner, req.params.id);
-    if (!secret) return void res.status(404).json({ error: "no such automation" });
-    c.audit(owner, "trigger.rotate", { trigger: req.params.id });
-    res.json({ secret, hookUrl: hookUrl(req.params.id, secret) });
-  });
+  app.post("/triggers/:id/rotate.json", (req, res) =>
+    rotateSecret(c, req, res, {
+      owner: (p) => ownerOfP(p, req.params.id),
+      action: "trigger.rotate",
+      rotate: (owner) => rotateTriggerSecret(c.db, c.box, owner, req.params.id),
+      notFound: "no such automation",
+      detail: () => ({ trigger: req.params.id }),
+      body: (secret) => ({ secret, hookUrl: hookUrl(req.params.id, secret) }),
+    })
+  );
 
   // "Run now" â€” the test path. Renders against the last real payload when there is one.
   app.post("/triggers/:id/run.json", async (req, res) => {
@@ -360,25 +342,21 @@ export function registerTriggerRoutes(app: Express, c: TriggerRouteCtx): void {
     });
     return { status: 202, body: { ok: true, accepted: true } };
   }
-  app.post("/hooks/:id/:secret", async (req: Request, res: Response) => {
-    const id = String(req.params.id ?? "").slice(0, 64);
-    if (perTrigger.over(id)) {
-      res.setHeader("Retry-After", "60");
-      return void res.status(429).json({ error: "slow down" });
-    }
-    const t = getTriggerById(c.db, id);
-    const real = t && (t.kind === "webhook" || t.kind === "github") ? revealSecret(c.db, c.box, t.id) : undefined;
-    // Always compare, even for an unknown id, so timing does not tell "no such trigger" from "wrong secret".
-    const okSecret = safeEqual(real ?? "\u0000no-trigger\u0000", String(req.params.secret ?? ""));
-    if (t && real && !okSecret) logDelivery(c.db, t.id, { at: Date.now(), outcome: "rejected", reason: "signature", detail: "wrong secret in the URL" });
-    if (!t || !real || !okSecret) return void res.status(404).json({ error: "not found" });
-    const raw = Buffer.isBuffer(req.body) ? (req.body as Buffer) : Buffer.alloc(0);
-    try {
-      const out = await receive(t, raw, req.headers as Record<string, string | string[] | undefined>, { secret: real });
+  registerHook<TriggerRow>(app, {
+    path: "/hooks/:id/:secret",
+    limiter: perTrigger,
+    resolve: (id) => {
+      const t = getTriggerById(c.db, id);
+      if (!t) return undefined;
+      const secret = t.kind === "webhook" || t.kind === "github" ? revealSecret(c.db, c.box, t.id) : undefined;
+      return secret ? { target: t, secret } : { target: t };
+    },
+    onWrongSecret: (t) => logDelivery(c.db, t.id, { at: Date.now(), outcome: "rejected", reason: "signature", detail: "wrong secret in the URL" }),
+    failWith: c.failWith,
+    handle: async (t, raw, req, res, secret) => {
+      const out = await receive(t, raw, req.headers as Record<string, string | string[] | undefined>, { secret });
       res.status(out.status).json(out.body);
-    } catch (e) {
-      c.failWith(res, e);
-    }
+    },
   });
 }
 

@@ -370,17 +370,33 @@ export function csrfOk(headers: Record<string, string | string[] | undefined>, p
   return true;
 }
 
+/** The box a request names: `box`, or the older `session` (both clients sent `session` until 2026-10). */
+const BOX_KEYS = ["box", "session"] as const;
+
+/** The box named by a body or query (`box`, else `session`); "" when none. */
+export function boxParam(src: unknown): string {
+  if (!src || typeof src !== "object") return "";
+  for (const k of BOX_KEYS) {
+    const v = (src as Record<string, unknown>)[k];
+    if (typeof v === "string" && v !== "") return v;
+  }
+  return "";
+}
+
 /**
- * Every `session` a request names, from the body AND the query. Routes read one or the other (GET
- * routes read the query even when a JSON body is present), so a gate that checked only
- * `body.session ?? query.session` could be sent `{"session":""}` in the body while the route acted
- * on the query's box. Empty strings are dropped, since they name no box.
+ * Every box a request names, from the body AND the query, under either key. Routes read one or
+ * the other (GET routes read the query even when a JSON body is present), so a gate that checked
+ * only `body.session ?? query.session` could be sent `{"session":""}` in the body while the route
+ * acted on the query's box. Empty strings are dropped, since they name no box.
  */
 export function requestSessions(body: unknown, query: unknown): unknown[] {
   const out: unknown[] = [];
   for (const src of [body, query]) {
-    const v = src && typeof src === "object" ? (src as Record<string, unknown>).session : undefined;
-    if (v !== undefined && v !== "") out.push(v);
+    if (!src || typeof src !== "object") continue;
+    for (const k of BOX_KEYS) {
+      const v = (src as Record<string, unknown>)[k];
+      if (v !== undefined && v !== "") out.push(v);
+    }
   }
   return out;
 }

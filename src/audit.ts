@@ -24,8 +24,10 @@ export function auditFields(body: unknown, query: unknown): Pick<AuditEvent, "se
   const out: Pick<AuditEvent, "session" | "action" | "repo"> = {};
   for (const src of [body, query]) {
     if (!src || typeof src !== "object") continue;
+    const o = src as Record<string, unknown>;
     for (const k of FIELDS) {
-      const v = (src as Record<string, unknown>)[k];
+      // The audit row's `session` column is the box; clients name it `box` (older ones `session`).
+      const v = k === "session" ? o.box ?? o.session : o[k];
       if (out[k] === undefined && typeof v === "string" && v.length <= 200) out[k] = v;
     }
   }

@@ -1,7 +1,7 @@
-import * as React from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { Check, Moon, RotateCw, Sun } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useNow } from "@/hooks/useNow";
 
 /**
  * Shown the moment you open a sleeping sandbox: the console has already asked the controller to
@@ -20,11 +20,7 @@ const STAGES = [
 const STUCK_AT = 45;
 
 export function WakingCard({ awake, startedAt, error, onRetry }: { awake: boolean; startedAt: number; error?: string | null; onRetry?: () => void }) {
-  const [now, setNow] = React.useState(Date.now());
-  React.useEffect(() => {
-    const t = window.setInterval(() => setNow(Date.now()), 500);
-    return () => window.clearInterval(t);
-  }, []);
+  const now = useNow(!awake && !error, 500);
   const elapsed = Math.max(0, Math.floor((now - startedAt) / 1000));
   const stage = awake ? STAGES.length - 1 : Math.min(STAGES.length - 1, STAGES.filter((s) => elapsed >= s.at).length - 1);
   const stuck = !awake && !error && elapsed >= STUCK_AT;

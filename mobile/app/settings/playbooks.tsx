@@ -1,4 +1,4 @@
-// Playbooks (web: components/WorkflowsPage.tsx). Header: From a repo · New playbook. Saved
+// Playbooks (web: components/PlaybooksPage.tsx). Header: From a repo · New playbook. Saved
 // playbooks (steps, automated by, source; Edit · Delete), Start from a template, the notes panel.
 // The YAML editor is /playbook/[id].
 import React, { useCallback, useState } from "react";
@@ -194,7 +194,7 @@ function Section({ title, meta, purpose, children }: { title: string; meta?: str
   );
 }
 
-/** Read every `*.yaml` under the repo's workflow folder (web: WorkflowsPage › ImportFromRepo). */
+/** Read every `*.yaml` under the repo's workflow folder (web: PlaybooksPage › ImportFromRepo). */
 function ImportFromRepo({ dir, onCancel, onDone }: { dir: string; onCancel: () => void; onDone: (r: { workflows: WorkflowView[] }, note: string) => void }) {
   const [repo, setRepo] = useState("");
   const [busy, setBusy] = useState(false);

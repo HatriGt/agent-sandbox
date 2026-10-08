@@ -25,10 +25,6 @@ export interface AccountView {
   isDefault: boolean;
 }
 
-export function maskToken(token: string): string {
-  return maskSecret(token.trim(), { head: (t) => t.match(/^(gh[pousr]_|github_pat_)/)?.[1] ?? t.slice(0, 3) });
-}
-
 export function viewAccounts(store: TokenStore, effectiveDefault: string | undefined): AccountView[] {
   return Object.values(store.accounts)
     .map((a) => ({
@@ -36,7 +32,8 @@ export function viewAccounts(store: TokenStore, effectiveDefault: string | undef
       type: a.type,
       orgs: a.orgs ?? [],
       verifiedRepos: a.verifiedRepos ?? [],
-      tokenHint: maskToken(a.token),
+      // The token's type prefix (`ghp_`, `github_pat_`) stays visible as the head.
+      tokenHint: maskSecret(a.token.trim(), { head: (t) => t.match(/^(gh[pousr]_|github_pat_)/)?.[1] ?? t.slice(0, 3) }),
       isDefault: a.login === effectiveDefault,
     }))
     .sort((a, b) => Number(b.isDefault) - Number(a.isDefault) || a.login.localeCompare(b.login));

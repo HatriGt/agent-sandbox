@@ -1,7 +1,7 @@
 /**
  * Fleet view — the dashboard's primary read, shaped for a UI rather than a CLI.
  *
- * Adds three things `/monitor.json` never had:
+ * Three things a plain box listing does not give:
  *
  *   1. **Lifecycle facts.** The configured idle timeout and max duration (as seconds) and the fleet
  *      capacity, so the UI can show "1h cap · 42m left" and "3 of 5 slots" from real configuration.

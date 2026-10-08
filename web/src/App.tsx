@@ -270,7 +270,7 @@ export default function App() {
     go({ view: "fleet" });
     setMobileRail(false);
   }, [go]);
-  const showAccounts = React.useCallback(() => {
+  const showIntegrations = React.useCallback(() => {
     go({ view: "integrations" });
     setMobileRail(false);
   }, [go]);
@@ -286,12 +286,12 @@ export default function App() {
     go({ view: "harnesses" });
     setMobileRail(false);
   }, [go]);
-  const showWorkflows = React.useCallback(() => {
-    go({ view: "workflows" });
+  const showPlaybooks = React.useCallback(() => {
+    go({ view: "playbooks" });
     setMobileRail(false);
   }, [go]);
   const showAutomations = React.useCallback(() => go({ view: "automations" }), [go]);
-  const goAutopilot = React.useCallback((t: AutopilotTab) => go({ view: t === "playbooks" ? "workflows" : t }), [go]);
+  const goAutopilot = React.useCallback((t: AutopilotTab) => go({ view: t }), [go]);
   const showHistory = React.useCallback(() => {
     go({ view: "history" });
     setMobileRail(false);
@@ -394,8 +394,8 @@ export default function App() {
       { id: "skills", label: "Skills", hint: "g s", icon: <Zap />, group: "Go to", run: showSkills },
       { id: "memory", label: "Memory", icon: <Brain />, group: "Go to", keywords: "notes remembered learned across runs", run: showMemory },
       { id: "harnesses", label: "Harnesses", icon: <Layers />, group: "Go to", keywords: "drivers rules hooks egress budget compare bundle", run: showHarnesses },
-      { id: "workflows", label: "Playbooks", icon: <ListChecks />, group: "Go to", keywords: "workflows steps pipeline checks retry yaml autopilot", run: showWorkflows },
-      { id: "integrations", label: "Integrations", hint: "g a", icon: <Plug />, group: "Go to", run: showAccounts },
+      { id: "playbooks", label: "Playbooks", icon: <ListChecks />, group: "Go to", keywords: "workflows steps pipeline checks retry yaml autopilot", run: showPlaybooks },
+      { id: "integrations", label: "Integrations", hint: "g a", icon: <Plug />, group: "Go to", keywords: "accounts providers secrets github mcp", run: showIntegrations },
       { id: "account", label: "Account", icon: <UserRound />, group: "Go to", keywords: "settings profile keys notifications", run: showAccount },
       ...(getMe()?.mode === "saas" && getMe()?.role === "admin" ? [{ id: "admin", label: "Admin · users", icon: <Shield />, group: "Go to", keywords: "people members", run: showAdmin }] : []),
       { id: "connect", label: "Connect an IDE", icon: <PlugZap />, group: "Go to", keywords: "cursor claude code mcp api key", run: showConnect },
@@ -413,7 +413,7 @@ export default function App() {
       { id: "sidebar", label: collapsed ? "Expand sidebar" : "Collapse sidebar", icon: collapsed ? <PanelLeftOpen /> : <PanelLeftClose />, keywords: "rail navigation", run: () => setCollapsed(!collapsed) },
       { id: "keys", label: "Keyboard shortcuts", hint: "?", icon: <Keyboard />, keywords: "help keys", run: () => setShortcuts(true) },
     ],
-    [threadActions, playbookActions, showFleet, showAutomations, showHistory, showActivity, showSkills, showMemory, showHarnesses, showWorkflows, showAccounts, showAccount, showAdmin, showConnect, dark, setDark, collapsed, setCollapsed, motionPref]
+    [threadActions, playbookActions, showFleet, showAutomations, showHistory, showActivity, showSkills, showMemory, showHarnesses, showPlaybooks, showIntegrations, showAccount, showAdmin, showConnect, dark, setDark, collapsed, setCollapsed, motionPref]
   );
 
   React.useEffect(() => {
@@ -454,7 +454,7 @@ export default function App() {
     setPending([]);
   }, [booting, boxes, go, selected]);
 
-  // Keyboard: n new · j/k machines · / composer · g f fleet · g a accounts.
+  // Keyboard: n new · j/k machines · / composer · g f fleet · g a integrations.
   const focusComposer = React.useRef<(() => void) | null>(null);
   const onFocusRequest = React.useCallback((f: () => void) => {
     focusComposer.current = f;
@@ -485,7 +485,7 @@ export default function App() {
       if (pendingG && e.key === "h") return (pulse("history"), showHistory());
       if (pendingG && e.key === "y") return (pulse("activity"), showActivity());
       if (pendingG && e.key === "s") return (pulse("skills"), showSkills());
-      if (pendingG && e.key === "a") return (pulse("integrations"), showAccounts());
+      if (pendingG && e.key === "a") return (pulse("integrations"), showIntegrations());
       if (e.key === "n") return newTask();
       if (e.key === "?") return setShortcuts(true);
       if (e.key === "/") {
@@ -507,7 +507,7 @@ export default function App() {
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [runs_, selected, open, newTask, showFleet, showHistory, showActivity, showSkills, showAccounts, pulse]);
+  }, [runs_, selected, open, newTask, showFleet, showHistory, showActivity, showSkills, showIntegrations, pulse]);
 
   const ask = async (name: string, question: string) => {
     let index = 0;
@@ -537,14 +537,42 @@ export default function App() {
 
   const health = !live && !data ? "offline" : waiting.length ? "attention" : "ok";
   const loading = !data && !error;
-  const paneKey =
-    // view "box" with no matching box yet is a JUST-STARTED session: delegate returned and the URL
-    // moved, but the fleet snapshot won't list the new box until the next poll. Falling through to
-    // "hub" here rendered the composer on top of the box URL for a few seconds (observed live), so
-    // hold the box-loading skeleton until the box surfaces (or the cleanup effect routes home).
-    // Once the booting pane knows its machine it shares that box's pane key, so the swap to the real
-    // Thread is a content change inside one pane — not a fade-out/fade-in remount (the jump-cut).
-    view === "fleet" ? "fleet" : view === "history" ? "history" : view === "automations" ? "automations" : route.view === "automation-runs" ? `automation-runs:${route.id}` : view === "skills" ? "skills" : view === "memory" ? "memory" : view === "integrations" ? "integrations" : view === "account" ? "account" : view === "connect" ? "connect" : view === "welcome" ? "welcome" : view === "admin" ? "admin" : route.view === "pr" ? `pr:${route.repo}#${route.number}` : (booting && !selectedBox) || (view === "box" && selected === launched) ? "launch" : selectedBox ? `box:${selectedBox.name}` : view === "box" && selectedRaw ? `box:${selectedRaw.name}` : view === "box" ? "box-loading" : "hub";
+  // view "box" with no matching box yet is a JUST-STARTED session: delegate returned and the URL
+  // moved, but the fleet snapshot won't list the new box until the next poll. Falling through to
+  // "hub" here rendered the composer on top of the box URL for a few seconds (observed live), so
+  // hold the box-loading skeleton until the box surfaces (or the cleanup effect routes home).
+  // Once the booting pane knows its machine it shares that box's pane key, so the swap to the real
+  // Thread is a content change inside one pane — not a fade-out/fade-in remount (the jump-cut).
+  // Exhaustive over ConsoleRoute: a new view without a key would silently share the hub's pane.
+  const paneKey = ((): string => {
+    switch (route.view) {
+      case "hub":
+        // Just sent from the hub: the launch shell takes over before the URL moves to the box.
+        return booting && !selectedBox ? "launch" : "hub";
+      case "automation-runs":
+        return `automation-runs:${route.id}`;
+      case "pr":
+        return `pr:${route.repo}#${route.number}`;
+      case "box":
+        return (booting && !selectedBox) || selected === launched ? "launch" : selectedBox ? `box:${selectedBox.name}` : selectedRaw ? `box:${selectedRaw.name}` : "box-loading";
+      case "fleet":
+      case "history":
+      case "activity":
+      case "automations":
+      case "playbooks":
+      case "skills":
+      case "memory":
+      case "harnesses":
+      case "integrations":
+      case "account":
+      case "connect":
+      case "welcome":
+      case "admin":
+        return route.view;
+      default:
+        return route satisfies never;
+    }
+  })();
 
   const reduceMotion = useReducedMotion();
   // Direction-aware pane motion: deeper (hub → page → box) enters from the right on phones, going
@@ -624,17 +652,15 @@ export default function App() {
             ? [autopilot, { label: "Automations", onClick: showAutomations }, { label: routeLabel }]
             : route.view === "automations"
               ? [autopilot, { label: "Automations" }]
-              : route.view === "scheduled"
-                ? [autopilot, { label: "Scheduled" }]
-                : route.view === "workflows"
-                  ? [autopilot, { label: "Playbooks" }]
-                  : route.view === "fleet"
-                    ? [{ label: "Fleet view" }]
-                    : route.view === "admin"
-                      ? [{ label: "Account", onClick: showAccount }, { label: "Admin" }]
-                      : route.view === "connect"
-                        ? [{ label: "Account", onClick: showAccount }, { label: "Connect an IDE" }]
-                        : [{ label: { history: "History", activity: "Activity", skills: "Skills", memory: "Memory", harnesses: "Harnesses", integrations: "Integrations", account: "Account", welcome: "Welcome" }[route.view] }];
+              : route.view === "playbooks"
+                ? [autopilot, { label: "Playbooks" }]
+                : route.view === "fleet"
+                  ? [{ label: "Fleet view" }]
+                  : route.view === "admin"
+                    ? [{ label: "Account", onClick: showAccount }, { label: "Admin" }]
+                    : route.view === "connect"
+                      ? [{ label: "Account", onClick: showAccount }, { label: "Connect an IDE" }]
+                      : [{ label: { history: "History", activity: "Activity", skills: "Skills", memory: "Memory", harnesses: "Harnesses", integrations: "Integrations", account: "Account", welcome: "Welcome" }[route.view] }];
 
   // The expanded rail body is rendered twice — in the desktop <aside> and inside the phone drawer.
   const railBody = (
@@ -715,7 +741,7 @@ export default function App() {
       <div className="flex flex-col gap-px border-t px-2 py-2">
         <p className="label text-faint px-2.5 pt-1 pb-1 text-[10px] tracking-[0.08em] uppercase">Workspace</p>
         <NavItem active={view === "fleet"} flash={flash === "fleet"} onClick={showFleet} icon={<LayoutGrid />} label="Fleet view" badge={boxes.length || undefined} attention={waiting.length || undefined} shortcut="g f" />
-        <NavItem active={view === "automations" || view === "automation-runs" || view === "scheduled" || view === "workflows"} onClick={showAutomations} icon={<Workflow />} label="Autopilot" />
+        <NavItem active={view === "automations" || view === "automation-runs" || view === "playbooks"} onClick={showAutomations} icon={<Workflow />} label="Autopilot" />
         <span className="contents" onMouseEnter={prefetchHistory}>
           <NavItem active={view === "history"} flash={flash === "history"} onClick={showHistory} icon={<Clock />} label="History" shortcut="g h" />
         </span>
@@ -727,7 +753,7 @@ export default function App() {
         <NavItem active={view === "memory"} onClick={showMemory} icon={<Brain />} label="Memory" />
         <NavItem active={view === "harnesses"} onClick={showHarnesses} icon={<Layers />} label="Harnesses" />
         <span className="contents" onMouseEnter={prefetchIntegrations}>
-          <NavItem active={view === "integrations"} flash={flash === "integrations"} onClick={showAccounts} icon={<Plug />} label="Integrations" shortcut="g a" />
+          <NavItem active={view === "integrations"} flash={flash === "integrations"} onClick={showIntegrations} icon={<Plug />} label="Integrations" shortcut="g a" />
         </span>
         <div className="mt-2 border-t pt-2" />
         <TrialBadge className="mx-2.5 mb-1 self-start" />
@@ -891,7 +917,7 @@ export default function App() {
             <nav key="rail" className="rail-reveal flex flex-1 flex-col items-center gap-1.5 px-2 pt-1 pb-3" aria-label="Sections">
               <RailIcon onClick={newTask} icon={<Plus />} label="New task" shortcut="n" primary />
               <RailIcon active={view === "fleet"} flash={flash === "fleet"} onClick={showFleet} icon={<LayoutGrid />} label={waiting.length ? `Fleet view · ${waiting.length} need you` : "Fleet view"} shortcut="g f" badge={boxes.length || undefined} dot={waiting.length > 0} />
-              <RailIcon active={view === "automations" || view === "automation-runs" || view === "scheduled" || view === "workflows"} onClick={showAutomations} icon={<Workflow />} label="Autopilot" />
+              <RailIcon active={view === "automations" || view === "automation-runs" || view === "playbooks"} onClick={showAutomations} icon={<Workflow />} label="Autopilot" />
               <span className="contents" onMouseEnter={prefetchHistory}>
                 <RailIcon active={view === "history"} flash={flash === "history"} onClick={showHistory} icon={<Clock />} label="History" shortcut="g h" />
               </span>
@@ -903,7 +929,7 @@ export default function App() {
               <RailIcon active={view === "memory"} onClick={showMemory} icon={<Brain />} label="Memory" />
               <RailIcon active={view === "harnesses"} onClick={showHarnesses} icon={<Layers />} label="Harnesses" />
               <span className="contents" onMouseEnter={prefetchIntegrations}>
-                <RailIcon active={view === "integrations"} flash={flash === "integrations"} onClick={showAccounts} icon={<Plug />} label="Integrations" shortcut="g a" />
+                <RailIcon active={view === "integrations"} flash={flash === "integrations"} onClick={showIntegrations} icon={<Plug />} label="Integrations" shortcut="g a" />
               </span>
               <div className="mt-auto flex flex-col items-center gap-1.5">
                 <RailIcon active={view === "account" || view === "connect" || view === "admin" || view === "welcome"} onClick={showAccount} icon={<UserRound />} label={getMe()?.kind === "user" ? "Account" : "Operator"} />
@@ -957,7 +983,7 @@ export default function App() {
                     onDestroyed={() => {}}
                     onBack={backToRail}
                   />
-                ) : view === "automations" || view === "scheduled" ? (
+                ) : view === "automations" || view === "playbooks" ? (
                   <PageEnter className="h-full min-h-0">
                     <AutopilotPage tab={view} boxes={boxes} onTab={goAutopilot} onBack={backToRail} onOpenBox={(b) => go({ view: "box", name: b })} onOpenRuns={(id) => go({ view: "automation-runs", id })} />
                   </PageEnter>
@@ -984,10 +1010,6 @@ export default function App() {
                 ) : view === "harnesses" ? (
                   <PageEnter className="h-full min-h-0">
                     <HarnessesPage onBack={backToRail} onOpenBox={(b) => go({ view: "box", name: b })} />
-                  </PageEnter>
-                ) : view === "workflows" ? (
-                  <PageEnter className="h-full min-h-0">
-                    <AutopilotPage tab="playbooks" boxes={boxes} onTab={goAutopilot} onBack={backToRail} onOpenBox={(b) => go({ view: "box", name: b })} onOpenRuns={(id) => go({ view: "automation-runs", id })} />
                   </PageEnter>
                 ) : view === "integrations" ? (
                   <PageEnter className="h-full min-h-0">
@@ -1116,7 +1138,7 @@ export default function App() {
           onWaiting={() => waiting[0] && open(waiting[0].name)}
           onBranch={() => window.dispatchEvent(new CustomEvent("asb:open-workspace"))}
           onModel={() => openPalette("t-model")}
-          onPlaybook={showWorkflows}
+          onPlaybook={showPlaybooks}
         />
         </main>
 

@@ -15,6 +15,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { RepoPicker } from "@/components/RepoPicker";
 import { PullRequestFloat } from "./PullRequestFloat";
 import { cn } from "@/lib/utils";
+import { useNow } from "@/hooks/useNow";
 
 /**
  * The thread's masthead: one block, two lines.
@@ -39,7 +40,6 @@ export function ThreadHeader({
   repos,
   attaching,
   pulls,
-  activity,
   startedAt,
   endedAt,
   onStop,
@@ -81,8 +81,6 @@ export function ThreadHeader({
   repos: { name: string; branch?: string }[];
   attaching: string | null;
   pulls?: { url: string; repo: string; number: number }[];
-  /** What the agent is doing right now, while running. */
-  activity?: string | null;
   /** Epoch ms of the run's first stamped event (or the digest's start). Omitted → no Started/elapsed. */
   startedAt?: number;
   /** Epoch ms of the last stamped event — where the elapsed timer freezes once the run is not running. */
@@ -555,23 +553,6 @@ export function ThreadHeader({
         )}
 
         <span className="ml-auto flex shrink-0 items-center gap-2 pl-3 whitespace-nowrap">
-          <AnimatePresence initial={false}>
-            {activity && (
-              <motion.span
-                key="activity"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
-                className="text-live hidden items-center gap-1.5 text-micro font-medium sm:inline-flex"
-              >
-                <span className="bg-live breathe size-1.5 rounded-full" aria-hidden />
-                <Swap state={activity} mode="popLayout" className="max-w-[10rem] truncate lg:max-w-[16rem]">
-                  {activity}
-                </Swap>
-              </motion.span>
-            )}
-          </AnimatePresence>
           {/* "finished 2m ago" → "asked just now": the meta changes with the state, so it crossfades with it. */}
           <Swap state={when ?? ""} className="hidden items-center sm:flex">
             {when && <span className={`${box.stalled ? "text-destructive" : "text-faint"} text-micro`}>{when}</span>}
@@ -650,13 +631,7 @@ function Dot() {
 
 /** `mm:ss` (or `h:mm:ss`) from start to end — ticking each second while `live`, frozen otherwise. */
 function useElapsed(start: number | undefined, end: number | undefined, live: boolean): string | null {
-  const [now, setNow] = React.useState(() => Date.now());
-  React.useEffect(() => {
-    if (!live || start === undefined) return;
-    setNow(Date.now());
-    const t = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(t);
-  }, [live, start]);
+  const now = useNow(live && start !== undefined);
   if (start === undefined) return null;
   const stop = live ? now : end;
   if (stop === undefined) return null;

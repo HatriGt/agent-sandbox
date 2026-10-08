@@ -154,14 +154,6 @@ export function setEnabled(db: Db, owner: string, id: string, enabled: boolean, 
   return getTrigger(db, owner, id);
 }
 
-/** "Make it an automation": a repeating chat schedule becomes a standing rule. A one-time run can't. */
-export function promoteTrigger(db: Db, owner: string, id: string, now = Date.now()): TriggerRow | undefined {
-  const cur = getTrigger(db, owner, id);
-  if (!cur || cur.spec.at) return undefined;
-  db.prepare(`UPDATE triggers SET scope = 'automation', updated_at = ? WHERE id = ? AND owner = ?`).run(now, id, owner);
-  return getTrigger(db, owner, id);
-}
-
 export function deleteTrigger(db: Db, owner: string, id: string): boolean {
   const n = db.prepare(`DELETE FROM triggers WHERE id = ? AND owner = ?`).run(id, owner).changes;
   if (n) {

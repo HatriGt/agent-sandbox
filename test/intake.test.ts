@@ -9,7 +9,8 @@ import {
   authVerdict, bareAddress, cleanSubject, emailTask, parseInboundEmail, parseIssueUrl, parseMime, parseSlack, resolveIntakeRepo, senderAllowed,
   slackText, splitAttachments, stripReply, verifyMailgun, verifySlack, isSlackResponseUrl,
 } from "../src/intake.ts";
-import { intakeBodyParser, registerIntakeRoutes } from "../src/intake-routes.ts";
+import { registerIntakeRoutes } from "../src/intake-routes.ts";
+import { hookBodyParser } from "../src/hooks.ts";
 import { getOrCreateChannel, revealChannelSecret, updateChannel } from "../src/intake-store.ts";
 import type { RepoInfo } from "../src/repos.ts";
 
@@ -236,7 +237,7 @@ function setup(opts: { repos?: RepoInfo[]; email?: string | null } = {}) {
   const starts: Array<{ owner: string; task: string; repo?: string; attachments?: unknown[]; startedBy: unknown }> = [];
   const slackPosts: Array<{ url: string; body: any }> = [];
   const app = express();
-  app.use((req, res, next) => (req.path.startsWith("/hooks/intake/") ? intakeBodyParser : express.json())(req, res, next));
+  app.use((req, res, next) => (req.path.startsWith("/hooks/intake/") ? hookBodyParser : express.json())(req, res, next));
   registerIntakeRoutes(app, {
     db,
     box,

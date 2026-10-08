@@ -8,10 +8,11 @@ import { cn } from "@/lib/utils";
 import { CHANGES_DISCARDED_EVENT } from "./FilePane";
 
 /**
- * The changed-files summary, docked above the composer where the run's output belongs — not inside
- * the conversation. Collapsed: one bar with the first few file marks, "N files changed", totals and
- * a chevron. Expanded: the list rises out of the bar (scrollable), each row a file with its mark,
- * path and counts; click opens the file pane. The dock stays put while the conversation scrolls.
+ * The changed-files shortcut, docked above the composer where the run's output belongs — not inside
+ * the conversation. Collapsed: one bar with the first few file marks, "N files changed", a chevron
+ * and "Review all" (the workspace pane's Review view carries the +/− totals). Expanded: the list
+ * rises out of the bar (scrollable), each row a file with its mark, path and counts; click opens
+ * the file pane. The dock stays put while the conversation scrolls.
  */
 /** The count rolls when it changes — a file landing mid-run is visible even in peripheral vision. */
 function PopCount({ value }: { value: number }) {
@@ -33,7 +34,7 @@ function PopCount({ value }: { value: number }) {
   );
 }
 
-export function ChangesDock({ files, loading, onOpen, onRefresh, onReviewAll, activePath }: { files: ChangedFile[]; loading?: boolean; onOpen: (f: ChangedFile) => void; onRefresh?: () => void; onReviewAll?: () => void; activePath?: string | null }) {
+export function ChangesDock({ files, loading, onOpen, onRefresh, onReviewAll, activePath }: { files: ChangedFile[]; loading?: boolean; onOpen: (f: ChangedFile) => void; onRefresh?: () => void; /** Open the workspace pane on its Review view. */ onReviewAll?: () => void; activePath?: string | null }) {
   const [open, setOpen] = React.useState(false);
   const still = useReducedMotion();
   // Esc collapses the expanded list — unless a dialog/menu/input owns the key.
@@ -58,8 +59,6 @@ export function ChangesDock({ files, loading, onOpen, onRefresh, onReviewAll, ac
     return () => window.removeEventListener(CHANGES_DISCARDED_EVENT, onDiscarded);
   }, [onRefresh]);
   if (!files.length) return null;
-  const adds = files.reduce((a, f) => a + f.additions, 0);
-  const dels = files.reduce((a, f) => a + f.deletions, 0);
   return (
     <div className="mx-auto w-full max-w-3xl px-3 md:px-6">
       <div className="bg-card raised overflow-hidden rounded-xl">
@@ -112,16 +111,6 @@ export function ChangesDock({ files, loading, onOpen, onRefresh, onReviewAll, ac
             </span>
             <span className="text-foreground shrink-0 text-meta font-medium whitespace-nowrap">
               <PopCount value={files.length} /> {files.length === 1 ? "file" : "files"} changed
-            </span>
-            <span className="stamp flex shrink-0 items-center gap-1.5 whitespace-nowrap">
-              {adds > 0 && <span className="text-ok">+{adds}</span>}
-              {dels > 0 && <span className="text-destructive">−{dels}</span>}
-              {adds + dels > 0 && (
-                <span className="bg-muted hidden h-1 w-10 overflow-hidden rounded-full sm:flex" aria-hidden>
-                  <span className="bg-ok h-full transition-[width] duration-300" style={{ width: `${(adds / (adds + dels)) * 100}%` }} />
-                  <span className="bg-destructive/80 h-full flex-1 transition-[width] duration-300" />
-                </span>
-              )}
             </span>
             {/* The chevron carries the affordance; a "Show files" caption only ever fought the
                 buttons beside it for room (a phone, or the column beside an open workspace). */}

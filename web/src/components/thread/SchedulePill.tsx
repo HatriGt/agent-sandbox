@@ -25,6 +25,7 @@ import { api, type ThreadScheduleItem, type ThreadScheduleReject } from "@/lib/a
 import { useGo } from "@/lib/route";
 import { cn } from "@/lib/utils";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { useNow } from "@/hooks/useNow";
 
 /**
  * The thread's schedule pill: what is scheduled as part of this chat, floating at the top-right of
@@ -114,16 +115,6 @@ export function useThreadSchedule(box: string, runState: string) {
   return { items, rejected, reload: load };
 }
 
-/** Re-render every 30s so "in 12 min" stays true. */
-export function useNow(): number {
-  const [now, setNow] = React.useState(Date.now());
-  React.useEffect(() => {
-    const t = window.setInterval(() => setNow(Date.now()), 30_000);
-    return () => window.clearInterval(t);
-  }, []);
-  return now;
-}
-
 /** The actions every surface (row menu, detail footer) shares. */
 export function useActions(reload: () => void) {
   const go = useGo();
@@ -149,7 +140,7 @@ export function useActions(reload: () => void) {
     remove: (it: Item) => run(it.id, () => api.deleteTrigger(it.id), `Deleted: ${it.name}`),
     runNow: (it: Item) => run(it.id, () => api.runTrigger(it.id), `Started: ${it.name}`),
     setOn: (it: Item, on: boolean) => run(it.id, () => api.setTriggerEnabled(it.id, on), `${on ? "Resumed" : "Paused"}: ${it.name}`),
-    openAutopilot: (it?: Item) => go({ view: it?.scope === "scheduled" ? "scheduled" : "automations" }),
+    openAutopilot: () => go({ view: "automations" }),
     openBox: (name: string) => go({ view: "box", name }),
   };
 }
@@ -160,7 +151,7 @@ export function SchedulePill({ box, runState, className }: { box: string; runSta
   const [open, setOpen] = React.useState(false);
   const [detailId, setDetailId] = React.useState<string | null>(null);
   const still = useReducedMotion();
-  const now = useNow();
+  const now = useNow(true, 30_000);
   const rootRef = React.useRef<HTMLDivElement>(null);
   const triggerRef = React.useRef<HTMLButtonElement>(null);
   const actions = useActions(() => void reload());
@@ -413,7 +404,7 @@ function RowMenu({ it, actions, onOpen, onLeave }: { it: Item; actions: Actions;
         <DropdownMenuItem onSelect={onOpen}>
           <ChevronRight /> View details
         </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => (onLeave(), actions.openAutopilot(it))}>
+        <DropdownMenuItem onSelect={() => (onLeave(), actions.openAutopilot())}>
           <ArrowUpRight /> Edit in Autopilot
         </DropdownMenuItem>
         {it.relation === "created" && (
@@ -501,7 +492,7 @@ function Detail({ it, now, actions, onBack, onLeave }: { it: Item; now: number; 
             </button>
           </>
         )}
-        <button type="button" className={cn(btn, "text-muted-foreground hover:bg-muted hover:text-foreground ml-auto")} onClick={() => (onLeave(), actions.openAutopilot(it))}>
+        <button type="button" className={cn(btn, "text-muted-foreground hover:bg-muted hover:text-foreground ml-auto")} onClick={() => (onLeave(), actions.openAutopilot())}>
           Edit in Autopilot <ArrowUpRight />
         </button>
       </div>

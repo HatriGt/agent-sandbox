@@ -60,7 +60,7 @@ import { cn } from "@/lib/utils";
 import type { SessionRun } from "@/hooks/useSessionRuns";
 import { useGo } from "@/lib/route";
 import { DataTable, MetaLine, StatusDot, type Column } from "@/components/ui/data-table";
-import { describeEvent } from "@/components/AuditLog";
+import { describeEvent } from "@/lib/activity";
 import { titleOf, runDuration, tokensOf } from "@/components/History";
 import { fmtTokens } from "@/components/thread/OutcomeCard";
 

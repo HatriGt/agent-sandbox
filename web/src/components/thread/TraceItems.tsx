@@ -3,7 +3,6 @@ import { AlertTriangle, ArrowUpRight, Brain, Check, ChevronDown, ChevronRight, C
 import { CodeNavContext } from "@/components/ui/code-ref";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { resultSummary, type TraceEvent } from "@/lib/trace";
-export { PlanCard, PlanDock } from "./PlanBoard";
 import { parseQuestion } from "@/lib/question";
 import { Pause as PauseIcon } from "lucide-react";
 import { parseTestReport } from "@/lib/testReport";

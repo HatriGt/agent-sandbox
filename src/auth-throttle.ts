@@ -56,7 +56,12 @@ export function clientOf(headers: Record<string, string | string[] | undefined>,
  * Keys are principals (user id / "operator") or, before auth, the client address. Reads are not
  * limited — the fleet poll is legitimately chatty; mutations are what cost machines and money.
  */
-export function makeRateLimiter(opts: { limit?: number; windowMs?: number; now?: () => number } = {}) {
+export interface RateLimiter {
+  /** Records the hit and reports whether it is over the limit. */
+  over(key: string): boolean;
+}
+
+export function makeRateLimiter(opts: { limit?: number; windowMs?: number; now?: () => number } = {}): RateLimiter {
   const limit = opts.limit ?? 60;
   const windowMs = opts.windowMs ?? 60_000;
   const now = opts.now ?? Date.now;

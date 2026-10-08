@@ -14,7 +14,7 @@ import { Collapse } from "@/components/ui/collapse";
 import { Bar } from "@/components/thread/Skeletons";
 import { Panel, SettingsSection } from "@/components/ui/settings";
 import { EmptyState } from "@/components/ui/empty-state";
-import { DriverBadges } from "@/components/DriverPicker";
+import { AgentSettings } from "@/components/AgentSettings";
 import { HarnessEditor } from "@/components/harness/HarnessEditor";
 import { ImportHarness } from "@/components/harness/ImportHarness";
 import { AttemptGroupList, CompareLauncher, CompareList } from "@/components/harness/Compare";
@@ -35,12 +35,11 @@ const ORDER: readonly Tab[] = ["drivers", "skills", "saved"];
  * showing the same thing; rules and egress are now facts on each saved row and fields in its editor.
  */
 export function HarnessesPage({ onBack, onOpenBox }: { onBack: () => void; onOpenBox?: (box: string) => void }) {
-  const [tab, setTab] = React.useState<Tab>("saved");
+  const [tab, setTab] = React.useState<Tab>("drivers");
   const [harnesses, setHarnesses] = React.useState<HarnessView[] | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [builtinCount, setBuiltinCount] = React.useState(0);
   const [drivers, setDrivers] = React.useState<AgentChoice[]>([]);
-  const [defaultDriver, setDefaultDriver] = React.useState<string>("claude");
   const [providers, setProviders] = React.useState<ProviderView[]>([]);
   const [skills, setSkills] = React.useState<SkillView[]>([]);
   const [editing, setEditing] = React.useState<HarnessDraft | null>(null);
@@ -60,10 +59,7 @@ export function HarnessesPage({ onBack, onOpenBox }: { onBack: () => void; onOpe
   }, []);
   React.useEffect(() => {
     reload();
-    api.agentPrefs().then((p) => {
-      setDrivers(p.agents ?? []);
-      setDefaultDriver(p.defaultAgent);
-    }).catch(() => {});
+    api.agentPrefs().then((p) => setDrivers(p.agents ?? [])).catch(() => {});
     api.providers().then((p) => setProviders(p.providers ?? [])).catch(() => {});
     api.skills().then((s) => setSkills(s.skills ?? [])).catch(() => {});
   }, [reload]);
@@ -257,20 +253,7 @@ export function HarnessesPage({ onBack, onOpenBox }: { onBack: () => void; onOpe
               )}
             </Swap>
           ) : tab === "drivers" ? (
-            <SettingsSection id="drivers" title="Drivers" purpose="The coding agent a run starts. A harness can pin one; otherwise your default is used.">
-              <Panel className="divide-y">
-                {drivers.map((d) => (
-                  <div key={d.id} className="flex flex-col gap-1.5 px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <span className="text-foreground text-body font-medium">{d.label}</span>
-                      {d.id === defaultDriver && <span className="text-muted-foreground text-micro">default</span>}
-                      <span className="text-faint ml-auto text-micro tabular-nums">{list.filter((h) => h.driver === d.id).length || "—"} harness{list.filter((h) => h.driver === d.id).length === 1 ? "" : "es"}</span>
-                    </div>
-                    <DriverBadges choice={d} />
-                  </div>
-                ))}
-              </Panel>
-            </SettingsSection>
+            <AgentSettings harnesses={list} />
           ) : (
             <div className="-mx-5 h-[calc(100dvh-14rem)] min-h-[32rem] md:-mx-8">
               <React.Suspense fallback={null}>

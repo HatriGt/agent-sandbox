@@ -652,9 +652,6 @@ async function post<T>(path: string, payload: unknown): Promise<T> {
   );
 }
 
-/** A controller built before /fleet.json existed: fall back to the bare monitor list once, remember. */
-let fleetRouteMissing = false;
-
 /**
  * Server-sent events over fetch, so the bearer header can be sent. Emits parsed `{event, data, id}`
  * frames; resolves when the server ends the stream; rejects on a network error. The caller owns
@@ -726,11 +723,11 @@ export const api = {
   },
   logout: () => post<{ ok: true }>("/auth/logout", {}),
   apiKeys: () => fetch(url("/api-keys.json"), { headers: authHeaders }).then(parse<{ keys: ApiKeyRow[] }>),
-  sessions: () => fetch(url("/sessions.json"), { headers: authHeaders }).then(parse<{ sessions: SessionRow[] }>),
+  sessions: () => fetch(url("/devices.json"), { headers: authHeaders }).then(parse<{ sessions: SessionRow[] }>),
   revokeSession: (id: string) =>
-    fetch(url("/sessions.json"), { method: "DELETE", headers: { ...authHeaders, "Content-Type": "application/json" }, body: JSON.stringify({ id }) }).then(parse<{ ok: true }>),
+    fetch(url("/devices.json"), { method: "DELETE", headers: { ...authHeaders, "Content-Type": "application/json" }, body: JSON.stringify({ id }) }).then(parse<{ ok: true }>),
   revokeOtherSessions: () =>
-    fetch(url("/sessions.json"), { method: "DELETE", headers: { ...authHeaders, "Content-Type": "application/json" }, body: JSON.stringify({ others: true }) }).then(parse<{ ok: true; revoked: number }>),
+    fetch(url("/devices.json"), { method: "DELETE", headers: { ...authHeaders, "Content-Type": "application/json" }, body: JSON.stringify({ others: true }) }).then(parse<{ ok: true; revoked: number }>),
   /** Stored audit trail (reverse-chron). `before` pages backwards from the last row's `at`. */
   audit: (opts: { limit?: number; before?: string; beforeId?: number } = {}, signal?: AbortSignal) =>
     fetch(
@@ -751,30 +748,21 @@ export const api = {
     return res.status !== 401;
   },
 
-  /**
-   * The fleet with lifecycle facts. Falls back to `/monitor.json` (boxes only, no lifecycle) against
-   * an older controller so the dashboard still works during a rolling deploy.
-   */
-  async fleet(signal?: AbortSignal): Promise<FleetSnapshot> {
-    if (!fleetRouteMissing) {
-      const res = await fetch(url("/fleet.json"), { headers: authHeaders, signal });
-      if (res.status !== 404) {
-        const snap = await parse<FleetSnapshot>(res);
+  /** The fleet with lifecycle facts (idle/max timeouts, capacity) and the sleeping boxes. */
+  fleet: (signal?: AbortSignal): Promise<FleetSnapshot> =>
+    fetch(url("/fleet.json"), { headers: authHeaders, signal })
+      .then(parse<FleetSnapshot>)
+      .then((snap) => {
         if (!Array.isArray(snap.boxes)) throw new ApiError("Unexpected fleet response", 502);
         return { ...snap, lifecycle: snap.lifecycle ?? { capacity: 0, poolSize: 0 } };
-      }
-      fleetRouteMissing = true;
-    }
-    const boxes = await fetch(url("/monitor.json"), { headers: authHeaders, signal }).then(parse<BoxView[]>);
-    return { boxes, lifecycle: { capacity: 0, poolSize: 0 }, at: Date.now() };
-  },
+      }),
 
   watch: (session: string, signal?: AbortSignal) =>
-    fetch(url("/watch.json", { session }), { headers: authHeaders, signal }).then(parse<WatchSnapshot>),
+    fetch(url("/watch.json", { box: session }), { headers: authHeaders, signal }).then(parse<WatchSnapshot>),
 
   /** Download a produced file as a blob (authenticated by header; the browser saves it). */
   async artifactBlob(session: string, path: string): Promise<Blob> {
-    const res = await fetch(url("/artifact", { session, path }), { headers: authHeaders });
+    const res = await fetch(url("/artifact", { box: session, path }), { headers: authHeaders });
     if (res.status === 401) signOut();
     if (!res.ok) {
       const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
@@ -785,82 +773,82 @@ export const api = {
 
   /** Files the agent changed in the sandbox, with +/- counts. */
   changes: (session: string, signal?: AbortSignal) =>
-    fetch(url("/changes.json", { session }), { headers: authHeaders, signal }).then(parse<{ files: ChangedFile[] }>),
+    fetch(url("/changes.json", { box: session }), { headers: authHeaders, signal }).then(parse<{ files: ChangedFile[] }>),
   /** Unified diff for one file (or `untracked`). */
   diff: (session: string, path: string, signal?: AbortSignal) =>
-    fetch(url("/diff.json", { session, path }), { headers: authHeaders, signal }).then(parse<FileDiff>),
+    fetch(url("/diff.json", { box: session, path }), { headers: authHeaders, signal }).then(parse<FileDiff>),
   /**
    * Reject the agent's change to one file (git checkout / delete), or just one hunk of it when the
    * hunk's unified-diff text is given (reverse-applied in the box). 409 while the agent is mid-turn.
    * Returns the refreshed changed-file list.
    */
   discardChange: (session: string, path: string, hunk?: string) =>
-    post<{ ok: true; scope: "hunk" | "file"; path: string; files: ChangedFile[] }>("/discard.json", { session, path, ...(hunk ? { hunk } : {}) }),
+    post<{ ok: true; scope: "hunk" | "file"; path: string; files: ChangedFile[] }>("/discard.json", { box: session, path, ...(hunk ? { hunk } : {}) }),
   /** The WHOLE workspace's unified diff (live box) — the Review-all panel. */
   runDiff: (session: string, signal?: AbortSignal) =>
-    fetch(url("/rundiff.json", { session }), { headers: authHeaders, signal }).then(parse<{ diff: string }>),
+    fetch(url("/rundiff.json", { box: session }), { headers: authHeaders, signal }).then(parse<{ diff: string }>),
   /** Pull request metadata for a card. */
   pull: (repo: string, number: number, signal?: AbortSignal) =>
     fetch(url("/pr.json", { repo, number: String(number) }), { headers: authHeaders, signal }).then(parse<PullInfo>),
 
   /** Keep (pin) a sandbox until destroyed, or release it. */
   /** Source control on one cloned repo inside the sandbox. */
-  gitStatus: (session: string, repo: string) => post<GitStatus>("/git.json", { session, repo, action: "status" }),
-  gitCommit: (session: string, repo: string, message: string) => post<{ sha: string; summary: string }>("/git.json", { session, repo, action: "commit", message }),
-  gitPush: (session: string, repo: string) => post<{ output: string }>("/git.json", { session, repo, action: "push" }),
+  gitStatus: (session: string, repo: string) => post<GitStatus>("/git.json", { box: session, repo, action: "status" }),
+  gitCommit: (session: string, repo: string, message: string) => post<{ sha: string; summary: string }>("/git.json", { box: session, repo, action: "commit", message }),
+  gitPush: (session: string, repo: string) => post<{ output: string }>("/git.json", { box: session, repo, action: "push" }),
   /** Ask the in-box helper to name this run (idempotent; the fleet carries the result). */
-  title: (session: string) => post<{ title?: string }>("/title.json", { session }),
+  title: (session: string) => post<{ title?: string }>("/title.json", { box: session }),
   /** Start a sleeping sandbox now (opening its thread does this automatically). */
-  wake: (session: string) => post<{ ok: true }>("/wake.json", { session }),
-  sleep: (session: string) => post<{ ok: true }>("/sleep.json", { session }),
+  wake: (session: string) => post<{ ok: true }>("/wake.json", { box: session }),
+  sleep: (session: string) => post<{ ok: true }>("/sleep.json", { box: session }),
   /** Resize a box's memory. Always reboots the machine — this runtime has no live resize. */
-  setMemory: (session: string, memory: string) => post<{ ok: true; memory: string }>("/memory.json", { session, memory }),
+  setMemory: (session: string, memory: string) => post<{ ok: true; memory: string }>("/memory.json", { box: session, memory }),
   /** Grow a box's root disk. Grow-only and always reboots; the server rejects a smaller tier. */
-  setDisk: (session: string, disk: string) => post<{ ok: true; disk: string }>("/disk.json", { session, disk }),
-  rename: (session: string, title: string) => post<{ title: string }>("/rename.json", { session, title }),
+  setDisk: (session: string, disk: string) => post<{ ok: true; disk: string }>("/disk.json", { box: session, disk }),
+  rename: (session: string, title: string) => post<{ title: string }>("/rename.json", { box: session, title }),
   /** Every workspace file (flat paths) for the explorer tree. */
   tree: (session: string, signal?: AbortSignal) =>
-    fetch(url("/tree.json", { session }), { headers: authHeaders, signal }).then(parse<{ files: string[]; total: number; truncated: boolean }>),
+    fetch(url("/tree.json", { box: session }), { headers: authHeaders, signal }).then(parse<{ files: string[]; total: number; truncated: boolean }>),
   /** The same index with size + mtime per file, for the records table. */
   treeDetails: (session: string, signal?: AbortSignal) =>
-    fetch(url("/tree.json", { session, details: "1" }), { headers: authHeaders, signal }).then(
+    fetch(url("/tree.json", { box: session, details: "1" }), { headers: authHeaders, signal }).then(
       parse<{ files: { path: string; bytes: number; mtime: number }[]; total: number; truncated: boolean }>
     ),
   /** Write a text file inside the sandbox. */
   writeFile: (session: string, path: string, content: string, encoding?: "base64") =>
-    fetch(url("/file.json"), { method: "PUT", headers: { ...authHeaders, "content-type": "application/json" }, body: JSON.stringify({ session, path, content, encoding }) }).then(
+    fetch(url("/file.json"), { method: "PUT", headers: { ...authHeaders, "content-type": "application/json" }, body: JSON.stringify({ box: session, path, content, encoding }) }).then(
       parse<{ ok: true; path: string; bytes: number }>
     ),
   /** The model catalog for the picker + this box's current sticky model. */
   models: (session?: string, signal?: AbortSignal) =>
-    fetch(url("/models.json", session ? { session } : {}), { headers: authHeaders, signal }).then(
+    fetch(url("/models.json", session ? { box: session } : {}), { headers: authHeaders, signal }).then(
       parse<{ default: string; current: string; models: { id: string; label: string; tier: "opus" | "sonnet" | "haiku" | "other" }[] }>
     ),
   /** Which operator messages (1-based; task = 1) have a restore point. */
   revertPoints: (session: string, signal?: AbortSignal) =>
-    fetch(url("/revert-points.json", { session }), { headers: authHeaders, signal }).then(parse<{ messages: number[] }>),
+    fetch(url("/revert-points.json", { box: session }), { headers: authHeaders, signal }).then(parse<{ messages: number[] }>),
   /** Revert the box to the state before operator message k was delivered (~1 s, in place). */
-  revert: (session: string, message: number) => post<{ ok: true; message: number }>("/revert.json", { session, message }),
+  revert: (session: string, message: number) => post<{ ok: true; message: number }>("/revert.json", { box: session, message }),
   /** Merge the PR from inside the sandbox (`gh pr merge --merge`). */
   mergePull: (session: string, repo: string, number: number, opts?: { method?: "merge" | "squash" | "rebase"; auto?: boolean; admin?: boolean }) =>
-    post<{ ok: true; auto: boolean; output: string }>("/pr/merge.json", { session, repo, number, ...opts }),
+    post<{ ok: true; auto: boolean; output: string }>("/pr/merge.json", { box: session, repo, number, ...opts }),
   /** Approve the PR from inside the sandbox (`gh pr review --approve`). */
   approvePull: (session: string, repo: string, number: number) =>
-    post<{ ok: true; output: string }>("/pr/approve.json", { session, repo, number }),
+    post<{ ok: true; output: string }>("/pr/approve.json", { box: session, repo, number }),
   /** Everything the dedicated PR page shows, in one request. */
   pullDetail: (repo: string, number: number, signal?: AbortSignal) =>
     fetch(url("/pr/detail.json", { repo, number: String(number) }), { headers: authHeaders, signal }).then(parse<PullDetail>),
   commentPull: (session: string, repo: string, number: number, body: string) =>
-    post<{ ok: true; output: string }>("/pr/comment.json", { session, repo, number, body }),
+    post<{ ok: true; output: string }>("/pr/comment.json", { box: session, repo, number, body }),
   reviewPull: (session: string, repo: string, number: number, event: "approve" | "request-changes" | "comment", body?: string) =>
-    post<{ ok: true; output: string }>("/pr/review.json", { session, repo, number, event, body }),
+    post<{ ok: true; output: string }>("/pr/review.json", { box: session, repo, number, event, body }),
   setPullState: (session: string, repo: string, number: number, action: "close" | "reopen" | "ready") =>
-    post<{ ok: true; output: string }>("/pr/state.json", { session, repo, number, action }),
-  keep: (session: string, keep: boolean) => post<{ ok: true; kept: boolean }>("/keep.json", { session, keep }),
+    post<{ ok: true; output: string }>("/pr/state.json", { box: session, repo, number, action }),
+  keep: (session: string, keep: boolean) => post<{ ok: true; kept: boolean }>("/keep.json", { box: session, keep }),
 
   /** Fetch a produced file's text for inline preview. Throws ApiError (404/413/…) on failure. */
   async artifactText(session: string, path: string, signal?: AbortSignal): Promise<string> {
-    const res = await fetch(url("/artifact", { session, path }), { headers: authHeaders, signal });
+    const res = await fetch(url("/artifact", { box: session, path }), { headers: authHeaders, signal });
     if (res.status === 401) signOut();
     if (!res.ok) {
       const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
@@ -872,7 +860,7 @@ export const api = {
 
   /** Read-only observer. Cannot steer the agent, by design. */
   ask: (session: string, question: string, newThread = false) =>
-    post<AskResult>("/ask.json", { session, question, newThread }),
+    post<AskResult>("/ask.json", { box: session, question, newThread }),
 
   /**
    * The only way to steer the agent: answers what it is blocked on, or sends a follow-up. While the
@@ -881,7 +869,7 @@ export const api = {
    */
   resume: (session: string, message: string, opts: { force?: boolean; model?: string; secrets?: Record<string, string> } = {}) =>
     post<{ output: string; queued?: undefined } | { queued: true; id: string }>("/resume.json", {
-      session,
+      box: session,
       message,
       force: opts.force,
       ...(opts.model ? { model: opts.model } : {}),
@@ -891,27 +879,27 @@ export const api = {
 
   /** Queued follow-ups for a box. */
   inbox: (session: string) =>
-    fetch(url("/inbox.json", { session }), { headers: authHeaders }).then(parse<{ queued: QueuedMessage[] }>),
+    fetch(url("/inbox.json", { box: session }), { headers: authHeaders }).then(parse<{ queued: QueuedMessage[] }>),
   /**
    * Deliver a queued follow-up NOW: the controller interrupts the running turn and resumes the
    * agent with this message (same session, `claude -c`). For turns stuck on something that will
    * never finish. Other queued messages stay queued.
    */
-  sendNow: (session: string, id: string) => post<{ ok: true; queued: QueuedMessage[] }>("/send-now.json", { session, id }),
+  sendNow: (session: string, id: string) => post<{ ok: true; queued: QueuedMessage[] }>("/send-now.json", { box: session, id }),
   /** Stop the running turn (session kept; a later message resumes it). The watch pill's Stop. */
-  interrupt: (session: string) => post<{ ok: true; stopped: boolean }>("/interrupt.json", { session }),
+  interrupt: (session: string) => post<{ ok: true; stopped: boolean }>("/interrupt.json", { box: session }),
   dequeue: (session: string, id?: string) =>
-    fetch(url("/inbox.json", id ? { session, id } : { session }), { method: "DELETE", headers: authHeaders }).then(
+    fetch(url("/inbox.json", id ? { box: session, id } : { box: session }), { method: "DELETE", headers: authHeaders }).then(
       parse<{ queued: QueuedMessage[] }>
     ),
 
   /** Workspace files matching `q`, for `@` mentions in the composer. */
   files: (session: string, q: string, signal?: AbortSignal) =>
-    fetch(url("/files.json", { session, q }), { headers: authHeaders, signal }).then(
+    fetch(url("/files.json", { box: session, q }), { headers: authHeaders, signal }).then(
       parse<{ files: string[]; total: number; truncated: boolean }>
     ),
 
-  teardown: (session: string) => post<{ ok: true }>("/teardown.json", { session }),
+  teardown: (session: string) => post<{ ok: true }>("/teardown.json", { box: session }),
 
   /** GitHub accounts (tokens stay on the VPS; only masked hints come back). */
   accounts: (signal?: AbortSignal) =>
@@ -1044,11 +1032,11 @@ export const api = {
 
   /** The run receipt for a finished thread: plan, files, failed commands, questions, headline. */
   digest: (session: string, signal?: AbortSignal) =>
-    fetch(url("/digest.json", { session }), { headers: authHeaders, signal }).then(parse<RunDigest>),
+    fetch(url("/digest.json", { box: session }), { headers: authHeaders, signal }).then(parse<RunDigest>),
 
   /** Clone a repository into a running sandbox at /workspace/<name>. */
   attachRepo: (session: string, repo: string, ref?: string) =>
-    post<{ ok: true; name: string; login?: string }>("/repos/attach.json", { session, repo, ref }),
+    post<{ ok: true; name: string; login?: string }>("/repos/attach.json", { box: session, repo, ref }),
 
   /** Archived runs, reverse-chron. `before` pages backwards from the last row's id (exclusive). */
   history: (opts: { limit?: number; before?: number } = {}, signal?: AbortSignal) =>
@@ -1089,7 +1077,6 @@ export const api = {
   updateTrigger: (id: string, t: AutomationDraft) => post<{ trigger: Automation }>(`/triggers/${encodeURIComponent(id)}.json`, t),
   deleteTrigger: (id: string) => fetch(url(`/triggers/${encodeURIComponent(id)}.json`), { method: "DELETE", headers: authHeaders }).then(parse<{ ok: true }>),
   setTriggerEnabled: (id: string, enabled: boolean) => post<{ trigger: Automation }>(`/triggers/${encodeURIComponent(id)}/enabled.json`, { enabled }),
-  promoteTrigger: (id: string) => post<{ trigger: Automation }>(`/triggers/${encodeURIComponent(id)}/promote.json`, {}),
   rotateTrigger: (id: string) => post<{ secret: string; hookUrl: string }>(`/triggers/${encodeURIComponent(id)}/rotate.json`, {}),
   threadSchedule: (box: string, signal?: AbortSignal) =>
     fetch(url(`/triggers/for-box.json?box=${encodeURIComponent(box)}`), { headers: authHeaders, signal }).then(parse<{ items: ThreadScheduleItem[]; rejected?: ThreadScheduleReject[] }>),

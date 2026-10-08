@@ -1,7 +1,7 @@
 import * as React from "react";
 import { Check, Loader2, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
-import { api, type AgentPrefs } from "@/lib/api";
+import { api, type AgentPrefs, type HarnessView } from "@/lib/api";
 import { DriverBadges } from "@/components/DriverPicker";
 import { Button } from "@/components/ui/button";
 import { Field, inputClass } from "@/components/ui/field";
@@ -21,10 +21,12 @@ const DESC: Record<AgentId, string> = {
 };
 
 /**
- * Default coding agent for NEW threads. A running thread keeps the agent it started on — the pick
- * only changes what the next "Start a task" launches, so switching is always safe.
+ * Default coding agent (driver) and model for NEW threads — the Drivers tab of Harnesses. A running
+ * thread keeps the agent it started on — the pick only changes what the next "Start a task"
+ * launches, so switching is always safe. `harnesses` adds a per-driver count of saved harnesses
+ * that pin it.
  */
-export function AgentSettings() {
+export function AgentSettings({ harnesses = [] }: { harnesses?: HarnessView[] }) {
   const [prefs, setPrefs] = React.useState<AgentPrefs | null>(null);
   const [catalog, setCatalog] = React.useState<{ default: string; models: { id: string; label: string }[] } | null>(null);
   // Which control is saving: an agent id, or "model" for the select.
@@ -65,9 +67,9 @@ export function AgentSettings() {
   const isFactory = prefs?.defaultAgent === FACTORY && !prefs?.defaultModel;
   return (
     <SettingsSection
-      id="agent"
-      title="Coding agent"
-      purpose="Which agent — and which model — new machines run. Threads already running keep what they started with."
+      id="drivers"
+      title="Drivers"
+      purpose="The coding agent — and model — new machines run. A harness can pin a driver; otherwise this default is used. Threads already running keep what they started with."
       status={
         <Swap state={saved} className="inline-flex" y={3}>
           {saved ? (
@@ -96,6 +98,7 @@ export function AgentSettings() {
           <div role="radiogroup" aria-labelledby="agent-h" className="flex max-w-xl flex-col gap-2">
             {prefs.agents.map((a) => {
               const active = prefs.defaultAgent === a.id;
+              const pinned = harnesses.filter((h) => h.driver === a.id).length;
               return (
                 <button
                   key={a.id}
@@ -117,6 +120,7 @@ export function AgentSettings() {
                       {a.label}
                       {a.id === FACTORY && <span className="text-faint text-micro font-normal">default</span>}
                       {a.id !== "claude" && <span className="border-line-strong text-muted-foreground rounded-full border px-1.5 py-px text-micro font-normal">beta</span>}
+                      {pinned > 0 && <span className="text-faint ml-auto text-micro font-normal tabular-nums">{pinned} harness{pinned === 1 ? "" : "es"}</span>}
                     </span>
                     <span className="text-muted-foreground mt-0.5 block text-micro">{DESC[a.id] ?? ""}</span>
                     <span className="mt-1.5 block"><DriverBadges choice={a} /></span>
