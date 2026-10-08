@@ -1,5 +1,5 @@
 import * as React from "react";
-import { AlertTriangle, ArrowUpRight, Brain, Check, ChevronRight, Clock, Copy, FileText, KeyRound, Loader2, MessageCircleQuestion, Play, Terminal, Undo2 } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, Brain, Check, ChevronDown, ChevronRight, Clock, Copy, FileText, KeyRound, Loader2, MessageCircleQuestion, Play, Terminal, Undo2 } from "lucide-react";
 import { CodeNavContext } from "@/components/ui/code-ref";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { resultSummary, type TraceEvent } from "@/lib/trace";
@@ -39,7 +39,7 @@ import { useNow } from "@/hooks/useNow";
 export const ExpandAll = React.createContext<{ v: number; open: boolean }>({ v: 0, open: false });
 
 /** Opens/closes a collapsible whenever the toolbar fires. */
-function useExpandAll(setOpen: (open: boolean) => void) {
+export function useExpandAll(setOpen: (open: boolean) => void) {
   const { v, open } = React.useContext(ExpandAll);
   React.useEffect(() => {
     if (v > 0) setOpen(open);
@@ -247,7 +247,7 @@ function groupSpan(events: ToolEvent[]): number | undefined {
 }
 
 /** Spring for disclosure height and row entry: settles quickly, no visible overshoot. */
-const SPRING = { type: "spring", stiffness: 420, damping: 38, mass: 0.8 } as const;
+export const SPRING = { type: "spring", stiffness: 420, damping: 38, mass: 0.8 } as const;
 
 /**
  * A status glyph that pops (scale 0.6 → 1) when it CHANGES — running → done, running → failed —
@@ -401,35 +401,72 @@ function SkillItem({ event, live }: { event: ToolEvent; live?: boolean }) {
  * numbered timeline of the individual calls. While the turn is live it reads `Working · 2/4 steps`
  * with a breathing dot; failures surface as a red count. A single tool renders inline.
  */
+/** Results worth reading (a test run, a PR URL) or a failure that blocks the run: open those groups. */
+export function notableTools(events: ToolEvent[]): boolean {
+  return events.some(
+    (e) =>
+      !!parseTestReport(e.result) ||
+      /github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/.test(e.result ?? "") ||
+      (!!e.failed && (!!parseMcpName(e.name) || (SHELL_TOOLS.has(e.name) && missingSecretOf(e.result) !== null)))
+  );
+}
+
+/**
+ * The facts worth a glance about a run of tool calls: step count, skills fired, files touched (named
+ * when one or two), commands run, external calls per server, lookups when nothing else happened.
+ */
+export function toolFacts(events: ToolEvent[]): string[] {
+  const files = new Set(events.filter((e) => /^(write|edit|multiedit|notebookedit)$/i.test(e.name) && e.arg).map((e) => e.arg!.split(/\s/)[0]));
+  const commands = events.filter((e) => SHELL_TOOLS.has(e.name)).length;
+  const reads = events.filter((e) => /^(read|glob|grep|search|ls|webfetch|websearch)$/i.test(e.name)).length;
+  const mcpByServer = new Map<string, number>();
+  for (const e of events) {
+    const m = parseMcpName(e.name);
+    if (m) mcpByServer.set(m.server, (mcpByServer.get(m.server) ?? 0) + 1);
+  }
+  const skillsUsed = [...new Set(events.filter((e) => e.name === "Skill").map((e) => skillOf(e)).filter(Boolean))] as string[];
+  const fileNames = [...files].map((f) => f.split("/").pop() ?? f);
+  return [
+    `${events.length} ${events.length === 1 ? "step" : "steps"}`,
+    ...skillsUsed.map((n) => `/${n}`),
+    files.size ? (files.size <= 2 ? fileNames.join(", ") : `${files.size} files`) : null,
+    commands ? `${commands} ${commands === 1 ? "command" : "commands"}` : null,
+    ...[...mcpByServer].map(([srv, n]) => `${n} ${srv} ${n === 1 ? "call" : "calls"}`),
+    !files.size && !commands && !mcpByServer.size && reads ? `${reads} lookups` : null,
+  ].filter(Boolean) as string[];
+}
+
 export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolean }) {
   // Results worth reading (a test run, a PR URL) must not hide behind the fold: open those groups.
   // …and a FAILED external (MCP) call must never hide behind the fold: a server silently missing
   // or erroring is precisely the thing an operator otherwise cannot see. Same for a shell call that
   // failed for want of an env var: its Resolve row is the one thing that unblocks the run.
-  const notable = React.useMemo(
-    () =>
-      events.some(
-        (e) =>
-          !!parseTestReport(e.result) ||
-          /github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/.test(e.result ?? "") ||
-          (!!e.failed && (!!parseMcpName(e.name) || (SHELL_TOOLS.has(e.name) && missingSecretOf(e.result) !== null)))
-      ),
-    [events]
-  );
-  const [open, setOpen] = React.useState(notable);
-  const still = useReducedMotion();
+  const notable = React.useMemo(() => notableTools(events), [events]);
+  const anyRunning = !!live && events.some((e) => !e.result || e.streaming);
+  const density = React.useContext(Density);
+  // Open while the agent works in it; folds when the work ends unless someone toggled it by hand.
+  const [open, setOpenRaw] = React.useState(notable || anyRunning || density === "trace");
+  const touched = React.useRef(false);
+  const setOpen = React.useCallback((v: boolean | ((o: boolean) => boolean)) => {
+    touched.current = true;
+    setOpenRaw(v);
+  }, []);
+  const wasRunning = React.useRef(anyRunning);
   React.useEffect(() => {
-    if (notable) setOpen(true);
+    if (anyRunning && !wasRunning.current && !touched.current) setOpenRaw(true);
+    if (!anyRunning && wasRunning.current && !touched.current) setOpenRaw(notable || density === "trace");
+    wasRunning.current = anyRunning;
+  }, [anyRunning, notable, density]);
+  React.useEffect(() => {
+    if (notable) setOpenRaw(true);
   }, [notable]);
   useExpandAll(setOpen);
-  const anyRunning = !!live && events.some((e) => !e.result || e.streaming);
   const failed = events.filter((e) => e.failed).length;
   const done = events.filter((e) => !!e.result && !e.streaming).length;
   const span = groupSpan(events);
   // While working, the group's clock runs from its first stamped call.
   const firstAt = events.find((e) => e.at !== undefined)?.at;
   const now = useNow(anyRunning && firstAt !== undefined);
-  const density = React.useContext(Density);
   // In chat density a lone finished step folds like any other work — unless it is running, notable,
   // or its output draws as a visual (a table, a request log…): that IS the result, so it stays.
   const drawn = events.length === 1 && !!events[0].result && toolOutputLanguage(events[0].result) !== null;
@@ -437,29 +474,7 @@ export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolea
     return <ToolItem event={events[0]} live={anyRunning} />;
   }
 
-  // Files touched (Write/Edit targets) and commands run — the two facts worth a glance.
-  const files = new Set(events.filter((e) => /^(write|edit|multiedit|notebookedit)$/i.test(e.name) && e.arg).map((e) => e.arg!.split(/\s/)[0]));
-  const commands = events.filter((e) => SHELL_TOOLS.has(e.name)).length;
-  const reads = events.filter((e) => /^(read|glob|grep|search|ls|webfetch|websearch)$/i.test(e.name)).length;
-  // External calls, grouped by server — "3 hana-qa calls" is a headline fact, not a footnote.
-  const mcpByServer = new Map<string, number>();
-  for (const e of events) {
-    const m = parseMcpName(e.name);
-    if (m) mcpByServer.set(m.server, (mcpByServer.get(m.server) ?? 0) + 1);
-  }
-  // Skills that fired inside the fold: named, because "the playbook ran" is the headline fact.
-  const skillsUsed = [...new Set(events.filter((e) => e.name === "Skill").map((e) => skillOf(e)).filter(Boolean))] as string[];
-  // One or two edited files are named outright — "rateLimit.ts, rateLimit.test.ts" says more than
-  // "2 files" and costs no more width; beyond that the count keeps the line short.
-  const fileNames = [...files].map((f) => f.split("/").pop() ?? f);
-  const facts = [
-    `${events.length} steps`,
-    ...skillsUsed.map((n) => `/${n}`),
-    files.size ? (files.size <= 2 ? fileNames.join(", ") : `${files.size} files`) : null,
-    commands ? `${commands} ${commands === 1 ? "command" : "commands"}` : null,
-    ...[...mcpByServer].map(([srv, n]) => `${n} ${srv} ${n === 1 ? "call" : "calls"}`),
-    !files.size && !commands && !mcpByServer.size && reads ? `${reads} lookups` : null,
-  ].filter(Boolean) as string[];
+  const facts = toolFacts(events);
 
   return (
     <div className="enter min-w-0">
@@ -468,18 +483,14 @@ export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolea
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         className={cn(
-          "group/steps -ml-1.5 flex max-w-full cursor-pointer items-center gap-2 rounded-md py-1 pr-2 pl-1.5 text-left text-meta transition-colors",
+          "group/steps -ml-1.5 flex max-w-full cursor-pointer items-center gap-2.5 rounded-md py-1 pr-2 pl-1.5 text-left text-meta transition-colors",
           anyRunning ? "text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
         )}
       >
-        <ChevronRight
-          className={cn("size-3.5 shrink-0 transition-transform duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]", open && "rotate-90")}
-          aria-hidden
-        />
+        <span className={cn("think-orb shrink-0", anyRunning && "think-orb-live")} aria-hidden />
         <Swap state={anyRunning} mode="popLayout" className="inline-flex shrink-0">
           {anyRunning ? (
             <span className="flex shrink-0 items-center gap-2 font-medium whitespace-nowrap">
-              <span className="bg-live breathe size-1.5 rounded-full" aria-hidden />
               Working
               <span className="text-muted-foreground font-normal tabular-nums">
                 <Odometer text={`${done}/${events.length}`} /> steps
@@ -524,64 +535,76 @@ export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolea
             </motion.span>
           )}
         </AnimatePresence>
+        <ChevronDown className={cn("text-muted-foreground size-3.5 shrink-0 transition-transform duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]", open && "rotate-180")} aria-hidden />
       </button>
       <AnimatePresence initial={false}>
         {open && (
-          <motion.ol
-            initial={still ? false : { height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={still ? { opacity: 0, transition: { duration: 0 } } : { height: 0, opacity: 0 }}
-            // Height rides a spring (it tracks content that is still growing without a hard stop);
-            // opacity stays a short tween so the fade never lags behind the reveal.
-            transition={still ? { duration: 0 } : { height: SPRING, opacity: { duration: 0.16, ease: [0.22, 1, 0.36, 1] } }}
-            // Capped: a 60-step group opened by accident must not shove the conversation a screen down.
-            // The timeline sits on its own quiet surface, so "work" reads apart from the agent's prose.
-            // No `overscroll-contain` here: on a scroll container it blocks scroll chaining even when
-            // the list is SHORTER than the cap, so a wheel over an open timeline scrolled nothing.
-            className="work-surface relative mt-2 max-h-[32rem] overflow-y-auto"
-          >
-            {events.map((e, i) => {
-              const running = !!live && (!e.result || !!e.streaming);
-              const last = i === events.length - 1;
-              const state = running ? "running" : e.failed ? "failed" : "done";
-              // Step and shell rows carry their own chip; MCP / skill rows get one here.
-              const ownChip = !parseMcpName(e.name) && e.name !== "Skill";
-              return (
-                <motion.li
-                  key={i}
-                  initial={still ? false : { opacity: 0, x: -6 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={still ? { duration: 0 } : { ...SPRING, delay: Math.min(i, 8) * 0.03 }}
-                  className="relative flex gap-3 pb-2 last:pb-0"
-                >
-                  <span className="relative flex w-4 shrink-0 flex-col items-center">
-                    <span
-                      className={cn(
-                        "z-10 mt-2 grid size-3.5 place-items-center rounded-full border text-[8.5px] font-semibold tabular-nums transition-colors duration-200",
-                        running
-                          ? "border-live bg-live/20 text-live"
-                          : e.failed
-                            ? "border-destructive/60 bg-destructive/10 text-destructive"
-                            : "border-line-strong bg-card text-muted-foreground"
-                      )}
-                    >
-                      <StatusGlyph state={state}>
-                        {running ? <span className="bg-live breathe size-1.5 rounded-full" /> : e.failed ? <AlertTriangle className="size-2" strokeWidth={3} aria-label="failed" /> : i + 1}
-                      </StatusGlyph>
-                    </span>
-                    {!last && <span className="bg-border absolute top-[1.4rem] bottom-0 w-px" aria-hidden />}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <ToolItem event={e} live={running} />
-                  </div>
-                  {!ownChip && <DurationChip event={e} running={running} className="mt-1.5" />}
-                </motion.li>
-              );
-            })}
-          </motion.ol>
+          <ToolStepsList events={events} live={live} />
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+/**
+ * The numbered timeline of one run of tool calls: a glyph per step (number, live dot, failed mark)
+ * on a hairline, each opening into the real work. Shared by ToolGroup's fold and the reasoning trail.
+ */
+export function ToolStepsList({ events, live, className, plain }: { events: ToolEvent[]; live?: boolean; className?: string; plain?: boolean }) {
+  const still = useReducedMotion();
+  return (
+    <motion.ol
+      initial={still || plain ? false : { height: 0, opacity: 0 }}
+      animate={{ height: "auto", opacity: 1 }}
+      exit={still || plain ? { opacity: 0, transition: { duration: 0 } } : { height: 0, opacity: 0 }}
+      // Height rides a spring (it tracks content that is still growing without a hard stop);
+      // opacity stays a short tween so the fade never lags behind the reveal.
+      transition={still ? { duration: 0 } : { height: SPRING, opacity: { duration: 0.16, ease: [0.22, 1, 0.36, 1] } }}
+      // Capped: a 60-step group opened by accident must not shove the conversation a screen down.
+      // The timeline sits on its own quiet surface, so "work" reads apart from the agent's prose.
+      // No `overscroll-contain` here: on a scroll container it blocks scroll chaining even when
+      // the list is SHORTER than the cap, so a wheel over an open timeline scrolled nothing.
+      className={cn("relative max-h-[32rem] overflow-y-auto", plain ? "mt-1" : "work-surface mt-2", className)}
+    >
+      {events.map((e, i) => {
+        const running = !!live && (!e.result || !!e.streaming);
+        const last = i === events.length - 1;
+        const state = running ? "running" : e.failed ? "failed" : "done";
+        // Step and shell rows carry their own chip; MCP / skill rows get one here.
+        const ownChip = !parseMcpName(e.name) && e.name !== "Skill";
+        return (
+          <motion.li
+            key={i}
+            initial={still ? false : { opacity: 0, x: -6 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={still ? { duration: 0 } : { ...SPRING, delay: Math.min(i, 8) * 0.03 }}
+            className="relative flex gap-3 pb-2 last:pb-0"
+          >
+            <span className="relative flex w-4 shrink-0 flex-col items-center">
+              <span
+                className={cn(
+                  "z-10 mt-2 grid size-3.5 place-items-center rounded-full border text-[8.5px] font-semibold tabular-nums transition-colors duration-200",
+                  running
+                    ? "border-live bg-live/20 text-live"
+                    : e.failed
+                      ? "border-destructive/60 bg-destructive/10 text-destructive"
+                      : "border-line-strong bg-card text-muted-foreground"
+                )}
+              >
+                <StatusGlyph state={state}>
+                  {running ? <span className="bg-live breathe size-1.5 rounded-full" /> : e.failed ? <AlertTriangle className="size-2" strokeWidth={3} aria-label="failed" /> : i + 1}
+                </StatusGlyph>
+              </span>
+              {!last && <span className="bg-border absolute top-[1.4rem] bottom-0 w-px" aria-hidden />}
+            </span>
+            <div className="min-w-0 flex-1">
+              <ToolItem event={e} live={running} />
+            </div>
+            {!ownChip && <DurationChip event={e} running={running} className="mt-1.5" />}
+          </motion.li>
+        );
+      })}
+    </motion.ol>
   );
 }
 

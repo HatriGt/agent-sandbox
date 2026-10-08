@@ -40,7 +40,8 @@ import { ChatContainerContent, ChatContainerRoot, ChatContainerScrollAnchor } fr
 import type { TraceEvent } from "@/lib/trace";
 import { LiveRegistryContext, SayKeyContext } from "@/components/viz/live-blocks";
 import { buildLiveRegistry, type SayInput } from "@/lib/viz-identity";
-import { AgentLabel, AnsweredQuestionItem, Density, ExpandAll, LifecycleItem, MemoryItem, ObserverItem, PlanCard, QueuedItem, RepeatedPolls, SayItem, ThinkingItem, ToolGroup, WorkingIndicator, YouItem, repeatedPolls, type ThreadDensity } from "./TraceItems";
+import { AnsweredQuestionItem, Density, ExpandAll, LifecycleItem, MemoryItem, ObserverItem, PlanCard, QueuedItem, RepeatedPolls, SayItem, ToolGroup, WorkingIndicator, YouItem, repeatedPolls, type ThreadDensity } from "./TraceItems";
+import { ReasoningTrail, type TrailItem } from "./ReasoningTrail";
 import { PlanDock } from "./PlanBoard";
 import { ThreadMinimap, type Turn } from "./ThreadMinimap";
 import { useStickToBottom } from "use-stick-to-bottom";
@@ -798,12 +799,13 @@ export function Thread({
             label: "Starting up",
             detail: box.agent === "omp" ? "installing oh-my-pi and getting your task ready — the first start takes about a minute" : "the sandbox is getting your task ready",
           }
-        : runState === "running" && !loadingTrace && !["say", "think"].includes(lastKind)
+        // A live reasoning trail carries its own status line and clock; a second pill under it would say the same thing twice.
+        : runState === "running" && !loadingTrace && !["say", "think", "work", "tools"].includes(lastKind)
           ? { label: events.length ? "Working" : "Starting up", detail: activity }
           : pendingReplies.length > 0 && runState !== "running"
             ? { label: "Message sent", detail: "the agent is picking it up" }
             : null;
-  const agentKinds = ["say", "tools", "think", "plan"];
+  const agentKinds = ["say", "tools", "think", "work", "plan"];
   const still = useReducedMotion();
 
   return (
@@ -917,7 +919,6 @@ export function Thread({
                 <LifecycleItem key={key} label={g.label} detail={g.detail} />
               ) : g.kind === "tools" ? (
                 <div key={key} className="min-w-0">
-                  {opensAgent && <AgentLabel live={liveHere} />}
                   <ToolGroup events={g.events} live={liveHere} />
                 </div>
               ) : g.kind === "mcp-connect" ? (
@@ -944,11 +945,13 @@ export function Thread({
                   <AnsweredQuestionItem question={g.question} answer={g.answer} />
                 </div>
                 )
-              ) : g.kind === "think" ? (
+              ) : g.kind === "work" ? (
                 <div key={key} className="min-w-0">
-                  {opensAgent && <AgentLabel live={liveHere} />}
-                  {(density === "trace" || liveHere) && <ThinkingItem text={g.text} live={liveHere} ms={g.ms} />}
+                  <ReasoningTrail items={g.items} live={liveHere} />
                 </div>
+              ) : g.kind === "think" ? (
+                // Folded into a "work" trail by foldWork; never reaches the renderer on its own.
+                null
               ) : g.kind === "memory" ? (
                 <MemoryItem key={key} notes={g.notes} />
               ) : g.kind === "plan" ? (
@@ -1280,6 +1283,7 @@ type TraceGroup =
   | { kind: "tools"; events: ToolEvent[] }
   | { kind: "mcp-connect"; server: string }
   | { kind: "think"; text: string; ms?: number }
+  | { kind: "work"; items: TrailItem[] }
   | { kind: "plan"; board: TaskBoard }
   | { kind: "memory"; notes: { note: string; text: string; area?: string; updated?: boolean }[] };
 
@@ -1322,7 +1326,7 @@ function groupTrace(events: TraceEvent[]): TraceGroup[] {
       out.push({ kind: "asked", question: e.text, answer: "" });
     } else if (e.kind === "think") {
       // Think events carry no stamp; the gap between the stamped events around it bounds it.
-      let before: number | undefined;
+      let before: number | undefined = e.at;
       for (let j = idx - 1; j >= 0 && before === undefined; j--) {
         const p = events[j];
         if (p.kind === "tool" && p.at !== undefined) before = p.at + (p.ms ?? 0);
@@ -1350,6 +1354,31 @@ function groupTrace(events: TraceEvent[]): TraceGroup[] {
       out.push({ kind: "say", text: e.text, at: e.at });
     }
   }
+  return foldWork(out);
+}
+
+/**
+ * The agent's work between two things it says — thinking, tool calls, server connects — folds into
+ * one reasoning trail, so the thread reads as prose with the work one line each between. A lone run
+ * of tool calls stays a tool group (its fold already reads the same way and keeps its visual output).
+ */
+function foldWork(groups: TraceGroup[]): TraceGroup[] {
+  const out: TraceGroup[] = [];
+  let run: TrailItem[] = [];
+  const flush = () => {
+    if (!run.length) return;
+    if (run.length === 1 && run[0].kind === "tools") out.push(run[0]);
+    else out.push({ kind: "work", items: run });
+    run = [];
+  };
+  for (const g of groups) {
+    if (g.kind === "think" || g.kind === "tools" || g.kind === "mcp-connect") run.push(g);
+    else {
+      flush();
+      out.push(g);
+    }
+  }
+  flush();
   return out;
 }
 

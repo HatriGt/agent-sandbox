@@ -29,7 +29,8 @@ export type TraceEvent =
    * folded in from the agent's BashOutput/TaskOutput polls (see foldBackgroundShells).
    */
   | { kind: "tool"; name: string; arg?: string; result?: string; failed?: boolean; diff?: string; at?: number; ms?: number; streaming?: boolean }
-  | { kind: "think"; text: string }
+  /** Extended thinking. `at` is the stamp current when it opened; `streaming` while the close marker has not arrived. */
+  | { kind: "think"; text: string; at?: number; streaming?: boolean }
   /** A TodoWrite snapshot. `at` is the formatter's wall-clock ms; absent on logs written before it. */
   | { kind: "plan"; items: PlanItem[]; at?: number }
   /**
@@ -168,6 +169,7 @@ export function parseTrace(rawLog: string): TraceEvent[] {
   let youAt: number | undefined;
   // Same shape for a thinking block and a plan block.
   let think: string[] | null = null;
+  let thinkAt: number | undefined;
   let plan: string[] | null = null;
   // Wall-clock of the plan block currently being collected, from the open sentinel's suffix.
   let planAt: number | undefined;
@@ -214,7 +216,7 @@ export function parseTrace(rawLog: string): TraceEvent[] {
     if (think !== null) {
       if (line === THINK_CLOSE) {
         const text = think.join("\n").trim();
-        if (text) events.push({ kind: "think", text });
+        if (text) events.push(thinkAt === undefined ? { kind: "think", text } : { kind: "think", text, at: thinkAt });
         think = null;
       } else think.push(line);
       continue;
@@ -282,6 +284,7 @@ export function parseTrace(rawLog: string): TraceEvent[] {
     if (line === THINK_OPEN) {
       flushProse();
       think = [];
+      thinkAt = clock;
       target = null;
       continue;
     }
@@ -398,6 +401,12 @@ export function parseTrace(rawLog: string): TraceEvent[] {
   if (you !== null) {
     const text = you.join("\n").trim();
     if (text) events.push(youAt === undefined ? { kind: "you", text } : { kind: "you", text, at: youAt });
+  }
+  // A ⟦think⟧ block still open at the end is thinking in progress: emit it streaming, so the thread
+  // can show the reasoning as it forms instead of a blank beat until the close marker lands.
+  if (think !== null) {
+    const text = think.join("\n").trim();
+    if (text) events.push({ kind: "think", text, streaming: true, ...(thinkAt === undefined ? {} : { at: thinkAt }) });
   }
   flushProse();
   return foldBackgroundShells(dedupeMemory(dedupe(events)).filter((e) => !isMechanism(e)));

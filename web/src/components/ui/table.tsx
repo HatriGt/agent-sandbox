@@ -105,7 +105,7 @@ function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
 type Align = "start" | "center" | "end";
 
 const cellBase =
-  "border-b border-(--table-line) align-middle whitespace-nowrap data-[align=center]:text-center data-[align=end]:text-end data-[align=end]:tabular-nums group-data-[variant=surface]/table:first:ps-4 group-data-[variant=surface]/table:last:pe-4";
+  "border-b border-(--table-line) align-middle whitespace-nowrap data-[align=center]:text-center data-[align=end]:text-end data-[align=end]:tabular-nums first:ps-4 last:pe-4";
 
 function TableHead({ className, align, ...props }: Omit<React.ComponentProps<"th">, "align"> & { align?: Align }) {
   return (

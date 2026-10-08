@@ -304,7 +304,14 @@ const TREE = ["orders-api/src/app.ts", "orders-api/src/middleware/rateLimit.ts",
 
 /* ───────────────────────────── SSE ───────────────────────────── */
 const box = boxFor(scenario);
-const fullLog = scenario === "booting" || scenario === "idle" ? "" : log(scenario === "sleeping" ? "done" : scenario);
+let fullLog = scenario === "booting" || scenario === "idle" ? "" : log(scenario === "sleeping" ? "done" : scenario);
+// --cut=<text>: stop the log just before the first line containing <text> (a run caught mid-work:
+// mid-thought with --cut=⟦/think⟧, mid-command with --cut=⟦#b1⟧).
+const cut = flag("cut", null);
+if (cut) {
+  const i = fullLog.indexOf(cut);
+  if (i >= 0) fullLog = fullLog.slice(0, i).replace(/[^\n]*$/, "");
+}
 const meta = (() => {
   const { role: _r, ...m } = box;
   return m;
@@ -480,6 +487,13 @@ if (stream) {
     await shot(`-p${i + 1}`);
     if (top >= total) break;
   }
+} else if (interact === "expand") {
+  // Everything open, from the top: the reasoning trails' contents.
+  await page.getByRole("button", { name: "Expand all" }).click().catch((e) => errors.push("expand: " + e.message));
+  await page.waitForTimeout(600);
+  await page.evaluate(() => document.querySelector("[aria-label='Conversation'] > div")?.scrollTo({ top: 0, behavior: "instant" }));
+  await page.waitForTimeout(400);
+  await shot("-expand");
 } else if (interact === "scrolled") {
   await page.evaluate(() => {
     const el = document.querySelector("[aria-label='Conversation'] > div");
