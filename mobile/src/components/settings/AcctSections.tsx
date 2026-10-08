@@ -1,16 +1,16 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Linking, View } from "react-native";
+import { ActivityIndicator, Animated, Linking, View } from "react-native";
 import { api, autopilotApi, type AgentId, type AgentPrefs, type HarnessView, type NotifySettings } from "@/lib/api";
-import { useTheme } from "@/theme/ThemeContext";
+import { useTheme, type ThemePref } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { T } from "@/components/ui/AppText";
 import { Button } from "@/components/ui/Button";
 import { Field } from "@/components/ui/Field";
-import { Icon, type IconName } from "@/components/ui/Icon";
 import { Toggle } from "@/components/ui/Toggle";
 import { PickerRow, PickerSheet } from "@/components/settings/PickerSheet";
+import { Segmented } from "@/components/settings/Segmented";
 import { DriverBadges } from "@/components/settings/HarnessParts";
-import { animateLayout, FadeIn, PressScale } from "@/components/motion";
+import { animateLayout, FadeIn, PressScale, setMotionPref, useMotionPref, useReducedMotion, type MotionPref } from "@/components/motion";
 import { pushStatus, registerForPush, unregisterPush, type PushStatus } from "@/lib/push";
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -36,30 +36,96 @@ export function AcctSection({ title, meta, purpose, action, children }: { title:
   );
 }
 
-/** Row linking to a sub-screen — same shape as the Settings tab's RowLink. */
-export function AcctLinkRow({ title, hint, icon, onPress }: { title: string; hint?: string; icon: IconName; onPress: () => void }) {
-  const { palette } = useTheme();
+/**
+ * Web AppearanceSettings: motion Full/System/Reduced (stored on this phone) plus the theme pick, which
+ * on the phone lives here rather than on the settings index.
+ */
+export function AppearanceSection() {
+  const { pref: theme, setPref: setTheme } = useTheme();
+  const motion = useMotionPref();
+  const reduced = useReducedMotion();
   return (
-    <PressScale
-      accessibilityRole="link"
-      onPress={onPress}
-      style={{ paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: palette.border, flexDirection: "row", alignItems: "center", gap: 12 }}
-    >
-      <View style={{ width: 32, height: 32, borderRadius: radius.md, backgroundColor: palette.secondary, alignItems: "center", justifyContent: "center" }}>
-        <Icon name={icon} size={15} color={palette.foreground} />
-      </View>
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <T variant="body" weight="medium" numberOfLines={1}>
-          {title}
+    <AcctSection title="Appearance" meta={motion === "system" ? (reduced ? "Reduced (from OS)" : "Full (from OS)") : undefined} purpose="Saved on this phone.">
+      <View style={{ gap: 6 }}>
+        <T variant="meta" weight="medium">
+          Theme
         </T>
-        {hint ? (
-          <T variant="micro" tone="faint" numberOfLines={2}>
-            {hint}
-          </T>
-        ) : null}
+        <Segmented<ThemePref>
+          small
+          value={theme}
+          onChange={setTheme}
+          options={[
+            { value: "system", label: "System" },
+            { value: "light", label: "Light" },
+            { value: "dark", label: "Dark" },
+          ]}
+        />
       </View>
-      <Icon name="chevron-right" size={16} color={palette.faint} />
-    </PressScale>
+      <View style={{ gap: 6 }}>
+        <T variant="meta" weight="medium">
+          Motion
+        </T>
+        <Segmented<MotionPref>
+          small
+          value={motion}
+          onChange={setMotionPref}
+          options={[
+            { value: "full", label: "Full" },
+            { value: "system", label: "System" },
+            { value: "reduced", label: "Reduced" },
+          ]}
+        />
+        <T variant="micro" tone="muted">
+          System follows your OS ‘animation effects’ setting.
+        </T>
+      </View>
+    </AcctSection>
+  );
+}
+
+/** 0–4: length 10+, length 14+, mixed case or digits, a symbol. Coarse on purpose — a hint, not a gate. */
+export function pwStrength(p: string): number {
+  if (!p) return 0;
+  let n = 0;
+  if (p.length >= 10) n++;
+  if (p.length >= 14) n++;
+  if (/[a-z]/.test(p) && /[A-Z]/.test(p)) n++;
+  else if (/\d/.test(p) && /[a-zA-Z]/.test(p)) n++;
+  if (/[^a-zA-Z0-9]/.test(p)) n++;
+  return Math.min(4, n);
+}
+
+const STRENGTH = ["", "weak", "fair", "good", "strong"] as const;
+
+/** Web StrengthMeter: four segments that fill left to right; the filled ones tint destructive → attention → ok. */
+export function StrengthMeter({ value, visible }: { value: number; visible: boolean }) {
+  const { palette } = useTheme();
+  const still = useReducedMotion();
+  const tone = value <= 1 ? palette.destructive : value === 2 ? palette.attention : value === 3 ? palette.live : palette.ok;
+  const fills = useRef([0, 1, 2, 3].map(() => new Animated.Value(0))).current;
+  useEffect(() => {
+    Animated.parallel(
+      fills.map((f, i) => {
+        const on = visible && i < value;
+        return still
+          ? Animated.timing(f, { toValue: on ? 1 : 0, duration: 0, useNativeDriver: true })
+          : Animated.spring(f, { toValue: on ? 1 : 0, stiffness: 500, damping: 36, mass: 1, delay: on ? i * 40 : 0, useNativeDriver: true });
+      }),
+    ).start();
+  }, [fills, value, visible, still]);
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingTop: 4 }} accessibilityElementsHidden={!visible} importantForAccessibility={visible ? "auto" : "no-hide-descendants"}>
+      <View style={{ flex: 1, flexDirection: "row", gap: 4 }}>
+        {fills.map((f, i) => (
+          <View key={i} style={{ flex: 1, height: 4, borderRadius: radius.pill, backgroundColor: palette.muted, overflow: "hidden" }}>
+            <Animated.View style={{ position: "absolute", top: 0, bottom: 0, left: "-50%", width: "200%", borderRadius: radius.pill, backgroundColor: tone, transform: [{ scaleX: f }] }} />
+          </View>
+        ))}
+      </View>
+      <T variant="micro" tone="muted" style={{ width: 40, textAlign: "right" }} accessibilityLiveRegion="polite">
+        {visible ? STRENGTH[value] : ""}
+      </T>
+    </View>
   );
 }
 

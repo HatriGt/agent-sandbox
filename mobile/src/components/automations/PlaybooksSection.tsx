@@ -6,9 +6,9 @@ import { View } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import { api, ledgerApi, type Automation, type BoxView, type LedgerRow, type WorkflowView } from "@/lib/api";
 import { ago } from "@/lib/format";
+import { composeTask } from "@/state/composerFocus";
 import { EXAMPLE, STARTERS } from "@/lib/playbookStarters";
 import { setPlaybookSeed } from "@/lib/playbookSeed";
-import { SettingsScreen } from "@/components/SettingsScreen";
 import { T } from "@/components/ui/AppText";
 import { ArmButton } from "@/components/ui/ArmButton";
 import { Button } from "@/components/ui/Button";
@@ -30,7 +30,8 @@ function lastRunLine(l: LastRun | null): { text: string; tone: "faint" | "ok" | 
   return { text: `Last run: ${at ? ago(at) : l.run.state}`, tone: l.run.state === "failed" ? "destructive" : "ok" };
 }
 
-export default function Playbooks() {
+/** The Playbooks tab of Autopilot (web: PlaybooksPage.tsx) — rendered by app/settings/autopilot.tsx. */
+export function PlaybooksSection() {
   const router = useRouter();
   const [list, setList] = useState<WorkflowView[] | null>(null);
   const [dir, setDir] = useState(".agent-sandbox/workflows");
@@ -75,11 +76,11 @@ export default function Playbooks() {
     return run ? { kind: "archived", run } : null;
   };
   // Run: the composer with this playbook preselected; the task fills {{task}}.
-  const runPlaybook = (w: WorkflowView) => router.push({ pathname: "/new", params: { workflow: w.id } });
+  const runPlaybook = (w: WorkflowView) => composeTask({ workflow: w.id });
   const items = list ?? [];
 
   return (
-    <SettingsScreen title="Playbooks">
+    <View style={{ gap: 12 }}>
       <T variant="body" tone="muted">
         <T variant="body">How</T> a task gets done: agent turns and command checks, in order. Failed checks go back to the agent. Use one from the composer, or let an automation run it.
       </T>
@@ -207,7 +208,7 @@ export default function Playbooks() {
           </Card>
         </>
       )}
-    </SettingsScreen>
+    </View>
   );
 }
 

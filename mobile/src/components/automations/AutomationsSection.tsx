@@ -1,15 +1,13 @@
 // Automations on the phone (docs/plan-mobile-parity.md): the list with pause/resume, "Run now",
 // proposals to approve or dismiss, and a filter for one-off chat schedules. Tapping a row opens the
-// editor (app/automation/[id].tsx); "+ New" opens it blank.
+// editor (app/automation/[id].tsx); the Autopilot header's "New" opens it blank.
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { RefreshControl, ScrollView, View } from "react-native";
-import { Redirect, useFocusEffect, useRouter } from "expo-router";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { View } from "react-native";
+import { useFocusEffect, useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { api, type Automation, type AutomationResult } from "@/lib/api";
 import { deliveryLine, deliveryTone } from "@/lib/automationRuns";
 import { ago } from "@/lib/format";
-import { useAuth } from "@/state/auth";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { T } from "@/components/ui/AppText";
@@ -212,18 +210,10 @@ function Row({ a, index, onChange, onRemove }: { a: Automation; index: number; o
   );
 }
 
-export default function AutomationsRoute() {
-  const { signedIn } = useAuth();
-  if (!signedIn) return <Redirect href="/welcome" />;
-  return <Automations />;
-}
-
-function Automations() {
-  const router = useRouter();
-  const { palette } = useTheme();
+/** The Automations tab of Autopilot (web: Automations.tsx) — rendered by app/settings/autopilot.tsx. */
+export function AutomationsSection() {
   const [list, setList] = useState<Automation[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
 
   const load = useCallback(async () => {
@@ -256,49 +246,20 @@ function Automations() {
   }, [list]);
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: palette.background }} edges={["top"]}>
-      <View style={{ flexDirection: "row", alignItems: "center", height: 56, paddingHorizontal: 12 }}>
-        <PressScale onPress={() => (router.canGoBack() ? router.back() : router.replace("/(tabs)/home"))} hitSlop={12} style={{ padding: 8 }}>
-          <T variant="body" tone="muted">
-            ‹ Back
-          </T>
-        </PressScale>
-        <View style={{ flex: 1 }} />
-        <PressScale onPress={() => router.push("/automation/new")} hitSlop={12} style={{ padding: 8 }} accessibilityRole="button" accessibilityLabel="New automation">
-          <T variant="body" weight="medium">
-            + New
-          </T>
-        </PressScale>
-      </View>
-      <ScrollView
-        contentContainerStyle={{ padding: 20, paddingTop: 0, gap: 12, paddingBottom: 40 }}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={async () => {
-              setRefreshing(true);
-              await load();
-              setRefreshing(false);
-            }}
-          />
-        }
-      >
-        <T serif variant="h1">
-          Automations
-        </T>
-        <T variant="body" tone="muted">
-          Runs that start on a schedule, after another run, on a webhook, or on a GitHub event. Tap one to edit it.
-        </T>
-        <Segmented
-          small
-          value={filter}
-          onChange={setFilter}
-          options={[
-            { value: "all", label: `All${counts.all ? ` · ${counts.all}` : ""}` },
-            { value: "rules", label: `Standing rules${counts.rules ? ` · ${counts.rules}` : ""}` },
-            { value: "chat", label: `From chat${counts.chat ? ` · ${counts.chat}` : ""}` },
-          ]}
-        />
+    <View style={{ gap: 12 }}>
+      <T variant="body" tone="muted">
+        Runs that start on a schedule, after another run, on a webhook, or on a GitHub event. Tap one to edit it.
+      </T>
+      <Segmented
+        small
+        value={filter}
+        onChange={setFilter}
+        options={[
+          { value: "all", label: `All${counts.all ? ` · ${counts.all}` : ""}` },
+          { value: "rules", label: `Standing rules${counts.rules ? ` · ${counts.rules}` : ""}` },
+          { value: "chat", label: `From chat${counts.chat ? ` · ${counts.chat}` : ""}` },
+        ]}
+      />
         {error ? (
           <FadeIn>
             <T variant="meta" tone="destructive">
@@ -313,14 +274,13 @@ function Automations() {
               {filter === "chat" ? "Nothing from a chat yet" : "No automations yet"}
             </T>
             <T variant="meta" tone="muted">
-              {filter === "chat" ? "Ask the agent to run something later or on a schedule and it shows up here for your OK." : "Tap + New to run something on a schedule, after another run, or when an event arrives."}
+              {filter === "chat" ? "Ask the agent to run something later or on a schedule and it shows up here for your OK." : "Tap New to run something on a schedule, after another run, or when an event arrives."}
             </T>
           </Card>
         ) : null}
         {shown.map((a, i) => (
           <Row key={a.id} a={a} index={i} onChange={replace} onRemove={remove} />
         ))}
-      </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }

@@ -2,9 +2,9 @@
 // iOS share extension) opens the new-task composer prefilled. Nothing starts without the person
 // pressing send. A share that arrives signed out waits until sign-in. Renders nothing.
 import { useEffect } from "react";
-import { useRouter } from "expo-router";
 import { useShareIntentContext, type ShareIntent } from "expo-share-intent";
 import { useAuth } from "@/state/auth";
+import { composeTask } from "@/state/composerFocus";
 
 const MAX = 20_000;
 
@@ -21,7 +21,6 @@ export function shareToTask(s: Pick<ShareIntent, "text" | "webUrl" | "meta">): s
 }
 
 export function ShareBridge() {
-  const router = useRouter();
   const { ready, signedIn } = useAuth();
   const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntentContext();
 
@@ -29,8 +28,8 @@ export function ShareBridge() {
     if (!ready || !signedIn || !hasShareIntent) return;
     const task = shareToTask(shareIntent);
     resetShareIntent();
-    if (task) router.push({ pathname: "/new", params: { task } });
-  }, [ready, signedIn, hasShareIntent, shareIntent, resetShareIntent, router]);
+    if (task) composeTask({ task });
+  }, [ready, signedIn, hasShareIntent, shareIntent, resetShareIntent]);
 
   return null;
 }

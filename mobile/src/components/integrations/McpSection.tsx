@@ -5,7 +5,7 @@ import * as Clipboard from "expo-clipboard";
 import { api, type McpServersResponse, type McpServerView } from "@/lib/api";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
-import { SettingsScreen } from "@/components/SettingsScreen";
+import { AcctSection } from "@/components/settings/AcctSections";
 import { T } from "@/components/ui/AppText";
 import { ArmButton } from "@/components/ui/ArmButton";
 import { Button } from "@/components/ui/Button";
@@ -21,7 +21,7 @@ import { describe, errMsg, jsonErrorLine, statusOf, type Health } from "@/compon
 type Filter = "all" | "on" | "off" | "stdio" | "remote";
 
 /** MCP servers (web: McpServers.tsx) — list with filters/search, add/edit sheet, paste config, whole-file JSON. */
-export default function McpServers() {
+export function McpSection() {
   const { palette } = useTheme();
   const [data, setData] = useState<McpServersResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -77,7 +77,7 @@ export default function McpServers() {
   const hasServers = !!servers && servers.length > 0;
 
   return (
-    <SettingsScreen title="MCP servers">
+    <AcctSection title="MCP servers">
       {servers ? (
         <T variant="meta" tone="muted">
           {servers.length === 0 ? "none yet" : `${counts.on} of ${servers.length} on`}
@@ -206,7 +206,7 @@ export default function McpServers() {
         onClose={() => setEditing((e) => ({ ...e, open: false }))}
       />
       <PasteSheet visible={pasting} onMutate={mutate} onClose={() => setPasting(false)} />
-    </SettingsScreen>
+    </AcctSection>
   );
 }
 

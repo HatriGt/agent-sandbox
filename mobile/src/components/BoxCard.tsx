@@ -1,5 +1,5 @@
 import React, { memo, useMemo, useState } from "react";
-import { Alert, View } from "react-native";
+import { Alert, View, type StyleProp, type ViewStyle } from "react-native";
 import { useRouter } from "expo-router";
 import { api, type BoxView } from "@/lib/api";
 import { parseQuestion, questionChoices, questionHeadline } from "@/lib/question";
@@ -21,11 +21,14 @@ export function boxLabel(b: BoxView): string {
 /**
  * One-tap answers on the inbox card (docs/plan-demo-parity.md bet 1): the same ≤ 3 choices the
  * notification offers. The label is the chip; the whole option is sent. Free text lives in the Thread.
+ * `amber` inverts the ink for the attention card; Home's compact rows use the plain variant.
  */
-function InboxChoices({ box, question }: { box: string; question: string }) {
+export function InboxChoices({ box, question, amber = true, style }: { box: string; question: string; amber?: boolean; style?: StyleProp<ViewStyle> }) {
   const { palette } = useTheme();
   const choices = useMemo(() => questionChoices(parseQuestion(question)), [question]);
   const [sent, setSent] = useState<number | null>(null);
+  const ink = amber ? palette.attentionInk : palette.foreground;
+  const onInk = amber ? palette.attention : palette.background;
   if (choices.length === 0) return null;
   const answer = async (i: number) => {
     if (sent != null) return;
@@ -40,7 +43,7 @@ function InboxChoices({ box, question }: { box: string; question: string }) {
     }
   };
   return (
-    <View accessibilityRole="radiogroup" accessibilityLabel="Quick answers" style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+    <View accessibilityRole="radiogroup" accessibilityLabel="Quick answers" style={[{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 }, style]}>
       {choices.map((c, i) => (
         <PressScale
           key={c.answer}
@@ -53,15 +56,15 @@ function InboxChoices({ box, question }: { box: string; question: string }) {
           <View
             style={{
               borderWidth: 1,
-              borderColor: palette.attentionInk,
+              borderColor: amber ? ink : sent === i ? ink : palette.lineStrong,
               borderRadius: radius.md,
               paddingHorizontal: 10,
               paddingVertical: 6,
               opacity: sent != null && sent !== i ? 0.45 : 1,
-              backgroundColor: sent === i ? palette.attentionInk : "transparent",
+              backgroundColor: sent === i ? ink : "transparent",
             }}
           >
-            <T variant="meta" weight="semibold" numberOfLines={1} style={{ color: sent === i ? palette.attention : palette.attentionInk }}>
+            <T variant="meta" weight="semibold" numberOfLines={1} style={{ color: sent === i ? onInk : ink }}>
               {c.label}
             </T>
           </View>

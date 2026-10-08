@@ -3,7 +3,7 @@ import { View } from "react-native";
 import { api, type ApiKeyRow } from "@/lib/api";
 import { serverUrl } from "@/lib/config";
 import { ago } from "@/lib/format";
-import { SettingsScreen } from "@/components/SettingsScreen";
+import { AcctSection } from "@/components/settings/AcctSections";
 import { T } from "@/components/ui/AppText";
 import { ArmButton } from "@/components/ui/ArmButton";
 import { Button } from "@/components/ui/Button";
@@ -14,7 +14,7 @@ import { OneTimeSecret } from "@/components/settings/OneTimeSecret";
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /** Web ApiKeys: personal bearer keys, shown once at creation; only the prefix is kept. */
-export default function ApiKeys() {
+export function ApiKeysSection() {
   const [keys, setKeys] = useState<ApiKeyRow[] | null>(null);
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
@@ -56,10 +56,7 @@ export default function ApiKeys() {
   const active = (keys ?? []).filter((k) => !k.revoked_at);
 
   return (
-    <SettingsScreen title="API keys">
-      <T variant="meta" tone="muted">
-        {keys ? `${active.length} active · ` : ""}What Cursor, Claude Code or a CI job presents to the MCP endpoint. Each key is shown once; only its prefix is kept.
-      </T>
+    <AcctSection title="API keys" meta={keys ? `${active.length} active` : undefined} purpose="What Cursor, Claude Code or a CI job presents to the MCP endpoint. Each key is shown once; only its prefix is kept.">
       {fresh ? (
         <OneTimeSecret
           label={`Copy ${fresh.name} now — it will not be shown again.`}
@@ -102,6 +99,6 @@ export default function ApiKeys() {
         returnKeyType="done"
       />
       <Button title="New key" variant="outline" loading={creating} onPress={() => void create()} />
-    </SettingsScreen>
+    </AcctSection>
   );
 }

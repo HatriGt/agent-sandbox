@@ -13,7 +13,7 @@ export function Segmented<V extends string>({
   small,
 }: {
   value: V;
-  options: { value: V; label: string }[];
+  options: { value: V; label: string; badge?: string | number }[];
   onChange: (v: V) => void;
   small?: boolean;
 }) {
@@ -41,9 +41,16 @@ export function Segmented<V extends string>({
             }}
           >
             <SelectionFill on={on} color={palette.accent} />
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
             <T variant={small ? "micro" : "meta"} weight={on ? "semibold" : "regular"}>
               {o.label}
             </T>
+            {o.badge !== undefined && o.badge !== 0 ? (
+              <T variant="micro" weight="semibold" tone="attention">
+                {o.badge}
+              </T>
+            ) : null}
+          </View>
           </PressScale>
         );
       })}

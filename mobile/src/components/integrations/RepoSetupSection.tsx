@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { View } from "react-native";
 import { api, type RepoSetupProfile, type RepoSetupsResponse } from "@/lib/api";
-import { SettingsScreen } from "@/components/SettingsScreen";
+import { AcctSection } from "@/components/settings/AcctSections";
 import { T } from "@/components/ui/AppText";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -15,7 +15,7 @@ const CMDS = ["install", "build", "test", "lint"] as const;
 const BY: Record<RepoSetupProfile["confirmedBy"], string> = { detected: "auto-detected", agent: "confirmed by the agent", user: "edited by you" };
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
-export default function RepoSetupScreen() {
+export function RepoSetupSection() {
   const [data, setData] = useState<RepoSetupsResponse | null>(null);
   const [note, setNote] = useState<string | null>(null);
   useEffect(() => {
@@ -23,10 +23,7 @@ export default function RepoSetupScreen() {
   }, []);
 
   return (
-    <SettingsScreen title="Repo setup">
-      <T variant="micro" tone="faint">
-        learned once · install · test · verify
-      </T>
+    <AcctSection title="Repo setup" meta="learned once · install · test · verify">
       {note ? <T variant="meta" tone="muted">{note}</T> : null}
       {!data ? (
         <T tone="muted">Loading…</T>
@@ -37,7 +34,7 @@ export default function RepoSetupScreen() {
       ) : (
         data.profiles.map((r) => <SetupRow key={r.repo} repo={r.repo} profile={r.profile} onChange={setData} onNote={setNote} />)
       )}
-    </SettingsScreen>
+    </AcctSection>
   );
 }
 

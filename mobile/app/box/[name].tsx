@@ -13,6 +13,7 @@ import { deriveTaskBoard } from "@/lib/planTasks";
 import { splitReplies } from "@/lib/replies";
 import { parseTrace } from "@/lib/trace";
 import { useAuth } from "@/state/auth";
+import { composeTask } from "@/state/composerFocus";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { Composer } from "@/components/Composer";
@@ -946,7 +947,7 @@ function Thread() {
           merged?.task
             ? () => {
                 setSheet(null);
-                router.push({ pathname: "/new", params: { task: merged?.task ?? "" } });
+                composeTask({ task: merged?.task ?? "" });
               }
             : undefined
         }

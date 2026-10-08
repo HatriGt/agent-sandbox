@@ -4,6 +4,7 @@ import { Redirect, Tabs, useRouter } from "expo-router";
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { haptic, isReducedMotion, PressScale, SPRING } from "@/components/motion";
+import { composeTask } from "@/state/composerFocus";
 import { useAuth } from "@/state/auth";
 import { useTheme } from "@/theme/ThemeContext";
 import { Icon, type IconName } from "@/components/ui/Icon";
@@ -111,7 +112,7 @@ function PillTabBar({ state, navigation }: BottomTabBarProps) {
           haptic="medium"
           accessibilityRole="button"
           accessibilityLabel="New task"
-          onPress={() => router.push("/new")}
+          onPress={() => composeTask()}
           style={{
             width: 50,
             height: 50,

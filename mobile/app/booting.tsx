@@ -6,6 +6,7 @@ import * as Haptics from "expo-haptics";
 import { api, ApiError } from "@/lib/api";
 import { setFailedSubmit, takePendingDelegate, type SubmitDraft } from "@/lib/pending-delegate";
 import { dropWatchCache } from "@/hooks/useWatch";
+import { composeTask } from "@/state/composerFocus";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { T } from "@/components/ui/AppText";
@@ -180,7 +181,7 @@ export default function Booting() {
     // started anyway. Give the fleet poll a grace window to attach; only then
     // show the error, and even then keep polling so a late box still wins.
     // Failure: stash the FULL submission so "Back to the task" restores repos, photos, model and
-    // verify — not just the text. One-shot; consumed by /new on mount.
+    // verify — not just the text. One-shot; consumed by the home composer on mount.
     const fail = (kind: "error" | "clarify", msg: string) => {
       if (draft.current) setFailedSubmit({ ...draft.current, [kind === "error" ? "error" : "clarify"]: msg });
     };
@@ -250,7 +251,13 @@ export default function Booting() {
                 The connection dropped, but the machine may have started anyway — check the fleet list, or resend the task.
               </T>
             ) : null}
-            <Button title="Back to the task" onPress={() => router.replace({ pathname: "/new", params: { task: task.current } })} />
+            <Button
+              title="Back to the task"
+              onPress={() => {
+                router.back();
+                composeTask({ task: task.current });
+              }}
+            />
           </View>
         ) : (
           <>

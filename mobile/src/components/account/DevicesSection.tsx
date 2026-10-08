@@ -4,7 +4,7 @@ import { api, type SessionRow } from "@/lib/api";
 import { ago } from "@/lib/format";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
-import { SettingsScreen } from "@/components/SettingsScreen";
+import { AcctSection } from "@/components/settings/AcctSections";
 import { T } from "@/components/ui/AppText";
 import { ArmButton } from "@/components/ui/ArmButton";
 import { Card } from "@/components/ui/Card";
@@ -22,7 +22,7 @@ function describe(ua: string | null): { label: string; mobile: boolean } {
 }
 
 /** Web Sessions: where you are signed in; sign one out without changing your password. */
-export default function Devices() {
+export function DevicesSection() {
   const { palette } = useTheme();
   const [rows, setRows] = useState<SessionRow[] | null>(null);
   const [note, setNote] = useState<{ tone: "ok" | "destructive"; text: string } | null>(null);
@@ -62,10 +62,7 @@ export default function Devices() {
   const others = sorted.filter((s) => !s.current);
 
   return (
-    <SettingsScreen title="Signed-in devices">
-      <T variant="meta" tone="muted">
-        {rows ? `${rows.length} · 30-day cap` : "30-day cap"} · Browser sessions holding your account. Sign one out if you do not recognise it; your password stays.
-      </T>
+    <AcctSection title="Signed-in devices" meta={rows ? `${rows.length} · 30-day cap` : "30-day cap"} purpose="Browser sessions holding your account. Sign one out if you do not recognise it; your password stays.">
       {others.length > 0 ? (
         <ArmButton
           title="Sign out everywhere else"
@@ -113,6 +110,6 @@ export default function Devices() {
           );
         })
       )}
-    </SettingsScreen>
+    </AcctSection>
   );
 }

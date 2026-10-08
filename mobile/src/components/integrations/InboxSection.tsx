@@ -3,7 +3,7 @@ import { Alert, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { useRouter } from "expo-router";
 import { intakeApi, type IntakeEmailProvider, type IntakeView } from "@/lib/api";
-import { SettingsScreen } from "@/components/SettingsScreen";
+import { AcctSection } from "@/components/settings/AcctSections";
 import { T } from "@/components/ui/AppText";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -80,7 +80,7 @@ function ListInput({ label, value, placeholder, onSave }: { label: string; value
 }
 
 /** "Starts from your inbox" + "Waiting on you" (web: InboxIntake.tsx). Secrets are write-only. */
-export default function Inbox() {
+export function InboxSection() {
   const router = useRouter();
   const [v, setV] = useState<IntakeView | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -119,7 +119,7 @@ export default function Inbox() {
 
   if (err || !v)
     return (
-      <SettingsScreen title="Starts from your inbox">
+      <AcctSection title="Starts from your inbox">
         {err ? (
           <T variant="meta" tone="destructive">
             {err}
@@ -127,14 +127,14 @@ export default function Inbox() {
         ) : (
           <T tone="muted">Loading…</T>
         )}
-      </SettingsScreen>
+      </AcctSection>
     );
 
   const p = PROVIDERS.find((x) => x.id === provider)!;
   const allowed = [v.accountEmail, ...v.channel.allowEmails].filter(Boolean).join(", ");
 
   return (
-    <SettingsScreen title="Starts from your inbox">
+    <AcctSection title="Starts from your inbox">
       {note ? (
         <T variant="meta" tone={note.bad ? "destructive" : "muted"}>
           {note.text}
@@ -310,6 +310,6 @@ export default function Inbox() {
           ))
         )}
       </Card>
-    </SettingsScreen>
+    </AcctSection>
   );
 }

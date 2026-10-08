@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { View } from "react-native";
 import { api, type ProviderKind, type ProvidersResponse, type ProviderView } from "@/lib/api";
 import { useAuth } from "@/state/auth";
-import { SettingsScreen } from "@/components/SettingsScreen";
+import { AcctSection } from "@/components/settings/AcctSections";
 import { T } from "@/components/ui/AppText";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -23,7 +23,7 @@ const DRIVER_LABEL: Record<string, string> = { claude: "Claude Code", omp: "oh-m
 const plural = (n: number) => `${n} model${n === 1 ? "" : "s"}`;
 
 /** Model providers (web: Providers.tsx): your keys, any endpoint, local models. Keys come back masked. */
-export default function Providers() {
+export function ProvidersSection() {
   const { me } = useAuth();
   const saas = me?.mode === "saas";
   const [r, setR] = useState<ProvidersResponse | null>(null);
@@ -37,10 +37,7 @@ export default function Providers() {
   useEffect(load, [load]);
 
   return (
-    <SettingsScreen title="Model providers">
-      <T variant="micro" tone="faint">
-        your keys · any endpoint · local models
-      </T>
+    <AcctSection title="Model providers" meta="your keys · any endpoint · local models">
       {error ? (
         <FadeIn>
           <T variant="meta" tone="destructive">
@@ -101,7 +98,7 @@ export default function Providers() {
           {r.cliLoginPolicy}
         </T>
       ) : null}
-    </SettingsScreen>
+    </AcctSection>
   );
 }
 

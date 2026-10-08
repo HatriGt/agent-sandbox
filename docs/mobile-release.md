@@ -205,28 +205,33 @@ Config plugins: `expo-router`, `expo-secure-store`, `expo-font`, `expo-asset`.
 ```
 mobile/
   app/                       expo-router routes
-    _layout.tsx              splash hold, font load, theme + auth providers, AnimatedSplash, Toasts
-    index.tsx  welcome.tsx  sign-in.tsx  sign-up.tsx  connect-server.tsx  github-auth.tsx
-    booting.tsx  new.tsx     (new.tsx is a bottom-sheet modal: delegate a task)
-    (tabs)/                  home · fleet · activity (timeline + history) · settings;
-                             _layout owns the pill tab bar + StatusLine
+    _layout.tsx              splash hold, font load, theme + auth providers, AnimatedSplash, Toasts;
+                             Stack defaults to platform push (auth/boot screens fade)
+    index.tsx  welcome.tsx  sign-in.tsx  sign-up.tsx  connect-server.tsx  github-auth.tsx  booting.tsx
+    (tabs)/                  home (inline composer, web Hub order) · fleet · activity (timeline + history)
+                             · settings (mirrors the web rail); _layout owns the pill tab bar + StatusLine
     box/[name].tsx           the thread — SSE stream, ThreadHeader, composer, docks, inspector
-    automations.tsx  automation/[id].tsx  playbook/[id].tsx  harness/[id].tsx
-    settings/                account, accounts, admin, api-keys, connect, devices, harnesses,
-                             inbox, mcp, memory, playbooks, providers, repo-setup, secrets, skills
+    automation/[id].tsx  playbook/[id].tsx  harness/[id].tsx
+    settings/                account (all sections inline), admin, autopilot (Automations | Playbooks),
+                             connect, harnesses (Drivers | Skills | Saved), integrations, memory, skills
   src/
     components/              BoxCard, Composer, TranscriptView, TurnRail, PlanBoard,
                              QuestionCard, OutcomeCard, DigestCard, WakingCard, HistoryList,
                              StatusLine, Toasts, EmptyFleet, DiffText, MarkdownLite, AnimatedSplash
       thread/                ThreadHeader, RunInspectorSheet
       sheets/                BoxActionsSheet, ChangesSheet, PrSheet
-      ui/                    AppText(T), Button, ArmButton, Card, Field, Icon, Sheet, SwipeRow,
+      ui/                    AppText(T), Button, ArmButton, Card, Field, Icon, Sheet, SwipeRow, Toggle,
                              Skeleton, StatePill, UsageMeter, WorkingDot, Motion, BrandMark
-      motion/                PressScale, SPRING/DUR/EASE tokens, FadeIn(Up), stagger, haptics, loaders
+      motion/                PressScale, SPRING/DUR/EASE tokens, FadeIn(Up), CrossFade, ScalePresence,
+                             stagger, haptics, loaders, reducedMotion (Motion pref: full/system/reduced)
+      composer/              HomeComposer (the inline new-task card: toolbar sheets, starters), HubSections
+      integrations/          Providers/Accounts/Mcp/Secrets/RepoSetup/Inbox sections (one page)
+      account/               ApiKeysSection, DevicesSection
+      automations/           AutomationsSection, PlaybooksSection (Autopilot tabs)
     hooks/                   useFleet (the fleet poll), useWatch (SSE), useNow (every clock)
     lib/                     api, config, sse, format, trace, question, activity,
                              mention, planTasks, slash, transcript-tools, pending-delegate
-    state/auth.tsx           auth gate + session
+    state/                   auth.tsx (auth gate + session), composerFocus.ts (tab '+' → home composer)
     theme/                   tokens.ts (palette, radius, state colors), ThemeContext.tsx
   assets/                    icon.png, adaptive-icon.png, splash-icon.png
   scripts/                   oklch-to-hex.js (ports the web tokens)

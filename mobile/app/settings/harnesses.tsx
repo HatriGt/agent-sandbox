@@ -1,6 +1,7 @@
-// Harnesses (web: components/HarnessesPage.tsx). Tabs Drivers · Skills · Saved. Saved: Import /
-// New harness, Saved harnesses (edit, duplicate, export, delete, review → approve), the rules
-// note, Compare (new compare + list) and Attempts. The editor itself is /harness/[id].
+// Harnesses (web: components/HarnessesPage.tsx). Tabs Drivers · Skills · Saved. Skills embeds the
+// full library (SkillsBody); Saved: Import / New harness in the header, Saved harnesses (edit,
+// duplicate, export, delete, review → approve), the rules note, Compare and Attempts. The editor
+// itself is /harness/[id].
 import React, { useCallback, useEffect, useState } from "react";
 import { Share, View } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
@@ -16,6 +17,7 @@ import { Card } from "@/components/ui/Card";
 import { Segmented } from "@/components/settings/Segmented";
 import { AttemptGroupList, CompareLauncher, CompareList, ImportHarness, ReviewPanel, rulesLine } from "@/components/settings/HarnessParts";
 import { AcctAgentSection } from "@/components/settings/AcctSections";
+import { SkillsBody } from "@/components/skills/SkillsBody";
 import { animateLayout, FadeIn, FadeInUp, stagger } from "@/components/motion";
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -76,7 +78,17 @@ export default function Harnesses() {
   const edit = (h: HarnessView) => router.push(`/harness/${encodeURIComponent(h.id)}`);
 
   return (
-    <SettingsScreen title="Harnesses">
+    <SettingsScreen
+      title="Harnesses"
+      right={
+        tab === "saved" ? (
+          <FadeIn key="saved-actions" style={{ flexDirection: "row", gap: 8 }}>
+            <Button small variant="outline" title="Import" onPress={() => setImporting(true)} />
+            <Button small title="New harness" onPress={() => router.push("/harness/new")} />
+          </FadeIn>
+        ) : null
+      }
+    >
       <T variant="body" tone="muted">
         How your agents work: driver, model, skills, rules and egress, saved as one pick.
       </T>
@@ -89,7 +101,7 @@ export default function Harnesses() {
         options={[
           { value: "drivers", label: "Drivers" },
           { value: "skills", label: "Skills" },
-          { value: "saved", label: reviewCount ? `Saved · ${reviewCount}` : "Saved" },
+          { value: "saved", label: "Saved", badge: reviewCount },
         ]}
       />
       {error ? (
@@ -107,18 +119,7 @@ export default function Harnesses() {
 
       {tab === "drivers" ? <AcctAgentSection title="Drivers" harnesses={all} /> : null}
 
-      {tab === "skills" ? (
-        <Section title="Skills" purpose="Installed into a run's sandbox when a harness lists them.">
-          <Card style={{ gap: 8 }}>
-            <T variant="meta" tone="muted">
-              {`${skills.length} skill${skills.length === 1 ? "" : "s"} · ${skills.filter((s) => s.enabled).length} enabled`}
-            </T>
-            <View style={{ flexDirection: "row" }}>
-              <Button small variant="outline" title="Open Skills" onPress={() => router.push("/settings/skills")} />
-            </View>
-          </Card>
-        </Section>
-      ) : null}
+      {tab === "skills" ? <SkillsBody /> : null}
 
       {tab === "saved" && importing ? (
         <ImportHarness
@@ -134,10 +135,6 @@ export default function Harnesses() {
 
       {tab === "saved" && !importing ? (
         <>
-          <View style={{ flexDirection: "row", gap: 8 }}>
-            <Button small variant="outline" title="Import" onPress={() => setImporting(true)} />
-            <Button small title="New harness" onPress={() => router.push("/harness/new")} />
-          </View>
           <Section
             title="Saved harnesses"
             meta={list ? String(all.length) : undefined}

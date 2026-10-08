@@ -9,7 +9,9 @@ import { SettingsScreen } from "@/components/SettingsScreen";
 import { T } from "@/components/ui/AppText";
 import { Button } from "@/components/ui/Button";
 import { Field } from "@/components/ui/Field";
-import { AcctAgentSection, AcctLinkRow, AcctNotifySection, AcctSection } from "@/components/settings/AcctSections";
+import { AcctNotifySection, AcctSection, AppearanceSection, pwStrength, StrengthMeter } from "@/components/settings/AcctSections";
+import { ApiKeysSection } from "@/components/account/ApiKeysSection";
+import { DevicesSection } from "@/components/account/DevicesSection";
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const SELF_HOST = "https://github.com/HatriGt/agent-sandbox/blob/main/docs/self-hosting.md";
@@ -46,6 +48,7 @@ export default function AccountSettings() {
   const emailOk = email.trim() === "" || EMAIL.test(email.trim());
   const dirty = name.trim() !== (user?.name ?? "").trim() || email.trim() !== (user?.email ?? "").trim();
   const pwMatch = pw.again === "" || pw.next === pw.again;
+  const pwStrong = pwStrength(pw.next);
   const pwShort = pw.next.length > 0 && pw.next.length < 10;
 
   const saveProfile = async () => {
@@ -80,7 +83,16 @@ export default function AccountSettings() {
   };
 
   return (
-    <SettingsScreen title="Account">
+    <SettingsScreen
+      title="Account"
+      right={
+        <>
+          {isAdmin && me?.mode === "saas" ? <Button small variant="ghost" title="Manage users" onPress={() => router.push("/settings/admin")} /> : null}
+          <Button small variant="ghost" title="View activity" onPress={() => router.navigate("/(tabs)/activity")} />
+          <Button small variant="outline" title="Connect an IDE" onPress={() => router.push("/settings/connect")} />
+        </>
+      }
+    >
       <T variant="meta" tone="muted">
         {user ? `@${user.login}` : "Operator"} · {isAdmin ? "admin" : "member"}
         {!showPlan ? ` · ${inUse !== null && maxBoxes ? `${inUse} of ${maxBoxes} machines in use` : `up to ${maxBoxes ?? "∞"} machines at once`}` : ""}
@@ -148,6 +160,7 @@ export default function AccountSettings() {
             <Field label="Current" value={pw.current} onChangeText={(v) => setPw({ ...pw, current: v })} secureTextEntry autoComplete="current-password" textContentType="password" />
           ) : null}
           <Field label="New" value={pw.next} onChangeText={(v) => setPw({ ...pw, next: v })} secureTextEntry autoComplete="new-password" textContentType="newPassword" hint="10 or more characters." />
+          {pw.next.length > 0 ? <StrengthMeter value={pwStrong} visible={pw.next.length > 0} /> : null}
           {pwShort ? <T variant="micro" tone="destructive">{`10+ characters · ${10 - pw.next.length} to go`}</T> : null}
           <Field label="Again" value={pw.again} onChangeText={(v) => setPw({ ...pw, again: v })} secureTextEntry autoComplete="new-password" textContentType="newPassword" />
           {!pwMatch ? <T variant="micro" tone="destructive">Doesn't match</T> : pw.again.length > 0 ? <T variant="micro" tone="ok">Matches</T> : null}
@@ -165,16 +178,10 @@ export default function AccountSettings() {
         </AcctSection>
       ) : null}
 
-      <AcctAgentSection />
+      <AppearanceSection />
       <AcctNotifySection />
-
-      <View style={{ marginTop: 12 }}>
-        {user ? <AcctLinkRow title="API keys" icon="key" hint="What Cursor, Claude Code or a CI job presents to the MCP endpoint." onPress={() => router.push("/settings/api-keys")} /> : null}
-        {user ? <AcctLinkRow title="Signed-in devices" icon="smartphone" hint="Sessions holding your account. Sign one out if you do not recognise it." onPress={() => router.push("/settings/devices")} /> : null}
-        <AcctLinkRow title="Recent activity" icon="list" hint="Every state-changing call made as you." onPress={() => router.push("/(tabs)/activity")} />
-        {isAdmin && me?.mode === "saas" ? <AcctLinkRow title="Manage users" icon="shield" onPress={() => router.push("/settings/admin")} /> : null}
-        <AcctLinkRow title="Connect an IDE" icon="zap" onPress={() => router.push("/settings/connect")} />
-      </View>
+      {user ? <ApiKeysSection /> : null}
+      {user ? <DevicesSection /> : null}
 
       {!user ? (
         <T variant="meta" tone="muted">

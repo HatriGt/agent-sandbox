@@ -22,15 +22,9 @@ void SplashScreen.preventAutoHideAsync();
 
 /** Content screens: platform push so the iOS edge swipe-back tracks the finger. */
 const PUSH = { animation: "default", gestureEnabled: true, fullScreenGestureEnabled: true } as const;
-const PUSH_SCREENS = [
-  "box/[name]",
-  "automation/[id]",
-  "playbook/[id]",
-  "harness/[id]",
-  "pr/[repo]/[number]",
-  "files/[name]",
-  ...["account", "accounts", "admin", "api-keys", "connect", "devices", "harnesses", "inbox", "mcp", "memory", "playbooks", "providers", "repo-setup", "secrets", "skills"].map((s) => `settings/${s}`),
-];
+/** Auth, redirects and the tab shell cross-fade: there is no "back" to them. */
+const FADE = { animation: "fade", animationDuration: 160, gestureEnabled: false } as const;
+const FADE_SCREENS = ["index", "welcome", "sign-in", "sign-up", "connect-server", "github-auth", "(tabs)", "dashboard/box/[name]", "dashboard/pr/[repo]/[number]"];
 
 function Shell() {
   const { palette, dark } = useTheme();
@@ -60,16 +54,16 @@ function Shell() {
         screenOptions={{
           headerShown: false,
           contentStyle: { backgroundColor: palette.background },
-          // Auth/booting/welcome cross-fade; content screens below get the platform push so the
-          // iOS edge swipe-back tracks the finger (a custom animation weakens the interactive pop).
-          animation: "fade",
-          animationDuration: 160,
+          // Platform push by default so every content screen gets the native transition and the
+          // iOS edge swipe-back tracks the finger. Only the auth/boot screens below cross-fade.
+          ...PUSH,
         }}
       >
-        <Stack.Screen name="new" options={{ presentation: "modal", animation: "slide_from_bottom" }} />
-        {PUSH_SCREENS.map((name) => (
-          <Stack.Screen key={name} name={name} options={PUSH} />
+        {FADE_SCREENS.map((name) => (
+          <Stack.Screen key={name} name={name} options={FADE} />
         ))}
+        {/* Boot is replaced in place by the box once it attaches; swiping back mid-boot would orphan it. */}
+        <Stack.Screen name="booting" options={{ gestureEnabled: false, fullScreenGestureEnabled: false }} />
       </Stack>
       <PushBridge />
       <ShareBridge />

@@ -4,7 +4,7 @@ import * as Clipboard from "expo-clipboard";
 import * as WebBrowser from "expo-web-browser";
 import { api, type AccountView, type AccountsResponse } from "@/lib/api";
 import { useTheme } from "@/theme/ThemeContext";
-import { SettingsScreen } from "@/components/SettingsScreen";
+import { AcctSection } from "@/components/settings/AcctSections";
 import { T } from "@/components/ui/AppText";
 import { ArmButton } from "@/components/ui/ArmButton";
 import { Button } from "@/components/ui/Button";
@@ -17,7 +17,7 @@ import { FadeIn, FadeInUp, stagger } from "@/components/motion";
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /** GitHub accounts (web: Accounts.tsx): avatar · login · default · masked token · orgs; "Add account" sheet. */
-export default function GithubAccounts() {
+export function AccountsSection() {
   const [data, setData] = useState<AccountsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -31,10 +31,7 @@ export default function GithubAccounts() {
   const oauth = data?.oauth ?? false;
 
   return (
-    <SettingsScreen title="GitHub accounts">
-      <T variant="micro" tone="faint">
-        clone · read PRs · push
-      </T>
+    <AcctSection title="GitHub accounts" meta="clone · read PRs · push">
       {error ? (
         <FadeIn style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
           <T variant="meta" tone="destructive" style={{ flex: 1 }}>
@@ -88,7 +85,7 @@ export default function GithubAccounts() {
           />
         ) : null}
       </Sheet>
-    </SettingsScreen>
+    </AcctSection>
   );
 }
 

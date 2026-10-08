@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Animated, Pressable, View } from "react-native";
+import { Animated, Pressable, TextInput, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { api, type AgentChoice, type AgentId, type AgentPrefs, type HarnessView, type ProviderView, type WorkflowView } from "@/lib/api";
 import { useTheme } from "@/theme/ThemeContext";
-import { radius } from "@/theme/tokens";
+import { fonts, radius, type } from "@/theme/tokens";
 import { T } from "../ui/AppText";
 import { Button } from "../ui/Button";
 import { Icon, type IconName } from "../ui/Icon";
@@ -19,7 +19,13 @@ import { PressScale } from "@/components/motion";
  */
 
 export type Attempts = 1 | 2 | 3;
-export type RunSection = "agent" | "provider" | "harness" | "workflow" | "attempts";
+export type RunSection = "agent" | "provider" | "harness" | "workflow" | "attempts" | "verify";
+
+/** Optional post-run verification: a command run in the sandbox, or a criterion a read-only checker judges. */
+export interface VerifySpec {
+  mode: "command" | "criterion";
+  text: string;
+}
 
 export interface RunOptions {
   /** null = the stored default agent (`AgentPrefs.defaultAgent`). */
@@ -281,6 +287,9 @@ export function RunSettingsSheet({
   loading,
   error,
   onRetry,
+  sections,
+  title = "Run settings",
+  verify,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -290,12 +299,18 @@ export function RunSettingsSheet({
   loading: boolean;
   error: string | null;
   onRetry: () => void;
+  /** Only these sections (the web's toolbar menus open one at a time); default: all of them. */
+  sections?: RunSection[];
+  title?: string;
+  /** Wire the verify row in (the "More" menu on web); absent = not shown. */
+  verify?: { value: VerifySpec | null; onChange: (v: VerifySpec | null) => void };
 }) {
   const { palette } = useTheme();
   const [confirming, setConfirming] = useState<AgentId | null>(null);
   useEffect(() => {
     if (!visible) setConfirming(null);
   }, [visible]);
+  const show = (s: RunSection) => !sections || sections.includes(s);
 
   const prefs = sources.prefs;
   const defaultAgent = prefs?.defaultAgent ?? null;
@@ -322,7 +337,7 @@ export function RunSettingsSheet({
   const empty = !loading && !error && !prefs && !sources.harnesses.length && !sources.workflows.length && !sources.providers.length;
 
   return (
-    <Sheet visible={visible} onClose={onClose} title="Run settings">
+    <Sheet visible={visible} onClose={onClose} title={title}>
       <View style={{ paddingBottom: 12 }}>
         {error ? (
           <View style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 8, paddingVertical: 6 }}>
@@ -339,7 +354,7 @@ export function RunSettingsSheet({
         ) : null}
 
         {/* ── Agent ── */}
-        {prefs && prefs.agents.length > 0 ? (
+        {show("agent") && prefs && prefs.agents.length > 0 ? (
           <>
             <SectionTitle title="Agent" hint="Which coding agent drives this thread." />
             {prefs.agents.map((a) => {
@@ -386,7 +401,7 @@ export function RunSettingsSheet({
         ) : null}
 
         {/* ── Model provider ── */}
-        {sources.providers.length > 0 ? (
+        {show("provider") && sources.providers.length > 0 ? (
           <>
             <SectionTitle title="Model provider" hint="Your own key or endpoint. Built-in uses the deployment's model." />
             <RadioRow
@@ -438,7 +453,7 @@ export function RunSettingsSheet({
         ) : null}
 
         {/* ── Harness ── */}
-        {sources.harnesses.length > 0 ? (
+        {show("harness") && sources.harnesses.length > 0 ? (
           <>
             <SectionTitle title="Harness" hint="A saved bundle of agent, model and rules. Explicit picks here still win." />
             <RadioRow
@@ -489,7 +504,7 @@ export function RunSettingsSheet({
         ) : null}
 
         {/* ── Playbook ── */}
-        {sources.workflows.length > 0 ? (
+        {show("workflow") && sources.workflows.length > 0 ? (
           <>
             <SectionTitle title="Playbook" hint="The task becomes the first step of a saved workflow." />
             <RadioRow
@@ -517,6 +532,8 @@ export function RunSettingsSheet({
         ) : null}
 
         {/* ── Attempts ── */}
+        {show("attempts") ? (
+          <>
         <SectionTitle title="Attempts" />
         <View style={{ paddingHorizontal: 8, gap: 6 }}>
           <View
@@ -561,8 +578,78 @@ export function RunSettingsSheet({
               : `Runs it ${value.attempts} ways on ${value.attempts} machines; the best attempt gets the PR.`}
           </T>
         </View>
+          </>
+        ) : null}
+
+        {/* ── Verify ── */}
+        {show("verify") && verify ? <VerifySection value={verify.value} onChange={verify.onChange} /> : null}
       </View>
     </Sheet>
+  );
+}
+
+/** The web's VerifyRow: mode toggle + one field; empty text clears the spec. */
+function VerifySection({ value, onChange }: { value: VerifySpec | null; onChange: (v: VerifySpec | null) => void }) {
+  const { palette } = useTheme();
+  // The mode survives an empty field so switching to "criterion" before typing is remembered.
+  const [mode, setMode] = useState<VerifySpec["mode"]>(value?.mode ?? "command");
+  const text = value?.text ?? "";
+  return (
+    <>
+      <SectionTitle title="Verify" hint="Checked after the agent finishes; shows as a chip once filled." />
+      <View style={{ paddingHorizontal: 8, gap: 8 }}>
+        <View style={{ flexDirection: "row", gap: 6 }}>
+          {(["command", "criterion"] as const).map((m) => (
+            <PressScale
+              key={m}
+              onPress={() => {
+                Haptics.selectionAsync().catch(() => {});
+                setMode(m);
+                if (text) onChange({ mode: m, text });
+              }}
+              accessibilityRole="radio"
+              accessibilityState={{ checked: mode === m }}
+              style={{
+                paddingVertical: 6,
+                paddingHorizontal: 12,
+                borderRadius: radius.pill,
+                borderWidth: 1,
+                borderColor: palette.border,
+                backgroundColor: mode === m ? palette.accent : "transparent",
+              }}
+            >
+              <T variant="meta" weight={mode === m ? "semibold" : "regular"}>
+                {m === "command" ? "Command" : "Criterion"}
+              </T>
+            </PressScale>
+          ))}
+        </View>
+        <TextInput
+          value={text}
+          onChangeText={(t) => onChange(t ? { mode, text: t } : null)}
+          placeholder={mode === "command" ? "npm test" : "what must be true when it's done"}
+          placeholderTextColor={palette.faint}
+          autoCapitalize="none"
+          autoCorrect={false}
+          style={{
+            borderWidth: 1,
+            borderColor: palette.input,
+            borderRadius: radius.lg,
+            backgroundColor: palette.card,
+            paddingHorizontal: 12,
+            paddingVertical: 10,
+            color: palette.foreground,
+            fontFamily: mode === "command" ? fonts.mono : fonts.sans,
+            fontSize: type.body.fontSize,
+          }}
+        />
+        <T variant="micro" tone="faint">
+          {mode === "command"
+            ? "Runs in the sandbox after the agent finishes — exit 0 means verified."
+            : "A read-only checker judges this — it can't edit anything."}
+        </T>
+      </View>
+    </>
   );
 }
 

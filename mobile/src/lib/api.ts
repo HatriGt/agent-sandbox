@@ -1228,8 +1228,8 @@ export interface AgentPrefs {
 }
 export const autopilotApi = {
   secrets: () => get<SecretsResponse>("/secrets.json"),
-  /** Store (or replace) a value. */
-  saveSecret: (name: string, value: string) => post<SecretsResponse>("/secrets.json", { action: "save", name, value }),
+  /** Store (or replace) a value; `repo` (owner/name) also grants it to that repo's setup profile. */
+  saveSecret: (name: string, value: string, repo?: string) => post<SecretsResponse>("/secrets.json", { action: "save", name, value, ...(repo ? { repo } : {}) }),
   removeSecret: (name: string) => post<SecretsResponse>("/secrets.json", { action: "remove", name }),
   /** `defaultModel: ""` clears the preference (the agent's own default applies). */
   saveAgentDefaults: (body: { defaultAgent: AgentId; defaultModel?: string; allowPartialSupervision?: boolean }) => post<AgentPrefs>("/agent-prefs.json", body),

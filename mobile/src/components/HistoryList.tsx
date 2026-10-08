@@ -3,6 +3,7 @@ import { Animated, FlatList, View, type StyleProp, type ViewStyle } from "react-
 import { useRouter } from "expo-router";
 import { api, ledgerApi, type LedgerRow, type LedgerTotals, type RunDigest } from "@/lib/api";
 import { ago, durationWords, friendlyName } from "@/lib/format";
+import { composeTask } from "@/state/composerFocus";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { T } from "./ui/AppText";
@@ -262,7 +263,7 @@ const HistoryRow = memo(function HistoryRow({
                   title="Run again"
                   variant="secondary"
                   small
-                  onPress={() => router.push({ pathname: "/new", params: { task: r.task ?? "" } })}
+                  onPress={() => composeTask({ task: r.task ?? "" })}
                 />
                 <ArmButton title="Forget" armedTitle="Delete record?" small onConfirm={() => onForget(r.id)} />
               </View>
