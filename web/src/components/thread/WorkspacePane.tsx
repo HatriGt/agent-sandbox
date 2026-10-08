@@ -11,7 +11,7 @@ import { CodeEditor } from "@/components/CodeEditor";
 import { AnimatedTabs } from "@/components/ui/animated-tabs";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { DiffView } from "./FilePane";
+import { DiffView, useHunkReview } from "./FilePane";
 import { RecordsTable } from "./RecordsTable";
 import { cn } from "@/lib/utils";
 
@@ -639,6 +639,8 @@ function FileView({ session, tab, change, onMode, onDraft, onSaving, onSaved }: 
   const [loading, setLoading] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const mode = tab.mode;
+  // Accept / reject per hunk, as in Review all; a reject refreshes the changes list.
+  const review = useHunkReview(session, tab.path, diff, { onDiscarded: onSaved });
 
   React.useEffect(() => {
     let cancelled = false;
@@ -770,7 +772,7 @@ function FileView({ session, tab, change, onMode, onDraft, onSaving, onSaved }: 
           </p>
         ) : mode === "diff" && diff ? (
           <div className="h-full overflow-auto">
-            <DiffView diff={diff} path={tab.path} />
+            <DiffView diff={diff} path={tab.path} review={review} />
           </div>
         ) : mode === "edit" && content !== null ? (
           deleted ? (

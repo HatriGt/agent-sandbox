@@ -1,5 +1,5 @@
 import * as React from "react";
-import { AlertTriangle, ArrowUpRight, Brain, Check, ChevronDown, ChevronRight, Clock, Copy, FileText, KeyRound, Loader2, MessageCircleQuestion, Play, Terminal, Undo2 } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, Brain, Check, ChevronDown, ChevronRight, Clock, Copy, FileSearch, FileText, KeyRound, Loader2, MessageCircleQuestion, Play, Terminal, Undo2 } from "lucide-react";
 import { CodeNavContext } from "@/components/ui/code-ref";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { resultSummary, type TraceEvent } from "@/lib/trace";
@@ -552,6 +552,8 @@ export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolea
  */
 export function ToolStepsList({ events, live, className, plain }: { events: ToolEvent[]; live?: boolean; className?: string; plain?: boolean }) {
   const still = useReducedMotion();
+  const density = React.useContext(Density);
+  const rows = React.useMemo(() => foldLookups(events, live, density), [events, live, density]);
   return (
     <motion.ol
       initial={still || plain ? false : { height: 0, opacity: 0 }}
@@ -566,9 +568,15 @@ export function ToolStepsList({ events, live, className, plain }: { events: Tool
       // the list is SHORTER than the cap, so a wheel over an open timeline scrolled nothing.
       className={cn("relative max-h-[32rem] overflow-y-auto", plain ? "mt-1" : "work-surface mt-2", className)}
     >
-      {events.map((e, i) => {
+      {rows.map((row, r) => {
+        const lastRow = r === rows.length - 1;
+        if (Array.isArray(row)) return <LookupFold key={`fold-${row[0]}`} events={row.map((i) => events[i])} indexes={row} all={events} last={lastRow} renderStep={renderStep} />;
+        return renderStep(events[row], row, lastRow);
+      })}
+    </motion.ol>
+  );
+  function renderStep(e: ToolEvent, i: number, last: boolean) {
         const running = !!live && (!e.result || !!e.streaming);
-        const last = i === events.length - 1;
         const state = running ? "running" : e.failed ? "failed" : "done";
         // Step and shell rows carry their own chip; MCP / skill rows get one here.
         const ownChip = !parseMcpName(e.name) && e.name !== "Skill";
@@ -603,9 +611,7 @@ export function ToolStepsList({ events, live, className, plain }: { events: Tool
             {!ownChip && <DurationChip event={e} running={running} className="mt-1.5" />}
           </motion.li>
         );
-      })}
-    </motion.ol>
-  );
+  }
 }
 
 /** A shell command as a terminal panel: `$ cmd`, then its output, on the dark trace ground. */
@@ -824,6 +830,111 @@ function EditDiff({ diff }: { diff: string }) {
 }
 
 /** Non-shell tool (Write / Read / Edit / Grep …): compact step row, arg as a code chip, output folded. */
+/**
+ * A step reads like a sentence — "Read src/trace.ts", "Searched for useResults" — not like a log
+ * line ("Read: src/trace.ts"). Present tense while it runs. The raw tool name stays as the title.
+ */
+export function stepVerb(event: ToolEvent, live: boolean): string {
+  const n = event.name.toLowerCase();
+  const v = (done: string, doing: string) => (live ? doing : done);
+  if (n === "read" || n === "cat") return v("Read", "Reading");
+  if (n === "grep" || n === "search" || n === "rg") return v("Searched for", "Searching for");
+  if (n === "glob" || n === "find") return v("Looked for", "Looking for");
+  if (n === "ls" || n === "list") return v("Listed", "Listing");
+  if (n === "edit" || n === "multiedit" || n === "notebookedit" || n === "patch" || n === "apply_patch") return v("Edited", "Editing");
+  if (n === "write") return v("Wrote", "Writing");
+  if (n === "webfetch" || n === "fetch") return v("Fetched", "Fetching");
+  if (n === "websearch" || n === "web_search") return v("Searched the web for", "Searching the web for");
+  if (n === "task" || n === "agent" || n === "delegate") return v("Delegated", "Delegating");
+  if (n === "todowrite" || n === "update_plan" || n === "write_todos") return v("Updated the plan", "Updating the plan");
+  if (n === "askuserquestion" || n === "ask") return v("Asked you", "Asking you");
+  return event.name;
+}
+
+/** Lookups: reads and searches, the research between the steps that change something. */
+const LOOKUP_TOOLS = /^(read|cat|grep|rg|search|glob|find|ls|list|webfetch|fetch|websearch|web_search)$/i;
+
+/**
+ * Back-to-back finished lookups fold into one row — "Explored 6 files · 2 searches" — so a long
+ * research stretch is one line, while anything that changed something, failed, or is still running
+ * keeps its own line. Runs shorter than three stay as they are; the trace density never folds.
+ */
+function foldLookups(events: ToolEvent[], live: boolean | undefined, density: ThreadDensity): (number | number[])[] {
+  const out: (number | number[])[] = [];
+  let run: number[] = [];
+  const flush = () => {
+    if (run.length >= 3) out.push(run);
+    else out.push(...run);
+    run = [];
+  };
+  events.forEach((e, i) => {
+    const running = !!live && (!e.result || !!e.streaming);
+    const foldable = density !== "trace" && !running && !e.failed && LOOKUP_TOOLS.test(e.name) && !e.diff;
+    if (foldable) run.push(i);
+    else {
+      flush();
+      out.push(i);
+    }
+  });
+  flush();
+  return out;
+}
+
+function lookupSummary(events: ToolEvent[]): string {
+  const files = new Set<string>();
+  let searches = 0;
+  let web = 0;
+  for (const e of events) {
+    const n = e.name.toLowerCase();
+    if (n === "read" || n === "cat") files.add((e.arg ?? "").split(/\s/)[0]);
+    else if (n === "webfetch" || n === "fetch" || n === "websearch" || n === "web_search") web += 1;
+    else searches += 1;
+  }
+  const parts = [
+    files.size ? `Explored ${files.size} ${files.size === 1 ? "file" : "files"}` : null,
+    searches ? `${searches} ${searches === 1 ? "search" : "searches"}` : null,
+    web ? `${web} web ${web === 1 ? "lookup" : "lookups"}` : null,
+  ].filter(Boolean) as string[];
+  if (!parts.length) return `${events.length} lookups`;
+  if (!files.size) parts[0] = parts[0][0].toUpperCase() + parts[0].slice(1);
+  return parts.join(" · ");
+}
+
+/** The folded lookups row: a stacked-files glyph, the summary, the summed time, and the rows behind it. */
+function LookupFold({ events, indexes, all, last, renderStep }: { events: ToolEvent[]; indexes: number[]; all: ToolEvent[]; last: boolean; renderStep: (e: ToolEvent, i: number, last: boolean) => React.ReactNode }) {
+  const [open, setOpen] = React.useState(false);
+  const still = useReducedMotion();
+  const ms = events.reduce((n, e) => n + (e.ms ?? 0), 0);
+  const stamped = events.some((e) => e.ms !== undefined);
+  return (
+    <motion.li initial={still ? false : { opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }} transition={still ? { duration: 0 } : SPRING} className="relative flex gap-3 pb-2 last:pb-0">
+      <span className="relative flex w-4 shrink-0 flex-col items-center">
+        <span className="border-line-strong bg-card text-muted-foreground z-10 mt-2 grid size-3.5 place-items-center rounded-full border">
+          <FileSearch className="size-2" strokeWidth={2.5} aria-hidden />
+        </span>
+        {!last && <span className="bg-border absolute top-[1.4rem] bottom-0 w-px" aria-hidden />}
+      </span>
+      <div className="min-w-0 flex-1">
+        <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} className="hover:bg-muted flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-left text-meta">
+          <span className="text-foreground min-w-0 truncate font-medium">{lookupSummary(events)}</span>
+          <span className="text-faint shrink-0 text-micro tabular-nums">{events.length} steps</span>
+          <span className="ml-auto flex shrink-0 items-center gap-2 pl-1">
+            {stamped && <span className="text-faint text-micro tabular-nums">{formatDuration(ms)}</span>}
+            <ChevronRight className={cn("text-muted-foreground size-3.5 transition-transform duration-150", open && "rotate-90")} aria-hidden />
+          </span>
+        </button>
+        <AnimatePresence initial={false}>
+          {open && (
+            <motion.ol initial={still ? false : { height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={still ? { opacity: 0, transition: { duration: 0 } } : { height: 0, opacity: 0 }} transition={still ? { duration: 0 } : { height: SPRING, opacity: { duration: 0.16 } }} className="mt-1 overflow-hidden">
+              {indexes.map((i, k) => renderStep(all[i], i, k === indexes.length - 1))}
+            </motion.ol>
+          )}
+        </AnimatePresence>
+      </div>
+    </motion.li>
+  );
+}
+
 function StepItem({ event, live }: { event: ToolEvent; live?: boolean }) {
   const [open, setOpen] = React.useState(false);
   const summary = resultSummary(event.result);
@@ -862,7 +973,7 @@ function StepItem({ event, live }: { event: ToolEvent; live?: boolean }) {
             <FileText className="text-muted-foreground size-3.5" aria-hidden />
           )}
         </StatusGlyph>
-        <span className="text-foreground shrink-0 font-medium">{event.name}</span>
+        <span className="text-foreground shrink-0 font-medium" title={event.name}>{stepVerb(event, !!live)}</span>
         {event.arg && (
           <code className="text-muted-foreground bg-muted min-w-0 truncate rounded px-1.5 py-0.5 font-mono text-micro">
             {event.arg}

@@ -1,0 +1,22 @@
+/* Streaming prose: the soft fade on freshly revealed words. Imported by
+   components/thread/StreamingMarkdown.tsx. The pacing itself lives in lib/stream-pace.ts; this
+   file only says how a word that has just landed looks.
+
+   A word is wrapped in `.md-fresh` the frame it is revealed and stays wrapped until its fade has
+   finished (FADE_MS in lib/stream-pace.ts); it is then returned to the plain text run at opacity 1,
+   so the hand-over is invisible. Opacity only — no transform, no blur — so the text never moves and
+   line breaking is identical to the finished paragraph. */
+.md-fresh {
+  animation: md-fresh-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes md-fresh-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+:root[data-motion="reduced"] .md-fresh {
+  animation: none;
+}

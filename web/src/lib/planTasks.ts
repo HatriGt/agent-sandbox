@@ -37,10 +37,26 @@ export interface TaskEvidence {
   ms?: number;
   /** The most recent attributed call — what the step is doing right now, while it is still active. */
   latest?: { name: string; arg?: string };
+  /** The most recent attributed call that came back as an error — the reason a failed step shows. */
+  failedCall?: { name: string; arg?: string };
 }
 
 export interface DerivedTask extends PlanItem {
   evidence: TaskEvidence;
+}
+
+/** What the LAST plan rewrite did to the step list, so the board can say it instead of silently swapping. */
+export interface PlanChanges {
+  /** Step texts present in the latest snapshot but not the previous one. */
+  added: string[];
+  /** Step texts present in the previous snapshot but gone from the latest. */
+  removed: string[];
+  /** Steps whose wording changed in place — close enough to read as an edit, not a swap. */
+  reworded: { from: string; to: string }[];
+  /** True when surviving steps changed their relative order. */
+  reordered?: boolean;
+  /** Stamp of the snapshot that made the change, when the log carries stamps. */
+  at?: number;
 }
 
 export interface TaskBoard {
@@ -50,6 +66,8 @@ export interface TaskBoard {
   complete: boolean;
   /** Number of plan snapshots — how many times the agent rewrote its own plan. */
   revisions: number;
+  /** The diff the last revision made to the step list; absent when it only moved statuses. */
+  changes?: PlanChanges;
   /** Total time across all attributed windows, when the log carries stamps. */
   ms?: number;
   /** Stamp of the snapshot that put the current active step in progress — the open window a live row ticks from. */
@@ -63,6 +81,81 @@ function blank(): TaskEvidence {
 /** Strip the workspace prefix so a chip reads `src/trace.ts`, not `/workspace/src/trace.ts`. */
 export function shortPath(p: string): string {
   return p.replace(/^\/workspace\/?/, "").replace(/^\/+/, "") || p;
+}
+
+const words = (t: string): string[] => t.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 1);
+
+/**
+ * Dice coefficient over word sets — enough to tell "Add tests" → "Add burst tests" (a rewording) from
+ * "Add tests" → "Open a pull request" (a different step). Dependency-free on purpose.
+ */
+export function stepSimilarity(a: string, b: string): number {
+  if (a === b) return 1;
+  const wa = new Set(words(a));
+  const wb = new Set(words(b));
+  if (!wa.size || !wb.size) return 0;
+  let shared = 0;
+  for (const w of wa) if (wb.has(w)) shared += 1;
+  return (2 * shared) / (wa.size + wb.size);
+}
+
+const REWORD_MIN = 0.5;
+
+/**
+ * Diff two snapshots by step text. A step that vanished at one position while a similar one appeared
+ * at the same position is a rewording; anything else is a removal plus an addition. Returns null when
+ * only statuses moved — the common case, which should not be reported as a change at all.
+ */
+export function diffPlan(prev: PlanItem[], next: PlanItem[], at?: number): PlanChanges | null {
+  const prevTexts = prev.map((i) => i.text);
+  const nextTexts = next.map((i) => i.text);
+  const prevSet = new Set(prevTexts);
+  const nextSet = new Set(nextTexts);
+  const gone = prevTexts.filter((t) => !nextSet.has(t));
+  const fresh = nextTexts.filter((t) => !prevSet.has(t));
+  const reworded: { from: string; to: string }[] = [];
+  const removed: string[] = [];
+  const added = new Set(fresh);
+  for (const from of gone) {
+    const pos = prevTexts.indexOf(from);
+    const to = nextTexts[pos];
+    if (to !== undefined && added.has(to) && stepSimilarity(from, to) >= REWORD_MIN) {
+      reworded.push({ from, to });
+      added.delete(to);
+    } else {
+      removed.push(from);
+    }
+  }
+  // Reorder: the survivors (by text, rewordings mapped forward) must keep their relative order.
+  const forward = new Map(reworded.map((r) => [r.from, r.to]));
+  const survivors = prevTexts.map((t) => forward.get(t) ?? t).filter((t) => nextSet.has(t));
+  const kept = nextTexts.filter((t) => survivors.includes(t));
+  const reordered = survivors.some((t, i) => kept[i] !== t);
+  if (!added.size && !removed.length && !reworded.length && !reordered) return null;
+  return {
+    added: [...added],
+    removed,
+    reworded,
+    ...(reordered ? { reordered } : {}),
+    ...(at !== undefined ? { at } : {}),
+  };
+}
+
+const clip = (t: string, n = 32): string => (t.length > n ? `${t.slice(0, n - 1).trimEnd()}…` : t);
+
+/** `1 step added, 1 removed` · `reworded 'Add tests' → 'Add burst tests'` — the note under the header. */
+export function describeChanges(c: PlanChanges): string {
+  const parts: string[] = [];
+  if (c.added.length) parts.push(`${c.added.length} step${c.added.length === 1 ? "" : "s"} added`);
+  if (c.removed.length) parts.push(`${c.removed.length} removed`);
+  if (c.reworded.length === 1 && !parts.length) {
+    const [r] = c.reworded;
+    parts.push(`reworded '${clip(r.from)}' → '${clip(r.to)}'`);
+  } else if (c.reworded.length) {
+    parts.push(`${c.reworded.length} reworded`);
+  }
+  if (c.reordered) parts.push(parts.length ? "reordered" : "steps reordered");
+  return parts.join(", ");
 }
 
 /**
@@ -81,6 +174,7 @@ export function deriveTaskBoard(events: TraceEvent[]): TaskBoard | null {
 
   let latest: PlanItem[] | null = null;
   let revisions = 0;
+  let changes: PlanChanges | null = null;
   // The step currently collecting work, and when its window opened.
   let openKey: string | null = null;
   let openAt: number | undefined;
@@ -92,6 +186,13 @@ export function deriveTaskBoard(events: TraceEvent[]): TaskBoard | null {
         const e = evidence(openKey);
         e.ms = (e.ms ?? 0) + Math.max(0, ev.at - openAt);
       }
+      // Only the LAST revision's diff is reported, but a rewording at any revision carries its evidence
+      // forward: both texts share one bucket, so nothing collected under the old wording is lost.
+      changes = latest ? diffPlan(latest, ev.items, ev.at) : null;
+      for (const r of changes?.reworded ?? []) {
+        const old = acc.get(r.from);
+        if (old && !acc.has(r.to)) acc.set(r.to, old);
+      }
       latest = ev.items;
       revisions += 1;
       const active = ev.items.find((i) => i.state === "active");
@@ -102,8 +203,11 @@ export function deriveTaskBoard(events: TraceEvent[]): TaskBoard | null {
     if (ev.kind === "tool" && openKey !== null) {
       const e = evidence(openKey);
       e.steps += 1;
-      if (ev.failed) e.failed = true;
       e.latest = { name: ev.name, arg: ev.arg };
+      if (ev.failed) {
+        e.failed = true;
+        e.failedCall = { name: ev.name, arg: ev.arg };
+      }
       const arg = (ev.arg ?? "").trim();
       if (ev.name === "Bash") {
         if (arg && !e.commands.includes(arg)) e.commands.push(arg);
@@ -129,6 +233,7 @@ export function deriveTaskBoard(events: TraceEvent[]): TaskBoard | null {
     done,
     complete: tasks.length > 0 && done === tasks.length,
     revisions,
+    ...(changes ? { changes } : {}),
     ms: total > 0 ? total : undefined,
     ...(openKey !== null && openAt !== undefined ? { activeSince: openAt } : {}),
   };

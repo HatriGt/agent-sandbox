@@ -1,0 +1,28 @@
+/* Plan board motion: what a plan rewrite looks like. Imported by PlanBoard.tsx so it ships with the
+   thread chunk. Timings live here rather than in motion props because a wash is a one-shot CSS
+   keyframe — cheaper than a spring and it never fights the row's layout animation. */
+
+/* ── A step that arrived in the last revision ─────────────────────────────────────────────────────
+   A soft live-tinted wash that fades over ~1.6s. It runs once on mount (the class is only given to
+   rows whose text is new since the previous snapshot), so a re-render never replays it. */
+@keyframes plan-wash {
+  0% {
+    background-color: color-mix(in oklab, var(--live) 22%, transparent);
+  }
+  40% {
+    background-color: color-mix(in oklab, var(--live) 16%, transparent);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+.plan-row-new {
+  /* `backwards`, not `both`: once the wash ends the row's own background (the active tint) must win. */
+  animation: plan-wash 1.6s cubic-bezier(0.22, 1, 0.36, 1) 1 backwards;
+}
+
+/* Reduced motion: the row still arrives, the wash does not. The note and the collapsing rows fall
+   back to plain opacity in the component (useReducedMotion), so there is nothing else to undo here. */
+:root[data-motion="reduced"] .plan-row-new {
+  animation: none;
+}

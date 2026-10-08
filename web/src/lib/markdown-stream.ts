@@ -14,6 +14,8 @@
  *
  * Both are fixed by rendering the slice as the *stable* document it is on its way to becoming: hide
  * a fence marker that is still being typed, and virtually close a fence that is genuinely open. The
+ * same rule covers the smaller constructs on the growing edge — a half-typed table, code span, link,
+ * emphasis run, or a block marker with nothing after it yet (see the hold* helpers below). The
  * revealed text itself is untouched — this only affects what is handed to the markdown renderer.
  */
 
@@ -70,6 +72,8 @@ export function stabilizeMarkdown(revealed: string): string {
   } else {
     holdPartialTable(lines);
     holdPartialCodeSpan(lines);
+    holdEmptyMarker(lines);
+    holdPartialInline(lines);
   }
 
   return lines.join("\n");
@@ -99,15 +103,124 @@ const TABLE_DELIM_RE = /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?\s*$/;
  * and `| --- |`, the lexer sees a paragraph of pipes ("| Scenario | Before | After |") which then
  * snaps into a table — the same prose-then-panel flicker as a fence. Hold back a trailing pipe row
  * (or two) that has no delimiter yet; it renders as a table on the frame the delimiter completes.
+ * A lone trailing "|" — the left edge of a row not typed yet — is held too: rendered, it is a stray
+ * bar (or an empty row) under the table.
  */
 function holdPartialTable(lines: string[]): void {
   let end = lines.length;
   // Ignore a trailing line still being typed if it is empty.
   while (end > 0 && lines[end - 1].trim() === "") end--;
+  if (end > 0 && lines[end - 1].trim() === "|") {
+    lines.splice(end - 1);
+    end = lines.length;
+  }
   let start = end;
   while (start > 0 && /^\s*\|/.test(lines[start - 1]) && lines[start - 1].trim() !== "") start--;
   const run = lines.slice(start, end);
   if (!run.length || run.length > 2) return;
   // Only a header row so far (or header + a delimiter still being typed): a table cannot render yet.
   if (run.length === 1 || !TABLE_DELIM_RE.test(run[1])) lines.splice(start, lines.length - start);
+}
+
+/**
+ * A block marker with nothing typed after it yet — "#", "## ", "- ", "1. ", "> ", "- [ ]" — is a
+ * frame away from being a heading, a list item or a quote. Rendered as-is it shows a stray glyph
+ * (or, for a lone "-", turns the paragraph above into a setext heading for one frame). Hold the line.
+ */
+const EMPTY_MARKER_RE = /^\s{0,3}(?:#{1,6}|[-*+]|\d{1,9}[.)]|>|(?:[-*+]|\d{1,9}[.)])\s+\[[ xX]?\]?)\s*$/;
+
+function holdEmptyMarker(lines: string[]): void {
+  const i = lines.length - 1;
+  if (i >= 0 && EMPTY_MARKER_RE.test(lines[i])) lines.pop();
+}
+
+/**
+ * Inline syntax on the growing edge of the slice: the last line is settled with `closeInline`.
+ * Fence lines and table rows are left alone (their pipes and backticks are structure, not markup).
+ */
+function holdPartialInline(lines: string[]): void {
+  const i = lines.length - 1;
+  if (i < 0) return;
+  const line = lines[i];
+  if (!line || FENCE_RE.test(line) || /^\s*\|/.test(line)) return;
+  const next = closeInline(line);
+  if (next !== line) lines[i] = next;
+}
+
+/** Blank out closed code spans (same length, so indices line up with the source line). */
+function maskCodeSpans(line: string): string {
+  return line.replace(/(`+)[^`]*?\1/g, (m) => " ".repeat(m.length));
+}
+
+const PUNCT = /[\p{P}\p{S}]/u;
+const SPACE = /\s/;
+
+/**
+ * One line → the same line with its open inline syntax settled. Decisions are made on a MASK of the
+ * line in which code spans are blanked, so a `*` or `[` inside backticks is never read as markup.
+ *
+ *  · an unclosed link — "see [the docs", "[the docs](https://ex", "[the docs]" — renders its text
+ *    plainly; the link appears whole when the URL closes. A half-typed image is held entirely.
+ *  · an unclosed emphasis run — "**bold te", "*em", "_em", "~~gone" — is virtually closed, so the
+ *    text is styled from its first frame and never flips from plain to bold when the close lands.
+ *  · a delimiter run with nothing after it yet ("text **", "**") is held: it would render literally.
+ *
+ * Exported for the test file only.
+ */
+export function closeInline(line: string): string {
+  let out = line;
+  let mask = maskCodeSpans(out);
+
+  // --- links ---------------------------------------------------------------------------------
+  // `[text` (no `]` yet) · `[text](ur` (no `)` yet) · `[text]` at the very end (the `(` is next).
+  // A task-list box ("- [ ]", "- [x]") is a list marker, not a link.
+  const link = /(!?)\[([^[\]]*)(?:\]\(([^()]*)|\])?$/.exec(mask);
+  if (link) {
+    const at = link.index;
+    const image = link[1] === "!";
+    const closedText = link[0].endsWith("]") && link[3] === undefined;
+    const text = link[2];
+    const taskBox = closedText && /^[ xX]$/.test(text) && /^\s*(?:[-*+]|\d{1,9}[.)])\s+$/.test(mask.slice(0, at));
+    if (!taskBox) {
+      const plain = image ? "" : out.slice(at + 1, at + 1 + text.length);
+      out = (out.slice(0, at) + plain).replace(/\s+$/, "");
+      mask = maskCodeSpans(out);
+    }
+  }
+
+  // --- emphasis ------------------------------------------------------------------------------
+  // Walk delimiter runs left to right with a stack of openers (CommonMark flanking rules, simplified:
+  // `_` never opens or closes inside a word, `*` may). Whatever is still open at the end is closed.
+  const open: { run: string; at: number }[] = [];
+  const re = /\*{1,3}|_{1,3}|~~/g;
+  let m: RegExpExecArray | null;
+  let dangling: number | null = null; // a run at the very end that neither opened nor closed
+  while ((m = re.exec(mask))) {
+    const run = m[0];
+    const end = m.index + run.length;
+    const before = m.index === 0 ? " " : mask[m.index - 1];
+    const after = end >= mask.length ? " " : mask[end];
+    const leftFlank = !SPACE.test(after) && (!PUNCT.test(after) || SPACE.test(before) || PUNCT.test(before));
+    const rightFlank = !SPACE.test(before) && (!PUNCT.test(before) || SPACE.test(after) || PUNCT.test(after));
+    const intraword = /\w/.test(before) && /\w/.test(after);
+    const underscore = run[0] === "_";
+    const canClose = rightFlank && !(underscore && intraword);
+    const canOpen = leftFlank && !(underscore && intraword);
+    const k = canClose ? open.map((o) => o.run).lastIndexOf(run) : -1;
+    if (k >= 0) open.splice(k);
+    else if (canOpen) open.push({ run, at: m.index });
+    else if (end === mask.length) dangling = m.index;
+  }
+  if (dangling !== null) out = out.slice(0, dangling).replace(/\s+$/, "");
+  if (open.length) {
+    // Openers with nothing after them yet ("**", "text **_") are held; the rest are closed, innermost
+    // first, after trailing whitespace (a closer after a space is not right-flanking).
+    out = out.replace(/\s+$/, "");
+    while (open.length && out.endsWith(open[open.length - 1].run) && open[open.length - 1].at + open[open.length - 1].run.length >= out.length) {
+      out = out.slice(0, open[open.length - 1].at).replace(/\s+$/, "");
+      open.pop();
+    }
+    for (let j = open.length - 1; j >= 0; j--) out += open[j].run;
+  }
+  return out;
 }

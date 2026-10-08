@@ -1,8 +1,13 @@
 import { cn } from "@/lib/utils"
 import { marked } from "marked"
-import { Children, isValidElement, memo, useId, useMemo, type ReactElement, type ReactNode } from "react"
+import { Children, createContext, isValidElement, memo, useCallback, useContext, useId, useMemo, useState, type ComponentProps, type ReactElement, type ReactNode } from "react"
 import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown"
 import remarkGfm from "remark-gfm"
+import { ArrowUpRight, Check, Ellipsis, Link2 } from "lucide-react"
+import { toast } from "sonner"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./dropdown-menu"
+import { csvField } from "@/lib/viz"
+import "@/styles/markdown.css"
 import { normalizeBlocks } from "@/lib/markdown-normalize"
 import { isCodeBlock } from "@/lib/markdown-code"
 import { splitOpenFence } from "@/lib/markdown-stream"
@@ -34,6 +39,144 @@ export type MarkdownProps = {
 function parseMarkdownIntoBlocks(markdown: string): string[] {
   const tokens = marked.lexer(normalizeBlocks(markdown))
   return tokens.map((token) => token.raw)
+}
+
+// ---------------------------------------------------------------- headings: stable ids
+
+/** "Sliding-window limiter is in" → "sliding-window-limiter-is-in" (GitHub-style; markup stripped). */
+export function slugify(text: string): string {
+  return text
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/[`*_~]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^\p{L}\p{N}\s-]/gu, "")
+    .replace(/\s+/g, "-")
+    .replace(/-{2,}/g, "-")
+    .replace(/^-|-$/g, "")
+}
+
+/** One id per heading block, de-duplicated across the document: `done`, `done-1`, `done-2`. */
+export function headingIds(blocks: string[]): (string | undefined)[] {
+  const seen = new Map<string, number>()
+  return blocks.map((raw) => {
+    const m = /^\s{0,3}#{1,6}\s+(.*?)\s*#*\s*$/.exec(raw.trim().split("\n")[0])
+    if (!m) return undefined
+    const base = slugify(m[1]) || "section"
+    const n = seen.get(base) ?? 0
+    seen.set(base, n + 1)
+    return n ? `${base}-${n}` : base
+  })
+}
+
+/** The id the enclosing block was assigned (marked emits one block per heading, so one id each). */
+const HeadingIdContext = createContext<string | undefined>(undefined)
+
+function HeadingAnchor({ id }: { id: string }) {
+  const [copied, setCopied] = useState(false)
+  const copy = useCallback(() => {
+    const hash = `#${id}`
+    void navigator.clipboard?.writeText(hash).then(
+      () => {
+        setCopied(true)
+        toast.success("Section link copied", { description: hash })
+        window.setTimeout(() => setCopied(false), 1600)
+      },
+      () => toast.error("Could not copy")
+    )
+  }, [id])
+  return (
+    <button type="button" className="md-anchor no-press" onClick={copy} aria-label="Copy link to this section" title="Copy link">
+      {copied ? <Check className="size-3.5 text-ok" aria-hidden /> : <Link2 className="size-3.5" aria-hidden />}
+    </button>
+  )
+}
+
+function heading(level: 1 | 2 | 3 | 4 | 5 | 6) {
+  const Tag = `h${level}` as const
+  return function HeadingComponent({ children, node: _node, ...props }: ComponentProps<typeof Tag> & { node?: unknown }) {
+    const id = useContext(HeadingIdContext)
+    return (
+      <Tag id={id} className="md-heading" {...props}>
+        {children}
+        {id && <HeadingAnchor id={id} />}
+      </Tag>
+    )
+  }
+}
+
+// ---------------------------------------------------------------- tables: copy menu
+
+type TableCells = { head: string[]; rows: string[][] }
+
+/** The same thead/tbody walk as viz/SmartBlock.tsx `tableFromMarkdown`, kept to each cell's text. */
+function tableCells(children: ReactNode): TableCells {
+  let head: string[] = []
+  const rows: string[][] = []
+  for (const section of Children.toArray(children)) {
+    if (!isValidElement<{ children?: ReactNode }>(section)) continue
+    const isHead = section.type === "thead"
+    for (const tr of Children.toArray(section.props.children)) {
+      if (!isValidElement<{ children?: ReactNode }>(tr)) continue
+      const cells = Children.toArray(tr.props.children)
+        .filter((c): c is ReactElement<{ children?: ReactNode }> => isValidElement(c))
+        .map((c) => nodeText(c.props.children).trim())
+      if (isHead && !head.length) head = cells
+      else rows.push(cells)
+    }
+  }
+  return { head, rows }
+}
+
+export function tableToMarkdown({ head, rows }: TableCells): string {
+  const cell = (s: string) => s.replace(/\|/g, "\\|").replace(/\n/g, " ")
+  const line = (r: string[]) => `| ${r.map(cell).join(" | ")} |`
+  return [line(head), `| ${head.map(() => "---").join(" | ")} |`, ...rows.map(line)].join("\n")
+}
+
+export function tableToCsv({ head, rows }: TableCells): string {
+  return [head, ...rows].map((r) => r.map(csvField).join(",")).join("\n")
+}
+
+/**
+ * The frame around every table: the table itself plus a hover-revealed "⋯" at its top-right with
+ * Copy as Markdown / Copy as CSV. A rich table (DataTable inside a VizFrame) already has a toolbar
+ * row there, so the trigger sits inside that row, left of the frame's own icons (`data-rich`).
+ */
+function TableFrame({ cells, rich, children }: { cells: TableCells; rich: boolean; children: ReactNode }) {
+  const copy = (what: "Markdown" | "CSV") => {
+    const text = what === "CSV" ? tableToCsv(cells) : tableToMarkdown(cells)
+    void navigator.clipboard?.writeText(text).then(
+      () => toast.success(`Table copied as ${what}`),
+      () => toast.error("Could not copy")
+    )
+  }
+  return (
+    <div className="md-table" data-rich={rich || undefined}>
+      {children}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button type="button" className="md-table-menu no-press" aria-label="Table options">
+            <Ellipsis className="size-3.5" aria-hidden />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="min-w-[11rem]">
+          <DropdownMenuItem onSelect={() => copy("Markdown")}>Copy as Markdown</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => copy("CSV")}>Copy as CSV</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  )
+}
+
+/** A link that leaves this origin: absolute http(s) to another host. */
+function isExternal(href: string): boolean {
+  if (!/^https?:\/\//i.test(href)) return false
+  try {
+    return new URL(href).origin !== location.origin
+  } catch {
+    return false
+  }
 }
 
 function extractLanguage(className?: string): string {
@@ -99,24 +242,26 @@ const INITIAL_COMPONENTS: Partial<Components> = {
   // GFM tables upgrade to the sortable DataTable (numeric alignment, magnitude bars, copy CSV).
   // …but only when there is something to sort or chart: three or more rows, or two rows with a
   // numeric column. A two-row table of words under a paragraph is prose; card chrome would outweigh it.
+  // Every table, rich or plain, gets a hover-revealed copy menu (Markdown / CSV) at its top-right.
   table: function TableComponent({ children }) {
-    const body = Children.toArray(children)
-      .filter((s): s is ReactElement<{ children?: ReactNode }> => isValidElement(s) && s.type === "tbody")
-      .flatMap((s) => Children.toArray(s.props.children))
-      .filter((tr): tr is ReactElement<{ children?: ReactNode }> => isValidElement(tr))
-      .map((tr) =>
-        Children.toArray(tr.props.children)
-          .filter((c): c is ReactElement<{ children?: ReactNode }> => isValidElement(c))
-          .map((c) => nodeText(c.props.children).trim())
-      )
-    const rich = tableWorthRich(body) ? tableFromMarkdown(children) : null
-    if (rich) return rich
+    const cells = tableCells(children)
+    const rich = tableWorthRich(cells.rows) ? tableFromMarkdown(children) : null
     return (
-      <div className="table-wrap">
-        <table>{children}</table>
-      </div>
+      <TableFrame cells={cells} rich={!!rich}>
+        {rich ?? (
+          <div className="table-wrap">
+            <table>{children}</table>
+          </div>
+        )}
+      </TableFrame>
     )
   },
+  h1: heading(1),
+  h2: heading(2),
+  h3: heading(3),
+  h4: heading(4),
+  h5: heading(5),
+  h6: heading(6),
   // GitHub-style alerts (`> [!NOTE]` …) upgrade to callout cards; ordinary quotes stay quotes.
   blockquote: function BlockquoteComponent({ children, node: _node, ...props }) {
     const alert = alertFromBlockquote(children, calloutKind)
@@ -162,14 +307,23 @@ const INITIAL_COMPONENTS: Partial<Components> = {
     return <>{children}</>
   },
   // Every link — typed `[text](url)` or an autolinked bare URL — renders as a chip with an icon for
-  // what it points at and a short label (`queue-service#142`, `github.com/acme/…`).
+  // what it points at and a short label (`queue-service#142`, `github.com/acme/…`). A link that
+  // leaves the site says so: it opens in a new tab (rel=noreferrer) and carries a small outward
+  // arrow after it. Same-origin and in-page links stay in this tab, plain, with no glyph.
   a: function LinkComponent({ href, children }) {
     if (!href) return <>{children}</>
     // A relative path (`[parseDag](web/src/lib/viz-extra.ts:515)`) is a code ref, not a web link.
     const ref = parseCodeRef(href)
     const chip = <LinkChip href={href}>{children}</LinkChip>
     if (ref) return <CodeRefLink parsed={ref} fallback={chip}>{children}</CodeRefLink>
-    return chip
+    if (isExternal(href))
+      return (
+        <span className="md-ext">
+          {chip}
+          <ArrowUpRight className="md-ext-glyph size-3 text-faint" aria-hidden />
+        </span>
+      )
+    return <a href={href}>{children}</a>
   },
 }
 
@@ -180,19 +334,23 @@ const urlTransform = (url: string) => (parseCodeRef(url) && !/^[a-z][\w+.-]*:\/\
 const MemoizedMarkdownBlock = memo(
   function MarkdownBlock({
     content,
+    headingId,
     components = INITIAL_COMPONENTS,
   }: {
     content: string
+    headingId?: string
     components?: Partial<Components>
   }) {
     return (
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components} urlTransform={urlTransform}>
-        {content}
-      </ReactMarkdown>
+      <HeadingIdContext.Provider value={headingId}>
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={components} urlTransform={urlTransform}>
+          {content}
+        </ReactMarkdown>
+      </HeadingIdContext.Provider>
     )
   },
   function propsAreEqual(prevProps, nextProps) {
-    return prevProps.content === nextProps.content
+    return prevProps.content === nextProps.content && prevProps.headingId === nextProps.headingId
   }
 )
 
@@ -202,11 +360,16 @@ function MarkdownComponent({
   children,
   id,
   className,
-  components = INITIAL_COMPONENTS,
+  components: overrides,
 }: MarkdownProps) {
   const generatedId = useId()
   const blockId = id ?? generatedId
   const blocks = useMemo(() => parseMarkdownIntoBlocks(children), [children])
+  const ids = useMemo(() => headingIds(blocks), [blocks])
+  // Caller overrides layer OVER the defaults: a surface that only wants to wrap `p`/`li` (the
+  // streaming reveal's fresh-word spans) must not lose code blocks, tables, headings and links.
+  // Pass a stable object to keep the per-block memo intact.
+  const components = useMemo(() => (overrides ? { ...INITIAL_COMPONENTS, ...overrides } : INITIAL_COMPONENTS), [overrides])
 
   return (
     <div className={className}>
@@ -215,6 +378,7 @@ function MarkdownComponent({
           <MemoizedMarkdownBlock
             key={`${blockId}-block-${index}`}
             content={block}
+            headingId={ids[index]}
             components={components}
           />
         ))}

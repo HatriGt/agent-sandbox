@@ -88,6 +88,36 @@ export function splitUnifiedDiff(text: string): DiffSection[] {
   return out;
 }
 
+/**
+ * Serialise one parsed hunk back into unified-diff text (an `@@` header rebuilt from the line
+ * numbers, then the lines with their `+`/`-`/` ` prefixes) — what /discard.json reverse-applies.
+ * The server prepends its own `---`/`+++` file header, so none is emitted here. Pure.
+ */
+export function hunkToPatch(hunk: DiffHunk): string {
+  const oldNos = hunk.lines.filter((l) => l.oldNo != null);
+  const newNos = hunk.lines.filter((l) => l.newNo != null);
+  const oldStart = oldNos[0]?.oldNo ?? (newNos[0]?.newNo ?? 1);
+  const newStart = newNos[0]?.newNo ?? (oldNos[0]?.oldNo ?? 1);
+  const head = `@@ -${oldStart},${oldNos.length} +${newStart},${newNos.length} @@${hunk.header ? ` ${hunk.header}` : ""}`;
+  const body = hunk.lines.map((l) => (l.kind === "meta" ? l.text : (l.kind === "add" ? "+" : l.kind === "del" ? "-" : " ") + l.text));
+  return [head, ...body].join("\n") + "\n";
+}
+
+/**
+ * A stable identity for a hunk — its position plus a hash of its content — so a reviewed mark
+ * persisted in sessionStorage survives the pane reopening AND stays attached to the right hunk after
+ * a neighbour is rejected (indexes shift; content does not). Pure.
+ */
+export function hunkId(hunk: DiffHunk): string {
+  let h = 5381;
+  for (const l of hunk.lines) {
+    const s = l.kind[0] + l.text;
+    for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+  }
+  const first = hunk.lines.find((l) => l.newNo != null)?.newNo ?? hunk.lines.find((l) => l.oldNo != null)?.oldNo ?? 0;
+  return `${first}:${h.toString(36)}`;
+}
+
 /** A changed span inside one line, as [from, to) character offsets. */
 export type Span = [number, number];
 

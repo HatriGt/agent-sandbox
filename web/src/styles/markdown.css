@@ -1,0 +1,137 @@
+/* Markdown chrome that lives beside the prose, not in it (ui/markdown.tsx). Quiet by rule: every
+   control here is invisible until the pointer or focus arrives, and none of them moves the text. */
+
+/* ---- Heading anchors: a link glyph at the end of the heading, same slot whether shown or not. */
+.md-heading {
+  position: relative;
+}
+.md-anchor {
+  display: inline-grid;
+  place-items: center;
+  width: 1.1em;
+  height: 1em;
+  margin-left: 0.25em;
+  vertical-align: -0.08em;
+  color: var(--faint);
+  opacity: 0;
+  border: 0;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  border-radius: 4px;
+  transition:
+    opacity 150ms ease,
+    color 150ms ease;
+}
+.md-heading:hover .md-anchor,
+.md-anchor:focus-visible {
+  opacity: 1;
+}
+.md-anchor:hover {
+  color: var(--foreground);
+}
+.md-anchor:focus-visible {
+  outline: 2px solid var(--live);
+  outline-offset: 2px;
+}
+/* A heading still streaming in has a caret after it (styles/thread.css); the anchor would sit under it. */
+.md-live .md-anchor {
+  display: none;
+}
+/* Jumping to #id: leave room for the sticky thread header. */
+.md-heading[id] {
+  scroll-margin-top: 4.5rem;
+}
+
+/* ---- Tables: a copy menu at the top-right, revealed on hover/focus, over the table's own frame. */
+.md-table {
+  position: relative;
+}
+.md-table-menu {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  z-index: 1;
+  display: inline-grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 0;
+  border-radius: var(--radius-md, 6px);
+  background: var(--card);
+  color: var(--muted-foreground);
+  box-shadow: var(--shadow-e1);
+  opacity: 0;
+  cursor: pointer;
+  transition:
+    opacity 150ms ease,
+    color 150ms ease,
+    background-color 150ms ease;
+}
+.md-table:hover .md-table-menu,
+.md-table:focus-within .md-table-menu,
+.md-table-menu[data-state="open"] {
+  opacity: 1;
+}
+.md-table-menu:hover,
+.md-table-menu[data-state="open"] {
+  color: var(--foreground);
+  background: var(--accent);
+}
+.md-table-menu:focus-visible {
+  outline: 2px solid var(--live);
+  outline-offset: 2px;
+}
+/* A rich table (DataTable in a VizFrame) has a 32px toolbar row with three 24px icons at its right
+   (copy · raw · maximize, 4px gaps, 12px padding). The trigger joins that row, just left of them,
+   in the row's own quiet style instead of floating over the cells. */
+.md-table[data-rich] .md-table-menu {
+  top: 4px;
+  right: calc(0.75rem + 5.25rem);
+  width: 1.5rem;
+  height: 1.5rem;
+  background: none;
+  box-shadow: none;
+  opacity: 0.6;
+  visibility: hidden;
+}
+.md-table[data-rich]:hover .md-table-menu,
+.md-table[data-rich]:focus-within .md-table-menu,
+.md-table[data-rich] .md-table-menu[data-state="open"] {
+  visibility: visible;
+  opacity: 1;
+}
+.md-table[data-rich] .md-table-menu:hover,
+.md-table[data-rich] .md-table-menu[data-state="open"] {
+  background: var(--muted);
+}
+@media (hover: none) {
+  .md-table-menu,
+  .md-table[data-rich] .md-table-menu {
+    opacity: 1;
+    visibility: visible;
+  }
+}
+
+/* ---- External links: one outward arrow after the chip, faint, never wrapping away from it. The
+   chip's own trailing arrow is hidden here so the glyph is said once. */
+.md-ext {
+  display: inline;
+  white-space: nowrap;
+}
+.md-ext > a {
+  white-space: normal;
+}
+.md-ext > a > svg:last-child {
+  display: none;
+}
+.md-ext-glyph {
+  display: inline-block;
+  vertical-align: 0.05em;
+  margin-left: 0.1em;
+}
+
+:root[data-motion="reduced"] .md-anchor,
+:root[data-motion="reduced"] .md-table-menu {
+  transition: none;
+}

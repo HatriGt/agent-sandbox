@@ -789,6 +789,13 @@ export const api = {
   /** Unified diff for one file (or `untracked`). */
   diff: (session: string, path: string, signal?: AbortSignal) =>
     fetch(url("/diff.json", { session, path }), { headers: authHeaders, signal }).then(parse<FileDiff>),
+  /**
+   * Reject the agent's change to one file (git checkout / delete), or just one hunk of it when the
+   * hunk's unified-diff text is given (reverse-applied in the box). 409 while the agent is mid-turn.
+   * Returns the refreshed changed-file list.
+   */
+  discardChange: (session: string, path: string, hunk?: string) =>
+    post<{ ok: true; scope: "hunk" | "file"; path: string; files: ChangedFile[] }>("/discard.json", { session, path, ...(hunk ? { hunk } : {}) }),
   /** The WHOLE workspace's unified diff (live box) — the Review-all panel. */
   runDiff: (session: string, signal?: AbortSignal) =>
     fetch(url("/rundiff.json", { session }), { headers: authHeaders, signal }).then(parse<{ diff: string }>),

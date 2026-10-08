@@ -6,7 +6,7 @@
 //                                  [--stream] [--interact=<name>] [--wait=ms]
 //
 // scenarios : running (default) · question · done · booting · sleeping · idle
-// interact  : scrolled · slash · mention · model · multiline · workspace · minimap · question-kbd
+// interact  : file · review · scrolled · slash · mention · model · multiline · workspace · minimap · question-kbd
 // --stream  : serve /watch.sse from a local server that drips the final answer in over ~6s
 //             (screenshot mid-stream) instead of one full snapshot.
 //
@@ -129,6 +129,8 @@ function log(kind) {
   L.push(at(0, 14), "→ Grep: rateLimit( src ⟦#r2⟧", at(0, 14),
     "  ⟦#r2⟧ src/app.ts:18:app.use('/orders', rateLimit({ limit: 100 }), ordersRouter);",
     "  src/app.ts:19:app.use('/health', rateLimit({ limit: 1000 }), healthRouter);");
+  L.push(at(0, 15), "→ Glob: test/**/*.test.ts ⟦#r3⟧", at(0, 15), "  ⟦#r3⟧ test/rateLimit.test.ts", "  test/app.test.ts");
+  L.push(at(0, 15), "→ Read: test/rateLimit.test.ts ⟦#r4⟧", at(0, 16), "  ⟦#r4⟧ 1	import { describe, it, expect } from 'vitest';", "  2	import { rateLimit } from '../src/middleware/rateLimit';");
   L.push(at(0, 16), "→ Bash: npx vitest run test/rateLimit.test.ts ⟦#b1⟧", at(0, 19),
     "  ⟦#b1⟧ RUN  v2.1.3 /workspace/orders-api",
     "  ",
@@ -419,6 +421,16 @@ await page.route("**/*", async (route) => {
         original: "const WINDOW = 60_000;\n\nexport function rateLimit({ limit }: { limit: number }) {\n  return async (req, res, next) => {\n    const key = `rl:${req.ip}:${Math.floor(Date.now() / WINDOW)}`;\n    const n = await redis.incr(key);\n    if (n > limit) return res.status(429).end();\n    next();\n  };\n}\n",
         diff: "@@ -1,9 +1,14 @@\n-const WINDOW = 60_000;\n+const BUCKETS = 6;\n+\n+interface Options {\n+  limit: number;\n+  window?: number;\n+}\n \n-export function rateLimit({ limit }: { limit: number }) {\n+export function rateLimit({ limit, window = 60_000 }: Options) {\n+  const slice = window / BUCKETS;\n",
       });
+    case "/rundiff.json":
+      return json(route, {
+        diff:
+          "diff --git a/orders-api/src/middleware/rateLimit.ts b/orders-api/src/middleware/rateLimit.ts\n--- a/orders-api/src/middleware/rateLimit.ts\n+++ b/orders-api/src/middleware/rateLimit.ts\n@@ -1,4 +1,9 @@\n-const WINDOW = 60_000;\n+const BUCKETS = 6;\n+\n+interface Options {\n+  limit: number;\n+  window?: number;\n+}\n \n export function rateLimit({ limit }: { limit: number }) {\n   return async (req, res, next) => {\n@@ -12,6 +17,8 @@ export function rateLimit({ limit }: { limit: number }) {\n     const key = `rl:${req.ip}`;\n-    const n = await redis.incr(key);\n-    if (n > limit) return res.status(429).end();\n+    const now = Math.floor(Date.now() / slice);\n+    const hits = await redis.hincrby(key, String(now), 1);\n+    if (hits > limit) return res.status(429).set('Retry-After', String(slice / 1000)).end();\n     next();\n   };\n }\ndiff --git a/orders-api/test/rateLimit.test.ts b/orders-api/test/rateLimit.test.ts\n--- a/orders-api/test/rateLimit.test.ts\n+++ b/orders-api/test/rateLimit.test.ts\n@@ -40,3 +40,8 @@ describe('rateLimit', () => {\n   it('allows under the limit', async () => {\n     expect(await hit(3)).toBe(200);\n   });\n+\n+  it('slides the window', async () => {\n+    clock.tick(10_000);\n+    expect(await hit(1)).toBe(200);\n+  });\n",
+      });
+    case "/discard.json": {
+      const body = route.request().postDataJSON?.() ?? {};
+      const rest = CHANGES.filter((f) => body.hunk || f.path !== body.path);
+      return json(route, { ok: true, scope: body.hunk ? "hunk" : "file", path: body.path, files: rest });
+    }
     case "/file.json":
       return json(route, { path: u.searchParams.get("path"), content: "const BUCKETS = 6;\n\ninterface Options {\n  limit: number;\n  window?: number;\n}\n\nexport function rateLimit({ limit, window = 60_000 }: Options) {\n  const slice = window / BUCKETS;\n  return async (req, res, next) => {\n    next();\n  };\n}\n", bytes: 240, mtime: Date.now() });
     case "/memory.json":
@@ -531,6 +543,29 @@ if (stream) {
   }
   await page.waitForTimeout(300);
   await shot("-multiline");
+} else if (interact === "file") {
+  // Open the changes dock and click its first row: the per-file diff.
+  await page.getByRole("button", { name: /show the changed files/i }).click();
+  const row = page.getByRole("button", { name: /rateLimit\.ts/ }).first();
+  await row.waitFor({ state: "visible" });
+  await page.waitForTimeout(600);
+  await row.click();
+  await page.waitForTimeout(1800);
+  await shot("-file");
+} else if (interact === "review") {
+  // The Review-all pane, hovering the first hunk so its accept/reject row shows; then one accepted.
+  await page.getByRole("button", { name: /^review/i }).first().click();
+  await page.waitForTimeout(1200);
+  const hunk = page.locator("[data-hunk]").first();
+  await hunk.hover();
+  await page.waitForTimeout(300);
+  await shot("-review");
+  await page.locator("[data-hunk]").nth(1).getByRole("button", { name: /^accept$/i }).click();
+  await page.waitForTimeout(400);
+  await shot("-review-accepted");
+  await hunk.getByRole("button", { name: /^reject$/i }).click();
+  await page.waitForTimeout(700);
+  await shot("-review-rejected");
 } else if (interact === "workspace") {
   await page.getByRole("button", { name: /files|workspace/i }).first().click();
   await page.waitForTimeout(1500);

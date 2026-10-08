@@ -12,7 +12,7 @@
  */
 import { ownerKey } from "./user-store.js";
 import type { Config } from "./config.js";
-import { exec } from "./msb.js";
+import { exec, execWithInput } from "./msb.js";
 import { shellQuote } from "./exec.js";
 import { ghGetJson } from "./gh-probe.js";
 import { loadStore, pickDefaultAccount, candidateAccounts } from "./gh-token-store.js";
@@ -197,6 +197,93 @@ export async function readDiff(cfg: Config, box: string, path: string): Promise<
   const original = cut >= 0 ? out.slice(cut + "\n@@ORIGINAL\n".length) : undefined;
   const binary = /^Binary files/m.test(diff);
   return { path: rel, diff, untracked: false, binary, ...(binary || original === undefined ? {} : { original }) };
+}
+
+/**
+ * Discarding what the agent did to ONE path — the "Reject" half of the review surfaces (FilePane,
+ * Review-all). Two grains:
+ *   · whole file: a path that exists in HEAD gets its index entry reset and worktree checked out
+ *     (`git reset -q -- p && git checkout -- p` — the reset also clears an intent-to-add entry left
+ *     by readFullDiff's `add -N`); anything else (untracked, or loose outside a repo) is deleted.
+ *   · one hunk: the client's hunk text is reverse-applied with `git apply -R --recount` on stdin.
+ *     `--recount` tolerates a client-rebuilt `@@` header whose counts are off; the context lines
+ *     are what place the hunk, so a hunk in the middle of a file applies cleanly on its own.
+ *     A hunk for a path NOT in HEAD is the whole file (there is nothing to keep) — callers fall
+ *     back to the whole-file delete.
+ * Pure script builders are exported for tests; the box-touching functions wrap them.
+ */
+const DISCARD_OK = "@@DISCARDED";
+
+/** Split a workspace-relative path into the repo directory (first segment) and the path inside it. */
+export function splitRepoPath(rel: string): { top: string; inner: string } {
+  const top = rel.split("/")[0];
+  return { top, inner: rel.slice(top.length + 1) };
+}
+
+export function discardFileSh(rel: string): string {
+  const { top, inner } = splitRepoPath(rel);
+  const q = shellQuote;
+  return (
+    `cd /workspace || exit 1; if [ -d ${q(top)}/.git ] && [ -n ${q(inner)} ]; then ` +
+    `if git -C ${q(top)} cat-file -e HEAD:${q(inner)} 2>/dev/null; then git -C ${q(top)} reset -q -- ${q(inner)} && git -C ${q(top)} checkout -- ${q(inner)} && echo ${DISCARD_OK}; ` +
+    `else git -C ${q(top)} rm -q --cached -f -- ${q(inner)} >/dev/null 2>&1; rm -f ${q(top)}/${q(inner)} && echo ${DISCARD_OK}; fi; ` +
+    `else rm -f ${q(rel)} && echo ${DISCARD_OK}; fi`
+  );
+}
+
+/**
+ * Normalise a client hunk into a patch git can reverse-apply: drop any file header it carried
+ * (`diff --git`, `index`, `---`, `+++`) and prepend our own for the in-repo path, so the client can
+ * never point the patch at another file. Throws when the text has no `@@` hunk at all.
+ */
+export function buildHunkPatch(inner: string, hunk: string): string {
+  const lines = hunk.replace(/\r/g, "").split("\n");
+  const at = lines.findIndex((l) => /^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/.test(l));
+  if (at < 0) throw new Error("hunk must start with an @@ header");
+  // Only diff-shaped lines survive (context/add/del/meta/@@). A trailing empty element from the
+  // final newline is dropped; an empty line INSIDE a hunk is a context line whose single leading
+  // space was stripped in transit — restore it.
+  const body = lines.slice(at).filter((l, i) => i === 0 || /^[ +\-\\@]/.test(l) || l === "");
+  while (body.length && body[body.length - 1] === "") body.pop();
+  const fixed = body.map((l) => (l === "" ? " " : l));
+  return `--- a/${inner}\n+++ b/${inner}\n${fixed.join("\n")}\n`;
+}
+
+export function discardHunkSh(rel: string): string {
+  const { top, inner } = splitRepoPath(rel);
+  const q = shellQuote;
+  return (
+    `cd /workspace/${q(top)} || exit 1; if git cat-file -e HEAD:${q(inner)} 2>/dev/null; then ` +
+    `base64 -d | git apply -R --recount --whitespace=nowarn - 2>&1 && echo ${DISCARD_OK}; else echo "@@UNTRACKED"; fi`
+  );
+}
+
+/**
+ * Discard a path's change (or just one hunk of it) inside the box. Returns normally on success and
+ * throws git's own message otherwise ("patch does not apply" when the hunk no longer matches the
+ * file — the agent, or an earlier reject, moved on).
+ */
+export async function discardChange(cfg: Config, box: string, path: string, hunk?: string): Promise<{ scope: "hunk" | "file" }> {
+  const rel = safeRelPath(path);
+  const { top, inner } = splitRepoPath(rel);
+  if (hunk && inner) {
+    const patch = buildHunkPatch(inner, hunk);
+    const r = await execWithInput(cfg, box, discardHunkSh(rel), Buffer.from(patch, "utf8").toString("base64"));
+    if (r.stdout.includes(DISCARD_OK)) return { scope: "hunk" };
+    if (!r.stdout.includes("@@UNTRACKED")) {
+      const msg = r.stdout
+        .trim()
+        .split("\n")
+        .filter((l) => !/^Checking patch|^Applied patch/.test(l))
+        .join(" ")
+        .slice(-300);
+      throw new Error(msg || "the hunk could not be reverted");
+    }
+    // Not in HEAD: the hunk IS the file. Fall through to the delete.
+  }
+  const r = await exec(cfg, box, discardFileSh(rel));
+  if (!r.stdout.includes(DISCARD_OK)) throw new Error(r.stdout.trim().slice(-300) || "the change could not be reverted");
+  return { scope: "file" };
 }
 
 export interface PullInfo {

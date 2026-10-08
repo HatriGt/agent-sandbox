@@ -96,7 +96,7 @@ import { listClaims, listKept, markKept, unmarkKept } from "./claims.js";
 import { makeRedactor, isPlumbingError } from "./redact.js";
 import { isSecretKey, probeMcpServer } from "./mcp-store.js";
 import type { BoxView, WatchSnapshot } from "./monitor.js";
-import { listChanges, readDiff, readFullDiff, fetchPull, fetchPullDetail, forgetPull } from "./changes.js";
+import { listChanges, readDiff, readFullDiff, discardChange, fetchPull, fetchPullDetail, forgetPull } from "./changes.js";
 import { loadRunMetas, saveRunMeta, forgetRunMeta } from "./run-memory.js";
 import { readArtifact } from "./artifact.js";
 import { existsSync } from "node:fs";
@@ -2859,6 +2859,34 @@ app.get("/diff.json", async (req: Request, res: Response) => {
     res.json({ ...d, ...("diff" in d && typeof d.diff === "string" ? { diff: redactor.redact(d.diff) } : {}), ...("original" in d && typeof d.original === "string" ? { original: redactor.redact(d.original) } : {}) });
   } catch (e) {
     res.status(400).json({ error: clientError(e) });
+  }
+});
+// Reject one file's change — or one hunk of it — from the review surfaces: `git checkout` / delete
+// for a whole path, `git apply -R` for a hunk (src/changes.ts discardChange). Refused mid-turn
+// like /revert.json: pulling the file out from under a working agent is a race nobody wins.
+// Answers with the refreshed file list so the dock's counts roll without a second round trip.
+app.post("/discard.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const { session, path, hunk } = (req.body ?? {}) as { session?: string; path?: string; hunk?: string };
+  if (!isBoxName(session) || typeof path !== "string" || !path || (hunk !== undefined && typeof hunk !== "string")) {
+    res.status(400).json({ error: "session and path are required" });
+    return;
+  }
+  if (hunk && hunk.length > 400_000) {
+    res.status(413).json({ error: "hunk too large" });
+    return;
+  }
+  try {
+    const snap = await watchHub.read(session);
+    if (!canRevert(snap.runState)) {
+      res.status(409).json({ error: "The agent is mid-turn — wait for it to finish (or stop it) before discarding its changes." });
+      return;
+    }
+    const r = await withBoxLock(session, () => discardChange(cfg, session, path, hunk || undefined));
+    res.json({ ok: true, scope: r.scope, path, files: await listChanges(cfg, session).catch(() => []) });
+  } catch (e) {
+    const msg = clientError(e, 400);
+    res.status(/invalid path|@@ header/.test(msg) ? 400 : 422).json({ error: msg });
   }
 });
 // Pull request metadata for the PR card (through a connected account; cached a minute).

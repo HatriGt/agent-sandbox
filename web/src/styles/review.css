@@ -1,0 +1,56 @@
+/* Review surfaces: accept / reject on a diff hunk (FilePane, Review-all). Imported by FilePane.tsx so
+   it ships with the thread chunk. Everything here is tokens: --ok for "accepted", --destructive for
+   the armed reject, --ring for the focused hunk. */
+
+/* A hunk is a focus stop (j/k, ⌘↵, ⌘⌫). The global :focus-visible ring would sit outside the
+   scroll box and get clipped, so the ring is drawn inset on the hunk itself. */
+.review-hunk { outline: none; position: relative; }
+.review-hunk:focus-visible { box-shadow: inset 0 0 0 2px var(--ring); }
+.review-hunk:focus-visible > .review-head { box-shadow: inset 0 2px 0 var(--ring), inset 2px 0 0 var(--ring), inset -2px 0 0 var(--ring); }
+
+/* The action row hides in the header until the hunk is hovered, focused, or already reviewed —
+   a reader skimming never sees controls; a reviewer finds them exactly where the eye already is. */
+.review-actions {
+  opacity: 0;
+  transition: opacity var(--dur-fast, 140ms) ease-out;
+}
+.review-hunk:hover .review-actions,
+.review-hunk:focus-within .review-actions,
+.review-hunk[data-accepted] .review-actions,
+.review-hunk[data-busy] .review-actions,
+[data-motion="reduced"] .review-actions {
+  opacity: 1;
+}
+@media (hover: none) {
+  .review-actions { opacity: 1; }
+}
+
+.review-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  height: 1.25rem;
+  padding: 0 0.4rem;
+  border-radius: 0.3rem;
+  font: inherit;
+  font-size: var(--text-micro);
+  font-weight: 500;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: color var(--dur-fast, 140ms) ease-out, background-color var(--dur-fast, 140ms) ease-out;
+}
+.review-btn:hover { color: var(--foreground); background: color-mix(in oklch, var(--foreground) 7%, transparent); }
+.review-btn:disabled { opacity: 0.5; cursor: default; }
+.review-btn[data-tone="ok"] { color: var(--ok); }
+.review-btn[data-tone="ok"]:hover { background: color-mix(in oklch, var(--ok) 12%, transparent); color: var(--ok); }
+.review-btn[data-tone="danger"]:hover { color: var(--destructive); background: color-mix(in oklch, var(--destructive) 10%, transparent); }
+.review-btn[data-tone="danger"][data-armed] { color: var(--destructive); background: color-mix(in oklch, var(--destructive) 12%, transparent); }
+
+/* Accepted: the hunk's rows settle back (dimmed, not hidden — accepted still means "kept"); the
+   header keeps a quiet check. */
+.review-hunk[data-accepted] > [role="row"]:not(.review-head) { opacity: 0.55; transition: opacity 220ms ease-out; }
+.review-hunk[data-accepted] > .review-head { border-left: 2px solid var(--ok); }
+.review-hunk[data-accepted] > .review-head .review-range { color: var(--ok); }
+
+/* The collapsing wrapper around a rejected hunk clips its sticky header while the height goes. */
+.review-hunk-wrap { overflow: hidden; }

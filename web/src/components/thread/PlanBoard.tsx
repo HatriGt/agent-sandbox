@@ -1,12 +1,13 @@
 import * as React from "react";
-import { AlertTriangle, ChevronRight, PanelRightClose, PanelRightOpen } from "lucide-react";
+import { AlertTriangle, Check, ChevronRight, PanelRightClose, PanelRightOpen } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useReducedMotion } from "@/lib/motion-pref";
-import { shortDuration, shortPath, type DerivedTask, type TaskBoard, type TaskEvidence } from "@/lib/planTasks";
+import { describeChanges, shortDuration, shortPath, type DerivedTask, type PlanChanges, type TaskBoard, type TaskEvidence } from "@/lib/planTasks";
 import { FileMark } from "@/lib/fileIcon";
 import { Collapse } from "@/components/ui/collapse";
 import { cn } from "@/lib/utils";
 import { useNow } from "@/hooks/useNow";
+import "@/styles/plan.css";
 
 /**
  * The agent's plan (TodoWrite) joined to the work it actually did — the thread's spine.
@@ -51,7 +52,156 @@ function StepDuration({ ms, since, live }: { ms?: number; since?: number; live: 
 const SPRING = { type: "spring", stiffness: 460, damping: 34 } as const;
 /** Orbit's ease. */
 const EASE = [0.2, 0.8, 0.2, 1] as const;
+/** The ease rows collapse out on — a quick start, a long settle, no overshoot. */
+const EXIT_EASE = [0.22, 1, 0.36, 1] as const;
+/** How long the "Plan changed" note stays, and how fresh a stamped revision must be to count as "just now". */
+const NOTE_MS = 8000;
+/** Fold finished steps above the active one only on long plans, and only a run worth folding. */
+const FOLD_MIN_STEPS = 6;
+const FOLD_MIN_RUN = 4;
 const BRAILLE = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
+
+/**
+ * A revision counts as "just happened" when it landed after this board mounted, or its stamp is
+ * within the note's window. A thread opened minutes after a rewrite must not wash every row it shows
+ * or announce a change the reader never saw the before of.
+ */
+function useFreshRevision(board: TaskBoard): boolean {
+  const mountRev = React.useRef(board.revisions);
+  const arrived = board.revisions > mountRev.current;
+  const stamped = board.changes?.at !== undefined && Date.now() - board.changes.at < NOTE_MS;
+  return !!board.changes && (arrived || stamped);
+}
+
+/** The step texts that arrived with the last revision — new steps and the new wording of reworded ones. */
+function arrivals(changes: PlanChanges | undefined): Set<string> {
+  const s = new Set<string>();
+  if (!changes) return s;
+  for (const t of changes.added) s.add(t);
+  for (const r of changes.reworded) s.add(r.to);
+  return s;
+}
+
+/**
+ * The inclusive index range of finished steps to fold away above the active one — the current work
+ * stays on screen instead of scrolling under a column of ticks. Null when there is nothing to fold.
+ */
+function foldRange(tasks: DerivedTask[]): [number, number] | null {
+  if (tasks.length <= FOLD_MIN_STEPS) return null;
+  const active = tasks.findIndex((t) => t.state === "active");
+  if (active < 0) return null;
+  let start = active;
+  while (start > 0 && tasks[start - 1].state === "done") start -= 1;
+  return active - start >= FOLD_MIN_RUN ? [start, active - 1] : null;
+}
+
+/**
+ * One quiet line under the header saying what the last rewrite did, in plain words. Stays ~8s, or
+ * until the next revision replaces it. Under reduced motion it appears and disappears without a fade.
+ */
+function ChangeNote({ board, className }: { board: TaskBoard; className?: string }) {
+  const reduce = useReducedMotion();
+  const fresh = useFreshRevision(board);
+  const { changes, revisions } = board;
+  // Keyed on the revision, not the (re-derived on every log line) changes object, so a growing log
+  // during the 8s does not keep resetting the timer.
+  const latest = React.useRef(changes);
+  latest.current = changes;
+  const [shown, setShown] = React.useState<{ rev: number; text: string } | null>(null);
+  React.useEffect(() => {
+    const c = latest.current;
+    if (!fresh || !c) {
+      setShown(null);
+      return;
+    }
+    setShown({ rev: revisions, text: describeChanges(c) });
+    const t = window.setTimeout(() => setShown(null), NOTE_MS);
+    return () => window.clearTimeout(t);
+  }, [fresh, revisions]);
+  return (
+    <AnimatePresence initial={false}>
+      {shown && (
+        <motion.div
+          key={shown.rev}
+          initial={reduce ? { opacity: 1, height: "auto" } : { opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: "auto" }}
+          exit={reduce ? { opacity: 0, height: "auto", transition: { duration: 0 } } : { opacity: 0, height: 0 }}
+          transition={reduce ? { duration: 0 } : { duration: 0.26, ease: EXIT_EASE }}
+          className={cn("overflow-hidden", className)}
+          role="status"
+        >
+          <div className="text-faint truncate text-micro" title={shown.text}>
+            Plan changed <span className="text-border mx-1">·</span> {shown.text}
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
+
+/** `4 steps done` — the folded run of finished steps above the active one; click to unfold them. */
+function FoldedRow({ n, failed, compact, onOpen }: { n: number; failed: boolean; compact?: boolean; onOpen: () => void }) {
+  const reduce = useReducedMotion();
+  return (
+    <motion.li
+      layout={reduce ? undefined : "position"}
+      initial={reduce ? false : { opacity: 0, height: 0 }}
+      animate={{ opacity: 1, height: "auto" }}
+      exit={reduce ? { opacity: 0, transition: { duration: 0 } } : { opacity: 0, height: 0 }}
+      transition={reduce ? { duration: 0 } : { duration: 0.26, ease: EXIT_EASE }}
+      className="hover:bg-muted/40 overflow-hidden rounded-md transition-colors duration-200"
+    >
+      <button
+        type="button"
+        onClick={onOpen}
+        aria-expanded={false}
+        title="Show these steps"
+        className="flex min-h-7 w-full cursor-pointer items-center gap-2.5 px-2 py-1 text-left"
+      >
+        <span className={cn("grid size-4 shrink-0 place-items-center", failed ? "text-destructive" : "text-ok")} aria-hidden>
+          <Check className="size-3.5" strokeWidth={2.25} />
+        </span>
+        <span className="text-muted-foreground min-w-0 flex-1 truncate text-meta">{n} steps done</span>
+        {!compact && <span className="text-faint hidden text-micro sm:block">show</span>}
+        <ChevronRight className="text-faint size-3.5 shrink-0" aria-hidden />
+      </button>
+    </motion.li>
+  );
+}
+
+/**
+ * The rows, shared by the card and the dock. Keys are the step TEXT (never the index) so a rewrite
+ * that inserts a step above another moves rows instead of re-labelling them: added rows enter with a
+ * wash, removed rows collapse out, and a long run of ticks above the active step folds into one row.
+ */
+function StepList({ board, live, compact, className }: { board: TaskBoard; live?: boolean; compact?: boolean; className?: string }) {
+  const { tasks } = board;
+  const fresh = useFreshRevision(board);
+  const arrived = React.useMemo(() => (fresh ? arrivals(board.changes) : new Set<string>()), [fresh, board.changes]);
+  const [unfolded, setUnfolded] = React.useState(false);
+  const range = foldRange(tasks);
+  const fold = range && !unfolded ? range : null;
+  // The fold re-arms itself once the active step moves on: an unfold is a look, not a setting.
+  const activeText = tasks.find((t) => t.state === "active")?.text;
+  React.useEffect(() => setUnfolded(false), [activeText]);
+
+  const rows: React.ReactNode[] = [];
+  tasks.forEach((t, i) => {
+    if (fold && i >= fold[0] && i <= fold[1]) {
+      if (i === fold[0]) {
+        const run = tasks.slice(fold[0], fold[1] + 1);
+        rows.push(<FoldedRow key="__fold" n={run.length} failed={run.some((s) => s.evidence.failed)} compact={compact} onOpen={() => setUnfolded(true)} />);
+      }
+      return;
+    }
+    rows.push(<TaskRow key={t.text} task={t} live={live} since={t.state === "active" ? board.activeSince : undefined} compact={compact} arrived={arrived.has(t.text)} />);
+  });
+  return (
+    <ol className={className}>
+      <AnimatePresence initial={false}>{rows}</AnimatePresence>
+    </ol>
+  );
+}
 
 /** The active step's braille spinner; a still frame under reduced motion or when the run is not live. */
 function Braille({ spin }: { spin: boolean }) {
@@ -116,7 +266,7 @@ function ProgressRail({ tasks, live, layoutId }: { tasks: DerivedTask[]; live?: 
       className="flex h-1 w-full shrink-0 gap-0.5"
     >
       {tasks.map((t, i) => (
-        <span key={`${i}-${t.text}`} className="bg-border relative h-full flex-1 overflow-hidden rounded-full">
+        <span key={t.text} className="bg-border relative h-full flex-1 overflow-hidden rounded-full">
           <motion.span
             className={cn("absolute inset-y-0 left-0 rounded-full", t.state === "done" ? (t.evidence.failed ? "bg-destructive" : "bg-live") : "bg-live/45")}
             // The active segment sweeps (dt-shim's keyframes, in the live hue); reduced motion keeps it still.
@@ -165,13 +315,19 @@ function RollingCount({ value }: { value: number }) {
   );
 }
 
-function TaskRow({ task, live, since, compact }: { task: DerivedTask; live?: boolean; since?: number; compact?: boolean }) {
+function TaskRow({ task, live, since, compact, arrived }: { task: DerivedTask; live?: boolean; since?: number; compact?: boolean; arrived?: boolean }) {
   const [open, setOpen] = React.useState(false);
   const reduce = useReducedMotion();
+  // Decided once, on mount: the wash is a one-shot CSS keyframe, and the class must not come and go
+  // with later renders or it would replay.
+  const [wash] = React.useState(() => !!arrived);
   const e = task.evidence;
   const hasDetail = e.files.length > 0 || e.commands.length > 0 || e.steps > 0;
   const active = task.state === "active";
   const summary = evidenceSummary(e);
+  // The reason a failed step failed: the call that errored, else whatever it was doing last.
+  const reason = e.failed ? (e.failedCall ?? e.latest) : undefined;
+  const showLatest = active && live && e.latest && !(reason && reason.name === e.latest.name && reason.arg === e.latest.arg);
 
   const body = (
     <>
@@ -198,11 +354,18 @@ function TaskRow({ task, live, since, compact }: { task: DerivedTask; live?: boo
           )}
         </span>
         {/* What this step is doing RIGHT NOW — the one thing a watcher actually wants mid-run. */}
-        {active && live && e.latest && (
+        {showLatest && e.latest && (
           <motion.span initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-live block truncate text-micro">
             {e.latest.name}
             {e.latest.arg ? <span className="stamp ml-1.5">{shortPath(e.latest.arg)}</span> : null}
           </motion.span>
+        )}
+        {/* A failed step keeps its reason in view — the command or tool that errored — not just a red mark. */}
+        {reason && (
+          <span className="text-destructive block truncate text-micro" title={reason.arg ? `${reason.name}: ${reason.arg}` : reason.name}>
+            failed <span className="opacity-60">·</span> {reason.name}
+            {reason.arg ? <span className="stamp ml-1.5">{shortPath(reason.arg)}</span> : null}
+          </span>
         )}
       </span>
       {/* Only where there is no tick to carry it — on a done row the mark itself is already red. */}
@@ -224,10 +387,16 @@ function TaskRow({ task, live, since, compact }: { task: DerivedTask; live?: boo
     // carries the live tint on its border, not just a wash.
     <motion.li
       layout={reduce ? undefined : "position"}
-      transition={reduce ? { duration: 0 } : { duration: 0.26, ease: EASE }}
+      // A row added by a rewrite grows in; a removed one collapses out (height + opacity) — the
+      // list's AnimatePresence has `initial={false}`, so the first paint never animates.
+      initial={reduce ? false : { opacity: 0, height: 0 }}
+      animate={{ opacity: 1, height: "auto" }}
+      exit={reduce ? { opacity: 0, transition: { duration: 0 } } : { opacity: 0, height: 0 }}
+      transition={reduce ? { duration: 0 } : { duration: 0.26, ease: EXIT_EASE }}
       className={cn(
         "overflow-hidden rounded-md transition-colors duration-200",
-        active && live ? "bg-live/6" : open ? "bg-muted/60" : "hover:bg-muted/40"
+        active && live ? "bg-live/6" : open ? "bg-muted/60" : "hover:bg-muted/40",
+        wash && "plan-row-new"
       )}
     >
       {hasDetail ? (
@@ -374,12 +543,9 @@ export function PlanCard({ board, live }: { board: TaskBoard; live?: boolean }) 
         <ChevronRight className={cn("text-faint size-3.5 shrink-0 transition-transform duration-150", open && "rotate-90")} aria-hidden />
       </button>
       <ProgressRail tasks={tasks} live={live} />
+      <ChangeNote board={board} className="mt-1.5" />
       <Collapse open={open}>
-        <ol className="mt-1.5 flex flex-col">
-          {tasks.map((t, i) => (
-            <TaskRow key={`${i}-${t.text}`} task={t} live={live} since={t.state === "active" ? board.activeSince : undefined} />
-          ))}
-        </ol>
+        <StepList board={board} live={live} className="mt-1.5 flex flex-col" />
       </Collapse>
     </section>
   );
@@ -445,11 +611,8 @@ export function PlanDock({ board, live }: { board: TaskBoard; live?: boolean }) 
             <div className="px-3 pb-1">
               <ProgressRail tasks={tasks} live={live} layoutId="plan-rail" />
             </div>
-            <ol className="flex min-h-0 flex-1 flex-col overflow-y-auto p-1.5">
-              {tasks.map((t, i) => (
-                <TaskRow key={`${i}-${t.text}`} task={t} live={live} since={t.state === "active" ? board.activeSince : undefined} compact />
-              ))}
-            </ol>
+            <ChangeNote board={board} className="px-3 pt-1" />
+            <StepList board={board} live={live} compact className="flex min-h-0 flex-1 flex-col overflow-y-auto p-1.5" />
             {(board.ms !== undefined || failed > 0) && (
               <div className="shrink-0 border-t px-3 py-2 text-micro">
                 {board.ms !== undefined && <span className="text-faint stamp">{shortDuration(board.ms)} total</span>}
@@ -480,7 +643,7 @@ export function PlanDock({ board, live }: { board: TaskBoard; live?: boolean }) 
             <span className="flex flex-col items-center gap-1 pt-0.5">
               {tasks.map((t, i) => (
                 <motion.span
-                  key={`${i}-${t.text}`}
+                  key={t.text}
                   initial={reduce ? false : { scaleY: 0, opacity: 0 }}
                   animate={{ scaleY: 1, opacity: 1 }}
                   transition={{ delay: Math.min(i * 0.04, 0.3), duration: 0.24, ease: EASE }}

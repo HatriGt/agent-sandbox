@@ -5,6 +5,7 @@ import { useReducedMotion } from "@/lib/motion-pref";
 import type { ChangedFile } from "@/lib/api";
 import { FileMark } from "@/lib/fileIcon";
 import { cn } from "@/lib/utils";
+import { CHANGES_DISCARDED_EVENT } from "./FilePane";
 
 /**
  * The changed-files summary, docked above the composer where the run's output belongs — not inside
@@ -47,6 +48,15 @@ export function ChangesDock({ files, loading, onOpen, onRefresh, onReviewAll, ac
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [open]);
+  // A reject in the file pane or Review-all reverts a file in the box; the surfaces announce it on
+  // the window (CHANGES_DISCARDED_EVENT in FilePane.tsx) and the dock — owner of the refresh —
+  // re-reads the list so its counts roll (and a file reverted whole leaves the list).
+  React.useEffect(() => {
+    if (!onRefresh) return;
+    const onDiscarded = () => onRefresh();
+    window.addEventListener(CHANGES_DISCARDED_EVENT, onDiscarded);
+    return () => window.removeEventListener(CHANGES_DISCARDED_EVENT, onDiscarded);
+  }, [onRefresh]);
   if (!files.length) return null;
   const adds = files.reduce((a, f) => a + f.additions, 0);
   const dels = files.reduce((a, f) => a + f.deletions, 0);
