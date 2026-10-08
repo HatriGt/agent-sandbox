@@ -12,6 +12,7 @@ import { hasUserStoreBackend, loadBlob, saveBlob, ownerKey, OPERATOR_OWNER } fro
 import type { Config } from "./config.js";
 import { run, shellQuote } from "./exec.js";
 import { sshMuxOpts } from "./ssh.js";
+import { maskSecret } from "./redact.js";
 
 export type McpTransport = "stdio" | "http" | "sse";
 
@@ -166,8 +167,10 @@ export function isSecretKey(key: string): boolean {
   return SECRET_KEY_RE.test(key);
 }
 
+/** 2/3 head/tail, min 6 — FIXED: mergeSecrets compares a submitted value against mask(stored) to
+ *  mean "unchanged", so a saved form from before any change to these numbers must still match. */
 export function mask(v: string): string {
-  return v.length <= 6 ? "••••" : `${v.slice(0, 2)}…${v.slice(-3)}`;
+  return maskSecret(v, { head: 2, tail: 3, min: 6 });
 }
 
 function maskMap(m: Record<string, string> | undefined): Record<string, string> | undefined {

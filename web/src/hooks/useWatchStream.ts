@@ -16,7 +16,7 @@ import { api, ApiError, openSse, type WatchSnapshot } from "@/lib/api";
  * `done` and ends the stream; we flip `ok` to false so the slow poll takes over, and when the box
  * comes back to life (a follow-up), the caller bumps `generation` to reopen the stream.
  */
-export interface WatchStream {
+interface WatchStream {
   snap: WatchSnapshot | null;
   /** True while the SSE connection is healthy. False → caller should fall back to polling. */
   ok: boolean;

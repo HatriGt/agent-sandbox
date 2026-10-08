@@ -212,13 +212,6 @@ export function registerTriggerRoutes(app: Express, c: TriggerRouteCtx): void {
     }
   });
 
-  app.get("/triggers/:id/payload.json", (req, res) => {
-    if (!c.dashAuthed(req, res)) return;
-    const owner = ownerOfP(c.principalOf(res), req.params.id);
-    if (!getTrigger(c.db, owner, req.params.id)) return void res.status(404).json({ error: "no such automation" });
-    res.json({ payload: lastPayload(c.db, owner, req.params.id) ?? null });
-  });
-
   // â”€â”€â”€ deliveries (bet 4): the short log of what arrived and what happened to it â”€â”€â”€
   app.get("/triggers/:id/deliveries.json", (req, res) => {
     if (!c.dashAuthed(req, res)) return;

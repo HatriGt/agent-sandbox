@@ -115,7 +115,7 @@ const ROWS: Array<{ label: string; cell: (f: CompareFacts) => React.ReactNode }>
 ];
 
 /** Both receipts, row by row. Every cell is a fact the run reported; unknown stays unknown. */
-export function CompareView({ id, onOpenBox }: { id: string; onOpenBox?: (box: string) => void }) {
+function CompareView({ id, onOpenBox }: { id: string; onOpenBox?: (box: string) => void }) {
   const [d, setD] = React.useState<CompareDetail | null>(null);
   const [err, setErr] = React.useState<string | null>(null);
   React.useEffect(() => {

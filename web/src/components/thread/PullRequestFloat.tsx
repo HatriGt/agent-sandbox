@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 import { ApproveControl, MergeControl, PolicyRescue } from "@/components/pr/PullActions";
 import { reviewLabel, verdict, type MergeMethod, type Verdict } from "@/components/pr/verdict";
 
-export type PullRef = { url: string; repo: string; number: number };
+type PullRef = { url: string; repo: string; number: number };
 
 /**
  * The run's pull request(s) as a floating control: a small chip pinned to the top-right of the

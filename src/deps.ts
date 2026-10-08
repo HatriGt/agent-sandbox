@@ -26,7 +26,7 @@ import {
   askInBox,
   driverStateLine,
   type AgentCreds,
-  execWithInput,
+  exec as execInBox,
   WORKSPACE_DIRS_SH,
   msbIo,
   OMP_MIN_DISK,
@@ -534,14 +534,14 @@ export const deps: HandlerDeps = {
       if (!safe.ok) throw new Error(`attachment: ${safe.message}`);
       const abs = `/workspace/${safe.relPath}`;
       const dir = abs.slice(0, abs.lastIndexOf("/"));
-      await execWithInput(runCfg, box, `mkdir -p ${shellQuote(dir)} && base64 -d > ${shellQuote(abs)}`, a.base64.replace(/^data:[^,]*,/, ""));
+      await execInBox(runCfg, box, `mkdir -p ${shellQuote(dir)} && base64 -d > ${shellQuote(abs)}`, { input: a.base64.replace(/^data:[^,]*,/, "") });
     }
 
     // Provider env (sourced by every turn, so resumes keep it), outside /workspace and mode 600,
     // so it never lands in a diff or a checkpoint.
     if (plan.provider) {
       const body = providerEnvFile(providerEnv(plan.provider, plan.model));
-      await execWithInput(runCfg, box, `umask 077 && cat > ${PROVIDER_ENV_PATH}`, body);
+      await execInBox(runCfg, box, `umask 077 && cat > ${PROVIDER_ENV_PATH}`, { input: body });
     }
 
     // Staging is transient (already copied into the box). Clean it; refill pool on claim.

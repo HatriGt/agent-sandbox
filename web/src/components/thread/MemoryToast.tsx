@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 
 const SEEN_KEY = "asb-memory-seen";
 const SEEN_CAP = 300;
-export const AUTO_KEEP_MS = 8_000;
+const AUTO_KEEP_MS = 8_000;
 
 function readSeen(): string[] {
   try {

@@ -33,12 +33,13 @@ import { toolOutputLanguage } from "@/lib/viz-tool-output";
 import { useNow } from "@/hooks/useNow";
 
 /**
- * The Execution toolbar's Expand all / Collapse all. `v` bumps on every press so pressing the same
- * button twice re-applies it after a row was toggled by hand; `v === 0` means "never pressed".
+ * The header's Chat/Trace toggle as a sweep over every fold: Trace opens all, Chat closes all. `v`
+ * bumps on each switch so a fold toggled by hand still follows the next one; `v === 0` means the
+ * toggle has not been touched since the thread mounted and each fold keeps its own default.
  */
 export const ExpandAll = React.createContext<{ v: number; open: boolean }>({ v: 0, open: false });
 
-/** Opens/closes a collapsible whenever the toolbar fires. */
+/** Opens/closes a collapsible whenever the density toggle sweeps. */
 export function useExpandAll(setOpen: (open: boolean) => void) {
   const { v, open } = React.useContext(ExpandAll);
   React.useEffect(() => {
@@ -124,7 +125,7 @@ const SEARCH_TOOLS = new Set(["Grep", "Glob", "WebSearch", "WebFetch", "grep", "
  * content for a Write). The block is capped at DIFF_MAX_LINES in the box and ends with "… N more
  * lines" when cut; those lines have no sign, so the stat is marked as a lower bound ("+200+").
  */
-export function diffStat(diff: string | undefined): { added: number; removed: number; partial: boolean } | null {
+function diffStat(diff: string | undefined): { added: number; removed: number; partial: boolean } | null {
   if (!diff) return null;
   let added = 0;
   let removed = 0;
@@ -138,7 +139,7 @@ export function diffStat(diff: string | undefined): { added: number; removed: nu
 }
 
 /** `Exit code 2` — the first line the formatter writes for a failed shell call (src/trace.ts ERR_MARK). */
-export function exitCodeOf(result: string | undefined): number | null {
+function exitCodeOf(result: string | undefined): number | null {
   const m = result?.match(/^\s*Exit code (\d+)\b/);
   return m ? Number(m[1]) : null;
 }
@@ -148,7 +149,7 @@ export function exitCodeOf(result: string | undefined): number | null {
  * variable`, `Missing env DATABASE_URL` — so the thread can offer to provide it (the Resolve row).
  * Only SCREAMING_CASE names of 3+ characters count; a lowercase word before "is not set" is prose.
  */
-export function missingSecretOf(result: string | undefined): string | null {
+function missingSecretOf(result: string | undefined): string | null {
   if (!result) return null;
   const said = result.match(/\b([A-Z][A-Z0-9_]{2,})\b:? (?:is not set|is unset|not defined|is not defined|missing|unbound variable)/);
   if (said) return said[1];
@@ -160,7 +161,7 @@ export function missingSecretOf(result: string | undefined): string | null {
  * How many hits a search/fetch result holds. Grep/Glob list one path per line; WebSearch results
  * carry "N results" / "N sources" / link lines. Null when the shape is not a list.
  */
-export function resultCount(name: string, result: string | undefined): number | null {
+function resultCount(name: string, result: string | undefined): number | null {
   if (!result || !SEARCH_TOOLS.has(name)) return null;
   const said = result.match(/\b(\d+)\s+(?:results?|sources?|matches|files?)\b/i);
   if (said) return Number(said[1]);
@@ -834,7 +835,7 @@ function EditDiff({ diff }: { diff: string }) {
  * A step reads like a sentence — "Read src/trace.ts", "Searched for useResults" — not like a log
  * line ("Read: src/trace.ts"). Present tense while it runs. The raw tool name stays as the title.
  */
-export function stepVerb(event: ToolEvent, live: boolean): string {
+function stepVerb(event: ToolEvent, live: boolean): string {
   const n = event.name.toLowerCase();
   const v = (done: string, doing: string) => (live ? doing : done);
   if (n === "read" || n === "cat") return v("Read", "Reading");
@@ -1038,7 +1039,7 @@ function StepItem({ event, live }: { event: ToolEvent; live?: boolean }) {
  * listing, a here-doc. Rendered as markdown it becomes bullet salad. Detect it by shape and show a
  * collapsed raw block instead.
  */
-export function looksLikeDump(text: string): boolean {
+function looksLikeDump(text: string): boolean {
   const lines = text.split("\n").filter((l) => l.trim());
   if (lines.length < 6) return /(^|\n)(diff --git|<<PROMPT_EOF|@@ -\d)/.test(text);
   const dumpish = lines.filter((l) => /^\s*(\d{1,5}[\s\t]|[+-]{3}\s|@@ |diff --git|index [0-9a-f]{6,}|[{}[\];]\s*$|<<|\$ )/.test(l) || /^\s{4,}\S/.test(l)).length;
@@ -1091,7 +1092,7 @@ export const SayItem = React.memo(function SayItem({ text: raw, live, label = tr
  * The agent's byline, once per turn, so where the operator stops and the agent starts is never a guess.
  * With `at`, a quiet time follows the name — revealed on hover of the reply, always shown on touch.
  */
-export function AgentLabel({ live, at }: { live?: boolean; at?: number }) {
+function AgentLabel({ live, at }: { live?: boolean; at?: number }) {
   return (
     <span className="label text-muted-foreground mb-1.5 flex items-center gap-2">
       {/* The agent's mark: a small sphere in the live hue. It breathes only while the agent works. */}
@@ -1135,21 +1136,13 @@ function CopyMessage({ text, at }: { text: string; at?: number }) {
 }
 
 /**
- * The "working…" beat between visible outputs — a live status pill, not dead air. It names what the
- * agent is doing right now (`Bash npm test`, `thinking`), morphs as that changes (the old detail
- * slides out, the new one in), and carries an elapsed counter so a stall is visible as a number that
- * keeps climbing next to a detail that stopped changing.
+ * The beat between visible outputs when the trace has nothing live to show — "Starting up", "Answer
+ * sent — resuming", "Message sent" — a quiet pill that morphs between phases. No clock: the header
+ * keeps the run's one elapsed time, and a live trail or tool group names what the agent is doing.
+ * `detail` is a sentence about the phase, never a tool name.
  */
 export function WorkingIndicator({ label = "Working", detail }: { label?: string; detail?: string | null }) {
   const still = useReducedMotion();
-  const [elapsed, setElapsed] = React.useState(0);
-  React.useEffect(() => {
-    const start = Date.now();
-    const t = window.setInterval(() => setElapsed(Math.floor((Date.now() - start) / 1000)), 1000);
-    return () => window.clearInterval(t);
-  }, []);
-  const mins = Math.floor(elapsed / 60);
-  const time = elapsed < 5 ? null : mins > 0 ? `${mins}m ${elapsed % 60}s` : `${elapsed}s`;
   const swap = still
     ? { initial: false as const, animate: { opacity: 1 }, exit: { opacity: 0 }, transition: { duration: 0 } }
     : { initial: { opacity: 0, y: 6 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -6 }, transition: { duration: 0.18, ease: [0.22, 1, 0.36, 1] as const } };
@@ -1174,12 +1167,11 @@ export function WorkingIndicator({ label = "Working", detail }: { label?: string
         </AnimatePresence>
         <AnimatePresence mode="popLayout" initial={false}>
           {detail && (
-            <motion.code key={detail} {...swap} className="text-muted-foreground bg-muted min-w-0 truncate rounded px-1.5 py-0.5 font-mono text-micro">
+            <motion.span key={detail} {...swap} className="text-muted-foreground min-w-0 truncate text-micro">
               {detail}
-            </motion.code>
+            </motion.span>
           )}
         </AnimatePresence>
-        {time && <span className="text-faint shrink-0 text-micro tabular-nums">{time}</span>}
       </motion.div>
     </div>
   );
@@ -1378,48 +1370,6 @@ export function ObserverItem({ question, answer }: { question: string; answer?: 
           </p>
         )}
       </div>
-    </div>
-  );
-}
-
-/**
- * Extended thinking, folded. Collapsed by default to one line — `Thought for 12s` once settled,
- * `Thinking…` with the live-text shimmer while it is still forming. Expands to the full reasoning in a
- * quieter voice than the agent's prose (height + opacity on the Orbit ease).
- */
-export function ThinkingItem({ text, live, ms }: { text: string; live?: boolean; ms?: number }) {
-  const [open, setOpen] = React.useState(false);
-  useExpandAll(setOpen);
-  const still = useReducedMotion();
-  const secs = ms !== undefined ? Math.max(1, Math.round(ms / 1000)) : null;
-  return (
-    <div className="enter min-w-0">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className={cn(
-          "group -ml-1.5 flex max-w-full cursor-pointer items-center gap-2 rounded-md py-1 pr-2 pl-1.5 text-left text-meta transition-colors",
-          live ? "text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-muted/60"
-        )}
-      >
-        <ChevronRight className={cn("size-3.5 shrink-0 transition-transform duration-200 ease-[cubic-bezier(.2,.8,.2,1)]", open && "rotate-90")} aria-hidden />
-        <Brain className={cn("size-3.5 shrink-0", live && "text-live")} aria-hidden />
-        <span className={cn("font-medium", live && "shimmer-text")}>{live ? "Thinking…" : secs !== null ? `Thought for ${secs}s` : "Thought"}</span>
-      </button>
-      <AnimatePresence initial={false}>
-        {open && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: still ? 0.12 : 0.26, ease: [0.2, 0.8, 0.2, 1] }}
-            className="overflow-hidden"
-          >
-            <div className="text-muted-foreground mt-1 ml-2 border-l pl-4 text-meta leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere]">{text}</div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }

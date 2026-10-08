@@ -630,21 +630,6 @@ export function Thread({
     setPrefill({ task: box.task ?? "", repos });
     onNew();
   };
-  // What the agent is doing right now: the latest tool call, or thinking between calls.
-  const activity = React.useMemo(() => {
-    if (runState !== "running" || sleeping) return null;
-    for (let i = events.length - 1; i >= 0; i--) {
-      const e = events[i];
-      if (e.kind === "say") return "writing";
-      if (e.kind === "tool") {
-        const a = e.arg?.split("\n")[0].trim();
-        const short = a ? (/^[\w./-]+$/.test(a) ? a.split("/").pop() : a.slice(0, 48)) : "";
-        return short ? `${e.name} ${short}` : e.name;
-      }
-      if (e.kind === "think") return "thinking";
-    }
-    return events.length ? "working" : "starting";
-  }, [events, runState, sleeping]);
   // The run's clock for the header: first stamped event → now while running, → last stamp once done.
   const stamps = React.useMemo(() => {
     let first: number | undefined;
@@ -687,7 +672,16 @@ export function Thread({
     const p = digest?.provenance;
     return p?.model ? (p.provider ? `${p.provider} / ${p.model}` : p.model) : outcome?.cost.model ?? null;
   }, [events, digest?.provenance, outcome?.cost.model]);
-  const [expandAll, setExpandAll] = React.useState({ v: 0, open: false });
+  // The header's Chat/Trace toggle is the one fold control: Trace sweeps every fold open, Chat
+  // folds them. `v` bumps on each switch so a fold toggled by hand still follows the next switch;
+  // v === 0 (not switched since mount) leaves each fold to its own default.
+  const [expandAll, setExpandAll] = React.useState({ v: 0, open: density === "trace" });
+  const densityRef = React.useRef(density);
+  React.useEffect(() => {
+    if (densityRef.current === density) return;
+    densityRef.current = density;
+    setExpandAll((s) => ({ v: s.v + 1, open: density === "trace" }));
+  }, [density]);
 
   // Turns for the minimap: the task plus every message you sent, each with how the agent replied.
   const stick = useStickToBottom({ resize: "smooth", initial: "instant" });
@@ -790,7 +784,7 @@ export function Thread({
   // pill morphs between stages, in priority order.
   const lastKind = groups[groups.length - 1]?.kind ?? "";
   const liveContext = React.useMemo(() => ({ registry: liveRegistry, working: runState === "running" }), [liveRegistry, runState]);
-  const working: { label: string; detail?: string | null } | null = resuming
+  const working: { label: string; detail?: string } | null = resuming
     ? { label: "Answer sent — the agent is resuming" }
     : sleeping
       ? null
@@ -799,9 +793,10 @@ export function Thread({
             label: "Starting up",
             detail: box.agent === "omp" ? "installing oh-my-pi and getting your task ready — the first start takes about a minute" : "the sandbox is getting your task ready",
           }
-        // A live reasoning trail carries its own status line and clock; a second pill under it would say the same thing twice.
+        // A live reasoning trail or tool group names what the agent is doing and the header keeps
+        // the clock; this pill only covers the beats before the trace starts speaking.
         : runState === "running" && !loadingTrace && !["say", "think", "work", "tools"].includes(lastKind)
-          ? { label: events.length ? "Working" : "Starting up", detail: activity }
+          ? { label: events.length ? "Working" : "Starting up" }
           : pendingReplies.length > 0 && runState !== "running"
             ? { label: "Message sent", detail: "the agent is picking it up" }
             : null;
@@ -829,7 +824,6 @@ export function Thread({
         repos={repos}
         attaching={attaching}
         pulls={pulls.length > 0 && !loadingTrace ? pulls : undefined}
-        activity={activity}
         startedAt={stamps.first}
         endedAt={stamps.last}
         onStop={runState === "running" && !sleeping ? stopTurn : undefined}
@@ -890,17 +884,6 @@ export function Thread({
 
             {/* Skeleton → transcript is a crossfade, not a cut: the placeholder is shaped like the
                 content, so the swap reads as the bones filling in. */}
-            {!loadingTrace && groups.some((g) => g.kind === "tools" || g.kind === "think") && (
-              <div className="text-muted-foreground -mb-2 flex h-7 items-center gap-1 border-b text-micro">
-                <span className="label mr-auto font-semibold tracking-wider uppercase">Execution</span>
-                <button type="button" onClick={() => setExpandAll((s) => ({ v: s.v + 1, open: true }))} className="hover:bg-muted hover:text-foreground cursor-pointer rounded-md px-2 py-1 transition-colors">
-                  Expand all
-                </button>
-                <button type="button" onClick={() => setExpandAll((s) => ({ v: s.v + 1, open: false }))} className="hover:bg-muted hover:text-foreground cursor-pointer rounded-md px-2 py-1 transition-colors">
-                  Collapse all
-                </button>
-              </div>
-            )}
             <ExpandAll.Provider value={expandAll}>
             <LiveRegistryContext.Provider value={liveContext}>
             <RepeatedPolls.Provider value={repeats}>
@@ -1013,6 +996,7 @@ export function Thread({
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-2 empty:hidden">
               {runState === "running" && !sleeping && <WatchPill session={box.name} events={events} />}
               {working && !(loadingTrace && starting) && <WorkingIndicator label={working.label} detail={working.detail} />}
+              {/* detail here is a sentence about the phase, never a tool name — the trace says what runs. */}
             </div>
 
             <AnimatePresence initial={false}>
@@ -1075,7 +1059,6 @@ export function Thread({
                 stats={runStats(events)}
                 durationSec={durationSec}
                 context={ctxHealth}
-                onCopy={async () => toMarkdown(events, { title, machine: friendlyName(box.name), url: window.location.href })}
                 onAgain={newFromThis}
               />
             )}

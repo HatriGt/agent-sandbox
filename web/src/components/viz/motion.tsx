@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
  */
 
 /** Rows past this many in one new batch appear instantly. */
-export const STAGGER_CAP = 8;
+const STAGGER_CAP = 8;
 
 type Entrance = { className: string; style?: React.CSSProperties };
 
@@ -77,7 +77,7 @@ const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
  * first render shows the real value (no count-up from zero: that would display fabricated
  * intermediate data on a block that isn't changing). Reduced motion → no roll.
  */
-export function useRolledText(text: string): string {
+function useRolledText(text: string): string {
   const reduce = useReducedMotion();
   const [shown, setShown] = React.useState(text);
   const prev = React.useRef(text);

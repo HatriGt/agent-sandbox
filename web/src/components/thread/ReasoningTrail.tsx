@@ -65,7 +65,7 @@ function toolsIcon(events: ToolEvent[]) {
  * and names it; the lines under it are its body. While text is still arriving, a heading that has
  * opened but not closed (`**Checking the`) is held back so a half-typed title never flashes.
  */
-export function sectionsOf(text: string, live: boolean): { heading?: string; body: string }[] {
+function sectionsOf(text: string, live: boolean): { heading?: string; body: string }[] {
   const lines = text.replace(/\r/g, "").split("\n");
   const out: { heading?: string; body: string[] }[] = [];
   let cur: { heading?: string; body: string[] } | null = null;
@@ -92,7 +92,7 @@ export function sectionsOf(text: string, live: boolean): { heading?: string; bod
 }
 
 /** The animated sphere that marks the agent's reasoning; a still frame when idle or under reduced motion. */
-export function ThinkingOrb({ active, className }: { active?: boolean; className?: string }) {
+function ThinkingOrb({ active, className }: { active?: boolean; className?: string }) {
   return <span className={cn("think-orb shrink-0", active && "think-orb-live", className)} aria-hidden />;
 }
 

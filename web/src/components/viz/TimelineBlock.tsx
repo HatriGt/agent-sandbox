@@ -41,7 +41,7 @@ export function TimelineBlock({ events, source }: { events: TimelineEvent[]; sou
 }
 
 /** A step whose title may carry rendered markdown (inline code chips) when it came from an `<ol>`. */
-export type StepView = Omit<Step, "title"> & { title: React.ReactNode };
+type StepView = Omit<Step, "title"> & { title: React.ReactNode };
 
 /**
  * ```steps → the vertical wizard: numbered circles, connector line, done/active/failed states.

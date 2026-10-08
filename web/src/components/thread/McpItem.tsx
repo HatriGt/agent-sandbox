@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 type ToolEvent = Extract<TraceEvent, { kind: "tool" }>;
 
 /** Server identity chip on the dark ground: brighter tint, low-alpha fill, same hue every run. */
-export function ServerChip({ server, live }: { server: string; live?: boolean }) {
+function ServerChip({ server, live }: { server: string; live?: boolean }) {
   const hue = serverHue(server);
   const style = {
     "--srv": `oklch(0.78 0.13 ${hue})`,

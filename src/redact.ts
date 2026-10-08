@@ -33,6 +33,20 @@ const SHAPES: RegExp[] = [
   /((?:^|[\s"',{])(?:[A-Za-z0-9_-]*(?:TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|APIKEY|PRIVATE_KEY|ACCESS_KEY)[A-Za-z0-9_-]*)["']?\s*[:=]\s*["']?)([^\s"',}…]{8,})/gi,
 ];
 
+/**
+ * The display form of a credential the controller holds: a recognisable head, an ellipsis, a short
+ * tail — never enough to use. Values at or under `min` chars collapse to "••••" (a head+tail of a
+ * short value would be most of it). `head` may be a number of chars or a function picking a
+ * meaningful prefix (a GitHub token's `ghp_`). Callers that round-trip the masked form (an editor
+ * that posts it back meaning "unchanged") must keep their head/tail/min stable.
+ */
+export function maskSecret(value: string, opts: { head?: number | ((v: string) => string); tail?: number; min?: number } = {}): string {
+  const { head = 3, tail = 4, min = 8 } = opts;
+  if (value.length <= min) return "••••";
+  const prefix = typeof head === "function" ? head(value) : value.slice(0, head);
+  return `${prefix}…${value.slice(-tail)}`;
+}
+
 function tail(v: string): string {
   return v.length >= 12 ? `…${v.slice(-4)}` : "…";
 }

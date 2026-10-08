@@ -14,6 +14,7 @@ import { randomUUID } from "node:crypto";
 import { allBlobs, loadBlob, ownerKey, saveBlob } from "./user-store.js";
 import type { DriverKind, ModelSource } from "./drivers/types.js";
 import { DRIVERS } from "./drivers/index.js";
+import { maskSecret as maskSecretValue } from "./redact.js";
 
 export type ProviderKind = "anthropic" | "openai" | "openai-compatible" | "ollama" | "ccproxy";
 export const PROVIDER_KINDS: readonly ProviderKind[] = ["anthropic", "openai", "openai-compatible", "ollama", "ccproxy"];
@@ -69,9 +70,7 @@ export interface ProviderView extends Omit<ProviderRecord, "apiKey"> {
 export const PROVIDERS_KIND = "providers";
 
 export function maskSecret(k: string | undefined | null): string | null {
-  if (!k) return null;
-  if (k.length <= 8) return "••••";
-  return `${k.slice(0, 3)}…${k.slice(-4)}`;
+  return k ? maskSecretValue(k) : null;
 }
 
 export function driversFor(kind: ProviderKind): DriverKind[] {

@@ -1,160 +1,22 @@
 import * as React from "react";
-import { Check, Download, FileCode2, FileDiff, FileQuestion, Loader2, Undo2, X } from "lucide-react";
+import { Check, FileQuestion, Loader2, Undo2 } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { toast } from "sonner";
 import { api, ApiError, type ChangedFile } from "@/lib/api";
-import { parseUnifiedDiff, diffForNewFile, hunkId, hunkToPatch, inlineChanges, pairChangedLines, type DiffHunk, type DiffLine, type ParsedDiff, type Span } from "@/lib/diff";
+import { hunkId, hunkToPatch, inlineChanges, pairChangedLines, type DiffHunk, type DiffLine, type ParsedDiff, type Span } from "@/lib/diff";
 import { useReducedMotion } from "@/lib/motion-pref";
 import { tokenizeLines, type CodeToken } from "@/components/CodeEditor";
-import { FileMark, languageOf } from "@/lib/fileIcon";
-import { CodeBlock, CodeBlockCode } from "@/components/ui/code-block";
-import { Markdown } from "@/components/ui/markdown";
-import { Button } from "@/components/ui/button";
-import { AnimatedTabs } from "@/components/ui/animated-tabs";
 import { cn } from "@/lib/utils";
 import "@/styles/review.css";
 
 /**
- * The file pane — a VS Code-style side panel for one file from the sandbox: its diff against HEAD
- * (two gutters, coloured lines, per-hunk headers) or its full content with syntax highlighting.
- * Fetched lazily and cached per (session, path); download via the token-guarded artifact route.
+ * The diff primitives every review surface is built from — `DiffView` (the two-gutter unified
+ * diff), `useHunkReview` (accept / reject state per file, wired to /discard.json) and
+ * `FileReviewBar` (the per-file controls). Used by the workspace's per-file Diff, the workspace
+ * Review view (review/ReviewView.tsx), the PR page and History's archived diff. The file keeps its
+ * name because those importers do; the old side-panel component that gave it the name is gone —
+ * the workspace pane is the one surface for a file.
  */
-export function FilePane({ session, file, onClose }: { session: string; file: ChangedFile; onClose: () => void }) {
-  const [tab, setTab] = React.useState<"diff" | "file">(file.status === "deleted" ? "diff" : "diff");
-  const [diff, setDiff] = React.useState<ParsedDiff | null>(null);
-  const [content, setContent] = React.useState<string | null>(null);
-  const [error, setError] = React.useState<string | null>(null);
-  const [loading, setLoading] = React.useState(false);
-  const untracked = file.status === "untracked" || file.status === "added";
-  const review = useHunkReview(session, file.path, diff, {
-    whole: untracked || file.status === "deleted",
-    onDiscarded: (_files, scope) => {
-      if (scope === "file") setDiff((d) => (d ? { ...d, hunks: [], additions: 0, deletions: 0 } : d));
-    },
-  });
-
-  React.useEffect(() => {
-    setDiff(null);
-    setContent(null);
-    setError(null);
-    setTab(file.status === "modified" || file.status === "renamed" || file.status === "deleted" ? "diff" : "file");
-  }, [session, file.path, file.status]);
-
-  React.useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    const load = async () => {
-      try {
-        if (tab === "diff") {
-          if (diff) return;
-          const d = await api.diff(session, file.path);
-          if (cancelled) return;
-          if (d.untracked) {
-            const text = content ?? (await api.artifactText(session, file.path));
-            if (cancelled) return;
-            setContent(text);
-            setDiff(diffForNewFile(text));
-          } else setDiff(parseUnifiedDiff(d.diff));
-        } else {
-          if (content !== null) return;
-          const text = await api.artifactText(session, file.path);
-          if (!cancelled) setContent(text);
-        }
-      } catch (e) {
-        if (!cancelled) setError(e instanceof ApiError && e.status === 404 ? "This file is no longer available in the sandbox." : e instanceof Error ? e.message : String(e));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
-    void load();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, file.path, tab]);
-
-  const download = async () => {
-    try {
-      const blob = await api.artifactBlob(session, file.path);
-      const href = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = href;
-      a.download = file.path.slice(file.path.lastIndexOf("/") + 1);
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(href), 10_000);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  };
-
-  const base = file.path.slice(file.path.lastIndexOf("/") + 1);
-  const dir = file.path.slice(0, Math.max(0, file.path.lastIndexOf("/")));
-  const isMd = /\.(md|markdown)$/i.test(base);
-
-  return (
-    <motion.aside
-      initial={{ x: 24, opacity: 0 }}
-      animate={{ x: 0, opacity: 1 }}
-      exit={{ x: 24, opacity: 0 }}
-      transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-      className="bg-card absolute inset-0 z-20 flex min-w-0 flex-col md:relative md:inset-auto md:h-full md:w-[46%] md:min-w-[26rem] md:border-l"
-      aria-label={`File ${file.path}`}
-    >
-      <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
-        <FileMark path={file.path} />
-        <div className="min-w-0 flex-1">
-          <p className="text-foreground truncate font-mono text-meta font-medium">{base}</p>
-          {dir && <p className="stamp text-muted-foreground truncate">{dir}</p>}
-        </div>
-        <span className="stamp flex shrink-0 items-center gap-1.5">
-          {file.additions > 0 && <span className="text-ok">+{file.additions}</span>}
-          {file.deletions > 0 && <span className="text-destructive">−{file.deletions}</span>}
-        </span>
-        {review && tab === "diff" && <FileReviewBar review={review} />}
-        <AnimatedTabs
-          ariaLabel="File view"
-          className="ml-2"
-          value={tab}
-          onChange={setTab}
-          items={[
-            { value: "diff", icon: <FileDiff className="size-3.5" />, label: "Diff" },
-            { value: "file", icon: <FileCode2 className="size-3.5" />, label: "File", disabled: file.status === "deleted" },
-          ]}
-        />
-        <Button variant="ghost" size="icon-sm" onClick={download} aria-label="Download" disabled={file.status === "deleted"}>
-          <Download />
-        </Button>
-        <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close file pane">
-          <X />
-        </Button>
-      </header>
-
-      <div className="min-h-0 flex-1 overflow-auto">
-        {error ? (
-          <p className="text-muted-foreground px-4 py-6 text-meta">{error}</p>
-        ) : loading && ((tab === "diff" && !diff) || (tab === "file" && content === null)) ? (
-          <p className="text-muted-foreground flex items-center gap-2 px-4 py-6 text-meta">
-            <Loader2 className="size-4 animate-spin" aria-hidden />
-            Loading {tab === "diff" ? "diff" : "file"}…
-          </p>
-        ) : tab === "diff" && diff ? (
-          <DiffView diff={diff} path={file.path} review={review} />
-        ) : tab === "file" && content !== null ? (
-          isMd ? (
-            <div className="prose-agent text-foreground px-5 py-4">
-              <Markdown>{content}</Markdown>
-            </div>
-          ) : (
-            <CodeBlock className="my-0 rounded-none border-0 shadow-none">
-              <CodeBlockCode code={content} language={languageOf(file.path)} />
-            </CodeBlock>
-          )
-        ) : null}
-      </div>
-    </motion.aside>
-  );
-}
 
 /**
  * Two-gutter unified diff, the way a reviewer reads one: old and new line numbers in a gutter that
@@ -354,8 +216,8 @@ export function FileReviewBar({ review, className }: { review: HunkReview; class
   const all = hunks > 0 && reviewed === hunks;
   const busy = review.busy === "file";
   return (
-    <span className={cn("flex shrink-0 items-center gap-1.5", className)} data-review-bar>
-      <span className="text-faint text-micro tabular-nums whitespace-nowrap" aria-live="polite">
+    <span className={cn("flex shrink-0 items-center gap-2", className)} data-review-bar>
+      <span className="text-faint stamp tabular-nums whitespace-nowrap" aria-live="polite">
         {hunks} {hunks === 1 ? "hunk" : "hunks"}
         {hunks > 0 && (
           <>
@@ -378,7 +240,7 @@ export function FileReviewBar({ review, className }: { review: HunkReview; class
       )}
       {armed && (
         <span className="flex items-center gap-1" role="group" aria-label="Confirm reject file">
-          <span className="text-muted-foreground text-micro whitespace-nowrap">Discard all changes?</span>
+          <span className="text-muted-foreground text-meta whitespace-nowrap">Discard all changes?</span>
           <button
             type="button"
             className="review-btn"
@@ -464,8 +326,8 @@ function Hunk({ hunk, prev, path, review }: { hunk: DiffHunk; prev?: DiffHunk; p
       data-busy={busy || undefined}
       tabIndex={review ? 0 : undefined}
     >
-      <div className="review-head bg-muted/70 sticky top-0 z-20 border-b backdrop-blur-sm [&:not(:first-child)]:border-t" role="row">
-        <div className="text-muted-foreground sticky left-0 flex w-max max-w-[calc(100vw-2rem)] items-center gap-2 px-3 py-1 text-micro">
+      <div className="review-head bg-muted/60 sticky top-0 z-20 border-b backdrop-blur-sm" role="row">
+        <div className="text-muted-foreground sticky left-0 flex w-max max-w-[calc(100vw-2rem)] items-center gap-2 px-3 py-1 text-micro tabular-nums">
           {gap > 0 ? (
             <span className="text-faint tabular-nums">⋯ {gap} unchanged {gap === 1 ? "line" : "lines"}</span>
           ) : (

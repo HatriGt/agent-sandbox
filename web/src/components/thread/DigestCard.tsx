@@ -35,7 +35,7 @@ export function useRunDigest(box: string, finished: boolean, finishedKey: string
  * The receipt's provenance + supervision line, machine voice: agent · model · questions · tokens.
  * Only recorded facts appear — no cost (no price data exists), no guessed model.
  */
-export function receiptFacts(digest: RunDigest): string[] {
+function receiptFacts(digest: RunDigest): string[] {
   const out: string[] = [];
   const p = digest.provenance;
   if (p?.agentLabel || p?.agent) out.push(p.agentLabel ?? p.agent!);

@@ -20,7 +20,7 @@ export interface VerifySpec {
   text: string;
 }
 
-export interface RunSettingsModel {
+interface RunSettingsModel {
   current: ModelChoice | null;
   models: ModelChoice[];
   defaultId: string;
@@ -57,17 +57,6 @@ export function useMediaQuery(q: string): boolean {
     return () => mq.removeEventListener("change", on);
   }, [q]);
   return m;
-}
-
-/** Which options are off their default — the chips the composer shows. */
-export function nonDefaults(p: Pick<RunSettingsProps, "harness" | "model" | "agent" | "attempts" | "verify">): number {
-  let n = 0;
-  if (p.harness?.value) n++;
-  if (p.model?.offDefault) n++;
-  if (p.agent?.current && p.agent.current.id !== p.agent.defaultId) n++;
-  if (p.attempts && p.attempts.value > 1) n++;
-  if (p.verify?.value && p.verify.value.text.trim()) n++;
-  return n;
 }
 
 export function Row({ label, hint, hintTone, children }: { label: string; hint?: string; hintTone?: "attention"; children: React.ReactNode }) {

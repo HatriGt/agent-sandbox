@@ -13,6 +13,7 @@
  * Pure shaping and the device-flow protocol are here with `fetch` injected, so they are unit-tested.
  */
 import type { Account, TokenStore } from "./gh-token-store.js";
+import { maskSecret } from "./redact.js";
 
 export interface AccountView {
   login: string;
@@ -25,10 +26,7 @@ export interface AccountView {
 }
 
 export function maskToken(token: string): string {
-  const t = token.trim();
-  if (t.length <= 8) return "••••";
-  const prefix = t.match(/^(gh[pousr]_|github_pat_)/)?.[1] ?? t.slice(0, 3);
-  return `${prefix}…${t.slice(-4)}`;
+  return maskSecret(token.trim(), { head: (t) => t.match(/^(gh[pousr]_|github_pat_)/)?.[1] ?? t.slice(0, 3) });
 }
 
 export function viewAccounts(store: TokenStore, effectiveDefault: string | undefined): AccountView[] {

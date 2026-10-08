@@ -12,14 +12,10 @@ import "@/styles/plan.css";
 /**
  * The agent's plan (TodoWrite) joined to the work it actually did — the thread's spine.
  *
- * Two presentations of ONE board. On wide screens it is a docked aside (`PlanDock`) pinned beside the
- * conversation, because the plan is the answer to "where is this run up to" and a card that scrolls
- * away with the transcript cannot answer it. Below `xl` there is no room for a second column, so the
- * same board renders in flow (`PlanCard`) where it always did.
- *
- * The dock is a SIBLING of the conversation+composer column, not an overlay: the whole column narrows
- * together, so the composer stays aligned with the text it belongs to (the constraint that killed the
- * old right-hand PR column) and nothing is ever covered.
+ * ONE board (`PlanBoard`) with two placements (`variant`): docked beside the conversation when the
+ * row has room, because the plan is the answer to "where is this run up to" and a card that scrolls
+ * away with the transcript cannot answer it; inline in the flow otherwise. The caller makes that
+ * one decision (`useDockRoom()` + which asides are open) and renders the board exactly once.
  *
  * Evidence per step comes from `deriveTaskBoard` — see `lib/planTasks.ts` for the attribution rule.
  */
@@ -43,7 +39,7 @@ function StepDuration({ ms, since, live }: { ms?: number; since?: number; live: 
   const total = (ms ?? 0) + (ticking ? Math.max(0, now - since) : 0);
   if (total < 1000) return null;
   return (
-    <span className={cn("stamp shrink-0 text-micro tabular-nums", ticking ? "text-live" : "text-faint")} title={ticking ? "In progress for" : "Took"}>
+    <span className={cn("stamp shrink-0 tabular-nums", ticking ? "text-live" : "text-faint")} title={ticking ? "In progress for" : "Took"}>
       {shortDuration(total)}
     </span>
   );
@@ -372,10 +368,10 @@ function TaskRow({ task, live, since, compact, arrived }: { task: DerivedTask; l
       {e.failed && task.state !== "done" && (
         <AlertTriangle className="text-destructive size-3.5 shrink-0" aria-label="a call in this step failed" />
       )}
-      {summary && <span className={cn("text-faint stamp shrink-0 text-micro", compact ? "hidden" : "hidden sm:block")}>{summary}</span>}
+      {summary && <span className={cn("text-faint stamp shrink-0 tabular-nums", compact ? "hidden" : "hidden sm:block")}>{summary}</span>}
       <StepDuration ms={e.ms} since={since} live={!!(active && live)} />
       {hasDetail && (
-        <ChevronRight className={cn("text-faint size-3.5 shrink-0 transition-transform duration-150", open && "rotate-90")} aria-hidden />
+        <ChevronRight className={cn("text-faint size-3.5 shrink-0 transition-transform duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none", open && "rotate-90")} aria-hidden />
       )}
     </>
   );
@@ -417,8 +413,8 @@ function TaskRow({ task, live, since, compact, arrived }: { task: DerivedTask; l
           <motion.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0, transition: { duration: 0.18, ease: EASE } }}
-            transition={reduce ? { duration: 0 } : { duration: 0.26, ease: EASE }}
+            exit={{ height: 0, opacity: 0, transition: { duration: reduce ? 0 : 0.18, ease: EXIT_EASE } }}
+            transition={reduce ? { duration: 0 } : { duration: 0.26, ease: EXIT_EASE }}
             className="overflow-hidden"
           >
             <div className="flex flex-col gap-2 px-2 pb-2 pl-8">
@@ -520,73 +516,88 @@ function Sweep({ on, failed }: { on: boolean; failed?: boolean }) {
   );
 }
 
-/** In-flow board, for screens with no room for the dock. */
-export function PlanCard({ board, live }: { board: TaskBoard; live?: boolean }) {
-  const [open, setOpen] = React.useState(true);
-  const { tasks, done, complete } = board;
-  const failed = tasks.filter((t) => t.evidence.failed).length;
-  const sweep = useCompletionSweep(complete);
-  return (
-    <section aria-label="Plan" className="enter relative overflow-hidden">
-      <Sweep on={sweep} failed={failed > 0} />
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="flex h-7 w-full cursor-pointer items-center gap-2.5 text-left"
-      >
-        <PlanLabel done={done} total={tasks.length} />
-        <span className="text-faint min-w-0 flex-1 truncate text-micro">
-          <BoardHeadline complete={complete} live={live} failed={failed > 0} />
-          {board.ms !== undefined ? ` · ${shortDuration(board.ms)}` : ""}
-        </span>
-        <ChevronRight className={cn("text-faint size-3.5 shrink-0 transition-transform duration-150", open && "rotate-90")} aria-hidden />
-      </button>
-      <ProgressRail tasks={tasks} live={live} />
-      <ChangeNote board={board} className="mt-1.5" />
-      <Collapse open={open}>
-        <StepList board={board} live={live} className="mt-1.5 flex flex-col" />
-      </Collapse>
-    </section>
-  );
-}
-
 const DOCK_KEY = "asb-plan-dock";
+/** Tailwind's `xl` — the width at which the thread row has room for a docked aside. */
+const DOCK_QUERY = "(min-width: 80rem)";
 
 /**
- * The docked board: pinned beside the conversation so the plan never scrolls away. Collapses to a slim
- * rail that still carries the fraction and a pip per step, so even collapsed it answers "how far in".
+ * Whether the viewport is wide enough for the docked board. Thread.tsx folds this into ONE layout
+ * decision — `useDockRoom() && !workspace && !inspector ? "dock" : "inline"` — so the plan is on
+ * screen exactly once, instead of a CSS breakpoint on the card and booleans on the dock disagreeing.
  */
-export function PlanDock({ board, live }: { board: TaskBoard; live?: boolean }) {
-  const [open, setOpen] = React.useState(() => sessionStorage.getItem(DOCK_KEY) !== "0");
+export function useDockRoom(): boolean {
+  const get = () => typeof window !== "undefined" && !!window.matchMedia?.(DOCK_QUERY).matches;
+  const [room, setRoom] = React.useState(get);
+  React.useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mq = window.matchMedia(DOCK_QUERY);
+    const on = () => setRoom(mq.matches);
+    on();
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+  return room;
+}
+
+export type PlanVariant = "inline" | "dock";
+
+/**
+ * THE plan board. One component, two placements:
+ *  - `inline` — in the conversation's flow, where there is no room beside it (or another aside has
+ *    the room). Folds under its header.
+ *  - `dock`   — an aside pinned beside the conversation so the plan never scrolls away; collapses to
+ *    a slim rail that still carries the fraction and a pip per step. Remembered per session.
+ * The dock is a SIBLING of the conversation+composer column, never an overlay: the column narrows
+ * with it, so the composer stays aligned with the text and nothing is covered.
+ */
+export function PlanBoard({ board, live, variant = "inline", className }: { board: TaskBoard; live?: boolean; variant?: PlanVariant; className?: string }) {
   const reduce = useReducedMotion();
   const { tasks, done, complete } = board;
   const failed = tasks.filter((t) => t.evidence.failed).length;
   const sweep = useCompletionSweep(complete);
+  // Inline: folded/unfolded for this mount. Dock: remembered for the session.
+  const [open, setOpen] = React.useState(() => (variant === "dock" ? sessionStorage.getItem(DOCK_KEY) !== "0" : true));
   const toggle = () =>
     setOpen((v) => {
-      sessionStorage.setItem(DOCK_KEY, v ? "0" : "1");
+      if (variant === "dock") sessionStorage.setItem(DOCK_KEY, v ? "0" : "1");
       return !v;
     });
 
+  if (variant === "inline") {
+    return (
+      <section aria-label="Plan" className={cn("enter relative overflow-hidden", className)}>
+        <Sweep on={sweep} failed={failed > 0} />
+        <button type="button" onClick={toggle} aria-expanded={open} className="flex h-7 w-full cursor-pointer items-center gap-2.5 text-left">
+          <PlanLabel done={done} total={tasks.length} />
+          <span className="text-faint min-w-0 flex-1 truncate text-micro">
+            <BoardHeadline complete={complete} live={live} failed={failed > 0} />
+            {board.ms !== undefined ? <span className="stamp"> · {shortDuration(board.ms)}</span> : null}
+          </span>
+          <ChevronRight className={cn("text-faint size-3.5 shrink-0 transition-transform duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none", open && "rotate-90")} aria-hidden />
+        </button>
+        <ProgressRail tasks={tasks} live={live} />
+        <ChangeNote board={board} className="mt-1.5" />
+        <Collapse open={open}>
+          <StepList board={board} live={live} className="mt-1.5 flex flex-col" />
+        </Collapse>
+      </section>
+    );
+  }
+
   return (
-    // The aside is a SIBLING in the thread's flex row, so the conversation column narrows rather than
-    // being covered — but it only reserves a gutter. The board itself is a self-sized card centred in
-    // that gutter (`items-center`), not a floor-to-ceiling panel.
+    // The aside only reserves a gutter; the board is a self-sized card centred in it, not a
+    // floor-to-ceiling panel.
     <motion.aside
       aria-label="Plan"
       initial={false}
       animate={{ width: open ? "22.5rem" : "3.25rem" }}
       transition={reduce ? { duration: 0 } : { type: "spring", stiffness: 340, damping: 36 }}
-      className="hidden shrink-0 items-center py-4 pr-4 pl-1 xl:flex"
+      className={cn("flex shrink-0 items-center py-4 pr-4 pl-1", className)}
     >
       <motion.div
         layout={!reduce}
         transition={reduce ? { duration: 0 } : SPRING}
-        className={cn(
-          "bg-card relative flex max-h-[70vh] w-full flex-col overflow-hidden rounded-xl border shadow-e4",
-          !open && "items-center"
-        )}
+        className={cn("bg-card relative flex max-h-[70vh] w-full flex-col overflow-hidden rounded-xl border", !open && "items-center")}
       >
         <Sweep on={sweep} failed={failed > 0} />
 
@@ -614,7 +625,7 @@ export function PlanDock({ board, live }: { board: TaskBoard; live?: boolean }) 
             <ChangeNote board={board} className="px-3 pt-1" />
             <StepList board={board} live={live} compact className="flex min-h-0 flex-1 flex-col overflow-y-auto p-1.5" />
             {(board.ms !== undefined || failed > 0) && (
-              <div className="shrink-0 border-t px-3 py-2 text-micro">
+              <div className="shrink-0 border-t px-3 py-2 text-micro tabular-nums">
                 {board.ms !== undefined && <span className="text-faint stamp">{shortDuration(board.ms)} total</span>}
                 {board.ms !== undefined && failed > 0 && <span className="text-border mx-1.5">·</span>}
                 {failed > 0 && (
@@ -637,7 +648,7 @@ export function PlanDock({ board, live }: { board: TaskBoard; live?: boolean }) 
             className="flex w-full cursor-pointer flex-col items-center gap-1.5 px-2 py-3"
           >
             <PanelRightOpen className="text-muted-foreground size-4 shrink-0" aria-hidden />
-            <span className="text-muted-foreground stamp mt-0.5 text-micro">
+            <span className="text-muted-foreground stamp mt-0.5 text-micro tabular-nums">
               {done}/{tasks.length}
             </span>
             <span className="flex flex-col items-center gap-1 pt-0.5">
@@ -650,13 +661,7 @@ export function PlanDock({ board, live }: { board: TaskBoard; live?: boolean }) 
                   title={t.text}
                   className={cn(
                     "h-3 w-1.5 shrink-0 rounded-full",
-                    t.state === "done"
-                      ? t.evidence.failed
-                        ? "bg-destructive"
-                        : "bg-ok"
-                      : t.state === "active"
-                        ? cn("bg-live", live && "breathe")
-                        : "bg-border"
+                    t.state === "done" ? (t.evidence.failed ? "bg-destructive" : "bg-ok") : t.state === "active" ? cn("bg-live", live && "breathe") : "bg-border"
                   )}
                 />
               ))}
@@ -666,4 +671,16 @@ export function PlanDock({ board, live }: { board: TaskBoard; live?: boolean }) 
       </motion.div>
     </motion.aside>
   );
+}
+
+/**
+ * Thin wrappers, same props as before, so Thread.tsx keeps compiling until it moves to `PlanBoard`
+ * with one `variant`. PlanDock keeps its old breakpoint gate only here — the component itself has
+ * none; the caller decides.
+ */
+export function PlanCard({ board, live }: { board: TaskBoard; live?: boolean }) {
+  return <PlanBoard board={board} live={live} variant="inline" />;
+}
+export function PlanDock({ board, live }: { board: TaskBoard; live?: boolean }) {
+  return <PlanBoard board={board} live={live} variant="dock" className="hidden xl:flex" />;
 }

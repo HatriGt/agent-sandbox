@@ -40,7 +40,7 @@ const COLUMNS: Column<Row>[] = [
   { id: "mtime", header: "Modified", align: "end", width: "w-28", sort: (r) => r.mtime, cell: (r) => <span className="text-muted-foreground text-micro">{fmtAgo(r.mtime)}</span> },
 ];
 
-export function fmtBytes(n: number): string {
+function fmtBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(n < 10240 ? 1 : 0)} KB`;
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;

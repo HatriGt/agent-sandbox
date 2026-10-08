@@ -26,7 +26,7 @@ import { cn } from "@/lib/utils";
  * returns focus to the trigger, reduced motion keeps only the fade.
  */
 
-export type MenuName = "plus" | "skills" | "harness" | "workflow" | "model" | "more";
+type MenuName = "plus" | "skills" | "harness" | "workflow" | "model" | "more";
 
 /** One open menu per composer, plus ⌘. / Ctrl+. → the Model menu (pass `hotkey` on one composer per page). */
 export function useComposerMenus(hotkey?: MenuName | false) {
@@ -50,7 +50,7 @@ export function useComposerMenus(hotkey?: MenuName | false) {
 }
 
 /** "Claude Sonnet 4.5" → "Sonnet 4.5": the toolbar label is a name, not a product line. */
-export function shortModelLabel(m: ModelChoice | null): string {
+function shortModelLabel(m: ModelChoice | null): string {
   if (!m) return "Model";
   return m.label.replace(/^claude[\s-]+/i, "").replace(/\s*\(.*\)\s*$/, "") || m.id;
 }
@@ -110,7 +110,7 @@ function popMotion(still: boolean | null, side: "top" | "bottom", align: "start"
   };
 }
 
-export interface ToolMenuProps {
+interface ToolMenuProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Title of the panel (sheet header on a phone, aria-label on a desk). */
@@ -123,7 +123,7 @@ export interface ToolMenuProps {
   children: React.ReactNode;
 }
 
-export function ToolMenu({ open, onOpenChange, title, trigger, side = "top", align = "start", width = "w-80", children }: ToolMenuProps) {
+function ToolMenu({ open, onOpenChange, title, trigger, side = "top", align = "start", width = "w-80", children }: ToolMenuProps) {
   const phone = useMediaQuery("(max-width: 639px)");
   const still = useReducedMotion();
   const rootRef = React.useRef<HTMLDivElement>(null);

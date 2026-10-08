@@ -72,10 +72,3 @@ export function useModelChoice(box: string | null): {
   );
   return { current, models, defaultId, pick, picked };
 }
-
-/** Same subsequence-friendly filter feel as the file mention menu: substring on label OR id. */
-export function filterModels(models: ModelChoice[], query: string): ModelChoice[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return models;
-  return models.filter((m) => m.label.toLowerCase().includes(q) || m.id.toLowerCase().includes(q));
-}

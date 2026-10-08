@@ -36,7 +36,7 @@ function verifiedText(v: { pass: boolean; retries?: number }): string {
   return tries > 1 ? `verification failed after ${tries} tries` : "UNVERIFIED";
 }
 
-export function testsText(o: RunOutcome): { text: string; tone: "ok" | "bad" | "plain" } {
+function testsText(o: RunOutcome): { text: string; tone: "ok" | "bad" | "plain" } {
   const t = o.trust.tests;
   if (t) {
     const total = t.passed + t.failed;

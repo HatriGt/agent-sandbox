@@ -84,7 +84,7 @@ import { makeCredentialBroker } from "./broker.js";
 import { FILE_INDEX_CAP, fileDetailsCommand, makeFileIndex, parseFileDetails } from "./files.js";
 import { canRevert, captureCmd, checkpointForMessage, listCmd, parseCkptLs, revertCmd, withBoxLock } from "./checkpoint.js";
 import { fetchModels, isAllowedModel } from "./models.js";
-import { exec as execInBox, execWithInput, execWithSecretEnv, boxRepoSlugs } from "./msb.js";
+import { execInBox, boxRepoSlugs } from "./msb.js";
 import { loadStore, saveStore, pickDefaultAccount, upsertAccount, removeAccount, setDefaultAccount } from "./gh-token-store.js";
 import { probeToken } from "./gh-probe.js";
 import { viewAccounts, deviceStart, devicePoll } from "./accounts.js";
@@ -2920,9 +2920,8 @@ app.post("/pr/merge.json", async (req: Request, res: Response) => {
     // policy. Only meaningful when the connected account actually has bypass rights; the UI keeps
     // it behind its own explicit confirm. --auto and --admin are mutually exclusive in gh.
     const extra = admin ? " --admin" : auto ? " --auto" : "";
-    const r = await execWithSecretEnv(cfg, session, `gh pr merge ${Number(number)} --repo ${shellQuote(repo)} ${methodFlag}${extra} 2>&1`, {
-      GH_TOKEN: creds.primaryToken,
-      GITHUB_TOKEN: creds.primaryToken,
+    const r = await execInBox(cfg, session, `gh pr merge ${Number(number)} --repo ${shellQuote(repo)} ${methodFlag}${extra} 2>&1`, {
+      secretEnv: { GH_TOKEN: creds.primaryToken, GITHUB_TOKEN: creds.primaryToken },
     });
     forgetPull(repo, Number(number));
     res.json({ ok: true, auto: !!auto && !admin, output: redactor.redact((r.stdout ?? "").trim().slice(-600)) });
@@ -2953,9 +2952,8 @@ app.post("/pr/approve.json", async (req: Request, res: Response) => {
       res.status(422).json({ error: "No GitHub account connected for this machine's owner — connect one in Integrations, then retry." });
       return;
     }
-    const r = await execWithSecretEnv(cfg, session, `gh pr review ${Number(number)} --repo ${shellQuote(repo)} --approve 2>&1`, {
-      GH_TOKEN: creds.primaryToken,
-      GITHUB_TOKEN: creds.primaryToken,
+    const r = await execInBox(cfg, session, `gh pr review ${Number(number)} --repo ${shellQuote(repo)} --approve 2>&1`, {
+      secretEnv: { GH_TOKEN: creds.primaryToken, GITHUB_TOKEN: creds.primaryToken },
     });
     forgetPull(repo, Number(number));
     res.json({ ok: true, output: redactor.redact((r.stdout ?? "").trim().slice(-600)) });
@@ -2992,9 +2990,8 @@ async function runPrAction(req: Request, res: Response, build: (number: number, 
       res.status(422).json({ error: "No GitHub account connected for this machine's owner — connect one in Integrations, then retry." });
       return;
     }
-    const r = await execWithSecretEnv(cfg, session, `gh pr ${built} 2>&1`, {
-      GH_TOKEN: creds.primaryToken,
-      GITHUB_TOKEN: creds.primaryToken,
+    const r = await execInBox(cfg, session, `gh pr ${built} 2>&1`, {
+      secretEnv: { GH_TOKEN: creds.primaryToken, GITHUB_TOKEN: creds.primaryToken },
     });
     forgetPull(repo, Number(number));
     res.json({ ok: true, output: redactor.redact((r.stdout ?? "").trim().slice(-600)) });
@@ -3356,7 +3353,7 @@ app.put("/file.json", async (req: Request, res: Response) => {
     const abs = `/workspace/${safe.relPath}`;
     const dir = abs.slice(0, abs.lastIndexOf("/"));
     // The body streams over stdin: argv would overflow (E2BIG) on anything larger than an icon.
-    await execWithInput(cfg, session, `mkdir -p ${q(dir)} && base64 -d > ${q(abs)} && wc -c < ${q(abs)}`, b64);
+    await execInBox(cfg, session, `mkdir -p ${q(dir)} && base64 -d > ${q(abs)} && wc -c < ${q(abs)}`, { input: b64 });
     res.json({ ok: true, path: safe.relPath, bytes: isB64 ? Buffer.from(b64, "base64").length : Buffer.byteLength(content, "utf8") });
   } catch (e) {
     res.status(422).json({ error: clientError(e, 400) });

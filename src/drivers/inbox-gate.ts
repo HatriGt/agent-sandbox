@@ -76,7 +76,7 @@ export function inboxLine(m: InboxLine): string {
   return JSON.stringify({ id: m.id, text: m.text, at: m.at }) + "\n";
 }
 
-/** Shell that appends stdin to INBOX_MARK (used with execWithInput). */
+/** Shell that appends stdin to INBOX_MARK (used with exec { input }). */
 export const INBOX_APPEND_SH = `cat >> ${INBOX_MARK}`;
 /** Shell that prints and clears the delivered ids (atomic enough: rename, then read). */
 export const INBOX_TAKE_DELIVERED_SH = `if [ -f ${INBOX_DELIVERED} ]; then mv ${INBOX_DELIVERED} ${INBOX_DELIVERED}.take && cat ${INBOX_DELIVERED}.take && rm -f ${INBOX_DELIVERED}.take; fi; true`;

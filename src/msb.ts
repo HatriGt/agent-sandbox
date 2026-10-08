@@ -228,39 +228,47 @@ export async function createBox(cfg: Config, opts: CreateBoxOpts): Promise<void>
 }
 
 
-/** Run a shell command inside the box (no cred env). */
-export async function exec(cfg: Config, box: string, sh: string, opts?: { env?: Record<string, string>; timeoutMs?: number }) {
-  // Env rides as `msb exec -e K=V` flags — per-invocation only, nothing persists in the box. Used to
-  // hand `gh` a token for one command (PR merge) the same way the ask lane does.
-  const envFlags = Object.entries(opts?.env ?? {}).flatMap(([k, v]) => ["-e", `${k}=${v}`]);
-  return msb(cfg, ["exec", ...envFlags, box, "--", "sh", "-lc", sh], true, opts?.timeoutMs);
+export interface ExecOpts {
+  /** Per-invocation env, as `msb exec -e K=V` flags. Values land in the VPS-side ssh command string
+   *  (readable in /proc/⋆/cmdline on the host for the call's duration) — fine for a flag, NOT for a
+   *  credential; use `secretEnv` for those. Nothing persists in the box. */
+  env?: Record<string, string>;
+  /** Env whose VALUES must never touch argv: exported inside the box from stdin before `sh` runs. */
+  secretEnv?: Record<string, string>;
+  /** Payload for the command's stdin. A shell argument caps at ~128 KB (and the ssh remote command is
+   *  one argument), so file contents — a pasted screenshot, an edited source file — must stream. */
+  input?: string;
+  timeoutMs?: number;
 }
 
 /**
- * Like `exec`, but the payload travels on stdin (ssh → msb exec → the command), not in argv. A shell
- * argument is capped at ~128 KB by the kernel and the ssh remote command is one argument, so file
- * contents — a pasted screenshot, an edited source file — must stream. `msb exec` forwards stdin.
+ * Run a shell command inside the box (no cred env). The one exec-in-box primitive: plain argv exec
+ * by default; with `input` or `secretEnv` the call rides a direct ssh so the payload travels on
+ * stdin (`msb exec` forwards it). Secret exports are prepended to the stdin payload and `eval`ed
+ * inside the box before `sh` (the exports ARE the stdin, so `secretEnv` and `input` are exclusive).
  */
-export async function execWithInput(cfg: Config, box: string, sh: string, input: string) {
-  const remoteCmd = [cfg.msb, "exec", box, "--", "sh", "-lc", sh].map(shellQuote).join(" ");
-  return run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, remoteCmd], { input });
+export async function exec(cfg: Config, box: string, sh: string, opts: ExecOpts = {}) {
+  const envFlags = Object.entries(opts.env ?? {}).flatMap(([k, v]) => ["-e", `${k}=${v}`]);
+  if (opts.input === undefined && !opts.secretEnv) {
+    return msb(cfg, ["exec", ...envFlags, box, "--", "sh", "-lc", sh], true, opts.timeoutMs);
+  }
+  if (opts.secretEnv && opts.input !== undefined) throw new Error("exec: secretEnv and input are mutually exclusive (the exports ARE the stdin)");
+  let script = sh;
+  let input = opts.input ?? "";
+  if (opts.secretEnv) {
+    const exports = Object.entries(opts.secretEnv)
+      .map(([k, v]) => {
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) throw new Error(`invalid env name: ${k}`);
+        return `export ${k}=${shellQuote(v)}`;
+      })
+      .join("\n");
+    script = `eval "$(cat)"\n${sh}`;
+    input = `${exports}\n`;
+  }
+  const remoteCmd = [cfg.msb, "exec", ...envFlags, box, "--", "sh", "-lc", script].map(shellQuote).join(" ");
+  return run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, remoteCmd], { input, ...(opts.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}) });
 }
-
-/**
- * Like `exec`, but the env values travel on STDIN, not as `-e K=V` argv flags. The `-e` route puts
- * the value in the VPS-side ssh remote command string — readable in /proc/⋆/cmdline by any local
- * user on the host for the duration of the call — which is unacceptable for a live GitHub token.
- * The exports are evaluated inside the box before the command runs; nothing persists.
- */
-export async function execWithSecretEnv(cfg: Config, box: string, sh: string, env: Record<string, string>) {
-  const exports = Object.entries(env)
-    .map(([k, v]) => {
-      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) throw new Error(`invalid env name: ${k}`);
-      return `export ${k}=${shellQuote(v)}`;
-    })
-    .join("\n");
-  return execWithInput(cfg, box, `eval "$(cat)"\n${sh}`, `${exports}\n`);
-}
+export { exec as execInBox };
 
 // ----- Warm pool -------------------------------------------------------------------------
 // Pool boxes are pre-booted from the snapshot with OPEN egress and pre-bootstrapped (claude+gh
@@ -1201,9 +1209,9 @@ export async function installSkills(cfg: Config, box: string): Promise<SkillDef[
       return [];
     }
     // The payload rides stdin as a base64 tar, not argv: skills carry whole file trees now
-    // (scripts/, docs/, …) and a shell argument caps at ~128 KB — see execWithInput.
+    // (scripts/, docs/, …) and a shell argument caps at ~128 KB — see ExecOpts.input.
     const tarB64 = buildSkillsTarBase64(skills, skillsIndex(skills));
-    await execWithInput(cfg, box, `rm -rf ${SKILLS_DIR} && mkdir -p ${SKILLS_DIR} && base64 -d | tar -xf - -C ${SKILLS_DIR}`, tarB64);
+    await exec(cfg, box, `rm -rf ${SKILLS_DIR} && mkdir -p ${SKILLS_DIR} && base64 -d | tar -xf - -C ${SKILLS_DIR}`, { input: tarB64 });
     return skills;
   } catch (e) {
     console.error(`[skills] could not install skills into ${box}:`, (e as Error).message);
@@ -1267,7 +1275,7 @@ export async function installMemory(cfg: Config, box: string, task?: string, opt
     const write = (paths: readonly string[], text: string) => {
       const [first, ...rest] = paths;
       const dirs = paths.map((p) => p.replace(/\/[^/]+$/, "")).join(" ");
-      return execWithInput(cfg, box, `mkdir -p ${dirs} && cat > ${first}${rest.map((p) => ` && cp ${first} ${p}`).join("")}`, text);
+      return exec(cfg, box, `mkdir -p ${dirs} && cat > ${first}${rest.map((p) => ` && cp ${first} ${p}`).join("")}`, { input: text });
     };
     await Promise.all([write(MEMORY_PATHS, md), write(MEMORY_ALL_PATHS, all)]);
     return { hint: opts.firstTurn ? playbookHint(matched) : "" };
@@ -1474,7 +1482,7 @@ export async function runAgentTask(
   // a task and the dashboard renders "starting" instead. agentSh re-writes the same content on
   // launch (first-run marks), which is harmless. Best-effort: rides stdin, never argv.
   const t0 = Date.now();
-  await execWithInput(cfg, box, `cat > ${TASK_MARK}`, `${task}\n`).catch(() => {});
+  await exec(cfg, box, `cat > ${TASK_MARK}`, { input: `${task}\n` }).catch(() => {});
   const t1 = Date.now();
   await msb(cfg, ["exec", box, ...env, "--", "sh", "-lc", bootstrapScript(cfg, agent)]);
   const t2 = Date.now();
@@ -1704,7 +1712,7 @@ export async function resumeAgentTask(
  * and the message delivers at turn end as before.
  */
 export async function mirrorInboxMessage(cfg: Config, box: string, m: InboxLine): Promise<void> {
-  await execWithInput(cfg, box, INBOX_APPEND_SH, inboxLine(m));
+  await exec(cfg, box, INBOX_APPEND_SH, { input: inboxLine(m) });
 }
 
 /** Ids the box's gate has already delivered mid-turn (and clears the receipt), so the controller

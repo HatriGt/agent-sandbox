@@ -12,7 +12,7 @@
  */
 import { ownerKey } from "./user-store.js";
 import type { Config } from "./config.js";
-import { exec, execWithInput } from "./msb.js";
+import { exec } from "./msb.js";
 import { shellQuote } from "./exec.js";
 import { ghGetJson } from "./gh-probe.js";
 import { loadStore, pickDefaultAccount, candidateAccounts } from "./gh-token-store.js";
@@ -268,7 +268,7 @@ export async function discardChange(cfg: Config, box: string, path: string, hunk
   const { top, inner } = splitRepoPath(rel);
   if (hunk && inner) {
     const patch = buildHunkPatch(inner, hunk);
-    const r = await execWithInput(cfg, box, discardHunkSh(rel), Buffer.from(patch, "utf8").toString("base64"));
+    const r = await exec(cfg, box, discardHunkSh(rel), { input: Buffer.from(patch, "utf8").toString("base64") });
     if (r.stdout.includes(DISCARD_OK)) return { scope: "hunk" };
     if (!r.stdout.includes("@@UNTRACKED")) {
       const msg = r.stdout

@@ -3,21 +3,22 @@ import { useLocation } from "react-router";
 import { Activity as ActivityIcon } from "lucide-react";
 import { api, type AuditEventRow, type BoxView, type LedgerRow } from "@/lib/api";
 import { fmtAgo } from "@/lib/format";
-import { consolePath } from "@/lib/route";
+import { consolePath, useGo } from "@/lib/route";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Swap } from "@/components/ui/swap";
 import { ListEmpty, ListSkeleton } from "@/components/ui/list-state";
 import { Panel, SettingsPage, SettingsSection } from "@/components/ui/settings";
 import { DataTable, StatusDot, stopRow, type Column } from "@/components/ui/data-table";
-import { describeEvent, eventKind, type Kind } from "@/components/AuditLog";
+import { ACTIVITY_FILTERS, dayLabel, describeEvent, eventKind, type ActivityFilter as Filter, type Kind } from "@/lib/activity";
+import { FilterChip } from "@/components/ui/filter-chip";
 
 const PAGE = 50;
 
 /**
  * One line of the Activity page. Three sources, one shape:
  *  - `audit`: a stored audit row (what you did, as the server recorded it);
- *  - `run`:   a lifecycle edge read off the ledger (started / finished / failed, with the headline);
+ *  - `run`:   a finished ledger run (finished / failed, with the headline) — links to History;
  *  - `live`:  a fleet transition this tab saw while open (asked a question, finished, stalled).
  * Every stamp is a real server stamp - a live row carries the moment the poll showed the change.
  */
@@ -30,28 +31,11 @@ interface Row {
   detail?: string;
   tone: "live" | "ok" | "muted" | "destructive" | "attention";
   status: string;
+  /** Ledger id: the row links to that run in History instead of repeating its receipt. */
+  run?: number;
 }
-
-type Filter = "all" | Kind | "failed";
-const FILTERS: { value: Filter; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "machines", label: "Machines" },
-  { value: "code", label: "Code" },
-  { value: "account", label: "Account" },
-  { value: "failed", label: "Failed" },
-];
 
 const clock = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
-const day = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
-function dayLabel(ms: number) {
-  const d = new Date(ms);
-  const now = new Date();
-  const same = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-  if (same(d, now)) return "Today";
-  const y = new Date(now);
-  y.setDate(now.getDate() - 1);
-  return same(d, y) ? "Yesterday" : day.format(d);
-}
 
 function auditRow(e: AuditEventRow): Row | null {
   const at = Date.parse(e.at);
@@ -70,57 +54,30 @@ function auditRow(e: AuditEventRow): Row | null {
   };
 }
 
-/** A ledger run yields up to two rows: its start (when stamped) and its finish. */
-function runRows(r: LedgerRow): Row[] {
-  const out: Row[] = [];
-  if (r.startedAt) out.push({ id: `rs${r.id}`, at: r.startedAt, kind: "machines", verb: "Run started on", box: r.box, detail: r.task ?? undefined, tone: "live", status: "started" });
-  const endAt = r.endedAt ?? r.archivedAt;
+/** A finished ledger run, as one row. Its start is already the audit's "Started a machine". */
+function runRow(r: LedgerRow): Row {
   const failed = r.state === "failed";
-  out.push({
+  return {
     id: `re${r.id}`,
-    at: endAt,
+    at: r.endedAt ?? r.archivedAt,
     kind: "machines",
     verb: failed ? "Run failed on" : "Run finished on",
     box: r.box,
     detail: r.headline ?? undefined,
     tone: failed ? "destructive" : "ok",
     status: failed ? "failed" : "finished",
-  });
-  return out;
-}
-
-/** Filter chips: pill row, the active one filled. Counts are of the rows loaded so far. */
-function Chips({ value, onChange, counts }: { value: Filter; onChange: (f: Filter) => void; counts: Record<Filter, number> }) {
-  return (
-    <div role="tablist" aria-label="Filter activity" className="flex flex-wrap gap-1">
-      {FILTERS.map((f) => {
-        const active = f.value === value;
-        return (
-          <button
-            key={f.value}
-            role="tab"
-            aria-selected={active}
-            onClick={() => onChange(f.value)}
-            className={cn(
-              "text-micro inline-flex h-6 items-center gap-1 rounded-full border px-2 transition-colors",
-              active ? "bg-foreground text-background border-foreground" : "text-muted-foreground hover:text-foreground hover:border-foreground/40 border-border"
-            )}
-          >
-            {f.label}
-            <span className={cn("tabular-nums", active ? "text-background/70" : "text-faint")}>{counts[f.value]}</span>
-          </button>
-        );
-      })}
-    </div>
-  );
+    run: r.id,
+  };
 }
 
 /**
- * Activity: everything that happened as you, in one timeline - audit calls, run lifecycle from the
- * ledger, and the state changes this tab witnessed on live machines. Lane chips are the audit log's.
+ * Activity: THE timeline — everything that happened as you, in one place: audit calls, each run's
+ * finish from the ledger (the row opens that run in History, which owns the receipt), and the state
+ * changes this tab witnessed on live machines. The Hub shows a four-line teaser that links here.
  */
 export function Activity({ boxes, onBack }: { boxes: BoxView[]; onBack: () => void }) {
   const { search } = useLocation();
+  const go = useGo();
   const [audit, setAudit] = React.useState<AuditEventRow[] | null>(null);
   const [runs, setRuns] = React.useState<LedgerRow[] | null>(null);
   const [auditDone, setAuditDone] = React.useState(false);
@@ -181,7 +138,7 @@ export function Activity({ boxes, onBack }: { boxes: BoxView[]; onBack: () => vo
 
   const rows = React.useMemo<Row[] | null>(() => {
     if (audit === null && runs === null) return null;
-    const merged = [...live, ...(audit ?? []).flatMap((e) => auditRow(e) ?? []), ...(runs ?? []).flatMap(runRows)];
+    const merged = [...live, ...(audit ?? []).flatMap((e) => auditRow(e) ?? []), ...(runs ?? []).map(runRow)];
     merged.sort((a, b) => b.at - a.at);
     return merged;
   }, [audit, runs, live]);
@@ -245,7 +202,11 @@ export function Activity({ boxes, onBack }: { boxes: BoxView[]; onBack: () => vo
   const oldest = audit && audit.length > 0 ? audit[audit.length - 1] : null;
   return (
     <SettingsPage title="Activity" purpose="What happened as you: your actions, each run's start and finish, and what live machines did while this tab was open." back={{ label: "Back", onClick: onBack, mobileOnly: true }}>
-      <SettingsSection id="timeline" title="Timeline" meta="audit kept 90 days" actions={rows && rows.length > 0 ? <Chips value={filter} onChange={setFilter} counts={counts} /> : undefined}>
+      <SettingsSection id="timeline" title="Timeline" meta="audit kept 90 days" actions={rows && rows.length > 0 ? <div role="radiogroup" aria-label="Filter activity" className="flex flex-wrap gap-1">
+              {ACTIVITY_FILTERS.map((f) => (
+                <FilterChip key={f.value} group="activity" active={filter === f.value} onClick={() => setFilter(f.value)} label={f.label} count={counts[f.value]} tone={f.value === "failed" ? "destructive" : undefined} />
+              ))}
+            </div> : undefined}>
         <Panel>
           <Swap state={state}>
             {state === "loading" ? (
@@ -255,7 +216,7 @@ export function Activity({ boxes, onBack }: { boxes: BoxView[]; onBack: () => vo
             ) : state === "nomatch" ? (
               <ListEmpty icon={ActivityIcon} title={`No ${filter} rows loaded`} line={auditDone ? "There are none in the last 90 days." : "Load more to look further back."} action={!auditDone && oldest ? <Button size="sm" variant="outline" loading={busy} onClick={() => loadAudit({ at: oldest.at, id: oldest.id })}>Show more</Button> : undefined} />
             ) : (
-              <DataTable aria-label="Activity" bordered={false} size="sm" rows={visible} columns={columns} rowKey={(r) => r.id} groupOf={(r) => dayLabel(r.at)} search={{ placeholder: "Search activity", text: (r) => `${r.verb} ${r.box ?? ""} ${r.detail ?? ""} ${r.status}` }} />
+              <DataTable aria-label="Activity" bordered={false} size="sm" rows={visible} onRowClick={(r) => r.run != null && go({ view: "history" })} rowLabel={(r) => (r.run != null ? `${r.verb} ${r.box ?? ""} — open in History` : `${r.verb} ${r.box ?? ""}`)} columns={columns} rowKey={(r) => r.id} groupOf={(r) => dayLabel(r.at)} search={{ placeholder: "Search activity", text: (r) => `${r.verb} ${r.box ?? ""} ${r.detail ?? ""} ${r.status}` }} />
             )}
           </Swap>
           {state === "list" && !auditDone && oldest && (

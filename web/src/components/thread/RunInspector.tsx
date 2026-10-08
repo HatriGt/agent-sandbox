@@ -23,8 +23,8 @@ import { cn } from "@/lib/utils";
  * the trace's ⟦usage⟧ sentinels); nothing is estimated.
  */
 
-export const INSPECTOR_WIDTH = 316;
-export type InspectorTab = "run" | "fleet";
+const INSPECTOR_WIDTH = 316;
+type InspectorTab = "run" | "fleet";
 
 export function RunInspector({
   box,
