@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Pressable, View } from "react-native";
+import { View } from "react-native";
 import { missingSecretOf, parseQuestion } from "@/lib/question";
 import { resumeWithSecrets, saveSecret } from "@/lib/api";
 import { useTheme } from "@/theme/ThemeContext";
@@ -61,7 +61,7 @@ export function QuestionCard({
         {parsed.title || question.split("\n")[0]}
       </T>
       {parsed.context ? (
-        <View style={{ backgroundColor: palette.card, borderRadius: radius.lg, padding: 10 }}>
+        <View style={{ backgroundColor: palette.card, borderRadius: radius.sm, padding: 10 }}>
           <MarkdownLite text={parsed.context} />
         </View>
       ) : null}
@@ -71,10 +71,11 @@ export function QuestionCard({
           <PressScale
             key={i}
             disabled={busy}
+            haptic="light"
             onPress={() => onAnswer(opt)}
             style={({ pressed }) => ({
               backgroundColor: palette.card,
-              borderRadius: radius.lg,
+              borderRadius: radius.sm,
               paddingVertical: 12,
               paddingHorizontal: 14,
               opacity: pressed || busy ? 0.7 : 1,
@@ -123,7 +124,7 @@ export function QuestionCard({
           </View>
         </View>
       ) : (
-        <PressScale onPress={() => setOther(true)} style={{ paddingVertical: 6, flexDirection: "row", alignItems: "center", gap: 6 }}>
+        <PressScale onPress={() => setOther(true)} style={{ paddingVertical: 12, flexDirection: "row", alignItems: "center", gap: 6 }}>
           <Icon name="edit-2" size={13} color={palette.attentionInk} />
           <T variant="body" weight="medium" style={{ color: palette.attentionInk }}>
             Something else…

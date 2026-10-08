@@ -1,5 +1,7 @@
 import React, { useState } from "react";
-import { Pressable, View } from "react-native";
+import { View } from "react-native";
+import { PressScale } from "@/components/motion";
+import { radius } from "@/theme/tokens";
 import { useTheme } from "@/theme/ThemeContext";
 import { T } from "@/components/ui/AppText";
 import { Field } from "@/components/ui/Field";
@@ -52,12 +54,13 @@ export function PickerSheet({
     const v = o?.value;
     const on = v === value;
     return (
-      <Pressable
+      <PressScale
         key={v ?? "__none"}
         onPress={() => pick(v)}
+        haptic="selection"
         accessibilityRole="button"
         accessibilityState={{ selected: on }}
-        style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: palette.border, opacity: pressed ? 0.7 : 1 })}
+        style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: palette.border }}
       >
         <View style={{ flex: 1, minWidth: 0 }}>
           <T variant="body" weight={on ? "semibold" : "regular"} numberOfLines={1} tone={o ? "default" : "muted"}>
@@ -70,7 +73,7 @@ export function PickerSheet({
           ) : null}
         </View>
         {on ? <Icon name="check" size={16} color={palette.foreground} /> : null}
-      </Pressable>
+      </PressScale>
     );
   };
   return (
@@ -113,27 +116,26 @@ export function PickerRow({ label, value, placeholder = "Choose", onPress }: { l
       <T variant="meta" weight="medium" tone="muted">
         {label}
       </T>
-      <Pressable
+      <PressScale
         onPress={onPress}
         accessibilityRole="button"
-        style={({ pressed }) => ({
+        style={{
           flexDirection: "row",
           alignItems: "center",
           gap: 8,
           borderWidth: 1,
           borderColor: palette.input,
-          borderRadius: 10,
+          borderRadius: radius.lg,
           paddingHorizontal: 12,
           paddingVertical: 12,
           backgroundColor: palette.card,
-          opacity: pressed ? 0.7 : 1,
-        })}
+        }}
       >
         <T variant="body" tone={value ? "default" : "faint"} numberOfLines={1} style={{ flex: 1 }}>
           {value ?? placeholder}
         </T>
         <Icon name="chevron-down" size={16} color={palette.faint} />
-      </Pressable>
+      </PressScale>
     </View>
   );
 }

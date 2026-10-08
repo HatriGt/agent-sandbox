@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FlatList, KeyboardAvoidingView, Platform, Pressable, ScrollView, View, type ViewToken } from "react-native";
+import { FlatList, KeyboardAvoidingView, Platform, RefreshControl, ScrollView, View, type ViewToken } from "react-native";
+import * as Clipboard from "expo-clipboard";
 import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFleet } from "@/hooks/useFleet";
@@ -49,8 +50,9 @@ const PR_RE = /github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)/g;
 
 /** expo-router route error boundary: a render bug degrades to a retry screen, never a crash. */
 export function ErrorBoundary({ error, retry }: { error: Error; retry: () => Promise<void> }) {
+  const { palette } = useTheme();
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: "#0f0f12" }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: palette.background }}>
       <View style={{ flex: 1, justifyContent: "center", padding: 28, gap: 12 }}>
         <T serif variant="h1">
           Something broke rendering this thread.
@@ -209,6 +211,17 @@ function Thread() {
   const [revertable, setRevertable] = useState<Set<number>>(new Set());
   const [revertAsk, setRevertAsk] = useState<{ message: number; text: string } | null>(null);
   const [reverting, setReverting] = useState(false);
+  // Long-press on a message: Copy / Quote (+ Revert when that message has a restore point).
+  const [msgActions, setMsgActions] = useState<{ text: string; revert?: () => void } | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const pullRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await refresh();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refresh]);
   useEffect(() => {
     if (!session || running) return;
     api
@@ -398,6 +411,7 @@ function Thread() {
   }, [msgIndexOf, revertable, canRevertNow]);
 
   const lastIndex = items.length - 1;
+  const openActions = useCallback((text: string, revert?: () => void) => setMsgActions({ text, revert }), []);
   const renderItem = useCallback(
     ({ item, index }: { item: ThreadItem; index: number }) => (
       <ThreadRow
@@ -406,9 +420,10 @@ function Thread() {
         animate={animate && index >= lastIndex - 1}
         live={running && index === lastIndex}
         onRevert={revertFns.get(index)}
+        onActions={openActions}
       />
     ),
-    [session, animate, lastIndex, running, revertFns],
+    [session, animate, lastIndex, running, revertFns, openActions],
   );
   const onViewable = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
     const first = viewableItems.find((v) => v.index != null);
@@ -505,6 +520,7 @@ function Thread() {
             // refetching, which remounts anyway), and a row's identity is its position in the log.
             keyExtractor={(_it, i) => String(i)}
             contentContainerStyle={{ padding: 16, paddingBottom: 8 }}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void pullRefresh()} tintColor={palette.mutedForeground} colors={[palette.mutedForeground]} />}
             initialNumToRender={20}
             maxToRenderPerBatch={12}
             windowSize={11}
@@ -576,7 +592,7 @@ function Thread() {
                 />
               )
             )}
-            {merged?.task ? <ThreadRow item={{ kind: "you", text: merged.task }} /> : null}
+            {merged?.task ? <ThreadRow item={{ kind: "you", text: merged.task }} onActions={openActions} /> : null}
               </>
             }
             ListFooterComponent={
@@ -584,7 +600,7 @@ function Thread() {
             {/* Optimistic echoes — sent but not yet in the durable log */}
             {pendingEchoes.map((r, i) => (
               <FadeInUp key={`echo-${i}`}>
-                <ThreadRow item={{ kind: "you", text: r }} />
+                <ThreadRow item={{ kind: "you", text: r }} onActions={openActions} />
               </FadeInUp>
             ))}
             {/* The run receipt — the archived outcome, attempts, then the server digest. The state
@@ -604,28 +620,6 @@ function Thread() {
                     {stopping ? "stopping…" : "working"}
                     {connected ? "" : " · reconnecting…"}
                   </T>
-                  <PressScale
-                    onPress={() => void stop()}
-                    disabled={stopping}
-                    hitSlop={8}
-                    accessibilityLabel="Stop the running turn"
-                    style={({ pressed }) => ({
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 6,
-                      paddingVertical: 5,
-                      paddingHorizontal: 11,
-                      borderRadius: radius.pill,
-                      borderWidth: 1,
-                      borderColor: palette.border,
-                      opacity: stopping ? 0.5 : pressed ? 0.7 : 1,
-                    })}
-                  >
-                    <Icon name="square" size={10} color={palette.foreground} />
-                    <T variant="micro" weight="medium">
-                      {stopping ? "Stopping…" : "Stop"}
-                    </T>
-                  </PressScale>
                 </View>
                 {merged?.stalled && !stopping ? (
                   <T variant="micro" tone="faint" style={{ marginTop: -6, paddingBottom: 8 }}>
@@ -691,6 +685,8 @@ function Thread() {
           {!stick && (
             <PressScale
               onPress={() => listRef.current?.scrollToEnd({ animated: true })}
+              hitSlop={10}
+              accessibilityLabel="Scroll to latest"
               style={{
                 position: "absolute",
                 bottom: 12,
@@ -699,8 +695,6 @@ function Thread() {
                 alignItems: "center",
                 gap: 6,
                 backgroundColor: palette.popover,
-                borderWidth: 1,
-                borderColor: palette.border,
                 borderRadius: radius.pill,
                 paddingVertical: 6,
                 paddingHorizontal: 12,
@@ -729,6 +723,7 @@ function Thread() {
             <PressScale
               key={c.key}
               haptic="selection"
+              hitSlop={{ top: 6, bottom: 6 }}
               onPress={() => (c.key === "files" ? router.push(`/files/${encodeURIComponent(session)}`) : setSheet(c.key))}
               style={({ pressed }) => ({
                 flexDirection: "row",
@@ -794,10 +789,13 @@ function Thread() {
             running={running}
             sleeping={sleeping}
             disabled={booting}
+            onStop={() => void stop()}
             accessoryLeft={
               models.length > 0 ? (
                 <PressScale
                   onPress={() => setSheet("model")}
+                  hitSlop={10}
+                  accessibilityLabel="Choose model"
                   style={({ pressed }) => ({
                     flexDirection: "row",
                     alignItems: "center",
@@ -847,6 +845,66 @@ function Thread() {
             <Button title="Keep everything" variant="secondary" style={{ flex: 1 }} onPress={() => setRevertAsk(null)} />
             <Button title={reverting ? "Reverting…" : "Revert"} variant="destructive" style={{ flex: 1 }} loading={reverting} onPress={doRevert} />
           </View>
+        </View>
+      </Sheet>
+
+      {/* Message actions — long-press on a bubble or the agent's prose */}
+      <Sheet visible={!!msgActions} onClose={() => setMsgActions(null)} title="Message">
+        <View style={{ gap: 4, paddingBottom: 12 }}>
+          {(
+            [
+              {
+                key: "copy",
+                icon: "copy" as IconName,
+                label: "Copy",
+                run: async () => {
+                  await Clipboard.setStringAsync(msgActions?.text ?? "");
+                  setNote("Copied.");
+                },
+              },
+              {
+                key: "quote",
+                icon: "corner-down-right" as IconName,
+                label: "Quote into composer",
+                run: () => {
+                  const quoted = (msgActions?.text ?? "").split("\n").map((l) => `> ${l}`).join("\n");
+                  setPrefill({ text: `${quoted}\n\n`, nonce: Date.now() });
+                },
+              },
+              ...(msgActions?.revert
+                ? [
+                    {
+                      key: "revert",
+                      icon: "rotate-ccw" as IconName,
+                      label: "Revert to before this message",
+                      // The confirm is another Sheet; let this one finish leaving before it opens.
+                      run: ((revert: () => void) => () => void setTimeout(revert, 260))(msgActions.revert),
+                    },
+                  ]
+                : []),
+            ] as { key: string; icon: IconName; label: string; run: () => void | Promise<void> }[]
+          ).map((a) => (
+            <PressScale
+              key={a.key}
+              haptic="light"
+              onPress={() => {
+                setMsgActions(null);
+                void a.run();
+              }}
+              style={({ pressed }) => ({
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 10,
+                paddingVertical: 12,
+                paddingHorizontal: 12,
+                borderRadius: radius.lg,
+                backgroundColor: pressed ? palette.accent : "transparent",
+              })}
+            >
+              <Icon name={a.icon} size={15} color={palette.mutedForeground} />
+              <T variant="body">{a.label}</T>
+            </PressScale>
+          ))}
         </View>
       </Sheet>
 

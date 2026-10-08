@@ -12,6 +12,7 @@ export function T({
   weight,
   mono,
   serif,
+  tnum,
   style,
   ...rest
 }: TextProps & {
@@ -20,6 +21,8 @@ export function T({
   weight?: "regular" | "medium" | "semibold";
   mono?: boolean;
   serif?: boolean;
+  /** Fixed-width digits: any number that changes while on screen (counts, timers, totals). */
+  tnum?: boolean;
 }) {
   const { palette } = useTheme();
   const color =
@@ -43,6 +46,6 @@ export function T({
         : weight === "medium"
           ? fonts.sansMedium
           : fonts.sans;
-  const s: TextStyle = { ...type[variant], color, fontFamily: family };
+  const s: TextStyle = { ...type[variant], color, fontFamily: family, ...(tnum ? { fontVariant: ["tabular-nums"] } : {}) };
   return <Text {...rest} style={[s, style]} />;
 }

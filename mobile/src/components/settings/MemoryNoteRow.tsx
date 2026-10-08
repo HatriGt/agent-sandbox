@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { Pressable, View } from "react-native";
+import { View } from "react-native";
+import { PressScale } from "@/components/motion";
 import { useRouter } from "expo-router";
 import type { MemoryNote } from "@/lib/api";
 import { ago, friendlyName, plural } from "@/lib/format";
@@ -123,7 +124,9 @@ export function MemoryNoteRow({ note: n, actions, showRepo, inArea, dim }: { not
         <View style={{ flex: 1 }} />
         {!editing ? (
           <>
-            <Pressable
+            <PressScale
+              scaleTo={0.9}
+              haptic="selection"
               onPress={() => void run("pin", () => actions.onPin(n, !n.pinned))}
               hitSlop={10}
               accessibilityRole="button"
@@ -133,10 +136,10 @@ export function MemoryNoteRow({ note: n, actions, showRepo, inArea, dim }: { not
               style={{ padding: 4 }}
             >
               <Icon name="bookmark" size={15} color={n.pinned ? palette.foreground : palette.faint} />
-            </Pressable>
-            <Pressable onPress={startEdit} hitSlop={10} accessibilityRole="button" accessibilityLabel="Edit note" style={{ padding: 4 }}>
+            </PressScale>
+            <PressScale scaleTo={0.9} onPress={startEdit} hitSlop={10} accessibilityRole="button" accessibilityLabel="Edit note" style={{ padding: 4 }}>
               <Icon name="edit-2" size={15} color={palette.faint} />
-            </Pressable>
+            </PressScale>
           </>
         ) : null}
       </View>
@@ -171,12 +174,12 @@ export function MemoryNoteRow({ note: n, actions, showRepo, inArea, dim }: { not
           </T>
           {steps.length ? (
             <>
-              <Pressable onPress={() => setStepsOpen((v) => !v)} accessibilityRole="button" accessibilityState={{ expanded: stepsOpen }} style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>
+              <PressScale onPress={() => setStepsOpen((v) => !v)} accessibilityRole="button" accessibilityState={{ expanded: stepsOpen }} style={{ flexDirection: "row", alignItems: "center", gap: 2 }}>
                 <Icon name={stepsOpen ? "chevron-down" : "chevron-right"} size={13} color={palette.mutedForeground} />
                 <T variant="meta" tone="muted">
                   {plural(steps.length, "step")}
                 </T>
-              </Pressable>
+              </PressScale>
               {stepsOpen
                 ? steps.map((st, i) => (
                     <T key={i} variant="meta" tone="muted" style={{ paddingLeft: 16 }}>
@@ -223,13 +226,13 @@ export function MemoryNoteRow({ note: n, actions, showRepo, inArea, dim }: { not
           ) : null}
           {history.length ? (
             <>
-              <Pressable onPress={() => setHistoryOpen((v) => !v)} accessibilityRole="button" accessibilityState={{ expanded: historyOpen }} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+              <PressScale onPress={() => setHistoryOpen((v) => !v)} accessibilityRole="button" accessibilityState={{ expanded: historyOpen }} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
                 <Icon name={historyOpen ? "chevron-down" : "chevron-right"} size={12} color={palette.faint} />
                 <Icon name="clock" size={12} color={palette.faint} />
                 <T variant="micro" tone="faint">
                   {plural(history.length, "earlier version")}
                 </T>
-              </Pressable>
+              </PressScale>
               {historyOpen ? (
                 <View style={{ marginLeft: 6, paddingLeft: 12, borderLeftWidth: 1, borderLeftColor: palette.border, gap: 6 }}>
                   {history.map((v) => (
@@ -301,8 +304,9 @@ export function EarlierNoteRow({ note: n, replacedBy, onDelete }: { note: Memory
 export function MemoryChip({ label, count, active, onPress }: { label: string; count?: string | number; active?: boolean; onPress: () => void }) {
   const { palette } = useTheme();
   return (
-    <Pressable
+    <PressScale
       onPress={onPress}
+      haptic="selection"
       accessibilityRole="button"
       accessibilityState={{ selected: !!active }}
       style={{
@@ -325,6 +329,6 @@ export function MemoryChip({ label, count, active, onPress }: { label: string; c
           {String(count)}
         </T>
       ) : null}
-    </Pressable>
+    </PressScale>
   );
 }

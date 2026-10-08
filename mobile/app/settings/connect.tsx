@@ -28,7 +28,7 @@ function Step({ n, title, done, children }: { n: number; title: string; done: bo
   return (
     <View style={{ flexDirection: "row", gap: 12, marginTop: 8 }}>
       <View style={{ width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: done ? palette.ok : palette.muted }}>
-        <T variant="micro" weight="semibold" style={{ color: done ? "#ffffff" : palette.mutedForeground }}>
+        <T variant="micro" weight="semibold" style={{ color: done ? palette.primaryForeground : palette.mutedForeground }}>
           {done ? "✓" : n}
         </T>
       </View>

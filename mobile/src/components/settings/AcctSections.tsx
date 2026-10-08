@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, Switch, View } from "react-native";
+import React, { useEffect, useRef, useState } from "react";
+import { ActivityIndicator, Linking, Switch, View } from "react-native";
 import { api, autopilotApi, type AgentId, type AgentPrefs, type HarnessView, type NotifySettings } from "@/lib/api";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
@@ -9,6 +9,8 @@ import { Field } from "@/components/ui/Field";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { PickerRow, PickerSheet } from "@/components/settings/PickerSheet";
 import { DriverBadges } from "@/components/settings/HarnessParts";
+import { animateLayout, FadeIn, haptic, PressScale } from "@/components/motion";
+import { pushStatus, registerForPush, unregisterPush, type PushStatus } from "@/lib/push";
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -37,12 +39,12 @@ export function AcctSection({ title, meta, purpose, action, children }: { title:
 export function AcctLinkRow({ title, hint, icon, onPress }: { title: string; hint?: string; icon: IconName; onPress: () => void }) {
   const { palette } = useTheme();
   return (
-    <Pressable
+    <PressScale
       accessibilityRole="link"
       onPress={onPress}
-      style={({ pressed }) => ({ paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: palette.border, opacity: pressed ? 0.7 : 1, flexDirection: "row", alignItems: "center", gap: 12 })}
+      style={{ paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: palette.border, flexDirection: "row", alignItems: "center", gap: 12 }}
     >
-      <View style={{ width: 32, height: 32, borderRadius: 9, backgroundColor: palette.secondary, alignItems: "center", justifyContent: "center" }}>
+      <View style={{ width: 32, height: 32, borderRadius: radius.md, backgroundColor: palette.secondary, alignItems: "center", justifyContent: "center" }}>
         <Icon name={icon} size={15} color={palette.foreground} />
       </View>
       <View style={{ flex: 1, minWidth: 0 }}>
@@ -56,7 +58,7 @@ export function AcctLinkRow({ title, hint, icon, onPress }: { title: string; hin
         ) : null}
       </View>
       <Icon name="chevron-right" size={16} color={palette.faint} />
-    </Pressable>
+    </PressScale>
   );
 }
 
@@ -126,11 +128,12 @@ export function AcctAgentSection({ harnesses = [], title = "Coding agent" }: { h
             const active = prefs.defaultAgent === a.id;
             const pinned = harnesses.filter((h) => h.driver === a.id).length;
             return (
-              <Pressable
+              <PressScale
                 key={a.id}
                 accessibilityRole="radio"
                 accessibilityState={{ checked: active, disabled: busy !== null }}
                 disabled={busy !== null}
+                haptic="selection"
                 onPress={() => pick(a.id)}
                 style={{
                   flexDirection: "row",
@@ -170,7 +173,7 @@ export function AcctAgentSection({ harnesses = [], title = "Coding agent" }: { h
                   </View>
                   {a.capabilities?.caveat ? <T variant="micro" tone="faint">{a.capabilities.caveat}</T> : null}
                 </View>
-              </Pressable>
+              </PressScale>
             );
           })}
         </View>
@@ -223,6 +226,9 @@ export function AcctNotifySection() {
   const [saved, setSaved] = useState(false);
   const [testing, setTesting] = useState(false);
   const [note, setNote] = useState<{ tone: "ok" | "destructive"; text: string } | null>(null);
+  const [push, setPush] = useState<PushStatus | null>(null);
+  const [pushBusy, setPushBusy] = useState(false);
+  const savedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const apply = (s: NotifySettings) => {
     setLoaded(s);
@@ -231,6 +237,8 @@ export function AcctNotifySection() {
   };
   useEffect(() => {
     api.notifySettings().then(apply).catch(() => {});
+    void pushStatus().then(setPush);
+    return () => clearTimeout(savedTimer.current);
   }, []);
 
   const urlOk = url === "" || /^https?:\/\/\S+$/i.test(url.trim());
@@ -244,12 +252,29 @@ export function AcctNotifySection() {
     setNote(null);
     try {
       apply(await api.saveNotifySettings({ url: url.trim(), events }));
+      animateLayout();
       setSaved(true);
-      setTimeout(() => setSaved(false), 1500);
+      savedTimer.current = setTimeout(() => {
+        animateLayout();
+        setSaved(false);
+      }, 1500);
     } catch (e) {
       setNote({ tone: "destructive", text: `Could not save: ${msg(e)}` });
     } finally {
       setSaving(false);
+    }
+  };
+  const setPush_ = async (next: boolean) => {
+    haptic("selection");
+    setPushBusy(true);
+    try {
+      if (next) setPush(await registerForPush(true));
+      else {
+        await unregisterPush({ remember: true });
+        setPush("off");
+      }
+    } finally {
+      setPushBusy(false);
     }
   };
   const sendTest = async () => {
@@ -288,6 +313,38 @@ export function AcctNotifySection() {
           />
           {!urlOk ? <T variant="micro" tone="destructive">Must start with http:// or https://</T> : null}
           <View style={{ borderWidth: 1, borderColor: palette.border, borderRadius: radius.lg, overflow: "hidden" }}>
+            <View style={{ backgroundColor: palette.muted, paddingHorizontal: 12, paddingVertical: 6 }}>
+              <T variant="micro" tone="faint" weight="medium">
+                ON THIS PHONE
+              </T>
+            </View>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 12, paddingVertical: 10 }}>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <T variant="meta" weight="medium">
+                  Push notifications
+                </T>
+                <T variant="micro" tone={push === "denied" ? "attention" : "muted"}>
+                  {push === "denied"
+                    ? "Turned off in system settings."
+                    : push === "unavailable"
+                      ? "Not available on this device."
+                      : "The events above, delivered to this phone."}
+                </T>
+              </View>
+              {push === "denied" ? (
+                <Button small variant="outline" title="Open settings" onPress={() => void Linking.openSettings()} />
+              ) : (
+                <Switch
+                  accessibilityLabel="Push notifications on this phone"
+                  value={push === "on"}
+                  disabled={push === null || pushBusy}
+                  trackColor={{ true: palette.live }}
+                  onValueChange={(next) => void setPush_(next)}
+                />
+              )}
+            </View>
+          </View>
+          <View style={{ borderWidth: 1, borderColor: palette.border, borderRadius: radius.lg, overflow: "hidden" }}>
             {GROUPS.map((g, gi) => (
               <View key={g.title} style={gi > 0 ? { borderTopWidth: 1, borderTopColor: palette.border } : undefined}>
                 <View style={{ backgroundColor: palette.muted, paddingHorizontal: 12, paddingVertical: 6 }}>
@@ -308,7 +365,11 @@ export function AcctNotifySection() {
                     <Switch
                       accessibilityLabel={`${ev.label} notifications`}
                       value={events[ev.key]}
-                      onValueChange={(next) => setEvents((s) => ({ ...s, [ev.key]: next }))}
+                      trackColor={{ true: palette.live }}
+                      onValueChange={(next) => {
+                        haptic("selection");
+                        setEvents((s) => ({ ...s, [ev.key]: next }));
+                      }}
                     />
                   </View>
                 ))}
@@ -316,9 +377,15 @@ export function AcctNotifySection() {
             ))}
           </View>
           <View style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-            <Button small title={saved ? "Saved" : "Save"} loading={saving} disabled={!urlOk || !dirty} onPress={() => void save()} />
+            <Button small title="Save" loading={saving} disabled={!urlOk || !dirty} onPress={() => void save()} />
             <Button small variant="outline" title="Send test" loading={testing} disabled={!canTest} onPress={() => void sendTest()} />
-            {dirty && !saving && !saved ? <T variant="meta" tone="muted">Unsaved changes</T> : null}
+            {saved ? (
+              <FadeIn>
+                <T variant="meta" tone="ok">Saved</T>
+              </FadeIn>
+            ) : dirty && !saving ? (
+              <T variant="meta" tone="muted">Unsaved changes</T>
+            ) : null}
           </View>
           {note ? <T variant="meta" tone={note.tone}>{note.text}</T> : null}
         </>

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Animated, Keyboard, Pressable, ScrollView, TextInput, View } from "react-native";
+import { ActivityIndicator, Animated, Keyboard, ScrollView, TextInput, View } from "react-native";
 import * as Haptics from "expo-haptics";
 import { api, type SkillView } from "@/lib/api";
 import { clearDraft, flushDraft, loadDraft, saveDraft, takePrefill } from "@/lib/draft";
@@ -11,7 +11,7 @@ import { fonts, radius, type } from "@/theme/tokens";
 import { T } from "./ui/AppText";
 import { Icon } from "./ui/Icon";
 import { VoiceButton, VoicePill } from "./VoiceButton";
-import { PressScale } from "@/components/motion";
+import { PressScale, SPRING } from "@/components/motion";
 
 /**
  * The SendBar, at web parity: two lanes (agent / read-only ask), `@` file
@@ -61,6 +61,7 @@ export function Composer({
   const hasContent = useRef(false);
   const inputRef = useRef<TextInput>(null);
   const [stopping, setStopping] = useState(false);
+  const stopFallback = useRef<number | undefined>(undefined);
   // Drafts are saved only after the restore settled, so the empty first render never erases one.
   const draftReady = useRef(false);
   const textRef = useRef(text);
@@ -111,6 +112,7 @@ export function Composer({
   useEffect(() => {
     if (!running) setStopping(false);
   }, [running]);
+  useEffect(() => () => clearTimeout(stopFallback.current), []);
 
   // Dictation: finalized phrases land at the caret through updateText, so chips and menus keep
   // working; the interim phrase streams in the pill above. Sending stays behind the button.
@@ -151,7 +153,7 @@ export function Composer({
     const has = !!t.trim() || f.length > 0 || !!s;
     if (has !== hasContent.current) {
       hasContent.current = has;
-      Animated.spring(sendScale, { toValue: has ? 1 : 0, useNativeDriver: true, speed: 30, bounciness: 8 }).start();
+      Animated.spring(sendScale, { toValue: has ? 1 : 0, useNativeDriver: true, ...SPRING.release }).start();
     }
   };
 
@@ -320,6 +322,8 @@ export function Composer({
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
           {skill && (
             <PressScale
+              hitSlop={10}
+              accessibilityLabel={`Remove /${skill}`}
               onPress={() => {
                 setSkill(null);
                 syncSendButton(text, files, null);
@@ -346,6 +350,8 @@ export function Composer({
           {files.map((f) => (
             <PressScale
               key={f}
+              hitSlop={10}
+              accessibilityLabel={`Remove ${f.split("/").pop()}`}
               onPress={() => {
                 const next = files.filter((x) => x !== f);
                 setFiles(next);
@@ -381,6 +387,9 @@ export function Composer({
               <PressScale
                 key={l}
                 disabled={askDisabled}
+                hitSlop={{ top: 10, bottom: 10 }}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: active, disabled: askDisabled }}
                 onPress={() => {
                   Haptics.selectionAsync().catch(() => {});
                   setLane(l);
@@ -439,7 +448,8 @@ export function Composer({
               setMention(mentionAt(t, t.length));
               inputRef.current?.focus();
             }}
-            hitSlop={8}
+            hitSlop={12}
+            accessibilityLabel="Mention a file"
             style={{ paddingBottom: 10 }}
           >
             <Icon name="at-sign" size={17} color={palette.faint} />
@@ -503,7 +513,8 @@ export function Composer({
               setStopping(true);
               // The thread's `running` flips false once the turn actually stops; until then the
               // control shows it took, and lets go after a few seconds if the state never arrives.
-              setTimeout(() => setStopping(false), 4000);
+              clearTimeout(stopFallback.current);
+              stopFallback.current = setTimeout(() => setStopping(false), 4000) as unknown as number;
               onStop();
             }}
             disabled={disabled || stopping}
@@ -527,11 +538,17 @@ export function Composer({
             )}
           </PressScale>
         ) : null}
-        <Animated.View style={{ transform: [{ scale: sendScale }], opacity: sendScale }}>
+        <Animated.View
+          pointerEvents={hasContent.current ? "auto" : "none"}
+          style={{ transform: [{ scale: sendScale.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1] }) }], opacity: sendScale }}
+        >
           <PressScale
             onPress={send}
             disabled={disabled || busy}
-            style={({ pressed }) => ({
+            hitSlop={6}
+            accessibilityLabel={isAsk ? "Ask" : running ? "Queue message" : "Send"}
+            accessibilityState={{ disabled: disabled || busy, busy }}
+            style={{
               width: 38,
               height: 38,
               borderRadius: 19,
@@ -539,14 +556,14 @@ export function Composer({
               alignItems: "center",
               justifyContent: "center",
               marginBottom: 1,
-              opacity: pressed || busy ? 0.7 : 1,
-            })}
+              opacity: disabled ? 0.45 : 1,
+            }}
           >
-            <Icon
-              name={busy ? "loader" : isAsk ? "eye" : running ? "clock" : "arrow-up"}
-              size={18}
-              color={isAsk ? palette.foreground : palette.primaryForeground}
-            />
+            {busy ? (
+              <ActivityIndicator size="small" color={isAsk ? palette.foreground : palette.primaryForeground} />
+            ) : (
+              <Icon name={isAsk ? "eye" : running ? "clock" : "arrow-up"} size={18} color={isAsk ? palette.foreground : palette.primaryForeground} />
+            )}
           </PressScale>
         </Animated.View>
       </View>

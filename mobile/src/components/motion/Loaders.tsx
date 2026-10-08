@@ -120,7 +120,7 @@ export function Skeleton({ width = "100%", height = 14, round, style }: { width?
           <Svg width="100%" height="100%">
             <Defs>
               <LinearGradient id="sheen" x1="0" y1="0" x2="1" y2="0">
-                <Stop offset="0" stopColor={dark ? "#ffffff" : "#ffffff"} stopOpacity="0" />
+                <Stop offset="0" stopColor="#ffffff" stopOpacity="0" />
                 <Stop offset="0.5" stopColor="#ffffff" stopOpacity={dark ? "0.07" : "0.6"} />
                 <Stop offset="1" stopColor="#ffffff" stopOpacity="0" />
               </LinearGradient>
@@ -147,63 +147,6 @@ export function CardSkeleton() {
         <Skeleton width={110} height={10} />
         <Skeleton width={48} height={10} />
       </View>
-    </View>
-  );
-}
-
-/**
- * Running-state border: a soft light sweeping round the card's edge. A rotating gradient square
- * sits behind the child, clipped to a `ring`-wide frame — the child's own opaque background
- * covers the middle, so only the rim glows. Rotation is native-driver; reduce-motion: a still tint.
- */
-export function LiveBorder({
-  active,
-  color,
-  borderRadius,
-  ring = 1.5,
-  children,
-}: {
-  active: boolean;
-  color: string;
-  borderRadius: number;
-  ring?: number;
-  children: React.ReactNode;
-}) {
-  const [size, setSize] = useState({ w: 0, h: 0 });
-  const t = useLoop(3200, 0);
-  const reduced = useReducedMotion();
-  if (!active) return <>{children}</>;
-  const d = Math.ceil(Math.hypot(size.w, size.h));
-  return (
-    <View
-      onLayout={(e) => setSize({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })}
-      style={{ borderRadius: borderRadius + ring, padding: ring, overflow: "hidden", backgroundColor: `${color}2e` }}
-    >
-      {d > 0 && !reduced ? (
-        <Animated.View
-          pointerEvents="none"
-          style={{
-            position: "absolute",
-            width: d,
-            height: d,
-            left: (size.w - d) / 2,
-            top: (size.h - d) / 2,
-            transform: [{ rotate: t.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] }) }],
-          }}
-        >
-          <Svg width={d} height={d}>
-            <Defs>
-              <LinearGradient id="sweep" x1="0" y1="0" x2="1" y2="0">
-                <Stop offset="0.3" stopColor={color} stopOpacity="0" />
-                <Stop offset="0.5" stopColor={color} stopOpacity="1" />
-                <Stop offset="0.7" stopColor={color} stopOpacity="0" />
-              </LinearGradient>
-            </Defs>
-            <Rect width={d} height={d / 2} fill="url(#sweep)" />
-          </Svg>
-        </Animated.View>
-      ) : null}
-      {children}
     </View>
   );
 }

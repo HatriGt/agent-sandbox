@@ -3,7 +3,8 @@
 // as two fields over the body, supporting files in a sheet, the inspector in a sheet. Same upsert /
 // toggle / remove bodies as the web.
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Modal, Pressable, ScrollView, Share, TextInput, View } from "react-native";
+import { Alert, Modal, ScrollView, Share, TextInput, View } from "react-native";
+import { PressScale } from "@/components/motion";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Clipboard from "expo-clipboard";
 import type { SkillView } from "@/lib/api";
@@ -220,15 +221,15 @@ function EditorBody({ initial, draft, onMutate, onSaved, onClose }: { initial?: 
     <SafeAreaView style={{ flex: 1, backgroundColor: palette.background }} edges={["top", "bottom"]}>
       {/* Header */}
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8, height: 52, paddingHorizontal: 8, borderBottomWidth: 1, borderBottomColor: palette.border }}>
-        <Pressable onPress={requestClose} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back to skills" style={{ padding: 6 }}>
+        <PressScale scaleTo={0.9} onPress={requestClose} hitSlop={10} accessibilityRole="button" accessibilityLabel="Back to skills" style={{ padding: 6 }}>
           <Icon name="arrow-left" size={20} />
-        </Pressable>
-        <Pressable onPress={focusName} accessibilityRole="button" accessibilityLabel="Rename" style={{ flexShrink: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 6 }}>
+        </PressScale>
+        <PressScale onPress={focusName} accessibilityRole="button" accessibilityLabel="Rename" style={{ flexShrink: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 6 }}>
           <T variant="body" weight="medium" mono={!!trimmedName} tone={trimmedName ? "default" : "muted"} numberOfLines={1} style={{ flexShrink: 1 }}>
             {trimmedName ? `/${trimmedName}` : "New skill"}
           </T>
           {initial && sourceOf(initial.name) === "starter" ? <StarterBadge /> : null}
-        </Pressable>
+        </PressScale>
         {saveState ? (
           <View accessibilityLiveRegion="polite" style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
             <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: saveState === "Unsaved" ? palette.attention : saveState === "Saved" ? palette.ok : palette.faint }} />
@@ -238,15 +239,15 @@ function EditorBody({ initial, draft, onMutate, onSaved, onClose }: { initial?: 
           </View>
         ) : null}
         <View style={{ flex: 1 }} />
-        <Pressable onPress={() => setMenu(true)} hitSlop={8} accessibilityRole="button" accessibilityLabel="More actions" style={{ padding: 6 }}>
+        <PressScale scaleTo={0.9} onPress={() => setMenu(true)} hitSlop={8} accessibilityRole="button" accessibilityLabel="More actions" style={{ padding: 6 }}>
           <Icon name="more-horizontal" size={20} />
-        </Pressable>
+        </PressScale>
         <Button small title={initial ? "Save" : "Create skill"} loading={busy} disabled={!valid || busy || (!!initial && !dirty)} onPress={() => void save()} />
       </View>
 
       {/* Toolbar: files · mode · details */}
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 10, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: palette.border }}>
-        <Pressable
+        <PressScale
           onPress={() => setFilesSheet(true)}
           accessibilityRole="button"
           accessibilityLabel="Files"
@@ -259,7 +260,7 @@ function EditorBody({ initial, draft, onMutate, onSaved, onClose }: { initial?: 
           <T variant="micro" tone="faint">
             {files.length + 1}
           </T>
-        </Pressable>
+        </PressScale>
         {!activeFile ? (
           <Segmented
             small
@@ -272,9 +273,9 @@ function EditorBody({ initial, draft, onMutate, onSaved, onClose }: { initial?: 
           />
         ) : null}
         <View style={{ flex: 1 }} />
-        <Pressable onPress={() => setInfoSheet(true)} hitSlop={8} accessibilityRole="button" accessibilityLabel="Details" style={{ padding: 4 }}>
+        <PressScale scaleTo={0.9} onPress={() => setInfoSheet(true)} hitSlop={8} accessibilityRole="button" accessibilityLabel="Details" style={{ padding: 4 }}>
           <Icon name="info" size={18} />
-        </Pressable>
+        </PressScale>
       </View>
 
       {/* Body */}
@@ -447,7 +448,7 @@ function EditorBody({ initial, draft, onMutate, onSaved, onClose }: { initial?: 
       <Sheet visible={menu} onClose={() => setMenu(false)} title="More actions">
         <View style={{ paddingBottom: 8 }}>
           {menuItems.map((m) => (
-            <Pressable
+            <PressScale
               key={m.label}
               disabled={m.icon === "power" && toggling}
               onPress={() => {
@@ -455,7 +456,7 @@ function EditorBody({ initial, draft, onMutate, onSaved, onClose }: { initial?: 
                 m.run();
               }}
               accessibilityRole="button"
-              style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 13, borderTopWidth: m.destructive ? 1 : 0, borderTopColor: palette.border, opacity: pressed ? 0.6 : 1 })}
+              style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 13, borderTopWidth: m.destructive ? 1 : 0, borderTopColor: palette.border }}
             >
               <Icon name={m.icon} size={17} color={m.destructive ? palette.destructive : undefined} />
               <T variant="body" tone={m.destructive ? "destructive" : "default"} style={{ flex: 1 }}>
@@ -466,7 +467,7 @@ function EditorBody({ initial, draft, onMutate, onSaved, onClose }: { initial?: 
                   {m.hint}
                 </T>
               ) : null}
-            </Pressable>
+            </PressScale>
           ))}
         </View>
       </Sheet>

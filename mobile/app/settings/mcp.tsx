@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, Switch, View } from "react-native";
+import { Switch, View } from "react-native";
+import { PressScale } from "@/components/motion";
 import * as Clipboard from "expo-clipboard";
 import { api, type McpServersResponse, type McpServerView } from "@/lib/api";
 import { useTheme } from "@/theme/ThemeContext";
@@ -218,7 +219,7 @@ function ServerRow({ server: s, health, testing, onTest, onEdit, onDismiss, onMu
   return (
     <Card>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-        <Pressable onPress={onEdit} accessibilityRole="button" accessibilityLabel={`Open ${s.name}`} style={{ flex: 1, minWidth: 0, gap: 3 }}>
+        <PressScale onPress={onEdit} accessibilityRole="button" accessibilityLabel={`Open ${s.name}`} style={{ flex: 1, minWidth: 0, gap: 3 }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <T variant="body" weight="medium" tone={s.enabled ? "default" : "muted"} numberOfLines={1}>
               {s.name}
@@ -229,7 +230,7 @@ function ServerRow({ server: s, health, testing, onTest, onEdit, onDismiss, onMu
             {describe(s)}
             {secrets > 0 ? <T variant="micro" tone="faint">{` · 🔑 ${secrets} ${secrets === 1 ? "secret" : "secrets"}`}</T> : null}
           </T>
-        </Pressable>
+        </PressScale>
         <Switch value={s.enabled} onValueChange={toggle} disabled={busy} trackColor={{ true: palette.live }} accessibilityLabel={s.enabled ? `Disable ${s.name}` : `Enable ${s.name}`} />
       </View>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 8 }}>

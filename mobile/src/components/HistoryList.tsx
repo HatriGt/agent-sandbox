@@ -1,5 +1,5 @@
-import React, { memo, useCallback, useEffect, useMemo, useState } from "react";
-import { FlatList, View, type StyleProp, type ViewStyle } from "react-native";
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Animated, FlatList, View, type StyleProp, type ViewStyle } from "react-native";
 import { useRouter } from "expo-router";
 import { api, ledgerApi, type LedgerRow, type LedgerTotals, type RunDigest } from "@/lib/api";
 import { ago, durationWords, friendlyName } from "@/lib/format";
@@ -10,10 +10,11 @@ import { ArmButton } from "./ui/ArmButton";
 import { Button } from "./ui/Button";
 import { Card } from "./ui/Card";
 import { Icon } from "./ui/Icon";
+import { SwipeRow } from "./ui/SwipeRow";
 import { DigestView } from "./DigestCard";
 import { OutcomeView, outcomeFacts } from "./OutcomeCard";
 import { Segmented as Chips } from "./settings/Segmented";
-import { animateLayout, CardSkeleton, FadeInUp, stagger } from "@/components/motion";
+import { animateLayout, CardSkeleton, DUR, EASE_OUT, FadeInUp, isReducedMotion, Skeleton, stagger } from "@/components/motion";
 
 const PAGE = 25;
 
@@ -179,6 +180,30 @@ const HistoryRow = memo(function HistoryRow({
   const facts = r.outcome ? outcomeFacts(r.outcome) : "";
   // Archive stamps are epoch ms; durationWords speaks seconds, ago speaks ms.
   const secs = r.startedAt && r.endedAt && r.endedAt > r.startedAt ? Math.round((r.endedAt - r.startedAt) / 1000) : null;
+  // Chevron turns to point down as the row opens, instead of swapping glyphs.
+  const turn = useRef(new Animated.Value(open ? 1 : 0)).current;
+  useEffect(() => {
+    if (isReducedMotion()) {
+      turn.setValue(open ? 1 : 0);
+      return;
+    }
+    Animated.timing(turn, { toValue: open ? 1 : 0, duration: DUR.fast, easing: EASE_OUT, useNativeDriver: true }).start();
+  }, [open, turn]);
+  // Swipe-to-forget keeps the arm/confirm step: the first tap arms the revealed action, the second
+  // (within 4s) deletes. Same contract as the ArmButton inside the open row.
+  const [armed, setArmed] = useState(false);
+  const disarm = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(disarm.current), []);
+  const swipeForget = () => {
+    if (!armed) {
+      setArmed(true);
+      disarm.current = setTimeout(() => setArmed(false), 4000);
+      return;
+    }
+    clearTimeout(disarm.current);
+    setArmed(false);
+    onForget(r.id);
+  };
   return (
     <>
       {head ? (
@@ -187,6 +212,7 @@ const HistoryRow = memo(function HistoryRow({
         </T>
       ) : null}
       <FadeInUp delay={stagger(i)}>
+        <SwipeRow actions={[{ label: armed ? "Delete?" : "Forget", icon: "trash-2", tone: "destructive", stayOpen: !armed, onPress: swipeForget }]}>
         <Card onPress={() => onToggle(r.id)}>
           <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
             <T variant="micro" mono tone="faint" style={{ flexShrink: 0 }} accessibilityLabel={`Run number ${r.id}`}>
@@ -195,7 +221,9 @@ const HistoryRow = memo(function HistoryRow({
             <T variant="body" weight="medium" style={{ flex: 1, minWidth: 0 }} numberOfLines={2}>
               {titleOf(r)}
             </T>
-            <Icon name={open ? "chevron-down" : "chevron-right"} size={14} color={palette.faint} />
+            <Animated.View style={{ transform: [{ rotate: turn.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "90deg"] }) }] }}>
+              <Icon name="chevron-right" size={14} color={palette.faint} />
+            </Animated.View>
           </View>
           <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 6, alignItems: "center" }}>
             <Chip tone={failed ? "destructive" : "ok"} label={failed ? "failed" : "done"} />
@@ -241,6 +269,7 @@ const HistoryRow = memo(function HistoryRow({
             </View>
           ) : null}
         </Card>
+        </SwipeRow>
       </FadeInUp>
     </>
   );
@@ -265,7 +294,15 @@ function RunDetail({ id }: { id: number }) {
     };
   }, [id]);
 
-  if (state === "loading") return <CardSkeleton />;
+  if (state === "loading") {
+    return (
+      <View style={{ gap: 8 }}>
+        <Skeleton width="70%" height={12} />
+        <Skeleton width="90%" height={10} />
+        <Skeleton width="55%" height={10} />
+      </View>
+    );
+  }
   if (!state.digest) {
     return (
       <T variant="meta" tone="faint">

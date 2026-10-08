@@ -217,11 +217,12 @@ mobile/
   src/
     components/              BoxCard, Composer, TranscriptView, TurnRail, PlanBoard,
                              QuestionCard, OutcomeCard, DigestCard, WakingCard, HistoryList,
-                             StatusLine, Toasts, DiffText, MarkdownLite, AnimatedSplash
+                             StatusLine, Toasts, EmptyFleet, DiffText, MarkdownLite, AnimatedSplash
       thread/                ThreadHeader, RunInspectorSheet
       sheets/                BoxActionsSheet, ChangesSheet, PrSheet
-      ui/                    AppText(T), Button, ArmButton, Card, Field, Icon, Sheet,
+      ui/                    AppText(T), Button, ArmButton, Card, Field, Icon, Sheet, SwipeRow,
                              Skeleton, StatePill, UsageMeter, WorkingDot, Motion, BrandMark
+      motion/                PressScale, SPRING/DUR/EASE tokens, FadeIn(Up), stagger, haptics, loaders
     hooks/                   useFleet (the fleet poll), useWatch (SSE), useNow (every clock)
     lib/                     api, config, sse, format, trace, question, activity,
                              mention, planTasks, slash, transcript-tools, pending-delegate

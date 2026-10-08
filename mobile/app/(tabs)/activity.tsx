@@ -99,6 +99,9 @@ const TimelineLine = memo(function TimelineLine({ r, head, first, onRun }: { r: 
   const router = useRouter();
   const { palette } = useTheme();
   const failed = r.tone === "destructive";
+  // One press target per row: a run opens its receipt in History; otherwise the box, if any.
+  const onPress = r.run != null ? onRun : r.box ? () => router.push(`/box/${encodeURIComponent(r.box!)}`) : undefined;
+  const label = r.run != null ? `${r.verb} ${r.box ?? ""} — open in History` : r.box ? `${r.verb} ${friendlyName(r.box)} — open` : undefined;
   const body = (
     <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10, paddingVertical: 6 }}>
       <T variant="micro" mono tone="faint" style={{ width: 40, textAlign: "right", marginTop: 2 }}>
@@ -111,7 +114,7 @@ const TimelineLine = memo(function TimelineLine({ r, head, first, onRun }: { r: 
           {r.box ? (
             <>
               {" "}
-              <T variant="meta" mono style={{ textDecorationLine: "underline" }} onPress={() => router.push(`/box/${encodeURIComponent(r.box!)}`)}>
+              <T variant="meta" mono>
                 {friendlyName(r.box)}
               </T>
             </>
@@ -143,8 +146,8 @@ const TimelineLine = memo(function TimelineLine({ r, head, first, onRun }: { r: 
           <View style={{ flex: 1, height: 1, backgroundColor: palette.border }} />
         </View>
       ) : null}
-      {r.run != null ? (
-        <PressScale accessibilityLabel={`${r.verb} ${r.box ?? ""} — open in History`} onPress={onRun}>
+      {onPress ? (
+        <PressScale accessibilityRole="button" accessibilityLabel={label} onPress={onPress}>
           {body}
         </PressScale>
       ) : (

@@ -29,6 +29,10 @@ export type Palette = {
   sleep: string;
   trace: string;
   traceFg: string;
+  /** Text on `destructive` fills. Dark red needs dark ink, not white. */
+  destructiveForeground: string;
+  /** Modal/sheet backdrop. */
+  scrim: string;
 };
 
 export const palettes: { light: Palette; dark: Palette } = {
@@ -57,6 +61,8 @@ export const palettes: { light: Palette; dark: Palette } = {
     sleep: "#8156c0",
     trace: "#161619",
     traceFg: "#e7e7ea",
+    destructiveForeground: "#ffffff",
+    scrim: "#00000066",
   },
   dark: {
     background: "#0f0f12",
@@ -83,6 +89,8 @@ export const palettes: { light: Palette; dark: Palette } = {
     sleep: "#be9df7",
     trace: "#070709",
     traceFg: "#dedee0",
+    destructiveForeground: "#1a0607",
+    scrim: "#00000099",
   },
 };
 
@@ -110,7 +118,7 @@ export const fonts = {
 } as const;
 
 // Radius scale: base 8px (0.5rem); sm/md/lg/xl/2xl = -2/+0/+2/+6/+10.
-export const radius = { sm: 6, md: 8, lg: 10, xl: 14, "2xl": 18, pill: 9999 } as const;
+export const radius = { sm: 6, md: 8, lg: 10, xl: 14, "2xl": 18, sheet: 24, pill: 9999 } as const;
 
 export const space = (n: number) => n * 4;
 

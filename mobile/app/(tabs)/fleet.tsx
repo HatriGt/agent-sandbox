@@ -6,8 +6,10 @@ import type { BoxView } from "@/lib/api";
 import { isSleeping, plural } from "@/lib/format";
 import { useTheme } from "@/theme/ThemeContext";
 import { BoxCard } from "@/components/BoxCard";
+import { EmptyFleet } from "@/components/EmptyFleet";
 import { BoxActionsSheet } from "@/components/sheets/BoxActionsSheet";
 import { T } from "@/components/ui/AppText";
+import { Button } from "@/components/ui/Button";
 import { CardSkeleton, CountUp, FadeInUp, ProgressFill, stagger } from "@/components/motion";
 
 const ORDER: Record<string, number> = { waiting: 0, running: 1, done: 2, idle: 3 };
@@ -34,11 +36,11 @@ export default function Fleet() {
   const poolFree = boxes.length - occupied;
   const renderItem = useCallback(
     ({ item, index }: { item: BoxView; index: number }) => (
-      <FadeInUp delay={stagger(index, 50, 6)}>
-        <BoxCard box={item} onLongPress={setActions} />
+      <FadeInUp delay={stagger(index)}>
+        <BoxCard box={item} onLongPress={setActions} onChanged={refresh} />
       </FadeInUp>
     ),
-    [],
+    [refresh],
   );
 
   return (
@@ -73,13 +75,11 @@ export default function Fleet() {
               ? <><CountUp value={occupied} /> of {capacity} slots occupied{poolFree ? `, ${plural(poolFree, "warm box")} ready` : ""}.</>
               : `${plural(occupied, "machine")}.`}
         </T>
-        {snap && occupied === 0 && !error && (
-          <T variant="meta" tone="faint">
-            No machines owned by this account. Machines are per-owner — runs started from the web with the
-            operator token belong to the operator, not to your GitHub user. Sign in with the same identity
-            you use on the web to see them.
-          </T>
-        )}
+        {!snap && error ? (
+          <View style={{ alignItems: "flex-start" }}>
+            <Button title="Retry" variant="outline" small onPress={() => void refresh()} />
+          </View>
+        ) : null}
         {/* One tick per slot, but only while the ticks stay legible — past ~24 slots each tick is
             thinner than the gap between them and the row reads as noise, so it becomes one bar. */}
         {capacity > 0 && capacity <= 24 && (
@@ -102,14 +102,18 @@ export default function Fleet() {
             <ProgressFill fraction={occupied / capacity} color={palette.live} height={6} />
           </View>
         )}
-        {!snap && !error ? (
-          <View style={{ gap: 10 }}>
-            <CardSkeleton />
-            <CardSkeleton />
-            <CardSkeleton />
           </View>
-        ) : null}
-          </View>
+        }
+        ListEmptyComponent={
+          !snap && !error ? (
+            <View style={{ gap: 10 }}>
+              <CardSkeleton />
+              <CardSkeleton />
+              <CardSkeleton />
+            </View>
+          ) : snap ? (
+            <EmptyFleet copy="No machines owned by this account. Machines are per-owner — runs started from the web with the operator token belong to the operator, not to your GitHub user. Sign in with the same identity you use on the web, or delegate a task to start one here." />
+          ) : null
         }
         ListFooterComponent={
           <View style={{ gap: 6 }}>

@@ -1,5 +1,5 @@
 import React from "react";
-import { Pressable, ScrollView, View } from "react-native";
+import { ScrollView, View } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "@/state/auth";
@@ -10,27 +10,28 @@ import { T } from "@/components/ui/AppText";
 import { ArmButton } from "@/components/ui/ArmButton";
 import { Card } from "@/components/ui/Card";
 import { Icon, type IconName } from "@/components/ui/Icon";
+import { PressScale } from "@/components/motion";
 
 function RowLink({ title, hint, icon, onPress }: { title: string; hint?: string; icon: IconName; onPress: () => void }) {
   const { palette } = useTheme();
   return (
-    <Pressable
+    <PressScale
       onPress={onPress}
-      style={({ pressed }) => ({
+      accessibilityRole="button"
+      style={{
         paddingVertical: 14,
         borderBottomWidth: 1,
         borderBottomColor: palette.border,
-        opacity: pressed ? 0.7 : 1,
         flexDirection: "row",
         alignItems: "center",
         gap: 12,
-      })}
+      }}
     >
       <View
         style={{
           width: 32,
           height: 32,
-          borderRadius: 9,
+          borderRadius: radius.md,
           backgroundColor: palette.secondary,
           alignItems: "center",
           justifyContent: "center",
@@ -51,7 +52,7 @@ function RowLink({ title, hint, icon, onPress }: { title: string; hint?: string;
       <View style={{ flexShrink: 0 }}>
         <Icon name="chevron-right" size={16} color={palette.faint} />
       </View>
-    </Pressable>
+    </PressScale>
   );
 }
 
@@ -122,9 +123,12 @@ export default function Settings() {
           </T>
           <View style={{ flexDirection: "row", gap: 6 }}>
             {(["system", "light", "dark"] as ThemePref[]).map((p) => (
-              <Pressable
+              <PressScale
                 key={p}
                 onPress={() => setPref(p)}
+                haptic="selection"
+                accessibilityRole="radio"
+                accessibilityState={{ checked: pref === p }}
                 style={{
                   paddingVertical: 8,
                   paddingHorizontal: 16,
@@ -137,7 +141,7 @@ export default function Settings() {
                 <T variant="meta" weight={pref === p ? "semibold" : "regular"}>
                   {p}
                 </T>
-              </Pressable>
+              </PressScale>
             ))}
           </View>
         </View>

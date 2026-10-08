@@ -1,5 +1,6 @@
 import React from "react";
-import { Animated, Easing, View, type ViewStyle } from "react-native";
+import { View, type ViewStyle } from "react-native";
+import { ProgressFill } from "@/components/motion";
 import { fmtMib, usageFraction, usageLevel, type Usage } from "@/lib/format";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
@@ -12,8 +13,8 @@ import { Icon } from "./Icon";
  * is ALWAYS shown: the amber fill is a low-contrast mark, which is fine for a bar but obliges a
  * visible value beside it. Mirrors web/src/components/ui/usage-meter.tsx.
  *
- * Width animates rather than jumping, because the fleet poll lands every few seconds and a snapping
- * bar reads as a glitch. RN `Animated` only — this app has no reanimated.
+ * The fill animates rather than jumping, because the fleet poll lands every few seconds and a
+ * snapping bar reads as a glitch. ProgressFill drives scaleX on the native thread.
  */
 export function UsageMeter({
   kind,
@@ -34,13 +35,6 @@ export function UsageMeter({
   const { palette } = useTheme();
   const f = usageFraction(usage);
   const level = usageLevel(usage);
-  // Keep the animated value alive across renders even when the meter has nothing to show, so the
-  // hooks order never changes; the early return below happens after it is declared.
-  const grow = React.useRef(new Animated.Value(f ?? 0)).current;
-  React.useEffect(() => {
-    if (f == null) return;
-    Animated.timing(grow, { toValue: f, duration: 450, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start();
-  }, [f, grow]);
 
   if (f == null || !usage) return null;
   const fill = level === "critical" ? palette.destructive : level === "high" ? palette.attention : palette.live;
@@ -64,15 +58,7 @@ export function UsageMeter({
           overflow: "hidden",
         }}
       >
-        <Animated.View
-          style={{
-            height: 4,
-            borderRadius: radius.pill,
-            backgroundColor: fill,
-            // A 0%-wide bar looks broken; floor it at a hairline so the mark is always present.
-            width: grow.interpolate({ inputRange: [0, 1], outputRange: ["2%", "100%"] }),
-          }}
-        />
+        <ProgressFill fraction={f} color={fill} height={4} floor={0.02} />
       </View>
       <T variant="micro" tone={textTone} mono numberOfLines={1} style={{ flexShrink: 0 }}>
         {`${fmtMib(usage.usedMib)}/${fmtMib(usage.totalMib)}`}

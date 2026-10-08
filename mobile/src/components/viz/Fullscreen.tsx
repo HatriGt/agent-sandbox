@@ -1,5 +1,6 @@
 import React from "react";
-import { Modal, Pressable, ScrollView, View } from "react-native";
+import { Modal, ScrollView, View } from "react-native";
+import { PressScale } from "@/components/motion";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
@@ -59,24 +60,25 @@ export function VizFullscreen({
 function ZoomButton({ icon, label, onPress, disabled }: { icon: IconName; label: string; onPress: () => void; disabled?: boolean }) {
   const { palette } = useTheme();
   return (
-    <Pressable
+    <PressScale
+      scaleTo={0.9}
       onPress={onPress}
       disabled={disabled}
       hitSlop={6}
       accessibilityRole="button"
       accessibilityLabel={label}
-      style={({ pressed }) => ({
+      accessibilityState={{ disabled: !!disabled }}
+      style={{
         width: 32,
         height: 32,
         borderRadius: radius.md,
         alignItems: "center",
         justifyContent: "center",
-        backgroundColor: pressed ? palette.muted : "transparent",
         opacity: disabled ? 0.35 : 1,
-      })}
+      }}
     >
       <Icon name={icon} size={16} color={palette.foreground} />
-    </Pressable>
+    </PressScale>
   );
 }
 
@@ -84,17 +86,17 @@ function ZoomButton({ icon, label, onPress, disabled }: { icon: IconName; label:
 export function ExpandAction({ onPress }: { onPress: () => void }) {
   const { palette } = useTheme();
   return (
-    <Pressable
+    <PressScale
       onPress={onPress}
       hitSlop={6}
       accessibilityRole="button"
       accessibilityLabel="Open fullscreen"
-      style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-end", opacity: pressed ? 0.6 : 1 })}
+      style={{ flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-end" }}
     >
       <Icon name="maximize-2" size={11} color={palette.mutedForeground} />
       <T variant="micro" tone="muted">
         Fullscreen
       </T>
-    </Pressable>
+    </PressScale>
   );
 }

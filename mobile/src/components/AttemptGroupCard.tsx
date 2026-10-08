@@ -152,9 +152,20 @@ export function AttemptGroupPanel({ group: g, currentBox, onChange }: { group: A
                 </T>
               </PressScale>
               {canPick ? (
-                <T variant="micro" tone="muted" weight="semibold" onPress={busy ? undefined : () => confirmPick(a)}>
-                  Pick this one instead ›
-                </T>
+                <PressScale
+                  onPress={() => confirmPick(a)}
+                  disabled={busy}
+                  haptic="selection"
+                  hitSlop={{ top: 6, bottom: 6 }}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Pick ${a.label} instead`}
+                  style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingVertical: 4, opacity: busy ? 0.5 : 1 }}
+                >
+                  <T variant="micro" tone="muted" weight="semibold">
+                    Pick this one instead
+                  </T>
+                  <Icon name="chevron-right" size={12} color={palette.mutedForeground} />
+                </PressScale>
               ) : null}
             </View>
           );

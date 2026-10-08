@@ -3,7 +3,7 @@ import { Alert, View } from "react-native";
 import { useRouter } from "expo-router";
 import { api, type BoxView } from "@/lib/api";
 import { parseQuestion, questionChoices, questionHeadline } from "@/lib/question";
-import { ago, friendlyName } from "@/lib/format";
+import { ago, friendlyName, isSleeping } from "@/lib/format";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { T } from "./ui/AppText";
@@ -11,7 +11,8 @@ import { Card } from "./ui/Card";
 import { Icon } from "./ui/Icon";
 import { StatePill } from "./ui/StatePill";
 import { UsageMeter } from "./ui/UsageMeter";
-import { haptic, LiveBorder, PressScale } from "@/components/motion";
+import { SwipeRow, type SwipeAction } from "./ui/SwipeRow";
+import { haptic, PressScale } from "@/components/motion";
 
 export function boxLabel(b: BoxView): string {
   return b.title || b.task?.split("\n")[0] || b.name;
@@ -41,14 +42,19 @@ function InboxChoices({ box, question }: { box: string; question: string }) {
   return (
     <View accessibilityRole="radiogroup" accessibilityLabel="Quick answers" style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
       {choices.map((c, i) => (
-        <PressScale key={c.answer} disabled={sent != null} onPress={() => void answer(i)}>
+        <PressScale
+          key={c.answer}
+          disabled={sent != null}
+          onPress={() => void answer(i)}
+          hitSlop={{ top: 6, bottom: 6 }}
+          accessibilityRole="button"
+          accessibilityLabel={`Answer: ${c.answer}`}
+        >
           <View
-            accessibilityRole="button"
-            accessibilityLabel={`Answer: ${c.answer}`}
             style={{
               borderWidth: 1,
               borderColor: palette.attentionInk,
-              borderRadius: 8,
+              borderRadius: radius.md,
               paddingHorizontal: 10,
               paddingVertical: 6,
               opacity: sent != null && sent !== i ? 0.45 : 1,
@@ -65,20 +71,57 @@ function InboxChoices({ box, question }: { box: string; question: string }) {
   );
 }
 
-/** One machine, triage-ready: title, state (icon+word+color), and what it needs. */
-export const BoxCard = memo(function BoxCard({ box, onLongPress }: { box: BoxView; onLongPress?: (b: BoxView) => void }) {
+/**
+ * One machine, triage-ready: title, state (icon+word+color), and what it needs. Swipe left for the
+ * two most-used controls (sleep/wake, keep/release); long-press opens the full sheet.
+ */
+export const BoxCard = memo(function BoxCard({
+  box,
+  onLongPress,
+  onChanged,
+}: {
+  box: BoxView;
+  onLongPress?: (b: BoxView) => void;
+  /** Called after a swipe action commits, so the list can refresh before the next poll. */
+  onChanged?: () => void;
+}) {
   const router = useRouter();
   const { palette } = useTheme();
   const waiting = box.runState === "waiting";
+  const running = box.runState === "running";
+  const sleeping = isSleeping(box.boxStatus);
   const q = waiting ? questionHeadline(box.question) : "";
   const ink = waiting ? palette.attentionInk : palette.faint;
 
+  const act = (label: string, fn: () => Promise<unknown>) => {
+    haptic("light");
+    fn()
+      .then(() => {
+        haptic("success");
+        onChanged?.();
+      })
+      .catch((e: unknown) => Alert.alert(`Could not ${label.toLowerCase()}`, e instanceof Error ? e.message : String(e)));
+  };
+  const actions: SwipeAction[] = [
+    {
+      label: box.kept ? "Release" : "Keep",
+      icon: "bookmark",
+      onPress: () => act(box.kept ? "Release" : "Keep", () => api.keep(box.name, !box.kept)),
+    },
+  ];
+  // Mirrors the sheet: a busy machine can't be put to sleep, so the action simply isn't offered.
+  if (sleeping) actions.push({ label: "Wake", icon: "sun", onPress: () => act("Wake", () => api.wake(box.name)) });
+  else if (!running) actions.push({ label: "Sleep", icon: "moon", onPress: () => act("Sleep", () => api.sleep(box.name)) });
+
   return (
+    <SwipeRow actions={actions}>
     <PressScale
       onPress={() => router.push(`/box/${encodeURIComponent(box.name)}`)}
       onLongPress={onLongPress ? () => onLongPress(box) : undefined}
+      accessibilityRole="button"
+      accessibilityLabel={boxLabel(box)}
+      accessibilityHint={onLongPress ? "Double tap to open. Double tap and hold for more actions." : "Double tap to open."}
     >
-      <LiveBorder active={box.runState === "running"} color={palette.live} borderRadius={radius.xl}>
       <Card attention={waiting}>
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
           <T
@@ -146,9 +189,9 @@ export const BoxCard = memo(function BoxCard({ box, onLongPress }: { box: BoxVie
           </View>
         ) : null}
       </Card>
-      </LiveBorder>
     </PressScale>
+    </SwipeRow>
   );
 },
 // The fleet poll hands back fresh objects every 4s; compare by content so unchanged cards skip rendering.
-(a, b) => a.onLongPress === b.onLongPress && JSON.stringify(a.box) === JSON.stringify(b.box));
+(a, b) => a.onLongPress === b.onLongPress && a.onChanged === b.onChanged && JSON.stringify(a.box) === JSON.stringify(b.box));

@@ -2,15 +2,17 @@
 // this module owns the phone side: permission, token registration, Android channels, and turning a
 // tapped notification or an asb:// link into a Thread route.
 //
-// No settings: once signed in the app asks the OS for permission (Android 13+ / iOS show their one
-// dialog) and registers this phone. Every later start re-registers silently — tokens can rotate.
-import { Platform } from "react-native";
+// Settings: "On this phone" (AcctNotifySection) can switch this device off; the choice is stored
+// locally so the silent re-register on every start (tokens can rotate) respects it.
+import { AppState, Platform } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
 import { api } from "./api";
 
 const TOKEN_KEY = "asb.push.token";
+/** Set when the user switched push off for this phone; registerForPush() then stays out. */
+const OFF_KEY = "asb.push.off";
 
 /** Box names are machine-generated slugs; anything else in a link is refused, not routed. */
 const BOX_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$/;
@@ -82,12 +84,23 @@ export function choiceFromResponse(r: Notifications.NotificationResponse | null 
 }
 
 let handlerSet = false;
-/** Foreground presentation: show a banner but stay quiet — the user is already in the app. */
+/**
+ * Foreground presentation: stay quiet — the user is already in the app. A "needs you" push (the
+ * ask-choices category / needs-you channel) is owned in-app by Toasts while the app is active, so
+ * its banner is suppressed; everything else still banners, and the list/badge behaviour is unchanged.
+ */
 export function configurePushPresentation(): void {
   if (handlerSet) return;
   handlerSet = true;
   Notifications.setNotificationHandler({
-    handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: false, shouldSetBadge: false }),
+    handleNotification: async (n) => {
+      const c = n.request.content;
+      const needsYou =
+        (typeof c.categoryIdentifier === "string" && c.categoryIdentifier.startsWith("ask-choices-")) ||
+        (c.data as { kind?: unknown } | null)?.kind === "waiting";
+      const inApp = needsYou && AppState.currentState === "active";
+      return { shouldShowBanner: !inApp, shouldShowList: true, shouldPlaySound: false, shouldSetBadge: false };
+    },
   });
   // Categories must exist before a push arrives; idempotent, and harmless where unsupported (web).
   void ensureChoiceCategories().catch(() => {});
@@ -110,16 +123,21 @@ async function ensureChannels(): Promise<void> {
   });
 }
 
-export type PushStatus = "on" | "denied" | "unavailable";
+export type PushStatus = "on" | "off" | "denied" | "unavailable";
 
 function projectId(): string | undefined {
   const extra = Constants.expoConfig?.extra as { eas?: { projectId?: string } } | undefined;
   return extra?.eas?.projectId ?? Constants.easConfig?.projectId;
 }
 
-/** Ask (if the OS still lets us) and register this device with the controller. Never throws. */
-export async function registerForPush(): Promise<PushStatus> {
+/**
+ * Ask (if the OS still lets us) and register this device with the controller. Never throws.
+ * Honours the per-phone "off" switch unless `force` (the switch itself turning back on).
+ */
+export async function registerForPush(force = false): Promise<PushStatus> {
   try {
+    if (force) await AsyncStorage.removeItem(OFF_KEY);
+    else if ((await AsyncStorage.getItem(OFF_KEY)) === "1") return "off";
     let perm = await Notifications.getPermissionsAsync();
     if (!perm.granted && perm.canAskAgain) perm = await Notifications.requestPermissionsAsync({ ios: { allowAlert: true, allowSound: true, allowBadge: false } });
     if (!perm.granted) return "denied";
@@ -135,11 +153,26 @@ export async function registerForPush(): Promise<PushStatus> {
   }
 }
 
-/** Stop this phone receiving pushes (sign-out). Best-effort. */
-export async function unregisterPush(): Promise<void> {
+/** Where this phone stands without prompting: used by the settings switch on mount. */
+export async function pushStatus(): Promise<PushStatus> {
+  try {
+    if ((await AsyncStorage.getItem(OFF_KEY)) === "1") return "off";
+    const perm = await Notifications.getPermissionsAsync();
+    if (!perm.granted) return "denied";
+    return (await AsyncStorage.getItem(TOKEN_KEY)) ? "on" : "unavailable";
+  } catch {
+    return "unavailable";
+  }
+}
+
+/**
+ * Stop this phone receiving pushes. `remember` is the per-phone switch (survives restarts);
+ * without it (sign-out) the switch is reset so the next sign-in registers again.
+ */
+export async function unregisterPush(opts: { remember?: boolean } = {}): Promise<void> {
+  await (opts.remember ? AsyncStorage.setItem(OFF_KEY, "1") : AsyncStorage.removeItem(OFF_KEY)).catch(() => {});
   const token = await AsyncStorage.getItem(TOKEN_KEY).catch(() => null);
   if (!token) return;
   await AsyncStorage.removeItem(TOKEN_KEY).catch(() => {});
   await api.pushUnregister(token).catch(() => {});
 }
-

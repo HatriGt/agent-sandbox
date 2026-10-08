@@ -1,7 +1,8 @@
 import React, { useCallback, useRef, useState } from "react";
-import { Animated, Pressable, type GestureResponderEvent, type PressableProps, type PressableStateCallbackType, type StyleProp, type ViewStyle } from "react-native";
+import { Animated, Pressable, StyleSheet, type GestureResponderEvent, type PressableProps, type PressableStateCallbackType, type StyleProp, type ViewStyle } from "react-native";
 import { haptic, type HapticKind } from "./haptics";
 import { isReducedMotion } from "./reducedMotion";
+import { SPRING } from "./Enter";
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
@@ -14,6 +15,12 @@ export type PressScaleProps = Omit<PressableProps, "style" | "children"> & {
   haptic?: HapticKind;
 };
 
+/** The caller's own transforms, so our press scale composes with them instead of replacing them. */
+function flattenTransform(style: StyleProp<ViewStyle>): Exclude<ViewStyle["transform"], string | undefined> {
+  const flat = StyleSheet.flatten(style);
+  return flat?.transform && typeof flat.transform !== "string" ? flat.transform : [];
+}
+
 /**
  * Drop-in `Pressable` with the app's press feedback: a fast spring down to 0.97 on touch and back
  * on release, on the native driver. Accepts the same function-style `style`/`children` as
@@ -25,7 +32,7 @@ export function PressScale({ style, children, scaleTo = 0.97, haptic: kind, onPr
   const springTo = useCallback(
     (v: number) => {
       if (isReducedMotion()) return;
-      Animated.spring(scale, { toValue: v, useNativeDriver: true, speed: 50, bounciness: v === 1 ? 6 : 0 }).start();
+      Animated.spring(scale, { toValue: v, useNativeDriver: true, ...(v === 1 ? SPRING.release : SPRING.press) }).start();
     },
     [scale],
   );
@@ -60,7 +67,7 @@ export function PressScale({ style, children, scaleTo = 0.97, haptic: kind, onPr
             }
           : undefined
       }
-      style={[resolved, { transform: [{ scale }] }]}
+      style={[resolved, { transform: [...flattenTransform(resolved), { scale }] }]}
     >
       {typeof children === "function" ? children(state) : children}
     </AnimatedPressable>

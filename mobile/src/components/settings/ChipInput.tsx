@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { Pressable, View } from "react-native";
+import { View } from "react-native";
+import { PressScale } from "@/components/motion";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { T } from "@/components/ui/AppText";
@@ -44,9 +45,9 @@ export function ChipInput({
               <T variant="micro" mono numberOfLines={1}>
                 {v}
               </T>
-              <Pressable disabled={disabled} hitSlop={8} onPress={() => onChange(values.filter((x) => x !== v))} accessibilityLabel={`Remove ${v}`}>
+              <PressScale scaleTo={0.9} disabled={disabled} hitSlop={8} onPress={() => onChange(values.filter((x) => x !== v))} accessibilityRole="button" accessibilityLabel={`Remove ${v}`}>
                 <Icon name="x" size={12} color={palette.mutedForeground} />
-              </Pressable>
+              </PressScale>
             </View>
           ))}
         </View>

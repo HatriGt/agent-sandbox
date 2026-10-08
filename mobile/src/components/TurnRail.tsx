@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from "react";
-import { Animated, Pressable, View } from "react-native";
+import { Animated, View } from "react-native";
 import { useTheme } from "@/theme/ThemeContext";
 import { DUR } from "./motion";
 import { PressScale } from "@/components/motion";

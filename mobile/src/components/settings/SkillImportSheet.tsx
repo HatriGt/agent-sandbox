@@ -2,7 +2,8 @@
 // pick, preview, import) and Paste markdown. One pick opens in the editor for review; several save
 // straight in, enabled. Upload is not offered: picking files needs a native document picker.
 import React, { useEffect, useMemo, useState } from "react";
-import { Alert, Pressable, TextInput, View } from "react-native";
+import { Alert, TextInput, View } from "react-native";
+import { PressScale } from "@/components/motion";
 import { api } from "@/lib/api";
 import { useTheme } from "@/theme/ThemeContext";
 import { fonts, radius, type } from "@/theme/tokens";
@@ -272,14 +273,14 @@ function GitHubStep({ existing, onClose, onImported, onEditOne, preset }: { exis
             Curated
           </T>
           {FEATURED_REPOS.map((f) => (
-            <Pressable
+            <PressScale
               key={f.repo}
               onPress={() => {
                 setInput(f.repo);
                 void browse(f.repo);
               }}
               accessibilityRole="button"
-              style={({ pressed }) => ({ flexDirection: "row", alignItems: "flex-start", gap: 10, backgroundColor: palette.card, borderWidth: 1, borderColor: palette.border, borderRadius: radius.xl, padding: 12, opacity: pressed ? 0.7 : 1 })}
+              style={{ flexDirection: "row", alignItems: "flex-start", gap: 10, backgroundColor: palette.card, borderWidth: 1, borderColor: palette.border, borderRadius: radius.xl, padding: 12 }}
             >
               <Icon name="github" size={16} />
               <View style={{ flex: 1, minWidth: 0 }}>
@@ -290,7 +291,7 @@ function GitHubStep({ existing, onClose, onImported, onEditOne, preset }: { exis
                   {f.blurb}
                 </T>
               </View>
-            </Pressable>
+            </PressScale>
           ))}
           <T variant="micro" tone="faint">
             Private repositories work through a connected GitHub account (Integrations).
@@ -325,18 +326,19 @@ function GitHubStep({ existing, onClose, onImported, onEditOne, preset }: { exis
               @ {found.branch} · {found.entries.length} found
               {found.authed ? " · via your saved GitHub token" : ""}
             </T>
-            <Pressable onPress={() => setPicked(pickedCount === found.entries.length ? {} : Object.fromEntries(found.entries.map((f) => [f.path, true as const])))} hitSlop={8} accessibilityRole="button">
+            <PressScale haptic="selection" onPress={() => setPicked(pickedCount === found.entries.length ? {} : Object.fromEntries(found.entries.map((f) => [f.path, true as const])))} hitSlop={8} accessibilityRole="button">
               <T variant="meta" weight="medium" tone="live">
                 {pickedCount === found.entries.length ? "Clear" : "Select all"}
               </T>
-            </Pressable>
+            </PressScale>
           </View>
           <View accessibilityLabel="Skills found" style={{ borderWidth: 1, borderColor: palette.border, borderRadius: radius.xl, overflow: "hidden" }}>
             {found.entries.map((f, i) => {
               const on = !!picked[f.path];
               return (
-                <Pressable
+                <PressScale
                   key={f.path}
+                  haptic="selection"
                   onPress={() =>
                     setPicked((p) => {
                       const n = { ...p };
@@ -347,10 +349,10 @@ function GitHubStep({ existing, onClose, onImported, onEditOne, preset }: { exis
                   }
                   accessibilityRole="checkbox"
                   accessibilityState={{ checked: on }}
-                  style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: i ? 1 : 0, borderTopColor: palette.border, backgroundColor: on ? palette.accent : "transparent", opacity: pressed ? 0.7 : 1 })}
+                  style={{ flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: i ? 1 : 0, borderTopColor: palette.border, backgroundColor: on ? palette.accent : "transparent" }}
                 >
                   <View style={{ width: 18, height: 18, borderRadius: 5, borderWidth: 1, borderColor: on ? palette.live : palette.lineStrong, backgroundColor: on ? palette.live : "transparent", alignItems: "center", justifyContent: "center" }}>
-                    {on ? <Icon name="check" size={12} color="#ffffff" /> : null}
+                    {on ? <Icon name="check" size={12} color={palette.primaryForeground} /> : null}
                   </View>
                   <View style={{ flex: 1, minWidth: 0 }}>
                     <T variant="meta" weight="medium" mono numberOfLines={1}>
@@ -370,7 +372,7 @@ function GitHubStep({ existing, onClose, onImported, onEditOne, preset }: { exis
                       replaces yours
                     </T>
                   ) : null}
-                </Pressable>
+                </PressScale>
               );
             })}
           </View>

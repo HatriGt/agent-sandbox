@@ -1,7 +1,8 @@
 // Harness page pieces ported from web/src/components/harness/{ImportHarness,Compare}.tsx and
 // HarnessesPage.tsx (ReviewPanel, DriverBadges).
 import React, { useEffect, useState } from "react";
-import { Pressable, View } from "react-native";
+import { View } from "react-native";
+import { PressScale } from "@/components/motion";
 import { useRouter } from "expo-router";
 import { api, type AgentChoice, type AttemptGroupRow, type AttemptGroupView, type CompareDetail, type CompareFacts, type CompareSummary, type HarnessImportPreview, type HarnessView, type SkillView } from "@/lib/api";
 import { ago } from "@/lib/format";
@@ -348,13 +349,13 @@ function Disclosure({ open, onPress, title, trailing, children }: { open: boolea
   const { palette } = useTheme();
   return (
     <View style={{ borderBottomWidth: 1, borderBottomColor: palette.border }}>
-      <Pressable onPress={onPress} accessibilityRole="button" accessibilityState={{ expanded: open }} style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 12 }}>
+      <PressScale onPress={onPress} accessibilityRole="button" accessibilityState={{ expanded: open }} style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 12 }}>
         <Icon name={open ? "chevron-down" : "chevron-right"} size={15} color={palette.mutedForeground} />
         <T variant="meta" numberOfLines={1} style={{ flex: 1 }}>
           {title}
         </T>
         {trailing}
-      </Pressable>
+      </PressScale>
       {open ? <View style={{ paddingBottom: 12 }}>{children}</View> : null}
     </View>
   );

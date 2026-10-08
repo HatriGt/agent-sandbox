@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Pressable, RefreshControl, ScrollView, View } from "react-native";
+import { RefreshControl, ScrollView, View } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFleet } from "@/hooks/useFleet";
@@ -12,9 +12,10 @@ import { radius } from "@/theme/tokens";
 import { BoxCard } from "@/components/BoxCard";
 import { BoxActionsSheet } from "@/components/sheets/BoxActionsSheet";
 import { T } from "@/components/ui/AppText";
+import { Button } from "@/components/ui/Button";
 import { Icon, type IconName } from "@/components/ui/Icon";
-import { BrandMark } from "@/components/ui/BrandMark";
-import { CardSkeleton, FadeInUp, PressScale } from "@/components/motion";
+import { EmptyFleet } from "@/components/EmptyFleet";
+import { CardSkeleton, FadeInUp, PressScale, stagger } from "@/components/motion";
 
 function SectionHeader({ icon, label, tone }: { icon: IconName; label: string; tone: "attention" | "live" | "muted" }) {
   const { palette } = useTheme();
@@ -37,7 +38,7 @@ function StripHeader({ title, onAll }: { title: string; onAll: () => void }) {
       <T variant="h3" weight="semibold">
         {title}
       </T>
-      <PressScale onPress={onAll} hitSlop={8} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+      <PressScale onPress={onAll} hitSlop={12} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
         <T variant="meta" tone="muted">
           View all
         </T>
@@ -93,7 +94,7 @@ function RecentRuns({ onHistory }: { onHistory: () => void }) {
 }
 
 /** The last few state-changing calls, as the Activity page narrates them. */
-function RecentActivity({ onAll }: { onAll: () => void }) {
+function RecentActivity({ onAll, onBox }: { onAll: () => void; onBox: (session: string) => void }) {
   const { palette } = useTheme();
   const [rows, setRows] = useState<AuditEventRow[] | null>(null);
   useEffect(() => {
@@ -115,7 +116,13 @@ function RecentActivity({ onAll }: { onAll: () => void }) {
         const at = Date.parse(e.at);
         const failed = e.status >= 400;
         return (
-          <View key={e.id} style={{ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 36, paddingVertical: 4 }}>
+          <PressScale
+            key={e.id}
+            disabled={!d.session}
+            onPress={d.session ? () => onBox(d.session!) : undefined}
+            accessibilityLabel={d.session ? `${d.verb} ${friendlyName(d.session)} — open` : d.verb}
+            style={{ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 36, paddingVertical: 4 }}
+          >
             <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: failed ? palette.destructive : palette.faint }} />
             <T variant="meta" tone={failed ? "muted" : "default"} numberOfLines={1} style={{ flex: 1, minWidth: 0 }}>
               {d.verb}
@@ -131,7 +138,7 @@ function RecentActivity({ onAll }: { onAll: () => void }) {
             <T variant="micro" tone="faint" style={{ flexShrink: 0 }}>
               {Number.isFinite(at) ? ago(at) : ""}
             </T>
-          </View>
+          </PressScale>
         );
       })}
     </FadeInUp>
@@ -178,7 +185,9 @@ export default function Home() {
 
         <PressScale
           onPress={() => router.push("/new")}
-          style={({ pressed }) => ({
+          accessibilityRole="button"
+          accessibilityLabel="Delegate a task"
+          style={{
             flexDirection: "row",
             alignItems: "center",
             gap: 10,
@@ -188,8 +197,7 @@ export default function Home() {
             backgroundColor: palette.card,
             padding: 16,
             marginTop: 8,
-            opacity: pressed ? 0.8 : 1,
-          })}
+          }}
         >
           <Icon name="plus-circle" size={18} color={palette.faint} />
           <T variant="body" tone="faint" style={{ flex: 1 }}>
@@ -198,8 +206,14 @@ export default function Home() {
           <Icon name="camera" size={16} color={palette.faint} />
         </PressScale>
 
+        {!snap && error ? (
+          <View style={{ marginTop: 12, alignItems: "flex-start" }}>
+            <Button title="Retry" variant="outline" small onPress={() => void refresh()} />
+          </View>
+        ) : null}
+
         {!snap && !error && (
-          <View style={{ gap: 8, marginTop: 12 }}>
+          <View style={{ gap: 10, marginTop: 12 }}>
             <CardSkeleton />
             <CardSkeleton />
             <CardSkeleton />
@@ -207,49 +221,42 @@ export default function Home() {
         )}
 
         {waiting.length > 0 && (
-          <View style={{ gap: 8, marginTop: 12 }}>
+          <View style={{ gap: 10, marginTop: 12 }}>
             <SectionHeader icon="alert-circle" label="Waiting on you" tone="attention" />
             {waiting.map((b, i) => (
-              <FadeInUp key={b.name} delay={i * 60}>
-                <BoxCard box={b} onLongPress={setActions} />
+              <FadeInUp key={b.name} delay={stagger(i)}>
+                <BoxCard box={b} onLongPress={setActions} onChanged={refresh} />
               </FadeInUp>
             ))}
           </View>
         )}
 
         {live.length > 0 && (
-          <View style={{ gap: 8, marginTop: 12 }}>
+          <View style={{ gap: 10, marginTop: 12 }}>
             <SectionHeader icon="activity" label="Live now" tone="live" />
             {live.map((b, i) => (
-              <FadeInUp key={b.name} delay={i * 60}>
-                <BoxCard box={b} onLongPress={setActions} />
+              <FadeInUp key={b.name} delay={stagger(i)}>
+                <BoxCard box={b} onLongPress={setActions} onChanged={refresh} />
               </FadeInUp>
             ))}
           </View>
         )}
 
         {rest.length > 0 && (
-          <View style={{ gap: 8, marginTop: 12 }}>
+          <View style={{ gap: 10, marginTop: 12 }}>
             <SectionHeader icon="archive" label="Recent" tone="muted" />
             {rest.map((b, i) => (
-              <FadeInUp key={b.name} delay={Math.min(i, 5) * 45}>
-                <BoxCard box={b} onLongPress={setActions} />
+              <FadeInUp key={b.name} delay={stagger(i)}>
+                <BoxCard box={b} onLongPress={setActions} onChanged={refresh} />
               </FadeInUp>
             ))}
           </View>
         )}
 
-        {snap && boxes.length === 0 && (
-          <View style={{ marginTop: 32, gap: 14, alignItems: "center" }}>
-            <BrandMark size={72} animate />
-            <T variant="body" tone="muted" style={{ textAlign: "center" }}>
-              Nothing running. Delegate a task and walk away — you'll see it here the moment it needs you.
-            </T>
-          </View>
-        )}
+        {snap && boxes.length === 0 && <EmptyFleet copy="Nothing running. Delegate a task and walk away — you'll see it here the moment it needs you." />}
 
         <RecentRuns onHistory={() => router.push({ pathname: "/(tabs)/activity", params: { tab: "history" } })} />
-        <RecentActivity onAll={() => router.push("/(tabs)/activity")} />
+        <RecentActivity onAll={() => router.push("/(tabs)/activity")} onBox={(s) => router.push(`/box/${encodeURIComponent(s)}`)} />
       </ScrollView>
       <BoxActionsSheet box={actions} memoryTiers={snap?.lifecycle.memoryTiers} memoryDefault={snap?.lifecycle.memoryDefault} diskTiers={snap?.lifecycle.diskTiers} visible={!!actions} onClose={() => setActions(null)} onChanged={refresh} />
     </SafeAreaView>

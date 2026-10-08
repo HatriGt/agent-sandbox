@@ -2,7 +2,8 @@
 // transport picker with a sentence each, command tokens, secret-aware key·value rows, "What the agent
 // sees" preview, connection test for saved remote servers. Same upsert body as the web.
 import React, { useEffect, useMemo, useState } from "react";
-import { Pressable, TextInput, View } from "react-native";
+import { TextInput, View } from "react-native";
+import { PressScale } from "@/components/motion";
 import type { McpServerView } from "@/lib/api";
 import { useTheme } from "@/theme/ThemeContext";
 import { fonts, radius, type as typeScale } from "@/theme/tokens";
@@ -72,9 +73,9 @@ export function Verdict({ health, onDismiss, onRetry, retrying }: { health: Heal
         </T>
         {onRetry ? <Button small variant="ghost" title="Test again" loading={retrying} onPress={onRetry} /> : null}
         {onDismiss ? (
-          <Pressable onPress={onDismiss} hitSlop={8} accessibilityRole="button" accessibilityLabel="Dismiss result">
+          <PressScale scaleTo={0.9} onPress={onDismiss} hitSlop={8} accessibilityRole="button" accessibilityLabel="Dismiss result">
             <Icon name="x" size={15} />
-          </Pressable>
+          </PressScale>
         ) : null}
       </View>
       {detail ? (
@@ -178,14 +179,14 @@ function KVRows({ label, rows, onChange, keyPlaceholder, valuePlaceholder, addLa
                   🔑 stored
                 </T>
               ) : sensitive ? (
-                <Pressable onPress={() => setShown((s) => ({ ...s, [i]: !s[i] }))} hitSlop={8} accessibilityRole="button" accessibilityLabel={hidden ? "Show value" : "Hide value"} style={{ position: "absolute", right: 8 }}>
+                <PressScale scaleTo={0.9} haptic="selection" onPress={() => setShown((s) => ({ ...s, [i]: !s[i] }))} hitSlop={8} accessibilityRole="button" accessibilityLabel={hidden ? "Show value" : "Hide value"} style={{ position: "absolute", right: 8 }}>
                   <Icon name={hidden ? "eye" : "eye-off"} size={14} />
-                </Pressable>
+                </PressScale>
               ) : null}
             </View>
-            <Pressable onPress={() => onChange(rows.filter((_, j) => j !== i))} hitSlop={6} accessibilityRole="button" accessibilityLabel={`Remove ${r.k || "row"}`}>
+            <PressScale scaleTo={0.9} onPress={() => onChange(rows.filter((_, j) => j !== i))} hitSlop={6} accessibilityRole="button" accessibilityLabel={`Remove ${r.k || "row"}`}>
               <Icon name="x" size={15} />
-            </Pressable>
+            </PressScale>
           </View>
         );
       })}
@@ -201,7 +202,7 @@ function Preview({ name, def }: { name: string; def: Record<string, unknown> }) 
   const [open, setOpen] = useState(false);
   return (
     <View style={{ borderWidth: 1, borderColor: palette.border, borderRadius: radius.lg, backgroundColor: palette.muted }}>
-      <Pressable onPress={() => setOpen((o) => !o)} accessibilityRole="button" accessibilityState={{ expanded: open }} style={{ flexDirection: "row", alignItems: "center", gap: 8, padding: 10 }}>
+      <PressScale onPress={() => setOpen((o) => !o)} accessibilityRole="button" accessibilityState={{ expanded: open }} style={{ flexDirection: "row", alignItems: "center", gap: 8, padding: 10 }}>
         <Icon name="code" size={14} />
         <T variant="meta" weight="medium">
           What the agent sees
@@ -210,7 +211,7 @@ function Preview({ name, def }: { name: string; def: Record<string, unknown> }) 
           ~/.agent-sandbox/mcp.json
         </T>
         <Icon name={open ? "chevron-up" : "chevron-down"} size={15} />
-      </Pressable>
+      </PressScale>
       {open ? (
         <T variant="micro" mono tone="muted" selectable style={{ borderTopWidth: 1, borderColor: palette.border, padding: 10 }}>
           {previewJson(name, def)}

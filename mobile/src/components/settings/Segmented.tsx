@@ -1,5 +1,6 @@
 import React from "react";
-import { Pressable, View } from "react-native";
+import { View } from "react-native";
+import { PressScale } from "@/components/motion";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { T } from "@/components/ui/AppText";
@@ -22,9 +23,12 @@ export function Segmented<V extends string>({
       {options.map((o) => {
         const on = o.value === value;
         return (
-          <Pressable
+          <PressScale
             key={o.value}
             onPress={() => onChange(o.value)}
+            haptic="selection"
+            scaleTo={0.95}
+            hitSlop={{ top: small ? 10 : 6, bottom: small ? 10 : 6 }}
             accessibilityRole="button"
             accessibilityState={{ selected: on }}
             style={{
@@ -39,7 +43,7 @@ export function Segmented<V extends string>({
             <T variant={small ? "micro" : "meta"} weight={on ? "semibold" : "regular"}>
               {o.label}
             </T>
-          </Pressable>
+          </PressScale>
         );
       })}
     </View>

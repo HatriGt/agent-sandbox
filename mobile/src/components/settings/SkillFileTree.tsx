@@ -2,7 +2,8 @@
 // the entry point, supporting files folded into folders, add / rename / remove inline. Everything
 // here is a draft until the skill is saved.
 import React, { useMemo, useState } from "react";
-import { Alert, Pressable, TextInput, View } from "react-native";
+import { Alert, TextInput, View } from "react-native";
+import { PressScale } from "@/components/motion";
 import { useTheme } from "@/theme/ThemeContext";
 import { fonts, radius, type } from "@/theme/tokens";
 import { T } from "@/components/ui/AppText";
@@ -97,7 +98,7 @@ export function SkillFileTree({ files, active, dirty, onSelect, actions }: { fil
         <T variant="micro" weight="medium" tone="muted">
           {`${files.length + 1} file${files.length ? "s" : ""}`}
         </T>
-        <Pressable
+        <PressScale
           onPress={() => {
             setRenaming(null);
             setAdding(true);
@@ -111,7 +112,7 @@ export function SkillFileTree({ files, active, dirty, onSelect, actions }: { fil
           <T variant="meta" tone="muted">
             Add a file
           </T>
-        </Pressable>
+        </PressScale>
       </View>
       <Row name="SKILL.md" path="SKILL.md" depth={0} active={active} dirty={!!dirty["SKILL.md"]} onSelect={onSelect} entry />
       {tree.map((n) => renderNode(n, 0))}
@@ -144,13 +145,13 @@ function Folder({ node, depth, render }: { node: FileNode; depth: number; render
   const [open, setOpen] = useState(true);
   return (
     <View>
-      <Pressable onPress={() => setOpen((v) => !v)} accessibilityRole="button" accessibilityState={{ expanded: open }} style={{ flexDirection: "row", alignItems: "center", gap: 6, height: 40, paddingLeft: 6 + depth * 14 }}>
+      <PressScale onPress={() => setOpen((v) => !v)} accessibilityRole="button" accessibilityState={{ expanded: open }} style={{ flexDirection: "row", alignItems: "center", gap: 6, height: 40, paddingLeft: 6 + depth * 14 }}>
         <Icon name={open ? "chevron-down" : "chevron-right"} size={13} />
         <Icon name="folder" size={14} />
         <T variant="meta" tone="muted" numberOfLines={1}>
           {node.name}
         </T>
-      </Pressable>
+      </PressScale>
       {open ? node.children?.map((c) => render(c, depth + 1)) : null}
     </View>
   );
@@ -161,7 +162,8 @@ function Row({ name, path, depth, active, dirty, entry, onSelect, onMenu }: { na
   const on = active === path;
   return (
     <View style={{ flexDirection: "row", alignItems: "center", height: 40, borderRadius: radius.md, backgroundColor: on ? palette.accent : "transparent" }}>
-      <Pressable
+      <PressScale
+        haptic="selection"
         onPress={() => onSelect(path)}
         onLongPress={onMenu}
         accessibilityRole="button"
@@ -179,11 +181,11 @@ function Row({ name, path, depth, active, dirty, entry, onSelect, onMenu }: { na
           </T>
         ) : null}
         {dirty ? <View accessibilityLabel="Unsaved changes" style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: palette.attention }} /> : null}
-      </Pressable>
+      </PressScale>
       {onMenu ? (
-        <Pressable onPress={onMenu} hitSlop={8} accessibilityRole="button" accessibilityLabel="File actions" style={{ paddingHorizontal: 8, height: "100%", justifyContent: "center" }}>
+        <PressScale scaleTo={0.9} onPress={onMenu} hitSlop={8} accessibilityRole="button" accessibilityLabel="File actions" style={{ paddingHorizontal: 8, height: "100%", justifyContent: "center" }}>
           <Icon name="more-horizontal" size={16} />
-        </Pressable>
+        </PressScale>
       ) : null}
     </View>
   );

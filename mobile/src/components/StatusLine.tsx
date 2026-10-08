@@ -48,12 +48,12 @@ export function StatusLine({ snap, error }: { snap: FleetSnapshot | null; error:
           </T>
         </>
       ) : (
-        <T variant="micro" tone="muted">
+        <T variant="micro" tone="muted" tnum>
           {running} running
           <T variant="micro" tone="faint">
             {" · "}
           </T>
-          <T variant="micro" tone={waiting ? "attention" : "muted"}>
+          <T variant="micro" tone={waiting ? "attention" : "muted"} tnum>
             {waiting} waiting
           </T>
           <T variant="micro" tone="faint">

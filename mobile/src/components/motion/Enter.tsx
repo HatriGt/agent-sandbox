@@ -5,6 +5,22 @@ import { isReducedMotion } from "./reducedMotion";
 /** Motion timing vocabulary — everything lands inside 150–300ms with an ease-out tail. */
 export const DUR = { fast: 160, base: 220, slow: 280 } as const;
 export const EASE_OUT = Easing.bezier(0.22, 1, 0.36, 1);
+/** iOS-like drawer curve: fast start, long settle. For sheets and anything the finger just released. */
+export const EASE_DRAWER = Easing.bezier(0.32, 0.72, 0, 1);
+
+/**
+ * Spring vocabulary (RN `speed`/`bounciness`). One set so every press, snap-back and sheet shares
+ * the same personality: crisp, barely any overshoot.
+ *   press   - finger down/up on a control
+ *   snap    - a dragged thing returning home
+ *   sheet   - a sheet or card arriving on screen
+ */
+export const SPRING = {
+  press: { speed: 50, bounciness: 0 },
+  release: { speed: 50, bounciness: 4 },
+  snap: { speed: 24, bounciness: 4 },
+  sheet: { speed: 18, bounciness: 3 },
+} as const;
 
 /** Per-item delay for a staggered list: quick early cascade, capped so a long list never lags. */
 export function stagger(index: number, step = 40, cap = 8): number {

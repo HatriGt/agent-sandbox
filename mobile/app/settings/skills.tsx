@@ -2,7 +2,7 @@
 // (search, filter chips, template strip, how skills reach the agent, recently edited) and the editor
 // over it; import is a sheet over the library.
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Pressable, Switch, TextInput, View } from "react-native";
+import { Switch, TextInput, View } from "react-native";
 import { api, type SkillView } from "@/lib/api";
 import { ago } from "@/lib/format";
 import { useTheme } from "@/theme/ThemeContext";
@@ -15,7 +15,7 @@ import { Icon, type IconName } from "@/components/ui/Icon";
 import { SkillEditor, StarterBadge } from "@/components/settings/SkillEditor";
 import { SkillImportSheet } from "@/components/settings/SkillImportSheet";
 import { byteLength, type Draft, fmtKb, type Mutate, sourceOf, TEMPLATES } from "@/components/settings/SkillModel";
-import { Skeleton } from "@/components/motion";
+import { PressScale, Skeleton } from "@/components/motion";
 
 type Filter = "all" | "on" | "off" | "starter" | "custom";
 type Editing = { initial?: SkillView; draft?: Draft };
@@ -126,16 +126,17 @@ export default function Skills() {
               style={{ flex: 1, color: palette.foreground, fontFamily: fonts.sans, fontSize: type.meta.fontSize, padding: 0 }}
             />
             {query ? (
-              <Pressable onPress={() => setQuery("")} hitSlop={10} accessibilityRole="button" accessibilityLabel="Clear search">
+              <PressScale scaleTo={0.9} onPress={() => setQuery("")} hitSlop={10} accessibilityRole="button" accessibilityLabel="Clear search">
                 <Icon name="x" size={14} />
-              </Pressable>
+              </PressScale>
             ) : null}
           </View>
           <View accessibilityRole="radiogroup" accessibilityLabel="Filter skills" style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
             {chips.map((c) => {
               const on = filter === c.value;
               return (
-                <Pressable
+                <PressScale
+                  haptic="selection"
                   key={c.value}
                   onPress={() => setFilter(c.value)}
                   accessibilityRole="radio"
@@ -148,7 +149,7 @@ export default function Skills() {
                   <T variant="micro" style={{ color: on ? palette.background : palette.mutedForeground }}>
                     {c.count}
                   </T>
-                </Pressable>
+                </PressScale>
               );
             })}
           </View>
@@ -218,7 +219,7 @@ export default function Skills() {
           </RailSection>
           <RailSection title="Recently edited">
             {recent.map((s) => (
-              <Pressable key={s.name} onPress={() => setEditing({ initial: s })} accessibilityRole="button" style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 6, opacity: pressed ? 0.6 : s.enabled ? 1 : 0.6 })}>
+              <PressScale key={s.name} onPress={() => setEditing({ initial: s })} accessibilityRole="button" style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 6, opacity: s.enabled ? 1 : 0.6 }}>
                 <T variant="meta" weight="medium" mono numberOfLines={1} style={{ flex: 1 }}>
                   /{s.name}
                 </T>
@@ -226,7 +227,7 @@ export default function Skills() {
                 <T variant="micro" tone="faint">
                   {ago(s.updatedAt)}
                 </T>
-              </Pressable>
+              </PressScale>
             ))}
           </RailSection>
         </View>

@@ -82,7 +82,7 @@ export function CompareBlock({ options }: { options: CompareOption[] }) {
             </T>
             {o.picked ? (
               <View style={{ paddingHorizontal: 8, paddingVertical: 2, borderRadius: radius.pill, backgroundColor: palette.live }}>
-                <T variant="micro" weight="medium" style={{ color: "#fff" }}>
+                <T variant="micro" weight="medium" style={{ color: palette.primaryForeground }}>
                   Recommended
                 </T>
               </View>

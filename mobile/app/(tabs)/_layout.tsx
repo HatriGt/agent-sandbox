@@ -1,9 +1,9 @@
 import React, { useEffect, useRef } from "react";
-import { Animated, Easing, PanResponder, Pressable, View } from "react-native";
+import { Animated, Dimensions, Easing, PanResponder, StyleSheet, View } from "react-native";
 import { Redirect, Tabs, useRouter } from "expo-router";
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import * as Haptics from "expo-haptics";
+import { haptic, isReducedMotion, PressScale, SPRING } from "@/components/motion";
 import { useAuth } from "@/state/auth";
 import { useTheme } from "@/theme/ThemeContext";
 import { Icon, type IconName } from "@/components/ui/Icon";
@@ -19,23 +19,38 @@ const TABS: { name: string; label: string; icon: IconName }[] = [
 
 function TabItem({
   icon,
+  label,
   focused,
   onPress,
 }: {
   icon: IconName;
+  label: string;
   focused: boolean;
   onPress: () => void;
 }) {
   const { palette } = useTheme();
   const anim = useRef(new Animated.Value(focused ? 1 : 0)).current;
   useEffect(() => {
-    Animated.spring(anim, { toValue: focused ? 1 : 0, useNativeDriver: true, speed: 24, bounciness: 7 }).start();
+    if (isReducedMotion()) {
+      anim.setValue(focused ? 1 : 0);
+      return;
+    }
+    Animated.spring(anim, { toValue: focused ? 1 : 0, useNativeDriver: true, ...SPRING.snap }).start();
   }, [focused, anim]);
 
   // Icon-only: the active tab gets a soft accent circle and a slight lift —
-  // no labels (they wrapped and cluttered the pill).
+  // no labels (they wrapped and cluttered the pill); the label is read by the screen reader.
   return (
-    <Pressable onPress={onPress} style={{ flex: 1, alignItems: "center" }} hitSlop={10}>
+    <PressScale
+      scaleTo={0.9}
+      haptic="selection"
+      accessibilityRole="tab"
+      accessibilityLabel={label}
+      accessibilityState={{ selected: focused }}
+      onPress={onPress}
+      style={{ flex: 1, alignItems: "center" }}
+      hitSlop={10}
+    >
       <View style={{ alignItems: "center", justifyContent: "center", width: 44, height: 44 }}>
         <Animated.View
           style={{
@@ -52,7 +67,7 @@ function TabItem({
           <Icon name={icon} size={20} color={focused ? palette.foreground : palette.faint} />
         </Animated.View>
       </View>
-    </Pressable>
+    </PressScale>
   );
 }
 
@@ -67,14 +82,9 @@ function PillTabBar({ state, navigation }: BottomTabBarProps) {
   const left = TABS.slice(0, 2);
   const right = TABS.slice(2);
 
-  const go = (name: string) => {
-    Haptics.selectionAsync().catch(() => {});
-    navigation.navigate(name as never);
-  };
-
   const item = (t: (typeof TABS)[number]) => {
     const idx = state.routes.findIndex((r) => r.name === t.name);
-    return <TabItem key={t.name} icon={t.icon} focused={state.index === idx} onPress={() => go(t.name)} />;
+    return <TabItem key={t.name} icon={t.icon} label={t.label} focused={state.index === idx} onPress={() => navigation.navigate(t.name as never)} />;
   };
 
   return (
@@ -87,24 +97,22 @@ function PillTabBar({ state, navigation }: BottomTabBarProps) {
           alignItems: "center",
           backgroundColor: palette.popover,
           borderRadius: 999,
-          borderWidth: 1,
-          borderColor: palette.border,
           paddingHorizontal: 8,
           paddingVertical: 6,
-          shadowColor: "#000",
-          shadowOpacity: dark ? 0.5 : 0.12,
-          shadowRadius: 18,
-          shadowOffset: { width: 0, height: 8 },
-          elevation: 12,
+          // Border OR shadow: a hairline in dark (shadows vanish on dark bg), a shadow in light.
+          ...(dark
+            ? { borderWidth: StyleSheet.hairlineWidth, borderColor: palette.border }
+            : { shadowColor: "#000", shadowOpacity: 0.12, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 12 }),
         }}
       >
         {left.map(item)}
-        <Pressable
-          onPress={() => {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-            router.push("/new");
-          }}
-          style={({ pressed }) => ({
+        <PressScale
+          scaleTo={0.92}
+          haptic="medium"
+          accessibilityRole="button"
+          accessibilityLabel="New task"
+          onPress={() => router.push("/new")}
+          style={{
             width: 50,
             height: 50,
             borderRadius: 25,
@@ -115,16 +123,15 @@ function PillTabBar({ state, navigation }: BottomTabBarProps) {
             justifyContent: "center",
             borderWidth: 3,
             borderColor: palette.background,
-            transform: [{ scale: pressed ? 0.94 : 1 }],
             shadowColor: "#000",
             shadowOpacity: 0.25,
             shadowRadius: 8,
             shadowOffset: { width: 0, height: 4 },
             elevation: 10,
-          })}
+          }}
         >
           <Icon name="plus" size={24} color={palette.primaryForeground} />
-        </Pressable>
+        </PressScale>
         {right.map(item)}
       </View>
       </View>
@@ -135,9 +142,14 @@ function PillTabBar({ state, navigation }: BottomTabBarProps) {
   );
 }
 
+const COMMIT_PX = 48;
+const FOLLOW_CAP = 56;
+const EDGE_PX = 24;
+
 /**
  * Horizontal-swipe layer over the tab scenes: a decisive left/right drag moves to the adjacent
- * tab, with a small directional nudge so the gesture is acknowledged before the scene shifts.
+ * tab. The scene follows the finger (rubber-banded) so the commit point is visible, a selection
+ * haptic marks crossing it, and the Tabs 'shift' transition is the only animation on commit.
  * PanResponder (not a pager — no native pager in this app) claims the gesture only when it is
  * clearly horizontal, so vertical scrolls and the horizontal chip docks keep working: those sit
  * deeper in the tree and win the responder negotiation for small drags.
@@ -157,39 +169,49 @@ function SwipeBetweenTabs({
   // Keep the latest index/count in refs — the PanResponder is created once.
   const at = useRef({ index, count });
   at.current = { index, count };
+  // Set once per drag when the finger crosses the commit distance: the haptic says "release now".
+  const crossed = useRef(false);
 
   const pan = useRef(
     PanResponder.create({
       // Claim only decisive horizontal drags (long and flat), and never capture —
-      // children get first refusal, so scrolling stays untouched.
-      onMoveShouldSetPanResponder: (_e, g) =>
-        Math.abs(g.dx) > 26 && Math.abs(g.dx) > Math.abs(g.dy) * 2.2,
+      // children get first refusal, so scrolling stays untouched. A drag that began at either
+      // screen edge is the system's (Android back gesture, iOS stack pop).
+      onMoveShouldSetPanResponder: (e, g) => {
+        const startX = e.nativeEvent.pageX - g.dx;
+        const w = Dimensions.get("window").width;
+        if (startX < EDGE_PX || startX > w - EDGE_PX) return false;
+        return Math.abs(g.dx) > 26 && Math.abs(g.dx) > Math.abs(g.dy) * 2.2;
+      },
+      onPanResponderGrant: () => {
+        crossed.current = false;
+      },
       onPanResponderMove: (_e, g) => {
         const { index: i, count: n } = at.current;
         const blocked = (g.dx < 0 && i >= n - 1) || (g.dx > 0 && i <= 0);
-        // Follow the finger a little (rubber-banded), so the gesture feels held.
-        nudge.setValue(Math.max(-40, Math.min(40, g.dx * (blocked ? 0.08 : 0.25))));
+        if (!blocked && !crossed.current && Math.abs(g.dx) > COMMIT_PX) {
+          crossed.current = true;
+          haptic("selection");
+        }
+        if (isReducedMotion()) return;
+        // Follow the finger (rubber-banded) so the commit point is visible before release.
+        nudge.setValue(Math.max(-FOLLOW_CAP, Math.min(FOLLOW_CAP, g.dx * (blocked ? 0.08 : 0.5))));
       },
       onPanResponderRelease: (_e, g) => {
         const { index: i, count: n } = at.current;
-        const goLeft = (g.dx < -48 || g.vx < -0.5) && i < n - 1;
-        const goRight = (g.dx > 48 || g.vx > 0.5) && i > 0;
+        const goLeft = (g.dx < -COMMIT_PX || g.vx < -0.5) && i < n - 1;
+        const goRight = (g.dx > COMMIT_PX || g.vx > 0.5) && i > 0;
         if (goLeft || goRight) {
-          Haptics.selectionAsync().catch(() => {});
-          // Slide out toward the swipe, snap to the far side, and let the new
-          // scene slide in — a lightweight pager feel without a pager.
-          const dir = goLeft ? -1 : 1;
-          Animated.timing(nudge, { toValue: dir * 56, duration: 110, easing: Easing.out(Easing.quad), useNativeDriver: true }).start(() => {
-            onGo(dir === -1 ? 1 : -1);
-            nudge.setValue(-dir * 56);
-            Animated.timing(nudge, { toValue: 0, duration: 200, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
-          });
+          if (!crossed.current) haptic("selection");
+          // The Tabs 'shift' transition is the one animation for the change: drop the nudge and go.
+          nudge.setValue(0);
+          onGo(goLeft ? 1 : -1);
         } else {
-          Animated.spring(nudge, { toValue: 0, useNativeDriver: true, speed: 24, bounciness: 6 }).start();
+          Animated.spring(nudge, { toValue: 0, useNativeDriver: true, ...SPRING.snap }).start();
         }
       },
       onPanResponderTerminate: () => {
-        Animated.spring(nudge, { toValue: 0, useNativeDriver: true, speed: 24, bounciness: 6 }).start();
+        Animated.spring(nudge, { toValue: 0, useNativeDriver: true, ...SPRING.snap }).start();
       },
     }),
   ).current;

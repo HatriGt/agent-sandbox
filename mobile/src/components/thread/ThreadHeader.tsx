@@ -102,7 +102,7 @@ export function ThreadHeader({
   const EXTRAS_MAX = 3;
   const shownExtras = extras.slice(0, EXTRAS_MAX);
   const extraOverflow = extras.length - shownExtras.length;
-  const iconBtn = ({ pressed }: { pressed: boolean }) => ({ padding: 8, opacity: pressed ? 0.5 : 1, transform: [{ scale: pressed ? 0.92 : 1 }] });
+  const iconBtn = ({ pressed }: { pressed: boolean }) => ({ padding: 8, opacity: pressed ? 0.5 : 1 });
 
   return (
     <View
@@ -117,7 +117,7 @@ export function ThreadHeader({
         borderBottomColor: palette.border,
       }}
     >
-      <PressScale onPress={onBack} hitSlop={12} accessibilityLabel="Back" style={iconBtn}>
+      <PressScale onPress={onBack} hitSlop={12} scaleTo={0.9} accessibilityLabel="Back" style={iconBtn}>
         <Icon name="chevron-left" size={22} color={palette.mutedForeground} />
       </PressScale>
       {/* minWidth:0 lets this column shrink; without it a long title shoves the pill off the edge. */}
@@ -130,7 +130,7 @@ export function ThreadHeader({
             {friendlyName(session)}
           </T>
           {elapsed ? (
-            <T variant="micro" mono tone={running ? "live" : "faint"} style={{ flexShrink: 0 }} accessibilityLabel={`${running ? "Elapsed" : "Took"} ${elapsed}`}>
+            <T variant="micro" mono tnum tone={running ? "live" : "faint"} style={{ flexShrink: 0 }} accessibilityLabel={`${running ? "Elapsed" : "Took"} ${elapsed}`}>
               {elapsed}
             </T>
           ) : null}
@@ -187,10 +187,10 @@ export function ThreadHeader({
         ) : null}
       </View>
       {box ? <LiveStatePill state={state} exitCode={box.exitCode} stalled={box.stalled} /> : null}
-      <PressScale onPress={onInfo} hitSlop={8} accessibilityLabel="Run inspector" style={iconBtn}>
+      <PressScale onPress={onInfo} hitSlop={8} scaleTo={0.9} accessibilityLabel="Run inspector" style={iconBtn}>
         <Icon name="info" size={18} color={palette.mutedForeground} />
       </PressScale>
-      <PressScale onPress={onMore} hitSlop={8} accessibilityLabel="More actions" style={iconBtn}>
+      <PressScale onPress={onMore} hitSlop={8} scaleTo={0.9} accessibilityLabel="More actions" style={iconBtn}>
         <Icon name="more-horizontal" size={20} color={palette.mutedForeground} />
       </PressScale>
     </View>

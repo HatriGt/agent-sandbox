@@ -1,5 +1,5 @@
 import React, { memo, useMemo, useState } from "react";
-import { Pressable, View } from "react-native";
+import { View } from "react-native";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import type { PlanItem, ProducedFile, TraceEvent } from "@/lib/trace";
@@ -114,6 +114,7 @@ export const ThreadRow = memo(function ThreadRow({
   item,
   animate,
   onRevert,
+  onActions,
   session,
   live,
 }: {
@@ -123,18 +124,25 @@ export const ThreadRow = memo(function ThreadRow({
   animate?: boolean;
   /** Set on revertable `you` items: called when the user confirms a revert to before this message. */
   onRevert?: (messageText: string) => void;
+  /** Long-press on a message (yours or the agent's prose): the thread opens its action sheet. */
+  onActions?: (text: string, revert?: () => void) => void;
   /** The box session; needed by the `produced` row to fetch/share files. Without it the row lists names only. */
   session?: string;
 }) {
   const body = (() => {
     switch (item.kind) {
       case "you":
-        return <YouBubble text={item.text} onRevert={onRevert} />;
+        return <YouBubble text={item.text} onRevert={onRevert} onActions={onActions} />;
       case "say":
         return (
-          <View style={{ paddingVertical: 8 }}>
+          <PressScale
+            disabled={!onActions}
+            onLongPress={onActions ? () => onActions(item.text) : undefined}
+            accessibilityHint={onActions ? "Long press for actions" : undefined}
+            style={{ paddingVertical: 8 }}
+          >
             <StreamingMarkdown text={item.text} live={!!live} />
-          </View>
+          </PressScale>
         );
       case "ask":
         return <AskRow text={item.text} />;
@@ -161,7 +169,7 @@ export const ThreadRow = memo(function ThreadRow({
   return enter ? <FadeInUp>{body}</FadeInUp> : <>{body}</>;
 });
 
-function YouBubble({ text, onRevert }: { text: string; onRevert?: (messageText: string) => void }) {
+function YouBubble({ text, onRevert, onActions }: { text: string; onRevert?: (messageText: string) => void; onActions?: (text: string, revert?: () => void) => void }) {
   const { palette } = useTheme();
   // A leading /skill token renders as a tinted tag, like the web.
   const m = text.match(/^\/([a-z0-9][a-z0-9-]*)\s*([\s\S]*)$/);
@@ -170,7 +178,10 @@ function YouBubble({ text, onRevert }: { text: string; onRevert?: (messageText: 
   return (
     <View style={{ flexDirection: "row", alignItems: "flex-end", justifyContent: "flex-end", gap: 8, marginVertical: 8 }}>
       {onRevert ? <RevertButton onConfirm={() => onRevert(text)} /> : null}
-      <View
+      <PressScale
+        disabled={!onActions}
+        onLongPress={onActions ? () => onActions(text, onRevert ? () => onRevert(text) : undefined) : undefined}
+        accessibilityHint={onActions ? "Long press for actions" : undefined}
         style={{
           backgroundColor: palette.primary,
           borderRadius: radius["2xl"],
@@ -186,11 +197,11 @@ function YouBubble({ text, onRevert }: { text: string; onRevert?: (messageText: 
           </T>
         ) : null}
         {body ? (
-          <T variant="body" selectable style={{ color: palette.primaryForeground }}>
+          <T variant="body" selectable={!onActions} style={{ color: palette.primaryForeground }}>
             {body}
           </T>
         ) : null}
-      </View>
+      </PressScale>
     </View>
   );
 }

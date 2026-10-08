@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from "react";
-import { Animated, Easing, Pressable, View } from "react-native";
+import { Animated, Easing, View } from "react-native";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { T } from "./ui/AppText";
@@ -114,6 +114,8 @@ export function WakingCard({
       {stuck && onRetry && (
         <PressScale
           onPress={onRetry}
+          hitSlop={10}
+          accessibilityLabel="Retry waking"
           style={({ pressed }) => ({
             flexDirection: "row",
             alignItems: "center",

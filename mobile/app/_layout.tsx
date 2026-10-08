@@ -20,6 +20,18 @@ import { Toasts } from "@/components/Toasts";
 // for the same reason).
 void SplashScreen.preventAutoHideAsync();
 
+/** Content screens: platform push so the iOS edge swipe-back tracks the finger. */
+const PUSH = { animation: "default", gestureEnabled: true, fullScreenGestureEnabled: true } as const;
+const PUSH_SCREENS = [
+  "box/[name]",
+  "automation/[id]",
+  "playbook/[id]",
+  "harness/[id]",
+  "pr/[repo]/[number]",
+  "files/[name]",
+  ...["account", "accounts", "admin", "api-keys", "connect", "devices", "harnesses", "inbox", "mcp", "memory", "playbooks", "providers", "repo-setup", "secrets", "skills"].map((s) => `settings/${s}`),
+];
+
 function Shell() {
   const { palette, dark } = useTheme();
   const { ready } = useAuth();
@@ -48,11 +60,16 @@ function Shell() {
         screenOptions={{
           headerShown: false,
           contentStyle: { backgroundColor: palette.background },
+          // Auth/booting/welcome cross-fade; content screens below get the platform push so the
+          // iOS edge swipe-back tracks the finger (a custom animation weakens the interactive pop).
           animation: "fade",
           animationDuration: 160,
         }}
       >
         <Stack.Screen name="new" options={{ presentation: "modal", animation: "slide_from_bottom" }} />
+        {PUSH_SCREENS.map((name) => (
+          <Stack.Screen key={name} name={name} options={PUSH} />
+        ))}
       </Stack>
       <PushBridge />
       <ShareBridge />
