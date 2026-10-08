@@ -56,6 +56,8 @@ export interface DelegateFlowInput {
   rules?: string;
   /** Repo setup profiles for this owner (see DelegatePlan.setup). */
   setup?: DelegatePlan["setup"];
+  /** Vault secrets granted to this run (see DelegatePlan.secrets). */
+  secrets?: Record<string, string>;
 }
 
 export type DelegateFlowResult =
@@ -97,6 +99,7 @@ export async function runDelegateFlow(
   if (input.skills) v.plan.skills = input.skills;
   if (input.rules?.trim()) v.plan.rules = input.rules;
   if (input.setup) v.plan.setup = input.setup;
+  if (input.secrets && Object.keys(input.secrets).length) v.plan.secrets = input.secrets;
 
   const tFlow = Date.now();
   let creds: AgentCreds | undefined;

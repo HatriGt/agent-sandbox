@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowUp, Check, ChevronDown, Pause, PenLine } from "lucide-react";
+import { ArrowUp, Check, ChevronDown, MessageSquareText, Pause, PenLine } from "lucide-react";
 import { parseQuestion } from "@/lib/question";
 import { Button } from "@/components/ui/button";
 import { smartJoin, useVoiceInput } from "@/hooks/useVoiceInput";
@@ -20,10 +20,13 @@ import { IconSwap } from "@/components/ui/icon-swap";
 export function QuestionCard({
   question,
   onAnswer,
+  onDiscuss,
   busy,
 }: {
   question: string;
   onAnswer: (text: string) => void;
+  /** Reply in free text with the question quoted; the question stays open. */
+  onDiscuss?: (proposal: string) => void;
   busy?: boolean;
 }) {
   const parsed = React.useMemo(() => parseQuestion(question), [question]);
@@ -252,10 +255,18 @@ export function QuestionCard({
             <span className="sm:hidden">{hasOptions ? "Pick one, then send. The agent waits until you do." : "Your answer releases the paused run."}</span>
             <span className="hidden sm:inline">{hasOptions ? "Pick one (or press its number), then send. Every tool call is blocked until you do." : "Your answer releases the paused run."}</span>
           </p>
-          <Button variant="attention" size="sm" onClick={send} disabled={!canSend} loading={busy} className="min-w-[8.5rem] shrink-0">
-            <ArrowUp className="size-3.5" />
-            Send answer
-          </Button>
+          <div className="flex shrink-0 items-center gap-1">
+            {onDiscuss && (
+              <Button variant="ghost" size="sm" onClick={() => onDiscuss(parsed.title || question)} disabled={busy} title="Reply in the composer with the question quoted — it stays open until you answer">
+                <MessageSquareText className="size-3.5" />
+                Discuss
+              </Button>
+            )}
+            <Button variant="attention" size="sm" onClick={send} disabled={!canSend} loading={busy} className="min-w-[8.5rem]">
+              <ArrowUp className="size-3.5" />
+              Send answer
+            </Button>
+          </div>
         </div>
       </div>
     </motion.div>

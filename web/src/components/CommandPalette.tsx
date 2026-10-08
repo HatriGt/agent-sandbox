@@ -1,5 +1,5 @@
 import * as React from "react";
-import { CornerDownLeft, History, Plus, Search, SearchX } from "lucide-react";
+import { ChevronLeft, ChevronRight, CornerDownLeft, History, Plus, Search, SearchX } from "lucide-react";
 import { motion } from "motion/react";
 import { useReducedMotion } from "@/lib/motion-pref";
 import type { BoxView } from "@/lib/api";
@@ -31,10 +31,11 @@ function pushRecent(name: string): string[] {
   return next;
 }
 
-/** Anything in the app can open the palette by dispatching this on `document`. */
+/** Anything in the app can open the palette by dispatching this on `document`; `detail` names an
+ *  action id whose sub-list should open directly (the status bar's model section). */
 export const OPEN_PALETTE_EVENT = "asb:open-palette";
-export function openPalette() {
-  document.dispatchEvent(new CustomEvent(OPEN_PALETTE_EVENT));
+export function openPalette(enter?: string) {
+  document.dispatchEvent(new CustomEvent(OPEN_PALETTE_EVENT, { detail: enter }));
 }
 
 /**
@@ -53,7 +54,11 @@ export interface PaletteAction {
   group?: string;
   /** Extra words the search should match ("theme dark light") that aren't in the label. */
   keywords?: string;
-  run: () => void;
+  /** Dimmer trailing text ("current", a model id). */
+  detail?: string;
+  /** A sub-list ("Run playbook ›"): choosing this row shows these instead of running anything. */
+  sub?: PaletteAction[];
+  run?: () => void;
 }
 
 export function CommandPalette({
@@ -72,12 +77,15 @@ export function CommandPalette({
   const [query, setQuery] = React.useState("");
   const [cursor, setCursor] = React.useState(0);
   const [recent, setRecent] = React.useState<string[]>(readRecent);
+  // The sub-list the user stepped into (Run playbook ›); null is the top level.
+  const [parent, setParent] = React.useState<PaletteAction | null>(null);
   const reduce = useReducedMotion();
 
   const close = React.useCallback(() => {
     dialog.current?.close();
     setQuery("");
     setCursor(0);
+    setParent(null);
   }, []);
   const open = React.useCallback(() => {
     const el = dialog.current;
@@ -87,6 +95,8 @@ export function CommandPalette({
     requestAnimationFrame(() => input.current?.focus());
   }, []);
 
+  const actionsRef = React.useRef(actions);
+  actionsRef.current = actions;
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
@@ -95,21 +105,28 @@ export function CommandPalette({
         else open();
       }
     };
+    const onOpen = (e: Event) => {
+      const want = e instanceof CustomEvent && typeof e.detail === "string" ? actionsRef.current.find((a) => a.id === e.detail && a.sub) : undefined;
+      setParent(want ?? null);
+      setQuery("");
+      setCursor(0);
+      open();
+    };
     document.addEventListener("keydown", onKey);
-    document.addEventListener(OPEN_PALETTE_EVENT, open);
+    document.addEventListener(OPEN_PALETTE_EVENT, onOpen);
     return () => {
       document.removeEventListener("keydown", onKey);
-      document.removeEventListener(OPEN_PALETTE_EVENT, open);
+      document.removeEventListener(OPEN_PALETTE_EVENT, onOpen);
     };
   }, [close, open]);
 
   const q = query.trim().toLowerCase();
-  const matches = q
-    ? boxes.filter((b) => `${friendlyName(b.name)} ${b.name} ${b.task ?? ""}`.toLowerCase().includes(q))
-    : boxes;
-  const acts = q ? actions.filter((a) => `${a.label} ${a.hint ?? ""} ${a.keywords ?? ""} ${a.group ?? ""}`.toLowerCase().includes(q)) : actions;
+  const matchAct = (a: PaletteAction) => `${a.label} ${a.hint ?? ""} ${a.keywords ?? ""} ${a.detail ?? ""} ${a.group ?? ""}`.toLowerCase().includes(q);
+  const matches = parent ? [] : q ? boxes.filter((b) => `${friendlyName(b.name)} ${b.name} ${b.task ?? ""}`.toLowerCase().includes(q)) : boxes;
+  const pool = parent ? parent.sub ?? [] : actions;
+  const acts = q ? pool.filter(matchAct) : pool;
   // Recents only earn a group when there is no query and something to recall that is still alive.
-  const recentBoxes = q ? [] : recent.map((n) => boxes.find((b) => b.name === n)).filter((b): b is BoxView => !!b);
+  const recentBoxes = q || parent ? [] : recent.map((n) => boxes.find((b) => b.name === n)).filter((b): b is BoxView => !!b);
   const recentSet = new Set(recentBoxes.map((b) => b.name));
   type Row = { kind: "new" } | { kind: "box"; box: BoxView; group: "Recent" | "Machines" } | { kind: "action"; action: PaletteAction };
   // Actions keep their declared order but are bucketed by group, so "Go to" pages sit together and
@@ -117,16 +134,16 @@ export function CommandPalette({
   // palette learnable.
   const grouped = new Map<string, PaletteAction[]>();
   for (const a of acts) {
-    const g = a.group ?? "Actions";
+    const g = a.group ?? (parent ? parent.label : "Actions");
     grouped.set(g, [...(grouped.get(g) ?? []), a]);
   }
   const rows: Row[] = [
-    ...(!q || "start a new task".includes(q) ? [{ kind: "new" as const }] : []),
+    ...(!parent && (!q || "start a new task".includes(q)) ? [{ kind: "new" as const }] : []),
     ...recentBoxes.map((b) => ({ kind: "box" as const, box: b, group: "Recent" as const })),
     ...matches.filter((b) => !recentSet.has(b.name)).map((b) => ({ kind: "box" as const, box: b, group: "Machines" as const })),
     ...[...grouped.values()].flat().map((a) => ({ kind: "action" as const, action: a })),
   ];
-  const groupOf = (r: Row) => (r.kind === "new" ? null : r.kind === "action" ? (r.action.group ?? "Actions") : r.group);
+  const groupOf = (r: Row) => (r.kind === "new" ? null : r.kind === "action" ? (r.action.group ?? (parent ? parent.label : "Actions")) : r.group);
   const clamped = Math.min(cursor, rows.length - 1);
   // Arrowing past the fold keeps the cursor row in view — the list scrolls, the cursor never hides.
   const list = React.useRef<HTMLUListElement>(null);
@@ -134,11 +151,24 @@ export function CommandPalette({
     list.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
   }, [clamped]);
 
+  const enter = (a: PaletteAction) => {
+    setParent(a);
+    setQuery("");
+    setCursor(0);
+    input.current?.focus();
+  };
+  const back = () => {
+    setParent(null);
+    setQuery("");
+    setCursor(0);
+    input.current?.focus();
+  };
   const run = (i: number) => {
     const row = rows[i];
     if (!row) return;
+    if (row.kind === "action" && row.action.sub) return enter(row.action);
     if (row.kind === "new") onNew();
-    else if (row.kind === "action") row.action.run();
+    else if (row.kind === "action") row.action.run?.();
     else {
       setRecent(pushRecent(row.box.name));
       onOpen(row.box.name);
@@ -166,7 +196,14 @@ export function CommandPalette({
       )}
     >
       <div className="flex items-center gap-2.5 border-b px-3.5 py-3">
-        <Search className="text-muted-foreground size-4 shrink-0" aria-hidden />
+        {parent ? (
+          <button type="button" onClick={back} aria-label="Back to all commands" className="text-muted-foreground hover:text-foreground flex shrink-0 cursor-pointer items-center gap-1 text-micro">
+            <ChevronLeft className="size-4" aria-hidden />
+            {parent.label}
+          </button>
+        ) : (
+          <Search className="text-muted-foreground size-4 shrink-0" aria-hidden />
+        )}
         <input
           ref={input}
           value={query}
@@ -184,10 +221,19 @@ export function CommandPalette({
             } else if (e.key === "Enter") {
               e.preventDefault();
               run(clamped);
+            } else if (parent && ((e.key === "Backspace" && !query) || e.key === "ArrowLeft")) {
+              e.preventDefault();
+              back();
+            } else if (e.key === "ArrowRight") {
+              const row = rows[clamped];
+              if (row?.kind === "action" && row.action.sub) {
+                e.preventDefault();
+                run(clamped);
+              }
             }
           }}
-          placeholder="Search machines, or type an action…"
-          aria-label="Search machines"
+          placeholder={parent ? `Search ${parent.label.toLowerCase()}…` : "Search machines, or type an action…"}
+          aria-label={parent ? `Search ${parent.label}` : "Search machines"}
           className="placeholder:text-muted-foreground min-w-0 flex-1 bg-transparent text-body outline-none"
         />
         <Kbd>esc</Kbd>
@@ -232,8 +278,10 @@ export function CommandPalette({
                 ) : row.kind === "action" ? (
                   <>
                     <span className="bg-muted text-muted-foreground grid size-6 shrink-0 place-items-center rounded-md [&_svg]:size-3.5">{row.action.icon}</span>
-                    <span className="text-foreground flex-1 text-meta">{row.action.label}</span>
+                    <span className="text-foreground min-w-0 flex-1 truncate text-meta">{row.action.label}</span>
+                    {row.action.detail && <span className="text-faint hidden shrink-0 truncate text-micro sm:inline">{row.action.detail}</span>}
                     {row.action.hint && <Kbd keys={row.action.hint.split(" ")} />}
+                    {row.action.sub && <ChevronRight className="text-muted-foreground size-3.5 shrink-0" aria-hidden />}
                   </>
                 ) : (
                   <>
@@ -245,24 +293,31 @@ export function CommandPalette({
                     </span>
                   </>
                 )}
-                <CornerDownLeft className={cn("text-muted-foreground size-3 shrink-0 transition-opacity duration-100", i === clamped ? "opacity-100" : "opacity-0")} aria-hidden />
+                {!(row.kind === "action" && row.action.sub) && (
+                  <CornerDownLeft className={cn("text-muted-foreground size-3 shrink-0 transition-opacity duration-100", i === clamped ? "opacity-100" : "opacity-0")} aria-hidden />
+                )}
               </button>
             </li>
           );
         })}
-        {q && !matches.length && !acts.length && (
+        {q && !rows.length && (
           // Empty state with a hint: say what IS searched, so a miss is a nudge rather than a dead end.
           <li className="flex flex-col items-center gap-2 px-2.5 py-6 text-center">
             <span className="bg-muted text-muted-foreground grid size-9 place-items-center rounded-full">
               <SearchX className="size-4" aria-hidden />
             </span>
-            <p className="text-foreground text-meta">No machine matches “{query.trim()}”.</p>
-            <p className="text-muted-foreground text-micro">Search by task text or machine name, or clear the search to see everything.</p>
+            <p className="text-foreground text-meta">{parent ? `Nothing in ${parent.label} matches “${query.trim()}”.` : `No machine matches “${query.trim()}”.`}</p>
+            {!parent && <p className="text-muted-foreground text-micro">Search by task text or machine name, or clear the search to see everything.</p>}
           </li>
         )}
-        {!q && !boxes.length && (
+        {!q && !parent && !boxes.length && (
           <li className="text-muted-foreground px-2.5 pt-1 pb-2 text-micro" aria-hidden>
             No machines yet — start a task and it shows up here.
+          </li>
+        )}
+        {!q && parent && !rows.length && (
+          <li className="text-muted-foreground px-2.5 pt-1 pb-2 text-micro" aria-hidden>
+            Nothing here yet.
           </li>
         )}
       </ul>
@@ -275,6 +330,9 @@ export function CommandPalette({
         </span>
         <span className="flex items-center gap-1.5">
           <Kbd>esc</Kbd> close
+        </span>
+        <span className="tabular ml-auto" aria-live="polite">
+          {rows.length} {rows.length === 1 ? "result" : "results"}
         </span>
       </div>
     </dialog>

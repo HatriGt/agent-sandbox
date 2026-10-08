@@ -17,6 +17,7 @@
 //   --type="text"     type into the focused element (after --key)
 //   --hover="css"     hover a selector before the shot
 //   --wait=ms         settle time before the shot (default 1200)
+//   --scroll="css"    scroll a container to its bottom before the shot
 //
 // Run from PowerShell (bash mangles the leading slash of the route).
 import { chromium } from "file:///C:/Users/ak/AppData/Roaming/npm/node_modules/@playwright/mcp/node_modules/playwright/index.mjs";
@@ -69,6 +70,7 @@ const boxes = has("--empty")
         title: "Auth middleware walkthrough",
         repos: [{ name: "agent-sandbox", branch: "main" }],
         agent: "claude",
+        workflow: { id: "w2", name: "Fix flaky test", line: "Fix flaky test · step 1/2", state: "running", step: 1, total: 2, history: [] },
       },
       {
         name: "asb-pool-c22de9f1",
@@ -220,7 +222,8 @@ const harnesses = {
 };
 
 const browser = await chromium.launch();
-const ctx = await browser.newContext({ viewport: { width: +w, height: +h }, colorScheme: dark ? "dark" : "light", deviceScaleFactor: 1 });
+const ctx = await browser.newContext({ viewport: { width: +w, height: +h }, colorScheme: dark ? "dark" : "light", deviceScaleFactor: 1, reducedMotion: has("--os-reduced") ? "reduce" : "no-preference" });
+if (val("motion")) await ctx.addInitScript((m) => localStorage.setItem("asb.motion", m), val("motion"));
 await ctx.addInitScript(
   ({ t, dark, collapsed, empty }) => {
     localStorage.setItem("asb-token", t);
@@ -268,7 +271,7 @@ await mock("/models.json", models);
 await mock("/history.json", history);
 await mock("/history/ledger.json", {
   totals: { runs: history.runs.length, done: history.runs.filter((r) => r.state === "done").length, failed: history.runs.filter((r) => r.state === "failed").length, checked: 2, passed: 2, inputTokens: 412_300, outputTokens: 58_900, withUsage: 3, costUsd: null, withCost: 0 },
-  rows: history.runs.map((r, i) => ({ ...r, startedBy: i % 2 ? "web" : "schedule", agent: "claude", verified: i < 2 ? true : null, inputTokens: 100_000, outputTokens: 15_000 })),
+  rows: history.runs.map((r, i) => ({ ...r, startedBy: i % 2 ? "web" : "schedule", agent: "claude", verified: i < 2 ? true : null, inputTokens: 100_000, outputTokens: 15_000, costUsd: i === 0 ? 0.42 : null, planDone: i === 0 ? 3 : null, planTotal: i === 0 ? 3 : null, workflowId: i === 1 ? "w1" : null })),
 });
 await mock("/history/activity.json", activity);
 await mock("/repos.json", repos);
@@ -276,6 +279,33 @@ await mock("/skills.json", skills);
 await mock("/mcp-servers.json", mcp);
 await mock("/harnesses.json", harnesses);
 await mock("/providers.json", { providers: [] });
+await mock("/repo-setup.json", { profiles: [
+  { repo: "hatrigt/agent-sandbox", updatedAt: ms - 3e6, profile: { v: 1, install: "npm ci", test: "npm test", runtimes: { node: "22" }, envVars: ["DEPLOY_TOKEN", "SENTRY_DSN"], detectedAt: ms - 9e6, confirmedBy: "agent" } },
+  { repo: "hatrigt-atom/billing", updatedAt: ms - 8e7, profile: { v: 1, install: "pnpm i", test: "pnpm test", runtimes: { node: "20" }, envVars: ["STRIPE_KEY"], detectedAt: ms - 9e7, confirmedBy: "detected" } },
+] });
+await mock("/secrets.json", { secrets: [
+  { name: "DEPLOY_TOKEN", createdAt: ms - 9e8, updatedAt: ms - 3e6, grantedTo: [{ kind: "harness", id: "h_mine", label: "Billing service" }, { kind: "repo", id: "hatrigt/agent-sandbox", label: "hatrigt/agent-sandbox" }] },
+  { name: "STRIPE_KEY", createdAt: ms - 5e8, updatedAt: ms - 8e7, grantedTo: [{ kind: "repo", id: "hatrigt-atom/billing", label: "hatrigt-atom/billing" }] },
+  { name: "NPM_TOKEN", createdAt: ms - 2e8, updatedAt: ms - 2e8, grantedTo: [] },
+] });
+const T0 = Date.now();
+const trig = (o) => ({ repos: [], taskTemplate: "", enabled: true, prComment: false, spec: {}, scope: "automation", status: "waiting", lastFired: null, nextFire: null, lastResult: null, hasPayload: false, active: 0, createdAt: T0 - 9e8, updatedAt: T0 - 9e6, ...o });
+const triggers = [
+  trig({ id: "t1", name: "Review new PRs on elseco-deal-service", kind: "github", when: "pull request opened on atom-insurance/elseco-deal-service", spec: { event: "pr_opened" }, repos: ["atom-insurance/elseco-deal-service"], prComment: true, lastFired: T0 - 3.6e6, lastResult: { at: T0 - 3.6e6, outcome: "started", box: "asb-pool-c22de9f1", finished: { state: "done", headline: "Approved, 2 low findings" } } }),
+  trig({ id: "t2", name: "Nightly dependency audit", kind: "schedule", when: "Weekdays 02:00 (Europe/Berlin)", spec: { cron: "0 2 * * 1-5" }, nextFire: T0 + 5.4e7, quiet: true, counts: { checked: 12, reports: 1 }, lastFired: T0 - 3e7, lastResult: { at: T0 - 3e7, outcome: "started", finished: { state: "done", headline: "nothing new" } } }),
+  trig({ id: "t3", name: "Sentry → triage", kind: "webhook", when: "webhook (sentry)", spec: { preset: "sentry" }, enabled: false, status: "paused", lastFired: T0 - 2e8, lastResult: { at: T0 - 2e8, outcome: "failed", reason: "box limit" } }),
+  trig({ id: "t4", name: "Flaky test sweeper", kind: "schedule", when: "Sundays 06:00 UTC", proposed: true, enabled: false, status: "needs-ok" }),
+  trig({ id: "s1", name: "Re-run the migration check", kind: "schedule", scope: "scheduled", when: "once, tomorrow 09:00", spec: { at: T0 + 8e7 }, nextFire: T0 + 8e7, sourceBox: "asb-session-a91b0e44", sourceTitle: "Auth middleware docs", repos: ["acme/api"], taskTemplate: "Re-run the migration check and report" }),
+  trig({ id: "s2", name: "Watch deploy health", kind: "schedule", scope: "scheduled", when: "every hour", status: "running", nextFire: T0 + 2e6, sourceBox: "asb-pool-c22de9f1", taskTemplate: "Check /healthz and error rate" }),
+  trig({ id: "s3", name: "Ping on PR merge", kind: "schedule", scope: "scheduled", when: "once", status: "done", lastFired: T0 - 5e6, taskTemplate: "Tell me when #142 merges" }),
+];
+await mock("/triggers.json", { triggers });
+const deliveries = [0, 1, 2, 3, 4].map((i) => ({ id: 100 - i, at: T0 - i * 7.2e6, outcome: i === 3 ? "skipped" : i === 4 ? "failed" : "fired", reason: i === 3 ? "dedupe" : i === 4 ? "error" : undefined, box: i < 3 ? `asb-pool-${i}abc` : undefined, facts: { v: 1, subject: { kind: "pr", number: 210 - i, repo: "atom-insurance/elseco-deal-service", url: "https://github.com/x", title: ["Add deal pricing cache", "Fix broker lookup", "Bump deps", "Refactor quotes", "Docs"][i] }, state: i === 0 ? "running" : "done", review: i ? { verdict: i === 2 ? "needs-work" : "approve", findings: { high: i === 2 ? 1 : 0, medium: 1, low: 2, info: 0 }, blocking: i === 2 ? 1 : 0 } : null, receiptUrl: i && i < 3 ? "https://github.com/x#c" : undefined, durationMs: i ? 90_000 * i : null } }));
+await ctx.route((u) => /^\/triggers\/[^/]+\/deliveries\.json$/.test(new URL(u).pathname), (r) => r.fulfill(json({ deliveries })));
+await mock("/workflows.json", { limits: {}, dir: ".agent-sandbox/workflows", workflows: [
+  { id: "w1", name: "Review a PR", description: "Read the diff, run tests, comment", steps: [{ kind: "agent", prompt: "Review" }, { kind: "check", command: "npm test", retry: 1 }], origin: { kind: "manual" }, createdAt: T0 - 9e8, updatedAt: T0 - 9e6 },
+  { id: "w2", name: "Fix flaky test", steps: [{ kind: "agent", prompt: "Fix" }], origin: { kind: "repo", repo: "acme/api", path: ".agent-sandbox/workflows/flaky.yaml" }, createdAt: T0 - 9e8, updatedAt: T0 - 9e6 },
+] });
 await ctx.route((u) => new URL(u).pathname === "/watch.json", (r) =>
   r.fulfill(json({ name: "x", boxStatus: "Running", runState: "running", log: "" }))
 );
@@ -299,11 +329,38 @@ for (const sel of click ? click.split(";;") : []) {
   await page.click(sel).catch((e) => errors.push("click: " + e.message));
   await page.waitForTimeout(250);
 }
+// `--scroll="css"` scrolls an inner scroller to its bottom (pages scroll inside the pane, not the window).
+const scroll = val("scroll");
+if (scroll) {
+  await page.evaluate((sel) => document.querySelector(sel)?.scrollTo(0, 1e6), scroll).catch((e) => errors.push("scroll: " + e.message));
+  await page.waitForTimeout(400);
+}
+// `--to="css"` brings an element to the top of its scroller (a settings section: `[aria-labelledby='<id>-h']`).
+const to = val("to");
+if (to) {
+  await page.evaluate((sel) => document.querySelector(sel)?.scrollIntoView({ block: "start", behavior: "instant" }), to).catch((e) => errors.push("to: " + e.message));
+  await page.waitForTimeout(400);
+}
 const key = val("key");
 if (key) await page.keyboard.press(key).catch((e) => errors.push("key: " + e.message));
 const type = val("type");
 if (type) await page.keyboard.type(type, { delay: 20 }).catch((e) => errors.push("type: " + e.message));
 await page.waitForTimeout(wait);
+if (has("--drag")) {
+  const h = page.locator("th .dt-resize").first();
+  const b = await h.boundingBox();
+  const before = await page.evaluate(() => document.querySelector("th").getBoundingClientRect().width);
+  await page.mouse.move(b.x + 4, b.y + 10); await page.mouse.down(); await page.mouse.move(b.x + 124, b.y + 10, { steps: 6 }); await page.mouse.up();
+  await page.waitForTimeout(300);
+  console.log("drag:", before, "->", await page.evaluate(() => document.querySelector("th").getBoundingClientRect().width), await page.evaluate(() => Object.keys(localStorage).filter((k) => k.startsWith("asb.cols")).map((k) => k + "=" + localStorage.getItem(k)).join(" ")));
+  console.log("cols:", await page.evaluate(() => [...document.querySelectorAll("col")].map((c) => `${c.dataset.col}:${Math.round(c.getBoundingClientRect().width)}${c.style.width ? "(" + c.style.width + ")" : ""}`).join(" ")));
+}
+if (has("--clip")) console.log("clip:", await page.evaluate(() => [...document.querySelectorAll("[data-slot=table] th")].filter((h) => h.offsetParent && h.innerText.trim()).map((h) => { const s = getComputedStyle(h); const box = h.getBoundingClientRect(); const avail = box.right - parseFloat(s.paddingRight); const r = document.createRange(); const label = h.querySelector("button") ?? h.firstChild; r.selectNodeContents(label); const rects = [...r.getClientRects()]; const right = rects.length ? Math.max(...rects.map((x) => x.right)) : 0; return `${h.innerText.trim()}:${Math.round(box.width)}${right > avail + 0.5 ? " CLIPPED(" + Math.round(right - avail) + ")" : ""}`; }).join("  ")));
+if (has("--tbl")) console.log("tbl:", await page.evaluate(() => [...document.querySelectorAll("[data-slot=table]")].map((t) => { const s = getComputedStyle(t); return `w=${Math.round(t.getBoundingClientRect().width)} layout=${s.tableLayout} minW=${s.minWidth} styleMin=${t.style.minWidth} parent=${Math.round(t.parentElement.getBoundingClientRect().width)} cols=${[...t.querySelectorAll("col")].map((c) => getComputedStyle(c).display + ":" + getComputedStyle(c).width).join(",")}`; }).join("\n")));
+if (has("--rows")) console.log("rows:", await page.evaluate(() => [...document.querySelectorAll("[data-slot=table]")].map((t) => `${t.getAttribute("aria-label")}: head=${[...t.querySelectorAll("th")].map((h) => h.innerText.trim()).join("|")} body=${t.querySelectorAll("tbody tr").length} clickable=${t.querySelectorAll("tbody tr[data-clickable]").length}\n  ` + [...t.querySelectorAll("tbody tr")].map((r) => r.innerText.replace(/\s+/g, " ").slice(0, 70)).join("\n  ")).join("\n")));
+if (has("--anim")) console.log("anim:", await page.evaluate(() => [...document.querySelectorAll("[data-slot=table-row][data-enter],[data-slot=table-row][data-new]")].slice(0, 6).map((r) => `${r.dataset.enter ?? "new"} i=${r.style.getPropertyValue("--i")} ${getComputedStyle(r).animationName} ${getComputedStyle(r).animationDelay} op=${(+getComputedStyle(r).opacity).toFixed(2)}`).join("\n  ") + "\n  pings=" + document.querySelectorAll(".dt-ping").length));
+if (has("--shim")) console.log("shim:", await page.evaluate(() => [...document.querySelectorAll(".shimmer-text")].slice(0, 4).map((e) => { const s = getComputedStyle(e); return `${e.textContent} ${s.animationName} ${s.animationDuration} pos=${s.backgroundPosition} size=${s.backgroundSize} img=${s.backgroundImage.slice(0, 90)}`; }).join("\n  ")));
+if (has("--probe")) console.log("probe:", await page.evaluate(() => ({ toasts: [...document.querySelectorAll("[data-attention-toast]")].map((t) => t.innerText.replace(/\s+/g, " ")), status: document.querySelector("[aria-label=Status]")?.innerText.replace(/\s+/g, " "), palette: [...document.querySelectorAll("dialog[open] [role=option], dialog[open] .label")].map((e) => e.innerText.replace(/\s+/g, " ")).join(" | "), footer: document.querySelector("dialog[open] .border-t:last-child")?.innerText.replace(/\s+/g, " ") })));
 await page.screenshot({ path: out, fullPage: full });
 console.log("saved", out, page.url());
 if (errors.length) console.log("console errors:\n" + errors.slice(0, 10).join("\n"));

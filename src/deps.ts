@@ -566,7 +566,7 @@ export const deps: HandlerDeps = {
       mark("setup");
     }
     // Harness rules ride beside the task (system prompt), never inside it — see DelegatePlan.rules.
-    await runAgentTask(runCfg, box, plan.task, layout, runCreds, plan.model, plan.agent, plan.rules);
+    await runAgentTask(runCfg, box, plan.task, layout, runCreds, plan.model, plan.agent, plan.rules, plan.secrets);
     mark("launch");
     console.error(`[timing] delegate ${box} warm=${warm} total=${Date.now() - t0}ms ${marks.join(" ")}`);
     const extra = setupDetected ? { setupDetected } : {};

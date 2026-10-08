@@ -112,7 +112,8 @@ import { createTrigger, firstSighting, getTriggerById, listTriggers, logDelivery
 import { automateNeedsApproval, isQuietRun, parseAutomate, parseAutomateRejects, type AutomateReject } from "./triggers.js";
 import { intakeBodyParser, registerIntakeRoutes } from "./intake-routes.js";
 import { candidateAccounts } from "./gh-token-store.js";
-import { applyHarness, getHarness, harnessSummaryLine, loadHarnesses, normalizeEgress, HARNESS_LIMITS, type HarnessDef } from "./harness.js";
+import { applyHarness, getHarness, harnessSummaryLine, loadHarnesses, normalizeEgress, putHarness, HARNESS_LIMITS, type HarnessDef } from "./harness.js";
+import { allSecretValues, deleteSecret, listSecrets, resolveSecrets, saveSecret, secretName } from "./secrets-store.js";
 import { reservedBoxes } from "./capacity.js";
 import { archivedDigestOf, checkCompareSide, recordRunHarness, runHarnessOf, skillPickBackend, skillSelectionBackend } from "./harness-runs.js";
 import { registerSkillPickBackend, skillPicksOf, type SkillPick } from "./skill-match.js";
@@ -369,6 +370,7 @@ const redactor = makeRedactor(async () => {
     /* same */
   }
   if (cfg.npmToken) out.push(cfg.npmToken);
+  out.push(...allSecretValues(db, secretBox));
   if (cfg.httpToken) out.push(cfg.httpToken);
   if (cfg.dashboardToken && cfg.dashboardToken !== cfg.httpToken) out.push(cfg.dashboardToken);
   return out;
@@ -503,7 +505,22 @@ if (rawResumeDetached) {
   };
 }
 
-const resumeQuietly = (session: string, message: string) => {
+/**
+ * Vault secrets granted to a box's thread (src/secrets-store.ts): its harness's list plus the envVars
+ * of its repos' setup profiles, resolved for the box's owner. Resumes re-exec the agent with a fresh
+ * env, so every lane re-injects them; `extra` are one-shot values the caller typed (Resolve row).
+ */
+const grantedSecretsOf = async (box: string, extra?: Record<string, string>): Promise<Record<string, string> | undefined> => {
+  const owner = ownerOf(db, box) ?? OPERATOR_OWNER;
+  const link = runHarnessOf(db, box);
+  const h = link?.harnessId ? getHarness(link.harnessId, owner) : undefined;
+  const repos = await reposOfBox(box);
+  const names = [...(h?.secrets ?? []), ...repos.flatMap((slug) => getSetup(db, owner, slug)?.envVars ?? [])];
+  const out = { ...resolveSecrets(db, secretBox, owner, names), ...extra };
+  return Object.keys(out).length ? out : undefined;
+};
+
+const resumeQuietly = (session: string, message: string, extraSecrets?: Record<string, string>) => {
   // A resume boots a sleeping box; forget the "stopped" memory and the cached idle snapshot at once so
   // the thread does not show it asleep (and close its stream) for the next 15 s.
   noteRunning(session);
@@ -523,10 +540,11 @@ const resumeQuietly = (session: string, message: string) => {
     // message changes anything — heavy dirs are excluded, so this is ~1 s on the send path at worst.
     await captureBeforeMessage(session).catch(() => {});
     try {
+      const secrets = await grantedSecretsOf(session, extraSecrets);
       return await withOwner(ownerOf(db, session) ?? null, () =>
         rawResumeDetached
-          ? rawResumeDetached(cfg, session, message, undefined, boxModels.get(session))
-          : rawResume(cfg, session, message, undefined, {}, boxModels.get(session)).then(() => undefined)
+          ? rawResumeDetached(cfg, session, message, secrets, boxModels.get(session))
+          : rawResume(cfg, session, message, secrets, {}, boxModels.get(session)).then(() => undefined)
       );
     } catch (e) {
       // The optimistic "running" note above was wrong — the resume never happened. Roll it back and
@@ -885,7 +903,8 @@ const archiveFinishedRun = async (box: string, opts: { withFiles: boolean; quiet
   } catch (e) {
     console.error(`[outcome] ${box}: ${(e as Error).message.slice(0, 200)}`);
   }
-  const archiveId = archiveRun(db, { box, owner: runOwner, digest, ...(diffText ? { diffText } : {}) });
+  const workflowId = workflowEngine.viewOf(box)?.id;
+  const archiveId = archiveRun(db, { box, owner: runOwner, digest, ...(diffText ? { diffText } : {}), ...(workflowId ? { workflowId } : {}) });
   // A trigger-started run finishing frees its slot, stamps the automation's last result, posts the
   // receipt comment and fires any chain. Only on a NEW record (null = this finish was already seen).
   const fin = archiveId !== null ? await dispatcher.onRunFinished(box, digest, digest.provenance?.startedBy, archiveId, { quiet: opts.quiet === true, events }) : { destroy: false };
@@ -1882,10 +1901,20 @@ app.post("/ask.json", async (req: Request, res: Response) => {
 // WAIT_TIMEOUT_MS driving the same interactive loop resume() uses over MCP.
 app.post("/resume.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
-  const { session, message, force, model } = (req.body ?? {}) as { session?: string; message?: string; force?: boolean; model?: string };
+  const { session, message, force, model, secrets } = (req.body ?? {}) as { session?: string; message?: string; force?: boolean; model?: string; secrets?: unknown };
   if (!session || !message?.trim()) {
     res.status(400).json({ error: "session and message are required" });
     return;
+  }
+  // One-shot secrets (the Resolve row): -e flags on this turn only, same rules as the MCP resume
+  // tool (src/secret-env.ts refuses reserved names when the flags are built). Never stored here.
+  const oneShot: Record<string, string> = {};
+  if (secrets !== undefined) {
+    if (!secrets || typeof secrets !== "object" || Array.isArray(secrets)) return void res.status(400).json({ error: "secrets must be an object of NAME: value" });
+    for (const [k, v] of Object.entries(secrets)) {
+      if (typeof v !== "string") return void res.status(400).json({ error: `secret ${k} must be text` });
+      oneShot[k] = v;
+    }
   }
   try {
     // Per-message model switch: validate against the catalog, then make it STICK for this box —
@@ -1912,7 +1941,7 @@ app.post("/resume.json", async (req: Request, res: Response) => {
         return;
       }
     }
-    await resumeQuietly(session, message);
+    await resumeQuietly(session, message, Object.keys(oneShot).length ? oneShot : undefined);
     res.json({ ok: true });
   } catch (e) {
     failWith(res, e);
@@ -2324,6 +2353,57 @@ app.post("/repo-setup/delete.json", (req: Request, res: Response) => {
     return;
   }
   res.json(setupPayload(owner));
+});
+
+// Secrets vault (src/secrets-store.ts). GET lists names + who they are granted to (harnesses whose
+// `secrets` list names them, repo setup profiles whose envVars do) — never a value. POST
+// {action:"save", name, value, repo?} stores (and with `repo`, grants it to that repo's profile);
+// {action:"remove", name} deletes the value and every grant that named it.
+const secretsPayload = (owner: string) => {
+  const harnesses = loadHarnesses(owner);
+  const setups = listSetups(db, owner);
+  return {
+    secrets: listSecrets(db, owner).map((s) => ({
+      ...s,
+      grantedTo: [
+        ...harnesses.filter((h) => h.secrets?.includes(s.name)).map((h) => ({ kind: "harness" as const, id: h.id, label: h.name })),
+        ...setups.filter((r) => r.profile.envVars.includes(s.name)).map((r) => ({ kind: "repo" as const, id: r.repo, label: r.repo })),
+      ],
+    })),
+  };
+};
+app.get("/secrets.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  res.json(secretsPayload(providerOwner(res)));
+});
+app.post("/secrets.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const owner = providerOwner(res);
+  const b = (req.body ?? {}) as { action?: unknown; name?: unknown; value?: unknown; repo?: unknown };
+  try {
+    if (b.action === "save") {
+      const meta = saveSecret(db, secretBox, owner, b.name, b.value);
+      res.locals.auditAction = "secret.save";
+      if (typeof b.repo === "string" && b.repo) {
+        if (!SETUP_REPO_RE.test(b.repo.trim().replace(/\.git$/i, ""))) throw new Error("repo must be owner/name");
+        const prev = getSetup(db, owner, b.repo);
+        if (!prev?.envVars.includes(meta.name)) saveSetup(db, owner, b.repo, { ...prev, envVars: [...(prev?.envVars ?? []), meta.name] }, prev?.confirmedBy ?? "user");
+      }
+      void redactor.prime();
+    } else if (b.action === "remove") {
+      const name = secretName(b.name);
+      if (!deleteSecret(db, owner, name)) return void res.status(404).json({ error: "no secret by that name" });
+      res.locals.auditAction = "secret.remove";
+      for (const h of loadHarnesses(owner)) if (h.secrets?.includes(name)) putHarness({ ...h, secrets: h.secrets.filter((n) => n !== name) }, owner);
+      for (const r of listSetups(db, owner)) if (r.profile.envVars.includes(name)) saveSetup(db, owner, r.repo, { ...r.profile, envVars: r.profile.envVars.filter((n) => n !== name) }, r.profile.confirmedBy);
+      void redactor.prime();
+    } else {
+      return void res.status(400).json({ error: "action must be save or remove" });
+    }
+    res.json(secretsPayload(owner));
+  } catch (e) {
+    res.status(400).json({ error: clientError(e) });
+  }
 });
 
 app.get("/notify.json", (req: Request, res: Response) => {
@@ -3417,7 +3497,10 @@ const startTriggerRun = (input: StartRunInput): Promise<{ ok: true; box: string 
         const agent = hAgent && isAgentKind(hAgent) ? hAgent : loadAgentPrefs(input.owner).defaultAgent;
         const hSkills = Array.isArray(hb.skills) ? (hb.skills as string[]) : undefined;
         const hEgress = Array.isArray(hb.allowDomains) ? (hb.allowDomains as string[]) : undefined;
+        // Vault secrets granted to this unattended run: the harness's list plus the repos' profiles' envVars.
+        const tSecrets = resolveSecrets(db, secretBox, input.owner, [...(th?.secrets ?? []), ...(repos ?? []).flatMap((rp) => getSetup(db, input.owner, rp.repo)?.envVars ?? [])]);
         const r = await runDelegateFlow(cfg, deps, {
+          ...(Object.keys(tSecrets).length ? { secrets: tSecrets } : {}),
           agent,
           source: "git",
           ...(repos?.length ? { repos } : {}),
@@ -3746,6 +3829,7 @@ app.get("/history/ledger.json", (req: Request, res: Response) => {
     ...(str("agent") ? { agent: str("agent") } : {}),
     ...(str("state") ? { state: str("state") } : {}),
     ...(str("verified") ? { verified: str("verified") } : {}),
+    ...(str("workflow") ? { workflow: str("workflow") } : {}),
   };
   try {
     res.json({
@@ -3920,8 +4004,12 @@ const delegateOnce = async (body0: Record<string, unknown>, principal: Principal
     if (!verifyPlan && setupSlugs.length === 1 && setup[setupSlugs[0]]?.test) {
       verifyPlan = { mode: "command", command: setup[setupSlugs[0]].test! };
     }
+    // Vault secrets (src/secrets-store.ts) granted by name: the harness's list plus every repo
+    // profile's envVars, resolved to the values this owner holds. Missing ones are simply not set.
+    const grantedSecrets = resolveSecrets(db, secretBox, hOwner, [...(harness?.secrets ?? []), ...Object.values(setup).flatMap((p) => p.envVars)]);
     const result = await withStartedBy({ kind: "manual" }, () => runDelegateFlow(cfg, deps, {
       ...(setupSlugs.length ? { setup } : {}),
+      ...(Object.keys(grantedSecrets).length ? { secrets: grantedSecrets } : {}),
       agent,
       attachments: attachments.length ? attachments : undefined,
       // A browser has no local tree to ship: git only. (`source:"local"` would rsync a controller-host path.)

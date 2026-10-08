@@ -186,6 +186,10 @@ function log(kind) {
     "  To github.com:acme/orders-api.git",
     "   * [new branch]      HEAD -> feat/sliding-window-limiter");
   L.push(at(1, 22), "→ Bash: gh pr create --fill ⟦#b5⟧", at(1, 25), "  ⟦#b5⟧ https://github.com/acme/orders-api/pull/482");
+  L.push(at(1, 26), "→ Bash: ./scripts/deploy-preview.sh ⟦#b6⟧", at(1, 27),
+    "  ⟦#b6⟧ ⟦err⟧ Exit code 1",
+    "  deploy-preview: DEPLOY_TOKEN is not set",
+    "  Set it in the environment and re-run.");
   L.push(`⟦plan⟧ ${T0 + 85_000}`, "[x] Read the current limiter and its tests", "[x] Implement a sliding-window limiter on Redis", "[x] Add burst and steady-traffic tests", kind === "done" ? "[x] Open a pull request" : "[>] Open a pull request", "⟦/plan⟧");
   L.push(at(1, 30));
   if (kind === "running") {
@@ -378,6 +382,10 @@ await page.route("**/*", async (route) => {
       return json(route, PR);
     case "/inbox.json":
       return json(route, { queued: [] });
+    case "/repos.json":
+      return json(route, { repos: [{ fullName: REPO, private: true, defaultBranch: "main", logins: ["acme"] }], total: 1 });
+    case "/secrets.json":
+      return json(route, { secrets: [] });
     case "/revert-points.json":
       return json(route, { messages: [2] });
     case "/models.json":
@@ -521,6 +529,11 @@ if (stream) {
   await page.keyboard.press("2");
   await page.waitForTimeout(300);
   await shot("-question-kbd");
+} else if (interact === "resolve") {
+  // The failed `deploy-preview.sh` call: its Resolve row ("Provide DEPLOY_TOKEN") under the terminal panel.
+  await page.locator("[data-resolve-row]").first().scrollIntoViewIfNeeded().catch((e) => errors.push("resolve: " + e.message));
+  await page.waitForTimeout(500);
+  await shot("-resolve");
 } else {
   await shot();
 }

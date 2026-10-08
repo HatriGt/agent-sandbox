@@ -18,7 +18,7 @@ function exact(at: number): string {
   return new Date(at).toLocaleString([], { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
 }
 
-export function ScheduledCard({ box, runState, onRetry }: { box: string; runState: string; onRetry: (text: string) => void }) {
+export function ScheduledCard({ box, runState, onRetry, onDiscuss }: { box: string; runState: string; onRetry: (text: string) => void; /** Reply in free text with the proposal quoted; it stays pending. */ onDiscuss?: (proposal: string) => void }) {
   const { items, rejected, reload } = useThreadSchedule(box, runState);
   const actions = useActions(() => void reload());
   const still = !!useReducedMotion();
@@ -42,7 +42,7 @@ export function ScheduledCard({ box, runState, onRetry }: { box: string; runStat
       </span>
       <AnimatePresence initial={false}>
         {mine.map((it) => (
-          <Card key={it.id} it={it} now={now} still={still} busy={actions.busy === it.id} actions={actions} />
+          <Card key={it.id} it={it} now={now} still={still} busy={actions.busy === it.id} actions={actions} onDiscuss={onDiscuss} />
         ))}
         {failed.map((r) => (
           <Rejected key={`${r.when}|${r.task}`} r={r} still={still} onRetry={onRetry} />
@@ -80,7 +80,7 @@ function when(it: ThreadScheduleItem, now: number): string {
   }
 }
 
-function Card({ it, now, still, busy, actions }: { it: ThreadScheduleItem; now: number; still: boolean; busy: boolean; actions: Actions }) {
+function Card({ it, now, still, busy, actions, onDiscuss }: { it: ThreadScheduleItem; now: number; still: boolean; busy: boolean; actions: Actions; onDiscuss?: (proposal: string) => void }) {
   const pending = it.relation === "proposed";
   const over = it.status === "done" || it.status === "cancelled";
   return (
@@ -108,6 +108,11 @@ function Card({ it, now, still, busy, actions }: { it: ThreadScheduleItem; now: 
           <>
             <p className="text-muted-foreground min-w-0 text-micro leading-snug line-clamp-2 sm:truncate">Approving puts it on the schedule. Nothing runs until you do.</p>
             <div className="flex shrink-0 items-center gap-1">
+              {onDiscuss && (
+                <Button variant="ghost" size="sm" disabled={busy} onClick={() => onDiscuss(`${it.name} — ${when(it, now)}`)} title="Reply in the composer with the proposal quoted — it stays pending">
+                  Discuss
+                </Button>
+              )}
               <Button variant="ghost" size="sm" disabled={busy} onClick={() => void actions.dismiss(it)}>
                 Dismiss
               </Button>

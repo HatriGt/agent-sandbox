@@ -62,7 +62,7 @@ export function describeEvent(e: Pick<AuditEventRow, "method" | "path" | "sessio
   return { verb: hit[0], session: hit[1] ? s : null };
 }
 
-type Kind = "machines" | "code" | "account";
+export type Kind = "machines" | "code" | "account";
 /** Which lane an event belongs to — drives the filter chips and the dot colour. */
 export function eventKind(e: Pick<AuditEventRow, "path" | "session">): Kind {
   const p = e.path;

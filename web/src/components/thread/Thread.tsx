@@ -8,7 +8,7 @@ import { useReducedMotion } from "@/lib/motion-pref";
 // The workspace (CodeMirror + merge view) is heavy and optional: loaded the first time it opens.
 const WorkspacePane = React.lazy(() => import("./WorkspacePane").then((m) => ({ default: m.WorkspacePane })));
 import { SleepingCard, WakingCard } from "./WakingCard";
-import { SessionContext } from "@/lib/session-context";
+import { SessionContext, SessionReposContext } from "@/lib/session-context";
 import { CodeNavContext } from "@/components/ui/code-ref";
 import type { CodeRef } from "@/lib/code-refs";
 import type { OpenRequest } from "./WorkspacePane";
@@ -27,6 +27,7 @@ import { useRunDigest } from "./DigestCard";
 import { useOutcome } from "./OutcomeCard";
 import { RunPill, WatchPill } from "./RunPill";
 import { ThreadHeader } from "./ThreadHeader";
+import { RunInspector } from "./RunInspector";
 import { SchedulePill } from "./SchedulePill";
 import { ScheduledCard } from "./ScheduledCard";
 import { parseTrace, producedFiles } from "@/lib/trace";
@@ -69,6 +70,8 @@ export interface Aside {
 export function Thread({
   box,
   lifecycle,
+  fleet = [],
+  onOpenBox,
   inferredRepos,
   asides,
   replies,
@@ -85,6 +88,9 @@ export function Thread({
 }: {
   box: BoxView;
   lifecycle: FleetLifecycle;
+  /** Every visible machine, for the inspector's Fleet tab. */
+  fleet?: BoxView[];
+  onOpenBox?: (name: string) => void;
   /** Repos auto-attached because the task named them — shown inline under the task bubble. */
   inferredRepos?: string[];
   asides: Aside[];
@@ -224,7 +230,12 @@ export function Thread({
   const [reviewOpen, setReviewOpen] = React.useState(false);
   const [workspaceOpen, setWorkspaceOpen] = React.useState(false);
   const [workspaceFull, setWorkspaceFull] = React.useState(false);
+  const [inspectorOpen, setInspectorOpen] = React.useState(false);
   const showWorkspace = workspaceOpen || openFile !== null;
+  // Opening a file (code ref, changed file, palette) wins over the inspector.
+  React.useEffect(() => {
+    if (openFile !== null) setInspectorOpen(false);
+  }, [openFile]);
   const closeWorkspace = () => {
     setWorkspaceOpen(false);
     setWorkspaceFull(false);
@@ -244,6 +255,51 @@ export function Thread({
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [showWorkspace]);
+
+  // The run inspector (B1): a second aside, mutually exclusive with the workspace — opening one
+  // closes the other, so the conversation never shrinks to a sliver between two panes.
+  const toggleInspector = React.useCallback(() => {
+    setInspectorOpen((v) => {
+      if (!v) {
+        setWorkspaceOpen(false);
+        setWorkspaceFull(false);
+        setOpenFile(null);
+      }
+      return !v;
+    });
+  }, []);
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() === "i" && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && !e.defaultPrevented) {
+        e.preventDefault();
+        toggleInspector();
+      }
+    };
+    const onToggle = () => toggleInspector();
+    // The palette's "This thread" commands reach the thread through window events.
+    const onOpenWorkspace = (e: Event) => {
+      const path = (e as CustomEvent<{ path?: string } | undefined>).detail?.path;
+      setInspectorOpen(false);
+      if (path) setOpenFile({ path });
+      else setWorkspaceOpen(true);
+    };
+    const onReview = () => setReviewOpen((v) => !v);
+    const onStop = () => void stopTurnRef.current?.();
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("asb:toggle-inspector", onToggle);
+    window.addEventListener("asb:open-workspace", onOpenWorkspace);
+    window.addEventListener("asb:review-changes", onReview);
+    window.addEventListener("asb:stop-turn", onStop);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("asb:toggle-inspector", onToggle);
+      window.removeEventListener("asb:open-workspace", onOpenWorkspace);
+      window.removeEventListener("asb:review-changes", onReview);
+      window.removeEventListener("asb:stop-turn", onStop);
+    };
+  }, [toggleInspector]);
+  // stopTurn is defined later (it needs the box and state); the listener above reaches it by ref.
+  const stopTurnRef = React.useRef<(() => Promise<void>) | null>(null);
 
   // Guard against a late response after a box switch: without the name check, box A's in-flight
   // changes resolve into box B's dock (and clicking a file would fetch A's paths against B).
@@ -612,6 +668,24 @@ export function Thread({
       toast.error("Could not stop the turn", { description: e instanceof Error ? e.message : String(e) });
     }
   };
+  // Only a running, awake turn can be stopped — the palette's event must respect that too.
+  stopTurnRef.current = runState === "running" && !sleeping ? stopTurn : null;
+  // Discuss (D1): reply in free text with the proposal quoted; the question or schedule stays open.
+  const discuss = React.useCallback((proposal: string) => {
+    const quoted = proposal.trim().split("\n").map((l) => `> ${l}`).join("\n");
+    setSeed({ text: `${quoted}\n\n`, n: Date.now() });
+  }, []);
+  // The run's model, from the formatter's "session started (model X)" marker — observed, not assumed.
+  const runModel = React.useMemo(() => {
+    for (const e of events) {
+      if (e.kind === "lifecycle" && e.detail) {
+        const m = e.detail.match(/^model\s+(\S+)/);
+        if (m) return m[1];
+      }
+    }
+    const p = digest?.provenance;
+    return p?.model ? (p.provider ? `${p.provider} / ${p.model}` : p.model) : outcome?.cost.model ?? null;
+  }, [events, digest?.provenance, outcome?.cost.model]);
   const [expandAll, setExpandAll] = React.useState({ v: 0, open: false });
 
   // Turns for the minimap: the task plus every message you sent, each with how the agent replied.
@@ -734,6 +808,7 @@ export function Thread({
 
   return (
     <SessionContext.Provider value={box.name}>
+    <SessionReposContext.Provider value={repos}>
     <CodeNavContext.Provider value={openRef}>
     {/* No mount animation: BootingThread (same layout, swapped by App inside one pane key) hands
         off to this pixel for pixel; a fade here was the second blink. Thread switches fade via
@@ -758,6 +833,8 @@ export function Thread({
         onStop={runState === "running" && !sleeping ? stopTurn : undefined}
         stopping={stopping}
         showWorkspace={showWorkspace}
+        showInspector={inspectorOpen && !showWorkspace}
+        onToggleInspector={toggleInspector}
         removing={removing}
         sleepNow={sleepNow}
         sleepBusy={sleepBusy}
@@ -771,7 +848,7 @@ export function Thread({
         onSetDisk={setDisk}
         onBack={onBack}
         onNew={onNew}
-        onToggleWorkspace={() => (showWorkspace ? closeWorkspace() : setWorkspaceOpen(true))}
+        onToggleWorkspace={() => (showWorkspace ? closeWorkspace() : (setInspectorOpen(false), setWorkspaceOpen(true)))}
         density={density}
         onToggleDensity={() => onDensity(density === "chat" ? "trace" : "chat")}
         onToggleKeep={toggleKeep}
@@ -892,7 +969,7 @@ export function Thread({
             </ExpandAll.Provider>
 
             {/* What this chat scheduled, right under the message that scheduled it. */}
-            {!loadingTrace && <ScheduledCard box={box.name} runState={String(runState ?? "")} onRetry={(text) => setSeed({ text, n: Date.now() })} />}
+            {!loadingTrace && <ScheduledCard box={box.name} runState={String(runState ?? "")} onRetry={(text) => setSeed({ text, n: Date.now() })} onDiscuss={discuss} />}
 
             {/* The sleep/wake card sits where the run left off — under the transcript when we still
                 have it, right under the task otherwise — so waking reads as "continuing", not as a
@@ -916,7 +993,7 @@ export function Thread({
                   <MemoryBumpCard kind={oomKilled ? "oom" : "pressure"} nextTier={nextMemoryTier!} memUsage={box.memUsage} phase={bumpPhase} onBump={() => void bumpAndContinue()} />
                 </Rise>
               )}
-              {showQuestion && <QuestionCard key="question" question={question!} onAnswer={answer} busy={answering} />}
+              {showQuestion && <QuestionCard key="question" question={question!} onAnswer={answer} onDiscuss={discuss} busy={answering} />}
             </AnimatePresence>
 
             <AnimatePresence initial={false}>
@@ -1090,7 +1167,26 @@ export function Thread({
       {/* Sibling of the whole column (conversation + dock + composer), so opening it narrows all
           three together and the composer stays aligned with the text. Hidden while the workspace
           pane is open — two asides would leave the conversation a sliver. */}
-      {planBoard && !sleeping && !showWorkspace && <PlanDock board={planBoard} live={runState === "running"} />}
+      {planBoard && !sleeping && !showWorkspace && !inspectorOpen && <PlanDock board={planBoard} live={runState === "running"} />}
+      <AnimatePresence>
+        {inspectorOpen && !showWorkspace && (
+          <RunInspector
+            key="inspector"
+            box={box}
+            lifecycle={lifecycle}
+            events={events}
+            running={runState === "running" && !sleeping}
+            startedAt={stamps.first}
+            endedAt={stamps.last}
+            model={runModel}
+            repos={repos}
+            queued={queuedItems}
+            fleet={fleet}
+            onOpenBox={onOpenBox}
+            onClose={() => setInspectorOpen(false)}
+          />
+        )}
+      </AnimatePresence>
       <AnimatePresence>
         {showWorkspace && (
           <React.Suspense
@@ -1120,6 +1216,7 @@ export function Thread({
       </div>
     </div>
     </CodeNavContext.Provider>
+    </SessionReposContext.Provider>
     </SessionContext.Provider>
   );
 }

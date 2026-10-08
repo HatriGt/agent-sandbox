@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { openMemoryDb } from "../src/db.ts";
-import { archiveRun, deleteRun, getRun, listRuns, pruneArchive } from "../src/run-archive.ts";
+import { archiveRun, deleteRun, getRun, listLedger, listRuns, pruneArchive } from "../src/run-archive.ts";
 import type { RunDigest } from "../src/digest.ts";
 
 const digest = (over: Partial<RunDigest> = {}): RunDigest => ({
@@ -136,4 +136,26 @@ test("archive: getRun is owner-scoped and survives corrupt digest_json", () => {
   const run = getRun(db, "A", id);
   assert.ok(run);
   assert.equal(run!.digest, null, "corrupt digest degrades to null, row still readable");
+});
+
+test("ledger: plan counts and workflow id are stored; a planless run reads as no plan, not 0/0", () => {
+  const db = openMemoryDb();
+  const plan = [
+    { text: "a", state: "done" as const },
+    { text: "b", state: "done" as const },
+    { text: "c", state: "active" as const, failed: true },
+  ];
+  archiveRun(db, { box: "p", owner: "A", digest: digest({ box: "p", endedAt: 1, plan }), workflowId: "wf_1", now: 10 });
+  archiveRun(db, { box: "q", owner: "A", digest: digest({ box: "q", endedAt: 2 }), now: 20 });
+  const rows = listLedger(db, "A");
+  const p = rows.find((r) => r.box === "p")!;
+  const q = rows.find((r) => r.box === "q")!;
+  assert.equal(p.planDone, 2);
+  assert.equal(p.planTotal, 3);
+  assert.equal(p.workflowId, "wf_1");
+  assert.equal(q.planDone, null);
+  assert.equal(q.planTotal, null);
+  assert.equal(q.workflowId, null);
+  assert.deepEqual(listLedger(db, "A", { workflow: "wf_1" }).map((r) => r.box), ["p"], "workflow filter");
+  assert.deepEqual(listLedger(db, "A", { workflow: "wf_other" }), []);
 });

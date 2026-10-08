@@ -6,6 +6,7 @@ import { shortDuration, shortPath, type DerivedTask, type TaskBoard, type TaskEv
 import { FileMark } from "@/lib/fileIcon";
 import { Collapse } from "@/components/ui/collapse";
 import { cn } from "@/lib/utils";
+import { useNow } from "@/hooks/useNow";
 
 /**
  * The agent's plan (TodoWrite) joined to the work it actually did — the thread's spine.
@@ -28,6 +29,23 @@ function evidenceSummary(e: TaskEvidence): string {
   if (e.commands.length) return `${e.commands.length} command${e.commands.length > 1 ? "s" : ""}`;
   if (e.steps) return `${e.steps} step${e.steps > 1 ? "s" : ""}`;
   return "";
+}
+
+/**
+ * The step's measured time: closed windows summed from the plan snapshots' stamps, plus the open
+ * window ticking live while the step is in progress. A row with no stamps shows nothing — the time
+ * is observed, never estimated.
+ */
+function StepDuration({ ms, since, live }: { ms?: number; since?: number; live: boolean }) {
+  const ticking = live && since !== undefined;
+  const now = useNow(ticking);
+  const total = (ms ?? 0) + (ticking ? Math.max(0, now - since) : 0);
+  if (total < 1000) return null;
+  return (
+    <span className={cn("stamp shrink-0 text-micro tabular-nums", ticking ? "text-live" : "text-faint")} title={ticking ? "In progress for" : "Took"}>
+      {shortDuration(total)}
+    </span>
+  );
 }
 
 const SPRING = { type: "spring", stiffness: 460, damping: 34 } as const;
@@ -147,7 +165,7 @@ function RollingCount({ value }: { value: number }) {
   );
 }
 
-function TaskRow({ task, live, compact }: { task: DerivedTask; live?: boolean; compact?: boolean }) {
+function TaskRow({ task, live, since, compact }: { task: DerivedTask; live?: boolean; since?: number; compact?: boolean }) {
   const [open, setOpen] = React.useState(false);
   const reduce = useReducedMotion();
   const e = task.evidence;
@@ -192,7 +210,7 @@ function TaskRow({ task, live, compact }: { task: DerivedTask; live?: boolean; c
         <AlertTriangle className="text-destructive size-3.5 shrink-0" aria-label="a call in this step failed" />
       )}
       {summary && <span className={cn("text-faint stamp shrink-0 text-micro", compact ? "hidden" : "hidden sm:block")}>{summary}</span>}
-      {e.ms !== undefined && e.ms >= 1000 && <span className="text-faint stamp shrink-0 text-micro tabular-nums">{shortDuration(e.ms)}</span>}
+      <StepDuration ms={e.ms} since={since} live={!!(active && live)} />
       {hasDetail && (
         <ChevronRight className={cn("text-faint size-3.5 shrink-0 transition-transform duration-150", open && "rotate-90")} aria-hidden />
       )}
@@ -359,7 +377,7 @@ export function PlanCard({ board, live }: { board: TaskBoard; live?: boolean }) 
       <Collapse open={open}>
         <ol className="mt-1.5 flex flex-col">
           {tasks.map((t, i) => (
-            <TaskRow key={`${i}-${t.text}`} task={t} live={live} />
+            <TaskRow key={`${i}-${t.text}`} task={t} live={live} since={t.state === "active" ? board.activeSince : undefined} />
           ))}
         </ol>
       </Collapse>
@@ -429,7 +447,7 @@ export function PlanDock({ board, live }: { board: TaskBoard; live?: boolean }) 
             </div>
             <ol className="flex min-h-0 flex-1 flex-col overflow-y-auto p-1.5">
               {tasks.map((t, i) => (
-                <TaskRow key={`${i}-${t.text}`} task={t} live={live} compact />
+                <TaskRow key={`${i}-${t.text}`} task={t} live={live} since={t.state === "active" ? board.activeSince : undefined} compact />
               ))}
             </ol>
             {(board.ms !== undefined || failed > 0) && (

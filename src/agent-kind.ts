@@ -26,6 +26,8 @@ export function isAgentKind(v: unknown): v is AgentKind {
 
 export interface AgentPrefs {
   defaultAgent: AgentKind;
+  /** The model the composer preselects for this owner (a model id of the default agent); absent = the agent's own default. */
+  defaultModel?: string;
 }
 
 export const AGENT_PREFS_KIND = "agent-prefs";
@@ -35,14 +37,21 @@ export const AGENT_PREFS_KIND = "agent-prefs";
  * an error (silently coercing a typo'd pick to claude would look like the setting didn't save).
  */
 export function normalizeAgentPrefs(raw: unknown): AgentPrefs {
-  const r = (raw ?? {}) as { defaultAgent?: unknown };
+  const r = (raw ?? {}) as { defaultAgent?: unknown; defaultModel?: unknown };
+  const model = modelOf(r.defaultModel);
   if (r.defaultAgent === undefined || r.defaultAgent === null || r.defaultAgent === "") {
-    return { defaultAgent: "claude" };
+    return { defaultAgent: "claude", ...model };
   }
   if (!isAgentKind(r.defaultAgent)) {
     throw new Error(`defaultAgent must be one of: ${AGENT_KINDS.join(", ")}`);
   }
-  return { defaultAgent: r.defaultAgent };
+  return { defaultAgent: r.defaultAgent, ...model };
+}
+
+/** A non-empty, short model id; anything else means "no preference". */
+function modelOf(v: unknown): { defaultModel?: string } {
+  const s = typeof v === "string" ? v.trim().slice(0, 120) : "";
+  return s ? { defaultModel: s } : {};
 }
 
 /** The stored prefs for an owner; a missing/corrupt blob degrades to the default, never throws. */
@@ -50,8 +59,8 @@ export function loadAgentPrefs(owner = ownerKey()): AgentPrefs {
   try {
     const raw = loadBlob(AGENT_PREFS_KIND, owner);
     if (!raw) return { defaultAgent: "claude" };
-    const parsed = JSON.parse(raw) as { defaultAgent?: unknown };
-    return isAgentKind(parsed.defaultAgent) ? { defaultAgent: parsed.defaultAgent } : { defaultAgent: "claude" };
+    const parsed = JSON.parse(raw) as { defaultAgent?: unknown; defaultModel?: unknown };
+    return { defaultAgent: isAgentKind(parsed.defaultAgent) ? parsed.defaultAgent : "claude", ...modelOf(parsed.defaultModel) };
   } catch {
     return { defaultAgent: "claude" };
   }

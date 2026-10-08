@@ -64,7 +64,7 @@ export function TopBar({
 
       <button
         type="button"
-        onClick={openPalette}
+        onClick={() => openPalette()}
         className="text-muted-foreground hover:text-foreground hover:border-line-strong bg-background/60 hover:bg-background flex h-7 w-64 shrink-0 cursor-pointer items-center gap-2 rounded-md border px-2.5 text-left text-[13px] transition-[color,background-color,border-color] duration-150 lg:w-72"
       >
         <Search className="size-3.5 shrink-0" aria-hidden />

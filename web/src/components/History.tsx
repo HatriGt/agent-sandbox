@@ -3,11 +3,11 @@ import { ArrowLeft, Check, RotateCw, Trash2 } from "lucide-react";
 import { motion } from "motion/react";
 import { useReducedMotion } from "@/lib/motion-pref";
 import { toast } from "sonner";
-import { api, type Automation, type LedgerRow as HistoryRun, type LedgerQuery, type LedgerTotals, type RunDigest, type RunOutcome } from "@/lib/api";
+import { api, type Automation, type BoxView, type LedgerRow as HistoryRun, type LedgerQuery, type LedgerTotals, type RunDigest, type RunOutcome } from "@/lib/api";
 import { ActivityHeatmap, type ActivityRun } from "@/components/ui/activity-heatmap";
 import { NumberTicker } from "@/components/ui/number-ticker";
-import { fmtAgo, friendlyName, shortName } from "@/lib/format";
-import { fmtDuration } from "@/lib/lifecycle";
+import { fmtAgo, friendlyName, shortName, threadTitle } from "@/lib/format";
+import { displayState, fmtDuration } from "@/lib/lifecycle";
 import { setPrefill } from "@/lib/draft";
 import { Button } from "@/components/ui/button";
 import { ArmButton } from "@/components/ui/arm-button";
@@ -17,16 +17,17 @@ import { DataTable, MetaLine, StatusDot, type Column } from "@/components/ui/dat
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { FilterChip } from "@/components/ui/filter-chip";
 import { DigestCard } from "@/components/thread/DigestCard";
-import { OutcomeCard, outcomeFacts } from "@/components/thread/OutcomeCard";
+import { OutcomeCard, fmtTokens, fmtUsd, outcomeFacts } from "@/components/thread/OutcomeCard";
 import { ReviewAllPane } from "@/components/thread/ReviewAll";
 import { Bar } from "@/components/thread/Skeletons";
 import { cn } from "@/lib/utils";
 
 /**
- * History: the record of what your agents did. Every run here is FINISHED and its machine may be
- * long gone — the page is an archive, deliberately still: fetched once on mount (plus "Show more"),
- * no polling, no breathing dots. A row opens the run's receipt (the digest) in a side sheet, and
- * offers exactly two actions: run the same brief again on a new machine, or delete the record.
+ * History: the record of what your agents did. Boxes still mid-run lead the table (from the fleet
+ * poll the app already runs); everything below them is FINISHED and its machine may be long gone —
+ * the archive is fetched once on mount (plus "Show more"), no polling of its own. A row opens the
+ * run's receipt (the digest) in a side sheet, and offers exactly two actions: run the same brief
+ * again on a new machine, or delete the record.
  */
 
 const PAGE = 50;
@@ -44,7 +45,7 @@ function dayLabel(ms: number): string {
   return d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short", ...(d.getFullYear() !== today.getFullYear() ? { year: "numeric" } : {}) });
 }
 
-function titleOf(r: HistoryRun): string {
+export function titleOf(r: HistoryRun): string {
   const t = (r.task ?? "").trim();
   if (t) {
     const firstLine = t.split("\n")[0];
@@ -68,13 +69,6 @@ function toQuery(f: LedgerFilters): LedgerQuery {
   if (f.agent) q.agent = f.agent;
   if (f.verified) q.verified = f.verified;
   return q;
-}
-
-function fmtTokens(n: number): string {
-  if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
-  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
-  if (n >= 1e4) return `${Math.round(n / 1e3)}k`;
-  return n.toLocaleString();
 }
 
 /** The ledger's headline numbers. Every figure is counted from real records; nothing is estimated. */
@@ -131,7 +125,7 @@ function FilterSelect({ label, value, onChange, options }: { label: string; valu
   );
 }
 
-export function History({ onBack, onAgain }: { onBack: () => void; onAgain: () => void }) {
+export function History({ onBack, onAgain, boxes, onOpen }: { onBack: () => void; onAgain: () => void; boxes: BoxView[]; onOpen: (box: string) => void }) {
   const [rows, setRows] = React.useState<HistoryRun[] | null>(null);
   const [totals, setTotals] = React.useState<LedgerTotals | null>(null);
   const [lf, setLf] = React.useState<LedgerFilters>(NO_FILTERS);
@@ -191,6 +185,9 @@ export function History({ onBack, onAgain }: { onBack: () => void; onAgain: () =
   const filtered = lf.startedBy !== "" || lf.agent !== "" || lf.verified !== "";
 
   const visible = (rows ?? []).filter((r) => filter === "all" || (filter === "failed" ? r.state === "failed" : r.state !== "failed"));
+  // Boxes mid-run lead the table (newest activity first) under their own group; they fall out as they archive.
+  const liveRows: Row[] = filter === "failed" || filtered ? [] : boxes.filter((b) => b.runState === "running" && displayState(b) === "running").sort((a, b) => (b.lastOutputAt ?? 0) - (a.lastOutputAt ?? 0)).map((box) => ({ kind: "live", box }));
+  const tableRows: Row[] = [...liveRows, ...visible.map((run): Row => ({ kind: "archived", run }))];
   const openRun = opened === null ? null : ((rows ?? []).find((x) => x.id === opened) ?? null);
   const removeRow = (id: number) => {
     setRows((prevRows) => (prevRows ?? []).filter((x) => x.id !== id));
@@ -254,7 +251,7 @@ export function History({ onBack, onAgain }: { onBack: () => void; onAgain: () =
           <FilterChip group="history" active={filter === "failed"} onClick={() => setFilter("failed")} label="Failed" count={counts.failed} tone="destructive" />
         </div>
 
-        <Swap state={error ? "error" : rows === null ? "loading" : !rows.length ? "empty" : !visible.length ? `none-${filter}` : "list"}>
+        <Swap state={error ? "error" : rows === null ? "loading" : !rows.length && !liveRows.length ? "empty" : !tableRows.length ? `none-${filter}` : "list"}>
           {error ? (
             <div className="border-destructive/30 bg-destructive/5 rounded-xl border border-dashed py-12 text-center" role="alert">
               <p className="text-destructive text-lead font-medium">Could not load history</p>
@@ -301,16 +298,16 @@ export function History({ onBack, onAgain }: { onBack: () => void; onAgain: () =
             <>
               <DataTable
                 aria-label="History"
-                rows={visible}
+                rows={tableRows}
                 columns={HISTORY_COLUMNS}
-                rowKey={(r) => String(r.id)}
-                onRowClick={(r) => setOpened(r.id)}
-                rowLabel={(r) => `${titleOf(r)} — ${r.state === "failed" ? "failed" : "done"}, show details`}
-                rowProps={(r) => ({ selected: opened === r.id })}
-                groupOf={(r) => { const t = r.archivedAt || r.endedAt; return t ? dayLabel(t) : null; }}
+                rowKey={rowKey}
+                onRowClick={(x) => (x.kind === "live" ? onOpen(x.box.name) : setOpened(x.run.id))}
+                rowLabel={(x) => (x.kind === "live" ? `${threadTitle(x.box)} — running, open the thread` : `${titleOf(x.run)} — ${x.run.state === "failed" ? "failed" : "done"}, show details`)}
+                rowProps={(x) => ({ selected: x.kind === "archived" && opened === x.run.id })}
+                groupOf={(x) => { if (x.kind === "live") return "Running now"; const t = x.run.archivedAt || x.run.endedAt; return t ? dayLabel(t) : null; }}
                 minWidth="min-w-[40rem]"
-                search={{ placeholder: "Search runs", text: (r) => `${titleOf(r)} ${r.headline ?? ""} ${r.box} ${friendlyName(r.box)} ${r.agent ?? ""} ${r.outcome?.header.label ?? ""}` }}
-                actions={(r) => <HistoryActions run={r} onAgain={onAgain} onDeleted={() => removeRow(r.id)} />}
+                search={{ placeholder: "Search runs", text: (x) => (x.kind === "live" ? `${threadTitle(x.box)} ${x.box.name} ${friendlyName(x.box.name)} running` : `#${x.run.id} ${titleOf(x.run)} ${x.run.headline ?? ""} ${x.run.box} ${friendlyName(x.run.box)} ${x.run.agent ?? ""} ${x.run.outcome?.header.label ?? ""}`) }}
+                actions={(x) => (x.kind === "archived" ? <HistoryActions run={x.run} onAgain={onAgain} onDeleted={() => removeRow(x.run.id)} /> : null)}
               />
               {more && (
                 <div className="mt-3 flex justify-center">
@@ -337,30 +334,56 @@ export function History({ onBack, onAgain }: { onBack: () => void; onAgain: () =
   );
 }
 
-function runDuration(run: HistoryRun): number | null {
+export function runDuration(run: HistoryRun): number | null {
   // Archive stamps are epoch ms (see HistoryRun); fmtDuration and fmtAgo both speak seconds.
   return run.startedAt && run.endedAt && run.endedAt > run.startedAt ? Math.round((run.endedAt - run.startedAt) / 1000) : null;
 }
 
-const HISTORY_COLUMNS: Column<HistoryRun>[] = [
+export function tokensOf(r: HistoryRun): number | null {
+  return r.inputTokens != null || r.outputTokens != null ? (r.inputTokens ?? 0) + (r.outputTokens ?? 0) : null;
+}
+
+/** A row is an archived record, or a box still running — the live rows lead so History reads as "every run". */
+type Row = { kind: "live"; box: BoxView } | { kind: "archived"; run: HistoryRun };
+const rowKey = (x: Row) => (x.kind === "live" ? `live:${x.box.name}` : String(x.run.id));
+
+const HISTORY_COLUMNS: Column<Row>[] = [
   {
     id: "state",
     header: "Status",
     width: "w-24",
-    sort: (r) => r.state,
-    cell: (r) => (r.state === "failed" ? <StatusDot tone="destructive">failed</StatusDot> : <StatusDot tone="ok">done</StatusDot>),
+    sort: (x) => (x.kind === "live" ? "running" : x.run.state),
+    cell: (x) =>
+      x.kind === "live" ? (
+        <StatusDot tone="live" pulse>running</StatusDot>
+      ) : x.run.state === "failed" ? (
+        <StatusDot tone="destructive">failed</StatusDot>
+      ) : (
+        <StatusDot tone="ok">done</StatusDot>
+      ),
   },
   {
     id: "title",
     header: "Run",
     primary: true,
-    sort: (r) => titleOf(r),
-    cell: (r) => {
+    sort: (x) => (x.kind === "live" ? threadTitle(x.box) : titleOf(x.run)),
+    cell: (x) => {
+      if (x.kind === "live") {
+        const b = x.box;
+        return (
+          <span className="flex min-w-0 flex-col">
+            <span className="truncate">{threadTitle(b)}</span>
+            <MetaLine className="font-normal" parts={[b.workflow ? <span className="stamp" title={b.workflow.line}>{b.workflow.name} · step {b.workflow.step}/{b.workflow.total}</span> : null, b.lastOutputAt ? <span className={b.stalled ? "text-destructive" : "text-faint"}>last action {fmtAgo(b.lastOutputAt)}</span> : null]} />
+          </span>
+        );
+      }
+      const r = x.run;
       const verified = /\bverified\s*$/i.test(r.headline ?? "");
       const facts = r.outcome ? outcomeFacts(r.outcome) : [];
       return (
         <span className="flex min-w-0 flex-col">
           <span className="flex min-w-0 items-center gap-2">
+            <span className="stamp text-faint shrink-0" title="Run number">#{r.id}</span>
             <span className="truncate">{titleOf(r)}</span>
             {verified && (
               <span className="bg-ok/10 text-ok inline-flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-px text-micro font-medium" title="The run's result was verified">
@@ -386,12 +409,15 @@ const HISTORY_COLUMNS: Column<HistoryRun>[] = [
     header: "Machine",
     width: "w-36",
     hideBelow: "md",
-    sort: (r) => friendlyName(r.box),
-    cell: (r) => (
-      <span className="stamp text-muted-foreground block truncate" title={shortName(r.box)}>
-        {friendlyName(r.box)}
-      </span>
-    ),
+    sort: (x) => friendlyName(x.kind === "live" ? x.box.name : x.run.box),
+    cell: (x) => {
+      const name = x.kind === "live" ? x.box.name : x.run.box;
+      return (
+        <span className="stamp text-muted-foreground block truncate" title={shortName(name)}>
+          {friendlyName(name)}
+        </span>
+      );
+    },
   },
   {
     id: "duration",
@@ -399,10 +425,32 @@ const HISTORY_COLUMNS: Column<HistoryRun>[] = [
     width: "w-24",
     hideBelow: "sm",
     align: "end",
-    sort: runDuration,
-    cell: (r) => {
-      const d = runDuration(r);
+    sort: (x) => (x.kind === "live" ? null : runDuration(x.run)),
+    cell: (x) => {
+      if (x.kind === "live") return <span className="stamp text-live tabular-nums">{x.box.uptime ? `up ${x.box.uptime}` : "running"}</span>;
+      const d = runDuration(x.run);
       return <span className="stamp text-muted-foreground tabular-nums">{d != null ? fmtDuration(d) : "—"}</span>;
+    },
+  },
+  {
+    id: "tokens",
+    header: "Tokens",
+    width: "w-24",
+    hideBelow: "sm",
+    align: "end",
+    sort: (x) => (x.kind === "live" ? null : tokensOf(x.run)),
+    cell: (x) => {
+      if (x.kind === "live") return <span className="text-faint text-micro">—</span>;
+      const t = tokensOf(x.run);
+      const usd = x.run.costUsd;
+      return (
+        <span className="flex flex-col items-end">
+          <span className={cn("tabular-nums text-micro", t != null ? "text-muted-foreground" : "text-faint")} title={t != null ? `${(x.run.inputTokens ?? 0).toLocaleString()} in · ${(x.run.outputTokens ?? 0).toLocaleString()} out` : "not reported"}>
+            {t != null ? fmtTokens(t) : "—"}
+          </span>
+          {usd != null && <span className="text-faint stamp tabular-nums" title="Reported by the agent — never an estimate">{fmtUsd(usd)}</span>}
+        </span>
+      );
     },
   },
   {
@@ -411,8 +459,8 @@ const HISTORY_COLUMNS: Column<HistoryRun>[] = [
     width: "w-28",
     hideBelow: "sm",
     align: "end",
-    sort: (r) => r.archivedAt || r.endedAt || null,
-    cell: (r) => <span className="text-muted-foreground text-micro tabular-nums">{r.archivedAt > 0 ? fmtAgo(Math.round(r.archivedAt / 1000)) : "—"}</span>,
+    sort: (x) => (x.kind === "live" ? null : x.run.archivedAt || x.run.endedAt || null),
+    cell: (x) => <span className="text-muted-foreground text-micro tabular-nums">{x.kind === "live" ? "" : x.run.archivedAt > 0 ? fmtAgo(Math.round(x.run.archivedAt / 1000)) : "—"}</span>,
   },
 ];
 

@@ -1460,9 +1460,12 @@ export async function runAgentTask(
   model?: string,
   agent: AgentKind = "claude",
   /** Harness rules for the thread (src/harness.ts rulesPreamble); stored in the box by the first turn. */
-  rules?: string
+  rules?: string,
+  /** Vault secrets granted to the run (src/secrets-store.ts): -e flags on the agent exec only, same path as resume secrets. */
+  secrets?: Record<string, string>
 ) {
   const env = agentEnvFlags(cfg, task, repos, creds?.primaryToken, model, agent, rules);
+  const agentEnv = [...env, ...secretEnvFlags(secrets)];
   const workdir = agentWorkdir(repos);
   // Publish the task BEFORE bootstrap, not only when agentSh launches. The thread view treats
   // "runState idle + no task" as an unused box and shows the "Nothing has run here yet" card —
@@ -1495,7 +1498,7 @@ export async function runAgentTask(
     timed("memory", installMemory(cfg, box, task, { firstTurn: true })),
   ]);
   const t3 = Date.now();
-  const r = await msb(cfg, ["exec", box, ...env, ...skillHintFlags(box, task, skills, true, memory.hint), "--", "sh", "-lc", agentSh(workdir, false, agent)]);
+  const r = await msb(cfg, ["exec", box, ...agentEnv, ...skillHintFlags(box, task, skills, true, memory.hint), "--", "sh", "-lc", agentSh(workdir, false, agent)]);
   console.error(
     `[timing] runAgentTask ${box} taskmark=${t1 - t0}ms bootstrap=${t2 - t1}ms prep=${t3 - t2}ms (${prepMarks.join(" ")}) exec=${Date.now() - t3}ms`
   );

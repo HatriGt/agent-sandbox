@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { TabPanel } from "@/components/ui/animated-tabs";
 import { NumberTicker } from "@/components/ui/number-ticker";
 import { cn } from "@/lib/utils";
-import { api } from "@/lib/api";
+import { api, type BoxView } from "@/lib/api";
 import { useCached } from "@/lib/cache";
 import { Automations, seedAutomation } from "@/components/Automations";
 import { WorkflowsPage } from "@/components/WorkflowsPage";
@@ -26,12 +26,15 @@ export function AutopilotPage({
   onBack,
   onOpenBox,
   onOpenRuns,
+  boxes,
 }: {
   tab: AutopilotTab;
   onTab: (t: AutopilotTab) => void;
   onBack: () => void;
   onOpenBox: (box: string) => void;
   onOpenRuns: (id: string) => void;
+  /** The live fleet — Playbooks reads each box's workflow for its "Last run" column. */
+  boxes: BoxView[];
 }) {
   const reduce = useReducedMotion();
   // Counts on the tabs: what is live, what is coming up, and (ink-ringed) what is waiting on you.
@@ -96,6 +99,7 @@ export function AutopilotPage({
             <ScheduledPage onOpenBox={onOpenBox} onAutomations={() => onTab("automations")} />
           ) : (
             <WorkflowsPage
+              boxes={boxes}
               onAutomate={(w) => {
                 seedAutomation({ name: w.name, workflowId: w.id, taskTemplate: w.description || `Run the ${w.name} playbook` });
                 onTab("automations");

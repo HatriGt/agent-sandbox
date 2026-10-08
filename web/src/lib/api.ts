@@ -91,9 +91,11 @@ export interface AgentChoice {
   supervised?: boolean;
 }
 
-/** Default coding agent for new threads. */
+/** Default coding agent (and, optionally, model) for new threads. */
 export interface AgentPrefs {
   defaultAgent: AgentId;
+  /** The model the composer preselects for this owner; absent = the agent's own default. */
+  defaultModel?: string;
   agents: AgentChoice[];
 }
 
@@ -325,6 +327,8 @@ export interface HarnessView {
   rulesMd?: string;
   verifyCommand?: string;
   egress?: string[];
+  /** Vault secret names granted to runs on this harness. */
+  secrets?: string[];
   needsReview?: boolean;
   unresolvedProvider?: { kind: string; label: string };
   origin?: { kind: "file" | "github" | "duplicate"; source?: string; at: number };
@@ -868,12 +872,14 @@ export const api = {
    * agent is mid-turn the controller QUEUES the message ({queued:true}) and delivers it when the run
    * finishes; `force` bypasses the queue (used for answering a question).
    */
-  resume: (session: string, message: string, opts: { force?: boolean; model?: string } = {}) =>
+  resume: (session: string, message: string, opts: { force?: boolean; model?: string; secrets?: Record<string, string> } = {}) =>
     post<{ output: string; queued?: undefined } | { queued: true; id: string }>("/resume.json", {
       session,
       message,
       force: opts.force,
       ...(opts.model ? { model: opts.model } : {}),
+      // One-shot: -e flags on this turn only (the Resolve row). Never stored by this call.
+      ...(opts.secrets ? { secrets: opts.secrets } : {}),
     }),
 
   /** Queued follow-ups for a box. */
@@ -1001,8 +1007,8 @@ export const api = {
   /** Default coding agent for new threads (Claude Code vs oh-my-pi). */
   agentPrefs: (signal?: AbortSignal) =>
     fetch(url("/agent-prefs.json"), { headers: authHeaders, signal }).then(parse<AgentPrefs>),
-  saveAgentPrefs: (defaultAgent: AgentId, allowPartialSupervision?: boolean) =>
-    post<AgentPrefs>("/agent-prefs.json", { defaultAgent, ...(allowPartialSupervision ? { allowPartialSupervision } : {}) }),
+  /** `defaultModel: ""` clears the preference (the agent's own default applies). */
+  saveAgentPrefs: (body: { defaultAgent: AgentId; allowPartialSupervision?: boolean; defaultModel?: string }) => post<AgentPrefs>("/agent-prefs.json", body),
 
   /** Model providers: the caller's own keys/endpoints. Keys come back masked only. */
   providers: (signal?: AbortSignal) => fetch(url("/providers.json"), { headers: authHeaders, signal }).then(parse<ProvidersResponse>),
@@ -1013,6 +1019,11 @@ export const api = {
   repoSetups: (signal?: AbortSignal) => fetch(url("/repo-setup.json"), { headers: authHeaders, signal }).then(parse<RepoSetupsResponse>),
   saveRepoSetup: (repo: string, profile: Partial<RepoSetupProfile>) => post<RepoSetupsResponse>("/repo-setup.json", { repo, profile }),
   resetRepoSetup: (repo: string) => post<RepoSetupsResponse>("/repo-setup/delete.json", { repo }),
+  /** Secrets vault (src/secrets-store.ts): names and grants only — a value never comes back. */
+  secrets: (signal?: AbortSignal) => fetch(url("/secrets.json"), { headers: authHeaders, signal }).then(parse<SecretsResponse>),
+  /** Store (or replace) a value; `repo` also grants it to that repo's setup profile. */
+  saveSecret: (name: string, value: string, repo?: string) => post<SecretsResponse>("/secrets.json", { action: "save", name, value, ...(repo ? { repo } : {}) }),
+  removeSecret: (name: string) => post<SecretsResponse>("/secrets.json", { action: "remove", name }),
   providerModels: (id: string, force?: boolean) =>
     post<{ models: string[]; cached: boolean; error?: string }>("/providers/models.json", { id, ...(force ? { force } : {}) }),
 
@@ -1245,6 +1256,8 @@ export interface LedgerQuery {
   agent?: string;
   state?: string;
   verified?: string;
+  /** Only runs started on this saved workflow. */
+  workflow?: string;
   since?: number;
   limit?: number;
   before?: number;
@@ -1274,6 +1287,16 @@ export interface RepoSetupProfile {
   notes?: string;
   detectedAt: number;
   confirmedBy: "detected" | "agent" | "user";
+}
+/** Mirrors GET /secrets.json. */
+export interface SecretMeta {
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+  grantedTo: Array<{ kind: "harness" | "repo"; id: string; label: string }>;
+}
+export interface SecretsResponse {
+  secrets: SecretMeta[];
 }
 export interface RepoSetupsResponse {
   profiles: Array<{ repo: string; profile: RepoSetupProfile; updatedAt: number }>;
@@ -1328,6 +1351,11 @@ export interface LedgerRow extends HistoryRun {
   inputTokens?: number | null;
   outputTokens?: number | null;
   costUsd?: number | null;
+  /** Steps of the plan of record (done / total); null when the run had no plan. */
+  planDone?: number | null;
+  planTotal?: number | null;
+  /** The saved workflow the run was started on, when it was. */
+  workflowId?: string | null;
 }
 
 /** One archived run — a record kept after its machine is gone. Mirrors GET /history.json rows. */

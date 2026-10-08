@@ -35,6 +35,7 @@ import { SKILL_LIMITS, normalizeSkill, validateSkillFilePath, type SkillDef, typ
 import { PROVIDER_KINDS, type ProviderKind, type ProviderRecord } from "./providers.js";
 import { redactShapes } from "./redact.js";
 import { AUTO_RETRY_MAX } from "./verify.js";
+import { SECRET_NAME_RE } from "./secrets-store.js";
 
 export const HARNESS_FORMAT = "agent-sandbox/harness";
 export const HARNESS_BUNDLE_FORMAT = "agent-sandbox/harness-bundle";
@@ -89,6 +90,8 @@ export interface HarnessDef {
   rulesMd?: string;
   verifyCommand?: string;
   egress?: string[];
+  /** Vault secret NAMES (src/secrets-store.ts) granted to runs on this harness. Owner-local: never exported. */
+  secrets?: string[];
   /** Imported and not yet approved by its owner: cannot start a run. */
   needsReview?: boolean;
   /** An imported provider ref that matched none of the owner's providers (UI prompt to connect one). */
@@ -178,6 +181,17 @@ export function normalizeHarness(input: unknown, existing?: HarnessDef, now = Da
   const rulesMd = cleanText(r.rulesMd, HARNESS_LIMITS.maxRulesMd, "RULES.md");
   const verifyCommand = cleanText(r.verifyCommand, HARNESS_LIMITS.maxVerify, "Verify command");
   const egress = normalizeEgress(r.egress);
+  let secrets: string[] | undefined;
+  if (r.secrets !== undefined && r.secrets !== null) {
+    if (!Array.isArray(r.secrets)) throw new Error("secrets must be a list of secret names.");
+    if (r.secrets.length > HARNESS_LIMITS.maxSkills) throw new Error(`At most ${HARNESS_LIMITS.maxSkills} secrets.`);
+    const set = new Set<string>();
+    for (const s of r.secrets) {
+      if (typeof s !== "string" || !SECRET_NAME_RE.test(s)) throw new Error(`"${String(s).slice(0, 60)}" is not a secret name (like DEPLOY_TOKEN).`);
+      set.add(s);
+    }
+    secrets = [...set].sort();
+  }
   const def: HarnessDef = {
     id: existing?.id ?? (typeof r.id === "string" && /^hrn_[\w-]{6,40}$/.test(r.id) ? r.id : `hrn_${randomUUID().slice(0, 12)}`),
     name,
@@ -193,6 +207,7 @@ export function normalizeHarness(input: unknown, existing?: HarnessDef, now = Da
   if (rulesMd) def.rulesMd = rulesMd;
   if (verifyCommand) def.verifyCommand = verifyCommand;
   if (egress?.length) def.egress = egress;
+  if (secrets?.length) def.secrets = secrets;
   // Review state is NEVER taken from client input: only import sets it, only approve clears it.
   if (existing?.needsReview) def.needsReview = true;
   if (existing?.unresolvedProvider && !providerId) def.unresolvedProvider = existing.unresolvedProvider;

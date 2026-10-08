@@ -1,5 +1,6 @@
 import * as React from "react";
-import { AlertTriangle, Brain, Check, ChevronRight, Clock, Copy, FileText, Loader2, MessageCircleQuestion, Terminal, Undo2 } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, Brain, Check, ChevronRight, Clock, Copy, FileText, KeyRound, Loader2, MessageCircleQuestion, Play, Terminal, Undo2 } from "lucide-react";
+import { CodeNavContext } from "@/components/ui/code-ref";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { resultSummary, type TraceEvent } from "@/lib/trace";
 export { PlanCard, PlanDock } from "./PlanBoard";
@@ -13,7 +14,7 @@ import { Markdown } from "@/components/ui/markdown";
 import { StreamingMarkdown } from "./StreamingMarkdown";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
-import { ATTACHMENT_RE, useSession } from "@/lib/session-context";
+import { ATTACHMENT_RE, SessionReposContext, useSession } from "@/lib/session-context";
 import { SkillMark } from "@/lib/skillGlyph";
 import { parseMcpName } from "@/lib/mcp";
 import { McpItem } from "./McpItem";
@@ -21,10 +22,15 @@ import { PanelFold, TraceOutput, VisualRawSwitch, useOutputVisual } from "./Trac
 import { Lightbox } from "@/components/ui/lightbox";
 import { Collapse } from "@/components/ui/collapse";
 import { Swap } from "@/components/ui/swap";
+import { Input } from "@/components/ui/field";
+import { Switch } from "@/components/ui/switch";
+import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 import { Odometer } from "@/components/viz/motion";
 import { LiveLogView, useLiveLog } from "@/components/viz/LiveLog";
 import { liveKind } from "@/lib/viz-live-log";
 import { toolOutputLanguage } from "@/lib/viz-tool-output";
+import { useNow } from "@/hooks/useNow";
 
 /**
  * The Execution toolbar's Expand all / Collapse all. `v` bumps on every press so pressing the same
@@ -108,6 +114,72 @@ export function MemoryItem({ notes }: { notes: { note: string; text: string; are
 const SHELL_TOOLS = new Set(["Bash", "Shell", "Terminal", "Run", "Exec", "sh", "bash", "eval", "python", "js"]);
 type ToolEvent = Extract<TraceEvent, { kind: "tool" }>;
 
+/** Tools that change a file: their row carries a diffstat chip and an Open link into the workspace. */
+const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
+/** Tools whose result is a hit list: the chip says how many. */
+const SEARCH_TOOLS = new Set(["Grep", "Glob", "WebSearch", "WebFetch", "grep", "glob", "find", "web_search", "fetch", "search"]);
+
+/**
+ * `+N −M` from the formatter's ⟦diff⟧ block (the tool's own input: old/new strings, or the whole
+ * content for a Write). The block is capped at DIFF_MAX_LINES in the box and ends with "… N more
+ * lines" when cut; those lines have no sign, so the stat is marked as a lower bound ("+200+").
+ */
+export function diffStat(diff: string | undefined): { added: number; removed: number; partial: boolean } | null {
+  if (!diff) return null;
+  let added = 0;
+  let removed = 0;
+  let partial = false;
+  for (const l of diff.split("\n")) {
+    if (l.startsWith("+")) added++;
+    else if (l.startsWith("-")) removed++;
+    else if (/^… \d+ more lines$/.test(l)) partial = true;
+  }
+  return added || removed ? { added, removed, partial } : null;
+}
+
+/** `Exit code 2` — the first line the formatter writes for a failed shell call (src/trace.ts ERR_MARK). */
+export function exitCodeOf(result: string | undefined): number | null {
+  const m = result?.match(/^\s*Exit code (\d+)\b/);
+  return m ? Number(m[1]) : null;
+}
+
+/**
+ * The env var a failed shell call says it is missing — `DEPLOY_TOKEN is not set`, `NPM_TOKEN: unbound
+ * variable`, `Missing env DATABASE_URL` — so the thread can offer to provide it (the Resolve row).
+ * Only SCREAMING_CASE names of 3+ characters count; a lowercase word before "is not set" is prose.
+ */
+export function missingSecretOf(result: string | undefined): string | null {
+  if (!result) return null;
+  const said = result.match(/\b([A-Z][A-Z0-9_]{2,})\b:? (?:is not set|is unset|not defined|is not defined|missing|unbound variable)/);
+  if (said) return said[1];
+  const env = result.match(/\bMissing (?:env(?:ironment)?(?: var(?:iable)?)?|required env(?:ironment)?(?: var(?:iable)?)?)[:\s]+\$?([A-Z][A-Z0-9_]{2,})\b/i);
+  return env ? env[1] : null;
+}
+
+/**
+ * How many hits a search/fetch result holds. Grep/Glob list one path per line; WebSearch results
+ * carry "N results" / "N sources" / link lines. Null when the shape is not a list.
+ */
+export function resultCount(name: string, result: string | undefined): number | null {
+  if (!result || !SEARCH_TOOLS.has(name)) return null;
+  const said = result.match(/\b(\d+)\s+(?:results?|sources?|matches|files?)\b/i);
+  if (said) return Number(said[1]);
+  if (/^no (matches|files) found/i.test(result.trim())) return 0;
+  const lines = result.split("\n").filter((l) => l.trim());
+  if (/^(Grep|Glob|grep|glob|find)$/.test(name)) return lines.filter((l) => !/^(Found \d+|\.\.\.|…)/.test(l)).length;
+  const links = lines.filter((l) => /https?:\/\//.test(l)).length;
+  return links || null;
+}
+
+/** A mono result chip: `+26 −1` · `exit 2` · `12 results`. */
+function OutcomeChip({ children, tone = "faint", className }: { children: React.ReactNode; tone?: "faint" | "destructive"; className?: string }) {
+  return (
+    <span className={cn("stamp shrink-0 rounded px-1 text-micro tabular-nums", tone === "destructive" ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground", className)}>
+      {children}
+    </span>
+  );
+}
+
 /* ── Timing ──────────────────────────────────────────────────────────────────────────────────────
  * Times come from the formatter's ⟦at⟧ stamps (see src/trace.ts). Every field is optional: a log
  * written before the stamps renders exactly as it always did, just without times. */
@@ -133,35 +205,6 @@ function relativeTime(at: number, now: number): string {
   const t = new Date(at);
   const time = t.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
   return t.toDateString() === new Date(now).toDateString() ? time : `${t.toLocaleDateString([], { month: "short", day: "numeric" })}, ${time}`;
-}
-
-// One shared interval per cadence, not one per mounted row: a 60-step group must not run 60 timers.
-const tickers = new Map<number, { subs: Set<() => void>; id: number }>();
-function subscribeTick(every: number, cb: () => void) {
-  let t = tickers.get(every);
-  if (!t) {
-    const subs = new Set<() => void>();
-    t = { subs, id: window.setInterval(() => subs.forEach((f) => f()), every) };
-    tickers.set(every, t);
-  }
-  t.subs.add(cb);
-  return () => {
-    t!.subs.delete(cb);
-    if (!t!.subs.size) {
-      window.clearInterval(t!.id);
-      tickers.delete(every);
-    }
-  };
-}
-/** Wall clock that re-renders every `every` ms while `active`; frozen (and timer-free) otherwise. */
-function useNow(active: boolean, every = 1000): number {
-  const [now, setNow] = React.useState(() => Date.now());
-  React.useEffect(() => {
-    if (!active) return;
-    setNow(Date.now());
-    return subscribeTick(every, () => setNow(Date.now()));
-  }, [active, every]);
-  return now;
 }
 
 /** A quiet time next to a label: relative text, the full date and time on hover. */
@@ -361,14 +404,15 @@ function SkillItem({ event, live }: { event: ToolEvent; live?: boolean }) {
 export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolean }) {
   // Results worth reading (a test run, a PR URL) must not hide behind the fold: open those groups.
   // …and a FAILED external (MCP) call must never hide behind the fold: a server silently missing
-  // or erroring is precisely the thing an operator otherwise cannot see.
+  // or erroring is precisely the thing an operator otherwise cannot see. Same for a shell call that
+  // failed for want of an env var: its Resolve row is the one thing that unblocks the run.
   const notable = React.useMemo(
     () =>
       events.some(
         (e) =>
           !!parseTestReport(e.result) ||
           /github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/.test(e.result ?? "") ||
-          (!!e.failed && !!parseMcpName(e.name))
+          (!!e.failed && (!!parseMcpName(e.name) || (SHELL_TOOLS.has(e.name) && missingSecretOf(e.result) !== null)))
       ),
     [events]
   );
@@ -545,6 +589,9 @@ export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolea
 function ShellItem({ event, live }: { event: ToolEvent; live?: boolean }) {
   const [open, setOpen] = React.useState(false);
   const hasOutput = !!event.result;
+  const exit = event.failed ? exitCodeOf(event.result) : null;
+  // A finished failure naming an env var it lacked gets a Resolve row: provide it once, or save it.
+  const missing = !live && event.failed ? missingSecretOf(event.result) : null;
   // A test run renders as a results card (summary chips + per-file cases) with the terminal panel
   // demoted to "raw output"; anything else is the plain terminal.
   const report = React.useMemo(() => (live ? null : parseTestReport(event.result)), [event.result, live]);
@@ -570,7 +617,7 @@ function ShellItem({ event, live }: { event: ToolEvent; live?: boolean }) {
           </p>
           <span className="ml-auto flex shrink-0 items-center gap-2">
             {live && <Loader2 className="text-live size-3 animate-spin motion-reduce:animate-none" aria-label="running" />}
-            {!live && event.failed && <span className="label text-destructive">failed</span>}
+            {!live && event.failed && (exit !== null ? <OutcomeChip tone="destructive">exit {exit}</OutcomeChip> : <span className="label text-destructive">failed</span>)}
             <DurationChip event={event} running={live} />
             <VisualRawSwitch raw={raw} onChange={setRaw} />
           </span>
@@ -578,6 +625,7 @@ function ShellItem({ event, live }: { event: ToolEvent; live?: boolean }) {
         {/* Both stay mounted: flipping to Raw and back must not reset the live view's tally or scroll. */}
         <div className={cn("min-w-0 [&>*]:my-0", raw && "hidden")}>{visual}</div>
         {raw && <TraceOutput text={event.result!} mode="term" className="bg-trace rounded-md border border-white/8" />}
+        {missing && <ResolveSecretRow name={missing} />}
       </div>
     );
   }
@@ -615,7 +663,7 @@ function ShellItem({ event, live }: { event: ToolEvent; live?: boolean }) {
           </StatusGlyph>
           <span className="label text-trace-fg/60">{event.name}</span>
           {live && <span className="label text-live">running</span>}
-          {!live && event.failed && <span className="label text-destructive">failed</span>}
+          {!live && event.failed && (exit !== null ? <OutcomeChip tone="destructive">exit {exit}</OutcomeChip> : <span className="label text-destructive">failed</span>)}
           <DurationChip event={event} running={live} className={cn("ml-auto", !live && !event.failed && "text-trace-fg/45")} />
           {hasOutput && <PanelFold open={open} text={event.result!} onToggle={() => setOpen((v) => !v)} />}
         </div>
@@ -636,6 +684,100 @@ function ShellItem({ event, live }: { event: ToolEvent; live?: boolean }) {
           </button>
         </Collapse>
       </div>
+      {missing && <ResolveSecretRow name={missing} />}
+    </div>
+  );
+}
+
+/**
+ * `Provide DEPLOY_TOKEN` — under a shell call that failed for want of an env var. One masked input;
+ * "Resume with it" hands the value to this turn only (api.resume `secrets`: -e flags, never stored).
+ * "Save for this repo" first stores it in the vault granted to the box's first repo, so the next run
+ * there has it from the start. The value lives in this input and nowhere else in the page.
+ */
+function ResolveSecretRow({ name }: { name: string }) {
+  const session = useSession();
+  const repos = React.useContext(SessionReposContext);
+  // Repo setup profiles are keyed owner/name; the box only knows the checkout dir. Match the dir
+  // against the connected repos so the grant lands on the real slug (`acme/orders-api`, not `orders-api`).
+  const dir = repos[0]?.name;
+  const [slug, setSlug] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    if (!dir) return;
+    const ctrl = new AbortController();
+    api
+      .repos(dir, false, ctrl.signal)
+      .then((r) => setSlug(r.repos.find((x) => x.fullName.split("/")[1].toLowerCase() === dir.toLowerCase())?.fullName ?? null))
+      .catch(() => setSlug(null));
+    return () => ctrl.abort();
+  }, [dir]);
+  const [value, setValue] = React.useState("");
+  const [save, setSave] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+  const [done, setDone] = React.useState(false);
+  const submit = async () => {
+    if (!session || !value || busy) return;
+    setBusy(true);
+    try {
+      if (save && slug) await api.saveSecret(name, value, slug);
+      await api.resume(session, `Provided ${name}; continue.`, { secrets: { [name]: value } });
+      setValue("");
+      setDone(true);
+      toast.success(`Provided ${name}`, { description: save && slug ? `Saved for ${slug} too — the next run there starts with it.` : "This turn only; it is not stored." });
+    } catch (e) {
+      toast.error(`Could not provide ${name}`, { description: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (done) {
+    return (
+      <p className="text-muted-foreground mt-1.5 flex items-center gap-1.5 pl-1 text-micro" role="status">
+        <Check className="text-ok size-3" aria-hidden />
+        <span className="font-mono">{name}</span> provided — the agent is continuing.
+      </p>
+    );
+  }
+  return (
+    <div className="border-attention/30 bg-attention/5 mt-1.5 flex flex-col gap-2 rounded-md border px-3 py-2" data-resolve-row>
+      <div className="flex min-w-0 items-center gap-2">
+        <KeyRound className="text-attention-ink size-3.5 shrink-0" aria-hidden />
+        <span className="text-foreground text-meta font-medium">
+          Provide <span className="font-mono">{name}</span>
+        </span>
+        <span className="text-muted-foreground min-w-0 truncate text-micro">the command stopped without it</span>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          mono
+          type="password"
+          autoComplete="off"
+          spellCheck={false}
+          aria-label={`Value for ${name}`}
+          placeholder="paste the value"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && void submit()}
+          disabled={busy}
+          className="h-8 min-w-0 flex-1 basis-56 text-micro"
+        />
+        <Button size="sm" variant="attention" onClick={() => void submit()} loading={busy} disabled={!value || !session}>
+          <Play className="size-3.5" />
+          Resume with it
+        </Button>
+      </div>
+      <label className={cn("flex w-fit items-center gap-2 text-micro", slug ? "text-muted-foreground cursor-pointer" : "text-faint")}>
+        <Switch size="sm" checked={save && !!slug} onCheckedChange={setSave} disabled={!slug} aria-label={slug ? `Save for ${slug}` : "Save for this repo"} />
+        {slug ? (
+          <>
+            Save for <span className="font-mono">{slug}</span> — stored, granted to this repo
+          </>
+        ) : dir ? (
+          <>Save for this repo — could not match {dir} to a connected repository</>
+        ) : (
+          <>Save for this repo — this machine has no repository attached</>
+        )}
+      </label>
     </div>
   );
 }
@@ -667,16 +809,23 @@ function StepItem({ event, live }: { event: ToolEvent; live?: boolean }) {
   // Folded like any step, but a recognisable output (JSON, a table…) opens drawn, "Raw" beside it.
   const visual = useOutputVisual(event.diff ? undefined : event.result, live);
   const [raw, setRaw] = React.useState(false);
+  const nav = React.useContext(CodeNavContext);
+  const isEdit = EDIT_TOOLS.has(event.name);
+  const stat = isEdit ? diffStat(event.diff) : null;
+  const hits = live ? null : resultCount(event.name, event.result);
+  // The headline arg of an editing tool is the path; anything with spaces or newlines is not one.
+  const filePath = isEdit && event.arg && /^\S+$/.test(event.arg.trim()) ? event.arg.trim() : null;
 
   return (
     <div className="enter min-w-0">
+      <div className="flex min-w-0 items-start gap-1">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         disabled={!expandable}
         aria-expanded={expandable ? open : undefined}
         className={cn(
-          "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1 text-left text-meta",
+          "flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1 text-left text-meta",
           expandable && "hover:bg-muted cursor-pointer",
           live && "bg-live/6"
         )}
@@ -696,15 +845,34 @@ function StepItem({ event, live }: { event: ToolEvent; live?: boolean }) {
             {event.arg}
           </code>
         )}
-        {/* Right-aligned tail: line count, duration, chevron. */}
+        {/* Right-aligned tail: outcome chip, line count, duration, chevron. */}
         <span className="ml-auto flex shrink-0 items-center gap-2 pl-1">
-          {expandable && lines > 1 && <span className="label text-faint">{lines} lines</span>}
+          {stat && (
+            <OutcomeChip className={cn(event.failed && "line-through")}>
+              <span className="text-ok">+{stat.added}{stat.partial ? "+" : ""}</span> <span className="text-destructive">−{stat.removed}</span>
+            </OutcomeChip>
+          )}
+          {hits !== null && <OutcomeChip>{hits} {hits === 1 ? "result" : "results"}</OutcomeChip>}
+          {expandable && lines > 1 && !stat && hits === null && <span className="label text-faint">{lines} lines</span>}
           <DurationChip event={event} running={live} />
           {expandable && (
             <ChevronRight className={cn("text-muted-foreground size-3.5 transition-transform duration-150", open && "rotate-90")} aria-hidden />
           )}
         </span>
       </button>
+      {/* Beside the row, not inside it (a button cannot hold a button): jump to the file in the workspace. */}
+      {nav && filePath && !live && (
+        <button
+          type="button"
+          onClick={() => nav({ path: filePath })}
+          className="text-muted-foreground hover:text-foreground hover:bg-muted flex shrink-0 cursor-pointer items-center gap-1 self-start rounded-md px-1.5 py-1 text-micro font-medium"
+          title={`Open ${filePath} in the workspace`}
+        >
+          Open
+          <ArrowUpRight className="size-3" aria-hidden />
+        </button>
+      )}
+      </div>
 
       <Collapse open={open && expandable}>
         {event.diff && <EditDiff diff={event.diff} />}

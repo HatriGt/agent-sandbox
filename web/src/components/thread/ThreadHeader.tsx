@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowLeft, Check, FileText, FolderTree, HardDrive, Link2, ListTree, Loader2, MemoryStick, MessageSquareText, Moon, MoreHorizontal, Pencil, Pin, PinOff, Plus, RotateCw, Square, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, FileText, FolderTree, HardDrive, Link2, ListTree, Loader2, MemoryStick, MessageSquareText, Moon, MoreHorizontal, PanelRight, Pencil, Pin, PinOff, Plus, RotateCw, Square, Trash2 } from "lucide-react";
 import { Swap } from "@/components/ui/swap";
 import { AnimatePresence, motion } from "motion/react";
 import { useReducedMotion } from "@/lib/motion-pref";
@@ -45,6 +45,8 @@ export function ThreadHeader({
   onStop,
   stopping,
   showWorkspace,
+  showInspector,
+  onToggleInspector,
   removing,
   sleepNow,
   sleepBusy,
@@ -89,6 +91,8 @@ export function ThreadHeader({
   onStop?: () => void;
   stopping?: boolean;
   showWorkspace: boolean;
+  showInspector: boolean;
+  onToggleInspector: () => void;
   removing: boolean;
   /** Put the machine to sleep now (msb stop, nothing removed). Hidden while already asleep. */
   sleepNow?: () => void;
@@ -297,6 +301,16 @@ export function ThreadHeader({
               </span>
             </TooltipTrigger>
             <TooltipContent side="bottom">{sleeping ? "Files — available once the sandbox is awake" : "Browse, diff and edit the workspace"}</TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="sm" onClick={onToggleInspector} aria-pressed={showInspector} className={cn("text-muted-foreground hidden md:inline-flex", showInspector && "bg-accent text-foreground")}>
+                <PanelRight />
+                <span className="hidden lg:inline">Inspector</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Run facts and the rest of the fleet · Ctrl+I</TooltipContent>
           </Tooltip>
 
           {onToggleDensity && (

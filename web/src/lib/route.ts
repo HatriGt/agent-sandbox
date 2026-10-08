@@ -22,6 +22,7 @@ export type ConsoleRoute =
   | { view: "pr"; name: string; repo: string; number: number }
   | { view: "fleet" }
   | { view: "history" }
+  | { view: "activity" }
   | { view: "automations" }
   | { view: "automation-runs"; id: string }
   | { view: "scheduled" }
@@ -45,6 +46,7 @@ export function parseConsolePath(pathname: string): ConsoleRoute {
   if (box) return { view: "box", name: decodeURIComponent(box[1]) };
   if (/^\/fleet\/?$/.test(rest)) return { view: "fleet" };
   if (/^\/history\/?$/.test(rest)) return { view: "history" };
+  if (/^\/activity\/?$/.test(rest)) return { view: "activity" };
   if (/^\/(automations|autopilot)\/?$/.test(rest)) return { view: "automations" };
   const runs = rest.match(/^\/autopilot\/automations\/([^/]+)\/runs\/?$/);
   if (runs) return { view: "automation-runs", id: decodeURIComponent(runs[1]) };
@@ -73,6 +75,8 @@ export function consolePath(r: ConsoleRoute): string {
       return `${BASE}/fleet`;
     case "history":
       return `${BASE}/history`;
+    case "activity":
+      return `${BASE}/activity`;
     case "automations":
       return `${BASE}/autopilot`;
     case "automation-runs":

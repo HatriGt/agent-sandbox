@@ -28,6 +28,8 @@ export interface Prefill {
   repos?: { name: string; branch?: string }[];
   /** Open the picker anyway (e.g. a repo could not be resolved). */
   wantsRepo?: boolean;
+  /** A saved playbook id to preselect in the composer (palette "Run playbook"). */
+  workflow?: string;
 }
 export function setPrefill(p: Prefill) {
   try {

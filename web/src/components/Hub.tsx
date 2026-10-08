@@ -35,7 +35,7 @@ import { useReducedMotion } from "@/lib/motion-pref";
 import { Collapse } from "@/components/ui/collapse";
 import { StaggerItem, Swap } from "@/components/ui/swap";
 import { IconSwap } from "@/components/ui/icon-swap";
-import { api, type BoxView, type FleetLifecycle } from "@/lib/api";
+import { api, type AuditEventRow, type BoxView, type FleetLifecycle, type LedgerRow } from "@/lib/api";
 import { intakeApi, isUnfurlable } from "@/lib/intake-api";
 import { fmtAgo, friendlyName, shortName, threadSort, threadTitle } from "@/lib/format";
 import { readDraft, takePrefill, writeDraft } from "@/lib/draft";
@@ -58,6 +58,11 @@ import { smartJoin, useVoiceInput } from "@/hooks/useVoiceInput";
 import { VoiceButton, VoicePill } from "@/components/ui/voice-button";
 import { cn } from "@/lib/utils";
 import type { SessionRun } from "@/hooks/useSessionRuns";
+import { useGo } from "@/lib/route";
+import { DataTable, MetaLine, StatusDot, type Column } from "@/components/ui/data-table";
+import { describeEvent } from "@/components/AuditLog";
+import { titleOf, runDuration, tokensOf } from "@/components/History";
+import { fmtTokens } from "@/components/thread/OutcomeCard";
 
 /**
  * The hub: what you see with no machine selected.
@@ -65,7 +70,7 @@ import type { SessionRun } from "@/hooks/useSessionRuns";
  * Starting a run is the primary act of this product, so the composer is the first thing on the page,
  * top-anchored so nothing jumps when the lists below change. Under it: the live fleet with its
  * capacity, because the hub is also where you glance to know whether anything needs you; then the
- * runs this browser started, honest about the ones whose machines are gone.
+ * last archived runs and the last few actions, so Home also says what happened while you were away.
  */
 
 interface Starter extends StarterDef {
@@ -263,7 +268,7 @@ export function Hub({
   const [attempts, setAttempts] = React.useState<Attempts>(1);
   const [harness, setHarness] = React.useState<string | null>(null);
   const [harnesses, setHarnesses] = React.useState<HarnessView[]>([]);
-  const [workflow, setWorkflow] = React.useState<string | null>(null);
+  const [workflow, setWorkflow] = React.useState<string | null>(() => prefill.current?.workflow ?? null);
   const [workflows, setWorkflows] = React.useState<WorkflowView[]>([]);
   React.useEffect(() => {
     const ctrl = new AbortController();
@@ -564,7 +569,7 @@ export function Hub({
   const chipsSet = !!harness || (agent.current && agent.current.id !== agent.defaultId) || attempts > 1 || verifyActive;
   const openChip = (key: ChipKey) => menus.set(key === "harness" ? "harness" : key === "model" ? "model" : "more");
 
-  const live = new Set(boxes.map((b) => b.name));
+  const go = useGo();
   const fleet = [...boxes].sort(threadSort);
   const runs = fleet.filter((b) => b.role !== "pool-free");
   // Anyone who already has runs (from another browser, or before this flag existed) has seen the
@@ -961,63 +966,162 @@ export function Hub({
         )}
         </AnimatePresence>
 
-        {sessionRuns.length > 0 && (
-          <motion.section
-            aria-labelledby="started-here"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.4, delay: 0.15, ease: [0.22, 1, 0.36, 1] }}
-          >
-            <div className="flex items-baseline justify-between pb-2">
-              <h2 id="started-here" className="text-foreground text-h3 font-semibold tracking-[-0.01em]">
-                Started from this browser
-              </h2>
-              <span className="text-muted-foreground text-micro">this session</span>
-            </div>
-            {/* Rows bleed 2 units past the heading so the hover tint has a gutter, like a real list. */}
-            <ul className="-mx-2 flex flex-col">
-              {sessionRuns.slice(0, 6).map((r, i) => {
-                const box = boxes.find((b) => b.name === r.box);
-                // With no snapshot at all, "gone" would be a guess: the row waits, unlabelled as dead.
-                const unknown = offline && boxes.length === 0;
-                const gone = !live.has(r.box);
-                return (
-                  <li key={r.box} className="stagger-item" style={{ "--i": i + 2 } as React.CSSProperties}>
-                    <button
-                      type="button"
-                      disabled={gone}
-                      onClick={() => onOpen(r.box)}
-                      onMouseEnter={() => !gone && prefetchWatch(r.box)}
-                      className={cn(
-                        "group flex min-h-11 w-full items-center gap-3 rounded-md px-2 py-2 text-left transition-colors duration-150",
-                        gone ? "cursor-default opacity-60" : "hover:bg-muted cursor-pointer"
-                      )}
-                    >
-                      {box ? (
-                        <StateStamp state={displayState(box)} exitCode={box.exitCode} className="w-24 shrink-0" />
-                      ) : (
-                        <span className="label text-faint w-24 shrink-0">{unknown ? "unreachable" : "destroyed"}</span>
-                      )}
-                      <span className={cn("min-w-0 flex-1 truncate text-meta", gone ? "text-muted-foreground" : "text-foreground")}>
-                        {box ? threadTitle(box) : r.task}
-                      </span>
-                      <span className="stamp text-muted-foreground shrink-0" title={shortName(r.box)}>
-                        {friendlyName(r.box)}
-                      </span>
-                      {!gone && (
-                        <ArrowRight className="text-muted-foreground size-3.5 shrink-0 -translate-x-0.5 opacity-0 transition-[opacity,translate] duration-150 group-hover:translate-x-0 group-hover:opacity-100" />
-                      )}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-            <p className="text-muted-foreground mt-3 text-micro">
-              A machine's history dies with it — nothing here is stored on the server.
-            </p>
-          </motion.section>
-        )}
+        <RecentRuns onHistory={() => go({ view: "history" })} />
+        <RecentActivity onAll={() => go({ view: "activity" })} />
       </div>
     </div>
+  );
+}
+
+function stepsOf(r: LedgerRow): string | null {
+  if (typeof r.planDone === "number" && typeof r.planTotal === "number" && r.planTotal > 0) return `${r.planDone}/${r.planTotal}`;
+  return null;
+}
+
+const RECENT_COLUMNS: Column<LedgerRow>[] = [
+  {
+    id: "state",
+    header: "Status",
+    width: "w-20",
+    cell: (r) => (r.state === "failed" ? <StatusDot tone="destructive">failed</StatusDot> : <StatusDot tone="ok">done</StatusDot>),
+  },
+  {
+    id: "title",
+    header: "Run",
+    primary: true,
+    cell: (r) => (
+      <span className="flex min-w-0 flex-col">
+        <span className="truncate">{titleOf(r)}</span>
+        <MetaLine
+          className="font-normal"
+          parts={[
+            <span className="stamp" title={shortName(r.box)}>{friendlyName(r.box)}</span>,
+            r.headline && r.task && r.headline.trim() !== titleOf(r) ? <span className="text-faint truncate" title={r.headline}>{r.headline.replace(/\s*verified\s*$/i, "")}</span> : null,
+          ]}
+        />
+      </span>
+    ),
+  },
+  {
+    id: "steps",
+    header: "Steps",
+    width: "w-16",
+    hideBelow: "sm",
+    align: "end",
+    cell: (r) => {
+      const s = stepsOf(r);
+      return <span className={cn("tabular-nums text-micro", s ? "text-muted-foreground" : "text-faint")}>{s ?? "—"}</span>;
+    },
+  },
+  {
+    id: "duration",
+    header: "Duration",
+    width: "w-20",
+    hideBelow: "sm",
+    align: "end",
+    cell: (r) => {
+      const d = runDuration(r);
+      return <span className="stamp text-muted-foreground tabular-nums">{d != null ? fmtDuration(d) : "—"}</span>;
+    },
+  },
+  {
+    id: "tokens",
+    header: "Tokens",
+    width: "w-20",
+    align: "end",
+    cell: (r) => {
+      const t = tokensOf(r);
+      return <span className={cn("tabular-nums text-micro", t != null ? "text-muted-foreground" : "text-faint")}>{t != null ? fmtTokens(t) : "—"}</span>;
+    },
+  },
+];
+
+/** The last few archived runs — Home's answer to "what happened while I was away". Fetched once per mount. */
+function RecentRuns({ onHistory }: { onHistory: () => void }) {
+  const [rows, setRows] = React.useState<LedgerRow[] | null>(null);
+  React.useEffect(() => {
+    const ctrl = new AbortController();
+    api
+      .ledger({ limit: 5 }, ctrl.signal)
+      .then((r) => setRows(r.rows))
+      .catch(() => {
+        if (!ctrl.signal.aborted) setRows([]);
+      });
+    return () => ctrl.abort();
+  }, []);
+  if (rows !== null && rows.length === 0) return null;
+  return (
+    <motion.section aria-labelledby="recent-runs" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.15, ease: [0.22, 1, 0.36, 1] }}>
+      <div className="flex items-baseline justify-between pb-2">
+        <h2 id="recent-runs" className="text-foreground text-h3 font-semibold tracking-[-0.01em]">
+          Recent runs
+        </h2>
+        <Button variant="ghost" size="xs" className="text-muted-foreground -mr-2" onClick={onHistory}>
+          View all
+          <ArrowRight className="size-3.5" />
+        </Button>
+      </div>
+      <DataTable
+        aria-label="Recent runs"
+        size="sm"
+        rows={rows ?? []}
+        loading={rows === null}
+        columns={RECENT_COLUMNS}
+        rowKey={(r) => String(r.id)}
+        onRowClick={onHistory}
+        rowLabel={(r) => `${titleOf(r)} — open history`}
+        minWidth="min-w-[32rem]"
+      />
+    </motion.section>
+  );
+}
+
+/** The last few state-changing calls, as the Activity page narrates them. */
+function RecentActivity({ onAll }: { onAll: () => void }) {
+  const [rows, setRows] = React.useState<AuditEventRow[] | null>(null);
+  React.useEffect(() => {
+    const ctrl = new AbortController();
+    api
+      .audit({ limit: 4 }, ctrl.signal)
+      .then((r) => setRows(r.events))
+      .catch(() => {
+        if (!ctrl.signal.aborted) setRows([]);
+      });
+    return () => ctrl.abort();
+  }, []);
+  if (!rows?.length) return null;
+  return (
+    <motion.section aria-labelledby="recent-activity" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.2, ease: [0.22, 1, 0.36, 1] }}>
+      <div className="flex items-baseline justify-between pb-2">
+        <h2 id="recent-activity" className="text-foreground text-h3 font-semibold tracking-[-0.01em]">
+          Recent activity
+        </h2>
+        <Button variant="ghost" size="xs" className="text-muted-foreground -mr-2" onClick={onAll}>
+          View all
+          <ArrowRight className="size-3.5" />
+        </Button>
+      </div>
+      <ul className="-mx-2 flex flex-col">
+        {rows.map((e, i) => {
+          const d = describeEvent(e);
+          const at = Date.parse(e.at);
+          return (
+            <li key={e.id} className="stagger-item flex min-h-9 items-center gap-3 rounded-md px-2 py-1.5" style={{ "--i": i + 2 } as React.CSSProperties}>
+              <span className={cn("size-1.5 shrink-0 rounded-full", e.status >= 400 ? "bg-destructive" : "bg-faint")} aria-hidden />
+              <span className={cn("min-w-0 flex-1 truncate text-meta", e.status >= 400 ? "text-muted-foreground" : "text-foreground")}>
+                {d.verb}
+                {d.session && (
+                  <>
+                    {" "}
+                    <span className="stamp text-foreground">{friendlyName(d.session)}</span>
+                  </>
+                )}
+              </span>
+              <span className="text-faint shrink-0 text-micro tabular-nums">{Number.isFinite(at) ? fmtAgo(at / 1000) : ""}</span>
+            </li>
+          );
+        })}
+      </ul>
+    </motion.section>
   );
 }

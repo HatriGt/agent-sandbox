@@ -18,6 +18,7 @@ import { Swap } from "@/components/ui/swap";
 import { ApiKeys } from "@/components/ApiKeys";
 import { NotifySettings } from "@/components/NotifySettings";
 import { AgentSettings } from "@/components/AgentSettings";
+import { SecretsSettings } from "@/components/SecretsSettings";
 import { Sessions } from "@/components/Sessions";
 import { AuditLog } from "@/components/AuditLog";
 import { cn } from "@/lib/utils";
@@ -274,6 +275,7 @@ export function Account({ onBack, onConnect, onAdmin }: { onBack: () => void; on
 
       <AppearanceSettings />
       <AgentSettings />
+      <SecretsSettings />
       <NotifySettings />
       {user && <ApiKeys />}
       {user && <Sessions />}

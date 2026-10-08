@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Link, useLocation, useNavigationType } from "react-router";
-import { ArrowRight, Bell, BellOff, Brain, ChevronRight, Clock, Flame, Keyboard, Layers, LayoutGrid, ListChecks, LogOut, Menu, Moon, PanelLeftClose, PanelLeftOpen, Pause, Plug, PlugZap, Plus, Search, Shield, Sparkles, Sun, UserRound, WifiOff, Workflow, Zap } from "lucide-react";
+import { Activity as ActivityIcon, ArrowRight, Bell, BellOff, Brain, ChevronRight, Clock, Cpu, FileSearch, Flame, GitCompare, Keyboard, Layers, LayoutGrid, ListChecks, LogOut, Menu, Moon, MoonStar, PanelLeftClose, PanelLeftOpen, PanelRight, Pause, Pin, PinOff, Plug, PlugZap, Plus, Search, Shield, Sparkles, Square, Sun, SunMedium, UserRound, WifiOff, Workflow, Zap } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { setMotionPref, useMotionPref, useReducedMotion, type MotionPref } from "@/lib/motion-pref";
 import { api, type Automation, type FleetLifecycle, type FleetSnapshot } from "@/lib/api";
@@ -14,6 +14,13 @@ import { useStableBoxes } from "@/hooks/useStableBoxes";
 import { dropWatchCache } from "@/hooks/useWatchStream";
 import { useSessionRuns } from "@/hooks/useSessionRuns";
 import { useNotifications } from "@/hooks/useNotifications";
+import { useAttentionToasts } from "@/hooks/useAttentionToasts";
+import { StatusBar } from "@/components/StatusBar";
+import { useModelChoice } from "@/components/thread/ModelPicker";
+import { useCached } from "@/lib/cache";
+import { setPrefill } from "@/lib/draft";
+import { isSleeping } from "@/lib/format";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import { Logo } from "@/components/ui/logo";
@@ -50,6 +57,7 @@ const AutopilotPage = React.lazy(() => import("@/components/AutopilotPage").then
 const AutomationRunsPage = React.lazy(() => import("@/components/AutomationRunsPage").then((m) => ({ default: m.AutomationRunsPage })));
 const HarnessesPage = React.lazy(() => import("@/components/HarnessesPage").then((m) => ({ default: m.HarnessesPage })));
 const History = React.lazy(() => import("@/components/History").then((m) => ({ default: m.History })));
+const ActivityPage = React.lazy(() => import("@/components/Activity").then((m) => ({ default: m.Activity })));
 const PullRequestPage = React.lazy(() => import("@/components/pr/PullRequestPage").then((m) => ({ default: m.PullRequestPage })));
 /** Hovering the nav item warms the chunk and both payloads, so the page paints complete on click. */
 function prefetchIntegrations() {
@@ -288,6 +296,10 @@ export default function App() {
     go({ view: "history" });
     setMobileRail(false);
   }, [go]);
+  const showActivity = React.useCallback(() => {
+    go({ view: "activity" });
+    setMobileRail(false);
+  }, [go]);
   const showAccount = React.useCallback(() => {
     go({ view: "account" });
     setMobileRail(false);
@@ -302,13 +314,83 @@ export default function App() {
   }, [go]);
 
   const notify = useNotifications(boxes, open);
+  useAttentionToasts(runs_, selected, open);
+  // "This thread" palette commands act on the open box. The model list is the box's own (sticky
+  // pick); playbooks are the saved list the Hub composer offers. Both are cached, so opening the
+  // palette never waits on the network.
+  const threadModel = useModelChoice(selectedBox?.name ?? null);
+  const { data: workflowsData } = useCached("workflows", (signal) => api.workflows(signal));
+  const runPlaybook = React.useCallback(
+    (id: string) => {
+      setPrefill({ task: "", workflow: id });
+      newTask();
+    },
+    [newTask]
+  );
+  const threadActions = React.useMemo<PaletteAction[]>(() => {
+    if (!selectedBox) return [];
+    const name = selectedBox.name;
+    const asleep = isSleeping(selectedBox);
+    const fail = (what: string) => (e: unknown) => toast.error(what, { description: e instanceof Error ? e.message : String(e) });
+    const dispatch = (type: string, detail?: unknown) => window.dispatchEvent(new CustomEvent(type, { detail }));
+    const group = "This thread";
+    return [
+      {
+        id: "t-model",
+        label: "Switch model",
+        icon: <Cpu />,
+        group,
+        keywords: "model opus sonnet haiku",
+        detail: threadModel.current?.label,
+        sub: threadModel.models.map((m) => ({
+          id: `t-model-${m.id}`,
+          label: m.label,
+          icon: <Cpu />,
+          keywords: `${m.id} ${m.group ?? ""}`,
+          detail: m.id === threadModel.current?.id ? "current" : m.group,
+          run: () => {
+            threadModel.pick(m);
+            toast(`Next message runs on ${m.label}`, { duration: 2500 });
+          },
+        })),
+      },
+      { id: "t-files", label: "Search files", icon: <FileSearch />, group, keywords: "workspace open file browse", run: () => dispatch("asb:open-workspace") },
+      ...(selectedBox.runState === "running" && !asleep
+        ? [{ id: "t-stop", label: "Stop turn", icon: <Square />, group, keywords: "interrupt cancel halt", run: () => dispatch("asb:stop-turn") }]
+        : []),
+      asleep
+        ? { id: "t-wake", label: "Wake machine", icon: <SunMedium />, group, keywords: "resume start", run: () => void api.wake(name).catch(fail("Could not wake the machine")) }
+        : { id: "t-sleep", label: "Put machine to sleep", icon: <MoonStar />, group, keywords: "stop pause idle", run: () => void api.sleep(name).catch(fail("Could not put the machine to sleep")) },
+      selectedBox.kept
+        ? { id: "t-unkeep", label: "Stop keeping this machine", icon: <PinOff />, group, keywords: "unpin reap", run: () => void api.keep(name, false).catch(fail("Could not change keep")) }
+        : { id: "t-keep", label: "Keep this machine", icon: <Pin />, group, keywords: "pin never reap", run: () => void api.keep(name, true).catch(fail("Could not keep the machine")) },
+      { id: "t-review", label: "Review all changes", icon: <GitCompare />, group, keywords: "diff review changes files", run: () => dispatch("asb:review-changes") },
+      { id: "t-inspector", label: "Toggle inspector", hint: "ctrl i", icon: <PanelRight />, group, keywords: "run fleet tokens context side pane", run: () => dispatch("asb:toggle-inspector") },
+    ];
+  }, [selectedBox, threadModel]);
+  const playbookActions = React.useMemo<PaletteAction[]>(() => {
+    const list = workflowsData?.workflows ?? [];
+    if (!list.length) return [];
+    return [
+      {
+        id: "run-playbook",
+        label: "Run playbook",
+        icon: <ListChecks />,
+        keywords: "workflow start steps",
+        detail: `${list.length}`,
+        sub: list.map((w) => ({ id: `pb-${w.id}`, label: w.name, icon: <ListChecks />, keywords: w.description ?? "", detail: `${w.steps.length} ${w.steps.length === 1 ? "step" : "steps"}`, run: () => runPlaybook(w.id) })),
+      },
+    ];
+  }, [workflowsData, runPlaybook]);
   const [shortcuts, setShortcuts] = React.useState(false);
   const motionPref = useMotionPref();
   const paletteActions = React.useMemo<PaletteAction[]>(
     () => [
+      ...threadActions,
       { id: "fleet", label: "Fleet view", hint: "g f", icon: <LayoutGrid />, group: "Go to", run: showFleet },
       { id: "automations", label: "Autopilot", icon: <Workflow />, group: "Go to", run: showAutomations },
       { id: "history", label: "History", hint: "g h", icon: <Clock />, group: "Go to", run: showHistory },
+      { id: "activity", label: "Activity", hint: "g y", icon: <ActivityIcon />, group: "Go to", keywords: "timeline audit events what happened", run: showActivity },
       { id: "skills", label: "Skills", hint: "g s", icon: <Zap />, group: "Go to", run: showSkills },
       { id: "memory", label: "Memory", icon: <Brain />, group: "Go to", keywords: "notes remembered learned across runs", run: showMemory },
       { id: "harnesses", label: "Harnesses", icon: <Layers />, group: "Go to", keywords: "drivers rules hooks egress budget compare bundle", run: showHarnesses },
@@ -317,6 +399,7 @@ export default function App() {
       { id: "account", label: "Account", icon: <UserRound />, group: "Go to", keywords: "settings profile keys notifications", run: showAccount },
       ...(getMe()?.mode === "saas" && getMe()?.role === "admin" ? [{ id: "admin", label: "Admin · users", icon: <Shield />, group: "Go to", keywords: "people members", run: showAdmin }] : []),
       { id: "connect", label: "Connect an IDE", icon: <PlugZap />, group: "Go to", keywords: "cursor claude code mcp api key", run: showConnect },
+      ...playbookActions,
       { id: "theme", label: dark ? "Switch to light theme" : "Switch to dark theme", icon: dark ? <Sun /> : <Moon />, keywords: "theme dark light mode appearance", run: () => setDark(!dark) },
       ...(["full", "system", "reduced"] as const)
         .filter((p) => p !== motionPref)
@@ -330,7 +413,7 @@ export default function App() {
       { id: "sidebar", label: collapsed ? "Expand sidebar" : "Collapse sidebar", icon: collapsed ? <PanelLeftOpen /> : <PanelLeftClose />, keywords: "rail navigation", run: () => setCollapsed(!collapsed) },
       { id: "keys", label: "Keyboard shortcuts", hint: "?", icon: <Keyboard />, keywords: "help keys", run: () => setShortcuts(true) },
     ],
-    [showFleet, showAutomations, showHistory, showSkills, showMemory, showHarnesses, showWorkflows, showAccounts, showAccount, showAdmin, showConnect, dark, setDark, collapsed, setCollapsed, motionPref]
+    [threadActions, playbookActions, showFleet, showAutomations, showHistory, showActivity, showSkills, showMemory, showHarnesses, showWorkflows, showAccounts, showAccount, showAdmin, showConnect, dark, setDark, collapsed, setCollapsed, motionPref]
   );
 
   React.useEffect(() => {
@@ -400,6 +483,7 @@ export default function App() {
       }
       if (pendingG && e.key === "f") return (pulse("fleet"), showFleet());
       if (pendingG && e.key === "h") return (pulse("history"), showHistory());
+      if (pendingG && e.key === "y") return (pulse("activity"), showActivity());
       if (pendingG && e.key === "s") return (pulse("skills"), showSkills());
       if (pendingG && e.key === "a") return (pulse("integrations"), showAccounts());
       if (e.key === "n") return newTask();
@@ -423,7 +507,7 @@ export default function App() {
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [runs_, selected, open, newTask, showFleet, showHistory, showSkills, showAccounts, pulse]);
+  }, [runs_, selected, open, newTask, showFleet, showHistory, showActivity, showSkills, showAccounts, pulse]);
 
   const ask = async (name: string, question: string) => {
     let index = 0;
@@ -550,7 +634,7 @@ export default function App() {
                       ? [{ label: "Account", onClick: showAccount }, { label: "Admin" }]
                       : route.view === "connect"
                         ? [{ label: "Account", onClick: showAccount }, { label: "Connect an IDE" }]
-                        : [{ label: { history: "History", skills: "Skills", memory: "Memory", harnesses: "Harnesses", integrations: "Integrations", account: "Account", welcome: "Welcome" }[route.view] }];
+                        : [{ label: { history: "History", activity: "Activity", skills: "Skills", memory: "Memory", harnesses: "Harnesses", integrations: "Integrations", account: "Account", welcome: "Welcome" }[route.view] }];
 
   // The expanded rail body is rendered twice — in the desktop <aside> and inside the phone drawer.
   const railBody = (
@@ -564,7 +648,7 @@ export default function App() {
         {/* Desktop searches from the top bar; the phone drawer keeps its own entry. */}
         <button
           type="button"
-          onClick={openPalette}
+          onClick={() => openPalette()}
           className="text-muted-foreground hover:text-foreground bg-background/60 flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md border px-3 text-left text-meta transition-colors duration-150 md:hidden"
         >
           <Search className="size-4 shrink-0" aria-hidden />
@@ -635,6 +719,7 @@ export default function App() {
         <span className="contents" onMouseEnter={prefetchHistory}>
           <NavItem active={view === "history"} flash={flash === "history"} onClick={showHistory} icon={<Clock />} label="History" shortcut="g h" />
         </span>
+        <NavItem active={view === "activity"} flash={flash === "activity"} onClick={showActivity} icon={<ActivityIcon />} label="Activity" shortcut="g y" />
         <p className="label text-faint px-2.5 pt-3 pb-1 text-[10px] tracking-[0.08em] uppercase">Resources</p>
         <span className="contents" onMouseEnter={prefetchSkills}>
           <NavItem active={view === "skills"} flash={flash === "skills"} onClick={showSkills} icon={<Zap />} label="Skills" shortcut="g s" />
@@ -810,6 +895,7 @@ export default function App() {
               <span className="contents" onMouseEnter={prefetchHistory}>
                 <RailIcon active={view === "history"} flash={flash === "history"} onClick={showHistory} icon={<Clock />} label="History" shortcut="g h" />
               </span>
+              <RailIcon active={view === "activity"} flash={flash === "activity"} onClick={showActivity} icon={<ActivityIcon />} label="Activity" shortcut="g y" />
               <span className="bg-border my-0.5 h-px w-6" aria-hidden />
               <span className="contents" onMouseEnter={prefetchSkills}>
                 <RailIcon active={view === "skills"} flash={flash === "skills"} onClick={showSkills} icon={<Zap />} label="Skills" shortcut="g s" />
@@ -873,7 +959,7 @@ export default function App() {
                   />
                 ) : view === "automations" || view === "scheduled" ? (
                   <PageEnter className="h-full min-h-0">
-                    <AutopilotPage tab={view} onTab={goAutopilot} onBack={backToRail} onOpenBox={(b) => go({ view: "box", name: b })} onOpenRuns={(id) => go({ view: "automation-runs", id })} />
+                    <AutopilotPage tab={view} boxes={boxes} onTab={goAutopilot} onBack={backToRail} onOpenBox={(b) => go({ view: "box", name: b })} onOpenRuns={(id) => go({ view: "automation-runs", id })} />
                   </PageEnter>
                 ) : route.view === "automation-runs" ? (
                   <PageEnter className="h-full min-h-0">
@@ -881,7 +967,11 @@ export default function App() {
                   </PageEnter>
                 ) : view === "history" ? (
                   <PageEnter className="h-full min-h-0">
-                    <History onBack={backToRail} onAgain={newTask} />
+                    <History onBack={backToRail} onAgain={newTask} boxes={boxes} onOpen={(b) => go({ view: "box", name: b })} />
+                  </PageEnter>
+                ) : view === "activity" ? (
+                  <PageEnter className="h-full min-h-0">
+                    <ActivityPage onBack={backToRail} boxes={boxes} />
                   </PageEnter>
                 ) : view === "skills" ? (
                   <PageEnter className="h-full min-h-0">
@@ -897,7 +987,7 @@ export default function App() {
                   </PageEnter>
                 ) : view === "workflows" ? (
                   <PageEnter className="h-full min-h-0">
-                    <AutopilotPage tab="playbooks" onTab={goAutopilot} onBack={backToRail} onOpenBox={(b) => go({ view: "box", name: b })} onOpenRuns={(id) => go({ view: "automation-runs", id })} />
+                    <AutopilotPage tab="playbooks" boxes={boxes} onTab={goAutopilot} onBack={backToRail} onOpenBox={(b) => go({ view: "box", name: b })} onOpenRuns={(id) => go({ view: "automation-runs", id })} />
                   </PageEnter>
                 ) : view === "integrations" ? (
                   <PageEnter className="h-full min-h-0">
@@ -936,6 +1026,8 @@ export default function App() {
                   <Thread
                     box={!selectedBox.task && selectedBox.name === launched && launchTask.current ? { ...selectedBox, task: launchTask.current } : selectedBox}
                     lifecycle={lifecycle}
+                    fleet={boxes}
+                    onOpenBox={(b) => go({ view: "box", name: b })}
                     inferredRepos={inferredNotes[selectedBox.name]}
                     asides={asides[selectedBox.name] ?? []}
                     replies={replies[selectedBox.name] ?? []}
@@ -1013,6 +1105,19 @@ export default function App() {
               </React.Suspense>
             </motion.div>
           </AnimatePresence>
+        <StatusBar
+          runs={runs_.length}
+          working={working}
+          waiting={waiting.length}
+          updatedAt={updatedAt}
+          connected={!!data || !error}
+          box={selectedBox}
+          onFleet={showFleet}
+          onWaiting={() => waiting[0] && open(waiting[0].name)}
+          onBranch={() => window.dispatchEvent(new CustomEvent("asb:open-workspace"))}
+          onModel={() => openPalette("t-model")}
+          onPlaybook={showWorkflows}
+        />
         </main>
 
         <CommandPalette boxes={runs_} actions={paletteActions} onOpen={open} onNew={newTask} />

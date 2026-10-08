@@ -17,6 +17,8 @@ export interface ArchiveRecord {
   digest: RunDigest;
   /** The run's full workspace diff (unified, workspace-relative paths), already redacted+capped. */
   diffText?: string;
+  /** The saved workflow (src/workflow.ts) the run was started on, when it was. */
+  workflowId?: string;
   /** Wall-clock archive moment; defaults to Date.now(). Injectable for tests. */
   now?: number;
 }
@@ -78,12 +80,16 @@ export function archiveRun(db: Db, rec: ArchiveRecord): number | null {
   const r = db
     .prepare(
       `INSERT INTO run_archive (box, owner, task, state, exit_code, started_at, ended_at, archived_at, headline, digest_json, diff_text,
-         started_by, trigger_id, agent, verified, input_tokens, output_tokens, cost_usd)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         started_by, trigger_id, agent, verified, input_tokens, output_tokens, cost_usd, workflow_id, plan_done, plan_total)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       rec.box, rec.owner, d.task, d.state, d.exitCode ?? null, d.startedAt ?? null, d.endedAt ?? null, now, d.headline, JSON.stringify(d), rec.diffText || null,
-      ...ledgerColumns(d)
+      ...ledgerColumns(d),
+      rec.workflowId ?? null,
+      // Plan counts only when the run carried a plan: a planless run is "no plan", not "0 of 0".
+      d.plan.length ? d.plan.filter((s) => s.state === "done").length : null,
+      d.plan.length ? d.plan.length : null
     );
   return Number(r.lastInsertRowid);
 }
@@ -114,6 +120,8 @@ export interface LedgerFilter {
   state?: string;
   /** "yes" | "no" | "unchecked" */
   verified?: string;
+  /** Saved workflow id the run was started on. */
+  workflow?: string;
 }
 
 export interface LedgerTotals {
@@ -146,6 +154,7 @@ function ledgerWhere(owner: string, f: LedgerFilter): { sql: string; args: Array
   if (f.verified === "yes") w.push("verified = 1");
   else if (f.verified === "no") w.push("verified = 0");
   else if (f.verified === "unchecked") w.push("verified IS NULL");
+  if (f.workflow) (w.push("workflow_id = ?"), args.push(f.workflow));
   return { sql: w.join(" AND "), args };
 }
 
@@ -190,6 +199,10 @@ export interface LedgerRow extends ArchivedRunRow {
   inputTokens: number | null;
   outputTokens: number | null;
   costUsd: number | null;
+  workflowId: string | null;
+  /** Steps of the plan of record (done / total); null when the run had no plan. */
+  planDone: number | null;
+  planTotal: number | null;
 }
 
 /** Filtered, reverse-chronological ledger rows (cap 50, `before` pages by id). */
@@ -199,7 +212,7 @@ export function listLedger(db: Db, owner: string, f: LedgerFilter & { limit?: nu
   const rows = db
     .prepare(
       `SELECT id, box, owner, task, state, exit_code, started_at, ended_at, archived_at, headline,
-         started_by, trigger_id, agent, verified, input_tokens, output_tokens, cost_usd
+         started_by, trigger_id, agent, verified, input_tokens, output_tokens, cost_usd, workflow_id, plan_done, plan_total
        FROM run_archive WHERE ${sql} ${f.before ? "AND id < ?" : ""} ORDER BY id DESC LIMIT ?`
     )
     .all(...args, ...(f.before ? [f.before] : []), limit) as Array<Record<string, unknown>>;
@@ -213,6 +226,9 @@ export function listLedger(db: Db, owner: string, f: LedgerFilter & { limit?: nu
     inputTokens: num(r.input_tokens),
     outputTokens: num(r.output_tokens),
     costUsd: num(r.cost_usd),
+    workflowId: (r.workflow_id as string | null) ?? null,
+    planDone: num(r.plan_done),
+    planTotal: num(r.plan_total),
   }));
 }
 

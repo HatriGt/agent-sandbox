@@ -1,8 +1,8 @@
 import * as React from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { Check, Copy, Github, ListChecks, Pencil, Plus, ShieldAlert, Terminal, Trash2, Wand2, Zap } from "lucide-react";
+import { Check, Copy, Github, ListChecks, Pencil, Play, Plus, ShieldAlert, Terminal, Trash2, Wand2, Zap } from "lucide-react";
 import { toast } from "sonner";
-import { api, type Automation, type WorkflowStep, type WorkflowView } from "@/lib/api";
+import { api, type Automation, type BoxView, type LedgerRow, type WorkflowStep, type WorkflowView } from "@/lib/api";
 import { useCached } from "@/lib/cache";
 import { fmtAgo } from "@/lib/format";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,9 @@ import { Panel, PanelFooter, SettingsSection } from "@/components/ui/settings";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Swap } from "@/components/ui/swap";
 import { Bar } from "@/components/thread/Skeletons";
-import { DataTable, stopRow, type Column } from "@/components/ui/data-table";
+import { DataTable, StatusDot, stopRow, type Column } from "@/components/ui/data-table";
+import { setPrefill } from "@/lib/draft";
+import { useGo } from "@/lib/route";
 
 const EXAMPLE = `name: ship-feature
 description: implement, prove it with tests, then review your own diff
@@ -83,7 +85,8 @@ steps:
  * repo would hold), validated by the controller as you type, with the parsed steps shown beside it
  * so a prompt can never be mistaken for a command.
  */
-export function WorkflowsPage({ onAutomate }: { onAutomate: (w: WorkflowView) => void }) {
+export function WorkflowsPage({ boxes, onAutomate }: { boxes: BoxView[]; onAutomate: (w: WorkflowView) => void }) {
+  const go = useGo();
   const [list, setList] = React.useState<WorkflowView[] | null>(null);
   const [dir, setDir] = React.useState(".agent-sandbox/workflows");
   const [error, setError] = React.useState<string | null>(null);
@@ -127,6 +130,33 @@ export function WorkflowsPage({ onAutomate }: { onAutomate: (w: WorkflowView) =>
   // Which automations run each playbook — the link between "how" and "when".
   const triggers = useCached("triggers", (signal) => api.triggers(signal)).data?.triggers ?? [];
   const usedBy = (id: string) => triggers.filter((t) => t.workflowId === id);
+  // Archived runs, newest first, indexed by the playbook they ran. One page is plenty: the column
+  // only needs the newest run per playbook, and a run older than the page is still "Never" at worst.
+  const [archived, setArchived] = React.useState<Map<string, LedgerRow>>(new Map());
+  React.useEffect(() => {
+    const ctrl = new AbortController();
+    api
+      .ledger({ limit: 100 }, ctrl.signal)
+      .then((r) => {
+        const m = new Map<string, LedgerRow>();
+        for (const row of r.rows) if (row.workflowId && !m.has(row.workflowId)) m.set(row.workflowId, row);
+        setArchived(m);
+      })
+      .catch(() => {});
+    return () => ctrl.abort();
+  }, []);
+  const lastRun = (id: string): LastRun | null => {
+    const live = boxes.filter((b) => b.workflow?.id === id).sort((a, b) => (b.lastOutputAt ?? 0) - (a.lastOutputAt ?? 0))[0];
+    if (live) return { kind: "live", box: live };
+    const run = archived.get(id);
+    return run ? { kind: "archived", run } : null;
+  };
+  // Run: the Hub composer with this playbook preselected and the caret ready for {{task}}.
+  const run = (w: WorkflowView) => {
+    setPrefill({ task: "", workflow: w.id });
+    go({ view: "hub" });
+    requestAnimationFrame(() => requestAnimationFrame(() => (document.getElementById("new-task") as HTMLTextAreaElement | null)?.focus()));
+  };
   return (
     <div className="min-w-0">
       <div>
@@ -208,7 +238,7 @@ export function WorkflowsPage({ onAutomate }: { onAutomate: (w: WorkflowView) =>
                     }
                   />
                 ) : (
-                  <PlaybookTable items={items} usedBy={usedBy} onEdit={(w) => void edit(w)} onDelete={(w) => void mutate({ action: "delete", id: w.id }, "Deleted")} onAutomate={onAutomate} />
+                  <PlaybookTable items={items} usedBy={usedBy} lastRun={lastRun} onRun={run} onEdit={(w) => void edit(w)} onDelete={(w) => void mutate({ action: "delete", id: w.id }, "Deleted")} onAutomate={onAutomate} />
                 )}
               </SettingsSection>
               <SettingsSection id="starters" title="Start from a template" purpose="Opens in the editor — change anything before you save.">
@@ -244,16 +274,23 @@ function stepLine(s: WorkflowStep): string {
   return s.title ?? (s.skill ? `/${s.skill}` : s.prompt.replace(/\s+/g, " ").slice(0, 60));
 }
 
-/** Saved playbooks as a table: what it is, its steps, which automations run it, where it lives. The row opens the editor. */
+/** The newest run of a playbook: a live box (BoxView.workflow) beats any archived record (LedgerRow.workflowId). */
+type LastRun = { kind: "live"; box: BoxView } | { kind: "archived"; run: LedgerRow };
+
+/** Saved playbooks as a table: what it is, its steps, which automations run it, its last run, where it lives. The row opens the editor. */
 function PlaybookTable({
   items,
   usedBy,
+  lastRun,
+  onRun,
   onEdit,
   onDelete,
   onAutomate,
 }: {
   items: WorkflowView[];
   usedBy: (id: string) => Automation[];
+  lastRun: (id: string) => LastRun | null;
+  onRun: (w: WorkflowView) => void;
   onEdit: (w: WorkflowView) => void;
   onDelete: (w: WorkflowView) => void;
   onAutomate: (w: WorkflowView) => void;
@@ -331,20 +368,51 @@ function PlaybookTable({
         ),
     },
     {
+      id: "last",
+      header: "Last run",
+      width: "w-[8rem]",
+      sort: (w) => {
+        const l = lastRun(w.id);
+        return l ? (l.kind === "live" ? Number.MAX_SAFE_INTEGER : l.run.endedAt ?? l.run.archivedAt) : null;
+      },
+      cell: (w) => {
+        const l = lastRun(w.id);
+        if (!l) return <span className="text-faint text-micro">Never</span>;
+        if (l.kind === "live") {
+          const wf = l.box.workflow!;
+          return (
+            <StatusDot tone={wf.state === "failed" ? "destructive" : wf.state === "done" ? "ok" : "live"} pulse={wf.state === "running"} className="text-micro">
+              {wf.state === "running" ? `step ${wf.step}/${wf.total}` : wf.state}
+            </StatusDot>
+          );
+        }
+        const at = l.run.endedAt ?? l.run.archivedAt;
+        return (
+          <StatusDot tone={l.run.state === "failed" ? "destructive" : "ok"} className="text-micro">
+            {at ? fmtAgo(Math.round(at / 1000)) : l.run.state}
+          </StatusDot>
+        );
+      },
+    },
+    {
       id: "actions",
       header: <span className="sr-only">Actions</span>,
-      width: "w-[9.5rem]",
+      width: "w-[13rem]",
       align: "end",
-      cell: (w) => <PlaybookActions w={w} onEdit={() => onEdit(w)} onDelete={() => onDelete(w)} onAutomate={() => onAutomate(w)} />,
+      cell: (w) => <PlaybookActions w={w} onRun={() => onRun(w)} onEdit={() => onEdit(w)} onDelete={() => onDelete(w)} onAutomate={() => onAutomate(w)} />,
     },
   ];
-  return <DataTable aria-label="Saved playbooks" rows={items} columns={columns} rowKey={(w) => w.id} onRowClick={onEdit} rowLabel={(w) => `Edit ${w.name}`} minWidth="min-w-[40rem]" />;
+  return <DataTable aria-label="Saved playbooks" rows={items} columns={columns} rowKey={(w) => w.id} onRowClick={onEdit} rowLabel={(w) => `Edit ${w.name}`} minWidth="min-w-[44rem]" />;
 }
 
-function PlaybookActions({ w, onEdit, onDelete, onAutomate }: { w: WorkflowView; onEdit: () => void; onDelete: () => void; onAutomate: () => void }) {
+function PlaybookActions({ w, onRun, onEdit, onDelete, onAutomate }: { w: WorkflowView; onRun: () => void; onEdit: () => void; onDelete: () => void; onAutomate: () => void }) {
   const [armed, setArmed] = React.useState(false);
   return (
     <span className="inline-flex items-center gap-0.5" onClick={stopRow} onKeyDown={stopRow}>
+      <Button variant="ghost" size="xs" onClick={onRun} title="Start a task with this playbook" className="text-live">
+        <Play />
+        Run
+      </Button>
       <Button variant="ghost" size="xs" onClick={onAutomate} title="Run this playbook on a schedule or event">
         <Zap />
         Automate

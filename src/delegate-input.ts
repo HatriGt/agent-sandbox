@@ -98,6 +98,8 @@ export interface DelegatePlan {
    * repos with no profile. Absent = the run knows nothing about setup.
    */
   setup?: Record<string, import("./setup-profile.js").SetupProfile>;
+  /** Vault secrets (src/secrets-store.ts) granted to this run, resolved by the route; -e flags on the first turn. */
+  secrets?: Record<string, string>;
   /** Back-compat accessor: the first repo's identifier. */
   repo: string;
   /** Back-compat accessor: the first repo's ref. */

@@ -417,6 +417,26 @@ const MIGRATIONS: string[] = [
   ALTER TABLE triggers ADD COLUMN repos_json TEXT;
   UPDATE triggers SET repos_json = json_array(repo) WHERE repo IS NOT NULL AND repo != '';
   `,
+  `
+  -- Ledger: the workflow a run was started on (History "Last run" per playbook, \`workflow\` filter)
+  -- and the plan of record's step counts, so a list row can show "steps 3/4" without the digest.
+  ALTER TABLE run_archive ADD COLUMN workflow_id TEXT;
+  ALTER TABLE run_archive ADD COLUMN plan_done INTEGER;
+  ALTER TABLE run_archive ADD COLUMN plan_total INTEGER;
+  `,
+  `
+  -- Secrets vault (src/secrets-store.ts): per-owner named values sealed with the controller key.
+  -- Grants are by NAME elsewhere (a harness's secrets list, a repo setup profile's envVars); a run
+  -- receives the granted names it has values for, through the same -e path as one-shot secrets.
+  CREATE TABLE IF NOT EXISTS secrets (
+    owner TEXT NOT NULL,
+    name TEXT NOT NULL,
+    value_enc TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (owner, name)
+  );
+  `,
 ];
 
 export function openDb(dataDir: string): Db {
