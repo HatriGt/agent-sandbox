@@ -15,6 +15,7 @@ import { Icon } from "@/components/ui/Icon";
 import { AttemptGroupPanel } from "@/components/AttemptGroupCard";
 import { PickerSheet } from "./PickerSheet";
 import { Segmented } from "./Segmented";
+import { useNow } from "@/hooks/useNow";
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -398,16 +399,14 @@ function CompareView({ id }: { id: string }) {
   const router = useRouter();
   const [d, setD] = useState<CompareDetail | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const tick = useNow(10_000);
   useEffect(() => {
     let live = true;
-    const load = () => api.compare(id).then((r) => live && setD(r)).catch((e) => live && setErr(msg(e)));
-    void load();
-    const t = setInterval(load, 10_000);
+    api.compare(id).then((r) => live && setD(r)).catch((e) => live && setErr(msg(e)));
     return () => {
       live = false;
-      clearInterval(t);
     };
-  }, [id]);
+  }, [id, tick]);
   if (err) return <T variant="micro" tone="destructive">{err}</T>;
   if (!d) return <T variant="micro" tone="faint">Loading…</T>;
   return (
@@ -491,16 +490,14 @@ function AttemptGroupDetail({ id }: { id: string }) {
   const [d, setD] = useState<AttemptGroupView | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const active = !d || d.status === "running" || d.status === "deciding";
+  const tick = useNow(10_000, active);
   useEffect(() => {
     let live = true;
-    const load = () => api.attemptGroup(id).then((r) => live && setD(r)).catch((e) => live && setErr(msg(e)));
-    void load();
-    const t = active ? setInterval(load, 10_000) : undefined;
+    api.attemptGroup(id).then((r) => live && setD(r)).catch((e) => live && setErr(msg(e)));
     return () => {
       live = false;
-      if (t) clearInterval(t);
     };
-  }, [id, active]);
+  }, [id, tick]);
   if (err) return <T variant="micro" tone="destructive">{err}</T>;
   if (!d) return <T variant="micro" tone="faint">Loading…</T>;
   return <AttemptGroupPanel group={d} onChange={setD} />;

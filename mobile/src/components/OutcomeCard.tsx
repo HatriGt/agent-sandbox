@@ -7,7 +7,7 @@ import { shortDuration } from "@/lib/planTasks";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { T } from "./ui/AppText";
-import { Icon } from "./ui/Icon";
+import { Icon, type IconName } from "./ui/Icon";
 import { FadeInUp, PressScale } from "@/components/motion";
 
 /**
@@ -18,8 +18,42 @@ import { FadeInUp, PressScale } from "@/components/motion";
  */
 const DASH = "—";
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
-const fmtTokens = (n: number) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k` : String(n));
-const fmtUsd = (n: number) => (n < 0.01 ? "<$0.01" : `$${n.toFixed(2)}`);
+export const fmtTokens = (n: number) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k` : String(n));
+export const fmtUsd = (n: number) => (n < 0.01 ? "<$0.01" : `$${n.toFixed(2)}`);
+
+type ChipTone = "ok" | "destructive" | "default";
+/**
+ * The collapsed facts as chips (web RunPill summary / OutcomeCard chips): PR · files ± · tests or
+ * verified · duration · tokens · cost. Only facts that exist; "no changes" when the diff is empty.
+ */
+export function outcomeChips(o: RunOutcome): { text: string; tone: ChipTone; icon?: IconName }[] {
+  const out: { text: string; tone: ChipTone; icon?: IconName }[] = [];
+  const prs = o.result.prs;
+  if (prs[0]) out.push({ text: `PR #${prs[0].number}${prs.length > 1 ? ` +${prs.length - 1}` : ""}`, tone: "default", icon: "git-pull-request" });
+  const d = o.result.diff;
+  if (d && d.files) out.push({ text: `${plural(d.files, "file")} +${d.additions} −${d.deletions}`, tone: "default", icon: "file-plus" });
+  const t = o.trust.tests;
+  if (t) out.push({ text: t.failed ? `tests ${t.passed}/${t.passed + t.failed} ✕` : `tests ${t.passed}/${t.passed} ✓`, tone: t.failed ? "destructive" : "ok" });
+  else if (o.trust.verified) out.push({ text: o.trust.verified.pass ? "verified ✓" : "unverified", tone: o.trust.verified.pass ? "ok" : "destructive" });
+  if (!prs.length && d && !d.files) out.push({ text: "no changes", tone: "default" });
+  if (o.cost.durationMs) out.push({ text: shortDuration(o.cost.durationMs), tone: "default", icon: "clock" });
+  if (o.cost.tokens) out.push({ text: `${fmtTokens(o.cost.tokens.input + o.cost.tokens.output)} tokens`, tone: "default" });
+  if (o.cost.usd !== null) out.push({ text: fmtUsd(o.cost.usd), tone: "default" });
+  return out;
+}
+
+function Chip({ text, tone, icon }: { text: string; tone: ChipTone; icon?: IconName }) {
+  const { palette } = useTheme();
+  const color = tone === "ok" ? palette.ok : tone === "destructive" ? palette.destructive : palette.mutedForeground;
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 4, borderWidth: 1, borderColor: palette.border, borderRadius: radius.pill, paddingHorizontal: 8, paddingVertical: 3 }}>
+      {icon ? <Icon name={icon} size={10} color={color} /> : null}
+      <T variant="micro" mono style={{ color }}>
+        {text}
+      </T>
+    </View>
+  );
+}
 
 function testsLine(o: RunOutcome): { text: string; tone: "ok" | "destructive" | "default" } {
   const t = o.trust.tests;
@@ -44,13 +78,17 @@ export function outcomeFacts(o: RunOutcome): string {
   return out.join(" · ");
 }
 
-/** Fetches the latest archived outcome for a live box's finished run; nothing until it exists. */
-export function OutcomeCard({ session, fetchKey }: { session: string; fetchKey: string }) {
+/**
+ * The latest archived outcome for a live box's finished run; null until it exists. The archive
+ * lands just after the finish edge, so a miss retries a few times, then stays absent.
+ */
+export function useOutcome(session: string, fetchKey: string, enabled: boolean): RunOutcome | null {
   const [o, setO] = useState<RunOutcome | null>(null);
   useEffect(() => {
+    setO(null);
+    if (!enabled || !session) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    setO(null);
     const load = (left: number) =>
       api
         .outcome({ box: session })
@@ -58,17 +96,15 @@ export function OutcomeCard({ session, fetchKey }: { session: string; fetchKey: 
           if (!cancelled) setO(r.outcome);
         })
         .catch(() => {
-          // The archive lands just after the finish edge; retry a few times, then stay absent.
           if (!cancelled && left > 0) timer = setTimeout(() => load(left - 1), 4000);
         });
     load(3);
     return () => {
       cancelled = true;
-      if (timer) clearTimeout(timer);
+      clearTimeout(timer);
     };
-  }, [session, fetchKey]);
-  if (!o) return null;
-  return <OutcomeView outcome={o} />;
+  }, [session, fetchKey, enabled]);
+  return o;
 }
 
 export function OutcomeView({ outcome: o }: { outcome: RunOutcome }) {
@@ -76,7 +112,7 @@ export function OutcomeView({ outcome: o }: { outcome: RunOutcome }) {
   const router = useRouter();
   const failed = o.state === "failed";
   const tests = testsLine(o);
-  const tokens = o.cost.tokens ? o.cost.tokens.input + o.cost.tokens.output : null;
+  const chips = outcomeChips(o);
   const openBox = (box: string) => router.push({ pathname: "/box/[name]", params: { name: box } });
   const openLink = (l: { href: string; external: boolean }) => {
     if (l.external) void Linking.openURL(l.href);
@@ -110,6 +146,13 @@ export function OutcomeView({ outcome: o }: { outcome: RunOutcome }) {
             {o.header.label ? `started by ${o.header.label}${o.header.link?.external ? " ↗" : ""}` : `started by ${DASH}`}
           </T>
         </View>
+        {chips.length ? (
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 5 }}>
+            {chips.map((c) => (
+              <Chip key={c.text} {...c} />
+            ))}
+          </View>
+        ) : null}
 
         <Section title="What you got">
           {o.result.prs.length ? (
@@ -126,9 +169,6 @@ export function OutcomeView({ outcome: o }: { outcome: RunOutcome }) {
               no pull request
             </T>
           )}
-          <T variant="micro" mono tone="muted">
-            {o.result.diff ? (o.result.diff.files ? `${plural(o.result.diff.files, "file")} · +${o.result.diff.additions} −${o.result.diff.deletions}` : "no file changes") : `diff ${DASH}`}
-          </T>
           {o.result.followedBy ? (
             <T variant="micro" tone="muted" onPress={() => openBox(o.result.followedBy!.box)}>
               followed by {friendlyName(o.result.followedBy.box)} ›
@@ -167,16 +207,6 @@ export function OutcomeView({ outcome: o }: { outcome: RunOutcome }) {
           <T variant="micro" tone="muted">
             {o.trust.questions ? `you were asked ${plural(o.trust.questions, "question")}` : "no questions asked"}
             {o.trust.openQuestions ? ` · ${o.trust.openQuestions} unanswered` : ""}
-          </T>
-        </Section>
-
-        <Section title="What it cost">
-          <T variant="micro" mono>
-            {o.cost.durationMs !== null ? shortDuration(o.cost.durationMs) : DASH}
-            {"  ·  "}
-            {tokens !== null ? `${fmtTokens(tokens)} tokens` : `tokens ${DASH}`}
-            {"  ·  "}
-            {o.cost.usd !== null ? fmtUsd(o.cost.usd) : `$ ${DASH}`}
           </T>
         </Section>
       </View>

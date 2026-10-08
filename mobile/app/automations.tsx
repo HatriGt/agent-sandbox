@@ -6,7 +6,8 @@ import { RefreshControl, ScrollView, Switch, View, Pressable } from "react-nativ
 import { Redirect, useFocusEffect, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
-import { api, type Automation, type AutomationDelivery, type AutomationResult, type AutomationScope } from "@/lib/api";
+import { api, type Automation, type AutomationResult } from "@/lib/api";
+import { deliveryLine, deliveryTone } from "@/lib/automationRuns";
 import { ago } from "@/lib/format";
 import { useAuth } from "@/state/auth";
 import { useTheme } from "@/theme/ThemeContext";
@@ -17,7 +18,9 @@ import { Card } from "@/components/ui/Card";
 import { Segmented } from "@/components/settings/Segmented";
 import { PressScale } from "@/components/motion";
 
-type Filter = "all" | AutomationScope;
+/** One list for everything that runs on its own: standing rules and what a chat asked for later. */
+type Filter = "all" | "rules" | "chat";
+const fromChat = (a: Automation) => a.scope === "scheduled";
 
 const KIND: Record<Automation["kind"], string> = { schedule: "Schedule", webhook: "Webhook", github: "GitHub", watch: "Repo activity", chain: "After another" };
 
@@ -29,24 +32,6 @@ function resultLine(r: AutomationResult | null): { text: string; tone: "muted" |
   return { text: `Failed to start ${ago(r.at)}${r.reason ? ` — ${r.reason}` : ""}`, tone: "destructive" };
 }
 
-const REASON: Record<NonNullable<AutomationDelivery["reason"]>, string> = {
-  cooldown: "cooldown",
-  disabled: "paused",
-  limit: "limit reached",
-  dedupe: "duplicate",
-  ignored: "not a match",
-  signature: "bad signature",
-  payload: "bad payload",
-  error: "error",
-};
-
-/** "fired → box-1" / "skipped · cooldown" / "rejected · bad signature" (mirrors the web). */
-function deliveryLine(d: AutomationDelivery): string {
-  const head = d.outcome === "fired" ? `fired${d.box ? ` → ${d.box}` : ""}` : `${d.outcome === "failed" ? "could not start" : d.outcome}${d.reason ? ` · ${REASON[d.reason]}` : ""}`;
-  return d.test ? `test · ${head}` : head;
-}
-const deliveryTone = (d: AutomationDelivery) => (d.outcome === "fired" ? ("ok" as const) : d.outcome === "skipped" ? ("muted" as const) : ("destructive" as const));
-
 function Row({ a, onChange, onRemove }: { a: Automation; onChange: (a: Automation) => void; onRemove: (id: string) => void }) {
   const router = useRouter();
   const { palette } = useTheme();
@@ -56,22 +41,7 @@ function Row({ a, onChange, onRemove }: { a: Automation; onChange: (a: Automatio
   const [approving, setApproving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [note, setNote] = useState<string | null>(null);
-  const [log, setLog] = useState<AutomationDelivery[] | null>(null);
-  const [open, setOpen] = useState(false);
   const last = resultLine(a.lastResult);
-
-  const loadLog = async () => {
-    try {
-      setLog((await api.automationDeliveries(a.id)).deliveries);
-    } catch (e) {
-      setNote(e instanceof Error ? e.message : String(e));
-    }
-  };
-  const toggleLog = () => {
-    const next = !open;
-    setOpen(next);
-    if (next) void loadLog();
-  };
 
   const sendTest = async () => {
     setTesting(true);
@@ -82,7 +52,6 @@ function Row({ a, onChange, onRemove }: { a: Automation; onChange: (a: Automatio
       void Haptics.notificationAsync(started ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Warning);
       if (r.result) onChange({ ...a, lastResult: r.result });
       setNote(started ? null : (r.result?.reason ?? r.skipped ?? r.ignored ?? "The test event did not fire."));
-      if (open) void loadLog();
       if (started && r.result?.box) router.push(`/box/${encodeURIComponent(r.result.box)}`);
     } catch (e) {
       setNote(e instanceof Error ? e.message : String(e));
@@ -155,7 +124,7 @@ function Row({ a, onChange, onRemove }: { a: Automation; onChange: (a: Automatio
             {a.name}
           </T>
           <T variant="micro" tone="faint" numberOfLines={2}>
-            {a.proposed ? "Scheduled by the agent · " : a.scope === "scheduled" ? "From a chat · " : ""}
+            {a.proposed ? "Proposed by the agent · " : fromChat(a) ? "From a chat · " : ""}
             {KIND[a.kind]} · {a.when}
           </T>
         </View>
@@ -210,30 +179,8 @@ function Row({ a, onChange, onRemove }: { a: Automation; onChange: (a: Automatio
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
         {a.kind !== "chain" ? <Button title="Run now" variant="secondary" small loading={busy} onPress={() => void runNow()} /> : null}
         {a.kind === "webhook" && a.spec?.preset ? <Button title="Send test event" variant="secondary" small loading={testing} onPress={() => void sendTest()} /> : null}
-        <Button title={open ? "Hide deliveries" : "Deliveries"} variant="ghost" small onPress={toggleLog} />
+        <Button title="Runs" variant="ghost" small onPress={() => router.push(`/automation/${encodeURIComponent(a.id)}`)} />
       </View>
-      {open ? (
-        log === null ? (
-          <T variant="micro" tone="faint">
-            Loading…
-          </T>
-        ) : log.length === 0 ? (
-          <T variant="micro" tone="faint">
-            Nothing has arrived yet.
-          </T>
-        ) : (
-          <View style={{ gap: 4 }}>
-            {log.map((d) => (
-              <PressScale key={d.id} disabled={!d.box} onPress={() => d.box && router.push(`/box/${encodeURIComponent(d.box)}`)}>
-                <T variant="micro" tone={deliveryTone(d)} numberOfLines={2}>
-                  {ago(d.at)} · {deliveryLine(d)}
-                  {d.detail && d.outcome !== "fired" ? ` — ${d.detail}` : ""}
-                </T>
-              </PressScale>
-            ))}
-          </View>
-        )
-      ) : null}
     </Card>
   );
 }
@@ -272,12 +219,12 @@ function Automations() {
 
   // Waiting on you first, then live ones, then paused (same order as the web).
   const shown = useMemo(() => {
-    const xs = (list ?? []).filter((a) => filter === "all" || a.scope === filter);
+    const xs = (list ?? []).filter((a) => filter === "all" || (filter === "chat") === fromChat(a));
     return xs.sort((a, b) => Number(!!b.proposed && !b.enabled) - Number(!!a.proposed && !a.enabled) || Number(b.enabled) - Number(a.enabled));
   }, [list, filter]);
   const counts = useMemo(() => {
-    const c = { all: list?.length ?? 0, automation: 0, scheduled: 0 };
-    for (const a of list ?? []) c[a.scope] += 1;
+    const c = { all: list?.length ?? 0, rules: 0, chat: 0 };
+    for (const a of list ?? []) c[fromChat(a) ? "chat" : "rules"] += 1;
     return c;
   }, [list]);
 
@@ -321,8 +268,8 @@ function Automations() {
           onChange={setFilter}
           options={[
             { value: "all", label: `All${counts.all ? ` · ${counts.all}` : ""}` },
-            { value: "automation", label: `Automations${counts.automation ? ` · ${counts.automation}` : ""}` },
-            { value: "scheduled", label: `Scheduled${counts.scheduled ? ` · ${counts.scheduled}` : ""}` },
+            { value: "rules", label: `Standing rules${counts.rules ? ` · ${counts.rules}` : ""}` },
+            { value: "chat", label: `From chat${counts.chat ? ` · ${counts.chat}` : ""}` },
           ]}
         />
         {error ? (
@@ -334,10 +281,10 @@ function Automations() {
         {list !== null && shown.length === 0 ? (
           <Card>
             <T variant="body" weight="medium">
-              {filter === "scheduled" ? "Nothing scheduled from a chat" : "No automations yet"}
+              {filter === "chat" ? "Nothing from a chat yet" : "No automations yet"}
             </T>
             <T variant="meta" tone="muted">
-              {filter === "scheduled" ? "Ask the agent to run something later or on a schedule and it shows up here for your OK." : "Tap + New to run something on a schedule, after another run, or when an event arrives."}
+              {filter === "chat" ? "Ask the agent to run something later or on a schedule and it shows up here for your OK." : "Tap + New to run something on a schedule, after another run, or when an event arrives."}
             </T>
           </Card>
         ) : null}

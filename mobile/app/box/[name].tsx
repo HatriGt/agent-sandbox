@@ -4,9 +4,10 @@ import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFleet } from "@/hooks/useFleet";
 import { useKeyboardInset } from "@/hooks/useKeyboardInset";
+import { useNow } from "@/hooks/useNow";
 import { useWatch } from "@/hooks/useWatch";
 import { api, type BoxView } from "@/lib/api";
-import { friendlyName, isSleeping, tierGib, usageLevel } from "@/lib/format";
+import { isSleeping, tierGib, usageLevel } from "@/lib/format";
 import { deriveTaskBoard } from "@/lib/planTasks";
 import { splitReplies } from "@/lib/replies";
 import { parseTrace } from "@/lib/trace";
@@ -22,9 +23,8 @@ import { ScheduledCard } from "@/components/ScheduledCard";
 import { draftKeyForBox } from "@/lib/draft";
 import { QuestionCard } from "@/components/QuestionCard";
 import { DigestCard } from "@/components/DigestCard";
-import { OutcomeCard } from "@/components/OutcomeCard";
+import { OutcomeView, useOutcome } from "@/components/OutcomeCard";
 import { AttemptGroupCard } from "@/components/AttemptGroupCard";
-import { RunSummary } from "@/components/RunSummary";
 import { TurnRail, type Turn } from "@/components/TurnRail";
 import { SleepingCard, WakingCard } from "@/components/WakingCard";
 import { Button } from "@/components/ui/Button";
@@ -32,10 +32,11 @@ import { groupEvents, shareItems, ThreadRow, type ThreadItem } from "@/component
 import { BoxActionsSheet, currentMemoryTier } from "@/components/sheets/BoxActionsSheet";
 import { ChangesSheet } from "@/components/sheets/ChangesSheet";
 import { PrSheet } from "@/components/sheets/PrSheet";
+import { RunInspectorSheet } from "@/components/thread/RunInspectorSheet";
+import { ThreadHeader, type DisplayState } from "@/components/thread/ThreadHeader";
 import { T } from "@/components/ui/AppText";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { Sheet } from "@/components/ui/Sheet";
-import { StatePill } from "@/components/ui/StatePill";
 import { UsageMeter } from "@/components/ui/UsageMeter";
 import { CodeRefSession } from "@/components/CodeRef";
 import { AgentLoader, FadeInUp, haptic, PressScale, TypingDots, WorkingDot } from "@/components/motion";
@@ -88,7 +89,7 @@ function Thread() {
   const session = typeof name === "string" ? name : "";
   const { meta, log, connected, gone, refresh } = useWatch(session || undefined);
 
-  const [sheet, setSheet] = useState<null | "changes" | "pr" | "actions" | "model" | "plan" | "queued">(null);
+  const [sheet, setSheet] = useState<null | "changes" | "pr" | "actions" | "model" | "plan" | "queued" | "inspector">(null);
   const [stopping, setStopping] = useState(false);
   const [models, setModels] = useState<{ id: string; label: string; tier: string }[]>([]);
   const [currentModel, setCurrentModel] = useState<string | null>(null);
@@ -162,22 +163,18 @@ function Thread() {
   // "Sleep now" from the ⋯ sheet: the thread stays open, so without this flag the auto-wake below
   // would bounce the box straight back up. Cleared by an explicit Wake tap or leaving the thread.
   const [sleptHere, setSleptHere] = useState(false);
+  // One shared 10s tick (useNow) instead of a private interval; the tick's first value lands on
+  // activation, so `lastWake` keeps that initial double render from firing twice.
+  const autoWake = sleeping && !!session && !sleptHere;
+  const wakeTick = useNow(10_000, autoWake);
+  const lastWake = useRef(0);
   useEffect(() => {
-    if (!sleeping || !session || sleptHere) return;
+    if (!autoWake) return;
     setWakingSince((w) => w ?? Date.now());
-    let cancelled = false;
-    const fire = () => {
-      api.wake(session).catch((e) => {
-        if (!cancelled) setNote(`Could not wake — ${e instanceof Error ? e.message : e}. Retrying…`);
-      });
-    };
-    fire();
-    const t = setInterval(fire, 10_000);
-    return () => {
-      cancelled = true;
-      clearInterval(t);
-    };
-  }, [sleeping, session, sleptHere]);
+    if (Date.now() - lastWake.current < 2000) return;
+    lastWake.current = Date.now();
+    api.wake(session).catch((e) => setNote(`Could not wake — ${e instanceof Error ? e.message : e}. Retrying…`));
+  }, [autoWake, session, wakeTick]);
   // The card lingers ~1.4s after awake so "Awake" is actually seen.
   useEffect(() => {
     if (!sleeping && wakingSince != null) {
@@ -290,6 +287,27 @@ function Thread() {
     return [...seen.values()];
   }, [log]);
   const pr = pulls.length ? pulls[pulls.length - 1] : null;
+
+  // The run's clock for the header (web Thread `stamps`): first stamped event → now while running,
+  // → the last stamp once done. Tool spans end at call stamp + duration.
+  const stamps = useMemo(() => {
+    let first: number | undefined;
+    let last: number | undefined;
+    for (const e of events) {
+      const at = "at" in e ? e.at : undefined;
+      if (at === undefined) continue;
+      if (first === undefined) first = at;
+      const end = e.kind === "tool" && e.ms !== undefined ? at + e.ms : at;
+      if (last === undefined || end > last) last = end;
+    }
+    return { first, last };
+  }, [events]);
+  const finished = !sleeping && done && items.length > 0;
+  // Keyed by exit code + how many turns you sent, so a resume that finishes again refetches.
+  const outcomeKey = `${merged?.exitCode}:${persisted.size}`;
+  const outcome = useOutcome(session, outcomeKey, finished && merged?.exitCode !== undefined);
+  const displayState: DisplayState = sleeping ? "sleeping" : (merged?.runState ?? "idle");
+  const title = merged?.title || merged?.task?.split("\n")[0] || session;
 
   const steer = async (text: string) => {
     setNote(null);
@@ -429,9 +447,6 @@ function Thread() {
     });
   }
   for (const s of merged?.skills ?? []) extras.push({ key: `skill-${s.name}`, label: `/${s.name}`, icon: "zap", dim: s.how === "auto" });
-  const EXTRAS_MAX = 3;
-  const shownExtras = extras.slice(0, EXTRAS_MAX);
-  const extraOverflow = extras.length - shownExtras.length;
 
   const chips: { key: "changes" | "pr" | "files"; label: string; icon: IconName }[] = [
     { key: "changes", label: "Changes", icon: "file-plus" },
@@ -445,93 +460,19 @@ function Thread() {
     <CodeRefSession.Provider value={session || null}>
     <SafeAreaView style={{ flex: 1, backgroundColor: palette.background }} edges={["top", "bottom"]}>
       <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
-        {/* Header — one row, 56px, like the web thread (grows by one chip line for harness /
-            workflow / skills, never more) */}
-        <View
-          style={{
-            minHeight: 56,
-            paddingVertical: 6,
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 10,
-            paddingHorizontal: 8,
-            borderBottomWidth: 1,
-            borderBottomColor: palette.border,
-          }}
-        >
-          <PressScale
-            onPress={() => router.back()}
-            hitSlop={12}
-            style={({ pressed }) => ({ padding: 8, opacity: pressed ? 0.5 : 1, transform: [{ scale: pressed ? 0.92 : 1 }] })}
-          >
-            <Icon name="chevron-left" size={22} color={palette.mutedForeground} />
-          </PressScale>
-          {/* minWidth:0 lets this column actually shrink; without it a long title or a third repo
-              chip widens the row and shoves the state pill and ⋯ past the right edge. */}
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <T variant="body" weight="semibold" numberOfLines={1}>
-              {merged?.title || merged?.task?.split("\n")[0] || session}
-            </T>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-              <T variant="micro" mono tone="faint" numberOfLines={1} style={{ flexShrink: 1, minWidth: 0 }}>
-                {friendlyName(session)}
-              </T>
-              {/* Two chips is all a 56px header can carry legibly; the rest are in the ⋯ menu. */}
-              {merged?.repos?.slice(0, 2).map((r) => (
-                <View key={r.name} style={{ flexDirection: "row", alignItems: "center", gap: 3, flexShrink: 1, minWidth: 0 }}>
-                  <Icon name="git-branch" size={10} color={palette.faint} />
-                  <T variant="micro" mono tone="faint" numberOfLines={1} style={{ flexShrink: 1, minWidth: 0 }}>
-                    {r.name.split("/").pop()}
-                  </T>
-                </View>
-              ))}
-              {merged && merged.repos && merged.repos.length > 2 ? (
-                <T variant="micro" mono tone="faint" style={{ flexShrink: 0 }}>
-                  +{merged.repos.length - 2}
-                </T>
-              ) : null}
-            </View>
-            {shownExtras.length > 0 ? (
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 }}>
-                {shownExtras.map((x) => (
-                  <View
-                    key={x.key}
-                    style={{
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 3,
-                      flexShrink: 1,
-                      minWidth: 0,
-                      paddingHorizontal: 6,
-                      paddingVertical: 1,
-                      borderRadius: radius.pill,
-                      backgroundColor: palette.secondary,
-                      opacity: x.dim ? 0.6 : 1,
-                    }}
-                  >
-                    <Icon name={x.icon} size={9} color={x.color ?? palette.faint} />
-                    <T variant="micro" numberOfLines={1} style={{ flexShrink: 1, minWidth: 0, color: x.color ?? palette.mutedForeground }}>
-                      {x.label}
-                    </T>
-                  </View>
-                ))}
-                {extraOverflow > 0 ? (
-                  <T variant="micro" mono tone="faint" style={{ flexShrink: 0 }}>
-                    +{extraOverflow}
-                  </T>
-                ) : null}
-              </View>
-            ) : null}
-          </View>
-          {merged ? <StatePill runState={merged.runState} boxStatus={merged.boxStatus} exitCode={merged.exitCode} /> : null}
-          <PressScale
-            onPress={() => setSheet("actions")}
-            hitSlop={12}
-            style={({ pressed }) => ({ padding: 8, opacity: pressed ? 0.5 : 1, transform: [{ scale: pressed ? 0.92 : 1 }] })}
-          >
-            <Icon name="more-horizontal" size={20} color={palette.mutedForeground} />
-          </PressScale>
-        </View>
+        <ThreadHeader
+          session={session}
+          box={merged}
+          lifecycle={fleetSnap?.lifecycle}
+          title={title}
+          state={displayState}
+          startedAt={stamps.first}
+          endedAt={stamps.last}
+          extras={extras}
+          onBack={() => router.back()}
+          onInfo={() => setSheet("inspector")}
+          onMore={() => setSheet("actions")}
+        />
 
         {/* Vitals strip: memory and disk against their caps. Its own row rather than crowding the
             56px header, and only while awake — the controller drops these numbers for a sleeping box
@@ -646,22 +587,13 @@ function Thread() {
                 <ThreadRow item={{ kind: "you", text: r }} />
               </FadeInUp>
             ))}
-            {!sleeping && merged?.runState === "done" && items.length > 0 && (
-              <RunSummary
-                events={events}
-                exitCode={merged?.exitCode}
-                title={merged?.title || merged?.task?.split("\n")[0] || session}
-                session={session}
-                onRunAgain={() => router.push({ pathname: "/new", params: { task: merged?.task ?? "" } })}
-              />
-            )}
-            {/* The digest ("run receipt") — server-derived detail under the summary pill. Keyed by
-                exit code + how many turns you sent, so a resume that finishes again refetches. */}
-            {!sleeping && merged?.runState === "done" && merged.exitCode !== undefined && items.length > 0 && (
+            {/* The run receipt — the archived outcome, attempts, then the server digest. The state
+                word lives in the header pill; copy-transcript / run-again in the ⋯ sheet. */}
+            {finished && merged?.exitCode !== undefined && (
               <>
-                <AttemptGroupCard box={session} fetchKey={`${merged.exitCode}:${persisted.size}`} />
-                <OutcomeCard session={session} fetchKey={`${merged.exitCode}:${persisted.size}`} />
-                <DigestCard session={session} fetchKey={`${merged.exitCode}:${persisted.size}`} />
+                <AttemptGroupCard box={session} fetchKey={outcomeKey} />
+                {outcome ? <OutcomeView outcome={outcome} /> : null}
+                <DigestCard session={session} fetchKey={outcomeKey} />
               </>
             )}
             {running && (
@@ -847,7 +779,7 @@ function Thread() {
 
         {waiting && merged?.question ? (
           <FadeInUp style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
-            <QuestionCard question={merged.question} onAnswer={answer} busy={answering} />
+            <QuestionCard question={merged.question} onAnswer={answer} busy={answering} session={session} repo={merged.repos?.[0]?.name ?? null} />
           </FadeInUp>
         ) : null}
 
@@ -949,6 +881,19 @@ function Thread() {
               }
             : undefined
         }
+      />
+      <RunInspectorSheet
+        visible={sheet === "inspector"}
+        onClose={() => setSheet(null)}
+        session={session}
+        box={merged}
+        lifecycle={fleetSnap?.lifecycle}
+        events={events}
+        running={running}
+        startedAt={stamps.first}
+        endedAt={stamps.last}
+        outcome={outcome}
+        queued={merged?.queued ?? []}
       />
       <Sheet visible={sheet === "model"} onClose={() => setSheet(null)} title="Model">
         <View style={{ gap: 4, paddingBottom: 12 }}>

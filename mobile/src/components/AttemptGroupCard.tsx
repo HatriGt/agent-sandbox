@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Linking, Pressable, View } from "react-native";
 import { useRouter } from "expo-router";
 import { api, type AttemptGroupView, type AttemptView } from "@/lib/api";
@@ -8,6 +8,7 @@ import { radius } from "@/theme/tokens";
 import { T } from "./ui/AppText";
 import { Icon } from "./ui/Icon";
 import { FadeInUp, PressScale } from "@/components/motion";
+import { useNow } from "@/hooks/useNow";
 
 /**
  * "Tries several approaches": a task run as 2-3 parallel attempts, scored by the controller; the
@@ -56,14 +57,15 @@ export function AttemptGroupCard({ box, fetchKey }: { box: string; fetchKey?: st
       cancelled = true;
     };
   }, [box, fetchKey]);
-  // Keep polling while undecided so the winner appears without a refresh.
+  // Keep polling while undecided so the winner appears without a refresh — on the shared 8s tick.
+  const undecided = !!g && (g.status === "running" || g.status === "deciding");
+  const tick = useNow(8000, undecided);
+  const polled = useRef(0);
   useEffect(() => {
-    if (!g || !["running", "deciding"].includes(g.status)) return;
-    const t = setInterval(() => {
-      api.attemptGroup(g.id).then(setG).catch(() => {});
-    }, 8000);
-    return () => clearInterval(t);
-  }, [g?.id, g?.status]);
+    if (!undecided || !g || polled.current === tick) return;
+    polled.current = tick;
+    api.attemptGroup(g.id).then(setG).catch(() => {});
+  }, [g?.id, undecided, tick]);
   if (!g) return null;
   return <AttemptGroupPanel group={g} currentBox={box} onChange={setG} />;
 }

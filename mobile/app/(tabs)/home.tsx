@@ -1,10 +1,11 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, View } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFleet } from "@/hooks/useFleet";
-import type { BoxView } from "@/lib/api";
-import { fleetSentence, greeting } from "@/lib/format";
+import { api, ledgerApi, type AuditEventRow, type BoxView, type LedgerRow } from "@/lib/api";
+import { describeEvent } from "@/lib/audit";
+import { ago, durationWords, fleetSentence, friendlyName, greeting } from "@/lib/format";
 import { useAuth } from "@/state/auth";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
@@ -25,6 +26,115 @@ function SectionHeader({ icon, label, tone }: { icon: IconName; label: string; t
         {label}
       </T>
     </View>
+  );
+}
+
+/** "Recent activity" / "Recent runs" heading with the web's "View all" affordance. */
+function StripHeader({ title, onAll }: { title: string; onAll: () => void }) {
+  const { palette } = useTheme();
+  return (
+    <View style={{ flexDirection: "row", alignItems: "baseline", justifyContent: "space-between" }}>
+      <T variant="h3" weight="semibold">
+        {title}
+      </T>
+      <PressScale onPress={onAll} hitSlop={8} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+        <T variant="meta" tone="muted">
+          View all
+        </T>
+        <Icon name="arrow-right" size={13} color={palette.mutedForeground} />
+      </PressScale>
+    </View>
+  );
+}
+
+/** The last few archived runs — Home's answer to "what happened while I was away". Fetched once per mount. */
+function RecentRuns({ onHistory }: { onHistory: () => void }) {
+  const { palette } = useTheme();
+  const [rows, setRows] = useState<LedgerRow[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    ledgerApi({ limit: 5 })
+      .then((r) => !cancelled && setRows(r.rows))
+      .catch(() => !cancelled && setRows([]));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  if (!rows?.length) return null;
+  return (
+    <FadeInUp delay={150} style={{ gap: 6, marginTop: 12 }}>
+      <StripHeader title="Recent runs" onAll={onHistory} />
+      {rows.map((r) => {
+        const failed = r.state === "failed";
+        const first = (r.task ?? "").trim().split("\n")[0] || (r.headline ?? "").trim() || "Untitled run";
+        const secs = r.startedAt && r.endedAt && r.endedAt > r.startedAt ? Math.round((r.endedAt - r.startedAt) / 1000) : null;
+        const tokens = r.inputTokens != null || r.outputTokens != null ? (r.inputTokens ?? 0) + (r.outputTokens ?? 0) : null;
+        return (
+          <PressScale key={r.id} onPress={onHistory} accessibilityLabel={`${first} — open history`} style={{ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 36, paddingVertical: 4 }}>
+            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: failed ? palette.destructive : palette.ok }} />
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <T variant="meta" numberOfLines={1}>
+                {first}
+              </T>
+              <T variant="micro" mono tone="faint" numberOfLines={1}>
+                {friendlyName(r.box)}
+                {secs ? ` · ${durationWords(secs)}` : ""}
+                {tokens != null ? ` · ${tokens >= 1000 ? `${(tokens / 1000).toFixed(tokens >= 10_000 ? 0 : 1)}k` : tokens} tok` : ""}
+              </T>
+            </View>
+            <T variant="micro" tone="faint" style={{ flexShrink: 0 }}>
+              {ago(r.archivedAt || r.endedAt)}
+            </T>
+          </PressScale>
+        );
+      })}
+    </FadeInUp>
+  );
+}
+
+/** The last few state-changing calls, as the Activity page narrates them. */
+function RecentActivity({ onAll }: { onAll: () => void }) {
+  const { palette } = useTheme();
+  const [rows, setRows] = useState<AuditEventRow[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .audit({ limit: 5 })
+      .then((r) => !cancelled && setRows(r.events))
+      .catch(() => !cancelled && setRows([]));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  if (!rows?.length) return null;
+  return (
+    <FadeInUp delay={200} style={{ gap: 6, marginTop: 12 }}>
+      <StripHeader title="Recent activity" onAll={onAll} />
+      {rows.map((e) => {
+        const d = describeEvent(e);
+        const at = Date.parse(e.at);
+        const failed = e.status >= 400;
+        return (
+          <View key={e.id} style={{ flexDirection: "row", alignItems: "center", gap: 10, minHeight: 36, paddingVertical: 4 }}>
+            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: failed ? palette.destructive : palette.faint }} />
+            <T variant="meta" tone={failed ? "muted" : "default"} numberOfLines={1} style={{ flex: 1, minWidth: 0 }}>
+              {d.verb}
+              {d.session ? (
+                <>
+                  {" "}
+                  <T variant="meta" mono>
+                    {friendlyName(d.session)}
+                  </T>
+                </>
+              ) : null}
+            </T>
+            <T variant="micro" tone="faint" style={{ flexShrink: 0 }}>
+              {Number.isFinite(at) ? ago(at) : ""}
+            </T>
+          </View>
+        );
+      })}
+    </FadeInUp>
   );
 }
 
@@ -137,6 +247,9 @@ export default function Home() {
             </T>
           </View>
         )}
+
+        <RecentRuns onHistory={() => router.push({ pathname: "/(tabs)/activity", params: { tab: "history" } })} />
+        <RecentActivity onAll={() => router.push("/(tabs)/activity")} />
       </ScrollView>
       <BoxActionsSheet box={actions} memoryTiers={snap?.lifecycle.memoryTiers} memoryDefault={snap?.lifecycle.memoryDefault} diskTiers={snap?.lifecycle.diskTiers} visible={!!actions} onClose={() => setActions(null)} onChanged={refresh} />
     </SafeAreaView>

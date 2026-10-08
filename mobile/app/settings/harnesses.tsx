@@ -4,7 +4,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Share, View } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
-import { api, type AgentChoice, type HarnessView, type SkillView } from "@/lib/api";
+import { api, type HarnessView, type SkillView } from "@/lib/api";
 import { ago } from "@/lib/format";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
@@ -14,7 +14,8 @@ import { ArmButton } from "@/components/ui/ArmButton";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Segmented } from "@/components/settings/Segmented";
-import { AttemptGroupList, CompareLauncher, CompareList, DriverBadges, ImportHarness, ReviewPanel, rulesLine } from "@/components/settings/HarnessParts";
+import { AttemptGroupList, CompareLauncher, CompareList, ImportHarness, ReviewPanel, rulesLine } from "@/components/settings/HarnessParts";
+import { AcctAgentSection } from "@/components/settings/AcctSections";
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 type Tab = "drivers" | "skills" | "saved";
@@ -27,8 +28,6 @@ export default function Harnesses() {
   const [builtins, setBuiltins] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
-  const [drivers, setDrivers] = useState<AgentChoice[]>([]);
-  const [defaultDriver, setDefaultDriver] = useState("claude");
   const [skills, setSkills] = useState<SkillView[]>([]);
   const [importing, setImporting] = useState(false);
   const [comparing, setComparing] = useState(false);
@@ -46,13 +45,6 @@ export default function Harnesses() {
   }, []);
   useFocusEffect(reload);
   useEffect(() => {
-    api
-      .agentPrefs()
-      .then((p) => {
-        setDrivers(p.agents ?? []);
-        setDefaultDriver(p.defaultAgent);
-      })
-      .catch(() => {});
     api.skills().then((s) => setSkills(s.skills ?? [])).catch(() => {});
   }, []);
 
@@ -107,34 +99,7 @@ export default function Harnesses() {
         </T>
       ) : null}
 
-      {tab === "drivers" ? (
-        <Section title="Drivers" purpose="The coding agent a run starts. A harness can pin one; otherwise your default is used.">
-          <Card style={{ paddingVertical: 0 }}>
-            {drivers.map((d, i) => {
-              const n = all.filter((h) => h.driver === d.id).length;
-              return (
-                <View key={d.id} style={{ gap: 6, paddingVertical: 12, borderTopWidth: i ? 1 : 0, borderTopColor: palette.border }}>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                    <T variant="body" weight="medium">
-                      {d.label}
-                    </T>
-                    {d.id === defaultDriver ? (
-                      <T variant="micro" tone="muted">
-                        default
-                      </T>
-                    ) : null}
-                    <View style={{ flex: 1 }} />
-                    <T variant="micro" tone="faint">
-                      {`${n || "—"} harness${n === 1 ? "" : "es"}`}
-                    </T>
-                  </View>
-                  <DriverBadges choice={d} />
-                </View>
-              );
-            })}
-          </Card>
-        </Section>
-      ) : null}
+      {tab === "drivers" ? <AcctAgentSection title="Drivers" harnesses={all} /> : null}
 
       {tab === "skills" ? (
         <Section title="Skills" purpose="Installed into a run's sandbox when a harness lists them.">

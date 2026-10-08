@@ -12,7 +12,7 @@ const FILE_CAP = 6;
 
 /**
  * The run receipt's expandable detail — the server-derived digest (src/digest.ts)
- * under the RunSummary pill. Collapsed it is one line: state mark, headline,
+ * under the outcome card. Collapsed it is one line: state mark, headline,
  * duration, chevron. Open it shows the plan checklist, changed files with ±
  * counts, failed commands, and how many questions were asked. Fetched once per
  * finished run (the parent keys us by exit/turn); a failed fetch renders nothing.
@@ -30,7 +30,7 @@ export function DigestCard({ session, fetchKey }: { session: string; fetchKey: s
       .then((d) => {
         if (!cancelled && (d.state === "done" || d.state === "failed")) setDigest(d);
       })
-      .catch(() => {}); // no digest, no card — the RunSummary pill still carries the outcome
+      .catch(() => {}); // no digest, no card — the header pill still carries the outcome
     return () => {
       cancelled = true;
     };

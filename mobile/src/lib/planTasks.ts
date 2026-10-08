@@ -52,6 +52,8 @@ export interface TaskBoard {
   revisions: number;
   /** Total time across all attributed windows, when the log carries stamps. */
   ms?: number;
+  /** Stamp of the snapshot that put the current active step in progress — the open window a live row ticks from. */
+  activeSince?: number;
 }
 
 function blank(): TaskEvidence {
@@ -128,6 +130,7 @@ export function deriveTaskBoard(events: TraceEvent[]): TaskBoard | null {
     complete: tasks.length > 0 && done === tasks.length,
     revisions,
     ms: total > 0 ? total : undefined,
+    ...(openKey !== null && openAt !== undefined ? { activeSince: openAt } : {}),
   };
 }
 

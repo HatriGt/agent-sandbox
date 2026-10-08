@@ -11,6 +11,7 @@ import { ArmButton } from "./ui/ArmButton";
 import { Button } from "./ui/Button";
 import { Icon, type IconName } from "./ui/Icon";
 import { PressScale } from "@/components/motion";
+import { useNow } from "@/hooks/useNow";
 
 /**
  * What this chat scheduled (web: thread/ScheduledCard + SchedulePill). One compact card with a row
@@ -121,26 +122,21 @@ export function useThreadSchedules(box: string, runState: string | undefined) {
     void load();
   }, [load, settled]);
 
+  // Poll while this screen is focused and the app is foregrounded — on the shared 30s tick.
+  const [focused, setFocused] = useState(false);
   useFocusEffect(
     useCallback(() => {
-      void load();
-      const t = setInterval(() => {
-        if (AppState.currentState === "active") void load();
-      }, POLL_MS);
-      return () => clearInterval(t);
-    }, [load]),
+      setFocused(true);
+      return () => setFocused(false);
+    }, []),
   );
+  const tick = useNow(POLL_MS, focused);
+  useEffect(() => {
+    if (!focused) return;
+    if (AppState.currentState === "active") void load();
+  }, [load, focused, tick]);
 
   return { items, rejected, reload: load };
-}
-
-function useNow(): number {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(t);
-  }, []);
-  return now;
 }
 
 export function ScheduledCard({
@@ -157,7 +153,7 @@ export function ScheduledCard({
 }) {
   const { palette } = useTheme();
   const { items, rejected, reload } = useThreadSchedules(box, runState);
-  const now = useNow();
+  const now = useNow(30_000);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 

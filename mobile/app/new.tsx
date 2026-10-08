@@ -108,12 +108,19 @@ export default function NewTask() {
   });
   const dictating = voice.state === "listening" || voice.state === "arming";
 
-  // "Run again" prefill from the thread's ⋯ menu.
-  const params = useLocalSearchParams<{ task?: string }>();
+  // "Run again" prefill from the thread's ⋯ menu; `workflow` is the Playbooks page's Run button.
+  const params = useLocalSearchParams<{ task?: string; workflow?: string }>();
   useEffect(() => {
     if (typeof params.task === "string" && params.task && !task) setTask(params.task);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.task]);
+  // Applied once the sticky picks and lists are in, so the sticky read cannot clobber it.
+  const workflowParamApplied = useRef(false);
+  useEffect(() => {
+    if (run.loading || workflowParamApplied.current || typeof params.workflow !== "string" || !params.workflow) return;
+    workflowParamApplied.current = true;
+    run.update({ workflow: params.workflow });
+  }, [run.loading, params.workflow, run.update]);
 
   // Draft: restore on mount if nothing else filled the box (no stash, prefill or ?task=), then
   // save as you type (debounced in draft.ts). Saving waits for the restore so an empty first

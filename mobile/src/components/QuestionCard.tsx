@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Pressable, View } from "react-native";
-import { parseQuestion } from "@/lib/question";
+import { missingSecretOf, parseQuestion } from "@/lib/question";
+import { resumeWithSecrets, saveSecret } from "@/lib/api";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { MarkdownLite } from "./MarkdownLite";
@@ -21,10 +22,16 @@ export function QuestionCard({
   question,
   onAnswer,
   busy,
+  session,
+  repo,
 }: {
   question: string;
   onAnswer: (text: string) => void;
   busy?: boolean;
+  /** The box, for the Provide-secret row (resume with one-shot secrets). */
+  session?: string;
+  /** The box's first repo slug (owner/name), when known — enables "Save for this repo". */
+  repo?: string | null;
 }) {
   const { palette } = useTheme();
   const parsed = parseQuestion(question);
@@ -58,6 +65,7 @@ export function QuestionCard({
           <MarkdownLite text={parsed.context} />
         </View>
       ) : null}
+      {session ? <ProvideSecretRow name={missingSecretOf(question)} session={session} repo={repo ?? null} /> : null}
       {!other &&
         parsed.options.map((opt, i) => (
           <PressScale
@@ -122,6 +130,97 @@ export function QuestionCard({
           </T>
         </PressScale>
       )}
+    </View>
+  );
+}
+
+/**
+ * `Provide DEPLOY_TOKEN` — under a question that names an env var it lacks (web TraceItems
+ * ResolveSecretRow). One masked input; "Resume with it" hands the value to this turn only via
+ * resume `secrets` (-e flags, never stored). "Save for this repo" first stores it in the vault.
+ */
+function ProvideSecretRow({ name, session, repo }: { name: string | null; session: string; repo: string | null }) {
+  const { palette } = useTheme();
+  const [value, setValue] = useState("");
+  const [save, setSave] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (!name) return null;
+  const submit = async () => {
+    if (!value || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      if (save && repo) await saveSecret(name, value, repo);
+      await resumeWithSecrets(session, `Provided ${name}; continue.`, { [name]: value });
+      setValue("");
+      setDone(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (done) {
+    return (
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }} accessibilityRole="text">
+        <Icon name="check" size={13} color={palette.attentionInk} />
+        <T variant="micro" style={{ color: palette.attentionInk }}>
+          <T variant="micro" mono style={{ color: palette.attentionInk }}>
+            {name}
+          </T>{" "}
+          provided — the agent is continuing.
+        </T>
+      </View>
+    );
+  }
+  return (
+    <View style={{ backgroundColor: palette.card, borderRadius: radius.lg, padding: 10, gap: 8 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+        <Icon name="key" size={13} color={palette.attentionText} />
+        <T variant="meta" weight="medium">
+          Provide{" "}
+          <T variant="meta" mono weight="medium">
+            {name}
+          </T>
+        </T>
+        <T variant="micro" tone="muted" numberOfLines={1} style={{ flex: 1, minWidth: 0 }}>
+          this turn only
+        </T>
+      </View>
+      <Field
+        mono
+        secureTextEntry
+        autoCapitalize="none"
+        autoCorrect={false}
+        placeholder="paste the value"
+        value={value}
+        onChangeText={setValue}
+        onSubmitEditing={() => void submit()}
+        editable={!busy}
+        accessibilityLabel={`Value for ${name}`}
+      />
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <Button title="Resume with it" onPress={() => void submit()} loading={busy} disabled={!value} style={{ flex: 1 }} />
+      </View>
+      <PressScale
+        disabled={!repo}
+        onPress={() => setSave((s) => !s)}
+        accessibilityRole="checkbox"
+        accessibilityState={{ checked: save && !!repo, disabled: !repo }}
+        style={{ flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start" }}
+      >
+        <Icon name={save && repo ? "check-square" : "square"} size={14} color={repo ? palette.mutedForeground : palette.faint} />
+        <T variant="micro" tone={repo ? "muted" : "faint"}>
+          {repo ? `Save for ${repo} — the next run there starts with it` : "Save for this repo (no repo attached)"}
+        </T>
+      </PressScale>
+      {error ? (
+        <T variant="micro" tone="destructive">
+          Could not provide {name}: {error}
+        </T>
+      ) : null}
     </View>
   );
 }

@@ -171,7 +171,7 @@ export default function AccountSettings() {
       <View style={{ marginTop: 12 }}>
         {user ? <AcctLinkRow title="API keys" icon="key" hint="What Cursor, Claude Code or a CI job presents to the MCP endpoint." onPress={() => router.push("/settings/api-keys")} /> : null}
         {user ? <AcctLinkRow title="Signed-in devices" icon="smartphone" hint="Sessions holding your account. Sign one out if you do not recognise it." onPress={() => router.push("/settings/devices")} /> : null}
-        <AcctLinkRow title="Recent activity" icon="list" hint="Every state-changing call made as you." onPress={() => router.push("/settings/audit")} />
+        <AcctLinkRow title="Recent activity" icon="list" hint="Every state-changing call made as you." onPress={() => router.push("/(tabs)/activity")} />
         {isAdmin && me?.mode === "saas" ? <AcctLinkRow title="Manage users" icon="shield" onPress={() => router.push("/settings/admin")} /> : null}
         <AcctLinkRow title="Connect an IDE" icon="zap" onPress={() => router.push("/settings/connect")} />
       </View>

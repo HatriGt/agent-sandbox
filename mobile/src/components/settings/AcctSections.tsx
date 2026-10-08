@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Pressable, Switch, View } from "react-native";
-import { api, type AgentId, type AgentPrefs, type NotifySettings } from "@/lib/api";
+import { api, autopilotApi, type AgentId, type AgentPrefs, type HarnessView, type NotifySettings } from "@/lib/api";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { T } from "@/components/ui/AppText";
 import { Button } from "@/components/ui/Button";
 import { Field } from "@/components/ui/Field";
 import { Icon, type IconName } from "@/components/ui/Icon";
+import { PickerRow, PickerSheet } from "@/components/settings/PickerSheet";
+import { DriverBadges } from "@/components/settings/HarnessParts";
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -66,25 +68,32 @@ const DESC: Record<AgentId, string> = {
   opencode: "OpenCode — open-source agent that runs on any provider, including local models.",
 };
 
-/** Web AgentSettings: default coding agent for NEW threads. */
-export function AcctAgentSection() {
+/**
+ * Web AgentSettings: default coding agent (driver) and model for NEW threads — the Drivers tab of
+ * Harnesses and the Account page. `harnesses` adds a per-driver count of saved harnesses that pin it.
+ */
+export function AcctAgentSection({ harnesses = [], title = "Coding agent" }: { harnesses?: HarnessView[]; title?: string }) {
   const { palette } = useTheme();
   const [prefs, setPrefs] = useState<AgentPrefs | null>(null);
-  const [busy, setBusy] = useState<AgentId | null>(null);
+  const [catalog, setCatalog] = useState<{ default: string; models: { id: string; label: string }[] } | null>(null);
+  // Which control is saving: an agent id, or "model" for the picker.
+  const [busy, setBusy] = useState<AgentId | "model" | null>(null);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [picking, setPicking] = useState(false);
 
   useEffect(() => {
     api.agentPrefs().then(setPrefs).catch(() => {});
+    api.models().then((r) => setCatalog({ default: r.default, models: r.models })).catch(() => {});
   }, []);
 
-  const pick = async (id: AgentId) => {
-    if (!prefs || prefs.defaultAgent === id || busy) return;
-    setBusy(id);
+  const save = async (next: { defaultAgent: AgentId; defaultModel: string }, who: AgentId | "model") => {
+    if (!prefs || busy) return;
+    setBusy(who);
     setError(null);
     try {
-      const choice = prefs.agents.find((a) => a.id === id);
-      setPrefs(await api.saveAgentPrefs(id, choice?.supervised === false));
+      const choice = prefs.agents.find((a) => a.id === next.defaultAgent);
+      setPrefs(await autopilotApi.saveAgentDefaults({ ...next, ...(choice?.supervised === false ? { allowPartialSupervision: true } : {}) }));
       setSaved(true);
       setTimeout(() => setSaved(false), 1500);
     } catch (e) {
@@ -93,13 +102,20 @@ export function AcctAgentSection() {
       setBusy(null);
     }
   };
+  const pick = (id: AgentId) => {
+    if (prefs && prefs.defaultAgent !== id) void save({ defaultAgent: id, defaultModel: prefs.defaultModel ?? "" }, id);
+  };
+
+  const isFactory = prefs?.defaultAgent === FACTORY && !prefs?.defaultModel;
+  const defaultLabel = catalog?.default ? (catalog.models.find((m) => m.id === catalog.default)?.label ?? catalog.default) : null;
+  const modelValue = prefs?.defaultModel ? (catalog?.models.find((m) => m.id === prefs.defaultModel)?.label ?? `${prefs.defaultModel}${catalog ? " (not in the catalog)" : ""}`) : undefined;
 
   return (
     <AcctSection
-      title="Coding agent"
+      title={title}
       meta={saved ? "Saved" : undefined}
-      purpose="Which agent new machines run. Threads already running keep the agent they started with."
-      action={prefs && prefs.defaultAgent !== FACTORY ? <Button small variant="ghost" title="Reset to default" disabled={busy !== null} onPress={() => void pick(FACTORY)} /> : null}
+      purpose="The coding agent — and model — new machines run. A harness can pin a driver; otherwise this default is used. Threads already running keep what they started with."
+      action={prefs && !isFactory ? <Button small variant="ghost" title="Reset to default" disabled={busy !== null} onPress={() => void save({ defaultAgent: FACTORY, defaultModel: "" }, FACTORY)} /> : null}
     >
       {error ? <T variant="meta" tone="destructive">{error}</T> : null}
       {!prefs ? (
@@ -108,13 +124,14 @@ export function AcctAgentSection() {
         <View accessibilityRole="radiogroup" style={{ gap: 8 }}>
           {prefs.agents.map((a) => {
             const active = prefs.defaultAgent === a.id;
+            const pinned = harnesses.filter((h) => h.driver === a.id).length;
             return (
               <Pressable
                 key={a.id}
                 accessibilityRole="radio"
                 accessibilityState={{ checked: active, disabled: busy !== null }}
                 disabled={busy !== null}
-                onPress={() => void pick(a.id)}
+                onPress={() => pick(a.id)}
                 style={{
                   flexDirection: "row",
                   gap: 12,
@@ -139,11 +156,18 @@ export function AcctAgentSection() {
                         <T variant="micro" tone="muted">beta</T>
                       </View>
                     ) : null}
+                    {pinned > 0 ? (
+                      <T variant="micro" tone="faint" style={{ marginLeft: "auto" }}>
+                        {`${pinned} harness${pinned === 1 ? "" : "es"}`}
+                      </T>
+                    ) : null}
                   </View>
                   <T variant="micro" tone="muted">
                     {DESC[a.id] ?? ""}
                   </T>
-                  {a.supervised === false ? <T variant="micro" tone="attention">supervised: partial</T> : null}
+                  <View style={{ marginTop: 4 }}>
+                    <DriverBadges choice={a} />
+                  </View>
                   {a.capabilities?.caveat ? <T variant="micro" tone="faint">{a.capabilities.caveat}</T> : null}
                 </View>
               </Pressable>
@@ -151,6 +175,27 @@ export function AcctAgentSection() {
           })}
         </View>
       )}
+      {prefs ? (
+        <>
+          <PickerRow label="Default model" value={busy === "model" ? "Saving…" : modelValue} placeholder={`Deployment default${defaultLabel ? ` — ${defaultLabel}` : ""}`} onPress={() => catalog && busy === null && setPicking(true)} />
+          <T variant="micro" tone="faint">
+            {catalog === null ? "Loading the model catalog…" : prefs.defaultModel ? "Preselected in every new-task composer you open; a thread keeps whatever it started on." : `New tasks start on the deployment default${defaultLabel ? ` (${defaultLabel})` : ""}.`}
+          </T>
+          <PickerSheet
+            visible={picking}
+            title="Default model"
+            options={[
+              ...(catalog?.models ?? []).map((m) => ({ value: m.id, label: m.label })),
+              ...(prefs.defaultModel && catalog && !catalog.models.some((m) => m.id === prefs.defaultModel) ? [{ value: prefs.defaultModel, label: `${prefs.defaultModel} (not in the catalog)` }] : []),
+            ]}
+            value={prefs.defaultModel || undefined}
+            allowNone
+            noneLabel={`Deployment default${defaultLabel ? ` — ${defaultLabel}` : ""}`}
+            onPick={(v) => void save({ defaultAgent: prefs.defaultAgent, defaultModel: v ?? "" }, "model")}
+            onClose={() => setPicking(false)}
+          />
+        </>
+      ) : null}
     </AcctSection>
   );
 }

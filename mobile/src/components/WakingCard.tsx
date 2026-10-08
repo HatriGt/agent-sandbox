@@ -1,10 +1,11 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef } from "react";
 import { Animated, Easing, Pressable, View } from "react-native";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { T } from "./ui/AppText";
 import { Icon } from "./ui/Icon";
 import { TypingDots, PressScale } from "@/components/motion";
+import { useNow } from "@/hooks/useNow";
 
 // Same staged copy as the web's WakingCard, advanced purely by elapsed time.
 const STAGES = [
@@ -87,11 +88,7 @@ export function WakingCard({
   onRetry?: () => void;
 }) {
   const { palette } = useTheme();
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 500);
-    return () => clearInterval(t);
-  }, []);
+  const now = useNow(500, sleeping);
   const elapsed = Math.max(0, Math.floor((now - startedAt) / 1000));
   const stageIdx = sleeping ? STAGES.reduce((a, s, i) => (elapsed >= s.at ? i : a), 0) : STAGES.length - 1;
   const stuck = sleeping && elapsed >= STUCK_AT;

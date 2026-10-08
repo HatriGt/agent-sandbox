@@ -95,7 +95,7 @@ export default function Settings() {
         </Card>
 
         <Group title="Autopilot" />
-        <RowLink title="Automations" icon="repeat" hint="Scheduled, chained and event runs — create, approve, pause" onPress={() => router.push("/automations")} />
+        <RowLink title="Automations" icon="repeat" hint="Standing rules and what a chat asked for later — create, approve, pause" onPress={() => router.push("/automations")} />
         <RowLink title="Playbooks" icon="list" hint="Agent turns and command checks, in order" onPress={() => router.push("/settings/playbooks")} />
 
         <Group title="Library" />
@@ -108,6 +108,7 @@ export default function Settings() {
         <RowLink title="GitHub accounts" icon="github" hint="Clone · read PRs · push" onPress={() => router.push("/settings/accounts")} />
         <RowLink title="MCP servers" icon="tool" hint="Extra tools every sandbox gets" onPress={() => router.push("/settings/mcp")} />
         <RowLink title="Repo setup" icon="package" hint="Learned once · install · test · verify" onPress={() => router.push("/settings/repo-setup")} />
+        <RowLink title="Secrets" icon="key" hint="Tokens and keys runs get as env vars" onPress={() => router.push("/settings/secrets")} />
         <RowLink title="Starts from your inbox" icon="inbox" hint="Email · Slack" onPress={() => router.push("/settings/inbox")} />
 
         <Group title={isUser ? "Account" : "Operator"} />

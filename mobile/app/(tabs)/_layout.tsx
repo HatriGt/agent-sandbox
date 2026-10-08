@@ -7,6 +7,8 @@ import * as Haptics from "expo-haptics";
 import { useAuth } from "@/state/auth";
 import { useTheme } from "@/theme/ThemeContext";
 import { Icon, type IconName } from "@/components/ui/Icon";
+import { useFleet } from "@/hooks/useFleet";
+import { StatusLine } from "@/components/StatusLine";
 
 const TABS: { name: string; label: string; icon: IconName }[] = [
   { name: "home", label: "Home", icon: "home" },
@@ -54,11 +56,14 @@ function TabItem({
   );
 }
 
-/** Floating pill tab bar with a raised center "New" action. */
+const STATUS_H = 22;
+
+/** Floating pill tab bar with a raised center "New" action, over the fleet status strip. */
 function PillTabBar({ state, navigation }: BottomTabBarProps) {
   const { palette, dark } = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const fleet = useFleet();
   const left = TABS.slice(0, 2);
   const right = TABS.slice(2);
 
@@ -73,7 +78,8 @@ function PillTabBar({ state, navigation }: BottomTabBarProps) {
   };
 
   return (
-    <View pointerEvents="box-none" style={{ position: "absolute", left: 0, right: 0, bottom: Math.max(insets.bottom, 10) }}>
+    <View pointerEvents="box-none" style={{ paddingBottom: insets.bottom, backgroundColor: palette.card }}>
+      <View pointerEvents="box-none" style={{ position: "absolute", left: 0, right: 0, bottom: insets.bottom + STATUS_H + 10 }}>
       <View
         style={{
           marginHorizontal: 16,
@@ -120,6 +126,10 @@ function PillTabBar({ state, navigation }: BottomTabBarProps) {
           <Icon name="plus" size={24} color={palette.primaryForeground} />
         </Pressable>
         {right.map(item)}
+      </View>
+      </View>
+      <View style={{ height: STATUS_H }}>
+        <StatusLine snap={fleet.snap} error={fleet.error} />
       </View>
     </View>
   );

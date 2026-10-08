@@ -205,21 +205,24 @@ Config plugins: `expo-router`, `expo-secure-store`, `expo-font`, `expo-asset`.
 ```
 mobile/
   app/                       expo-router routes
-    _layout.tsx              splash hold, font load, theme + auth providers, AnimatedSplash
+    _layout.tsx              splash hold, font load, theme + auth providers, AnimatedSplash, Toasts
     index.tsx  welcome.tsx  sign-in.tsx  sign-up.tsx  connect-server.tsx  github-auth.tsx
     booting.tsx  new.tsx     (new.tsx is a bottom-sheet modal: delegate a task)
-    (tabs)/                  home · fleet · activity · settings
-    box/[name].tsx           the thread — SSE stream, vitals strip, composer, docks
-    settings/                account, accounts, admin, api-keys, connect, devices,
-                             mcp, notifications, skills
+    (tabs)/                  home · fleet · activity (timeline + history) · settings;
+                             _layout owns the pill tab bar + StatusLine
+    box/[name].tsx           the thread — SSE stream, ThreadHeader, composer, docks, inspector
+    automations.tsx  automation/[id].tsx  playbook/[id].tsx  harness/[id].tsx
+    settings/                account, accounts, admin, api-keys, connect, devices, harnesses,
+                             inbox, mcp, memory, playbooks, providers, repo-setup, secrets, skills
   src/
     components/              BoxCard, Composer, TranscriptView, TurnRail, PlanBoard,
-                             QuestionCard, RunSummary, WakingCard, DiffText,
-                             MarkdownLite, AnimatedSplash, SettingsScreen
+                             QuestionCard, OutcomeCard, DigestCard, WakingCard, HistoryList,
+                             StatusLine, Toasts, DiffText, MarkdownLite, AnimatedSplash
+      thread/                ThreadHeader, RunInspectorSheet
       sheets/                BoxActionsSheet, ChangesSheet, PrSheet
       ui/                    AppText(T), Button, ArmButton, Card, Field, Icon, Sheet,
                              Skeleton, StatePill, UsageMeter, WorkingDot, Motion, BrandMark
-    hooks/useFleet.ts        the fleet poll
+    hooks/                   useFleet (the fleet poll), useWatch (SSE), useNow (every clock)
     lib/                     api, config, sse, format, trace, question, activity,
                              mention, planTasks, slash, transcript-tools, pending-delegate
     state/auth.tsx           auth gate + session

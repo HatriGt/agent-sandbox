@@ -23,7 +23,9 @@ import { animateLayout, FadeInUp, PressScale, ProgressFill } from "@/components/
 export type ThreadItem =
   | { kind: "tools"; tools: Extract<TraceEvent, { kind: "tool" }>[] }
   | { kind: "produced"; files: ProducedFile[] }
-  | Exclude<TraceEvent, { kind: "tool" | "usage" }>;
+  /** `ms`: bounded by the stamped events around it (think events carry no stamp), like the web. */
+  | { kind: "think"; text: string; ms?: number }
+  | Exclude<TraceEvent, { kind: "tool" | "usage" | "think" }>;
 
 /**
  * Group trace events into thread items. Pass `{ done: true }` once the run has finished to append
@@ -32,13 +34,27 @@ export type ThreadItem =
  */
 export function groupEvents(events: TraceEvent[], opts?: { done?: boolean }): ThreadItem[] {
   const out: ThreadItem[] = [];
-  for (const e of events) {
+  for (let idx = 0; idx < events.length; idx++) {
+    const e = events[idx];
     if (e.kind === "tool") {
       const last = out[out.length - 1];
       if (last && last.kind === "tools") last.tools.push(e);
       else out.push({ kind: "tools", tools: [e] });
     } else if (e.kind === "usage") {
       continue;
+    } else if (e.kind === "think") {
+      let before: number | undefined;
+      for (let j = idx - 1; j >= 0 && before === undefined; j--) {
+        const p = events[j];
+        if (p.kind === "tool" && p.at !== undefined) before = p.at + (p.ms ?? 0);
+        else if ((p.kind === "say" || p.kind === "you" || p.kind === "plan" || p.kind === "memory") && p.at !== undefined) before = p.at;
+      }
+      let after: number | undefined;
+      for (let j = idx + 1; j < events.length && after === undefined; j++) {
+        const n = events[j];
+        if ("at" in n && n.at !== undefined) after = n.at;
+      }
+      out.push({ kind: "think", text: e.text, ...(before !== undefined && after !== undefined && after > before ? { ms: after - before } : {}) });
     } else {
       out.push(e);
     }
@@ -61,7 +77,8 @@ function sameItem(a: ThreadItem, b: ThreadItem): boolean {
     });
   }
   // Prose kinds can be long: their text is the whole identity, so skip serializing them.
-  if (a.kind === "say" || a.kind === "you" || a.kind === "think" || a.kind === "ask") return "text" in b && a.text === b.text;
+  if (a.kind === "think" && b.kind === "think") return a.text === b.text && a.ms === b.ms;
+  if (a.kind === "say" || a.kind === "you" || a.kind === "ask") return "text" in b && a.text === b.text;
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
@@ -126,7 +143,7 @@ export const ThreadRow = memo(function ThreadRow({
       case "produced":
         return session ? <ProducedFiles session={session} files={item.files} /> : <ProducedNames files={item.files} />;
       case "think":
-        return <ThinkRow text={item.text} />;
+        return <ThinkRow text={item.text} ms={item.ms} live={!!live} />;
       case "plan":
         return <PlanRow items={item.items} />;
       case "memory":
@@ -393,21 +410,33 @@ function MemoryRow({ note, text }: { note: string; text: string }) {
   );
 }
 
-function ThinkRow({ text }: { text: string }) {
+/** Folded to "Thought for Ns" ("Thinking…" while it is the live tail); tap to read the reasoning. */
+function ThinkRow({ text, ms, live }: { text: string; ms?: number; live: boolean }) {
   const { palette } = useTheme();
   const [open, setOpen] = useState(false);
+  const label = live && ms === undefined ? "Thinking…" : ms !== undefined ? `Thought for ${Math.max(1, Math.round(ms / 1000))}s` : "Thought";
   return (
     <PressScale
       onPress={() => {
         animateLayout();
         setOpen((o) => !o);
       }}
-      style={{ marginVertical: 6, flexDirection: "row", gap: 8 }}
+      accessibilityRole="button"
+      accessibilityState={{ expanded: open }}
+      style={{ marginVertical: 6, gap: 4 }}
     >
-      <Icon name="cloud" size={13} color={palette.faint} style={{ marginTop: 3 }} />
-      <T variant="meta" tone="faint" style={{ fontStyle: "italic", flex: 1 }}>
-        {open ? text : `Thought · ${text.split("\n")[0].slice(0, 80)}…`}
-      </T>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <Icon name="cloud" size={13} color={live && ms === undefined ? palette.live : palette.faint} />
+        <T variant="meta" tone={live && ms === undefined ? "live" : "faint"} style={{ flex: 1 }}>
+          {label}
+        </T>
+        <Icon name={open ? "chevron-down" : "chevron-right"} size={13} color={palette.faint} />
+      </View>
+      {open ? (
+        <T variant="meta" tone="faint" selectable style={{ fontStyle: "italic", paddingLeft: 21 }}>
+          {text}
+        </T>
+      ) : null}
     </PressScale>
   );
 }

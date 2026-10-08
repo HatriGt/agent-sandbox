@@ -132,3 +132,18 @@ export function questionChoices(parsed: ParsedQuestion): Choice[] {
   }
   return out.length >= 2 ? out : [];
 }
+
+/**
+ * The env var a question (or a failed call's output) says it is missing — `DEPLOY_TOKEN is not set`,
+ * `NPM_TOKEN: unbound variable`, `Missing env DATABASE_URL` — so the card can offer to provide it
+ * (web TraceItems missingSecretOf). Only SCREAMING_CASE names of 3+ characters count.
+ */
+export function missingSecretOf(text: string | undefined): string | null {
+  if (!text) return null;
+  const said = text.match(/\b([A-Z][A-Z0-9_]{2,})\b:? (?:is not set|is unset|not defined|is not defined|missing|unbound variable)/);
+  if (said) return said[1];
+  const env = text.match(/\bMissing (?:env(?:ironment)?(?: var(?:iable)?)?|required env(?:ironment)?(?: var(?:iable)?)?)[:\s]+\$?([A-Z][A-Z0-9_]{2,})\b/i);
+  if (env) return env[1];
+  const ask = text.match(/\b(?:provide|need|needs|set|share|paste)\b[^\n]{0,40}?\b(?:the |a |your )?(?:value (?:of|for) |secret |token |env(?:ironment)? var(?:iable)? )?`?\$?([A-Z][A-Z0-9_]{2,})`?/);
+  return ask ? ask[1] : null;
+}

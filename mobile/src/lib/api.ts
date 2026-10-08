@@ -887,12 +887,6 @@ export const api = {
   watch: (session: string) => get<WatchSnapshot>("/watch.json", { box: session }),
   /** The run receipt for a finished thread — headline, plan, files, questions. */
   digest: (session: string) => get<RunDigest>("/digest.json", { box: session }),
-  /** Archived finished runs, reverse-chron. `before` pages past the given id; `limit` caps at 50 server-side. */
-  history: (opts: { limit?: number; before?: number } = {}) =>
-    get<{ runs: HistoryRun[] }>("/history.json", {
-      ...(opts.limit !== undefined ? { limit: String(opts.limit) } : {}),
-      ...(opts.before !== undefined ? { before: String(opts.before) } : {}),
-    }),
   /** One archived run with its full digest (null when none was captured). */
   historyDetail: (id: number) => get<{ run: HistoryDetail }>("/history.json", { id: String(id) }),
   /** The outcome card of an archived run: by archive id, or the latest record for a box. */
@@ -1079,8 +1073,6 @@ export const api = {
   deleteProvider: (id: string) => post<ProvidersResponse>("/providers/delete.json", { id }),
   providerModels: (id: string, force?: boolean) =>
     post<{ models: string[]; cached: boolean; error?: string }>("/providers/models.json", { id, ...(force ? { force } : {}) }),
-  /** History ledger totals over the archive (rows ignored here; the list pages separately). */
-  ledger: (since?: number) => get<{ totals: LedgerTotals }>("/history/ledger.json", { limit: "1", ...(since ? { since: String(since) } : {}) }),
 
   // ---- audit ----
   audit: (opts: { limit?: number; before?: string; beforeId?: number } = {}) =>
@@ -1170,3 +1162,75 @@ export function isUnfurlable(text: string): boolean {
   }
   return false;
 }
+
+// --- MThread additions
+/**
+ * Hand a secret to this turn only (web TraceItems ResolveSecretRow): the same POST /resume.json
+ * the composer uses, with `secrets` as one-shot -e flags. Never stored by this call.
+ */
+export function resumeWithSecrets(session: string, message: string, secrets: Record<string, string>) {
+  return post<{ output: string; queued?: undefined } | { queued: true; id: string }>(
+    "/resume.json",
+    { box: session, message, force: true, secrets },
+    AGENT_TIMEOUT_MS,
+  );
+}
+/** Store a value in the vault; `repo` (owner/name) also grants it to that repo's setup profile. */
+export function saveSecret(name: string, value: string, repo?: string) {
+  return post<{ secrets: { name: string; createdAt: number }[] }>("/secrets.json", { action: "save", name, value, ...(repo ? { repo } : {}) });
+}
+
+// --- MHome additions
+/** Ledger row: an archived run plus the per-run usage the ledger reports (web LedgerRow). */
+export interface LedgerRow extends HistoryRun {
+  startedBy?: string | null;
+  triggerId?: string | null;
+  agent?: string | null;
+  verified?: boolean | null;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  costUsd?: number | null;
+  /** Steps of the plan of record (done / total); null when the run had no plan. */
+  planDone?: number | null;
+  planTotal?: number | null;
+}
+export interface LedgerQuery {
+  state?: string;
+  since?: number;
+  limit?: number;
+  before?: number;
+}
+/** The History ledger: totals + rows over the archive (GET /history/ledger.json). */
+export const ledgerApi = (q: LedgerQuery = {}) =>
+  get<{ totals: LedgerTotals; rows: LedgerRow[] }>(
+    "/history/ledger.json",
+    Object.fromEntries(Object.entries(q).filter(([, v]) => v !== undefined && v !== "").map(([k, v]) => [k, String(v)])),
+  );
+
+// --- MAutopilot additions
+/** Mirrors GET /secrets.json — names and grants only; a value never comes back. */
+export interface SecretMeta {
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+  grantedTo: Array<{ kind: "harness" | "repo"; id: string; label: string }>;
+}
+export interface SecretsResponse {
+  secrets: SecretMeta[];
+}
+/** Declaration merge onto MHome's LedgerRow: the saved playbook the run was started on, when it was. */
+export interface LedgerRow {
+  workflowId?: string | null;
+}
+/** The owner's default model for the composer; absent = the agent's own default. */
+export interface AgentPrefs {
+  defaultModel?: string;
+}
+export const autopilotApi = {
+  secrets: () => get<SecretsResponse>("/secrets.json"),
+  /** Store (or replace) a value. */
+  saveSecret: (name: string, value: string) => post<SecretsResponse>("/secrets.json", { action: "save", name, value }),
+  removeSecret: (name: string) => post<SecretsResponse>("/secrets.json", { action: "remove", name }),
+  /** `defaultModel: ""` clears the preference (the agent's own default applies). */
+  saveAgentDefaults: (body: { defaultAgent: AgentId; defaultModel?: string; allowPartialSupervision?: boolean }) => post<AgentPrefs>("/agent-prefs.json", body),
+};

@@ -1,34 +1,5 @@
 import type { TraceEvent } from "./trace";
 
-const SHELL = new Set(["Bash", "Shell", "Terminal", "Run", "Exec", "sh", "bash"]);
-const WRITES = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
-
-export interface RunStats {
-  steps: number;
-  files: number;
-  commands: number;
-  failed: number;
-  turns: number;
-}
-
-/** What a finished run amounted to, read off the trace: tool calls, distinct files written, commands run. */
-export function runStats(events: TraceEvent[]): RunStats {
-  const files = new Set<string>();
-  let steps = 0;
-  let commands = 0;
-  let failed = 0;
-  let turns = 0;
-  for (const e of events) {
-    if (e.kind === "you") turns++;
-    if (e.kind !== "tool") continue;
-    steps++;
-    if (e.failed) failed++;
-    if (SHELL.has(e.name)) commands++;
-    else if (WRITES.has(e.name) && e.arg) files.add(e.arg.split(/\s+/)[0]);
-  }
-  return { steps, files: files.size, commands, failed, turns };
-}
-
 /**
  * The conversation as Markdown for pasting into a PR, a ticket or a doc. Your messages are quoted,
  * the agent's prose is kept as written, tool work is folded into a list so the record stays readable.

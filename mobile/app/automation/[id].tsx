@@ -9,6 +9,7 @@ import {
   api,
   type AlertPreset,
   type Automation,
+  type AutomationDelivery,
   type AutomationDraft,
   type AutomationKind,
   type AutomationSpec,
@@ -19,6 +20,9 @@ import {
   type WorkflowView,
   type AgentChoice,
 } from "@/lib/api";
+import { deliveryLine, deliveryTone } from "@/lib/automationRuns";
+import { ago } from "@/lib/format";
+import { PressScale } from "@/components/motion";
 import { useAuth } from "@/state/auth";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
@@ -617,6 +621,8 @@ function Editor() {
         </View>
       ) : null}
 
+      {id ? <Runs id={id} /> : null}
+
       <PickerSheet
         visible={sheet === "repo"}
         title="Repos — tap to add or remove"
@@ -674,6 +680,81 @@ function Editor() {
         emptyText={workflows === null ? "Loading…" : "No playbooks saved. Make one on the web."}
       />
     </SettingsScreen>
+  );
+}
+
+type RunFilter = "all" | "fired" | "skipped" | "rejected";
+
+/** This automation's run history — the last 50 deliveries, newest first (web: AutomationRunsPage). */
+function Runs({ id }: { id: string }) {
+  const router = useRouter();
+  const [rows, setRows] = useState<AutomationDelivery[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<RunFilter>("all");
+
+  const load = useCallback(() => {
+    setError(null);
+    return api
+      .automationDeliveries(id)
+      .then((r) => setRows(r.deliveries))
+      .catch((e) => setError(msg(e)));
+  }, [id]);
+  useEffect(() => void load(), [load]);
+
+  const all = rows ?? [];
+  const counts = { all: all.length, fired: all.filter((d) => d.outcome === "fired").length, skipped: all.filter((d) => d.outcome === "skipped").length, rejected: all.filter((d) => d.outcome === "rejected" || d.outcome === "failed").length };
+  const shown = all.filter((d) => (filter === "all" ? true : filter === "rejected" ? d.outcome === "rejected" || d.outcome === "failed" : d.outcome === filter));
+  const label = (name: string, n: number) => (n ? `${name} · ${n}` : name);
+
+  return (
+    <Card style={{ gap: 12 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+        <T variant="micro" weight="semibold" tone="muted">
+          Runs
+        </T>
+        <T variant="micro" tone="faint">
+          last 50 deliveries
+        </T>
+      </View>
+      <Segmented<RunFilter>
+        small
+        value={filter}
+        onChange={setFilter}
+        options={[
+          { value: "all", label: label("All", counts.all) },
+          { value: "fired", label: label("Fired", counts.fired) },
+          { value: "skipped", label: label("Skipped", counts.skipped) },
+          { value: "rejected", label: label("Rejected", counts.rejected) },
+        ]}
+      />
+      {error ? (
+        <View style={{ gap: 8, alignItems: "flex-start" }}>
+          <T variant="meta" tone="destructive">
+            {error}
+          </T>
+          <Button title="Retry" variant="secondary" small onPress={() => void load()} />
+        </View>
+      ) : rows === null ? (
+        <T variant="micro" tone="faint">
+          Loading…
+        </T>
+      ) : shown.length === 0 ? (
+        <T variant="meta" tone="muted">
+          {counts.all === 0 ? "Nothing has arrived yet. Every delivery lands here: fired (with the box it opened), skipped and why, or rejected." : "Nothing matches this filter."}
+        </T>
+      ) : (
+        <View style={{ gap: 6 }}>
+          {shown.map((d) => (
+            <PressScale key={d.id} disabled={!d.box} onPress={() => d.box && router.push(`/box/${encodeURIComponent(d.box)}`)} accessibilityRole={d.box ? "link" : undefined}>
+              <T variant="meta" tone={deliveryTone(d)} numberOfLines={2}>
+                {ago(d.at)} · {deliveryLine(d)}
+                {d.detail && d.outcome !== "fired" ? ` — ${d.detail}` : ""}
+              </T>
+            </PressScale>
+          ))}
+        </View>
+      )}
+    </Card>
   );
 }
 

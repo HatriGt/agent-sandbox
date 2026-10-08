@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { AccessibilityInfo, Animated, Easing, Pressable, ScrollView, useWindowDimensions, View } from "react-native";
 import { shortDuration, shortPath, type DerivedTask, type TaskBoard, type TaskEvidence } from "@/lib/planTasks";
+import { useNow } from "@/hooks/useNow";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { T } from "./ui/AppText";
@@ -20,12 +21,27 @@ import { animateLayout, PressScale, ProgressFill } from "@/components/motion";
  */
 
 function evidenceSummary(e: TaskEvidence): string {
-  const parts: string[] = [];
-  if (e.files.length) parts.push(`${e.files.length} file${e.files.length > 1 ? "s" : ""}`);
-  else if (e.commands.length) parts.push(`${e.commands.length} command${e.commands.length > 1 ? "s" : ""}`);
-  else if (e.steps) parts.push(`${e.steps} step${e.steps > 1 ? "s" : ""}`);
-  if (e.ms !== undefined) parts.push(shortDuration(e.ms));
-  return parts.join(" · ");
+  if (e.files.length) return `${e.files.length} file${e.files.length > 1 ? "s" : ""}`;
+  if (e.commands.length) return `${e.commands.length} command${e.commands.length > 1 ? "s" : ""}`;
+  if (e.steps) return `${e.steps} step${e.steps > 1 ? "s" : ""}`;
+  return "";
+}
+
+/**
+ * The step's measured time (web PlanBoard StepDuration): closed windows summed from the plan
+ * snapshots' stamps, plus the open window ticking live while the step is in progress. No stamps,
+ * nothing shown — observed, never estimated.
+ */
+function StepDuration({ ms, since, live }: { ms?: number; since?: number; live: boolean }) {
+  const ticking = live && since !== undefined;
+  const now = useNow(1000, ticking);
+  const total = (ms ?? 0) + (ticking ? Math.max(0, now - since) : 0);
+  if (total < 1000) return null;
+  return (
+    <T variant="micro" mono tone={ticking ? "live" : "faint"} style={{ flexShrink: 0, marginTop: 3 }}>
+      {shortDuration(total)}
+    </T>
+  );
 }
 
 /** A completed step STAMPS in — spring scale, the one loud moment. */
@@ -133,7 +149,7 @@ function ProgressRail({ done, total, complete, failed }: { done: number; total: 
   );
 }
 
-function TaskRow({ task, live, last }: { task: DerivedTask; live?: boolean; last: boolean }) {
+function TaskRow({ task, index, total, live, since, last }: { task: DerivedTask; index: number; total: number; live?: boolean; since?: number; last: boolean }) {
   const { palette } = useTheme();
   const [open, setOpen] = useState(false);
   const e = task.evidence;
@@ -176,6 +192,7 @@ function TaskRow({ task, live, last }: { task: DerivedTask; live?: boolean; last
             tone={task.state === "done" ? "muted" : "default"}
             style={task.state === "done" ? { textDecorationLine: "line-through" } : undefined}
           >
+            <T variant="micro" mono tone="faint">{index + 1}/{total}  </T>
             {task.text}
           </T>
           {/* What this step is doing RIGHT NOW — the one thing a watcher wants mid-run. */}
@@ -191,6 +208,7 @@ function TaskRow({ task, live, last }: { task: DerivedTask; live?: boolean; last
             </T>
           ) : null}
         </View>
+        <StepDuration ms={e.ms} since={since} live={!!(active && live)} />
         {e.failed && task.state !== "done" ? <Icon name="alert-triangle" size={13} color={palette.destructive} style={{ marginTop: 3 }} /> : null}
         {hasDetail ? (
           <Icon name={open ? "chevron-down" : "chevron-right"} size={14} color={palette.faint} style={{ marginTop: 3 }} />
@@ -352,7 +370,7 @@ export function PlanSheet({
             screen, not a constant — 440 plus the header is taller than a short phone. */}
         <ScrollView style={{ maxHeight: Math.min(440, screenH * 0.5) }} contentContainerStyle={{ backgroundColor: `${palette.muted}66`, borderRadius: radius.xl, padding: 8 }}>
           {tasks.map((t, i) => (
-            <TaskRow key={`${i}-${t.text}`} task={t} live={live} last={i === tasks.length - 1} />
+            <TaskRow key={`${i}-${t.text}`} task={t} index={i} total={tasks.length} live={live} since={t.state === "active" ? board.activeSince : undefined} last={i === tasks.length - 1} />
           ))}
         </ScrollView>
       </View>

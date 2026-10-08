@@ -1,10 +1,10 @@
 // Playbooks (web: components/PlaybooksPage.tsx). Header: From a repo · New playbook. Saved
-// playbooks (steps, automated by, source; Edit · Delete), Start from a template, the notes panel.
-// The YAML editor is /playbook/[id].
+// playbooks (steps, automated by, last run, source; Run · Edit · Delete), Start from a template,
+// the notes panel. The YAML editor is /playbook/[id].
 import React, { useCallback, useState } from "react";
 import { View } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
-import { api, type Automation, type WorkflowView } from "@/lib/api";
+import { api, ledgerApi, type Automation, type BoxView, type LedgerRow, type WorkflowView } from "@/lib/api";
 import { ago } from "@/lib/format";
 import { EXAMPLE, STARTERS } from "@/lib/playbookStarters";
 import { setPlaybookSeed } from "@/lib/playbookSeed";
@@ -17,6 +17,19 @@ import { Field } from "@/components/ui/Field";
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
+/** The newest run of a playbook: a live box (BoxView.workflow) beats any archived record (LedgerRow.workflowId). */
+type LastRun = { kind: "live"; box: BoxView } | { kind: "archived"; run: LedgerRow };
+
+function lastRunLine(l: LastRun | null): { text: string; tone: "faint" | "ok" | "live" | "destructive" } {
+  if (!l) return { text: "Last run: never", tone: "faint" };
+  if (l.kind === "live") {
+    const wf = l.box.workflow!;
+    return { text: `Last run: ${wf.state === "running" ? `step ${wf.step}/${wf.total}` : wf.state}`, tone: wf.state === "failed" ? "destructive" : wf.state === "done" ? "ok" : "live" };
+  }
+  const at = l.run.endedAt ?? l.run.archivedAt;
+  return { text: `Last run: ${at ? ago(at) : l.run.state}`, tone: l.run.state === "failed" ? "destructive" : "ok" };
+}
+
 export default function Playbooks() {
   const router = useRouter();
   const [list, setList] = useState<WorkflowView[] | null>(null);
@@ -25,6 +38,10 @@ export default function Playbooks() {
   const [info, setInfo] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [triggers, setTriggers] = useState<Automation[]>([]);
+  const [boxes, setBoxes] = useState<BoxView[]>([]);
+  // Newest archived run per playbook. The newest 100 rows are enough: the page only needs the
+  // newest run per playbook, and a run older than the page is still "Never" at worst.
+  const [archived, setArchived] = useState<Map<string, LedgerRow>>(new Map());
 
   const reload = useCallback(() => {
     api
@@ -36,6 +53,14 @@ export default function Playbooks() {
       })
       .catch((e) => setError(msg(e)));
     api.automations().then((r) => setTriggers(r.triggers)).catch(() => {});
+    api.fleet().then((r) => setBoxes(r.boxes)).catch(() => {});
+    ledgerApi({ limit: 100 })
+      .then((r) => {
+        const m = new Map<string, LedgerRow>();
+        for (const row of r.rows) if (row.workflowId && !m.has(row.workflowId)) m.set(row.workflowId, row);
+        setArchived(m);
+      })
+      .catch(() => {});
   }, []);
   useFocusEffect(reload);
 
@@ -43,6 +68,14 @@ export default function Playbooks() {
     setPlaybookSeed(yaml);
     router.push("/playbook/new");
   };
+  const lastRun = (id: string): LastRun | null => {
+    const live = boxes.filter((b) => b.workflow?.id === id).sort((a, b) => (b.lastOutputAt ?? 0) - (a.lastOutputAt ?? 0))[0];
+    if (live) return { kind: "live", box: live };
+    const run = archived.get(id);
+    return run ? { kind: "archived", run } : null;
+  };
+  // Run: the composer with this playbook preselected; the task fills {{task}}.
+  const runPlaybook = (w: WorkflowView) => router.push({ pathname: "/new", params: { workflow: w.id } });
   const items = list ?? [];
 
   return (
@@ -106,6 +139,7 @@ export default function Playbooks() {
                 const used = triggers.filter((t) => t.workflowId === w.id);
                 const checks = w.steps.filter((s) => s.kind === "check").length;
                 const open = () => router.push(`/playbook/${encodeURIComponent(w.id)}`);
+                const last = lastRunLine(lastRun(w.id));
                 return (
                   <Card key={w.id} onPress={open}>
                     <T variant="body" weight="medium" numberOfLines={1}>
@@ -123,10 +157,14 @@ export default function Playbooks() {
                     <T variant="micro" tone={used.length ? "default" : "faint"} numberOfLines={1}>
                       {used.length ? `Automated by ${used.length === 1 ? used[0].name : `${used.length} automations`}` : "Manual only"}
                     </T>
+                    <T variant="micro" tone={last.tone} numberOfLines={1}>
+                      {last.text}
+                    </T>
                     <T variant="micro" tone="muted" mono={w.origin?.kind === "repo"} numberOfLines={1}>
                       {w.origin?.kind === "repo" ? w.origin.repo : "Saved here"}
                     </T>
                     <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+                      <Button small variant="ghost" title="Run" onPress={() => runPlaybook(w)} />
                       <Button small variant="ghost" title="Edit" onPress={open} />
                       <ArmButton
                         small
@@ -194,7 +232,7 @@ function Section({ title, meta, purpose, children }: { title: string; meta?: str
   );
 }
 
-/** Read every `*.yaml` under the repo's workflow folder (web: PlaybooksPage › ImportFromRepo). */
+/** Read every `*.yaml` under the repo's playbook folder (web: PlaybooksPage › ImportFromRepo). */
 function ImportFromRepo({ dir, onCancel, onDone }: { dir: string; onCancel: () => void; onDone: (r: { workflows: WorkflowView[] }, note: string) => void }) {
   const [repo, setRepo] = useState("");
   const [busy, setBusy] = useState(false);
@@ -208,7 +246,7 @@ function ImportFromRepo({ dir, onCancel, onDone }: { dir: string; onCancel: () =
     try {
       const r = await api.workflowMutate({ action: "import-repo", repo: m[1], ...(m[2] ? { ref: m[2] } : {}) });
       const n = r.imported?.length ?? 0;
-      onDone(r, `${n ? `Imported ${n} workflow${n === 1 ? "" : "s"} from ${m[1]}` : `Nothing imported from ${m[1]}`}${r.skipped?.length ? ` — ${r.skipped.join(" · ")}` : ""}`);
+      onDone(r, `${n ? `Imported ${n} playbook${n === 1 ? "" : "s"} from ${m[1]}` : `Nothing imported from ${m[1]}`}${r.skipped?.length ? ` — ${r.skipped.join(" · ")}` : ""}`);
     } catch (e) {
       setError(msg(e));
     } finally {

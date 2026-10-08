@@ -13,6 +13,7 @@ import { AuthProvider, useAuth } from "@/state/auth";
 import { PushBridge } from "@/components/PushBridge";
 import { ShareIntentProvider } from "expo-share-intent";
 import { ShareBridge } from "@/components/ShareBridge";
+import { Toasts } from "@/components/Toasts";
 
 // Hold the native splash until fonts and the stored credential are loaded, so
 // the first frame is the real app (the web dashboard inlines a shell skeleton
@@ -55,6 +56,7 @@ function Shell() {
       </Stack>
       <PushBridge />
       <ShareBridge />
+      <Toasts />
       {intro && <AnimatedSplash onDone={() => setIntro(false)} />}
     </>
   );
