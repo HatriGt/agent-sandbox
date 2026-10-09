@@ -180,8 +180,6 @@ export const HomeComposer = forwardRef<HomeComposerHandle, { lifecycle?: FleetLi
 
   // `/name ` typed by hand becomes the skill chip (web updateSlash); `/` at a word start opens the
   // inline menu below the box.
-  const taskRef = useRef(task);
-  taskRef.current = task;
   const updateText = (next: string, c: number) => {
     taskRef.current = next;
     setTask(next);
