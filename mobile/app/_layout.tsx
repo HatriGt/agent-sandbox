@@ -14,6 +14,7 @@ import { PushBridge } from "@/components/PushBridge";
 import { ShareIntentProvider } from "expo-share-intent";
 import { ShareBridge } from "@/components/ShareBridge";
 import { Toasts } from "@/components/Toasts";
+import { useOtaUpdates } from "@/hooks/useOtaUpdates";
 
 // Hold the native splash until fonts and the stored credential are loaded, so
 // the first frame is the real app (the web dashboard inlines a shell skeleton
@@ -41,6 +42,7 @@ function Shell() {
   // Native splash hands off to the in-app AnimatedSplash for a live intro
   // (spring mark, orb pop, spark to the gap) instead of a hard cut to the UI.
   const [intro, setIntro] = useState(true);
+  useOtaUpdates();
   useEffect(() => {
     if (fontsLoaded && ready) void SplashScreen.hideAsync();
   }, [fontsLoaded, ready]);
