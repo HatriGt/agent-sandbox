@@ -157,7 +157,7 @@ export function VoiceOverlay({ open, onDone, onCancel }: { open: boolean; onDone
         <ScrollView
           ref={scroll}
           style={{ flex: 1 }}
-          contentContainerStyle={{ flexGrow: 1, justifyContent: "flex-end", paddingVertical: 20 }}
+          contentContainerStyle={{ flexGrow: 1, justifyContent: "flex-end", paddingTop: 20, paddingBottom: 8 }}
           showsVerticalScrollIndicator={false}
           onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: !isReducedMotion() })}
         >
@@ -185,7 +185,7 @@ export function VoiceOverlay({ open, onDone, onCancel }: { open: boolean; onDone
           )}
         </ScrollView>
 
-        <View style={{ alignItems: "center", gap: 2, paddingTop: 8 }}>
+        <View style={{ alignItems: "center", gap: 28, paddingTop: 36, paddingBottom: 8 }}>
           <Pressable
             onPress={togglePause}
             onLayout={(e) => {
@@ -204,7 +204,7 @@ export function VoiceOverlay({ open, onDone, onCancel }: { open: boolean; onDone
               </T>
             </View>
           </PressScale>
-          <T variant="micro" style={{ color: palette.faint, marginTop: 8 }}>
+          <T variant="micro" style={{ color: palette.faint, marginTop: -16 }}>
             Tap the orb to {paused ? "resume" : "pause"}
           </T>
         </View>

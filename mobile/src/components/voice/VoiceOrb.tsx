@@ -79,20 +79,21 @@ half4 main(float2 xy) {
   float3 L = normalize(float3(-0.45, -0.55, 0.7));
   float diff = clamp(dot(nrm, L), 0.0, 1.0);
   float fres = pow(1.0 - z, 2.2);
-  half3 deep  = half3(0.16, 0.40, 0.86);   // #2966DB
-  half3 azure = half3(0.36, 0.64, 1.0);    // #5CA3FF
-  half3 sky   = half3(0.66, 0.83, 1.0);    // #A8D4FF
-  half3 white = half3(0.96, 0.98, 1.0);
+  // Sky palette: cyan-leaning blues, no navy - the ball reads as daylight sky with clouds.
+  half3 deep  = half3(0.30, 0.60, 0.98);   // #4C99FA
+  half3 azure = half3(0.49, 0.76, 1.0);    // #7DC2FF
+  half3 sky   = half3(0.74, 0.89, 1.0);    // #BDE3FF
+  half3 white = half3(0.97, 0.99, 1.0);
   half3 base = mix(deep, azure, diff * 0.85 + 0.1);
   base = mix(base, sky, fres * 0.75);
 
   // Clouds: broad white masses where the warped noise rises, with a denser bright core, and
-  // deeper blue troughs in between. Speaking lifts the cloud threshold so more white blooms.
+  // slightly deeper sky in the troughs. Speaking lifts the cloud threshold so more white blooms.
   float cloud = smoothstep(-0.08 - u_level * 0.08, 0.3, n);
   float core = smoothstep(0.12, 0.42, n + 0.3 * n2);
   float trough = smoothstep(0.0, -0.35, n2);
-  half3 inside = mix(base, deep, trough * 0.5);
-  inside = mix(inside, mix(sky, white, 0.6), cloud * 0.9);
+  half3 inside = mix(base, deep, trough * 0.35);
+  inside = mix(inside, mix(sky, white, 0.7), cloud * 0.9);
   inside = mix(inside, white, core * 0.9);
 
   // Specular lobe, and a bright limb so the ball reads glossy and round.
