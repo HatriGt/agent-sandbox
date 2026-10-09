@@ -6,14 +6,15 @@ import { playVoiceSound } from "@/lib/voice-sounds";
 import { useTheme } from "@/theme/ThemeContext";
 import { T } from "@/components/ui/AppText";
 import { Icon } from "@/components/ui/Icon";
-import { DUR, EASE_OUT, FadeIn, haptic, isReducedMotion, PressScale, SPRING } from "@/components/motion";
+import { DUR, EASE_OUT, FadeInUp, haptic, isReducedMotion, PressScale, SPRING } from "@/components/motion";
 import { VoiceOrb } from "./VoiceOrb";
 
 /**
- * Full-screen voice mode (ChatGPT-style): listening starts the moment it opens, finalized phrases
- * stack up under the orb with the in-flight phrase in muted italics, Done hands the whole take to
- * the composer, Cancel (or Android back) discards it. Tapping the orb pauses/resumes the mic.
- * Nothing is sent from here — the composer still owns sending.
+ * Full-screen voice mode (ChatGPT-style): listening starts the moment it opens; the transcript fills
+ * the screen with finalized phrases in foreground and the in-flight phrase muted, bottom-anchored so
+ * the latest words sit nearest the orb. The orb row at the bottom holds Cancel / orb / Done; tapping
+ * the orb pauses/resumes the mic, Android back cancels. Nothing is sent from here — the composer
+ * still owns sending.
  */
 export function VoiceOverlay({ open, onDone, onCancel }: { open: boolean; onDone: (text: string) => void; onCancel: () => void }) {
   const { palette } = useTheme();
@@ -21,7 +22,12 @@ export function VoiceOverlay({ open, onDone, onCancel }: { open: boolean; onDone
   const [mounted, setMounted] = useState(open);
   const [committed, setCommitted] = useState<string[]>([]);
   const [paused, setPaused] = useState(false);
-  const { state, interim, level, start, stop } = useVoiceInput({ onFinal: (t) => setCommitted((c) => [...c, t]) });
+  const { state, interim, level, start, stop } = useVoiceInput({
+    onFinal: (t) => {
+      setCommitted((c) => [...c, t]);
+      playVoiceSound("phrase");
+    },
+  });
   const backdrop = useRef(new Animated.Value(0)).current;
   const content = useRef(new Animated.Value(0.96)).current;
   const scroll = useRef<ScrollView>(null);
@@ -58,13 +64,9 @@ export function VoiceOverlay({ open, onDone, onCancel }: { open: boolean; onDone
   useEffect(() => {
     if (open && state === "listening" && !startChimed.current) {
       startChimed.current = true;
-      playVoiceSound("start");
+      playVoiceSound("open");
     }
   }, [open, state]);
-
-  useEffect(() => {
-    scroll.current?.scrollToEnd({ animated: !isReducedMotion() });
-  }, [committed, interim]);
 
   if (!mounted) return null;
 
@@ -83,16 +85,18 @@ export function VoiceOverlay({ open, onDone, onCancel }: { open: boolean; onDone
     stop();
     const all = tail ? [...committed, tail] : committed;
     haptic("success");
-    playVoiceSound("stop");
+    playVoiceSound("done");
     onDone(all.join(" "));
   };
   const togglePause = () => {
     haptic("selection");
     if (paused) {
       setPaused(false);
+      playVoiceSound("resume");
       void start();
     } else {
       setPaused(true);
+      playVoiceSound("pause");
       stop();
     }
   };
@@ -120,15 +124,13 @@ export function VoiceOverlay({ open, onDone, onCancel }: { open: boolean; onDone
           transform: [{ scale: content }],
         }}
       >
-        <View style={{ alignItems: "center", gap: 8, minHeight: 44 }}>
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-            {listening && !paused ? <PulseDot color="#5DA6F5" /> : null}
-            <T variant="meta" weight="medium" style={{ color: state === "error" ? palette.destructive : palette.mutedForeground }}>
-              {label}
-            </T>
-          </View>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8, minHeight: 24 }}>
+          {listening && !paused ? <PulseDot color="#5DA6F5" /> : null}
+          <T variant="meta" weight="medium" style={{ color: state === "error" ? palette.destructive : palette.mutedForeground }}>
+            {label}
+          </T>
           {state === "error" && !paused ? (
-            <PressScale onPress={retry} accessibilityRole="button" accessibilityLabel="Retry microphone">
+            <PressScale onPress={retry} accessibilityRole="button" accessibilityLabel="Retry microphone" hitSlop={8}>
               <T variant="meta" weight="semibold" style={{ color: palette.foreground, textDecorationLine: "underline" }}>
                 Retry
               </T>
@@ -136,50 +138,56 @@ export function VoiceOverlay({ open, onDone, onCancel }: { open: boolean; onDone
           ) : null}
         </View>
 
-        <View style={{ alignItems: "center", paddingVertical: 8 }}>
-          <Pressable onPress={togglePause} accessibilityRole="button" accessibilityLabel={paused ? "Resume listening" : "Pause listening"} hitSlop={20}>
-            <VoiceOrb level={level} paused={paused} />
-          </Pressable>
-          <T variant="micro" style={{ color: palette.faint, marginTop: -8 }}>
-            Tap the orb to {paused ? "resume" : "pause"}
-          </T>
-        </View>
-
-        <ScrollView ref={scroll} style={{ flex: 1 }} contentContainerStyle={{ paddingVertical: 12, flexGrow: 1, justifyContent: "flex-start" }} showsVerticalScrollIndicator={false}>
-          <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "center" }}>
-            {committed.map((phrase, i) => (
-              <FadeIn key={i}>
-                <T variant="h3" style={{ color: palette.foreground, textAlign: "center" }}>
-                  {phrase}{" "}
-                </T>
-              </FadeIn>
-            ))}
-            {interim ? (
-              <FadeIn key={`interim-${committed.length}`}>
-                <T variant="h3" style={{ color: palette.mutedForeground, fontStyle: "italic", textAlign: "center" }}>
-                  {interim}
-                </T>
-              </FadeIn>
-            ) : null}
-            {!hasText ? (
-              <T variant="body" style={{ color: palette.faint, textAlign: "center" }}>
-                {paused ? "Resume to keep dictating." : "Say what you want the agent to do."}
-              </T>
-            ) : null}
-          </View>
+        <ScrollView
+          ref={scroll}
+          style={{ flex: 1 }}
+          contentContainerStyle={{ flexGrow: 1, justifyContent: "flex-end", paddingVertical: 20 }}
+          showsVerticalScrollIndicator={false}
+          onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: !isReducedMotion() })}
+        >
+          {hasText ? (
+            <View style={{ flexDirection: "row", flexWrap: "wrap" }}>
+              {committed.map((phrase, i) => (
+                <FadeInUp key={i} distance={6}>
+                  <T variant="h2" serif style={{ color: palette.foreground }}>
+                    {phrase}{" "}
+                  </T>
+                </FadeInUp>
+              ))}
+              {interim ? (
+                <FadeInUp key={`interim-${committed.length}`} distance={6}>
+                  <T variant="h2" serif style={{ color: palette.mutedForeground, opacity: 0.6 }}>
+                    {interim}
+                  </T>
+                </FadeInUp>
+              ) : null}
+            </View>
+          ) : (
+            <T variant="h2" serif style={{ color: palette.faint }}>
+              Say something…
+            </T>
+          )}
         </ScrollView>
 
-        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 28, paddingTop: 12 }}>
-          <PressScale onPress={cancel} haptic="light" accessibilityRole="button" accessibilityLabel="Cancel dictation" hitSlop={8}>
-            <View style={{ width: 56, height: 56, borderRadius: 28, borderWidth: 1, borderColor: palette.border, alignItems: "center", justifyContent: "center" }}>
-              <Icon name="x" size={22} color={palette.foreground} />
-            </View>
-          </PressScale>
-          <PressScale onPress={done} disabled={!hasText} accessibilityRole="button" accessibilityLabel="Use dictated text" accessibilityState={{ disabled: !hasText }} hitSlop={8}>
-            <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: palette.primary, opacity: hasText ? 1 : 0.4, alignItems: "center", justifyContent: "center" }}>
-              <Icon name="check" size={24} color={palette.primaryForeground} />
-            </View>
-          </PressScale>
+        <View style={{ alignItems: "center", gap: 10, paddingTop: 8 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", alignSelf: "stretch", paddingHorizontal: 12 }}>
+            <PressScale onPress={cancel} haptic="light" accessibilityRole="button" accessibilityLabel="Cancel dictation" hitSlop={8}>
+              <View style={{ width: 52, height: 52, borderRadius: 26, borderWidth: 1, borderColor: palette.border, alignItems: "center", justifyContent: "center" }}>
+                <Icon name="x" size={20} color={palette.foreground} />
+              </View>
+            </PressScale>
+            <Pressable onPress={togglePause} accessibilityRole="button" accessibilityLabel={paused ? "Resume listening" : "Pause listening"} hitSlop={12}>
+              <VoiceOrb level={level} paused={paused} size={200} />
+            </Pressable>
+            <PressScale onPress={done} disabled={!hasText} accessibilityRole="button" accessibilityLabel="Use dictated text" accessibilityState={{ disabled: !hasText }} hitSlop={8}>
+              <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: palette.primary, opacity: hasText ? 1 : 0.4, alignItems: "center", justifyContent: "center" }}>
+                <Icon name="check" size={22} color={palette.primaryForeground} />
+              </View>
+            </PressScale>
+          </View>
+          <T variant="micro" style={{ color: palette.faint }}>
+            Tap the orb to {paused ? "resume" : "pause"}
+          </T>
         </View>
       </Animated.View>
     </Modal>

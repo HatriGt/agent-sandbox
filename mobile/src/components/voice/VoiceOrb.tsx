@@ -1,231 +1,143 @@
-import React, { useEffect, useMemo, useRef } from "react";
-import { Animated, Easing, View } from "react-native";
-import Svg, { Circle, Defs, RadialGradient, Stop } from "react-native-svg";
+import React, { useEffect, useMemo } from "react";
+import { Canvas, Fill, Shader, Skia } from "@shopify/react-native-skia";
+import { useClock } from "@shopify/react-native-skia";
+import { useDerivedValue, useSharedValue, withSpring, withTiming } from "react-native-reanimated";
 import { useReducedMotion } from "@/components/motion";
 
 /**
- * The voice-mode sphere, cloud variant: a frosted white-blue globe with no hard edge. The disc is a
- * feathered radial gradient (white core → sky → transparent), and nine translucent cloud puffs in
- * three depth layers orbit inside it on their own periods, so the surface never repeats. The whole
- * cloud field slowly revolves; a specular highlight sits top-left; a haze halo breathes outside.
- *
- * Mic `level` (0..1) is spring-tracked and drives: globe scale, halo scale/opacity, cloud spread
- * (the puffs push outward and brighten when you speak) and the revolve speed. Silence falls back to
- * a 2.6s breath. Paused dims everything and freezes the orbits; reduce-motion keeps only a subtle
- * level-driven scale. Colours are intentionally fixed (not themed): this is the one place in the
- * app that is "sky", in light and dark alike. Every animated prop is a native-driver transform or
- * opacity; the SVG gradients are static.
+ * The voice-mode orb: a single fragment shader, so the surface rolls like a volumetric cloud rather
+ * than layered circles. Two domain-warp passes feed a 4-octave value-noise fbm over polar-ish
+ * coordinates; the fbm value picks a point on a 4-stop blue palette, a specular lobe sits top-left,
+ * a darker rim hugs the feathered edge, and a wide haze glows outside. The mic `level` (0..1) is
+ * spring-smoothed on the UI thread and only ever reaches the GPU as a uniform: it speeds up the
+ * cloud, grows the radius and brightens the haze. Paused: time slows to 0.15x and colour drifts
+ * toward grey. Reduce-motion: time at 0.03x and no level-driven radius. Everything per-frame runs in
+ * the shader — no JS allocations once mounted.
  */
 
-const SKY = {
-  core: "#FFFFFF",
-  mist: "#DCEBFF",
-  powder: "#BBD7FF",
-  sky: "#93C0FF",
-  azure: "#6FAEFF",
-  deep: "#4A94F0",
-  ocean: "#2F74D6",
-  lilac: "#A9B0FF",
-  cyan: "#8CD8FF",
-} as const;
+const SKSL = `
+uniform float u_time;
+uniform float u_level;
+uniform float2 u_res;
+uniform float u_paused;
+uniform float u_reduced;
 
-interface Puff {
-  id: string;
-  // Rest position as a fraction of the radius, polar: angle (deg) + distance (0..1).
-  angle: number;
-  dist: number;
-  // Puff radius as a fraction of the globe radius.
-  r: number;
-  tint: string;
-  alpha: number;
-  // Orbit period (ms) and sway amplitude (fraction of radius).
-  period: number;
-  sway: number;
-  // Depth layer: 0 = back (big, faint, slow), 2 = front (small, bright, quick).
-  layer: 0 | 1 | 2;
+float hash(float2 p) {
+  p = fract(p * float2(123.34, 456.21));
+  p += dot(p, p + 45.32);
+  return fract(p.x * p.y);
 }
 
-const PUFFS: Puff[] = [
-  // Back: large, deep-blue lobes that give the globe its body.
-  { id: "b1", angle: 200, dist: 0.3, r: 0.7, tint: SKY.deep, alpha: 0.6, period: 9800, sway: 0.1, layer: 0 },
-  { id: "b2", angle: 40, dist: 0.35, r: 0.66, tint: SKY.ocean, alpha: 0.5, period: 11400, sway: 0.09, layer: 0 },
-  { id: "b3", angle: 310, dist: 0.25, r: 0.58, tint: SKY.lilac, alpha: 0.4, period: 12600, sway: 0.08, layer: 0 },
-  { id: "b4", angle: 130, dist: 0.5, r: 0.56, tint: SKY.azure, alpha: 0.5, period: 10600, sway: 0.09, layer: 0 },
-  // Middle: overlapping sky-blue cumulus lobes.
-  { id: "m1", angle: 120, dist: 0.42, r: 0.46, tint: SKY.sky, alpha: 0.72, period: 7200, sway: 0.12, layer: 1 },
-  { id: "m2", angle: 260, dist: 0.46, r: 0.42, tint: SKY.cyan, alpha: 0.6, period: 6400, sway: 0.13, layer: 1 },
-  { id: "m3", angle: 10, dist: 0.5, r: 0.4, tint: SKY.azure, alpha: 0.62, period: 8100, sway: 0.11, layer: 1 },
-  { id: "m4", angle: 190, dist: 0.58, r: 0.38, tint: SKY.sky, alpha: 0.58, period: 7700, sway: 0.12, layer: 1 },
-  { id: "m5", angle: 330, dist: 0.6, r: 0.36, tint: SKY.powder, alpha: 0.55, period: 6900, sway: 0.12, layer: 1 },
-  // Front: small pale wisps; the only near-white in the globe.
-  { id: "f1", angle: 160, dist: 0.3, r: 0.3, tint: SKY.mist, alpha: 0.75, period: 4600, sway: 0.16, layer: 2 },
-  { id: "f2", angle: 340, dist: 0.38, r: 0.26, tint: SKY.powder, alpha: 0.7, period: 5300, sway: 0.15, layer: 2 },
-  { id: "f3", angle: 80, dist: 0.55, r: 0.24, tint: SKY.mist, alpha: 0.62, period: 4100, sway: 0.17, layer: 2 },
-  { id: "f4", angle: 230, dist: 0.62, r: 0.22, tint: SKY.core, alpha: 0.5, period: 4900, sway: 0.16, layer: 2 },
-];
-
-const REVOLVE_MS = 26000;
-
-function loopSine(v: Animated.Value, period: number, delay = 0) {
-  return Animated.loop(
-    Animated.sequence([
-      Animated.delay(delay),
-      Animated.timing(v, { toValue: 1, duration: period / 2, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-      Animated.timing(v, { toValue: 0, duration: period / 2, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-    ]),
-  );
+float vnoise(float2 p) {
+  float2 i = floor(p);
+  float2 f = fract(p);
+  float2 u = f * f * (3.0 - 2.0 * f);
+  float a = hash(i);
+  float b = hash(i + float2(1.0, 0.0));
+  float c = hash(i + float2(0.0, 1.0));
+  float d = hash(i + float2(1.0, 1.0));
+  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
 
-export function VoiceOrb({ level, paused, size = 220 }: { level: number; paused: boolean; size?: number }) {
+float fbm(float2 p) {
+  float v = 0.0;
+  float amp = 0.5;
+  float2x2 rot = float2x2(0.8, 0.6, -0.6, 0.8);
+  for (int i = 0; i < 4; i++) {
+    v += amp * vnoise(p);
+    p = rot * p * 2.03 + 11.7;
+    amp *= 0.5;
+  }
+  return v;
+}
+
+half4 main(float2 xy) {
+  float2 uv = (xy - 0.5 * u_res) / min(u_res.x, u_res.y);
+  float dist = length(uv);
+  float ang = atan(uv.y, uv.x);
+  float speed = (0.12 + u_level * 0.35) * mix(1.0, 0.15, u_paused) * mix(1.0, 0.03 / 0.12, u_reduced);
+  float t = u_time * speed;
+
+  // Polar-ish domain: angle wraps smoothly, radius stretched so the cloud rolls around the sphere.
+  float2 pol = float2(cos(ang) * (0.6 + dist * 1.4), sin(ang) * (0.6 + dist * 1.4));
+  float2 p = pol * 2.2;
+
+  // Two warp passes.
+  float2 q = float2(fbm(p + float2(0.0, t * 0.9)), fbm(p + float2(5.2, 1.3) - t * 0.7));
+  float2 r = float2(fbm(p + 2.6 * q + float2(1.7, 9.2) + t * 0.5), fbm(p + 2.6 * q + float2(8.3, 2.8) - t * 0.4));
+  float n = fbm(p + 2.2 * r + t * 0.25);
+
+  float levelR = u_level * 0.04 * (1.0 - u_reduced);
+  float radius = 0.42 + levelR + 0.02 * (n - 0.5) * 2.0;
+  float mask = smoothstep(radius + 0.06, radius - 0.08, dist);
+
+  // Four-stop blue palette by fbm value.
+  half3 deep = half3(0.184, 0.435, 0.851);   // #2F6FD9
+  half3 azure = half3(0.373, 0.659, 1.0);    // #5FA8FF
+  half3 sky = half3(0.612, 0.796, 1.0);      // #9CCBFF
+  half3 white = half3(0.902, 0.949, 1.0);    // #E6F2FF
+  float k = clamp((n - 0.2) / 0.6, 0.0, 1.0);
+  half3 inside = k < 0.333 ? mix(deep, azure, k * 3.0)
+               : k < 0.666 ? mix(azure, sky, (k - 0.333) * 3.0)
+               : mix(sky, white, (k - 0.666) * 3.0);
+
+  // Soft specular lobe top-left, faint darker rim.
+  float spec = exp(-dot(uv - float2(-0.16, -0.17), uv - float2(-0.16, -0.17)) * 28.0);
+  inside += half3(spec * 0.35);
+  float rim = smoothstep(radius - 0.14, radius, dist);
+  inside = mix(inside, deep * 0.85, rim * 0.35);
+
+  // Outside haze: same blues, alpha fading to 0 by 0.7, brighter with level.
+  float haze = (1.0 - smoothstep(radius - 0.02, 0.7, dist)) * (1.0 - mask);
+  haze = haze * haze * (0.28 + u_level * 0.4);
+  half3 hazeCol = mix(azure, sky, 0.5 + 0.5 * (n - 0.5));
+
+  half3 col = inside * mask + hazeCol * haze;
+  float alpha = clamp(mask + haze, 0.0, 1.0);
+
+  // Paused: drop saturation.
+  float lum = dot(col, half3(0.299, 0.587, 0.114));
+  col = mix(col, half3(lum), u_paused * 0.7);
+
+  return half4(col * alpha, alpha);
+}
+`;
+
+const compiled = Skia.RuntimeEffect.Make(SKSL);
+if (!compiled) throw new Error("VoiceOrb: shader failed to compile");
+const effect = compiled;
+
+export function VoiceOrb({ level, paused, size = 200 }: { level: number; paused: boolean; size?: number }) {
   const reduced = useReducedMotion();
-  const lvl = useRef(new Animated.Value(0)).current;
-  const breath = useRef(new Animated.Value(0)).current;
-  const spin = useRef(new Animated.Value(0)).current;
-  const dim = useRef(new Animated.Value(1)).current;
-  const sways = useRef(PUFFS.map(() => new Animated.Value(0))).current;
-  const sways2 = useRef(PUFFS.map(() => new Animated.Value(0))).current;
-
-  // Spring-track the raw level: bursts land soft, silence decays rather than snapping.
-  useEffect(() => {
-    Animated.spring(lvl, { toValue: paused ? 0 : level, speed: 18, bounciness: 3, useNativeDriver: true }).start();
-  }, [level, paused, lvl]);
+  const clock = useClock();
+  const lvl = useSharedValue(0);
+  const pausedV = useSharedValue(paused ? 1 : 0);
 
   useEffect(() => {
-    Animated.timing(dim, { toValue: paused ? 0.5 : 1, duration: 260, easing: Easing.out(Easing.quad), useNativeDriver: true }).start();
-  }, [paused, dim]);
-
-  // Breath, revolve and per-puff sway loops. Frozen (and settled) while paused or under reduce-motion.
+    lvl.value = withSpring(Math.max(0, Math.min(1, level)), { damping: 14, stiffness: 160, mass: 0.6 });
+  }, [level, lvl]);
   useEffect(() => {
-    if (paused || reduced) {
-      [breath, spin, ...sways, ...sways2].forEach((v) => v.stopAnimation());
-      Animated.timing(breath, { toValue: 0, duration: 260, useNativeDriver: true }).start();
-      return;
-    }
-    const loops = [
-      loopSine(breath, 2600),
-      Animated.loop(Animated.timing(spin, { toValue: 1, duration: REVOLVE_MS, easing: Easing.linear, useNativeDriver: true })),
-      ...PUFFS.map((p, i) => loopSine(sways[i], p.period, (i * 377) % 1500)),
-      ...PUFFS.map((p, i) => loopSine(sways2[i], p.period * 1.37, (i * 541) % 2100)),
-    ];
-    loops.forEach((l) => l.start());
-    return () => loops.forEach((l) => l.stop());
-  }, [paused, reduced, breath, spin, sways, sways2]);
+    pausedV.value = withTiming(paused ? 1 : 0, { duration: 260 });
+  }, [paused, pausedV]);
 
-  const r = size / 2;
-  const box = Math.round(size * 1.7);
-  const c = box / 2;
-
-  const globeScale = reduced
-    ? lvl.interpolate({ inputRange: [0, 1], outputRange: [1, 1.05] })
-    : Animated.add(lvl.interpolate({ inputRange: [0, 1], outputRange: [1, 1.1] }), breath.interpolate({ inputRange: [0, 1], outputRange: [0, 0.025] }));
-  const haloScale = Animated.add(lvl.interpolate({ inputRange: [0, 1], outputRange: [1, reduced ? 1.06 : 1.3] }), breath.interpolate({ inputRange: [0, 1], outputRange: [0, 0.04] }));
-  const haloOpacity = Animated.multiply(lvl.interpolate({ inputRange: [0, 1], outputRange: [0.5, 1] }), dim);
-  // Speaking pushes the clouds outward (spread) and brightens the front layer.
-  const spread = lvl.interpolate({ inputRange: [0, 1], outputRange: [1, 1.22] });
-  const frontGlow = Animated.multiply(lvl.interpolate({ inputRange: [0, 1], outputRange: [0.75, 1] }), dim);
-  const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
-  const counterRotate = spin.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "-360deg"] });
-
-  // Layer rotation: the back layer revolves with the field, the front counter-rotates at a slower
-  // rate so parallax reads as depth rather than a spinning disc.
-  const layerRotate = useMemo(
-    () => [rotate, spin.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "140deg"] }), counterRotate] as const,
-    [rotate, counterRotate, spin],
+  const res = useMemo(() => [size, size], [size]);
+  const reducedV = reduced ? 1 : 0;
+  const uniforms = useDerivedValue(
+    () => ({
+      u_time: clock.value / 1000,
+      u_level: lvl.value,
+      u_res: res,
+      u_paused: pausedV.value,
+      u_reduced: reducedV,
+    }),
+    [res, reducedV],
   );
 
   return (
-    <View style={{ width: box, height: box, alignItems: "center", justifyContent: "center" }} pointerEvents="none">
-      {/* Haze halo: a wide feathered disc that swells with the voice. */}
-      <Animated.View style={{ position: "absolute", width: box, height: box, opacity: haloOpacity, transform: [{ scale: haloScale }] }}>
-        <Svg width={box} height={box}>
-          <Defs>
-            <RadialGradient id="halo" cx="50%" cy="50%" rx="50%" ry="50%">
-              <Stop offset="0%" stopColor={SKY.azure} stopOpacity={0.5} />
-              <Stop offset="55%" stopColor={SKY.deep} stopOpacity={0.2} />
-              <Stop offset="100%" stopColor={SKY.ocean} stopOpacity={0} />
-            </RadialGradient>
-          </Defs>
-          <Circle cx={c} cy={c} r={c} fill="url(#halo)" />
-        </Svg>
-      </Animated.View>
-
-      {/* Globe: feathered base (no clip, no rim) + three revolving cloud layers + specular. */}
-      <Animated.View style={{ width: size, height: size, opacity: dim, transform: [{ scale: globeScale }] }}>
-        <Svg width={size} height={size} style={{ position: "absolute" }}>
-          <Defs>
-            <RadialGradient id="globe" cx="46%" cy="44%" rx="56%" ry="56%">
-              <Stop offset="0%" stopColor={SKY.mist} stopOpacity={1} />
-              <Stop offset="38%" stopColor={SKY.sky} stopOpacity={0.98} />
-              <Stop offset="70%" stopColor={SKY.azure} stopOpacity={0.92} />
-              <Stop offset="90%" stopColor={SKY.deep} stopOpacity={0.55} />
-              <Stop offset="100%" stopColor={SKY.ocean} stopOpacity={0} />
-            </RadialGradient>
-          </Defs>
-          <Circle cx={r} cy={r} r={r} fill="url(#globe)" />
-        </Svg>
-
-        {([0, 1, 2] as const).map((layer) => (
-          <Animated.View
-            key={layer}
-            style={{
-              position: "absolute",
-              left: 0,
-              top: 0,
-              width: size,
-              height: size,
-              opacity: layer === 2 ? frontGlow : 1,
-              transform: [{ rotate: layerRotate[layer] }, { scale: layer === 0 ? 1 : spread }],
-            }}
-          >
-            {PUFFS.filter((p) => p.layer === layer).map((p) => {
-              const i = PUFFS.indexOf(p);
-              const d = r * p.r;
-              const a = (p.angle * Math.PI) / 180;
-              const cx = r + Math.cos(a) * p.dist * r;
-              const cy = r + Math.sin(a) * p.dist * r;
-              const amp = p.sway * r;
-              const dx = sways[i].interpolate({ inputRange: [0, 1], outputRange: [-amp, amp] });
-              const dy = sways2[i].interpolate({ inputRange: [0, 1], outputRange: [amp * 0.7, -amp * 0.7] });
-              const puffScale = sways2[i].interpolate({ inputRange: [0, 1], outputRange: [0.92, 1.08] });
-              return (
-                <Animated.View
-                  key={p.id}
-                  style={{ position: "absolute", left: cx - d, top: cy - d, width: d * 2, height: d * 2, transform: [{ translateX: dx }, { translateY: dy }, { scale: puffScale }] }}
-                >
-                  <Svg width={d * 2} height={d * 2}>
-                    <Defs>
-                      <RadialGradient id={`puff-${p.id}`} cx="50%" cy="50%" rx="50%" ry="50%">
-                        <Stop offset="0%" stopColor={p.tint} stopOpacity={p.alpha} />
-                        <Stop offset="35%" stopColor={p.tint} stopOpacity={p.alpha * 0.7} />
-                        <Stop offset="68%" stopColor={p.tint} stopOpacity={p.alpha * 0.28} />
-                        <Stop offset="100%" stopColor={p.tint} stopOpacity={0} />
-                      </RadialGradient>
-                    </Defs>
-                    <Circle cx={d} cy={d} r={d} fill={`url(#puff-${p.id})`} />
-                  </Svg>
-                </Animated.View>
-              );
-            })}
-          </Animated.View>
-        ))}
-
-        {/* Specular: a soft off-centre highlight that keeps the globe reading as a sphere. */}
-        <Svg width={size} height={size} style={{ position: "absolute" }}>
-          <Defs>
-            <RadialGradient id="spec" cx="34%" cy="28%" rx="36%" ry="32%">
-              <Stop offset="0%" stopColor={SKY.core} stopOpacity={0.55} />
-              <Stop offset="100%" stopColor={SKY.core} stopOpacity={0} />
-            </RadialGradient>
-            <RadialGradient id="feather" cx="50%" cy="50%" rx="50%" ry="50%">
-              <Stop offset="0%" stopColor={SKY.deep} stopOpacity={0} />
-              <Stop offset="70%" stopColor={SKY.deep} stopOpacity={0} />
-              <Stop offset="100%" stopColor={SKY.deep} stopOpacity={0.3} />
-            </RadialGradient>
-          </Defs>
-          <Circle cx={r} cy={r} r={r} fill="url(#spec)" />
-          <Circle cx={r} cy={r} r={r} fill="url(#feather)" />
-        </Svg>
-      </Animated.View>
-    </View>
+    <Canvas style={{ width: size, height: size }}>
+      <Fill>
+        <Shader source={effect} uniforms={uniforms} />
+      </Fill>
+    </Canvas>
   );
 }
