@@ -180,7 +180,10 @@ export const HomeComposer = forwardRef<HomeComposerHandle, { lifecycle?: FleetLi
 
   // `/name ` typed by hand becomes the skill chip (web updateSlash); `/` at a word start opens the
   // inline menu below the box.
+  const taskRef = useRef(task);
+  taskRef.current = task;
   const updateText = (next: string, c: number) => {
+    taskRef.current = next;
     setTask(next);
     setCaret(c);
     setSlash(skill ? null : slashAt(next, c));
@@ -365,9 +368,11 @@ export const HomeComposer = forwardRef<HomeComposerHandle, { lifecycle?: FleetLi
           value={task}
           onChangeText={(t) => updateText(t, caret + (t.length - task.length))}
           onSelectionChange={(e) => {
+            // Fires in the same batch as onChangeText, before re-render: read the text from the ref,
+            // not the closure, or the just-opened `/` menu is immediately closed against stale text.
             const c = e.nativeEvent.selection.start;
             setCaret(c);
-            setSlash(skill ? null : slashAt(task, c));
+            setSlash(skill ? null : slashAt(taskRef.current, c));
           }}
           onFocus={onFocus}
           placeholder={skill ? `Add details for /${skill} — or just start…` : "Describe a task. A fresh sandbox picks it up…  ( / skills )"}
@@ -394,7 +399,7 @@ export const HomeComposer = forwardRef<HomeComposerHandle, { lifecycle?: FleetLi
         />
 
         {/* `/` menu, inline under the text: the only way to pick a skill (no toolbar button). */}
-        {slash && skills ? (
+        {slash ? (
           <View style={{ marginHorizontal: 10, borderWidth: 1, borderColor: palette.border, borderRadius: radius.lg, backgroundColor: palette.popover, overflow: "hidden" }}>
             {slashHits.map((s) => (
               <PressScale
@@ -411,7 +416,11 @@ export const HomeComposer = forwardRef<HomeComposerHandle, { lifecycle?: FleetLi
                 </T>
               </PressScale>
             ))}
-            {slashHits.length === 0 ? (
+            {skills === null ? (
+              <T variant="micro" tone="muted" style={{ paddingHorizontal: 12, paddingVertical: 9 }}>
+                Loading skills…
+              </T>
+            ) : slashHits.length === 0 ? (
               <PressScale
                 onPress={() => router.push("/settings/skills")}
                 style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingVertical: 9 }}

@@ -169,6 +169,7 @@ export function Composer({
         t = t.slice(0, tok.start) + t.slice(tok.start + tok.length);
       }
     }
+    textRef.current = t;
     setText(t);
     syncSendButton(t, files, skill);
     if (lane === "reply" && session) {
@@ -465,8 +466,9 @@ export function Composer({
             const c = e.nativeEvent.selection.start;
             setCaret(c);
             if (lane === "reply" && session) {
-              setMention(mentionAt(text, c));
-              setSlash(skill ? null : slashAt(text, c));
+              // Same batch as onChangeText; the closure `text` is stale, the ref is not.
+              setMention(mentionAt(textRef.current, c));
+              setSlash(skill ? null : slashAt(textRef.current, c));
             }
           }}
           placeholder={
