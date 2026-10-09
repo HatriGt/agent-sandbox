@@ -3,7 +3,7 @@ import { View } from "react-native";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as WebBrowser from "expo-web-browser";
-import { api, type BoxView } from "@/lib/api";
+import { api, type BoxView, type Me } from "@/lib/api";
 import { ago, friendlyName, isSleeping, isUp } from "@/lib/format";
 import { questionHeadline } from "@/lib/question";
 import { useAuth } from "@/state/auth";
@@ -53,7 +53,7 @@ export function Capacity({ boxes, capacity }: { boxes: BoxView[]; capacity: numb
     }
   };
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }} accessibilityLabel={`${live.length} of ${capacity} slots in use`}>
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }} accessibilityLabel={`${live.length} of ${capacity} machines`}>
       <View style={{ flexDirection: "row", gap: 4 }}>
         {cells.map((b, i) => (
           <View key={b?.name ?? `free-${i}`} style={{ width: 12, height: 8, borderRadius: 3, backgroundColor: colorOf(b) }} />
@@ -62,54 +62,6 @@ export function Capacity({ boxes, capacity }: { boxes: BoxView[]; capacity: numb
       <T variant="micro" tone="muted" tnum>
         {live.length}/{capacity}
       </T>
-    </View>
-  );
-}
-
-/* ───────────────────────────── How it works ───────────────────────────── */
-
-const HOWTO_KEY = "asb-hub-howto-done";
-const HOWTO_STEPS: { icon: IconName; title: string; body: string }[] = [
-  { icon: "edit-3", title: "Describe a task", body: "in plain words, with a repo if it needs one" },
-  { icon: "zap", title: "An agent works on it", body: "in a fresh sandbox, watched live" },
-  { icon: "git-pull-request", title: "Review the PR", body: "diff, checks and merge, right here" },
-];
-
-/** null until the stored flag is read, so the strip never flashes for a returning user. */
-export function useHowtoDone(): [boolean | null, () => void] {
-  const [done, setDone] = useState<boolean | null>(null);
-  useEffect(() => {
-    AsyncStorage.getItem(HOWTO_KEY).then((v) => setDone(v === "1"), () => setDone(false));
-  }, []);
-  const mark = () => {
-    setDone(true);
-    AsyncStorage.setItem(HOWTO_KEY, "1").catch(() => {});
-  };
-  return [done, mark];
-}
-
-/** The first-run strip: three steps above the composer until the first task has started from this phone. */
-export function HowItWorks() {
-  const { palette } = useTheme();
-  return (
-    <View style={{ gap: 6 }} accessibilityLabel="How it works">
-      {HOWTO_STEPS.map((s, i) => (
-        <FadeInUp key={s.title} delay={stagger(i, 60)}>
-          <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 10, paddingHorizontal: 12, paddingVertical: 8, borderRadius: radius.lg, backgroundColor: palette.muted }}>
-            <View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: palette.background, alignItems: "center", justifyContent: "center", marginTop: 1 }}>
-              <Icon name={s.icon} size={12} color={palette.mutedForeground} />
-            </View>
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <T variant="meta" weight="medium">
-                {s.title}
-              </T>
-              <T variant="micro" tone="muted">
-                {s.body}
-              </T>
-            </View>
-          </View>
-        </FadeInUp>
-      ))}
     </View>
   );
 }
@@ -147,7 +99,7 @@ export function GettingStarted({ onDismiss, onFocusComposer }: { onDismiss: () =
   }, []);
   const steps: { done: boolean; icon: IconName; title: string; body: string; cta: string; run: () => void }[] = [
     { done: (accounts ?? 0) > 0, icon: "github", title: "Connect a GitHub account", body: "So machines can clone your private repositories and open pull requests.", cta: "Integrations", run: () => router.push("/settings/integrations") },
-    { done: false, icon: "zap", title: "Start your first task", body: "Describe it above — a machine boots in seconds and you watch it work.", cta: "Focus the composer", run: onFocusComposer },
+    { done: false, icon: "zap", title: "Start your first task", body: "Describe it above in plain words, with a repo if it needs one. An agent works on it in a fresh sandbox, watched live, and you review the PR — diff, checks and merge — right here.", cta: "Focus the composer", run: onFocusComposer },
     { done: (keys ?? 0) > 0, icon: "link", title: "Connect your IDE", body: "Delegate from Cursor or Claude Code with a personal API key.", cta: "Connect", run: () => router.push("/settings/connect") },
   ];
   return (
@@ -203,28 +155,44 @@ export function GettingStarted({ onDismiss, onFocusComposer }: { onDismiss: () =
   );
 }
 
-/* ───────────────────────────── Trial ended ───────────────────────────── */
+/* ───────────────────────────── Trial ───────────────────────────── */
+
+export const SELF_HOST_URL = "https://github.com/HatriGt/agent-sandbox/blob/main/docs/self-hosting.md";
+export const UPGRADE_FALLBACK_URL = "mailto:hello@agent-sandbox.dev?subject=Agent%20Sandbox%20upgrade";
+
+/**
+ * One wording for the plan everywhere: `badge` is the short line on the Settings account row,
+ * `title` + `body` the plan card in Account and the hard stop on Home.
+ */
+export function trialCopy(user: Extract<Me, { kind: "user" }>): { badge: string; title: string; body: string } {
+  if (user.plan === "pro") return { badge: "Pro", title: "Pro", body: "Unlimited time. Thank you." };
+  if (user.expired) {
+    return { badge: "Trial ended", title: "Trial ended", body: "Your runs, GitHub accounts and MCP servers are kept. Upgrade to keep starting machines — or self-host for free." };
+  }
+  const left = user.daysLeft === 0 ? "ends today" : `${user.daysLeft ?? "?"} day${user.daysLeft === 1 ? "" : "s"} left`;
+  const ends = user.trialEndsAt ? ` · ends ${new Date(user.trialEndsAt).toLocaleDateString()}` : "";
+  return { badge: `Trial · ${left}`, title: "Free trial", body: `${left[0].toUpperCase()}${left.slice(1)}${ends} · no card on file` };
+}
 
 /** The hard stop (web TrialBadge.tsx TrialEndedNotice): shown above the composer once the trial is over. */
 export function TrialEndedNotice() {
   const { palette } = useTheme();
   const { me } = useAuth();
   if (me?.kind !== "user" || !me.expired) return null;
-  const upgrade = me.billingUrl ?? "mailto:hello@agent-sandbox.dev?subject=Agent%20Sandbox%20upgrade";
+  const { title, body } = trialCopy(me);
   return (
     <FadeInUp>
       <View style={{ backgroundColor: palette.card, borderRadius: radius.xl, borderWidth: 1, borderColor: palette.border, borderLeftWidth: 3, borderLeftColor: palette.attention, padding: 14, gap: 10 }} accessibilityRole="alert">
         <View style={{ gap: 2 }}>
           <T variant="meta" weight="medium">
-            Your free trial has ended.
+            {title}
           </T>
           <T variant="meta" tone="muted">
-            Your runs, GitHub accounts and MCP servers are kept. Upgrade to keep starting machines — or self-host for free.
+            {body}
           </T>
         </View>
-        <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
-          <Button title="Self-host" variant="ghost" small onPress={() => void WebBrowser.openBrowserAsync("https://github.com/HatriGt/agent-sandbox/blob/main/docs/self-hosting.md")} />
-          <Button title="Upgrade" small onPress={() => void WebBrowser.openBrowserAsync(upgrade)} />
+        <View style={{ flexDirection: "row", alignItems: "center" }}>
+          <Button title="Upgrade" small onPress={() => void WebBrowser.openBrowserAsync(me.billingUrl ?? UPGRADE_FALLBACK_URL)} />
         </View>
       </View>
     </FadeInUp>

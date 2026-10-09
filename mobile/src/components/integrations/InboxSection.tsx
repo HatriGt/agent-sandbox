@@ -3,7 +3,7 @@ import { Alert, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 import { useRouter } from "expo-router";
 import { intakeApi, type IntakeEmailProvider, type IntakeView } from "@/lib/api";
-import { AcctSection } from "@/components/settings/AcctSections";
+import { SettingsSection } from "@/components/ui/SettingsSection";
 import { T } from "@/components/ui/AppText";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -119,7 +119,7 @@ export function InboxSection() {
 
   if (err || !v)
     return (
-      <AcctSection title="Starts from your inbox">
+      <SettingsSection title="Starts from your inbox">
         {err ? (
           <T variant="meta" tone="destructive">
             {err}
@@ -127,14 +127,14 @@ export function InboxSection() {
         ) : (
           <T tone="muted">Loading…</T>
         )}
-      </AcctSection>
+      </SettingsSection>
     );
 
   const p = PROVIDERS.find((x) => x.id === provider)!;
   const allowed = [v.accountEmail, ...v.channel.allowEmails].filter(Boolean).join(", ");
 
   return (
-    <AcctSection title="Starts from your inbox">
+    <SettingsSection title="Starts from your inbox">
       {note ? (
         <T variant="meta" tone={note.bad ? "destructive" : "muted"}>
           {note.text}
@@ -310,6 +310,6 @@ export function InboxSection() {
           ))
         )}
       </Card>
-    </AcctSection>
+    </SettingsSection>
   );
 }

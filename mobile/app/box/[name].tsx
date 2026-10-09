@@ -39,7 +39,6 @@ import { ThreadHeader, type DisplayState } from "@/components/thread/ThreadHeade
 import { T } from "@/components/ui/AppText";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { Sheet } from "@/components/ui/Sheet";
-import { UsageMeter } from "@/components/ui/UsageMeter";
 import { CodeRefSession } from "@/components/CodeRef";
 import { AgentLoader, FadeInUp, haptic, PressScale, ScalePresence, TypingDots, WorkingDot } from "@/components/motion";
 
@@ -508,26 +507,6 @@ function Thread() {
           scrollY={scrollY}
         />
 
-        {/* Vitals strip: memory and disk against their caps. Its own row rather than crowding the
-            56px header, and only while awake — the controller drops these numbers for a sleeping box
-            so a meter never shows a frozen value that looks live. The ⋯ menu is where you act on it. */}
-        {!sleeping && (merged?.memUsage || merged?.disk) ? (
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "center",
-              gap: 16,
-              paddingHorizontal: 16,
-              paddingVertical: 7,
-              borderBottomWidth: 1,
-              borderBottomColor: palette.border,
-            }}
-          >
-            <UsageMeter kind="memory" usage={merged?.memUsage} fluid style={{ flex: 1 }} />
-            <UsageMeter kind="disk" usage={merged?.disk} fluid style={{ flex: 1 }} />
-          </View>
-        ) : null}
-
         {/* Transcript */}
         <View style={{ flex: 1 }}>
           <Animated.FlatList
@@ -942,6 +921,7 @@ function Thread() {
         onClose={() => setSheet(null)}
         onChanged={refresh}
         onSlept={() => setSleptHere(true)}
+        onInspect={() => setSheet("inspector")}
         onDestroyed={() => router.back()}
         onRunAgain={
           merged?.task

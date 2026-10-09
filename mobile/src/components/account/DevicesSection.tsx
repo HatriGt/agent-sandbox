@@ -4,7 +4,7 @@ import { api, type SessionRow } from "@/lib/api";
 import { ago } from "@/lib/format";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
-import { AcctSection } from "@/components/settings/AcctSections";
+import { SettingsSection } from "@/components/ui/SettingsSection";
 import { T } from "@/components/ui/AppText";
 import { ArmButton } from "@/components/ui/ArmButton";
 import { Card } from "@/components/ui/Card";
@@ -62,7 +62,7 @@ export function DevicesSection() {
   const others = sorted.filter((s) => !s.current);
 
   return (
-    <AcctSection title="Signed-in devices" meta={rows ? `${rows.length} · 30-day cap` : "30-day cap"} purpose="Browser sessions holding your account. Sign one out if you do not recognise it; your password stays.">
+    <SettingsSection title="Signed-in devices" meta={rows ? `${rows.length} · 30-day cap` : "30-day cap"} purpose="Browser sessions holding your account. Sign one out if you do not recognise it; your password stays.">
       {others.length > 0 ? (
         <ArmButton
           title="Sign out everywhere else"
@@ -110,6 +110,6 @@ export function DevicesSection() {
           );
         })
       )}
-    </AcctSection>
+    </SettingsSection>
   );
 }

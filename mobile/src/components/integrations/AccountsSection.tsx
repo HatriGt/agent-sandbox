@@ -4,7 +4,7 @@ import * as Clipboard from "expo-clipboard";
 import * as WebBrowser from "expo-web-browser";
 import { api, type AccountView, type AccountsResponse } from "@/lib/api";
 import { useTheme } from "@/theme/ThemeContext";
-import { AcctSection } from "@/components/settings/AcctSections";
+import { SettingsSection } from "@/components/ui/SettingsSection";
 import { T } from "@/components/ui/AppText";
 import { ArmButton } from "@/components/ui/ArmButton";
 import { Button } from "@/components/ui/Button";
@@ -31,7 +31,7 @@ export function AccountsSection() {
   const oauth = data?.oauth ?? false;
 
   return (
-    <AcctSection title="GitHub accounts" meta="clone · read PRs · push">
+    <SettingsSection title="GitHub accounts" meta="clone · read PRs · push">
       {error ? (
         <FadeIn style={{ flexDirection: "row", alignItems: "flex-start", gap: 8 }}>
           <T variant="meta" tone="destructive" style={{ flex: 1 }}>
@@ -85,7 +85,7 @@ export function AccountsSection() {
           />
         ) : null}
       </Sheet>
-    </AcctSection>
+    </SettingsSection>
   );
 }
 

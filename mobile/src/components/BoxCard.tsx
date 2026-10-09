@@ -2,6 +2,7 @@ import React, { memo, useMemo, useState } from "react";
 import { Alert, View, type StyleProp, type ViewStyle } from "react-native";
 import { useRouter } from "expo-router";
 import { api, type BoxView } from "@/lib/api";
+import { keepAction, sleepAction, type BoxAction } from "@/lib/box-actions";
 import { parseQuestion, questionChoices, questionHeadline } from "@/lib/question";
 import { ago, friendlyName, isSleeping } from "@/lib/format";
 import { useTheme } from "@/theme/ThemeContext";
@@ -96,25 +97,19 @@ export const BoxCard = memo(function BoxCard({
   const q = waiting ? questionHeadline(box.question) : "";
   const ink = waiting ? palette.attentionInk : palette.faint;
 
-  const act = (label: string, fn: () => Promise<unknown>) => {
+  const act = ({ label, run }: BoxAction) => {
     haptic("light");
-    fn()
+    run()
       .then(() => {
         haptic("success");
         onChanged?.();
       })
       .catch((e: unknown) => Alert.alert(`Could not ${label.toLowerCase()}`, e instanceof Error ? e.message : String(e)));
   };
-  const actions: SwipeAction[] = [
-    {
-      label: box.kept ? "Release" : "Keep",
-      icon: "bookmark",
-      onPress: () => act(box.kept ? "Release" : "Keep", () => api.keep(box.name, !box.kept)),
-    },
-  ];
-  // Mirrors the sheet: a busy machine can't be put to sleep, so the action simply isn't offered.
-  if (sleeping) actions.push({ label: "Wake", icon: "sun", onPress: () => act("Wake", () => api.wake(box.name)) });
-  else if (!running) actions.push({ label: "Sleep", icon: "moon", onPress: () => act("Sleep", () => api.sleep(box.name)) });
+  // Same controls and copy as the ⋯ sheet; a disabled one (sleep while busy) simply isn't offered.
+  const actions: SwipeAction[] = [keepAction(box), sleepAction(box)]
+    .filter((a) => !a.disabled)
+    .map((a) => ({ label: a.label, icon: a.icon, onPress: () => act(a) }));
 
   return (
     <SwipeRow actions={actions}>

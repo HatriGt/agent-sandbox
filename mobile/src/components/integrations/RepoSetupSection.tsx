@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { View } from "react-native";
 import { api, type RepoSetupProfile, type RepoSetupsResponse } from "@/lib/api";
-import { AcctSection } from "@/components/settings/AcctSections";
+import { SettingsSection } from "@/components/ui/SettingsSection";
 import { T } from "@/components/ui/AppText";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -23,7 +23,7 @@ export function RepoSetupSection() {
   }, []);
 
   return (
-    <AcctSection title="Repo setup" meta="learned once · install · test · verify">
+    <SettingsSection title="Repo setup" meta="learned once · install · test · verify">
       {note ? <T variant="meta" tone="muted">{note}</T> : null}
       {!data ? (
         <T tone="muted">Loading…</T>
@@ -34,7 +34,7 @@ export function RepoSetupSection() {
       ) : (
         data.profiles.map((r) => <SetupRow key={r.repo} repo={r.repo} profile={r.profile} onChange={setData} onNote={setNote} />)
       )}
-    </AcctSection>
+    </SettingsSection>
   );
 }
 

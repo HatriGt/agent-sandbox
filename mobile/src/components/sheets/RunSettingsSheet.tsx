@@ -10,6 +10,7 @@ import { Button } from "../ui/Button";
 import { Icon, type IconName } from "../ui/Icon";
 import { Sheet } from "../ui/Sheet";
 import { PressScale } from "@/components/motion";
+import { SettingsSection } from "@/components/ui/SettingsSection";
 
 /**
  * Run options for the NEXT thread, at web parity (web/src/components/thread/RunSettings.tsx +
@@ -259,20 +260,6 @@ function RadioRow({
   );
 }
 
-function SectionTitle({ title, hint }: { title: string; hint?: string }) {
-  return (
-    <View style={{ paddingHorizontal: 8, paddingTop: 14, paddingBottom: 4, gap: 1 }}>
-      <T variant="micro" weight="semibold" tone="faint" style={{ letterSpacing: 0.6, textTransform: "uppercase" }}>
-        {title}
-      </T>
-      {hint ? (
-        <T variant="micro" tone="faint">
-          {hint}
-        </T>
-      ) : null}
-    </View>
-  );
-}
 
 // Agents whose "supervised: partial" caveat the person has already acknowledged this launch — the
 // confirm line shows once per agent, not on every pick.
@@ -356,7 +343,7 @@ export function RunSettingsSheet({
         {/* ── Agent ── */}
         {show("agent") && prefs && prefs.agents.length > 0 ? (
           <>
-            <SectionTitle title="Agent" hint="Which coding agent drives this thread." />
+            <SettingsSection title="Agent" purpose="Which coding agent drives this thread." />
             {prefs.agents.map((a) => {
               const on = a.id === activeAgent;
               const asking = confirming === a.id;
@@ -403,7 +390,7 @@ export function RunSettingsSheet({
         {/* ── Model provider ── */}
         {show("provider") && sources.providers.length > 0 ? (
           <>
-            <SectionTitle title="Model provider" hint="Your own key or endpoint. Built-in uses the deployment's model." />
+            <SettingsSection title="Model provider" purpose="Your own key or endpoint. Built-in uses the deployment's model." />
             <RadioRow
               on={!value.provider}
               label="Built-in"
@@ -455,7 +442,7 @@ export function RunSettingsSheet({
         {/* ── Harness ── */}
         {show("harness") && sources.harnesses.length > 0 ? (
           <>
-            <SectionTitle title="Harness" hint="A saved bundle of agent, model and rules. Explicit picks here still win." />
+            <SettingsSection title="Harness" purpose="A saved bundle of agent, model and rules. Explicit picks here still win." />
             <RadioRow
               on={!value.harness}
               label="None"
@@ -506,7 +493,7 @@ export function RunSettingsSheet({
         {/* ── Playbook ── */}
         {show("workflow") && sources.workflows.length > 0 ? (
           <>
-            <SectionTitle title="Playbook" hint="The task becomes the first step of a saved workflow." />
+            <SettingsSection title="Playbook" purpose="The task becomes the first step of a saved workflow." />
             <RadioRow
               on={!value.workflow}
               label="None"
@@ -534,7 +521,7 @@ export function RunSettingsSheet({
         {/* ── Attempts ── */}
         {show("attempts") ? (
           <>
-        <SectionTitle title="Attempts" />
+        <SettingsSection title="Attempts" />
         <View style={{ paddingHorizontal: 8, gap: 6 }}>
           <View
             style={{
@@ -596,7 +583,7 @@ function VerifySection({ value, onChange }: { value: VerifySpec | null; onChange
   const text = value?.text ?? "";
   return (
     <>
-      <SectionTitle title="Verify" hint="Checked after the agent finishes; shows as a chip once filled." />
+      <SettingsSection title="Verify" purpose="Checked after the agent finishes; shows as a chip once filled." />
       <View style={{ paddingHorizontal: 8, gap: 8 }}>
         <View style={{ flexDirection: "row", gap: 6 }}>
           {(["command", "criterion"] as const).map((m) => (

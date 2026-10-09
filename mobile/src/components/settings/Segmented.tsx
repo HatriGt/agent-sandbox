@@ -1,23 +1,31 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Animated, View } from "react-native";
-import { isReducedMotion, PressScale, SPRING } from "@/components/motion";
+import { haptic, isReducedMotion, PressScale, SPRING } from "@/components/motion";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { T } from "@/components/ui/AppText";
 
-/** Pill-row segmented control — the same shape the Settings tab uses for appearance. */
+type Option<V extends string> = { value: V; label: string; badge?: string | number };
+
+/**
+ * Segmented control. `chips` (default): wrapping pill row, the shape Settings uses for appearance.
+ * `glide`: one track with equal-width segments and a selection pill that springs between them.
+ */
 export function Segmented<V extends string>({
   value,
   options,
   onChange,
   small,
+  variant = "chips",
 }: {
   value: V;
-  options: { value: V; label: string; badge?: string | number }[];
+  options: Option<V>[];
   onChange: (v: V) => void;
   small?: boolean;
+  variant?: "chips" | "glide";
 }) {
   const { palette } = useTheme();
+  if (variant === "glide") return <Glide value={value} options={options} onChange={onChange} />;
   return (
     <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
       {options.map((o) => {
@@ -51,6 +59,68 @@ export function Segmented<V extends string>({
               </T>
             ) : null}
           </View>
+          </PressScale>
+        );
+      })}
+    </View>
+  );
+}
+
+/** Selection pill glides between equal segments (native-driver spring). */
+function Glide<V extends string>({ value, options, onChange }: { value: V; options: Option<V>[]; onChange: (v: V) => void }) {
+  const { palette } = useTheme();
+  const [w, setW] = useState(0);
+  const index = Math.max(0, options.findIndex((o) => o.value === value));
+  const x = useRef(new Animated.Value(index)).current;
+  useEffect(() => {
+    if (isReducedMotion()) x.setValue(index);
+    else Animated.spring(x, { toValue: index, useNativeDriver: true, speed: 22, bounciness: 4 }).start();
+  }, [index, x]);
+  const n = options.length;
+  const seg = (w - 6) / n;
+  return (
+    <View
+      accessibilityRole="tablist"
+      onLayout={(e) => setW(e.nativeEvent.layout.width)}
+      style={{
+        flexDirection: "row",
+        padding: 3,
+        borderRadius: radius.lg,
+        backgroundColor: palette.card,
+        borderWidth: 1,
+        borderColor: palette.border,
+      }}
+    >
+      {w > 0 ? (
+        <Animated.View
+          style={{
+            position: "absolute",
+            top: 3,
+            bottom: 3,
+            left: 3,
+            width: seg,
+            borderRadius: radius.md,
+            backgroundColor: palette.background,
+            transform: [{ translateX: x.interpolate({ inputRange: [0, Math.max(1, n - 1)], outputRange: [0, seg * Math.max(1, n - 1)] }) }],
+          }}
+        />
+      ) : null}
+      {options.map((o) => {
+        const on = o.value === value;
+        return (
+          <PressScale
+            key={o.value}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: on }}
+            onPress={() => {
+              if (!on) haptic("selection");
+              onChange(o.value);
+            }}
+            style={{ flex: 1, alignItems: "center", paddingVertical: 7 }}
+          >
+            <T variant="meta" weight="medium" tone={on ? "default" : "muted"}>
+              {o.label}
+            </T>
           </PressScale>
         );
       })}

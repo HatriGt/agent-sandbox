@@ -1,5 +1,5 @@
-// Harnesses (web: components/HarnessesPage.tsx). Tabs Drivers · Skills · Saved. Skills embeds the
-// full library (SkillsBody); Saved: Import / New harness in the header, Saved harnesses (edit,
+// Harnesses (web: components/HarnessesPage.tsx). Tabs Drivers · Skills · Saved. Skills links to the
+// library (/settings/skills); Saved: Import / New harness in the header, Saved harnesses (edit,
 // duplicate, export, delete, review → approve), the rules note, Compare and Attempts. The editor
 // itself is /harness/[id].
 import React, { useCallback, useEffect, useState } from "react";
@@ -17,8 +17,9 @@ import { Card } from "@/components/ui/Card";
 import { Segmented } from "@/components/settings/Segmented";
 import { AttemptGroupList, CompareLauncher, CompareList, ImportHarness, ReviewPanel, rulesLine } from "@/components/settings/HarnessParts";
 import { AcctAgentSection } from "@/components/settings/AcctSections";
-import { SkillsBody } from "@/components/skills/SkillsBody";
+import { Icon } from "@/components/ui/Icon";
 import { animateLayout, FadeIn, FadeInUp, stagger } from "@/components/motion";
+import { SettingsSection } from "@/components/ui/SettingsSection";
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 type Tab = "drivers" | "skills" | "saved";
@@ -119,7 +120,20 @@ export default function Harnesses() {
 
       {tab === "drivers" ? <AcctAgentSection title="Drivers" harnesses={all} /> : null}
 
-      {tab === "skills" ? <SkillsBody /> : null}
+      {tab === "skills" ? (
+        <Card onPress={() => router.push("/settings/skills")} style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+          <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+            <T variant="body" weight="medium">
+              Skills
+              <T variant="micro" tone="faint">{`  ${skills.filter((s) => s.enabled).length} of ${skills.length} on`}</T>
+            </T>
+            <T variant="meta" tone="muted" numberOfLines={1}>
+              The playbooks every sandbox gets — write, toggle, import.
+            </T>
+          </View>
+          <Icon name="chevron-right" size={16} color={palette.faint} />
+        </Card>
+      ) : null}
 
       {tab === "saved" && importing ? (
         <ImportHarness
@@ -135,7 +149,7 @@ export default function Harnesses() {
 
       {tab === "saved" && !importing ? (
         <>
-          <Section
+          <SettingsSection
             title="Saved harnesses"
             meta={list ? String(all.length) : undefined}
             purpose="Built-ins are best-practice starting points: edit them, duplicate them, or delete the ones you don't use."
@@ -180,13 +194,13 @@ export default function Harnesses() {
                 </FadeInUp>
               ))
             )}
-          </Section>
+          </SettingsSection>
           <Card>
             <T variant="micro" tone="muted">
               Rules and RULES.md go to the agent as system-prompt instructions for the whole thread — your task text stays as you typed it. Verify on done is enforced: the controller runs the check. Executable hooks are never installed from a bundle (an imported <T variant="micro" mono>hooks/</T> folder is ignored); the PR-only push guard and the supervision gate are built in and apply to every harness.
             </T>
           </Card>
-          <Section
+          <SettingsSection
             title="Compare"
             purpose="Run one task on two harnesses: two ordinary runs, side by side. Only what the runs reported is shown."
             action={runnable.length >= 2 && !comparing ? <Button small variant="outline" title="New compare" onPress={() => setComparing(true)} /> : null}
@@ -203,38 +217,16 @@ export default function Harnesses() {
               />
             ) : null}
             <CompareList refresh={compareRefresh} canStart={runnable.length >= 2} />
-          </Section>
-          <Section title="Attempts" purpose="Tasks run several ways in parallel. The best attempt gets the PR; you can pick another one instead.">
+          </SettingsSection>
+          <SettingsSection title="Attempts" purpose="Tasks run several ways in parallel. The best attempt gets the PR; you can pick another one instead.">
             <AttemptGroupList />
-          </Section>
+          </SettingsSection>
         </>
       ) : null}
     </SettingsScreen>
   );
 }
 
-function Section({ title, meta, purpose, action, children }: { title: string; meta?: string; purpose: string; action?: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <View style={{ gap: 8, marginTop: 8 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        <T variant="h3" weight="semibold">
-          {title}
-        </T>
-        {meta ? (
-          <T variant="micro" tone="faint">
-            {meta}
-          </T>
-        ) : null}
-        <View style={{ flex: 1 }} />
-        {action}
-      </View>
-      <T variant="meta" tone="muted">
-        {purpose}
-      </T>
-      {children}
-    </View>
-  );
-}
 
 function HarnessRow({
   h,

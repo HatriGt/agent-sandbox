@@ -27,6 +27,7 @@ import { T } from "@/components/ui/AppText";
 import { ArmButton } from "@/components/ui/ArmButton";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { Field } from "@/components/ui/Field";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { WorkingDot, PressScale } from "@/components/motion";
@@ -562,13 +563,6 @@ function Checks({ pr }: { pr: PullDetail }) {
   );
 }
 
-function Empty({ children }: { children: React.ReactNode }) {
-  const { palette } = useTheme();
-  return (
-    <View style={{ borderWidth: 1, borderStyle: "dashed", borderColor: palette.border, borderRadius: radius.xl, paddingVertical: 32, alignItems: "center" }}>
-      <T variant="meta" tone="muted">
-        {children}
-      </T>
-    </View>
-  );
+function Empty({ children }: { children: string }) {
+  return <EmptyState title={children} />;
 }

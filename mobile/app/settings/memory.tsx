@@ -18,6 +18,7 @@ import { EarlierNoteRow, MemoryChip, MemoryNoteRow, type NoteActions } from "@/c
 import { Segmented } from "@/components/settings/Segmented";
 import { KINDS, KIND_PLURAL, isOperatorKind } from "@/components/settings/memoryKinds";
 import { animateLayout, FadeIn, FadeInUp, stagger } from "@/components/motion";
+import { SettingsSection } from "@/components/ui/SettingsSection";
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const REPO_KINDS: MemoryKind[] = ["domain", "decision", "lesson", "fact", "playbook"];
@@ -223,7 +224,7 @@ export default function MemoryPage() {
 
           {view === "you" ? (
             <FadeIn key="you">
-            <Section title="You" meta={plural(model.you.length, "note")} purpose="Preferences and rules — in every run's MEMORY.md, whatever the repo.">
+            <SettingsSection title="You" meta={plural(model.you.length, "note")} purpose="Preferences and rules — in every run's MEMORY.md, whatever the repo.">
               {model.you.length ? (
                 <Card style={{ paddingTop: 0 }}>
                   {model.you.map((n, i) => (
@@ -237,7 +238,7 @@ export default function MemoryPage() {
                   {model.filtering ? "No preference or rule matches." : "No preferences yet — say how you like things done during a run, or add one above."}
                 </T>
               )}
-            </Section>
+            </SettingsSection>
             </FadeIn>
           ) : null}
 
@@ -256,7 +257,7 @@ export default function MemoryPage() {
 
           {view === "earlier" ? (
             <FadeIn key="earlier">
-            <Section title="Earlier" meta={plural(model.earlier.length, "replaced note")} purpose="Notes a newer one replaced — kept as history, out of MEMORY.md.">
+            <SettingsSection title="Earlier" meta={plural(model.earlier.length, "replaced note")} purpose="Notes a newer one replaced — kept as history, out of MEMORY.md.">
               {model.earlier.length ? (
                 <Card style={{ paddingTop: 0 }}>
                   {model.earlier.map((n, i) => (
@@ -270,7 +271,7 @@ export default function MemoryPage() {
                   No replaced note matches.
                 </T>
               )}
-            </Section>
+            </SettingsSection>
             </FadeIn>
           ) : null}
         </>
@@ -292,24 +293,6 @@ export default function MemoryPage() {
   );
 }
 
-function Section({ title, meta, purpose, children }: { title: string; meta: string; purpose: string; children: React.ReactNode }) {
-  return (
-    <View style={{ gap: 8, marginTop: 4 }}>
-      <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
-        <T variant="h3" weight="semibold" numberOfLines={1} style={{ flexShrink: 1 }}>
-          {title}
-        </T>
-        <T variant="micro" tone="faint">
-          {meta}
-        </T>
-      </View>
-      <T variant="meta" tone="muted">
-        {purpose}
-      </T>
-      {children}
-    </View>
-  );
-}
 
 /** One repo's knowledge base: area chips, then each area page (header + notes by kind). */
 function RepoSection({ repo, groups, areaSel, onArea, actions, dim }: { repo: string; groups: AreaGroup[]; areaSel: string | null; onArea: (a: string) => void; actions: NoteActions; dim: boolean }) {
@@ -318,7 +301,7 @@ function RepoSection({ repo, groups, areaSel, onArea, actions, dim }: { repo: st
   const list = groups.flatMap((g) => g.notes);
   const shown = areaSel && groups.some((g) => g.area === areaSel) ? groups.filter((g) => g.area === areaSel) : groups;
   return (
-    <Section
+    <SettingsSection
       title={repo || "Any repo"}
       meta={pages.length ? `${plural(pages.length, "area")} · ${plural(list.length, "note")}` : plural(list.length, "note")}
       purpose={
@@ -391,7 +374,7 @@ function RepoSection({ repo, groups, areaSel, onArea, actions, dim }: { repo: st
           ))}
         </>
       )}
-    </Section>
+    </SettingsSection>
   );
 }
 

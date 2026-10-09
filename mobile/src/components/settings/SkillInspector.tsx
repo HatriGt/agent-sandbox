@@ -13,6 +13,7 @@ import { Icon } from "@/components/ui/Icon";
 import { Toggle } from "@/components/ui/Toggle";
 import type { SkillFile } from "./skillImport";
 import { byteLength, fmtKb, MAX_CONTENT } from "./SkillModel";
+import { SettingsSection } from "@/components/ui/SettingsSection";
 
 export function SkillInspector({
   name,
@@ -46,7 +47,7 @@ export function SkillInspector({
 
   return (
     <View style={{ gap: 20, paddingBottom: 8 }}>
-      <Section title="Fires when">
+      <SettingsSection title="Fires when">
         <View style={{ flexDirection: "row", gap: 10, alignItems: "flex-start" }}>
           <T variant="micro" mono style={chip}>
             /{slug}
@@ -69,10 +70,10 @@ export function SkillInspector({
             </T>
           )}
         </View>
-      </Section>
+      </SettingsSection>
 
       {saved && onToggle ? (
-        <Section title="Status">
+        <SettingsSection title="Status">
           <View style={[box, { flexDirection: "row", alignItems: "center", gap: 12 }]}>
             <View style={{ flex: 1, minWidth: 0 }}>
               <T variant="meta" weight="medium">
@@ -84,12 +85,12 @@ export function SkillInspector({
             </View>
             <Toggle value={enabled} onValueChange={onToggle} disabled={toggling} accessibilityLabel={enabled ? "Turn off" : "Turn on"} />
           </View>
-        </Section>
+        </SettingsSection>
       ) : null}
 
-      <Section
+      <SettingsSection
         title="In the sandbox"
-        trailing={
+        action={
           <PressScale
             scaleTo={0.9}
             hitSlop={10}
@@ -125,40 +126,27 @@ export function SkillInspector({
             ) : null}
           </View>
         </View>
-      </Section>
+      </SettingsSection>
 
-      <Section title="Size">
+      <SettingsSection title="Size">
         <Fact label="SKILL.md" value={fmtKb(bodyBytes)} />
         {files.length > 0 ? <Fact label={`${files.length} supporting file${files.length === 1 ? "" : "s"}`} value={fmtKb(total - bodyBytes)} /> : null}
         <Fact label="Instructions" value={`${pct}% of limit`} danger={pct >= 90} />
         <View style={{ height: 4, borderRadius: 2, backgroundColor: palette.muted, overflow: "hidden", marginTop: 4 }}>
           <View style={{ height: "100%", width: `${Math.max(pct, content.length ? 1.5 : 0)}%`, backgroundColor: pct >= 90 ? palette.destructive : palette.mutedForeground, borderRadius: 2 }} />
         </View>
-      </Section>
+      </SettingsSection>
 
       {saved ? (
-        <Section title="History">
+        <SettingsSection title="History">
           <Fact label="Last saved" value={ago(saved.updatedAt)} />
           <Fact label="Added" value={new Date(saved.addedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })} />
-        </Section>
+        </SettingsSection>
       ) : null}
     </View>
   );
 }
 
-function Section({ title, trailing, children }: { title: string; trailing?: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <View style={{ gap: 8 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-        <T variant="micro" weight="medium" tone="muted" style={{ textTransform: "uppercase", letterSpacing: 0.6 }}>
-          {title}
-        </T>
-        {trailing}
-      </View>
-      {children}
-    </View>
-  );
-}
 
 function Fact({ label, value, danger }: { label: string; value: string; danger?: boolean }) {
   return (

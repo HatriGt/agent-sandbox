@@ -7,6 +7,7 @@ import { T } from "@/components/ui/AppText";
 import { Button } from "@/components/ui/Button";
 import { Field } from "@/components/ui/Field";
 import { Toggle } from "@/components/ui/Toggle";
+import { SettingsSection } from "@/components/ui/SettingsSection";
 import { PickerRow, PickerSheet } from "@/components/settings/PickerSheet";
 import { Segmented } from "@/components/settings/Segmented";
 import { DriverBadges } from "@/components/settings/HarnessParts";
@@ -14,27 +15,6 @@ import { animateLayout, FadeIn, PressScale, setMotionPref, useMotionPref, useRed
 import { pushStatus, registerForPush, unregisterPush, type PushStatus } from "@/lib/push";
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
-
-/** Section heading in web SettingsSection order: title · meta, purpose, optional trailing action. */
-export function AcctSection({ title, meta, purpose, action, children }: { title: string; meta?: string; purpose?: string; action?: React.ReactNode; children?: React.ReactNode }) {
-  return (
-    <View style={{ gap: 10, marginTop: 12 }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        <T variant="h3" weight="semibold" style={{ flex: 1 }}>
-          {title}
-          {meta ? <T variant="micro" tone="faint">{`  ${meta}`}</T> : null}
-        </T>
-        {action}
-      </View>
-      {purpose ? (
-        <T variant="meta" tone="muted">
-          {purpose}
-        </T>
-      ) : null}
-      {children}
-    </View>
-  );
-}
 
 /**
  * Web AppearanceSettings: motion Full/System/Reduced (stored on this phone) plus the theme pick, which
@@ -45,7 +25,7 @@ export function AppearanceSection() {
   const motion = useMotionPref();
   const reduced = useReducedMotion();
   return (
-    <AcctSection title="Appearance" meta={motion === "system" ? (reduced ? "Reduced (from OS)" : "Full (from OS)") : undefined} purpose="Saved on this phone.">
+    <SettingsSection title="Appearance" meta={motion === "system" ? (reduced ? "Reduced (from OS)" : "Full (from OS)") : undefined} purpose="Saved on this phone.">
       <View style={{ gap: 6 }}>
         <T variant="meta" weight="medium">
           Theme
@@ -79,7 +59,7 @@ export function AppearanceSection() {
           System follows your OS ‘animation effects’ setting.
         </T>
       </View>
-    </AcctSection>
+    </SettingsSection>
   );
 }
 
@@ -180,7 +160,7 @@ export function AcctAgentSection({ harnesses = [], title = "Coding agent" }: { h
   const modelValue = prefs?.defaultModel ? (catalog?.models.find((m) => m.id === prefs.defaultModel)?.label ?? `${prefs.defaultModel}${catalog ? " (not in the catalog)" : ""}`) : undefined;
 
   return (
-    <AcctSection
+    <SettingsSection
       title={title}
       meta={saved ? "Saved" : undefined}
       purpose="The coding agent — and model — new machines run. A harness can pin a driver; otherwise this default is used. Threads already running keep what they started with."
@@ -266,7 +246,7 @@ export function AcctAgentSection({ harnesses = [], title = "Coding agent" }: { h
           />
         </>
       ) : null}
-    </AcctSection>
+    </SettingsSection>
   );
 }
 
@@ -357,7 +337,7 @@ export function AcctNotifySection() {
   };
 
   return (
-    <AcctSection
+    <SettingsSection
       title="Notifications"
       meta={loaded ? `${onCount} of ${ALL.length} on` : undefined}
       purpose="Get pinged when a machine needs you or finishes. Point a webhook at Slack, ntfy, Discord — anything that accepts a JSON POST."
@@ -451,6 +431,6 @@ export function AcctNotifySection() {
           {note ? <T variant="meta" tone={note.tone}>{note.text}</T> : null}
         </>
       )}
-    </AcctSection>
+    </SettingsSection>
   );
 }

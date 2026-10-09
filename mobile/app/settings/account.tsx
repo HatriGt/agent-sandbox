@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { Linking, View } from "react-native";
 import { useRouter } from "expo-router";
-import { api, type BoxView } from "@/lib/api";
+import { api } from "@/lib/api";
 import { useAuth } from "@/state/auth";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
@@ -9,12 +9,13 @@ import { SettingsScreen } from "@/components/SettingsScreen";
 import { T } from "@/components/ui/AppText";
 import { Button } from "@/components/ui/Button";
 import { Field } from "@/components/ui/Field";
-import { AcctNotifySection, AcctSection, AppearanceSection, pwStrength, StrengthMeter } from "@/components/settings/AcctSections";
+import { AcctNotifySection, AppearanceSection, pwStrength, StrengthMeter } from "@/components/settings/AcctSections";
+import { SELF_HOST_URL, trialCopy, UPGRADE_FALLBACK_URL } from "@/components/composer/HubSections";
+import { SettingsSection } from "@/components/ui/SettingsSection";
 import { ApiKeysSection } from "@/components/account/ApiKeysSection";
 import { DevicesSection } from "@/components/account/DevicesSection";
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const SELF_HOST = "https://github.com/HatriGt/agent-sandbox/blob/main/docs/self-hosting.md";
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /** Web Account page (web/src/components/Account.tsx), same sections in the same order. */
@@ -32,15 +33,7 @@ export default function AccountSettings() {
   const [pwBusy, setPwBusy] = useState(false);
   const [pwNote, setPwNote] = useState<{ tone: "ok" | "destructive"; text: string } | null>(null);
 
-  // Live usage: running machines against the plan cap; on failure fall back to the static line.
-  const [fleetBoxes, setFleetBoxes] = useState<BoxView[] | null>(null);
-  useEffect(() => {
-    api
-      .fleet()
-      .then((r) => setFleetBoxes(r.boxes.filter((b) => /^running$/i.test(b.boxStatus) || (/^stopped$/i.test(b.boxStatus) && b.role !== "pool-free"))))
-      .catch(() => {});
-  }, []);
-  const inUse = fleetBoxes ? fleetBoxes.filter((b) => /^running$/i.test(b.boxStatus)).length : null;
+  const plan = user ? trialCopy(user) : null;
   const maxBoxes = user?.maxBoxes ?? null;
   const isAdmin = user?.role === "admin" || me?.kind === "operator";
   const showPlan = !!user && user.mode === "saas" && (user.plan === "trial" || user.plan === "pro");
@@ -88,49 +81,39 @@ export default function AccountSettings() {
       right={
         <>
           {isAdmin && me?.mode === "saas" ? <Button small variant="ghost" title="Manage users" onPress={() => router.push("/settings/admin")} /> : null}
-          <Button small variant="ghost" title="View activity" onPress={() => router.navigate("/(tabs)/activity")} />
           <Button small variant="outline" title="Connect an IDE" onPress={() => router.push("/settings/connect")} />
         </>
       }
     >
       <T variant="meta" tone="muted">
         {user ? `@${user.login}` : "Operator"} · {isAdmin ? "admin" : "member"}
-        {!showPlan ? ` · ${inUse !== null && maxBoxes ? `${inUse} of ${maxBoxes} machines in use` : `up to ${maxBoxes ?? "∞"} machines at once`}` : ""}
+        {!showPlan ? ` · up to ${maxBoxes ?? "∞"} machines` : ""}
       </T>
 
-      {user && showPlan ? (
+      {user && plan && showPlan ? (
         <View style={{ gap: 8, padding: 16, borderRadius: radius.xl, backgroundColor: user.expired ? `${palette.destructive}1a` : palette.card, borderWidth: user.expired ? 0 : 1, borderColor: palette.border }}>
           <T variant="h3" weight="semibold">
-            {user.plan === "pro" ? "Pro" : user.expired ? "Trial ended" : "Free trial"}
+            {plan.title}
           </T>
           <T variant="meta" tone="muted">
-            {user.plan === "pro"
-              ? "Unlimited time. Thank you."
-              : user.expired
-                ? "Your history and settings are kept; starting or resuming machines needs an upgrade — or self-host for free."
-                : `${user.daysLeft === 0 ? "Ends today" : `${user.daysLeft} day${user.daysLeft === 1 ? "" : "s"} left`} · ends ${new Date(user.trialEndsAt ?? 0).toLocaleDateString()} · no card on file`}
+            {plan.body}
           </T>
-          {inUse !== null && maxBoxes ? (
+          {maxBoxes ? (
             <T variant="meta" tone="muted">
-              {inUse} of {maxBoxes} machines in use
-              {user.plan === "trial" && !user.expired ? `  ·  ${user.daysLeft === 0 ? "ends today" : `${user.daysLeft}d left`}` : ""}
-            </T>
-          ) : maxBoxes ? (
-            <T variant="meta" tone="muted">
-              up to {maxBoxes} machines at once
+              Up to {maxBoxes} machines
             </T>
           ) : null}
           {user.plan !== "pro" ? (
             <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-              <Button small title="Upgrade" onPress={() => void Linking.openURL(user.billingUrl ?? "mailto:hello@agent-sandbox.dev?subject=Agent%20Sandbox%20upgrade")} />
-              <Button small variant="ghost" title="Self-host for free" onPress={() => void Linking.openURL(SELF_HOST)} />
+              <Button small title="Upgrade" onPress={() => void Linking.openURL(user.billingUrl ?? UPGRADE_FALLBACK_URL)} />
+              <Button small variant="ghost" title="Self-host for free" onPress={() => void Linking.openURL(SELF_HOST_URL)} />
             </View>
           ) : null}
         </View>
       ) : null}
 
       {user ? (
-        <AcctSection title="Profile" meta={user.github ? "GitHub sign-in linked" : undefined} purpose="How you appear in the console and in notifications.">
+        <SettingsSection title="Profile" meta={user.github ? "GitHub sign-in linked" : undefined} purpose="How you appear in the console and in notifications.">
           <Field label="Name" value={name} onChangeText={setName} autoComplete="name" textContentType="name" />
           <Field
             label="Email (optional)"
@@ -148,11 +131,11 @@ export default function AccountSettings() {
             {dirty && !saving && !saved ? <T variant="meta" tone="muted">Unsaved changes</T> : null}
           </View>
           {profileNote ? <T variant="meta" tone="destructive">{profileNote}</T> : null}
-        </AcctSection>
+        </SettingsSection>
       ) : null}
 
       {user ? (
-        <AcctSection
+        <SettingsSection
           title={user.hasPassword ? "Change password" : "Set a password"}
           purpose={user.hasPassword ? "Sessions on other devices stay signed in." : "You signed in with a token or GitHub; a password lets you sign in with your username too."}
         >
@@ -175,7 +158,7 @@ export default function AccountSettings() {
             />
           </View>
           {pwNote ? <T variant="meta" tone={pwNote.tone}>{pwNote.text}</T> : null}
-        </AcctSection>
+        </SettingsSection>
       ) : null}
 
       <AppearanceSection />
@@ -185,11 +168,7 @@ export default function AccountSettings() {
 
       {!user ? (
         <T variant="meta" tone="muted">
-          You are signed in with the operator token — the deployment's root identity. For day-to-day work, sign up for a personal account and, if you need to manage people, use{" "}
-          <T variant="meta" style={{ textDecorationLine: "underline" }} onPress={() => router.push("/settings/admin")}>
-            Manage users
-          </T>
-          .
+          You are signed in with the operator token — the deployment's root identity. For day-to-day work, sign up for a personal account; to manage people, use Manage users above.
         </T>
       ) : null}
     </SettingsScreen>

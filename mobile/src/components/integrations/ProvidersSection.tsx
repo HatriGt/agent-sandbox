@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { View } from "react-native";
 import { api, type ProviderKind, type ProvidersResponse, type ProviderView } from "@/lib/api";
 import { useAuth } from "@/state/auth";
-import { AcctSection } from "@/components/settings/AcctSections";
+import { SettingsSection } from "@/components/ui/SettingsSection";
 import { T } from "@/components/ui/AppText";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
@@ -37,7 +37,7 @@ export function ProvidersSection() {
   useEffect(load, [load]);
 
   return (
-    <AcctSection title="Model providers" meta="your keys · any endpoint · local models">
+    <SettingsSection title="Model providers" meta="your keys · any endpoint · local models">
       {error ? (
         <FadeIn>
           <T variant="meta" tone="destructive">
@@ -98,7 +98,7 @@ export function ProvidersSection() {
           {r.cliLoginPolicy}
         </T>
       ) : null}
-    </AcctSection>
+    </SettingsSection>
   );
 }
 

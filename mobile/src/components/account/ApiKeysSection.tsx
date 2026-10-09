@@ -3,7 +3,7 @@ import { View } from "react-native";
 import { api, type ApiKeyRow } from "@/lib/api";
 import { serverUrl } from "@/lib/config";
 import { ago } from "@/lib/format";
-import { AcctSection } from "@/components/settings/AcctSections";
+import { SettingsSection } from "@/components/ui/SettingsSection";
 import { T } from "@/components/ui/AppText";
 import { ArmButton } from "@/components/ui/ArmButton";
 import { Button } from "@/components/ui/Button";
@@ -56,7 +56,7 @@ export function ApiKeysSection() {
   const active = (keys ?? []).filter((k) => !k.revoked_at);
 
   return (
-    <AcctSection title="API keys" meta={keys ? `${active.length} active` : undefined} purpose="What Cursor, Claude Code or a CI job presents to the MCP endpoint. Each key is shown once; only its prefix is kept.">
+    <SettingsSection title="API keys" meta={keys ? `${active.length} active` : undefined} purpose="What Cursor, Claude Code or a CI job presents to the MCP endpoint. Each key is shown once; only its prefix is kept.">
       {fresh ? (
         <OneTimeSecret
           label={`Copy ${fresh.name} now — it will not be shown again.`}
@@ -99,6 +99,6 @@ export function ApiKeysSection() {
         returnKeyType="done"
       />
       <Button title="New key" variant="outline" loading={creating} onPress={() => void create()} />
-    </AcctSection>
+    </SettingsSection>
   );
 }

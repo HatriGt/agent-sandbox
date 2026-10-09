@@ -1,5 +1,5 @@
-import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Animated, FlatList, View } from "react-native";
+import React, { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { FlatList, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { api, ledgerApi, type AuditEventRow, type LedgerRow } from "@/lib/api";
@@ -21,74 +21,18 @@ import { T } from "@/components/ui/AppText";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { HistoryList } from "@/components/HistoryList";
-import { Segmented as Chips } from "@/components/settings/Segmented";
-import { radius, type Palette } from "@/theme/tokens";
-import { CardSkeleton, FadeIn, FadeInUp, haptic, isReducedMotion, PressScale, stagger } from "@/components/motion";
+import { Segmented } from "@/components/settings/Segmented";
+import { type Palette } from "@/theme/tokens";
+import { CardSkeleton, FadeIn, FadeInUp, PressScale, stagger } from "@/components/motion";
 
 type Tab = "activity" | "history";
-const TABS: Tab[] = ["activity", "history"];
+const TABS: { value: Tab; label: string }[] = [
+  { value: "activity", label: "Timeline" },
+  { value: "history", label: "History" },
+];
 const LIST_STYLE = { padding: 20, gap: 10, paddingBottom: 110 };
 const PAGE = 50;
 const clock = new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
-
-/** Segmented control whose selection pill glides between halves (native-driver spring). */
-function Segmented({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }) {
-  const { palette } = useTheme();
-  const [w, setW] = useState(0);
-  const x = useRef(new Animated.Value(TABS.indexOf(tab))).current;
-  useEffect(() => {
-    const to = TABS.indexOf(tab);
-    if (isReducedMotion()) x.setValue(to);
-    else Animated.spring(x, { toValue: to, useNativeDriver: true, speed: 22, bounciness: 4 }).start();
-  }, [tab, x]);
-  const half = (w - 6) / 2;
-  return (
-    <View
-      accessibilityRole="tablist"
-      onLayout={(e) => setW(e.nativeEvent.layout.width)}
-      style={{
-        flexDirection: "row",
-        padding: 3,
-        borderRadius: radius.lg,
-        backgroundColor: palette.card,
-        borderWidth: 1,
-        borderColor: palette.border,
-        marginBottom: 4,
-      }}
-    >
-      {w > 0 ? (
-        <Animated.View
-          style={{
-            position: "absolute",
-            top: 3,
-            bottom: 3,
-            left: 3,
-            width: half,
-            borderRadius: radius.md,
-            backgroundColor: palette.background,
-            transform: [{ translateX: x.interpolate({ inputRange: [0, 1], outputRange: [0, half] }) }],
-          }}
-        />
-      ) : null}
-      {TABS.map((t) => (
-        <PressScale
-          key={t}
-          accessibilityRole="tab"
-          accessibilityState={{ selected: tab === t }}
-          onPress={() => {
-            if (t !== tab) haptic("selection");
-            onChange(t);
-          }}
-          style={{ flex: 1, alignItems: "center", paddingVertical: 7 }}
-        >
-          <T variant="meta" weight="medium" tone={tab === t ? "default" : "muted"}>
-            {t === "activity" ? "Timeline" : "History"}
-          </T>
-        </PressScale>
-      ))}
-    </View>
-  );
-}
 
 function toneColor(palette: Palette, tone: RowTone) {
   return tone === "destructive" ? palette.destructive : tone === "live" ? palette.live : tone === "ok" ? palette.ok : tone === "attention" ? palette.attention : palette.faint;
@@ -247,7 +191,7 @@ export default function Activity() {
       <T serif variant="h1" style={{ marginTop: 12 }}>
         Activity
       </T>
-      <Segmented tab={tab} onChange={setTab} />
+      <Segmented variant="glide" value={tab} onChange={setTab} options={TABS} />
     </View>
   );
 
@@ -273,7 +217,7 @@ export default function Activity() {
                   What happened as you: your actions, each run's start and finish, and what live machines did while this device was open. Audit kept 90 days.
                 </T>
                 {rows && rows.length > 0 ? (
-                  <Chips small value={filter} onChange={setFilter} options={ACTIVITY_FILTERS.map((f) => ({ value: f.value, label: `${f.label} ${counts[f.value]}` }))} />
+                  <Segmented small value={filter} onChange={setFilter} options={ACTIVITY_FILTERS.map((f) => ({ value: f.value, label: `${f.label} ${counts[f.value]}` }))} />
                 ) : null}
               </View>
             }

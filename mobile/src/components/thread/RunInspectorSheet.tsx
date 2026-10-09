@@ -13,6 +13,7 @@ import { T } from "../ui/AppText";
 import { Icon } from "../ui/Icon";
 import { Sheet } from "../ui/Sheet";
 import { UsageMeter } from "../ui/UsageMeter";
+import { SettingsSection } from "@/components/ui/SettingsSection";
 
 /**
  * The run inspector (web RunInspector, Run tab) as a bottom sheet: the facts that are true of this
@@ -21,17 +22,6 @@ import { UsageMeter } from "../ui/UsageMeter";
 
 const AGENT_LABEL: Record<string, string> = { omp: "oh-my-pi", codex: "Codex CLI", opencode: "OpenCode", claude: "Claude Code" };
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  const { palette } = useTheme();
-  return (
-    <View style={{ gap: 4, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: palette.border }}>
-      <T variant="micro" tone="faint" weight="semibold" style={{ textTransform: "uppercase", letterSpacing: 0.6, marginBottom: 2 }}>
-        {title}
-      </T>
-      {children}
-    </View>
-  );
-}
 
 function Row({ label, value, tone, mono }: { label: string; value: React.ReactNode; tone?: "default" | "live" | "attention" | "destructive" | "ok" | "muted"; mono?: boolean }) {
   return (
@@ -111,25 +101,25 @@ export function RunInspectorSheet({
   return (
     <Sheet visible={visible} onClose={onClose} title="Run">
       <View style={{ paddingBottom: 12 }}>
-        <Section title="Run">
+        <SettingsSection title="Run">
           <Row label="Box" value={friendlyName(session)} mono />
           {outcome?.header.label ? <Row label="Started by" value={outcome.header.label} /> : null}
           {outcome?.header.startedBy?.kind ? <Row label="Trigger" value={outcome.header.startedBy.kind} mono /> : null}
           {w ? <Row label="Playbook" value={`${w.name} · step ${w.step}/${w.total}`} /> : null}
           {w ? <Row label="Step" value={w.line} tone={w.state === "failed" ? "destructive" : undefined} /> : null}
           {box?.harness ? <Row label="Harness" value={box.harness.name} /> : null}
-        </Section>
+        </SettingsSection>
 
-        <Section title="Timing">
+        <SettingsSection title="Timing">
           {elapsedMs !== undefined ? <Row label={running ? "Elapsed" : "Took"} value={fmtClock(elapsedMs)} mono tone={running ? "live" : undefined} /> : null}
           {startedAt !== undefined ? <Row label="Started" value={new Date(startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })} mono /> : null}
           {box?.lastOutputAt ? <Row label="Last output" value={ago(box.lastOutputAt * 1000)} /> : null}
           {uptime !== undefined ? <Row label={sleeping ? "Ran for" : "Machine up"} value={fmtDuration(uptime)} mono /> : null}
           {left ? <Row label="Time left" value={left} tone={deadline?.remainingSec != null && deadline.remainingSec < 300 ? "attention" : undefined} /> : null}
           {elapsedMs === undefined && startedAt === undefined && !left ? <Empty>No stamps yet.</Empty> : null}
-        </Section>
+        </SettingsSection>
 
-        <Section title="Tokens">
+        <SettingsSection title="Tokens">
           {usage || tokens !== null || outcome?.cost.usd != null ? (
             <>
               {usage ? <Row label="Input" value={fmtTokens(usage.inputTokens)} mono /> : null}
@@ -141,9 +131,9 @@ export function RunInspectorSheet({
           ) : (
             <Empty>Reported at the end of each turn.</Empty>
           )}
-        </Section>
+        </SettingsSection>
 
-        <Section title="Agent">
+        <SettingsSection title="Agent">
           {agentName ? <Row label="Driver" value={agentName} /> : null}
           {model ? <Row label="Model" value={model} mono /> : null}
           {box?.skills?.length ? (
@@ -164,9 +154,9 @@ export function RunInspectorSheet({
             </View>
           ) : null}
           {!agentName && !model && !box?.skills?.length ? <Empty>Defaults.</Empty> : null}
-        </Section>
+        </SettingsSection>
 
-        <Section title="Repositories">
+        <SettingsSection title="Repositories">
           {repos.length ? (
             repos.map((r) => (
               <View key={r.name} style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
@@ -184,9 +174,9 @@ export function RunInspectorSheet({
           ) : (
             <Empty>None attached.</Empty>
           )}
-        </Section>
+        </SettingsSection>
 
-        <Section title="Machine">
+        <SettingsSection title="Machine">
           {sleeping ? (
             <Empty>Asleep — no live vitals.</Empty>
           ) : (
@@ -197,10 +187,10 @@ export function RunInspectorSheet({
               {!box?.cpu && !box?.memUsage && !box?.disk ? <Empty>Vitals arrive with the next poll.</Empty> : null}
             </View>
           )}
-        </Section>
+        </SettingsSection>
 
         {queued.length > 0 ? (
-          <Section title={`Queued · ${queued.length}`}>
+          <SettingsSection title={`Queued · ${queued.length}`}>
             {queued.map((q, i) => (
               <View key={`${i}-${q}`} style={{ flexDirection: "row", gap: 8 }}>
                 <T variant="meta" mono tone="faint">
@@ -211,7 +201,7 @@ export function RunInspectorSheet({
                 </T>
               </View>
             ))}
-          </Section>
+          </SettingsSection>
         ) : null}
       </View>
     </Sheet>

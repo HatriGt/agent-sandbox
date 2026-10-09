@@ -5,7 +5,7 @@ import * as Clipboard from "expo-clipboard";
 import { api, type McpServersResponse, type McpServerView } from "@/lib/api";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
-import { AcctSection } from "@/components/settings/AcctSections";
+import { SettingsSection } from "@/components/ui/SettingsSection";
 import { T } from "@/components/ui/AppText";
 import { ArmButton } from "@/components/ui/ArmButton";
 import { Button } from "@/components/ui/Button";
@@ -77,7 +77,7 @@ export function McpSection() {
   const hasServers = !!servers && servers.length > 0;
 
   return (
-    <AcctSection title="MCP servers">
+    <SettingsSection title="MCP servers">
       {servers ? (
         <T variant="meta" tone="muted">
           {servers.length === 0 ? "none yet" : `${counts.on} of ${servers.length} on`}
@@ -206,7 +206,7 @@ export function McpSection() {
         onClose={() => setEditing((e) => ({ ...e, open: false }))}
       />
       <PasteSheet visible={pasting} onMutate={mutate} onClose={() => setPasting(false)} />
-    </AcctSection>
+    </SettingsSection>
   );
 }
 

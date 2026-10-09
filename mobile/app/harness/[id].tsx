@@ -206,7 +206,7 @@ export default function HarnessEditor() {
       </View>
 
       <PickerSheet visible={sheet === "driver"} title="Driver" options={drivers.map((a) => ({ value: a.id, label: a.label, hint: a.supervised === false ? "supervised: partial" : undefined }))} value={d.driver || undefined} allowNone noneLabel="Run's default" onPick={(v) => set({ driver: (v as AgentId) ?? "" })} onClose={() => setSheet(null)} />
-      <PickerSheet visible={sheet === "provider"} title="Provider" options={providers.map((p) => ({ value: p.id, label: p.label, hint: p.kind }))} value={d.providerId || undefined} allowNone noneLabel="Built-in" onPick={(v) => (animateLayout(), set({ providerId: v ?? "", model: "" }))} onClose={() => setSheet(null)} emptyText="No providers — add one in Settings → Providers." />
+      <PickerSheet visible={sheet === "provider"} title="Provider" options={providers.map((p) => ({ value: p.id, label: p.label, hint: p.kind }))} value={d.providerId || undefined} allowNone noneLabel="Built-in" onPick={(v) => (animateLayout(), set({ providerId: v ?? "", model: "" }))} onClose={() => setSheet(null)} emptyText="No providers — add one in Settings → Integrations." />
       <PickerSheet visible={sheet === "model"} title="Model" options={(provider?.models ?? []).map((m) => ({ value: m, label: m }))} value={d.model || undefined} allowNone noneLabel="Provider default" onPick={(v) => set({ model: v ?? "" })} onClose={() => setSheet(null)} />
     </SettingsScreen>
   );

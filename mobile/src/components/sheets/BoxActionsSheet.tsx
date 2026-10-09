@@ -5,7 +5,8 @@ import { api, type BoxView, type RepoInfo } from "@/lib/api";
 import { parseTrace } from "@/lib/trace";
 import { toMarkdown } from "@/lib/transcript-tools";
 import { serverUrl } from "@/lib/config";
-import { currentDiskTier, fmtMib, isSleeping, offerableTiers, usageLevel, type Usage } from "@/lib/format";
+import { currentDiskTier, isSleeping, offerableTiers } from "@/lib/format";
+import { keepAction, sleepAction } from "@/lib/box-actions";
 import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { T } from "../ui/AppText";
@@ -13,62 +14,7 @@ import { Button } from "../ui/Button";
 import { Field } from "../ui/Field";
 import { Icon, type IconName } from "../ui/Icon";
 import { Sheet } from "../ui/Sheet";
-import { UsageMeter } from "../ui/UsageMeter";
 import { PressScale } from "@/components/motion";
-
-/** "812 MB used · 3.2 GB free" — the sentence under a vitals meter. */
-function usageWords(u: Usage): string {
-  const free = Math.max(0, u.totalMib - u.usedMib);
-  return `${fmtMib(u.usedMib)} used · ${fmtMib(free)} free of ${fmtMib(u.totalMib)}`;
-}
-
-/**
- * One vitals row: label, meter against the cap, and the used/free sentence.
- *
- * Full width, stacked — not two columns. Half a sheet cannot hold an icon, a track, a `812 MB/1.0 GB`
- * mono label and a "used · free of" sentence without the text escaping the card on a narrow phone.
- */
-function VitalRow({ kind, label, usage }: { kind: "memory" | "disk"; label: string; usage: Usage | undefined }) {
-  if (!usage || !(usage.totalMib > 0)) return null;
-  const level = usageLevel(usage);
-  return (
-    <View style={{ gap: 4 }}>
-      <T variant="micro" tone="faint" weight="semibold">
-        {label}
-      </T>
-      <UsageMeter kind={kind} usage={usage} fluid />
-      <T
-        variant="micro"
-        numberOfLines={1}
-        tone={level === "critical" ? "destructive" : level === "high" ? "attention" : "muted"}
-      >
-        {usageWords(usage)}
-      </T>
-    </View>
-  );
-}
-
-/**
- * Live vitals for the ⋯ menu: how much RAM and disk the box is using and what's left. Only while
- * awake — a sleeping box reports no metrics, so we say that instead of showing a frozen number.
- */
-function VitalsBlock({ box, sleeping, border }: { box: BoxView; sleeping: boolean; border: string }) {
-  const hasAny = !!(box.memUsage || box.disk);
-  return (
-    <View style={{ borderWidth: 1, borderColor: border, borderRadius: radius.xl, padding: 12, marginBottom: 8 }}>
-      {sleeping || !hasAny ? (
-        <T variant="micro" tone="faint">
-          {sleeping ? "Asleep — memory and disk usage report once it wakes." : "No usage metrics reported yet."}
-        </T>
-      ) : (
-        <View style={{ gap: 12 }}>
-          <VitalRow kind="memory" label="MEMORY" usage={box.memUsage} />
-          <VitalRow kind="disk" label="STORAGE" usage={box.disk} />
-        </View>
-      )}
-    </View>
-  );
-}
 
 /** One row of the actions menu: icon tile + label + hint, web ⋯-menu style. */
 function ActionRow({
@@ -162,6 +108,7 @@ export function BoxActionsSheet({
   onDestroyed,
   onRunAgain,
   onSlept,
+  onInspect,
 }: {
   box: BoxView | null;
   log?: string;
@@ -177,6 +124,8 @@ export function BoxActionsSheet({
   onRunAgain?: () => void;
   /** The operator chose "Sleep now" — the thread must not auto-wake the box right back up. */
   onSlept?: () => void;
+  /** Opens the run inspector (vitals, timeline). Omitted from Home/Fleet long-press, where there is no inspector. */
+  onInspect?: () => void;
 }) {
   const { palette } = useTheme();
   const [pane, setPane] = useState<Pane>("menu");
@@ -206,6 +155,8 @@ export function BoxActionsSheet({
   const running = box.runState === "running";
   const memTier = currentMemoryTier(box.mem, memoryDefault);
   const diskTier = currentDiskTier(box.disk, diskTiers);
+  const keep = keepAction(box);
+  const sleep = sleepAction(box);
   // Grow-only: `msb modify --root-disk` cannot shrink a managed disk, so a smaller pick could only
   // ever fail at the runtime with a confusing error. Offer sizes at or above the current one.
   const growTiers = offerableTiers(diskTiers, diskTier, true);
@@ -248,13 +199,8 @@ export function BoxActionsSheet({
 
         {pane === "menu" && (
           <>
-            <VitalsBlock box={box} sleeping={sleeping} border={palette.border} />
-            <ActionRow
-              icon={box.kept ? "bookmark" : "bookmark"}
-              label={box.kept ? "Release" : "Keep"}
-              hint={box.kept ? "kept — sleeps · auto-destroyed after release" : "never reaped while asleep"}
-              onPress={() => act(() => api.keep(box.name, !box.kept))}
-            />
+            {onInspect ? <ActionRow icon="info" label="Details" hint="machine, timeline and vitals" onPress={onInspect} /> : null}
+            <ActionRow icon={keep.icon} label={keep.label} hint={keep.hint} onPress={() => act(keep.run)} />
             <ActionRow icon="edit-2" label="Rename" disabled={!box.task} onPress={() => setPane("rename")} />
             <ActionRow
               icon="git-branch"
@@ -289,30 +235,17 @@ export function BoxActionsSheet({
               <ActionRow icon="refresh-cw" label="Run again" hint="new machine, same brief" onPress={onRunAgain} />
             ) : null}
             <ActionRow
-              icon={sleeping ? "sun" : "moon"}
+              icon={sleep.icon}
               label={sleeping ? "Wake" : "Sleep now"}
-              hint={sleeping ? "restores the workspace and session" : running ? "busy — finish first" : "a reply wakes it"}
-              disabled={!sleeping && running}
-              onPress={() =>
-                act(
-                  () => (sleeping ? api.wake(box.name) : api.sleep(box.name).then((r) => (onSlept?.(), r))),
-                  onClose,
-                )
-              }
+              hint={sleep.hint}
+              disabled={sleep.disabled}
+              onPress={() => act(() => sleep.run().then((r) => (sleeping ? r : (onSlept?.(), r))), onClose)}
             />
             {memoryTiers?.length ? (
               <ActionRow
                 icon="cpu"
                 label="Memory"
-                hint={
-                  running
-                    ? "busy — finish first"
-                    : box.memUsage
-                      ? `${fmtMib(box.memUsage.usedMib)} of ${fmtMib(box.memUsage.totalMib)} used · resize reboots`
-                      : memTier
-                        ? `${memTier} · a change reboots the machine`
-                        : "a change reboots the machine"
-                }
+                hint={running ? "busy — finish first" : memTier ? `${memTier} · a change reboots the machine` : "a change reboots the machine"}
                 disabled={running}
                 onPress={() => setPane("memory")}
               />
@@ -321,15 +254,7 @@ export function BoxActionsSheet({
               <ActionRow
                 icon="hard-drive"
                 label="Storage"
-                hint={
-                  running
-                    ? "busy — finish first"
-                    : box.disk
-                      ? `${fmtMib(box.disk.usedMib)} of ${fmtMib(box.disk.totalMib)} used · grow reboots`
-                      : diskTier
-                        ? `${diskTier} · a change reboots the machine`
-                        : "a change reboots the machine"
-                }
+                hint={running ? "busy — finish first" : diskTier ? `${diskTier} · a change reboots the machine` : "a change reboots the machine"}
                 disabled={running}
                 onPress={() => setPane("disk")}
               />

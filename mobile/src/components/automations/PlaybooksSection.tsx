@@ -14,6 +14,7 @@ import { ArmButton } from "@/components/ui/ArmButton";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Field } from "@/components/ui/Field";
+import { SettingsSection } from "@/components/ui/SettingsSection";
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
@@ -107,7 +108,7 @@ export function PlaybooksSection() {
             <Button small title="New playbook" onPress={() => startFrom(EXAMPLE)} />
           </View>
 
-          <Section title="Saved playbooks" meta={list ? String(items.length) : undefined} purpose="Pick one in the composer, or automate it; your task fills {{task}} in its first step.">
+          <SettingsSection title="Saved playbooks" meta={list ? String(items.length) : undefined} purpose="Pick one in the composer, or automate it; your task fills {{task}} in its first step.">
             {error ? (
               <Card style={{ gap: 8 }}>
                 <T variant="body" weight="medium">
@@ -186,9 +187,9 @@ export function PlaybooksSection() {
                 );
               })
             )}
-          </Section>
+          </SettingsSection>
 
-          <Section title="Start from a template" purpose="Opens in the editor — change anything before you save.">
+          <SettingsSection title="Start from a template" purpose="Opens in the editor — change anything before you save.">
             {STARTERS.map((s) => (
               <Card key={s.name} onPress={() => startFrom(s.yaml)}>
                 <T variant="meta" weight="medium">
@@ -199,7 +200,7 @@ export function PlaybooksSection() {
                 </T>
               </Card>
             ))}
-          </Section>
+          </SettingsSection>
 
           <Card>
             <T variant="micro" tone="muted">
@@ -212,26 +213,6 @@ export function PlaybooksSection() {
   );
 }
 
-function Section({ title, meta, purpose, children }: { title: string; meta?: string; purpose: string; children: React.ReactNode }) {
-  return (
-    <View style={{ gap: 8, marginTop: 8 }}>
-      <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
-        <T variant="h3" weight="semibold">
-          {title}
-        </T>
-        {meta ? (
-          <T variant="micro" tone="faint">
-            {meta}
-          </T>
-        ) : null}
-      </View>
-      <T variant="meta" tone="muted">
-        {purpose}
-      </T>
-      {children}
-    </View>
-  );
-}
 
 /** Read every `*.yaml` under the repo's playbook folder (web: PlaybooksPage › ImportFromRepo). */
 function ImportFromRepo({ dir, onCancel, onDone }: { dir: string; onCancel: () => void; onDone: (r: { workflows: WorkflowView[] }, note: string) => void }) {

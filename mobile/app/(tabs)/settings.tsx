@@ -10,6 +10,7 @@ import { T } from "@/components/ui/AppText";
 import { ArmButton } from "@/components/ui/ArmButton";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { FadeInUp, PressScale, stagger } from "@/components/motion";
+import { trialCopy } from "@/components/composer/HubSections";
 
 function RowLink({ title, hint, icon, onPress }: { title: string; hint?: string; icon: IconName; onPress: () => void }) {
   const { palette } = useTheme();
@@ -68,7 +69,6 @@ export default function Settings() {
   const { palette } = useTheme();
   const { me, signOut } = useAuth();
   const isUser = me?.kind === "user";
-  const admin = me?.role === "admin";
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: palette.background }} edges={["top"]}>
@@ -78,17 +78,15 @@ export default function Settings() {
         </T>
         <Group title="Workspace" />
         <FadeInUp delay={stagger(0)}>
-          <RowLink title="Autopilot" icon="repeat" hint="Work that runs without you: when it starts, and how it gets done" onPress={() => router.push("/settings/autopilot")} />
-          <RowLink title="History" icon="clock" hint="Archived runs" onPress={() => router.navigate({ pathname: "/(tabs)/activity", params: { tab: "history" } })} />
-          <RowLink title="Activity" icon="activity" hint="Every state-changing call, kept 90 days" onPress={() => router.navigate("/(tabs)/activity")} />
+          <RowLink title="Autopilot" icon="repeat" hint="Automations and playbooks" onPress={() => router.push("/settings/autopilot")} />
         </FadeInUp>
 
         <Group title="Resources" />
         <FadeInUp delay={stagger(1)}>
-          <RowLink title="Skills" icon="zap" hint="The playbooks every sandbox gets — write, toggle, import" onPress={() => router.push("/settings/skills")} />
-          <RowLink title="Memory" icon="layers" hint="What your agents learned on earlier runs — yours and per repo" onPress={() => router.push("/settings/memory")} />
-          <RowLink title="Harnesses" icon="sliders" hint="Driver, model, skills and rules saved as one pick" onPress={() => router.push("/settings/harnesses")} />
-          <RowLink title="Integrations" icon="link" hint="Model providers · GitHub accounts · MCP servers · Secrets · Repo setup · Inbox" onPress={() => router.push("/settings/integrations")} />
+          <RowLink title="Skills" icon="zap" hint="Playbooks every sandbox gets" onPress={() => router.push("/settings/skills")} />
+          <RowLink title="Memory" icon="layers" hint="What agents learned, per repo" onPress={() => router.push("/settings/memory")} />
+          <RowLink title="Harnesses" icon="sliders" hint="Driver, model, skills, rules" onPress={() => router.push("/settings/harnesses")} />
+          <RowLink title="Integrations" icon="link" hint="Providers, GitHub, MCP, secrets" onPress={() => router.push("/settings/integrations")} />
         </FadeInUp>
 
         <Group title={isUser ? "Account" : "Operator"} />
@@ -116,7 +114,7 @@ export default function Settings() {
               </T>
               {isUser && me.kind === "user" && me.plan === "trial" ? (
                 <T variant="micro" tone={me.expired ? "destructive" : "attention"}>
-                  {me.expired ? "Trial expired — machines can't start until you upgrade." : `Trial · ${me.daysLeft ?? "?"} days left`}
+                  {trialCopy(me).badge}
                 </T>
               ) : null}
             </View>
@@ -124,8 +122,6 @@ export default function Settings() {
               <Icon name="chevron-right" size={16} color={palette.faint} />
             </View>
           </PressScale>
-          <RowLink title="Connect an IDE" icon="code" hint="MCP setup for Claude Code, Cursor, VS Code, Windsurf" onPress={() => router.push("/settings/connect")} />
-          {admin && me?.mode === "saas" && <RowLink title="Admin" icon="shield" hint="People on this controller" onPress={() => router.push("/settings/admin")} />}
         </FadeInUp>
 
         <View style={{ marginTop: 28 }}>
