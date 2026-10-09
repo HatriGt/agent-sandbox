@@ -22,30 +22,29 @@ uniform float2 u_res;
 uniform float u_paused;
 uniform float u_reduced;
 
-float hash(float2 p) {
-  p = fract(p * float2(123.34, 456.21));
-  p += dot(p, p + 45.32);
-  return fract(p.x * p.y);
+// Smooth gradient noise (quintic fade) — no grain, large soft features.
+float2 hash2(float2 p) {
+  p = float2(dot(p, float2(127.1, 311.7)), dot(p, float2(269.5, 183.3)));
+  return -1.0 + 2.0 * fract(sin(p) * 43758.5453123);
 }
 
-float vnoise(float2 p) {
+float gnoise(float2 p) {
   float2 i = floor(p);
   float2 f = fract(p);
-  float2 u = f * f * (3.0 - 2.0 * f);
-  float a = hash(i);
-  float b = hash(i + float2(1.0, 0.0));
-  float c = hash(i + float2(0.0, 1.0));
-  float d = hash(i + float2(1.0, 1.0));
-  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+  float2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+  return mix(
+    mix(dot(hash2(i + float2(0.0, 0.0)), f - float2(0.0, 0.0)), dot(hash2(i + float2(1.0, 0.0)), f - float2(1.0, 0.0)), u.x),
+    mix(dot(hash2(i + float2(0.0, 1.0)), f - float2(0.0, 1.0)), dot(hash2(i + float2(1.0, 1.0)), f - float2(1.0, 1.0)), u.x),
+    u.y);
 }
 
 float fbm(float2 p) {
   float v = 0.0;
-  float amp = 0.5;
+  float amp = 0.55;
   float2x2 rot = float2x2(0.8, 0.6, -0.6, 0.8);
-  for (int i = 0; i < 4; i++) {
-    v += amp * vnoise(p);
-    p = rot * p * 2.03 + 11.7;
+  for (int i = 0; i < 3; i++) {
+    v += amp * gnoise(p);
+    p = rot * p * 1.9 + 7.3;
     amp *= 0.5;
   }
   return v;
@@ -54,51 +53,64 @@ float fbm(float2 p) {
 half4 main(float2 xy) {
   float2 uv = (xy - 0.5 * u_res) / min(u_res.x, u_res.y);
   float dist = length(uv);
-  float ang = atan(uv.y, uv.x);
-  float speed = (0.12 + u_level * 0.35) * mix(1.0, 0.15, u_paused) * mix(1.0, 0.03 / 0.12, u_reduced);
+  float speed = (0.22 + u_level * 0.45) * mix(1.0, 0.15, u_paused) * mix(1.0, 0.15, u_reduced);
   float t = u_time * speed;
 
-  // Polar-ish domain: angle wraps smoothly, radius stretched so the cloud rolls around the sphere.
-  float2 pol = float2(cos(ang) * (0.6 + dist * 1.4), sin(ang) * (0.6 + dist * 1.4));
-  float2 p = pol * 2.2;
+  float radius = 0.40 + u_level * 0.03 * (1.0 - u_reduced);
+  // Crisp anti-aliased disc: the orb IS a sphere; the clouds live inside it.
+  float px = 1.0 / min(u_res.x, u_res.y);
+  float mask = 1.0 - smoothstep(radius - px, radius + px, dist);
 
-  // Two warp passes.
-  float2 q = float2(fbm(p + float2(0.0, t * 0.9)), fbm(p + float2(5.2, 1.3) - t * 0.7));
-  float2 r = float2(fbm(p + 2.6 * q + float2(1.7, 9.2) + t * 0.5), fbm(p + 2.6 * q + float2(8.3, 2.8) - t * 0.4));
-  float n = fbm(p + 2.2 * r + t * 0.25);
+  // Sphere coordinates: fake z and normal, so wisps wrap around the ball instead of lying flat.
+  float2 s = uv / radius;
+  float z = sqrt(max(0.0, 1.0 - dot(s, s)));
+  float3 nrm = float3(s, z);
 
-  float levelR = u_level * 0.04 * (1.0 - u_reduced);
-  float radius = 0.42 + levelR + 0.02 * (n - 0.5) * 2.0;
-  float mask = smoothstep(radius + 0.06, radius - 0.08, dist);
+  // Slow global swirl plus two low-frequency warp passes: big soft cloud masses, slowly rolling.
+  float ca = cos(t * 0.35), sa = sin(t * 0.35);
+  float2 d = float2x2(ca, -sa, sa, ca) * s;
+  float2 p = d * 1.35 + float2(0.0, z * 0.6);
+  float2 q = float2(fbm(p + float2(0.0, t * 0.6)), fbm(p + float2(3.1, 1.7) - t * 0.45));
+  float2 w = float2(fbm(p + 1.6 * q + float2(1.7, 9.2) + t * 0.3), fbm(p + 1.6 * q + float2(8.3, 2.8) - t * 0.25));
+  float n = fbm(p + 1.4 * w + t * 0.15);          // ~ -0.6 .. 0.6
+  float n2 = fbm(p * 0.7 - 1.1 * q + float2(4.0, 6.0) - t * 0.2);
 
-  // Four-stop blue palette by fbm value.
-  half3 deep = half3(0.184, 0.435, 0.851);   // #2F6FD9
-  half3 azure = half3(0.373, 0.659, 1.0);    // #5FA8FF
-  half3 sky = half3(0.612, 0.796, 1.0);      // #9CCBFF
-  half3 white = half3(0.902, 0.949, 1.0);    // #E6F2FF
-  float k = clamp((n - 0.2) / 0.6, 0.0, 1.0);
-  half3 inside = k < 0.333 ? mix(deep, azure, k * 3.0)
-               : k < 0.666 ? mix(azure, sky, (k - 0.333) * 3.0)
-               : mix(sky, white, (k - 0.666) * 3.0);
+  // Base: a lit blue sphere. Light from top-left, soft fresnel toward the limb.
+  float3 L = normalize(float3(-0.45, -0.55, 0.7));
+  float diff = clamp(dot(nrm, L), 0.0, 1.0);
+  float fres = pow(1.0 - z, 2.2);
+  half3 deep  = half3(0.16, 0.40, 0.86);   // #2966DB
+  half3 azure = half3(0.36, 0.64, 1.0);    // #5CA3FF
+  half3 sky   = half3(0.66, 0.83, 1.0);    // #A8D4FF
+  half3 white = half3(0.96, 0.98, 1.0);
+  half3 base = mix(deep, azure, diff * 0.85 + 0.1);
+  base = mix(base, sky, fres * 0.75);
 
-  // Soft specular lobe top-left, faint darker rim.
-  float spec = exp(-dot(uv - float2(-0.16, -0.17), uv - float2(-0.16, -0.17)) * 28.0);
+  // Clouds: broad white masses where the warped noise rises, with a denser bright core, and
+  // deeper blue troughs in between. Speaking lifts the cloud threshold so more white blooms.
+  float cloud = smoothstep(-0.08 - u_level * 0.08, 0.3, n);
+  float core = smoothstep(0.12, 0.42, n + 0.3 * n2);
+  float trough = smoothstep(0.0, -0.35, n2);
+  half3 inside = mix(base, deep, trough * 0.5);
+  inside = mix(inside, mix(sky, white, 0.6), cloud * 0.9);
+  inside = mix(inside, white, core * 0.9);
+
+  // Specular lobe, and a bright limb so the ball reads glossy and round.
+  float3 H = normalize(L + float3(0.0, 0.0, 1.0));
+  float spec = pow(clamp(dot(nrm, H), 0.0, 1.0), 48.0);
   inside += half3(spec * 0.35);
-  float rim = smoothstep(radius - 0.14, radius, dist);
-  inside = mix(inside, deep * 0.85, rim * 0.35);
+  inside = mix(inside, white, pow(fres, 1.6) * 0.35);
 
-  // Outside haze: same blues, alpha fading to 0 by 0.7, brighter with level.
-  float haze = (1.0 - smoothstep(radius - 0.02, 0.7, dist)) * (1.0 - mask);
-  haze = haze * haze * (0.28 + u_level * 0.4);
-  half3 hazeCol = mix(azure, sky, 0.5 + 0.5 * (n - 0.5));
+  // Outer haze: soft, wide, breathes with the voice.
+  float haze = 1.0 - smoothstep(radius, radius + 0.26 + u_level * 0.1, dist);
+  haze = haze * haze * (0.22 + u_level * 0.45) * (1.0 - mask);
+  half3 hazeCol = mix(azure, sky, 0.5 + 0.5 * n);
 
   half3 col = inside * mask + hazeCol * haze;
   float alpha = clamp(mask + haze, 0.0, 1.0);
 
-  // Paused: drop saturation.
   float lum = dot(col, half3(0.299, 0.587, 0.114));
   col = mix(col, half3(lum), u_paused * 0.7);
-
   return half4(col * alpha, alpha);
 }
 `;
