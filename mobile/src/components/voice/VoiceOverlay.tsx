@@ -188,7 +188,7 @@ export function VoiceOverlay({ open, onDone, onCancel }: { open: boolean; onDone
           )}
         </ScrollView>
 
-        <View style={{ alignItems: "center", gap: 28, paddingTop: 36, paddingBottom: 8 }}>
+        <View style={{ alignItems: "center", gap: 28, paddingTop: 64, paddingBottom: 8 }}>
           <Pressable
             ref={slot}
             onPress={togglePause}
