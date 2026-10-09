@@ -19,12 +19,14 @@ import { useReducedMotion } from "@/components/motion";
 
 const SKY = {
   core: "#FFFFFF",
-  mist: "#EAF4FF",
-  sky: "#BFDCFF",
-  azure: "#8CC2FF",
-  deep: "#5DA6F5",
-  lilac: "#C9C4FF",
-  cyan: "#A8ECFF",
+  mist: "#DCEBFF",
+  powder: "#BBD7FF",
+  sky: "#93C0FF",
+  azure: "#6FAEFF",
+  deep: "#4A94F0",
+  ocean: "#2F74D6",
+  lilac: "#A9B0FF",
+  cyan: "#8CD8FF",
 } as const;
 
 interface Puff {
@@ -44,15 +46,22 @@ interface Puff {
 }
 
 const PUFFS: Puff[] = [
-  { id: "b1", angle: 200, dist: 0.3, r: 0.62, tint: SKY.azure, alpha: 0.55, period: 9800, sway: 0.1, layer: 0 },
-  { id: "b2", angle: 40, dist: 0.35, r: 0.58, tint: SKY.deep, alpha: 0.42, period: 11400, sway: 0.09, layer: 0 },
-  { id: "b3", angle: 310, dist: 0.25, r: 0.5, tint: SKY.lilac, alpha: 0.38, period: 12600, sway: 0.08, layer: 0 },
-  { id: "m1", angle: 120, dist: 0.42, r: 0.4, tint: SKY.sky, alpha: 0.7, period: 7200, sway: 0.12, layer: 1 },
-  { id: "m2", angle: 260, dist: 0.46, r: 0.36, tint: SKY.cyan, alpha: 0.6, period: 6400, sway: 0.13, layer: 1 },
-  { id: "m3", angle: 10, dist: 0.5, r: 0.34, tint: SKY.azure, alpha: 0.55, period: 8100, sway: 0.11, layer: 1 },
-  { id: "f1", angle: 160, dist: 0.3, r: 0.26, tint: SKY.core, alpha: 0.85, period: 4600, sway: 0.16, layer: 2 },
-  { id: "f2", angle: 340, dist: 0.38, r: 0.22, tint: SKY.mist, alpha: 0.8, period: 5300, sway: 0.15, layer: 2 },
-  { id: "f3", angle: 80, dist: 0.55, r: 0.2, tint: SKY.core, alpha: 0.7, period: 4100, sway: 0.17, layer: 2 },
+  // Back: large, deep-blue lobes that give the globe its body.
+  { id: "b1", angle: 200, dist: 0.3, r: 0.7, tint: SKY.deep, alpha: 0.6, period: 9800, sway: 0.1, layer: 0 },
+  { id: "b2", angle: 40, dist: 0.35, r: 0.66, tint: SKY.ocean, alpha: 0.5, period: 11400, sway: 0.09, layer: 0 },
+  { id: "b3", angle: 310, dist: 0.25, r: 0.58, tint: SKY.lilac, alpha: 0.4, period: 12600, sway: 0.08, layer: 0 },
+  { id: "b4", angle: 130, dist: 0.5, r: 0.56, tint: SKY.azure, alpha: 0.5, period: 10600, sway: 0.09, layer: 0 },
+  // Middle: overlapping sky-blue cumulus lobes.
+  { id: "m1", angle: 120, dist: 0.42, r: 0.46, tint: SKY.sky, alpha: 0.72, period: 7200, sway: 0.12, layer: 1 },
+  { id: "m2", angle: 260, dist: 0.46, r: 0.42, tint: SKY.cyan, alpha: 0.6, period: 6400, sway: 0.13, layer: 1 },
+  { id: "m3", angle: 10, dist: 0.5, r: 0.4, tint: SKY.azure, alpha: 0.62, period: 8100, sway: 0.11, layer: 1 },
+  { id: "m4", angle: 190, dist: 0.58, r: 0.38, tint: SKY.sky, alpha: 0.58, period: 7700, sway: 0.12, layer: 1 },
+  { id: "m5", angle: 330, dist: 0.6, r: 0.36, tint: SKY.powder, alpha: 0.55, period: 6900, sway: 0.12, layer: 1 },
+  // Front: small pale wisps; the only near-white in the globe.
+  { id: "f1", angle: 160, dist: 0.3, r: 0.3, tint: SKY.mist, alpha: 0.75, period: 4600, sway: 0.16, layer: 2 },
+  { id: "f2", angle: 340, dist: 0.38, r: 0.26, tint: SKY.powder, alpha: 0.7, period: 5300, sway: 0.15, layer: 2 },
+  { id: "f3", angle: 80, dist: 0.55, r: 0.24, tint: SKY.mist, alpha: 0.62, period: 4100, sway: 0.17, layer: 2 },
+  { id: "f4", angle: 230, dist: 0.62, r: 0.22, tint: SKY.core, alpha: 0.5, period: 4900, sway: 0.16, layer: 2 },
 ];
 
 const REVOLVE_MS = 26000;
@@ -131,9 +140,9 @@ export function VoiceOrb({ level, paused, size = 220 }: { level: number; paused:
         <Svg width={box} height={box}>
           <Defs>
             <RadialGradient id="halo" cx="50%" cy="50%" rx="50%" ry="50%">
-              <Stop offset="0%" stopColor={SKY.sky} stopOpacity={0.45} />
-              <Stop offset="55%" stopColor={SKY.azure} stopOpacity={0.16} />
-              <Stop offset="100%" stopColor={SKY.deep} stopOpacity={0} />
+              <Stop offset="0%" stopColor={SKY.azure} stopOpacity={0.5} />
+              <Stop offset="55%" stopColor={SKY.deep} stopOpacity={0.2} />
+              <Stop offset="100%" stopColor={SKY.ocean} stopOpacity={0} />
             </RadialGradient>
           </Defs>
           <Circle cx={c} cy={c} r={c} fill="url(#halo)" />
@@ -145,11 +154,11 @@ export function VoiceOrb({ level, paused, size = 220 }: { level: number; paused:
         <Svg width={size} height={size} style={{ position: "absolute" }}>
           <Defs>
             <RadialGradient id="globe" cx="46%" cy="44%" rx="56%" ry="56%">
-              <Stop offset="0%" stopColor={SKY.core} stopOpacity={1} />
-              <Stop offset="42%" stopColor={SKY.mist} stopOpacity={0.98} />
-              <Stop offset="74%" stopColor={SKY.sky} stopOpacity={0.9} />
-              <Stop offset="92%" stopColor={SKY.azure} stopOpacity={0.45} />
-              <Stop offset="100%" stopColor={SKY.deep} stopOpacity={0} />
+              <Stop offset="0%" stopColor={SKY.mist} stopOpacity={1} />
+              <Stop offset="38%" stopColor={SKY.sky} stopOpacity={0.98} />
+              <Stop offset="70%" stopColor={SKY.azure} stopOpacity={0.92} />
+              <Stop offset="90%" stopColor={SKY.deep} stopOpacity={0.55} />
+              <Stop offset="100%" stopColor={SKY.ocean} stopOpacity={0} />
             </RadialGradient>
           </Defs>
           <Circle cx={r} cy={r} r={r} fill="url(#globe)" />
@@ -187,7 +196,8 @@ export function VoiceOrb({ level, paused, size = 220 }: { level: number; paused:
                     <Defs>
                       <RadialGradient id={`puff-${p.id}`} cx="50%" cy="50%" rx="50%" ry="50%">
                         <Stop offset="0%" stopColor={p.tint} stopOpacity={p.alpha} />
-                        <Stop offset="45%" stopColor={p.tint} stopOpacity={p.alpha * 0.55} />
+                        <Stop offset="35%" stopColor={p.tint} stopOpacity={p.alpha * 0.7} />
+                        <Stop offset="68%" stopColor={p.tint} stopOpacity={p.alpha * 0.28} />
                         <Stop offset="100%" stopColor={p.tint} stopOpacity={0} />
                       </RadialGradient>
                     </Defs>
@@ -202,14 +212,14 @@ export function VoiceOrb({ level, paused, size = 220 }: { level: number; paused:
         {/* Specular: a soft off-centre highlight that keeps the globe reading as a sphere. */}
         <Svg width={size} height={size} style={{ position: "absolute" }}>
           <Defs>
-            <RadialGradient id="spec" cx="34%" cy="28%" rx="34%" ry="30%">
-              <Stop offset="0%" stopColor={SKY.core} stopOpacity={0.9} />
+            <RadialGradient id="spec" cx="34%" cy="28%" rx="36%" ry="32%">
+              <Stop offset="0%" stopColor={SKY.core} stopOpacity={0.55} />
               <Stop offset="100%" stopColor={SKY.core} stopOpacity={0} />
             </RadialGradient>
             <RadialGradient id="feather" cx="50%" cy="50%" rx="50%" ry="50%">
-              <Stop offset="0%" stopColor={SKY.core} stopOpacity={0} />
-              <Stop offset="82%" stopColor={SKY.core} stopOpacity={0} />
-              <Stop offset="100%" stopColor={SKY.sky} stopOpacity={0.35} />
+              <Stop offset="0%" stopColor={SKY.deep} stopOpacity={0} />
+              <Stop offset="70%" stopColor={SKY.deep} stopOpacity={0} />
+              <Stop offset="100%" stopColor={SKY.deep} stopOpacity={0.3} />
             </RadialGradient>
           </Defs>
           <Circle cx={r} cy={r} r={r} fill="url(#spec)" />
