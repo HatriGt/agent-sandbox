@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from "react";
 import { Animated, Dimensions, Easing, PanResponder, StyleSheet, View } from "react-native";
 import { Redirect, Tabs, useRouter } from "expo-router";
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
+import { useIsFocused } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { haptic, isReducedMotion, PressScale, SPRING } from "@/components/motion";
 import { composeTask } from "@/state/composerFocus";
@@ -173,6 +174,7 @@ function SwipeBetweenTabs({
   onGo: (dir: 1 | -1) => void;
   children: React.ReactNode;
 }) {
+  const focused = useIsFocused();
   const drag = useRef(new Animated.Value(0)).current;
   // Keep the latest index/count in refs — the PanResponder is created once.
   const at = useRef({ index, count });
@@ -181,6 +183,14 @@ function SwipeBetweenTabs({
   const width = Dimensions.get("window").width;
 
   const settle = () => Animated.spring(drag, { toValue: 0, useNativeDriver: true, ...SPRING.snap }).start();
+  // The exit animation's completion callback is not guaranteed once the scene blurs (the screen is
+  // frozen behind the new tab), which left the scene parked half off-screen. Authoritative reset:
+  // whenever this tab is the focused one, it sits at 0.
+  useEffect(() => {
+    if (!focused) return;
+    drag.stopAnimation();
+    drag.setValue(0);
+  }, [focused, drag]);
 
   const pan = useRef(
     PanResponder.create({
@@ -192,6 +202,7 @@ function SwipeBetweenTabs({
         return Math.abs(g.dx) > CLAIM_PX && Math.abs(g.dx) > Math.abs(g.dy) * CLAIM_RATIO;
       },
       onPanResponderGrant: () => {
+        drag.stopAnimation();
         crossed.current = false;
       },
       onPanResponderMove: (_e, g) => {
