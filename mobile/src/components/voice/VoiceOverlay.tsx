@@ -122,7 +122,7 @@ export function VoiceOverlay({ open, onDone, onCancel }: { open: boolean; onDone
       >
         <View style={{ alignItems: "center", gap: 8, minHeight: 44 }}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-            {listening && !paused ? <PulseDot color={palette.live} /> : null}
+            {listening && !paused ? <PulseDot color="#5DA6F5" /> : null}
             <T variant="meta" weight="medium" style={{ color: state === "error" ? palette.destructive : palette.mutedForeground }}>
               {label}
             </T>
