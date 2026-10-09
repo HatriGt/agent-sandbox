@@ -228,6 +228,7 @@ mobile/
       integrations/          Providers/Accounts/Mcp/Secrets/RepoSetup/Inbox sections (one page)
       account/               ApiKeysSection, DevicesSection
       automations/           AutomationsSection, PlaybooksSection (Autopilot tabs)
+      voice/                 VoiceOverlay (full-screen dictation: orb, live transcript, Done/Cancel), VoiceOrb
     hooks/                   useFleet (the fleet poll), useWatch (SSE), useNow (every clock)
     lib/                     api, config, sse, format, trace, question, activity,
                              mention, planTasks, slash, transcript-tools, pending-delegate
