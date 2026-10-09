@@ -9,8 +9,9 @@ import { T } from "./ui/AppText";
 import { Icon } from "./ui/Icon";
 import { Button } from "./ui/Button";
 import { Field } from "./ui/Field";
-import { smartJoin, useVoiceInput } from "@/hooks/useVoiceInput";
-import { VoiceButton, VoicePill } from "./VoiceButton";
+import { smartJoin, useVoiceSupported } from "@/hooks/useVoiceInput";
+import { VoiceButton } from "./VoiceButton";
+import { VoiceOverlay } from "./voice/VoiceOverlay";
 import { animateLayout, FadeInUp, PressScale, stagger } from "@/components/motion";
 
 /**
@@ -37,10 +38,9 @@ export function QuestionCard({
   const parsed = parseQuestion(question);
   const [other, setOther] = useState(false);
   const [text, setText] = useState("");
-  // Dictate the free-text answer; sending stays behind the button.
-  const voice = useVoiceInput({
-    onFinal: (spoken) => setText((prev) => prev + smartJoin(prev, spoken)),
-  });
+  // Dictate the free-text answer through the voice overlay; sending stays behind the button.
+  const voiceSupported = useVoiceSupported();
+  const [voiceOpen, setVoiceOpen] = useState(false);
 
   return (
     <View
@@ -100,7 +100,14 @@ export function QuestionCard({
         ))}
       {other ? (
         <View style={{ gap: 8 }}>
-          <VoicePill state={voice.state} interim={voice.interim} />
+          <VoiceOverlay
+            open={voiceOpen}
+            onDone={(spoken) => {
+              setVoiceOpen(false);
+              if (spoken) setText((prev) => prev + smartJoin(prev, spoken));
+            }}
+            onCancel={() => setVoiceOpen(false)}
+          />
           <Field
             placeholder="Tell the agent what to do…"
             value={text}
@@ -114,14 +121,13 @@ export function QuestionCard({
               title="Send"
               onPress={() => {
                 if (!text.trim()) return;
-                voice.stop();
                 onAnswer(text.trim());
               }}
               loading={busy}
               style={{ flex: 1 }}
             />
-            {voice.supported && <VoiceButton state={voice.state} level={voice.level} onToggle={voice.toggle} size={38} />}
-            <Button title="Back" variant="secondary" onPress={() => { voice.stop(); animateLayout(); setOther(false); }} />
+            {voiceSupported && <VoiceButton onPress={() => setVoiceOpen(true)} size={38} />}
+            <Button title="Back" variant="secondary" onPress={() => { animateLayout(); setOther(false); }} />
           </View>
         </View>
       ) : (

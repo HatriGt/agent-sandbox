@@ -6,9 +6,18 @@ import {
 
 /**
  * Dictation, native: Android's SpeechRecognizer via expo-speech-recognition, same contract as the
- * web hook — interim words stream out for the live pill, finalized phrases fire `onFinal`, nothing
- * auto-sends. `level` (0..1) comes from the recognizer's volume events and drives the equalizer.
+ * web hook — interim words stream out for the live transcript, finalized phrases fire `onFinal`,
+ * nothing auto-sends. `level` (0..1) comes from the recognizer's volume events and drives the orb.
  */
+
+/** Whether the device can dictate at all — composers hide the mic otherwise. */
+export function useVoiceSupported(): boolean {
+  const [supported, setSupported] = useState(false);
+  useEffect(() => {
+    setSupported(!!ExpoSpeechRecognitionModule.isRecognitionAvailable?.());
+  }, []);
+  return supported;
+}
 
 export type VoiceState = "idle" | "arming" | "listening" | "error";
 
@@ -121,15 +130,10 @@ export function useVoiceInput({ onFinal }: { onFinal: (text: string) => void }) 
     }
   }, []);
 
-  const toggle = useCallback(() => {
-    if (wantListening.current) stop();
-    else void start();
-  }, [start, stop]);
-
   // Leaving the screen releases the mic.
   useEffect(() => stop, [stop]);
 
-  return { supported, state, interim, level, start, stop, toggle };
+  return { supported, state, interim, level, start, stop };
 }
 
 /** Space/capitalization glue so dictated text lands naturally after existing text. */

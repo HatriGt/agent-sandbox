@@ -5,12 +5,13 @@ import { api, type SkillView } from "@/lib/api";
 import { clearDraft, flushDraft, loadDraft, saveDraft, takePrefill } from "@/lib/draft";
 import { expandMentions, mentionAt, type MentionState } from "@/lib/mention";
 import { slashAt, stripSlashToken, typedSkillToken, type SlashState } from "@/lib/slash";
-import { smartJoin, useVoiceInput } from "@/hooks/useVoiceInput";
+import { smartJoin, useVoiceSupported } from "@/hooks/useVoiceInput";
 import { useTheme } from "@/theme/ThemeContext";
 import { fonts, radius, type } from "@/theme/tokens";
 import { T } from "./ui/AppText";
 import { Icon } from "./ui/Icon";
-import { VoiceButton, VoicePill } from "./VoiceButton";
+import { VoiceButton } from "./VoiceButton";
+import { VoiceOverlay } from "./voice/VoiceOverlay";
 import { PressScale, ScalePresence, SPRING } from "@/components/motion";
 
 /**
@@ -114,20 +115,22 @@ export function Composer({
   }, [running]);
   useEffect(() => () => clearTimeout(stopFallback.current), []);
 
-  // Dictation: finalized phrases land at the caret through updateText, so chips and menus keep
-  // working; the interim phrase streams in the pill above. Sending stays behind the button.
-  const voice = useVoiceInput({
-    onFinal: (spoken) => {
-      setText((prev) => {
-        const at = inputRef.current?.isFocused() ? Math.min(caret, prev.length) : prev.length;
-        const glue = smartJoin(prev.slice(0, at), spoken);
-        const next = prev.slice(0, at) + glue + prev.slice(at);
-        setCaret(at + glue.length);
-        syncSendButton(next, files, skill);
-        return next;
-      });
-    },
-  });
+  // Voice mode: the overlay captures a whole take; it lands at the caret through the same path
+  // typed text takes, so chips and menus keep working. Sending stays behind the button.
+  const voiceSupported = useVoiceSupported();
+  const [voiceOpen, setVoiceOpen] = useState(false);
+  const insertSpoken = (spoken: string) => {
+    setVoiceOpen(false);
+    if (!spoken) return;
+    setText((prev) => {
+      const at = inputRef.current?.isFocused() ? Math.min(caret, prev.length) : prev.length;
+      const glue = smartJoin(prev.slice(0, at), spoken);
+      const next = prev.slice(0, at) + glue + prev.slice(at);
+      setCaret(at + glue.length);
+      syncSendButton(next, files, skill);
+      return next;
+    });
+  };
 
   useEffect(() => {
     if (!session) return;
@@ -204,7 +207,6 @@ export function Composer({
   const send = async () => {
     let t = text.trim();
     if ((!t && !files.length && !skill) || busy) return;
-    voice.stop();
     Keyboard.dismiss();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     // Clear the box BEFORE the round-trip — the thread echoes the message optimistically, and a
@@ -250,11 +252,11 @@ export function Composer({
         ? "The agent is mid-turn. Your message is queued and delivered when this turn finishes."
         : null;
 
-  const dictating = voice.state === "listening" || voice.state === "arming";
+  const dictating = voiceOpen;
 
   return (
     <View style={{ gap: 6 }}>
-      <VoicePill state={voice.state} interim={voice.interim} />
+      <VoiceOverlay open={voiceOpen} onDone={insertSpoken} onCancel={() => setVoiceOpen(false)} />
       {/* @ / menus float above the composer */}
       {menuOpen && (
         <View
@@ -498,9 +500,9 @@ export function Composer({
             paddingBottom: 8,
           }}
         />
-        {voice.supported && (
+        {voiceSupported && (
           <View style={{ paddingBottom: 2 }}>
-            <VoiceButton state={voice.state} level={voice.level} onToggle={voice.toggle} />
+            <VoiceButton onPress={() => setVoiceOpen(true)} />
           </View>
         )}
         {/* Stop the turn — only while the agent is working, and only when the thread wired it. A

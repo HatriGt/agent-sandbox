@@ -9,14 +9,15 @@ import { setPendingDelegate, takeFailedSubmit } from "@/lib/pending-delegate";
 import { clearDraft, DRAFT_NEW, loadDraft, saveDraft, takePrefill } from "@/lib/draft";
 import { mergeStarterText, STARTERS, type StarterDef } from "@/lib/starters";
 import { slashAt, stripSlashToken, typedSkillToken, type SlashState } from "@/lib/slash";
-import { smartJoin, useVoiceInput } from "@/hooks/useVoiceInput";
+import { smartJoin, useVoiceSupported } from "@/hooks/useVoiceInput";
 import { onFocusComposer, type ComposeRequest } from "@/state/composerFocus";
 import { useAuth } from "@/state/auth";
 import { useTheme } from "@/theme/ThemeContext";
 import { fonts, radius, type } from "@/theme/tokens";
 import { T } from "@/components/ui/AppText";
 import { Icon } from "@/components/ui/Icon";
-import { VoiceButton, VoicePill } from "@/components/VoiceButton";
+import { VoiceButton } from "@/components/VoiceButton";
+import { VoiceOverlay } from "@/components/voice/VoiceOverlay";
 import { animateLayout, FadeInUp, haptic, PressScale, ScalePresence, stagger } from "@/components/motion";
 import { currentAgent, RunOptionChips, RunSettingsSheet, useRunOptions, type RunSection, type VerifySpec } from "@/components/sheets/RunSettingsSheet";
 import { AddSheet, type PickedRepo } from "./AddSheet";
@@ -79,18 +80,20 @@ export const HomeComposer = forwardRef<HomeComposerHandle, { lifecycle?: FleetLi
 
   const trialExpired = me?.kind === "user" && me.expired;
 
-  // Dictate the brief: finalized phrases land at the caret; starting the machine stays manual.
-  const voice = useVoiceInput({
-    onFinal: (spoken) => {
-      setTask((prev) => {
-        const at = inputRef.current?.isFocused() ? Math.min(caret, prev.length) : prev.length;
-        const glue = smartJoin(prev.slice(0, at), spoken);
-        setCaret(at + glue.length);
-        return prev.slice(0, at) + glue + prev.slice(at);
-      });
-    },
-  });
-  const dictating = voice.state === "listening" || voice.state === "arming";
+  // Voice mode: the overlay's take lands at the caret; starting the machine stays manual.
+  const voiceSupported = useVoiceSupported();
+  const [voiceOpen, setVoiceOpen] = useState(false);
+  const insertSpoken = (spoken: string) => {
+    setVoiceOpen(false);
+    if (!spoken) return;
+    setTask((prev) => {
+      const at = inputRef.current?.isFocused() ? Math.min(caret, prev.length) : prev.length;
+      const glue = smartJoin(prev.slice(0, at), spoken);
+      setCaret(at + glue.length);
+      return prev.slice(0, at) + glue + prev.slice(at);
+    });
+  };
+  const dictating = voiceOpen;
 
   const focus = () => inputRef.current?.focus();
   useImperativeHandle(ref, () => ({ focus }), []);
@@ -246,7 +249,6 @@ export const HomeComposer = forwardRef<HomeComposerHandle, { lifecycle?: FleetLi
   // promise rides to /booting, which replaces itself with the thread as soon as the box name is back.
   const submit = () => {
     if (!canSend) return;
-    voice.stop();
     setError(null);
     setClarify(null);
     // A picked skill goes as the leading `/name` token: the controller is instructed to invoke it.
@@ -321,7 +323,7 @@ export const HomeComposer = forwardRef<HomeComposerHandle, { lifecycle?: FleetLi
 
   return (
     <View style={{ gap: 6 }}>
-      <VoicePill state={voice.state} interim={voice.interim} />
+      <VoiceOverlay open={voiceOpen} onDone={insertSpoken} onCancel={() => setVoiceOpen(false)} />
       {clarify ? (
         <FadeInUp>
           <View style={{ backgroundColor: palette.attention, borderRadius: radius.xl, padding: 12 }}>
@@ -505,7 +507,7 @@ export const HomeComposer = forwardRef<HomeComposerHandle, { lifecycle?: FleetLi
             ) : null}
             <ToolButton icon="more-horizontal" accessibilityLabel="More run options" dot={moreDot} onPress={() => setSheet("agent")} />
           </ScrollView>
-          {voice.supported && !trialExpired ? <VoiceButton state={voice.state} level={voice.level} onToggle={voice.toggle} size={32} /> : null}
+          {voiceSupported && !trialExpired ? <VoiceButton onPress={() => setVoiceOpen(true)} size={32} /> : null}
           <ScalePresence visible={canSend}>
             <PressScale
               onPress={submit}

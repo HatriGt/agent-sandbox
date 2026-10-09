@@ -2,7 +2,7 @@
   "expo": {
     "name": "Agent Sandbox",
     "slug": "agent-sandbox",
-    "version": "0.3.0",
+    "version": "0.4.0",
     "orientation": "portrait",
     "scheme": "asb",
     "userInterfaceStyle": "automatic",
@@ -17,7 +17,9 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "dev.ajeethkumar.agentsandbox",
-      "entitlements": { "com.apple.developer.usernotifications.time-sensitive": true },
+      "entitlements": {
+        "com.apple.developer.usernotifications.time-sensitive": true
+      },
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "Attach screenshots and photos to delegated tasks.",
         "NSCameraUsageDescription": "Photograph a whiteboard or bug to delegate it as a task."
@@ -34,10 +36,21 @@
           "action": "VIEW",
           "autoVerify": true,
           "data": [
-            { "scheme": "https", "host": "agent-sandbox.ajeethkumar.dev", "pathPrefix": "/dashboard/box" },
-            { "scheme": "https", "host": "agent-sandbox.ajeethkumar.dev", "pathPrefix": "/dashboard/pr" }
+            {
+              "scheme": "https",
+              "host": "agent-sandbox.ajeethkumar.dev",
+              "pathPrefix": "/dashboard/box"
+            },
+            {
+              "scheme": "https",
+              "host": "agent-sandbox.ajeethkumar.dev",
+              "pathPrefix": "/dashboard/pr"
+            }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ]
     },
@@ -58,20 +71,38 @@
       "expo-secure-store",
       "expo-font",
       "expo-asset",
-      ["expo-notifications", { "color": "#000000" }],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": false
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#000000"
+        }
+      ],
       [
         "expo-speech-recognition",
         {
           "microphonePermission": "Dictate a task or reply instead of typing it.",
           "speechRecognitionPermission": "Turn your speech into text in the chat box.",
-          "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox"]
+          "androidSpeechServicePackages": [
+            "com.google.android.googlequicksearchbox"
+          ]
         }
       ],
       [
         "expo-share-intent",
         {
-          "androidIntentFilters": ["text/plain"],
-          "iosActivationRules": { "NSExtensionActivationSupportsText": true, "NSExtensionActivationSupportsWebURLWithMaxCount": 1 },
+          "androidIntentFilters": [
+            "text/plain"
+          ],
+          "iosActivationRules": {
+            "NSExtensionActivationSupportsText": true,
+            "NSExtensionActivationSupportsWebURLWithMaxCount": 1
+          },
           "disableIOS": false
         }
       ]
