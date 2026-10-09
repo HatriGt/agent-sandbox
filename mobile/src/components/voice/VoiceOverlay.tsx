@@ -36,6 +36,8 @@ export function VoiceOverlay({ open, onDone, onCancel }: { open: boolean; onDone
   const backdrop = useRef(new Animated.Value(0)).current;
   const content = useRef(new Animated.Value(0.96)).current;
   const scroll = useRef<ScrollView>(null);
+  const container = useRef<View>(null);
+  const slot = useRef<View>(null);
   const startChimed = useRef(false);
 
   // Enter/exit: the Modal is animationType none; we fade the backdrop and spring the content.
@@ -119,6 +121,7 @@ export function VoiceOverlay({ open, onDone, onCancel }: { open: boolean; onDone
     <Modal visible transparent statusBarTranslucent animationType="none" onRequestClose={cancel}>
       <Animated.View style={{ flex: 1, backgroundColor: palette.background, opacity: backdrop.interpolate({ inputRange: [0, 1], outputRange: [0, 0.98] }) }} />
       <Animated.View
+        ref={container}
         style={{
           position: "absolute",
           left: 0,
@@ -187,10 +190,14 @@ export function VoiceOverlay({ open, onDone, onCancel }: { open: boolean; onDone
 
         <View style={{ alignItems: "center", gap: 28, paddingTop: 36, paddingBottom: 8 }}>
           <Pressable
+            ref={slot}
             onPress={togglePause}
-            onLayout={(e) => {
-              // Window-space centre of the orb slot; the full-bleed canvas draws the sphere here.
-              e.target.measureInWindow((x, y, w, h) => setOrbCenter({ x: x + w / 2, y: y + h / 2 }));
+            onLayout={() => {
+              // Layout-space centre of the orb slot relative to the content view (transform-free, so
+              // the enter spring's scale can't skew it); the full-bleed canvas draws the sphere here.
+              const s = slot.current;
+              const c = container.current;
+              if (s && c) s.measureLayout(c, (x, y, w, h) => setOrbCenter({ x: x + w / 2, y: y + h / 2 }));
             }}
             accessibilityRole="button"
             accessibilityLabel={paused ? "Resume listening" : "Pause listening"}
