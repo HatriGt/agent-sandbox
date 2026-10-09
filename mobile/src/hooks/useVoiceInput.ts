@@ -3,6 +3,7 @@ import {
   ExpoSpeechRecognitionModule,
   useSpeechRecognitionEvent,
 } from "expo-speech-recognition";
+import { useSharedValue } from "react-native-reanimated";
 
 /**
  * Dictation, native: Android's SpeechRecognizer via expo-speech-recognition, same contract as the
@@ -26,6 +27,7 @@ export function useVoiceInput({ onFinal }: { onFinal: (text: string) => void }) 
   const [state, setState] = useState<VoiceState>("idle");
   const [interim, setInterim] = useState("");
   const [level, setLevel] = useState(0);
+  const levelV = useSharedValue(0);
   // The engine restarts between utterances on Android; only user intent ends the session.
   const wantListening = useRef(false);
   // The phrase still in flight — committed by us if the engine never finalizes it (stop/end/error).
@@ -60,13 +62,19 @@ export function useVoiceInput({ onFinal }: { onFinal: (text: string) => void }) 
     }
   });
   useSpeechRecognitionEvent("volumechange", (e) => {
-    // e.value is roughly -2..10 dB-ish; fold to 0..1.
+    // e.value is roughly -2..10 dB-ish; fold to 0..1. The shared value feeds the orb on the UI
+    // thread every tick; the React state is a coarse mirror for anything that renders from it.
     const v = typeof e.value === "number" ? Math.max(0, Math.min(1, (e.value + 2) / 12)) : 0;
-    setLevel(v);
+    levelV.value = v;
+    setLevel((prev) => (Math.abs(prev - v) > 0.08 ? v : prev));
   });
+  const resetLevel = () => {
+    levelV.value = 0;
+    setLevel(0);
+  };
   useSpeechRecognitionEvent("error", (e) => {
     commitPending();
-    setLevel(0);
+    resetLevel();
     if (e.error === "no-speech" && wantListening.current) {
       // Silence timeout — restart quietly, the user hasn't pressed stop.
       try {
@@ -81,7 +89,7 @@ export function useVoiceInput({ onFinal }: { onFinal: (text: string) => void }) 
   });
   useSpeechRecognitionEvent("end", () => {
     commitPending();
-    setLevel(0);
+    resetLevel();
     if (wantListening.current) {
       try {
         beginRecognition();
@@ -97,7 +105,7 @@ export function useVoiceInput({ onFinal }: { onFinal: (text: string) => void }) 
     ExpoSpeechRecognitionModule.start({
       interimResults: true,
       continuous: true,
-      volumeChangeEventOptions: { enabled: true, intervalMillis: 100 },
+      volumeChangeEventOptions: { enabled: true, intervalMillis: 50 },
     });
   };
 
@@ -121,7 +129,7 @@ export function useVoiceInput({ onFinal }: { onFinal: (text: string) => void }) 
   const stop = useCallback(() => {
     wantListening.current = false;
     commitPending();
-    setLevel(0);
+    resetLevel();
     setState("idle");
     try {
       ExpoSpeechRecognitionModule.stop();
@@ -133,7 +141,7 @@ export function useVoiceInput({ onFinal }: { onFinal: (text: string) => void }) 
   // Leaving the screen releases the mic.
   useEffect(() => stop, [stop]);
 
-  return { supported, state, interim, level, start, stop };
+  return { supported, state, interim, level, levelV, start, stop };
 }
 
 /** Space/capitalization glue so dictated text lands naturally after existing text. */

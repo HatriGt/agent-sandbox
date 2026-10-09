@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo } from "react";
-import { Canvas, Fill, Shader, Skia } from "@shopify/react-native-skia";
-import { useClock } from "@shopify/react-native-skia";
-import { useDerivedValue, useSharedValue, withSpring, withTiming } from "react-native-reanimated";
+import { Canvas, Fill, Shader, Skia, useClock } from "@shopify/react-native-skia";
+import { Easing, useDerivedValue, useSharedValue, withTiming, type SharedValue } from "react-native-reanimated";
 import { useReducedMotion } from "@/components/motion";
 
 /**
@@ -14,6 +13,9 @@ import { useReducedMotion } from "@/components/motion";
  * toward grey. Reduce-motion: time at 0.03x and no level-driven radius. Everything per-frame runs in
  * the shader — no JS allocations once mounted.
  */
+
+/** Canvas width as a multiple of the sphere diameter: room for the glow to fade out fully. */
+const GLOW_SPREAD = 1.9;
 
 const SKSL = `
 uniform float u_time;
@@ -51,14 +53,14 @@ float fbm(float2 p) {
 }
 
 half4 main(float2 xy) {
-  float2 uv = (xy - 0.5 * u_res) / min(u_res.x, u_res.y);
+  // The canvas is GLOW_SPREAD x the sphere; normalise so the sphere radius is the same fraction.
+  float2 uv = (xy - 0.5 * u_res) / min(u_res.x, u_res.y) * ${GLOW_SPREAD.toFixed(2)};
   float dist = length(uv);
-  float speed = (0.22 + u_level * 0.45) * mix(1.0, 0.15, u_paused) * mix(1.0, 0.15, u_reduced);
-  float t = u_time * speed;
+  float t = u_time;
 
   float radius = 0.40 + u_level * 0.03 * (1.0 - u_reduced);
   // Crisp anti-aliased disc: the orb IS a sphere; the clouds live inside it.
-  float px = 1.0 / min(u_res.x, u_res.y);
+  float px = ${GLOW_SPREAD.toFixed(2)} / min(u_res.x, u_res.y);
   float mask = 1.0 - smoothstep(radius - px, radius + px, dist);
 
   // Sphere coordinates: fake z and normal, so wisps wrap around the ball instead of lying flat.
@@ -101,17 +103,24 @@ half4 main(float2 xy) {
   inside += half3(spec * 0.35);
   inside = mix(inside, white, pow(fres, 1.6) * 0.35);
 
-  // Outer haze: soft, wide, breathes with the voice.
-  float haze = 1.0 - smoothstep(radius, radius + 0.26 + u_level * 0.1, dist);
-  haze = haze * haze * (0.22 + u_level * 0.45) * (1.0 - mask);
+  // Reflector glow: a wide exponential falloff from the limb, like light bleeding through haze.
+  // Two terms - a tight bright corona and a long soft tail - so it reads as one continuous
+  // light source rather than a ring. Breathes outward with the voice.
+  float dOut = max(0.0, dist - radius);
+  float corona = exp(-dOut * (14.0 - u_level * 4.0));
+  float tail = exp(-dOut * (4.0 - u_level * 1.2));
+  float haze = (corona * 0.5 + tail * 0.5) * (0.42 + u_level * 0.5) * (1.0 - mask);
+  // A slow drift in the glow's colour so the reflector feels alive, never a static ring.
   half3 hazeCol = mix(azure, sky, 0.5 + 0.5 * n);
 
+  // Premultiplied output: the colour is already weighted by its coverage, so alpha is applied
+  // exactly once. Multiplying again would square the faint tail and cut the glow off short.
   half3 col = inside * mask + hazeCol * haze;
   float alpha = clamp(mask + haze, 0.0, 1.0);
 
   float lum = dot(col, half3(0.299, 0.587, 0.114));
   col = mix(col, half3(lum), u_paused * 0.7);
-  return half4(col * alpha, alpha);
+  return half4(col, alpha);
 }
 `;
 
@@ -119,34 +128,46 @@ const compiled = Skia.RuntimeEffect.Make(SKSL);
 if (!compiled) throw new Error("VoiceOrb: shader failed to compile");
 const effect = compiled;
 
-export function VoiceOrb({ level, paused, size = 200 }: { level: number; paused: boolean; size?: number }) {
+export function VoiceOrb({ level, paused, size = 200 }: { level: SharedValue<number>; paused: boolean; size?: number }) {
   const reduced = useReducedMotion();
   const clock = useClock();
-  const lvl = useSharedValue(0);
   const pausedV = useSharedValue(paused ? 1 : 0);
+  // Smoothed level, accumulated phase and last clock live on the UI thread; nothing per-frame
+  // crosses the bridge. Phase integrates dt * speed so a louder moment accelerates the clouds
+  // instead of teleporting them (t = time * speed would jump every time speed changed).
+  const lvl = useSharedValue(0);
+  const phase = useSharedValue(0);
+  const last = useSharedValue(0);
 
   useEffect(() => {
-    lvl.value = withSpring(Math.max(0, Math.min(1, level)), { damping: 14, stiffness: 160, mass: 0.6 });
-  }, [level, lvl]);
-  useEffect(() => {
-    pausedV.value = withTiming(paused ? 1 : 0, { duration: 260 });
+    pausedV.value = withTiming(paused ? 1 : 0, { duration: 320, easing: Easing.out(Easing.cubic) });
   }, [paused, pausedV]);
 
-  const res = useMemo(() => [size, size], [size]);
+  // The canvas is wider than the sphere so the reflector glow has room to fade to nothing.
+  const canvas = Math.round(size * GLOW_SPREAD);
+  const res = useMemo(() => [canvas, canvas], [canvas]);
   const reducedV = reduced ? 1 : 0;
-  const uniforms = useDerivedValue(
-    () => ({
-      u_time: clock.value / 1000,
+  const uniforms = useDerivedValue(() => {
+    const now = clock.value / 1000;
+    const dt = last.value === 0 ? 0 : Math.min(0.05, now - last.value);
+    last.value = now;
+    // Asymmetric smoothing: attack fast (voice onsets feel immediate), release slow (no flutter).
+    const target = level.value;
+    const k = target > lvl.value ? 1 - Math.exp(-dt * 18) : 1 - Math.exp(-dt * 5);
+    lvl.value = lvl.value + (target - lvl.value) * k;
+    const speed = (0.22 + lvl.value * 0.45) * (1 - pausedV.value * 0.85) * (reducedV ? 0.15 : 1);
+    phase.value = phase.value + dt * speed;
+    return {
+      u_time: phase.value,
       u_level: lvl.value,
       u_res: res,
       u_paused: pausedV.value,
       u_reduced: reducedV,
-    }),
-    [res, reducedV],
-  );
+    };
+  }, [res, reducedV]);
 
   return (
-    <Canvas style={{ width: size, height: size }}>
+    <Canvas style={{ width: canvas, height: canvas }}>
       <Fill>
         <Shader source={effect} uniforms={uniforms} />
       </Fill>

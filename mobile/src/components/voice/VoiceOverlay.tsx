@@ -5,16 +5,16 @@ import { useVoiceInput } from "@/hooks/useVoiceInput";
 import { playVoiceSound } from "@/lib/voice-sounds";
 import { useTheme } from "@/theme/ThemeContext";
 import { T } from "@/components/ui/AppText";
-import { Icon } from "@/components/ui/Icon";
 import { DUR, EASE_OUT, FadeInUp, haptic, isReducedMotion, PressScale, SPRING } from "@/components/motion";
 import { VoiceOrb } from "./VoiceOrb";
 
 /**
  * Full-screen voice mode (ChatGPT-style): listening starts the moment it opens; the transcript fills
  * the screen with finalized phrases in foreground and the in-flight phrase muted, bottom-anchored so
- * the latest words sit nearest the orb. The orb row at the bottom holds Cancel / orb / Done; tapping
- * the orb pauses/resumes the mic, Android back cancels. Nothing is sent from here — the composer
- * still owns sending.
+ * the latest words sit nearest the orb. The orb sits alone at the bottom with a Done pill beneath;
+ * tapping the orb pauses/resumes the mic, Cancel is top-right and Android back cancels. Haptics mark
+ * every state change (mic live, phrase finalized, pause/resume, done, cancel). Nothing is sent from
+ * here — the composer still owns sending.
  */
 export function VoiceOverlay({ open, onDone, onCancel }: { open: boolean; onDone: (text: string) => void; onCancel: () => void }) {
   const { palette } = useTheme();
@@ -22,9 +22,10 @@ export function VoiceOverlay({ open, onDone, onCancel }: { open: boolean; onDone
   const [mounted, setMounted] = useState(open);
   const [committed, setCommitted] = useState<string[]>([]);
   const [paused, setPaused] = useState(false);
-  const { state, interim, level, start, stop } = useVoiceInput({
+  const { state, interim, levelV, start, stop } = useVoiceInput({
     onFinal: (t) => {
       setCommitted((c) => [...c, t]);
+      haptic("selection");
       playVoiceSound("phrase");
     },
   });
@@ -64,6 +65,7 @@ export function VoiceOverlay({ open, onDone, onCancel }: { open: boolean; onDone
   useEffect(() => {
     if (open && state === "listening" && !startChimed.current) {
       startChimed.current = true;
+      haptic("light");
       playVoiceSound("open");
     }
   }, [open, state]);
@@ -74,6 +76,7 @@ export function VoiceOverlay({ open, onDone, onCancel }: { open: boolean; onDone
   const listening = state === "listening";
 
   const cancel = () => {
+    haptic("light");
     playVoiceSound("cancel");
     onCancel();
   };
@@ -89,7 +92,7 @@ export function VoiceOverlay({ open, onDone, onCancel }: { open: boolean; onDone
     onDone(all.join(" "));
   };
   const togglePause = () => {
-    haptic("selection");
+    haptic(paused ? "light" : "medium");
     if (paused) {
       setPaused(false);
       playVoiceSound("resume");
@@ -130,12 +133,18 @@ export function VoiceOverlay({ open, onDone, onCancel }: { open: boolean; onDone
             {label}
           </T>
           {state === "error" && !paused ? (
-            <PressScale onPress={retry} accessibilityRole="button" accessibilityLabel="Retry microphone" hitSlop={8}>
+            <PressScale onPress={retry} haptic="light" accessibilityRole="button" accessibilityLabel="Retry microphone" hitSlop={8}>
               <T variant="meta" weight="semibold" style={{ color: palette.foreground, textDecorationLine: "underline" }}>
                 Retry
               </T>
             </PressScale>
           ) : null}
+          <View style={{ flex: 1 }} />
+          <PressScale onPress={cancel} haptic="light" accessibilityRole="button" accessibilityLabel="Cancel dictation" hitSlop={12}>
+            <T variant="meta" weight="medium" style={{ color: palette.mutedForeground }}>
+              Cancel
+            </T>
+          </PressScale>
         </View>
 
         <ScrollView
@@ -169,23 +178,18 @@ export function VoiceOverlay({ open, onDone, onCancel }: { open: boolean; onDone
           )}
         </ScrollView>
 
-        <View style={{ alignItems: "center", gap: 10, paddingTop: 8 }}>
-          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", alignSelf: "stretch", paddingHorizontal: 12 }}>
-            <PressScale onPress={cancel} haptic="light" accessibilityRole="button" accessibilityLabel="Cancel dictation" hitSlop={8}>
-              <View style={{ width: 52, height: 52, borderRadius: 26, borderWidth: 1, borderColor: palette.border, alignItems: "center", justifyContent: "center" }}>
-                <Icon name="x" size={20} color={palette.foreground} />
-              </View>
-            </PressScale>
-            <Pressable onPress={togglePause} accessibilityRole="button" accessibilityLabel={paused ? "Resume listening" : "Pause listening"} hitSlop={12}>
-              <VoiceOrb level={level} paused={paused} size={200} />
-            </Pressable>
-            <PressScale onPress={done} disabled={!hasText} accessibilityRole="button" accessibilityLabel="Use dictated text" accessibilityState={{ disabled: !hasText }} hitSlop={8}>
-              <View style={{ width: 52, height: 52, borderRadius: 26, backgroundColor: palette.primary, opacity: hasText ? 1 : 0.4, alignItems: "center", justifyContent: "center" }}>
-                <Icon name="check" size={22} color={palette.primaryForeground} />
-              </View>
-            </PressScale>
-          </View>
-          <T variant="micro" style={{ color: palette.faint }}>
+        <View style={{ alignItems: "center", gap: 2, paddingTop: 8 }}>
+          <Pressable onPress={togglePause} accessibilityRole="button" accessibilityLabel={paused ? "Resume listening" : "Pause listening"} hitSlop={12}>
+            <VoiceOrb level={levelV} paused={paused} size={200} />
+          </Pressable>
+          <PressScale onPress={done} disabled={!hasText} haptic="medium" accessibilityRole="button" accessibilityLabel="Use dictated text" accessibilityState={{ disabled: !hasText }} hitSlop={12}>
+            <View style={{ paddingHorizontal: 28, paddingVertical: 12, borderRadius: 999, backgroundColor: hasText ? palette.primary : "transparent", borderWidth: 1, borderColor: hasText ? palette.primary : palette.border, opacity: hasText ? 1 : 0.5 }}>
+              <T variant="meta" weight="semibold" style={{ color: hasText ? palette.primaryForeground : palette.mutedForeground }}>
+                Done
+              </T>
+            </View>
+          </PressScale>
+          <T variant="micro" style={{ color: palette.faint, marginTop: 8 }}>
             Tap the orb to {paused ? "resume" : "pause"}
           </T>
         </View>
