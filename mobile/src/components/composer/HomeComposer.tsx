@@ -21,7 +21,6 @@ import { VoiceOverlay } from "@/components/voice/VoiceOverlay";
 import { animateLayout, FadeInUp, haptic, PressScale, ScalePresence, stagger } from "@/components/motion";
 import { currentAgent, RunOptionChips, RunSettingsSheet, useRunOptions, type RunSection, type VerifySpec } from "@/components/sheets/RunSettingsSheet";
 import { AddSheet, type PickedRepo } from "./AddSheet";
-import { SkillsSheet } from "./SkillsSheet";
 import { ModelSheet } from "./ModelSheet";
 import { ToolButton } from "./ToolButton";
 
@@ -34,8 +33,9 @@ export interface HomeComposerHandle {
 
 /**
  * The Hub's inline composer (web Hub.tsx PromptInput + composer/Toolbar.tsx): one card holding the
- * brief, picked repos with a branch field, image thumbnails, and the toolbar - Plus / Skills /
- * Harness / Playbook / Model / More - each a Sheet on a phone. Submit fires the delegate and pushes
+ * brief, picked repos with a branch field, image thumbnails, and the toolbar - Plus / Harness /
+ * Playbook / Model / More - each a Sheet on a phone. Skills are picked by typing `/` (inline menu
+ * under the text). Submit fires the delegate and pushes
  * /booting, which attaches to the box the moment it surfaces.
  *
  * Mounted once by Home; the tab bar's "+", the empty state and the checklist reach it through the
@@ -71,7 +71,7 @@ export const HomeComposer = forwardRef<HomeComposerHandle, { lifecycle?: FleetLi
   // Run settings: agent / harness / playbook / attempts. Agent, harness and playbook stick across
   // launches; a failed submit restores exactly what was sent (including attempts).
   const run = useRunOptions(stash?.run ? { ...stash.run, agent: stash.run.agent as AgentId | null } : null);
-  const [sheet, setSheet] = useState<null | "add" | "skills" | "model" | RunSection>(null);
+  const [sheet, setSheet] = useState<null | "add" | "model" | RunSection>(null);
   const [addOnRepos, setAddOnRepos] = useState(false);
   // Link unfurl: a pasted GitHub issue/PR or Sentry link becomes a task (server-side fetch).
   const [unfurled, setUnfurled] = useState<Unfurled | null>(null);
@@ -199,7 +199,7 @@ export const HomeComposer = forwardRef<HomeComposerHandle, { lifecycle?: FleetLi
       setSkill(null);
       return;
     }
-    // From the `/` menu the typed token goes; from the Skills button the text is left alone.
+    // The typed `/query` token goes; the picked name rides as a chip above the text.
     const stripped = slash ? stripSlashToken(task, slash.start) : { value: task, caret: task.length };
     animateLayout();
     setSkill(name);
@@ -393,8 +393,8 @@ export const HomeComposer = forwardRef<HomeComposerHandle, { lifecycle?: FleetLi
           }}
         />
 
-        {/* `/` menu, inline under the text like the thread composer. */}
-        {slash && slashHits.length > 0 ? (
+        {/* `/` menu, inline under the text: the only way to pick a skill (no toolbar button). */}
+        {slash && skills ? (
           <View style={{ marginHorizontal: 10, borderWidth: 1, borderColor: palette.border, borderRadius: radius.lg, backgroundColor: palette.popover, overflow: "hidden" }}>
             {slashHits.map((s) => (
               <PressScale
@@ -411,6 +411,18 @@ export const HomeComposer = forwardRef<HomeComposerHandle, { lifecycle?: FleetLi
                 </T>
               </PressScale>
             ))}
+            {slashHits.length === 0 ? (
+              <PressScale
+                onPress={() => router.push("/settings/skills")}
+                style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingVertical: 9 }}
+              >
+                <Icon name="zap" size={13} color={palette.faint} />
+                <T variant="micro" tone="muted" style={{ flex: 1 }}>
+                  {skills.length === 0 ? "No skills yet - add one in Settings" : `No skill matches "/${slash.query}"`}
+                </T>
+                {skills.length === 0 ? <Icon name="chevron-right" size={12} color={palette.faint} /> : null}
+              </PressScale>
+            ) : null}
           </View>
         ) : null}
 
@@ -495,7 +507,6 @@ export const HomeComposer = forwardRef<HomeComposerHandle, { lifecycle?: FleetLi
                 setSheet("add");
               }}
             />
-            <ToolButton icon="slash" label="Skills" accessibilityLabel="Run a skill with this message" dot={!!skill} onPress={() => setSheet("skills")} />
             {sources.harnesses.length > 0 ? (
               <ToolButton icon="layers" label={pickedHarness?.name ?? "Harness"} accessibilityLabel="Harness" dot={!!pickedHarness} onPress={() => setSheet("harness")} />
             ) : null}
@@ -584,7 +595,6 @@ export const HomeComposer = forwardRef<HomeComposerHandle, { lifecycle?: FleetLi
       </View>
 
       <AddSheet visible={sheet === "add"} onClose={() => setSheet(null)} picked={picked} onToggleRepo={toggleRepo} onPickImage={(c) => void pickImage(c)} startOnRepos={addOnRepos} />
-      <SkillsSheet visible={sheet === "skills"} onClose={() => setSheet(null)} skills={skills} current={skill} onPick={pickSkill} />
       <ModelSheet
         visible={sheet === "model"}
         onClose={() => setSheet(null)}
