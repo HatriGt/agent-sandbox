@@ -401,7 +401,7 @@ https://<ASB_DOMAIN>/dashboard?token=<MCP_HTTP_TOKEN>
   connection dot and a **light/dark theme toggle** (persisted to `localStorage`; both palettes are
   hand-authored shadcn-style `data-theme` token sets on `<html>`). Click a card to open its log
   panel, which polls **`/watch.json?session=…`** for that box's live log tail.
-- **`/monitor.json`** and **`/watch.json?session=&lines=`** — JSON forms of `gatherMonitor` /
+- **`/fleet.json`** and **`/watch.json?box=&lines=`** — JSON forms of `gatherMonitor` /
   `gatherWatch`, same data the `monitor` / `watch` tools render as text.
 - **Auth (fails closed):** `checkDashboardAuth` accepts the token via `Authorization: Bearer` (the
   page's fetch calls) **or** the `?token=` query param (so a browser navigation works — it can't set
