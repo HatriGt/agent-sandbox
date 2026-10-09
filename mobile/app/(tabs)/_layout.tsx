@@ -143,17 +143,24 @@ function PillTabBar({ state, navigation }: BottomTabBarProps) {
   );
 }
 
-const COMMIT_PX = 48;
-const FOLLOW_CAP = 56;
+/** Decisive-horizontal test: 12px moved, flatter than ~1:1.6. Fires in the capture phase so a drag
+ *  that began on a card or row still pages, yet a scroll (vertical) or a chip dock (short, fast
+ *  horizontal flicks are already native-scrolling before 12px) keeps its own gesture. */
+const CLAIM_PX = 12;
+const CLAIM_RATIO = 1.6;
 const EDGE_PX = 24;
+/** Commit when the finger crossed a quarter of the width, or flicked. */
+const COMMIT_FRACTION = 0.25;
+const COMMIT_VX = 0.3;
+/** How far the leaving scene travels on commit before the Tabs transition takes over. */
+const EXIT_FRACTION = 0.4;
 
 /**
- * Horizontal-swipe layer over the tab scenes: a decisive left/right drag moves to the adjacent
- * tab. The scene follows the finger (rubber-banded) so the commit point is visible, a selection
- * haptic marks crossing it, and the Tabs 'shift' transition is the only animation on commit.
- * PanResponder (not a pager — no native pager in this app) claims the gesture only when it is
- * clearly horizontal, so vertical scrolls and the horizontal chip docks keep working: those sit
- * deeper in the tree and win the responder negotiation for small drags.
+ * Horizontal-swipe layer over the tab scenes: the scene tracks the finger 1:1 (rubber-banded past
+ * the first/last tab), a selection haptic marks the commit point, and on release it either springs
+ * back or carries on out of the way while the Tabs 'shift' transition brings the neighbour in — one
+ * continuous motion, like a pager. PanResponder, not a native pager: the app has none and OTA can't
+ * add one. Claimed in the capture phase so pressables under the finger don't swallow the drag.
  */
 function SwipeBetweenTabs({
   index,
@@ -166,59 +173,69 @@ function SwipeBetweenTabs({
   onGo: (dir: 1 | -1) => void;
   children: React.ReactNode;
 }) {
-  const nudge = useRef(new Animated.Value(0)).current;
+  const drag = useRef(new Animated.Value(0)).current;
   // Keep the latest index/count in refs — the PanResponder is created once.
   const at = useRef({ index, count });
   at.current = { index, count };
-  // Set once per drag when the finger crosses the commit distance: the haptic says "release now".
   const crossed = useRef(false);
+  const width = Dimensions.get("window").width;
+
+  const settle = () => Animated.spring(drag, { toValue: 0, useNativeDriver: true, ...SPRING.snap }).start();
 
   const pan = useRef(
     PanResponder.create({
-      // Claim only decisive horizontal drags (long and flat), and never capture —
-      // children get first refusal, so scrolling stays untouched. A drag that began at either
-      // screen edge is the system's (Android back gesture, iOS stack pop).
-      onMoveShouldSetPanResponder: (e, g) => {
+      onMoveShouldSetPanResponderCapture: (e, g) => {
         const startX = e.nativeEvent.pageX - g.dx;
         const w = Dimensions.get("window").width;
+        // A drag from either screen edge is the system's (Android back gesture, iOS stack pop).
         if (startX < EDGE_PX || startX > w - EDGE_PX) return false;
-        return Math.abs(g.dx) > 26 && Math.abs(g.dx) > Math.abs(g.dy) * 2.2;
+        return Math.abs(g.dx) > CLAIM_PX && Math.abs(g.dx) > Math.abs(g.dy) * CLAIM_RATIO;
       },
       onPanResponderGrant: () => {
         crossed.current = false;
       },
       onPanResponderMove: (_e, g) => {
         const { index: i, count: n } = at.current;
+        const w = Dimensions.get("window").width;
         const blocked = (g.dx < 0 && i >= n - 1) || (g.dx > 0 && i <= 0);
-        if (!blocked && !crossed.current && Math.abs(g.dx) > COMMIT_PX) {
-          crossed.current = true;
+        const commit = w * COMMIT_FRACTION;
+        if (!blocked && Math.abs(g.dx) > commit !== crossed.current) {
+          crossed.current = !crossed.current;
           haptic("selection");
         }
         if (isReducedMotion()) return;
-        // Follow the finger (rubber-banded) so the commit point is visible before release.
-        nudge.setValue(Math.max(-FOLLOW_CAP, Math.min(FOLLOW_CAP, g.dx * (blocked ? 0.08 : 0.5))));
+        // 1:1 under the finger; a rubber band past the ends so the edge is felt, not hit.
+        drag.setValue(blocked ? g.dx * 0.15 : g.dx);
       },
       onPanResponderRelease: (_e, g) => {
         const { index: i, count: n } = at.current;
-        const goLeft = (g.dx < -COMMIT_PX || g.vx < -0.5) && i < n - 1;
-        const goRight = (g.dx > COMMIT_PX || g.vx > 0.5) && i > 0;
-        if (goLeft || goRight) {
-          if (!crossed.current) haptic("selection");
-          // The Tabs 'shift' transition is the one animation for the change: drop the nudge and go.
-          nudge.setValue(0);
-          onGo(goLeft ? 1 : -1);
-        } else {
-          Animated.spring(nudge, { toValue: 0, useNativeDriver: true, ...SPRING.snap }).start();
+        const w = Dimensions.get("window").width;
+        const commit = w * COMMIT_FRACTION;
+        const goLeft = (g.dx < -commit || g.vx < -COMMIT_VX) && i < n - 1;
+        const goRight = (g.dx > commit || g.vx > COMMIT_VX) && i > 0;
+        if (!goLeft && !goRight) return settle();
+        if (!crossed.current) haptic("selection");
+        const dir: 1 | -1 = goLeft ? 1 : -1;
+        if (isReducedMotion()) {
+          drag.setValue(0);
+          return onGo(dir);
         }
+        // Keep moving with the finger's momentum while the neighbour shifts in, then reset this
+        // scene's offset once it is off-screen so it comes back centred next time.
+        Animated.timing(drag, { toValue: -dir * w * EXIT_FRACTION, duration: 200, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start(() =>
+          drag.setValue(0),
+        );
+        onGo(dir);
       },
-      onPanResponderTerminate: () => {
-        Animated.spring(nudge, { toValue: 0, useNativeDriver: true, ...SPRING.snap }).start();
-      },
+      onPanResponderTerminate: settle,
     }),
   ).current;
 
+  // Fade as the scene leaves so the hand-off to the incoming tab reads as one surface, not two.
+  const opacity = drag.interpolate({ inputRange: [-width, 0, width], outputRange: [0.35, 1, 0.35], extrapolate: "clamp" });
+
   return (
-    <Animated.View style={{ flex: 1, transform: [{ translateX: nudge }] }} {...pan.panHandlers}>
+    <Animated.View style={{ flex: 1, opacity, transform: [{ translateX: drag }] }} {...pan.panHandlers}>
       {children}
     </Animated.View>
   );
