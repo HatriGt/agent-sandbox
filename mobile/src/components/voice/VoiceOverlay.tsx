@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Animated, Easing, Modal, Pressable, ScrollView, View } from "react-native";
+import { Animated, Easing, Modal, Pressable, ScrollView, useWindowDimensions, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useVoiceInput } from "@/hooks/useVoiceInput";
 import { playVoiceSound } from "@/lib/voice-sounds";
@@ -16,12 +16,16 @@ import { VoiceOrb } from "./VoiceOrb";
  * every state change (mic live, phrase finalized, pause/resume, done, cancel). Nothing is sent from
  * here — the composer still owns sending.
  */
+const ORB = 200;
+
 export function VoiceOverlay({ open, onDone, onCancel }: { open: boolean; onDone: (text: string) => void; onCancel: () => void }) {
   const { palette } = useTheme();
   const insets = useSafeAreaInsets();
   const [mounted, setMounted] = useState(open);
   const [committed, setCommitted] = useState<string[]>([]);
   const [paused, setPaused] = useState(false);
+  const { width: winW, height: winH } = useWindowDimensions();
+  const [orbCenter, setOrbCenter] = useState<{ x: number; y: number } | null>(null);
   const { state, interim, levelV, start, stop } = useVoiceInput({
     onFinal: (t) => {
       setCommitted((c) => [...c, t]);
@@ -109,6 +113,7 @@ export function VoiceOverlay({ open, onDone, onCancel }: { open: boolean; onDone
   };
 
   const label = paused ? "Paused" : state === "error" ? "Microphone unavailable" : listening ? "Listening" : "Starting…";
+  const win = { width: winW, height: winH };
 
   return (
     <Modal visible transparent statusBarTranslucent animationType="none" onRequestClose={cancel}>
@@ -127,6 +132,8 @@ export function VoiceOverlay({ open, onDone, onCancel }: { open: boolean; onDone
           transform: [{ scale: content }],
         }}
       >
+        {/* Full-screen shader layer: the sphere is drawn at the orb slot, the glow bleeds everywhere. */}
+        {orbCenter ? <VoiceOrb level={levelV} paused={paused} size={ORB} center={orbCenter} viewport={win} /> : null}
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8, minHeight: 24 }}>
           {listening && !paused ? <PulseDot color="#5DA6F5" /> : null}
           <T variant="meta" weight="medium" style={{ color: state === "error" ? palette.destructive : palette.mutedForeground }}>
@@ -179,9 +186,17 @@ export function VoiceOverlay({ open, onDone, onCancel }: { open: boolean; onDone
         </ScrollView>
 
         <View style={{ alignItems: "center", gap: 2, paddingTop: 8 }}>
-          <Pressable onPress={togglePause} accessibilityRole="button" accessibilityLabel={paused ? "Resume listening" : "Pause listening"} hitSlop={12}>
-            <VoiceOrb level={levelV} paused={paused} size={200} />
-          </Pressable>
+          <Pressable
+            onPress={togglePause}
+            onLayout={(e) => {
+              // Window-space centre of the orb slot; the full-bleed canvas draws the sphere here.
+              e.target.measureInWindow((x, y, w, h) => setOrbCenter({ x: x + w / 2, y: y + h / 2 }));
+            }}
+            accessibilityRole="button"
+            accessibilityLabel={paused ? "Resume listening" : "Pause listening"}
+            hitSlop={12}
+            style={{ width: ORB, height: ORB }}
+          />
           <PressScale onPress={done} disabled={!hasText} haptic="medium" accessibilityRole="button" accessibilityLabel="Use dictated text" accessibilityState={{ disabled: !hasText }} hitSlop={12}>
             <View style={{ paddingHorizontal: 28, paddingVertical: 12, borderRadius: 999, backgroundColor: hasText ? palette.primary : "transparent", borderWidth: 1, borderColor: hasText ? palette.primary : palette.border, opacity: hasText ? 1 : 0.5 }}>
               <T variant="meta" weight="semibold" style={{ color: hasText ? palette.primaryForeground : palette.mutedForeground }}>

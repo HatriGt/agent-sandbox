@@ -14,13 +14,11 @@ import { useReducedMotion } from "@/components/motion";
  * the shader — no JS allocations once mounted.
  */
 
-/** Canvas width as a multiple of the sphere diameter: room for the glow to fade out fully. */
-const GLOW_SPREAD = 1.9;
-
 const SKSL = `
 uniform float u_time;
 uniform float u_level;
-uniform float2 u_res;
+uniform float2 u_center;
+uniform float u_radius;
 uniform float u_paused;
 uniform float u_reduced;
 
@@ -53,14 +51,14 @@ float fbm(float2 p) {
 }
 
 half4 main(float2 xy) {
-  // The canvas is GLOW_SPREAD x the sphere; normalise so the sphere radius is the same fraction.
-  float2 uv = (xy - 0.5 * u_res) / min(u_res.x, u_res.y) * ${GLOW_SPREAD.toFixed(2)};
+  // Sphere-normalised coordinates: the sphere has radius 0.40 regardless of where it sits on screen.
+  float2 uv = (xy - u_center) / u_radius * 0.40;
   float dist = length(uv);
   float t = u_time;
 
   float radius = 0.40 + u_level * 0.03 * (1.0 - u_reduced);
   // Crisp anti-aliased disc: the orb IS a sphere; the clouds live inside it.
-  float px = ${GLOW_SPREAD.toFixed(2)} / min(u_res.x, u_res.y);
+  float px = 0.40 / u_radius;
   float mask = 1.0 - smoothstep(radius - px, radius + px, dist);
 
   // Sphere coordinates: fake z and normal, so wisps wrap around the ball instead of lying flat.
@@ -128,7 +126,24 @@ const compiled = Skia.RuntimeEffect.Make(SKSL);
 if (!compiled) throw new Error("VoiceOrb: shader failed to compile");
 const effect = compiled;
 
-export function VoiceOrb({ level, paused, size = 200 }: { level: SharedValue<number>; paused: boolean; size?: number }) {
+/**
+ * Renders full-bleed: the Canvas fills the overlay and the sphere is placed at `center` (window
+ * px) with `size` diameter, so the glow can bleed across the whole screen and never meets a box
+ * edge. Mount it absolutely behind the UI; pass the orb's measured centre.
+ */
+export function VoiceOrb({
+  level,
+  paused,
+  size = 200,
+  center,
+  viewport,
+}: {
+  level: SharedValue<number>;
+  paused: boolean;
+  size?: number;
+  center: { x: number; y: number };
+  viewport: { width: number; height: number };
+}) {
   const reduced = useReducedMotion();
   const clock = useClock();
   const pausedV = useSharedValue(paused ? 1 : 0);
@@ -143,9 +158,8 @@ export function VoiceOrb({ level, paused, size = 200 }: { level: SharedValue<num
     pausedV.value = withTiming(paused ? 1 : 0, { duration: 320, easing: Easing.out(Easing.cubic) });
   }, [paused, pausedV]);
 
-  // The canvas is wider than the sphere so the reflector glow has room to fade to nothing.
-  const canvas = Math.round(size * GLOW_SPREAD);
-  const res = useMemo(() => [canvas, canvas], [canvas]);
+  const centerU = useMemo(() => [center.x, center.y], [center.x, center.y]);
+  const radiusPx = size / 2;
   const reducedV = reduced ? 1 : 0;
   const uniforms = useDerivedValue(() => {
     const now = clock.value / 1000;
@@ -160,14 +174,15 @@ export function VoiceOrb({ level, paused, size = 200 }: { level: SharedValue<num
     return {
       u_time: phase.value,
       u_level: lvl.value,
-      u_res: res,
+      u_center: centerU,
+      u_radius: radiusPx,
       u_paused: pausedV.value,
       u_reduced: reducedV,
     };
-  }, [res, reducedV]);
+  }, [centerU, radiusPx, reducedV]);
 
   return (
-    <Canvas style={{ width: canvas, height: canvas }}>
+    <Canvas pointerEvents="none" style={{ position: "absolute", left: 0, top: 0, width: viewport.width, height: viewport.height }}>
       <Fill>
         <Shader source={effect} uniforms={uniforms} />
       </Fill>
