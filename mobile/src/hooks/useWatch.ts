@@ -36,10 +36,32 @@ export function useWatch(session: string | undefined) {
   const retry = useRef(0);
   const stopped = useRef(false);
   const logRef = useRef("");
+  // True when the last server snapshot carried NO log (stopped/missing box) and we kept the old text
+  // on screen instead. The server's offset is 0 then, so its next `append` is the whole log — it must
+  // REPLACE our stale copy, not extend it.
+  const stale = useRef(false);
 
   const setLogBoth = (updater: (prev: string) => string) => {
     logRef.current = updater(logRef.current);
     setLog(logRef.current);
+  };
+
+  /**
+   * Apply a full snapshot. A sleeping box answers with boxStatus "stopped" and a booting one with
+   * "missing" — both carry an EMPTY log because the controller will not exec into them. Replacing the
+   * transcript with that blank wiped the thread for the whole sleep→wake→resume window and retired
+   * optimistic echoes against an empty log, so the message you just sent vanished until the box was
+   * execable again (minutes). Keep what is on screen; the next real log replaces it.
+   */
+  const applySnapshot = (snap: WatchSnapshot) => {
+    const { log: l, ...rest } = snap;
+    setMeta(rest);
+    if (!l && logRef.current && (rest.boxStatus === "stopped" || rest.boxStatus === "missing")) {
+      stale.current = true;
+      return;
+    }
+    stale.current = false;
+    setLogBoth(() => l);
   };
 
   // Set when the box goes terminal/asleep; a later "alive again" poll result
@@ -53,12 +75,10 @@ export function useWatch(session: string | undefined) {
       if (stopped.current) return;
       try {
         const snap = await api.watch(session);
-        const { log: l, ...rest } = snap;
-        setMeta(rest);
-        setLogBoth(() => l);
+        applySnapshot(snap);
         setGone(false);
         // Case-insensitive: watch.json says "running", fleet.json says "Running".
-        if (/^running$/i.test(rest.boxStatus ?? "") && (rest.runState === "running" || rest.runState === "waiting")) {
+        if (/^running$/i.test(snap.boxStatus ?? "") && (snap.runState === "running" || snap.runState === "waiting")) {
           if (pollTimer.current) clearTimeout(pollTimer.current);
           pollTimer.current = null;
           offset.current = undefined; // resnapshot: the log may have been replaced across the wake
@@ -71,15 +91,20 @@ export function useWatch(session: string | undefined) {
       pollTimer.current = setTimeout(poll, DONE_POLL_MS);
     };
     void poll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session]);
 
   const connect = useCallback(() => {
     if (!session || stopped.current) return;
     handle.current?.close();
+    // `tail` proves the offset still points where we think inside the server's sliding log window;
+    // on mismatch the server sends the full log instead of splicing an unrelated suffix onto ours.
+    const from = offset.current && !stale.current ? offset.current : undefined;
+    const tail = from && logRef.current ? `&tail=${encodeURIComponent(logRef.current.slice(-256))}` : "";
     handle.current = openSse(
-      `/watch.sse?box=${encodeURIComponent(session)}${offset.current ? `&from=${offset.current}` : ""}`,
+      `/watch.sse?box=${encodeURIComponent(session)}${from ? `&from=${from}${tail}` : ""}`,
       {
-        lastEventId: offset.current,
+        lastEventId: from,
         onFrame: (f) => {
           setConnected(true);
           retry.current = 0;
@@ -91,9 +116,14 @@ export function useWatch(session: string | undefined) {
             case "snapshot": {
               try {
                 const d = JSON.parse(f.data) as { meta: Omit<WatchSnapshot, "log">; log: string; from: number };
-                setMeta(d.meta);
                 // A resume (from>0) delivers only the missed tail; a fresh open replaces.
-                setLogBoth((prev) => (d.from > 0 ? prev.slice(0, d.from) + (d.log ?? "") : d.log ?? ""));
+                if (d.from > 0) {
+                  setMeta(d.meta);
+                  stale.current = false;
+                  setLogBoth((prev) => prev.slice(0, d.from) + (d.log ?? ""));
+                } else {
+                  applySnapshot({ ...d.meta, log: d.log ?? "" });
+                }
               } catch {
                 /* malformed snapshot — wait for the next frame */
               }
@@ -102,7 +132,9 @@ export function useWatch(session: string | undefined) {
             case "append": {
               try {
                 const { chunk } = JSON.parse(f.data) as { chunk: string };
-                setLogBoth((prev) => prev + chunk);
+                const replace = stale.current;
+                stale.current = false;
+                setLogBoth((prev) => (replace ? chunk : prev + chunk));
               } catch {
                 /* ignore */
               }
@@ -111,7 +143,13 @@ export function useWatch(session: string | undefined) {
             case "reset": {
               try {
                 const { chunk } = JSON.parse(f.data) as { chunk: string };
-                setLogBoth(() => chunk);
+                // An empty reset is the box going to sleep (or a boot gap) — same rule as a blank
+                // snapshot: keep the transcript, replace on the next real bytes.
+                if (!chunk && logRef.current) stale.current = true;
+                else {
+                  stale.current = false;
+                  setLogBoth(() => chunk);
+                }
               } catch {
                 /* ignore */
               }
@@ -163,17 +201,20 @@ export function useWatch(session: string | undefined) {
     // Fetch the snapshot immediately over plain GET: for a sleeping (stopped)
     // box the SSE stream may error without ever delivering meta, and the
     // caller needs boxStatus to decide to wake it.
+    stale.current = false;
     api
       .watch(session)
       .then((snap) => {
-        const { log: l, ...rest } = snap;
-        setMeta((m) => m ?? rest);
         // The fresh server log wins over the cache SEED: for a reused name (warm claim, recreate)
         // the cached log is a previous run's transcript, and `prev || l` kept it on screen whenever
         // the SSE snapshot never arrived (the sleeping-box path). But this GET races the SSE
-        // snapshot — if live frames already replaced the seed, leave them alone; and keep the seed
-        // when the server returned nothing (the instant-paint blip).
-        setLogBoth((prev) => (prev === seedLog && l ? l : prev));
+        // snapshot — if live frames already replaced the seed, leave them alone.
+        if (logRef.current !== seedLog) {
+          const { log: _l, ...rest } = snap;
+          setMeta((m) => m ?? rest);
+          return;
+        }
+        applySnapshot(snap);
       })
       .catch((e) => {
         if ((e as { status?: number }).status === 404) setGone(true);
@@ -204,13 +245,11 @@ export function useWatch(session: string | undefined) {
   const refresh = useCallback(async () => {
     if (!session) return;
     try {
-      const snap = await api.watch(session);
-      const { log: l, ...rest } = snap;
-      setMeta(rest);
-      setLogBoth(() => l);
+      applySnapshot(await api.watch(session));
     } catch {
       /* transient */
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session]);
 
   return { meta, log, connected, gone, refresh };
