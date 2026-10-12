@@ -157,10 +157,13 @@ export function VoiceOverlay({ open, onDone, onCancel }: { open: boolean; onDone
           </PressScale>
         </View>
 
+        {/* Text anchors at the TOP of the screen: bottom-justified, the placeholder and the first
+            phrases sat inside the orb's glow. Long dictation still grows downward and auto-scrolls;
+            the bottom padding keeps the last line clear of the glow. */}
         <ScrollView
           ref={scroll}
           style={{ flex: 1 }}
-          contentContainerStyle={{ flexGrow: 1, justifyContent: "flex-end", paddingTop: 20, paddingBottom: 8 }}
+          contentContainerStyle={{ paddingTop: 28, paddingBottom: 48 }}
           showsVerticalScrollIndicator={false}
           onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: !isReducedMotion() })}
         >
