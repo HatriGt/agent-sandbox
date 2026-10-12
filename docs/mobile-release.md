@@ -209,7 +209,7 @@ mobile/
                              Stack defaults to platform push (auth/boot screens fade)
     index.tsx  welcome.tsx  sign-in.tsx  sign-up.tsx  connect-server.tsx  github-auth.tsx  booting.tsx
     (tabs)/                  home (inline composer, web Hub order) · fleet · activity (timeline + history)
-                             · settings (mirrors the web rail); _layout owns the pill tab bar + StatusLine.
+                             · settings (mirrors the web rail); _layout owns the pill tab bar.
                              The tabs are a material-top-tabs navigator (tabBarPosition bottom) on
                              react-native-pager-view, so the swipe between tabs is the native pager
     box/[name].tsx           the thread — SSE stream, ThreadHeader, composer, docks, inspector
@@ -219,7 +219,7 @@ mobile/
   src/
     components/              BoxCard, Composer, TranscriptView, TurnRail, PlanBoard,
                              QuestionCard, OutcomeCard, DigestCard, WakingCard, HistoryList,
-                             StatusLine, Toasts, EmptyFleet, DiffText, MarkdownLite, AnimatedSplash
+                             Toasts, EmptyFleet, DiffText, MarkdownLite, AnimatedSplash
       thread/                ThreadHeader, RunInspectorSheet
       sheets/                BoxActionsSheet, ChangesSheet, PrSheet
       ui/                    AppText(T), Button, ArmButton, Card, Field, Icon, Sheet, SwipeRow, Toggle,

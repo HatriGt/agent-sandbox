@@ -9,8 +9,6 @@ import { composeTask } from "@/state/composerFocus";
 import { useAuth } from "@/state/auth";
 import { useTheme } from "@/theme/ThemeContext";
 import { Icon, type IconName } from "@/components/ui/Icon";
-import { useFleet } from "@/hooks/useFleet";
-import { StatusLine } from "@/components/StatusLine";
 
 // Tabs on a native pager (react-native-pager-view): the swipe is the platform's own - the scene
 // is under the finger from the first pixel, flings and settles natively, and can never park
@@ -79,13 +77,13 @@ function TabItem({
   );
 }
 
-const STATUS_H = 22;
+/** In-flow height the bar reserves under the floating pill (the pill itself is absolute). */
+const BAR_H = 22;
 
-/** Floating pill tab bar with a raised center "New" action, over the fleet status strip. */
+/** Floating pill tab bar with a raised center "New" action. */
 function PillTabBar({ state, navigation }: MaterialTopTabBarProps) {
   const { palette, dark } = useTheme();
   const insets = useSafeAreaInsets();
-  const fleet = useFleet();
   const left = TABS.slice(0, 2);
   const right = TABS.slice(2);
 
@@ -96,7 +94,7 @@ function PillTabBar({ state, navigation }: MaterialTopTabBarProps) {
 
   return (
     <View pointerEvents="box-none" style={{ paddingBottom: insets.bottom, backgroundColor: palette.card }}>
-      <View pointerEvents="box-none" style={{ position: "absolute", left: 0, right: 0, bottom: insets.bottom + STATUS_H + 10 }}>
+      <View pointerEvents="box-none" style={{ position: "absolute", left: 0, right: 0, bottom: insets.bottom + BAR_H + 10 }}>
       <View
         style={{
           marginHorizontal: 16,
@@ -142,9 +140,7 @@ function PillTabBar({ state, navigation }: MaterialTopTabBarProps) {
         {right.map(item)}
       </View>
       </View>
-      <View style={{ height: STATUS_H }}>
-        <StatusLine snap={fleet.snap} error={fleet.error} />
-      </View>
+      <View style={{ height: BAR_H }} />
     </View>
   );
 }
