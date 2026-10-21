@@ -10,16 +10,28 @@
  *      pull_request_review_comment, and PR issue comments addressed to the agent send it back to
  *      the same branch with every comment (file/line context). When it finishes, the controller
  *      replies on GitHub and resolves the threads.
+ *   3. Answer `/agent …` anywhere: a PR conversation comment that starts with the command (or
+ *      mentions @agent) is a *command* — on ANY pull request, not only agent-opened ones. The
+ *      engine adopts the PR for the owner the first time, runs the request on the PR's branch and
+ *      posts the agent's reply as a comment; every later `/agent` on that PR is a new turn of the
+ *      same conversation. Commands reach the engine from the owner's follow-up webhook, from an
+ *      automation's webhook, or from the activity poller (src/agent-mentions.ts), which watches the
+ *      owner's own GitHub events feed — so no webhook is needed for "any repo".
  *
- * Loop guard: MAX_ATTEMPTS per PR per kind, one CI follow-up per head SHA, one review follow-up per
- * review / comment, never while another follow-up on the same PR is running, never for a bot sender
- * or a comment carrying our own marker (replies are posted with the owner's token, so they look
- * like the owner — the marker is what tells them apart).
+ * Loop guard: MAX_ATTEMPTS per PR per kind (MAX_COMMANDS for commands — each is a deliberate ask,
+ * not a loop), one CI follow-up per head SHA, one review follow-up per review / comment, never
+ * while another follow-up on the same PR is running, never for a bot sender or a comment carrying
+ * our own marker (replies are posted with the owner's token, so they look like the owner — the
+ * marker is what tells them apart).
  */
 import { escapeValue } from "./triggers.js";
 
-export type FollowupKind = "ci" | "review";
+export type FollowupKind = "ci" | "review" | "command";
 export const MAX_ATTEMPTS = 3;
+/** Commands (`/agent …`) per PR: a conversation, not a retry loop, so the cap only stops a runaway. */
+export const MAX_COMMANDS = 50;
+/** The command a PR comment starts with to address the agent. */
+export const AGENT_COMMAND = "/agent";
 /** Every comment the controller posts ends with this; an event whose body carries it is ours. */
 export const FOLLOWUP_MARKER = "<!-- agent-sandbox:followup -->";
 
@@ -60,7 +72,20 @@ export interface ReviewComment {
   url?: string;
 }
 
-export type Signal = CiSignal | ReviewSignal;
+/** `/agent …` in a PR conversation: one explicit ask from a trusted human, answered in a reply. */
+export interface CommandSignal {
+  kind: "command";
+  repo: string;
+  prs: number[];
+  /** Dedupe unit: the comment that carried the command. */
+  unit: { type: "issue_comment"; id: number };
+  author: string;
+  /** The ask with the command prefix removed (may be empty: "/agent" alone = look at the PR). */
+  command: string;
+  comment: ReviewComment;
+}
+
+export type Signal = CiSignal | ReviewSignal | CommandSignal;
 export type Classified = { ok: true; signal: Signal } | { ok: false; reason: string };
 
 /** Events this module reacts to (the receiver routes them here before a trigger's own match). */
@@ -70,10 +95,18 @@ const prNums = (a: unknown): number[] =>
   Array.isArray(a) ? a.map((p) => Number((p as { number?: unknown })?.number)).filter((n) => Number.isInteger(n) && n > 0) : [];
 
 /** Is this issue comment addressed to the agent? `/agent …` or an `@agent` mention. */
-export function addressedToAgent(body: string, command = "/agent"): boolean {
+export function addressedToAgent(body: string, command = AGENT_COMMAND): boolean {
   const b = body.trim();
   if (b === command || b.startsWith(command + " ") || b.startsWith(command + "\n")) return true;
   return /(^|\s)@agent(-sandbox)?\b/i.test(b);
+}
+
+/** The ask inside an addressed comment: the leading command / mention stripped, whitespace trimmed. */
+export function commandOf(body: string, command = AGENT_COMMAND): string {
+  const b = body.trim();
+  if (b === command) return "";
+  if (b.startsWith(command + " ") || b.startsWith(command + "\n")) return b.slice(command.length).trim();
+  return b.replace(/(^|\s)@agent(-sandbox)?\b\s*/i, "$1").trim();
 }
 
 /**
@@ -187,12 +220,13 @@ export function classifyEvent(eventHeader: string, payload: unknown): Classified
       return {
         ok: true,
         signal: {
-          kind: "review",
+          kind: "command",
           repo,
           prs: prNums([p.issue]),
           unit: { type: "issue_comment", id: Number(c.id) },
           author,
-          comments: [{ id: Number(c.id), type: "issue", author, body, ...(c.html_url ? { url: String(c.html_url) } : {}) }],
+          command: commandOf(body),
+          comment: { id: Number(c.id), type: "issue", author, body, ...(c.html_url ? { url: String(c.html_url) } : {}) },
         },
       };
     }
@@ -237,14 +271,16 @@ export type Admit = { ok: true; attempt: number } | { ok: false; reason: string;
 
 /** Loop guard + staleness. */
 export function admitFollowup(s: Signal, g: GuardState): Admit {
-  if (!g.enabled) return { ok: false, code: "disabled", reason: s.kind === "ci" ? "Keep my PRs green is off" : "Address review comments is off" };
+  if (!g.enabled)
+    return { ok: false, code: "disabled", reason: s.kind === "ci" ? "Keep my PRs green is off" : s.kind === "review" ? "Address review comments is off" : "Answer /agent on any PR is off" };
   if (!g.pr.open) return { ok: false, code: "ignored", reason: "the PR is closed" };
   if (g.pr.fork) return { ok: false, code: "ignored", reason: "the PR head is a fork" };
-  if (g.seen) return { ok: false, code: "dedupe", reason: s.kind === "ci" ? `already followed up on ${s.headSha.slice(0, 7)}` : "already followed up on this feedback" };
+  if (g.seen) return { ok: false, code: "dedupe", reason: s.kind === "ci" ? `already followed up on ${s.headSha.slice(0, 7)}` : s.kind === "review" ? "already followed up on this feedback" : "already answered this comment" };
   // A failure on a commit that is no longer the head is stale: a newer push is being checked.
   if (s.kind === "ci" && s.headSha && g.pr.headSha && s.headSha !== g.pr.headSha) return { ok: false, code: "ignored", reason: `stale: ${s.headSha.slice(0, 7)} is no longer the PR head` };
   if (g.running) return { ok: false, code: "limit", reason: "a follow-up on this PR is already running" };
-  if (g.attempts >= MAX_ATTEMPTS) return { ok: false, code: "limit", reason: `gave up after ${MAX_ATTEMPTS} follow-up attempts on this PR` };
+  const cap = s.kind === "command" ? MAX_COMMANDS : MAX_ATTEMPTS;
+  if (g.attempts >= cap) return { ok: false, code: "limit", reason: `gave up after ${cap} ${s.kind === "command" ? "commands" : "follow-up attempts"} on this PR` };
   return { ok: true, attempt: g.attempts + 1 };
 }
 
@@ -348,6 +384,54 @@ export function reviewTask(pr: PrRef, comments: ReviewComment[], attempt: number
   return lines.join("\n");
 }
 
+/** Markers the agent wraps its PR reply in; the controller posts what is between them. */
+export const REPLY_OPEN = "REPLY-TO-PR:";
+export const REPLY_CLOSE = "END-REPLY";
+const MAX_REPLY = 6000;
+const REPLY_PLACEHOLDER = "<what you did or found, for the people reading the PR>";
+
+/**
+ * The task for a `/agent …` command: do what was asked on the PR's branch, and write the reply the
+ * controller posts back on the PR. `turn` is this PR's n-th command (shown so the agent knows the
+ * conversation has history on GitHub).
+ */
+export function commandTask(pr: PrRef, c: ReviewComment, command: string, turn: number): string {
+  const ask = command.trim();
+  return [
+    `@${escapeValue(c.author)} asked you something on pull request ${pr.repo}#${pr.number}${pr.title ? ` ("${escapeValue(pr.title)}")` : ""} — comment ${c.id}${turn > 1 ? `, the ${ord(turn)} request on this PR` : ""}.`,
+    ``,
+    SAME_BRANCH(pr),
+    ``,
+    UNTRUSTED,
+    ``,
+    `### The request`,
+    ask ? fence(ask) : `_(just "${AGENT_COMMAND}" — look at the PR: read its description and diff, review it, and report what you find)_`,
+    ``,
+    `Start from the PR itself: \`gh pr view ${pr.number} --comments\` and \`gh pr diff ${pr.number}\` give the description, the conversation so far (earlier requests and your earlier replies) and the change.`,
+    `If the request needs code changes, make them, run the relevant checks, commit on this branch and push. If it is a question or a review, answer it — do not change code nobody asked for.`,
+    `If it cannot or should not be done, say so and why.`,
+    ``,
+    `Your reply is posted on the PR as a comment. End your final message with exactly this block (Markdown inside, as long as it needs to be, no code fence around it):`,
+    `${REPLY_OPEN}`,
+    REPLY_PLACEHOLDER,
+    `${REPLY_CLOSE}`,
+  ].join("\n");
+}
+
+/** The LAST REPLY-TO-PR … END-REPLY block in the agent's output (its final message comes last). */
+export function parseReply(log: string): string | undefined {
+  const open = log.lastIndexOf(REPLY_OPEN);
+  if (open < 0) return undefined;
+  const from = open + REPLY_OPEN.length;
+  const close = log.indexOf(REPLY_CLOSE, from);
+  let body = (close < 0 ? log.slice(from) : log.slice(from, close)).replace(/^[ \t]*\r?\n/, "").trimEnd();
+  // A log-level fence the agent wrapped the block in anyway.
+  body = body.replace(/^```\w*\r?\n([\s\S]*?)\r?\n```$/, "$1").trim();
+  // The task's own example block, echoed into a log, is not a reply.
+  if (!body || body === REPLY_PLACEHOLDER) return undefined;
+  return body.length > MAX_REPLY ? body.slice(0, MAX_REPLY) + "…" : body;
+}
+
 /** `ADDRESSED 123: renamed foo` lines from the agent's final output. Last word wins per id. */
 export function parseAddressed(log: string): Map<number, string> {
   const out = new Map<number, string>();
@@ -371,6 +455,10 @@ export interface FollowupView {
 
 /** "Fixed failing check `test` · 2nd attempt" — the line web and mobile show on the outcome. */
 export function followupLine(f: Pick<FollowupView, "kind" | "subject" | "attempt" | "state">): string {
+  if (f.kind === "command") {
+    const verb = f.state === "running" ? "Answering" : f.state === "done" ? "Answered" : "Could not answer";
+    return `${verb} ${f.subject}${f.attempt > 1 ? ` · ${ord(f.attempt)} request` : ""}`;
+  }
   const verb =
     f.kind === "ci"
       ? f.state === "running" ? "Fixing" : f.state === "done" ? "Fixed" : "Tried to fix"
@@ -380,6 +468,10 @@ export function followupLine(f: Pick<FollowupView, "kind" | "subject" | "attempt
 
 export function subjectOf(s: Signal, commentCount?: number): string {
   if (s.kind === "ci") return `failing check \`${s.check.name.slice(0, 60)}\``;
+  if (s.kind === "command") {
+    const ask = s.command.replace(/\s+/g, " ").trim();
+    return ask ? `@${s.author}: “${ask.length > 60 ? ask.slice(0, 57) + "…" : ask}”` : `@${s.author}'s ${AGENT_COMMAND}`;
+  }
   const n = commentCount ?? s.comments.length;
   return n === 1 ? "1 review comment" : `${n} review comments`;
 }
@@ -400,10 +492,31 @@ export function summaryComment(f: { kind: FollowupKind; subject: string; attempt
     `> ${escapeValue(f.headline || (f.state === "done" ? "finished" : "failed"))}`,
   ];
   if (f.kind === "review" && f.total) lines.push(``, `Replied on ${f.addressed ?? 0} of ${f.total} comment${f.total === 1 ? "" : "s"}.`);
-  if (f.attempt >= MAX_ATTEMPTS) lines.push(``, `This was the last automatic attempt (${MAX_ATTEMPTS}) on this PR; further ${f.kind === "ci" ? "failures" : "feedback"} will not start a run.`);
+  if (f.kind !== "command" && f.attempt >= MAX_ATTEMPTS) lines.push(``, `This was the last automatic attempt (${MAX_ATTEMPTS}) on this PR; further ${f.kind === "ci" ? "failures" : "feedback"} will not start a run.`);
   if (f.runUrl) lines.push(``, `[Open the run](${f.runUrl})`);
   lines.push(FOLLOWUP_MARKER);
   return lines.join("\n");
+}
+
+/**
+ * The PR comment answering a `/agent …` command: the agent's own reply block when it wrote one,
+ * else the run's headline. Quoting the asker keeps a long conversation readable on GitHub.
+ */
+export function commandReply(f: { reply?: string; headline: string; state: "done" | "failed"; author: string; runUrl?: string }): string {
+  const lines: string[] = [];
+  if (f.reply) lines.push(f.reply);
+  else lines.push(`@${escapeValue(f.author)} ${f.state === "done" ? escapeValue(f.headline || "done — but the run left no reply.") : `the run failed before it could reply${f.headline ? `: ${escapeValue(f.headline)}` : "."}`}`);
+  lines.push(``, `<sub>${f.state === "done" ? "Agent Sandbox" : "Agent Sandbox · run failed"}${f.runUrl ? ` · [open the run](${f.runUrl})` : ""} · reply with \`${AGENT_COMMAND} …\` to continue</sub>`);
+  lines.push(FOLLOWUP_MARKER);
+  return lines.join("\n");
+}
+
+/** Posted when a command arrives while another follow-up on the same PR is still running. */
+export function busyReply(author: string, runUrl?: string): string {
+  return [
+    `@${escapeValue(author)} still working on the previous request on this PR${runUrl ? ` ([open the run](${runUrl}))` : ""} — comment \`${AGENT_COMMAND} …\` again once it has replied.`,
+    FOLLOWUP_MARKER,
+  ].join("\n");
 }
 
 /* ───────────────────────────── settings ───────────────────────────── */
@@ -411,19 +524,27 @@ export function summaryComment(f: { kind: FollowupKind; subject: string; attempt
 export interface FollowupPrefs {
   keepGreen: boolean;
   addressReviews: boolean;
+  /** `/agent …` on any PR the owner can push to (not only agent-opened ones), via the activity poller or a webhook. */
+  commandAnywhere: boolean;
 }
-export const DEFAULT_PREFS: FollowupPrefs = { keepGreen: true, addressReviews: true };
+export const DEFAULT_PREFS: FollowupPrefs = { keepGreen: true, addressReviews: true, commandAnywhere: true };
 
 export function normalizePrefs(raw: unknown): FollowupPrefs {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   return {
     keepGreen: typeof r.keepGreen === "boolean" ? r.keepGreen : DEFAULT_PREFS.keepGreen,
     addressReviews: typeof r.addressReviews === "boolean" ? r.addressReviews : DEFAULT_PREFS.addressReviews,
+    commandAnywhere: typeof r.commandAnywhere === "boolean" ? r.commandAnywhere : DEFAULT_PREFS.commandAnywhere,
   };
 }
 
-/** An automation's explicit setting wins; unset falls back to the owner's default. */
-export function enabledFor(kind: FollowupKind, prefs: FollowupPrefs, spec?: { keepGreen?: boolean; addressReviews?: boolean }): boolean {
+/**
+ * An automation's explicit setting wins; unset falls back to the owner's default. A command on an
+ * agent-opened PR rides on "Address review comments" (as before); on an adopted PR it needs
+ * "Answer /agent on any PR".
+ */
+export function enabledFor(kind: FollowupKind, prefs: FollowupPrefs, spec?: { keepGreen?: boolean; addressReviews?: boolean }, adopted = false): boolean {
   if (kind === "ci") return spec?.keepGreen ?? prefs.keepGreen;
+  if (kind === "command" && adopted) return prefs.commandAnywhere;
   return spec?.addressReviews ?? prefs.addressReviews;
 }

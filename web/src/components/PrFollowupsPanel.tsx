@@ -6,8 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 
 /**
- * "Keep my PRs green / Address review comments": the per-user defaults for PR follow-ups (both ON),
- * plus the one GitHub webhook that feeds them. Automations can override either toggle per automation.
+ * "Keep my PRs green / Address review comments / Answer /agent on any PR": the per-user defaults for
+ * PR follow-ups (all ON), plus the one GitHub webhook that feeds the first two. The third needs no
+ * webhook: the controller watches the account's own GitHub activity. Automations can override the
+ * first two per automation.
  */
 export function PrFollowupsPanel() {
   const [prefs, setPrefs] = React.useState<PrFollowupPrefs | null>(null);
@@ -69,9 +71,21 @@ export function PrFollowupsPanel() {
           </span>
           <Switch size="sm" checked={prefs.addressReviews} onCheckedChange={(v) => void change({ addressReviews: v })} />
         </label>
+        <label className="flex items-center justify-between gap-3">
+          <span className="text-meta">
+            Answer “/agent …” on any PR
+            <span className="text-faint block text-micro">
+              Comment <code>/agent &lt;ask&gt;</code> on any pull request in any repo your GitHub account can push to — no webhook needed. It works on the PR’s branch
+              and replies on the PR; comment again to continue. Typically within a minute.
+            </span>
+          </span>
+          <Switch size="sm" checked={prefs.commandAnywhere} onCheckedChange={(v) => void change({ commandAnywhere: v })} />
+        </label>
         <div className="border-t pt-3 text-micro">
           <p className="text-muted-foreground">
-            GitHub automations already feed this. For other repos, add a webhook (content type JSON) sending: {(hook?.events ?? ["check_run", "check_suite", "workflow_run", "pull_request_review", "pull_request_review_comment", "issue_comment"]).join(", ")}.
+            CI results and review comments need a webhook. GitHub automations already feed this; for other repos, add a webhook (content type JSON) sending:{" "}
+            {(hook?.events ?? ["check_run", "check_suite", "workflow_run", "pull_request_review", "pull_request_review_comment", "issue_comment"]).join(", ")}. A webhook also lets
+            collaborators’ “/agent” comments through.
           </p>
           {fresh ? (
             <div className="mt-2 flex flex-col gap-1.5">

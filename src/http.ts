@@ -103,6 +103,7 @@ import { existsSync } from "node:fs";
 import { withStartedBy, currentStartedBy, recordStartedBy, startedByOf, type StartedBy } from "./started-by.js";
 import { makeDispatcher, type StartRunInput } from "./trigger-dispatch.js";
 import { GhRateLimitError, makeRepoWatcher, rateInfoOf } from "./repo-watch.js";
+import { makeMentionWatcher } from "./agent-mentions.js";
 import { makeFollowupEngine, type GhRequest } from "./pr-followup-engine.js";
 import { registerFollowupRoutes } from "./pr-followup-routes.js";
 import { followupsForBox } from "./pr-followup-store.js";
@@ -3667,7 +3668,7 @@ const followups = makeFollowupEngine({
     const pseudo: TriggerRow = {
       id: f.pr.triggerId ?? `followup:${f.pr.repo}#${f.pr.number}`,
       owner: f.owner,
-      name: `${f.startedBy.followup === "ci" ? "Fix CI" : "Address review"} · ${f.pr.repo}#${f.pr.number}`,
+      name: `${f.startedBy.followup === "ci" ? "Fix CI" : f.startedBy.followup === "command" ? "/agent" : "Address review"} · ${f.pr.repo}#${f.pr.number}`,
       kind: "github",
       spec: {},
       repos: [f.startedBy.pr.repo],
@@ -3690,6 +3691,44 @@ const followups = makeFollowupEngine({
     };
     return startTriggerRun({ owner: f.owner, trigger: pseudo, task: f.task, repos: [{ repo: f.startedBy.pr.repo, ref: f.branch }], startedBy: f.startedBy });
   },
+});
+// `/agent …` on any PR (src/agent-mentions.ts): each stored GitHub account's own activity feed is
+// polled with its own token; PR comments the account wrote that address the agent go to the
+// follow-up engine, which adopts the PR and answers on it. No webhook, no repo list.
+const mentionWatcher = makeMentionWatcher({
+  db,
+  engine: followups,
+  log: (m) => console.error(m),
+  enabled: (owner) => loadFollowupPrefs(owner).commandAnywhere,
+  accounts: async () => {
+    const out: Array<{ owner: string; login: string }> = [];
+    const owners = [OPERATOR_OWNER, ...listUsers(db).map((u) => u.id)];
+    for (const owner of owners) {
+      try {
+        const store = await withOwner(owner, () => loadStore(cfg));
+        for (const a of Object.values(store.accounts)) if (a.login) out.push({ owner, login: a.login });
+      } catch {
+        /* an owner without a usable token store is simply not watched */
+      }
+    }
+    return out;
+  },
+  get: (owner, login, path, etag) =>
+    withOwner(owner, async () => {
+      const acc = (await loadStore(cfg)).accounts[login];
+      if (!acc) throw new Error(`no stored token for @${login}`);
+      const r = await fetch(`https://api.github.com${path}`, {
+        headers: { authorization: `Bearer ${acc.token}`, accept: "application/vnd.github+json", "user-agent": "agent-sandbox", ...(etag ? { "if-none-match": etag } : {}) },
+        signal: AbortSignal.timeout(15_000),
+      });
+      const rate = rateInfoOf(r.headers);
+      const pollRaw = Number(r.headers.get("x-poll-interval"));
+      const pollInterval = Number.isFinite(pollRaw) && pollRaw > 0 ? pollRaw : undefined;
+      if (r.status === 304) return { notModified: true as const, rate, ...(pollInterval ? { pollInterval } : {}) };
+      if (r.status === 403 || r.status === 429) throw new GhRateLimitError(r.status, rate, path.split("?")[0]);
+      if (!r.ok) throw new Error(`GitHub answered ${r.status} for ${path.split("?")[0]}`);
+      return { notModified: false as const, data: await r.json(), etag: r.headers.get("etag") ?? undefined, rate, ...(pollInterval ? { pollInterval } : {}) };
+    }),
 });
 registerFollowupRoutes(app, {
   db,
@@ -4307,6 +4346,7 @@ app.listen(cfg.httpPort, cfg.httpHost, () => {
   // Triggers: fire due schedules (the webhook and finish-edge sources call the dispatcher directly).
   dispatcher.start();
   repoWatcher.start();
+  mentionWatcher.start();
   // Cold-start nudge: without a baked snapshot every run pays the toolchain install in the box.
   if (!cfg.snapshot) {
     console.error(

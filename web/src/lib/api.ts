@@ -1300,6 +1300,8 @@ export interface RepoSetupsResponse {
 export interface PrFollowupPrefs {
   keepGreen: boolean;
   addressReviews: boolean;
+  /** `/agent …` on any PR the account can push to, via the activity poller — not only agent-opened PRs. */
+  commandAnywhere: boolean;
 }
 
 export interface RunOutcome {
@@ -1310,7 +1312,7 @@ export interface RunOutcome {
     prs: { url: string; repo: string; number: number }[];
     diff: { files: number; additions: number; deletions: number } | null;
     followedBy?: { box: string; archiveId: number | null } | null;
-    followups?: Array<{ box: string; kind: "ci" | "review"; subject: string; attempt: number; state: "running" | "done" | "failed"; archiveId: number | null; at: number; pr: { repo: string; number: number }; line?: string }>;
+    followups?: Array<{ box: string; kind: "ci" | "review" | "command"; subject: string; attempt: number; state: "running" | "done" | "failed"; archiveId: number | null; at: number; pr: { repo: string; number: number }; line?: string }>;
   };
   trust: {
     tests: { runner: string; passed: number; failed: number; skipped: number; source: "verify" | "trace" } | null;

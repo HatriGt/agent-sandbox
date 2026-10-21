@@ -65,7 +65,7 @@ export function registerFollowupRoutes(app: Express, c: FollowupRouteCtx): void 
     try {
       const prefs = normalizePrefs({ ...c.loadPrefs(owner), ...((req.body ?? {}) as object) });
       c.savePrefs(owner, prefs);
-      c.audit(owner, "followups.settings", { outcome: `green=${prefs.keepGreen} reviews=${prefs.addressReviews}` });
+      c.audit(owner, "followups.settings", { outcome: `green=${prefs.keepGreen} reviews=${prefs.addressReviews} anywhere=${prefs.commandAnywhere}` });
       res.json({ prefs });
     } catch (e) {
       c.failWith(res, e);
@@ -111,7 +111,8 @@ export function registerFollowupRoutes(app: Express, c: FollowupRouteCtx): void 
         return void res.status(400).json({ error: "deliveries must be JSON (content type application/json)" });
       }
       if (!claimDelivery(c.db, h.id, deliveryKeys(headers, raw), at)) return void res.json({ ok: true, duplicate: true });
-      const cl = c.engine.claims(h.owner, ev, payload);
+      // The owner's own hook adopts any PR a trusted commenter addressed with /agent (an automation's hook does not).
+      const cl = c.engine.claims(h.owner, ev, payload, { adopt: true });
       if (!cl.ok) {
         // Successes and green checks are the common case: only log what looked like follow-up material.
         if (FOLLOWUP_EVENTS.has(ev) && !/^check (run|suite) success|^workflow run success|neutral|skipped|in_progress|requested|queued/.test(cl.reason))
@@ -119,7 +120,7 @@ export function registerFollowupRoutes(app: Express, c: FollowupRouteCtx): void 
         return void res.status(202).json({ ok: true, ignored: cl.reason });
       }
       // Answer inside GitHub's 10 s; the start lands in the delivery log.
-      void c.engine.handle({ id: h.id, owner: h.owner }, ev, payload).catch((e) => {
+      void c.engine.handle({ id: h.id, owner: h.owner }, ev, payload, { adopt: true }).catch((e) => {
         logDelivery(c.db, h.id, { at, outcome: "failed", reason: "error", detail: (e as Error).message.slice(0, 200) });
       });
       res.status(202).json({ ok: true, accepted: true });

@@ -15,8 +15,8 @@ export type StartedBy =
   | { kind: "after"; parent: string }
   | { kind: "intake"; source: "email" | "slack"; from?: string }
   | { kind: "trigger"; triggerId: string; name: string; source: TriggerKind; event?: string; subject?: { kind: "issue" | "pr"; number: number; repo?: string }; /** chain: the box this run follows. */ parent?: string }
-  /** A PR follow-up (src/pr-followups.ts): back on the PR's branch after CI failed or review feedback. */
-  | { kind: "followup"; followup: "ci" | "review"; parent: string; pr: { repo: string; number: number }; attempt: number; subject: string; triggerId?: string };
+  /** A PR follow-up (src/pr-followups.ts): back on the PR's branch after CI failed, review feedback, or a `/agent …` command. `parent` is "" on a PR the agent did not open. */
+  | { kind: "followup"; followup: "ci" | "review" | "command"; parent: string; pr: { repo: string; number: number }; attempt: number; subject: string; triggerId?: string };
 
 const als = new AsyncLocalStorage<StartedBy>();
 export const withStartedBy = <T>(s: StartedBy, fn: () => T): T => als.run(s, fn);
@@ -56,7 +56,9 @@ export function describeStartedBy(s: StartedBy | undefined): string | undefined 
     case "trigger":
       return `${s.source} ${s.name}`;
     case "followup":
-      return `${s.followup === "ci" ? "CI follow-up" : "review follow-up"} on ${s.pr.repo}#${s.pr.number}${s.attempt > 1 ? ` (attempt ${s.attempt})` : ""}`;
+      return s.followup === "command"
+        ? `/agent on ${s.pr.repo}#${s.pr.number}${s.attempt > 1 ? ` (request ${s.attempt})` : ""}`
+        : `${s.followup === "ci" ? "CI follow-up" : "review follow-up"} on ${s.pr.repo}#${s.pr.number}${s.attempt > 1 ? ` (attempt ${s.attempt})` : ""}`;
     case "intake":
       return s.source === "email" ? "email to your inbox address" : "Slack";
   }

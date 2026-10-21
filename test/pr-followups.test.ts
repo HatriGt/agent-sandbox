@@ -2,11 +2,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { openMemoryDb } from "../src/db.ts";
 import {
-  addressedToAgent, admitFollowup, ciTask, classifyEvent, dedupeKey, enabledFor, excerptLog, FOLLOWUP_MARKER, followupLine, MAX_ATTEMPTS,
-  normalizePrefs, parseAddressed, reviewTask, summaryComment, type Signal,
+  addressedToAgent, admitFollowup, ciTask, classifyEvent, commandOf, commandReply, commandTask, dedupeKey, enabledFor, excerptLog, FOLLOWUP_MARKER, followupLine,
+  MAX_ATTEMPTS, MAX_COMMANDS, normalizePrefs, parseAddressed, parseReply, REPLY_CLOSE, REPLY_OPEN, reviewTask, subjectOf, summaryComment, type Signal,
 } from "../src/pr-followups.ts";
 import { makeFollowupEngine, type GhRequest } from "../src/pr-followup-engine.ts";
-import { followupsForBox, getAgentPr, hookDeliveries, rotateHook } from "../src/pr-followup-store.ts";
+import { followupsForBox, getAgentPr, hookDeliveries, mentionsSourceId, rotateHook } from "../src/pr-followup-store.ts";
+import { isAgentCommand, makeMentionWatcher, payloadOf } from "../src/agent-mentions.ts";
+import { GhRateLimitError } from "../src/repo-watch.ts";
 import type { RunDigest } from "../src/digest.ts";
 
 const REPO = "acme/app";
@@ -52,11 +54,20 @@ test("classify: reviews, review comments and addressed issue comments → review
   assert.ok(rc.ok && rc.signal.kind === "review");
   // Shares the review's dedupe unit: the review event and its comment events are one follow-up.
   assert.equal(dedupeKey(rc.ok ? rc.signal : (null as never)), "review:900");
-  const ic = (body: string) => classifyEvent("issue_comment", { action: "created", repository: repo, sender: user, issue: { number: 5, pull_request: {} }, comment: { id: 12, body, author_association: "OWNER", user } });
+  const ic = (body: string, assoc = "OWNER") =>
+    classifyEvent("issue_comment", { action: "created", repository: repo, sender: user, issue: { number: 5, pull_request: {} }, comment: { id: 12, body, author_association: assoc, user } });
   assert.equal(ic("looks good").ok, false);
-  assert.equal(ic("/agent please add a test").ok, true);
-  assert.equal(ic("hey @agent can you fix the lint").ok, true);
+  // An addressed PR comment is a command: the ask with the prefix stripped, the comment kept for the reply.
+  const cmd = ic("/agent please add a test");
+  assert.ok(cmd.ok && cmd.signal.kind === "command" && cmd.signal.command === "please add a test" && cmd.signal.comment.id === 12 && cmd.signal.author === "alice");
+  assert.equal(dedupeKey(cmd.ok ? cmd.signal : (null as never)), "issue_comment:12");
+  const mention = ic("hey @agent can you fix the lint");
+  assert.ok(mention.ok && mention.signal.kind === "command" && mention.signal.command === "hey can you fix the lint");
+  assert.equal(ic("/agent do it", "NONE").ok, false);
+  assert.equal(classifyEvent("issue_comment", { action: "created", repository: repo, sender: user, issue: { number: 5 }, comment: { id: 12, body: "/agent", author_association: "OWNER", user } }).ok, false);
   assert.ok(addressedToAgent("/agent") && !addressedToAgent("/agents"));
+  assert.equal(commandOf("/agent"), "");
+  assert.equal(commandOf("/agent\nfix the build"), "fix the build");
 });
 
 const ciSig = (sha = "sha1"): Signal => ({ kind: "ci", repo: REPO, prs: [5], headSha: sha, headBranch: "b", check: { source: "check_run", id: 1, name: "test", conclusion: "failure" } });
@@ -72,14 +83,23 @@ test("admit: loop guard, dedupe per sha, stale sha, closed, fork, disabled", () 
   assert.equal((admitFollowup(ciSig(), { ...base, pr: { ...base.pr, open: false } }) as { code: string }).code, "ignored");
   assert.equal((admitFollowup(ciSig(), { ...base, pr: { ...base.pr, fork: true } }) as { code: string }).code, "ignored");
   assert.equal((admitFollowup(ciSig(), { ...base, enabled: false }) as { code: string }).code, "disabled");
+  // Commands are a conversation: the 3-attempt loop guard does not apply, only the runaway cap.
+  const cmd: Signal = { kind: "command", repo: REPO, prs: [5], unit: { type: "issue_comment", id: 12 }, author: "alice", command: "add a test", comment: { id: 12, type: "issue", author: "alice", body: "/agent add a test" } };
+  assert.deepEqual(admitFollowup(cmd, { ...base, attempts: MAX_ATTEMPTS }), { ok: true, attempt: MAX_ATTEMPTS + 1 });
+  assert.equal((admitFollowup(cmd, { ...base, attempts: MAX_COMMANDS }) as { code: string }).code, "limit");
+  assert.match((admitFollowup(cmd, { ...base, enabled: false }) as { reason: string }).reason, /any PR is off/);
 });
 
 test("prefs: default ON; an automation's explicit value wins", () => {
   const p = normalizePrefs(undefined);
-  assert.deepEqual(p, { keepGreen: true, addressReviews: true });
-  assert.equal(enabledFor("ci", { keepGreen: false, addressReviews: true }), false);
-  assert.equal(enabledFor("ci", { keepGreen: false, addressReviews: true }, { keepGreen: true }), true);
+  assert.deepEqual(p, { keepGreen: true, addressReviews: true, commandAnywhere: true });
+  assert.equal(enabledFor("ci", { ...p, keepGreen: false }), false);
+  assert.equal(enabledFor("ci", { ...p, keepGreen: false }, { keepGreen: true }), true);
   assert.equal(enabledFor("review", p, { addressReviews: false }), false);
+  // A command on an agent PR rides on "Address review comments"; on an adopted PR on "Answer /agent on any PR".
+  assert.equal(enabledFor("command", { ...p, addressReviews: false }), false);
+  assert.equal(enabledFor("command", { ...p, addressReviews: false }, undefined, true), true);
+  assert.equal(enabledFor("command", { ...p, commandAnywhere: false }, undefined, true), false);
 });
 
 test("log excerpt: strips ANSI/timestamps, centres on the last error, caps size", () => {
@@ -110,6 +130,18 @@ test("tasks: same branch, no new PR, untrusted framing, comment ids; ADDRESSED p
   assert.equal(m.get(11), "renamed x to y");
   assert.equal(m.get(12), "explained why not");
   assert.equal(parseAddressed(r).size, 0); // the task's own instructions never parse as an answer
+  const c = commandTask({ ...pr, title: "Add login" }, { id: 12, type: "issue", author: "alice", body: "/agent add a test for {{x}}" }, "add a test for {{x}}", 2);
+  assert.match(c, /@alice asked you something on pull request acme\/app#5 \("Add login"\) — comment 12, the 2nd request/);
+  assert.match(c, /branch `agent\/fix`/);
+  assert.doesNotMatch(c, /\{\{x\}\}/);
+  assert.match(c, new RegExp(`^${REPLY_OPEN}$`, "m"));
+  assert.equal(parseReply(c), undefined); // the instructions' placeholder is not a reply
+  const bare = commandTask(pr, { id: 12, type: "issue", author: "alice", body: "/agent" }, "", 1);
+  assert.match(bare, /just "\/agent"/);
+  const log = `${c}\n…work…\n${REPLY_OPEN}\nAdded \`login.test.ts\` covering the happy path.\n\n- pushed 1 commit\n${REPLY_CLOSE}\ntrailing harness noise`;
+  assert.equal(parseReply(log), "Added `login.test.ts` covering the happy path.\n\n- pushed 1 commit");
+  assert.equal(parseReply(`${REPLY_OPEN}\n\`\`\`\nfenced anyway\n\`\`\`\n${REPLY_CLOSE}`), "fenced anyway");
+  assert.equal(parseReply(`${REPLY_OPEN}\nno close marker`), "no close marker");
 });
 
 test("labels: the outcome line and the summary comment", () => {
@@ -118,6 +150,15 @@ test("labels: the outcome line and the summary comment", () => {
   const s = summaryComment({ kind: "ci", subject: "failing check `test`", attempt: 3, state: "failed", headline: "gave up" });
   assert.match(s, /last automatic attempt/);
   assert.ok(s.includes(FOLLOWUP_MARKER));
+  assert.equal(followupLine({ kind: "command", subject: "@alice: “add a test”", attempt: 3, state: "done" }), "Answered @alice: “add a test” · 3rd request");
+  const sig: Signal = { kind: "command", repo: REPO, prs: [5], unit: { type: "issue_comment", id: 12 }, author: "alice", command: "x".repeat(80), comment: { id: 12, type: "issue", author: "alice", body: "" } };
+  assert.equal(subjectOf(sig), `@alice: “${"x".repeat(57)}…”`);
+  assert.equal(subjectOf({ ...sig, command: "" }), "@alice's /agent");
+  const reply = commandReply({ reply: "Done, pushed.", headline: "h", state: "done", author: "alice", runUrl: "https://x/run" });
+  assert.ok(reply.startsWith("Done, pushed.") && reply.includes("[open the run](https://x/run)") && reply.includes(FOLLOWUP_MARKER));
+  const noReply = commandReply({ headline: "fixed the lint", state: "done", author: "alice" });
+  assert.match(noReply, /^@alice fixed the lint/);
+  assert.match(commandReply({ headline: "boom", state: "failed", author: "alice" }), /run failed before it could reply: boom/);
 });
 
 /* ───────────── engine, end to end against a fake GitHub ───────────── */
@@ -220,6 +261,197 @@ test("engine: toggle off skips; review follow-up replies, resolves and summarise
   const before = calls.length;
   await engine.onRunFinished(r.box!, digest({ box: r.box! }), "", 2);
   assert.equal(calls.length, before);
+});
+
+const issueComment = (body: string, over: Record<string, unknown> = {}) => ({
+  action: "created",
+  repository: repo,
+  sender: user,
+  issue: { number: 7, pull_request: {} },
+  comment: { id: 31, body, author_association: "OWNER", user, html_url: "https://github.com/acme/app/pull/7#issuecomment-31", ...over },
+});
+
+function setupAnyPr(opts: { prefs?: { keepGreen: boolean; addressReviews: boolean; commandAnywhere: boolean }; prOpen?: boolean } = {}) {
+  const db = openMemoryDb();
+  const calls: GhRequest[] = [];
+  const starts: Array<{ task: string; branch: string; startedBy: { attempt: number; parent: string; followup: string } }> = [];
+  const logs: Array<{ id: string; outcome: string; reason?: string; detail?: string }> = [];
+  let n = 0;
+  const engine = makeFollowupEngine({
+    db,
+    publicUrl: "https://asb.example",
+    redact: (s) => s.replace(/ghp_\w+/g, "[redacted]"),
+    prefs: () => opts.prefs ?? { keepGreen: true, addressReviews: true, commandAnywhere: true },
+    logDelivery: (id, e) => logs.push({ id, ...e }),
+    log: () => {},
+    gh: async (_owner, _repo, req) => {
+      calls.push(req);
+      if (req.path === `/repos/${REPO}/pulls/7`) return { state: opts.prOpen === false ? "closed" : "open", title: "Human PR", head: { ref: "feat/login", sha: "h1", repo: { full_name: REPO } } };
+      if (req.path === `/repos/other/repo/pulls/1`) throw new Error("GitHub answered 404");
+      return {};
+    },
+    startFollowup: async (f) => {
+      starts.push(f as never);
+      return { ok: true, box: `cmd-${++n}` };
+    },
+  });
+  return { db, engine, calls, starts, logs };
+}
+
+test("engine: /agent on a PR nobody here opened is adopted only when asked to; the reply is posted; the next /agent is a new turn", async () => {
+  const { db, engine, calls, starts, logs } = setupAnyPr();
+  // An automation's webhook (no adopt): still "not ours".
+  const plain = await engine.handle({ id: "h", owner: "u1" }, "issue_comment", issueComment("/agent add a test"));
+  assert.equal(plain.handled, false);
+  assert.equal(getAgentPr(db, REPO, 7), undefined);
+  // The owner's hook / the activity poller (adopt): read the PR as the owner, adopt, run on its branch.
+  const r = await engine.handle({ id: "h", owner: "u1" }, "issue_comment", issueComment("/agent add a test for ghp_secret123"), { adopt: true });
+  assert.ok(r.handled && r.outcome === "fired" && r.box === "cmd-1");
+  const apr = getAgentPr(db, REPO, 7);
+  assert.ok(apr?.adopted && apr.owner === "u1" && apr.branch === "feat/login");
+  assert.equal(starts[0].branch, "feat/login");
+  assert.equal(starts[0].startedBy.followup, "command");
+  assert.equal(starts[0].startedBy.parent, "");
+  assert.match(starts[0].task, /@alice asked you something on pull request acme\/app#7/);
+  assert.match(starts[0].task, /add a test for \[redacted\]/);
+  assert.doesNotMatch(starts[0].task, /ghp_secret123/);
+  // Same comment again (a second delivery): deduped.
+  const dup = await engine.handle({ id: "h", owner: "u1" }, "issue_comment", issueComment("/agent add a test"), { adopt: true });
+  assert.ok(dup.handled && dup.outcome === "skipped" && dup.reason === "dedupe");
+  // A new ask while the first runs: skipped, and told so on the PR — once.
+  const busy = await engine.handle({ id: "h", owner: "u1" }, "issue_comment", issueComment("/agent also lint", { id: 32 }), { adopt: true });
+  assert.ok(busy.handled && busy.outcome === "skipped" && busy.reason === "limit");
+  const busyNote = calls.filter((c) => c.method === "POST" && c.path === `/repos/${REPO}/issues/7/comments`);
+  assert.equal(busyNote.length, 1);
+  assert.match(JSON.stringify(busyNote[0].body), /still working on the previous request/);
+  await engine.handle({ id: "h", owner: "u1" }, "issue_comment", issueComment("/agent also lint", { id: 32 }), { adopt: true });
+  assert.equal(calls.filter((c) => c.method === "POST" && c.path === `/repos/${REPO}/issues/7/comments`).length, 1);
+  // The run finishes: the agent's reply block is what lands on the PR.
+  await engine.onRunFinished("cmd-1", digest({ box: "cmd-1", headline: "added the test" }), `noise\n${REPLY_OPEN}\nAdded \`login.test.ts\`; pushed to feat/login.\n${REPLY_CLOSE}\n`, 9);
+  const posted = calls.filter((c) => c.method === "POST" && c.path === `/repos/${REPO}/issues/7/comments`);
+  assert.equal(posted.length, 2);
+  const body = (posted[1].body as { body: string }).body;
+  assert.ok(body.startsWith("Added `login.test.ts`; pushed to feat/login."));
+  assert.match(body, /open the run\]\(https:\/\/asb\.example\/dashboard\/box\/cmd-1\)/);
+  assert.ok(body.includes(FOLLOWUP_MARKER));
+  // The next /agent on the same PR is request 2 — no 3-attempt cap in the way.
+  const again = await engine.handle({ id: "h", owner: "u1" }, "issue_comment", issueComment("/agent now the docs", { id: 33 }), { adopt: true });
+  assert.ok(again.handled && again.outcome === "fired");
+  assert.equal(starts[1].startedBy.attempt, 2);
+  assert.match(starts[1].task, /the 2nd request on this PR/);
+  // CI / review signals never fire on an adopted PR.
+  const ci = await engine.handle({ id: "h", owner: "u1" }, "check_run", checkRun({ pull_requests: [{ number: 7 }], check_suite: { head_branch: "feat/login" } }), { adopt: true });
+  assert.equal(ci.handled, false);
+  // Another owner's hook cannot touch it.
+  assert.equal((await engine.handle({ id: "h", owner: "u2" }, "issue_comment", issueComment("/agent hi", { id: 34 }), { adopt: true })).handled, false);
+  assert.deepEqual(followupsForBox(db, "u1", "cmd-1").map((f) => [f.kind, f.state, f.attempt]), [["command", "done", 1], ["command", "running", 2]]);
+  assert.ok(logs.every((l) => l.id === "h"));
+});
+
+test("engine: adoption needs the owner's token to read the PR; the toggle off skips; a failed run says so", async () => {
+  const { engine, calls } = setupAnyPr();
+  const far = await engine.handle({ id: "h", owner: "u1" }, "issue_comment", { ...issueComment("/agent x"), repository: { full_name: "other/repo" }, issue: { number: 1, pull_request: {} } }, { adopt: true });
+  assert.ok(far.handled && far.outcome === "failed" && /could not read the PR/.test(far.detail));
+  const off = setupAnyPr({ prefs: { keepGreen: true, addressReviews: true, commandAnywhere: false } });
+  const r = await off.engine.handle({ id: "h", owner: "u1" }, "issue_comment", issueComment("/agent x"), { adopt: true });
+  assert.ok(r.handled && r.outcome === "skipped" && r.reason === "disabled");
+  const ok = await engine.handle({ id: "h", owner: "u1" }, "issue_comment", issueComment("/agent x"), { adopt: true });
+  assert.ok(ok.handled && ok.outcome === "fired");
+  await engine.onRunFinished(ok.box!, digest({ box: ok.box!, state: "failed", headline: "box crashed" }), "", 1);
+  const posted = calls.filter((c) => c.method === "POST" && c.path === `/repos/${REPO}/issues/7/comments`);
+  assert.match((posted.at(-1)!.body as { body: string }).body, /run failed before it could reply: box crashed/);
+});
+
+/* ───────────── the activity poller ───────────── */
+
+const feedEvent = (id: string, body: string, over: Record<string, unknown> = {}) => ({
+  id,
+  type: "IssueCommentEvent",
+  actor: { login: "alice", type: "User" },
+  repo: { name: REPO },
+  created_at: new Date().toISOString(),
+  payload: { action: "created", issue: { number: 7, pull_request: {} }, comment: { id: Number(id), body, author_association: "OWNER", user } },
+  ...over,
+});
+
+test("mentions: baseline replays nothing; later /agent PR comments from the feed reach the engine once; noise is ignored", async () => {
+  const { db, engine, starts, logs } = setupAnyPr();
+  let feed: unknown[] = [feedEvent("100", "/agent old ask")];
+  const gets: Array<{ login: string; path: string; etag?: string }> = [];
+  let etag = "e1";
+  const watcher = makeMentionWatcher({
+    db,
+    engine,
+    log: () => {},
+    enabled: () => true,
+    accounts: async () => [{ owner: "u1", login: "alice" }],
+    get: async (_owner, login, path, e) => {
+      gets.push({ login, path, ...(e ? { etag: e } : {}) });
+      if (e === etag) return { notModified: true, pollInterval: 60 };
+      return { notModified: false, data: feed, etag, pollInterval: 60 };
+    },
+  });
+  await watcher.tick();
+  assert.equal(gets[0].path, "/users/alice/events?per_page=100");
+  assert.equal(starts.length, 0); // baseline
+  // Nothing new: a 304, and the poll interval keeps the next tick quiet.
+  await watcher.pollFeed("u1", "alice");
+  assert.equal(gets.at(-1)?.etag, "e1");
+  await watcher.tick();
+  assert.equal(gets.length, 2);
+  // Three new events: a PR comment with /agent, an issue (not PR) comment with /agent, a push.
+  etag = "e2";
+  feed = [
+    { id: "104", type: "PushEvent", repo: { name: REPO }, payload: {} },
+    feedEvent("103", "/agent add a test"),
+    feedEvent("102", "/agent on an issue", { payload: { action: "created", issue: { number: 2 }, comment: { id: 102, body: "/agent on an issue", author_association: "OWNER", user } } }),
+    feedEvent("101", "plain comment"),
+    feedEvent("100", "/agent old ask"),
+  ];
+  await watcher.pollFeed("u1", "alice");
+  assert.equal(starts.length, 1);
+  assert.match(starts[0].task, /add a test/);
+  // The same feed read again: already past the high-water mark.
+  etag = "e3";
+  await watcher.pollFeed("u1", "alice");
+  assert.equal(starts.length, 1);
+  assert.deepEqual(payloadOf(feedEvent("5", "/agent x") as never, "alice").repository, { full_name: REPO, name: "app", owner: { login: "acme" }, html_url: `https://github.com/${REPO}` });
+  assert.equal(isAgentCommand(feedEvent("5", "nope") as never), false);
+  assert.equal(isAgentCommand(feedEvent("5", "/agent yes") as never), true);
+  assert.ok(logs.some((l) => l.id === "mentions:u1" && l.outcome === "fired"));
+  assert.equal(mentionsSourceId("u1"), "mentions:u1");
+});
+
+test("mentions: the owner's toggle off means no read; a rate limit pauses the feed; a missing association is fetched", async () => {
+  const { db, engine, starts } = setupAnyPr();
+  let enabled = false;
+  let calls = 0;
+  let fail = false;
+  const watcher = makeMentionWatcher({
+    db,
+    engine,
+    log: () => {},
+    enabled: () => enabled,
+    accounts: async () => [{ owner: "u1", login: "alice" }],
+    get: async (_o, _l, path) => {
+      calls++;
+      if (fail) throw new GhRateLimitError(403, { retryAfterMs: 3_600_000 }, path);
+      if (path.includes("/issues/comments/")) return { notModified: false, data: { author_association: "COLLABORATOR" } };
+      return { notModified: false, data: calls === 1 ? [] : [feedEvent("9", "/agent hi", { payload: { action: "created", issue: { number: 7, pull_request: {} }, comment: { id: 9, body: "/agent hi", user } } })], etag: `e${calls}` };
+    },
+  });
+  await watcher.tick();
+  assert.equal(calls, 0);
+  enabled = true;
+  await watcher.tick(); // baseline
+  assert.equal(calls, 1);
+  fail = true;
+  await assert.rejects(watcher.pollFeed("u1", "alice"));
+  await watcher.tick(); // paused for an hour: no read
+  assert.equal(calls, 2);
+  fail = false;
+  await watcher.pollFeed("u1", "alice"); // the event lacks author_association → the comment is read
+  assert.equal(starts.length, 1);
 });
 
 test("hook store: rotate keeps the id; deliveries are owner-scoped", () => {

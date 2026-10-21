@@ -230,7 +230,7 @@ export function RunPill({
     rows.push(["followed by", <A href={`/dashboard/box/${encodeURIComponent(o.result.followedBy.box)}`}>{friendlyName(o.result.followedBy.box)}</A>]);
   (o?.result.followups ?? []).forEach((f) =>
     rows.push([
-      f.kind === "ci" ? "CI follow-up" : "review follow-up",
+      f.kind === "ci" ? "CI follow-up" : f.kind === "command" ? "/agent" : "review follow-up",
       <span className={f.state === "failed" ? "text-destructive" : undefined}>
         <A href={`/dashboard/box/${encodeURIComponent(f.box)}`}>{f.line ?? f.subject}</A>
       </span>,

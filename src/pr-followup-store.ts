@@ -7,7 +7,9 @@ import { newSecret } from "./triggers.js";
 /**
  * Persistence for PR follow-ups (rules: src/pr-followups.ts). Owner-scoped on every read the API
  * serves. `agent_prs` is written at the archive moment from the outcome card's opened-PR list — so
- * only PRs a run of this product opened can ever be followed up.
+ * only PRs a run of this product opened get CI / review follow-ups. A PR someone addressed with
+ * `/agent …` is *adopted* instead (root_box = "", `adopted`): commands are answered on it, nothing
+ * else ever fires there.
  */
 
 export interface AgentPr {
@@ -22,6 +24,8 @@ export interface AgentPr {
   triggerId?: string;
   archiveId?: number;
   createdAt: number;
+  /** Not opened by a run: adopted when someone commented `/agent …` on it. Only commands fire on it. */
+  adopted: boolean;
 }
 
 const lc = (s: string) => s.toLowerCase();
@@ -31,6 +35,7 @@ const toPr = (r: Record<string, any>): AgentPr => ({
   number: Number(r.number),
   owner: r.owner,
   rootBox: r.root_box,
+  adopted: !r.root_box,
   ...(r.branch ? { branch: r.branch } : {}),
   ...(r.harness_id ? { harnessId: r.harness_id } : {}),
   ...(r.agent ? { agent: r.agent } : {}),
@@ -54,6 +59,17 @@ export function recordAgentPrs(
   for (const p of r.prs)
     n += put.run(lc(p.repo), p.number, r.owner, r.box, r.branch ?? null, r.harnessId ?? null, r.agent ?? null, r.model ?? null, r.triggerId ?? null, r.archiveId ?? null, now).changes;
   return n;
+}
+
+/**
+ * Adopt a PR nobody here opened because its owner (or a collaborator) addressed the agent on it.
+ * First writer wins, like recordAgentPrs: a PR a run opened keeps its root. Returns the row.
+ */
+export function adoptPr(db: Db, r: { repo: string; number: number; owner: string; branch?: string }, now = Date.now()): AgentPr {
+  db.prepare(`INSERT INTO agent_prs (repo, number, owner, root_box, branch, created_at) VALUES (?, ?, ?, '', ?, ?) ON CONFLICT(repo, number) DO NOTHING`).run(
+    lc(r.repo), r.number, r.owner, r.branch ?? null, now
+  );
+  return getAgentPr(db, r.repo, r.number)!;
 }
 
 export function getAgentPr(db: Db, repo: string, number: number): AgentPr | undefined {
@@ -236,11 +252,13 @@ export function rotateHook(db: Db, box: SecretBox, owner: string, now = Date.now
   return { id, secret };
 }
 
-/** The follow-up hook's delivery log (same table as automations', keyed by the hook id). Newest first. */
+/** The delivery-log source id of the owner's activity poller (src/agent-mentions.ts). */
+export const mentionsSourceId = (owner: string) => `mentions:${owner}`;
+
+/** The follow-up hook's and the activity poller's delivery log (same table as automations'). Newest first. */
 export function hookDeliveries(db: Db, owner: string, limit = 50): Array<{ id: number; at: number; outcome: string; reason?: string; detail?: string; box?: string }> {
   const h = hookOf(db, owner);
-  if (!h) return [];
-  return (db.prepare(`SELECT * FROM trigger_delivery_log WHERE trigger_id = ? ORDER BY id DESC LIMIT ?`).all(h.id, limit) as Array<Record<string, any>>).map((r) => ({
+  return (db.prepare(`SELECT * FROM trigger_delivery_log WHERE trigger_id IN (?, ?) ORDER BY id DESC LIMIT ?`).all(h?.id ?? "", mentionsSourceId(owner), limit) as Array<Record<string, any>>).map((r) => ({
     id: Number(r.id),
     at: Number(r.at),
     outcome: r.outcome,

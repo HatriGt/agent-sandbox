@@ -3,18 +3,23 @@ import type { RunDigest } from "./digest.js";
 import type { StartedBy } from "./started-by.js";
 import type { DeliveryEntry } from "./trigger-store.js";
 import {
-  admitFollowup, ciTask, classifyEvent, dedupeKey, enabledFor, excerptLog, FOLLOWUP_EVENTS, FOLLOWUP_MARKER, inlineOf, parseAddressed,
-  reviewTask, subjectOf, summaryComment, threadReply, type FollowupPrefs, type ReviewComment, type Signal,
+  admitFollowup, busyReply, ciTask, classifyEvent, commandReply, commandTask, dedupeKey, enabledFor, excerptLog, FOLLOWUP_EVENTS, FOLLOWUP_MARKER, inlineOf,
+  parseAddressed, parseReply, reviewTask, subjectOf, summaryComment, threadReply, type FollowupPrefs, type ReviewComment, type Signal,
 } from "./pr-followups.js";
 import {
-  agentPrByBranch, attachBox, claimFollowup, dropFollowup, finishFollowup, getAgentPr, guardFacts, recordAgentPrs, setPrBranch, updateFollowup, type AgentPr,
+  adoptPr, agentPrByBranch, attachBox, claimFollowup, dropFollowup, finishFollowup, getAgentPr, guardFacts, recordAgentPrs, setPrBranch, updateFollowup, type AgentPr,
 } from "./pr-followup-store.js";
+import { claimDelivery } from "./trigger-store.js";
 
 /**
  * The side effects of PR follow-ups (rules: src/pr-followups.ts). Three entry points:
- *   - onArchived: a finished run's opened PRs become "agent PRs" (the only ones ever followed up)
- *   - handle: one GitHub delivery (from an automation's webhook or the owner's follow-up hook)
- *   - onRunFinished: a follow-up finished → reply on the review threads, resolve them, summarise
+ *   - onArchived: a finished run's opened PRs become "agent PRs" (CI / review follow-ups only ever
+ *     act on those)
+ *   - handle: one GitHub delivery (from an automation's webhook, the owner's follow-up hook, or the
+ *     activity poller). With `adopt`, a `/agent …` command on a PR nobody here opened adopts it for
+ *     the owner — after reading the PR with the owner's token, which is also the access check.
+ *   - onRunFinished: a follow-up finished → reply on the review threads, resolve them, summarise;
+ *     a command → post the agent's reply on the PR
  * GitHub is reached only through `gh`, which the controller wires to the owner's stored token.
  */
 
@@ -59,6 +64,13 @@ export function makeFollowupEngine(d: EngineDeps) {
   const now = () => (d.now ? d.now() : Date.now());
   const log = (m: string) => (d.log ? d.log(m) : console.error(m));
   const runUrl = (box: string) => (d.publicUrl ? `${d.publicUrl.replace(/\/$/, "")}/dashboard/box/${encodeURIComponent(box)}` : undefined);
+  /** The run currently working on a PR, for the "still busy" note. */
+  const runningUrl = (repo: string, number: number): string | undefined => {
+    const r = d.db.prepare(`SELECT box FROM pr_followups WHERE repo = ? AND number = ? AND state IN ('starting', 'running') AND box IS NOT NULL ORDER BY id DESC LIMIT 1`).get(repo.toLowerCase(), number) as
+      | { box: string }
+      | undefined;
+    return r ? runUrl(r.box) : undefined;
+  };
 
   function onArchived(r: { box: string; owner: string; digest: RunDigest; archiveId?: number; harnessId?: string }): number {
     const prs = (r.digest as { outcome?: { result?: { prs?: Array<{ repo: string; number: number }> } } }).outcome?.result?.prs ?? [];
@@ -140,36 +152,48 @@ export function makeFollowupEngine(d: EngineDeps) {
     return s.kind === "ci" ? agentPrByBranch(d.db, s.repo, s.headBranch) : undefined;
   }
 
-  /** Synchronous, db-only: is this delivery a follow-up on one of `owner`'s agent PRs? */
-  function claims(owner: string, eventHeader: string, payload: unknown): { ok: true; signal: Signal; pr: AgentPr } | { ok: false; reason: string } {
+  /**
+   * Synchronous, db-only: is this delivery a follow-up on one of `owner`'s agent PRs? With
+   * `adopt`, a `/agent …` command on a PR nobody here opened is claimed too (`pr` absent: handle
+   * adopts it once the owner's token has read the PR).
+   */
+  function claims(owner: string, eventHeader: string, payload: unknown, opts: { adopt?: boolean } = {}): { ok: true; signal: Signal; pr?: AgentPr } | { ok: false; reason: string } {
     if (!FOLLOWUP_EVENTS.has(eventHeader)) return { ok: false, reason: `event ${eventHeader || "?"} is not a follow-up event` };
     const c = classifyEvent(eventHeader, payload);
     if (!c.ok) return { ok: false, reason: c.reason };
     const apr = findPr(c.signal);
+    if (!apr) {
+      if (c.signal.kind === "command" && opts.adopt && c.signal.prs.length) return { ok: true, signal: c.signal };
+      return { ok: false, reason: "not a pull request this product opened" };
+    }
     // A hook only acts on its owner's PRs; another tenant's PR is "not ours", never an error that leaks it.
-    if (!apr || apr.owner !== owner) return { ok: false, reason: "not a pull request this product opened" };
+    if (apr.owner !== owner) return { ok: false, reason: "not a pull request this product opened" };
+    if (apr.adopted && c.signal.kind !== "command") return { ok: false, reason: "only /agent commands run on a PR the agent did not open" };
     return { ok: true, signal: c.signal, pr: apr };
   }
 
-  async function handle(source: { id: string; owner: string }, eventHeader: string, payload: unknown): Promise<HandleResult> {
-    const cl = claims(source.owner, eventHeader, payload);
+  async function handle(source: { id: string; owner: string }, eventHeader: string, payload: unknown, opts: { adopt?: boolean } = {}): Promise<HandleResult> {
+    const cl = claims(source.owner, eventHeader, payload, opts);
     if (!cl.ok) return { handled: false, reason: cl.reason };
     const s = cl.signal;
-    const apr = cl.pr;
+    const number = cl.pr?.number ?? s.prs[0];
     const done = (r: Omit<Extract<HandleResult, { handled: true }>, "handled">): HandleResult => {
       d.logDelivery?.(source.id, { at: now(), outcome: r.outcome, ...(r.reason ? { reason: r.reason } : {}), detail: r.detail.slice(0, 300), ...(r.box ? { box: r.box } : {}) });
       return { handled: true, ...r };
     };
-    const tag = `${apr.repo}#${apr.number}`;
+    const tag = `${s.repo}#${number}`;
 
     let pr: Record<string, any>;
     try {
-      pr = await d.gh(apr.owner, s.repo, { path: `/repos/${s.repo}/pulls/${apr.number}` });
+      pr = await d.gh(source.owner, s.repo, { path: `/repos/${s.repo}/pulls/${number}` });
     } catch (e) {
       return done({ outcome: "failed", reason: "error", detail: `follow-up on ${tag}: could not read the PR (${(e as Error).message.slice(0, 120)})` });
     }
     const branch = String(pr?.head?.ref ?? "");
     const headRepo = String(pr?.head?.repo?.full_name ?? "");
+    // A command on a PR nobody here opened: adopt it now that the owner's token has read it.
+    const apr = cl.pr ?? adoptPr(d.db, { repo: s.repo, number, owner: source.owner, ...(branch ? { branch } : {}) }, now());
+    if (apr.owner !== source.owner) return done({ outcome: "skipped", reason: "ignored", detail: `follow-up on ${tag}: the PR belongs to another owner here` });
     if (branch && branch !== apr.branch) setPrBranch(d.db, apr.repo, apr.number, branch);
 
     const prefs = d.prefs(apr.owner);
@@ -178,10 +202,17 @@ export function makeFollowupEngine(d: EngineDeps) {
     const g = guardFacts(d.db, apr.repo, apr.number, s.kind, key, now());
     const adm = admitFollowup(s, {
       ...g,
-      enabled: enabledFor(s.kind, prefs, spec),
+      enabled: enabledFor(s.kind, prefs, spec, apr.adopted),
       pr: { open: pr?.state === "open" && !pr?.merged, headSha: String(pr?.head?.sha ?? ""), fork: !!headRepo && headRepo.toLowerCase() !== s.repo.toLowerCase() },
     });
-    if (!adm.ok) return done({ outcome: "skipped", reason: adm.code, detail: `follow-up on ${tag}: ${adm.reason}` });
+    if (!adm.ok) {
+      // Someone asked while the agent is still busy on this PR: tell them once, on the PR.
+      if (s.kind === "command" && adm.code === "limit" && g.running && claimDelivery(d.db, "followup-busy", [`busy:${s.repo}#${number}:${s.unit.id}`], now()))
+        await d
+          .gh(apr.owner, s.repo, { method: "POST", path: `/repos/${s.repo}/issues/${number}/comments`, body: { body: busyReply(s.author, runningUrl(apr.repo, apr.number)) } })
+          .catch((e) => log(`[followup] busy reply on ${tag} failed: ${(e as Error).message.slice(0, 200)}`));
+      return done({ outcome: "skipped", reason: adm.code, detail: `follow-up on ${tag}: ${adm.reason}` });
+    }
     if (!branch) return done({ outcome: "failed", reason: "error", detail: `follow-up on ${tag}: the PR has no head branch` });
 
     const id = claimFollowup(d.db, { repo: apr.repo, number: apr.number, owner: apr.owner, kind: s.kind, dedupeKey: key, attempt: adm.attempt, subject: subjectOf(s) }, now());
@@ -194,6 +225,11 @@ export function makeFollowupEngine(d: EngineDeps) {
       const failures = await ciFailures(apr.owner, s);
       subject = `failing check \`${failures[0]?.name.slice(0, 60) ?? s.check.name}\``;
       task = ciTask(ref, failures, adm.attempt);
+    } else if (s.kind === "command") {
+      const comment = { ...s.comment, body: d.redact(s.comment.body) };
+      subject = subjectOf(s);
+      updateFollowup(d.db, id, { comments: [comment] });
+      task = commandTask(ref, comment, d.redact(s.command), adm.attempt);
     } else {
       const comments = await reviewComments(apr.owner, s, apr.number);
       if (!comments.length) {
@@ -259,6 +295,14 @@ export function makeFollowupEngine(d: EngineDeps) {
     if (!row) return;
     const repo = row.repo;
     const url = runUrl(box);
+    if (row.kind === "command") {
+      const reply = parseReply(runLog);
+      const body = commandReply({ ...(reply ? { reply: d.redact(reply) } : {}), headline: digest.headline, state, author: row.comments[0]?.author ?? "", ...(url ? { runUrl: url } : {}) });
+      await d
+        .gh(row.owner, repo, { method: "POST", path: `/repos/${repo}/issues/${row.number}/comments`, body: { body: d.redact(body) } })
+        .catch((e) => log(`[followup] reply on ${repo}#${row.number} failed: ${(e as Error).message.slice(0, 200)}`));
+      return;
+    }
     let addressed = 0;
     if (row.kind === "review") {
       const said = parseAddressed(runLog);

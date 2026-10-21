@@ -58,6 +58,7 @@ orchestrator, produce the same box, and show up in the same fleet view.
 | 🖥️ **Dashboard** | Open the console, pick repos, type the task, hit send. Nothing installed. | Kicking off work from anywhere — including a phone — and answering a box that's blocked. |
 | 🧩 **Your coding agent** | `delegate this: <task>` in Cursor, Claude Code, Codex, VS Code, Windsurf, Zed… | Handing off what you're already looking at — the local entry ships your **uncommitted working tree**. |
 | ⚙️ **A script / CI** | `POST /delegate.json` (or `/mcp`) with a bearer token. | Automation: nightly chores, an issue-triage bot, a pipeline step. |
+| 💬 **A PR comment** | Comment `/agent <ask>` on any pull request in any repo your GitHub account can push to. No webhook, no setup. | Driving a PR from GitHub itself — "add a test for this", "why does CI fail?", "review it". The agent works on the PR's branch, replies on the PR, and keeps listening ([how it works](docs/pr-commands.md)). |
 
 Once a run exists, every surface can drive it: watch the live log, `ask` a read-only co-pilot what
 it's doing, queue a follow-up, answer its question, pin the box, or tear it down.
