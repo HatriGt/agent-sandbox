@@ -1,8 +1,9 @@
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Kbd } from "@/components/ui/kbd";
 import { StaggerItem } from "@/components/ui/swap";
+import { SHORTCUTS } from "@/lib/workspace-model";
 
-const GROUPS: { title: string; rows: [string[], string][] }[] = [
+const GROUPS: { title: string; note?: string; rows: [string[], string][] }[] = [
   {
     title: "Go",
     rows: [
@@ -27,6 +28,12 @@ const GROUPS: { title: string; rows: [string[], string][] }[] = [
     ],
   },
   {
+    title: "Workspace",
+    note: "while the files pane is open",
+    // The pane's own table, so the dialog and the pane never disagree. ⌘ reads as Ctrl elsewhere.
+    rows: SHORTCUTS.map((s) => [[...s.label], s.what]),
+  },
+  {
     title: "Anywhere",
     rows: [
       [["?"], "This list"],
@@ -48,7 +55,10 @@ export function ShortcutsDialog({ open, onOpenChange }: { open: boolean; onOpenC
             const before = GROUPS.slice(0, gi).reduce((n, x) => n + x.rows.length, 0);
             return (
               <section key={g.title}>
-                <h3 className="label text-faint mb-2">{g.title}</h3>
+                <h3 className="label text-faint mb-2">
+                  {g.title}
+                  {g.note && <span className="ml-1.5 font-normal">· {g.note}</span>}
+                </h3>
                 <ul className="divide-border/60 divide-y">
                   {g.rows.map(([keys, what], ri) => (
                     <li key={what}>

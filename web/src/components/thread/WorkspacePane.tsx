@@ -1,26 +1,27 @@
 import * as React from "react";
-import { ArrowDown, ArrowUp, CaseSensitive, Check, ChevronRight, Columns2, Copy, CopyPlus, Download, FilePlus, Files, FileCode2, FileDiff, FoldVertical, FolderPlus, GitBranch, GitCommitHorizontal, Loader2, Locate, Maximize2, Minimize2, PanelRight, Pencil, Pin, RefreshCw, Regex, Search, SearchCode, Table2, Trash2, Upload, WrapText, X } from "lucide-react";
+import { ArrowDown, ArrowUp, CaseSensitive, Check, ChevronRight, Columns2, Copy, CopyPlus, FilePlus, Files, FileDiff, FoldVertical, FolderPlus, GitBranch, GitCommitHorizontal, Loader2, Locate, Maximize2, Minimize2, PanelRight, Pencil, RefreshCw, Regex, Search, SearchCode, Table2, Trash2, Upload, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { ContextMenu as CM, DropdownMenu as DM } from "radix-ui";
+import { ContextMenu as CM } from "radix-ui";
 import { useReducedMotion } from "@/lib/motion-pref";
 import { toast } from "sonner";
-import { api, ApiError, type ChangedFile, type FsOp, type GitStatus, type SearchMatch } from "@/lib/api";
-import { parseUnifiedDiff, diffForNewFile, type ParsedDiff } from "@/lib/diff";
-import { languageOf } from "@/lib/fileIcon";
+import { api, type ChangedFile, type FsOp, type GitStatus, type SearchMatch } from "@/lib/api";
 import { FileIcon, FolderIcon } from "@/lib/vscodeIcons";
-import { CodeEditor } from "@/components/CodeEditor";
 import { AnimatedTabs } from "@/components/ui/animated-tabs";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
+import type { CodeEditorHandle } from "@/components/CodeEditor";
 import { invalidateResolver } from "@/components/ui/code-ref";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { DiffView, useHunkReview } from "./FilePane";
+import { EmptyEditor, TabStrip } from "./EditorTabs";
+import { FileView } from "./FileView";
+import { EASE, MENU_CONTENT, MENU_ITEM, MENU_ITEM_DESTRUCTIVE, MENU_SEP, MenuHint, copyText, shortcutLabel, type Open } from "./workspace-chrome";
 import { RecordsTable } from "./RecordsTable";
 import { ReviewView, type ReviewFocus } from "./review/ReviewView";
 import { cn } from "@/lib/utils";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import {
   EMPTY_TABS,
+  OVERLAY_OPEN,
   SHORTCUTS,
   SIDEBAR_DEFAULT,
   baseOf,
@@ -32,6 +33,7 @@ import {
   invalidName,
   matchPaths,
   matchShortcut,
+  nodeAt,
   parentOf,
   paneRange,
   parseLineQuery,
@@ -49,9 +51,6 @@ import {
   type Range,
   type Row,
   type RowEdit,
-  type Tab,
-  type TabAction,
-  type TabGroup,
 } from "@/lib/workspace-model";
 
 /**
@@ -65,7 +64,6 @@ import {
 export type OpenRequest = { path: string; line?: number; endLine?: number };
 type View = "explorer" | "search" | "scm" | "review" | "records";
 type Repo = { name: string; branch?: string };
-type Open = (path: string, opts?: OpenOpts) => void;
 
 const STATUS_LETTER: Record<ChangedFile["status"], { l: string; tone: string }> = {
   modified: { l: "M", tone: "text-attention-text" },
@@ -74,14 +72,6 @@ const STATUS_LETTER: Record<ChangedFile["status"], { l: string; tone: string }> 
   deleted: { l: "D", tone: "text-destructive" },
   renamed: { l: "R", tone: "text-live" },
 };
-const SPRING = { type: "spring", stiffness: 500, damping: 40 } as const;
-const EASE = [0.22, 1, 0.36, 1] as const;
-const MENU_CONTENT = "bg-popover text-popover-foreground z-50 min-w-[13rem] rounded-xl border p-1.5 shadow-e3 outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=open]:duration-150 data-[state=open]:ease-[cubic-bezier(0.22,1,0.36,1)] data-[state=closed]:animate-out data-[state=closed]:zoom-out-[0.97] data-[state=closed]:duration-100 data-[state=closed]:fade-out-0";
-const MENU_ITEM = "flex h-8 cursor-pointer items-center gap-2.5 rounded-md px-2 text-meta outline-none select-none transition-[background-color,transform] duration-100 ease-[cubic-bezier(0.22,1,0.36,1)] data-[highlighted]:bg-accent active:scale-[0.985] data-[disabled]:pointer-events-none data-[disabled]:opacity-40 [&_svg]:text-muted-foreground [&_svg]:size-4 [&_svg]:shrink-0";
-const MENU_ITEM_DESTRUCTIVE = "text-destructive data-[highlighted]:bg-destructive/10 [&_svg]:text-destructive";
-const MENU_SEP = "bg-border my-1.5 h-px";
-const MenuHint = ({ children }: { children: React.ReactNode }) => <span className="text-faint ml-auto pl-4 text-micro">{children}</span>;
-const shortcutLabel = (key: string) => SHORTCUTS.find((s) => s.key === key)?.label;
 
 const readStore = <T,>(key: string, fallback: T): T => {
   try {
@@ -101,7 +91,6 @@ const removeStore = (key: string) => {
     localStorage.removeItem(key);
   } catch {}
 };
-const copyText = (text: string) => navigator.clipboard?.writeText(text).catch(() => toast.error("Could not copy"));
 
 export function WorkspacePane({ session, changes, open, review, onClose, onSaved, repos, full = false, onToggleFull }: { session: string; changes: ChangedFile[]; open: OpenRequest | null; /** Bumped to switch the pane to the Review view (the whole run's diff). */ review?: number; onClose: () => void; onSaved: () => void; repos: Repo[]; full?: boolean; onToggleFull?: () => void }) {
   const [paths, setPaths] = React.useState<string[] | null>(null);
@@ -121,6 +110,10 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
   const [focusedRow, setFocusedRow] = React.useState<string | null>(null);
   const [edit, setEdit] = React.useState<RowEdit | null>(null);
   const savers = React.useRef(new Map<string, () => Promise<string | null>>());
+  // Live editors by "group:path", so a window-level ⌘F reaches the focused file's find widget.
+  const editors = React.useRef(new Map<string, CodeEditorHandle>());
+  // ⌘F on a diff tab switches it to the file and opens find once that editor mounts.
+  const pendingFind = React.useRef<string | null>(null);
   const paneRef = React.useRef<HTMLElement>(null);
 
   const loadTree = React.useCallback(
@@ -145,7 +138,6 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
   const focusedGroup = tabs.groups[tabs.focus] ?? tabs.groups[0];
   const active = focusedGroup.active;
   const activeTab = focusedGroup.tabs.find((t) => t.path === active) ?? null;
-  const activeDoc = active ? docs.get(active) : undefined;
 
   const expandTo = React.useCallback((path: string) => {
     setExpanded((e) => {
@@ -265,22 +257,65 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
   };
 
   const toggleWrap = () => setWrap((w) => (writeStore("asb-ws-wrap", !w), !w));
+  // The explorer header's New file / New folder: into the focused folder, else beside the focused
+  // or active file, else at the repo root, as VS Code's do.
+  const startEdit = (what: "newFile" | "newDir") => {
+    const at = focusedRow ?? active;
+    const dir = at ? (tree && nodeAt(tree, at)?.children ? at : parentOf(at)) : (repos[0]?.name ?? "");
+    setQuery("");
+    if (dir) {
+      expandTo(dir);
+      setExpanded((e) => new Set(e).add(dir));
+    }
+    setEdit({ what, parent: dir });
+  };
+  const saveActive = () => {
+    const saver = active && savers.current.get(active);
+    if (saver) void saver().then((err) => err && toast.error("Could not save", { description: err }));
+  };
   const commands: PaneCommands = {
     closeActive: () => void (active && closeTab(tabs.focus, active)),
     quickOpen: (prefill = "") => setQuickOpen(prefill),
     toggleSidebar: () => setSidebar((v) => !v),
     searchInFiles: () => (setSidebar(true), setView("search")),
+    find: () => {
+      if (!activeTab || view === "review" || view === "records") return commands.searchInFiles();
+      const key = `${tabs.focus}:${activeTab.path}`;
+      const editor = editors.current.get(key);
+      if (editor) return editor.openFind();
+      pendingFind.current = key;
+      if (activeTab.mode === "diff") dispatch({ type: "setMode", path: activeTab.path, mode: "edit" });
+    },
+    save: saveActive,
     split: () => dispatch({ type: "split" }),
     toggleWrap,
     focusGroup: (g) => dispatch({ type: "focus", group: g }),
   };
-  const onKeyDownCapture = (e: React.KeyboardEvent) => {
-    const s = matchShortcut(e.nativeEvent, SHORTCUTS);
-    if (!s) return;
-    e.preventDefault();
-    e.stopPropagation();
-    s.run(commands);
+  const registerEditor = (key: string, h: CodeEditorHandle | null) => {
+    if (!h) return void editors.current.delete(key);
+    editors.current.set(key, h);
+    if (pendingFind.current === key) {
+      pendingFind.current = null;
+      h.openFind();
+    }
   };
+  // The chords work from anywhere while the pane is mounted, as in VS Code: the composer, the
+  // side chat, the tree. Captured at the window so the editor's own keymap never fires twice;
+  // quiet while a dialog or menu owns the keyboard and when something upstream already handled it.
+  const commandsRef = React.useRef(commands);
+  commandsRef.current = commands;
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      const s = matchShortcut(e, SHORTCUTS);
+      if (!s || document.querySelector(OVERLAY_OPEN)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      s.run(commandsRef.current);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
 
   const activeRepo = React.useMemo(() => {
     const top = (active ?? changes[0]?.path ?? "").split("/")[0];
@@ -344,7 +379,7 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
         </TooltipTrigger>
         <TooltipContent side="bottom">
           {sidebar ? "Hide the files panel" : "Show the files panel"}
-          <Kbd className="ml-2">{shortcutLabel("b")}</Kbd>
+          <Kbd className="ml-2">{shortcutLabel("sidebar")}</Kbd>
         </TooltipContent>
       </Tooltip>
       <Tooltip>
@@ -367,7 +402,6 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
       transition={{ width: resizing ? { duration: 0 } : { duration: 0.28, ease: EASE }, opacity: { duration: 0.18 } }}
       className="bg-card absolute inset-0 z-20 flex min-w-0 flex-col overflow-hidden md:relative md:inset-auto md:h-full md:shrink-0 md:border-l"
       aria-label="Workspace"
-      onKeyDownCapture={onKeyDownCapture}
     >
       {!full && !phone && <Divider value={width} range={range} label="Resize workspace" onChange={setPaneWidth} onReset={() => setPaneWidth(null)} onDragging={setResizing} />}
 
@@ -396,7 +430,7 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
               const tab = g.tabs.find((t) => t.path === g.active) ?? null;
               return (
                 <div key={gi} data-group={gi} data-focused={focused} className={cn("flex min-h-0 min-w-0 flex-1 flex-col", gi === 1 && "border-l")} onPointerDownCapture={() => !focused && dispatch({ type: "focus", group: gi })}>
-                  <div className={cn("flex h-10 shrink-0 items-stretch border-b transition-colors", !focused && "bg-muted/30")}>
+                  <div className={cn("flex h-10 shrink-0 items-stretch border-b transition-colors", focused ? "bg-muted/40" : "bg-muted/70")}>
                     <TabStrip group={gi} state={g} focused={focused} dirty={dirtySet} dispatch={dispatch} onClose={(p) => void closeTab(gi, p)} />
                     {i === tabs.groups.length - 1 && controls}
                   </div>
@@ -415,6 +449,8 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
                       onOpen={openPath}
                       onSaved={onSaved}
                       onSaver={(fn) => (fn ? savers.current.set(tab.path, fn) : savers.current.delete(tab.path))}
+                      onEditor={(h) => registerEditor(`${gi}:${tab.path}`, h)}
+                      onToggleWrap={toggleWrap}
                     />
                   ) : (
                     <EmptyEditor />
@@ -435,7 +471,7 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
                 onChange={(v) => setView(v)}
                 items={[
                   { value: "explorer", icon: <Files className="size-3.5" />, label: <span className="sr-only">Files</span>, title: "Files" },
-                  { value: "search", icon: <SearchCode className="size-3.5" />, label: <span className="sr-only">Search</span>, title: `Search in files (${shortcutLabel("f")})` },
+                  { value: "search", icon: <SearchCode className="size-3.5" />, label: <span className="sr-only">Search</span>, title: `Search in files (${shortcutLabel("searchInFiles")})` },
                   {
                     value: "scm",
                     icon: <GitBranch className="size-3.5" />,
@@ -447,9 +483,11 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
                   { value: "records", icon: <Table2 className="size-3.5" />, label: <span className="sr-only">All</span>, title: "All files" },
                 ]}
               />
-              <button type="button" onClick={() => (view === "scm" || view === "review" ? loadGit() : void loadTree())} aria-label="Refresh" className="text-muted-foreground hover:text-foreground ml-auto grid size-7 cursor-pointer place-items-center rounded-md">
-                <RefreshCw className="size-3.5" />
-              </button>
+              {view !== "explorer" && (
+                <button type="button" onClick={() => (view === "scm" || view === "review" ? loadGit() : void loadTree())} aria-label="Refresh" className="text-muted-foreground hover:text-foreground ml-auto grid size-7 cursor-pointer place-items-center rounded-md">
+                  <RefreshCw className="size-3.5" />
+                </button>
+              )}
               {phone && (
                 <button type="button" onClick={onClose} aria-label="Close workspace" className="text-muted-foreground hover:text-foreground grid size-7 cursor-pointer place-items-center rounded-md">
                   <X className="size-3.5" />
@@ -462,6 +500,25 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
               <SearchView session={session} active={active} onOpen={openPath} />
             ) : (
               <>
+                {/* Section header, as VS Code's: the title, the repo, and actions that show on hover. */}
+                <div className="group/hdr flex h-[26px] shrink-0 items-center gap-1.5 pr-1 pl-3">
+                  <span className="label text-foreground">Explorer</span>
+                  {repos.length === 1 && <span className="stamp text-muted-foreground truncate">{repos[0].name}</span>}
+                  <span className="ml-auto flex items-center opacity-0 transition-opacity group-focus-within/hdr:opacity-100 group-hover/hdr:opacity-100 [@media(pointer:coarse)]:opacity-100">
+                    <HeaderAction label="New file" onClick={() => startEdit("newFile")} disabled={!tree}>
+                      <FilePlus className="size-3.5" />
+                    </HeaderAction>
+                    <HeaderAction label="New folder" onClick={() => startEdit("newDir")} disabled={!tree}>
+                      <FolderPlus className="size-3.5" />
+                    </HeaderAction>
+                    <HeaderAction label="Collapse all folders" onClick={() => (setExpanded(new Set()), setEdit(null))}>
+                      <FoldVertical className="size-3.5" />
+                    </HeaderAction>
+                    <HeaderAction label="Refresh" onClick={() => void loadTree()}>
+                      <RefreshCw className="size-3.5" />
+                    </HeaderAction>
+                  </span>
+                </div>
                 <div className="mx-2 mb-1 flex items-center gap-1">
                   <label className="bg-card focus-within:ring-ring flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-md border px-2 focus-within:ring-2">
                     <Search className="text-muted-foreground size-3.5" aria-hidden />
@@ -479,14 +536,6 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
                       </button>
                     </TooltipTrigger>
                     <TooltipContent side="bottom">Reveal the active file</TooltipContent>
-                  </Tooltip>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button type="button" onClick={() => (setExpanded(new Set()), setEdit(null))} aria-label="Collapse all" className="text-muted-foreground hover:text-foreground hover:bg-muted grid size-7 shrink-0 cursor-pointer place-items-center rounded-md">
-                        <FoldVertical className="size-3.5" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">Collapse all folders</TooltipContent>
                   </Tooltip>
                 </div>
                 {query.trim() ? (
@@ -536,16 +585,8 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
         <span className="hidden sm:inline">{changes.length} changed</span>
         {paths && <span className="hidden sm:inline">{paths.length} files</span>}
         <button type="button" onClick={() => setQuickOpen("")} className="hover:bg-muted hover:text-foreground ml-auto hidden cursor-pointer items-center gap-1 rounded px-1 sm:flex" aria-label="Quick open">
-          Go to file <Kbd className="h-4 min-w-4 text-[10px]">{shortcutLabel("p")}</Kbd>
+          Go to file <Kbd className="h-4 min-w-4 text-[10px]">{shortcutLabel("quickOpen")}</Kbd>
         </button>
-        {activeTab && <span className="ml-auto sm:ml-0">{languageOf(activeTab.path)}</span>}
-        {activeTab?.mode === "edit" && (
-          <button type="button" onClick={toggleWrap} aria-pressed={wrap} aria-label="Toggle word wrap" title={`Word wrap (${shortcutLabel("z")})`} className={cn("hover:bg-muted flex cursor-pointer items-center gap-1 rounded px-1", wrap && "text-foreground")}>
-            <WrapText className="size-3" aria-hidden />
-            {wrap ? "Wrap" : "No wrap"}
-          </button>
-        )}
-        {activeTab && <span className="tabular-nums">{activeTab.mode === "diff" ? "diff" : activeDoc?.saving === "saving" ? "Saving…" : activeDoc?.dirty ? "Unsaved" : activeDoc?.saving === "saved" ? "Saved" : "Autosave on"}</span>}
       </footer>
 
       {quickOpen !== null && (
@@ -562,6 +603,20 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
         />
       )}
     </motion.aside>
+  );
+}
+
+/** A section header's hover action: a 24px icon button with its name in a tooltip. */
+function HeaderAction({ label, onClick, disabled, children }: { label: string; onClick: () => void; disabled?: boolean; children: React.ReactNode }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button type="button" onClick={onClick} disabled={disabled} aria-label={label} className="text-muted-foreground hover:text-foreground hover:bg-muted grid size-6 shrink-0 cursor-pointer place-items-center rounded disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent">
+          {children}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{label}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -816,7 +871,7 @@ function Explorer({ tree, err, expanded, focused, active, changeByPath, repos, e
                 {rows.map((row, i) => {
                   if (row.kind === "edit") {
                     return (
-                      <li key={`edit:${row.edit.what}:${row.path}`} role="treeitem" aria-level={row.depth + 1} className="relative flex h-[26px] items-center" style={{ paddingLeft: `${8 + row.depth * 12 + (row.edit.what === "newDir" ? 0 : 18)}px` }}>
+                      <li key={`edit:${row.edit.what}:${row.path}`} role="treeitem" aria-level={row.depth + 1} className="relative flex h-[22px] items-center" style={{ paddingLeft: `${8 + row.depth * 12 + (row.edit.what === "newDir" ? 0 : 18)}px` }}>
                         <Guides depth={row.depth} />
                         <EditRow edit={row.edit} siblings={siblingsOf(row.edit.what === "rename" ? parentOf(row.edit.target) : row.edit.parent, row.edit.what === "rename" ? baseOf(row.edit.target) : undefined)} onDone={(name) => void commitEdit(row, name)} />
                       </li>
@@ -858,7 +913,7 @@ function Explorer({ tree, err, expanded, focused, active, changeByPath, repos, e
                       }}
                       onDoubleClick={() => row.kind === "file" && onOpen(row.path, { preview: false })}
                       className={cn(
-                        "text-foreground relative isolate flex h-[26px] cursor-pointer items-center gap-1 pr-2 text-left text-meta outline-none transition-colors select-none",
+                        "text-foreground relative isolate flex h-[22px] cursor-pointer items-center gap-1 pr-2 text-left text-meta outline-none transition-colors select-none",
                         active !== row.path && "hover:bg-muted",
                         isFocused && "focus-visible:ring-ring ring-inset focus-visible:ring-1",
                         dropDir === row.path && "bg-live/15 ring-live ring-1 ring-inset"
@@ -990,7 +1045,7 @@ function ExplorerMenu({ target, onAction }: { target: Row | null; onAction: (a: 
         {item("newFile", "New file", <FilePlus />)}
         {item("newDir", "New folder", <FolderPlus />)}
         <CM.Separator className={MENU_SEP} />
-        {item("openSide", "Open to the side", <Columns2 />, { disabled: !isFile, hint: shortcutLabel("\\") })}
+        {item("openSide", "Open to the side", <Columns2 />, { disabled: !isFile, hint: shortcutLabel("split") })}
         {item("reveal", "Reveal active file", <Locate />)}
         <CM.Separator className={MENU_SEP} />
         {item("copyPath", "Copy path", <Copy />, { disabled: !t, hint: "⌘C" })}
@@ -1409,382 +1464,5 @@ function SourceControl({ session, repo, status, err, reload: load, changes, acti
         </div>
       )}
     </>
-  );
-}
-
-function TabStrip({ group, state, focused, dirty, dispatch, onClose }: { group: 0 | 1; state: TabGroup; focused: boolean; dirty: ReadonlySet<string>; dispatch: (a: TabAction) => void; onClose: (path: string) => void }) {
-  const still = useReducedMotion();
-  const [menuPath, setMenuPath] = React.useState<string | null>(null);
-  const [dropAt, setDropAt] = React.useState<number | null>(null);
-  const tabFrom = (el: Element | null) => (el?.closest("[data-tab]") as HTMLElement | null)?.dataset.tab;
-  const indexFor = (e: React.DragEvent) => {
-    const el = (e.target as Element).closest<HTMLElement>("[data-tab]");
-    if (!el) return state.tabs.length;
-    const i = state.tabs.findIndex((t) => t.path === el.dataset.tab);
-    const r = el.getBoundingClientRect();
-    return i + (e.clientX > r.left + r.width / 2 ? 1 : 0);
-  };
-  const menuTab = state.tabs.find((t) => t.path === menuPath) ?? null;
-  const item = (label: string, onSelect: () => void, opts: { disabled?: boolean; hint?: string } = {}) => (
-    <CM.Item disabled={opts.disabled} onSelect={onSelect} className={MENU_ITEM}>
-      {label}
-      {opts.hint && <MenuHint>{opts.hint}</MenuHint>}
-    </CM.Item>
-  );
-  const many = (which: "others" | "right" | "all" | "saved") => menuPath !== null && dispatch({ type: "closeMany", group, which, path: menuPath, dirty });
-  return (
-    <CM.Root onOpenChange={(o) => !o && setMenuPath(null)}>
-      <CM.Trigger asChild>
-        <div
-          role="tablist"
-          aria-label={`Editor group ${group + 1}`}
-          className="scrollbar-none relative flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto px-2"
-          onContextMenuCapture={(e) => setMenuPath(tabFrom(e.target as Element) ?? null)}
-          onDragOver={(e) => {
-            if (!hasDrag(e, "asb/tab")) return;
-            e.preventDefault();
-            e.dataTransfer.dropEffect = "move";
-            setDropAt(indexFor(e));
-          }}
-          onDragLeave={(e) => !e.currentTarget.contains(e.relatedTarget as globalThis.Node | null) && setDropAt(null)}
-          onDrop={(e) => {
-            const from = readDrag(e, "asb/tab");
-            setDropAt(null);
-            if (!from) return;
-            e.preventDefault();
-            dispatch({ type: "move", from, to: { group, index: indexFor(e) } });
-          }}
-        >
-          {state.tabs.map((t, i) => {
-            const on = t.path === state.active;
-            const base = baseOf(t.path);
-            const isDirty = dirty.has(t.path);
-            return (
-              <div
-                key={t.path}
-                role="tab"
-                aria-selected={on}
-                data-tab={t.path}
-                data-preview={t.preview || undefined}
-                draggable
-                onDragStart={(e) => setDrag(e, "asb/tab", { group, path: t.path })}
-                onClick={() => dispatch({ type: "activate", group, path: t.path })}
-                onDoubleClick={() => dispatch({ type: "pin", path: t.path })}
-                onMouseDown={(e) => e.button === 1 && e.preventDefault()}
-                onAuxClick={(e) => e.button === 1 && onClose(t.path)}
-                className={cn("group relative flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md pr-1 pl-2 text-meta transition-colors select-none", on && focused ? "text-foreground" : on ? "text-foreground/80" : "text-muted-foreground hover:text-foreground hover:bg-muted/60")}
-                title={t.path}
-              >
-                {dropAt === i && <span className="bg-live absolute inset-y-1 -left-0.5 w-0.5 rounded-full" aria-hidden />}
-                {on && (
-                  <motion.span layoutId={`ws-active-tab-${group}`} className={cn("absolute inset-0 -z-10 rounded-md", focused ? "bg-muted" : "bg-muted/50")} transition={still ? { duration: 0 } : SPRING} aria-hidden>
-                    <span className={cn("absolute inset-x-2 bottom-0 h-px rounded-full", focused ? "bg-foreground/70" : "bg-foreground/30")} />
-                  </motion.span>
-                )}
-                <span className="flex items-center gap-1.5">
-                  <FileIcon path={t.path} size={14} />
-                  <span className={cn("text-micro", t.preview && "italic")}>{base}</span>
-                </span>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onClose(t.path);
-                  }}
-                  aria-label={`Close ${base}`}
-                  className={cn("text-muted-foreground hover:text-foreground hover:bg-background grid size-5 cursor-pointer place-items-center rounded", !isDirty && !on && "opacity-0 group-hover:opacity-100 focus-visible:opacity-100")}
-                >
-                  {isDirty ? <span className="bg-foreground block size-2 rounded-full" aria-label="unsaved" /> : <X className="size-3" />}
-                </button>
-              </div>
-            );
-          })}
-          {dropAt === state.tabs.length && state.tabs.length > 0 && <span className="bg-live h-5 w-0.5 shrink-0 rounded-full" aria-hidden />}
-          {state.tabs.length === 0 && <span className="text-muted-foreground px-1 text-micro">No file open</span>}
-        </div>
-      </CM.Trigger>
-      <CM.Portal>
-        <CM.Content collisionPadding={8} className={MENU_CONTENT} aria-label="Tab actions">
-          {item("Close", () => menuPath && onClose(menuPath), { disabled: !menuTab, hint: shortcutLabel("w") })}
-          {item("Close others", () => many("others"), { disabled: !menuTab || state.tabs.length < 2 })}
-          {item("Close to the right", () => many("right"), { disabled: !menuTab || state.tabs[state.tabs.length - 1]?.path === menuPath })}
-          {item("Close saved", () => many("saved"), { disabled: state.tabs.length === 0 })}
-          {item("Close all", () => many("all"), { disabled: state.tabs.length === 0 })}
-          <CM.Separator className={MENU_SEP} />
-          <CM.Item disabled={!menuTab?.preview} onSelect={() => menuPath && dispatch({ type: "pin", path: menuPath })} className={MENU_ITEM}>
-            <Pin />
-            Keep open
-          </CM.Item>
-          <CM.Item disabled={!menuTab} onSelect={() => menuPath && dispatch({ type: "open", path: menuPath, opts: { side: true, mode: menuTab?.mode } })} className={MENU_ITEM}>
-            <Columns2 />
-            Open to the side
-            <MenuHint>{shortcutLabel("\\")}</MenuHint>
-          </CM.Item>
-          <CM.Item disabled={!menuTab} onSelect={() => menuPath && void copyText(`/workspace/${menuPath}`)} className={MENU_ITEM}>
-            <Copy />
-            Copy path
-          </CM.Item>
-        </CM.Content>
-      </CM.Portal>
-    </CM.Root>
-  );
-}
-
-/* ───────────────────────────── Editor ───────────────────────────── */
-
-function EmptyEditor() {
-  return (
-    <div className="text-muted-foreground flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center text-meta">
-      <div className="grid grid-cols-3 gap-1.5 opacity-60" aria-hidden>
-        {["src/index.ts", "README.md", "package.json", "app.tsx", "styles.css", "Dockerfile"].map((p) => (
-          <span key={p} className="bg-muted grid size-8 place-items-center rounded-md">
-            <FileIcon path={p} size={16} />
-          </span>
-        ))}
-      </div>
-      <p>Open a file from the Explorer, jump with Go to file, or pick a change in Source Control.</p>
-      <p className="text-micro opacity-70">
-        <Kbd>{shortcutLabel("p")}</Kbd> go to file · <Kbd>{shortcutLabel("f")}</Kbd> search · ⌘S saves into the sandbox
-      </p>
-    </div>
-  );
-}
-
-function FileView({ session, tab, doc, tree, change, wrap, onMode, onDoc, onPin, onOpen, onSaved, onSaver }: { session: string; tab: Tab; doc: Doc; tree: Node | null; change?: ChangedFile; wrap: boolean; onMode: (m: Tab["mode"]) => void; onDoc: (p: Partial<Doc>) => void; onPin: () => void; onOpen: Open; onSaved: () => void; onSaver: (fn: (() => Promise<string | null>) | null) => void }) {
-  const [diff, setDiff] = React.useState<ParsedDiff | null>(null);
-  const [content, setContent] = React.useState<string | null>(null);
-  const [error, setError] = React.useState<string | null>(null);
-  const [loading, setLoading] = React.useState(false);
-  const mode = tab.mode;
-  // Accept / reject per hunk, as in Review all; a reject refreshes the changes list.
-  const review = useHunkReview(session, tab.path, diff, { onDiscarded: onSaved });
-
-  React.useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    (async () => {
-      try {
-        if (mode === "diff") {
-          if (diff) return;
-          const d = await api.diff(session, tab.path);
-          if (cancelled) return;
-          if (d.untracked) {
-            const text = content ?? (await api.artifactText(session, tab.path));
-            if (cancelled) return;
-            setContent(text);
-            setDiff(diffForNewFile(text));
-          } else {
-            setDiff(parseUnifiedDiff(d.diff));
-            if (typeof d.original === "string") {
-              // Prefetch the working copy so the switch to Edit is instant.
-              if (content === null) {
-                const text = await api.artifactText(session, tab.path);
-                if (!cancelled) setContent(text);
-              }
-            }
-          }
-        } else if (content === null) {
-          const text = await api.artifactText(session, tab.path);
-          if (!cancelled) setContent(text);
-        }
-      } catch (e) {
-        if (!cancelled) setError(e instanceof ApiError && e.status === 404 ? "This file is not in the sandbox (anymore)." : e instanceof Error ? e.message : String(e));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, tab.path, mode]);
-
-  const draft = doc.draft ?? content ?? "";
-  const saving = doc.saving === "saving";
-  const latest = React.useRef({ draft, dirty: doc.dirty, saving });
-  latest.current = { draft, dirty: doc.dirty, saving };
-  const save = React.useCallback(async (): Promise<string | null> => {
-    const cur = latest.current;
-    if (!cur.dirty || cur.saving) return null;
-    latest.current.saving = true;
-    onDoc({ saving: "saving" });
-    try {
-      await api.writeFile(session, tab.path, cur.draft);
-      setContent(cur.draft);
-      setDiff(null);
-      onDoc({ draft: cur.draft, dirty: false, saving: "saved" });
-      onSaved();
-      return null;
-    } catch (e) {
-      onDoc({ saving: undefined });
-      return e instanceof Error ? e.message : String(e);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, tab.path]);
-  React.useEffect(() => {
-    if (!doc.dirty) return;
-    const t = window.setTimeout(() => void save().then((err) => err && toast.error("Could not save", { description: err })), 900);
-    return () => window.clearTimeout(t);
-  }, [draft, doc.dirty, save]);
-  const saverRef = React.useRef(onSaver);
-  saverRef.current = onSaver;
-  React.useEffect(() => {
-    saverRef.current(save);
-    return () => {
-      saverRef.current(null);
-      void save();
-    };
-  }, [save]);
-  const download = async () => {
-    try {
-      const blob = await api.artifactBlob(session, tab.path);
-      const href = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = href;
-      a.download = baseOf(tab.path);
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(href), 10_000);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : String(e));
-    }
-  };
-
-  const base = baseOf(tab.path);
-  const deleted = change?.status === "deleted";
-
-  return (
-    <>
-      {/* Breadcrumbs + mode + actions */}
-      <div className="flex h-9 shrink-0 items-center gap-2 border-b px-3">
-        <Breadcrumb path={tab.path} tree={tree} onOpen={onOpen} />
-        {change && (
-          <span className="stamp flex shrink-0 items-center gap-1.5 pr-1">
-            {change.additions > 0 && <span className="text-ok">+{change.additions}</span>}
-            {change.deletions > 0 && <span className="text-destructive">−{change.deletions}</span>}
-          </span>
-        )}
-        {change && (
-          <AnimatedTabs
-            ariaLabel="View mode"
-            value={mode === "diff" ? "diff" : "edit"}
-            onChange={(v) => onMode(v)}
-            items={[
-              { value: "diff", icon: <FileDiff className="size-3.5" />, label: "Diff" },
-              { value: "edit", icon: <FileCode2 className="size-3.5" />, label: "File", disabled: deleted },
-            ]}
-          />
-        )}
-        <span className={cn("stamp w-14 text-right transition-colors", saving ? "text-muted-foreground" : doc.dirty ? "text-attention-text" : "text-faint")} aria-live="polite">
-          {saving ? "saving…" : doc.dirty ? "unsaved" : doc.saving === "saved" ? "saved" : ""}
-        </span>
-        <Button variant="ghost" size="icon-sm" onClick={download} aria-label="Download" disabled={deleted}>
-          <Download />
-        </Button>
-      </div>
-      <div className="min-h-0 flex-1 overflow-hidden">
-        {error ? (
-          <p className="text-muted-foreground px-4 py-6 text-meta">{error}</p>
-        ) : loading && ((mode === "diff" && !diff) || (mode !== "diff" && content === null)) ? (
-          <p className="text-muted-foreground flex items-center gap-2 px-4 py-6 text-meta">
-            <Loader2 className="size-4 animate-spin" aria-hidden />
-            Loading {mode === "diff" ? "diff" : "file"}…
-          </p>
-        ) : mode === "diff" && diff ? (
-          <div className="h-full overflow-auto">
-            <DiffView diff={diff} path={tab.path} review={review} />
-          </div>
-        ) : mode === "edit" && content !== null ? (
-          deleted ? (
-            <p className="text-muted-foreground px-4 py-6 text-meta">This file was deleted in the working tree; see the diff.</p>
-          ) : (
-            <CodeEditor
-              value={draft}
-              onChange={(v) => {
-                onDoc({ draft: v, dirty: v !== content });
-                if (tab.preview) onPin();
-              }}
-              onSave={() => void save().then((err) => err && toast.error("Could not save", { description: err }))}
-              path={tab.path}
-              ariaLabel={`Edit ${base}`}
-              autoFocus
-              reveal={tab.reveal}
-              wrap={wrap}
-            />
-          )
-        ) : null}
-      </div>
-    </>
-  );
-}
-
-function Breadcrumb({ path, tree, onOpen }: { path: string; tree: Node | null; onOpen: Open }) {
-  const segs = path.split("/");
-  const dirs = segs.slice(0, -1).map((name, i) => ({ name, path: segs.slice(0, i + 1).join("/") }));
-  const shown: { name: string; path: string | null }[] = dirs.length > 4 ? [dirs[0], { name: "…", path: null }, ...dirs.slice(-2)] : dirs;
-  return (
-    <nav aria-label="Breadcrumb" className="@container flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-meta" title={path}>
-      {/* Folders are shown only when the header is wide enough to show them whole; below that the
-          trail is just the file (the full path stays in the tooltip). Never a row of chopped words. */}
-      {shown.map((d, i) => (
-        <React.Fragment key={d.path ?? i}>
-          <Segment seg={d} current={d.path ?? ""} tree={tree} onOpen={onOpen} className={cn("text-muted-foreground hidden shrink-0 @min-[460px]:inline", d.path === null && "tracking-widest", i < shown.length - 1 && "@min-[460px]:hidden @min-[640px]:inline")}>
-            {d.name}
-          </Segment>
-          <ChevronRight className={cn("text-faint hidden size-3 shrink-0 @min-[460px]:inline", i < shown.length - 1 && "@min-[460px]:hidden @min-[640px]:inline")} aria-hidden />
-        </React.Fragment>
-      ))}
-      <Segment seg={{ name: baseOf(path), path }} current={path} tree={tree} onOpen={onOpen} className="text-foreground flex shrink-0 items-center gap-1.5 font-medium">
-        <FileIcon path={path} size={14} />
-        <span className="max-w-[16rem] truncate">{baseOf(path)}</span>
-      </Segment>
-    </nav>
-  );
-}
-
-function Segment({ seg, current, tree, onOpen, className, children }: { seg: { name: string; path: string | null }; current: string; tree: Node | null; onOpen: Open; className: string; children: React.ReactNode }) {
-  if (!tree || !seg.path) return <span className={className}>{children}</span>;
-  const siblings = childrenOf(tree, parentOf(seg.path));
-  return (
-    <DM.Root>
-      <DM.Trigger className={cn(className, "hover:text-foreground data-[state=open]:text-foreground cursor-pointer rounded px-0.5 outline-none hover:bg-muted focus-visible:ring-1 focus-visible:ring-ring")} aria-label={`${seg.name}: siblings`}>
-        {children}
-      </DM.Trigger>
-      <DM.Portal>
-        <DM.Content align="start" sideOffset={6} collisionPadding={8} className={cn(MENU_CONTENT, "max-h-80 overflow-auto")}>
-          {siblings.map((n) => (
-            <DirItem key={n.path} node={n} current={current} onOpen={onOpen} />
-          ))}
-        </DM.Content>
-      </DM.Portal>
-    </DM.Root>
-  );
-}
-
-function DirItem({ node, current, onOpen }: { node: Node; current: string; onOpen: Open }) {
-  const on = node.path === current || current.startsWith(node.path + "/");
-  if (!node.children) {
-    return (
-      <DM.Item onSelect={() => onOpen(node.path, { preview: true })} className={cn(MENU_ITEM, on && "bg-accent/60")} aria-current={on || undefined}>
-        <FileIcon path={node.path} size={15} />
-        <span className="truncate">{node.name}</span>
-      </DM.Item>
-    );
-  }
-  return (
-    <DM.Sub>
-      <DM.SubTrigger className={cn(MENU_ITEM, on && "bg-accent/60")}>
-        <FolderIcon name={node.name} open={on} />
-        <span className="truncate">{node.name}</span>
-        <ChevronRight className="ml-auto size-3.5" aria-hidden />
-      </DM.SubTrigger>
-      <DM.Portal>
-        <DM.SubContent sideOffset={4} collisionPadding={8} className={cn(MENU_CONTENT, "max-h-80 overflow-auto")}>
-          {childrenOf(node, "").map((n) => (
-            <DirItem key={n.path} node={n} current={current} onOpen={onOpen} />
-          ))}
-        </DM.SubContent>
-      </DM.Portal>
-    </DM.Sub>
   );
 }

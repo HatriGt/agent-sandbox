@@ -823,3 +823,23 @@ Scope: chat visualizer tables (viz/DataTable) and the page-level table (ui/data-
 ### Left out on purpose
 - The grip is a constant 8px hit area straddling the edge, not 4px widening to 8px on hover. `.dt-resize::after` in index.css already assumes 8px and that file is not owned by this round.
 - Other viz blocks (ChartExtras heatmap matrix, AutoBlocks/ListBlocks/SmallBlocks key-value `<dl>` grids) are not row tables and were not converted.
+
+## Round: find like VS Code, window shortcuts (2026-10-22)
+
+**Find is a widget, not a panel.** The editor's find lives in a floating card at the top-right of the code, 320px wide (384px with the replace row), `rounded-md`, hairline border, `shadow-e2`, `bg-popover`, 120ms fade and 6px drop. It never pushes the code down. The search input takes focus on open and is seeded from a short single-line selection. The count reads "n of N" in tabular figures, "No results" in destructive, "Invalid" for a bad regex, "999+" past the cap. Match case, whole word and regex are `aria-pressed` toggles inside the input's frame, lit with `bg-live/15 text-live`. Replace is a chevron-expanded second row and only exists when the file is editable. Keys: Enter next, Shift+Enter previous, Escape closes and returns focus to the code, Enter in Replace replaces one, ⌘Enter replaces all. The last query follows the user from file to file.
+
+**Highlighting rides the package's own panel.** @codemirror/search only paints matches while its panel is open, so the host keeps a hidden panel (`createPanel` returns a `hidden` div, `.cm-panels { display: none }`) open for exactly as long as the widget is mounted. The widget pushes its query with `setSearchQuery` and lets `findNext`, `findPrevious`, `replaceNext`, `replaceAll` do the moving. Typing jumps to the nearest match at or after the caret (wrapping) so the count reads "1 of N" and the editor scrolls there.
+
+**Workspace chords are window chords.** While the files pane is mounted, every `SHORTCUTS` entry fires from a window-level capture listener, so ⌘P, ⌘F, ⌘S, ⌘B and the rest work from the composer and the side chat input, not just inside the code. The listener skips when `e.defaultPrevented` and when any Radix dialog, menu, popover or the command palette (a native `<dialog>`) is open (`OVERLAY_OPEN`). ⌘K stays the palette's. Quick open (role="dialog", no `data-state`) does not block the chords so ⌘P inside it is harmless. The ShortcutsDialog lists the whole table under "Workspace · while the files pane is open" and `SHORTCUTS` is the single source for that list, the empty editor's welcome list and every menu hint.
+
+**Shortcut table.** ⌘P Go to file, ⌘G Go to line (quick open with ":"), ⌘F Find in file (no file open: Search in files), ⌘⇧F Search in files, ⌘S Save file, ⌘W Close tab, ⌘B Toggle the files panel, ⌘\ Split the editor, ⌥Z Toggle word wrap, ⌘1 / ⌘2 focus a group. Editor-local only: ⌘D add next occurrence, ⌘⇧L select all occurrences, Esc close find.
+
+**Editor status strip.** 22px, `text-micro`, muted, hairline top border. Left: "Ln X, Col Y" live, "(N selected)" when a selection exists, "Diff" in diff mode. Right: save state (Saving…, Unsaved in attention, Saved, Autosave on; `aria-live`), language, Wrap toggle (`aria-pressed`), and an italic bordered "Preview" badge that pins the tab on click. The save stamp moved here from the breadcrumb bar and footer.
+
+**Tabs are flush.** No gap or padding on the strip. The active tab is `bg-card` with a 2px top line in ink (`bg-foreground`, `/30` when the group is unfocused); the backdrop glides between tabs with the shared spring. Preview tabs are italic. A dirty tab shows a 8px dot that swaps to × under the pointer; clean inactive tabs reveal × on hover only.
+
+**Breadcrumb bar 26px.** `ChevronRight size-3` between segments, clickable segments `hover:bg-muted`, `Segmented size="xs"` for Diff / File on the right, download as a size-5 icon button.
+
+**Explorer header.** A 26px row: `.label` "Explorer" in sentence case (DESIGN.md: no uppercase eyebrows) plus the repo name as a `stamp` when there is one repo. New file, New folder, Collapse all, Refresh are size-6 icon buttons revealed on hover or focus-within. Tree rows are 22px; the glide highlight and indent guides stay. The tabs-row Refresh hides in the Explorer view since the header owns it.
+
+**Empty editor.** A `<dl>` of the chords that get someone into a file, rendered with `<Kbd>`: ⌘P open, ⌘⇧F search, ⌘F find, ⌘B sidebar, ⌘\ split.

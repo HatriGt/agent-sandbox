@@ -2,7 +2,9 @@ import * as React from "react";
 import { EditorState, EditorSelection, Compartment, Prec, StateEffect, StateField, type Extension } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView, keymap, lineNumbers, placeholder, highlightActiveLine, highlightActiveLineGutter, drawSelection, dropCursor, rectangularSelection, crosshairCursor, highlightSpecialChars, scrollPastEnd } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
-import { searchKeymap, highlightSelectionMatches } from "@codemirror/search";
+import { closeSearchPanel, highlightSelectionMatches, openSearchPanel, search, searchPanelOpen, selectNextOccurrence, selectSelectionMatches } from "@codemirror/search";
+import { AnimatePresence } from "motion/react";
+import { EditorFind } from "@/components/EditorFind";
 import { bracketMatching, foldGutter, foldKeymap, indentOnInput, syntaxHighlighting, HighlightStyle, StreamLanguage, LanguageDescription, LanguageSupport, Language } from "@codemirror/language";
 import { classHighlighter, highlightCode, tags as t } from "@lezer/highlight";
 import { javascript } from "@codemirror/lang-javascript";
@@ -18,10 +20,12 @@ import { cn } from "@/lib/utils";
 
 /**
  * The code editor, on CodeMirror 6 — a real editor: one scroller, native selection, undo history,
- * ⌘F search, bracket matching, folding, indentation-aware Enter, Tab as indent. Themed from the
- * console's own tokens (fonts, `--text-code`, muted/foreground), light and dark. `onChange` fires on
- * every document change so the caller can autosave; ⌘S calls `onSave`. `tokenizeLines` lends the
- * same grammars to the two-gutter diff so code reads the same in the editor and in a diff.
+ * ⌘F find (the floating `EditorFind` widget), bracket matching, folding, indentation-aware Enter,
+ * Tab as indent. Themed from the console's own tokens (fonts, `--text-code`, muted/foreground),
+ * light and dark. `onChange` fires on every document change so the caller can autosave; ⌘S calls
+ * `onSave`; `onStatus` reports the caret for a status strip. The `ref` handle lets a host open the
+ * find widget or focus the editor from a window-level shortcut. `tokenizeLines` lends the same
+ * grammars to the two-gutter diff so code reads the same in the editor and in a diff.
  */
 export function languageFor(path: string): Extension {
   const base = path.slice(path.lastIndexOf("/") + 1).toLowerCase();
@@ -125,12 +129,19 @@ const chrome = EditorView.theme({
   ".cm-selectionMatch": { backgroundColor: "color-mix(in oklch, var(--attention) 22%, transparent)" },
   ".cm-searchMatch": { backgroundColor: "color-mix(in oklch, var(--attention) 35%, transparent)" },
   ".cm-searchMatch.cm-searchMatch-selected": { backgroundColor: "color-mix(in oklch, var(--attention) 60%, transparent)" },
-  ".cm-panels": { backgroundColor: "var(--card)", color: "var(--foreground)", borderColor: "var(--border)", fontFamily: "var(--font-sans)", fontSize: "12px" },
-  ".cm-panels.cm-panels-top": { borderBottom: "1px solid var(--border)" },
-  ".cm-panel.cm-search": { padding: "6px 10px" },
-  ".cm-panel.cm-search input, .cm-panel.cm-search button": { fontFamily: "var(--font-sans)", fontSize: "12px", borderRadius: "6px", border: "1px solid var(--border)", background: "var(--background)", color: "var(--foreground)", padding: "2px 8px" },
-  ".cm-panel.cm-search label": { fontSize: "11px", color: "var(--muted-foreground)" },
+  // The search panel exists only to switch match highlighting on; the find widget is the UI.
+  ".cm-panels": { display: "none" },
 });
+
+/**
+ * @codemirror/search paints `.cm-searchMatch` only while its panel is open (searchHighlighter checks
+ * `panel` before decorating), so the panel is a hidden element and the widget opens and closes it.
+ */
+const hiddenSearchPanel = () => {
+  const dom = document.createElement("div");
+  dom.hidden = true;
+  return { dom, top: true };
+};
 
 /**
  * Authoring, not coding: a touch larger type, looser leading, wider measure padding and a gutter that
@@ -161,8 +172,9 @@ const baseExtensions = (readOnly: boolean): Extension => [
   crosshairCursor(),
   highlightActiveLine(),
   highlightSelectionMatches(),
+  search({ createPanel: hiddenSearchPanel, top: true }),
   scrollPastEnd(),
-  keymap.of([...defaultKeymap, ...searchKeymap, ...historyKeymap, ...foldKeymap, indentWithTab]),
+  keymap.of([...defaultKeymap, ...historyKeymap, ...foldKeymap, indentWithTab, { key: "Mod-d", run: selectNextOccurrence, preventDefault: true }, { key: "Shift-Mod-l", run: selectSelectionMatches, preventDefault: true }]),
   EditorState.readOnly.of(readOnly),
   EditorView.editable.of(!readOnly),
   chrome,
@@ -200,10 +212,22 @@ function revealLines(v: EditorView, from: number, to: number) {
   });
 }
 
+/** What a status strip shows: the caret's line and column (1-based) and the main selection's length. */
+export type EditorStatus = { line: number; col: number; selected: number };
+export type CodeEditorHandle = { openFind(): void; closeFind(): void; focus(): void };
+
+const statusOf = (state: EditorState): EditorStatus => {
+  const main = state.selection.main;
+  const line = state.doc.lineAt(main.head);
+  return { line: line.number, col: main.head - line.from + 1, selected: main.to - main.from };
+};
+
 export function CodeEditor({
+  ref,
   value,
   onChange,
   onSave,
+  onStatus,
   language = "",
   path,
   readOnly = false,
@@ -215,9 +239,12 @@ export function CodeEditor({
   reveal,
   wrap = false,
 }: {
+  ref?: React.Ref<CodeEditorHandle>;
   value: string;
   onChange?: (v: string) => void;
   onSave?: () => void;
+  /** The caret moved or the document changed. */
+  onStatus?: (s: EditorStatus) => void;
   /** Explicit language name, or leave empty and pass `path` to detect from the extension. */
   language?: string;
   path?: string;
@@ -242,8 +269,37 @@ export function CodeEditor({
   const wrapComp = React.useRef(new Compartment());
   const onChangeRef = React.useRef(onChange);
   const onSaveRef = React.useRef(onSave);
+  const onStatusRef = React.useRef(onStatus);
   onChangeRef.current = onChange;
   onSaveRef.current = onSave;
+  onStatusRef.current = onStatus;
+  // The live view as state, so the find widget renders once it exists; `rev` ticks on every
+  // document or selection change so the widget's match count follows the editor.
+  const [live, setLive] = React.useState<EditorView | null>(null);
+  const [rev, setRev] = React.useState(0);
+  const [find, setFind] = React.useState({ open: false, nonce: 0 });
+  const findOpen = React.useRef(false);
+  findOpen.current = find.open;
+  // Whether find is wanted, independent of the view: a host may ask before the view mounts (⌘F on
+  // a tab still loading), and the view is recreated under StrictMode and on a readOnly change.
+  const findWanted = React.useRef(false);
+  const openFind = React.useCallback(() => {
+    findWanted.current = true;
+    const v = view.current;
+    if (!v) return;
+    if (!searchPanelOpen(v.state)) openSearchPanel(v);
+    setFind((f) => ({ open: true, nonce: f.nonce + 1 }));
+  }, []);
+  const closeFind = React.useCallback(() => {
+    findWanted.current = false;
+    const v = view.current;
+    if (v) {
+      closeSearchPanel(v);
+      v.focus();
+    }
+    setFind((f) => (f.open ? { ...f, open: false } : f));
+  }, []);
+  React.useImperativeHandle(ref, () => ({ openFind, closeFind, focus: () => view.current?.focus() }), [openFind, closeFind]);
 
   const langExt = React.useMemo(() => languageFor(path ?? (language ? `x.${language === "typescript" ? "ts" : language === "javascript" ? "js" : language}` : "")), [path, language]);
 
@@ -267,19 +323,29 @@ export function CodeEditor({
               return true;
             },
           },
+          { key: "Mod-f", run: () => (openFind(), true) },
+          { key: "Escape", run: () => findOpen.current && (closeFind(), true) },
         ]),
         EditorView.updateListener.of((u) => {
           if (u.docChanged) onChangeRef.current?.(u.state.doc.toString());
+          if (u.docChanged || u.selectionSet) {
+            onStatusRef.current?.(statusOf(u.state));
+            setRev((r) => r + 1);
+          }
         }),
         EditorView.contentAttributes.of({ "aria-label": ariaLabel }),
       ],
     });
     const v = new EditorView({ state, parent: host.current });
     view.current = v;
+    setLive(v);
+    onStatusRef.current?.(statusOf(v.state));
     if (autoFocus) v.focus();
+    if (findWanted.current) openFind();
     return () => {
       v.destroy();
       view.current = null;
+      setLive(null);
     };
     // The document is seeded once; later external changes are applied through the effect below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -311,7 +377,12 @@ export function CodeEditor({
     return () => window.clearTimeout(t);
   }, [reveal?.nonce, readOnly, prose, placeholderText]);
 
-  return <div ref={host} className={cn("cm-host h-full min-h-0 w-full overflow-hidden text-code", className)} />;
+  return (
+    <div className={cn("relative h-full min-h-0 w-full overflow-hidden", className)}>
+      <div ref={host} className="cm-host h-full min-h-0 w-full overflow-hidden text-code" />
+      <AnimatePresence>{find.open && live && <EditorFind key="find" view={live} nonce={find.nonce} editable={!readOnly} rev={rev} onClose={closeFind} />}</AnimatePresence>
+    </div>
+  );
 }
 
 /**
