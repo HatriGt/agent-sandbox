@@ -112,7 +112,7 @@ export function fenceIdentity(f: Pick<Fence, "lang" | "meta" | "body" | "heading
 }
 
 export interface SayInput {
-  /** Stable key of the say item (Thread uses its group index). */
+  /** Stable key of the say item (Thread derives it from the group's timestamp). */
   key: string;
   text: string;
   at?: number;
