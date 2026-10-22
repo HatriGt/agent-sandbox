@@ -3,7 +3,7 @@ import { Check, Copy, Code2, Maximize2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CodeBlock, CodeBlockCode } from "@/components/ui/code-block";
 import { LiveSlotBadge, LiveSlotContext, useLiveSlotTitle } from "./live-blocks";
-import { VizFullscreen, VizFullscreenContext } from "./viz-fullscreen";
+import { VizFullscreen, VizFullscreenContext, VizFullscreenGate } from "./viz-fullscreen";
 
 /** Fixed categorical slot → CSS var. Never cycles: callers cap series at 8 upstream. */
 export function seriesColor(i: number): string {
@@ -84,6 +84,13 @@ export function VizFrame({
   const slotTitle = useLiveSlotTitle();
   const [copied, setCopied] = React.useState(false);
   const [full, setFull] = React.useState(false);
+  const gate = React.useContext(VizFullscreenGate);
+  React.useEffect(() => {
+    if (full) gate?.(true);
+    return () => {
+      if (full) gate?.(false);
+    };
+  }, [full, gate]);
   // Already inside a fullscreen dialog (a nested card): no second maximize.
   const inFullscreen = React.useContext(VizFullscreenContext);
   const quiet = "text-muted-foreground hover:text-foreground grid size-6 cursor-pointer place-items-center rounded-md opacity-60 group-hover/viz:opacity-100 focus-visible:opacity-100";
