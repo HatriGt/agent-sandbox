@@ -587,11 +587,13 @@ if (stream) {
 } else if (interact === "file") {
   // Open the changes dock and click its first row: the per-file diff.
   await page.getByRole("button", { name: /show the changed files/i }).click();
-  const row = page.getByRole("button", { name: /rateLimit\.ts/ }).first();
+  const row = page.getByRole("list", { name: "Changed files" }).getByRole("button", { name: /rateLimit\.ts/ }).first();
   await row.waitFor({ state: "visible" });
   await page.waitForTimeout(600);
   await row.click();
-  await page.waitForTimeout(1800);
+  await page.locator('aside[aria-label="Workspace"]').waitFor({ timeout: 8000 }).catch(() => console.log("workspace pane never mounted"));
+  await page.waitForTimeout(600);
+  console.log("workspace:", await page.evaluate(() => { const a = document.querySelector('aside[aria-label="Workspace"]'); if (!a) return "none"; const r = a.getBoundingClientRect(); return `${Math.round(r.x)},${Math.round(r.y)} ${Math.round(r.width)}x${Math.round(r.height)} files-panel=${!!a.querySelector("section[aria-label]")} editor-tab=${a.querySelector("[role=tab][aria-selected=true]")?.textContent?.trim() ?? "-"}`; }));
   await shot("-file");
 } else if (interact === "review") {
   // The Review-all pane, hovering the first hunk so its accept/reject row shows; then one accepted.

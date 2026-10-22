@@ -2,7 +2,7 @@ import * as React from "react";
 import { ArrowUp, Eraser, MessageCircleQuestion, PanelRightClose, RotateCw } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useReducedMotion } from "@/lib/motion-pref";
-import { useMediaQuery } from "./RunSettings";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import type { SettledTurn, SideChatHandle } from "@/lib/sidechat";
 import { Markdown } from "@/components/ui/markdown";
 import { Button } from "@/components/ui/button";

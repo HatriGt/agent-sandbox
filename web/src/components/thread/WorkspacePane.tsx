@@ -18,6 +18,7 @@ import { DiffView, useHunkReview } from "./FilePane";
 import { RecordsTable } from "./RecordsTable";
 import { ReviewView, type ReviewFocus } from "./review/ReviewView";
 import { cn } from "@/lib/utils";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import {
   EMPTY_TABS,
   SHORTCUTS,
@@ -107,6 +108,9 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
   const [treeErr, setTreeErr] = React.useState<string | null>(null);
   const [expanded, setExpanded] = React.useState<Set<string>>(() => new Set(repos.map((r) => r.name)));
   const [view, setView] = React.useState<View>("explorer");
+  // Below md the pane is the whole screen and the files panel is a layer over the editor: pick a
+  // file and the panel closes; the header's files button brings it back.
+  const phone = !useMediaQuery("(min-width: 48rem)");
   const [sidebar, setSidebar] = React.useState(true);
   const [query, setQuery] = React.useState("");
   const [tabs, dispatch] = React.useReducer(tabsReducer, EMPTY_TABS);
@@ -166,8 +170,9 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
       expandTo(path);
       setFocusedRow(path);
       if (!opts.preview) pushRecent(path);
+      if (phone) setSidebar(false);
     },
-    [expandTo, pushRecent]
+    [expandTo, pushRecent, phone]
   );
   React.useEffect(() => {
     if (!open) return;
@@ -357,14 +362,14 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
     <motion.aside
       ref={paneRef}
       initial={{ width: 0, opacity: 0 }}
-      animate={{ width: full ? "100%" : width || "58%", opacity: 1 }}
+      animate={{ width: full || phone ? "100%" : width || "58%", opacity: 1 }}
       exit={{ width: 0, opacity: 0 }}
       transition={{ width: resizing ? { duration: 0 } : { duration: 0.28, ease: EASE }, opacity: { duration: 0.18 } }}
       className="bg-card absolute inset-0 z-20 flex min-w-0 flex-col overflow-hidden md:relative md:inset-auto md:h-full md:shrink-0 md:border-l"
       aria-label="Workspace"
       onKeyDownCapture={onKeyDownCapture}
     >
-      {!full && <Divider value={width} range={range} label="Resize workspace" onChange={setPaneWidth} onReset={() => setPaneWidth(null)} onDragging={setResizing} />}
+      {!full && !phone && <Divider value={width} range={range} label="Resize workspace" onChange={setPaneWidth} onReset={() => setPaneWidth(null)} onDragging={setResizing} />}
 
       <div className="flex min-h-0 flex-1">
         <div className="flex min-h-0 min-w-0 flex-1">
@@ -421,8 +426,8 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
         </div>
 
         {sidebar && (
-          <section className="bg-muted/20 relative flex shrink-0 flex-col border-l" style={{ width: sidebarWidth }} aria-label={filesTitle}>
-            <Divider value={sidebarWidth} range={sbRange} label="Resize files panel" onChange={setSidebarWidth} onReset={() => setSidebarWidth(null)} />
+          <section className={cn("bg-muted/20 relative flex shrink-0 flex-col border-l", phone && "bg-card absolute inset-0 z-10 border-l-0")} style={phone ? undefined : { width: sidebarWidth }} aria-label={filesTitle}>
+            {!phone && <Divider value={sidebarWidth} range={sbRange} label="Resize files panel" onChange={setSidebarWidth} onReset={() => setSidebarWidth(null)} />}
             <div className="flex h-10 shrink-0 items-center gap-1 px-2">
               <AnimatedTabs
                 ariaLabel="Sidebar view"
@@ -445,9 +450,14 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
               <button type="button" onClick={() => (view === "scm" || view === "review" ? loadGit() : void loadTree())} aria-label="Refresh" className="text-muted-foreground hover:text-foreground ml-auto grid size-7 cursor-pointer place-items-center rounded-md">
                 <RefreshCw className="size-3.5" />
               </button>
+              {phone && (
+                <button type="button" onClick={onClose} aria-label="Close workspace" className="text-muted-foreground hover:text-foreground grid size-7 cursor-pointer place-items-center rounded-md">
+                  <X className="size-3.5" />
+                </button>
+              )}
             </div>
             {view === "scm" || view === "review" ? (
-              <SourceControl session={session} repo={activeRepo} status={git} err={gitErr} reload={loadGit} changes={changes} active={view === "review" ? (reviewFocus?.path ?? null) : active} onOpen={(p) => (view === "review" ? setReviewFocus({ path: p, nonce: Date.now() }) : openPath(p, { mode: "diff", preview: true }))} onChanged={onSaved} />
+              <SourceControl session={session} repo={activeRepo} status={git} err={gitErr} reload={loadGit} changes={changes} active={view === "review" ? (reviewFocus?.path ?? null) : active} onOpen={(p) => (view === "review" ? (setReviewFocus({ path: p, nonce: Date.now() }), phone && setSidebar(false)) : openPath(p, { mode: "diff", preview: true }))} onChanged={onSaved} />
             ) : view === "search" ? (
               <SearchView session={session} active={active} onOpen={openPath} />
             ) : (
@@ -514,21 +524,21 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
       </div>
 
       {/* Status bar */}
-      <footer className="bg-muted/60 text-muted-foreground flex h-6 shrink-0 items-center gap-3 border-t px-3 text-micro">
+      <footer className="bg-muted/60 text-muted-foreground flex h-6 shrink-0 items-center gap-3 overflow-hidden border-t px-3 text-micro whitespace-nowrap">
         {activeRepo && (
-          <button type="button" onClick={() => (setView("scm"), setSidebar(true))} className="text-foreground hover:bg-muted flex cursor-pointer items-center gap-1 rounded px-1" aria-label="Open source control">
+          <button type="button" onClick={() => (setView("scm"), setSidebar(true))} className="text-foreground hover:bg-muted flex min-w-0 cursor-pointer items-center gap-1 rounded px-1" aria-label="Open source control">
             <GitBranch className="size-3" aria-hidden />
-            {git?.branch ?? activeRepo.branch ?? "…"}
+            <span className="truncate">{git?.branch ?? activeRepo.branch ?? "…"}</span>
             {git && git.ahead > 0 && <span className="text-ok">↑{git.ahead}</span>}
             {git && git.behind > 0 && <span className="text-attention-text">↓{git.behind}</span>}
           </button>
         )}
-        <span>{changes.length} changed</span>
-        {paths && <span>{paths.length} files</span>}
-        <button type="button" onClick={() => setQuickOpen("")} className="hover:bg-muted hover:text-foreground ml-auto flex cursor-pointer items-center gap-1 rounded px-1" aria-label="Quick open">
+        <span className="hidden sm:inline">{changes.length} changed</span>
+        {paths && <span className="hidden sm:inline">{paths.length} files</span>}
+        <button type="button" onClick={() => setQuickOpen("")} className="hover:bg-muted hover:text-foreground ml-auto hidden cursor-pointer items-center gap-1 rounded px-1 sm:flex" aria-label="Quick open">
           Go to file <Kbd className="h-4 min-w-4 text-[10px]">{shortcutLabel("p")}</Kbd>
         </button>
-        {activeTab && <span>{languageOf(activeTab.path)}</span>}
+        {activeTab && <span className="ml-auto sm:ml-0">{languageOf(activeTab.path)}</span>}
         {activeTab?.mode === "edit" && (
           <button type="button" onClick={toggleWrap} aria-pressed={wrap} aria-label="Toggle word wrap" title={`Word wrap (${shortcutLabel("z")})`} className={cn("hover:bg-muted flex cursor-pointer items-center gap-1 rounded px-1", wrap && "text-foreground")}>
             <WrapText className="size-3" aria-hidden />

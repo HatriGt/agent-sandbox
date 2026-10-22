@@ -1,6 +1,7 @@
 import * as React from "react";
 import { ArrowUp, ChevronsUpDown, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { Button } from "@/components/ui/button";
 import { NumberTicker } from "@/components/ui/number-ticker";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, type TableProps } from "@/components/ui/table";
@@ -31,18 +32,6 @@ export interface Column<T> {
 }
 
 const BP: Record<NonNullable<Column<unknown>["hideBelow"]>, string> = { sm: "(min-width: 40rem)", md: "(min-width: 48rem)", lg: "(min-width: 64rem)" };
-
-function useMedia(query: string) {
-  return React.useSyncExternalStore(
-    (notify) => {
-      const mq = window.matchMedia(query);
-      mq.addEventListener("change", notify);
-      return () => mq.removeEventListener("change", notify);
-    },
-    () => window.matchMedia(query).matches,
-    () => true
-  );
-}
 
 /** The trailing actions column, sized from its own buttons on a phone. */
 const ACTIONS = "__actions";
@@ -229,7 +218,7 @@ export function DataTable<T>({
   /** Where dragged column widths are remembered; defaults to the aria-label. */
   resizeKey?: string;
 }) {
-  const at = { sm: useMedia(BP.sm), md: useMedia(BP.md), lg: useMedia(BP.lg) };
+  const at = { sm: useMediaQuery(BP.sm), md: useMediaQuery(BP.md), lg: useMediaQuery(BP.lg) };
   // A column hidden at this breakpoint is not rendered at all, not display:none: in fixed layout a
   // hidden <col> or cell still takes an equal share of the free width, which is what squeezed the
   // primary column on phones.

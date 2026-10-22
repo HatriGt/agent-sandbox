@@ -69,6 +69,7 @@ export function ChangesDock({ files, loading, onOpen, onRefresh, onReviewAll, ac
               animate={still ? { opacity: 1 } : { height: "auto", opacity: 1 }}
               exit={still ? { opacity: 0 } : { height: 0, opacity: 0 }}
               transition={{ duration: still ? 0.12 : 0.26, ease: [0.22, 1, 0.36, 1] }}
+              aria-label="Changed files"
               className="max-h-64 overflow-y-auto border-b"
             >
               {files.map((f, i) => {

@@ -46,7 +46,7 @@ import { buildLiveRegistry, type SayInput } from "@/lib/viz-identity";
 import { AnsweredQuestionItem, Density, ExpandAll, LifecycleItem, MemoryItem, QueuedItem, RepeatedPolls, SayItem, ToolGroup, WorkingIndicator, YouItem, repeatedPolls, type ThreadDensity } from "./TraceItems";
 import { ReasoningTrail, type TrailItem } from "./ReasoningTrail";
 import { PlanBoard, type PlanVariant } from "./PlanBoard";
-import { useMediaQuery } from "./RunSettings";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { ThreadMinimap, type Turn } from "./ThreadMinimap";
 import { useStickToBottom } from "use-stick-to-bottom";
 import { ChangesDock } from "./ChangesDock";
