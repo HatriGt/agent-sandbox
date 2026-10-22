@@ -267,13 +267,14 @@ export type PaneCommands = {
   toggleWrap(): void;
   focusGroup(g: 0 | 1): void;
 };
-export type ShortcutId = "quickOpen" | "goToLine" | "find" | "searchInFiles" | "save" | "close" | "sidebar" | "split" | "wrap" | "group1" | "group2";
+export type ShortcutId = "quickOpen" | "goToLine" | "goToSymbol" | "find" | "searchInFiles" | "save" | "close" | "sidebar" | "split" | "wrap" | "group1" | "group2";
 export type Shortcut = { id: ShortcutId; key: string; mod?: boolean; shift?: boolean; alt?: boolean; label: string; what: string; run: (c: PaneCommands) => void };
 
 /** The pane's chords, in the order the shortcuts dialog lists them. Each label is one glyph per key. */
 export const SHORTCUTS: Shortcut[] = [
   { id: "quickOpen", key: "p", mod: true, label: "⌘P", what: "Go to file", run: (c) => c.quickOpen() },
   { id: "goToLine", key: "g", mod: true, label: "⌘G", what: "Go to line", run: (c) => c.quickOpen(":") },
+  { id: "goToSymbol", key: "o", mod: true, shift: true, label: "⌘⇧O", what: "Go to symbol", run: (c) => c.quickOpen("@") },
   { id: "find", key: "f", mod: true, label: "⌘F", what: "Find in file", run: (c) => c.find() },
   { id: "searchInFiles", key: "f", mod: true, shift: true, label: "⌘⇧F", what: "Search in files", run: (c) => c.searchInFiles() },
   { id: "save", key: "s", mod: true, label: "⌘S", what: "Save file", run: (c) => c.save() },
