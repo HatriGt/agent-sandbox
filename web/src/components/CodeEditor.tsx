@@ -16,6 +16,7 @@ import { html } from "@codemirror/lang-html";
 import { yaml } from "@codemirror/lang-yaml";
 import { shell } from "@codemirror/legacy-modes/mode/shell";
 import { useIsDark } from "@/components/ui/code-block";
+import { symbolsIn, type CodeSymbol } from "@/lib/symbols";
 import { cn } from "@/lib/utils";
 
 /**
@@ -124,6 +125,7 @@ const chrome = EditorView.theme({
   // A revealed line (a code ref clicked in chat) flashes, then settles to nothing.
   ".cm-reveal-line": { animation: "cm-reveal 2s ease-out forwards" },
   "@keyframes cm-reveal": { "0%, 35%": { backgroundColor: "color-mix(in oklch, var(--live) 18%, transparent)" }, "100%": { backgroundColor: "transparent" } },
+  ".cm-preview-line": { backgroundColor: "color-mix(in oklch, var(--live) 12%, transparent)" },
   ".cm-placeholder": { color: "var(--muted-foreground)", opacity: "0.7", fontStyle: "normal" },
   ".cm-matchingBracket": { backgroundColor: "color-mix(in oklch, var(--live) 18%, transparent)", outline: "1px solid color-mix(in oklch, var(--live) 40%, transparent)" },
   ".cm-selectionMatch": { backgroundColor: "color-mix(in oklch, var(--attention) 22%, transparent)" },
@@ -180,9 +182,10 @@ const baseExtensions = (readOnly: boolean): Extension => [
   chrome,
 ];
 
-/** Lines flashed by `reveal`: a tint that fades out (`.cm-reveal-line` in index.css). */
-const setRevealLines = StateEffect.define<{ from: number; to: number } | null>();
+/** Lines flashed by `reveal` (a tint that fades out) or held tinted while go-to-symbol previews (`steady`). */
+const setRevealLines = StateEffect.define<{ from: number; to: number; steady?: boolean } | null>();
 const revealLine = Decoration.line({ class: "cm-reveal-line" });
+const previewLine = Decoration.line({ class: "cm-preview-line" });
 const revealField = StateField.define<DecorationSet>({
   create: () => Decoration.none,
   update(deco, tr) {
@@ -191,8 +194,9 @@ const revealField = StateField.define<DecorationSet>({
       if (!e.is(setRevealLines)) continue;
       if (!e.value) return Decoration.none;
       const doc = tr.state.doc;
+      const mark = e.value.steady ? previewLine : revealLine;
       const ranges = [];
-      for (let n = e.value.from; n <= e.value.to; n++) ranges.push(revealLine.range(doc.line(n).from));
+      for (let n = e.value.from; n <= e.value.to; n++) ranges.push(mark.range(doc.line(n).from));
       deco = Decoration.set(ranges);
     }
     return deco;
@@ -214,7 +218,17 @@ function revealLines(v: EditorView, from: number, to: number) {
 
 /** What a status strip shows: the caret's line and column (1-based) and the main selection's length. */
 export type EditorStatus = { line: number; col: number; selected: number };
-export type CodeEditorHandle = { openFind(): void; closeFind(): void; focus(): void };
+export type CodeEditorHandle = {
+  openFind(): void;
+  closeFind(): void;
+  focus(): void;
+  /** The document's outline, read off the syntax tree. */
+  symbols(): CodeSymbol[];
+  /** Scroll a symbol into view. `select` also selects its name and focuses the editor; otherwise its line is tinted. */
+  reveal(sym: CodeSymbol, opts: { select: boolean }): void;
+  /** Capture scroll and selection; the returned function puts them back and clears the preview tint. */
+  snapshot(): () => void;
+};
 
 const statusOf = (state: EditorState): EditorStatus => {
   const main = state.selection.main;
@@ -299,7 +313,38 @@ export function CodeEditor({
     }
     setFind((f) => (f.open ? { ...f, open: false } : f));
   }, []);
-  React.useImperativeHandle(ref, () => ({ openFind, closeFind, focus: () => view.current?.focus() }), [openFind, closeFind]);
+  React.useImperativeHandle(
+    ref,
+    () => ({
+      openFind,
+      closeFind,
+      focus: () => view.current?.focus(),
+      symbols: () => (view.current ? symbolsIn(view.current.state) : []),
+      reveal: (sym, { select }) => {
+        const v = view.current;
+        if (!v || sym.to > v.state.doc.length) return;
+        if (select) {
+          v.dispatch({ selection: EditorSelection.single(sym.from, sym.to), effects: [setRevealLines.of(null), EditorView.scrollIntoView(sym.from, { y: "center" })] });
+          v.focus();
+        } else {
+          v.dispatch({ effects: [setRevealLines.of({ from: sym.line, to: sym.line, steady: true }), EditorView.scrollIntoView(sym.from, { y: "center" })] });
+        }
+      },
+      snapshot: () => {
+        const v = view.current;
+        if (!v) return () => {};
+        const selection = v.state.selection;
+        const top = v.scrollDOM.scrollTop;
+        return () => {
+          const w = view.current;
+          if (!w) return;
+          w.dispatch({ selection: selection.ranges.every((r) => r.to <= w.state.doc.length) ? selection : undefined, effects: setRevealLines.of(null) });
+          w.scrollDOM.scrollTop = top;
+        };
+      },
+    }),
+    [openFind, closeFind]
+  );
 
   const langExt = React.useMemo(() => languageFor(path ?? (language ? `x.${language === "typescript" ? "ts" : language === "javascript" ? "js" : language}` : "")), [path, language]);
 

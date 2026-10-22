@@ -18,14 +18,13 @@ function CodeBlock({ children, className, ...props }: CodeBlockProps) {
   return (
     <div
       className={cn(
-        // A fenced block reads as a distinct panel: a header bar carrying the language + copy control,
-        // a hairline, 8px corners, and a tinted body. `group` drives the copy button's hover reveal;
+        // A fenced block reads as a distinct panel: a header row carrying the language + copy control,
+        // 8px corners, and one tinted body. `group` drives the copy button's hover reveal;
         // `overflow-clip` keeps highlighted content inside the rounded corners. The surface is the
         // muted token (NOT `--card`, which equals the white canvas in light mode and would read as
-        // white-on-white). The body fill is set on CodeBlockCode so it sits under the code but the
-        // header bar can carry a slightly stronger tint for separation.
+        // white-on-white). It sits in the prose, not above it, so no shadow.
         "group not-prose relative my-3 flex w-full flex-col overflow-clip rounded-md border",
-        "border-border bg-muted/40 text-card-foreground shadow-e1",
+        "border-border bg-muted/40 text-card-foreground",
         className
       )}
       {...props}
@@ -69,15 +68,65 @@ function CopyButton({ code }: { code: string }) {
 }
 
 /**
- * The header bar: language tag on the left, copy control on the right. A quiet strip that names the
- * block as code without a heavy chrome. `language` is the resolved fence language (or "text").
+ * The header row: language tag on the left, copy control on the right. It shares the body's tint
+ * (no band, no rule) so the block is one panel with a label in its corner, not two stacked bars.
+ * `language` is the resolved fence language (or "text").
  */
 function CodeBlockHeader({ language, code }: { language: string; code: string }) {
   const label = language && language !== "text" && language !== "plaintext" ? language : "code"
   return (
-    <div className="border-border bg-muted/60 text-muted-foreground flex items-center justify-between border-b px-3 py-1.5">
+    <div className="text-muted-foreground flex items-center justify-between px-3 pt-1.5">
       <span className="stamp select-none">{label}</span>
       <CopyButton code={code} />
+    </div>
+  )
+}
+
+/**
+ * Marks the wrapper `data-scrolled-start` / `data-scrolled-end` while its scroll container has code
+ * hidden that way, so the edge fades only show when there is something to scroll to (the pattern
+ * from viz/DataTable). Observes the scroller and its <pre>, which grows when highlighting lands.
+ */
+function useScrollEdges() {
+  const [wrap, setWrap] = useState<HTMLDivElement | null>(null)
+  useLayoutEffect(() => {
+    const el = wrap?.firstElementChild as HTMLElement | null
+    if (!wrap || !el) return
+    const update = () => {
+      const max = el.scrollWidth - el.clientWidth
+      wrap.toggleAttribute("data-scrolled-start", el.scrollLeft > 0.5)
+      wrap.toggleAttribute("data-scrolled-end", el.scrollLeft < max - 0.5)
+    }
+    update()
+    el.addEventListener("scroll", update, { passive: true })
+    const ro = typeof ResizeObserver === "function" ? new ResizeObserver(update) : null
+    ro?.observe(el)
+    const mo = new MutationObserver(() => {
+      update()
+      if (el.firstElementChild) ro?.observe(el.firstElementChild)
+    })
+    mo.observe(el, { childList: true })
+    if (el.firstElementChild) ro?.observe(el.firstElementChild)
+    return () => {
+      el.removeEventListener("scroll", update)
+      ro?.disconnect()
+      mo.disconnect()
+    }
+  }, [wrap])
+  return setWrap
+}
+
+const EDGE_FADE =
+  "pointer-events-none absolute inset-y-0 w-6 opacity-0 transition-opacity duration-150 from-[color-mix(in_oklab,var(--foreground)_7%,transparent)] to-transparent"
+
+/** The sideways scroller for code: thin scrollbar on hover only, and a soft fade on each edge that has more. */
+function CodeScroller({ children }: { children: React.ReactNode }) {
+  const ref = useScrollEdges()
+  return (
+    <div ref={ref} className="relative">
+      {children}
+      <div aria-hidden className={cn(EDGE_FADE, "left-0 bg-gradient-to-r in-data-scrolled-start:opacity-100")} />
+      <div aria-hidden className={cn(EDGE_FADE, "right-0 bg-gradient-to-l in-data-scrolled-end:opacity-100")} />
     </div>
   )
 }
@@ -225,7 +274,7 @@ function CodeBlockCode({
     // shows through and highlighted blocks share the same surface as plain/ASCII ones. `whitespace-pre`
     // preserves the column alignment of ASCII/box-drawing tables (the `df -h` case) and scrolls long
     // lines. No `pr-10` reserve is needed anymore — the copy control lives in the header, not floating.
-    "w-full overflow-x-auto text-code [&>pre]:!bg-transparent [&>pre]:px-4 [&>pre]:py-3 [&>pre]:whitespace-pre",
+    "code-scroll w-full overflow-x-auto text-code [&>pre]:!bg-transparent [&>pre]:px-4 [&>pre]:pt-2 [&>pre]:pb-3 [&>pre]:whitespace-pre",
     className
   )
 
@@ -245,15 +294,17 @@ function CodeBlockCode({
         Never pass anything but highlighter output through here.
       */}
       <Fold lines={lineCount} enabled={foldable}>
-        {highlightedHtml ? (
-          <div className={classNames} dangerouslySetInnerHTML={{ __html: highlightedHtml }} {...props} />
-        ) : (
-          <div className={classNames} {...props}>
-            <pre>
-              <code>{code}</code>
-            </pre>
-          </div>
-        )}
+        <CodeScroller>
+          {highlightedHtml ? (
+            <div className={classNames} dangerouslySetInnerHTML={{ __html: highlightedHtml }} {...props} />
+          ) : (
+            <div className={classNames} {...props}>
+              <pre>
+                <code>{code}</code>
+              </pre>
+            </div>
+          )}
+        </CodeScroller>
       </Fold>
     </>
   )

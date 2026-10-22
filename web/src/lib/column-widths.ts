@@ -38,6 +38,29 @@ export interface ColumnWidths {
   reset: (id: string) => void;
 }
 
+/**
+ * The header's own footprint (label, sort icon, padding). At max-content a `th` box is as wide as the
+ * column's widest cell, so measuring the box would make the flexible column's floor the width of
+ * its longest title and push the table past its card.
+ */
+function labelWidth(th: HTMLTableCellElement): number {
+  let w = 0;
+  for (const node of Array.from(th.childNodes)) {
+    if (node instanceof HTMLElement) {
+      if (node.classList.contains("dt-resize")) continue;
+      // A sort button overhangs the cell padding with negative margins; its net footprint is what counts.
+      const m = getComputedStyle(node);
+      w += node.getBoundingClientRect().width + parseFloat(m.marginLeft) + parseFloat(m.marginRight);
+    } else {
+      const range = document.createRange();
+      range.selectNode(node);
+      for (const r of Array.from(range.getClientRects())) w += r.width;
+    }
+  }
+  const s = getComputedStyle(th);
+  return w + parseFloat(s.paddingLeft) + parseFloat(s.paddingRight);
+}
+
 export function useColumnWidths(storeKey: string | undefined, ready: boolean, signature: string): ColumnWidths {
   const colgroup = React.useRef<HTMLTableColElement>(null);
   const [manual, setManual] = React.useState<Record<string, number>>(() => {
@@ -72,7 +95,7 @@ export function useColumnWidths(storeKey: string | undefined, ready: boolean, si
       const id = col.dataset.col;
       if (!id) return;
       const th = headRow?.cells[i];
-      if (th?.offsetParent) head[id] = Math.ceil(th.getBoundingClientRect().width) + 2;
+      if (th?.offsetParent) head[id] = Math.ceil(labelWidth(th)) + 2;
       if (!ready || col.dataset.flex !== undefined) return;
       let w = 0;
       for (const row of Array.from(table.tBodies[0]?.rows ?? [])) {

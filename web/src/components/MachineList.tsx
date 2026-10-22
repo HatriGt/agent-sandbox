@@ -1,7 +1,8 @@
-import { useRef, useSyncExternalStore } from "react";
+import { useRef } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { useReducedMotion } from "@/lib/motion-pref";
 import { Swap } from "@/components/ui/swap";
+import { StatusDot } from "@/components/ui/data-table";
 import type { StableBox } from "@/hooks/useStableBoxes";
 import { prefetchWatch } from "@/hooks/useWatchStream";
 import { friendlyName, roleLabel, threadSort, threadTitle } from "@/lib/format";
@@ -14,73 +15,22 @@ import { cn } from "@/lib/utils";
 const SPRING = { type: "spring", stiffness: 420, damping: 30, mass: 0.8 } as const;
 const EASE = [0.2, 0.8, 0.2, 1] as const;
 
-// One braille spinner clock shared by every running row: a single 80ms interval, started while at
-// least one spinner is mounted.
-const FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
-let frame = 0;
-let timer: number | undefined;
-const listeners = new Set<() => void>();
-function subscribeSpinner(fn: () => void) {
-  listeners.add(fn);
-  timer ??= window.setInterval(() => {
-    frame = (frame + 1) % FRAMES.length;
-    listeners.forEach((l) => l());
-  }, 80);
-  return () => {
-    listeners.delete(fn);
-    if (!listeners.size && timer !== undefined) {
-      window.clearInterval(timer);
-      timer = undefined;
-    }
-  };
-}
-const noop = () => () => {};
-function Spinner({ still }: { still: boolean }) {
-  const i = useSyncExternalStore(still ? noop : subscribeSpinner, () => frame);
-  return (
-    <span className="text-live inline-block w-[1ch] font-mono" aria-hidden>
-      {FRAMES[still ? 0 : i]}
-    </span>
-  );
-}
-
-type Word = { word: string; tone: "live" | "attention" | "faint" | "destructive" | "muted" | "ok" };
-/** The shared live-state vocabulary. */
-function stateWord(state: DisplayState, exitCode?: number): Word {
+export type StateWord = { word: string; tone: "live" | "attention" | "sleep" | "destructive" | "muted" | "ok" };
+/** The shared live-state vocabulary: one word and one tone per state, for the sidebar and the Hub alike. */
+export function stateWord(state: DisplayState, exitCode?: number, stalled?: boolean): StateWord {
+  if (stalled && state === "running") return { word: "Stalled", tone: "destructive" };
   switch (state) {
     case "running":
       return { word: "Working", tone: "live" };
     case "waiting":
       return { word: "Needs you", tone: "attention" };
     case "sleeping":
-      return { word: "Asleep", tone: "faint" };
+      return { word: "Asleep", tone: "sleep" };
     case "done":
       return exitCode != null && exitCode !== 0 ? { word: "Failed", tone: "destructive" } : { word: "Done", tone: "ok" };
     default:
       return { word: "Idle", tone: "muted" };
   }
-}
-
-const TONE_TEXT: Record<Word["tone"], string> = {
-  live: "text-live",
-  attention: "text-attention-text",
-  faint: "text-faint",
-  destructive: "text-destructive",
-  muted: "text-muted-foreground",
-  ok: "text-muted-foreground",
-};
-const TONE_TILE: Record<Word["tone"], string> = {
-  live: "bg-live/15 text-live",
-  attention: "bg-attention/15 text-attention-text",
-  faint: "bg-muted text-faint",
-  destructive: "bg-destructive/15 text-destructive",
-  muted: "bg-muted text-muted-foreground",
-  ok: "bg-ok/15 text-ok",
-};
-
-function initialOf(v: StableBox): string {
-  const src = v.agent || v.harness?.name || threadTitle(v) || v.name;
-  return (src.trim()[0] ?? "?").toUpperCase();
 }
 
 function tooltipOf(v: StableBox, state: DisplayState, sleepTtlSec?: number): string {
@@ -116,7 +66,7 @@ function AgentRow({
   onSelect: (name: string) => void;
 }) {
   const state = displayState(v);
-  const { word, tone } = stateWord(state, v.exitCode);
+  const { word, tone } = stateWord(state, v.exitCode, v.stalled);
   const flashes = useChangeCount(`${state}:${word}`);
   return (
     <button
@@ -127,7 +77,7 @@ function AgentRow({
       aria-current={active ? "true" : undefined}
       title={tooltipOf(v, state, sleepTtlSec)}
       className={cn(
-        "group relative flex h-8 w-full cursor-pointer items-center gap-2 overflow-hidden rounded-md px-2 text-left text-meta transition-colors duration-150",
+        "group relative flex h-9 w-full cursor-pointer items-center gap-2 overflow-hidden rounded-md px-2 text-left text-meta transition-colors duration-150",
         active ? "bg-accent text-foreground" : "hover:bg-muted text-foreground/90",
         v.leaving && "opacity-60"
       )}
@@ -135,26 +85,21 @@ function AgentRow({
       {flashes > 0 && !still && (
         <span key={flashes} className="pointer-events-none absolute inset-0 rounded-md" style={{ animation: "dt-row-flash 1.6s ease-out both" }} aria-hidden />
       )}
-      <span className={cn("relative grid size-5 shrink-0 place-items-center rounded-[5px] text-[11px] font-semibold transition-colors duration-200", TONE_TILE[tone])} aria-hidden>
-        {initialOf(v)}
-      </span>
       <span className={cn("relative min-w-0 flex-1 truncate", state === "waiting" && "font-medium")}>{threadTitle(v)}</span>
-      <span className="relative ml-1 flex shrink-0 items-center gap-1.5 text-micro">
-        <AnimatePresence mode="popLayout" initial={false}>
-          <motion.span
-            key={word}
-            className={cn("inline-flex items-center gap-1.5", TONE_TEXT[tone])}
-            initial={still ? { opacity: 0 } : { opacity: 0, y: 3 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={still ? { opacity: 0 } : { opacity: 0, y: -3 }}
-            transition={{ duration: still ? 0 : 0.18, ease: EASE }}
-          >
-            {state === "running" && <Spinner still={still} />}
-            {state === "waiting" && <span className="bg-attention dt-ping text-attention size-1.5 rounded-full" aria-hidden />}
-            <span className={cn(state === "running" && "shimmer-text")}>{word}</span>
-          </motion.span>
-        </AnimatePresence>
-      </span>
+      <AnimatePresence mode="popLayout" initial={false}>
+        <motion.span
+          key={word}
+          className="relative ml-1 shrink-0"
+          initial={still ? { opacity: 0 } : { opacity: 0, y: 3 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={still ? { opacity: 0 } : { opacity: 0, y: -3 }}
+          transition={{ duration: still ? 0 : 0.18, ease: EASE }}
+        >
+          <StatusDot tone={tone} pulse={state === "running" && !v.stalled ? true : state === "waiting" ? "dot" : false} className="text-micro font-normal">
+            {word}
+          </StatusDot>
+        </motion.span>
+      </AnimatePresence>
     </button>
   );
 }
@@ -197,8 +142,7 @@ export function MachineList({
           ) : loading ? (
             <div className="space-y-px py-px" aria-busy="true">
               {[0, 1, 2].map((i) => (
-                <div key={i} className="flex h-8 items-center gap-2 px-2">
-                  <Bar className="size-5 rounded-[5px]" />
+                <div key={i} className="flex h-9 items-center gap-2 px-2">
                   <Bar className="h-2.5 flex-1" />
                   <Bar className="h-2.5 w-10" />
                 </div>
@@ -222,15 +166,14 @@ export function MachineList({
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, transition: { duration: 0.15 } }}
                     transition={still ? { duration: 0 } : SPRING}
-                    className="flex h-8 items-center gap-2 rounded-md px-2 text-meta"
+                    className="flex h-9 items-center gap-2 rounded-md px-2 text-meta"
                     title={p.task}
                     aria-busy="true"
                   >
-                    <span className="bg-live/15 text-live breathe grid size-5 shrink-0 place-items-center rounded-[5px] text-[11px] font-semibold" aria-hidden>
-                      {(p.task.trim()[0] ?? "?").toUpperCase()}
-                    </span>
                     <span className="text-muted-foreground min-w-0 flex-1 truncate">{p.task}</span>
-                    <span className="text-live shimmer-text shrink-0 text-micro">Booting</span>
+                    <StatusDot tone="live" pulse className="shrink-0 text-micro font-normal">
+                      Booting
+                    </StatusDot>
                   </motion.li>
                 ))}
                 {sorted.map((v) => (

@@ -46,10 +46,13 @@ export function SendBar({
   seed,
   onReplyFailed,
   phase,
+  top,
 }: {
   /** What the thread is in the middle of, for the composer's copy: a run being set up, a question
    *  waiting on the card above, or a box that has never run anything. */
   phase?: "starting" | "asked" | "fresh";
+  /** The first row inside the composer's surface (the changed-files dock), above the text. */
+  top?: React.ReactNode;
   boxName: string;
   runState: RunState;
   sleeping?: boolean;
@@ -328,7 +331,7 @@ export function SendBar({
       {/* Same column as the conversation and the changes dock: max-w-3xl with the same inner gutter. */}
       <div className="relative mx-auto min-w-0 max-w-3xl px-3 md:px-6">
         <VoicePill state={voice.state} interim={voice.interim} />
-        <AnimatePresence>
+        <AnimatePresence initial={false}>
           {mention && <MentionMenu key="mention" session={boxName} repos={repos} state={mention} onPick={pickFile} onClose={() => setMention(null)} />}
           {!mention && slash && <SkillMenu key="skill" state={slash} onPick={pickSkill} onClose={() => setSlash(null)} onMatches={setSlashMatches} />}
         </AnimatePresence>
@@ -364,6 +367,7 @@ export function SendBar({
             addImages(e.dataTransfer.files);
           }}
         >
+          {top}
           {/* Chip rows stay mounted through their own exit: the last chip used to vanish with the row. */}
           <AnimatePresence initial={false}>
           {images.length > 0 && (

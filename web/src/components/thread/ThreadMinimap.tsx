@@ -5,9 +5,10 @@ import { cn } from "@/lib/utils";
 
 /**
  * A minimap for the conversation: a small stack of bars sitting in the vertical middle of the
- * thread, one bar per turn you sent (task, follow-ups, answers). The bar for the turn currently in
- * view is long and solid; hover any bar for a card with your message and how the agent began its
- * reply; click to jump there. Desktop only — on a phone the thread is the map.
+ * thread, one 2px bar per turn you sent (task, follow-ups, answers). The bar for the turn currently
+ * in view is the live colour; hover any bar for a card with your message and how the agent began
+ * its reply; click to jump there. Desktop only, and only from three turns — on a phone or in a short
+ * thread the thread is the map.
  */
 export interface Turn {
   id: string;
@@ -50,7 +51,8 @@ export function ThreadMinimap({ turns, scrollerRef }: { turns: Turn[]; scrollerR
     };
   }, [measure, scrollerRef]);
 
-  if (turns.length < 2) return null;
+  // Two turns is the task and one reply: the thread is the map. A rail earns its place from three.
+  if (turns.length < 3) return null;
 
   const jump = (id: string) => {
     scrollerRef.current?.querySelector<HTMLElement>(`[data-turn="${id}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -60,11 +62,11 @@ export function ThreadMinimap({ turns, scrollerRef }: { turns: Turn[]; scrollerR
     <nav aria-label="Conversation map" className="group/map absolute top-1/2 left-0 z-10 hidden w-12 -translate-y-1/2 min-[1120px]:block" onMouseLeave={() => setHover(null)}>
       {/* A faint rail appears when the pointer is near, so the ticks read as one control. */}
       <span className="bg-border/80 absolute top-0 bottom-0 left-[13px] w-px opacity-0 transition-opacity duration-200 group-hover/map:opacity-100" aria-hidden />
-      <ol className="flex flex-col gap-[7px] py-2 pl-2">
+      <ol className="flex flex-col gap-3 py-2 pl-2">
         {turns.map((t, i) => {
           const on = i === active;
           return (
-            <li key={t.id} className="relative flex h-[7px] items-center">
+            <li key={t.id} className="relative flex h-0.5 items-center">
               <button
                 type="button"
                 onClick={() => jump(t.id)}
@@ -73,22 +75,12 @@ export function ThreadMinimap({ turns, scrollerRef }: { turns: Turn[]; scrollerR
                 onBlur={() => setHover(null)}
                 aria-label={`Jump to ${t.label}: ${t.you.slice(0, 60)}`}
                 aria-current={on ? "true" : undefined}
-                className="group no-press relative -my-1 flex h-4 w-10 cursor-pointer items-center"
+                className="group no-press relative -my-1.5 flex h-3.5 w-10 cursor-pointer items-center"
               >
                 <span
                   className={cn(
-                    "block h-[3px] rounded-full transition-[width,background-color] duration-200",
-                    t.kind === "question"
-                      ? on
-                        ? "w-7 bg-transparent"
-                        : hover === i
-                          ? "bg-attention/80 w-6"
-                          : "bg-attention/60 w-3.5 group-hover:bg-attention/80"
-                      : on
-                        ? "w-7 bg-transparent"
-                        : hover === i
-                          ? "bg-foreground/60 w-6"
-                          : "bg-muted-foreground/40 w-3.5 group-hover:bg-foreground/60"
+                    "block h-0.5 w-4 rounded-full transition-colors duration-200",
+                    on ? "bg-transparent" : t.kind === "question" ? "bg-attention/60 group-hover:bg-attention" : "bg-muted-foreground/35 group-hover:bg-foreground/60"
                   )}
                 />
                 {/* The "you are here" marker is one element that glides between bars as you scroll. */}
@@ -96,7 +88,7 @@ export function ThreadMinimap({ turns, scrollerRef }: { turns: Turn[]; scrollerR
                   <motion.span
                     layoutId="minimap-active"
                     transition={still ? { duration: 0 } : { type: "spring", stiffness: 520, damping: 40, mass: 0.7 }}
-                    className={cn("absolute left-0 top-1/2 -mt-[1.5px] block h-[3px] w-7 rounded-full", t.kind === "question" ? "bg-attention" : "bg-foreground")}
+                    className={cn("absolute left-0 top-1/2 -mt-px block h-0.5 w-4 rounded-full", t.kind === "question" ? "bg-attention" : "bg-live")}
                     aria-hidden
                   />
                 )}

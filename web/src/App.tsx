@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Link, useLocation, useNavigationType } from "react-router";
-import { Activity as ActivityIcon, ArrowRight, Bell, BellOff, Brain, ChevronRight, Clock, Cpu, FileSearch, Flame, GitCompare, Keyboard, Layers, LayoutGrid, ListChecks, LogOut, Menu, MessageCircleQuestion, Moon, MoonStar, PanelLeftClose, PanelLeftOpen, PanelRight, Pause, Pin, PinOff, Plug, PlugZap, Plus, Search, Shield, Sparkles, Square, Sun, SunMedium, UserRound, WifiOff, Workflow, Zap } from "lucide-react";
+import { Activity as ActivityIcon, ArrowRight, Bell, BellOff, Brain, ChevronRight, Clock, Cpu, FileSearch, GitCompare, Keyboard, Layers, LayoutGrid, ListChecks, LogOut, Menu, MessageCircleQuestion, Moon, MoonStar, PanelLeftClose, PanelLeftOpen, PanelRight, Pause, Pin, PinOff, Plug, PlugZap, Plus, Search, Shield, Sparkles, Square, Sun, SunMedium, UserRound, WifiOff, Workflow, Zap } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { setMotionPref, useMotionPref, useReducedMotion, type MotionPref } from "@/lib/motion-pref";
 import { api, type Automation, type FleetLifecycle, type FleetSnapshot } from "@/lib/api";
@@ -710,10 +710,10 @@ export default function App() {
         <button
           type="button"
           onClick={showFleet}
-          className="text-muted-foreground hover:text-foreground mx-3 mb-1 flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-micro transition-colors"
+          className="text-faint hover:text-foreground mx-3 mb-1 flex h-7 w-[calc(100%-1.5rem)] cursor-pointer items-center gap-2 rounded-md px-2 text-left text-micro tabular-nums transition-colors"
         >
-          <Flame className="text-ok size-3.5 shrink-0" aria-hidden />
-          {warmReady === 1 ? "1 warm machine ready" : `${warmReady} warm machines ready`} — a new task starts in seconds
+          <span className="bg-ok size-1.5 shrink-0 rounded-full" aria-hidden />
+          <span className="truncate">{warmReady === 1 ? "1 warm machine ready" : `${warmReady} warm machines ready`} · starts in seconds</span>
         </button>
       </Collapse>
 

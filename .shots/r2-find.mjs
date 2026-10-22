@@ -138,9 +138,9 @@ await page.waitForTimeout(350);
 check("replace row opens", await widget.getByRole("textbox", { name: "Replace" }).isVisible());
 await shot("replace");
 
-// Status strip: caret position and the file's state, under the editor.
-const stripBox = await page.locator('[aria-label="Editor status"]').first().boundingBox();
-check("status strip is 22px", !!stripBox && Math.round(stripBox.height) === 22, JSON.stringify(stripBox && { h: Math.round(stripBox.height), w: Math.round(stripBox.width) }));
+// Status: caret position and the file's state, on the right of the pane's one 28px status bar.
+const stripBox = await page.locator('[aria-label="Workspace status"]').first().boundingBox();
+check("status bar is 28px and holds the editor status", !!stripBox && Math.round(stripBox.height) === 28 && (await page.locator('[aria-label="Workspace status"] [aria-label="Editor status"]').count()) === 1, JSON.stringify(stripBox && { h: Math.round(stripBox.height), w: Math.round(stripBox.width) }));
 const stripText = await page.locator('[aria-label="Editor status"]').first().textContent();
 check("strip shows Ln/Col and language", /Ln \d+, Col \d+/.test(stripText ?? "") && /TypeScript/i.test(stripText ?? ""), stripText?.trim());
 if (stripBox) await shot("status", { x: Math.max(0, stripBox.x - 8), y: stripBox.y - 160, width: Math.min(W - stripBox.x + 8, stripBox.width + 16), height: 182 + stripBox.height });

@@ -1,15 +1,17 @@
 import * as React from "react";
-import { ArrowDown, ArrowUp, CaseSensitive, Check, ChevronRight, Columns2, Copy, CopyPlus, FilePlus, Files, FileDiff, FoldVertical, FolderPlus, GitBranch, GitCommitHorizontal, Loader2, Locate, Maximize2, Minimize2, PanelRight, Pencil, RefreshCw, Regex, Search, SearchCode, Table2, Trash2, Upload, X } from "lucide-react";
+import { ArrowDown, ArrowUp, CaseSensitive, Check, ChevronRight, Columns2, Copy, CopyPlus, FilePlus, Files, FileDiff, FoldVertical, FolderPlus, GitBranch, GitCommitHorizontal, ListFilter, Loader2, Locate, Maximize2, Minimize2, PanelRight, Pencil, RefreshCw, Regex, Search, SearchCode, Table2, Trash2, Upload, WrapText, X, Box as BoxIcon, Hash as HashIcon, Heading, Key as KeyIcon, SquareFunction, Type as TypeIcon, Variable, type LucideIcon } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { ContextMenu as CM } from "radix-ui";
 import { useReducedMotion } from "@/lib/motion-pref";
 import { toast } from "sonner";
 import { api, type ChangedFile, type FsOp, type GitStatus, type SearchMatch } from "@/lib/api";
+import { languageOf } from "@/lib/fileIcon";
 import { FileIcon, FolderIcon } from "@/lib/vscodeIcons";
 import { AnimatedTabs } from "@/components/ui/animated-tabs";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
-import type { CodeEditorHandle } from "@/components/CodeEditor";
+import type { CodeEditorHandle, EditorStatus } from "@/components/CodeEditor";
+import { matchSymbols, type CodeSymbol, type SymbolKind } from "@/lib/symbols";
 import { invalidateResolver } from "@/components/ui/code-ref";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { EmptyEditor, TabStrip } from "./EditorTabs";
@@ -109,6 +111,17 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
   const [quickOpen, setQuickOpen] = React.useState<string | null>(null);
   const [focusedRow, setFocusedRow] = React.useState<string | null>(null);
   const [edit, setEdit] = React.useState<RowEdit | null>(null);
+  // The explorer's filter is a header-row swap, so the field exists only while asked for or used.
+  const [filtering, setFiltering] = React.useState(false);
+  // Caret per open editor, by "group:path"; the status bar shows the focused tab's.
+  const [carets, setCarets] = React.useState<Map<string, EditorStatus>>(() => new Map());
+  const setCaret = (key: string, s: EditorStatus | null) =>
+    setCarets((m) => {
+      const n = new Map(m);
+      if (s) n.set(key, s);
+      else n.delete(key);
+      return n;
+    });
   const savers = React.useRef(new Map<string, () => Promise<string | null>>());
   // Live editors by "group:path", so a window-level ⌘F reaches the focused file's find widget.
   const editors = React.useRef(new Map<string, CodeEditorHandle>());
@@ -138,6 +151,8 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
   const focusedGroup = tabs.groups[tabs.focus] ?? tabs.groups[0];
   const active = focusedGroup.active;
   const activeTab = focusedGroup.tabs.find((t) => t.path === active) ?? null;
+  const activeDoc = activeTab ? docs.get(activeTab.path) : undefined;
+  const caret = activeTab ? carets.get(`${tabs.focus}:${activeTab.path}`) : undefined;
 
   const expandTo = React.useCallback((path: string) => {
     setExpanded((e) => {
@@ -275,7 +290,11 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
   };
   const commands: PaneCommands = {
     closeActive: () => void (active && closeTab(tabs.focus, active)),
-    quickOpen: (prefill = "") => setQuickOpen(prefill),
+    quickOpen: (prefill = "") => {
+      // "@" reads the file's syntax tree, which only the editor holds, so a diff tab switches to the file.
+      if (prefill.startsWith("@") && activeTab?.mode === "diff") dispatch({ type: "setMode", path: activeTab.path, mode: "edit" });
+      setQuickOpen(prefill);
+    },
     toggleSidebar: () => setSidebar((v) => !v),
     searchInFiles: () => (setSidebar(true), setView("search")),
     find: () => {
@@ -362,7 +381,7 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
 
   const filesTitle = view === "scm" || view === "review" ? "Changes" : view === "search" ? "Search" : "Files";
   const controls = (
-    <div className="flex shrink-0 items-center gap-0.5 border-l px-1.5">
+    <div className="flex shrink-0 items-center gap-0.5 border-l px-1.5 [&_.lucide]:[stroke-width:1.5]">
       <Tooltip>
         <TooltipTrigger asChild>
           <button type="button" onClick={onToggleFull} aria-pressed={full} aria-label={full ? "Show the conversation" : "Full view"} className="text-muted-foreground hover:text-foreground hover:bg-muted grid size-7 cursor-pointer place-items-center rounded-md">
@@ -409,7 +428,7 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
         <div className="flex min-h-0 min-w-0 flex-1">
           {view === "review" ? (
             <div className="flex min-w-0 flex-1 flex-col">
-              <div className="flex h-10 shrink-0 items-stretch border-b">
+              <div data-ws-top className="flex h-9 shrink-0 items-stretch border-b">
                 <span className="text-muted-foreground flex flex-1 items-center px-3 text-meta">Review</span>
                 {controls}
               </div>
@@ -417,7 +436,7 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
             </div>
           ) : view === "records" ? (
             <div className="flex min-w-0 flex-1 flex-col">
-              <div className="flex h-10 shrink-0 items-stretch border-b">
+              <div data-ws-top className="flex h-9 shrink-0 items-stretch border-b">
                 <span className="text-muted-foreground flex flex-1 items-center px-3 text-meta">All files</span>
                 {controls}
               </div>
@@ -430,7 +449,7 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
               const tab = g.tabs.find((t) => t.path === g.active) ?? null;
               return (
                 <div key={gi} data-group={gi} data-focused={focused} className={cn("flex min-h-0 min-w-0 flex-1 flex-col", gi === 1 && "border-l")} onPointerDownCapture={() => !focused && dispatch({ type: "focus", group: gi })}>
-                  <div className={cn("flex h-10 shrink-0 items-stretch border-b transition-colors", focused ? "bg-muted/40" : "bg-muted/70")}>
+                  <div data-ws-top className={cn("flex h-9 shrink-0 items-stretch border-b transition-colors [&_.lucide]:[stroke-width:1.5]", focused ? "bg-muted/40" : "bg-muted/70")}>
                     <TabStrip group={gi} state={g} focused={focused} dirty={dirtySet} dispatch={dispatch} onClose={(p) => void closeTab(gi, p)} />
                     {i === tabs.groups.length - 1 && controls}
                   </div>
@@ -450,7 +469,7 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
                       onSaved={onSaved}
                       onSaver={(fn) => (fn ? savers.current.set(tab.path, fn) : savers.current.delete(tab.path))}
                       onEditor={(h) => registerEditor(`${gi}:${tab.path}`, h)}
-                      onToggleWrap={toggleWrap}
+                      onStatus={(s) => setCaret(`${gi}:${tab.path}`, s)}
                     />
                   ) : (
                     <EmptyEditor />
@@ -464,7 +483,7 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
         {sidebar && (
           <section className={cn("bg-muted/20 relative flex shrink-0 flex-col border-l", phone && "bg-card absolute inset-0 z-10 border-l-0")} style={phone ? undefined : { width: sidebarWidth }} aria-label={filesTitle}>
             {!phone && <Divider value={sidebarWidth} range={sbRange} label="Resize files panel" onChange={setSidebarWidth} onReset={() => setSidebarWidth(null)} />}
-            <div className="flex h-10 shrink-0 items-center gap-1 px-2">
+            <div data-ws-top className="flex h-9 shrink-0 items-center gap-1 border-b px-2 [&_.lucide]:[stroke-width:1.5]">
               <AnimatedTabs
                 ariaLabel="Sidebar view"
                 value={view}
@@ -483,10 +502,19 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
                   { value: "records", icon: <Table2 className="size-3.5" />, label: <span className="sr-only">All</span>, title: "All files" },
                 ]}
               />
-              {view !== "explorer" && (
+              {view !== "explorer" ? (
                 <button type="button" onClick={() => (view === "scm" || view === "review" ? loadGit() : void loadTree())} aria-label="Refresh" className="text-muted-foreground hover:text-foreground ml-auto grid size-7 cursor-pointer place-items-center rounded-md">
                   <RefreshCw className="size-3.5" />
                 </button>
+              ) : (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button type="button" onClick={() => setFiltering((f) => !f || !!query)} disabled={!tree} aria-pressed={filtering || !!query} aria-label="Filter files" className={cn("hover:bg-muted ml-auto grid size-7 cursor-pointer place-items-center rounded-md disabled:opacity-40", filtering || query ? "text-foreground" : "text-muted-foreground hover:text-foreground")}>
+                      <ListFilter className="size-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">Filter files</TooltipContent>
+                </Tooltip>
               )}
               {phone && (
                 <button type="button" onClick={onClose} aria-label="Close workspace" className="text-muted-foreground hover:text-foreground grid size-7 cursor-pointer place-items-center rounded-md">
@@ -500,43 +528,47 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
               <SearchView session={session} active={active} onOpen={openPath} />
             ) : (
               <>
-                {/* Section header, as VS Code's: the title, the repo, and actions that show on hover. */}
-                <div className="group/hdr flex h-[26px] shrink-0 items-center gap-1.5 pr-1 pl-3">
-                  <span className="label text-foreground">Explorer</span>
-                  {repos.length === 1 && <span className="stamp text-muted-foreground truncate">{repos[0].name}</span>}
-                  <span className="ml-auto flex items-center opacity-0 transition-opacity group-focus-within/hdr:opacity-100 group-hover/hdr:opacity-100 [@media(pointer:coarse)]:opacity-100">
-                    <HeaderAction label="New file" onClick={() => startEdit("newFile")} disabled={!tree}>
-                      <FilePlus className="size-3.5" />
-                    </HeaderAction>
-                    <HeaderAction label="New folder" onClick={() => startEdit("newDir")} disabled={!tree}>
-                      <FolderPlus className="size-3.5" />
-                    </HeaderAction>
-                    <HeaderAction label="Collapse all folders" onClick={() => (setExpanded(new Set()), setEdit(null))}>
-                      <FoldVertical className="size-3.5" />
-                    </HeaderAction>
-                    <HeaderAction label="Refresh" onClick={() => void loadTree()}>
-                      <RefreshCw className="size-3.5" />
-                    </HeaderAction>
-                  </span>
-                </div>
-                <div className="mx-2 mb-1 flex items-center gap-1">
-                  <label className="bg-card focus-within:ring-ring flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-md border px-2 focus-within:ring-2">
-                    <Search className="text-muted-foreground size-3.5" aria-hidden />
-                    <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter files" aria-label="Filter files" className="text-foreground placeholder:text-muted-foreground min-w-0 flex-1 bg-transparent text-meta outline-none" />
-                    {query && (
-                      <button type="button" onClick={() => setQuery("")} aria-label="Clear" className="text-muted-foreground hover:text-foreground cursor-pointer">
+                {/* Section header, as VS Code's: the title, the repo, and actions that show on hover.
+                    The filter is the same row, swapped in on demand, so the tree starts one row down. */}
+                <div className="group/hdr relative flex h-[26px] shrink-0 items-center gap-1.5 pr-1 pl-3 [&_.lucide]:[stroke-width:1.5]">
+                  {filtering || query ? (
+                    <label className="flex h-full min-w-0 flex-1 items-center gap-1.5">
+                      <Search className="text-muted-foreground size-3.5 shrink-0" aria-hidden />
+                      <input
+                        autoFocus
+                        value={query}
+                        onChange={(e) => setQuery(e.target.value)}
+                        onKeyDown={(e) => e.key === "Escape" && (setQuery(""), setFiltering(false))}
+                        onBlur={() => !query && setFiltering(false)}
+                        placeholder="Filter files"
+                        aria-label="Filter files"
+                        className="text-foreground placeholder:text-muted-foreground min-w-0 flex-1 bg-transparent text-meta outline-none"
+                      />
+                      <button type="button" onClick={() => (setQuery(""), setFiltering(false))} aria-label="Clear" className="text-muted-foreground hover:text-foreground hover:bg-muted grid size-6 shrink-0 cursor-pointer place-items-center rounded">
                         <X className="size-3.5" />
                       </button>
-                    )}
-                  </label>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button type="button" onClick={revealActive} disabled={!active} aria-label="Reveal active file" className="text-muted-foreground hover:text-foreground hover:bg-muted grid size-7 shrink-0 cursor-pointer place-items-center rounded-md disabled:opacity-40">
-                        <Locate className="size-3.5" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">Reveal the active file</TooltipContent>
-                  </Tooltip>
+                    </label>
+                  ) : (
+                    <>
+                      <span className="label text-foreground">Explorer</span>
+                      {repos.length === 1 && <span className="stamp text-muted-foreground truncate">{repos[0].name}</span>}
+                      {/* Overlaid, not in flow: the stamp keeps the row's full width until the actions show. */}
+                      <span className="from-background absolute inset-y-0 right-1 flex items-center bg-gradient-to-l from-75% to-transparent pl-5 opacity-0 transition-opacity group-focus-within/hdr:opacity-100 group-hover/hdr:opacity-100 [@media(pointer:coarse)]:opacity-100">
+                        <HeaderAction label="New file" onClick={() => startEdit("newFile")} disabled={!tree}>
+                          <FilePlus className="size-3.5" />
+                        </HeaderAction>
+                        <HeaderAction label="New folder" onClick={() => startEdit("newDir")} disabled={!tree}>
+                          <FolderPlus className="size-3.5" />
+                        </HeaderAction>
+                        <HeaderAction label="Collapse all folders" onClick={() => (setExpanded(new Set()), setEdit(null))}>
+                          <FoldVertical className="size-3.5" />
+                        </HeaderAction>
+                        <HeaderAction label="Refresh" onClick={() => void loadTree()}>
+                          <RefreshCw className="size-3.5" />
+                        </HeaderAction>
+                      </span>
+                    </>
+                  )}
                 </div>
                 {query.trim() ? (
                   <GoToFile paths={paths} query={query} active={active} changeByPath={changeByPath} onOpen={(p) => (openPath(p), setQuery(""))} />
@@ -572,10 +604,10 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
         )}
       </div>
 
-      {/* Status bar */}
-      <footer className="bg-muted/60 text-muted-foreground flex h-6 shrink-0 items-center gap-3 overflow-hidden border-t px-3 text-micro whitespace-nowrap">
+      {/* The one status bar: the repo on the left, the focused file on the right. */}
+      <footer data-ws-status aria-label="Workspace status" className="bg-muted/60 text-muted-foreground tabular flex h-7 shrink-0 items-center gap-3 overflow-hidden border-t px-3 text-micro whitespace-nowrap [&_.lucide]:[stroke-width:1.5]">
         {activeRepo && (
-          <button type="button" onClick={() => (setView("scm"), setSidebar(true))} className="text-foreground hover:bg-muted flex min-w-0 cursor-pointer items-center gap-1 rounded px-1" aria-label="Open source control">
+          <button type="button" onClick={() => (setView("scm"), setSidebar(true))} className="text-foreground hover:bg-muted flex h-5 min-w-0 cursor-pointer items-center gap-1 rounded px-1" aria-label="Open source control">
             <GitBranch className="size-3" aria-hidden />
             <span className="truncate">{git?.branch ?? activeRepo.branch ?? "…"}</span>
             {git && git.ahead > 0 && <span className="text-ok">↑{git.ahead}</span>}
@@ -584,9 +616,38 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
         )}
         <span className="hidden sm:inline">{changes.length} changed</span>
         {paths && <span className="hidden sm:inline">{paths.length} files</span>}
-        <button type="button" onClick={() => setQuickOpen("")} className="hover:bg-muted hover:text-foreground ml-auto hidden cursor-pointer items-center gap-1 rounded px-1 sm:flex" aria-label="Quick open">
-          Go to file <Kbd className="h-4 min-w-4 text-[10px]">{shortcutLabel("quickOpen")}</Kbd>
-        </button>
+        {activeTab && (
+          <span className="ml-auto flex items-center gap-3" aria-label="Editor status">
+            {activeTab.mode === "edit" && caret && (
+              <span>
+                Ln {caret.line}, Col {caret.col}
+                {caret.selected > 0 && ` (${caret.selected} selected)`}
+              </span>
+            )}
+            {activeTab.mode === "edit" && (
+              <span className={cn("transition-colors", activeDoc?.dirty && activeDoc.saving !== "saving" && "text-attention-text")} aria-live="polite">
+                {activeDoc?.saving === "saving" ? "Saving…" : activeDoc?.dirty ? "Unsaved" : activeDoc?.saving === "saved" ? "Saved" : "Autosave on"}
+              </span>
+            )}
+            <span>{languageOf(activeTab.path)}</span>
+            {activeTab.mode === "edit" && (
+              <button type="button" onClick={toggleWrap} aria-pressed={wrap} aria-label="Toggle word wrap" title={`Word wrap (${shortcutLabel("wrap")})`} className={cn("hover:bg-muted hover:text-foreground flex h-5 cursor-pointer items-center gap-1 rounded px-1", wrap && "text-foreground")}>
+                <WrapText className="size-3" aria-hidden />
+                Wrap
+              </button>
+            )}
+            {activeTab.preview && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button type="button" onClick={() => dispatch({ type: "pin", path: activeTab.path })} className="hover:bg-muted hover:text-foreground flex h-5 cursor-pointer items-center rounded border px-1.5 italic">
+                    Preview
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">A preview tab is replaced by the next file. Click to keep it open.</TooltipContent>
+              </Tooltip>
+            )}
+          </span>
+        )}
       </footer>
 
       {quickOpen !== null && (
@@ -594,6 +655,7 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
           paths={paths}
           recent={recent}
           activePath={active}
+          editor={() => (active ? (editors.current.get(`${tabs.focus}:${active}`) ?? null) : null)}
           initial={quickOpen}
           onPick={(p, opts) => {
             openPath(p, opts);
@@ -1105,22 +1167,61 @@ function GoToFile({ paths, query: q, active, changeByPath, onOpen }: { paths: st
   );
 }
 
-function QuickOpen({ paths, recent, activePath, initial, onPick, onClose }: { paths: string[] | null; recent: string[]; activePath: string | null; initial: string; onPick: (path: string, opts: OpenOpts) => void; onClose: () => void }) {
+const SYMBOL_ICON: Record<SymbolKind, LucideIcon> = { function: SquareFunction, method: SquareFunction, class: BoxIcon, interface: TypeIcon, type: TypeIcon, enum: TypeIcon, variable: Variable, property: KeyIcon, key: KeyIcon, heading: Heading, selector: HashIcon };
+
+function QuickOpen({ paths, recent, activePath, editor, initial, onPick, onClose }: { paths: string[] | null; recent: string[]; activePath: string | null; editor: () => CodeEditorHandle | null; initial: string; onPick: (path: string, opts: OpenOpts) => void; onClose: () => void }) {
   const [q, setQ] = React.useState(initial);
   const [cursor, setCursor] = React.useState(0);
   const inputRef = React.useRef<HTMLInputElement>(null);
+  const listRef = React.useRef<HTMLUListElement>(null);
   const line = parseLineQuery(q);
-  const mode: "recent" | "line" | "files" = line || q.trim().startsWith(":") ? "line" : q.trim() ? "files" : "recent";
+  const head = q.trim();
+  const mode: "recent" | "line" | "files" | "symbols" = head.startsWith("@") ? "symbols" : line || head.startsWith(":") ? "line" : head ? "files" : "recent";
   const items = React.useMemo(() => (mode === "recent" ? recent.filter((p) => !paths || paths.includes(p)) : mode === "files" && paths ? matchPaths(paths, q, 40) : []), [mode, recent, paths, q]);
-  React.useEffect(() => setCursor(0), [q]);
+  // "@": the outline is read once per session and the editor's scroll and selection are put back
+  // on close, unless a symbol is picked. The editor getter lives in a ref so the effects key on mode.
+  const editorRef = React.useRef(editor);
+  editorRef.current = editor;
+  const [symbols, setSymbols] = React.useState<CodeSymbol[]>([]);
+  const restore = React.useRef<(() => void) | null>(null);
+  React.useEffect(() => {
+    if (mode !== "symbols") return;
+    const h = editorRef.current();
+    setSymbols(h?.symbols() ?? []);
+    restore.current = h?.snapshot() ?? null;
+    return () => {
+      restore.current?.();
+      restore.current = null;
+    };
+  }, [mode]);
+  const found = React.useMemo(() => (mode === "symbols" ? matchSymbols(symbols, head.slice(1)) : []), [mode, symbols, head]);
+  const count = mode === "symbols" ? found.length : items.length;
+  React.useEffect(() => {
+    const sym = mode === "symbols" ? found[cursor] : undefined;
+    if (sym) editorRef.current()?.reveal(sym, { select: false });
+  }, [mode, found, cursor]);
+  React.useEffect(() => {
+    listRef.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
+  }, [cursor]);
+  // Focus returns where it came from on close, except when a symbol pick hands it to the editor.
+  const handedOff = React.useRef(false);
   React.useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
     const el = inputRef.current;
     el?.focus();
     el?.setSelectionRange(el.value.length, el.value.length);
-    return () => prev?.focus?.();
+    return () => void (handedOff.current || prev?.focus?.());
   }, []);
   const pick = (i: number) => {
+    if (mode === "symbols") {
+      const sym = found[i];
+      if (!sym) return;
+      restore.current = null;
+      handedOff.current = true;
+      editorRef.current()?.reveal(sym, { select: true });
+      onClose();
+      return;
+    }
     if (mode === "line") {
       if (line && activePath) onPick(activePath, { reveal: { ...line, nonce: Date.now() } });
       return;
@@ -1131,7 +1232,7 @@ function QuickOpen({ paths, recent, activePath, initial, onPick, onClose }: { pa
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
-      if (items.length) setCursor((c) => (c + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length);
+      if (count) setCursor((c) => (c + (e.key === "ArrowDown" ? 1 : count - 1)) % count);
     } else if (e.key === "Enter") {
       e.preventDefault();
       pick(cursor);
@@ -1153,15 +1254,38 @@ function QuickOpen({ paths, recent, activePath, initial, onPick, onClose }: { pa
       >
         <label className="flex h-10 items-center gap-2 border-b px-3">
           <Search className="text-muted-foreground size-4" aria-hidden />
-          <input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={onKeyDown} placeholder="Go to file, or :line" aria-label="Go to file" spellCheck={false} className="text-foreground placeholder:text-muted-foreground min-w-0 flex-1 bg-transparent text-meta outline-none" />
+          <input
+            ref={inputRef}
+            value={q}
+            onChange={(e) => {
+              setQ(e.target.value);
+              setCursor(0);
+            }}
+            onKeyDown={onKeyDown}
+            placeholder="Go to file, :line or @symbol"
+            aria-label="Go to file" spellCheck={false} className="text-foreground placeholder:text-muted-foreground min-w-0 flex-1 bg-transparent text-meta outline-none" />
           <Kbd>Esc</Kbd>
         </label>
         {mode === "line" ? (
           <p className="text-muted-foreground px-3 py-2.5 text-meta">
             {!activePath ? "Open a file first." : line ? `Go to line ${line.from}${line.to !== line.from ? `–${line.to}` : ""} in ${baseOf(activePath)}` : "Type a line number, or a range like :10-20."}
           </p>
+        ) : mode === "symbols" ? (
+          <ul ref={listRef} role="listbox" aria-label="Symbols" className="max-h-72 overflow-auto py-1">
+            {found.map((s, i) => {
+              const Icon = SYMBOL_ICON[s.kind];
+              return (
+                <li key={s.from} role="option" aria-selected={i === cursor} onMouseEnter={() => setCursor(i)} onClick={() => pick(i)} style={{ paddingLeft: 12 + s.depth * 14 }} className={cn("flex h-[26px] cursor-pointer items-center gap-1.5 pr-3 text-meta", i === cursor && "bg-accent")}>
+                  <Icon className="text-muted-foreground size-3.5 shrink-0" aria-hidden />
+                  <span className="truncate">{s.name}</span>
+                  <span className="stamp text-muted-foreground ml-auto shrink-0">{s.kind}</span>
+                </li>
+              );
+            })}
+            {found.length === 0 && <li className="text-muted-foreground px-3 py-2 text-micro">{symbols.length === 0 ? "No symbols in this file" : `No symbol matches “${head.slice(1).trim()}”.`}</li>}
+          </ul>
         ) : (
-          <ul role="listbox" aria-label={mode === "recent" ? "Recently opened" : "Matching files"} className="max-h-72 overflow-auto py-1">
+          <ul ref={listRef} role="listbox" aria-label={mode === "recent" ? "Recently opened" : "Matching files"} className="max-h-72 overflow-auto py-1">
             {mode === "recent" && items.length > 0 && <li className="label text-faint px-3 pt-1 pb-0.5">Recently opened</li>}
             {items.map((p, i) => (
               <li key={p} role="option" aria-selected={i === cursor} onMouseEnter={() => setCursor(i)} onClick={() => pick(i)} className={cn("flex h-[26px] cursor-pointer items-center gap-1.5 px-3 text-meta", i === cursor && "bg-accent")}>

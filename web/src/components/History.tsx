@@ -2,6 +2,7 @@ import * as React from "react";
 import { ArrowLeft, Check, RotateCw, Trash2, X } from "lucide-react";
 import { motion } from "motion/react";
 import { useReducedMotion } from "@/lib/motion-pref";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { toast } from "sonner";
 import { api, type Automation, type BoxView, type LedgerRow as HistoryRun, type LedgerQuery, type LedgerTotals, type RunDigest, type RunOutcome } from "@/lib/api";
 import { ActivityHeatmap, type ActivityRun } from "@/components/ui/activity-heatmap";
@@ -114,7 +115,7 @@ function FilterSelect({ label, value, onChange, options }: { label: string; valu
   return (
     <label className={cn("flex h-8 items-center gap-1.5 rounded-full border px-3 text-meta", value ? "border-foreground/30 text-foreground" : "bg-card text-muted-foreground")}>
       <span className="text-faint whitespace-nowrap">{label}</span>
-      <select aria-label={label} className="min-w-0 cursor-pointer bg-transparent font-medium outline-none" value={value} onChange={(e) => onChange(e.target.value)}>
+      <select aria-label={label} className="min-w-0 max-w-36 cursor-pointer truncate bg-transparent font-medium outline-none" value={value} onChange={(e) => onChange(e.target.value)}>
         {options.map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}
@@ -183,6 +184,50 @@ export function History({ onBack, onAgain, boxes, onOpen }: { onBack: () => void
   // Chip counts come from the ledger totals (the whole filtered set, not just the loaded page).
   const counts = { all: totals?.runs ?? (rows ?? []).length, done: totals ? totals.runs - totals.failed : 0, failed: totals?.failed ?? 0 };
   const filtered = lf.startedBy !== "" || lf.agent !== "" || lf.verified !== "";
+  // One row with the table's search: chips, then the narrowing selects. The agent select only earns
+  // its place once there is more than one agent to choose between.
+  const filters = (
+    <>
+      <div role="radiogroup" aria-label="Filter runs" className="flex items-center gap-1">
+        <FilterChip group="history" active={filter === "all"} onClick={() => setFilter("all")} label="All" count={counts.all} />
+        <FilterChip group="history" active={filter === "done"} onClick={() => setFilter("done")} label="Done" count={counts.done} tone="ok" />
+        <FilterChip group="history" active={filter === "failed"} onClick={() => setFilter("failed")} label="Failed" count={counts.failed} tone="destructive" />
+      </div>
+      <FilterSelect
+        label="Started by"
+        value={lf.startedBy}
+        onChange={(v) => setLf((f) => ({ ...f, startedBy: v }))}
+        options={[
+          { value: "", label: "anyone" },
+          { value: "manual", label: "dashboard" },
+          { value: "mcp", label: "MCP client" },
+          { value: "trigger", label: "any automation" },
+          ...automations.map((a) => ({ value: `t:${a.id}`, label: a.name })),
+          { value: "after", label: "handoff" },
+          { value: "unknown", label: "unrecorded" },
+        ]}
+      />
+      {(agents.length > 1 || lf.agent) && (
+        <FilterSelect label="Agent" value={lf.agent} onChange={(v) => setLf((f) => ({ ...f, agent: v }))} options={[{ value: "", label: "any" }, ...Array.from(new Set([...agents, ...(lf.agent ? [lf.agent] : [])])).map((a) => ({ value: a, label: a }))]} />
+      )}
+      <FilterSelect
+        label="Verified"
+        value={lf.verified}
+        onChange={(v) => setLf((f) => ({ ...f, verified: v }))}
+        options={[
+          { value: "", label: "any" },
+          { value: "yes", label: "passed" },
+          { value: "no", label: "failed check" },
+          { value: "unchecked", label: "not checked" },
+        ]}
+      />
+      {filtered && (
+        <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => setLf(NO_FILTERS)}>
+          Clear
+        </Button>
+      )}
+    </>
+  );
 
   const visible = (rows ?? []).filter((r) => filter === "all" || (filter === "failed" ? r.state === "failed" : r.state !== "failed"));
   // Boxes mid-run lead the table (newest activity first) under their own group; they fall out as they archive.
@@ -211,46 +256,6 @@ export function History({ onBack, onAgain, boxes, onOpen }: { onBack: () => void
         {/* A failed load shows its error below; a shimmer that never resolves above it would be a lie. */}
         {!error && <LedgerTotalsStrip t={totals} />}
 
-        <div className="mb-3 flex flex-wrap items-center gap-1">
-          <FilterSelect
-            label="Started by"
-            value={lf.startedBy}
-            onChange={(v) => setLf((f) => ({ ...f, startedBy: v }))}
-            options={[
-              { value: "", label: "anyone" },
-              { value: "manual", label: "dashboard" },
-              { value: "mcp", label: "MCP client" },
-              { value: "trigger", label: "any automation" },
-              ...automations.map((a) => ({ value: `t:${a.id}`, label: a.name })),
-              { value: "after", label: "handoff" },
-              { value: "unknown", label: "unrecorded" },
-            ]}
-          />
-          <FilterSelect label="Agent" value={lf.agent} onChange={(v) => setLf((f) => ({ ...f, agent: v }))} options={[{ value: "", label: "any" }, ...Array.from(new Set([...agents, ...(lf.agent ? [lf.agent] : [])])).map((a) => ({ value: a, label: a }))]} />
-          <FilterSelect
-            label="Verified"
-            value={lf.verified}
-            onChange={(v) => setLf((f) => ({ ...f, verified: v }))}
-            options={[
-              { value: "", label: "any" },
-              { value: "yes", label: "passed" },
-              { value: "no", label: "failed check" },
-              { value: "unchecked", label: "not checked" },
-            ]}
-          />
-          {filtered && (
-            <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => setLf(NO_FILTERS)}>
-              Clear
-            </Button>
-          )}
-        </div>
-
-        <div role="radiogroup" aria-label="Filter runs" className="mb-3 flex flex-wrap items-center gap-1">
-          <FilterChip group="history" active={filter === "all"} onClick={() => setFilter("all")} label="All" count={counts.all} />
-          <FilterChip group="history" active={filter === "done"} onClick={() => setFilter("done")} label="Done" count={counts.done} tone="ok" />
-          <FilterChip group="history" active={filter === "failed"} onClick={() => setFilter("failed")} label="Failed" count={counts.failed} tone="destructive" />
-        </div>
-
         <Swap state={error ? "error" : rows === null ? "loading" : !rows.length && !liveRows.length ? "empty" : !tableRows.length ? `none-${filter}` : "list"}>
           {error ? (
             <div className="border-destructive/30 bg-destructive/5 rounded-xl border border-dashed py-12 text-center" role="alert">
@@ -272,13 +277,16 @@ export function History({ onBack, onAgain, boxes, onOpen }: { onBack: () => void
               ))}
             </div>
           ) : !rows.length && filtered ? (
-            <div className="rounded-xl border border-dashed py-12 text-center">
-              <p className="text-foreground text-lead font-medium">Nothing matches</p>
-              <p className="text-muted-foreground mt-1 text-meta">No finished run fits these filters.</p>
-              <Button size="sm" variant="ghost" className="text-live mt-2" onClick={() => setLf(NO_FILTERS)}>
-                Clear filters
-              </Button>
-            </div>
+            <>
+              <div className="mb-3 flex flex-wrap items-center justify-end gap-2">{filters}</div>
+              <div className="rounded-xl border border-dashed py-12 text-center">
+                <p className="text-foreground text-lead font-medium">Nothing matches</p>
+                <p className="text-muted-foreground mt-1 text-meta">No finished run fits these filters.</p>
+                <Button size="sm" variant="ghost" className="text-live mt-2" onClick={() => setLf(NO_FILTERS)}>
+                  Clear filters
+                </Button>
+              </div>
+            </>
           ) : !rows.length ? (
             <div className="rounded-xl border border-dashed py-14 text-center">
               <p className="text-foreground text-lead font-medium">Nothing here yet</p>
@@ -287,13 +295,16 @@ export function History({ onBack, onAgain, boxes, onOpen }: { onBack: () => void
               </p>
             </div>
           ) : !visible.length ? (
-            <div className="rounded-xl border border-dashed py-12 text-center">
-              <p className="text-foreground text-lead font-medium">Nothing matches</p>
-              <p className="text-muted-foreground mt-1 text-meta">No {filter} runs among the loaded records.</p>
-              <Button size="sm" variant="ghost" className="text-live mt-2" onClick={() => setFilter("all")}>
-                Show everything
-              </Button>
-            </div>
+            <>
+              <div className="mb-3 flex flex-wrap items-center justify-end gap-2">{filters}</div>
+              <div className="rounded-xl border border-dashed py-12 text-center">
+                <p className="text-foreground text-lead font-medium">Nothing matches</p>
+                <p className="text-muted-foreground mt-1 text-meta">No {filter} runs among the loaded records.</p>
+                <Button size="sm" variant="ghost" className="text-live mt-2" onClick={() => setFilter("all")}>
+                  Show everything
+                </Button>
+              </div>
+            </>
           ) : (
             <>
               <DataTable
@@ -306,6 +317,7 @@ export function History({ onBack, onAgain, boxes, onOpen }: { onBack: () => void
                 rowProps={(x) => ({ selected: x.kind === "archived" && opened === x.run.id })}
                 groupOf={(x) => { if (x.kind === "live") return "Running now"; const t = x.run.archivedAt || x.run.endedAt; return t ? dayLabel(t) : null; }}
                 minWidth="min-w-[40rem]"
+                toolbar={filters}
                 search={{ placeholder: "Search runs", text: (x) => (x.kind === "live" ? `${threadTitle(x.box)} ${x.box.name} ${friendlyName(x.box.name)} running` : `#${x.run.id} ${titleOf(x.run)} ${x.run.headline ?? ""} ${x.run.box} ${friendlyName(x.run.box)} ${x.run.agent ?? ""} ${x.run.outcome?.header.label ?? ""}`) }}
                 actions={(x) => (x.kind === "archived" ? <HistoryActions run={x.run} onAgain={onAgain} onDeleted={() => removeRow(x.run.id)} /> : null)}
               />
@@ -421,7 +433,7 @@ const HISTORY_COLUMNS: Column<Row>[] = [
   },
   {
     id: "duration",
-    header: "Duration",
+    header: "Took",
     width: "w-24",
     hideBelow: "sm",
     align: "end",
@@ -455,8 +467,8 @@ const HISTORY_COLUMNS: Column<Row>[] = [
   },
   {
     id: "archived",
-    header: "Archived",
-    width: "w-28",
+    header: "When",
+    width: "w-24",
     hideBelow: "sm",
     align: "end",
     sort: (x) => (x.kind === "live" ? null : x.run.archivedAt || x.run.endedAt || null),
@@ -580,6 +592,7 @@ function RunDetail({ id, outcome }: { id: number; outcome: RunOutcome | null }) 
 const ACTIVITY_WEEKS = 13;
 function ActivityPanel() {
   const [runs, setRuns] = React.useState<ActivityRun[] | null>(null);
+  const wide = useMediaQuery("(min-width: 640px)");
   React.useEffect(() => {
     const ctrl = new AbortController();
     api
@@ -592,8 +605,11 @@ function ActivityPanel() {
   }, []);
   if (!runs?.length) return null; // nothing to draw yet — the empty state below says it better
   const failed = runs.filter((r) => r.failed).length;
+  // A 13-week grid with a handful of lit cells reads as broken; until two weeks' worth of days have
+  // runs, a single row of the last six weeks says the same thing at its own size.
+  const activeDays = new Set(runs.map((r) => new Date(r.t).toDateString())).size;
   return (
-    <section aria-label="Run activity" className="enter bg-card shadow-e1 mb-6 rounded-xl border px-4 py-3.5">
+    <section aria-label="Run activity" className="enter bg-card mb-6 rounded-xl border px-4 py-3.5">
       <div className="mb-3 flex items-baseline gap-4">
         <span className="label text-muted-foreground">Activity</span>
         <span className="text-faint text-micro">
@@ -601,7 +617,7 @@ function ActivityPanel() {
           <NumberTicker value={runs.length - failed} /> done · <NumberTicker value={failed} /> failed
         </span>
       </div>
-      <ActivityHeatmap runs={runs} weeks={ACTIVITY_WEEKS} />
+      <ActivityHeatmap runs={runs} weeks={ACTIVITY_WEEKS} days={activeDays < 14 ? (wide ? 42 : 21) : undefined} />
     </section>
   );
 }

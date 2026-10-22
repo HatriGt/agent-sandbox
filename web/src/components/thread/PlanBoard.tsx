@@ -559,19 +559,20 @@ export function PlanBoard({ board, live, variant = "card", className }: { board:
   }
 
   return (
-    // The aside only reserves a gutter; the board is a self-sized card centred in it, not a
-    // floor-to-ceiling panel.
+    // The aside only reserves a gutter; the board is a self-sized panel at the top of it, level with
+    // the conversation's first row (pt-7), so it reads as a rail beside the text, not a card afloat
+    // in the margin. A sibling column is not elevated: hairline, no shadow.
     <motion.aside
       aria-label="Plan"
       initial={false}
       animate={{ width: open ? "22.5rem" : "3.25rem" }}
       transition={reduce ? { duration: 0 } : { type: "spring", stiffness: 340, damping: 36 }}
-      className={cn("flex shrink-0 items-center py-4 pr-4 pl-1", className)}
+      className={cn("flex shrink-0 items-start pt-7 pb-4 pr-4 pl-1", className)}
     >
       <motion.div
         layout={!reduce}
         transition={reduce ? { duration: 0 } : SPRING}
-        className={cn("bg-card relative flex max-h-[70vh] w-full flex-col overflow-hidden rounded-xl border shadow-e2", !open && "items-center")}
+        className={cn("bg-card relative flex max-h-[70vh] w-full flex-col overflow-hidden rounded-xl border", !open && "items-center")}
       >
         <Sweep on={sweep} failed={failed > 0} />
 

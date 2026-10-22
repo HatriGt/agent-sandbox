@@ -60,6 +60,9 @@ export function DiffView({ diff, path, review }: { diff: ParsedDiff; path: strin
   if (!diff.hunks.length) return <DiffNote>No differences against HEAD for {path}.</DiffNote>;
   const live = diff.hunks.filter((h) => !review?.removed.has(hunkId(h)));
   if (!live.length) return <DiffNote>Every hunk was reverted — {path} is back to HEAD.</DiffNote>;
+  // One gutter width for the whole file (3ch floor), so hunks line up and nothing is padded for a
+  // line number the file does not reach.
+  const digits = Math.max(3, String(Math.max(0, ...diff.hunks.flatMap((h) => h.lines.flatMap((l) => [l.oldNo ?? 0, l.newNo ?? 0])))).length);
   return (
     <div ref={ref} onKeyDown={onKeyDown} className="enter min-w-max pb-4 font-mono text-code leading-[1.65]" role="table" aria-label={`Diff of ${path}`}>
       <AnimatePresence initial={false}>
@@ -71,7 +74,7 @@ export function DiffView({ diff, path, review }: { diff: ParsedDiff; path: strin
             exit={still ? { opacity: 0 } : { height: 0, opacity: 0 }}
             transition={{ duration: still ? 0.12 : 0.26, ease: [0.22, 1, 0.36, 1] }}
           >
-            <Hunk hunk={h} prev={live[i - 1]} path={path} review={review} />
+            <Hunk hunk={h} prev={live[i - 1]} path={path} review={review} digits={digits} />
           </motion.div>
         ))}
       </AnimatePresence>
@@ -291,8 +294,11 @@ function sides(lines: DiffLine[]) {
   return { old, neu, oldIdx, newIdx };
 }
 
-function Hunk({ hunk, prev, path, review }: { hunk: DiffHunk; prev?: DiffHunk; path: string; review?: HunkReview }) {
+function Hunk({ hunk, prev, path, review, digits }: { hunk: DiffHunk; prev?: DiffHunk; path: string; review?: HunkReview; digits: number }) {
   const { lines } = hunk;
+  // Each number column is its digits plus 6px a side; the sign is 1ch; the code starts 8px after.
+  const numW = `calc(${digits}ch + 0.75rem)`;
+  const codeStart = `calc(${digits * 2 + 1}ch + 2rem)`;
   const id = React.useMemo(() => hunkId(hunk), [hunk]);
   const accepted = !!review?.accepted.has(id);
   const busy = review?.busy === id;
@@ -326,14 +332,16 @@ function Hunk({ hunk, prev, path, review }: { hunk: DiffHunk; prev?: DiffHunk; p
       data-busy={busy || undefined}
       tabIndex={review ? 0 : undefined}
     >
-      <div className="review-head bg-muted/60 sticky top-0 z-20 border-b backdrop-blur-sm" role="row">
-        <div className="text-muted-foreground sticky left-0 flex w-max max-w-[calc(100vw-2rem)] items-center gap-2 px-3 py-1 text-micro tabular-nums">
+      {/* A quiet line inside the body, not a bar: card-coloured only so it can stay put while the
+          hunk scrolls under it (the review actions live here). */}
+      <div className="review-head bg-card sticky top-0 z-20" role="row">
+        <div className="text-faint sticky left-0 flex w-max max-w-[calc(100vw-2rem)] items-center gap-2 px-3 py-0.5 text-micro tabular-nums">
           {gap > 0 ? (
-            <span className="text-faint tabular-nums">⋯ {gap} unchanged {gap === 1 ? "line" : "lines"}</span>
+            <span className="tabular-nums">⋯ {gap} unchanged {gap === 1 ? "line" : "lines"}</span>
           ) : (
-            <span className="text-live font-semibold">@@</span>
+            <span className="font-semibold">@@</span>
           )}
-          <span className="review-range tabular-nums">{range}</span>
+          <span className="review-range text-muted-foreground tabular-nums">{range}</span>
           {/* Capped so the action row stays inside a narrow pane; the full header is the title. */}
           {hunk.header && <span className={cn("text-faint truncate", review && "max-w-[28ch]")} title={hunk.header}>{hunk.header}</span>}
           {review && (
@@ -368,7 +376,7 @@ function Hunk({ hunk, prev, path, review }: { hunk: DiffHunk; prev?: DiffHunk; p
       {lines.map((l, i) => {
         if (l.kind === "meta") {
           return (
-            <div key={i} className="text-faint flex items-center gap-2 pl-[8.25rem] text-micro italic" role="row">
+            <div key={i} className="text-faint flex items-center gap-2 text-micro italic" style={{ paddingLeft: codeStart }} role="row">
               {l.text.replace(/^\\ /, "")}
             </div>
           );
@@ -377,9 +385,9 @@ function Hunk({ hunk, prev, path, review }: { hunk: DiffHunk; prev?: DiffHunk; p
         return (
           <div key={i} role="row" className={cn("flex", l.kind === "add" ? "diff-row-add" : l.kind === "del" ? "diff-row-del" : "diff-row-context")}>
             <span className="diff-gutter sticky left-0 z-10 flex shrink-0 select-none border-r" role="rowheader">
-              <span className="text-faint w-[3.5rem] px-2 text-right tabular-nums">{l.oldNo ?? ""}</span>
-              <span className="text-faint w-[3.5rem] px-2 text-right tabular-nums">{l.newNo ?? ""}</span>
-              <span className={cn("w-5 text-center font-semibold", l.kind === "add" ? "text-ok" : l.kind === "del" ? "text-destructive" : "text-transparent")} aria-label={l.kind}>
+              <span className="text-faint px-1.5 text-right tabular-nums" style={{ width: numW }}>{l.oldNo ?? ""}</span>
+              <span className="text-faint px-1.5 text-right tabular-nums" style={{ width: numW }}>{l.newNo ?? ""}</span>
+              <span className={cn("w-[1ch] text-center font-semibold", l.kind === "add" ? "text-ok" : l.kind === "del" ? "text-destructive" : "text-transparent")} aria-label={l.kind}>
                 {l.kind === "add" ? "+" : l.kind === "del" ? "\u2212" : " "}
               </span>
             </span>
