@@ -15,7 +15,7 @@ import { CodeBlock, CodeBlockCode } from "./code-block"
 import { LinkChip } from "./link-chip"
 import { CodeRefLink, CodeRefScope, InlineCode } from "./code-ref"
 import { parseCodeRef } from "@/lib/code-refs"
-import { remarkCodeRefs } from "@/lib/remark-code-refs"
+import { PROSE_REF_ATTR, remarkCodeRefs } from "@/lib/remark-code-refs"
 import { smartBlock, tableFromMarkdown } from "@/components/viz/SmartBlock"
 import { ChecklistCard, taskItems } from "@/components/viz/ChecklistCard"
 import { DefinitionListBlock, StatusListBlock, listItemTexts } from "@/components/viz/ListBlocks"
@@ -313,12 +313,9 @@ const INITIAL_COMPONENTS: Partial<Components> = {
   // arrow after it. Same-origin and in-page links stay in this tab, plain, with no glyph.
   a: function LinkComponent({ href, children, ...props }) {
     if (!href) return <>{children}</>
-    // A relative path (`[parseDag](web/src/lib/viz-extra.ts:515)`) is a code ref, not a web link. A ref
-    // the remark plugin found in plain prose (`data-prose-ref`) stays its own words wherever it cannot
-    // open a file; only a typed link falls back to a chip.
     const ref = parseCodeRef(href)
     const chip = <LinkChip href={href}>{children}</LinkChip>
-    if (ref) return <CodeRefLink parsed={ref} fallback={"data-prose-ref" in props ? children : chip}>{children}</CodeRefLink>
+    if (ref) return <CodeRefLink parsed={ref} fallback={PROSE_REF_ATTR in props ? children : chip}>{children}</CodeRefLink>
     if (isExternal(href))
       return (
         <span className="md-ext">
@@ -332,7 +329,6 @@ const INITIAL_COMPONENTS: Partial<Components> = {
 
 // `viz.ts:42` looks like a `viz.ts:` scheme to the default sanitiser, which would blank it; a
 // relative code path is kept as written (it never becomes an href — see the `a` override).
-// Bare paths and line phrases in prose become links the `a` override routes to CodeRefLink.
 const REMARK_PLUGINS = [remarkGfm, remarkCodeRefs]
 
 const urlTransform = (url: string) => (parseCodeRef(url) && !/^[a-z][\w+.-]*:\/\//i.test(url) ? url : defaultUrlTransform(url))

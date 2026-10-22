@@ -86,17 +86,13 @@ export function pathResolver(files: readonly string[]): (path: string) => string
 /** `path:line` / `path:from-to` as shown in tooltips. */
 export const refLabel = (r: CodeRef) => r.path + (r.line ? `:${r.line}${r.endLine ? `-${r.endLine}` : ""}` : "");
 
-// ---------------------------------------------------------------- refs inside prose
-
 /** A ref found inside plain prose, with its character span in the source text. */
 export type ProseRef = { start: number; end: number; ref: CodeRef };
 type LineHint = { line: number; endLine?: number };
 
 const PATH = String.raw`${SEG}(?:/${SEG})*`;
 const LOC = String.raw`(?::\d+(?:[-–]\d+)?(?::\d+)?|#L\d+(?:-L?\d+)?)`;
-// A token starts the text, follows whitespace, or follows an opener; so `github.com/x` inside a URL never starts one.
 const LEFT = String.raw`(?<![^\s(\["'])`;
-// …and ends the text or runs into whitespace, allowing sentence punctuation in between (stripped below).
 const RIGHT = String.raw`(?=[.,;:)\]"']*(?:\s|$))`;
 const RANGE = String.raw`(\d+)(?:\s*(?:[-–]|to)\s*(\d+))?`;
 const TRAIL = /[.,;:)\]"']+$/;
@@ -107,37 +103,34 @@ const lineOf = (a: string, b?: string): LineHint => {
   const endLine = Number(b) || undefined;
   return { line, ...(endLine !== undefined && endLine > line && { endLine }) };
 };
-const FORMS: Form[] = [
-  // `line N of <path>`, `lines N-M of <path>`, `lines N to M in <path>`
-  {
+const looksLikeFile = (r: CodeRef) => r.line !== undefined || r.path.includes("/");
+const FORMS: Record<"lineOfPath" | "pathLine" | "bareToken", Form> = {
+  lineOfPath: {
     re: new RegExp(String.raw`(?<!\w)lines?\s+${RANGE}\s+(?:of|in)\s+(${PATH})${RIGHT}`, "gi"),
     ref: (m) => {
       const r = parseCodeRef(m[3].replace(TRAIL, ""));
       return r && { ...r, ...lineOf(m[1], m[2]) };
     },
   },
-  // `<path> line N`, `<path> lines N-M`, `<path> at line N`, `<path>, line N`
-  {
+  pathLine: {
     re: new RegExp(String.raw`${LEFT}(${PATH})(?:,|\s+at)?\s+lines?\s+${RANGE}(?!\w)`, "gi"),
     ref: (m) => {
-      // `…in foo.ts. Line 7…` is a sentence boundary, not a ref.
-      if (TRAIL.test(m[1])) return null;
+      const sentenceEndsBeforeLine = TRAIL.test(m[1]);
+      if (sentenceEndsBeforeLine) return null;
       const r = parseCodeRef(m[1]);
       return r && { ...r, ...lineOf(m[2], m[3]) };
     },
   },
-  // `path/to/file.ts`, `file.ts:12`, `path/file.ts:3-5`, `file.ts#L7`
-  {
+  bareToken: {
     re: new RegExp(String.raw`${LEFT}(${PATH}${LOC}?)${RIGHT}`, "g"),
     ref: (m) => {
       const token = m[1].replace(TRAIL, "");
       if (/^www\./i.test(token)) return null;
       const r = parseCodeRef(token);
-      // A bare `foo.ts` with neither a directory nor a line is a word in prose (`setup.py`, `e.g.`).
-      return r && (r.line !== undefined || r.path.includes("/")) ? r : null;
+      return r && looksLikeFile(r) ? r : null;
     },
   },
-];
+};
 
 /**
  * Code refs inside a run of prose: whitespace-delimited `path(:line(-line)?)?` tokens (a path needs a
@@ -148,7 +141,7 @@ const FORMS: Form[] = [
  */
 export function findCodeRefs(text: string): ProseRef[] {
   const hits: ProseRef[] = [];
-  for (const { re, ref } of FORMS) {
+  for (const { re, ref } of Object.values(FORMS)) {
     for (const m of text.matchAll(re)) {
       const r = ref(m);
       if (!r) continue;

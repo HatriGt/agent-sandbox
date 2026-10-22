@@ -1,7 +1,8 @@
 import type { InlineCode, Link, Nodes, Parents, PhrasingContent, Root, RootContent, Text } from "mdast";
 import { findCodeRefs, leadingLineHint, parseCodeRef, refLabel, trailingLineHint } from "./code-refs";
 
-// Text under these is already a link, code, or raw markup: never a prose ref.
+export const PROSE_REF_ATTR = "data-prose-ref";
+
 const SKIP = new Set(["link", "linkReference", "inlineCode", "code", "html"]);
 const isParent = (n: Nodes): n is Parents => "children" in n;
 
@@ -9,7 +10,7 @@ const isParent = (n: Nodes): n is Parents => "children" in n;
  * Splits mdast `text` nodes around findCodeRefs hits into text + `link` nodes (url = refLabel(ref),
  * `data-prose-ref` on the element) so the markdown `a` override renders them through CodeRefLink. A
  * line phrase whose path is an adjacent inline-code sibling ("lines 3-5 of `x.ts`", "`x.ts` line 7")
- * annotates that `inlineCode` with data-line / data-end-line instead. One manual walk, no plugin deps.
+ * annotates that `inlineCode` with data-line / data-end-line instead.
  */
 export function remarkCodeRefs(): (tree: Root) => void {
   return (tree) => walk(tree);
@@ -55,7 +56,7 @@ function split(node: Text): PhrasingContent[] {
       type: "link",
       url: refLabel(ref),
       children: [{ type: "text", value: node.value.slice(start, end) }],
-      data: { hProperties: { "data-prose-ref": "" } },
+      data: { hProperties: { [PROSE_REF_ATTR]: "" } },
     };
     out.push(link);
     at = end;

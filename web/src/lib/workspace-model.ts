@@ -1,9 +1,3 @@
-/**
- * The workspace pane's domain, with no React in it: the explorer as a flat list of rendered rows,
- * the editor groups as a reducer over a one-or-two-group tuple, the per-file draft, the shortcut
- * table and the native-drag payloads. Everything the pane's keyboard, drag and reveal code does is an
- * index walk over `Row[]` or one `TabAction`.
- */
 export type Node = { name: string; path: string; children?: Map<string, Node> };
 
 export function buildTree(paths: string[]): Node {
@@ -25,7 +19,6 @@ export function buildTree(paths: string[]): Node {
   return root;
 }
 
-/** Directories first, then by name, the way every explorer sorts. */
 export const sortedChildren = (m: Map<string, Node> | undefined): Node[] => (m ? [...m.values()].sort((a, b) => (a.children ? 0 : 1) - (b.children ? 0 : 1) || a.name.localeCompare(b.name)) : []);
 
 export const parentOf = (path: string): string => path.slice(0, Math.max(0, path.lastIndexOf("/")));
@@ -41,12 +34,10 @@ export function nodeAt(tree: Node, path: string): Node | null {
   return cur;
 }
 
-/** Siblings for the breadcrumb dropdowns. */
 export function childrenOf(tree: Node, dir: string): Node[] {
   return sortedChildren(nodeAt(tree, dir)?.children);
 }
 
-/** One rendered explorer line. `edit` is the inline input for new file / new folder / rename. */
 export type Row =
   | { kind: "dir"; path: string; name: string; depth: number; expanded: boolean }
   | { kind: "file"; path: string; name: string; depth: number }
@@ -128,8 +119,6 @@ export function invalidName(name: string, siblings: ReadonlySet<string>): string
   return null;
 }
 
-/* ───────────────────────────── tabs ───────────────────────────── */
-
 export type Reveal = { from: number; to: number; nonce: number };
 export type Tab = { path: string; mode: "diff" | "edit"; preview: boolean; reveal?: Reveal };
 export type TabGroup = { tabs: Tab[]; active: string | null };
@@ -152,7 +141,6 @@ export const EMPTY_TABS: TabState = { groups: [{ tabs: [], active: null }], focu
 
 const withGroup = (state: TabState, i: 0 | 1, g: TabGroup): TabState["groups"] => (state.groups.length === 2 ? (i === 0 ? [g, state.groups[1]] : [state.groups[0], g]) : [g]);
 
-/** Group 1 exists only while non-empty; an empty group 0 beside a live group 1 hands over to it. */
 function settle(groups: TabState["groups"], focus: 0 | 1): TabState {
   if (groups.length === 2) {
     if (groups[1].tabs.length === 0) return { groups: [groups[0]], focus: 0 };
@@ -188,7 +176,6 @@ export function tabsReducer(state: TabState, action: TabAction): TabState {
         gi = state.focus === 0 ? 1 : 0;
       }
       const g = groups[gi]!;
-      // A targeted line always shows the file itself, not its diff.
       const mode: Tab["mode"] = opts.reveal ? "edit" : (opts.mode ?? "edit");
       const existing = g.tabs.find((t) => t.path === path);
       let tabs: Tab[];
@@ -268,8 +255,6 @@ export function tabsReducer(state: TabState, action: TabAction): TabState {
 /** One draft per path, shared by both groups. `saving` is the lock that stops the second autosave. */
 export type Doc = { draft?: string; dirty: boolean; saving?: "saving" | "saved" };
 
-/* ───────────────────────────── shortcuts ───────────────────────────── */
-
 export type PaneCommands = {
   closeActive(): void;
   quickOpen(prefill?: string): void;
@@ -281,7 +266,6 @@ export type PaneCommands = {
 };
 export type Shortcut = { key: string; mod?: boolean; shift?: boolean; alt?: boolean; label: string; run: (c: PaneCommands) => void };
 
-/** ⌘W ⌘P ⌘G ⌘B ⌘⇧F ⌘\ ⌥Z ⌘1 ⌘2. Matched in the capture phase on the pane root; ⌘F is left to CodeMirror. */
 export const SHORTCUTS: Shortcut[] = [
   { key: "w", mod: true, label: "⌘W", run: (c) => c.closeActive() },
   { key: "p", mod: true, label: "⌘P", run: (c) => c.quickOpen() },
@@ -302,9 +286,6 @@ export function matchShortcut(e: Pick<KeyboardEvent, "key" | "code" | "metaKey" 
   return table.find((s) => !!s.mod === mod && !!s.shift === e.shiftKey && !!s.alt === e.altKey && (e.key.toLowerCase() === s.key || e.code === codeOf(s.key))) ?? null;
 }
 
-/* ───────────────────────────── drag ───────────────────────────── */
-
-/** Native-drag payloads for rows and tabs; one mime per kind so a tab cannot drop onto a folder. */
 export type DragKind = "asb/path" | "asb/tab";
 type DragPayload<K extends DragKind> = K extends "asb/path" ? { path: string } : { group: 0 | 1; path: string };
 type DragLike = { dataTransfer: DataTransfer | null };
@@ -326,9 +307,6 @@ export function readDrag<K extends DragKind>(e: DragLike, kind: K): DragPayload<
 }
 export const hasDrag = (e: DragLike, kind: DragKind): boolean => !!e.dataTransfer && Array.from(e.dataTransfer.types).includes(kind);
 
-/* ───────────────────────────── quick open ───────────────────────────── */
-
-/** `:12` or `:12-20` typed into quick open. */
 export function parseLineQuery(q: string): { from: number; to: number } | null {
   const m = /^:\s*(\d+)(?:\s*-\s*(\d+))?\s*$/.exec(q);
   if (!m) return null;
@@ -337,7 +315,6 @@ export function parseLineQuery(q: string): { from: number; to: number } | null {
   return from > 0 ? { from, to: Math.max(from, to) } : null;
 }
 
-/** Basename prefix first, then basename substring, then anywhere in the path; shorter paths first. */
 export function matchPaths(paths: string[], query: string, limit = 80): string[] {
   const needle = query.trim().toLowerCase();
   if (!needle) return paths.slice(0, Math.min(limit, 60));

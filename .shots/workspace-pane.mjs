@@ -1,11 +1,3 @@
-// Workspace pane checks: explorer keyboard + mouse, preview/pinned tabs, context menu, inline
-// new/rename through a mocked /fs.json, quick open, search in files, split groups, tab drag and
-// word wrap. Every per-box endpoint is mocked with page.route() (same shape as thread-fixture.mjs).
-// Run from PowerShell:
-//
-//   node .shots/workspace-pane.mjs [--dark] [--w=1440 --h=900]
-//
-// Prints one "ok"/"FAIL" line per check and saves .shots/ws-explorer.png, ws-split.png, ws-search.png.
 import { chromium } from "file:///C:/Users/ak/AppData/Roaming/npm/node_modules/@playwright/mcp/node_modules/playwright/index.mjs";
 
 const flags = process.argv.slice(2).filter((a) => a.startsWith("--"));
@@ -16,7 +8,6 @@ const H = Number(flag("h", 900));
 const token = process.env.ASB_DEV_TOKEN || "devtoken123";
 const base = process.env.ASB_UI || "http://localhost:5173";
 
-/* ───────────────────────────── the box ───────────────────────────── */
 const NAME = "quiet-otter";
 const REPO = "acme/orders-api";
 const T0 = Date.now() - 14 * 60_000;
@@ -44,7 +35,6 @@ const CHANGES = [
   { path: "orders-api/test/rateLimit.test.ts", repo: "orders-api", status: "modified", additions: 24, deletions: 0 },
   { path: "orders-api/docs/rate-limits.md", repo: "orders-api", status: "added", additions: 18, deletions: 0 },
 ];
-// Mutable: /fs.json creates, renames, moves and deletes against it.
 let FILES = ["orders-api/src/app.ts", "orders-api/src/middleware/rateLimit.ts", "orders-api/src/lib/redis.ts", "orders-api/test/rateLimit.test.ts", "orders-api/test/orders.test.ts", "orders-api/docs/rate-limits.md", "orders-api/package.json", "orders-api/README.md"];
 const SOURCE = Array.from({ length: 20 }, (_, i) => `const line${i + 1} = ${i + 1}; // redis is mentioned on line ${i + 1} so that content search has hits`).join("\n") + "\n";
 const SEARCH = [
@@ -55,7 +45,6 @@ const SEARCH = [
 ];
 const frame = (event, data, id) => `event: ${event}\n${id !== undefined ? `id: ${id}\n` : ""}data: ${JSON.stringify(data)}\n\n`;
 
-/* ───────────────────────────── browser ───────────────────────────── */
 const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: W, height: H }, colorScheme: dark ? "dark" : "light", deviceScaleFactor: 1 });
 await ctx.addInitScript(
@@ -68,8 +57,6 @@ await ctx.addInitScript(
 );
 const page = await ctx.newPage();
 const errors = [];
-// "Failed to load resource" is the response listener's job; it skips the dev server refusing the worktree's
-// font files (@fs allow list) and the outcome 404 that means "no archived run yet".
 page.on("console", (m) => m.type() === "error" && !m.text().startsWith("Failed to load resource") && errors.push(m.text()));
 page.on("pageerror", (e) => errors.push(String(e)));
 page.on("response", (r) => r.status() >= 400 && !/.woff2?$/.test(r.url()) && !(r.status() === 404 && r.url().includes("/history/outcome.json")) && errors.push(`${r.status()} ${r.url()}`));
@@ -154,9 +141,7 @@ await page.route("**/*", async (route) => {
   }
 });
 
-/* ───────────────────────────── checks ───────────────────────────── */
 const results = [];
-// A crashed step still reports the checks that ran before it.
 process.on("uncaughtException", (e) => {
   console.log(results.join(String.fromCharCode(10)));
   console.log("CRASH " + String(e.message ?? e).split(String.fromCharCode(10))[0]);
@@ -189,7 +174,6 @@ await settle(800);
 
 await check("auto-opens the first change pinned in diff mode", async () => (await tabsIn(0)).join(",") === "orders-api/src/middleware/rateLimit.ts" && (await tab("orders-api/src/middleware/rateLimit.ts").getAttribute("data-preview")) === null);
 
-// Keyboard: ↓ moves focus, → expands the folder under the cursor.
 await row("orders-api").focus();
 await page.keyboard.press("ArrowDown");
 await settle(100);
@@ -205,7 +189,6 @@ await page.keyboard.type("pack");
 await settle(100);
 await check("type-ahead lands on package.json", async () => (await focusedPath()) === "orders-api/package.json");
 
-// Mouse: single click previews (italic, replaced by the next preview), double click pins, middle click closes.
 await row("orders-api/README.md").click();
 await settle(300);
 await check("single click opens an italic preview tab", async () => (await tab("orders-api/README.md").getAttribute("data-preview")) === "true" && (await tab("orders-api/README.md").locator("span.italic").count()) === 1);
@@ -219,7 +202,6 @@ await tab("orders-api/package.json").click({ button: "middle" });
 await settle(400);
 await check("middle click closes the tab", async () => (await tabsIn(0)).join(",") === "orders-api/src/middleware/rateLimit.ts");
 
-// Context menu on a folder.
 await row("orders-api/docs").click({ button: "right" });
 const menu = page.getByRole("menu", { name: /actions/ });
 await menu.waitFor({ timeout: 3000 });
@@ -231,7 +213,6 @@ await check("right-click shows the explorer context menu", async () => {
 });
 await page.screenshot({ path: ".shots/ws-explorer.png" });
 
-// New file through the menu → inline input → mocked /fs.json → row + pinned tab.
 await menu.getByRole("menuitem", { name: /^New file/ }).click();
 const nameInput = pane().getByRole("textbox", { name: "File name" });
 await nameInput.waitFor({ timeout: 3000 });
@@ -245,7 +226,6 @@ await row("orders-api/docs/notes.md").waitFor({ timeout: 3000 });
 await settle(300);
 await check("New file creates the row and opens a pinned tab (mocked /fs.json)", async () => fsCalls.some((c) => c.op === "create" && c.path === "orders-api/docs/notes.md") && (await tab("orders-api/docs/notes.md").count()) === 1 && (await tab("orders-api/docs/notes.md").getAttribute("data-preview")) === null);
 
-// Rename via F2.
 await row("orders-api/docs/notes.md").focus();
 await page.keyboard.press("F2");
 const renameInput = pane().getByRole("textbox", { name: "New name" });
@@ -256,7 +236,6 @@ await row("orders-api/docs/notes-v2.md").waitFor({ timeout: 3000 });
 await settle(300);
 await check("F2 rename commits and follows the open tab", async () => fsCalls.some((c) => c.op === "move" && c.path === "orders-api/docs/notes.md" && c.to === "orders-api/docs/notes-v2.md") && (await tab("orders-api/docs/notes-v2.md").count()) === 1 && (await tab("orders-api/docs/notes.md").count()) === 0);
 
-// Quick open.
 await page.keyboard.press(`${modKey}+p`);
 const quick = page.getByRole("dialog", { name: "Quick open" });
 await quick.waitFor({ timeout: 3000 });
@@ -278,7 +257,6 @@ await check(":12 in quick open jumps to line 12", async () => {
   return (after.trim() === "12" && after !== lineBefore) || `before ${lineBefore.trim()} after ${after.trim()}`;
 });
 
-// Search in files.
 await page.keyboard.press(`${modKey}+Shift+f`);
 const search = pane().getByRole("textbox", { name: "Search in files" });
 await search.waitFor({ timeout: 3000 });
@@ -290,7 +268,6 @@ await pane().locator('button[title="orders-api/src/middleware/rateLimit.ts:14"]'
 await settle(600);
 await check("clicking a result opens the file at that line", async () => (await tab("orders-api/src/middleware/rateLimit.ts").getAttribute("aria-selected")) === "true" && (await activeLine()).trim() === "14");
 
-// Split.
 await pane().locator('[data-group="0"] .cm-content').click();
 await page.keyboard.press(`${modKey}+\\`);
 await pane().locator('[data-group="1"]').waitFor({ timeout: 3000 });
@@ -298,7 +275,6 @@ await settle(500);
 await check("⌘\\ splits into two groups with the active file copied", async () => (await pane().locator("[data-group]").count()) === 2 && (await tabsIn(1)).join(",") === "orders-api/src/middleware/rateLimit.ts" && (await pane().locator('[data-group="1"]').getAttribute("data-focused")) === "true");
 await page.screenshot({ path: ".shots/ws-split.png" });
 
-// Tab drag reorders within group 0.
 const before = await tabsIn(0);
 await tab(before[0]).dragTo(tab(before[before.length - 1]), { targetPosition: { x: 70, y: 10 } });
 await settle(500);
@@ -307,13 +283,11 @@ await check("dragging a tab reorders the strip", async () => {
   return (after.join(",") !== before.join(",") && after.length === before.length && after[after.length - 1] === before[0]) || `before ${before.join(",")} after ${after.join(",")}`;
 });
 
-// Word wrap.
 await pane().locator('[data-group="1"] .cm-content').click();
 await page.keyboard.press("Alt+z");
 await settle(300);
 await check("⌥Z toggles line wrapping in the editor", async () => (await pane().locator("[data-group] .cm-lineWrapping").count()) >= 1);
 
-// Delete with confirm → tabs holding the path close everywhere.
 await pane().getByRole("tab", { name: /^Files$/ }).click();
 await row("orders-api/docs/notes-v2.md").waitFor({ timeout: 3000 });
 page.once("dialog", (d) => d.accept());

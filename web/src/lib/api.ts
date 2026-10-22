@@ -829,7 +829,6 @@ export const api = {
     ),
   /** Create, delete, move or copy under /workspace. The reply is the fresh tree, so no second fetch. */
   fs: (session: string, op: FsOp) => post<{ ok: true; files: string[] }>("/fs.json", { box: session, ...op }),
-  /** Content search under /workspace; literal by default, capped server-side (`truncated`). */
   search: (session: string, q: string, opts: { regex: boolean; caseSensitive: boolean }, signal?: AbortSignal) =>
     fetch(url("/search.json", { box: session, q, regex: opts.regex ? "1" : "0", case: opts.caseSensitive ? "1" : "0" }), { headers: authHeaders, signal }).then(
       parse<{ matches: SearchMatch[]; truncated: boolean }>

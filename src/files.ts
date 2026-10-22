@@ -12,9 +12,7 @@
 export const FILE_INDEX_CAP = 4000;
 export const FILE_MATCH_LIMIT = 40;
 
-/** Directories never listed or searched, wherever they sit under /workspace. */
 export const EXCLUDED_DIRS = ["node_modules", ".git", "dist", "build", ".next", "target", "__pycache__", ".venv", "venv"] as const;
-/** File names (glob) never listed or searched: the controller's sentinels and generated noise. */
 export const EXCLUDED_NAMES = [".agent.*", "*.lock", "*.log"] as const;
 
 const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
@@ -36,8 +34,8 @@ export function fileDetailsCommand(): string {
   return `cd /workspace 2>/dev/null && find . -type f ${findExclusions()} -printf '%s\\t%T@\\t%P\\n' 2>/dev/null | head -n ${FILE_INDEX_CAP}`;
 }
 
-/** Most matching lines one search returns; the command fetches one more to learn it was cut. */
 export const SEARCH_LINE_CAP = 500;
+const SEARCH_READ_LINES = SEARCH_LINE_CAP + 1;
 
 export interface SearchMatch {
   path: string;
@@ -57,7 +55,7 @@ const GREP_EXIT_MARK = "__GREP_EXIT=";
 export function searchCommand(opts: { regex: boolean; caseSensitive: boolean }): string {
   const flags = ["-rnIZ", "--color=never", ...(opts.caseSensitive ? [] : ["-i"]), opts.regex ? "-E" : "-F"];
   const excludes = [...EXCLUDED_DIRS.map((d) => `--exclude-dir=${q(d)}`), ...EXCLUDED_NAMES.map((n) => `--exclude=${q(n)}`)];
-  return `cd /workspace 2>/dev/null && { grep ${flags.join(" ")} ${excludes.join(" ")} -f - .; echo "${GREP_EXIT_MARK}$?" >&2; } | head -n ${SEARCH_LINE_CAP + 1}`;
+  return `cd /workspace 2>/dev/null && { grep ${flags.join(" ")} ${excludes.join(" ")} -f - .; echo "${GREP_EXIT_MARK}$?" >&2; } | head -n ${SEARCH_READ_LINES}`;
 }
 
 /** grep's exit status from the command's stderr (0 matched, 1 nothing matched, 2 error); null when the marker is missing. */
@@ -66,12 +64,10 @@ export function searchExitStatus(stderr: string): number | null {
   return m ? Number(m[1]) : null;
 }
 
-/** The stderr a user may see: grep's messages without the status marker. */
 export function searchStderr(stderr: string): string {
   return stderr.replace(/__GREP_EXIT=\d+\s*$/, "").trim();
 }
 
-/** `path\0line:text` lines → matches, capped at SEARCH_LINE_CAP; `truncated` when more were present. */
 export function parseSearchOutput(stdout: string): { matches: SearchMatch[]; truncated: boolean } {
   const matches: SearchMatch[] = [];
   for (const raw of stdout.split("\n")) {
@@ -84,7 +80,7 @@ export function parseSearchOutput(stdout: string): { matches: SearchMatch[]; tru
     const path = raw.slice(0, nul).replace(/^\.\//, "");
     matches.push({ path, line, text: rest.slice(colon + 1).replace(/\r$/, "") });
   }
-  return { matches: matches.slice(0, SEARCH_LINE_CAP), truncated: matches.length > SEARCH_LINE_CAP };
+  return { matches: matches.slice(0, SEARCH_LINE_CAP), truncated: matches.length >= SEARCH_READ_LINES };
 }
 
 export interface FileDetail {
@@ -159,15 +155,15 @@ export function makeFileIndex(exec: (box: string, sh: string) => Promise<string>
     if (c && now() - c.at < ttl) return c.paths;
     const pending = inFlight.get(box);
     if (pending) return pending;
-    const p = exec(box, fileListCommand())
+    const stillCurrent = () => inFlight.get(box) === p;
+    const p: Promise<string[]> = exec(box, fileListCommand())
       .then((out) => {
         const paths = parseFileList(out);
-        // A `find` that started before an invalidate saw the old tree: hand it to its callers, cache nothing.
-        if (inFlight.get(box) === p) cache.set(box, { at: now(), paths });
+        if (stillCurrent()) cache.set(box, { at: now(), paths });
         return paths;
       })
       .finally(() => {
-        if (inFlight.get(box) === p) inFlight.delete(box);
+        if (stillCurrent()) inFlight.delete(box);
       });
     inFlight.set(box, p);
     return p;

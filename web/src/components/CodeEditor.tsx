@@ -231,7 +231,7 @@ export function CodeEditor({
   placeholder?: string;
   /** Scroll to, select and flash lines `from`–`to` (1-based); a new `nonce` repeats it. */
   reveal?: { from: number; to: number; nonce: number };
-  /** Soft-wrap long lines (⌥Z in the workspace). Prose always wraps. */
+  /** Soft-wrap long lines. Prose always wraps. */
   wrap?: boolean;
 }) {
   const host = React.useRef<HTMLDivElement>(null);
