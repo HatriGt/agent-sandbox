@@ -39,6 +39,7 @@ import { Button } from "@/components/ui/button";
 import { ChatContainerContent, ChatContainerRoot, ChatContainerScrollAnchor } from "@/components/ui/chat-container";
 import type { TraceEvent } from "@/lib/trace";
 import { LiveRegistryContext, SayKeyContext } from "@/components/viz/live-blocks";
+import { VizFullscreenGate } from "@/components/viz/viz-fullscreen";
 import { buildLiveRegistry, type SayInput } from "@/lib/viz-identity";
 import { AnsweredQuestionItem, Density, ExpandAll, LifecycleItem, MemoryItem, ObserverItem, QueuedItem, RepeatedPolls, SayItem, ToolGroup, WorkingIndicator, YouItem, repeatedPolls, type ThreadDensity } from "./TraceItems";
 import { ReasoningTrail, type TrailItem } from "./ReasoningTrail";
@@ -732,6 +733,15 @@ export function Thread({
     el.addEventListener("wheel", onWheel, { passive: true });
     return () => el.removeEventListener("wheel", onWheel);
   }, [stickScrollRef, stopScroll, box.name]);
+  // A fullscreen viz pauses following too: closing it must land on the block the reader opened.
+  // The library re-locks on any shrink near the bottom (a tool row settling), so the pause is held
+  // for as long as a dialog is open, not set once.
+  const [vizFullscreens, setVizFullscreens] = React.useState(0);
+  const onVizFullscreen = React.useCallback((open: boolean) => setVizFullscreens((n) => n + (open ? 1 : -1)), []);
+  const vizHeld = vizFullscreens > 0;
+  React.useEffect(() => {
+    if (vizHeld && !stick.escapedFromLock) stopScroll();
+  }, [vizHeld, stick.escapedFromLock, stopScroll]);
 
   // "New activity" on the jump-to-latest button: set when the trace grows while the reader is
   // scrolled up in history, cleared the moment they reach the bottom again.
@@ -892,6 +902,7 @@ export function Thread({
                 content, so the swap reads as the bones filling in. */}
             <ExpandAll.Provider value={expandAll}>
             <LiveRegistryContext.Provider value={liveContext}>
+            <VizFullscreenGate.Provider value={onVizFullscreen}>
             <RepeatedPolls.Provider value={repeats}>
             <Density.Provider value={density}>
             <Swap state={loadingTrace} className="flex flex-col gap-5">
@@ -957,6 +968,7 @@ export function Thread({
             </Swap>
             </Density.Provider>
             </RepeatedPolls.Provider>
+            </VizFullscreenGate.Provider>
             </LiveRegistryContext.Provider>
             </ExpandAll.Provider>
 
