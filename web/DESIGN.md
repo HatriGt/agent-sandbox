@@ -796,3 +796,30 @@ bar is 44).
 
 Rule: chrome shows identity and state; everything else waits in Details. A second line is not a place
 to park facts.
+
+## Round: tables you can shape (2026-10-22)
+
+Scope: chat visualizer tables (viz/DataTable) and the page-level table (ui/data-table) now share one width model in `web/src/lib/column-widths.ts`.
+
+### One width model
+- `useColumnWidths(storeKey, ready, signature)` owns three layers per column: **floor** (header label + icon, measured once on first paint, never crossed), **fit** (widest cell, clamped 56..360, measured in one synchronous max-content relayout before paint) and **manual** (px the user set). `width(id)` = manual ?? fit, never under floor. `shaped` is true once any manual width exists.
+- `columnGrip(id, label, cols)` returns the props for the grip span: `role=separator`, `aria-orientation=vertical`, `aria-label="Resize <label>"`, `aria-valuenow`/`aria-valuemin`, `tabIndex=0`, drag, ←/→ nudge 16px, double-click reset. Styling stays in `.dt-resize` (index.css): hairline on header-row hover, accent line while dragged or focused, `col-resize` cursor document-wide during a drag.
+- Persistence: `localStorage["asb.cols.<key>"]`. Page tables use their own id. Viz tables use `viz:<shapeKey>` where `shapeKey` is an FNV-1a hash of the frame title plus the header texts, so the same table shape in a later turn keeps its widths and a different table does not inherit them.
+
+### Two layout modes, no fighting
+- **Unshaped** (default): `table-layout: auto`, `width: 100%`, cells `nowrap`. The browser fits to content; wide tables scroll inside the frame. Nothing is stored.
+- **Shaped** (after the first drag or nudge): the hook snapshots every column's rendered width first, then the table switches to `table-layout: fixed` with px `<col>`s and a trailing flex `<col>` that absorbs the slack. Text cells wrap (`overflow-wrap: anywhere`). `min-width` = sum of column widths, so narrowing the frame scrolls instead of crushing columns. Double-click on every grip returns the table to unshaped.
+
+### Overflow is a feeling, not a scrollbar
+- First column is sticky (`bg-card`, hairline right edge plus a soft 12px shadow) only once the user has scrolled right (`data-scrolled-start` on the wrapper). A 24px fade on the right edge appears only while more content exists that way (`data-scrolled-end`). Both come from observing `scrollLeft` and `scrollWidth`, so a table that fits shows neither.
+- Row tint is a CSS variable (`--row-bg`) shared by the row and its sticky cell, so hover, focus and pinned tints stay continuous across the sticky edge. Tints are opaque `color-mix` results so the sticky cell never shows rows sliding under it.
+
+### Header and cells
+- Header labels: `text-micro`, `tracking-[0.05em]`, uppercase, muted. Sort affordance (chevrons) at 60% only on hover; the sorted header goes `foreground` with a single arrow that rotates for direction. Numeric headers are right-aligned with the icon on the left so the label stays flush with the numbers.
+- Cells: 12px horizontal, 8px vertical. No zebra. Hover `muted/50`, pinned `muted/40`, focus `muted/60`. Numeric cells are `tabular-nums`, right-aligned, and keep the magnitude bar under the value. Status cells keep their tone.
+- Footer appears at more than 8 rows: filter input plus `"N rows"` and `"· M shown"` only while a filter narrows the set. `aria-live=polite` on the count.
+- Keyboard: header sort buttons are real buttons; grips are focusable separators with ←/→ nudge; rows pin with Enter/Space as before.
+
+### Left out on purpose
+- The grip is a constant 8px hit area straddling the edge, not 4px widening to 8px on hover. `.dt-resize::after` in index.css already assumes 8px and that file is not owned by this round.
+- Other viz blocks (ChartExtras heatmap matrix, AutoBlocks/ListBlocks/SmallBlocks key-value `<dl>` grids) are not row tables and were not converted.

@@ -1,6 +1,7 @@
 import * as React from "react";
 import { ArrowUp, ChevronsUpDown, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { columnGrip, useColumnWidths } from "@/lib/column-widths";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { Button } from "@/components/ui/button";
 import { NumberTicker } from "@/components/ui/number-ticker";
@@ -46,123 +47,10 @@ function focusSibling(row: HTMLElement, dir: 1 | -1) {
   all[all.indexOf(row) + dir]?.focus();
 }
 
-const MIN_COL = 56;
-const AUTO_MAX = 360;
-
 /** A Tailwind width class ("w-28", "w-[8.5rem]", "w-[28%]") as a CSS length, for `max(header, declared)`. */
 function twWidth(cls: string): string {
   const m = /^w-(?:\[(.+)\]|(\d+(?:\.\d+)?))$/.exec(cls);
   return m ? (m[1] ?? `calc(var(--spacing) * ${m[2]})`) : "0px";
-}
-
-/**
- * Column widths. Every column's header is measured on first paint and is a hard floor: no column
- * (fitted, dragged, declared or flexible) is ever narrower than its own label + sort icon. Auto:
- * once real rows paint, every sized column is fitted to its widest content (clamped to 360px) and
- * the flexible column takes the rest. Manual: dragging a header edge sets that column in px and is
- * remembered per table (localStorage); double-click the edge to hand it back to auto.
- */
-function useColumnWidths(storeKey: string | undefined, ready: boolean, signature: string) {
-  const colgroup = React.useRef<HTMLTableColElement>(null);
-  const [manual, setManual] = React.useState<Record<string, number>>(() => {
-    if (!storeKey) return {};
-    try {
-      return JSON.parse(localStorage.getItem(`asb.cols.${storeKey}`) ?? "{}");
-    } catch {
-      return {};
-    }
-  });
-  const [auto, setAuto] = React.useState<Record<string, number>>({});
-  const fitted = React.useRef("");
-  // Header floors: the width each header needs to show its label + sort icon in full. No column is
-  // ever narrower than this - not before rows load, not after a drag, not the flexible one.
-  const [floor, setFloor] = React.useState<Record<string, number>>({});
-  React.useLayoutEffect(() => {
-    const table = colgroup.current?.closest("table");
-    const key = `${ready}|${signature}`;
-    if (!table || fitted.current === key) return;
-    fitted.current = key;
-    const fit: Record<string, number> = {};
-    const head: Record<string, number> = {};
-    const cols = Array.from(colgroup.current!.children) as HTMLElement[];
-    // One synchronous relayout before paint: auto layout at max-content lets every cell (truncating
-    // ones included) take its content's natural width; everything is restored afterwards.
-    const saved = [table.style.tableLayout, table.style.width, table.style.minWidth];
-    const savedCols = cols.map((c) => c.style.width);
-    cols.forEach((c) => (c.style.width = "auto"));
-    table.style.tableLayout = "auto";
-    table.style.width = "max-content";
-    table.style.minWidth = "0";
-    const headRow = table.tHead?.rows[0];
-    cols.forEach((col, i) => {
-      const id = col.dataset.col;
-      if (!id) return;
-      const th = headRow?.cells[i];
-      if (th?.offsetParent) head[id] = Math.ceil(th.getBoundingClientRect().width) + 2;
-      if (!ready || col.dataset.flex !== undefined) return;
-      let w = 0;
-      for (const row of Array.from(table.tBodies[0]?.rows ?? [])) {
-        const c = row.cells[i];
-        if (c && c.colSpan === 1 && c.offsetParent) w = Math.max(w, c.getBoundingClientRect().width);
-      }
-      if (w > 0) fit[id] = Math.min(AUTO_MAX, Math.max(MIN_COL, Math.ceil(w) + 2));
-    });
-    [table.style.tableLayout, table.style.width, table.style.minWidth] = saved;
-    cols.forEach((c, i) => (c.style.width = savedCols[i]));
-    setFloor(head);
-    if (ready) setAuto(fit);
-  }, [ready, signature]);
-  const persist = (m: Record<string, number>) => {
-    setManual(m);
-    if (storeKey) localStorage.setItem(`asb.cols.${storeKey}`, JSON.stringify(m));
-  };
-  const startResize = (id: string, e: React.PointerEvent<HTMLElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const th = e.currentTarget.closest("th")!;
-    const startX = e.clientX;
-    const startW = th.getBoundingClientRect().width;
-    const handle = e.currentTarget;
-    handle.setPointerCapture(e.pointerId);
-    document.documentElement.dataset.colResize = "";
-    let latest = manual;
-    const move = (ev: PointerEvent) => {
-      latest = { ...manual, [id]: Math.max(floor[id] ?? MIN_COL, Math.round(startW + ev.clientX - startX)) };
-      setManual(latest);
-    };
-    const up = () => {
-      handle.removeEventListener("pointermove", move);
-      handle.removeEventListener("pointerup", up);
-      handle.removeEventListener("pointercancel", up);
-      delete document.documentElement.dataset.colResize;
-      persist(latest);
-    };
-    handle.addEventListener("pointermove", move);
-    handle.addEventListener("pointerup", up);
-    handle.addEventListener("pointercancel", up);
-  };
-  const nudge = (id: string, th: HTMLElement | null, by: number) => {
-    const w = manual[id] ?? th?.getBoundingClientRect().width ?? MIN_COL;
-    persist({ ...manual, [id]: Math.max(floor[id] ?? MIN_COL, Math.round(w + by)) });
-  };
-  const reset = (id: string) => {
-    const { [id]: _, ...rest } = manual;
-    persist(rest);
-  };
-  return {
-    colgroup,
-    floor: (id: string) => floor[id],
-    fit: (id: string) => auto[id],
-    // Never under the header's own width, whatever was stored or fitted.
-    width: (id: string) => {
-      const w = manual[id] ?? auto[id];
-      return w === undefined ? undefined : Math.max(w, floor[id] ?? 0);
-    },
-    isManual: (id: string) => id in manual,
-    startResize,
-    nudge,
-    reset,
-  };
 }
 
 export function DataTable<T>({
@@ -358,22 +246,7 @@ export function DataTable<T>({
                 ) : (
                   c.header
                 )}
-                <span
-                  role="separator"
-                  aria-orientation="vertical"
-                  aria-label={`Resize ${typeof c.header === "string" ? c.header : c.id} column`}
-                  tabIndex={0}
-                  title="Drag to resize · double-click to fit"
-                  onPointerDown={(e) => cols.startResize(c.id, e)}
-                  onDoubleClick={() => cols.reset(c.id)}
-                  onClick={(e) => e.stopPropagation()}
-                  onKeyDown={(e) => {
-                    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
-                    e.preventDefault();
-                    cols.nudge(c.id, e.currentTarget.closest("th"), e.key === "ArrowRight" ? 16 : -16);
-                  }}
-                  className="dt-resize absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize touch-none outline-none group-last/th:right-0"
-                />
+                <span {...columnGrip(c.id, typeof c.header === "string" ? c.header : c.id, cols, "group-last/th:right-0")} />
               </TableHead>
             );
           })}
