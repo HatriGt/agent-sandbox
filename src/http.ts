@@ -81,7 +81,8 @@ import { WatchHub } from "./watch-hub.js";
 import { makeFleetReader } from "./fleet.js";
 import { Inbox, startInboxDelivery } from "./inbox.js";
 import { makeCredentialBroker } from "./broker.js";
-import { FILE_INDEX_CAP, fileDetailsCommand, makeFileIndex, parseFileDetails } from "./files.js";
+import { FILE_INDEX_CAP, fileDetailsCommand, makeFileIndex, parseFileDetails, parseSearchOutput, searchCommand, searchExitStatus, searchStderr } from "./files.js";
+import { confineFsOp, exitCodeOf, fsCommand, fsFailure } from "./fs-ops.js";
 import { canRevert, captureCmd, checkpointForMessage, listCmd, parseCkptLs, revertCmd, withBoxLock } from "./checkpoint.js";
 import { fetchModels, isAllowedModel } from "./models.js";
 import { execInBox, boxRepoSlugs } from "./msb.js";
@@ -3365,6 +3366,64 @@ app.put("/file.json", async (req: Request, res: Response) => {
     res.json({ ok: true, path: safe.relPath, bytes: isB64 ? Buffer.from(b64, "base64").length : Buffer.byteLength(content, "utf8") });
   } catch (e) {
     res.status(422).json({ error: clientError(e, 400) });
+  }
+});
+
+// Content search under /workspace (the explorer's search view). The pattern travels on stdin, so
+// nothing the user typed is shell-quoted; grep's status comes back on stderr (src/files.ts).
+app.get("/search.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const session = boxParam(req.query);
+  const q = typeof req.query.q === "string" ? req.query.q : "";
+  if (!session || !/^[\w.-]+$/.test(session) || !q || q.length > 200) {
+    res.status(400).json({ error: "session and q (1-200 chars) are required" });
+    return;
+  }
+  try {
+    const r = await execInBox(cfg, session, searchCommand({ regex: req.query.regex === "1", caseSensitive: req.query.case === "1" }), {
+      input: q.replace(/\r?\n/g, " ") + "\n",
+    });
+    const found = parseSearchOutput(r.stdout);
+    // 1 is "nothing matched"; a higher status with nothing matched is a bad pattern or an unreadable
+    // tree (with matches it is a per-file warning the results already answer).
+    const status = searchExitStatus(r.stderr) ?? 0;
+    if (status >= 2 && found.matches.length === 0) {
+      res.status(422).json({ error: redactor.redact(searchStderr(r.stderr).slice(-400)) || "search failed" });
+      return;
+    }
+    res.json(found);
+  } catch (e) {
+    res.status(422).json({ error: clientError(e, 400) });
+  }
+});
+
+// Create / mkdir / delete / move / copy under /workspace (the explorer's context menu). The reply
+// carries the fresh tree, so the client never races the 20 s index cache.
+app.post("/fs.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const session = boxParam(req.body);
+  if (!session || !/^[\w.-]+$/.test(session)) {
+    res.status(400).json({ error: "session is required" });
+    return;
+  }
+  const confined = confineFsOp(req.body);
+  if (!confined.ok) {
+    res.status(confined.status).json({ error: confined.message });
+    return;
+  }
+  try {
+    await execInBox(cfg, session, fsCommand(confined.op));
+  } catch (e) {
+    const known = fsFailure(exitCodeOf(e));
+    if (known) res.status(known.status).json({ error: known.message });
+    else res.status(422).json({ error: clientError(e, 400) });
+    return;
+  }
+  fileIndex.invalidate(session);
+  try {
+    res.json({ ok: true, files: (await fileIndex(session, "", Number.POSITIVE_INFINITY)).files });
+  } catch (e) {
+    failWith(res, e);
   }
 });
 
