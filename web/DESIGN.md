@@ -855,3 +855,80 @@ Select any text in the conversation and a small pill floats above it: **Ask in s
 **Quote in reply.** Inserts `> text` plus a blank line at the start of the main composer's draft, or appends after a non-empty draft, through SendBar's seed mechanism (`append: true`), then focuses the composer with the caret at the end. The "Discuss" path from proposals now uses the same `asQuote` helper.
 
 **Deliberately not done.** No command palette entry and no ShortcutsDialog line: the pill is discovered by selecting, and keyboard users reach its buttons with Tab (DOM order places it right after the scroller). No pill on touch or below md.
+
+## Round: the conversation column (2026-10-22)
+
+The column where the run is read: the transcript, the plan, code in answers, the changed-files strip, the jump button, the map in the gutter. The brief was "premium", which here meant removing what did not earn its pixels before adding anything.
+
+### What was subtracted
+
+- **The minimap below three turns.** A one-reply thread drew two stray bars at x≈285–305 that read as a rendering defect. Two turns is the task and one reply; the thread is its own map. The rail now returns nothing under three turns. When it does render it is one shape: 2px bars, 16px wide, 12px apart, muted; the active turn's bar is `--live` (a question's is `--attention`). The old mix of heights and widths is gone.
+- **Two shadows.** The plan dock and code blocks both carried `shadow-e1/e2` while sitting in the same plane as the prose. Shadows are for elevation; neither is above anything. Both are flat now, bordered only.
+- **The code header band.** "ts · Copy" was a filled strip with a hairline under it. It is now the language and the copy button on the block's own surface, no band, no rule. The language is `.stamp`-quiet.
+- **A second card above the composer.** "3 files changed · Review all" used to be its own `bg-card rounded-xl border shadow-e2` block floating 12px above the composer, so the bottom of the column stacked two cards with two shadows and two radii that did not agree. The dock now lives inside the composer's surface as its first row (SendBar's `top` slot): edge to edge, `rounded-t-[15px]` against the 16px outer corner (concentric: outer radius minus the 1px border), one hairline below it as the only structural border. One surface, one shadow.
+- **The jump button that appeared too soon.** The scroll-to-bottom control showed as soon as the view left the end. It now shows when the reader is more than one viewport above the end (or new content landed below), the only distance at which a jump beats a scroll. It sits 16px above the composer's top edge, centred on the column (676 = column centre at 1440), and enters with the checklist's icon values (opacity 0→1, scale 0.25→1, spring 0.3s, bounce 0), exits at scale 0.9. Reduced motion: opacity only.
+
+### The plan card
+
+At 1440 the plan read as a floating card. Measuring it showed it was not positioned; it was a flex sibling aside, vertically centred (`items-center`) with `shadow-e2`, so it hung in the middle of an empty column with nothing to align to. The split itself was right: a docked aside at ≥80rem when no other aside is open, an inline section below. What was wrong was the alignment and the elevation.
+
+Decision: keep the dock/inline split, top-align the dock so its panel's top edge is level with the Task label (both at y=116 at 1440 and 1280), and drop its shadow so it is a column beside the conversation rather than an object over it. Below 80rem it is the inline section above the task, as before.
+
+Evidence (`.shots/r5-chat-plan-1440.png`, `-1280.png`, `-1100.png`; fixture `.shots/out/r5-chat-1440.png`, `-1280.png`, `-1100.png`): zero intersections between the plan's box and any answer paragraph at all three widths; the widest prose line is 681px at 1440 and 1100, 580px at 1280 beside the dock. The 1100 shot shows the inline section with the task bubble below it.
+
+### Code in answers
+
+Long lines used to clip at the block's right edge. The block now scrolls sideways (`whitespace-pre`) with soft edge fades on the side that has more (DataTable's `data-scrolled-start/end` pattern, 24px, 7% foreground mix) and a thin scrollbar that is transparent until the block is hovered or focused. On the fixture's wide `ts` line: scrollWidth 1008 against clientWidth 679; only the right fade at the start, only the left fade after scrolling to the end.
+
+### Checklist sweep
+
+`text-wrap: pretty` on answer paragraphs and list items; `tabular-nums` on the rolling file count; `initial={false}` on the inspector, workspace-pane, composer-menu and jump-button `AnimatePresence`s so nothing animates in on page load; no `transition-all` in the owned files.
+
+### Left out
+
+- The task bubble and tool-card radii live in TraceItems.tsx, which this round did not own.
+- `useScrollEdges` is duplicated between `viz/DataTable.tsx` and `ui/code-block.tsx`; DataTable was not owned here, so the shared hook is a follow-up.
+- A true overlay scrollbar is not available on Windows Chrome without `::-webkit-scrollbar` tricks that the standard `scrollbar-width` overrides; the thin transparent-until-hover bar is the honest version.
+
+### Proof
+
+`.shots/r5-chat.mjs` 18/18 light and 18/18 dark (minimap absent, plan placement at three widths, code fades and scroll, jump-button distance and position, dock inside the composer and not focusing the textarea). `.shots/r3-select.mjs` still 22/22. `npm run build` clean.
+
+## Round: workspace chrome, by subtraction (2026-10-23)
+
+The files pane had grown three header rows above the code and three bars below it. Each row was reasonable on its own; together they cost the code 118px at the top and 46px at the bottom, and the hunk header repeated the file name that the tab already carried. This round removes rows instead of restyling them.
+
+### What was subtracted
+
+- The file header. Its name repeated the tab. Its +34 −11 stamp, the Diff · File segmented control and the download button move into one 26px toolbar under the tab strip, with a folder trail (never the file name) on the left. The hunk header is no longer chrome; it is a quiet 11px line inside the diff body, sticky, in `text-faint`.
+- The editor status strip. The 22px strip under the editor is gone. Ln/Col, the save state, the language, Wrap and Preview sit on the right of the pane's one 28px status bar (`footer[data-ws-status]`), which already carried branch, changed and file counts on the left. Nothing in the pane repeats the global bar; the "Go to file ⌘P" button left the footer because ⌘P is listed in the shortcuts dialog and the palette.
+- The explorer's filter row. The sidebar now has an icon row (36px, the same height as the tab strip, so the border runs through both) and a 26px section header. A filter button in the icon row swaps the header into the filter field; Escape, Clear, or blurring an empty field swaps it back. The Filter and Reveal header actions are gone (Reveal stays in the tree's context menu), so the header keeps four hover actions, and those are overlaid rather than in flow so the repo stamp keeps the row's full width until the pointer arrives.
+- The gutter. Line numbers were ~130px for two columns. The width now comes from the widest line number in the diff (`max(3, digits)` ch plus padding), the sign is 1ch, and long lines scroll under a soft right-edge fade (the viz/DataTable pattern, armed through `data-scrolled-end`) instead of a hard clip.
+
+### Measurements (1440×900 fixture, `.shots/r5-workspace.mjs`)
+
+- Top chrome: 118px (tab 36 + file header 26 + hunk bar 26 + status strip offset) to 62px (tab 36 + toolbar 26). Bottom chrome: 46px (22px strip + 24px footer) to 28px. The code area gains 74px, 698px of a 788px pane.
+- Gutter: 78px of a 420px editor group; code column is 81% of the group (was ~65%).
+- Explorer rows above the tree: three to two. Icon row and tab strip both end at y=124.
+- Hit areas: toolbar buttons are 24px with a pseudo-element reaching 40px; header actions 24px inside a 26px row that is itself the hover target.
+- Lucide strokes in pane chrome are 1.5px through a container class, so no icon needs its own prop.
+- Fixtures: `r5-workspace.mjs` 20/20 at 1440 light and dark; `r2-find.mjs` 21/21 after its 22px strip check became a 28px footer check.
+
+### What was left out
+
+- No press scale on toolbar or header buttons. `index.css` already applies `:active { transform: scale(0.985) }` globally, and the shared Button has no scale prop, so adding one per button would be a second system.
+- No width policy for the sidebar. At 1100×800 the fixture's pane is 348px with a 191px sidebar, which leaves the editor group 155px; the toolbar clips rather than spilling into the sidebar and hides the +/− stamp under 300px, but the proportion itself belongs to the pane layout, not to chrome. The 60% code-column target holds at 1440 and reads 50% at 1100 for that reason.
+- The language label stays as `languageOf` returns it (`typescript`, not `TypeScript`). Capitalising it is a display map worth doing once for the whole app, not here.
+- The review page, PR page and History still share `DiffView`, so they inherit the narrow gutter and in-body hunk header; their own headers were not touched.
+
+## Round: go to symbol (2026-10-23)
+
+**⌘⇧O is the third mode of quick open.** The same dialog, the same input, the same 26px rows: "@" lists the active file's outline, the way VS Code does it. `SHORTCUTS` gains `goToSymbol` (⌘⇧O, "Go to symbol", `quickOpen("@")`), so the ShortcutsDialog, the window-level chord listener and every menu hint picked it up without a second table. The placeholder now reads "Go to file, :line or @symbol". ⌘⇧O on a Diff tab switches it to File first, because only the editor holds a syntax tree.
+
+**The outline is a pure function of the editor state.** `lib/symbols.ts` exports `CodeSymbol = { name, kind, line, from, to, depth }` and `symbolsIn(state)`. One table per CodeMirror language name maps lezer node names to `{ kind, names(node) }`: TS/JS declarations (function, class, method, property, interface, type, enum, `const`/`let` bindings through destructuring, arrow-function consts count as functions, members of interfaces and type literals), Python defs and classes (a def under a class is a method), markdown headings (ATX and Setext, nested by level), JSON keys, YAML keys, CSS rule selectors. `depth` is a stack counter that grows inside any node that emitted a symbol, so a method sits one level under its class and a local under its function. The tree is parsed to the end with `ensureSyntaxTree(…, 200)` and falls back to whatever is parsed. A grammar without a table (shell, html) yields nothing. Capped at 2000 symbols. `matchSymbols` ranks prefix over substring over subsequence, ties in document order, and an empty query is the whole outline in document order.
+
+**Rows.** Indent is 12px plus 14px per depth. A 14px lucide icon by kind (SquareFunction for function and method, Box for class, Type for interface/type/enum, Variable, Key for property and key, Heading, Hash for a selector), the name, and the kind as a `stamp` on the right. One quiet row, "No symbols in this file", when there is no editor or no tree; "No symbol matches “x”." when the filter empties the list. The cursor row stays in view while arrowing (that scroll-into-view now serves the file list too).
+
+**Preview, then commit.** The editor handle grows `symbols()`, `reveal(sym, { select })` and `snapshot()`. Opening "@" takes a snapshot (scroll and selection). Arrowing calls `reveal` without `select`: the editor scrolls the symbol to centre and tints its line (`.cm-preview-line`, `--live` at 12%, held, unlike the 2s reveal flash) while the caret stays put, so the status strip does not move. Enter calls `reveal` with `select`: the name is selected, the editor takes focus, and the tint goes. Escape, a click outside, or leaving "@" for another mode runs the snapshot's restore, which puts scroll and selection back and clears the tint. Quick open normally returns focus where it came from on close; a symbol pick hands it to the editor instead.
+
+**Left out.** No command palette entry: the palette's "Go to" group is pages, there are no workspace commands in it, and a one-off entry there would be the only one of its kind. No symbols for shell, html or plain text (no tree or no table). Workspace-wide symbol search ("#") is not built. The outline is read once per "@" session; edits made while the dialog is open are not reflected until it is reopened.
