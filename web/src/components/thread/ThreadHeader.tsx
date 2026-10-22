@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowLeft, Check, FileText, FolderTree, HardDrive, Link2, ListTree, Loader2, MemoryStick, MessageSquareText, Moon, MoreHorizontal, PanelRight, Pencil, Pin, PinOff, Plus, RotateCw, Square, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, FileText, FolderTree, HardDrive, Link2, ListTree, Loader2, MemoryStick, MessageCircleQuestion, MessageSquareText, Moon, MoreHorizontal, PanelRight, Pencil, Pin, PinOff, Plus, RotateCw, Square, Trash2 } from "lucide-react";
 import { Swap } from "@/components/ui/swap";
 import { AnimatePresence, motion } from "motion/react";
 import { useReducedMotion } from "@/lib/motion-pref";
@@ -47,6 +47,9 @@ export function ThreadHeader({
   showWorkspace,
   showInspector,
   onToggleInspector,
+  showSideChat,
+  sideUnread = 0,
+  onToggleSideChat,
   removing,
   sleepNow,
   sleepBusy,
@@ -91,6 +94,10 @@ export function ThreadHeader({
   showWorkspace: boolean;
   showInspector: boolean;
   onToggleInspector: () => void;
+  showSideChat: boolean;
+  /** Side-chat answers that landed while the pane was closed. */
+  sideUnread?: number;
+  onToggleSideChat: () => void;
   removing: boolean;
   /** Put the machine to sleep now (msb stop, nothing removed). Hidden while already asleep. */
   sleepNow?: () => void;
@@ -309,6 +316,21 @@ export function ThreadHeader({
               </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom">Run facts and the rest of the fleet · Ctrl+I</TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="sm" onClick={onToggleSideChat} aria-pressed={showSideChat} className={cn("text-muted-foreground relative", showSideChat && "bg-accent text-foreground")}>
+                <MessageCircleQuestion />
+                <span className="hidden lg:inline">Side chat</span>
+                {sideUnread > 0 && (
+                  <span className="bg-primary text-primary-foreground stamp rounded-full px-1.5 text-micro leading-4" aria-label={`${sideUnread} unread`}>
+                    {sideUnread}
+                  </span>
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Ask the sandbox about this run without interrupting the agent</TooltipContent>
           </Tooltip>
 
           {onToggleDensity && (

@@ -28,6 +28,8 @@ import { useOutcome } from "./OutcomeCard";
 import { RunPill, WatchPill } from "./RunPill";
 import { ThreadHeader } from "./ThreadHeader";
 import { RunInspector } from "./RunInspector";
+import { SideChat } from "./SideChat";
+import { useSideChat } from "@/lib/sidechat";
 import { SchedulePill } from "./SchedulePill";
 import { ScheduledCard } from "./ScheduledCard";
 import { parseTrace, producedFiles } from "@/lib/trace";
@@ -41,7 +43,7 @@ import type { TraceEvent } from "@/lib/trace";
 import { LiveRegistryContext, SayKeyContext } from "@/components/viz/live-blocks";
 import { VizFullscreenGate } from "@/components/viz/viz-fullscreen";
 import { buildLiveRegistry, type SayInput } from "@/lib/viz-identity";
-import { AnsweredQuestionItem, Density, ExpandAll, LifecycleItem, MemoryItem, ObserverItem, QueuedItem, RepeatedPolls, SayItem, ToolGroup, WorkingIndicator, YouItem, repeatedPolls, type ThreadDensity } from "./TraceItems";
+import { AnsweredQuestionItem, Density, ExpandAll, LifecycleItem, MemoryItem, QueuedItem, RepeatedPolls, SayItem, ToolGroup, WorkingIndicator, YouItem, repeatedPolls, type ThreadDensity } from "./TraceItems";
 import { ReasoningTrail, type TrailItem } from "./ReasoningTrail";
 import { PlanBoard, type PlanVariant } from "./PlanBoard";
 import { useMediaQuery } from "./RunSettings";
@@ -57,13 +59,6 @@ import { AttachedFromTask } from "./BootingThread";
 import { SendBar } from "./SendBar";
 import { cn } from "@/lib/utils";
 
-/** A co-pilot exchange, owned by the parent so it survives switching threads. */
-export interface Aside {
-  question: string;
-  answer?: string;
-  error?: string;
-}
-
 /**
  * One machine's thread: a one-row header (state · title · name · lifecycle · vitals · destroy), the
  * trace, and the composer. The trace comes from the cached/resumable SSE stream, with a slow poll as
@@ -75,9 +70,7 @@ export function Thread({
   fleet = [],
   onOpenBox,
   inferredRepos,
-  asides,
   replies,
-  onAsk,
   onReplied,
   onBack,
   onNew,
@@ -95,9 +88,7 @@ export function Thread({
   onOpenBox?: (name: string) => void;
   /** Repos auto-attached because the task named them — shown inline under the task bubble. */
   inferredRepos?: string[];
-  asides: Aside[];
   replies: string[];
-  onAsk: (question: string) => void;
   onReplied: (text: string) => void;
   /** Clear this box's optimistic echoes after a revert rewrites the durable log. */
   onRepliesFlushed?: () => void;
@@ -234,10 +225,17 @@ export function Thread({
   const [workspaceFull, setWorkspaceFull] = React.useState(false);
   const [inspectorOpen, setInspectorOpen] = React.useState(false);
   const showWorkspace = workspaceOpen || openFile !== null;
-  // Opening a file (code ref, changed file, palette) wins over the inspector.
+  // The side chat is a third aside under the same one-at-a-time rule. Its open flag lives in the
+  // per-box store (persisted), so each aside's opener closes the others itself.
+  const side = useSideChat(box.name);
+  const sideOpen = side.chat.open;
+  // Opening a file (code ref, changed file, palette) wins over the inspector and the side chat.
   React.useEffect(() => {
-    if (openFile !== null) setInspectorOpen(false);
-  }, [openFile]);
+    if (openFile !== null) {
+      setInspectorOpen(false);
+      side.close();
+    }
+  }, [openFile, side]);
   const closeWorkspace = () => {
     setWorkspaceOpen(false);
     setWorkspaceFull(false);
@@ -247,13 +245,14 @@ export function Thread({
   const [reviewNonce, setReviewNonce] = React.useState(0);
   const openReview = React.useCallback(() => {
     setInspectorOpen(false);
+    side.close();
     setWorkspaceOpen(true);
     setReviewNonce((n) => n + 1);
-  }, []);
+  }, [side]);
   // THE plan placement, decided once: docked beside the conversation when the row is wide (xl)
   // and no other aside has the room; a card in the flow otherwise. Never both, never neither.
   const wide = useMediaQuery("(min-width: 80rem)");
-  const planPlacement: PlanVariant = wide && !showWorkspace && !inspectorOpen ? "dock" : "card";
+  const planPlacement: PlanVariant = wide && !showWorkspace && !inspectorOpen && !sideOpen ? "dock" : "card";
 
   // Esc closes the workspace pane — but never steals the key from a dialog, menu or focused input
   // (those own Escape themselves and either prevent default or match the focus guard below).
@@ -277,10 +276,19 @@ export function Thread({
         setWorkspaceOpen(false);
         setWorkspaceFull(false);
         setOpenFile(null);
+        side.close();
       }
       return !v;
     });
-  }, []);
+  }, [side]);
+  const openSideChat = React.useCallback(() => {
+    setInspectorOpen(false);
+    setWorkspaceOpen(false);
+    setWorkspaceFull(false);
+    setOpenFile(null);
+    side.open();
+  }, [side]);
+  const toggleSideChat = React.useCallback(() => (side.chat.open ? side.close() : openSideChat()), [side, openSideChat]);
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key.toLowerCase() === "i" && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && !e.defaultPrevented) {
@@ -289,10 +297,12 @@ export function Thread({
       }
     };
     const onToggle = () => toggleInspector();
+    const onToggleSide = () => toggleSideChat();
     // The palette's "This thread" commands reach the thread through window events.
     const onOpenWorkspace = (e: Event) => {
       const path = (e as CustomEvent<{ path?: string } | undefined>).detail?.path;
       setInspectorOpen(false);
+      side.close();
       if (path) setOpenFile({ path });
       else setWorkspaceOpen(true);
     };
@@ -300,12 +310,14 @@ export function Thread({
     const onStop = () => void stopTurnRef.current?.();
     window.addEventListener("keydown", onKey);
     window.addEventListener("asb:toggle-inspector", onToggle);
+    window.addEventListener("asb:toggle-sidechat", onToggleSide);
     window.addEventListener("asb:open-workspace", onOpenWorkspace);
     window.addEventListener("asb:review-changes", onReview);
     window.addEventListener("asb:stop-turn", onStop);
     return () => {
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("asb:toggle-inspector", onToggle);
+      window.removeEventListener("asb:toggle-sidechat", onToggleSide);
       window.removeEventListener("asb:open-workspace", onOpenWorkspace);
       window.removeEventListener("asb:review-changes", onReview);
       window.removeEventListener("asb:stop-turn", onStop);
@@ -852,6 +864,9 @@ export function Thread({
         showWorkspace={showWorkspace}
         showInspector={inspectorOpen && !showWorkspace}
         onToggleInspector={toggleInspector}
+        showSideChat={sideOpen}
+        sideUnread={side.unread}
+        onToggleSideChat={toggleSideChat}
         removing={removing}
         sleepNow={sleepNow}
         sleepBusy={sleepBusy}
@@ -865,7 +880,7 @@ export function Thread({
         onSetDisk={setDisk}
         onBack={onBack}
         onNew={onNew}
-        onToggleWorkspace={() => (showWorkspace ? closeWorkspace() : (setInspectorOpen(false), setWorkspaceOpen(true)))}
+        onToggleWorkspace={() => (showWorkspace ? closeWorkspace() : (setInspectorOpen(false), side.close(), setWorkspaceOpen(true)))}
         density={density}
         onToggleDensity={() => onDensity(density === "chat" ? "trace" : "chat")}
         onToggleKeep={toggleKeep}
@@ -1030,14 +1045,6 @@ export function Thread({
               ))}
             </AnimatePresence>
 
-            <AnimatePresence initial={false}>
-              {asides.map((a, i) => (
-                <Rise key={`aside-${i}`} still={still}>
-                  <ObserverItem question={a.question} answer={a.error ?? a.answer} />
-                </Rise>
-              ))}
-            </AnimatePresence>
-
             {!sleeping && !loadingTrace && artifacts.length > 0 && runState !== "running" && pendingReplies.length === 0 && <ProducedFiles session={box.name} files={artifacts} />}
 
             {/* Context nearly full: warn before quality degrades — the advice is the point. */}
@@ -1143,7 +1150,7 @@ export function Thread({
         runState={runState}
         sleeping={sleeping}
         repos={repos}
-        onAsk={onAsk}
+        onOpenSideChat={openSideChat}
         onReplied={onReplied}
         onQueued={refreshQueue}
         onFocusRequest={onFocusRequest}
@@ -1174,6 +1181,7 @@ export function Thread({
           />
         )}
       </AnimatePresence>
+      <SideChat side={side} sleeping={sleeping} onClose={side.close} />
       <AnimatePresence>
         {showWorkspace && (
           <React.Suspense
@@ -1401,7 +1409,7 @@ function sentence(s: string): string {
 }
 
 /**
- * A transient thread row (pending reply, queued message, aside): rises into place on arrival and
+ * A transient thread row (pending reply, queued message): rises into place on arrival and
  * folds away on exit so its neighbours glide rather than jump. Transform/opacity plus a height
  * collapse on exit only; reduced motion keeps a plain fade. The column's gap-5 is not ours to
  * animate, so the exit also pulls marginBottom to -gap: the row's slot AND its gap close together

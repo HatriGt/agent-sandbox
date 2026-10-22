@@ -6,7 +6,7 @@
 //                                  [--stream] [--interact=<name>] [--wait=ms]
 //
 // scenarios : running (default) · question · done · booting · sleeping · idle
-// interact  : file · review · scrolled · slash · mention · model · multiline · workspace · minimap · question-kbd
+// interact  : file · review · scrolled · slash · mention · model · multiline · workspace · minimap · question-kbd · sidechat
 // --stream  : serve /watch.sse from a local server that drips the final answer in over ~6s
 //             (screenshot mid-stream) instead of one full snapshot.
 //
@@ -15,6 +15,7 @@
 //   node .shots/thread-fixture.mjs question .shots/thread-q --dark --w=390 --h=844
 //   node .shots/thread-fixture.mjs running .shots/thread-slash --interact=slash
 import http from "node:http";
+import { auditOverflow, serveWorktreeFonts } from "./overflow-probe.mjs";
 import { chromium } from "file:///C:/Users/ak/AppData/Roaming/npm/node_modules/@playwright/mcp/node_modules/playwright/index.mjs";
 
 const args = process.argv.slice(2);
@@ -57,6 +58,23 @@ const VITEST = [
   "   Start at  09:14:02",
   "   Duration  1.42s (transform 210ms, setup 0ms, collect 380ms, tests 731ms)",
 ];
+
+const SIDE_ANSWER = [
+  "Three files so far, all under `orders-api/`:",
+  "",
+  "- `src/middleware/rateLimit.ts` — the sliding-window limiter (six 10s buckets in a Redis hash)",
+  "- `test/rateLimit.test.ts` — burst, steady and window-slide cases",
+  "- `src/lib/redis.ts` — adds `hincrby` to the client wrapper",
+  "",
+  "The last test run passed: **25 tests, 3 files, 1.42s**. The agent is now writing the PR body.",
+  "",
+  "```sh",
+  "git status --short",
+  " M orders-api/src/lib/redis.ts",
+  " M orders-api/src/middleware/rateLimit.ts",
+  " M orders-api/test/rateLimit.test.ts",
+  "```",
+].join("\n");
 
 const ANSWER = [
   "## Sliding-window limiter is in",
@@ -368,10 +386,17 @@ page.on("pageerror", (e) => errors.push(String(e)));
 page.on("response", (r) => r.status() >= 400 && errors.push(`${r.status()} ${r.url()}`));
 
 const json = (route, body, status = 200) => route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
+await serveWorktreeFonts(ctx);
 await page.route("**/*", async (route) => {
   const u = new URL(route.request().url());
   const p = u.pathname;
   switch (p) {
+    case "/auth/config.json":
+      return json(route, { mode: "saas", providers: ["github"], tokenLogin: true, password: true, signup: true, passwordMin: 10, trialDays: 14, beta: true });
+    case "/workflows.json":
+      return json(route, { limits: {}, dir: ".agent-sandbox/workflows", workflows: [] });
+    case "/triggers/for-box.json":
+      return json(route, { items: [] });
     case "/fleet.json":
       return json(route, { boxes: [box], lifecycle: LIFECYCLE, at: Date.now() });
     case "/monitor.json":
@@ -435,12 +460,27 @@ await page.route("**/*", async (route) => {
       return json(route, { path: u.searchParams.get("path"), content: "const BUCKETS = 6;\n\ninterface Options {\n  limit: number;\n  window?: number;\n}\n\nexport function rateLimit({ limit, window = 60_000 }: Options) {\n  const slice = window / BUCKETS;\n  return async (req, res, next) => {\n    next();\n  };\n}\n", bytes: 240, mtime: Date.now() });
     case "/memory.json":
       return json(route, { ok: true });
+    case "/ask.json": {
+      await new Promise((r) => setTimeout(r, 600));
+      return json(route, { answer: SIDE_ANSWER, timedOut: false, continued: true, driverState: "running" });
+    }
     case "/resume.json":
     case "/title.json":
     case "/wake.json":
       return json(route, { ok: true });
+    case "/me.json":
+      return json(route, { kind: "user", mode: "saas", id: "u_1", login: "ak", name: "Arun K", role: "admin", via: "session", email: "ak@example.com", avatarUrl: null, github: true, hasPassword: true, maxBoxes: 8, plan: "trial", trialEndsAt: new Date(Date.now() + 9 * 86400e3).toISOString(), daysLeft: 9, expired: false, billingUrl: null });
+    case "/history/outcome.json":
+      return json(route, { id: 31, box: NAME, outcome: {
+        v: 1, state: "done",
+        header: { startedBy: { kind: "web" }, label: null, link: null },
+        result: { prs: [{ url: PR.url, repo: REPO, number: 482 }], diff: { files: 2, additions: 58, deletions: 11 } },
+        trust: { tests: { runner: "vitest", passed: 25, failed: 0, skipped: 0, source: "trace" }, exitCode: 0, verified: null, prOnly: false, questions: 1, openQuestions: 0, blocked: 0 },
+        cost: { durationMs: 92_000, tokens: { input: 91320, output: 12880 }, usd: null, model: "ak-claude-opus-4.8" },
+      } });
     default:
-      return route.continue();
+      // Not `continue()`: that would skip the context-level font route.
+      return route.fallback();
   }
 });
 
@@ -450,6 +490,7 @@ await page.waitForTimeout(wait);
 const shots = [];
 const shot = async (suffix = "") => {
   const out = `${outPrefix}${suffix}${dark ? "-dark" : ""}-${W}.png`;
+  if (process.argv.includes("--audit")) for (const o of await auditOverflow(page)) console.log(`OVERFLOW ${o.kind} +${o.by}px  ${o.path}`);
   await page.screenshot({ path: out, fullPage: full });
   shots.push(out);
 };
@@ -578,6 +619,36 @@ if (stream) {
   await page.keyboard.press("2");
   await page.waitForTimeout(300);
   await shot("-question-kbd");
+} else if (interact === "sidechat") {
+  // The side chat: opened from the composer's "Ask the sandbox" button, a question asked, the
+  // answer awaited, then a reload (the turn persists) and a close (the transcript has no side row).
+  await page.getByRole("button", { name: "Ask the sandbox", exact: true }).first().click();
+  const side = page.locator("#sidechat-input");
+  await side.waitFor({ state: "visible", timeout: 5000 }).catch(async (e) => {
+    errors.push("sidechat: " + e.message);
+    await shot("-side-fail");
+  });
+  await page.waitForTimeout(400);
+  await shot("-side-open");
+  await side.type("Which files changed so far, and do the tests pass?");
+  await side.press("Enter");
+  await page.waitForTimeout(250);
+  await shot("-side-pending");
+  await page.locator("[aria-label='Side chat'] .prose-agent").first().waitFor({ state: "visible", timeout: 5000 });
+  await page.waitForTimeout(500);
+  await shot("-side-answer");
+  await page.reload({ waitUntil: "load" });
+  await page.waitForTimeout(wait);
+  const stored = await page.evaluate(() => localStorage.getItem("asb-sidechat:quiet-otter"));
+  const parsed = stored ? JSON.parse(stored) : null;
+  console.log("persisted:", parsed ? `${parsed.turns.length} turn(s), kinds=${parsed.turns.map((t) => t.kind).join(",")}, open=${parsed.open}, pending=${parsed.pending}` : "nothing");
+  await shot("-side-reloaded");
+  await page.locator("button[aria-label='Close the side chat']").or(page.locator("[role=dialog] button[aria-label='Close']")).first().click();
+  await page.waitForTimeout(500);
+  const sideRows = await page.locator("[aria-label='Conversation']").getByText("Which files changed so far").count();
+  const paneCount = await page.locator("[aria-label='Side chat']").count();
+  console.log(`after close: side rows in transcript=${sideRows}, side chat surfaces mounted=${paneCount}`);
+  await shot("-side-closed");
 } else if (interact === "resolve") {
   // The failed `deploy-preview.sh` call: its Resolve row ("Provide DEPLOY_TOKEN") under the terminal panel.
   await page.locator("[data-resolve-row]").first().scrollIntoViewIfNeeded().catch((e) => errors.push("resolve: " + e.message));

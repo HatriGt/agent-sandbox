@@ -22,21 +22,14 @@ import { smartJoin, useVoiceInput } from "@/hooks/useVoiceInput";
 import { VoiceButton, VoicePill } from "@/components/ui/voice-button";
 import { cn } from "@/lib/utils";
 
-type Mode = "agent" | "side";
-
 /**
  * The composer.
  *
- * One input, one primary destination: the AGENT doing the work. Sending to it is always allowed —
- * if the agent is mid-turn the controller queues the message and delivers it the moment the current
- * turn ends, and the thread shows it as "queued" until then. Answering a paused question goes through
- * the question card, so the composer never has to explain "this releases the run".
- *
- * The secondary destination is a SIDE QUESTION: a separate read-only helper inside the same sandbox
- * answers questions ABOUT the run (what changed, why is it stuck) without interrupting the agent. It
- * used to be called "Co-pilot", which suggested it steered; it does not. The label and copy now say
- * exactly what it is. A sleeping (stopped) sandbox has nothing to inspect, so side questions are off
- * there; a reply wakes it.
+ * One input, one destination: the AGENT doing the work. Sending to it is always allowed — if the
+ * agent is mid-turn the controller queues the message and delivers it the moment the current turn
+ * ends, and the thread shows it as "queued" until then. Answering a paused question goes through
+ * the question card, so the composer never has to explain "this releases the run". Questions ABOUT
+ * the run go to the side chat, its own surface with its own input; the toolbar only opens it.
  *
  * `@` opens the workspace file picker (Cursor-style); mentions are expanded into explicit paths so
  * the agent reads the right files.
@@ -46,7 +39,7 @@ export function SendBar({
   runState,
   sleeping = false,
   repos = [],
-  onAsk,
+  onOpenSideChat,
   onReplied,
   onQueued,
   onFocusRequest,
@@ -61,7 +54,8 @@ export function SendBar({
   runState: RunState;
   sleeping?: boolean;
   repos?: { name: string; branch?: string }[];
-  onAsk: (question: string) => void;
+  /** Open the side chat (a read-only helper answering about the run). Hidden while asleep. */
+  onOpenSideChat?: () => void;
   onReplied: (text: string) => void;
   onQueued?: () => void;
   onFocusRequest?: (focus: () => void) => void;
@@ -71,8 +65,6 @@ export function SendBar({
   seed?: { text: string; n: number } | null;
 }) {
   const busy = runState === "running" && !sleeping;
-  const canSide = !sleeping;
-  const [mode, setMode] = React.useState<Mode>("agent");
   const [value, setValue] = React.useState(() => readDraft(boxName));
   React.useEffect(() => setValue(readDraft(boxName)), [boxName]);
   const model = useModelChoice(boxName);
@@ -175,15 +167,9 @@ export function SendBar({
       t?.setSelectionRange(seed.text.length, seed.text.length);
     });
   }, [seed]);
-  React.useEffect(() => {
-    if (!canSide && mode === "side") setMode("agent");
-  }, [canSide, mode]);
-
-  const effective: Mode = canSide ? mode : "agent";
-  const toAgent = effective === "agent";
   const still = useReducedMotion();
   // One slot, four faces: the icon morphs between them rather than swapping.
-  const sendIcon = sending ? "sending" : sent ? "sent" : busy && toAgent ? "queue" : "send";
+  const sendIcon = sending ? "sending" : sent ? "sent" : busy ? "queue" : "send";
 
   const updateMention = (next: string) => {
     const el = textarea();
@@ -274,43 +260,35 @@ export function SendBar({
         imagesTail = `Attached ${paths.length === 1 ? "image" : "images"} (open with the Read tool):\n${paths.map((p) => `- ${p}`).join("\n")}`;
         message = `${message}${message ? "\n\n" : ""}${imagesTail}`;
       }
-      if (!toAgent) {
-        setValue("");
-        setFiles([]);
-        setImages([]);
-        setSkill(null);
-        onAsk(message);
-      } else {
-        setValue("");
-        setFiles([]);
-        setImages([]);
-        setSkill(null);
-        // Echo NOW. The controller wakes/kicks the run in a few seconds; a message that only appears
-        // when the server answers reads as a broken chat. The echo is withdrawn if delivery fails,
-        // and the durable ⟦you⟧ line in the log replaces it once it lands.
-        const body = attached.length ? `${text}\n${attached.map((f) => `@${f}`).join(" ")}` : text;
-        const echo =
-          (chosenSkill ? `/${chosenSkill.name} ` : "") +
-          body +
-          // Image-only sends have no body: the old indexOf-based slice went negative there and
-          // produced an empty echo (a permanent ghost bubble).
-          (imagesTail ? `${body ? "\n\n" : ""}${imagesTail}` : "");
-        if (!busy) onReplied(echo);
-        try {
-          // The picked model rides the send once; the server makes it sticky for the box.
-          const res = await api.resume(boxName, message, model.picked ? { model: model.picked } : {});
-          if ("queued" in res && res.queued) {
-            if (!busy) onReplyFailed?.(echo);
-            onQueued?.();
-            toast("Sent to the agent", {
-              description: "It is mid-turn. It reads your message at its next step and replies in the thread.",
-              icon: <Clock className="size-4" />,
-            });
-          }
-        } catch (e) {
+      setValue("");
+      setFiles([]);
+      setImages([]);
+      setSkill(null);
+      // Echo NOW. The controller wakes/kicks the run in a few seconds; a message that only appears
+      // when the server answers reads as a broken chat. The echo is withdrawn if delivery fails,
+      // and the durable ⟦you⟧ line in the log replaces it once it lands.
+      const body = attached.length ? `${text}\n${attached.map((f) => `@${f}`).join(" ")}` : text;
+      const echo =
+        (chosenSkill ? `/${chosenSkill.name} ` : "") +
+        body +
+        // Image-only sends have no body: the old indexOf-based slice went negative there and
+        // produced an empty echo (a permanent ghost bubble).
+        (imagesTail ? `${body ? "\n\n" : ""}${imagesTail}` : "");
+      if (!busy) onReplied(echo);
+      try {
+        // The picked model rides the send once; the server makes it sticky for the box.
+        const res = await api.resume(boxName, message, model.picked ? { model: model.picked } : {});
+        if ("queued" in res && res.queued) {
           if (!busy) onReplyFailed?.(echo);
-          throw e;
+          onQueued?.();
+          toast("Sent to the agent", {
+            description: "It is mid-turn. It reads your message at its next step and replies in the thread.",
+            icon: <Clock className="size-4" />,
+          });
         }
+      } catch (e) {
+        if (!busy) onReplyFailed?.(echo);
+        throw e;
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -335,15 +313,13 @@ export function SendBar({
     ? null
     : sleeping
       ? "Waking the sandbox — type ahead, it sends when the machine is back."
-      : toAgent
-        ? busy
-          ? "Agent is mid-turn — it reads your message at its next step."
-          : phase === "starting"
-            ? "Starting up — type ahead, it is delivered once the agent is listening."
-            : phase === "asked"
-              ? "Pick an option above, or answer here — it reaches the agent as your answer."
-              : "Enter to send · Shift+Enter for a new line · paste or drop images"
-        : "Answered by a read-only helper in the sandbox — the agent is not interrupted.";
+      : busy
+        ? "Agent is mid-turn — it reads your message at its next step."
+        : phase === "starting"
+          ? "Starting up — type ahead, it is delivered once the agent is listening."
+          : phase === "asked"
+            ? "Pick an option above, or answer here — it reaches the agent as your answer."
+            : "Enter to send · Shift+Enter for a new line · paste or drop images";
 
   return (
     <div className="pt-1 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
@@ -367,8 +343,7 @@ export function SendBar({
           }}
           isLoading={sending}
           className={cn(
-            "bg-card raised composer-glow composer-depth rounded-2xl p-2",
-            toAgent ? "border-line-strong" : "border-border border-dashed",
+            "bg-card raised composer-glow composer-depth border-line-strong rounded-2xl p-2",
             sleeping && "border-sleep/50",
             dragOver && "border-live ring-live/40 ring-2",
             (voice.state === "listening" || voice.state === "arming") && "mic-glow"
@@ -413,7 +388,7 @@ export function SendBar({
           )}
           </AnimatePresence>
           <label htmlFor="send-input" className="sr-only">
-            {toAgent ? "Message the agent" : "Ask a side question about this run"}
+            Message the agent
           </label>
           <PromptInputTextarea
             id="send-input"
@@ -438,17 +413,15 @@ export function SendBar({
                 ? `Add details for /${skill.name} — or just send…`
                 : sleeping
                   ? "Type ahead — sends once the sandbox is awake…"
-                  : toAgent
-                    ? busy
-                      ? "Say something — the agent reads it at its next step…"
-                      : phase === "fresh"
-                        ? "Describe a task for this machine… ( / skills · @ files )"
-                        : phase === "starting"
-                          ? "Type ahead — delivered once the agent is listening…"
-                          : phase === "asked"
-                            ? "Answer in your own words…"
-                            : "Send a follow-up… ( / skills · @ files )"
-                    : "Ask about this run — what changed, what is it doing, why is it stuck…"
+                  : busy
+                    ? "Say something — the agent reads it at its next step…"
+                    : phase === "fresh"
+                      ? "Describe a task for this machine… ( / skills · @ files )"
+                      : phase === "starting"
+                        ? "Type ahead — delivered once the agent is listening…"
+                        : phase === "asked"
+                          ? "Answer in your own words…"
+                          : "Send a follow-up… ( / skills · @ files )"
             }
           />
           {/* Context chips inside the box, above the toolbar: the skill, then @-mentioned files. */}
@@ -483,7 +456,7 @@ export function SendBar({
           {/* One row, never two: everything is nowrap and the tool cluster can shrink (min-w-0) so the
               send button always keeps its place at the right edge — on a phone as much as beside an
               open workspace pane. */}
-          {/* The shared toolbar (components/composer/Toolbar.tsx): + / @ · Side question · Model … voice
+          {/* The shared toolbar (components/composer/Toolbar.tsx): + / @ · Ask the sandbox · Model … voice
               send. One row, never two — labels drop below `sm`, send keeps its place at the right. */}
           <PromptInputActions className="block pt-0">
             <ComposerToolbar
@@ -523,30 +496,22 @@ export function SendBar({
                       });
                     }}
                   />
-                  {/* The one secondary destination, as a single toggle: off = the agent (always), on =
-                      the read-only side helper. The dashed border and the caption say which is live. */}
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span className="inline-flex" tabIndex={!canSide ? 0 : -1}>
+                  {onOpenSideChat && !sleeping && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
                         <ToolButton
                           icon={<MessageCircleQuestion />}
-                          label="Side question"
-                          aria-pressed={!toAgent}
-                          active={!toAgent}
-                          disabled={!canSide}
+                          aria-label="Ask the sandbox"
                           onClick={(e) => {
                             e.stopPropagation();
-                            setMode(toAgent ? "side" : "agent");
+                            onOpenSideChat();
                           }}
                         />
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent side="top">
-                      {!canSide ? "A sleeping sandbox has nothing to inspect — wake it with a message first" : toAgent ? "Ask about this run without interrupting the agent" : "Back to messaging the agent"}
-                    </TooltipContent>
-                  </Tooltip>
-                  {/* Model: only for the AGENT lane — the side helper stays on ASK_MODEL. */}
-                  {toAgent && <ModelMenu {...menus.props("model")} model={modelOptions} disabled={sending} />}
+                      </TooltipTrigger>
+                      <TooltipContent side="top">Ask the sandbox about this run — the agent is not interrupted</TooltipContent>
+                    </Tooltip>
+                  )}
+                  <ModelMenu {...menus.props("model")} model={modelOptions} disabled={sending} />
                   <input
                     ref={fileInput}
                     type="file"
@@ -564,11 +529,11 @@ export function SendBar({
                 <>
                   {voice.supported && <VoiceButton state={voice.state} level={voice.level} onToggle={voice.toggle} />}
             <Button
-              variant={toAgent ? "primary" : "outline"}
+              variant="primary"
               size="icon"
               onClick={send}
               disabled={sending || (!value.trim() && !files.length && !images.length && !skill)}
-              aria-label={toAgent ? (busy ? "Queue for the agent" : "Send to the agent") : "Ask a side question"}
+              aria-label={busy ? "Queue for the agent" : "Send to the agent"}
               className="no-press shrink-0 rounded-full transition-[opacity,scale,background-color] duration-[var(--dur-fast)] ease-[var(--ease-out-quint)] disabled:opacity-35 enabled:hover:scale-105 enabled:active:scale-90 motion-reduce:enabled:hover:scale-100 motion-reduce:enabled:active:scale-100"
             >
               <AnimatePresence initial={false} mode="popLayout">

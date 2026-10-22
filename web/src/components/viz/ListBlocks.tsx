@@ -28,11 +28,11 @@ export function listItemTexts(children: React.ReactNode): string[] | null {
 
 export function DefinitionListBlock({ items }: { items: Definition[] }) {
   return (
-    <dl className="not-prose my-3 grid grid-cols-[minmax(6rem,max-content)_1fr] gap-x-6 gap-y-2.5 rounded-xl border px-4 py-3">
+    <dl className="not-prose my-3 grid grid-cols-[minmax(6rem,max-content)_1fr] gap-x-6 gap-y-2.5 rounded-xl border px-4 py-3 @max-[26rem]:grid-cols-1 @max-[26rem]:gap-y-0.5">
       {items.map((d) => (
         <div key={d.term} className="contents">
           <dt className="text-foreground text-body font-medium">{d.term}</dt>
-          <dd className="text-muted-foreground m-0 min-w-0 text-body leading-relaxed">{d.detail}</dd>
+          <dd className="text-muted-foreground m-0 min-w-0 text-body leading-relaxed @max-[26rem]:mb-2 @max-[26rem]:last:mb-0">{d.detail}</dd>
         </div>
       ))}
     </dl>
