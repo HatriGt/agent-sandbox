@@ -9,6 +9,7 @@ import { useNow } from "@/hooks/useNow";
 import { useWatch } from "@/hooks/useWatch";
 import { api, type BoxView } from "@/lib/api";
 import { isSleeping, tierGib, usageLevel } from "@/lib/format";
+import { forgetSideChat, useSideChat } from "@/lib/sidechat";
 import { deriveTaskBoard } from "@/lib/planTasks";
 import { splitReplies } from "@/lib/replies";
 import { parseTrace } from "@/lib/trace";
@@ -39,10 +40,9 @@ import { ThreadHeader, type DisplayState } from "@/components/thread/ThreadHeade
 import { T } from "@/components/ui/AppText";
 import { Icon, type IconName } from "@/components/ui/Icon";
 import { Sheet } from "@/components/ui/Sheet";
+import { SideChatButton, SideChatSheet } from "@/components/SideChatSheet";
 import { CodeRefSession } from "@/components/CodeRef";
-import { AgentLoader, FadeInUp, haptic, PressScale, ScalePresence, TypingDots, WorkingDot } from "@/components/motion";
-
-type AskEntry = { q: string; a?: string; pending: boolean };
+import { AgentLoader, FadeInUp, haptic, PressScale, ScalePresence, WorkingDot } from "@/components/motion";
 
 const VIEWABILITY = { itemVisiblePercentThreshold: 10 };
 
@@ -97,7 +97,7 @@ function Thread() {
   const [currentModel, setCurrentModel] = useState<string | null>(null);
   const [pickedModel, setPickedModel] = useState<string | null>(null);
   const keyboardInset = useKeyboardInset();
-  const [asks, setAsks] = useState<AskEntry[]>([]);
+  const side = useSideChat(session);
   const [answering, setAnswering] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const [prefill, setPrefill] = useState<{ text: string; nonce: number } | null>(null);
@@ -192,7 +192,6 @@ function Thread() {
     setNote(null);
     setReplies([]);
     setSettled(new Set());
-    setAsks([]);
     setPickedModel(null);
   }, [session]);
 
@@ -373,18 +372,6 @@ function Thread() {
       setNote(e instanceof Error ? e.message : String(e));
     } finally {
       setAnswering(false);
-    }
-  };
-
-  const ask = async (q: string) => {
-    setAsks((a) => [...a, { q, pending: true }]);
-    try {
-      const r = await api.ask(session, q);
-      setAsks((a) => a.map((e) => (e.q === q && e.pending ? { q, a: r.answer, pending: false } : e)));
-    } catch (e) {
-      setAsks((a) =>
-        a.map((en) => (en.q === q && en.pending ? { q, a: `✕ ${e instanceof Error ? e.message : e}`, pending: false } : en)),
-      );
     }
   };
 
@@ -622,32 +609,6 @@ function Thread() {
                 ) : null}
               </FadeInUp>
             )}
-            {asks.length > 0 && (
-              <View style={{ gap: 8, marginTop: 12 }}>
-                {asks.map((a, i) => (
-                  <View
-                    key={i}
-                    style={{
-                      borderWidth: 1.5,
-                      borderStyle: "dashed",
-                      borderColor: palette.lineStrong,
-                      borderRadius: radius.xl,
-                      padding: 12,
-                      gap: 6,
-                    }}
-                  >
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
-                      <Icon name="eye" size={12} color={palette.faint} />
-                      <T variant="micro" tone="faint" weight="semibold">
-                        Ask · read-only co-pilot
-                      </T>
-                    </View>
-                    <T variant="body" weight="medium">{a.q}</T>
-                    {a.pending ? <TypingDots color={palette.faint} /> : <T variant="body" tone="muted" selectable>{a.a}</T>}
-                  </View>
-                ))}
-              </View>
-            )}
             {/* What this chat scheduled — under the transcript so a long list scrolls with it. */}
             {!booting ? (
               <View style={{ marginTop: 12 }}>
@@ -776,7 +737,6 @@ function Thread() {
             draftKey={draftKeyForBox(session)}
             prefill={prefill}
             onSend={steer}
-            onAsk={ask}
             running={running}
             sleeping={sleeping}
             disabled={booting}
@@ -801,16 +761,19 @@ function Thread() {
                 >
                   <Icon name="cpu" size={11} color={pickedModel ? palette.live : palette.faint} />
                   {/* Model names run long ("Claude Sonnet 5 (thinking)") and this chip shares a row
-                      with both lane toggles — cap it rather than let it push them off. */}
+                      with the side chat button — cap it rather than let it push that off. */}
                   <T variant="micro" weight="medium" numberOfLines={1} tone={pickedModel ? "live" : "faint"} style={{ maxWidth: 120 }}>
                     {models.find((m) => m.id === (pickedModel ?? currentModel))?.label ?? "Model"}
                   </T>
                 </PressScale>
               ) : null
             }
+            accessoryRight={<SideChatButton unread={side.unread} onPress={side.open} />}
           />
         </View>
       </KeyboardAvoidingView>
+
+      <SideChatSheet side={side} sleeping={sleeping} />
 
       {/* Revert confirm — quotes the message it rolls back to */}
       <Sheet visible={!!revertAsk} onClose={() => setRevertAsk(null)} title="Revert to before this message?">
@@ -922,7 +885,10 @@ function Thread() {
         onChanged={refresh}
         onSlept={() => setSleptHere(true)}
         onInspect={() => setSheet("inspector")}
-        onDestroyed={() => router.back()}
+        onDestroyed={() => {
+          forgetSideChat(session);
+          router.back();
+        }}
         onRunAgain={
           merged?.task
             ? () => {
