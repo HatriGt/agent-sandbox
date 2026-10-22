@@ -29,7 +29,8 @@ import { RunPill, WatchPill } from "./RunPill";
 import { ThreadHeader } from "./ThreadHeader";
 import { RunInspector } from "./RunInspector";
 import { SideChat } from "./SideChat";
-import { useSideChat } from "@/lib/sidechat";
+import { asQuote, useSideChat } from "@/lib/sidechat";
+import { SelectionToolbar } from "./SelectionToolbar";
 import { SchedulePill } from "./SchedulePill";
 import { ScheduledCard } from "./ScheduledCard";
 import { parseTrace, producedFiles } from "@/lib/trace";
@@ -397,7 +398,7 @@ export function Thread({
   // in-box checkpoint taken when turn k-1 finished). Refetched whenever a turn settles.
   const [revertable, setRevertable] = React.useState<Set<number>>(new Set());
   const [revertAsk, setRevertAsk] = React.useState<{ message: number; discarded: number } | null>(null);
-  const [seed, setSeed] = React.useState<{ text: string; n: number } | null>(null);
+  const [seed, setSeed] = React.useState<{ text: string; n: number; append?: boolean } | null>(null);
   const [reverting, setReverting] = React.useState(false);
   const canRevertNow = !sleeping && runState !== "running";
   React.useEffect(() => {
@@ -682,9 +683,18 @@ export function Thread({
   stopTurnRef.current = runState === "running" && !sleeping ? stopTurn : null;
   // Discuss (D1): reply in free text with the proposal quoted; the question or schedule stays open.
   const discuss = React.useCallback((proposal: string) => {
-    const quoted = proposal.trim().split("\n").map((l) => `> ${l}`).join("\n");
-    setSeed({ text: `${quoted}\n\n`, n: Date.now() });
+    setSeed({ text: `${asQuote(proposal)}\n\n`, n: Date.now() });
   }, []);
+  // Selected conversation text: a quote attached to the side chat's next question, or quoted into
+  // the main composer's draft (appended when something is already typed).
+  const askSelection = React.useCallback(
+    (text: string) => {
+      openSideChat();
+      side.quote(text);
+    },
+    [openSideChat, side]
+  );
+  const quoteSelection = React.useCallback((text: string) => setSeed({ text: `${asQuote(text)}\n\n`, n: Date.now(), append: true }), []);
   // The run's model, from the formatter's "session started (model X)" marker — observed, not assumed.
   const runModel = React.useMemo(() => {
     for (const e of events) {
@@ -889,6 +899,7 @@ export function Thread({
         onDestroy={destroy}
         onCopyTranscript={async () => toMarkdown(events, { title, machine: friendlyName(box.name), url: window.location.href })}
         onNewFromThis={newFromThis}
+        events={events}
       />
 
       <div className="relative flex min-h-0 flex-1">
@@ -1090,6 +1101,7 @@ export function Thread({
             <ChatContainerScrollAnchor />
           </ChatContainerContent>
         </ChatContainerRoot>
+        <SelectionToolbar scrollerRef={stick.scrollRef} onAsk={askSelection} onQuote={quoteSelection} />
         {/* Revert confirmation: destructive to the LATER turns, and honest about what does not
             rewind — pushed commits, opened PRs, external API writes stay. */}
         <Dialog open={!!revertAsk} onOpenChange={(o) => !o && !reverting && setRevertAsk(null)}>

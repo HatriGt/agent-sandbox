@@ -1,11 +1,12 @@
 import * as React from "react";
-import { ArrowUp, Eraser, MessageCircleQuestion, PanelRightClose, RotateCw } from "lucide-react";
+import { ArrowUp, Eraser, MessageCircleQuestion, PanelRightClose, Quote, RotateCw, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useReducedMotion } from "@/lib/motion-pref";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
-import type { SettledTurn, SideChatHandle } from "@/lib/sidechat";
+import { DEFAULT_QUOTE_QUESTION, questionBody, type PendingTurn, type SettledTurn, type SideChatHandle } from "@/lib/sidechat";
 import { Markdown } from "@/components/ui/markdown";
 import { Button } from "@/components/ui/button";
+import { Collapse } from "@/components/ui/collapse";
 import { PromptInput, PromptInputActions, PromptInputTextarea } from "@/components/ui/prompt-input";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -13,6 +14,7 @@ import { cn } from "@/lib/utils";
 
 const PANE_WIDTH = "22rem";
 export const SIDE_INPUT_ID = "sidechat-input";
+const CHIP_CHARS = 60;
 
 /**
  * The side chat: a second, small conversation attached to the box, answered from inside the sandbox
@@ -28,11 +30,12 @@ export function SideChat({ side, sleeping, onClose }: { side: SideChatHandle; sl
     if (chat.open) markRead();
   }, [chat.open, chat.turns, markRead]);
 
+  // Focus follows the surface opening, and a quote arriving while it is already open.
   React.useEffect(() => {
     if (!chat.open) return;
     const t = window.setTimeout(() => document.getElementById(SIDE_INPUT_ID)?.focus(), phone ? 260 : 40);
     return () => window.clearTimeout(t);
-  }, [chat.open, phone]);
+  }, [chat.open, chat.quote, phone]);
 
   const body = <Body side={side} sleeping={sleeping} onClose={onClose} phone={phone} />;
 
@@ -101,6 +104,7 @@ function Body({ side, sleeping, onClose, phone }: { side: SideChatHandle; sleepi
   const { chat } = side;
   const listRef = React.useRef<HTMLDivElement>(null);
   const pending = chat.pending !== null;
+  const sendable = !sleeping && !pending && (chat.draft.trim() !== "" || chat.quote !== null);
 
   React.useLayoutEffect(() => {
     // A long answer reads from its question, not from its tail: the newest turn's top comes into view.
@@ -108,9 +112,17 @@ function Body({ side, sleeping, onClose, phone }: { side: SideChatHandle; sleepi
   }, [chat.turns.length, pending]);
 
   const send = () => {
-    if (sleeping || pending || !chat.draft.trim()) return;
+    if (!sendable) return;
     side.ask(chat.draft);
   };
+
+  const placeholder = sleeping
+    ? "Wake the sandbox to ask about it"
+    : chat.quote !== null
+      ? DEFAULT_QUOTE_QUESTION
+      : pending
+        ? "Reading the box… type the next one"
+        : "What changed? Why is it stuck?";
 
   const composer = (
     <div className={cn("shrink-0 border-t px-3 py-3", phone && "bg-popover sticky bottom-0 -mx-4 px-4 pb-0")}>
@@ -121,13 +133,14 @@ function Body({ side, sleeping, onClose, phone }: { side: SideChatHandle; sleepi
         disabled={sleeping}
         className="bg-background rounded-xl p-1.5"
       >
+        <QuoteChip quote={chat.quote} onRemove={side.unquote} />
         <label htmlFor={SIDE_INPUT_ID} className="sr-only">
           Ask the sandbox about this run
         </label>
         <PromptInputTextarea
           id={SIDE_INPUT_ID}
           className="min-h-9 px-2 pt-1.5 text-meta"
-          placeholder={sleeping ? "Wake the sandbox to ask about it" : pending ? "Reading the box… type the next one" : "What changed? Why is it stuck?"}
+          placeholder={placeholder}
           onKeyDown={(e) => {
             if (e.key === "Escape" && !chat.draft.trim()) {
               e.preventDefault();
@@ -143,14 +156,7 @@ function Body({ side, sleeping, onClose, phone }: { side: SideChatHandle; sleepi
           ) : (
             <span className="text-faint text-micro">{sleeping ? "Asleep" : "Enter to ask · the agent is not interrupted"}</span>
           )}
-          <Button
-            variant="primary"
-            size="icon-xs"
-            onClick={send}
-            disabled={sleeping || pending || !chat.draft.trim()}
-            aria-label="Ask the sandbox"
-            className="rounded-full disabled:opacity-35"
-          >
+          <Button variant="primary" size="icon-xs" onClick={send} disabled={!sendable} aria-label="Ask the sandbox" className="rounded-full disabled:opacity-35">
             <ArrowUp />
           </Button>
         </PromptInputActions>
@@ -175,7 +181,7 @@ function Body({ side, sleeping, onClose, phone }: { side: SideChatHandle; sleepi
             ))}
             {chat.pending && (
               <li className="flex scroll-mt-3 flex-col gap-1.5">
-                <Question text={chat.pending.question} />
+                <Question turn={chat.pending} />
                 <p className="text-muted-foreground flex items-center gap-2 px-1 text-meta">
                   <span className="flex items-center gap-1" aria-hidden>
                     <span className="dot dot-1 bg-current size-1.5 rounded-full" />
@@ -194,6 +200,33 @@ function Body({ side, sleeping, onClose, phone }: { side: SideChatHandle; sleepi
   );
 }
 
+/** The attached selection, one line above the textarea; × detaches it. */
+function QuoteChip({ quote, onRemove }: { quote: string | null; onRemove: () => void }) {
+  // The chip keeps its last text through the collapse, so removing it never flashes empty.
+  const last = React.useRef(quote ?? "");
+  if (quote !== null) last.current = quote;
+  const text = last.current.replace(/\s+/g, " ");
+  const preview = text.length > CHIP_CHARS ? `${text.slice(0, CHIP_CHARS).trimEnd()}…` : text;
+  return (
+    <Collapse open={quote !== null} duration={0.12}>
+      <div data-quote-chip className="mb-1 flex items-center gap-1.5 px-1 pt-1">
+        <Quote className="text-muted-foreground size-3 shrink-0" aria-hidden />
+        <span className="text-muted-foreground border-border min-w-0 flex-1 truncate border-l-2 pl-2 text-micro" title={last.current}>
+          {preview}
+        </span>
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label="Remove the quote"
+          className="text-muted-foreground hover:text-foreground grid size-5 shrink-0 cursor-pointer place-items-center rounded-md transition-colors"
+        >
+          <X className="size-3" aria-hidden />
+        </button>
+      </div>
+    </Collapse>
+  );
+}
+
 function NewThreadRule() {
   return (
     <li aria-label="New thread" className="text-faint flex items-center gap-2 text-micro">
@@ -207,7 +240,7 @@ function NewThreadRule() {
 function TurnRow({ turn, onRetry }: { turn: SettledTurn; onRetry: () => void }) {
   return (
     <li className="flex scroll-mt-3 flex-col gap-1.5">
-      <Question text={turn.question} />
+      <Question turn={turn} />
       {turn.kind === "answered" ? (
         <div className="px-1">
           <div className="text-foreground prose-agent text-meta">
@@ -228,7 +261,8 @@ function TurnRow({ turn, onRetry }: { turn: SettledTurn; onRetry: () => void }) 
   );
 }
 
-function Question({ text }: { text: string }) {
+/** The question bubble: the quoted selection as a small block above the typed text, both clamped until clicked. */
+function Question({ turn }: { turn: PendingTurn }) {
   const [full, setFull] = React.useState(false);
   return (
     <button
@@ -237,7 +271,15 @@ function Question({ text }: { text: string }) {
       title={full ? "Show less" : "Show the whole question"}
       className="bg-muted text-foreground max-w-full cursor-pointer self-end rounded-xl rounded-br-sm border px-3 py-1.5 text-left text-meta"
     >
-      <span className={cn("block whitespace-pre-wrap [overflow-wrap:anywhere]", !full && "line-clamp-2")}>{text}</span>
+      {turn.quote && (
+        <blockquote
+          data-question-quote
+          className={cn("text-muted-foreground border-border mb-1 border-l-2 pl-2 whitespace-pre-wrap [overflow-wrap:anywhere]", !full && "line-clamp-3")}
+        >
+          {turn.quote}
+        </blockquote>
+      )}
+      <span className={cn("block whitespace-pre-wrap [overflow-wrap:anywhere]", !full && "line-clamp-2")}>{questionBody(turn)}</span>
     </button>
   );
 }
