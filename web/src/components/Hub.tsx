@@ -624,7 +624,7 @@ export function Hub({
             onSubmit={getMe()?.kind === "user" && (getMe() as { expired?: boolean }).expired ? () => {} : () => (slash && slashMatches > 0 ? undefined : void submit())}
             isLoading={busy}
             className={cn(
-              "bg-card border-line-strong composer-depth focus-within:border-live/60 focus-within:shadow-[0_0_0_3px_color-mix(in_oklch,var(--live)_18%,transparent),0_1px_2px_oklch(0_0_0/0.05),0_8px_24px_-16px_oklch(0_0_0/0.25)] relative rounded-2xl p-2.5 transition-[border-color,box-shadow] duration-200",
+              "bg-card border-line-strong composer-depth focus-within:border-live/60 focus-within:shadow-[0_0_0_3px_color-mix(in_oklch,var(--live)_18%,transparent),var(--shadow-e2)] relative rounded-2xl p-2.5 transition-[border-color,box-shadow] duration-200",
               dragOver && "border-live",
               (voice.state === "listening" || voice.state === "arming") && "mic-glow"
             )}
@@ -913,7 +913,7 @@ export function Hub({
               </h2>
               {loading ? <Bar className="h-3 w-20" /> : <Capacity boxes={boxes} capacity={lifecycle.capacity} size="sm" />}
             </div>
-            <ul className="bg-card divide-y overflow-hidden rounded-xl border">
+            <ul className="bg-card divide-y overflow-hidden rounded-xl border shadow-e1">
               <AnimatePresence initial={false}>
               {loading
                 ? [0, 1, 2].map((i) => (

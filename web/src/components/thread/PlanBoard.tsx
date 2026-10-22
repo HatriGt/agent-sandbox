@@ -571,7 +571,7 @@ export function PlanBoard({ board, live, variant = "card", className }: { board:
       <motion.div
         layout={!reduce}
         transition={reduce ? { duration: 0 } : SPRING}
-        className={cn("bg-card relative flex max-h-[70vh] w-full flex-col overflow-hidden rounded-xl border", !open && "items-center")}
+        className={cn("bg-card relative flex max-h-[70vh] w-full flex-col overflow-hidden rounded-xl border shadow-e2", !open && "items-center")}
       >
         <Sweep on={sweep} failed={failed > 0} />
 

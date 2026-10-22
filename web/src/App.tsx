@@ -691,7 +691,11 @@ export default function App() {
           {lifecycle.capacity > 0 ? (
             <Capacity boxes={boxes} capacity={lifecycle.capacity} size="sm" />
           ) : (
-            runs_.length > 0 && <NumberTicker value={runs_.length} from={runs_.length} className="text-muted-foreground tabular text-micro" />
+            !loading && (
+              <span className="text-faint tabular-nums text-micro whitespace-nowrap" aria-live="polite">
+                {working + waiting.length} online
+              </span>
+            )
           )}
         </span>
       </div>

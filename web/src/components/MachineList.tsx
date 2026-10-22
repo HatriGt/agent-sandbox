@@ -185,21 +185,9 @@ export function MachineList({
   const sorted = [...boxes].sort(threadSort);
   const still = useReducedMotion();
   const empty = !loading && !sorted.length && !pending.length;
-  const online = boxes.filter((v) => {
-    const s = displayState(v);
-    return s === "running" || s === "waiting";
-  }).length;
 
   return (
     <nav aria-label="Machines" className="flex min-h-0 flex-1 flex-col">
-      <div className="flex h-7 shrink-0 items-center justify-between px-4 text-micro">
-        <span className="text-muted-foreground font-medium">Machines</span>
-        {!loading && !(empty && offline) && (
-          <span className="text-faint tabular-nums" aria-live="polite">
-            {online} online
-          </span>
-        )}
-      </div>
       <div className="scroll-fade-y min-h-0 flex-1 overflow-y-auto px-2 pb-4">
         <Swap state={loading ? "loading" : empty ? (offline ? "offline" : "empty") : "list"}>
           {empty && offline ? (

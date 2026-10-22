@@ -60,7 +60,7 @@ export function StatusBar({
     <div
       role="contentinfo"
       aria-label="Status"
-      className="bg-card text-muted-foreground flex h-6 shrink-0 items-center gap-0.5 overflow-hidden border-t px-1.5 text-micro"
+      className="bg-sidebar text-muted-foreground flex h-6 shrink-0 items-center gap-0.5 overflow-hidden border-t px-1.5 text-micro whitespace-nowrap"
     >
       <Section onClick={onFleet} title="Fleet view">
         <span className="tabular">
@@ -79,7 +79,7 @@ export function StatusBar({
         {fresh}
       </span>
       {box && (
-        <div className="ml-auto flex min-w-0 items-center gap-0.5">
+        <div className="ml-auto hidden min-w-0 items-center gap-0.5 sm:flex">
           {branch && (
             <Section onClick={onBranch} title="Open the workspace">
               <GitBranch className="size-3" aria-hidden />

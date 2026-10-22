@@ -61,7 +61,7 @@ export function ChangesDock({ files, loading, onOpen, onRefresh, onReviewAll, ac
   if (!files.length) return null;
   return (
     <div className="mx-auto w-full max-w-3xl px-3 md:px-6">
-      <div className="bg-card raised overflow-hidden rounded-xl">
+      <div className="bg-card overflow-hidden rounded-xl border shadow-e2">
         <AnimatePresence initial={false}>
           {open && (
             <motion.ul
