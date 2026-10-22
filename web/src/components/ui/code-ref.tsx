@@ -31,21 +31,42 @@ function loadResolver(session: string): Promise<Resolve> {
   return p
 }
 const ready = new Map<string, Resolve>()
+// Bumped by invalidateResolver so refs already on screen re-resolve against the fresh tree.
+let generation = 0
+const listeners = new Set<() => void>()
+const subscribe = (fn: () => void) => {
+  listeners.add(fn)
+  return () => void listeners.delete(fn)
+}
+
+/** Forget the box's file list (after the pane creates, moves or deletes a file) so refs resolve against the next fetch. */
+export function invalidateResolver(session: string): void {
+  resolvers.delete(session)
+  ready.delete(session)
+  generation++
+  for (const fn of listeners) fn()
+}
+
 function useResolver(session: string | null, enabled: boolean): Resolve | null {
-  const [res, setRes] = React.useState<Resolve | null>(() => (session ? ready.get(session) ?? null : null))
+  const gen = React.useSyncExternalStore(subscribe, () => generation)
+  const [state, setState] = React.useState<{ gen: number; res: Resolve } | null>(() => {
+    const r = session ? ready.get(session) : undefined
+    return r ? { gen: generation, res: r } : null
+  })
+  const res = state && state.gen === gen ? state.res : null
   React.useEffect(() => {
     if (!session || !enabled || res) return
     let live = true
     loadResolver(session)
       .then((r) => {
         ready.set(session, r)
-        if (live) setRes(() => r)
+        if (live) setState({ gen, res: r })
       })
       .catch(() => {})
     return () => {
       live = false
     }
-  }, [session, enabled, res])
+  }, [session, enabled, res, gen])
   return res
 }
 
@@ -85,23 +106,32 @@ function RefTrigger({ target, className, children }: { target: { nav: (r: CodeRe
   )
 }
 
-/** Inline code that may be a code ref (path form, or a symbol bound earlier in the message). */
-export function InlineCode({ text, children, ...props }: React.ComponentProps<"code"> & { text: string }) {
+/**
+ * Inline code that may be a code ref (path form, or a symbol bound earlier in the message).
+ * `data-line` / `data-end-line` come from remark-code-refs when the prose around the backticks named
+ * a line ("lines 3-5 of `x.ts`"); they apply only when the backticks carry no line of their own.
+ */
+export function InlineCode({ text, children, "data-line": hintLine, "data-end-line": hintEnd, ...props }: React.ComponentProps<"code"> & { text: string; "data-line"?: string; "data-end-line"?: string }) {
   const symbols = React.useContext(SymbolContext)
   const inRef = React.useContext(InRefContext)
   const parsed = React.useMemo(() => {
     if (inRef) return null
     const t = text.trim()
-    return parseCodeRef(t) ?? symbols?.get(t.replace(/\(\)$/, "")) ?? symbols?.get(t) ?? null
-  }, [text, symbols, inRef])
+    const ref = parseCodeRef(t) ?? symbols?.get(t.replace(/\(\)$/, "")) ?? symbols?.get(t) ?? null
+    const line = Number(hintLine) || undefined
+    if (!ref || ref.line !== undefined || line === undefined) return ref
+    const endLine = Number(hintEnd) || undefined
+    return { ...ref, line, ...(endLine !== undefined && endLine > line && { endLine }) }
+  }, [text, symbols, inRef, hintLine, hintEnd])
   const target = useResolved(parsed)
   const code = <code {...props}>{children}</code>
   return target ? <RefTrigger target={target}>{code}</RefTrigger> : code
 }
 
 /**
- * A markdown link whose href is a relative path. Off the box page it renders `fallback` (today's
- * LinkChip); on it, an unresolvable path renders as its plain text — never a broken link.
+ * A markdown link whose href is a relative path. Off the box page it renders `fallback` (a LinkChip
+ * for a typed link, the original words for a ref found in prose); on it, an unresolvable path
+ * renders as its plain text — never a broken link.
  */
 export function CodeRefLink({ parsed, fallback, children }: { parsed: CodeRef; fallback: React.ReactNode; children: React.ReactNode }) {
   const nav = React.useContext(CodeNavContext)

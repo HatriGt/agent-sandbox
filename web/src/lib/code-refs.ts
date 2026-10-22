@@ -85,3 +85,91 @@ export function pathResolver(files: readonly string[]): (path: string) => string
 
 /** `path:line` / `path:from-to` as shown in tooltips. */
 export const refLabel = (r: CodeRef) => r.path + (r.line ? `:${r.line}${r.endLine ? `-${r.endLine}` : ""}` : "");
+
+// ---------------------------------------------------------------- refs inside prose
+
+/** A ref found inside plain prose, with its character span in the source text. */
+export type ProseRef = { start: number; end: number; ref: CodeRef };
+type LineHint = { line: number; endLine?: number };
+
+const PATH = String.raw`${SEG}(?:/${SEG})*`;
+const LOC = String.raw`(?::\d+(?:[-–]\d+)?(?::\d+)?|#L\d+(?:-L?\d+)?)`;
+// A token starts the text, follows whitespace, or follows an opener; so `github.com/x` inside a URL never starts one.
+const LEFT = String.raw`(?<![^\s(\["'])`;
+// …and ends the text or runs into whitespace, allowing sentence punctuation in between (stripped below).
+const RIGHT = String.raw`(?=[.,;:)\]"']*(?:\s|$))`;
+const RANGE = String.raw`(\d+)(?:\s*(?:[-–]|to)\s*(\d+))?`;
+const TRAIL = /[.,;:)\]"']+$/;
+
+type Form = { re: RegExp; ref: (m: RegExpExecArray) => CodeRef | null };
+const lineOf = (a: string, b?: string): LineHint => {
+  const line = Number(a);
+  const endLine = Number(b) || undefined;
+  return { line, ...(endLine !== undefined && endLine > line && { endLine }) };
+};
+const FORMS: Form[] = [
+  // `line N of <path>`, `lines N-M of <path>`, `lines N to M in <path>`
+  {
+    re: new RegExp(String.raw`(?<!\w)lines?\s+${RANGE}\s+(?:of|in)\s+(${PATH})${RIGHT}`, "gi"),
+    ref: (m) => {
+      const r = parseCodeRef(m[3].replace(TRAIL, ""));
+      return r && { ...r, ...lineOf(m[1], m[2]) };
+    },
+  },
+  // `<path> line N`, `<path> lines N-M`, `<path> at line N`, `<path>, line N`
+  {
+    re: new RegExp(String.raw`${LEFT}(${PATH})(?:,|\s+at)?\s+lines?\s+${RANGE}(?!\w)`, "gi"),
+    ref: (m) => {
+      // `…in foo.ts. Line 7…` is a sentence boundary, not a ref.
+      if (TRAIL.test(m[1])) return null;
+      const r = parseCodeRef(m[1]);
+      return r && { ...r, ...lineOf(m[2], m[3]) };
+    },
+  },
+  // `path/to/file.ts`, `file.ts:12`, `path/file.ts:3-5`, `file.ts#L7`
+  {
+    re: new RegExp(String.raw`${LEFT}(${PATH}${LOC}?)${RIGHT}`, "g"),
+    ref: (m) => {
+      const token = m[1].replace(TRAIL, "");
+      if (/^www\./i.test(token)) return null;
+      const r = parseCodeRef(token);
+      // A bare `foo.ts` with neither a directory nor a line is a word in prose (`setup.py`, `e.g.`).
+      return r && (r.line !== undefined || r.path.includes("/")) ? r : null;
+    },
+  },
+];
+
+/**
+ * Code refs inside a run of prose: whitespace-delimited `path(:line(-line)?)?` tokens (a path needs a
+ * `/` or a line; trailing sentence punctuation is dropped) and the English forms `<path> line N`,
+ * `<path> lines N-M`, `line N of <path>`, `lines N to M in <path>`. Every candidate goes through
+ * parseCodeRef; the resolver, not this scanner, decides what is a real file. Non-overlapping,
+ * ascending; on overlap the earlier start wins, then the longer match.
+ */
+export function findCodeRefs(text: string): ProseRef[] {
+  const hits: ProseRef[] = [];
+  for (const { re, ref } of FORMS) {
+    for (const m of text.matchAll(re)) {
+      const r = ref(m);
+      if (!r) continue;
+      const end = m.index + m[0].replace(TRAIL, "").length;
+      hits.push({ start: m.index, end, ref: r });
+    }
+  }
+  hits.sort((a, b) => a.start - b.start || b.end - a.end);
+  const out: ProseRef[] = [];
+  for (const h of hits) if (!out.length || h.start >= out[out.length - 1].end) out.push(h);
+  return out;
+}
+
+/** `lines 3-5 of ` at the end of a text run: the path is whatever follows (an inline-code sibling). */
+export function trailingLineHint(text: string): LineHint | null {
+  const m = new RegExp(String.raw`(?<!\w)lines?\s+${RANGE}\s+(?:of|in)\s*$`, "i").exec(text);
+  return m && lineOf(m[1], m[2]);
+}
+
+/** ` line 42` / `, line 42` / ` at lines 3-5` at the start of a text run: the path is what precedes it. */
+export function leadingLineHint(text: string): LineHint | null {
+  const m = new RegExp(String.raw`^[,\s]*(?:at\s+)?lines?\s+${RANGE}(?!\w)`, "i").exec(text);
+  return m && lineOf(m[1], m[2]);
+}
