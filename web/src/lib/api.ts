@@ -133,6 +133,14 @@ export interface FileDiff {
   /** The file as of HEAD, for the merge view (absent for untracked/binary). */
   original?: string;
 }
+/** A workspace mutation from the explorer; paths are relative to /workspace. */
+export type FsOp = { op: "create" | "mkdir" | "delete"; path: string } | { op: "move" | "copy"; path: string; to: string };
+export interface SearchMatch {
+  path: string;
+  /** 1-based. */
+  line: number;
+  text: string;
+}
 export interface PullInfo {
   repo: string;
   number: number;
@@ -818,6 +826,13 @@ export const api = {
   writeFile: (session: string, path: string, content: string, encoding?: "base64") =>
     fetch(url("/file.json"), { method: "PUT", headers: { ...authHeaders, "content-type": "application/json" }, body: JSON.stringify({ box: session, path, content, encoding }) }).then(
       parse<{ ok: true; path: string; bytes: number }>
+    ),
+  /** Create, delete, move or copy under /workspace. The reply is the fresh tree, so no second fetch. */
+  fs: (session: string, op: FsOp) => post<{ ok: true; files: string[] }>("/fs.json", { box: session, ...op }),
+  /** Content search under /workspace; literal by default, capped server-side (`truncated`). */
+  search: (session: string, q: string, opts: { regex: boolean; caseSensitive: boolean }, signal?: AbortSignal) =>
+    fetch(url("/search.json", { box: session, q, regex: opts.regex ? "1" : "0", case: opts.caseSensitive ? "1" : "0" }), { headers: authHeaders, signal }).then(
+      parse<{ matches: SearchMatch[]; truncated: boolean }>
     ),
   /** The model catalog for the picker + this box's current sticky model. */
   models: (session?: string, signal?: AbortSignal) =>
