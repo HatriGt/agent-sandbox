@@ -24,15 +24,17 @@ only start follow-ups on PRs the agent opened.
 
 Two paths, both landing in the same engine:
 
-- **Polling (no webhook).** About once a minute, as every stored GitHub account with its own
+- **Polling (no webhook).** Every few seconds, as every stored GitHub account with its own
   token, the controller lists the issues and PRs that account can see which changed since its
-  last look (`GET /issues?filter=all&since=…`, a conditional read) and reads the new comments on
-  each changed PR. Any `/agent` comment the account can read arrives this way, whoever wrote it,
-  usually within a minute. Nothing written before the controller started watching is replayed.
+  last look (`GET /issues?filter=all&since=…`, a conditional read: an unchanged answer is a 304,
+  which GitHub does not count against the rate limit) and reads the new comments on each changed
+  PR. Any `/agent` comment the account can read arrives this way, whoever wrote it, within a few
+  seconds. Nothing written before the controller started watching is replayed.
   (The GitHub activity feed is not used: it delivers events late, drops them again, and its ids
   are not one sequence.)
 - **Webhook.** The per-user PR follow-up webhook (and GitHub automations) deliver `issue_comment`
-  events for a repo, which also lets other collaborators' `/agent` comments through.
+  events the instant they happen. Added as an organisation webhook it covers every repo in the
+  org at once.
 
 Each comment is answered once, whichever path delivers it first. The moment a command is taken
 the agent reacts to the comment with 👀; the reply follows when the run finishes.

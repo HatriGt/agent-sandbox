@@ -18,8 +18,8 @@ import { claimDelivery, logDelivery } from "./trigger-store.js";
  * the GitHub UI does. Anyone whose comment the account can read arrives this way (the engine
  * still only obeys trusted commenters), not just the account's own comments.
  *
- * Every read is conditional (ETag; a 304 is free against the rate limit) and honours GitHub's
- * `X-Poll-Interval` when sent. Watching starts with a baseline — nothing written before the
+ * Every read is conditional (ETag; a 304 is free against the rate limit, which is what lets the
+ * list be re-read every few seconds) and honours GitHub's `X-Poll-Interval` when sent. Watching starts with a baseline — nothing written before the
  * controller started watching is replayed — and later reads act only on what changed since the
  * last look, so a short controller outage loses nothing while a cursor left unused for longer
  * than STALE_MS starts over. Each comment is acted on once (a delivery claim by comment id),
@@ -76,7 +76,12 @@ const SOURCE = "events";
 const STALE_MS = 24 * 3600_000;
 /** Comments older than this are never acted on, whatever the list says. */
 const MAX_AGE_MS = 24 * 3600_000;
-const DEFAULT_POLL_S = 60;
+/**
+ * How often the updated-issues list is re-read when GitHub sends no `X-Poll-Interval`. A read that
+ * answers 304 does not count against the rate limit (checked live: X-RateLimit-Used stays put), so
+ * a tight loop costs nothing while nothing changes and a comment is noticed within seconds.
+ */
+const DEFAULT_POLL_S = 4;
 /** Pages of the updated-issues list read per poll; more than this in one interval is a storm, not a backlog. */
 const MAX_PAGES = 3;
 
@@ -243,7 +248,7 @@ export function makeMentionWatcher(d: MentionDeps) {
     }
   }
 
-  function start(intervalMs = 20_000): { stop: () => void } {
+  function start(intervalMs = 2_000): { stop: () => void } {
     const timer = setInterval(() => void tick(), intervalMs);
     if (typeof timer.unref === "function") timer.unref();
     return { stop: () => clearInterval(timer) };
