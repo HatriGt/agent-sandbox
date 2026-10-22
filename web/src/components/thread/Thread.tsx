@@ -1187,7 +1187,7 @@ export function Thread({
           <React.Suspense
             key="workspace"
             fallback={
-              <aside className="bg-card hidden md:flex md:h-full md:w-[58%] md:min-w-[34rem] md:flex-col md:border-l" aria-busy="true" aria-label="Workspace loading">
+              <aside className="bg-card hidden md:flex md:h-full md:w-[58%] md:min-w-[30rem] md:shrink-0 md:flex-col md:border-l" aria-busy="true" aria-label="Workspace loading">
                 <div className="h-10 border-b" />
                 <div className="flex flex-1">
                   <div className="flex-1 space-y-2 p-4">
