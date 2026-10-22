@@ -420,9 +420,9 @@ test("mentions: baseline replays nothing; later /agent PR comments from the feed
   assert.equal(starts.length, 1);
   // A row written by the old high-water-mark version re-baselines instead of replaying the page.
   db.prepare(`UPDATE repo_watch SET state_json = ? WHERE repo = '@alice'`).run(JSON.stringify({ lastId: "104" }));
-  etag = "e4";
   feed = [feedEvent("36", "/agent another ask"), ...feed];
-  await watcher.pollFeed("u1", "alice");
+  await watcher.pollFeed("u1", "alice"); // its etag is not sent either: a 304 would keep the old row
+  assert.equal(gets.at(-1)?.etag, undefined);
   assert.equal(starts.length, 1);
   // The first request is still running, so the next one is a new turn once it finishes.
   await engine.onRunFinished("cmd-1", digest({ box: "cmd-1", headline: "added" }), `${REPLY_OPEN}

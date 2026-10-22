@@ -120,8 +120,10 @@ export function makeMentionWatcher(d: MentionDeps) {
     } catch {
       state = undefined;
     }
-    // A row written by the high-water-mark version has no id set: start over with a baseline.
-    if (state && !Array.isArray(state.seen)) state = undefined;
+    // A row written by the high-water-mark version has no id set: start over with a baseline,
+    // and without the etag — a 304 would otherwise keep the stale row until the feed changes,
+    // and that change would then be swallowed as the baseline.
+    if (state && !Array.isArray(state.seen)) return undefined;
     return { etag: r.etag ?? undefined, state };
   };
   const touch = (owner: string, login: string) => d.db.prepare(`UPDATE repo_watch SET updated_at = ? WHERE owner = ? AND repo = ? AND source = ?`).run(now(), owner, feedKey(login), SOURCE);
