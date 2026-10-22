@@ -69,7 +69,6 @@ const STATUS_LETTER: Record<ChangedFile["status"], { l: string; tone: string }> 
 };
 const SPRING = { type: "spring", stiffness: 500, damping: 40 } as const;
 const EASE = [0.22, 1, 0.36, 1] as const;
-// The dropdown-menu surface and item, for the Radix context menus and submenus used here.
 const MENU_CONTENT = "bg-popover text-popover-foreground z-50 min-w-[13rem] rounded-xl border p-1.5 shadow-e3 outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=open]:duration-150 data-[state=open]:ease-[cubic-bezier(0.22,1,0.36,1)] data-[state=closed]:animate-out data-[state=closed]:zoom-out-[0.97] data-[state=closed]:duration-100 data-[state=closed]:fade-out-0";
 const MENU_ITEM = "flex h-8 cursor-pointer items-center gap-2.5 rounded-md px-2 text-meta outline-none select-none transition-[background-color,transform] duration-100 ease-[cubic-bezier(0.22,1,0.36,1)] data-[highlighted]:bg-accent active:scale-[0.985] data-[disabled]:pointer-events-none data-[disabled]:opacity-40 [&_svg]:text-muted-foreground [&_svg]:size-4 [&_svg]:shrink-0";
 const MENU_ITEM_DESTRUCTIVE = "text-destructive data-[highlighted]:bg-destructive/10 [&_svg]:text-destructive";
@@ -88,9 +87,7 @@ const readStore = <T,>(key: string, fallback: T): T => {
 const writeStore = (key: string, v: unknown) => {
   try {
     localStorage.setItem(key, JSON.stringify(v));
-  } catch {
-    /* storage blocked: the value lives for this tab only */
-  }
+  } catch {}
 };
 const copyText = (text: string) => navigator.clipboard?.writeText(text).catch(() => toast.error("Could not copy"));
 
@@ -194,8 +191,6 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
   const dirtySet = React.useMemo(() => new Set([...docs].filter(([, d]) => d.dirty).map(([p]) => p)), [docs]);
   const holders = (path: string) => tabs.groups.reduce((n, g) => n + g.tabs.filter((t) => t.path === path).length, 0);
 
-  // Closing the last tab that holds a draft flushes it first; if the write fails the tab stays and the
-  // toast offers Discard. With autosave on there is no "unsaved changes" dialog to earn.
   const closeTab = async (group: 0 | 1, path: string) => {
     const saver = savers.current.get(path);
     if (docs.get(path)?.dirty && saver && holders(path) === 1) {
@@ -263,7 +258,6 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
     toggleWrap,
     focusGroup: (g) => dispatch({ type: "focus", group: g }),
   };
-  // Capture phase so these beat CodeMirror's own bindings; ⌘F is not in the table and stays the editor's.
   const onKeyDownCapture = (e: React.KeyboardEvent) => {
     const s = matchShortcut(e.nativeEvent, SHORTCUTS);
     if (!s) return;
@@ -373,7 +367,6 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
       {!full && <div role="separator" aria-orientation="vertical" onPointerDown={onDrag} className="hover:bg-live/60 active:bg-live absolute top-0 bottom-0 -left-1 z-30 hidden w-2 cursor-col-resize transition-colors md:block" title="Drag to resize" />}
 
       <div className="flex min-h-0 flex-1">
-        {/* Editor groups: one or two columns, each with its own tab strip; the window controls ride the last strip. */}
         <div className="flex min-h-0 min-w-0 flex-1">
           {view === "review" ? (
             <div className="flex min-w-0 flex-1 flex-col">
@@ -427,10 +420,8 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
           )}
         </div>
 
-        {/* Sidebar on the right: Files (tree or filter), Search, Changes, Review, All. */}
         {sidebar && (
           <section className="bg-muted/20 flex w-64 shrink-0 flex-col border-l" aria-label={filesTitle}>
-            {/* Five views do not fit as words in this width; each is an icon with its name in the tooltip. */}
             <div className="flex h-10 shrink-0 items-center gap-1 px-2">
               <AnimatedTabs
                 ariaLabel="Sidebar view"
@@ -567,6 +558,8 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
 
 type MenuAction = "newFile" | "newDir" | "rename" | "delete" | "duplicate" | "copyPath" | "copyRelPath" | "openSide" | "reveal";
 
+const MAX_ANIMATED_ROW_SHIFT = 40;
+
 function Explorer({ tree, err, expanded, focused, active, changeByPath, repos, edit, onEdit, onFocus, onToggle, onReveal, onOpen, onFs }: { tree: Node | null; err: string | null; expanded: Set<string>; focused: string | null; active: string | null; changeByPath: Map<string, ChangedFile>; repos: Repo[]; edit: RowEdit | null; onEdit: (e: RowEdit | null) => void; onFocus: (path: string | null) => void; onToggle: (dir: string, open?: boolean) => void; onReveal: () => void; onOpen: Open; onFs: (op: FsOp) => Promise<boolean> }) {
   const rows = React.useMemo(() => (tree ? visibleRows(tree, expanded, edit) : null), [tree, expanded, edit]);
   const listRef = React.useRef<HTMLUListElement>(null);
@@ -575,11 +568,10 @@ function Explorer({ tree, err, expanded, focused, active, changeByPath, repos, e
   const dragSrc = React.useRef<string | null>(null);
   const typed = React.useRef({ text: "", at: 0 });
   const still = useReducedMotion();
-  // Rows fade in only for a small reveal; a big one reads as a jump and VS Code does not animate it either.
   const prevLen = React.useRef(rows?.length ?? 0);
   const delta = (rows?.length ?? 0) - prevLen.current;
   prevLen.current = rows?.length ?? 0;
-  const animateRows = !still && delta !== 0 && Math.abs(delta) <= 40;
+  const animateRows = !still && delta !== 0 && Math.abs(delta) <= MAX_ANIMATED_ROW_SHIFT;
 
   const changeCounts = React.useMemo(() => {
     const m = new Map<string, number>();
@@ -594,11 +586,10 @@ function Explorer({ tree, err, expanded, focused, active, changeByPath, repos, e
   }, [changeByPath]);
 
   const focusIndex = rows && focused ? rows.findIndex((r) => r.path === focused && r.kind !== "edit") : -1;
-  // Keyboard moves land on the row element itself (roving tabindex), and keep it in view. Not while
-  // the inline edit input has focus: its row keeps the same data-path during the exit animation.
   React.useEffect(() => {
     const list = listRef.current;
-    if (!list || !focused || !list.contains(document.activeElement) || document.activeElement?.tagName === "INPUT") return;
+    const typingInEditRow = document.activeElement instanceof HTMLInputElement;
+    if (!list || !focused || !list.contains(document.activeElement) || typingInEditRow) return;
     const el = list.querySelector<HTMLElement>(`[data-path="${CSS.escape(focused)}"]`);
     if (el && el !== document.activeElement) {
       el.focus({ preventScroll: true });
@@ -698,7 +689,6 @@ function Explorer({ tree, err, expanded, focused, active, changeByPath, repos, e
     }
   };
 
-  // Native drag: a row onto a folder moves it. Its own folder, itself, or its subtree is a no-op.
   const dropDirFor = (el: Element | null) => {
     const r = rows?.find((x) => x.path === (el?.closest("[data-path]") as HTMLElement | null)?.dataset.path);
     if (!r || r.kind === "edit") return null;
@@ -817,7 +807,6 @@ function Explorer({ tree, err, expanded, focused, active, changeByPath, repos, e
   );
 }
 
-/** One guide per ancestor level, so the lines run unbroken down a flat list of rows. */
 function Guides({ depth }: { depth: number }) {
   if (depth === 0) return null;
   return (
@@ -856,7 +845,6 @@ function RowView({ row, repo, change, changeCount }: { row: Row & { kind: "dir" 
   );
 }
 
-/** The inline input for a new file, a new folder or a rename. Enter commits, Escape cancels, a bad name is refused in place. */
 function EditRow({ edit, siblings, onDone }: { edit: RowEdit; siblings: ReadonlySet<string>; onDone: (name: string | null) => void }) {
   const initial = edit.what === "rename" ? baseOf(edit.target) : "";
   const [value, setValue] = React.useState(initial);
@@ -988,9 +976,6 @@ function GoToFile({ paths, query: q, active, changeByPath, onOpen }: { paths: st
   );
 }
 
-/* ───────────────────────────── Quick open ───────────────────────────── */
-
-/** ⌘P. Empty shows recent files, `:12` or `:12-20` jumps on the active tab, anything else matches paths. */
 function QuickOpen({ paths, recent, activePath, initial, onPick, onClose }: { paths: string[] | null; recent: string[]; activePath: string | null; initial: string; onPick: (path: string, opts: OpenOpts) => void; onClose: () => void }) {
   const [q, setQ] = React.useState(initial);
   const [cursor, setCursor] = React.useState(0);
@@ -999,7 +984,6 @@ function QuickOpen({ paths, recent, activePath, initial, onPick, onClose }: { pa
   const mode: "recent" | "line" | "files" = line || q.trim().startsWith(":") ? "line" : q.trim() ? "files" : "recent";
   const items = React.useMemo(() => (mode === "recent" ? recent.filter((p) => !paths || paths.includes(p)) : mode === "files" && paths ? matchPaths(paths, q, 40) : []), [mode, recent, paths, q]);
   React.useEffect(() => setCursor(0), [q]);
-  // Focus goes back where it came from on close, so the pane keeps receiving its shortcuts.
   React.useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
     const el = inputRef.current;
@@ -1064,8 +1048,6 @@ function QuickOpen({ paths, recent, activePath, initial, onPick, onClose }: { pa
     </div>
   );
 }
-
-/* ───────────────────────────── Search in files ───────────────────────────── */
 
 function SearchView({ session, active, onOpen }: { session: string; active: string | null; onOpen: Open }) {
   const [q, setQ] = React.useState("");
@@ -1356,8 +1338,6 @@ function SourceControl({ session, repo, status, err, reload: load, changes, acti
   );
 }
 
-/* ───────────────────────────── Tabs ───────────────────────────── */
-
 function TabStrip({ group, state, focused, dirty, dispatch, onClose }: { group: 0 | 1; state: TabGroup; focused: boolean; dirty: ReadonlySet<string>; dispatch: (a: TabAction) => void; onClose: (path: string) => void }) {
   const still = useReducedMotion();
   const [menuPath, setMenuPath] = React.useState<string | null>(null);
@@ -1422,8 +1402,6 @@ function TabStrip({ group, state, focused, dirty, dispatch, onClose }: { group: 
                 title={t.path}
               >
                 {dropAt === i && <span className="bg-live absolute inset-y-1 -left-0.5 w-0.5 rounded-full" aria-hidden />}
-                {/* The active tab's pill glides between tabs (shared layoutId per group); an underline
-                    rides along its bottom edge so the active file reads even where the pill is faint. */}
                 {on && (
                   <motion.span layoutId={`ws-active-tab-${group}`} className={cn("absolute inset-0 -z-10 rounded-md", focused ? "bg-muted" : "bg-muted/50")} transition={still ? { duration: 0 } : SPRING} aria-hidden>
                     <span className={cn("absolute inset-x-2 bottom-0 h-px rounded-full", focused ? "bg-foreground/70" : "bg-foreground/30")} />
@@ -1550,9 +1528,6 @@ function FileView({ session, tab, doc, tree, change, wrap, onMode, onDoc, onPin,
 
   const draft = doc.draft ?? content ?? "";
   const saving = doc.saving === "saving";
-  // Autosave, the way an editor does it: a short pause after the last keystroke writes the file back
-  // into the sandbox. No Save button; ⌘S just saves immediately. The draft lives in the shared Doc, so
-  // the same file open in both groups has one draft and one save at a time.
   const latest = React.useRef({ draft, dirty: doc.dirty, saving });
   latest.current = { draft, dirty: doc.dirty, saving };
   const save = React.useCallback(async (): Promise<string | null> => {
@@ -1578,14 +1553,14 @@ function FileView({ session, tab, doc, tree, change, wrap, onMode, onDoc, onPin,
     const t = window.setTimeout(() => void save().then((err) => err && toast.error("Could not save", { description: err })), 900);
     return () => window.clearTimeout(t);
   }, [draft, doc.dirty, save]);
+  const saverRef = React.useRef(onSaver);
+  saverRef.current = onSaver;
   React.useEffect(() => {
-    onSaver(save);
-    // Leaving the view (or the pane) with unsaved text flushes it.
+    saverRef.current(save);
     return () => {
-      onSaver(null);
+      saverRef.current(null);
       void save();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [save]);
   const download = async () => {
     try {
@@ -1669,10 +1644,6 @@ function FileView({ session, tab, doc, tree, change, wrap, onMode, onDoc, onPin,
   );
 }
 
-/**
- * A path as a quiet trail: folders in the muted colour, the file with its icon in the foreground. The
- * middle collapses first. Each segment drops down its siblings; a folder in the list unfolds further.
- */
 function Breadcrumb({ path, tree, onOpen }: { path: string; tree: Node | null; onOpen: Open }) {
   const segs = path.split("/");
   const dirs = segs.slice(0, -1).map((name, i) => ({ name, path: segs.slice(0, i + 1).join("/") }));
@@ -1697,7 +1668,6 @@ function Breadcrumb({ path, tree, onOpen }: { path: string; tree: Node | null; o
   );
 }
 
-/** One breadcrumb segment: a dropdown of its siblings, or plain text while the tree is still loading. */
 function Segment({ seg, current, tree, onOpen, className, children }: { seg: { name: string; path: string | null }; current: string; tree: Node | null; onOpen: Open; className: string; children: React.ReactNode }) {
   if (!tree || !seg.path) return <span className={className}>{children}</span>;
   const siblings = childrenOf(tree, parentOf(seg.path));
@@ -1717,7 +1687,6 @@ function Segment({ seg, current, tree, onOpen, className, children }: { seg: { n
   );
 }
 
-/** One breadcrumb menu entry: a file opens, a folder unfolds into a submenu. */
 function DirItem({ node, current, onOpen }: { node: Node; current: string; onOpen: Open }) {
   const on = node.path === current || current.startsWith(node.path + "/");
   if (!node.children) {

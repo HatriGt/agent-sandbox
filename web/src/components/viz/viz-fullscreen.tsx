@@ -8,10 +8,7 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
  */
 export const VizFullscreenContext = React.createContext(false);
 
-/**
- * Told when a frame's fullscreen opens or closes. The thread uses it to stop following the stream
- * while a dialog is up, so closing it returns the reader to the block they opened, not the bottom.
- */
+/** Told when a frame's fullscreen opens or closes. */
 export const VizFullscreenGate = React.createContext<((open: boolean) => void) | null>(null);
 
 const MIN = 0.25;

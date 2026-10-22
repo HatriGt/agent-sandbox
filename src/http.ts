@@ -3369,8 +3369,6 @@ app.put("/file.json", async (req: Request, res: Response) => {
   }
 });
 
-// Content search under /workspace (the explorer's search view). The pattern travels on stdin, so
-// nothing the user typed is shell-quoted; grep's status comes back on stderr (src/files.ts).
 app.get("/search.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   const session = boxParam(req.query);
@@ -3397,8 +3395,6 @@ app.get("/search.json", async (req: Request, res: Response) => {
   }
 });
 
-// Create / mkdir / delete / move / copy under /workspace (the explorer's context menu). The reply
-// carries the fresh tree, so the client never races the 20 s index cache.
 app.post("/fs.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   const session = boxParam(req.body);

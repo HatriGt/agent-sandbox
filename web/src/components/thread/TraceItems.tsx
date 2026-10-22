@@ -1040,8 +1040,6 @@ function StepItem({ event, live }: { event: ToolEvent; live?: boolean }) {
  * collapsed raw block instead.
  */
 function looksLikeDump(text: string): boolean {
-  // Fenced code is deliberate markdown (a chart's JSON is mostly `{ } [ ]` lines), so only the
-  // prose around the fences is judged.
   const fences = scanFences(text);
   const lines = text.split("\n").filter((l, i) => l.trim() && !fences.some((f) => i >= f.start && i <= f.end));
   if (lines.length < 6) return /(^|\n)(diff --git|<<PROMPT_EOF|@@ -\d)/.test(lines.join("\n"));

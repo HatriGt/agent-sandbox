@@ -31,7 +31,6 @@ function loadResolver(session: string): Promise<Resolve> {
   return p
 }
 const ready = new Map<string, Resolve>()
-// Bumped by invalidateResolver so refs already on screen re-resolve against the fresh tree.
 let generation = 0
 const listeners = new Set<() => void>()
 const subscribe = (fn: () => void) => {
@@ -39,7 +38,6 @@ const subscribe = (fn: () => void) => {
   return () => void listeners.delete(fn)
 }
 
-/** Forget the box's file list (after the pane creates, moves or deletes a file) so refs resolve against the next fetch. */
 export function invalidateResolver(session: string): void {
   resolvers.delete(session)
   ready.delete(session)

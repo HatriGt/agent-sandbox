@@ -1366,13 +1366,6 @@ function foldWork(groups: TraceGroup[]): TraceGroup[] {
   return out;
 }
 
-/**
- * A group's React key and minimap id come from its own timestamp, not its position: once the
- * sandbox's log tail slides, the leading groups drop and an index key would remount the whole
- * transcript (every fullscreen closes, every enter animation replays, the scroller jumps to the
- * bottom). A group without a stamp hangs off the stamped group before it, so appends at the end
- * never renumber it either. Equal keys are told apart by order.
- */
 function groupKeys(groups: TraceGroup[]): string[] {
   const keys: string[] = [];
   const seen = new Map<string, number>();

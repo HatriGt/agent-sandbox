@@ -41,10 +41,6 @@ test("confineFsOp refuses a move or copy onto itself or into itself", () => {
   assert.equal(confined({ op: "move", path: "repo/src", to: "repo/src2" }).op, "move");
 });
 
-/**
- * The shell strings run for real where a POSIX sh exists, with /workspace rewritten to a temp
- * dir; the observable effects (filesystem state, exit code) are the contract the route maps.
- */
 const sh = process.platform === "win32" ? ["C:\\Program Files\\Git\\usr\\bin\\sh.exe", "C:\\Program Files\\Git\\bin\\sh.exe"].find((p) => existsSync(p)) : "sh";
 const run = (op: SafeFsOp, root: string) => {
   const script = fsCommand(op).replaceAll("'/workspace/", `'${root.replaceAll("\\", "/")}/`);
