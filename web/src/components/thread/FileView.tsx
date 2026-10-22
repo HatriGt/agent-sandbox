@@ -1,10 +1,9 @@
 import * as React from "react";
-import { ChevronRight, Download, FileCode2, FileDiff, Loader2, WrapText } from "lucide-react";
+import { ChevronRight, Download, FileCode2, FileDiff, Loader2 } from "lucide-react";
 import { DropdownMenu as DM } from "radix-ui";
 import { toast } from "sonner";
 import { api, ApiError, type ChangedFile } from "@/lib/api";
 import { parseUnifiedDiff, diffForNewFile, type ParsedDiff } from "@/lib/diff";
-import { languageOf } from "@/lib/fileIcon";
 import { FileIcon, FolderIcon } from "@/lib/vscodeIcons";
 import { CodeEditor, type CodeEditorHandle, type EditorStatus } from "@/components/CodeEditor";
 import { Segmented } from "@/components/ui/segmented";
@@ -12,16 +11,15 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { DiffView, useHunkReview } from "./FilePane";
 import { cn } from "@/lib/utils";
 import { baseOf, childrenOf, parentOf, type Doc, type Node, type Tab } from "@/lib/workspace-model";
-import { MENU_CONTENT, MENU_ITEM, shortcutLabel, type Open } from "./workspace-chrome";
+import { MENU_CONTENT, MENU_ITEM, type Open } from "./workspace-chrome";
 
 /**
- * One open file: a 26px breadcrumb bar, the diff or the editor, and a 22px status strip (caret,
- * selection, save state, language, wrap, preview). The strip is the file's own; the pane's status
- * bar below it is about the repo.
+ * One open file: a 26px toolbar (the folder trail, the diff stat, Diff / File, download) over the
+ * diff or the editor. The file's name is the tab's; the caret and save state go up through
+ * `onStatus` to the pane's one status bar.
  */
 
-export function FileView({ session, tab, doc, tree, change, wrap, onMode, onDoc, onPin, onOpen, onSaved, onSaver, onEditor, onToggleWrap }: { session: string; tab: Tab; doc: Doc; tree: Node | null; change?: ChangedFile; wrap: boolean; onMode: (m: Tab["mode"]) => void; onDoc: (p: Partial<Doc>) => void; onPin: () => void; onOpen: Open; onSaved: () => void; onSaver: (fn: (() => Promise<string | null>) | null) => void; onEditor: (h: CodeEditorHandle | null) => void; onToggleWrap: () => void }) {
-  const [status, setStatus] = React.useState<EditorStatus | null>(null);
+export function FileView({ session, tab, doc, tree, change, wrap, onMode, onDoc, onPin, onOpen, onSaved, onSaver, onEditor, onStatus }: { session: string; tab: Tab; doc: Doc; tree: Node | null; change?: ChangedFile; wrap: boolean; onMode: (m: Tab["mode"]) => void; onDoc: (p: Partial<Doc>) => void; onPin: () => void; onOpen: Open; onSaved: () => void; onSaver: (fn: (() => Promise<string | null>) | null) => void; onEditor: (h: CodeEditorHandle | null) => void; onStatus: (s: EditorStatus | null) => void }) {
   const [diff, setDiff] = React.useState<ParsedDiff | null>(null);
   const [content, setContent] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -121,16 +119,20 @@ export function FileView({ session, tab, doc, tree, change, wrap, onMode, onDoc,
     }
   };
 
+  const statusRef = React.useRef(onStatus);
+  statusRef.current = onStatus;
+  React.useEffect(() => () => statusRef.current(null), []);
+  const edgeRef = useScrollEdge();
+
   const base = baseOf(tab.path);
   const deleted = change?.status === "deleted";
 
   return (
     <>
-      {/* Breadcrumbs + mode + actions */}
-      <div className="flex h-[26px] shrink-0 items-center gap-1.5 border-b pr-1.5 pl-2">
+      <div data-ws-toolbar className="@container flex h-[26px] shrink-0 items-center gap-1.5 overflow-hidden border-b pr-1.5 pl-2 [&_.lucide]:[stroke-width:1.5]">
         <Breadcrumb path={tab.path} tree={tree} onOpen={onOpen} />
         {change && (
-          <span className="stamp flex shrink-0 items-center gap-1.5 pr-1">
+          <span className="stamp tabular hidden shrink-0 items-center gap-1.5 pr-1 @min-[300px]:flex">
             {change.additions > 0 && <span className="text-ok">+{change.additions}</span>}
             {change.deletions > 0 && <span className="text-destructive">−{change.deletions}</span>}
           </span>
@@ -149,7 +151,7 @@ export function FileView({ session, tab, doc, tree, change, wrap, onMode, onDoc,
         )}
         <Tooltip>
           <TooltipTrigger asChild>
-            <button type="button" onClick={download} aria-label="Download" disabled={deleted} className="text-muted-foreground hover:text-foreground hover:bg-muted grid size-5 shrink-0 cursor-pointer place-items-center rounded disabled:cursor-default disabled:opacity-40">
+            <button type="button" onClick={download} aria-label="Download" disabled={deleted} className="text-muted-foreground hover:text-foreground hover:bg-muted relative grid size-6 shrink-0 cursor-pointer place-items-center rounded before:absolute before:-inset-x-2 before:-inset-y-1 before:content-[''] disabled:cursor-default disabled:opacity-40">
               <Download className="size-3.5" />
             </button>
           </TooltipTrigger>
@@ -165,8 +167,12 @@ export function FileView({ session, tab, doc, tree, change, wrap, onMode, onDoc,
             Loading {mode === "diff" ? "diff" : "file"}…
           </p>
         ) : mode === "diff" && diff ? (
-          <div className="h-full overflow-auto">
-            <DiffView diff={diff} path={tab.path} review={review} />
+          <div ref={edgeRef} className="relative h-full">
+            <div className="h-full overflow-auto">
+              <DiffView diff={diff} path={tab.path} review={review} />
+            </div>
+            {/* Long lines scroll; a soft edge says so instead of a hard clip (as viz/DataTable). */}
+            <div aria-hidden className="pointer-events-none absolute inset-y-0 right-0 w-6 bg-gradient-to-l from-[color-mix(in_oklab,var(--foreground)_7%,transparent)] to-transparent opacity-0 transition-opacity duration-150 in-data-scrolled-end:opacity-100" />
           </div>
         ) : mode === "edit" && content !== null ? (
           deleted ? (
@@ -180,7 +186,7 @@ export function FileView({ session, tab, doc, tree, change, wrap, onMode, onDoc,
                 if (tab.preview) onPin();
               }}
               onSave={() => void save().then((err) => err && toast.error("Could not save", { description: err }))}
-              onStatus={setStatus}
+              onStatus={onStatus}
               path={tab.path}
               ariaLabel={`Edit ${base}`}
               autoFocus
@@ -190,61 +196,47 @@ export function FileView({ session, tab, doc, tree, change, wrap, onMode, onDoc,
           )
         ) : null}
       </div>
-      {/* Status strip: the caret and selection live, then the file's state, read right to left. */}
-      <div className="text-muted-foreground flex h-[22px] shrink-0 items-center gap-3 overflow-hidden border-t px-2 text-micro whitespace-nowrap" aria-label="Editor status">
-        {mode === "edit" && status ? (
-          <span className="tabular">
-            Ln {status.line}, Col {status.col}
-            {status.selected > 0 && ` (${status.selected} selected)`}
-          </span>
-        ) : (
-          <span>{mode === "diff" ? "Diff" : ""}</span>
-        )}
-        <span className={cn("ml-auto transition-colors", doc.dirty && !saving && "text-attention-text")} aria-live="polite">
-          {saving ? "Saving…" : doc.dirty ? "Unsaved" : doc.saving === "saved" ? "Saved" : "Autosave on"}
-        </span>
-        <span>{languageOf(tab.path)}</span>
-        {mode === "edit" && (
-          <button type="button" onClick={onToggleWrap} aria-pressed={wrap} aria-label="Toggle word wrap" title={`Word wrap (${shortcutLabel("wrap")})`} className={cn("hover:bg-muted hover:text-foreground flex h-[18px] cursor-pointer items-center gap-1 rounded px-1", wrap && "text-foreground")}>
-            <WrapText className="size-3" aria-hidden />
-            Wrap
-          </button>
-        )}
-        {tab.preview && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button type="button" onClick={onPin} className="hover:bg-muted hover:text-foreground flex h-[18px] cursor-pointer items-center rounded border px-1.5 italic">
-                Preview
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="top">A preview tab is replaced by the next file. Click to keep it open.</TooltipContent>
-          </Tooltip>
-        )}
-      </div>
     </>
   );
 }
 
+/** Marks the wrapper `data-scrolled-end` while its scroll box has content hidden to the right. */
+function useScrollEdge() {
+  const [wrap, setWrap] = React.useState<HTMLDivElement | null>(null);
+  React.useLayoutEffect(() => {
+    const el = wrap?.firstElementChild as HTMLElement | null;
+    if (!wrap || !el) return;
+    const update = () => wrap.toggleAttribute("data-scrolled-end", el.scrollLeft < el.scrollWidth - el.clientWidth - 0.5);
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    if (el.firstElementChild) ro.observe(el.firstElementChild);
+    return () => {
+      el.removeEventListener("scroll", update);
+      ro.disconnect();
+    };
+  }, [wrap]);
+  return setWrap;
+}
+
+/** The folder trail only: the file is named once, on its tab. Each folder opens its siblings. */
 function Breadcrumb({ path, tree, onOpen }: { path: string; tree: Node | null; onOpen: Open }) {
   const segs = path.split("/");
   const dirs = segs.slice(0, -1).map((name, i) => ({ name, path: segs.slice(0, i + 1).join("/") }));
   const shown: { name: string; path: string | null }[] = dirs.length > 4 ? [dirs[0], { name: "…", path: null }, ...dirs.slice(-2)] : dirs;
   return (
     <nav aria-label="Breadcrumb" className="@container flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-meta" title={path}>
-      {/* Folders are shown only when the header is wide enough to show them whole; below that the
-          trail is just the file (the full path stays in the tooltip). Never a row of chopped words. */}
+      {/* Folders show only when the row is wide enough to show them whole; below that the trail is
+          empty and the full path stays in the tooltip. Never a row of chopped words. */}
       {shown.map((d, i) => (
         <React.Fragment key={d.path ?? i}>
-          <Segment seg={d} current={d.path ?? ""} tree={tree} onOpen={onOpen} className={cn("text-muted-foreground hidden shrink-0 @min-[460px]:inline", d.path === null && "tracking-widest", i < shown.length - 1 && "@min-[460px]:hidden @min-[640px]:inline")}>
+          {i > 0 && <ChevronRight className={cn("text-faint hidden size-3 shrink-0 @min-[140px]:inline", i < shown.length - 1 && "@min-[140px]:hidden @min-[300px]:inline")} aria-hidden />}
+          <Segment seg={d} current={d.path ?? ""} tree={tree} onOpen={onOpen} className={cn("text-muted-foreground hidden shrink-0 @min-[140px]:inline", d.path === null && "tracking-widest", i < shown.length - 1 && "@min-[140px]:hidden @min-[300px]:inline")}>
             {d.name}
           </Segment>
-          <ChevronRight className={cn("text-faint hidden size-3 shrink-0 @min-[460px]:inline", i < shown.length - 1 && "@min-[460px]:hidden @min-[640px]:inline")} aria-hidden />
         </React.Fragment>
       ))}
-      <Segment seg={{ name: baseOf(path), path }} current={path} tree={tree} onOpen={onOpen} className="text-foreground flex shrink-0 items-center gap-1.5 font-medium">
-        <FileIcon path={path} size={14} />
-        <span className="max-w-[16rem] truncate">{baseOf(path)}</span>
-      </Segment>
     </nav>
   );
 }
