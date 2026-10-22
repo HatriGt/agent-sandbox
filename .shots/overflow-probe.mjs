@@ -55,3 +55,14 @@ export async function auditOverflow(page) {
     return out;
   });
 }
+
+// Every DataTable's column widths as laid out: `<aria-label>: id=width …` so a wrong column shows as a number.
+export async function dumpTables(page) {
+  return page.evaluate(() =>
+    Array.from(document.querySelectorAll("table[data-slot=table]")).map((t) => {
+      const cols = Array.from(t.querySelectorAll("col")).map((c) => `${c.dataset.col ?? "?"}=${c.style.width || c.className || "-"}`);
+      const ths = Array.from(t.tHead?.rows[0]?.cells ?? []).map((th) => `${th.textContent.trim().slice(0, 10) || "·"}:${Math.round(th.getBoundingClientRect().width)}`);
+      return `${t.getAttribute("aria-label")} table=${Math.round(t.getBoundingClientRect().width)}/${Math.round(t.parentElement.getBoundingClientRect().width)}  cols[${cols.join(" ")}]  ths[${ths.join(" ")}]`;
+    })
+  );
+}

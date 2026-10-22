@@ -20,7 +20,7 @@
 //   --scroll="css"    scroll a container to its bottom before the shot
 //
 // Run from PowerShell (bash mangles the leading slash of the route).
-import { auditOverflow, serveWorktreeFonts } from "./overflow-probe.mjs";
+import { auditOverflow, dumpTables, serveWorktreeFonts } from "./overflow-probe.mjs";
 import { chromium } from "file:///C:/Users/ak/AppData/Roaming/npm/node_modules/@playwright/mcp/node_modules/playwright/index.mjs";
 
 const [route = "/dashboard", out = ".shots/out.png", w = "1440", h = "900", ...flags] = process.argv.slice(2);
@@ -380,6 +380,7 @@ if (has("--anim")) console.log("anim:", await page.evaluate(() => [...document.q
 if (has("--shim")) console.log("shim:", await page.evaluate(() => [...document.querySelectorAll(".shimmer-text")].slice(0, 4).map((e) => { const s = getComputedStyle(e); return `${e.textContent} ${s.animationName} ${s.animationDuration} pos=${s.backgroundPosition} size=${s.backgroundSize} img=${s.backgroundImage.slice(0, 90)}`; }).join("\n  ")));
 if (has("--probe")) console.log("probe:", await page.evaluate(() => ({ toasts: [...document.querySelectorAll("[data-attention-toast]")].map((t) => t.innerText.replace(/\s+/g, " ")), status: document.querySelector("[aria-label=Status]")?.innerText.replace(/\s+/g, " "), palette: [...document.querySelectorAll("dialog[open] [role=option], dialog[open] .label")].map((e) => e.innerText.replace(/\s+/g, " ")).join(" | "), footer: document.querySelector("dialog[open] .border-t:last-child")?.innerText.replace(/\s+/g, " ") })));
 if (process.argv.includes("--audit")) for (const o of await auditOverflow(page)) console.log(`OVERFLOW ${o.kind} +${o.by}px  ${o.path}`);
+if (process.argv.includes("--cols")) for (const l of await dumpTables(page)) console.log(`COLS ${l}`);
 await page.screenshot({ path: out, fullPage: full });
 console.log("saved", out, page.url());
 if (errors.length) console.log("console errors:\n" + errors.slice(0, 10).join("\n"));

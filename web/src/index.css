@@ -277,20 +277,24 @@
     background: color-mix(in oklch, var(--live) 24%, transparent);
     color: var(--foreground);
   }
-  ::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
-  }
-  ::-webkit-scrollbar-thumb {
-    background: var(--line-strong);
-    border: 3px solid transparent;
-    background-clip: padding-box;
-    border-radius: 9999px;
-  }
-  ::-webkit-scrollbar-thumb:hover {
-    background: var(--muted-foreground);
-    border: 3px solid transparent;
-    background-clip: padding-box;
+  /* A styled scrollbar is a desktop pointer affordance. On touch the native overlay bar stays, so
+     a scrolling code block or table never gains a permanent 10px gutter. */
+  @media (hover: hover) and (pointer: fine) {
+    ::-webkit-scrollbar {
+      width: 10px;
+      height: 10px;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: var(--line-strong);
+      border: 3px solid transparent;
+      background-clip: padding-box;
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: var(--muted-foreground);
+      border: 3px solid transparent;
+      background-clip: padding-box;
+    }
   }
   :focus-visible {
     outline: 2px solid var(--ring);

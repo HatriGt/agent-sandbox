@@ -113,8 +113,8 @@ function LedgerTotalsStrip({ t }: { t: LedgerTotals | null }) {
 function FilterSelect({ label, value, onChange, options }: { label: string; value: string; onChange: (v: string) => void; options: Array<{ value: string; label: string }> }) {
   return (
     <label className={cn("flex h-8 items-center gap-1.5 rounded-full border px-3 text-meta", value ? "border-foreground/30 text-foreground" : "bg-card text-muted-foreground")}>
-      <span className="text-faint">{label}</span>
-      <select aria-label={label} className="cursor-pointer bg-transparent font-medium outline-none" value={value} onChange={(e) => onChange(e.target.value)}>
+      <span className="text-faint whitespace-nowrap">{label}</span>
+      <select aria-label={label} className="min-w-0 cursor-pointer bg-transparent font-medium outline-none" value={value} onChange={(e) => onChange(e.target.value)}>
         {options.map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}

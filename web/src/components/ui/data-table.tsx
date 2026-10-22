@@ -30,10 +30,22 @@ export interface Column<T> {
   className?: string;
 }
 
-const HIDE: Record<NonNullable<Column<unknown>["hideBelow"]>, string> = { sm: "hidden sm:table-cell", md: "hidden md:table-cell", lg: "hidden lg:table-cell" };
-// Literal classes (Tailwind only generates what it can read): a hidden <col> must come back as a column, or its width is lost.
-const HIDE_COL: Record<NonNullable<Column<unknown>["hideBelow"]>, string> = { sm: "hidden sm:table-column", md: "hidden md:table-column", lg: "hidden lg:table-column" };
 const BP: Record<NonNullable<Column<unknown>["hideBelow"]>, string> = { sm: "(min-width: 40rem)", md: "(min-width: 48rem)", lg: "(min-width: 64rem)" };
+
+function useMedia(query: string) {
+  return React.useSyncExternalStore(
+    (notify) => {
+      const mq = window.matchMedia(query);
+      mq.addEventListener("change", notify);
+      return () => mq.removeEventListener("change", notify);
+    },
+    () => window.matchMedia(query).matches,
+    () => true
+  );
+}
+
+/** The trailing actions column, sized from its own buttons on a phone. */
+const ACTIONS = "__actions";
 
 type Sort = { id: string; dir: "asc" | "desc" } | null;
 
@@ -151,6 +163,7 @@ function useColumnWidths(storeKey: string | undefined, ready: boolean, signature
   return {
     colgroup,
     floor: (id: string) => floor[id],
+    fit: (id: string) => auto[id],
     // Never under the header's own width, whatever was stored or fitted.
     width: (id: string) => {
       const w = manual[id] ?? auto[id];
@@ -216,7 +229,16 @@ export function DataTable<T>({
   /** Where dragged column widths are remembered; defaults to the aria-label. */
   resizeKey?: string;
 }) {
-  const cols = useColumnWidths(resizeKey ?? ariaLabel, !loading && rows.length > 0, `${columns.map((c) => c.id).join(",")}|${rows.length}`);
+  const at = { sm: useMedia(BP.sm), md: useMedia(BP.md), lg: useMedia(BP.lg) };
+  // A column hidden at this breakpoint is not rendered at all, not display:none: in fixed layout a
+  // hidden <col> or cell still takes an equal share of the free width, which is what squeezed the
+  // primary column on phones.
+  const visibleCols = columns.filter((c) => !c.hideBelow || at[c.hideBelow]);
+  // Below `sm` the table is exactly the phone's width: no declared minimum, no fitted or dragged
+  // widths, a sized column takes the lesser of its declaration and its content, the primary column
+  // truncates into what is left and the actions cell is as wide as its buttons.
+  const narrow = !at.sm;
+  const cols = useColumnWidths(resizeKey ?? ariaLabel, !loading && rows.length > 0, `${visibleCols.map((c) => c.id).join(",")}|${rows.length}`);
   const [sort, setSort] = React.useState<Sort>(initialSort);
   const sorted = React.useMemo(() => {
     const col = sort && columns.find((c) => c.id === sort.id);
@@ -290,9 +312,10 @@ export function DataTable<T>({
     return () => window.removeEventListener("keydown", onKey);
   }, [hasSearch]);
 
-  const span = columns.length + (actions ? 1 : 0);
+  const span = visibleCols.length + (actions ? 1 : 0);
   const searchMiss = !!needle && !!search && shown.length === 0 && rows.length > 0;
   const grouped = !!groupOf && !sort;
+  const actionsW = narrow ? cols.fit(ACTIONS) : undefined;
 
   const table = (
     <Table
@@ -301,34 +324,36 @@ export function DataTable<T>({
       size={size}
       stickyHeader={stickyHeader}
       containerClassName={containerClassName}
-      className={cn("table-fixed", minWidth)}
+      className={cn("table-fixed", !narrow && minWidth)}
       style={(() => {
+        if (narrow) return undefined;
         // Sized columns + the flexible one's share (≥240px and ≥ its header): below that the card scrolls sideways.
-        // Columns hidden at this breakpoint take no room, so they don't count.
-        const shown = columns.filter((c) => !c.hideBelow || window.matchMedia(BP[c.hideBelow]).matches);
-        const fixed = shown.reduce((s, c) => s + (c.width || cols.isManual(c.id) ? Math.max(cols.width(c.id) ?? 0, cols.floor(c.id) ?? 0) : Math.max(240, cols.floor(c.id) ?? 0)), 0) + (actions ? 112 : 0);
+        const fixed = visibleCols.reduce((s, c) => s + (c.width || cols.isManual(c.id) ? Math.max(cols.width(c.id) ?? 0, cols.floor(c.id) ?? 0) : Math.max(240, cols.floor(c.id) ?? 0)), 0) + (actions ? 112 : 0);
         return fixed ? { minWidth: fixed } : undefined;
       })()}
       aria-busy={loading || undefined}
     >
       <colgroup ref={cols.colgroup}>
-        {columns.map((c) => {
+        {visibleCols.map((c) => {
           // Manual > fitted content > declared class, and never under the header's own width: the
           // header floor is measured on first paint (no rows needed), so a "w-16" column whose label
-          // needs 84px gets 84px from the start. The flexible column fills what's left.
+          // needs 84px gets 84px from the start. The flexible column fills what's left. On a phone a
+          // sized column is the lesser of its declaration and its content.
           const f = cols.floor(c.id);
           const w = cols.width(c.id);
-          const px = cols.isManual(c.id) || (w && c.width) ? w : c.width && f ? `max(${f}px, ${twWidth(c.width)})` : undefined;
-          return <col key={c.id} data-col={c.id} data-flex={c.width ? undefined : ""} style={px ? { width: px } : undefined} className={cn(!px && c.width, c.hideBelow && HIDE_COL[c.hideBelow])} />;
+          const fit = cols.fit(c.id);
+          const declared = c.width && f ? `max(${f}px, ${twWidth(c.width)})` : undefined;
+          const px = narrow ? (c.width && f && fit ? `max(${f}px, min(${fit}px, ${twWidth(c.width)}))` : declared) : cols.isManual(c.id) || (w && c.width) ? w : declared;
+          return <col key={c.id} data-col={c.id} data-flex={c.width ? undefined : ""} style={px ? { width: px } : undefined} className={!px ? c.width : undefined} />;
         })}
-        {actions && <col className="w-28" />}
+        {actions && <col data-col={ACTIONS} style={actionsW ? { width: actionsW } : undefined} className={actionsW ? undefined : "w-28"} />}
       </colgroup>
       <TableHeader>
         <TableRow>
-          {columns.map((c) => {
+          {visibleCols.map((c) => {
             const on = sort?.id === c.id ? sort.dir : null;
             return (
-              <TableHead key={c.id} align={c.align} aria-sort={on ? (on === "asc" ? "ascending" : "descending") : c.sort ? "none" : undefined} className={cn("group/th relative whitespace-nowrap", c.hideBelow && HIDE[c.hideBelow])}>
+              <TableHead key={c.id} align={c.align} aria-sort={on ? (on === "asc" ? "ascending" : "descending") : c.sort ? "none" : undefined} className="group/th relative whitespace-nowrap">
                 {c.sort ? (
                   <button
                     type="button"
@@ -358,7 +383,7 @@ export function DataTable<T>({
                     e.preventDefault();
                     cols.nudge(c.id, e.currentTarget.closest("th"), e.key === "ArrowRight" ? 16 : -16);
                   }}
-                  className="dt-resize absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize touch-none outline-none"
+                  className="dt-resize absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize touch-none outline-none group-last/th:right-0"
                 />
               </TableHead>
             );
@@ -374,8 +399,8 @@ export function DataTable<T>({
         {loading ? (
           Array.from({ length: 4 }, (_, i) => (
             <TableRow key={`sk${i}`}>
-              {columns.map((c) => (
-                <TableCell key={c.id} className={cn(c.hideBelow && HIDE[c.hideBelow])}>
+              {visibleCols.map((c) => (
+                <TableCell key={c.id}>
                   <span className="dt-shim block h-3 max-w-32 rounded-full" style={{ width: `${55 + ((i * 17 + c.id.length * 7) % 40)}%` }} />
                 </TableCell>
               ))}
@@ -456,8 +481,8 @@ export function DataTable<T>({
                   data-new={motion["data-new"]}
                   style={motion.style}
                 >
-                  {columns.map((c) => (
-                    <TableCell key={c.id} align={c.align} className={cn("overflow-hidden", c.hideBelow && HIDE[c.hideBelow], c.primary && "text-foreground font-medium", c.className)}>
+                  {visibleCols.map((c) => (
+                    <TableCell key={c.id} align={c.align} className={cn("overflow-hidden", c.primary && "text-foreground font-medium", c.className)}>
                       {c.cell(r)}
                     </TableCell>
                   ))}
