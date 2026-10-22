@@ -368,7 +368,7 @@ export function DataTable<T>({
       <div className="flex flex-wrap items-center gap-2">
         {search && (
           <>
-            <label className="bg-card focus-within:ring-ring/40 focus-within:border-ring flex h-8 w-full max-w-72 min-w-0 items-center gap-1.5 rounded-md border px-2 transition-[border-color,box-shadow] duration-150 focus-within:ring-2 sm:w-64">
+            <label className="bg-card focus-within:ring-ring/40 focus-within:border-ring flex h-8 min-w-40 flex-1 basis-40 items-center gap-1.5 rounded-md border px-2 transition-[border-color,box-shadow] duration-150 focus-within:ring-2 sm:max-w-64">
               <Search className="text-muted-foreground size-3.5 shrink-0" aria-hidden />
               <input
                 ref={inputRef}
@@ -397,15 +397,9 @@ export function DataTable<T>({
                 </kbd>
               )}
             </label>
-            {!loading && (
+            {!loading && needle && (
               <span className="text-muted-foreground text-micro" aria-live="polite">
-                {needle ? (
-                  <>
-                    <NumberTicker value={shown.length} from={rows.length} className="text-foreground" /> of <span className="tabular-nums">{rows.length}</span>
-                  </>
-                ) : (
-                  <span className="tabular-nums">{rows.length}</span>
-                )}
+                <NumberTicker value={shown.length} from={rows.length} className="text-foreground" /> of <span className="tabular-nums">{rows.length}</span>
               </span>
             )}
           </>
@@ -421,13 +415,13 @@ export function DataTable<T>({
 export const stopRow = (e: React.SyntheticEvent) => e.stopPropagation();
 
 /** Status as a dot + word (Orbit), never a filled pill. `pulse` for live work. */
-export function StatusDot({ tone, pulse, children, className }: { tone: "ok" | "live" | "attention" | "destructive" | "muted"; pulse?: boolean; children: React.ReactNode; className?: string }) {
-  const dot = { ok: "bg-ok", live: "bg-live", attention: "bg-attention", destructive: "bg-destructive", muted: "bg-faint" }[tone];
-  const text = { ok: "text-ok", live: "text-live", attention: "text-attention-text", destructive: "text-destructive", muted: "text-muted-foreground" }[tone];
+export function StatusDot({ tone, pulse, children, className }: { tone: "ok" | "live" | "attention" | "destructive" | "muted" | "sleep"; pulse?: boolean | "dot"; children: React.ReactNode; className?: string }) {
+  const dot = { ok: "bg-ok", live: "bg-live", attention: "bg-attention", destructive: "bg-destructive", muted: "bg-faint", sleep: "bg-sleep" }[tone];
+  const text = { ok: "text-ok", live: "text-live", attention: "text-attention-text", destructive: "text-destructive", muted: "text-muted-foreground", sleep: "text-sleep" }[tone];
   return (
     <span className={cn("inline-flex items-center gap-1.5 text-meta font-medium", text, className)}>
       <span className={cn("relative inline-flex size-1.5 shrink-0 rounded-full", dot, pulse && "dt-ping")} />
-      {pulse ? <span className="shimmer-text min-w-0 truncate [--shim-dim:color-mix(in_oklab,currentColor_70%,transparent)] [--shim-hi:var(--foreground)]">{children}</span> : children}
+      {pulse === true ? <span className="shimmer-text min-w-0 truncate [--shim-dim:color-mix(in_oklab,currentColor_70%,transparent)] [--shim-hi:var(--foreground)]">{children}</span> : children}
     </span>
   );
 }

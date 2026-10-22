@@ -48,7 +48,7 @@ import { questionHeadline } from "@/lib/question";
 import { QuestionChoices } from "@/components/QuestionChoices";
 import { prefetchWatch } from "@/hooks/useWatchStream";
 import { Button } from "@/components/ui/button";
-import { StateStamp } from "@/components/ui/stamp";
+import { stateWord } from "@/components/MachineList";
 import { PromptInput, PromptInputActions, PromptInputTextarea } from "@/components/ui/prompt-input";
 import { Lightbox } from "@/components/ui/lightbox";
 import { NumberTicker } from "@/components/ui/number-ticker";
@@ -913,7 +913,7 @@ export function Hub({
               </h2>
               {loading ? <Bar className="h-3 w-20" /> : <Capacity boxes={boxes} capacity={lifecycle.capacity} size="sm" />}
             </div>
-            <ul className="bg-card divide-y overflow-hidden rounded-xl border shadow-e1">
+            <ul className="bg-card divide-y overflow-hidden rounded-xl border">
               <AnimatePresence initial={false}>
               {loading
                 ? [0, 1, 2].map((i) => (
@@ -939,18 +939,15 @@ export function Hub({
                         onMouseEnter={() => prefetchWatch(b.name)}
                         className="group hover:bg-muted/70 flex h-11 w-full cursor-pointer items-center gap-3 px-3.5 text-left transition-colors duration-150"
                       >
-                        <StateStamp state={displayState(b)} exitCode={b.exitCode} stalled={b.stalled} className="w-24 shrink-0" />
+                        <LiveState b={b} />
                         <span className="text-foreground min-w-0 flex-1 truncate text-meta">
                           {b.runState === "waiting" && b.question ? questionHeadline(b.question) : threadTitle(b)}
                         </span>
-                        {b.lastOutputAt && (
-                          <span className={`${b.stalled ? "text-destructive" : "text-faint"} tabular hidden shrink-0 text-micro sm:inline`}>
-                            {b.runState === "running" ? "last action " : ""}
-                            {fmtAgo(b.lastOutputAt)}
-                          </span>
-                        )}
-                        {/* Phone: the task wins the row; the machine name is on the thread it opens. */}
-                        <span className="stamp text-muted-foreground hidden shrink-0 sm:inline" title={shortName(b.name)}>
+                        {/* Fixed trailing columns, so the stamps line up down the list. Phone: the task wins the row. */}
+                        <span className={`${b.stalled ? "text-destructive" : "text-faint"} tabular hidden w-32 shrink-0 text-end text-micro sm:inline`}>
+                          {b.lastOutputAt ? `${b.runState === "running" ? "last action " : ""}${fmtAgo(b.lastOutputAt)}` : ""}
+                        </span>
+                        <span className="stamp text-muted-foreground hidden w-24 shrink-0 truncate text-end sm:inline" title={shortName(b.name)}>
                           {friendlyName(b.name)}
                         </span>
                         <ArrowRight className="text-muted-foreground size-3.5 shrink-0 -translate-x-0.5 opacity-0 transition-[opacity,translate] duration-150 group-hover:translate-x-0 group-hover:opacity-100 group-focus-visible:translate-x-0 group-focus-visible:opacity-100" />
@@ -1015,7 +1012,7 @@ const RECENT_COLUMNS: Column<LedgerRow>[] = [
   },
   {
     id: "duration",
-    header: "Duration",
+    header: "Took",
     width: "w-20",
     hideBelow: "sm",
     align: "end",
@@ -1123,5 +1120,14 @@ function RecentActivity({ onAll }: { onAll: () => void }) {
         })}
       </ul>
     </motion.section>
+  );
+}
+
+function LiveState({ b }: { b: BoxView }) {
+  const { word, tone } = stateWord(displayState(b), b.exitCode, b.stalled);
+  return (
+    <StatusDot tone={tone} pulse={b.runState === "running" && !b.stalled} className="w-24 shrink-0">
+      {word}
+    </StatusDot>
   );
 }

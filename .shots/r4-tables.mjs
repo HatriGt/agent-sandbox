@@ -100,8 +100,9 @@ const reloaded = await thWidth("Resize Owner");
 check("width survives reload", Math.abs(reloaded - after) <= 2, `${after.toFixed(0)}→${reloaded.toFixed(0)}`);
 await shot("after-reload", { clip: await frameOf("Resize Description").boundingBox() });
 
+const descBefore = await thWidth("Resize Description");
 await dragGrip("Resize Description", 360);
-check("Description widened past 900px", (await thWidth("Resize Description")) > 900, (await thWidth("Resize Description")).toFixed(0));
+check("Description drag widens it by ~360", Math.abs((await thWidth("Resize Description")) - descBefore - 360) <= 3, `${descBefore.toFixed(0)}→${(await thWidth("Resize Description")).toFixed(0)}`);
 const scroller = frameOf("Resize Description").locator(".overflow-auto").first();
 const overflow = await scroller.evaluate((el) => el.scrollWidth - el.clientWidth);
 check("widened table overflows the card", overflow > 100, `overflow=${overflow.toFixed(0)}`);

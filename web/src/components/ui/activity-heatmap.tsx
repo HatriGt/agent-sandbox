@@ -30,11 +30,14 @@ interface Cell {
 
 /**
  * GitHub-style run activity: one cell per local day for the last `weeks` weeks; columns are weeks,
- * Sun→Sat top to bottom. Intensity is relative to the busiest day in range, in four steps over empty.
- * A roving-tabindex grid: arrow keys walk days, each cell names its date and count to AT.
+ * Sun→Sat top to bottom. With `days`, a single row of the last `days` days instead: the shape for an
+ * archive too sparse to fill a grid. Intensity is relative to the busiest day in range, in four
+ * steps over empty. A roving-tabindex grid: arrow keys walk days, each cell names its date and count to AT.
  */
-export function ActivityHeatmap({ runs, weeks = 20, className }: { runs: ActivityRun[]; weeks?: number; className?: string }) {
+export function ActivityHeatmap({ runs, weeks = 20, days, className }: { runs: ActivityRun[]; weeks?: number; days?: number; className?: string }) {
   const reduce = useReducedMotion();
+  const perCol = days ? 1 : 7;
+  const nCols = days ?? weeks;
   const { cols, max, total } = React.useMemo(() => {
     const counts = new Map<string, { n: number; failed: number }>();
     for (const r of runs) {
@@ -47,15 +50,15 @@ export function ActivityHeatmap({ runs, weeks = 20, className }: { runs: Activit
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const start = new Date(today);
-    start.setDate(today.getDate() - ((weeks - 1) * 7 + today.getDay()));
+    start.setDate(today.getDate() - (days ? days - 1 : (weeks - 1) * 7 + today.getDay()));
     const cols: Cell[][] = [];
     let max = 0;
     let total = 0;
-    for (let w = 0; w < weeks; w++) {
+    for (let w = 0; w < nCols; w++) {
       const col: Cell[] = [];
-      for (let d = 0; d < 7; d++) {
+      for (let d = 0; d < perCol; d++) {
         const date = new Date(start);
-        date.setDate(start.getDate() + w * 7 + d);
+        date.setDate(start.getDate() + w * perCol + d);
         const c = counts.get(dayKey(date)) ?? { n: 0, failed: 0 };
         const future = date.getTime() > today.getTime();
         if (!future) {
@@ -67,10 +70,10 @@ export function ActivityHeatmap({ runs, weeks = 20, className }: { runs: Activit
       cols.push(col);
     }
     return { cols, max, total };
-  }, [runs, weeks]);
+  }, [runs, weeks, days, nCols, perCol]);
 
   const level = (n: number) => (n === 0 || max === 0 ? 0 : Math.min(4, Math.ceil((n / max) * 4)));
-  const [focus, setFocus] = React.useState<[number, number]>(() => [weeks - 1, new Date().getDay()]);
+  const [focus, setFocus] = React.useState<[number, number]>(() => [nCols - 1, days ? 0 : new Date().getDay()]);
   const cellRefs = React.useRef(new Map<string, HTMLButtonElement>());
 
   const onKey = (e: React.KeyboardEvent, w: number, d: number) => {
@@ -78,8 +81,8 @@ export function ActivityHeatmap({ runs, weeks = 20, className }: { runs: Activit
     const m = moves[e.key];
     if (!m) return;
     e.preventDefault();
-    let nw = Math.min(weeks - 1, Math.max(0, w + m[0]));
-    let nd = Math.min(6, Math.max(0, d + m[1]));
+    let nw = Math.min(nCols - 1, Math.max(0, w + m[0]));
+    let nd = Math.min(perCol - 1, Math.max(0, d + m[1]));
     if (cols[nw][nd].future) [nw, nd] = [w, d];
     setFocus([nw, nd]);
     cellRefs.current.get(`${nw}-${nd}`)?.focus();
@@ -88,6 +91,9 @@ export function ActivityHeatmap({ runs, weeks = 20, className }: { runs: Activit
   const monthLabel = (w: number) => {
     const first = cols[w][0].date;
     const prev = w > 0 ? cols[w - 1][0].date : null;
+    const next = cols[w + 1]?.[0].date;
+    // The first column names its month only if the next column is still in it; otherwise the two labels collide.
+    if (!prev && next && next.getMonth() !== first.getMonth()) return "";
     return !prev || prev.getMonth() !== first.getMonth() ? first.toLocaleDateString(undefined, { month: "short" }) : "";
   };
 
@@ -97,16 +103,16 @@ export function ActivityHeatmap({ runs, weeks = 20, className }: { runs: Activit
         <div className="inline-flex flex-col gap-1.5">
           <div className="flex gap-[3px]" aria-hidden>
             {cols.map((_, w) => (
-              <span key={w} className="text-faint w-[11px] overflow-visible whitespace-nowrap text-micro leading-none">
+              <span key={w} className="text-faint w-3 overflow-visible whitespace-nowrap text-micro leading-none">
                 {monthLabel(w)}
               </span>
             ))}
           </div>
-          <div role="grid" aria-label={`Run activity, last ${weeks} weeks: ${total} ${total === 1 ? "run" : "runs"}`} className="flex gap-[3px]">
+          <div role="grid" aria-label={`Run activity, last ${days ? `${days} days` : `${weeks} weeks`}: ${total} ${total === 1 ? "run" : "runs"}`} className="flex gap-[3px]">
             {cols.map((col, w) => (
               <div key={w} role="row" className="flex flex-col gap-[3px]">
                 {col.map((c, d) => {
-                  if (c.future) return <span key={d} className="size-[11px]" aria-hidden />;
+                  if (c.future) return <span key={d} className="size-3" aria-hidden />;
                   const dateText = c.date.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", year: "numeric" });
                   const label = `${c.n === 0 ? "No" : c.n} ${c.n === 1 ? "run" : "runs"}${c.failed ? ` (${c.failed} failed)` : ""} · ${dateText}`;
                   return (
@@ -126,7 +132,7 @@ export function ActivityHeatmap({ runs, weeks = 20, className }: { runs: Activit
                           animate={{ opacity: 1, scale: 1 }}
                           transition={{ duration: 0.3, delay: reduce ? 0 : w * 0.018 + d * 0.01, ease: [0.22, 1, 0.36, 1] }}
                           style={{ background: LEVEL_BG[level(c.n)] }}
-                          className="focus-visible:ring-ring size-[11px] cursor-default rounded-[3px] outline-none focus-visible:ring-2 focus-visible:ring-offset-1"
+                          className="focus-visible:ring-ring size-3 cursor-default rounded-[3px] outline-none focus-visible:ring-2 focus-visible:ring-offset-1"
                         />
                       </TooltipTrigger>
                       <TooltipContent side="top">{label}</TooltipContent>
@@ -141,7 +147,7 @@ export function ActivityHeatmap({ runs, weeks = 20, className }: { runs: Activit
       <figcaption className="text-faint mt-2 flex items-center justify-end gap-1.5 text-micro" aria-hidden>
         Less
         {LEVEL_BG.map((bg, i) => (
-          <span key={i} className="size-[9px] rounded-[2px]" style={{ background: bg }} />
+          <span key={i} className="size-2.5 rounded-[2px]" style={{ background: bg }} />
         ))}
         More
       </figcaption>
