@@ -213,6 +213,7 @@ export function CodeEditor({
   prose = false,
   placeholder: placeholderText,
   reveal,
+  wrap = false,
 }: {
   value: string;
   onChange?: (v: string) => void;
@@ -230,12 +231,15 @@ export function CodeEditor({
   placeholder?: string;
   /** Scroll to, select and flash lines `from`–`to` (1-based); a new `nonce` repeats it. */
   reveal?: { from: number; to: number; nonce: number };
+  /** Soft-wrap long lines (⌥Z in the workspace). Prose always wraps. */
+  wrap?: boolean;
 }) {
   const host = React.useRef<HTMLDivElement>(null);
   const view = React.useRef<EditorView | null>(null);
   const dark = useIsDark();
   const themeComp = React.useRef(new Compartment());
   const langComp = React.useRef(new Compartment());
+  const wrapComp = React.useRef(new Compartment());
   const onChangeRef = React.useRef(onChange);
   const onSaveRef = React.useRef(onSave);
   onChangeRef.current = onChange;
@@ -252,6 +256,7 @@ export function CodeEditor({
         revealField,
         themeComp.current.of(syntaxHighlighting(dark ? darkHighlight : lightHighlight)),
         langComp.current.of(langExt),
+        wrapComp.current.of(wrap ? EditorView.lineWrapping : []),
         prose ? [Prec.high(proseChrome), EditorView.lineWrapping] : [],
         placeholderText ? placeholder(placeholderText) : [],
         keymap.of([
@@ -287,6 +292,9 @@ export function CodeEditor({
   React.useEffect(() => {
     view.current?.dispatch({ effects: langComp.current.reconfigure(langExt) });
   }, [langExt]);
+  React.useEffect(() => {
+    view.current?.dispatch({ effects: wrapComp.current.reconfigure(wrap ? EditorView.lineWrapping : []) });
+  }, [wrap]);
   // External value change (a different file, or a reload) — only when it differs from the doc.
   React.useEffect(() => {
     const v = view.current;

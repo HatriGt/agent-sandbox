@@ -1,56 +1,65 @@
 import * as React from "react";
-import { ArrowDown, ArrowUp, Check, ChevronRight, Download, Files, FileCode2, FileDiff, GitBranch, GitCommitHorizontal, Loader2, Maximize2, Minimize2, PanelRight, RefreshCw, Search, Table2, Upload, X } from "lucide-react";
-import { motion } from "motion/react";
+import { ArrowDown, ArrowUp, CaseSensitive, Check, ChevronRight, Columns2, Copy, CopyPlus, Download, FilePlus, Files, FileCode2, FileDiff, FoldVertical, FolderPlus, GitBranch, GitCommitHorizontal, Loader2, Locate, Maximize2, Minimize2, PanelRight, Pencil, Pin, RefreshCw, Regex, Search, SearchCode, Table2, Trash2, Upload, WrapText, X } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
+import { ContextMenu as CM, DropdownMenu as DM } from "radix-ui";
 import { useReducedMotion } from "@/lib/motion-pref";
 import { toast } from "sonner";
-import { api, ApiError, type ChangedFile, type GitStatus } from "@/lib/api";
+import { api, ApiError, type ChangedFile, type FsOp, type GitStatus, type SearchMatch } from "@/lib/api";
 import { parseUnifiedDiff, diffForNewFile, type ParsedDiff } from "@/lib/diff";
 import { languageOf } from "@/lib/fileIcon";
 import { FileIcon, FolderIcon } from "@/lib/vscodeIcons";
 import { CodeEditor } from "@/components/CodeEditor";
 import { AnimatedTabs } from "@/components/ui/animated-tabs";
 import { Button } from "@/components/ui/button";
+import { Kbd } from "@/components/ui/kbd";
+import { invalidateResolver } from "@/components/ui/code-ref";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DiffView, useHunkReview } from "./FilePane";
 import { RecordsTable } from "./RecordsTable";
 import { ReviewView, type ReviewFocus } from "./review/ReviewView";
 import { cn } from "@/lib/utils";
+import {
+  EMPTY_TABS,
+  SHORTCUTS,
+  baseOf,
+  buildTree,
+  childrenOf,
+  hasDrag,
+  invalidName,
+  matchPaths,
+  matchShortcut,
+  parentOf,
+  parseLineQuery,
+  readDrag,
+  setDrag,
+  tabsReducer,
+  treeKeyTarget,
+  typeAheadTarget,
+  visibleRows,
+  type Doc,
+  type Node,
+  type OpenOpts,
+  type PaneCommands,
+  type Row,
+  type RowEdit,
+  type Tab,
+  type TabAction,
+  type TabGroup,
+} from "@/lib/workspace-model";
 
 /**
- * The workspace as an editor: an activity bar (Explorer · Search · Source Control · Review), a sidebar view,
- * an editor group with tabs, breadcrumbs and Diff / File / Edit modes, and a status bar. The tree
- * uses a coloured icon theme and indent guides; Source Control shows the branch with ahead/behind,
- * a commit box, and the changes with VS Code's status letters — commit and push run inside the
- * sandbox as the run's git identity. Files open from the tree, from Source Control, or from the
- * changes dock; edits save back with ⌘S and refresh the change list.
+ * The workspace as an editor: a sidebar (Files · Search · Changes · Review · All), one or two editor
+ * groups with tabs, breadcrumbs and Diff / File / Edit modes, and a status bar. The explorer is one
+ * keyboard-driven list of rows with a context menu, inline new/rename and drag-to-move; tabs preview
+ * on single click and pin on double click; ⌘P quick-opens, ⌘⇧F searches file contents. Edits autosave
+ * back into the sandbox and refresh the change list.
  */
-type Node = { name: string; path: string; children?: Map<string, Node> };
-type Reveal = { from: number; to: number; nonce: number };
-type Tab = { path: string; mode: "diff" | "edit"; draft?: string; dirty?: boolean; saving?: "saving" | "saved"; reveal?: Reveal };
 /** A request to show a file, optionally at a line range. A new object each time, so repeats navigate. */
 export type OpenRequest = { path: string; line?: number; endLine?: number };
 type View = "explorer" | "search" | "scm" | "review" | "records";
 type Repo = { name: string; branch?: string };
+type Open = (path: string, opts?: OpenOpts) => void;
 
-function buildTree(paths: string[]): Node {
-  const root: Node = { name: "", path: "", children: new Map() };
-  for (const p of paths) {
-    const parts = p.split("/");
-    let cur = root;
-    parts.forEach((part, i) => {
-      const isFile = i === parts.length - 1;
-      const path = parts.slice(0, i + 1).join("/");
-      let next = cur.children!.get(part);
-      if (!next) {
-        next = isFile ? { name: part, path } : { name: part, path, children: new Map() };
-        cur.children!.set(part, next);
-      }
-      cur = next;
-    });
-  }
-  return root;
-}
-const sorted = (m: Map<string, Node>) => [...m.values()].sort((a, b) => (a.children ? 0 : 1) - (b.children ? 0 : 1) || a.name.localeCompare(b.name));
 const STATUS_LETTER: Record<ChangedFile["status"], { l: string; tone: string }> = {
   modified: { l: "M", tone: "text-attention-text" },
   added: { l: "A", tone: "text-ok" },
@@ -58,6 +67,32 @@ const STATUS_LETTER: Record<ChangedFile["status"], { l: string; tone: string }> 
   deleted: { l: "D", tone: "text-destructive" },
   renamed: { l: "R", tone: "text-live" },
 };
+const SPRING = { type: "spring", stiffness: 500, damping: 40 } as const;
+const EASE = [0.22, 1, 0.36, 1] as const;
+// The dropdown-menu surface and item, for the Radix context menus and submenus used here.
+const MENU_CONTENT = "bg-popover text-popover-foreground z-50 min-w-[13rem] rounded-xl border p-1.5 shadow-e3 outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=open]:duration-150 data-[state=open]:ease-[cubic-bezier(0.22,1,0.36,1)] data-[state=closed]:animate-out data-[state=closed]:zoom-out-[0.97] data-[state=closed]:duration-100 data-[state=closed]:fade-out-0";
+const MENU_ITEM = "flex h-8 cursor-pointer items-center gap-2.5 rounded-md px-2 text-meta outline-none select-none transition-[background-color,transform] duration-100 ease-[cubic-bezier(0.22,1,0.36,1)] data-[highlighted]:bg-accent active:scale-[0.985] data-[disabled]:pointer-events-none data-[disabled]:opacity-40 [&_svg]:text-muted-foreground [&_svg]:size-4 [&_svg]:shrink-0";
+const MENU_ITEM_DESTRUCTIVE = "text-destructive data-[highlighted]:bg-destructive/10 [&_svg]:text-destructive";
+const MENU_SEP = "bg-border my-1.5 h-px";
+const MenuHint = ({ children }: { children: React.ReactNode }) => <span className="text-faint ml-auto pl-4 text-micro">{children}</span>;
+const shortcutLabel = (key: string) => SHORTCUTS.find((s) => s.key === key)?.label;
+
+const readStore = <T,>(key: string, fallback: T): T => {
+  try {
+    const v = localStorage.getItem(key);
+    return v === null ? fallback : (JSON.parse(v) as T);
+  } catch {
+    return fallback;
+  }
+};
+const writeStore = (key: string, v: unknown) => {
+  try {
+    localStorage.setItem(key, JSON.stringify(v));
+  } catch {
+    /* storage blocked: the value lives for this tab only */
+  }
+};
+const copyText = (text: string) => navigator.clipboard?.writeText(text).catch(() => toast.error("Could not copy"));
 
 export function WorkspacePane({ session, changes, open, review, onClose, onSaved, repos, full = false, onToggleFull }: { session: string; changes: ChangedFile[]; open: OpenRequest | null; /** Bumped to switch the pane to the Review view (the whole run's diff). */ review?: number; onClose: () => void; onSaved: () => void; repos: Repo[]; full?: boolean; onToggleFull?: () => void }) {
   const [paths, setPaths] = React.useState<string[] | null>(null);
@@ -66,8 +101,15 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
   const [view, setView] = React.useState<View>("explorer");
   const [sidebar, setSidebar] = React.useState(true);
   const [query, setQuery] = React.useState("");
-  const [tabs, setTabs] = React.useState<Tab[]>([]);
-  const [active, setActive] = React.useState<string | null>(null);
+  const [tabs, dispatch] = React.useReducer(tabsReducer, EMPTY_TABS);
+  const [docs, setDocs] = React.useState<Map<string, Doc>>(() => new Map());
+  const [wrap, setWrap] = React.useState(() => readStore("asb-ws-wrap", false));
+  const [recent, setRecent] = React.useState<string[]>(() => readStore(`asb-ws-recent:${session}`, []));
+  const [quickOpen, setQuickOpen] = React.useState<string | null>(null);
+  const [focusedRow, setFocusedRow] = React.useState<string | null>(null);
+  const [edit, setEdit] = React.useState<RowEdit | null>(null);
+  const savers = React.useRef(new Map<string, () => Promise<string | null>>());
+  const paneRef = React.useRef<HTMLElement>(null);
 
   const loadTree = React.useCallback(
     (signal?: AbortSignal) =>
@@ -87,32 +129,42 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
   }, [loadTree]);
 
   const changeByPath = React.useMemo(() => new Map(changes.map((c) => [c.path, c])), [changes]);
+  const tree = React.useMemo(() => (paths ? buildTree(paths) : null), [paths]);
+  const focusedGroup = tabs.groups[tabs.focus] ?? tabs.groups[0];
+  const active = focusedGroup.active;
+  const activeTab = focusedGroup.tabs.find((t) => t.path === active) ?? null;
+  const activeDoc = active ? docs.get(active) : undefined;
 
-  const openPath = React.useCallback(
-    (path: string, mode?: Tab["mode"], reveal?: Reveal) => {
-      // A targeted line always shows the file itself, not its diff.
-      const m = reveal ? "edit" : mode;
-      setTabs((t) =>
-        t.some((x) => x.path === path)
-          ? reveal
-            ? t.map((x) => (x.path === path ? { ...x, mode: "edit", reveal } : x))
-            : t
-          : [...t, { path, mode: m ?? "edit", reveal }]
-      );
-      setActive(path);
-      setExpanded((e) => {
-        const n = new Set(e);
-        const parts = path.split("/");
-        for (let i = 1; i < parts.length; i++) n.add(parts.slice(0, i).join("/"));
-        return n;
-      });
+  const expandTo = React.useCallback((path: string) => {
+    setExpanded((e) => {
+      const n = new Set(e);
+      const parts = path.split("/");
+      for (let i = 1; i < parts.length; i++) n.add(parts.slice(0, i).join("/"));
+      return n;
+    });
+  }, []);
+  const pushRecent = React.useCallback(
+    (path: string) =>
+      setRecent((r) => {
+        const next = [path, ...r.filter((p) => p !== path)].slice(0, 30);
+        writeStore(`asb-ws-recent:${session}`, next);
+        return next;
+      }),
+    [session]
+  );
+  const openPath = React.useCallback<Open>(
+    (path, opts = {}) => {
+      dispatch({ type: "open", path, opts });
+      expandTo(path);
+      setFocusedRow(path);
+      if (!opts.preview) pushRecent(path);
     },
-    [changeByPath]
+    [expandTo, pushRecent]
   );
   React.useEffect(() => {
     if (!open) return;
     const reveal = open.line ? { from: open.line, to: open.endLine ?? open.line, nonce: Date.now() } : undefined;
-    openPath(open.path, changeByPath.has(open.path) ? "diff" : "edit", reveal);
+    openPath(open.path, { mode: changeByPath.has(open.path) ? "diff" : "edit", reveal });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
   // "Review all" (the ChangesDock shortcut, the palette) lands on the whole-run diff.
@@ -123,27 +175,103 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
     setSidebar(true);
   }, [review]);
 
-  const closeTab = (path: string) => {
-    setTabs((t) => {
-      const i = t.findIndex((x) => x.path === path);
-      const next = t.filter((x) => x.path !== path);
-      if (active === path) setActive(next[Math.max(0, i - 1)]?.path ?? null);
-      return next;
-    });
-  };
-  const patchTab = (path: string, p: Partial<Tab>) => setTabs((t) => t.map((x) => (x.path === path ? { ...x, ...p } : x)));
-
   // An empty editor is a dead end: when the tree arrives and nothing is open, open the most useful file —
   // the first change, else a README, else the first file at the repo root.
   React.useEffect(() => {
-    if (!paths || tabs.length > 0 || open) return;
+    if (!paths || tabs.groups[0].tabs.length > 0 || open) return;
     const first = changes[0]?.path ?? paths.find((p) => /(^|\/)readme\.md$/i.test(p)) ?? [...paths].sort((a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b))[0];
-    if (first) openPath(first, changes[0] ? "diff" : "edit");
+    if (first) openPath(first, { mode: changes[0] ? "diff" : "edit" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paths]);
 
-  const tree = React.useMemo(() => (paths ? buildTree(paths) : null), [paths]);
-  const activeTab = tabs.find((t) => t.path === active) ?? null;
+  const setDoc = React.useCallback((path: string, p: Partial<Doc>) => {
+    setDocs((m) => {
+      const n = new Map(m);
+      n.set(path, { ...(m.get(path) ?? { dirty: false }), ...p });
+      return n;
+    });
+  }, []);
+  const dirtySet = React.useMemo(() => new Set([...docs].filter(([, d]) => d.dirty).map(([p]) => p)), [docs]);
+  const holders = (path: string) => tabs.groups.reduce((n, g) => n + g.tabs.filter((t) => t.path === path).length, 0);
+
+  // Closing the last tab that holds a draft flushes it first; if the write fails the tab stays and the
+  // toast offers Discard. With autosave on there is no "unsaved changes" dialog to earn.
+  const closeTab = async (group: 0 | 1, path: string) => {
+    const saver = savers.current.get(path);
+    if (docs.get(path)?.dirty && saver && holders(path) === 1) {
+      const err = await saver();
+      if (err) {
+        toast.error("Could not save", {
+          description: err,
+          action: {
+            label: "Discard",
+            onClick: () => {
+              setDoc(path, { draft: undefined, dirty: false, saving: undefined });
+              dispatch({ type: "close", group, path });
+            },
+          },
+        });
+        return;
+      }
+    }
+    dispatch({ type: "close", group, path });
+  };
+  const closePathEverywhere = (path: string) => {
+    tabs.groups.forEach((g, gi) => g.tabs.forEach((t) => (t.path === path || t.path.startsWith(path + "/")) && dispatch({ type: "close", group: gi as 0 | 1, path: t.path })));
+  };
+  const onFs = async (op: FsOp): Promise<boolean> => {
+    try {
+      const r = await api.fs(session, op);
+      setPaths(r.files);
+      invalidateResolver(session);
+      if (op.op === "move") {
+        dispatch({ type: "rename", from: op.path, to: op.to });
+        setDocs((m) => new Map([...m].map(([p, d]) => [p === op.path ? op.to : p.startsWith(op.path + "/") ? op.to + p.slice(op.path.length) : p, d])));
+        setFocusedRow(op.to);
+      } else if (op.op === "delete") {
+        closePathEverywhere(op.path);
+        setFocusedRow(parentOf(op.path) || null);
+      } else {
+        setFocusedRow(op.path);
+        if (op.op !== "copy") expandTo(op.path);
+        if (op.op === "create") openPath(op.path, { preview: false });
+      }
+      onSaved();
+      return true;
+    } catch (e) {
+      toast.error(`Could not ${op.op === "mkdir" ? "create folder" : op.op}`, { description: e instanceof Error ? e.message : String(e) });
+      return false;
+    }
+  };
+  const revealActive = () => {
+    if (!active) return;
+    setView("explorer");
+    setSidebar(true);
+    setQuery("");
+    expandTo(active);
+    setFocusedRow(active);
+    requestAnimationFrame(() => paneRef.current?.querySelector<HTMLElement>(`[role=tree] [data-path="${CSS.escape(active)}"]`)?.focus());
+  };
+
+  const toggleWrap = () => setWrap((w) => (writeStore("asb-ws-wrap", !w), !w));
+  const commands: PaneCommands = {
+    closeActive: () => void (active && closeTab(tabs.focus, active)),
+    quickOpen: (prefill = "") => setQuickOpen(prefill),
+    toggleSidebar: () => setSidebar((v) => !v),
+    searchInFiles: () => (setSidebar(true), setView("search")),
+    split: () => dispatch({ type: "split" }),
+    toggleWrap,
+    focusGroup: (g) => dispatch({ type: "focus", group: g }),
+  };
+  // Capture phase so these beat CodeMirror's own bindings; ⌘F is not in the table and stays the editor's.
+  const onKeyDownCapture = (e: React.KeyboardEvent) => {
+    const s = matchShortcut(e.nativeEvent, SHORTCUTS);
+    if (!s) return;
+    e.preventDefault();
+    e.stopPropagation();
+    s.run(commands);
+  };
+
   const activeRepo = React.useMemo(() => {
     const top = (active ?? changes[0]?.path ?? "").split("/")[0];
     return repos.find((r) => r.name === top) ?? repos[0];
@@ -197,107 +325,129 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
     window.addEventListener("pointerup", up);
   };
 
-  const filesTitle = view === "scm" || view === "review" ? "Changes" : "Files";
-  const still = useReducedMotion();
+  const filesTitle = view === "scm" || view === "review" ? "Changes" : view === "search" ? "Search" : "Files";
+  const controls = (
+    <div className="flex shrink-0 items-center gap-0.5 border-l px-1.5">
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button type="button" onClick={onToggleFull} aria-pressed={full} aria-label={full ? "Show the conversation" : "Full view"} className="text-muted-foreground hover:text-foreground hover:bg-muted grid size-7 cursor-pointer place-items-center rounded-md">
+            {full ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">{full ? "Show the conversation" : "Full view — collapse the conversation"}</TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button type="button" onClick={() => setSidebar((v) => !v)} aria-pressed={sidebar} aria-label={sidebar ? "Hide files" : "Show files"} className={cn("hover:bg-muted grid size-7 cursor-pointer place-items-center rounded-md", sidebar ? "text-foreground" : "text-muted-foreground hover:text-foreground")}>
+            <PanelRight className="size-4" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          {sidebar ? "Hide the files panel" : "Show the files panel"}
+          <Kbd className="ml-2">{shortcutLabel("b")}</Kbd>
+        </TooltipContent>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button type="button" onClick={onClose} aria-label="Close workspace" className="text-muted-foreground hover:text-foreground hover:bg-muted grid size-7 cursor-pointer place-items-center rounded-md">
+            <X className="size-4" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">Close</TooltipContent>
+      </Tooltip>
+    </div>
+  );
+
   return (
     <motion.aside
+      ref={paneRef}
       initial={{ width: 0, opacity: 0 }}
       animate={{ width: full ? "100%" : width ? width : "58%", opacity: 1 }}
       exit={{ width: 0, opacity: 0 }}
-      transition={{ width: { duration: 0.28, ease: [0.22, 1, 0.36, 1] }, opacity: { duration: 0.18 } }}
+      transition={{ width: { duration: 0.28, ease: EASE }, opacity: { duration: 0.18 } }}
       style={{ minWidth: full ? undefined : width ? width : undefined }}
       className={cn("bg-card absolute inset-0 z-20 flex min-w-0 flex-col overflow-hidden md:relative md:inset-auto md:h-full md:border-l", !full && !width && "md:min-w-[34rem]")}
       aria-label="Workspace"
+      onKeyDownCapture={onKeyDownCapture}
     >
       {!full && <div role="separator" aria-orientation="vertical" onPointerDown={onDrag} className="hover:bg-live/60 active:bg-live absolute top-0 bottom-0 -left-1 z-30 hidden w-2 cursor-col-resize transition-colors md:block" title="Drag to resize" />}
 
-      {/* Tab strip + window controls, the way an editor puts them: files across, actions at the right. */}
-      <div className="flex h-10 shrink-0 items-stretch border-b">
-        <div role="tablist" className="scrollbar-none flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto px-2">
-          {tabs.map((t) => {
-            const on = t.path === active;
-            const base = t.path.slice(t.path.lastIndexOf("/") + 1);
-            return (
-              <div key={t.path} role="tab" aria-selected={on} className={cn("group relative flex h-7 shrink-0 items-center gap-1.5 rounded-md pr-1 pl-2 text-meta transition-colors", on ? "text-foreground" : "text-muted-foreground hover:text-foreground hover:bg-muted/60")}>
-                {/* The active tab's pill glides between tabs (shared layoutId); an underline rides
-                    along its bottom edge so the active file reads even where the pill is faint. */}
-                {on && (
-                  <motion.span layoutId="ws-active-tab" className="bg-muted absolute inset-0 -z-10 rounded-md" transition={still ? { duration: 0 } : { type: "spring", stiffness: 500, damping: 40 }} aria-hidden>
-                    <span className="bg-foreground/70 absolute inset-x-2 bottom-0 h-px rounded-full" />
-                  </motion.span>
-                )}
-                <button type="button" onClick={() => setActive(t.path)} className="no-press flex cursor-pointer items-center gap-1.5">
-                  <FileIcon path={t.path} size={14} />
-                  <span className={cn("text-micro", t.dirty && "italic")}>{base}</span>
-                </button>
-                <button type="button" onClick={() => closeTab(t.path)} aria-label={`Close ${base}`} className={cn("text-muted-foreground hover:text-foreground hover:bg-background grid size-5 cursor-pointer place-items-center rounded", !t.dirty && !on && "opacity-0 group-hover:opacity-100 focus-visible:opacity-100")}>
-                  {t.dirty ? <span className="bg-foreground block size-2 rounded-full" aria-label="unsaved" /> : <X className="size-3" />}
-                </button>
-              </div>
-            );
-          })}
-          {tabs.length === 0 && <span className="text-muted-foreground px-1 text-micro">No file open</span>}
-        </div>
-        <div className="flex shrink-0 items-center gap-0.5 border-l px-1.5">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button type="button" onClick={onToggleFull} aria-pressed={full} aria-label={full ? "Show the conversation" : "Full view"} className="text-muted-foreground hover:text-foreground hover:bg-muted grid size-7 cursor-pointer place-items-center rounded-md">
-                {full ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">{full ? "Show the conversation" : "Full view — collapse the conversation"}</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button type="button" onClick={() => setSidebar((v) => !v)} aria-pressed={sidebar} aria-label={sidebar ? "Hide files" : "Show files"} className={cn("hover:bg-muted grid size-7 cursor-pointer place-items-center rounded-md", sidebar ? "text-foreground" : "text-muted-foreground hover:text-foreground")}>
-                <PanelRight className="size-4" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">{sidebar ? "Hide the files panel" : "Show the files panel"}</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button type="button" onClick={onClose} aria-label="Close workspace" className="text-muted-foreground hover:text-foreground hover:bg-muted grid size-7 cursor-pointer place-items-center rounded-md">
-                <X className="size-4" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">Close</TooltipContent>
-          </Tooltip>
-        </div>
-      </div>
-
       <div className="flex min-h-0 flex-1">
-        {/* Editor group */}
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        {/* Editor groups: one or two columns, each with its own tab strip; the window controls ride the last strip. */}
+        <div className="flex min-h-0 min-w-0 flex-1">
           {view === "review" ? (
-            <ReviewView session={session} focus={reviewFocus} className="h-full" />
+            <div className="flex min-w-0 flex-1 flex-col">
+              <div className="flex h-10 shrink-0 items-stretch border-b">
+                <span className="text-muted-foreground flex flex-1 items-center px-3 text-meta">Review</span>
+                {controls}
+              </div>
+              <ReviewView session={session} focus={reviewFocus} className="min-h-0 flex-1" />
+            </div>
           ) : view === "records" ? (
-            <RecordsTable session={session} onOpen={(p) => (setView("explorer"), openPath(p))} />
-          ) : activeTab ? (
-            <FileView key={activeTab.path} session={session} tab={activeTab} change={changeByPath.get(activeTab.path)} onMode={(m) => patchTab(activeTab.path, { mode: m })} onDraft={(d, dirty) => patchTab(activeTab.path, { draft: d, dirty })} onSaving={(s) => patchTab(activeTab.path, { saving: s })} onSaved={onSaved} />
+            <div className="flex min-w-0 flex-1 flex-col">
+              <div className="flex h-10 shrink-0 items-stretch border-b">
+                <span className="text-muted-foreground flex flex-1 items-center px-3 text-meta">All files</span>
+                {controls}
+              </div>
+              <RecordsTable session={session} onOpen={(p) => (setView("explorer"), openPath(p))} />
+            </div>
           ) : (
-            <EmptyEditor />
+            tabs.groups.map((g, i) => {
+              const gi = i as 0 | 1;
+              const focused = tabs.focus === gi;
+              const tab = g.tabs.find((t) => t.path === g.active) ?? null;
+              return (
+                <div key={gi} data-group={gi} data-focused={focused} className={cn("flex min-h-0 min-w-0 flex-1 flex-col", gi === 1 && "border-l")} onPointerDownCapture={() => !focused && dispatch({ type: "focus", group: gi })}>
+                  <div className={cn("flex h-10 shrink-0 items-stretch border-b transition-colors", !focused && "bg-muted/30")}>
+                    <TabStrip group={gi} state={g} focused={focused} dirty={dirtySet} dispatch={dispatch} onClose={(p) => void closeTab(gi, p)} />
+                    {i === tabs.groups.length - 1 && controls}
+                  </div>
+                  {tab ? (
+                    <FileView
+                      key={`${gi}:${tab.path}`}
+                      session={session}
+                      tab={tab}
+                      doc={docs.get(tab.path) ?? { dirty: false }}
+                      tree={tree}
+                      change={changeByPath.get(tab.path)}
+                      wrap={wrap}
+                      onMode={(m) => dispatch({ type: "setMode", path: tab.path, mode: m })}
+                      onDoc={(p) => setDoc(tab.path, p)}
+                      onPin={() => dispatch({ type: "pin", path: tab.path })}
+                      onOpen={openPath}
+                      onSaved={onSaved}
+                      onSaver={(fn) => (fn ? savers.current.set(tab.path, fn) : savers.current.delete(tab.path))}
+                    />
+                  ) : (
+                    <EmptyEditor />
+                  )}
+                </div>
+              );
+            })
           )}
         </div>
 
-        {/* Files panel on the right: search on top, tree (or results) below; Changes is the same panel's other face. */}
+        {/* Sidebar on the right: Files (tree or filter), Search, Changes, Review, All. */}
         {sidebar && (
           <section className="bg-muted/20 flex w-64 shrink-0 flex-col border-l" aria-label={filesTitle}>
+            {/* Five views do not fit as words in this width; each is an icon with its name in the tooltip. */}
             <div className="flex h-10 shrink-0 items-center gap-1 px-2">
               <AnimatedTabs
                 ariaLabel="Sidebar view"
-                value={view === "search" ? "explorer" : view}
+                value={view}
                 onChange={(v) => setView(v)}
                 items={[
-                  { value: "explorer", icon: <Files className="size-3.5" />, label: "Files" },
+                  { value: "explorer", icon: <Files className="size-3.5" />, label: <span className="sr-only">Files</span>, title: "Files" },
+                  { value: "search", icon: <SearchCode className="size-3.5" />, label: <span className="sr-only">Search</span>, title: `Search in files (${shortcutLabel("f")})` },
                   {
                     value: "scm",
                     icon: <GitBranch className="size-3.5" />,
-                    label: "Changes",
-                    badge: changes.length > 0 && <span className={cn("ml-0.5 rounded-full px-1.5 text-[9px] leading-4 font-semibold", view === "scm" ? "bg-live text-white" : "bg-live/20 text-live")}>{changes.length}</span>,
+                    label: <span className="sr-only">Changes</span>,
+                    title: "Changes",
+                    badge: changes.length > 0 && <span className={cn("rounded-full px-1.5 text-[9px] leading-4 font-semibold", view === "scm" ? "bg-live text-white" : "bg-live/20 text-live")}>{changes.length}</span>,
                   },
-                  { value: "review", icon: <FileDiff className="size-3.5" />, label: "Review" },
-                  { value: "records", icon: <Table2 className="size-3.5" />, label: "All" },
+                  { value: "review", icon: <FileDiff className="size-3.5" />, label: <span className="sr-only">Review</span>, title: "Review the whole run" },
+                  { value: "records", icon: <Table2 className="size-3.5" />, label: <span className="sr-only">All</span>, title: "All files" },
                 ]}
               />
               <button type="button" onClick={() => (view === "scm" || view === "review" ? loadGit() : void loadTree())} aria-label="Refresh" className="text-muted-foreground hover:text-foreground ml-auto grid size-7 cursor-pointer place-items-center rounded-md">
@@ -305,22 +455,65 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
               </button>
             </div>
             {view === "scm" || view === "review" ? (
-              <SourceControl session={session} repo={activeRepo} status={git} err={gitErr} reload={loadGit} changes={changes} active={view === "review" ? reviewFocus?.path ?? null : active} onOpen={(p) => (view === "review" ? setReviewFocus({ path: p, nonce: Date.now() }) : openPath(p, "diff"))} onChanged={onSaved} />
+              <SourceControl session={session} repo={activeRepo} status={git} err={gitErr} reload={loadGit} changes={changes} active={view === "review" ? (reviewFocus?.path ?? null) : active} onOpen={(p) => (view === "review" ? setReviewFocus({ path: p, nonce: Date.now() }) : openPath(p, { mode: "diff", preview: true }))} onChanged={onSaved} />
+            ) : view === "search" ? (
+              <SearchView session={session} active={active} onOpen={openPath} />
             ) : (
               <>
-                <label className="mx-2 mb-1 flex h-8 items-center gap-1.5 rounded-md border bg-card px-2 focus-within:ring-2 focus-within:ring-ring">
-                  <Search className="text-muted-foreground size-3.5" aria-hidden />
-                  <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search files" aria-label="Search files" className="text-foreground placeholder:text-muted-foreground min-w-0 flex-1 bg-transparent text-meta outline-none" />
-                  {query && (
-                    <button type="button" onClick={() => setQuery("")} aria-label="Clear" className="text-muted-foreground hover:text-foreground cursor-pointer">
-                      <X className="size-3.5" />
-                    </button>
-                  )}
-                </label>
+                <div className="mx-2 mb-1 flex items-center gap-1">
+                  <label className="bg-card focus-within:ring-ring flex h-8 min-w-0 flex-1 items-center gap-1.5 rounded-md border px-2 focus-within:ring-2">
+                    <Search className="text-muted-foreground size-3.5" aria-hidden />
+                    <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Filter files" aria-label="Filter files" className="text-foreground placeholder:text-muted-foreground min-w-0 flex-1 bg-transparent text-meta outline-none" />
+                    {query && (
+                      <button type="button" onClick={() => setQuery("")} aria-label="Clear" className="text-muted-foreground hover:text-foreground cursor-pointer">
+                        <X className="size-3.5" />
+                      </button>
+                    )}
+                  </label>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button type="button" onClick={revealActive} disabled={!active} aria-label="Reveal active file" className="text-muted-foreground hover:text-foreground hover:bg-muted grid size-7 shrink-0 cursor-pointer place-items-center rounded-md disabled:opacity-40">
+                        <Locate className="size-3.5" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">Reveal the active file</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button type="button" onClick={() => (setExpanded(new Set()), setEdit(null))} aria-label="Collapse all" className="text-muted-foreground hover:text-foreground hover:bg-muted grid size-7 shrink-0 cursor-pointer place-items-center rounded-md">
+                        <FoldVertical className="size-3.5" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">Collapse all folders</TooltipContent>
+                  </Tooltip>
+                </div>
                 {query.trim() ? (
                   <GoToFile paths={paths} query={query} active={active} changeByPath={changeByPath} onOpen={(p) => (openPath(p), setQuery(""))} />
                 ) : (
-                  <Explorer tree={tree} err={treeErr} expanded={expanded} setExpanded={setExpanded} active={active} changeByPath={changeByPath} onOpen={openPath} repos={repos} />
+                  <Explorer
+                    tree={tree}
+                    err={treeErr}
+                    expanded={expanded}
+                    focused={focusedRow}
+                    active={active}
+                    changeByPath={changeByPath}
+                    repos={repos}
+                    edit={edit}
+                    onEdit={setEdit}
+                    onFocus={setFocusedRow}
+                    onToggle={(dir, openIt) =>
+                      setExpanded((e) => {
+                        const s = new Set(e);
+                        const want = openIt ?? !s.has(dir);
+                        if (want) s.add(dir);
+                        else s.delete(dir);
+                        return s;
+                      })
+                    }
+                    onReveal={revealActive}
+                    onOpen={openPath}
+                    onFs={onFs}
+                  />
                 )}
               </>
             )}
@@ -340,84 +533,412 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
         )}
         <span>{changes.length} changed</span>
         {paths && <span>{paths.length} files</span>}
-        <span className="ml-auto">{activeTab ? languageOf(activeTab.path) : ""}</span>
-        {activeTab && <span className="tabular-nums">{activeTab.mode === "diff" ? "diff" : activeTab.saving === "saving" ? "Saving…" : activeTab.dirty ? "Unsaved" : activeTab.saving === "saved" ? "Saved" : "Autosave on"}</span>}
+        <button type="button" onClick={() => setQuickOpen("")} className="hover:bg-muted hover:text-foreground ml-auto flex cursor-pointer items-center gap-1 rounded px-1" aria-label="Quick open">
+          Go to file <Kbd className="h-4 min-w-4 text-[10px]">{shortcutLabel("p")}</Kbd>
+        </button>
+        {activeTab && <span>{languageOf(activeTab.path)}</span>}
+        {activeTab?.mode === "edit" && (
+          <button type="button" onClick={toggleWrap} aria-pressed={wrap} aria-label="Toggle word wrap" title={`Word wrap (${shortcutLabel("z")})`} className={cn("hover:bg-muted flex cursor-pointer items-center gap-1 rounded px-1", wrap && "text-foreground")}>
+            <WrapText className="size-3" aria-hidden />
+            {wrap ? "Wrap" : "No wrap"}
+          </button>
+        )}
+        {activeTab && <span className="tabular-nums">{activeTab.mode === "diff" ? "diff" : activeDoc?.saving === "saving" ? "Saving…" : activeDoc?.dirty ? "Unsaved" : activeDoc?.saving === "saved" ? "Saved" : "Autosave on"}</span>}
       </footer>
+
+      {quickOpen !== null && (
+        <QuickOpen
+          paths={paths}
+          recent={recent}
+          activePath={active}
+          initial={quickOpen}
+          onPick={(p, opts) => {
+            openPath(p, opts);
+            setQuickOpen(null);
+          }}
+          onClose={() => setQuickOpen(null)}
+        />
+      )}
     </motion.aside>
   );
 }
 
 /* ───────────────────────────── Explorer ───────────────────────────── */
 
-function Explorer({ tree, err, expanded, setExpanded, active, changeByPath, onOpen, repos }: { tree: Node | null; err: string | null; expanded: Set<string>; setExpanded: React.Dispatch<React.SetStateAction<Set<string>>>; active: string | null; changeByPath: Map<string, ChangedFile>; onOpen: (p: string) => void; repos: Repo[] }) {
+type MenuAction = "newFile" | "newDir" | "rename" | "delete" | "duplicate" | "copyPath" | "copyRelPath" | "openSide" | "reveal";
+
+function Explorer({ tree, err, expanded, focused, active, changeByPath, repos, edit, onEdit, onFocus, onToggle, onReveal, onOpen, onFs }: { tree: Node | null; err: string | null; expanded: Set<string>; focused: string | null; active: string | null; changeByPath: Map<string, ChangedFile>; repos: Repo[]; edit: RowEdit | null; onEdit: (e: RowEdit | null) => void; onFocus: (path: string | null) => void; onToggle: (dir: string, open?: boolean) => void; onReveal: () => void; onOpen: Open; onFs: (op: FsOp) => Promise<boolean> }) {
+  const rows = React.useMemo(() => (tree ? visibleRows(tree, expanded, edit) : null), [tree, expanded, edit]);
+  const listRef = React.useRef<HTMLUListElement>(null);
+  const [menuTarget, setMenuTarget] = React.useState<Row | null>(null);
+  const [dropDir, setDropDir] = React.useState<string | null>(null);
+  const dragSrc = React.useRef<string | null>(null);
+  const typed = React.useRef({ text: "", at: 0 });
+  const still = useReducedMotion();
+  // Rows fade in only for a small reveal; a big one reads as a jump and VS Code does not animate it either.
+  const prevLen = React.useRef(rows?.length ?? 0);
+  const delta = (rows?.length ?? 0) - prevLen.current;
+  prevLen.current = rows?.length ?? 0;
+  const animateRows = !still && delta !== 0 && Math.abs(delta) <= 40;
+
+  const changeCounts = React.useMemo(() => {
+    const m = new Map<string, number>();
+    for (const p of changeByPath.keys()) {
+      const parts = p.split("/");
+      for (let i = 1; i < parts.length; i++) {
+        const d = parts.slice(0, i).join("/");
+        m.set(d, (m.get(d) ?? 0) + 1);
+      }
+    }
+    return m;
+  }, [changeByPath]);
+
+  const focusIndex = rows && focused ? rows.findIndex((r) => r.path === focused && r.kind !== "edit") : -1;
+  // Keyboard moves land on the row element itself (roving tabindex), and keep it in view. Not while
+  // the inline edit input has focus: its row keeps the same data-path during the exit animation.
+  React.useEffect(() => {
+    const list = listRef.current;
+    if (!list || !focused || !list.contains(document.activeElement) || document.activeElement?.tagName === "INPUT") return;
+    const el = list.querySelector<HTMLElement>(`[data-path="${CSS.escape(focused)}"]`);
+    if (el && el !== document.activeElement) {
+      el.focus({ preventScroll: true });
+      el.scrollIntoView({ block: "nearest" });
+    }
+  }, [focused, rows]);
+
+  const moveTo = (i: number | null) => {
+    if (i === null || !rows || !rows[i]) return;
+    onFocus(rows[i].path);
+  };
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (!rows || rows.length === 0 || (e.target as HTMLElement).tagName === "INPUT") return;
+    const row = rows[focusIndex];
+    const k = e.key;
+    if (k === "ArrowUp" || k === "ArrowDown" || k === "Home" || k === "End" || k === "ArrowLeft" || k === "ArrowRight") {
+      e.preventDefault();
+      const target = treeKeyTarget(rows, focusIndex, k);
+      if (target !== null) return moveTo(target);
+      if (row?.kind === "dir") onToggle(row.path, k === "ArrowRight");
+      return;
+    }
+    if (!row || row.kind === "edit") return;
+    if (k === "Enter" || k === " ") {
+      e.preventDefault();
+      if (row.kind === "dir") onToggle(row.path);
+      else onOpen(row.path, { preview: k === " " });
+    } else if (k === "F2") {
+      e.preventDefault();
+      if (row.depth > 0) onEdit({ what: "rename", target: row.path });
+    } else if (k === "Delete" || k === "Backspace") {
+      e.preventDefault();
+      void act("delete", row);
+    } else if ((e.metaKey || e.ctrlKey) && k.toLowerCase() === "c") {
+      e.preventDefault();
+      void act(e.shiftKey ? "copyRelPath" : "copyPath", row);
+    } else if (k.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      const now = Date.now();
+      typed.current = { text: (now - typed.current.at < 600 ? typed.current.text : "") + k, at: now };
+      moveTo(typeAheadTarget(rows, focusIndex, typed.current.text));
+    }
+  };
+
+  const siblingsOf = (parent: string, except?: string) => new Set(childrenOf(tree!, parent).map((n) => n.name).filter((n) => n !== except));
+  const act = async (a: MenuAction, target: Row | null) => {
+    const t = target && target.kind !== "edit" ? target : null;
+    switch (a) {
+      case "newFile":
+      case "newDir": {
+        const parent = t ? (t.kind === "dir" ? t.path : parentOf(t.path)) : "";
+        if (parent) onToggle(parent, true);
+        onEdit({ what: a, parent });
+        return;
+      }
+      case "rename":
+        if (t && t.depth > 0) onEdit({ what: "rename", target: t.path });
+        return;
+      case "delete":
+        if (!t || t.depth === 0) return;
+        if (!window.confirm(`Delete ${t.kind === "dir" ? "folder" : "file"} "${t.name}"? This cannot be undone.`)) return;
+        await onFs({ op: "delete", path: t.path });
+        return;
+      case "duplicate": {
+        if (!t || t.depth === 0) return;
+        const taken = siblingsOf(parentOf(t.path));
+        const dot = t.kind === "file" ? t.name.lastIndexOf(".") : -1;
+        const stem = dot > 0 ? t.name.slice(0, dot) : t.name;
+        const ext = dot > 0 ? t.name.slice(dot) : "";
+        let name = `${stem} copy${ext}`;
+        for (let n = 2; taken.has(name); n++) name = `${stem} copy ${n}${ext}`;
+        await onFs({ op: "copy", path: t.path, to: `${parentOf(t.path)}/${name}` });
+        return;
+      }
+      case "copyPath":
+        if (t) void copyText(`/workspace/${t.path}`);
+        return;
+      case "copyRelPath":
+        if (t) void copyText(t.path.slice(t.path.indexOf("/") + 1));
+        return;
+      case "openSide":
+        if (t?.kind === "file") onOpen(t.path, { side: true });
+        return;
+      case "reveal":
+        onReveal();
+        return;
+    }
+  };
+  const commitEdit = async (row: Row & { kind: "edit" }, name: string | null) => {
+    onEdit(null);
+    if (name === null) return;
+    const e = row.edit;
+    if (e.what === "rename") {
+      const to = `${parentOf(e.target)}/${name}`;
+      if (to !== e.target) await onFs({ op: "move", path: e.target, to });
+    } else {
+      await onFs({ op: e.what === "newDir" ? "mkdir" : "create", path: e.parent ? `${e.parent}/${name}` : name });
+    }
+  };
+
+  // Native drag: a row onto a folder moves it. Its own folder, itself, or its subtree is a no-op.
+  const dropDirFor = (el: Element | null) => {
+    const r = rows?.find((x) => x.path === (el?.closest("[data-path]") as HTMLElement | null)?.dataset.path);
+    if (!r || r.kind === "edit") return null;
+    const dir = r.kind === "dir" ? r.path : parentOf(r.path);
+    const src = dragSrc.current;
+    if (!dir || !src || dir === src || dir === parentOf(src) || dir.startsWith(src + "/")) return null;
+    return dir;
+  };
+  const onDragOver = (e: React.DragEvent) => {
+    if (!hasDrag(e, "asb/path")) return;
+    const dir = dropDirFor(e.target as Element);
+    setDropDir(dir);
+    if (dir) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+    }
+  };
+  const onDrop = (e: React.DragEvent) => {
+    const src = readDrag(e, "asb/path")?.path ?? dragSrc.current;
+    const dir = dropDirFor(e.target as Element);
+    setDropDir(null);
+    dragSrc.current = null;
+    if (!src || !dir) return;
+    e.preventDefault();
+    void onFs({ op: "move", path: src, to: `${dir}/${baseOf(src)}` });
+  };
+
+  return (
+    <CM.Root onOpenChange={(o) => !o && setMenuTarget(null)}>
+      <CM.Trigger asChild>
+        <div
+          className="min-h-0 flex-1 overflow-auto pb-2"
+          onContextMenuCapture={(e) => {
+            const path = (e.target as HTMLElement).closest<HTMLElement>("[data-path]")?.dataset.path;
+            const row = rows?.find((r) => r.path === path && r.kind !== "edit") ?? null;
+            setMenuTarget(row);
+            if (row) onFocus(row.path);
+          }}
+        >
+          {err ? (
+            <p className="text-destructive px-3 py-2 text-micro">{err}</p>
+          ) : !rows ? (
+            <div className="flex flex-col gap-2.5 px-3 py-2">
+              {[0, 1, 2, 3, 4, 5, 6].map((i) => (
+                <span key={i} className="bg-muted h-3 animate-pulse rounded" style={{ width: `${50 + ((i * 23) % 40)}%`, marginLeft: `${(i % 3) * 12}px` }} />
+              ))}
+            </div>
+          ) : (
+            <ul ref={listRef} role="tree" aria-label="Files" className="relative outline-none" onKeyDown={onKeyDown} onDragOver={onDragOver} onDrop={onDrop} onDragLeave={(e) => !e.currentTarget.contains(e.relatedTarget as globalThis.Node | null) && setDropDir(null)}>
+              <AnimatePresence initial={false} custom={animateRows}>
+                {rows.map((row, i) => {
+                  if (row.kind === "edit") {
+                    return (
+                      <li key={`edit:${row.edit.what}:${row.path}`} role="treeitem" aria-level={row.depth + 1} className="relative flex h-[26px] items-center" style={{ paddingLeft: `${8 + row.depth * 12 + (row.edit.what === "newDir" ? 0 : 18)}px` }}>
+                        <Guides depth={row.depth} />
+                        <EditRow edit={row.edit} siblings={siblingsOf(row.edit.what === "rename" ? parentOf(row.edit.target) : row.edit.parent, row.edit.what === "rename" ? baseOf(row.edit.target) : undefined)} onDone={(name) => void commitEdit(row, name)} />
+                      </li>
+                    );
+                  }
+                  const isFocused = focused === row.path;
+                  const repo = row.kind === "dir" && row.depth === 0 ? repos.find((r) => r.name === row.name) : undefined;
+                  return (
+                    <motion.li
+                      key={row.path}
+                      custom={animateRows}
+                      variants={{ hidden: (anim: boolean) => (anim ? { opacity: 0, y: -3, transition: { duration: 0.12, ease: EASE } } : { opacity: 0, transition: { duration: 0 } }), shown: { opacity: 1, y: 0, transition: { duration: 0.16, ease: EASE } } }}
+                      initial="hidden"
+                      animate="shown"
+                      exit="hidden"
+                      role="treeitem"
+                      aria-level={row.depth + 1}
+                      aria-expanded={row.kind === "dir" ? row.expanded : undefined}
+                      aria-selected={isFocused}
+                      aria-current={active === row.path ? "true" : undefined}
+                      tabIndex={isFocused || (focusIndex < 0 && i === 0) ? 0 : -1}
+                      data-path={row.path}
+                      data-kind={row.kind}
+                      title={row.path}
+                      draggable={row.depth > 0}
+                      onDragStartCapture={(e) => {
+                        dragSrc.current = row.path;
+                        setDrag(e, "asb/path", { path: row.path });
+                      }}
+                      onDragEndCapture={() => {
+                        dragSrc.current = null;
+                        setDropDir(null);
+                      }}
+                      onFocus={() => !isFocused && onFocus(row.path)}
+                      onClick={() => {
+                        onFocus(row.path);
+                        if (row.kind === "dir") onToggle(row.path);
+                        else onOpen(row.path, { preview: true });
+                      }}
+                      onDoubleClick={() => row.kind === "file" && onOpen(row.path, { preview: false })}
+                      className={cn(
+                        "text-foreground relative isolate flex h-[26px] cursor-pointer items-center gap-1 pr-2 text-left text-meta outline-none transition-colors select-none",
+                        active !== row.path && "hover:bg-muted",
+                        isFocused && "focus-visible:ring-ring ring-inset focus-visible:ring-1",
+                        dropDir === row.path && "bg-live/15 ring-live ring-1 ring-inset"
+                      )}
+                      style={{ paddingLeft: `${8 + row.depth * 12 + (row.kind === "file" ? 18 : 0)}px` }}
+                    >
+                      <Guides depth={row.depth} />
+                      {active === row.path && <ActiveRow />}
+                      <RowView row={row} repo={repo} change={row.kind === "file" ? changeByPath.get(row.path) : undefined} changeCount={row.kind === "dir" ? (changeCounts.get(row.path) ?? 0) : 0} />
+                    </motion.li>
+                  );
+                })}
+              </AnimatePresence>
+            </ul>
+          )}
+        </div>
+      </CM.Trigger>
+      <ExplorerMenu target={menuTarget} onAction={(a) => void act(a, menuTarget)} />
+    </CM.Root>
+  );
+}
+
+/** One guide per ancestor level, so the lines run unbroken down a flat list of rows. */
+function Guides({ depth }: { depth: number }) {
+  if (depth === 0) return null;
   return (
     <>
-      <div className="min-h-0 flex-1 overflow-auto pb-2">
-        {err ? (
-          <p className="text-destructive px-3 py-2 text-micro">{err}</p>
-        ) : !tree ? (
-          <div className="flex flex-col gap-2.5 px-3 py-2">
-            {[0, 1, 2, 3, 4, 5, 6].map((i) => (
-              <span key={i} className="bg-muted h-3 animate-pulse rounded" style={{ width: `${50 + ((i * 23) % 40)}%`, marginLeft: `${(i % 3) * 12}px` }} />
-            ))}
-          </div>
-        ) : (
-          <TreeLevel node={tree} depth={0} expanded={expanded} setExpanded={setExpanded} active={active} changeByPath={changeByPath} onOpen={onOpen} repos={repos} />
-        )}
-      </div>
+      {Array.from({ length: depth }, (_, k) => (
+        <span key={k} className="bg-border absolute top-0 bottom-0 w-px" style={{ left: `${8 + k * 12 + 7}px` }} aria-hidden />
+      ))}
     </>
   );
 }
 
-function TreeLevel({ node, depth, expanded, setExpanded, active, changeByPath, onOpen, repos }: { node: Node; depth: number; expanded: Set<string>; setExpanded: React.Dispatch<React.SetStateAction<Set<string>>>; active: string | null; changeByPath: Map<string, ChangedFile>; onOpen: (p: string) => void; repos: Repo[] }) {
+function RowView({ row, repo, change, changeCount }: { row: Row & { kind: "dir" | "file" }; repo?: Repo; change?: ChangedFile; changeCount: number }) {
+  if (row.kind === "dir") {
+    return (
+      <>
+        <ChevronRight className={cn("text-muted-foreground size-3.5 shrink-0 transition-transform duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none", row.expanded && "rotate-90")} aria-hidden />
+        <FolderIcon name={row.name} open={row.expanded} />
+        <span className={cn("truncate", repo && "font-semibold")}>{row.name}</span>
+        {repo && (
+          <span className="stamp text-muted-foreground ml-1 flex min-w-0 items-center gap-0.5">
+            <GitBranch className="size-3 shrink-0" aria-hidden />
+            <span className="truncate">{repo.branch ?? "main"}</span>
+          </span>
+        )}
+        {changeCount > 0 && <span className="stamp text-attention-text ml-auto tabular-nums">{changeCount}</span>}
+      </>
+    );
+  }
+  const st = change ? STATUS_LETTER[change.status] : null;
   return (
-    <ul className="relative">
-      {/* Indent guide for this level */}
-      {depth > 0 && <span className="bg-border absolute top-0 bottom-0 w-px" style={{ left: `${8 + (depth - 1) * 12 + 7}px` }} aria-hidden />}
-      {sorted(node.children!).map((child) => {
-        if (child.children) {
-          const isOpen = expanded.has(child.path);
-          const repo = depth === 0 ? repos.find((r) => r.name === child.name) : undefined;
-          let n = 0;
-          for (const p of changeByPath.keys()) if (p.startsWith(child.path + "/")) n++;
-          return (
-            <li key={child.path}>
-              <button
-                type="button"
-                onClick={() =>
-                  setExpanded((e) => {
-                    const s = new Set(e);
-                    if (s.has(child.path)) s.delete(child.path);
-                    else s.add(child.path);
-                    return s;
-                  })
-                }
-                aria-expanded={isOpen}
-                className="hover:bg-muted text-foreground flex h-[26px] w-full cursor-pointer items-center gap-1 pr-2 text-left text-meta transition-colors"
-                style={{ paddingLeft: `${8 + depth * 12}px` }}
-              >
-                <ChevronRight className={cn("text-muted-foreground size-3.5 shrink-0 transition-transform duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none", isOpen && "rotate-90")} />
-                <FolderIcon name={child.name} open={isOpen} />
-                <span className={cn("truncate", repo && "font-semibold")}>{child.name}</span>
-                {repo && (
-                  <span className="stamp text-muted-foreground ml-1 flex items-center gap-0.5 truncate">
-                    <GitBranch className="size-3" aria-hidden />
-                    {repo.branch ?? "main"}
-                  </span>
-                )}
-                {n > 0 && <span className="stamp text-attention-text ml-auto tabular-nums">{n}</span>}
-              </button>
-              {isOpen && <TreeLevel node={child} depth={depth + 1} expanded={expanded} setExpanded={setExpanded} active={active} changeByPath={changeByPath} onOpen={onOpen} repos={repos} />}
-            </li>
-          );
-        }
-        return (
-          <li key={child.path}>
-            <FileRow path={child.path} depth={depth} active={active === child.path} change={changeByPath.get(child.path)} onOpen={() => onOpen(child.path)} />
-          </li>
-        );
-      })}
-    </ul>
+    <>
+      <FileIcon path={row.path} size={15} />
+      <span className={cn("truncate", change?.status === "deleted" && "line-through", st?.tone)}>{row.name}</span>
+      {st && <span className={cn("stamp ml-auto shrink-0 font-semibold", st.tone)}>{st.l}</span>}
+    </>
+  );
+}
+
+/** The inline input for a new file, a new folder or a rename. Enter commits, Escape cancels, a bad name is refused in place. */
+function EditRow({ edit, siblings, onDone }: { edit: RowEdit; siblings: ReadonlySet<string>; onDone: (name: string | null) => void }) {
+  const initial = edit.what === "rename" ? baseOf(edit.target) : "";
+  const [value, setValue] = React.useState(initial);
+  const [touched, setTouched] = React.useState(false);
+  const done = React.useRef(false);
+  const ref = React.useRef<HTMLInputElement>(null);
+  const error = touched || value ? invalidName(value, siblings) : null;
+  const unchanged = edit.what === "rename" && value === initial;
+  const finish = (name: string | null) => {
+    if (done.current) return;
+    done.current = true;
+    onDone(name);
+  };
+  React.useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.focus();
+    const dot = edit.what === "rename" ? initial.lastIndexOf(".") : -1;
+    el.setSelectionRange(0, dot > 0 ? dot : initial.length);
+  }, [edit.what, initial]);
+  return (
+    <div className="relative flex min-w-0 flex-1 items-center gap-1.5 pr-2">
+      {edit.what === "newDir" ? <FolderIcon name={value || "folder"} open={false} /> : <FileIcon path={value || "file"} size={15} />}
+      <input
+        ref={ref}
+        value={value}
+        onChange={(e) => (setValue(e.target.value), setTouched(true))}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            setTouched(true);
+            if (!error && !unchanged) finish(value);
+            else if (unchanged) finish(null);
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            finish(null);
+          }
+          e.stopPropagation();
+        }}
+        onBlur={() => finish(null)}
+        aria-label={edit.what === "rename" ? "New name" : edit.what === "newDir" ? "Folder name" : "File name"}
+        aria-invalid={!!error}
+        spellCheck={false}
+        className={cn("bg-card min-w-0 flex-1 rounded border px-1 text-meta outline-none focus:ring-1", error ? "border-destructive focus:ring-destructive" : "focus:ring-ring")}
+      />
+      {error && (
+        <span role="alert" className="bg-popover text-destructive shadow-e2 absolute top-full left-0 z-10 mt-0.5 max-w-full truncate rounded border px-1.5 py-0.5 text-micro">
+          {error}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function ExplorerMenu({ target, onAction }: { target: Row | null; onAction: (a: MenuAction) => void }) {
+  const t = target && target.kind !== "edit" ? target : null;
+  const isFile = t?.kind === "file";
+  const mutable = !!t && t.depth > 0;
+  const item = (a: MenuAction, label: string, icon: React.ReactNode, opts: { disabled?: boolean; destructive?: boolean; hint?: string } = {}) => (
+    <CM.Item disabled={opts.disabled} onSelect={() => onAction(a)} className={cn(MENU_ITEM, opts.destructive && MENU_ITEM_DESTRUCTIVE)}>
+      {icon}
+      {label}
+      {opts.hint && <MenuHint>{opts.hint}</MenuHint>}
+    </CM.Item>
+  );
+  return (
+    <CM.Portal>
+      <CM.Content collisionPadding={8} className={MENU_CONTENT} aria-label={t ? `${t.name} actions` : "Explorer actions"}>
+        {item("newFile", "New file", <FilePlus />)}
+        {item("newDir", "New folder", <FolderPlus />)}
+        <CM.Separator className={MENU_SEP} />
+        {item("openSide", "Open to the side", <Columns2 />, { disabled: !isFile, hint: shortcutLabel("\\") })}
+        {item("reveal", "Reveal active file", <Locate />)}
+        <CM.Separator className={MENU_SEP} />
+        {item("copyPath", "Copy path", <Copy />, { disabled: !t, hint: "⌘C" })}
+        {item("copyRelPath", "Copy relative path", <Copy />, { disabled: !t, hint: "⌘⇧C" })}
+        <CM.Separator className={MENU_SEP} />
+        {item("rename", "Rename", <Pencil />, { disabled: !mutable, hint: "F2" })}
+        {item("duplicate", "Duplicate", <CopyPlus />, { disabled: !mutable })}
+        {item("delete", "Delete", <Trash2 />, { disabled: !mutable, destructive: true, hint: "⌦" })}
+      </CM.Content>
+    </CM.Portal>
   );
 }
 
@@ -433,16 +954,16 @@ function ActiveRow({ glide = true }: { glide?: boolean }) {
   return <motion.span layoutId="ws-active-row" className="bg-accent absolute inset-0 -z-10" transition={{ type: "spring", stiffness: 520, damping: 42, mass: 0.7 }} aria-hidden />;
 }
 
-function FileRow({ path, depth, active, change, onOpen, showDir, glide }: { path: string; depth: number; active: boolean; change?: ChangedFile; onOpen: () => void; showDir?: boolean; glide?: boolean }) {
-  const base = path.slice(path.lastIndexOf("/") + 1);
-  const dir = path.slice(0, Math.max(0, path.lastIndexOf("/")));
+function FileRow({ path, active, change, onOpen, glide }: { path: string; active: boolean; change?: ChangedFile; onOpen: () => void; glide?: boolean }) {
+  const base = baseOf(path);
+  const dir = parentOf(path);
   const st = change ? STATUS_LETTER[change.status] : null;
   return (
-    <button type="button" onClick={onOpen} className={cn("text-foreground relative isolate flex h-[26px] w-full cursor-pointer items-center gap-1.5 pr-2 text-left text-meta transition-colors", !active && "hover:bg-muted")} style={{ paddingLeft: `${8 + depth * 12 + 18}px` }} title={path}>
+    <button type="button" onClick={onOpen} className={cn("text-foreground relative isolate flex h-[26px] w-full cursor-pointer items-center gap-1.5 px-3 text-left text-meta transition-colors", !active && "hover:bg-muted")} title={path}>
       {active && <ActiveRow glide={glide} />}
       <FileIcon path={path} size={15} />
       <span className={cn("truncate", change?.status === "deleted" && "line-through", st?.tone)}>{base}</span>
-      {showDir && dir && <span className="stamp text-muted-foreground truncate">{dir}</span>}
+      {dir && <span className="stamp text-muted-foreground truncate">{dir}</span>}
       {st && <span className={cn("stamp ml-auto shrink-0 font-semibold", st.tone)}>{st.l}</span>}
     </button>
   );
@@ -453,35 +974,249 @@ function FileRow({ path, depth, active, change, onOpen, showDir, glide }: { path
 function GoToFile({ paths, query: q, active, changeByPath, onOpen }: { paths: string[] | null; query: string; active: string | null; changeByPath: Map<string, ChangedFile>; onOpen: (p: string) => void }) {
   const [cursor, setCursor] = React.useState(0);
   const needle = q.trim().toLowerCase();
-  const matches = React.useMemo(() => {
-    if (!paths) return [];
-    if (!needle) return paths.slice(0, 60);
-    const score = (p: string) => {
-      const base = p.slice(p.lastIndexOf("/") + 1).toLowerCase();
-      if (base.startsWith(needle)) return 0;
-      if (base.includes(needle)) return 1;
-      if (p.toLowerCase().includes(needle)) return 2;
-      return 9;
-    };
-    return paths
-      .map((p) => [score(p), p] as const)
-      .filter(([s]) => s < 9)
-      .sort((a, b) => a[0] - b[0] || a[1].length - b[1].length)
-      .slice(0, 80)
-      .map(([, p]) => p);
-  }, [paths, needle]);
+  const matches = React.useMemo(() => (paths ? matchPaths(paths, needle) : []), [paths, needle]);
   React.useEffect(() => setCursor(0), [needle]);
   return (
+    <ul className="min-h-0 flex-1 overflow-auto pb-2">
+      {matches.map((p, i) => (
+        <li key={p}>
+          <FileRow path={p} active={active === p || i === cursor} change={changeByPath.get(p)} onOpen={() => onOpen(p)} glide={false} />
+        </li>
+      ))}
+      {paths && matches.length === 0 && <li className="text-muted-foreground px-3 py-2 text-micro">No file matches “{q.trim()}”.</li>}
+    </ul>
+  );
+}
+
+/* ───────────────────────────── Quick open ───────────────────────────── */
+
+/** ⌘P. Empty shows recent files, `:12` or `:12-20` jumps on the active tab, anything else matches paths. */
+function QuickOpen({ paths, recent, activePath, initial, onPick, onClose }: { paths: string[] | null; recent: string[]; activePath: string | null; initial: string; onPick: (path: string, opts: OpenOpts) => void; onClose: () => void }) {
+  const [q, setQ] = React.useState(initial);
+  const [cursor, setCursor] = React.useState(0);
+  const inputRef = React.useRef<HTMLInputElement>(null);
+  const line = parseLineQuery(q);
+  const mode: "recent" | "line" | "files" = line || q.trim().startsWith(":") ? "line" : q.trim() ? "files" : "recent";
+  const items = React.useMemo(() => (mode === "recent" ? recent.filter((p) => !paths || paths.includes(p)) : mode === "files" && paths ? matchPaths(paths, q, 40) : []), [mode, recent, paths, q]);
+  React.useEffect(() => setCursor(0), [q]);
+  // Focus goes back where it came from on close, so the pane keeps receiving its shortcuts.
+  React.useEffect(() => {
+    const prev = document.activeElement as HTMLElement | null;
+    const el = inputRef.current;
+    el?.focus();
+    el?.setSelectionRange(el.value.length, el.value.length);
+    return () => prev?.focus?.();
+  }, []);
+  const pick = (i: number) => {
+    if (mode === "line") {
+      if (line && activePath) onPick(activePath, { reveal: { ...line, nonce: Date.now() } });
+      return;
+    }
+    const p = items[i];
+    if (p) onPick(p, { preview: false });
+  };
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (items.length) setCursor((c) => (c + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      pick(cursor);
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      onClose();
+    }
+  };
+  const still = useReducedMotion();
+  return (
+    <div className="absolute inset-0 z-40" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
+      <motion.div
+        role="dialog"
+        aria-label="Quick open"
+        initial={still ? false : { opacity: 0, y: -6, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ duration: 0.16, ease: EASE }}
+        className="bg-popover text-popover-foreground shadow-e3 absolute top-3 left-1/2 flex w-[min(30rem,calc(100%-2rem))] -translate-x-1/2 flex-col overflow-hidden rounded-xl border"
+      >
+        <label className="flex h-10 items-center gap-2 border-b px-3">
+          <Search className="text-muted-foreground size-4" aria-hidden />
+          <input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={onKeyDown} placeholder="Go to file, or :line" aria-label="Go to file" spellCheck={false} className="text-foreground placeholder:text-muted-foreground min-w-0 flex-1 bg-transparent text-meta outline-none" />
+          <Kbd>Esc</Kbd>
+        </label>
+        {mode === "line" ? (
+          <p className="text-muted-foreground px-3 py-2.5 text-meta">
+            {!activePath ? "Open a file first." : line ? `Go to line ${line.from}${line.to !== line.from ? `–${line.to}` : ""} in ${baseOf(activePath)}` : "Type a line number, or a range like :10-20."}
+          </p>
+        ) : (
+          <ul role="listbox" aria-label={mode === "recent" ? "Recently opened" : "Matching files"} className="max-h-72 overflow-auto py-1">
+            {mode === "recent" && items.length > 0 && <li className="label text-faint px-3 pt-1 pb-0.5">Recently opened</li>}
+            {items.map((p, i) => (
+              <li key={p} role="option" aria-selected={i === cursor} onMouseEnter={() => setCursor(i)} onClick={() => pick(i)} className={cn("flex h-[26px] cursor-pointer items-center gap-1.5 px-3 text-meta", i === cursor && "bg-accent")}>
+                <FileIcon path={p} size={15} />
+                <span className="truncate">{baseOf(p)}</span>
+                <span className="stamp text-muted-foreground truncate">{parentOf(p)}</span>
+              </li>
+            ))}
+            {items.length === 0 && <li className="text-muted-foreground px-3 py-2 text-micro">{mode === "recent" ? "No recent files. Type to search." : `No file matches “${q.trim()}”.`}</li>}
+          </ul>
+        )}
+      </motion.div>
+    </div>
+  );
+}
+
+/* ───────────────────────────── Search in files ───────────────────────────── */
+
+function SearchView({ session, active, onOpen }: { session: string; active: string | null; onOpen: Open }) {
+  const [q, setQ] = React.useState("");
+  const [regex, setRegex] = React.useState(false);
+  const [caseSensitive, setCaseSensitive] = React.useState(false);
+  const [result, setResult] = React.useState<{ matches: SearchMatch[]; truncated: boolean } | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+  const [busy, setBusy] = React.useState(false);
+  const [collapsed, setCollapsed] = React.useState<Set<string>>(() => new Set());
+  const inputRef = React.useRef<HTMLInputElement>(null);
+  React.useEffect(() => inputRef.current?.focus(), []);
+
+  React.useEffect(() => {
+    const needle = q.trim();
+    if (!needle) {
+      setResult(null);
+      setError(null);
+      setBusy(false);
+      return;
+    }
+    const ctrl = new AbortController();
+    const t = window.setTimeout(() => {
+      setBusy(true);
+      api
+        .search(session, needle, { regex, caseSensitive }, ctrl.signal)
+        .then((r) => {
+          setResult(r);
+          setError(null);
+        })
+        .catch((e: unknown) => {
+          if (ctrl.signal.aborted) return;
+          setError(e instanceof Error ? e.message : String(e));
+        })
+        .finally(() => !ctrl.signal.aborted && setBusy(false));
+    }, 300);
+    return () => {
+      window.clearTimeout(t);
+      ctrl.abort();
+    };
+  }, [session, q, regex, caseSensitive]);
+
+  const matcher = React.useMemo(() => {
+    const needle = q.trim();
+    if (!needle) return null;
+    try {
+      return new RegExp(regex ? needle : needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), caseSensitive ? "" : "i");
+    } catch {
+      return null;
+    }
+  }, [q, regex, caseSensitive]);
+  const groups = React.useMemo(() => {
+    const m = new Map<string, SearchMatch[]>();
+    for (const hit of result?.matches ?? []) m.set(hit.path, [...(m.get(hit.path) ?? []), hit]);
+    return [...m];
+  }, [result]);
+  const toggle = (path: string) =>
+    setCollapsed((s) => {
+      const n = new Set(s);
+      if (n.has(path)) n.delete(path);
+      else n.add(path);
+      return n;
+    });
+  return (
     <>
-      <ul className="min-h-0 flex-1 overflow-auto pb-2">
-        {matches.map((p, i) => (
-          <li key={p}>
-            <FileRow path={p} depth={-1} active={active === p || i === cursor} change={changeByPath.get(p)} onOpen={() => onOpen(p)} showDir glide={false} />
-          </li>
-        ))}
-        {paths && matches.length === 0 && <li className="text-muted-foreground px-3 py-2 text-micro">No file matches “{q.trim()}”.</li>}
-      </ul>
+      <label className="bg-card focus-within:ring-ring mx-2 mb-1 flex h-8 items-center gap-1 rounded-md border px-2 focus-within:ring-2">
+        <input ref={inputRef} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search in files" aria-label="Search in files" spellCheck={false} className="text-foreground placeholder:text-muted-foreground min-w-0 flex-1 bg-transparent text-meta outline-none" />
+        {busy && <Loader2 className="text-muted-foreground size-3.5 animate-spin" aria-label="Searching" />}
+        <SearchToggle on={caseSensitive} onClick={() => setCaseSensitive((v) => !v)} label="Match case">
+          <CaseSensitive className="size-3.5" />
+        </SearchToggle>
+        <SearchToggle on={regex} onClick={() => setRegex((v) => !v)} label="Use regular expression">
+          <Regex className="size-3.5" />
+        </SearchToggle>
+      </label>
+      <div className="min-h-0 flex-1 overflow-auto pb-2" aria-live="polite" aria-busy={busy}>
+        {error ? (
+          <p className="text-destructive px-3 py-2 text-micro">{error}</p>
+        ) : !q.trim() ? (
+          <p className="text-muted-foreground px-3 py-2 text-micro">Type to search every file in the sandbox.</p>
+        ) : result && groups.length === 0 ? (
+          <p className="text-muted-foreground px-3 py-2 text-micro">No results for “{q.trim()}”.</p>
+        ) : (
+          result && (
+            <>
+              <p className="text-muted-foreground px-3 py-1 text-micro tabular-nums">
+                {result.matches.length} {result.matches.length === 1 ? "result" : "results"} in {groups.length} {groups.length === 1 ? "file" : "files"}
+              </p>
+              <ul>
+                {groups.map(([path, hits]) => {
+                  const open = !collapsed.has(path);
+                  return (
+                    <li key={path}>
+                      <button type="button" onClick={() => toggle(path)} aria-expanded={open} className="hover:bg-muted text-foreground flex h-[26px] w-full cursor-pointer items-center gap-1 px-2 text-left text-meta" title={path}>
+                        <ChevronRight className={cn("text-muted-foreground size-3.5 shrink-0 transition-transform duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none", open && "rotate-90")} aria-hidden />
+                        <FileIcon path={path} size={15} />
+                        <span className="truncate">{baseOf(path)}</span>
+                        <span className="stamp text-muted-foreground truncate">{parentOf(path)}</span>
+                        <span className="bg-muted text-muted-foreground ml-auto shrink-0 rounded-full px-1.5 text-[10px] leading-4 tabular-nums">{hits.length}</span>
+                      </button>
+                      {open && (
+                        <ul>
+                          {hits.map((h) => {
+                            const m = matcher?.exec(h.text);
+                            const text = h.text.trimStart();
+                            const off = h.text.length - text.length;
+                            const a = m ? Math.max(0, m.index - off) : -1;
+                            const b = m ? a + m[0].length : -1;
+                            return (
+                              <li key={`${h.path}:${h.line}`}>
+                                <button type="button" onClick={() => onOpen(h.path, { preview: true, reveal: { from: h.line, to: h.line, nonce: Date.now() } })} className={cn("relative isolate flex h-[26px] w-full cursor-pointer items-center gap-2 pr-2 pl-9 text-left font-mono text-micro", active === h.path ? "hover:bg-accent/60" : "hover:bg-muted")} title={`${h.path}:${h.line}`}>
+                                  <span className="text-faint w-7 shrink-0 text-right tabular-nums">{h.line}</span>
+                                  <span className="truncate">
+                                    {m && a >= 0 && b <= text.length ? (
+                                      <>
+                                        {text.slice(0, a)}
+                                        <mark className="bg-attention/35 text-foreground rounded-sm">{text.slice(a, b)}</mark>
+                                        {text.slice(b)}
+                                      </>
+                                    ) : (
+                                      text
+                                    )}
+                                  </span>
+                                </button>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+              {result.truncated && <p className="text-muted-foreground border-t px-3 py-1.5 text-micro">Showing the first {result.matches.length} results. Narrow the search to see the rest.</p>}
+            </>
+          )
+        )}
+      </div>
     </>
+  );
+}
+
+function SearchToggle({ on, onClick, label, children }: { on: boolean; onClick: () => void; label: string; children: React.ReactNode }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button type="button" onClick={onClick} aria-pressed={on} aria-label={label} className={cn("grid size-6 shrink-0 cursor-pointer place-items-center rounded", on ? "bg-live/15 text-live" : "text-muted-foreground hover:text-foreground hover:bg-muted")}>
+          {children}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{label}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -524,11 +1259,7 @@ function SourceControl({ session, repo, status, err, reload: load, changes, acti
   };
 
   if (!repo) {
-    return (
-      <>
-        <p className="text-muted-foreground px-3 py-2 text-micro">No repository is attached to this sandbox.</p>
-      </>
-    );
+    return <p className="text-muted-foreground px-3 py-2 text-micro">No repository is attached to this sandbox.</p>;
   }
   return (
     <>
@@ -590,8 +1321,8 @@ function SourceControl({ session, repo, status, err, reload: load, changes, acti
         {repoChanges.length === 0 && <li className="text-muted-foreground px-3 py-2 text-micro">Working tree clean.</li>}
         {repoChanges.map((c) => {
           const rel = c.path.slice(repo.name.length + 1);
-          const base = rel.slice(rel.lastIndexOf("/") + 1);
-          const dir = rel.slice(0, Math.max(0, rel.lastIndexOf("/")));
+          const base = baseOf(rel);
+          const dir = parentOf(rel);
           const st = STATUS_LETTER[c.status];
           return (
             <li key={c.path}>
@@ -625,6 +1356,128 @@ function SourceControl({ session, repo, status, err, reload: load, changes, acti
   );
 }
 
+/* ───────────────────────────── Tabs ───────────────────────────── */
+
+function TabStrip({ group, state, focused, dirty, dispatch, onClose }: { group: 0 | 1; state: TabGroup; focused: boolean; dirty: ReadonlySet<string>; dispatch: (a: TabAction) => void; onClose: (path: string) => void }) {
+  const still = useReducedMotion();
+  const [menuPath, setMenuPath] = React.useState<string | null>(null);
+  const [dropAt, setDropAt] = React.useState<number | null>(null);
+  const tabFrom = (el: Element | null) => (el?.closest("[data-tab]") as HTMLElement | null)?.dataset.tab;
+  const indexFor = (e: React.DragEvent) => {
+    const el = (e.target as Element).closest<HTMLElement>("[data-tab]");
+    if (!el) return state.tabs.length;
+    const i = state.tabs.findIndex((t) => t.path === el.dataset.tab);
+    const r = el.getBoundingClientRect();
+    return i + (e.clientX > r.left + r.width / 2 ? 1 : 0);
+  };
+  const menuTab = state.tabs.find((t) => t.path === menuPath) ?? null;
+  const item = (label: string, onSelect: () => void, opts: { disabled?: boolean; hint?: string } = {}) => (
+    <CM.Item disabled={opts.disabled} onSelect={onSelect} className={MENU_ITEM}>
+      {label}
+      {opts.hint && <MenuHint>{opts.hint}</MenuHint>}
+    </CM.Item>
+  );
+  const many = (which: "others" | "right" | "all" | "saved") => menuPath !== null && dispatch({ type: "closeMany", group, which, path: menuPath, dirty });
+  return (
+    <CM.Root onOpenChange={(o) => !o && setMenuPath(null)}>
+      <CM.Trigger asChild>
+        <div
+          role="tablist"
+          aria-label={`Editor group ${group + 1}`}
+          className="scrollbar-none relative flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto px-2"
+          onContextMenuCapture={(e) => setMenuPath(tabFrom(e.target as Element) ?? null)}
+          onDragOver={(e) => {
+            if (!hasDrag(e, "asb/tab")) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            setDropAt(indexFor(e));
+          }}
+          onDragLeave={(e) => !e.currentTarget.contains(e.relatedTarget as globalThis.Node | null) && setDropAt(null)}
+          onDrop={(e) => {
+            const from = readDrag(e, "asb/tab");
+            setDropAt(null);
+            if (!from) return;
+            e.preventDefault();
+            dispatch({ type: "move", from, to: { group, index: indexFor(e) } });
+          }}
+        >
+          {state.tabs.map((t, i) => {
+            const on = t.path === state.active;
+            const base = baseOf(t.path);
+            const isDirty = dirty.has(t.path);
+            return (
+              <div
+                key={t.path}
+                role="tab"
+                aria-selected={on}
+                data-tab={t.path}
+                data-preview={t.preview || undefined}
+                draggable
+                onDragStart={(e) => setDrag(e, "asb/tab", { group, path: t.path })}
+                onClick={() => dispatch({ type: "activate", group, path: t.path })}
+                onDoubleClick={() => dispatch({ type: "pin", path: t.path })}
+                onMouseDown={(e) => e.button === 1 && e.preventDefault()}
+                onAuxClick={(e) => e.button === 1 && onClose(t.path)}
+                className={cn("group relative flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-md pr-1 pl-2 text-meta transition-colors select-none", on && focused ? "text-foreground" : on ? "text-foreground/80" : "text-muted-foreground hover:text-foreground hover:bg-muted/60")}
+                title={t.path}
+              >
+                {dropAt === i && <span className="bg-live absolute inset-y-1 -left-0.5 w-0.5 rounded-full" aria-hidden />}
+                {/* The active tab's pill glides between tabs (shared layoutId per group); an underline
+                    rides along its bottom edge so the active file reads even where the pill is faint. */}
+                {on && (
+                  <motion.span layoutId={`ws-active-tab-${group}`} className={cn("absolute inset-0 -z-10 rounded-md", focused ? "bg-muted" : "bg-muted/50")} transition={still ? { duration: 0 } : SPRING} aria-hidden>
+                    <span className={cn("absolute inset-x-2 bottom-0 h-px rounded-full", focused ? "bg-foreground/70" : "bg-foreground/30")} />
+                  </motion.span>
+                )}
+                <span className="flex items-center gap-1.5">
+                  <FileIcon path={t.path} size={14} />
+                  <span className={cn("text-micro", t.preview && "italic")}>{base}</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onClose(t.path);
+                  }}
+                  aria-label={`Close ${base}`}
+                  className={cn("text-muted-foreground hover:text-foreground hover:bg-background grid size-5 cursor-pointer place-items-center rounded", !isDirty && !on && "opacity-0 group-hover:opacity-100 focus-visible:opacity-100")}
+                >
+                  {isDirty ? <span className="bg-foreground block size-2 rounded-full" aria-label="unsaved" /> : <X className="size-3" />}
+                </button>
+              </div>
+            );
+          })}
+          {dropAt === state.tabs.length && state.tabs.length > 0 && <span className="bg-live h-5 w-0.5 shrink-0 rounded-full" aria-hidden />}
+          {state.tabs.length === 0 && <span className="text-muted-foreground px-1 text-micro">No file open</span>}
+        </div>
+      </CM.Trigger>
+      <CM.Portal>
+        <CM.Content collisionPadding={8} className={MENU_CONTENT} aria-label="Tab actions">
+          {item("Close", () => menuPath && onClose(menuPath), { disabled: !menuTab, hint: shortcutLabel("w") })}
+          {item("Close others", () => many("others"), { disabled: !menuTab || state.tabs.length < 2 })}
+          {item("Close to the right", () => many("right"), { disabled: !menuTab || state.tabs[state.tabs.length - 1]?.path === menuPath })}
+          {item("Close saved", () => many("saved"), { disabled: state.tabs.length === 0 })}
+          {item("Close all", () => many("all"), { disabled: state.tabs.length === 0 })}
+          <CM.Separator className={MENU_SEP} />
+          <CM.Item disabled={!menuTab?.preview} onSelect={() => menuPath && dispatch({ type: "pin", path: menuPath })} className={MENU_ITEM}>
+            <Pin />
+            Keep open
+          </CM.Item>
+          <CM.Item disabled={!menuTab} onSelect={() => menuPath && dispatch({ type: "open", path: menuPath, opts: { side: true, mode: menuTab?.mode } })} className={MENU_ITEM}>
+            <Columns2 />
+            Open to the side
+            <MenuHint>{shortcutLabel("\\")}</MenuHint>
+          </CM.Item>
+          <CM.Item disabled={!menuTab} onSelect={() => menuPath && void copyText(`/workspace/${menuPath}`)} className={MENU_ITEM}>
+            <Copy />
+            Copy path
+          </CM.Item>
+        </CM.Content>
+      </CM.Portal>
+    </CM.Root>
+  );
+}
+
 /* ───────────────────────────── Editor ───────────────────────────── */
 
 function EmptyEditor() {
@@ -638,17 +1491,18 @@ function EmptyEditor() {
         ))}
       </div>
       <p>Open a file from the Explorer, jump with Go to file, or pick a change in Source Control.</p>
-      <p className="text-micro opacity-70">Diff · File · Edit — ⌘S saves into the sandbox</p>
+      <p className="text-micro opacity-70">
+        <Kbd>{shortcutLabel("p")}</Kbd> go to file · <Kbd>{shortcutLabel("f")}</Kbd> search · ⌘S saves into the sandbox
+      </p>
     </div>
   );
 }
 
-function FileView({ session, tab, change, onMode, onDraft, onSaving, onSaved }: { session: string; tab: Tab; change?: ChangedFile; onMode: (m: Tab["mode"]) => void; onDraft: (d: string, dirty: boolean) => void; onSaving: (s: Tab["saving"]) => void; onSaved: () => void }) {
+function FileView({ session, tab, doc, tree, change, wrap, onMode, onDoc, onPin, onOpen, onSaved, onSaver }: { session: string; tab: Tab; doc: Doc; tree: Node | null; change?: ChangedFile; wrap: boolean; onMode: (m: Tab["mode"]) => void; onDoc: (p: Partial<Doc>) => void; onPin: () => void; onOpen: Open; onSaved: () => void; onSaver: (fn: (() => Promise<string | null>) | null) => void }) {
   const [diff, setDiff] = React.useState<ParsedDiff | null>(null);
   const [content, setContent] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
-  const [saving, setSaving] = React.useState(false);
   const mode = tab.mode;
   // Accept / reject per hunk, as in Review all; a reject refreshes the changes list.
   const review = useHunkReview(session, tab.path, diff, { onDiscarded: onSaved });
@@ -694,45 +1548,52 @@ function FileView({ session, tab, change, onMode, onDraft, onSaving, onSaved }: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, tab.path, mode]);
 
-  const draft = tab.draft ?? content ?? "";
+  const draft = doc.draft ?? content ?? "";
+  const saving = doc.saving === "saving";
   // Autosave, the way an editor does it: a short pause after the last keystroke writes the file back
-  // into the sandbox. No Save button; ⌘S just saves immediately. The status bar shows Saving/Saved.
-  const latest = React.useRef({ draft, dirty: !!tab.dirty, saving: false });
-  latest.current = { draft, dirty: !!tab.dirty, saving };
-  const save = React.useCallback(async () => {
+  // into the sandbox. No Save button; ⌘S just saves immediately. The draft lives in the shared Doc, so
+  // the same file open in both groups has one draft and one save at a time.
+  const latest = React.useRef({ draft, dirty: doc.dirty, saving });
+  latest.current = { draft, dirty: doc.dirty, saving };
+  const save = React.useCallback(async (): Promise<string | null> => {
     const cur = latest.current;
-    if (!cur.dirty || cur.saving) return;
-    setSaving(true);
-    onSaving("saving");
+    if (!cur.dirty || cur.saving) return null;
+    latest.current.saving = true;
+    onDoc({ saving: "saving" });
     try {
       await api.writeFile(session, tab.path, cur.draft);
       setContent(cur.draft);
       setDiff(null);
-      onDraft(cur.draft, false);
-      onSaving("saved");
+      onDoc({ draft: cur.draft, dirty: false, saving: "saved" });
       onSaved();
+      return null;
     } catch (e) {
-      onSaving(undefined);
-      toast.error("Could not save", { description: e instanceof Error ? e.message : String(e) });
-    } finally {
-      setSaving(false);
+      onDoc({ saving: undefined });
+      return e instanceof Error ? e.message : String(e);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, tab.path]);
   React.useEffect(() => {
-    if (!tab.dirty) return;
-    const t = window.setTimeout(() => void save(), 900);
+    if (!doc.dirty) return;
+    const t = window.setTimeout(() => void save().then((err) => err && toast.error("Could not save", { description: err })), 900);
     return () => window.clearTimeout(t);
-  }, [draft, tab.dirty, save]);
-  // Leaving the tab (or the pane) with unsaved text flushes it.
-  React.useEffect(() => () => void save(), [save]);
+  }, [draft, doc.dirty, save]);
+  React.useEffect(() => {
+    onSaver(save);
+    // Leaving the view (or the pane) with unsaved text flushes it.
+    return () => {
+      onSaver(null);
+      void save();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [save]);
   const download = async () => {
     try {
       const blob = await api.artifactBlob(session, tab.path);
       const href = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = href;
-      a.download = tab.path.slice(tab.path.lastIndexOf("/") + 1);
+      a.download = baseOf(tab.path);
       a.click();
       setTimeout(() => URL.revokeObjectURL(href), 10_000);
     } catch (e) {
@@ -740,15 +1601,14 @@ function FileView({ session, tab, change, onMode, onDraft, onSaving, onSaved }: 
     }
   };
 
-  const segs = tab.path.split("/");
-  const base = segs[segs.length - 1];
+  const base = baseOf(tab.path);
   const deleted = change?.status === "deleted";
 
   return (
     <>
       {/* Breadcrumbs + mode + actions */}
       <div className="flex h-9 shrink-0 items-center gap-2 border-b px-3">
-        <Breadcrumb path={tab.path} />
+        <Breadcrumb path={tab.path} tree={tree} onOpen={onOpen} />
         {change && (
           <span className="stamp flex shrink-0 items-center gap-1.5 pr-1">
             {change.additions > 0 && <span className="text-ok">+{change.additions}</span>}
@@ -766,8 +1626,8 @@ function FileView({ session, tab, change, onMode, onDraft, onSaving, onSaved }: 
             ]}
           />
         )}
-        <span className={cn("stamp w-14 text-right transition-colors", saving ? "text-muted-foreground" : tab.dirty ? "text-attention-text" : "text-faint")} aria-live="polite">
-          {saving ? "saving…" : tab.dirty ? "unsaved" : tab.saving === "saved" ? "saved" : ""}
+        <span className={cn("stamp w-14 text-right transition-colors", saving ? "text-muted-foreground" : doc.dirty ? "text-attention-text" : "text-faint")} aria-live="polite">
+          {saving ? "saving…" : doc.dirty ? "unsaved" : doc.saving === "saved" ? "saved" : ""}
         </span>
         <Button variant="ghost" size="icon-sm" onClick={download} aria-label="Download" disabled={deleted}>
           <Download />
@@ -789,7 +1649,19 @@ function FileView({ session, tab, change, onMode, onDraft, onSaving, onSaved }: 
           deleted ? (
             <p className="text-muted-foreground px-4 py-6 text-meta">This file was deleted in the working tree; see the diff.</p>
           ) : (
-            <CodeEditor value={draft} onChange={(v) => onDraft(v, v !== content)} onSave={() => void save()} path={tab.path} ariaLabel={`Edit ${base}`} autoFocus reveal={tab.reveal} />
+            <CodeEditor
+              value={draft}
+              onChange={(v) => {
+                onDoc({ draft: v, dirty: v !== content });
+                if (tab.preview) onPin();
+              }}
+              onSave={() => void save().then((err) => err && toast.error("Could not save", { description: err }))}
+              path={tab.path}
+              ariaLabel={`Edit ${base}`}
+              autoFocus
+              reveal={tab.reveal}
+              wrap={wrap}
+            />
           )
         ) : null}
       </div>
@@ -797,26 +1669,79 @@ function FileView({ session, tab, change, onMode, onDraft, onSaving, onSaved }: 
   );
 }
 
-/** A path as a quiet trail: folders in the muted colour, the file with its icon in the foreground. The middle collapses first. */
-function Breadcrumb({ path }: { path: string }) {
+/**
+ * A path as a quiet trail: folders in the muted colour, the file with its icon in the foreground. The
+ * middle collapses first. Each segment drops down its siblings; a folder in the list unfolds further.
+ */
+function Breadcrumb({ path, tree, onOpen }: { path: string; tree: Node | null; onOpen: Open }) {
   const segs = path.split("/");
-  const file = segs[segs.length - 1];
-  const dirs = segs.slice(0, -1);
-  const shown = dirs.length > 4 ? [dirs[0], "…", ...dirs.slice(-2)] : dirs;
+  const dirs = segs.slice(0, -1).map((name, i) => ({ name, path: segs.slice(0, i + 1).join("/") }));
+  const shown: { name: string; path: string | null }[] = dirs.length > 4 ? [dirs[0], { name: "…", path: null }, ...dirs.slice(-2)] : dirs;
   return (
     <nav aria-label="Breadcrumb" className="@container flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-meta" title={path}>
       {/* Folders are shown only when the header is wide enough to show them whole; below that the
           trail is just the file (the full path stays in the tooltip). Never a row of chopped words. */}
       {shown.map((d, i) => (
-        <React.Fragment key={i}>
-          <span className={cn("text-muted-foreground hidden shrink-0 @min-[460px]:inline", d === "…" && "tracking-widest", i < shown.length - 1 && "@min-[460px]:hidden @min-[640px]:inline")}>{d}</span>
+        <React.Fragment key={d.path ?? i}>
+          <Segment seg={d} current={d.path ?? ""} tree={tree} onOpen={onOpen} className={cn("text-muted-foreground hidden shrink-0 @min-[460px]:inline", d.path === null && "tracking-widest", i < shown.length - 1 && "@min-[460px]:hidden @min-[640px]:inline")}>
+            {d.name}
+          </Segment>
           <ChevronRight className={cn("text-faint hidden size-3 shrink-0 @min-[460px]:inline", i < shown.length - 1 && "@min-[460px]:hidden @min-[640px]:inline")} aria-hidden />
         </React.Fragment>
       ))}
-      <span className="text-foreground flex shrink-0 items-center gap-1.5 font-medium">
+      <Segment seg={{ name: baseOf(path), path }} current={path} tree={tree} onOpen={onOpen} className="text-foreground flex shrink-0 items-center gap-1.5 font-medium">
         <FileIcon path={path} size={14} />
-        <span className="max-w-[16rem] truncate">{file}</span>
-      </span>
+        <span className="max-w-[16rem] truncate">{baseOf(path)}</span>
+      </Segment>
     </nav>
+  );
+}
+
+/** One breadcrumb segment: a dropdown of its siblings, or plain text while the tree is still loading. */
+function Segment({ seg, current, tree, onOpen, className, children }: { seg: { name: string; path: string | null }; current: string; tree: Node | null; onOpen: Open; className: string; children: React.ReactNode }) {
+  if (!tree || !seg.path) return <span className={className}>{children}</span>;
+  const siblings = childrenOf(tree, parentOf(seg.path));
+  return (
+    <DM.Root>
+      <DM.Trigger className={cn(className, "hover:text-foreground data-[state=open]:text-foreground cursor-pointer rounded px-0.5 outline-none hover:bg-muted focus-visible:ring-1 focus-visible:ring-ring")} aria-label={`${seg.name}: siblings`}>
+        {children}
+      </DM.Trigger>
+      <DM.Portal>
+        <DM.Content align="start" sideOffset={6} collisionPadding={8} className={cn(MENU_CONTENT, "max-h-80 overflow-auto")}>
+          {siblings.map((n) => (
+            <DirItem key={n.path} node={n} current={current} onOpen={onOpen} />
+          ))}
+        </DM.Content>
+      </DM.Portal>
+    </DM.Root>
+  );
+}
+
+/** One breadcrumb menu entry: a file opens, a folder unfolds into a submenu. */
+function DirItem({ node, current, onOpen }: { node: Node; current: string; onOpen: Open }) {
+  const on = node.path === current || current.startsWith(node.path + "/");
+  if (!node.children) {
+    return (
+      <DM.Item onSelect={() => onOpen(node.path, { preview: true })} className={cn(MENU_ITEM, on && "bg-accent/60")} aria-current={on || undefined}>
+        <FileIcon path={node.path} size={15} />
+        <span className="truncate">{node.name}</span>
+      </DM.Item>
+    );
+  }
+  return (
+    <DM.Sub>
+      <DM.SubTrigger className={cn(MENU_ITEM, on && "bg-accent/60")}>
+        <FolderIcon name={node.name} open={on} />
+        <span className="truncate">{node.name}</span>
+        <ChevronRight className="ml-auto size-3.5" aria-hidden />
+      </DM.SubTrigger>
+      <DM.Portal>
+        <DM.SubContent sideOffset={4} collisionPadding={8} className={cn(MENU_CONTENT, "max-h-80 overflow-auto")}>
+          {childrenOf(node, "").map((n) => (
+            <DirItem key={n.path} node={n} current={current} onOpen={onOpen} />
+          ))}
+        </DM.SubContent>
+      </DM.Portal>
+    </DM.Sub>
   );
 }
