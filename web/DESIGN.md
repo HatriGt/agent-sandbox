@@ -746,3 +746,53 @@ no new detail was taken from them beyond what this file already records.
 - Only recorded facts. Unknown or empty rows are dropped: no "—", no "$ —", no "no questions asked", no "exit 0" when tests or verify already speak. A digest headline that just says "done" is dropped so the state is said once.
 - The pill also absorbs `RunSummary`: its steps/commands go in a "work" row, its exit-code note in "note", and Copy transcript / Run again are the last row of the details (`[data-run-pill-actions]`). Nothing else renders at run end.
 - History keeps `OutcomeCard`/`DigestCard`; the data (`/history/outcome.json`, `/digest.json`) is unchanged.
+
+## Round: two-row chrome (2026-10-22)
+
+Was: four rows above the conversation. A 44px top bar (sidebar toggle, breadcrumb trail, search,
+working/need-you pill), a 36px tab strip, then a two-line masthead (state pill, title, Stop, Files,
+Inspector, Side chat, Chat/Trace, ⋯ on line one; machine name, vitals, every repo chip, PR, Started,
+elapsed, agent, lifecycle, size on line two). 160px at 1440x900, measured from the viewport top to the
+masthead's bottom edge. The second masthead line repeated what the sidebar, the status bar and the
+trace already say, every run, whether or not anyone was asking.
+
+Now: two rows, 88px at 1440x900 (shell bar 40 + masthead 48; 92px on a 390 phone, where the phone
+bar is 44).
+
+- **One shell bar** (`ShellTabs.tsx` → `ShellBar`, `TopBar.tsx` folded in). h-10, `bg-sidebar`, md+.
+  `[sidebar toggle] [Home] [open tabs, scroll sideways] … [⌘K search, w-56] [working · need-you]`. Tab
+  routes (box, PR, automation runs) no longer draw a breadcrumb trail because the active tab is the
+  breadcrumb. A route that is neither a tab nor the hub (History, Admin, a repo) renders its crumbs as
+  one non-closable **page tab** after Home: parents muted and clickable, the last crumb in the
+  foreground colour, chevrons between, the same `layoutId` underline. `crumbs` in `App.tsx` stays the
+  single data source; the bar only decides whether to show it (`pageTab = !homeActive && !activeKey`).
+  Alt+W / Alt+[ / Alt+], middle-click close, live and attention dots, `gone` dimming and the
+  NumberTicker are unchanged.
+- **One masthead line** (`thread/ThreadHeader.tsx`). h-12, px-5 on a desk:
+  `[← phones] [state pill] [title, takes the slack, floor 12rem at lg] [PR · clock at xl, first repo
+  +N from 2xl] [Details] [Stop · Files · Inspector · Side chat · Chat/Trace · ⋯]`. The title is the
+  identity, so it is the only thing that shrinks. The cluster never shrinks; a chip that ellipsises to
+  "ord" is worse than no chip, so each piece has a breakpoint where it fits whole. The arithmetic at
+  1280 (1008px inside the padding): pill 121 + title floor 192 + controls 383 + gaps 32 leaves 280,
+  enough for PR + clock but not the repo chip as well. At 1536 the branch chip joins. Below xl the
+  cluster is gone and Details is the only place for meta.
+- **"Working · Writing"**: the live activity moved into the state pill's label at xl+ (`Swap`,
+  `max-w-[28ch] truncate`, full text in the pill's tooltip; `thread/live-activity.ts` reads the tail
+  of the trace). Below xl the pill says "Working". The agent's current step was the one thing on the
+  old second line worth keeping in view, and it belongs to the state, not to the metadata.
+- **Details** is an `Info` icon button (tooltip "Details — machine, repositories, timing", Tab
+  reachable, Esc closes). A popover on a desk (`ui/popover.tsx`, new, same elevation and motion as
+  `ui/dropdown-menu.tsx`: `shadow-e3`, zoom-in-95 over 150ms), a bottom Sheet on a phone where the
+  trigger lives in the ⋯ menu's first row. Inside, top to bottom: machine friendly name with the kept
+  pin, the mono short id (click copies, IconSwap Copy→Check), the vitals line (up · cpu · memory ·
+  disk · role), then a `dl` of Repos (every chip, "Attach another" opens the same RepoPicker as the ⋯
+  menu), PR, Started HH:MM with the live elapsed, Agent with harness or playbook, Lifecycle (last
+  action or finished, and the deadline), Size (memory and disk tiers, read-only, "resize from ⋯").
+- **Inspector and Side chat are icon-only** at every width (tooltips and aria-labels carry the names).
+  Stop, Files and Chat/Trace keep their labels from sm; Files folds into ⋯ below md. A deadline under
+  five minutes stays inline next to the controls in the attention colour, because that one is urgent.
+- Motion: nothing cuts. The pill's activity swaps through `Swap`, the id chip's icon through
+  `IconSwap`, the popover zooms from its trigger, the title still crossfades into the rename input.
+
+Rule: chrome shows identity and state; everything else waits in Details. A second line is not a place
+to park facts.

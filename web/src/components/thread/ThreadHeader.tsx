@@ -1,12 +1,18 @@
 import * as React from "react";
-import { ArrowLeft, Check, FileText, FolderTree, HardDrive, Link2, ListTree, Loader2, MemoryStick, MessageCircleQuestion, MessageSquareText, Moon, MoreHorizontal, PanelRight, Pencil, Pin, PinOff, Plus, RotateCw, Square, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, Copy, FileText, FolderTree, HardDrive, Info, Link2, ListTree, Loader2, MemoryStick, MessageCircleQuestion, MessageSquareText, Moon, MoreHorizontal, PanelRight, Pencil, Pin, PinOff, Plus, RotateCw, Square, Trash2 } from "lucide-react";
 import { Swap } from "@/components/ui/swap";
+import { IconSwap } from "@/components/ui/icon-swap";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { AnimatePresence, motion } from "motion/react";
 import { useReducedMotion } from "@/lib/motion-pref";
 import { menuMotion } from "./MentionMenu";
 import { toast } from "sonner";
 import type { BoxView } from "@/lib/api";
-import { fmtAgo, friendlyName, isFailedExit, roleLabel, shortName } from "@/lib/format";
+import type { TraceEvent } from "@/lib/trace";
+import { liveActivity } from "./live-activity";
+import { fmtAgo, friendlyName, isFailedExit, roleLabel } from "@/lib/format";
 import { deadlineLabel, deadlineShort, fmtDuration, fmtUsage, type Deadline, type DisplayState } from "@/lib/lifecycle";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -18,15 +24,15 @@ import { cn } from "@/lib/utils";
 import { useNow } from "@/hooks/useNow";
 
 /**
- * The thread's masthead: one block, two lines.
+ * The thread's masthead: one line, 48px.
  *
- *   line 1 — the Orbit task line: a mono id chip, the live state pill, the title, and the controls:
- *            Stop (while a turn runs), Files, and a ⋯ menu holding everything else.
- *   line 2 — meta separated by hairlines: machine · repos · PR · Started HH:MM · elapsed (ticking while
- *            running, frozen once done) · agent/harness, and while the agent works, what it is doing.
+ *   [back · phones] [state pill, "Working · Editing retry.ts" at xl+] [title, takes the slack]
+ *   [PR · elapsed at xl, first repo +N from 2xl] [Details] [Stop · Files · Inspector · Side chat · Chat/Trace · ⋯]
  *
- * Telemetry lives in the machine name's tooltip; the loud red button lives inside the confirm dialog,
- * where destroying genuinely is the primary action.
+ * Details is a popover with everything that is not the identity: machine name, id and vitals, kept,
+ * every repo and the attach flow, PR, Started/elapsed, agent/harness, lifecycle, size. Below lg it is
+ * the only place for meta. The loud red button lives inside the confirm dialog, where destroying
+ * genuinely is the primary action.
  */
 export function ThreadHeader({
   box,
@@ -72,6 +78,7 @@ export function ThreadHeader({
   onDestroy,
   onCopyTranscript,
   onNewFromThis,
+  events,
 }: {
   box: BoxView;
   title: string;
@@ -125,6 +132,8 @@ export function ThreadHeader({
   onDestroy: () => Promise<void>;
   onCopyTranscript: () => Promise<string>;
   onNewFromThis: () => void;
+  /** The trace, for the pill's live activity label ("Working · Editing retry.ts"). */
+  events?: TraceEvent[];
 }) {
   const [editing, setEditing] = React.useState(false);
   const [draft, setDraft] = React.useState(title);
@@ -133,6 +142,16 @@ export function ThreadHeader({
   // confirm-dialog treatment as Destroy rather than firing straight off the menu.
   const [resizeTo, setResizeTo] = React.useState<{ kind: "memory" | "disk"; tier: string } | null>(null);
   const [addRepo, setAddRepo] = React.useState(false);
+  const [details, setDetails] = React.useState(false);
+  // Details is a popover off the Info button on a desk and a bottom sheet off the ⋯ menu on a phone,
+  // where a 32px button would cost the title a third of its width.
+  const phone = useMediaQuery("(max-width: 639px)");
+  const [idCopied, setIdCopied] = React.useState(false);
+  React.useEffect(() => {
+    if (!idCopied) return;
+    const t = setTimeout(() => setIdCopied(false), 1500);
+    return () => clearTimeout(t);
+  }, [idCopied]);
   const pickerRef = React.useRef<HTMLSpanElement>(null);
   const still = useReducedMotion();
   const openFromMenu = React.useRef(false);
@@ -202,12 +221,10 @@ export function ThreadHeader({
   const long = deadlineLabel(deadline);
   const running = state === "running";
   const elapsed = useElapsed(startedAt, running ? undefined : endedAt, running);
+  const activity = running && events ? liveActivity(events) : null;
   const agentName = box.harness?.name ?? (box.agent ? (({ omp: "oh-my-pi", codex: "Codex CLI", opencode: "OpenCode", claude: "Claude Code" } as Record<string, string>)[box.agent] ?? box.agent) : null);
   // Which resource's request is in flight — the confirm dialog is shared between the two.
   const busyFor = resizeTo?.kind === "disk" ? diskBusy : memoryBusy;
-  // The harness this thread started on ("Harness: Bug fixer · asks before guessing · verify on done"):
-  // its rules live in the agent's system prompt, so this line is where the operator sees them applied.
-  const vitals = [box.workflow && `Playbook: ${box.workflow.line}`, box.harness && `Harness: ${box.harness.line}`, box.agent && box.agent !== "claude" && `agent ${({ omp: "oh-my-pi", codex: "Codex CLI", opencode: "OpenCode" } as Record<string, string>)[box.agent] ?? box.agent}`, box.uptime && `${sleeping ? "ran for" : "up"} ${box.uptime}`, box.cpu && `cpu ${box.cpu}`, box.memUsage && `memory ${fmtUsage(box.memUsage)}`, box.disk && `disk ${fmtUsage(box.disk)}`, roleLabel(box.role)].filter(Boolean).join(" · ");
 
   // The conversation scroller is a sibling rendered by Thread, not a child, so there is nothing to
   // ref. Scroll events don't bubble but they DO capture, so one capture-phase listener on the
@@ -227,368 +244,436 @@ export function ThreadHeader({
     return () => parent.removeEventListener("scroll", onScroll, true);
   }, [box.name]);
 
+  const copyId = async () => {
+    try {
+      await navigator.clipboard.writeText(box.name);
+      setIdCopied(true);
+      toast.success("Machine id copied");
+    } catch (e) {
+      toast.error("Could not copy", { description: e instanceof Error ? e.message : String(e) });
+    }
+  };
+  const openPicker = () => {
+    setDetails(false);
+    setAddRepo(true);
+  };
+  const startedLabel = startedAt !== undefined ? new Date(startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }) : null;
+  const urgent = deadline.remainingSec != null && deadline.remainingSec < 300 ? short : null;
+  const machineLine = [box.uptime && `${sleeping ? "ran for" : "up"} ${box.uptime}`, box.cpu && `cpu ${box.cpu}`, box.memUsage && `memory ${fmtUsage(box.memUsage)}`, box.disk && `disk ${fmtUsage(box.disk)}`, roleLabel(box.role)].filter(Boolean).join(" · ");
+  const tiers = [memoryTier && `${memoryTier} memory`, diskTier && `${diskTier} disk`].filter(Boolean).join(" · ");
+
+  const repoChip = (r: { name: string; branch?: string }) => (
+    <Tooltip key={r.name}>
+      <TooltipTrigger asChild>
+        <span className="bg-muted text-foreground stamp inline-flex h-6 max-w-56 shrink-0 items-center gap-1 rounded-md px-2 whitespace-nowrap">
+          <span className="shrink-0">{r.name}</span>
+          {r.branch && <span className="text-muted-foreground min-w-0 truncate">@{r.branch}</span>}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">
+        /workspace/{r.name}{r.branch ? ` on ${r.branch}` : ""} — @ mentions search here
+      </TooltipContent>
+    </Tooltip>
+  );
+
+  const detailsBody = (
+    <>
+      <div className="flex items-center gap-2">
+        {kept && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Pin className="text-live size-3.5 fill-current" aria-label="Kept" />
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Kept — never sleeps or auto-destroys</TooltipContent>
+          </Tooltip>
+        )}
+        <span className="text-foreground min-w-0 truncate text-body font-medium">{friendlyName(box.name)}</span>
+        <button type="button" onClick={copyId} title="Copy the machine id" className="bg-muted text-muted-foreground hover:text-foreground stamp inline-flex h-6 shrink-0 cursor-pointer items-center gap-1.5 rounded px-1.5 transition-colors">
+          {box.name.slice(-6)}
+          <IconSwap state={idCopied} className="size-3">
+            {idCopied ? <Check className="text-ok size-3" /> : <Copy className="size-3" />}
+          </IconSwap>
+        </button>
+      </div>
+      {machineLine && <p className="stamp text-muted-foreground mt-1.5 text-micro leading-relaxed">{machineLine}</p>}
+
+      <dl className="mt-3 grid grid-cols-[4.5rem_minmax(0,1fr)] gap-x-3 gap-y-2.5 text-meta">
+        <dt className="text-muted-foreground pt-0.5">Repos</dt>
+        <dd className="flex min-w-0 flex-wrap items-center gap-1.5">
+          {repos.map(repoChip)}
+          {!sleeping && (
+            <button
+              type="button"
+              onClick={openPicker}
+              disabled={!!attaching}
+              className={cn("hover:text-foreground hover:bg-muted inline-flex h-6 cursor-pointer items-center gap-1 rounded-md px-1.5 text-micro font-medium transition-colors disabled:opacity-60", repos.length ? "text-faint" : "text-muted-foreground")}
+            >
+              <Plus className="size-3" aria-hidden />
+              {repos.length ? "Attach another" : "Attach a repository"}
+            </button>
+          )}
+          {sleeping && !repos.length && <span className="text-faint">none</span>}
+        </dd>
+
+        {!!pulls?.length && (
+          <>
+            <dt className="text-muted-foreground pt-0.5">PR</dt>
+            <dd className="flex min-w-0 flex-col gap-1">
+              {pulls.map((p) => (
+                <a key={p.url} href={p.url} target="_blank" rel="noreferrer" className="text-foreground hover:text-live stamp min-w-0 truncate transition-colors">
+                  #{p.number} <span className="text-muted-foreground">{p.repo}</span>
+                </a>
+              ))}
+            </dd>
+          </>
+        )}
+
+        {startedLabel && (
+          <>
+            <dt className="text-muted-foreground">Started</dt>
+            <dd className="flex items-center gap-2 tabular-nums">
+              {startedLabel}
+              {elapsed && (
+                <>
+                  <Dot />
+                  <span className={cn("stamp", running ? "text-live" : "text-muted-foreground")}>{running ? `${elapsed} so far` : elapsed}</span>
+                </>
+              )}
+            </dd>
+          </>
+        )}
+
+        {(agentName || box.harness || box.workflow) && (
+          <>
+            <dt className="text-muted-foreground">Agent</dt>
+            <dd className="min-w-0">
+              {agentName}
+              {box.harness && <div className="text-muted-foreground text-micro">Harness: {box.harness.line}</div>}
+              {box.workflow && <div className="text-muted-foreground text-micro">Playbook: {box.workflow.line}</div>}
+            </dd>
+          </>
+        )}
+
+        {(when || long) && (
+          <>
+            <dt className="text-muted-foreground">Lifecycle</dt>
+            <dd className="min-w-0">
+              {when && <div className={box.stalled ? "text-destructive" : undefined}>{when}</div>}
+              {long && <div className={cn("text-micro", urgent ? "text-attention-text" : "text-muted-foreground")}>{long}</div>}
+            </dd>
+          </>
+        )}
+
+        {tiers && (
+          <>
+            <dt className="text-muted-foreground">Size</dt>
+            <dd className="stamp text-muted-foreground">
+              {tiers}
+              {(onSetMemory || onSetDisk) && <span className="text-faint"> · resize from ⋯</span>}
+            </dd>
+          </>
+        )}
+      </dl>
+    </>
+  );
+
   return (
     <header
       ref={headerRef}
       data-scrolled={scrolled || undefined}
-      className={cn("relative z-10 shrink-0 border-b px-3 py-2.5 transition-[box-shadow,border-color] duration-200 md:px-5", scrolled ? "border-transparent shadow-e2" : "border-border")}
+      className={cn("relative z-10 flex h-12 shrink-0 items-center gap-2 border-b px-3 transition-[box-shadow,border-color] duration-200 md:px-5", scrolled ? "border-transparent shadow-e2" : "border-border")}
     >
-      {/* Line 1: identity + controls */}
-      <div className="flex items-center gap-2">
-        <Button variant="ghost" size="icon-sm" onClick={onBack} aria-label="Back to machines" className="-ml-1 md:hidden">
-          <ArrowLeft />
-        </Button>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="bg-muted text-muted-foreground hidden shrink-0 rounded px-1.5 py-0.5 font-mono text-micro sm:inline">{box.name.slice(-6)}</span>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">{box.name}</TooltipContent>
-        </Tooltip>
-        <LiveStatePill state={state} exitCode={exitCode} stalled={box.stalled} />
-        {editing ? (
-          <input
-            ref={inputRef}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={commit}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") commit();
-              else if (e.key === "Escape") setEditing(false);
-            }}
-            aria-label="Run title"
-            maxLength={80}
-            className="pop-in text-foreground bg-muted ring-ring/30 h-8 min-w-0 flex-1 rounded-md px-2 text-h3 font-semibold tracking-[-0.01em] ring-2 outline-none"
-          />
-        ) : (
-          <h1 className="flex min-w-0 flex-1 items-center">
-            {/* The pencil lives INSIDE the button: the visible edit affordance must be clickable,
-                not just the text beside it. */}
-            <button
-              type="button"
-              onClick={startRename}
-              title="Rename"
-              className="group/title flex min-w-0 cursor-text items-center gap-1.5 text-left no-press"
-            >
-              {/* A rename crossfades: the old title lifts out, the new one rises in. min-w-0 all the
-                  way down, so on a phone the title truncates instead of shoving the controls off. */}
-              <Swap state={title} className="min-w-0 flex-1 overflow-hidden">
-                <span className="text-foreground block min-w-0 truncate text-h3 font-semibold tracking-[-0.01em]" title={title}>
-                  {title}
-                </span>
-              </Swap>
-              <Pencil className="text-faint size-3 shrink-0 -translate-x-0.5 opacity-0 transition-[opacity,translate] duration-150 group-hover/title:translate-x-0 group-hover/title:opacity-100 group-focus-visible/title:opacity-100" aria-hidden />
-            </button>
-          </h1>
-        )}
-
-        {/* Under md the secondary actions (new task, files) fold into the ⋯ menu — one control beside
-            the title, so the title keeps the width. */}
-        <div className="ml-auto flex shrink-0 items-center gap-1">
-          {onStop && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="ghost" size="sm" onClick={onStop} disabled={stopping} className="text-muted-foreground">
-                  {stopping ? <Loader2 className="animate-spin" /> : <Square className="fill-current" />}
-                  <span className="hidden sm:inline">{stopping ? "Stopping…" : "Stop"}</span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">Stop this turn — the session is kept; a message resumes it</TooltipContent>
-            </Tooltip>
-          )}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              {/* A disabled button emits no pointer events; the span carries the tooltip while asleep. */}
-              <span tabIndex={sleeping ? 0 : -1} className="hidden rounded-md outline-none md:inline-flex">
-                <Button variant="ghost" size="sm" onClick={onToggleWorkspace} aria-pressed={showWorkspace} className={cn("text-muted-foreground", showWorkspace && "bg-accent text-foreground")} disabled={sleeping}>
-                  <FolderTree />
-                  <span className="hidden sm:inline">Files</span>
-                </Button>
+      <Button variant="ghost" size="icon-sm" onClick={onBack} aria-label="Back to machines" className="-ml-1 md:hidden">
+        <ArrowLeft />
+      </Button>
+      <LiveStatePill state={state} exitCode={exitCode} stalled={box.stalled} activity={activity} />
+      {editing ? (
+        <input
+          ref={inputRef}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commit();
+            else if (e.key === "Escape") setEditing(false);
+          }}
+          aria-label="Run title"
+          maxLength={80}
+          className="pop-in text-foreground bg-muted ring-ring/30 h-8 min-w-0 flex-1 rounded-md px-2 text-h3 font-semibold tracking-[-0.01em] ring-2 outline-none"
+        />
+      ) : (
+        <h1 className="flex min-w-0 flex-1 items-center lg:min-w-48">
+          {/* The pencil lives INSIDE the button: the visible edit affordance must be clickable,
+              not just the text beside it. */}
+          <button type="button" onClick={startRename} title="Rename" className="group/title flex min-w-0 cursor-text items-center gap-1.5 text-left no-press">
+            {/* A rename crossfades: the old title lifts out, the new one rises in. min-w-0 all the
+                way down, so on a phone the title truncates instead of shoving the controls off. */}
+            <Swap state={title} className="min-w-0 flex-1 overflow-hidden">
+              <span className="text-foreground block min-w-0 truncate text-h3 font-semibold tracking-[-0.01em]" title={title}>
+                {title}
               </span>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">{sleeping ? "Files — available once the sandbox is awake" : "Browse, diff and edit the workspace"}</TooltipContent>
-          </Tooltip>
+            </Swap>
+            <Pencil className="text-faint size-3 shrink-0 -translate-x-0.5 opacity-0 transition-[opacity,translate] duration-150 group-hover/title:translate-x-0 group-hover/title:opacity-100 group-focus-visible/title:opacity-100" aria-hidden />
+          </button>
+        </h1>
+      )}
 
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="sm" onClick={onToggleInspector} aria-pressed={showInspector} className={cn("text-muted-foreground hidden md:inline-flex", showInspector && "bg-accent text-foreground")}>
-                <PanelRight />
-                <span className="hidden lg:inline">Inspector</span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">Run facts and the rest of the fleet · Ctrl+I</TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="sm" onClick={onToggleSideChat} aria-pressed={showSideChat} className={cn("text-muted-foreground relative", showSideChat && "bg-accent text-foreground")}>
-                <MessageCircleQuestion />
-                <span className="hidden lg:inline">Side chat</span>
-                {sideUnread > 0 && (
-                  <span className="bg-primary text-primary-foreground stamp rounded-full px-1.5 text-micro leading-4" aria-label={`${sideUnread} unread`}>
-                    {sideUnread}
-                  </span>
-                )}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">Ask the sandbox about this run without interrupting the agent</TooltipContent>
-          </Tooltip>
-
-          {onToggleDensity && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={onToggleDensity}
-                  aria-pressed={density === "trace"}
-                  data-density={density}
-                  className={cn("text-muted-foreground", density === "trace" && "bg-accent text-foreground")}
-                >
-                  {density === "trace" ? <ListTree /> : <MessageSquareText />}
-                  <span className="hidden sm:inline">{density === "trace" ? "Trace" : "Chat"}</span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">{density === "trace" ? "Every step shown — switch to chat to fold the work" : "Conversation first — switch to trace to see every step"}</TooltipContent>
-            </Tooltip>
-          )}
-
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon-sm" aria-label="More actions" className="text-muted-foreground">
-                <MoreHorizontal />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="end"
-              onCloseAutoFocus={(e) => {
-                // Opening the repo picker from the menu: the picker owns focus, not the ⋯ trigger.
-                if (openFromMenu.current) {
-                  e.preventDefault();
-                  openFromMenu.current = false;
-                }
-              }}
-            >
-              <DropdownMenuItem onSelect={onNew} className="md:hidden">
-                <Plus />
-                New task
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={onToggleWorkspace} disabled={sleeping} className="md:hidden" aria-pressed={showWorkspace}>
-                <FolderTree />
-                {showWorkspace ? "Hide files" : "Files"}
-                <MenuHint>{sleeping ? "asleep" : "browse, diff, edit"}</MenuHint>
-              </DropdownMenuItem>
-              <DropdownMenuSeparator className="md:hidden" />
-              {box.role !== "pool-free" && (
-                <DropdownMenuItem onSelect={onToggleKeep} disabled={keeping}>
-                  {kept ? <PinOff /> : <Pin />}
-                  {kept ? "Release" : "Keep"}
-                  <MenuHint>{kept ? "kept" : "sleeps · auto-destroyed"}</MenuHint>
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuItem onSelect={startRename} disabled={!box.task}>
-                <Pencil />
-                Rename
-              </DropdownMenuItem>
-              {!sleeping && (
-                <DropdownMenuItem
-                  onSelect={() => {
-                    openFromMenu.current = true;
-                    setAddRepo(true);
-                  }}
-                  disabled={!!attaching}
-                >
-                  <Plus />
-                  Attach a repository
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={copyLink}>
-                <Link2 />
-                Copy link
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={copyTranscript}>
-                {copied ? <Check className="text-ok" /> : <FileText />}
-                Copy transcript
-                <MenuHint>Markdown</MenuHint>
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={onNewFromThis} disabled={!box.task}>
-                <RotateCw />
-                Run again
-                <MenuHint>new machine, same brief</MenuHint>
-              </DropdownMenuItem>
-              {onSetMemory && !!memoryTiers?.length && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuLabel>Memory</DropdownMenuLabel>
-                  {memoryTiers.map((t) => (
-                    <DropdownMenuItem
-                      key={t}
-                      onSelect={() => setResizeTo({ kind: "memory", tier: t })}
-                      disabled={t === memoryTier || memoryBusy || state === "running"}
-                    >
-                      <MemoryStick />
-                      {t}
-                      <MenuHint>
-                        {t === memoryTier ? "current" : state === "running" ? "busy — finish first" : "reboots the machine"}
-                      </MenuHint>
-                    </DropdownMenuItem>
-                  ))}
-                </>
-              )}
-              {onSetDisk && !!diskTiers?.length && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuLabel>Storage</DropdownMenuLabel>
-                  {diskTiers.map((t) => (
-                    <DropdownMenuItem
-                      key={t}
-                      onSelect={() => setResizeTo({ kind: "disk", tier: t })}
-                      disabled={t === diskTier || diskBusy || state === "running"}
-                    >
-                      <HardDrive />
-                      {t}
-                      <MenuHint>
-                        {t === diskTier ? "current" : state === "running" ? "busy — finish first" : "reboots the machine"}
-                      </MenuHint>
-                    </DropdownMenuItem>
-                  ))}
-                </>
-              )}
-              <DropdownMenuSeparator />
-              {!sleeping && sleepNow && (
-                <DropdownMenuItem onSelect={sleepNow} disabled={sleepBusy || state === "running"}>
-                  <Moon />
-                  Sleep now
-                  <MenuHint>{state === "running" ? "busy — finish first" : "a reply wakes it"}</MenuHint>
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuItem destructive onSelect={() => setConfirm(true)}>
-                <Trash2 />
-                Destroy machine…
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </div>
-
-      {/* Line 2: context as a sentence. The state is the pill — it anchors the whole view, and its
-          crossfade makes the working → needs-you → done transition an event rather than a blink. */}
-      {/* One line at every width. On a phone the sentence is trimmed to what matters there (state,
-          machine, repos — the meters and lifecycle live in the machine's tooltip and the ⋯ menu),
-          and the repo chips scroll sideways rather than stacking into a third and fourth row. */}
-      <div className="text-muted-foreground mt-1.5 flex h-6 min-w-0 flex-nowrap items-center gap-2 text-meta">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="stamp inline-flex h-6 shrink-0 items-center gap-1" title={shortName(box.name)}>
-              {kept && <Pin className="text-live size-3 fill-current" aria-label="Kept" />}
-              {friendlyName(box.name)}
-            </span>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">{vitals || shortName(box.name)}</TooltipContent>
-        </Tooltip>
-
-        {!sleeping && (
-          <>
-            <Dot />
-            {/* Chips shrink and ellipsise their branch instead of the row clipping mid-glyph: a
-                hidden horizontal scroller read as a chopped "orders-api @" at 1280px. */}
-            <span className="flex min-w-20 shrink items-center gap-1.5 overflow-hidden">
-              {repos.map((r) => (
-                <Tooltip key={r.name}>
-                  <TooltipTrigger asChild>
-                    <span className="bg-muted text-foreground stamp inline-flex h-6 min-w-0 max-w-64 shrink items-center gap-1 rounded-md px-2 whitespace-nowrap">
-                      <span className="shrink-0">{r.name}</span>
-                      {r.branch && <span className="text-muted-foreground hidden min-w-0 truncate sm:inline">@{r.branch}</span>}
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">/workspace/{r.name} — @ mentions search here</TooltipContent>
-                </Tooltip>
-              ))}
-              <AnimatePresence initial={false}>
-                {attaching && (
-                  <motion.span
-                    key="attaching"
-                    initial={{ opacity: 0, scale: 0.92 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.92 }}
-                    transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
-                    className="stamp text-muted-foreground inline-flex items-center gap-1"
-                  >
-                    <Loader2 className="size-3 animate-spin" aria-hidden />
-                    cloning {attaching.split("/")[1]}…
-                  </motion.span>
-                )}
-              </AnimatePresence>
-            </span>
-            <span ref={pickerRef} className="relative shrink-0">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      onClick={() => setAddRepo((v) => !v)}
-                      aria-expanded={addRepo}
-                      aria-label={repos.length ? "Attach another repository" : "Attach a repository"}
-                      disabled={!!attaching}
-                      className={cn("hover:text-foreground hover:bg-muted inline-flex h-6 cursor-pointer items-center gap-1 rounded-md text-micro font-medium transition-colors disabled:opacity-60", repos.length ? "text-faint w-6 justify-center" : "text-muted-foreground px-1.5")}
-                    >
-                      <Plus className="size-3" aria-hidden />
-                      {!repos.length && "Attach a repo"}
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">{repos.length ? "Attach another repository" : "The agent clones it into /workspace"}</TooltipContent>
-                </Tooltip>
-                <AnimatePresence>
-                  {addRepo && (
-                    <motion.div key="repo-picker" {...menuMotion(still, "bottom")} className="absolute top-full left-0 z-20 mt-1">
-                      <RepoPicker multi={false} selected={repos.map((r) => ({ repo: r.name }))} onToggle={(r) => (onAttach(r.fullName), setAddRepo(false))} onClose={() => setAddRepo(false)} />
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+      {/* The compact meta cluster (xl+): the PR and the clock, and from 2xl the first repo too. At
+          1280 the row has 1008px inside its padding; pill 121 + title floor 192 + controls 399 + gaps
+          32 leave 264, which fits PR + clock (222) but not the chip as well (305). Nothing here
+          shrinks: the title takes the slack. Everything else is in Details, which is also the only
+          place for meta below xl. */}
+      <div className="text-muted-foreground hidden shrink-0 items-center gap-2 text-meta xl:flex">
+        {!sleeping && repos.length > 0 && (
+          <span className="hidden items-center gap-1.5 2xl:flex">
+            {repoChip(repos[0])}
+            {repos.length > 1 && (
+              <span className="stamp text-muted-foreground" aria-label={`${repos.length - 1} more ${repos.length - 1 === 1 ? "repository" : "repositories"}`}>
+                +{repos.length - 1}
               </span>
-          </>
+            )}
+          </span>
         )}
-
+        <AnimatePresence initial={false}>
+          {attaching && (
+            <motion.span key="attaching" initial={{ opacity: 0, scale: 0.92 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.92 }} transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }} className="stamp text-muted-foreground inline-flex items-center gap-1">
+              <Loader2 className="size-3 animate-spin" aria-hidden />
+              cloning {attaching.split("/")[1]}…
+            </motion.span>
+          )}
+        </AnimatePresence>
         {!!pulls?.length && (
           <>
             <Dot />
             <PullRequestFloat key={pulls[pulls.length - 1].url} session={box.name} pulls={pulls} />
           </>
         )}
-
-        {startedAt !== undefined && (
+        {elapsed && (
           <>
             <Dot />
-            <span className="hidden h-6 shrink-0 items-center whitespace-nowrap sm:inline-flex">Started {new Date(startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}</span>
-            {elapsed && (
-              <span className={cn("stamp inline-flex h-6 shrink-0 items-center tabular-nums", running ? "text-live" : "text-faint")} aria-label={`Elapsed ${elapsed}`}>
-                {elapsed}
-              </span>
-            )}
+            <span className={cn("stamp inline-flex h-6 shrink-0 items-center tabular-nums", running ? "text-live" : "text-faint")} aria-label={`Elapsed ${elapsed}`}>
+              {elapsed}
+            </span>
           </>
         )}
+      </div>
 
-        {agentName && (
-          <span className="hidden h-6 shrink-0 items-center gap-2 whitespace-nowrap lg:flex">
-            <Dot />
-            <span>{agentName}</span>
-          </span>
+      <div className="flex shrink-0 items-center gap-1">
+        {/* A deadline inside five minutes is the one fact that stays inline at every width. */}
+        {urgent && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="text-attention-text px-1 text-micro font-medium whitespace-nowrap">{urgent}</span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{long}</TooltipContent>
+          </Tooltip>
         )}
 
-        <span className="ml-auto flex h-6 shrink-0 items-center gap-2 pl-3 whitespace-nowrap">
-          {/* "finished 2m ago" → "asked just now": the meta changes with the state, so it crossfades with it. */}
-          <Swap state={when ?? ""} className="hidden items-center sm:flex">
-            {when && <span className={`${box.stalled ? "text-destructive" : "text-faint"} text-micro`}>{when}</span>}
-          </Swap>
-          {when && short && <span className="hidden sm:inline"><Dot /></span>}
-          {short && (
+        {/* Details: the machine, every repo, PR, timing, agent, lifecycle, size. The repo picker is
+            anchored here too, whether it opens from Details or from the ⋯ menu. */}
+        <span ref={pickerRef} className="relative">
+          <Popover open={details && !phone} onOpenChange={setDetails}>
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className={cn("text-faint text-micro", deadline.remainingSec != null && deadline.remainingSec < 300 ? "text-attention-text" : "hidden sm:inline")}>{short}</span>
+                <PopoverTrigger asChild>
+                  <Button variant="ghost" size="icon-sm" aria-label="Details" className={cn("text-muted-foreground hidden sm:inline-flex", details && "bg-accent text-foreground")}>
+                    <Info />
+                  </Button>
+                </PopoverTrigger>
               </TooltipTrigger>
-              <TooltipContent side="bottom">{long}</TooltipContent>
+              <TooltipContent side="bottom">Details — machine, repositories, timing</TooltipContent>
             </Tooltip>
-          )}
+            <PopoverContent className="w-[22rem]">{detailsBody}</PopoverContent>
+          </Popover>
+          <Sheet open={details && phone} onOpenChange={setDetails}>
+            <SheetContent side="bottom" title="Details">
+              {detailsBody}
+            </SheetContent>
+          </Sheet>
+          <AnimatePresence>
+            {addRepo && (
+              <motion.div key="repo-picker" {...menuMotion(still, "bottom")} className="absolute top-full right-0 z-20 mt-1 max-sm:fixed max-sm:inset-x-4 max-sm:top-24 max-sm:mt-0">
+                <RepoPicker multi={false} selected={repos.map((r) => ({ repo: r.name }))} onToggle={(r) => (onAttach(r.fullName), setAddRepo(false))} onClose={() => setAddRepo(false)} />
+              </motion.div>
+            )}
+          </AnimatePresence>
         </span>
+
+        {onStop && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="sm" onClick={onStop} disabled={stopping} className="text-muted-foreground">
+                {stopping ? <Loader2 className="animate-spin" /> : <Square className="fill-current" />}
+                <span className="hidden sm:inline">{stopping ? "Stopping…" : "Stop"}</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Stop this turn — the session is kept; a message resumes it</TooltipContent>
+          </Tooltip>
+        )}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            {/* A disabled button emits no pointer events; the span carries the tooltip while asleep. */}
+            <span tabIndex={sleeping ? 0 : -1} className="hidden rounded-md outline-none md:inline-flex">
+              <Button variant="ghost" size="sm" onClick={onToggleWorkspace} aria-pressed={showWorkspace} className={cn("text-muted-foreground", showWorkspace && "bg-accent text-foreground")} disabled={sleeping}>
+                <FolderTree />
+                <span className="hidden sm:inline">Files</span>
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">{sleeping ? "Files — available once the sandbox is awake" : "Browse, diff and edit the workspace"}</TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon-sm" onClick={onToggleInspector} aria-pressed={showInspector} aria-label="Inspector" className={cn("text-muted-foreground hidden md:inline-flex", showInspector && "bg-accent text-foreground")}>
+              <PanelRight />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">Run facts and the rest of the fleet · Ctrl+I</TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size={sideUnread > 0 ? "sm" : "icon-sm"} onClick={onToggleSideChat} aria-pressed={showSideChat} aria-label="Side chat" className={cn("text-muted-foreground relative", showSideChat && "bg-accent text-foreground")}>
+              <MessageCircleQuestion />
+              {sideUnread > 0 && (
+                <span className="bg-primary text-primary-foreground stamp rounded-full px-1.5 text-micro leading-4" aria-label={`${sideUnread} unread`}>
+                  {sideUnread}
+                </span>
+              )}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">Ask the sandbox about this run without interrupting the agent</TooltipContent>
+        </Tooltip>
+
+        {onToggleDensity && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onToggleDensity}
+                aria-pressed={density === "trace"}
+                data-density={density}
+                className={cn("text-muted-foreground", density === "trace" && "bg-accent text-foreground")}
+              >
+                {density === "trace" ? <ListTree /> : <MessageSquareText />}
+                <span className="hidden sm:inline">{density === "trace" ? "Trace" : "Chat"}</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{density === "trace" ? "Every step shown — switch to chat to fold the work" : "Conversation first — switch to trace to see every step"}</TooltipContent>
+          </Tooltip>
+        )}
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon-sm" aria-label="More actions" className="text-muted-foreground">
+              <MoreHorizontal />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="end"
+            onCloseAutoFocus={(e) => {
+              // Opening the repo picker from the menu: the picker owns focus, not the ⋯ trigger.
+              if (openFromMenu.current) {
+                e.preventDefault();
+                openFromMenu.current = false;
+              }
+            }}
+          >
+            <DropdownMenuItem onSelect={() => setDetails(true)} className="sm:hidden">
+              <Info />
+              Details
+              <MenuHint>machine, repos, timing</MenuHint>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={onNew} className="md:hidden">
+              <Plus />
+              New task
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={onToggleWorkspace} disabled={sleeping} className="md:hidden" aria-pressed={showWorkspace}>
+              <FolderTree />
+              {showWorkspace ? "Hide files" : "Files"}
+              <MenuHint>{sleeping ? "asleep" : "browse, diff, edit"}</MenuHint>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator className="md:hidden" />
+            {box.role !== "pool-free" && (
+              <DropdownMenuItem onSelect={onToggleKeep} disabled={keeping}>
+                {kept ? <PinOff /> : <Pin />}
+                {kept ? "Release" : "Keep"}
+                <MenuHint>{kept ? "kept" : "sleeps · auto-destroyed"}</MenuHint>
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem onSelect={startRename} disabled={!box.task}>
+              <Pencil />
+              Rename
+            </DropdownMenuItem>
+            {!sleeping && (
+              <DropdownMenuItem
+                onSelect={() => {
+                  openFromMenu.current = true;
+                  setAddRepo(true);
+                }}
+                disabled={!!attaching}
+              >
+                <Plus />
+                Attach a repository
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={copyLink}>
+              <Link2 />
+              Copy link
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={copyTranscript}>
+              {copied ? <Check className="text-ok" /> : <FileText />}
+              Copy transcript
+              <MenuHint>Markdown</MenuHint>
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={onNewFromThis} disabled={!box.task}>
+              <RotateCw />
+              Run again
+              <MenuHint>new machine, same brief</MenuHint>
+            </DropdownMenuItem>
+            {onSetMemory && !!memoryTiers?.length && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>Memory</DropdownMenuLabel>
+                {memoryTiers.map((t) => (
+                  <DropdownMenuItem key={t} onSelect={() => setResizeTo({ kind: "memory", tier: t })} disabled={t === memoryTier || memoryBusy || state === "running"}>
+                    <MemoryStick />
+                    {t}
+                    <MenuHint>{t === memoryTier ? "current" : state === "running" ? "busy — finish first" : "reboots the machine"}</MenuHint>
+                  </DropdownMenuItem>
+                ))}
+              </>
+            )}
+            {onSetDisk && !!diskTiers?.length && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>Storage</DropdownMenuLabel>
+                {diskTiers.map((t) => (
+                  <DropdownMenuItem key={t} onSelect={() => setResizeTo({ kind: "disk", tier: t })} disabled={t === diskTier || diskBusy || state === "running"}>
+                    <HardDrive />
+                    {t}
+                    <MenuHint>{t === diskTier ? "current" : state === "running" ? "busy — finish first" : "reboots the machine"}</MenuHint>
+                  </DropdownMenuItem>
+                ))}
+              </>
+            )}
+            <DropdownMenuSeparator />
+            {!sleeping && sleepNow && (
+              <DropdownMenuItem onSelect={sleepNow} disabled={sleepBusy || state === "running"}>
+                <Moon />
+                Sleep now
+                <MenuHint>{state === "running" ? "busy — finish first" : "a reply wakes it"}</MenuHint>
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem destructive onSelect={() => setConfirm(true)}>
+              <Trash2 />
+              Destroy machine…
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       <Dialog open={!!resizeTo} onOpenChange={(o) => !o && setResizeTo(null)}>
@@ -666,9 +751,10 @@ function useElapsed(start: number | undefined, end: number | undefined, live: bo
 
 /**
  * The Orbit state pill, in the shared live vocabulary: Working (text shimmer + pinging dot) ·
- * Needs you · Asleep · Done · Failed · Idle. Colours are the existing state tokens.
+ * Needs you · Asleep · Done · Failed · Idle. Colours are the existing state tokens. While working,
+ * the activity ("Editing retry.ts") joins the label at lg+, full text in the tooltip.
  */
-function LiveStatePill({ state, exitCode, stalled }: { state: DisplayState; exitCode?: number; stalled?: boolean }) {
+function LiveStatePill({ state, exitCode, stalled, activity }: { state: DisplayState; exitCode?: number; stalled?: boolean; activity?: string | null }) {
   const failed = state === "done" && isFailedExit(exitCode);
   const working = state === "running" && !stalled;
   const [word, tone] =
@@ -685,10 +771,25 @@ function LiveStatePill({ state, exitCode, stalled }: { state: DisplayState; exit
               ? ["Failed", "text-destructive bg-destructive/10"]
               : ["Done", "text-ok bg-ok/10"]
             : ["Idle", "text-muted-foreground bg-muted"];
-  return (
-    <span key={word} className={cn("pop-in inline-flex h-5 shrink-0 items-center gap-1.5 rounded-full px-2 text-micro font-medium transition-colors duration-200", tone)}>
+  const doing = working ? activity : null;
+  const pill = (
+    <span key={word} className={cn("pop-in inline-flex h-6 shrink-0 items-center gap-1.5 rounded-full px-2 text-micro font-medium transition-colors duration-200", tone)}>
       <span className={cn("size-1.5 rounded-full bg-current", working && "dt-ping")} aria-hidden />
       <span className={cn(working && "shimmer-text")}>{word}</span>
+      {/* What the agent is doing rides inside the pill at lg+; the one-line masthead has no room for a
+          separate live tail, and the pill is already the thing that says "alive". */}
+      {doing && (
+        <Swap state={doing} className="hidden min-w-0 xl:block">
+          <span className="block max-w-[28ch] truncate font-normal opacity-80">· {doing}</span>
+        </Swap>
+      )}
     </span>
+  );
+  if (!doing) return pill;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{pill}</TooltipTrigger>
+      <TooltipContent side="bottom">{doing}</TooltipContent>
+    </Tooltip>
   );
 }
