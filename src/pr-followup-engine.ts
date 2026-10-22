@@ -241,6 +241,12 @@ export function makeFollowupEngine(d: EngineDeps) {
       task = reviewTask(ref, comments, adm.attempt);
     }
     updateFollowup(d.db, id, { subject });
+    // Acknowledge a command the moment it is taken, before any work: a 👀 on the comment tells the
+    // asker it was heard, minutes before the reply lands.
+    if (s.kind === "command")
+      await d
+        .gh(apr.owner, s.repo, { method: "POST", path: `/repos/${s.repo}/issues/comments/${s.unit.id}/reactions`, body: { content: "eyes" } })
+        .catch((e) => log(`[followup] reacting to the command on ${tag} failed: ${(e as Error).message.slice(0, 200)}`));
 
     const startedBy: FollowupStart["startedBy"] = {
       kind: "followup",

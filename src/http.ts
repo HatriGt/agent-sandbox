@@ -3692,9 +3692,10 @@ const followups = makeFollowupEngine({
     return startTriggerRun({ owner: f.owner, trigger: pseudo, task: f.task, repos: [{ repo: f.startedBy.pr.repo, ref: f.branch }], startedBy: f.startedBy });
   },
 });
-// `/agent …` on any PR (src/agent-mentions.ts): each stored GitHub account's own activity feed is
-// polled with its own token; PR comments the account wrote that address the agent go to the
-// follow-up engine, which adopts the PR and answers on it. No webhook, no repo list.
+// `/agent …` on any PR (src/agent-mentions.ts): as each stored GitHub account, with its own token,
+// the controller lists the PRs updated since its last look and reads their new comments; those
+// addressed to the agent go to the follow-up engine, which adopts the PR and answers on it. No
+// webhook, no repo list.
 const mentionWatcher = makeMentionWatcher({
   db,
   engine: followups,

@@ -362,87 +362,114 @@ test("engine: adoption needs the owner's token to read the PR; the toggle off sk
   assert.match((posted.at(-1)!.body as { body: string }).body, /run failed before it could reply: box crashed/);
 });
 
-/* ───────────── the activity poller ───────────── */
+/* ───────────── the PR comment poller ───────────── */
 
-const feedEvent = (id: string, body: string, over: Record<string, unknown> = {}) => ({
+let clock = Date.parse("2026-10-22T05:00:00Z");
+const listedPr = (number: number, over: Record<string, unknown> = {}) => ({
+  number,
+  title: "Human PR",
+  updated_at: new Date(clock).toISOString(),
+  pull_request: { url: `https://api.github.com/repos/${REPO}/pulls/${number}` },
+  repository: { full_name: REPO, name: "app", owner: { login: "acme" }, html_url: `https://github.com/${REPO}` },
+  ...over,
+});
+const listedComment = (id: number, body: string, over: Record<string, unknown> = {}) => ({
   id,
-  type: "IssueCommentEvent",
-  actor: { login: "alice", type: "User" },
-  repo: { name: REPO },
-  created_at: new Date().toISOString(),
-  payload: { action: "created", issue: { number: 7, pull_request: {} }, comment: { id: Number(id), body, author_association: "OWNER", user } },
+  body,
+  user,
+  author_association: "OWNER",
+  created_at: new Date(clock).toISOString(),
+  html_url: `https://github.com/${REPO}/pull/7#issuecomment-${id}`,
   ...over,
 });
 
-test("mentions: baseline replays nothing; later /agent PR comments from the feed reach the engine once; noise is ignored", async () => {
-  const { db, engine, starts, logs } = setupAnyPr();
-  let feed: unknown[] = [feedEvent("100", "/agent old ask")];
+test("mentions: baseline replays nothing; /agent comments on PRs updated since the last look reach the engine once; the comment gets a 👀", async () => {
+  const { db, engine, calls, starts, logs } = setupAnyPr();
+  clock = Date.parse("2026-10-22T05:00:00Z");
+  const tick = () => (clock += 90_000);
+  let issues: unknown[] = [listedPr(7)];
+  let comments: Record<number, unknown[]> = { 7: [listedComment(31, "/agent old ask")] };
+  tick(); // the controller starts watching after that comment
   const gets: Array<{ login: string; path: string; etag?: string }> = [];
   let etag = "e1";
   const watcher = makeMentionWatcher({
     db,
     engine,
     log: () => {},
+    now: () => clock,
     enabled: () => true,
     accounts: async () => [{ owner: "u1", login: "alice" }],
     get: async (_owner, login, path, e) => {
       gets.push({ login, path, ...(e ? { etag: e } : {}) });
+      const m = /\/issues\/(\d+)\/comments/.exec(path);
+      if (m) return { notModified: false, data: comments[Number(m[1])] ?? [] };
       if (e === etag) return { notModified: true, pollInterval: 60 };
-      return { notModified: false, data: feed, etag, pollInterval: 60 };
+      return { notModified: false, data: issues, etag, pollInterval: 60 };
     },
   });
   await watcher.tick();
-  assert.equal(gets[0].path, "/users/alice/events?per_page=100");
-  assert.equal(starts.length, 0); // baseline
-  // Nothing new: a 304, and the poll interval keeps the next tick quiet.
+  assert.equal(gets.length, 0); // the baseline is a timestamp, not a read: nothing before it is replayed
+  assert.equal(starts.length, 0);
+  await watcher.tick(); // the poll interval keeps the next tick quiet
+  assert.equal(gets.length, 0);
+  tick();
   await watcher.pollFeed("u1", "alice");
-  assert.equal(gets.at(-1)?.etag, "e1");
-  await watcher.tick();
-  assert.equal(gets.length, 2);
-  // Three new events: a PR comment with /agent, an issue (not PR) comment with /agent, a push.
-  // GitHub's event ids are not one sequence: the comment's id is below the baseline's (a real
-  // feed shows IssueCommentEvents around 1.7e10 next to PushEvents around 2.4e10), and it must
-  // still be picked up.
+  assert.match(gets[0].path, /^\/issues\?filter=all&state=all&since=\d{4}-[^&]+&sort=updated&direction=desc&per_page=100$/);
+  // The baseline sits at "now"; a comment written before it is not acted on even if the PR shows up.
+  assert.equal(starts.length, 0, "the old ask was written before the baseline");
+  // Now: a PR comment with /agent, a plain comment, an issue (not a PR) with /agent, a push-only PR.
   etag = "e2";
-  feed = [
-    { id: "104", type: "PushEvent", repo: { name: REPO }, payload: {} },
-    feedEvent("37", "/agent add a test"),
-    feedEvent("102", "/agent on an issue", { payload: { action: "created", issue: { number: 2 }, comment: { id: 102, body: "/agent on an issue", author_association: "OWNER", user } } }),
-    feedEvent("101", "plain comment"),
-    feedEvent("100", "/agent old ask"),
-  ];
+  tick();
+  const g0 = gets.length;
+  issues = [listedPr(9, { comments: 0 }), listedPr(7), { ...listedPr(8), pull_request: undefined }];
+  comments = { 7: [listedComment(33, "/agent add a test"), listedComment(32, "plain comment")], 8: [listedComment(40, "/agent on an issue")], 9: [] };
   await watcher.pollFeed("u1", "alice");
   assert.equal(starts.length, 1);
   assert.match(starts[0].task, /add a test/);
-  // The same feed read again: every event already seen.
+  assert.deepEqual(
+    gets.slice(g0).filter((g) => g.path.includes("/comments")).map((g) => g.path.replace(/since=[^&]+/, "since=S")),
+    [`/repos/${REPO}/issues/9/comments?since=S&per_page=100`, `/repos/${REPO}/issues/7/comments?since=S&per_page=100`]
+  );
+  const eyes = calls.filter((c) => c.method === "POST" && c.path === `/repos/${REPO}/issues/comments/33/reactions`);
+  assert.equal(eyes.length, 1);
+  assert.deepEqual(eyes[0].body, { content: "eyes" });
+  // Nothing changed: a 304, free.
+  const before = gets.length;
+  await watcher.pollFeed("u1", "alice");
+  assert.equal(gets.at(-1)?.etag, "e2");
+  assert.equal(gets.length, before + 1);
+  // The same PR listed again (the cursor is inclusive) re-reads its comments; the claim stops a second run.
   etag = "e3";
   await watcher.pollFeed("u1", "alice");
   assert.equal(starts.length, 1);
-  // A row written by the old high-water-mark version re-baselines instead of replaying the page.
-  db.prepare(`UPDATE repo_watch SET state_json = ? WHERE repo = '@alice'`).run(JSON.stringify({ lastId: "104" }));
-  feed = [feedEvent("36", "/agent another ask"), ...feed];
-  await watcher.pollFeed("u1", "alice"); // its etag is not sent either: a 304 would keep the old row
-  assert.equal(gets.at(-1)?.etag, undefined);
+  // A row from the activity-feed version is not a cursor: re-baseline, no read, nothing replayed.
+  db.prepare(`UPDATE repo_watch SET state_json = ?, etag = 'old' WHERE repo = '@alice'`).run(JSON.stringify({ seen: ["1"] }));
+  const n = gets.length;
+  comments[7] = [listedComment(34, "/agent another ask"), ...comments[7]];
+  tick(); // written before the new baseline: never replayed
+  await watcher.pollFeed("u1", "alice");
+  assert.equal(gets.length, n);
   assert.equal(starts.length, 1);
-  // The first request is still running, so the next one is a new turn once it finishes.
-  await engine.onRunFinished("cmd-1", digest({ box: "cmd-1", headline: "added" }), `${REPLY_OPEN}
-Added a test.
-${REPLY_CLOSE}
-`, 1);
+  // The first request is still running; once it finishes, the next ask is a new turn.
+  await engine.onRunFinished("cmd-1", digest({ box: "cmd-1", headline: "added" }), `${REPLY_OPEN}\nAdded a test.\n${REPLY_CLOSE}\n`, 1);
   etag = "e5";
-  feed = [feedEvent("35", "/agent after the baseline"), ...feed];
+  tick();
+  issues = [listedPr(7)];
+  comments[7] = [listedComment(35, "/agent after the baseline"), ...comments[7]];
   await watcher.pollFeed("u1", "alice");
   assert.equal(starts.length, 2);
   assert.match(starts[1].task, /after the baseline/);
-  assert.deepEqual(payloadOf(feedEvent("5", "/agent x") as never, "alice").repository, { full_name: REPO, name: "app", owner: { login: "acme" }, html_url: `https://github.com/${REPO}` });
-  assert.equal(isAgentCommand(feedEvent("5", "nope") as never), false);
-  assert.equal(isAgentCommand(feedEvent("5", "/agent yes") as never), true);
+  assert.deepEqual(payloadOf(listedPr(5) as never, listedComment(1, "/agent x") as never).repository, { full_name: REPO, name: "app", owner: { login: "acme" }, html_url: `https://github.com/${REPO}` });
+  assert.equal(isAgentCommand(listedPr(5) as never, listedComment(1, "nope") as never), false);
+  assert.equal(isAgentCommand(listedPr(5) as never, listedComment(1, "/agent yes") as never), true);
+  assert.equal(isAgentCommand({ ...listedPr(5), pull_request: undefined } as never, listedComment(1, "/agent yes") as never), false);
   assert.ok(logs.some((l) => l.id === "mentions:u1" && l.outcome === "fired"));
   assert.equal(mentionsSourceId("u1"), "mentions:u1");
 });
 
-test("mentions: the owner's toggle off means no read; a rate limit pauses the feed; a missing association is fetched", async () => {
+test("mentions: the owner's toggle off means no read; a rate limit pauses the account; a collaborator's ask counts too", async () => {
   const { db, engine, starts } = setupAnyPr();
+  clock = Date.parse("2026-10-22T06:00:00Z");
   let enabled = false;
   let calls = 0;
   let fail = false;
@@ -450,27 +477,30 @@ test("mentions: the owner's toggle off means no read; a rate limit pauses the fe
     db,
     engine,
     log: () => {},
+    now: () => clock,
     enabled: () => enabled,
     accounts: async () => [{ owner: "u1", login: "alice" }],
     get: async (_o, _l, path) => {
       calls++;
       if (fail) throw new GhRateLimitError(403, { retryAfterMs: 3_600_000 }, path);
-      if (path.includes("/issues/comments/")) return { notModified: false, data: { author_association: "COLLABORATOR" } };
-      return { notModified: false, data: calls === 1 ? [] : [feedEvent("9", "/agent hi", { payload: { action: "created", issue: { number: 7, pull_request: {} }, comment: { id: 9, body: "/agent hi", user } } })], etag: `e${calls}` };
+      if (path.includes("/issues/7/comments")) return { notModified: false, data: [listedComment(9, "/agent hi", { user: { login: "bob", type: "User" }, author_association: "COLLABORATOR" })] };
+      return { notModified: false, data: [listedPr(7)], etag: `e${calls}` };
     },
   });
   await watcher.tick();
   assert.equal(calls, 0);
   enabled = true;
-  await watcher.tick(); // baseline
-  assert.equal(calls, 1);
+  await watcher.tick(); // baseline: no read
+  assert.equal(calls, 0);
   fail = true;
   await assert.rejects(watcher.pollFeed("u1", "alice"));
   await watcher.tick(); // paused for an hour: no read
-  assert.equal(calls, 2);
+  assert.equal(calls, 1);
   fail = false;
-  await watcher.pollFeed("u1", "alice"); // the event lacks author_association → the comment is read
+  clock += 90_000;
+  await watcher.pollFeed("u1", "alice");
   assert.equal(starts.length, 1);
+  assert.match(starts[0].task, /hi/);
 });
 
 test("hook store: rotate keeps the id; deliveries are owner-scoped", () => {

@@ -24,25 +24,29 @@ only start follow-ups on PRs the agent opened.
 
 Two paths, both landing in the same engine:
 
-- **Activity feed (no webhook).** Every stored GitHub account's own activity feed is polled with
-  its own token (`GET /users/{login}/events`, conditional reads, honouring GitHub's poll
-  interval). Comments *that account* wrote on any PR it can see arrive this way, usually within a
-  minute. Nothing written before the controller started watching is replayed.
+- **Polling (no webhook).** About once a minute, as every stored GitHub account with its own
+  token, the controller lists the issues and PRs that account can see which changed since its
+  last look (`GET /issues?filter=all&since=…`, a conditional read) and reads the new comments on
+  each changed PR. Any `/agent` comment the account can read arrives this way, whoever wrote it,
+  usually within a minute. Nothing written before the controller started watching is replayed.
+  (The GitHub activity feed is not used: it delivers events late, drops them again, and its ids
+  are not one sequence.)
 - **Webhook.** The per-user PR follow-up webhook (and GitHub automations) deliver `issue_comment`
   events for a repo, which also lets other collaborators' `/agent` comments through.
 
-Each comment is answered once, whichever path delivers it first.
+Each comment is answered once, whichever path delivers it first. The moment a command is taken
+the agent reacts to the comment with 👀; the reply follows when the run finishes.
 
 ## Settings
 
 Dashboard → Automations → PR follow-ups → **Answer “/agent …” on any PR** (on by default). Turning
-it off stops the activity-feed polling for that account and ignores `/agent` on PRs the agent did
+it off stops the polling for that account and ignores `/agent` on PRs the agent did
 not open; `/agent` on agent-opened PRs still follows **Address review comments**.
 
 ## Operational notes
 
 - Runs started this way show up in the thread list as `/agent · owner/repo#N` and in the fleet
   view with the request number.
-- The poller logs under `[mentions]`. A rate-limited feed backs off and resumes on its own.
+- The poller logs under `[mentions]`. A rate-limited account backs off and resumes on its own.
 - Deliveries are recorded under the source id `mentions:<owner>` next to the webhook's, so the
   PR follow-ups panel shows them in one list.

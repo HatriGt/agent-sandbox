@@ -6,18 +6,24 @@ import { backoffUntil, GhRateLimitError, type RateInfo } from "./repo-watch.js";
 import { claimDelivery, logDelivery } from "./trigger-store.js";
 
 /**
- * `/agent …` on ANY pull request, without a webhook: the controller polls each owner's own GitHub
- * activity feed (`GET /users/{login}/events`, which lists the comments that account wrote across
- * every repo it can see, private ones included when the token is the account's own) and hands each
- * PR comment addressed to the agent to the follow-up engine as if it were an `issue_comment`
- * delivery. The engine adopts the PR, runs the request on its branch and replies on the PR.
+ * `/agent …` on ANY pull request, without a webhook: the controller asks GitHub, as each stored
+ * account, which issues and PRs that account can see were updated since the last look
+ * (`GET /issues?filter=all&since=…`, every repo the token reaches, private ones included), reads
+ * the new comments on each updated PR, and hands every comment addressed to the agent to the
+ * follow-up engine as if it were an `issue_comment` delivery. The engine adopts the PR, runs the
+ * request on its branch and replies on the PR.
  *
- * Only the owner's OWN comments arrive this way (it is their feed): a collaborator's `/agent` on a
- * repo needs the follow-up webhook or an automation. Every read is conditional (ETag; a 304 is free
- * against the rate limit) and honours GitHub's `X-Poll-Interval`. The first read of a feed records
- * a baseline — nothing written before the controller started watching is replayed — and later
- * reads act only on events newer than the last id seen, so a short controller outage loses nothing
- * while a feed left unread for longer than STALE_MS starts over.
+ * Why not the activity feed (`/users/{login}/events`)? It is best effort: events show up late,
+ * vanish again, and their ids are not one sequence. The issues list is the same consistent read
+ * the GitHub UI does. Anyone whose comment the account can read arrives this way (the engine
+ * still only obeys trusted commenters), not just the account's own comments.
+ *
+ * Every read is conditional (ETag; a 304 is free against the rate limit) and honours GitHub's
+ * `X-Poll-Interval` when sent. Watching starts with a baseline — nothing written before the
+ * controller started watching is replayed — and later reads act only on what changed since the
+ * last look, so a short controller outage loses nothing while a cursor left unused for longer
+ * than STALE_MS starts over. Each comment is acted on once (a delivery claim by comment id),
+ * whichever path delivers it first.
  */
 
 export interface MentionAnswer {
@@ -25,7 +31,7 @@ export interface MentionAnswer {
   data?: unknown;
   etag?: string;
   rate?: RateInfo;
-  /** GitHub's `X-Poll-Interval` (seconds) for this feed. */
+  /** GitHub's `X-Poll-Interval` (seconds), when the endpoint sends one. */
   pollInterval?: number;
 }
 
@@ -42,62 +48,62 @@ export interface MentionDeps {
   now?(): number;
 }
 
-interface GhEvent {
-  id: string;
-  type: string;
-  actor?: { login?: string; type?: string };
-  repo?: { name?: string };
-  payload?: { action?: string; issue?: Record<string, any>; comment?: Record<string, any> };
+interface GhIssue {
+  number: number;
+  updated_at?: string;
+  pull_request?: unknown;
+  repository?: { full_name?: string; name?: string; owner?: { login?: string }; html_url?: string };
+  repository_url?: string;
+  [k: string]: unknown;
+}
+
+interface GhComment {
+  id: number;
+  body?: string;
   created_at?: string;
+  user?: { login?: string; type?: string };
+  author_association?: string;
+  [k: string]: unknown;
 }
 
 interface FeedState {
-  /**
-   * Ids of the events the last read returned. GitHub event ids are not one rising sequence
-   * (an IssueCommentEvent can carry a far smaller id than an older PushEvent), so "newer than
-   * the highest id seen" would drop comments; an event is new when it was not in the feed before.
-   */
-  seen: string[];
+  /** ISO time of the newest update seen; the next read asks for changes since then. */
+  since: string;
 }
 
 const SOURCE = "events";
-/** A feed not read for this long is re-baselined rather than replayed. */
+/** A cursor not used for this long is re-baselined rather than replayed. */
 const STALE_MS = 24 * 3600_000;
-/** Events older than this are never acted on, whatever the feed says. */
+/** Comments older than this are never acted on, whatever the list says. */
 const MAX_AGE_MS = 24 * 3600_000;
 const DEFAULT_POLL_S = 60;
+/** Pages of the updated-issues list read per poll; more than this in one interval is a storm, not a backlog. */
+const MAX_PAGES = 3;
 
-/** Ids kept between reads: the whole last page plus what was seen before it, bounded. */
-const SEEN_MAX = 1000;
-const remember = (events: GhEvent[], before: string[] = []): string[] => {
-  const ids = events.map((e) => String(e.id));
-  const set = new Set(ids);
-  for (const id of before) {
-    if (set.size >= SEEN_MAX) break;
-    set.add(id);
-  }
-  return [...set];
+const repoOf = (i: GhIssue): string => {
+  if (i.repository?.full_name) return String(i.repository.full_name);
+  const m = /\/repos\/([^/]+\/[^/]+)$/.exec(String(i.repository_url ?? ""));
+  return m?.[1] ?? "";
 };
-const at = (e: GhEvent): number => (e.created_at ? Date.parse(e.created_at) || 0 : 0);
+const t = (iso: string | undefined): number => (iso ? Date.parse(iso) || 0 : 0);
 
-/** The webhook-shaped `issue_comment` payload the engine classifies, built from one feed event. */
-export function payloadOf(e: GhEvent, login: string): Record<string, unknown> {
-  const repo = String(e.repo?.name ?? "");
+/** The webhook-shaped `issue_comment` payload the engine classifies, from one listed PR and one of its comments. */
+export function payloadOf(issue: GhIssue, comment: GhComment): Record<string, unknown> {
+  const repo = repoOf(issue);
   const [owner, name] = repo.split("/");
   return {
     action: "created",
     repository: { full_name: repo, name: name ?? "", owner: { login: owner ?? "" }, html_url: `https://github.com/${repo}` },
-    sender: { login: String(e.actor?.login ?? login), type: e.actor?.type ?? "User" },
-    issue: e.payload?.issue ?? {},
-    comment: e.payload?.comment ?? {},
+    sender: { login: String(comment.user?.login ?? ""), type: comment.user?.type ?? "User" },
+    issue,
+    comment,
   };
 }
 
-/** Is this event a PR comment addressed to the agent? (Everything else in a feed is noise.) */
-export function isAgentCommand(e: GhEvent): boolean {
-  if (e.type !== "IssueCommentEvent" || e.payload?.action !== "created") return false;
-  if (!e.payload.issue?.pull_request) return false;
-  return addressedToAgent(String(e.payload.comment?.body ?? ""));
+/** Is this comment on a PR addressed to the agent? (Everything else in the list is noise.) */
+export function isAgentCommand(issue: GhIssue, comment: GhComment): boolean {
+  if (!issue.pull_request) return false;
+  return addressedToAgent(String(comment.body ?? ""));
 }
 
 export function makeMentionWatcher(d: MentionDeps) {
@@ -120,10 +126,8 @@ export function makeMentionWatcher(d: MentionDeps) {
     } catch {
       state = undefined;
     }
-    // A row written by the high-water-mark version has no id set: start over with a baseline,
-    // and without the etag — a 304 would otherwise keep the stale row until the feed changes,
-    // and that change would then be swallowed as the baseline.
-    if (state && !Array.isArray(state.seen)) return undefined;
+    // A row from an earlier version (the activity-feed poller) is not a usable cursor: start over.
+    if (!state || typeof state.since !== "string" || !t(state.since)) return undefined;
     return { etag: r.etag ?? undefined, state };
   };
   const touch = (owner: string, login: string) => d.db.prepare(`UPDATE repo_watch SET updated_at = ? WHERE owner = ? AND repo = ? AND source = ?`).run(now(), owner, feedKey(login), SOURCE);
@@ -135,63 +139,81 @@ export function makeMentionWatcher(d: MentionDeps) {
       )
       .run(owner, feedKey(login), SOURCE, etag ?? null, JSON.stringify(state), now());
 
+  const listPath = (since: string, page: number) =>
+    `/issues?filter=all&state=all&since=${encodeURIComponent(since)}&sort=updated&direction=desc&per_page=100${page > 1 ? `&page=${page}` : ""}`;
+
   async function pollFeed(owner: string, login: string): Promise<number> {
     const row = load(owner, login);
-    let r: MentionAnswer;
-    try {
-      r = await d.get(owner, login, `/users/${encodeURIComponent(login)}/events?per_page=100`, row?.etag);
-    } catch (e) {
-      if (e instanceof GhRateLimitError) nextAt.set(login, backoffUntil(e.rate, e.status, now()) ?? now() + 60_000);
-      throw e;
-    }
-    const pause = backoffUntil(r.rate, undefined, now());
-    nextAt.set(login, Math.max(pause ?? 0, now() + (r.pollInterval && r.pollInterval > 0 ? r.pollInterval : DEFAULT_POLL_S) * 1000));
-    if (r.notModified) {
-      touch(owner, login);
+    if (!row) {
+      // First look (or a stale cursor): a baseline, nothing replayed, no request.
+      store(owner, login, undefined, { since: new Date(now()).toISOString() });
+      nextAt.set(login, now() + DEFAULT_POLL_S * 1000);
       return 0;
     }
-    const events = (Array.isArray(r.data) ? r.data : []) as GhEvent[];
-    if (!row?.state) {
-      // First read (or a stale feed): a baseline, nothing replayed.
-      store(owner, login, r.etag, { seen: remember(events) });
-      return 0;
+    const since = row.state.since;
+    const issues: GhIssue[] = [];
+    let etag: string | undefined;
+    for (let page = 1; page <= MAX_PAGES; page++) {
+      let r: MentionAnswer;
+      try {
+        r = await d.get(owner, login, listPath(since, page), page === 1 ? row.etag : undefined);
+      } catch (e) {
+        if (e instanceof GhRateLimitError) nextAt.set(login, backoffUntil(e.rate, e.status, now()) ?? now() + 60_000);
+        throw e;
+      }
+      if (page === 1) {
+        const pause = backoffUntil(r.rate, undefined, now());
+        nextAt.set(login, Math.max(pause ?? 0, now() + (r.pollInterval && r.pollInterval > 0 ? r.pollInterval : DEFAULT_POLL_S) * 1000));
+        if (r.notModified) {
+          touch(owner, login);
+          return 0;
+        }
+        etag = r.etag;
+      }
+      const batch = (Array.isArray(r.data) ? r.data : []) as GhIssue[];
+      issues.push(...batch);
+      if (batch.length < 100) break;
     }
-    const seen = new Set(row.state.seen);
-    const fresh = events
-      .filter((e) => !seen.has(String(e.id)))
-      .filter((e) => !e.created_at || now() - Date.parse(e.created_at) < MAX_AGE_MS)
-      .sort((a, b) => at(a) - at(b) || String(a.id).localeCompare(String(b.id)));
-    // Record what was seen before acting: a crash mid-way never replays the batch.
-    store(owner, login, r.etag, { seen: remember(events, row.state.seen) });
+    // Move the cursor before acting: a crash mid-way never replays the batch.
+    const newest = issues.reduce((m, i) => Math.max(m, t(i.updated_at)), t(since));
+    store(owner, login, etag, { since: new Date(newest).toISOString() });
+
     let fired = 0;
     const source = mentionsSourceId(owner);
-    for (const e of fresh) {
-      if (!isAgentCommand(e)) continue;
-      if (!claimDelivery(d.db, source, [`event:${e.id}`], now())) continue;
-      let payload = payloadOf(e, login);
-      const comment = payload.comment as Record<string, any>;
-      // Older feed shapes omit the commenter's association: read the comment itself, which carries it.
-      if (!comment.author_association && comment.id && e.repo?.name) {
-        try {
-          const full = await d.get(owner, login, `/repos/${e.repo.name}/issues/comments/${Number(comment.id)}`);
-          if (!full.notModified && full.data && typeof full.data === "object") payload = { ...payload, comment: { ...comment, ...(full.data as object) } };
-        } catch (err) {
-          log(`[mentions] ${login}: reading comment ${comment.id} failed: ${(err as Error).message.slice(0, 200)}`);
-        }
-      }
-      const tag = `${e.repo?.name ?? "?"}#${Number((payload.issue as Record<string, any>)?.number) || "?"}`;
+    const prs = issues.filter((i) => i.pull_request && repoOf(i) && Number.isFinite(Number(i.number))).sort((a, b) => t(a.updated_at) - t(b.updated_at));
+    for (const issue of prs) {
+      const repo = repoOf(issue);
+      const tag = `${repo}#${issue.number}`;
+      let comments: GhComment[];
       try {
-        const res = await d.engine.handle({ id: source, owner }, "issue_comment", payload, { adopt: true });
-        if (!res.handled) logDelivery(d.db, source, { at: now(), outcome: "skipped", reason: "ignored", detail: `/agent on ${tag}: ${res.reason}`.slice(0, 300) });
-        else if (res.outcome === "fired") fired++;
-      } catch (err) {
-        logDelivery(d.db, source, { at: now(), outcome: "failed", reason: "error", detail: `/agent on ${tag}: ${(err as Error).message.slice(0, 200)}` });
+        const r = await d.get(owner, login, `/repos/${repo}/issues/${Number(issue.number)}/comments?since=${encodeURIComponent(since)}&per_page=100`);
+        comments = (Array.isArray(r.data) ? r.data : []) as GhComment[];
+      } catch (e) {
+        if (e instanceof GhRateLimitError) {
+          nextAt.set(login, backoffUntil(e.rate, e.status, now()) ?? now() + 60_000);
+          throw e;
+        }
+        log(`[mentions] @${login}: reading comments on ${tag} failed: ${(e as Error).message.slice(0, 200)}`);
+        continue;
+      }
+      for (const c of comments.sort((a, b) => t(a.created_at) - t(b.created_at))) {
+        if (!isAgentCommand(issue, c)) continue;
+        // `since` on the comments list is by last edit: an old comment edited now is not a new ask.
+        if (c.created_at && (t(c.created_at) < t(since) || now() - t(c.created_at) >= MAX_AGE_MS)) continue;
+        if (!claimDelivery(d.db, source, [`comment:${c.id}`], now())) continue;
+        try {
+          const res = await d.engine.handle({ id: source, owner }, "issue_comment", payloadOf(issue, c), { adopt: true });
+          if (!res.handled) logDelivery(d.db, source, { at: now(), outcome: "skipped", reason: "ignored", detail: `/agent on ${tag}: ${res.reason}`.slice(0, 300) });
+          else if (res.outcome === "fired") fired++;
+        } catch (err) {
+          logDelivery(d.db, source, { at: now(), outcome: "failed", reason: "error", detail: `/agent on ${tag}: ${(err as Error).message.slice(0, 200)}` });
+        }
       }
     }
     return fired;
   }
 
-  /** Read every watched feed that is due. Re-entrancy guarded: a slow GitHub never stacks polls. */
+  /** Look for every watched account that is due. Re-entrancy guarded: a slow GitHub never stacks polls. */
   async function tick(): Promise<void> {
     if (ticking) return;
     ticking = true;
@@ -211,7 +233,7 @@ export function makeMentionWatcher(d: MentionDeps) {
           lastError.delete(k);
         } catch (e) {
           const msg = (e as Error).message.slice(0, 200);
-          // Log a failing feed once per distinct error, not every tick.
+          // Log a failing account once per distinct error, not every tick.
           if (lastError.get(k) !== msg) log(`[mentions] @${a.login} (${a.owner}): ${msg}`);
           lastError.set(k, msg);
         }
