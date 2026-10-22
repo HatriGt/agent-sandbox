@@ -33,8 +33,7 @@ import { PageEnter } from "@/components/ui/page";
 import { TrialBadge } from "@/components/TrialBadge";
 import { Capacity } from "@/components/Capacity";
 import { CommandPalette, openPalette, type PaletteAction } from "@/components/CommandPalette";
-import { TopBar, type Crumb } from "@/components/TopBar";
-import { ShellTabs, useShellTabs } from "@/components/ShellTabs";
+import { ShellBar, useShellTabs, type Crumb } from "@/components/ShellTabs";
 import { ShortcutsDialog } from "@/components/ShortcutsDialog";
 import { Toaster } from "@/components/ui/sonner";
 import { getMe, signOut } from "@/lib/auth";
@@ -941,8 +940,22 @@ export default function App() {
               <Plus className="size-4" />
             </Button>
           </div>
-          <TopBar crumbs={crumbs} working={working} waiting={waiting.length} onOpenWaiting={() => waiting[0] && open(waiting[0].name)} collapsed={collapsed} onToggleSidebar={() => setCollapsed(!collapsed)} />
-          <ShellTabs tabs={shellTabs.tabs} activeKey={shellTabs.activeKey} homeActive={route.view === "hub"} gone={shellTabs.gone} boxes={boxes} onSelect={go} onHome={goHub} onClose={shellTabs.close} />
+          <ShellBar
+            tabs={shellTabs.tabs}
+            activeKey={shellTabs.activeKey}
+            homeActive={route.view === "hub"}
+            crumbs={crumbs}
+            gone={shellTabs.gone}
+            boxes={boxes}
+            working={working}
+            waiting={waiting.length}
+            collapsed={collapsed}
+            onToggleSidebar={() => setCollapsed(!collapsed)}
+            onOpenWaiting={() => waiting[0] && open(waiting[0].name)}
+            onSelect={go}
+            onHome={goHub}
+            onClose={shellTabs.close}
+          />
           <AnimatePresence mode="wait" initial={false} custom={paneCustom}>
             <motion.div
               key={paneKey}

@@ -651,6 +651,26 @@ if (stream) {
   const paneCount = await page.locator("[aria-label='Side chat']").count();
   console.log(`after close: side rows in transcript=${sideRows}, side chat surfaces mounted=${paneCount}`);
   await shot("-side-closed");
+} else if (interact === "details") {
+  // The masthead's Details popover, and the chrome height above the conversation.
+  const chrome = await page.evaluate(() => {
+    const h = document.querySelector("header");
+    const bar = h?.previousElementSibling;
+    const r = (el) => (el ? Math.round(el.getBoundingClientRect().height) : null);
+    const row = [...(h?.children ?? [])].map((c) => `${(c.getAttribute("aria-label") ?? c.tagName.toLowerCase()).slice(0, 12)} ${Math.round(c.getBoundingClientRect().width)}`).join(" | ");
+    return `shell bar ${r(bar)}px + masthead ${r(h)}px = ${Math.round(h?.getBoundingClientRect().bottom ?? 0)}px to the conversation
+row: inner ${Math.round(h?.clientWidth ?? 0)} = ${row}; scrollWidth ${h?.scrollWidth}`;
+  });
+  console.log("chrome:", chrome);
+  await shot();
+  // Phones reach Details through the ⋯ menu (a bottom sheet); desks through the Info button.
+  if (await page.locator("button[aria-label='Details']").isVisible()) await page.locator("button[aria-label='Details']").click();
+  else {
+    await page.locator("button[aria-label='More actions']").click();
+    await page.getByRole("menuitem", { name: /^Details/ }).click();
+  }
+  await page.waitForTimeout(500);
+  await shot("-details");
 } else if (interact === "resolve") {
   // The failed `deploy-preview.sh` call: its Resolve row ("Provide DEPLOY_TOKEN") under the terminal panel.
   await page.locator("[data-resolve-row]").first().scrollIntoViewIfNeeded().catch((e) => errors.push("resolve: " + e.message));

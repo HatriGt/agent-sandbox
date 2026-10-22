@@ -260,23 +260,36 @@ export type PaneCommands = {
   quickOpen(prefill?: string): void;
   toggleSidebar(): void;
   searchInFiles(): void;
+  /** Find in the active file; with no file open, the files Search view. */
+  find(): void;
+  save(): void;
   split(): void;
   toggleWrap(): void;
   focusGroup(g: 0 | 1): void;
 };
-export type Shortcut = { key: string; mod?: boolean; shift?: boolean; alt?: boolean; label: string; run: (c: PaneCommands) => void };
+export type ShortcutId = "quickOpen" | "goToLine" | "find" | "searchInFiles" | "save" | "close" | "sidebar" | "split" | "wrap" | "group1" | "group2";
+export type Shortcut = { id: ShortcutId; key: string; mod?: boolean; shift?: boolean; alt?: boolean; label: string; what: string; run: (c: PaneCommands) => void };
 
+/** The pane's chords, in the order the shortcuts dialog lists them. Each label is one glyph per key. */
 export const SHORTCUTS: Shortcut[] = [
-  { key: "w", mod: true, label: "⌘W", run: (c) => c.closeActive() },
-  { key: "p", mod: true, label: "⌘P", run: (c) => c.quickOpen() },
-  { key: "g", mod: true, label: "⌘G", run: (c) => c.quickOpen(":") },
-  { key: "b", mod: true, label: "⌘B", run: (c) => c.toggleSidebar() },
-  { key: "f", mod: true, shift: true, label: "⌘⇧F", run: (c) => c.searchInFiles() },
-  { key: "\\", mod: true, label: "⌘\\", run: (c) => c.split() },
-  { key: "z", alt: true, label: "⌥Z", run: (c) => c.toggleWrap() },
-  { key: "1", mod: true, label: "⌘1", run: (c) => c.focusGroup(0) },
-  { key: "2", mod: true, label: "⌘2", run: (c) => c.focusGroup(1) },
+  { id: "quickOpen", key: "p", mod: true, label: "⌘P", what: "Go to file", run: (c) => c.quickOpen() },
+  { id: "goToLine", key: "g", mod: true, label: "⌘G", what: "Go to line", run: (c) => c.quickOpen(":") },
+  { id: "find", key: "f", mod: true, label: "⌘F", what: "Find in file", run: (c) => c.find() },
+  { id: "searchInFiles", key: "f", mod: true, shift: true, label: "⌘⇧F", what: "Search in files", run: (c) => c.searchInFiles() },
+  { id: "save", key: "s", mod: true, label: "⌘S", what: "Save file", run: (c) => c.save() },
+  { id: "close", key: "w", mod: true, label: "⌘W", what: "Close tab", run: (c) => c.closeActive() },
+  { id: "sidebar", key: "b", mod: true, label: "⌘B", what: "Toggle the files panel", run: (c) => c.toggleSidebar() },
+  { id: "split", key: "\\", mod: true, label: "⌘\\", what: "Split the editor", run: (c) => c.split() },
+  { id: "wrap", key: "z", alt: true, label: "⌥Z", what: "Toggle word wrap", run: (c) => c.toggleWrap() },
+  { id: "group1", key: "1", mod: true, label: "⌘1", what: "Focus the first group", run: (c) => c.focusGroup(0) },
+  { id: "group2", key: "2", mod: true, label: "⌘2", what: "Focus the second group", run: (c) => c.focusGroup(1) },
 ];
+
+/**
+ * An overlay that owns the keyboard: a Radix dialog, menu, popover or listbox, or the command
+ * palette's native `<dialog>`. Pane chords stay quiet while one is open.
+ */
+export const OVERLAY_OPEN = 'dialog[open], [data-state="open"]:is([role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"])';
 
 // ⌥ on macOS turns the key into a symbol (⌥Z is "Ω"), so the physical code is matched as well.
 const codeOf = (key: string) => (key === "\\" ? "Backslash" : /^[a-z]$/.test(key) ? `Key${key.toUpperCase()}` : /^[0-9]$/.test(key) ? `Digit${key}` : null);

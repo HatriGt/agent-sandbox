@@ -61,8 +61,9 @@ export function SendBar({
   onFocusRequest?: (focus: () => void) => void;
   /** The server could not deliver this reply: the parent drops the optimistic echo. */
   onReplyFailed?: (text: string) => void;
-  /** Text to drop into the composer (e.g. a starter prompt); `n` changes to re-apply the same text. */
-  seed?: { text: string; n: number } | null;
+  /** Text to drop into the composer (e.g. a starter prompt); `n` changes to re-apply the same text.
+   *  `append` adds it after a non-empty draft instead of replacing it (a quoted selection). */
+  seed?: { text: string; n: number; append?: boolean } | null;
 }) {
   const busy = runState === "running" && !sleeping;
   const [value, setValue] = React.useState(() => readDraft(boxName));
@@ -160,11 +161,12 @@ export function SendBar({
   }, [onFocusRequest]);
   React.useEffect(() => {
     if (!seed) return;
-    setValue(seed.text);
+    setValue((prev) => (seed.append && prev.trim() ? `${prev.trimEnd()}\n\n${seed.text}` : seed.text));
     requestAnimationFrame(() => {
       const t = textarea();
-      t?.focus();
-      t?.setSelectionRange(seed.text.length, seed.text.length);
+      if (!t) return;
+      t.focus();
+      t.setSelectionRange(t.value.length, t.value.length);
     });
   }, [seed]);
   const still = useReducedMotion();

@@ -746,3 +746,112 @@ no new detail was taken from them beyond what this file already records.
 - Only recorded facts. Unknown or empty rows are dropped: no "—", no "$ —", no "no questions asked", no "exit 0" when tests or verify already speak. A digest headline that just says "done" is dropped so the state is said once.
 - The pill also absorbs `RunSummary`: its steps/commands go in a "work" row, its exit-code note in "note", and Copy transcript / Run again are the last row of the details (`[data-run-pill-actions]`). Nothing else renders at run end.
 - History keeps `OutcomeCard`/`DigestCard`; the data (`/history/outcome.json`, `/digest.json`) is unchanged.
+
+## Round: two-row chrome (2026-10-22)
+
+Was: four rows above the conversation. A 44px top bar (sidebar toggle, breadcrumb trail, search,
+working/need-you pill), a 36px tab strip, then a two-line masthead (state pill, title, Stop, Files,
+Inspector, Side chat, Chat/Trace, ⋯ on line one; machine name, vitals, every repo chip, PR, Started,
+elapsed, agent, lifecycle, size on line two). 160px at 1440x900, measured from the viewport top to the
+masthead's bottom edge. The second masthead line repeated what the sidebar, the status bar and the
+trace already say, every run, whether or not anyone was asking.
+
+Now: two rows, 88px at 1440x900 (shell bar 40 + masthead 48; 92px on a 390 phone, where the phone
+bar is 44).
+
+- **One shell bar** (`ShellTabs.tsx` → `ShellBar`, `TopBar.tsx` folded in). h-10, `bg-sidebar`, md+.
+  `[sidebar toggle] [Home] [open tabs, scroll sideways] … [⌘K search, w-56] [working · need-you]`. Tab
+  routes (box, PR, automation runs) no longer draw a breadcrumb trail because the active tab is the
+  breadcrumb. A route that is neither a tab nor the hub (History, Admin, a repo) renders its crumbs as
+  one non-closable **page tab** after Home: parents muted and clickable, the last crumb in the
+  foreground colour, chevrons between, the same `layoutId` underline. `crumbs` in `App.tsx` stays the
+  single data source; the bar only decides whether to show it (`pageTab = !homeActive && !activeKey`).
+  Alt+W / Alt+[ / Alt+], middle-click close, live and attention dots, `gone` dimming and the
+  NumberTicker are unchanged.
+- **One masthead line** (`thread/ThreadHeader.tsx`). h-12, px-5 on a desk:
+  `[← phones] [state pill] [title, takes the slack, floor 12rem at lg] [PR · clock at xl, first repo
+  +N from 2xl] [Details] [Stop · Files · Inspector · Side chat · Chat/Trace · ⋯]`. The title is the
+  identity, so it is the only thing that shrinks. The cluster never shrinks; a chip that ellipsises to
+  "ord" is worse than no chip, so each piece has a breakpoint where it fits whole. The arithmetic at
+  1280 (1008px inside the padding): pill 121 + title floor 192 + controls 383 + gaps 32 leaves 280,
+  enough for PR + clock but not the repo chip as well. At 1536 the branch chip joins. Below xl the
+  cluster is gone and Details is the only place for meta.
+- **"Working · Writing"**: the live activity moved into the state pill's label at xl+ (`Swap`,
+  `max-w-[28ch] truncate`, full text in the pill's tooltip; `thread/live-activity.ts` reads the tail
+  of the trace). Below xl the pill says "Working". The agent's current step was the one thing on the
+  old second line worth keeping in view, and it belongs to the state, not to the metadata.
+- **Details** is an `Info` icon button (tooltip "Details — machine, repositories, timing", Tab
+  reachable, Esc closes). A popover on a desk (`ui/popover.tsx`, new, same elevation and motion as
+  `ui/dropdown-menu.tsx`: `shadow-e3`, zoom-in-95 over 150ms), a bottom Sheet on a phone where the
+  trigger lives in the ⋯ menu's first row. Inside, top to bottom: machine friendly name with the kept
+  pin, the mono short id (click copies, IconSwap Copy→Check), the vitals line (up · cpu · memory ·
+  disk · role), then a `dl` of Repos (every chip, "Attach another" opens the same RepoPicker as the ⋯
+  menu), PR, Started HH:MM with the live elapsed, Agent with harness or playbook, Lifecycle (last
+  action or finished, and the deadline), Size (memory and disk tiers, read-only, "resize from ⋯").
+- **Inspector and Side chat are icon-only** at every width (tooltips and aria-labels carry the names).
+  Stop, Files and Chat/Trace keep their labels from sm; Files folds into ⋯ below md. A deadline under
+  five minutes stays inline next to the controls in the attention colour, because that one is urgent.
+- Motion: nothing cuts. The pill's activity swaps through `Swap`, the id chip's icon through
+  `IconSwap`, the popover zooms from its trigger, the title still crossfades into the rename input.
+
+Rule: chrome shows identity and state; everything else waits in Details. A second line is not a place
+to park facts.
+
+## Round: tables you can shape (2026-10-22)
+
+Scope: chat visualizer tables (viz/DataTable) and the page-level table (ui/data-table) now share one width model in `web/src/lib/column-widths.ts`.
+
+### One width model
+- `useColumnWidths(storeKey, ready, signature)` owns three layers per column: **floor** (header label + icon, measured once on first paint, never crossed), **fit** (widest cell, clamped 56..360, measured in one synchronous max-content relayout before paint) and **manual** (px the user set). `width(id)` = manual ?? fit, never under floor. `shaped` is true once any manual width exists.
+- `columnGrip(id, label, cols)` returns the props for the grip span: `role=separator`, `aria-orientation=vertical`, `aria-label="Resize <label>"`, `aria-valuenow`/`aria-valuemin`, `tabIndex=0`, drag, ←/→ nudge 16px, double-click reset. Styling stays in `.dt-resize` (index.css): hairline on header-row hover, accent line while dragged or focused, `col-resize` cursor document-wide during a drag.
+- Persistence: `localStorage["asb.cols.<key>"]`. Page tables use their own id. Viz tables use `viz:<shapeKey>` where `shapeKey` is an FNV-1a hash of the frame title plus the header texts, so the same table shape in a later turn keeps its widths and a different table does not inherit them.
+
+### Two layout modes, no fighting
+- **Unshaped** (default): `table-layout: auto`, `width: 100%`, cells `nowrap`. The browser fits to content; wide tables scroll inside the frame. Nothing is stored.
+- **Shaped** (after the first drag or nudge): the hook snapshots every column's rendered width first, then the table switches to `table-layout: fixed` with px `<col>`s and a trailing flex `<col>` that absorbs the slack. Text cells wrap (`overflow-wrap: anywhere`). `min-width` = sum of column widths, so narrowing the frame scrolls instead of crushing columns. Double-click on every grip returns the table to unshaped.
+
+### Overflow is a feeling, not a scrollbar
+- First column is sticky (`bg-card`, hairline right edge plus a soft 12px shadow) only once the user has scrolled right (`data-scrolled-start` on the wrapper). A 24px fade on the right edge appears only while more content exists that way (`data-scrolled-end`). Both come from observing `scrollLeft` and `scrollWidth`, so a table that fits shows neither.
+- Row tint is a CSS variable (`--row-bg`) shared by the row and its sticky cell, so hover, focus and pinned tints stay continuous across the sticky edge. Tints are opaque `color-mix` results so the sticky cell never shows rows sliding under it.
+
+### Header and cells
+- Header labels: `text-micro`, `tracking-[0.05em]`, uppercase, muted. Sort affordance (chevrons) at 60% only on hover; the sorted header goes `foreground` with a single arrow that rotates for direction. Numeric headers are right-aligned with the icon on the left so the label stays flush with the numbers.
+- Cells: 12px horizontal, 8px vertical. No zebra. Hover `muted/50`, pinned `muted/40`, focus `muted/60`. Numeric cells are `tabular-nums`, right-aligned, and keep the magnitude bar under the value. Status cells keep their tone.
+- Footer appears at more than 8 rows: filter input plus `"N rows"` and `"· M shown"` only while a filter narrows the set. `aria-live=polite` on the count.
+- Keyboard: header sort buttons are real buttons; grips are focusable separators with ←/→ nudge; rows pin with Enter/Space as before.
+
+### Left out on purpose
+- The grip is a constant 8px hit area straddling the edge, not 4px widening to 8px on hover. `.dt-resize::after` in index.css already assumes 8px and that file is not owned by this round.
+- Other viz blocks (ChartExtras heatmap matrix, AutoBlocks/ListBlocks/SmallBlocks key-value `<dl>` grids) are not row tables and were not converted.
+
+## Round: find like VS Code, window shortcuts (2026-10-22)
+
+**Find is a widget, not a panel.** The editor's find lives in a floating card at the top-right of the code, 320px wide (384px with the replace row), `rounded-md`, hairline border, `shadow-e2`, `bg-popover`, 120ms fade and 6px drop. It never pushes the code down. The search input takes focus on open and is seeded from a short single-line selection. The count reads "n of N" in tabular figures, "No results" in destructive, "Invalid" for a bad regex, "999+" past the cap. Match case, whole word and regex are `aria-pressed` toggles inside the input's frame, lit with `bg-live/15 text-live`. Replace is a chevron-expanded second row and only exists when the file is editable. Keys: Enter next, Shift+Enter previous, Escape closes and returns focus to the code, Enter in Replace replaces one, ⌘Enter replaces all. The last query follows the user from file to file.
+
+**Highlighting rides the package's own panel.** @codemirror/search only paints matches while its panel is open, so the host keeps a hidden panel (`createPanel` returns a `hidden` div, `.cm-panels { display: none }`) open for exactly as long as the widget is mounted. The widget pushes its query with `setSearchQuery` and lets `findNext`, `findPrevious`, `replaceNext`, `replaceAll` do the moving. Typing jumps to the nearest match at or after the caret (wrapping) so the count reads "1 of N" and the editor scrolls there.
+
+**Workspace chords are window chords.** While the files pane is mounted, every `SHORTCUTS` entry fires from a window-level capture listener, so ⌘P, ⌘F, ⌘S, ⌘B and the rest work from the composer and the side chat input, not just inside the code. The listener skips when `e.defaultPrevented` and when any Radix dialog, menu, popover or the command palette (a native `<dialog>`) is open (`OVERLAY_OPEN`). ⌘K stays the palette's. Quick open (role="dialog", no `data-state`) does not block the chords so ⌘P inside it is harmless. The ShortcutsDialog lists the whole table under "Workspace · while the files pane is open" and `SHORTCUTS` is the single source for that list, the empty editor's welcome list and every menu hint.
+
+**Shortcut table.** ⌘P Go to file, ⌘G Go to line (quick open with ":"), ⌘F Find in file (no file open: Search in files), ⌘⇧F Search in files, ⌘S Save file, ⌘W Close tab, ⌘B Toggle the files panel, ⌘\ Split the editor, ⌥Z Toggle word wrap, ⌘1 / ⌘2 focus a group. Editor-local only: ⌘D add next occurrence, ⌘⇧L select all occurrences, Esc close find.
+
+**Editor status strip.** 22px, `text-micro`, muted, hairline top border. Left: "Ln X, Col Y" live, "(N selected)" when a selection exists, "Diff" in diff mode. Right: save state (Saving…, Unsaved in attention, Saved, Autosave on; `aria-live`), language, Wrap toggle (`aria-pressed`), and an italic bordered "Preview" badge that pins the tab on click. The save stamp moved here from the breadcrumb bar and footer.
+
+**Tabs are flush.** No gap or padding on the strip. The active tab is `bg-card` with a 2px top line in ink (`bg-foreground`, `/30` when the group is unfocused); the backdrop glides between tabs with the shared spring. Preview tabs are italic. A dirty tab shows a 8px dot that swaps to × under the pointer; clean inactive tabs reveal × on hover only.
+
+**Breadcrumb bar 26px.** `ChevronRight size-3` between segments, clickable segments `hover:bg-muted`, `Segmented size="xs"` for Diff / File on the right, download as a size-5 icon button.
+
+**Explorer header.** A 26px row: `.label` "Explorer" in sentence case (DESIGN.md: no uppercase eyebrows) plus the repo name as a `stamp` when there is one repo. New file, New folder, Collapse all, Refresh are size-6 icon buttons revealed on hover or focus-within. Tree rows are 22px; the glide highlight and indent guides stay. The tabs-row Refresh hides in the Explorer view since the header owns it.
+
+**Empty editor.** A `<dl>` of the chords that get someone into a file, rendered with `<Kbd>`: ⌘P open, ⌘⇧F search, ⌘F find, ⌘B sidebar, ⌘\ split.
+
+## Round: select, then ask (2026-10-22)
+
+Select any text in the conversation and a small pill floats above it: **Ask in side chat**, **Quote in reply**, **Copy**. The selection is the question; the pill only decides where it goes.
+
+**The pill.** `SelectionToolbar` reads the document selection on `selectionchange` (settled 80ms, never while the mouse button is still down) and shows only when the selection is non-collapsed, at least two trimmed characters, and both ends sit inside the conversation scroller. Position is fixed, centred on the first line's client rect, 8px above it, flipped below when the line sits within 48px of the top, and clamped 8px inside the viewport once its real width is measured. Scroll (captured) and resize recompute on the next frame; a selection scrolled out of the conversation's own box hides the pill. Pointer devices at md and up only; phones keep the native selection UI. `bg-popover`, `border`, `shadow-e3`, `rounded-lg`, h-8 with h-7 buttons, `text-micro` labels, 14px lucide icons, 120ms fade with a 4px rise (0px under reduced motion). The pill cancels pointerdown so a click never collapses the selection it acts on; Escape hides it; Copy swaps to a check plus "Copied" for 1.2s and keeps the selection.
+
+**Ask in side chat.** The store gains `quote: string | null` (persisted, re-validated on load, capped at 1500 characters with an ellipsis). A `quote` event attaches the text and opens the side chat; `unquote` detaches it; `asked` clears both draft and quote. The composer shows the quote as a chip above the textarea (Quote icon, 60-character single-line preview, × to detach, 120ms collapse that keeps its last text so it never flashes empty). The placeholder becomes "Explain this." and an empty draft sends exactly that, so one click and Enter is a full question. On the wire the question stays one string: every quote line prefixed `> `, a blank line, then the typed text. The turn also keeps `quote` so the bubble renders it as a blockquote (`border-l-2 border-border`, muted, three-line clamp, click to expand) above the typed text instead of raw `>` lines. A quote attaches while an answer is pending; it rides the next question. Retry re-sends the failed question verbatim with its own quote.
+
+**Quote in reply.** Inserts `> text` plus a blank line at the start of the main composer's draft, or appends after a non-empty draft, through SendBar's seed mechanism (`append: true`), then focuses the composer with the caret at the end. The "Discuss" path from proposals now uses the same `asQuote` helper.
+
+**Deliberately not done.** No command palette entry and no ShortcutsDialog line: the pill is discovered by selecting, and keyboard users reach its buttons with Tab (DOM order places it right after the scroller). No pill on touch or below md.
