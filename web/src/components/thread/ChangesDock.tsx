@@ -8,11 +8,12 @@ import { cn } from "@/lib/utils";
 import { CHANGES_DISCARDED_EVENT } from "./FilePane";
 
 /**
- * The changed-files shortcut, docked above the composer where the run's output belongs — not inside
- * the conversation. Collapsed: one bar with the first few file marks, "N files changed", a chevron
- * and "Review all" (the workspace pane's Review view carries the +/− totals). Expanded: the list
- * rises out of the bar (scrollable), each row a file with its mark, path and counts; click opens
- * the file pane. The dock stays put while the conversation scrolls.
+ * The changed-files shortcut, the first row inside the composer's surface (SendBar's `top` slot)
+ * where the run's output belongs — not inside the conversation, and not a second card above the
+ * composer. Collapsed: one bar with the first few file marks, "N files changed", a chevron and
+ * "Review all" (the workspace pane's Review view carries the +/− totals). Expanded: the list rises
+ * out of the bar (scrollable), each row a file with its mark, path and counts; click opens the file
+ * pane. The dock stays put while the conversation scrolls.
  */
 /** The count rolls when it changes — a file landing mid-run is visible even in peripheral vision. */
 function PopCount({ value }: { value: number }) {
@@ -60,8 +61,11 @@ export function ChangesDock({ files, loading, onOpen, onRefresh, onReviewAll, ac
   }, [onRefresh]);
   if (!files.length) return null;
   return (
-    <div className="mx-auto w-full max-w-3xl px-3 md:px-6">
-      <div className="bg-card overflow-hidden rounded-xl border shadow-e2">
+    // Spans the composer edge to edge (its p-2 undone) and takes the inner corner radius (16px
+    // minus the 1px border) so hover fills stay concentric with the surface. The hairline below is
+    // the one structural border: it parts the files from the text. Clicks stop here so a file row
+    // does not also focus the textarea (PromptInput focuses on any click inside it).
+    <div className="-mx-2 -mt-2 mb-1 overflow-hidden rounded-t-[15px] border-b" onClick={(e) => e.stopPropagation()}>
         <AnimatePresence initial={false}>
           {open && (
             <motion.ul
@@ -128,7 +132,6 @@ export function ChangesDock({ files, loading, onOpen, onRefresh, onReviewAll, ac
             </button>
           )}
         </div>
-      </div>
     </div>
   );
 }

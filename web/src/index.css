@@ -262,6 +262,12 @@
   #root {
     height: 100%;
   }
+  h1, h2, h3 {
+    text-wrap: balance;
+  }
+  p {
+    text-wrap: pretty;
+  }
   body {
     margin: 0;
     background: var(--background);
@@ -960,11 +966,10 @@
     transition-duration: 150ms;
     transition-timing-function: var(--ease-out-quint);
   }
-  button:not(:disabled):active, [role="tab"]:active, [role="radio"]:active, [data-slot="button"]:not([aria-disabled="true"]):active, .press:active { transform: scale(0.985); }
+  /* ui/button owns its own press (scale 0.96 on surface variants); bare buttons and rows get the lighter one. */
+  button:not(:disabled):not([data-slot="button"]):active, [role="tab"]:active, [role="radio"]:active, .press:active { transform: scale(0.985); }
   /* Editor tabs and rows that already scale on hover keep their own transform. */
   .no-press:active { transform: none !important; }
-  /* The primary action presses a touch deeper than the global 0.985 — it is the one that matters. */
-  [data-slot="button"]:is([data-variant="primary"], [data-variant="default"], [data-variant="attention"], [data-variant="destructive"]):not(:disabled):active { transform: scale(0.97); }
 }
 /* Touch devices fire :hover on tap; hover lifts are pointer-only. */
 @media (hover: none) {
@@ -1591,4 +1596,25 @@ col { transition: width 0.2s var(--ease-out-quint); }
 :root[data-motion="reduced"] .think-orb,
 :root[data-motion="reduced"] .think-orb::before {
   animation: none;
+}
+
+/* ───────── Round: the conversation column (2026-10-22) ───────── */
+
+/* Answer prose: no orphans on the last line of a paragraph or list item. */
+.prose-agent p,
+.prose-agent li {
+  text-wrap: pretty;
+}
+
+/* Fenced code scrolls sideways under a thin bar that is invisible until the pointer is over the
+   block; the edge fades (code-block.tsx) say "more this way" the rest of the time. The standard
+   properties win over ::-webkit-scrollbar in Chromium, so this is the whole rule. */
+.code-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  transition: scrollbar-color var(--dur-base) var(--ease-out-quint);
+}
+.group:hover .code-scroll,
+.code-scroll:focus-within {
+  scrollbar-color: var(--line-strong) transparent;
 }

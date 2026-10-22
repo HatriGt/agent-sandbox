@@ -779,6 +779,16 @@ export function Thread({
   React.useEffect(() => {
     if (stick.isAtBottom) setNewBelow(false);
   }, [stick.isAtBottom]);
+  // More than one viewport above the end: the only distance at which a jump button beats scrolling.
+  const [farUp, setFarUp] = React.useState(false);
+  React.useEffect(() => {
+    const el = stick.scrollRef.current;
+    if (!el) return;
+    const measure = () => setFarUp(el.scrollHeight - el.scrollTop - el.clientHeight > el.clientHeight);
+    measure();
+    el.addEventListener("scroll", measure, { passive: true });
+    return () => el.removeEventListener("scroll", measure);
+  }, [stick.scrollRef]);
   const turns = React.useMemo<Turn[]>(() => {
     const out: Turn[] = [];
     if (box.task) out.push({ id: "task", label: "Task", you: box.task, reply: groups.find((g) => g.kind === "say")?.text });
@@ -1124,19 +1134,21 @@ export function Thread({
             </div>
           </DialogContent>
         </Dialog>
-        {/* Jump to the latest output: centred over the column, only while scrolled up. When the agent
-            produces something NEW while you are reading history, the button grows a label — the
-            chat-app affordance for "there is more below than when you left". */}
-        <AnimatePresence>
-          {!stick.isAtBottom && (
-            <div className="pointer-events-none absolute inset-x-0 bottom-4 z-10 flex justify-center">
+        {/* Jump to the latest output: centred just above the composer, only once the reader is more
+            than a viewport away from the end (a screen's worth of scrolling is a wheel flick, not a
+            journey). When the agent produces something NEW while you are reading history, the
+            button appears at once and grows a label — the chat-app affordance for "there is more
+            below than when you left". */}
+        <AnimatePresence initial={false}>
+          {!stick.isAtBottom && (farUp || newBelow) && (
+            <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex justify-center">
             <motion.button
               type="button"
               layout={!still}
-              initial={still ? false : { opacity: 0, y: 6, scale: 0.9 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={still ? { opacity: 0 } : { opacity: 0, y: 6, scale: 0.9 }}
-              transition={{ duration: still ? 0 : 0.16 }}
+              initial={still ? false : { opacity: 0, scale: 0.25 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={still ? { opacity: 0 } : { opacity: 0, scale: 0.9 }}
+              transition={still ? { duration: 0 } : { type: "spring", duration: 0.3, bounce: 0 }}
               onClick={() => void stick.scrollToBottom()}
               aria-label="Scroll to latest"
               className={cn(
@@ -1156,8 +1168,8 @@ export function Thread({
         </AnimatePresence>
       </div>
 
-      {!sleeping && <ChangesDock files={changes} loading={changesLoading} onOpen={openChange} onRefresh={refreshChanges} onReviewAll={openReview} activePath={openFile?.path} />}
       <SendBar
+        top={!sleeping ? <ChangesDock files={changes} loading={changesLoading} onOpen={openChange} onRefresh={refreshChanges} onReviewAll={openReview} activePath={openFile?.path} /> : undefined}
         boxName={box.name}
         runState={runState}
         sleeping={sleeping}
@@ -1174,7 +1186,7 @@ export function Thread({
       {/* Sibling of the whole column (conversation + dock + composer), so opening it narrows all
           three together and the composer stays aligned with the text. */}
       {planBoard && !sleeping && planPlacement === "dock" && <PlanBoard board={planBoard} live={runState === "running"} variant="dock" />}
-      <AnimatePresence>
+      <AnimatePresence initial={false}>
         {inspectorOpen && !showWorkspace && (
           <RunInspector
             key="inspector"
@@ -1194,7 +1206,7 @@ export function Thread({
         )}
       </AnimatePresence>
       <SideChat side={side} sleeping={sleeping} onClose={side.close} />
-      <AnimatePresence>
+      <AnimatePresence initial={false}>
         {showWorkspace && (
           <React.Suspense
             key="workspace"
