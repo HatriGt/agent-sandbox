@@ -203,6 +203,7 @@ export function Thread({
 
   const events = React.useMemo(() => parseTrace(snap?.log ?? ""), [snap?.log]);
   const groups = React.useMemo(() => groupTrace(events), [events]);
+  const keys = React.useMemo(() => groupKeys(groups), [groups]);
   const repeats = React.useMemo(() => repeatedPolls(events), [events]);
   // Visual fences the agent re-emits under one name within a run render as ONE block that updates
   // in place at its first position (lib/viz-identity.ts); later copies collapse to a row.
@@ -210,10 +211,10 @@ export function Thread({
     () =>
       buildLiveRegistry(
         groups.flatMap((g, i): SayInput[] =>
-          g.kind === "say" ? [{ key: `say-${i}`, text: g.text, at: g.at }] : g.kind === "you" || g.kind === "asked" ? [{ key: `b-${i}`, text: "", boundary: true }] : []
+          g.kind === "say" ? [{ key: keys[i], text: g.text, at: g.at }] : g.kind === "you" || g.kind === "asked" ? [{ key: keys[i], text: "", boundary: true }] : []
         )
       ),
-    [groups]
+    [groups, keys]
   );
   // Derived once here so the docked board and the in-flow card are the same object.
   const planBoard = React.useMemo(() => deriveTaskBoard(events), [events]);
@@ -753,7 +754,7 @@ export function Thread({
       if (g.kind === "you" || g.kind === "asked") {
         const reply = groups.slice(i + 1).find((x) => x.kind === "say");
         out.push({
-          id: `${g.kind}-${i}`,
+          id: keys[i],
           label: g.kind === "asked" ? "Question" : "Follow-up",
           you: g.kind === "asked" ? `${g.question.split("\n")[0]} → ${g.answer}` : g.text,
           reply: reply?.kind === "say" ? reply.text : undefined,
@@ -762,7 +763,7 @@ export function Thread({
       }
     });
     return out;
-  }, [groups, box.task]);
+  }, [groups, keys, box.task]);
 
   // Keep (pin): the sandbox still sleeps on schedule, but is never reaped — only Destroy removes it.
   const [keptLocal, setKeptLocal] = React.useState<boolean | null>(null);
@@ -897,7 +898,7 @@ export function Thread({
             {loadingTrace && <ThreadSkeleton withTask={!!box.task} />}
             {!loadingTrace && groups.map((g, i) => {
               const isLast = i === groups.length - 1;
-              const key = `${g.kind}-${i}`;
+              const key = keys[i];
               // Operator-message index: the task is 1, each you/asked group after it increments.
               const msgIndex = 1 + groups.slice(0, i + 1).filter((x) => x.kind === "you" || x.kind === "asked").length;
               // The agent's byline opens each of its runs, whatever it starts with (prose, tools, thinking).
@@ -947,7 +948,7 @@ export function Thread({
                 null
               ) : (
                 <div key={key} data-say className="min-w-0">
-                  <SayKeyContext.Provider value={`say-${i}`}>
+                  <SayKeyContext.Provider value={key}>
                     <SayItem text={g.text} live={liveHere} label={opensAgent} at={g.at} />
                   </SayKeyContext.Provider>
                 </div>
@@ -1351,6 +1352,43 @@ function foldWork(groups: TraceGroup[]): TraceGroup[] {
   }
   flush();
   return out;
+}
+
+/**
+ * A group's React key and minimap id come from its own timestamp, not its position: once the
+ * sandbox's log tail slides, the leading groups drop and an index key would remount the whole
+ * transcript (every fullscreen closes, every enter animation replays, the scroller jumps to the
+ * bottom). A group without a stamp hangs off the stamped group before it, so appends at the end
+ * never renumber it either. Equal keys are told apart by order.
+ */
+function groupKeys(groups: TraceGroup[]): string[] {
+  const keys: string[] = [];
+  const seen = new Map<string, number>();
+  let anchor = "start";
+  let sinceAnchor = 0;
+  for (const g of groups) {
+    const at = groupAt(g);
+    let key: string;
+    if (at === undefined) key = `${g.kind}~${anchor}+${sinceAnchor++}`;
+    else {
+      key = `${g.kind}@${at}`;
+      anchor = key;
+      sinceAnchor = 0;
+    }
+    const n = (seen.get(key) ?? 0) + 1;
+    seen.set(key, n);
+    keys.push(n === 1 ? key : `${key}#${n}`);
+  }
+  return keys;
+}
+
+function groupAt(g: TraceGroup): number | undefined {
+  if (g.kind === "say" || g.kind === "you") return g.at;
+  if (g.kind === "tools") return g.events[0]?.at;
+  if (g.kind === "work") {
+    for (const item of g.items) if (item.kind === "tools" && item.events[0]?.at !== undefined) return item.events[0].at;
+  }
+  return undefined;
 }
 
 function sentence(s: string): string {
