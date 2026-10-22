@@ -1068,10 +1068,13 @@ export const api = {
   /** Automations (triggers): schedules, webhooks, GitHub events and chains. */
   prFollowups: (signal?: AbortSignal) =>
     fetch(url("/pr-followups.json"), { headers: authHeaders, signal }).then(
-      parse<{ prefs: PrFollowupPrefs; hook: { id: string; createdAt: number; events: string[] } | null }>,
+      parse<{ prefs: PrFollowupPrefs; hook: { id: string; createdAt: number; events: string[] } | null; installs: PrFollowupInstall[] }>,
     ),
   setPrFollowups: (p: Partial<PrFollowupPrefs>) => post<{ prefs: PrFollowupPrefs }>("/pr-followups/settings.json", p),
   rotatePrFollowupHook: () => post<{ id: string; secret: string; hookUrl: string; events: string[] }>("/pr-followups/hook.json", {}),
+  /** One click: put the follow-up webhook on an org (`acme`) or a repo (`acme/app`) as the connected account. */
+  installPrFollowupHook: (target: string) => post<{ install: PrFollowupInstall; updated: boolean; installs: PrFollowupInstall[] }>("/pr-followups/install.json", { target }),
+  uninstallPrFollowupHook: (target: string) => post<{ ok: true; installs: PrFollowupInstall[] }>("/pr-followups/uninstall.json", { target }),
   triggers: (signal?: AbortSignal) => fetch(url("/triggers.json"), { headers: authHeaders, signal }).then(parse<{ triggers: Automation[] }>),
   createTrigger: (t: AutomationDraft) => post<{ trigger: Automation; secret?: string; hookUrl?: string }>("/triggers.json", t),
   updateTrigger: (id: string, t: AutomationDraft) => post<{ trigger: Automation }>(`/triggers/${encodeURIComponent(id)}.json`, t),
@@ -1300,8 +1303,16 @@ export interface RepoSetupsResponse {
 export interface PrFollowupPrefs {
   keepGreen: boolean;
   addressReviews: boolean;
-  /** `/agent …` on any PR the account can push to, via the activity poller — not only agent-opened PRs. */
+  /** `/agent …` on any PR the account can see (polled every couple of seconds, or instant via a webhook) — not only agent-opened PRs. */
   commandAnywhere: boolean;
+}
+
+/** Where the controller has installed the follow-up webhook on GitHub for this owner. */
+export interface PrFollowupInstall {
+  /** `acme` (organisation, every repo in it) or `acme/app`. */
+  target: string;
+  kind: "org" | "repo";
+  createdAt: number;
 }
 
 export interface RunOutcome {

@@ -252,6 +252,39 @@ export function rotateHook(db: Db, box: SecretBox, owner: string, now = Date.now
   return { id, secret };
 }
 
+/** Where the owner's follow-up webhook has been installed on GitHub by the controller (an org, or one repo). */
+export interface InstallRow {
+  owner: string;
+  /** `acme` (organisation) or `acme/app` (repository). */
+  target: string;
+  kind: "org" | "repo";
+  /** GitHub's id for the webhook, for the later PATCH/DELETE. */
+  ghHookId: number;
+  createdAt: number;
+}
+
+export function installsOf(db: Db, owner: string): InstallRow[] {
+  return (db.prepare(`SELECT owner, target, kind, gh_hook_id, created_at FROM pr_followup_installs WHERE owner = ? ORDER BY created_at`).all(owner) as Array<Record<string, any>>).map((r) => ({
+    owner: r.owner,
+    target: r.target,
+    kind: r.kind === "org" ? "org" : "repo",
+    ghHookId: Number(r.gh_hook_id),
+    createdAt: Number(r.created_at),
+  }));
+}
+
+export function saveInstall(db: Db, row: Omit<InstallRow, "createdAt">, now = Date.now()): InstallRow {
+  db.prepare(
+    `INSERT INTO pr_followup_installs (owner, target, kind, gh_hook_id, created_at) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(owner, target) DO UPDATE SET kind = excluded.kind, gh_hook_id = excluded.gh_hook_id`
+  ).run(row.owner, row.target, row.kind, row.ghHookId, now);
+  return installsOf(db, row.owner).find((i) => i.target === row.target)!;
+}
+
+export function dropInstall(db: Db, owner: string, target: string): void {
+  db.prepare(`DELETE FROM pr_followup_installs WHERE owner = ? AND target = ?`).run(owner, target);
+}
+
 /** The delivery-log source id of the owner's activity poller (src/agent-mentions.ts). */
 export const mentionsSourceId = (owner: string) => `mentions:${owner}`;
 

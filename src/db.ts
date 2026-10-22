@@ -290,6 +290,14 @@ const MIGRATIONS: string[] = [
     secret_enc TEXT NOT NULL,
     created_at INTEGER NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS pr_followup_installs (
+    owner TEXT NOT NULL,
+    target TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    gh_hook_id INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (owner, target)
+  );
   `,
   `
   -- Repo setup profiles (src/setup-profile.ts): per owner × repo, how it installs/builds/tests.

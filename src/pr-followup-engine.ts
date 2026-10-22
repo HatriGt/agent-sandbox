@@ -24,7 +24,7 @@ import { claimDelivery } from "./trigger-store.js";
  */
 
 export interface GhRequest {
-  method?: "GET" | "POST" | "PATCH";
+  method?: "GET" | "POST" | "PATCH" | "DELETE";
   path: string;
   body?: unknown;
   /** Return the response text (job logs) instead of JSON. */
@@ -182,6 +182,17 @@ export function makeFollowupEngine(d: EngineDeps) {
       return { handled: true, ...r };
     };
     const tag = `${s.repo}#${number}`;
+    const prefs = d.prefs(source.owner);
+    const spec = cl.pr?.triggerId ? d.triggerSpec?.(cl.pr.triggerId) : undefined;
+
+    // Acknowledge a command the instant it is taken: a 👀 on the comment tells the asker it was
+    // heard, long before the reply lands. Sent alongside the PR read, not after it, and never
+    // awaited; a comment that will not be honoured (the setting is off) gets no reaction.
+    // Reactions are idempotent per account, so a duplicate delivery is harmless.
+    if (s.kind === "command" && enabledFor("command", prefs, spec, cl.pr?.adopted ?? true))
+      void d
+        .gh(source.owner, s.repo, { method: "POST", path: `/repos/${s.repo}/issues/comments/${s.unit.id}/reactions`, body: { content: "eyes" } })
+        .catch((e) => log(`[followup] reacting to the command on ${tag} failed: ${(e as Error).message.slice(0, 200)}`));
 
     let pr: Record<string, any>;
     try {
@@ -196,8 +207,6 @@ export function makeFollowupEngine(d: EngineDeps) {
     if (apr.owner !== source.owner) return done({ outcome: "skipped", reason: "ignored", detail: `follow-up on ${tag}: the PR belongs to another owner here` });
     if (branch && branch !== apr.branch) setPrBranch(d.db, apr.repo, apr.number, branch);
 
-    const prefs = d.prefs(apr.owner);
-    const spec = apr.triggerId ? d.triggerSpec?.(apr.triggerId) : undefined;
     const key = dedupeKey(s);
     const g = guardFacts(d.db, apr.repo, apr.number, s.kind, key, now());
     const adm = admitFollowup(s, {
@@ -241,12 +250,6 @@ export function makeFollowupEngine(d: EngineDeps) {
       task = reviewTask(ref, comments, adm.attempt);
     }
     updateFollowup(d.db, id, { subject });
-    // Acknowledge a command the moment it is taken, before any work: a 👀 on the comment tells the
-    // asker it was heard, minutes before the reply lands.
-    if (s.kind === "command")
-      await d
-        .gh(apr.owner, s.repo, { method: "POST", path: `/repos/${s.repo}/issues/comments/${s.unit.id}/reactions`, body: { content: "eyes" } })
-        .catch((e) => log(`[followup] reacting to the command on ${tag} failed: ${(e as Error).message.slice(0, 200)}`));
 
     const startedBy: FollowupStart["startedBy"] = {
       kind: "followup",

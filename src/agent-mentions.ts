@@ -79,9 +79,11 @@ const MAX_AGE_MS = 24 * 3600_000;
 /**
  * How often the updated-issues list is re-read when GitHub sends no `X-Poll-Interval`. A read that
  * answers 304 does not count against the rate limit (checked live: X-RateLimit-Used stays put), so
- * a tight loop costs nothing while nothing changes and a comment is noticed within seconds.
+ * a tight loop costs nothing while nothing changes and a comment is noticed within a second or
+ * two. (GitHub's secondary limit is 900 points a minute per account; 30 reads a minute is far
+ * under it even if every one counted.)
  */
-const DEFAULT_POLL_S = 4;
+const DEFAULT_POLL_S = 2;
 /** Pages of the updated-issues list read per poll; more than this in one interval is a storm, not a backlog. */
 const MAX_PAGES = 3;
 
@@ -186,19 +188,28 @@ export function makeMentionWatcher(d: MentionDeps) {
     let fired = 0;
     const source = mentionsSourceId(owner);
     const prs = issues.filter((i) => i.pull_request && repoOf(i) && Number.isFinite(Number(i.number))).sort((a, b) => t(a.updated_at) - t(b.updated_at));
-    for (const issue of prs) {
+    // The comments of every changed PR are read at once (one round trip, not one per PR), then acted on in order.
+    const reads = await Promise.all(
+      prs.map(async (issue) => {
+        const repo = repoOf(issue);
+        try {
+          const r = await d.get(owner, login, `/repos/${repo}/issues/${Number(issue.number)}/comments?since=${encodeURIComponent(since)}&per_page=100`);
+          return { issue, comments: (Array.isArray(r.data) ? r.data : []) as GhComment[] };
+        } catch (e) {
+          return { issue, error: e as Error };
+        }
+      })
+    );
+    const limited = reads.find((r) => r.error instanceof GhRateLimitError)?.error as GhRateLimitError | undefined;
+    if (limited) {
+      nextAt.set(login, backoffUntil(limited.rate, limited.status, now()) ?? now() + 60_000);
+      throw limited;
+    }
+    for (const { issue, comments, error } of reads) {
       const repo = repoOf(issue);
       const tag = `${repo}#${issue.number}`;
-      let comments: GhComment[];
-      try {
-        const r = await d.get(owner, login, `/repos/${repo}/issues/${Number(issue.number)}/comments?since=${encodeURIComponent(since)}&per_page=100`);
-        comments = (Array.isArray(r.data) ? r.data : []) as GhComment[];
-      } catch (e) {
-        if (e instanceof GhRateLimitError) {
-          nextAt.set(login, backoffUntil(e.rate, e.status, now()) ?? now() + 60_000);
-          throw e;
-        }
-        log(`[mentions] @${login}: reading comments on ${tag} failed: ${(e as Error).message.slice(0, 200)}`);
+      if (!comments) {
+        log(`[mentions] @${login}: reading comments on ${tag} failed: ${(error as Error).message.slice(0, 200)}`);
         continue;
       }
       for (const c of comments.sort((a, b) => t(a.created_at) - t(b.created_at))) {
@@ -218,7 +229,7 @@ export function makeMentionWatcher(d: MentionDeps) {
     return fired;
   }
 
-  /** Look for every watched account that is due. Re-entrancy guarded: a slow GitHub never stacks polls. */
+  /** Look for every watched account that is due, all at once. Re-entrancy guarded: a slow GitHub never stacks polls. */
   async function tick(): Promise<void> {
     if (ticking) return;
     ticking = true;
@@ -229,26 +240,29 @@ export function makeMentionWatcher(d: MentionDeps) {
       } catch (e) {
         log(`[mentions] listing accounts failed: ${(e as Error).message.slice(0, 200)}`);
       }
-      for (const a of accounts) {
-        if (!d.enabled(a.owner)) continue;
-        if ((nextAt.get(a.login) ?? 0) > now()) continue;
-        const k = `${a.owner}\u0000${a.login}`;
-        try {
-          await pollFeed(a.owner, a.login);
-          lastError.delete(k);
-        } catch (e) {
-          const msg = (e as Error).message.slice(0, 200);
-          // Log a failing account once per distinct error, not every tick.
-          if (lastError.get(k) !== msg) log(`[mentions] @${a.login} (${a.owner}): ${msg}`);
-          lastError.set(k, msg);
-        }
-      }
+      // Every due account is read at once: one slow account never delays another's comment.
+      await Promise.all(
+        accounts
+          .filter((a) => d.enabled(a.owner) && (nextAt.get(a.login) ?? 0) <= now())
+          .map(async (a) => {
+            const k = `${a.owner}\u0000${a.login}`;
+            try {
+              await pollFeed(a.owner, a.login);
+              lastError.delete(k);
+            } catch (e) {
+              const msg = (e as Error).message.slice(0, 200);
+              // Log a failing account once per distinct error, not every tick.
+              if (lastError.get(k) !== msg) log(`[mentions] @${a.login} (${a.owner}): ${msg}`);
+              lastError.set(k, msg);
+            }
+          })
+      );
     } finally {
       ticking = false;
     }
   }
 
-  function start(intervalMs = 2_000): { stop: () => void } {
+  function start(intervalMs = 1_000): { stop: () => void } {
     const timer = setInterval(() => void tick(), intervalMs);
     if (typeof timer.unref === "function") timer.unref();
     return { stop: () => clearInterval(timer) };

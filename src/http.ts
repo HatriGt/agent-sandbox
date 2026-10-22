@@ -113,7 +113,7 @@ import { hookAuditPath, hookBodyParser } from "./hooks.js";
 import { createTrigger, firstSighting, getTriggerById, listTriggers, logDelivery, pruneDeliveries, type TriggerRow } from "./trigger-store.js";
 import { automateNeedsApproval, isQuietRun, parseAutomate, parseAutomateRejects, type AutomateReject } from "./triggers.js";
 import { registerIntakeRoutes } from "./intake-routes.js";
-import { candidateAccounts } from "./gh-token-store.js";
+import { candidateAccounts, ownerOf as repoOwnerOf } from "./gh-token-store.js";
 import { applyHarness, getHarness, harnessSummaryLine, loadHarnesses, normalizeEgress, putHarness, HARNESS_LIMITS, type HarnessDef } from "./harness.js";
 import { allSecretValues, deleteSecret, listSecrets, resolveSecrets, saveSecret, secretName } from "./secrets-store.js";
 import { reservedBoxes } from "./capacity.js";
@@ -3576,7 +3576,11 @@ const startTriggerRun = (input: StartRunInput): Promise<{ ok: true; box: string 
  */
 const ghAsOwner = (owner: string, repo: string, req: GhRequest): Promise<any> =>
   withOwner(owner, async () => {
-    const acc = candidateAccounts(await loadStore(cfg), repo)[0];
+    const store = await loadStore(cfg);
+    // An account with a verified repo under this owner very likely reaches the owner's other repos
+    // (and is the one to install an org webhook with) when nothing matches more precisely.
+    const under = `${(repoOwnerOf(repo) ?? "").toLowerCase()}/`;
+    const acc = candidateAccounts(store, repo)[0] ?? (under.length > 1 ? Object.values(store.accounts).find((a) => a.verifiedRepos.some((r) => r.toLowerCase().startsWith(under))) : undefined);
     if (!acc) throw new Error("no stored GitHub account can reach this repo");
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), 15_000);
@@ -3742,6 +3746,7 @@ registerFollowupRoutes(app, {
   savePrefs: (owner, p) => saveBlob(FOLLOWUP_PREFS_KIND, JSON.stringify(p), owner),
   publicUrl: cfg.publicUrl,
   audit: auditTrigger,
+  gh: ghAsOwner,
 });
 registerTriggerRoutes(app, {
   followups,

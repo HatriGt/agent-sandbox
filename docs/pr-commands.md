@@ -24,20 +24,24 @@ only start follow-ups on PRs the agent opened.
 
 Two paths, both landing in the same engine:
 
-- **Polling (no webhook).** Every few seconds, as every stored GitHub account with its own
-  token, the controller lists the issues and PRs that account can see which changed since its
-  last look (`GET /issues?filter=all&since=…`, a conditional read: an unchanged answer is a 304,
-  which GitHub does not count against the rate limit) and reads the new comments on each changed
-  PR. Any `/agent` comment the account can read arrives this way, whoever wrote it, within a few
-  seconds. Nothing written before the controller started watching is replayed.
-  (The GitHub activity feed is not used: it delivers events late, drops them again, and its ids
-  are not one sequence.)
-- **Webhook.** The per-user PR follow-up webhook (and GitHub automations) deliver `issue_comment`
-  events the instant they happen. Added as an organisation webhook it covers every repo in the
-  org at once.
+- **Polling (no webhook).** Every two seconds, as every stored GitHub account with its own
+  token (all accounts at once), the controller lists the issues and PRs that account can see
+  which changed since its last look (`GET /issues?filter=all&since=…`, a conditional read: an
+  unchanged answer is a 304, which GitHub does not count against the rate limit) and reads the
+  new comments on every changed PR in one go. Any `/agent` comment the account can read arrives
+  this way, whoever wrote it, within a second or two. Nothing written before the controller
+  started watching is replayed. (The GitHub activity feed is not used: it delivers events late,
+  drops them again, and its ids are not one sequence.)
+- **Webhook (instant).** The per-user PR follow-up webhook (and GitHub automations) deliver
+  `issue_comment` events the moment they happen. Dashboard → Automations → PR follow-ups →
+  **Install on GitHub** puts it on an organisation (every repo in it, current and future) or one
+  repo in one click, as the connected account (which must administer the org or repo).
+  Re-installing updates the webhook GitHub already has instead of adding a second one; removing
+  it from the list deletes it on GitHub.
 
 Each comment is answered once, whichever path delivers it first. The moment a command is taken
-the agent reacts to the comment with 👀; the reply follows when the run finishes.
+the agent reacts to the comment with 👀 (sent in parallel with reading the PR, before any work);
+the reply follows when the run finishes.
 
 ## Settings
 
