@@ -400,10 +400,13 @@ test("mentions: baseline replays nothing; later /agent PR comments from the feed
   await watcher.tick();
   assert.equal(gets.length, 2);
   // Three new events: a PR comment with /agent, an issue (not PR) comment with /agent, a push.
+  // GitHub's event ids are not one sequence: the comment's id is below the baseline's (a real
+  // feed shows IssueCommentEvents around 1.7e10 next to PushEvents around 2.4e10), and it must
+  // still be picked up.
   etag = "e2";
   feed = [
     { id: "104", type: "PushEvent", repo: { name: REPO }, payload: {} },
-    feedEvent("103", "/agent add a test"),
+    feedEvent("37", "/agent add a test"),
     feedEvent("102", "/agent on an issue", { payload: { action: "created", issue: { number: 2 }, comment: { id: 102, body: "/agent on an issue", author_association: "OWNER", user } } }),
     feedEvent("101", "plain comment"),
     feedEvent("100", "/agent old ask"),
@@ -411,10 +414,26 @@ test("mentions: baseline replays nothing; later /agent PR comments from the feed
   await watcher.pollFeed("u1", "alice");
   assert.equal(starts.length, 1);
   assert.match(starts[0].task, /add a test/);
-  // The same feed read again: already past the high-water mark.
+  // The same feed read again: every event already seen.
   etag = "e3";
   await watcher.pollFeed("u1", "alice");
   assert.equal(starts.length, 1);
+  // A row written by the old high-water-mark version re-baselines instead of replaying the page.
+  db.prepare(`UPDATE repo_watch SET state_json = ? WHERE repo = '@alice'`).run(JSON.stringify({ lastId: "104" }));
+  etag = "e4";
+  feed = [feedEvent("36", "/agent another ask"), ...feed];
+  await watcher.pollFeed("u1", "alice");
+  assert.equal(starts.length, 1);
+  // The first request is still running, so the next one is a new turn once it finishes.
+  await engine.onRunFinished("cmd-1", digest({ box: "cmd-1", headline: "added" }), `${REPLY_OPEN}
+Added a test.
+${REPLY_CLOSE}
+`, 1);
+  etag = "e5";
+  feed = [feedEvent("35", "/agent after the baseline"), ...feed];
+  await watcher.pollFeed("u1", "alice");
+  assert.equal(starts.length, 2);
+  assert.match(starts[1].task, /after the baseline/);
   assert.deepEqual(payloadOf(feedEvent("5", "/agent x") as never, "alice").repository, { full_name: REPO, name: "app", owner: { login: "acme" }, html_url: `https://github.com/${REPO}` });
   assert.equal(isAgentCommand(feedEvent("5", "nope") as never), false);
   assert.equal(isAgentCommand(feedEvent("5", "/agent yes") as never), true);

@@ -52,7 +52,12 @@ interface GhEvent {
 }
 
 interface FeedState {
-  lastId: string;
+  /**
+   * Ids of the events the last read returned. GitHub event ids are not one rising sequence
+   * (an IssueCommentEvent can carry a far smaller id than an older PushEvent), so "newer than
+   * the highest id seen" would drop comments; an event is new when it was not in the feed before.
+   */
+  seen: string[];
 }
 
 const SOURCE = "events";
@@ -62,12 +67,18 @@ const STALE_MS = 24 * 3600_000;
 const MAX_AGE_MS = 24 * 3600_000;
 const DEFAULT_POLL_S = 60;
 
-const gt = (a: string, b: string): boolean => {
-  const x = /^\d+$/.test(a) ? BigInt(a) : 0n;
-  const y = /^\d+$/.test(b) ? BigInt(b) : 0n;
-  return x > y;
+/** Ids kept between reads: the whole last page plus what was seen before it, bounded. */
+const SEEN_MAX = 1000;
+const remember = (events: GhEvent[], before: string[] = []): string[] => {
+  const ids = events.map((e) => String(e.id));
+  const set = new Set(ids);
+  for (const id of before) {
+    if (set.size >= SEEN_MAX) break;
+    set.add(id);
+  }
+  return [...set];
 };
-const maxId = (events: GhEvent[], from = "0"): string => events.reduce((m, e) => (gt(String(e.id), m) ? String(e.id) : m), from);
+const at = (e: GhEvent): number => (e.created_at ? Date.parse(e.created_at) || 0 : 0);
 
 /** The webhook-shaped `issue_comment` payload the engine classifies, built from one feed event. */
 export function payloadOf(e: GhEvent, login: string): Record<string, unknown> {
@@ -109,6 +120,8 @@ export function makeMentionWatcher(d: MentionDeps) {
     } catch {
       state = undefined;
     }
+    // A row written by the high-water-mark version has no id set: start over with a baseline.
+    if (state && !Array.isArray(state.seen)) state = undefined;
     return { etag: r.etag ?? undefined, state };
   };
   const touch = (owner: string, login: string) => d.db.prepare(`UPDATE repo_watch SET updated_at = ? WHERE owner = ? AND repo = ? AND source = ?`).run(now(), owner, feedKey(login), SOURCE);
@@ -138,16 +151,16 @@ export function makeMentionWatcher(d: MentionDeps) {
     const events = (Array.isArray(r.data) ? r.data : []) as GhEvent[];
     if (!row?.state) {
       // First read (or a stale feed): a baseline, nothing replayed.
-      store(owner, login, r.etag, { lastId: maxId(events) });
+      store(owner, login, r.etag, { seen: remember(events) });
       return 0;
     }
-    const since = row.state.lastId;
+    const seen = new Set(row.state.seen);
     const fresh = events
-      .filter((e) => gt(String(e.id), since))
+      .filter((e) => !seen.has(String(e.id)))
       .filter((e) => !e.created_at || now() - Date.parse(e.created_at) < MAX_AGE_MS)
-      .sort((a, b) => (gt(a.id, b.id) ? 1 : gt(b.id, a.id) ? -1 : 0));
-    // Record the new high-water mark before acting: a crash mid-way never replays the batch.
-    store(owner, login, r.etag, { lastId: maxId(events, since) });
+      .sort((a, b) => at(a) - at(b) || String(a.id).localeCompare(String(b.id)));
+    // Record what was seen before acting: a crash mid-way never replays the batch.
+    store(owner, login, r.etag, { seen: remember(events, row.state.seen) });
     let fired = 0;
     const source = mentionsSourceId(owner);
     for (const e of fresh) {
