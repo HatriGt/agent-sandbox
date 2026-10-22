@@ -129,6 +129,7 @@ export function Users() {
               {u.id === myId && <span className="text-faint text-micro font-normal">you</span>}
             </span>
             <span className="text-faint truncate text-micro font-normal tabular-nums">
+              <span className="sm:hidden">{planTone(u).label} · </span>
               {u.boxes} {u.boxes === 1 ? "machine" : "machines"} · {u.keys} {u.keys === 1 ? "key" : "keys"}
               {u.github ? " · GitHub linked" : ""}
             </span>
@@ -140,6 +141,7 @@ export function Users() {
       id: "plan",
       header: "Plan",
       width: "w-32",
+      hideBelow: "sm",
       sort: (u) => (u.plan === "pro" ? 0 : u.plan === "trial" ? 1 + (u.expired ? 1000 : -(u.daysLeft ?? 0)) : 2000),
       cell: (u) => {
         const p = planTone(u);
@@ -150,6 +152,7 @@ export function Users() {
       id: "role",
       header: "Role",
       width: "w-44",
+      hideBelow: "sm",
       sort: (u) => u.role,
       cell: (u) => (
         <Tooltip>

@@ -279,7 +279,7 @@ export function Automations({ onOpenBox, onOpenPlaybooks, onOpenRuns }: { onOpen
     <div className="min-w-0">
       <div>
         <div className="mb-4 flex flex-wrap items-center gap-3">
-          <p className="text-muted-foreground min-w-0 flex-1 text-meta">
+          <p className="text-muted-foreground min-w-0 flex-[1_1_20rem] text-meta">
             <span className="text-foreground">When</span> work starts on its own — a schedule, a webhook, a GitHub event, or after another run. Each opens a PR at most and leaves a receipt.
           </p>
           <AnimatePresence initial={false}>

@@ -188,25 +188,25 @@
 
 .dark {
   /* Dark: charcoal, not black, so the terminal panel can still be darker than the page. */
-  --background: oklch(0.17 0.005 286);
+  --background: oklch(0.175 0.005 286);
   --foreground: oklch(0.95 0.002 286);
-  --card: oklch(0.205 0.005 286);
+  --card: oklch(0.215 0.005 286);
   --card-foreground: oklch(0.95 0.002 286);
-  --sidebar: oklch(0.15 0.005 286);
-  --popover: oklch(0.225 0.006 286);
+  --sidebar: oklch(0.14 0.005 286);
+  --popover: oklch(0.245 0.006 286);
   --popover-foreground: oklch(0.95 0.002 286);
   --primary: oklch(0.93 0.002 286);
   --primary-foreground: oklch(0.19 0.005 286);
-  --secondary: oklch(0.27 0.006 286);
+  --secondary: oklch(0.28 0.006 286);
   --secondary-foreground: oklch(0.95 0.002 286);
-  --muted: oklch(0.255 0.006 286);
+  --muted: oklch(0.265 0.006 286);
   --muted-foreground: oklch(0.7 0.012 286);
-  --accent: oklch(0.29 0.007 286);
+  --accent: oklch(0.3 0.007 286);
   --accent-foreground: oklch(0.97 0.002 286);
   --destructive: oklch(0.7 0.19 22);
-  --border: oklch(1 0 0 / 0.09);
-  --line-strong: oklch(1 0 0 / 0.2);
-  --input: oklch(1 0 0 / 0.14);
+  --border: oklch(1 0 0 / 0.12);
+  --line-strong: oklch(1 0 0 / 0.24);
+  --input: oklch(1 0 0 / 0.16);
   --ring: oklch(0.72 0.16 262);
 
   --live: oklch(0.74 0.15 262);
@@ -218,7 +218,7 @@
   --ok: oklch(0.74 0.14 155);
   --sleep: oklch(0.76 0.13 300);
 
-  --trace: oklch(0.13 0.004 286);
+  --trace: oklch(0.12 0.004 286);
   --trace-fg: oklch(0.9 0.004 286);
 
   --faint: oklch(0.62 0.012 286);
@@ -277,20 +277,24 @@
     background: color-mix(in oklch, var(--live) 24%, transparent);
     color: var(--foreground);
   }
-  ::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
-  }
-  ::-webkit-scrollbar-thumb {
-    background: var(--line-strong);
-    border: 3px solid transparent;
-    background-clip: padding-box;
-    border-radius: 9999px;
-  }
-  ::-webkit-scrollbar-thumb:hover {
-    background: var(--muted-foreground);
-    border: 3px solid transparent;
-    background-clip: padding-box;
+  /* A styled scrollbar is a desktop pointer affordance. On touch the native overlay bar stays, so
+     a scrolling code block or table never gains a permanent 10px gutter. */
+  @media (hover: hover) and (pointer: fine) {
+    ::-webkit-scrollbar {
+      width: 10px;
+      height: 10px;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: var(--line-strong);
+      border: 3px solid transparent;
+      background-clip: padding-box;
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: var(--muted-foreground);
+      border: 3px solid transparent;
+      background-clip: padding-box;
+    }
   }
   :focus-visible {
     outline: 2px solid var(--ring);
@@ -996,7 +1000,7 @@
 :root[data-motion="reduced"] {
   .hover-raise:hover { translate: none; }
 }
-.dark .raised { box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.06), var(--shadow-e1); }
+.dark .raised { box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.08), var(--shadow-e1); }
 
 /* The agent's "thinking" orb: a small live-blue sphere with a soft bloom that breathes while it works
    (Space UI's loading orb, done in CSS, no WebGL). Static under reduced motion via the global rule. */
@@ -1034,7 +1038,7 @@
     box-shadow var(--dur-slow) var(--ease-out-expo);
 }
 .composer-glow:focus-within {
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring) 22%, transparent), var(--shadow-e1, 0 1px 2px rgb(0 0 0 / 0.06));
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring) 22%, transparent), var(--shadow-e2);
 }
 
 /* A question landing: one gentle attention ring swells out of the card after it rises in, then
@@ -1123,11 +1127,11 @@
 .you-bubble {
   background: color-mix(in oklch, var(--muted) 88%, var(--card));
   border: 1px solid color-mix(in oklch, var(--border) 80%, transparent);
-  box-shadow: 0 1px 2px oklch(0 0 0 / 0.04);
+  box-shadow: var(--shadow-e1);
 }
 .dark .you-bubble {
   background: color-mix(in oklch, var(--muted) 80%, var(--card));
-  box-shadow: inset 0 1px 0 0 oklch(1 0 0 / 0.04);
+  box-shadow: inset 0 1px 0 0 oklch(1 0 0 / 0.06), var(--shadow-e1);
 }
 
 /* The tool timeline's ground: a quiet inset panel, one step below the prose. */
@@ -1142,14 +1146,12 @@
 .composer-depth {
   box-shadow:
     inset 0 1px 0 0 oklch(1 0 0 / 0.5),
-    0 1px 2px oklch(0 0 0 / 0.05),
-    0 8px 24px -16px oklch(0 0 0 / 0.25);
+    var(--shadow-e2);
 }
 .dark .composer-depth {
   box-shadow:
-    inset 0 1px 0 0 oklch(1 0 0 / 0.05),
-    0 1px 2px oklch(0 0 0 / 0.3),
-    0 8px 24px -16px oklch(0 0 0 / 0.6);
+    inset 0 1px 0 0 oklch(1 0 0 / 0.08),
+    var(--shadow-e2);
 }
 
 /* Shell surfaces ------------------------------------------------------------------------------------ */

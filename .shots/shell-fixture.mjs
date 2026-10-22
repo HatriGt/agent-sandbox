@@ -20,6 +20,7 @@
 //   --scroll="css"    scroll a container to its bottom before the shot
 //
 // Run from PowerShell (bash mangles the leading slash of the route).
+import { auditOverflow, dumpTables, serveWorktreeFonts } from "./overflow-probe.mjs";
 import { chromium } from "file:///C:/Users/ak/AppData/Roaming/npm/node_modules/@playwright/mcp/node_modules/playwright/index.mjs";
 
 const [route = "/dashboard", out = ".shots/out.png", w = "1440", h = "900", ...flags] = process.argv.slice(2);
@@ -222,7 +223,7 @@ const harnesses = {
 };
 
 const browser = await chromium.launch();
-const ctx = await browser.newContext({ viewport: { width: +w, height: +h }, colorScheme: dark ? "dark" : "light", deviceScaleFactor: 1, reducedMotion: has("--os-reduced") ? "reduce" : "no-preference" });
+const ctx = await browser.newContext({ viewport: { width: +w, height: +h }, colorScheme: dark ? "dark" : "light", deviceScaleFactor: 1, reducedMotion: has("--os-reduced") ? "reduce" : "no-preference", hasTouch: +w < 500, isMobile: +w < 500 });
 if (val("motion")) await ctx.addInitScript((m) => localStorage.setItem("asb.motion", m), val("motion"));
 await ctx.addInitScript(
   ({ t, dark, collapsed, empty }) => {
@@ -244,6 +245,7 @@ await ctx.addInitScript(
   { t: token, dark, collapsed: has("--collapsed"), empty: has("--empty") }
 );
 
+await serveWorktreeFonts(ctx);
 let fleetCalls = 0;
 const json = (body, status = 200) => ({ status, contentType: "application/json", body: JSON.stringify(body) });
 const mock = (path, body) => ctx.route((u) => new URL(u).pathname === path, (r) => (r.request().method() === "GET" ? r.fulfill(json(body)) : r.fulfill(json({ ok: true }))));
@@ -300,6 +302,21 @@ const triggers = [
   trig({ id: "s3", name: "Ping on PR merge", kind: "schedule", scope: "scheduled", when: "once", status: "done", lastFired: T0 - 5e6, taskTemplate: "Tell me when #142 merges" }),
 ];
 await mock("/triggers.json", { triggers });
+await mock("/memory-notes.json", { enabled: true, notes: [
+  { id: "m1", kind: "preference", scope: "operator", status: "kept", text: "Prefer small PRs; one concern per PR.", at: ms - 3e8, source: "asb-session-dead0001", pinned: true },
+  { id: "m2", kind: "lesson", scope: "repo", status: "kept", text: "The nightly build is slow because the CI runner has no cache mounted.", why: "Measured 14 min cold vs 3 min warm.", at: ms - 2e8, source: "asb-session-dead0002", repo: "HatriGt/agent-sandbox" },
+  { id: "m3", kind: "playbook", scope: "repo", status: "pending", text: "Run `npm run shots` before touching the thread UI.", at: ms - 1e6, source: "asb-session-a91b0e44", repo: "HatriGt/agent-sandbox" },
+] });
+await mock("/devices.json", sessions);
+await mock("/pr-followups.json", { prefs: { keepGreen: true, addressReviews: true, commandAnywhere: false }, hook: null, installs: [] });
+await mock("/intake.json", {
+  channel: { id: "ch_1", allowEmails: ["ak@example.com"], slackUsers: [], hasMailgunKey: false, hasSlackSecret: false, hasSlackBotToken: false, hasSentryToken: false },
+  accountEmail: "ak@example.com",
+  email: { urls: { mailgun: "https://example.com/intake/mailgun", cloudflare: "https://example.com/intake/cf" }, cloudflareWorker: "export default {}" },
+  slack: { url: "https://example.com/intake/slack", manifest: "{}" },
+  pending: [],
+  deliveries: [],
+});
 const deliveries = [0, 1, 2, 3, 4].map((i) => ({ id: 100 - i, at: T0 - i * 7.2e6, outcome: i === 3 ? "skipped" : i === 4 ? "failed" : "fired", reason: i === 3 ? "dedupe" : i === 4 ? "error" : undefined, box: i < 3 ? `asb-pool-${i}abc` : undefined, facts: { v: 1, subject: { kind: "pr", number: 210 - i, repo: "atom-insurance/elseco-deal-service", url: "https://github.com/x", title: ["Add deal pricing cache", "Fix broker lookup", "Bump deps", "Refactor quotes", "Docs"][i] }, state: i === 0 ? "running" : "done", review: i ? { verdict: i === 2 ? "needs-work" : "approve", findings: { high: i === 2 ? 1 : 0, medium: 1, low: 2, info: 0 }, blocking: i === 2 ? 1 : 0 } : null, receiptUrl: i && i < 3 ? "https://github.com/x#c" : undefined, durationMs: i ? 90_000 * i : null } }));
 await ctx.route((u) => /^\/triggers\/[^/]+\/deliveries\.json$/.test(new URL(u).pathname), (r) => r.fulfill(json({ deliveries })));
 await mock("/workflows.json", { limits: {}, dir: ".agent-sandbox/workflows", workflows: [
@@ -314,6 +331,7 @@ const page = await ctx.newPage();
 const errors = [];
 page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
 page.on("pageerror", (e) => errors.push(String(e)));
+page.on("response", (r) => r.status() >= 400 && errors.push(`${r.status()} ${r.url()}`));
 const target = route === "/dashboard" ? "/dashboard/" : route;
 await page.goto(base + target, { waitUntil: "load", timeout: 20000 }).catch((e) => errors.push("goto: " + e.message));
 await page.waitForTimeout(600);
@@ -361,6 +379,8 @@ if (has("--rows")) console.log("rows:", await page.evaluate(() => [...document.q
 if (has("--anim")) console.log("anim:", await page.evaluate(() => [...document.querySelectorAll("[data-slot=table-row][data-enter],[data-slot=table-row][data-new]")].slice(0, 6).map((r) => `${r.dataset.enter ?? "new"} i=${r.style.getPropertyValue("--i")} ${getComputedStyle(r).animationName} ${getComputedStyle(r).animationDelay} op=${(+getComputedStyle(r).opacity).toFixed(2)}`).join("\n  ") + "\n  pings=" + document.querySelectorAll(".dt-ping").length));
 if (has("--shim")) console.log("shim:", await page.evaluate(() => [...document.querySelectorAll(".shimmer-text")].slice(0, 4).map((e) => { const s = getComputedStyle(e); return `${e.textContent} ${s.animationName} ${s.animationDuration} pos=${s.backgroundPosition} size=${s.backgroundSize} img=${s.backgroundImage.slice(0, 90)}`; }).join("\n  ")));
 if (has("--probe")) console.log("probe:", await page.evaluate(() => ({ toasts: [...document.querySelectorAll("[data-attention-toast]")].map((t) => t.innerText.replace(/\s+/g, " ")), status: document.querySelector("[aria-label=Status]")?.innerText.replace(/\s+/g, " "), palette: [...document.querySelectorAll("dialog[open] [role=option], dialog[open] .label")].map((e) => e.innerText.replace(/\s+/g, " ")).join(" | "), footer: document.querySelector("dialog[open] .border-t:last-child")?.innerText.replace(/\s+/g, " ") })));
+if (process.argv.includes("--audit")) for (const o of await auditOverflow(page)) console.log(`OVERFLOW ${o.kind} +${o.by}px  ${o.path}`);
+if (process.argv.includes("--cols")) for (const l of await dumpTables(page)) console.log(`COLS ${l}`);
 await page.screenshot({ path: out, fullPage: full });
 console.log("saved", out, page.url());
 if (errors.length) console.log("console errors:\n" + errors.slice(0, 10).join("\n"));

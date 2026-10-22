@@ -332,3 +332,20 @@ export function matchPaths(paths: string[], query: string, limit = 80): string[]
     .slice(0, limit)
     .map(([, p]) => p);
 }
+
+/* ───────────── Resizable widths: the pane inside its container, the files panel inside the pane ───────────── */
+
+export type Range = { min: number; max: number };
+export const PANE_MIN = 480;
+/** The conversation beside the pane keeps at least this much of the container. */
+export const CONVERSATION_MIN = 480;
+export const SIDEBAR_MIN = 192;
+export const SIDEBAR_DEFAULT = 256;
+
+export const clampTo = (v: number, r: Range): number => Math.min(r.max, Math.max(r.min, Math.round(v)));
+export const paneRange = (container: number): Range => {
+  const max = Math.max(0, Math.round(container) - CONVERSATION_MIN);
+  return { min: Math.min(PANE_MIN, max), max };
+};
+export const defaultPaneWidth = (container: number): number => clampTo(container * 0.58, paneRange(container));
+export const sidebarRange = (pane: number): Range => ({ min: SIDEBAR_MIN, max: Math.max(SIDEBAR_MIN, Math.floor(pane / 2)) });

@@ -309,9 +309,10 @@ function TaskCell({ box, lifecycle }: { box: StableBox; lifecycle: FleetLifecycl
           {repos.length > 3 && <span className="text-faint text-[10px]">+{repos.length - 3}</span>}
         </span>
       )}
-      {/* Mobile meta line: the machine and time columns are hidden below md. */}
+      {/* Mobile meta lines: the machine and time columns are hidden below md; a phone's column has room for two parts. */}
+      <MetaLine className="stamp mt-0.5 sm:hidden" parts={[<span title={shortName(box.name)}>{friendlyName(box.name)}</span>, deadline.remainingSec != null && `${deadline.remainingSec <= 0 ? "soon" : fmtDuration(deadline.remainingSec)} left`]} />
       <MetaLine
-        className="stamp mt-0.5 md:hidden"
+        className="stamp mt-0.5 hidden sm:flex md:hidden"
         parts={[
           <span title={shortName(box.name)}>{friendlyName(box.name)}</span>,
           box.leaving ? "shutting down" : roleLabel(box.role),

@@ -18,20 +18,26 @@ import { DiffView, useHunkReview } from "./FilePane";
 import { RecordsTable } from "./RecordsTable";
 import { ReviewView, type ReviewFocus } from "./review/ReviewView";
 import { cn } from "@/lib/utils";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import {
   EMPTY_TABS,
   SHORTCUTS,
+  SIDEBAR_DEFAULT,
   baseOf,
   buildTree,
   childrenOf,
+  clampTo,
+  defaultPaneWidth,
   hasDrag,
   invalidName,
   matchPaths,
   matchShortcut,
   parentOf,
+  paneRange,
   parseLineQuery,
   readDrag,
   setDrag,
+  sidebarRange,
   tabsReducer,
   treeKeyTarget,
   typeAheadTarget,
@@ -40,6 +46,7 @@ import {
   type Node,
   type OpenOpts,
   type PaneCommands,
+  type Range,
   type Row,
   type RowEdit,
   type Tab,
@@ -89,6 +96,11 @@ const writeStore = (key: string, v: unknown) => {
     localStorage.setItem(key, JSON.stringify(v));
   } catch {}
 };
+const removeStore = (key: string) => {
+  try {
+    localStorage.removeItem(key);
+  } catch {}
+};
 const copyText = (text: string) => navigator.clipboard?.writeText(text).catch(() => toast.error("Could not copy"));
 
 export function WorkspacePane({ session, changes, open, review, onClose, onSaved, repos, full = false, onToggleFull }: { session: string; changes: ChangedFile[]; open: OpenRequest | null; /** Bumped to switch the pane to the Review view (the whole run's diff). */ review?: number; onClose: () => void; onSaved: () => void; repos: Repo[]; full?: boolean; onToggleFull?: () => void }) {
@@ -96,6 +108,9 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
   const [treeErr, setTreeErr] = React.useState<string | null>(null);
   const [expanded, setExpanded] = React.useState<Set<string>>(() => new Set(repos.map((r) => r.name)));
   const [view, setView] = React.useState<View>("explorer");
+  // Below md the pane is the whole screen and the files panel is a layer over the editor: pick a
+  // file and the panel closes; the header's files button brings it back.
+  const phone = !useMediaQuery("(min-width: 48rem)");
   const [sidebar, setSidebar] = React.useState(true);
   const [query, setQuery] = React.useState("");
   const [tabs, dispatch] = React.useReducer(tabsReducer, EMPTY_TABS);
@@ -155,8 +170,9 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
       expandTo(path);
       setFocusedRow(path);
       if (!opts.preview) pushRecent(path);
+      if (phone) setSidebar(false);
     },
-    [expandTo, pushRecent]
+    [expandTo, pushRecent, phone]
   );
   React.useEffect(() => {
     if (!open) return;
@@ -286,38 +302,28 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
   }, [session, activeRepoName]);
   React.useEffect(loadGit, [loadGit, changes.length]);
 
-  // Drag the left edge to resize; the width persists across sessions.
-  const [width, setWidth] = React.useState<number>(() => {
-    try {
-      return Number(localStorage.getItem("asb-workspace-w")) || 0;
-    } catch {
-      return 0;
-    }
-  });
-  const widthRef = React.useRef(width);
-  widthRef.current = width;
-  const dragging = React.useRef(false);
-  const onDrag = (e: React.PointerEvent) => {
-    dragging.current = true;
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-    const move = (ev: PointerEvent) => {
-      if (!dragging.current) return;
-      const w = Math.min(window.innerWidth - 480, Math.max(520, window.innerWidth - ev.clientX));
-      setWidth(w);
-    };
-    const up = () => {
-      dragging.current = false;
-      try {
-        localStorage.setItem("asb-workspace-w", String(widthRef.current));
-      } catch {
-        /* storage blocked: the width lives for this tab only */
-      }
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-  };
+  // Widths: the pane inside its container, the files panel inside the pane. A stored width is
+  // clamped against the container it is restored into, so a 1920px layout cannot swallow a 1280px one.
+  const [container, setContainer] = React.useState(0);
+  React.useLayoutEffect(() => {
+    const parent = paneRef.current?.parentElement;
+    if (!parent) return;
+    const measure = () => setContainer(parent.getBoundingClientRect().width);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(parent);
+    return () => ro.disconnect();
+  }, []);
+  const [panePref, setPanePref] = React.useState(() => readStore<number | null>("asb-workspace-w", null));
+  const [sidebarPref, setSidebarPref] = React.useState(() => readStore<number | null>("asb-ws-sidebar-w", null));
+  const [resizing, setResizing] = React.useState(false);
+  const range = paneRange(container);
+  const width = container ? clampTo(panePref ?? defaultPaneWidth(container), range) : 0;
+  const sbRange = sidebarRange(full ? container : width);
+  const sidebarWidth = clampTo(sidebarPref ?? SIDEBAR_DEFAULT, sbRange);
+  const persist = (key: string, w: number | null) => (w === null ? removeStore(key) : writeStore(key, w));
+  const setPaneWidth = (w: number | null) => (persist("asb-workspace-w", w), setPanePref(w));
+  const setSidebarWidth = (w: number | null) => (persist("asb-ws-sidebar-w", w), setSidebarPref(w));
 
   const filesTitle = view === "scm" || view === "review" ? "Changes" : view === "search" ? "Search" : "Files";
   const controls = (
@@ -356,15 +362,14 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
     <motion.aside
       ref={paneRef}
       initial={{ width: 0, opacity: 0 }}
-      animate={{ width: full ? "100%" : width ? width : "58%", opacity: 1 }}
+      animate={{ width: full || phone ? "100%" : width || "58%", opacity: 1 }}
       exit={{ width: 0, opacity: 0 }}
-      transition={{ width: { duration: 0.28, ease: EASE }, opacity: { duration: 0.18 } }}
-      style={{ minWidth: full ? undefined : width ? width : undefined }}
-      className={cn("bg-card absolute inset-0 z-20 flex min-w-0 flex-col overflow-hidden md:relative md:inset-auto md:h-full md:border-l", !full && !width && "md:min-w-[34rem]")}
+      transition={{ width: resizing ? { duration: 0 } : { duration: 0.28, ease: EASE }, opacity: { duration: 0.18 } }}
+      className="bg-card absolute inset-0 z-20 flex min-w-0 flex-col overflow-hidden md:relative md:inset-auto md:h-full md:shrink-0 md:border-l"
       aria-label="Workspace"
       onKeyDownCapture={onKeyDownCapture}
     >
-      {!full && <div role="separator" aria-orientation="vertical" onPointerDown={onDrag} className="hover:bg-live/60 active:bg-live absolute top-0 bottom-0 -left-1 z-30 hidden w-2 cursor-col-resize transition-colors md:block" title="Drag to resize" />}
+      {!full && !phone && <Divider value={width} range={range} label="Resize workspace" onChange={setPaneWidth} onReset={() => setPaneWidth(null)} onDragging={setResizing} />}
 
       <div className="flex min-h-0 flex-1">
         <div className="flex min-h-0 min-w-0 flex-1">
@@ -421,7 +426,8 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
         </div>
 
         {sidebar && (
-          <section className="bg-muted/20 flex w-64 shrink-0 flex-col border-l" aria-label={filesTitle}>
+          <section className={cn("bg-muted/20 relative flex shrink-0 flex-col border-l", phone && "bg-card absolute inset-0 z-10 border-l-0")} style={phone ? undefined : { width: sidebarWidth }} aria-label={filesTitle}>
+            {!phone && <Divider value={sidebarWidth} range={sbRange} label="Resize files panel" onChange={setSidebarWidth} onReset={() => setSidebarWidth(null)} />}
             <div className="flex h-10 shrink-0 items-center gap-1 px-2">
               <AnimatedTabs
                 ariaLabel="Sidebar view"
@@ -444,9 +450,14 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
               <button type="button" onClick={() => (view === "scm" || view === "review" ? loadGit() : void loadTree())} aria-label="Refresh" className="text-muted-foreground hover:text-foreground ml-auto grid size-7 cursor-pointer place-items-center rounded-md">
                 <RefreshCw className="size-3.5" />
               </button>
+              {phone && (
+                <button type="button" onClick={onClose} aria-label="Close workspace" className="text-muted-foreground hover:text-foreground grid size-7 cursor-pointer place-items-center rounded-md">
+                  <X className="size-3.5" />
+                </button>
+              )}
             </div>
             {view === "scm" || view === "review" ? (
-              <SourceControl session={session} repo={activeRepo} status={git} err={gitErr} reload={loadGit} changes={changes} active={view === "review" ? (reviewFocus?.path ?? null) : active} onOpen={(p) => (view === "review" ? setReviewFocus({ path: p, nonce: Date.now() }) : openPath(p, { mode: "diff", preview: true }))} onChanged={onSaved} />
+              <SourceControl session={session} repo={activeRepo} status={git} err={gitErr} reload={loadGit} changes={changes} active={view === "review" ? (reviewFocus?.path ?? null) : active} onOpen={(p) => (view === "review" ? (setReviewFocus({ path: p, nonce: Date.now() }), phone && setSidebar(false)) : openPath(p, { mode: "diff", preview: true }))} onChanged={onSaved} />
             ) : view === "search" ? (
               <SearchView session={session} active={active} onOpen={openPath} />
             ) : (
@@ -513,21 +524,21 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
       </div>
 
       {/* Status bar */}
-      <footer className="bg-muted/60 text-muted-foreground flex h-6 shrink-0 items-center gap-3 border-t px-3 text-micro">
+      <footer className="bg-muted/60 text-muted-foreground flex h-6 shrink-0 items-center gap-3 overflow-hidden border-t px-3 text-micro whitespace-nowrap">
         {activeRepo && (
-          <button type="button" onClick={() => (setView("scm"), setSidebar(true))} className="text-foreground hover:bg-muted flex cursor-pointer items-center gap-1 rounded px-1" aria-label="Open source control">
+          <button type="button" onClick={() => (setView("scm"), setSidebar(true))} className="text-foreground hover:bg-muted flex min-w-0 cursor-pointer items-center gap-1 rounded px-1" aria-label="Open source control">
             <GitBranch className="size-3" aria-hidden />
-            {git?.branch ?? activeRepo.branch ?? "…"}
+            <span className="truncate">{git?.branch ?? activeRepo.branch ?? "…"}</span>
             {git && git.ahead > 0 && <span className="text-ok">↑{git.ahead}</span>}
             {git && git.behind > 0 && <span className="text-attention-text">↓{git.behind}</span>}
           </button>
         )}
-        <span>{changes.length} changed</span>
-        {paths && <span>{paths.length} files</span>}
-        <button type="button" onClick={() => setQuickOpen("")} className="hover:bg-muted hover:text-foreground ml-auto flex cursor-pointer items-center gap-1 rounded px-1" aria-label="Quick open">
+        <span className="hidden sm:inline">{changes.length} changed</span>
+        {paths && <span className="hidden sm:inline">{paths.length} files</span>}
+        <button type="button" onClick={() => setQuickOpen("")} className="hover:bg-muted hover:text-foreground ml-auto hidden cursor-pointer items-center gap-1 rounded px-1 sm:flex" aria-label="Quick open">
           Go to file <Kbd className="h-4 min-w-4 text-[10px]">{shortcutLabel("p")}</Kbd>
         </button>
-        {activeTab && <span>{languageOf(activeTab.path)}</span>}
+        {activeTab && <span className="ml-auto sm:ml-0">{languageOf(activeTab.path)}</span>}
         {activeTab?.mode === "edit" && (
           <button type="button" onClick={toggleWrap} aria-pressed={wrap} aria-label="Toggle word wrap" title={`Word wrap (${shortcutLabel("z")})`} className={cn("hover:bg-muted flex cursor-pointer items-center gap-1 rounded px-1", wrap && "text-foreground")}>
             <WrapText className="size-3" aria-hidden />
@@ -551,6 +562,69 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
         />
       )}
     </motion.aside>
+  );
+}
+
+/* ───────────────────────────── Resize handle ───────────────────────────── */
+
+function Divider({ value, range, label, onChange, onReset, onDragging }: { value: number; range: Range; label: string; onChange: (w: number) => void; onReset: () => void; onDragging?: (on: boolean) => void }) {
+  const [active, setActive] = React.useState(false);
+  const set = (w: number) => onChange(clampTo(w, range));
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const el = e.currentTarget;
+    const x0 = e.clientX;
+    const start = value;
+    el.setPointerCapture(e.pointerId);
+    setActive(true);
+    onDragging?.(true);
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+    const move = (ev: PointerEvent) => set(start + (x0 - ev.clientX));
+    const end = () => {
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", end);
+      el.removeEventListener("lostpointercapture", end);
+      document.body.style.userSelect = "";
+      document.body.style.cursor = "";
+      setActive(false);
+      onDragging?.(false);
+    };
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", end);
+    el.addEventListener("lostpointercapture", end);
+  };
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    const by = e.shiftKey ? 64 : 16;
+    const next = e.key === "ArrowLeft" ? value + by : e.key === "ArrowRight" ? value - by : e.key === "Home" ? range.min : e.key === "End" ? range.max : null;
+    if (next === null) return;
+    e.preventDefault();
+    onDragging?.(true);
+    set(next);
+  };
+  const settle = () => onDragging?.(false);
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={label}
+      aria-valuenow={value}
+      aria-valuemin={range.min}
+      aria-valuemax={range.max}
+      tabIndex={0}
+      title="Drag to resize · double-click to reset"
+      data-active={active || undefined}
+      onPointerDown={onPointerDown}
+      onDoubleClick={onReset}
+      onKeyDown={onKeyDown}
+      onKeyUp={settle}
+      onBlur={settle}
+      className="group absolute top-0 bottom-0 -left-1 z-30 hidden w-2 cursor-col-resize outline-none md:block"
+    >
+      <span aria-hidden className="group-hover:bg-live/50 group-focus-visible:bg-live group-data-[active]:bg-live absolute inset-y-0 left-1 w-px transition-colors duration-150" />
+      <span aria-hidden className="bg-muted-foreground/35 group-hover:bg-live group-focus-visible:bg-live group-data-[active]:bg-live absolute top-1/2 left-[3px] h-8 w-[3px] -translate-y-1/2 rounded-full transition-colors duration-150" />
+    </div>
   );
 }
 

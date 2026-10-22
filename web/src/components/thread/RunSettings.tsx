@@ -46,19 +46,6 @@ export const TIER_TINT: Record<ModelChoice["tier"], string> = {
   other: "bg-line-strong",
 };
 
-export function useMediaQuery(q: string): boolean {
-  const get = () => (typeof window !== "undefined" && "matchMedia" in window ? window.matchMedia(q).matches : false);
-  const [m, setM] = React.useState(get);
-  React.useEffect(() => {
-    const mq = window.matchMedia(q);
-    const on = () => setM(mq.matches);
-    on();
-    mq.addEventListener("change", on);
-    return () => mq.removeEventListener("change", on);
-  }, [q]);
-  return m;
-}
-
 export function Row({ label, hint, hintTone, children }: { label: string; hint?: string; hintTone?: "attention"; children: React.ReactNode }) {
   return (
     <div>

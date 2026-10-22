@@ -1,5 +1,5 @@
 import * as React from "react";
-import { AlertTriangle, ArrowUpRight, Brain, Check, ChevronDown, ChevronRight, Clock, Copy, FileSearch, FileText, KeyRound, Loader2, MessageCircleQuestion, Play, Terminal, Undo2 } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, Brain, Check, ChevronDown, ChevronRight, Clock, Copy, FileSearch, FileText, KeyRound, Loader2, Play, Terminal, Undo2 } from "lucide-react";
 import { CodeNavContext } from "@/components/ui/code-ref";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { resultSummary, type TraceEvent } from "@/lib/trace";
@@ -9,7 +9,6 @@ import { parseTestReport } from "@/lib/testReport";
 import { TestResultsCard } from "./TestResultsCard";
 import { AnimatePresence, motion } from "motion/react";
 import { useReducedMotion } from "@/lib/motion-pref";
-import { Markdown } from "@/components/ui/markdown";
 import { StreamingMarkdown } from "./StreamingMarkdown";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
@@ -1338,38 +1337,6 @@ export function QueuedItem({
       </span>
       <div className="text-foreground min-w-0 max-w-[min(72%,60ch)] rounded-xl rounded-br-md border border-dashed px-4 py-2.5 text-body leading-relaxed break-words whitespace-pre-wrap [overflow-wrap:anywhere]">
         {text}
-      </div>
-    </div>
-  );
-}
-
-/**
- * A side question and its answer: a separate read-only helper answering ABOUT the run. Same thread,
- * unmistakably another voice, and it says so every time — the agent never sees this exchange.
- */
-export function ObserverItem({ question, answer }: { question: string; answer?: string }) {
-  return (
-    <div className="enter flex flex-col gap-1.5">
-      <span className="label text-muted-foreground flex items-center gap-1.5">
-        <MessageCircleQuestion className="size-3" aria-hidden />
-        Side question · answered from the sandbox, not by the agent
-      </span>
-      <div className="max-w-[70ch] rounded-xl border border-dashed px-5 py-4">
-        <p className="text-muted-foreground text-meta italic">{question}</p>
-        {answer ? (
-          <div className="text-foreground prose-agent mt-2 text-body">
-            <Markdown>{answer}</Markdown>
-          </div>
-        ) : (
-          <p className="text-muted-foreground mt-2.5 flex items-center gap-2 text-meta">
-            <span className="flex items-center gap-1" aria-hidden>
-              <span className="dot dot-1 bg-current size-1.5 rounded-full" />
-              <span className="dot dot-2 bg-current size-1.5 rounded-full" />
-              <span className="dot dot-3 bg-current size-1.5 rounded-full" />
-            </span>
-            Reading the box…
-          </p>
-        )}
       </div>
     </div>
   );

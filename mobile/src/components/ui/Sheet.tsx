@@ -200,7 +200,7 @@ export function Sheet({
               {children}
             </ScrollView>
           ) : (
-            <View style={{ paddingHorizontal: 16, paddingBottom: 8 }}>{children}</View>
+            <View style={{ paddingHorizontal: 16, paddingBottom: 8, flexShrink: 1 }}>{children}</View>
           )}
         </Animated.View>
       </KeyboardAvoidingView>

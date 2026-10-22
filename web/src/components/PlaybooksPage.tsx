@@ -161,7 +161,7 @@ export function PlaybooksPage({ boxes, onAutomate }: { boxes: BoxView[]; onAutom
     <div className="min-w-0">
       <div>
         <header className="mb-4 flex flex-wrap items-center gap-3">
-          <p className="text-muted-foreground min-w-0 flex-1 text-meta">
+          <p className="text-muted-foreground min-w-0 flex-[1_1_20rem] text-meta">
             <span className="text-foreground">How</span> a task gets done: agent turns and command checks, in order. Failed checks go back to the agent. Use one from the composer, or let an automation run it.
           </p>
           <AnimatePresence initial={false}>
@@ -316,6 +316,7 @@ function PlaybookTable({
       id: "steps",
       header: "Steps",
       width: "w-[34%]",
+      hideBelow: "md",
       sort: (w) => w.steps.length,
       cell: (w) => {
         const checks = w.steps.filter((s) => s.kind === "check").length;
@@ -341,6 +342,7 @@ function PlaybookTable({
       id: "used",
       header: "Automated by",
       width: "w-[8.5rem]",
+      hideBelow: "sm",
       sort: (w) => usedBy(w.id).length,
       cell: (w) => {
         const used = usedBy(w.id);
@@ -357,6 +359,7 @@ function PlaybookTable({
       id: "source",
       header: "Source",
       width: "w-[7rem]",
+      hideBelow: "md",
       sort: (w) => (w.origin?.kind === "repo" ? w.origin.repo : ""),
       cell: (w) =>
         w.origin?.kind === "repo" ? (
@@ -371,6 +374,7 @@ function PlaybookTable({
       id: "last",
       header: "Last run",
       width: "w-[8rem]",
+      hideBelow: "sm",
       sort: (w) => {
         const l = lastRun(w.id);
         return l ? (l.kind === "live" ? Number.MAX_SAFE_INTEGER : l.run.endedAt ?? l.run.archivedAt) : null;
@@ -411,11 +415,11 @@ function PlaybookActions({ w, onRun, onEdit, onDelete, onAutomate }: { w: Workfl
     <span className="inline-flex items-center gap-0.5" onClick={stopRow} onKeyDown={stopRow}>
       <Button variant="ghost" size="xs" onClick={onRun} title="Start a task with this playbook" className="text-live">
         <Play />
-        Run
+        <span className="hidden sm:inline">Run</span>
       </Button>
       <Button variant="ghost" size="xs" onClick={onAutomate} title="Run this playbook on a schedule or event">
         <Zap />
-        Automate
+        <span className="hidden sm:inline">Automate</span>
       </Button>
       <Button variant="ghost" size="icon-xs" onClick={onEdit} aria-label={`Edit ${w.name}`} title="Edit">
         <Pencil />

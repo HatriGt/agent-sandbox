@@ -15,31 +15,31 @@ import { VoiceOverlay } from "./voice/VoiceOverlay";
 import { PressScale, ScalePresence, SPRING } from "@/components/motion";
 
 /**
- * The SendBar, at web parity: two lanes (agent / read-only ask), `@` file
- * mentions backed by /files.json, `/` skill menu backed by /skills.json —
- * both insert chips, not text — a circular icon send button, and a hint line.
+ * The SendBar, at web parity: `@` file mentions backed by /files.json, `/` skill menu
+ * backed by /skills.json — both insert chips, not text — a circular icon send button, and a
+ * hint line. One input, one destination; the side chat has its own input in its sheet.
  */
 export function Composer({
   session,
   onSend,
-  onAsk,
   running,
   sleeping,
   disabled,
   placeholder,
   accessoryLeft,
+  accessoryRight,
   draftKey,
   onStop,
   prefill,
 }: {
   session?: string;
   onSend: (text: string) => Promise<void> | void;
-  onAsk?: (text: string) => Promise<void> | void;
   running?: boolean;
   sleeping?: boolean;
   disabled?: boolean;
   placeholder?: string;
   accessoryLeft?: React.ReactNode;
+  accessoryRight?: React.ReactNode;
   /** When set (e.g. `box:<name>`), unsent text survives leaving the thread or an app restart. */
   draftKey?: string;
   /** Stop the running turn. Shown next to send only while `running`; the thread wires `/interrupt.json`. */
@@ -50,7 +50,6 @@ export function Composer({
   const { palette } = useTheme();
   const [text, setText] = useState("");
   const [caret, setCaret] = useState(0);
-  const [lane, setLane] = useState<"reply" | "ask">("reply");
   const [busy, setBusy] = useState(false);
   const [files, setFiles] = useState<string[]>([]);
   const [skill, setSkill] = useState<string | null>(null);
@@ -103,7 +102,6 @@ export function Composer({
   }, [draftKey, text]);
   useEffect(() => {
     if (!prefill?.text) return;
-    setLane("reply");
     setText(prefill.text);
     setCaret(prefill.text.length);
     syncSendButton(prefill.text, files, skill);
@@ -162,7 +160,7 @@ export function Composer({
 
   const updateText = (t: string, c = caret) => {
     // Hand-typing a complete `/name ` converts to a chip, like the web.
-    if (!skill && lane === "reply") {
+    if (!skill) {
       const tok = typedSkillToken(t);
       if (tok && skills.some((s) => s.name === tok.name)) {
         setSkill(tok.name);
@@ -172,7 +170,7 @@ export function Composer({
     textRef.current = t;
     setText(t);
     syncSendButton(t, files, skill);
-    if (lane === "reply" && session) {
+    if (session) {
       setMention(mentionAt(t, Math.min(c, t.length)));
       setSlash(skill ? null : slashAt(t, Math.min(c, t.length)));
     } else {
@@ -222,14 +220,10 @@ export function Composer({
     syncSendButton("", [], null);
     setBusy(true);
     try {
-      if (lane === "ask" && onAsk) {
-        await onAsk(t);
-      } else {
-        if (files.length) t = `${t}\n\nFiles: ${files.map((f) => `@${f}`).join(" ")}`;
-        t = expandMentions(t);
-        if (skill) t = `/${skill}${t ? ` ${t}` : ""}`;
-        await onSend(t);
-      }
+      if (files.length) t = `${t}\n\nFiles: ${files.map((f) => `@${f}`).join(" ")}`;
+      t = expandMentions(t);
+      if (skill) t = `/${skill}${t ? ` ${t}` : ""}`;
+      await onSend(t);
       if (draftKey) clearDraft(draftKey);
     } catch {
       setText(draft.text);
@@ -241,17 +235,14 @@ export function Composer({
     }
   };
 
-  const isAsk = lane === "ask";
   const slashHits = slash ? skills.filter((s) => s.name.includes(slash.query)).slice(0, 6) : [];
   const menuOpen = (mention && fileHits.length > 0) || slashHits.length > 0;
 
   const hint = sleeping
     ? "Waking the sandbox. Type ahead — it is sent the moment the machine is back."
-    : isAsk
-      ? "Answered by a read-only helper inside the sandbox. The agent is not interrupted."
-      : running
-        ? "The agent is mid-turn. Your message is queued and delivered when this turn finishes."
-        : null;
+    : running
+      ? "The agent is mid-turn. Your message is queued and delivered when this turn finishes."
+      : null;
 
   const dictating = voiceOpen;
 
@@ -380,49 +371,11 @@ export function Composer({
         </View>
       )}
 
-      {/* Lane toggle + accessories */}
-      {onAsk ? (
+      {accessoryLeft || accessoryRight ? (
         <View style={{ flexDirection: "row", gap: 6, alignItems: "center" }}>
-          {(["reply", "ask"] as const).map((l) => {
-            const active = lane === l;
-            const askDisabled = l === "ask" && sleeping;
-            return (
-              <PressScale
-                key={l}
-                disabled={askDisabled}
-                hitSlop={{ top: 10, bottom: 10 }}
-                accessibilityRole="radio"
-                accessibilityState={{ selected: active, disabled: askDisabled }}
-                onPress={() => {
-                  Haptics.selectionAsync().catch(() => {});
-                  setLane(l);
-                  if (l === "ask") {
-                    setMention(null);
-                    setSlash(null);
-                  }
-                }}
-                style={{
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: 5,
-                  paddingVertical: 5,
-                  paddingHorizontal: 12,
-                  borderRadius: radius.pill,
-                  backgroundColor: active ? palette.accent : "transparent",
-                  borderWidth: 1,
-                  borderColor: active ? palette.lineStrong : "transparent",
-                  opacity: askDisabled ? 0.4 : 1,
-                }}
-              >
-                <Icon name={l === "reply" ? "terminal" : "eye"} size={12} color={active ? palette.foreground : palette.faint} />
-                <T variant="micro" weight="medium" tone={active ? "default" : "faint"}>
-                  {l === "reply" ? (running ? "Queue for agent" : "Agent") : "Side question"}
-                </T>
-              </PressScale>
-            );
-          })}
+          {accessoryLeft}
           <View style={{ flex: 1 }} />
-          {!isAsk && accessoryLeft}
+          {accessoryRight}
         </View>
       ) : null}
 
@@ -431,9 +384,8 @@ export function Composer({
           flexDirection: "row",
           alignItems: "flex-end",
           gap: 8,
-          borderWidth: dictating ? 1.5 : isAsk ? 1.5 : 1,
-          borderColor: dictating ? palette.live : sleeping ? palette.sleep : isAsk ? palette.lineStrong : palette.input,
-          borderStyle: isAsk ? "dashed" : "solid",
+          borderWidth: dictating ? 1.5 : 1,
+          borderColor: dictating ? palette.live : sleeping ? palette.sleep : palette.input,
           borderRadius: radius["2xl"] + 6,
           backgroundColor: palette.card,
           paddingLeft: 12,
@@ -441,7 +393,7 @@ export function Composer({
           paddingVertical: 6,
         }}
       >
-        {!isAsk && session ? (
+        {session ? (
           <PressScale
             onPress={() => {
               const insert = text && !/\s$/.test(text) ? " @" : "@";
@@ -465,7 +417,7 @@ export function Composer({
           onSelectionChange={(e) => {
             const c = e.nativeEvent.selection.start;
             setCaret(c);
-            if (lane === "reply" && session) {
+            if (session) {
               // Same batch as onChangeText; the closure `text` is stale, the ref is not.
               setMention(mentionAt(textRef.current, c));
               setSlash(skill ? null : slashAt(textRef.current, c));
@@ -477,11 +429,9 @@ export function Composer({
               ? `Add details for /${skill} — or just send…`
               : sleeping
                 ? "Type ahead — sends once the sandbox is awake…"
-                : isAsk
-                  ? "Ask about this run — what changed, why is it stuck…"
-                  : running
-                    ? "Queue a follow-up for when this turn finishes…"
-                    : "Send a follow-up…  ( / skills · @ files )")
+                : running
+                  ? "Queue a follow-up for when this turn finishes…"
+                  : "Send a follow-up…  ( / skills · @ files )")
           }
           placeholderTextColor={palette.faint}
           multiline
@@ -509,7 +459,7 @@ export function Composer({
         )}
         {/* Stop the turn — only while the agent is working, and only when the thread wired it. A
             hairline ring with a square, not a filled red button: it is an interrupt, not a destroy. */}
-        <ScalePresence visible={!!onStop && !!running && !isAsk}>
+        <ScalePresence visible={!!onStop && !!running}>
           <PressScale
             onPress={() => {
               if (stopping) return;
@@ -550,13 +500,13 @@ export function Composer({
             onPress={send}
             disabled={disabled || busy}
             hitSlop={6}
-            accessibilityLabel={isAsk ? "Ask" : running ? "Queue message" : "Send"}
+            accessibilityLabel={running ? "Queue message" : "Send"}
             accessibilityState={{ disabled: disabled || busy, busy }}
             style={{
               width: 38,
               height: 38,
               borderRadius: 19,
-              backgroundColor: isAsk ? palette.secondary : palette.primary,
+              backgroundColor: palette.primary,
               alignItems: "center",
               justifyContent: "center",
               marginBottom: 1,
@@ -564,9 +514,9 @@ export function Composer({
             }}
           >
             {busy ? (
-              <ActivityIndicator size="small" color={isAsk ? palette.foreground : palette.primaryForeground} />
+              <ActivityIndicator size="small" color={palette.primaryForeground} />
             ) : (
-              <Icon name={isAsk ? "eye" : running ? "clock" : "arrow-up"} size={18} color={isAsk ? palette.foreground : palette.primaryForeground} />
+              <Icon name={running ? "clock" : "arrow-up"} size={18} color={palette.primaryForeground} />
             )}
           </PressScale>
         </Animated.View>

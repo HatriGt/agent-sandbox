@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowLeft, Check, FileText, FolderTree, HardDrive, Link2, ListTree, Loader2, MemoryStick, MessageSquareText, Moon, MoreHorizontal, PanelRight, Pencil, Pin, PinOff, Plus, RotateCw, Square, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, FileText, FolderTree, HardDrive, Link2, ListTree, Loader2, MemoryStick, MessageCircleQuestion, MessageSquareText, Moon, MoreHorizontal, PanelRight, Pencil, Pin, PinOff, Plus, RotateCw, Square, Trash2 } from "lucide-react";
 import { Swap } from "@/components/ui/swap";
 import { AnimatePresence, motion } from "motion/react";
 import { useReducedMotion } from "@/lib/motion-pref";
@@ -47,6 +47,9 @@ export function ThreadHeader({
   showWorkspace,
   showInspector,
   onToggleInspector,
+  showSideChat,
+  sideUnread = 0,
+  onToggleSideChat,
   removing,
   sleepNow,
   sleepBusy,
@@ -91,6 +94,10 @@ export function ThreadHeader({
   showWorkspace: boolean;
   showInspector: boolean;
   onToggleInspector: () => void;
+  showSideChat: boolean;
+  /** Side-chat answers that landed while the pane was closed. */
+  sideUnread?: number;
+  onToggleSideChat: () => void;
   removing: boolean;
   /** Put the machine to sleep now (msb stop, nothing removed). Hidden while already asleep. */
   sleepNow?: () => void;
@@ -311,6 +318,21 @@ export function ThreadHeader({
             <TooltipContent side="bottom">Run facts and the rest of the fleet · Ctrl+I</TooltipContent>
           </Tooltip>
 
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="sm" onClick={onToggleSideChat} aria-pressed={showSideChat} className={cn("text-muted-foreground relative", showSideChat && "bg-accent text-foreground")}>
+                <MessageCircleQuestion />
+                <span className="hidden lg:inline">Side chat</span>
+                {sideUnread > 0 && (
+                  <span className="bg-primary text-primary-foreground stamp rounded-full px-1.5 text-micro leading-4" aria-label={`${sideUnread} unread`}>
+                    {sideUnread}
+                  </span>
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Ask the sandbox about this run without interrupting the agent</TooltipContent>
+          </Tooltip>
+
           {onToggleDensity && (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -454,10 +476,10 @@ export function ThreadHeader({
       {/* One line at every width. On a phone the sentence is trimmed to what matters there (state,
           machine, repos — the meters and lifecycle live in the machine's tooltip and the ⋯ menu),
           and the repo chips scroll sideways rather than stacking into a third and fourth row. */}
-      <div className="text-muted-foreground mt-1 flex min-h-6 min-w-0 flex-nowrap items-center gap-x-2 text-meta">
+      <div className="text-muted-foreground mt-1.5 flex h-6 min-w-0 flex-nowrap items-center gap-2 text-meta">
         <Tooltip>
           <TooltipTrigger asChild>
-            <span className="stamp inline-flex shrink-0 items-center gap-1" title={shortName(box.name)}>
+            <span className="stamp inline-flex h-6 shrink-0 items-center gap-1" title={shortName(box.name)}>
               {kept && <Pin className="text-live size-3 fill-current" aria-label="Kept" />}
               {friendlyName(box.name)}
             </span>
@@ -474,7 +496,7 @@ export function ThreadHeader({
               {repos.map((r) => (
                 <Tooltip key={r.name}>
                   <TooltipTrigger asChild>
-                    <span className="bg-muted text-foreground stamp inline-flex min-w-0 max-w-64 shrink items-center gap-1 rounded-md px-1.5 py-0.5 whitespace-nowrap">
+                    <span className="bg-muted text-foreground stamp inline-flex h-6 min-w-0 max-w-64 shrink items-center gap-1 rounded-md px-2 whitespace-nowrap">
                       <span className="shrink-0">{r.name}</span>
                       {r.branch && <span className="text-muted-foreground hidden min-w-0 truncate sm:inline">@{r.branch}</span>}
                     </span>
@@ -536,9 +558,9 @@ export function ThreadHeader({
         {startedAt !== undefined && (
           <>
             <Dot />
-            <span className="hidden shrink-0 whitespace-nowrap sm:inline">Started {new Date(startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}</span>
+            <span className="hidden h-6 shrink-0 items-center whitespace-nowrap sm:inline-flex">Started {new Date(startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}</span>
             {elapsed && (
-              <span className={cn("stamp shrink-0 tabular-nums", running ? "text-live" : "text-faint")} aria-label={`Elapsed ${elapsed}`}>
+              <span className={cn("stamp inline-flex h-6 shrink-0 items-center tabular-nums", running ? "text-live" : "text-faint")} aria-label={`Elapsed ${elapsed}`}>
                 {elapsed}
               </span>
             )}
@@ -546,13 +568,13 @@ export function ThreadHeader({
         )}
 
         {agentName && (
-          <span className="hidden shrink-0 items-center gap-2 whitespace-nowrap lg:flex">
+          <span className="hidden h-6 shrink-0 items-center gap-2 whitespace-nowrap lg:flex">
             <Dot />
             <span>{agentName}</span>
           </span>
         )}
 
-        <span className="ml-auto flex shrink-0 items-center gap-2 pl-3 whitespace-nowrap">
+        <span className="ml-auto flex h-6 shrink-0 items-center gap-2 pl-3 whitespace-nowrap">
           {/* "finished 2m ago" → "asked just now": the meta changes with the state, so it crossfades with it. */}
           <Swap state={when ?? ""} className="hidden items-center sm:flex">
             {when && <span className={`${box.stalled ? "text-destructive" : "text-faint"} text-micro`}>{when}</span>}

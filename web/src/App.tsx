@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Link, useLocation, useNavigationType } from "react-router";
-import { Activity as ActivityIcon, ArrowRight, Bell, BellOff, Brain, ChevronRight, Clock, Cpu, FileSearch, Flame, GitCompare, Keyboard, Layers, LayoutGrid, ListChecks, LogOut, Menu, Moon, MoonStar, PanelLeftClose, PanelLeftOpen, PanelRight, Pause, Pin, PinOff, Plug, PlugZap, Plus, Search, Shield, Sparkles, Square, Sun, SunMedium, UserRound, WifiOff, Workflow, Zap } from "lucide-react";
+import { Activity as ActivityIcon, ArrowRight, Bell, BellOff, Brain, ChevronRight, Clock, Cpu, FileSearch, Flame, GitCompare, Keyboard, Layers, LayoutGrid, ListChecks, LogOut, Menu, MessageCircleQuestion, Moon, MoonStar, PanelLeftClose, PanelLeftOpen, PanelRight, Pause, Pin, PinOff, Plug, PlugZap, Plus, Search, Shield, Sparkles, Square, Sun, SunMedium, UserRound, WifiOff, Workflow, Zap } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { setMotionPref, useMotionPref, useReducedMotion, type MotionPref } from "@/lib/motion-pref";
 import { api, type Automation, type FleetLifecycle, type FleetSnapshot } from "@/lib/api";
@@ -40,13 +40,15 @@ import { Toaster } from "@/components/ui/sonner";
 import { getMe, signOut } from "@/lib/auth";
 import { Tooltip, TooltipContent, TooltipKbd, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
-import { Thread, type Aside } from "@/components/thread/Thread";
+import { Thread } from "@/components/thread/Thread";
+import { forgetSideChat } from "@/lib/sidechat";
 import { BootingThread } from "@/components/thread/BootingThread";
 import { Bar } from "@/components/thread/Skeletons";
 import { Collapse } from "@/components/ui/collapse";
 import { IconSwap } from "@/components/ui/icon-swap";
 import { NumberTicker } from "@/components/ui/number-ticker";
 import { cn } from "@/lib/utils";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 
 // Secondary pages are code-split: the thread — the page you live in — never pays for them.
 const Sandboxes = React.lazy(() => import("@/components/Sandboxes").then((m) => ({ default: m.Sandboxes })));
@@ -223,7 +225,6 @@ export default function App() {
   // The inline "Attached from the task" note, keyed by box, surviving the booting→thread swap.
   const [inferredNotes, setInferredNotes] = React.useState<Record<string, string[]>>({});
   const [pending, setPending] = React.useState<{ id: string; task: string }[]>([]);
-  const [asides, setAsides] = React.useState<Record<string, Aside[]>>({});
   const [replies, setReplies] = React.useState<Record<string, string[]>>({});
 
   const reported = React.useMemo(() => (data && Array.isArray(data.boxes) ? data.boxes.filter(isVisible) : null), [data]);
@@ -366,6 +367,7 @@ export default function App() {
         : { id: "t-keep", label: "Keep this machine", icon: <Pin />, group, keywords: "pin never reap", run: () => void api.keep(name, true).catch(fail("Could not keep the machine")) },
       { id: "t-review", label: "Review all changes", icon: <GitCompare />, group, keywords: "diff review changes files", run: () => dispatch("asb:review-changes") },
       { id: "t-inspector", label: "Toggle inspector", hint: "ctrl i", icon: <PanelRight />, group, keywords: "run fleet tokens context side pane", run: () => dispatch("asb:toggle-inspector") },
+      { id: "t-sidechat", label: "Side chat", icon: <MessageCircleQuestion />, group, keywords: "ask question sandbox helper observer", run: () => dispatch("asb:toggle-sidechat") },
     ];
   }, [selectedBox, threadModel]);
   const playbookActions = React.useMemo<PaletteAction[]>(() => {
@@ -509,32 +511,6 @@ export default function App() {
     return () => document.removeEventListener("keydown", onKey);
   }, [runs_, selected, open, newTask, showFleet, showHistory, showActivity, showSkills, showIntegrations, pulse]);
 
-  const ask = async (name: string, question: string) => {
-    let index = 0;
-    setAsides((prev) => {
-      const list = [...(prev[name] ?? []), { question }];
-      index = list.length - 1;
-      return { ...prev, [name]: list };
-    });
-    try {
-      const res = await api.ask(name, question);
-      setAsides((prev) => {
-        const list = [...(prev[name] ?? [])];
-        list[index] = {
-          question,
-          answer: res.timedOut ? `${res.answer}\n\n_(time cap reached — this answer may be partial)_` : res.answer,
-        };
-        return { ...prev, [name]: list };
-      });
-    } catch (e) {
-      setAsides((prev) => {
-        const list = [...(prev[name] ?? [])];
-        list[index] = { question, error: e instanceof Error ? e.message : String(e) };
-        return { ...prev, [name]: list };
-      });
-    }
-  };
-
   const health = !live && !data ? "offline" : waiting.length ? "attention" : "ok";
   const loading = !data && !error;
   // view "box" with no matching box yet is a JUST-STARTED session: delegate returned and the URL
@@ -577,7 +553,7 @@ export default function App() {
   const reduceMotion = useReducedMotion();
   // Direction-aware pane motion: deeper (hub → page → box) enters from the right on phones, going
   // back enters from the left; desktop keeps the plain 6px rise. Transform + opacity only.
-  const narrow = useNarrow();
+  const narrow = useMediaQuery("(max-width: 767px)");
   const depth = paneDepth(paneKey);
   const prevDepth = React.useRef(depth);
   const paneDir = depth === prevDepth.current ? 0 : depth > prevDepth.current ? 1 : -1;
@@ -715,7 +691,11 @@ export default function App() {
           {lifecycle.capacity > 0 ? (
             <Capacity boxes={boxes} capacity={lifecycle.capacity} size="sm" />
           ) : (
-            runs_.length > 0 && <NumberTicker value={runs_.length} from={runs_.length} className="text-muted-foreground tabular text-micro" />
+            !loading && (
+              <span className="text-faint tabular-nums text-micro whitespace-nowrap" aria-live="polite">
+                {working + waiting.length} online
+              </span>
+            )
           )}
         </span>
       </div>
@@ -1051,9 +1031,7 @@ export default function App() {
                     fleet={boxes}
                     onOpenBox={(b) => go({ view: "box", name: b })}
                     inferredRepos={inferredNotes[selectedBox.name]}
-                    asides={asides[selectedBox.name] ?? []}
                     replies={replies[selectedBox.name] ?? []}
-                    onAsk={(q) => void ask(selectedBox.name, q)}
                     onReplied={(text) =>
                       setReplies((prev) => ({ ...prev, [selectedBox.name]: [...(prev[selectedBox.name] ?? []), text] }))
                     }
@@ -1073,10 +1051,7 @@ export default function App() {
                     }
                     onTornDown={(name) => {
                       go({ view: "hub" });
-                      setAsides((prev) => {
-                        const { [name]: _gone, ...rest } = prev;
-                        return rest;
-                      });
+                      forgetSideChat(name);
                       setReplies((prev) => {
                         const { [name]: _dropped, ...rest } = prev;
                         return rest;
@@ -1354,14 +1329,3 @@ function paneVariants(reduce: boolean, narrow: boolean) {
   };
 }
 
-function useNarrow() {
-  const q = "(max-width: 767px)";
-  const [narrow, setNarrow] = React.useState(() => typeof window !== "undefined" && window.matchMedia(q).matches);
-  React.useEffect(() => {
-    const m = window.matchMedia(q);
-    const on = () => setNarrow(m.matches);
-    m.addEventListener("change", on);
-    return () => m.removeEventListener("change", on);
-  }, []);
-  return narrow;
-}
