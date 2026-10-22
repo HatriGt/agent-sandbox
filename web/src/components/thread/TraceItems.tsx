@@ -28,6 +28,7 @@ import { toast } from "sonner";
 import { Odometer } from "@/components/viz/motion";
 import { LiveLogView, useLiveLog } from "@/components/viz/LiveLog";
 import { liveKind } from "@/lib/viz-live-log";
+import { scanFences } from "@/lib/viz-identity";
 import { toolOutputLanguage } from "@/lib/viz-tool-output";
 import { useNow } from "@/hooks/useNow";
 
@@ -1039,8 +1040,11 @@ function StepItem({ event, live }: { event: ToolEvent; live?: boolean }) {
  * collapsed raw block instead.
  */
 function looksLikeDump(text: string): boolean {
-  const lines = text.split("\n").filter((l) => l.trim());
-  if (lines.length < 6) return /(^|\n)(diff --git|<<PROMPT_EOF|@@ -\d)/.test(text);
+  // Fenced code is deliberate markdown (a chart's JSON is mostly `{ } [ ]` lines), so only the
+  // prose around the fences is judged.
+  const fences = scanFences(text);
+  const lines = text.split("\n").filter((l, i) => l.trim() && !fences.some((f) => i >= f.start && i <= f.end));
+  if (lines.length < 6) return /(^|\n)(diff --git|<<PROMPT_EOF|@@ -\d)/.test(lines.join("\n"));
   const dumpish = lines.filter((l) => /^\s*(\d{1,5}[\s\t]|[+-]{3}\s|@@ |diff --git|index [0-9a-f]{6,}|[{}[\];]\s*$|<<|\$ )/.test(l) || /^\s{4,}\S/.test(l)).length;
   return dumpish / lines.length >= 0.5;
 }
