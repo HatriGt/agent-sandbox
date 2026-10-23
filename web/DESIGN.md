@@ -174,7 +174,7 @@ pane.
 
 shadcn's semantic contract plus a functional layer. Every value is exposed via `@theme inline` so
 each usage is a real utility (`text-live`, `bg-attention/18`) — never an arbitrary `text-[var(--x)]`.
-The table shows the two base palettes, Light (`:root`) and Graphite (`.dark`). The other three
+The table shows the two base palettes, Light (`:root`) and Graphite (`.dark`). The other seven
 themes override a subset of these in `:root[data-theme="…"]` blocks; see **Themes** below.
 
 | Token | Light | Dark (Graphite) | Role |
@@ -203,31 +203,46 @@ that precedes them — the bug that made the primary button ink-on-ink. Keep the
 
 ## Themes (`src/lib/theme.ts`)
 
-Five themes, two light and three dark, chosen from the picker in the sidebar footer (the palette
-icon in the collapsed rail, and a row in Account → Appearance). The registry is one ordered table,
-`THEMES: { id, label, scheme, description, preview }[]`; the id lands on `<html data-theme>` and the
-scheme toggles the `dark` class, which every `.dark` selector (syntax tokens, `.raised`, code
-blocks, Mermaid) still keys off. Token overrides live in `index.css` as `:root[data-theme="…"]`
+Nine themes, three light and six dark, chosen from the theme panel (the palette icon in the sidebar
+footer and in the collapsed rail, and a row in Account → Appearance). The registry is one ordered
+table, `THEMES: { id, label, scheme, description, preview }[]`; the id lands on `<html data-theme>`
+and the scheme toggles the `dark` class, which every `.dark` selector (syntax tokens, `.raised`,
+code blocks, Mermaid) still keys off. Token overrides live in `index.css` as `:root[data-theme="…"]`
 blocks after `.dark`, so a dark theme inherits Graphite's functional hues and shadows unless it
-overrides them. `preview` repeats the rail, page and live tones for the picker swatches, and the
-fixture asserts the rendered page background equals it, so the two cannot drift.
+overrides them. `preview` repeats seven tones (page, rail, card, ink, muted ink, hairline, live)
+that the panel's miniatures are drawn in, and the fixture asserts the rendered page background
+equals `preview.background`, so the registry and the CSS cannot drift.
 
 | Theme | Scheme | Intent | Page / rail / card |
 |---|---|---|---|
-| **Light** | light | White paper, zinc ink. The original light tokens. | `.992` / `.962` / white |
+| **Light** | light | White paper, zinc ink. The original light tokens; the default light. | `.992` / `.962` / white |
 | **Linen** | light | Warm paper, warm ink (hue 60–85, chroma ≤ .02). The accent stays brand indigo so state colours do not drift. | `.975 .009 80` / `.945 .012 80` / `.99 .005 85` |
+| **Mist** | light | Cool grey-blue paper (hue 240, chroma .012) and slate ink (hue 250). The accent turns steel blue (`.5 .16 250`) to sit in the same family; hairlines and shadows carry the slate. | `.962 .012 240` / `.925 .016 240` / `.985 .007 240` |
 | **Black** | dark | Pitch black, the default dark. The page is `oklch(.1 0 0)` (#030303), so the rail cannot sit below it; it steps *up* to `.16` and the sheet reads as a dark well in a lighter frame. Cards `.15`, popovers `.19`, borders `white/.10`. The terminal tone steps up the same way (`.16`). | `.10` / `.16` / `.15` |
 | **Graphite** | dark | Charcoal, the previous dark, every value kept. | `.175` / `.125` / `.215` |
 | **Midnight** | dark | Navy-indigo on the `--live` hue (262, chroma .03). Cards lean six degrees violet, hairlines carry the hue (`oklch(.78 .1 262 / .16)`), shadows are navy rather than black. | `.17 .03 262` / `.125 .028 262` / `.215 .032 268` |
+| **Nord** | dark | Polar grey-blue (hue 245, chroma .02), a step lighter than Graphite so it reads as slate, not charcoal. The accent is a desaturated frost cyan (`.8 .09 215`) instead of indigo; the ring follows it. | `.225 .02 245` / `.18 .018 245` / `.265 .022 245` |
+| **Forest** | dark | Deep green neutrals (hue 155, chroma .025) with moss cards. The accent is mint (`.82 .13 172`), and `--ok` leans yellow-green (`.78 .16 135`) so working and done stay two colours. | `.185 .025 155` / `.14 .022 155` / `.23 .03 152` |
+| **Dusk** | dark | Warm aubergine (hue 340, chroma .03) with a rose-gold accent (`.8 .1 20`). Hairlines and shadows carry the plum; the destructive red stays darker and more saturated than the accent. | `.185 .03 340` / `.14 .028 340` / `.23 .033 345` |
 
-Switching is instant: no transition on a theme change, which some people make many times a day.
-The palette keeps one "Switch to light/dark theme" command that flips scheme and lands on the theme
-the user last used in that scheme (`asb-theme-light` / `asb-theme-dark`), plus a "Theme: <name>"
-command per theme. The landing page's sun/moon toggle goes through the same module.
+The panel (`components/ThemePicker.tsx`) is a 21rem popover of theme cards in two columns, grouped
+under "Light" and "Dark". Each card is a miniature of the console drawn with real DOM in the
+theme's own `preview` tones: a rail strip with two working rows, the sheet with its hairline frame,
+a task bubble, two text lines, a live row and the composer bar with its live caret. The active card
+has a 2px `--ring` and a check. The hover-preview rule: resting the pointer on a card for 150ms
+applies that theme to the whole app through `applyTheme` (DOM only, nothing stored); leaving the
+panel, pressing Escape or closing it puts `readTheme()` back; a click or Enter commits through
+`setTheme` and closes. Arrow keys walk the grid (left/right by one, up/down by a row) and preview as
+they go, so a keyboard user sees the same try-before-you-keep. The popover has only its standard
+150ms origin-aware grow-in; the theme switch itself has no transition, which some people make many
+times a day. The palette keeps one "Switch to light/dark theme" command that flips scheme and lands
+on the theme the user last used in that scheme (`asb-theme-light` / `asb-theme-dark`), plus a
+"Theme: <name>" command per theme. The landing page's sun/moon toggle goes through the same module.
 
 Storage and migration: `asb-theme` holds the id. On first load without it, the legacy `asb-dark`
 maps `true` → Black and `false` → Light; absent, the OS preference picks Black or Light. The inline
-script in `index.html` mirrors this so the first paint is already the right theme.
+script in `index.html` mirrors this (an id regex and a dark-id regex, plus a placeholder shell tint
+per theme) so the first paint is already the right theme.
 
 ## Type
 
@@ -1154,3 +1169,62 @@ Left out: per-theme syntax colours (one set per scheme; the fixture measures eve
 the page and the card, and the dark set's lowest is 5.70 on Graphite and Midnight, 6.40 on Black); a
 theme transition (a hundred switches a day is not a moment for motion); a settings page
 (Appearance gets a row that opens the same picker).
+
+## Round: the theme panel (2026-10-23)
+
+The theme menu was five `menuitemradio` rows, each a 36×16 three-tone swatch, a name, a
+description and a check. The verdict was that it did not look good, and the swatch could not say
+what a theme would feel like: three flat tones carry none of the frame, the card step or the live
+accent that make one dark differ from another.
+
+Decision: a panel, not a row list. `ThemePicker` is a 21rem popover (Radix Popover, the same
+150ms origin-aware grow-in as every menu, capped at the available height so a mid-page trigger
+scrolls the grid instead of clipping it) holding a two-column grid of theme cards grouped under
+"Light" and "Dark". Each card is a miniature of the console drawn with real DOM in the registry's
+`preview` tones: a rail strip with two working rows, the sheet with its hairline frame, a task
+bubble, two text lines, a live row and the composer bar with its live caret. The active card has a
+2px `--ring` and a check. Resting on a card for 150ms previews the theme on the whole app through
+`applyTheme` without storing; leaving the panel or pressing Escape puts `readTheme()` back; a click
+or Enter commits and closes. Arrow keys walk the grid and preview as they go, so the keyboard gets
+the same try-before-you-keep. The theme switch itself still has no transition.
+
+Four themes join the five, each a `:root[data-theme]` block overriding only what differs from its
+scheme base: Mist (light, cool grey-blue paper, slate ink, a steel-blue accent), Nord (dark, polar
+grey-blue a step lighter than Graphite, a frost-cyan accent), Forest (dark, deep green with moss
+cards, a mint accent, `--ok` moved to yellow-green so working and done stay apart) and Dusk (dark,
+warm aubergine, a rose-gold accent). Each carries its own `--ring`, `--live`, hairlines and
+`--shade-*` on its hue. `preview` grew from three tones to seven so the miniatures draw from the
+registry rather than a second copy. The pre-paint script in `index.html` gained the four ids and a
+placeholder shell tint each. Black stays the default dark and Light the default light.
+
+Measured on the Hub at 1440 (`.shots/r8-themes.mjs`, 287 checks; contrast is WCAG, composited;
+`live/card` is `--live` on `--card`, `tok-min` the lowest `.tok-*` syntax colour on page or card):
+
+| Theme | Page | Rail | Body | Muted | Faint | Live | Live/card | tok-min | Composer hairline |
+|---|---|---|---|---|---|---|---|---|---|
+| Light | `.992 .001 286` | `.962 .003 286` | 17.28 | 5.88 | 4.65 | 5.59 | 5.74 | 4.92 | 1.53 |
+| Linen | `.975 .009 80` | `.945 .012 80` | 14.96 | 5.86 | 4.72 | 5.33 | 5.59 | 4.69 | 1.52 |
+| Mist | `.962 .012 240` | `.925 .016 240` | 13.48 | 6.10 | 4.85 | 5.36 | 5.72 | 4.54 | 1.59 |
+| Black | `.1 0 0` | `.16 0 0` | 17.78 | 7.98 | 5.90 | 8.72 | 8.32 | 6.40 | 1.81 |
+| Graphite | `.175 .005 286` | `.125 .005 286` | 16.39 | 7.06 | 5.19 | 8.03 | 7.41 | 5.70 | 2.12 |
+| Midnight | `.17 .03 262` | `.125 .028 262` | 16.60 | 8.01 | 5.94 | 8.60 | 7.87 | 5.70 | 1.90 |
+| Nord | `.225 .02 245` | `.18 .018 245` | 14.33 | 7.42 | 5.71 | 9.39 | 8.46 | 4.99 | 1.92 |
+| Forest | `.185 .025 155` | `.14 .022 155` | 16.03 | 7.85 | 6.08 | 11.18 | 10.10 | 5.44 | 1.86 |
+| Dusk | `.185 .03 340` | `.14 .028 340` | 16.15 | 8.05 | 6.16 | 9.68 | 8.84 | 5.57 | 1.95 |
+
+The fixture also asserts, per theme on the Hub, History and a thread: `data-theme` and the `dark`
+class match the registry, the page background equals `preview.background`, the rail differs from
+the sheet, no page errors; and for the panel, opened on Light and on Black: nine `radio` cards under
+the two headers, exactly one ringed and checked, hovering another card changes the computed page
+background within 300ms (measured 187–190ms: the 150ms rest plus a frame or two) without writing `asb-theme`, moving the pointer off
+the panel reverts it and leaves the panel open, a click commits, stores and closes; from the
+keyboard, the active card has focus on open, ArrowRight moves focus and previews without storing,
+ArrowDown then Enter commits and stores, Escape after an arrow preview closes and reverts. The
+landing toggle and the legacy-key migration checks carry over from round 7. Shots in
+`.shots/r8/theme-<id>-hub.png` and `theme-panel-{light,dark}.png`.
+
+Left out: per-theme syntax colours (the one dark set still clears 4.5 on every dark page and card,
+lowest 4.99 on Nord's lighter card; the light set's lowest is 4.54 on Mist); a per-card scheme badge
+(the two group headers already say it, and a third word under a 9rem card was noise); a fourth light
+theme to square the grid (an empty slot is honest, a filler theme is not); the mobile registry
+(`mobile/src/theme/themes.ts` mirrors the web one by hand and is another workstream's).

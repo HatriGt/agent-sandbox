@@ -238,7 +238,7 @@
   --viz-grid: #2c2c2a;
 }
 
-/* Themes (lib/theme.ts). `:root` is Light and `.dark` is Graphite; the three blocks below override
+/* Themes (lib/theme.ts). `:root` is Light and `.dark` is Graphite; the seven blocks below override
    only what differs, so a dark theme inherits Graphite's functional hues and shadows unless it says
    otherwise. `:root[data-theme]` outranks `.dark`, so order between them does not matter. */
 
@@ -338,6 +338,147 @@
   --shade-2: oklch(0.3 0.05 60 / 0.14);
   --shade-3: oklch(0.3 0.05 60 / 0.2);
   --viz-grid: #e4ddd0;
+}
+
+/* Mist: cool grey-blue paper (hue 240, chroma .012) and slate ink. The accent turns steel blue to
+   sit in the same cool family; the hairlines and shadows carry the slate rather than black. */
+:root[data-theme="mist"] {
+  --background: oklch(0.962 0.012 240);
+  --foreground: oklch(0.27 0.03 250);
+  --card: oklch(0.985 0.007 240);
+  --card-foreground: oklch(0.27 0.03 250);
+  --sidebar: oklch(0.925 0.016 240);
+  --popover: oklch(0.985 0.007 240);
+  --popover-foreground: oklch(0.27 0.03 250);
+  --primary: oklch(0.27 0.03 250);
+  --primary-foreground: oklch(0.98 0.006 240);
+  --secondary: oklch(0.925 0.016 240);
+  --secondary-foreground: oklch(0.27 0.03 250);
+  --muted: oklch(0.93 0.015 240);
+  --muted-foreground: oklch(0.47 0.035 250);
+  --accent: oklch(0.905 0.018 240);
+  --accent-foreground: oklch(0.27 0.03 250);
+  --border: oklch(0.3 0.06 250 / 0.13);
+  --line-strong: oklch(0.3 0.06 250 / 0.24);
+  --input: oklch(0.3 0.06 250 / 0.16);
+  --ring: oklch(0.5 0.16 250);
+  --live: oklch(0.5 0.16 250);
+  --attention: oklch(0.27 0.03 250);
+  --attention-text: oklch(0.27 0.03 250);
+  --attention-ink: oklch(0.98 0.006 240);
+  --trace: oklch(0.24 0.025 250);
+  --trace-fg: oklch(0.93 0.008 240);
+  --faint: oklch(0.525 0.035 250);
+  --shade-1: oklch(0.2 0.04 250 / 0.1);
+  --shade-2: oklch(0.2 0.04 250 / 0.14);
+  --shade-3: oklch(0.2 0.04 250 / 0.2);
+  --viz-grid: #d8dde8;
+}
+
+/* Nord: polar grey-blue (hue 245, chroma .02), a step lighter than Graphite so it reads as slate,
+   not charcoal. The accent is a desaturated frost cyan instead of the brand indigo. */
+:root[data-theme="nord"] {
+  --background: oklch(0.225 0.02 245);
+  --foreground: oklch(0.94 0.008 240);
+  --card: oklch(0.265 0.022 245);
+  --card-foreground: oklch(0.94 0.008 240);
+  --sidebar: oklch(0.18 0.018 245);
+  --popover: oklch(0.295 0.024 245);
+  --popover-foreground: oklch(0.94 0.008 240);
+  --primary: oklch(0.92 0.01 240);
+  --primary-foreground: oklch(0.22 0.02 245);
+  --secondary: oklch(0.33 0.026 245);
+  --secondary-foreground: oklch(0.94 0.008 240);
+  --muted: oklch(0.31 0.025 245);
+  --muted-foreground: oklch(0.74 0.02 240);
+  --accent: oklch(0.35 0.028 245);
+  --accent-foreground: oklch(0.97 0.006 240);
+  --border: oklch(0.85 0.05 240 / 0.14);
+  --line-strong: oklch(0.85 0.05 240 / 0.26);
+  --input: oklch(0.85 0.05 240 / 0.18);
+  --ring: oklch(0.78 0.1 215);
+  --live: oklch(0.8 0.09 215);
+  --attention: oklch(0.92 0.01 240);
+  --attention-text: oklch(0.94 0.008 240);
+  --attention-ink: oklch(0.22 0.02 245);
+  --trace: oklch(0.155 0.016 245);
+  --trace-fg: oklch(0.9 0.008 240);
+  --faint: oklch(0.67 0.02 240);
+  --shade-1: oklch(0.1 0.02 245 / 0.45);
+  --shade-2: oklch(0.1 0.02 245 / 0.55);
+  --shade-3: oklch(0.1 0.02 245 / 0.65);
+  --viz-grid: #343b4a;
+}
+
+/* Forest: deep green neutrals (hue 155, chroma .025) with moss cards. The accent is mint and the
+   "done" green leans yellow so working and done stay two colours. */
+:root[data-theme="forest"] {
+  --background: oklch(0.185 0.025 155);
+  --foreground: oklch(0.95 0.01 150);
+  --card: oklch(0.23 0.03 152);
+  --card-foreground: oklch(0.95 0.01 150);
+  --sidebar: oklch(0.14 0.022 155);
+  --popover: oklch(0.265 0.032 152);
+  --popover-foreground: oklch(0.95 0.01 150);
+  --primary: oklch(0.93 0.015 150);
+  --primary-foreground: oklch(0.19 0.025 155);
+  --secondary: oklch(0.3 0.035 152);
+  --secondary-foreground: oklch(0.95 0.01 150);
+  --muted: oklch(0.28 0.033 152);
+  --muted-foreground: oklch(0.73 0.035 150);
+  --accent: oklch(0.32 0.038 152);
+  --accent-foreground: oklch(0.97 0.01 150);
+  --border: oklch(0.8 0.08 155 / 0.15);
+  --line-strong: oklch(0.8 0.08 155 / 0.28);
+  --input: oklch(0.8 0.08 155 / 0.19);
+  --ring: oklch(0.8 0.13 172);
+  --live: oklch(0.82 0.13 172);
+  --ok: oklch(0.78 0.16 135);
+  --attention: oklch(0.93 0.015 150);
+  --attention-text: oklch(0.95 0.01 150);
+  --attention-ink: oklch(0.19 0.025 155);
+  --trace: oklch(0.125 0.02 155);
+  --trace-fg: oklch(0.9 0.01 150);
+  --faint: oklch(0.66 0.035 150);
+  --shade-1: oklch(0.08 0.02 155 / 0.45);
+  --shade-2: oklch(0.08 0.02 155 / 0.55);
+  --shade-3: oklch(0.08 0.02 155 / 0.65);
+  --viz-grid: #273b31;
+}
+
+/* Dusk: warm aubergine neutrals (hue 340, chroma .03) with a rose-gold accent. Hairlines and shadows
+   carry the plum; the destructive red stays more saturated and darker than the accent. */
+:root[data-theme="dusk"] {
+  --background: oklch(0.185 0.03 340);
+  --foreground: oklch(0.95 0.01 340);
+  --card: oklch(0.23 0.033 345);
+  --card-foreground: oklch(0.95 0.01 340);
+  --sidebar: oklch(0.14 0.028 340);
+  --popover: oklch(0.265 0.035 345);
+  --popover-foreground: oklch(0.95 0.01 340);
+  --primary: oklch(0.93 0.015 340);
+  --primary-foreground: oklch(0.19 0.03 340);
+  --secondary: oklch(0.3 0.038 345);
+  --secondary-foreground: oklch(0.95 0.01 340);
+  --muted: oklch(0.28 0.036 345);
+  --muted-foreground: oklch(0.74 0.03 340);
+  --accent: oklch(0.32 0.04 345);
+  --accent-foreground: oklch(0.97 0.01 340);
+  --border: oklch(0.85 0.08 340 / 0.15);
+  --line-strong: oklch(0.85 0.08 340 / 0.28);
+  --input: oklch(0.85 0.08 340 / 0.19);
+  --ring: oklch(0.78 0.11 20);
+  --live: oklch(0.8 0.1 20);
+  --attention: oklch(0.93 0.015 340);
+  --attention-text: oklch(0.95 0.01 340);
+  --attention-ink: oklch(0.19 0.03 340);
+  --trace: oklch(0.125 0.025 340);
+  --trace-fg: oklch(0.9 0.01 340);
+  --faint: oklch(0.67 0.03 340);
+  --shade-1: oklch(0.08 0.03 340 / 0.45);
+  --shade-2: oklch(0.08 0.03 340 / 0.55);
+  --shade-3: oklch(0.08 0.03 340 / 0.65);
+  --viz-grid: #3d2a36;
 }
 
 @utility scrollbar-thin {
