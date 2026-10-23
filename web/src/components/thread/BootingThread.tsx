@@ -68,7 +68,6 @@ export function BootingThread({
       <div className="relative flex min-h-0 flex-1">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="relative min-h-0 min-w-0 flex-1">
-            <div aria-hidden className="thread-glow pointer-events-none absolute inset-0" />
             <ChatContainerRoot className="relative h-full [&>div]:overflow-x-hidden" aria-label="Conversation" aria-busy="true">
               <ChatContainerContent className="mx-auto w-full max-w-3xl gap-5 px-4 pt-7 pb-12 md:px-6">
                 <div data-turn="task">

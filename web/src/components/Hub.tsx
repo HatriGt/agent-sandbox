@@ -581,7 +581,7 @@ export function Hub({
   }, [howto, loading, runs.length, sessionRuns.length]);
 
   return (
-    <div className="hub-stage h-full min-w-0 overflow-y-auto">
+    <div className="h-full min-w-0 overflow-y-auto">
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-8 px-5 pt-8 pb-16 md:px-6 md:pt-[8vh]">
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}>
           <Button variant="ghost" size="sm" onClick={onBack} className="-ml-2 mb-3 md:hidden" aria-label="Back to machines">

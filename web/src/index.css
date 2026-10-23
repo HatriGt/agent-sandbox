@@ -1170,22 +1170,6 @@
   -webkit-mask-image: linear-gradient(to bottom, black calc(100% - 14px), transparent);
 }
 
-/* The hub composer's stage: a faint brand bloom behind the hero so the page has a centre of gravity. */
-.hub-stage {
-  background: radial-gradient(48rem 20rem at 50% 12rem, color-mix(in oklch, var(--live) 4.5%, transparent), transparent 70%);
-}
-.dark .hub-stage {
-  background: radial-gradient(48rem 20rem at 50% 12rem, color-mix(in oklch, var(--live) 7%, transparent), transparent 70%);
-}
-
-/* A faint brand glow at the head of the conversation. */
-.thread-glow {
-  background: radial-gradient(60% 24rem at 50% 0%, color-mix(in oklch, var(--live) 5%, transparent), transparent 70%);
-}
-.dark .thread-glow {
-  background: radial-gradient(60% 24rem at 50% 0%, color-mix(in oklch, var(--live) 8%, transparent), transparent 70%);
-}
-
 /* Output visualizers, motion when data changes (components/viz/motion.tsx). Rows that arrive
    while a block streams fade + lift in (30 ms stagger, capped in JS at 8); bars tween their
    width; a state mark pops in when it flips; the active step's soft pulse is the ONLY loop and
