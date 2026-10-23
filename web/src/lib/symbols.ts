@@ -4,11 +4,13 @@ import type { SyntaxNode } from "@lezer/common";
 
 /**
  * Go-to-symbol's model: the declarations in a document, read off CodeMirror's syntax tree. Pure, no
- * React, no view — a `Text` and a tree in, a flat list out. `depth` nests a method under its class
- * and a local under its function (headings nest by level), so the list can indent like an outline.
+ * React, no view — a `Text` and a tree in, a flat list out. `from`/`to` span the name, `range` the
+ * whole declaration (body included) so a preview can band every line and the caret can be placed in
+ * its symbol. `depth` nests a method under its class and a local under its function (headings nest
+ * by level), and `containerName` names that enclosing declaration, as VS Code's detail column does.
  */
 export type SymbolKind = "function" | "method" | "class" | "interface" | "type" | "enum" | "variable" | "property" | "heading" | "key" | "selector";
-export type CodeSymbol = { name: string; kind: SymbolKind; line: number; from: number; to: number; depth: number };
+export type CodeSymbol = { name: string; kind: SymbolKind; line: number; endLine: number; from: number; to: number; range: Span; depth: number; containerName?: string };
 
 type Span = { from: number; to: number };
 type Rule = {
@@ -16,7 +18,7 @@ type Rule = {
   /** Where the symbol's name sits; one declaration can bind several (`const a = 1, b = 2`). */
   names: (node: SyntaxNode, doc: Text) => Span[];
   label?: (text: string) => string;
-  /** Headings nest by level, not by tree depth. */
+  /** Headings nest by level, not by tree depth, and contain nothing. */
   depth?: (node: SyntaxNode) => number;
 };
 type Table = Record<string, Rule>;
@@ -116,52 +118,103 @@ export function symbolsIn(state: EditorState): CodeSymbol[] {
   const tree = ensureSyntaxTree(state, state.doc.length, 200) ?? syntaxTree(state);
   const doc = state.doc;
   const out: CodeSymbol[] = [];
-  const opened: boolean[] = [];
-  let depth = 0;
+  // One frame per visited node: the name it opened as a container, or null.
+  const opened: (string | null)[] = [];
+  const containers: string[] = [];
   tree.iterate({
     enter: (ref) => {
       const rule = table[ref.name];
-      let emitted = false;
+      let first: string | null = null;
       if (rule && out.length < MAX_SYMBOLS) {
         const node = ref.node;
         const kind = typeof rule.kind === "function" ? rule.kind(node) : rule.kind;
-        const d = rule.depth ? rule.depth(node) : depth;
+        const depth = rule.depth ? rule.depth(node) : containers.length;
+        const range = { from: ref.from, to: ref.to };
+        const endLine = doc.lineAt(ref.to).number;
         for (const span of rule.names(node, doc)) {
           const raw = doc.sliceString(span.from, span.to);
           const name = rule.label ? rule.label(raw) : raw;
           if (!name) continue;
-          out.push({ name, kind, line: doc.lineAt(span.from).number, from: span.from, to: span.to, depth: d });
-          emitted = true;
+          const sym: CodeSymbol = { name, kind, line: doc.lineAt(span.from).number, endLine, from: span.from, to: span.to, range, depth };
+          if (containers.length && !rule.depth) sym.containerName = containers[containers.length - 1];
+          out.push(sym);
+          first ??= name;
         }
       }
-      opened.push(emitted && !rule?.depth);
-      if (emitted && !rule?.depth) depth++;
+      const opens = first !== null && !rule?.depth ? first : null;
+      opened.push(opens);
+      if (opens !== null) containers.push(opens);
     },
     leave: () => {
-      if (opened.pop()) depth--;
+      if (opened.pop() !== null) containers.pop();
     },
   });
   return out;
 }
 
+/** The innermost symbol whose declaration contains `pos`, as an index into `symbols`, or -1. */
+export function symbolAt(symbols: CodeSymbol[], pos: number): number {
+  // Document order puts a member after its container, so the last hit is the innermost.
+  let hit = -1;
+  symbols.forEach((s, i) => {
+    if (s.range.from <= pos && pos <= s.range.to) hit = i;
+  });
+  return hit;
+}
+
+/** A symbol that survived the filter, with the name's matched character offsets for highlighting. */
+export type SymbolMatch = { symbol: CodeSymbol; positions: number[] };
+
 /**
  * Filter for the "@" query: prefix beats substring beats subsequence, ties keep document order. An
- * empty query is the whole outline in document order.
+ * empty query is the whole outline in document order with nothing highlighted.
  */
-export function matchSymbols(symbols: CodeSymbol[], query: string): CodeSymbol[] {
+export function matchSymbols(symbols: CodeSymbol[], query: string): SymbolMatch[] {
   const needle = query.trim().toLowerCase();
-  if (!needle) return symbols;
-  const score = (name: string): number => {
+  if (!needle) return symbols.map((symbol) => ({ symbol, positions: [] }));
+  const run = (at: number) => Array.from(needle, (_, k) => at + k);
+  const score = (name: string): [number, number[]] | null => {
     const n = name.toLowerCase();
-    if (n.startsWith(needle)) return 0;
-    if (n.includes(needle)) return 1;
-    let i = 0;
-    for (const ch of n) if (ch === needle[i] && ++i === needle.length) return 2;
-    return 9;
+    if (n.startsWith(needle)) return [0, run(0)];
+    const at = n.indexOf(needle);
+    if (at >= 0) return [1, run(at)];
+    const positions: number[] = [];
+    for (let i = 0; i < n.length && positions.length < needle.length; i++) if (n[i] === needle[positions.length]) positions.push(i);
+    return positions.length === needle.length ? [2, positions] : null;
   };
   return symbols
-    .map((s, i) => [score(s.name), i, s] as const)
-    .filter(([sc]) => sc < 9)
-    .sort((a, b) => a[0] - b[0] || a[1] - b[1])
-    .map(([, , s]) => s);
+    .map((symbol, i) => [score(symbol.name), i, symbol] as const)
+    .filter((m): m is readonly [[number, number[]], number, CodeSymbol] => m[0] !== null)
+    .sort((a, b) => a[0][0] - b[0][0] || a[1] - b[1])
+    .map(([[, positions], , symbol]) => ({ symbol, positions }));
+}
+
+/** VS Code's "@:" categories: the separator label and the order the groups appear in. */
+export const CATEGORY: Record<SymbolKind, { label: string; order: number }> = {
+  class: { label: "classes", order: 0 },
+  interface: { label: "interfaces", order: 1 },
+  function: { label: "functions", order: 2 },
+  method: { label: "methods", order: 3 },
+  variable: { label: "variables", order: 4 },
+  property: { label: "properties", order: 5 },
+  enum: { label: "enums", order: 6 },
+  type: { label: "types", order: 7 },
+  heading: { label: "headings", order: 8 },
+  key: { label: "keys", order: 9 },
+  selector: { label: "selectors", order: 10 },
+};
+
+export type SymbolGroup = { kind: SymbolKind; label: string; items: SymbolMatch[] };
+
+/** The "@:" view: matches bucketed by kind in CATEGORY order, each bucket keeping the matches' order. */
+export function groupSymbols(matches: SymbolMatch[]): SymbolGroup[] {
+  const buckets = new Map<SymbolKind, SymbolMatch[]>();
+  for (const m of matches) {
+    const list = buckets.get(m.symbol.kind);
+    if (list) list.push(m);
+    else buckets.set(m.symbol.kind, [m]);
+  }
+  return [...buckets]
+    .sort(([a], [b]) => CATEGORY[a].order - CATEGORY[b].order)
+    .map(([kind, items]) => ({ kind, label: `${CATEGORY[kind].label} (${items.length})`, items }));
 }
