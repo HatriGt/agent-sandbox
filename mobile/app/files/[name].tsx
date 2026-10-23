@@ -12,6 +12,7 @@ import { T } from "@/components/ui/AppText";
 import { Button } from "@/components/ui/Button";
 import { Field } from "@/components/ui/Field";
 import { Icon } from "@/components/ui/Icon";
+import { FileIcon } from "@/components/ui/FileIcon";
 import { PressScale } from "@/components/motion";
 
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -162,7 +163,7 @@ export default function Files() {
             onPress={() => (e.folder ? setDir(e.path) : void openFile(e.path))}
             style={({ pressed }) => ({ flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: palette.border, opacity: pressed || loadingFile === e.path ? 0.5 : 1 })}
           >
-            <Icon name={e.folder ? "folder" : "file-text"} size={15} color={e.folder ? palette.foreground : palette.mutedForeground} />
+            <FileIcon name={e.name} folder={e.folder} size={16} />
             <T variant="body" mono={!e.folder} numberOfLines={1} style={{ flex: 1, minWidth: 0 }}>
               {e.name}
             </T>

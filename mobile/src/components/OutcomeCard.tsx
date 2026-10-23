@@ -14,7 +14,7 @@ import { FadeInUp, PressScale, stagger } from "@/components/motion";
  * The outcome card (docs/plan-demo-parity.md bet 2), mobile twin of
  * web/src/components/thread/OutcomeCard.tsx: what did I get, can I trust it, what did it cost, and
  * why it started. Only recorded facts; unknown is "—". Green passes, red fails, everything else
- * neutral — amber stays reserved for "needs you".
+ * neutral — amber stays reserved for "action needed".
  */
 const DASH = "—";
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;

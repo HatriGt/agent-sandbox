@@ -15,7 +15,7 @@ import { VoiceOverlay } from "./voice/VoiceOverlay";
 import { animateLayout, FadeInUp, PressScale, stagger } from "@/components/motion";
 
 /**
- * The structured decision control: amber = needs you (the reserved hue),
+ * The structured decision control: amber = action needed (the reserved hue),
  * options as big touch targets, "Something else…" for free text. Answers go
  * through resume — the only steering channel.
  */
@@ -54,7 +54,7 @@ export function QuestionCard({
       <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
         <Icon name="alert-circle" size={13} color={palette.attentionInk} />
         <T variant="micro" weight="semibold" style={{ color: palette.attentionInk, letterSpacing: 0.5 }}>
-          NEEDS YOU
+          ACTION NEEDED
         </T>
       </View>
       <T variant="lead" weight="semibold" style={{ color: palette.attentionInk }} selectable>

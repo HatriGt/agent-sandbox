@@ -15,7 +15,7 @@ import { useNow } from "@/hooks/useNow";
 
 /**
  * What this chat scheduled (web: thread/ScheduledCard + SchedulePill). One compact card with a row
- * per schedule, grouped by relation. A proposal awaiting approval carries the "needs you" treatment
+ * per schedule, grouped by relation. A proposal awaiting approval carries the "action needed" treatment
  * from the recent web theme — an ink hairline with a soft halo and exactly one filled button — never
  * amber. A schedule the agent wrote but the controller could not read is listed too, with a one-tap
  * way to ask again (copied into the clipboard for the composer; it has no prefill hook yet).
@@ -243,7 +243,7 @@ export function ScheduledCard({
 
 type Run = (id: string, fn: () => Promise<unknown>) => Promise<void>;
 
-/** Needs you: ink hairline, a soft halo ring, one filled button. */
+/** Action needed: ink hairline, a soft halo ring, one filled button. */
 function ProposedRow({ it, busy, run }: { it: Item; busy: boolean; run: Run }) {
   const { palette } = useTheme();
   const cat = CATEGORY[it.category];

@@ -7,6 +7,7 @@ import { radius } from "@/theme/tokens";
 import type { CommandLine, Comparison, CronSpec, EnvVar, FileEntry, IniSection, JwtDecoded, LinkItem, StackTrace, UrlParts } from "@/lib/viz";
 import { T } from "../ui/AppText";
 import { Icon, type IconName } from "../ui/Icon";
+import { FileIcon } from "../ui/FileIcon";
 import { MiniAction } from "./VizFrame";
 import { PressScale } from "@/components/motion";
 
@@ -255,7 +256,6 @@ function humanBytes(n: number): string {
   return `${v < 10 ? v.toFixed(1) : Math.round(v)} ${u[i]}`;
 }
 
-const FILE_ICON: Record<FileEntry["kind"], IconName> = { dir: "folder", link: "link-2", file: "file" };
 
 export function FileListBlock({ entries }: { entries: FileEntry[] }) {
   const { palette } = useTheme();
@@ -267,7 +267,7 @@ export function FileListBlock({ entries }: { entries: FileEntry[] }) {
     <View>
       {shown.map((e, i) => (
         <View key={`${e.name}-${i}`} style={{ ...rowBorder(i, palette.border), flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 6 }}>
-          <Icon name={FILE_ICON[e.kind]} size={14} color={e.kind === "dir" ? palette.live : palette.mutedForeground} />
+          {e.kind === "link" ? <Icon name="link-2" size={14} color={palette.mutedForeground} /> : <FileIcon name={e.name} folder={e.kind === "dir"} size={14} />}
           <View style={{ flex: 1, minWidth: 0 }}>
             <T variant="code" mono weight={e.kind === "dir" ? "medium" : "regular"} numberOfLines={1} selectable>
               {e.name}

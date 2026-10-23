@@ -137,7 +137,7 @@ function Row({ a, index, onChange, onRemove }: { a: Automation; index: number; o
     >
     <Card
       onPress={() => router.push(`/automation/${encodeURIComponent(a.id)}`)}
-      // "Needs you" is ink: a hairline, no tinted fill (theme commits 21d16af / 44fb21c).
+      // "Action needed" is ink: a hairline, no tinted fill (theme commits 21d16af / 44fb21c).
       style={[{ gap: 6 }, pending ? { borderColor: palette.lineStrong, borderRadius: radius.xl } : !a.enabled ? { opacity: 0.75 } : null]}
     >
       <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>

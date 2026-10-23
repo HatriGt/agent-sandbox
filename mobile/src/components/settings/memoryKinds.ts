@@ -1,5 +1,5 @@
 // Ported from web/src/components/memory/kinds.ts — order, labels and glyphs (Feather equivalents
-// of the lucide set). Kinds are never coloured: amber stays reserved for "needs you".
+// of the lucide set). Kinds are never coloured: amber stays reserved for "action needed".
 import type { MemoryKind } from "@/lib/api";
 import type { IconName } from "@/components/ui/Icon";
 
