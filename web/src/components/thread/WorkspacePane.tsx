@@ -16,7 +16,7 @@ import { invalidateResolver } from "@/components/ui/code-ref";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { EmptyEditor, TabStrip } from "./EditorTabs";
 import { FileView } from "./FileView";
-import { EASE, MENU_CONTENT, MENU_ITEM, MENU_ITEM_DESTRUCTIVE, MENU_SEP, MenuHint, copyText, shortcutLabel, type Open } from "./workspace-chrome";
+import { EASE, MENU_CONTENT, MENU_ITEM, MENU_ITEM_DESTRUCTIVE, MENU_SEP, MenuHint, Twistie, copyText, shortcutLabel, type Open } from "./workspace-chrome";
 import { RecordsTable } from "./RecordsTable";
 import { ReviewView, type ReviewFocus } from "./review/ReviewView";
 import { cn } from "@/lib/utils";
@@ -1013,7 +1013,7 @@ function RowView({ row, repo, change, changeCount }: { row: Row & { kind: "dir" 
   if (row.kind === "dir") {
     return (
       <>
-        <ChevronRight className={cn("text-muted-foreground size-3.5 shrink-0 transition-transform duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none", row.expanded && "rotate-90")} aria-hidden />
+        <Twistie open={row.expanded} />
         <FolderIcon name={row.name} open={row.expanded} />
         <span className={cn("truncate", repo && "font-semibold")}>{row.name}</span>
         {repo && (
@@ -1029,7 +1029,7 @@ function RowView({ row, repo, change, changeCount }: { row: Row & { kind: "dir" 
   const st = change ? STATUS_LETTER[change.status] : null;
   return (
     <>
-      <FileIcon path={row.path} size={15} />
+      <FileIcon path={row.path} />
       <span className={cn("truncate", change?.status === "deleted" && "line-through", st?.tone)}>{row.name}</span>
       {st && <span className={cn("stamp ml-auto shrink-0 font-semibold", st.tone)}>{st.l}</span>}
     </>

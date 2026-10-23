@@ -5,7 +5,7 @@ import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirro
 import { closeSearchPanel, highlightSelectionMatches, openSearchPanel, search, searchPanelOpen, selectNextOccurrence, selectSelectionMatches } from "@codemirror/search";
 import { AnimatePresence } from "motion/react";
 import { EditorFind } from "@/components/EditorFind";
-import { bracketMatching, foldGutter, foldKeymap, indentOnInput, syntaxHighlighting, HighlightStyle, StreamLanguage, LanguageDescription, LanguageSupport, Language } from "@codemirror/language";
+import { bracketMatching, codeFolding, foldGutter, foldKeymap, indentOnInput, syntaxHighlighting, HighlightStyle, StreamLanguage, LanguageDescription, LanguageSupport, Language } from "@codemirror/language";
 import { classHighlighter, highlightCode, tags as t } from "@lezer/highlight";
 import { javascript } from "@codemirror/lang-javascript";
 import { json } from "@codemirror/lang-json";
@@ -119,7 +119,15 @@ const chrome = EditorView.theme({
   ".cm-lineNumbers .cm-gutterElement": { padding: "0 10px 0 6px", minWidth: "3.2ch" },
   ".cm-activeLineGutter": { backgroundColor: "transparent", color: "var(--foreground)" },
   ".cm-activeLine": { backgroundColor: "color-mix(in oklch, var(--foreground) 3.5%, transparent)" },
-  ".cm-foldGutter .cm-gutterElement": { color: "var(--muted-foreground)", opacity: "0.6" },
+  // VS Code's fold gutter: a 16px chevron column, open chevrons shown only while the gutter is hovered.
+  ".cm-foldGutter .cm-gutterElement": { width: "16px", padding: "0", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "var(--muted-foreground)" },
+  ".cm-foldGutter .cm-gutterElement:hover": { color: "var(--foreground)" },
+  ".cm-foldGutter span": { padding: "0", display: "flex", transition: "opacity 100ms" },
+  ".cm-foldGutter span[data-fold=open]": { opacity: "0" },
+  ".cm-gutters:hover .cm-foldGutter span[data-fold=open]": { opacity: "1" },
+  ":root[data-motion=reduced] & .cm-foldGutter span": { transition: "none" },
+  ".cm-foldPlaceholder": { backgroundColor: "color-mix(in oklch, var(--muted-foreground) 14%, transparent)", border: "none", color: "var(--muted-foreground)", borderRadius: "3px", margin: "0 2px", padding: "0 5px", fontSize: "0.85em", cursor: "pointer" },
+  ".cm-foldPlaceholder:hover": { backgroundColor: "color-mix(in oklch, var(--muted-foreground) 24%, transparent)", color: "var(--foreground)" },
   ".cm-selectionBackground, &.cm-focused .cm-selectionBackground, ::selection": { backgroundColor: "color-mix(in oklch, var(--live) 22%, transparent) !important" },
   ".cm-cursor": { borderLeftColor: "var(--foreground)", borderLeftWidth: "1.5px" },
   // A revealed line (a code ref clicked in chat) flashes, then settles to nothing.
@@ -159,12 +167,23 @@ const proseChrome = EditorView.theme({
   ".cm-activeLine": { backgroundColor: "transparent" },
 });
 
+const CHEVRON = { open: "m6 9 6 6 6-6", closed: "m9 18 6-6-6-6" };
+/** The fold marker: lucide's chevron as a 16px inline SVG, down for an open region, right for a folded one. */
+const foldMarker = (open: boolean) => {
+  const el = document.createElement("span");
+  el.dataset.fold = open ? "open" : "closed";
+  el.title = open ? "Fold line" : "Unfold line";
+  el.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${open ? CHEVRON.open : CHEVRON.closed}"/></svg>`;
+  return el;
+};
+
 const baseExtensions = (readOnly: boolean): Extension => [
   lineNumbers(),
   highlightActiveLineGutter(),
   highlightSpecialChars(),
   history(),
-  foldGutter({ openText: "▾", closedText: "▸" }),
+  foldGutter({ markerDOM: foldMarker }),
+  codeFolding({ placeholderText: "⋯" }),
   drawSelection(),
   dropCursor(),
   EditorState.allowMultipleSelections.of(true),
