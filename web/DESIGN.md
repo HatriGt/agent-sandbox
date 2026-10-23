@@ -404,13 +404,20 @@ A pin in the thread header holds a sandbox: it still sleeps when quiet, but the 
 it — only Destroy does. Shown as a `kept` pill in the header, "kept" in the machine list and "kept ·
 until destroyed" in the Fleet time-left column. Off by default; per sandbox.
 
-## File marks
+## File marks and the icon set
 
-`lib/fileIcon.tsx`: a 16px neutral square with the extension in mono (TS, JS, MD, {} …) used in the
-`@` menu, composer chips and the changes dock. The type is read from the letters, not a brand colour,
-so a dock of changed files stays on the console's palette. Editor chrome (tabs, file tree) keeps the
-coloured VS Code icon theme through `lib/vscodeIcons` directly, where a coloured mark is the
-convention the reader expects.
+Two marks, one table. `lib/iconTheme.tsx` is the console's own icon set for the explorer, the editor
+tabs, the quick-open lists and the `@` menu: every file is the same 16px folded-corner sheet with
+its family's mark on it, and the whole icon takes the family's hue, one of eight picked in oklch at
+one lightness and one chroma per scheme (L .62 C .13 light, L .72 C .12 dark) so no file shouts:
+blue TypeScript, amber JavaScript, green data, violet style, orange markup, teal Python, red
+compiled, pink media. Prose, shell, config, lock, license, gitignore and Dockerfile draw in the muted
+ink; a test file carries a check badge. Folders are a two-tone glyph in the muted ink whose tab turns
+live when a change sits inside, and a repo root wears a branch mark. `lib/fileIcon.tsx`'s `FileMark`
+stays the 16px neutral square with the extension in mono for the composer chips and the changes
+dock, where a row of coloured icons would pull the eye off the transcript; `variant="icon"` draws
+the icon set for lists scanned like an explorer. Both read the kind from the same table and expose
+it as `data-file-kind`, so a file resolves to one family wherever it appears.
 
 ## Resilience
 
@@ -1102,6 +1109,55 @@ rerunnable codemod, `.shots/r8-glow-edits.mjs`. Shots: `.shots/r8/before-*` and 
 Left alone: the Hub hero composer's focus halo (home, not the thread), the plan board's live
 sweep and completion wash (linear, no shadow), the dictation pill's sheen, the secret field's
 one-shot ring flash (outside the thread).
+
+## Round: "action needed" (2026-10-23)
+
+The state a person has to act on was called "needs you" in the rail counter, the sidebar group
+label, the Hub's fleet line, the thread header, the run inspector, notification settings, the
+landing demo, the memory overview, the server's push copy and the docs. The verdict was to reframe
+it everywhere as "action needed". Rules of the sweep: the sentence forms go first ("a secret that
+needs you" becomes "needs action", "1 machine needs you" becomes "1 machine needs action"), then
+the state word, then the bare counter ("0 action needed"). Phrases that name a specific action
+("needs your answer", "needs your pick") stay, because they say more. Internal ids are untouched:
+the `waiting` state, the inspector's `needs-you` key and the `needs-you-v2` push channel keep stored
+settings and filters working. The nav item drops its hidden keyboard-shortcut slot while an
+attention count shows, so the count is the only thing on that line. Lever:
+`.shots/r8-reword-action-needed.sh` (rerunnable, no output matches any input). Proof:
+`.shots/r8-wording.mjs` (17 checks: the rail, the Hub, a waiting thread, light and dark).
+
+## Round: the explorer icon set (2026-10-23)
+
+The explorer showed brand logos from simple-icons in their trademark colours, so a tree of twenty
+files was twenty unrelated hues at twenty chromas, and the folders were tinted by role. Decision:
+one icon set drawn by the console, the one described under **File marks and the icon set** above.
+What it fixes: every icon shares the sheet silhouette so the column reads as a column; the eight
+hues sit at one lightness and chroma per scheme so a file's colour says its family and nothing
+louder; the mono families (prose, shell, config, lock) stop competing with code; the test badge
+and the live folder tab carry state that the old set could not. Tabs, quick open and the `@` menu
+moved to the same set so a file looks the same wherever it is named. The simple-icons shim is gone
+from the file surfaces (brand marks for integrations keep `lib/brandIcon.tsx`). Measured
+(`.shots/r8-icons.mjs`, 40 checks, light and dark): every tree row icon is a 16px inline SVG, open
+and closed folders differ, each sample file resolves to its family, a chromatic family's ink sits
+within 0.05 of the scheme's lightness and 0.10 to 0.16 chroma, a mono family's ink is
+`--muted-foreground`, test files carry the badge, hovering a row does not recolour its icon, names
+align across depths, and the tab, the dock and the `@` menu resolve a file to the same kind.
+Shots in `.shots/r8/icons-after-*`.
+
+## Round: a run that was never interrupted (2026-10-23)
+
+Not a screen, but the thread said something false. A first turn ("Hi") on a fresh box ended with
+"run interrupted: the sandbox restarted mid-run" and then carried on and finished. The liveness
+probe decided a run was stale when its pid mark was older than `/proc/1`, on the premise that
+`/proc/1`'s time is the boot time. Measured on a live 1G box: it is the time the kernel last created
+that inode, and under page-cache pressure (the first turn's npx pre-install) the inode is evicted
+and re-created a few seconds into the run, so a live run's marks read as pre-boot. The wrapper now
+records the kernel's boot id (`/proc/sys/kernel/random/boot_id`) in `.agent.boot` and the probe
+compares boot ids; the mtime rule stays only for a run launched by the previous wrapper. The proof
+is end to end on a real guest (`.shots/build-probe.mjs`): the new fragment says `running` after a
+cache drop where the old one said `done exit=254` with that exact message. Tests:
+`test/oom-attribution.test.ts` (15, including the re-created inode and a stale boot id), and the
+driver snapshot regenerated deliberately for the one new line in the wrapper
+(`.shots/regen-snapshot.mjs` refuses if anything but the wrapper changed).
 
 ## Round: VS Code chevrons (2026-10-23)
 
