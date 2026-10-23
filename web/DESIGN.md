@@ -1046,6 +1046,75 @@ above a step, one boxed level inside. File marks went from chroma 0.184 to 0.016
 dark. Evidence: `.shots/r6-trace.mjs` (32 checks), shots in `.shots/r6/trace-*`.
 
 
+## Round: no page glows (2026-10-23)
+
+A radial brand bloom sat behind the conversation head (`.thread-glow`, an `absolute inset-0` layer
+on the thread root) and another behind the Hub hero (`.hub-stage`). Because the thread layer covered
+the whole root, it also bled under the workspace explorer when the pane was open, so the file tree
+had a soft indigo halo at its head. The user read both as noise.
+
+Decision: delete both. The sheet is one flat tone and hierarchy comes from the content (the framed
+sheet, the type scale, the bordered test card). The top and bottom edge fades on the thread stay,
+since they mask the scroll edges rather than decorate them. Evidence: `.shots/r7/noglow-file-dark-1440.png`
+against `.shots/r7/base-file-dark-file-dark-1440.png`.
+
+## Round: VS Code chevrons (2026-10-23)
+
+The editor's fold markers were `▾`/`▸` text glyphs at 60% opacity, always on, 9px wide in a
+20px cell. The explorer's twisties were 14px lucide chevrons at stroke 2 in muted ink. The folded
+placeholder was CodeMirror's default (`#eee` box, `#888` text, `…`), the only unthemed piece of the
+editor. The user said they looked small and nothing like VS Code.
+
+Decision: VS Code's treatment in both places. The fold gutter is a 16px column; each marker is an
+inline SVG of lucide's chevron (down for an open region, right for a folded one) at 1.5 stroke in
+`currentColor`. Open markers are hidden until the pointer is over the gutter (`.cm-gutters:hover`,
+100ms opacity, none under reduced motion); a folded region keeps its chevron-right visible so it stays
+discoverable; the hovered marker brightens to `--foreground`. The placeholder is `⋯` in
+`--muted-foreground` on a 14% muted tint, 3px radius, no border, brighter on hover. The explorer
+twistie is one `Twistie` component (`workspace-chrome.tsx`): 16px, stroke 1.5, `text-foreground/80`,
+`rotate-90` when open, 100ms ease-out. It overhangs its 14px slot by 1px each side so the guide lines
+and name x positions did not move. The file icon was 15px beside a 16px folder icon, which put file
+names 1px left of folder names at the same depth; it is 16px now and names align (1243/1243,
+1255/1255 at 1440). Rows stay 22px. Evidence: `.shots/r7-chevrons.mjs` (30 checks, light and dark),
+shots in `.shots/r7/chev-*`.
+
+Left out: diff hunk expand controls (there are none); the explorer header's collapse-all icon stays
+`size-3.5` with its neighbours; the Search pane's result chevrons (a different surface).
+
+## Round: go to symbol, VS Code parity (2026-10-23)
+
+The first cut of ⌘⇧O (above) opened on the first row, centred the editor on it, showed neutral
+14px icons with the kind word on the right, had no match highlighting, read `@:` as a query for
+":" and showed `⌘⇧O` glyphs on Windows. Measured against VS Code's Go to Symbol in Editor, eleven
+behaviours differed or were unproven.
+
+Decision: close every gap and prove each one. The palette opens on the symbol the caret is in
+(`symbolAt` over the declaration ranges `CodeSymbol.range`; innermost wins) without scrolling the
+editor. Rows are 26px with a 16px kind icon in VS Code's tones (purple method/function, orange class
+and enum, blue variable/field/interface/property, teal type, neutral heading/key/selector), a 6px gap,
+the name with the typed characters bolded (`matchSymbols` returns `positions`), and the containing
+class or function as dim detail (`containerName`; headings have none). `@:` groups by kind in VS
+Code's order (classes, interfaces, functions, methods, variables, properties, enums, types, then
+headings, keys, selectors) with counted separators riding the first row of each group, and `@:q`
+filters within the groups (`CATEGORY`, `groupSymbols`). Arrowing bands every line of the declaration
+(`line..endLine`) and centres only when the symbol is off screen, as VS Code reveals; Escape, a click
+outside, or backspacing past `@` restores scroll and selection exactly. Enter selects the name with
+the caret at its start, centres, and focuses the editor. Empty states read "No editor symbols" and
+"Open a file first." The dialog is 600px wide at 1440 with a 1px border. `SHORTCUTS` rows are built
+by a `chord()` helper that derives `keys` and `label` per platform, so the shortcuts dialog and the
+empty editor read `Ctrl Shift O` on Windows and `⌘ ⇧ O` on a Mac.
+
+One root cause found on the way: after "centre only when off screen", Escape left the editor
+scrolled. CodeMirror's focus observer repairs a `scrollTop` of 0 against its stale `lastScrollTop`
+when focus returns, overwriting the restore. The snapshot now restores through
+`view.scrollSnapshot()`, which lands inside CodeMirror's measure cycle after the focus return.
+Evidence: `.shots/r7-symbols.mjs` (36 checks per theme, 72 total; 42 passed before), `symbols.test.ts`
+10 tests, shots in `.shots/r7/sym-*`.
+
+Left out: the list keeps its depth indent (VS Code's is flat; r5 asserts the indent); the band tone
+stays `--live` at 12% rather than VS Code's yellow range highlight; pressing the chord while the
+palette already holds `@` plus a query does not clear the query.
+
 ## Round: five themes (2026-10-23)
 
 One light and one dark palette, flipped by a sun/moon button writing `asb-dark`. The dark was
