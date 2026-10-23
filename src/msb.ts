@@ -963,6 +963,9 @@ const DONE_MARK = "/workspace/.agent.done"; // written with the exit code when t
 const RUN_MARK = "/workspace/.agent.running"; // present while a run is in flight
 const PID_MARK = "/workspace/.agent.pid"; // pid of the run wrapper, for liveness checks
 const START_MARK = "/workspace/.agent.start"; // guest /proc/uptime seconds when the run began
+const BOOT_MARK = "/workspace/.agent.boot"; // the guest boot id the run began on (BOOT_ID below)
+/** The kernel's per-boot uuid: the one boot marker that does not move while the box is up. */
+const BOOT_ID = "/proc/sys/kernel/random/boot_id";
 const TASK_MARK = "/workspace/.agent.task"; // the current task/follow-up text, so `monitor` can show it
 // The harness rules the thread started on (src/agent-prompt.ts harnessPromptHint), written from
 // $AGENT_RULES by the FIRST turn and appended to $AGENT_SYS_PROMPT by EVERY turn, so a follow-up from
@@ -975,7 +978,7 @@ export const RULES_MARK = "/workspace/.agent.rules";
  * the marker survives on disk and every reader reports run:running forever. That deadlocks the whole
  * thread: the dashboard shows "working…" with no output, and /resume.json queues every new message to
  * the inbox, which only delivers on done/idle. So: a marker whose recorded pid is dead, or that
- * predates the current boot (older than /proc/1), is stale — heal it to done(254) in place and note
+ * was recorded on a previous boot (boot id mismatch), is stale — heal it to done(254) in place and note
  * the interruption in the log so the user sees why the run ended. 254 is reserved for "interrupted".
  *
  * A restart is not the only way a run can vanish, and it used to be the only one we reported: a box
@@ -996,17 +999,23 @@ const OOM_RE = "Out of memory: Killed process";
 const LAST_OOM_AT = `dmesg 2>/dev/null | grep ${shellQuote(OOM_RE)} | sed -n 's/^\\[[ ]*\\([0-9.]*\\)\\].*/\\1/p' | tail -1`;
 export const RUN_STATE_SH =
   `if [ -f ${RUN_MARK} ]; then ` +
-  `p=$(cat ${PID_MARK} 2>/dev/null); ` +
+  `p=$(cat ${PID_MARK} 2>/dev/null); b=$(head -n 1 ${BOOT_MARK} 2>/dev/null); cur=$(cat ${BOOT_ID} 2>/dev/null); ` +
   // A run is live only if its pid was recorded THIS boot and that process still exists. Anything
   // else is stale. The two halves are both load-bearing:
   //   · the pid must still exist — otherwise the wrapper died (crash, OOM, VM stop);
-  //   · PID_MARK must post-date /proc/1 — after a reboot the workspace still holds the old pid,
-  //     and pid numbers are recycled, so an unrelated process can inherit it and pin the box in
-  //     `running` forever. The old code used RUN_MARK's age for this, but the wrapper publishes
-  //     the pid BEFORE touching the run marker, so a poll in that window judged a marker that was
-  //     about to be refreshed and healed a LIVE run to done. Judging the pid file — the thing the
-  //     liveness claim actually rests on — has no such window.
-  `if [ -z "$p" ] || [ ! -d "/proc/$p" ] || [ ${PID_MARK} -ot /proc/1 ]; then ` +
+  //   · the pid must have been recorded on THIS boot — after a reboot the workspace still holds
+  //     the old pid, and pid numbers are recycled, so an unrelated process can inherit it and pin
+  //     the box in `running` forever.
+  // "This boot" is the kernel's boot id, recorded by the wrapper next to the pid. It used to be
+  // judged by mtime, `PID_MARK -ot /proc/1`, and that healed a LIVE run to "restarted" seconds
+  // after it launched (measured on a 1G box starting claude plus its MCP servers): /proc entries
+  // are not real files, the kernel stamps /proc/1 with the time its inode was last CREATED, and
+  // under page-cache pressure that inode is evicted and re-created at the next stat, so "boot"
+  // moved to "now" and every mark on disk read as pre-boot. The mtime rule survives only as the
+  // fallback for a run launched by the previous wrapper, which wrote no boot mark.
+  `if [ -n "$b" ] && [ -n "$cur" ]; then if [ "$b" = "$cur" ]; then same=1; else same=; fi; ` +
+  `elif [ ${PID_MARK} -ot /proc/1 ]; then same=; else same=1; fi; ` +
+  `if [ -z "$p" ] || [ ! -d "/proc/$p" ] || [ -z "$same" ]; then ` +
   // START_MARK sits in the agent-writable workspace, so it is read defensively: the FIRST line
   // only (a forged "junk\n0" would otherwise pass a line-oriented filter and forge a start time of
   // zero, back-dating the run so any kill in the buffer post-dates it), and it must be a bare
@@ -1026,11 +1035,13 @@ export const RUN_STATE_SH =
   // report the healed state read-only.
   `if mv ${RUN_MARK} ${RUN_MARK}.healing 2>/dev/null; then ` +
   `k=$(${LAST_OOM_AT}); s=$(head -n 1 ${START_MARK} 2>/dev/null | grep -Ex '[0-9]+(\\.[0-9]+)?'); ` +
-  `if [ -f ${START_MARK} ] && [ ${START_MARK} -ot /proc/1 ]; then s=; fi; ` +
+  // The start mark is on this boot's clock only if the run is: a boot id mismatch discards it; a
+  // run without a boot mark keeps the old mtime test for the start mark itself.
+  `if { [ -n "$b" ] && [ -z "$same" ]; } || { [ -z "$b" ] && [ -f ${START_MARK} ] && [ ${START_MARK} -ot /proc/1 ]; }; then s=; fi; ` +
   `if [ -n "$k" ] && [ -n "$s" ] && awk -v k="$k" -v s="$s" 'BEGIN{exit !(k+0 > s+0)}' 2>/dev/null; then c=137; ` +
   `m="run interrupted: out of memory — the agent was killed by the kernel. Raise this machine memory from the menu, then send a message to continue."; ` +
   `else c=254; m="run interrupted: the sandbox restarted mid-run. Send a message to continue."; fi; ` +
-  `echo $c > ${DONE_MARK}; rm -f ${RUN_MARK}.healing ${START_MARK}; ` +
+  `echo $c > ${DONE_MARK}; rm -f ${RUN_MARK}.healing ${START_MARK} ${BOOT_MARK}; ` +
   `echo "$m" >> ${AGENT_LOG}; ` +
   `echo "run:done exit=$c"; ` +
   // Lost the mv race: another prober is healing right now — report done with its exit if already
@@ -1382,6 +1393,10 @@ export function agentSh(workdir: string, resume: boolean, agent: AgentKind = "cl
     // and all output sent to /dev/null, the box would sit at `idle` with the user's message gone.
     // A fresh turn starts with no stale mid-turn mail or delivery receipts (src/drivers/inbox-gate.ts).
     `rm -f ${DONE_MARK} ${QUESTION_MARK}; ${INBOX_RESET_SH}; echo $$ > ${PID_MARK} && ` +
+    // The boot id rides beside the pid so a status read can tell "this boot" without trusting a
+    // /proc mtime (see RUN_STATE_SH). Best-effort like the start mark: no mark means the reader
+    // falls back to the mtime rule, never that the run is skipped.
+    `{ cat ${BOOT_ID} > ${BOOT_MARK} 2>/dev/null || rm -f ${BOOT_MARK}; }; ` +
     `{ cut -d' ' -f1 /proc/uptime > ${START_MARK} || rm -f ${START_MARK}; }; touch ${RUN_MARK} && ` +
     // pipefail so the recorded exit reflects claude's, not the formatter's. Claude's raw stderr also
     // lands in the log (errors aren't JSON). The formatter appends readable lines to the same log as
@@ -1389,7 +1404,7 @@ export function agentSh(workdir: string, resume: boolean, agent: AgentKind = "cl
     // pipefail is available.
     `{ set -o pipefail; ` +
     launch +
-    `echo $? > ${DONE_MARK}; rm -f ${RUN_MARK} ${PID_MARK} ${START_MARK}; }`;
+    `echo $? > ${DONE_MARK}; rm -f ${RUN_MARK} ${PID_MARK} ${START_MARK} ${BOOT_MARK}; }`;
   // nohup + bash + & so the child outlives the exec shell; redirect all fds so exec doesn't block.
   return `nohup bash -c ${shellQuote(inner)} >/dev/null 2>&1 < /dev/null & echo started`;
 }
@@ -1736,7 +1751,7 @@ export async function interruptAgentRun(cfg: Config, box: string, why = "to deli
     `for i in 1 2 3 4 5 6 7 8 9 10; do [ ! -f ${RUN_MARK} ] && { echo interrupted; exit 0; }; sleep 1; done; ` +
     `pkill -KILL -P "$p" 2>/dev/null; ` +
     `for i in 1 2 3 4 5; do [ ! -f ${RUN_MARK} ] && { echo interrupted; exit 0; }; sleep 1; done; ` +
-    `kill -KILL "$p" 2>/dev/null; echo 253 > ${DONE_MARK}; rm -f ${RUN_MARK} ${PID_MARK} ${START_MARK}; echo forced`;
+    `kill -KILL "$p" 2>/dev/null; echo 253 > ${DONE_MARK}; rm -f ${RUN_MARK} ${PID_MARK} ${START_MARK} ${BOOT_MARK}; echo forced`;
   const r = await msb(cfg, ["exec", box, "--", "bash", "-lc", sh], false);
   return !/(^|\n)no-run/.test(r.stdout);
 }

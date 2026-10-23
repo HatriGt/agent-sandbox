@@ -29,6 +29,10 @@ interface Opts {
   livePid?: boolean;
   /** Mark names to back-date before /proc/1, standing in for marks that survived a reboot. */
   preBoot?: string[];
+  /** The guest's CURRENT boot id (the stand-in for /proc/sys/kernel/random/boot_id). */
+  bootId?: string;
+  /** Re-stamp the /proc/1 stand-in AFTER the marks are written, newer than all of them. */
+  proc1Recreated?: boolean;
 }
 
 function runState(marks: Record<string, string>, opts: Opts = {}): string {
@@ -54,9 +58,14 @@ function runState(marks: Record<string, string>, opts: Opts = {}): string {
           // the child does not hold execFileSync's stdout open for its whole lifetime.
           `sleep 30 >/dev/null 2>&1 & echo $! > ${ws}.agent.pid; `
         : "") +
-      (opts.preBoot ?? []).map((m) => `touch -d '1 hour ago' ${ws}${m}; `).join("");
+      (opts.preBoot ?? []).map((m) => `touch -d '1 hour ago' ${ws}${m}; `).join("") +
+      // The boot id file is the kernel's; the fixture supplies the current boot's value.
+      `printf '%s\n' ${JSON.stringify(opts.bootId ?? "boot-a")} > ${ws}boot_id; ` +
+      // The reported bug: the kernel re-creates /proc/1's inode under cache pressure and stamps it
+      // with the CURRENT time, so a stat a few seconds into a run finds "boot" newer than the marks.
+      (opts.proc1Recreated ? `touch -d '1 minute' ${proc1}; ` : "");
     // /proc/1 is referenced bare, so it is swapped separately from the /workspace/ prefix.
-    const sh = setup + RUN_STATE_SH.replaceAll("/workspace/", ws).replaceAll("/proc/1", proc1);
+    const sh = setup + RUN_STATE_SH.replaceAll("/workspace/", ws).replaceAll("/proc/sys/kernel/random/boot_id", `${ws}boot_id`).replaceAll("/proc/1", proc1);
     return execFileSync("sh", ["-c", sh], {
       encoding: "utf8",
       env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}` },
@@ -74,6 +83,29 @@ test("a live run is never healed to done, even on a box that OOMed earlier", () 
   // The reported bug: pid alive, but an older kill in dmesg reported the run as OOM-killed.
   const out = runState({ ".agent.start": after("\n"), ".agent.running": "" }, { livePid: true });
   assert.equal(out, "run:running");
+});
+
+test("a live run is never healed because /proc/1's inode was re-created (its mtime moved to now)", () => {
+  // Measured live on a 1G box: a few seconds into the first turn a status probe found every mark
+  // "older than /proc/1" and wrote "run interrupted: the sandbox restarted mid-run" into the log
+  // while claude was starting; the run then finished normally. The boot id is what decides now.
+  const out = runState({ ".agent.start": after("\n"), ".agent.boot": "boot-a\n", ".agent.running": "" }, { livePid: true, proc1Recreated: true });
+  assert.equal(out, "run:running");
+});
+
+test("a pid recorded on a previous boot is stale by boot id, whatever the file times say", () => {
+  // The marks are fresh by mtime (the resize flow re-mounts the workspace, times survive) and
+  // some process holds the number; only the boot id knows the wrapper is gone.
+  const out = runState({ ".agent.start": before("\n"), ".agent.boot": "boot-old\n", ".agent.running": "" }, { livePid: true, bootId: "boot-new" });
+  // The start mark is on the old boot's clock too, so the kill cannot be attributed: 254, not 137.
+  assert.equal(out, "run:done exit=254");
+});
+
+test("without a boot mark (a run launched by the previous wrapper) the mtime rule still applies", () => {
+  const live = runState({ ".agent.start": after("\n"), ".agent.running": "" }, { livePid: true });
+  assert.equal(live, "run:running");
+  const rebooted = runState({ ".agent.start": before("\n"), ".agent.running": "" }, { livePid: true, preBoot: [".agent.pid"] });
+  assert.equal(rebooted, "run:done exit=137");
 });
 
 test("a live run whose RUN_MARK survived a reboot is still reported as running", () => {
