@@ -174,8 +174,10 @@ pane.
 
 shadcn's semantic contract plus a functional layer. Every value is exposed via `@theme inline` so
 each usage is a real utility (`text-live`, `bg-attention/18`) — never an arbitrary `text-[var(--x)]`.
+The table shows the two base palettes, Light (`:root`) and Graphite (`.dark`). The other three
+themes override a subset of these in `:root[data-theme="…"]` blocks; see **Themes** below.
 
-| Token | Light | Dark | Role |
+| Token | Light | Dark (Graphite) | Role |
 |---|---|---|---|
 | `--background` | `oklch(.992 .001 286)` | `oklch(.17 .005 286)` | page |
 | `--card` | white | `oklch(.205 .005 286)` | sidebar, composer, panels |
@@ -198,6 +200,34 @@ Elevation is declared once per surface — border **or** `shadow-xs`, never both
 h2 h1 display`). Without it, tailwind-merge classifies those as *colours* and drops a real colour class
 that precedes them — the bug that made the primary button ink-on-ink. Keep the list in sync with
 `@theme`.
+
+## Themes (`src/lib/theme.ts`)
+
+Five themes, two light and three dark, chosen from the picker in the sidebar footer (the palette
+icon in the collapsed rail, and a row in Account → Appearance). The registry is one ordered table,
+`THEMES: { id, label, scheme, description, preview }[]`; the id lands on `<html data-theme>` and the
+scheme toggles the `dark` class, which every `.dark` selector (syntax tokens, `.raised`, code
+blocks, Mermaid) still keys off. Token overrides live in `index.css` as `:root[data-theme="…"]`
+blocks after `.dark`, so a dark theme inherits Graphite's functional hues and shadows unless it
+overrides them. `preview` repeats the rail, page and live tones for the picker swatches, and the
+fixture asserts the rendered page background equals it, so the two cannot drift.
+
+| Theme | Scheme | Intent | Page / rail / card |
+|---|---|---|---|
+| **Light** | light | White paper, zinc ink. The original light tokens. | `.992` / `.962` / white |
+| **Linen** | light | Warm paper, warm ink (hue 60–85, chroma ≤ .02). The accent stays brand indigo so state colours do not drift. | `.975 .009 80` / `.945 .012 80` / `.99 .005 85` |
+| **Black** | dark | Pitch black, the default dark. The page is `oklch(.1 0 0)` (#030303), so the rail cannot sit below it; it steps *up* to `.16` and the sheet reads as a dark well in a lighter frame. Cards `.15`, popovers `.19`, borders `white/.10`. The terminal tone steps up the same way (`.16`). | `.10` / `.16` / `.15` |
+| **Graphite** | dark | Charcoal, the previous dark, every value kept. | `.175` / `.125` / `.215` |
+| **Midnight** | dark | Navy-indigo on the `--live` hue (262, chroma .03). Cards lean six degrees violet, hairlines carry the hue (`oklch(.78 .1 262 / .16)`), shadows are navy rather than black. | `.17 .03 262` / `.125 .028 262` / `.215 .032 268` |
+
+Switching is instant: no transition on a theme change, which some people make many times a day.
+The palette keeps one "Switch to light/dark theme" command that flips scheme and lands on the theme
+the user last used in that scheme (`asb-theme-light` / `asb-theme-dark`), plus a "Theme: <name>"
+command per theme. The landing page's sun/moon toggle goes through the same module.
+
+Storage and migration: `asb-theme` holds the id. On first load without it, the legacy `asb-dark`
+maps `true` → Black and `false` → Light; absent, the OS preference picks Black or Light. The inline
+script in `index.html` mirrors this so the first paint is already the right theme.
 
 ## Type
 
@@ -1015,3 +1045,43 @@ After: 23 bordered elements (21 running), 10 four-sided surfaces (8 running), no
 above a step, one boxed level inside. File marks went from chroma 0.184 to 0.016 light and 0.012
 dark. Evidence: `.shots/r6-trace.mjs` (32 checks), shots in `.shots/r6/trace-*`.
 
+
+## Round: five themes (2026-10-23)
+
+One light and one dark palette, flipped by a sun/moon button writing `asb-dark`. The dark was
+charcoal (`oklch(.175)`, #101010), and there was no way to have a true black page or anything with
+a hue.
+
+Decision: a theme registry (`lib/theme.ts`) and a picker. Light and Graphite are the existing
+palettes untouched. Black is the new default dark, `oklch(.1 0 0)` on the page; since nothing can sit
+below that, the rail and the terminal tone step up to `.16` and the sheet reads as a dark well in a
+lighter frame, the inverse of the light theme's lifted paper. Midnight puts the `--live` hue into the
+neutrals (chroma .03 at 262, cards six degrees violet, tinted hairlines, navy shadows). Linen warms
+the neutrals (hue 60–85) and keeps the indigo accent. Every override is a `:root[data-theme]` block
+over `.dark`, so the syntax tokens, `.raised`, code blocks and Mermaid keep keying off the class.
+The picker is a menu of `menuitemradio` rows with a rail/page/live swatch each; switching has no
+transition. The palette keeps the scheme toggle, which now returns to the last theme used in each
+scheme, and gains a command per theme. Two light values outside the new blocks moved, both because
+they sat under the 4.5:1 the tokens promise: `--faint` `.58` → `.555` (4.21 → 4.65 on the Light
+page) and `.tok-comment` `#6e7781` → `#59636e` (4.43 on Light, 4.22 on Linen; both now above 5).
+
+Measured on the Hub at 1440 (`.shots/r7-themes.mjs`, 129 checks; contrast is WCAG, composited):
+
+| Theme | Page | Rail | Body | Muted | Faint | Live | Composer hairline | Trace vs page |
+|---|---|---|---|---|---|---|---|---|
+| Light | `.992 .001 286` | `.962 .003 286` | 17.28 | 5.88 | 4.65 | 5.59 | 1.53 | 17.61 |
+| Linen | `.975 .009 80` | `.945 .012 80` | 14.96 | 5.86 | 4.72 | 5.33 | 1.52 | 16.14 |
+| Black | `.1 0 0` | `.16 0 0` | 17.78 | 7.98 | 5.90 | 8.72 | 1.81 | 1.06 |
+| Graphite | `.175 .005 286` | `.125 .005 286` | 16.39 | 7.06 | 5.19 | 8.03 | 2.12 | 1.07 |
+| Midnight | `.17 .03 262` | `.125 .028 262` | 16.60 | 8.01 | 5.94 | 8.60 | 1.90 | 1.06 |
+
+The fixture also asserts, per theme on the Hub, History and a thread: `data-theme` and the `dark`
+class match the registry, the page background equals the registry preview, the rail differs from
+the sheet, no page errors; and that the picker lists five radios with the active one checked, a
+keyboard choice switches and stores, the landing toggle returns to the last dark theme, and the
+legacy key migrates (`asb-dark=1` → Black, `0` → Light). Shots in `.shots/r7/theme-*`.
+
+Left out: per-theme syntax colours (one set per scheme; the fixture measures every `.tok-*` against
+the page and the card, and the dark set's lowest is 5.70 on Graphite and Midnight, 6.40 on Black); a
+theme transition (a hundred switches a day is not a moment for motion); a settings page
+(Appearance gets a row that opens the same picker).

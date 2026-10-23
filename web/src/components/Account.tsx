@@ -1,8 +1,10 @@
 import * as React from "react";
 import { motion } from "motion/react";
 import { setMotionPref, useMotionPref, useReducedMotion, type MotionPref } from "@/lib/motion-pref";
+import { useTheme } from "@/lib/theme";
+import { ThemePicker } from "@/components/ThemePicker";
 import { Segmented } from "@/components/ui/segmented";
-import { Activity as ActivityIcon, PlugZap, Shield } from "lucide-react";
+import { Activity as ActivityIcon, ChevronDown, Palette, PlugZap, Shield } from "lucide-react";
 import { toast } from "sonner";
 import { api, type BoxView } from "@/lib/api";
 import { getMe, setMe } from "@/lib/auth";
@@ -39,8 +41,19 @@ function pwStrength(p: string): number {
 function AppearanceSettings() {
   const pref = useMotionPref();
   const reduced = useReducedMotion();
+  const theme = useTheme();
   return (
     <SettingsSection id="appearance" title="Appearance" meta={pref === "system" ? (reduced ? "Reduced (from OS)" : "Full (from OS)") : undefined} purpose="Saved in this browser.">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <span className="text-foreground text-meta font-medium">Theme</span>
+        <ThemePicker side="bottom" align="start">
+          <Button variant="outline" size="sm" className="gap-2">
+            <Palette />
+            {theme.label}
+            <ChevronDown className="text-muted-foreground" />
+          </Button>
+        </ThemePicker>
+      </div>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <span className="text-foreground text-meta font-medium">Motion</span>
         <Segmented<MotionPref>

@@ -1,8 +1,10 @@
 import * as React from "react";
 import { Link, useLocation, useNavigationType } from "react-router";
-import { Activity as ActivityIcon, ArrowRight, Bell, BellOff, Brain, ChevronRight, Clock, Cpu, FileSearch, GitCompare, Keyboard, Layers, LayoutGrid, ListChecks, LogOut, Menu, MessageCircleQuestion, Moon, MoonStar, PanelLeftClose, PanelLeftOpen, PanelRight, Pause, Pin, PinOff, Plug, PlugZap, Plus, Search, Shield, Sparkles, Square, Sun, SunMedium, UserRound, WifiOff, Workflow, Zap } from "lucide-react";
+import { Activity as ActivityIcon, ArrowRight, Bell, BellOff, Brain, ChevronRight, Clock, Cpu, FileSearch, GitCompare, Keyboard, Layers, LayoutGrid, ListChecks, LogOut, Menu, MessageCircleQuestion, Moon, MoonStar, Palette, PanelLeftClose, PanelLeftOpen, PanelRight, Pause, Pin, PinOff, Plug, PlugZap, Plus, Search, Shield, Sparkles, Square, Sun, SunMedium, UserRound, WifiOff, Workflow, Zap } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { setMotionPref, useMotionPref, useReducedMotion, type MotionPref } from "@/lib/motion-pref";
+import { THEMES, setTheme, toggleScheme, useTheme } from "@/lib/theme";
+import { ThemePicker } from "@/components/ThemePicker";
 import { api, type Automation, type FleetLifecycle, type FleetSnapshot } from "@/lib/api";
 import { POLL_MS, isUp, isVisible, threadSort, threadTitle } from "@/lib/format";
 import { questionHeadline } from "@/lib/question";
@@ -179,10 +181,8 @@ function usePersisted(key: string, initial: boolean) {
 }
 
 export default function App() {
-  const [dark, setDark] = usePersisted("asb-dark", false);
-  React.useEffect(() => {
-    document.documentElement.classList.toggle("dark", dark);
-  }, [dark]);
+  const theme = useTheme();
+  const dark = theme.scheme === "dark";
   const [collapsed, setCollapsed] = usePersisted("asb-collapsed", false);
   // Thread density: chat (default) folds the agent's work to one line per stretch; trace shows every step.
   const [traceDensity, setTraceDensity] = usePersisted("asb-trace-density", false);
@@ -401,7 +401,15 @@ export default function App() {
       ...(getMe()?.mode === "saas" && getMe()?.role === "admin" ? [{ id: "admin", label: "Admin · users", icon: <Shield />, group: "Go to", keywords: "people members", run: showAdmin }] : []),
       { id: "connect", label: "Connect an IDE", icon: <PlugZap />, group: "Go to", keywords: "cursor claude code mcp api key", run: showConnect },
       ...playbookActions,
-      { id: "theme", label: dark ? "Switch to light theme" : "Switch to dark theme", icon: dark ? <Sun /> : <Moon />, keywords: "theme dark light mode appearance", run: () => setDark(!dark) },
+      { id: "theme", label: dark ? "Switch to light theme" : "Switch to dark theme", icon: dark ? <Sun /> : <Moon />, keywords: "theme dark light mode appearance toggle", run: toggleScheme },
+      ...THEMES.filter((t) => t.id !== theme.id).map((t) => ({
+        id: `theme-${t.id}`,
+        label: `Theme: ${t.label}`,
+        icon: <Palette />,
+        detail: t.description,
+        keywords: `theme appearance ${t.scheme} ${t.scheme === "dark" ? "night" : "day"}`,
+        run: () => setTheme(t.id),
+      })),
       ...(["full", "system", "reduced"] as const)
         .filter((p) => p !== motionPref)
         .map((p: MotionPref) => ({
@@ -414,7 +422,7 @@ export default function App() {
       { id: "sidebar", label: collapsed ? "Expand sidebar" : "Collapse sidebar", icon: collapsed ? <PanelLeftOpen /> : <PanelLeftClose />, keywords: "rail navigation", run: () => setCollapsed(!collapsed) },
       { id: "keys", label: "Keyboard shortcuts", hint: "?", icon: <Keyboard />, keywords: "help keys", run: () => setShortcuts(true) },
     ],
-    [threadActions, playbookActions, showFleet, showAutomations, showHistory, showActivity, showSkills, showMemory, showHarnesses, showPlaybooks, showIntegrations, showAccount, showAdmin, showConnect, dark, setDark, collapsed, setCollapsed, motionPref]
+    [threadActions, playbookActions, showFleet, showAutomations, showHistory, showActivity, showSkills, showMemory, showHarnesses, showPlaybooks, showIntegrations, showAccount, showAdmin, showConnect, dark, theme.id, collapsed, setCollapsed, motionPref]
   );
 
   React.useEffect(() => {
@@ -793,12 +801,14 @@ export default function App() {
               </Tooltip>
             )}
             <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon-xs" onClick={() => setDark(!dark)} aria-label={dark ? "Switch to light theme" : "Switch to dark theme"}>
-                  <IconSwap state={dark} rotate>{dark ? <Moon /> : <Sun />}</IconSwap>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="top">{dark ? "Light theme" : "Dark theme"}</TooltipContent>
+              <ThemePicker side="top" align="end">
+                <TooltipTrigger asChild>
+                  <Button variant="ghost" size="icon-xs" aria-label={`Theme: ${theme.label}`}>
+                    <Palette />
+                  </Button>
+                </TooltipTrigger>
+              </ThemePicker>
+              <TooltipContent side="top">Theme: {theme.label}</TooltipContent>
             </Tooltip>
           </div>
         </div>
@@ -912,7 +922,9 @@ export default function App() {
               </span>
               <div className="mt-auto flex flex-col items-center gap-1.5">
                 <RailIcon active={view === "account" || view === "connect" || view === "admin" || view === "welcome"} onClick={showAccount} icon={<UserRound />} label={getMe()?.kind === "user" ? "Account" : "Operator"} />
-                <RailIcon onClick={() => setDark(!dark)} icon={<IconSwap state={dark} rotate>{dark ? <Moon /> : <Sun />}</IconSwap>} label={dark ? "Light theme" : "Dark theme"} />
+                <ThemePicker side="right" align="end">
+                  <RailIcon icon={<Palette />} label={`Theme: ${theme.label}`} />
+                </ThemePicker>
                 <RailIcon onClick={() => setCollapsed(false)} icon={<PanelLeftOpen />} label="Expand sidebar" />
               </div>
             </nav>
@@ -1257,31 +1269,31 @@ function NavItem({
 function RailIcon({
   active,
   flash,
-  onClick,
   icon,
   label,
   shortcut,
   badge,
   dot,
   primary,
+  className,
+  ...rest
 }: {
   active?: boolean;
   flash?: boolean;
-  onClick: () => void;
   icon: React.ReactNode;
   label: string;
   shortcut?: string;
   badge?: number;
   dot?: boolean;
   primary?: boolean;
-}) {
+} & React.ComponentProps<"button">) {
   const reduce = useReducedMotion();
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <button
           type="button"
-          onClick={onClick}
+          {...rest}
           aria-label={shortcut ? `${label} (${shortcut})` : label}
           aria-current={active ? "page" : undefined}
           data-flash={flash ? "true" : undefined}
@@ -1292,7 +1304,8 @@ function RailIcon({
               ? "bg-primary text-primary-foreground shadow-e1 hover:bg-primary/80 hover:shadow-e2 hover:-translate-y-px active:translate-y-0"
               : active
                 ? "text-foreground"
-                : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted",
+            className
           )}
         >
           {active && !primary && <motion.span layoutId="rail-active" className="bg-accent absolute inset-0 -z-10 rounded-md" transition={reduce ? { duration: 0 } : NAV_SPRING} aria-hidden />}
