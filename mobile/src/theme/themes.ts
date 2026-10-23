@@ -19,13 +19,13 @@ export interface Theme {
 export const THEMES: readonly Theme[] = [
   { id: "light", label: "Light", scheme: "light", description: "White paper, zinc ink", palette: PALETTES.light },
   { id: "linen", label: "Linen", scheme: "light", description: "Warm paper, warm ink", palette: PALETTES.linen },
-  { id: "mist", label: "Mist", scheme: "light", description: "Cool paper, grey-blue ink", palette: PALETTES.mist },
+  { id: "mist", label: "Mist", scheme: "light", description: "Cool grey-blue paper, slate ink", palette: PALETTES.mist },
   { id: "black", label: "Black", scheme: "dark", description: "Pitch black, OLED-friendly", palette: PALETTES.black },
   { id: "graphite", label: "Graphite", scheme: "dark", description: "Charcoal, the classic dark", palette: PALETTES.graphite },
   { id: "midnight", label: "Midnight", scheme: "dark", description: "Deep navy, indigo light", palette: PALETTES.midnight },
-  { id: "nord", label: "Nord", scheme: "dark", description: "Cool grey-blue, low chroma", palette: PALETTES.nord },
-  { id: "forest", label: "Forest", scheme: "dark", description: "Deep green, mint light", palette: PALETTES.forest },
-  { id: "dusk", label: "Dusk", scheme: "dark", description: "Aubergine, rose-gold light", palette: PALETTES.dusk },
+  { id: "nord", label: "Nord", scheme: "dark", description: "Polar grey-blue, frost light", palette: PALETTES.nord },
+  { id: "forest", label: "Forest", scheme: "dark", description: "Deep green, moss cards, mint light", palette: PALETTES.forest },
+  { id: "dusk", label: "Dusk", scheme: "dark", description: "Warm plum, rose-gold light", palette: PALETTES.dusk },
 ];
 
 export const DEFAULT_THEME: Record<Scheme, ThemeId> = { light: "light", dark: "black" };
