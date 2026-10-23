@@ -77,7 +77,7 @@ function AgentRow({
       aria-current={active ? "true" : undefined}
       title={tooltipOf(v, state, sleepTtlSec)}
       className={cn(
-        "group relative flex h-9 w-full cursor-pointer items-center gap-2 overflow-hidden rounded-md px-2 text-left text-meta transition-colors duration-150",
+        "group press-row relative flex h-9 w-full cursor-pointer items-center gap-2 overflow-hidden rounded-md px-2 text-left text-meta",
         active ? "bg-accent text-foreground" : "hover:bg-muted text-foreground/90",
         v.leaving && "opacity-60"
       )}

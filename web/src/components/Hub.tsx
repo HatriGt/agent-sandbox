@@ -709,7 +709,7 @@ export function Hub({
                       <button type="button" onClick={() => setPreview(img)} aria-label={`Preview ${img.name}`} className="block size-full cursor-zoom-in">
                         <img src={img.dataUrl} alt={img.name} className="size-full object-cover transition-transform duration-200 group-hover:scale-105" />
                       </button>
-                      <button type="button" onClick={() => setImages((prev) => prev.filter((x) => x.id !== img.id))} aria-label={`Remove ${img.name}`} className="bg-card/80 text-foreground hover:bg-card absolute top-1 right-1 grid size-5 cursor-pointer place-items-center rounded-full opacity-0 shadow-e1 transition-opacity group-hover:opacity-100 focus-visible:opacity-100">
+                      <button type="button" onClick={() => setImages((prev) => prev.filter((x) => x.id !== img.id))} aria-label={`Remove ${img.name}`} className="bg-card/80 text-foreground hover:bg-card absolute top-1 right-1 grid size-5 cursor-pointer place-items-center rounded-full opacity-0 shadow-e1 group-hover:opacity-100 focus-visible:opacity-100">
                         <X className="size-3" />
                       </button>
                     </motion.span>
@@ -937,7 +937,7 @@ export function Hub({
                         type="button"
                         onClick={() => onOpen(b.name)}
                         onMouseEnter={() => prefetchWatch(b.name)}
-                        className="group hover:bg-muted/70 flex h-11 w-full cursor-pointer items-center gap-3 px-3.5 text-left transition-colors duration-150"
+                        className="group hover:bg-muted/70 press-row flex h-11 w-full cursor-pointer items-center gap-3 px-3.5 text-left"
                       >
                         <LiveState b={b} />
                         <span className="text-foreground min-w-0 flex-1 truncate text-meta">

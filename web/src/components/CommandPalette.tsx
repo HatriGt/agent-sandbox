@@ -1,7 +1,5 @@
 import * as React from "react";
 import { ChevronLeft, ChevronRight, CornerDownLeft, History, Plus, Search, SearchX } from "lucide-react";
-import { motion } from "motion/react";
-import { useReducedMotion } from "@/lib/motion-pref";
 import type { BoxView } from "@/lib/api";
 import { fmtAgo, friendlyName, shortName, threadTitle } from "@/lib/format";
 import { StateStamp } from "@/components/ui/stamp";
@@ -79,7 +77,6 @@ export function CommandPalette({
   const [recent, setRecent] = React.useState<string[]>(readRecent);
   // The sub-list the user stepped into (Run playbook ›); null is the top level.
   const [parent, setParent] = React.useState<PaletteAction | null>(null);
-  const reduce = useReducedMotion();
 
   const close = React.useCallback(() => {
     dialog.current?.close();
@@ -189,10 +186,10 @@ export function CommandPalette({
         "shadow-e4",
         "fixed top-[12vh] left-1/2 -translate-x-1/2",
         "backdrop:bg-black/40 backdrop:backdrop-blur-[2px] open:flex open:flex-col",
-        // Scale + fade in and out. `starting:` gives the entry frame; allow-discrete keeps the
-        // dialog painted (display/overlay) until the exit transition finishes.
-        "origin-top scale-[0.97] opacity-0 transition-[opacity,scale,display,overlay] transition-discrete duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]",
-        "open:scale-100 open:opacity-100 starting:open:scale-[0.97] starting:open:opacity-0 motion-reduce:scale-100 motion-reduce:duration-100"
+        // The palette is opened by a keystroke, so it does not animate in: a 100ms opacity fade
+        // from `starting:` is the most it does, and it closes at once (no transition while closed,
+        // so display:none applies on the same frame as Escape).
+        "opacity-0 transition-none open:opacity-100 open:transition-[opacity] open:duration-100 open:ease-out starting:open:opacity-0"
       )}
     >
       <div className="flex items-center gap-2.5 border-b px-3.5 py-3">
@@ -259,14 +256,8 @@ export function CommandPalette({
                 onClick={() => run(i)}
                 className="group relative isolate flex h-10 w-full cursor-pointer items-center gap-3 rounded-md px-2.5 text-left"
               >
-                {i === clamped && (
-                  <motion.span
-                    layoutId="palette-cursor"
-                    className="bg-accent absolute inset-0 -z-10 rounded-md"
-                    transition={reduce ? { duration: 0 } : { type: "spring", stiffness: 700, damping: 48, mass: 0.6 }}
-                    aria-hidden
-                  />
-                )}
+                {/* The cursor moves on arrow keys, so it jumps: a keystroke never animates. */}
+                {i === clamped && <span className="bg-accent absolute inset-0 -z-10 rounded-md" aria-hidden />}
                 {row.kind === "new" ? (
                   <>
                     <span className="bg-primary text-primary-foreground grid size-6 shrink-0 place-items-center rounded-md">

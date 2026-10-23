@@ -13,7 +13,10 @@ import { IconSwap } from "@/components/ui/icon-swap";
  */
 const buttonVariants = cva(
   "inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 rounded-md font-medium whitespace-nowrap " +
-    "transition-[color,background-color,border-color,box-shadow,opacity,transform,translate,scale] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] outline-none " +
+    "transition-[color,background-color,border-color,box-shadow,opacity,transform,translate,scale] duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] " +
+    // One ring for every button: the ring token, 2px outside the control's own background, and only
+    // for keyboard focus (focus-visible), never after a mouse click.
+    "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring " +
     "disabled:pointer-events-none disabled:opacity-40 " +
     "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
@@ -71,12 +74,14 @@ function Button({
   ...props
 }: React.ComponentProps<"button"> & VariantProps<typeof buttonVariants> & { asChild?: boolean; loading?: boolean; static?: boolean }) {
   const Comp = asChild ? Slot : "button";
-  // Surfaces press (scale 0.96); ghost and link are text, and text does not depress.
+  // Surfaces press (scale 0.96); ghost and link are text, and text does not depress. Icon-only ghost
+  // buttons are the exception: they press at 0.97 through `[data-variant=ghost][data-size^=icon]`
+  // in index.css (the feel round), which is why the size is exposed as a data attribute.
   const press = !isStatic && variant !== "ghost" && variant !== "link";
   const classes = cn(buttonVariants({ variant, size }), press && "active:scale-[0.96]", className);
   if (asChild) {
     return (
-      <Comp data-slot="button" data-variant={variant ?? "default"} className={classes} disabled={disabled} {...props}>
+      <Comp data-slot="button" data-variant={variant ?? "default"} data-size={size ?? "default"} className={classes} disabled={disabled} {...props}>
         {children}
       </Comp>
     );
@@ -89,6 +94,7 @@ function Button({
     <Comp
       data-slot="button"
       data-variant={variant ?? "default"}
+      data-size={size ?? "default"}
       className={classes}
       disabled={disabled || loading}
       aria-busy={loading || undefined}

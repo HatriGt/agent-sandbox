@@ -1139,14 +1139,6 @@
   box-shadow: inset 0 1px 0 0 oklch(1 0 0 / 0.06), var(--shadow-e1);
 }
 
-/* The tool timeline's ground: a quiet inset panel, one step below the prose. */
-.work-surface {
-  padding: 0.625rem 0.75rem 0.625rem 0.5rem;
-  border-radius: 0.75rem;
-  border: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
-  background: color-mix(in oklch, var(--muted) 35%, transparent);
-}
-
 /* Composer depth: hairline plus soft elevation, and a top highlight that reads as a lit edge. */
 .composer-depth {
   box-shadow:
@@ -1617,4 +1609,53 @@ col { transition: width 0.2s var(--ease-out-quint); }
 .group:hover .code-scroll,
 .code-scroll:focus-within {
   scrollbar-color: var(--line-strong) transparent;
+}
+
+/* ───────── Round: the feel pass (2026-10-23) ─────────
+   Press, hit-area and tooltip grammar for the shell. Utilities only; no tokens change here. The
+   base rules above already give every button a transform-capable 150ms quint transition and a
+   0.985 press; these set the two sizes the round asks for (0.97 small, 0.98 rows) and keep the
+   press inside the transition list where a component had narrowed it. Unlayered on purpose so a
+   utility class on the same element cannot reopen the question. */
+
+/* Small controls (icon buttons, tab close, status-bar sections, table sort headers): 0.97. */
+.press-small:not(:disabled):active,
+[data-variant="ghost"][data-size^="icon"]:not(:disabled):active {
+  transform: scale(0.97);
+}
+/* Full-width list rows (Live now, sidebar machines): 0.98. Table rows tint instead (table.tsx). */
+.press-row:not(:disabled):active {
+  transform: scale(0.98);
+}
+/* Chips keep their lift-and-settle, and now the press scale eases on the same curve. */
+.hover-raise {
+  transition-property: translate, box-shadow, background-color, border-color, color, transform;
+}
+/* A 32px icon button whose pointer target is 40px. Only for buttons with 4px of clear air on
+   every side (the shell-bar sidebar toggle); neighbours' hit areas must not overlap. */
+.hit-40 {
+  position: relative;
+}
+.hit-40::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+}
+/* Tooltip entry: 125ms fade from 0.97 out of the Radix origin, only when the tooltip waited
+   (delayed-open). instant-open (pointer moved from a neighbour) and closed get no animation. */
+@keyframes feel-tip-in {
+  from {
+    opacity: 0;
+    scale: 0.97;
+  }
+}
+[data-slot="tooltip-content"][data-state="delayed-open"] {
+  animation: feel-tip-in 125ms var(--ease-out-quint) both;
+}
+[data-motion="reduced"] [data-slot="tooltip-content"][data-state="delayed-open"] {
+  animation: none;
+}
+[data-motion="reduced"] .press-small:active,
+[data-motion="reduced"] .press-row:active {
+  transform: none;
 }

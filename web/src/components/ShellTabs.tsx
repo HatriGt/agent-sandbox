@@ -18,6 +18,14 @@ const STORE = "asb-tabs";
 const MAX_TABS = 8;
 const EASE = [0.2, 0.8, 0.2, 1] as const;
 
+// Was the last input a key? A tab switched by Alt+[ or Alt+] is keyboard-initiated and the underline
+// jumps; a clicked tab lets it slide. Read at render, which runs after the event that switched tabs.
+let keyboardLast = false;
+if (typeof window !== "undefined") {
+  window.addEventListener("keydown", () => (keyboardLast = true), true);
+  window.addEventListener("pointerdown", () => (keyboardLast = false), true);
+}
+
 export function tabKey(r: ConsoleRoute): string | null {
   if (r.view === "box") return `box:${r.name}`;
   if (r.view === "automation-runs") return `automation-runs:${r.id}`;
@@ -189,7 +197,7 @@ export function ShellBar({
     <motion.span
       layoutId="shell-tab-active"
       className="bg-live absolute inset-x-0 -bottom-px h-0.5 rounded-full"
-      transition={reduce ? { duration: 0 } : { duration: 0.24, ease: EASE }}
+      transition={reduce || keyboardLast ? { duration: 0 } : { duration: 0.24, ease: EASE }}
       aria-hidden
     />
   );
@@ -197,7 +205,7 @@ export function ShellBar({
     <div data-shell-bar className="bg-sidebar hidden h-10 shrink-0 items-stretch gap-2 pr-3 pl-1.5 md:flex">
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button variant="ghost" size="icon-sm" onClick={onToggleSidebar} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} aria-pressed={!collapsed} className="my-auto">
+          <Button variant="ghost" size="icon-sm" onClick={onToggleSidebar} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} aria-pressed={!collapsed} className="hit-40 my-auto">
             {collapsed ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
           </Button>
         </TooltipTrigger>
@@ -211,7 +219,7 @@ export function ShellBar({
           aria-selected={homeActive}
           onClick={onHome}
           className={cn(
-            "relative flex shrink-0 cursor-pointer items-center gap-1.5 px-3 text-[13px] transition-colors duration-150",
+            "relative flex shrink-0 cursor-pointer items-center gap-1.5 px-3 text-[13px] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
             homeActive ? "text-foreground" : "text-muted-foreground hover:text-foreground"
           )}
         >
@@ -228,7 +236,7 @@ export function ShellBar({
                   <li key={`${i}:${c.label}`} className="flex min-w-0 items-center gap-0.5">
                     {i > 0 && <ChevronRight className="text-faint size-3.5 shrink-0" aria-hidden />}
                     {c.onClick && !last ? (
-                      <button type="button" onClick={c.onClick} className="text-muted-foreground hover:text-foreground hover:bg-muted cursor-pointer truncate rounded px-1 py-0.5 transition-colors duration-150">
+                      <button type="button" onClick={c.onClick} className="text-muted-foreground hover:text-foreground hover:bg-muted press-small cursor-pointer truncate rounded px-1 py-0.5">
                         {c.label}
                       </button>
                     ) : (
@@ -272,7 +280,8 @@ export function ShellBar({
                 if (e.button === 1) e.preventDefault();
               }}
               className={cn(
-                "group relative flex max-w-52 min-w-0 shrink-0 cursor-pointer items-center gap-1.5 pr-1.5 pl-3 text-[13px] outline-none transition-[color,opacity] duration-150 focus-visible:bg-muted",
+                // Inset ring: the tab sits inside a clipped strip, so an outside ring would be cut.
+                "group relative flex max-w-52 min-w-0 shrink-0 cursor-pointer items-center gap-1.5 pr-1.5 pl-3 text-[13px] focus-visible:bg-muted focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
                 active ? "text-foreground" : "text-muted-foreground hover:text-foreground",
                 isGone && "opacity-45"
               )}
@@ -291,7 +300,9 @@ export function ShellBar({
                   onClose(t.key);
                 }}
                 className={cn(
-                  "hover:bg-muted text-faint hover:text-foreground grid size-4 shrink-0 cursor-pointer place-items-center rounded transition-opacity duration-150",
+                  // 20px visible, 28px to the pointer (after:-inset-1): the tab's own 6px end padding
+                  // keeps that from reaching the next tab.
+                  "hover:bg-muted text-faint hover:text-foreground press-small relative grid size-5 shrink-0 cursor-pointer place-items-center rounded after:absolute after:-inset-1 after:content-['']",
                   active ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"
                 )}
               >
@@ -306,7 +317,7 @@ export function ShellBar({
       <button
         type="button"
         onClick={() => openPalette()}
-        className="text-muted-foreground hover:text-foreground hover:border-line-strong bg-background/60 hover:bg-background my-auto flex h-7 w-56 shrink-0 cursor-pointer items-center gap-2 rounded-md border px-2.5 text-left text-[13px] transition-[color,background-color,border-color] duration-150"
+        className="text-muted-foreground hover:text-foreground hover:border-line-strong bg-background/60 hover:bg-background press-small my-auto flex h-7 w-56 shrink-0 cursor-pointer items-center gap-2 rounded-md border px-2.5 text-left text-[13px]"
       >
         <Search className="size-3.5 shrink-0" aria-hidden />
         <span className="flex-1 truncate">Search or jump to…</span>
@@ -320,7 +331,7 @@ export function ShellBar({
         </span>
         <span className="text-faint px-1.5" aria-hidden>·</span>
         {waiting > 0 ? (
-          <button type="button" onClick={onOpenWaiting} className="text-attention-text hover:bg-attention/10 -mx-1 flex cursor-pointer items-center gap-1.5 rounded px-1 font-medium transition-colors duration-150">
+          <button type="button" onClick={onOpenWaiting} className="text-attention-text hover:bg-attention/10 press-small -mx-1 flex cursor-pointer items-center gap-1.5 rounded px-1 font-medium">
             <span className="bg-attention size-1.5 rounded-full" aria-hidden />
             <NumberTicker value={waiting} from={waiting} /> need you
           </button>

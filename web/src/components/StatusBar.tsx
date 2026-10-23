@@ -103,7 +103,7 @@ export function StatusBar({
             <Section onClick={onPlaybook} title={wf.name} className={cn(wf.state === "failed" && "text-destructive")}>
               <ListChecks className="size-3" aria-hidden />
               <span className="truncate">
-                {wf.name} · step {wf.step}/{wf.total}
+                {wf.name} · <span className="tabular">step {wf.step}/{wf.total}</span>
               </span>
             </Section>
           )}
@@ -120,7 +120,9 @@ function Section({ children, onClick, title, className }: { children: React.Reac
       onClick={onClick}
       title={title}
       className={cn(
-        "hover:bg-muted hover:text-foreground focus-visible:ring-ring flex h-5 min-w-0 cursor-pointer items-center gap-1 rounded-sm px-1.5 transition-colors focus-visible:ring-2 focus-visible:outline-none motion-reduce:transition-none",
+        // Full bar height (24px) so the whole strip is the target; the ring is inset because the bar
+        // clips. Colours and the press transform ease through the base button transition.
+        "hover:bg-muted hover:text-foreground press-small flex h-6 min-w-0 cursor-pointer items-center gap-1 rounded-sm px-1.5 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
         className
       )}
     >
