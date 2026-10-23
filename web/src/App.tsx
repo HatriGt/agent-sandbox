@@ -834,7 +834,7 @@ export default function App() {
       <Toaster />
       <div
         className={cn(
-          "bg-background grid h-full grid-cols-1 transition-[grid-template-columns] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none",
+          "bg-sidebar grid h-full grid-cols-1 transition-[grid-template-columns] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none",
           collapsed ? "md:grid-cols-[3.5rem_minmax(0,1fr)]" : "md:grid-cols-[17rem_minmax(0,1fr)]"
         )}
       >
@@ -845,7 +845,7 @@ export default function App() {
           </SheetContent>
         </Sheet>
 
-        <aside className="bg-sidebar hidden min-h-0 flex-col overflow-hidden md:flex md:border-r" data-collapsed={collapsed || undefined}>
+        <aside className="bg-sidebar hidden min-h-0 flex-col overflow-hidden md:flex" data-collapsed={collapsed || undefined}>
           <div className={cn("flex h-14 shrink-0 items-center gap-2.5 px-3", collapsed && "md:justify-center md:px-0")}>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -923,7 +923,7 @@ export default function App() {
           )}
         </aside>
 
-        <main ref={mainRef} tabIndex={-1} className="bg-background flex min-h-0 min-w-0 flex-col overflow-hidden outline-none">
+        <main ref={mainRef} tabIndex={-1} className="bg-background md:bg-sidebar flex min-h-0 min-w-0 flex-col overflow-hidden outline-none">
           {/* Phone top bar: menu (opens the drawer), identity + health, new task. Desktop has the rail. */}
           <div className="bg-card flex h-11 shrink-0 items-center gap-1 border-b px-1.5 md:hidden">
             <Button variant="ghost" size="icon-sm" onClick={() => setMobileRail(true)} aria-label="Open menu" aria-expanded={mobileRail}>
@@ -956,6 +956,7 @@ export default function App() {
             onHome={goHub}
             onClose={shellTabs.close}
           />
+          <div data-sheet className="bg-background flex min-h-0 flex-1 flex-col overflow-hidden md:rounded-tl-xl md:border-t md:border-l">
           <AnimatePresence mode="wait" initial={false} custom={paneCustom}>
             <motion.div
               key={paneKey}
@@ -1115,6 +1116,7 @@ export default function App() {
               </React.Suspense>
             </motion.div>
           </AnimatePresence>
+          </div>
         <StatusBar
           runs={runs_.length}
           working={working}

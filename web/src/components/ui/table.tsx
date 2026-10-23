@@ -94,7 +94,9 @@ function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
       data-slot="table-row"
       className={cn(
         "group/row relative bg-(--table-bg) transition-[background-color] duration-[120ms] hover:bg-(--table-hover) data-[state=selected]:bg-muted",
-        "data-clickable:cursor-pointer data-clickable:outline-none data-clickable:focus-visible:bg-(--table-hover) data-clickable:active:bg-[color-mix(in_oklab,var(--foreground)_6%,transparent)]",
+        // A clickable row tints on hover and press (a full-width row does not scale) and takes an
+        // inset ring on keyboard focus, since it sits inside a bordered card.
+        "data-clickable:cursor-pointer data-clickable:focus-visible:bg-(--table-hover) data-clickable:focus-visible:outline-2 data-clickable:focus-visible:-outline-offset-2 data-clickable:focus-visible:outline-ring data-clickable:active:bg-[color-mix(in_oklab,var(--foreground)_6%,transparent)]",
         className
       )}
       {...props}

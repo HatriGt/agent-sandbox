@@ -235,7 +235,7 @@ export function DataTable<T>({
                   <button
                     type="button"
                     onClick={() => cycle(c.id)}
-                    className={cn("hover:text-foreground group/sort -mx-1.5 inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 uppercase transition-colors duration-150", on && "text-foreground", c.align === "end" && "flex-row-reverse")}
+                    className={cn("hover:text-foreground group/sort press-small -mx-1.5 inline-flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 uppercase", on && "text-foreground", c.align === "end" && "flex-row-reverse")}
                   >
                     {c.header}
                     <span className="relative inline-grid size-3 place-items-center">
@@ -388,7 +388,7 @@ export function DataTable<T>({
                 className="text-foreground placeholder:text-muted-foreground min-w-0 flex-1 bg-transparent text-meta outline-none [&::-webkit-search-cancel-button]:hidden"
               />
               {query ? (
-                <button type="button" onClick={() => { applyQuery(""); inputRef.current?.focus(); }} aria-label="Clear search" className="text-muted-foreground hover:text-foreground hover:bg-muted pop-in cursor-pointer rounded p-0.5">
+                <button type="button" onClick={() => { applyQuery(""); inputRef.current?.focus(); }} aria-label="Clear search" className="text-muted-foreground hover:text-foreground hover:bg-muted pop-in press-small -my-1 grid size-6 cursor-pointer place-items-center rounded">
                   <X className="size-3.5" />
                 </button>
               ) : (

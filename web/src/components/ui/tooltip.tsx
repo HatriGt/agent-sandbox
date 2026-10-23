@@ -11,8 +11,11 @@ import { cn } from "@/lib/utils"
  * the trigger side — no zoom, so it reads as a label appearing, not a popover launching. Dark mode
  * uses the popover surface with a hairline instead of a bright inverted pill.
  */
+// The first tooltip waits 400ms; once one is open, moving to a neighbour within 300ms opens the next
+// one at once (Radix marks it data-state="instant-open", and index.css gives only delayed-open an
+// entry animation).
 function TooltipProvider({
-  delayDuration = 350,
+  delayDuration = 400,
   skipDelayDuration = 300,
   ...props
 }: React.ComponentProps<typeof TooltipPrimitive.Provider>) {
@@ -53,13 +56,10 @@ function TooltipContent({
           "z-50 w-fit origin-(--radix-tooltip-content-transform-origin) rounded-md px-2.5 py-1.5 text-meta text-balance",
           // Light: inverted pill. Dark: popover surface + hairline (a bright pill glares on a dark canvas).
           "bg-foreground text-background dark:bg-popover dark:text-popover-foreground dark:border dark:border-border dark:shadow-e2",
-          // 120ms fade + 2px slide, no zoom. Reduced motion keeps the fade only.
-          "animate-in fade-in-0 duration-120 ease-out",
-          "data-[side=bottom]:slide-in-from-top-0.5 data-[side=left]:slide-in-from-right-0.5 data-[side=right]:slide-in-from-left-0.5 data-[side=top]:slide-in-from-bottom-0.5",
-          "motion-reduce:data-[side=bottom]:slide-in-from-top-0 motion-reduce:data-[side=left]:slide-in-from-right-0 motion-reduce:data-[side=right]:slide-in-from-left-0 motion-reduce:data-[side=top]:slide-in-from-bottom-0",
-          "data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:duration-100",
-          "data-[state=closed]:data-[side=bottom]:slide-out-to-top-0.5 data-[state=closed]:data-[side=left]:slide-out-to-right-0.5 data-[state=closed]:data-[side=right]:slide-out-to-left-0.5 data-[state=closed]:data-[side=top]:slide-out-to-bottom-0.5",
-          "motion-reduce:data-[state=closed]:data-[side=bottom]:slide-out-to-top-0 motion-reduce:data-[state=closed]:data-[side=left]:slide-out-to-right-0 motion-reduce:data-[state=closed]:data-[side=right]:slide-out-to-left-0 motion-reduce:data-[state=closed]:data-[side=top]:slide-out-to-bottom-0",
+          // Entry motion lives in index.css (`[data-state=delayed-open]` only): 125ms fade from
+          // scale 0.97 out of the Radix transform origin. An instant-open tooltip (the pointer moved
+          // from a neighbour) and a closing one get no animation at all, so adjacent tips swap
+          // without two of them overlapping.
           className
         )}
         {...props}

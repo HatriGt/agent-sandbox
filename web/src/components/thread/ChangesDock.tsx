@@ -109,9 +109,9 @@ export function ChangesDock({ files, loading, onOpen, onRefresh, onReviewAll, ac
         </AnimatePresence>
         <div className="flex items-center gap-2 px-3 py-2">
           <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} aria-label={open ? "Hide the changed files" : "Show the changed files"} className="flex min-w-0 flex-1 cursor-pointer items-center gap-2.5 text-left">
-            <span className="flex shrink-0 -space-x-1">
+            <span className="flex shrink-0 gap-1">
               {files.slice(0, 4).map((f) => (
-                <FileMark key={f.path} path={f.path} className="ring-card ring-2" />
+                <FileMark key={f.path} path={f.path} />
               ))}
             </span>
             <span className="text-foreground shrink-0 text-meta font-medium whitespace-nowrap">

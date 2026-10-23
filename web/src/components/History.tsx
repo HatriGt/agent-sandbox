@@ -97,7 +97,7 @@ function LedgerTotalsStrip({ t }: { t: LedgerTotals | null }) {
             <>
               <p className="label text-muted-foreground">{c.label}</p>
               <p className="text-foreground tabular mt-0.5 text-lead font-medium">{c.value}</p>
-              {c.note && <p className="text-faint text-micro">{c.note}</p>}
+              {c.note && <p className="text-faint tabular text-micro">{c.note}</p>}
             </>
           ) : (
             <>
