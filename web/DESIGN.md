@@ -152,7 +152,10 @@ brief is "more modern", "smoother" or "premium", start here rather than inventin
 
 ## Layout
 
-Flat two-pane console — no floating cards, no gaps, one hairline between the panes.
+A framed console. The rail, the shell bar and the status bar share one tinted tone (`--sidebar`);
+the content pane is a lighter sheet with a 14px top-left corner and a top and left hairline, like a
+document on a desk. No floating cards inside the sheet, no gaps between panes. Phones keep the flush
+pane.
 
 - **Sidebar (17rem, collapsible to 3.5rem):** brand + live health line → **New task** (the primary
   fill) → search (⌘K) → *needs-you queue card (paper, ink hairline, only when non-empty)* → **Machines** list,
@@ -968,3 +971,24 @@ The button primitive owns its press now: surface variants (default, primary, out
 - The Hub's "Live now" keeps 44px rows: it is a list of running work with a question drawer under waiting rows, not the sidebar's 36px index.
 - No breakpoint drops a History column; after the floor fix none was needed at 1280 or 1440, and the model already hides Machine below `md`.
 - `.shots/r4-tables.mjs` asserted the Description column lands past 900px after a 360px drag; that number depended on the old floor (longest cell). It now asserts what the step proves, that the drag widened the column by 360 (20/20 again).
+
+## Round: a framed sheet (2026-10-23)
+
+The shell read flat. The sidebar was two points of lightness darker than the page in light mode
+(0.972 against 0.992) and 3.5 points in dark (0.14 against 0.175), and the only thing separating
+rail from content was a hairline. Screenshots in both themes showed three panes divided by lines,
+not a surface holding a document.
+
+Decision: one tinted chrome and one sheet. The rail, the shell bar and the status bar all sit on
+`--sidebar`, now 0.962 in light and 0.125 in dark, a three-point step that reads at a glance. The
+pane is wrapped in a `data-sheet` surface on `--background` with `md:rounded-tl-xl` (14px with the
+10px radius token) and `md:border-t md:border-l`. The shell bar lost its bottom border and the rail
+its right border; the sheet's own hairlines take over, so there is still exactly one line between
+chrome and content. The collapsed rail keeps the frame; below `md` the sheet is flush, square and
+unbordered, because a 390px screen has no desk to sit on.
+
+Evidence: `.shots/r6-frame.mjs` (18 checks) measures the rail tone against the sheet tone in both
+themes, the main pane behind the sheet on the rail tone, the corner radius and the hairline sides,
+no bottom border on the shell bar, the status bar on the rail tone, the sheet's offset from the
+rail, and the flush pane at 390. Shots in `.shots/r6/`.
+
