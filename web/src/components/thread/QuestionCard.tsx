@@ -54,7 +54,7 @@ export function QuestionCard({
   const canSend = !!answer && !busy;
   const send = () => canSend && onAnswer(answer);
 
-  // The card is the thing that needs you, so it takes focus when it appears — unless you are
+  // The card is the thing that needs action, so it takes focus when it appears — unless you are
   // already typing somewhere. That makes the number keys, arrows and Enter work at once, and
   // scrolls the card into view on a phone where the composer would otherwise hide it.
   const groupRef = React.useRef<HTMLDivElement>(null);
@@ -111,7 +111,7 @@ export function QuestionCard({
         aria-label="Question from the agent"
         tabIndex={0}
         onKeyDown={onKey}
-        className="border-attention/50 bg-card focus-visible:ring-attention/40 attention-glow attention-pulse max-w-[72ch] rounded-xl border outline-none focus-visible:ring-2"
+        className="border-attention/50 bg-card focus-visible:ring-attention/40 max-w-[72ch] rounded-xl border outline-none focus-visible:ring-2"
       >
         <div className="px-5 pt-4 pb-3">
           <p className="text-foreground text-lead leading-[1.5] font-medium text-balance">{parsed.title || question}</p>
@@ -227,7 +227,7 @@ export function QuestionCard({
 
         <Collapse open={other}>
           <div className="px-3 pb-2">
-            <div className={cn("bg-muted focus-within:ring-attention/50 flex items-end gap-1 rounded-md pr-1.5 transition-shadow focus-within:ring-2", (voice.state === "listening" || voice.state === "arming") && "mic-glow ring-0")}>
+            <div className={cn("bg-muted focus-within:ring-attention/50 flex items-end gap-1 rounded-md pr-1.5 transition-shadow focus-within:ring-2", (voice.state === "listening" || voice.state === "arming") && "mic-live ring-0")}>
               <textarea
                 ref={inputRef}
                 value={custom}

@@ -4,7 +4,7 @@ Status as of 2026-10-03. The mobile app (Expo, `mobile/`) is ~13.6k lines agains
 console's ~44k, and its last feature commit predates memory v3, thread schedules, harnesses,
 workflows, providers and the viz blocks. This document is the gap list and the order we close it.
 
-The mobile app is the **"needs you" surface**: answer questions, approve things, watch runs,
+The mobile app is the **"action needed" surface**: answer questions, approve things, watch runs,
 unblock them, start new work from anywhere. It is not an IDE. So parity is judged per feature:
 *full* where the web feature is about steering or trusting a run, *read + the one action that
 matters* for configuration pages, and *deliberately absent* for desktop-only editing surfaces.
@@ -85,5 +85,5 @@ fences, and a simple bar/line `chart`. Everything else keeps the code block.
 
 Conventions: mirror web's `lib/*.ts` pure helpers byte-for-byte where they are platform-neutral
 (`trace.ts` already is; `testReport.ts`, `question.ts`, `planTasks.ts` next), keep every new
-screen inside the existing theme tokens, and keep the "needs you" visual language (ink hairline,
+screen inside the existing theme tokens, and keep the "action needed" visual language (ink hairline,
 halo, one filled button) from the recent web theme commits.

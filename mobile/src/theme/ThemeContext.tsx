@@ -1,20 +1,24 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { useColorScheme } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { palettes, type Palette } from "./tokens";
+import type { Palette } from "./tokens";
+import { parseThemePref, resolveTheme, themeOf, type Theme, type ThemePref } from "./themes";
 
-export type ThemePref = "system" | "light" | "dark";
+export type { ThemePref } from "./themes";
 
 type ThemeCtx = {
   palette: Palette;
+  /** The resolved scheme, for the status bar and every light/dark fork. */
   dark: boolean;
+  theme: Theme;
   pref: ThemePref;
   setPref: (p: ThemePref) => void;
 };
 
 const Ctx = createContext<ThemeCtx>({
-  palette: palettes.dark,
+  palette: themeOf("black").palette,
   dark: true,
+  theme: themeOf("black"),
   pref: "system",
   setPref: () => {},
 });
@@ -27,7 +31,10 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     AsyncStorage.getItem(KEY).then((v) => {
-      if (v === "light" || v === "dark" || v === "system") setPrefState(v);
+      const p = parseThemePref(v);
+      setPrefState(p);
+      // A legacy "dark" is rewritten as "black" once, so the migration does not run on every launch.
+      if (v !== null && v !== p) AsyncStorage.setItem(KEY, p).catch(() => {});
     });
   }, []);
 
@@ -36,11 +43,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     AsyncStorage.setItem(KEY, p).catch(() => {});
   };
 
-  const dark = pref === "system" ? system !== "light" : pref === "dark";
-  const value = useMemo(
-    () => ({ palette: dark ? palettes.dark : palettes.light, dark, pref, setPref }),
-    [dark, pref],
-  );
+  const theme = resolveTheme(pref, system === "light" ? "light" : "dark");
+  const value = useMemo(() => ({ palette: theme.palette, dark: theme.scheme === "dark", theme, pref, setPref }), [theme, pref]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

@@ -562,7 +562,7 @@ export function MemoryGraph({ notes, onSelect, onSection }: { notes: MemoryNote[
                 {h.note.repo && !isOperatorKind(h.note.kind) && ` · ${h.note.repo}`}
                 {h.area && ` · ${h.area}`} · {fmtAgo(Math.floor(h.note.at / 1000))}
               </span>
-              {h.note.status === "pending" && <span className="text-attention-text font-medium">needs you</span>}
+              {h.note.status === "pending" && <span className="text-attention-text font-medium">action needed</span>}
               {h.note.stale && <span className="text-muted-foreground">unverified</span>}
             </p>
             <p className="text-foreground mt-0.5 line-clamp-4 text-meta leading-snug font-medium">{noteHeadline(h.note.text)}</p>

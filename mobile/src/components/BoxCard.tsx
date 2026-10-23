@@ -178,7 +178,7 @@ export const BoxCard = memo(function BoxCard({
           ) : null}
         </View>
         {/* Vitals as meters, and only while awake: mergeWithMemory drops the numbers for a sleeping
-            box, and a frozen meter would read as live. Skipped on an amber "needs you" card, whose
+            box, and a frozen meter would read as live. Skipped on an amber "action needed" card, whose
             ink is inverted and whose one job is the question. */}
         {!waiting && (box.memUsage || box.disk) ? (
           <View style={{ flexDirection: "row", gap: 12, marginTop: 6, alignItems: "center", flexWrap: "wrap" }}>

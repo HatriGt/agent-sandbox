@@ -66,7 +66,7 @@ export function McpItem({ event, call, live }: { event: ToolEvent; call: McpCall
 
   return (
     <div className="enter min-w-0">
-      <div className={cn("bg-trace overflow-hidden rounded-md border border-white/8", live && "ring-live/40 ring-1")}>
+      <div className={cn("bg-trace overflow-hidden rounded-md border", live ? "border-live/40" : "border-white/8")}>
         <div className="flex min-w-0 items-center gap-2 border-b border-white/8 px-3 py-1.5">
           <ServerChip server={call.server} live={live} />
           <Connector live={live} failed={event.failed} />

@@ -320,7 +320,10 @@ const MODELS = {
   ],
 };
 
-const TREE = ["orders-api/src/app.ts", "orders-api/src/middleware/rateLimit.ts", "orders-api/src/lib/redis.ts", "orders-api/test/rateLimit.test.ts", "orders-api/test/orders.test.ts", "orders-api/docs/rate-limits.md", "orders-api/package.json", "orders-api/README.md"];
+// One file per icon family plus every name-matched special, so the explorer shows the whole set (r8-icons.mjs carries the same list).
+const TREE = ["orders-api/src/app.ts", "orders-api/src/middleware/rateLimit.ts", "orders-api/src/lib/redis.ts", "orders-api/test/rateLimit.test.ts", "orders-api/test/orders.test.ts", "orders-api/docs/rate-limits.md", "orders-api/package.json", "orders-api/README.md",
+  "orders-api/.env", "orders-api/.gitignore", "orders-api/Dockerfile", "orders-api/LICENSE", "orders-api/Makefile", "orders-api/brand.woff2", "orders-api/config.yaml", "orders-api/deploy.sh", "orders-api/notes.txt", "orders-api/openapi.json", "orders-api/package-lock.json", "orders-api/schema.sql", "orders-api/tsconfig.json",
+  "orders-api/src/App.tsx", "orders-api/src/App.vue", "orders-api/src/app.test.ts", "orders-api/src/hero.png", "orders-api/src/index.css", "orders-api/src/index.html", "orders-api/src/legacy.js", "orders-api/src/lib.rs", "orders-api/src/logo.svg", "orders-api/src/main.go", "orders-api/src/worker.py"];
 
 /* ───────────────────────────── SSE ───────────────────────────── */
 const box = boxFor(scenario);

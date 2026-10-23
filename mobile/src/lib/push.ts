@@ -85,7 +85,7 @@ export function choiceFromResponse(r: Notifications.NotificationResponse | null 
 
 let handlerSet = false;
 /**
- * Foreground presentation: stay quiet — the user is already in the app. A "needs you" push (the
+ * Foreground presentation: stay quiet — the user is already in the app. An "action needed" push (the
  * ask-choices category / needs-you channel) is owned in-app by Toasts while the app is active, so
  * its banner is suppressed; everything else still banners, and the list/badge behaviour is unchanged.
  */
@@ -95,13 +95,13 @@ export function configurePushPresentation(): void {
   Notifications.setNotificationHandler({
     handleNotification: async (n) => {
       const c = n.request.content;
-      const needsYou =
+      const actionNeeded =
         (typeof c.categoryIdentifier === "string" && c.categoryIdentifier.startsWith("ask-choices-")) ||
         (c.data as { kind?: unknown } | null)?.kind === "waiting";
-      const inApp = needsYou && AppState.currentState === "active";
+      const inApp = actionNeeded && AppState.currentState === "active";
       // A question needs the operator now: heads-up banner with sound, even over a foreground app
       // on another screen. Done/failed arrive quietly in the list when the app is open.
-      return { shouldShowBanner: !inApp, shouldShowList: true, shouldPlaySound: needsYou && !inApp, shouldSetBadge: false };
+      return { shouldShowBanner: !inApp, shouldShowList: true, shouldPlaySound: actionNeeded && !inApp, shouldSetBadge: false };
     },
   });
   // Categories must exist before a push arrives; idempotent, and harmless where unsupported (web).
@@ -112,7 +112,7 @@ async function ensureChannels(): Promise<void> {
   if (Platform.OS !== "android") return;
   // PRIVATE: on a secure lock screen Android shows "contents hidden" instead of the run title.
   await Notifications.setNotificationChannelAsync("needs-you-v2", {
-    name: "Needs you",
+    name: "Action needed",
     description: "An agent stopped on a question.",
     importance: Notifications.AndroidImportance.MAX,
     bypassDnd: true,

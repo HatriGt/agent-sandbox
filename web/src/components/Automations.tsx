@@ -1053,7 +1053,7 @@ function Editor({
         )}
         <label className="flex items-center justify-between gap-3">
           <span className="text-meta">
-            Quiet — only tell me when something needs me
+            Quiet — only tell me when something needs action
             <span className="text-faint block text-micro">A run that finds nothing ends silently and counts as a check. Questions, failures and PRs still notify.</span>
           </span>
           <Switch size="sm" checked={!!d.quiet} onCheckedChange={(v) => set({ quiet: v })} />

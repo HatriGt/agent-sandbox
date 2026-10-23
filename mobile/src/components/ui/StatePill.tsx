@@ -19,7 +19,7 @@ export function StatePill({
 }) {
   const { palette } = useTheme();
   const s = stateColor(palette, { runState, boxStatus, exitCode });
-  const attention = s.word === "needs you";
+  const attention = s.word === "action needed";
   return (
     <CrossFade id={s.word} style={{ flexShrink: 0, alignSelf: "flex-start" }}>
       <View
@@ -33,7 +33,7 @@ export function StatePill({
           backgroundColor: attention ? palette.attention : "transparent",
           borderWidth: attention ? 0 : 1,
           borderColor: palette.border,
-          // Words like "out of memory" and "needs you" are wide; the pill must keep its own size and
+          // Words like "out of memory" and "action needed" are wide; the pill must keep its own size and
           // let whatever sits beside it give ground, never split across two lines.
           flexShrink: 0,
           alignSelf: "flex-start",

@@ -38,7 +38,7 @@ export interface RunSettingsProps {
   verify?: { value: VerifySpec | null; onChange: (v: VerifySpec | null) => void };
 }
 
-// Amber is reserved for "needs you" everywhere on the console — Haiku's dot is grey, not amber.
+// Amber is reserved for "action needed" everywhere on the console — Haiku's dot is grey, not amber.
 export const TIER_TINT: Record<ModelChoice["tier"], string> = {
   opus: "bg-live",
   sonnet: "bg-ok",

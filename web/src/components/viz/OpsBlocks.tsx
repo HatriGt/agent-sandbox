@@ -203,7 +203,7 @@ export function LogBlock({ lines, source }: { lines: LogLine[]; source: string }
   );
 }
 
-/** Search hits get a quiet series-1 wash \u2014 never the amber "needs you" hue. */
+/** Search hits get a quiet series-1 wash \u2014 never the amber "action needed" hue. */
 function Mark({ text, q }: { text: string; q: string }) {
   const out: React.ReactNode[] = [];
   const low = text.toLowerCase();

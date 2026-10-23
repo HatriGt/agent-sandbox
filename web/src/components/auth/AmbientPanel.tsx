@@ -66,7 +66,7 @@ export function AmbientPanel() {
             pill={
               <span className="bg-card text-attention-text ring-attention/60 inline-flex h-6 items-center gap-1.5 rounded-full px-2.5 text-micro font-semibold ring-1 ring-inset">
                 <Pause className="size-3" strokeWidth={2.5} />
-                needs you
+                action needed
               </span>
             }
             text="pauses for your decision — every tool call blocked"

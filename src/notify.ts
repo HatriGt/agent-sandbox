@@ -32,7 +32,7 @@ export interface BoxRunView {
 
 export interface NotifyEvent {
   box: string;
-  /** `stalled` is delivered under the operator's "failed" toggle — both mean "this needs you". */
+  /** `stalled` is delivered under the operator's "failed" toggle — both mean "this needs action". */
   kind: "waiting" | "done" | "failed" | "stalled";
   /** Minutes since the last action, for a stalled event. */
   quietMin?: number;

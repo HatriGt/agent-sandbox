@@ -7,13 +7,14 @@ import { radius } from "@/theme/tokens";
 import { MarkdownLite } from "./MarkdownLite";
 import { T } from "./ui/AppText";
 import { Button } from "./ui/Button";
-import { Icon, type IconName } from "./ui/Icon";
+import { Icon } from "./ui/Icon";
+import { FileIcon } from "./ui/FileIcon";
 import { Sheet } from "./ui/Sheet";
 import { FadeInUp, PressScale } from "@/components/motion";
 
 /**
  * The files the agent produced this run, as a row of artifact cards (mirrors
- * web/src/components/thread/ProducedFiles.tsx). Each card: extension glyph, name, View (a sheet
+ * web/src/components/thread/ProducedFiles.tsx). Each card: file-type icon, name, View (a sheet
  * that fetches the text through /artifact — markdown rendered, everything else monospace) and Share
  * (the OS share sheet with the file's text; `expo-sharing` / `expo-file-system` are not in the app,
  * so binary files are not shareable from here). A torn-down box 404s and the sheet says so calmly.
@@ -53,7 +54,7 @@ export function ProducedFiles({ session, files }: { session: string; files: Prod
             key={f.relPath}
             style={{ flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1, borderColor: palette.border, borderRadius: radius.xl, backgroundColor: palette.card, paddingLeft: 12, paddingRight: 6, paddingVertical: 6 }}
           >
-            <Icon name={fileGlyph(f.name)} size={16} color={palette.mutedForeground} />
+            <FileIcon name={f.name} size={16} />
             <View style={{ flex: 1, minWidth: 0 }}>
               <T variant="meta" mono numberOfLines={1} ellipsizeMode="middle">
                 {f.name}
@@ -165,18 +166,6 @@ const TEXT_EXT = /\.(md|markdown|txt|csv|tsv|json|ya?ml|toml|xml|html?|css|scss|
 
 function isTextLike(name: string): boolean {
   return TEXT_EXT.test(name) || !name.includes(".");
-}
-
-/** Extension → glyph, in the same family the tool rows use. */
-function fileGlyph(name: string): IconName {
-  const ext = name.slice(name.lastIndexOf(".") + 1).toLowerCase();
-  if (/^(md|markdown|txt|rst|tex)$/.test(ext)) return "file-text";
-  if (/^(png|jpe?g|gif|webp|svg|bmp|heic)$/.test(ext)) return "image";
-  if (/^(csv|tsv|xlsx?|json|ya?ml|toml|xml)$/.test(ext)) return "database";
-  if (/^(js|jsx|ts|tsx|mjs|cjs|py|rb|go|rs|java|kt|swift|c|h|cpp|hpp|cs|sh|bash|zsh|ps1|sql|html?|css|scss)$/.test(ext)) return "code";
-  if (/^(zip|tar|gz|tgz|7z|rar)$/.test(ext)) return "archive";
-  if (/^(pdf|docx?|pptx?)$/.test(ext)) return "book";
-  return "file";
 }
 
 function errorText(e: unknown): string {

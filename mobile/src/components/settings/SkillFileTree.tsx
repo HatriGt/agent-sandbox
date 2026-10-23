@@ -9,6 +9,7 @@ import { useTheme } from "@/theme/ThemeContext";
 import { fonts, radius, type } from "@/theme/tokens";
 import { T } from "@/components/ui/AppText";
 import { Icon } from "@/components/ui/Icon";
+import { FileIcon } from "@/components/ui/FileIcon";
 import type { SkillFile } from "./skillImport";
 import { fileNameError } from "./SkillModel";
 
@@ -156,7 +157,7 @@ function Folder({ node, depth, render }: { node: FileNode; depth: number; render
         style={{ flexDirection: "row", alignItems: "center", gap: 6, height: 40, paddingLeft: 6 + depth * 14 }}
       >
         <Chevron open={open} size={13} />
-        <Icon name="folder" size={14} />
+        <FileIcon name={node.name} folder open={open} size={14} />
         <T variant="meta" tone="muted" numberOfLines={1}>
           {node.name}
         </T>
@@ -179,7 +180,7 @@ function Row({ name, path, depth, active, dirty, entry, onSelect, onMenu }: { na
         accessibilityState={{ selected: on }}
         style={{ flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 6, height: "100%", paddingLeft: 21 + depth * 14, paddingRight: 6 }}
       >
-        <Icon name="file-text" size={14} />
+        <FileIcon name={name} size={14} />
         <T variant="meta" weight={on ? "medium" : undefined} numberOfLines={1} style={{ flexShrink: 1 }}>
           {name}
         </T>

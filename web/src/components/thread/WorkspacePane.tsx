@@ -6,7 +6,7 @@ import { useReducedMotion } from "@/lib/motion-pref";
 import { toast } from "sonner";
 import { api, type ChangedFile, type FsOp, type GitStatus, type SearchMatch } from "@/lib/api";
 import { languageOf } from "@/lib/fileIcon";
-import { FileIcon, FolderIcon } from "@/lib/vscodeIcons";
+import { FileIcon, FolderIcon } from "@/lib/iconTheme";
 import { AnimatedTabs } from "@/components/ui/animated-tabs";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
@@ -1014,7 +1014,7 @@ function RowView({ row, repo, change, changeCount }: { row: Row & { kind: "dir" 
     return (
       <>
         <Twistie open={row.expanded} />
-        <FolderIcon name={row.name} open={row.expanded} />
+        <FolderIcon open={row.expanded} root={!!repo} changed={changeCount > 0} />
         <span className={cn("truncate", repo && "font-semibold")}>{row.name}</span>
         {repo && (
           <span className="stamp text-muted-foreground ml-1 flex min-w-0 items-center gap-0.5">
@@ -1058,7 +1058,7 @@ function EditRow({ edit, siblings, onDone }: { edit: RowEdit; siblings: Readonly
   }, [edit.what, initial]);
   return (
     <div className="relative flex min-w-0 flex-1 items-center gap-1.5 pr-2">
-      {edit.what === "newDir" ? <FolderIcon name={value || "folder"} open={false} /> : <FileIcon path={value || "file"} size={15} />}
+      {edit.what === "newDir" ? <FolderIcon open={false} /> : <FileIcon path={value || "file"} size={15} />}
       <input
         ref={ref}
         value={value}

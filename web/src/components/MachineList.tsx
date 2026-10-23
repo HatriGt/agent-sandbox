@@ -23,7 +23,7 @@ export function stateWord(state: DisplayState, exitCode?: number, stalled?: bool
     case "running":
       return { word: "Working", tone: "live" };
     case "waiting":
-      return { word: "Needs you", tone: "attention" };
+      return { word: "Action needed", tone: "attention" };
     case "sleeping":
       return { word: "Asleep", tone: "sleep" };
     case "done":
@@ -105,7 +105,7 @@ function AgentRow({
 }
 
 /**
- * The live agents list, ordered for triage (needs you, working, finished, asleep, idle). Rows spring
+ * The live agents list, ordered for triage (action needed, working, finished, asleep, idle). Rows spring
  * into their new position when a state flips and flash once; hovering prefetches the thread.
  */
 export function MachineList({

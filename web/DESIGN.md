@@ -11,16 +11,17 @@
 
 ## Principles that shape every screen
 
-1. **`needs you` is the loudest thing on screen — and it is ink, not a hue.** Weight and motion
-   carry it: a strong hairline on paper, a soft wide halo, a ping dot, and the one filled button
+1. **`action needed` is the loudest thing on screen — and it is ink, not a hue.** Weight and motion
+   carry it: a strong hairline on paper, a ping dot, and the one filled button
    (Answer / Approve). Never a tinted fill — a grey wash reads as *disabled*, the opposite of "your
-   turn". The sidebar queue card, the state pill, the question and scheduled cards, the composer's
-   halo and the approval chips all follow this (`--attention` tokens).
+   turn". The sidebar queue card, the state pill, the question and scheduled cards and the approval
+   chips all follow this (`--attention` tokens). No halo: a wide near-white shadow reads as a glow
+   on a dark page.
 2. **Colour is for what the machine is doing.** working (live blue, breathing), done (green), failed
    (red), idle (grey), **sleeping** (violet — an idle-stopped microVM whose workspace survives; a reply
    wakes it), each with a drawn icon and a word so the meaning survives colour-blindness and sunlight.
    **Amber (`--warn`) is a fact, not a request:** a meter running high, a weak password, a PR with
-   changes requested, a trial ending, an unsaved file. Used sparingly; never for "needs you".
+   changes requested, a trial ending, an unsaved file. Used sparingly; never for "action needed".
    Everything else is ink on paper.
 3. **Two voices, never confusable.** The agent is full-measure prose with a small label. You are the
    one bubble (a quiet muted fill, right-aligned). A **side question** — answered by a separate
@@ -158,7 +159,7 @@ document on a desk. No floating cards inside the sheet, no gaps between panes. P
 pane.
 
 - **Sidebar (17rem, collapsible to 3.5rem):** brand + live health line → **New task** (the primary
-  fill) → search (⌘K) → *needs-you queue card (paper, ink hairline, only when non-empty)* → **Machines** list,
+  fill) → search (⌘K) → *action-needed queue card (paper, ink hairline, only when non-empty)* → **Machines** list,
   triage-ordered (waiting → working → rest) → footer with **Fleet view**, freshness ("Updated 3s
   ago") and the theme toggle. No fabricated profile or avatar.
 - **Workspace:** Hub, Thread, Booting placeholder, or Fleet.
@@ -174,7 +175,7 @@ pane.
 
 shadcn's semantic contract plus a functional layer. Every value is exposed via `@theme inline` so
 each usage is a real utility (`text-live`, `bg-attention/18`) — never an arbitrary `text-[var(--x)]`.
-The table shows the two base palettes, Light (`:root`) and Graphite (`.dark`). The other three
+The table shows the two base palettes, Light (`:root`) and Graphite (`.dark`). The other seven
 themes override a subset of these in `:root[data-theme="…"]` blocks; see **Themes** below.
 
 | Token | Light | Dark (Graphite) | Role |
@@ -185,7 +186,7 @@ themes override a subset of these in `:root[data-theme="…"]` blocks; see **The
 | `--muted-foreground` | `oklch(.5 .016 286)` | `oklch(.7 .012 286)` | secondary text (≥4.5:1) |
 | `--primary` | ink | near-white | the one filled action |
 | `--live` | `oklch(.52 .2 262)` | `oklch(.74 .15 262)` | working, links, caret, selection, focus ring |
-| `--attention` / `-text` / `-ink` | ink / ink / paper | near-white / near-white / charcoal | needs you — hairline, halo, the one filled button; never a tinted fill |
+| `--attention` / `-text` / `-ink` | ink / ink / paper | near-white / near-white / charcoal | action needed — hairline, the one filled button; never a tinted fill, never a halo |
 | `--warn` / `-text` | amber / dark amber | amber / light amber | a fact that is off (meter high, weak password, changes requested, trial ending) |
 | `--ok` | green | green | done, `$` prompt |
 | `--destructive` | red | red | failed, destroy |
@@ -203,31 +204,46 @@ that precedes them — the bug that made the primary button ink-on-ink. Keep the
 
 ## Themes (`src/lib/theme.ts`)
 
-Five themes, two light and three dark, chosen from the picker in the sidebar footer (the palette
-icon in the collapsed rail, and a row in Account → Appearance). The registry is one ordered table,
-`THEMES: { id, label, scheme, description, preview }[]`; the id lands on `<html data-theme>` and the
-scheme toggles the `dark` class, which every `.dark` selector (syntax tokens, `.raised`, code
-blocks, Mermaid) still keys off. Token overrides live in `index.css` as `:root[data-theme="…"]`
+Nine themes, three light and six dark, chosen from the theme panel (the palette icon in the sidebar
+footer and in the collapsed rail, and a row in Account → Appearance). The registry is one ordered
+table, `THEMES: { id, label, scheme, description, preview }[]`; the id lands on `<html data-theme>`
+and the scheme toggles the `dark` class, which every `.dark` selector (syntax tokens, `.raised`,
+code blocks, Mermaid) still keys off. Token overrides live in `index.css` as `:root[data-theme="…"]`
 blocks after `.dark`, so a dark theme inherits Graphite's functional hues and shadows unless it
-overrides them. `preview` repeats the rail, page and live tones for the picker swatches, and the
-fixture asserts the rendered page background equals it, so the two cannot drift.
+overrides them. `preview` repeats seven tones (page, rail, card, ink, muted ink, hairline, live)
+that the panel's miniatures are drawn in, and the fixture asserts the rendered page background
+equals `preview.background`, so the registry and the CSS cannot drift.
 
 | Theme | Scheme | Intent | Page / rail / card |
 |---|---|---|---|
-| **Light** | light | White paper, zinc ink. The original light tokens. | `.992` / `.962` / white |
+| **Light** | light | White paper, zinc ink. The original light tokens; the default light. | `.992` / `.962` / white |
 | **Linen** | light | Warm paper, warm ink (hue 60–85, chroma ≤ .02). The accent stays brand indigo so state colours do not drift. | `.975 .009 80` / `.945 .012 80` / `.99 .005 85` |
+| **Mist** | light | Cool grey-blue paper (hue 240, chroma .012) and slate ink (hue 250). The accent turns steel blue (`.5 .16 250`) to sit in the same family; hairlines and shadows carry the slate. | `.962 .012 240` / `.925 .016 240` / `.985 .007 240` |
 | **Black** | dark | Pitch black, the default dark. The page is `oklch(.1 0 0)` (#030303), so the rail cannot sit below it; it steps *up* to `.16` and the sheet reads as a dark well in a lighter frame. Cards `.15`, popovers `.19`, borders `white/.10`. The terminal tone steps up the same way (`.16`). | `.10` / `.16` / `.15` |
 | **Graphite** | dark | Charcoal, the previous dark, every value kept. | `.175` / `.125` / `.215` |
 | **Midnight** | dark | Navy-indigo on the `--live` hue (262, chroma .03). Cards lean six degrees violet, hairlines carry the hue (`oklch(.78 .1 262 / .16)`), shadows are navy rather than black. | `.17 .03 262` / `.125 .028 262` / `.215 .032 268` |
+| **Nord** | dark | Polar grey-blue (hue 245, chroma .02), a step lighter than Graphite so it reads as slate, not charcoal. The accent is a desaturated frost cyan (`.8 .09 215`) instead of indigo; the ring follows it. | `.225 .02 245` / `.18 .018 245` / `.265 .022 245` |
+| **Forest** | dark | Deep green neutrals (hue 155, chroma .025) with moss cards. The accent is mint (`.82 .13 172`), and `--ok` leans yellow-green (`.78 .16 135`) so working and done stay two colours. | `.185 .025 155` / `.14 .022 155` / `.23 .03 152` |
+| **Dusk** | dark | Warm aubergine (hue 340, chroma .03) with a rose-gold accent (`.8 .1 20`). Hairlines and shadows carry the plum; the destructive red stays darker and more saturated than the accent. | `.185 .03 340` / `.14 .028 340` / `.23 .033 345` |
 
-Switching is instant: no transition on a theme change, which some people make many times a day.
-The palette keeps one "Switch to light/dark theme" command that flips scheme and lands on the theme
-the user last used in that scheme (`asb-theme-light` / `asb-theme-dark`), plus a "Theme: <name>"
-command per theme. The landing page's sun/moon toggle goes through the same module.
+The panel (`components/ThemePicker.tsx`) is a 21rem popover of theme cards in two columns, grouped
+under "Light" and "Dark". Each card is a miniature of the console drawn with real DOM in the
+theme's own `preview` tones: a rail strip with two working rows, the sheet with its hairline frame,
+a task bubble, two text lines, a live row and the composer bar with its live caret. The active card
+has a 2px `--ring` and a check. The hover-preview rule: resting the pointer on a card for 150ms
+applies that theme to the whole app through `applyTheme` (DOM only, nothing stored); leaving the
+panel, pressing Escape or closing it puts `readTheme()` back; a click or Enter commits through
+`setTheme` and closes. Arrow keys walk the grid (left/right by one, up/down by a row) and preview as
+they go, so a keyboard user sees the same try-before-you-keep. The popover has only its standard
+150ms origin-aware grow-in; the theme switch itself has no transition, which some people make many
+times a day. The palette keeps one "Switch to light/dark theme" command that flips scheme and lands
+on the theme the user last used in that scheme (`asb-theme-light` / `asb-theme-dark`), plus a
+"Theme: <name>" command per theme. The landing page's sun/moon toggle goes through the same module.
 
 Storage and migration: `asb-theme` holds the id. On first load without it, the legacy `asb-dark`
 maps `true` → Black and `false` → Light; absent, the OS preference picks Black or Light. The inline
-script in `index.html` mirrors this so the first paint is already the right theme.
+script in `index.html` mirrors this (an id regex and a dark-id regex, plus a placeholder shell tint
+per theme) so the first paint is already the right theme.
 
 ## Type
 
@@ -309,7 +325,7 @@ an empty first snapshot; only the skeleton is ever replaced, by real output.
 
 One idea — liveness — expressed consistently: `breathe` on working dots, the streaming caret, the
 working dots, the `sheen` on an occupied capacity slot. Structure moves with purpose only: machine
-rows `layout`-animate to their new triage position when a state flips; the needs-you card grows in
+rows `layout`-animate to their new triage position when a state flips; the action-needed card grows in
 and out; panes cross-fade in 160ms; the Hub's three blocks stagger in once. Loading is a `shimmer`
 skeleton shaped like the real thread. Everything collapses under `prefers-reduced-motion`
 (`MotionConfig reducedMotion="user"` + the global CSS rule; dialogs and sheets keep a 120ms fade).
@@ -388,13 +404,20 @@ A pin in the thread header holds a sandbox: it still sleeps when quiet, but the 
 it — only Destroy does. Shown as a `kept` pill in the header, "kept" in the machine list and "kept ·
 until destroyed" in the Fleet time-left column. Off by default; per sandbox.
 
-## File marks
+## File marks and the icon set
 
-`lib/fileIcon.tsx`: a 16px neutral square with the extension in mono (TS, JS, MD, {} …) used in the
-`@` menu, composer chips and the changes dock. The type is read from the letters, not a brand colour,
-so a dock of changed files stays on the console's palette. Editor chrome (tabs, file tree) keeps the
-coloured VS Code icon theme through `lib/vscodeIcons` directly, where a coloured mark is the
-convention the reader expects.
+Two marks, one table. `lib/iconTheme.tsx` is the console's own icon set for the explorer, the editor
+tabs, the quick-open lists and the `@` menu: every file is the same 16px folded-corner sheet with
+its family's mark on it, and the whole icon takes the family's hue, one of eight picked in oklch at
+one lightness and one chroma per scheme (L .62 C .13 light, L .72 C .12 dark) so no file shouts:
+blue TypeScript, amber JavaScript, green data, violet style, orange markup, teal Python, red
+compiled, pink media. Prose, shell, config, lock, license, gitignore and Dockerfile draw in the muted
+ink; a test file carries a check badge. Folders are a two-tone glyph in the muted ink whose tab turns
+live when a change sits inside, and a repo root wears a branch mark. `lib/fileIcon.tsx`'s `FileMark`
+stays the 16px neutral square with the extension in mono for the composer chips and the changes
+dock, where a row of coloured icons would pull the eye off the transcript; `variant="icon"` draws
+the icon set for lists scanned like an explorer. Both read the kind from the same table and expose
+it as `data-file-kind`, so a file resolves to one family wherever it appears.
 
 ## Resilience
 
@@ -665,7 +688,7 @@ New things a user can do, each placed where the need arises rather than added to
 - **Run summary.** A finished thread ends with one line that reads like a sentence — "Completed · 6 steps · 3 files · 2 commands" — followed by two tertiary actions: **Copy transcript** (Markdown, tool work folded into `<details>`) and **New task from this** (hands the task to the Hub; opens the repo picker if the run had repositories). Labels folded into values; no spec sheet.
 - **Command palette actions.** ⌘K now also runs Fleet view, Integrations, theme switch and the shortcuts list, under a quiet "Actions" label below machine matches. Typing filters both.
 - **Keyboard shortcuts overlay.** `?` anywhere. Three groups (Go, Thread, Anywhere); keys as small `kbd` chips on the right so the eye scans descriptions.
-- **Grouped sidebar.** Machines carry faint group labels (Needs you · Working · Done · Sleeping · Warm) only when the list spans more than one group — more space around a group than within it.
+- **Grouped sidebar.** Machines carry faint group labels (Action needed · Working · Done · Sleeping · Warm) only when the list spans more than one group — more space around a group than within it.
 - **Drafts survive.** Unsent Hub and follow-up text lives in sessionStorage per machine; a reload or a detour to another thread does not lose it.
 - **Last activity.** Hub "Live now" rows show "active 2m ago" / "2m ago" in the tertiary colour before the machine name.
 - **Header vitals demoted** to the tertiary text colour — uptime/cpu/memory were competing with the title.
@@ -742,7 +765,7 @@ Now, with Claude.ai, ChatGPT, Cursor, v0 and T3 Chat as the target shape:
 - **Icon + label on a desk, icon only below `sm`**; the left cluster shrinks and the row never wraps
   (checked at 390px and 1280px, both themes — `.shots/composer-shots.mjs`). Buttons are 32px pills
   with a 0.97 press scale (dropped under reduced motion); a small **live-blue** dot marks a menu with
-  something set inside. Amber stays reserved for needs-you.
+  something set inside. Amber stays reserved for action-needed.
 - **Menus are popovers on a desk, bottom sheets on a phone** (the v0 / T3 Chat mobile pattern); rows,
   not cards; focus lands inside, ↑/↓/Home/End move, Enter/Space picks, Esc closes and returns focus.
   The Hub's menus grow downward (the composer is near the top), the thread's upward.
@@ -776,7 +799,7 @@ no new detail was taken from them beyond what this file already records.
 ## Run-end pill, not cards (2026-09-30)
 
 - A finished run ends with ONE pill (`thread/RunPill.tsx`, `[data-run-pill="done|failed"]`), replacing the outcome card and the digest card in the thread: rounded-full, `text-micro`, muted, single line, left-aligned with agent prose. Example: `● Done · PR #142 · 3 files +40 −12 · tests 48/48 ✓ · 2m 14s · 121k tokens ▸`.
-- Dot: green done, red failed. Amber never appears here (it means needs-you).
+- Dot: green done, red failed. Amber never appears here (it means action-needed).
 - Collapsed by default. Click/Enter opens, via `Collapse` (height + fade; plain fade under reduced motion), a borderless key-value list (`[data-run-pill-details]`): summary, started by, driver, model, PR links, diff, tests, verify, exit code, failed commands, questions, sandbox blocks, duration, tokens, cost, followed by, follow-ups.
 - Only recorded facts. Unknown or empty rows are dropped: no "—", no "$ —", no "no questions asked", no "exit 0" when tests or verify already speak. A digest headline that just says "done" is dropped so the state is said once.
 - The pill also absorbs `RunSummary`: its steps/commands go in a "work" row, its exit-code note in "note", and Copy transcript / Run again are the last row of the details (`[data-run-pill-actions]`). Nothing else renders at run end.
@@ -975,7 +998,7 @@ The frame around the work: the sidebar's machine list, the Hub's "Live now" and 
 ### What was subtracted
 
 - **A header-measurement bug, not a column.** Both Hub and History tables ran past their cards (History 882px in an 834px card; the Hub's "Tokens" header read "T…"). The width model measured each header's *cell* at max-content as the column's floor, and at max-content a cell is as wide as the column's widest row, so the flexible "Run" column's floor was the length of its longest title. The floor is now the header's own footprint (label, sort icon, padding; `labelWidth` in `lib/column-widths.ts`). Hub 494/622, History 771/834, no declared width touched to get there. "Duration" became "Took" and "Archived" became "When": shorter words, same meaning, narrower floors.
-- **Three ways to say a state.** The sidebar drew a coloured initial tile, a braille spinner for working rows, a pinging dot for waiting ones and a bare word for the rest; the Hub drew icon+word stamps in a fourth style. One vocabulary now (`stateWord` in MachineList: Working, Needs you, Done, Failed, Asleep, Idle, Stalled) rendered one way everywhere: `StatusDot`, a 6px dot and a word. The sidebar's tile, spinner and tone tables are gone (−60 lines). Rows are 36px with 8px hover surfaces.
+- **Three ways to say a state.** The sidebar drew a coloured initial tile, a braille spinner for working rows, a pinging dot for waiting ones and a bare word for the rest; the Hub drew icon+word stamps in a fourth style. One vocabulary now (`stateWord` in MachineList: Working, Action needed, Done, Failed, Asleep, Idle, Stalled) rendered one way everywhere: `StatusDot`, a 6px dot and a word. The sidebar's tile, spinner and tone tables are gone (−60 lines). Rows are 36px with 8px hover surfaces.
 - **The two-line warm callout.** "1 warm machine ready — a new task starts in seconds" under a flame icon, wrapping to two lines in a 13px face, is now one 28px line in `text-faint` with the `ok` dot: "1 warm machine ready · starts in seconds". It is a fact about capacity, and it reads like one.
 - **Two shadows.** "Live now" and the activity card both carried `shadow-e1` while sitting in the page plane. Borders now; shadows stay on things that float.
 - **A duplicated count.** The table toolbar showed the row count beside the search even with nothing typed, next to chips that already say "All 6". It appears only while a query narrows the rows ("3 of 6").
@@ -1038,7 +1061,7 @@ whose only structure is the glyph column and its hairline. Step glyphs are 20% t
 shell command is a flat row with the same anatomy as every other step (glyph, `$ cmd` in mono, tail
 with exit chip, duration, chevron) and its output opens under it as the dark block. Every dark panel
 dropped its white hairline, since the ground tone already separates it. State marks keep their
-borders (a secret that needs you, a queued item, a chosen answer). The test results card stays as the
+borders (a secret that needs action, a queued item, a chosen answer). The test results card stays as the
 one bordered surface in the column, because that is the result the reader came for.
 
 After: 23 bordered elements (21 running), 10 four-sided surfaces (8 running), no boxed ancestor
@@ -1057,6 +1080,84 @@ Decision: delete both. The sheet is one flat tone and hierarchy comes from the c
 sheet, the type scale, the bordered test card). The top and bottom edge fades on the thread stay,
 since they mask the scroll edges rather than decorate them. Evidence: `.shots/r7/noglow-file-dark-1440.png`
 against `.shots/r7/base-file-dark-file-dark-1440.png`.
+
+## Round: no glows in the column (2026-10-23)
+
+After the page-level blooms went (the round above), the user still saw corner light in the thread's
+dynamic parts. Found and removed, each replaced by its static cue:
+
+| Was | Now |
+|---|---|
+| Composer focus: a 3px spread shadow in `--ring` (`.composer-glow`) | A flat 2px outline in `--ring` at 40% (`.composer-focus`), `outline-offset: 0`, no spread |
+| Question and scheduled cards: a 4px attention ring plus a 32px offset bloom (`.attention-glow`), near-white on a dark page, and a one-shot swelling ring on landing (`.attention-pulse`) | The `border-attention/50` hairline alone; the card's rise-in marks its arrival |
+| Dictation: live border at 55% plus a 3px ring and a 24px blurred bloom (`.mic-glow`) | Solid `--live` border plus a 1.5px inset outline (`.mic-live`), no shadow |
+| Three lit spheres (run pill `.orb`, byline `.agent-mark`, reasoning trail `.think-orb`): radial gradient, conic sheen, inset rim, live drop shadow, pulsing bloom | One rule, a flat disc in `--live` at 12, 14 and 16px, `breathe` only while live |
+| Timeline and step dots: an expanding live shadow ring (`viz-pulse`) | `breathe` |
+| MCP panel while live (`ring-live/40`), the Starting pill (`ring-live/20 ring-inset`), a picked option (`ring-live/25 ring-2`) | `border-live/40`, `border-live/20`, `border-live/60` |
+
+Kept: the composer's neutral e2 depth and 1px inset highlight, the you-bubble's inset highlight,
+keyboard `focus-visible` rings, neutral elevation shadows, the `--background` edge fades. All are
+achromatic, inset or keyboard-only.
+
+Proof: `.shots/r8-glow.mjs` (64 checks). With the composer focused it scans every element and
+pseudo-element under `[data-thread]` in the done, running and question scenarios, light and dark,
+and fails on any painted non-inset box-shadow with chroma above 0.02 or lighter than the page, any
+`radial-gradient` background and any `blur()` filter. It self-tests by injecting the old composer
+halo, a lit sphere and a blur and requiring the detector to catch all three. The edits are a
+rerunnable codemod, `.shots/r8-glow-edits.mjs`. Shots: `.shots/r8/before-*` and `after-*`.
+
+Left alone: the Hub hero composer's focus halo (home, not the thread), the plan board's live
+sweep and completion wash (linear, no shadow), the dictation pill's sheen, the secret field's
+one-shot ring flash (outside the thread).
+
+## Round: "action needed" (2026-10-23)
+
+The state a person has to act on was called "needs you" in the rail counter, the sidebar group
+label, the Hub's fleet line, the thread header, the run inspector, notification settings, the
+landing demo, the memory overview, the server's push copy and the docs. The verdict was to reframe
+it everywhere as "action needed". Rules of the sweep: the sentence forms go first ("a secret that
+needs you" becomes "needs action", "1 machine needs you" becomes "1 machine needs action"), then
+the state word, then the bare counter ("0 action needed"). Phrases that name a specific action
+("needs your answer", "needs your pick") stay, because they say more. Internal ids are untouched:
+the `waiting` state, the inspector's `needs-you` key and the `needs-you-v2` push channel keep stored
+settings and filters working. The nav item drops its hidden keyboard-shortcut slot while an
+attention count shows, so the count is the only thing on that line. Lever:
+`.shots/r8-reword-action-needed.sh` (rerunnable, no output matches any input). Proof:
+`.shots/r8-wording.mjs` (17 checks: the rail, the Hub, a waiting thread, light and dark).
+
+## Round: the explorer icon set (2026-10-23)
+
+The explorer showed brand logos from simple-icons in their trademark colours, so a tree of twenty
+files was twenty unrelated hues at twenty chromas, and the folders were tinted by role. Decision:
+one icon set drawn by the console, the one described under **File marks and the icon set** above.
+What it fixes: every icon shares the sheet silhouette so the column reads as a column; the eight
+hues sit at one lightness and chroma per scheme so a file's colour says its family and nothing
+louder; the mono families (prose, shell, config, lock) stop competing with code; the test badge
+and the live folder tab carry state that the old set could not. Tabs, quick open and the `@` menu
+moved to the same set so a file looks the same wherever it is named. The simple-icons shim is gone
+from the file surfaces (brand marks for integrations keep `lib/brandIcon.tsx`). Measured
+(`.shots/r8-icons.mjs`, 40 checks, light and dark): every tree row icon is a 16px inline SVG, open
+and closed folders differ, each sample file resolves to its family, a chromatic family's ink sits
+within 0.05 of the scheme's lightness and 0.10 to 0.16 chroma, a mono family's ink is
+`--muted-foreground`, test files carry the badge, hovering a row does not recolour its icon, names
+align across depths, and the tab, the dock and the `@` menu resolve a file to the same kind.
+Shots in `.shots/r8/icons-after-*`.
+
+## Round: a run that was never interrupted (2026-10-23)
+
+Not a screen, but the thread said something false. A first turn ("Hi") on a fresh box ended with
+"run interrupted: the sandbox restarted mid-run" and then carried on and finished. The liveness
+probe decided a run was stale when its pid mark was older than `/proc/1`, on the premise that
+`/proc/1`'s time is the boot time. Measured on a live 1G box: it is the time the kernel last created
+that inode, and under page-cache pressure (the first turn's npx pre-install) the inode is evicted
+and re-created a few seconds into the run, so a live run's marks read as pre-boot. The wrapper now
+records the kernel's boot id (`/proc/sys/kernel/random/boot_id`) in `.agent.boot` and the probe
+compares boot ids; the mtime rule stays only for a run launched by the previous wrapper. The proof
+is end to end on a real guest (`.shots/build-probe.mjs`): the new fragment says `running` after a
+cache drop where the old one said `done exit=254` with that exact message. Tests:
+`test/oom-attribution.test.ts` (15, including the re-created inode and a stale boot id), and the
+driver snapshot regenerated deliberately for the one new line in the wrapper
+(`.shots/regen-snapshot.mjs` refuses if anything but the wrapper changed).
 
 ## Round: VS Code chevrons (2026-10-23)
 
@@ -1154,3 +1255,62 @@ Left out: per-theme syntax colours (one set per scheme; the fixture measures eve
 the page and the card, and the dark set's lowest is 5.70 on Graphite and Midnight, 6.40 on Black); a
 theme transition (a hundred switches a day is not a moment for motion); a settings page
 (Appearance gets a row that opens the same picker).
+
+## Round: the theme panel (2026-10-23)
+
+The theme menu was five `menuitemradio` rows, each a 36×16 three-tone swatch, a name, a
+description and a check. The verdict was that it did not look good, and the swatch could not say
+what a theme would feel like: three flat tones carry none of the frame, the card step or the live
+accent that make one dark differ from another.
+
+Decision: a panel, not a row list. `ThemePicker` is a 21rem popover (Radix Popover, the same
+150ms origin-aware grow-in as every menu, capped at the available height so a mid-page trigger
+scrolls the grid instead of clipping it) holding a two-column grid of theme cards grouped under
+"Light" and "Dark". Each card is a miniature of the console drawn with real DOM in the registry's
+`preview` tones: a rail strip with two working rows, the sheet with its hairline frame, a task
+bubble, two text lines, a live row and the composer bar with its live caret. The active card has a
+2px `--ring` and a check. Resting on a card for 150ms previews the theme on the whole app through
+`applyTheme` without storing; leaving the panel or pressing Escape puts `readTheme()` back; a click
+or Enter commits and closes. Arrow keys walk the grid and preview as they go, so the keyboard gets
+the same try-before-you-keep. The theme switch itself still has no transition.
+
+Four themes join the five, each a `:root[data-theme]` block overriding only what differs from its
+scheme base: Mist (light, cool grey-blue paper, slate ink, a steel-blue accent), Nord (dark, polar
+grey-blue a step lighter than Graphite, a frost-cyan accent), Forest (dark, deep green with moss
+cards, a mint accent, `--ok` moved to yellow-green so working and done stay apart) and Dusk (dark,
+warm aubergine, a rose-gold accent). Each carries its own `--ring`, `--live`, hairlines and
+`--shade-*` on its hue. `preview` grew from three tones to seven so the miniatures draw from the
+registry rather than a second copy. The pre-paint script in `index.html` gained the four ids and a
+placeholder shell tint each. Black stays the default dark and Light the default light.
+
+Measured on the Hub at 1440 (`.shots/r8-themes.mjs`, 287 checks; contrast is WCAG, composited;
+`live/card` is `--live` on `--card`, `tok-min` the lowest `.tok-*` syntax colour on page or card):
+
+| Theme | Page | Rail | Body | Muted | Faint | Live | Live/card | tok-min | Composer hairline |
+|---|---|---|---|---|---|---|---|---|---|
+| Light | `.992 .001 286` | `.962 .003 286` | 17.28 | 5.88 | 4.65 | 5.59 | 5.74 | 4.92 | 1.53 |
+| Linen | `.975 .009 80` | `.945 .012 80` | 14.96 | 5.86 | 4.72 | 5.33 | 5.59 | 4.69 | 1.52 |
+| Mist | `.962 .012 240` | `.925 .016 240` | 13.48 | 6.10 | 4.85 | 5.36 | 5.72 | 4.54 | 1.59 |
+| Black | `.1 0 0` | `.16 0 0` | 17.78 | 7.98 | 5.90 | 8.72 | 8.32 | 6.40 | 1.81 |
+| Graphite | `.175 .005 286` | `.125 .005 286` | 16.39 | 7.06 | 5.19 | 8.03 | 7.41 | 5.70 | 2.12 |
+| Midnight | `.17 .03 262` | `.125 .028 262` | 16.60 | 8.01 | 5.94 | 8.60 | 7.87 | 5.70 | 1.90 |
+| Nord | `.225 .02 245` | `.18 .018 245` | 14.33 | 7.42 | 5.71 | 9.39 | 8.46 | 4.99 | 1.92 |
+| Forest | `.185 .025 155` | `.14 .022 155` | 16.03 | 7.85 | 6.08 | 11.18 | 10.10 | 5.44 | 1.86 |
+| Dusk | `.185 .03 340` | `.14 .028 340` | 16.15 | 8.05 | 6.16 | 9.68 | 8.84 | 5.57 | 1.95 |
+
+The fixture also asserts, per theme on the Hub, History and a thread: `data-theme` and the `dark`
+class match the registry, the page background equals `preview.background`, the rail differs from
+the sheet, no page errors; and for the panel, opened on Light and on Black: nine `radio` cards under
+the two headers, exactly one ringed and checked, hovering another card changes the computed page
+background within 300ms (measured 187–190ms: the 150ms rest plus a frame or two) without writing `asb-theme`, moving the pointer off
+the panel reverts it and leaves the panel open, a click commits, stores and closes; from the
+keyboard, the active card has focus on open, ArrowRight moves focus and previews without storing,
+ArrowDown then Enter commits and stores, Escape after an arrow preview closes and reverts. The
+landing toggle and the legacy-key migration checks carry over from round 7. Shots in
+`.shots/r8/theme-<id>-hub.png` and `theme-panel-{light,dark}.png`.
+
+Left out: per-theme syntax colours (the one dark set still clears 4.5 on every dark page and card,
+lowest 4.99 on Nord's lighter card; the light set's lowest is 4.54 on Mist); a per-card scheme badge
+(the two group headers already say it, and a third word under a 9rem card was noise); a fourth light
+theme to square the grid (an empty slot is honest, a filler theme is not); the mobile registry
+(`mobile/src/theme/themes.ts` mirrors the web one by hand and is another workstream's).

@@ -157,7 +157,7 @@ export function MentionMenu({
                 aria-hidden
               />
             )}
-            <FileMark path={f} />
+            <FileMark path={f} variant="icon" />
             <span className="truncate font-medium">{base}</span>
             {dir && (
               <span className="text-muted-foreground stamp ml-auto flex min-w-0 items-center gap-1 truncate">

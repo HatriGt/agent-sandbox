@@ -16,7 +16,7 @@ const TONE: Record<ChipTone, string> = {
 /**
  * A count-carrying filter pill: the counts ARE the filter. One `radiogroup` of these sits above a
  * list; the active chip is the one ink fill in the row, the rest are paper with a tinted count when
- * the state has a hue (needs you, working, failed…). A zero count disables the chip — there is
+ * the state has a hue (action needed, working, failed…). A zero count disables the chip — there is
  * nothing to narrow to — but the active chip stays clickable so the group is never stuck.
  */
 export function FilterChip({

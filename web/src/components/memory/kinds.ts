@@ -32,7 +32,7 @@ export const KIND_ICON: Record<MemoryKind, LucideIcon> = {
 };
 /**
  * Kinds are told apart by glyph + label, and in the overview by an ink ramp (foreground at falling
- * opacity) — no hues, so amber stays reserved for "needs you" and both themes read the same.
+ * opacity) — no hues, so amber stays reserved for "action needed" and both themes read the same.
  */
 export const KIND_INK: Record<MemoryKind, number> = {
   preference: 0.9,

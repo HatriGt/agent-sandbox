@@ -15,9 +15,9 @@
       // Mirrors lib/theme.ts (readTheme): stored `asb-theme`, else the legacy `asb-dark`, else the OS.
       try {
         var t = localStorage.getItem("asb-theme"), d = localStorage.getItem("asb-dark");
-        if (!/^(light|linen|black|graphite|midnight)$/.test(t)) t = d !== null ? (d === "true" || d === "1" ? "black" : "light") : matchMedia("(prefers-color-scheme: dark)").matches ? "black" : "light";
+        if (!/^(light|linen|mist|black|graphite|midnight|nord|forest|dusk)$/.test(t)) t = d !== null ? (d === "true" || d === "1" ? "black" : "light") : matchMedia("(prefers-color-scheme: dark)").matches ? "black" : "light";
         document.documentElement.setAttribute("data-theme", t);
-        if (t === "black" || t === "graphite" || t === "midnight") document.documentElement.classList.add("dark");
+        if (/^(black|graphite|midnight|nord|forest|dusk)$/.test(t)) document.documentElement.classList.add("dark");
       } catch (e) {}
     </script>
     <style>
@@ -28,6 +28,10 @@
       [data-theme="black"] .asb-shell { background: oklch(0.1 0 0); }
       [data-theme="midnight"] .asb-shell { background: oklch(0.17 0.03 262); }
       [data-theme="linen"] .asb-shell { background: oklch(0.975 0.009 80); color: oklch(0.25 0.02 60); }
+      [data-theme="mist"] .asb-shell { background: oklch(0.962 0.012 240); color: oklch(0.27 0.03 250); }
+      [data-theme="nord"] .asb-shell { background: oklch(0.225 0.02 245); }
+      [data-theme="forest"] .asb-shell { background: oklch(0.185 0.025 155); }
+      [data-theme="dusk"] .asb-shell { background: oklch(0.185 0.03 340); }
       .asb-shell .side { width: 272px; border-right: 1px solid oklch(0 0 0 / 0.08); padding: 16px; box-sizing: border-box; }
       .dark .asb-shell .side { border-color: oklch(1 0 0 / 0.08); }
       .asb-shell .main { flex: 1; display: flex; flex-direction: column; }

@@ -18,10 +18,10 @@ import { CrossFade, PressScale, WorkingDot } from "@/components/motion";
 
 export type DisplayState = RunState | "sleeping";
 
-/** Working · Needs you · Asleep · Done · Failed · Idle — the web RunPill/LiveStatePill words. */
+/** Working · Action needed · Asleep · Done · Failed · Idle — the web RunPill/LiveStatePill words. */
 function phaseWord(state: DisplayState, exitCode: number | null | undefined, stalled?: boolean): { word: string; tone: "live" | "attention" | "sleep" | "ok" | "destructive" | "muted" } {
   if (state === "running") return stalled ? { word: "Stalled", tone: "destructive" } : { word: "Working", tone: "live" };
-  if (state === "waiting") return { word: "Needs you", tone: "attention" };
+  if (state === "waiting") return { word: "Action needed", tone: "attention" };
   if (state === "sleeping") return { word: "Asleep", tone: "sleep" };
   if (state === "done") {
     if (exitCode === 253 || exitCode === 254) return { word: "Stopped", tone: "muted" };

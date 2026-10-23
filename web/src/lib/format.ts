@@ -84,7 +84,7 @@ export function threadTitle(v: BoxView): string {
 }
 
 export function stateNoun(s: RunState): string {
-  return s === "waiting" ? "needs you" : s;
+  return s === "waiting" ? "action needed" : s;
 }
 
 /**

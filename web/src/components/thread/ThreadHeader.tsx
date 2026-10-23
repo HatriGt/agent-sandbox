@@ -751,7 +751,7 @@ function useElapsed(start: number | undefined, end: number | undefined, live: bo
 
 /**
  * The Orbit state pill, in the shared live vocabulary: Working (text shimmer + pinging dot) ·
- * Needs you · Asleep · Done · Failed · Idle. Colours are the existing state tokens. While working,
+ * Action needed · Asleep · Done · Failed · Idle. Colours are the existing state tokens. While working,
  * the activity ("Editing retry.ts") joins the label at lg+, full text in the tooltip.
  */
 function LiveStatePill({ state, exitCode, stalled, activity }: { state: DisplayState; exitCode?: number; stalled?: boolean; activity?: string | null }) {
@@ -763,7 +763,7 @@ function LiveStatePill({ state, exitCode, stalled, activity }: { state: DisplayS
         ? ["Stalled", "text-destructive bg-destructive/10"]
         : ["Working", "text-live bg-live/10"]
       : state === "waiting"
-        ? ["Needs you", "text-attention-text bg-attention/15"]
+        ? ["Action needed", "text-attention-text bg-attention/15"]
         : state === "sleeping"
           ? ["Asleep", "text-sleep bg-sleep/10"]
           : state === "done"

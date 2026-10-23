@@ -289,7 +289,7 @@ export function ShellBar({
               {state === "running" ? (
                 <span className="bg-live text-live dt-ping size-1.5 shrink-0 rounded-full" aria-label="Working" />
               ) : state === "waiting" ? (
-                <span className="bg-attention size-1.5 shrink-0 rounded-full" aria-label="Needs you" />
+                <span className="bg-attention size-1.5 shrink-0 rounded-full" aria-label="Action needed" />
               ) : null}
               <span className="min-w-0 truncate">{t.label}</span>
               <button
@@ -333,10 +333,10 @@ export function ShellBar({
         {waiting > 0 ? (
           <button type="button" onClick={onOpenWaiting} className="text-attention-text hover:bg-attention/10 press-small -mx-1 flex cursor-pointer items-center gap-1.5 rounded px-1 font-medium">
             <span className="bg-attention size-1.5 rounded-full" aria-hidden />
-            <NumberTicker value={waiting} from={waiting} /> need you
+            <NumberTicker value={waiting} from={waiting} /> action needed
           </button>
         ) : (
-          <span className="text-muted-foreground">0 need you</span>
+          <span className="text-muted-foreground">0 action needed</span>
         )}
       </div>
     </div>

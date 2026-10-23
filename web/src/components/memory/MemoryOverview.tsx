@@ -105,7 +105,7 @@ export function MemoryOverview({
                 <svg viewBox="0 0 12 12" width={11} height={11} aria-hidden>
                   <circle cx={6} cy={6} r={4.5} fill="none" className="stroke-attention" strokeWidth={1.6} strokeDasharray="2.5 1.5" />
                 </svg>
-                needs you
+                action needed
               </li>
             )}
           </ul>

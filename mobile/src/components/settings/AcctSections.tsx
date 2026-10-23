@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Animated, Linking, View } from "react-native";
 import { api, autopilotApi, type AgentId, type AgentPrefs, type HarnessView, type NotifySettings } from "@/lib/api";
-import { useTheme, type ThemePref } from "@/theme/ThemeContext";
+import { useTheme } from "@/theme/ThemeContext";
 import { radius } from "@/theme/tokens";
 import { T } from "@/components/ui/AppText";
 import { Button } from "@/components/ui/Button";
@@ -10,6 +10,7 @@ import { Toggle } from "@/components/ui/Toggle";
 import { SettingsSection } from "@/components/ui/SettingsSection";
 import { PickerRow, PickerSheet } from "@/components/settings/PickerSheet";
 import { Segmented } from "@/components/settings/Segmented";
+import { ThemeSheet } from "@/components/settings/ThemeSheet";
 import { DriverBadges } from "@/components/settings/HarnessParts";
 import { animateLayout, FadeIn, PressScale, setMotionPref, useMotionPref, useReducedMotion, type MotionPref } from "@/components/motion";
 import { pushStatus, registerForPush, unregisterPush, type PushStatus } from "@/lib/push";
@@ -17,30 +18,18 @@ import { pushStatus, registerForPush, unregisterPush, type PushStatus } from "@/
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /**
- * Web AppearanceSettings: motion Full/System/Reduced (stored on this phone) plus the theme pick, which
- * on the phone lives here rather than on the settings index.
+ * Web AppearanceSettings: the theme pick (a row that opens the nine-theme sheet) and motion
+ * Full/System/Reduced. Both are stored on this phone.
  */
 export function AppearanceSection() {
-  const { pref: theme, setPref: setTheme } = useTheme();
+  const { pref, theme } = useTheme();
+  const [picking, setPicking] = useState(false);
   const motion = useMotionPref();
   const reduced = useReducedMotion();
   return (
     <SettingsSection title="Appearance" meta={motion === "system" ? (reduced ? "Reduced (from OS)" : "Full (from OS)") : undefined} purpose="Saved on this phone.">
-      <View style={{ gap: 6 }}>
-        <T variant="meta" weight="medium">
-          Theme
-        </T>
-        <Segmented<ThemePref>
-          small
-          value={theme}
-          onChange={setTheme}
-          options={[
-            { value: "system", label: "System" },
-            { value: "light", label: "Light" },
-            { value: "dark", label: "Dark" },
-          ]}
-        />
-      </View>
+      <PickerRow label="Theme" value={pref === "system" ? `System · ${theme.label}` : theme.label} onPress={() => setPicking(true)} />
+      <ThemeSheet visible={picking} onClose={() => setPicking(false)} />
       <View style={{ gap: 6 }}>
         <T variant="meta" weight="medium">
           Motion
@@ -252,7 +241,7 @@ export function AcctAgentSection({ harnesses = [], title = "Coding agent" }: { h
 
 type EventKey = keyof NotifySettings["events"];
 const GROUPS: { title: string; events: { key: EventKey; label: string; desc: string; attention?: boolean }[] }[] = [
-  { title: "Needs you", events: [{ key: "waiting", label: "Question", desc: "The agent paused on a question and is waiting for your answer.", attention: true }] },
+  { title: "Action needed", events: [{ key: "waiting", label: "Question", desc: "The agent paused on a question and is waiting for your answer.", attention: true }] },
   {
     title: "Run finished",
     events: [
@@ -340,7 +329,7 @@ export function AcctNotifySection() {
     <SettingsSection
       title="Notifications"
       meta={loaded ? `${onCount} of ${ALL.length} on` : undefined}
-      purpose="Get pinged when a machine needs you or finishes. Point a webhook at Slack, ntfy, Discord — anything that accepts a JSON POST."
+      purpose="Get pinged when a machine needs action or finishes. Point a webhook at Slack, ntfy, Discord — anything that accepts a JSON POST."
     >
       {loaded === null ? (
         <T tone="muted">Loading…</T>

@@ -9,7 +9,7 @@ import { questionHeadline } from "@/lib/question";
  * this tab has actually observed — never on first load, so opening the dashboard to three waiting
  * machines does not fire three alerts.
  *
- * Also keeps the document title honest: "(2) Agent Sandbox" while anything needs you.
+ * Also keeps the document title honest: "(2) Agent Sandbox" while anything needs action.
  */
 const KEY = "asb-notify";
 

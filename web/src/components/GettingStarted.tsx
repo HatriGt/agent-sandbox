@@ -73,7 +73,7 @@ export function GettingStarted({ onDismiss }: { onDismiss?: () => void } = {}) {
             <li key={s.title} className="min-w-0">
               {/* A done step goes quiet — muted card, a small green check, "Done" where the action was —
                   rather than a green slab with a struck-out title (which reads as "cancelled"). The
-                  card that still needs you is the one with ink. */}
+                  card that still needs action is the one with ink. */}
               <StaggerItem index={i} step={0.05} className={cn("flex h-full flex-col gap-2 rounded-lg border p-3 transition-colors duration-300", s.done ? "bg-transparent" : "bg-muted/60 border-transparent")}>
                 {/* re-keyed on completion so the check pops in fresh (one-shot .pop-in) */}
                 <span key={s.done ? "done" : "todo"} className={cn("grid size-7 place-items-center rounded-full [&_svg]:size-3.5", s.done ? "bg-ok/12 text-ok pop-in" : "bg-background text-muted-foreground shadow-e1")}>

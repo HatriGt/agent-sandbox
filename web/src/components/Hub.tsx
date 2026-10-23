@@ -69,7 +69,7 @@ import { fmtTokens } from "@/components/thread/OutcomeCard";
  *
  * Starting a run is the primary act of this product, so the composer is the first thing on the page,
  * top-anchored so nothing jumps when the lists below change. Under it: the live fleet with its
- * capacity, because the hub is also where you glance to know whether anything needs you; then the
+ * capacity, because the hub is also where you glance to know whether anything needs action; then the
  * last archived runs and the last few actions, so Home also says what happened while you were away.
  */
 
@@ -626,7 +626,7 @@ export function Hub({
             className={cn(
               "bg-card border-line-strong composer-depth focus-within:border-live/60 focus-within:shadow-[0_0_0_3px_color-mix(in_oklch,var(--live)_18%,transparent),var(--shadow-e2)] relative rounded-2xl p-2.5 transition-[border-color,box-shadow] duration-200",
               dragOver && "border-live",
-              (voice.state === "listening" || voice.state === "arming") && "mic-glow"
+              (voice.state === "listening" || voice.state === "arming") && "mic-live"
             )}
             onPaste={(e) => {
               const files = [...(e.clipboardData?.items ?? [])].filter((i) => i.kind === "file" && i.type.startsWith("image/")).map((i) => i.getAsFile()).filter((f): f is File => !!f);

@@ -3,7 +3,7 @@ import { Columns2, Copy, Pin, X } from "lucide-react";
 import { motion } from "motion/react";
 import { ContextMenu as CM } from "radix-ui";
 import { useReducedMotion } from "@/lib/motion-pref";
-import { FileIcon } from "@/lib/vscodeIcons";
+import { FileIcon } from "@/lib/iconTheme";
 import { Kbd } from "@/components/ui/kbd";
 import { cn } from "@/lib/utils";
 import { SHORTCUTS, baseOf, hasDrag, readDrag, setDrag, type ShortcutId, type TabAction, type TabGroup } from "@/lib/workspace-model";
@@ -83,7 +83,7 @@ export function TabStrip({ group, state, focused, dirty, dispatch, onClose }: { 
                     <span className={cn("absolute inset-x-0 top-0 h-0.5 transition-colors", focused ? "bg-foreground" : "bg-foreground/30")} />
                   </motion.span>
                 )}
-                <FileIcon path={t.path} size={14} />
+                <FileIcon path={t.path} />
                 <span className={cn("max-w-[14rem] truncate", t.preview && "italic")}>{base}</span>
                 <button
                   type="button"
