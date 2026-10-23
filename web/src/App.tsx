@@ -681,7 +681,7 @@ export default function App() {
               <Pause className="size-3" strokeWidth={3} />
             </span>
             <span className="min-w-0 flex-1">
-              <span className="text-foreground block truncate text-meta font-medium">{waiting.length === 1 ? "1 machine needs you" : `${waiting.length} machines need you`}</span>
+              <span className="text-foreground block truncate text-meta font-medium">{waiting.length === 1 ? "1 machine needs action" : `${waiting.length} machines need action`}</span>
               <span className="text-muted-foreground block truncate text-micro">{questionHeadline(waiting[0].question) || threadTitle(waiting[0])}</span>
             </span>
             <span className="text-attention-text flex shrink-0 items-center gap-0.5 text-micro font-semibold">
@@ -776,7 +776,7 @@ export default function App() {
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="top">
-                  {notify.enabled ? "Notifying when a machine needs you or finishes" : "Notify me when a machine needs me or finishes"}
+                  {notify.enabled ? "Notifying when a machine needs action or finishes" : "Notify me when a machine needs action or finishes"}
                 </TooltipContent>
               </Tooltip>
             )}
@@ -905,7 +905,7 @@ export default function App() {
           {collapsed ? (
             <nav key="rail" className="rail-reveal flex flex-1 flex-col items-center gap-1.5 px-2 pt-1 pb-3" aria-label="Sections">
               <RailIcon onClick={newTask} icon={<Plus />} label="New task" shortcut="n" primary />
-              <RailIcon active={view === "fleet"} flash={flash === "fleet"} onClick={showFleet} icon={<LayoutGrid />} label={waiting.length ? `Fleet view · ${waiting.length} need you` : "Fleet view"} shortcut="g f" badge={boxes.length || undefined} dot={waiting.length > 0} />
+              <RailIcon active={view === "fleet"} flash={flash === "fleet"} onClick={showFleet} icon={<LayoutGrid />} label={waiting.length ? `Fleet view · ${waiting.length} action needed` : "Fleet view"} shortcut="g f" badge={boxes.length || undefined} dot={waiting.length > 0} />
               <RailIcon active={view === "automations" || view === "automation-runs" || view === "playbooks"} onClick={showAutomations} icon={<Workflow />} label="Autopilot" />
               <span className="contents" onMouseEnter={prefetchHistory}>
                 <RailIcon active={view === "history"} flash={flash === "history"} onClick={showHistory} icon={<Clock />} label="History" shortcut="g h" />
@@ -1219,7 +1219,7 @@ function NavItem({
   icon: React.ReactNode;
   label: string;
   badge?: number;
-  /** Needs-you count, shown in the attention colour beside the label. */
+  /** Action-needed count, shown in the attention colour beside the label. */
   attention?: number;
   shortcut?: string;
 }) {
@@ -1246,13 +1246,15 @@ function NavItem({
       <span className="min-w-0 truncate">{label}</span>
       {attention != null && (
         <span className="text-attention-text bg-attention/10 pop-in shrink-0 rounded px-1.5 text-[11px] leading-[18px] font-medium tabular-nums">
-          <NumberTicker value={attention} from={attention} /> need you
+          <NumberTicker value={attention} from={attention} /> action needed
         </span>
       )}
       <span className="flex-1" />
       {/* The shortcut surfaces on hover/focus, where the eye already is — no tooltip to wait for.
-          Badge and chord share one slot and crossfade so nothing blinks in or out. */}
-      {(badge != null || shortcut) && (
+          Badge and chord share one slot and crossfade so nothing blinks in or out. The slot yields
+          to the attention count: "Fleet view · 1 action needed" needs the width, the chord stays
+          discoverable through aria-keyshortcuts, and the total returns once the question is answered. */}
+      {(badge != null || shortcut) && attention == null && (
         <span className="relative inline-grid place-items-end [&>*]:col-start-1 [&>*]:row-start-1">
           {badge != null && (
             <span className={cn("text-muted-foreground tabular text-micro transition-opacity duration-150", shortcut && "group-hover:opacity-0 group-focus-visible:opacity-0")}>

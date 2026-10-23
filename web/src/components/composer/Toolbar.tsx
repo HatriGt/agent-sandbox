@@ -65,7 +65,7 @@ type ToolButtonProps = React.ComponentProps<"button"> & {
   /** Show the label at every width (e.g. a harness that has been picked). */
   keepLabel?: boolean;
   active?: boolean;
-  /** Something is set inside — a small live dot (never amber: amber is for needs-you). */
+  /** Something is set inside — a small live dot (never amber: amber is for action-needed). */
   dot?: boolean;
   caret?: boolean;
   menu?: MenuName;

@@ -69,7 +69,7 @@ import { fmtTokens } from "@/components/thread/OutcomeCard";
  *
  * Starting a run is the primary act of this product, so the composer is the first thing on the page,
  * top-anchored so nothing jumps when the lists below change. Under it: the live fleet with its
- * capacity, because the hub is also where you glance to know whether anything needs you; then the
+ * capacity, because the hub is also where you glance to know whether anything needs action; then the
  * last archived runs and the last few actions, so Home also says what happened while you were away.
  */
 

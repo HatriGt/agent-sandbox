@@ -51,6 +51,6 @@ Rewrite the landing demo to show exactly what ships: the notification with choic
 card. The demo stops being aspirational.
 
 ## Rules
-No made-up numbers ("—" when unknown) · amber only for "needs you" · both themes · reduced
+No made-up numbers ("—" when unknown) · amber only for "action needed" · both themes · reduced
 motion · browser never calls vendors (CSP `connect-src 'self'`) · every bet works on web, mobile
 and API.

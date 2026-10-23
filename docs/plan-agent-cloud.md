@@ -225,7 +225,7 @@ The console's spine changes from *Machines* to *Runs*. Machines remain as a dril
 
 | Nav item | Purpose | Built on |
 |---|---|---|
-| **Runs** (home) | Needs-you queue → live runs → recently finished (receipts). Composer at top. | `Hub.tsx`, `Sessions.tsx`, `thread/` |
+| **Runs** (home) | Action-needed queue → live runs → recently finished (receipts). Composer at top. | `Hub.tsx`, `Sessions.tsx`, `thread/` |
 | **Automations** | Triggers: schedules, webhooks, GitHub rules, chains. Each row: name, when, harness, last result, next fire, on/off. | new; `handoff.ts` for chains |
 | **Harnesses** | Drivers, skills, hooks, rules, verify, egress, budgets. Skills page becomes one tab here. | `SkillsPage.tsx`, `AgentSettings.tsx`, `McpServers.tsx` |
 | **Providers & Accounts** | Model providers, GitHub accounts, CLI logins, API keys. | `Integrations.tsx`, `Accounts.tsx`, `ApiKeys.tsx` |
@@ -237,7 +237,7 @@ The console's spine changes from *Machines* to *Runs*. Machines remain as a dril
 
 **Runs (home).** Keep the serif greeting and the one honest fleet sentence. Composer gains three
 compact selectors inside the input frame: *driver* (icon + name), *model* (grouped by provider),
-*budget* (chip: "1 h · $2"). Below the composer: the amber needs-you queue (unchanged rule: amber is
+*budget* (chip: "1 h · $2"). Below the composer: the amber action-needed queue (unchanged rule: amber is
 only for this), then *Live now* cards with heartbeat ("last action 12 s ago") and a thin budget
 bar, then *Finished* as receipt rows (headline, PR link, cost, verified tick). Empty state for a new
 account is the activation flow: "Connect a provider → pick a driver → run the demo task".
@@ -267,7 +267,7 @@ policy sentence. Each provider row can "Fetch models" and shows the resolved lis
 period totals at the top (runs, verified %, cost, tokens). Row opens the archived receipt and diff.
 Read-only, dated, visibly past.
 
-**Mobile.** Same product, single pane: Runs (needs-you first), Thread with question cards and the
+**Mobile.** Same product, single pane: Runs (action-needed first), Thread with question cards and the
 side-question lane, Automations read + toggle + "Run now", History. Push notifications with deep
 links are the reason the app exists.
 
@@ -280,7 +280,7 @@ and a one-command install. Hosted signup is the secondary CTA.
 
 ### Design guidelines (extends `web/DESIGN.md`; that file stays the source of truth for UI decisions)
 
-- **Keep the principles**: amber only for needs-you; six functional state hues; two voices; live
+- **Keep the principles**: amber only for action-needed; six functional state hues; two voices; live
   never implies history; the phone is the same product. New states: **stalled** (failed hue,
   pulse-stopped glyph) and **scheduled/queued** (idle grey with a clock glyph). Cost is machine
   data → Geist Mono, never coloured.

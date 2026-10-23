@@ -41,7 +41,7 @@ const groupOf = (v: StableBox): Exclude<Filter, "all"> => {
 };
 
 const GROUP_LABEL: Record<Exclude<Filter, "all">, string> = {
-  attention: "Needs you",
+  attention: "Action needed",
   working: "Working",
   sleeping: "Sleeping",
   done: "Done",
@@ -153,7 +153,7 @@ export function Sandboxes({
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <div role="radiogroup" aria-label="Filter machines" className="flex flex-wrap items-center gap-1">
               <FilterChip group="fleet" active={filter === "all"} onClick={() => setFilter("all")} label="All" count={boxes.filter((b) => !b.leaving).length} />
-              <FilterChip group="fleet" active={filter === "attention"} onClick={() => setFilter("attention")} label="Needs you" count={counts.attention} tone="attention" />
+              <FilterChip group="fleet" active={filter === "attention"} onClick={() => setFilter("attention")} label="Action needed" count={counts.attention} tone="attention" />
               <FilterChip group="fleet" active={filter === "working"} onClick={() => setFilter("working")} label="Working" count={counts.working} tone="live" />
               <FilterChip group="fleet" active={filter === "sleeping"} onClick={() => setFilter("sleeping")} label="Sleeping" count={counts.sleeping} tone="sleep" />
               <FilterChip group="fleet" active={filter === "done"} onClick={() => setFilter("done")} label="Done" count={counts.done} />
@@ -235,7 +235,7 @@ const stateDot = (box: StableBox) => {
     case "running":
       return <StatusDot tone="live" pulse>working</StatusDot>;
     case "waiting":
-      return <StatusDot tone="attention">needs you</StatusDot>;
+      return <StatusDot tone="attention">action needed</StatusDot>;
     case "done":
       return <StatusDot tone={isFailedExit(box.exitCode) ? "destructive" : "ok"}>{doneLabel(box.exitCode)}</StatusDot>;
     case "sleeping":
@@ -363,7 +363,7 @@ function TimeLeft({ box, lifecycle }: { box: StableBox; lifecycle: FleetLifecycl
     <Tooltip>
       <TooltipTrigger asChild>
         <div className="flex flex-col gap-1.5">
-          {/* Amber is reserved for "needs you"; a run about to sleep steps up to the foreground colour. */}
+          {/* Amber is reserved for "action needed"; a run about to sleep steps up to the foreground colour. */}
           <span className={cn("inline-flex items-center gap-1.5 text-micro", deadline.remainingSec < 300 ? "text-foreground" : "text-muted-foreground")}>
             <Hourglass className="size-3" aria-hidden />
             {deadline.remainingSec <= 0 ? (

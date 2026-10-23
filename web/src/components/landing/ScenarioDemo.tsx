@@ -62,12 +62,12 @@ const PLAN = [
   { text: "Fix, verify, open the PR", active: 13700, done: 17200 },
 ];
 
-type RunState = "triggered" | "booting" | "working" | "needs you" | "done";
+type RunState = "triggered" | "booting" | "working" | "action needed" | "done";
 function stateAt(t: number): RunState {
   if (t < 1600) return "triggered";
   if (t < 3000) return "booting";
   if (t < 10600) return "working";
-  if (t < 13700) return "needs you";
+  if (t < 13700) return "action needed";
   if (t < 17600) return "working";
   return "done";
 }
@@ -189,7 +189,7 @@ const PILL: Record<RunState, string> = {
   triggered: "bg-muted text-muted-foreground ring-border",
   booting: "bg-live/10 text-live ring-live/20",
   working: "bg-live/10 text-live ring-live/20",
-  "needs you": "bg-card text-attention-text ring-attention/60",
+  "action needed": "bg-card text-attention-text ring-attention/60",
   done: "bg-ok/10 text-ok ring-ok/20",
 };
 
@@ -197,7 +197,7 @@ function StatePill({ state, small }: { state: RunState; small?: boolean }) {
   return (
     <span className={cn("inline-flex shrink-0 items-center gap-1.5 rounded-full font-semibold ring-1 ring-inset transition-colors duration-200", small ? "h-5 px-2 text-[11px]" : "h-6 px-2.5 text-micro", PILL[state])}>
       {(state === "working" || state === "booting") && <CircleDot className="breathe size-3" strokeWidth={2.5} aria-hidden />}
-      {state === "needs you" && <Pause className="size-3" strokeWidth={2.5} aria-hidden />}
+      {state === "action needed" && <Pause className="size-3" strokeWidth={2.5} aria-hidden />}
       {state === "done" && <Check className="size-3" strokeWidth={3} aria-hidden />}
       {state === "triggered" && <Webhook className="size-3" aria-hidden />}
       {state}
@@ -429,7 +429,7 @@ function QuestionCard({ t }: { t: number }) {
       <div className="px-4 pt-3 pb-2">
         <p className={cn("label mb-1.5 flex items-center gap-1.5", answered ? "text-muted-foreground" : "text-attention-text")}>
           {answered ? <Check className="size-3" strokeWidth={3} aria-hidden /> : <Pause className="size-3" strokeWidth={2.5} aria-hidden />}
-          {answered ? "Answered · resuming" : "Paused · needs you"}
+          {answered ? "Answered · resuming" : "Paused · action needed"}
         </p>
         <p className="text-foreground text-body font-medium">{Q}</p>
       </div>
@@ -590,8 +590,8 @@ function SidePanel({ t, state }: { t: number; state: RunState }) {
       </Section>
       <Section label="Machine" focus={focus === "machine"}>
         <p className="text-foreground mt-2 flex items-center gap-2 text-micro font-medium">
-          <span className={cn("size-2 rounded-full", state === "needs you" ? "bg-attention" : state === "done" ? "bg-sleep" : state === "triggered" ? "bg-muted-foreground/50" : "bg-live breathe")} aria-hidden />
-          {state === "triggered" ? "Claiming a warm machine" : state === "booting" ? "Booting" : state === "needs you" ? "Waiting on you" : state === "done" ? "Sleeping · wakes on reply" : `Heartbeat ${1 + (Math.floor(t / 1000) % 3)}s ago`}
+          <span className={cn("size-2 rounded-full", state === "action needed" ? "bg-attention" : state === "done" ? "bg-sleep" : state === "triggered" ? "bg-muted-foreground/50" : "bg-live breathe")} aria-hidden />
+          {state === "triggered" ? "Claiming a warm machine" : state === "booting" ? "Booting" : state === "action needed" ? "Waiting on you" : state === "done" ? "Sleeping · wakes on reply" : `Heartbeat ${1 + (Math.floor(t / 1000) % 3)}s ago`}
         </p>
         <p className="stamp text-muted-foreground mt-1">fc-7b2e · KVM · egress: 3 hosts</p>
         <p className="text-muted-foreground mt-2.5 flex items-start gap-1.5 text-micro leading-snug">
@@ -629,7 +629,7 @@ function Push({ t, reduced }: { t: number; reduced: boolean }) {
               <span>now</span>
             </div>
             <p className="text-foreground mt-1.5 flex items-center gap-1.5 text-meta font-semibold">
-              <Pause className="text-attention-text size-3" strokeWidth={2.5} /> checkout-svc needs you
+              <Pause className="text-attention-text size-3" strokeWidth={2.5} /> checkout-svc needs your answer
             </p>
             <p className="text-muted-foreground mt-0.5 text-micro">{Q}</p>
             <div className="mt-2.5 grid grid-cols-2 gap-1.5">

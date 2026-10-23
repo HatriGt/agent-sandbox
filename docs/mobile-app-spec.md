@@ -2,7 +2,7 @@
 
 Native iOS + Android companion apps for Agent Sandbox. Same product, same design language, rethought for the pocket. This spec covers scope, UX, screen-by-screen design, API/auth mapping, push notifications, and the server work required.
 
-Guiding line from `web/DESIGN.md` principle #6: **"the phone is not a degraded desktop."** The app is not the dashboard shrunk down — it is the *triage and steering* surface. You start runs, get pinged when a run needs you, answer questions, review diffs, merge PRs, and revert. Deep code editing stays on desktop.
+Guiding line from `web/DESIGN.md` principle #6: **"the phone is not a degraded desktop."** The app is not the dashboard shrunk down — it is the *triage and steering* surface. You start runs, get pinged when a run needs action, answer questions, review diffs, merge PRs, and revert. Deep code editing stays on desktop.
 
 ---
 
@@ -47,7 +47,7 @@ Port the oklch palette from `web/src/index.css` as a `theme.ts` with light/dark 
 | State | Token | Meaning | Pairing rule |
 |---|---|---|---|
 | working | `--live` (blue) | running, links, streaming caret | always icon + word |
-| needs you | `--attention` (amber) | `waiting` — reserved exclusively for this | amber fill, `--attention-ink` text |
+| action needed | `--attention` (amber) | `waiting` — reserved exclusively for this | amber fill, `--attention-ink` text |
 | done | `--ok` (green) | exit 0 | |
 | failed | `--destructive` (red) | non-zero exit, destroy | |
 | sleeping | `--sleep` (violet) | `boxStatus: Stopped` | |
@@ -147,7 +147,7 @@ Server has two modes; the app supports both:
 1. **SaaS mode** (primary): Sign in screen (password or GitHub OAuth in a system browser tab / ASWebAuthenticationSession → callback deep link). On success the app immediately **mints a device-scoped API key** (`POST /api-keys.json`, name = device model) and stores it in Keychain/Keystore; all subsequent calls use `Authorization: Bearer asb_…`. This avoids cookie+CSRF handling in native code and gives per-device revocation for free (shows up in Settings → API keys).
 2. **Self-host token mode**: "Connect to your server" screen — server URL + operator token, stored in secure storage. Same bearer header.
 
-First-run flow: server URL (or default SaaS host) → sign in → notification permission prompt *with context* ("Get pinged the moment an agent needs you") → land on Home.
+First-run flow: server URL (or default SaaS host) → sign in → notification permission prompt *with context* ("Get pinged the moment an agent needs action") → land on Home.
 
 Errors: ownership checks return **404, never 403** — the app must treat 404 on a box route as "gone or not yours" with a neutral "This machine no longer exists" screen. 401 → sign-in. Rate limit (60 mutations/min) → toast with retry-after.
 

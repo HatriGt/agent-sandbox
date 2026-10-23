@@ -245,7 +245,7 @@ with a one-line narration only when something notable changes.
 `web/src/lib/watch.ts` (`deriveWatch`, tested in `test/watch.test.ts`) reads the parsed trace: the
 latest marker not followed by an operator message is the current watch; every later agent reply
 carrying a fence counts as an update. `WatchPill` (in `RunPill.tsx`) shows "Watching <target> ·
-N updates · 3m" with a live-blue breathing dot (not amber — nothing needs you) and a Stop button that
+N updates · 3m" with a live-blue breathing dot (not amber — nothing needs action) and a Stop button that
 POSTs `/interrupt.json` (kills the turn, keeps the session; exit 253). After that the run pill reads
 "Stopped watching <target> · N updates · 12m" and the last block stays where it was.
 **Partial output while a call runs.** Claude background shells stream through their output file. omp streams through `tool_execution_update`: the formatter in `src/drivers/omp.ts` sends complete new lines at most once a second, as `  ⟦#id⟧ ⟦…⟧ lines` (or `⟦…!⟧` to replace the whole partial text when it did not just grow). `src/trace.ts` marks the call `streaming` until the final id-stamped result replaces the chunks. omp's `eval`/`python`/`js` render as shell items, so they get the live view too. The prompt still asks for ONE poll cycle per tool call, because a loop inside one call delays the summary block until the call returns.

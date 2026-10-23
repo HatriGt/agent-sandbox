@@ -8,7 +8,7 @@ import type { DisplayState } from "@/lib/lifecycle";
  * Run state, the loudest signal in the console.
  *
  * Each state pairs a functional hue with a drawn icon AND a word, so meaning survives colour-blindness
- * and bright sunlight: working → live blue, breathing · needs you → ink pause on paper · done → green check ·
+ * and bright sunlight: working → live blue, breathing · action needed → ink pause on paper · done → green check ·
  * failed → red cross · idle → hollow grey circle · sleeping → violet moon (an idle-stopped microVM
  * whose workspace and session survive; a reply wakes it).
  *
@@ -23,7 +23,7 @@ const TONE: Record<DisplayState | "failed" | "stalled", Tone> = {
   running: { icon: CircleDot, word: () => "working", text: "text-live", pill: "bg-live/10 text-live ring-live/20" },
   waiting: {
     icon: Pause,
-    word: () => "needs you",
+    word: () => "action needed",
     text: "text-attention-text",
     pill: "bg-card text-attention-text ring-attention/60 shadow-e1",
   },
@@ -84,9 +84,9 @@ export function StatePill({
 }) {
   const t = toneOf(state, exitCode, stalled);
   const Icon = t.icon;
-  // The pill crossfades when the state flips (working → needs you → done → sleeping) instead of
+  // The pill crossfades when the state flips (working → action needed → done → sleeping) instead of
   // snapping: a state change is an event worth a beat, and the beat makes it legible.
-  // The outer pill owns `layout` so its width glides between words (working → needs you) while the
+  // The outer pill owns `layout` so its width glides between words (working → action needed) while the
   // keyed content crossfades inside; colours ease via CSS so the tone change never snaps.
   return (
     <motion.span

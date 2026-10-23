@@ -276,7 +276,7 @@ export function RunPill({
 
 /**
  * The live pill for a WATCH (the agent loops on a monitoring task until told to stop): "Watching
- * backend logs · 4 updates · 3m", a calm live-blue breathing dot (never amber — nothing needs you),
+ * backend logs · 4 updates · 3m", a calm live-blue breathing dot (never amber — nothing needs action),
  * and a quiet Stop that interrupts the turn (session kept). Renders nothing unless the trace holds a
  * current watch, so the thread can mount it unconditionally while a run is going.
  */

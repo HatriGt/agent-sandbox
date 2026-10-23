@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 
 type EventKey = keyof Settings["events"];
 const GROUPS: { title: string; events: { key: EventKey; label: string; desc: string; attention?: boolean }[] }[] = [
-  { title: "Needs you", events: [{ key: "waiting", label: "Question", desc: "The agent paused on a question and is waiting for your answer.", attention: true }] },
+  { title: "Action needed", events: [{ key: "waiting", label: "Question", desc: "The agent paused on a question and is waiting for your answer.", attention: true }] },
   {
     title: "Run finished",
     events: [
@@ -85,7 +85,7 @@ export function NotifySettings() {
 
   const canTest = !!loaded?.url || !!url.trim() || !!loaded?.fallbackConfigured;
   return (
-    <SettingsSection id="notify" title="Notifications" meta={loaded ? `${onCount} of ${ALL.length} on` : undefined} purpose="Get pinged when a machine needs you or finishes. Point a webhook at Slack, ntfy, Discord — anything that accepts a JSON POST.">
+    <SettingsSection id="notify" title="Notifications" meta={loaded ? `${onCount} of ${ALL.length} on` : undefined} purpose="Get pinged when a machine needs action or finishes. Point a webhook at Slack, ntfy, Discord — anything that accepts a JSON POST.">
       <Swap state={loaded === null ? "loading" : "form"}>
         {loaded === null ? (
           <div className="flex max-w-xl flex-col gap-4" aria-busy="true" aria-label="Loading">

@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
 const LOOP = 15_000;
 const EASE = [0.22, 1, 0.36, 1] as const;
 
-type S = "working" | "needs you" | "done";
+type S = "working" | "action needed" | "done";
 type Row = {
   at: number;
   kind: "webhook" | "schedule" | "github" | "chain";
@@ -24,7 +24,7 @@ type Row = {
 
 const ROWS: Row[] = [
   { at: 0, kind: "schedule", source: "cron 03:00", title: "Nightly dependency bumps", steps: [[0, "working", "3 packages"], [2600, "done", "PR #88 · tests pass"]] },
-  { at: 1400, kind: "webhook", source: "error monitor", title: "TypeError spike in cart totals", steps: [[1400, "working", "bisecting…"], [5200, "needs you", "patch or revert?"], [8200, "working", "patching"], [10400, "done", "PR #2231 · receipt"]] },
+  { at: 1400, kind: "webhook", source: "error monitor", title: "TypeError spike in cart totals", steps: [[1400, "working", "bisecting…"], [5200, "action needed", "patch or revert?"], [8200, "working", "patching"], [10400, "done", "PR #2231 · receipt"]] },
   { at: 3600, kind: "github", source: "issue labelled", title: "Flaky upload retry test", steps: [[3600, "working", "reproducing"], [7600, "done", "PR #412 · receipt"]] },
   { at: 6400, kind: "github", source: "PR opened", title: "Review #2229 · pricing API", steps: [[6400, "working", "reading diff"], [9400, "done", "review posted"]] },
   { at: 10900, kind: "chain", source: "after triage", title: "Changelog + release notes", steps: [[10900, "working", "new microVM"], [13200, "done", "PR #2232"]] },
@@ -41,7 +41,7 @@ const KIND_LABEL = { webhook: "webhook", schedule: "schedule", github: "GitHub",
 
 const PILL: Record<S, string> = {
   working: "bg-live/10 text-live ring-live/20",
-  "needs you": "bg-card text-attention-text ring-attention/60",
+  "action needed": "bg-card text-attention-text ring-attention/60",
   done: "bg-ok/10 text-ok ring-ok/20",
 };
 
@@ -67,7 +67,7 @@ export function HeroFeed({ className }: { className?: string }) {
   }, [reduced, visible]);
 
   const rows = [...ROWS.filter((r) => t >= r.at).reverse(), ...EARLIER]; // newest on top
-  const asking = rows.some((r) => stepAt(r, t)[1] === "needs you");
+  const asking = rows.some((r) => stepAt(r, t)[1] === "action needed");
   const receipts = rows.filter((r) => r.at >= 0).filter((r) => stepAt(r, t)[1] === "done").length;
 
   return (
@@ -93,9 +93,9 @@ export function HeroFeed({ className }: { className?: string }) {
                 animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
                 exit={{ opacity: 0 }}
                 transition={{ duration: 0.45, ease: EASE }}
-                className={cn("relative border-b px-4 py-3 transition-colors duration-500", s === "needs you" && "bg-attention/[0.06]")}
+                className={cn("relative border-b px-4 py-3 transition-colors duration-500", s === "action needed" && "bg-attention/[0.06]")}
               >
-                {s === "needs you" && <span className="bg-attention absolute inset-y-0 left-0 w-[3px]" />}
+                {s === "action needed" && <span className="bg-attention absolute inset-y-0 left-0 w-[3px]" />}
                 <div className="text-muted-foreground flex items-center gap-1.5 text-micro">
                   <Icon className="size-3.5 shrink-0" />
                   <span className="font-medium">{KIND_LABEL[r.kind]}</span>
@@ -105,12 +105,12 @@ export function HeroFeed({ className }: { className?: string }) {
                   <span className="text-foreground min-w-0 flex-1 truncate text-meta font-medium">{r.title}</span>
                   <span className={cn("inline-flex h-5 shrink-0 items-center gap-1 rounded-full px-2 text-[11px] font-semibold ring-1 ring-inset transition-colors duration-300", PILL[s])}>
                     {s === "working" && <CircleDot className="breathe size-2.5" strokeWidth={2.5} />}
-                    {s === "needs you" && <Pause className="size-2.5" strokeWidth={2.5} />}
+                    {s === "action needed" && <Pause className="size-2.5" strokeWidth={2.5} />}
                     {s === "done" && <Check className="size-2.5" strokeWidth={3} />}
                     {s}
                   </span>
                 </div>
-                <p className={cn("stamp mt-0.5 truncate", s === "needs you" ? "text-attention-text" : "text-muted-foreground")}>{detail}</p>
+                <p className={cn("stamp mt-0.5 truncate", s === "action needed" ? "text-attention-text" : "text-muted-foreground")}>{detail}</p>
               </motion.li>
             );
           })}
@@ -118,7 +118,7 @@ export function HeroFeed({ className }: { className?: string }) {
       </ul>
       <div className="text-muted-foreground flex h-10 items-center gap-2 border-t px-4 text-micro">
         <span className={cn("size-1.5 rounded-full transition-colors duration-300", asking ? "bg-attention" : "bg-muted-foreground/40")} aria-hidden />
-        {asking ? <span className="text-attention-text font-medium">1 run is asking you · push sent</span> : <span>Nothing needs you.</span>}
+        {asking ? <span className="text-attention-text font-medium">1 run is asking you · push sent</span> : <span>Nothing needs action.</span>}
         <span className="stamp ml-auto hidden sm:inline">each in its own microVM</span>
       </div>
     </div>

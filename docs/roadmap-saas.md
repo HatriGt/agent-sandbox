@@ -28,7 +28,7 @@ mile first.
 7. **Run history archive** — persist digest + diff summary + final state at teardown/reap (SQLite);
    read-only History page. The retention asset and the substrate for weekly emails and billing.
 8. **Mobile push notifications + deep links** — `push_devices`, `/push/register.json`, FCM/APNs,
-   `asb://box/<name>` (scheme declared, unhandled). The lock-screen "needs you" is the thesis.
+   `asb://box/<name>` (scheme declared, unhandled). The lock-screen "action needed" is the thesis.
 9. **Email notification channel** — hosted users have inboxes, not webhook receivers.
 10. **Durable inbox** — queued follow-ups survive controller restarts (SQLite, not memory).
 11. **Audit view** — surface `audit_events` to its owner + admin; add retention pruning.

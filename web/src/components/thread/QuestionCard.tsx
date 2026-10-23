@@ -54,7 +54,7 @@ export function QuestionCard({
   const canSend = !!answer && !busy;
   const send = () => canSend && onAnswer(answer);
 
-  // The card is the thing that needs you, so it takes focus when it appears — unless you are
+  // The card is the thing that needs action, so it takes focus when it appears — unless you are
   // already typing somewhere. That makes the number keys, arrows and Enter work at once, and
   // scrolls the card into view on a phone where the composer would otherwise hide it.
   const groupRef = React.useRef<HTMLDivElement>(null);

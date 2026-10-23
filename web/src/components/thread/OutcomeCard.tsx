@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
  * The outcome card (docs/plan-demo-parity.md bet 2): what did I get, can I trust it, what did it
  * cost — and why the run started. Every figure comes from GET /history/outcome.json, which only
  * carries recorded facts; an unknown renders as "—", never a guess. Colour: green for passing,
- * red for failing, neutral otherwise — amber is reserved for "needs you" and never appears here.
+ * red for failing, neutral otherwise — amber is reserved for "action needed" and never appears here.
  */
 
 const DASH = "—";

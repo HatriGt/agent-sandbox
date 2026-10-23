@@ -292,7 +292,7 @@ const BUILT: Array<{ title: string; body: string; tags?: string[] }> = [
   },
   {
     title: "Mobile push",
-    body: "The phone app gets a push when a run needs you; the notification deep-links to the question card. Automations on mobile: read, toggle, Run now.",
+    body: "The phone app gets a push when a run needs action; the notification deep-links to the question card. Automations on mobile: read, toggle, Run now.",
   },
   {
     title: "Harnesses",

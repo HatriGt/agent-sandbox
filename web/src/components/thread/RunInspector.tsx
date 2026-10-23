@@ -292,7 +292,7 @@ function groupOf(b: BoxView): FleetGroup {
 
 const GROUP: Record<FleetGroup, { label: string; tone: "live" | "attention" | "muted" | "ok" }> = {
   working: { label: "Working", tone: "live" },
-  "needs-you": { label: "Needs you", tone: "attention" },
+  "needs-you": { label: "Action needed", tone: "attention" },
   idle: { label: "Idle", tone: "muted" },
   asleep: { label: "Asleep", tone: "muted" },
 };

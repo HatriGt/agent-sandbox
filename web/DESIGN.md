@@ -11,7 +11,7 @@
 
 ## Principles that shape every screen
 
-1. **`needs you` is the loudest thing on screen — and it is ink, not a hue.** Weight and motion
+1. **`action needed` is the loudest thing on screen — and it is ink, not a hue.** Weight and motion
    carry it: a strong hairline on paper, a soft wide halo, a ping dot, and the one filled button
    (Answer / Approve). Never a tinted fill — a grey wash reads as *disabled*, the opposite of "your
    turn". The sidebar queue card, the state pill, the question and scheduled cards, the composer's
@@ -20,7 +20,7 @@
    (red), idle (grey), **sleeping** (violet — an idle-stopped microVM whose workspace survives; a reply
    wakes it), each with a drawn icon and a word so the meaning survives colour-blindness and sunlight.
    **Amber (`--warn`) is a fact, not a request:** a meter running high, a weak password, a PR with
-   changes requested, a trial ending, an unsaved file. Used sparingly; never for "needs you".
+   changes requested, a trial ending, an unsaved file. Used sparingly; never for "action needed".
    Everything else is ink on paper.
 3. **Two voices, never confusable.** The agent is full-measure prose with a small label. You are the
    one bubble (a quiet muted fill, right-aligned). A **side question** — answered by a separate
@@ -158,7 +158,7 @@ document on a desk. No floating cards inside the sheet, no gaps between panes. P
 pane.
 
 - **Sidebar (17rem, collapsible to 3.5rem):** brand + live health line → **New task** (the primary
-  fill) → search (⌘K) → *needs-you queue card (paper, ink hairline, only when non-empty)* → **Machines** list,
+  fill) → search (⌘K) → *action-needed queue card (paper, ink hairline, only when non-empty)* → **Machines** list,
   triage-ordered (waiting → working → rest) → footer with **Fleet view**, freshness ("Updated 3s
   ago") and the theme toggle. No fabricated profile or avatar.
 - **Workspace:** Hub, Thread, Booting placeholder, or Fleet.
@@ -185,7 +185,7 @@ themes override a subset of these in `:root[data-theme="…"]` blocks; see **The
 | `--muted-foreground` | `oklch(.5 .016 286)` | `oklch(.7 .012 286)` | secondary text (≥4.5:1) |
 | `--primary` | ink | near-white | the one filled action |
 | `--live` | `oklch(.52 .2 262)` | `oklch(.74 .15 262)` | working, links, caret, selection, focus ring |
-| `--attention` / `-text` / `-ink` | ink / ink / paper | near-white / near-white / charcoal | needs you — hairline, halo, the one filled button; never a tinted fill |
+| `--attention` / `-text` / `-ink` | ink / ink / paper | near-white / near-white / charcoal | action needed — hairline, halo, the one filled button; never a tinted fill |
 | `--warn` / `-text` | amber / dark amber | amber / light amber | a fact that is off (meter high, weak password, changes requested, trial ending) |
 | `--ok` | green | green | done, `$` prompt |
 | `--destructive` | red | red | failed, destroy |
@@ -309,7 +309,7 @@ an empty first snapshot; only the skeleton is ever replaced, by real output.
 
 One idea — liveness — expressed consistently: `breathe` on working dots, the streaming caret, the
 working dots, the `sheen` on an occupied capacity slot. Structure moves with purpose only: machine
-rows `layout`-animate to their new triage position when a state flips; the needs-you card grows in
+rows `layout`-animate to their new triage position when a state flips; the action-needed card grows in
 and out; panes cross-fade in 160ms; the Hub's three blocks stagger in once. Loading is a `shimmer`
 skeleton shaped like the real thread. Everything collapses under `prefers-reduced-motion`
 (`MotionConfig reducedMotion="user"` + the global CSS rule; dialogs and sheets keep a 120ms fade).
@@ -665,7 +665,7 @@ New things a user can do, each placed where the need arises rather than added to
 - **Run summary.** A finished thread ends with one line that reads like a sentence — "Completed · 6 steps · 3 files · 2 commands" — followed by two tertiary actions: **Copy transcript** (Markdown, tool work folded into `<details>`) and **New task from this** (hands the task to the Hub; opens the repo picker if the run had repositories). Labels folded into values; no spec sheet.
 - **Command palette actions.** ⌘K now also runs Fleet view, Integrations, theme switch and the shortcuts list, under a quiet "Actions" label below machine matches. Typing filters both.
 - **Keyboard shortcuts overlay.** `?` anywhere. Three groups (Go, Thread, Anywhere); keys as small `kbd` chips on the right so the eye scans descriptions.
-- **Grouped sidebar.** Machines carry faint group labels (Needs you · Working · Done · Sleeping · Warm) only when the list spans more than one group — more space around a group than within it.
+- **Grouped sidebar.** Machines carry faint group labels (Action needed · Working · Done · Sleeping · Warm) only when the list spans more than one group — more space around a group than within it.
 - **Drafts survive.** Unsent Hub and follow-up text lives in sessionStorage per machine; a reload or a detour to another thread does not lose it.
 - **Last activity.** Hub "Live now" rows show "active 2m ago" / "2m ago" in the tertiary colour before the machine name.
 - **Header vitals demoted** to the tertiary text colour — uptime/cpu/memory were competing with the title.
@@ -742,7 +742,7 @@ Now, with Claude.ai, ChatGPT, Cursor, v0 and T3 Chat as the target shape:
 - **Icon + label on a desk, icon only below `sm`**; the left cluster shrinks and the row never wraps
   (checked at 390px and 1280px, both themes — `.shots/composer-shots.mjs`). Buttons are 32px pills
   with a 0.97 press scale (dropped under reduced motion); a small **live-blue** dot marks a menu with
-  something set inside. Amber stays reserved for needs-you.
+  something set inside. Amber stays reserved for action-needed.
 - **Menus are popovers on a desk, bottom sheets on a phone** (the v0 / T3 Chat mobile pattern); rows,
   not cards; focus lands inside, ↑/↓/Home/End move, Enter/Space picks, Esc closes and returns focus.
   The Hub's menus grow downward (the composer is near the top), the thread's upward.
@@ -776,7 +776,7 @@ no new detail was taken from them beyond what this file already records.
 ## Run-end pill, not cards (2026-09-30)
 
 - A finished run ends with ONE pill (`thread/RunPill.tsx`, `[data-run-pill="done|failed"]`), replacing the outcome card and the digest card in the thread: rounded-full, `text-micro`, muted, single line, left-aligned with agent prose. Example: `● Done · PR #142 · 3 files +40 −12 · tests 48/48 ✓ · 2m 14s · 121k tokens ▸`.
-- Dot: green done, red failed. Amber never appears here (it means needs-you).
+- Dot: green done, red failed. Amber never appears here (it means action-needed).
 - Collapsed by default. Click/Enter opens, via `Collapse` (height + fade; plain fade under reduced motion), a borderless key-value list (`[data-run-pill-details]`): summary, started by, driver, model, PR links, diff, tests, verify, exit code, failed commands, questions, sandbox blocks, duration, tokens, cost, followed by, follow-ups.
 - Only recorded facts. Unknown or empty rows are dropped: no "—", no "$ —", no "no questions asked", no "exit 0" when tests or verify already speak. A digest headline that just says "done" is dropped so the state is said once.
 - The pill also absorbs `RunSummary`: its steps/commands go in a "work" row, its exit-code note in "note", and Copy transcript / Run again are the last row of the details (`[data-run-pill-actions]`). Nothing else renders at run end.
@@ -975,7 +975,7 @@ The frame around the work: the sidebar's machine list, the Hub's "Live now" and 
 ### What was subtracted
 
 - **A header-measurement bug, not a column.** Both Hub and History tables ran past their cards (History 882px in an 834px card; the Hub's "Tokens" header read "T…"). The width model measured each header's *cell* at max-content as the column's floor, and at max-content a cell is as wide as the column's widest row, so the flexible "Run" column's floor was the length of its longest title. The floor is now the header's own footprint (label, sort icon, padding; `labelWidth` in `lib/column-widths.ts`). Hub 494/622, History 771/834, no declared width touched to get there. "Duration" became "Took" and "Archived" became "When": shorter words, same meaning, narrower floors.
-- **Three ways to say a state.** The sidebar drew a coloured initial tile, a braille spinner for working rows, a pinging dot for waiting ones and a bare word for the rest; the Hub drew icon+word stamps in a fourth style. One vocabulary now (`stateWord` in MachineList: Working, Needs you, Done, Failed, Asleep, Idle, Stalled) rendered one way everywhere: `StatusDot`, a 6px dot and a word. The sidebar's tile, spinner and tone tables are gone (−60 lines). Rows are 36px with 8px hover surfaces.
+- **Three ways to say a state.** The sidebar drew a coloured initial tile, a braille spinner for working rows, a pinging dot for waiting ones and a bare word for the rest; the Hub drew icon+word stamps in a fourth style. One vocabulary now (`stateWord` in MachineList: Working, Action needed, Done, Failed, Asleep, Idle, Stalled) rendered one way everywhere: `StatusDot`, a 6px dot and a word. The sidebar's tile, spinner and tone tables are gone (−60 lines). Rows are 36px with 8px hover surfaces.
 - **The two-line warm callout.** "1 warm machine ready — a new task starts in seconds" under a flame icon, wrapping to two lines in a 13px face, is now one 28px line in `text-faint` with the `ok` dot: "1 warm machine ready · starts in seconds". It is a fact about capacity, and it reads like one.
 - **Two shadows.** "Live now" and the activity card both carried `shadow-e1` while sitting in the page plane. Borders now; shadows stay on things that float.
 - **A duplicated count.** The table toolbar showed the row count beside the search even with nothing typed, next to chips that already say "All 6". It appears only while a query narrows the rows ("3 of 6").
@@ -1038,7 +1038,7 @@ whose only structure is the glyph column and its hairline. Step glyphs are 20% t
 shell command is a flat row with the same anatomy as every other step (glyph, `$ cmd` in mono, tail
 with exit chip, duration, chevron) and its output opens under it as the dark block. Every dark panel
 dropped its white hairline, since the ground tone already separates it. State marks keep their
-borders (a secret that needs you, a queued item, a chosen answer). The test results card stays as the
+borders (a secret that needs action, a queued item, a chosen answer). The test results card stays as the
 one bordered surface in the column, because that is the result the reader came for.
 
 After: 23 bordered elements (21 running), 10 four-sided surfaces (8 running), no boxed ancestor

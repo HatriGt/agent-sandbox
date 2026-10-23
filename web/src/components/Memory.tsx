@@ -664,7 +664,7 @@ function Composer({ id, onAdd, onCancel }: { id: string; onAdd: (add: { kind: Me
   );
 }
 
-/** Kind marker: a glyph plus a short label. Never coloured — amber on this page means "needs you" only. */
+/** Kind marker: a glyph plus a short label. Never coloured — amber on this page means "action needed" only. */
 function KindGlyph({ kind }: { kind: MemoryKind }) {
   const Icon = KIND_ICON[kind];
   return (
