@@ -91,7 +91,7 @@ function Card({ it, now, still, busy, actions, onDiscuss }: { it: ThreadSchedule
       aria-label={it.name}
       className={cn(
         "bg-card overflow-hidden rounded-xl border transition-[border-color,box-shadow] duration-500",
-        pending && "border-attention/50 attention-glow attention-pulse",
+        pending && "border-attention/50",
         over && "opacity-70"
       )}
     >

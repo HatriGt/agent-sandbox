@@ -626,7 +626,7 @@ export function Hub({
             className={cn(
               "bg-card border-line-strong composer-depth focus-within:border-live/60 focus-within:shadow-[0_0_0_3px_color-mix(in_oklch,var(--live)_18%,transparent),var(--shadow-e2)] relative rounded-2xl p-2.5 transition-[border-color,box-shadow] duration-200",
               dragOver && "border-live",
-              (voice.state === "listening" || voice.state === "arming") && "mic-glow"
+              (voice.state === "listening" || voice.state === "arming") && "mic-live"
             )}
             onPaste={(e) => {
               const files = [...(e.clipboardData?.items ?? [])].filter((i) => i.kind === "file" && i.type.startsWith("image/")).map((i) => i.getAsFile()).filter((f): f is File => !!f);

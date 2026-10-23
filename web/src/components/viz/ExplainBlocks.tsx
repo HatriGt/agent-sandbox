@@ -23,7 +23,7 @@ export function CompareBlock({ options, source }: { options: CompareOption[]; so
           <section
             key={o.name}
             aria-label={o.picked ? `${o.name} (recommended)` : o.name}
-            className={cn("min-w-0 rounded-lg border px-3 py-2.5", o.picked && "border-live/60 ring-live/25 ring-2", entrance(o.name).className)}
+            className={cn("min-w-0 rounded-lg border px-3 py-2.5", o.picked && "border-live/60", entrance(o.name).className)}
             style={entrance(o.name).style}
           >
             <div className="flex flex-wrap items-center gap-1.5">

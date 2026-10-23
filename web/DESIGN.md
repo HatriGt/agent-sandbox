@@ -12,10 +12,11 @@
 ## Principles that shape every screen
 
 1. **`action needed` is the loudest thing on screen — and it is ink, not a hue.** Weight and motion
-   carry it: a strong hairline on paper, a soft wide halo, a ping dot, and the one filled button
+   carry it: a strong hairline on paper, a ping dot, and the one filled button
    (Answer / Approve). Never a tinted fill — a grey wash reads as *disabled*, the opposite of "your
-   turn". The sidebar queue card, the state pill, the question and scheduled cards, the composer's
-   halo and the approval chips all follow this (`--attention` tokens).
+   turn". The sidebar queue card, the state pill, the question and scheduled cards and the approval
+   chips all follow this (`--attention` tokens). No halo: a wide near-white shadow reads as a glow
+   on a dark page.
 2. **Colour is for what the machine is doing.** working (live blue, breathing), done (green), failed
    (red), idle (grey), **sleeping** (violet — an idle-stopped microVM whose workspace survives; a reply
    wakes it), each with a drawn icon and a word so the meaning survives colour-blindness and sunlight.
@@ -185,7 +186,7 @@ themes override a subset of these in `:root[data-theme="…"]` blocks; see **The
 | `--muted-foreground` | `oklch(.5 .016 286)` | `oklch(.7 .012 286)` | secondary text (≥4.5:1) |
 | `--primary` | ink | near-white | the one filled action |
 | `--live` | `oklch(.52 .2 262)` | `oklch(.74 .15 262)` | working, links, caret, selection, focus ring |
-| `--attention` / `-text` / `-ink` | ink / ink / paper | near-white / near-white / charcoal | action needed — hairline, halo, the one filled button; never a tinted fill |
+| `--attention` / `-text` / `-ink` | ink / ink / paper | near-white / near-white / charcoal | action needed — hairline, the one filled button; never a tinted fill, never a halo |
 | `--warn` / `-text` | amber / dark amber | amber / light amber | a fact that is off (meter high, weak password, changes requested, trial ending) |
 | `--ok` | green | green | done, `$` prompt |
 | `--destructive` | red | red | failed, destroy |
@@ -1072,6 +1073,35 @@ Decision: delete both. The sheet is one flat tone and hierarchy comes from the c
 sheet, the type scale, the bordered test card). The top and bottom edge fades on the thread stay,
 since they mask the scroll edges rather than decorate them. Evidence: `.shots/r7/noglow-file-dark-1440.png`
 against `.shots/r7/base-file-dark-file-dark-1440.png`.
+
+## Round: no glows in the column (2026-10-23)
+
+After the page-level blooms went (the round above), the user still saw corner light in the thread's
+dynamic parts. Found and removed, each replaced by its static cue:
+
+| Was | Now |
+|---|---|
+| Composer focus: a 3px spread shadow in `--ring` (`.composer-glow`) | A flat 2px outline in `--ring` at 40% (`.composer-focus`), `outline-offset: 0`, no spread |
+| Question and scheduled cards: a 4px attention ring plus a 32px offset bloom (`.attention-glow`), near-white on a dark page, and a one-shot swelling ring on landing (`.attention-pulse`) | The `border-attention/50` hairline alone; the card's rise-in marks its arrival |
+| Dictation: live border at 55% plus a 3px ring and a 24px blurred bloom (`.mic-glow`) | Solid `--live` border plus a 1.5px inset outline (`.mic-live`), no shadow |
+| Three lit spheres (run pill `.orb`, byline `.agent-mark`, reasoning trail `.think-orb`): radial gradient, conic sheen, inset rim, live drop shadow, pulsing bloom | One rule, a flat disc in `--live` at 12, 14 and 16px, `breathe` only while live |
+| Timeline and step dots: an expanding live shadow ring (`viz-pulse`) | `breathe` |
+| MCP panel while live (`ring-live/40`), the Starting pill (`ring-live/20 ring-inset`), a picked option (`ring-live/25 ring-2`) | `border-live/40`, `border-live/20`, `border-live/60` |
+
+Kept: the composer's neutral e2 depth and 1px inset highlight, the you-bubble's inset highlight,
+keyboard `focus-visible` rings, neutral elevation shadows, the `--background` edge fades. All are
+achromatic, inset or keyboard-only.
+
+Proof: `.shots/r8-glow.mjs` (64 checks). With the composer focused it scans every element and
+pseudo-element under `[data-thread]` in the done, running and question scenarios, light and dark,
+and fails on any painted non-inset box-shadow with chroma above 0.02 or lighter than the page, any
+`radial-gradient` background and any `blur()` filter. It self-tests by injecting the old composer
+halo, a lit sphere and a blur and requiring the detector to catch all three. The edits are a
+rerunnable codemod, `.shots/r8-glow-edits.mjs`. Shots: `.shots/r8/before-*` and `after-*`.
+
+Left alone: the Hub hero composer's focus halo (home, not the thread), the plan board's live
+sweep and completion wash (linear, no shadow), the dictation pill's sheen, the secret field's
+one-shot ring flash (outside the thread).
 
 ## Round: VS Code chevrons (2026-10-23)
 

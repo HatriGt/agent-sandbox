@@ -52,7 +52,7 @@ export function BootingThread({
           </div>
         </div>
         <div className="text-muted-foreground mt-1 flex min-h-6 min-w-0 flex-nowrap items-center gap-x-2 text-meta">
-          <span className="bg-live/10 text-live ring-live/20 inline-flex h-6 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-micro font-semibold ring-1 ring-inset">
+          <span className="bg-live/10 text-live border-live/20 inline-flex h-6 shrink-0 items-center gap-1.5 rounded-full border px-2.5 text-micro font-semibold">
             <span className="bg-live breathe size-2 rounded-full" aria-hidden />
             Starting
           </span>

@@ -348,10 +348,10 @@ export function SendBar({
           }}
           isLoading={sending}
           className={cn(
-            "bg-card composer-glow composer-depth border-line-strong rounded-2xl p-2",
+            "bg-card composer-focus composer-depth border-line-strong rounded-2xl p-2",
             sleeping && "border-sleep/50",
             dragOver && "border-live ring-live/40 ring-2",
-            (voice.state === "listening" || voice.state === "arming") && "mic-glow"
+            (voice.state === "listening" || voice.state === "arming") && "mic-live"
           )}
           onPaste={onPaste}
           onDragOver={(e) => {
