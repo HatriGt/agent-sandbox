@@ -92,7 +92,7 @@ try {
     }
 
     // 2. Tooltips: the first waits, the next follows instantly with no entry animation.
-    const triggers = [await page.$("aside button[aria-label^='Switch to']"), await page.$("aside button[aria-label='Sign out']")].filter(Boolean);
+    const triggers = [await page.$("aside button[aria-label^='Theme:']"), await page.$("aside button[aria-label='Sign out']")].filter(Boolean);
     if (triggers.length >= 2) {
       const t0 = Date.now();
       await triggers[0].hover();

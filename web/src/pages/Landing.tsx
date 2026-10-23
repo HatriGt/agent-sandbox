@@ -4,6 +4,7 @@ import { ArrowRight, Check, Copy, Globe, GitPullRequest, KeyRound, Moon, ScrollT
 import { IconSwap } from "@/components/ui/icon-swap";
 import { motion, useInView } from "motion/react";
 import { useReducedMotion } from "@/lib/motion-pref";
+import { applyTheme, lastTheme, setTheme, useTheme } from "@/lib/theme";
 import { Logo } from "@/components/ui/logo";
 import { AGENT_BRANDS, MODEL_BRANDS, type Brand } from "@/components/landing/BrandMarks";
 import { ScenarioDemo } from "@/components/landing/ScenarioDemo";
@@ -18,7 +19,7 @@ import { useSession } from "@/lib/auth";
  *   3. what's built today — an editorial numbered list, no cards; the planned item says so
  *   4. security — a two-column spec sheet on hairlines
  *   5. one-command self-host install (primary), hosted signup (secondary)
- * Follows the console's theme (stored `asb-dark`, else the OS preference); both themes are first-class.
+ * Follows the console's theme (lib/theme.ts: stored `asb-theme`, else the OS preference); every theme is first-class.
  */
 export default function Landing() {
   const { ready, config, me, token } = useSession();
@@ -33,7 +34,7 @@ export default function Landing() {
   const [dark, setDark] = useLandingTheme();
 
   return (
-    <div className={cn("bg-background text-foreground min-h-full overflow-y-auto", dark && "dark")}>
+    <div className="bg-background text-foreground min-h-full overflow-y-auto">
       <a href="#main" className="focus:bg-primary focus:text-primary-foreground sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:rounded-md focus:px-3 focus:py-2">
         Skip to content
       </a>
@@ -359,27 +360,12 @@ function BrandGroup({ label, brands }: { label: string; brands: Brand[] }) {
 
 /* ───────────────────────────── building blocks ───────────────────────────── */
 
-/** Stored console preference (`asb-dark`) if there is one, else the OS preference. The toggle writes it back. */
+/** The console's theme (lib/theme.ts): the toggle flips between Light and the user's last dark theme. */
 function useLandingTheme(): [boolean, (v: boolean) => void] {
-  const [dark, setDarkState] = React.useState(() => {
-    try {
-      const v = localStorage.getItem("asb-dark");
-      if (v !== null) return v === "true" || v === "1";
-    } catch {
-      /* storage blocked */
-    }
-    return typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches;
-  });
-  const setDark = React.useCallback((v: boolean) => {
-    setDarkState(v);
-    try {
-      localStorage.setItem("asb-dark", v ? "true" : "false");
-    } catch {
-      /* storage blocked */
-    }
-    document.documentElement.classList.toggle("dark", v);
-  }, []);
-  return [dark, setDark];
+  const theme = useTheme();
+  React.useEffect(() => applyTheme(theme.id), [theme.id]);
+  const setDark = React.useCallback((v: boolean) => setTheme(lastTheme(v ? "dark" : "light")), []);
+  return [theme.scheme === "dark", setDark];
 }
 
 /**

@@ -5,7 +5,7 @@ import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirro
 import { closeSearchPanel, highlightSelectionMatches, openSearchPanel, search, searchPanelOpen, selectNextOccurrence, selectSelectionMatches } from "@codemirror/search";
 import { AnimatePresence } from "motion/react";
 import { EditorFind } from "@/components/EditorFind";
-import { bracketMatching, foldGutter, foldKeymap, indentOnInput, syntaxHighlighting, HighlightStyle, StreamLanguage, LanguageDescription, LanguageSupport, Language } from "@codemirror/language";
+import { bracketMatching, codeFolding, foldGutter, foldKeymap, indentOnInput, syntaxHighlighting, HighlightStyle, StreamLanguage, LanguageDescription, LanguageSupport, Language } from "@codemirror/language";
 import { classHighlighter, highlightCode, tags as t } from "@lezer/highlight";
 import { javascript } from "@codemirror/lang-javascript";
 import { json } from "@codemirror/lang-json";
@@ -119,7 +119,15 @@ const chrome = EditorView.theme({
   ".cm-lineNumbers .cm-gutterElement": { padding: "0 10px 0 6px", minWidth: "3.2ch" },
   ".cm-activeLineGutter": { backgroundColor: "transparent", color: "var(--foreground)" },
   ".cm-activeLine": { backgroundColor: "color-mix(in oklch, var(--foreground) 3.5%, transparent)" },
-  ".cm-foldGutter .cm-gutterElement": { color: "var(--muted-foreground)", opacity: "0.6" },
+  // VS Code's fold gutter: a 16px chevron column, open chevrons shown only while the gutter is hovered.
+  ".cm-foldGutter .cm-gutterElement": { width: "16px", padding: "0", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "var(--muted-foreground)" },
+  ".cm-foldGutter .cm-gutterElement:hover": { color: "var(--foreground)" },
+  ".cm-foldGutter span": { padding: "0", display: "flex", transition: "opacity 100ms" },
+  ".cm-foldGutter span[data-fold=open]": { opacity: "0" },
+  ".cm-gutters:hover .cm-foldGutter span[data-fold=open]": { opacity: "1" },
+  ":root[data-motion=reduced] & .cm-foldGutter span": { transition: "none" },
+  ".cm-foldPlaceholder": { backgroundColor: "color-mix(in oklch, var(--muted-foreground) 14%, transparent)", border: "none", color: "var(--muted-foreground)", borderRadius: "3px", margin: "0 2px", padding: "0 5px", fontSize: "0.85em", cursor: "pointer" },
+  ".cm-foldPlaceholder:hover": { backgroundColor: "color-mix(in oklch, var(--muted-foreground) 24%, transparent)", color: "var(--foreground)" },
   ".cm-selectionBackground, &.cm-focused .cm-selectionBackground, ::selection": { backgroundColor: "color-mix(in oklch, var(--live) 22%, transparent) !important" },
   ".cm-cursor": { borderLeftColor: "var(--foreground)", borderLeftWidth: "1.5px" },
   // A revealed line (a code ref clicked in chat) flashes, then settles to nothing.
@@ -159,12 +167,23 @@ const proseChrome = EditorView.theme({
   ".cm-activeLine": { backgroundColor: "transparent" },
 });
 
+const CHEVRON = { open: "m6 9 6 6 6-6", closed: "m9 18 6-6-6-6" };
+/** The fold marker: lucide's chevron as a 16px inline SVG, down for an open region, right for a folded one. */
+const foldMarker = (open: boolean) => {
+  const el = document.createElement("span");
+  el.dataset.fold = open ? "open" : "closed";
+  el.title = open ? "Fold line" : "Unfold line";
+  el.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${open ? CHEVRON.open : CHEVRON.closed}"/></svg>`;
+  return el;
+};
+
 const baseExtensions = (readOnly: boolean): Extension => [
   lineNumbers(),
   highlightActiveLineGutter(),
   highlightSpecialChars(),
   history(),
-  foldGutter({ openText: "▾", closedText: "▸" }),
+  foldGutter({ markerDOM: foldMarker }),
+  codeFolding({ placeholderText: "⋯" }),
   drawSelection(),
   dropCursor(),
   EditorState.allowMultipleSelections.of(true),
@@ -185,7 +204,7 @@ const baseExtensions = (readOnly: boolean): Extension => [
 /** Lines flashed by `reveal` (a tint that fades out) or held tinted while go-to-symbol previews (`steady`). */
 const setRevealLines = StateEffect.define<{ from: number; to: number; steady?: boolean } | null>();
 const revealLine = Decoration.line({ class: "cm-reveal-line" });
-const previewLine = Decoration.line({ class: "cm-preview-line" });
+const previewLine = Decoration.line({ class: "cm-preview-line", attributes: { "data-range-highlight": "" } });
 const revealField = StateField.define<DecorationSet>({
   create: () => Decoration.none,
   update(deco, tr) {
@@ -224,10 +243,24 @@ export type CodeEditorHandle = {
   focus(): void;
   /** The document's outline, read off the syntax tree. */
   symbols(): CodeSymbol[];
-  /** Scroll a symbol into view. `select` also selects its name and focuses the editor; otherwise its line is tinted. */
+  /** The main selection's head, so go-to-symbol can open on the symbol the caret sits in. */
+  caret(): number;
+  /**
+   * Bring a symbol on screen, centred only when it is off screen, as VS Code reveals. `select` puts
+   * the caret at the start of the name with the name selected and focuses the editor; otherwise
+   * every line of the declaration is banded and the caret stays put.
+   */
   reveal(sym: CodeSymbol, opts: { select: boolean }): void;
   /** Capture scroll and selection; the returned function puts them back and clears the preview tint. */
   snapshot(): () => void;
+};
+
+/** Whether `pos` is inside the scroller's visible band; outside the rendered viewport counts as off screen. */
+const onScreen = (v: EditorView, pos: number): boolean => {
+  const c = v.coordsAtPos(pos);
+  if (!c) return false;
+  const box = v.scrollDOM.getBoundingClientRect();
+  return c.top >= box.top && c.bottom <= box.bottom;
 };
 
 const statusOf = (state: EditorState): EditorStatus => {
@@ -320,26 +353,29 @@ export function CodeEditor({
       closeFind,
       focus: () => view.current?.focus(),
       symbols: () => (view.current ? symbolsIn(view.current.state) : []),
+      caret: () => view.current?.state.selection.main.head ?? 0,
       reveal: (sym, { select }) => {
         const v = view.current;
         if (!v || sym.to > v.state.doc.length) return;
+        const bring = EditorView.scrollIntoView(sym.from, { y: onScreen(v, sym.from) ? "nearest" : "center" });
         if (select) {
-          v.dispatch({ selection: EditorSelection.single(sym.from, sym.to), effects: [setRevealLines.of(null), EditorView.scrollIntoView(sym.from, { y: "center" })] });
+          v.dispatch({ selection: EditorSelection.single(sym.to, sym.from), effects: [setRevealLines.of(null), bring] });
           v.focus();
         } else {
-          v.dispatch({ effects: [setRevealLines.of({ from: sym.line, to: sym.line, steady: true }), EditorView.scrollIntoView(sym.from, { y: "center" })] });
+          v.dispatch({ effects: [setRevealLines.of({ from: sym.line, to: Math.min(sym.endLine, v.state.doc.lines), steady: true }), bring] });
         }
       },
       snapshot: () => {
         const v = view.current;
         if (!v) return () => {};
         const selection = v.state.selection;
-        const top = v.scrollDOM.scrollTop;
+        // CM's own scroll effect, not a scrollTop write: it lands in CM's measure cycle, after a
+        // focus return, so CM's focus handler never "repairs" a fresh 0 back to the stale position.
+        const scroll = v.scrollSnapshot();
         return () => {
           const w = view.current;
           if (!w) return;
-          w.dispatch({ selection: selection.ranges.every((r) => r.to <= w.state.doc.length) ? selection : undefined, effects: setRevealLines.of(null) });
-          w.scrollDOM.scrollTop = top;
+          w.dispatch({ selection: selection.ranges.every((r) => r.to <= w.state.doc.length) ? selection : undefined, effects: [setRevealLines.of(null), scroll] });
         };
       },
     }),

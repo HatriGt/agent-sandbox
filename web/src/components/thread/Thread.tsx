@@ -917,10 +917,8 @@ export function Thread({
       <div className="@container relative min-h-0 min-w-0 flex-1">
         <ThreadMinimap turns={turns} scrollerRef={stick.scrollRef} />
         <SchedulePill box={box.name} runState={String(runState ?? "")} />
-        {/* Ambient depth: a faint brand glow at the head of the conversation, and soft fades at the
-            top and bottom edges so messages dissolve under the header and into the composer rather
-            than being sliced by them. Pure decoration; pointer-events off. */}
-        <div aria-hidden className="thread-glow pointer-events-none absolute inset-0" />
+        {/* Soft fades at the top and bottom edges so messages dissolve under the header and into the
+            composer rather than being sliced by them. Pure decoration; pointer-events off. */}
         <div aria-hidden className="from-background pointer-events-none absolute inset-x-0 top-0 z-10 h-6 bg-gradient-to-b to-transparent" />
         <div aria-hidden className="to-background pointer-events-none absolute inset-x-0 bottom-0 z-10 h-8 bg-gradient-to-b from-transparent" />
         <ChatContainerRoot className="relative h-full [&>div]:overflow-x-hidden" instance={stick} aria-label="Conversation" aria-busy={runState === "running"}>

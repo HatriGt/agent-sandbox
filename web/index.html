@@ -12,13 +12,22 @@
     <script>
       // Theme before first paint: the console persists it in localStorage; applying it here avoids a
       // light flash for dark users while the bundle loads.
-      try { if (localStorage.getItem("asb-dark") === "true" || localStorage.getItem("asb-dark") === "1") document.documentElement.classList.add("dark"); } catch (e) {}
+      // Mirrors lib/theme.ts (readTheme): stored `asb-theme`, else the legacy `asb-dark`, else the OS.
+      try {
+        var t = localStorage.getItem("asb-theme"), d = localStorage.getItem("asb-dark");
+        if (!/^(light|linen|black|graphite|midnight)$/.test(t)) t = d !== null ? (d === "true" || d === "1" ? "black" : "light") : matchMedia("(prefers-color-scheme: dark)").matches ? "black" : "light";
+        document.documentElement.setAttribute("data-theme", t);
+        if (t === "black" || t === "graphite" || t === "midnight") document.documentElement.classList.add("dark");
+      } catch (e) {}
     </script>
     <style>
       /* The app shell, drawn in plain HTML/CSS so the first frame is the layout, not a blank page. */
       #root:empty::before, .asb-shell { display: none; }
       .asb-shell { display: flex; height: 100vh; background: oklch(0.992 0.001 286); color: oklch(0.21 0.006 285.9); font-family: ui-sans-serif, system-ui, sans-serif; }
       .dark .asb-shell { background: oklch(0.17 0.005 285); color: oklch(0.93 0 0); }
+      [data-theme="black"] .asb-shell { background: oklch(0.1 0 0); }
+      [data-theme="midnight"] .asb-shell { background: oklch(0.17 0.03 262); }
+      [data-theme="linen"] .asb-shell { background: oklch(0.975 0.009 80); color: oklch(0.25 0.02 60); }
       .asb-shell .side { width: 272px; border-right: 1px solid oklch(0 0 0 / 0.08); padding: 16px; box-sizing: border-box; }
       .dark .asb-shell .side { border-color: oklch(1 0 0 / 0.08); }
       .asb-shell .main { flex: 1; display: flex; flex-direction: column; }

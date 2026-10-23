@@ -174,8 +174,10 @@ pane.
 
 shadcn's semantic contract plus a functional layer. Every value is exposed via `@theme inline` so
 each usage is a real utility (`text-live`, `bg-attention/18`) — never an arbitrary `text-[var(--x)]`.
+The table shows the two base palettes, Light (`:root`) and Graphite (`.dark`). The other three
+themes override a subset of these in `:root[data-theme="…"]` blocks; see **Themes** below.
 
-| Token | Light | Dark | Role |
+| Token | Light | Dark (Graphite) | Role |
 |---|---|---|---|
 | `--background` | `oklch(.992 .001 286)` | `oklch(.17 .005 286)` | page |
 | `--card` | white | `oklch(.205 .005 286)` | sidebar, composer, panels |
@@ -198,6 +200,34 @@ Elevation is declared once per surface — border **or** `shadow-xs`, never both
 h2 h1 display`). Without it, tailwind-merge classifies those as *colours* and drops a real colour class
 that precedes them — the bug that made the primary button ink-on-ink. Keep the list in sync with
 `@theme`.
+
+## Themes (`src/lib/theme.ts`)
+
+Five themes, two light and three dark, chosen from the picker in the sidebar footer (the palette
+icon in the collapsed rail, and a row in Account → Appearance). The registry is one ordered table,
+`THEMES: { id, label, scheme, description, preview }[]`; the id lands on `<html data-theme>` and the
+scheme toggles the `dark` class, which every `.dark` selector (syntax tokens, `.raised`, code
+blocks, Mermaid) still keys off. Token overrides live in `index.css` as `:root[data-theme="…"]`
+blocks after `.dark`, so a dark theme inherits Graphite's functional hues and shadows unless it
+overrides them. `preview` repeats the rail, page and live tones for the picker swatches, and the
+fixture asserts the rendered page background equals it, so the two cannot drift.
+
+| Theme | Scheme | Intent | Page / rail / card |
+|---|---|---|---|
+| **Light** | light | White paper, zinc ink. The original light tokens. | `.992` / `.962` / white |
+| **Linen** | light | Warm paper, warm ink (hue 60–85, chroma ≤ .02). The accent stays brand indigo so state colours do not drift. | `.975 .009 80` / `.945 .012 80` / `.99 .005 85` |
+| **Black** | dark | Pitch black, the default dark. The page is `oklch(.1 0 0)` (#030303), so the rail cannot sit below it; it steps *up* to `.16` and the sheet reads as a dark well in a lighter frame. Cards `.15`, popovers `.19`, borders `white/.10`. The terminal tone steps up the same way (`.16`). | `.10` / `.16` / `.15` |
+| **Graphite** | dark | Charcoal, the previous dark, every value kept. | `.175` / `.125` / `.215` |
+| **Midnight** | dark | Navy-indigo on the `--live` hue (262, chroma .03). Cards lean six degrees violet, hairlines carry the hue (`oklch(.78 .1 262 / .16)`), shadows are navy rather than black. | `.17 .03 262` / `.125 .028 262` / `.215 .032 268` |
+
+Switching is instant: no transition on a theme change, which some people make many times a day.
+The palette keeps one "Switch to light/dark theme" command that flips scheme and lands on the theme
+the user last used in that scheme (`asb-theme-light` / `asb-theme-dark`), plus a "Theme: <name>"
+command per theme. The landing page's sun/moon toggle goes through the same module.
+
+Storage and migration: `asb-theme` holds the id. On first load without it, the legacy `asb-dark`
+maps `true` → Black and `false` → Light; absent, the OS preference picks Black or Light. The inline
+script in `index.html` mirrors this so the first paint is already the right theme.
 
 ## Type
 
@@ -1015,3 +1045,112 @@ After: 23 bordered elements (21 running), 10 four-sided surfaces (8 running), no
 above a step, one boxed level inside. File marks went from chroma 0.184 to 0.016 light and 0.012
 dark. Evidence: `.shots/r6-trace.mjs` (32 checks), shots in `.shots/r6/trace-*`.
 
+
+## Round: no page glows (2026-10-23)
+
+A radial brand bloom sat behind the conversation head (`.thread-glow`, an `absolute inset-0` layer
+on the thread root) and another behind the Hub hero (`.hub-stage`). Because the thread layer covered
+the whole root, it also bled under the workspace explorer when the pane was open, so the file tree
+had a soft indigo halo at its head. The user read both as noise.
+
+Decision: delete both. The sheet is one flat tone and hierarchy comes from the content (the framed
+sheet, the type scale, the bordered test card). The top and bottom edge fades on the thread stay,
+since they mask the scroll edges rather than decorate them. Evidence: `.shots/r7/noglow-file-dark-1440.png`
+against `.shots/r7/base-file-dark-file-dark-1440.png`.
+
+## Round: VS Code chevrons (2026-10-23)
+
+The editor's fold markers were `▾`/`▸` text glyphs at 60% opacity, always on, 9px wide in a
+20px cell. The explorer's twisties were 14px lucide chevrons at stroke 2 in muted ink. The folded
+placeholder was CodeMirror's default (`#eee` box, `#888` text, `…`), the only unthemed piece of the
+editor. The user said they looked small and nothing like VS Code.
+
+Decision: VS Code's treatment in both places. The fold gutter is a 16px column; each marker is an
+inline SVG of lucide's chevron (down for an open region, right for a folded one) at 1.5 stroke in
+`currentColor`. Open markers are hidden until the pointer is over the gutter (`.cm-gutters:hover`,
+100ms opacity, none under reduced motion); a folded region keeps its chevron-right visible so it stays
+discoverable; the hovered marker brightens to `--foreground`. The placeholder is `⋯` in
+`--muted-foreground` on a 14% muted tint, 3px radius, no border, brighter on hover. The explorer
+twistie is one `Twistie` component (`workspace-chrome.tsx`): 16px, stroke 1.5, `text-foreground/80`,
+`rotate-90` when open, 100ms ease-out. It overhangs its 14px slot by 1px each side so the guide lines
+and name x positions did not move. The file icon was 15px beside a 16px folder icon, which put file
+names 1px left of folder names at the same depth; it is 16px now and names align (1243/1243,
+1255/1255 at 1440). Rows stay 22px. Evidence: `.shots/r7-chevrons.mjs` (30 checks, light and dark),
+shots in `.shots/r7/chev-*`.
+
+Left out: diff hunk expand controls (there are none); the explorer header's collapse-all icon stays
+`size-3.5` with its neighbours; the Search pane's result chevrons (a different surface).
+
+## Round: go to symbol, VS Code parity (2026-10-23)
+
+The first cut of ⌘⇧O (above) opened on the first row, centred the editor on it, showed neutral
+14px icons with the kind word on the right, had no match highlighting, read `@:` as a query for
+":" and showed `⌘⇧O` glyphs on Windows. Measured against VS Code's Go to Symbol in Editor, eleven
+behaviours differed or were unproven.
+
+Decision: close every gap and prove each one. The palette opens on the symbol the caret is in
+(`symbolAt` over the declaration ranges `CodeSymbol.range`; innermost wins) without scrolling the
+editor. Rows are 26px with a 16px kind icon in VS Code's tones (purple method/function, orange class
+and enum, blue variable/field/interface/property, teal type, neutral heading/key/selector), a 6px gap,
+the name with the typed characters bolded (`matchSymbols` returns `positions`), and the containing
+class or function as dim detail (`containerName`; headings have none). `@:` groups by kind in VS
+Code's order (classes, interfaces, functions, methods, variables, properties, enums, types, then
+headings, keys, selectors) with counted separators riding the first row of each group, and `@:q`
+filters within the groups (`CATEGORY`, `groupSymbols`). Arrowing bands every line of the declaration
+(`line..endLine`) and centres only when the symbol is off screen, as VS Code reveals; Escape, a click
+outside, or backspacing past `@` restores scroll and selection exactly. Enter selects the name with
+the caret at its start, centres, and focuses the editor. Empty states read "No editor symbols" and
+"Open a file first." The dialog is 600px wide at 1440 with a 1px border. `SHORTCUTS` rows are built
+by a `chord()` helper that derives `keys` and `label` per platform, so the shortcuts dialog and the
+empty editor read `Ctrl Shift O` on Windows and `⌘ ⇧ O` on a Mac.
+
+One root cause found on the way: after "centre only when off screen", Escape left the editor
+scrolled. CodeMirror's focus observer repairs a `scrollTop` of 0 against its stale `lastScrollTop`
+when focus returns, overwriting the restore. The snapshot now restores through
+`view.scrollSnapshot()`, which lands inside CodeMirror's measure cycle after the focus return.
+Evidence: `.shots/r7-symbols.mjs` (36 checks per theme, 72 total; 42 passed before), `symbols.test.ts`
+10 tests, shots in `.shots/r7/sym-*`.
+
+Left out: the list keeps its depth indent (VS Code's is flat; r5 asserts the indent); the band tone
+stays `--live` at 12% rather than VS Code's yellow range highlight; pressing the chord while the
+palette already holds `@` plus a query does not clear the query.
+
+## Round: five themes (2026-10-23)
+
+One light and one dark palette, flipped by a sun/moon button writing `asb-dark`. The dark was
+charcoal (`oklch(.175)`, #101010), and there was no way to have a true black page or anything with
+a hue.
+
+Decision: a theme registry (`lib/theme.ts`) and a picker. Light and Graphite are the existing
+palettes untouched. Black is the new default dark, `oklch(.1 0 0)` on the page; since nothing can sit
+below that, the rail and the terminal tone step up to `.16` and the sheet reads as a dark well in a
+lighter frame, the inverse of the light theme's lifted paper. Midnight puts the `--live` hue into the
+neutrals (chroma .03 at 262, cards six degrees violet, tinted hairlines, navy shadows). Linen warms
+the neutrals (hue 60–85) and keeps the indigo accent. Every override is a `:root[data-theme]` block
+over `.dark`, so the syntax tokens, `.raised`, code blocks and Mermaid keep keying off the class.
+The picker is a menu of `menuitemradio` rows with a rail/page/live swatch each; switching has no
+transition. The palette keeps the scheme toggle, which now returns to the last theme used in each
+scheme, and gains a command per theme. Two light values outside the new blocks moved, both because
+they sat under the 4.5:1 the tokens promise: `--faint` `.58` → `.555` (4.21 → 4.65 on the Light
+page) and `.tok-comment` `#6e7781` → `#59636e` (4.43 on Light, 4.22 on Linen; both now above 5).
+
+Measured on the Hub at 1440 (`.shots/r7-themes.mjs`, 129 checks; contrast is WCAG, composited):
+
+| Theme | Page | Rail | Body | Muted | Faint | Live | Composer hairline | Trace vs page |
+|---|---|---|---|---|---|---|---|---|
+| Light | `.992 .001 286` | `.962 .003 286` | 17.28 | 5.88 | 4.65 | 5.59 | 1.53 | 17.61 |
+| Linen | `.975 .009 80` | `.945 .012 80` | 14.96 | 5.86 | 4.72 | 5.33 | 1.52 | 16.14 |
+| Black | `.1 0 0` | `.16 0 0` | 17.78 | 7.98 | 5.90 | 8.72 | 1.81 | 1.06 |
+| Graphite | `.175 .005 286` | `.125 .005 286` | 16.39 | 7.06 | 5.19 | 8.03 | 2.12 | 1.07 |
+| Midnight | `.17 .03 262` | `.125 .028 262` | 16.60 | 8.01 | 5.94 | 8.60 | 1.90 | 1.06 |
+
+The fixture also asserts, per theme on the Hub, History and a thread: `data-theme` and the `dark`
+class match the registry, the page background equals the registry preview, the rail differs from
+the sheet, no page errors; and that the picker lists five radios with the active one checked, a
+keyboard choice switches and stores, the landing toggle returns to the last dark theme, and the
+legacy key migrates (`asb-dark=1` → Black, `0` → Light). Shots in `.shots/r7/theme-*`.
+
+Left out: per-theme syntax colours (one set per scheme; the fixture measures every `.tok-*` against
+the page and the card, and the dark set's lowest is 5.70 on Graphite and Midnight, 6.40 on Black); a
+theme transition (a hundred switches a day is not a moment for motion); a settings page
+(Appearance gets a row that opens the same picker).

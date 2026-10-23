@@ -23,19 +23,21 @@ function DropdownMenuContent({ className, ...props }: React.ComponentProps<typeo
   );
 }
 
+const itemClass = cn(
+  "flex h-8 cursor-pointer items-center gap-2.5 rounded-md px-2 text-meta outline-none select-none transition-[background-color,transform] duration-100 ease-[cubic-bezier(0.22,1,0.36,1)]",
+  "data-[highlighted]:bg-accent active:scale-[0.985] data-[disabled]:pointer-events-none data-[disabled]:opacity-40",
+  "[&_svg]:text-muted-foreground [&_svg]:size-4 [&_svg]:shrink-0"
+);
+
 function DropdownMenuItem({ className, destructive, ...props }: React.ComponentProps<typeof DM.Item> & { destructive?: boolean }) {
-  return (
-    <DM.Item
-      className={cn(
-        "flex h-8 cursor-pointer items-center gap-2.5 rounded-md px-2 text-meta outline-none select-none transition-[background-color,transform] duration-100 ease-[cubic-bezier(0.22,1,0.36,1)]",
-        "data-[highlighted]:bg-accent active:scale-[0.985] data-[disabled]:pointer-events-none data-[disabled]:opacity-40",
-        "[&_svg]:text-muted-foreground [&_svg]:size-4 [&_svg]:shrink-0",
-        destructive && "text-destructive data-[highlighted]:bg-destructive/10 [&_svg]:text-destructive",
-        className
-      )}
-      {...props}
-    />
-  );
+  return <DM.Item className={cn(itemClass, destructive && "text-destructive data-[highlighted]:bg-destructive/10 [&_svg]:text-destructive", className)} {...props} />;
+}
+
+const DropdownMenuRadioGroup = DM.RadioGroup;
+
+/** One of a set (`role=menuitemradio`): the same row as an item, `aria-checked` marks the chosen one. */
+function DropdownMenuRadioItem({ className, ...props }: React.ComponentProps<typeof DM.RadioItem>) {
+  return <DM.RadioItem className={cn(itemClass, className)} {...props} />;
 }
 
 function DropdownMenuSeparator({ className, ...props }: React.ComponentProps<typeof DM.Separator>) {
@@ -51,4 +53,4 @@ function MenuHint({ children }: { children: React.ReactNode }) {
   return <span className="text-faint ml-auto pl-4 text-micro">{children}</span>;
 }
 
-export { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuLabel, MenuHint };
+export { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuLabel, MenuHint };

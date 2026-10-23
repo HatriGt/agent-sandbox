@@ -167,7 +167,7 @@
   --trace: oklch(0.2 0.006 286);
   --trace-fg: oklch(0.93 0.003 286);
 
-  --faint: oklch(0.58 0.012 286);
+  --faint: oklch(0.555 0.012 286);
   --shade-1: oklch(0 0 0 / 0.1);
   --shade-2: oklch(0 0 0 / 0.14);
   --shade-3: oklch(0 0 0 / 0.2);
@@ -236,6 +236,108 @@
   --viz-7: #9085e9;
   --viz-8: #e66767;
   --viz-grid: #2c2c2a;
+}
+
+/* Themes (lib/theme.ts). `:root` is Light and `.dark` is Graphite; the three blocks below override
+   only what differs, so a dark theme inherits Graphite's functional hues and shadows unless it says
+   otherwise. `:root[data-theme]` outranks `.dark`, so order between them does not matter. */
+
+/* Black: a pitch-black page. The rail cannot be darker than that, so it steps UP (0.16) and the
+   sheet reads as a dark well in a lighter frame; the terminal panel steps up the same way. */
+:root[data-theme="black"] {
+  --background: oklch(0.1 0 0);
+  --foreground: oklch(0.95 0 0);
+  --card: oklch(0.15 0 0);
+  --card-foreground: oklch(0.95 0 0);
+  --sidebar: oklch(0.16 0 0);
+  --popover: oklch(0.19 0 0);
+  --popover-foreground: oklch(0.95 0 0);
+  --primary: oklch(0.95 0 0);
+  --primary-foreground: oklch(0.12 0 0);
+  --secondary: oklch(0.23 0 0);
+  --secondary-foreground: oklch(0.95 0 0);
+  --muted: oklch(0.21 0 0);
+  --muted-foreground: oklch(0.71 0 0);
+  --accent: oklch(0.25 0 0);
+  --accent-foreground: oklch(0.97 0 0);
+  --border: oklch(1 0 0 / 0.1);
+  --line-strong: oklch(1 0 0 / 0.22);
+  --input: oklch(1 0 0 / 0.14);
+  --attention: oklch(0.95 0 0);
+  --attention-text: oklch(0.95 0 0);
+  --attention-ink: oklch(0.12 0 0);
+  --trace: oklch(0.16 0 0);
+  --trace-fg: oklch(0.9 0 0);
+  --faint: oklch(0.63 0 0);
+  --viz-grid: #262626;
+}
+
+/* Midnight: navy-indigo on the --live hue (262). The card step leans a few degrees violet so a
+   panel reads as its own surface, and the hairlines carry the hue instead of being grey. */
+:root[data-theme="midnight"] {
+  --background: oklch(0.17 0.03 262);
+  --foreground: oklch(0.95 0.008 262);
+  --card: oklch(0.215 0.032 268);
+  --card-foreground: oklch(0.95 0.008 262);
+  --sidebar: oklch(0.125 0.028 262);
+  --popover: oklch(0.25 0.034 268);
+  --popover-foreground: oklch(0.95 0.008 262);
+  --primary: oklch(0.93 0.012 262);
+  --primary-foreground: oklch(0.19 0.03 262);
+  --secondary: oklch(0.28 0.038 266);
+  --secondary-foreground: oklch(0.95 0.008 262);
+  --muted: oklch(0.265 0.036 266);
+  --muted-foreground: oklch(0.73 0.03 262);
+  --accent: oklch(0.3 0.042 266);
+  --accent-foreground: oklch(0.97 0.008 262);
+  --border: oklch(0.78 0.1 262 / 0.16);
+  --line-strong: oklch(0.78 0.1 262 / 0.3);
+  --input: oklch(0.78 0.1 262 / 0.2);
+  --ring: oklch(0.74 0.16 262);
+  --live: oklch(0.76 0.15 262);
+  --attention: oklch(0.93 0.012 262);
+  --attention-text: oklch(0.95 0.008 262);
+  --attention-ink: oklch(0.19 0.03 262);
+  --trace: oklch(0.115 0.026 262);
+  --trace-fg: oklch(0.9 0.01 262);
+  --faint: oklch(0.65 0.03 262);
+  --shade-1: oklch(0.1 0.03 262 / 0.45);
+  --shade-2: oklch(0.1 0.03 262 / 0.55);
+  --shade-3: oklch(0.1 0.03 262 / 0.65);
+  --viz-grid: #262c47;
+}
+
+/* Linen: warm paper and warm ink. The accent stays the brand indigo so state colours do not drift
+   between themes; only the neutrals turn warm. */
+:root[data-theme="linen"] {
+  --background: oklch(0.975 0.009 80);
+  --foreground: oklch(0.25 0.02 60);
+  --card: oklch(0.99 0.005 85);
+  --card-foreground: oklch(0.25 0.02 60);
+  --sidebar: oklch(0.945 0.012 80);
+  --popover: oklch(0.99 0.005 85);
+  --popover-foreground: oklch(0.25 0.02 60);
+  --primary: oklch(0.25 0.02 60);
+  --primary-foreground: oklch(0.985 0.006 85);
+  --secondary: oklch(0.94 0.012 80);
+  --secondary-foreground: oklch(0.25 0.02 60);
+  --muted: oklch(0.945 0.012 80);
+  --muted-foreground: oklch(0.49 0.03 65);
+  --accent: oklch(0.925 0.014 80);
+  --accent-foreground: oklch(0.25 0.02 60);
+  --border: oklch(0.3 0.05 60 / 0.12);
+  --line-strong: oklch(0.3 0.05 60 / 0.22);
+  --input: oklch(0.3 0.05 60 / 0.15);
+  --attention: oklch(0.25 0.02 60);
+  --attention-text: oklch(0.25 0.02 60);
+  --attention-ink: oklch(0.985 0.006 85);
+  --trace: oklch(0.22 0.012 60);
+  --trace-fg: oklch(0.93 0.008 80);
+  --faint: oklch(0.54 0.028 65);
+  --shade-1: oklch(0.3 0.05 60 / 0.1);
+  --shade-2: oklch(0.3 0.05 60 / 0.14);
+  --shade-3: oklch(0.3 0.05 60 / 0.2);
+  --viz-grid: #e4ddd0;
 }
 
 @utility scrollbar-thin {
@@ -1085,7 +1187,7 @@
 .tok-variableName.tok-definition, .tok-function { color: #8250df; }
 .tok-typeName, .tok-className, .tok-namespace { color: #953800; }
 .tok-propertyName, .tok-attributeName, .tok-labelName { color: #0550ae; }
-.tok-comment { color: #6e7781; font-style: italic; }
+.tok-comment { color: #59636e; font-style: italic; }
 .tok-meta, .tok-punctuation, .tok-operator { color: color-mix(in oklch, var(--foreground) 72%, transparent); }
 .tok-heading { font-weight: 600; color: #0550ae; }
 .tok-link { text-decoration: underline; }
@@ -1168,22 +1270,6 @@
 .scroll-fade-y {
   mask-image: linear-gradient(to bottom, black calc(100% - 14px), transparent);
   -webkit-mask-image: linear-gradient(to bottom, black calc(100% - 14px), transparent);
-}
-
-/* The hub composer's stage: a faint brand bloom behind the hero so the page has a centre of gravity. */
-.hub-stage {
-  background: radial-gradient(48rem 20rem at 50% 12rem, color-mix(in oklch, var(--live) 4.5%, transparent), transparent 70%);
-}
-.dark .hub-stage {
-  background: radial-gradient(48rem 20rem at 50% 12rem, color-mix(in oklch, var(--live) 7%, transparent), transparent 70%);
-}
-
-/* A faint brand glow at the head of the conversation. */
-.thread-glow {
-  background: radial-gradient(60% 24rem at 50% 0%, color-mix(in oklch, var(--live) 5%, transparent), transparent 70%);
-}
-.dark .thread-glow {
-  background: radial-gradient(60% 24rem at 50% 0%, color-mix(in oklch, var(--live) 8%, transparent), transparent 70%);
 }
 
 /* Output visualizers, motion when data changes (components/viz/motion.tsx). Rows that arrive

@@ -2,6 +2,7 @@ import { StrictMode, Suspense, lazy, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { MotionConfig } from "motion/react";
 import { initMotionPref, useReducedMotion } from "./lib/motion-pref";
+import { initTheme } from "./lib/theme";
 import { createBrowserRouter, RouterProvider } from "react-router";
 
 // Type faces, self-hosted (variable where available) via fontsource.
@@ -16,6 +17,9 @@ import { ErrorBoundary, RouteError } from "./components/ErrorBoundary";
 
 // Resolve the motion setting onto <html data-motion> before first paint so CSS never flashes motion.
 initMotionPref();
+// The theme id lands on <html data-theme> (and the dark class) the same way; index.html already did
+// this before paint, so this only reconciles a stale pre-paint guess.
+initTheme();
 
 /** motion/react follows the in-app setting: transforms/layout collapse when reduced, full otherwise. */
 function AppMotion({ children }: { children: ReactNode }) {

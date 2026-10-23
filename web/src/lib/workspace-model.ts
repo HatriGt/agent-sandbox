@@ -268,22 +268,29 @@ export type PaneCommands = {
   focusGroup(g: 0 | 1): void;
 };
 export type ShortcutId = "quickOpen" | "goToLine" | "goToSymbol" | "find" | "searchInFiles" | "save" | "close" | "sidebar" | "split" | "wrap" | "group1" | "group2";
-export type Shortcut = { id: ShortcutId; key: string; mod?: boolean; shift?: boolean; alt?: boolean; label: string; what: string; run: (c: PaneCommands) => void };
+/** `keys` is one cap per key for the platform (`["⌘", "⇧", "O"]` or `["Ctrl", "Shift", "O"]`); `label` joins them. */
+export type Shortcut = { id: ShortcutId; key: string; mod?: boolean; shift?: boolean; alt?: boolean; keys: string[]; label: string; what: string; run: (c: PaneCommands) => void };
 
-/** The pane's chords, in the order the shortcuts dialog lists them. Each label is one glyph per key. */
+const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+const chord = (s: Omit<Shortcut, "keys" | "label">): Shortcut => {
+  const keys = [...(s.mod ? [IS_MAC ? "⌘" : "Ctrl"] : []), ...(s.shift ? [IS_MAC ? "⇧" : "Shift"] : []), ...(s.alt ? [IS_MAC ? "⌥" : "Alt"] : []), s.key.toUpperCase()];
+  return { ...s, keys, label: keys.join(IS_MAC ? "" : "+") };
+};
+
+/** The pane's chords, in the order the shortcuts dialog lists them. */
 export const SHORTCUTS: Shortcut[] = [
-  { id: "quickOpen", key: "p", mod: true, label: "⌘P", what: "Go to file", run: (c) => c.quickOpen() },
-  { id: "goToLine", key: "g", mod: true, label: "⌘G", what: "Go to line", run: (c) => c.quickOpen(":") },
-  { id: "goToSymbol", key: "o", mod: true, shift: true, label: "⌘⇧O", what: "Go to symbol", run: (c) => c.quickOpen("@") },
-  { id: "find", key: "f", mod: true, label: "⌘F", what: "Find in file", run: (c) => c.find() },
-  { id: "searchInFiles", key: "f", mod: true, shift: true, label: "⌘⇧F", what: "Search in files", run: (c) => c.searchInFiles() },
-  { id: "save", key: "s", mod: true, label: "⌘S", what: "Save file", run: (c) => c.save() },
-  { id: "close", key: "w", mod: true, label: "⌘W", what: "Close tab", run: (c) => c.closeActive() },
-  { id: "sidebar", key: "b", mod: true, label: "⌘B", what: "Toggle the files panel", run: (c) => c.toggleSidebar() },
-  { id: "split", key: "\\", mod: true, label: "⌘\\", what: "Split the editor", run: (c) => c.split() },
-  { id: "wrap", key: "z", alt: true, label: "⌥Z", what: "Toggle word wrap", run: (c) => c.toggleWrap() },
-  { id: "group1", key: "1", mod: true, label: "⌘1", what: "Focus the first group", run: (c) => c.focusGroup(0) },
-  { id: "group2", key: "2", mod: true, label: "⌘2", what: "Focus the second group", run: (c) => c.focusGroup(1) },
+  chord({ id: "quickOpen", key: "p", mod: true, what: "Go to file", run: (c) => c.quickOpen() }),
+  chord({ id: "goToLine", key: "g", mod: true, what: "Go to line", run: (c) => c.quickOpen(":") }),
+  chord({ id: "goToSymbol", key: "o", mod: true, shift: true, what: "Go to symbol", run: (c) => c.quickOpen("@") }),
+  chord({ id: "find", key: "f", mod: true, what: "Find in file", run: (c) => c.find() }),
+  chord({ id: "searchInFiles", key: "f", mod: true, shift: true, what: "Search in files", run: (c) => c.searchInFiles() }),
+  chord({ id: "save", key: "s", mod: true, what: "Save file", run: (c) => c.save() }),
+  chord({ id: "close", key: "w", mod: true, what: "Close tab", run: (c) => c.closeActive() }),
+  chord({ id: "sidebar", key: "b", mod: true, what: "Toggle the files panel", run: (c) => c.toggleSidebar() }),
+  chord({ id: "split", key: "\\", mod: true, what: "Split the editor", run: (c) => c.split() }),
+  chord({ id: "wrap", key: "z", alt: true, what: "Toggle word wrap", run: (c) => c.toggleWrap() }),
+  chord({ id: "group1", key: "1", mod: true, what: "Focus the first group", run: (c) => c.focusGroup(0) }),
+  chord({ id: "group2", key: "2", mod: true, what: "Focus the second group", run: (c) => c.focusGroup(1) }),
 ];
 
 /**

@@ -30,8 +30,8 @@ const GROUPS: { title: string; note?: string; rows: [string[], string][] }[] = [
   {
     title: "Workspace",
     note: "while the files pane is open",
-    // The pane's own table, so the dialog and the pane never disagree. ⌘ reads as Ctrl elsewhere.
-    rows: SHORTCUTS.map((s) => [[...s.label], s.what]),
+    // The pane's own table, so the dialog and the pane never disagree; its caps are already per platform.
+    rows: SHORTCUTS.map((s) => [s.keys, s.what]),
   },
   {
     title: "Anywhere",

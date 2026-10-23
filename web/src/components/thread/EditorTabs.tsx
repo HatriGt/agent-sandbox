@@ -151,7 +151,7 @@ export function EmptyEditor() {
             <React.Fragment key={id}>
               <dt className="text-right">{s.what}</dt>
               <dd>
-                <Kbd keys={[...s.label]} />
+                <Kbd keys={s.keys} />
               </dd>
             </React.Fragment>
           );

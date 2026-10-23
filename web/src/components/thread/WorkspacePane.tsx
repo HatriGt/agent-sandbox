@@ -11,12 +11,12 @@ import { AnimatedTabs } from "@/components/ui/animated-tabs";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import type { CodeEditorHandle, EditorStatus } from "@/components/CodeEditor";
-import { matchSymbols, type CodeSymbol, type SymbolKind } from "@/lib/symbols";
+import { groupSymbols, matchSymbols, symbolAt, type CodeSymbol, type SymbolKind, type SymbolMatch } from "@/lib/symbols";
 import { invalidateResolver } from "@/components/ui/code-ref";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { EmptyEditor, TabStrip } from "./EditorTabs";
 import { FileView } from "./FileView";
-import { EASE, MENU_CONTENT, MENU_ITEM, MENU_ITEM_DESTRUCTIVE, MENU_SEP, MenuHint, copyText, shortcutLabel, type Open } from "./workspace-chrome";
+import { EASE, MENU_CONTENT, MENU_ITEM, MENU_ITEM_DESTRUCTIVE, MENU_SEP, MenuHint, Twistie, copyText, shortcutLabel, type Open } from "./workspace-chrome";
 import { RecordsTable } from "./RecordsTable";
 import { ReviewView, type ReviewFocus } from "./review/ReviewView";
 import { cn } from "@/lib/utils";
@@ -1013,7 +1013,7 @@ function RowView({ row, repo, change, changeCount }: { row: Row & { kind: "dir" 
   if (row.kind === "dir") {
     return (
       <>
-        <ChevronRight className={cn("text-muted-foreground size-3.5 shrink-0 transition-transform duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none", row.expanded && "rotate-90")} aria-hidden />
+        <Twistie open={row.expanded} />
         <FolderIcon name={row.name} open={row.expanded} />
         <span className={cn("truncate", repo && "font-semibold")}>{row.name}</span>
         {repo && (
@@ -1029,7 +1029,7 @@ function RowView({ row, repo, change, changeCount }: { row: Row & { kind: "dir" 
   const st = change ? STATUS_LETTER[change.status] : null;
   return (
     <>
-      <FileIcon path={row.path} size={15} />
+      <FileIcon path={row.path} />
       <span className={cn("truncate", change?.status === "deleted" && "line-through", st?.tone)}>{row.name}</span>
       {st && <span className={cn("stamp ml-auto shrink-0 font-semibold", st.tone)}>{st.l}</span>}
     </>
@@ -1168,6 +1168,48 @@ function GoToFile({ paths, query: q, active, changeByPath, onOpen }: { paths: st
 }
 
 const SYMBOL_ICON: Record<SymbolKind, LucideIcon> = { function: SquareFunction, method: SquareFunction, class: BoxIcon, interface: TypeIcon, type: TypeIcon, enum: TypeIcon, variable: Variable, property: KeyIcon, key: KeyIcon, heading: Heading, selector: HashIcon };
+/** VS Code's symbol icon colours (light, dark): callables purple, classes and enums orange, values blue; prose stays neutral. */
+const SYMBOL_TONE: Record<SymbolKind, string> = {
+  function: "text-[#652d90] dark:text-[#b180d7]",
+  method: "text-[#652d90] dark:text-[#b180d7]",
+  class: "text-[#d67e00] dark:text-[#ee9d28]",
+  enum: "text-[#d67e00] dark:text-[#ee9d28]",
+  interface: "text-[#007acc] dark:text-[#75beff]",
+  variable: "text-[#007acc] dark:text-[#75beff]",
+  property: "text-[#007acc] dark:text-[#75beff]",
+  key: "text-[#007acc] dark:text-[#75beff]",
+  type: "text-[#267f99] dark:text-[#4ec9b0]",
+  heading: "text-muted-foreground",
+  selector: "text-muted-foreground",
+};
+
+/** A symbol name with its matched characters in bold, runs of neighbours sharing one span. */
+function Highlighted({ text, positions }: { text: string; positions: number[] }) {
+  if (positions.length === 0) return <>{text}</>;
+  const hot = new Set(positions);
+  const runs: { text: string; hot: boolean }[] = [];
+  for (let i = 0; i < text.length; i++) {
+    const last = runs[runs.length - 1];
+    if (last && last.hot === hot.has(i)) last.text += text[i];
+    else runs.push({ text: text[i], hot: hot.has(i) });
+  }
+  return (
+    <>
+      {runs.map((r, i) =>
+        r.hot ? (
+          <b key={i} data-match className="text-live font-semibold">
+            {r.text}
+          </b>
+        ) : (
+          r.text
+        )
+      )}
+    </>
+  );
+}
+
+/** One row of the "@" list: a match, and the category label when it opens an "@:" group. */
+type SymbolRow = { match: SymbolMatch; group?: string };
 
 function QuickOpen({ paths, recent, activePath, editor, initial, onPick, onClose }: { paths: string[] | null; recent: string[]; activePath: string | null; editor: () => CodeEditorHandle | null; initial: string; onPick: (path: string, opts: OpenOpts) => void; onClose: () => void }) {
   const [q, setQ] = React.useState(initial);
@@ -1178,8 +1220,14 @@ function QuickOpen({ paths, recent, activePath, editor, initial, onPick, onClose
   const head = q.trim();
   const mode: "recent" | "line" | "files" | "symbols" = head.startsWith("@") ? "symbols" : line || head.startsWith(":") ? "line" : head ? "files" : "recent";
   const items = React.useMemo(() => (mode === "recent" ? recent.filter((p) => !paths || paths.includes(p)) : mode === "files" && paths ? matchPaths(paths, q, 40) : []), [mode, recent, paths, q]);
-  // "@": the outline is read once per session and the editor's scroll and selection are put back
-  // on close, unless a symbol is picked. The editor getter lives in a ref so the effects key on mode.
+  // A chord while the palette is open swaps its prefix, as ⌘⇧O after ⌘P does in VS Code.
+  React.useEffect(() => {
+    setQ(initial);
+    setCursor(0);
+  }, [initial]);
+  // "@": the outline is read once per session, the row under the caret is selected first, and the
+  // editor's scroll and selection are put back the moment "@" mode ends (backspacing past it, or
+  // closing) unless a symbol is picked. The editor getter lives in a ref so the effects key on mode.
   const editorRef = React.useRef(editor);
   editorRef.current = editor;
   const [symbols, setSymbols] = React.useState<CodeSymbol[]>([]);
@@ -1187,22 +1235,31 @@ function QuickOpen({ paths, recent, activePath, editor, initial, onPick, onClose
   React.useEffect(() => {
     if (mode !== "symbols") return;
     const h = editorRef.current();
-    setSymbols(h?.symbols() ?? []);
+    const syms = h?.symbols() ?? [];
+    setSymbols(syms);
+    setCursor(Math.max(0, symbolAt(syms, h?.caret() ?? 0)));
     restore.current = h?.snapshot() ?? null;
     return () => {
       restore.current?.();
       restore.current = null;
     };
   }, [mode]);
-  const found = React.useMemo(() => (mode === "symbols" ? matchSymbols(symbols, head.slice(1)) : []), [mode, symbols, head]);
-  const count = mode === "symbols" ? found.length : items.length;
+  // "@:" is VS Code's grouped view; what follows either prefix is the filter.
+  const grouped = mode === "symbols" && head.startsWith("@:");
+  const query = head.slice(grouped ? 2 : 1);
+  const rows = React.useMemo<SymbolRow[]>(() => {
+    if (mode !== "symbols") return [];
+    const matches = matchSymbols(symbols, query);
+    return grouped ? groupSymbols(matches).flatMap((g) => g.items.map((match, i) => (i === 0 ? { match, group: g.label } : { match }))) : matches.map((match) => ({ match }));
+  }, [mode, symbols, query, grouped]);
+  const count = mode === "symbols" ? rows.length : items.length;
   React.useEffect(() => {
-    const sym = mode === "symbols" ? found[cursor] : undefined;
+    const sym = mode === "symbols" ? rows[cursor]?.match.symbol : undefined;
     if (sym) editorRef.current()?.reveal(sym, { select: false });
-  }, [mode, found, cursor]);
+  }, [mode, rows, cursor]);
   React.useEffect(() => {
     listRef.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
-  }, [cursor]);
+  }, [cursor, rows]);
   // Focus returns where it came from on close, except when a symbol pick hands it to the editor.
   const handedOff = React.useRef(false);
   React.useEffect(() => {
@@ -1214,7 +1271,7 @@ function QuickOpen({ paths, recent, activePath, editor, initial, onPick, onClose
   }, []);
   const pick = (i: number) => {
     if (mode === "symbols") {
-      const sym = found[i];
+      const sym = rows[i]?.match.symbol;
       if (!sym) return;
       restore.current = null;
       handedOff.current = true;
@@ -1250,7 +1307,7 @@ function QuickOpen({ paths, recent, activePath, editor, initial, onPick, onClose
         initial={still ? false : { opacity: 0, y: -6, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ duration: 0.16, ease: EASE }}
-        className="bg-popover text-popover-foreground shadow-e3 absolute top-3 left-1/2 flex w-[min(30rem,calc(100%-2rem))] -translate-x-1/2 flex-col overflow-hidden rounded-xl border"
+        className="bg-popover text-popover-foreground shadow-e3 absolute top-3 left-1/2 flex w-[min(37.5rem,calc(100%-2rem))] -translate-x-1/2 flex-col overflow-hidden rounded-xl border"
       >
         <label className="flex h-10 items-center gap-2 border-b px-3">
           <Search className="text-muted-foreground size-4" aria-hidden />
@@ -1272,17 +1329,37 @@ function QuickOpen({ paths, recent, activePath, editor, initial, onPick, onClose
           </p>
         ) : mode === "symbols" ? (
           <ul ref={listRef} role="listbox" aria-label="Symbols" className="max-h-72 overflow-auto py-1">
-            {found.map((s, i) => {
+            {rows.map(({ match: { symbol: s, positions }, group }, i) => {
               const Icon = SYMBOL_ICON[s.kind];
               return (
-                <li key={s.from} role="option" aria-selected={i === cursor} onMouseEnter={() => setCursor(i)} onClick={() => pick(i)} style={{ paddingLeft: 12 + s.depth * 14 }} className={cn("flex h-[26px] cursor-pointer items-center gap-1.5 pr-3 text-meta", i === cursor && "bg-accent")}>
-                  <Icon className="text-muted-foreground size-3.5 shrink-0" aria-hidden />
-                  <span className="truncate">{s.name}</span>
-                  <span className="stamp text-muted-foreground ml-auto shrink-0">{s.kind}</span>
+                <li
+                  key={s.from}
+                  role="option"
+                  aria-selected={i === cursor}
+                  data-symbol={s.name}
+                  onMouseEnter={() => setCursor(i)}
+                  onClick={() => pick(i)}
+                  style={{ paddingLeft: 10 + s.depth * 12 }}
+                  className={cn("flex h-[26px] cursor-pointer items-center gap-1.5 pr-3 text-meta", i === cursor && "bg-accent", group && i > 0 && "border-border border-t")}
+                >
+                  <Icon className={cn("size-4 shrink-0", SYMBOL_TONE[s.kind])} strokeWidth={1.5} aria-hidden />
+                  <span className="truncate">
+                    <Highlighted text={s.name} positions={positions} />
+                  </span>
+                  {s.containerName && (
+                    <span data-symbol-container className="text-muted-foreground truncate text-micro">
+                      {s.containerName}
+                    </span>
+                  )}
+                  {group && (
+                    <span data-symbol-group className="text-faint tabular ml-auto shrink-0 pl-3 text-micro">
+                      {group}
+                    </span>
+                  )}
                 </li>
               );
             })}
-            {found.length === 0 && <li className="text-muted-foreground px-3 py-2 text-micro">{symbols.length === 0 ? "No symbols in this file" : `No symbol matches “${head.slice(1).trim()}”.`}</li>}
+            {rows.length === 0 && <li className="text-muted-foreground px-3 py-2 text-micro">{!activePath ? "Open a file first." : symbols.length === 0 ? "No editor symbols" : `No symbol matches “${query.trim()}”.`}</li>}
           </ul>
         ) : (
           <ul ref={listRef} role="listbox" aria-label={mode === "recent" ? "Recently opened" : "Matching files"} className="max-h-72 overflow-auto py-1">
