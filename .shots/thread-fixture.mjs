@@ -6,7 +6,7 @@
 //                                  [--stream] [--interact=<name>] [--wait=ms]
 //
 // scenarios : running (default) · question · done · booting · sleeping · idle
-// interact  : file · review · scrolled · slash · mention · model · multiline · workspace · minimap · question-kbd · sidechat
+// interact  : file · review · scrolled · slash · mention · model · multiline · workspace · ws-tour (--slow-files for the skeleton) · minimap · question-kbd · sidechat
 // --stream  : serve /watch.sse from a local server that drips the final answer in over ~6s
 //             (screenshot mid-stream) instead of one full snapshot.
 //
@@ -321,9 +321,12 @@ const MODELS = {
 };
 
 // One file per icon family plus every name-matched special, so the explorer shows the whole set (r8-icons.mjs carries the same list).
-const TREE = ["orders-api/src/app.ts", "orders-api/src/middleware/rateLimit.ts", "orders-api/src/lib/redis.ts", "orders-api/test/rateLimit.test.ts", "orders-api/test/orders.test.ts", "orders-api/docs/rate-limits.md", "orders-api/package.json", "orders-api/README.md",
+const TREE = ["orders-api/src/app.ts", "orders-api/src/middleware/rateLimit.ts", "orders-api/src/lib/redis.ts", "orders-api/test/rateLimit.test.ts", "orders-api/test/orders.test.ts", "orders-api/docs/rate-limits.md", "orders-api/docs/window.png", "orders-api/package.json", "orders-api/README.md",
   "orders-api/.env", "orders-api/.gitignore", "orders-api/Dockerfile", "orders-api/LICENSE", "orders-api/Makefile", "orders-api/brand.woff2", "orders-api/config.yaml", "orders-api/deploy.sh", "orders-api/notes.txt", "orders-api/openapi.json", "orders-api/package-lock.json", "orders-api/schema.sql", "orders-api/tsconfig.json",
   "orders-api/src/App.tsx", "orders-api/src/App.vue", "orders-api/src/app.test.ts", "orders-api/src/hero.png", "orders-api/src/index.css", "orders-api/src/index.html", "orders-api/src/legacy.js", "orders-api/src/lib.rs", "orders-api/src/logo.svg", "orders-api/src/main.go", "orders-api/src/worker.py"];
+const README = "# orders-api\n\nThe orders service: a small Express app in front of Postgres, with Redis for rate limiting.\n\n## Rate limiting\n\nRequests are counted in **six 10-second buckets** per client key and summed on every request, so a client that burns its quota at `:59` does not get a fresh allowance at `:00`.\n\n| Setting | Default | Notes |\n| --- | --- | --- |\n| `limit` | 120 | requests per window |\n| `window` | 60 000 ms | sliding |\n\n```ts\napp.use(rateLimit({ limit: 120 }));\n```\n\n- Fails open when Redis is down\n- Sends `Retry-After` on 429\n";
+// A 4×4 PNG (blue square) so the image viewer has something to show.
+const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAE0lEQVR4nGNk+M+ABzDhlR2+0gAN9gEHsgEqkwAAAABJRU5ErkJggg==", "base64");
 
 /* ───────────────────────────── SSE ───────────────────────────── */
 const box = boxFor(scenario);
@@ -435,12 +438,17 @@ await page.route("**/*", async (route) => {
       return json(route, { files: TREE.filter((f) => f.includes(u.searchParams.get("q") ?? "")), total: TREE.length, truncated: false });
     case "/git.json":
       return json(route, { repo: "orders-api", branch: "feat/sliding-window-limiter", upstream: "origin/feat/sliding-window-limiter", ahead: 0, behind: 0, lastCommit: "feat: sliding-window rate limiter", clean: false, changed: 3 });
-    case "/artifact":
+    case "/artifact": {
+      const ap = u.searchParams.get("path") ?? "";
+      if (process.argv.includes("--slow-files")) await new Promise((r) => setTimeout(r, 4000));
+      if (ap.endsWith(".png")) return route.fulfill({ status: 200, contentType: "image/png", body: PNG });
+      if (ap.endsWith(".md")) return route.fulfill({ status: 200, contentType: "text/plain", body: README });
       return route.fulfill({
         status: 200,
         contentType: "text/plain",
         body: "import type { NextFunction, Request, Response } from 'express';\nimport { redis } from '../lib/redis';\n\nconst BUCKETS = 6;\n\ninterface Options {\n  limit: number;\n  window?: number;\n}\n\nexport function rateLimit({ limit, window = 60_000 }: Options) {\n  const slice = window / BUCKETS;\n  return async (req: Request, res: Response, next: NextFunction) => {\n    const key = `rl:${req.ip}`;\n    const now = Math.floor(Date.now() / slice);\n    const hits = await redis.hincrby(key, String(now), 1);\n    if (hits > limit) return res.status(429).set('Retry-After', String(slice / 1000)).end();\n    next();\n  };\n}\n",
       });
+    }
     case "/diff.json":
       return json(route, {
         path: u.searchParams.get("path") ?? CHANGES[0].path,
@@ -616,6 +624,58 @@ if (stream) {
   await page.getByRole("button", { name: /files|workspace/i }).first().click();
   await page.waitForTimeout(1500);
   await shot("-workspace");
+} else if (interact === "ws-tour") {
+  // The workspace pane as an editor: the tree, a markdown Preview, ⌘P with lit matches, the explorer
+  // filter, the status bar in edit mode (Ln/Col, indentation), an image. --slow-files holds every
+  // text file 4s so the first shot catches the code-shaped skeleton.
+  const ws = page.getByRole("complementary", { name: "Workspace" });
+  await page.getByRole("button", { name: /files|workspace/i }).first().click();
+  await page.waitForTimeout(process.argv.includes("--slow-files") ? 900 : 1500);
+  await shot("-ws-tree");
+  await ws.getByRole("treeitem", { name: /^README\.md/ }).click();
+  if (process.argv.includes("--slow-files")) {
+    await page.waitForTimeout(500);
+    console.log("loading:", await ws.getByRole("status", { name: /^Loading/ }).count(), "skeleton line(s):", await ws.locator(".ws-skel-line").count());
+    await shot("-ws-loading");
+    await page.waitForTimeout(4500);
+  }
+  await page.waitForTimeout(700);
+  await ws.getByRole("radio", { name: "Preview" }).click();
+  await page.waitForTimeout(900);
+  await shot("-ws-md");
+  await page.keyboard.press(process.platform === "darwin" ? "Meta+p" : "Control+p");
+  await page.waitForTimeout(300);
+  await page.keyboard.type("rlt");
+  await page.waitForTimeout(400);
+  console.log("quick open:", await page.locator("[role=dialog][aria-label='Quick open'] [role=option]").evaluateAll((els) => els.map((e) => `${e.textContent?.trim()} (${e.querySelectorAll("[data-match]").length} lit)`).join(" | ")));
+  await shot("-ws-quick");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  await ws.getByRole("button", { name: "Filter files" }).click();
+  await page.keyboard.type("rl");
+  await page.waitForTimeout(400);
+  await shot("-ws-filter");
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  await ws.getByRole("treeitem", { name: /^rateLimit\.ts/ }).first().click({ button: "right" });
+  await page.waitForTimeout(400);
+  await shot("-ws-menu");
+  await page.keyboard.press("Escape");
+  await ws.getByRole("treeitem", { name: /^rateLimit\.ts/ }).first().dblclick();
+  await page.waitForTimeout(600);
+  await ws.getByRole("radio", { name: "File" }).click();
+  await page.waitForTimeout(700);
+  await ws.locator(".cm-content").first().click();
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("End");
+  await page.waitForTimeout(300);
+  console.log("status:", await ws.getByRole("footer", { name: "Workspace status" }).or(ws.locator("[data-ws-status]")).first().innerText().then((t) => t.replace(/\s+/g, " ")));
+  await shot("-ws-edit");
+  await ws.getByRole("treeitem", { name: /^docs/ }).click();
+  await page.waitForTimeout(400);
+  await ws.getByRole("treeitem", { name: /^window\.png/ }).click();
+  await page.waitForTimeout(900);
+  await shot("-ws-image");
 } else if (interact === "minimap") {
   await page.mouse.move(W - 20, H / 2);
   await page.waitForTimeout(500);

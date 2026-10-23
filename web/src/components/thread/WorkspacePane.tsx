@@ -33,7 +33,8 @@ import {
   defaultPaneWidth,
   hasDrag,
   invalidName,
-  matchPaths,
+  isImage,
+  fuzzyPaths,
   matchShortcut,
   nodeAt,
   parentOf,
@@ -42,6 +43,7 @@ import {
   readDrag,
   setDrag,
   sidebarRange,
+  splitPositions,
   tabsReducer,
   treeKeyTarget,
   typeAheadTarget,
@@ -50,6 +52,7 @@ import {
   type Node,
   type OpenOpts,
   type PaneCommands,
+  type PathMatch,
   type Range,
   type Row,
   type RowEdit,
@@ -122,6 +125,16 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
       else n.delete(key);
       return n;
     });
+  // Indentation per open file, by the same key; "Spaces: 2" / "Tab" in the status bar.
+  const [indents, setIndents] = React.useState<Map<string, string>>(() => new Map());
+  const setIndent = (key: string, s: string | null) =>
+    setIndents((m) => {
+      if ((m.get(key) ?? null) === s) return m;
+      const n = new Map(m);
+      if (s) n.set(key, s);
+      else n.delete(key);
+      return n;
+    });
   const savers = React.useRef(new Map<string, () => Promise<string | null>>());
   // Live editors by "group:path", so a window-level ⌘F reaches the focused file's find widget.
   const editors = React.useRef(new Map<string, CodeEditorHandle>());
@@ -153,6 +166,9 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
   const activeTab = focusedGroup.tabs.find((t) => t.path === active) ?? null;
   const activeDoc = activeTab ? docs.get(activeTab.path) : undefined;
   const caret = activeTab ? carets.get(`${tabs.focus}:${activeTab.path}`) : undefined;
+  const indent = activeTab ? indents.get(`${tabs.focus}:${activeTab.path}`) : undefined;
+  // The caret, save state and wrap belong to a text editor; a picture has none of them.
+  const editing = !!activeTab && activeTab.mode === "edit" && !isImage(activeTab.path);
 
   const expandTo = React.useCallback((path: string) => {
     setExpanded((e) => {
@@ -470,6 +486,7 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
                       onSaver={(fn) => (fn ? savers.current.set(tab.path, fn) : savers.current.delete(tab.path))}
                       onEditor={(h) => registerEditor(`${gi}:${tab.path}`, h)}
                       onStatus={(s) => setCaret(`${gi}:${tab.path}`, s)}
+                      onIndent={(s) => setIndent(`${gi}:${tab.path}`, s)}
                     />
                   ) : (
                     <EmptyEditor />
@@ -618,19 +635,20 @@ export function WorkspacePane({ session, changes, open, review, onClose, onSaved
         {paths && <span className="hidden sm:inline">{paths.length} files</span>}
         {activeTab && (
           <span className="ml-auto flex items-center gap-3" aria-label="Editor status">
-            {activeTab.mode === "edit" && caret && (
-              <span>
+            {editing && caret && (
+              <button type="button" onClick={() => commands.quickOpen(":")} title={`Go to line (${shortcutLabel("goToLine")})`} aria-label={`Line ${caret.line}, column ${caret.col}. Go to line`} className="hover:bg-muted hover:text-foreground flex h-5 cursor-pointer items-center rounded px-1">
                 Ln {caret.line}, Col {caret.col}
                 {caret.selected > 0 && ` (${caret.selected} selected)`}
-              </span>
+              </button>
             )}
-            {activeTab.mode === "edit" && (
+            {editing && indent && <span>{indent}</span>}
+            {editing && (
               <span className={cn("transition-colors", activeDoc?.dirty && activeDoc.saving !== "saving" && "text-attention-text")} aria-live="polite">
                 {activeDoc?.saving === "saving" ? "Saving…" : activeDoc?.dirty ? "Unsaved" : activeDoc?.saving === "saved" ? "Saved" : "Autosave on"}
               </span>
             )}
             <span>{languageOf(activeTab.path)}</span>
-            {activeTab.mode === "edit" && (
+            {editing && (
               <button type="button" onClick={toggleWrap} aria-pressed={wrap} aria-label="Toggle word wrap" title={`Word wrap (${shortcutLabel("wrap")})`} className={cn("hover:bg-muted hover:text-foreground flex h-5 cursor-pointer items-center gap-1 rounded px-1", wrap && "text-foreground")}>
                 <WrapText className="size-3" aria-hidden />
                 Wrap
@@ -787,6 +805,14 @@ function Explorer({ tree, err, expanded, focused, active, changeByPath, repos, e
       el.scrollIntoView({ block: "nearest" });
     }
   }, [focused, rows]);
+
+  // Auto-reveal, as VS Code's: a file opened from elsewhere (a tab, ⌘P, a code ref in the chat)
+  // has its row scrolled into view; focus stays where the person is working.
+  React.useEffect(() => {
+    if (!active || !rows) return;
+    listRef.current?.querySelector<HTMLElement>(`[data-path="${CSS.escape(active)}"]`)?.scrollIntoView({ block: "nearest" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
 
   const moveTo = (i: number | null) => {
     if (i === null || !rows || !rows[i]) return;
@@ -1133,16 +1159,23 @@ function ActiveRow({ glide = true }: { glide?: boolean }) {
   return <motion.span layoutId="ws-active-row" className="bg-accent absolute inset-0 -z-10" transition={{ type: "spring", stiffness: 520, damping: 42, mass: 0.7 }} aria-hidden />;
 }
 
-function FileRow({ path, active, change, onOpen, glide }: { path: string; active: boolean; change?: ChangedFile; onOpen: () => void; glide?: boolean }) {
+function FileRow({ path, positions = [], active, change, onOpen, glide }: { path: string; positions?: number[]; active: boolean; change?: ChangedFile; onOpen: () => void; glide?: boolean }) {
   const base = baseOf(path);
   const dir = parentOf(path);
+  const lit = splitPositions(path, positions);
   const st = change ? STATUS_LETTER[change.status] : null;
   return (
     <button type="button" onClick={onOpen} className={cn("text-foreground relative isolate flex h-[26px] w-full cursor-pointer items-center gap-1.5 px-3 text-left text-meta transition-colors", !active && "hover:bg-muted")} title={path}>
       {active && <ActiveRow glide={glide} />}
       <FileIcon path={path} size={15} />
-      <span className={cn("truncate", change?.status === "deleted" && "line-through", st?.tone)}>{base}</span>
-      {dir && <span className="stamp text-muted-foreground truncate">{dir}</span>}
+      <span className={cn("truncate", change?.status === "deleted" && "line-through", st?.tone)}>
+        <Highlighted text={base} positions={lit.base} />
+      </span>
+      {dir && (
+        <span className="stamp text-muted-foreground truncate">
+          <Highlighted text={dir} positions={lit.dir} />
+        </span>
+      )}
       {st && <span className={cn("stamp ml-auto shrink-0 font-semibold", st.tone)}>{st.l}</span>}
     </button>
   );
@@ -1153,13 +1186,13 @@ function FileRow({ path, active, change, onOpen, glide }: { path: string; active
 function GoToFile({ paths, query: q, active, changeByPath, onOpen }: { paths: string[] | null; query: string; active: string | null; changeByPath: Map<string, ChangedFile>; onOpen: (p: string) => void }) {
   const [cursor, setCursor] = React.useState(0);
   const needle = q.trim().toLowerCase();
-  const matches = React.useMemo(() => (paths ? matchPaths(paths, needle) : []), [paths, needle]);
+  const matches = React.useMemo(() => (paths ? fuzzyPaths(paths, needle) : []), [paths, needle]);
   React.useEffect(() => setCursor(0), [needle]);
   return (
     <ul className="min-h-0 flex-1 overflow-auto pb-2">
-      {matches.map((p, i) => (
+      {matches.map(({ path: p, positions }, i) => (
         <li key={p}>
-          <FileRow path={p} active={active === p || i === cursor} change={changeByPath.get(p)} onOpen={() => onOpen(p)} glide={false} />
+          <FileRow path={p} positions={positions} active={active === p || i === cursor} change={changeByPath.get(p)} onOpen={() => onOpen(p)} glide={false} />
         </li>
       ))}
       {paths && matches.length === 0 && <li className="text-muted-foreground px-3 py-2 text-micro">No file matches “{q.trim()}”.</li>}
@@ -1219,7 +1252,7 @@ function QuickOpen({ paths, recent, activePath, editor, initial, onPick, onClose
   const line = parseLineQuery(q);
   const head = q.trim();
   const mode: "recent" | "line" | "files" | "symbols" = head.startsWith("@") ? "symbols" : line || head.startsWith(":") ? "line" : head ? "files" : "recent";
-  const items = React.useMemo(() => (mode === "recent" ? recent.filter((p) => !paths || paths.includes(p)) : mode === "files" && paths ? matchPaths(paths, q, 40) : []), [mode, recent, paths, q]);
+  const items = React.useMemo<PathMatch[]>(() => (mode === "recent" ? recent.filter((p) => !paths || paths.includes(p)).map((path) => ({ path, positions: [] })) : mode === "files" && paths ? fuzzyPaths(paths, q, 40) : []), [mode, recent, paths, q]);
   // A chord while the palette is open swaps its prefix, as ⌘⇧O after ⌘P does in VS Code.
   React.useEffect(() => {
     setQ(initial);
@@ -1283,7 +1316,7 @@ function QuickOpen({ paths, recent, activePath, editor, initial, onPick, onClose
       if (line && activePath) onPick(activePath, { reveal: { ...line, nonce: Date.now() } });
       return;
     }
-    const p = items[i];
+    const p = items[i]?.path;
     if (p) onPick(p, { preview: false });
   };
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -1364,13 +1397,20 @@ function QuickOpen({ paths, recent, activePath, editor, initial, onPick, onClose
         ) : (
           <ul ref={listRef} role="listbox" aria-label={mode === "recent" ? "Recently opened" : "Matching files"} className="max-h-72 overflow-auto py-1">
             {mode === "recent" && items.length > 0 && <li className="label text-faint px-3 pt-1 pb-0.5">Recently opened</li>}
-            {items.map((p, i) => (
-              <li key={p} role="option" aria-selected={i === cursor} onMouseEnter={() => setCursor(i)} onClick={() => pick(i)} className={cn("flex h-[26px] cursor-pointer items-center gap-1.5 px-3 text-meta", i === cursor && "bg-accent")}>
-                <FileIcon path={p} size={15} />
-                <span className="truncate">{baseOf(p)}</span>
-                <span className="stamp text-muted-foreground truncate">{parentOf(p)}</span>
-              </li>
-            ))}
+            {items.map(({ path: p, positions }, i) => {
+              const lit = splitPositions(p, positions);
+              return (
+                <li key={p} role="option" aria-selected={i === cursor} onMouseEnter={() => setCursor(i)} onClick={() => pick(i)} className={cn("flex h-[26px] cursor-pointer items-center gap-1.5 px-3 text-meta", i === cursor && "bg-accent")}>
+                  <FileIcon path={p} size={15} />
+                  <span className="truncate">
+                    <Highlighted text={baseOf(p)} positions={lit.base} />
+                  </span>
+                  <span className="stamp text-muted-foreground truncate">
+                    <Highlighted text={parentOf(p)} positions={lit.dir} />
+                  </span>
+                </li>
+              );
+            })}
             {items.length === 0 && <li className="text-muted-foreground px-3 py-2 text-micro">{mode === "recent" ? "No recent files. Type to search." : `No file matches “${q.trim()}”.`}</li>}
           </ul>
         )}

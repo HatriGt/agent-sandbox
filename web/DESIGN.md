@@ -1314,3 +1314,34 @@ lowest 4.99 on Nord's lighter card; the light set's lowest is 4.54 on Mist); a p
 (the two group headers already say it, and a third word under a 9rem card was noise); a fourth light
 theme to square the grid (an empty slot is honest, a filler theme is not); the mobile registry
 (`mobile/src/theme/themes.ts` mirrors the web one by hand and is another workstream's).
+
+## Round: the editor's remaining manners (2026-10-24)
+
+Four things an editor does that the workspace pane did not, added on top of the keyboard tree, preview
+tabs, menus and chords that already landed; nothing new in colour or type.
+
+- **A rendered Preview for markdown.** The toolbar's segmented control gains a third mode beside Diff
+  and File for `.md` files: the document in `prose-agent` on a 76ch measure, the same renderer the
+  conversation uses, so a README reads the way it will on GitHub. The tab keeps its source; the mode
+  is the tab's own.
+- **Pictures open as pictures.** An image file is centred on a quiet checker (6% ink, 16px tiles, so a
+  transparent edge is readable in both schemes) with its dimensions, weight and format in a stamp row
+  underneath. The status bar drops the caret, autosave and wrap for it: a picture has none of them.
+- **A code-shaped wait.** A file still arriving is drawn as fourteen gutter-and-body lines of 7% ink
+  that breathe a beat apart (opacity only, 60ms stagger, still under reduced motion), not a sentence
+  with a spinner. `role=status` names it for a reader.
+- **The status bar says the indentation** ("Spaces: 2" / "Tab", read from the file's first indented
+  line) and Ln/Col is a button that opens Go to line, the same `:` palette as ⌘G.
+- **Go to file matches the way VS Code's does.** Every typed character in order, scored for runs kept
+  together, word starts (after `/ . _ -` and a capital after a lowercase, so "rl" finds rateLimit) and
+  the file name over its folders; the whole query inside a name outranks a scatter. A single greedy
+  pass took the "r" of "orders-api" and never reached "rateLimit", so three alignments are tried and
+  the best kept. The lit characters are the same `text-live` bold the symbol list uses, in ⌘P and in
+  the explorer's filter.
+- **Auto-reveal.** A file opened from elsewhere (a tab, ⌘P, a code ref in the chat) has its tree row
+  scrolled into view; focus stays where the person is working.
+
+Left out: a tab-strip edge fade (it would dim the drop indicators that sit at the strip's edges); a
+folder unfold animation (the rows already rise 3px apart on expand); an outline view (go to symbol
+covers the use). Proof: `.shots/thread-fixture.mjs done <out> --interact=ws-tour` (add `--slow-files`
+for the skeleton), light and dark.

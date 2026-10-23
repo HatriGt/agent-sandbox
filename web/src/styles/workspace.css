@@ -1,0 +1,52 @@
+/* Hallmark · v2.0.0 · built: the project · redesign: polish · scope: app · theme: locked (web/DESIGN.md) */
+/* critique: an editor's waiting states and picture viewer in the console's own ink-on-paper system; no new hue, no new face. */
+/* Motion follows the console's in-app setting ([data-motion], lib/motion-pref.ts); the OS query below is honoured unless the person chose "Full" there. */
+/* Workspace pane: the editor's waiting state and the image viewer. Imported by FileView.tsx so it
+   ships with the (lazy) editor chunk. Everything is tokens; the one animation is opacity, and it
+   goes still under [data-motion="reduced"]. */
+
+/* ── Waiting ───────────────────────────────────────────────────────────────────────────────────
+   A file still arriving is drawn as code-shaped lines (a gutter and an indented body) that
+   breathe a beat apart, not a sentence with a spinner. */
+.ws-skel-line {
+  height: 9px;
+  border-radius: 3px;
+  background: color-mix(in oklch, var(--foreground) 7%, transparent);
+  animation: ws-shimmer 1.4s ease-in-out infinite;
+  animation-delay: calc(var(--i, 0) * 60ms);
+}
+@keyframes ws-shimmer {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* ── Image viewer ──────────────────────────────────────────────────────────────────────────────
+   Transparent pixels show a quiet checker so an icon's edge is readable in both schemes. */
+.ws-checker {
+  background-color: var(--background);
+  background-image:
+    linear-gradient(45deg, color-mix(in oklch, var(--foreground) 6%, transparent) 25%, transparent 25%),
+    linear-gradient(-45deg, color-mix(in oklch, var(--foreground) 6%, transparent) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, color-mix(in oklch, var(--foreground) 6%, transparent) 75%),
+    linear-gradient(-45deg, transparent 75%, color-mix(in oklch, var(--foreground) 6%, transparent) 75%);
+  background-size: 16px 16px;
+  background-position:
+    0 0,
+    0 8px,
+    8px -8px,
+    -8px 0;
+}
+
+[data-motion="reduced"] .ws-skel-line {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion="full"]) .ws-skel-line {
+    animation: none;
+  }
+}

@@ -24,6 +24,18 @@ export const sortedChildren = (m: Map<string, Node> | undefined): Node[] => (m ?
 export const parentOf = (path: string): string => path.slice(0, Math.max(0, path.lastIndexOf("/")));
 export const baseOf = (path: string): string => path.slice(path.lastIndexOf("/") + 1);
 
+const IMAGE_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico)$/i;
+/** A file the editor shows as a picture, not text. */
+export const isImage = (path: string): boolean => IMAGE_RE.test(path);
+/** A file that gets a rendered Preview mode beside its source. */
+export const isMarkdown = (path: string): boolean => /\.(md|mdx|markdown)$/i.test(path);
+/** "Spaces: 2" / "Tab", read from the first indented line, as an editor's status bar says it. */
+export function detectIndent(text: string): string {
+  const m = /^( +|\t+)\S/m.exec(text);
+  if (!m) return "Spaces: 2";
+  return m[1][0] === "\t" ? "Tab" : `Spaces: ${m[1].length}`;
+}
+
 export function nodeAt(tree: Node, path: string): Node | null {
   if (!path) return tree;
   let cur: Node | undefined = tree;
@@ -120,7 +132,7 @@ export function invalidName(name: string, siblings: ReadonlySet<string>): string
 }
 
 export type Reveal = { from: number; to: number; nonce: number };
-export type Tab = { path: string; mode: "diff" | "edit"; preview: boolean; reveal?: Reveal };
+export type Tab = { path: string; mode: "diff" | "edit" | "preview"; preview: boolean; reveal?: Reveal };
 export type TabGroup = { tabs: Tab[]; active: string | null };
 export type TabState = { groups: [TabGroup] | [TabGroup, TabGroup]; focus: 0 | 1 };
 export type OpenOpts = { mode?: Tab["mode"]; reveal?: Reveal; preview?: boolean; side?: boolean };
@@ -336,22 +348,79 @@ export function parseLineQuery(q: string): { from: number; to: number } | null {
   return from > 0 ? { from, to: Math.max(from, to) } : null;
 }
 
-export function matchPaths(paths: string[], query: string, limit = 80): string[] {
+export type PathMatch = { path: string; positions: number[] };
+
+/**
+ * Fuzzy, as an editor's Go to file: every typed character in order, scored for runs kept together,
+ * word starts (after / . _ - and a capital after a lowercase, so "rl" lights rateLimit) and the file
+ * name over its folders; a name that contains the whole query outranks a scatter, and among equals
+ * the shorter name wins. `positions` are the lit characters, indexed into the path.
+ */
+export function fuzzyPaths(paths: string[], query: string, limit = 80): PathMatch[] {
   const needle = query.trim().toLowerCase();
-  if (!needle) return paths.slice(0, Math.min(limit, 60));
-  const score = (p: string) => {
-    const base = baseOf(p).toLowerCase();
-    if (base.startsWith(needle)) return 0;
-    if (base.includes(needle)) return 1;
-    if (p.toLowerCase().includes(needle)) return 2;
-    return 9;
-  };
-  return paths
-    .map((p) => [score(p), p] as const)
-    .filter(([s]) => s < 9)
-    .sort((a, b) => a[0] - b[0] || a[1].length - b[1].length)
+  if (!needle) return paths.slice(0, Math.min(limit, 60)).map((path) => ({ path, positions: [] }));
+  const scored: (PathMatch & { score: number })[] = [];
+  for (const path of paths) {
+    const m = fuzzyMatch(needle, path);
+    if (m) scored.push({ path, ...m });
+  }
+  return scored
+    .sort((a, b) => b.score - a.score || baseOf(a.path).length - baseOf(b.path).length || a.path.length - b.path.length)
     .slice(0, limit)
-    .map(([, p]) => p);
+    .map(({ path, positions }) => ({ path, positions }));
+}
+
+type Alignment = { score: number; positions: number[] };
+
+/**
+ * The best of three alignments: the query inside the file name alone, then across the whole path
+ * preferring word starts, then the plain left-to-right one. A single greedy pass would take the
+ * "r" of "orders-api" and never reach "rateLimit".
+ */
+function fuzzyMatch(needle: string, path: string): Alignment | null {
+  const hay = path.toLowerCase();
+  const baseStart = path.lastIndexOf("/") + 1;
+  const whole = hay.indexOf(needle, baseStart);
+  if (whole >= 0) return { score: 100 + (whole === baseStart ? 20 : 0) + needle.length * 6, positions: Array.from(needle, (_, i) => whole + i) };
+  const best = [align(needle, path, hay, baseStart, baseStart, true), align(needle, path, hay, baseStart, 0, true), align(needle, path, hay, baseStart, 0, false)].filter((a): a is Alignment => a !== null);
+  return best.length ? best.reduce((a, b) => (b.score > a.score ? b : a)) : null;
+}
+
+const isBoundary = (path: string, hay: string, j: number) => j === 0 || "/._-".includes(hay[j - 1]) || (path[j] !== hay[j] && path[j - 1] === hay[j - 1]);
+
+function align(needle: string, path: string, hay: string, baseStart: number, start: number, preferBoundary: boolean): Alignment | null {
+  const positions: number[] = [];
+  let score = 0;
+  let from = start;
+  let prev = -2;
+  for (const c of needle) {
+    let j = hay.indexOf(c, from);
+    if (j < 0) return null;
+    // A run continues where it is; otherwise the next word start wins over the next letter.
+    if (preferBoundary && j !== prev + 1 && !isBoundary(path, hay, j)) {
+      for (let k = hay.indexOf(c, j + 1); k >= 0; k = hay.indexOf(c, k + 1)) {
+        if (isBoundary(path, hay, k)) {
+          j = k;
+          break;
+        }
+      }
+    }
+    score += 1 + (j === prev + 1 ? 5 : 0) + (isBoundary(path, hay, j) ? 4 : 0) + (j >= baseStart ? 3 : 0);
+    positions.push(j);
+    prev = j;
+    from = j + 1;
+  }
+  // Letters spread across the path read worse than letters kept close.
+  score -= Math.round((positions[positions.length - 1] - positions[0] - needle.length + 1) * 0.3);
+  return { score, positions };
+}
+
+export const matchPaths = (paths: string[], query: string, limit = 80): string[] => fuzzyPaths(paths, query, limit).map((m) => m.path);
+
+/** `positions` (into the path) split for a row that shows the name and the folder apart. */
+export function splitPositions(path: string, positions: number[]): { base: number[]; dir: number[] } {
+  const at = path.lastIndexOf("/") + 1;
+  return { base: positions.filter((i) => i >= at).map((i) => i - at), dir: positions.filter((i) => i < at - 1) };
 }
 
 /* ───────────── Resizable widths: the pane inside its container, the files panel inside the pane ───────────── */

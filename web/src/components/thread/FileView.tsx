@@ -1,34 +1,40 @@
 import * as React from "react";
-import { ChevronRight, Download, FileCode2, FileDiff, Loader2 } from "lucide-react";
+import { ChevronRight, Download, Eye, FileCode2, FileDiff } from "lucide-react";
 import { DropdownMenu as DM } from "radix-ui";
 import { toast } from "sonner";
 import { api, ApiError, type ChangedFile } from "@/lib/api";
 import { parseUnifiedDiff, diffForNewFile, type ParsedDiff } from "@/lib/diff";
 import { FileIcon, FolderIcon } from "@/lib/iconTheme";
 import { CodeEditor, type CodeEditorHandle, type EditorStatus } from "@/components/CodeEditor";
+import { Markdown } from "@/components/ui/markdown";
 import { Segmented } from "@/components/ui/segmented";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DiffView, useHunkReview } from "./FilePane";
 import { cn } from "@/lib/utils";
-import { baseOf, childrenOf, parentOf, type Doc, type Node, type Tab } from "@/lib/workspace-model";
+import { baseOf, childrenOf, detectIndent, isImage, isMarkdown, parentOf, type Doc, type Node, type Tab } from "@/lib/workspace-model";
 import { MENU_CONTENT, MENU_ITEM, type Open } from "./workspace-chrome";
+import "@/styles/workspace.css";
 
 /**
- * One open file: a 26px toolbar (the folder trail, the diff stat, Diff / File, download) over the
- * diff or the editor. The file's name is the tab's; the caret and save state go up through
- * `onStatus` to the pane's one status bar.
+ * One open file: a 26px toolbar (the folder trail, the diff stat, Diff / File / Preview, download)
+ * over the diff, the editor, a rendered markdown page or a picture. The file's name is the tab's;
+ * the caret, indentation and save state go up through `onStatus` / `onIndent` to the pane's one
+ * status bar. While the text is on its way the editor is drawn as code-shaped lines.
  */
 
-export function FileView({ session, tab, doc, tree, change, wrap, onMode, onDoc, onPin, onOpen, onSaved, onSaver, onEditor, onStatus }: { session: string; tab: Tab; doc: Doc; tree: Node | null; change?: ChangedFile; wrap: boolean; onMode: (m: Tab["mode"]) => void; onDoc: (p: Partial<Doc>) => void; onPin: () => void; onOpen: Open; onSaved: () => void; onSaver: (fn: (() => Promise<string | null>) | null) => void; onEditor: (h: CodeEditorHandle | null) => void; onStatus: (s: EditorStatus | null) => void }) {
+export function FileView({ session, tab, doc, tree, change, wrap, onMode, onDoc, onPin, onOpen, onSaved, onSaver, onEditor, onStatus, onIndent }: { session: string; tab: Tab; doc: Doc; tree: Node | null; change?: ChangedFile; wrap: boolean; onMode: (m: Tab["mode"]) => void; onDoc: (p: Partial<Doc>) => void; onPin: () => void; onOpen: Open; onSaved: () => void; onSaver: (fn: (() => Promise<string | null>) | null) => void; onEditor: (h: CodeEditorHandle | null) => void; onStatus: (s: EditorStatus | null) => void; onIndent: (s: string | null) => void }) {
   const [diff, setDiff] = React.useState<ParsedDiff | null>(null);
   const [content, setContent] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(false);
   const mode = tab.mode;
+  const image = isImage(tab.path);
+  const md = isMarkdown(tab.path);
   // Accept / reject per hunk, as in Review all; a reject refreshes the changes list.
   const review = useHunkReview(session, tab.path, diff, { onDiscarded: onSaved });
 
   React.useEffect(() => {
+    if (image) return;
     let cancelled = false;
     setLoading(true);
     setError(null);
@@ -122,10 +128,22 @@ export function FileView({ session, tab, doc, tree, change, wrap, onMode, onDoc,
   const statusRef = React.useRef(onStatus);
   statusRef.current = onStatus;
   React.useEffect(() => () => statusRef.current(null), []);
+  // Indentation is a property of the file, read once the text is here and cleared when the view goes.
+  const indentRef = React.useRef(onIndent);
+  indentRef.current = onIndent;
+  React.useEffect(() => {
+    indentRef.current(content === null || image ? null : detectIndent(content));
+  }, [content, image]);
+  React.useEffect(() => () => indentRef.current(null), []);
   const edgeRef = useScrollEdge();
 
   const base = baseOf(tab.path);
   const deleted = change?.status === "deleted";
+  const modes: { value: Tab["mode"]; label: string; icon: React.ReactNode; disabled?: boolean }[] = [
+    ...(change ? [{ value: "diff" as const, icon: <FileDiff className="size-3" />, label: "Diff" }] : []),
+    { value: "edit" as const, icon: <FileCode2 className="size-3" />, label: "File", disabled: deleted },
+    ...(md ? [{ value: "preview" as const, icon: <Eye className="size-3" />, label: "Preview", disabled: deleted }] : []),
+  ];
 
   return (
     <>
@@ -137,18 +155,7 @@ export function FileView({ session, tab, doc, tree, change, wrap, onMode, onDoc,
             {change.deletions > 0 && <span className="text-destructive">−{change.deletions}</span>}
           </span>
         )}
-        {change && (
-          <Segmented
-            ariaLabel="View mode"
-            size="xs"
-            value={mode === "diff" ? "diff" : "edit"}
-            onChange={(v) => onMode(v)}
-            options={[
-              { value: "diff", icon: <FileDiff className="size-3" />, label: "Diff" },
-              { value: "edit", icon: <FileCode2 className="size-3" />, label: "File", disabled: deleted },
-            ]}
-          />
-        )}
+        {!image && modes.length > 1 && <Segmented ariaLabel="View mode" size="xs" value={modes.some((m) => m.value === mode) ? mode : "edit"} onChange={(v) => onMode(v)} options={modes} />}
         <Tooltip>
           <TooltipTrigger asChild>
             <button type="button" onClick={download} aria-label="Download" disabled={deleted} className="text-muted-foreground hover:text-foreground hover:bg-muted relative grid size-6 shrink-0 cursor-pointer place-items-center rounded before:absolute before:-inset-x-2 before:-inset-y-1 before:content-[''] disabled:cursor-default disabled:opacity-40">
@@ -159,13 +166,18 @@ export function FileView({ session, tab, doc, tree, change, wrap, onMode, onDoc,
         </Tooltip>
       </div>
       <div className="min-h-0 flex-1 overflow-hidden">
-        {error ? (
+        {image ? (
+          <ImageView session={session} path={tab.path} />
+        ) : error ? (
           <p className="text-muted-foreground px-4 py-6 text-meta">{error}</p>
         ) : loading && ((mode === "diff" && !diff) || (mode !== "diff" && content === null)) ? (
-          <p className="text-muted-foreground flex items-center gap-2 px-4 py-6 text-meta">
-            <Loader2 className="size-4 animate-spin" aria-hidden />
-            Loading {mode === "diff" ? "diff" : "file"}…
-          </p>
+          <CodeSkeleton what={mode === "diff" ? "diff" : "file"} />
+        ) : mode === "preview" && content !== null ? (
+          <div className="enter h-full overflow-auto">
+            <article className="mx-auto max-w-[76ch] px-8 py-7">
+              <Markdown className="prose-agent">{draft}</Markdown>
+            </article>
+          </div>
         ) : mode === "diff" && diff ? (
           <div ref={edgeRef} className="relative h-full">
             <div className="h-full overflow-auto">
@@ -197,6 +209,66 @@ export function FileView({ session, tab, doc, tree, change, wrap, onMode, onDoc,
         ) : null}
       </div>
     </>
+  );
+}
+
+/** A file still arriving, drawn as code-shaped lines (a gutter and an indented body), not a sentence with a spinner. */
+function CodeSkeleton({ what }: { what: "diff" | "file" }) {
+  const widths = [42, 68, 30, 80, 55, 24, 61, 47, 73, 36, 58, 29, 66, 40];
+  return (
+    <div className="flex flex-col gap-[11px] px-4 py-4" role="status" aria-live="polite" aria-busy aria-label={`Loading ${what}`}>
+      {widths.map((w, i) => (
+        <div key={i} className="flex items-center gap-4" aria-hidden>
+          <span className="ws-skel-line w-4 shrink-0 opacity-60" style={{ "--i": i } as React.CSSProperties} />
+          <span className="ws-skel-line" style={{ width: `${w}%`, marginLeft: `${(i % 4) * 14}px`, "--i": i } as React.CSSProperties} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** A picture, as an editor shows one: centred on a checker, its size and weight underneath. */
+function ImageView({ session, path }: { session: string; path: string }) {
+  const [src, setSrc] = React.useState<string | null>(null);
+  const [bytes, setBytes] = React.useState(0);
+  const [dims, setDims] = React.useState<{ w: number; h: number } | null>(null);
+  const [err, setErr] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    let url: string | null = null;
+    let cancelled = false;
+    api
+      .artifactBlob(session, path)
+      .then((b) => {
+        if (cancelled) return;
+        url = URL.createObjectURL(b);
+        setBytes(b.size);
+        setSrc(url);
+      })
+      .catch((e: unknown) => !cancelled && setErr(e instanceof Error ? e.message : String(e)));
+    return () => {
+      cancelled = true;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [session, path]);
+  if (err) return <p className="text-muted-foreground px-4 py-6 text-meta">{err}</p>;
+  if (!src) return <CodeSkeleton what="file" />;
+  const size = bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  const base = baseOf(path);
+  return (
+    <div className="enter flex h-full flex-col">
+      <div className="ws-checker flex min-h-0 flex-1 items-center justify-center overflow-auto p-6">
+        <img src={src} alt={base} onLoad={(e) => setDims({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })} className="shadow-e2 max-h-full max-w-full rounded-sm" />
+      </div>
+      <p className="stamp text-muted-foreground tabular flex h-7 shrink-0 items-center gap-3 border-t px-3" aria-label="Image details">
+        {dims && (
+          <span>
+            {dims.w} × {dims.h}
+          </span>
+        )}
+        <span>{size}</span>
+        <span className="ml-auto">{base.slice(base.lastIndexOf(".") + 1).toLowerCase()}</span>
+      </p>
+    </div>
   );
 }
 
