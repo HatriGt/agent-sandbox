@@ -194,7 +194,7 @@ export function ShellBar({
     />
   );
   return (
-    <div className="bg-sidebar hidden h-10 shrink-0 items-stretch gap-2 border-b pr-3 pl-1.5 md:flex">
+    <div data-shell-bar className="bg-sidebar hidden h-10 shrink-0 items-stretch gap-2 pr-3 pl-1.5 md:flex">
       <Tooltip>
         <TooltipTrigger asChild>
           <Button variant="ghost" size="icon-sm" onClick={onToggleSidebar} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} aria-pressed={!collapsed} className="my-auto">

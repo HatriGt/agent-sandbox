@@ -60,6 +60,7 @@ export function StatusBar({
     <div
       role="contentinfo"
       aria-label="Status"
+      data-status-bar
       className="bg-sidebar text-muted-foreground flex h-6 shrink-0 items-center gap-0.5 overflow-hidden border-t px-1.5 text-micro whitespace-nowrap"
     >
       <Section onClick={onFleet} title="Fleet view">
