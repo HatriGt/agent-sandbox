@@ -3,7 +3,7 @@ import { ChevronRight, FilePlus2, MoreHorizontal, PenLine, Trash2 } from "lucide
 import { AnimatePresence, motion } from "motion/react";
 import { useReducedMotion } from "@/lib/motion-pref";
 import type { SkillFile } from "@/lib/skillImport";
-import { FileIcon, FolderIcon } from "@/lib/vscodeIcons";
+import { FileIcon, FolderIcon } from "@/lib/iconTheme";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Collapse } from "@/components/ui/collapse";
@@ -231,7 +231,7 @@ function TreeNodeRow({
         style={{ paddingLeft: `${6 + depth * 14}px` }}
       >
         <ChevronRight className={cn("text-muted-foreground size-3 shrink-0 transition-transform duration-150 ease-out", open && "rotate-90")} aria-hidden />
-        <FolderIcon name={node.name} open={open} size={14} />
+        <FolderIcon open={open} size={14} />
         <span className="text-muted-foreground min-w-0 truncate text-meta">{node.name}</span>
       </button>
       <Collapse open={open}>

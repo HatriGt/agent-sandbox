@@ -4,7 +4,7 @@ import { DropdownMenu as DM } from "radix-ui";
 import { toast } from "sonner";
 import { api, ApiError, type ChangedFile } from "@/lib/api";
 import { parseUnifiedDiff, diffForNewFile, type ParsedDiff } from "@/lib/diff";
-import { FileIcon, FolderIcon } from "@/lib/vscodeIcons";
+import { FileIcon, FolderIcon } from "@/lib/iconTheme";
 import { CodeEditor, type CodeEditorHandle, type EditorStatus } from "@/components/CodeEditor";
 import { Segmented } from "@/components/ui/segmented";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -273,7 +273,7 @@ function DirItem({ node, current, onOpen }: { node: Node; current: string; onOpe
   return (
     <DM.Sub>
       <DM.SubTrigger className={cn(MENU_ITEM, on && "bg-accent/60")}>
-        <FolderIcon name={node.name} open={on} />
+        <FolderIcon open={on} />
         <span className="truncate">{node.name}</span>
         <ChevronRight className="ml-auto size-3.5" aria-hidden />
       </DM.SubTrigger>
