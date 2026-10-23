@@ -1,56 +1,32 @@
 import { cn } from "@/lib/utils";
-import { FileIcon } from "@/lib/vscodeIcons";
 
 /**
- * File-type marks for lists: a two-letter monogram in the language's conventional colour, the way
- * editors do it. Vector-crisp at 16px, no icon-font dependency; unknown types fall back to a neutral
- * mark. Colours are chosen to read on both themes.
+ * File-type marks for lists: a neutral square with the extension in mono. The type is read from the
+ * letters, not from a brand colour, so a dock of changed files stays on the console's palette (the
+ * editor chrome keeps the coloured icon theme through `FileIcon` directly).
  */
-const KINDS: Record<string, { mark: string; color: string }> = {
-  ts: { mark: "TS", color: "bg-[#3178c6] text-white" },
-  tsx: { mark: "TS", color: "bg-[#3178c6] text-white" },
-  js: { mark: "JS", color: "bg-[#f7df1e] text-black" },
-  jsx: { mark: "JS", color: "bg-[#f7df1e] text-black" },
-  mjs: { mark: "JS", color: "bg-[#f7df1e] text-black" },
-  json: { mark: "{}", color: "bg-[#cbcb41] text-black" },
-  md: { mark: "M↓", color: "bg-[#519aba] text-white" },
-  mdx: { mark: "M↓", color: "bg-[#519aba] text-white" },
-  css: { mark: "#", color: "bg-[#563d7c] text-white" },
-  scss: { mark: "S", color: "bg-[#c6538c] text-white" },
-  html: { mark: "<>", color: "bg-[#e34c26] text-white" },
-  py: { mark: "Py", color: "bg-[#3572a5] text-white" },
-  go: { mark: "Go", color: "bg-[#00add8] text-white" },
-  rs: { mark: "Rs", color: "bg-[#dea584] text-black" },
-  java: { mark: "J", color: "bg-[#b07219] text-white" },
-  kt: { mark: "Kt", color: "bg-[#a97bff] text-white" },
-  rb: { mark: "Rb", color: "bg-[#701516] text-white" },
-  php: { mark: "Php", color: "bg-[#4f5d95] text-white" },
-  sh: { mark: ">_", color: "bg-[#89e051] text-black" },
-  bash: { mark: ">_", color: "bg-[#89e051] text-black" },
-  yml: { mark: "Y", color: "bg-[#cb171e] text-white" },
-  yaml: { mark: "Y", color: "bg-[#cb171e] text-white" },
-  toml: { mark: "T", color: "bg-[#9c4221] text-white" },
-  sql: { mark: "SQL", color: "bg-[#e38c00] text-white" },
-  svg: { mark: "◇", color: "bg-[#ffb13b] text-black" },
-  png: { mark: "▣", color: "bg-muted-foreground/40 text-foreground" },
-  jpg: { mark: "▣", color: "bg-muted-foreground/40 text-foreground" },
-  lock: { mark: "🔒", color: "bg-muted text-foreground" },
-  env: { mark: ".e", color: "bg-[#ecd53f] text-black" },
-  dockerfile: { mark: "🐳", color: "bg-[#384d54] text-white" },
-  txt: { mark: "≡", color: "bg-muted-foreground/40 text-foreground" },
-};
+const MARKS: Record<string, string> = { ts: "TS", tsx: "TS", js: "JS", jsx: "JS", mjs: "JS", cjs: "JS", json: "{}", md: "MD", mdx: "MD", css: "#", scss: "#", html: "<>", py: "PY", go: "GO", rs: "RS", java: "JV", kt: "KT", rb: "RB", php: "PHP", sh: ">_", bash: ">_", yml: "YML", yaml: "YML", toml: "TML", sql: "SQL", svg: "SVG", png: "IMG", jpg: "IMG", jpeg: "IMG", gif: "IMG", webp: "IMG", lock: "LCK", env: ".e", dockerfile: "DK", txt: "TXT" };
 
-export function fileKind(path: string): { mark: string; color: string } {
+function markOf(path: string): string {
   const base = path.slice(path.lastIndexOf("/") + 1).toLowerCase();
-  if (base === "dockerfile") return KINDS.dockerfile;
-  if (base.startsWith(".env")) return KINDS.env;
+  if (base === "dockerfile") return MARKS.dockerfile;
+  if (base.startsWith(".env")) return MARKS.env;
   const ext = base.includes(".") ? base.slice(base.lastIndexOf(".") + 1) : "";
-  return KINDS[ext] ?? { mark: ext ? ext.slice(0, 3).toUpperCase() : "·", color: "bg-muted text-muted-foreground" };
+  return MARKS[ext] ?? (ext ? ext.slice(0, 3).toUpperCase() : "·");
 }
 
-/** The file mark used across the console: the VS Code-style icon theme (brand glyphs, coloured). */
+/** The file mark used across the console's lists and docks: a 16px neutral square, the extension in mono. */
 export function FileMark({ path, className }: { path: string; className?: string }) {
-  return <FileIcon path={path} className={cn("size-4", className)} />;
+  const mark = markOf(path);
+  return (
+    <span
+      className={cn("bg-muted-foreground/20 text-muted-foreground grid size-4 shrink-0 place-items-center rounded-[4px] font-mono text-[8px] leading-none font-semibold", mark.length > 2 && "text-[7px] tracking-tight", className)}
+      aria-hidden
+      data-file-mark
+    >
+      {mark}
+    </span>
+  );
 }
 
 /** Language hint for the syntax highlighter, from the extension. */

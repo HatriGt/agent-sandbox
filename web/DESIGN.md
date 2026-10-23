@@ -360,9 +360,11 @@ until destroyed" in the Fleet time-left column. Off by default; per sandbox.
 
 ## File marks
 
-`lib/fileIcon.tsx`: a two-letter monogram in the language's conventional colour (TS blue, JS yellow,
-MD steel-blue, Py …) used in the `@` menu, composer chips and the changes list — the editor
-convention, vector-crisp, no icon font.
+`lib/fileIcon.tsx`: a 16px neutral square with the extension in mono (TS, JS, MD, {} …) used in the
+`@` menu, composer chips and the changes dock. The type is read from the letters, not a brand colour,
+so a dock of changed files stays on the console's palette. Editor chrome (tabs, file tree) keeps the
+coloured VS Code icon theme through `lib/vscodeIcons` directly, where a coloured mark is the
+convention the reader expects.
 
 ## Resilience
 
@@ -991,4 +993,25 @@ Evidence: `.shots/r6-frame.mjs` (18 checks) measures the rail tone against the s
 themes, the main pane behind the sheet on the rail tone, the corner radius and the hairline sides,
 no bottom border on the shell bar, the status bar on the rail tone, the sheet's offset from the
 rail, and the flush pane at 390. Shots in `.shots/r6/`.
+
+## Round: one calm transcript column (2026-10-23)
+
+The transcript nested bordered boxes three deep. A tool step was a bordered card inside the tinted,
+bordered "Worked for Xs" surface, and a shell command was a dark bordered terminal panel with its own
+header row inside that. The changes dock's marks were brand icons (TypeScript blue, vitest yellow)
+that fought a muted palette. Measured on the Trace density fixture with every fold open: 42 elements
+with a visible border in a done thread, 32 four-sided surfaces over 24px tall, a tool step with a
+boxed ancestor and three boxed levels inside it.
+
+Decision: hierarchy by spacing, tone and type, not by nested borders. The work group is a bare list
+whose only structure is the glyph column and its hairline. Step glyphs are 20% tints, not rings. A
+shell command is a flat row with the same anatomy as every other step (glyph, `$ cmd` in mono, tail
+with exit chip, duration, chevron) and its output opens under it as the dark block. Every dark panel
+dropped its white hairline, since the ground tone already separates it. State marks keep their
+borders (a secret that needs you, a queued item, a chosen answer). The test results card stays as the
+one bordered surface in the column, because that is the result the reader came for.
+
+After: 23 bordered elements (21 running), 10 four-sided surfaces (8 running), no boxed ancestor
+above a step, one boxed level inside. File marks went from chroma 0.184 to 0.016 light and 0.012
+dark. Evidence: `.shots/r6-trace.mjs` (32 checks), shots in `.shots/r6/trace-*`.
 

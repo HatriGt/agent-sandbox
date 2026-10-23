@@ -16,7 +16,8 @@ import { ATTACHMENT_RE, SessionReposContext, useSession } from "@/lib/session-co
 import { SkillMark } from "@/lib/skillGlyph";
 import { parseMcpName } from "@/lib/mcp";
 import { McpItem } from "./McpItem";
-import { PanelFold, TraceOutput, VisualRawSwitch, useOutputVisual } from "./TraceOutput";
+import { TraceOutput, VisualRawSwitch, useOutputVisual } from "./TraceOutput";
+import { outputStats } from "@/lib/highlight";
 import { Lightbox } from "@/components/ui/lightbox";
 import { Collapse } from "@/components/ui/collapse";
 import { Swap } from "@/components/ui/swap";
@@ -389,7 +390,7 @@ function SkillItem({ event, live }: { event: ToolEvent; live?: boolean }) {
         <span className={cn("rule-draw h-px min-w-6 flex-1", event.failed ? "bg-destructive/30" : "bg-live/30")} aria-hidden />
       </div>
       <Collapse open={open && !!extra}>
-        <pre className="bg-trace text-trace-fg/80 mt-2 ml-9 max-h-72 overflow-auto rounded-md border border-white/8 px-3 py-2 font-mono text-code whitespace-pre-wrap">{extra}</pre>
+        <pre className="bg-trace text-trace-fg/80 mt-2 ml-9 max-h-72 overflow-auto rounded-md px-3 py-2 font-mono text-code whitespace-pre-wrap">{extra}</pre>
       </Collapse>
     </div>
   );
@@ -563,10 +564,11 @@ export function ToolStepsList({ events, live, className, plain }: { events: Tool
       // opacity stays a short tween so the fade never lags behind the reveal.
       transition={still ? { duration: 0 } : { height: SPRING, opacity: { duration: 0.16, ease: [0.22, 1, 0.36, 1] } }}
       // Capped: a 60-step group opened by accident must not shove the conversation a screen down.
-      // The timeline sits on its own quiet surface, so "work" reads apart from the agent's prose.
+      // No surface of its own: the glyph column and its hairline are the only structure, so the
+      // work reads as part of the column, one tone quieter than the prose, not as a card in it.
       // No `overscroll-contain` here: on a scroll container it blocks scroll chaining even when
       // the list is SHORTER than the cap, so a wheel over an open timeline scrolled nothing.
-      className={cn("relative max-h-[32rem] overflow-y-auto", plain ? "mt-1" : "work-surface mt-2", className)}
+      className={cn("relative max-h-[32rem] overflow-y-auto", plain ? "mt-1" : "mt-2 pl-0.5", className)}
     >
       {rows.map((row, r) => {
         const lastRow = r === rows.length - 1;
@@ -587,16 +589,13 @@ export function ToolStepsList({ events, live, className, plain }: { events: Tool
             animate={{ opacity: 1, x: 0 }}
             transition={still ? { duration: 0 } : { ...SPRING, delay: Math.min(i, 8) * 0.03 }}
             className="relative flex gap-3 pb-2 last:pb-0"
+            data-step
           >
             <span className="relative flex w-4 shrink-0 flex-col items-center">
               <span
                 className={cn(
-                  "z-10 mt-2 grid size-3.5 place-items-center rounded-full border text-[8.5px] font-semibold tabular-nums transition-colors duration-200",
-                  running
-                    ? "border-live bg-live/20 text-live"
-                    : e.failed
-                      ? "border-destructive/60 bg-destructive/10 text-destructive"
-                      : "border-line-strong bg-card text-muted-foreground"
+                  "z-10 mt-2 grid size-3.5 place-items-center rounded-full text-[8.5px] font-semibold tabular-nums transition-colors duration-200",
+                  running ? "bg-live/20 text-live" : e.failed ? "bg-destructive/10 text-destructive" : "bg-muted-foreground/20 text-muted-foreground"
                 )}
               >
                 <StatusGlyph state={state}>
@@ -653,7 +652,7 @@ function ShellItem({ event, live }: { event: ToolEvent; live?: boolean }) {
         </div>
         {/* Both stay mounted: flipping to Raw and back must not reset the live view's tally or scroll. */}
         <div className={cn("min-w-0 [&>*]:my-0", raw && "hidden")}>{visual}</div>
-        {raw && <TraceOutput text={event.result!} mode="term" className="bg-trace rounded-md border border-white/8" />}
+        {raw && <TraceOutput text={event.result!} mode="term" className="bg-trace rounded-md" />}
         {missing && <ResolveSecretRow name={missing} />}
       </div>
     );
@@ -667,52 +666,78 @@ function ShellItem({ event, live }: { event: ToolEvent; live?: boolean }) {
         </p>
         <TestResultsCard report={report} onRaw={() => setOpen((v) => !v)} rawOpen={open} />
         <Collapse open={open}>
-          <TraceOutput text={event.result!} mode="term" className="bg-trace rounded-md border border-white/8" />
+          <TraceOutput text={event.result!} mode="term" className="bg-trace rounded-md" />
         </Collapse>
       </div>
     );
   }
+  // The plain terminal is a flat row like any other step (glyph, `$ cmd`, the tail), and the dark
+  // output panel sits under it when open. The row IS the command, so no panel header repeats it.
+  const arg = event.arg ?? "";
+  const firstLine = arg.split("\n")[0];
+  const multiline = arg.includes("\n");
+  const stats = hasOutput ? outputStats(event.result!) : null;
+  const lines = hasOutput ? lineCount(event.result!) : 0;
   return (
     <div className="enter min-w-0">
-      <div
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        disabled={!hasOutput}
+        aria-expanded={hasOutput ? open : undefined}
         className={cn(
-          "bg-trace overflow-hidden rounded-md border border-white/8",
-          live && "ring-live/40 ring-1"
+          "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1 text-left text-meta",
+          hasOutput && "hover:bg-muted cursor-pointer",
+          live && "bg-live/6"
         )}
       >
-        <div className="flex items-center gap-2 border-b border-white/8 px-3 py-1.5">
-          <StatusGlyph state={live ? "running" : event.failed ? "failed" : "done"}>
-            {live ? (
-              <Loader2 className="text-live size-3 animate-spin" aria-hidden />
-            ) : event.failed ? (
-              <AlertTriangle className="text-destructive size-3" aria-hidden />
-            ) : (
-              <Terminal className="text-trace-fg/60 size-3" aria-hidden />
-            )}
-          </StatusGlyph>
-          <span className="label text-trace-fg/60">{event.name}</span>
-          {live && <span className="label text-live">running</span>}
-          {!live && event.failed && (exit !== null ? <OutcomeChip tone="destructive">exit {exit}</OutcomeChip> : <span className="label text-destructive">failed</span>)}
-          <DurationChip event={event} running={live} className={cn("ml-auto", !live && !event.failed && "text-trace-fg/45")} />
-          {hasOutput && <PanelFold open={open} text={event.result!} onToggle={() => setOpen((v) => !v)} />}
-        </div>
-        <pre className="text-trace-fg px-3 py-2 font-mono text-code whitespace-pre-wrap [overflow-wrap:anywhere]">
-          <span className="text-ok mr-2 shrink-0 select-none" aria-hidden>
+        <StatusGlyph state={live ? "running" : event.failed ? "failed" : "done"}>
+          {live ? (
+            <Loader2 className="text-live size-3.5 animate-spin" aria-hidden />
+          ) : event.failed ? (
+            <AlertTriangle className="text-destructive size-3.5" aria-hidden />
+          ) : (
+            <Terminal className="text-muted-foreground size-3.5" aria-hidden />
+          )}
+        </StatusGlyph>
+        <code className="min-w-0 truncate font-mono text-micro">
+          <span className={cn("mr-1.5 select-none", event.failed ? "text-destructive" : live ? "text-live" : "text-ok")} aria-hidden>
             $
           </span>
-          {event.arg ?? ""}
+          <span className="text-foreground">{firstLine}</span>
+          {multiline && <span className="text-faint"> …</span>}
           {live && !hasOutput && <span className="caret text-live" aria-hidden>▍</span>}
-        </pre>
-        <Collapse open={hasOutput && open}>
-          <TraceOutput text={event.result!} mode="term" className="border-t border-white/8" />
-        </Collapse>
-        <Collapse open={hasOutput && !open}>
-          <button type="button" onClick={() => setOpen(true)} className="text-trace-fg/60 hover:text-trace-fg flex w-full cursor-pointer items-center gap-2 border-t border-white/8 px-3 py-1.5 text-left font-mono text-micro">
-            <span className="text-trace-fg/40 select-none">›</span>
-            <span className="truncate">{resultSummary(event.result)}</span>
-          </button>
-        </Collapse>
-      </div>
+        </code>
+        <span className="ml-auto flex shrink-0 items-center gap-2 pl-1">
+          {live && <span className="label text-live">running</span>}
+          {!live && event.failed && (exit !== null ? <OutcomeChip tone="destructive">exit {exit}</OutcomeChip> : <span className="label text-destructive">failed</span>)}
+          {stats && stats.errors > 0 ? (
+            <span className="label text-destructive">{stats.errors} {stats.errors === 1 ? "error" : "errors"}</span>
+          ) : stats && stats.warns > 0 ? (
+            <span className="label text-attention-text">{stats.warns} {stats.warns === 1 ? "warning" : "warnings"}</span>
+          ) : lines > 1 ? (
+            <span className="label text-faint">{lines} lines</span>
+          ) : null}
+          <DurationChip event={event} running={live} />
+          {hasOutput && <ChevronRight className={cn("text-muted-foreground size-3.5 transition-transform duration-150", open && "rotate-90")} aria-hidden />}
+        </span>
+      </button>
+      <Collapse open={hasOutput && open}>
+        <div className="bg-trace mt-2 ml-6 overflow-hidden rounded-md">
+          {multiline && (
+            <pre className="text-trace-fg border-b border-white/8 px-3 py-2 font-mono text-code whitespace-pre-wrap [overflow-wrap:anywhere]">
+              <span className="text-ok mr-2 shrink-0 select-none" aria-hidden>
+                $
+              </span>
+              {arg}
+            </pre>
+          )}
+          <TraceOutput text={event.result ?? ""} mode="term" />
+        </div>
+      </Collapse>
+      <Collapse open={hasOutput && !open}>
+        <p className={cn("stamp ml-8 truncate", event.failed ? "text-destructive" : "text-muted-foreground")}>{resultSummary(event.result)}</p>
+      </Collapse>
       {missing && <ResolveSecretRow name={missing} />}
     </div>
   );
@@ -814,7 +839,7 @@ function ResolveSecretRow({ name }: { name: string }) {
 /** The per-edit ⟦diff⟧ block: -old/+new lines from the formatter, tinted like a diff. */
 function EditDiff({ diff }: { diff: string }) {
   return (
-    <pre className="bg-trace mt-2 ml-6 max-h-72 overflow-auto rounded-md border border-white/8 px-3 py-2 font-mono text-code whitespace-pre-wrap">
+    <pre className="bg-trace mt-2 ml-6 max-h-72 overflow-auto rounded-md px-3 py-2 font-mono text-code whitespace-pre-wrap">
       {diff.split("\n").map((l, i) => (
         <div
           key={i}
@@ -907,9 +932,9 @@ function LookupFold({ events, indexes, all, last, renderStep }: { events: ToolEv
   const ms = events.reduce((n, e) => n + (e.ms ?? 0), 0);
   const stamped = events.some((e) => e.ms !== undefined);
   return (
-    <motion.li initial={still ? false : { opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }} transition={still ? { duration: 0 } : SPRING} className="relative flex gap-3 pb-2 last:pb-0">
+    <motion.li initial={still ? false : { opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }} transition={still ? { duration: 0 } : SPRING} className="relative flex gap-3 pb-2 last:pb-0" data-step>
       <span className="relative flex w-4 shrink-0 flex-col items-center">
-        <span className="border-line-strong bg-card text-muted-foreground z-10 mt-2 grid size-3.5 place-items-center rounded-full border">
+        <span className="bg-muted-foreground/20 text-muted-foreground z-10 mt-2 grid size-3.5 place-items-center rounded-full">
           <FileSearch className="size-2" strokeWidth={2.5} aria-hidden />
         </span>
         {!last && <span className="bg-border absolute top-[1.4rem] bottom-0 w-px" aria-hidden />}
@@ -1018,7 +1043,7 @@ function StepItem({ event, live }: { event: ToolEvent; live?: boolean }) {
         {event.result && visual && !raw ? (
           <div className="mt-1.5 ml-6 min-w-0 [&>*]:my-0">{visual}</div>
         ) : (
-          event.result && <TraceOutput text={event.result} mode="term" className="bg-trace mt-2 ml-6 overflow-hidden rounded-md border border-white/8" />
+          event.result && <TraceOutput text={event.result} mode="term" className="bg-trace mt-2 ml-6 overflow-hidden rounded-md" />
         )}
       </Collapse>
       <Collapse open={!!event.result && !open && !!summary}>
@@ -1061,7 +1086,7 @@ function DumpItem({ text }: { text: string }) {
         </Collapse>
       </button>
       <Collapse open={open}>
-        <pre className="bg-trace text-trace-fg/80 mt-1.5 max-h-96 overflow-auto rounded-md border border-white/8 px-3 py-2 font-mono text-code whitespace-pre-wrap">{text}</pre>
+        <pre className="bg-trace text-trace-fg/80 mt-1.5 max-h-96 overflow-auto rounded-md px-3 py-2 font-mono text-code whitespace-pre-wrap">{text}</pre>
       </Collapse>
     </div>
   );
@@ -1156,7 +1181,7 @@ export function WorkingIndicator({ label = "Working", detail }: { label?: string
       <motion.div
         layout={!still}
         transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-        className="bg-card inline-flex max-w-full items-center gap-2.5 overflow-hidden rounded-full border py-1.5 pr-3.5 pl-2 text-meta shadow-e1"
+        className="bg-card inline-flex max-w-full items-center gap-2.5 overflow-hidden rounded-full py-1.5 pr-3.5 pl-2 text-meta shadow-e1"
         aria-hidden
       >
         <span className="orb shrink-0" />
@@ -1275,7 +1300,7 @@ function AttachmentImage({ path }: { path: string }) {
   }, [session, path]);
   const name = path.slice(path.lastIndexOf("/") + 1);
   const [open, setOpen] = React.useState(false);
-  if (failed) return <span className="stamp text-muted-foreground rounded-md border px-2 py-1">{name}</span>;
+  if (failed) return <span className="stamp text-muted-foreground bg-muted rounded-md px-2 py-1">{name}</span>;
   return (
     <>
       <button type="button" onClick={() => src && setOpen(true)} title={name} aria-label={`Open ${name}`} className={cn("bg-muted hover:border-line-strong block max-h-56 max-w-[16rem] cursor-zoom-in overflow-hidden rounded-xl border transition-[border-color,transform] hover:scale-[1.01]", !src && "size-24 animate-pulse")}>
