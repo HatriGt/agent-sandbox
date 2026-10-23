@@ -6,7 +6,8 @@
 import { chromium } from "file:///C:/Users/ak/AppData/Roaming/npm/node_modules/@playwright/mcp/node_modules/playwright/index.mjs";
 import { openShell, boxes } from "./shell-mock.mjs";
 
-const tag = process.argv[process.argv.indexOf("--tag") + 1] || "now";
+const tagAt = process.argv.indexOf("--tag");
+const tag = tagAt > 0 ? process.argv[tagAt + 1] : "now";
 const out = (name) => `.shots/r8/wording-${tag}-${name}.png`;
 const now = Math.floor(Date.now() / 1000);
 const waitingBoxes = [{ ...boxes[0], runState: "waiting", question: "Patch the retry path or revert the whole commit?", lastOutputAt: now - 30 }, ...boxes.slice(1)];
