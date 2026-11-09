@@ -208,16 +208,40 @@ test("MCP_DIRECT_BIN_JS: installed npx servers run their bin directly; anything 
       },
     })
   );
-  execFileSync(process.execPath, ["-e", MCP_DIRECT_BIN_JS, file], { env: { ...process.env, R } });
+  const out = execFileSync(process.execPath, ["-e", MCP_DIRECT_BIN_JS, file, join(root, "absent.json")], { env: { ...process.env, R, D: " nope-mcp  @cap-js/other " } }).toString();
   const s = JSON.parse(readFileSync(file, "utf8")).mcpServers;
+  assert.equal(s.notInstalled, undefined, "a spec the pre-install reported (env D) loses its server: npx would download it mid-run into the full disk");
+  assert.equal(out.trim(), "mcp-drop:notInstalled", "the drop is printed once for the controller log");
   assert.equal(s.cds.command, process.execPath);
   assert.deepEqual(s.cds.args, [join(R, "@cap-js/mcp-server", "index.js")]);
   assert.deepEqual(s.chrome.args, [join(R, "chrome-devtools-mcp", "build/bin.js"), "--headless"], "server args survive, @latest is not re-resolved");
   assert.deepEqual(s.remote.args, [join(R, "mcp-remote", "dist/proxy.js"), "https://mcp.example/x"], "the bin named after the package wins");
   assert.deepEqual(s.remote.env, { A: "1" });
-  for (const k of ["ambiguous", "absentBin", "notInstalled", "oddFlag"]) assert.equal(s[k].command, "npx", `${k} must stay on npx`);
+  for (const k of ["ambiguous", "absentBin", "oddFlag"]) assert.equal(s[k].command, "npx", `${k} must stay on npx`);
   assert.equal(s.http.url, "https://x");
   if (process.platform !== "win32") assert.equal(statSync(file).mode & 0o777, 0o600);
+});
+
+test("preinstallSh: a package is installed only when the disk can take it, a failed install is removed, and both are reported for the drop", async () => {
+  const { preinstallSh, MCP_MIN_FREE_KB, mcpInstallNotes } = await import("../src/msb.js");
+  assert.equal(preinstallSh([]), "true");
+  const sh = preinstallSh(["btp-mcp-server", "chrome-devtools-mcp@latest"]);
+  // Presence by directory (the spec's @version never names the directory).
+  assert.ok(sh.includes(`[ -d "$R"/'chrome-devtools-mcp' ] ||`));
+  // Free space is read before each install and compared against the floor.
+  assert.match(sh, /df -Pk \//);
+  assert.ok(sh.includes(`-lt ${MCP_MIN_FREE_KB} ]`));
+  assert.ok(MCP_MIN_FREE_KB >= 250 * 1024 && MCP_MIN_FREE_KB <= 400 * 1024, "the floor is the largest server package in use plus the run's own writes");
+  // The cache is cleaned after EVERY install, not once at the end, so two packages never stack their tarballs.
+  assert.equal((sh.match(/npm cache clean --force/g) ?? []).length, 4, "a clean per success and per failure, per package");
+  assert.ok(!/\[ -n "\$I" \]/.test(sh), "the old end-of-run clean is gone");
+  // A skip and a failure both print their spec and mark it for the rewriter's drop list.
+  assert.ok(sh.includes(`echo mcp-skip:'btp-mcp-server'" free=\${F}k"; D="$D "'btp-mcp-server'`));
+  assert.ok(sh.includes(`echo mcp-fail:'btp-mcp-server'; D="$D "'btp-mcp-server'; rm -rf "$R"/'btp-mcp-server'`));
+  assert.ok(sh.includes("npm i -g --no-audit --no-fund 'chrome-devtools-mcp@latest'"));
+  assert.ok(sh.startsWith(`R=/usr/local/lib/node_modules; [ -d "$R" ] || R=$(npm root -g); D=; `), "D starts empty so the rewriter sees only this run's decisions");
+  assert.ok(sh.endsWith("; true"), "best-effort: the exec never fails the run start");
+  assert.deepEqual(mcpInstallNotes("x\nmcp-skip:'btp-mcp-server' free=120000k\nnoise\n mcp-drop:btp-cf \n"), ["mcp-skip:'btp-mcp-server' free=120000k", "mcp-drop:btp-cf"]);
 });
 
 test("omp boxes boot with 2 vCPUs, default boxes keep the runtime default", async () => {

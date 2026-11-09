@@ -478,3 +478,34 @@ with the plain image. `docker save | msb load` imports the result, and the Docke
 afterwards. The build is one pruned `RUN`: it drops the onnxruntime CUDA/TensorRT providers
 (~700 MB), non-linux-x64 binaries, bun's hardlinked install cache, and the baseline CPU builds when
 the host has AVX2. That leaves a 1.44 GB layer. Remove old tags with `msb image rm`.
+
+## The claude snapshot carries the MCP server packages, on a 3G disk
+
+Every task start used to `npm i -g` the `npx …` MCP servers of the caller's config into the box
+(`installMcpConfig` → `preinstallSh`), because the `agent-base` snapshot held only Claude Code. On
+the 1G claude tier that was ~30s of every start, and from 2026-10-26 (`@cap-js/mcp-server` 0.1.0
+pulled in onnxruntime; `btp-mcp-server` ships two 107 MB bun binaries) it no longer fit: the
+install plus npm's tarball cache took the disk to 0 bytes free, and every later write of the run —
+`git config`, the PR-only hooks, the agent log — failed with ENOSPC. The box booted, the task was
+accepted, and the agent died before turn one; the dashboard showed a box that started and stopped.
+Fifty-five runs went that way before anyone looked at `df` inside a box.
+
+Two things changed. The pre-install is now disk-guarded (it reads free space before each package,
+cleans the cache after each one, removes a failed install, and DROPS a server it could not install
+from the run's config instead of leaving `npx` to download it mid-run — each decision is logged as
+`[mcp] <box>: mcp-skip:… / mcp-fail:… / mcp-drop:…`). And the claude snapshot is baked with the
+deployment's servers already installed, on a disk that holds them:
+
+```bash
+ssh hostbrr "cd /root/agent-sandbox-deploy && docker compose exec -T -e MSB_ROOT_DISK=3G -e BAKE_NPX='btp-mcp-server,@cap-js/mcp-server,chrome-devtools-mcp@latest,hana-mcp-server' agent-sandbox node dist/bake-snapshot.js agent-base-3g"
+# boot-test, then set MSB_SNAPSHOT=agent-base-3g in .env, `docker compose up -d`, and remove the
+# warm box the pool booted from the old snapshot (msb rm --force <pool-…>) so it reseeds.
+```
+
+A snapshot pins the root disk of every box booted from it, so `MSB_ROOT_DISK` matters at BAKE
+time, not at boot (createBox omits `--root-disk` for snapshot boots). The upper is copied sparsely
+(a 1G snapshot with 398 MB of content costs 398 MB per box and boots in ~5s), so the 3G tier costs
+host disk only for what the packages actually weigh. `BAKE_NPX` is the explicit list: the bake
+runs outside a login, so it cannot read the encrypted per-user MCP stores, only the operator's
+legacy file. When a user adds a new `npx` server, the guard installs it per run if it fits, and
+the next rebake makes it free.

@@ -1115,18 +1115,23 @@ export function npxPackagesOf(conf: { mcpServers: Record<string, unknown> }): st
 export const MCP_DIRECT_BIN_JS = String.raw`
 const fs = require("fs"), path = require("path");
 const R = process.env.R || "/usr/local/lib/node_modules";
+// Specs the pre-install could not put on disk (env D, space-separated): their servers are DROPPED
+// from the config rather than left on npx, which would download them mid-run into the same disk.
+const DROP = new Set((process.env.D || "").split(/\s+/).filter(Boolean));
+const dropped = new Set();
 const NPX_FLAGS = new Set(["-y", "--yes", "-q", "--quiet"]);
 for (const file of process.argv.slice(1)) {
   let conf;
   try { conf = JSON.parse(fs.readFileSync(file, "utf8")); } catch { continue; }
   let changed = false;
-  for (const s of Object.values(conf.mcpServers || {})) {
+  for (const [sname, s] of Object.entries(conf.mcpServers || {})) {
     if (!s || s.type !== "stdio" || s.command !== "npx") continue;
     const args = s.args || [];
     let i = 0;
     while (i < args.length && NPX_FLAGS.has(args[i])) i++;
     const spec = args[i];
     if (!spec || spec.startsWith("-") || !/^(@[\w.-]+\/)?[\w.-]+(@[\w.^~-]+)?$/.test(spec)) continue;
+    if (DROP.has(spec)) { delete conf.mcpServers[sname]; dropped.add(sname); changed = true; continue; }
     const at = spec.indexOf("@", 1);
     const name = at > 0 ? spec.slice(0, at) : spec;
     let pkg;
@@ -1147,6 +1152,7 @@ for (const file of process.argv.slice(1)) {
   }
   if (changed) fs.writeFileSync(file, JSON.stringify(conf), { mode: 0o600 });
 }
+if (dropped.size) console.log("mcp-drop:" + [...dropped].join(","));
 `;
 
 export async function installMcpConfig(cfg: Config, box: string): Promise<void> {
@@ -1161,9 +1167,9 @@ export async function installMcpConfig(cfg: Config, box: string): Promise<void> 
     // ONE exec for the config writes, the package pre-install AND the npx→direct-bin rewrite: each
     // exec is an SSH→msb→guest round trip on the task-start critical path.
     const direct = specs.length
-      ? `; R="$R" node -e ${shellQuote(MCP_DIRECT_BIN_JS)} ${MCP_CONFIG_PATH} ${OMP_MCP_CONFIG_PATH} || true`
+      ? `; R="$R" D="$D" node -e ${shellQuote(MCP_DIRECT_BIN_JS)} ${MCP_CONFIG_PATH} ${OMP_MCP_CONFIG_PATH} || true`
       : "";
-    await exec(
+    const r = await exec(
       cfg,
       box,
       `printf '%s' ${shellQuote(json)} > ${MCP_CONFIG_PATH} && chmod 600 ${MCP_CONFIG_PATH} && ` +
@@ -1171,16 +1177,39 @@ export async function installMcpConfig(cfg: Config, box: string): Promise<void> 
         `; ${preinstallSh(specs)}${direct}`,
       { timeoutMs: 300_000 }
     );
+    // A server that could not be installed on this disk is dropped for the run, not fatal — but it
+    // must be visible somewhere, and the run log is the operator's first stop.
+    const notes = mcpInstallNotes(r.stdout ?? "");
+    if (notes.length) console.error(`[mcp] ${box}: ${notes.join("; ")}`);
   } catch (e) {
     console.error(`[mcp] could not install MCP config into ${box}:`, (e as Error).message);
   }
 }
 
 /**
+ * The root disk must keep at least this much free for a run to live (the repo copy, the agent's
+ * log and transcript, git's lock files, the hooks); an MCP package that would eat into it is not
+ * installed. 300M: the biggest server package in use unpacks to ~260M, so anything above this
+ * line is a box with room, anything below is one that would have died.
+ */
+export const MCP_MIN_FREE_KB = 307_200;
+
+/** The `mcp-skip:` / `mcp-fail:` / `mcp-drop:` lines the in-box install prints, for the run log. */
+export function mcpInstallNotes(stdout: string): string[] {
+  return stdout.split("\n").map((l) => l.trim()).filter((l) => /^mcp-(skip|fail|drop):/.test(l));
+}
+
+/**
  * Globally install npm packages in the box so `npx <pkg>` starts instantly instead of downloading
- * against the MCP startup timeout. Presence-guarded per package; the npm cache is cleaned only
- * when something was actually installed (the tarballs are dead disk weight once bins are on PATH,
- * but cleaning on every no-op pass would add a pointless write to every resume).
+ * against the MCP startup timeout. Presence-guarded per package. Disk-guarded too, and the npm
+ * cache is dropped after EVERY install rather than once at the end: a 1G box holding Claude Code
+ * has ~550M to spare, and one server's tarballs plus its unpacked tree (btp-mcp-server ships two
+ * 107M bun binaries) filled that to the last byte — every later write of the run (git config, the
+ * PR-only hooks, the agent log) then failed with ENOSPC and the box died before turn one, for two
+ * weeks of runs. A package that cannot fit is skipped, a failed install is removed again, and
+ * either spec lands in $D so the rewriter drops its server from the config instead of leaving
+ * `npx` to download it mid-run into the same full disk. Each decision is printed as an
+ * `mcp-skip:` / `mcp-fail:` line (mcpInstallNotes) so the controller log says what the agent lacks.
  */
 /** The shell for the presence-guarded install, so callers can splice it into an existing exec. */
 export function preinstallSh(specs: string[]): string {
@@ -1190,13 +1219,20 @@ export function preinstallSh(specs: string[]): string {
     // @scope survives because only an "@" after index 0 is a version separator).
     const at = spec.indexOf("@", 1);
     const name = at > 0 ? spec.slice(0, at) : spec;
+    const dir = `"$R"/${shellQuote(name)}`;
+    const q = shellQuote(spec);
     // A directory test, NOT `npm ls -g`: seven sequential npm invocations cost ~5s inside the box
     // on every run start (measured); the dir test is free and the no-op path is the common one.
-    return `[ -d "$R"/${shellQuote(name)} ] || { npm i -g ${shellQuote(spec)} >/dev/null 2>&1 && I=1; } || true`;
+    return (
+      `[ -d ${dir} ] || { F=$(df -Pk / 2>/dev/null | awk 'NR==2{print $4}'); ` +
+      `if [ "\${F:-0}" -lt ${MCP_MIN_FREE_KB} ]; then echo mcp-skip:${q}" free=\${F}k"; D="$D "${q}; ` +
+      `elif npm i -g --no-audit --no-fund ${q} >/dev/null 2>&1; then npm cache clean --force >/dev/null 2>&1; ` +
+      `else echo mcp-fail:${q}; D="$D "${q}; rm -rf ${dir}; npm cache clean --force >/dev/null 2>&1; fi; } || true`
+    );
   });
   // The global root is /usr/local/lib/node_modules in every box image we ship; `npm root -g` is
   // itself a ~1s npm startup, so it is only the fallback for a nonstandard image.
-  return `R=/usr/local/lib/node_modules; [ -d "$R" ] || R=$(npm root -g); I=; ${steps.join("; ")}; { [ -n "$I" ] && npm cache clean --force >/dev/null 2>&1; } || true`;
+  return `R=/usr/local/lib/node_modules; [ -d "$R" ] || R=$(npm root -g); D=; ${steps.join("; ")}; true`;
 }
 
 export async function preinstallNpmPackages(cfg: Config, box: string, specs: string[]): Promise<void> {

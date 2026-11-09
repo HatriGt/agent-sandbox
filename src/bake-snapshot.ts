@@ -7,7 +7,7 @@
  */
 import { loadDotEnv } from "./dotenv.js";
 import { loadConfig } from "./config.js";
-import { createBareBox, installTools, installOmpTools, installMcpConfig, preinstallNpmPackages, stopBox, snapshotCreate, teardown, OMP_MIN_DISK, OMP_MIN_MEMORY } from "./msb.js";
+import { createBareBox, installTools, installOmpTools, installMcpConfig, preinstallNpmPackages, exec, stopBox, snapshotCreate, teardown, OMP_MIN_DISK, OMP_MIN_MEMORY } from "./msb.js";
 
 async function main() {
   loadDotEnv();
@@ -26,18 +26,25 @@ async function main() {
   const r = await (omp ? installOmpTools(cfg, box) : installTools(cfg, box));
   console.log(r.stdout.trim() || r.stderr.trim());
 
-  if (omp) {
-    // Pre-install MCP server packages so a booted box skips the ~80s npm round: whatever the
-    // legacy-file store yields here (the encrypted per-owner store is not reachable from this
-    // standalone process) plus an explicit OMP_BAKE_NPX=pkg,pkg list for the deployment's known set.
-    console.log("[bake] pre-installing MCP server packages ...");
-    await installMcpConfig(cfg, box);
-    const extra = (process.env.OMP_BAKE_NPX ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-    if (extra.length) {
-      console.log(`[bake] pre-installing: ${extra.join(", ")}`);
-      await preinstallNpmPackages(cfg, box, extra);
-    }
+  // Pre-install MCP server packages so a booted box skips the npm round (~30s of every task
+  // start, measured on the claude tier) and, on a 1G disk, the space it costs — the per-run
+  // install of btp-mcp-server + @cap-js/mcp-server filled the claude boxes to the last byte and
+  // killed every run for two weeks. The set: whatever the legacy-file store yields here (the
+  // encrypted per-owner store is not reachable from this standalone process) plus an explicit
+  // BAKE_NPX=pkg,pkg list for the deployment's known servers (OMP_BAKE_NPX, the older name, is
+  // still read for the omp bake). Bake with MSB_ROOT_DISK=3G: the snapshot pins the disk of every
+  // box booted from it, and the packages do not fit beside Claude Code on 1G.
+  console.log("[bake] pre-installing MCP server packages ...");
+  await installMcpConfig(cfg, box);
+  const extra = [...new Set([process.env.BAKE_NPX ?? "", omp ? (process.env.OMP_BAKE_NPX ?? "") : ""].flatMap((v) => v.split(",")).map((s) => s.trim()).filter(Boolean))];
+  if (extra.length) {
+    console.log(`[bake] pre-installing: ${extra.join(", ")}`);
+    await preinstallNpmPackages(cfg, box, extra);
   }
+  // The tarballs are dead weight once the bins are on PATH, and a snapshot boot copies its whole
+  // upper into every box — so the caches go, and the disk the boxes will inherit is printed.
+  const df = await exec(cfg, box, "npm cache clean --force >/dev/null 2>&1; rm -rf /root/.npm/_cacache /root/.cache /tmp/* 2>/dev/null; ls /usr/local/lib/node_modules | tr '\\n' ' '; echo; df -h / | tail -1");
+  console.log(`[bake] packages: ${df.stdout.trim()}`);
 
   console.log(`[bake] stopping box + creating snapshot '${name}' ...`);
   await stopBox(cfg, box);
@@ -46,7 +53,7 @@ async function main() {
   console.log("[bake] removing scratch box ...");
   await teardown(cfg, box);
 
-  console.log(`[bake] done. Set ${omp ? "MSB_OMP_SNAPSHOT" : "MSB_SNAPSHOT"}=${name} in .env to warm-start from it.`);
+  console.log(`[bake] done. Set ${omp ? "MSB_OMP_SNAPSHOT" : "MSB_SNAPSHOT"}=${name} in .env to warm-start from it (boxes get a ${cfg.rootDisk} disk).`);
 }
 
 main().catch((e) => {
