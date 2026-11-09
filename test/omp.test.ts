@@ -250,9 +250,10 @@ test("preinstallSh: a package is installed only when the disk can take it, a fai
   // A skip and a failure both print their spec and mark it for the rewriter's drop list.
   assert.ok(sh.includes(`echo mcp-skip:'btp-mcp-server'" free=\${F}k"; D="$D "'btp-mcp-server'`));
   assert.ok(sh.includes(`echo mcp-fail:'btp-mcp-server'; D="$D "'btp-mcp-server'; rm -rf "$R"/'btp-mcp-server'`));
-  assert.ok(sh.includes("npm i -g --no-audit --no-fund 'chrome-devtools-mcp@latest'"));
-  assert.ok(sh.startsWith(`R=/usr/local/lib/node_modules; [ -d "$R" ] || R=$(npm root -g); D=; `), "D starts empty so the rewriter sees only this run's decisions");
-  assert.ok(sh.endsWith("; true"), "best-effort: the exec never fails the run start");
+  // npm's temp dir leaves the 256M tmpfs for the root disk, and onnxruntime's GPU download is skipped.
+  assert.ok(sh.includes("TMPDIR=/root/.npm-tmp ONNXRUNTIME_NODE_INSTALL_CUDA=skip npm i -g --no-audit --no-fund 'chrome-devtools-mcp@latest'"));
+  assert.ok(sh.startsWith(`R=/usr/local/lib/node_modules; [ -d "$R" ] || R=$(npm root -g); D=; mkdir -p /root/.npm-tmp; `), "D starts empty so the rewriter sees only this run's decisions");
+  assert.ok(sh.endsWith("; rm -rf /root/.npm-tmp; true"), "best-effort: the exec never fails the run start, and the temp dir goes");
   assert.deepEqual(mcpInstallNotes("x\nmcp-skip:'btp-mcp-server' free=120000k\nnoise\n mcp-drop:btp-cf \n"), ["mcp-skip:'btp-mcp-server' free=120000k", "mcp-drop:btp-cf"]);
 });
 

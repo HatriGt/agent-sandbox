@@ -1210,7 +1210,13 @@ export function mcpInstallNotes(stdout: string): string[] {
  * either spec lands in $D so the rewriter drops its server from the config instead of leaving
  * `npx` to download it mid-run into the same full disk. Each decision is printed as an
  * `mcp-skip:` / `mcp-fail:` line (mcpInstallNotes) so the controller log says what the agent lacks.
+ *
+ * npm's temp dir is moved onto the root disk: the box's /tmp is a 256M tmpfs (RAM), and a
+ * postinstall that downloads something big — onnxruntime-node fetches a GPU package of several
+ * hundred MB — dies there with ENOSPC however large the disk is (seen with @cap-js/mcp-server in
+ * every box AND in the bake). That GPU download is also told to stay home: no microVM has a GPU.
  */
+const NPM_INSTALL_ENV = "TMPDIR=/root/.npm-tmp ONNXRUNTIME_NODE_INSTALL_CUDA=skip";
 /** The shell for the presence-guarded install, so callers can splice it into an existing exec. */
 export function preinstallSh(specs: string[]): string {
   if (!specs.length) return "true";
@@ -1226,13 +1232,13 @@ export function preinstallSh(specs: string[]): string {
     return (
       `[ -d ${dir} ] || { F=$(df -Pk / 2>/dev/null | awk 'NR==2{print $4}'); ` +
       `if [ "\${F:-0}" -lt ${MCP_MIN_FREE_KB} ]; then echo mcp-skip:${q}" free=\${F}k"; D="$D "${q}; ` +
-      `elif npm i -g --no-audit --no-fund ${q} >/dev/null 2>&1; then npm cache clean --force >/dev/null 2>&1; ` +
+      `elif ${NPM_INSTALL_ENV} npm i -g --no-audit --no-fund ${q} >/dev/null 2>&1; then npm cache clean --force >/dev/null 2>&1; ` +
       `else echo mcp-fail:${q}; D="$D "${q}; rm -rf ${dir}; npm cache clean --force >/dev/null 2>&1; fi; } || true`
     );
   });
   // The global root is /usr/local/lib/node_modules in every box image we ship; `npm root -g` is
   // itself a ~1s npm startup, so it is only the fallback for a nonstandard image.
-  return `R=/usr/local/lib/node_modules; [ -d "$R" ] || R=$(npm root -g); D=; ${steps.join("; ")}; true`;
+  return `R=/usr/local/lib/node_modules; [ -d "$R" ] || R=$(npm root -g); D=; mkdir -p /root/.npm-tmp; ${steps.join("; ")}; rm -rf /root/.npm-tmp; true`;
 }
 
 export async function preinstallNpmPackages(cfg: Config, box: string, specs: string[]): Promise<void> {
@@ -1254,7 +1260,7 @@ export function pruneMcpPackagesSh(root = "/usr/local/lib/node_modules"): string
     `find ${r} \\( -name libonnxruntime_providers_cuda.so -o -name libonnxruntime_providers_tensorrt.so \\) -delete 2>/dev/null; ` +
     `for d in $(find ${r} -type d -path '*onnxruntime-node/bin/napi-v*' 2>/dev/null); do rm -rf "$d/darwin" "$d/win32" "$d/linux/arm64"; done; ` +
     `if grep -q avx2 /proc/cpuinfo 2>/dev/null; then rm -rf ${r}/*/node_modules/@oven/bun-linux-x64-baseline; fi; ` +
-    `npm cache clean --force >/dev/null 2>&1; rm -rf /root/.npm/_cacache /root/.cache /tmp/* 2>/dev/null; true`
+    `npm cache clean --force >/dev/null 2>&1; rm -rf /root/.npm/_cacache /root/.npm-tmp /root/.cache /tmp/* 2>/dev/null; true`
   );
 }
 
