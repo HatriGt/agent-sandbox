@@ -1240,6 +1240,24 @@ export async function preinstallNpmPackages(cfg: Config, box: string, specs: str
   await exec(cfg, box, preinstallSh(specs), { timeoutMs: 300_000 });
 }
 
+/**
+ * The dead weight the MCP server packages drag into a box, for a bake to strip before the snapshot
+ * is taken (the same cuts ompImageDockerfile makes in its one layer, measured there): onnxruntime's
+ * CUDA/TensorRT providers (~700M, no GPU in a microVM), its darwin/win32/arm64 binaries, and bun's
+ * baseline CPU build when the host has AVX2 — every box booted from the snapshot would otherwise
+ * copy all of it. Confined to the global node_modules: the box root is an overlay, and a tree-wide
+ * find is both slow and pointless there. Then the caches, which are tarballs nothing reads again.
+ */
+export function pruneMcpPackagesSh(root = "/usr/local/lib/node_modules"): string {
+  const r = shellQuote(root);
+  return (
+    `find ${r} \\( -name libonnxruntime_providers_cuda.so -o -name libonnxruntime_providers_tensorrt.so \\) -delete 2>/dev/null; ` +
+    `for d in $(find ${r} -type d -path '*onnxruntime-node/bin/napi-v*' 2>/dev/null); do rm -rf "$d/darwin" "$d/win32" "$d/linux/arm64"; done; ` +
+    `if grep -q avx2 /proc/cpuinfo 2>/dev/null; then rm -rf ${r}/*/node_modules/@oven/bun-linux-x64-baseline; fi; ` +
+    `npm cache clean --force >/dev/null 2>&1; rm -rf /root/.npm/_cacache /root/.cache /tmp/* 2>/dev/null; true`
+  );
+}
+
 /** Where dashboard-configured skills land inside the box. `--setting-sources user` loads exactly
  *  this tree, so the in-box claude discovers them natively (and repo-shipped skills never load). */
 /**

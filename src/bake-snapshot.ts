@@ -7,7 +7,7 @@
  */
 import { loadDotEnv } from "./dotenv.js";
 import { loadConfig } from "./config.js";
-import { createBareBox, installTools, installOmpTools, installMcpConfig, preinstallNpmPackages, exec, stopBox, snapshotCreate, teardown, OMP_MIN_DISK, OMP_MIN_MEMORY } from "./msb.js";
+import { createBareBox, installTools, installOmpTools, installMcpConfig, preinstallNpmPackages, pruneMcpPackagesSh, exec, stopBox, snapshotCreate, teardown, OMP_MIN_DISK, OMP_MIN_MEMORY } from "./msb.js";
 
 async function main() {
   loadDotEnv();
@@ -41,9 +41,10 @@ async function main() {
     console.log(`[bake] pre-installing: ${extra.join(", ")}`);
     await preinstallNpmPackages(cfg, box, extra);
   }
-  // The tarballs are dead weight once the bins are on PATH, and a snapshot boot copies its whole
-  // upper into every box — so the caches go, and the disk the boxes will inherit is printed.
-  const df = await exec(cfg, box, "npm cache clean --force >/dev/null 2>&1; rm -rf /root/.npm/_cacache /root/.cache /tmp/* 2>/dev/null; ls /usr/local/lib/node_modules | tr '\\n' ' '; echo; df -h / | tail -1");
+  // The GPU providers, foreign-platform binaries and tarball caches are dead weight once the bins
+  // are on PATH, and a snapshot boot copies its whole upper into every box — so they go, and the
+  // disk the boxes will inherit is printed.
+  const df = await exec(cfg, box, `${pruneMcpPackagesSh()}; ls /usr/local/lib/node_modules | tr '\\n' ' '; echo; df -h / | tail -1`, { timeoutMs: 300_000 });
   console.log(`[bake] packages: ${df.stdout.trim()}`);
 
   console.log(`[bake] stopping box + creating snapshot '${name}' ...`);

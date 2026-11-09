@@ -222,6 +222,18 @@ test("MCP_DIRECT_BIN_JS: installed npx servers run their bin directly; anything 
   if (process.platform !== "win32") assert.equal(statSync(file).mode & 0o777, 0o600);
 });
 
+test("pruneMcpPackagesSh: strips the GPU providers, foreign binaries, bun's baseline build and the caches, inside the global root only", async () => {
+  const { pruneMcpPackagesSh } = await import("../src/msb.js");
+  const sh = pruneMcpPackagesSh();
+  assert.ok(sh.startsWith("find '/usr/local/lib/node_modules' \\( -name libonnxruntime_providers_cuda.so -o -name libonnxruntime_providers_tensorrt.so \\) -delete"));
+  assert.ok(sh.includes(`rm -rf "$d/darwin" "$d/win32" "$d/linux/arm64"`));
+  assert.ok(sh.includes("grep -q avx2 /proc/cpuinfo") && sh.includes("@oven/bun-linux-x64-baseline"));
+  assert.ok(sh.includes("rm -rf /root/.npm/_cacache /root/.cache /tmp/*"));
+  assert.ok(!/find \/ /.test(sh), "never a tree-wide find on the overlay root");
+  assert.ok(sh.endsWith("; true"));
+  assert.ok(pruneMcpPackagesSh("/x/y").startsWith("find '/x/y' "));
+});
+
 test("preinstallSh: a package is installed only when the disk can take it, a failed install is removed, and both are reported for the drop", async () => {
   const { preinstallSh, MCP_MIN_FREE_KB, mcpInstallNotes } = await import("../src/msb.js");
   assert.equal(preinstallSh([]), "true");
