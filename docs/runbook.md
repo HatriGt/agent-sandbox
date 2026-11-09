@@ -497,10 +497,25 @@ from the run's config instead of leaving `npx` to download it mid-run — each d
 deployment's servers already installed, on a disk that holds them:
 
 ```bash
-ssh hostbrr "cd /root/agent-sandbox-deploy && docker compose exec -T -e MSB_ROOT_DISK=3G -e BAKE_NPX='btp-mcp-server,@cap-js/mcp-server,chrome-devtools-mcp@latest,hana-mcp-server' agent-sandbox node dist/bake-snapshot.js agent-base-3g"
-# boot-test, then set MSB_SNAPSHOT=agent-base-3g in .env, `docker compose up -d`, and remove the
-# warm box the pool booted from the old snapshot (msb rm --force <pool-…>) so it reseeds.
+ssh hostbrr "cd /root/agent-sandbox-deploy && docker compose exec -T -e MSB_ROOT_DISK=3G -e BAKE_NPX='btp-mcp-server,@cap-js/mcp-server,chrome-devtools-mcp@latest,hana-mcp-server' agent-sandbox node dist/bake-snapshot.js agent-base-3g-2"
+# compact it (below), boot-test, then set MSB_SNAPSHOT=agent-base-3g-2 in .env, `docker compose up -d`,
+# and remove the warm box the pool booted from the old snapshot (msb rm --force <pool-…>) so it reseeds.
 ```
+
+The guest cannot `fstrim` (virtio-blk without discard), so the install-then-delete churn of a bake
+leaves ~1.5 GB of freed blocks allocated in `upper.ext4`, and a box boot copies allocated blocks.
+Zero-fill and hole-punch on the host before switching to it (2.1 GB → 931 MB, 4 s boot):
+
+```bash
+ssh hostbrr 'F=/root/.microsandbox/snapshots/agent-base-3g-2/upper.ext4; mkdir -p /mnt/asb-snap; mount -o loop $F /mnt/asb-snap; dd if=/dev/zero of=/mnt/asb-snap/.zero bs=4M status=none || true; sync; rm -f /mnt/asb-snap/.zero; umount /mnt/asb-snap; fallocate -d $F; du -sh $F'
+```
+
+Two box facts the fix ran into: `/tmp` in a box is a 256 MB tmpfs in RAM, so a postinstall that
+downloads something big dies with ENOSPC however large the disk is (onnxruntime-node's GPU
+package, via `@cap-js/mcp-server`) — `preinstallSh` therefore runs npm with `TMPDIR=/root/.npm-tmp`
+and `ONNXRUNTIME_NODE_INSTALL_CUDA=skip`. And an `msb exec` that launches an MCP server binary
+(even under `timeout`) returns with its whole output lost, as does an exec in the first ~10 s after
+`msb run -d`; probe a fresh box with `ls`, not by starting a server.
 
 A snapshot pins the root disk of every box booted from it, so `MSB_ROOT_DISK` matters at BAKE
 time, not at boot (createBox omits `--root-disk` for snapshot boots). The upper is copied sparsely
