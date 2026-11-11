@@ -705,6 +705,16 @@ export async function bakeOmpImage(cfg: Config, tag: string, extraNpx: string[])
   return bakeAgentImage(cfg, tag, extraNpx, "omp");
 }
 
+/**
+ * The install order for a bake: the operator's explicit (pinned) specs FIRST, then the store's.
+ * preinstallSh skips a package that is already present by NAME, so with the store's unpinned
+ * `btp-mcp-server` ahead of `btp-mcp-server@1.0.1` the pin was never installed — the bake took
+ * whatever npm called latest that day, which is the drift the pin exists to prevent.
+ */
+export function bakeSpecOrder(storeSpecs: readonly string[], pinned: readonly string[]): string[] {
+  return Array.from(new Set([...pinned, ...storeSpecs]));
+}
+
 export async function bakeAgentImage(cfg: Config, tag: string, extraNpx: string[], agent: "claude" | "omp"): Promise<string> {
   if (!/^[a-z0-9][\w.-]*:[\w.-]+$/.test(tag)) throw new Error(`invalid image tag: ${JSON.stringify(tag)}`);
   const insp = await msb(cfg, ["image", "inspect", cfg.image]);
@@ -718,7 +728,7 @@ export async function bakeAgentImage(cfg: Config, tag: string, extraNpx: string[
   } catch {
     // no operator MCP store reachable from this process — OMP_BAKE_NPX alone
   }
-  const df = agentImageDockerfile(cfg, `${repo}@${digest}`, Array.from(new Set([...specs, ...extraNpx])), agent);
+  const df = agentImageDockerfile(cfg, `${repo}@${digest}`, bakeSpecOrder(specs, extraNpx), agent);
   const q = shellQuote(tag);
   const r = await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, 'sh -c "$(cat)"'], {
     timeoutMs: 1_800_000,

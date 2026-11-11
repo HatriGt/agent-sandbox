@@ -61,3 +61,8 @@ test("the box's temp dir is on the root disk for the agent, login shells and the
   assert.ok(OMP_WARM_SCRUB_SH.includes(`${BOX_TMPDIR}/*`));
   assert.ok(pruneMcpPackagesSh().includes(`${BOX_TMPDIR}/*`));
 });
+
+test("a bake installs the pinned specs before the store's unpinned ones (presence check is by name)", async () => {
+  const { bakeSpecOrder } = await import("../src/msb.js");
+  assert.deepEqual(bakeSpecOrder(["btp-mcp-server", "mcp-remote"], ["btp-mcp-server@1.0.1", "mcp-remote"]), ["btp-mcp-server@1.0.1", "mcp-remote", "btp-mcp-server"]);
+});
