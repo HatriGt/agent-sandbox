@@ -2234,9 +2234,12 @@ app.get("/mcp-servers.json", async (req: Request, res: Response) => {
     // How each npx server's package reaches a box (src/package-watch.ts): baked into the image, an
     // install on every task start, or dropped from the last run. Known once a box has reported.
     const { baked, last } = mcpProvisionState();
+    // Until a box has reported its manifest (the first task start after a controller restart)
+    // nothing is known, and "per-run" for everything would be a guess dressed as a fact.
+    const known = Object.keys(baked).length > 0;
     const servers = viewServers(store).map((s) => {
       const spec = npxSpecOf(s);
-      return spec ? { ...s, provision: provisionOf(spec, baked, last) } : s;
+      return spec && known ? { ...s, provision: provisionOf(spec, baked, last) } : s;
     });
     res.json({ servers, config: toEditableConfig(store), baked, lastProvision: last });
   } catch (e) {
