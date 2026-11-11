@@ -1066,6 +1066,13 @@ export function Thread({
 
             {!sleeping && !loadingTrace && artifacts.length > 0 && runState !== "running" && pendingReplies.length === 0 && <ProducedFiles session={box.name} files={artifacts} />}
 
+            {/* MCP servers the install left out of this box: the agent is running without them. */}
+            {!sleeping && !loadingTrace && !!snap?.mcpNotes?.length && (
+              <p className="text-muted-foreground enter text-micro" role="status">
+                {mcpNotesText(snap.mcpNotes)}
+              </p>
+            )}
+
             {/* Context nearly full: warn before quality degrades — the advice is the point. */}
             {!sleeping && !loadingTrace && ctxHealth?.level === "critical" && (
               <p className="text-attention-text enter text-micro" role="status">
@@ -1084,9 +1091,13 @@ export function Thread({
                     ? "Completed"
                     : exitCode === 137
                       ? "Out of memory"
-                      : exitCode === 254 || exitCode === 253
-                        ? "Run interrupted"
-                        : "Exited with an error"
+                      : exitCode === 250
+                        ? "Disk full"
+                        : exitCode === 254 || exitCode === 253
+                          ? "Run interrupted"
+                          : digest?.startFailure
+                            ? "Failed to start"
+                            : "Exited with an error"
                 }
                 failed={exitCode != null && exitCode !== 0}
                 detail={
@@ -1094,11 +1105,15 @@ export function Thread({
                     ? deadlineText ?? undefined
                     : exitCode === 137
                       ? "the kernel killed the agent — add memory above to continue where it left off"
-                      : exitCode === 254
-                        ? "the sandbox restarted mid-run — send a message to continue"
-                        : exitCode === 253
-                          ? "stopped by you to deliver a message immediately"
-                          : `code ${exitCode}`
+                      : exitCode === 250
+                        ? "the sandbox disk is full, so the run was not started — grow the disk above, then send a message to continue"
+                        : exitCode === 254
+                          ? "the sandbox restarted mid-run — send a message to continue"
+                          : exitCode === 253
+                            ? "stopped by you to deliver a message immediately"
+                            : digest?.startFailure
+                              ? `the sandbox never ran the agent (code ${exitCode})${digest.startFailure.tail ? ` — ${lastLine(digest.startFailure.tail)}` : ""}`
+                              : `code ${exitCode}`
                 }
                 stats={runStats(events)}
                 durationSec={durationSec}
@@ -1451,4 +1466,34 @@ function Rise({ still, children }: { still: boolean | null; children: React.Reac
       {children}
     </motion.div>
   );
+}
+
+/** The last non-empty line of a log tail, for a one-line reason. */
+function lastLine(tail: string): string {
+  const lines = tail.split("\n").map((l) => l.trim()).filter(Boolean);
+  return lines[lines.length - 1] ?? "";
+}
+
+/**
+ * `mcp-skip:'spec' free=…k` / `mcp-fail:'spec'` / `mcp-drop:a,b` → "Running without 2 MCP servers:
+ * btp-mcp-server (no disk space), @cap-js/mcp-server (install failed)". The drop line repeats the
+ * skipped and failed ones, so it only adds names the other lines did not explain.
+ */
+function mcpNotesText(notes: string[]): string {
+  const why = new Map<string, string>();
+  const nameOf = (spec: string) => {
+    const at = spec.indexOf("@", 1);
+    return at > 0 ? spec.slice(0, at) : spec;
+  };
+  for (const n of notes) {
+    const m = n.match(/^mcp-(skip|fail):'([^']+)'/);
+    if (m) why.set(nameOf(m[2]), m[1] === "skip" ? "no disk space" : "install failed");
+  }
+  for (const n of notes) {
+    if (!n.startsWith("mcp-drop:")) continue;
+    for (const name of n.slice("mcp-drop:".length).split(",").map((x) => x.trim()).filter(Boolean)) if (!why.has(name)) why.set(name, "not installed");
+  }
+  if (why.size === 0) return "";
+  const list = [...why].map(([name, w]) => `${name} (${w})`).join(", ");
+  return `Running without ${why.size === 1 ? "an MCP server" : `${why.size} MCP servers`}: ${list}`;
 }

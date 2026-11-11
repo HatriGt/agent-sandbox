@@ -15,6 +15,7 @@
     "start:http": "node dist/http.js",
     "bake": "node dist/bake-snapshot.js",
     "bake:omp-image": "node dist/bake-omp-image.js",
+    "bake:claude-image": "node dist/bake-claude-image.js",
     "bench": "node dist/bench.js",
     "pool:warm": "node dist/pool-warm.js",
     "pool:status": "node dist/pool-status.js",

@@ -251,7 +251,24 @@ function serverColumns(health: Record<string, Health>, testing: Record<string, b
             </span>
             <span className="flex min-w-0 flex-col gap-0.5">
               <span className={cn("truncate", !s.enabled && "text-muted-foreground")}>{s.name}</span>
-              <MetaLine parts={[<span title={s.url ?? [s.command, ...(s.args ?? [])].filter(Boolean).join(" ")}>{describe(s)}</span>, secrets > 0 && `${secrets} ${secrets === 1 ? "secret" : "secrets"}`]} />
+              <MetaLine
+                parts={[
+                  <span title={s.url ?? [s.command, ...(s.args ?? [])].filter(Boolean).join(" ")}>{describe(s)}</span>,
+                  secrets > 0 && `${secrets} ${secrets === 1 ? "secret" : "secrets"}`,
+                  // How the package reaches a box (controller /mcp-servers.json `provision`): free when
+                  // baked, an npm install on every task start otherwise, and a warning when the last
+                  // run had to leave it out.
+                  s.provision === "baked" ? (
+                    <span title="Installed in the sandbox image — no install at task start">baked in</span>
+                  ) : s.provision === "per-run" ? (
+                    <span title="Not in the sandbox image — npm installs it on every task start. Rebake the image to make it free.">installed each run</span>
+                  ) : s.provision === "dropped" ? (
+                    <span className="text-attention-text" title="The last run could not install it (disk space or a failed install) and ran without it">
+                      left out of the last run
+                    </span>
+                  ) : null,
+                ]}
+              />
             </span>
           </span>
         );

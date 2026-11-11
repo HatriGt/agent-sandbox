@@ -17,6 +17,7 @@
  */
 
 import { isPublicHttpUrl } from "./net-guard.js";
+import { EXIT_NOTES } from "./run-health.js";
 
 /** The slice of a fleet box view the detector needs. Kept minimal so tests need no full BoxView. */
 export interface BoxRunView {
@@ -28,6 +29,10 @@ export interface BoxRunView {
   stalled?: boolean;
   /** Epoch seconds of the last log write, for the stall message. */
   lastOutputAt?: number;
+  /** The run died before its first turn (src/run-health.ts): the sandbox failed it, not the agent. */
+  startFailed?: boolean;
+  /** The last lines the box wrote, for a start failure's notification. */
+  tail?: string;
 }
 
 export interface NotifyEvent {
@@ -38,24 +43,26 @@ export interface NotifyEvent {
   quietMin?: number;
   question?: string;
   exitCode?: number;
-  /** Human note for special exit codes (interrupted / stopped by operator). */
+  /** Human note for special exit codes (interrupted / stopped by operator / disk full). */
   note?: string;
+  /** The sandbox failed the run before the agent's first turn. */
+  startFailure?: boolean;
+  /** What the box wrote last, when it failed to start. */
+  tail?: string;
 }
-
-/** Exit codes the run wrapper uses for non-agent terminations (see msb.ts RUN_STATE_SH). */
-const EXIT_INTERRUPTED = 254;
-const EXIT_STOPPED = 253;
 
 function terminalEvent(b: BoxRunView): NotifyEvent {
   const code = b.exitCode ?? 0;
   if (code === 0) return { box: b.name, kind: "done", exitCode: 0 };
-  const note =
-    code === EXIT_INTERRUPTED
-      ? "interrupted (restart or send-now)"
-      : code === EXIT_STOPPED
-        ? "stopped by the operator"
-        : undefined;
-  return { box: b.name, kind: "failed", exitCode: code, ...(note ? { note } : {}) };
+  const note = EXIT_NOTES[code];
+  return {
+    box: b.name,
+    kind: "failed",
+    exitCode: code,
+    ...(note ? { note } : {}),
+    ...(b.startFailed ? { startFailure: true } : {}),
+    ...(b.startFailed && b.tail ? { tail: b.tail } : {}),
+  };
 }
 
 /** Which of the operator's three toggles an event kind rides. */
@@ -157,7 +164,11 @@ export function formatNotification(
         ? `“${label}” finished${ctx.headline ? ` — ${ctx.headline}` : ""} (${e.box})`
         : e.kind === "stalled"
           ? `“${label}” looks stalled — no action for ${e.quietMin ?? "several"} min (${e.box})`
-          : `“${label}” failed${e.note ? ` — ${e.note}` : ` (exit ${e.exitCode})`} (${e.box})`;
+          : e.note
+            ? `“${label}” failed — ${e.note} (${e.box})`
+            : e.startFailure
+              ? `“${label}” failed to start — the sandbox never ran the agent (exit ${e.exitCode})${e.tail ? `: ${e.tail.split("\n").slice(-2).join(" | ").slice(0, 200)}` : ""} (${e.box})`
+              : `“${label}” failed (exit ${e.exitCode}) (${e.box})`;
   return { text, url: `${ctx.publicUrl.replace(/\/+$/, "")}/dashboard/#/box/${e.box}`, event: e };
 }
 

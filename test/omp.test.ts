@@ -228,7 +228,7 @@ test("pruneMcpPackagesSh: strips the GPU providers, foreign binaries, bun's base
   assert.ok(sh.startsWith("find '/usr/local/lib/node_modules' \\( -name libonnxruntime_providers_cuda.so -o -name libonnxruntime_providers_tensorrt.so \\) -delete"));
   assert.ok(sh.includes(`rm -rf "$d/darwin" "$d/win32" "$d/linux/arm64"`));
   assert.ok(sh.includes("grep -q avx2 /proc/cpuinfo") && sh.includes("@oven/bun-linux-x64-baseline"));
-  assert.ok(sh.includes("rm -rf /root/.npm/_cacache /root/.npm-tmp /root/.cache /tmp/*"));
+  assert.ok(sh.includes("rm -rf /root/.npm/_cacache /root/.npm-tmp /root/.cache /tmp/* /root/.tmp/*"));
   assert.ok(!/find \/ /.test(sh), "never a tree-wide find on the overlay root");
   assert.ok(sh.endsWith("; true"));
   assert.ok(pruneMcpPackagesSh("/x/y").startsWith("find '/x/y' "));

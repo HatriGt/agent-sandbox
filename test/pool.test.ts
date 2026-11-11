@@ -36,12 +36,21 @@ test("maintainer arms a timer when enabled and stop() clears it", () => {
   assert.doesNotThrow(() => h.stop());
 });
 
-test("poolEligible needs size>0, a snapshot, open egress, and no per-call domains", () => {
+test("poolEligible needs size>0, a snapshot or claude image, open egress, and no per-call domains", () => {
   assert.equal(poolEligible(base, false), true);
   assert.equal(poolEligible(base, true), false); // per-call allowDomains -> fresh cold boot
   assert.equal(poolEligible({ ...base, poolSize: 0 }, false), false);
   assert.equal(poolEligible({ ...base, snapshot: "" }, false), false);
+  assert.equal(poolEligible({ ...base, snapshot: "", claudeImage: "agent-claude:1" }, false), true, "a baked image is as good as a snapshot");
   assert.equal(poolEligible({ ...base, egressAllowAll: false }, false), false);
+});
+
+test("claudePoolCfg boots the pool from the image when one is set, else the snapshot", async () => {
+  const { claudePoolCfg } = await import("../src/pool.ts");
+  assert.equal(claudePoolCfg(base).snapshot, "agent-base");
+  const c = claudePoolCfg({ ...base, image: "node:20", claudeImage: "agent-claude:1" });
+  assert.equal(c.image, "agent-claude:1");
+  assert.equal(c.snapshot, "");
 });
 
 // --- the claim race ------------------------------------------------------------------------------

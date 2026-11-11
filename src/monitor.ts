@@ -274,6 +274,11 @@ export interface WatchSnapshot {
    * read from the box.
    */
   memoryNew?: Array<{ id: string; kind: string; text: string; why?: string; status: "pending" | "kept"; at: number }>;
+  /**
+   * What the MCP install left out of this box (`mcp-skip:` / `mcp-fail:` / `mcp-drop:` lines from
+   * src/msb.ts preinstallSh), so the thread can say which servers the agent is running without.
+   */
+  mcpNotes?: string[];
   /** The log tail (already limited to N lines by the caller). */
   log: string;
 }

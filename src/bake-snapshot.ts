@@ -7,7 +7,7 @@
  */
 import { loadDotEnv } from "./dotenv.js";
 import { loadConfig } from "./config.js";
-import { createBareBox, installTools, installOmpTools, installMcpConfig, preinstallNpmPackages, pruneMcpPackagesSh, exec, stopBox, snapshotCreate, teardown, OMP_MIN_DISK, OMP_MIN_MEMORY } from "./msb.js";
+import { createBareBox, installTools, installOmpTools, installMcpConfig, preinstallNpmPackages, pruneMcpPackagesSh, bakedManifestSh, compactSnapshotUpper, ZERO_FILL_SH, exec, stopBox, snapshotCreate, teardown, OMP_MIN_DISK, OMP_MIN_MEMORY } from "./msb.js";
 
 async function main() {
   loadDotEnv();
@@ -44,12 +44,19 @@ async function main() {
   // The GPU providers, foreign-platform binaries and tarball caches are dead weight once the bins
   // are on PATH, and a snapshot boot copies its whole upper into every box — so they go, and the
   // disk the boxes will inherit is printed.
-  const df = await exec(cfg, box, `${pruneMcpPackagesSh()}; ls /usr/local/lib/node_modules | tr '\\n' ' '; echo; df -h / | tail -1`, { timeoutMs: 300_000 });
+  const df = await exec(cfg, box, `${pruneMcpPackagesSh()}; ${bakedManifestSh()}; ls /usr/local/lib/node_modules | tr '\\n' ' '; echo; df -h / | tail -1`, { timeoutMs: 300_000 });
   console.log(`[bake] packages: ${df.stdout.trim()}`);
+
+  // The guest cannot fstrim: everything installed and deleted above is still allocated in the
+  // upper, and a snapshot boot copies all of it per box. Zero the free space now so the host can
+  // punch it out after the snapshot is taken (compactSnapshotUpper) — 2.1G → 931M, measured.
+  console.log("[bake] zero-filling free space so the snapshot compacts ...");
+  await exec(cfg, box, ZERO_FILL_SH, { timeoutMs: 900_000 });
 
   console.log(`[bake] stopping box + creating snapshot '${name}' ...`);
   await stopBox(cfg, box);
   await snapshotCreate(cfg, box, name);
+  console.log(`[bake] compacting the snapshot upper: ${await compactSnapshotUpper(cfg, name)}`);
 
   console.log("[bake] removing scratch box ...");
   await teardown(cfg, box);

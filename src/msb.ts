@@ -56,6 +56,9 @@ import { NEED_HOOK, needSetup } from "./drivers/need.js";
 import { AGENT_LOG, AT_MARK, MCP_CONFIG_PATH, PROVIDER_ENV_PATH, QUESTION_MARK, USAGE_OPEN, YOU_MARK_CLOSE, YOU_MARK_OPEN } from "./drivers/sentinels.js";
 import { INBOX_APPEND_SH, INBOX_RESET_SH, INBOX_TAKE_DELIVERED_SH, inboxLine, type InboxLine } from "./drivers/inbox-gate.js";
 import { isStalled } from "./stall.js";
+import { EXIT_DISK_FULL } from "./run-health.js";
+import { parseBakedManifest, type LastProvision } from "./package-watch.js";
+import { orphanSandboxDirs, parseDfPk, parseDirListing, type DiskReading } from "./host-disk.js";
 
 // The driver pieces used to live here; re-exported so every existing importer keeps working.
 export { claudeInstallSh, streamFmtScript } from "./drivers/claude.js";
@@ -287,6 +290,12 @@ export async function bootWarmBox(cfg: Config, agent: AgentKind = "claude"): Pro
   warming.add(name);
   try {
     await bootAndWarm(cfg, name, agent);
+  } catch (e) {
+    // A box whose warm-up failed (boot error, bootstrap error, or the health check below) is not
+    // left running without /.ready for the orphan reaper to find twelve minutes later: it goes now,
+    // and the refill that called us boots another. The error still propagates so the log says why.
+    await forceRemoveBox(cfg, name).catch(() => {});
+    throw e;
   } finally {
     warming.delete(name);
   }
@@ -322,7 +331,7 @@ export function isOrphanWarmBox(name: string, state: string, inFlight: ReadonlyS
 export const OMP_WARM_SCRUB_SH =
   "rm -rf /root/.agent-mcp.json /root/.omp/agent/mcp.json /root/.claude/skills /root/.omp/agent/agent.db* " +
   "/root/.omp/agent/sessions /root/.omp/sessions /root/.omp/logs /root/.hdb /root/.mcp-auth /root/.npm/_logs " +
-  "/root/.local/share/chrome-devtools-mcp /workspace/* /workspace/.[!.]* /tmp/* 2>/dev/null; true";
+  "/root/.local/share/chrome-devtools-mcp /workspace/* /workspace/.[!.]* /tmp/* /root/.tmp/* 2>/dev/null; true";
 
 async function bootAndWarm(cfg: Config, name: string, agent: AgentKind): Promise<void> {
   await msb(cfg, [
@@ -384,10 +393,66 @@ async function bootAndWarm(cfg: Config, name: string, agent: AgentKind): Promise
     // moves the cost back onto the user's first task.
     await msb(cfg, ["exec", name, ...agentEnvFlags(cfg, "noop", undefined, undefined, undefined, agent), "--", "bash", "-lc", warm], false, 360_000);
   }
+  // A box is handed out only if it can actually run a task: the disk has room for one and the
+  // agent binary starts. Checked HERE, at warm-up time where nobody is waiting, rather than at
+  // claim time: neither can change while the box sits idle, and `claude --version` is a ~1s node
+  // startup that would otherwise sit on every task start. The claim re-reads only the disk.
+  const health = await exec(cfg, name, WARM_HEALTH_SH, { timeoutMs: 60_000 });
+  const verdict = warmBoxVerdict(health.stdout);
+  if (!verdict.ok) throw new Error(`warm box ${name} failed its health check (${verdict.reason}); it is not handed out`);
   // Claimable only from here: the free-probe requires /.ready, so a delegation can never claim a
   // box whose (multi-minute, for omp) warm-up is still running — that race put the whole cold
   // start back on the user's first task while the pool claimed to be "warm".
   await exec(cfg, name, "touch /.ready");
+}
+
+/**
+ * Free KiB the root disk must keep for a run to live: the repo copy is already in, so this covers
+ * the agent's log and transcript, git's lock files, the hooks and whatever the task writes. 100M
+ * is far above what a run needs to start and far below what a full disk has (0). The MCP install
+ * keeps its own, higher floor (MCP_MIN_FREE_KB) because an install is what used to eat the rest.
+ */
+export const RUN_MIN_FREE_KB = 102_400;
+/** Free KiB on the root disk, one number (blank if df is unavailable). */
+export const DF_FREE_KB_SH = `df -Pk / 2>/dev/null | awk 'NR==2{print $4}'`;
+/** The warm-up health probe: free KiB on line one, then the agent's version line. */
+export const WARM_HEALTH_SH = `${DF_FREE_KB_SH}; claude --version 2>/dev/null | head -1`;
+
+/** Judge WARM_HEALTH_SH's output. Pure, so the gate is unit-tested without a box. */
+export function warmBoxVerdict(stdout: string, minFreeKb = RUN_MIN_FREE_KB): { ok: true } | { ok: false; reason: string } {
+  const lines = stdout.split("\n").map((l) => l.trim()).filter(Boolean);
+  const free = Number(lines[0]);
+  if (!Number.isFinite(free)) return { ok: false, reason: "the root disk could not be read" };
+  if (free < minFreeKb) return { ok: false, reason: `only ${Math.round(free / 1024)} MB free on the root disk` };
+  if (!lines.slice(1).some((l) => /\d+\.\d+/.test(l))) return { ok: false, reason: "claude --version printed nothing" };
+  return { ok: true };
+}
+
+/**
+ * The launch preflight: if the root disk is below the run floor, drop what the box can spare (the
+ * npm caches and temp dirs) and look again; still short means the run is NOT started — the
+ * wrapper's first writes (git config, the hooks, the log) would fail with ENOSPC and the box
+ * would die before turn one with nothing to say why. Sets $F to the free KiB after the attempt.
+ */
+export const DISK_PREFLIGHT_SH =
+  `F=$(${DF_FREE_KB_SH}); if [ "\${F:-0}" -lt ${RUN_MIN_FREE_KB} ]; then ` +
+  `npm cache clean --force >/dev/null 2>&1; rm -rf /root/.npm/_cacache /root/.npm-tmp /root/.tmp/* /tmp/* 2>/dev/null; F=$(${DF_FREE_KB_SH}); fi`;
+
+/** A box whose disk cannot hold a run: thrown by the launch so the caller gets a sentence, not a dead box. */
+export class DiskFullError extends Error {
+  constructor(public readonly box: string, public readonly freeKb: number, public readonly totalKb: number) {
+    super(
+      `The sandbox disk is full (${Math.round(freeKb / 1024)} MB free of ${Math.round(totalKb / 1024)} MB), so the run was not started. ` +
+        `Grow the disk from the machine menu and send the message again, or destroy this machine and start over.`
+    );
+    this.name = "DiskFullError";
+  }
+}
+
+/** `diskfull <freeKb> <totalKb>` from a guarded launch, or undefined when the run was started. */
+export function diskFullFromLaunch(stdout: string): { freeKb: number; totalKb: number } | undefined {
+  const m = stdout.match(/^diskfull (\d+) (\d+)\s*$/m);
+  return m ? { freeKb: Number(m[1]), totalKb: Number(m[2]) } : undefined;
 }
 
 /**
@@ -500,7 +565,12 @@ export async function claimWarmBox(
   box: string,
   copyDir: string | undefined
 ): Promise<void> {
-  await exec(cfg, box, "touch /.claimed");
+  // The claim marker lands only if the disk can still take a run (the warm-up proved the rest,
+  // see WARM_HEALTH_SH); one exec for both, this is the task-start critical path.
+  const r = await exec(cfg, box, `F=$(${DF_FREE_KB_SH}); if [ "\${F:-0}" -lt ${RUN_MIN_FREE_KB} ]; then echo "lowdisk $F"; else touch /.claimed && echo claimed; fi`);
+  const low = r.stdout.match(/^lowdisk (\d*)\s*$/m);
+  if (low) throw new Error(`warm box ${box} has only ${Math.round(Number(low[1] || 0) / 1024)} MB free; not claiming it`);
+  if (!/^claimed\s*$/m.test(r.stdout)) throw new Error(`warm box ${box} did not accept the claim marker`);
   // Host-side marker too: once this box sleeps, /.claimed is unreadable, and the marker is what
   // stops the pool maintainer from reaping the run (see claims.ts).
   await markClaimed(cfg, box);
@@ -558,9 +628,27 @@ export function ompRootSource(cfg: Config): { image: string; snapshot: string } 
   return cfg.ompImage ? { image: cfg.ompImage, snapshot: "" } : { image: cfg.image, snapshot: cfg.ompSnapshot };
 }
 
+/**
+ * Where a claude box's rootfs comes from — the same rule as ompRootSource: a baked image
+ * (MSB_CLAUDE_IMAGE) wins over the snapshot (MSB_SNAPSHOT), because a snapshot boot copies the
+ * whole upper per box (931M for the MCP-laden claude snapshot, no reflink on the host) while an
+ * image is stored once and each box's upper starts empty. Callers splice this into the Config they
+ * boot with (createBox / bootAndWarm read cfg.snapshot and cfg.image).
+ */
+export function claudeRootSource(cfg: Config): { image: string; snapshot: string } {
+  return cfg.claudeImage ? { image: cfg.claudeImage, snapshot: "" } : { image: cfg.image, snapshot: cfg.snapshot };
+}
+
 /** The `msb run` rootfs flags: the snapshot (which pins its own disk size), or a sized image boot. */
 export function rootSourceArgs(cfg: Config): string[] {
   return cfg.snapshot ? ["--from-snapshot", cfg.snapshot] : ["--root-disk", cfg.rootDisk, cfg.image];
+}
+
+/** Where a bake leaves the list of globally installed npm packages (src/package-watch.ts reads it). */
+export const BAKED_MANIFEST = "/etc/asb-baked-npm.json";
+/** Record what the bake installed globally: { dependencies: { name: { version } } }. Best-effort. */
+export function bakedManifestSh(): string {
+  return `npm ls -g --depth=0 --json 2>/dev/null > ${BAKED_MANIFEST} || true`;
 }
 
 /**
@@ -573,24 +661,38 @@ export function rootSourceArgs(cfg: Config): string[] {
  * pi-natives and bun (the loaders pick "modern" first).
  */
 export function ompImageDockerfile(cfg: Config, base: string, npx: string[]): string {
+  return agentImageDockerfile(cfg, base, npx, "omp");
+}
+
+/**
+ * The same one-layer build for either flavor. The claude image is Claude Code + gh + the MCP
+ * server packages (what the claude snapshot carried, minus the per-box copy of it); the omp image
+ * adds bun, omp and debugpy. Both end with the baked-package manifest (BAKED_MANIFEST) so a box
+ * can tell the controller what it was born with.
+ */
+export function agentImageDockerfile(cfg: Config, base: string, npx: string[], agent: "claude" | "omp"): string {
   if (!/^[\w./:@-]+$/.test(base)) throw new Error(`invalid base image: ${JSON.stringify(base)}`);
+  const omp = agent === "omp";
   const steps = [
     "set -e",
     claudeInstallSh(cfg.claudeCodeVersion),
     "apt-get update -qq && apt-get install -y -qq --no-install-recommends gh >/dev/null",
-    ompInstallSh(cfg.ompVersion),
-    "{ pip3 install --break-system-packages debugpy || apt-get install -y -qq --no-install-recommends python3-debugpy; } >/dev/null 2>&1 || true",
+    ...(omp
+      ? [ompInstallSh(cfg.ompVersion), "{ pip3 install --break-system-packages debugpy || apt-get install -y -qq --no-install-recommends python3-debugpy; } >/dev/null 2>&1 || true"]
+      : []),
     preinstallSh(npx),
     "find / -xdev \\( -name libonnxruntime_providers_cuda.so -o -name libonnxruntime_providers_tensorrt.so \\) -delete",
     `for d in $(find / -xdev -type d -path '*onnxruntime-node/bin/napi-v*'); do rm -rf "$d/darwin" "$d/win32" "$d/linux/arm64"; done`,
     "if grep -q avx2 /proc/cpuinfo; then rm -f /usr/local/install/global/node_modules/@oh-my-pi/pi-natives-linux-x64/*-baseline.node; " +
       "rm -rf /usr/local/lib/node_modules/*/node_modules/@oven/bun-linux-x64-baseline; fi",
     "npm cache clean --force >/dev/null 2>&1 || true",
-    "rm -rf /usr/local/install/cache /root/.bun/install/cache /root/.cache /root/.npm /root/.hdb /tmp/* /var/lib/apt/lists/* /var/cache/apt/*",
+    bakedManifestSh(),
+    "rm -rf /usr/local/install/cache /root/.bun/install/cache /root/.cache /root/.npm /root/.npm-tmp /root/.hdb /tmp/* /var/lib/apt/lists/* /var/cache/apt/*",
     "claude --version",
-    "omp --version",
+    ...(omp ? ["omp --version"] : []),
   ];
-  return `FROM ${base}\nENV BUN_INSTALL=/usr/local OMP_SKIP_SETUP=1\nRUN ${steps.join("; \\\n  ")}\n`;
+  const env = omp ? "ENV BUN_INSTALL=/usr/local OMP_SKIP_SETUP=1\n" : "";
+  return `FROM ${base}\n${env}RUN ${steps.join("; \\\n  ")}\n`;
 }
 
 /**
@@ -600,6 +702,10 @@ export function ompImageDockerfile(cfg: Config, base: string, npx: string[]): st
  * The MCP package list is the operator's stored config plus `extraNpx` (OMP_BAKE_NPX).
  */
 export async function bakeOmpImage(cfg: Config, tag: string, extraNpx: string[]): Promise<string> {
+  return bakeAgentImage(cfg, tag, extraNpx, "omp");
+}
+
+export async function bakeAgentImage(cfg: Config, tag: string, extraNpx: string[], agent: "claude" | "omp"): Promise<string> {
   if (!/^[a-z0-9][\w.-]*:[\w.-]+$/.test(tag)) throw new Error(`invalid image tag: ${JSON.stringify(tag)}`);
   const insp = await msb(cfg, ["image", "inspect", cfg.image]);
   const digest = insp.stdout.match(/^Digest:\s+(sha256:[0-9a-f]{64})$/m)?.[1];
@@ -612,7 +718,7 @@ export async function bakeOmpImage(cfg: Config, tag: string, extraNpx: string[])
   } catch {
     // no operator MCP store reachable from this process — OMP_BAKE_NPX alone
   }
-  const df = ompImageDockerfile(cfg, `${repo}@${digest}`, Array.from(new Set([...specs, ...extraNpx])));
+  const df = agentImageDockerfile(cfg, `${repo}@${digest}`, Array.from(new Set([...specs, ...extraNpx])), agent);
   const q = shellQuote(tag);
   const r = await run("ssh", [...sshMuxOpts(cfg), cfg.vpsSsh, 'sh -c "$(cat)"'], {
     timeoutMs: 1_800_000,
@@ -702,6 +808,11 @@ export function agentEnvFlags(
     // Every non-interactive bash the agent spawns sources the auto-install hook (src/drivers/need.ts).
     "-e",
     `BASH_ENV=${NEED_HOOK}`,
+    // The box's /tmp is a 256M tmpfs in RAM: anything the agent (or a tool it runs: npm, pip, a
+    // build) parks there dies with ENOSPC at 256M however large the disk is. Temp files go on the
+    // root disk instead; bootstrapScript creates the dir and sets the same for login shells.
+    "-e",
+    `TMPDIR=${BOX_TMPDIR}`,
   ];
   // Harness rules travel as their own variable, not folded into AGENT_SYS_PROMPT here: the run
   // wrapper (agentSh) persists them in the box on the first turn and appends them to the system
@@ -912,9 +1023,14 @@ export function gitCredentialsScript(ownerTokens: Record<string, string>, fallba
 
 
 
+/** On-disk temp dir for everything that runs in a box (see agentEnvFlags: /tmp is a 256M tmpfs). */
+export const BOX_TMPDIR = "/root/.tmp";
+
 export function bootstrapScript(cfg: Config, agent: AgentKind = "claude"): string {
   const lines = [
     "set -e",
+    // Temp on the root disk for every `sh -lc` / `bash -lc` exec too (login shells read profile.d).
+    `mkdir -p ${BOX_TMPDIR} && printf '%s\\n' 'export TMPDIR=${BOX_TMPDIR}' > /etc/profile.d/asb-tmpdir.sh`,
     claudeInstallSh(cfg.claudeCodeVersion),
     // Install gh if missing (Debian/Ubuntu node image). We do NOT run `gh auth setup-git` or set any
     // identity here: there is no default account. Git auth + commit identity are applied per-repo
@@ -1155,12 +1271,12 @@ for (const file of process.argv.slice(1)) {
 if (dropped.size) console.log("mcp-drop:" + [...dropped].join(","));
 `;
 
-export async function installMcpConfig(cfg: Config, box: string): Promise<void> {
+export async function installMcpConfig(cfg: Config, box: string): Promise<string[]> {
   try {
     const conf = toClaudeMcpConfig(await loadMcpStore(cfg));
     if (!conf) {
-      await exec(cfg, box, `rm -f ${MCP_CONFIG_PATH} ${OMP_MCP_CONFIG_PATH}`);
-      return;
+      await exec(cfg, box, `rm -f ${MCP_CONFIG_PATH} ${OMP_MCP_CONFIG_PATH} ${MCP_NOTES_PATH}`);
+      return [];
     }
     const json = JSON.stringify(conf);
     const specs = npxPackagesOf(conf);
@@ -1169,21 +1285,58 @@ export async function installMcpConfig(cfg: Config, box: string): Promise<void> 
     const direct = specs.length
       ? `; R="$R" D="$D" node -e ${shellQuote(MCP_DIRECT_BIN_JS)} ${MCP_CONFIG_PATH} ${OMP_MCP_CONFIG_PATH} || true`
       : "";
+    // The install's decisions are kept in the box (MCP_NOTES_PATH) so the thread can show what the
+    // agent lacks — the watch probe reads them — and the bake's package manifest rides back on the
+    // same exec, so the controller learns what the box was born with without opening a snapshot.
     const r = await exec(
       cfg,
       box,
       `printf '%s' ${shellQuote(json)} > ${MCP_CONFIG_PATH} && chmod 600 ${MCP_CONFIG_PATH} && ` +
         `mkdir -p /root/.omp/agent && printf '%s' ${shellQuote(json)} > ${OMP_MCP_CONFIG_PATH} && chmod 600 ${OMP_MCP_CONFIG_PATH}` +
-        `; ${preinstallSh(specs)}${direct}`,
+        `; { ${preinstallSh(specs)}${direct}; } > ${MCP_NOTES_PATH} 2>&1; cat ${MCP_NOTES_PATH}` +
+        `; echo "mcp-baked:$(tr -d '\\n' < ${BAKED_MANIFEST} 2>/dev/null)"`,
       { timeoutMs: 300_000 }
     );
+    const out = r.stdout ?? "";
+    const baked = out.match(/^mcp-baked:(\{.*\})\s*$/m);
+    if (baked) rememberBaked(baked[1]);
     // A server that could not be installed on this disk is dropped for the run, not fatal — but it
     // must be visible somewhere, and the run log is the operator's first stop.
-    const notes = mcpInstallNotes(r.stdout ?? "");
+    const notes = mcpInstallNotes(out);
     if (notes.length) console.error(`[mcp] ${box}: ${notes.join("; ")}`);
+    rememberProvision(box, notes);
+    return notes;
   } catch (e) {
     console.error(`[mcp] could not install MCP config into ${box}:`, (e as Error).message);
+    return [];
   }
+}
+
+/** Where the in-box install leaves its mcp-skip/fail/drop lines for the watch probe. */
+export const MCP_NOTES_PATH = "/root/.agent-mcp.notes";
+
+// What the controller knows about MCP package provisioning, for the MCP settings page: the baked
+// manifest the last box reported, and the decisions of the last install. Process memory — both
+// are re-learned on the next task start, and neither is worth a table.
+let bakedPackages: Record<string, string> = {};
+let lastProvision: LastProvision | undefined;
+
+function rememberBaked(json: string): void {
+  const m = parseBakedManifest(json);
+  if (Object.keys(m).length) bakedPackages = m;
+}
+
+/** mcp-skip:'spec' free=…k / mcp-fail:'spec' / mcp-drop:name,name → the last provision record. */
+export function rememberProvision(box: string, notes: readonly string[]): void {
+  const specOf = (l: string) => (l.match(/^mcp-(?:skip|fail):'([^']+)'/)?.[1] ?? l.replace(/^mcp-(?:skip|fail):/, "").split(" ")[0].replace(/^'|'$/g, "")).trim();
+  const skipped = notes.filter((l) => l.startsWith("mcp-skip:")).map(specOf);
+  const failed = notes.filter((l) => l.startsWith("mcp-fail:")).map(specOf);
+  const dropped = notes.filter((l) => l.startsWith("mcp-drop:")).flatMap((l) => l.slice("mcp-drop:".length).split(",").map((s) => s.trim()).filter(Boolean));
+  lastProvision = { at: Date.now(), box, skipped, failed, dropped };
+}
+
+export function mcpProvisionState(): { baked: Record<string, string>; last: LastProvision | undefined } {
+  return { baked: { ...bakedPackages }, last: lastProvision ? { ...lastProvision } : undefined };
 }
 
 /**
@@ -1260,7 +1413,7 @@ export function pruneMcpPackagesSh(root = "/usr/local/lib/node_modules"): string
     `find ${r} \\( -name libonnxruntime_providers_cuda.so -o -name libonnxruntime_providers_tensorrt.so \\) -delete 2>/dev/null; ` +
     `for d in $(find ${r} -type d -path '*onnxruntime-node/bin/napi-v*' 2>/dev/null); do rm -rf "$d/darwin" "$d/win32" "$d/linux/arm64"; done; ` +
     `if grep -q avx2 /proc/cpuinfo 2>/dev/null; then rm -rf ${r}/*/node_modules/@oven/bun-linux-x64-baseline; fi; ` +
-    `npm cache clean --force >/dev/null 2>&1; rm -rf /root/.npm/_cacache /root/.npm-tmp /root/.cache /tmp/* 2>/dev/null; true`
+    `npm cache clean --force >/dev/null 2>&1; rm -rf /root/.npm/_cacache /root/.npm-tmp /root/.cache /tmp/* /root/.tmp/* 2>/dev/null; true`
   );
 }
 
@@ -1581,11 +1734,31 @@ export async function runAgentTask(
     timed("memory", installMemory(cfg, box, task, { firstTurn: true })),
   ]);
   const t3 = Date.now();
-  const r = await msb(cfg, ["exec", box, ...agentEnv, ...skillHintFlags(box, task, skills, true, memory.hint), "--", "sh", "-lc", agentSh(workdir, false, agent)]);
+  const r = await msb(cfg, ["exec", box, ...agentEnv, ...skillHintFlags(box, task, skills, true, memory.hint), "--", "sh", "-lc", guardedAgentSh(workdir, false, agent)]);
   console.error(
     `[timing] runAgentTask ${box} taskmark=${t1 - t0}ms bootstrap=${t2 - t1}ms prep=${t3 - t2}ms (${prepMarks.join(" ")}) exec=${Date.now() - t3}ms`
   );
+  const full = diskFullFromLaunch(r.stdout);
+  if (full) throw new DiskFullError(box, full.freeKb, full.totalKb);
   return r;
+}
+
+/**
+ * The launch behind the disk preflight (DISK_PREFLIGHT_SH). A disk below the run floor records the
+ * reason where every reader looks — a line in the agent log, EXIT_DISK_FULL in the done mark, so the
+ * thread shows "Disk full" and the notification says so — and prints `diskfull <free> <total>` for
+ * the controller, which turns it into a DiskFullError for the caller. Both writes are best-effort:
+ * at 0 bytes they fail too, and the stdout line is then the only word (hence the throw).
+ */
+export function guardedAgentSh(workdir: string, resume: boolean, agent: AgentKind = "claude"): string {
+  const note = "run not started: the sandbox disk is full (%s MB free). Grow the disk from the machine menu, then send a message to continue.";
+  return (
+    `${DISK_PREFLIGHT_SH}; if [ "\${F:-0}" -lt ${RUN_MIN_FREE_KB} ]; then ` +
+    `{ printf ${shellQuote(note + "\\n")} "$((\${F:-0}/1024))"; } >> ${AGENT_LOG} 2>/dev/null; ` +
+    `echo ${EXIT_DISK_FULL} > ${DONE_MARK} 2>/dev/null; rm -f ${QUESTION_MARK} 2>/dev/null; ` +
+    `echo "diskfull \${F:-0} $(df -Pk / 2>/dev/null | awk 'NR==2{print $2}')"; ` +
+    `else ${agentSh(workdir, resume, agent)}; fi`
+  );
 }
 
 /**
@@ -1768,7 +1941,10 @@ export async function resumeAgentTask(
   // inbox delivery, send-now, the credential broker, an elicited answer) only has a box id and used
   // to pass undefined here, which resumed a single-repo box in /workspace and lost the session.
   const workdir = repos?.length ? agentWorkdir(repos) : await boxAgentWorkdir(cfg, box);
-  return msb(cfg, ["exec", box, ...env, ...skillHintFlags(box, message, skills, false), "--", "sh", "-lc", agentSh(workdir, true, agent)]);
+  const r = await msb(cfg, ["exec", box, ...env, ...skillHintFlags(box, message, skills, false), "--", "sh", "-lc", guardedAgentSh(workdir, true, agent)]);
+  const full = diskFullFromLaunch(r.stdout);
+  if (full) throw new DiskFullError(box, full.freeKb, full.totalKb);
+  return r;
 }
 
 /**
@@ -2143,6 +2319,7 @@ export async function gatherWatch(
         `echo "---Q---"; cat ${QUESTION_MARK} 2>/dev/null || true; ` +
         `echo "---T---"; cat ${TASK_MARK} 2>/dev/null || true; ` +
         `echo "---A---"; cat ${KIND_MARK} 2>/dev/null || true; ` +
+        `echo "---N---"; cat ${MCP_NOTES_PATH} 2>/dev/null || true; ` +
         `echo "---LOG---"; ${logTailCmd(logLines)}`,
       // Same bound as gatherMonitor's probe: an exec into a box caught mid-shutdown can park in
       // poll() indefinitely, and this read sits behind every WatchHub tick — unbounded, one wedged
@@ -2163,9 +2340,15 @@ export async function gatherWatch(
     base.exitCode = rs.exitCode;
     // ---A--- (agent kind) is absent on boxes probed by an older controller — tolerate both shapes.
     const aStartRaw = out.indexOf("---A---");
-    const tEnd = aStartRaw >= 0 ? aStartRaw : logStart;
+    const nStartRaw = out.indexOf("---N---");
+    const tEnd = aStartRaw >= 0 ? aStartRaw : nStartRaw >= 0 ? nStartRaw : logStart;
     base.task = out.slice(tStart + "---T---".length, tEnd).trim() || undefined;
-    if (aStartRaw >= 0) base.agent = boxAgentKindFrom(out.slice(aStartRaw + "---A---".length, logStart));
+    if (aStartRaw >= 0) base.agent = boxAgentKindFrom(out.slice(aStartRaw + "---A---".length, nStartRaw >= 0 ? nStartRaw : logStart));
+    // ---N---: what the MCP install left out of this box (mcp-skip/fail/drop lines), for the thread.
+    if (nStartRaw >= 0) {
+      const notes = mcpInstallNotes(out.slice(nStartRaw + "---N---".length, logStart));
+      if (notes.length) base.mcpNotes = notes;
+    }
     base.log = out.slice(logStart + "---LOG---".length).trim();
     base.boxStatus = "running"; // execable => running
   } catch {
@@ -2277,6 +2460,53 @@ export function msbIo(cfg: Config) {
     noteRunning,
   };
 }
+
+/** `df` of the filesystem under the microsandbox home on the VPS — the disk every box boot needs. */
+export async function hostDisk(cfg: Config): Promise<DiskReading | undefined> {
+  const r = await ssh(cfg, `df -Pk ${shellQuote(cfg.msbHome)}`, false);
+  return r.code === 0 ? parseDfPk(r.stdout) : undefined;
+}
+
+/**
+ * Remove sandbox directories the runtime no longer lists (src/host-disk.ts orphanSandboxDirs).
+ * Observed on the host: 15 dirs from one August afternoon, 6.8G, from boots that failed or were
+ * removed mid-way — msb forgot them, the disk did not. The listing must SUCCEED and parse before
+ * anything is judged an orphan: an empty listing from a failed `msb ls` would make every dir one.
+ */
+export async function sweepOrphanSandboxDirs(cfg: Config, opts: { dryRun?: boolean } = {}): Promise<{ removed: string[]; freedMib?: number }> {
+  const ls = await msb(cfg, ["ls", "--format", "json"], false, PROBE_TIMEOUT_MS);
+  if (ls.code !== 0 || !ls.stdout.trim().startsWith("[")) throw new Error(`msb ls failed (exit ${ls.code}); not sweeping`);
+  const listed = parseLsJson(ls.stdout).map((e) => e.name);
+  const dir = `${cfg.msbHome}/sandboxes`;
+  const found = await ssh(cfg, `find ${shellQuote(dir)} -mindepth 1 -maxdepth 1 -type d -printf '%f %T@\\n' 2>/dev/null`, false);
+  const orphans = orphanSandboxDirs(parseDirListing(found.stdout), listed, Date.now() / 1000);
+  if (!orphans.length || opts.dryRun) return { removed: orphans };
+  const paths = orphans.map((n) => shellQuote(`${dir}/${n}`)).join(" ");
+  const r = await ssh(cfg, `du -skc ${paths} 2>/dev/null | tail -1 | awk '{print $1}'; rm -rf ${paths}`, false);
+  const kb = Number(r.stdout.trim().split("\n")[0]);
+  return { removed: orphans, ...(Number.isFinite(kb) && kb > 0 ? { freedMib: Math.round(kb / 1024) } : {}) };
+}
+
+/**
+ * Dig the holes out of a snapshot's upper on the host. The guest cannot fstrim, so every byte a
+ * bake installed and deleted again (npm's tarballs, the pruned GPU providers) stays allocated in
+ * upper.ext4 — 2.1G allocated for 543M of content, measured — and a snapshot boot copies all of
+ * it into every box. bake-snapshot zero-fills the free space in the guest first, so the freed
+ * blocks are zeros; `fallocate -d` then turns the zero runs into holes (2.1G → 931M).
+ */
+export async function compactSnapshotUpper(cfg: Config, name: string): Promise<string> {
+  const f = `${cfg.msbHome}/snapshots/${name}/upper.ext4`;
+  const r = await ssh(
+    cfg,
+    `F=${shellQuote(f)}; if [ ! -f "$F" ]; then echo "no upper at $F"; exit 0; fi; ` +
+      `B=$(du -sh "$F" | cut -f1); fallocate -d "$F" 2>/dev/null || echo "fallocate -d failed"; echo "$B -> $(du -sh "$F" | cut -f1)"`,
+    false
+  );
+  return r.stdout.trim();
+}
+
+/** Fill the guest's free space with zeros and release it, so the host can punch holes (above). */
+export const ZERO_FILL_SH = "dd if=/dev/zero of=/.zero bs=4M 2>/dev/null; sync; rm -f /.zero; sync; true";
 
 export async function teardown(cfg: Config, box: string, stagingDir?: string): Promise<void> {
   assertBoxName(box);

@@ -524,3 +524,69 @@ host disk only for what the packages actually weigh. `BAKE_NPX` is the explicit 
 runs outside a login, so it cannot read the encrypted per-user MCP stores, only the operator's
 legacy file. When a user adds a new `npx` server, the guard installs it per run if it fits, and
 the next rebake makes it free.
+
+## The service watches itself (2026-11-11)
+
+The 2026-10 outage (every claude run dying before its first turn for two weeks, 55 runs, nothing
+but "failed (exit 1)" to show for it) was found by a user. These are the pieces that find the next
+one from the inside. All of them are best-effort and never throw into the sweep or a timer.
+
+- **Start failures are named** (`src/run-health.ts`). A failed edge whose log has no session,
+  tool call, plan or usage behind it is a start failure: the sandbox failed the run, not the
+  agent. The notification says "failed to start" with the box's last lines, the thread's run pill
+  says "Failed to start", the digest carries `startFailure.tail`. The third in a row alerts the
+  operator (`[alert] start-failures` in the log; webhook + push), then once per 6h while it goes on.
+- **Disk preflight** (`guardedAgentSh`, msb.ts). Before the agent launches, the box's free space is
+  read; below 100M the npm caches and temp dirs are dropped and it is read again; still short means
+  the run is NOT started: a note goes to the agent log, `250` to the done mark (the thread shows
+  "Disk full", the notification "not started: the sandbox disk is full"), and the controller throws
+  a `DiskFullError` so the caller gets a sentence instead of a dead box.
+- **Warm boxes are checked before they are handed out** (`WARM_HEALTH_SH`, `warmBoxVerdict`). At
+  warm-up time, where nobody waits, the box must have 100M free and `claude --version` must answer,
+  or `/.ready` is never written and the box is removed (the refill boots another). The claim re-reads
+  only the disk, in the same exec as the claim marker; a box that fails it is removed and the
+  delegation cold-boots.
+- **MCP install notes reach the thread.** `preinstallSh`'s `mcp-skip/fail/drop` lines are kept in
+  the box (`/root/.agent-mcp.notes`); the watch probe reads them (`---N---`) and the thread says
+  "Running without 2 MCP servers: btp-mcp-server (no disk space), ...". The MCP settings page shows
+  each npx server as *baked in*, *installed each run* or *left out of the last run*
+  (`/mcp-servers.json` `provision`).
+- **Canary** (`src/canary.ts`, `CANARY_INTERVAL_MS`, default hourly). One real task
+  ("Reply with exactly the word CANARY-OK") through `delegateOnce` as the operator, judged by its
+  log, its box torn down; the fleet sweep skips `[canary]` boxes for notifications, history and
+  memory. A failure alerts at once (then per 6h), the pass after a failure says "recovered". State
+  on `/health.json`; `POST /health/canary.json` runs one now.
+- **Host disk** (`src/host-disk.ts`). `df` under `MSB_HOME` every 10 min, one alert per 12h at
+  `HOST_DISK_ALERT_PCT` (85). Daily (and 2 min after boot) the sandboxes dir is swept for
+  directories `msb ls` no longer lists AND older than a day (`sweepOrphanSandboxDirs`); the listing
+  must succeed and parse before anything is judged an orphan. Found on 2026-11-11: 13 dirs from
+  one August afternoon, ~5G.
+- **Baked package versions** (`src/package-watch.ts`). The bake writes `/etc/asb-baked-npm.json`
+  (`npm ls -g --json`); every task start reports it (`mcp-baked:` line of the install exec). Daily the
+  baked versions are compared to the registry's `latest`; a difference alerts "Rebake due" once a
+  week. Pin the specs you bake (`BAKE_NPX=pkg@1.2.3`).
+- **Claude boxes boot from an image** (`MSB_CLAUDE_IMAGE`, `npm run bake:claude-image`), like omp's
+  `MSB_OMP_IMAGE`: one layer stored once, empty upper per box, instead of copying the 931M snapshot
+  upper per boot. `claudeRootSource(cfg)` decides (image > snapshot > cold); the snapshot stays as
+  the fallback when the variable is unset.
+- **TMPDIR is on the root disk** (`/root/.tmp`, via `-e TMPDIR` on the agent exec and
+  `/etc/profile.d/asb-tmpdir.sh` for login shells). The box's `/tmp` is a 256M tmpfs in RAM:
+  anything parked there died with ENOSPC at 256M however large the disk was (the onnxruntime
+  postinstall did). The scrub and the prune clear `/root/.tmp` too.
+- **Snapshot compaction is part of the bake.** `bake-snapshot` zero-fills the guest's free space
+  before stopping the box (the guest cannot fstrim) and runs `fallocate -d` on the snapshot upper on
+  the host after `msb snapshot create` (`compactSnapshotUpper`): 2.1G -> 931M measured by hand on
+  agent-base-3g-2, now automatic.
+
+`/health.json` (dashboard token) returns all of it: canary, hostDisk, orphanSweep, startFailures,
+baked, lastProvision, rebakeDue, claudeSource. The Fleet page shows the canary, the host disk and the
+boot source under its heading.
+
+### Baking the claude image on the VPS
+
+    docker exec -e BAKE_NPX='@cap-js/mcp-server@0.1.0,btp-mcp-server@1.2.3' agent-sandbox       node dist/bake-claude-image.js agent-claude:1
+    # then in /root/agent-sandbox-deploy/.env: MSB_CLAUDE_IMAGE=agent-claude:1
+    docker compose up -d
+    msb rm --force <the warm pool box>   # so the pool reseeds from the image
+
+The MCP store's own `npx` specs are baked without listing them; `BAKE_NPX` adds (or pins) more.

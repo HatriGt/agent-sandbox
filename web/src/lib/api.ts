@@ -179,7 +179,13 @@ export type McpTransport = "stdio" | "http" | "sse";
 export interface McpServersResponse {
   servers: McpServerView[];
   config: { mcpServers: Record<string, unknown> };
+  /** Globally installed npm packages the boxes are born with (name → version), once a box has reported. */
+  baked?: Record<string, string>;
+  lastProvision?: { at: number; box: string; skipped: string[]; failed: string[]; dropped: string[] } | null;
 }
+
+/** How an npx server's package reaches a box: baked into the image, installed every run, or left out of the last run. */
+export type McpProvision = "baked" | "per-run" | "dropped";
 
 export interface McpServerView {
   name: string;
@@ -195,6 +201,8 @@ export interface McpServerView {
   headers?: Record<string, string>;
   enabled: boolean;
   addedAt: number;
+  /** Only for npx stdio servers, and only once a box has reported its baked packages. */
+  provision?: McpProvision;
 }
 
 /** Outcome of `mcpTest`; `tools` only when the server answered `tools/list`. */
@@ -470,6 +478,25 @@ export interface WatchSnapshot extends Omit<BoxView, "role"> {
   log: string;
   /** Notes this box produced recently (memory v2); absent on older controllers. */
   memoryNew?: MemoryNew[];
+  /** MCP servers the install left out of this box (`mcp-skip:` / `mcp-fail:` / `mcp-drop:` lines). */
+  mcpNotes?: string[];
+}
+
+/** /health.json: the service's own health for the Fleet page. */
+export interface HealthResponse {
+  canary: {
+    enabled: boolean;
+    intervalMs: number;
+    last: { ok: boolean; ms: number; detail: string; box?: string; at: number; failures: number; lastOkAt?: number } | null;
+  };
+  hostDisk: { reading?: { totalMib: number; usedMib: number; availMib: number; usedPct: number }; at: number; error?: string; alertPct: number; home: string };
+  orphanSweep: { at: number; removed: string[]; freedMib?: number; error?: string } | null;
+  startFailures: { streak: number; last?: { box: string; at: number; tail: string }; alertedAt: number };
+  baked: Record<string, string>;
+  lastProvision: { at: number; box: string; skipped: string[]; failed: string[]; dropped: string[] } | null;
+  rebakeDue: { name: string; baked: string; latest: string }[];
+  rebakeCheckedAt: number;
+  claudeSource: { kind: "image" | "snapshot" | "cold"; name: string };
 }
 
 /** Walk-away notifications: the owner's webhook + which run events fire it. */
@@ -507,6 +534,8 @@ export interface RunDigest {
   verified?: { mode: "command" | "criterion"; pass: boolean; detail: string };
   /** Receipt provenance: which agent ran and on which model, only when known. */
   provenance?: { agent?: string; agentLabel?: string; model?: string; provider?: string; skills?: { name: string; how: "explicit" | "auto" }[] };
+  /** The run never had a turn: the sandbox failed it (a full disk, a crashed CLI). `tail` is what the box said last. */
+  startFailure?: { tail: string };
 }
 
 export interface AskResult {
@@ -968,6 +997,8 @@ export const api = {
   skillMutate: (body: Record<string, unknown>) => post<SkillsResponse>("/skills.json", body),
   /** Memory across runs: the owner's notes. Not /memory.json, which is the VM's RAM. */
   memoryNotes: (signal?: AbortSignal) => fetch(url("/memory-notes.json"), { headers: authHeaders, signal }).then(parse<MemoryNotesResponse>),
+  /** The service's own health (canary, host disk, start failures, baked packages). */
+  health: (signal?: AbortSignal) => fetch(url("/health.json"), { headers: authHeaders, signal }).then(parse<HealthResponse>),
   memoryNoteUpdate: (body: { enabled: boolean } | { id: string; text?: string; why?: string; pinned?: boolean; status?: "kept"; area?: string; paths?: string; links?: string; verified?: boolean; repo?: string }) =>
     post<MemoryNotesResponse>("/memory-notes.json", body),
   /** Add a preference/rule by hand (the composer on the Memory page). */

@@ -31,6 +31,7 @@ import {
   msbIo,
   OMP_MIN_DISK,
   ompRootSource,
+  claudeRootSource,
   OMP_MIN_MEMORY,
   OMP_CPUS,
 } from "./msb.js";
@@ -462,6 +463,10 @@ export const deps: HandlerDeps = {
       // baked (MSB_OMP_SNAPSHOT), boot from it — bun + omp pre-installed on the 4G rootfs, so the
       // ~90s per-thread install disappears; otherwise cold-boot from the image and install.
       runCfg = { ...runCfg, ...ompRootSource(cfg), rootDisk: OMP_MIN_DISK, memory: OMP_MIN_MEMORY, cpus: OMP_CPUS };
+    } else {
+      // Every other driver runs in the claude box: the baked claude image when one is configured
+      // (MSB_CLAUDE_IMAGE), else the snapshot, else a cold install from the base image.
+      runCfg = { ...runCfg, ...claudeRootSource(cfg) };
     }
 
     const id = newSessionId();

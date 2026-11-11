@@ -9,6 +9,7 @@
  * list. No new instrumentation runs in the box.
  */
 import type { TraceEvent, PlanItem } from "./trace.js";
+import { EXIT_NOTES, isStartFailure, logTail } from "./run-health.js";
 import type { VerifyResult } from "./verify.js";
 import { AGENT_LABELS, isAgentKind } from "./agent-kind.js";
 import type { StartedBy } from "./started-by.js";
@@ -33,6 +34,8 @@ export interface DigestInput {
   verified?: VerifyResult;
   /** How many times a failed verification sent the run back (harness autoRetry) before this finish. */
   retries?: number;
+  /** The raw log tail, for the start-failure note (what the box said before it died). */
+  log?: string;
   /** Which coding agent ran (the box's .agent.kind mark), when known. */
   agent?: string;
   /** The model the run used, when the controller knows it (never guessed). */
@@ -93,13 +96,13 @@ export interface RunDigest {
   rememberedKinds?: Partial<Record<MemoryKind, number>>;
   /** The outcome card (src/outcome.ts), attached at archive time. */
   outcome?: import("./outcome.js").RunOutcome;
+  /**
+   * The run never had a turn: a non-zero exit with no session, tool call or plan behind it means
+   * the SANDBOX failed the run (a full disk, a crashed CLI), not the agent. `tail` is the last
+   * lines the box wrote — the only account there is. See src/run-health.ts.
+   */
+  startFailure?: { tail: string };
 }
-
-/** Exit codes the run wrapper reserves for non-agent terminations (msb.ts). */
-const EXIT_NOTES: Record<number, string> = {
-  254: "interrupted (restart or send-now)",
-  253: "stopped by the operator",
-};
 
 function stateOf(runState: DigestInput["runState"], exitCode: number | undefined): RunDigest["state"] {
   if (runState === "waiting") return "waiting";
@@ -117,11 +120,12 @@ export function headlineOf(x: {
   openQuestions: number;
   verified?: VerifyResult;
   retries?: number;
+  startFailure?: boolean;
 }): string {
   const bits: string[] = [];
   if (x.state === "failed") {
     const note = x.exitCode !== undefined ? EXIT_NOTES[x.exitCode] : undefined;
-    bits.push(note ? `failed — ${note}` : `failed (exit ${x.exitCode})`);
+    bits.push(note ? `failed — ${note}` : x.startFailure ? `failed to start (exit ${x.exitCode}) — the sandbox never ran the agent` : `failed (exit ${x.exitCode})`);
   } else if (x.state === "waiting") {
     bits.push("needs an answer");
   } else if (x.state === "running") {
@@ -199,8 +203,10 @@ export function buildDigest(input: DigestInput): RunDigest {
   }));
 
   const openQuestions = questions.filter((q) => q.answer === undefined).length;
+  const startFailure = state === "failed" && isStartFailure(input.exitCode, input.events);
   const headline = headlineOf({
     state,
+    startFailure,
     exitCode: input.exitCode,
     fileCount: input.files.length,
     stepCount: plan.length,
@@ -225,6 +231,7 @@ export function buildDigest(input: DigestInput): RunDigest {
     task: input.task,
     state,
     ...(input.exitCode !== undefined ? { exitCode: input.exitCode } : {}),
+    ...(startFailure ? { startFailure: { tail: logTail(input.log ?? "") } } : {}),
     ...(startedAt !== undefined ? { startedAt } : {}),
     ...(endedAt !== undefined ? { endedAt } : {}),
     plan,

@@ -9,7 +9,7 @@
  *
  * The pool state lives on the VPS (the running `pool-*` boxes), so it survives MCP respawns.
  */
-import { createBox, bootWarmBox, listPoolBoxes, claimWarmBox, reapDeadPoolBoxes, forceRemoveBox, OMP_MIN_MEMORY, OMP_MIN_DISK, OMP_CPUS, ompRootSource } from "./msb.js";
+import { createBox, bootWarmBox, listPoolBoxes, claimWarmBox, reapDeadPoolBoxes, forceRemoveBox, OMP_MIN_MEMORY, OMP_MIN_DISK, OMP_CPUS, ompRootSource, claudeRootSource } from "./msb.js";
 import { stagingPathFor } from "./sync.js";
 import { parseDurationSec } from "./monitor.js";
 import type { Config } from "./config.js";
@@ -41,9 +41,19 @@ export function freshPoolBoxes(available: readonly string[], maxAgeMs: number, n
 // msb.ts needs it too and pool.ts already imports msb.ts — a cycle otherwise.
 export { warmMaxDuration } from "./monitor.js";
 
+/** Is a baked claude rootfs (image or snapshot) configured? Without one a claude box cold-installs. */
+export function claudeSourceOn(cfg: Config): boolean {
+  return !!(cfg.claudeImage || cfg.snapshot);
+}
+
+/** The Config a claude pool box boots with: the claude image (or snapshot) at the default tier. */
+export function claudePoolCfg(cfg: Config): Config {
+  return { ...cfg, ...claudeRootSource(cfg) };
+}
+
 /** Whether this delegation is eligible to use a (open-egress) pooled box. */
 export function poolEligible(cfg: Config, allowDomainsProvided: boolean): boolean {
-  return cfg.poolSize > 0 && !!cfg.snapshot && cfg.egressAllowAll && !allowDomainsProvided;
+  return cfg.poolSize > 0 && claudeSourceOn(cfg) && cfg.egressAllowAll && !allowDomainsProvided;
 }
 
 /**
@@ -127,9 +137,11 @@ export async function acquireBox(
         );
         return { box: warm, warm: true };
       } catch (e) {
-        // The box went sideways between listing and claiming (desync). Don't hand back a dead box
-        // that would show run:running while Stopped — reap it and fall through to a clean cold boot.
-        console.error(`[pool] claim of ${warm} failed, reaping and cold-booting:`, e);
+        // The box went sideways between listing and claiming (desync), or its disk cannot take a
+        // run (claimWarmBox's floor). Don't hand back a box that would show run:running while
+        // Stopped, or die before turn one: remove THIS box, reap the rest, cold-boot clean.
+        console.error(`[pool] claim of ${warm} failed, removing it and cold-booting:`, e);
+        await forceRemoveBox(cfg, warm).catch(() => {});
         await reapDeadPoolBoxes(cfg);
       } finally {
         claiming.delete(warm);
@@ -168,7 +180,7 @@ let refillInFlight: Promise<void> | null = null;
  * delegation.
  */
 export function refillPool(cfg: Config, io: RefillIO = realRefillIO, wanted: Set<AgentKind> = preferredAgents()): Promise<void> {
-  const claudeOn = cfg.poolSize > 0 && !!cfg.snapshot;
+  const claudeOn = cfg.poolSize > 0 && claudeSourceOn(cfg);
   const ompOn = (cfg.ompPoolSize ?? 0) > 0 && ompSourceOn(cfg);
   if ((!claudeOn && !ompOn) || !cfg.egressAllowAll) return Promise.resolve();
   if (refillInFlight) return refillInFlight;
@@ -181,7 +193,7 @@ export function refillPool(cfg: Config, io: RefillIO = realRefillIO, wanted: Set
       // pool follows the agent setting instead of paying RAM for both flavors at once.
       const all = await io.listPoolBoxes(cfg);
       const flavors: Array<{ agent: AgentKind; size: number; bootCfg: Config; on: boolean }> = [
-        { agent: "claude", size: wanted.has("claude") ? cfg.poolSize : 0, bootCfg: cfg, on: claudeOn },
+        { agent: "claude", size: wanted.has("claude") ? cfg.poolSize : 0, bootCfg: claudePoolCfg(cfg), on: claudeOn },
         { agent: "omp", size: wanted.has("omp") ? cfg.ompPoolSize ?? 0 : 0, bootCfg: ompPoolCfg(cfg), on: ompOn },
       ];
       for (const f of flavors) {
@@ -225,7 +237,7 @@ export function refillPool(cfg: Config, io: RefillIO = realRefillIO, wanted: Set
  * makes a warm box ALWAYS ready. Returns a stop handle; unref'd so it never holds the process open.
  */
 export function startPoolMaintainer(cfg: Config): { stop: () => void } {
-  const claudeOn = cfg.poolSize > 0 && !!cfg.snapshot;
+  const claudeOn = cfg.poolSize > 0 && claudeSourceOn(cfg);
   const ompOn = (cfg.ompPoolSize ?? 0) > 0 && ompSourceOn(cfg);
   if ((!claudeOn && !ompOn) || !cfg.egressAllowAll || cfg.poolRefillIntervalMs <= 0) {
     return { stop: () => {} };
@@ -250,7 +262,7 @@ export async function poolStatus(cfg: Config): Promise<{
   boxes: string[];
   enabled: boolean;
 }> {
-  const enabled = (cfg.poolSize > 0 && !!cfg.snapshot && cfg.egressAllowAll) || ompPoolEligible(cfg, false);
+  const enabled = (cfg.poolSize > 0 && claudeSourceOn(cfg) && cfg.egressAllowAll) || ompPoolEligible(cfg, false);
   const boxes = enabled ? await listPoolBoxes(cfg) : [];
   return { size: cfg.poolSize + (ompSourceOn(cfg) ? cfg.ompPoolSize : 0), available: boxes.length, boxes, enabled };
 }

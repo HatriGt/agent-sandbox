@@ -37,6 +37,11 @@ import { githubAuthorizeUrl, githubExchangeCode, githubIdentity } from "./github
 import { keyFromEnvOrFile, makeSecretBox } from "./secretbox.js";
 import { allBlobs, loadBlob, ownerKey, registerUserStoreBackend, saveBlob, withOwner, OPERATOR_OWNER } from "./user-store.js";
 import { detectTransitions, formatNotification, makeNotifier, shouldNotify, toggleFor, type BoxRunView, type NotifyEvent } from "./notify.js";
+import { StartFailureStreak, isStartFailure, logTail, startFailureAlertText } from "./run-health.js";
+import { CANARY_TASK, canaryAlertText, canaryVerdict, isCanaryTask, makeCanary, type CanaryResult } from "./canary.js";
+import { hostDiskAlarmed, hostDiskAlertText, type DiskReading } from "./host-disk.js";
+import { fetchLatestVersions, outdatedPackages, provisionOf, rebakeDueText, type Outdated } from "./package-watch.js";
+import { hostDisk, mcpProvisionState, sweepOrphanSandboxDirs } from "./msb.js";
 import { claimNonce, mintNonce, questionChoices, releaseNonce } from "./answer-choice.js";
 import { buildPushMessages, deviceCount, listDeviceTokens, makeOwnerRateCap, pruneToken, registerDevice, sendExpoPush, unregisterDevice } from "./push.js";
 import { fetchPinned } from "./net-guard.js";
@@ -709,6 +714,45 @@ function skillPicksView(box: string): { skills?: SkillPick[] } {
 const notifier = makeNotifier({ send: sendNotification, log: (m) => console.error(m) });
 
 /**
+ * Infrastructure alerts for the OPERATOR (not a run's owner): start-failure streaks, the canary,
+ * the host disk, a rebake due. The operator's webhook (or NOTIFY_WEBHOOK_URL) and their phones;
+ * the per-event toggles do not apply — these say the service is failing, not that a run ended.
+ * Best-effort like every notification: a failed alert is logged, never thrown into a timer.
+ */
+const alertOperator = async (text: string, alert: string): Promise<void> => {
+  console.error(`[alert] ${alert}: ${text}`);
+  const settings = loadNotifySettings(OPERATOR_OWNER);
+  const url = settings.url || process.env.NOTIFY_WEBHOOK_URL || "";
+  const ev: NotifyEvent = { box: "controller", kind: "failed", exitCode: 1, note: text };
+  const pushed = sendPushFor(OPERATOR_OWNER, ev, "Agent Sandbox").catch((e) => console.error(`[push] alert/${alert}: ${(e as Error).message.slice(0, 200)}`));
+  if (url) {
+    const ac = new AbortController();
+    const t = setTimeout(() => ac.abort(), 5000);
+    try {
+      await fetchPinned(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, url: `${(cfg.publicUrl ?? "").replace(/\/+$/, "")}/dashboard/#/sandboxes`, event: { kind: "alert", alert, box: "controller" } }),
+        signal: ac.signal,
+      });
+    } catch (e) {
+      console.error(`[alert] webhook ${alert}: ${(e as Error).message.slice(0, 200)}`);
+    } finally {
+      clearTimeout(t);
+    }
+  }
+  await pushed;
+};
+
+/**
+ * Runs that died before their first turn (src/run-health.ts): the fleet sweep classifies every
+ * failed edge, the notification says "failed to start" with the box's last lines, and the third
+ * in a row wakes the operator — the 2026-10 disk outage produced 55 of these over two weeks with
+ * nothing but "failed (exit 1)" to show for them.
+ */
+const startFailures = new StartFailureStreak();
+
+/**
  * Run history archive (docs/roadmap-saas.md #7). Archive a finished run as a digest-shaped record.
  * The done/failed edge of the fleet sweep is the natural moment: the box is still running there, so
  * listChanges can capture the file list — at teardown a stopped box can't answer it. Redaction: the
@@ -759,7 +803,7 @@ async function memoryTick(boxes: BoxView[]): Promise<void> {
   const owners = new Set<string>();
   const now = Date.now();
   for (const b of boxes) {
-    if (b.role === "pool-free" || !/^running$/i.test(b.boxStatus)) continue;
+    if (b.role === "pool-free" || !/^running$/i.test(b.boxStatus) || isCanaryTask(b.task)) continue;
     const owner = ownerOf(db, b.name) ?? OPERATOR_OWNER;
     owners.add(owner);
     // Finished runs too: a run that ended between sweeps never produces a finish edge for this
@@ -1058,8 +1102,28 @@ const readFleet = makeFleetReader(
       const nextRunViews = boxes
         .filter((b) => b.role !== "pool-free")
         .map((b) => ({ name: b.name, runState: b.runState, exitCode: b.exitCode, question: b.question, stalled: b.stalled, lastOutputAt: b.lastOutputAt }));
-      for (const ev of detectTransitions(prevRunViews, nextRunViews)) {
-        notifyCtx.set(ev.box, { title: titles[ev.box], task: boxes.find((b) => b.name === ev.box)?.task });
+      for (const ev0 of detectTransitions(prevRunViews, nextRunViews)) {
+        const edgeTask = boxes.find((b) => b.name === ev0.box)?.task;
+        // The canary's runs are the controller's own: no notification, no history row, no memory.
+        // The canary reads its box itself (see makeCanary below) and tears it down.
+        if (isCanaryTask(edgeTask)) continue;
+        // A failed edge is classified before anything hears of it: a non-zero exit with no agent
+        // turn behind it is the sandbox's failure, and the event carries that and the log tail.
+        const ev: NotifyEvent = { ...ev0 };
+        const classify = async (): Promise<void> => {
+          if (ev.kind !== "failed" && ev.kind !== "done") return;
+          const snap = await watchHub.read(ev.box).catch(() => undefined);
+          const sf = ev.kind === "failed" && !!snap && isStartFailure(ev.exitCode, parseTrace(snap.log ?? ""));
+          if (sf) {
+            ev.startFailure = true;
+            const tail = logTail(snap?.log ?? "");
+            if (tail) ev.tail = tail;
+            console.error(`[run-health] ${ev.box}: died before its first turn (exit ${ev.exitCode})${tail ? `: ${tail.split("\n").slice(-1)[0]}` : ""}`);
+          }
+          const rec = startFailures.record(ev.box, sf, ev.tail);
+          if (rec.alert) void alertOperator(startFailureAlertText(rec.streak, startFailures.state().last, cfg.publicUrl ?? ""), "start-failures");
+        };
+        notifyCtx.set(ev.box, { title: titles[ev.box], task: edgeTask });
         // Quiet automations: a done edge whose log ends with the quiet marker (and that asked nothing
         // and opened no PR) is a check that found nothing — no notification, ledger row marked quiet.
         // Everything else notifies as before. Best-effort: an unreadable log is a normal finish.
@@ -1069,6 +1133,9 @@ const readFleet = makeFleetReader(
           return !!snap && isQuietRun(snap.log ?? "", { question: snap.question });
         };
         const settle = async (): Promise<void> => {
+          // Classified first (one hub read, off the sweep): the notification and the archive row
+          // then both know whether this was the sandbox's failure.
+          await classify();
           const quiet = await quietDone();
           if (shouldNotify(ev, { quiet })) void notifier.notify(ev);
           // Run history archive: persist the digest at the finish edge (box still up → files listable).
@@ -2164,11 +2231,24 @@ app.get("/mcp-servers.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   try {
     const store = await loadMcpStore(cfg);
-    res.json({ servers: viewServers(store), config: toEditableConfig(store) });
+    // How each npx server's package reaches a box (src/package-watch.ts): baked into the image, an
+    // install on every task start, or dropped from the last run. Known once a box has reported.
+    const { baked, last } = mcpProvisionState();
+    const servers = viewServers(store).map((s) => {
+      const spec = npxSpecOf(s);
+      return spec ? { ...s, provision: provisionOf(spec, baked, last) } : s;
+    });
+    res.json({ servers, config: toEditableConfig(store), baked, lastProvision: last });
   } catch (e) {
     failWith(res, e);
   }
 });
+/** The npm package spec an `npx` stdio server runs, by the same rule msb.ts npxPackagesOf uses. */
+const npxSpecOf = (s: { type?: string; command?: string; args?: string[] }): string | undefined => {
+  if (s.type !== "stdio" || s.command !== "npx") return undefined;
+  const spec = (s.args ?? []).find((a) => a && !a.startsWith("-"));
+  return spec && /^(@[\w.-]+\/)?[\w.-]+(@[\w.^~-]+)?$/.test(spec) && !/^https?:/.test(spec) ? spec : undefined;
+};
 app.post("/mcp-servers.json", async (req: Request, res: Response) => {
   if (!dashAuthed(req, res)) return;
   const body = (req.body ?? {}) as Record<string, unknown>;
@@ -4393,6 +4473,117 @@ app.post("/delegate.json", async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * The canary (src/canary.ts): one tiny real task through delegateOnce as the operator — the same
+ * warm claim, prep and launch a dashboard delegation takes — judged by its log, its box torn down.
+ * The fleet sweep skips the box (isCanaryTask) so it never notifies, archives or feeds memory.
+ */
+const CANARY_WAIT_MS = 180_000;
+const canaryRun = async (): Promise<CanaryResult> => {
+  const t0 = Date.now();
+  const principal: Principal = { kind: "operator" };
+  const r = await withPrincipal(principal, () => delegateOnce({ task: CANARY_TASK }, principal));
+  const box = typeof r.json.box === "string" ? r.json.box : "";
+  if (r.status !== 200 || !box) return { ok: false, ms: Date.now() - t0, detail: `delegate answered ${r.status}: ${String(r.json.error ?? r.json.output ?? "").slice(0, 200)}` };
+  try {
+    while (Date.now() - t0 < CANARY_WAIT_MS) {
+      await new Promise((res) => setTimeout(res, 3000));
+      const snap = await watchHub.read(box).catch(() => undefined);
+      if (!snap) continue;
+      if (snap.boxStatus === "missing") return { ok: false, ms: Date.now() - t0, detail: "the box vanished before finishing", box };
+      if (snap.runState === "done") return { ...canaryVerdict({ runState: snap.runState, exitCode: snap.exitCode, log: snap.log ?? "", ms: Date.now() - t0 }), box };
+      if (snap.runState === "waiting") return { ok: false, ms: Date.now() - t0, detail: "the agent asked a question instead of answering", box };
+    }
+    return { ...canaryVerdict({ runState: "running", log: "", ms: Date.now() - t0, timedOut: true }), box };
+  } finally {
+    void deps.teardown(cfg, box).catch((e) => console.error(`[canary] teardown ${box}: ${(e as Error).message.slice(0, 200)}`));
+  }
+};
+const canary = makeCanary(
+  {
+    run: canaryRun,
+    notify: (s, recovered) => alertOperator(canaryAlertText(s, recovered, cfg.publicUrl ?? ""), recovered ? "canary-recovered" : "canary"),
+    log: (m) => console.error(m),
+  },
+  { intervalMs: cfg.canaryIntervalMs }
+);
+
+/** The host disk under the microsandbox home, read every ten minutes; one alert per half day above the line. */
+let hostDiskState: { reading?: DiskReading; at: number; error?: string } = { at: 0 };
+let hostDiskAlertedAt = 0;
+const HOST_DISK_POLL_MS = 10 * 60_000;
+const hostDiskTick = async (): Promise<void> => {
+  try {
+    const reading = await hostDisk(cfg);
+    hostDiskState = { reading, at: Date.now(), ...(reading ? {} : { error: "df failed" }) };
+    if (hostDiskAlarmed(reading, cfg.hostDiskAlertPct) && Date.now() - hostDiskAlertedAt >= 12 * 3600_000) {
+      hostDiskAlertedAt = Date.now();
+      await alertOperator(hostDiskAlertText(reading!, cfg.msbHome, cfg.publicUrl ?? ""), "host-disk");
+    }
+  } catch (e) {
+    hostDiskState = { at: Date.now(), error: (e as Error).message.slice(0, 200) };
+  }
+};
+
+/** Sandbox dirs the runtime forgot (src/host-disk.ts): swept two minutes after boot, then daily. */
+let lastOrphanSweep: { at: number; removed: string[]; freedMib?: number; error?: string } | undefined;
+const orphanSweepTick = async (): Promise<void> => {
+  try {
+    const r = await sweepOrphanSandboxDirs(cfg);
+    lastOrphanSweep = { at: Date.now(), ...r };
+    if (r.removed.length) console.error(`[host-disk] removed ${r.removed.length} orphaned sandbox dir(s)${r.freedMib ? `, ${r.freedMib} MiB` : ""}: ${r.removed.join(" ")}`);
+  } catch (e) {
+    lastOrphanSweep = { at: Date.now(), removed: [], error: (e as Error).message.slice(0, 200) };
+    console.error(`[host-disk] orphan sweep: ${(e as Error).message.slice(0, 200)}`);
+  }
+};
+
+/** Baked package versions against the registry, daily (src/package-watch.ts); one alert a week while a rebake is due. */
+let rebakeDue: Outdated[] = [];
+let rebakeCheckedAt = 0;
+let rebakeAlertedAt = 0;
+const rebakeTick = async (): Promise<void> => {
+  const { baked } = mcpProvisionState();
+  const names = Object.keys(baked).filter((n) => n !== "npm" && n !== "corepack");
+  if (!names.length) return;
+  try {
+    const latest = await fetchLatestVersions(names);
+    rebakeDue = outdatedPackages(baked, latest, names);
+    rebakeCheckedAt = Date.now();
+    if (rebakeDue.length && Date.now() - rebakeAlertedAt >= 7 * 24 * 3600_000) {
+      rebakeAlertedAt = Date.now();
+      await alertOperator(rebakeDueText(rebakeDue, cfg.publicUrl ?? ""), "rebake-due");
+    }
+  } catch (e) {
+    console.error(`[package-watch] ${(e as Error).message.slice(0, 200)}`);
+  }
+};
+
+/** The service's own health, for the dashboard's Sandboxes page: canary, host disk, start failures, baked packages. */
+app.get("/health.json", (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  const { baked, last } = mcpProvisionState();
+  res.json({
+    canary: { enabled: cfg.canaryIntervalMs > 0, intervalMs: cfg.canaryIntervalMs, last: canary.state() },
+    hostDisk: { ...hostDiskState, alertPct: cfg.hostDiskAlertPct, home: cfg.msbHome },
+    orphanSweep: lastOrphanSweep ?? null,
+    startFailures: startFailures.state(),
+    baked,
+    lastProvision: last ?? null,
+    rebakeDue,
+    rebakeCheckedAt,
+    claudeSource: cfg.claudeImage ? { kind: "image", name: cfg.claudeImage } : cfg.snapshot ? { kind: "snapshot", name: cfg.snapshot } : { kind: "cold", name: cfg.image },
+  });
+});
+app.post("/health/canary.json", async (req: Request, res: Response) => {
+  if (!dashAuthed(req, res)) return;
+  try {
+    res.json(await canary.runNow());
+  } catch (e) {
+    failWith(res, e);
+  }
+});
+
 app.listen(cfg.httpPort, cfg.httpHost, () => {
   console.error(`[agent-sandbox] HTTP MCP on ${cfg.httpHost}:${cfg.httpPort} (bearer-guarded)`);
   // Auto-seed the shared warm pool so the first remote delegation is fast too.
@@ -4408,11 +4599,20 @@ app.listen(cfg.httpPort, cfg.httpHost, () => {
   dispatcher.start();
   repoWatcher.start();
   mentionWatcher.start();
-  // Cold-start nudge: without a baked snapshot every run pays the toolchain install in the box.
-  if (!cfg.snapshot) {
+  // The service watching itself: the canary, the host disk, the orphan sweep, the rebake check.
+  canary.start();
+  setTimeout(() => void hostDiskTick(), 20_000).unref();
+  setInterval(() => void hostDiskTick(), HOST_DISK_POLL_MS).unref();
+  setTimeout(() => void orphanSweepTick(), 2 * 60_000).unref();
+  setInterval(() => void orphanSweepTick(), 24 * 3600_000).unref();
+  // The baked manifest arrives with the first task start; check an hour in, then daily.
+  setTimeout(() => void rebakeTick(), 3600_000).unref();
+  setInterval(() => void rebakeTick(), 24 * 3600_000).unref();
+  // Cold-start nudge: without a baked image or snapshot every run pays the toolchain install in the box.
+  if (!cfg.snapshot && !cfg.claudeImage) {
     console.error(
-      `[agent-sandbox] MSB_SNAPSHOT is not set — every cold run installs claude+gh in the box (~10s). ` +
-        `Run 'npm run bake' once and set MSB_SNAPSHOT to the printed name.`
+      `[agent-sandbox] neither MSB_CLAUDE_IMAGE nor MSB_SNAPSHOT is set — every cold run installs claude+gh in the box (~10s). ` +
+        `Run 'npm run bake:claude-image' once and set MSB_CLAUDE_IMAGE to the tag.`
     );
   }
 });

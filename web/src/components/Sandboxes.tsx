@@ -18,6 +18,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { UsageMeter } from "@/components/ui/usage-meter";
 import { DataTable, MetaLine, StatusDot, stopRow, type Column } from "@/components/ui/data-table";
 import { Capacity } from "@/components/Capacity";
+import { ServiceHealth } from "@/components/ServiceHealth";
 import { Bar } from "@/components/thread/Skeletons";
 import { cn } from "@/lib/utils";
 
@@ -105,6 +106,7 @@ export function Sandboxes({
             Runs up to {lifecycle.maxDurationSec ? fmtDuration(lifecycle.maxDurationSec) : "the cap"} · sleeps after{" "}
             {lifecycle.idleTimeoutSec ? fmtDuration(lifecycle.idleTimeoutSec) : "the idle limit"} quiet · a reply wakes it.
           </p>
+          <ServiceHealth />
         </header>
 
         <Collapse open={waiting.length > 0 && filter === "all" && !q}>

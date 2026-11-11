@@ -26,6 +26,19 @@ export interface Config {
   /** Snapshot name to warm-start from (Claude Code + gh pre-baked). Empty = boot from image. */
   snapshot: string;
   /**
+   * OCI image claude boxes boot from (bake with `node dist/bake-claude-image.js`). Wins over
+   * `snapshot` the way ompImage wins over ompSnapshot: an image's layers are stored ONCE on the
+   * host and every box's private upper starts empty, where a snapshot boot copies the snapshot's
+   * whole upper (931M for the MCP-laden claude snapshot) into every box it boots.
+   */
+  claudeImage: string;
+  /** The microsandbox home on the VPS (sandboxes/, snapshots/): host-disk watch, orphan sweep, compaction. */
+  msbHome: string;
+  /** Canary cadence (ms): one tiny real task through the live delegate path per interval. 0 = off. */
+  canaryIntervalMs: number;
+  /** Host-disk alert threshold, percent used of the filesystem under msbHome. */
+  hostDiskAlertPct: number;
+  /**
    * Pinned Claude Code CLI version installed in every box. The in-box install is version-aware
    * (claudeInstallSh): bumping this reaches cold boxes, warm-pool boxes AND baked snapshots on
    * their next bootstrap — no rebake required (a rebake just makes the next cold boot faster).
@@ -217,6 +230,10 @@ export function loadConfig(): Config {
     msb: req("MSB", "/root/.local/bin/msb"),
     image: req("MSB_IMAGE", "node"),
     snapshot: process.env.MSB_SNAPSHOT || "",
+    claudeImage: process.env.MSB_CLAUDE_IMAGE || "",
+    msbHome: (process.env.MSB_HOME || "/root/.microsandbox").replace(/\/+$/, ""),
+    canaryIntervalMs: Math.max(0, Number(process.env.CANARY_INTERVAL_MS ?? "3600000") || 0),
+    hostDiskAlertPct: Math.min(100, Math.max(1, Number(process.env.HOST_DISK_ALERT_PCT ?? "85") || 85)),
     // Bump deliberately (after a smoke run), not automatically: the agent's behavior IS the product.
     claudeCodeVersion: req("CLAUDE_CODE_VERSION", "2.1.273"),
     ompVersion: req("OMP_VERSION", "latest"),
