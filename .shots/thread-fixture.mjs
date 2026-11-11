@@ -375,6 +375,24 @@ if (stream) {
   streamPort = streamer.address().port;
 }
 
+// --interact=send: a finished run's stream held open, so a message sent from the composer can land
+// in the log a beat later (the echo → durable line swap) and the agent can answer it.
+let appendLog = null;
+if (interact === "send" || interact === "send-probe" || interact === "send-rich") {
+  streamer = http.createServer((req, res) => {
+    res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", "access-control-allow-origin": "*" });
+    res.write("retry: 3000\n\n");
+    res.write(frame("snapshot", { meta, log: fullLog, from: 0 }, fullLog.length));
+    let sent = fullLog.length;
+    appendLog = (chunk) => {
+      sent += chunk.length;
+      res.write(frame("append", { chunk }, sent));
+    };
+  });
+  await new Promise((r) => streamer.listen(0, "127.0.0.1", r));
+  streamPort = streamer.address().port;
+}
+
 /* ───────────────────────────── browser ───────────────────────────── */
 const browser = await chromium.launch();
 const ctx = await browser.newContext({ viewport: { width: W, height: H }, colorScheme: dark ? "dark" : "light", deviceScaleFactor: 1, hasTouch: W < 500, isMobile: W < 500 });
@@ -476,6 +494,13 @@ await page.route("**/*", async (route) => {
       return json(route, { answer: SIDE_ANSWER, timedOut: false, continued: true, driverState: "running" });
     }
     case "/resume.json":
+      if (appendLog) {
+        const msg = JSON.parse(route.request().postData() || "{}").message ?? "";
+        const land = Number(flag("land", 1500));
+        setTimeout(() => appendLog(`\n⟦at⟧ ${Date.now()}\n⟦you⟧\n${msg}\n⟦/you⟧\n`), land);
+        setTimeout(() => appendLog(`⟦at⟧ ${Date.now()}\nOn it.\n`), land + 1800);
+      }
+      return json(route, { ok: true });
     case "/title.json":
     case "/wake.json":
       return json(route, { ok: true });
@@ -680,6 +705,61 @@ if (stream) {
   await page.mouse.move(W - 20, H / 2);
   await page.waitForTimeout(500);
   await shot("-minimap");
+} else if (interact === "send-rich") {
+  // A long message with a skill and file chips, as the composer delivers it: the bubble must show
+  // words + chips, folded, and the hover actions.
+  const body = Array.from({ length: 22 }, (_, i) => `line ${i + 1}: the limiter should also cover the admin routes`).join("\n");
+  await page.evaluate((msg) => {
+    const el = document.getElementById("send-input");
+    const set = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set;
+    set.call(el, msg);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+  }, body + "\n\nFiles: @orders-api/src/middleware/rateLimit.ts @orders-api/test/rateLimit.test.ts");
+  await input().press("Escape");
+  await page.waitForTimeout(150);
+  await input().press("Enter");
+  await page.waitForTimeout(2600);
+  await page.locator(".you-bubble").last().hover();
+  await page.waitForTimeout(400);
+  await shot("-rich");
+} else if (interact === "send" || interact === "send-probe") {
+  // Send, watch the echo, let the log line land, then send the SAME words again.
+  const probe = async (label, ms) => {
+    const rows = await page.evaluate(async (ms) => {
+      const out = [];
+      const t0 = performance.now();
+      while (performance.now() - t0 < ms) {
+        const b = [...document.querySelectorAll(".you-bubble")].slice(-2).map((e) => {
+          const r = e.getBoundingClientRect();
+          let o = 1;
+          for (let n = e; n && n !== document.body; n = n.parentElement) o *= +getComputedStyle(n).opacity;
+          return `${e.textContent.slice(0, 12)}@${Math.round(r.top)}/${o.toFixed(2)}`;
+        });
+        const row = `${document.querySelectorAll(".you-bubble").length}:${b.join("|")}`;
+        if (out[out.length - 1]?.row !== row) out.push({ t: Math.round(performance.now() - t0), row });
+        await new Promise((r) => requestAnimationFrame(r));
+      }
+      return out.map((o) => `${o.t}ms ${o.row}`);
+    }, ms);
+    console.log(`-- ${label}\n` + rows.join("\n"));
+  };
+  await input().click();
+  await input().type("continue");
+  await input().press("Enter");
+  await page.waitForTimeout(450);
+  await shot("-echo");
+  await probe("first send: echo to log line", 2600);
+  await shot("-landed");
+  await page.waitForTimeout(1500);
+  await input().type("continue");
+  await input().press("Enter");
+  await page.waitForTimeout(450);
+  await shot("-echo2");
+  await probe("same words again", 2600);
+  await input().press("ArrowUp");
+  await page.waitForTimeout(200);
+  console.log("recall:", JSON.stringify(await input().inputValue()));
+  await shot("-recall");
 } else if (interact === "question-kbd") {
   await page.keyboard.press("2");
   await page.waitForTimeout(300);
@@ -743,6 +823,9 @@ row: inner ${Math.round(h?.clientWidth ?? 0)} = ${row}; scrollWidth ${h?.scrollW
   await shot();
 }
 
+const evalFile = flag("eval-file", null);
+const evalJs = evalFile ? (await import("node:fs")).readFileSync(evalFile, "utf8") : flag("eval", null);
+if (evalJs) console.log("eval:", JSON.stringify(await page.evaluate(evalJs)));
 console.log("saved", shots.join(", "));
 if (errors.length) console.log("console errors:\n" + errors.slice(0, 12).join("\n"));
 await browser.close();

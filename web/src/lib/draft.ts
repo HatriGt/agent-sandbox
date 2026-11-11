@@ -22,6 +22,33 @@ export function writeDraft(key: string, text: string) {
   }
 }
 
+/**
+ * What was sent to a thread, newest last, so Up in an empty composer brings a message back to
+ * resend or reword (the shell and every chat app's convention). Session-scoped like drafts.
+ */
+const SENT = "asb-sent:";
+const SENT_MAX = 30;
+export function readSent(key: string): string[] {
+  try {
+    const raw = sessionStorage.getItem(SENT + key);
+    const list: unknown = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list) ? list.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+export function pushSent(key: string, text: string) {
+  const t = text.trim();
+  if (!t) return;
+  try {
+    const list = readSent(key).filter((x) => x !== t);
+    list.push(t);
+    sessionStorage.setItem(SENT + key, JSON.stringify(list.slice(-SENT_MAX)));
+  } catch {
+    /* storage full or blocked: recall is a convenience */
+  }
+}
+
 export interface Prefill {
   task: string;
   /** Repositories the source run had, by checkout name (and branch); the Hub resolves them to owner/name. */

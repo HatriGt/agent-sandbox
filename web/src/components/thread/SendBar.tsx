@@ -1,5 +1,6 @@
 import * as React from "react";
-import { readDraft, writeDraft } from "@/lib/draft";
+import { pushSent, readDraft, readSent, writeDraft } from "@/lib/draft";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { ArrowUp, AtSign, Check as CheckIcon, Clock, ImagePlus, Loader2, MessageCircleQuestion, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useReducedMotion } from "@/lib/motion-pref";
@@ -173,14 +174,39 @@ export function SendBar({
     });
   }, [seed]);
   const still = useReducedMotion();
+  // A phone's keyboard has no Shift+Enter: there Enter is a new line and the arrow sends.
+  const touch = useMediaQuery("(pointer: coarse) and (hover: none)");
+  // Up in an empty composer walks back through what was sent to this thread; the index is only
+  // meaningful while the text is still exactly the recalled message.
+  const recall = React.useRef<number | null>(null);
+  const recallKey = (e: React.KeyboardEvent<HTMLTextAreaElement>): boolean => {
+    if ((e.key !== "ArrowUp" && e.key !== "ArrowDown") || e.shiftKey || e.altKey || e.metaKey || e.ctrlKey) return false;
+    const sentBefore = readSent(boxName);
+    const at = recall.current !== null && sentBefore[recall.current] === value ? recall.current : null;
+    if (at === null && (e.key === "ArrowDown" || value !== "" || !sentBefore.length)) return false;
+    const next = at === null ? sentBefore.length - 1 : at + (e.key === "ArrowUp" ? -1 : 1);
+    if (next < 0) return true; // already at the oldest: stay, and keep the caret from jumping
+    recall.current = next < sentBefore.length ? next : null;
+    setValue(sentBefore[next] ?? "");
+    return true;
+  };
   // One slot, four faces: the icon morphs between them rather than swapping.
   const sendIcon = sending ? "sending" : sent ? "sent" : busy ? "queue" : "send";
 
+  // Escape on a menu means "not this one": the `@`/`/` token it belonged to stays plain text. The
+  // menus are re-derived from the caret on every key-up, so without this the key-up of that very
+  // Escape reopened the menu it had just closed — the menu could not be dismissed, and the next
+  // Enter picked a file instead of sending.
+  const dismissed = React.useRef<{ mention?: number; slash?: number }>({});
   const updateMention = (next: string) => {
     const el = textarea();
     const caret = el?.selectionStart ?? next.length;
-    setMention(mentionAt(next, caret));
-    setSlash(skill ? null : slashAt(next, caret));
+    const m = mentionAt(next, caret);
+    if (!m || m.start !== dismissed.current.mention) dismissed.current.mention = undefined;
+    setMention(m && m.start === dismissed.current.mention ? null : m);
+    const s = skill ? null : slashAt(next, caret);
+    if (!s || s.start !== dismissed.current.slash) dismissed.current.slash = undefined;
+    setSlash(s && s.start === dismissed.current.slash ? null : s);
     // Typing a full `/name ` by hand — at the start or mid-message — converts to the chip the
     // moment the space lands, same as picking from the menu.
     if (!skill) {
@@ -248,7 +274,7 @@ export function SendBar({
     const attached = files;
     const attachedImages = images;
     const chosenSkill = skill;
-    let message = expandMentions(files.length ? `${text}\n\nFiles: ${files.map((f) => `@${f}`).join(" ")}` : text);
+    let message = expandMentions(files.length ? `${text}\n\nFiles: ${files.map((f) => `@${f}`).join(" ")}` : text).trim();
     // The skill rides as the leading /token — the agent is instructed to invoke it for the message.
     if (chosenSkill) message = `/${chosenSkill.name}${message ? ` ${message}` : ""}`;
     try {
@@ -269,16 +295,14 @@ export function SendBar({
       setFiles([]);
       setImages([]);
       setSkill(null);
+      recall.current = null;
       // Echo NOW. The controller wakes/kicks the run in a few seconds; a message that only appears
       // when the server answers reads as a broken chat. The echo is withdrawn if delivery fails,
-      // and the durable ⟦you⟧ line in the log replaces it once it lands.
-      const body = attached.length ? `${text}\n${attached.map((f) => `@${f}`).join(" ")}` : text;
-      const echo =
-        (chosenSkill ? `/${chosenSkill.name} ` : "") +
-        body +
-        // Image-only sends have no body: the old indexOf-based slice went negative there and
-        // produced an empty echo (a permanent ghost bubble).
-        (imagesTail ? `${body ? "\n\n" : ""}${imagesTail}` : "");
+      // and the durable ⟦you⟧ line in the log replaces it once it lands. The echo IS the delivered
+      // message, byte for byte: a prettier paraphrase (files as `@path`, no path list) never
+      // matched its own log line, so every send with a file chip left a second bubble behind for
+      // good. The bubble turns the machinery back into chips for the echo and the log line alike.
+      const echo = message;
       if (!busy) onReplied(echo);
       try {
         // The picked model rides the send once; the server makes it sticky for the box.
@@ -298,6 +322,9 @@ export function SendBar({
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setError(msg);
+      // Also straight to storage: if the thread was left while this was in flight, the component
+      // is gone and the state update below is a no-op — the words must still be there on return.
+      writeDraft(boxName, text);
       setValue(text);
       setFiles(attached);
       setImages(attachedImages);
@@ -306,6 +333,7 @@ export function SendBar({
       setSending(false);
       return;
     }
+    pushSent(boxName, text);
     // Spinner → check morph: the send is confirmed where the eye already is, then the arrow returns.
     setSending(false);
     setSent(true);
@@ -324,7 +352,9 @@ export function SendBar({
           ? "Starting up — type ahead, it is delivered once the agent is listening."
           : phase === "asked"
             ? "Pick an option above, or answer here — it reaches the agent as your answer."
-            : "Enter to send · Shift+Enter for a new line · paste or drop images";
+            : touch
+              ? "Tap the arrow to send · attach images with +"
+              : "Enter to send · Shift+Enter for a new line · Up recalls your last message";
 
   return (
     <div className="pt-1 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
@@ -332,15 +362,18 @@ export function SendBar({
       <div className="relative mx-auto min-w-0 max-w-3xl px-3 md:px-6">
         <VoicePill state={voice.state} interim={voice.interim} />
         <AnimatePresence initial={false}>
-          {mention && <MentionMenu key="mention" session={boxName} repos={repos} state={mention} onPick={pickFile} onClose={() => setMention(null)} />}
-          {!mention && slash && <SkillMenu key="skill" state={slash} onPick={pickSkill} onClose={() => setSlash(null)} onMatches={setSlashMatches} />}
+          {mention && <MentionMenu key="mention" session={boxName} repos={repos} state={mention} onPick={pickFile} onClose={() => (mention && (dismissed.current.mention = mention.start), setMention(null))} />}
+          {!mention && slash && <SkillMenu key="skill" state={slash} onPick={pickSkill} onClose={() => (slash && (dismissed.current.slash = slash.start), setSlash(null))} onMatches={setSlashMatches} />}
         </AnimatePresence>
         <PromptInput
           value={value}
           onValueChange={(v) => {
             setValue(v);
             updateMention(v);
+            // The caption under the composer is about the LAST attempt; a new edit retires it.
+            if (error) setError(null);
           }}
+          enterSends={!touch}
           onSubmit={() => {
             if (mention) return; // Enter inside the mention menu picks a file
             if (slash && slashMatches > 0) return; // Enter inside the skill menu picks a skill
@@ -402,6 +435,9 @@ export function SendBar({
             onKeyDown={(e) => {
               const nav = ["ArrowDown", "ArrowUp", "Enter", "Tab", "Escape"].includes(e.key);
               if (!nav) return;
+              // An IME's own Enter/arrows (choosing a candidate) are never ours to act on.
+              if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+              if (!mention && !(slash && slashMatches > 0) && recallKey(e)) return e.preventDefault();
               if (mention) {
                 e.preventDefault();
                 e.stopPropagation();
@@ -422,12 +458,12 @@ export function SendBar({
                   : busy
                     ? "Say something — the agent reads it at its next step…"
                     : phase === "fresh"
-                      ? "Describe a task for this machine… ( / skills · @ files )"
+                      ? "Describe a task for this machine…"
                       : phase === "starting"
                         ? "Type ahead — delivered once the agent is listening…"
                         : phase === "asked"
                           ? "Answer in your own words…"
-                          : "Send a follow-up… ( / skills · @ files )"
+                          : "Send a follow-up…"
             }
           />
           {/* Context chips inside the box, above the toolbar: the skill, then @-mentioned files. */}

@@ -70,6 +70,8 @@ export function QuestionCard({
 
   const onKey = (e: React.KeyboardEvent) => {
     if (e.target instanceof HTMLTextAreaElement) return;
+    // Ctrl/Alt/Cmd+digit belong to the browser and the OS (tab and window switching).
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
     const n = Number(e.key);
     if (hasOptions && n >= 1 && n <= parsed.options.length) {
       setOther(false);
@@ -146,7 +148,7 @@ export function QuestionCard({
             {parsed.options.map((opt, i) => {
               const on = !other && selected === i;
               return (
-                <li key={opt}>
+                <li key={`${i}:${opt}`}>
                   <button
                     type="button"
                     role="radio"
@@ -155,7 +157,7 @@ export function QuestionCard({
                       setOther(false);
                       setSelected(i);
                     }}
-                    onDoubleClick={() => onAnswer(opt)}
+                    onDoubleClick={() => !busy && onAnswer(opt)}
                     className={cn(
                       "flex w-full cursor-pointer items-center gap-3 rounded-md border px-3 py-2.5 text-left text-body transition-colors",
                       on
@@ -233,7 +235,7 @@ export function QuestionCard({
                 value={custom}
                 onChange={(e) => setCustom(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
+                  if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && e.keyCode !== 229) {
                     e.preventDefault();
                     send();
                   }

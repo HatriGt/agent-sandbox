@@ -21,6 +21,7 @@ import { StatusBar } from "@/components/StatusBar";
 import { useModelChoice } from "@/components/thread/ModelPicker";
 import { useCached } from "@/lib/cache";
 import { setPrefill } from "@/lib/draft";
+import type { PendingReply } from "@/lib/replies";
 import { isSleeping } from "@/lib/format";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -224,7 +225,7 @@ export default function App() {
   // The inline "Attached from the task" note, keyed by box, surviving the booting→thread swap.
   const [inferredNotes, setInferredNotes] = React.useState<Record<string, string[]>>({});
   const [pending, setPending] = React.useState<{ id: string; task: string }[]>([]);
-  const [replies, setReplies] = React.useState<Record<string, string[]>>({});
+  const [replies, setReplies] = React.useState<Record<string, PendingReply[]>>({});
 
   const reported = React.useMemo(() => (data && Array.isArray(data.boxes) ? data.boxes.filter(isVisible) : null), [data]);
   const boxes = useStableBoxes(reported);
@@ -1058,8 +1059,13 @@ export default function App() {
                     onOpenBox={(b) => go({ view: "box", name: b })}
                     inferredRepos={inferredNotes[selectedBox.name]}
                     replies={replies[selectedBox.name] ?? []}
-                    onReplied={(text) =>
-                      setReplies((prev) => ({ ...prev, [selectedBox.name]: [...(prev[selectedBox.name] ?? []), text] }))
+                    onReplied={(reply) =>
+                      setReplies((prev) => ({ ...prev, [selectedBox.name]: [...(prev[selectedBox.name] ?? []), reply] }))
+                    }
+                    // The durable log line landed: the echo is retired at the source, so the list
+                    // never outgrows what is actually in flight.
+                    onRepliesSettled={(ids) =>
+                      setReplies((prev) => ({ ...prev, [selectedBox.name]: (prev[selectedBox.name] ?? []).filter((r) => !ids.includes(r.id)) }))
                     }
                     onBack={backToRail}
                     onNew={newTask}
@@ -1070,7 +1076,7 @@ export default function App() {
                     onReplyFailed={(text) =>
                       setReplies((prev) => {
                         const list = [...(prev[selectedBox.name] ?? [])];
-                        const i = list.lastIndexOf(text);
+                        const i = list.map((r) => r.text).lastIndexOf(text);
                         if (i >= 0) list.splice(i, 1);
                         return { ...prev, [selectedBox.name]: list };
                       })

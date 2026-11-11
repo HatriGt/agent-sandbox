@@ -23,6 +23,7 @@ type PromptInputContextType = {
   maxHeight: number | string
   onSubmit?: () => void
   disabled?: boolean
+  enterSends: boolean
   textareaRef: React.RefObject<HTMLTextAreaElement | null>
 }
 
@@ -33,6 +34,7 @@ const PromptInputContext = createContext<PromptInputContextType>({
   maxHeight: 240,
   onSubmit: undefined,
   disabled: false,
+  enterSends: true,
   textareaRef: React.createRef<HTMLTextAreaElement>(),
 })
 
@@ -49,6 +51,9 @@ export type PromptInputProps = {
   children: React.ReactNode
   className?: string
   disabled?: boolean
+  /** Plain Enter submits. Defaults to on, except on touch keyboards, which have no Shift+Enter
+   *  for a new line; Ctrl/Cmd+Enter submits either way. */
+  enterSends?: boolean
 } & React.ComponentProps<"div">
 
 function PromptInput({
@@ -60,9 +65,14 @@ function PromptInput({
   onSubmit,
   children,
   disabled = false,
+  enterSends: enterSendsProp,
   onClick,
   ...props
 }: PromptInputProps) {
+  // Every composer gets the touch rule unless it says otherwise.
+  const enterSends =
+    enterSendsProp ??
+    !(typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse) and (hover: none)").matches)
   const [internalValue, setInternalValue] = useState(value || "")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -86,6 +96,7 @@ function PromptInput({
           maxHeight,
           onSubmit,
           disabled,
+          enterSends,
           textareaRef,
         }}
       >
@@ -115,7 +126,7 @@ function PromptInputTextarea({
   disableAutosize = false,
   ...props
 }: PromptInputTextareaProps) {
-  const { value, setValue, maxHeight, onSubmit, disabled, textareaRef } =
+  const { value, setValue, maxHeight, onSubmit, disabled, enterSends, textareaRef } =
     usePromptInput()
 
   const adjustHeight = (el: HTMLTextAreaElement | null) => {
@@ -167,7 +178,10 @@ function PromptInputTextarea({
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    // An Enter that confirms an IME composition (Japanese, Chinese, Korean input) picks the
+    // candidate; it is not a send. `isComposing` covers modern browsers, keyCode 229 Safari.
+    const composing = e.nativeEvent.isComposing || e.keyCode === 229
+    if (e.key === "Enter" && !e.shiftKey && !composing && (enterSends || e.ctrlKey || e.metaKey)) {
       e.preventDefault()
       onSubmit?.()
     }

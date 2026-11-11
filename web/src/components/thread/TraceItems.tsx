@@ -1,5 +1,7 @@
 import * as React from "react";
-import { AlertTriangle, ArrowUpRight, Brain, Check, ChevronDown, ChevronRight, Clock, Copy, FileSearch, FileText, KeyRound, Loader2, Play, Terminal, Undo2 } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, Brain, Check, ChevronDown, ChevronRight, Clock, Copy, FileSearch, FileText, KeyRound, Loader2, Pencil, Play, Terminal, Undo2 } from "lucide-react";
+import { parseYouMessage } from "@/lib/you-message";
+import { FileMark } from "@/lib/fileIcon";
 import { CodeNavContext } from "@/components/ui/code-ref";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { resultSummary, type TraceEvent } from "@/lib/trace";
@@ -1202,27 +1204,62 @@ export function WorkingIndicator({ label = "Working", detail }: { label?: string
   );
 }
 
+/** A message this long folds: a pasted log must not push the reply it got off the screen. */
+const YOU_FOLD_LINES = 14;
+const YOU_FOLD_CHARS = 1400;
+
 /**
  * Your turn: the one bubble. A muted fill, right-aligned, so the primary ink stays for actions.
- * When `onRevert` is set, hovering the row reveals a ⟲ control BEFORE the bubble (left of it,
- * fading in like the output-panel copy button): revert the box to the state before this message
- * was delivered. Confirmation happens upstream (Thread owns the dialog).
+ * The message arrives with machinery for the agent (skill token, file lines, image list); the
+ * bubble shows the words and puts the rest back as the chips and thumbnails the composer had
+ * (lib/you-message.ts), so an optimistic echo and its durable log line are the same picture.
+ *
+ * Hovering the row reveals its actions BEFORE the bubble (left of it, so the bubble keeps its right
+ * edge): copy, edit (the words go back into the composer as a new draft), and — when `onRevert` is
+ * set — revert the box to the state before this message was delivered. Confirmation for the revert
+ * happens upstream (Thread owns the dialog). Always shown on touch, where there is no hover.
  *
  * `noEnter` drops the CSS entrance for callers that animate the row in themselves (Thread's `Rise`
- * around pending replies) — otherwise the bubble would rise twice.
+ * around pending replies) or that replace an echo already on screen — otherwise the bubble would
+ * rise twice.
  */
-export function YouItem({ text, label = "You", onRevert, at, noEnter = false }: { text: string; label?: string; onRevert?: () => void; at?: number; noEnter?: boolean }) {
+export function YouItem({
+  text,
+  label = "You",
+  onRevert,
+  onEdit,
+  at,
+  noEnter = false,
+}: {
+  text: string;
+  label?: string;
+  onRevert?: () => void;
+  /** Put the words back into the composer. */
+  onEdit?: (text: string) => void;
+  at?: number;
+  noEnter?: boolean;
+}) {
   // Image attachments ride in the message as in-box paths; show them as thumbnails, not as text.
   const attachments = React.useMemo(() => [...new Set(text.match(ATTACHMENT_RE) ?? [])], [text]);
-  const body = React.useMemo(() => (attachments.length ? text.replace(/\n*Attached images? \(open with the Read tool\):[\s\S]*$/, "").trim() : text), [text, attachments.length]);
-  // A leading /skill token renders as a tinted tag, not prose — the same face it had in the composer.
-  const skillMatch = body.match(/^\/([a-z0-9][a-z0-9-]{0,49})(?:\s+([\s\S]*))?$/);
-  const skillName = skillMatch?.[1] ?? null;
-  const rest = skillMatch ? (skillMatch[2] ?? "").trim() : body;
+  const { body, skill: skillName, files } = React.useMemo(() => parseYouMessage(text), [text]);
+  const openRef = React.useContext(CodeNavContext);
+  const long = body.length > YOU_FOLD_CHARS || body.split("\n").length > YOU_FOLD_LINES;
+  const [open, setOpen] = React.useState(false);
+  const [copied, setCopied] = React.useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(body || text);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard blocked: nothing to signal */
+    }
+  };
+  const action = "text-muted-foreground hover:text-foreground hover:bg-muted grid size-7 shrink-0 cursor-pointer place-items-center rounded-full";
   return (
     <div className={cn(!noEnter && "enter", "group/you flex flex-col items-end gap-1.5")}>
       <span className="label text-muted-foreground flex items-center gap-1.5 pr-1">
-        {/* The time sits BEFORE the label so the label keeps its right edge; hover-revealed like revert. */}
+        {/* The time sits BEFORE the label so the label keeps its right edge; hover-revealed like the actions. */}
         {at !== undefined && (
           <TimeStamp at={at} className="normal-case tracking-normal opacity-0 transition-opacity duration-150 group-hover/you:opacity-100 [@media(hover:none)]:opacity-100" />
         )}
@@ -1235,41 +1272,93 @@ export function YouItem({ text, label = "You", onRevert, at, noEnter = false }: 
           ))}
         </div>
       )}
+      {files.length > 0 && (
+        <ul className="flex max-w-[min(72%,60ch)] flex-wrap justify-end gap-1.5" aria-label="Attached files">
+          {files.map((f) => {
+            const base = f.slice(f.lastIndexOf("/") + 1);
+            const chip = (
+              <>
+                <FileMark path={f} />
+                <span className="truncate font-mono font-medium">{base}</span>
+              </>
+            );
+            return (
+              <li key={f} className="min-w-0">
+                {openRef ? (
+                  <button type="button" onClick={() => openRef({ path: f })} title={`Open ${f}`} className="bg-muted text-foreground hover:bg-accent inline-flex h-7 max-w-full cursor-pointer items-center gap-1.5 rounded-md px-2 text-micro transition-colors">
+                    {chip}
+                  </button>
+                ) : (
+                  <span title={f} className="bg-muted text-foreground inline-flex h-7 max-w-full items-center gap-1.5 rounded-md px-2 text-micro">
+                    {chip}
+                  </span>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
       {/* w-full, not fit-content: the bubble's 72% max-width must resolve against the whole column.
           Against a shrink-to-fit row, the percentage is circular and (with overflow-wrap:anywhere
           making min-content one character) the browser may collapse a short message onto two lines. */}
-      <div className="flex w-full items-center justify-end gap-2">
-        {onRevert && (
-          <Tooltip>
-            <TooltipTrigger asChild>
+      {(body || skillName) && (
+        <div className="flex w-full items-center justify-end gap-1.5">
+          <div className="flex shrink-0 items-center opacity-0 transition-opacity duration-150 group-hover/you:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+            {onRevert && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button type="button" onClick={onRevert} aria-label="Revert the sandbox to before this message" className={action}>
+                    <Undo2 className="size-3.5" aria-hidden />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">Revert to before this message</TooltipContent>
+              </Tooltip>
+            )}
+            {onEdit && body && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button type="button" onClick={() => onEdit(body)} aria-label="Edit as a new message" className={action}>
+                    <Pencil className="size-3.5" aria-hidden />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">Edit as a new message</TooltipContent>
+              </Tooltip>
+            )}
+            {body && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button type="button" onClick={() => void copy()} aria-label={copied ? "Copied" : "Copy message"} className={action}>
+                    {copied ? <Check className="text-ok size-3.5" strokeWidth={2.5} aria-hidden /> : <Copy className="size-3.5" aria-hidden />}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">{copied ? "Copied" : "Copy"}</TooltipContent>
+              </Tooltip>
+            )}
+          </div>
+          <div className="you-bubble text-foreground min-w-0 max-w-[min(72%,60ch)] rounded-2xl rounded-br-md px-4 py-2.5 text-lead">
+            <div className={cn("break-words whitespace-pre-wrap [overflow-wrap:anywhere]", long && !open && "line-clamp-[10]")}>
+              {skillName && (
+                <span className="border-live/30 bg-live/10 text-live stamp mr-1.5 inline-flex translate-y-[-1px] items-center gap-1 rounded-md border px-1.5 py-0.5 align-middle text-micro font-semibold">
+                  <SkillMark name={skillName} size={13} />
+                  /{skillName}
+                </span>
+              )}
+              {body}
+            </div>
+            {long && (
               <button
                 type="button"
-                onClick={onRevert}
-                aria-label="Revert the sandbox to before this message"
-                className="text-muted-foreground hover:text-foreground hover:bg-muted grid size-7 shrink-0 cursor-pointer place-items-center rounded-full border opacity-0 transition-opacity duration-150 group-hover/you:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
+                onClick={() => setOpen((v) => !v)}
+                aria-expanded={open}
+                className="text-muted-foreground hover:text-foreground mt-1.5 flex cursor-pointer items-center gap-1 text-micro font-medium"
               >
-                <Undo2 className="size-3.5" aria-hidden />
+                {open ? "Show less" : "Show more"}
+                <ChevronDown className={cn("size-3 transition-transform duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]", open && "rotate-180")} aria-hidden />
               </button>
-            </TooltipTrigger>
-            <TooltipContent side="left">Revert to before this message</TooltipContent>
-          </Tooltip>
-        )}
-      {body && (
-        <div className="you-bubble text-foreground min-w-0 max-w-[min(72%,60ch)] rounded-2xl rounded-br-md px-4 py-2.5 text-lead break-words whitespace-pre-wrap [overflow-wrap:anywhere]">
-          {skillName ? (
-            <>
-              <span className="border-live/30 bg-live/10 text-live stamp mr-1.5 inline-flex translate-y-[-1px] items-center gap-1 rounded-md border px-1.5 py-0.5 align-middle text-micro font-semibold">
-                <SkillMark name={skillName} size={13} />
-                /{skillName}
-              </span>
-              {rest}
-            </>
-          ) : (
-            body
-          )}
+            )}
+          </div>
         </div>
       )}
-      </div>
     </div>
   );
 }

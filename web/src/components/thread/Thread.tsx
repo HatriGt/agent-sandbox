@@ -18,7 +18,7 @@ import { MemoryBumpCard } from "./MemoryCard";
 import { useMemoryToasts } from "./MemoryToast";
 import { runStats, toMarkdown } from "@/lib/transcript";
 import { contextHealth, lastUsage } from "@/lib/context-health";
-import { splitReplies } from "@/lib/replies";
+import { matchReplies, stampReply, type PendingReply } from "@/lib/replies";
 import { parseMcpName } from "@/lib/mcp";
 import { McpConnectItem } from "./McpItem";
 import { setPrefill } from "@/lib/draft";
@@ -73,6 +73,7 @@ export function Thread({
   inferredRepos,
   replies,
   onReplied,
+  onRepliesSettled,
   onBack,
   onNew,
   onTornDown,
@@ -89,8 +90,11 @@ export function Thread({
   onOpenBox?: (name: string) => void;
   /** Repos auto-attached because the task named them — shown inline under the task bubble. */
   inferredRepos?: string[];
-  replies: string[];
-  onReplied: (text: string) => void;
+  /** Messages sent from this tab whose durable log line has not been seen yet. */
+  replies: PendingReply[];
+  onReplied: (reply: PendingReply) => void;
+  /** These echoes' log lines landed: the parent drops them for good. */
+  onRepliesSettled?: (ids: string[]) => void;
   /** Clear this box's optimistic echoes after a revert rewrites the durable log. */
   onRepliesFlushed?: () => void;
   onBack: () => void;
@@ -323,7 +327,7 @@ export function Thread({
       window.removeEventListener("asb:review-changes", onReview);
       window.removeEventListener("asb:stop-turn", onStop);
     };
-  }, [toggleInspector, openReview]);
+  }, [toggleInspector, toggleSideChat, openReview, side]);
   // stopTurn is defined later (it needs the box and state); the listener above reaches it by ref.
   const stopTurnRef = React.useRef<(() => Promise<void>) | null>(null);
 
@@ -358,19 +362,46 @@ export function Thread({
     const t = window.setInterval(refreshChanges, 20_000);
     return () => window.clearInterval(t);
   }, [box.runState, sleeping, refreshChanges]);
-  // Optimistic echoes vs the durable log. The log is a bounded TAIL: an old ⟦you⟧ line eventually
-  // scrolls out of the window, so an echo must be retired the FIRST time its persisted copy is seen
-  // — never resurrected later when the tail no longer contains it (the "ghost message" bug: a
-  // message sent hours ago reappearing at the bottom of the thread as if just sent).
-  const settledRef = React.useRef(new Map<string, Set<string>>());
-  const pendingReplies = React.useMemo(() => {
-    const settled = settledRef.current.get(box.name) ?? new Set<string>();
-    settledRef.current.set(box.name, settled);
-    const persisted = new Set(events.filter((e) => e.kind === "you").map((e) => e.text.trim()));
-    const { pending, nowSettled } = splitReplies(replies, persisted, settled);
-    for (const r of nowSettled) settled.add(r.trim());
-    return pending;
-  }, [replies, events, box.name]);
+  // Optimistic echoes vs the durable log (lib/replies.ts). An echo is stamped with the log's own
+  // clock when it is sent and retired by the ⟦you⟧ line that lands after that — so the same words
+  // sent twice are two messages, and an old line scrolling out of the bounded tail never brings a
+  // message back. Retiring happens at the source (the parent drops the echo), once.
+  const sentLines = React.useMemo(() => events.flatMap((e) => (e.kind === "you" ? [{ text: e.text, at: e.at }] : [])), [events]);
+  const logClock = React.useMemo(() => {
+    let newest: number | undefined;
+    for (const e of events) {
+      const at = "at" in e ? e.at : undefined;
+      if (at !== undefined && (newest === undefined || at > newest)) newest = at;
+    }
+    return newest;
+  }, [events]);
+  const echoBasis = React.useRef({ sentLines, logClock });
+  echoBasis.current = { sentLines, logClock };
+  const onRepliedRef = React.useRef(onReplied);
+  onRepliedRef.current = onReplied;
+  // Sending is also "take me to my message": a reader who had scrolled up to check something would
+  // otherwise send into a thread that shows no sign of it (the bubble landed screens below).
+  const jumpToLatest = React.useRef<() => void>(() => {});
+  const echo = React.useCallback((text: string) => {
+    onRepliedRef.current(stampReply(text, echoBasis.current.sentLines, echoBasis.current.logClock));
+    jumpToLatest.current();
+  }, []);
+  const replyMatch = React.useMemo(() => matchReplies(replies, sentLines), [replies, sentLines]);
+  const pendingReplies = replyMatch.pending;
+  // The log line that replaces an echo takes over the echo's place on screen: same bubble, same
+  // spot. It must not rise in as if new while the echo folds away — that was a blink on every send.
+  const swappedIn = React.useRef(new Set<number>());
+  for (const s of replyMatch.settled) {
+    const at = sentLines[s.line]?.at;
+    if (at !== undefined) swappedIn.current.add(at);
+  }
+  const echoesLanded = replyMatch.settled.length > 0;
+  const settledIds = replyMatch.settled.map((s) => s.id).join(" ");
+  const onRepliesSettledRef = React.useRef(onRepliesSettled);
+  onRepliesSettledRef.current = onRepliesSettled;
+  React.useEffect(() => {
+    if (settledIds) onRepliesSettledRef.current?.(settledIds.split(" "));
+  }, [settledIds]);
   // The fleet poll is authoritative for a sleeping box (its stream cannot connect).
   const runState = sleeping ? box.runState : snap?.runState ?? box.runState;
   const question = sleeping ? box.question : snap?.question ?? box.question;
@@ -417,7 +448,7 @@ export function Thread({
       await api.revert(box.name, revertAsk.message);
       // The restored box carries the shorter log; flush everything the browser layered on top and
       // force a fresh stream generation — the open watch stream still holds the pre-revert snapshot.
-      settledRef.current.delete(box.name);
+      swappedIn.current.clear();
       onRepliesFlushed?.();
       setGeneration((g) => g + 1);
       setRevertAsk(null);
@@ -549,7 +580,7 @@ export function Thread({
   }, [runState, box.name]);
   const answer = React.useCallback(
     (text: string) => {
-      onReplied(text);
+      echo(text);
       setAnswering(true);
       setAnswered(question ?? "");
       api
@@ -561,7 +592,7 @@ export function Thread({
         })
         .finally(() => setAnswering(false));
     },
-    [box.name, onReplied, question]
+    [box.name, echo, onReplyFailed, question]
   );
   const showQuestion = !!question && runState === "waiting" && answered !== question;
   const resuming = !!question && runState === "waiting" && answered === question;
@@ -718,11 +749,29 @@ export function Thread({
   }, [density]);
 
   // Turns for the minimap: the task plus every message you sent, each with how the agent replied.
-  const stick = useStickToBottom({ resize: "smooth", initial: "instant" });
+  // Following is smooth only while the agent is writing. Everything else lands at once: opening a
+  // thread used to travel through the whole conversation for a second and a half (the transcript
+  // replaced the skeleton, and the smooth follow animated from the top to the end), and code blocks
+  // highlighting a beat later kept it drifting. A reader opens a thread to see where it stands.
+  const [landed, setLanded] = React.useState(false);
+  React.useEffect(() => {
+    if (loadingTrace) return setLanded(false);
+    const t = window.setTimeout(() => setLanded(true), 1200);
+    return () => window.clearTimeout(t);
+  }, [loadingTrace]);
+  const stick = useStickToBottom({ resize: landed && runState === "running" && !sleeping ? "smooth" : "instant", initial: "instant" });
 
   // A long agent message must not drag the view to its end. Once the newest reply's first line
   // reaches the top while it is still the last thing in the thread, following stops there and the
   // reader scrolls on at their own pace; scrolling back to the bottom resumes following.
+  jumpToLatest.current = () =>
+    requestAnimationFrame(() => {
+      const el = stick.scrollRef.current;
+      if (!el) return;
+      // A long way down is a jump, not a ride: a spring across ten screens is a blur.
+      const far = el.scrollHeight - el.scrollTop - el.clientHeight > el.clientHeight * 2;
+      void stick.scrollToBottom({ animation: far ? "instant" : "smooth" });
+    });
   const heldSay = React.useRef<Element | null>(null);
   React.useLayoutEffect(() => {
     const scroller = stick.scrollRef.current;
@@ -735,9 +784,18 @@ export function Thread({
     if (content.getBoundingClientRect().bottom - r.bottom > 160) return;
     const top = r.top - scroller.getBoundingClientRect().top + scroller.scrollTop - 24;
     if (top + scroller.clientHeight >= scroller.scrollHeight) return;
+    // Something below the reply wants the reader first (the wake card, a question waiting): open
+    // on that, at the end, and do not come back for this reply later.
+    if (!landed && (sleeping || wake || showQuestion)) {
+      heldSay.current = last;
+      return;
+    }
     heldSay.current = last;
     stick.stopScroll();
-    if (scroller.scrollTop > top) scroller.scrollTop = Math.max(0, top);
+    // While the reply streams, the view only ever comes BACK to its first line. On open there is
+    // nothing to come back from: the thread is still at the very top, and stopping the follow
+    // there left a finished run showing its first screen instead of its answer. Go to the answer.
+    if (scroller.scrollTop > top || !landed) scroller.scrollTop = Math.max(0, top);
   });
 
   // Scrolling UP while the agent streams must win against the auto-scroll. The library's own wheel
@@ -854,6 +912,13 @@ export function Thread({
             ? { label: "Message sent", detail: "the agent is picking it up" }
             : null;
   const agentKinds = ["say", "tools", "think", "work", "plan"];
+  // Operator-message index per group: the task is 1, each you/asked group after it increments.
+  const messageIndex = React.useMemo(() => {
+    let n = 1;
+    return groups.map((g) => (g.kind === "you" || g.kind === "asked" ? ++n : n));
+  }, [groups]);
+  const messageCount = messageIndex[messageIndex.length - 1] ?? 1;
+  const editMessage = React.useCallback((text: string) => setSeed({ text, n: Date.now() }), []);
   const still = useReducedMotion();
 
   return (
@@ -926,7 +991,7 @@ export function Thread({
             {planBoard && !sleeping && !loadingTrace && planPlacement === "card" && <PlanBoard board={planBoard} live={runState === "running"} variant="card" />}
             {box.task && (
               <div data-turn="task">
-                <YouItem text={box.task} label="Task" noEnter />
+                <YouItem text={box.task} label="Task" noEnter onEdit={editMessage} />
               </div>
             )}
             {inferredRepos && inferredRepos.length > 0 && <AttachedFromTask repos={inferredRepos} />}
@@ -939,13 +1004,12 @@ export function Thread({
             <VizFullscreenGate.Provider value={onVizFullscreen}>
             <RepeatedPolls.Provider value={repeats}>
             <Density.Provider value={density}>
-            <Swap state={loadingTrace} className="flex flex-col gap-5">
+            <Swap state={loadingTrace} mode="popLayout" className="flex flex-col gap-5">
             {loadingTrace && <ThreadSkeleton withTask={!!box.task} />}
             {!loadingTrace && groups.map((g, i) => {
               const isLast = i === groups.length - 1;
               const key = keys[i];
-              // Operator-message index: the task is 1, each you/asked group after it increments.
-              const msgIndex = 1 + groups.slice(0, i + 1).filter((x) => x.kind === "you" || x.kind === "asked").length;
+              const msgIndex = messageIndex[i];
               // The agent's byline opens each of its runs, whatever it starts with (prose, tools, thinking).
               const opensAgent = agentKinds.includes(g.kind) && (i === 0 || !agentKinds.includes(groups[i - 1].kind));
               const liveHere = runState === "running" && isLast;
@@ -962,11 +1026,9 @@ export function Thread({
                   <YouItem
                     text={g.text}
                     at={g.at}
-                    onRevert={
-                      canRevertNow && revertable.has(msgIndex)
-                        ? () => setRevertAsk({ message: msgIndex, discarded: groups.filter((x) => x.kind === "you" || x.kind === "asked").length + 1 - (msgIndex - 1) })
-                        : undefined
-                    }
+                    noEnter={g.at !== undefined && swappedIn.current.has(g.at)}
+                    onEdit={editMessage}
+                    onRevert={canRevertNow && revertable.has(msgIndex) ? () => setRevertAsk({ message: msgIndex, discarded: messageCount - (msgIndex - 1) }) : undefined}
                   />
                 </div>
               ) : g.kind === "asked" ? (
@@ -1034,10 +1096,12 @@ export function Thread({
               {showQuestion && <QuestionCard key="question" question={question!} onAnswer={answer} onDiscuss={discuss} busy={answering} />}
             </AnimatePresence>
 
-            <AnimatePresence initial={false}>
-              {pendingReplies.map((r, i) => (
-                <Rise key={`reply-${i}`} still={still}>
-                  <YouItem text={r} noEnter />
+            {/* An echo whose log line just landed leaves at once (`custom`): the line is already drawn
+                in its place. One that is withdrawn (delivery failed) folds away as before. */}
+            <AnimatePresence initial={false} custom={{ still, instant: echoesLanded }}>
+              {pendingReplies.map((r) => (
+                <Rise key={r.id} still={still} className="mt-5">
+                  <YouItem text={r.text} noEnter />
                 </Rise>
               ))}
             </AnimatePresence>
@@ -1188,8 +1252,11 @@ export function Thread({
         sleeping={sleeping}
         repos={repos}
         onOpenSideChat={openSideChat}
-        onReplied={onReplied}
-        onQueued={refreshQueue}
+        onReplied={echo}
+        onQueued={() => {
+          refreshQueue();
+          jumpToLatest.current();
+        }}
         onFocusRequest={onFocusRequest}
         onReplyFailed={onReplyFailed}
         seed={seed}
@@ -1452,16 +1519,26 @@ function sentence(s: string): string {
  * animate, so the exit also pulls marginBottom to -gap: the row's slot AND its gap close together
  * instead of the gap snapping shut when the node finally unmounts.
  */
-function Rise({ still, children }: { still: boolean | null; children: React.ReactNode }) {
+type RiseCustom = { still: boolean | null; instant?: boolean };
+const RISE = {
+  from: (c: RiseCustom) => (c.still ? { opacity: 0 } : { opacity: 0, y: 10, scale: 0.98 }),
+  shown: { opacity: 1, y: 0, scale: 1 },
+  // `instant`: something already drawn in this row's place has taken over — leave without a fold.
+  gone: (c: RiseCustom) =>
+    c.instant ? { opacity: 0, transition: { duration: 0 } } : c.still ? { opacity: 0 } : { opacity: 0, scale: 0.98, height: 0, marginTop: 0, marginBottom: "-1.25rem" },
+};
+function Rise({ still, children, className }: { still: boolean | null; children: React.ReactNode; className?: string }) {
   return (
     <motion.div
       layout={still ? false : "position"}
-      initial={still ? { opacity: 0 } : { opacity: 0, y: 10, scale: 0.98 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={still ? { opacity: 0 } : { opacity: 0, scale: 0.98, height: 0, marginTop: 0, marginBottom: "-1.25rem" }}
+      custom={{ still } satisfies RiseCustom}
+      variants={RISE}
+      initial="from"
+      animate="shown"
+      exit="gone"
       transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
       style={{ transformOrigin: "100% 100%" }}
-      className="min-w-0"
+      className={cn("min-w-0", className)}
     >
       {children}
     </motion.div>
