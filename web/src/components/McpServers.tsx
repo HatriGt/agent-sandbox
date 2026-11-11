@@ -233,6 +233,7 @@ const TONE: Record<Status["kind"], React.ComponentProps<typeof StatusDot>["tone"
   connected: "ok",
   failed: "destructive",
   expired: "destructive",
+  excluded: "attention",
 };
 
 function serverColumns(health: Record<string, Health>, testing: Record<string, boolean>): Column<McpServerView>[] {
@@ -254,14 +255,27 @@ function serverColumns(health: Record<string, Health>, testing: Record<string, b
               <MetaLine
                 parts={[
                   <span title={s.url ?? [s.command, ...(s.args ?? [])].filter(Boolean).join(" ")}>{describe(s)}</span>,
-                  secrets > 0 && `${secrets} ${secrets === 1 ? "secret" : "secrets"}`,
+                  // The secrets count yields to the exclusion verdict: the line has room for one
+                  // qualifier, and "why no sandbox gets this" matters more than "how many values".
+                  secrets > 0 && !s.excluded && `${secrets} ${secrets === 1 ? "secret" : "secrets"}`,
+                  // Kept out of every sandbox (controller `excluded`): the stronger reason first, in
+                  // the attention colour because an enabled server that never runs surprises people.
+                  s.excluded === "operator-token" ? (
+                    <span className="text-attention-text" title="Its token is this controller's own operator token. A sandbox holding it could drive every machine and run. Create a per-user API key in Settings and use that instead.">
+                      carries the operator token
+                    </span>
+                  ) : s.excluded === "host-bound" ? (
+                    <span title="Points at a path or address that only exists on your machine, so it cannot run inside a sandbox">
+                      only runs on your machine
+                    </span>
+                  ) : null,
                   // How the package reaches a box (controller /mcp-servers.json `provision`): free when
                   // baked, an npm install on every task start otherwise, and a warning when the last
                   // run had to leave it out.
                   s.provision === "baked" ? (
                     <span title="Installed in the sandbox image — no install at task start">baked in</span>
                   ) : s.provision === "per-run" ? (
-                    <span title="Not in the sandbox image — npm installs it on every task start. Rebake the image to make it free.">installed each run</span>
+                    <span title="Not in the sandbox image — npm installs it on every task start. Rebake the image to make it free.">installs each run</span>
                   ) : s.provision === "dropped" ? (
                     <span className="text-attention-text" title="The last run could not install it (disk space or a failed install) and ran without it">
                       left out of the last run
@@ -275,17 +289,9 @@ function serverColumns(health: Record<string, Health>, testing: Record<string, b
       },
     },
     {
-      id: "transport",
-      header: "Transport",
-      width: "w-28",
-      hideBelow: "md",
-      sort: (s) => s.type,
-      cell: (s) => <span className="stamp">{s.type}</span>,
-    },
-    {
       id: "status",
       header: "Status",
-      width: "w-36",
+      width: "w-32",
       sort: (s) => statusOf(s, health[s.name], !!testing[s.name]).word,
       cell: (s) => {
         const st = statusOf(s, health[s.name], !!testing[s.name]);
@@ -297,26 +303,23 @@ function serverColumns(health: Record<string, Health>, testing: Record<string, b
       },
     },
     {
-      id: "tools",
-      header: "Tools",
-      width: "w-20",
-      align: "end",
-      hideBelow: "sm",
-      sort: (s) => health[s.name]?.tools?.length,
-      cell: (s) => {
-        const n = health[s.name]?.tools?.length;
-        return n == null ? <span className="text-faint" title={s.type === "stdio" ? "Counted inside the sandbox at run time" : "Not tested yet"}>—</span> : <span className="tabular-nums">{n}</span>;
-      },
-    },
-    {
+      // One column for what a probe learned: how many tools and when. A stdio server is only ever
+      // probed inside a sandbox, so for it this stays "at run time" rather than a misleading "never".
       id: "checked",
-      header: "Last checked",
-      width: "w-32",
-      hideBelow: "lg",
+      header: "Checked",
+      width: "w-40",
+      hideBelow: "md",
       sort: (s) => health[s.name]?.at,
       cell: (s) => {
         const h = health[s.name];
-        return h ? <span className="tabular-nums">{fmtAgo(Math.floor(h.at / 1000))}</span> : <span className="text-faint">never</span>;
+        if (!h) return <span className="text-faint">{s.type === "stdio" ? "at run time" : "never"}</span>;
+        const n = h.tools?.length;
+        return (
+          <span className="tabular-nums">
+            {n != null && <span className="text-foreground">{n} {n === 1 ? "tool" : "tools"} · </span>}
+            {fmtAgo(Math.floor(h.at / 1000))}
+          </span>
+        );
       },
     },
   ];

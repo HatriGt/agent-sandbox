@@ -104,7 +104,9 @@ export function hostOf(url?: string): string | null {
 export function describe(s: McpServerView): string {
   if (s.type === "stdio") {
     const pkg = packageOf(s.command, s.args);
-    return pkg ? `Runs ${pkg} inside the sandbox` : "Runs a command inside the sandbox";
+    // "inside the sandbox" went without saying — the page header already says where servers run,
+    // and the words cost the one line that has to fit the package name, the secrets and the verdict.
+    return pkg ? `Runs ${pkg}` : "Runs a command";
   }
   const host = hostOf(s.url);
   return host ? `${s.type === "sse" ? "SSE" : "HTTP"} · ${host}` : "Remote endpoint";
@@ -112,11 +114,14 @@ export function describe(s: McpServerView): string {
 
 /* ───────────────────────────── status ───────────────────────────── */
 
-export type Status = { kind: "off" | "on" | "connected" | "failed" | "expired" | "checking"; word: string };
+export type Status = { kind: "off" | "on" | "connected" | "failed" | "expired" | "checking" | "excluded"; word: string };
 
 export function statusOf(s: McpServerView, h: Health | undefined, testing: boolean): Status {
   if (!s.enabled) return { kind: "off", word: "Off" };
   if (testing) return { kind: "checking", word: "Checking…" };
+  // Enabled, yet no sandbox will ever see it — "On" here would be a lie the operator discovers
+  // only when a run lacks the tools.
+  if (s.excluded) return { kind: "excluded", word: "Kept out" };
   if (s.tokenExpired) return { kind: "expired", word: "Token expired" };
   if (h && !h.ok) return { kind: "failed", word: "Failed" };
   if (h && h.ok && s.type !== "stdio") return { kind: "connected", word: h.tools ? `Connected · ${h.tools.length} ${h.tools.length === 1 ? "tool" : "tools"}` : "Connected" };

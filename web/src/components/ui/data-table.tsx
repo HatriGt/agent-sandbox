@@ -192,7 +192,11 @@ export function DataTable<T>({
   const span = visibleCols.length + (actions ? 1 : 0);
   const searchMiss = !!needle && !!search && shown.length === 0 && rows.length > 0;
   const grouped = !!groupOf && !sort;
-  const actionsW = narrow ? cols.fit(ACTIONS) : undefined;
+  // The actions cell is as wide as its buttons everywhere, never under the default 112px: a
+  // declared w-28 with a Test button, two icons and a switch inside overflowed the card by 70px,
+  // and the hover-revealed buttons dragged a scrollbar in with them.
+  const fitActions = cols.fit(ACTIONS);
+  const actionsW = narrow ? fitActions : fitActions ? Math.max(112, fitActions) : undefined;
 
   const table = (
     <Table
@@ -205,7 +209,7 @@ export function DataTable<T>({
       style={(() => {
         if (narrow) return undefined;
         // Sized columns + the flexible one's share (≥240px and ≥ its header): below that the card scrolls sideways.
-        const fixed = visibleCols.reduce((s, c) => s + (c.width || cols.isManual(c.id) ? Math.max(cols.width(c.id) ?? 0, cols.floor(c.id) ?? 0) : Math.max(240, cols.floor(c.id) ?? 0)), 0) + (actions ? 112 : 0);
+        const fixed = visibleCols.reduce((s, c) => s + (c.width || cols.isManual(c.id) ? Math.max(cols.width(c.id) ?? 0, cols.floor(c.id) ?? 0) : Math.max(240, cols.floor(c.id) ?? 0)), 0) + (actions ? (actionsW ?? 112) : 0);
         return fixed ? { minWidth: fixed } : undefined;
       })()}
       aria-busy={loading || undefined}

@@ -18,6 +18,7 @@ const PILL: Record<Status["kind"], { pill: string; dot: string }> = {
   connected: { pill: "bg-ok/10 text-ok ring-ok/20", dot: "bg-ok" },
   failed: { pill: "bg-destructive/10 text-destructive ring-destructive/20", dot: "bg-destructive" },
   expired: { pill: "bg-destructive/10 text-destructive ring-destructive/20", dot: "bg-destructive" },
+  excluded: { pill: "bg-attention/10 text-attention-text ring-attention/20", dot: "bg-attention" },
 };
 
 export function StatusPill({ status, className }: { status: Status; className?: string }) {

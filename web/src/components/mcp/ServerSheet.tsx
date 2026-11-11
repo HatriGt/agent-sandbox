@@ -350,6 +350,20 @@ export function ServerSheet({
             )}
           </div>
 
+          {initial?.excluded && mode === "fields" && (
+            <div className="border-attention/40 bg-card -mt-2 rounded-lg border border-l-4 p-3" role="status">
+              <div className="flex items-center gap-2">
+                <p className="text-foreground text-meta font-medium">Kept out of every sandbox</p>
+                <StatusPill status={statusOf(initial, health, testing)} />
+              </div>
+              <p className="text-muted-foreground mt-1 text-micro">
+                {initial.excluded === "operator-token"
+                  ? "Its Authorization value is this controller's own operator token. A sandbox holding it could open every machine, read every run and change every setting, so the controller never copies it in. To let agents call this controller, create an API key under Account and use that instead; to override, set BOX_SELF_MCP=1 on the server."
+                  : "Its command or address points at something that only exists on your machine (a home directory, a local port), so it cannot start inside a sandbox. Point it at a package or a public address to send it in."}
+              </p>
+            </div>
+          )}
+
           {initial && initial.type !== "stdio" && mode === "fields" && (
             <div className="bg-muted/40 -mt-2 flex flex-col gap-2.5 rounded-lg border p-3">
               <div className="flex items-center gap-3">
