@@ -1345,3 +1345,16 @@ Left out: a tab-strip edge fade (it would dim the drop indicators that sit at th
 folder unfold animation (the rows already rise 3px apart on expand); an outline view (go to symbol
 covers the use). Proof: `.shots/thread-fixture.mjs done <out> --interact=ws-tour` (add `--slow-files`
 for the skeleton), light and dark.
+
+## Round: the column settles (2026-11-11)
+
+A pass over the conversation page for what was uneven or cut, measured before it was changed.
+
+- **A step list that hid the one thing that needed a hand.** The work list caps at 32rem and scrolls inside. A five-step group with rich output passed the cap, so the `Provide DEPLOY_TOKEN` prompt sat half under the fold of an inner scroller with nothing to say the list went on. A list that holds a waiting action (`[data-resolve-row]`) now has no cap. Every other capped list dissolves at the cut (`.steps-scroll`, an alpha mask driven by `data-above` / `data-below`) instead of slicing a row.
+- **Uneven rhythm.** The hover-only Copy row held 32px open under every reply, so prose to work was 52px while work to prose was 20px. With a pointer the row now lives in the gap (6px reserved); on touch it is always visible and keeps its line.
+- **Settled work is a neutral dot.** `Thought for 5s` and `Worked for 7s` carried a 16px disc in `--live` in a finished thread. Colour is for what the machine is doing now (principle 2): the settled mark is an 8px dot in `--line-strong`, and it grows to the full live disc while that work runs. The byline mark keeps the live hue as the agent's identity. This amends the "one rule" row of the no-glows table for `.think-orb` only.
+- **Starters are a list, not four cards.** The idle thread offered a 2x2 grid of equal cards with border and shadow. It is one framed list of rows (mark, name, what it sends), with an arrow that appears on hover and points up to the composer, where a pick lands to be edited. The keyboard line is hidden on touch, where Enter is a new line.
+- **Phone.** The run title takes two short lines instead of one chopped word. The composer's default caption is gone on touch (the arrow and the + say it), which gives the transcript a line back; contextual captions (mid-turn, waking, errors) still show.
+- **Question card.** The footer sentence was truncated on desktop. It now fits: "Press a number or pick one. The run stays paused until you answer."
+
+Evidence: `.shots/r12/b-*` before, `a-*` after; `.shots/probe-rhythm.js` for the gaps, `.shots/probe-steps.js` for the cap and fades.

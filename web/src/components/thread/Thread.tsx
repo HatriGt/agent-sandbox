@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Loader2, Plus, Undo2 } from "lucide-react";
+import { ArrowUpRight, Bug, Compass, GitPullRequest, Loader2, Plus, Sparkles, Undo2 } from "lucide-react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { api, type BoxView, type ChangedFile, type FleetLifecycle, type WatchSnapshot } from "@/lib/api";
@@ -1322,10 +1322,10 @@ export function Thread({
 
 /** Starter prompts: an empty box should show what a good first instruction looks like, not a blank page. */
 const STARTERS = [
-  { title: "Explore a repo", text: "Clone the repository I attach, map its structure, and summarise how it is built and tested." },
-  { title: "Fix a failing test", text: "Run the test suite, find the first failing test, fix the root cause, and show me the diff." },
-  { title: "Add a feature", text: "Add a small feature: describe it here — then write tests for it and open a pull request." },
-  { title: "Review a PR", text: "Review pull request #<number> for bugs and risky changes, and leave me a short verdict." },
+  { icon: Compass, title: "Explore a repo", text: "Clone the repository I attach, map its structure, and summarise how it is built and tested." },
+  { icon: Bug, title: "Fix a failing test", text: "Run the test suite, find the first failing test, fix the root cause, and show me the diff." },
+  { icon: Sparkles, title: "Add a feature", text: "Add a small feature: describe it here — then write tests for it and open a pull request." },
+  { icon: GitPullRequest, title: "Review a PR", text: "Review pull request #<number> for bugs and risky changes, and leave me a short verdict." },
 ];
 
 function IdleEmpty({ box, onNew, onPick }: { box: BoxView; onNew: () => void; onPick: (text: string) => void }) {
@@ -1342,16 +1342,25 @@ function IdleEmpty({ box, onNew, onPick }: { box: BoxView; onNew: () => void; on
             : "Nothing has run here yet. Pick a starting point, or write your own instruction below."}
         </p>
       </div>
-      <ul className="grid w-full gap-2 sm:grid-cols-2">
+      {/* One list, not four equal cards: the starters are a menu of first lines for the composer, so
+          they read as rows (mark, name, what it sends) with one frame around the lot. The arrow
+          says where a pick goes: up into the composer, to be edited before it is sent. */}
+      <ul className="bg-card divide-border w-full max-w-[40rem] divide-y overflow-hidden rounded-xl border">
         {STARTERS.map((st, i) => (
           <li key={st.title} className="stagger-item" style={{ "--i": i } as React.CSSProperties}>
             <button
               type="button"
               onClick={() => onPick(st.text)}
-              className="bg-card hover:border-line-strong hover:shadow-e2 group flex h-full w-full cursor-pointer flex-col gap-1 rounded-xl border p-3.5 text-left shadow-e1 transition-[border-color,box-shadow,transform] duration-150 hover:-translate-y-px"
+              className="group hover:bg-muted/60 focus-visible:bg-muted/60 flex w-full cursor-pointer items-center gap-3 px-3.5 py-3 text-left transition-colors duration-150 outline-none"
             >
-              <span className="text-foreground text-meta font-medium">{st.title}</span>
-              <span className="text-muted-foreground line-clamp-2 text-micro">{st.text}</span>
+              <span className="bg-muted text-muted-foreground group-hover:text-foreground grid size-8 shrink-0 place-items-center rounded-lg transition-colors duration-150" aria-hidden>
+                <st.icon className="size-4" strokeWidth={1.75} />
+              </span>
+              <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="text-foreground text-meta font-medium">{st.title}</span>
+                <span className="text-muted-foreground line-clamp-2 text-micro sm:line-clamp-1">{st.text}</span>
+              </span>
+              <ArrowUpRight className="text-faint group-hover:text-foreground size-4 shrink-0 -translate-x-1 opacity-0 transition-[opacity,translate,color] duration-150 group-hover:translate-x-0 group-hover:opacity-100 group-focus-visible:translate-x-0 group-focus-visible:opacity-100 [@media(hover:none)]:translate-x-0 [@media(hover:none)]:opacity-100" aria-hidden />
             </button>
           </li>
         ))}
@@ -1361,7 +1370,8 @@ function IdleEmpty({ box, onNew, onPick }: { box: BoxView; onNew: () => void; on
           <Plus className="size-3.5" />
           New task
         </Button>
-        <span className="text-faint text-micro">
+        {/* Keyboard facts: on a phone Enter is a new line, so the line is not shown there. */}
+        <span className="text-faint text-micro [@media(hover:none)]:hidden">
           <kbd className="rounded border px-1 font-mono">Enter</kbd> sends · <kbd className="rounded border px-1 font-mono">@</kbd> files · <kbd className="rounded border px-1 font-mono">/</kbd> skills
         </span>
       </div>

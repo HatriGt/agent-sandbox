@@ -553,12 +553,57 @@ export function ToolGroup({ events, live }: { events: ToolEvent[]; live?: boolea
  * The numbered timeline of one run of tool calls: a glyph per step (number, live dot, failed mark)
  * on a hairline, each opening into the real work. Shared by ToolGroup's fold and the reasoning trail.
  */
+/**
+ * Marks a capped scroller with `data-above` / `data-below` while there is more in that direction,
+ * so the cut can dissolve (`.steps-scroll`) instead of slicing a row in half with nothing to say
+ * the list goes on.
+ */
+function useScrollFades(ref: React.RefObject<HTMLElement | null>) {
+  React.useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => {
+      el.toggleAttribute("data-above", el.scrollTop > 4);
+      el.toggleAttribute("data-below", el.scrollHeight - el.scrollTop - el.clientHeight > 4);
+    };
+    // Measure now and once more when things have settled: the list opens on a height spring, and
+    // its last frame (a px height becoming `auto`) is not a resize, so the mid-flight reading
+    // ("more below") would otherwise stick to a list that ended up fully open.
+    let settle = 0;
+    const update = () => {
+      measure();
+      window.clearTimeout(settle);
+      settle = window.setTimeout(measure, 400);
+    };
+    const sizes = new ResizeObserver(update);
+    const watch = () => {
+      sizes.disconnect();
+      sizes.observe(el);
+      for (const child of el.children) sizes.observe(child);
+      update();
+    };
+    const rows = new MutationObserver(watch);
+    rows.observe(el, { childList: true });
+    el.addEventListener("scroll", update, { passive: true });
+    watch();
+    return () => {
+      window.clearTimeout(settle);
+      sizes.disconnect();
+      rows.disconnect();
+      el.removeEventListener("scroll", update);
+    };
+  }, [ref]);
+}
+
 export function ToolStepsList({ events, live, className, plain }: { events: ToolEvent[]; live?: boolean; className?: string; plain?: boolean }) {
   const still = useReducedMotion();
+  const listRef = React.useRef<HTMLOListElement>(null);
+  useScrollFades(listRef);
   const density = React.useContext(Density);
   const rows = React.useMemo(() => foldLookups(events, live, density), [events, live, density]);
   return (
     <motion.ol
+      ref={listRef}
       initial={still || plain ? false : { height: 0, opacity: 0 }}
       animate={{ height: "auto", opacity: 1 }}
       exit={still || plain ? { opacity: 0, transition: { duration: 0 } } : { height: 0, opacity: 0 }}
@@ -570,7 +615,9 @@ export function ToolStepsList({ events, live, className, plain }: { events: Tool
       // work reads as part of the column, one tone quieter than the prose, not as a card in it.
       // No `overscroll-contain` here: on a scroll container it blocks scroll chaining even when
       // the list is SHORTER than the cap, so a wheel over an open timeline scrolled nothing.
-      className={cn("relative max-h-[32rem] overflow-y-auto", plain ? "mt-1" : "mt-2 pl-0.5", className)}
+      // A step that is waiting on the reader (a secret to provide) lifts the cap: the one thing in
+      // the list that needs a hand must never sit half under the fold of an inner scroller.
+      className={cn("steps-scroll relative max-h-[32rem] overflow-y-auto has-[[data-resolve-row]]:max-h-none", plain ? "mt-1" : "mt-2 pl-0.5", className)}
     >
       {rows.map((row, r) => {
         const lastRow = r === rows.length - 1;
@@ -1139,7 +1186,10 @@ function AgentLabel({ live, at }: { live?: boolean; at?: number }) {
 function CopyMessage({ text, at }: { text: string; at?: number }) {
   const [copied, setCopied] = React.useState(false);
   return (
-    <div className="mt-1 -ml-1.5 flex h-7 items-center opacity-0 transition-opacity duration-150 group-hover/say:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100">
+    // With a pointer the row is hover-only, so it lives in the gap under the reply (the negative
+    // margin) instead of holding 32px open under every paragraph the agent says: prose to work was
+    // 52px while work to prose was 20px. On touch it is always visible and keeps its own line.
+    <div className="mt-0.5 -ml-1.5 flex h-6 items-center opacity-0 transition-opacity duration-150 group-hover/say:opacity-100 focus-within:opacity-100 [@media(hover:hover)]:-mb-5 [@media(hover:none)]:opacity-100">
       <button
         type="button"
         onClick={async () => {

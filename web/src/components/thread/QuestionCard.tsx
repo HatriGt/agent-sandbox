@@ -255,7 +255,7 @@ export function QuestionCard({
               does not. The number-key hint only applies with a keyboard anyway. */}
           <p className="text-muted-foreground min-w-0 text-micro leading-snug line-clamp-2 sm:line-clamp-none sm:truncate">
             <span className="sm:hidden">{hasOptions ? "Pick one, then send. The agent waits until you do." : "Your answer releases the paused run."}</span>
-            <span className="hidden sm:inline">{hasOptions ? "Pick one (or press its number), then send. Every tool call is blocked until you do." : "Your answer releases the paused run."}</span>
+            <span className="hidden sm:inline">{hasOptions ? "Press a number or pick one. The run stays paused until you answer." : "Your answer releases the paused run."}</span>
           </p>
           <div className="flex shrink-0 items-center gap-1">
             {onDiscuss && (

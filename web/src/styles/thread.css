@@ -1,6 +1,21 @@
 /* Thread-only styles: the streaming caret and the conversation's small motion. Imported by
    Thread.tsx so it ships with the thread chunk, not with every page. */
 
+/* ── Capped step list ──
+   A long run of steps scrolls inside its own 32rem window. Where it continues, the edge dissolves
+   (an alpha mask, so it works on any ground) instead of cutting a row in half. */
+.steps-scroll[data-above],
+.steps-scroll[data-below] {
+  --steps-fade: 2.5rem;
+  mask-image: linear-gradient(to bottom, transparent, #000 var(--steps-top, 0px), #000 calc(100% - var(--steps-bottom, 0px)), transparent);
+}
+.steps-scroll[data-above] {
+  --steps-top: var(--steps-fade);
+}
+.steps-scroll[data-below] {
+  --steps-bottom: var(--steps-fade);
+}
+
 /* ── Streaming caret ──────────────────────────────────────────────────────────────────────────────
    The growing edge of a live reply. Inline, at the end of the last text block (a paragraph, heading,
    list item, quote) — the way a text editor's caret follows the last glyph — never on a line of its

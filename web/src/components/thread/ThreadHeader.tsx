@@ -409,7 +409,8 @@ export function ThreadHeader({
             {/* A rename crossfades: the old title lifts out, the new one rises in. min-w-0 all the
                 way down, so on a phone the title truncates instead of shoving the controls off. */}
             <Swap state={title} className="min-w-0 flex-1 overflow-hidden">
-              <span className="text-foreground block min-w-0 truncate text-h3 font-semibold tracking-[-0.01em]" title={title}>
+              {/* Phone: two short lines beat one chopped word ("Sliding-windo…"); the bar keeps its height. */}
+              <span className="text-foreground min-w-0 text-body leading-[1.2] break-words font-semibold tracking-[-0.01em] line-clamp-2 sm:line-clamp-none sm:truncate sm:text-h3 sm:leading-[1.4]" title={title}>
                 {title}
               </span>
             </Swap>

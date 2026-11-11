@@ -353,7 +353,7 @@ export function SendBar({
           : phase === "asked"
             ? "Pick an option above, or answer here — it reaches the agent as your answer."
             : touch
-              ? "Tap the arrow to send · attach images with +"
+              ? null // the arrow and the + say it themselves; a phone has no line to spare for it
               : "Enter to send · Shift+Enter for a new line · Up recalls your last message";
 
   return (
@@ -600,7 +600,7 @@ export function SendBar({
 
         {/* The hint is a caption under the composer, never squeezed into the action row where it
             truncated mid-sentence. Errors take the same slot in the destructive tone. */}
-        <p className={cn("mt-1.5 min-h-4 px-2 text-center text-micro line-clamp-2 sm:line-clamp-none sm:truncate sm:text-left", error ? "text-destructive" : "text-faint")} role={error ? "alert" : undefined} title={error ?? hint ?? undefined}>
+        <p hidden={!error && !hint} className={cn("mt-1.5 min-h-4 px-2 text-center text-micro line-clamp-2 sm:line-clamp-none sm:truncate sm:text-left", error ? "text-destructive" : "text-faint")} role={error ? "alert" : undefined} title={error ?? hint ?? undefined}>
           {error ?? hint}
         </p>
       </div>

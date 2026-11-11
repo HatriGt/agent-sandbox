@@ -1323,6 +1323,18 @@
 .think-orb {
   width: 1rem;
   height: 1rem;
+  /* Settled work is a fact, not an activity: a small neutral dot. The live hue and the full disc
+     are for work that is happening now (principle 2), so in a finished thread the only colour left
+     in the column is the outcome. The box stays 16px either way, so the label never shifts. */
+  background: var(--line-strong);
+  scale: 0.5;
+  transition:
+    scale var(--dur-base) var(--ease-out-quint),
+    background-color var(--dur-base) var(--ease-out-quint);
+}
+.think-orb-live {
+  background: var(--live);
+  scale: 1;
 }
 .orb,
 .agent-mark-live,
