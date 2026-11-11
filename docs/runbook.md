@@ -590,3 +590,32 @@ boot source under its heading.
     msb rm --force <the warm pool box>   # so the pool reseeds from the image
 
 The MCP store's own `npx` specs are baked without listing them; `BAKE_NPX` adds (or pins) more.
+
+## What a sandbox can and cannot reach (audited 2026-11-11)
+
+A box is a libkrun microVM with its own kernel, an overlay root and one virtiofs mount (`/.msb`,
+the box's own `sandboxes/<box>/runtime/` on the host — writable from the guest, but per box, so a
+guest writing there lands in its own directory and nowhere else). The guest's only neighbour is its
+gateway (`172.16.21.41`), which answers DNS and nothing else; the compose network (controller, DB,
+Traefik internals) is not routable from a box. Boxes are never reused across owners: a warm box
+carries no owner secret until it is claimed, and a claimed box is destroyed, never re-pooled.
+
+What DOES leave the controller for a box, by design, at task start: the owner's GitHub token for
+the repos the task names, the model key for the run's provider, `NPM_TOKEN` if set, and the owner's
+MCP store (headers and env included). Those are the agent's working credentials; the egress policy
+decides where they can be sent. `EGRESS_ALLOW_ALL=1` (the current setting) lets a box talk to any
+host on the internet, so a prompt-injected agent could post any of them anywhere — the in-box guard
+hooks warn on obvious exfiltration patterns but are advisory. To close that, leave
+`EGRESS_ALLOW_ALL` unset: boxes then get DNS plus the allow-listed domains only (`allowDomains` per
+call, `DELEGATE_ALLOW_DOMAINS` as the default).
+
+What never leaves the controller any more: its own operator token. Before this change the store's
+`agent-sandbox-remote` entry (the controller itself, imported from a desktop MCP config with
+`Authorization: Bearer <MCP_HTTP_TOKEN>`) was copied into every box's `/root/.agent-mcp.json`, so
+any box could have driven the whole fleet as the operator. `boxExclusion()` in `src/mcp-store.ts`
+now keeps any server whose header or env value equals `MCP_HTTP_TOKEN` or `DASHBOARD_TOKEN` out of
+the in-box config (the MCP page shows it as **Kept out**, the controller log says
+`[mcp] <box>: kept out of the box (carries the controller's operator token): <name>`). Agents that
+need the controller get a per-user API key from the Account page; `BOX_SELF_MCP=1` restores the
+old behaviour on purpose. If a token was ever exposed this way, rotate `MCP_HTTP_TOKEN` and
+`DASHBOARD_TOKEN` in the host `.env` and restart.

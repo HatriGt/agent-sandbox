@@ -156,6 +156,9 @@ export interface Config {
   dataDir: string;
   /** Public origin, e.g. https://agent-sandbox.example.com — OAuth callback base and cookie Secure flag. */
   publicUrl?: string;
+  /** BOX_SELF_MCP=1: let an MCP server that carries the controller's OWN operator token into boxes.
+   * Off by default — a box holding that token holds the whole fleet. Give agents a per-user API key instead. */
+  boxOperatorMcp: boolean;
   /** Client secret of the same GitHub OAuth App (web flow for sign-in). Required in saas mode. */
   githubOauthClientSecret?: string;
   /** Default concurrent-box quota per user (saas). */
@@ -288,6 +291,7 @@ export function loadConfig(): Config {
     authMode: process.env.AUTH_MODE === "saas" ? "saas" : "token",
     dataDir: process.env.DATA_DIR || "./data",
     publicUrl: (process.env.PUBLIC_URL || (process.env.ASB_DOMAIN ? `https://${process.env.ASB_DOMAIN}` : "")).replace(/\/+$/, "") || undefined,
+    boxOperatorMcp: process.env.BOX_SELF_MCP === "1",
     githubOauthClientSecret: process.env.GITHUB_OAUTH_CLIENT_SECRET || undefined,
     userMaxBoxes: Math.max(1, Number(process.env.USER_MAX_BOXES ?? "2") || 2),
     adminLogins: (process.env.ADMIN_GITHUB_LOGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),

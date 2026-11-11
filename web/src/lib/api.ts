@@ -203,6 +203,9 @@ export interface McpServerView {
   addedAt: number;
   /** Only for npx stdio servers, and only once a box has reported its baked packages. */
   provision?: McpProvision;
+  /** Why this server never reaches a sandbox: it can only run on the operator's machine, or it
+   *  carries the controller's own operator token (a box holding that would hold the whole fleet). */
+  excluded?: "host-bound" | "operator-token";
 }
 
 /** Outcome of `mcpTest`; `tools` only when the server answered `tools/list`. */

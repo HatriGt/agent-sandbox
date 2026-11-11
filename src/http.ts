@@ -100,7 +100,7 @@ import { loadSkillStore, saveSkillStore, normalizeSkill, viewSkills, type SkillD
 import { listRepoSkills, fetchRepoFile, fetchRepoSkillDir, resolveSkillRepoToken } from "./github-skills.js";
 import { listClaims, listKept, markKept, unmarkKept } from "./claims.js";
 import { makeRedactor, isPlumbingError } from "./redact.js";
-import { isSecretKey, probeMcpServer } from "./mcp-store.js";
+import { isSecretKey, probeMcpServer, boxSecretPolicy, boxExclusion } from "./mcp-store.js";
 import type { BoxView, WatchSnapshot } from "./monitor.js";
 import { listChanges, readDiff, readFullDiff, discardChange, fetchPull, fetchPullDetail, forgetPull } from "./changes.js";
 import { loadRunMetas, saveRunMeta, forgetRunMeta } from "./run-memory.js";
@@ -2237,9 +2237,14 @@ app.get("/mcp-servers.json", async (req: Request, res: Response) => {
     // Until a box has reported its manifest (the first task start after a controller restart)
     // nothing is known, and "per-run" for everything would be a guess dressed as a fact.
     const known = Object.keys(baked).length > 0;
+    // Why a server stays out of every box: it can only run on the operator's machine, or it carries
+    // the controller's own operator token (src/mcp-store.ts boxExclusion). Computed on the unmasked
+    // store — the view has already masked the token.
+    const policy = boxSecretPolicy(cfg);
     const servers = viewServers(store).map((s) => {
       const spec = npxSpecOf(s);
-      return spec && known ? { ...s, provision: provisionOf(spec, baked, last) } : s;
+      const excluded = boxExclusion(store.servers[s.name], policy);
+      return { ...s, ...(spec && known ? { provision: provisionOf(spec, baked, last) } : {}), ...(excluded ? { excluded } : {}) };
     });
     res.json({ servers, config: toEditableConfig(store), baked, lastProvision: last });
   } catch (e) {

@@ -63,3 +63,26 @@ test("host-bound stdio servers never reach the box config", () => {
   assert.equal(isBoxRunnableServer({ type: "stdio", command: "npx", args: ["-y", "btp-mcp-server"] }), true);
   assert.equal(isBoxRunnableServer({ type: "http" }), true);
 });
+
+test("mcp: a server carrying the controller's operator token never reaches a box unless BOX_SELF_MCP=1", async () => {
+  const { toClaudeMcpConfig: build, boxExclusion, carriesOperatorToken, boxSecretPolicy } = await import("../src/mcp-store.ts");
+  const self = normalizeServer({ name: "self", type: "http", url: "https://asb.example/mcp", headers: { Authorization: "Bearer operator-token-value" } }, 1);
+  const viaEnv = normalizeServer({ name: "env", command: "npx", args: ["-y", "x"], env: { ASB_TOKEN: "operator-token-value" } }, 1);
+  const other = normalizeServer({ name: "other", type: "http", url: "https://asb.example/mcp", headers: { Authorization: "Bearer asb_user_key_123456" } }, 1);
+  const store = { servers: { self, env: viaEnv, other } };
+  const policy = boxSecretPolicy({ httpToken: "operator-token-value", dashboardToken: "dash-token-value" });
+  assert.equal(carriesOperatorToken(self, policy.operatorTokens), true);
+  assert.equal(carriesOperatorToken(viaEnv, policy.operatorTokens), true);
+  assert.equal(carriesOperatorToken(other, policy.operatorTokens), false);
+  assert.equal(boxExclusion(self, policy), "operator-token");
+  assert.equal(boxExclusion(other, policy), undefined);
+  assert.equal(boxExclusion(normalizeServer({ name: "h", command: "/Users/me/srv" }, 1), policy), "host-bound");
+  // The in-box config keeps only the server with a credential of its own.
+  assert.deepEqual(Object.keys(build(store, policy)!.mcpServers), ["other"]);
+  // Without a policy (the bake from a process with no tokens) nothing is withheld — and the
+  // operator may opt in explicitly.
+  assert.deepEqual(Object.keys(build(store)!.mcpServers), ["self", "env", "other"]);
+  assert.deepEqual(Object.keys(build(store, boxSecretPolicy({ httpToken: "operator-token-value", boxOperatorMcp: true }))!.mcpServers), ["self", "env", "other"]);
+  // Short/empty tokens never match (an unset token is not a wildcard).
+  assert.equal(carriesOperatorToken(self, ["", "short"]), false);
+});

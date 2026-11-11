@@ -10,6 +10,14 @@
  */
 import { hasUserStoreBackend, loadBlob, saveBlob, ownerKey, OPERATOR_OWNER } from "./user-store.js";
 import type { Config } from "./config.js";
+
+/** The box policy for this controller: its own tokens stay out of boxes unless BOX_SELF_MCP=1. */
+export function boxSecretPolicy(cfg: Pick<Config, "httpToken" | "dashboardToken" | "boxOperatorMcp">): BoxSecretPolicy {
+  return {
+    operatorTokens: [cfg.httpToken, cfg.dashboardToken].filter((t): t is string => !!t),
+    allowOperatorToken: cfg.boxOperatorMcp === true,
+  };
+}
 import { run, shellQuote } from "./exec.js";
 import { sshMuxOpts } from "./ssh.js";
 import { maskSecret } from "./redact.js";
@@ -145,11 +153,44 @@ export function isBoxRunnableServer(s: Pick<McpServer, "type" | "command" | "arg
   return !Object.values(s.env ?? {}).some((v) => LAN_TARGET_RE.test(v));
 }
 
+/**
+ * What must never ride into a sandbox: the controller's own operator credentials. A box that holds
+ * them holds the whole fleet — every other tenant's runs, the dashboard, the stores — and an agent
+ * only needs one prompt-injected page to be told to use them. The operator added the controller
+ * as an MCP server for their OWN desktop client; the import copied it into the box config unasked.
+ */
+export interface BoxSecretPolicy {
+  /** Values that are the operator's: MCP_HTTP_TOKEN, DASHBOARD_TOKEN. */
+  operatorTokens: readonly string[];
+  /** BOX_SELF_MCP=1 — the operator explicitly wants boxes to drive the controller with its own token. */
+  allowOperatorToken?: boolean;
+}
+
+const BEARER_RE = /^\s*bearer\s+/i;
+
+/** Does any header or env value of this server equal one of the operator's tokens (with or without a `Bearer ` prefix)? */
+export function carriesOperatorToken(s: Pick<McpServer, "env" | "headers">, tokens: readonly string[]): boolean {
+  const live = tokens.filter((t) => t && t.length >= 8);
+  if (!live.length) return false;
+  for (const v of [...Object.values(s.headers ?? {}), ...Object.values(s.env ?? {})]) {
+    const bare = String(v).replace(BEARER_RE, "").trim();
+    if (live.includes(bare)) return true;
+  }
+  return false;
+}
+
+/** Why a server is kept out of every box, for the MCP page. `undefined` = it goes in. */
+export function boxExclusion(s: McpServer, policy?: BoxSecretPolicy): "host-bound" | "operator-token" | undefined {
+  if (!isBoxRunnableServer(s)) return "host-bound";
+  if (policy && !policy.allowOperatorToken && carriesOperatorToken(s, policy.operatorTokens)) return "operator-token";
+  return undefined;
+}
+
 /** What the in-box `claude --mcp-config` reads: enabled, box-runnable servers, in Claude Code's shape. */
-export function toClaudeMcpConfig(store: McpStore): { mcpServers: Record<string, unknown> } | null {
+export function toClaudeMcpConfig(store: McpStore, policy?: BoxSecretPolicy): { mcpServers: Record<string, unknown> } | null {
   const mcpServers: Record<string, unknown> = {};
   for (const s of Object.values(store.servers)) {
-    if (!s.enabled || !isBoxRunnableServer(s)) continue;
+    if (!s.enabled || boxExclusion(s, policy)) continue;
     mcpServers[s.name] =
       s.type === "stdio"
         ? { type: "stdio", command: s.command, ...(s.args?.length ? { args: s.args } : {}), ...(s.env ? { env: s.env } : {}) }

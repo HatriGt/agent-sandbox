@@ -11,7 +11,7 @@ import { sshMuxOpts } from "./ssh.js";
 import { listClaims, listKept, listParked, markClaimed, shouldKeepStopped, unmarkClaimed, unmarkKept, unmarkParked } from "./claims.js";
 import { askParkTtlSec } from "./snapshot.js";
 import { guardNodeProgram } from "./guard.js";
-import { loadMcpStore, toClaudeMcpConfig } from "./mcp-store.js";
+import { loadMcpStore, toClaudeMcpConfig, boxSecretPolicy, boxExclusion } from "./mcp-store.js";
 import { boxSkillSelection, buildSkillsTarBase64, loadSkillStore, skillsForBox, type SkillDef } from "./skill-store.js";
 import { SKILLS_DIR, SKILLS_INDEX, recordSkillPicks, skillTurnHint, skillsIndex } from "./skill-match.js";
 import { loadMemoryStore, markPlaybooksUsed, playbookHint, renderMemoryArchive, renderMemoryMd, saveMemoryStore, selectMemory } from "./memory-store.js";
@@ -723,7 +723,7 @@ export async function bakeAgentImage(cfg: Config, tag: string, extraNpx: string[
   const repo = cfg.image.replace(/[:@].*$/, "");
   let specs: string[] = [];
   try {
-    const conf = toClaudeMcpConfig(await loadMcpStore(cfg));
+    const conf = toClaudeMcpConfig(await loadMcpStore(cfg), boxSecretPolicy(cfg));
     if (conf) specs = npxPackagesOf(conf);
   } catch {
     // no operator MCP store reachable from this process — OMP_BAKE_NPX alone
@@ -1283,7 +1283,13 @@ if (dropped.size) console.log("mcp-drop:" + [...dropped].join(","));
 
 export async function installMcpConfig(cfg: Config, box: string): Promise<string[]> {
   try {
-    const conf = toClaudeMcpConfig(await loadMcpStore(cfg));
+    const store = await loadMcpStore(cfg);
+    const policy = boxSecretPolicy(cfg);
+    // Said once per install, in the controller log: which enabled server was kept out because it
+    // carries the operator's own token. The MCP page says the same next to the server.
+    const withheld = Object.values(store.servers).filter((s) => s.enabled && boxExclusion(s, policy) === "operator-token").map((s) => s.name);
+    if (withheld.length) console.error(`[mcp] ${box}: kept out of the box (carries the controller's operator token): ${withheld.join(", ")}`);
+    const conf = toClaudeMcpConfig(store, policy);
     if (!conf) {
       await exec(cfg, box, `rm -f ${MCP_CONFIG_PATH} ${OMP_MCP_CONFIG_PATH} ${MCP_NOTES_PATH}`);
       return [];
